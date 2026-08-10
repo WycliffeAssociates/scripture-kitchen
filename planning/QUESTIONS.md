@@ -246,6 +246,66 @@ what JS even needs to know.
   double-HashMap-per-marker `fast_lookup` is the known smell). Every column
   added to the table is an `if` deleted from some driver.
 
+- **Q9 — slots as a piece table: edited slots own their text, unedited
+  slots slice the original.** (2026-08-08, exploring — not decided.)
+  The lazy-materialization worry ("if you edit before strings are
+  allocated, spans shift") dissolves if a slot's backing is EITHER a range
+  of the original source OR an owned replacement String swapped in by
+  `updateSlot`:
+  - Edit slot 3 → only slot 3's text and tokens change. Every other slot's
+    tokens are byte-identical because spans are SLOT-RELATIVE; only the run
+    table's base offsets shift (one add per slot, or a lazy prefix-sum).
+    This is the strongest argument yet that slot-relative spans are the
+    default, not a mode.
+  - No lexer toggle needed for book-vs-chapter offsets: `lex` is relative
+    to whatever slice it's handed (proven — `--chunked` produces identical
+    tokens). "Absolute" is just the run-table base added back. Zero new
+    arms.
+  - Search never straddles disk-vs-edited: every slot exposes one
+    `text() -> &str` view (slice of original or owned string — search
+    doesn't care). No post-hoc diff, no "which version am I searching."
+  - Edit-before-materialize can't happen through the editor: an edit
+    enters via a rendered container, and rendering IS materialization of
+    that slot. Visible-chapter-first materialization is safe.
+  - Save = concat(slot texts), lossless by the partition invariant.
+  - Duplicates / out-of-order chapters stay fine: slots are positional;
+    `\c` is the boundary event; "which section of the file" = slot index +
+    session slot id, never a byte offset.
+  - THE edit primitive is splice, not update (2026-08-08): cross-boundary
+    edits (drag-delete from mid-ch.1 through mid-ch.3) are
+    `spliceSlots(contiguous slot range, replacement text) -> Effect`. The
+    store lexes the replacement and RE-PARTITIONS at whatever `\c` it
+    finds: 3-in/1-out (the tail of 3 "flows into" 1 by re-partition, not
+    by an operation), keystroke = 1-in/1-out degenerate case (updateSlot
+    IS splice), pasting a `\c` = 1-in/2-out. Slot structure is always
+    output, never instruction — no delete/merge/split operations exist.
+    Empty range = pure insertion (`splice(2..2, "\c ...")` — Vec::splice
+    semantics), so "add a chapter" needs no primitive either. Case table:
+    keystroke 1→1 · paste-`\c` 1→2 · drag-across 3→1 · insert-button 0→1 ·
+    select-all-type N→M.
+    The loop's rule: Lexical's tree mutation is a PREDICTION, the store's
+    re-partition is the RULING, reconcile settles the difference (often a
+    no-op — drag-delete's merge was a correct prediction; typed-`\c` was
+    not, so reconcile splits the container). The store never trusts the
+    editor's structure, only its text. This turns tab D's observed
+    "self-healing by luck" into self-healing by design. Lib default stays SPEC: book in, book resolved,
+    book-absolute offsets (structure state legitimately crosses `\c` —
+    milestones); slot-relative is the STORE's internal representation only.
+  - The header (rename: ParseHeader) IS the adapter between the two
+    coordinate systems (2026-08-09): its run-table bases remap
+    book-absolute ↔ slot-relative by one subtract/add (run found by binary
+    search over bases), so the store adopts a single spec parse into slots
+    WITHOUT re-lexing. Toc, chapter-materialization index, and coordinate
+    adapter are one structure — no extra fields.
+  - OPEN (same question as the prototype's Q18 container-set diff): id
+    survival across re-partition — positional-prefix matching (first-in ↔
+    first-out, kill/mint the rest) covers the known cases; verify against
+    "selection ate the range's own first `\c`" in the prototype.
+  - OPEN: does the store hold the original as one String + ranges (true
+    piece table) or copy each slot's text on load (simpler, ~one book of
+    RAM)? And what the splice Effect carries (the container-set diff the
+    editor reconciles by).
+
 ---
 
 ## Parked — onion scar tissue, not yet reached here

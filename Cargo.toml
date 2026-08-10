@@ -6,6 +6,12 @@ edition = "2024"
 [dependencies]
 memchr = "2.8.3"
 winnow = "1.0.4"
+# Playground-only parallelism (dev-deps don't reach src/bin binaries, so:
+# optional dep + feature, cfg-gated in the playground, absent from the lib).
+rayon = { version = "1.10", optional = true }
+
+[features]
+par = ["dep:rayon"]
 
 [dev-dependencies]
 criterion = "0.8.2"
