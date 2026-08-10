@@ -297,14 +297,60 @@ what JS even needs to know.
     search over bases), so the store adopts a single spec parse into slots
     WITHOUT re-lexing. Toc, chapter-materialization index, and coordinate
     adapter are one structure — no extra fields.
-  - OPEN (same question as the prototype's Q18 container-set diff): id
-    survival across re-partition — positional-prefix matching (first-in ↔
-    first-out, kill/mint the rest) covers the known cases; verify against
-    "selection ate the range's own first `\c`" in the prototype.
+  - RESOLVED — id survival is POSITIONAL-PREFIX (2026-08-10, prototype
+    Q29/Q30). Both candidate rules were implemented and run over ten cases;
+    they agree on seven and disagree on exactly three, and every
+    disagreement has the same cause: the surviving run's LABEL changed. In
+    all three, label-anchored matching killed the id of the slot the user
+    was typing in and minted a replacement. Since the label is display data
+    and the id is what comments/locks/undo hang off, renumbering a chapter
+    must not be an identity event. Both rules always produced byte-identical
+    output — the id rule is pure identity bookkeeping and cannot affect the
+    document.
+  - RESOLVED — "selection ate the range's own first `\c`" DISSOLVES, and
+    the reason generalises into a rule (prototype Q30/Q31). A splice range
+    is a claim about BYTES, and the store must WIDEN it on both ends until
+    that claim is closed under re-scan:
+    - **extend LEFT** while the replacement starts with non-`\c` bytes:
+      chapterless bytes are only legal in slot 0, so the previous slot joins
+      the transaction and absorbs them. After that the replacement starts at
+      a real `\c` and the ordinary rule applies — the case stops being
+      special.
+    - **extend RIGHT** while the replacement does not END in a newline:
+      slots are separable only by the newline between them, so otherwise the
+      replacement's last line and the successor's `\c N` land on the SAME
+      line, that `\c` stops matching the chapter predicate, and the two slots
+      silently weld. Found as a live oracle RED (retained 4 vs fresh 3), NOT
+      predicted by the store harness. This is the non-obvious half.
+    Re-partition is therefore **not** closed over an arbitrary range, and
+    both normalisations are store-internal — the editor never knows.
+  - RESOLVED — the Effect is a SPLICE DESCRIPTION carrying positions and the
+    caret (prototype Q28/Q32/Q33): `{ at, removedCount, outIds, survived[],
+    createdIds, removedIds, caretTo, extendedLeft, extendedRight }`. Three
+    consequences verified against real Lexical in the prototype:
+    - one flush = one splice in all four probed shapes (keystroke 1→1,
+      typed `\c` 1→2, select-all+type 3→1, cross-boundary drag 3→1), oracle
+      GREEN on every one. The editor makes no structural claim at all — it
+      contributes a byte range and a caret offset, nothing else.
+    - `caretTo` is resolved BY THE STORE against the out-slots, and the
+      mount plan takes it as an explicit input, so the caret lands in a slot
+      minted by that same splice ("selection restore → slot-5@6 : ok").
+      Every previous run of that exercise failed.
+    - container DESTRUCTION becomes expressible, which ancestor-walk
+      attribution could never do: destroyed containers are named by INDEX
+      (live set vs believed-materialised set) and folded into the range;
+      contributing no bytes for them IS the deletion. A flush must therefore
+      be able to run with nothing dirty.
   - OPEN: does the store hold the original as one String + ranges (true
     piece table) or copy each slot's text on load (simpler, ~one book of
-    RAM)? And what the splice Effect carries (the container-set diff the
-    editor reconciles by).
+    RAM)?
+  - OPEN (definitional, for the scanner): is an empty book ZERO slots or ONE
+    empty labelless slot? `spliceSlots(0, N, "")` legitimately yields zero;
+    `scanBook("")` yields one; the oracle reddens on the difference. Store
+    and scanner must agree or select-all-and-delete is permanently red.
+    Related and now settled: a splice that would leave an empty LABELLESS
+    slot must DROP it — Q11's "empty is not a legal slot state" is promoted
+    from an observation to a normalisation the store performs.
 
 ---
 
