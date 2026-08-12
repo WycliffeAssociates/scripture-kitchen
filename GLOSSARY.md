@@ -2,9 +2,7 @@
 
 One meaning per term, one term per concept, each mapped to at most ONE type
 when it becomes code. If a sentence about the domain can't be written in
-these terms, the glossary is missing an entry — add it here BEFORE adding a
-type. Terms marked `(pending Qn)` have a live design question in
-QUESTIONS.md; the definition records the current soft direction.
+planning/; the definition records the current soft direction.
 
 ## The material
 
@@ -39,6 +37,124 @@ QUESTIONS.md; the definition records the current soft direction.
 - **Token** — the smallest lexed unit and the ONE working representation:
   `{ id, kind, markerIdx?, span }`. Everything richer is a derivation.
   (pending Q0: the exact eager field list — each added field is twin tax.)
+
+- **Scope** — an open region on the stack: it opens, it takes Content, it
+  closes. THE stack mechanism, and the reason a `\p` cannot be swallowed by an
+  unclosed `\f`. Type: `ScopeKind`. Columns: `opens_scope`, `closes_scope`.
+- **Frame** — one live occurrence of a Scope on the stack. A Scope is the kind;
+  a Frame is the instance. Frames carry the Context stamped at push time [I].
+- **Context** — a legality region: the answer to "may this marker appear here?"
+  `Scripture`, `BookHeaders`, `ChapterContent`, `Para`, `Footnote`, … Type:
+  `SpecContext`. Column: `allowed_contexts`.
+- **Positional context** — a Context established by document POSITION rather
+  than by an open Scope: `BookIdentification → BookHeaders → BookTitles →
+  BookIntroduction → ChapterContent`, in sequence, advanced by the markers that
+  initialize each. Will, 2026-08-12: *"you know you're in bookheaders sort of by
+  knowing you're pre-chapter, and one of these markers initializes that context
+  as well."*
+
+  **An empty Scope stack does not mean no Context.** Confirmed by Will on the
+  `\q1` case: with nothing open, the legality question is still live — *"are we
+  in ChapterContent, i.e. not BookHeaders or something."* This is what makes the
+  positional mechanism load-bearing rather than tidy-up. NEXT-STEPS §5 (positional context).
+- **Contributes** — the relation between the two: an open Scope contributes a
+  Context to its children (`\f` contributes `Footnote`, which is what makes
+  `\ft` legal). Derived from `kind` × `category`, never stored:
+  `schema::contributes_context`. `None` means the Frame is TRANSPARENT — children
+  are judged against the Frame below.
+- **Content** — what flows inside an open Scope; in a tree, the children array.
+  A marker that takes Content is a **Container**; one that does not is a
+  **Point**.
+- **Children** — the Scopes and Tokens directly inside one Container's Content.
+  Tree-side word only; the Scanner has no children.
+- **Point** — a marker that occupies a position and takes no Content: `\c`,
+  `\v`, `\pb`, milestones. Q16, ruled 2026-08-12: `\c`/`\v` are Points, so
+  paragraphs are their SIBLINGS, not their children. A Point may still DISPLACE
+  (see Precedence) — pushing nothing and popping something are independent.
+- **Precedence** — how many frames to pop (Will's definition, 2026-08-12).
+  Usfmtc calls its integer form `node_depths`. **Precedence is a SCOPE fact and
+  has nothing to do with Context** — it is displacement, not legality. The term
+  deliberately does NOT commit to being an integer, because the encoding stays a
+  mask (`PARENTS`): an integer cannot express "Character may contain Character".
+  Implemented as `MarkerRow::precedence()`, baked into the packed row.
+
+  Three things to keep straight:
+
+  1. **Precedence cannot do Context's job.** It is a total order, so it permits
+     everything strictly deeper, unconditionally — it cannot say "`\v` may not
+     sit directly in a chapter", cannot allow `\add` inside `\add`, and cannot
+     tell `\p` from `\qa` (same rank) for the `\v`-forbidden rule. Contexts carry
+     information Precedence structurally cannot. usfmtc agrees by construction:
+     `node_depths` is referenced exactly ONCE, inside `removeType`, and never in
+     `validating/` — legality is a separate grammar pass there.
+  2. **Only DISPLACING markers consult it.** A `\nd` just pushes; it is closed
+     explicitly, so it never pops a peer. usfmtc's ordinary `char` handler does
+     not call `removeType` at all. So "do I displace?" is a per-marker fact —
+     and `ClosingBehavior` already almost IS it (`None` → displaces,
+     `RequiredExplicit` → nests), read together with kind (`\pb` is `None` but a
+     Character, and must not close its paragraph).
+  3. **Points have Precedence without opening a Scope.** `\c` pushes nothing yet
+     must still pop, so it is a separate fact from `opens_scope`. DONE 2026-08-12
+     (item L): `opens_scope` now means PUSHING only, and `precedence()` is two
+     arms — `MarkerKind::Chapter`/`Verse` displace at their own rank, everything
+     else displaces at whatever it pushes. `\pb` and the milestones get `None`
+     for free, which is exactly the bug onion has.
+
+  Precedence must never CONTRADICT Context (if a Para may contain a Character then
+  `rank(Para) < rank(Character)`), but it carries strictly less information.
+- **Displacement** — closing an open Frame because an incoming marker outranks
+  it (see Precedence), with no explicit closer in the source. Always a Lint event, never silent:
+  Will, 2026-08-12 — *"let them know we closed the footnote, but it's supposed to
+  close explicitly."*
+
+  Displacement is for TREE SANITY, and is not the same as illegality. A marker
+  that is merely in the wrong Context but opens nothing (`\cp` outside a
+  chapter) has nothing to pop, so it is lint-only. That is the concrete answer to
+  NEXT-STEPS §5 for this marker class.
+- **Unclosed vs implicitly closed** — an `\f` that never gets `\f*` is
+  **unclosed** (a finding anchored at the `\f`); a `\ft` that legitimately ends
+  at its note's end is **implicitly closed** (no finding). The row column that
+  distinguishes them is `closing: ClosingBehavior`.
+
+## Trees and passes
+
+- **CST** — the lossless Concrete Syntax Tree over the token stream: every byte
+  of Source is reachable, Contexts nest, Points sit as siblings. The tree the
+  walker builds. "Flat CST" is the same thing before any Context has opened.
+- **Linter** — the pass that emits Observations over `Vec<Token>` alone (never
+  reaching into live parser state, per [L]). Consumes Displacement events,
+  Context legality, and the row's own flags.
+- **Scanner** — canonical, defined above. **"Lexer" is a synonym to AVOID** —
+  one term per concept, and `scanner.rs` is the module.
+
+## Naming collisions — RULED 2026-08-12
+
+- **Walker** is the name for the structural loop (frame stack, push/pop,
+  displacement, legality) — "the tree the walker builds", the thing lint
+  listens to. **"Driver" is a synonym to AVOID for it**: this glossary
+  already uses "driver" for the engine-host sense ("drivers may vary, the
+  engine never forks"), and one word may not mean both.
+- **`common_marker_checks`** is the name (NOT `marker_fast_paths`). The fused
+  hot-marker checks, NEXT-STEPS step 4.4.
+- **Designator** is the name for the `\c`/`\v` payload — the glossary already had
+  the word ("Verse designator", "Chapter designator", below), so
+  `Payload::NumberRange` becomes `Payload::Designator` and the step-4.3
+  `TokenKind` is `Designator`. Neither `NumberRange` nor `NumberKind` survives:
+  one term per concept, and the column and the TokenKind must not disagree.
+
+  The spec pattern the INTERPRETER implements, verbatim (spec name `VERSE`,
+  "Verse number, including ranges and sequences"):
+
+  ```
+  /[1-9][0-9]*[\p{L}\p{Mn}]*(‏?[\-,][0-9]+[\p{L}\p{Mn}]*)*/
+  ```
+
+  It belongs to the designator interpreter, never to the Scanner: the Scanner
+  emits ONE `Designator` token spanning the whole thing and never looks inside.
+  Its fast path recognizes only the pure-digit happy shape and falls back for
+  suffixes, ranges, sequences, the U+200F RLM, and junk.
+- **GLOSSARY.md location** — `src/lib.rs` cites `planning/GLOSSARY.md`; the file
+  is at the repo root. Still to fix; one of the two is wrong.
 
 ## Identity and location (the four jobs — never conflated)
 

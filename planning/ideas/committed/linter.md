@@ -1,7 +1,7 @@
 # Lint & diagnostics — decided + discussed so far
 
 Sketch of everything settled or firmly leaning about lint, diagnostics, and
-recovery. Sources: QUESTIONS.md (E section, Q9, L ruling), TRANSITIONS.md,
+recovery. Sources: the retired QUESTIONS/TRANSITIONS logs,
 NEXT-STEPS step 2 rulings, onion scar tissue. Items marked (leaning) are
 direction, not law.
 
@@ -49,7 +49,7 @@ one atomic act, structurally impossible to forget.
 
 ## Where lint runs
 
-- **One structure driver, lint as listener — and structural findings are
+- **One structure walker, lint as listener — and structural findings are
   the walker's EXHAUST (ruled 2026-08-10).** The walker asks "is this
   allowed here" FIRST and NECESSARILY — recovery IS a legality check
   (`pop_while(frame forbids marker)` can't run without it). So structural
@@ -108,13 +108,49 @@ one atomic act, structurally impossible to forget.
 - **Note recovery is not a special mechanism [I]**: frames carry
   `effective_context` stamped at push time; a marker illegal in the
   current context pops through the note via the same generic
-  `pop_while(predicate)` driver as everything else.
+  `pop_while(predicate)` walker as everything else.
 
 ## Context legality (the cheap check)
 
 - Per marker token: `row.allowed_contexts & (1 << current_context) != 0` —
-  one AND against the 20-bit SpecContext mask, riding the walker's stack.
+  one AND against the 18-bit SpecContext mask, riding the walker's stack.
   Listener-gated: no lint listener attached → no ANDs.
+
+### The spec is FUZZY here, and that is lint's problem, not the table's
+
+**Will, 2026-08-12: "I hate these docs. They are all over the place… the spec is
+way too fuzzy in places."** Concretely, the `Valid In::` lists systematically
+under-report `Footnote`/`CrossReference` for character markers, and the docs'
+OWN EXAMPLES contradict their own lists:
+
+| marker | lists Footnote? | but its own example… |
+|---|---|---|
+| `em`, `bd`, `it` | yes | — |
+| `jmp` | **no** | Example 13 puts `\jmp` inside `\ef` |
+| `dc` | **no** | example puts `\dc` inside `\x` |
+| `nd`, `add`, `wj`, `fm` | **no** | — |
+
+So presence/absence is NOT a real spec distinction; it is unevenly maintained
+documentation. The division of labour that follows:
+
+- **The table records what the marker page says**, fuzziness included. Rows are
+  not "corrected" toward a generalisation, and **codegen never invents the
+  difference** — an earlier generator promoted `Footnote`/`CrossReference` onto
+  every block-legal character row and it was deleted (Will: "this wasn't
+  allowed"). The fact may be true; a generator is the wrong place for it.
+- **Lint decides what to shout about.** A character marker inside a note is
+  therefore NOT reported, or reported at the lowest severity — the spec
+  demonstrates the markup it declines to list. Crying wolf on valid text is
+  worse than missing a nicety.
+
+`fm` is the deliberate live example: it does not list Footnote, but "you might
+conceivably reference another footnote in a footnote", so its row is LEFT AS THE
+PAGE HAS IT (Will's call) and lint stays quiet rather than the table guessing.
+
+The general rule for this whole class: **where the spec is internally
+inconsistent, the table follows the marker page and lint absorbs the
+uncertainty.** Severity lives in the rules table, so this is one tunable value
+rather than a fork in the data.
 
 ## Rules already known to be lint's business (not the matcher's/scanner's)
 
@@ -125,6 +161,33 @@ one atomic act, structurally impossible to forget.
 - Redundancies: empty paragraphs, duplicate chapter labels (occurrence
   ordinals are derived, duplicates are DATA — lint comments, never blocks).
 - Delimiter-whitespace violations — reads ws_after_name.
+- **Missing paragraph after `\c` — FLAG ONLY, never repair** (Will,
+  2026-08-12). `\c 1 \v 1 In the beginning…` puts a verse directly in the
+  chapter with no paragraph between them. The reference implementation
+  usfmtc *fabricates* one: `_v` sees the chapter on top of the stack, closes
+  the `c` tag, and inserts an implicit `\p` before pushing the verse
+  (`src/usfmtc/usfmparser.py:891`).
+
+  **We cannot do that.** Synthesizing a paragraph invents a token with no
+  span in the source, which breaks losslessness and the partition oracle in
+  one move — `concat(spans) == source` is not negotiable. So this is a lint
+  finding ("this needs a paragraph") anchored at the `\v`, and the tree the
+  walker emits shows the verse where the source actually put it. A consumer
+  that wants usfmtc's tree shape can insert the paragraph itself; the engine
+  reports, it does not rewrite.
+
+  Worth remembering as the general rule for reading usfmtc: it is a
+  USFM↔USX *converter*, so it is free to normalize. We are a lossless
+  scanner, so every place usfmtc repairs is a place we flag instead.
+
+- Adjacency rules — the `(lastMarker, token)` shape (ruled 2026-08-12):
+  `\ca`/`\cp` are legal only immediately after `\c` (or another of the
+  pair), `\va`/`\vp` only immediately after `\v`. One marker of lookbehind
+  over bare tokens — the emit funnel's delay buffer already provides it.
+  This class exists because `Chapter`/`Verse` are NOT contexts: chapters
+  repeat, so no monotonic positional encoding can express "right after
+  `\c`" (NEXT-STEPS §5). Tier 2, never the walker — a misplaced
+  `\ca` opens no scope, so illegality here is lint-only.
 - Conditional attribute cardinality — `AttrStatus` is per-attribute and
   cannot express dependencies BETWEEN attributes, so these are lint rules:
   `eid` is required *if* `sid` was used (3.2 ms/qt.html); `sid`/`eid` are

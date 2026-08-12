@@ -4,99 +4,60 @@
 //!
 //! **The table conforms to USFM 3.2** (<https://docs.usfm.bible/usfm/3.2/>) and
 //! nothing else: no version column, no version-tracking, no multi-version
-//! emissions. Everything generated here — the packed table, the JS registry, the
-//! USJ projection — therefore describes 3.2 only. The 3.1 grammar in
-//! tcdocs/usx.rng is fallback evidence for the AUDIT, never an input to codegen.
+//! emissions.
 //!
-//! Planned emissions (planning/NEXT-STEPS.md step 3):
-//! 1. `src/tables/generated.rs` —
-//!    - packed row table (codegen owns the bit layout; u128 rows or u64+u32
-//!      lanes, whichever it picks), with the derived facts baked in: the
-//!      20-bit effective-context mask from `allowed_contexts`, and
-//!      `schema::contributes_context(kind, category)`
-//!    - side arrays: marker names, attribute-name strings (the per-attribute
-//!      `AttrStatus` packs alongside each index — required/optional/deprecated
-//!      is 2 bits)
-//!    - `marker_idx(name: &[u8]) -> u8` — **[G] the strip order is
-//!      `-s`/`-e` FIRST, then trailing ascii digits**: `qt3-s` → `qt3` → `qt`.
-//!      Then load ≤8 name bytes into a u64 and integer-match over the
-//!      canonical constants (the compiler emits the decision tree). The digits
-//!      are validated against `numbered_max`; the bare form is ALWAYS legal
-//!      [D]; `Numbering::TableColumns` means "match the alpha stem and stop,
-//!      the rest of the lexeme is payload" [O]. The lookup key is
-//!      (name, `SpellingShape`), so for the handful of overloaded names (`qt`)
-//!      codegen emits one extra compare against the shape the lexer already
-//!      classified; every other name resolves on the u64 match alone.
-//!    - **Index 0 is the generic EMPTY row**, not a bare sentinel: opens
-//!      nothing, closes nothing, contributes no context, no payload, no
-//!      attributes. A first-byte-`z` test bails to it without matching a name
-//!      at all [F], which is why a `\zaln-s` fast check needs no row — the
-//!      token kind still comes from the lexical shape.
-//! 2. Later, same source: `common_marker_checks` — the hot-marker fast path,
-//!    priority-ordered u64/u16 compares, built one pattern at a time and
-//!    measured (the `priority` column is now MEASURED, not guessed: en_ulb +
-//!    examples.bsb, 2026-08-10). Then the JS/TS registry and USJ projection.
+//! This is a thin main. The generator itself is `tables::emit`, in the library,
+//! so `tests/codegen_output_matches_input.rs` can regenerate to a buffer and fail the build
+//! when the checked-in file is stale.
 //!
-//! A test will assert freshness: regenerate to a temp buffer, compare with the
-//! checked-in file, fail if stale.
-//!
-//! Today it emits nothing and instead reports AUDIT READINESS: the state of the
-//! two row sources — the AUDITED table (`tables::rows`) and the UNAUDITED
-//! mechanical translation (`tables::unaudited`) — plus every recorded fact the
-//! audit needs to carry across. The schema and data rounds are closed, so the
-//! flags below are RECORDED FACTS AND CITATIONS, not blockers: each says what was
-//! decided and why, or names something the spec itself leaves open.
+//! NOT emitted yet, deliberately (planning/NEXT-STEPS.md): `common_marker_checks`
+//! — the hot-marker fast path, which is built one pattern at a time and MEASURED,
+//! never speculated (the `priority` column is measurement, not a guess) — and the
+//! JS/TS registry + USJ projection, which arrive with the wasm/JS boundary work.
 
-use usfm_onion_2::tables::{rows, unaudited};
+use std::path::Path;
 
-fn main() {
-    let audited = rows::ROWS;
-    let scratch = unaudited::UNAUDITED_ROWS;
+use usfm_onion_2::tables::{emit, rows};
 
-    let open_categories = unaudited::CATEGORY_JUDGEMENT_CALLS
+const OUT: &str = "src/tables/generated.rs";
+
+fn main() -> std::io::Result<()> {
+    let text = emit::generated_rs();
+
+    let path = Path::new(OUT);
+    let previous = std::fs::read_to_string(path).unwrap_or_default();
+    std::fs::write(path, &text)?;
+
+    let attrs: usize = rows::ROWS
         .iter()
-        .filter(|(_, reason)| !reason.starts_with("CONFIRMED") && !reason.starts_with("FIXED"))
+        .map(|row| row.defined_attributes.len())
+        .sum();
+    let overloaded = rows::ROWS
+        .iter()
+        .filter(|row| !matches!(row.shape, usfm_onion_2::tables::schema::SpellingShape::Any))
         .count();
 
-    println!("codegen: emits nothing yet. Schema + data rounds are CLOSED; what remains");
-    println!("is the row-by-row audit (planning/NEXT-STEPS.md step 3), then step 3's");
-    println!("emissions. Conformance target: USFM 3.2, no version column.");
-    println!();
-    println!("  AUDIT PROGRESS");
+    println!("codegen → {OUT}");
     println!(
-        "    audited rows      (tables::rows — the real table)  {:>4}",
-        audited.len()
+        "  rows                {:>4}  (index 0 is the empty row)",
+        rows::ROWS.len()
     );
+    println!("  attribute entries   {:>4}  before run-sharing", attrs);
     println!(
-        "    awaiting audit    (tables::unaudited)              {:>4}",
-        scratch.len()
+        "  shape-keyed rows    {:>4}  (names needing the extra compare)",
+        overloaded
     );
+    println!("  bits used per row   {:>4}  of 128", emit::BITS_USED);
+    println!("  bytes written     {:>6}", text.len());
     println!(
-        "    collapsed families (numbered + milestone spellings) {:>3}",
-        unaudited::COLLAPSED_FAMILIES
-    );
-    println!();
-    println!("  RECORDED STATE — decisions, citations, and spec-side unknowns");
-    println!(
-        "    category rulings                                   {:>4}  ({} open)",
-        unaudited::CATEGORY_JUDGEMENT_CALLS.len(),
-        open_categories
-    );
-    if open_categories == 0 {
-        println!();
-        println!("    Every category ruling is settled. Nothing blocks the audit; spec-side");
-        println!("    unknowns are tracked in planning/attributes-3.2.md.");
-    }
-    println!();
-    println!("  Category rulings — where the spec group was ambiguous, contradictory, or");
-    println!("  absent. All 20 reviewed and CONFIRMED CORRECT by Will 2026-08-10; kept as");
-    println!("  the audit record of how each was decided:");
-    for (marker, reason) in unaudited::CATEGORY_JUDGEMENT_CALLS {
-        let tag = if reason.starts_with("CONFIRMED") || reason.starts_with("FIXED") {
-            "ok     "
+        "  {}",
+        if previous == text {
+            "unchanged — checked-in file was already fresh"
+        } else if previous.is_empty() {
+            "CREATED"
         } else {
-            "OPEN   "
-        };
-        println!("  {tag}[{marker}] {reason}");
-    }
+            "CHANGED — review the diff before committing"
+        }
+    );
+    Ok(())
 }

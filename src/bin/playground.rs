@@ -89,7 +89,11 @@ fn main() {
     let elapsed = started.elapsed();
 
     let secs = elapsed.as_secs_f64() / iters as f64;
-    let docs_per_sec = if secs > 0.0 { sources.len() as f64 / secs } else { 0.0 };
+    let docs_per_sec = if secs > 0.0 {
+        sources.len() as f64 / secs
+    } else {
+        0.0
+    };
     let mib_per_sec = if secs > 0.0 {
         (bytes as f64 / (1024.0 * 1024.0)) / secs
     } else {
@@ -116,7 +120,9 @@ fn verify_variant(sources: &[String], mode: Mode) {
                 usfm_onion_2::experiments::chapter_par::lex_chunked_par
             }
             #[cfg(not(feature = "par"))]
-            panic!("--chpar needs the feature: cargo run --release --features par --bin playground -- --chpar")
+            panic!(
+                "--chpar needs the feature: cargo run --release --features par --bin playground -- --chpar"
+            )
         }
     };
     for (i, source) in sources.iter().enumerate() {
@@ -165,7 +171,9 @@ fn run_once(sources: &[String], mode: Mode) {
                 });
             }
             #[cfg(not(feature = "par"))]
-            panic!("--par needs the feature: cargo run --release --features par --bin playground -- --par");
+            panic!(
+                "--par needs the feature: cargo run --release --features par --bin playground -- --par"
+            );
         }
         Mode::ChapterPar => {
             #[cfg(feature = "par")]
@@ -179,7 +187,9 @@ fn run_once(sources: &[String], mode: Mode) {
                 }
             }
             #[cfg(not(feature = "par"))]
-            panic!("--chpar needs the feature: cargo run --release --features par --bin playground -- --chpar");
+            panic!(
+                "--chpar needs the feature: cargo run --release --features par --bin playground -- --chpar"
+            );
         }
     }
 }

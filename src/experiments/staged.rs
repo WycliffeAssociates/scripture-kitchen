@@ -57,9 +57,7 @@ impl StructuralIndex {
         // safely under the floor.
         let mut control: Vec<u32> = Vec::with_capacity(bytes.len() / 8);
         control.extend(memchr3_iter(BACKSLASH, CR, LF, bytes).map(|p| p as u32));
-        let opt_breaks: Vec<u32> = memmem::find_iter(bytes, b"//")
-            .map(|p| p as u32)
-            .collect();
+        let opt_breaks: Vec<u32> = memmem::find_iter(bytes, b"//").map(|p| p as u32).collect();
         Self {
             control,
             ci: 0,

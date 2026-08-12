@@ -1,93 +1,18 @@
-//! Row types the authored table is written in. Reworked 2026-08-10 against the
-//! rulings [A]–[P] recorded in planning/NEXT-STEPS.md step 2; each affected
-//! item cites its ruling.
+//! Row types the authored marker table (`tables::rows`) is written in.
 //!
-//! ## Version policy: the table conforms to USFM 3.2, and only 3.2
-//!
-//! **The referee for every fact in this table is <https://docs.usfm.bible/usfm/3.2/>**
-//! — the latest spec. There is deliberately NO version column and no
-//! version-tracking of any kind: supporting multiple spec versions at once was
-//! ruled out ("gets gnarly, not interested"). Where 3.2 deprecates something,
-//! that is exactly what `deprecated` (on a row) and [`AttrStatus::Deprecated`]
-//! (on an attribute) mean — they record 3.2's own judgement, not our history.
-//!
-//! The 3.1 USX grammar in tcdocs/usx.rng is FALLBACK evidence only: useful for
-//! confirming that a marker exists and for reading attribute cardinality the
-//! prose omits, but it never outvotes a 3.2 page. Two markers found only in the
-//! 3.1 grammar and absent from the 3.2 docs (`t-s`/`t-e`, `wj-s`/`wj-e`) are
-//! treated accordingly — see the flag list in `tables::unaudited`.
-//!
-//! Rules of the schema:
-//! - Named fields only. Packing (u128 rows / u64+u32 lanes / windows) is
-//!   codegen OUTPUT, never authored.
-//! - One row per CANONICAL marker; numbered spellings collapse (the digit lives
-//!   in the token's span, validated against [`Numbering`]).
-//! - Strings that can't be bits become side arrays: marker names, attribute
-//!   names, doc paths (codegen-only).
-//! - **No derived facts as columns.** Anything computable from other columns is
-//!   a `const fn` here (see [`contributes_context`]) so codegen can bake it and
-//!   the audit never has to keep two columns in sync.
-//!
-//! ## Name resolution [G]
-//!
-//! The matcher strips **`-s`/`-e` FIRST, then trailing digits**: `qt3-s` →
-//! `qt3` → `qt`. The milestone side (`-s` start / `-e` end) is read off the
-//! token's span, never stored. Longest canonical name is 6 bytes (`periph`),
-//! which is what makes the u64 load work.
-//!
-//! Rows are therefore keyed by **(name, [`SpellingShape`])**, not by name
-//! alone. Almost every row is [`SpellingShape::Any`] and the shape costs
-//! nothing; the axis exists because a few names are overloaded across the plain
-//! and milestone spellings with genuinely different facts (`qt` today). The
-//! lexer already knows which shape it saw — its regexes distinguish the
-//! `-s`/`-e` suffixed form from the plain one, and maximal munch takes the
-//! longest — so the disambiguation is free at the point of lookup. See
-//! planning/TRANSITIONS.md §7 for why this beats a kind-from-shape override.
-//!
-//! ## `\z` extensions and unknown markers [F]
-//!
-//! Extension markers (`\zaln-s`, `\zwhatever`) are **never rows in this
-//! table**. Their definitions arrive as CONFIG (the `markers.ext` shape,
-//! supplied by the caller, never read off the filesystem by the engine). An
-//! unconfigured `\z` marker has ZERO behavior: it resolves to marker index 0,
-//! opens nothing, closes nothing.
-//!
-//! Two 3.2 additions the config shape must account for when it is designed
-//! (recorded here so they are not discovered late — neither is implemented):
-//!
-//! - **`*` wildcards in attribute definitions.** 3.2 lets an extension declare
-//!   `a-*`, meaning "any attribute whose name starts with `a-`". So a configured
-//!   marker's attribute set is a set of PATTERNS, not a set of names, and
-//!   [`AttrStatus`] would have to attach to a pattern. Note the table's own
-//!   `defined_attributes` stays a plain name list — this is a config-side
-//!   concern only.
-//! - **A `standalone` marker category.** 3.2 adds it for a bare milestone that
-//!   takes no attributes and no delimiter. Nothing in [`Category`] corresponds,
-//!   because nothing in the SPEC table needs it; an extension declaring
-//!   `standalone` maps onto `opens_scope: None` + `payload: Payload::None` +
-//!   `ws_after_name: NotRequired`, which the config loader would synthesize.
-//!
-//! **Index 0 IS that generic empty row**, not a sentinel with no data: its
-//! defaults are "opens nothing, closes nothing, contributes no context, no
-//! payload, no attributes". A first-byte-`z` test bails straight to index 0
-//! without any name match at all, which is why a `\zaln-s` fast check needs no
-//! row — the token's KIND still comes from its lexical shape (`-s` → Milestone),
-//! and the row only has to be inert.
-//!
-//! An unknown or illegal marker (`\s5`, `\notamarker`) is a recovery event:
-//! **pop all the way out and start fresh.** That is a driver rule keyed on
-//! index 0, not a per-row value — see planning/TRANSITIONS.md §6.
-//!
-//! ## Whitespace vocabulary note
-//!
-//! Only ONE whitespace column survives the port ([`StructuralWhitespaceRequirement`],
-//! read for `ws_after_name`), so it lives here rather than in a sibling
-//! `tables/whitespace.rs`. Onion's other three positions (before-open,
-//! before-close, after-close) and its format-preference / format-category
-//! columns are formatter+lint concerns this scanner never reads; if they are
-//! ever pulled in, THAT is when the enum family earns its own module. Spec
-//! patterns for `hs`/`HS`/`Hs`/`nl`/`NL`/`ws`/`WS`/`Ws`/`TAGEND` are recorded
-//! in tcdocs/def.txt.
+//! - **Referee: USFM 3.2 only** (<https://docs.usfm.bible/usfm/3.2/>). No
+//!   version column; `deprecated`/[`AttrStatus::Deprecated`] record 3.2's own
+//!   judgement. The 3.1 usx.rng is fallback evidence and never outvotes a
+//!   3.2 page; markers only it knows do not exist.
+//! - **Named fields only.** Packing is codegen OUTPUT; derived facts are
+//!   `const fn`s (never columns), so codegen bakes them and nothing is kept
+//!   in sync by hand.
+//! - **Rows are keyed by (canonical name, [`SpellingShape`])** — strip
+//!   `-s`/`-e` first, then digits (`qt3-s` → `qt`); longest name is 6 bytes,
+//!   which is what makes the u64 name load work.
+//! - **`\z` extensions and unknown markers are never rows**: they resolve to
+//!   index 0, the inert empty row (opens/closes/contributes nothing).
+//!   Extension definitions arrive as caller CONFIG, never from the table.
 
 /// Which SPELLINGS of a name a row claims — the second half of the row key.
 ///
@@ -131,6 +56,12 @@ impl SpellingShape {
 /// checks), codegen (packing, USJ type projection), export.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum MarkerKind {
+    /// The generic EMPTY row at index 0 — an unconfigured `\z` extension, an
+    /// unknown name, an illegal spelling. Added 2026-08-12 when codegen landed:
+    /// the schema always said index 0 is a ROW and not a sentinel, and without
+    /// this variant every generated accessor would have had to return an
+    /// `Option` purely to describe row 0. Pairs only with [`Category::Unknown`].
+    Unknown,
     Paragraph,
     Character,
     Note,
@@ -148,12 +79,8 @@ pub enum MarkerKind {
 
 /// The spec's own FINE category, one flat enum [C].
 ///
-/// This replaces the four accreted fields ported from onion
-/// (`paragraph_category`, `note_family`, `note_subkind`, `inline_context`) —
-/// and also replaces the `contributes_context` column an earlier draft
-/// proposed, which was the same accretion collapsed rather than removed. The
-/// spec's own two-level taxonomy ([`MarkerKind`] × [`Category`]) carries all
-/// four facts, and reads like the documentation it came from.
+/// The spec's own two-level taxonomy ([`MarkerKind`] × [`Category`]) —
+/// it reads like the documentation it came from.
 ///
 /// **Category is load-bearing for behavior, not decoration.** The canonical
 /// example: `\pb` is a *character* marker of category [`Category::CharBreaks`],
@@ -175,6 +102,9 @@ pub enum MarkerKind {
 /// [`MarkerRow::opens_scope`], authored from it), export, codegen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Category {
+    /// The empty row's category — see [`MarkerKind::Unknown`]. No spec group.
+    Unknown,
+
     // ---- Paragraphs (docs.usfm.bible: Paragraphs > …) --------------------
     /// Paragraphs > Identification — `ide`, `h#`, `toc#`, `toca#`, `rem`, `sts`.
     ParaIdentification,
@@ -266,6 +196,7 @@ impl Category {
         use Category as C;
         use MarkerKind as K;
         match kind {
+            K::Unknown => matches!(self, C::Unknown),
             K::Paragraph => matches!(
                 self,
                 C::ParaIdentification
@@ -318,26 +249,31 @@ impl Category {
 /// and taxonomy disagree (`\pb` is a Character that opens nothing; `\fig` is a
 /// Figure that behaves as a Character scope).
 ///
-/// Read by: the walker/driver. The precedence data itself is keyed on THIS
-/// enum and lives in a separate ~13-row auxiliary table [A] — never on marker
-/// rows, which would be 162 copies of 13 values.
+/// Read by: the walker (frame kind on push, pop-barrier and close-matching
+/// checks).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ScopeKind {
     /// Reserved for the unresolved/custom marker (index 0): unwind, push
-    /// nothing. See planning/TRANSITIONS.md §6 and ruling [F].
+    /// nothing. Unknown/illegal markers: pop all, start fresh.
     Unknown,
     Header,
-    Block,
+    Para,
     Note,
     Character,
     Milestone,
-    Chapter,
-    Verse,
+    // No `Chapter`/`Verse`: `\c`/`\v` are POINTS (Q16) — no frame, and the
+    // walker needs no rank. Deleted 2026-08-12 with zero users.
+    /// No marker opens a table — the WALKER synthesizes this frame when `\tr`
+    /// arrives with no table already open (`\tr` needs it to know whether to
+    /// start one or join one). A peer of [`Self::Para`]. Unreachable from any
+    /// row, deliberately — same shape as `HtmlElement::Table`.
+    Table,
     TableRow,
     TableCell,
     Sidebar,
     Periph,
-    Meta,
+    // No `Meta`: `\cat` is char-shaped and opens a `Character` scope. A scope
+    // kind nothing can push is dead weight.
 }
 
 /// Structural-whitespace requirement immediately AFTER the marker name —
@@ -402,15 +338,26 @@ pub enum Payload {
     /// looks inside it; the fast path only ever recognizes the pure-digit happy
     /// shape and falls back to the general path for suffixes, ranges,
     /// sequences, RLM, and junk.
-    NumberRange,
+    Designator,
     /// `\usfm` — a version string, spec shape `\d+\.\d+(\.\d+)?` [E]. Same
-    /// discipline as `NumberRange`: one span, interpreted on demand.
+    /// discipline as `Designator`: one span, interpreted on demand.
     Version,
     /// `\f`, `\fe`, `\ef`, `\x`, `\ex` — the note caller [K]: `+` (auto), `-`
     /// (no caller), `?`, or a custom caller string, consumed after the
     /// delimiter and before the note's content.
     ///
-    /// Same pending-payload machinery as `NumberRange`; it becomes the 10th
+    /// **Spec pattern, from the Footnote railroad** (3.2 note/index.html, read
+    /// 2026-08-12): the caller is `/[^\\\s]+/` — one or more characters that are
+    /// neither a backslash nor whitespace. So it is not an enumeration of
+    /// `+`/`-`/`?` plus a special case; those are just the conventional values of
+    /// one general run, and the interpreter never has to enumerate them.
+    ///
+    /// The same production shows what FOLLOWS the caller: an optional `category`
+    /// (`\cat …\cat*`) BEFORE any content. So `\cat` is positionally constrained
+    /// inside a note — `\ef - \cat People\cat*\fr 1.2-6a: …` — which is a lint
+    /// rule, not something the caller payload expresses.
+    ///
+    /// Same pending-payload machinery as `Designator`; it becomes the 10th
     /// `TokenKind` when step 4 lands (kind_bits has room after the nested-bit
     /// slide). The table's job here is only to record the FACT that these
     /// kinds consume a caller.
@@ -455,16 +402,19 @@ pub enum Numbering {
     TableColumns,
 }
 
-/// The 20 spec contexts a marker may legally appear in.
+/// The 18 spec contexts a marker may legally appear in.
 ///
-/// AUTHORED FORM is a `&'static [SpecContext]` slice on the row. The 20-bit
-/// mask (and the "effective context" promotions: peripheral-content falls back
-/// to chapter-content, character markers valid in section/para/list/table are
-/// also valid inside notes) are CODEGEN output computed from this slice —
-/// authored rows never carry a mask.
+/// AUTHORED FORM is a `&'static [SpecContext]` slice on the row. The 18-bit
+/// mask is CODEGEN output computed from this slice — authored rows never
+/// carry a mask, and the mask is EXACTLY the slice: codegen never invents
+/// facts (the "effective context" promotion pass was deleted 2026-08-12 for
+/// contradicting `fm`'s own page; a test pins the equality).
 ///
-/// Read by: lint, and the driver's recovery predicate (ruling [I]: the row's
+/// Read by: lint, and the walker's recovery predicate (ruling [I]: the row's
 /// mask AND-ed against the top frame's stamped context). Codegen emits the mask.
+///
+/// The enum spans TWO AXES; [`SpecContext::is_positional`] makes every
+/// variant answer which one it is on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SpecContext {
     Scripture,
@@ -478,8 +428,6 @@ pub enum SpecContext {
     Peripheral,
     PeripheralContent,
     PeripheralDivision,
-    Chapter,
-    Verse,
     Section,
     Para,
     List,
@@ -489,17 +437,56 @@ pub enum SpecContext {
     CrossReference,
 }
 
+impl SpecContext {
+    /// The axis this variant lives on. POSITIONAL contexts are the document
+    /// sequence (`Scripture` → … → `ChapterContent`): monotonic, established
+    /// by position in the book, and the only band any "advance" rule may
+    /// apply to — the document moves forward through them exactly once.
+    /// Everything else REPEATS FREELY: scope-established sub-groups of
+    /// chapter/peripheral content (`Section`, `Para`, `Footnote`, …).
+    /// "Right after `\c`" is deliberately NOT a context (chapters repeat, so
+    /// no monotonic encoding works): `ca`/`cp`/`va`/`vp` are checked by an
+    /// adjacency lint rule instead, and their rows carry an empty context
+    /// slice.
+    ///
+    /// Exhaustive on purpose — a new variant must declare its axis here
+    /// before it compiles.
+    pub const fn is_positional(self) -> bool {
+        use SpecContext as S;
+        match self {
+            S::Scripture
+            | S::BookIdentification
+            | S::BookHeaders
+            | S::BookTitles
+            | S::BookIntroduction
+            | S::BookIntroductionEndTitles
+            | S::BookChapterLabel
+            | S::ChapterContent => true,
+            S::Peripheral
+            | S::PeripheralContent
+            | S::PeripheralDivision
+            | S::Section
+            | S::Para
+            | S::List
+            | S::Table
+            | S::Sidebar
+            | S::Footnote
+            | S::CrossReference => false,
+        }
+    }
+}
+
 /// What context an OPEN scope of this (kind, category) puts its children in —
 /// **derived, not a column** (ruling [C] removed the authored
 /// `contributes_context` field; ruling [I] still needs the value).
 ///
 /// `None` means the frame is TRANSPARENT: it contributes no context of its own,
 /// so a child's legality is judged against whatever frame is below it. Per [I]
-/// the driver stamps the resolved value onto each frame at push time
+/// the walker stamps the resolved value onto each frame at push time
 /// (`frame.ctx = contributes_context(row).unwrap_or(parent.ctx)`), so no
 /// consumer ever walks the stack.
 ///
-/// Read by: the driver (frame stamping), lint (legality), codegen (bakes this
+/// Read by: the walker (frame stamping), lint (legality), codegen (bakes this
 /// into the packed row so it costs nothing at runtime).
 pub const fn contributes_context(kind: MarkerKind, category: Category) -> Option<SpecContext> {
     use Category as C;
@@ -510,6 +497,11 @@ pub const fn contributes_context(kind: MarkerKind, category: Category) -> Option
         // fine category. NOTE: onion lumped every non-inline paragraph to
         // ChapterContent; this is finer and spec-shaped. See the flag list in
         // tables/unaudited.rs.
+        // `cp` is the only Paragraph in the ChapterVerse group, and it opens no
+        // scope — it is a published chapter LABEL, a payload and nothing else
+        // (Will, 2026-08-12). So it contributes nothing: a value here would be
+        // dead, since `contributes_context` is only ever read at push time.
+        K::Paragraph if matches!(category, C::ChapterVerse) => None,
         K::Paragraph => Some(match category {
             C::ParaBody | C::ParaPoetry => S::Para,
             C::ParaLists => S::List,
@@ -527,12 +519,17 @@ pub const fn contributes_context(kind: MarkerKind, category: Category) -> Option
         K::Chapter => Some(S::ChapterContent),
         K::Periph => Some(S::PeripheralContent),
         K::Sidebar => Some(S::Sidebar),
-        K::Header | K::Meta => Some(S::Scripture),
+        K::Header => Some(S::Scripture),
         K::TableRow | K::TableCell => Some(S::Table),
         // Transparent: an open `\nd`, `\ft`, `\zaln-s`, `\v`, or `\fig` does
         // not change what is legal inside it — the enclosing block or note
         // still decides.
-        K::Character | K::Milestone | K::Verse | K::Figure => None,
+        // `\cat` is Meta by TAXONOMY but char-shaped in behavior, so it is
+        // transparent like any character marker (Will, 2026-08-12).
+        K::Character | K::Milestone | K::Verse | K::Figure | K::Meta => None,
+        // The empty row contributes nothing, which is also the recovery
+        // walker's cue to unwind (pop-all recovery).
+        K::Unknown => None,
     }
 }
 
@@ -553,37 +550,26 @@ pub const fn contributes_context(kind: MarkerKind, category: Category) -> Option
 /// two rail groups do not align with [`Category`] at all. Extracted from
 /// tcdocs/usx.rng:
 ///
-/// - `OtherPara.para.style.enum` (line 1151): `lit`, `cp`, `pb`, `qa`, `k1`,
-///   `k2`, `sts`, `rem` — which spans FIVE of our categories (ParaBody,
-///   ChapterVerse, CharBreaks, ParaPoetry, ParaIdentification) and includes two
-///   markers we have no row for.
-/// - `SectionPara.para.style.enum` (line 892): `restore`, `iex`, `ip`, `ms#`,
-///   `ms`, `mr`, `mte#`, `mte`, `r`, `s#`, `sr`, `sp`, `sd#`, `sd`, `cl`, `cd` —
-///   which includes `iex`/`ip` (we file them ParaIntroductions) and `restore`
-///   (no row), while OMITTING `mt` and `d` that our ParaTitlesSections holds.
+/// - `OtherPara.para.style.enum` (line 1151): `lit`, `cp`, `pb`, `qa`, `sts`,
+///   `rem` — which spans FIVE of our categories (ParaBody, ChapterVerse,
+///   CharBreaks, ParaPoetry, ParaIdentification).
+/// - `SectionPara.para.style.enum` (line 892): `iex`, `ip`, `ms#`, `ms`, `mr`,
+///   `mte#`, `mte`, `r`, `s#`, `sr`, `sp`, `sd#`, `sd`, `cl`, `cd` — which
+///   includes `iex`/`ip` (we file them ParaIntroductions) while OMITTING `mt`
+///   and `d` that our ParaTitlesSections holds.
 ///
 /// So the rail groups are a different partition of the same markers, not a
 /// coarsening of ours. A marker-level set is the only honest encoding; codegen
 /// turns it into a bitmask over row indices.
 ///
-/// Members are canonical names, so `s` covers `s1`..`s4`.
-///
-/// **Three members deliberately have no row** — `k1`, `k2` (usx.rng:1161, 1163)
-/// and `restore` (usx.rng:894) are ERRATA: the rail's member lists declare them,
-/// but 3.2's posted marker index documents none of them, and we go by the posted
-/// docs (round 9 / 1 — same class as `t-s`/`t-e` and `wj-s`/`wj-e`). They stay
-/// listed here because this constant records RAIL MEMBERSHIP, which is what the
-/// `\v` rule keys on; the drift-guard test knows they are absent.
-///
-/// Note `k1`/`k2` are spelled out rather than canonicalised to `k`: the canonical
-/// form would collide with the character marker `\k` ("Keyword/keyterm"), a real
-/// 3.2 marker that is NOT `\v`-forbidden. Canonicalising would have let the
-/// drift-guard pass for the wrong reason.
+/// Members are canonical names, so `s` covers `s1`..`s4`. **Every member has a
+/// row.** The rails' `k1`, `k2` (usx.rng:1161, 1163) and `restore`
+/// (usx.rng:894) are NOT listed: 3.2 documents no such markers, so they do
+/// not exist, and a rule about markers that do not exist is cruft.
 pub const V_FORBIDDEN_IN_PARAGRAPHS: &[&str] = &[
-    // OtherPara (usx.rng:1151); `k1`/`k2` are errata with no row.
-    "lit", "cp", "pb", "qa", "k1", "k2", "sts", "rem",
-    // SectionPara (usx.rng:892); `restore` is errata with no row.
-    "restore", "iex", "ip", "ms", "mr", "mte", "r", "s", "sr", "sp", "sd", "cl", "cd",
+    // OtherPara (usx.rng:1151).
+    "lit", "cp", "pb", "qa", "sts", "rem", // SectionPara (usx.rng:892).
+    "iex", "ip", "ms", "mr", "mte", "r", "s", "sr", "sp", "sd", "cl", "cd",
 ];
 
 /// Lexical facts about CONTENT that the scanner owns and this table only
@@ -608,15 +594,15 @@ pub const V_FORBIDDEN_IN_PARAGRAPHS: &[&str] = &[
 /// scanner never rejects it. This is why tightening the name scan to
 /// lowercase-only was NOT adopted.
 ///
-/// See planning/attributes-3.2.md §2 for the analysis and the outstanding
+/// See NEXT-STEPS §5 (attributes) for the analysis and the outstanding
 /// step-4 scanner work item.
 pub const USV_ESCAPE_LETTERS: &[(char, usize)] = &[('u', 4), ('U', 8)];
 
 /// How a marker's scope ends.
 ///
-/// Read by: the driver (open-marker stack: what a `\X*` may close), lint
+/// Read by: the walker (open-marker stack: what a `\X*` may close), lint
 /// (unclosed-marker findings), export (tree building). See
-/// planning/TRANSITIONS.md.
+/// NEXT-STEPS §5.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClosingBehavior {
     /// Opens no scope that needs closing (paragraphs, chapter, verse, `\pb`).
@@ -847,11 +833,15 @@ pub struct MarkerRow {
     /// Contexts this marker is legal in, AUTHORED as a slice. The bitmask and
     /// the effective-context promotions are codegen output.
     ///
-    /// Read by: lint, and the driver's recovery predicate [I]. Codegen reads it
+    /// Read by: lint, and the walker's recovery predicate [I]. Codegen reads it
     /// to emit the mask.
     pub allowed_contexts: &'static [SpecContext],
 
-    /// The scope an occurrence of this marker OPENS, or `None` for a leaf [A].
+    /// The scope an occurrence of this marker PUSHES A FRAME for, or `None` [A].
+    ///
+    /// **This column means pushing ONLY** — displacement is the walker's
+    /// pop_while over the context mask, never a column (`\c`/`\v` push
+    /// nothing yet still pop).
     ///
     /// Authored from `kind` × `category`, which is why `\pb` (CharBreaks) is
     /// `None` while every other character marker is `Some(Character)`. This
@@ -862,7 +852,7 @@ pub struct MarkerRow {
     /// The PRECEDENCE data (what an incoming scope displaces) is keyed on
     /// [`ScopeKind`] in a separate ~13-row auxiliary table, NOT here.
     ///
-    /// Read by: the driver.
+    /// Read by: the walker.
     pub opens_scope: Option<ScopeKind>,
 
     /// The scope an occurrence of this marker CLOSES [B]. `Some(Sidebar)` for
@@ -874,7 +864,7 @@ pub struct MarkerRow {
     /// this column `esbe` closes what `esb` opened, by the same mechanism the
     /// milestone `\*` closer uses.
     ///
-    /// Read by: the driver.
+    /// Read by: the walker.
     pub closes_scope: Option<ScopeKind>,
 
     /// Attributes USFM 3.2 defines for this marker, in spec order, each with
@@ -926,7 +916,7 @@ pub struct MarkerRow {
     /// Read by: interpreters (attribute list), lint, export.
     pub default_attribute: Option<&'static str>,
 
-    /// How this marker's scope ends. Read by: the driver, lint (unclosed
+    /// How this marker's scope ends. Read by: the walker, lint (unclosed
     /// findings), export (tree building).
     pub closing: ClosingBehavior,
 
@@ -966,4 +956,8 @@ impl MarkerRow {
     pub const fn contributes_context(&self) -> Option<SpecContext> {
         contributes_context(self.kind, self.category)
     }
+
+    // Deliberately NO `precedence()`/rank: displacement is
+    // `pop_while(top frame's stamped context ∉ row's context mask)` — a rank
+    // has no consumer. Don't re-derive one. See NEXT-STEPS §5 (walker design).
 }

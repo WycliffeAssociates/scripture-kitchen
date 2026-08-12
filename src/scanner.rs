@@ -43,7 +43,7 @@ const MILESTONE_END: u8 = b'e';
 /// the run table's base offsets convert book-absolute spans to
 /// slot-relative (subtract; find the run by binary search over bases) and
 /// back (add), so the store derives its slot view from one spec parse
-/// without re-lexing (planning/QUESTIONS.md Q9).
+/// without re-lexing (planning/ideas/committed/braidv2.md).
 #[derive(Debug, Clone, Default)]
 pub struct Header {
     /// The book code as a span over whatever came after the first `\id` —

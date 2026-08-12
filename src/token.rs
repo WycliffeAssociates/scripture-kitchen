@@ -84,7 +84,7 @@ impl TokenKind {
 /// move to chapter-relative spans (treating chapters as hunks/slots, with
 /// each hunk's base offset in the header's run table) so that an edit inside
 /// one chapter never shifts another chapter's rows. Undecided — see
-/// planning/QUESTIONS.md "E — Statefulness and granularity".
+/// planning/ideas/committed/braidv2.md.
 ///
 /// `marker_idx` indexes the marker table for spec markers; `0` is reserved
 /// as "unresolved / not a spec marker" (custom `\z*` markers resolve by

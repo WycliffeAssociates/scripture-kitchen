@@ -1,7 +1,7 @@
 # Braid v2 — the stateful layer (slots, splice, reconcile)
 
 Sketch of everything settled or firmly leaning about the working-store /
-editor-session layer. Sources: QUESTIONS.md "E — Statefulness and
+editor-session layer. Sources: the retired QUESTIONS log "E — Statefulness and
 granularity" + Q9, the onion_editor_chef prototype (tabs A–D, Q1–Q27),
 `experiments/chapter_par.rs`. Items marked (leaning) are direction; (open)
 needs prototype evidence.
