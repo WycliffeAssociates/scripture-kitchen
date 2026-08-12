@@ -16,6 +16,8 @@
 use memchr::memchr3;
 use memchr::memmem;
 
+use crate::tables::generated;
+use crate::tables::schema::SpellingShape;
 use crate::token::{Token, TokenKind};
 
 // Named once so every match arm/peek reads as "is this a marker-start"
@@ -240,6 +242,11 @@ fn marker_end(bytes: &[u8], start: usize) -> usize {
 
 /// Classification: names the shape of one already-bounded `\...` slice.
 /// Position-free — takes only the bytes of the token itself.
+// Deliberately NOT the table's job: this names the SPELLING (opener /
+// `*`-closer / `-s|-e` milestone), a fact of these bytes that survives an
+// unknown name — `\zaln-s` has no row yet must still be a Milestone token
+// to pair with its `\*`. The table dictates the marker's IDENTITY (spec
+// kind, contexts) once the shape has picked which row to ask for.
 fn classify_marker(slice: &[u8]) -> TokenKind {
     debug_assert_eq!(slice.first(), Some(&BACKSLASH));
     let nested = slice.get(1) == Some(&PLUS);
@@ -268,10 +275,35 @@ fn classify_marker(slice: &[u8]) -> TokenKind {
     TokenKind::Marker { nested }
 }
 
+/// Step 4.1: resolve an already-bounded, already-classified marker slice to
+/// its table row. The lexeme handed to the table is the NAME as spelled —
+/// leading `\`/`+` and trailing `*` stripped, `-s`/`-e` kept (the matcher
+/// strips those itself). The shape argument is the classification we already
+/// made; `qt` is the one name where plain and milestone rows differ.
+fn resolve_marker_idx(slice: &[u8], kind: TokenKind) -> generated::MarkerIdx {
+    let name_from = if slice.get(1) == Some(&PLUS) { 2 } else { 1 };
+    let name_to = if slice.last() == Some(&STAR) {
+        slice.len() - 1
+    } else {
+        slice.len()
+    };
+    let shape = match kind {
+        TokenKind::Milestone | TokenKind::MilestoneEnd => SpellingShape::MilestoneOnly,
+        _ => SpellingShape::PlainOnly,
+    };
+    generated::marker_idx(&slice[name_from..name_to], shape)
+}
+
 fn marker_arm(bytes: &[u8], index: usize, mode: &mut ScanMode, tokens: &mut Vec<Token>) -> usize {
     let end = marker_end(bytes, index);
-    let kind = classify_marker(&bytes[index..end]);
+    let slice = &bytes[index..end];
+    let kind = classify_marker(slice);
     push_token(tokens, kind, index, end);
+    // push_token always pushes at least one row, and a marker slice is far
+    // below the u16 split threshold, so `last` IS this marker's token.
+    if let Some(last) = tokens.last_mut() {
+        last.marker_idx = resolve_marker_idx(slice, kind);
+    }
     mode.awaiting_delimiter_ws = true;
     end
 }
@@ -469,5 +501,29 @@ mod tests {
             kinds_and_ranges(&lex("//x")),
             vec![(TokenKind::OptBreak, 0, 2), (TokenKind::Text, 2, 3)]
         );
+    }
+
+    /// Step 4.1: marker tokens carry their table row; every other spelling
+    /// fact still lives in the span. Asserted by name round-trip so the test
+    /// survives row reordering.
+    #[test]
+    fn marker_tokens_are_stamped_with_their_row() {
+        let named = |source: &str| {
+            let tokens = lex(source);
+            generated::name(tokens[0].marker_idx)
+        };
+        assert_eq!(named("\\p x"), "p");
+        assert_eq!(named("\\q2 x"), "q"); // level lives in the span
+        assert_eq!(named("\\+nd*"), "nd"); // nested + closing both strip
+        assert_eq!(named("\\qt-s |who=\"P\"\\*"), "qt");
+        assert_eq!(named("\\zaln-s x"), ""); // unconfigured extension → row 0
+        assert_eq!(named("\\s7 x"), ""); // illegal level → row 0
+        // The one overloaded name resolves per shape: both spellings hit a
+        // row NAMED qt, but different rows.
+        let plain = lex("\\qt x")[0].marker_idx;
+        let milestone = lex("\\qt-s x")[0].marker_idx;
+        assert_ne!(plain, milestone);
+        assert_eq!(generated::name(plain), "qt");
+        assert_eq!(generated::name(milestone), "qt");
     }
 }

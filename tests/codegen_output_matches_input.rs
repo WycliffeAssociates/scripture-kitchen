@@ -78,7 +78,7 @@ fn every_row_resolves_to_itself() {
         for spelling in spellings {
             assert_eq!(
                 generated::marker_idx(spelling.as_bytes(), shape),
-                idx as u16,
+                idx as generated::MarkerIdx,
                 "`\\{spelling}` did not resolve to row {idx} ({})",
                 row.marker
             );
@@ -115,7 +115,7 @@ fn unknown_markers_land_on_the_empty_row() {
 #[test]
 fn baked_derived_facts_match_the_schema() {
     for (idx, row) in rows::ROWS.iter().enumerate() {
-        let idx = idx as u16;
+        let idx = idx as generated::MarkerIdx;
         assert_eq!(
             generated::contributes_context(idx),
             row.contributes_context(),
@@ -141,7 +141,7 @@ fn context_mask_invents_nothing() {
             .iter()
             .fold(0u32, |mask, ctx| mask | generated::context_bit(*ctx));
         assert_eq!(
-            generated::context_mask(idx as u16),
+            generated::context_mask(idx as generated::MarkerIdx),
             authored,
             "{}: packed context mask is not exactly `allowed_contexts`",
             row.marker

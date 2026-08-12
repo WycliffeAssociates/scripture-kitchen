@@ -135,9 +135,17 @@ fn verify_variant(sources: &[String], mode: Mode) {
             reference.len(),
             variant.len()
         );
-        assert_eq!(reference, variant, "doc {i}: token streams differ");
+        // The variants are frozen PRE-4.1 lexers: they stamp marker_idx 0.
+        // Spans and kinds must still be byte-identical; only marker_idx may
+        // differ. This is step 4.1's verification harness.
+        for (t, (r, v)) in reference.iter().zip(&variant).enumerate() {
+            assert!(
+                r.start == v.start && r.len == v.len && r.kind_bits == v.kind_bits,
+                "doc {i} token {t}: spans/kinds differ (ref {r:?}, variant {v:?})"
+            );
+        }
     }
-    eprintln!("verify: variant output identical to crate::lex on all docs");
+    eprintln!("verify: variant spans/kinds identical to crate::lex on all docs (marker_idx exempt)");
 }
 
 fn run_once(sources: &[String], mode: Mode) {

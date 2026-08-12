@@ -15,9 +15,13 @@ use crate::tables::schema::{
     SpecContext, SpellingShape, StructuralWhitespaceRequirement as Ws,
 };
 
-/// A row's position in `tables::rows::ROWS`. `u16` because the table is
-/// ~160 rows and config-provided `\z` extensions will want room above it.
-pub type MarkerIdx = u16;
+/// A row's position in `tables::rows::ROWS`. `u8`: ~153 rows, and
+/// config-provided `\z` extensions fit in the headroom above them.
+pub type MarkerIdx = u8;
+
+// The narrowing is safe only while the table fits; growing past 256 rows is
+// a design event (the token's marker_idx field is sized to match).
+const _: () = assert!(ROW_COUNT <= 256);
 
 /// The generic EMPTY row: an unconfigured `\z` extension, an unknown name,
 /// an illegal digit. Inert, and the walker's cue to unwind [F].
