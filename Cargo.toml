@@ -15,6 +15,9 @@ par = ["dep:rayon"]
 
 [dev-dependencies]
 criterion = "0.8.2"
+# Integration tests DO see dev-deps (unlike src/bin — see rayon note above),
+# so tests get parallelism without the `par` feature or touching the lib.
+rayon = "1.10"
 
 [profile.release]
 debug = true

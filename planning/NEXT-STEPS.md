@@ -4,141 +4,192 @@ Slow on purpose. Plain language so this can be picked up cold after a break.
 Design state and open questions live in QUESTIONS.md / GLOSSARY.md; this file
 is only "what code to write next, in what order."
 
-## 1. Stub the core structs (agreed shape)
+## Done (so cold pickup doesn't re-plan it)
 
-- **Token** — one compact row per token: `start u32 · len u16 · kind u8 ·
-  markerIdx u8` (8 bytes). Text is always a slice of the source; nothing
-  address-shaped lives on the token. `markerIdx` indexes the marker table;
-  one reserved value means "custom marker — read the span."
-- **Header** — what one scan of a book discovers about its structure: the
-  book code as a *slice* of whatever came after the first `\id` (any length,
-  invalid included, never truncated), plus the chapter run table: one entry
-  per `\c` (row range, label slice, repeat-ordinal for reopened chapters).
-  This doubles as the editor's nav toc and the "materialize just one
-  chapter" index.
-- **The scan signature** — one fused pass, several outputs:
-  `scan(source) -> (Slots, Header)`, with an optional event/diagnostic
-  sink for listeners (editor tree-building, lint) that costs nothing when
-  nobody is listening. **Columns are grouped per chapter SLOT with
-  slot-relative spans from day one** (slot 0 = front matter) — the run
-  table IS the slot list, and this is what makes the future stateful layer
-  a retention of the same types instead of a migration (see QUESTIONS.md
-  "E — Statefulness and granularity"). `to_tokens(slot)` is where owned
-  allocation happens; a stateless whole-book call is just the loop.
-- Playground prints all three so driving stays visible.
+- Core structs stubbed and split: `src/token.rs` (8-byte row, kind_bits
+  codec), `src/scanner.rs` (arms split: boundary finders own the cursor,
+  `classify_marker` is position-free). 10 tests green.
+- Perf story priced and banked in `src/experiments/` (see "Benchmarks"
+  under Later). Real fix shipped: prebuilt memmem Finder (+14% prose).
+- Table scaffolding: `src/tables/{schema,rows,unaudited}.rs` +
+  `src/bin/codegen.rs`. Mechanical translation DONE (2026-08-10): 238
+  onion spellings → 162 canonical rows in `unaudited.rs`, 22 families
+  collapsed, 14 flags (printed by `cargo run --bin codegen`).
+  `rows.rs` is the audited-only file and is still EMPTY.
+- `planning/TRANSITIONS.md`: the context-machine analysis. Verdict being
+  refined (see step 2 rulings below).
+- **Partition oracle** (2026-08-12): `tests/partition_oracle.rs` —
+  standing test that every token starts where the previous span ended
+  and the last ends at EOF (implies `concat(spans) == source`), over
+  every `*.usfm` under example-corpora (226 books, all green; skips
+  loudly if corpora absent — they're gitignored). If a change wants to
+  break it, that's a design event — stop and log it in QUESTIONS.md.
 
-## 2. Split the arms (the fused shape)
+## 2. Table audit + schema rework — DESIGN DONE, audit pending
 
-Restructure the current ~200 lines so each arm has one job:
+STATUS (2026-08-10, after ten agent rounds): every ruling below is
+APPLIED to schema.rs/unaudited.rs and every later flag is ruled — see
+the category ledger (`cargo run --bin codegen`), TRANSITIONS.md's
+ruling ledger, planning/attributes-3.2.md (USV + node-initial
+attributes, incl. the Q-A6 three-rung pipe ladder), and
+planning/html-elements.md (render classes, all closed). 154 canonical
+rows sit in unaudited.rs awaiting the audit; the only open items
+anywhere are spec-side residues and parked proposals. What remains of
+this step is H: move rows into rows.rs category-by-category
+(paragraphs → characters → notes → milestones → meta/periph), verified
+against the 3.2 docs; delete unaudited.rs when the last row moves.
+The rulings are kept below as the record:
 
-- **Cursor movement** is its own thing (`find_boundary` — the memchr work).
-  Only this code advances position.
-- **Classification** names the shape of a slice. It MAY read marker-table
-  columns and keep pass state (the ws-fold flag today; a small open-marker
-  stack later). It may NEVER parse the inside of a payload (attribute
-  key/values, verse numbers) — that's an interpreter's job, later, on
-  demand.
-- **One fused pass** — the walker runs inside the scan, not as a second
-  pass. The same walk emits tokens + header (+ events when a listener is
-  attached).
+- **[A] `opens_scope: Option<ScopeKind>` column** on marker rows; the
+  precedence machine keys on scope kind in a small AUXILIARY table
+  (~13 rows), not on marker rows. Spec source pasted in
+  planning/scratch.md (usfm 3.1 doc index).
+- **[B] `closes_scope` column** (retires onion's `\esbe` phantom frame).
+- **[C] Category restructure**: replace the four accreted fields
+  (paragraph_category, note_family, note_subkind, inline_context) with
+  the spec's own two levels — `kind` (Para/Char/Milestone/Note/Sidebar/
+  Periph) × `category` (Para → Identification·Introductions·
+  TitlesSections·Body·Poetry·Lists·Tables; Char → TextFeatures·
+  Formatting·Breaks·Intro·Poetry·Lists·Tables·Notes; Milestone →
+  list·table·qt·ts·vid; Note → Footnote·CrossRef). Fine category is
+  load-bearing (`\pb` is Char but Breaks → opens no scope). Stub for
+  eyeballing.
+- **[D] `s#` ws ruling: TagEndDelimiter** — s is a paragraph marker;
+  takes space-or-TAGEND like any para. (Spec patterns for TAGEND/ws/hs/
+  HS/Hs/nl recorded in scratch.md.) Also: `s` IS numbered; bare form
+  legal only when a single level exists in the text — that
+  bare-vs-numbered rule is spec-wide and is LINT's business, not the
+  matcher's (bare is always a valid spelling).
+- **[E] Payload column settled**, plus: `\usfm` gets a Version payload;
+  the NumberRange grammar is pinned to the spec pattern
+  `/[1-9][0-9]*[\p{L}\p{Mn}]*(‏?[-,][0-9]+[\p{L}\p{Mn}]*)*/` — that
+  pattern belongs to the verse-designator INTERPRETER (Q2); the scanner
+  fast path only ever handles the pure-digit happy shape.
+- **[F] `\z` customs**: extension definitions are CONFIG-provided (the
+  markers.ext shape, never read from a file); zero behavior when
+  unconfigured. Unknown/illegal markers (`\s5`): recovery = pop all the
+  way out, start fresh.
+- **[G] Matcher strips `-s`/`-e` BEFORE digits** (`qt3-s` → `qt3` →
+  `qt`); milestone side is read off the span, rows stay collapsed.
+- **[H — OPEN, delegated]** precedence encoding: generic
+  `pop_while(predicate)` driver vs onion's fixed 3-pass. Suspicion: the
+  3-pass is a fossil; verify against `apply_open_precedence` and present
+  options.
+- **[I] Note recovery folds into the generic driver**: stamp
+  `effective_context` on each stack frame at push time
+  (`frame.ctx = row.contributes_context.unwrap_or(parent.ctx)`); then
+  "may `\q2` appear here?" is top-of-stack + row mask, and recovery is
+  `pop_while(frame's context forbids this marker)`. No stack walk ever.
+- **[J] Two hand rules accepted**: `\X*` name-matched pop and `\*`
+  kind-matched pop (bounded stack SEARCH through possibly-unclosed inner
+  frames — genuinely not a per-row value, ~10 lines each).
+- **[K] NoteCaller becomes a TokenKind** (10th shape; kind_bits has room
+  after the nested-bit slide). The `+`/`-`/`?`/custom caller after
+  `\f `/`\x ` is payload-shaped — same pending-payload machinery as
+  NumberRange; note kinds get a caller payload in the table.
+- **[L — OPEN]** lint/context modeling. Recorded constraint: lint must
+  be correct over `Vec<Token>` alone — anything context-shaped arrives
+  as a token-stream property or explicitly attached emission, never a
+  reach into live parser state. Editor contract: Token {id, kind, text}
+  is ALL an editor supplies; no round-trip through usfm text to answer
+  context questions.
+- **[M] Single-pass vision stands**: the fused pass produces a
+  valid/recovered/diagnostics-aware result in ONE traversal. Layering
+  survives INSIDE the pass: arms own position, walker owns policy,
+  walker is listener-gated so the plain-tokens path remains the oracle.
+- **[N] `takes_attributes` grounded in spec**: defined attributes on
+  jmp(href,title,id) · rb(gloss) · w(lemma,strong,srcloc) ·
+  ref(loc,gen) · fig(alt,src,size,loc,copy,ref); milestones may define
+  them (qt: who). User-defined `x-`/`z-` attributes are legal on ANY
+  character marker (kind-level fact, not a column) and are
+  non-canonical.
+- **[O] Table cells (`\tc1-2` spans)**: match the alpha stem (`tc`),
+  hand the digits/span details to that marker's interpreter over the
+  span. Numbering doesn't model spans; the matcher doesn't parse them.
+- **[P] `//`**: stays TokenKind::OptBreak, never resolved by name — the
+  row leaves the table.
+- **Numbering caps per spec**: lim 1–4 · sd 1–4 · ph 1–3 · h 1–3 but the
+  numbered `h#` syntax itself is DEPRECATED (keep cap + deprecated note).
 
-Rules this step must encode (agreed today):
+Then the audit itself: move rows `unaudited.rs` → `rows.rs`
+category-by-category, verified against spec docs (tcdocs/ + scratch.md);
+delete `unaudited.rs` when the last row moves.
 
-- The whitespace fold (delimiter space absorbed into the marker's span) is
-  **per marker class, from the table** — not unconditional like today.
-  Closing markers don't take it; their trailing space is content.
-- **Kinds must be enough to render from.** A consumer looking only at
-  `kind` should never need USFM trivia (is this space a delimiter? is this
-  pipe an attribute?). That's why the fold happens here, and why an
-  attribute list becomes ONE `AttrList` token once the stack exists — the
-  stack knows a `\w` or milestone is open; a bare pipe in ordinary text
-  stays content.
-- **Standing test, added now: `concat(all spans) == source`**, byte for
-  byte, over testData + example-corpora. If a change wants to break it,
-  that's a design event — stop and log it in QUESTIONS.md.
-- Log every granularity cut (marker vs number separate, AttrList as one
-  token, etc.) in QUESTIONS.md's Q6 as it's made.
+## 3. Codegen emissions (NEXT — the immediate next coding step)
 
-## 3. Pull static data from onion (only what's demanded)
+`cargo run --bin codegen` reads **rows.rs only** (the audited file) and
+emits `src/tables/generated.rs`, checked in:
 
-DECIDED (2026-08-09): table BEFORE attributes — the attribute parser needs
-the open-marker stack, the stack needs the kind column, so attributes-first
-would hardcode a shadow table. Session order:
-1. Author `marker_rows` in this repo: mechanically translate onion's
-   marker_defs_data into the new schema (throwaway script), then AUDIT
-   category-by-category (paragraphs, then char, then notes...) — judgment,
-   not typing. ws enums may split into their own module.
-2. Codegen binary: rows → packed u128 table + strip-digits-then-match
-   name→idx fn, emitted as a generated file. (JS registry later, same
-   source.)
-3. Wire into lexer: marker_idx assignment · per-class ws fold (kills the
-   ScanMode TODO) · payload column → NumberRange token kind (9th shape:
-   slide NESTED_BIT to bit 4). Fast-path prelude AFTERWARD, one pattern at
-   a time, measured (`\v `+SWAR-digits first); table stores facts, codegen
-   emits the checks; general path stays the definition, oracle-verified.
-4. Then attributes, on the stack the kind column enables.
+1. The packed row table (u128-in-spirit; u64+u32 lanes vs u128 vs
+   windows is the GENERATOR's choice) + typed accessor fns — no
+   consumer ever touches bits.
+2. `marker_idx(name)`: strip `-s`/`-e`, strip digits, load ≤8 bytes as
+   a u64, integer match; digits validated against Numbering;
+   SpellingShape picks between the two `qt` rows; first-byte-`z` /
+   no-match → 0.
+3. Side arrays: idx→name (the reverse lookup — this is what makes the
+   table double as the MARKER CATALOG), per-marker defined_attributes
+   + AttrStatus, default-attribute, html element ids.
+4. Derived aux: context bitmasks from the authored slices, baked
+   contributes_context values, V_FORBIDDEN as indices. The
+   hand-authored aux tables (PARENTS scope masks, heading base levels)
+   stay authored; codegen may re-emit them packed.
+5. Freshness test: regenerate to a buffer, compare to the checked-in
+   file, fail if stale.
 
-Extract columns from onion's marker_defs as arms actually ask — never the
-whole table on spec:
+Because codegen reads rows.rs, emissions GROW as the audit moves rows;
+an unmoved marker resolves to idx 0 (same graceful path as a custom) —
+partial is never wrong, only incomplete. NOT in this pass: the JS/TS
+registry and USJ types (they come with the wasm/JS boundary work) and
+`common_marker_checks` (step 4.4 — measured, never speculative).
 
-- **Now:** the spine (marker name → index) — required the moment tokens
-  carry `markerIdx` — and the **role class** column (paragraph / character /
-  note / milestone / closing), which is probably where the whitespace-fold
-  rule comes from.
-- **Verify rows against the spec docs (tcdocs/) as they're pulled** — this
-  IS the table audit, done as demand-driven extraction instead of an
-  up-front review of onion's 1,700 lines.
-- **Open sub-question, don't decide yet:** what shape the table compiles to
-  for fast scanning (plain static array first; codegen / perfect-hash only
-  if measurement says lookup is hot — onion's double-HashMap-per-marker is
-  the known smell). The JS copy is generated from the Rust table, never
-  hand-written.
+## 4. Wire into the lexer — SLOWLY, in this order
 
-### MarkerRow schema notes (audited 2026-08, from onion's marker_defs)
+The go-slow rule, stated as law (Will, 2026-08-10): do NOT turn on
+attrs + all markers + milestones + every ruled behavior at once. The
+architecture is "given a marker, ask the table the right questions" —
+but the questions get ASKED one at a time, each behind the partition
+oracle and the playground verify, each with its perf delta read off
+the playground before the next lands.
 
-Facts gathered so the schema draft doesn't re-derive them:
+1. **marker_idx assignment only.** Tokens gain real indices; nothing
+   else changes. Verify output vs current lexer (only marker_idx
+   differs), bench.
+2. **Per-class ws fold** (kills the ScanMode TODO — reads ws_after_name
+   off the row). This CHANGES token boundaries for closing markers;
+   design event per the oracle rule, expected and logged.
+3. **Payload mode, narrow**: pending-payload flag + NumberRange token
+   kind for the `\c`/`\v` family ONLY (slide NESTED_BIT to bit 4 here).
+   NoteCaller rides the same machinery next once NumberRange holds.
+4. **`common_marker_checks`** (renamed from "prelude"): the fused
+   fast checks that collapse a hot marker's several arm passes + token
+   pushes into one masked-compare hit — `\v `+SWAR-digits first, then
+   one arm at a time in measured-priority order
+   (planning/marker-frequencies.md), keep an arm only if its delta
+   clears run-to-run noise. General path stays the definition;
+   oracle-verified per arm.
+5. **USV escapes + the region-start escape dispatch fix** (the ruled
+   [A] behavior + the pre-existing `\~`-at-region-start bug) — small,
+   self-contained, can land anywhere after 4.1.
 
-- **~170 canonical rows** after collapsing numbered spellings (219 unique
-  markers, 68 are numbered variants like `q1..q4`). Fits `marker_idx: u8`
-  with room; 0 stays "unresolved/custom".
-- **Name → index lookup: zero alloc.** Longest spec name is 6 bytes
-  (`periph`), so: strip trailing digits, load the name into a u64,
-  codegen'd integer `match` (compiler emits the decision tree). Digits are
-  validated against the row's numbered-max column; the number itself is
-  never stored — it's in the token's span.
-- **Everything enumerable fits ~77 bits** (kind 4 · context-mask 20 ·
-  ws requirements 16 · paragraph-category 4 · family/note/inline/block/
-  scope/closing ~18 · payload-id 2 · numbered-max 4 · flags). Row is a
-  u128 in spirit (u64 + u32, or two-u64 windows — codegen's choice), which
-  leaves ~50 spare bits. Approved use of spare bits: default HTML element
-  class (4 bits, ≤16 element names; numbered markers store the element
-  CLASS, export computes the level from the span's number). Overridable —
-  it's a default.
-- **Three side arrays, not bits**: marker names (idx → name), default
-  attribute strings (only 6 distinct: lemma/gloss/link-href/loc/src/who),
-  doc paths (codegen-only). Flatten onion's `qt*-s/-e → who` suffix RULE
-  into plain rows at codegen time.
-- **Authoring format**: Rust rows with named struct fields (compiler-checked,
-  like onion's marker_defs_data); a generator emits the packed runtime
-  table, the u64 match, and the JS/TS registry (editor-side "is this a
-  marker / what kind / own line?"). Bit layout is generator output — no
-  hand-maintained masks. `priority: u8` may ride as a codegen-only column
-  ordering a hot-marker fast-path prelude — build only if the lookup
-  profiles hot.
-- **Open**: can context-machine TRANSITIONS (what pushes/pops/implicitly
-  closes) be fully table-encoded, or do a few hand rules remain around the
-  table? (onion: `structural_marker_info` + `closes_unclosed_note` suggest
-  mostly-table-with-exceptions.)
-- **Open**: number-PAYLOAD tokens (`\v 12`) — separate NumberRange token
-  kind (onion's way; editor re-fuses at node level, proven in proto-2's
-  USFMNumberedMarkerNode) vs fused marker+number token. Either needs the
-  payload column + a pending-payload flag on ScanMode. Lean: separate.
+## 5. Walker + attributes (LAST — the complexity we deliberately deferred)
+
+Everything ruled but nothing built: the structure driver (open-marker
+stack + opens/closes_scope columns + the pop_while driver + the two
+hand rules), fused into the pass, listener-gated. Then AttrList — both
+forms, the Q-A6 three-rung pipe ladder, one token kind, deprecation
+lint on trailing. Then ParseHeader emission (book span + chapter run
+table) rides along. Same go-slow discipline: stack first (scopes
+open/close, no consumers), then AttrList on top of it, then the context
+lane. Milestone sid/eid, note callers' full behavior, and the lint
+listener all live HERE, not in step 4.
 
 ## Later (when we're actually writing code again)
 
-- **Verse designator interpreter** — pure text rules (digits, ranges,
-  suffixes, junk → "not cleanly numeric" flag). Zero table. Writing its
-  doc-comment IS writing the comparison rules lint/vref need.
+- **Verse designator interpreter** — the [E] spec pattern; pure text
+  rules (digits, ranges, suffixes, junk → "not cleanly numeric" flag).
+  Zero table. Writing its doc-comment IS writing the comparison rules
+  lint/vref need.
 - **Structure events → editor tree.** Measure the wasm route FIRST before
   building any JS twin; consumer-sufficient kinds may have shrunk this
   problem a lot.
@@ -155,32 +206,25 @@ Facts gathered so the schema draft doesn't re-derive them:
   tool. The `--chunked` verify (token-identical split at `\c`) is standing
   evidence that no scan state crosses a chapter — the slot model's
   independence claim, proven on both corpora.
-- **Two-stage structural indexing (the simdjson trick): TRIED, a wash.**
-  Built as `experiments/staged.rs` (2026-08-09), verified token-identical:
-  +6% on prose, −4% on marker-dense ult. Why it doesn't transfer: the
-  position tape is ~50MB of extra write+read traffic on ult, and our
-  per-token work is too thin to amortize it (simdjson's stage 2 does heavy
-  parsing per position; ours is an 8-byte push). REFINED CONCLUSION: the
-  lexer's cost is the token pushes + arm logic themselves, not scan-call
-  overhead — so future speed comes from EMITTING FEWER TOKENS (e.g.
-  AttrList as one token), which is the consumer-sufficiency direction
-  anyway. ~1.1-1.3 GiB/s/core is what this granularity costs; accept it.
+- **Two-stage structural indexing (the simdjson trick): TRIED, a wash**
+  (+6% prose, −4% aligned; the position tape's memory traffic eats the
+  savings at our thin per-token work). Conclusion kept: cost is token
+  pushes + arm logic, so speed comes from EMITTING FEWER TOKENS
+  (AttrList), which is the consumer-sufficiency direction anyway.
+  ~1.1–1.3 GiB/s/core is what this granularity costs; accept it.
 - **Feature-gate exports to shrink the wasm bundle** (e.g. no USJ/HTML/XML
   export unless built with it). Cargo features work the same for wasm
-  targets (`wasm-pack build -- --features …`); compiled-out code never
-  enters the .wasm. The catch: a wasm blob does NOT tree-shake like JS —
-  whatever is compiled in ships to every user — so features matter MORE
-  here. Feature combos = separate build artifacts; the JS wrapper can
-  dynamic-import the right blob.
-- **Codegen USJ types** as the product of Token × marker table (the lossy
-  normalized kv projection): the discriminated union + serializer fall out
-  of the same generator that emits the JS registry. MUST map to official
-  USJ type names (`para`, `char`, `note`, `ms`, `book`, `chapter`,
-  `verse`, `optbreak`…), which differ from our vocabulary — check the USJ
-  JSON schema in usfm-grammar before naming anything.
+  targets; compiled-out code never enters the .wasm. A wasm blob does NOT
+  tree-shake like JS, so features matter MORE here; combos = separate
+  build artifacts, JS wrapper dynamic-imports the right blob.
+- **Codegen USJ types** as the product of Token × marker table: the
+  discriminated union + serializer fall out of the same generator as the
+  JS registry. MUST use official USJ type names (`para`, `char`, `note`,
+  `ms`…) — check the USJ JSON schema in usfm-grammar before naming.
 
 ## Parked (do not start)
 
 Editing/session layer (live ids, re-scan on edit, lint anchoring while
-editing), multi-book project file format (toc, checksums, caches),
-diff/merge, publish. Each gets designed against this base once it holds.
+editing — design state lives in QUESTIONS.md Q9), multi-book project file
+format (toc, checksums, caches), diff/merge, publish. Each gets designed
+against this base once it holds.
