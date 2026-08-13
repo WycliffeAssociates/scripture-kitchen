@@ -129,8 +129,7 @@ fn lex_impl<const FAST: bool>(source: &str) -> Vec<Token> {
         // to the general path — pinned by tests/fast_path_identity.rs, which
         // runs the corpora against `lex_general_path_only`.
         if FAST && bytes[index] == BACKSLASH {
-            if let Some(next) = common_marker_checks(bytes, index, &hot, &mut mode, &mut tokens)
-            {
+            if let Some(next) = common_marker_checks(bytes, index, &hot, &mut mode, &mut tokens) {
                 index = next;
                 continue;
             }
@@ -190,12 +189,11 @@ impl HotIdx {
     fn resolve() -> Self {
         let hot = |name: &[u8]| {
             let idx = generated::marker_idx(name, SpellingShape::PlainOnly);
-            let folds = matches!(
-                generated::ws_after_name(idx),
-                Ws::TagEndDelimiter
-                    | Ws::AtLeastOneHorizontalWhitespace
-                    | Ws::AtLeastOneWhitespace
-            );
+            // Every hot marker is a plain opener by construction (the arms
+            // bail on `\+q`, `\f*`), so the shape half of the predicate is
+            // fixed here — but it is the SAME predicate the general path
+            // runs, which is what keeps `fast_path_identity` honest.
+            let folds = folds_delimiter(TokenKind::Marker { nested: false }, idx);
             Hot { idx, folds }
         };
         let cap = |h: Hot| match generated::numbering(h.idx) {
@@ -344,6 +342,42 @@ fn fused_plain(
         }
         _ => None,
     }
+}
+
+/// Step 4.6: does a marker of this SHAPE and row fold a following
+/// space/tab run into its own span as the structural delimiter?
+///
+/// Two facts, in this order:
+///
+/// 1. **Shape first.** Openers and milestones delimit with space; end
+///    markers (`\w*`, `\*`) do not — their trailing whitespace is content,
+///    whatever the shared row says.
+/// 2. **Then the row, read permissively.** Fold whenever the row PERMITS
+///    horizontal whitespace after the name, required or optional alike:
+///    "optional" means zero-or-more HS is allowed, and HS that is actually
+///    present is still the delimiter, not content. Only `SingleNewline`
+///    abstains, because its delimiter is a NEWLINE and a newline is never
+///    folded into a marker span — Newline tokens are structurally
+///    load-bearing, and hiding a line boundary inside a marker would cost
+///    more than the token saves. (`\v`'s row is `AtLeastOneWhitespace`,
+///    i.e. HS *or* newline; `ws_run_end` eats space/tab only, so `\v\n1`
+///    still emits its Newline. Deliberate.)
+///
+/// The UNRESOLVED row is defaulted here, explicitly, rather than by
+/// reading its `NotRequired`: unknown markers follow the shape rule like
+/// anything else. The row keeps its honest value so lint can never read
+/// "an unknown marker requires a delimiter" out of a scanner
+/// convenience. Today `NotRequired` has exactly one holder — row 0 itself
+/// — so leaving this to fall out of the match would work by accident and
+/// would silently start folding if a real row ever took that value.
+fn folds_delimiter(kind: TokenKind, idx: generated::MarkerIdx) -> bool {
+    if !matches!(kind, TokenKind::Marker { .. } | TokenKind::Milestone) {
+        return false;
+    }
+    if idx == generated::UNRESOLVED {
+        return true;
+    }
+    !matches!(generated::ws_after_name(idx), Ws::SingleNewline)
 }
 
 /// A fused marker token: plain opener shape, row already known.
@@ -538,16 +572,10 @@ fn marker_arm(bytes: &[u8], index: usize, mode: &mut ScanMode, tokens: &mut Vec<
     if let Some(last) = tokens.last_mut() {
         last.marker_idx = idx;
     }
-    // Per-class delimiter fold (step 4.2). Closers and `\*` never absorb —
-    // their trailing whitespace is content, whatever their shared row says.
-    // Openers and milestones fold exactly when the row requires a delimiter;
-    // row 0 is NotRequired, so unresolved markers absorb nothing.
-    mode.awaiting_delimiter_ws = matches!(kind, TokenKind::Marker { .. } | TokenKind::Milestone)
-        && matches!(
-            generated::ws_after_name(idx),
-            Ws::TagEndDelimiter | Ws::AtLeastOneHorizontalWhitespace | Ws::AtLeastOneWhitespace
-        );
-    // Step 4.3: does this row consume a designator payload (`\c`/`\v`)?
+    // Per-class delimiter fold (steps 4.2 + 4.6) — one predicate, shared
+    // with the fast arms so the two paths cannot drift.
+    mode.awaiting_delimiter_ws = folds_delimiter(kind, idx);
+    //  does this row consume a designator payload (`\c`/`\v`)?
     // The assignment doubles as clearing any stale expectation.
     mode.pending_designator = matches!(kind, TokenKind::Marker { .. })
         && matches!(generated::payload(idx), Payload::Designator);
@@ -580,7 +608,9 @@ fn escape_len(bytes: &[u8], pos: usize) -> Option<usize> {
     match *bytes.get(pos + 1)? {
         SLASH | TILDE | BACKSLASH | PIPE => Some(2),
         letter => {
-            let &(_, width) = USV_ESCAPE_LETTERS.iter().find(|&&(l, _)| l as u8 == letter)?;
+            let &(_, width) = USV_ESCAPE_LETTERS
+                .iter()
+                .find(|&&(l, _)| l as u8 == letter)?;
             let digits = bytes.get(pos + 2..pos + 2 + width)?;
             digits
                 .iter()
@@ -592,12 +622,10 @@ fn escape_len(bytes: &[u8], pos: usize) -> Option<usize> {
 
 /// Boundary: where a pending designator ends — the next structural stop.
 /// One span, interior NEVER parsed here: `1`, `12-14a`, junk alike; the
-/// designator interpreter judges the content on demand [E].
+/// linter can validate the content
 fn designator_end(bytes: &[u8], from: usize) -> usize {
     let mut index = from;
-    while index < bytes.len()
-        && !matches!(bytes[index], SPACE | TAB | CR | LF | BACKSLASH | PIPE)
-    {
+    while index < bytes.len() && !matches!(bytes[index], SPACE | TAB | CR | LF | BACKSLASH | PIPE) {
         index += 1;
     }
     index
@@ -774,21 +802,46 @@ mod tests {
         );
     }
 
-    /// Step 4.2: the fold is PER-CLASS, read off the row. A closer's trailing
-    /// space is content (the row is shared with the opener — kind gates it);
-    /// an unresolved marker's row is NotRequired, so it absorbs nothing.
+    /// Steps 4.2 + 4.6: the fold is SHAPE first, then the row read
+    /// permissively — `folds_delimiter` is the whole rule.
     #[test]
     fn only_delimiter_taking_markers_absorb_whitespace() {
         // `\w*` then space: the space is CONTENT — it opens the following
-        // text run (one Text token, never Text + Text back to back).
+        // text run (one Text token, never Text + Text back to back). Shape
+        // decides; the row is shared with the opener and says nothing here.
         assert_eq!(
             kinds_and_ranges(&lex("\\w* x")),
             vec![(CLOSING, 0, 3), (TokenKind::Text, 3, 5)]
         );
-        // Unresolved `\zaln-s` then space: same — no fold for row 0.
+        // Unresolved `\zaln-s` (row 0) DOES fold: unknown openers follow the
+        // shape rule like anything else, which is what puts an attribute
+        // list's pipe at a region start (step 5A).
         assert_eq!(
             kinds_and_ranges(&lex("\\zaln-s x")),
-            vec![(TokenKind::Milestone, 0, 7), (TokenKind::Text, 7, 9)]
+            vec![(TokenKind::Milestone, 0, 8), (TokenKind::Text, 8, 9)]
+        );
+        // Known milestones fold too — their rows are OptionalHorizontalWhitespace,
+        // and "optional" means the HS is permitted, not that it is content.
+        assert_eq!(
+            kinds_and_ranges(&lex("\\qt-s x"))[0],
+            (TokenKind::Milestone, 0, 6)
+        );
+        // `\b` is the one abstainer: its row is SingleNewline, so its
+        // delimiter is a NEWLINE and the space stays content.
+        assert_eq!(
+            kinds_and_ranges(&lex("\\b x")),
+            vec![(MARKER, 0, 2), (TokenKind::Text, 2, 4)]
+        );
+        // A newline is NEVER folded into a marker span, even when the row
+        // permits newline as its delimiter (`\v` is AtLeastOneWhitespace):
+        // Newline tokens are structurally load-bearing.
+        assert_eq!(
+            kinds_and_ranges(&lex("\\v\n1")),
+            vec![
+                (MARKER, 0, 2),
+                (TokenKind::Newline, 2, 3),
+                (TokenKind::Text, 3, 4),
+            ]
         );
     }
 
@@ -848,7 +901,9 @@ mod tests {
             kinds_and_ranges(&lex("\\U0001F600")),
             vec![(TokenKind::Text, 0, 10)]
         );
-        assert_eq!(kinds_and_ranges(&lex("\\u12 x"))[0], (MARKER, 0, 4));
+        // Wrong width: `\u12` stays a MARKER — unresolved (row 0), so per
+        // step 4.6 it folds its delimiter space like any other opener.
+        assert_eq!(kinds_and_ranges(&lex("\\u12 x"))[0], (MARKER, 0, 5));
     }
 
     #[test]

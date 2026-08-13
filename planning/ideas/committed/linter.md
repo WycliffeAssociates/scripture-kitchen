@@ -188,6 +188,29 @@ rather than a fork in the data.
   repeat, so no monotonic positional encoding can express "right after
   `\c`" (NEXT-STEPS §5). Tier 2, never the walker — a misplaced
   `\ca` opens no scope, so illegality here is lint-only.
+- **NOT BUILT YET — the AttrList findings ship LATE, on purpose** (ruled
+  2026-08-13). The scanner's attribute work (NEXT-STEPS steps 4.6/5A/5B)
+  lands BEFORE the walker stack, because the pipe ladder needs no stack:
+  closer NAME-matching (`\add*` terminating a `\w` list) is deliberately
+  not checked in the lexer, and every deformed shape degrades to
+  content-plus-a-hint inside its own line. So there is a real interval
+  where attribute lists LEX correctly and are LINTED not at all. The four
+  findings owed at the end of that interval, each derivable from the
+  stream alone (no privileged scanner state — [L] holds):
+  1. Trailing-form deprecation — the AttrList span does NOT end with `|`.
+     Fire on `<char>` frames ONLY: `\zaln-s |attrs\*` is the milestone's
+     longstanding normal syntax, which U25001 never deprecates, so
+     flagging it would light up every alignment corpus for nothing.
+  2. Both lists on one node — two AttrList tokens between one opener and
+     its closer (legal back-compat; see the next bullet).
+  3. Rung-3 hint — a `|` sitting inside a Text token while a
+     char/milestone frame was open. The bytes are already content; lint
+     only points.
+  4. Mismatched terminator — the closer that ended a trailing list is not
+     the open frame's. Needs the stack, hence tier 1 (walker exhaust).
+  Whichever driver runs (fused feed or `tokens.iter().for_each(feed)`),
+  these are tier 1/2 rules over fed tokens — the funnel above is the
+  attach point, and none of them wants a scanner hook.
 - Trailing attribute list — U25001 deprecates the at-the-end form
   (`\w Jésus|lemma="Jesus"\w*`) in 3.2, removed in 4. Anchor: the
   AttrList token; severity by declared version, never a rejection. Also
