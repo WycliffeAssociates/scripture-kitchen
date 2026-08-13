@@ -594,8 +594,20 @@ pub const V_FORBIDDEN_IN_PARAGRAPHS: &[&str] = &[
 /// scanner never rejects it. This is why tightening the name scan to
 /// lowercase-only was NOT adopted.
 ///
-/// See NEXT-STEPS §5 (attributes) for the analysis and the outstanding
-/// step-4 scanner work item.
+/// Read by the scanner's `escape_len` (letter + fixed hex width), so the
+/// escape set is defined exactly once.
+///
+/// https://github.com/usfm-bible/tcdocs/blob/main/proposals/2025/U25004%20Explicit%20Unicode.md
+// This proposal introduces two new markers for use in USFM only: \u and \U. They are followed by 4 or 8 hexadecimal digits respectively. The resulting character is inserted in the content of the file. Thus the use of \u0020 results in a content space rather than a structural space. The content space may be removed during subsequent processing such as canonicalisation. This corresponds directly to the use of &#x….; type entities in USX and \u in USJ. Notice that in USJ there is no \U and that USVs above U+FFFF are stored as surrogate pairs as per UTF-16.
+// USFM Unicode Escape Sequences are defined as follows:
+// For BMP characters (≤ U+FFFF):
+// \uXXXX (4-digit uppercase hexadecimal Unicode code point)
+// For characters beyond BMP (U+10000 to U+10FFFF):
+// \UXXXXXXXX (8-digit uppercase hexadecimal Unicode code point)
+// Examples:
+
+// \u0020 (Space, U+0020)
+// \U0001F600 (Grinning Face, U+1F600)
 pub const USV_ESCAPE_LETTERS: &[(char, usize)] = &[('u', 4), ('U', 8)];
 
 /// How a marker's scope ends.

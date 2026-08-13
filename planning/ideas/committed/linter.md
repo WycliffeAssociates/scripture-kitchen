@@ -188,6 +188,11 @@ rather than a fork in the data.
   repeat, so no monotonic positional encoding can express "right after
   `\c`" (NEXT-STEPS §5). Tier 2, never the walker — a misplaced
   `\ca` opens no scope, so illegality here is lint-only.
+- Trailing attribute list — U25001 deprecates the at-the-end form
+  (`\w Jésus|lemma="Jesus"\w*`) in 3.2, removed in 4. Anchor: the
+  AttrList token; severity by declared version, never a rejection. Also
+  flag a marker carrying BOTH lists (legal for `<char>` back-compat;
+  "later definition wins" is the interpreter's merge rule).
 - Conditional attribute cardinality — `AttrStatus` is per-attribute and
   cannot express dependencies BETWEEN attributes, so these are lint rules:
   `eid` is required *if* `sid` was used (3.2 ms/qt.html); `sid`/`eid` are

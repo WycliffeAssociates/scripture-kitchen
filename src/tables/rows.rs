@@ -25,10 +25,9 @@
 //! carries a `// ws:` comment saying whether the value was curated or
 //! derived; `priority` counts are MEASURED (planning/marker-frequencies.md).
 //!
-//! Two APPROVED 3.2 additions are analysed but NOT implemented — they change
+//! One APPROVED 3.2 addition is analysed but NOT implemented — it changes
 //! the scanner arms, not this table: generalised node-initial attributes
-//! (U25001) and explicit Unicode escapes (U25004). See
-//! NEXT-STEPS §5 (attributes).
+//! (U25001). See NEXT-STEPS §5 (attributes).
 //!
 
 use super::schema::{

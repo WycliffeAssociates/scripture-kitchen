@@ -17,7 +17,9 @@ use memchr::memchr3;
 use memchr::memmem;
 
 use crate::tables::generated;
-use crate::tables::schema::{Numbering, Payload, SpellingShape, StructuralWhitespaceRequirement as Ws};
+use crate::tables::schema::{
+    Numbering, Payload, SpellingShape, StructuralWhitespaceRequirement as Ws, USV_ESCAPE_LETTERS,
+};
 use crate::token::{Token, TokenKind};
 
 // Named once so every match arm/peek reads as "is this a marker-start"
@@ -141,6 +143,11 @@ fn lex_impl<const FAST: bool>(source: &str) -> Vec<Token> {
                 whitespace_arm(bytes, index, &mut mode, &mut tokens)
             }
             CR | LF => newline_arm(bytes, index, &mut mode, &mut tokens),
+            // An escape is content WHEREVER it appears: at a region start
+            // (`\~` right after a newline) the marker arm must never see it.
+            BACKSLASH if escape_len(bytes, index).is_some() => {
+                text_arm(bytes, index, &mut mode, &mut tokens, &opt_break_finder)
+            }
             BACKSLASH => marker_arm(bytes, index, &mut mode, &mut tokens),
             PIPE => pipe_arm(index, &mut mode, &mut tokens),
             _ => text_arm(bytes, index, &mut mode, &mut tokens, &opt_break_finder),
@@ -562,6 +569,27 @@ fn pipe_arm(index: usize, mode: &mut ScanMode, tokens: &mut Vec<Token>) -> usize
 
 // ---- text arm ---------------------------------------------------------------
 
+/// The escaped-content forms the text arm folds: def.txt's TEXT escapes
+/// (`\/` `\~` `\\` `\|`) plus the U25004 USV escapes — the letter and its
+/// fixed hex width come from the schema's [`USV_ESCAPE_LETTERS`], no
+/// terminator. Returns the whole escape's byte length, or None when this
+/// backslash starts a real marker. The exact USV pattern BEATS the marker
+/// claim, and hex case is lint's business, not a rejection (both ruled at
+/// the schema const).
+fn escape_len(bytes: &[u8], pos: usize) -> Option<usize> {
+    match *bytes.get(pos + 1)? {
+        SLASH | TILDE | BACKSLASH | PIPE => Some(2),
+        letter => {
+            let &(_, width) = USV_ESCAPE_LETTERS.iter().find(|&&(l, _)| l as u8 == letter)?;
+            let digits = bytes.get(pos + 2..pos + 2 + width)?;
+            digits
+                .iter()
+                .all(|b| b.is_ascii_hexdigit())
+                .then_some(2 + width)
+        }
+    }
+}
+
 /// Boundary: where a pending designator ends — the next structural stop.
 /// One span, interior NEVER parsed here: `1`, `12-14a`, junk alike; the
 /// designator interpreter judges the content on demand [E].
@@ -589,8 +617,12 @@ fn text_arm(
     if mode.pending_designator {
         mode.pending_designator = false;
         let end = designator_end(bytes, index);
-        push_token(tokens, TokenKind::Designator, index, end);
-        return end;
+        // A region opening with an escape (`\v \~…`) has no number to take —
+        // fall through to the ordinary scan, same as a designator-less `\v`.
+        if end > index {
+            push_token(tokens, TokenKind::Designator, index, end);
+            return end;
+        }
     }
     // The start of the `Text` segment currently being built. Separate from
     // `cursor` because a `//` found mid-run ends the current segment early
@@ -636,14 +668,12 @@ fn text_arm(
         let pos = cursor + offset;
 
         match bytes[pos] {
-            // `\/`, `\~`, `\\`, `\|` are escaped literal content (def.txt's
-            // TEXT pattern) — keep the run going. Any other backslash is a
-            // real marker start.
-            BACKSLASH => match bytes.get(pos + 1) {
-                Some(&SLASH) | Some(&TILDE) | Some(&BACKSLASH) | Some(&PIPE) => {
-                    cursor = pos + 2;
-                }
-                _ => {
+            // Escaped literal content (`escape_len`: the four TEXT escapes
+            // plus USV) keeps the run going; any other backslash is a real
+            // marker start.
+            BACKSLASH => match escape_len(bytes, pos) {
+                Some(len) => cursor = pos + len,
+                None => {
                     cursor = pos;
                     break;
                 }
@@ -732,6 +762,11 @@ mod tests {
             kinds_and_ranges(&lex("\\v \\p t"))[..2],
             [(MARKER, 0, 3), (MARKER, 3, 6)]
         );
+        // Escaped content after `\v `: no number to take, no empty token.
+        assert_eq!(
+            kinds_and_ranges(&lex("\\v \\~a")),
+            vec![(MARKER, 0, 3), (TokenKind::Text, 3, 6)]
+        );
         // Other payload-less markers are untouched.
         assert_eq!(
             kinds_and_ranges(&lex("\\p 12 x")),
@@ -794,6 +829,26 @@ mod tests {
             kinds_and_ranges(&lex("a\\~b\\p")),
             vec![(TokenKind::Text, 0, 4), (MARKER, 4, 6)]
         );
+        // At a REGION START too — the marker arm never sees an escape.
+        assert_eq!(
+            kinds_and_ranges(&lex("\\~b")),
+            vec![(TokenKind::Text, 0, 3)]
+        );
+    }
+
+    /// U25004: `\u` + exactly 4 hex digits (`\U` + 8) is content, beating the
+    /// marker claim; a wrong-width spelling stays a marker (row 0, lint's).
+    #[test]
+    fn usv_escapes_fold_into_the_text_run() {
+        assert_eq!(
+            kinds_and_ranges(&lex("a\\u0041b")),
+            vec![(TokenKind::Text, 0, 8)]
+        );
+        assert_eq!(
+            kinds_and_ranges(&lex("\\U0001F600")),
+            vec![(TokenKind::Text, 0, 10)]
+        );
+        assert_eq!(kinds_and_ranges(&lex("\\u12 x"))[0], (MARKER, 0, 4));
     }
 
     #[test]
