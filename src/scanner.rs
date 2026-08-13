@@ -17,7 +17,7 @@ use memchr::memchr3;
 use memchr::memmem;
 
 use crate::tables::generated;
-use crate::tables::schema::SpellingShape;
+use crate::tables::schema::{Numbering, Payload, SpellingShape, StructuralWhitespaceRequirement as Ws};
 use crate::token::{Token, TokenKind};
 
 // Named once so every match arm/peek reads as "is this a marker-start"
@@ -72,14 +72,15 @@ pub struct ChapterRun {
 
 /// Scan-pass state. Mode only — never payload knowledge.
 struct ScanMode {
-    // True right after emitting a Marker, until the one whitespace run that
-    // structurally delimits it (if any) has been consumed.
-    //
-    // TODO(table): this fold is currently UNCONDITIONAL, which is knowingly
-    // wrong — whether a marker takes a delimiting whitespace is a fact of
-    // its marker class (closing markers don't; their trailing space is
-    // content). Becomes a table lookup when the spine + role column land.
+    // True right after emitting a marker whose row takes a structural
+    // delimiter, until the one whitespace run that delimits it has been
+    // consumed (step 4.2: per-class, read off `ws_after_name`).
     awaiting_delimiter_ws: bool,
+    // True right after emitting a marker whose row consumes a Designator
+    // payload (`\c`/`\v`, step 4.3), until the next region: text becomes
+    // ONE Designator token; anything else (newline, marker) drops the
+    // expectation — a `\v` with no number emits no empty token.
+    pending_designator: bool,
 }
 
 /// Lexes a whole source into compact token rows.
@@ -88,6 +89,18 @@ struct ScanMode {
 /// a boundary finder (which alone moves the cursor) and then classifies the
 /// slice it found.
 pub fn lex(source: &str) -> Vec<Token> {
+    lex_impl::<true>(source)
+}
+
+/// The general path alone, fast checks compiled out. Exists ONLY as the
+/// oracle for `tests/fast_path_identity.rs`: every `common_marker_checks`
+/// arm must produce a token stream identical to this.
+#[doc(hidden)]
+pub fn lex_general_path_only(source: &str) -> Vec<Token> {
+    lex_impl::<false>(source)
+}
+
+fn lex_impl<const FAST: bool>(source: &str) -> Vec<Token> {
     let bytes = source.as_bytes();
     // Presize from source length: onion measured a hard density floor of
     // ~6.5 bytes per lexeme across the corpus (poetry, `\w`, and full
@@ -96,17 +109,37 @@ pub fn lex(source: &str) -> Vec<Token> {
     let mut tokens: Vec<Token> = Vec::with_capacity(source.len() / 6);
     let mut mode = ScanMode {
         awaiting_delimiter_ws: false,
+        pending_designator: false,
     };
     // Built ONCE per lex: memmem::find (the one-shot form) reconstructs its
     // searcher on every call — measured 31ns/call vs 6ns with a prebuilt
     // Finder, against a ~5ns/token budget. The text arm calls this once per
     // text-run iteration, so the one-shot form was a real tax.
     let opt_break_finder = memmem::Finder::new(b"//");
+    // Resolved once per lex so no fast arm ever pays a name match.
+    let hot = HotIdx::resolve();
     let mut index = 0usize;
 
     while index < bytes.len() {
+        // common_marker_checks (step 4.4): fused fast checks for the hottest
+        // markers, added ONE ARM AT A TIME in measured-frequency order
+        // (planning/marker-frequencies.md). Each arm must be token-identical
+        // to the general path — pinned by tests/fast_path_identity.rs, which
+        // runs the corpora against `lex_general_path_only`.
+        if FAST && bytes[index] == BACKSLASH {
+            if let Some(next) = common_marker_checks(bytes, index, &hot, &mut mode, &mut tokens)
+            {
+                index = next;
+                continue;
+            }
+        }
         index = match bytes[index] {
-            SPACE | TAB => whitespace_arm(bytes, index, &mut mode, &mut tokens),
+            // A space run is special ONLY as a marker's awaited delimiter.
+            // Otherwise it is ordinary content and flows into the text arm,
+            // merging with what follows — never Text + Text back to back.
+            SPACE | TAB if mode.awaiting_delimiter_ws => {
+                whitespace_arm(bytes, index, &mut mode, &mut tokens)
+            }
             CR | LF => newline_arm(bytes, index, &mut mode, &mut tokens),
             BACKSLASH => marker_arm(bytes, index, &mut mode, &mut tokens),
             PIPE => pipe_arm(index, &mut mode, &mut tokens),
@@ -115,6 +148,204 @@ pub fn lex(source: &str) -> Vec<Token> {
     }
 
     tokens
+}
+
+// ---- common marker checks (step 4.4) ---------------------------------------
+
+/// The hot-marker rows, resolved ONCE per lex so no arm ever pays a name
+/// match. Membership is the measured top-9 cut (planning/marker-frequencies.md:
+/// v 62k · q 47k · p 18k · s 17k · f · b · ft · fr · xt, ~85% of occurrences;
+/// `c` deliberately excluded — one per chapter doesn't pay for an arm).
+/// One hot row: its index plus whether its class folds a following
+/// space/tab run as the structural delimiter — the same table fact the
+/// general path reads per hit (`\b` does NOT fold; its space is content).
+#[derive(Clone, Copy)]
+struct Hot {
+    idx: generated::MarkerIdx,
+    folds: bool,
+}
+
+struct HotIdx {
+    v: Hot,
+    q: Hot,
+    q_max: u8,
+    p: Hot,
+    s: Hot,
+    s_max: u8,
+    b: Hot,
+    f: Hot,
+    ft: Hot,
+    fr: Hot,
+    xt: Hot,
+}
+
+impl HotIdx {
+    fn resolve() -> Self {
+        let hot = |name: &[u8]| {
+            let idx = generated::marker_idx(name, SpellingShape::PlainOnly);
+            let folds = matches!(
+                generated::ws_after_name(idx),
+                Ws::TagEndDelimiter
+                    | Ws::AtLeastOneHorizontalWhitespace
+                    | Ws::AtLeastOneWhitespace
+            );
+            Hot { idx, folds }
+        };
+        let cap = |h: Hot| match generated::numbering(h.idx) {
+            Numbering::UpTo(cap) => cap,
+            _ => 0,
+        };
+        let (q, s) = (hot(b"q"), hot(b"s"));
+        HotIdx {
+            v: hot(b"v"),
+            q,
+            q_max: cap(q),
+            p: hot(b"p"),
+            s,
+            s_max: cap(s),
+            b: hot(b"b"),
+            f: hot(b"f"),
+            ft: hot(b"ft"),
+            fr: hot(b"fr"),
+            xt: hot(b"xt"),
+        }
+    }
+}
+
+/// The fused fast checks for the hot markers: one shape test emits what the
+/// general path needs several arm passes for. Every arm is CONSERVATIVE —
+/// anything off its happy shape (`\+q`, `\q1a`, `\s5`, `\v  1`, `\f*`)
+/// returns None and takes the general path, which stays the definition
+/// (pinned token-identical by tests/fast_path_identity.rs).
+///
+/// On a hit the cursor returns just past what was consumed; the next loop
+/// iteration dispatches normally, so the text arm's memchr scan picks up
+/// exactly at the next region.
+#[inline(always)]
+fn common_marker_checks(
+    bytes: &[u8],
+    index: usize,
+    hot: &HotIdx,
+    mode: &mut ScanMode,
+    tokens: &mut Vec<Token>,
+) -> Option<usize> {
+    match *bytes.get(index + 1)? {
+        // `\v ` + pure digits + structural stop: marker (delimiter folded)
+        // plus its Designator, the corpus's most frequent hit by 2x.
+        b'v' if bytes.get(index + 2) == Some(&SPACE) => {
+            let digits_from = index + 3;
+            let mut end = digits_from;
+            while end < bytes.len() && bytes[end].is_ascii_digit() {
+                end += 1;
+            }
+            if end == digits_from
+                || !matches!(
+                    bytes.get(end),
+                    None | Some(&SPACE | &TAB | &CR | &LF | &BACKSLASH | &PIPE)
+                )
+            {
+                return None; // `\v \p`, `\v 1a`: the general path decides.
+            }
+            push_marker(tokens, index, digits_from, hot.v.idx);
+            push_token(tokens, TokenKind::Designator, digits_from, end);
+            mode.awaiting_delimiter_ws = false;
+            mode.pending_designator = false;
+            Some(end)
+        }
+        // Numbered paragraph families: name + at most ONE level digit,
+        // validated against the row's cap (an over-cap level is row 0 —
+        // general path's business).
+        b'q' => fused_leveled(bytes, index, index + 2, hot.q, hot.q_max, mode, tokens),
+        b's' => fused_leveled(bytes, index, index + 2, hot.s, hot.s_max, mode, tokens),
+        // Plain one/two-letter names, delimiter or line end after.
+        b'p' => fused_plain(bytes, index, index + 2, hot.p, mode, tokens),
+        b'b' => fused_plain(bytes, index, index + 2, hot.b, mode, tokens),
+        b'f' => match bytes.get(index + 2) {
+            Some(&b't') => fused_plain(bytes, index, index + 3, hot.ft, mode, tokens),
+            Some(&b'r') => fused_plain(bytes, index, index + 3, hot.fr, mode, tokens),
+            _ => fused_plain(bytes, index, index + 2, hot.f, mode, tokens),
+        },
+        b'x' if bytes.get(index + 2) == Some(&b't') => {
+            fused_plain(bytes, index, index + 3, hot.xt, mode, tokens)
+        }
+        _ => None,
+    }
+}
+
+/// A hot NUMBERED marker: `name_end` sits right after the alpha stem; accept
+/// at most one digit `1..=max` before the delimiter.
+#[inline(always)]
+fn fused_leveled(
+    bytes: &[u8],
+    index: usize,
+    name_end: usize,
+    hot: Hot,
+    max: u8,
+    mode: &mut ScanMode,
+    tokens: &mut Vec<Token>,
+) -> Option<usize> {
+    let name_end = match bytes.get(name_end) {
+        Some(&d) if d.is_ascii_digit() => {
+            if !(b'1'..=b'0' + max).contains(&d) {
+                return None; // over-cap level, or a second digit follows.
+            }
+            name_end + 1
+        }
+        _ => name_end,
+    };
+    fused_plain(bytes, index, name_end, hot, mode, tokens)
+}
+
+/// The shared tail of every non-`v` arm: after the (possibly leveled) name,
+/// fold a space/tab delimiter run into the marker span exactly like the
+/// general path, or take the marker + its line ending in one hit. Any other
+/// next byte (alnum continuing a longer name, `*`, `-`, EOF) bails.
+#[inline(always)]
+fn fused_plain(
+    bytes: &[u8],
+    index: usize,
+    name_end: usize,
+    hot: Hot,
+    mode: &mut ScanMode,
+    tokens: &mut Vec<Token>,
+) -> Option<usize> {
+    match bytes.get(name_end) {
+        Some(&SPACE | &TAB) if hot.folds => {
+            // The whole run is the structural delimiter, same as the fold.
+            let end = ws_run_end(bytes, name_end + 1);
+            push_marker(tokens, index, end, hot.idx);
+            mode.awaiting_delimiter_ws = false;
+            mode.pending_designator = false;
+            Some(end)
+        }
+        Some(&SPACE | &TAB) => {
+            // Non-delimiter class (`\b`): the space is CONTENT — emit the
+            // marker alone and let the space open the next text run.
+            push_marker(tokens, index, name_end, hot.idx);
+            mode.awaiting_delimiter_ws = false;
+            mode.pending_designator = false;
+            Some(name_end)
+        }
+        Some(&CR | &LF) => {
+            // Marker + its line ending (`\n` or `\r\n`) in one hit.
+            push_marker(tokens, index, name_end, hot.idx);
+            let end = newline_end(bytes, name_end);
+            push_token(tokens, TokenKind::Newline, name_end, end);
+            mode.awaiting_delimiter_ws = false;
+            mode.pending_designator = false;
+            Some(end)
+        }
+        _ => None,
+    }
+}
+
+/// A fused marker token: plain opener shape, row already known.
+#[inline(always)]
+fn push_marker(tokens: &mut Vec<Token>, start: usize, end: usize, idx: generated::MarkerIdx) {
+    push_token(tokens, TokenKind::Marker { nested: false }, start, end);
+    if let Some(last) = tokens.last_mut() {
+        last.marker_idx = idx;
+    }
 }
 
 // ---- emit -----------------------------------------------------------------
@@ -154,9 +385,9 @@ fn ws_run_end(bytes: &[u8], from: usize) -> usize {
     index
 }
 
-/// A whitespace run is either a marker's structural delimiter (folded into
-/// that marker's span — see the ScanMode TODO about making this per-class)
-/// or plain content, classified `Text` like any other non-marker run.
+/// Folds a marker's structural delimiter run into that marker's span. Only
+/// dispatched while `awaiting_delimiter_ws` (marker_arm decides, per-class);
+/// any other space run enters the text arm as ordinary content.
 fn whitespace_arm(
     bytes: &[u8],
     index: usize,
@@ -164,16 +395,10 @@ fn whitespace_arm(
     tokens: &mut Vec<Token>,
 ) -> usize {
     let end = ws_run_end(bytes, index);
-
-    if mode.awaiting_delimiter_ws {
-        mode.awaiting_delimiter_ws = false;
-        if let Some(last) = tokens.last_mut() {
-            last.len = (end as u32 - last.start) as u16;
-        }
-    } else {
-        push_token(tokens, TokenKind::Text, index, end);
+    mode.awaiting_delimiter_ws = false;
+    if let Some(last) = tokens.last_mut() {
+        last.len = (end as u32 - last.start) as u16;
     }
-
     end
 }
 
@@ -193,6 +418,7 @@ fn newline_end(bytes: &[u8], from: usize) -> usize {
 
 fn newline_arm(bytes: &[u8], index: usize, mode: &mut ScanMode, tokens: &mut Vec<Token>) -> usize {
     mode.awaiting_delimiter_ws = false;
+    mode.pending_designator = false;
     let end = newline_end(bytes, index);
     push_token(tokens, TokenKind::Newline, index, end);
     end
@@ -301,10 +527,23 @@ fn marker_arm(bytes: &[u8], index: usize, mode: &mut ScanMode, tokens: &mut Vec<
     push_token(tokens, kind, index, end);
     // push_token always pushes at least one row, and a marker slice is far
     // below the u16 split threshold, so `last` IS this marker's token.
+    let idx = resolve_marker_idx(slice, kind);
     if let Some(last) = tokens.last_mut() {
-        last.marker_idx = resolve_marker_idx(slice, kind);
+        last.marker_idx = idx;
     }
-    mode.awaiting_delimiter_ws = true;
+    // Per-class delimiter fold (step 4.2). Closers and `\*` never absorb —
+    // their trailing whitespace is content, whatever their shared row says.
+    // Openers and milestones fold exactly when the row requires a delimiter;
+    // row 0 is NotRequired, so unresolved markers absorb nothing.
+    mode.awaiting_delimiter_ws = matches!(kind, TokenKind::Marker { .. } | TokenKind::Milestone)
+        && matches!(
+            generated::ws_after_name(idx),
+            Ws::TagEndDelimiter | Ws::AtLeastOneHorizontalWhitespace | Ws::AtLeastOneWhitespace
+        );
+    // Step 4.3: does this row consume a designator payload (`\c`/`\v`)?
+    // The assignment doubles as clearing any stale expectation.
+    mode.pending_designator = matches!(kind, TokenKind::Marker { .. })
+        && matches!(generated::payload(idx), Payload::Designator);
     end
 }
 
@@ -315,12 +554,26 @@ fn marker_arm(bytes: &[u8], index: usize, mode: &mut ScanMode, tokens: &mut Vec<
 // text is content) is deferred with the data tables.
 fn pipe_arm(index: usize, mode: &mut ScanMode, tokens: &mut Vec<Token>) -> usize {
     mode.awaiting_delimiter_ws = false;
+    mode.pending_designator = false;
     let end = index + 1;
     push_token(tokens, TokenKind::Pipe, index, end);
     end
 }
 
 // ---- text arm ---------------------------------------------------------------
+
+/// Boundary: where a pending designator ends — the next structural stop.
+/// One span, interior NEVER parsed here: `1`, `12-14a`, junk alike; the
+/// designator interpreter judges the content on demand [E].
+fn designator_end(bytes: &[u8], from: usize) -> usize {
+    let mut index = from;
+    while index < bytes.len()
+        && !matches!(bytes[index], SPACE | TAB | CR | LF | BACKSLASH | PIPE)
+    {
+        index += 1;
+    }
+    index
+}
 
 fn text_arm(
     bytes: &[u8],
@@ -330,6 +583,15 @@ fn text_arm(
     opt_break_finder: &memmem::Finder<'_>,
 ) -> usize {
     mode.awaiting_delimiter_ws = false;
+    // Step 4.3: the first content region after `\c`/`\v` is its designator —
+    // one token, then this arm is done; whatever follows re-enters the loop
+    // as ordinary text.
+    if mode.pending_designator {
+        mode.pending_designator = false;
+        let end = designator_end(bytes, index);
+        push_token(tokens, TokenKind::Designator, index, end);
+        return end;
+    }
     // The start of the `Text` segment currently being built. Separate from
     // `cursor` because a `//` found mid-run ends the current segment early
     // (pushed as its own `OptBreak`) without ending this whole call — text
@@ -436,6 +698,62 @@ mod tests {
                 (TokenKind::Text, 3, 12),
                 (TokenKind::Newline, 12, 13),
             ]
+        );
+    }
+
+    /// Step 4.3: the region after `\c`/`\v` is ONE Designator token — happy
+    /// digits, ranges, and junk alike (the interpreter judges content); a
+    /// designator-less `\v` emits nothing extra.
+    #[test]
+    fn chapter_and_verse_take_a_designator_token() {
+        assert_eq!(
+            kinds_and_ranges(&lex("\\v 1 text")),
+            vec![
+                (MARKER, 0, 3),
+                (TokenKind::Designator, 3, 4),
+                (TokenKind::Text, 4, 9),
+            ]
+        );
+        assert_eq!(
+            kinds_and_ranges(&lex("\\c 12\n")),
+            vec![
+                (MARKER, 0, 3),
+                (TokenKind::Designator, 3, 5),
+                (TokenKind::Newline, 5, 6),
+            ]
+        );
+        // Range + suffix stay ONE span; the scanner never parses inside.
+        assert_eq!(
+            kinds_and_ranges(&lex("\\v 12-14a x"))[1],
+            (TokenKind::Designator, 3, 9)
+        );
+        // No designator present: the expectation dies with the next marker.
+        assert_eq!(
+            kinds_and_ranges(&lex("\\v \\p t"))[..2],
+            [(MARKER, 0, 3), (MARKER, 3, 6)]
+        );
+        // Other payload-less markers are untouched.
+        assert_eq!(
+            kinds_and_ranges(&lex("\\p 12 x")),
+            vec![(MARKER, 0, 3), (TokenKind::Text, 3, 7)]
+        );
+    }
+
+    /// Step 4.2: the fold is PER-CLASS, read off the row. A closer's trailing
+    /// space is content (the row is shared with the opener — kind gates it);
+    /// an unresolved marker's row is NotRequired, so it absorbs nothing.
+    #[test]
+    fn only_delimiter_taking_markers_absorb_whitespace() {
+        // `\w*` then space: the space is CONTENT — it opens the following
+        // text run (one Text token, never Text + Text back to back).
+        assert_eq!(
+            kinds_and_ranges(&lex("\\w* x")),
+            vec![(CLOSING, 0, 3), (TokenKind::Text, 3, 5)]
+        );
+        // Unresolved `\zaln-s` then space: same — no fold for row 0.
+        assert_eq!(
+            kinds_and_ranges(&lex("\\zaln-s x")),
+            vec![(TokenKind::Milestone, 0, 7), (TokenKind::Text, 7, 9)]
         );
     }
 

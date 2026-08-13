@@ -3,3 +3,5 @@
 /testData
 /.ai-notify
 planning/spec_contexts_diff.py
+planning/mine_fastpath_windows.py
+src/experiments/sweeps.rs

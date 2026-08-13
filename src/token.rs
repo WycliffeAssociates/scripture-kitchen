@@ -13,8 +13,8 @@
 /// they carry no dead field.
 /// The working enum is 2 bytes (tag + payload — rustc doesn't bit-pack
 /// multi-payload enums), so the row does NOT store it directly: it stores
-/// the packed u8 from `to_bits`/`from_bits` below — low 3 bits = shape,
-/// bit 3 = nested. That pair is THE one place the mapping is defined; any
+/// the packed u8 from `to_bits`/`from_bits` below — low 4 bits = shape,
+/// bit 4 = nested. That pair is THE one place the mapping is defined; any
 /// future codec reuses it or it doesn't ship.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenKind {
@@ -26,20 +26,23 @@ pub enum TokenKind {
     OptBreak,
     Pipe,
     Text,
+    /// The one-span payload after `\c`/`\v` (step 4.3): `1`, `12-14a`, junk —
+    /// the scanner never looks inside; the designator INTERPRETER judges it.
+    Designator,
 }
 
-// "A byte with only bit 3 set" (= 8). Shapes live in the low 3 bits
-// (values 0-7), so OR-ing this flag on top can never collide with a shape.
-// Bits 4-7 are unused; if a 9th shape ever lands, slide this flag up to
-// bit 4 and the shape field grows to 16 values — still inside the one byte.
-const NESTED_BIT: u8 = 0b1000;
+// "A byte with only bit 4 set" (= 16). Shapes live in the low 4 bits
+// (values 0-15; the 9th shape, Designator, forced the slide from bit 3),
+// so OR-ing this flag on top can never collide with a shape. Bits 5-7 are
+// unused.
+const NESTED_BIT: u8 = 0b1_0000;
 
 impl TokenKind {
-    /// Packs to the row's kind byte: low 3 bits = shape, bit 3 = nested.
+    /// Packs to the row's kind byte: low 4 bits = shape, bit 4 = nested.
     pub fn to_bits(self) -> u8 {
         match self {
             // Shape number, with the nested flag OR'd on top when set —
-            // e.g. nested ClosingMarker = 1 | 0b1000 = 0b1001. (The `0 |`
+            // e.g. nested ClosingMarker = 1 | 0b1_0000 = 0b1_0001. (The `0 |`
             // is a no-op, kept so the two arms read symmetrically.)
             Self::Marker { nested } => 0 | if nested { NESTED_BIT } else { 0 },
             Self::ClosingMarker { nested } => 1 | if nested { NESTED_BIT } else { 0 },
@@ -49,6 +52,7 @@ impl TokenKind {
             Self::OptBreak => 5,
             Self::Pipe => 6,
             Self::Text => 7,
+            Self::Designator => 8,
         }
     }
 
@@ -69,6 +73,7 @@ impl TokenKind {
                     5 => Self::OptBreak,
                     6 => Self::Pipe,
                     7 => Self::Text,
+                    8 => Self::Designator,
                     _ => unreachable!("unknown kind bits {bits:#04b}"),
                 }
             }
@@ -88,8 +93,7 @@ impl TokenKind {
 ///
 /// `marker_idx` indexes the marker table for spec markers; `0` is reserved
 /// as "unresolved / not a spec marker" (custom `\z*` markers resolve by
-/// reading the span). Always `0` today: no data tables have been pulled in
-/// yet, assignment lands with the table spine.
+/// reading the span). Stamped by the marker arm since step 4.1.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Token {
     pub start: u32,
@@ -132,6 +136,7 @@ mod tests {
             TokenKind::OptBreak,
             TokenKind::Pipe,
             TokenKind::Text,
+            TokenKind::Designator,
         ];
         for kind in all {
             assert_eq!(TokenKind::from_bits(kind.to_bits()), kind);

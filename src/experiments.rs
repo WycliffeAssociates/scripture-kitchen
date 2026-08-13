@@ -15,3 +15,4 @@
 pub mod chapter_par;
 pub mod scalar;
 pub mod staged;
+pub mod sweeps;

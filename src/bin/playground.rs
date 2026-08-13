@@ -31,6 +31,12 @@ enum Mode {
     Staged,
     Chunked,
     ChapterPar,
+    // The stop-cost ladder (experiments::sweeps): scan ceiling → full stop
+    // set → the text arm's cursor-restart pattern. Full lex minus SweepCursor
+    // = the work inside the stops.
+    SweepNl,
+    SweepStops,
+    SweepCursor,
 }
 
 fn main() {
@@ -44,6 +50,9 @@ fn main() {
             "--par" => mode = Mode::Par,
             "--scalar" => mode = Mode::Scalar,
             "--staged" => mode = Mode::Staged,
+            "--sweep-nl" => mode = Mode::SweepNl,
+            "--sweep-stops" => mode = Mode::SweepStops,
+            "--sweep-cursor" => mode = Mode::SweepCursor,
             "--chunked" => mode = Mode::Chunked,
             "--chpar" => mode = Mode::ChapterPar,
             "--iters" => {
@@ -74,6 +83,9 @@ fn main() {
         Mode::Staged => "staged",
         Mode::Chunked => "chunked",
         Mode::ChapterPar => "chpar",
+        Mode::SweepNl => "sweep-nl",
+        Mode::SweepStops => "sweep-stops",
+        Mode::SweepCursor => "sweep-cursor",
     };
     eprintln!(
         "playground: loaded {} source(s), {bytes} bytes total, iters={iters}, mode={mode_name}",
@@ -111,6 +123,8 @@ fn main() {
 fn verify_variant(sources: &[String], mode: Mode) {
     let run: fn(&str) -> Vec<usfm_onion_2::Token> = match mode {
         Mode::Serial | Mode::Par => return, // the reference itself
+        // Sweeps produce counts, not token streams — nothing to verify.
+        Mode::SweepNl | Mode::SweepStops | Mode::SweepCursor => return,
         Mode::Scalar => usfm_onion_2::experiments::scalar::lex,
         Mode::Staged => usfm_onion_2::experiments::staged::lex,
         Mode::Chunked => usfm_onion_2::experiments::chapter_par::lex_chunked,
@@ -126,26 +140,22 @@ fn verify_variant(sources: &[String], mode: Mode) {
         }
     };
     for (i, source) in sources.iter().enumerate() {
-        let reference = usfm_onion_2::lex(source);
         let variant = run(source);
-        assert_eq!(
-            reference.len(),
-            variant.len(),
-            "doc {i}: token count differs (ref {}, variant {})",
-            reference.len(),
-            variant.len()
-        );
-        // The variants are frozen PRE-4.1 lexers: they stamp marker_idx 0.
-        // Spans and kinds must still be byte-identical; only marker_idx may
-        // differ. This is step 4.1's verification harness.
-        for (t, (r, v)) in reference.iter().zip(&variant).enumerate() {
-            assert!(
-                r.start == v.start && r.len == v.len && r.kind_bits == v.kind_bits,
-                "doc {i} token {t}: spans/kinds differ (ref {r:?}, variant {v:?})"
+        // The variants are FROZEN pre-4.2 lexers: since the per-class ws fold
+        // landed, boundaries legitimately differ (closers and unresolved
+        // markers no longer absorb their trailing space). What must still
+        // hold for a variant is the partition invariant itself.
+        let mut cursor = 0usize;
+        for (t, v) in variant.iter().enumerate() {
+            assert_eq!(
+                v.start as usize, cursor,
+                "doc {i} token {t}: variant stream is not a partition"
             );
+            cursor += v.len as usize;
         }
+        assert_eq!(cursor, source.len(), "doc {i}: variant partition short");
     }
-    eprintln!("verify: variant spans/kinds identical to crate::lex on all docs (marker_idx exempt)");
+    eprintln!("verify: variant streams are lossless partitions (frozen pre-4.2 — boundaries may differ from crate::lex)");
 }
 
 fn run_once(sources: &[String], mode: Mode) {
@@ -168,6 +178,21 @@ fn run_once(sources: &[String], mode: Mode) {
         Mode::Chunked => {
             for source in sources {
                 std::hint::black_box(usfm_onion_2::experiments::chapter_par::lex_chunked(source));
+            }
+        }
+        Mode::SweepNl => {
+            for source in sources {
+                std::hint::black_box(usfm_onion_2::experiments::sweeps::sweep_nl(source));
+            }
+        }
+        Mode::SweepStops => {
+            for source in sources {
+                std::hint::black_box(usfm_onion_2::experiments::sweeps::sweep_stops(source));
+            }
+        }
+        Mode::SweepCursor => {
+            for source in sources {
+                std::hint::black_box(usfm_onion_2::experiments::sweeps::sweep_cursor(source));
             }
         }
         Mode::Par => {

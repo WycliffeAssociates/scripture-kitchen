@@ -20,5 +20,5 @@ mod scanner;
 pub mod tables;
 mod token;
 
-pub use scanner::{ChapterRun, Header, lex};
+pub use scanner::{ChapterRun, Header, lex, lex_general_path_only};
 pub use token::{Token, TokenKind};
