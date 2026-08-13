@@ -13,6 +13,7 @@
 //! shape, not row format. It moves out only if emission ever gives it
 //! behavior of its own.
 
+use memchr::memchr;
 use memchr::memchr3;
 use memchr::memmem;
 
@@ -76,13 +77,19 @@ pub struct ChapterRun {
 struct ScanMode {
     // True right after emitting a marker whose row takes a structural
     // delimiter, until the one whitespace run that delimits it has been
-    // consumed (step 4.2: per-class, read off `ws_after_name`).
+    // consumed (read off `ws_after_name`).
     awaiting_delimiter_ws: bool,
     // True right after emitting a marker whose row consumes a Designator
-    // payload (`\c`/`\v`, step 4.3), until the next region: text becomes
+    // payload (`\c`/`\v`), until the next region: text becomes
     // ONE Designator token; anything else (newline, marker) drops the
     // expectation — a `\v` with no number emits no empty token.
     pending_designator: bool,
+    // True from the moment an opener/milestone token is emitted until ANY
+    // other token is. Its one job is deciding whether a pipe is in FRONT
+    // position (U25001: attributes precede content), and because the text
+    // arm clears it on entry, "front position" reduces to "the dispatch loop
+    // found this pipe" — no byte-scanning predicate anywhere.
+    after_marker: bool,
 }
 
 /// Lexes a whole source into compact token rows.
@@ -112,6 +119,7 @@ fn lex_impl<const FAST: bool>(source: &str) -> Vec<Token> {
     let mut mode = ScanMode {
         awaiting_delimiter_ws: false,
         pending_designator: false,
+        after_marker: false,
     };
     // Built ONCE per lex: memmem::find (the one-shot form) reconstructs its
     // searcher on every call — measured 31ns/call vs 6ns with a prebuilt
@@ -123,7 +131,7 @@ fn lex_impl<const FAST: bool>(source: &str) -> Vec<Token> {
     let mut index = 0usize;
 
     while index < bytes.len() {
-        // common_marker_checks (step 4.4): fused fast checks for the hottest
+        // common_marker_checks: fused fast checks for the hottest
         // markers, added ONE ARM AT A TIME in measured-frequency order
         // (planning/marker-frequencies.md). Each arm must be token-identical
         // to the general path — pinned by tests/fast_path_identity.rs, which
@@ -148,7 +156,18 @@ fn lex_impl<const FAST: bool>(source: &str) -> Vec<Token> {
                 text_arm(bytes, index, &mut mode, &mut tokens, &opt_break_finder)
             }
             BACKSLASH => marker_arm(bytes, index, &mut mode, &mut tokens),
-            PIPE => pipe_arm(index, &mut mode, &mut tokens),
+            // A pipe at a region start is in FRONT position exactly when a
+            // marker preceded it — the U25001 node-initial form, plus the
+            // legacy empty-content form (`\zaln-s |x-strong="G1"\*`), which
+            // only reaches here because it  folds the delimiter into the
+            // marker's span. If it opens no list the bytes were content all
+            // along, so the text arm takes them from the pipe.
+            PIPE => {
+                let front = mode.after_marker;
+                try_attr_list(bytes, index, front, &mut mode, &mut tokens).unwrap_or_else(|_| {
+                    text_arm(bytes, index, &mut mode, &mut tokens, &opt_break_finder)
+                })
+            }
             _ => text_arm(bytes, index, &mut mode, &mut tokens, &opt_break_finder),
         };
     }
@@ -156,7 +175,7 @@ fn lex_impl<const FAST: bool>(source: &str) -> Vec<Token> {
     tokens
 }
 
-// ---- common marker checks (step 4.4) ---------------------------------------
+// ---- common marker checks ---------------------------------------
 
 /// The hot-marker rows, resolved ONCE per lex so no arm ever pays a name
 /// match. Membership is the measured top-9 cut (planning/marker-frequencies.md:
@@ -255,6 +274,10 @@ fn common_marker_checks(
             push_token(tokens, TokenKind::Designator, digits_from, end);
             mode.awaiting_delimiter_ws = false;
             mode.pending_designator = false;
+            // The designator is content, so this arm ends with a token that is
+            // NOT a marker — matching the general path, where the text arm
+            // clears the flag before taking the designator.
+            mode.after_marker = false;
             Some(end)
         }
         // Numbered paragraph families: name + at most ONE level digit,
@@ -321,6 +344,9 @@ fn fused_plain(
             push_marker(tokens, index, end, hot.idx);
             mode.awaiting_delimiter_ws = false;
             mode.pending_designator = false;
+            // Every hot marker is an opener, so a pipe right after the folded
+            // delimiter is in front position — same as the general path.
+            mode.after_marker = true;
             Some(end)
         }
         Some(&SPACE | &TAB) => {
@@ -329,6 +355,9 @@ fn fused_plain(
             push_marker(tokens, index, name_end, hot.idx);
             mode.awaiting_delimiter_ws = false;
             mode.pending_designator = false;
+            // Still true here, and still correct: the space is content, so the
+            // text arm clears the flag before any pipe can be reached.
+            mode.after_marker = true;
             Some(name_end)
         }
         Some(&CR | &LF) => {
@@ -338,38 +367,42 @@ fn fused_plain(
             push_token(tokens, TokenKind::Newline, name_end, end);
             mode.awaiting_delimiter_ws = false;
             mode.pending_designator = false;
+            // This arm ends on the Newline token, not the marker.
+            mode.after_marker = false;
             Some(end)
         }
         _ => None,
     }
 }
 
-/// Step 4.6: does a marker of this SHAPE and row fold a following
+/// does a marker of this SHAPE and row fold a following
 /// space/tab run into its own span as the structural delimiter?
 ///
-/// Two facts, in this order:
+/// The table is the authority on the QUESTION, but it cannot be asked
+/// first, because shape plays two different roles around it:
 ///
-/// 1. **Shape first.** Openers and milestones delimit with space; end
-///    markers (`\w*`, `\*`) do not — their trailing whitespace is content,
-///    whatever the shared row says.
-/// 2. **Then the row, read permissively.** Fold whenever the row PERMITS
-///    horizontal whitespace after the name, required or optional alike:
-///    "optional" means zero-or-more HS is allowed, and HS that is actually
-///    present is still the delimiter, not content. Only `SingleNewline`
-///    abstains, because its delimiter is a NEWLINE and a newline is never
-///    folded into a marker span — Newline tokens are structurally
-///    load-bearing, and hiding a line boundary inside a marker would cost
-///    more than the token saves. (`\v`'s row is `AtLeastOneWhitespace`,
-///    i.e. HS *or* newline; `ws_run_end` eats space/tab only, so `\v\n1`
-///    still emits its Newline. Deliberate.)
-///
-/// The UNRESOLVED row is defaulted here, explicitly, rather than by
-/// reading its `NotRequired`: unknown markers follow the shape rule like
-/// anything else. The row keeps its honest value so lint can never read
-/// "an unknown marker requires a delimiter" out of a scanner
-/// convenience. Today `NotRequired` has exactly one holder — row 0 itself
-/// — so leaving this to fall out of the match would work by accident and
-/// would silently start folding if a real row ever took that value.
+/// 1. **Shape VETOES (not a pre-filter — it beats the table).** End markers
+///    never absorb: `\w*`'s trailing space is content. Reading the row
+///    first would get this WRONG, since `\w*` shares `\w`'s row and that
+///    row says `TagEndDelimiter` — a closer has no row of its own to
+///    disagree with, so the shape has to win here or nothing can.
+/// 2. **The row DECIDES, read permissively.** For openers and milestones,
+///    fold whenever the row PERMITS horizontal whitespace after the name,
+///    required or optional alike: "optional" means zero-or-more HS is
+///    allowed, and HS that is actually present is still the delimiter, not
+///    content. Only `SingleNewline` abstains, because its delimiter is a
+///    NEWLINE and a newline is never folded into a marker span — Newline
+///    tokens are structurally load-bearing, and hiding a line boundary
+///    inside a marker would cost more than the token saves. (`\v`'s row is
+///    `AtLeastOneWhitespace`, i.e. HS *or* newline; `ws_run_end` eats
+///    space/tab only, so `\v\n1` still emits its Newline. Deliberate.)
+/// 3. **Shape DEFAULTS when there is no row.** An unresolved marker has no
+///    table opinion to read, so it follows the shape rule like anything
+///    else. Written as its own branch even though row 0's `NotRequired`
+///    would fall through to the same answer: that coincidence holds only
+///    while row 0 is the value's sole holder, and the row must keep its
+///    honest value so lint can never read "an unknown marker requires a
+///    delimiter" out of a scanner convenience.
 fn folds_delimiter(kind: TokenKind, idx: generated::MarkerIdx) -> bool {
     if !matches!(kind, TokenKind::Marker { .. } | TokenKind::Milestone) {
         return false;
@@ -460,6 +493,7 @@ fn newline_end(bytes: &[u8], from: usize) -> usize {
 fn newline_arm(bytes: &[u8], index: usize, mode: &mut ScanMode, tokens: &mut Vec<Token>) -> usize {
     mode.awaiting_delimiter_ws = false;
     mode.pending_designator = false;
+    mode.after_marker = false;
     let end = newline_end(bytes, index);
     push_token(tokens, TokenKind::Newline, index, end);
     end
@@ -542,7 +576,7 @@ fn classify_marker(slice: &[u8]) -> TokenKind {
     TokenKind::Marker { nested }
 }
 
-/// Step 4.1: resolve an already-bounded, already-classified marker slice to
+///  resolve an already-bounded, already-classified marker slice to
 /// its table row. The lexeme handed to the table is the NAME as spelled —
 /// leading `\`/`+` and trailing `*` stripped, `-s`/`-e` kept (the matcher
 /// strips those itself). The shape argument is the classification we already
@@ -572,9 +606,12 @@ fn marker_arm(bytes: &[u8], index: usize, mode: &mut ScanMode, tokens: &mut Vec<
     if let Some(last) = tokens.last_mut() {
         last.marker_idx = idx;
     }
-    // Per-class delimiter fold (steps 4.2 + 4.6) — one predicate, shared
+    // Per-class delimiter fold — one predicate, shared
     // with the fast arms so the two paths cannot drift.
     mode.awaiting_delimiter_ws = folds_delimiter(kind, idx);
+    // Only an opener or milestone can have attributes in front of it; a
+    // closer has nothing in front of it by definition.
+    mode.after_marker = matches!(kind, TokenKind::Marker { .. } | TokenKind::Milestone);
     //  does this row consume a designator payload (`\c`/`\v`)?
     // The assignment doubles as clearing any stale expectation.
     mode.pending_designator = matches!(kind, TokenKind::Marker { .. })
@@ -582,17 +619,124 @@ fn marker_arm(bytes: &[u8], index: usize, mode: &mut ScanMode, tokens: &mut Vec<
     end
 }
 
-// ---- pipe arm -------------------------------------------------------------
+// ---- attribute lists ------------------------------------------------------
 
-// Just the delimiter byte itself — attribute-list handling (one `AttrList`
-// region once the fused pass has an open-marker stack; a bare pipe in plain
-// text is content) is deferred with the data tables.
-fn pipe_arm(index: usize, mode: &mut ScanMode, tokens: &mut Vec<Token>) -> usize {
-    mode.awaiting_delimiter_ws = false;
-    mode.pending_designator = false;
-    let end = index + 1;
-    push_token(tokens, TokenKind::Pipe, index, end);
-    end
+/// What one pipe turned out to be. The three rungs of the ladder, and the
+/// ONLY three things a raw pipe can mean.
+enum AttrScan {
+    /// U25001 node-initial: the list closed itself with a second pipe.
+    /// Payload is one PAST that pipe.
+    NodeInitial(usize),
+    /// Legacy trailing (3.1; deprecated in 3.2, removed in 4): the list ran
+    /// to the node's own terminator. Payload is AT the terminating
+    /// backslash, which the list does not include.
+    Trailing(usize),
+    /// Not a list at all. Payload is the byte the scan refuted on — the
+    /// caller resumes THERE, never at the pipe, since any pipe in between
+    /// would refute on that identical byte.
+    NotAList(usize),
+}
+
+/// Boundary: where an attribute list starting at `pipe_at` ends, and which
+/// of the three shapes it is. Escape-aware and BOUNDED TO THE LINE, which is
+/// the whole recovery story: a malformed list degrades to content plus a lint
+/// hint without ever consuming past its own newline.
+///
+/// `front` says the pipe is in front position — nothing but the marker and
+/// its folded delimiter before it. It is the only thing that makes a second
+/// raw pipe a terminator, and that single gate reproduces the spec's own
+/// disambiguation: `\w|Jesus|\w*` is node-initial, `\w|Jesus\w*` is the 3.1
+/// default-attribute form, and a pipe AFTER content (`\w a|b|c\w*`) can only
+/// be legacy, so its interior pipes are ordinary span bytes.
+///
+/// The terminator is only checked for BEING a closer, never for matching the
+/// open frame: lint owns the real stack, and `\add*` ending a `\w` list is a
+/// finding, not a lexing decision.
+/// VECTORIZED, and it has to be: alignment corpora are mostly attribute
+/// bytes (`\zaln-s` lists run ~150 bytes each), so a scalar loop here scans
+/// the majority of such a document one byte at a time — Same two-scan
+/// shape the text arm uses: three needles fit one `memchr3`, and the fourth
+/// (the closing pipe, which only terminates in front position) rides a
+/// second call BOUNDED to the first hit, since a pipe past the terminator
+/// could never win the minimum anyway.
+fn attr_list_end(bytes: &[u8], pipe_at: usize, front: bool) -> AttrScan {
+    let mut index = pipe_at + 1;
+    while index < bytes.len() {
+        let rest = &bytes[index..];
+        let control = memchr3(BACKSLASH, CR, LF, rest);
+        let bound = control.unwrap_or(rest.len());
+        let pipe = if front {
+            memchr(PIPE, &rest[..bound])
+        } else {
+            None
+        };
+        let offset = match (control, pipe) {
+            (Some(c), Some(p)) => c.min(p),
+            (Some(c), None) => c,
+            (None, Some(p)) => p,
+            // No terminator anywhere ahead: never a list.
+            (None, None) => return AttrScan::NotAList(bytes.len()),
+        };
+        let pos = index + offset;
+        match bytes[pos] {
+            // The line bound. A list never spans one.
+            CR | LF => return AttrScan::NotAList(pos),
+            // Only ever searched for when `front`, so reaching this IS rung 1.
+            PIPE => return AttrScan::NodeInitial(pos + 1),
+            _ => match escape_len(bytes, pos) {
+                // `\|` and `\\` inside a value are content and keep the scan
+                // going — `\|` is load-bearing under U25001, where a raw pipe
+                // would end the list.
+                Some(len) => index = pos + len,
+                // A real marker: either this node's terminator (list
+                // confirmed) or a refutation. Nothing else it can be.
+                None => {
+                    let slice = &bytes[pos..marker_end(bytes, pos)];
+                    return match classify_marker(slice) {
+                        TokenKind::ClosingMarker { .. } | TokenKind::MilestoneEnd => {
+                            AttrScan::Trailing(pos)
+                        }
+                        _ => AttrScan::NotAList(pos),
+                    };
+                }
+            },
+        }
+    }
+    AttrScan::NotAList(bytes.len())
+}
+
+/// Emits one `AttrList` token if the pipe at `pipe_at` opens a list.
+///
+/// `Ok(cursor)` = a list was recognized and emitted. `Err(stop)` = it was
+/// not; `stop` is where the caller should resume (see [`AttrScan::NotAList`]).
+/// Shared by both callers — the dispatch loop for front position and, later,
+/// the text arm for back position — so the two can never disagree about what
+/// a pipe means.
+fn try_attr_list(
+    bytes: &[u8],
+    pipe_at: usize,
+    front: bool,
+    mode: &mut ScanMode,
+    tokens: &mut Vec<Token>,
+) -> Result<usize, usize> {
+    let (end, absorbs_trailing_ws) = match attr_list_end(bytes, pipe_at, front) {
+        // U25001's production puts `<HS>*` INSIDE the attribute_list, after
+        // the closing pipe — so those bytes belong to the list. Re-arming the
+        // delimiter fold is all it takes: `whitespace_arm` extends the last
+        // token, which is this one.
+        AttrScan::NodeInitial(end) => (end, true),
+        // A trailing list is followed by its closer, never by a delimiter.
+        AttrScan::Trailing(end) => (end, false),
+        AttrScan::NotAList(stop) => return Err(stop),
+    };
+    push_token(tokens, TokenKind::AttrList, pipe_at, end);
+    mode.awaiting_delimiter_ws = absorbs_trailing_ws;
+    // Nothing can be in front of a node twice.
+    mode.after_marker = false;
+    // `pending_designator` is deliberately UNTOUCHED: `\v|script="Arab"| 1`
+    // still owes its designator, and an attribute list is not the content
+    // that would cancel it.
+    Ok(end)
 }
 
 // ---- text arm ---------------------------------------------------------------
@@ -639,7 +783,11 @@ fn text_arm(
     opt_break_finder: &memmem::Finder<'_>,
 ) -> usize {
     mode.awaiting_delimiter_ws = false;
-    // Step 4.3: the first content region after `\c`/`\v` is its designator —
+    // Entering this arm IS content starting, so nothing after this point can
+    // be in front position. That is what reduces "front" to "the dispatch
+    // loop found the pipe".
+    mode.after_marker = false;
+    //the first content region after `\c`/`\v` is its designator —
     // one token, then this arm is done; whatever follows re-enters the loop
     // as ordinary text.
     if mode.pending_designator {
@@ -740,10 +888,26 @@ mod tests {
     const CLOSING: TokenKind = TokenKind::ClosingMarker { nested: false };
     const NESTED_CLOSING: TokenKind = TokenKind::ClosingMarker { nested: true };
 
+    const MILESTONE: TokenKind = TokenKind::Milestone;
+    const MS_END: TokenKind = TokenKind::MilestoneEnd;
+    const TEXT: TokenKind = TokenKind::Text;
+    const ATTRS: TokenKind = TokenKind::AttrList;
+
     fn kinds_and_ranges(tokens: &[Token]) -> Vec<(TokenKind, usize, usize)> {
         tokens
             .iter()
             .map(|t| (t.kind(), t.start as usize, t.end() as usize))
+            .collect()
+    }
+
+    /// Kinds paired with the bytes they actually cover. Preferred wherever the
+    /// SPANS are the point (attribute lists, escapes): it reads as the source
+    /// re-spelled, and a wrong boundary shows up as wrong text instead of an
+    /// off-by-one to decode. Concatenating the second column is the partition.
+    fn kinds_and_text(source: &str) -> Vec<(TokenKind, &str)> {
+        lex(source)
+            .iter()
+            .map(|t| (t.kind(), &source[t.start as usize..t.end() as usize]))
             .collect()
     }
 
@@ -759,7 +923,7 @@ mod tests {
         );
     }
 
-    /// Step 4.3: the region after `\c`/`\v` is ONE Designator token — happy
+    /// the region after `\c`/`\v` is ONE Designator token — happy
     /// digits, ranges, and junk alike (the interpreter judges content); a
     /// designator-less `\v` emits nothing extra.
     #[test]
@@ -802,7 +966,7 @@ mod tests {
         );
     }
 
-    /// Steps 4.2 + 4.6: the fold is SHAPE first, then the row read
+    /// the fold is SHAPE first, then the row read
     /// permissively — `folds_delimiter` is the whole rule.
     #[test]
     fn only_delimiter_taking_markers_absorb_whitespace() {
@@ -815,7 +979,7 @@ mod tests {
         );
         // Unresolved `\zaln-s` (row 0) DOES fold: unknown openers follow the
         // shape rule like anything else, which is what puts an attribute
-        // list's pipe at a region start (step 5A).
+        // list's pipe at a region start
         assert_eq!(
             kinds_and_ranges(&lex("\\zaln-s x")),
             vec![(TokenKind::Milestone, 0, 8), (TokenKind::Text, 8, 9)]
@@ -867,12 +1031,99 @@ mod tests {
         );
     }
 
+    /// an attribute list in FRONT position — the pipe sits
+    /// at a region start because the marker's delimiter was folded into its
+    /// span. One span per list, pipes included, interior never parsed.
     #[test]
-    fn pipe_delimits_after_a_milestone() {
+    fn front_position_attribute_lists() {
+        // Milestone, no content, terminated by `\*` — the alignment corpus's
+        // shape.
         assert_eq!(
-            kinds_and_ranges(&lex("\\zaln-s|")),
-            vec![(TokenKind::Milestone, 0, 7), (TokenKind::Pipe, 7, 8)]
+            kinds_and_text("\\zaln-s |x-strong=\"G46130\"\\*"),
+            vec![
+                (MILESTONE, "\\zaln-s "),
+                (ATTRS, "|x-strong=\"G46130\""),
+                (MS_END, "\\*"),
+            ]
         );
+        // Node-initial on a paragraph (U25001): the list closes itself, and
+        // per the grammar's trailing `<HS>*` the delimiter space that follows
+        // belongs to the LIST, not to the content.
+        assert_eq!(
+            kinds_and_text("\\p|cat=\"emphasised\"| text"),
+            vec![
+                (MARKER, "\\p"),
+                (ATTRS, "|cat=\"emphasised\"| "),
+                (TEXT, "text")
+            ]
+        );
+        // The proposal writes a space before the pipe (`\f |aid="x"| + …`) even
+        // though its own production doesn't allow one. The fold absorbs it, so
+        // both spellings lex the same and the disagreement stays lint's.
+        assert_eq!(
+            kinds_and_text("\\f |aid=\"mynote\"| +")[1],
+            (ATTRS, "|aid=\"mynote\"| ")
+        );
+        // A `\v`'s designator SURVIVES its attribute list — the list is not
+        // the content that would cancel the expectation.
+        assert_eq!(
+            kinds_and_text("\\v|script=\"Arab\"| 1 x"),
+            vec![
+                (MARKER, "\\v"),
+                (ATTRS, "|script=\"Arab\"| "),
+                (TokenKind::Designator, "1"),
+                (TEXT, " x"),
+            ]
+        );
+        // The spec hangs node-initial vs 3.1-trailing on the closing pipe
+        // alone, and the ladder's ordering reproduces exactly that.
+        assert_eq!(kinds_and_text("\\w|Jesus|\\w*")[1], (ATTRS, "|Jesus|"));
+        assert_eq!(kinds_and_text("\\w|Jesus\\w*")[1], (ATTRS, "|Jesus"));
+        // Empty list: the pipe alone is the token.
+        assert_eq!(kinds_and_text("\\w|\\w*")[1], (ATTRS, "|"));
+        // `\fig`: front, no content, terminated by its named closer.
+        assert_eq!(
+            kinds_and_text("\\fig |src=\"a.png\" size=\"col\"\\fig*")[1],
+            (ATTRS, "|src=\"a.png\" size=\"col\"")
+        );
+        // An escaped pipe is a value byte, not a terminator — load-bearing
+        // under U25001, where a raw pipe would end the list.
+        assert_eq!(kinds_and_text("\\w|a\\|b|\\w*")[1], (ATTRS, "|a\\|b|"));
+    }
+
+    /// Rung 3: a pipe that opens no list was never a delimiter. No token of
+    /// its own (the `Pipe` kind is retired), no repair, and NOTHING consumed
+    /// past its own line — that bound is the whole recovery story.
+    #[test]
+    fn a_pipe_that_opens_no_list_is_ordinary_content() {
+        // Newline before any terminator refutes it.
+        assert_eq!(
+            kinds_and_text("\\p |x=\"y\"\n"),
+            vec![
+                (MARKER, "\\p "),
+                (TEXT, "|x=\"y\""),
+                (TokenKind::Newline, "\n")
+            ]
+        );
+        // So does a marker that is not a closer.
+        assert_eq!(
+            kinds_and_text("\\p |x=\"y\"\\add z\\add*"),
+            vec![
+                (MARKER, "\\p "),
+                (TEXT, "|x=\"y\""),
+                (MARKER, "\\add "),
+                (TEXT, "z"),
+                (CLOSING, "\\add*"),
+            ]
+        );
+        // EOF refutes it too, and a bare pipe after a milestone is now Text
+        // rather than a token of its own.
+        assert_eq!(
+            kinds_and_text("\\zaln-s|"),
+            vec![(MILESTONE, "\\zaln-s"), (TEXT, "|")]
+        );
+        // No marker in front at all: an ordinary prose pipe, one Text run.
+        assert_eq!(kinds_and_text("a|b"), vec![(TEXT, "a|b")]);
     }
 
     #[test]
@@ -902,7 +1153,7 @@ mod tests {
             vec![(TokenKind::Text, 0, 10)]
         );
         // Wrong width: `\u12` stays a MARKER — unresolved (row 0), so per
-        // step 4.6 it folds its delimiter space like any other opener.
+        // folds its delimiter space like any other opener.
         assert_eq!(kinds_and_ranges(&lex("\\u12 x"))[0], (MARKER, 0, 5));
     }
 
@@ -931,7 +1182,7 @@ mod tests {
         );
     }
 
-    /// Step 4.1: marker tokens carry their table row; every other spelling
+    /// marker tokens carry their table row; every other spelling
     /// fact still lives in the span. Asserted by name round-trip so the test
     /// survives row reordering.
     #[test]

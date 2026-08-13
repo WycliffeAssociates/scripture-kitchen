@@ -231,7 +231,10 @@ fn marker_arm(bytes: &[u8], index: usize, mode: &mut ScanMode, tokens: &mut Vec<
 fn pipe_arm(index: usize, mode: &mut ScanMode, tokens: &mut Vec<Token>) -> usize {
     mode.awaiting_delimiter_ws = false;
     let end = index + 1;
-    push_token(tokens, TokenKind::Pipe, index, end);
+    // `TokenKind::Pipe` is retired; this frozen variant is verified for
+    // PARTITION only, so the span is what matters and `Text` is the honest
+    // kind for a byte nobody here interprets.
+    push_token(tokens, TokenKind::Text, index, end);
     end
 }
 

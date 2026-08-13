@@ -18,17 +18,37 @@
 /// future codec reuses it or it doesn't ship.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenKind {
-    Marker { nested: bool },
-    ClosingMarker { nested: bool },
+    Marker {
+        nested: bool,
+    },
+    ClosingMarker {
+        nested: bool,
+    },
     Milestone,
     MilestoneEnd,
     Newline,
     OptBreak,
-    Pipe,
     Text,
     /// The one-span payload after `\c`/`\v` (step 4.3): `1`, `12-14a`, junk —
     /// the scanner never looks inside; the designator INTERPRETER judges it.
     Designator,
+    /// One attribute list, INCLUDING its delimiting pipe(s): `|lemma="grace"`
+    /// (legacy trailing) or `|cat="x"|` (U25001 node-initial, closing pipe and
+    /// any HS it absorbs included). A SPAN, never a container — the interior is
+    /// never parsed here and the k/v view is the attribute interpreter's, on
+    /// demand, exactly like `Designator`. That is what makes attribute
+    /// passthrough byte-identical for every shape the spec allows, deformed
+    /// ones included.
+    ///
+    /// The list's FORM is not stored, because position already encodes it:
+    /// ends with `|` → node-initial, else trailing. A tree that files
+    /// attributes in a named slot forgets stream order and must therefore
+    /// derive and record the form itself; a token never carries it.
+    ///
+    /// Which marker owns the list is likewise not stored — attributes belong
+    /// to the last marker, so a consumer reads the owner off the adjacent
+    /// marker/closer token (the same adjacency shape as `ca`/`cp`/`va`/`vp`).
+    AttrList,
 }
 
 // "A byte with only bit 4 set" (= 16). Shapes live in the low 4 bits
@@ -50,7 +70,8 @@ impl TokenKind {
             Self::MilestoneEnd => 3,
             Self::Newline => 4,
             Self::OptBreak => 5,
-            Self::Pipe => 6,
+
+            Self::AttrList => 6,
             Self::Text => 7,
             Self::Designator => 8,
         }
@@ -71,7 +92,7 @@ impl TokenKind {
                     3 => Self::MilestoneEnd,
                     4 => Self::Newline,
                     5 => Self::OptBreak,
-                    6 => Self::Pipe,
+                    6 => Self::AttrList,
                     7 => Self::Text,
                     8 => Self::Designator,
                     _ => unreachable!("unknown kind bits {bits:#04b}"),
@@ -134,7 +155,7 @@ mod tests {
             TokenKind::MilestoneEnd,
             TokenKind::Newline,
             TokenKind::OptBreak,
-            TokenKind::Pipe,
+            TokenKind::AttrList,
             TokenKind::Text,
             TokenKind::Designator,
         ];
