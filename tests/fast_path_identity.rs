@@ -59,5 +59,8 @@ fn fast_paths_are_token_identical_to_the_general_path() {
         }
     });
 
-    eprintln!("fast-path identity: {} books, streams identical", paths.len());
+    eprintln!(
+        "fast-path identity: {} books, streams identical",
+        paths.len()
+    );
 }

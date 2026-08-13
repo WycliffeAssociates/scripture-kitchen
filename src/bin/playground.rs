@@ -155,7 +155,9 @@ fn verify_variant(sources: &[String], mode: Mode) {
         }
         assert_eq!(cursor, source.len(), "doc {i}: variant partition short");
     }
-    eprintln!("verify: variant streams are lossless partitions (frozen pre-4.2 — boundaries may differ from crate::lex)");
+    eprintln!(
+        "verify: variant streams are lossless partitions (frozen pre-4.2 — boundaries may differ from crate::lex)"
+    );
 }
 
 fn run_once(sources: &[String], mode: Mode) {
