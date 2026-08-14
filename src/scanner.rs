@@ -19,7 +19,8 @@ use memchr::memmem;
 
 use crate::tables::generated;
 use crate::tables::schema::{
-    Numbering, Payload, SpellingShape, StructuralWhitespaceRequirement as Ws, USV_ESCAPE_LETTERS,
+    MarkerKind, Numbering, Payload, SpellingShape, StructuralWhitespaceRequirement as Ws,
+    USV_ESCAPE_LETTERS,
 };
 use crate::token::{Token, TokenKind};
 
@@ -74,7 +75,7 @@ pub struct ChapterRun {
 }
 
 /// Scan-pass state. Mode only — never payload knowledge.
-struct ScanMode {
+struct ScanState {
     // True right after emitting a marker whose row takes a structural
     // delimiter, until the one whitespace run that delimits it has been
     // consumed (read off `ws_after_name`).
@@ -90,6 +91,21 @@ struct ScanMode {
     // arm clears it on entry, "front position" reduces to "the dispatch loop
     // found this pipe" — no byte-scanning predicate anywhere.
     after_marker: bool,
+    // How many attrs-capable character frames are open ON THIS LINE. Nonzero
+    // is the ONLY condition under which the text arm looks for a pipe, which
+    // is what keeps the deprecated back-position form from taxing the stop
+    // set globally (stop density is the measured wall).
+    //
+    // Reset to 0 at every newline, which BOUNDS what a stale count can cost
+    // to one line. The honest limitation that buys: a character frame whose
+    // opener and trailing list sit on DIFFERENT lines
+    // (`\w gracious\nmore|lemma="x"\w*`) is not recognized as a list — the
+    // bytes stay content and lint reports the pipe. Lossless either way, and
+    // no corpus book contains the shape; the alternative (never resetting)
+    // leaves the needle armed for the rest of the document after a single
+    // unclosed `\w`, which is the worse failure since prose is full of
+    // character markers.
+    attr_frames: u8,
 }
 
 /// One scan in progress: the source, what has been emitted so far, the mode
@@ -133,7 +149,7 @@ struct ScanMode {
 struct Scanner<'a> {
     bytes: &'a [u8],
     tokens: Vec<Token>,
-    mode: ScanMode,
+    mode: ScanState,
     /// Built ONCE per lex: `memmem::find` (the one-shot form) reconstructs its
     /// searcher on every call — measured 31ns/call vs 6ns with a prebuilt
     /// Finder, against a ~5ns/token budget. The text arm calls this once per
@@ -176,10 +192,11 @@ impl<'a> Scanner<'a> {
             // at ~16), so `/6` sits just under the floor and effectively never
             // reallocs.
             tokens: Vec::with_capacity(source.len() / 6),
-            mode: ScanMode {
+            mode: ScanState {
                 awaiting_delimiter_ws: false,
                 pending_designator: false,
                 after_marker: false,
+                attr_frames: 0,
             },
             opt_break_finder: memmem::Finder::new(b"//"),
             hot: HotIdx::resolve(),
@@ -221,7 +238,7 @@ impl<'a> Scanner<'a> {
                 // only reaches here because it  folds the delimiter into the
                 // marker's span. If it opens no list the bytes were content all
                 // along, so the text arm takes them from the pipe.
-                PIPE => match self.try_attr_list(index, self.mode.after_marker) {
+                PIPE => match self.try_attr_list(index, self.mode.after_marker, index, None) {
                     Ok(end) => end,
                     Err(_) => self.text_arm(index),
                 },
@@ -247,6 +264,11 @@ struct Hot {
     idx: generated::MarkerIdx,
     folds: bool,
     level_max: u8,
+    /// Does opening this marker arm the text arm's pipe needle? True for the
+    /// character-class hot rows (`ft`, `fr`, `xt`), false for the rest — the
+    /// same `MarkerKind` test the general path runs, precomputed so no fast
+    /// arm ever reads the table.
+    attrs_frame: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -277,6 +299,7 @@ impl HotIdx {
                     Numbering::UpTo(cap) => cap,
                     _ => 0,
                 },
+                attrs_frame: opens_attrs_frame(idx),
             }
         };
         HotIdx {
@@ -385,6 +408,9 @@ impl Scanner<'_> {
                 // Every hot marker is an opener, so a pipe right after the folded
                 // delimiter is in front position — same as the general path.
                 self.mode.after_marker = true;
+                if hot.attrs_frame {
+                    self.mode.attr_frames = self.mode.attr_frames.saturating_add(1);
+                }
                 Some(end)
             }
             Some(&SPACE | &TAB) => {
@@ -396,6 +422,9 @@ impl Scanner<'_> {
                 // Still true here, and still correct: the space is content, so the
                 // text arm clears the flag before any pipe can be reached.
                 self.mode.after_marker = true;
+                if hot.attrs_frame {
+                    self.mode.attr_frames = self.mode.attr_frames.saturating_add(1);
+                }
                 Some(name_end)
             }
             Some(&CR | &LF) => {
@@ -407,6 +436,9 @@ impl Scanner<'_> {
                 self.mode.pending_designator = false;
                 // This arm ends on the Newline token, not the marker.
                 self.mode.after_marker = false;
+                // The line ended, so no frame this marker opened can still be
+                // collecting content on it — same reset the newline arm does.
+                self.mode.attr_frames = 0;
                 Some(end)
             }
             _ => None,
@@ -442,6 +474,27 @@ impl Scanner<'_> {
 ///    while row 0 is the value's sole holder, and the row must keep its
 ///    honest value so lint can never read "an unknown marker requires a
 ///    delimiter" out of a scanner convenience.
+/// Does opening this row put an attrs-capable frame on the line — i.e. arm the
+/// text arm's pipe needle so a BACK-position (pre usfm 3.2 legacy trailing) list can be
+/// found inside a text run?
+///
+/// Character and Figure only. Deliberately NOT:
+/// - **milestones**, which have no content, so their pipe is always at a region
+///   start and the dispatch arm already sees it;
+/// - **notes, paragraphs, verses**, which take the U25001 front form only —
+///   also a region start, also no needle;
+/// - **row 0**, since arming for every unconfigured `\z` marker would put the
+///   needle over custom paragraph content for nothing.
+///
+/// One predicate, shared with `Hot::attrs_frame`, so the fast and general
+/// paths cannot disagree about when the needle is live.
+fn opens_attrs_frame(idx: generated::MarkerIdx) -> bool {
+    matches!(
+        generated::kind(idx),
+        MarkerKind::Character | MarkerKind::Figure
+    )
+}
+
 fn folds_delimiter(kind: TokenKind, idx: generated::MarkerIdx) -> bool {
     if !matches!(kind, TokenKind::Marker { .. } | TokenKind::Milestone) {
         return false;
@@ -535,6 +588,9 @@ impl Scanner<'_> {
         self.mode.awaiting_delimiter_ws = false;
         self.mode.pending_designator = false;
         self.mode.after_marker = false;
+        // Attribute lists never span a line, so the needle is disarmed here —
+        // the bound on what a stale count can cost.
+        self.mode.attr_frames = 0;
         let end = newline_end(self.bytes, index);
         self.push_token(TokenKind::Newline, index, end);
         end
@@ -661,6 +717,19 @@ impl Scanner<'_> {
         // The assignment doubles as clearing any stale expectation.
         self.mode.pending_designator = matches!(kind, TokenKind::Marker { .. })
             && matches!(generated::payload(idx), Payload::Designator);
+        // Attrs-capable frame bookkeeping — see `ScanMode::attr_frames`. Any
+        // closer decrements, even a mismatched one: the count only gates a
+        // needle, so being approximately right costs at most one refuted
+        // ladder, and pairing closers to openers is the walker's job.
+        match kind {
+            TokenKind::Marker { .. } if opens_attrs_frame(idx) => {
+                self.mode.attr_frames = self.mode.attr_frames.saturating_add(1)
+            }
+            TokenKind::ClosingMarker { .. } | TokenKind::MilestoneEnd => {
+                self.mode.attr_frames = self.mode.attr_frames.saturating_sub(1)
+            }
+            _ => {}
+        }
         end
     }
 }
@@ -705,25 +774,34 @@ enum AttrScan {
 /// (the closing pipe, which only terminates in front position) rides a
 /// second call BOUNDED to the first hit, since a pipe past the terminator
 /// could never win the minimum anyway.
-fn attr_list_end(bytes: &[u8], pipe_at: usize, front: bool) -> AttrScan {
+fn attr_list_end(bytes: &[u8], pipe_at: usize, front: bool, first_stop: Option<usize>) -> AttrScan {
     let mut index = pipe_at + 1;
+    // The text arm reaches this having ALREADY located the next `\`/CR/LF for
+    // its own run, and in back position that byte is necessarily this scan's
+    // first stop too (no control byte can sit between the pipe and it, and a
+    // pipe never stops a back-position scan). Taking it instead of re-deriving
+    // it removes one vectorized pass per list — which matters because
+    // word-aligned corpora carry one list per WORD.
+    let mut known = first_stop;
     while index < bytes.len() {
-        let rest = &bytes[index..];
-        let control = memchr3(BACKSLASH, CR, LF, rest);
-        let bound = control.unwrap_or(rest.len());
-        let pipe = if front {
-            memchr(PIPE, &rest[..bound])
-        } else {
-            None
+        let pos = match known.take() {
+            Some(stop) => stop,
+            None => {
+                let rest = &bytes[index..];
+                let control = memchr3(BACKSLASH, CR, LF, rest);
+                let bound = control.unwrap_or(rest.len());
+                let pipe = if front {
+                    memchr(PIPE, &rest[..bound])
+                } else {
+                    None
+                };
+                match [control, pipe].into_iter().flatten().min() {
+                    Some(offset) => index + offset,
+                    // No terminator anywhere ahead: never a list.
+                    None => return AttrScan::NotAList(bytes.len()),
+                }
+            }
         };
-        let offset = match (control, pipe) {
-            (Some(c), Some(p)) => c.min(p),
-            (Some(c), None) => c,
-            (None, Some(p)) => p,
-            // No terminator anywhere ahead: never a list.
-            (None, None) => return AttrScan::NotAList(bytes.len()),
-        };
-        let pos = index + offset;
         match bytes[pos] {
             // The line bound. A list never spans one.
             CR | LF => return AttrScan::NotAList(pos),
@@ -755,13 +833,26 @@ fn attr_list_end(bytes: &[u8], pipe_at: usize, front: bool) -> AttrScan {
 ///
 /// `Ok(cursor)` = a list was recognized and emitted. `Err(stop)` = it was
 /// not; `stop` is where the caller should resume (see [`AttrScan::NotAList`]).
-/// Shared by both callers — the dispatch loop for front position and, later,
-/// the text arm for back position — so the two can never disagree about what
-/// a pipe means.
+/// Shared by both callers — the dispatch loop for front position, the text arm
+/// for back position — so the two can never disagree about what a pipe means.
+///
+/// `text_from` is where content pending emission begins, which for the text
+/// arm is its open segment: a back-position list has content before it, and
+/// that content must be emitted BEFORE the list to keep the stream in source
+/// order (order is the losslessness guarantee, and the partition oracle fails
+/// loudly otherwise). Pass `pipe_at` for "nothing pending", as front position
+/// always does.
 impl Scanner<'_> {
     #[inline(always)]
-    fn try_attr_list(&mut self, pipe_at: usize, front: bool) -> Result<usize, usize> {
-        let (end, absorbs_trailing_ws) = match attr_list_end(self.bytes, pipe_at, front) {
+    fn try_attr_list(
+        &mut self,
+        pipe_at: usize,
+        front: bool,
+        text_from: usize,
+        first_stop: Option<usize>,
+    ) -> Result<usize, usize> {
+        let (end, absorbs_trailing_ws) = match attr_list_end(self.bytes, pipe_at, front, first_stop)
+        {
             // U25001's production puts `<HS>*` INSIDE the attribute_list, after
             // the closing pipe — so those bytes belong to the list. Re-arming the
             // delimiter fold is all it takes: `whitespace_arm` extends the last
@@ -771,6 +862,10 @@ impl Scanner<'_> {
             AttrScan::Trailing(end) => (end, false),
             AttrScan::NotAList(stop) => return Err(stop),
         };
+        // The content this list trails, if any, goes out FIRST.
+        if pipe_at > text_from {
+            self.push_token(TokenKind::Text, text_from, pipe_at);
+        }
         self.push_token(TokenKind::AttrList, pipe_at, end);
         self.mode.awaiting_delimiter_ws = absorbs_trailing_ws;
         // Nothing can be in front of a node twice.
@@ -877,14 +972,20 @@ impl Scanner<'_> {
             // Called through `self` rather than held in a local: a
             // `&self.opt_break_finder` binding would live across the pushes below.
             let opt_break = self.opt_break_finder.find(&rest[..bound]);
-            let offset = match (control, opt_break) {
-                (Some(c), Some(o)) => c.min(o),
-                (Some(c), None) => c,
-                (None, Some(o)) => o,
-                (None, None) => {
-                    cursor = bytes.len();
-                    break;
-                }
+            // The MODE-SWAPPED needle: a pipe is a stop only while an
+            // attrs-capable character frame is open on this line, i.e. only
+            // where the deprecated back-position list can legally be. Bounded
+            // to the control hit for the same reason `//` is. Off, this costs
+            // one already-loaded flag test; on, it costs one more vectorized
+            // pass over a frame's worth of bytes (a word or two, typically).
+            let pipe = if self.mode.attr_frames > 0 {
+                memchr(PIPE, &rest[..bound])
+            } else {
+                None
+            };
+            let Some(offset) = [control, opt_break, pipe].into_iter().flatten().min() else {
+                cursor = bytes.len();
+                break;
             };
             let pos = cursor + offset;
 
@@ -899,6 +1000,28 @@ impl Scanner<'_> {
                         break;
                     }
                 },
+                // A BACK-position attribute list (`\w gracious|lemma="x"\w*`):
+                // there is content before the pipe by construction, which is
+                // what back position means — so `front` is false here, and rung
+                // 1 can never fire from this path (an interior pipe in
+                // `\w a|b|c\w*` stays a span byte with no extra gate).
+                PIPE => {
+                    match self.try_attr_list(pos, false, segment_start, control.map(|c| cursor + c))
+                    {
+                        // The open segment was emitted by `try_attr_list`, before
+                        // the list, so this call is done.
+                        Ok(end) => return end,
+                        // Not a list. RESUME AT THE REFUTATION, not at `pos + 1`:
+                        // the stop is either this line's newline or a raw
+                        // non-closer backslash, and in back position a pipe never
+                        // terminates a scan — so every pipe in between would refute
+                        // on that identical byte. Resuming at `pos + 1` instead
+                        // re-scans to the same stop for each of them, which is
+                        // quadratic on a pipe-dense line. The pipe stays ordinary
+                        // content inside this same Text run: no token, no split.
+                        Err(stop) => cursor = stop,
+                    }
+                }
                 // A confirmed "//" — split this call's output into two Text
                 // segments around it.
                 SLASH => {
@@ -1137,6 +1260,150 @@ mod tests {
         assert_eq!(kinds_and_text("\\w|a\\|b|\\w*")[1], (ATTRS, "|a\\|b|"));
     }
 
+    /// 5B rung 2 in BACK position: the list trails real content, found by the
+    /// mode-swapped pipe needle. Deprecated in 3.2, removed in 4 — recognized
+    /// unconditionally anyway, because "wrong form for your declared version"
+    /// is lint severity, never a lexing decision.
+    #[test]
+    fn back_position_attribute_lists() {
+        assert_eq!(
+            kinds_and_text("\\w gracious|lemma=\"grace\"\\w*"),
+            vec![
+                (MARKER, "\\w "),
+                (TEXT, "gracious"),
+                (ATTRS, "|lemma=\"grace\""),
+                (CLOSING, "\\w*"),
+            ]
+        );
+        // The bare default-value form: one span, no interior parse.
+        assert_eq!(kinds_and_text("\\w Jésus|Jesus\\w*")[2], (ATTRS, "|Jesus"));
+        // The proposal's own "ridiculous but legal" case — TWO lists on one
+        // node, front and back, both kept in source order so passthrough is
+        // byte-identical. "Later definition wins" is the interpreter's merge
+        // rule; the lexer never resolves it.
+        assert_eq!(
+            kinds_and_text("\\w |Fred|Jésus|Jesus\\w*"),
+            vec![
+                (MARKER, "\\w "),
+                (ATTRS, "|Fred|"),
+                (TEXT, "Jésus"),
+                (ATTRS, "|Jesus"),
+                (CLOSING, "\\w*"),
+            ]
+        );
+        // Back position, so interior pipes are just span BYTES: rung 1 is
+        // ineligible once content has been seen.
+        assert_eq!(kinds_and_text("\\w a|b|c\\w*")[2], (ATTRS, "|b|c"));
+        // Lexically identical to the first case even though `add` defines no
+        // attributes at all. AttrStatus is lint's business; the shape set never
+        // depends on the row.
+        assert_eq!(
+            kinds_and_text("\\add x|k=\"v\"\\add*")[2],
+            (ATTRS, "|k=\"v\"")
+        );
+        // A hot-path character marker (`\ft` is one of the fused arms) arms the
+        // needle too — the precomputed `Hot::attrs_frame` agreeing with the
+        // general path is what `fast_path_identity` pins.
+        assert_eq!(
+            kinds_and_text("\\ft x|k=\"v\"\\ft*")[2],
+            (ATTRS, "|k=\"v\"")
+        );
+    }
+
+    /// The three INTERIOR syntaxes the spec defines inside an attribute list —
+    /// the unnamed default value, comma-separated multiple values, and
+    /// colon-separated compound parts — are invisible to the scanner. None of
+    /// `,` `:` `=` `"` or space is a stop, so each is ONE span, and the
+    /// interpreter does the splitting on demand.
+    ///
+    /// Note especially that the spec's "whitespace adjacent to the comma
+    /// separators is ignored" is a NORMALIZATION rule and therefore must not
+    /// happen here: the span keeps `"a, b"` byte-for-byte so it round-trips,
+    /// and trimming belongs to whoever asks for the values.
+    #[test]
+    fn interior_attribute_syntax_is_one_span() {
+        // The default attribute: a bare value, no `=`. Binding it to the row's
+        // `default_attribute` is the interpreter's job; a row with no default
+        // is lint's.
+        assert_eq!(
+            kinds_and_text("\\w gracious|grace\\w*")[2],
+            (ATTRS, "|grace")
+        );
+        // Comma-separated values, spaces preserved exactly as written.
+        assert_eq!(
+            kinds_and_text("\\w x|lemma=\"a, b\" strong=\"H1,H2\"\\w*")[2],
+            (ATTRS, "|lemma=\"a, b\" strong=\"H1,H2\"")
+        );
+        // Colon-separated compound parts.
+        assert_eq!(
+            kinds_and_text("\\w x|x-content=\"alpha:beta\"\\w*")[2],
+            (ATTRS, "|x-content=\"alpha:beta\"")
+        );
+        // A whole real alignment word: several pairs, ONE span.
+        assert_eq!(
+            kinds_and_text("\\w In|x-occurrence=\"1\" x-occurrences=\"1\"\\w*"),
+            vec![
+                (MARKER, "\\w "),
+                (TEXT, "In"),
+                (ATTRS, "|x-occurrence=\"1\" x-occurrences=\"1\""),
+                (CLOSING, "\\w*"),
+            ]
+        );
+    }
+
+    /// The ladder is QUOTE-BLIND, on purpose: it tracks no `"…"` state, so the
+    /// delimiters win over quoting. Documented because it looks like a bug.
+    /// The spec gives attribute values no escape mechanism, `\|` covers the one
+    /// case that needs escaping, and U25001 depends on the pipe being a hard
+    /// delimiter — so quote state would add work to a hot scan purely to serve
+    /// strings that are already non-conforming. Failure mode is a truncated
+    /// span plus a lint finding; the bytes are always all still there.
+    #[test]
+    fn the_ladder_does_not_track_quotes() {
+        // A raw pipe inside a value ends a front-position list early…
+        assert_eq!(
+            kinds_and_text("\\w|lemma=\"a|b\"|\\w*")[1],
+            (ATTRS, "|lemma=\"a|")
+        );
+        // …which is exactly what `\|` is for.
+        assert_eq!(
+            kinds_and_text("\\w|lemma=\"a\\|b\"|\\w*")[1],
+            (ATTRS, "|lemma=\"a\\|b\"|")
+        );
+    }
+
+    /// The needle is MODE-SWAPPED: with no attrs-capable frame open, a pipe is
+    /// not a stop at all, so the text run never splits. Asserting token COUNT
+    /// is the point — a globally-armed needle would still pass a kinds check
+    /// while costing the whole corpus.
+    #[test]
+    fn the_pipe_needle_is_off_outside_a_character_frame() {
+        assert_eq!(kinds_and_text("\\p a|b|c d\n")[1], (TEXT, "a|b|c d"));
+        // A note frame takes the front form only, so it does NOT arm the
+        // needle: `\f`'s own pipe would be at a region start.
+        assert_eq!(kinds_and_text("\\f + x|y\\f*")[1], (TEXT, "+ x|y"));
+        // Closing the frame disarms it again.
+        assert_eq!(kinds_and_text("\\w a\\w* b|c\n")[3], (TEXT, " b|c"));
+    }
+
+    /// The needle's line bound, stated as behavior: a character frame whose
+    /// opener and trailing list sit on DIFFERENT lines is NOT recognized as a
+    /// list. Documented limitation, not an oversight — see
+    /// `ScanMode::attr_frames`. Lossless either way; lint reports the pipe.
+    #[test]
+    fn a_frame_does_not_carry_the_needle_across_a_newline() {
+        assert_eq!(
+            kinds_and_text("\\w gracious\nmore|lemma=\"x\"\\w*"),
+            vec![
+                (MARKER, "\\w "),
+                (TEXT, "gracious"),
+                (TokenKind::Newline, "\n"),
+                (TEXT, "more|lemma=\"x\""),
+                (CLOSING, "\\w*"),
+            ]
+        );
+    }
+
     /// Rung 3: a pipe that opens no list was never a delimiter. No token of
     /// its own (the `Pipe` kind is retired), no repair, and NOTHING consumed
     /// past its own line — that bound is the whole recovery story.
@@ -1252,3 +1519,4 @@ mod tests {
         assert_eq!(generated::name(milestone), "qt");
     }
 }
+

@@ -2782,6 +2782,9 @@ pub static ROWS: &[MarkerRow] = &[
         html_element: Some(HtmlElement::TableCell),
         priority: None,
     },
+    // 3.2 char/features/tl.html (read 2026-08-14): `\tl content|@lang\tl*` —
+    // `lang` is the DEFAULT attribute, "source language of the transliterated
+    // text according to ISO639-1 (2 letter codes)". Added by USFM 3.1.2.
     MarkerRow {
         marker: "tl",
         shape: SpellingShape::Any,
@@ -2801,8 +2804,8 @@ pub static ROWS: &[MarkerRow] = &[
         ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
-        defined_attributes: &[],
-        default_attribute: None,
+        defined_attributes: &[("lang", AttrStatus::Optional)],
+        default_attribute: Some("lang"),
         closing: ClosingBehavior::RequiredExplicit,
         deprecated: false,
         html_element: Some(HtmlElement::Span),
@@ -3141,6 +3144,8 @@ pub static ROWS: &[MarkerRow] = &[
         html_element: Some(HtmlElement::Span),
         priority: None,
     },
+    // 3.2 char/features/wl.html (read 2026-08-14): `\wl content|@lang\wl*` —
+    // same shape as `tl`, `lang` is the DEFAULT attribute. Added by 3.1.2.
     MarkerRow {
         marker: "wl",
         shape: SpellingShape::Any,
@@ -3160,8 +3165,8 @@ pub static ROWS: &[MarkerRow] = &[
         ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
-        defined_attributes: &[],
-        default_attribute: None,
+        defined_attributes: &[("lang", AttrStatus::Optional)],
+        default_attribute: Some("lang"),
         closing: ClosingBehavior::RequiredExplicit,
         deprecated: false,
         html_element: Some(HtmlElement::Span),
