@@ -29,9 +29,22 @@ pub enum TokenKind {
     Newline,
     OptBreak,
     Text,
-    /// The one-span payload after `\c`/`\v` (step 4.3): `1`, `12-14a`, junk —
-    /// the scanner never looks inside; the designator INTERPRETER judges it.
+    /// The one-span payload after `\c`/`\v`: `1`, `12-14a`, junk — the scanner
+    /// never looks inside; the designator INTERPRETER judges it against the
+    /// spec's `VERSE` pattern.
     Designator,
+    /// The note caller after `\f`/`\fe`/`\ef`/`\x`/`\ex`: `+`, `-`, `?`, or a
+    /// custom string. Spec pattern is `/[^\\\s]+/`, so the conventional values
+    /// are just the common cases of one general run, never an enumeration.
+    NoteCaller,
+    /// The book identifier after `\id`: `GEN`, `1JN`. One span up to the first
+    /// space, so `\id GEN Some description` leaves the description as ordinary
+    /// Text. NOT validated here — "3 uppercase characters" and "is a known
+    /// code" are both lint's, against an authored books table.
+    ///
+    /// Deliberately not the id line's whole remainder: the code is what
+    /// `Header.book` wants to point at, and the description is content.
+    BookCode,
     /// One attribute list, INCLUDING its delimiting pipe(s): `|lemma="grace"`
     /// (legacy trailing) or `|cat="x"|` (U25001 node-initial, closing pipe and
     /// any HS it absorbs included). A SPAN, never a container — the interior is
@@ -74,6 +87,8 @@ impl TokenKind {
             Self::AttrList => 6,
             Self::Text => 7,
             Self::Designator => 8,
+            Self::NoteCaller => 9,
+            Self::BookCode => 10,
         }
     }
 
@@ -95,6 +110,8 @@ impl TokenKind {
                     6 => Self::AttrList,
                     7 => Self::Text,
                     8 => Self::Designator,
+                    9 => Self::NoteCaller,
+                    10 => Self::BookCode,
                     _ => unreachable!("unknown kind bits {bits:#04b}"),
                 }
             }
@@ -158,6 +175,8 @@ mod tests {
             TokenKind::AttrList,
             TokenKind::Text,
             TokenKind::Designator,
+            TokenKind::NoteCaller,
+            TokenKind::BookCode,
         ];
         for kind in all {
             assert_eq!(TokenKind::from_bits(kind.to_bits()), kind);

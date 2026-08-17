@@ -45,3 +45,25 @@ surgery.
 newline. The scanner already never folds a newline (`ws_run_end` eats
 space/tab only), so those rows are not counterexamples; they just make the
 enum look more load-bearing to the scanner than it is.
+
+## A `\w` fused arm — the aligned-corpus equivalent of 4.4 (2026-08-13)
+
+NOT a deletion, so it needs a stronger justification than the item above —
+but the number is large enough to record. `common_marker_checks`'s
+membership is the top-9 measured on PROSE (en_ulb/bsb). On word-aligned
+text the distribution is completely different: `\w` and `\zaln-s` dominate,
+`\w` appearing once per WORD, and neither has an arm — so en_ult's hottest
+path is entirely general-path (`marker_end` → `classify_marker` →
+`resolve_marker_idx` → the fold predicate, three walks over the same ≤4
+bytes).
+
+Evidence it would pay: 5B measured en_ult at 1017 MiB/s vs prose's ~1700,
+and 5B's own residual cost is concentrated on exactly this shape
+(`\w text|attrs\w*`). An arm could fuse marker + delimiter + the
+back-position ladder for the whole word in one shape test.
+
+**Before building it:** re-measure the frequency table on an aligned corpus
+(planning/marker-frequencies.md is prose-only, which is why `\w` isn't in
+the cut), and check this against the "one-load marker path" spike already
+banked at the bottom of NEXT-STEPS — they overlap, and the spike should
+come first since it helps every marker rather than one.

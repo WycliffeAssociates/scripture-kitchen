@@ -186,7 +186,7 @@ static PACKED: [u128; 153] = [
     0x0000001800100080180431, // 116 sr
     0x0000000600008040180411, // 117 sts
     0x000000002f0703082802a2, // 118 sup
-    0x000000000f070108280292, // 119 ta
+    0x000404800f070108280292, // 119 ta
     0x0008030000100158300746, // 120 table
     0x0000001e080002804782fc, // 121 tc
     0x0000001e080002804782fc, // 122 tcc
@@ -194,7 +194,7 @@ static PACKED: [u128; 153] = [
     0x0000001e080002804782fc, // 124 th
     0x0000001e080002804782fc, // 125 thc
     0x0000001e080002804782fc, // 126 thr
-    0x004404800f070108280292, // 127 tl
+    0x004404c00f070108280292, // 127 tl
     0x0000000600008040198411, // 128 toc
     0x0000000600008040198411, // 129 toca
     0x0000001e0010024038027b, // 130 tr
@@ -202,14 +202,14 @@ static PACKED: [u128; 153] = [
     0x00000002000080401035cd, // 132 usfm
     0x000000000e102300002985, // 133 v
     0x0000000000000308002582, // 134 va
-    0x004804c000100158300776, // 135 vid
+    0x0048050000100158300776, // 135 vid
     0x0000000000000308002582, // 136 vp
-    0x004c05400f070108280292, // 137 w
+    0x004c05800f070108280292, // 137 w
     0x000000000f070108280292, // 138 wa
     0x000000000f070108280292, // 139 wg
     0x000000000f070108280292, // 140 wh
     0x000000000f070108280292, // 141 wj
-    0x004404800f070108280292, // 142 wl
+    0x004404c00f070108280292, // 142 wl
     0x00000024005702c8204323, // 143 x
     0x0000000040000130280302, // 144 xdc
     0x0000000040000110280302, // 145 xk
@@ -384,7 +384,7 @@ static NAMES: [&str; 153] = [
 /// Every row's `defined_attributes`, concatenated; a row's slice is
 /// `[ATTR_OFF .. ATTR_OFF + ATTR_LEN]`. Identical runs are shared.
 #[rustfmt::skip]
-static ATTRS: [(&str, AttrStatus); 24] = [
+static ATTRS: [(&str, AttrStatus); 25] = [
     ("src", AttrStatus::Required),
     ("size", AttrStatus::Required),
     ("ref", AttrStatus::Required),
@@ -403,6 +403,7 @@ static ATTRS: [(&str, AttrStatus); 24] = [
     ("sid", AttrStatus::Optional),
     ("eid", AttrStatus::Optional),
     ("gloss", AttrStatus::Optional),
+    ("a-*", AttrStatus::Optional),
     ("lang", AttrStatus::Optional),
     ("ref", AttrStatus::Required),
     ("h", AttrStatus::Optional),

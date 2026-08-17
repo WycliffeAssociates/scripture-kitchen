@@ -2627,6 +2627,11 @@ pub static ROWS: &[MarkerRow] = &[
         html_element: Some(HtmlElement::Sup),
         priority: None,
     },
+    // 3.2 char/features/ta.html (read 2026-08-14): `\ta content|@a-<identifier>\ta*`
+    // — "one or more attributes for providing text alternatives. Each attribute
+    // should begin with `a-`". No fixed names exist, so this row carries the
+    // PREFIX WILDCARD spelling ruled at `defined_attributes`; the "one or more"
+    // is family-level cardinality and therefore lint's. Added by USFM 3.1.2.
     MarkerRow {
         marker: "ta",
         shape: SpellingShape::Any,
@@ -2646,7 +2651,7 @@ pub static ROWS: &[MarkerRow] = &[
         ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
-        defined_attributes: &[],
+        defined_attributes: &[("a-*", AttrStatus::Optional)],
         default_attribute: None,
         closing: ClosingBehavior::RequiredExplicit,
         deprecated: false,

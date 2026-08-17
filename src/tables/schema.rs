@@ -916,6 +916,26 @@ pub struct MarkerRow {
     /// column — a per-row boolean would be `true` for all ~60 character rows and
     /// tell the reader nothing.
     ///
+    /// **A name ending in `*` is a PREFIX WILDCARD** the
+    /// entry `("a-*", Optional)` means "any attribute whose name begins with
+    /// `a-`". `\ta` (3.1.2, U24002 Textual Alternatives) needs it — its spec
+    /// defines no fixed names at all, only "each attribute should begin with
+    /// `a-`" — so an exact-name list can express NEITHER the positive rule
+    /// (every legal `a-…` would lint as unknown) nor the negative one (an
+    /// attribute here that does not start with `a-` should be flagged).
+    ///
+    /// A sentinel rather than new schema, for two reasons: `*` is not legal in
+    /// an attribute name, so it cannot collide with a real one; and prefix-ness
+    /// is a property of the NAME, not of the status, so folding it into
+    /// [`AttrStatus`] would mix axes the same way carrying default-ness there
+    /// would. The `\z` markers.ext config shape needs the identical feature and
+    /// should reuse this spelling. Whatever matches names is the ONE place that
+    /// learns the convention — the scanner never reads this column.
+    ///
+    /// Note the pattern entry says nothing about cardinality: `\ta`'s "one or
+    /// more" is a family-level requirement, which lands in the same place as
+    /// point 2 above — a lint rule, not a status.
+    ///
     /// Codegen turns the names into side-array indices. Read by: interpreters
     /// (attribute list), lint (missing-required / unknown / deprecated
     /// findings), export.

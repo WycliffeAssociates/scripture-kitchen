@@ -84,7 +84,14 @@ struct ScanState {
     // payload (`\c`/`\v`), until the next region: text becomes
     // ONE Designator token; anything else (newline, marker) drops the
     // expectation — a `\v` with no number emits no empty token.
-    pending_designator: bool,
+    // What payload the marker just emitted still owes, straight off its row —
+    // `Payload::None` when nothing is pending. Carrying the row's own enum
+    // rather than a bool per payload keeps one code path for all three carved
+    // payloads (`\c`/`\v` designators, note callers, the `\id` book code): the
+    // text arm maps it to a token kind and clears it. The expectation dies at
+    // the next region if nothing is there to take, so a payload-less `\v` or
+    // `\id` emits no empty token.
+    pending_payload: Payload,
     // True from the moment an opener/milestone token is emitted until ANY
     // other token is. Its one job is deciding whether a pipe is in FRONT
     // position (U25001: attributes precede content), and because the text
@@ -194,7 +201,7 @@ impl<'a> Scanner<'a> {
             tokens: Vec::with_capacity(source.len() / 6),
             mode: ScanState {
                 awaiting_delimiter_ws: false,
-                pending_designator: false,
+                pending_payload: Payload::None,
                 after_marker: false,
                 attr_frames: 0,
             },
@@ -269,6 +276,11 @@ struct Hot {
     /// same `MarkerKind` test the general path runs, precomputed so no fast
     /// arm ever reads the table.
     attrs_frame: bool,
+    /// The payload this row owes after its delimiter — `NoteCaller` for `\f`,
+    /// `Designator` for `\v`, `None` for the rest. Precomputed for the same
+    /// reason as the others: an arm must owe EXACTLY what the general path
+    /// owes, and `fast_path_identity` is what proves it.
+    payload: Payload,
 }
 
 #[derive(Clone, Copy)]
@@ -300,6 +312,7 @@ impl HotIdx {
                     _ => 0,
                 },
                 attrs_frame: opens_attrs_frame(idx),
+                payload: generated::payload(idx),
             }
         };
         HotIdx {
@@ -349,7 +362,7 @@ impl Scanner<'_> {
                 self.push_marker(index, digits_from, self.hot.v.idx);
                 self.push_token(TokenKind::Designator, digits_from, end);
                 self.mode.awaiting_delimiter_ws = false;
-                self.mode.pending_designator = false;
+                self.mode.pending_payload = Payload::None;
                 // The designator is content, so this arm ends with a token that is
                 // NOT a marker — matching the general path, where the text arm
                 // clears the flag before taking the designator.
@@ -404,10 +417,12 @@ impl Scanner<'_> {
                 let end = ws_run_end(self.bytes, name_end + 1);
                 self.push_marker(index, end, hot.idx);
                 self.mode.awaiting_delimiter_ws = false;
-                self.mode.pending_designator = false;
+                self.mode.pending_payload = Payload::None;
                 // Every hot marker is an opener, so a pipe right after the folded
                 // delimiter is in front position — same as the general path.
                 self.mode.after_marker = true;
+                // `\f` owes its note caller here exactly as the general path does.
+                self.mode.pending_payload = hot.payload;
                 if hot.attrs_frame {
                     self.mode.attr_frames = self.mode.attr_frames.saturating_add(1);
                 }
@@ -418,10 +433,11 @@ impl Scanner<'_> {
                 // marker alone and let the space open the next text run.
                 self.push_marker(index, name_end, hot.idx);
                 self.mode.awaiting_delimiter_ws = false;
-                self.mode.pending_designator = false;
+                self.mode.pending_payload = Payload::None;
                 // Still true here, and still correct: the space is content, so the
                 // text arm clears the flag before any pipe can be reached.
                 self.mode.after_marker = true;
+                self.mode.pending_payload = hot.payload;
                 if hot.attrs_frame {
                     self.mode.attr_frames = self.mode.attr_frames.saturating_add(1);
                 }
@@ -433,7 +449,7 @@ impl Scanner<'_> {
                 let end = newline_end(self.bytes, name_end);
                 self.push_token(TokenKind::Newline, name_end, end);
                 self.mode.awaiting_delimiter_ws = false;
-                self.mode.pending_designator = false;
+                self.mode.pending_payload = Payload::None;
                 // This arm ends on the Newline token, not the marker.
                 self.mode.after_marker = false;
                 // The line ended, so no frame this marker opened can still be
@@ -586,7 +602,7 @@ impl Scanner<'_> {
     #[inline(always)]
     fn newline_arm(&mut self, index: usize) -> usize {
         self.mode.awaiting_delimiter_ws = false;
-        self.mode.pending_designator = false;
+        self.mode.pending_payload = Payload::None;
         self.mode.after_marker = false;
         // Attribute lists never span a line, so the needle is disarmed here —
         // the bound on what a stale count can cost.
@@ -713,10 +729,15 @@ impl Scanner<'_> {
         // Only an opener or milestone can have attributes in front of it; a
         // closer has nothing in front of it by definition.
         self.mode.after_marker = matches!(kind, TokenKind::Marker { .. } | TokenKind::Milestone);
-        //  does this row consume a designator payload (`\c`/`\v`)?
-        // The assignment doubles as clearing any stale expectation.
-        self.mode.pending_designator = matches!(kind, TokenKind::Marker { .. })
-            && matches!(generated::payload(idx), Payload::Designator);
+        // Does this row owe a carved payload (`\c`/`\v` designator, a note
+        // caller, `\id`'s book code)? Straight off the row; the assignment
+        // doubles as clearing any stale expectation. Only OPENERS owe one — a
+        // closer's row is shared with its opener and would otherwise re-arm it.
+        self.mode.pending_payload = if matches!(kind, TokenKind::Marker { .. }) {
+            generated::payload(idx)
+        } else {
+            Payload::None
+        };
         // Attrs-capable frame bookkeeping — see `ScanMode::attr_frames`. Any
         // closer decrements, even a mismatched one: the count only gates a
         // needle, so being approximately right costs at most one refuted
@@ -902,10 +923,21 @@ fn escape_len(bytes: &[u8], pos: usize) -> Option<usize> {
     }
 }
 
-/// Boundary: where a pending designator ends — the next structural stop.
-/// One span, interior NEVER parsed here: `1`, `12-14a`, junk alike; the
-/// linter can validate the content
-fn designator_end(bytes: &[u8], from: usize) -> usize {
+/// Boundary: where a carved payload ends — the next structural stop. Shared by
+/// all three (designator, note caller, book code), because all three are "the
+/// run of bytes up to the next structural byte" and none is validated here.
+///
+/// The interior is NEVER parsed: `1`, `12-14a`, `GEN`, `GENESIS`, `+`, junk
+/// alike get one span, and the interpreter or lint judges the content. Two
+/// specifics worth knowing:
+///
+/// - The note caller's spec pattern is `/[^\\\s]+/`, which would admit a pipe;
+///   stopping at one anyway is REQUIRED, because `\f |aid="x"| + …` is U25001's
+///   front-position attribute list, not a caller. (In practice that pipe sits at
+///   a region start and the dispatch arm takes it before this is reached.)
+/// - Stopping at the first space is what makes `\id GEN Some description` give
+///   the CODE as the payload and leave the description as ordinary Text.
+fn payload_end(bytes: &[u8], from: usize) -> usize {
     let mut index = from;
     while index < bytes.len() && !matches!(bytes[index], SPACE | TAB | CR | LF | BACKSLASH | PIPE) {
         index += 1;
@@ -925,16 +957,25 @@ impl Scanner<'_> {
         // be in front position. That is what reduces "front" to "the dispatch
         // loop found the pipe".
         self.mode.after_marker = false;
-        //the first content region after `\c`/`\v` is its designator —
-        // one token, then this arm is done; whatever follows re-enters the loop
-        // as ordinary text.
-        if self.mode.pending_designator {
-            self.mode.pending_designator = false;
-            let end = designator_end(bytes, index);
-            // A region opening with an escape (`\v \~…`) has no number to take —
-            // fall through to the ordinary scan, same as a designator-less `\v`.
+        // The first content region after a payload-owing marker IS that payload
+        // — one token, then this arm is done; whatever follows re-enters the
+        // loop as ordinary text. `Version` (`\usfm 3.0`) deliberately carves
+        // NOTHING: its Text token is already isolated by the line ending, and
+        // its only consumer reads it off the adjacent marker.
+        let payload_kind = match self.mode.pending_payload {
+            Payload::Designator => Some(TokenKind::Designator),
+            Payload::NoteCaller => Some(TokenKind::NoteCaller),
+            Payload::BookCode => Some(TokenKind::BookCode),
+            Payload::None | Payload::Version => None,
+        };
+        self.mode.pending_payload = Payload::None;
+        if let Some(kind) = payload_kind {
+            let end = payload_end(bytes, index);
+            // A region opening with an escape (`\v \~…`) has nothing to take —
+            // fall through to the ordinary scan, same as a payload-less `\v`,
+            // and emit no empty token.
             if end > index {
-                self.push_token(TokenKind::Designator, index, end);
+                self.push_token(kind, index, end);
                 return end;
             }
         }
@@ -1061,6 +1102,8 @@ mod tests {
     const MS_END: TokenKind = TokenKind::MilestoneEnd;
     const TEXT: TokenKind = TokenKind::Text;
     const ATTRS: TokenKind = TokenKind::AttrList;
+    const CALLER: TokenKind = TokenKind::NoteCaller;
+    const BOOK: TokenKind = TokenKind::BookCode;
 
     fn kinds_and_ranges(tokens: &[Token]) -> Vec<(TokenKind, usize, usize)> {
         tokens
@@ -1310,6 +1353,122 @@ mod tests {
         );
     }
 
+    /// The note caller: one span after the delimiter, spec pattern
+    /// `/[^\\\s]+/`, so `+`/`-`/`?` are just its conventional values and the
+    /// scanner enumerates nothing.
+    #[test]
+    fn notes_and_cross_references_carve_their_caller() {
+        assert_eq!(
+            kinds_and_text("\\f + \\ft text\\f*"),
+            vec![
+                (MARKER, "\\f "),
+                (CALLER, "+"),
+                (TEXT, " "),
+                (MARKER, "\\ft "),
+                (TEXT, "text"),
+                (CLOSING, "\\f*"),
+            ]
+        );
+        // A note whose content is bare text: without carving, the caller and the
+        // content would share ONE Text token with nothing to separate them.
+        // This is the case that justifies the token kind.
+        assert_eq!(
+            kinds_and_text("\\f - bare note\\f*"),
+            vec![
+                (MARKER, "\\f "),
+                (CALLER, "-"),
+                (TEXT, " bare note"),
+                (CLOSING, "\\f*"),
+            ]
+        );
+        // Not an enumeration — a custom caller string is one run.
+        assert_eq!(
+            kinds_and_text("\\f ?custom \\ft x\\f*")[1],
+            (CALLER, "?custom")
+        );
+        // Cross-references owe one too (`x`, and `fe`/`ef`/`ex` alike).
+        assert_eq!(kinds_and_text("\\x - \\xo 1.1\\x*")[1], (CALLER, "-"));
+        // U25001 front-position attributes on a note: the list comes FIRST and
+        // the caller expectation must survive it, exactly as `\v`'s designator
+        // survives `\v|script="Arab"| 1`.
+        assert_eq!(
+            kinds_and_text("\\f |aid=\"n1\"| + \\ft x\\f*")[..3],
+            [(MARKER, "\\f "), (ATTRS, "|aid=\"n1\"| "), (CALLER, "+")]
+        );
+        // Nothing to take: no empty token, same rule as a designator-less `\v`.
+        assert_eq!(
+            kinds_and_text("\\f\n"),
+            vec![(MARKER, "\\f"), (TokenKind::Newline, "\n")]
+        );
+    }
+
+    /// `\id`'s book code stops at the first space, which is what leaves the
+    /// optional description as ordinary content. Nothing is validated here: the
+    /// spec's own prose ("a standard 3-character identifier" + the books list)
+    /// and its railroad pattern disagree — the pattern as published admits none
+    /// of the 27 digit-leading codes like `1JN` — so shape and membership are
+    /// both lint's, against an authored books table.
+    #[test]
+    fn id_carves_the_book_code_and_leaves_the_description() {
+        assert_eq!(
+            kinds_and_text("\\id GEN Some description\n"),
+            vec![
+                (MARKER, "\\id "),
+                (BOOK, "GEN"),
+                (TEXT, " Some description"),
+                (TokenKind::Newline, "\n"),
+            ]
+        );
+        // Digit-leading codes are ordinary here, whatever the railroad says.
+        assert_eq!(kinds_and_text("\\id 1JN\n")[1], (BOOK, "1JN"));
+        // Wrong shape is still ONE span — the anchor lint wants.
+        assert_eq!(kinds_and_text("\\id GENESIS\n")[1], (BOOK, "GENESIS"));
+        assert_eq!(kinds_and_text("\\id gen\n")[1], (BOOK, "gen"));
+        // No code at all: no empty token.
+        assert_eq!(
+            kinds_and_text("\\id\n"),
+            vec![(MARKER, "\\id"), (TokenKind::Newline, "\n")]
+        );
+    }
+
+    /// `\usfm 3.0` carves NOTHING (open question, current answer): the version
+    /// string is already isolated by the line ending, and its only consumer —
+    /// lint asking which version is declared — reads it off the adjacent
+    /// marker, the same adjacency shape as `ca`/`cp`.
+    #[test]
+    fn the_version_marker_carves_no_payload() {
+        assert_eq!(
+            kinds_and_text("\\usfm 3.0\n"),
+            vec![
+                (MARKER, "\\usfm "),
+                (TEXT, "3.0"),
+                (TokenKind::Newline, "\n"),
+            ]
+        );
+    }
+
+    /// A Byte Order Mark is ALLOWED at the start of a file
+    /// so it is not an error and nothing should flag it. It lexes as what it
+    /// is — ordinary content, three bytes of Text — which keeps the partition
+    /// exact and round-trips the file byte-for-byte.
+    ///
+    /// The consequence for anything downstream: `\id` is NOT guaranteed to be
+    /// the first token, so find it by SEARCHING for the marker, never by
+    /// indexing token 0. (Header emission is the first consumer that will
+    /// care.)
+    #[test]
+    fn a_leading_byte_order_mark_is_content() {
+        assert_eq!(
+            kinds_and_text("\u{FEFF}\\id GEN\n"),
+            vec![
+                (TEXT, "\u{FEFF}"),
+                (MARKER, "\\id "),
+                (TokenKind::BookCode, "GEN"),
+                (TokenKind::Newline, "\n"),
+            ]
+        );
+    }
+
     /// The three INTERIOR syntaxes the spec defines inside an attribute list —
     /// the unnamed default value, comma-separated multiple values, and
     /// colon-separated compound parts — are invisible to the scanner. None of
@@ -1380,8 +1539,9 @@ mod tests {
     fn the_pipe_needle_is_off_outside_a_character_frame() {
         assert_eq!(kinds_and_text("\\p a|b|c d\n")[1], (TEXT, "a|b|c d"));
         // A note frame takes the front form only, so it does NOT arm the
-        // needle: `\f`'s own pipe would be at a region start.
-        assert_eq!(kinds_and_text("\\f + x|y\\f*")[1], (TEXT, "+ x|y"));
+        // needle: `\f`'s own pipe would be at a region start. (Index 2 because
+        // the `+` is now carved as the note caller.)
+        assert_eq!(kinds_and_text("\\f + x|y\\f*")[2], (TEXT, " x|y"));
         // Closing the frame disarms it again.
         assert_eq!(kinds_and_text("\\w a\\w* b|c\n")[3], (TEXT, " b|c"));
     }
@@ -1519,4 +1679,3 @@ mod tests {
         assert_eq!(generated::name(milestone), "qt");
     }
 }
-

@@ -1,40 +1,68 @@
 # Next steps
 
-Slow on purpose. Plain language so this can be picked up cold after a break.
-Vocabulary lives in GLOSSARY.md; the lint and braid layer designs in
-ideas/committed/. This file is the open queue, "what code to write next, in
-what order", and the settled design the code doesn't yet embody.
+The OPEN QUEUE only: what to write next, the questions blocking it, and
+settled design the code doesn't embody yet. Implementation history is not
+kept here — the code and its doc comments are the record, git is the log.
+Vocabulary: GLOSSARY.md. Lint and braid designs: ideas/committed/.
+Unproven simplification leads: investigate-later.md.
 
-## Where we actually are (2026-08-12)
+## Where we are (2026-08-13)
 
-- **Done**: token/scanner split (8-byte row, boundary finders own the
-  cursor, `classify_marker` position-free) · perf experiments banked in
-  `src/experiments/` (see Benchmarks under Later) · the marker table
-  (`src/tables/rows.rs`, 151 rows, idx 0 = empty row) · codegen
-  (`src/tables/emit.rs` → `generated.rs`, checked in, freshness-tested;
-  one u128/row) · partition oracle (`tests/partition_oracle.rs`:
-  contiguous spans, `concat(spans) == source`, 226 corpus books) ·
-  spec-diff (`planning/spec_contexts_diff.py`, needs a tcdocs clone).
-- **The next CODE step is 4.1.** Nothing in the scanner reads the table yet.
-- The design rulings ([A]–[P], Q16, the axis split, adjacency) are ENCODED —
-  in schema.rs's types and doc comments, rows.rs values, and the sections
-  below. The code is the record; there is no separate ledger to consult.
+The scanner is COMPLETE. Token kinds, the marker table
+and its codegen, the fused fast arms, attribute lists (both U25001
+node-initial and legacy trailing), all three carved payloads (designator,
+note caller, `\id` book code), and the `Scanner` struct all landed;
+`tests/partition_oracle.rs` (226 books, `concat(spans) == source`) and
+`tests/fast_path_identity.rs` are green. ~1.7 GiB/s prose, ~1.0 aligned.
 
-## Open queue
+`\usfm` deliberately carves nothing — its Text is already isolated by the
+line ending, so lint reads the version off the adjacent marker.
 
-Delete items as they're ruled; rulings land here / in the schema.
+Nothing consumes tokens yet: no walker, no lint listener, no exports. The
+books table lint will need (valid codes only — membership, no ordering or
+testament data; onion has the list to copy) does not exist yet either.
 
-- **R1 — Read emit.rs, then commit the tree (Will, in progress).** 13
-  modified + 4 new files from the 2026-08-12 sitting, uncommitted.
-  Suggested split: table promotion / generator / row fixes / planning
-  docs. Everything else waits on this baseline.
-- Parked (not open, just not lost): Q-A7/`aid` with U25002; anchors.
+## Open questions — decide these before or while coding
+
+1. **Version data has nowhere to live.** `MarkerRow` carries only
+   `deprecated: bool`, but the facts keep accumulating: `ta` since 3.1.2,
+   trailing attribute lists deprecated 3.2 / removed 4, `\list-s` and
+   `\table-s` optional 3.2 / required 4. One of those is decisive — a
+   deprecated GRAMMAR FORM is owned by no row — so the lint rules table
+   has to be the primary home (`severity(code, declared_version)`, fed by
+   `\usfm`), with rows carrying per-marker since/until only if the rules
+   table can't. There are 46 spare bits per row if it comes to that.
+   **Deliberately unresolved until the rules table exists** (Will,
+   2026-08-14), since that may make the column unnecessary. Note the
+   scanner takes no runtime version input and has no rejection path — it
+   implements a static SUPERSET of forms — so this decision adds no
+   scanner branches either way.
+2. **Unicode whitespace where the spec says `hs`.** The fold takes SPACE
+   and TAB only, which is spec-correct, so a NBSP after a marker name
+   stays content and does not fold. Real files contain them. Lint's, we
+   think — the facts it needs are derivable (HS beyond the delimiter is
+   inside the marker span; span length vs name length recovers it).
+
+## Next code, in order
+
+1. **Header emission** — `Header`/`ChapterRun` are defined but never
+   produced. Unblocked: `\id`'s payload is now a `BookCode` token, and
+   remember a BOM means `\id` is not always token 0, so FIND it.
+2. **The walker** — settled design below, unbuilt. Stack first, with no
+   consumers, then the context lane.
+3. **Lint listener** — attaches at the `push_token` funnel per
+   ideas/committed/linter.md, which also lists the four attribute
+   findings owed (deprecated trailing form, both-lists, rung-3 hint,
+   mismatched terminator) and the interval where they are missing.
 
 ## Standing laws
 
 - **Partition oracle is not negotiable.** If a change wants to break
   `concat(spans) == source`, that's a design event — stop and log it.
-- **Rows change only through the spec-diff.** 6 of 7 row edits made by
+  (It has already caught what unit tests could not: a correct token
+  emitted in the wrong ORDER.)
+- **Rows change only through the spec-diff** (`planning/spec_contexts_diff.py`,
+  needs a tcdocs clone). 6 of 7 row edits made by
   inference (2026-08-12) were wrong; the diff caught all of them. The
   MARKER PAGE is the referee — the doc index, the RNG grammar (it
   describes USX), and the pages themselves disagree in spots; spec
@@ -42,68 +70,19 @@ Delete items as they're ruled; rulings land here / in the schema.
 - **Never synthesize tokens.** usfmtc fabricates an implicit `\p` when
   `\v` follows `\c`; we cannot — no span to give it. Flag, never repair.
   Every place the reference implementation normalizes is a place we lint.
+- **Normalization is never the lexer's.** Spans keep their bytes exactly
+  (`"a, b"` in an attribute value keeps its space); trimming happens when
+  a consumer asks for values, and editing a region is how a user opts
+  into it.
 - **Go slow** (Will, 2026-08-10): one behavior at a time, each behind the
-  oracle + playground verify, each with its perf delta read before the next.
+  oracle + playground verify, each with its perf delta read before the
+  next. Deltas under ~15% need MAX-of-8 runs and a re-measured baseline in
+  the same window — this machine's noise band is ~24% under load.
 
-## 4. Wire into the lexer — SLOWLY, in this order (**START HERE**)
+## The walker (SETTLED design, unbuilt)
 
-1. **marker_idx assignment only — DONE 2026-08-12.** Markers stamp their
-   row via `resolve_marker_idx`; spans/kinds verified byte-identical vs
-   the frozen variants. Perf: 1354–1377 → 962–975 MiB/s (−29%): ~5ns per
-   marker resolve against a ~5ns/token budget. Accepted; step 4's
-   `common_marker_checks` is the designed claw-back (suspects if it ever
-   needs profiling: the sparse-u64 `by_name` compare tree + `digits_ok`'s
-   second PACKED read).
-2. **Per-class ws fold — DONE 2026-08-12** (killed the ScanMode TODO;
-   `marker_arm` reads `ws_after_name` off the row). Perf: no measurable
-   cost over 4.1 (980–988 MiB/s). DESIGN EVENT, logged as expected:
-   token boundaries changed — closers (`\w*`) and `\*` never absorb
-   their trailing space (content, whatever their shared row says; kind
-   gates it), and unresolved markers (row 0 = NotRequired) absorb
-   nothing — their following space is content and OPENS the next text
-   run (one Text token; the stream never emits Text + Text). The
-   partition oracle held throughout (boundaries moved, bytes didn't).
-   The frozen `src/experiments/` variants now legitimately differ from
-   `crate::lex`; the playground verify was downgraded to asserting each
-   variant stream is itself a lossless partition.
-3. **Payload mode, narrow — DONE 2026-08-12.** `TokenKind::Designator`
-   (9th shape; NESTED_BIT slid to bit 4), `pending_designator` mode flag
-   set from the row's payload column, consumed by the text arm as ONE
-   span (happy digits, ranges, junk alike — the interpreter judges).
-   A designator-less `\c`/`\v` emits nothing extra. Perf: 985 →
-   1145–1192 MiB/s — a GAIN (verse numbers stopped paying the SIMD
-   text-run setup for a 1–3 byte token). NoteCaller rides this same
-   machinery next.
-4. **`common_marker_checks` — ALL 9 ARMS DONE 2026-08-12** (v q p s f b
-   ft fr xt, the measured cut). `lex` is `lex_impl::<FAST>`;
-   `lex_general_path_only` (fast checks compiled out) is the definition,
-   and `tests/fast_path_identity.rs` pins every arm token-identical to
-   it over all 226 corpus books. Rows + caps + fold classes resolved
-   ONCE per lex (`HotIdx`); every arm is conservative — off-shape
-   (`\+q`, `\q1a`, `\s5`, `\v  1`, `\f*`, `\fq`) falls to the general
-   path. Arms fuse: name + delimiter run (fold read off the row —
-   the identity test caught `\b`'s non-folding class on the first run),
-   `\v`'s digit designator, and the marker's own line ending (`\n` and
-   `\r\n` alike). Digit sweep is a scalar loop — 1–3 digits, SWAR has
-   nothing to chew. Perf: 968 (post-4.1 low) → **~1730 MiB/s** prose,
-   26%% ABOVE the pre-table baseline (1354–1377); aligned (en_ult,
-   zaln-dominated, arms rarely hit) unchanged ~1150.
-5. **USV escapes** (`\uXXXX`/`\UXXXXXXXX`, U25004: a text-arm escape
-   fold — today a literal backslash-u escape in source lexes as an unknown
-   marker and triggers
-   pop-all recovery) **+ the region-start escape dispatch fix** (the
-   pre-existing `\~`-at-region-start bug). Small, self-contained, can
-   land anywhere after 4.1.
-
-## 5. Walker + attributes (LAST — the complexity we deliberately deferred)
-
-The walker design is SETTLED (distilled here from the retired
-TRANSITIONS.md, 2026-08-12); what remains is writing it, in the same
-go-slow order: stack first (no consumers), then AttrList, then the
-context lane. Milestone sid/eid, note callers' full behavior, and the
-lint listener live HERE, not in step 4.
-
-### The walker
+Distilled from the retired TRANSITIONS.md, 2026-08-12. Milestone sid/eid
+pairing and note callers' full behavior live here, not in the scanner.
 
 - **One generic loop**: frames are stamped with their context at push
   time (`frame.ctx = row.contributes_context() or inherited` — Character
@@ -134,6 +113,25 @@ lint listener live HERE, not in step 4.
   what pairs an unknown `\zaln-s` with its `\*`.
 - **Displacement pops are LINT EVENTS**, not silent ("let them know we
   closed the footnote — it's supposed to close explicitly").
+- **Unknown/illegal markers recover by popping ALL frames and starting
+  fresh** — row 0 is what the walker keys that on (`ScopeKind::Unknown`).
+- **`\table-s`/`\list-s` break one stated assumption** (checked against
+  U25003 + the shipped ms/list.html, ms/table.html rows, 2026-08-14).
+  Lexing needs nothing — they are `-s`/`-e` milestones and their
+  attributes are ordinary front-position lists, verified — but:
+  `ScopeKind::Table`'s doc says "no marker opens a table, the walker
+  SYNTHESIZES the frame when `\tr` arrives," and these markers do open
+  one explicitly. So the walker needs BOTH paths and must not nest two
+  frames when a `\table-s` is followed by `\tr`. There is also no
+  `ScopeKind::List` at all, and both rows currently carry
+  `opens_scope: Some(ScopeKind::Milestone)` — decide whether a generic
+  milestone frame is enough or lists/tables need their own kinds, and fix
+  that doc comment either way. The proposal's closure rule ("a closing
+  milestone is required before anything that would otherwise end the
+  list/table, e.g. `\p`") is a pop barrier plus a lint event, the same
+  shape as the Sidebar barrier; the requirement level is version-keyed
+  (optional in 3.2, required in 4), like the trailing-attribute
+  deprecation.
 
 ### Positional context (the other half of legality)
 
@@ -152,77 +150,61 @@ lint listener live HERE, not in step 4.
 - `ca`/`cp`/`va`/`vp` are NOT context questions: adjacency lint rules of
   shape (lastMarker, token) — see linter.md. Their rows carry an empty
   context slice; the context machine abstains.
+- The exact lane encoding (per-token context values vs an event stream)
+  and the rules-table shape stay open until the walker exists, then get
+  tested against real rules.
 
-### Attributes (3.2, from the retired attributes doc)
-
-- BOTH forms, one `AttrList` token kind: node-initial (U25001, both
-  pipes, zero scope state) and legacy trailing (needs the stack).
-  Disambiguation is the three-rung pipe ladder: closing pipe →
-  node-initial; closing marker → legacy trailing + deprecation lint;
-  neither → content + lint hint. A pipe terminates a marker name
-  universally.
-- Defined attributes + defaults are table columns; `x-`/`z-` attributes
-  are legal on ANY character marker (kind-level fact). Conditional
-  cardinality (sid/eid pairing) is lint's business — linter.md.
-- `\z` customs are CONFIG-provided (markers.ext shape); zero behavior
-  unconfigured. Unknown/illegal markers: recovery = pop all, start fresh.
-  Two 3.2 facts the config shape must handle when designed: attribute
-  PATTERNS (`a-*` wildcards, so config attrs aren't a plain name list) and
-  the `standalone` category (maps onto no-scope + no-payload + no-ws; no
-  [`Category`] variant needed).
-
-## Later (when we're actually writing code again)
+## Later
 
 - **Verse designator interpreter** — the spec `VERSE` pattern
   (`/[1-9][0-9]*[\p{L}\p{Mn}]*(‏?[-,][0-9]+[\p{L}\p{Mn}]*)*/`); pure text
   rules, zero table. Writing its doc-comment IS writing the comparison
-  rules lint/vref need.
+  rules lint/vref need. The attribute interpreter is its sibling: k/v
+  over an `AttrList` span, including the default-attribute binding and
+  the comma/colon interior splits.
 - **Exports / render surfaces** (from the retired html-elements doc):
   three surfaces only — the marker-keyed `html_element` column, the
   token-KIND-keyed NoteCaller rendering, and SCOPE-DERIVED containers
   (list/table/chapter wrappers are synthesized around scopes, unreachable
   from any row). Heading base levels are an authored aux table; data
-  attributes always verbose.
-- **Structure events → editor tree.** Measure the wasm route FIRST before
-  building any JS twin.
+  attributes always verbose. USJ types are codegen from Token × the
+  table, and MUST use official USJ names (`para`, `char`, `note`, `ms` …)
+  — check the USJ JSON schema in usfm-grammar before naming.
+- **`\z` custom markers are CONFIG-provided** (markers.ext shape); zero
+  behavior unconfigured, which is what row 0 already gives us. Two 3.2
+  facts the config shape must handle when it gets designed: attribute
+  PATTERNS (`a-*` wildcards, so config attributes are not a plain name
+  list) and the `standalone` category (maps onto no-scope + no-payload +
+  no-ws — needs no new `Category` variant).
 - **Observation (lint finding) shape**: `{ code, anchor token, optional
   second token }` — severity/category/template in a rules table; message
   rendering on the consumer's side. Audit onion's messageParams first.
-- **Benchmarks**: playground timing until there are two real alternatives;
-  criterion then. Banked (2026-08, src/experiments/): serial 1.3 GiB/s
-  prose / 1.15 aligned; scalar floor 441 MiB/s; chapter-par hits the
-  machine ceiling on big books, loses on small ones — measured size
-  threshold, whole-project-open tool only. The `--chunked` verify
-  (token-identical split at `\c`) is the slot model's independence proof.
-  Two-stage indexing (the simdjson trick): tried, a wash — cost is token
-  pushes + arm logic, so speed comes from EMITTING FEWER TOKENS
-  (AttrList). The stop-cost ladder (`experiments/sweeps.rs`, 2026-08-12)
-  measured the granularity price directly: the full stop set alone runs
-  ~1.7 GiB/s vs a 16+ GiB/s one-needle ceiling — stop DENSITY is the
-  wall. Post-4.4, prose full-lex BEATS its own scan skeleton (fused arms
-  skip memchr restarts), so prose is done; aligned still leaves ~30%
-  inside the stops, recoverable only by fewer tokens (AttrList, `\z`).
-- **Feature-gate exports to shrink the wasm bundle** — wasm doesn't
-  tree-shake; combos = separate build artifacts, JS wrapper
-  dynamic-imports the right blob.
-- **Codegen USJ types** as the product of Token × marker table. MUST use
-  official USJ type names (`para`, `char`, `note`, `ms` …) — check the
-  USJ JSON schema in usfm-grammar before naming.
-
+- **Structure events → editor tree.** Measure the wasm route FIRST before
+  building any JS twin. Feature-gate exports when that happens — wasm
+  doesn't tree-shake, so combos are separate build artifacts.
+- **Perf, what is already known** (rules, not numbers; the numbers live
+  at their call sites in scanner.rs and in src/experiments/): stop
+  DENSITY is the wall, so speed comes from EMITTING FEWER TOKENS; a new
+  scalar loop over hot bytes costs far more than a new stop; the arms
+  must stay `#[inline(always)]`; when two scans in sequence want the same
+  needle over overlapping bytes, hand the answer forward. Prose full-lex
+  already beats its own scan skeleton. Chapter-par only pays on big
+  books — a whole-project-open tool, not a default. Criterion when there
+  are two real alternatives to compare.
 - **Spike candidate: one-load marker path** (2026-08-12, unbuilt). The
   general path walks the same ≤8 bytes three times (`marker_end`,
   `classify_marker`, `resolve_marker_idx`'s stem scan + u64 key build).
-  One 8-byte load + one SWAR alnum mask + ctz could feed all three:
-  end position, suffix byte (`*`/`-s`/`-e`), and the zero-padded name
-  key from a single register. NOT a straight SWAR win — the alnum walk
-  is 1 iteration for the Zipf-common names, so fixed-cost masking
-  (~12-16 ops) loses to the loop there; the win, if any, is
-  DE-DUPLICATING the three walks. Only worth a spike AFTER aligned's
-  fewer-tokens work (AttrList, `\z` arm) lands, since the hot arms
-  already bypass all three walks on prose. Spike first, per standing law.
+  One 8-byte load + one SWAR alnum mask + ctz could feed all three: end
+  position, suffix byte (`*`/`-s`/`-e`), and the zero-padded name key
+  from a single register. NOT a straight SWAR win — the alnum walk is 1
+  iteration for the Zipf-common names, so fixed-cost masking (~12-16 ops)
+  loses to the loop there; the win, if any, is DE-DUPLICATING the three
+  walks. Spike first, per standing law. See investigate-later.md, which
+  notes a `\w` fused arm would overlap this and should come second.
 
 ## Parked (do not start)
 
 Editing/session layer (design: ideas/committed/braidv2.md), multi-book
 project file format (toc, checksums, caches), diff/merge, publish. Each
-gets designed against this base once it holds.
+gets designed against this base once it holds. Also parked, not lost:
+Q-A7/`aid` with U25002; anchors. wasm comes after all of the above.
