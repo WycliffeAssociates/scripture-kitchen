@@ -18,42 +18,43 @@ note caller, `\id` book code), and the `Scanner` struct all landed;
 `\usfm` deliberately carves nothing — its Text is already isolated by the
 line ending, so lint reads the version off the adjacent marker.
 
-Nothing consumes tokens yet: no walker, no lint listener, no exports. The
-books table lint will need (valid codes only — membership, no ordering or
-testament data; onion has the list to copy) does not exist yet either.
+`ParseHeader` is emitted (renamed from `Header`, 2026-08-17 — three other
+things in this crate are already called a header), in its own module
+(src/parse_header.rs) and its own PASS over the token stream, not
+bookkeeping inside the scan, so the hot loop is untouched and a tokens-only
+caller pays nothing. `tests/parse_header_oracle.rs` pins the property the
+coordinate adapter rests on (runs tile the rows, and therefore the bytes,
+from the first `\c` to EOF) over the same 226 books.
 
-## Open questions — decide these before or while coding
+Still nothing else consumes tokens: no walker, no lint listener, no
+exports. The books table lint will need (valid codes only — membership, no
+ordering or testament data; onion has the list to copy) does not exist yet
+either.
 
-1. **Version data has nowhere to live.** `MarkerRow` carries only
-   `deprecated: bool`, but the facts keep accumulating: `ta` since 3.1.2,
-   trailing attribute lists deprecated 3.2 / removed 4, `\list-s` and
-   `\table-s` optional 3.2 / required 4. One of those is decisive — a
-   deprecated GRAMMAR FORM is owned by no row — so the lint rules table
-   has to be the primary home (`severity(code, declared_version)`, fed by
-   `\usfm`), with rows carrying per-marker since/until only if the rules
-   table can't. There are 46 spare bits per row if it comes to that.
-   **Deliberately unresolved until the rules table exists** (Will,
-   2026-08-14), since that may make the column unnecessary. Note the
-   scanner takes no runtime version input and has no rejection path — it
-   implements a static SUPERSET of forms — so this decision adds no
-   scanner branches either way.
-2. **Unicode whitespace where the spec says `hs`.** The fold takes SPACE
-   and TAB only, which is spec-correct, so a NBSP after a marker name
-   stays content and does not fold. Real files contain them. Lint's, we
-   think — the facts it needs are derivable (HS beyond the delimiter is
-   inside the marker span; span length vs name length recovers it).
+## Version data lives in LINT (Will, 2026-08-17)
+
+Ruled: `MarkerRow` gets no version column. The lint rules table is the
+home — `severity(code, declared_version)`, fed by `\usfm` — which is what
+the accumulating facts want anyway, since the decisive one is owned by no
+row: a deprecated GRAMMAR FORM (trailing attribute lists, deprecated 3.2 /
+removed 4) has no marker to hang on. Others to carry: `ta` since 3.1.2,
+`\list-s`/`\table-s` optional 3.2 / required 4. If a per-marker
+since/until ever turns out to be unavoidable there are 46 spare bits per
+row, but do not add it speculatively. The scanner is unaffected either
+way — it takes no runtime version input and has no rejection path, so it
+implements a static SUPERSET of forms.
 
 ## Next code, in order
 
-1. **Header emission** — `Header`/`ChapterRun` are defined but never
-   produced. Unblocked: `\id`'s payload is now a `BookCode` token, and
-   remember a BOM means `\id` is not always token 0, so FIND it.
-2. **The walker** — settled design below, unbuilt. Stack first, with no
+1. **The walker** — settled design below, unbuilt. Stack first, with no
    consumers, then the context lane.
-3. **Lint listener** — attaches at the `push_token` funnel per
+2. **Lint listener** — attaches at the `push_token` funnel per
    ideas/committed/linter.md, which also lists the four attribute
    findings owed (deprecated trailing form, both-lists, rung-3 hint,
-   mismatched terminator) and the interval where they are missing.
+   mismatched terminator) and the interval where they are missing. First
+   findings owed beyond that list, surfaced by header emission: a missing
+   `\id` (real — BSB Ecclesiastes ships without one) and a `\c` with no
+   designator (`ParseHeader` records an empty label span and judges nothing).
 
 ## Standing laws
 
@@ -108,9 +109,12 @@ pairing and note callers' full behavior live here, not in the scanner.
   (`opens_scope.is_some() || kind ∈ {Chapter, Verse}`), not a rank. The
   mask serves legality AND displacement, and they diverge exactly on the
   empty-mask adjacency rows (`ca` must never pop the stack).
-- **Milestone spelling overrides the table**: any token the lexer shaped
-  as `\name-s/-e` is scope-kind Milestone whatever the row says — that's
-  what pairs an unknown `\zaln-s` with its `\*`.
+- **Milestone spelling overrides the table, FOR UNKNOWN ROWS**: a token
+  the lexer shaped as `\name-s/-e` is scope-kind Milestone whatever the row
+  says — that's what pairs an unknown `\zaln-s` with its `\*`. SCOPED to
+  that purpose on 2026-08-17 (it used to be unconditional): when the row is
+  KNOWN, its `category` picks the frame, which is what lets `\table-s` and
+  `\list-s` open their containers. See `ScopeKind::List`'s doc comment.
 - **Displacement pops are LINT EVENTS**, not silent ("let them know we
   closed the footnote — it's supposed to close explicitly").
 - **Unknown/illegal markers recover by popping ALL frames and starting
@@ -118,15 +122,17 @@ pairing and note callers' full behavior live here, not in the scanner.
 - **`\table-s`/`\list-s` break one stated assumption** (checked against
   U25003 + the shipped ms/list.html, ms/table.html rows, 2026-08-14).
   Lexing needs nothing — they are `-s`/`-e` milestones and their
-  attributes are ordinary front-position lists, verified — but:
-  `ScopeKind::Table`'s doc says "no marker opens a table, the walker
-  SYNTHESIZES the frame when `\tr` arrives," and these markers do open
-  one explicitly. So the walker needs BOTH paths and must not nest two
-  frames when a `\table-s` is followed by `\tr`. There is also no
-  `ScopeKind::List` at all, and both rows currently carry
-  `opens_scope: Some(ScopeKind::Milestone)` — decide whether a generic
-  milestone frame is enough or lists/tables need their own kinds, and fix
-  that doc comment either way. The proposal's closure rule ("a closing
+  attributes are ordinary front-position lists, verified — but the walker
+  needs BOTH paths (synthesize on `\tr`, and accept an explicit
+  `\table-s`) and must not nest two frames when a `\table-s` is followed
+  by `\tr`. **RULED 2026-08-17** (Will): these milestones DO open the
+  container, and the walker gets there via `category`
+  (`MilestoneTable`/`MilestoneList`), not via `opens_scope` and not via the
+  `-s`/`-e` spelling — so the spelling law above is scoped to unknown rows
+  and no row edits are needed (no spec-diff). `ScopeKind::List` is added as
+  `Table`'s peer, and `ScopeKind::Table`'s stale "no marker opens a table"
+  claim is corrected; both variants now carry the full rationale, including
+  why a list needed no frame before U25003. The proposal's closure rule ("a closing
   milestone is required before anything that would otherwise end the
   list/table, e.g. `\p`") is a pop barrier plus a lint event, the same
   shape as the Sidebar barrier; the requirement level is version-keyed
@@ -187,7 +193,14 @@ pairing and note callers' full behavior live here, not in the scanner.
   DENSITY is the wall, so speed comes from EMITTING FEWER TOKENS; a new
   scalar loop over hot bytes costs far more than a new stop; the arms
   must stay `#[inline(always)]`; when two scans in sequence want the same
-  needle over overlapping bytes, hand the answer forward. Prose full-lex
+  needle over overlapping bytes, hand the answer forward. **A SECOND PASS
+  over the token rows is cheap — ~1 ns/token, 7-15% of a lex** (measured on
+  `ParseHeader`, numbers in parse_header.rs; `playground --parse-header-only`
+  prices any such pass; ~5.8 µs per prose book, ~106 µs per aligned one). So
+  the lex stays the wall, and the walker and lint listener do not have to fuse
+  into the scan to be affordable. That figure is a FLOOR, though — `ParseHeader`
+  is a read-only walk with no stack, so measure what a pass adds on
+  top of it rather than assuming it inherits 1 ns/token. Prose full-lex
   already beats its own scan skeleton. Chapter-par only pays on big
   books — a whole-project-open tool, not a default. Criterion when there
   are two real alternatives to compare.

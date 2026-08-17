@@ -549,6 +549,7 @@ pub fn opens_scope(idx: MarkerIdx) -> Option<ScopeKind> {
         9 => Some(ScopeKind::Sidebar),
         10 => Some(ScopeKind::Periph),
         11 => Some(ScopeKind::Table),
+        12 => Some(ScopeKind::List),
         _ => unreachable!(),
     }
 }
@@ -569,6 +570,7 @@ pub fn closes_scope(idx: MarkerIdx) -> Option<ScopeKind> {
         9 => Some(ScopeKind::Sidebar),
         10 => Some(ScopeKind::Periph),
         11 => Some(ScopeKind::Table),
+        12 => Some(ScopeKind::List),
         _ => unreachable!(),
     }
 }

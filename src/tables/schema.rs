@@ -263,11 +263,50 @@ pub enum ScopeKind {
     Milestone,
     // No `Chapter`/`Verse`: `\c`/`\v` are POINTS (Q16) — no frame, and the
     // walker needs no rank. Deleted 2026-08-12 with zero users.
-    /// No marker opens a table — the WALKER synthesizes this frame when `\tr`
-    /// arrives with no table already open (`\tr` needs it to know whether to
-    /// start one or join one). A peer of [`Self::Para`]. Unreachable from any
-    /// row, deliberately — same shape as `HtmlElement::Table`.
+    /// The container `\tr` rows and `\tc` cells hang off. A peer of
+    /// [`Self::Para`], and unreachable from any row — same shape as
+    /// `HtmlElement::Table`.
+    ///
+    /// The WALKER synthesizes this frame when `\tr` arrives with no table
+    /// already open (`\tr` needs it to know whether to start one or join
+    /// one). It said "no marker opens a table" until 2026-08-14, and that is
+    /// now FALSE: U25003 added `\table-s`/`\table-e`, which delimit one
+    /// explicitly (optional in 3.2, required in 4). Their rows still carry
+    /// `opens_scope: Some(ScopeKind::Milestone)` — honest, since a milestone
+    /// is what they are — so "unreachable from any row" holds; what changed
+    /// is that the walker needs BOTH paths and must not nest two frames when
+    /// a `\table-s` is followed by `\tr`.
+    ///
+    /// **How the explicit marker reaches this frame** (ruled 2026-08-17): the
+    /// walker keys the container off `category` — `MilestoneTable` here,
+    /// `MilestoneList` for [`Self::List`] — NOT off the row's `opens_scope`
+    /// and not off the `-s`/`-e` spelling. See [`Self::List`] for the rule
+    /// this resolves.
     Table,
+    /// The list container, `Self::Table`'s peer: same shape, same
+    /// unreachable-from-any-row status, same `category`-keyed entry
+    /// (`MilestoneList`), and the same export twin (`HtmlElement::ListContainer`).
+    ///
+    /// **It exists for `\list-s`/`\list-e` ALONE**, and that is worth stating
+    /// because nothing else in USFM needs it. `\li` is a PARAGRAPH: it opens
+    /// [`Self::Para`] and contributes `SpecContext::List`, so the context lane
+    /// already carries "inside a list" while the stack carries the open
+    /// paragraph. A list is FLAT — item after item is ordinary paragraph
+    /// displacement — whereas a table NESTS (table > row > cell) and `\tc`
+    /// must find its row. So no container frame was needed until U25003 gave
+    /// lists an explicit begin/end whose closure rule is a POP BARRIER, and a
+    /// barrier needs a frame to be a barrier ON. That, and only that, is what
+    /// this variant is for.
+    ///
+    /// **The rule this and [`Self::Table`] resolve** (ruled 2026-08-17): the
+    /// walker law "milestone spelling overrides the table" (NEXT-STEPS) would
+    /// otherwise make `\list-s`/`\table-s` plain `Milestone` frames. That law
+    /// is now SCOPED to rows with no better opinion — its purpose is pairing an
+    /// UNKNOWN `\zaln-s` with its `\*` — so a KNOWN row's category wins. This
+    /// needs no row edits, and therefore no spec-diff: both rows keep
+    /// `opens_scope: Some(ScopeKind::Milestone)`, which stays honest about what
+    /// they are, and the mapping lives in the walker where the frame is chosen.
+    List,
     TableRow,
     TableCell,
     Sidebar,

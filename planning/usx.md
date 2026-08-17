@@ -65,13 +65,13 @@ Verified against the shipped 3.2 pages, 2026-08-14:
    config shape should reuse the same spelling.
 2. **`tl` and `wl` `lang` — landed 2026-08-14** (Optional AND default, per
    the pages quoted above; codegen re-run).
-3. **There is no version column.** `MarkerRow` carries only
-   `deprecated: bool`, but version-keyed facts keep accumulating: `ta`
-   introduced in 3.1.2; trailing attribute lists deprecated in 3.2 and
-   removed in 4; `\list-s`/`\table-s` optional in 3.2 and required in 4.
-   Lint severity is supposed to be keyed on the declared version (the
-   `\usfm` marker's payload). Decide whether that needs a column, a
-   separate authored aux table, or stays in lint's own rules table.
+3. **There is no version column — RULED, and there won't be** (Will,
+   2026-08-17). Version-keyed facts (`ta` since 3.1.2; trailing attribute
+   lists deprecated 3.2 / removed 4; `\list-s`/`\table-s` optional 3.2 /
+   required 4) live in LINT's rules table, keyed on the declared version off
+   `\usfm`, not in `MarkerRow`. The decisive case is the one no row owns: a
+   deprecated grammar FORM has no marker to hang on. See NEXT-STEPS for the
+   full rationale.
 
 ## Losslessness, for the record
 

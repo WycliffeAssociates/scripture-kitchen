@@ -43,7 +43,7 @@ pub enum TokenKind {
     /// code" are both lint's, against an authored books table.
     ///
     /// Deliberately not the id line's whole remainder: the code is what
-    /// `Header.book` wants to point at, and the description is content.
+    /// `ParseHeader.book` wants to point at, and the description is content.
     BookCode,
     /// One attribute list, INCLUDING its delimiting pipe(s): `|lemma="grace"`
     /// (legacy trailing) or `|cat="x"|` (U25001 node-initial, closing pipe and

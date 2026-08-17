@@ -9,9 +9,6 @@
 //!   attribute key/values, verse numbers, book codes are interpreters' work,
 //!   on demand, later.
 //!
-//! `Header` lives here because it is what one scan discovers: scan output
-//! shape, not row format. It moves out only if emission ever gives it
-//! behavior of its own.
 
 use memchr::memchr;
 use memchr::memchr3;
@@ -39,40 +36,6 @@ const PLUS: u8 = b'+';
 const HYPHEN: u8 = b'-';
 const MILESTONE_START: u8 = b's';
 const MILESTONE_END: u8 = b'e';
-
-/// What one scan of a book discovers about its structure, beyond the tokens
-/// themselves. STUB — defined for shape agreement, not yet emitted by `lex`;
-/// emission is a later step (planning/NEXT-STEPS.md step "Header emission").
-///
-/// Likely rename: `ParseHeader`. Three jobs, zero extra fields: nav toc,
-/// materialize-one-chapter index, and the book↔slot COORDINATE ADAPTER —
-/// the run table's base offsets convert book-absolute spans to
-/// slot-relative (subtract; find the run by binary search over bases) and
-/// back (add), so the store derives its slot view from one spec parse
-/// without re-lexing (planning/ideas/committed/braidv2.md).
-#[derive(Debug, Clone, Default)]
-pub struct Header {
-    /// The book code as a span over whatever came after the first `\id` —
-    /// a SLICE, any length, invalid codes kept verbatim, never truncated.
-    /// Later `\id` occurrences are ordinary tokens (and lint's business).
-    pub book: Option<(u32, u16)>,
-    /// One entry per `\c` run, in source order.
-    /// toc and the single-chapter materialization index.
-    pub runs: Vec<ChapterRun>,
-}
-
-/// One chapter run: the row range it covers, where its label text lives, and
-/// which repeat of that label this is (reopened/duplicate chapters are real
-/// data — the ordinal is derived and positional, never typed).
-#[derive(Debug, Clone)]
-pub struct ChapterRun {
-    /// Token row indices `[first, last)` belonging to this run.
-    pub rows: core::ops::Range<u32>,
-    /// Span of the label text after `\c`.
-    pub label: (u32, u16),
-    /// 0 for the first occurrence of this label in the book, 1 for the next…
-    pub occurrence: u8,
-}
 
 /// Scan-pass state. Mode only — never payload knowledge.
 struct ScanState {
@@ -1454,7 +1417,7 @@ mod tests {
     ///
     /// The consequence for anything downstream: `\id` is NOT guaranteed to be
     /// the first token, so find it by SEARCHING for the marker, never by
-    /// indexing token 0. (Header emission is the first consumer that will
+    /// indexing token 0. (`ParseHeader` is the first consumer that will
     /// care.)
     #[test]
     fn a_leading_byte_order_mark_is_content() {

@@ -4,6 +4,8 @@
 //   cargo run --release --bin playground                        // serial, default corpus
 //   cargo run --release --bin playground -- <path>              // file or dir of *.usfm
 //   cargo run --release --bin playground -- --iters 100         // repeat for stable timing / profiling
+//   cargo run --release --bin playground -- --parse-header       // lex + ParseHeader (the whole pipeline)
+//   cargo run --release --bin playground -- --parse-header-only  // pre-lexed; times the SECOND PASS alone
 //   cargo run --release --bin playground -- --scalar            // no-memchr twin (prices SIMD)
 //   cargo run --release --bin playground -- --staged            // two-stage structural index (simdjson shape)
 //   cargo run --release --bin playground -- --chunked           // chapter-split, lexed serially (prices the split)
@@ -26,6 +28,9 @@ const DEFAULT_CORPUS: &str = "example-corpora/en_ulb";
 #[derive(Clone, Copy, PartialEq)]
 enum Mode {
     Serial,
+    /// Lex, then index the stream — what a real caller that wants a toc pays.
+    ParseHeader,
+    ParseHeaderOnly,
     Par,
     Scalar,
     Staged,
@@ -48,6 +53,8 @@ fn main() {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--par" => mode = Mode::Par,
+            "--parse-header" => mode = Mode::ParseHeader,
+            "--parse-header-only" => mode = Mode::ParseHeaderOnly,
             "--scalar" => mode = Mode::Scalar,
             "--staged" => mode = Mode::Staged,
             "--sweep-nl" => mode = Mode::SweepNl,
@@ -78,6 +85,8 @@ fn main() {
     let bytes: usize = sources.iter().map(|s| s.len()).sum();
     let mode_name = match mode {
         Mode::Serial => "serial",
+        Mode::ParseHeader => "parse-header",
+        Mode::ParseHeaderOnly => "parse-header-only",
         Mode::Par => "par",
         Mode::Scalar => "scalar",
         Mode::Staged => "staged",
@@ -94,9 +103,17 @@ fn main() {
 
     verify_variant(&sources, mode);
 
+    // Lexed OUTSIDE the clock: --parse-header-only prices the second pass by itself,
+    // so the lex it walks over must not be in the measurement.
+    let prelexed: Vec<Vec<usfm_onion_2::Token>> = if mode == Mode::ParseHeaderOnly {
+        sources.iter().map(|s| usfm_onion_2::lex(s)).collect()
+    } else {
+        Vec::new()
+    };
+
     let started = Instant::now();
     for _ in 0..iters {
-        run_once(&sources, mode);
+        run_once(&sources, &prelexed, mode);
     }
     let elapsed = started.elapsed();
 
@@ -125,6 +142,7 @@ fn verify_variant(sources: &[String], mode: Mode) {
         Mode::Serial | Mode::Par => return, // the reference itself
         // Sweeps produce counts, not token streams — nothing to verify.
         Mode::SweepNl | Mode::SweepStops | Mode::SweepCursor => return,
+        Mode::ParseHeader | Mode::ParseHeaderOnly => return, // the real lexer plus a pure pass
         Mode::Scalar => usfm_onion_2::experiments::scalar::lex,
         Mode::Staged => usfm_onion_2::experiments::staged::lex,
         Mode::Chunked => usfm_onion_2::experiments::chapter_par::lex_chunked,
@@ -160,8 +178,19 @@ fn verify_variant(sources: &[String], mode: Mode) {
     );
 }
 
-fn run_once(sources: &[String], mode: Mode) {
+fn run_once(sources: &[String], prelexed: &[Vec<usfm_onion_2::Token>], mode: Mode) {
     match mode {
+        Mode::ParseHeader => {
+            for source in sources {
+                let tokens = usfm_onion_2::lex(source);
+                std::hint::black_box(usfm_onion_2::ParseHeader::from_tokens(&tokens, source));
+            }
+        }
+        Mode::ParseHeaderOnly => {
+            for (source, tokens) in sources.iter().zip(prelexed) {
+                std::hint::black_box(usfm_onion_2::ParseHeader::from_tokens(tokens, source));
+            }
+        }
         Mode::Serial => {
             for source in sources {
                 std::hint::black_box(usfm_onion_2::lex(source));

@@ -46,6 +46,27 @@ newline. The scanner already never folds a newline (`ws_run_end` eats
 space/tab only), so those rows are not counterexamples; they just make the
 enum look more load-bearing to the scanner than it is.
 
+## Unicode whitespace where the spec says `hs` (2026-08-17)
+
+**Current answer, and probably the final one: it's spec, and lint's.** The
+delimiter fold takes SPACE and TAB only, which is what `hs` means, so a NBSP
+after a marker name stays content and does not fold. Will has not seen real
+files with one after a marker, and the terms file doesn't put one there
+either — so this is a lint finding, not a scanner behavior.
+
+**Why it needs no scanner change if that holds:** the facts lint needs are
+already derivable from the spans. HS beyond the delimiter is inside the
+marker span, and span length vs name length recovers it; a NBSP is simply at
+the head of the following Text run.
+
+**Evidence, 2026-08-17:** the 226-book corpora contain ZERO occurrences of
+NBSP (U+00A0), NNBSP (U+202F), ideographic space (U+3000) or ZWSP (U+200B) —
+not in delimiter position, not anywhere. So there is no corpus case to serve
+and nothing to weigh against the spec reading.
+
+**What would reopen it:** a real book with a non-`hs` whitespace character
+in delimiter position. Until one shows up this is closed.
+
 ## A `\w` fused arm — the aligned-corpus equivalent of 4.4 (2026-08-13)
 
 NOT a deletion, so it needs a stronger justification than the item above —

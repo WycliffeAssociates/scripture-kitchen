@@ -109,6 +109,9 @@ const SCOPES: &[(ScopeKind, &str)] = &[
     // `Table` (K.1) takes the code `Meta` freed when it was retired (K.2), so no
     // other variant's bit pattern moved. Position IS the code — see the module doc.
     (ScopeKind::Table, "Table"),
+    // `List` is APPENDED for the same reason: a new code at the end moves no
+    // existing one, and 12 scopes still fit the same 4 bits.
+    (ScopeKind::List, "List"),
 ];
 
 const WSREQS: &[(Ws, &str)] = &[

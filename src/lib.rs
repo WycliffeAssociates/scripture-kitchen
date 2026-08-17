@@ -8,17 +8,20 @@
 //! - [`token`] — the row format: `TokenKind`, the packed-byte mapping, and
 //!   the 8-byte `Token` row. What a binary codec or JS twin cares about.
 //! - [`scanner`] — the Scanner: the only code that owns position. `lex`,
-//!   the arms, the boundary finders, `classify_marker`, and the (stub)
-//!   `Header` a scan discovers.
+//!   the arms, the boundary finders, `classify_marker`.
+//! - [`parse_header`] — the first CONSUMER of tokens: a second pass that indexes
+//!   the book code and the chapter runs out of an already-lexed stream.
 //!
 //! The load-bearing contract (see scanner.rs module doc): boundary finding
 //! and classification are kept strictly apart, and payload interiors belong
 //! to interpreters, on demand, later.
 
 pub mod experiments;
+mod parse_header;
 mod scanner;
 pub mod tables;
 mod token;
 
-pub use scanner::{ChapterRun, Header, lex, lex_general_path_only};
+pub use parse_header::{ChapterRun, ParseHeader};
+pub use scanner::{lex, lex_general_path_only};
 pub use token::{Token, TokenKind};
