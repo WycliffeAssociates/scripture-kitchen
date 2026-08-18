@@ -448,6 +448,16 @@ pub static ROWS: &[MarkerRow] = &[
             SpecContext::BookIntroductionEndTitles,
             SpecContext::ChapterContent,
             SpecContext::PeripheralContent,
+            // Scope contexts curated 2026-08-18: the note pages' "Valid In"
+            // speak only the positional band, but the CONTAINERS grant these —
+            // para/index.html's content railroad lists Footnote and
+            // CrossReference as paragraph content, and li/tc type their
+            // content as VerseText (the same content model). Mirrors the
+            // spec-given scope list on the `v` row. Without these, a note
+            // opening inside its paragraph DISPLACES the paragraph.
+            SpecContext::Para,
+            SpecContext::List,
+            SpecContext::Table,
         ],
         opens_scope: Some(ScopeKind::Note),
         closes_scope: None,
@@ -540,6 +550,16 @@ pub static ROWS: &[MarkerRow] = &[
             SpecContext::BookIntroductionEndTitles,
             SpecContext::ChapterContent,
             SpecContext::PeripheralContent,
+            // Scope contexts curated 2026-08-18: the note pages' "Valid In"
+            // speak only the positional band, but the CONTAINERS grant these —
+            // para/index.html's content railroad lists Footnote and
+            // CrossReference as paragraph content, and li/tc type their
+            // content as VerseText (the same content model). Mirrors the
+            // spec-given scope list on the `v` row. Without these, a note
+            // opening inside its paragraph DISPLACES the paragraph.
+            SpecContext::Para,
+            SpecContext::List,
+            SpecContext::Table,
         ],
         opens_scope: Some(ScopeKind::Note),
         closes_scope: None,
@@ -568,6 +588,16 @@ pub static ROWS: &[MarkerRow] = &[
             SpecContext::BookIntroductionEndTitles,
             SpecContext::ChapterContent,
             SpecContext::PeripheralContent,
+            // Scope contexts curated 2026-08-18: the note pages' "Valid In"
+            // speak only the positional band, but the CONTAINERS grant these —
+            // para/index.html's content railroad lists Footnote and
+            // CrossReference as paragraph content, and li/tc type their
+            // content as VerseText (the same content model). Mirrors the
+            // spec-given scope list on the `v` row. Without these, a note
+            // opening inside its paragraph DISPLACES the paragraph.
+            SpecContext::Para,
+            SpecContext::List,
+            SpecContext::Table,
         ],
         opens_scope: Some(ScopeKind::Note),
         closes_scope: None,
@@ -610,6 +640,16 @@ pub static ROWS: &[MarkerRow] = &[
             SpecContext::BookIntroductionEndTitles,
             SpecContext::ChapterContent,
             SpecContext::PeripheralContent,
+            // Scope contexts curated 2026-08-18: the note pages' "Valid In"
+            // speak only the positional band, but the CONTAINERS grant these —
+            // para/index.html's content railroad lists Footnote and
+            // CrossReference as paragraph content, and li/tc type their
+            // content as VerseText (the same content model). Mirrors the
+            // spec-given scope list on the `v` row. Without these, a note
+            // opening inside its paragraph DISPLACES the paragraph.
+            SpecContext::Para,
+            SpecContext::List,
+            SpecContext::Table,
         ],
         opens_scope: Some(ScopeKind::Note),
         closes_scope: None,
@@ -2885,7 +2925,18 @@ pub static ROWS: &[MarkerRow] = &[
         ws_after_name: Ws::OptionalHorizontalWhitespace, // ws: curated (onion MARKER_WHITESPACE row)
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
-        allowed_contexts: &[SpecContext::ChapterContent],
+        allowed_contexts: &[
+            SpecContext::ChapterContent,
+            // Scope contexts curated 2026-08-18: usfmtc's USJ keeps `\ts-s`
+            // INSIDE the open paragraph, list item, and table cell (probe in
+            // scratchpad, three cases) — with ChapterContent alone this row
+            // would DISPLACE its host. Same gap class as the note rows.
+            // `list`/`table` deliberately do NOT get these: usfmtc renders
+            // their content BESIDE the paragraph, so displacing is correct.
+            SpecContext::Para,
+            SpecContext::List,
+            SpecContext::Table,
+        ],
         opens_scope: Some(ScopeKind::Milestone),
         closes_scope: None,
         defined_attributes: &[("sid", AttrStatus::Optional), ("eid", AttrStatus::Optional)],
@@ -2981,6 +3032,12 @@ pub static ROWS: &[MarkerRow] = &[
         ws_after_name: Ws::OptionalHorizontalWhitespace, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
+        // ChapterContent ONLY, on purpose (re-confirmed 2026-08-18): `\vid`
+        // is a fragment-header milestone that stands BETWEEN structures —
+        // usfm-grammar master gives it `_chapterContent` placement only, and
+        // its new-vid-milestone fixture shows it on its own line before \s1 /
+        // between paragraphs. Displacing an open paragraph is therefore
+        // correct, unlike `ts` (see that row).
         allowed_contexts: &[SpecContext::ChapterContent],
         opens_scope: Some(ScopeKind::Milestone),
         closes_scope: None,
@@ -3192,6 +3249,16 @@ pub static ROWS: &[MarkerRow] = &[
             SpecContext::BookIntroductionEndTitles,
             SpecContext::ChapterContent,
             SpecContext::PeripheralContent,
+            // Scope contexts curated 2026-08-18: the note pages' "Valid In"
+            // speak only the positional band, but the CONTAINERS grant these —
+            // para/index.html's content railroad lists Footnote and
+            // CrossReference as paragraph content, and li/tc type their
+            // content as VerseText (the same content model). Mirrors the
+            // spec-given scope list on the `v` row. Without these, a note
+            // opening inside its paragraph DISPLACES the paragraph.
+            SpecContext::Para,
+            SpecContext::List,
+            SpecContext::Table,
         ],
         opens_scope: Some(ScopeKind::Note),
         closes_scope: None,

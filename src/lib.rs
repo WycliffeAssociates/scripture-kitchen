@@ -16,6 +16,7 @@
 //! and classification are kept strictly apart, and payload interiors belong
 //! to interpreters, on demand, later.
 
+pub mod cst;
 pub mod experiments;
 mod parse_header;
 mod scanner;

@@ -513,6 +513,52 @@ impl SpecContext {
             | S::CrossReference => false,
         }
     }
+
+    /// Every variant, IN DECLARATION ORDER — `ALL[ctx as usize] == ctx` is
+    /// the contract [`Self::from_u8`] rests on (round-trip pinned in tests
+    /// below). Kept in THIS impl on purpose: `is_positional` above is an
+    /// exhaustive match, so adding a variant already stops compilation in
+    /// this file — extend both while you're here.
+    pub const ALL: [Self; 18] = [
+        Self::Scripture,
+        Self::BookIdentification,
+        Self::BookHeaders,
+        Self::BookTitles,
+        Self::BookIntroduction,
+        Self::BookIntroductionEndTitles,
+        Self::BookChapterLabel,
+        Self::ChapterContent,
+        Self::Peripheral,
+        Self::PeripheralContent,
+        Self::PeripheralDivision,
+        Self::Section,
+        Self::Para,
+        Self::List,
+        Self::Table,
+        Self::Sidebar,
+        Self::Footnote,
+        Self::CrossReference,
+    ];
+
+    /// Decodes a stamped discriminant (e.g. `Node.ctx`). A value outside the
+    /// enum is a builder bug — refused loudly via the index, same policy as
+    /// `TokenKind::from_bits`.
+    pub fn from_u8(value: u8) -> Self {
+        Self::ALL[value as usize]
+    }
+}
+
+#[cfg(test)]
+mod spec_context_tests {
+    use super::SpecContext;
+
+    #[test]
+    fn all_is_in_declaration_order() {
+        for (index, ctx) in SpecContext::ALL.iter().enumerate() {
+            assert_eq!(*ctx as usize, index);
+            assert_eq!(SpecContext::from_u8(index as u8), *ctx);
+        }
+    }
 }
 
 /// What context an OPEN scope of this (kind, category) puts its children in —
