@@ -475,7 +475,7 @@ fn opens_attrs_frame(idx: generated::MarkerIdx) -> bool {
 }
 
 fn folds_delimiter(kind: TokenKind, idx: generated::MarkerIdx) -> bool {
-    if !matches!(kind, TokenKind::Marker { .. } | TokenKind::Milestone) {
+    if !matches!(kind, TokenKind::Marker { .. } | TokenKind::Milestone { .. }) {
         return false;
     }
     if idx == generated::UNRESOLVED {
@@ -639,11 +639,15 @@ fn classify_marker(slice: &[u8]) -> TokenKind {
     if name_len == 0 && slice.get(after_name) == Some(&STAR) {
         // No name at all before the `*` — closes a milestone span
         // (`\zaln-s ... \*`), not a named closing marker like `\it*`.
-        return TokenKind::MilestoneEnd;
+        return TokenKind::MilestoneTerminator;
     }
     if slice.get(after_name) == Some(&HYPHEN) {
-        // `\zaln-s`, `\qt-e` — hyphen after the name is the milestone form.
-        return TokenKind::Milestone;
+        // `\zaln-s`, `\qt-e` — hyphen after the name is the milestone form;
+        // the suffix is exactly one byte (`marker_end` bounds it), and `e`
+        // is the end spelling. Anything else (`-s` included) is an opener.
+        return TokenKind::Milestone {
+            end: slice.get(after_name + 1) == Some(&b'e'),
+        };
     }
     if slice.get(after_name) == Some(&STAR) {
         // `\it*`, `\+w*` — star after the name closes it.
@@ -666,7 +670,9 @@ fn resolve_marker_idx(slice: &[u8], kind: TokenKind) -> generated::MarkerIdx {
         slice.len()
     };
     let shape = match kind {
-        TokenKind::Milestone | TokenKind::MilestoneEnd => SpellingShape::MilestoneOnly,
+        TokenKind::Milestone { .. } | TokenKind::MilestoneTerminator => {
+            SpellingShape::MilestoneOnly
+        }
         _ => SpellingShape::PlainOnly,
     };
     generated::marker_idx(&slice[name_from..name_to], shape)
@@ -691,7 +697,8 @@ impl Scanner<'_> {
         self.mode.awaiting_delimiter_ws = folds_delimiter(kind, idx);
         // Only an opener or milestone can have attributes in front of it; a
         // closer has nothing in front of it by definition.
-        self.mode.after_marker = matches!(kind, TokenKind::Marker { .. } | TokenKind::Milestone);
+        self.mode.after_marker =
+            matches!(kind, TokenKind::Marker { .. } | TokenKind::Milestone { .. });
         // Does this row owe a carved payload (`\c`/`\v` designator, a note
         // caller, `\id`'s book code)? Straight off the row; the assignment
         // doubles as clearing any stale expectation. Only OPENERS owe one — a
@@ -709,7 +716,7 @@ impl Scanner<'_> {
             TokenKind::Marker { .. } if opens_attrs_frame(idx) => {
                 self.mode.attr_frames = self.mode.attr_frames.saturating_add(1)
             }
-            TokenKind::ClosingMarker { .. } | TokenKind::MilestoneEnd => {
+            TokenKind::ClosingMarker { .. } | TokenKind::MilestoneTerminator => {
                 self.mode.attr_frames = self.mode.attr_frames.saturating_sub(1)
             }
             _ => {}
@@ -801,7 +808,7 @@ fn attr_list_end(bytes: &[u8], pipe_at: usize, front: bool, first_stop: Option<u
                 None => {
                     let slice = &bytes[pos..marker_end(bytes, pos)];
                     return match classify_marker(slice) {
-                        TokenKind::ClosingMarker { .. } | TokenKind::MilestoneEnd => {
+                        TokenKind::ClosingMarker { .. } | TokenKind::MilestoneTerminator => {
                             AttrScan::Trailing(pos)
                         }
                         _ => AttrScan::NotAList(pos),
@@ -1061,8 +1068,8 @@ mod tests {
     const CLOSING: TokenKind = TokenKind::ClosingMarker { nested: false };
     const NESTED_CLOSING: TokenKind = TokenKind::ClosingMarker { nested: true };
 
-    const MILESTONE: TokenKind = TokenKind::Milestone;
-    const MS_END: TokenKind = TokenKind::MilestoneEnd;
+    const MILESTONE: TokenKind = TokenKind::Milestone { end: false };
+    const MS_END: TokenKind = TokenKind::MilestoneTerminator;
     const TEXT: TokenKind = TokenKind::Text;
     const ATTRS: TokenKind = TokenKind::AttrList;
     const CALLER: TokenKind = TokenKind::NoteCaller;
@@ -1157,13 +1164,16 @@ mod tests {
         // list's pipe at a region start
         assert_eq!(
             kinds_and_ranges(&lex("\\zaln-s x")),
-            vec![(TokenKind::Milestone, 0, 8), (TokenKind::Text, 8, 9)]
+            vec![
+                (TokenKind::Milestone { end: false }, 0, 8),
+                (TokenKind::Text, 8, 9)
+            ]
         );
         // Known milestones fold too — their rows are OptionalHorizontalWhitespace,
         // and "optional" means the HS is permitted, not that it is content.
         assert_eq!(
             kinds_and_ranges(&lex("\\qt-s x"))[0],
-            (TokenKind::Milestone, 0, 6)
+            (TokenKind::Milestone { end: false }, 0, 6)
         );
         // `\b` is the one abstainer: its row is SingleNewline, so its
         // delimiter is a NEWLINE and the space stays content.
@@ -1194,7 +1204,7 @@ mod tests {
         );
         assert_eq!(
             kinds_and_ranges(&lex("\\zaln-s")),
-            vec![(TokenKind::Milestone, 0, 7)]
+            vec![(TokenKind::Milestone { end: false }, 0, 7)]
         );
     }
 
@@ -1202,7 +1212,7 @@ mod tests {
     fn bare_star_is_milestone_end_not_a_nameless_closing_marker() {
         assert_eq!(
             kinds_and_ranges(&lex("\\*")),
-            vec![(TokenKind::MilestoneEnd, 0, 2)]
+            vec![(TokenKind::MilestoneTerminator, 0, 2)]
         );
     }
 

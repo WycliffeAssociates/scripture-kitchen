@@ -9,8 +9,14 @@
 /// class (that's a marker-table fact), so it records the spelling wherever
 /// it appears and leaves "was that legal here" to the table/lint. It rides
 /// on the two variants where the spelling occurs (`\+w` opens, `\+w*`
-/// closes); milestones don't participate (`\+zaln-s` isn't a thing), so
-/// they carry no dead field.
+/// closes); milestones don't participate (`\+zaln-s` isn't a thing).
+///
+/// `Milestone.end` records the `-e` SPELLING the same way — `\qt-e`,
+/// `\zaln-e` — because the suffix is the only place the fact exists (the
+/// row is shared with the `-s` form) and the walker needs it to tell a
+/// container OPENER (`\list-s`) from its CLOSER (`\list-e`) without
+/// re-reading source bytes. Any suffix that is not exactly `e` (including
+/// `-s`) is `end: false`; a weird suffix is the row/lint's problem.
 /// The working enum is 2 bytes (tag + payload — rustc doesn't bit-pack
 /// multi-payload enums), so the row does NOT store it directly: it stores
 /// the packed u8 from `to_bits`/`from_bits` below — low 4 bits = shape,
@@ -24,8 +30,17 @@ pub enum TokenKind {
     ClosingMarker {
         nested: bool,
     },
-    Milestone,
-    MilestoneEnd,
+    /// A NAMED milestone token — `\qt-s`, `\zaln-e`. `end` is which half of
+    /// the logical start/end PAIR the `-s`/`-e` spelling names; both halves
+    /// are otherwise identical elements (each takes attributes and is closed
+    /// by its own `\*`).
+    Milestone {
+        end: bool,
+    },
+    /// The bare `\*` that terminates a milestone ELEMENT's span — syntax
+    /// punctuation, not the `-e` pair-half (that is `Milestone{end: true}`,
+    /// which `\*` also terminates: `\qt-e |eid="x"\*`).
+    MilestoneTerminator,
     Newline,
     OptBreak,
     Text,
@@ -67,8 +82,11 @@ pub enum TokenKind {
 // "A byte with only bit 4 set" (= 16). Shapes live in the low 4 bits
 // (values 0-15; the 9th shape, Designator, forced the slide from bit 3),
 // so OR-ing this flag on top can never collide with a shape. Bits 5-7 are
-// unused.
+// unused. Bit 4 is a SPELLING flag whose meaning is per-shape: `\+` nesting
+// on the two marker shapes, `-e` on Milestone. They can share the bit
+// because no shape carries both spellings.
 const NESTED_BIT: u8 = 0b1_0000;
+const END_BIT: u8 = NESTED_BIT;
 
 impl TokenKind {
     /// Packs to the row's kind byte: low 4 bits = shape, bit 4 = nested.
@@ -79,8 +97,8 @@ impl TokenKind {
             // is a no-op, kept so the two arms read symmetrically.)
             Self::Marker { nested } => 0 | if nested { NESTED_BIT } else { 0 },
             Self::ClosingMarker { nested } => 1 | if nested { NESTED_BIT } else { 0 },
-            Self::Milestone => 2,
-            Self::MilestoneEnd => 3,
+            Self::Milestone { end } => 2 | if end { END_BIT } else { 0 },
+            Self::MilestoneTerminator => 3,
             Self::Newline => 4,
             Self::OptBreak => 5,
 
@@ -92,19 +110,20 @@ impl TokenKind {
         }
     }
 
-    /// Decodes the row's kind byte. The nested bit is only meaningful on the
-    /// two marker shapes; on any other shape it would be a scanner bug, so
-    /// it is refused loudly rather than ignored.
+    /// Decodes the row's kind byte. The spelling bit is only meaningful on
+    /// the shapes that carry a spelling (`\+` markers, `-e` milestones); on
+    /// any other shape it would be a scanner bug, so it is refused loudly
+    /// rather than ignored.
     pub fn from_bits(bits: u8) -> TokenKind {
         let nested = bits & NESTED_BIT != 0;
         match bits & !NESTED_BIT {
             0 => Self::Marker { nested },
             1 => Self::ClosingMarker { nested },
+            2 => Self::Milestone { end: nested },
             other => {
-                debug_assert!(!nested, "nested bit set on a non-marker shape");
+                debug_assert!(!nested, "spelling bit set on a shape without one");
                 match other {
-                    2 => Self::Milestone,
-                    3 => Self::MilestoneEnd,
+                    3 => Self::MilestoneTerminator,
                     4 => Self::Newline,
                     5 => Self::OptBreak,
                     6 => Self::AttrList,
@@ -168,8 +187,9 @@ mod tests {
             TokenKind::Marker { nested: true },
             TokenKind::ClosingMarker { nested: false },
             TokenKind::ClosingMarker { nested: true },
-            TokenKind::Milestone,
-            TokenKind::MilestoneEnd,
+            TokenKind::Milestone { end: false },
+            TokenKind::Milestone { end: true },
+            TokenKind::MilestoneTerminator,
             TokenKind::Newline,
             TokenKind::OptBreak,
             TokenKind::AttrList,

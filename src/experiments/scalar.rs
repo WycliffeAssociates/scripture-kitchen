@@ -152,10 +152,12 @@ fn classify_marker(slice: &[u8]) -> TokenKind {
     let after_name = name_from + name_len;
 
     if name_len == 0 && slice.get(after_name) == Some(&STAR) {
-        return TokenKind::MilestoneEnd;
+        return TokenKind::MilestoneTerminator;
     }
     if slice.get(after_name) == Some(&HYPHEN) {
-        return TokenKind::Milestone;
+        return TokenKind::Milestone {
+            end: slice.get(after_name + 1) == Some(&b'e'),
+        };
     }
     if slice.get(after_name) == Some(&STAR) {
         return TokenKind::ClosingMarker { nested };

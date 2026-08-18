@@ -1436,7 +1436,14 @@ pub static ROWS: &[MarkerRow] = &[
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
-        allowed_contexts: &[SpecContext::ChapterContent],
+        allowed_contexts: &[
+            SpecContext::ChapterContent,
+            // List curated 2026-08-18 (U25003): items are the \list-s
+            // container's content, so they must be legal in the List context
+            // the container contributes. Same-kind eviction in the walker is
+            // what keeps siblings from nesting despite this.
+            SpecContext::List,
+        ],
         opens_scope: Some(ScopeKind::Para),
         closes_scope: None,
         defined_attributes: &[],
@@ -1454,7 +1461,14 @@ pub static ROWS: &[MarkerRow] = &[
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
-        allowed_contexts: &[SpecContext::ChapterContent],
+        allowed_contexts: &[
+            SpecContext::ChapterContent,
+            // List curated 2026-08-18 (U25003): items are the \list-s
+            // container's content, so they must be legal in the List context
+            // the container contributes. Same-kind eviction in the walker is
+            // what keeps siblings from nesting despite this.
+            SpecContext::List,
+        ],
         opens_scope: Some(ScopeKind::Para),
         closes_scope: None,
         defined_attributes: &[],
@@ -1476,7 +1490,14 @@ pub static ROWS: &[MarkerRow] = &[
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::UpTo(4),
-        allowed_contexts: &[SpecContext::ChapterContent],
+        allowed_contexts: &[
+            SpecContext::ChapterContent,
+            // List curated 2026-08-18 (U25003): items are the \list-s
+            // container's content, so they must be legal in the List context
+            // the container contributes. Same-kind eviction in the walker is
+            // what keeps siblings from nesting despite this.
+            SpecContext::List,
+        ],
         opens_scope: Some(ScopeKind::Para),
         closes_scope: None,
         defined_attributes: &[],
@@ -1514,7 +1535,14 @@ pub static ROWS: &[MarkerRow] = &[
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::UpTo(4),
-        allowed_contexts: &[SpecContext::ChapterContent],
+        allowed_contexts: &[
+            SpecContext::ChapterContent,
+            // List curated 2026-08-18 (U25003): items are the \list-s
+            // container's content, so they must be legal in the List context
+            // the container contributes. Same-kind eviction in the walker is
+            // what keeps siblings from nesting despite this.
+            SpecContext::List,
+        ],
         opens_scope: Some(ScopeKind::Para),
         closes_scope: None,
         defined_attributes: &[],
@@ -2906,7 +2934,13 @@ pub static ROWS: &[MarkerRow] = &[
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
-        allowed_contexts: &[SpecContext::ChapterContent],
+        allowed_contexts: &[
+            SpecContext::ChapterContent,
+            // Table curated 2026-08-18 (U25003): rows are the \table-s
+            // container's content. Same-kind eviction (a row ends the open
+            // cells and row before it) keeps siblings from nesting.
+            SpecContext::Table,
+        ],
         opens_scope: Some(ScopeKind::TableRow),
         closes_scope: None,
         defined_attributes: &[],
