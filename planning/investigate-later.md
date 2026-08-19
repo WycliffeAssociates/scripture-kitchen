@@ -254,3 +254,17 @@ hook is not the problem — the machines' working set is.
 **Recommendation: PARK the lint fusion, and note that streaming lex→cst is
 viable on its own** if a future editor session wants a tree without a token
 slice. The staged path stays the only public API either way.
+
+## Do header_scan / ParseHeader / the TOC slab want one shape? (Will, 2026-08-19)
+
+lint grew `header_scan(source, tokens) -> (book, declared_version)` — a
+~30-line bounded pre-scan to the first `\c`. ParseHeader already reads
+the same neighborhood, and the sous TOC slab is ParseHeader's big
+sibling. The law stands (lint takes no ParseHeader — it's a
+consumer-side index), so any unification is a shared low-level
+PRIMITIVE ("read the id line / \usfm adjacency"), not a dependency.
+Related: the search/proofing MASKS idea (plain-text search across
+markup boundaries in aligned bibles) belongs to the same
+text_runs/slab layer — when the slab export gets built, ask whether
+header_scan's facts and the masks are both just rows of it. Goal is
+net deletion: if unifying adds a layer, the answer was no.

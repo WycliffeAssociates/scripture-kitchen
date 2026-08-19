@@ -422,9 +422,9 @@ pub struct LintRow {
     /// marker text at those token spans. Rendering and localization are the
     /// consumer's; the library never allocates a message.
     pub template: &'static str,
-    /// The label a phase-4 fix would carry. Present here already so the row is
-    /// the single place a rule's affordances are declared; no fix machinery
-    /// exists yet.
+    /// The label this code's fix carries. The row is the single place a
+    /// rule's affordances are declared: a code emits a fix iff its row has a
+    /// label (tested), and the generators read the label from here.
     pub fix_label: Option<&'static str>,
 }
 
