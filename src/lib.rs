@@ -21,6 +21,7 @@
 
 pub mod cst;
 pub mod designator;
+pub mod edit;
 pub mod experiments;
 pub mod lint;
 mod parse_header;
