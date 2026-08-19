@@ -35,57 +35,58 @@
 //! identifier was meant is not mechanical), the gap codes, and a renumber whose
 //! own successor would collide with it.
 //!
-//! Shape of the pass, and it is still FOUR sweeps after phase 3: a short
-//! bounded prologue over the header ([`header_scan`]), one sweep over
-//! `cst.nodes` (close verdicts, the consumed-closer bitset, empty paragraphs),
-//! one sweep over `tokens` — [`token_pass`], which is now THE token walk and
-//! carries three pieces of one-token lookbehind — one in-order tree walk
-//! carrying two depth counters (sidebar and paragraph), and one more sweep over
-//! `tokens` for ORDERING, separate because its state is a SEQUENCE and not the
-//! previous token. All linear, no recursion.
+//! Shape of the pass, since 2026-08-19: **lint is ONE in-order walk of the CST
+//! feeding four state machines.** A short bounded prologue over the header
+//! ([`header_scan`]) reads the two whole-file facts the machines need, and then
+//! [`walk`] visits every node open, every leaf token in document order, and
+//! every node close exactly once, handing each event to [`Structure`] (close
+//! verdicts, orphan closers), [`Ancestry`] (sidebar containment, paragraph-less
+//! verse runs), [`Ordering`] (the chapter/verse sequence) and [`Flat`] (the
+//! row-lookup, form, payload, adjacency and attribute rules). All four write
+//! through one [`Emit`] sink and the findings are sorted once at the end, so
+//! report order is a property of the report and not of the traversal.
 //!
-//! PERF (measured 2026-08-19, `playground --lint-only`, min-of-8 on the same
-//! machine in the same window, so trust the deltas over the absolutes; en_ulb
-//! is small enough that its numbers need `--iters 30` to settle):
+//! The four sweeps this replaced — a node sweep, a token sweep, a tree walk and
+//! an ordering sweep — each paid the same ~2.5 ns/token of dispatch before any
+//! rule ran, and the tree walk is a strict superset of a flat token sweep: the
+//! lifted partition oracle says `cst.in_order()` recovers `0..tokens.len()`, so
+//! one walk delivers every token in document order PLUS the ancestry its own
+//! stack carries PLUS the node boundaries. The machines are plain feedable
+//! structs — explicit state, event methods, no assumption that a slice of
+//! tokens exists — because the next driver is the CST Builder itself
+//! (planning/investigate-later.md, "Single-pass pipeline").
 //!
-//! | corpus | phase 1 | phase 2 | phase 3 | phase 4 |
-//! |--------|---------|---------|---------|---------|
-//! | en_ult (6.57M tokens) | 7.4 ns/token | 9.4 | 12.4 | 11.9 |
-//! | en_ulb (255k tokens)  | 6.7 ns/token | 8.8 | 12.5 | 12.6 |
+//! PERF (measured 2026-08-19, `playground --lint-only`, min-of-8 with the two
+//! binaries run ALTERNATELY in one window, so trust the deltas over the
+//! absolutes; en_ulb is small enough that its numbers need `--iters 30`):
 //!
-//! (The phase-2 column is re-measured here — it read 9.9 / 9.1 in its own
-//! window. Same code, different afternoon. The phase-4 column was taken against
-//! a phase-3 binary run ALTERNATELY with it in one window, which read 12.3 /
-//! 12.0 — so the honest phase-4 deltas are **-0.4 on en_ult and +0.5 on
-//! en_ulb**, and the split is exactly what the fix model predicts: en_ult
-//! carries 92 findings (31 with a fix) across 6.57M tokens and pays nothing,
-//! while en_ulb carries 17,242 findings and 2,834 fixes across 255k, and pays
-//! for computing them plus the permutation the parallel `fix_of` vec now needs
-//! at sort time. Fix computation is per FINDING, so its cost tracks damage and
-//! not document size.)
+//! | corpus | four passes | one walk |
+//! |--------|-------------|----------|
+//! | en_ult (6.57M tokens, 1.76M nodes) | 12.1 ns/token | **9.1** |
+//! | en_ulb (255k tokens)               | 12.8 ns/token | **8.4** |
 //!
-//! Phase 2's +2.4 was `ordering_pass` and nothing else. Phase 3's +3.0 / +3.7
-//! is the token walk growing, and the number that decided its shape: giving
-//! adjacency and the attribute rules a FIFTH pass of their own cost **+3.6
-//! ns/token on en_ult by itself**, and disabling each of its arms' bodies in
-//! turn moved that by only 0.4-0.9 — the cost was the sweep, not the work. A
-//! token sweep over this corpus is ~2.5 ns before any rule runs (the kind
-//! dispatch and its branch mispredictions), which is why the sketch's "one
-//! token walk" is the right architecture and not merely a tidy one. Fusing it
-//! into [`token_pass`] gave the whole family back for ~1 ns.
+//! Split by machine on en_ult, by disabling each in turn: the bare walk ~3.6,
+//! `Flat` ~3.1, `Structure` ~1.4, `Ordering` ~0.6, `Ancestry` ~0.3. Four things
+//! bought the 3 ns, in order of size:
 //!
-//! What the remaining phase-3 growth buys, in rough order of cost: the two Form
-//! rules read the source byte on either side of every opening marker (the first
-//! rule in lint to touch `source` per token rather than per finding), the
-//! attribute machine carries four locals across the walk, and `numbering-mix`
-//! zeroes two 153-entry arrays per document.
+//! - **The node-close fast out** (~0.5). 1.73M of en_ult's 1.76M nodes close
+//!   `Explicit` and have no verdict to report, so the shape question — which
+//!   reads the row and peeks at the next node — is asked only of the rest.
+//! - **The current frame in locals** (~0.8), with only the ancestors in the vec:
+//!   `stack.last_mut()` on every iteration was a load and a bounds check on the
+//!   hottest line in lint.
+//! - **[`Frame::scratch`]** (~1.0): the two ancestry bits computed at open and
+//!   handed back at close, instead of re-reading the row.
+//! - **Orphan closers judged at node close only** (~0.7): see [`Structure`].
+//!   This also deleted the `tokens.len()` consumed-closer bitset and the
+//!   `nodes.len()` container-end one, which the staged passes needed because
+//!   the fact was produced in one sweep and read in another.
 //!
-//! Split by pass, phase 3: the token walk ~4.5, the tree walk ~3.8, ordering
-//! ~2.4, the node sweep plus the two scratch vecs ~2.0. The tree walk is now
-//! the biggest single lead (ancestry is the one fact no node carries, so it
-//! chases arena ids out of order); the second is fusing ordering into the token
-//! walk, which the phase-3 measurement says is worth ~1.5 and which only the
-//! "sequence state is not lookbehind" reading keeps apart.
+//! `Flat` is now the biggest single line, and it is the same rule bodies as
+//! before — the two Form rules read the source byte on either side of every
+//! opening marker, the attribute machine carries four fields across the walk,
+//! and `numbering-mix` zeroes two 153-entry arrays per document. Cutting it
+//! further means changing what the rules DO, which is a different exercise.
 
 use std::ops::Range;
 
@@ -1054,14 +1055,15 @@ pub fn lint(source: &[u8], tokens: &[Token], cst: &Cst) -> LintReport {
     let (book, declared_version) = header_scan(source, tokens);
     let mut out = Emit::default();
 
-    // `consumed[t]` = token t is a closer that actually closed a frame. Built
-    // from the nodes rather than re-walked: a closer that closed something is
-    // by construction the LAST child of an Explicit node.
-    let mut consumed = vec![false; tokens.len()];
-    node_pass(source, tokens, cst, &mut consumed, &mut out);
-    token_pass(source, tokens, &consumed, declared_version, &mut out);
-    tree_pass(source, tokens, cst, &mut out);
-    ordering_pass(source, tokens, &mut out);
+    walk(
+        &Doc {
+            source,
+            tokens,
+            cst,
+        },
+        declared_version,
+        &mut out,
+    );
 
     // A file with no `\id` at all. Raised here rather than in a pass because
     // the fact is the ABSENCE of a token, which no sweep can see, and because
@@ -1301,42 +1303,264 @@ fn shape_of(tokens: &[Token], cst: &Cst, id: usize) -> Shape {
     }
 }
 
-/// One sweep over the nodes: the close-verdict rules, plus the consumed-closer
-/// bitset the token pass needs.
-///
-/// This is where four of the five INSERTION fixes are computed — the closer,
-/// the terminator or the end milestone the walker never saw — because the node
-/// is the only place both the missing text (the opening token's own spelling)
-/// and its position ([`Cst::extent`]) are in hand at once.
-fn node_pass(source: &[u8], tokens: &[Token], cst: &Cst, consumed: &mut [bool], out: &mut Emit) {
-    // A `-e` point that actually ended a container is that container's LAST
-    // child; anything else is an orphan. Marked here so the verdict rules
-    // below can stay a single pass.
-    let mut ended_a_container = vec![false; cst.nodes.len()];
+/// The three read-only slices every machine reads through — one argument
+/// instead of three at every event, and the thing a future Builder-driven
+/// pipeline replaces with its own live view.
+struct Doc<'a> {
+    source: &'a [u8],
+    tokens: &'a [Token],
+    cst: &'a Cst,
+}
 
-    for (id, node) in cst.nodes.iter().enumerate().skip(1) {
-        if node.close_reason() == CloseReason::Explicit
-            && let Some(&last) = last_child(cst, node)
+/// One frame of the driver's own stack: where this node's child list has got
+/// to, and which node it is (so the close event can name it).
+struct Frame {
+    next: u32,
+    end: u32,
+    node: u32,
+    /// [`Ancestry`]'s two bits for this frame, handed back at close.
+    ///
+    /// The machines keep no copy of this stack — but a fact a machine computed
+    /// at OPEN and needs again at CLOSE has to live somewhere, and the frame is
+    /// where it is already paid for. A Builder-driven pipeline carries the same
+    /// byte on its own frames, which is why this is a machine-agnostic scratch
+    /// and not an ancestry field.
+    scratch: u8,
+}
+
+/// THE WALK. One in-order pass over the CST, feeding four state machines.
+///
+/// Every token index is delivered exactly once, in document order, as an
+/// `on_leaf` event — the lint-side reading of the lifted partition oracle
+/// (`cst.in_order()` recovers `0..tokens.len()`), and asserted as such by the
+/// debug counter below. A node's OPENING marker is one of those
+/// leaves: the walker files it as the node's own first child, so it arrives
+/// after that node's open event and inside its frame. Its explicit closer,
+/// symmetrically, is the LAST child and arrives immediately before the close.
+///
+/// That last fact is why no consumed-closer bitset exists any more: a closer
+/// that closed something is by construction the last child of an `Explicit`
+/// node, so the very next event after it is that node's close. [`Structure`]
+/// holds one token of pending state and judges the closer on the following
+/// event instead of on a `tokens.len()`-sized side table.
+///
+/// The machines are plain structs with explicit state and no view of the walk's
+/// stack: the driver owns the stack, and the one per-frame fact a machine needs
+/// twice rides [`Frame::scratch`], a byte the driver hands back at close. That
+/// is what makes them FEEDABLE — tomorrow's driver is the CST Builder's own
+/// frame stack (planning/investigate-later.md, "Single-pass pipeline"), which
+/// can carry the same byte — and nothing here assumes a slice of tokens exists
+/// ahead of the cursor except the one token of lookahead
+/// `attr-terminator-mismatch` still wants, which is noted where it lives.
+fn walk(doc: &Doc, version: Option<UsfmVersion>, out: &mut Emit) {
+    let mut structure = Structure::new();
+    let mut ancestry = Ancestry::new();
+    let mut ordering = Ordering::new();
+    let mut flat = Flat::new(version);
+
+    let root = &doc.cst.nodes[0];
+    // The CURRENT frame lives in locals and only the ancestors live in the vec:
+    // every iteration touches `cur.next`, and re-deriving it through
+    // `stack.last_mut()` each time costs a load and a bounds check on the
+    // hottest line in lint.
+    let mut cur = Frame {
+        next: root.children.start,
+        end: root.children.end,
+        node: 0,
+        scratch: 0,
+    };
+    let mut stack: Vec<Frame> = Vec::new();
+    // Debug-only: the partition oracle, echoed on the lint side. Every leaf
+    // event is the next token index, so the walk delivers each token exactly
+    // once and in order — the property the whole fusion rests on.
+    #[cfg(debug_assertions)]
+    let mut expected_leaf = 0u32;
+
+    loop {
+        if cur.next == cur.end {
+            // The root is never closed: its "close" is `finish`.
+            let Some(parent) = stack.pop() else { break };
+            let node = &doc.cst.nodes[cur.node as usize];
+            structure.on_node_close(doc, cur.node, node, out);
+            ancestry.on_node_close(cur.scratch);
+            cur = parent;
+            continue;
+        }
+        let child = doc.cst.child_ids[cur.next as usize];
+        cur.next += 1;
+
+        if child & NODE_ID_BIT != 0 {
+            let id = child & !NODE_ID_BIT;
+            let node = &doc.cst.nodes[id as usize];
+            let scratch = ancestry.on_node_open(doc, node);
+            stack.push(cur);
+            cur = Frame {
+                next: node.children.start,
+                end: node.children.end,
+                node: id,
+                scratch,
+            };
+            continue;
+        }
+
+        #[cfg(debug_assertions)]
         {
-            if last & NODE_ID_BIT == 0 {
-                consumed[last as usize] = true;
-            } else if shape_of(tokens, cst, id) == Shape::Container {
-                ended_a_container[(last & !NODE_ID_BIT) as usize] = true;
+            debug_assert_eq!(
+                child, expected_leaf,
+                "the walk must deliver every token index exactly once, in order"
+            );
+            expected_leaf += 1;
+        }
+        let token = &doc.tokens[child as usize];
+        // Decoded ONCE and handed round: four machines that each asked the
+        // token for its kind would pay for four decodes and four dispatch
+        // trees over the same byte.
+        let kind = token.kind();
+        structure.on_leaf(doc, child, kind, out);
+        ancestry.on_leaf(doc, child, token, kind, out);
+        ordering.on_leaf(doc, child, token, kind, out);
+        flat.on_leaf(doc, child, token, kind, out);
+    }
+
+    #[cfg(debug_assertions)]
+    debug_assert_eq!(
+        expected_leaf as usize,
+        doc.tokens.len(),
+        "the walk must deliver every token"
+    );
+
+    structure.finish(doc, out);
+    ordering.finish(out);
+}
+
+/// Node close verdicts, empty paragraphs, and the orphan closers.
+///
+/// The verdict half is a match on the walker's [`CloseReason`] — lint reads it,
+/// never re-derives it — and it is where four of the five INSERTION fixes are
+/// computed, because the close event is the one place both the missing text
+/// (the opening token's own spelling) and its position ([`Cst::extent`]) are in
+/// hand at once.
+///
+/// The orphan half is the only state, and it is TWO u32s where the staged
+/// passes needed a `tokens.len()` bitset and a `nodes.len()` one.
+///
+/// A `\X*`/`\*` leaf and a container's `-e` point node ask the same question —
+/// "am I the last child of the thing that consumed me?" — and a last child is
+/// always followed immediately by its parent's close. So the verdict is settled
+/// at the NEXT NODE CLOSE and nowhere else: whatever is pending is consumed iff
+/// that closing node is `Explicit` and its last child is the pending id, and is
+/// an orphan otherwise. Nothing has to happen on the leaves in between, because
+/// a leaf after the pending id is exactly what makes it not-last, which the
+/// last-child test already reports. The one leaf that must act is a SECOND
+/// closer arriving before any close: the first can no longer be anyone's last
+/// child, so it is flushed there.
+struct Structure {
+    /// A closer leaf awaiting its verdict, or [`NO_TOKEN`].
+    pending_closer: u32,
+    /// Whether that pending closer is a bare `\*` (which reports a different
+    /// code and splices the same way).
+    pending_is_terminator: bool,
+    /// A container `-e` point node awaiting its verdict, or [`NO_TOKEN`].
+    pending_end: u32,
+}
+
+impl Structure {
+    fn new() -> Self {
+        Self {
+            pending_closer: NO_TOKEN,
+            pending_is_terminator: false,
+            pending_end: NO_TOKEN,
+        }
+    }
+
+    /// Resolve whatever is pending against the node now closing. `closing` is
+    /// [`NO_TOKEN`] at end of input, where nothing can have consumed anything.
+    ///
+    /// `#[inline(never)]`: the emission path is large and the walk loop wants to
+    /// stay small, and this runs once per node rather than once per token.
+    #[inline(never)]
+    fn resolve(&mut self, doc: &Doc, closing: u32, out: &mut Emit) {
+        if self.pending_closer != NO_TOKEN {
+            let token = self.pending_closer;
+            self.pending_closer = NO_TOKEN;
+            if !consumed_by(doc, closing, token) {
+                self.orphan(doc, token, out);
+            }
+        }
+        if self.pending_end != NO_TOKEN {
+            let id = self.pending_end;
+            self.pending_end = NO_TOKEN;
+            let ended = closing != NO_TOKEN
+                && consumed_by(doc, closing, NODE_ID_BIT | id)
+                && shape_of(doc.tokens, doc.cst, closing as usize) == Shape::Container;
+            if !ended {
+                out.push(Observation::one(
+                    Code::OrphanContainerEnd,
+                    doc.cst.nodes[id as usize].token,
+                ));
             }
         }
     }
 
-    for (id, node) in cst.nodes.iter().enumerate().skip(1) {
-        let anchor = node.token;
-        let marker_idx = tokens[anchor as usize].marker_idx;
-        let shape = shape_of(tokens, cst, id);
+    /// A closer that closed nothing, and the splice that removes it.
+    #[inline(never)]
+    fn orphan(&mut self, doc: &Doc, token: u32, out: &mut Emit) {
+        let code = if self.pending_is_terminator {
+            Code::OrphanTerminator
+        } else {
+            Code::OrphanCloser
+        };
+        // A PLAIN span delete, whitespace left exactly as written. Deleting
+        // `\f*` out of `text \f* more` does leave two spaces — and eating one of
+        // them would be a second, unasked-for edit to bytes the author chose.
+        // Extra horizontal whitespace is legal everywhere in USFM; the formatter
+        // bundle is where it belongs.
+        let span = &doc.tokens[token as usize];
+        out.push_fixed(Observation::one(code, token), span.start, span.end(), b"");
+    }
 
-        if shape == Shape::Point
-            && tokens[anchor as usize].kind() == (TokenKind::Milestone { end: true })
-            && is_container_row(marker_idx)
-            && !ended_a_container[id]
-        {
-            out.push(Observation::one(Code::OrphanContainerEnd, anchor));
+    /// The ONLY per-leaf work: remember a closer, and flush a previous one that
+    /// this arrival has just disqualified.
+    #[inline]
+    fn on_leaf(&mut self, doc: &Doc, idx: u32, kind: TokenKind, out: &mut Emit) {
+        let terminator = match kind {
+            TokenKind::ClosingMarker { .. } => false,
+            TokenKind::MilestoneTerminator => true,
+            _ => return,
+        };
+        if self.pending_closer != NO_TOKEN {
+            // Two closers with no close between them: the first can no longer
+            // be any node's last child.
+            let stale = self.pending_closer;
+            self.orphan(doc, stale, out);
+        }
+        self.pending_closer = idx;
+        self.pending_is_terminator = terminator;
+    }
+
+    /// The document ended with something still pending — nothing can have
+    /// consumed it. (A closer that is the ROOT's last child lands here: the root
+    /// is never closed.)
+    fn finish(&mut self, doc: &Doc, out: &mut Emit) {
+        self.resolve(doc, NO_TOKEN, out);
+    }
+
+    fn on_node_close(&mut self, doc: &Doc, id: u32, node: &Node, out: &mut Emit) {
+        if self.pending_closer != NO_TOKEN || self.pending_end != NO_TOKEN {
+            self.resolve(doc, id, out);
+        }
+
+        let (source, tokens, cst) = (doc.source, doc.tokens, doc.cst);
+        let anchor = node.token;
+        let opener = &tokens[anchor as usize];
+        let marker_idx = opener.marker_idx;
+
+        // A container's `-e` point claims to end a container; whether it did is
+        // the PARENT's close to say, which is the very next event if it did.
+        // (A `-e` milestone is a Point by construction, so [`shape_of`] is not
+        // consulted here — see its `end` arm.)
+        if opener.kind() == (TokenKind::Milestone { end: true }) && is_container_row(marker_idx) {
+            self.pending_end = id;
         }
 
         // A paragraph with nothing under it but line endings. `\b` abstains by
@@ -1349,7 +1573,17 @@ fn node_pass(source: &[u8], tokens: &[Token], cst: &Cst, consumed: &mut [bool], 
             out.push(Observation::one(Code::EmptyParagraph, anchor));
         }
 
-        let code = match node.close_reason() {
+        // THE FAST OUT, and it is most of this machine's budget: 1.73M of
+        // en_ult's 1.76M nodes close Explicit, and a normally-closed frame has
+        // no verdict to report — so the shape question (which reads the row and
+        // peeks at the next node) is asked only of the ones that do.
+        let reason = node.close_reason();
+        if matches!(reason, CloseReason::Explicit | CloseReason::Implicit) {
+            return;
+        }
+        let shape = shape_of(tokens, cst, id as usize);
+
+        let code = match reason {
             // The walker judged these normal. Note peers and displaced
             // paragraphs both land here, and both are silent by ruling.
             CloseReason::Explicit | CloseReason::Implicit => None,
@@ -1373,7 +1607,7 @@ fn node_pass(source: &[u8], tokens: &[Token], cst: &Cst, consumed: &mut [bool], 
                 _ => None,
             },
         };
-        let Some(code) = code else { continue };
+        let Some(code) = code else { return };
 
         // Every one of these five findings has the same repair — write the
         // ending the author left out — so the TEXT is a question about the
@@ -1389,7 +1623,7 @@ fn node_pass(source: &[u8], tokens: &[Token], cst: &Cst, consumed: &mut [bool], 
             Some(text) => {
                 let at = content_end(
                     source,
-                    cst.extent(id as u32, tokens),
+                    cst.extent(id, tokens),
                     tokens[anchor as usize].end(),
                 );
                 out.push_fixed(observation, at, at, text);
@@ -1397,6 +1631,22 @@ fn node_pass(source: &[u8], tokens: &[Token], cst: &Cst, consumed: &mut [bool], 
             None => out.push(observation),
         }
     }
+}
+
+/// Did the node now closing consume `child` — i.e. is `child` its last child,
+/// and did the walker call that an explicit close?
+///
+/// `child` is a raw token id or a [`NODE_ID_BIT`]-tagged node id, exactly as
+/// the arena stores it. `closing` is [`NO_TOKEN`] for any event that is not a
+/// node close, which can never consume anything.
+#[inline]
+fn consumed_by(doc: &Doc, closing: u32, child: u32) -> bool {
+    if closing == NO_TOKEN {
+        return false;
+    }
+    let node = &doc.cst.nodes[closing as usize];
+    node.close_reason() == CloseReason::Explicit
+        && last_child(doc.cst, node) == Some(&child)
 }
 
 /// The scratch every "write the missing ending" fix builds into. Enough for the
@@ -1496,18 +1746,25 @@ fn last_child<'a>(cst: &'a Cst, node: &Node) -> Option<&'a u32> {
     cst.child_ids.get(node.children.end as usize - 1)
 }
 
-/// THE token walk: every rule whose evidence is a token row, its span, or the
+/// Which designator family may be re-numbered at this point.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Window {
+    Closed,
+    Chapter,
+    Verse,
+}
+
+/// The FLAT machine: every rule whose evidence is a token row, its span, or the
 /// one token before it — the row-lookup rules, the two Form rules, the caller
 /// and numbering payload rules, adjacency, and the shape-only attribute
-/// family. One pass, exactly as the sketch draws it ("adjacency + form +
-/// payload + attributes: single token walk").
+/// family. Fed one leaf at a time, exactly as the sketch draws it ("adjacency +
+/// form + payload + attributes: single token walk").
 ///
-/// It carries THREE small pieces of lookbehind state, and they are here rather
-/// than in passes of their own for a measured reason: a token sweep over this
-/// corpus costs ~2.5 ns/token in dispatch alone, however little each arm does,
-/// so a family that needs no more than the last marker earns no pass of its
-/// own. `ordering_pass` stays separate because its state is a SEQUENCE (the
-/// previous chapter and verse), not the previous token.
+/// It carries THREE small pieces of lookbehind state, and they are its fields
+/// rather than four separate sweeps' locals for a measured reason: a token
+/// sweep over this corpus costs ~2.5 ns/token in dispatch alone, however little
+/// each arm does, so a family that needs no more than the last marker earns no
+/// traversal of its own.
 ///
 /// - **The adjacency window.** `\ca`/`\cp` are legal immediately after `\c`'s
 ///   designator or after each other, `\va`/`\vp` likewise after `\v` — where
@@ -1519,50 +1776,64 @@ fn last_child<'a>(cst: &'a Cst, node: &Node) -> Option<&'a u32> {
 ///   [`TokenKind::AttrList`] documents, so the owner is the nearest preceding
 ///   opener and a Newline ends its reach — the scanner bounds lists to a line,
 ///   so nothing else would be honest.
-/// - **The numbering-mix bitmasks**, closed out by the pass simply ending.
-fn token_pass(
-    source: &[u8],
-    tokens: &[Token],
-    consumed: &[bool],
+/// - **The numbering-mix bitmasks**, closed out by the document simply ending.
+struct Flat {
+    /// The `\usfm` version the header declared, the one fact this machine takes
+    /// from outside the walk.
     version: Option<UsfmVersion>,
-    out: &mut Emit,
-) {
-    /// Which designator family may be re-numbered at this point.
-    #[derive(Clone, Copy, PartialEq, Eq)]
-    enum Window {
-        Closed,
-        Chapter,
-        Verse,
+    /// The four adjacency rows, resolved once instead of per token.
+    ca: generated::MarkerIdx,
+    cp: generated::MarkerIdx,
+    va: generated::MarkerIdx,
+    vp: generated::MarkerIdx,
+    window: Window,
+    /// The owning marker of any attribute list that arrives now: its token
+    /// index, its row, whether its terminator is `\*` rather than a named
+    /// closer, and whether its row defines any attributes at all. `NO_TOKEN` =
+    /// no marker is in reach.
+    owner: u32,
+    owner_idx: generated::MarkerIdx,
+    owner_is_point: bool,
+    owner_has_attrs: bool,
+    /// The first attribute list already seen on that owner.
+    first_list: u32,
+    /// Levels-seen per numbered family, indexed by ROW: bit 0 = the bare
+    /// spelling, bit n = `\q<n>`, bit 15 = "already reported". A fixed array
+    /// rather than a map because the row index IS the family key and there are
+    /// only 153 rows — 306 bytes, no hashing, no allocation. `first_seen` is
+    /// only ever read when the mask says the family has been seen, so it needs
+    /// no sentinel initialization.
+    levels: [u16; generated::ROW_COUNT],
+    first_seen: [u32; generated::ROW_COUNT],
+}
+
+const REPORTED: u16 = 1 << 15;
+
+impl Flat {
+    fn new(version: Option<UsfmVersion>) -> Self {
+        let idx_of = |name: &[u8]| generated::marker_idx(name, SpellingShape::PlainOnly);
+        Self {
+            version,
+            ca: idx_of(b"ca"),
+            cp: idx_of(b"cp"),
+            va: idx_of(b"va"),
+            vp: idx_of(b"vp"),
+            window: Window::Closed,
+            owner: NO_TOKEN,
+            owner_idx: generated::UNRESOLVED,
+            owner_is_point: false,
+            owner_has_attrs: false,
+            first_list: NO_TOKEN,
+            levels: [0u16; generated::ROW_COUNT],
+            first_seen: [0u32; generated::ROW_COUNT],
+        }
     }
 
-    let idx_of = |name: &[u8]| generated::marker_idx(name, SpellingShape::PlainOnly);
-    let (ca, cp) = (idx_of(b"ca"), idx_of(b"cp"));
-    let (va, vp) = (idx_of(b"va"), idx_of(b"vp"));
-
-    let mut window = Window::Closed;
-    // The owning marker of any attribute list that arrives now: its token
-    // index, its row, whether its terminator is `\*` rather than a named
-    // closer, and whether its row defines any attributes at all. `NO_TOKEN` =
-    // no marker is in reach.
-    let mut owner = NO_TOKEN;
-    let mut owner_idx = generated::UNRESOLVED;
-    let mut owner_is_point = false;
-    let mut owner_has_attrs = false;
-    // The first attribute list already seen on that owner.
-    let mut first_list = NO_TOKEN;
-    // Levels-seen per numbered family, indexed by ROW: bit 0 = the bare
-    // spelling, bit n = `\q<n>`, bit 15 = "already reported". A fixed array
-    // rather than a map because the row index IS the family key and there are
-    // only 153 rows — 306 bytes of stack, no hashing, no allocation.
-    // `first_seen` is only ever read when the mask says the family has been
-    // seen, so it needs no sentinel initialization.
-    let mut levels = [0u16; generated::ROW_COUNT];
-    let mut first_seen = [0u32; generated::ROW_COUNT];
-    const REPORTED: u16 = 1 << 15;
-
-    for (idx, token) in tokens.iter().enumerate() {
-        let idx = idx as u32;
-        let kind = token.kind();
+    #[inline]
+    fn on_leaf(&mut self, doc: &Doc, idx: u32, token: &Token, kind: TokenKind, out: &mut Emit) {
+        let (source, tokens) = (doc.source, doc.tokens);
+        let (ca, cp, va, vp) = (self.ca, self.cp, self.va, self.vp);
+        let version = self.version;
         match kind {
             // Byte-exact membership first, then the case-folded retry: "known
             // but lowercase" and "unknown" are different findings and exactly
@@ -1570,7 +1841,7 @@ fn token_pass(
             TokenKind::BookCode => {
                 let span = span_of(source, token);
                 if books::is_book_code(span) {
-                    continue;
+                    return;
                 }
                 let folded = books::upper3(span).filter(|upper| books::is_book_code(upper));
                 match folded {
@@ -1639,12 +1910,12 @@ fn token_pass(
                 } else {
                     (None, Window::Closed)
                 };
-                window = match code {
+                self.window = match code {
                     Some(code) => {
-                        if window != opens {
+                        if self.window != opens {
                             out.push(Observation::one(code, idx));
                         }
-                        // The window stays open either way: `\ca 2\ca*\cp א`
+                        // The self.window stays open either way: `\ca 2\ca*\cp א`
                         // is one legal run, and re-reporting every member of a
                         // misplaced run turns one slip into three findings.
                         opens
@@ -1658,19 +1929,19 @@ fn token_pass(
 
                 // --- numbering-mix --------------------------------------
                 if has_levels(marker_idx) {
-                    let family = &mut levels[marker_idx as usize];
-                    if *family == 0 {
-                        first_seen[marker_idx as usize] = idx;
+                    let slot = marker_idx as usize;
+                    if self.levels[slot] == 0 {
+                        self.first_seen[slot] = idx;
                     }
-                    *family |= 1 << spelled_level(span_of(source, token)).min(14);
+                    self.levels[slot] |= 1 << spelled_level(span_of(source, token)).min(14);
+                    let family = self.levels[slot];
                     // Bare AND numbered, said once per family per book.
-                    if *family & REPORTED == 0 && *family & 1 != 0 && *family & !(REPORTED | 1) != 0
-                    {
-                        *family |= REPORTED;
+                    if family & REPORTED == 0 && family & 1 != 0 && family & !(REPORTED | 1) != 0 {
+                        self.levels[slot] |= REPORTED;
                         out.push(Observation {
                             code: Code::NumberingMix,
                             anchor: idx,
-                            second: first_seen[marker_idx as usize],
+                            second: self.first_seen[slot],
                             aux: match generated::numbering(marker_idx) {
                                 Numbering::UpTo(cap) => u32::from(cap),
                                 // `liv` alone: numbered with no cap stated.
@@ -1680,15 +1951,15 @@ fn token_pass(
                     }
                 }
 
-                owner = idx;
-                owner_idx = marker_idx;
-                owner_is_point = !opener || generated::kind(marker_idx) == MarkerKind::Milestone;
+                self.owner = idx;
+                self.owner_idx = marker_idx;
+                self.owner_is_point = !opener || generated::kind(marker_idx) == MarkerKind::Milestone;
                 // Resolved HERE, once per marker, rather than per Text token:
                 // it is the flag that keeps the pipe scan off ordinary prose,
                 // so it must not itself cost a table read per token.
-                owner_has_attrs =
-                    !owner_is_point && !generated::defined_attributes(marker_idx).is_empty();
-                first_list = NO_TOKEN;
+                self.owner_has_attrs =
+                    !self.owner_is_point && !generated::defined_attributes(marker_idx).is_empty();
+                self.first_list = NO_TOKEN;
             }
             // Not an enumeration of `+`/`-`/`?` — those are the conventional
             // values of one general run, and a caller of up to three bytes is
@@ -1697,56 +1968,37 @@ fn token_pass(
                 if span_of(source, token).len() > 3 {
                     out.push(Observation::one(Code::CallerShape, idx));
                 }
-                window = Window::Closed;
+                self.window = Window::Closed;
             }
+            // Whether a closer closed anything is [`Structure`]'s question,
+            // not this machine's: the answer is a property of the node that is
+            // about to close, and it arrives one event later.
             TokenKind::ClosingMarker { nested } => {
-                if !consumed[idx as usize] {
-                    // A PLAIN span delete, whitespace left exactly as written.
-                    // Deleting `\f*` out of `text \f* more` does leave two
-                    // spaces — and eating one of them would be a second,
-                    // unasked-for edit to bytes the author chose. Extra
-                    // horizontal whitespace is legal everywhere in USFM; the
-                    // formatter bundle is where it belongs.
-                    out.push_fixed(
-                        Observation::one(Code::OrphanCloser, idx),
-                        token.start,
-                        token.end(),
-                        b"",
-                    );
-                }
                 if nested
                     && token.marker_idx != generated::UNRESOLVED
                     && generated::kind(token.marker_idx) != MarkerKind::Character
                 {
                     out.push(Observation::one(Code::NestedSpellingMisuse, idx));
                 }
-                // A closer ends the owner's reach and leaves the adjacency
-                // window alone: `\ca 2\ca*\cp א` is one legal run.
-                owner = NO_TOKEN;
-                owner_has_attrs = false;
-                first_list = NO_TOKEN;
+                // A closer ends the self.owner's reach and leaves the adjacency
+                // self.window alone: `\ca 2\ca*\cp א` is one legal run.
+                self.owner = NO_TOKEN;
+                self.owner_has_attrs = false;
+                self.first_list = NO_TOKEN;
             }
             TokenKind::MilestoneTerminator => {
-                if !consumed[idx as usize] {
-                    out.push_fixed(
-                        Observation::one(Code::OrphanTerminator, idx),
-                        token.start,
-                        token.end(),
-                        b"",
-                    );
-                }
-                owner = NO_TOKEN;
-                owner_has_attrs = false;
-                first_list = NO_TOKEN;
+                self.owner = NO_TOKEN;
+                self.owner_has_attrs = false;
+                self.first_list = NO_TOKEN;
             }
             TokenKind::AttrList => {
-                if first_list != NO_TOKEN {
-                    out.push(Observation::pair(Code::AttrBothLists, idx, first_list));
+                if self.first_list != NO_TOKEN {
+                    out.push(Observation::pair(Code::AttrBothLists, idx, self.first_list));
                 } else {
-                    first_list = idx;
+                    self.first_list = idx;
                 }
-                if owner == NO_TOKEN {
-                    continue;
+                if self.owner == NO_TOKEN {
+                    return;
                 }
                 // NODE-INITIAL is "in front position AND self-closed": the
                 // list is the token right after its marker, and its span ends
@@ -1757,20 +2009,20 @@ fn token_pass(
                 // value — but that list is not in front position either, so
                 // the front test already excludes it.
                 let span = span_of(source, token);
-                let trailing = idx != owner + 1
+                let trailing = idx != self.owner + 1
                     || !span
                         .iter()
                         .rev()
                         .find(|byte| !matches!(byte, b' ' | b'\t'))
                         .is_some_and(|byte| *byte == b'|');
                 if trailing {
-                    if generated::kind(owner_idx) == MarkerKind::Character
+                    if generated::kind(self.owner_idx) == MarkerKind::Character
                         && version >= Some(UsfmVersion::V3_2)
                     {
                         out.push(Observation {
                             code: Code::AttrTrailingFormDeprecated,
                             anchor: idx,
-                            second: owner,
+                            second: self.owner,
                             aux: version.map_or(0, |declared| declared as u32),
                         });
                     }
@@ -1778,18 +2030,18 @@ fn token_pass(
                     // token IS the closer the scanner accepted without
                     // checking whose it was. This is where that is checked.
                     let matched = match tokens.get(idx as usize + 1).map(Token::kind) {
-                        Some(TokenKind::MilestoneTerminator) => owner_is_point,
+                        Some(TokenKind::MilestoneTerminator) => self.owner_is_point,
                         Some(TokenKind::ClosingMarker { .. }) => {
-                            !owner_is_point && tokens[idx as usize + 1].marker_idx == owner_idx
+                            !self.owner_is_point && tokens[idx as usize + 1].marker_idx == self.owner_idx
                         }
                         _ => true,
                     };
                     if !matched {
-                        out.push(Observation::pair(Code::AttrTerminatorMismatch, idx, owner));
+                        out.push(Observation::pair(Code::AttrTerminatorMismatch, idx, self.owner));
                     }
                 }
             }
-            // A raw pipe in the content of an attrs-capable marker. The owner
+            // A raw pipe in the content of an attrs-capable marker. The self.owner
             // flag comes first on purpose: it is one already-loaded boolean,
             // and it keeps the byte scan off the ~85% of tokens that are
             // ordinary prose.
@@ -1801,136 +2053,139 @@ fn token_pass(
             // `unterminated-milestone` already reports, exactly, and this hint
             // would only guess at.
             TokenKind::Text => {
-                if owner_has_attrs && span_of(source, token).contains(&b'|') {
-                    out.push(Observation::pair(Code::AttrPipeHint, idx, owner));
+                if self.owner_has_attrs && span_of(source, token).contains(&b'|') {
+                    out.push(Observation::pair(Code::AttrPipeHint, idx, self.owner));
                 }
                 // GUARDED, and the guard is load-bearing: `\c 1 \ca` is the
                 // only shape that cares whether a Text run is blank, so asking
                 // the question unconditionally means reading every content byte
                 // in the document for a fact that matters after roughly one
                 // token in ten thousand.
-                if window != Window::Closed
+                if self.window != Window::Closed
                     && !span_of(source, token).iter().all(|b| is_structural_ws(*b))
                 {
-                    window = Window::Closed;
+                    self.window = Window::Closed;
                 }
             }
             // A line ending ends the ATTRIBUTE machine's reach, and
-            // deliberately leaves the adjacency window open: `\c 1` and its
+            // deliberately leaves the adjacency self.window open: `\c 1` and its
             // `\cp` are conventionally written on separate lines.
             TokenKind::Newline => {
-                owner = NO_TOKEN;
-                owner_has_attrs = false;
-                first_list = NO_TOKEN;
+                self.owner = NO_TOKEN;
+                self.owner_has_attrs = false;
+                self.first_list = NO_TOKEN;
             }
             // The designator of the `\c`/`\v`/`\ca`/`\vp` that opened the
-            // window belongs to the run; an optional break does not.
+            // self.window belongs to the run; an optional break does not.
             TokenKind::Designator => {}
-            TokenKind::OptBreak => window = Window::Closed,
+            TokenKind::OptBreak => self.window = Window::Closed,
         }
     }
 }
 
-/// One in-order walk carrying the two ancestry facts no single node knows:
-/// "am I inside a sidebar" and "is there a paragraph above me".
-fn tree_pass(source: &[u8], tokens: &[Token], cst: &Cst, out: &mut Emit) {
-    struct Cursor {
-        next: u32,
-        end: u32,
-        sidebar: bool,
-        para: bool,
-        /// Restored on pop, so nested sidebars name the innermost opener.
-        prev_sidebar_token: u32,
+/// The ANCESTRY machine: the two facts no single node knows — "am I inside a
+/// sidebar" and "is there a paragraph above me".
+///
+/// It keeps no parallel copy of the walk's stack. Both depths are re-derived at
+/// close from the node in hand (the same two table reads the open did), which
+/// is what lets the driver own the stack outright — and is the property a
+/// Builder-driven pipeline needs, since the Builder's frames are its own. The
+/// one thing that cannot be re-derived is WHICH sidebar we are in, so the
+/// innermost opener rides a stack of its own; it grows only on sidebars, which
+/// are rare.
+struct Ancestry {
+    sidebars: u32,
+    paragraphs: u32,
+    sidebar_token: u32,
+    /// The enclosing sidebar's opener, restored on pop, so nested sidebars name
+    /// the innermost one.
+    enclosing: Vec<u32>,
+    /// One `\p` repairs a whole run of paragraph-less verses, so the run gets
+    /// ONE finding, anchored where that `\p` would go. Reported per verse this
+    /// rule cries wolf: `\c 2` with no `\p` lights up every verse in the
+    /// chapter (614 → 34 across en_ult), which buries the real signal.
+    run_reported: bool,
+}
+
+/// [`Frame::scratch`] bits: what this node contributes to the two depths.
+const IS_SIDEBAR: u8 = 1;
+const IS_PARAGRAPH: u8 = 2;
+
+impl Ancestry {
+    fn new() -> Self {
+        Self {
+            sidebars: 0,
+            paragraphs: 0,
+            sidebar_token: ROOT_TOKEN,
+            enclosing: Vec::new(),
+            run_reported: false,
+        }
     }
 
-    let root = &cst.nodes[0];
-    let mut stack = vec![Cursor {
-        next: root.children.start,
-        end: root.children.end,
-        sidebar: false,
-        para: false,
-        prev_sidebar_token: ROOT_TOKEN,
-    }];
-    let mut sidebars = 0u32;
-    let mut paragraphs = 0u32;
-    let mut sidebar_token = ROOT_TOKEN;
-    // One `\p` repairs a whole run of paragraph-less verses, so the run gets
-    // ONE finding, anchored where that `\p` would go. Reported per verse this
-    // rule cries wolf: `\c 2` with no `\p` lights up every verse in the
-    // chapter (614 → 34 across en_ult), which buries the real signal.
-    let mut run_reported = false;
-
-    while let Some(cursor) = stack.last_mut() {
-        if cursor.next == cursor.end {
-            let done = stack.pop().expect("cursor was borrowed from the stack");
-            sidebars -= u32::from(done.sidebar);
-            paragraphs -= u32::from(done.para);
-            if done.sidebar {
-                sidebar_token = done.prev_sidebar_token;
-            }
-            continue;
+    /// Reads the node's row ONCE and hands the answer back to the driver as
+    /// [`Frame::scratch`]; the close event gets it for free rather than paying
+    /// for the same two table reads again.
+    #[inline]
+    fn on_node_open(&mut self, doc: &Doc, node: &Node) -> u8 {
+        let marker_idx = doc.tokens[node.token as usize].marker_idx;
+        let sidebar = generated::opens_scope(marker_idx) == Some(ScopeKind::Sidebar);
+        // Cells count: a verse inside a table cell is inside a paragraph for
+        // every purpose this rule has.
+        let para = matches!(
+            generated::kind(marker_idx),
+            MarkerKind::Paragraph | MarkerKind::TableCell
+        );
+        self.sidebars += u32::from(sidebar);
+        self.paragraphs += u32::from(para);
+        if para {
+            self.run_reported = false;
         }
-        let child = cst.child_ids[cursor.next as usize];
-        cursor.next += 1;
-
-        if child & NODE_ID_BIT != 0 {
-            let node = &cst.nodes[(child & !NODE_ID_BIT) as usize];
-            let marker_idx = tokens[node.token as usize].marker_idx;
-            let sidebar = generated::opens_scope(marker_idx) == Some(ScopeKind::Sidebar);
-            // Cells count: a verse inside a table cell is inside a paragraph
-            // for every purpose this rule has.
-            let para = matches!(
-                generated::kind(marker_idx),
-                MarkerKind::Paragraph | MarkerKind::TableCell
-            );
-            sidebars += u32::from(sidebar);
-            paragraphs += u32::from(para);
-            if para {
-                run_reported = false;
-            }
-            let prev_sidebar_token = sidebar_token;
-            if sidebar {
-                sidebar_token = node.token;
-            }
-            stack.push(Cursor {
-                next: node.children.start,
-                end: node.children.end,
-                sidebar,
-                para,
-                prev_sidebar_token,
-            });
-            continue;
+        if sidebar {
+            self.enclosing.push(self.sidebar_token);
+            self.sidebar_token = node.token;
         }
+        u8::from(sidebar) | (u8::from(para) << 1)
+    }
 
-        let token = &tokens[child as usize];
-        if !matches!(token.kind(), TokenKind::Marker { .. }) {
-            continue;
+    #[inline]
+    fn on_node_close(&mut self, scratch: u8) {
+        self.sidebars -= u32::from(scratch & IS_SIDEBAR != 0);
+        self.paragraphs -= u32::from(scratch & IS_PARAGRAPH != 0);
+        if scratch & IS_SIDEBAR != 0 {
+            self.sidebar_token = self.enclosing.pop().unwrap_or(ROOT_TOKEN);
+        }
+    }
+
+    #[inline]
+    fn on_leaf(&mut self, doc: &Doc, idx: u32, token: &Token, kind: TokenKind, out: &mut Emit) {
+        if !matches!(kind, TokenKind::Marker { .. }) {
+            return;
         }
         match generated::kind(token.marker_idx) {
             MarkerKind::Chapter => {
-                if sidebars > 0 {
+                if self.sidebars > 0 {
                     out.push(Observation::pair(
                         Code::ContentOutsideSidebarRule,
-                        child,
-                        sidebar_token,
+                        idx,
+                        self.sidebar_token,
                     ));
                 }
                 // A run cannot cross `\c`: the chapter displaces any open
                 // paragraph, so a `\p` inserted in the previous chapter
                 // repairs nothing here — each offending chapter is its own
                 // run and gets its own finding.
-                run_reported = false;
+                self.run_reported = false;
             }
             MarkerKind::Verse => {
-                if sidebars > 0 {
+                if self.sidebars > 0 {
                     out.push(Observation::pair(
                         Code::ContentOutsideSidebarRule,
-                        child,
-                        sidebar_token,
+                        idx,
+                        self.sidebar_token,
                     ));
                 }
-                if paragraphs == 0 && !run_reported {
-                    run_reported = true;
+                if self.paragraphs == 0 && !self.run_reported {
+                    self.run_reported = true;
                     // The `\p` usfmtc fabricates, PROPOSED instead: inserted in
                     // front of the verse that starts the run, which is where the
                     // one repairing paragraph belongs. The leading newline is
@@ -1938,18 +2193,14 @@ fn tree_pass(source: &[u8], tokens: &[Token], cst: &Cst, out: &mut Emit) {
                     // would trade this finding for a `marker-not-ws-preceded` on
                     // the `\p` we just proposed — a fix must not hand back a new
                     // finding, and the oracle would say so.
-                    let at = tokens[child as usize].start;
-                    let text: &[u8] = if at == 0 || is_structural_ws(source[at as usize - 1]) {
-                        b"\\p\n"
-                    } else {
-                        b"\n\\p\n"
-                    };
-                    out.push_fixed(
-                        Observation::one(Code::MissingParagraph, child),
-                        at,
-                        at,
-                        text,
-                    );
+                    let at = token.start;
+                    let text: &[u8] =
+                        if at == 0 || is_structural_ws(doc.source[at as usize - 1]) {
+                            b"\\p\n"
+                        } else {
+                            b"\n\\p\n"
+                        };
+                    out.push_fixed(Observation::one(Code::MissingParagraph, idx), at, at, text);
                 }
             }
             _ => {}
@@ -2044,38 +2295,53 @@ fn has_levels(marker_idx: generated::MarkerIdx) -> bool {
 /// Two of its four anomaly codes offer a fix — renumber to what the sequence
 /// expected — and both go through [`renumberable`], which is where the honest
 /// half of that fix lives.
-fn ordering_pass(source: &[u8], tokens: &[Token], out: &mut Emit) {
-    /// Which marker is still owed its `Designator` token.
-    #[derive(Clone, Copy, PartialEq, Eq)]
-    enum Awaiting {
-        None,
-        /// The `\c` marker's token index — the anchor if no number arrives.
-        Chapter(u32),
-        Verse,
+/// Which marker is still owed its `Designator` token.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Awaiting {
+    None,
+    /// The `\c` marker's token index — the anchor if no number arrives.
+    Chapter(u32),
+    Verse,
+}
+
+struct Ordering {
+    awaiting: Awaiting,
+    /// (number, the designator token that carried it) — `second` on a finding.
+    prev_chapter: Option<(u32, u32)>,
+    prev_verse: Option<(u32, u32)>,
+    /// True until this chapter's first verse has been read (well-formed or
+    /// not): the window in which `missing-verse-one` can fire. Starts FALSE —
+    /// the rule is about a CHAPTER's first verse, so a verse ahead of any `\c`
+    /// is verse-before-first-chapter's story alone, never also this one's.
+    first_verse_slot: bool,
+    seen_chapter: bool,
+    first_verse_token: Option<u32>,
+    first_pre_chapter_verse: Option<u32>,
+}
+
+impl Ordering {
+    fn new() -> Self {
+        Self {
+            awaiting: Awaiting::None,
+            prev_chapter: None,
+            prev_verse: None,
+            first_verse_slot: false,
+            seen_chapter: false,
+            first_verse_token: None,
+            first_pre_chapter_verse: None,
+        }
     }
 
-    let mut awaiting = Awaiting::None;
-    // (number, the designator token that carried it) — `second` on a finding.
-    let mut prev_chapter: Option<(u32, u32)> = None;
-    let mut prev_verse: Option<(u32, u32)> = None;
-    // True until this chapter's first verse has been read (well-formed or
-    // not): the window in which `missing-verse-one` can fire. Starts FALSE —
-    // the rule is about a CHAPTER's first verse, so a verse ahead of any `\c`
-    // is verse-before-first-chapter's story alone, never also this one's.
-    let mut first_verse_slot = false;
-    let mut seen_chapter = false;
-    let mut first_verse_token: Option<u32> = None;
-    let mut first_pre_chapter_verse: Option<u32> = None;
-
-    for (idx, token) in tokens.iter().enumerate() {
-        let idx = idx as u32;
-        match token.kind() {
+    #[inline]
+    fn on_leaf(&mut self, doc: &Doc, idx: u32, token: &Token, kind: TokenKind, out: &mut Emit) {
+        let (source, tokens) = (doc.source, doc.tokens);
+        match kind {
             // An attribute list does not end the payload expectation, and it
             // is not the payload either — step over it.
             TokenKind::AttrList => {}
-            TokenKind::Designator => match awaiting {
+            TokenKind::Designator => match self.awaiting {
                 Awaiting::Chapter(_) => {
-                    awaiting = Awaiting::None;
+                    self.awaiting = Awaiting::None;
                     match designator::chapter(span_of(source, token)) {
                         Designator::Malformed => {
                             out.push(Observation::one(Code::DesignatorMalformed, idx));
@@ -2083,10 +2349,10 @@ fn ordering_pass(source: &[u8], tokens: &[Token], out: &mut Emit) {
                             // the NEXT chapter has nothing legitimate to be
                             // compared against either. Dropping the state is
                             // what keeps one bad number to one finding.
-                            prev_chapter = None;
+                            self.prev_chapter = None;
                         }
                         Designator::Wellformed { first: number, .. } => {
-                            if let Some((previous, previous_token)) = prev_chapter {
+                            if let Some((previous, previous_token)) = self.prev_chapter {
                                 let expected = previous.saturating_add(1);
                                 let code = if number == previous {
                                     Some(Code::ChapterDuplicate)
@@ -2112,12 +2378,12 @@ fn ordering_pass(source: &[u8], tokens: &[Token], out: &mut Emit) {
                                     );
                                 }
                             }
-                            prev_chapter = Some((number, idx));
+                            self.prev_chapter = Some((number, idx));
                         }
                     }
                 }
                 Awaiting::Verse => {
-                    awaiting = Awaiting::None;
+                    self.awaiting = Awaiting::None;
                     match designator::verse(span_of(source, token)) {
                         Designator::Malformed => {
                             out.push(Observation::one(Code::DesignatorMalformed, idx));
@@ -2127,15 +2393,15 @@ fn ordering_pass(source: &[u8], tokens: &[Token], out: &mut Emit) {
                             // the malformed token itself is not enough: real
                             // data proves it. en_ulb ZEC 12:7 is written
                             // `\v 7"` (no space before the quote), so the
-                            // designator is `7"`; leaving `prev_verse` at 6
+                            // designator is `7"`; leaving `self.prev_verse` at 6
                             // then made the perfectly good `\v 8` look like a
                             // gap — one typo, two findings, the second of them
                             // a lie.
-                            prev_verse = None;
-                            first_verse_slot = false;
+                            self.prev_verse = None;
+                            self.first_verse_slot = false;
                         }
                         Designator::Wellformed { first, last } => {
-                            if let Some((previous_last, previous_token)) = prev_verse {
+                            if let Some((previous_last, previous_token)) = self.prev_verse {
                                 let expected = previous_last.saturating_add(1);
                                 let code = if first == previous_last {
                                     Some(Code::VerseDuplicate)
@@ -2160,7 +2426,7 @@ fn ordering_pass(source: &[u8], tokens: &[Token], out: &mut Emit) {
                                         true,
                                     );
                                 }
-                            } else if first_verse_slot && first != 1 {
+                            } else if self.first_verse_slot && first != 1 {
                                 out.push(Observation {
                                     code: Code::MissingVerseOne,
                                     anchor: idx,
@@ -2168,28 +2434,28 @@ fn ordering_pass(source: &[u8], tokens: &[Token], out: &mut Emit) {
                                     aux: 1,
                                 });
                             }
-                            first_verse_slot = false;
-                            prev_verse = Some((last, idx));
+                            self.first_verse_slot = false;
+                            self.prev_verse = Some((last, idx));
                         }
                     }
                 }
                 Awaiting::None => {}
             },
             TokenKind::Marker { .. } => {
-                if let Awaiting::Chapter(marker) = awaiting {
+                if let Awaiting::Chapter(marker) = self.awaiting {
                     out.push(Observation::one(Code::ChapterWithoutDesignator, marker));
                 }
-                awaiting = match generated::kind(token.marker_idx) {
+                self.awaiting = match generated::kind(token.marker_idx) {
                     MarkerKind::Chapter => {
-                        seen_chapter = true;
-                        prev_verse = None;
-                        first_verse_slot = true;
+                        self.seen_chapter = true;
+                        self.prev_verse = None;
+                        self.first_verse_slot = true;
                         Awaiting::Chapter(idx)
                     }
                     MarkerKind::Verse => {
-                        first_verse_token.get_or_insert(idx);
-                        if !seen_chapter {
-                            first_pre_chapter_verse.get_or_insert(idx);
+                        self.first_verse_token.get_or_insert(idx);
+                        if !self.seen_chapter {
+                            self.first_pre_chapter_verse.get_or_insert(idx);
                         }
                         Awaiting::Verse
                     }
@@ -2200,27 +2466,38 @@ fn ordering_pass(source: &[u8], tokens: &[Token], out: &mut Emit) {
             // over, exactly as the scanner's is. Guarded rather than
             // unconditional because this is the arm nearly every token in the
             // corpus takes, and a perfectly-predicted branch beats a store.
-            _ if awaiting != Awaiting::None => {
-                if let Awaiting::Chapter(marker) = awaiting {
+            _ if self.awaiting != Awaiting::None => {
+                if let Awaiting::Chapter(marker) = self.awaiting {
                     out.push(Observation::one(Code::ChapterWithoutDesignator, marker));
                 }
-                awaiting = Awaiting::None;
+                self.awaiting = Awaiting::None;
             }
             _ => {}
         }
     }
-    // A `\c` as the very last token of the file.
-    if let Awaiting::Chapter(marker) = awaiting {
-        out.push(Observation::one(Code::ChapterWithoutDesignator, marker));
-    }
 
-    match (seen_chapter, first_verse_token, first_pre_chapter_verse) {
-        // Verses and no chapter anywhere: one finding at the first verse.
-        // (A book with neither — front matter, a glossary — says nothing.)
-        (false, Some(verse), _) => out.push(Observation::one(Code::MissingChapter, verse)),
-        // Verses ahead of the first `\c`: one finding for the whole run.
-        (true, _, Some(verse)) => out.push(Observation::one(Code::VerseBeforeFirstChapter, verse)),
-        _ => {}
+    /// End of input: the whole-book facts, which are exactly the ones no token
+    /// event could carry.
+    fn finish(&mut self, out: &mut Emit) {
+        // A `\c` as the very last token of the file.
+        if let Awaiting::Chapter(marker) = self.awaiting {
+            out.push(Observation::one(Code::ChapterWithoutDesignator, marker));
+        }
+
+        match (
+            self.seen_chapter,
+            self.first_verse_token,
+            self.first_pre_chapter_verse,
+        ) {
+            // Verses and no chapter anywhere: one finding at the first verse.
+            // (A book with neither — front matter, a glossary — says nothing.)
+            (false, Some(verse), _) => out.push(Observation::one(Code::MissingChapter, verse)),
+            // Verses ahead of the first `\c`: one finding for the whole run.
+            (true, _, Some(verse)) => {
+                out.push(Observation::one(Code::VerseBeforeFirstChapter, verse))
+            }
+            _ => {}
+        }
     }
 }
 

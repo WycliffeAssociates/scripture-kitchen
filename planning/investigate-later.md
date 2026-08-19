@@ -129,3 +129,16 @@ refactor SHAPED AS feedable state machines, driven by the tree walk —
 90% of the extraction as a pure reorganization; (2) invert cst::build to
 feed(); (3) the scanner-sink experiment in experiments/, behind the
 identity oracle.
+
+**(1) IS DONE, 2026-08-19.** src/lint.rs is one in-order walk feeding
+`Structure`/`Ancestry`/`Ordering`/`Flat` — plain structs, `on_node_open` /
+`on_leaf` / `on_node_close` / `finish`, no view of the driver's stack. Every
+observation, fix label and edit is byte-identical over all 226 books, and
+12.1 → 9.1 ns/token on en_ult, 12.8 → 8.4 on en_ulb. Two findings that bear
+on step 2: the orphan-closer BITSET IS GONE (a closer that closed something is
+the last child of an `Explicit` node, so the very next event settles it — no
+side table, which is exactly the simplification this section predicted), and
+the one fact a machine needed at both open and close rides a `u8` scratch on
+the driver's frame, so the Builder's frames must carry the same byte. The
+only lookahead left is `attr-terminator-mismatch`'s one token, still read off
+the slice and still owed the pending-state treatment when the Builder drives.
