@@ -437,19 +437,20 @@ pub struct LintRow {
 pub const LINT_ROWS: [LintRow; 37] = [
     // A note frame the walker had to end without its `\f*`/`\x*`: something
     // that cannot live inside a note (a `\c`, a bare `\v`, an unknown marker)
-    // arrived while it was open. Two of the three live corpus instances (en_ulb
-    // ISA and MRK) are genuinely truncated footnotes.
+    // arrived while it was open. Both live corpus instances (en_ulb ISA and
+    // MRK) are genuinely truncated footnotes.
     //
-    // The THIRD is not, and phase 4's fix preview is what showed it. bsb GEN
-    // 2:4 writes a perfectly well-formed note whose `\fq` contains `\+nd`, and
-    // `nd`'s context mask omits Footnote — so the nested character marker
-    // DISPLACES the whole note, which is why that book also carries the corpus's
-    // two orphan `\f*`. That omission is the spec fuzziness the standing ruling
-    // names ("Valid In lists systematically under-report Footnote for character
-    // markers"), and rows change only through the spec-diff, so lint reports the
-    // walker's verdict as it always does — but a user who accepts the fix there
-    // would truncate a good footnote. Recorded in lint-sketch.md's open list for
-    // the referee; NOT worked around here.
+    // There used to be a third, and it was a TABLE bug rather than damaged
+    // data — phase 4's fix preview is what showed it. bsb GEN 2:4 writes a
+    // perfectly well-formed note whose `\fq` contains `\+nd`, and `nd`'s
+    // context mask omitted Footnote, so the nested character marker DISPLACED
+    // the whole note (taking that book's `\f*` down with it as an orphan
+    // closer). Will ruled the omission class-wide on 2026-08-19 — usfmtc nests
+    // character markers in notes, and the spec contradicts its own "Valid In"
+    // lists — so every character row now carries Footnote and CrossReference
+    // (see the note above the `add` row in tables::rows). The fix that would
+    // have truncated a good footnote is no longer offered there, because there
+    // is no longer a finding.
     LintRow {
         code: Code::UnclosedNote,
         name: "unclosed-note",
@@ -2629,7 +2630,7 @@ mod tests {
     #[test]
     fn unclosed_note() {
         // `\c` is not allowed inside a footnote, so the walker stamps the note
-        // Recovery — the shape of all three live corpus findings.
+        // Recovery — the shape of both live corpus findings.
         let (tokens, obs) = findings("\\c 1\n\\p \\v 1 a\\f + \\ft note\\c 2\n\\p b");
         assert_eq!(
             obs,
@@ -2638,6 +2639,19 @@ mod tests {
                 token_named(&tokens, "f", 0)
             )]
         );
+    }
+
+    #[test]
+    fn a_note_holding_nested_character_markers_is_silent() {
+        // bsb GEN 2:4, the bytes that used to produce an unclosed-note here and
+        // an orphan `\f*` downstream: the note's `\fq` holds a `\+nd`. Since
+        // the 2026-08-19 class-wide curation of the character rows' contexts
+        // the char nests instead of displacing, so this well-formed note is
+        // simply CLEAN — end to end, lex → build → lint.
+        let (_, obs) = findings(
+            "\\c 2\n\\p \\v 1 in the beginning\n\\v 2 more\n\\v 3 more\n\\v 4 the \\nd Lord\\nd*\\f + \\fr 2:4 \\fq \\+nd Lord\\+nd*\\ft or \\fq \\+nd God\\+nd*\\ft , the proper name.\\f* God made them.",
+        );
+        assert_eq!(codes(&obs), Vec::<Code>::new());
     }
 
     #[test]

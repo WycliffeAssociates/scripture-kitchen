@@ -65,6 +65,38 @@ pub static ROWS: &[MarkerRow] = &[
         html_element: Some(HtmlElement::Transparent),
         priority: None,
     },
+    // ---- Character markers inside notes: the class-wide curation ---------
+    //
+    // Curated 2026-08-19, RULED BY WILL over the spec-diff referee: every
+    // scope-opening Character row in this table carries `Footnote` and
+    // `CrossReference`, whether or not its page's "Valid In" list says so.
+    // Will: "if that's what usfmtc does, likely all character markers are
+    // valid in footnotes — but they still need explicit closure."
+    //
+    // Evidence, two strands:
+    //   * usfmtc, the reference implementation, NESTS them. Probed against
+    //     bsb GEN 2:4 — `\f + \fr 2:4 \fq \+nd Lord\+nd*…\f*` reads as
+    //     note:f → char:fq → char:nd with the footnote intact.
+    //   * the spec contradicts its own "Valid In" lists in its examples:
+    //     `\jmp` inside `\ef` (its Example 13), `\dc` inside `\x`. The
+    //     omissions are unevenly maintained documentation, not a real
+    //     distinction.
+    //
+    // What it fixes: without these two contexts the walker DISPLACES an open
+    // note at `\+nd` — on real published scripture (bsb GEN) that produced a
+    // wrong tree, a spurious unclosed-note, an orphan `\f*` downstream, and a
+    // lint fix that would have truncated a good footnote.
+    //
+    // The CLOSING column is deliberately NOT touched: character markers still
+    // require explicit closure everywhere, inside notes included.
+    //
+    // NOT curated, on purpose: `ca`/`va`/`vp` (adjacency rows whose slice is
+    // empty BY DESIGN — see `SpecContext::is_positional`) and `pb`
+    // (CharBreaks). None of them opens a scope, so the mask is not
+    // load-bearing for any of them, and `fig` is its own kind, not this class.
+    //
+    // Every curated row below marks the addition with a one-line pointer back
+    // to this note.
     MarkerRow {
         marker: "add",
         shape: SpellingShape::Any,
@@ -81,6 +113,10 @@ pub static ROWS: &[MarkerRow] = &[
             SpecContext::Para,
             SpecContext::List,
             SpecContext::Table,
+            // + Footnote/CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
         ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
@@ -107,6 +143,10 @@ pub static ROWS: &[MarkerRow] = &[
             SpecContext::Para,
             SpecContext::List,
             SpecContext::Table,
+            // + Footnote/CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
         ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
@@ -152,7 +192,10 @@ pub static ROWS: &[MarkerRow] = &[
             SpecContext::Para,
             SpecContext::List,
             SpecContext::Table,
+            // + CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
             SpecContext::Footnote,
+            SpecContext::CrossReference,
         ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
@@ -182,7 +225,10 @@ pub static ROWS: &[MarkerRow] = &[
             SpecContext::Para,
             SpecContext::List,
             SpecContext::Table,
+            // + CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
             SpecContext::Footnote,
+            SpecContext::CrossReference,
         ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
@@ -209,6 +255,10 @@ pub static ROWS: &[MarkerRow] = &[
             SpecContext::Para,
             SpecContext::List,
             SpecContext::Table,
+            // + Footnote/CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
         ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
@@ -424,6 +474,10 @@ pub static ROWS: &[MarkerRow] = &[
             SpecContext::Para,
             SpecContext::List,
             SpecContext::Table,
+            // + Footnote/CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
         ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
@@ -488,7 +542,10 @@ pub static ROWS: &[MarkerRow] = &[
             SpecContext::Para,
             SpecContext::List,
             SpecContext::Table,
+            // + CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
             SpecContext::Footnote,
+            SpecContext::CrossReference,
         ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
@@ -616,7 +673,12 @@ pub static ROWS: &[MarkerRow] = &[
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
-        allowed_contexts: &[SpecContext::Footnote],
+        allowed_contexts: &[
+            // + CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
+        ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
         defined_attributes: &[],
@@ -702,7 +764,12 @@ pub static ROWS: &[MarkerRow] = &[
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
-        allowed_contexts: &[SpecContext::Footnote],
+        allowed_contexts: &[
+            // + CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
+        ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
         defined_attributes: &[],
@@ -720,7 +787,12 @@ pub static ROWS: &[MarkerRow] = &[
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
-        allowed_contexts: &[SpecContext::Footnote],
+        allowed_contexts: &[
+            // + CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
+        ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
         defined_attributes: &[],
@@ -746,6 +818,10 @@ pub static ROWS: &[MarkerRow] = &[
             SpecContext::Para,
             SpecContext::List,
             SpecContext::Table,
+            // + Footnote/CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
         ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
@@ -779,7 +855,12 @@ pub static ROWS: &[MarkerRow] = &[
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
-        allowed_contexts: &[SpecContext::Footnote],
+        allowed_contexts: &[
+            // + CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
+        ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
         defined_attributes: &[],
@@ -797,7 +878,12 @@ pub static ROWS: &[MarkerRow] = &[
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
-        allowed_contexts: &[SpecContext::Footnote],
+        allowed_contexts: &[
+            // + CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
+        ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
         defined_attributes: &[],
@@ -817,7 +903,12 @@ pub static ROWS: &[MarkerRow] = &[
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
-        allowed_contexts: &[SpecContext::Footnote],
+        allowed_contexts: &[
+            // + CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
+        ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
         defined_attributes: &[],
@@ -836,7 +927,12 @@ pub static ROWS: &[MarkerRow] = &[
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
-        allowed_contexts: &[SpecContext::Footnote],
+        allowed_contexts: &[
+            // + CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
+        ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
         defined_attributes: &[],
@@ -855,7 +951,12 @@ pub static ROWS: &[MarkerRow] = &[
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
-        allowed_contexts: &[SpecContext::Footnote],
+        allowed_contexts: &[
+            // + CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
+        ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
         defined_attributes: &[],
@@ -873,7 +974,12 @@ pub static ROWS: &[MarkerRow] = &[
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
-        allowed_contexts: &[SpecContext::Footnote],
+        allowed_contexts: &[
+            // + CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
+        ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
         defined_attributes: &[],
@@ -891,7 +997,12 @@ pub static ROWS: &[MarkerRow] = &[
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
-        allowed_contexts: &[SpecContext::Footnote],
+        allowed_contexts: &[
+            // + CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
+        ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
         defined_attributes: &[],
@@ -1167,7 +1278,13 @@ pub static ROWS: &[MarkerRow] = &[
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
-        allowed_contexts: &[SpecContext::BookIntroduction],
+        allowed_contexts: &[
+            SpecContext::BookIntroduction,
+            // + Footnote/CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
+        ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
         defined_attributes: &[],
@@ -1313,7 +1430,13 @@ pub static ROWS: &[MarkerRow] = &[
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
-        allowed_contexts: &[SpecContext::BookIntroduction],
+        allowed_contexts: &[
+            SpecContext::BookIntroduction,
+            // + Footnote/CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
+        ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
         defined_attributes: &[],
@@ -1359,7 +1482,10 @@ pub static ROWS: &[MarkerRow] = &[
             SpecContext::Para,
             SpecContext::List,
             SpecContext::Table,
+            // + CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
             SpecContext::Footnote,
+            SpecContext::CrossReference,
         ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
@@ -1386,6 +1512,10 @@ pub static ROWS: &[MarkerRow] = &[
             SpecContext::Para,
             SpecContext::List,
             SpecContext::Table,
+            // + Footnote/CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
         ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
@@ -1419,6 +1549,10 @@ pub static ROWS: &[MarkerRow] = &[
             SpecContext::Para,
             SpecContext::List,
             SpecContext::Table,
+            // + Footnote/CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
         ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
@@ -1516,7 +1650,13 @@ pub static ROWS: &[MarkerRow] = &[
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
-        allowed_contexts: &[SpecContext::List],
+        allowed_contexts: &[
+            SpecContext::List,
+            // + Footnote/CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
+        ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
         defined_attributes: &[],
@@ -1599,7 +1739,13 @@ pub static ROWS: &[MarkerRow] = &[
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
-        allowed_contexts: &[SpecContext::List],
+        allowed_contexts: &[
+            SpecContext::List,
+            // + Footnote/CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
+        ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
         defined_attributes: &[],
@@ -1623,7 +1769,13 @@ pub static ROWS: &[MarkerRow] = &[
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unbounded,
-        allowed_contexts: &[SpecContext::List],
+        allowed_contexts: &[
+            SpecContext::List,
+            // + Footnote/CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
+        ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
         defined_attributes: &[],
@@ -1789,6 +1941,10 @@ pub static ROWS: &[MarkerRow] = &[
             SpecContext::Para,
             SpecContext::List,
             SpecContext::Table,
+            // + Footnote/CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
         ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
@@ -1816,7 +1972,10 @@ pub static ROWS: &[MarkerRow] = &[
             SpecContext::Para,
             SpecContext::List,
             SpecContext::Table,
+            // + CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
             SpecContext::Footnote,
+            SpecContext::CrossReference,
         ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
@@ -1843,6 +2002,10 @@ pub static ROWS: &[MarkerRow] = &[
             SpecContext::Para,
             SpecContext::List,
             SpecContext::Table,
+            // + Footnote/CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
         ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
@@ -2056,6 +2219,10 @@ pub static ROWS: &[MarkerRow] = &[
             SpecContext::Para,
             SpecContext::List,
             SpecContext::Table,
+            // + Footnote/CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
         ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
@@ -2082,6 +2249,10 @@ pub static ROWS: &[MarkerRow] = &[
             SpecContext::Para,
             SpecContext::List,
             SpecContext::Table,
+            // + Footnote/CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
         ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
@@ -2144,6 +2315,10 @@ pub static ROWS: &[MarkerRow] = &[
             SpecContext::Para,
             SpecContext::List,
             SpecContext::Table,
+            // + Footnote/CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
         ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
@@ -2202,7 +2377,13 @@ pub static ROWS: &[MarkerRow] = &[
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
-        allowed_contexts: &[SpecContext::Para],
+        allowed_contexts: &[
+            SpecContext::Para,
+            // + Footnote/CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
+        ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
         defined_attributes: &[],
@@ -2294,7 +2475,13 @@ pub static ROWS: &[MarkerRow] = &[
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
-        allowed_contexts: &[SpecContext::Para],
+        allowed_contexts: &[
+            SpecContext::Para,
+            // + Footnote/CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
+        ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
         defined_attributes: &[],
@@ -2357,6 +2544,10 @@ pub static ROWS: &[MarkerRow] = &[
             SpecContext::Para,
             SpecContext::List,
             SpecContext::Table,
+            // + Footnote/CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
         ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
@@ -2403,6 +2594,10 @@ pub static ROWS: &[MarkerRow] = &[
             SpecContext::Para,
             SpecContext::List,
             SpecContext::Table,
+            // + Footnote/CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
         ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
@@ -2480,6 +2675,10 @@ pub static ROWS: &[MarkerRow] = &[
             SpecContext::Para,
             SpecContext::List,
             SpecContext::Table,
+            // + Footnote/CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
         ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
@@ -2528,7 +2727,10 @@ pub static ROWS: &[MarkerRow] = &[
             SpecContext::Para,
             SpecContext::List,
             SpecContext::Table,
+            // + CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
             SpecContext::Footnote,
+            SpecContext::CrossReference,
         ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
@@ -2579,6 +2781,10 @@ pub static ROWS: &[MarkerRow] = &[
             SpecContext::Para,
             SpecContext::List,
             SpecContext::Table,
+            // + Footnote/CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
         ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
@@ -2605,6 +2811,10 @@ pub static ROWS: &[MarkerRow] = &[
             SpecContext::Para,
             SpecContext::List,
             SpecContext::Table,
+            // + Footnote/CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
         ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
@@ -2685,7 +2895,10 @@ pub static ROWS: &[MarkerRow] = &[
             SpecContext::Para,
             SpecContext::List,
             SpecContext::Table,
+            // + CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
             SpecContext::Footnote,
+            SpecContext::CrossReference,
         ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
@@ -2717,6 +2930,10 @@ pub static ROWS: &[MarkerRow] = &[
             SpecContext::Para,
             SpecContext::List,
             SpecContext::Table,
+            // + Footnote/CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
         ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
@@ -2875,6 +3092,10 @@ pub static ROWS: &[MarkerRow] = &[
             SpecContext::Para,
             SpecContext::List,
             SpecContext::Table,
+            // + Footnote/CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
         ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
@@ -3120,6 +3341,10 @@ pub static ROWS: &[MarkerRow] = &[
             SpecContext::Para,
             SpecContext::List,
             SpecContext::Table,
+            // + Footnote/CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
         ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
@@ -3150,6 +3375,10 @@ pub static ROWS: &[MarkerRow] = &[
             SpecContext::Para,
             SpecContext::List,
             SpecContext::Table,
+            // + Footnote/CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
         ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
@@ -3176,6 +3405,10 @@ pub static ROWS: &[MarkerRow] = &[
             SpecContext::Para,
             SpecContext::List,
             SpecContext::Table,
+            // + Footnote/CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
         ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
@@ -3202,6 +3435,10 @@ pub static ROWS: &[MarkerRow] = &[
             SpecContext::Para,
             SpecContext::List,
             SpecContext::Table,
+            // + Footnote/CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
         ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
@@ -3231,6 +3468,10 @@ pub static ROWS: &[MarkerRow] = &[
             SpecContext::Para,
             SpecContext::List,
             SpecContext::Table,
+            // + Footnote/CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
         ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
@@ -3259,6 +3500,10 @@ pub static ROWS: &[MarkerRow] = &[
             SpecContext::Para,
             SpecContext::List,
             SpecContext::Table,
+            // + Footnote/CrossReference: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
         ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
@@ -3312,7 +3557,12 @@ pub static ROWS: &[MarkerRow] = &[
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
-        allowed_contexts: &[SpecContext::CrossReference],
+        allowed_contexts: &[
+            // + Footnote: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
+        ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
         defined_attributes: &[],
@@ -3330,7 +3580,12 @@ pub static ROWS: &[MarkerRow] = &[
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
-        allowed_contexts: &[SpecContext::CrossReference],
+        allowed_contexts: &[
+            // + Footnote: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
+        ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
         defined_attributes: &[],
@@ -3348,7 +3603,12 @@ pub static ROWS: &[MarkerRow] = &[
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
-        allowed_contexts: &[SpecContext::CrossReference],
+        allowed_contexts: &[
+            // + Footnote: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
+        ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
         defined_attributes: &[],
@@ -3366,7 +3626,12 @@ pub static ROWS: &[MarkerRow] = &[
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
-        allowed_contexts: &[SpecContext::CrossReference],
+        allowed_contexts: &[
+            // + Footnote: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
+        ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
         defined_attributes: &[],
@@ -3384,7 +3649,12 @@ pub static ROWS: &[MarkerRow] = &[
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
-        allowed_contexts: &[SpecContext::CrossReference],
+        allowed_contexts: &[
+            // + Footnote: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
+        ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
         defined_attributes: &[],
@@ -3402,7 +3672,12 @@ pub static ROWS: &[MarkerRow] = &[
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
-        allowed_contexts: &[SpecContext::CrossReference],
+        allowed_contexts: &[
+            // + Footnote: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
+        ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
         defined_attributes: &[],
@@ -3420,7 +3695,12 @@ pub static ROWS: &[MarkerRow] = &[
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
-        allowed_contexts: &[SpecContext::CrossReference],
+        allowed_contexts: &[
+            // + Footnote: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
+        ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
         defined_attributes: &[],
@@ -3470,7 +3750,12 @@ pub static ROWS: &[MarkerRow] = &[
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
-        allowed_contexts: &[SpecContext::CrossReference],
+        allowed_contexts: &[
+            // + Footnote: class-wide curation 2026-08-19 — see the
+            // note on the `add` row above.
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
+        ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
         defined_attributes: &[],

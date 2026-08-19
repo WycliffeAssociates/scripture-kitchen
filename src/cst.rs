@@ -921,6 +921,50 @@ mod tests {
     }
 
     #[test]
+    fn a_character_marker_nests_inside_its_note_instead_of_displacing_it() {
+        // bsb GEN 2:4's shape, byte for byte in miniature. Until the
+        // 2026-08-19 class-wide curation (see the note above the `add` row in
+        // tables::rows) no character row carried Footnote, so `\+nd` DISPLACED
+        // the note: `\f` closed Recovery, lint called it unclosed, and the
+        // `\f*` 240 bytes later became an orphan closer. Now the note is a
+        // parent and the char sits inside it — still explicitly closed, which
+        // is the half of the ruling that did NOT change.
+        let tokens = lex("\\p \\f + \\fr 2:4 \\fq \\+nd Lord\\+nd*\\ft rest.\\f* after");
+        let cst = build(&tokens);
+
+        let f = node_for(&tokens, &cst, "f");
+        let fq = node_for(&tokens, &cst, "fq");
+        let nd = node_for(&tokens, &cst, "nd");
+        assert_eq!(f.close_reason(), CloseReason::Explicit);
+        assert_eq!(nd.close_reason(), CloseReason::Explicit);
+        assert_eq!(f.context(), SpecContext::Footnote);
+        assert_eq!(fq.context(), SpecContext::Footnote);
+        assert_eq!(nd.context(), SpecContext::Footnote);
+
+        // note:f → char:fq → char:nd, the tree usfmtc reads off the same bytes.
+        let id_of = |name: &str| {
+            cst.nodes
+                .iter()
+                .position(|n| {
+                    n.token != ROOT_TOKEN
+                        && generated::name(tokens[n.token as usize].marker_idx) == name
+                })
+                .unwrap() as u32
+        };
+        let children = |node: &Node| {
+            cst.child_ids[node.children.start as usize..node.children.end as usize].to_vec()
+        };
+        assert!(children(f).contains(&(NODE_ID_BIT | id_of("fq"))));
+        assert!(children(fq).contains(&(NODE_ID_BIT | id_of("nd"))));
+        // The paragraph survives too, and every token is still in the tree.
+        assert!(children(node_for(&tokens, &cst, "p")).contains(&(NODE_ID_BIT | id_of("f"))));
+        assert_eq!(
+            cst.in_order().collect::<Vec<_>>(),
+            (0..tokens.len() as u32).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
     fn the_sidebar_is_a_pop_barrier_only_esbe_ends() {
         // `\c` inside `\esb` must NOT unwind the sidebar — it stays inside
         // (lint's to flag). `\esbe` reaches the barrier frame itself.

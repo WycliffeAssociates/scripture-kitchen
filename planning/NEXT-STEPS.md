@@ -16,8 +16,10 @@ flat lossless CST, ~6 ns/token; design and walker rules live in its doc
 comments and tests). Green: `tests/partition_oracle.rs`,
 `tests/fast_path_identity.rs`, `tests/parse_header_oracle.rs`,
 `tests/cst_oracle.rs` (lifted partition over 226 books). Corpus health via
-`playground --cst-stats`: zero Recovery except three genuinely unclosed
-`\f` (en_ulb ISA/MRK, bsb GEN) — lint's first three real findings.
+`playground --cst-stats`: zero Recovery except two genuinely unclosed
+`\f` (en_ulb ISA/MRK) — lint's first real findings. (bsb GEN was a third
+until 2026-08-19, when the character-in-note curation showed it was a
+table bug, not damaged data.)
 
 LINT is COMPLETE through phase 4 (src/lint.rs — 37 codes, the rules table,
 and the fix model: `Fix`/`Edit`/`FixStr`, 14 codes offering a byte-splice
@@ -102,7 +104,13 @@ knob is per-rule off/severity config, and only when a consumer asks.
 - **Rows change only through the spec-diff**
   (`planning/spec_contexts_diff.py`, needs a tcdocs clone). The MARKER
   PAGE is the referee; spec fuzziness is absorbed by LINT SEVERITY,
-  never by inventing table values.
+  never by inventing table values. WILL MAY OVERRIDE THE REFEREE, and
+  did once (2026-08-19): character markers are valid inside footnotes
+  and cross-references CLASS-WIDE — usfmtc nests them and the spec
+  contradicts its own "Valid In" lists — so every scope-opening
+  character row carries Footnote/CrossReference, with closing behaviour
+  untouched. An override is recorded on the rows (curation note above
+  the `add` row) and in lint-sketch.md, never left implicit.
 - **Never synthesize tokens.** Flag, never repair. Every place the
   reference implementation normalizes is a place we lint.
 - **Normalization is never the lexer's.** Spans keep their bytes exactly;

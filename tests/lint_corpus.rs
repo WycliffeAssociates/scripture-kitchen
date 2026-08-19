@@ -81,15 +81,25 @@ fn the_corpus_yields_exactly_the_known_findings() {
     }
     let total = |code: Code| totals[code as usize];
 
-    // The three genuinely truncated `\f` the CST has been pointing at since
+    // The two genuinely truncated `\f` the CST has been pointing at since
     // `--cst-stats` landed. These are lint's first real findings and the whole
     // reason the Recovery verdict exists.
-    assert_eq!(total(Code::UnclosedNote), 3);
+    //
+    // Was 3 until 2026-08-19: bsb GEN 2:4's footnote was never truncated, it
+    // was DISPLACED by the `\+nd` inside it, because no character row carried
+    // the Footnote context. Will's class-wide curation (see the note above the
+    // `add` row in tables::rows) gave every character row Footnote and
+    // CrossReference, and that footnote now closes Explicit at its own `\f*`.
+    assert_eq!(total(Code::UnclosedNote), 2);
 
-    // Both in examples.bsb, both DOWNSTREAM of an unclosed note: once the note
-    // frame is gone its `\f*` closes nothing. GEN's pair sits ~240 bytes
-    // apart, which is the signature of exactly this.
-    assert_eq!(total(Code::OrphanCloser), 2);
+    // examples.bsb 1SA 16:9 writes `\+xt 2 Samuel 13:3, \+xt 2 Samuel
+    // 21:21\+xt* and \+xt* …` — one more `\+xt*` than there are opens. A real
+    // authoring slip in the BSB, and the only orphan closer in 226 books.
+    //
+    // Was 2 until 2026-08-19: the other one, bsb GEN @5796, WAS downstream of
+    // the displaced note above — once the note frame was gone its `\f*` closed
+    // nothing. Fixing the table fixed the `\f*` with it.
+    assert_eq!(total(Code::OrphanCloser), 1);
 
     // `\s5` — the unfoldingWord chunk marker, not a spec marker — in every
     // en_ulb book. It resolves to row 0, so it is BOTH a finding and the
@@ -271,7 +281,7 @@ fn the_corpus_yields_exactly_the_known_findings() {
 }
 
 #[test]
-fn the_three_unclosed_notes_are_isa_mrk_and_bsb_gen() {
+fn the_two_unclosed_notes_are_isa_and_mrk() {
     let Some(books) = lint_corpus() else { return };
 
     let mut sites: BTreeMap<String, u64> = BTreeMap::new();
@@ -291,11 +301,9 @@ fn the_three_unclosed_notes_are_isa_mrk_and_bsb_gen() {
 
     assert_eq!(
         sites,
-        BTreeMap::from([
-            ("en_ulb/ISA".to_string(), 1),
-            ("en_ulb/MRK".to_string(), 1),
-            ("examples.bsb/GEN".to_string(), 1),
-        ])
+        // examples.bsb/GEN dropped out on 2026-08-19 — it was a displaced
+        // note, not a truncated one. See the unclosed-note pin above.
+        BTreeMap::from([("en_ulb/ISA".to_string(), 1), ("en_ulb/MRK".to_string(), 1),])
     );
 }
 
@@ -355,10 +363,12 @@ fn every_corpus_fix_passes_the_oracle() {
     }
     let total = |code: Code| totals[code as usize];
 
-    // The three truncated footnotes and the two orphan `\f*` downstream of two
-    // of them — every structural finding in 226 books, each with a repair.
-    assert_eq!(total(Code::UnclosedNote), 3);
-    assert_eq!(total(Code::OrphanCloser), 2);
+    // The two truncated footnotes and the one orphan `\+xt*` — every
+    // structural finding in 226 books, each with a repair. (Both counts fell
+    // by one on 2026-08-19 with the character-in-note curation; see the pins
+    // in `the_corpus_yields_exactly_the_known_findings`.)
+    assert_eq!(total(Code::UnclosedNote), 2);
+    assert_eq!(total(Code::OrphanCloser), 1);
     // One `\p` per paragraph-less run, all 2865 of them.
     assert_eq!(total(Code::MissingParagraph), 2_865);
     // The corpus's ONE duplicate verse is deliberately NOT among these: bdf_reg
@@ -367,7 +377,7 @@ fn every_corpus_fix_passes_the_oracle() {
     // (see `renumber`), which is why this reads 0 while the finding count above
     // reads 1 — and it is exactly the case that taught the guard.
     assert_eq!(total(Code::VerseDuplicate), 0);
-    assert_eq!(totals.iter().sum::<u64>(), 2_870);
+    assert_eq!(totals.iter().sum::<u64>(), 2_868);
 }
 
 #[test]

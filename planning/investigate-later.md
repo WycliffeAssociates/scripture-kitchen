@@ -88,3 +88,44 @@ back-position ladder for the whole word in one shape test.
 the cut), and check this against the "one-load marker path" spike already
 banked at the bottom of NEXT-STEPS — they overlap, and the spike should
 come first since it helps every marker rather than one.
+
+## Single-pass pipeline: a generic sink on push_token (Will, 2026-08-19)
+
+**The idea:** the whole pipeline could run in ONE traversal — the scanner's
+`push_token` feeds a generic sink (`Noop` by default, monomorphized away),
+the sink is the CST Builder, and lint's state machines feed on the
+Builder's events (leaf token / node-open / node-close(reason)). This is
+the linter.md emit funnel RESURRECTED — deliberately: the reasons it was
+killed are dead (no external-token door exists; the editor sends text),
+and the version that survives is the one where the scanner learns nothing
+about what listens.
+
+**Why it's mechanical, verified 2026-08-19:**
+- `cst::build` is a forward-only Builder loop, no lookahead — inverts to
+  `feed(token)` + `finish()`, with `build(&[Token])` as sugar.
+- The Builder's live frame stack IS the ancestry lint's tree walk
+  re-derives; close verdicts are stamped at pop, exactly when the
+  structural machine wants them; orphan closers get SIMPLER fused (the
+  consumed-bitset exists only because the passes are separate).
+- Whole-file facts (missing-id, numbering-mix) flush at finish().
+
+**The wrinkles, priced:**
+- ONE-TOKEN DELAY, still true: `whitespace_arm` (scanner.rs) extends the
+  PREVIOUS token's len on a later iteration, so a sink sees token N only
+  when N+1 exists (or EOF). Old linter.md recorded exactly this.
+- Two lint rules hold one token of lookahead (attr-terminator-mismatch,
+  adjacency windows) — pending-state in the machine, judged on next feed.
+- THE STAGED PATH STAYS AS THE ORACLE: fused output identity-tested
+  against lex → build → lint run separately (the fast_path_identity
+  precedent). The staged functions never go away.
+
+**Honest perf bound:** fusion deletes iteration overhead — ~8-10 ns/token
+pipeline-wide at best (~33 → ~23 measured baseline) — but the scanner's
+1.7 GiB/s comes from a tight loop; per-token work hanging off push_token
+risks the lex itself. Max-of-8, both corpora, believed only when measured.
+
+**Staging (converges with work already queued):** (1) lint one-walk
+refactor SHAPED AS feedable state machines, driven by the tree walk —
+90% of the extraction as a pure reorganization; (2) invert cst::build to
+feed(); (3) the scanner-sink experiment in experiments/, behind the
+identity oracle.

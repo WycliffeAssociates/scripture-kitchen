@@ -178,6 +178,18 @@ nicety. `fm` is the deliberate live example: its row stays as the page
 has it, lint stays quiet. One tunable severity value, never a fork in
 the data.
 
+SUPERSEDED for this one case (Will, 2026-08-19), overriding the
+spec-diff referee: character markers ARE valid inside footnotes and
+cross-references, CLASS-WIDE, and the table now says so — every
+scope-opening character row carries Footnote and CrossReference (curation
+note above the `add` row in tables::rows). Evidence: usfmtc nests them
+(probed on bsb GEN 2:4), and the spec contradicts its own lists as above.
+Will: "if that's what usfmtc does, likely all character markers are valid
+in footnotes — but they still need explicit closure" — the CLOSING column
+is untouched. `fm` is no longer the quiet-lint example; it is curated like
+the rest. The severity policy above still stands for every OTHER fuzzy
+case.
+
 ## Code list, v1
 
 ### Structure (read off `Node.reason` — a linear pass)
@@ -303,15 +315,17 @@ lint(source, tokens, cst):
 ## Still open (small)
 - messageParams audit vs onion — mechanical, do during build: every
   onion param must be a span or fit aux.
-- **`nd`'s context mask omits Footnote, and it costs three findings**
+- ~~**`nd`'s context mask omits Footnote, and it costs three findings**
   (found by phase-4's fix preview, 2026-08-19): bsb GEN 2:4 writes a
   well-formed note whose `\fq` contains `\+nd`; the character marker's
   mask has no Footnote bit, so it DISPLACES the note — which is the
-  book's `unclosed-note` and both of the corpus's `orphan-closer`s. Same
-  spec fuzziness the standing severity ruling names. Rows change only
-  through the spec-diff, so lint keeps reporting the walker's verdict —
-  but the offered fix would truncate a good footnote, which makes this
-  the first table question a USER could be hurt by. Referee needed.
+  book's `unclosed-note` and one of the corpus's two `orphan-closer`s.~~
+  **RESOLVED 2026-08-19 by Will, ruling over the spec-diff referee**
+  (see the superseding paragraph under "Severity policy" above): every
+  scope-opening character row gained Footnote and CrossReference, closing
+  behaviour untouched. Corpus moved exactly as predicted —
+  `unclosed-note` 3→2, `orphan-closer` 2→1 (the survivor, bsb 1SA 16:9,
+  is a genuine extra `\+xt*` and always was), CST Recovery 3→2.
 - **Latent row inconsistency, needs the spec-diff referee** (found by
   phase-3 tests, 2026-08-19; zero corpus impact — no `\ca` anywhere in
   226 books): `ca`/`va`/`vp` rows carry `closing: RequiredExplicit` but
