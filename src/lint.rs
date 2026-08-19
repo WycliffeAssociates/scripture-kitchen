@@ -3399,48 +3399,41 @@ mod tests {
     // Phase 3: adjacency
     // -----------------------------------------------------------------
 
-    /// The placement findings alone.
-    ///
-    /// Filtered rather than compared whole because `\ca*`/`\va*` currently
-    /// draw an `orphan-closer` of their own: the `ca`/`va`/`vp` rows carry
-    /// `closing: RequiredExplicit` but `opens_scope: None`, so the walker
-    /// pushes no frame for them and their closers close nothing. That is a
-    /// TABLE/walker disagreement, not this rule's business, and the corpus
-    /// contains no `\ca` at all — flagged for the spec-diff, never patched
-    /// here.
-    fn placement(observations: &[Observation]) -> Vec<Observation> {
-        observations
-            .iter()
-            .filter(|obs| matches!(obs.code, Code::CaCpPlacement | Code::VaVpPlacement))
-            .copied()
-            .collect()
-    }
-
+    /// Compared WHOLE since 2026-08-19. These tests used to filter for the
+    /// placement codes because a well-formed `\ca 2\ca*` drew a spurious
+    /// `orphan-closer` — the rows demanded an explicit closer while opening no
+    /// scope for it to close. Will's ruling made `ca`/`va`/`vp` scope openers
+    /// (see the `ca` row in `tables::rows`), so the closers now close their own
+    /// frames and the noise is gone. The adjacency rule itself is unchanged: it
+    /// reads TOKENS, never the CST.
     #[test]
     fn ca_and_cp_must_follow_their_chapter() {
         // The spec's own shape: `\ca` on the `\c` line, `\cp` on the next one.
         // A Newline between them is a token, and the rule steps over it.
         let (_, obs) = findings("\\c 1 \\ca 2\\ca*\n\\cp \u{5d0}\n\\p \\v 1 a");
-        assert_eq!(placement(&obs), vec![]);
+        assert_eq!(obs, vec![]);
 
         // …and the pair the other way round is equally legal.
         let (_, obs) = findings("\\c 1\n\\cp \u{5d0}\n\\ca 2\\ca*\n\\p \\v 1 a");
-        assert_eq!(placement(&obs), vec![]);
+        assert_eq!(obs, vec![]);
 
         // Real content between them closes the window.
         let (tokens, obs) = findings("\\c 1\n\\p text\n\\ca 2\\ca*\n");
         assert_eq!(
-            placement(&obs),
+            obs,
             vec![Observation::one(
                 Code::CaCpPlacement,
                 token_named(&tokens, "ca", 0)
             )]
         );
 
-        // A whole run out of place is ONE finding, not one per member.
-        let (tokens, obs) = findings("\\p text\n\\ca 2\\ca*\\cp \u{5d0}\n");
+        // A whole run out of place is ONE finding, not one per member. (The
+        // newline before `\cp` is only there to keep the snippet free of an
+        // unrelated `marker-not-ws-preceded`, now that these tests compare the
+        // finding list whole.)
+        let (tokens, obs) = findings("\\p text\n\\ca 2\\ca*\n\\cp \u{5d0}\n");
         assert_eq!(
-            placement(&obs),
+            obs,
             vec![Observation::one(
                 Code::CaCpPlacement,
                 token_named(&tokens, "ca", 0)
@@ -3451,15 +3444,15 @@ mod tests {
     #[test]
     fn va_and_vp_must_follow_their_verse() {
         let (_, obs) = findings("\\c 1\n\\p \\v 1 \\va 2\\va* \\vp 1-2\\vp* text");
-        assert_eq!(placement(&obs), vec![]);
+        assert_eq!(obs, vec![]);
 
         // The designator and a line break both keep the window open.
         let (_, obs) = findings("\\c 1\n\\p \\v 1\n\\va 2\\va*\n");
-        assert_eq!(placement(&obs), vec![]);
+        assert_eq!(obs, vec![]);
 
         let (tokens, obs) = findings("\\c 1\n\\p \\v 1 text \\va 2\\va*");
         assert_eq!(
-            placement(&obs),
+            obs,
             vec![Observation::one(
                 Code::VaVpPlacement,
                 token_named(&tokens, "va", 0)
@@ -3470,10 +3463,26 @@ mod tests {
         // separate machines, not one "designator" window.
         let (tokens, obs) = findings("\\c 1 \\va 2\\va*\n\\p \\v 1 a");
         assert_eq!(
-            placement(&obs),
+            obs,
             vec![Observation::one(
                 Code::VaVpPlacement,
                 token_named(&tokens, "va", 0)
+            )]
+        );
+    }
+
+    /// The other half of the ruling: an UNCLOSED `\ca` is now a real finding
+    /// (`unclosed-char`, with the insert-`\ca*` fix) rather than silence.
+    #[test]
+    fn an_unclosed_chapter_annotation_is_an_unclosed_char() {
+        // Displaced by the next chapter: the row is RequiredExplicit, so the
+        // walker stamps Recovery and lint reads it off the node.
+        let (tokens, obs) = findings("\\c 1\n\\ca 2\n\\c 2\n\\p \\v 1 a");
+        assert_eq!(
+            obs,
+            vec![Observation::one(
+                Code::UnclosedChar,
+                token_named(&tokens, "ca", 0)
             )]
         );
     }
@@ -3909,6 +3918,16 @@ mod tests {
         assert_eq!(
             repaired("\\id GEN\n\\p \\add a \\+nd b\\add*", Code::UnclosedChar),
             "\\id GEN\n\\p \\add a \\+nd b\\+nd*\\add*"
+        );
+
+        // `\ca` is one of these since Will's 2026-08-19 ruling — a character
+        // scope like any other, so an unclosed one is repaired the same way.
+        assert_eq!(
+            repaired(
+                "\\id GEN\n\\c 1\n\\ca 2\n\\c 2\n\\p \\v 1 a",
+                Code::UnclosedChar
+            ),
+            "\\id GEN\n\\c 1\n\\ca 2\\ca*\n\\c 2\n\\p \\v 1 a"
         );
 
         // At EOF there is nothing to insert in front of, so the closer simply

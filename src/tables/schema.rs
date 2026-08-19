@@ -485,8 +485,16 @@ impl SpecContext {
     /// chapter/peripheral content (`Section`, `Para`, `Footnote`, …).
     /// "Right after `\c`" is deliberately NOT a context (chapters repeat, so
     /// no monotonic encoding works): `ca`/`cp`/`va`/`vp` are checked by an
-    /// adjacency lint rule instead, and their rows carry an empty context
-    /// slice.
+    /// adjacency lint rule over TOKENS instead, never by this axis.
+    ///
+    /// That ruling is about the POSITIONAL band only, and it survives a
+    /// later one. Will ruled on 2026-08-19 that `ca`/`va`/`vp` open Character
+    /// scopes like the character markers they are, so those three rows now
+    /// carry the character class's CONTAINER contexts (`Para`, `List`,
+    /// `Table`, `Footnote`, …) — which the walker's pop predicate needs the
+    /// moment a row opens a scope, since an empty mask pops every frame. Only
+    /// `cp` (a Paragraph row, `closing: None`, opening nothing) still carries
+    /// the empty slice. See the ruling on the `ca` row in `tables::rows`.
     ///
     /// Exhaustive on purpose — a new variant must declare its axis here
     /// before it compiles.

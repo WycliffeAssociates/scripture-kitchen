@@ -1368,7 +1368,10 @@ mod tests {
 
     #[test]
     fn empty_context_rows_do_not_displace() {
-        let tokens = lex("\\p before\\ca 1 after");
+        // `cp` is the last empty-mask row (a published chapter label: no
+        // closer, no frame). Its emptiness is safe precisely because it opens
+        // nothing — see `every_scope_opening_row_has_a_nonempty_context_mask`.
+        let tokens = lex("\\p before\n\\cp \u{5d0}\n after");
         let cst = build(&tokens);
         let p = node_for(&tokens, &cst, "p");
 
@@ -1377,6 +1380,66 @@ mod tests {
             cst.in_order().collect::<Vec<_>>(),
             (0..tokens.len() as u32).collect::<Vec<_>>()
         );
+    }
+
+    /// `ca`/`va`/`vp` open Character scopes (Will, 2026-08-19) and carry the
+    /// character class's context mask, so they NEST at both of the places the
+    /// spec puts them and displace nothing there.
+    #[test]
+    fn chapter_and_verse_annotations_nest_like_character_markers() {
+        // Chapter level: `\c` is a point, so the stack is just the root, which
+        // the pop loop never touches. The `\p` and `\v` that follow are
+        // unaffected by the closed annotation.
+        let tokens = lex("\\c 1\n\\ca 2\\ca*\n\\p \\v 1 text");
+        let cst = build(&tokens);
+        let ca = node_for(&tokens, &cst, "ca");
+        let p = node_for(&tokens, &cst, "p");
+        assert_eq!(ca.close_reason(), CloseReason::Explicit);
+        assert_eq!(ca.context(), SpecContext::Scripture);
+        assert_eq!(p.close_reason(), CloseReason::Eof);
+        assert_eq!(p.context(), SpecContext::Para);
+        // Three nodes and no more: root, `\ca`, `\p` — nothing was displaced
+        // and nothing else opened.
+        assert_eq!(cst.nodes.len(), 3);
+        assert_eq!(
+            cst.in_order().collect::<Vec<_>>(),
+            (0..tokens.len() as u32).collect::<Vec<_>>()
+        );
+
+        // Verse level: `Para` in the mask is what keeps the paragraph open
+        // across both annotations, and the paragraph still ends at EOF.
+        let tokens = lex("\\p \\v 1 \\va 3\\va* \\vp 3b\\vp* text");
+        let cst = build(&tokens);
+        let p = node_for(&tokens, &cst, "p");
+        let va = node_for(&tokens, &cst, "va");
+        let vp = node_for(&tokens, &cst, "vp");
+        assert_eq!(va.close_reason(), CloseReason::Explicit);
+        assert_eq!(vp.close_reason(), CloseReason::Explicit);
+        assert_eq!(va.context(), SpecContext::Para);
+        assert_eq!(vp.context(), SpecContext::Para);
+        assert_eq!(p.close_reason(), CloseReason::Eof);
+        // Both are CHILDREN of the paragraph, not its successors.
+        let children = &cst.child_ids[p.children.start as usize..p.children.end as usize];
+        assert_eq!(
+            children.iter().filter(|id| *id & NODE_ID_BIT != 0).count(),
+            2
+        );
+        assert_eq!(cst.nodes.len(), 4);
+        assert_eq!(
+            cst.in_order().collect::<Vec<_>>(),
+            (0..tokens.len() as u32).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn an_unclosed_chapter_annotation_is_displaced_as_recovery() {
+        // `RequiredExplicit` + displacement = Recovery, the same verdict any
+        // other unclosed character marker earns. Before the rows opened a
+        // scope this was SILENT: no frame existed to be displaced.
+        let tokens = lex("\\c 1\n\\ca 2\n\\c 2");
+        let cst = build(&tokens);
+        let ca = node_for(&tokens, &cst, "ca");
+        assert_eq!(ca.close_reason(), CloseReason::Recovery);
     }
 
     /// The extent of a node is stated as the SOURCE TEXT it covers, which is

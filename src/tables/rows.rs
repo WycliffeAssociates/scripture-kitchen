@@ -90,10 +90,11 @@ pub static ROWS: &[MarkerRow] = &[
     // The CLOSING column is deliberately NOT touched: character markers still
     // require explicit closure everywhere, inside notes included.
     //
-    // NOT curated, on purpose: `ca`/`va`/`vp` (adjacency rows whose slice is
-    // empty BY DESIGN — see `SpecContext::is_positional`) and `pb`
-    // (CharBreaks). None of them opens a scope, so the mask is not
-    // load-bearing for any of them, and `fig` is its own kind, not this class.
+    // NOT curated at the time, but curated since: `ca`/`va`/`vp` — see the
+    // second ruling on the `ca` row below, which made them scope openers and
+    // gave them this same class-wide mask. Still NOT curated, on purpose: `pb`
+    // (CharBreaks) opens no scope, so its mask is not load-bearing, and `fig`
+    // is its own kind, not this class.
     //
     // Every curated row below marks the addition with a one-line pointer back
     // to this note.
@@ -312,11 +313,58 @@ pub static ROWS: &[MarkerRow] = &[
         ws_after_name: Ws::AtLeastOneHorizontalWhitespace, // ws: curated (onion MARKER_WHITESPACE row) — OVERRIDES the ChapterVerse default (TagEndDelimiter)
         payload: Payload::Designator,
         numbered_max: Numbering::Unnumbered,
-        // Adjacency-checked (must immediately follow `\c`/each other): a lint
-        // rule of shape (lastMarker, token), not a context. Empty = the context
-        // machine abstains for this row.
-        allowed_contexts: &[],
-        opens_scope: None,
+        // ---- `ca`/`va`/`vp` open Character scopes -----------------------
+        //
+        // RULED BY WILL, 2026-08-19: "ca/va/vp should open scopes like chars I
+        // think." These three are `kind: Character` with
+        // `closing: RequiredExplicit`, so they were the one class of row that
+        // demanded a closer while pushing no frame for it to close — every
+        // well-formed `\ca 2\ca*` drew a spurious `orphan-closer`, and an
+        // unclosed `\ca` drew nothing at all (recorded as a latent row
+        // inconsistency by phase-3, zero corpus impact: there is no `\ca`,
+        // `\va` or `\vp` anywhere in the 226 books). Opening the scope makes
+        // the closer close something and the omission an `unclosed-char`.
+        //
+        // THE MASK IS NOW LOAD-BEARING, which is why it changed in the same
+        // breath. The walker's pop predicate is `opens_scope.is_some() || …`
+        // and it pops while the top frame's stamped context is NOT in this
+        // row's mask; an EMPTY mask therefore pops EVERYTHING (nothing is a
+        // member of the empty set). So these rows take the same slice every
+        // scope-opening character row carries after the class-wide curation
+        // above — which is exactly what makes their two real placements nest
+        // instead of displace:
+        //   * `\ca 2\ca*` right after `\c`: `\c` is a POINT (pushes no frame),
+        //     so the stack is usually just the root, and the root is never
+        //     popped. Where a paragraph is still open, `Para` in the mask keeps
+        //     it open.
+        //   * `\va`/`\vp` right after `\v` INSIDE a paragraph: `\v` is a point
+        //     too, so the top frame is the `\p` — `Para`/`List`/`Table` keep
+        //     it. `Footnote`/`CrossReference` come along for class uniformity
+        //     (`\fv`-adjacent verse annotations nest rather than truncate a
+        //     note), same reasoning as the note above.
+        //
+        // These are CONTAINER contexts, for the walker's displacement pop and
+        // nothing else. The POSITIONAL ruling is untouched and still true:
+        // "right after `\c`/`\v`" is not a context (chapters and verses
+        // repeat, so no monotonic encoding works), and the adjacency of
+        // `ca`/`cp`/`va`/`vp` stays a lint rule of shape (lastMarker, token)
+        // reading TOKENS, not the CST — see `SpecContext::is_positional`.
+        //
+        // `cp` is deliberately NOT part of this: it is a Paragraph row with
+        // `closing: None` — a published chapter LABEL and nothing else — so it
+        // has no closer to orphan and keeps its empty, non-load-bearing slice.
+        allowed_contexts: &[
+            SpecContext::BookTitles,
+            SpecContext::BookIntroduction,
+            SpecContext::BookIntroductionEndTitles,
+            SpecContext::Section,
+            SpecContext::Para,
+            SpecContext::List,
+            SpecContext::Table,
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
+        ],
+        opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
         defined_attributes: &[],
         default_attribute: None,
@@ -3264,11 +3312,23 @@ pub static ROWS: &[MarkerRow] = &[
         ws_after_name: Ws::AtLeastOneHorizontalWhitespace, // ws: curated (onion MARKER_WHITESPACE row) — OVERRIDES the ChapterVerse default (TagEndDelimiter)
         payload: Payload::Designator,
         numbered_max: Numbering::Unnumbered,
-        // Adjacency-checked (must immediately follow `\v`/each other): a lint
-        // rule of shape (lastMarker, token), not a context. Empty = the context
-        // machine abstains for this row.
-        allowed_contexts: &[],
-        opens_scope: None,
+        // Opens a Character scope, and carries the character class's mask so
+        // the pop predicate has something to test — ruled by Will 2026-08-19;
+        // the reasoning (and why the empty mask could not stay) is on the `ca`
+        // row. Adjacency to `\v` is still a lint rule over tokens, not a
+        // context.
+        allowed_contexts: &[
+            SpecContext::BookTitles,
+            SpecContext::BookIntroduction,
+            SpecContext::BookIntroductionEndTitles,
+            SpecContext::Section,
+            SpecContext::Para,
+            SpecContext::List,
+            SpecContext::Table,
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
+        ],
+        opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
         defined_attributes: &[],
         default_attribute: None,
@@ -3312,11 +3372,23 @@ pub static ROWS: &[MarkerRow] = &[
         ws_after_name: Ws::AtLeastOneHorizontalWhitespace, // ws: curated (onion MARKER_WHITESPACE row) — OVERRIDES the ChapterVerse default (TagEndDelimiter)
         payload: Payload::Designator,
         numbered_max: Numbering::Unnumbered,
-        // Adjacency-checked (must immediately follow `\v`/each other): a lint
-        // rule of shape (lastMarker, token), not a context. Empty = the context
-        // machine abstains for this row.
-        allowed_contexts: &[],
-        opens_scope: None,
+        // Opens a Character scope, and carries the character class's mask so
+        // the pop predicate has something to test — ruled by Will 2026-08-19;
+        // the reasoning (and why the empty mask could not stay) is on the `ca`
+        // row. Adjacency to `\v` is still a lint rule over tokens, not a
+        // context.
+        allowed_contexts: &[
+            SpecContext::BookTitles,
+            SpecContext::BookIntroduction,
+            SpecContext::BookIntroductionEndTitles,
+            SpecContext::Section,
+            SpecContext::Para,
+            SpecContext::List,
+            SpecContext::Table,
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
+        ],
+        opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
         defined_attributes: &[],
         default_attribute: None,
@@ -3911,8 +3983,12 @@ mod tests {
     /// [12]/[C] the behaviour the fine category is load-bearing for: a marker
     /// that takes a payload but opens no scope, and `\pb`.
     ///
-    /// Rewritten 2026-08-12 for Q16: the whole ChapterVerse group now pushes NO
-    /// frame — `\c`/`\v` are Points, and `ca`/`cp`/`va`/`vp` always were.
+    /// Rewritten 2026-08-12 for Q16: `\c`/`\v` are Points, and `cp` is a bare
+    /// published label — none of them pushes a frame. Amended 2026-08-19 by
+    /// Will's ruling that `ca`/`va`/`vp` open Character scopes like the
+    /// character markers they are (they demand `\ca*` and now have something
+    /// for it to close); the split inside the group is therefore pinned by
+    /// name, since the category alone no longer decides it.
     ///
     /// Note what this test can NO LONGER assert, because the fact stopped
     /// existing: which of them "displaces". Displacement is not a per-row value
@@ -3927,11 +4003,22 @@ mod tests {
             let opens = row.opens_scope.is_some();
             match row.category {
                 Category::CharBreaks => assert!(!opens, "{} must open no scope", row.marker),
-                Category::ChapterVerse => assert!(
-                    !opens,
-                    "{}: nothing in the ChapterVerse group pushes a frame (Q16)",
-                    row.marker
-                ),
+                // The ChapterVerse group splits by name: the three
+                // char-shaped annotations open a Character scope, everything
+                // else in the group pushes no frame (Q16).
+                Category::ChapterVerse => match row.marker {
+                    "ca" | "va" | "vp" => assert_eq!(
+                        row.opens_scope,
+                        Some(ScopeKind::Character),
+                        "{}: a closer-requiring character annotation must push a frame",
+                        row.marker
+                    ),
+                    _ => assert!(
+                        !opens,
+                        "{}: nothing else in the ChapterVerse group pushes a frame (Q16)",
+                        row.marker
+                    ),
+                },
                 _ => {}
             }
         }

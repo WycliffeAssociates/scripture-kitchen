@@ -92,7 +92,11 @@ knob is per-rule off/severity config, and only when a consumer asks.
 - Markers listing two positional contexts (`mt#`, `cl`, `ip`) resolve by
   lowest-above-current; `cl`'s dual semantics falls out.
 - `ca`/`cp`/`va`/`vp` are adjacency lint rules, not context questions —
-  empty context slice, the machine abstains.
+  this POSITIONAL lane abstains on all four. Amended 2026-08-19 (Will's
+  ruling that `ca`/`va`/`vp` open Character scopes): those three now
+  carry the character class's CONTAINER contexts, because the walker's
+  pop predicate reads the mask and an empty one pops every frame. That
+  is displacement, not this lane; only `cp` still has an empty slice.
 - The lane's exact encoding (per-token sidecar vs stamped on nodes) and
   the rules-table shape get tested against real rules when built. Node
   has spare layout room.

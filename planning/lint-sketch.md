@@ -326,13 +326,19 @@ lint(source, tokens, cst):
   behaviour untouched. Corpus moved exactly as predicted —
   `unclosed-note` 3→2, `orphan-closer` 2→1 (the survivor, bsb 1SA 16:9,
   is a genuine extra `\+xt*` and always was), CST Recovery 3→2.
-- **Latent row inconsistency, needs the spec-diff referee** (found by
+- ~~**Latent row inconsistency, needs the spec-diff referee** (found by
   phase-3 tests, 2026-08-19; zero corpus impact — no `\ca` anywhere in
   226 books): `ca`/`va`/`vp` rows carry `closing: RequiredExplicit` but
   `opens_scope: None`, so the walker pushes no frame and every
-  `\ca*`/`\va*`/`\vp*` draws a spurious `orphan-closer`. Rows change
-  only through the spec-diff with the marker page as referee, so lint
-  documents around it rather than touching the rows.
+  `\ca*`/`\va*`/`\vp*` draws a spurious `orphan-closer`.~~ **RESOLVED
+  2026-08-19 by Will** ("ca/va/vp should open scopes like chars I
+  think"): the three rows now open Character scopes and carry the
+  character class's context mask (which the pop predicate needs the
+  moment a row opens a scope), so the closers close their own frames and
+  an unclosed one is an `unclosed-char` with the insert-closer fix. The
+  phase-3 placement tests dropped their orphan-closer workaround; the
+  adjacency rule is untouched, and the corpus (which has no `\ca`,
+  `\va` or `\vp`) did not move.
 - Phase-3 discoveries recorded in code, listed here for the sketch's
   honesty: `numbering-out-of-range` is UNREACHABLE (level caps are
   enforced at marker resolution — `\q7` is row 0 / unknown-marker; a
