@@ -93,9 +93,9 @@ struct ScanState {
 /// position-free" are checkable from a signature instead of trusted from a
 /// comment: `fn marker_end(bytes, start) -> usize` cannot touch mode or push
 /// a row, and could not be made to without changing its type. It is the same
-/// state discipline the emit-funnel listener is already ruled to follow
-/// (ideas/committed/linter.md: `feed(token, source)` only, never ScanMode),
-/// applied inward — and it is what keeps `lex_general_path_only` a
+/// state discipline every downstream pass follows (cst/lint read only the
+/// token rows and source bytes, never scanner internals), applied inward —
+/// and it is what keeps `lex_general_path_only` a
 /// trustworthy oracle, since both paths share every stateless decision and
 /// can therefore only diverge in EMISSION, which is exactly what
 /// tests/fast_path_identity.rs checks.

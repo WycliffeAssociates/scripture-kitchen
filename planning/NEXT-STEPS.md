@@ -21,16 +21,17 @@ comments and tests). Green: `tests/partition_oracle.rs`,
 
 ## Next code: lint
 
-Sketch to react to (shapes, fix model, code list): lint-sketch.md — NOT
-yet approved; its open questions get ruled in discussion before build.
-What follows is the already-settled contract it must land inside.
+Shapes, fix model, and the full code list: lint-sketch.md (marked up
+2026-08-19 — fix model A ruled, severity ladder ruled, three small opens
+left at its bottom). What follows is the settled contract.
 
-Entry points (tokens are always born stamped; there is no external-token
-door — the editor sends TEXT and every transaction re-lexes):
+ONE entry point (ruled 2026-08-19): lint ALWAYS gets a CST — the library
+is always three lines (lex → cst::build → lint); no fused pass, no
+listener/funnel, no lint-over-bare-tokens door (the editor sends TEXT and
+every transaction re-lexes). The CST is cheap and without it lint would
+recompute forced closures the walker already judged.
 
-    pub fn lint_prepared(source: &[u8], tokens: &[Token], cst: &Cst)
-        -> LintReport                       // the worker
-    pub fn lint(source: &[u8]) -> LintReport // sugar: lex → build → worker
+    pub fn lint(source: &[u8], tokens: &[Token], cst: &Cst) -> LintReport
 
     struct LintReport {
         book: Option<u32>,  // BookCode token idx; None IS the missing-\id
@@ -51,19 +52,12 @@ Two subsystems:
    is a flat vec; no recursion): `Recovery` always a finding, `Eof` a
    finding iff the row wanted a closer, `Explicit`/`Implicit` silent —
    lint READS the walker's verdict, never re-derives it (non-negotiable).
-   Owed findings beyond that: the four attribute ones
-   per ideas/committed/linter.md (deprecated trailing form = AttrList
-   span not ending in `|`; both-lists = two AttrLists adjacent to one
-   marker; mismatched terminator = span shape; rung-3 hint = Text
-   containing `|` inside an attrs-capable node); a `\c` with no
-   designator (ParseHeader records an empty label and judges nothing);
-   **marker not preceded by whitespace** (the para railroad requires
-   `\n`/ws before a marker; `content\s1` still lexes as a marker — byte
-   before the marker token is non-ws → finding).
-   Lint is a PASS, the scanner's `push_token` funnel is retired —
-   linter.md still says funnel, EDIT IT when building. Escape hatch: a
-   finding proven un-re-derivable rides the scanner individually; the
-   general funnel does not come back.
+   The full code list (attributes, adjacency, payload, form, the
+   flag-never-repair rules) lives in lint-sketch.md. Lint is a PASS —
+   the scanner's `push_token` funnel/listener idea is dead (linter.md
+   deleted 2026-08-19, still-true rulings folded into the sketch).
+   Escape hatch: a finding proven un-re-derivable rides the scanner
+   individually; the general funnel does not come back.
 2. **Ordering** — tokens only, ignores the CST: filter
    `Designator`/`BookCode` kinds, run the verse-designator interpreter
    per span, compare across the sequence. Needs the interpreter (spec
@@ -75,8 +69,8 @@ Two subsystems:
 
 Neither lint nor `cst::build` takes `ParseHeader` — it is a
 consumer-side index; if ordering lint wants chapter runs it computes
-them. Lint suppressions (when they come) key `{code, reference}` —
-content-derived, per the no-minted-identity law.
+them. Suppressions: NONE in v1 (ruled 2026-08-19) — the only future
+knob is per-rule off/severity config, and only when a consumer asks.
 
 ### The positional-context lane (deferred here from cst::build)
 

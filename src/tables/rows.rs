@@ -762,7 +762,8 @@ pub static ROWS: &[MarkerRow] = &[
         // NOT MODELLED, deliberately: strictly the behaviour is "required outside
         // a note, optional (peer-closed) inside one" — a CONDITIONAL that
         // `ClosingBehavior` cannot express, the same shape as the conditional
-        // attribute cardinality parked in ideas/committed/linter.md. The
+        // attribute cardinality parked in planning/lint-sketch.md
+        // (`attr-required-if`). The
         // outside-a-note case is taken as the row value because that is where the
         // spec shows it used; a `\fm` nested in a note is lint's problem.
         closing: ClosingBehavior::RequiredExplicit,

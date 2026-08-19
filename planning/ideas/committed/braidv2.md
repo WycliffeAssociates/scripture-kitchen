@@ -123,8 +123,10 @@ needs prototype evidence.
 
 - Incremental lint is a fold over slots:
   `(incoming state) → findings + (outgoing state)`; recompute an edited
-  slot, propagate downstream only if outgoing state changed (rare). See
-  ideas/committed/linter.md. Per the spec rail, no block state
+  slot, propagate downstream only if outgoing state changed (rare).
+  (Superseded: lint is a whole-book pass — see planning/lint-sketch.md;
+  if incrementality ever returns it is chunk memoization,
+  ideas/committed/chunk-memoization.md.) Per the spec rail, no block state
   legitimately crosses `\c`; the cross-chapter residue (milestone
   pairing, label duplicates, tallies) is the small explicit incoming
   state.
