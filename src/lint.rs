@@ -1645,8 +1645,7 @@ fn consumed_by(doc: &Doc, closing: u32, child: u32) -> bool {
         return false;
     }
     let node = &doc.cst.nodes[closing as usize];
-    node.close_reason() == CloseReason::Explicit
-        && last_child(doc.cst, node) == Some(&child)
+    node.close_reason() == CloseReason::Explicit && last_child(doc.cst, node) == Some(&child)
 }
 
 /// The scratch every "write the missing ending" fix builds into. Enough for the
@@ -1953,7 +1952,8 @@ impl Flat {
 
                 self.owner = idx;
                 self.owner_idx = marker_idx;
-                self.owner_is_point = !opener || generated::kind(marker_idx) == MarkerKind::Milestone;
+                self.owner_is_point =
+                    !opener || generated::kind(marker_idx) == MarkerKind::Milestone;
                 // Resolved HERE, once per marker, rather than per Text token:
                 // it is the flag that keeps the pipe scan off ordinary prose,
                 // so it must not itself cost a table read per token.
@@ -2032,12 +2032,17 @@ impl Flat {
                     let matched = match tokens.get(idx as usize + 1).map(Token::kind) {
                         Some(TokenKind::MilestoneTerminator) => self.owner_is_point,
                         Some(TokenKind::ClosingMarker { .. }) => {
-                            !self.owner_is_point && tokens[idx as usize + 1].marker_idx == self.owner_idx
+                            !self.owner_is_point
+                                && tokens[idx as usize + 1].marker_idx == self.owner_idx
                         }
                         _ => true,
                     };
                     if !matched {
-                        out.push(Observation::pair(Code::AttrTerminatorMismatch, idx, self.owner));
+                        out.push(Observation::pair(
+                            Code::AttrTerminatorMismatch,
+                            idx,
+                            self.owner,
+                        ));
                     }
                 }
             }
@@ -2194,12 +2199,11 @@ impl Ancestry {
                     // the `\p` we just proposed — a fix must not hand back a new
                     // finding, and the oracle would say so.
                     let at = token.start;
-                    let text: &[u8] =
-                        if at == 0 || is_structural_ws(doc.source[at as usize - 1]) {
-                            b"\\p\n"
-                        } else {
-                            b"\n\\p\n"
-                        };
+                    let text: &[u8] = if at == 0 || is_structural_ws(doc.source[at as usize - 1]) {
+                        b"\\p\n"
+                    } else {
+                        b"\n\\p\n"
+                    };
                     out.push_fixed(Observation::one(Code::MissingParagraph, idx), at, at, text);
                 }
             }
