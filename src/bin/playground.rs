@@ -9,6 +9,8 @@
 //   cargo run --release --bin playground -- --cst              // lex + cst::build (the whole pipeline)
 //   cargo run --release --bin playground -- --cst-only         // pre-lexed; times cst::build alone
 //   cargo run --release --bin playground -- --cst-stats        // untimed: CloseReason distribution over the corpus
+//   cargo run --release --bin playground -- --lint             // lex + cst::build + lint (the whole pipeline)
+//   cargo run --release --bin playground -- --lint-stats       // untimed: per-code finding counts over the corpus
 //   cargo run --release --bin playground -- --scalar            // no-memchr twin (prices SIMD)
 //   cargo run --release --bin playground -- --staged            // two-stage structural index (simdjson shape)
 //   cargo run --release --bin playground -- --chunked           // chapter-split, lexed serially (prices the split)
@@ -47,6 +49,9 @@ enum Mode {
     SweepCursor,
     Cst,
     CstOnly,
+    Lint,
+    /// Pre-lexed AND pre-built; times the lint pass by itself.
+    LintOnly,
 }
 
 fn main() {
@@ -54,6 +59,7 @@ fn main() {
     let mut mode = Mode::Serial;
     let mut iters: u32 = 1;
     let mut cst_stats = false;
+    let mut lint_stats = false;
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -64,6 +70,9 @@ fn main() {
             "--cst" => mode = Mode::Cst,
             "--cst-only" => mode = Mode::CstOnly,
             "--cst-stats" => cst_stats = true,
+            "--lint" => mode = Mode::Lint,
+            "--lint-only" => mode = Mode::LintOnly,
+            "--lint-stats" => lint_stats = true,
             "--scalar" => mode = Mode::Scalar,
             "--staged" => mode = Mode::Staged,
             "--sweep-nl" => mode = Mode::SweepNl,
@@ -98,6 +107,8 @@ fn main() {
         Mode::ParseHeaderOnly => "parse-header-only",
         Mode::Cst => "cst",
         Mode::CstOnly => "cst-only",
+        Mode::Lint => "lint",
+        Mode::LintOnly => "lint-only",
         Mode::Par => "par",
         Mode::Scalar => "scalar",
         Mode::Staged => "staged",
@@ -120,17 +131,43 @@ fn main() {
         report_cst_stats(&sources);
         return;
     }
+    if lint_stats {
+        report_lint_stats(&sources, &path);
+        return;
+    }
 
     let prelexed: Vec<Vec<usfm_onion_2::Token>> =
-        if matches!(mode, Mode::ParseHeaderOnly | Mode::CstOnly) {
+        if matches!(mode, Mode::ParseHeaderOnly | Mode::CstOnly | Mode::LintOnly) {
             sources.iter().map(|s| usfm_onion_2::lex(s)).collect()
         } else {
             Vec::new()
         };
+    // The lint modes report ns/token, so they need the token count regardless
+    // of whether the lex itself is on the clock.
+    let tokens_total: u64 = if matches!(mode, Mode::Lint | Mode::LintOnly) {
+        if prelexed.is_empty() {
+            sources
+                .iter()
+                .map(|s| usfm_onion_2::lex(s).len() as u64)
+                .sum()
+        } else {
+            prelexed.iter().map(|t| t.len() as u64).sum()
+        }
+    } else {
+        0
+    };
+    let prebuilt: Vec<usfm_onion_2::cst::Cst> = if mode == Mode::LintOnly {
+        prelexed
+            .iter()
+            .map(|t| usfm_onion_2::cst::build(t))
+            .collect()
+    } else {
+        Vec::new()
+    };
 
     let started = Instant::now();
     for _ in 0..iters {
-        run_once(&sources, &prelexed, mode);
+        run_once(&sources, &prelexed, &prebuilt, mode);
     }
     let elapsed = started.elapsed();
 
@@ -150,6 +187,12 @@ fn main() {
         sources.len(),
         secs * 1000.0
     );
+    if tokens_total > 0 {
+        println!(
+            "  tokens={tokens_total} {:.2} ns/token",
+            secs * 1e9 / tokens_total as f64
+        );
+    }
 }
 
 /// Experiment variants must produce byte-identical token streams. Checked
@@ -161,6 +204,7 @@ fn verify_variant(sources: &[String], mode: Mode) {
         Mode::SweepNl | Mode::SweepStops | Mode::SweepCursor => return,
         Mode::ParseHeader | Mode::ParseHeaderOnly => return, // the real lexer plus a pure pass
         Mode::Cst | Mode::CstOnly => return,                 // the real lexer plus a pure pass
+        Mode::Lint | Mode::LintOnly => return,               // the real lexer plus two pure passes
         Mode::Scalar => usfm_onion_2::experiments::scalar::lex,
         Mode::Staged => usfm_onion_2::experiments::staged::lex,
         Mode::Chunked => usfm_onion_2::experiments::chapter_par::lex_chunked,
@@ -196,8 +240,25 @@ fn verify_variant(sources: &[String], mode: Mode) {
     );
 }
 
-fn run_once(sources: &[String], prelexed: &[Vec<usfm_onion_2::Token>], mode: Mode) {
+fn run_once(
+    sources: &[String],
+    prelexed: &[Vec<usfm_onion_2::Token>],
+    prebuilt: &[usfm_onion_2::cst::Cst],
+    mode: Mode,
+) {
     match mode {
+        Mode::Lint => {
+            for source in sources {
+                let tokens = usfm_onion_2::lex(source);
+                let cst = usfm_onion_2::cst::build(&tokens);
+                std::hint::black_box(usfm_onion_2::lint::lint(source.as_bytes(), &tokens, &cst));
+            }
+        }
+        Mode::LintOnly => {
+            for ((source, tokens), cst) in sources.iter().zip(prelexed).zip(prebuilt) {
+                std::hint::black_box(usfm_onion_2::lint::lint(source.as_bytes(), tokens, cst));
+            }
+        }
         Mode::ParseHeader => {
             for source in sources {
                 let tokens = usfm_onion_2::lex(source);
@@ -304,6 +365,91 @@ fn collect_usfm_paths(root: &Path, paths: &mut Vec<PathBuf>) {
 fn read_source(path: &Path) -> String {
     fs::read_to_string(path)
         .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()))
+}
+
+/// Untimed corpus sweep: what does lint actually FIND in the wild? Per-code
+/// counts first, then a sample of each code's sites (book, code name, byte
+/// offset of the anchor token) — enough to eyeball a class before pinning its
+/// count in tests/lint_corpus.rs.
+fn report_lint_stats(sources: &[String], root: &Path) {
+    use usfm_onion_2::lint::LINT_ROWS;
+
+    const SAMPLES_PER_CODE: usize = 12;
+
+    let names: Vec<String> = if root.is_dir() {
+        let mut paths = Vec::new();
+        collect_usfm_paths(root, &mut paths);
+        paths.sort();
+        paths
+            .iter()
+            .map(|p| {
+                p.file_stem()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect()
+    } else {
+        vec![
+            root.file_stem()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned(),
+        ]
+    };
+
+    let mut counts = [0u64; LINT_ROWS.len()];
+    let mut samples: Vec<Vec<(String, u32)>> = vec![Vec::new(); LINT_ROWS.len()];
+    let mut books_without_id = 0u64;
+    let mut tokens_total = 0u64;
+
+    for (i, source) in sources.iter().enumerate() {
+        let tokens = usfm_onion_2::lex(source);
+        let cst = usfm_onion_2::cst::build(&tokens);
+        let report = usfm_onion_2::lint::lint(source.as_bytes(), &tokens, &cst);
+        tokens_total += tokens.len() as u64;
+
+        let book = match report.book {
+            Some(idx) => {
+                let token = tokens[idx as usize];
+                source[token.start as usize..token.end() as usize].to_string()
+            }
+            None => {
+                books_without_id += 1;
+                names.get(i).cloned().unwrap_or_else(|| format!("doc#{i}"))
+            }
+        };
+        for obs in &report.observations {
+            let slot = obs.code as usize;
+            counts[slot] += 1;
+            if samples[slot].len() < SAMPLES_PER_CODE {
+                samples[slot].push((book.clone(), tokens[obs.anchor as usize].start));
+            }
+        }
+    }
+
+    let total: u64 = counts.iter().sum();
+    println!(
+        "lint-stats docs={} tokens={tokens_total} findings={total} books-without-id={books_without_id}",
+        sources.len()
+    );
+    for (slot, row) in LINT_ROWS.iter().enumerate() {
+        if counts[slot] == 0 {
+            continue;
+        }
+        println!("  {} x{}", row.name, counts[slot]);
+        for (book, offset) in &samples[slot] {
+            println!("    {book} {} @{offset}", row.name);
+        }
+        if counts[slot] > SAMPLES_PER_CODE as u64 {
+            println!("    … {} more", counts[slot] - SAMPLES_PER_CODE as u64);
+        }
+    }
+    for row in LINT_ROWS.iter() {
+        if counts[row.code as usize] == 0 {
+            println!("  {} x0", row.name);
+        }
+    }
 }
 
 /// Untimed corpus sweep: how do frames actually CLOSE in the wild? Clean

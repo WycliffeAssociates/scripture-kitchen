@@ -18,6 +18,7 @@
 
 pub mod cst;
 pub mod experiments;
+pub mod lint;
 mod parse_header;
 mod scanner;
 pub mod tables;
