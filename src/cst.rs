@@ -94,6 +94,52 @@ impl Cst {
             stack: vec![ChildCursor::for_node(self, node)],
         }
     }
+
+    /// One node's BYTE extent: its opening marker's start through the end of
+    /// its LAST DESCENDANT token.
+    ///
+    /// Both ends are walked rather than read off `token`, because a child id is
+    /// as likely to be a node as a token: the last child of `\f` is usually the
+    /// `\ft` node, whose own last child may be another node again. Two loops
+    /// down the first/last spine, no recursion and no iterator.
+    ///
+    /// A node's extent INCLUDES its explicit closer, which is the closer's
+    /// place in the child list ([`Builder::explicit_close`]) and the reason a
+    /// "replace this whole note" edit needs nothing else. The ROOT (`node` 0,
+    /// whose `token` is no token at all) extends over every token in the
+    /// document; an empty document is `0..0`.
+    ///
+    /// Consumers: lint's phase-4 fixes (where the missing closer belongs), and
+    /// later the app's content-extents read.
+    pub fn extent(&self, node: u32, tokens: &[Token]) -> Range<u32> {
+        let children = &self.nodes[node as usize].children;
+        if children.is_empty() {
+            // Only the root can be childless (every other node holds at least
+            // its own opening marker), and only for an empty document.
+            let start = self.nodes[node as usize].token;
+            return match tokens.get(start as usize) {
+                Some(token) => token.start..token.start,
+                None => 0..0,
+            };
+        }
+        let mut spine = children.clone();
+        let first = loop {
+            let child = self.child_ids[spine.start as usize];
+            if child & NODE_ID_BIT == 0 {
+                break child;
+            }
+            spine = self.nodes[(child & !NODE_ID_BIT) as usize].children.clone();
+        };
+        let mut spine = children.clone();
+        let last = loop {
+            let child = self.child_ids[spine.end as usize - 1];
+            if child & NODE_ID_BIT == 0 {
+                break child;
+            }
+            spine = self.nodes[(child & !NODE_ID_BIT) as usize].children.clone();
+        };
+        tokens[first as usize].start..tokens[last as usize].end()
+    }
 }
 
 /// The allocation-backed depth-first iterator used by every in-order consumer.
@@ -1159,5 +1205,74 @@ mod tests {
             cst.in_order().collect::<Vec<_>>(),
             (0..tokens.len() as u32).collect::<Vec<_>>()
         );
+    }
+
+    /// The extent of a node is stated as the SOURCE TEXT it covers, which is
+    /// the only form in which the answer is checkable by eye.
+    fn extent_text<'a>(source: &'a str, tokens: &[Token], cst: &Cst, name: &str) -> &'a str {
+        let node = node_for(tokens, cst, name);
+        let id = cst
+            .nodes
+            .iter()
+            .position(|candidate| candidate == node)
+            .expect("the node came from this tree") as u32;
+        let extent = cst.extent(id, tokens);
+        &source[extent.start as usize..extent.end as usize]
+    }
+
+    #[test]
+    fn a_node_extends_to_its_last_descendant_token() {
+        // Ending in a LEAF: the paragraph's last child is the text token.
+        let source = "\\p one two";
+        let tokens = lex(source);
+        let cst = build(&tokens);
+        assert_eq!(extent_text(source, &tokens, &cst, "p"), "\\p one two");
+
+        // Ending in a NESTED NODE, twice over: `\p`'s last child is the `\f`
+        // node, whose last child is the `\ft` node. Neither node's own `token`
+        // could have answered this.
+        let source = "\\p one \\f + \\ft note\\f* tail\n\\p next";
+        let tokens = lex(source);
+        let cst = build(&tokens);
+        assert_eq!(extent_text(source, &tokens, &cst, "ft"), "\\ft note");
+        // The closer is INSIDE the note's extent — it is the note's last child.
+        assert_eq!(
+            extent_text(source, &tokens, &cst, "f"),
+            "\\f + \\ft note\\f*"
+        );
+        assert_eq!(
+            extent_text(source, &tokens, &cst, "p"),
+            "\\p one \\f + \\ft note\\f* tail\n"
+        );
+
+        // A node ending in a node ending in a node: the container's last
+        // descendant is two levels down.
+        let source = "\\list-s\\*\n\\li item\n\\list-e\\*";
+        let tokens = lex(source);
+        let cst = build(&tokens);
+        assert_eq!(extent_text(source, &tokens, &cst, "li"), "\\li item\n");
+        assert_eq!(extent_text(source, &tokens, &cst, "list"), source);
+    }
+
+    #[test]
+    fn the_root_extends_over_the_whole_document() {
+        let source = "\\id GEN\n\\c 1\n\\p \\v 1 text\n";
+        let tokens = lex(source);
+        let cst = build(&tokens);
+        assert_eq!(cst.extent(0, &tokens), 0..source.len() as u32);
+
+        // A point's extent is its own tiny span, terminator included.
+        let source = "\\p a \\qt-s |who=\"Levi\"\\* b";
+        let tokens = lex(source);
+        let cst = build(&tokens);
+        assert_eq!(
+            extent_text(source, &tokens, &cst, "qt"),
+            "\\qt-s |who=\"Levi\"\\*"
+        );
+
+        // An empty document has an empty root extent rather than a panic.
+        let tokens = lex("");
+        let cst = build(&tokens);
+        assert_eq!(cst.extent(0, &tokens), 0..0);
     }
 }

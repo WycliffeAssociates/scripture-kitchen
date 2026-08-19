@@ -17,13 +17,20 @@ comments and tests). Green: `tests/partition_oracle.rs`,
 `tests/fast_path_identity.rs`, `tests/parse_header_oracle.rs`,
 `tests/cst_oracle.rs` (lifted partition over 226 books). Corpus health via
 `playground --cst-stats`: zero Recovery except three genuinely unclosed
-`\f` (en_ulb ISA/MRK, bsb GEN) — lint's first three real findings, waiting.
+`\f` (en_ulb ISA/MRK, bsb GEN) — lint's first three real findings.
 
-## Next code: lint
+LINT is COMPLETE through phase 4 (src/lint.rs — 37 codes, the rules table,
+and the fix model: `Fix`/`Edit`/`FixStr`, 14 codes offering a byte-splice
+repair, `check_fixes` as the oracle over every corpus fix). Still owed and
+each waiting on a piece that does not exist: the two attribute rules that
+need a k/v interpreter, and the Version family. Next large piece is
+EXPORTS, per the order at the bottom of this file.
+
+## The lint contract (built 2026-08-19)
 
 Shapes, fix model, and the full code list: lint-sketch.md (marked up
-2026-08-19 — fix model A ruled, severity ladder ruled, three small opens
-left at its bottom). What follows is the settled contract.
+2026-08-19 — fix model A ruled, severity ladder ruled, opens left at its
+bottom). What follows is the settled contract.
 
 ONE entry point (ruled 2026-08-19): lint ALWAYS gets a CST — the library
 is always three lines (lex → cst::build → lint); no fused pass, no

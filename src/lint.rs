@@ -1,9 +1,9 @@
 //! Findings over an already-built document: `lex → cst::build → lint`.
 //!
-//! Phases 1-3 ship the STRUCTURAL, ORDERING, PAYLOAD, FORM and ADJACENCY
-//! families plus the SHAPE-ONLY half of Attributes. Still owed, each waiting on
-//! a piece that does not exist yet: the two attribute rules that need a k/v
-//! interpreter, the Version family, and the whole fix model (phase 4) — see
+//! Phases 1-4 ship the STRUCTURAL, ORDERING, PAYLOAD, FORM and ADJACENCY
+//! families, the SHAPE-ONLY half of Attributes, and the FIX model. Still owed,
+//! each waiting on a piece that does not exist yet: the two attribute rules that
+//! need a k/v interpreter, and the Version family — see
 //! planning/lint-sketch.md "Build phases".
 //!
 //! Three laws shape everything here:
@@ -14,12 +14,26 @@
 //!   walker used at pop time ([`wants_closer`]), never a second notion of it.
 //! - **Flag, never repair.** No token is reordered, inserted or dropped
 //!   (the editor session's token→span→UTF-16 mapping depends on it), and no
-//!   text is rewritten. Phase 4's fixes are *offered* byte edits, not applied.
+//!   text is rewritten. Phase 4's [`Fix`]es are *offered* byte edits: the rule
+//!   governs TOKENS, and a fix is proposed TEXT that nothing here applies. Once
+//!   a user accepts one the bytes are real and the next re-lex is honest.
 //! - **No strings, anywhere.** An [`Observation`] is four u32s. Everything a
 //!   message needs textually is already a span reachable through
 //!   `anchor`/`second`; everything else is a small integer in `aux`, whose
 //!   meaning per code is the [`LintRow::aux`] column. That is what lets a
 //!   report cross wasm as one flat `[code, anchor, second, aux] × n` array.
+//!
+//! Fixes ride the passes that find things, computed BESIDE the finding and
+//! never in a pass of their own: 14 of the 37 codes declare a
+//! [`LintRow::fix_label`], and a code emits a fix if and only if its row does
+//! (asserted both ways in tests). Every one is a byte splice — insert the ending
+//! the author left out, delete an orphan, write the expected number, upper-case
+//! three bytes — and every one is proved by [`check_fixes`], the oracle, over
+//! all 226 corpus books. Where a repair would be a MOVE or a guess it is not
+//! offered: `attr-trailing-form-deprecated` (relocating an attribute list is an
+//! interpretation of the content it jumps), `book-code-unknown` (which
+//! identifier was meant is not mechanical), the gap codes, and a renumber whose
+//! own successor would collide with it.
 //!
 //! Shape of the pass, and it is still FOUR sweeps after phase 3: a short
 //! bounded prologue over the header ([`header_scan`]), one sweep over
@@ -34,13 +48,21 @@
 //! machine in the same window, so trust the deltas over the absolutes; en_ulb
 //! is small enough that its numbers need `--iters 30` to settle):
 //!
-//! | corpus | phase 1 | phase 2 | phase 3 |
-//! |--------|---------|---------|---------|
-//! | en_ult (6.57M tokens) | 7.4 ns/token | 9.4 | 12.4 |
-//! | en_ulb (255k tokens)  | 6.7 ns/token | 8.8 | 12.5 |
+//! | corpus | phase 1 | phase 2 | phase 3 | phase 4 |
+//! |--------|---------|---------|---------|---------|
+//! | en_ult (6.57M tokens) | 7.4 ns/token | 9.4 | 12.4 | 11.9 |
+//! | en_ulb (255k tokens)  | 6.7 ns/token | 8.8 | 12.5 | 12.6 |
 //!
 //! (The phase-2 column is re-measured here — it read 9.9 / 9.1 in its own
-//! window. Same code, different afternoon.)
+//! window. Same code, different afternoon. The phase-4 column was taken against
+//! a phase-3 binary run ALTERNATELY with it in one window, which read 12.3 /
+//! 12.0 — so the honest phase-4 deltas are **-0.4 on en_ult and +0.5 on
+//! en_ulb**, and the split is exactly what the fix model predicts: en_ult
+//! carries 92 findings (31 with a fix) across 6.57M tokens and pays nothing,
+//! while en_ulb carries 17,242 findings and 2,834 fixes across 255k, and pays
+//! for computing them plus the permutation the parallel `fix_of` vec now needs
+//! at sort time. Fix computation is per FINDING, so its cost tracks damage and
+//! not document size.)
 //!
 //! Phase 2's +2.4 was `ordering_pass` and nothing else. Phase 3's +3.0 / +3.7
 //! is the token walk growing, and the number that decided its shape: giving
@@ -64,6 +86,8 @@
 //! chases arena ids out of order); the second is fusing ordering into the token
 //! walk, which the phase-3 measurement says is worth ~1.5 and which only the
 //! "sequence state is not lookbehind" reading keeps apart.
+
+use std::ops::Range;
 
 use crate::cst::{CloseReason, Cst, Node};
 use crate::designator::{self, Designator};
@@ -161,6 +185,108 @@ impl Observation {
     }
 }
 
+// ---------------------------------------------------------------------------
+// The fix model: byte-splice edit lists (model A, ruled 2026-08-19)
+// ---------------------------------------------------------------------------
+
+/// Our own tiny inline string — the useful part of `CompactString` without the
+/// dependency or the heap path.
+///
+/// Fix text is always short, engine-generated ASCII: a closer (`\add*`, `\+nd*`
+/// — 9 bytes at the table's worst), `\p\n`, an end milestone (`\table-e\*`, 10),
+/// a handful of renumber digits. Fifteen bytes covers every one of them, and
+/// anything longer (a custom `\z` closer, if configuration ever gives row 0 real
+/// rows) splits into ADJACENT SAME-POSITION edits which concatenate — fixed
+/// width with no cap. It stays ASCII so a JS consumer decodes with
+/// `String.fromCharCode` and needs no `TextEncoder`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct FixStr {
+    len: u8,
+    bytes: [u8; FixStr::CAP],
+}
+
+impl FixStr {
+    /// The inline capacity. Longer text is the caller's to split.
+    pub const CAP: usize = 15;
+
+    /// Zero length is a PURE DELETION — an edit that inserts nothing.
+    pub const EMPTY: Self = Self {
+        len: 0,
+        bytes: [0; Self::CAP],
+    };
+
+    /// Debug-asserts both invariants rather than truncating: an over-long or
+    /// non-ASCII proposal is an engine bug, and silently shortening it would
+    /// put damaged text in front of a user.
+    pub fn new(text: &[u8]) -> Self {
+        debug_assert!(text.len() <= Self::CAP, "fix text longer than a FixStr");
+        debug_assert!(text.is_ascii(), "fix text is not ASCII");
+        let mut bytes = [0u8; Self::CAP];
+        let len = text.len().min(Self::CAP);
+        bytes[..len].copy_from_slice(&text[..len]);
+        Self {
+            len: len as u8,
+            bytes,
+        }
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.bytes[..self.len as usize]
+    }
+
+    pub fn as_str(&self) -> &str {
+        core::str::from_utf8(self.as_bytes()).expect("ASCII by construction")
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+}
+
+impl core::fmt::Debug for FixStr {
+    /// As the text it is — the derived form would print fifteen bytes of
+    /// padding into every failing assertion.
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        core::fmt::Debug::fmt(self.as_str(), f)
+    }
+}
+
+/// One byte splice: replace `from..to` with `insert`. 24 bytes, `Copy`.
+///
+/// Offsets are absolute byte offsets into the SOURCE the report was built
+/// from — the same coordinates `Token::start` uses, so an editor session runs
+/// them through the byte→UTF-16 shim it already owns. Equal ends is a pure
+/// insertion; an empty `insert` is a pure deletion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Edit {
+    pub from: u32,
+    pub to: u32,
+    pub insert: FixStr,
+}
+
+/// One offered repair: a label and a range into [`LintReport::edit_list`].
+///
+/// The edits inside a fix are sorted by `from` and non-overlapping, and their
+/// total order is (`from`, sequence) — equal `from` is legal and means
+/// CONCATENATION, which is how text longer than a [`FixStr`] is carried. Apply
+/// them RIGHT TO LEFT ([`apply`]) and every offset stays valid.
+///
+/// **Offered, never applied.** Never-synthesize governs TOKENS; a fix is
+/// proposed TEXT. Nothing in this module rewrites a byte — once a user accepts
+/// a fix the bytes are real and the next re-lex is honest about them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Fix {
+    /// From [`LintRow::fix_label`] — the row is where a rule's affordances are
+    /// declared, so the label is never authored twice. Static, like every other
+    /// string here: the digits of "renumber to 12" live in the EDIT, which is
+    /// why the label stays generic.
+    pub label: &'static str,
+    pub edits: Range<u32>,
+}
+
+/// [`LintReport::fix_of`] when an observation offers no repair.
+pub const NO_FIX: u32 = u32::MAX;
+
 /// Everything one lint run learned about one document.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct LintReport {
@@ -181,6 +307,34 @@ pub struct LintReport {
     /// Sorted by `anchor`, then by code — one document order for consumers,
     /// independent of which internal pass produced a finding.
     pub observations: Vec<Observation>,
+    /// PARALLEL to `observations`: the [`Fix`] index each finding offers, or
+    /// [`NO_FIX`]. A side table rather than a fifth field on
+    /// [`Observation`] — the four-u32 shape is what lets a report cross wasm as
+    /// one flat array, most findings offer no fix at all, and every consumer
+    /// that only wants to LIST findings never touches this vec. Read it through
+    /// [`Self::fix`].
+    pub fix_of: Vec<u32>,
+    /// Every offered repair, in no particular order — reached through
+    /// `fix_of`, never scanned.
+    pub fixes: Vec<Fix>,
+    /// The shared edit arena every [`Fix::edits`] range indexes. Flat, like
+    /// `observations`: a wasm consumer reads `[from, to, len, bytes…]`.
+    pub edit_list: Vec<Edit>,
+}
+
+impl LintReport {
+    /// The repair offered for `observations[index]`, if any.
+    pub fn fix(&self, index: usize) -> Option<&Fix> {
+        match self.fix_of.get(index).copied() {
+            Some(NO_FIX) | None => None,
+            Some(fix) => Some(&self.fixes[fix as usize]),
+        }
+    }
+
+    /// One fix's edits, in apply order (see [`Fix`]).
+    pub fn edits(&self, fix: &Fix) -> &[Edit] {
+        &self.edit_list[fix.edits.start as usize..fix.edits.end as usize]
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -283,8 +437,19 @@ pub struct LintRow {
 pub const LINT_ROWS: [LintRow; 37] = [
     // A note frame the walker had to end without its `\f*`/`\x*`: something
     // that cannot live inside a note (a `\c`, a bare `\v`, an unknown marker)
-    // arrived while it was open. The three live corpus instances (en_ulb ISA
-    // and MRK, bsb GEN) are all genuinely truncated footnotes.
+    // arrived while it was open. Two of the three live corpus instances (en_ulb
+    // ISA and MRK) are genuinely truncated footnotes.
+    //
+    // The THIRD is not, and phase 4's fix preview is what showed it. bsb GEN
+    // 2:4 writes a perfectly well-formed note whose `\fq` contains `\+nd`, and
+    // `nd`'s context mask omits Footnote — so the nested character marker
+    // DISPLACES the whole note, which is why that book also carries the corpus's
+    // two orphan `\f*`. That omission is the spec fuzziness the standing ruling
+    // names ("Valid In lists systematically under-report Footnote for character
+    // markers"), and rows change only through the spec-diff, so lint reports the
+    // walker's verdict as it always does — but a user who accepts the fix there
+    // would truncate a good footnote. Recorded in lint-sketch.md's open list for
+    // the referee; NOT worked around here.
     LintRow {
         code: Code::UnclosedNote,
         name: "unclosed-note",
@@ -434,6 +599,15 @@ pub const LINT_ROWS: [LintRow; 37] = [
     // ONE finding per paragraph-less RUN, anchored at its first verse: that is
     // where the single repairing `\p` belongs, and per-verse reporting turns
     // one authoring slip into a chapter of noise.
+    //
+    // Phase 4 learned the limit of that aggregation, and it is worth stating
+    // where the rule is: a run can be re-opened. In en_ulb the `\s5` chunk
+    // marker is row 0, so its pop-all recovery kills whatever paragraph is
+    // standing — accepting the fix at the head of a run therefore repairs that
+    // site and UNMASKS the next segment, which was damaged all along and merely
+    // aggregated away. Nothing is created (PHM reports 36 before and 36 after)
+    // and the count never rises, which is why the fix oracle judges a fix by
+    // its own SITE rather than by a falling total. See `check_fixes`.
     LintRow {
         code: Code::MissingParagraph,
         name: "missing-paragraph",
@@ -728,7 +902,7 @@ pub const LINT_ROWS: [LintRow; 37] = [
         escalation: None,
         aux: AuxKind::None,
         template: "\\{anchor} needs whitespace before it",
-        fix_label: None,
+        fix_label: Some("insert a line break"),
     },
     // The delimiter after a marker NAME is written as something that is not
     // structural whitespace — the NBSP-after-name case, and every other
@@ -789,6 +963,14 @@ pub const LINT_ROWS: [LintRow; 37] = [
     //   declares 3.0 and contains 792,414 trailing lists — every one of them
     //   right, and every one of them a false positive without this gate. The
     //   `escalation` column then does the rest: Warning at 3.2, Error at 4.
+    //
+    // NO FIX, deliberately (phase 4). The 3.2 rewrite MOVES the list from back
+    // position to front — `\w grace|lemma="x"\w*` becomes
+    // `\w |lemma="x"|grace\w*` — and a move is not one splice: the k/v interior
+    // has never been read (that is the attribute interpreter's, unbuilt), the
+    // content the list has to jump over is arbitrary, and deciding where inside
+    // it the boundary falls is an interpretation of the author's text. A fix is
+    // a mechanical splice or it is not offered.
     LintRow {
         code: Code::AttrTrailingFormDeprecated,
         name: "attr-trailing-form-deprecated",
@@ -869,32 +1051,22 @@ pub const LINT_ROWS: [LintRow; 37] = [
 /// ask only the CST and the marker table.
 pub fn lint(source: &[u8], tokens: &[Token], cst: &Cst) -> LintReport {
     let (book, declared_version) = header_scan(source, tokens);
-    let mut report = LintReport {
-        book,
-        declared_version,
-        observations: Vec::new(),
-    };
+    let mut out = Emit::default();
 
     // `consumed[t]` = token t is a closer that actually closed a frame. Built
     // from the nodes rather than re-walked: a closer that closed something is
     // by construction the LAST child of an Explicit node.
     let mut consumed = vec![false; tokens.len()];
-    node_pass(tokens, cst, &mut consumed, &mut report.observations);
-    token_pass(
-        source,
-        tokens,
-        &consumed,
-        declared_version,
-        &mut report.observations,
-    );
-    tree_pass(tokens, cst, &mut report.observations);
-    ordering_pass(source, tokens, &mut report.observations);
+    node_pass(source, tokens, cst, &mut consumed, &mut out);
+    token_pass(source, tokens, &consumed, declared_version, &mut out);
+    tree_pass(source, tokens, cst, &mut out);
+    ordering_pass(source, tokens, &mut out);
 
     // A file with no `\id` at all. Raised here rather than in a pass because
     // the fact is the ABSENCE of a token, which no sweep can see, and because
-    // `report.book` is the state it reads. Markers-only guard: a plain-prose
-    // or empty buffer is not a book that owes an `\id`.
-    if report.book.is_none()
+    // `book` is the state it reads. Markers-only guard: a plain-prose or empty
+    // buffer is not a book that owes an `\id`.
+    if book.is_none()
         && tokens.iter().any(|token| {
             matches!(
                 token.kind(),
@@ -904,18 +1076,107 @@ pub fn lint(source: &[u8], tokens: &[Token], cst: &Cst) -> LintReport {
             )
         })
     {
-        report
-            .observations
-            .push(Observation::one(Code::MissingId, 0));
+        out.push(Observation::one(Code::MissingId, 0));
     }
 
-    // Findings are rare relative to tokens, so one sort at the end is cheaper
-    // than threading document order through three passes that each have a
-    // natural order of their own.
-    report
-        .observations
-        .sort_unstable_by_key(|obs| (obs.anchor, obs.code as u16));
-    report
+    out.finish(book, declared_version)
+}
+
+/// The sink every pass writes findings through, and the only place a fix is
+/// attached to one.
+///
+/// It exists because an [`Observation`] cannot carry its fix: the four-u32 shape
+/// is pinned, so the link is the parallel `fix_of` vec, and a parallel vec must
+/// be permuted with its partner when the findings are sorted. One sink keeps
+/// that pairing in a single place instead of at forty push sites.
+#[derive(Default)]
+struct Emit {
+    observations: Vec<Observation>,
+    fix_of: Vec<u32>,
+    fixes: Vec<Fix>,
+    edit_list: Vec<Edit>,
+}
+
+impl Emit {
+    /// A finding with no repair — the common case, and the shape every phase
+    /// 1-3 call site already had.
+    fn push(&mut self, observation: Observation) {
+        self.observations.push(observation);
+        self.fix_of.push(NO_FIX);
+    }
+
+    /// A finding AND the byte splice that repairs it: `from..to` replaced by
+    /// `text` (equal ends = a pure insertion, empty `text` = a pure deletion).
+    ///
+    /// Text longer than a [`FixStr`] becomes a chain of same-position edits
+    /// which concatenate; only the FIRST carries the replaced range, so applying
+    /// right to left splices once and then inserts the tail behind it.
+    ///
+    /// The label comes from the row, which is therefore the single declaration
+    /// of "this rule offers a fix" — a code that emits one without declaring it
+    /// is a table bug and fails loudly here rather than in a consumer.
+    fn push_fixed(&mut self, observation: Observation, from: u32, to: u32, text: &[u8]) {
+        let label = observation
+            .code
+            .row()
+            .fix_label
+            .expect("a code that emits a fix declares its label");
+        let start = self.edit_list.len() as u32;
+        let mut rest = text;
+        loop {
+            let take = rest.len().min(FixStr::CAP);
+            let (from, to) = if self.edit_list.len() as u32 == start {
+                (from, to)
+            } else {
+                (to, to)
+            };
+            self.edit_list.push(Edit {
+                from,
+                to,
+                insert: FixStr::new(&rest[..take]),
+            });
+            rest = &rest[take..];
+            if rest.is_empty() {
+                break;
+            }
+        }
+        let fix = self.fixes.len() as u32;
+        self.fixes.push(Fix {
+            label,
+            edits: start..self.edit_list.len() as u32,
+        });
+        self.observations.push(observation);
+        self.fix_of.push(fix);
+    }
+
+    /// Document order, applied to the observations and their fix links at once.
+    ///
+    /// Findings are rare relative to tokens, so one sort at the end is cheaper
+    /// than threading document order through four passes that each have a
+    /// natural order of their own. It sorts a PERMUTATION because `fix_of` has
+    /// to travel with its partner; both gathers are over a vec whose length is
+    /// the finding count, not the token count.
+    fn finish(self, book: Option<u32>, declared_version: Option<UsfmVersion>) -> LintReport {
+        let mut order: Vec<u32> = (0..self.observations.len() as u32).collect();
+        order.sort_unstable_by_key(|slot| {
+            let obs = self.observations[*slot as usize];
+            (obs.anchor, obs.code as u16)
+        });
+        LintReport {
+            book,
+            declared_version,
+            observations: order
+                .iter()
+                .map(|slot| self.observations[*slot as usize])
+                .collect(),
+            fix_of: order
+                .iter()
+                .map(|slot| self.fix_of[*slot as usize])
+                .collect(),
+            fixes: self.fixes,
+            edit_list: self.edit_list,
+        }
+    }
 }
 
 /// The two header facts every later pass wants: the `\id` line's BookCode
@@ -1041,7 +1302,12 @@ fn shape_of(tokens: &[Token], cst: &Cst, id: usize) -> Shape {
 
 /// One sweep over the nodes: the close-verdict rules, plus the consumed-closer
 /// bitset the token pass needs.
-fn node_pass(tokens: &[Token], cst: &Cst, consumed: &mut [bool], out: &mut Vec<Observation>) {
+///
+/// This is where four of the five INSERTION fixes are computed — the closer,
+/// the terminator or the end milestone the walker never saw — because the node
+/// is the only place both the missing text (the opening token's own spelling)
+/// and its position ([`Cst::extent`]) are in hand at once.
+fn node_pass(source: &[u8], tokens: &[Token], cst: &Cst, consumed: &mut [bool], out: &mut Emit) {
     // A `-e` point that actually ended a container is that container's LAST
     // child; anything else is an orphan. Marked here so the verdict rules
     // below can stay a single pass.
@@ -1082,33 +1348,129 @@ fn node_pass(tokens: &[Token], cst: &Cst, consumed: &mut [bool], out: &mut Vec<O
             out.push(Observation::one(Code::EmptyParagraph, anchor));
         }
 
-        match node.close_reason() {
+        let code = match node.close_reason() {
             // The walker judged these normal. Note peers and displaced
             // paragraphs both land here, and both are silent by ruling.
-            CloseReason::Explicit | CloseReason::Implicit => {}
-            CloseReason::Recovery => match shape {
-                Shape::Container => out.push(Observation::one(Code::UnterminatedContainer, anchor)),
-                Shape::Point => out.push(Observation::one(Code::UnterminatedMilestone, anchor)),
+            CloseReason::Explicit | CloseReason::Implicit => None,
+            CloseReason::Recovery => Some(match shape {
+                Shape::Container => Code::UnterminatedContainer,
+                Shape::Point => Code::UnterminatedMilestone,
                 Shape::Plain => match generated::kind(marker_idx) {
-                    MarkerKind::Note => out.push(Observation::one(Code::UnclosedNote, anchor)),
-                    MarkerKind::Character => out.push(Observation::one(Code::UnclosedChar, anchor)),
+                    MarkerKind::Note => Code::UnclosedNote,
+                    MarkerKind::Character => Code::UnclosedChar,
                     // Defensive: only RequiredExplicit/SelfClosingMilestone
                     // rows are ever stamped Recovery, and on a Plain node that
                     // means a note or a character marker. A row that grows a
                     // third closer-wanting kind lands here rather than
                     // panicking on real data.
-                    _ => out.push(Observation::one(Code::UnclosedAtEof, anchor)),
+                    _ => Code::UnclosedAtEof,
                 },
-            },
+            }),
             CloseReason::Eof => match shape {
-                Shape::Point => out.push(Observation::one(Code::UnterminatedMilestone, anchor)),
-                _ if wants_closer(marker_idx) => {
-                    out.push(Observation::one(Code::UnclosedAtEof, anchor))
-                }
-                _ => {}
+                Shape::Point => Some(Code::UnterminatedMilestone),
+                _ if wants_closer(marker_idx) => Some(Code::UnclosedAtEof),
+                _ => None,
             },
+        };
+        let Some(code) = code else { continue };
+
+        // Every one of these five findings has the same repair — write the
+        // ending the author left out — so the TEXT is a question about the
+        // node's shape, not about which code fired.
+        let mut buf = [0u8; CLOSER_CAP];
+        let text = match shape {
+            Shape::Container => container_end_text(marker_idx, &mut buf),
+            Shape::Point => Some(&b"\\*"[..]),
+            Shape::Plain => closer_text(span_of(source, &tokens[anchor as usize]), &mut buf),
+        };
+        let observation = Observation::one(code, anchor);
+        match text {
+            Some(text) => {
+                let at = content_end(
+                    source,
+                    cst.extent(id as u32, tokens),
+                    tokens[anchor as usize].end(),
+                );
+                out.push_fixed(observation, at, at, text);
+            }
+            None => out.push(observation),
         }
     }
+}
+
+/// The scratch every "write the missing ending" fix builds into. Enough for the
+/// table's two worst cases — `\+` + the longest name (6 bytes) + `*`, and
+/// `\table-e\*` — with room for a spelling the table does not have yet. It has
+/// nothing to do with [`FixStr::CAP`]: text longer than that splits, and this is
+/// only how much of it is composed at once.
+const CLOSER_CAP: usize = 16;
+
+/// The closer the author never wrote, in THEIR spelling: the opening token's own
+/// bytes with the folded delimiter trimmed, plus `*`.
+///
+/// The row NAME would be wrong twice over — it is canonical, so `\+nd` would
+/// come back as `\nd*` (losing the nesting the author wrote) and `\q2` as `\q*`
+/// (losing the level). The token's bytes are the only record of the spelling in
+/// force, exactly as `spelled_level` reads them for `numbering-mix`.
+///
+/// `None` — no fix — for a span we cannot re-emit as short ASCII. Unreachable on
+/// today's table (every closer-wanting row is a known ASCII name), and cheaper
+/// than being wrong if a configuration channel ever gives row 0 real rows.
+fn closer_text<'a>(span: &[u8], buf: &'a mut [u8; CLOSER_CAP]) -> Option<&'a [u8]> {
+    let name = trim_end_ws(span);
+    if name.len() + 1 > buf.len() || !name.is_ascii() {
+        return None;
+    }
+    buf[..name.len()].copy_from_slice(name);
+    buf[name.len()] = b'*';
+    Some(&buf[..name.len() + 1])
+}
+
+/// A U25003 container's end milestone: `\list-e\*`, `\table-e\*`.
+///
+/// Built from the ROW name here, and that is not an inconsistency with
+/// [`closer_text`]: the `-s`/`-e` suffix pair is the row's own spelling of open
+/// and close, so the author's `-s` bytes are not text this fix can reuse — a
+/// bare `\list` opens a container too, and its ending is still `\list-e\*`.
+fn container_end_text(
+    marker_idx: generated::MarkerIdx,
+    buf: &mut [u8; CLOSER_CAP],
+) -> Option<&[u8]> {
+    let name = generated::name(marker_idx).as_bytes();
+    let end = name.len() + b"\\-e\\*".len();
+    if name.is_empty() || end > buf.len() {
+        return None;
+    }
+    buf[0] = b'\\';
+    buf[1..=name.len()].copy_from_slice(name);
+    buf[name.len() + 1..end].copy_from_slice(b"-e\\*");
+    Some(&buf[..end])
+}
+
+/// Where a missing ending BELONGS: the node's last content byte.
+///
+/// The extent END is a token boundary, and the last token of an unclosed node is
+/// very often the newline that ended the line — so inserting there strands the
+/// closer on the next line's doorstep (`\ft note\n\f*\v 5`). Backing off over
+/// trailing structural whitespace instead puts it where an author would have
+/// typed it: `\ft note\f*\n\v 5`. The `floor` (the opening marker's own span
+/// end) is what keeps the backoff out of the marker itself, so an empty
+/// `\add ` gets `\add \add*` and never `\add\add* `.
+fn content_end(source: &[u8], extent: Range<u32>, floor: u32) -> u32 {
+    let mut at = extent.end;
+    while at > floor && at > extent.start && is_structural_ws(source[at as usize - 1]) {
+        at -= 1;
+    }
+    at
+}
+
+/// A span with its trailing space/tab/newline run removed.
+fn trim_end_ws(span: &[u8]) -> &[u8] {
+    let mut end = span.len();
+    while end > 0 && is_structural_ws(span[end - 1]) {
+        end -= 1;
+    }
+    &span[..end]
 }
 
 /// Does this node hold anything a reader would see? A child NODE always
@@ -1162,7 +1524,7 @@ fn token_pass(
     tokens: &[Token],
     consumed: &[bool],
     version: Option<UsfmVersion>,
-    out: &mut Vec<Observation>,
+    out: &mut Emit,
 ) {
     /// Which designator family may be re-numbered at this point.
     #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1209,16 +1571,20 @@ fn token_pass(
                 if books::is_book_code(span) {
                     continue;
                 }
-                let known_folded =
-                    books::upper3(span).is_some_and(|upper| books::is_book_code(&upper));
-                out.push(Observation::one(
-                    if known_folded {
-                        Code::BookCodeNotUppercase
-                    } else {
-                        Code::BookCodeUnknown
-                    },
-                    idx,
-                ));
+                let folded = books::upper3(span).filter(|upper| books::is_book_code(upper));
+                match folded {
+                    // The one payload fix: the code IS a book identifier, so
+                    // case-folding its three bytes is a splice and not a guess.
+                    // (`book-code-unknown` gets none — which identifier the
+                    // author meant is not a mechanical question.)
+                    Some(upper) => out.push_fixed(
+                        Observation::one(Code::BookCodeNotUppercase, idx),
+                        token.start,
+                        token.end(),
+                        &upper,
+                    ),
+                    None => out.push(Observation::one(Code::BookCodeUnknown, idx)),
+                }
             }
             // Openers and milestones share this arm because they are the same
             // thing to every rule below: the marker a list, a level or a
@@ -1238,7 +1604,16 @@ fn token_pass(
                         && token.start > 0
                         && !is_structural_ws(source[token.start as usize - 1])
                     {
-                        out.push(Observation::one(Code::MarkerNotWsPreceded, idx));
+                        // A NEWLINE, not a space: the rule reports a paragraph
+                        // marker, and what the PARA railroad wants in front of
+                        // one is a line break. It also re-lexes into exactly the
+                        // shape the rest of the corpus is written in.
+                        out.push_fixed(
+                            Observation::one(Code::MarkerNotWsPreceded, idx),
+                            token.start,
+                            token.start,
+                            b"\n",
+                        );
                     }
                     // "The span absorbed no delimiter" is ONE byte to check: a
                     // marker name never ends in whitespace, so a trailing
@@ -1325,7 +1700,18 @@ fn token_pass(
             }
             TokenKind::ClosingMarker { nested } => {
                 if !consumed[idx as usize] {
-                    out.push(Observation::one(Code::OrphanCloser, idx));
+                    // A PLAIN span delete, whitespace left exactly as written.
+                    // Deleting `\f*` out of `text \f* more` does leave two
+                    // spaces — and eating one of them would be a second,
+                    // unasked-for edit to bytes the author chose. Extra
+                    // horizontal whitespace is legal everywhere in USFM; the
+                    // formatter bundle is where it belongs.
+                    out.push_fixed(
+                        Observation::one(Code::OrphanCloser, idx),
+                        token.start,
+                        token.end(),
+                        b"",
+                    );
                 }
                 if nested
                     && token.marker_idx != generated::UNRESOLVED
@@ -1341,7 +1727,12 @@ fn token_pass(
             }
             TokenKind::MilestoneTerminator => {
                 if !consumed[idx as usize] {
-                    out.push(Observation::one(Code::OrphanTerminator, idx));
+                    out.push_fixed(
+                        Observation::one(Code::OrphanTerminator, idx),
+                        token.start,
+                        token.end(),
+                        b"",
+                    );
                 }
                 owner = NO_TOKEN;
                 owner_has_attrs = false;
@@ -1441,7 +1832,7 @@ fn token_pass(
 
 /// One in-order walk carrying the two ancestry facts no single node knows:
 /// "am I inside a sidebar" and "is there a paragraph above me".
-fn tree_pass(tokens: &[Token], cst: &Cst, out: &mut Vec<Observation>) {
+fn tree_pass(source: &[u8], tokens: &[Token], cst: &Cst, out: &mut Emit) {
     struct Cursor {
         next: u32,
         end: u32,
@@ -1539,7 +1930,25 @@ fn tree_pass(tokens: &[Token], cst: &Cst, out: &mut Vec<Observation>) {
                 }
                 if paragraphs == 0 && !run_reported {
                     run_reported = true;
-                    out.push(Observation::one(Code::MissingParagraph, child));
+                    // The `\p` usfmtc fabricates, PROPOSED instead: inserted in
+                    // front of the verse that starts the run, which is where the
+                    // one repairing paragraph belongs. The leading newline is
+                    // conditional because without it a glued `\v` (`text\v 1`)
+                    // would trade this finding for a `marker-not-ws-preceded` on
+                    // the `\p` we just proposed — a fix must not hand back a new
+                    // finding, and the oracle would say so.
+                    let at = tokens[child as usize].start;
+                    let text: &[u8] = if at == 0 || is_structural_ws(source[at as usize - 1]) {
+                        b"\\p\n"
+                    } else {
+                        b"\n\\p\n"
+                    };
+                    out.push_fixed(
+                        Observation::one(Code::MissingParagraph, child),
+                        at,
+                        at,
+                        text,
+                    );
                 }
             }
             _ => {}
@@ -1630,7 +2039,11 @@ fn has_levels(marker_idx: generated::MarkerIdx) -> bool {
 ///   larger by more than one → gap.
 /// - Verse state resets at every `\c`; chapter state runs for the whole book.
 /// - Ranges count as their span: after `\v 12-14` the sequence expects 15.
-fn ordering_pass(source: &[u8], tokens: &[Token], out: &mut Vec<Observation>) {
+///
+/// Two of its four anomaly codes offer a fix — renumber to what the sequence
+/// expected — and both go through [`renumberable`], which is where the honest
+/// half of that fix lives.
+fn ordering_pass(source: &[u8], tokens: &[Token], out: &mut Emit) {
     /// Which marker is still owed its `Designator` token.
     #[derive(Clone, Copy, PartialEq, Eq)]
     enum Awaiting {
@@ -1684,12 +2097,18 @@ fn ordering_pass(source: &[u8], tokens: &[Token], out: &mut Vec<Observation>) {
                                     None
                                 };
                                 if let Some(code) = code {
-                                    out.push(Observation {
-                                        code,
-                                        anchor: idx,
-                                        second: previous_token,
-                                        aux: expected,
-                                    });
+                                    renumber(
+                                        source,
+                                        tokens,
+                                        out,
+                                        Observation {
+                                            code,
+                                            anchor: idx,
+                                            second: previous_token,
+                                            aux: expected,
+                                        },
+                                        false,
+                                    );
                                 }
                             }
                             prev_chapter = Some((number, idx));
@@ -1727,12 +2146,18 @@ fn ordering_pass(source: &[u8], tokens: &[Token], out: &mut Vec<Observation>) {
                                     None
                                 };
                                 if let Some(code) = code {
-                                    out.push(Observation {
-                                        code,
-                                        anchor: idx,
-                                        second: previous_token,
-                                        aux: expected,
-                                    });
+                                    renumber(
+                                        source,
+                                        tokens,
+                                        out,
+                                        Observation {
+                                            code,
+                                            anchor: idx,
+                                            second: previous_token,
+                                            aux: expected,
+                                        },
+                                        true,
+                                    );
                                 }
                             } else if first_verse_slot && first != 1 {
                                 out.push(Observation {
@@ -1798,6 +2223,280 @@ fn ordering_pass(source: &[u8], tokens: &[Token], out: &mut Vec<Observation>) {
     }
 }
 
+/// A sequence finding, plus "renumber to the expected number" WHEN that is a
+/// splice and not an interpretation.
+///
+/// All four anomaly codes come through here and only the duplicate and
+/// out-of-order pairs are ever fixed; the two GAP codes are refused by the row
+/// column itself, which declares no label for them (closing a hole would
+/// renumber the rest of the chapter, and no single splice can do that). The row
+/// stays the one place a rule's affordances are declared.
+///
+/// Two further conditions, both learned from real text:
+///
+/// - The designator must be PLAIN DIGITS. `\v 12-14` renumbered to one number
+///   silently drops the verses the range covered, and `\v 2a` loses its segment
+///   — both are interpretations of what the author meant, not repairs of how
+///   they wrote it.
+/// - The next number in the sequence must be strictly ABOVE the one we would
+///   write. bdf_reg ROM 3 is the case that earned this: it writes `\v 10` twice
+///   and then `\v 11`, so renumbering the duplicate to 11 would only move the
+///   duplicate one verse along. The same guard covers the mirror shape for
+///   out-of-order (`\v 5 \v 2 \v 3`, where renumbering the 2 to 6 would make
+///   the following 3 the one going backwards). The fix oracle catches both, and
+///   this is the fix admitting it rather than the oracle catching us.
+fn renumber(
+    source: &[u8],
+    tokens: &[Token],
+    out: &mut Emit,
+    observation: Observation,
+    verse: bool,
+) {
+    let token = &tokens[observation.anchor as usize];
+    let expected = observation.aux;
+    let renumberable = observation.code.row().fix_label.is_some()
+        && span_of(source, token).iter().all(u8::is_ascii_digit)
+        && next_number(source, tokens, observation.anchor, verse)
+            .is_none_or(|next| next > expected);
+    if !renumberable {
+        out.push(observation);
+        return;
+    }
+    let mut buf = [0u8; 10];
+    out.push_fixed(
+        observation,
+        token.start,
+        token.end(),
+        decimal(expected, &mut buf),
+    );
+}
+
+/// The FIRST number of the next designator in this sequence — the one the
+/// renumber has to stay clear of.
+///
+/// The only lookahead anywhere in lint, and it is affordable for the reason
+/// every fix computation is: it runs on a FINDING, never on a token. It also
+/// stops at the very next `\v`/`\c`, so the walk is a handful of tokens except
+/// for the last finding in a book.
+///
+/// `None` covers three cases a renumber may treat alike: no next designator, a
+/// next one that is malformed (which resyncs the sequence, so it compares
+/// against nothing), and — for verses — an intervening `\c`, which resets the
+/// verse sequence entirely.
+fn next_number(source: &[u8], tokens: &[Token], from: u32, verse: bool) -> Option<u32> {
+    let wanted = if verse {
+        MarkerKind::Verse
+    } else {
+        MarkerKind::Chapter
+    };
+    let mut awaiting = false;
+    for token in &tokens[from as usize + 1..] {
+        match token.kind() {
+            // Stepped over, exactly as the pass itself steps over it.
+            TokenKind::AttrList => {}
+            TokenKind::Designator if awaiting => {
+                let span = span_of(source, token);
+                let parsed = if verse {
+                    designator::verse(span)
+                } else {
+                    designator::chapter(span)
+                };
+                return match parsed {
+                    Designator::Wellformed { first, .. } => Some(first),
+                    Designator::Malformed => None,
+                };
+            }
+            TokenKind::Marker { .. } => {
+                let kind = generated::kind(token.marker_idx);
+                if verse && kind == MarkerKind::Chapter {
+                    return None;
+                }
+                awaiting = kind == wanted;
+            }
+            _ => awaiting = false,
+        }
+    }
+    None
+}
+
+/// A number as ASCII digits, written back to front into the caller's buffer
+/// (ten digits holds any u32).
+fn decimal(number: u32, buf: &mut [u8; 10]) -> &[u8] {
+    let mut at = buf.len();
+    let mut rest = number;
+    loop {
+        at -= 1;
+        buf[at] = b'0' + (rest % 10) as u8;
+        rest /= 10;
+        if rest == 0 {
+            return &buf[at..];
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Applying a fix, and the oracle that proves one
+// ---------------------------------------------------------------------------
+
+/// Splices a fix's edits into a COPY of the source.
+///
+/// Right to left, which is the whole trick: every `from`/`to` is an offset into
+/// the ORIGINAL text, and applying the last edit first means no earlier offset
+/// has moved by the time it is used. `edits` must be sorted by `from` and
+/// non-overlapping — which is what [`Fix`] guarantees, and what
+/// [`check_fixes`] re-checks before it trusts one.
+///
+/// The library allocates here, and only here, because this is the serialization
+/// boundary the ownership law names: a consumer asked for the proposed TEXT.
+pub fn apply(source: &[u8], edits: &[Edit]) -> Vec<u8> {
+    let mut fixed = source.to_vec();
+    for edit in edits.iter().rev() {
+        fixed.splice(
+            edit.from as usize..edit.to as usize,
+            edit.insert.as_bytes().iter().copied(),
+        );
+    }
+    fixed
+}
+
+/// THE FIX ORACLE: the composability rule made executable.
+///
+/// Applies the fixes of the given observations (indices into
+/// `report.observations`, one for a single fix, many for a "fix all of code X"
+/// dispatch), re-lexes, re-builds and re-lints, and demands all four of:
+///
+/// 1. the edits are sorted, non-overlapping, and inside the source;
+/// 2. each fixed finding is GONE — no finding of that code survives at that
+///    anchor's position, mapped through the edits that moved it;
+/// 3. NO code's count rises. A fix may not hand back a new finding;
+/// 4. the partition oracle still holds on the fixed text.
+///
+/// Condition 2 is per-SITE and not a count, and the reason is a real corpus
+/// case rather than fastidiousness. `missing-paragraph` reports once per
+/// paragraph-less RUN; in en_ulb a run is repeatedly re-opened by `\s5`, whose
+/// row-0 pop-all kills whatever paragraph is standing — so inserting the
+/// proposed `\p` repairs the reported site and UNMASKS the next segment of the
+/// same run, which was damaged all along and merely aggregated away. The total
+/// does not move (36 findings before, 36 after in PHM), no damage is created,
+/// and a strict "the count went down" test would have called that a failure. A
+/// fix answers for its own site; it does not answer for what the rule's
+/// aggregation was hiding behind it.
+///
+/// A verification tool, not part of the reporting path: it re-runs the whole
+/// pipeline and returns an allocated message. It is public because the rule it
+/// enforces is a property of the LIBRARY's fixes, and the tests that run it over
+/// 226 books live outside this module.
+pub fn check_fixes(
+    source: &str,
+    tokens: &[Token],
+    report: &LintReport,
+    observations: &[u32],
+) -> Result<(), String> {
+    let mut edits: Vec<Edit> = Vec::new();
+    // (code, the anchor's byte offset) — the site each fix answers for.
+    let mut targets: Vec<(Code, u32)> = Vec::new();
+    for index in observations {
+        let index = *index as usize;
+        let fix = report
+            .fix(index)
+            .ok_or_else(|| format!("observation {index} offers no fix"))?;
+        let own = report.edits(fix);
+        for pair in own.windows(2) {
+            if pair[1].from < pair[0].to || pair[1].from < pair[0].from {
+                return Err(format!(
+                    "{}: edits are out of order or overlap: {pair:?}",
+                    fix.label
+                ));
+            }
+        }
+        let observation = report.observations[index];
+        targets.push((observation.code, tokens[observation.anchor as usize].start));
+        edits.extend_from_slice(own);
+    }
+    // Stable, so a fix's own concatenation chain keeps its (from, sequence)
+    // order after several fixes are merged into one dispatch.
+    edits.sort_by_key(|edit| edit.from);
+    for pair in edits.windows(2) {
+        if pair[1].from < pair[0].to {
+            return Err(format!("merged fixes overlap: {pair:?}"));
+        }
+    }
+    if let Some(edit) = edits.iter().find(|edit| {
+        edit.to as usize > source.len()
+            || edit.from > edit.to
+            || !source.is_char_boundary(edit.to as usize)
+    }) {
+        return Err(format!(
+            "edit is not a valid splice of the source: {edit:?}"
+        ));
+    }
+
+    let fixed = apply(source.as_bytes(), &edits);
+    let fixed = String::from_utf8(fixed).map_err(|error| format!("fix broke UTF-8: {error}"))?;
+    let tokens_after = crate::lex(&fixed);
+    let cst = crate::cst::build(&tokens_after);
+    let after = lint(fixed.as_bytes(), &tokens_after, &cst);
+
+    let mut before_counts = [0u32; LINT_ROWS.len()];
+    let mut after_counts = [0u32; LINT_ROWS.len()];
+    for obs in &report.observations {
+        before_counts[obs.code as usize] += 1;
+    }
+    for obs in &after.observations {
+        after_counts[obs.code as usize] += 1;
+    }
+    for (code, site) in &targets {
+        // Where that anchor's first byte ended up: every edit that lands wholly
+        // at or before it moves it, and nothing else does. An insertion exactly
+        // AT the anchor (`missing-paragraph`, `marker-not-ws-preceded`) pushes
+        // it right; a replacement OF the anchor (a renumber) leaves it where it
+        // was, which is the same rule read the other way.
+        let mut moved = i64::from(*site);
+        for edit in &edits {
+            if edit.to <= *site {
+                moved += edit.insert.as_bytes().len() as i64 - i64::from(edit.to - edit.from);
+            }
+        }
+        let survived = after.observations.iter().any(|obs| {
+            obs.code == *code && i64::from(tokens_after[obs.anchor as usize].start) == moved
+        });
+        if survived {
+            return Err(format!(
+                "{} was not repaired: it still fires at byte {moved}",
+                code.row().name
+            ));
+        }
+    }
+    for (slot, row) in LINT_ROWS.iter().enumerate() {
+        if after_counts[slot] > before_counts[slot] {
+            return Err(format!(
+                "the fix introduced {}: {} findings before, {} after",
+                row.name, before_counts[slot], after_counts[slot]
+            ));
+        }
+    }
+
+    // The standing invariant, re-asserted on text nobody has lexed before: the
+    // spans of the fixed source still concatenate back to it.
+    let mut cursor = 0usize;
+    for token in &tokens_after {
+        if token.start as usize != cursor {
+            return Err(format!(
+                "the fixed text does not partition: token at {} follows a span ending at {cursor}",
+                token.start
+            ));
+        }
+        cursor += token.len as usize;
+    }
+    if cursor != fixed.len() {
+        return Err(format!(
+            "the fixed text does not partition: spans end at {cursor} of {}",
+            fixed.len()
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1822,6 +2521,20 @@ mod tests {
         let tokens = lex(&usfm);
         let cst = build(&tokens);
         let report = lint(usfm.as_bytes(), &tokens, &cst);
+        // Half of the row/fix agreement, checked on EVERY snippet in the file
+        // rather than in one test: a fix may only appear where the row declared
+        // one, and it must carry that row's own label. (The other half — every
+        // declared label is actually reachable — is one table below.)
+        for (index, obs) in report.observations.iter().enumerate() {
+            if let Some(fix) = report.fix(index) {
+                assert_eq!(
+                    Some(fix.label),
+                    obs.code.row().fix_label,
+                    "{} emitted a fix its row does not declare",
+                    obs.code.row().name
+                );
+            }
+        }
         (tokens, report.observations)
     }
 
@@ -2777,6 +3490,360 @@ mod tests {
         // Neither does a marker that opens no attributes of its own.
         let (_, obs) = findings("\\p \\add a | b\\add*\n");
         assert_eq!(obs, vec![]);
+    }
+
+    // -----------------------------------------------------------------
+    // Phase 4: fixes
+    // -----------------------------------------------------------------
+
+    /// One document's report, for the fix tests — which state their snippet in
+    /// full (no `\id` prefix is added) because the repaired TEXT is the
+    /// assertion and a hidden prefix would not appear in it.
+    fn report_of(usfm: &str) -> (Vec<Token>, LintReport) {
+        let tokens = lex(usfm);
+        let cst = build(&tokens);
+        let report = lint(usfm.as_bytes(), &tokens, &cst);
+        (tokens, report)
+    }
+
+    fn slots_for(report: &LintReport, code: Code) -> Vec<u32> {
+        report
+            .observations
+            .iter()
+            .enumerate()
+            .filter(|(_, obs)| obs.code == code)
+            .map(|(index, _)| index as u32)
+            .collect()
+    }
+
+    /// Runs the ORACLE over the fixes for `code` and returns the repaired text.
+    ///
+    /// Every fix test below goes through here, so each one is also an oracle
+    /// test; what the test itself then states is the repaired document, which is
+    /// the only form in which an edit list is checkable by eye.
+    fn repaired(usfm: &str, code: Code) -> String {
+        let (tokens, report) = report_of(usfm);
+        let slots = slots_for(&report, code);
+        assert!(!slots.is_empty(), "no {} in {usfm:?}", code.row().name);
+        check_fixes(usfm, &tokens, &report, &slots)
+            .unwrap_or_else(|error| panic!("{} on {usfm:?}: {error}", code.row().name));
+        let mut edits: Vec<Edit> = slots
+            .iter()
+            .flat_map(|slot| {
+                report
+                    .edits(report.fix(*slot as usize).expect("the fix exists"))
+                    .to_vec()
+            })
+            .collect();
+        edits.sort_by_key(|edit| edit.from);
+        String::from_utf8(apply(usfm.as_bytes(), &edits)).expect("fixes are ASCII")
+    }
+
+    /// Does this code offer a fix on this snippet at all?
+    fn offers_fix(usfm: &str, code: Code) -> bool {
+        let (_, report) = report_of(usfm);
+        slots_for(&report, code)
+            .iter()
+            .any(|slot| report.fix(*slot as usize).is_some())
+    }
+
+    #[test]
+    fn the_fix_types_are_the_ruled_widths() {
+        assert_eq!(core::mem::size_of::<Edit>(), 24);
+        assert_eq!(FixStr::CAP, 15);
+        assert!(FixStr::EMPTY.is_empty());
+        assert_eq!(FixStr::new(b"\\table-e\\*").as_str(), "\\table-e\\*");
+        // The observation row is untouched by the fix model — the link is the
+        // side table, which is why this number is still four u32s.
+        assert_eq!(core::mem::size_of::<Observation>(), 16);
+    }
+
+    #[test]
+    fn text_longer_than_a_fixstr_splits_into_concatenating_edits() {
+        // No fix in the table is this long (the worst is `\table-e\*`, ten
+        // bytes), so the splitter is exercised directly: it is the reason the
+        // inline string needs no cap.
+        let mut out = Emit::default();
+        let long = b"0123456789abcdefghijklmnopqr";
+        out.push_fixed(Observation::one(Code::OrphanCloser, 0), 4, 7, long);
+        let fix = out.fixes[0].clone();
+        let edits = &out.edit_list[fix.edits.start as usize..fix.edits.end as usize];
+        assert_eq!(edits.len(), 2);
+        // Only the FIRST edit carries the replaced range; the tail is a pure
+        // insertion at its end, so right-to-left application concatenates.
+        assert_eq!(edits[0].from, 4);
+        assert_eq!(edits[0].to, 7);
+        assert_eq!(
+            edits[1],
+            Edit {
+                from: 7,
+                to: 7,
+                insert: FixStr::new(&long[15..])
+            }
+        );
+        assert_eq!(
+            String::from_utf8(apply(b"....xyz....", edits)).unwrap(),
+            format!("....{}....", core::str::from_utf8(long).unwrap())
+        );
+    }
+
+    #[test]
+    fn a_missing_closer_lands_at_the_last_content_byte() {
+        // The corpus shape: a `\c` inside a footnote. The closer goes where the
+        // note's content ends, in front of what displaced it.
+        assert_eq!(
+            repaired(
+                "\\id GEN\n\\c 1\n\\p \\v 1 a\\f + \\ft note\\c 2\n\\p b",
+                Code::UnclosedNote
+            ),
+            "\\id GEN\n\\c 1\n\\p \\v 1 a\\f + \\ft note\\f*\\c 2\n\\p b"
+        );
+
+        // …and when the displacer is on the NEXT LINE, the closer stays on this
+        // one: the extent ends after the newline, the fix backs off over it.
+        assert_eq!(
+            repaired(
+                "\\id GEN\n\\c 1\n\\p \\v 1 a\\f + \\ft note\n\\c 2\n\\p b",
+                Code::UnclosedNote
+            ),
+            "\\id GEN\n\\c 1\n\\p \\v 1 a\\f + \\ft note\\f*\n\\c 2\n\\p b"
+        );
+
+        // A character marker keeps the author's own SPELLING — `\+nd` is closed
+        // by `\+nd*`, which the canonical row name could not have said.
+        assert_eq!(
+            repaired("\\id GEN\n\\p \\add a \\+nd b\\add*", Code::UnclosedChar),
+            "\\id GEN\n\\p \\add a \\+nd b\\+nd*\\add*"
+        );
+
+        // At EOF there is nothing to insert in front of, so the closer simply
+        // ends the file.
+        assert_eq!(
+            repaired("\\id GEN\n\\p \\add a", Code::UnclosedAtEof),
+            "\\id GEN\n\\p \\add a\\add*"
+        );
+        // A trailing newline is content the closer belongs in FRONT of…
+        assert_eq!(
+            repaired("\\id GEN\n\\p \\add a\n", Code::UnclosedAtEof),
+            "\\id GEN\n\\p \\add a\\add*\n"
+        );
+        // …but the backoff never reaches into the opening marker's own span.
+        assert_eq!(
+            repaired("\\id GEN\n\\p \\add ", Code::UnclosedAtEof),
+            "\\id GEN\n\\p \\add \\add*"
+        );
+    }
+
+    #[test]
+    fn a_missing_terminator_and_a_missing_end_milestone() {
+        assert_eq!(
+            repaired(
+                "\\id GEN\n\\p a \\qt-s |who=\"Levi\"",
+                Code::UnterminatedMilestone
+            ),
+            "\\id GEN\n\\p a \\qt-s |who=\"Levi\"\\*"
+        );
+
+        // The container's end milestone is built from the ROW name — the `-s`
+        // and `-e` spellings are the row's, not the author's.
+        assert_eq!(
+            repaired(
+                "\\id GEN\n\\list-s\\*\n\\li a\n\\p prose",
+                Code::UnterminatedContainer
+            ),
+            "\\id GEN\n\\list-s\\*\n\\li a\\list-e\\*\n\\p prose"
+        );
+    }
+
+    #[test]
+    fn an_orphan_is_deleted_span_and_nothing_more() {
+        // The two spaces left behind are deliberate: extra horizontal
+        // whitespace is legal everywhere, and eating one would be a second edit
+        // nobody asked for.
+        assert_eq!(
+            repaired("\\id GEN\n\\p text \\w* more", Code::OrphanCloser),
+            "\\id GEN\n\\p text  more"
+        );
+        assert_eq!(
+            repaired("\\id GEN\n\\p text \\* more", Code::OrphanTerminator),
+            "\\id GEN\n\\p text  more"
+        );
+    }
+
+    #[test]
+    fn the_missing_paragraph_fix_writes_the_p_usfmtc_fabricates() {
+        assert_eq!(
+            repaired(
+                "\\id GEN\n\\c 1\n\\v 1 no paragraph",
+                Code::MissingParagraph
+            ),
+            "\\id GEN\n\\c 1\n\\p\n\\v 1 no paragraph"
+        );
+
+        // Glued to the preceding word, the `\p` needs a line break of its own —
+        // without it the repair would trade one finding for another
+        // (`marker-not-ws-preceded`), which the oracle refuses.
+        assert_eq!(
+            repaired("\\id GEN\n\\c 1\ntext\\v 1 a", Code::MissingParagraph),
+            "\\id GEN\n\\c 1\ntext\n\\p\n\\v 1 a"
+        );
+    }
+
+    #[test]
+    fn the_book_identifier_and_the_glued_paragraph_marker() {
+        assert_eq!(
+            repaired("\\id gen\n\\c 1\n\\p \\v 1 a", Code::BookCodeNotUppercase),
+            "\\id GEN\n\\c 1\n\\p \\v 1 a"
+        );
+        // A code that is no identifier in any casing is NOT guessed at.
+        assert!(!offers_fix(
+            "\\id ZZZ\n\\c 1\n\\p \\v 1 a",
+            Code::BookCodeUnknown
+        ));
+
+        assert_eq!(
+            repaired(
+                "\\id GEN\n\\p text\\s1 heading\n\\p more",
+                Code::MarkerNotWsPreceded
+            ),
+            "\\id GEN\n\\p text\n\\s1 heading\n\\p more"
+        );
+    }
+
+    #[test]
+    fn renumbering_is_offered_only_where_it_is_a_splice() {
+        assert_eq!(
+            repaired("\\id GEN\n\\c 1\n\\c 1\n", Code::ChapterDuplicate),
+            "\\id GEN\n\\c 1\n\\c 2\n"
+        );
+        assert_eq!(
+            repaired("\\id GEN\n\\c 2\n\\c 1\n", Code::ChapterOutOfOrder),
+            "\\id GEN\n\\c 2\n\\c 3\n"
+        );
+        assert_eq!(
+            repaired(
+                "\\id GEN\n\\c 1\n\\p \\v 1 a \\v 1 b \\v 3 c",
+                Code::VerseDuplicate
+            ),
+            "\\id GEN\n\\c 1\n\\p \\v 1 a \\v 2 b \\v 3 c"
+        );
+        assert_eq!(
+            repaired(
+                "\\id GEN\n\\c 1\n\\p \\v 1 a \\v 3 b \\v 2 c",
+                Code::VerseOutOfOrder
+            ),
+            "\\id GEN\n\\c 1\n\\p \\v 1 a \\v 3 b \\v 4 c"
+        );
+
+        // The bdf_reg ROM 3 shape: `\v 10` twice with `\v 11` after it.
+        // Renumbering the duplicate to 11 would only move it along, so no fix
+        // is offered at all — the finding stands on its own.
+        assert!(!offers_fix(
+            "\\id GEN\n\\c 1\n\\p \\v 10 a \\v 10 b \\v 11 c",
+            Code::VerseDuplicate
+        ));
+        // The mirror shape for out-of-order.
+        assert!(!offers_fix(
+            "\\id GEN\n\\c 1\n\\p \\v 5 a \\v 2 b \\v 3 c",
+            Code::VerseOutOfOrder
+        ));
+        // A RANGE is never renumbered: writing one number over `12-14` would
+        // drop the verses it covers, which is interpretation, not a splice.
+        assert!(!offers_fix(
+            "\\id GEN\n\\c 1\n\\p \\v 1-11 a \\v 11-13 b",
+            Code::VerseDuplicate
+        ));
+        // Neither is a segment (`\v 2a`).
+        assert!(!offers_fix(
+            "\\id GEN\n\\c 1\n\\p \\v 1 a \\v 1a b \\v 3 c",
+            Code::VerseDuplicate
+        ));
+        // A gap is never renumbered either — its row declares no label.
+        assert!(!offers_fix(
+            "\\id GEN\n\\c 1\n\\p \\v 1 a \\v 5 b",
+            Code::VerseGap
+        ));
+    }
+
+    #[test]
+    fn fix_all_of_one_code_dispatches_as_a_single_edit_list() {
+        // Two findings of one code, concatenated, sorted, applied once — the
+        // "fix all X" affordance, and the composability rule at its sharpest.
+        assert_eq!(
+            repaired(
+                "\\id GEN\n\\c 1\n\\p \\v 1 a \\v 1 b \\v 3 c \\v 3 d\n",
+                Code::VerseDuplicate
+            ),
+            "\\id GEN\n\\c 1\n\\p \\v 1 a \\v 2 b \\v 3 c \\v 4 d\n"
+        );
+        assert_eq!(
+            repaired(
+                "\\id GEN\n\\c 1\n\\v 1 a\n\\c 2\n\\v 1 b\n",
+                Code::MissingParagraph
+            ),
+            "\\id GEN\n\\c 1\n\\p\n\\v 1 a\n\\c 2\n\\p\n\\v 1 b\n"
+        );
+    }
+
+    #[test]
+    fn a_fix_is_offered_exactly_where_the_row_declares_one() {
+        // One snippet per code that DECLARES a label, so no label is a promise
+        // nothing keeps. (The converse — a code emitting a fix its row does not
+        // declare — is asserted on every snippet in this file, inside
+        // `findings`, and again over the whole corpus.)
+        let cases: [(Code, &str); 14] = [
+            (
+                Code::UnclosedNote,
+                "\\id GEN\n\\c 1\n\\p \\v 1 a\\f + \\ft n\\c 2\n\\p b",
+            ),
+            (Code::UnclosedChar, "\\id GEN\n\\p \\add a \\w b\\add*"),
+            (Code::UnclosedAtEof, "\\id GEN\n\\p \\add a"),
+            (
+                Code::UnterminatedContainer,
+                "\\id GEN\n\\list-s\\*\n\\li a\n\\p prose",
+            ),
+            (
+                Code::UnterminatedMilestone,
+                "\\id GEN\n\\p a \\qt-s |who=\"Levi\"",
+            ),
+            (Code::OrphanCloser, "\\id GEN\n\\p text\\w* more"),
+            (Code::OrphanTerminator, "\\id GEN\n\\p text \\* more"),
+            (Code::MissingParagraph, "\\id GEN\n\\c 1\n\\v 1 a"),
+            (Code::ChapterDuplicate, "\\id GEN\n\\c 1\n\\c 1\n"),
+            (Code::ChapterOutOfOrder, "\\id GEN\n\\c 2\n\\c 1\n"),
+            (
+                Code::VerseDuplicate,
+                "\\id GEN\n\\c 1\n\\p \\v 1 a \\v 1 b \\v 3 c",
+            ),
+            (
+                Code::VerseOutOfOrder,
+                "\\id GEN\n\\c 1\n\\p \\v 1 a \\v 3 b \\v 2 c",
+            ),
+            (Code::BookCodeNotUppercase, "\\id gen\n\\c 1\n\\p \\v 1 a"),
+            (
+                Code::MarkerNotWsPreceded,
+                "\\id GEN\n\\p text\\s1 heading\n\\p more",
+            ),
+        ];
+        let mut demonstrated: Vec<Code> = Vec::new();
+        for (code, usfm) in cases {
+            assert!(
+                offers_fix(usfm, code),
+                "{} declares a fix but offered none on {usfm:?}",
+                code.row().name
+            );
+            // Each one also passes the oracle (`repaired` runs it).
+            repaired(usfm, code);
+            demonstrated.push(code);
+        }
+        for row in LINT_ROWS.iter() {
+            assert_eq!(
+                row.fix_label.is_some(),
+                demonstrated.contains(&row.code),
+                "{} is not demonstrated by a case above",
+                row.name
+            );
+        }
     }
 
     #[test]

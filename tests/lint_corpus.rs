@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use rayon::prelude::*;
 use usfm_onion_2::cst::build;
 use usfm_onion_2::lex;
-use usfm_onion_2::lint::{Code, LINT_ROWS, lint};
+use usfm_onion_2::lint::{Code, LINT_ROWS, check_fixes, lint};
 
 fn collect_usfm_paths(root: &Path, paths: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(root) else {
@@ -297,6 +297,77 @@ fn the_three_unclosed_notes_are_isa_mrk_and_bsb_gen() {
             ("examples.bsb/GEN".to_string(), 1),
         ])
     );
+}
+
+/// THE FIX ORACLE over the whole corpus: apply → re-lex → re-build → re-lint,
+/// for EVERY fix this corpus offers, one at a time.
+///
+/// Each one must repair its own finding and introduce none — the composability
+/// rule, executable ([`usfm_onion_2::lint::check_fixes`] states the four
+/// conditions). It is the load-bearing test of phase 4: a fix that is merely
+/// plausible on a snippet meets 226 real books here.
+#[test]
+fn every_corpus_fix_passes_the_oracle() {
+    let mut paths = Vec::new();
+    collect_usfm_paths(Path::new("example-corpora"), &mut paths);
+    if paths.is_empty() {
+        eprintln!("fix oracle SKIPPED: no *.usfm under example-corpora/");
+        return;
+    }
+    paths.sort();
+
+    // (fixes exercised, per-code counts) — the oracle is only evidence if it
+    // actually ran, so the count is pinned like every other number here.
+    let counted: Vec<[u64; LINT_ROWS.len()]> = paths
+        .par_iter()
+        .map(|path| {
+            let source = std::fs::read_to_string(path).unwrap();
+            let tokens = lex(&source);
+            let cst = build(&tokens);
+            let report = lint(source.as_bytes(), &tokens, &cst);
+
+            let mut counts = [0u64; LINT_ROWS.len()];
+            for (index, obs) in report.observations.iter().enumerate() {
+                let Some(fix) = report.fix(index) else {
+                    continue;
+                };
+                assert_eq!(
+                    Some(fix.label),
+                    obs.code.row().fix_label,
+                    "{}: {} emitted a fix its row does not declare",
+                    path.display(),
+                    obs.code.row().name
+                );
+                check_fixes(&source, &tokens, &report, &[index as u32]).unwrap_or_else(|error| {
+                    panic!("{}: {} — {error}", path.display(), obs.code.row().name)
+                });
+                counts[obs.code as usize] += 1;
+            }
+            counts
+        })
+        .collect();
+
+    let mut totals = [0u64; LINT_ROWS.len()];
+    for counts in &counted {
+        for (slot, count) in counts.iter().enumerate() {
+            totals[slot] += count;
+        }
+    }
+    let total = |code: Code| totals[code as usize];
+
+    // The three truncated footnotes and the two orphan `\f*` downstream of two
+    // of them — every structural finding in 226 books, each with a repair.
+    assert_eq!(total(Code::UnclosedNote), 3);
+    assert_eq!(total(Code::OrphanCloser), 2);
+    // One `\p` per paragraph-less run, all 2865 of them.
+    assert_eq!(total(Code::MissingParagraph), 2_865);
+    // The corpus's ONE duplicate verse is deliberately NOT among these: bdf_reg
+    // ROM 3 writes `\v 10` twice and then `\v 11`, so renumbering the duplicate
+    // to 11 would only move the duplicate one verse along. The fix declines
+    // (see `renumber`), which is why this reads 0 while the finding count above
+    // reads 1 — and it is exactly the case that taught the guard.
+    assert_eq!(total(Code::VerseDuplicate), 0);
+    assert_eq!(totals.iter().sum::<u64>(), 2_870);
 }
 
 #[test]

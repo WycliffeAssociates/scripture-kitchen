@@ -292,11 +292,26 @@ lint(source, tokens, cst):
    attribute interpreter is built (exports want it too).
 4. **Fixes**: Fix/Edit/FixStr, `Cst::extent(node, tokens)`, per-code
    fixes, and the fix ORACLE harness (apply → relex → relint: finding
-   gone, nothing new) run over every corpus fix.
+   gone, nothing new) run over every corpus fix. LANDED 2026-08-19 —
+   14 codes offer a fix, 2870 of them exercised by the oracle over the
+   226 books. Two shapes the sketch did not anticipate, both recorded in
+   code: the oracle judges a fix by its own SITE rather than by a falling
+   count (an aggregate rule can unmask the next segment of the run it was
+   hiding), and a renumber is offered only when the next number in the
+   sequence is above the one it writes.
 
 ## Still open (small)
 - messageParams audit vs onion — mechanical, do during build: every
   onion param must be a span or fit aux.
+- **`nd`'s context mask omits Footnote, and it costs three findings**
+  (found by phase-4's fix preview, 2026-08-19): bsb GEN 2:4 writes a
+  well-formed note whose `\fq` contains `\+nd`; the character marker's
+  mask has no Footnote bit, so it DISPLACES the note — which is the
+  book's `unclosed-note` and both of the corpus's `orphan-closer`s. Same
+  spec fuzziness the standing severity ruling names. Rows change only
+  through the spec-diff, so lint keeps reporting the walker's verdict —
+  but the offered fix would truncate a good footnote, which makes this
+  the first table question a USER could be hurt by. Referee needed.
 - **Latent row inconsistency, needs the spec-diff referee** (found by
   phase-3 tests, 2026-08-19; zero corpus impact — no `\ca` anywhere in
   226 books): `ca`/`va`/`vp` rows carry `closing: RequiredExplicit` but

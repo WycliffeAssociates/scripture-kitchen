@@ -10,7 +10,8 @@
 //   cargo run --release --bin playground -- --cst-only         // pre-lexed; times cst::build alone
 //   cargo run --release --bin playground -- --cst-stats        // untimed: CloseReason distribution over the corpus
 //   cargo run --release --bin playground -- --lint             // lex + cst::build + lint (the whole pipeline)
-//   cargo run --release --bin playground -- --lint-stats       // untimed: per-code finding counts over the corpus
+//   cargo run --release --bin playground -- --lint-stats       // untimed: per-code finding counts (and fix counts)
+//   cargo run --release --bin playground -- --fix-preview unclosed-note  // …plus before/after windows for one code
 //   cargo run --release --bin playground -- --scalar            // no-memchr twin (prices SIMD)
 //   cargo run --release --bin playground -- --staged            // two-stage structural index (simdjson shape)
 //   cargo run --release --bin playground -- --chunked           // chapter-split, lexed serially (prices the split)
@@ -60,6 +61,7 @@ fn main() {
     let mut iters: u32 = 1;
     let mut cst_stats = false;
     let mut lint_stats = false;
+    let mut fix_preview: Option<String> = None;
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -73,6 +75,12 @@ fn main() {
             "--lint" => mode = Mode::Lint,
             "--lint-only" => mode = Mode::LintOnly,
             "--lint-stats" => lint_stats = true,
+            // Implies --lint-stats: it is the same sweep, printing before/after
+            // windows for the first few fixes of ONE code.
+            "--fix-preview" => {
+                lint_stats = true;
+                fix_preview = args.next();
+            }
             "--scalar" => mode = Mode::Scalar,
             "--staged" => mode = Mode::Staged,
             "--sweep-nl" => mode = Mode::SweepNl,
@@ -132,7 +140,7 @@ fn main() {
         return;
     }
     if lint_stats {
-        report_lint_stats(&sources, &path);
+        report_lint_stats(&sources, &path, fix_preview.as_deref());
         return;
     }
 
@@ -371,10 +379,11 @@ fn read_source(path: &Path) -> String {
 /// counts first, then a sample of each code's sites (book, code name, byte
 /// offset of the anchor token) — enough to eyeball a class before pinning its
 /// count in tests/lint_corpus.rs.
-fn report_lint_stats(sources: &[String], root: &Path) {
+fn report_lint_stats(sources: &[String], root: &Path, preview_of: Option<&str>) {
     use usfm_onion_2::lint::LINT_ROWS;
 
     const SAMPLES_PER_CODE: usize = 12;
+    const PREVIEWS: usize = 6;
 
     let names: Vec<String> = if root.is_dir() {
         let mut paths = Vec::new();
@@ -399,7 +408,9 @@ fn report_lint_stats(sources: &[String], root: &Path) {
     };
 
     let mut counts = [0u64; LINT_ROWS.len()];
+    let mut fixed = [0u64; LINT_ROWS.len()];
     let mut samples: Vec<Vec<(String, u32)>> = vec![Vec::new(); LINT_ROWS.len()];
+    let mut previews: Vec<(String, &'static str, String, String)> = Vec::new();
     let mut books_without_id = 0u64;
     let mut tokens_total = 0u64;
 
@@ -419,25 +430,57 @@ fn report_lint_stats(sources: &[String], root: &Path) {
                 names.get(i).cloned().unwrap_or_else(|| format!("doc#{i}"))
             }
         };
-        for obs in &report.observations {
+        for (index, obs) in report.observations.iter().enumerate() {
             let slot = obs.code as usize;
             counts[slot] += 1;
             if samples[slot].len() < SAMPLES_PER_CODE {
                 samples[slot].push((book.clone(), tokens[obs.anchor as usize].start));
             }
+            let Some(fix) = report.fix(index) else {
+                continue;
+            };
+            fixed[slot] += 1;
+            // A window of the repaired text beside the original, for the first
+            // few fixes of each code — the only way to see whether a proposal
+            // reads sanely in real scripture rather than in a test snippet.
+            if previews.len() < PREVIEWS
+                && preview_of.is_some_and(|name| name == LINT_ROWS[slot].name)
+            {
+                let edits = report.edits(fix);
+                let at = edits[0].from as usize;
+                let window = at.saturating_sub(60)..(at + 60).min(source.len());
+                let after = String::from_utf8(usfm_onion_2::lint::apply(source.as_bytes(), edits))
+                    .expect("fixes are ASCII");
+                let shift = window.start..(window.end + 8).min(after.len());
+                previews.push((
+                    book.clone(),
+                    fix.label,
+                    source[window].to_string(),
+                    after[shift].to_string(),
+                ));
+            }
         }
     }
 
     let total: u64 = counts.iter().sum();
+    let fixable: u64 = fixed.iter().sum();
     println!(
-        "lint-stats docs={} tokens={tokens_total} findings={total} books-without-id={books_without_id}",
+        "lint-stats docs={} tokens={tokens_total} findings={total} with-fix={fixable} books-without-id={books_without_id}",
         sources.len()
     );
+    for (book, label, before, after) in &previews {
+        println!("  fix-preview {book} [{label}]");
+        println!("    before {before:?}");
+        println!("    after  {after:?}");
+    }
     for (slot, row) in LINT_ROWS.iter().enumerate() {
         if counts[slot] == 0 {
             continue;
         }
-        println!("  {} x{}", row.name, counts[slot]);
+        println!(
+            "  {} x{} ({} with a fix)",
+            row.name, counts[slot], fixed[slot]
+        );
         for (book, offset) in &samples[slot] {
             println!("    {book} {} @{offset}", row.name);
         }
