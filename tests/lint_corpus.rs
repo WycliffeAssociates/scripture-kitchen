@@ -123,8 +123,61 @@ fn the_corpus_yields_exactly_the_known_findings() {
         .sum();
     assert_eq!(outside_ulb, 33);
 
+    // ---- Ordering + payload (phase 2) -----------------------------------
+
+    // Two designators in 226 books fail their pattern, both genuine typos:
+    //   * bdf_reg ACT 8:17 is written `\v +` — a bare note caller where the
+    //     verse number belongs (the `\v 18` after it is correct).
+    //   * en_ulb ZEC 12:7 is written `\v 7"` with no space before the quote,
+    //     so the carved payload is `7"`.
+    // The second is why malformed designators RESYNC the sequence instead of
+    // merely being skipped: with `prev_verse` left at 6, the perfectly good
+    // `\v 8` next to it read as a gap. One typo, one finding.
+    assert_eq!(total(Code::DesignatorMalformed), 2);
+
+    // bdf_reg ROM 3 carries `\v 10` twice — the same verse translated twice,
+    // the second copy left in. Real duplication, not a range overlap.
+    assert_eq!(total(Code::VerseDuplicate), 1);
+
+    // Verses whose marker is simply absent. Every one inspected is real, and
+    // they split into two well-known kinds:
+    //   * examples.bsb x17 — the classic "omitted verses" (MAT 17:21, 18:11,
+    //     23:14; MRK 7:16, 9:44, 9:46, 11:26, 15:28; LUK 17:36, 23:17;
+    //     JHN 5:4; ACT 8:37, 15:34, 24:7, 28:29; ROM 16:24), which the BSB
+    //     deliberately moves into a footnote, plus PSA 106:42 where the verse
+    //     marker is genuinely missing above its own text.
+    //   * bdf_reg x11 — a minority-language translation that merges verses
+    //     without writing the merge as a range (`\v 7` then `\v 9`).
+    // The first group is exactly the future customer for a per-rule off
+    // switch (ruled: no versification schemes inside the linter).
+    assert_eq!(total(Code::VerseGap), 28);
+    let gaps_by_corpus = |corpus: &str| -> u64 {
+        books
+            .iter()
+            .filter(|(path, _, _)| path.to_string_lossy().contains(corpus))
+            .map(|(_, counts, _)| counts[Code::VerseGap as usize])
+            .sum()
+    };
+    assert_eq!(gaps_by_corpus("examples.bsb"), 17);
+    assert_eq!(gaps_by_corpus("bdf_reg"), 11);
+
+    // examples.bsb LAM 2 opens `\c 2` … `\v 2`: the verse 1 marker is missing
+    // above its own text. Reported ONLY as missing-verse-one — never also as
+    // a gap, which is the whole point of the two rules being exclusive.
+    assert_eq!(total(Code::MissingVerseOne), 1);
+
+    // BSB Ecclesiastes, the same book `LintReport::book == None` has always
+    // named. Phase 2 turns that state into an actual observation at token 0.
+    assert_eq!(total(Code::MissingId), 1);
+
     // Everything else is CLEAN across 226 books, and must stay that way: each
     // of these codes fires only on damage the corpus does not contain.
+    //
+    // Worth naming what the zeros PROVE, because several were the rules most
+    // likely to cry wolf: every `\id` in the corpus is one of the spec's 116
+    // identifiers, in uppercase; every `\c` owns a number; no book has verses
+    // before its first chapter or no chapter at all; and no chapter number
+    // repeats, reverses or skips anywhere in 226 books.
     for code in [
         Code::UnclosedChar,
         Code::UnclosedAtEof,
@@ -134,6 +187,15 @@ fn the_corpus_yields_exactly_the_known_findings() {
         Code::OrphanContainerEnd,
         Code::ContentOutsideSidebarRule,
         Code::NestedSpellingMisuse,
+        Code::ChapterDuplicate,
+        Code::ChapterOutOfOrder,
+        Code::ChapterGap,
+        Code::VerseOutOfOrder,
+        Code::VerseBeforeFirstChapter,
+        Code::MissingChapter,
+        Code::BookCodeUnknown,
+        Code::BookCodeNotUppercase,
+        Code::ChapterWithoutDesignator,
     ] {
         assert_eq!(total(code), 0, "{} fired on clean data", code.row().name);
     }
@@ -171,8 +233,8 @@ fn the_three_unclosed_notes_are_isa_mrk_and_bsb_gen() {
 #[test]
 fn exactly_one_corpus_book_has_no_id_line() {
     let Some(books) = lint_corpus() else { return };
-    // BSB Ecclesiastes. `LintReport::book == None` IS that finding in phase 1;
-    // the `missing-id` code arrives with the payload pass.
+    // BSB Ecclesiastes. `LintReport::book == None` is the STATE; since phase 2
+    // the `missing-id` observation is raised beside it (counted above).
     let missing: Vec<&PathBuf> = books
         .iter()
         .filter(|(_, _, book)| book.is_none())

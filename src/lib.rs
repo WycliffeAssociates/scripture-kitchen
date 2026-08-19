@@ -7,6 +7,9 @@
 //!
 //! - [`token`] — the row format: `TokenKind`, the packed-byte mapping, and
 //!   the 8-byte `Token` row. What a binary codec or JS twin cares about.
+//! - [`designator`] — the chapter/verse designator interpreter: the one
+//!   reader of a `Designator` span's interior (ordering lint today, vref
+//!   exports later).
 //! - [`scanner`] — the Scanner: the only code that owns position. `lex`,
 //!   the arms, the boundary finders, `classify_marker`.
 //! - [`parse_header`] — the first CONSUMER of tokens: a second pass that indexes
@@ -17,6 +20,7 @@
 //! to interpreters, on demand, later.
 
 pub mod cst;
+pub mod designator;
 pub mod experiments;
 pub mod lint;
 mod parse_header;

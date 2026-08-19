@@ -8,6 +8,9 @@
 //!   Spellings collapse by stripping `-s`/`-e` first, then digits [G], so
 //!   `q1..q4` are one row `q` and `qt3-s` is one row `qt`. Index 0 is the
 //!   generic EMPTY row.
+//! - [`books`] — the books AUXILIARY table: the spec's 116 `\id` book
+//!   identifiers, membership only. Authored, not codegen, and not a marker
+//!   fact — lint's `book-code-*` rules are its only consumer.
 //! - [`emit`] — the generator: `rows::ROWS` in, the text of `generated.rs`
 //!   out. A pure `String`-returning function so the freshness test can call it
 //!   (`tests/codegen_output_matches_input.rs`); `src/bin/codegen.rs` is a thin main over it.
@@ -31,6 +34,7 @@
 //! into [`rows`] rather than being drained row-by-row — Will's call, recorded in
 //! that module's header. Only [`rows::ROWS`] exists now, and it is the table.
 
+pub mod books;
 pub mod emit;
 pub mod generated;
 pub mod rows;
