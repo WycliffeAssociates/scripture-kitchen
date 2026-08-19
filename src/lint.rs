@@ -167,7 +167,7 @@ pub struct Observation {
 }
 
 impl Observation {
-    fn one(code: Code, anchor: u32) -> Self {
+    pub(crate) fn one(code: Code, anchor: u32) -> Self {
         Self {
             code,
             anchor,
@@ -1093,17 +1093,17 @@ pub fn lint(source: &[u8], tokens: &[Token], cst: &Cst) -> LintReport {
 /// be permuted with its partner when the findings are sorted. One sink keeps
 /// that pairing in a single place instead of at forty push sites.
 #[derive(Default)]
-struct Emit {
-    observations: Vec<Observation>,
-    fix_of: Vec<u32>,
-    fixes: Vec<Fix>,
-    edit_list: Vec<Edit>,
+pub(crate) struct Emit {
+    pub(crate) observations: Vec<Observation>,
+    pub(crate) fix_of: Vec<u32>,
+    pub(crate) fixes: Vec<Fix>,
+    pub(crate) edit_list: Vec<Edit>,
 }
 
 impl Emit {
     /// A finding with no repair — the common case, and the shape every phase
     /// 1-3 call site already had.
-    fn push(&mut self, observation: Observation) {
+    pub(crate) fn push(&mut self, observation: Observation) {
         self.observations.push(observation);
         self.fix_of.push(NO_FIX);
     }
@@ -1118,7 +1118,7 @@ impl Emit {
     /// The label comes from the row, which is therefore the single declaration
     /// of "this rule offers a fix" — a code that emits one without declaring it
     /// is a table bug and fails loudly here rather than in a consumer.
-    fn push_fixed(&mut self, observation: Observation, from: u32, to: u32, text: &[u8]) {
+    pub(crate) fn push_fixed(&mut self, observation: Observation, from: u32, to: u32, text: &[u8]) {
         let label = observation
             .code
             .row()
@@ -1159,7 +1159,11 @@ impl Emit {
     /// natural order of their own. It sorts a PERMUTATION because `fix_of` has
     /// to travel with its partner; both gathers are over a vec whose length is
     /// the finding count, not the token count.
-    fn finish(self, book: Option<u32>, declared_version: Option<UsfmVersion>) -> LintReport {
+    pub(crate) fn finish(
+        self,
+        book: Option<u32>,
+        declared_version: Option<UsfmVersion>,
+    ) -> LintReport {
         let mut order: Vec<u32> = (0..self.observations.len() as u32).collect();
         order.sort_unstable_by_key(|slot| {
             let obs = self.observations[*slot as usize];
@@ -1190,7 +1194,7 @@ impl Emit {
 /// the four corpora do not have would cost more than every rule that reads it.
 /// Nothing after the first chapter can be an `\id` or a `\usfm` line — and a
 /// file that puts one there has a structural finding already, not a header.
-fn header_scan(source: &[u8], tokens: &[Token]) -> (Option<u32>, Option<UsfmVersion>) {
+pub(crate) fn header_scan(source: &[u8], tokens: &[Token]) -> (Option<u32>, Option<UsfmVersion>) {
     let usfm = generated::marker_idx(b"usfm", SpellingShape::PlainOnly);
     let mut book = None;
     let mut version = None;
@@ -1306,10 +1310,10 @@ fn shape_of(tokens: &[Token], cst: &Cst, id: usize) -> Shape {
 /// The three read-only slices every machine reads through — one argument
 /// instead of three at every event, and the thing a future Builder-driven
 /// pipeline replaces with its own live view.
-struct Doc<'a> {
-    source: &'a [u8],
-    tokens: &'a [Token],
-    cst: &'a Cst,
+pub(crate) struct Doc<'a> {
+    pub(crate) source: &'a [u8],
+    pub(crate) tokens: &'a [Token],
+    pub(crate) cst: &'a Cst,
 }
 
 /// One frame of the driver's own stack: where this node's child list has got
@@ -1454,7 +1458,7 @@ fn walk(doc: &Doc, version: Option<UsfmVersion>, out: &mut Emit) {
 /// last-child test already reports. The one leaf that must act is a SECOND
 /// closer arriving before any close: the first can no longer be anyone's last
 /// child, so it is flushed there.
-struct Structure {
+pub(crate) struct Structure {
     /// A closer leaf awaiting its verdict, or [`NO_TOKEN`].
     pending_closer: u32,
     /// Whether that pending closer is a bare `\*` (which reports a different
@@ -1465,7 +1469,7 @@ struct Structure {
 }
 
 impl Structure {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             pending_closer: NO_TOKEN,
             pending_is_terminator: false,
@@ -1522,7 +1526,7 @@ impl Structure {
     /// The ONLY per-leaf work: remember a closer, and flush a previous one that
     /// this arrival has just disqualified.
     #[inline]
-    fn on_leaf(&mut self, doc: &Doc, idx: u32, kind: TokenKind, out: &mut Emit) {
+    pub(crate) fn on_leaf(&mut self, doc: &Doc, idx: u32, kind: TokenKind, out: &mut Emit) {
         let terminator = match kind {
             TokenKind::ClosingMarker { .. } => false,
             TokenKind::MilestoneTerminator => true,
@@ -1541,11 +1545,11 @@ impl Structure {
     /// The document ended with something still pending — nothing can have
     /// consumed it. (A closer that is the ROOT's last child lands here: the root
     /// is never closed.)
-    fn finish(&mut self, doc: &Doc, out: &mut Emit) {
+    pub(crate) fn finish(&mut self, doc: &Doc, out: &mut Emit) {
         self.resolve(doc, NO_TOKEN, out);
     }
 
-    fn on_node_close(&mut self, doc: &Doc, id: u32, node: &Node, out: &mut Emit) {
+    pub(crate) fn on_node_close(&mut self, doc: &Doc, id: u32, node: &Node, out: &mut Emit) {
         if self.pending_closer != NO_TOKEN || self.pending_end != NO_TOKEN {
             self.resolve(doc, id, out);
         }
@@ -1776,7 +1780,7 @@ enum Window {
 ///   opener and a Newline ends its reach — the scanner bounds lists to a line,
 ///   so nothing else would be honest.
 /// - **The numbering-mix bitmasks**, closed out by the document simply ending.
-struct Flat {
+pub(crate) struct Flat {
     /// The `\usfm` version the header declared, the one fact this machine takes
     /// from outside the walk.
     version: Option<UsfmVersion>,
@@ -1809,7 +1813,7 @@ struct Flat {
 const REPORTED: u16 = 1 << 15;
 
 impl Flat {
-    fn new(version: Option<UsfmVersion>) -> Self {
+    pub(crate) fn new(version: Option<UsfmVersion>) -> Self {
         let idx_of = |name: &[u8]| generated::marker_idx(name, SpellingShape::PlainOnly);
         Self {
             version,
@@ -1829,7 +1833,14 @@ impl Flat {
     }
 
     #[inline]
-    fn on_leaf(&mut self, doc: &Doc, idx: u32, token: &Token, kind: TokenKind, out: &mut Emit) {
+    pub(crate) fn on_leaf(
+        &mut self,
+        doc: &Doc,
+        idx: u32,
+        token: &Token,
+        kind: TokenKind,
+        out: &mut Emit,
+    ) {
         let (source, tokens) = (doc.source, doc.tokens);
         let (ca, cp, va, vp) = (self.ca, self.cp, self.va, self.vp);
         let version = self.version;
@@ -2098,7 +2109,7 @@ impl Flat {
 /// one thing that cannot be re-derived is WHICH sidebar we are in, so the
 /// innermost opener rides a stack of its own; it grows only on sidebars, which
 /// are rare.
-struct Ancestry {
+pub(crate) struct Ancestry {
     sidebars: u32,
     paragraphs: u32,
     sidebar_token: u32,
@@ -2117,7 +2128,7 @@ const IS_SIDEBAR: u8 = 1;
 const IS_PARAGRAPH: u8 = 2;
 
 impl Ancestry {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             sidebars: 0,
             paragraphs: 0,
@@ -2131,7 +2142,7 @@ impl Ancestry {
     /// [`Frame::scratch`]; the close event gets it for free rather than paying
     /// for the same two table reads again.
     #[inline]
-    fn on_node_open(&mut self, doc: &Doc, node: &Node) -> u8 {
+    pub(crate) fn on_node_open(&mut self, doc: &Doc, node: &Node) -> u8 {
         let marker_idx = doc.tokens[node.token as usize].marker_idx;
         let sidebar = generated::opens_scope(marker_idx) == Some(ScopeKind::Sidebar);
         // Cells count: a verse inside a table cell is inside a paragraph for
@@ -2153,7 +2164,7 @@ impl Ancestry {
     }
 
     #[inline]
-    fn on_node_close(&mut self, scratch: u8) {
+    pub(crate) fn on_node_close(&mut self, scratch: u8) {
         self.sidebars -= u32::from(scratch & IS_SIDEBAR != 0);
         self.paragraphs -= u32::from(scratch & IS_PARAGRAPH != 0);
         if scratch & IS_SIDEBAR != 0 {
@@ -2162,7 +2173,14 @@ impl Ancestry {
     }
 
     #[inline]
-    fn on_leaf(&mut self, doc: &Doc, idx: u32, token: &Token, kind: TokenKind, out: &mut Emit) {
+    pub(crate) fn on_leaf(
+        &mut self,
+        doc: &Doc,
+        idx: u32,
+        token: &Token,
+        kind: TokenKind,
+        out: &mut Emit,
+    ) {
         if !matches!(kind, TokenKind::Marker { .. }) {
             return;
         }
@@ -2308,7 +2326,7 @@ enum Awaiting {
     Verse,
 }
 
-struct Ordering {
+pub(crate) struct Ordering {
     awaiting: Awaiting,
     /// (number, the designator token that carried it) — `second` on a finding.
     prev_chapter: Option<(u32, u32)>,
@@ -2324,7 +2342,7 @@ struct Ordering {
 }
 
 impl Ordering {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             awaiting: Awaiting::None,
             prev_chapter: None,
@@ -2337,7 +2355,14 @@ impl Ordering {
     }
 
     #[inline]
-    fn on_leaf(&mut self, doc: &Doc, idx: u32, token: &Token, kind: TokenKind, out: &mut Emit) {
+    pub(crate) fn on_leaf(
+        &mut self,
+        doc: &Doc,
+        idx: u32,
+        token: &Token,
+        kind: TokenKind,
+        out: &mut Emit,
+    ) {
         let (source, tokens) = (doc.source, doc.tokens);
         match kind {
             // An attribute list does not end the payload expectation, and it
@@ -2482,7 +2507,7 @@ impl Ordering {
 
     /// End of input: the whole-book facts, which are exactly the ones no token
     /// event could carry.
-    fn finish(&mut self, out: &mut Emit) {
+    pub(crate) fn finish(&mut self, out: &mut Emit) {
         // A `\c` as the very last token of the file.
         if let Awaiting::Chapter(marker) = self.awaiting {
             out.push(Observation::one(Code::ChapterWithoutDesignator, marker));

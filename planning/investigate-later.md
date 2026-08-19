@@ -183,3 +183,74 @@ recovers with interest (deeper displacement searches, each of which now skips
 two loads). `Frame` is still 12 bytes, so nothing regressed in layout. Judged
 a wash and taken for the streaming contract. `#[inline(always)]` on `feed` was
 tried and is WORSE (40.0 ms); plain `#[inline]` is right.
+
+**(3) IS BUILT AND MEASURED, 2026-08-19 — and the answer is NO for lint.**
+`src/experiments/fused.rs` is the whole pipeline in ONE traversal: a copy of
+the scanner's ARMS (every pure piece — boundary finders, `classify_marker`,
+`resolve_marker_idx`, `escape_len`, `attr_list_end`, `folds_delimiter`,
+`HotIdx`, `ScanState` — reused from `scanner` via `pub(crate)`, so the copy can
+only diverge in EMISSION) whose `push_token` feeds a `Sink` holding a COPIED
+`cst::Builder` with the lint machine calls inlined at its push/pop/leaf sites,
+plus the four REAL machines, `Emit` and `header_scan`, reused verbatim. The
+production diff is visibility-only. `tests/fused_identity.rs` is the oracle:
+`analyze_fused(src) == (lex, build, lint)` — tokens, `Cst`, and every field of
+`LintReport` — over all **226 corpus books** and a 50-snippet zoo. Green.
+
+Four things learned building it:
+
+- **The delay is TWO tokens, not one.** `whitespace_arm`'s late `len` extension
+  is only half of it: `push_marker`/`marker_arm` stamp `marker_idx` AFTER
+  `push_token` returns, and `Flat`'s attr-terminator-mismatch rule reads
+  `tokens[idx + 1]`'s row. One token of delay hands that rule an unstamped
+  successor and it reports a mismatch on every well-formed `\w …|…\w*` in
+  en_ult NAM. Feed N once N+2 exists and both N and its lookahead are settled.
+- **`header_scan` needs no divergence at all** — a WARM-UP BUFFER beats judging
+  with a half-known version. The sink delivers no events until it has settled
+  the first `Chapter` marker, then runs the REAL `header_scan` over exactly
+  that prefix (identical to the full slice, since it breaks there anyway) and
+  flushes. An `AttrList` ahead of the `\usfm` line is judged exactly as staged
+  judges it. Cost: a buffered book header; a document with no `\c` buffers whole.
+- **`next_number` is the one thing that genuinely cannot run in a single pass.**
+  Lint's only unbounded lookahead walks FORWARD to the next `\c`/`\v` to refuse
+  a renumber that would just move the problem along (bdf_reg ROM 3). Fused is a
+  strict SUPERSET there (a short slice returns `None`, which always permits), so
+  it is corrected at `finish` over the FINDINGS — never the tokens — withdrawing
+  the fixes staged refuses. Removing the correction fails the oracle on both the
+  corpus and the zoo, so it is load-bearing, not defensive.
+- The debug leaf counter transfers unchanged: the sink asserts every token index
+  is delivered exactly once, in order.
+
+**Perf (min-of-8, all six modes interleaved in one window, one binary):**
+
+| ns/token | lex | lex+cst | lex+cst+lint |
+|---|---|---|---|
+| en_ult staged | 15.65 | 21.94 | **30.90** |
+| en_ult fused | 16.10 (noop sink) | 21.44 | **36.64** |
+| en_ulb staged | 10.16 | 15.57 | **24.59** |
+| en_ulb fused | 12.67 (noop sink) | 17.24 | **31.91** |
+
+(en_ult 102.9 / 144.2 / 203.1 ms vs 105.8 / 140.9 / 240.8; en_ulb 2.592 /
+3.970 / 6.272 ms vs 3.232 / 4.397 / 8.138.)
+
+**The verdict splits cleanly at the CST/lint line.** Fusing the BUILDER into
+the scan is free-to-slightly-positive — en_ult 144.2 → 140.9 ms (**−2.3%**),
+en_ulb 3.97 → 4.40 (+11%, and most of that is the hook's per-document setup
+showing up over 66 small books). Fusing LINT is a straight loss: the lint step
+alone goes 58.9 → 99.9 ms on en_ult (**+70%**) and 2.30 → 3.74 on en_ulb
+(**+63%**), for **+18.6% / +29.8%** end to end. The predicted 8-10 ns/token of
+deleted iteration overhead is real but is dwarfed by what the machines lose:
+`lint::walk` keeps its frame in LOCALS, its four machines as LOCAL structs
+whose hot fields live in registers, and builds `Doc` ONCE outside the loop —
+fused, every event re-derives `Doc` from `self` and reaches each machine through
+`&mut self` on a ~1 KB struct that also carries the scanner's mode flags, the
+memmem finder and the Builder's three vecs. That is exactly the effect
+scanner.rs already documents for its own `ScanState` (6% just from `&mut self`
+vs threaded parameters), paid four times per leaf, and the scanner's flags spill
+across the call to boot. **Hanging the sink off `push_token` costs the LEX
+almost nothing** (en_ult +0.45 ns/token, 102.9 → 105.8 ms;
+en_ulb's +2.5 ns/token is a 66-small-book per-document setup artifact), so the
+hook is not the problem — the machines' working set is.
+
+**Recommendation: PARK the lint fusion, and note that streaming lex→cst is
+viable on its own** if a future editor session wants a tree without a token
+slice. The staged path stays the only public API either way.

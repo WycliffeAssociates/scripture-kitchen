@@ -23,26 +23,26 @@ use crate::token::{Token, TokenKind};
 
 // Named once so every match arm/peek reads as "is this a marker-start"
 // instead of a bare `b'\\'` scattered across every function.
-const BACKSLASH: u8 = b'\\';
-const PIPE: u8 = b'|';
-const SLASH: u8 = b'/';
-const TILDE: u8 = b'~';
-const SPACE: u8 = b' ';
-const TAB: u8 = b'\t';
-const CR: u8 = b'\r';
-const LF: u8 = b'\n';
-const STAR: u8 = b'*';
-const PLUS: u8 = b'+';
-const HYPHEN: u8 = b'-';
-const MILESTONE_START: u8 = b's';
-const MILESTONE_END: u8 = b'e';
+pub(crate) const BACKSLASH: u8 = b'\\';
+pub(crate) const PIPE: u8 = b'|';
+pub(crate) const SLASH: u8 = b'/';
+pub(crate) const TILDE: u8 = b'~';
+pub(crate) const SPACE: u8 = b' ';
+pub(crate) const TAB: u8 = b'\t';
+pub(crate) const CR: u8 = b'\r';
+pub(crate) const LF: u8 = b'\n';
+pub(crate) const STAR: u8 = b'*';
+pub(crate) const PLUS: u8 = b'+';
+pub(crate) const HYPHEN: u8 = b'-';
+pub(crate) const MILESTONE_START: u8 = b's';
+pub(crate) const MILESTONE_END: u8 = b'e';
 
 /// Scan-pass state. Mode only — never payload knowledge.
-struct ScanState {
+pub(crate) struct ScanState {
     // True right after emitting a marker whose row takes a structural
     // delimiter, until the one whitespace run that delimits it has been
     // consumed (read off `ws_after_name`).
-    awaiting_delimiter_ws: bool,
+    pub(crate) awaiting_delimiter_ws: bool,
     // True right after emitting a marker whose row consumes a Designator
     // payload (`\c`/`\v`), until the next region: text becomes
     // ONE Designator token; anything else (newline, marker) drops the
@@ -54,13 +54,13 @@ struct ScanState {
     // text arm maps it to a token kind and clears it. The expectation dies at
     // the next region if nothing is there to take, so a payload-less `\v` or
     // `\id` emits no empty token.
-    pending_payload: Payload,
+    pub(crate) pending_payload: Payload,
     // True from the moment an opener/milestone token is emitted until ANY
     // other token is. Its one job is deciding whether a pipe is in FRONT
     // position (U25001: attributes precede content), and because the text
     // arm clears it on entry, "front position" reduces to "the dispatch loop
     // found this pipe" — no byte-scanning predicate anywhere.
-    after_marker: bool,
+    pub(crate) after_marker: bool,
     // How many attrs-capable character frames are open ON THIS LINE. Nonzero
     // is the ONLY condition under which the text arm looks for a pipe, which
     // is what keeps the deprecated back-position form from taxing the stop
@@ -75,7 +75,7 @@ struct ScanState {
     // leaves the needle armed for the rest of the document after a single
     // unclosed `\w`, which is the worse failure since prose is full of
     // character markers.
-    attr_frames: u8,
+    pub(crate) attr_frames: u8,
 }
 
 /// One scan in progress: the source, what has been emitted so far, the mode
@@ -230,37 +230,37 @@ impl<'a> Scanner<'a> {
 /// `\b` does NOT fold; its space is content), and its highest legal level
 /// digit (0 = unnumbered, which is most of them).
 #[derive(Clone, Copy)]
-struct Hot {
-    idx: generated::MarkerIdx,
-    folds: bool,
-    level_max: u8,
+pub(crate) struct Hot {
+    pub(crate) idx: generated::MarkerIdx,
+    pub(crate) folds: bool,
+    pub(crate) level_max: u8,
     /// Does opening this marker arm the text arm's pipe needle? True for the
     /// character-class hot rows (`ft`, `fr`, `xt`), false for the rest — the
     /// same `MarkerKind` test the general path runs, precomputed so no fast
     /// arm ever reads the table.
-    attrs_frame: bool,
+    pub(crate) attrs_frame: bool,
     /// The payload this row owes after its delimiter — `NoteCaller` for `\f`,
     /// `Designator` for `\v`, `None` for the rest. Precomputed for the same
     /// reason as the others: an arm must owe EXACTLY what the general path
     /// owes, and `fast_path_identity` is what proves it.
-    payload: Payload,
+    pub(crate) payload: Payload,
 }
 
 #[derive(Clone, Copy)]
-struct HotIdx {
-    v: Hot,
-    q: Hot,
-    p: Hot,
-    s: Hot,
-    b: Hot,
-    f: Hot,
-    ft: Hot,
-    fr: Hot,
-    xt: Hot,
+pub(crate) struct HotIdx {
+    pub(crate) v: Hot,
+    pub(crate) q: Hot,
+    pub(crate) p: Hot,
+    pub(crate) s: Hot,
+    pub(crate) b: Hot,
+    pub(crate) f: Hot,
+    pub(crate) ft: Hot,
+    pub(crate) fr: Hot,
+    pub(crate) xt: Hot,
 }
 
 impl HotIdx {
-    fn resolve() -> Self {
+    pub(crate) fn resolve() -> Self {
         let hot = |name: &[u8]| {
             let idx = generated::marker_idx(name, SpellingShape::PlainOnly);
             Hot {
@@ -467,14 +467,14 @@ impl Scanner<'_> {
 ///
 /// One predicate, shared with `Hot::attrs_frame`, so the fast and general
 /// paths cannot disagree about when the needle is live.
-fn opens_attrs_frame(idx: generated::MarkerIdx) -> bool {
+pub(crate) fn opens_attrs_frame(idx: generated::MarkerIdx) -> bool {
     matches!(
         generated::kind(idx),
         MarkerKind::Character | MarkerKind::Figure
     )
 }
 
-fn folds_delimiter(kind: TokenKind, idx: generated::MarkerIdx) -> bool {
+pub(crate) fn folds_delimiter(kind: TokenKind, idx: generated::MarkerIdx) -> bool {
     if !matches!(kind, TokenKind::Marker { .. } | TokenKind::Milestone { .. }) {
         return false;
     }
@@ -524,7 +524,7 @@ impl Scanner<'_> {
 // ---- whitespace arm ---------------------------------------------------------
 
 /// Boundary: the end of a space/tab run.
-fn ws_run_end(bytes: &[u8], from: usize) -> usize {
+pub(crate) fn ws_run_end(bytes: &[u8], from: usize) -> usize {
     let mut index = from;
     while index < bytes.len() && matches!(bytes[index], SPACE | TAB) {
         index += 1;
@@ -550,7 +550,7 @@ impl Scanner<'_> {
 // ---- newline arm ------------------------------------------------------------
 
 /// Boundary: one newline, `\r\n` taken as a single token.
-fn newline_end(bytes: &[u8], from: usize) -> usize {
+pub(crate) fn newline_end(bytes: &[u8], from: usize) -> usize {
     // One byte consumed for `\n` (or a bare `\r`); when that byte was CR and
     // an LF follows, consume it too so `\r\n` is ONE two-byte token rather
     // than being torn into two newlines.
@@ -582,7 +582,7 @@ impl Scanner<'_> {
 /// (optional `+`, alnum name, optional `-s`/`-e` milestone suffix, optional
 /// closing `*`) purely to find the END — the shape decision is re-derived
 /// from the slice by `classify_marker`, cursor-free.
-fn marker_end(bytes: &[u8], start: usize) -> usize {
+pub(crate) fn marker_end(bytes: &[u8], start: usize) -> usize {
     let mut index = start + 1; // past the `\`
 
     // Nested spelling: the `+` of `\+w` sits between `\` and the name.
@@ -625,7 +625,7 @@ fn marker_end(bytes: &[u8], start: usize) -> usize {
 // unknown name — `\zaln-s` has no row yet must still be a Milestone token
 // to pair with its `\*`. The table dictates the marker's IDENTITY (spec
 // kind, contexts) once the shape has picked which row to ask for.
-fn classify_marker(slice: &[u8]) -> TokenKind {
+pub(crate) fn classify_marker(slice: &[u8]) -> TokenKind {
     debug_assert_eq!(slice.first(), Some(&BACKSLASH));
     let nested = slice.get(1) == Some(&PLUS);
     let name_from = if nested { 2 } else { 1 };
@@ -662,7 +662,7 @@ fn classify_marker(slice: &[u8]) -> TokenKind {
 /// leading `\`/`+` and trailing `*` stripped, `-s`/`-e` kept (the matcher
 /// strips those itself). The shape argument is the classification we already
 /// made; `qt` is the one name where plain and milestone rows differ.
-fn resolve_marker_idx(slice: &[u8], kind: TokenKind) -> generated::MarkerIdx {
+pub(crate) fn resolve_marker_idx(slice: &[u8], kind: TokenKind) -> generated::MarkerIdx {
     let name_from = if slice.get(1) == Some(&PLUS) { 2 } else { 1 };
     let name_to = if slice.last() == Some(&STAR) {
         slice.len() - 1
@@ -729,7 +729,7 @@ impl Scanner<'_> {
 
 /// What one pipe turned out to be. The three rungs of the ladder, and the
 /// ONLY three things a raw pipe can mean.
-enum AttrScan {
+pub(crate) enum AttrScan {
     /// U25001 node-initial: the list closed itself with a second pipe.
     /// Payload is one PAST that pipe.
     NodeInitial(usize),
@@ -765,7 +765,12 @@ enum AttrScan {
 /// (the closing pipe, which only terminates in front position) rides a
 /// second call BOUNDED to the first hit, since a pipe past the terminator
 /// could never win the minimum anyway.
-fn attr_list_end(bytes: &[u8], pipe_at: usize, front: bool, first_stop: Option<usize>) -> AttrScan {
+pub(crate) fn attr_list_end(
+    bytes: &[u8],
+    pipe_at: usize,
+    front: bool,
+    first_stop: Option<usize>,
+) -> AttrScan {
     let mut index = pipe_at + 1;
     // The text arm reaches this having ALREADY located the next `\`/CR/LF for
     // its own run, and in back position that byte is necessarily this scan's
@@ -877,7 +882,7 @@ impl Scanner<'_> {
 /// backslash starts a real marker. The exact USV pattern BEATS the marker
 /// claim, and hex case is lint's business, not a rejection (both ruled at
 /// the schema const).
-fn escape_len(bytes: &[u8], pos: usize) -> Option<usize> {
+pub(crate) fn escape_len(bytes: &[u8], pos: usize) -> Option<usize> {
     match *bytes.get(pos + 1)? {
         SLASH | TILDE | BACKSLASH | PIPE => Some(2),
         letter => {
@@ -907,7 +912,7 @@ fn escape_len(bytes: &[u8], pos: usize) -> Option<usize> {
 ///   a region start and the dispatch arm takes it before this is reached.)
 /// - Stopping at the first space is what makes `\id GEN Some description` give
 ///   the CODE as the payload and leave the description as ordinary Text.
-fn payload_end(bytes: &[u8], from: usize) -> usize {
+pub(crate) fn payload_end(bytes: &[u8], from: usize) -> usize {
     let mut index = from;
     while index < bytes.len() && !matches!(bytes[index], SPACE | TAB | CR | LF | BACKSLASH | PIPE) {
         index += 1;

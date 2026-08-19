@@ -12,7 +12,12 @@
 //!   uninterrupted sweeps build position arrays, then a stop-free stage 2
 //!   walks them. Prices the per-short-run scan-call overhead.
 
+//! - [`fused`] — the SINGLE-PASS pipeline: the scanner's `push_token` feeds a
+//!   sink that builds the CST and runs lint during the scan. Prices fusing
+//!   the whole pipeline into one traversal.
+
 pub mod chapter_par;
+pub mod fused;
 pub mod scalar;
 pub mod staged;
 pub mod sweeps;

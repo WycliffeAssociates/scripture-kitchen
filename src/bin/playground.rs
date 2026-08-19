@@ -12,6 +12,8 @@
 //   cargo run --release --bin playground -- --lint             // lex + cst::build + lint (the whole pipeline)
 //   cargo run --release --bin playground -- --lint-stats       // untimed: per-code finding counts (and fix counts)
 //   cargo run --release --bin playground -- --fix-preview unclosed-note  // …plus before/after windows for one code
+//   cargo run --release --bin playground -- --fused            // SINGLE PASS: lex+cst+lint off push_token
+//   cargo run --release --bin playground -- --fused-noop       // the fused traversal with the sink OFF (prices the hook)
 //   cargo run --release --bin playground -- --scalar            // no-memchr twin (prices SIMD)
 //   cargo run --release --bin playground -- --staged            // two-stage structural index (simdjson shape)
 //   cargo run --release --bin playground -- --chunked           // chapter-split, lexed serially (prices the split)
@@ -53,6 +55,12 @@ enum Mode {
     Lint,
     /// Pre-lexed AND pre-built; times the lint pass by itself.
     LintOnly,
+    /// The single-pass experiment: lex + cst + lint in ONE traversal.
+    Fused,
+    /// The same traversal with the sink switched off — prices the hook alone.
+    FusedNoop,
+    /// The middle rung: lex + cst fused, no lint.
+    FusedCst,
 }
 
 fn main() {
@@ -74,6 +82,9 @@ fn main() {
             "--cst-stats" => cst_stats = true,
             "--lint" => mode = Mode::Lint,
             "--lint-only" => mode = Mode::LintOnly,
+            "--fused" => mode = Mode::Fused,
+            "--fused-noop" => mode = Mode::FusedNoop,
+            "--fused-cst" => mode = Mode::FusedCst,
             "--lint-stats" => lint_stats = true,
             // Implies --lint-stats: it is the same sweep, printing before/after
             // windows for the first few fixes of ONE code.
@@ -117,6 +128,9 @@ fn main() {
         Mode::CstOnly => "cst-only",
         Mode::Lint => "lint",
         Mode::LintOnly => "lint-only",
+        Mode::Fused => "fused",
+        Mode::FusedNoop => "fused-noop",
+        Mode::FusedCst => "fused-cst",
         Mode::Par => "par",
         Mode::Scalar => "scalar",
         Mode::Staged => "staged",
@@ -152,7 +166,10 @@ fn main() {
         };
     // The lint modes report ns/token, so they need the token count regardless
     // of whether the lex itself is on the clock.
-    let tokens_total: u64 = if matches!(mode, Mode::Lint | Mode::LintOnly) {
+    let tokens_total: u64 = if matches!(
+        mode,
+        Mode::Lint | Mode::LintOnly | Mode::Fused | Mode::FusedNoop | Mode::FusedCst
+    ) {
         if prelexed.is_empty() {
             sources
                 .iter()
@@ -213,6 +230,9 @@ fn verify_variant(sources: &[String], mode: Mode) {
         Mode::ParseHeader | Mode::ParseHeaderOnly => return, // the real lexer plus a pure pass
         Mode::Cst | Mode::CstOnly => return,                 // the real lexer plus a pure pass
         Mode::Lint | Mode::LintOnly => return,               // the real lexer plus two pure passes
+        // Identity is tests/fused_identity.rs's job — whole reports, not just
+        // token streams, so it cannot be a `fn(&str) -> Vec<Token>` here.
+        Mode::Fused | Mode::FusedNoop | Mode::FusedCst => return,
         Mode::Scalar => usfm_onion_2::experiments::scalar::lex,
         Mode::Staged => usfm_onion_2::experiments::staged::lex,
         Mode::Chunked => usfm_onion_2::experiments::chapter_par::lex_chunked,
@@ -260,6 +280,21 @@ fn run_once(
                 let tokens = usfm_onion_2::lex(source);
                 let cst = usfm_onion_2::cst::build(&tokens);
                 std::hint::black_box(usfm_onion_2::lint::lint(source.as_bytes(), &tokens, &cst));
+            }
+        }
+        Mode::Fused => {
+            for source in sources {
+                std::hint::black_box(usfm_onion_2::experiments::fused::analyze_fused(source));
+            }
+        }
+        Mode::FusedNoop => {
+            for source in sources {
+                std::hint::black_box(usfm_onion_2::experiments::fused::lex_noop_sink(source));
+            }
+        }
+        Mode::FusedCst => {
+            for source in sources {
+                std::hint::black_box(usfm_onion_2::experiments::fused::analyze_fused_cst(source));
             }
         }
         Mode::LintOnly => {

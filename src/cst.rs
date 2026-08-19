@@ -15,8 +15,8 @@ use crate::tables::generated;
 use crate::tables::schema::{Category, ClosingBehavior, MarkerKind, ScopeKind, SpecContext};
 use crate::{Token, TokenKind};
 
-const NODE_ID_BIT: u32 = 1 << 31;
-const ROOT_TOKEN: u32 = u32::MAX;
+pub(crate) const NODE_ID_BIT: u32 = 1 << 31;
+pub(crate) const ROOT_TOKEN: u32 = u32::MAX;
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -188,7 +188,7 @@ impl Iterator for InOrder<'_> {
 
 /// What a frame IS to the walker's rules, beyond its row.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum FrameRole {
+pub(crate) enum FrameRole {
     /// Paragraphs, characters, notes, rows, cells — the generic case.
     Plain,
     /// A sidebar is a POP BARRIER: the displacement loop and the closer
@@ -212,30 +212,30 @@ enum FrameRole {
     Container(ScopeKind),
 }
 
-struct Frame {
-    node: u32,
+pub(crate) struct Frame {
+    pub(crate) node: u32,
     /// The open frame owns the scratch tail beginning at this index.
-    mark: u32,
+    pub(crate) mark: u32,
     /// The row of the frame's OPENING token, COPIED at push time. Every
     /// closer rule keys on it, and holding it here rather than re-reading
     /// `tokens[node.token]` is what makes the Builder streaming: see the
     /// no-slice contract on [`Builder`]. The root frame's value is
     /// [`generated::UNRESOLVED`] and is never read (all searches start at
     /// depth 1).
-    marker_idx: generated::MarkerIdx,
+    pub(crate) marker_idx: generated::MarkerIdx,
     /// The context resolved once at push time; transparent frames inherit it.
-    ctx: u8,
-    role: FrameRole,
+    pub(crate) ctx: u8,
+    pub(crate) role: FrameRole,
 }
 
 impl Frame {
-    fn barrier(&self) -> bool {
+    pub(crate) fn barrier(&self) -> bool {
         self.role == FrameRole::Sidebar
     }
 
     /// Frames that structural SEARCHES never cross (barriers and
     /// containers), as opposed to the displacement loop's barrier-only stop.
-    fn wall(&self) -> bool {
+    pub(crate) fn wall(&self) -> bool {
         matches!(self.role, FrameRole::Sidebar | FrameRole::Container(_))
     }
 }
@@ -322,7 +322,7 @@ fn exact_scope_openers(tokens: &[Token]) -> usize {
 }
 
 impl CloseReason {
-    fn for_displacement(marker_idx: generated::MarkerIdx) -> Self {
+    pub(crate) fn for_displacement(marker_idx: generated::MarkerIdx) -> Self {
         match generated::closing(marker_idx) {
             ClosingBehavior::None | ClosingBehavior::OptionalExplicitUntilNoteEnd => Self::Implicit,
             ClosingBehavior::RequiredExplicit | ClosingBehavior::SelfClosingMilestone => {
@@ -759,14 +759,14 @@ impl Builder {
     }
 }
 
-fn displaces(kind: MarkerKind, opens_scope: Option<ScopeKind>, mask: u32) -> bool {
+pub(crate) fn displaces(kind: MarkerKind, opens_scope: Option<ScopeKind>, mask: u32) -> bool {
     opens_scope.is_some() || (matches!(kind, MarkerKind::Chapter | MarkerKind::Verse) && mask != 0)
 }
 
 /// The U25003 containers, keyed on CATEGORY per the 2026-08-17 ruling — the
 /// rows' `opens_scope` says Milestone, and the `-s`/`-e` spelling picks
 /// open vs close.
-fn container_kind(marker_idx: generated::MarkerIdx) -> Option<ScopeKind> {
+pub(crate) fn container_kind(marker_idx: generated::MarkerIdx) -> Option<ScopeKind> {
     match generated::category(marker_idx) {
         Category::MilestoneList => Some(ScopeKind::List),
         Category::MilestoneTable => Some(ScopeKind::Table),
@@ -774,7 +774,7 @@ fn container_kind(marker_idx: generated::MarkerIdx) -> Option<ScopeKind> {
     }
 }
 
-fn context_bit(ctx: u8) -> u32 {
+pub(crate) fn context_bit(ctx: u8) -> u32 {
     1 << ctx
 }
 
