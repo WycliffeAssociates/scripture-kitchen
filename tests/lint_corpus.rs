@@ -170,6 +170,52 @@ fn the_corpus_yields_exactly_the_known_findings() {
     // named. Phase 2 turns that state into an actual observation at token 0.
     assert_eq!(total(Code::MissingId), 1);
 
+    // ---- Token-walk rules (phase 3) --------------------------------------
+
+    // One book mixing bare and numbered spellings of one family, said once per
+    // family per book. All 52 are real and all are the poetry ladder:
+    //   * en_ulb x44 — books carrying `\q1`/`\q2` throughout and a handful of
+    //     bare `\q` lines (8417 bare against 14755 numbered corpus-wide).
+    //   * bdf_reg x6 — the mirror image: mostly bare `\q`, a few `\q1`/`\q2`.
+    //   * en_ult x2 — PSA has one bare `\q` among 14k numbered ones; FRT is
+    //     front matter with a stray second spelling.
+    //   * examples.bsb x0 — it uses `\q1`/`\q2` and bare `\q` in DIFFERENT
+    //     books, which is exactly what per-book aggregation is for.
+    assert_eq!(total(Code::NumberingMix), 52);
+    let by_corpus = |code: Code, corpus: &str| -> u64 {
+        books
+            .iter()
+            .filter(|(path, _, _)| path.to_string_lossy().contains(corpus))
+            .map(|(_, counts, _)| counts[code as usize])
+            .sum()
+    };
+    assert_eq!(by_corpus(Code::NumberingMix, "en_ulb"), 44);
+    assert_eq!(by_corpus(Code::NumberingMix, "bdf_reg"), 6);
+    assert_eq!(by_corpus(Code::NumberingMix, "en_ult"), 2);
+    assert_eq!(by_corpus(Code::NumberingMix, "examples.bsb"), 0);
+
+    // ONE marker in 113 MB is followed by something that is not structural
+    // whitespace: en_ulb REV writes `\m(for fine linen is the righteous
+    // acts…)` with no space after the marker name. A genuine typo, and the
+    // only one — which is the evidence that this rule is narrow enough.
+    assert_eq!(total(Code::DelimiterShape), 1);
+
+    // Paragraphs with nothing in them. Info-tier, and every one inspected is a
+    // real (if harmless) authoring artifact:
+    //   * en_ulb x726 — the `\s5` chunk idiom writes `\m` and then `\p` on the
+    //     next line, so the `\m` never gets any content.
+    //   * en_ult x59 — a `\p` immediately followed by `\s1`, and empty `\d`
+    //     descriptive titles above a psalm's first `\q1`.
+    //   * examples.bsb x2 — an empty `\d` (ZEC 12) and an empty `\q1` used as
+    //     a spacer between two `\q2` lines (PSA 106).
+    // `\b`, the paragraph that is empty BY DESIGN, is excluded by the rule and
+    // appears in all four corpora — so a zero here would be the bug.
+    assert_eq!(total(Code::EmptyParagraph), 787);
+    assert_eq!(by_corpus(Code::EmptyParagraph, "en_ulb"), 726);
+    assert_eq!(by_corpus(Code::EmptyParagraph, "en_ult"), 59);
+    assert_eq!(by_corpus(Code::EmptyParagraph, "examples.bsb"), 2);
+    assert_eq!(by_corpus(Code::EmptyParagraph, "bdf_reg"), 0);
+
     // Everything else is CLEAN across 226 books, and must stay that way: each
     // of these codes fires only on damage the corpus does not contain.
     //
@@ -178,6 +224,21 @@ fn the_corpus_yields_exactly_the_known_findings() {
     // identifiers, in uppercase; every `\c` owns a number; no book has verses
     // before its first chapter or no chapter at all; and no chapter number
     // repeats, reverses or skips anywhere in 226 books.
+    //
+    // Phase 3 adds four zeros that are the same kind of evidence, each one a
+    // rule that would otherwise have buried the report:
+    //   * marker-not-ws-preceded — NARROWED to paragraph rows. Unnarrowed it
+    //     reports every hugging character marker, i.e. most of en_ult's 6.5M
+    //     aligned tokens.
+    //   * attr-trailing-form-deprecated — en_ult declares `\usfm 3.0` and
+    //     contains 792,414 trailing `\w` lists, every one of them the correct
+    //     spelling for its declared version. The rule reads that declaration.
+    //   * attr-both-lists / attr-terminator-mismatch — no book writes two
+    //     lists on one marker, and every list's terminator belongs to its
+    //     owner. `\zaln-s |…\*` alone accounts for a million of the latter.
+    //   * attr-pipe-hint / caller-shape — no stray pipe survives inside an
+    //     attrs-capable marker, and every note caller in the corpus is `+`
+    //     (5661 of them) or a mark of at most three bytes.
     for code in [
         Code::UnclosedChar,
         Code::UnclosedAtEof,
@@ -196,6 +257,14 @@ fn the_corpus_yields_exactly_the_known_findings() {
         Code::BookCodeUnknown,
         Code::BookCodeNotUppercase,
         Code::ChapterWithoutDesignator,
+        Code::CaCpPlacement,
+        Code::VaVpPlacement,
+        Code::CallerShape,
+        Code::MarkerNotWsPreceded,
+        Code::AttrTrailingFormDeprecated,
+        Code::AttrBothLists,
+        Code::AttrTerminatorMismatch,
+        Code::AttrPipeHint,
     ] {
         assert_eq!(total(code), 0, "{} fired on clean data", code.row().name);
     }

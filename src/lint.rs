@@ -1,9 +1,10 @@
 //! Findings over an already-built document: `lex → cst::build → lint`.
 //!
-//! Phases 1-2 ship the STRUCTURAL and ORDERING subsystems plus the four
-//! Payload rules that need only a span and a table (adjacency, form, the
-//! remaining payload and attribute rules, and the fix model, are later phases
-//! — see planning/lint-sketch.md "Build phases").
+//! Phases 1-3 ship the STRUCTURAL, ORDERING, PAYLOAD, FORM and ADJACENCY
+//! families plus the SHAPE-ONLY half of Attributes. Still owed, each waiting on
+//! a piece that does not exist yet: the two attribute rules that need a k/v
+//! interpreter, the Version family, and the whole fix model (phase 4) — see
+//! planning/lint-sketch.md "Build phases".
 //!
 //! Three laws shape everything here:
 //!
@@ -20,42 +21,58 @@
 //!   meaning per code is the [`LintRow::aux`] column. That is what lets a
 //!   report cross wasm as one flat `[code, anchor, second, aux] × n` array.
 //!
-//! Shape of the pass: one sweep over `cst.nodes` (per-node close verdicts and
-//! the consumed-closer bitset), one sweep over `tokens` (row-keyed and
-//! span-keyed token findings), one in-order tree walk carrying two depth
-//! counters (sidebar and paragraph), and one more sweep over `tokens` for
-//! ORDERING, which is separate because it is the only rule family carrying
-//! cross-token sequence state. All linear, no recursion.
+//! Shape of the pass, and it is still FOUR sweeps after phase 3: a short
+//! bounded prologue over the header ([`header_scan`]), one sweep over
+//! `cst.nodes` (close verdicts, the consumed-closer bitset, empty paragraphs),
+//! one sweep over `tokens` — [`token_pass`], which is now THE token walk and
+//! carries three pieces of one-token lookbehind — one in-order tree walk
+//! carrying two depth counters (sidebar and paragraph), and one more sweep over
+//! `tokens` for ORDERING, separate because its state is a SEQUENCE and not the
+//! previous token. All linear, no recursion.
 //!
 //! PERF (measured 2026-08-19, `playground --lint-only`, min-of-8 on the same
-//! machine in the same window, so trust the deltas over the absolutes):
+//! machine in the same window, so trust the deltas over the absolutes; en_ulb
+//! is small enough that its numbers need `--iters 30` to settle):
 //!
-//! | corpus | phase 1 | phase 2 | delta |
-//! |--------|---------|---------|-------|
-//! | en_ult (6.57M tokens) | 7.4 ns/token | 9.9 | +2.5 |
-//! | en_ulb (255k tokens)  | 6.7 ns/token | 9.1 | +2.4 |
+//! | corpus | phase 1 | phase 2 | phase 3 |
+//! |--------|---------|---------|---------|
+//! | en_ult (6.57M tokens) | 7.4 ns/token | 9.4 | 12.4 |
+//! | en_ulb (255k tokens)  | 6.7 ns/token | 8.8 | 12.5 |
 //!
-//! The whole +2.4 is `ordering_pass` and nothing else: skipping just that call
-//! puts both corpora back on their phase-1 numbers to within noise (7.7 / 6.8),
-//! so the BookCode arm added to the token sweep is free. Two-plus ns for a
-//! fourth linear sweep is honest rather than surprising — a bare second pass
-//! over token rows floors at ~1 ns/token (measured, cst.rs) and the state
-//! machine costs the rest — and en_ulb, which fits in cache, pays the same, so
-//! it is work and not memory traffic.
+//! (The phase-2 column is re-measured here — it read 9.9 / 9.1 in its own
+//! window. Same code, different afternoon.)
 //!
-//! Split by pass, phase 2: the tree walk ~3.8, ordering ~2.4, the node sweep
-//! plus the two scratch vecs ~2.0, the token sweep ~1.4. The tree walk is
-//! still the biggest single lead (ancestry is the one fact no node carries, so
-//! it chases arena ids out of order); the cheap SECOND lead, if lint ever
-//! needs to get under ~8 again, is fusing the two token sweeps into one — they
-//! have identical shape and only the ruled "one family, one pass" tidiness
-//! keeps them apart.
+//! Phase 2's +2.4 was `ordering_pass` and nothing else. Phase 3's +3.0 / +3.7
+//! is the token walk growing, and the number that decided its shape: giving
+//! adjacency and the attribute rules a FIFTH pass of their own cost **+3.6
+//! ns/token on en_ult by itself**, and disabling each of its arms' bodies in
+//! turn moved that by only 0.4-0.9 — the cost was the sweep, not the work. A
+//! token sweep over this corpus is ~2.5 ns before any rule runs (the kind
+//! dispatch and its branch mispredictions), which is why the sketch's "one
+//! token walk" is the right architecture and not merely a tidy one. Fusing it
+//! into [`token_pass`] gave the whole family back for ~1 ns.
+//!
+//! What the remaining phase-3 growth buys, in rough order of cost: the two Form
+//! rules read the source byte on either side of every opening marker (the first
+//! rule in lint to touch `source` per token rather than per finding), the
+//! attribute machine carries four locals across the walk, and `numbering-mix`
+//! zeroes two 153-entry arrays per document.
+//!
+//! Split by pass, phase 3: the token walk ~4.5, the tree walk ~3.8, ordering
+//! ~2.4, the node sweep plus the two scratch vecs ~2.0. The tree walk is now
+//! the biggest single lead (ancestry is the one fact no node carries, so it
+//! chases arena ids out of order); the second is fusing ordering into the token
+//! walk, which the phase-3 measurement says is worth ~1.5 and which only the
+//! "sequence state is not lookbehind" reading keeps apart.
 
 use crate::cst::{CloseReason, Cst, Node};
 use crate::designator::{self, Designator};
 use crate::tables::books;
 use crate::tables::generated;
-use crate::tables::schema::{Category as MarkerCategory, ClosingBehavior, MarkerKind, ScopeKind};
+use crate::tables::schema::{
+    Category as MarkerCategory, ClosingBehavior, MarkerKind, Numbering, ScopeKind, SpellingShape,
+    StructuralWhitespaceRequirement as Ws,
+};
 use crate::{Token, TokenKind};
 
 /// `Observation::second` when there is no second party.
@@ -152,6 +169,15 @@ pub struct LintReport {
     /// phase 1 never an [`Observation`] either: the `missing-id` code is
     /// phase 2's, and until then this field carries the fact by itself.
     pub book: Option<u32>,
+    /// The version the `\usfm` line declares, `None` when there is no such
+    /// line (the corpus majority) or its payload is not a version.
+    ///
+    /// Phase 3 gives the [`LintRow::escalation`] column the fact it has always
+    /// needed: a consumer maps a finding's severity through that column using
+    /// THIS value, and one rule (`attr-trailing-form-deprecated`) uses it as a
+    /// gate rather than a dial, because "deprecated" is a claim about a
+    /// declared version and is false without one.
+    pub declared_version: Option<UsfmVersion>,
     /// Sorted by `anchor`, then by code — one document order for consumers,
     /// independent of which internal pass produced a finding.
     pub observations: Vec<Observation>,
@@ -196,6 +222,21 @@ pub enum Code {
     BookCodeUnknown,
     BookCodeNotUppercase,
     ChapterWithoutDesignator,
+    // --- phase 3: adjacency (filed Structure — see the rows) --------------
+    CaCpPlacement,
+    VaVpPlacement,
+    // --- phase 3: Payload -------------------------------------------------
+    CallerShape,
+    NumberingMix,
+    // --- phase 3: Form ----------------------------------------------------
+    MarkerNotWsPreceded,
+    DelimiterShape,
+    EmptyParagraph,
+    // --- phase 3: Attributes (shape only — no k/v interpreter) ------------
+    AttrTrailingFormDeprecated,
+    AttrBothLists,
+    AttrTerminatorMismatch,
+    AttrPipeHint,
 }
 
 impl Code {
@@ -234,10 +275,12 @@ pub struct LintRow {
 
 /// The authored rules table — one row per [`Code`], in the enum's order.
 ///
-/// Phases 1 and 2: the Structure family, the Ordering family, and the four
-/// Payload rules that need nothing but a span and a table. Rows for the
-/// adjacency, form, attribute and version families land with their passes.
-pub const LINT_ROWS: [LintRow; 26] = [
+/// Phases 1-3: Structure, Ordering, Payload, Form, and the SHAPE-ONLY half of
+/// Attributes. Still absent, each waiting on a piece that does not exist yet:
+/// `attr-unknown-name` and `attr-required-if` want the k/v attribute
+/// interpreter, and the whole Version family wants a consumer for the
+/// `deprecated` column.
+pub const LINT_ROWS: [LintRow; 37] = [
     // A note frame the walker had to end without its `\f*`/`\x*`: something
     // that cannot live inside a note (a `\c`, a bare `\v`, an unknown marker)
     // arrived while it was open. The three live corpus instances (en_ulb ISA
@@ -586,6 +629,227 @@ pub const LINT_ROWS: [LintRow; 26] = [
         template: "\\{anchor} has no chapter number",
         fix_label: None,
     },
+    // ---- Adjacency --------------------------------------------------------
+    // `\ca`/`\cp` may only follow `\c`'s designator, or the other of the pair.
+    // Filed under STRUCTURE rather than Payload: the fact reported is a
+    // marker sitting where it may not sit, which is exactly what
+    // `content-outside-sidebar-rule` reports and nothing like a malformed
+    // span. The sketch lists these separately only because they need a token
+    // of LOOKBEHIND — the CST cannot see them, since `ca`/`cp` open no scope
+    // — and "which pass computes it" is not a category.
+    //
+    // Whitespace between the parties is fine, newlines included: `\c 1\n\ca
+    // 2\ca*\n\cp א` is the shape the spec's own examples use, and the scanner
+    // emits a Newline token between them, so the rule steps over Newlines and
+    // whitespace-only Text and nothing else.
+    LintRow {
+        code: Code::CaCpPlacement,
+        name: "ca-cp-placement",
+        category: Category::Structure,
+        severity: Severity::Warning,
+        escalation: None,
+        aux: AuxKind::None,
+        template: "\\{anchor} must follow the \\c it re-numbers",
+        fix_label: None,
+    },
+    // The same rule for `\va`/`\vp` after `\v`.
+    LintRow {
+        code: Code::VaVpPlacement,
+        name: "va-vp-placement",
+        category: Category::Structure,
+        severity: Severity::Warning,
+        escalation: None,
+        aux: AuxKind::None,
+        template: "\\{anchor} must follow the \\v it re-numbers",
+        fix_label: None,
+    },
+    // ---- Payload ----------------------------------------------------------
+    // A note caller that is none of the three conventional values (`+`, `-`,
+    // `?`) AND longer than three bytes. The spec pattern is `/[^\\\s]+/`, so a
+    // custom caller is perfectly legal and this can only ever be a HINT — the
+    // rule exists for the ACCIDENT (`\f + \ft` written `\f +\ft`, a quotation
+    // mark glued to the marker), not for the deliberate custom caller.
+    //
+    // Three bytes is the width that keeps it honest: every real custom caller
+    // seen in the wild is a mark or a short symbol, and the corpus's one
+    // non-`+` caller (`",` — examples.bsb, a stray quote) is two bytes and is
+    // deliberately NOT reported. Widening this rule to "not one of the three"
+    // would report that and every legitimate custom caller with it.
+    LintRow {
+        code: Code::CallerShape,
+        name: "caller-shape",
+        category: Category::Payload,
+        severity: Severity::Hint,
+        escalation: None,
+        aux: AuxKind::None,
+        template: "{anchor} is an unusual note caller",
+        fix_label: None,
+    },
+    // One book spelling a numbered family both ways — `\q` and `\q2`. The
+    // spec's own rule is that the bare form is a valid spelling ALWAYS and
+    // should be used when the text has a single level, so this is a
+    // consistency observation and never an error. ONE finding per family per
+    // book, anchored at the token that revealed the mix; `second` is the
+    // family's first occurrence, `aux` the row's numbering cap (`liv`, the one
+    // uncapped family, reports 0). The LEVELS are not in `aux` because they
+    // are not integers a message needs: both spellings are spans, reachable
+    // through `anchor` and `second`, which is the message-params rule.
+    //
+    // NOTE for the reader looking for `numbering-out-of-range`: it is not
+    // here, because it cannot fire. `generated::marker_idx` validates the
+    // level against the row's cap DURING resolution (`digits_ok`), so `\q7`
+    // never reaches the `q` row at all — it is row 0, and `unknown-marker`
+    // has already said everything there is to say about it. A rule for it
+    // would be dead code; see the report in git history.
+    LintRow {
+        code: Code::NumberingMix,
+        name: "numbering-mix",
+        category: Category::Payload,
+        severity: Severity::Info,
+        escalation: None,
+        aux: AuxKind::NumberingCap,
+        template: "\\{anchor} mixes numbered and bare spellings with \\{second} (levels 1-{aux})",
+        fix_label: None,
+    },
+    // ---- Form -------------------------------------------------------------
+    // The byte before a marker's backslash is neither whitespace nor the start
+    // of the file — `content\s1`. NARROWED to PARAGRAPH rows, and the
+    // narrowing is not a nicety: character markers legitimately hug, and
+    // aligned USFM is built out of hugging (`\zaln-s |…\*\w In|…\w*\zaln-e\*`
+    // — 6.5M tokens of it in en_ult), so an un-narrowed rule reports ~1.5M
+    // findings on a corpus with nothing wrong with it. What the spec actually
+    // states is the PARA railroad's requirement of a newline (or at least
+    // whitespace) before a paragraph marker, and that is what this reports.
+    LintRow {
+        code: Code::MarkerNotWsPreceded,
+        name: "marker-not-ws-preceded",
+        category: Category::Form,
+        severity: Severity::Warning,
+        escalation: None,
+        aux: AuxKind::None,
+        template: "\\{anchor} needs whitespace before it",
+        fix_label: None,
+    },
+    // The delimiter after a marker NAME is written as something that is not
+    // structural whitespace — the NBSP-after-name case, and every other
+    // exotic separator with it (`\p\u{00A0}text`, `\v\u{2007}1`).
+    //
+    // What this HONESTLY covers, and why it is not more: after the lex, the
+    // delimiter is not a token — it is folded into the marker's own span, so
+    // "how was it written" survives only as the marker's LENGTH and the byte
+    // that follows it. Two derivations exist there, and this rule ships the
+    // one that is unambiguous: the row requires a delimiter, the span absorbed
+    // none (`ws_run_end` folds space/tab only), and the next byte is not
+    // whitespace, not a marker or pipe (`TAGEND`'s other alternatives), and
+    // not the end of the file. The other derivation — "the delimiter is
+    // several spaces where one would do" — is deliberately left out: extra
+    // horizontal whitespace is legal in every row's pattern (`HS` is `+`, not
+    // `?`), so it is a FORMATTER's business, and phase 4's formatter bundle is
+    // where it belongs.
+    LintRow {
+        code: Code::DelimiterShape,
+        name: "delimiter-shape",
+        category: Category::Form,
+        severity: Severity::Hint,
+        escalation: None,
+        aux: AuxKind::None,
+        template: "\\{anchor} is not followed by structural whitespace",
+        fix_label: None,
+    },
+    // A paragraph node with no content at all — nothing but Newlines under it,
+    // or nothing whatever. `\b` is EXCLUDED, because a blank line is a
+    // paragraph that is empty BY DESIGN; it is identified by the one column
+    // that says so, `ws_after_name: SingleNewline` (it is the table's only
+    // such row, and it is that value precisely because `\b` takes no content).
+    // `\pb` never reaches here at all — it is a Character row that opens no
+    // scope, so it is never a node.
+    LintRow {
+        code: Code::EmptyParagraph,
+        name: "empty-paragraph",
+        category: Category::Form,
+        severity: Severity::Info,
+        escalation: None,
+        aux: AuxKind::None,
+        template: "\\{anchor} has no content",
+        fix_label: None,
+    },
+    // ---- Attributes (shape only) ------------------------------------------
+    // The 3.1 TRAILING attribute form — `\w grace|lemma="x"\w*` — which 3.2
+    // deprecates and 4 removes.
+    //
+    // Two gates, both load-bearing:
+    //
+    // - CHARACTER rows only. `\zaln-s |x-strong="G1"\*` is a milestone's
+    //   NORMAL syntax and never deprecated; `\fig |src="a.png"…\fig*` is how
+    //   the spec's own figure examples are written. Flagging either lights up
+    //   every alignment corpus for nothing.
+    // - The document must DECLARE `\usfm 3.2` or later. A rule that says "this
+    //   form is deprecated" to a file that declares 3.0 is simply wrong: the
+    //   trailing form is the correct spelling of the version in force. en_ult
+    //   declares 3.0 and contains 792,414 trailing lists — every one of them
+    //   right, and every one of them a false positive without this gate. The
+    //   `escalation` column then does the rest: Warning at 3.2, Error at 4.
+    LintRow {
+        code: Code::AttrTrailingFormDeprecated,
+        name: "attr-trailing-form-deprecated",
+        category: Category::Attributes,
+        severity: Severity::Warning,
+        escalation: Some((UsfmVersion::V4_0, Severity::Error)),
+        aux: AuxKind::Version,
+        template: "the trailing attribute form is deprecated in USFM {aux}",
+        fix_label: None,
+    },
+    // Two attribute lists on one marker — the proposal's own "ridiculous but
+    // legal" `\w |Fred|Jésus|Jesus\w*`. Legal back-compat, so a warning and
+    // not an error; which one wins is the interpreter's merge rule ("later
+    // definition wins"), which is exactly why saying it twice is worth
+    // reporting. `second` is the first list.
+    LintRow {
+        code: Code::AttrBothLists,
+        name: "attr-both-lists",
+        category: Category::Attributes,
+        severity: Severity::Warning,
+        escalation: None,
+        aux: AuxKind::None,
+        template: "a second attribute list overrides the one at {second}",
+        fix_label: None,
+    },
+    // A trailing-form list ended by the WRONG terminator: `\w a|k="v"\add*`,
+    // or a milestone list closed by a named closer instead of `\*`. This is
+    // the finding scanner.rs promises when it says the terminator is checked
+    // "only for BEING a closer, never for matching the open frame" — the list
+    // is well-formed, its owner's closer is not the one that arrived.
+    //
+    // Node-initial lists are never reported: their terminator is their own
+    // closing pipe, which the scanner found or the bytes would not be a list.
+    // That is also why "the list was never closed" has no code — a list that
+    // runs to a newline is not lexed as a list at all, so its pipe survives as
+    // Text and `attr-pipe-hint` below is what speaks.
+    LintRow {
+        code: Code::AttrTerminatorMismatch,
+        name: "attr-terminator-mismatch",
+        category: Category::Attributes,
+        severity: Severity::Warning,
+        escalation: None,
+        aux: AuxKind::None,
+        template: "the attribute list on \\{second} is closed by the wrong marker",
+        fix_label: None,
+    },
+    // A raw `|` left in the content of a marker that DEFINES attributes: the
+    // author meant an attribute list and the list was refuted (it ran past the
+    // end of its line, or its closer never came), so the bytes stayed content.
+    // Hint, and gated on `defined_attributes` being non-empty, because a pipe
+    // in ordinary prose is ordinary prose.
+    LintRow {
+        code: Code::AttrPipeHint,
+        name: "attr-pipe-hint",
+        category: Category::Attributes,
+        severity: Severity::Hint,
+        escalation: None,
+        aux: AuxKind::None,
+        template: "did you mean an attribute list on \\{second}?",
+        fix_label: None,
+    },
 ];
 
 // ---------------------------------------------------------------------------
@@ -599,15 +863,15 @@ pub const LINT_ROWS: [LintRow; 26] = [
 /// same slice afterwards. The editor session's token→span→UTF-16 mapping is
 /// built on that.
 ///
-/// `source` is taken because the signature is the library's one entry point
-/// (NEXT-STEPS, ruled 2026-08-19) and later phases read bytes through it; the
-/// structural rules ask only the CST and the marker table.
+/// `source` is read through spans the scanner already carved — plus, since
+/// phase 3, the single byte on either side of an opening marker's span, which
+/// is where the Form family's whole evidence lives. The structural rules still
+/// ask only the CST and the marker table.
 pub fn lint(source: &[u8], tokens: &[Token], cst: &Cst) -> LintReport {
+    let (book, declared_version) = header_scan(source, tokens);
     let mut report = LintReport {
-        book: tokens
-            .iter()
-            .position(|token| token.kind() == TokenKind::BookCode)
-            .map(|idx| idx as u32),
+        book,
+        declared_version,
         observations: Vec::new(),
     };
 
@@ -616,7 +880,13 @@ pub fn lint(source: &[u8], tokens: &[Token], cst: &Cst) -> LintReport {
     // by construction the LAST child of an Explicit node.
     let mut consumed = vec![false; tokens.len()];
     node_pass(tokens, cst, &mut consumed, &mut report.observations);
-    token_pass(source, tokens, &consumed, &mut report.observations);
+    token_pass(
+        source,
+        tokens,
+        &consumed,
+        declared_version,
+        &mut report.observations,
+    );
     tree_pass(tokens, cst, &mut report.observations);
     ordering_pass(source, tokens, &mut report.observations);
 
@@ -646,6 +916,69 @@ pub fn lint(source: &[u8], tokens: &[Token], cst: &Cst) -> LintReport {
         .observations
         .sort_unstable_by_key(|obs| (obs.anchor, obs.code as u16));
     report
+}
+
+/// The two header facts every later pass wants: the `\id` line's BookCode
+/// token, and the version the `\usfm` line declares.
+///
+/// BOUNDED AT THE FIRST `\c`, and that bound is the point: both markers live in
+/// the book header, so sweeping 6.5M tokens for a `\usfm` line that three of
+/// the four corpora do not have would cost more than every rule that reads it.
+/// Nothing after the first chapter can be an `\id` or a `\usfm` line — and a
+/// file that puts one there has a structural finding already, not a header.
+fn header_scan(source: &[u8], tokens: &[Token]) -> (Option<u32>, Option<UsfmVersion>) {
+    let usfm = generated::marker_idx(b"usfm", SpellingShape::PlainOnly);
+    let mut book = None;
+    let mut version = None;
+    let mut awaiting_version = false;
+    for (idx, token) in tokens.iter().enumerate() {
+        match token.kind() {
+            TokenKind::BookCode => {
+                book.get_or_insert(idx as u32);
+                if version.is_some() {
+                    break;
+                }
+            }
+            // `\usfm` carves no payload (the scanner leaves the version string
+            // as ordinary Text, isolated by its line ending), so the fact is
+            // read off the ADJACENT token — the same adjacency shape the
+            // `ca`/`cp` rules use, and the reason scanner.rs carves nothing.
+            TokenKind::Text if awaiting_version => {
+                version = parse_version(span_of(source, token));
+                awaiting_version = false;
+                if book.is_some() && version.is_some() {
+                    break;
+                }
+            }
+            TokenKind::Marker { .. } => {
+                if generated::kind(token.marker_idx) == MarkerKind::Chapter {
+                    break;
+                }
+                awaiting_version = token.marker_idx == usfm;
+            }
+            _ => awaiting_version = false,
+        }
+    }
+    (book, version)
+}
+
+/// `3.0`, `3.2`, `4.0` → the ladder rung a rule keys on. Anything else is
+/// `None`: an undeclared version is not a declaration of 3.0, and a rule that
+/// escalates on one must not fire on the other.
+fn parse_version(span: &[u8]) -> Option<UsfmVersion> {
+    let mut parts = span.split(|b| *b == b'.');
+    let number = |part: Option<&[u8]>| -> Option<u32> {
+        let part = part?;
+        (!part.is_empty() && part.iter().all(u8::is_ascii_digit))
+            .then(|| part.iter().fold(0u32, |n, b| n * 10 + u32::from(b - b'0')))
+    };
+    let major = number(parts.next())?;
+    let minor = number(parts.next()).unwrap_or(0);
+    Some(match (major, minor) {
+        (4.., _) => UsfmVersion::V4_0,
+        (3, 2..) => UsfmVersion::V3_2,
+        _ => UsfmVersion::V3_0,
+    })
 }
 
 /// What a node IS to the structural rules. The CST does not store this — it is
@@ -739,6 +1072,16 @@ fn node_pass(tokens: &[Token], cst: &Cst, consumed: &mut [bool], out: &mut Vec<O
             out.push(Observation::one(Code::OrphanContainerEnd, anchor));
         }
 
+        // A paragraph with nothing under it but line endings. `\b` abstains by
+        // its `SingleNewline` delimiter — the column that says "this row takes
+        // no content" (see the row).
+        if generated::kind(marker_idx) == MarkerKind::Paragraph
+            && generated::ws_after_name(marker_idx) != Ws::SingleNewline
+            && is_empty_paragraph(tokens, cst, node)
+        {
+            out.push(Observation::one(Code::EmptyParagraph, anchor));
+        }
+
         match node.close_reason() {
             // The walker judged these normal. Note peers and displaced
             // paragraphs both land here, and both are silent by ruling.
@@ -768,6 +1111,21 @@ fn node_pass(tokens: &[Token], cst: &Cst, consumed: &mut [bool], out: &mut Vec<O
     }
 }
 
+/// Does this node hold anything a reader would see? A child NODE always
+/// counts; among token children only the node's own OPENING marker (which the
+/// walker files as its first child) and a `Newline` do not. Attribute lists DO
+/// count — `\p|cat="x"|` with nothing after it carries metadata and is a
+/// different authoring fact from a bare `\p`, and lumping the two together
+/// would report the deliberate one.
+fn is_empty_paragraph(tokens: &[Token], cst: &Cst, node: &Node) -> bool {
+    cst.child_ids[node.children.start as usize..node.children.end as usize]
+        .iter()
+        .all(|child| {
+            *child & NODE_ID_BIT == 0
+                && (*child == node.token || tokens[*child as usize].kind() == TokenKind::Newline)
+        })
+}
+
 fn last_child<'a>(cst: &'a Cst, node: &Node) -> Option<&'a u32> {
     if node.children.is_empty() {
         return None;
@@ -775,12 +1133,74 @@ fn last_child<'a>(cst: &'a Cst, node: &Node) -> Option<&'a u32> {
     cst.child_ids.get(node.children.end as usize - 1)
 }
 
-/// One sweep over the tokens: the rules that are a row lookup, or a span
-/// against an auxiliary table, and nothing else.
-fn token_pass(source: &[u8], tokens: &[Token], consumed: &[bool], out: &mut Vec<Observation>) {
+/// THE token walk: every rule whose evidence is a token row, its span, or the
+/// one token before it — the row-lookup rules, the two Form rules, the caller
+/// and numbering payload rules, adjacency, and the shape-only attribute
+/// family. One pass, exactly as the sketch draws it ("adjacency + form +
+/// payload + attributes: single token walk").
+///
+/// It carries THREE small pieces of lookbehind state, and they are here rather
+/// than in passes of their own for a measured reason: a token sweep over this
+/// corpus costs ~2.5 ns/token in dispatch alone, however little each arm does,
+/// so a family that needs no more than the last marker earns no pass of its
+/// own. `ordering_pass` stays separate because its state is a SEQUENCE (the
+/// previous chapter and verse), not the previous token.
+///
+/// - **The adjacency window.** `\ca`/`\cp` are legal immediately after `\c`'s
+///   designator or after each other, `\va`/`\vp` likewise after `\v` — where
+///   "immediately" means "with nothing but whitespace between", because the
+///   scanner emits a Newline token at every line break and the spec's own
+///   examples put `\cp` on its own line. These markers open no scope, so the
+///   CST cannot see their misplacement; this is the only place the fact exists.
+/// - **The attribute owner.** Attributes belong to the last marker, exactly as
+///   [`TokenKind::AttrList`] documents, so the owner is the nearest preceding
+///   opener and a Newline ends its reach — the scanner bounds lists to a line,
+///   so nothing else would be honest.
+/// - **The numbering-mix bitmasks**, closed out by the pass simply ending.
+fn token_pass(
+    source: &[u8],
+    tokens: &[Token],
+    consumed: &[bool],
+    version: Option<UsfmVersion>,
+    out: &mut Vec<Observation>,
+) {
+    /// Which designator family may be re-numbered at this point.
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Window {
+        Closed,
+        Chapter,
+        Verse,
+    }
+
+    let idx_of = |name: &[u8]| generated::marker_idx(name, SpellingShape::PlainOnly);
+    let (ca, cp) = (idx_of(b"ca"), idx_of(b"cp"));
+    let (va, vp) = (idx_of(b"va"), idx_of(b"vp"));
+
+    let mut window = Window::Closed;
+    // The owning marker of any attribute list that arrives now: its token
+    // index, its row, whether its terminator is `\*` rather than a named
+    // closer, and whether its row defines any attributes at all. `NO_TOKEN` =
+    // no marker is in reach.
+    let mut owner = NO_TOKEN;
+    let mut owner_idx = generated::UNRESOLVED;
+    let mut owner_is_point = false;
+    let mut owner_has_attrs = false;
+    // The first attribute list already seen on that owner.
+    let mut first_list = NO_TOKEN;
+    // Levels-seen per numbered family, indexed by ROW: bit 0 = the bare
+    // spelling, bit n = `\q<n>`, bit 15 = "already reported". A fixed array
+    // rather than a map because the row index IS the family key and there are
+    // only 153 rows — 306 bytes of stack, no hashing, no allocation.
+    // `first_seen` is only ever read when the mask says the family has been
+    // seen, so it needs no sentinel initialization.
+    let mut levels = [0u16; generated::ROW_COUNT];
+    let mut first_seen = [0u32; generated::ROW_COUNT];
+    const REPORTED: u16 = 1 << 15;
+
     for (idx, token) in tokens.iter().enumerate() {
         let idx = idx as u32;
-        match token.kind() {
+        let kind = token.kind();
+        match kind {
             // Byte-exact membership first, then the case-folded retry: "known
             // but lowercase" and "unknown" are different findings and exactly
             // one of them fires.
@@ -800,12 +1220,108 @@ fn token_pass(source: &[u8], tokens: &[Token], consumed: &[bool], out: &mut Vec<
                     idx,
                 ));
             }
-            TokenKind::Marker { nested } => {
-                if token.marker_idx == generated::UNRESOLVED {
-                    out.push(Observation::one(Code::UnknownMarker, idx));
-                } else if nested && generated::kind(token.marker_idx) != MarkerKind::Character {
-                    out.push(Observation::one(Code::NestedSpellingMisuse, idx));
+            // Openers and milestones share this arm because they are the same
+            // thing to every rule below: the marker a list, a level or a
+            // designator belongs to. `nested` binds the two kinds' one
+            // spelling bit (`\+w`'s `+`, `\qt-e`'s `e`), and only the opener
+            // half ever reads it.
+            TokenKind::Marker { nested } | TokenKind::Milestone { end: nested } => {
+                let marker_idx = token.marker_idx;
+                let opener = matches!(kind, TokenKind::Marker { .. });
+                if opener {
+                    if marker_idx == generated::UNRESOLVED {
+                        out.push(Observation::one(Code::UnknownMarker, idx));
+                    } else if nested && generated::kind(marker_idx) != MarkerKind::Character {
+                        out.push(Observation::one(Code::NestedSpellingMisuse, idx));
+                    }
+                    if generated::kind(marker_idx) == MarkerKind::Paragraph
+                        && token.start > 0
+                        && !is_structural_ws(source[token.start as usize - 1])
+                    {
+                        out.push(Observation::one(Code::MarkerNotWsPreceded, idx));
+                    }
+                    // "The span absorbed no delimiter" is ONE byte to check: a
+                    // marker name never ends in whitespace, so a trailing
+                    // space or tab can only be the folded delimiter run.
+                    if wants_delimiter(marker_idx)
+                        && !span_of(source, token)
+                            .last()
+                            .is_some_and(|byte| matches!(byte, b' ' | b'\t'))
+                        && source
+                            .get(token.end() as usize)
+                            .is_some_and(|byte| !is_delimiter_byte(*byte))
+                    {
+                        out.push(Observation::one(Code::DelimiterShape, idx));
+                    }
                 }
+
+                // --- adjacency ------------------------------------------
+                let (code, opens) = if marker_idx == ca || marker_idx == cp {
+                    (Some(Code::CaCpPlacement), Window::Chapter)
+                } else if marker_idx == va || marker_idx == vp {
+                    (Some(Code::VaVpPlacement), Window::Verse)
+                } else {
+                    (None, Window::Closed)
+                };
+                window = match code {
+                    Some(code) => {
+                        if window != opens {
+                            out.push(Observation::one(code, idx));
+                        }
+                        // The window stays open either way: `\ca 2\ca*\cp א`
+                        // is one legal run, and re-reporting every member of a
+                        // misplaced run turns one slip into three findings.
+                        opens
+                    }
+                    None => match generated::kind(marker_idx) {
+                        MarkerKind::Chapter => Window::Chapter,
+                        MarkerKind::Verse => Window::Verse,
+                        _ => Window::Closed,
+                    },
+                };
+
+                // --- numbering-mix --------------------------------------
+                if has_levels(marker_idx) {
+                    let family = &mut levels[marker_idx as usize];
+                    if *family == 0 {
+                        first_seen[marker_idx as usize] = idx;
+                    }
+                    *family |= 1 << spelled_level(span_of(source, token)).min(14);
+                    // Bare AND numbered, said once per family per book.
+                    if *family & REPORTED == 0 && *family & 1 != 0 && *family & !(REPORTED | 1) != 0
+                    {
+                        *family |= REPORTED;
+                        out.push(Observation {
+                            code: Code::NumberingMix,
+                            anchor: idx,
+                            second: first_seen[marker_idx as usize],
+                            aux: match generated::numbering(marker_idx) {
+                                Numbering::UpTo(cap) => u32::from(cap),
+                                // `liv` alone: numbered with no cap stated.
+                                _ => 0,
+                            },
+                        });
+                    }
+                }
+
+                owner = idx;
+                owner_idx = marker_idx;
+                owner_is_point = !opener || generated::kind(marker_idx) == MarkerKind::Milestone;
+                // Resolved HERE, once per marker, rather than per Text token:
+                // it is the flag that keeps the pipe scan off ordinary prose,
+                // so it must not itself cost a table read per token.
+                owner_has_attrs =
+                    !owner_is_point && !generated::defined_attributes(marker_idx).is_empty();
+                first_list = NO_TOKEN;
+            }
+            // Not an enumeration of `+`/`-`/`?` — those are the conventional
+            // values of one general run, and a caller of up to three bytes is
+            // taken as deliberate. See the row for why the width is what it is.
+            TokenKind::NoteCaller => {
+                if span_of(source, token).len() > 3 {
+                    out.push(Observation::one(Code::CallerShape, idx));
+                }
+                window = Window::Closed;
             }
             TokenKind::ClosingMarker { nested } => {
                 if !consumed[idx as usize] {
@@ -817,11 +1333,108 @@ fn token_pass(source: &[u8], tokens: &[Token], consumed: &[bool], out: &mut Vec<
                 {
                     out.push(Observation::one(Code::NestedSpellingMisuse, idx));
                 }
+                // A closer ends the owner's reach and leaves the adjacency
+                // window alone: `\ca 2\ca*\cp א` is one legal run.
+                owner = NO_TOKEN;
+                owner_has_attrs = false;
+                first_list = NO_TOKEN;
             }
-            TokenKind::MilestoneTerminator if !consumed[idx as usize] => {
-                out.push(Observation::one(Code::OrphanTerminator, idx))
+            TokenKind::MilestoneTerminator => {
+                if !consumed[idx as usize] {
+                    out.push(Observation::one(Code::OrphanTerminator, idx));
+                }
+                owner = NO_TOKEN;
+                owner_has_attrs = false;
+                first_list = NO_TOKEN;
             }
-            _ => {}
+            TokenKind::AttrList => {
+                if first_list != NO_TOKEN {
+                    out.push(Observation::pair(Code::AttrBothLists, idx, first_list));
+                } else {
+                    first_list = idx;
+                }
+                if owner == NO_TOKEN {
+                    continue;
+                }
+                // NODE-INITIAL is "in front position AND self-closed": the
+                // list is the token right after its marker, and its span ends
+                // with the closing pipe (plus any HS the U25001 production
+                // puts inside the list). Everything else is the 3.1 trailing
+                // form. The one shape this would read as node-initial and is
+                // not is `\w a|b|\w*`, where a raw pipe ENDS a back-position
+                // value — but that list is not in front position either, so
+                // the front test already excludes it.
+                let span = span_of(source, token);
+                let trailing = idx != owner + 1
+                    || !span
+                        .iter()
+                        .rev()
+                        .find(|byte| !matches!(byte, b' ' | b'\t'))
+                        .is_some_and(|byte| *byte == b'|');
+                if trailing {
+                    if generated::kind(owner_idx) == MarkerKind::Character
+                        && version >= Some(UsfmVersion::V3_2)
+                    {
+                        out.push(Observation {
+                            code: Code::AttrTrailingFormDeprecated,
+                            anchor: idx,
+                            second: owner,
+                            aux: version.map_or(0, |declared| declared as u32),
+                        });
+                    }
+                    // A trailing list stops AT its terminator, so the next
+                    // token IS the closer the scanner accepted without
+                    // checking whose it was. This is where that is checked.
+                    let matched = match tokens.get(idx as usize + 1).map(Token::kind) {
+                        Some(TokenKind::MilestoneTerminator) => owner_is_point,
+                        Some(TokenKind::ClosingMarker { .. }) => {
+                            !owner_is_point && tokens[idx as usize + 1].marker_idx == owner_idx
+                        }
+                        _ => true,
+                    };
+                    if !matched {
+                        out.push(Observation::pair(Code::AttrTerminatorMismatch, idx, owner));
+                    }
+                }
+            }
+            // A raw pipe in the content of an attrs-capable marker. The owner
+            // flag comes first on purpose: it is one already-loaded boolean,
+            // and it keeps the byte scan off the ~85% of tokens that are
+            // ordinary prose.
+            //
+            // MILESTONE owners abstain, and that is the same line the scanner
+            // draws when it arms its back-position pipe needle for Character
+            // and Figure rows alone. A milestone has no content, so a pipe
+            // that stayed content there means its `\*` never came — which
+            // `unterminated-milestone` already reports, exactly, and this hint
+            // would only guess at.
+            TokenKind::Text => {
+                if owner_has_attrs && span_of(source, token).contains(&b'|') {
+                    out.push(Observation::pair(Code::AttrPipeHint, idx, owner));
+                }
+                // GUARDED, and the guard is load-bearing: `\c 1 \ca` is the
+                // only shape that cares whether a Text run is blank, so asking
+                // the question unconditionally means reading every content byte
+                // in the document for a fact that matters after roughly one
+                // token in ten thousand.
+                if window != Window::Closed
+                    && !span_of(source, token).iter().all(|b| is_structural_ws(*b))
+                {
+                    window = Window::Closed;
+                }
+            }
+            // A line ending ends the ATTRIBUTE machine's reach, and
+            // deliberately leaves the adjacency window open: `\c 1` and its
+            // `\cp` are conventionally written on separate lines.
+            TokenKind::Newline => {
+                owner = NO_TOKEN;
+                owner_has_attrs = false;
+                first_list = NO_TOKEN;
+            }
+            // The designator of the `\c`/`\v`/`\ca`/`\vp` that opened the
+            // window belongs to the run; an optional break does not.
+            TokenKind::Designator => {}
+            TokenKind::OptBreak => window = Window::Closed,
         }
     }
 }
@@ -934,10 +1547,65 @@ fn tree_pass(tokens: &[Token], cst: &Cst, out: &mut Vec<Observation>) {
     }
 }
 
-/// A token's bytes. The only place lint reads `source`, and it reads it only
-/// through spans the scanner already carved.
+/// A token's bytes. Lint reads `source` only through spans the scanner already
+/// carved, plus the single byte on either side of one (the two Form rules).
 fn span_of<'a>(source: &'a [u8], token: &Token) -> &'a [u8] {
     &source[token.start as usize..token.end() as usize]
+}
+
+/// Space, tab, CR or LF — the four bytes the scanner treats as whitespace.
+/// Deliberately ASCII-only: it is the SPEC's structural whitespace, and a
+/// no-break space failing this test is the finding, not a gap.
+fn is_structural_ws(byte: u8) -> bool {
+    matches!(byte, b' ' | b'\t' | b'\r' | b'\n')
+}
+
+/// What may legally follow a marker name: structural whitespace, or one of
+/// `TAGEND`'s two other alternatives (a marker, an attribute list).
+fn is_delimiter_byte(byte: u8) -> bool {
+    is_structural_ws(byte) || matches!(byte, b'\\' | b'|')
+}
+
+/// Does this row's `ws_after_name` REQUIRE something after the name? The
+/// optional forms (milestones' `Hs`, row 0's `NotRequired`) can never be
+/// missing one.
+fn wants_delimiter(marker_idx: generated::MarkerIdx) -> bool {
+    matches!(
+        generated::ws_after_name(marker_idx),
+        Ws::AtLeastOneHorizontalWhitespace
+            | Ws::AtLeastOneWhitespace
+            | Ws::SingleNewline
+            | Ws::AtLeastOneNewline
+            | Ws::TagEndDelimiter
+    )
+}
+
+/// The level digit an occurrence was SPELLED with — `\q2` → 2, `\q` → 0,
+/// `\qt3-s` → 3. Read off the span because that is the only place it exists:
+/// rows are canonical (`q`, not `q1`), so the token's own bytes are the sole
+/// record of which spelling was used.
+fn spelled_level(span: &[u8]) -> u8 {
+    let from = usize::from(span.get(1) == Some(&b'+')) + 1;
+    let mut level = 0u8;
+    for byte in &span[from.min(span.len())..] {
+        match byte {
+            b'0'..=b'9' => level = level.saturating_mul(10).saturating_add(byte - b'0'),
+            b'a'..=b'z' if level == 0 => {}
+            _ => break,
+        }
+    }
+    level
+}
+
+/// Is this row numbered in the sense `numbering-mix` cares about — a family
+/// whose digit is a LEVEL? `TableColumns` rows (`\tc1`, `\tc1-2`) are excluded:
+/// their digits are a column number, i.e. payload, so `\tc` beside `\tc2` is
+/// not two spellings of one thing.
+fn has_levels(marker_idx: generated::MarkerIdx) -> bool {
+    matches!(
+        generated::numbering(marker_idx),
+        Numbering::UpTo(_) | Numbering::Unbounded
+    )
 }
 
 /// The Ordering subsystem: one linear sweep over the tokens, ignoring the CST
@@ -1195,20 +1863,17 @@ mod tests {
             assert!(!seen.contains(&row.name), "duplicate name {}", row.name);
             seen.push(row.name);
             assert_eq!(row.code.row().name, row.name);
-            // Phases 1-2 ship three families; a stray row from a family whose
-            // pass has not landed means a phase arrived half-built.
+            // Phases 1-3 ship five families; a stray row from a family whose
+            // pass has not landed means a phase arrived half-built. Version is
+            // the one still missing.
             assert!(
-                matches!(
-                    row.category,
-                    Category::Structure | Category::Ordering | Category::Payload
-                ),
+                !matches!(row.category, Category::Version),
                 "{} belongs to a family with no pass yet",
                 row.name
             );
-            // The only `aux` meaning in use so far is the expected number, and
-            // only the sequence rules carry one.
+            // `Count` is the one aux meaning nothing writes yet.
             assert!(
-                matches!(row.aux, AuxKind::None | AuxKind::ExpectedNumber),
+                !matches!(row.aux, AuxKind::Count),
                 "{} uses an aux kind nothing writes yet",
                 row.name
             );
@@ -1353,7 +2018,10 @@ mod tests {
 
     #[test]
     fn content_outside_sidebar_rule() {
-        let (tokens, obs) = findings("\\p out\\esb \\p in \\c 1 more\\esbe\\p after");
+        // (The line break before the last `\p` is load-bearing since phase 3:
+        // a paragraph marker glued to the preceding word is a Form finding of
+        // its own, and this test is not about that.)
+        let (tokens, obs) = findings("\\p out\\esb \\p in \\c 1 more\\esbe\n\\p after");
         assert_eq!(
             obs,
             vec![Observation::pair(
@@ -1716,6 +2384,398 @@ mod tests {
 
         // An attribute list is stepped over, not mistaken for the payload.
         let (_, obs) = findings("\\c 1\n\\p \\v |script=\"Arab\"| 1 a");
+        assert_eq!(obs, vec![]);
+    }
+
+    // -----------------------------------------------------------------
+    // Phase 3: adjacency
+    // -----------------------------------------------------------------
+
+    /// The placement findings alone.
+    ///
+    /// Filtered rather than compared whole because `\ca*`/`\va*` currently
+    /// draw an `orphan-closer` of their own: the `ca`/`va`/`vp` rows carry
+    /// `closing: RequiredExplicit` but `opens_scope: None`, so the walker
+    /// pushes no frame for them and their closers close nothing. That is a
+    /// TABLE/walker disagreement, not this rule's business, and the corpus
+    /// contains no `\ca` at all — flagged for the spec-diff, never patched
+    /// here.
+    fn placement(observations: &[Observation]) -> Vec<Observation> {
+        observations
+            .iter()
+            .filter(|obs| matches!(obs.code, Code::CaCpPlacement | Code::VaVpPlacement))
+            .copied()
+            .collect()
+    }
+
+    #[test]
+    fn ca_and_cp_must_follow_their_chapter() {
+        // The spec's own shape: `\ca` on the `\c` line, `\cp` on the next one.
+        // A Newline between them is a token, and the rule steps over it.
+        let (_, obs) = findings("\\c 1 \\ca 2\\ca*\n\\cp \u{5d0}\n\\p \\v 1 a");
+        assert_eq!(placement(&obs), vec![]);
+
+        // …and the pair the other way round is equally legal.
+        let (_, obs) = findings("\\c 1\n\\cp \u{5d0}\n\\ca 2\\ca*\n\\p \\v 1 a");
+        assert_eq!(placement(&obs), vec![]);
+
+        // Real content between them closes the window.
+        let (tokens, obs) = findings("\\c 1\n\\p text\n\\ca 2\\ca*\n");
+        assert_eq!(
+            placement(&obs),
+            vec![Observation::one(
+                Code::CaCpPlacement,
+                token_named(&tokens, "ca", 0)
+            )]
+        );
+
+        // A whole run out of place is ONE finding, not one per member.
+        let (tokens, obs) = findings("\\p text\n\\ca 2\\ca*\\cp \u{5d0}\n");
+        assert_eq!(
+            placement(&obs),
+            vec![Observation::one(
+                Code::CaCpPlacement,
+                token_named(&tokens, "ca", 0)
+            )]
+        );
+    }
+
+    #[test]
+    fn va_and_vp_must_follow_their_verse() {
+        let (_, obs) = findings("\\c 1\n\\p \\v 1 \\va 2\\va* \\vp 1-2\\vp* text");
+        assert_eq!(placement(&obs), vec![]);
+
+        // The designator and a line break both keep the window open.
+        let (_, obs) = findings("\\c 1\n\\p \\v 1\n\\va 2\\va*\n");
+        assert_eq!(placement(&obs), vec![]);
+
+        let (tokens, obs) = findings("\\c 1\n\\p \\v 1 text \\va 2\\va*");
+        assert_eq!(
+            placement(&obs),
+            vec![Observation::one(
+                Code::VaVpPlacement,
+                token_named(&tokens, "va", 0)
+            )]
+        );
+
+        // A `\va` after a CHAPTER is still misplaced — the two windows are
+        // separate machines, not one "designator" window.
+        let (tokens, obs) = findings("\\c 1 \\va 2\\va*\n\\p \\v 1 a");
+        assert_eq!(
+            placement(&obs),
+            vec![Observation::one(
+                Code::VaVpPlacement,
+                token_named(&tokens, "va", 0)
+            )]
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // Phase 3: payload
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn caller_shape_only_reports_the_accidents() {
+        // The three conventional values, and a short custom one, are silent.
+        for caller in ["+", "-", "?", "*", "\",", "abc"] {
+            let (_, obs) = findings(&format!("\\p a\\f {caller} \\ft n\\f*"));
+            assert_eq!(obs, vec![], "caller {caller:?}");
+        }
+
+        // `\f +note` — the space after the caller was forgotten, so the whole
+        // word lexed as the caller.
+        let (tokens, obs) = findings("\\p a\\f +note \\ft n\\f*");
+        let caller = tokens
+            .iter()
+            .position(|t| t.kind() == TokenKind::NoteCaller)
+            .unwrap() as u32;
+        assert_eq!(obs, vec![Observation::one(Code::CallerShape, caller)]);
+    }
+
+    /// `numbering-out-of-range` is NOT a code, and this is why: an over-cap
+    /// level never reaches its family's row. `generated::marker_idx` validates
+    /// the digits during resolution, so `\q7` IS row 0 and `unknown-marker`
+    /// has already said everything there is to say about it. If this test ever
+    /// fails, the rule became reachable and should be written.
+    #[test]
+    fn an_over_cap_level_is_an_unknown_marker_not_a_range_finding() {
+        let (tokens, obs) = findings("\\c 1\n\\q7 poetry\n");
+        let over_cap = tokens
+            .iter()
+            .position(|t| {
+                matches!(t.kind(), TokenKind::Marker { .. })
+                    && t.marker_idx == generated::UNRESOLVED
+            })
+            .unwrap() as u32;
+        assert_eq!(codes(&obs), vec![Code::UnknownMarker]);
+        assert_eq!(obs[0].anchor, over_cap);
+        // …and the highest legal level resolves to the `q` row as it should.
+        let (_, obs) = findings("\\c 1\n\\q4 poetry\n");
+        assert_eq!(obs, vec![]);
+    }
+
+    #[test]
+    fn the_declared_version_is_reported() {
+        let version = |usfm: &str| {
+            let tokens = lex(usfm);
+            let cst = build(&tokens);
+            lint(usfm.as_bytes(), &tokens, &cst).declared_version
+        };
+        assert_eq!(
+            version("\\id GEN\n\\usfm 3.0\n\\p a"),
+            Some(UsfmVersion::V3_0)
+        );
+        assert_eq!(
+            version("\\id GEN\n\\usfm 3.2\n\\p a"),
+            Some(UsfmVersion::V3_2)
+        );
+        assert_eq!(
+            version("\\id GEN\n\\usfm 4\n\\p a"),
+            Some(UsfmVersion::V4_0)
+        );
+        assert_eq!(
+            version("\\id GEN\n\\usfm 3.2.1\n\\p a"),
+            Some(UsfmVersion::V3_2)
+        );
+        // No declaration, and a declaration that is not a version, are the
+        // same state: unknown, never assumed.
+        assert_eq!(version("\\id GEN\n\\p a"), None);
+        assert_eq!(version("\\id GEN\n\\usfm three\n\\p a"), None);
+        // The header scan stops at the first `\c`, so a `\usfm` line written
+        // below one is not a declaration this report will claim.
+        assert_eq!(version("\\id GEN\n\\c 1\n\\usfm 3.2\n\\p a"), None);
+    }
+
+    #[test]
+    fn numbering_mix_is_one_finding_per_family_per_book() {
+        // One family, both spellings: anchored at the token that revealed it,
+        // `second` at the family's first occurrence, `aux` the row's cap.
+        let (tokens, obs) = findings("\\c 1\n\\q a\n\\q1 b\n\\q2 c\n\\q d\n");
+        assert_eq!(
+            obs,
+            vec![Observation {
+                code: Code::NumberingMix,
+                anchor: token_named(&tokens, "q", 1),
+                second: token_named(&tokens, "q", 0),
+                aux: 4,
+            }]
+        );
+
+        // Numbered-only and bare-only are both consistent.
+        let (_, obs) = findings("\\c 1\n\\q1 a\n\\q2 b\n");
+        assert_eq!(obs, vec![]);
+        let (_, obs) = findings("\\c 1\n\\q a\n\\q b\n");
+        assert_eq!(obs, vec![]);
+
+        // Two families mixing is two findings — never one per occurrence.
+        let (_, obs) = findings("\\c 1\n\\q a\n\\q1 b\n\\q c\n\\s d\n\\s1 e\n\\s f\n");
+        assert_eq!(codes(&obs), vec![Code::NumberingMix, Code::NumberingMix]);
+
+        // `\tc1` is a COLUMN, not a level: `\tc` beside it is not a mix.
+        let (_, obs) = findings("\\c 1\n\\tr \\tc a \\tc2 b\n");
+        assert_eq!(obs, vec![]);
+    }
+
+    // -----------------------------------------------------------------
+    // Phase 3: form
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn marker_not_ws_preceded_is_paragraphs_only() {
+        let (tokens, obs) = findings("\\p text\\s1 heading\n\\p more");
+        assert_eq!(
+            obs,
+            vec![Observation::one(
+                Code::MarkerNotWsPreceded,
+                token_named(&tokens, "s", 0)
+            )]
+        );
+
+        // Character markers legitimately hug — the nested spelling included,
+        // and aligned USFM is built out of exactly this.
+        let (_, obs) = findings("\\p \\w grace\\+nd deep\\+nd*\\w*\\add x\\add*");
+        assert_eq!(obs, vec![]);
+
+        // Start of file is not a finding either (the `\id` prefix this helper
+        // adds is itself the case).
+        let (_, obs) = findings("\\id GEN\n\\p a");
+        assert_eq!(obs, vec![]);
+    }
+
+    #[test]
+    fn delimiter_shape_reports_a_non_whitespace_separator() {
+        // The live corpus finding: en_ulb REV writes `\m(for fine linen…`.
+        let (tokens, obs) = findings("\\p a\n\\m(for fine linen)\n");
+        assert_eq!(
+            obs,
+            vec![Observation::one(
+                Code::DelimiterShape,
+                token_named(&tokens, "m", 0)
+            )]
+        );
+
+        // A no-break space after the name is the same finding.
+        let (tokens, obs) = findings("\\p a\n\\q\u{00A0}poetry\n");
+        assert_eq!(
+            obs,
+            vec![Observation::one(
+                Code::DelimiterShape,
+                token_named(&tokens, "q", 0)
+            )]
+        );
+
+        // Everything `TAGEND` allows is silent: whitespace, a line ending, a
+        // marker, an attribute list, end of file.
+        for usfm in [
+            "\\p text",
+            "\\p\ttext",
+            "\\p\n\\p text",
+            "\\p\\v 1 text",
+            "\\p|cat=\"x\"| text",
+            "\\c 1\n\\p a\n\\b\n\\p b",
+        ] {
+            let (_, obs) = findings(usfm);
+            assert!(
+                !codes(&obs).contains(&Code::DelimiterShape),
+                "{usfm:?} reported a delimiter"
+            );
+        }
+    }
+
+    #[test]
+    fn empty_paragraph_excludes_the_blank_line() {
+        let (tokens, obs) = findings("\\c 1\n\\p\n\\p text\n");
+        assert_eq!(
+            obs,
+            vec![Observation::one(
+                Code::EmptyParagraph,
+                token_named(&tokens, "p", 0)
+            )]
+        );
+
+        // `\b` IS an empty paragraph, and is empty by design.
+        let (_, obs) = findings("\\c 1\n\\p a\n\\b\n\\p b\n");
+        assert_eq!(obs, vec![]);
+
+        // A verse, a nested node, or plain text all count as content.
+        let (_, obs) = findings("\\c 1\n\\p \\v 1 a\n\\q1 b\n\\q2 \\add c\\add*\n");
+        assert_eq!(obs, vec![]);
+    }
+
+    // -----------------------------------------------------------------
+    // Phase 3: attributes (shape only)
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn the_trailing_attribute_form_is_reported_only_against_a_declared_32() {
+        // 3.0 declared, and no declaration at all: the trailing form is the
+        // correct spelling and nothing is said.
+        let (_, obs) = findings("\\id GEN\n\\usfm 3.0\n\\p \\w grace|lemma=\"x\"\\w*\n");
+        assert_eq!(obs, vec![]);
+        let (_, obs) = findings("\\p \\w grace|lemma=\"x\"\\w*\n");
+        assert_eq!(obs, vec![]);
+
+        // 3.2 declared: deprecated, and the row escalates it to an Error at 4.
+        let usfm = "\\id GEN\n\\usfm 3.2\n\\p \\w grace|lemma=\"x\"\\w*\n";
+        let (tokens, obs) = findings(usfm);
+        let list = tokens
+            .iter()
+            .position(|t| t.kind() == TokenKind::AttrList)
+            .unwrap() as u32;
+        assert_eq!(
+            obs,
+            vec![Observation {
+                code: Code::AttrTrailingFormDeprecated,
+                anchor: list,
+                second: token_named(&tokens, "w", 0),
+                aux: UsfmVersion::V3_2 as u32,
+            }]
+        );
+        assert_eq!(
+            Code::AttrTrailingFormDeprecated.row().escalation,
+            Some((UsfmVersion::V4_0, Severity::Error))
+        );
+
+        // The node-initial form is what 3.2 wants, and says nothing.
+        let (_, obs) = findings("\\id GEN\n\\usfm 3.2\n\\p \\w |lemma=\"x\"|grace\\w*\n");
+        assert_eq!(obs, vec![]);
+
+        // A MILESTONE's trailing list is its normal syntax, never deprecated —
+        // this is the shape that would light up every alignment corpus.
+        let (_, obs) =
+            findings("\\id GEN\n\\usfm 3.2\n\\p a \\qt-s |who=\"Levi\"\\* b \\qt-e\\*\n");
+        assert_eq!(obs, vec![]);
+    }
+
+    #[test]
+    fn two_attribute_lists_on_one_marker() {
+        // The proposal's own "ridiculous but legal" case.
+        let (tokens, obs) = findings("\\p \\w |Fred|J\u{e9}sus|Jesus\\w*\n");
+        let lists: Vec<u32> = tokens
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| t.kind() == TokenKind::AttrList)
+            .map(|(idx, _)| idx as u32)
+            .collect();
+        assert_eq!(
+            obs,
+            vec![Observation::pair(Code::AttrBothLists, lists[1], lists[0])]
+        );
+
+        // One list per marker, twice over, is not two lists on one marker.
+        let (_, obs) = findings("\\p \\w a|k=\"v\"\\w* \\w b|k=\"v\"\\w*\n");
+        assert_eq!(obs, vec![]);
+    }
+
+    #[test]
+    fn an_attribute_list_closed_by_the_wrong_marker() {
+        // `\add*` ends `\w`'s list — the case scanner.rs names when it says
+        // the terminator is checked only for BEING a closer.
+        let (tokens, obs) = findings("\\p \\w grace|lemma=\"x\"\\add*\n");
+        let list = tokens
+            .iter()
+            .position(|t| t.kind() == TokenKind::AttrList)
+            .unwrap() as u32;
+        assert!(codes(&obs).contains(&Code::AttrTerminatorMismatch));
+        assert_eq!(
+            obs.iter()
+                .find(|o| o.code == Code::AttrTerminatorMismatch)
+                .copied(),
+            Some(Observation::pair(
+                Code::AttrTerminatorMismatch,
+                list,
+                token_named(&tokens, "w", 0)
+            ))
+        );
+
+        // A milestone list closed by `\*`, and a character list closed by its
+        // own `\X*`, are both matched.
+        let (_, obs) = findings("\\p a \\qt-s |who=\"Levi\"\\* b \\qt-e\\*\n");
+        assert_eq!(obs, vec![]);
+        let (_, obs) = findings("\\p \\w grace|lemma=\"x\"\\w*\n");
+        assert_eq!(obs, vec![]);
+    }
+
+    #[test]
+    fn a_pipe_in_content_hints_only_inside_an_attrs_capable_marker() {
+        // The list was refuted (no closer before the end of the line), so the
+        // pipe survived as content — which is the whole reason for the hint.
+        let (tokens, obs) = findings("\\p \\w gracious|lemma=\"grace\"\n\\p more\n");
+        let hints: Vec<Observation> = obs
+            .iter()
+            .filter(|o| o.code == Code::AttrPipeHint)
+            .copied()
+            .collect();
+        assert_eq!(hints.len(), 1, "{obs:?}");
+        assert_eq!(hints[0].second, token_named(&tokens, "w", 0));
+
+        // A pipe in ordinary prose is ordinary prose: `\p` defines no
+        // attributes, so nothing is said.
+        let (_, obs) = findings("\\p a | b\n");
+        assert_eq!(obs, vec![]);
+
+        // Neither does a marker that opens no attributes of its own.
+        let (_, obs) = findings("\\p \\add a | b\\add*\n");
         assert_eq!(obs, vec![]);
     }
 

@@ -297,3 +297,20 @@ lint(source, tokens, cst):
 ## Still open (small)
 - messageParams audit vs onion — mechanical, do during build: every
   onion param must be a span or fit aux.
+- **Latent row inconsistency, needs the spec-diff referee** (found by
+  phase-3 tests, 2026-08-19; zero corpus impact — no `\ca` anywhere in
+  226 books): `ca`/`va`/`vp` rows carry `closing: RequiredExplicit` but
+  `opens_scope: None`, so the walker pushes no frame and every
+  `\ca*`/`\va*`/`\vp*` draws a spurious `orphan-closer`. Rows change
+  only through the spec-diff with the marker page as referee, so lint
+  documents around it rather than touching the rows.
+- Phase-3 discoveries recorded in code, listed here for the sketch's
+  honesty: `numbering-out-of-range` is UNREACHABLE (level caps are
+  enforced at marker resolution — `\q7` is row 0 / unknown-marker; a
+  test pins this so the rule gets written if resolution ever changes);
+  `attr-terminator-mismatch` as "opened `|…` never re-piped" cannot
+  lex (such bytes stay Text) — the reachable finding is a trailing
+  list terminated by a closer that isn't its owner's;
+  `attr-trailing-form-deprecated` is version-GATED (declared
+  `\usfm >= 3.2` required), not merely escalated — a 3.0 file's
+  792k trailing lists are correct for their version.
