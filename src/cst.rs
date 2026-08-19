@@ -1,12 +1,13 @@
 //! A compact structural tree over the scanner's stamped token stream.
 //!
 //! This module owns the CST walker: one generic scope loop (displacement by
-//! stamped context), the explicit-closer rules (`\X*` by name, `\esbe` by
-//! scope kind, note peers, the sidebar barrier), milestone points
-//! (`\zaln-s |…\*` — spelling pairs row-0 milestones with their `\*`), one
-//! scratch tail feeding the shared child-id arena, and document order
-//! through [`Cst::in_order`]. Recovery pop-all, list/table containers, and
-//! positional context are deliberately separate follow-up stages.
+//! stamped context, same-kind eviction), the explicit-closer rules (`\X*`
+//! by name, `\esbe` by scope kind, note peers, the sidebar barrier),
+//! milestone points (`\zaln-s |…\*` — spelling pairs row-0 milestones with
+//! their `\*`), the U25003 list/table containers, unknown-marker pop-all
+//! recovery, one scratch tail feeding the shared child-id arena, and
+//! document order through [`Cst::in_order`]. The positional-context lane is
+//! deliberately deferred to lint (NEXT-STEPS).
 
 use std::ops::Range;
 
@@ -203,6 +204,14 @@ struct Builder<'a> {
 /// keeps the token partition complete while `Node::token` gives consumers a
 /// direct opening-marker handle. Only a scope-opening row, or a chapter/verse
 /// point with a non-empty context mask, may displace the current stack.
+///
+/// PERF (measured 2026-08-18, `playground --cst-only`, min-of-8 at load ~14
+/// so trust the ratios): ~6 ns/token — 40.4ms over en_ult's 6.57M tokens,
+/// 1.41ms over en_ulb's 255k — about 40% of a lex, ~6× the ParseHeader
+/// floor (this pass has a stack, arena writes, and several table reads per
+/// marker). Heaviest aligned book ≈ 0.6ms; lex+build ≈ 2.1ms. Corpus health
+/// via `--cst-stats`: zero Recovery across all four corpora except three
+/// genuinely unclosed `\f` in the wild (en_ulb ISA/MRK, bsb GEN).
 pub fn build(tokens: &[Token]) -> Cst {
     assert!(
         tokens.len() < NODE_ID_BIT as usize,
@@ -268,6 +277,33 @@ pub fn build(tokens: &[Token]) -> Cst {
                 continue;
             }
         };
+
+        // A KNOWN milestone row in its BARE spelling — `\ts \*`,
+        // usfm-grammar's `_milestoneStandaloneMarker` — is still a point;
+        // the spelling adds nothing the row doesn't already say. Without
+        // this, every uW chunk marker opened a plain frame that only
+        // displacement could kill (12,062 Recovery stamps across en_ult,
+        // all of them `\ts`, found by `--cst-stats`).
+        if generated::kind(marker_idx) == MarkerKind::Milestone {
+            b.milestone_point(token_idx as u32, marker_idx, false);
+            continue;
+        }
+
+        // Unknown/illegal markers (row 0) RECOVER: pop everything and start
+        // fresh — the walker cannot trust any open scope across a marker it
+        // cannot classify. Each popped row keeps its own verdict (a
+        // paragraph's death is normal-shaped even here); the unknown marker
+        // itself is lint's finding, and it stays an ordinary leaf. Unknown
+        // CLOSERS and row-0 MILESTONES deliberately do not recover — the
+        // closer is an orphan leaf, the milestone is a point by spelling.
+        if marker_idx == generated::UNRESOLVED {
+            while b.frames.len() > 1 {
+                let reason = CloseReason::for_displacement(b.top_marker_idx());
+                b.close_top(reason);
+            }
+            b.scratch.push(token_idx as u32);
+            continue;
+        }
 
         // `\esbe`-shaped rows close a scope by KIND rather than by name.
         if let Some(kind) = generated::closes_scope(marker_idx) {
@@ -986,6 +1022,39 @@ mod tests {
         // The -e point exists and closes at its star; nothing else closes.
         let point = node_for(&tokens, &cst, "list");
         assert_eq!(point.close_reason(), CloseReason::Explicit);
+        assert_eq!(
+            cst.in_order().collect::<Vec<_>>(),
+            (0..tokens.len() as u32).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn an_unknown_marker_recovers_by_popping_all_frames() {
+        let tokens = lex("\\p a \\f + \\ft n \\zfoo b");
+        let cst = build(&tokens);
+        assert_eq!(
+            node_for(&tokens, &cst, "f").close_reason(),
+            CloseReason::Recovery
+        );
+        assert_eq!(
+            node_for(&tokens, &cst, "ft").close_reason(),
+            CloseReason::Implicit
+        );
+        assert_eq!(
+            node_for(&tokens, &cst, "p").close_reason(),
+            CloseReason::Implicit
+        );
+        // The unknown marker and its text land at ROOT — fresh start.
+        let root_kids = &cst.child_ids
+            [cst.nodes[0].children.start as usize..cst.nodes[0].children.end as usize];
+        let zfoo = tokens
+            .iter()
+            .position(|t| {
+                t.marker_idx == generated::UNRESOLVED
+                    && matches!(t.kind(), TokenKind::Marker { .. })
+            })
+            .unwrap() as u32;
+        assert!(root_kids.contains(&zfoo));
         assert_eq!(
             cst.in_order().collect::<Vec<_>>(),
             (0..tokens.len() as u32).collect::<Vec<_>>()

@@ -6,6 +6,9 @@
 //   cargo run --release --bin playground -- --iters 100         // repeat for stable timing / profiling
 //   cargo run --release --bin playground -- --parse-header       // lex + ParseHeader (the whole pipeline)
 //   cargo run --release --bin playground -- --parse-header-only  // pre-lexed; times the SECOND PASS alone
+//   cargo run --release --bin playground -- --cst              // lex + cst::build (the whole pipeline)
+//   cargo run --release --bin playground -- --cst-only         // pre-lexed; times cst::build alone
+//   cargo run --release --bin playground -- --cst-stats        // untimed: CloseReason distribution over the corpus
 //   cargo run --release --bin playground -- --scalar            // no-memchr twin (prices SIMD)
 //   cargo run --release --bin playground -- --staged            // two-stage structural index (simdjson shape)
 //   cargo run --release --bin playground -- --chunked           // chapter-split, lexed serially (prices the split)
@@ -42,12 +45,15 @@ enum Mode {
     SweepNl,
     SweepStops,
     SweepCursor,
+    Cst,
+    CstOnly,
 }
 
 fn main() {
     let mut path: Option<PathBuf> = None;
     let mut mode = Mode::Serial;
     let mut iters: u32 = 1;
+    let mut cst_stats = false;
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -55,6 +61,9 @@ fn main() {
             "--par" => mode = Mode::Par,
             "--parse-header" => mode = Mode::ParseHeader,
             "--parse-header-only" => mode = Mode::ParseHeaderOnly,
+            "--cst" => mode = Mode::Cst,
+            "--cst-only" => mode = Mode::CstOnly,
+            "--cst-stats" => cst_stats = true,
             "--scalar" => mode = Mode::Scalar,
             "--staged" => mode = Mode::Staged,
             "--sweep-nl" => mode = Mode::SweepNl,
@@ -87,6 +96,8 @@ fn main() {
         Mode::Serial => "serial",
         Mode::ParseHeader => "parse-header",
         Mode::ParseHeaderOnly => "parse-header-only",
+        Mode::Cst => "cst",
+        Mode::CstOnly => "cst-only",
         Mode::Par => "par",
         Mode::Scalar => "scalar",
         Mode::Staged => "staged",
@@ -105,11 +116,17 @@ fn main() {
 
     // Lexed OUTSIDE the clock: --parse-header-only prices the second pass by itself,
     // so the lex it walks over must not be in the measurement.
-    let prelexed: Vec<Vec<usfm_onion_2::Token>> = if mode == Mode::ParseHeaderOnly {
-        sources.iter().map(|s| usfm_onion_2::lex(s)).collect()
-    } else {
-        Vec::new()
-    };
+    if cst_stats {
+        report_cst_stats(&sources);
+        return;
+    }
+
+    let prelexed: Vec<Vec<usfm_onion_2::Token>> =
+        if matches!(mode, Mode::ParseHeaderOnly | Mode::CstOnly) {
+            sources.iter().map(|s| usfm_onion_2::lex(s)).collect()
+        } else {
+            Vec::new()
+        };
 
     let started = Instant::now();
     for _ in 0..iters {
@@ -143,6 +160,7 @@ fn verify_variant(sources: &[String], mode: Mode) {
         // Sweeps produce counts, not token streams — nothing to verify.
         Mode::SweepNl | Mode::SweepStops | Mode::SweepCursor => return,
         Mode::ParseHeader | Mode::ParseHeaderOnly => return, // the real lexer plus a pure pass
+        Mode::Cst | Mode::CstOnly => return,                 // the real lexer plus a pure pass
         Mode::Scalar => usfm_onion_2::experiments::scalar::lex,
         Mode::Staged => usfm_onion_2::experiments::staged::lex,
         Mode::Chunked => usfm_onion_2::experiments::chapter_par::lex_chunked,
@@ -189,6 +207,17 @@ fn run_once(sources: &[String], prelexed: &[Vec<usfm_onion_2::Token>], mode: Mod
         Mode::ParseHeaderOnly => {
             for (source, tokens) in sources.iter().zip(prelexed) {
                 std::hint::black_box(usfm_onion_2::ParseHeader::from_tokens(tokens, source));
+            }
+        }
+        Mode::Cst => {
+            for source in sources {
+                let tokens = usfm_onion_2::lex(source);
+                std::hint::black_box(usfm_onion_2::cst::build(&tokens));
+            }
+        }
+        Mode::CstOnly => {
+            for tokens in prelexed {
+                std::hint::black_box(usfm_onion_2::cst::build(tokens));
             }
         }
         Mode::Serial => {
@@ -275,4 +304,57 @@ fn collect_usfm_paths(root: &Path, paths: &mut Vec<PathBuf>) {
 fn read_source(path: &Path) -> String {
     fs::read_to_string(path)
         .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()))
+}
+
+/// Untimed corpus sweep: how do frames actually CLOSE in the wild? Clean
+/// books should be nearly all Explicit/Implicit; Recovery clusters are
+/// either real data damage or a walker/table gap — eyeball them.
+fn report_cst_stats(sources: &[String]) {
+    use usfm_onion_2::cst::CloseReason;
+    let mut totals = [0u64; 4];
+    let mut nodes_total = 0u64;
+    let mut tokens_total = 0u64;
+    let mut worst: Vec<(u64, usize)> = Vec::new();
+    let mut by_marker: std::collections::BTreeMap<&str, u64> = std::collections::BTreeMap::new();
+    for (i, source) in sources.iter().enumerate() {
+        let tokens = usfm_onion_2::lex(source);
+        let cst = usfm_onion_2::cst::build(&tokens);
+        tokens_total += tokens.len() as u64;
+        nodes_total += cst.nodes.len() as u64;
+        let mut recoveries = 0u64;
+        for node in &cst.nodes[1..] {
+            let reason = node.close_reason();
+            totals[reason as usize] += 1;
+            if reason == CloseReason::Recovery {
+                recoveries += 1;
+            }
+        }
+        if recoveries > 0 {
+            worst.push((recoveries, i));
+        }
+        for node in &cst.nodes[1..] {
+            if node.close_reason() == CloseReason::Recovery {
+                let idx = tokens[node.token as usize].marker_idx;
+                let name = usfm_onion_2::tables::generated::name(idx);
+                *by_marker.entry(name).or_insert(0u64) += 1;
+            }
+        }
+    }
+    println!(
+        "cst-stats docs={} tokens={tokens_total} nodes={nodes_total} explicit={} implicit={} recovery={} eof={}",
+        sources.len(),
+        totals[CloseReason::Explicit as usize],
+        totals[CloseReason::Implicit as usize],
+        totals[CloseReason::Recovery as usize],
+        totals[CloseReason::Eof as usize],
+    );
+    let mut by_marker: Vec<_> = by_marker.into_iter().collect();
+    by_marker.sort_unstable_by(|a, b| b.1.cmp(&a.1));
+    for (name, count) in by_marker.iter().take(10) {
+        println!("  recovery marker \\{name} x{count}");
+    }
+    worst.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+    for (count, doc) in worst.iter().take(10) {
+        println!("  recovery x{count} in doc #{doc}");
+    }
 }
