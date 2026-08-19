@@ -216,6 +216,13 @@ struct Frame {
     node: u32,
     /// The open frame owns the scratch tail beginning at this index.
     mark: u32,
+    /// The row of the frame's OPENING token, COPIED at push time. Every
+    /// closer rule keys on it, and holding it here rather than re-reading
+    /// `tokens[node.token]` is what makes the Builder streaming: see the
+    /// no-slice contract on [`Builder`]. The root frame's value is
+    /// [`generated::UNRESOLVED`] and is never read (all searches start at
+    /// depth 1).
+    marker_idx: generated::MarkerIdx,
     /// The context resolved once at push time; transparent frames inherit it.
     ctx: u8,
     role: FrameRole,
@@ -233,11 +240,31 @@ impl Frame {
     }
 }
 
-/// The in-flight build state. A struct for the same reason the lexer grew
-/// `Scanner`: the closer rules each need the same four mutable pieces, and
-/// threading them through free functions buries the logic in signatures.
-struct Builder<'a> {
-    tokens: &'a [Token],
+/// The in-flight build state, driven ONE TOKEN AT A TIME: [`Builder::feed`]
+/// per token in document order, then [`Builder::finish`]. [`build`] is that
+/// loop over a slice; the scanner-sink experiment (NEXT-STEPS) is the same
+/// loop hanging off `push_token`.
+///
+/// A struct for the same reason the lexer grew `Scanner`: the closer rules
+/// each need the same four mutable pieces, and threading them through free
+/// functions buries the logic in signatures.
+///
+/// # The feed contract
+///
+/// **The Builder never sees the token stream — only the token in hand.** It
+/// holds no `&[Token]` and does no lookahead OR look-BACK: everything the
+/// closer rules need from an earlier token (its row) was copied into
+/// [`Frame::marker_idx`] when that token opened its frame. So `feed` may be
+/// called from a driver whose tokens are not retained at all, and re-reading
+/// a fed token is never a question the Builder has to answer.
+///
+/// The one thing a driver owes the Builder: **do not feed token N until token
+/// N is final.** The scanner's `whitespace_arm` extends the PREVIOUS token's
+/// len on a LATER iteration, so a `push_token` sink must feed token N only
+/// once N+1 exists (or at EOF). The Builder itself is indifferent — it reads
+/// `kind()` and `marker_idx`, not `len` — but consumers downstream of it are
+/// not, so the rule belongs with the driver.
+pub(crate) struct Builder {
     nodes: Vec<Node>,
     child_ids: Vec<u32>,
     scratch: Vec<u32>,
@@ -264,12 +291,23 @@ pub fn build(tokens: &[Token]) -> Cst {
         "token ids must fit the tag bit"
     );
 
-    // One cheap counting pre-pass buys EXACT allocations for both vecs:
-    // nodes = openers + root, and child_ids = every token once + every
-    // non-root node once (the doc'd arena-length identity). Every milestone
-    // token opens a point (row 0 included — the spelling override), and a
-    // container start opens a second node (the container itself).
-    let scope_openers: usize = tokens
+    // One cheap counting pre-pass buys EXACT allocations for both vecs.
+    // Only a caller holding the whole slice can afford this; a streaming
+    // driver uses `Builder::with_capacity`'s estimate instead.
+    let mut b = Builder::with_capacity(tokens.len(), exact_scope_openers(tokens));
+    for (token_idx, token) in tokens.iter().enumerate() {
+        b.feed(token_idx as u32, token);
+    }
+    b.finish()
+}
+
+/// The count that makes [`build`]'s allocations EXACT: nodes = openers +
+/// root, and child_ids = every token once + every non-root node once (the
+/// doc'd arena-length identity). Every milestone token opens a point (row 0
+/// included — the spelling override), and a container start opens a second
+/// node (the container itself).
+fn exact_scope_openers(tokens: &[Token]) -> usize {
+    tokens
         .iter()
         .map(|token| match token.kind() {
             TokenKind::Milestone { end } => {
@@ -280,158 +318,7 @@ pub fn build(tokens: &[Token]) -> Cst {
             }
             _ => 0,
         })
-        .sum();
-
-    let mut b = Builder {
-        tokens,
-        nodes: Vec::with_capacity(scope_openers + 1),
-        child_ids: Vec::with_capacity(tokens.len() + scope_openers),
-        scratch: Vec::with_capacity(tokens.len()),
-        frames: vec![Frame {
-            node: 0,
-            mark: 0,
-            ctx: SpecContext::Scripture as u8,
-            role: FrameRole::Plain,
-        }],
-    };
-    // Reserve the root before the walk. Its range is patched after all child
-    // tails have reached the arena; it is never a synthesized token.
-    b.nodes.push(Node {
-        token: ROOT_TOKEN,
-        children: 0..0,
-        reason: CloseReason::Eof as u8,
-        ctx: SpecContext::Scripture as u8,
-    });
-
-    for (token_idx, token) in tokens.iter().enumerate() {
-        let marker_idx = match token.kind() {
-            TokenKind::Marker { .. } => token.marker_idx,
-            TokenKind::Milestone { end } => {
-                b.milestone_point(token_idx as u32, token.marker_idx, end);
-                continue;
-            }
-            TokenKind::MilestoneTerminator => {
-                b.milestone_close(token_idx as u32);
-                continue;
-            }
-            TokenKind::ClosingMarker { .. } => {
-                b.explicit_close(token_idx as u32, token.marker_idx);
-                continue;
-            }
-            _ => {
-                b.scratch.push(token_idx as u32);
-                continue;
-            }
-        };
-
-        // A KNOWN milestone row in its BARE spelling — `\ts \*`,
-        // usfm-grammar's `_milestoneStandaloneMarker` — is still a point;
-        // the spelling adds nothing the row doesn't already say. Without
-        // this, every uW chunk marker opened a plain frame that only
-        // displacement could kill (12,062 Recovery stamps across en_ult,
-        // all of them `\ts`, found by `--cst-stats`).
-        if generated::kind(marker_idx) == MarkerKind::Milestone {
-            b.milestone_point(token_idx as u32, marker_idx, false);
-            continue;
-        }
-
-        // Unknown/illegal markers (row 0) RECOVER: pop everything and start
-        // fresh — the walker cannot trust any open scope across a marker it
-        // cannot classify. Each popped row keeps its own verdict (a
-        // paragraph's death is normal-shaped even here); the unknown marker
-        // itself is lint's finding, and it stays an ordinary leaf. Unknown
-        // CLOSERS and row-0 MILESTONES deliberately do not recover — the
-        // closer is an orphan leaf, the milestone is a point by spelling.
-        if marker_idx == generated::UNRESOLVED {
-            while b.frames.len() > 1 {
-                let reason = CloseReason::for_displacement(b.top_marker_idx());
-                b.close_top(reason);
-            }
-            b.scratch.push(token_idx as u32);
-            continue;
-        }
-
-        // `\esbe`-shaped rows close a scope by KIND rather than by name.
-        if let Some(kind) = generated::closes_scope(marker_idx) {
-            b.scope_close(token_idx as u32, kind);
-            continue;
-        }
-
-        // Note peers: an incoming `\ft`-class marker first ends an open
-        // sibling of the same class (`\fr` then `\ft` are peers, not
-        // parent/child). Displacement can't do this — both siblings sit in
-        // the same Footnote context, so the mask never pops one for the
-        // other.
-        if generated::closing(marker_idx) == ClosingBehavior::OptionalExplicitUntilNoteEnd
-            && b.frames.len() > 1
-            && generated::closing(b.top_marker_idx())
-                == ClosingBehavior::OptionalExplicitUntilNoteEnd
-        {
-            b.close_top(CloseReason::Implicit);
-        }
-
-        let marker_kind = generated::kind(marker_idx);
-        let opens_scope = generated::opens_scope(marker_idx);
-        let mask = generated::context_mask(marker_idx);
-        if opens_scope.is_some() {
-            // Same-kind eviction: like kinds never nest — without this,
-            // `\li` inside a list container (List IS in its mask, so
-            // displacement abstains) would nest under its own sibling
-            // forever. A new row also ends the previous row's open cells.
-            b.same_kind_evict(marker_kind);
-        }
-        if displaces(marker_kind, opens_scope, mask) {
-            while b.frames.len() > 1 && !b.top().barrier() && mask & context_bit(b.top().ctx) == 0 {
-                let reason = CloseReason::for_displacement(b.top_marker_idx());
-                b.close_top(reason);
-            }
-        }
-
-        if opens_scope.is_some() {
-            let inherited = b.top().ctx;
-            let ctx = generated::contributes_context(marker_idx)
-                .map(|context| context as u8)
-                .unwrap_or(inherited);
-            let node = b.nodes.len() as u32;
-            b.nodes.push(Node {
-                token: token_idx as u32,
-                children: 0..0,
-                reason: CloseReason::Eof as u8,
-                ctx,
-            });
-            let mark = b.scratch.len() as u32;
-            b.scratch.push(token_idx as u32);
-            b.frames.push(Frame {
-                node,
-                mark,
-                ctx,
-                role: if opens_scope == Some(ScopeKind::Sidebar) {
-                    FrameRole::Sidebar
-                } else {
-                    FrameRole::Plain
-                },
-            });
-        } else {
-            // Empty-mask adjacency markers such as `ca` are ordinary leaves;
-            // they must not accidentally displace the enclosing paragraph.
-            b.scratch.push(token_idx as u32);
-        }
-    }
-
-    // Input ended: close survivors as Eof — lint judges each by its row
-    // (a paragraph at EOF is silent, a footnote at EOF is a finding).
-    while b.frames.len() > 1 {
-        b.close_top(CloseReason::Eof);
-    }
-
-    let root_start = b.child_ids.len() as u32;
-    b.child_ids.extend_from_slice(&b.scratch);
-    b.nodes[0].children = root_start..b.child_ids.len() as u32;
-
-    Cst {
-        nodes: b.nodes,
-        child_ids: b.child_ids,
-    }
+        .sum()
 }
 
 impl CloseReason {
@@ -445,19 +332,197 @@ impl CloseReason {
     }
 }
 
-impl Builder<'_> {
+impl Builder {
+    /// A Builder that reserves nothing and grows. For a driver with no token
+    /// count in hand at all.
+    #[allow(dead_code)] // Its caller is the scanner-sink driver (step 3).
+    pub(crate) fn new() -> Self {
+        Self::with_capacity(0, 0)
+    }
+
+    /// `tokens` is the expected token count and `scope_openers` the expected
+    /// number of scope-opening tokens; both are HINTS, and both being wrong
+    /// costs only a realloc. [`build`] passes exact counts (it has the
+    /// slice); a scanner-sink driver estimates from the source length —
+    /// measured over the corpora, tokens ≈ bytes/16 and openers ≈ tokens/8 on
+    /// prose, tokens/4 on aligned text (`--cst-stats` prints both counts).
+    pub(crate) fn with_capacity(tokens: usize, scope_openers: usize) -> Self {
+        let mut b = Self {
+            nodes: Vec::with_capacity(scope_openers + 1),
+            child_ids: Vec::with_capacity(tokens + scope_openers),
+            scratch: Vec::with_capacity(tokens),
+            frames: vec![Frame {
+                node: 0,
+                mark: 0,
+                marker_idx: generated::UNRESOLVED,
+                ctx: SpecContext::Scripture as u8,
+                role: FrameRole::Plain,
+            }],
+        };
+        // Reserve the root before the walk. Its range is patched by `finish`,
+        // after all child tails have reached the arena; it is never a
+        // synthesized token.
+        b.nodes.push(Node {
+            token: ROOT_TOKEN,
+            children: 0..0,
+            reason: CloseReason::Eof as u8,
+            ctx: SpecContext::Scripture as u8,
+        });
+        b
+    }
+
+    /// One token, in document order. `token_idx` is the id this token will
+    /// carry in the finished tree — the driver's own running count.
+    ///
+    /// See the type doc for the feed contract: nothing before or after this
+    /// token is read.
+    #[inline]
+    pub(crate) fn feed(&mut self, token_idx: u32, token: &Token) {
+        debug_assert!(token_idx < NODE_ID_BIT, "token ids must fit the tag bit");
+        let marker_idx = match token.kind() {
+            TokenKind::Marker { .. } => token.marker_idx,
+            TokenKind::Milestone { end } => {
+                self.milestone_point(token_idx, token.marker_idx, end);
+                return;
+            }
+            TokenKind::MilestoneTerminator => {
+                self.milestone_close(token_idx);
+                return;
+            }
+            TokenKind::ClosingMarker { .. } => {
+                self.explicit_close(token_idx, token.marker_idx);
+                return;
+            }
+            _ => {
+                self.scratch.push(token_idx);
+                return;
+            }
+        };
+
+        // A KNOWN milestone row in its BARE spelling — `\ts \*`,
+        // usfm-grammar's `_milestoneStandaloneMarker` — is still a point;
+        // the spelling adds nothing the row doesn't already say. Without
+        // this, every uW chunk marker opened a plain frame that only
+        // displacement could kill (12,062 Recovery stamps across en_ult,
+        // all of them `\ts`, found by `--cst-stats`).
+        if generated::kind(marker_idx) == MarkerKind::Milestone {
+            self.milestone_point(token_idx, marker_idx, false);
+            return;
+        }
+
+        // Unknown/illegal markers (row 0) RECOVER: pop everything and start
+        // fresh — the walker cannot trust any open scope across a marker it
+        // cannot classify. Each popped row keeps its own verdict (a
+        // paragraph's death is normal-shaped even here); the unknown marker
+        // itself is lint's finding, and it stays an ordinary leaf. Unknown
+        // CLOSERS and row-0 MILESTONES deliberately do not recover — the
+        // closer is an orphan leaf, the milestone is a point by spelling.
+        if marker_idx == generated::UNRESOLVED {
+            while self.frames.len() > 1 {
+                let reason = CloseReason::for_displacement(self.top_marker_idx());
+                self.close_top(reason);
+            }
+            self.scratch.push(token_idx);
+            return;
+        }
+
+        // `\esbe`-shaped rows close a scope by KIND rather than by name.
+        if let Some(kind) = generated::closes_scope(marker_idx) {
+            self.scope_close(token_idx, kind);
+            return;
+        }
+
+        // Note peers: an incoming `\ft`-class marker first ends an open
+        // sibling of the same class (`\fr` then `\ft` are peers, not
+        // parent/child). Displacement can't do this — both siblings sit in
+        // the same Footnote context, so the mask never pops one for the
+        // other.
+        if generated::closing(marker_idx) == ClosingBehavior::OptionalExplicitUntilNoteEnd
+            && self.frames.len() > 1
+            && generated::closing(self.top_marker_idx())
+                == ClosingBehavior::OptionalExplicitUntilNoteEnd
+        {
+            self.close_top(CloseReason::Implicit);
+        }
+
+        let marker_kind = generated::kind(marker_idx);
+        let opens_scope = generated::opens_scope(marker_idx);
+        let mask = generated::context_mask(marker_idx);
+        if opens_scope.is_some() {
+            // Same-kind eviction: like kinds never nest — without this,
+            // `\li` inside a list container (List IS in its mask, so
+            // displacement abstains) would nest under its own sibling
+            // forever. A new row also ends the previous row's open cells.
+            self.same_kind_evict(marker_kind);
+        }
+        if displaces(marker_kind, opens_scope, mask) {
+            while self.frames.len() > 1
+                && !self.top().barrier()
+                && mask & context_bit(self.top().ctx) == 0
+            {
+                let reason = CloseReason::for_displacement(self.top_marker_idx());
+                self.close_top(reason);
+            }
+        }
+
+        if opens_scope.is_some() {
+            let inherited = self.top().ctx;
+            let ctx = generated::contributes_context(marker_idx)
+                .map(|context| context as u8)
+                .unwrap_or(inherited);
+            let node = self.nodes.len() as u32;
+            self.nodes.push(Node {
+                token: token_idx,
+                children: 0..0,
+                reason: CloseReason::Eof as u8,
+                ctx,
+            });
+            let mark = self.scratch.len() as u32;
+            self.scratch.push(token_idx);
+            self.frames.push(Frame {
+                node,
+                mark,
+                marker_idx,
+                ctx,
+                role: if opens_scope == Some(ScopeKind::Sidebar) {
+                    FrameRole::Sidebar
+                } else {
+                    FrameRole::Plain
+                },
+            });
+        } else {
+            // Empty-mask adjacency markers such as `ca` are ordinary leaves;
+            // they must not accidentally displace the enclosing paragraph.
+            self.scratch.push(token_idx);
+        }
+    }
+
+    /// Input ended: close survivors as Eof — lint judges each by its row (a
+    /// paragraph at EOF is silent, a footnote at EOF is a finding) — then
+    /// patch the root's child range and hand over the tree.
+    pub(crate) fn finish(mut self) -> Cst {
+        while self.frames.len() > 1 {
+            self.close_top(CloseReason::Eof);
+        }
+
+        let root_start = self.child_ids.len() as u32;
+        self.child_ids.extend_from_slice(&self.scratch);
+        self.nodes[0].children = root_start..self.child_ids.len() as u32;
+
+        Cst {
+            nodes: self.nodes,
+            child_ids: self.child_ids,
+        }
+    }
+
     fn top(&self) -> &Frame {
         self.frames.last().expect("root frame remains")
     }
 
-    /// The marker row of the frame's OPENING token.
+    /// The marker row of the frame's OPENING token, read off the frame — see
+    /// [`Frame::marker_idx`].
     fn top_marker_idx(&self) -> generated::MarkerIdx {
-        self.frame_marker_idx(self.frames.len() - 1)
-    }
-
-    fn frame_marker_idx(&self, depth: usize) -> generated::MarkerIdx {
-        let node = self.frames[depth].node;
-        self.tokens[self.nodes[node as usize].token as usize].marker_idx
+        self.top().marker_idx
     }
 
     /// Flush the top frame's scratch tail into the arena and stamp its
@@ -488,7 +553,7 @@ impl Builder<'_> {
             if self.frames[depth].wall() {
                 break;
             }
-            if self.frame_marker_idx(depth) == closer_idx {
+            if self.frames[depth].marker_idx == closer_idx {
                 target = Some(depth);
                 break;
             }
@@ -567,6 +632,7 @@ impl Builder<'_> {
                 self.frames.push(Frame {
                     node,
                     mark: self.scratch.len() as u32,
+                    marker_idx,
                     ctx,
                     role: FrameRole::Container(kind),
                 });
@@ -589,6 +655,7 @@ impl Builder<'_> {
         self.frames.push(Frame {
             node,
             mark,
+            marker_idx,
             ctx,
             role: FrameRole::Point { ends },
         });
@@ -645,7 +712,7 @@ impl Builder<'_> {
                 break;
             }
             if self.frames[depth].role == FrameRole::Plain {
-                let kind = generated::kind(self.frame_marker_idx(depth));
+                let kind = generated::kind(self.frames[depth].marker_idx);
                 if evicts(kind) {
                     target = Some(depth);
                     // An incoming row that found a CELL keeps looking for
@@ -670,7 +737,7 @@ impl Builder<'_> {
     fn scope_close(&mut self, token_idx: u32, kind: ScopeKind) {
         let mut target = None;
         for depth in (1..self.frames.len()).rev() {
-            let opener = self.frame_marker_idx(depth);
+            let opener = self.frames[depth].marker_idx;
             if generated::opens_scope(opener) == Some(kind) {
                 target = Some(depth);
                 break;
@@ -732,6 +799,67 @@ mod tests {
             .copied()
             .filter(|id| id & NODE_ID_BIT == 0)
             .collect()
+    }
+
+    /// The streaming Builder — no slice, no pre-count, one token at a time —
+    /// is the SAME walker `build` runs. This is the property step 3's
+    /// scanner sink depends on: if a bare `Builder` fed off `push_token`
+    /// could differ from `build`, the fusion would be a rewrite rather than
+    /// a re-driving.
+    fn feeds_the_same_tree(source: &str) {
+        let tokens = lex(source);
+        let mut b = Builder::new();
+        for (idx, token) in tokens.iter().enumerate() {
+            b.feed(idx as u32, token);
+        }
+        assert_eq!(
+            b.finish(),
+            build(&tokens),
+            "streaming differs on {source:?}"
+        );
+    }
+
+    #[test]
+    fn streaming_matches_the_slice_build() {
+        for source in [
+            "",
+            "text",
+            "\\p one\\p two",
+            "\\p before\\f + \\ft note\\c 1",
+            "\\p \\add deep\\add* after",
+            "\\p out\\esb \\p in \\c 1 more\\esbe\\p after",
+            "\\list-s\\*\n\\li one\n\\li two\n\\list-e\\*",
+            "\\table-s\\*\n\\tr \\tc1 a\\tc2 b\n\\tr \\tc1 c\n\\table-e\\*",
+            "\\p a \\f + \\ft n \\zfoo b",
+            "\\zaln-s |x-strong=\"G1\"\\*\\w In|lemma=\"in\"\\w*\\zaln-e\\*",
+            "\\p text \\* more\\w* tail",
+            "\\id GEN\n\\c 1\n\\p \\v 1 text\n",
+        ] {
+            feeds_the_same_tree(source);
+        }
+    }
+
+    /// The same equivalence over one REAL book — every shape the unit
+    /// snippets miss, at corpus scale. Skips when the (gitignored) corpora
+    /// are absent, like the oracle tests.
+    #[test]
+    fn streaming_matches_the_slice_build_on_a_corpus_book() {
+        let mut paths: Vec<std::path::PathBuf> = match std::fs::read_dir("example-corpora/en_ult") {
+            Ok(dir) => dir
+                .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+                .filter(|path| path.extension().is_some_and(|ext| ext == "usfm"))
+                .collect(),
+            Err(_) => {
+                eprintln!("streaming equivalence SKIPPED: no example-corpora/en_ult");
+                return;
+            }
+        };
+        paths.sort();
+        let Some(path) = paths.first() else {
+            eprintln!("streaming equivalence SKIPPED: no *.usfm in en_ult");
+            return;
+        };
+        feeds_the_same_tree(&std::fs::read_to_string(path).expect("readable book"));
     }
 
     #[test]

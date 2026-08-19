@@ -142,3 +142,44 @@ the one fact a machine needed at both open and close rides a `u8` scratch on
 the driver's frame, so the Builder's frames must carry the same byte. The
 only lookahead left is `attr-terminator-mismatch`'s one token, still read off
 the slice and still owed the pending-state treatment when the Builder drives.
+
+**(2) IS DONE, 2026-08-19.** `cst::Builder` is `pub(crate)`, driven by
+`with_capacity(tokens, scope_openers)` / `new()` → `feed(token_idx: u32,
+&Token)` per token → `finish() -> Cst`; `build(&[Token])` is that loop plus
+the exact pre-count, and the public API is otherwise untouched. All 151 tests
+green (cst oracle, lint corpus, fix oracle, partition, header, fast-path all
+unchanged), clippy warning set identical to HEAD, `--cst-stats` identical.
+Three findings that bear on step 3:
+
+- **The feed contract came out STRONGER than "may re-read earlier tokens".**
+  The Builder holds NO slice at all: the walker's only look-back was
+  `frame_marker_idx`, re-reading an open frame's opening token for its row,
+  and that row is now COPIED into `Frame::marker_idx` at push time. Verified
+  by exhaustion that nothing else indexed a neighbouring token — the
+  bare-spelling milestone clause, `same_kind_evict`, the container searches
+  and `milestone_point` all read FRAMES, never tokens. So the sink never
+  needs the scanner's growing vec in hand, which also dodges the borrow
+  fight (a `Builder<'a>` borrowing the vec the scanner is pushing into is not
+  expressible without passing the slice back in on every feed).
+- **The one-token delay is the DRIVER's rule, and it is now written on
+  `Builder`'s doc.** The Builder reads `kind()` and `marker_idx` only, never
+  `len`, so `whitespace_arm`'s late mutation of the previous token cannot
+  reach it — but its downstream consumers are not so lucky, so a `push_token`
+  sink must still feed N only once N+1 exists (or at EOF).
+- **Capacity split.** `build` keeps its exact pre-count (now
+  `exact_scope_openers`) and so allocates identically to before;
+  `with_capacity` takes those two counts as HINTS for a driver that only has
+  the source length (measured: tokens ≈ bytes/16, openers ≈ tokens/8 on prose
+  and tokens/4 on aligned text), and `new()` reserves nothing.
+
+**Perf (min-of-8, `--cst-only`, both binaries kept side by side and
+interleaved):** en_ulb 1.376 → 1.344 ms (**−2.3%**), en_ult 39.09 → 39.53 ms
+(**+1.1%**, 5.95 → 6.02 ns/token). Isolated by building a third variant that
+keeps `feed`/`finish` but re-reads the row off a held slice: that one lands ON
+the baseline, so **the feed/finish split itself is free** and the whole ±1% is
+the `Frame::marker_idx` byte — one extra store per frame push, which the
+aligned corpus pays (a point frame per word, its row rarely re-read) and prose
+recovers with interest (deeper displacement searches, each of which now skips
+two loads). `Frame` is still 12 bytes, so nothing regressed in layout. Judged
+a wash and taken for the streaming contract. `#[inline(always)]` on `feed` was
+tried and is WORSE (40.0 ms); plain `#[inline]` is right.
