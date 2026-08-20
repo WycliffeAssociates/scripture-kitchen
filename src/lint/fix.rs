@@ -4,11 +4,11 @@
 use std::ops::Range;
 
 use super::walk::span_of;
-use super::{Code, Emit, LINT_ROWS, LintReport, Observation, lint};
+use super::{Code, Doc, Emit, LINT_ROWS, LintReport, Observation, lint};
 use crate::designator::{self, Designator};
 use crate::edit::{Edit, apply};
 use crate::tables::generated;
-use crate::tables::schema::MarkerKind;
+use crate::tables::schema::{ClosingBehavior, MarkerKind};
 use crate::{Token, TokenKind};
 
 // ---------------------------------------------------------------------------
@@ -130,6 +130,85 @@ fn next_number(source: &[u8], tokens: &[Token], from: u32, verse: bool) -> Optio
                 awaiting = kind == wanted;
             }
             _ => awaiting = false,
+        }
+    }
+    None
+}
+
+/// A deprecated marker, and the RENAME the spec's replacement makes mechanical
+/// — both halves of it.
+///
+/// `\pro x\pro*` → `\rb x\rb*` is two splices and ONE fix, because half a
+/// rename is a document with an orphan closer in it (the oracle says so: a fix
+/// may not hand back a new finding). Only the NAME bytes move: the level digits
+/// of `\ph2` → `\li2` ride along untouched, because a spelling is always the
+/// row's canonical name followed by them.
+///
+/// The fix is declined — the finding stands alone — when the row wants a closer
+/// and no closer of its own is in reach. That is the same line every other fix
+/// draws: a repair is a mechanical splice or it is not offered.
+pub(super) fn rename(doc: &Doc, out: &mut Emit, observation: Observation, replacement: &str) {
+    let opener = &doc.tokens[observation.anchor as usize];
+    let name = generated::name(opener.marker_idx).len() as u32;
+    let closer = match generated::closing(opener.marker_idx) {
+        ClosingBehavior::RequiredExplicit => closer_of(doc.tokens, observation.anchor),
+        // A paragraph row (`\ph`) has no closer to rewrite, and a milestone's
+        // `\*` carries no name.
+        _ => None,
+    };
+    if closer.is_none()
+        && generated::closing(opener.marker_idx) == ClosingBehavior::RequiredExplicit
+    {
+        out.push(observation);
+        return;
+    }
+    let text = replacement.as_bytes();
+    let at = name_at(opener);
+    match closer {
+        Some(closer) => {
+            let closer = &doc.tokens[closer as usize];
+            let to = name_at(closer);
+            out.push_spliced(observation, &[(at, at + name, text), (to, to + name, text)]);
+        }
+        None => out.push_fixed(observation, at, at + name, text),
+    }
+}
+
+/// Where a marker token's NAME begins: past the backslash, and past the `+` of
+/// a nested spelling. The row's canonical name is always a PREFIX of what is
+/// written there (`ph` of `ph2`), which is what makes a rename a fixed-width
+/// splice rather than a re-lex.
+fn name_at(token: &Token) -> u32 {
+    let nested = matches!(
+        token.kind(),
+        TokenKind::Marker { nested: true } | TokenKind::ClosingMarker { nested: true }
+    );
+    token.start + 1 + u32::from(nested)
+}
+
+/// This opener's own closer, or `None` when it is not mechanically in reach.
+///
+/// A forward scan, and affordable for the reason every fix computation is: it
+/// runs on a FINDING, never on a token. It stops at anything that would
+/// DISPLACE the frame — a chapter, a verse, a paragraph, an unknown marker —
+/// because past that point a closer of the same name is somebody else's.
+fn closer_of(tokens: &[Token], from: u32) -> Option<u32> {
+    let marker_idx = tokens[from as usize].marker_idx;
+    for (offset, token) in tokens[from as usize + 1..].iter().enumerate() {
+        match token.kind() {
+            TokenKind::ClosingMarker { .. } if token.marker_idx == marker_idx => {
+                return Some(from + 1 + offset as u32);
+            }
+            TokenKind::Marker { .. }
+                if token.marker_idx == generated::UNRESOLVED
+                    || matches!(
+                        generated::kind(token.marker_idx),
+                        MarkerKind::Chapter | MarkerKind::Verse | MarkerKind::Paragraph
+                    ) =>
+            {
+                return None;
+            }
+            _ => {}
         }
     }
     None
@@ -591,13 +670,51 @@ mod tests {
         );
     }
 
+    /// The one MULTI-SPLICE fix: a deprecated marker renamed at both ends.
+    #[test]
+    fn the_deprecated_marker_rename_rewrites_both_halves_at_once() {
+        // `\pro` → `\rb`: two splices, one accepted change. Half of it would
+        // leave an orphan `\pro*` behind, which the oracle (run inside
+        // `repaired`) would refuse.
+        assert_eq!(
+            repaired(
+                "\\id GEN\n\\usfm 3.0\n\\c 1\n\\p \\v 1 \\pro x\\pro*",
+                Code::DeprecatedMarker
+            ),
+            "\\id GEN\n\\usfm 3.0\n\\c 1\n\\p \\v 1 \\rb x\\rb*"
+        );
+
+        // A paragraph row has no closer to rewrite, and the LEVEL DIGIT rides
+        // along untouched: only the name bytes are spliced.
+        assert_eq!(
+            repaired(
+                "\\id GEN\n\\usfm 3.0\n\\c 1\n\\ph2 hanging\n",
+                Code::DeprecatedMarker
+            ),
+            "\\id GEN\n\\usfm 3.0\n\\c 1\n\\li2 hanging\n"
+        );
+
+        // No fix where the spec's replacement is a RESTRUCTURE (`\addpn` wants
+        // `\add` wrapping `\pn`, i.e. two markers where there was one)…
+        assert!(!offers_fix(
+            "\\id GEN\n\\usfm 3.0\n\\c 1\n\\p \\v 1 \\addpn x\\addpn*",
+            Code::DeprecatedMarker
+        ));
+        // …and none where the closer is not mechanically in reach: renaming
+        // only the opener would trade this finding for an orphan closer.
+        assert!(!offers_fix(
+            "\\id GEN\n\\usfm 3.0\n\\c 1\n\\p \\v 1 \\pro x",
+            Code::DeprecatedMarker
+        ));
+    }
+
     #[test]
     fn a_fix_is_offered_exactly_where_the_row_declares_one() {
         // One snippet per code that DECLARES a label, so no label is a promise
         // nothing keeps. (The converse — a code emitting a fix its row does not
         // declare — is asserted on every snippet in this file, inside
         // `findings`, and again over the whole corpus.)
-        let cases: [(Code, &str); 14] = [
+        let cases: [(Code, &str); 15] = [
             (
                 Code::UnclosedNote,
                 "\\id GEN\n\\c 1\n\\p \\v 1 a\\f + \\ft n\\c 2\n\\p b",
@@ -629,6 +746,10 @@ mod tests {
             (
                 Code::MarkerNotWsPreceded,
                 "\\id GEN\n\\p text\\s1 heading\n\\p more",
+            ),
+            (
+                Code::DeprecatedMarker,
+                "\\id GEN\n\\usfm 3.0\n\\c 1\n\\p \\v 1 \\pro x\\pro*",
             ),
         ];
         let mut demonstrated: Vec<Code> = Vec::new();

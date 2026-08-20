@@ -43,28 +43,41 @@ impl Emit {
     /// of "this rule offers a fix" — a code that emits one without declaring it
     /// is a table bug and fails loudly here rather than in a consumer.
     pub(crate) fn push_fixed(&mut self, observation: Observation, from: u32, to: u32, text: &[u8]) {
+        self.push_spliced(observation, &[(from, to, text)]);
+    }
+
+    /// A finding and a repair made of SEVERAL splices, which the user accepts
+    /// as one change — `deprecated-marker` renames an opening marker and its
+    /// closer, and half a rename is worse than none.
+    ///
+    /// The splices must be sorted by `from` and non-overlapping, exactly as
+    /// [`check_fixes`](super::check_fixes) demands of the fix it hands back.
+    pub(crate) fn push_spliced(&mut self, observation: Observation, splices: &[(u32, u32, &[u8])]) {
         let label = observation
             .code
             .row()
             .fix_label
             .expect("a code that emits a fix declares its label");
         let start = self.edit_list.len() as u32;
-        let mut rest = text;
-        loop {
-            let take = rest.len().min(FixStr::CAP);
-            let (from, to) = if self.edit_list.len() as u32 == start {
-                (from, to)
-            } else {
-                (to, to)
-            };
-            self.edit_list.push(Edit {
-                from,
-                to,
-                insert: FixStr::new(&rest[..take]),
-            });
-            rest = &rest[take..];
-            if rest.is_empty() {
-                break;
+        for (from, to, text) in splices {
+            let first = self.edit_list.len() as u32;
+            let mut rest = *text;
+            loop {
+                let take = rest.len().min(FixStr::CAP);
+                let (from, to) = if self.edit_list.len() as u32 == first {
+                    (*from, *to)
+                } else {
+                    (*to, *to)
+                };
+                self.edit_list.push(Edit {
+                    from,
+                    to,
+                    insert: FixStr::new(&rest[..take]),
+                });
+                rest = &rest[take..];
+                if rest.is_empty() {
+                    break;
+                }
             }
         }
         let fix = self.fixes.len() as u32;

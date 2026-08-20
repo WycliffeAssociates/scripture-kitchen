@@ -40,10 +40,15 @@ pub enum AuxKind {
     ExpectedNumber,
     /// The row's `numbered_max` cap.
     NumberingCap,
-    /// A plain count (occurrences folded into one aggregate finding).
+    /// A plain count (occurrences folded into one aggregate finding), or the
+    /// same u32 read as a FLAG where a rule has exactly two shapes
+    /// (`attr-unknown-name`: 1 = the marker has no default attribute at all).
     Count,
     /// A [`UsfmVersion`] discriminant.
     Version,
+    /// A [`MalformedAttr`](crate::attributes::MalformedAttr) discriminant —
+    /// which way an attribute list stopped making sense.
+    MalformedShape,
 }
 
 /// The declared `\usfm` versions a rule's severity can key on.
@@ -108,6 +113,15 @@ pub enum Code {
     AttrBothLists,
     AttrTerminatorMismatch,
     AttrPipeHint,
+    // --- closeout: Attributes, through the k/v interpreter ----------------
+    AttrUnknownName,
+    AttrMalformed,
+    AttrRequiredIf,
+    // --- closeout: Version ------------------------------------------------
+    DeprecatedMarker,
+    DeprecatedAttribute,
+    // --- closeout: the positional band ------------------------------------
+    MarkerOutOfBand,
 }
 
 impl Code {
@@ -124,14 +138,27 @@ pub struct LintRow {
     /// The durable identity. Kebab-case, unique, never renamed lightly.
     pub name: &'static str,
     pub category: Category,
-    /// The severity when no `\usfm` version has been declared, or when the
-    /// declared version is below `escalation`'s.
-    pub severity: Severity,
-    /// At/after this declared `\usfm` version, use THIS severity instead.
-    /// `None` = flat. This column owns the version facts no `MarkerRow` owns:
-    /// the spec deprecates and then removes forms, and the table records the
-    /// marker page, never a version ladder.
-    pub escalation: Option<(UsfmVersion, Severity)>,
+    /// The severity BELOW the ladder's first rung — no `\usfm` declaration, or
+    /// one under `escalation[0]`'s version.
+    ///
+    /// `None` is the GATE, and it is a rule's whole version story in one place:
+    /// the code says NOTHING at all until its first rung is declared
+    /// (`attr-trailing-form-deprecated`, `deprecated-marker`). A finding is not
+    /// raised and then filtered — the machine asks [`Self::severity_at`] and
+    /// stays silent — because "this form is deprecated" is FALSE in a document
+    /// that declares an earlier version, not merely quiet.
+    pub severity: Option<Severity>,
+    /// The version LADDER, ascending: at or above each version, that severity.
+    /// Empty = flat, and the last rung at or below the declared version wins
+    /// ([`Self::severity_at`]).
+    ///
+    /// This column owns the version facts no `MarkerRow` owns: the spec
+    /// deprecates and then removes forms, and the table records the marker
+    /// page, never a version ladder. It is DATA — `attr-trailing-form`'s
+    /// none→Warning→Error ladder used to be half here and half a hand-coded
+    /// `>= 3.2` gate in `flat.rs`; the `None` base above is what let that gate
+    /// become this slice's first rung.
+    pub escalation: &'static [(UsfmVersion, Severity)],
     /// What [`Observation::aux`] means for this code.
     ///
     /// [`Observation::aux`]: super::Observation::aux
@@ -146,14 +173,44 @@ pub struct LintRow {
     pub fix_label: Option<&'static str>,
 }
 
+impl LintRow {
+    /// The severity this rule carries in a document that declares `version`, or
+    /// `None` when it is SILENT there — the whole reading of the two version
+    /// columns, in one place.
+    ///
+    /// ```text
+    /// severity          escalation                          undeclared  3.0      3.2      4.0
+    /// Some(Error)       &[]                                 Error       Error    Error    Error
+    /// Some(Warning)     &[(V4_0, Error)]                    Warning     Warning  Warning  Error
+    /// None (GATED)      &[(V3_2, Warning), (V4_0, Error)]   —           —        Warning  Error
+    /// ```
+    ///
+    /// A `None` answer means the finding is never raised at all (the machine
+    /// asks before it pushes), which is why the gate is expressible as data
+    /// rather than as an `if` beside the rule.
+    pub fn severity_at(&self, version: Option<UsfmVersion>) -> Option<Severity> {
+        let mut severity = self.severity;
+        if let Some(declared) = version {
+            // Ascending, so the LAST rung at or below the declaration wins.
+            for (rung, escalated) in self.escalation {
+                if *rung > declared {
+                    break;
+                }
+                severity = Some(*escalated);
+            }
+        }
+        severity
+    }
+}
+
 /// The authored rules table — one row per [`Code`], in the enum's order.
 ///
-/// Phases 1-3: Structure, Ordering, Payload, Form, and the SHAPE-ONLY half of
-/// Attributes. Still absent, each waiting on a piece that does not exist yet:
-/// `attr-unknown-name` and `attr-required-if` want the k/v attribute
-/// interpreter, and the whole Version family wants a consumer for the
-/// `deprecated` column.
-pub const LINT_ROWS: [LintRow; 37] = [
+/// All six families, and nothing owed: phases 1-3 shipped Structure, Ordering,
+/// Payload, Form and the shape-only half of Attributes, and the closeout window
+/// added the three k/v attribute rules the interpreter unblocked, the Version
+/// family (the consumer `MarkerRow::deprecated` was waiting for) and the
+/// positional band's judge.
+pub const LINT_ROWS: [LintRow; 43] = [
     // A note frame the walker had to end without its `\f*`/`\x*`: something
     // that cannot live inside a note (a `\c`, a bare `\v`, an unknown marker)
     // arrived while it was open. Both live corpus instances (en_ulb ISA and
@@ -174,8 +231,8 @@ pub const LINT_ROWS: [LintRow; 37] = [
         code: Code::UnclosedNote,
         name: "unclosed-note",
         category: Category::Structure,
-        severity: Severity::Error,
-        escalation: None,
+        severity: Some(Severity::Error),
+        escalation: &[],
         aux: AuxKind::None,
         template: "\\{anchor} was never closed",
         fix_label: Some("insert the note closer"),
@@ -186,8 +243,8 @@ pub const LINT_ROWS: [LintRow; 37] = [
         code: Code::UnclosedChar,
         name: "unclosed-char",
         category: Category::Structure,
-        severity: Severity::Error,
-        escalation: None,
+        severity: Some(Severity::Error),
+        escalation: &[],
         aux: AuxKind::None,
         template: "\\{anchor} was never closed",
         fix_label: Some("insert the closer"),
@@ -199,8 +256,8 @@ pub const LINT_ROWS: [LintRow; 37] = [
         code: Code::UnclosedAtEof,
         name: "unclosed-at-eof",
         category: Category::Structure,
-        severity: Severity::Warning,
-        escalation: None,
+        severity: Some(Severity::Warning),
+        escalation: &[],
         aux: AuxKind::None,
         template: "\\{anchor} is still open at the end of the book",
         fix_label: Some("insert the closer"),
@@ -212,8 +269,8 @@ pub const LINT_ROWS: [LintRow; 37] = [
         code: Code::UnterminatedContainer,
         name: "unterminated-container",
         category: Category::Structure,
-        severity: Severity::Warning,
-        escalation: Some((UsfmVersion::V4_0, Severity::Error)),
+        severity: Some(Severity::Warning),
+        escalation: &[(UsfmVersion::V4_0, Severity::Error)],
         aux: AuxKind::None,
         template: "\\{anchor} container was not closed by its end milestone",
         fix_label: Some("insert the container end milestone"),
@@ -225,8 +282,8 @@ pub const LINT_ROWS: [LintRow; 37] = [
         code: Code::UnterminatedMilestone,
         name: "unterminated-milestone",
         category: Category::Structure,
-        severity: Severity::Error,
-        escalation: None,
+        severity: Some(Severity::Error),
+        escalation: &[],
         aux: AuxKind::None,
         template: "\\{anchor} milestone is missing its \\*",
         fix_label: Some("insert \\*"),
@@ -238,8 +295,8 @@ pub const LINT_ROWS: [LintRow; 37] = [
         code: Code::OrphanCloser,
         name: "orphan-closer",
         category: Category::Structure,
-        severity: Severity::Error,
-        escalation: None,
+        severity: Some(Severity::Error),
+        escalation: &[],
         aux: AuxKind::None,
         template: "\\{anchor} closes nothing",
         fix_label: Some("delete the closer"),
@@ -249,8 +306,8 @@ pub const LINT_ROWS: [LintRow; 37] = [
         code: Code::OrphanTerminator,
         name: "orphan-terminator",
         category: Category::Structure,
-        severity: Severity::Error,
-        escalation: None,
+        severity: Some(Severity::Error),
+        escalation: &[],
         aux: AuxKind::None,
         template: "\\* terminates no milestone",
         fix_label: Some("delete \\*"),
@@ -263,8 +320,8 @@ pub const LINT_ROWS: [LintRow; 37] = [
         code: Code::OrphanContainerEnd,
         name: "orphan-container-end",
         category: Category::Structure,
-        severity: Severity::Warning,
-        escalation: None,
+        severity: Some(Severity::Warning),
+        escalation: &[],
         aux: AuxKind::None,
         template: "\\{anchor} ends no open container",
         fix_label: None,
@@ -277,8 +334,8 @@ pub const LINT_ROWS: [LintRow; 37] = [
         code: Code::ContentOutsideSidebarRule,
         name: "content-outside-sidebar-rule",
         category: Category::Structure,
-        severity: Severity::Warning,
-        escalation: None,
+        severity: Some(Severity::Warning),
+        escalation: &[],
         aux: AuxKind::None,
         template: "\\{anchor} is inside the sidebar opened by \\{second}",
         fix_label: None,
@@ -293,8 +350,8 @@ pub const LINT_ROWS: [LintRow; 37] = [
         code: Code::UnknownMarker,
         name: "unknown-marker",
         category: Category::Structure,
-        severity: Severity::Warning,
-        escalation: None,
+        severity: Some(Severity::Warning),
+        escalation: &[],
         aux: AuxKind::None,
         template: "\\{anchor} is not a known marker",
         fix_label: None,
@@ -307,8 +364,8 @@ pub const LINT_ROWS: [LintRow; 37] = [
         code: Code::NestedSpellingMisuse,
         name: "nested-spelling-misuse",
         category: Category::Structure,
-        severity: Severity::Warning,
-        escalation: None,
+        severity: Some(Severity::Warning),
+        escalation: &[],
         aux: AuxKind::None,
         template: "\\+{anchor} is not a character marker; the nested spelling does not apply",
         fix_label: None,
@@ -332,8 +389,8 @@ pub const LINT_ROWS: [LintRow; 37] = [
         code: Code::MissingParagraph,
         name: "missing-paragraph",
         category: Category::Structure,
-        severity: Severity::Warning,
-        escalation: None,
+        severity: Some(Severity::Warning),
+        escalation: &[],
         aux: AuxKind::None,
         template: "\\{anchor} is not inside a paragraph",
         fix_label: Some("insert \\p"),
@@ -348,8 +405,8 @@ pub const LINT_ROWS: [LintRow; 37] = [
         code: Code::DesignatorMalformed,
         name: "designator-malformed",
         category: Category::Ordering,
-        severity: Severity::Error,
-        escalation: None,
+        severity: Some(Severity::Error),
+        escalation: &[],
         aux: AuxKind::None,
         template: "{anchor} is not a valid chapter/verse number",
         fix_label: None,
@@ -360,8 +417,8 @@ pub const LINT_ROWS: [LintRow; 37] = [
         code: Code::ChapterDuplicate,
         name: "chapter-duplicate",
         category: Category::Ordering,
-        severity: Severity::Error,
-        escalation: None,
+        severity: Some(Severity::Error),
+        escalation: &[],
         aux: AuxKind::ExpectedNumber,
         template: "chapter {anchor} repeats the chapter at {second}; expected {aux}",
         fix_label: Some("renumber to the expected chapter"),
@@ -371,8 +428,8 @@ pub const LINT_ROWS: [LintRow; 37] = [
         code: Code::ChapterOutOfOrder,
         name: "chapter-out-of-order",
         category: Category::Ordering,
-        severity: Severity::Error,
-        escalation: None,
+        severity: Some(Severity::Error),
+        escalation: &[],
         aux: AuxKind::ExpectedNumber,
         template: "chapter {anchor} goes backwards from {second}; expected {aux}",
         fix_label: Some("renumber to the expected chapter"),
@@ -384,8 +441,8 @@ pub const LINT_ROWS: [LintRow; 37] = [
         code: Code::ChapterGap,
         name: "chapter-gap",
         category: Category::Ordering,
-        severity: Severity::Warning,
-        escalation: None,
+        severity: Some(Severity::Warning),
+        escalation: &[],
         aux: AuxKind::ExpectedNumber,
         template: "chapter {anchor} skips ahead; expected {aux}",
         fix_label: None,
@@ -397,8 +454,8 @@ pub const LINT_ROWS: [LintRow; 37] = [
         code: Code::VerseDuplicate,
         name: "verse-duplicate",
         category: Category::Ordering,
-        severity: Severity::Warning,
-        escalation: None,
+        severity: Some(Severity::Warning),
+        escalation: &[],
         aux: AuxKind::ExpectedNumber,
         template: "verse {anchor} repeats the verse at {second}; expected {aux}",
         fix_label: Some("renumber to the expected verse"),
@@ -408,8 +465,8 @@ pub const LINT_ROWS: [LintRow; 37] = [
         code: Code::VerseOutOfOrder,
         name: "verse-out-of-order",
         category: Category::Ordering,
-        severity: Severity::Warning,
-        escalation: None,
+        severity: Some(Severity::Warning),
+        escalation: &[],
         aux: AuxKind::ExpectedNumber,
         template: "verse {anchor} goes backwards from {second}; expected {aux}",
         fix_label: Some("renumber to the expected verse"),
@@ -422,8 +479,8 @@ pub const LINT_ROWS: [LintRow; 37] = [
         code: Code::VerseGap,
         name: "verse-gap",
         category: Category::Ordering,
-        severity: Severity::Warning,
-        escalation: None,
+        severity: Some(Severity::Warning),
+        escalation: &[],
         aux: AuxKind::ExpectedNumber,
         template: "verse {anchor} skips ahead; expected {aux}",
         fix_label: None,
@@ -435,8 +492,8 @@ pub const LINT_ROWS: [LintRow; 37] = [
         code: Code::MissingVerseOne,
         name: "missing-verse-one",
         category: Category::Ordering,
-        severity: Severity::Warning,
-        escalation: None,
+        severity: Some(Severity::Warning),
+        escalation: &[],
         aux: AuxKind::ExpectedNumber,
         template: "this chapter starts at verse {anchor}; expected {aux}",
         fix_label: None,
@@ -449,8 +506,8 @@ pub const LINT_ROWS: [LintRow; 37] = [
         code: Code::VerseBeforeFirstChapter,
         name: "verse-before-first-chapter",
         category: Category::Ordering,
-        severity: Severity::Warning,
-        escalation: None,
+        severity: Some(Severity::Warning),
+        escalation: &[],
         aux: AuxKind::None,
         template: "\\{anchor} comes before the book's first \\c",
         fix_label: None,
@@ -462,8 +519,8 @@ pub const LINT_ROWS: [LintRow; 37] = [
         code: Code::MissingChapter,
         name: "missing-chapter",
         category: Category::Ordering,
-        severity: Severity::Warning,
-        escalation: None,
+        severity: Some(Severity::Warning),
+        escalation: &[],
         aux: AuxKind::None,
         template: "this book has verses but no \\c",
         fix_label: None,
@@ -478,8 +535,8 @@ pub const LINT_ROWS: [LintRow; 37] = [
         code: Code::MissingId,
         name: "missing-id",
         category: Category::Payload,
-        severity: Severity::Error,
-        escalation: None,
+        severity: Some(Severity::Error),
+        escalation: &[],
         aux: AuxKind::None,
         template: "this book has no \\id line",
         fix_label: None,
@@ -490,8 +547,8 @@ pub const LINT_ROWS: [LintRow; 37] = [
         code: Code::BookCodeUnknown,
         name: "book-code-unknown",
         category: Category::Payload,
-        severity: Severity::Error,
-        escalation: None,
+        severity: Some(Severity::Error),
+        escalation: &[],
         aux: AuxKind::None,
         template: "{anchor} is not a book identifier",
         fix_label: None,
@@ -503,8 +560,8 @@ pub const LINT_ROWS: [LintRow; 37] = [
         code: Code::BookCodeNotUppercase,
         name: "book-code-not-uppercase",
         category: Category::Payload,
-        severity: Severity::Warning,
-        escalation: None,
+        severity: Some(Severity::Warning),
+        escalation: &[],
         aux: AuxKind::None,
         template: "book identifier {anchor} should be uppercase",
         fix_label: Some("uppercase the book identifier"),
@@ -517,8 +574,8 @@ pub const LINT_ROWS: [LintRow; 37] = [
         code: Code::ChapterWithoutDesignator,
         name: "chapter-without-designator",
         category: Category::Payload,
-        severity: Severity::Error,
-        escalation: None,
+        severity: Some(Severity::Error),
+        escalation: &[],
         aux: AuxKind::None,
         template: "\\{anchor} has no chapter number",
         fix_label: None,
@@ -540,8 +597,8 @@ pub const LINT_ROWS: [LintRow; 37] = [
         code: Code::CaCpPlacement,
         name: "ca-cp-placement",
         category: Category::Structure,
-        severity: Severity::Warning,
-        escalation: None,
+        severity: Some(Severity::Warning),
+        escalation: &[],
         aux: AuxKind::None,
         template: "\\{anchor} must follow the \\c it re-numbers",
         fix_label: None,
@@ -551,8 +608,8 @@ pub const LINT_ROWS: [LintRow; 37] = [
         code: Code::VaVpPlacement,
         name: "va-vp-placement",
         category: Category::Structure,
-        severity: Severity::Warning,
-        escalation: None,
+        severity: Some(Severity::Warning),
+        escalation: &[],
         aux: AuxKind::None,
         template: "\\{anchor} must follow the \\v it re-numbers",
         fix_label: None,
@@ -573,8 +630,8 @@ pub const LINT_ROWS: [LintRow; 37] = [
         code: Code::CallerShape,
         name: "caller-shape",
         category: Category::Payload,
-        severity: Severity::Hint,
-        escalation: None,
+        severity: Some(Severity::Hint),
+        escalation: &[],
         aux: AuxKind::None,
         template: "{anchor} is an unusual note caller",
         fix_label: None,
@@ -599,8 +656,8 @@ pub const LINT_ROWS: [LintRow; 37] = [
         code: Code::NumberingMix,
         name: "numbering-mix",
         category: Category::Payload,
-        severity: Severity::Info,
-        escalation: None,
+        severity: Some(Severity::Info),
+        escalation: &[],
         aux: AuxKind::NumberingCap,
         template: "\\{anchor} mixes numbered and bare spellings with \\{second} (levels 1-{aux})",
         fix_label: None,
@@ -624,8 +681,8 @@ pub const LINT_ROWS: [LintRow; 37] = [
         code: Code::MarkerNotWsPreceded,
         name: "marker-not-ws-preceded",
         category: Category::Form,
-        severity: Severity::Hint,
-        escalation: None,
+        severity: Some(Severity::Hint),
+        escalation: &[],
         aux: AuxKind::None,
         template: "\\{anchor} needs whitespace before it",
         fix_label: Some("insert a line break"),
@@ -650,8 +707,8 @@ pub const LINT_ROWS: [LintRow; 37] = [
         code: Code::DelimiterShape,
         name: "delimiter-shape",
         category: Category::Form,
-        severity: Severity::Hint,
-        escalation: None,
+        severity: Some(Severity::Hint),
+        escalation: &[],
         aux: AuxKind::None,
         template: "\\{anchor} is not followed by structural whitespace",
         fix_label: None,
@@ -667,8 +724,8 @@ pub const LINT_ROWS: [LintRow; 37] = [
         code: Code::EmptyParagraph,
         name: "empty-paragraph",
         category: Category::Form,
-        severity: Severity::Info,
-        escalation: None,
+        severity: Some(Severity::Info),
+        escalation: &[],
         aux: AuxKind::None,
         template: "\\{anchor} has no content",
         fix_label: None,
@@ -687,22 +744,30 @@ pub const LINT_ROWS: [LintRow; 37] = [
     //   form is deprecated" to a file that declares 3.0 is simply wrong: the
     //   trailing form is the correct spelling of the version in force. en_ult
     //   declares 3.0 and contains 792,414 trailing lists — every one of them
-    //   right, and every one of them a false positive without this gate. The
-    //   `escalation` column then does the rest: Warning at 3.2, Error at 4.
+    //   right, and every one of them a false positive without this gate.
+    //
+    //   That gate USED TO BE an `if` beside the rule in flat.rs. It is now the
+    //   `None` base below plus the ladder's first rung, which is the whole
+    //   point of the slice: undeclared and 3.0 are silent, 3.2 is a Warning,
+    //   4 is an Error, and every one of those four facts is authored HERE.
     //
     // NO FIX, deliberately (phase 4). The 3.2 rewrite MOVES the list from back
     // position to front — `\w grace|lemma="x"\w*` becomes
-    // `\w |lemma="x"|grace\w*` — and a move is not one splice: the k/v interior
-    // has never been read (that is the attribute interpreter's, unbuilt), the
-    // content the list has to jump over is arbitrary, and deciding where inside
-    // it the boundary falls is an interpretation of the author's text. A fix is
+    // `\w |lemma="x"|grace\w*` — and a move is not one splice: the content the
+    // list has to jump over is arbitrary, and deciding where inside it the
+    // boundary falls is an interpretation of the author's text. (The k/v
+    // interior IS readable now — `crate::attributes` — and it changes nothing:
+    // knowing the pairs does not locate the author's intended split.) A fix is
     // a mechanical splice or it is not offered.
     LintRow {
         code: Code::AttrTrailingFormDeprecated,
         name: "attr-trailing-form-deprecated",
         category: Category::Attributes,
-        severity: Severity::Warning,
-        escalation: Some((UsfmVersion::V4_0, Severity::Error)),
+        severity: None,
+        escalation: &[
+            (UsfmVersion::V3_2, Severity::Warning),
+            (UsfmVersion::V4_0, Severity::Error),
+        ],
         aux: AuxKind::Version,
         template: "the trailing attribute form is deprecated in USFM {aux}",
         fix_label: None,
@@ -716,8 +781,8 @@ pub const LINT_ROWS: [LintRow; 37] = [
         code: Code::AttrBothLists,
         name: "attr-both-lists",
         category: Category::Attributes,
-        severity: Severity::Warning,
-        escalation: None,
+        severity: Some(Severity::Warning),
+        escalation: &[],
         aux: AuxKind::None,
         template: "a second attribute list overrides the one at {second}",
         fix_label: None,
@@ -737,8 +802,8 @@ pub const LINT_ROWS: [LintRow; 37] = [
         code: Code::AttrTerminatorMismatch,
         name: "attr-terminator-mismatch",
         category: Category::Attributes,
-        severity: Severity::Warning,
-        escalation: None,
+        severity: Some(Severity::Warning),
+        escalation: &[],
         aux: AuxKind::None,
         template: "the attribute list on \\{second} is closed by the wrong marker",
         fix_label: None,
@@ -752,13 +817,276 @@ pub const LINT_ROWS: [LintRow; 37] = [
         code: Code::AttrPipeHint,
         name: "attr-pipe-hint",
         category: Category::Attributes,
-        severity: Severity::Hint,
-        escalation: None,
+        severity: Some(Severity::Hint),
+        escalation: &[],
         aux: AuxKind::None,
         template: "did you mean an attribute list on \\{second}?",
         fix_label: None,
     },
+    // ---- Attributes (the k/v half) ----------------------------------------
+    // An attribute name the owning marker's row does not define — read by
+    // `attributes::resolve`, which is the ONE place naming conventions live.
+    //
+    // A HINT, and the corpus says why it must be: `x-`/`z-` names are legal on
+    // any marker and en_ult carries 4.35M of them, so the only names that reach
+    // this rule are genuinely unrecognized ones — and an unrecognized name is
+    // not damage. The spec's own extension story is "put it in `x-`", so the
+    // finding is "did you mean `x-…`?", not "this is wrong".
+    //
+    // TWO shapes, told apart by `aux`, because they are one authoring question
+    // asked twice:
+    //   * aux = 0 — a NAMED attribute nothing matched (`\w a|nope="x"\w*`).
+    //   * aux = 1 — the BARE default form on a row with no `default_attribute`
+    //     (`\fig |a.png\fig*`). The interpreter resolves bare through that
+    //     column itself and reports `Unknown` for both cases, so the shape is
+    //     read off `name.is_empty()` exactly as `AttrResolution` documents.
+    //
+    // Row 0 owners are silent: `unknown-marker` has already said everything
+    // there is to say about `\zfoo |k="v"\*`, and its row defines nothing, so
+    // every attribute on it would otherwise be a finding.
+    LintRow {
+        code: Code::AttrUnknownName,
+        name: "attr-unknown-name",
+        category: Category::Attributes,
+        severity: Some(Severity::Hint),
+        escalation: &[],
+        aux: AuxKind::Count,
+        template: "\\{second} defines no such attribute",
+        fix_label: None,
+    },
+    // The interpreter's `Malformed` verdict: the list's bytes stopped making
+    // sense. ONE finding per list by construction — `Malformed` ends the walk,
+    // because a broken tail is one mistake and not one per remaining byte.
+    //
+    // `aux` is the [`MalformedAttr`](crate::attributes::MalformedAttr)
+    // discriminant, and the mapping is the enum's declaration order:
+    //   0 = UnterminatedQuote (`|lemma="grace`)
+    //   1 = EmptyName         (`|="x"`)
+    //   2 = MissingValue      (`|lemma=`)
+    //   3 = BareJunk          (`|lemma="a", strong="G1"` — a comma is not a
+    //                          separator; usfmtc silently DROPS the tail, we
+    //                          report it)
+    //
+    // Warning, not Error: the list lexed as a list, so the document is
+    // readable — what is lost is the attributes after the blamed byte.
+    LintRow {
+        code: Code::AttrMalformed,
+        name: "attr-malformed",
+        category: Category::Attributes,
+        severity: Some(Severity::Warning),
+        escalation: &[],
+        aux: AuxKind::MalformedShape,
+        template: "the attribute list on \\{second} stops making sense",
+        fix_label: None,
+    },
+    // The CONDITIONAL cardinality no row can express. `defined_attributes`
+    // says Optional because the attribute is optional in general; whether THIS
+    // occurrence owes one is a fact about the document, which makes it lint's.
+    //
+    // Two shapes, both anchored at the list (or at the milestone itself when
+    // there is no list at all):
+    //   * `eid` on a milestone END point whose family was opened with `sid`
+    //     (`\qt-s |sid="a"\* … \qt-e\*`). `second` is that earlier
+    //     sid-carrying point. Deliberately NOT pairing: which `sid` this `eid`
+    //     would answer is vref/pairing territory, unmodelled in the CST on
+    //     purpose, so the rule is per-POINT — the row was opened with `sid`
+    //     somewhere above, and this `-e` carries none.
+    //   * `\ta`'s "one or more attributes, each beginning with `a-`"
+    //     (char/features/ta.html). The row carries the `a-*` wildcard and no
+    //     fixed names, so "the family is empty here" is the only reading of
+    //     its cardinality, and a list with none of it is the finding.
+    LintRow {
+        code: Code::AttrRequiredIf,
+        name: "attr-required-if",
+        category: Category::Attributes,
+        severity: Some(Severity::Warning),
+        escalation: &[],
+        aux: AuxKind::None,
+        template: "\\{second} is missing an attribute this occurrence requires",
+        fix_label: None,
+    },
+    // ---- Version ----------------------------------------------------------
+    // A marker the spec deprecates — membership is [`VERSION_ROWS`], the small
+    // authored table below, because the decisive fact (WHICH version said so)
+    // is owned by no `MarkerRow` column.
+    //
+    // GATED on a declared `\usfm`, via the `None` base: a 2.x-era book full of
+    // `\addpn` is correct for its era, and guessing that an undeclared file
+    // means "latest" would report every legacy book in the world. Warning from
+    // 3.0 (every seed marker's own deprecating version), Error at 4 — the era
+    // in which a deprecated form is expected to be gone.
+    //
+    // `aux` is the DEPRECATING version, not the declared one: it is the fact
+    // the message needs ("deprecated since 3.0"), and the declared version is
+    // already in `LintReport::declared_version`.
+    LintRow {
+        code: Code::DeprecatedMarker,
+        name: "deprecated-marker",
+        category: Category::Version,
+        severity: None,
+        escalation: &[
+            (UsfmVersion::V3_0, Severity::Warning),
+            (UsfmVersion::V4_0, Severity::Error),
+        ],
+        aux: AuxKind::Version,
+        template: "\\{anchor} is deprecated since USFM {aux}",
+        fix_label: Some("rename to the replacement marker"),
+    },
+    // The Version family's other half, and the reason it is HERE rather than
+    // under Attributes: the fact reported is a LIFECYCLE fact — the spec still
+    // recognizes this attribute and tells authors not to use it — which is what
+    // this family is for. `\xt`'s `link-href` and `\jmp`'s whole `link-`
+    // prefixed trio, deprecated in 3.1, are the entire membership, and it is
+    // read straight off [`AttrStatus::Deprecated`] as the interpreter resolves
+    // the name.
+    //
+    // INFO, and NO GATE, both because of what the data is: `AttrStatus` carries
+    // no version, so "deprecated since when" cannot be said here the way
+    // `VERSION_ROWS` says it for a marker — and a rule that cannot name the
+    // version it keys on must not pretend to gate on one. The attribute is
+    // still legal to read, which is exactly Info's register.
+    //
+    // NO FIX: `link-href` → `href` looks mechanical, and might be, but the
+    // table records only the deprecated name — nothing authored says what
+    // replaces it. A fix is offered from data or it is not offered.
+    LintRow {
+        code: Code::DeprecatedAttribute,
+        name: "deprecated-attribute",
+        category: Category::Version,
+        severity: Some(Severity::Info),
+        escalation: &[],
+        aux: AuxKind::None,
+        template: "the attribute list on \\{second} uses a deprecated attribute",
+        fix_label: None,
+    },
+    // ---- The positional band ----------------------------------------------
+    // A marker whose every POSITIONAL context is behind the document's
+    // position: `\ip` (BookIntroduction) after the book has reached
+    // ChapterContent, `\h` (BookHeaders) after its titles.
+    //
+    // The band is the mask's positional half — `Scripture` → … →
+    // `ChapterContent`, the axis `SpecContext::is_positional` names — and it is
+    // MONOTONIC, which is the whole reason this rule needs no data: the
+    // document walks the eight bits forward exactly once, so a marker either
+    // fits where we are, advances us to the lowest of its contexts above us, or
+    // is behind us and is this finding. Markers listing two positional
+    // contexts (`mt#`, `cl`, `ip`) resolve by lowest-above-current, which is
+    // how `\cl`'s two meanings (before the first `\c`, and inside a chapter)
+    // fall out of one rule.
+    //
+    // ABSTAINS on rows with no positional bit at all — every character marker,
+    // and `\cp`, whose empty mask is deliberate (`ca`/`cp`/`va`/`vp` are an
+    // ADJACENCY question over tokens, ruled, and this lane says nothing about
+    // them). Row 0 abstains for the same reason: no mask, and `unknown-marker`
+    // has already spoken.
+    //
+    // Warning: the marker is legal, its PLACE is not, and the repair is a
+    // MOVE — never a splice — so no fix is offered.
+    LintRow {
+        code: Code::MarkerOutOfBand,
+        name: "marker-out-of-band",
+        category: Category::Structure,
+        severity: Some(Severity::Warning),
+        escalation: &[],
+        aux: AuxKind::None,
+        template: "\\{anchor} belongs earlier in the book than this",
+        fix_label: None,
+    },
 ];
+
+// ---------------------------------------------------------------------------
+// The Version family's authored data
+// ---------------------------------------------------------------------------
+
+/// Per-marker version facts lint owns, because no `MarkerRow` column does:
+/// `deprecated` is a BOOL, and "deprecated SINCE WHAT" is the fact the rule
+/// needs. (The "no version column on MarkerRow" law was softened 2026-08-20 —
+/// a column there is permitted when simpler — but a five-row table here touches
+/// no schema and no codegen, so it stays lint-side until the set grows.)
+///
+/// Keyed by ROW NAME, like the books table: the canonical name is what
+/// `generated::name` hands back, and a name comparison over five entries is
+/// cheaper than any index scheme this would need.
+pub struct VersionRow {
+    pub marker: &'static str,
+    /// The first version that says "don't".
+    pub deprecated_in: UsfmVersion,
+    /// The marker to rename to, when the spec's replacement is a RENAME. `None`
+    /// where it is a restructure — the same line `attr-trailing-form` draws:
+    /// a fix is a mechanical splice or it is not offered.
+    pub replacement: Option<&'static str>,
+}
+
+/// The five markers `tables::rows` marks `deprecated: true`, with the version
+/// the deprecation dates from.
+///
+/// All five date from 3.0 — USFM 3.0 is the release that deprecated the
+/// Chinese-typography markers (`addpn`, `pro`), the hanging-indent paragraph
+/// (`ph`) and the two deuterocanonical note halves (`fdc`, `xdc`). Our own
+/// `ph` row already carried the page evidence (`para/paragraphs/ph.html`,
+/// "Deprecated: 3.0"); the other four are stated as 3.0 on the same authority
+/// and nothing in 3.1/3.2 re-dates them.
+///
+/// NOTE — no `removed_in` column, and that is a reading of the spec rather than
+/// a shortcut: 3.2 still documents all five, so none has been REMOVED and the
+/// column would be five `None`s that nothing reads. The Error rung on
+/// `deprecated-marker`'s ladder carries the "this era expects it gone" fact
+/// instead. Add the column with the first marker the spec actually removes.
+pub const VERSION_ROWS: [VersionRow; 5] = [
+    // char/addpn.html — the Chinese "added proper name". The replacement is
+    // `\add` WRAPPING `\pn`, i.e. two markers where there was one, so it is a
+    // restructure and no rename can express it.
+    VersionRow {
+        marker: "addpn",
+        deprecated_in: UsfmVersion::V3_0,
+        replacement: None,
+    },
+    // char/fdc.html — footnote text that applies only to a deuterocanonical
+    // edition. Handled by publishing a different footnote, not by another
+    // marker: a restructure.
+    VersionRow {
+        marker: "fdc",
+        deprecated_in: UsfmVersion::V3_0,
+        replacement: None,
+    },
+    // para/paragraphs/ph.html, "Deprecated: 3.0" — the page names `\li#` as
+    // the form to use, and the level digit carries across unchanged (`ph`
+    // caps at 3, `li` at 4), so `\ph2` → `\li2` is a pure rename of the two
+    // name bytes.
+    VersionRow {
+        marker: "ph",
+        deprecated_in: UsfmVersion::V3_0,
+        replacement: Some("li"),
+    },
+    // char/pro.html — the Chinese pronunciation gloss, replaced by 3.0's ruby
+    // markup `\rb`. `rb`'s only attribute (`gloss`) is Optional, so
+    // `\pro x\pro*` → `\rb x\rb*` is legal on its own; the richer
+    // `|gloss="…"` form is an ENRICHMENT the author adds, not something the
+    // rename owes.
+    VersionRow {
+        marker: "pro",
+        deprecated_in: UsfmVersion::V3_0,
+        replacement: Some("rb"),
+    },
+    // char/xdc.html — `\fdc`'s cross-reference twin, and the same
+    // restructure.
+    VersionRow {
+        marker: "xdc",
+        deprecated_in: UsfmVersion::V3_0,
+        replacement: None,
+    },
+];
+
+/// The version facts for a marker row's canonical name.
+///
+/// A linear scan over five `&'static str`s — and it never runs on a token that
+/// is not already deprecated, because `MarkerRow::deprecated` (one bitfield
+/// read, false for 148 of 153 rows) is the filter in front of it. That split is
+/// why the family needs no stamped column: the BOOL says whether to look, and
+/// this table says what the answer is.
+pub fn version_row(marker: &str) -> Option<&'static VersionRow> {
+    VERSION_ROWS.iter().find(|row| row.marker == marker)
+}
 
 #[cfg(test)]
 mod tests {
@@ -780,20 +1108,102 @@ mod tests {
             assert!(!seen.contains(&row.name), "duplicate name {}", row.name);
             seen.push(row.name);
             assert_eq!(row.code.row().name, row.name);
-            // Phases 1-3 ship five families; a stray row from a family whose
-            // pass has not landed means a phase arrived half-built. Version is
-            // the one still missing.
+            // The ladder is ASCENDING and starts above the base: a rung out of
+            // order would make `severity_at` read the wrong severity, silently.
+            for pair in row.escalation.windows(2) {
+                assert!(pair[0].0 < pair[1].0, "{}'s ladder is unsorted", row.name);
+            }
+            // A GATED row (silent base) with no ladder would be silent for
+            // ever — that is a deleted rule, not a gated one.
             assert!(
-                !matches!(row.category, Category::Version),
-                "{} belongs to a family with no pass yet",
+                row.severity.is_some() || !row.escalation.is_empty(),
+                "{} is silent at every version",
                 row.name
             );
-            // `Count` is the one aux meaning nothing writes yet.
+        }
+        // Every family now has a pass. (This assertion used to read the other
+        // way round — "no row may be Version, that pass does not exist" — and
+        // the closeout window is what turned it over.)
+        for family in [
+            Category::Structure,
+            Category::Ordering,
+            Category::Attributes,
+            Category::Payload,
+            Category::Form,
+            Category::Version,
+        ] {
             assert!(
-                !matches!(row.aux, AuxKind::Count),
-                "{} uses an aux kind nothing writes yet",
-                row.name
+                LINT_ROWS.iter().any(|row| row.category == family),
+                "{family:?} has no rule"
             );
+        }
+    }
+
+    /// The escalation slice's whole contract, on the row that earned it: below
+    /// the first rung a GATED code says nothing at all, and each rung takes
+    /// over at its own version.
+    #[test]
+    fn the_trailing_form_ladder_is_silent_then_warning_then_error() {
+        let row = Code::AttrTrailingFormDeprecated.row();
+        assert_eq!(row.severity_at(None), None);
+        assert_eq!(row.severity_at(Some(UsfmVersion::V3_0)), None);
+        assert_eq!(
+            row.severity_at(Some(UsfmVersion::V3_2)),
+            Some(Severity::Warning)
+        );
+        assert_eq!(
+            row.severity_at(Some(UsfmVersion::V4_0)),
+            Some(Severity::Error)
+        );
+
+        // A FLAT row ignores the declaration entirely…
+        let flat = Code::UnclosedNote.row();
+        for version in [None, Some(UsfmVersion::V3_0), Some(UsfmVersion::V4_0)] {
+            assert_eq!(flat.severity_at(version), Some(Severity::Error));
+        }
+        // …and an ungated one-rung row keeps its base until the rung.
+        let container = Code::UnterminatedContainer.row();
+        assert_eq!(container.severity_at(None), Some(Severity::Warning));
+        assert_eq!(
+            container.severity_at(Some(UsfmVersion::V3_2)),
+            Some(Severity::Warning)
+        );
+        assert_eq!(
+            container.severity_at(Some(UsfmVersion::V4_0)),
+            Some(Severity::Error)
+        );
+    }
+
+    /// The Version table and `MarkerRow::deprecated` must name the same five
+    /// markers: the bool is the filter the rule reads first, so a row in one
+    /// and not the other is a rule that cannot fire (or a lookup that misses).
+    #[test]
+    fn the_version_table_matches_the_deprecated_column() {
+        use crate::tables::generated;
+
+        let mut from_table: Vec<&str> = (0..generated::ROW_COUNT)
+            .map(|idx| idx as generated::MarkerIdx)
+            .filter(|idx| generated::deprecated(*idx))
+            .map(generated::name)
+            .collect();
+        from_table.sort_unstable();
+        let mut authored: Vec<&str> = VERSION_ROWS.iter().map(|row| row.marker).collect();
+        authored.sort_unstable();
+        assert_eq!(from_table, authored);
+        assert_eq!(authored, ["addpn", "fdc", "ph", "pro", "xdc"]);
+
+        // A replacement must be a real marker row (the fix writes its name).
+        for row in &VERSION_ROWS {
+            if let Some(replacement) = row.replacement {
+                assert!(
+                    generated::marker_idx(
+                        replacement.as_bytes(),
+                        crate::tables::schema::SpellingShape::PlainOnly
+                    ) != generated::UNRESOLVED,
+                    "{} names an unknown replacement",
+                    row.marker
+                );
+            }
         }
     }
 }

@@ -1,34 +1,33 @@
 //! The attribute k/v INTERPRETER: the one place that reads inside a
 //! [`TokenKind::AttrList`](crate::TokenKind::AttrList) span, and the one place
-//! that knows how an attribute NAME is matched against the marker table.
+//! that knows how an attribute NAME matches the marker table.
+//! [`designator`](crate::designator)'s sibling: borrowed spans, no allocation,
+//! no repair — `Malformed` is recorded, never resynchronized. Consumers:
+//! lint's attr rules, exports' k/v splatting (the LOSSY step; the token
+//! itself stays byte-identical).
 //!
-//! The scanner carves a list as ONE token, delimiting pipe(s) included, and
-//! never looks at its bytes (scanner.rs `attr_list_end` only finds the END).
-//! This module is the judgement half: span in, k/v events out. It is
-//! [`designator`](crate::designator)'s sibling in every respect — no
-//! allocation, no repair, borrowed spans, and a `Malformed` verdict that is
-//! recorded rather than resynchronized. Consumers: lint's `attr-unknown-name`
-//! / `attr-required-if`, and exports' k/v splatting (the LOSSY step — the
-//! token itself stays byte-identical, which is what makes attribute
-//! passthrough lossless).
-//!
-//! # The interior
-//!
-//! Interior = the token span minus its delimiters: the leading `|` always, and
-//! a trailing `|` when the list is the U25001 node-initial form. The form is
-//! not stored on the token (token.rs) because the bytes encode it: the closing
-//! pipe is the whole distinction between `\w|Jesus|\w*` (node-initial) and
-//! `\w|Jesus\w*` (the 3.1 trailing form). One wrinkle: U25001 puts `<HS>*`
-//! INSIDE the list after the closing pipe, so the node-initial span can END in
-//! whitespace (`|aid="x"| `). Horizontal whitespace is therefore trimmed from
-//! both ends of the interior BEFORE the closing pipe is looked for, and
-//! trimming it costs nothing on the trailing form either (whitespace ends an
-//! unquoted value regardless).
-//!
-//! # The grammar
+//! # By example (each line is one AttrList token; `→` is the event stream)
 //!
 //! ```text
-//! interior := HS* (pairs | bare) HS*
+//! |x-strong="G2532" x-lemma="καί"  →  x-strong=G2532, x-lemma=καί   the corpus majority
+//! |in                              →  lemma=in            bare: whole interior → row's default_attribute
+//! |Fred Smith                      →  lemma=Fred Smith    bare is GREEDY: free text, ONE event, no invented junk
+//! |lemma=grace                     →  lemma=grace         unquoted pair value; ends at HS or interior end
+//! |lemma="a"strong="G1"            →  lemma=a, strong=G1  a closing quote is its own delimiter
+//! |aid="x"| ␠                      →  aid=x               node-initial (U25001): closing pipe + its inner HS trimmed
+//! |lemma="grace                    →  Malformed(UnterminatedQuote)       a pair ATTEMPTED and unfinished
+//! |lemma="a", strong="G1"          →  lemma=a, Malformed(BareJunk @ ,)   comma is never a separator
+//! |="x"                            →  Malformed(EmptyName)
+//! ```
+//!
+//! `Malformed` ENDS iteration — a broken tail is one finding, not many.
+//! Pairs-vs-bare is decided ONCE from the first bytes: name-run + `=` opens
+//! the pair form, anything else makes the whole interior one bare value.
+//!
+//! # Grammar
+//!
+//! ```text
+//! interior := HS* (pairs | bare) HS*     interior = span minus delimiter pipe(s)
 //! pairs    := pair (HS+ pair)*
 //! pair     := name '=' value
 //! name     := [A-Za-z0-9_-]+
@@ -36,71 +35,39 @@
 //! bare     := the whole interior, verbatim
 //! ```
 //!
-//! `HS` is space or tab; CR/LF cannot occur, because a list never spans a line
-//! (`attr_list_end` refuses one).
+//! HS = space/tab; CR/LF cannot occur (a list never spans a line —
+//! `attr_list_end`). Whitespace is the ONLY separator: probed 2026-08-20,
+//! usfmtc silently DROPS everything after a comma, so there is no comma
+//! dialect to honour — we flag where the reference implementation loses
+//! data. The name charset enforces it: a pair may only begin where a name
+//! byte does, so any stray byte where a pair was due is `BareJunk`.
 //!
-//! PAIRS OR BARE IS DECIDED ONCE, from the interior's first bytes: a name run
-//! followed by `=` starts the pair form; anything else means the entire
-//! interior is one unnamed value bound to the row's `default_attribute`
-//! (`\w In|in\w*` → `lemma = "in"`). The bare form is deliberately GREEDY —
-//! `|Fred Smith` is one value, not a value plus junk — because the default
-//! value is free text and tokenizing it would invent findings on ordinary
-//! data. It also makes the bare form exactly one event: read it, stop.
+//! # Bytes we refuse to touch (the spec defines NO escapes; neither do we)
 //!
-//! Separators are WHITESPACE ONLY. A comma between pairs is
-//! [`MalformedAttr::BareJunk`] at the comma (probed 2026-08-20: usfmtc
-//! silently DROPS everything after a comma, so there is no comma dialect to
-//! honour — where the reference implementation loses data, we flag it). What
-//! actually enforces that is the NAME charset: a pair may only begin where a
-//! name byte does, so `,` — or any other stray byte — is junk wherever a pair
-//! was due. A value carries its own right delimiter (the closing quote, or the
-//! whitespace that ends an unquoted one), so no separator is REQUIRED after
-//! one: `lemma="a"strong="G1"` reads as two pairs, which is also what usfmtc
-//! does.
+//! ```text
+//! |x="a\|b"   →  x=a\|b            \| and \\ pass through VERBATIM (unescaping
+//!                                  = allocation + a WRITER's job, never a reader's)
+//! |x="a\"b"   →  x=a\  + BareJunk  a quoted value ends at the FIRST '"', whatever precedes
+//! |"quoted"   →  lemma="quoted"    bare keeps its quote bytes (delimiters only in a pair)
+//! ```
 //!
-//! # Escapes, and other bytes we refuse to touch
+//! Only a quoted PAIR value's quotes are stripped — that one interpretation
+//! is the module's point.
 //!
-//! The 3.2 attribute grammar defines NO escapes inside a value, so this module
-//! defines none either:
+//! # vs usfmtc (probed 2026-08-20; every divergence deliberate)
 //!
-//! - A quoted value ends at the first `"` byte. `\` before it is a value byte
-//!   and closes nothing, so `lemma="a\"b"` reads as the value `a\` followed by
-//!   junk — [`MalformedAttr::BareJunk`], recorded rather than guessed.
-//! - `\|` and `\\` DO occur inside real lists (the scanner's `escape_len`
-//!   keeps them as content, which is load-bearing under U25001 where a raw
-//!   pipe would end the list). They pass through as value bytes VERBATIM. No
-//!   unescaping: normalization belongs to whoever writes bytes out, never to a
-//!   reader, and an interpreter that unescaped would have to allocate to do it.
-//! - Only the quotes of a quoted PAIR value are stripped — that one
-//!   interpretation is the point of the module. Nothing else is trimmed, and
-//!   the bare form keeps any quotes it contains (they are not delimiters
-//!   there; usfmtc agrees).
-//!
-//! # Where this reads more than usfmtc, and where it reads less
-//!
-//! Probed 2026-08-20 (usfmtc `readFile` → USJ, `\w hi|…\w*`). usfmtc parses
-//! the interior as a pair list and, if that fails ANYWHERE, silently rereads
-//! the WHOLE interior as the default value: `lemma=` becomes the value
-//! `lemma=`, `="x"` becomes the value `="x"`, `lemma="a` becomes the value
-//! `lemma="a"`-minus-nothing. That is a repair, and repairing is not ours: a
-//! pair ATTEMPT (a name run followed by `=`) that does not complete is
-//! [`AttrEvent::Malformed`], which is the finding lint wants and the data loss
-//! exports must not paper over. Two smaller divergences, both deliberate:
-//!
-//! - `lemma=grace` — an UNQUOTED pair value, which usfmtc rejects (and then
-//!   swallows whole). Read here as `lemma` = `grace`, ending at whitespace or
-//!   at the interior's end. Accepting it invents no bytes.
-//! - `"quoted"` as a bare default value — usfmtc keeps the quote BYTES there
-//!   (they are delimiters only in a pair), and so does this.
+//! On ANY pair failure usfmtc silently rereads the WHOLE interior as the
+//! default value (`lemma=` → the value `lemma=`). That is a repair, and
+//! repairing is not ours: a failed pair attempt here is `Malformed` — the
+//! finding lint wants, the data loss exports must not paper over. We also
+//! READ `lemma=grace` where usfmtc rejects-then-swallows (accepting it
+//! invents no bytes). Cross-checked EXACT on en_ult TIT 1:1's 48 real lists.
 //!
 //! # Cost
 //!
-//! One forward pass over the interior, no allocation, no lookahead beyond the
-//! pair/bare decision. The corpus sweep (tests/attr_corpus.rs) reads 1.25M
-//! lists and 4.35M attributes out of 226 books in ~0.1s wall, lexing included
-//! — around 100ns per list, most of it the lex. Nothing here needs to be fast
-//! (it runs on demand, never during a scan); the sweep exists to prove the
-//! grammar right on real data, and it finds ZERO malformed lists.
+//! One forward pass, no allocation, on demand (never during a scan). Corpus
+//! sweep (tests/attr_corpus.rs): 1.25M lists, 4.35M attributes, 226 books,
+//! ~0.1s wall lex included — and ZERO malformed, which is the sweep's point.
 
 use core::ops::Range;
 
@@ -273,7 +240,7 @@ impl<'a> AttrIter<'a> {
                 // precedes it (module doc).
                 let quote_at = self.at;
                 value_from = self.at + 1;
-                match memchr_quote(&self.interior[value_from..]) {
+                match next_quote(&self.interior[value_from..]) {
                     Some(offset) => {
                         value_to = value_from + offset;
                         self.at = value_to + 1;
@@ -417,7 +384,7 @@ fn starts_pair(interior: &[u8]) -> bool {
 
 /// Index of the next `"`. Its own function only to keep the value arm short;
 /// a list is tens of bytes, so a plain loop beats a vectorized search.
-fn memchr_quote(bytes: &[u8]) -> Option<usize> {
+fn next_quote(bytes: &[u8]) -> Option<usize> {
     bytes.iter().position(|&byte| byte == b'"')
 }
 

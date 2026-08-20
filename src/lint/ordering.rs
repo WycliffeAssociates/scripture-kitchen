@@ -481,7 +481,10 @@ mod tests {
         );
 
         // An attribute list is stepped over, not mistaken for the payload.
-        let (_, obs) = findings("\\c 1\n\\p \\v |script=\"Arab\"| 1 a");
+        // (The name is `x-`: `\v` defines no attributes of its own, so a
+        // canonical-looking one would draw an `attr-unknown-name` hint from the
+        // k/v rules and this test is not about that.)
+        let (_, obs) = findings("\\c 1\n\\p \\v |x-script=\"Arab\"| 1 a");
         assert_eq!(obs, vec![]);
     }
 }

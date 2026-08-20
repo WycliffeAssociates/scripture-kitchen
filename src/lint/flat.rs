@@ -1,12 +1,16 @@
 //! The FLAT machine: every rule whose evidence is a token row, its span, or
-//! the one token before it — row lookup, form, payload, adjacency, attributes.
+//! the one token before it — row lookup, form, payload, adjacency, attributes,
+//! the version family, and the positional band.
 
+use super::rows::version_row;
 use super::walk::{is_structural_ws, span_of};
 use super::{Code, Doc, Emit, NO_TOKEN, Observation, UsfmVersion};
+use crate::attributes::{self, AttrEvent, AttrResolution, MalformedAttr};
 use crate::tables::books;
 use crate::tables::generated;
 use crate::tables::schema::{
-    MarkerKind, Numbering, SpellingShape, StructuralWhitespaceRequirement as Ws,
+    AttrStatus, MarkerKind, Numbering, SpecContext, SpellingShape,
+    StructuralWhitespaceRequirement as Ws,
 };
 use crate::{Token, TokenKind};
 
@@ -24,7 +28,7 @@ enum Window {
 /// family. Fed one leaf at a time, exactly as the sketch draws it ("adjacency +
 /// form + payload + attributes: single token walk").
 ///
-/// It carries THREE small pieces of lookbehind state, and they are its fields
+/// It carries a few small pieces of lookbehind state, and they are its fields
 /// rather than four separate sweeps' locals for a measured reason: a token
 /// sweep over this corpus costs ~2.5 ns/token in dispatch alone, however little
 /// each arm does, so a family that needs no more than the last marker earns no
@@ -41,6 +45,11 @@ enum Window {
 ///   opener and a Newline ends its reach — the scanner bounds lists to a line,
 ///   so nothing else would be honest.
 /// - **The numbering-mix bitmasks**, closed out by the document simply ending.
+/// - **The positional BAND** (one u8, the closeout window): where the document
+///   has got to along `Scripture` → … → `ChapterContent`. Monotonic, so the
+///   whole judge is a mask AND and a `trailing_zeros` — no data, no stack.
+/// - **The sid ledger**, one token index per row, for the `eid`-required-if
+///   rule: "was this milestone family ever opened with a `sid`".
 pub(crate) struct Flat {
     /// The `\usfm` version the header declared, the one fact this machine takes
     /// from outside the walk.
@@ -61,6 +70,20 @@ pub(crate) struct Flat {
     owner_has_attrs: bool,
     /// The first attribute list already seen on that owner.
     first_list: u32,
+    /// The `-e` milestone point in reach owes an `eid`, and this is the earlier
+    /// `sid`-carrying point that says so ([`NO_TOKEN`] = nothing owed). Settled
+    /// at the point's `\*`, because "there was no list at all" is a verdict only
+    /// the terminator can give.
+    eid_owed: u32,
+    eid_seen: bool,
+    /// Per ROW: the token of the first point that carried a `sid`, or
+    /// [`NO_TOKEN`]. Indexed by row exactly like `levels` below — the row IS
+    /// the milestone family's key, and only four rows in the table define
+    /// `sid`/`eid` at all.
+    sid_at: [u32; generated::ROW_COUNT],
+    /// How far along the POSITIONAL band the document has come, as a
+    /// `SpecContext` discriminant (0 = `Scripture`, the state a book opens in).
+    band: u8,
     /// Levels-seen per numbered family, indexed by ROW: bit 0 = the bare
     /// spelling, bit n = `\q<n>`, bit 15 = "already reported". A fixed array
     /// rather than a map because the row index IS the family key and there are
@@ -72,6 +95,23 @@ pub(crate) struct Flat {
 }
 
 const REPORTED: u16 = 1 << 15;
+
+/// The context mask's POSITIONAL half — the eight bits
+/// [`SpecContext::is_positional`] names, and the only bits the band judge may
+/// look at. Folded from the enum itself so a new positional variant arrives
+/// here without an edit.
+const POSITIONAL: u32 = {
+    let mut mask = 0;
+    let mut at = 0;
+    while at < SpecContext::ALL.len() {
+        let ctx = SpecContext::ALL[at];
+        if ctx.is_positional() {
+            mask |= generated::context_bit(ctx);
+        }
+        at += 1;
+    }
+    mask
+};
 
 impl Flat {
     pub(crate) fn new(version: Option<UsfmVersion>) -> Self {
@@ -88,6 +128,10 @@ impl Flat {
             owner_is_point: false,
             owner_has_attrs: false,
             first_list: NO_TOKEN,
+            eid_owed: NO_TOKEN,
+            eid_seen: false,
+            sid_at: [NO_TOKEN; generated::ROW_COUNT],
+            band: 0,
             levels: [0u16; generated::ROW_COUNT],
             first_seen: [0u32; generated::ROW_COUNT],
         }
@@ -173,6 +217,46 @@ impl Flat {
                     {
                         out.push(Observation::one(Code::DelimiterShape, idx));
                     }
+
+                    // --- the positional band ----------------------------
+                    // Stay if this marker is legal where we are; else advance
+                    // to the LOWEST of its positional contexts above us; else
+                    // every one of them is behind us and that is the finding.
+                    // Two instructions of state, and the mt#/cl/ip
+                    // dual-context question answers itself.
+                    //
+                    // A mask with any CONTAINER bit in it abstains, and this is
+                    // the lane's real boundary rather than a noise filter (it
+                    // was measured as one: `\add`'s mask carries BookTitles and
+                    // BookIntroduction, so without this every character marker
+                    // inside a paragraph would be "behind us"). A marker a
+                    // container licenses is judged by the WALKER's mask at pop
+                    // time — that is displacement, the other axis — so the band
+                    // speaks only for the markers whose sole license is where
+                    // the book has got to: `\id`, `\h`, `\toc#`, `\mt#`, the
+                    // introduction ladder, `\c`, and the paragraph rows.
+                    let mask = generated::context_mask(marker_idx);
+                    let positional = mask & POSITIONAL;
+                    if positional != 0
+                        && mask & !POSITIONAL == 0
+                        && positional & (1 << self.band) == 0
+                    {
+                        let above = positional & !((1 << (self.band + 1)) - 1);
+                        if above == 0 {
+                            out.push(Observation::one(Code::MarkerOutOfBand, idx));
+                        } else {
+                            self.band = above.trailing_zeros() as u8;
+                        }
+                    }
+
+                    // --- the Version family -----------------------------
+                    // The row's own BOOL is the filter; the five-row table
+                    // says since when. Reported at the OPENER only — a closer
+                    // is the same occurrence, and the fix rewrites both halves
+                    // from here.
+                    if generated::deprecated(marker_idx) {
+                        self.deprecated_marker(doc, idx, marker_idx, out);
+                    }
                 }
 
                 // --- adjacency ------------------------------------------
@@ -231,9 +315,21 @@ impl Flat {
                 // Resolved HERE, once per marker, rather than per Text token:
                 // it is the flag that keeps the pipe scan off ordinary prose,
                 // so it must not itself cost a table read per token.
-                self.owner_has_attrs =
-                    !self.owner_is_point && !generated::defined_attributes(marker_idx).is_empty();
+                let defined = generated::defined_attributes(marker_idx);
+                self.owner_has_attrs = !self.owner_is_point && !defined.is_empty();
                 self.first_list = NO_TOKEN;
+                // An `-e` point's list is where an `eid` would be, so the
+                // question opens here and is settled at its `\*`.
+                self.eid_seen = false;
+                self.eid_owed = if !opener
+                    && nested
+                    && self.sid_at[marker_idx as usize] != NO_TOKEN
+                    && defined.iter().any(|(name, _)| *name == "eid")
+                {
+                    self.sid_at[marker_idx as usize]
+                } else {
+                    NO_TOKEN
+                };
             }
             // Not an enumeration of `+`/`-`/`?` — those are the conventional
             // values of one general run, and a caller of up to three bytes is
@@ -259,11 +355,31 @@ impl Flat {
                 self.owner = NO_TOKEN;
                 self.owner_has_attrs = false;
                 self.first_list = NO_TOKEN;
+                self.eid_owed = NO_TOKEN;
             }
+            // The `-e` point is COMPLETE here, and only here: an `eid` that
+            // never arrived is a fact about the whole point, not about any one
+            // list, so this is where the verdict is given. Anchored at the
+            // list when there was one and at the milestone itself when there
+            // was not — which is the shape the rule is really about
+            // (`\qt-e\*` carrying nothing).
             TokenKind::MilestoneTerminator => {
+                if self.eid_owed != NO_TOKEN && !self.eid_seen {
+                    let anchor = if self.first_list == NO_TOKEN {
+                        self.owner
+                    } else {
+                        self.first_list
+                    };
+                    out.push(Observation::pair(
+                        Code::AttrRequiredIf,
+                        anchor,
+                        self.eid_owed,
+                    ));
+                }
                 self.owner = NO_TOKEN;
                 self.owner_has_attrs = false;
                 self.first_list = NO_TOKEN;
+                self.eid_owed = NO_TOKEN;
             }
             TokenKind::AttrList => {
                 if self.first_list != NO_TOKEN {
@@ -290,8 +406,15 @@ impl Flat {
                         .find(|byte| !matches!(byte, b' ' | b'\t'))
                         .is_some_and(|byte| *byte == b'|');
                 if trailing {
+                    // The version half of this rule is the ROW's, not the
+                    // rule's: `severity_at` is `None` below the ladder's first
+                    // rung, which is exactly the old hand-coded `>= 3.2` gate
+                    // with the fact moved to where the fact is authored.
                     if generated::kind(self.owner_idx) == MarkerKind::Character
-                        && version >= Some(UsfmVersion::V3_2)
+                        && Code::AttrTrailingFormDeprecated
+                            .row()
+                            .severity_at(version)
+                            .is_some()
                     {
                         out.push(Observation {
                             code: Code::AttrTrailingFormDeprecated,
@@ -318,6 +441,19 @@ impl Flat {
                             self.owner,
                         ));
                     }
+                }
+                // ROW 0 ABSTAINS, and it is both the honest line and the
+                // measured one. Honest: a custom `\z` marker has no row to
+                // judge its attributes against, and `unknown-marker` is the
+                // one finding lint owes on a marker it cannot classify (the
+                // same line `nested-spelling-misuse` draws). Measured: en_ult
+                // writes 461,352 `\zaln-s` lists of five attributes each,
+                // which is over half of every attribute byte in the corpus —
+                // reading them to say nothing costs ~7 ns/token. The day
+                // custom-marker configuration lands, `\zaln-s` gets a real row
+                // and its lists are read like anyone's.
+                if self.owner_idx != generated::UNRESOLVED {
+                    self.read_attributes(doc, idx, token, out);
                 }
             }
             // A raw pipe in the content of an attrs-capable marker. The self.owner
@@ -353,12 +489,160 @@ impl Flat {
                 self.owner = NO_TOKEN;
                 self.owner_has_attrs = false;
                 self.first_list = NO_TOKEN;
+                // A point whose `\*` never came is `unterminated-milestone`,
+                // exactly and already; saying it also owes an `eid` would be
+                // two findings for one missing terminator.
+                self.eid_owed = NO_TOKEN;
             }
             // The designator of the `\c`/`\v`/`\ca`/`\vp` that opened the
             // self.window belongs to the run; an optional break does not.
             TokenKind::Designator => {}
             TokenKind::OptBreak => self.window = Window::Closed,
         }
+    }
+
+    /// The k/v half of the Attributes family: one walk of the list's interior
+    /// through [`attributes::attrs`], which is the ONLY place anything here
+    /// reads inside a token.
+    ///
+    /// `#[inline(never)]`: it runs once per attribute LIST, never once per
+    /// token, so it has no business inflating the dispatch tree above it.
+    ///
+    /// THE COST, measured and named because it is the closeout window's one
+    /// real perf event: this is the first rule in lint to read INSIDE a list,
+    /// and a word-aligned corpus is largely made of list interiors. en_ult
+    /// writes 792,414 `\w` lists of `|x-occurrence="1" x-occurrences="1"` —
+    /// 31 MB of bytes — and walking them costs +5.7 ns/token there (9.8 → 15.5,
+    /// min-of-8) against +0.6 ns/token on the three unaligned corpora. It is
+    /// not the interpreter being slow (~0.85 GB/s byte-at-a-time is what that
+    /// walk is worth); it is 31 MB of work lint never did. The two honest
+    /// reductions are already applied — row 0 abstains (see the call site,
+    /// another 25 MB) and `x-`/`z-` names skip resolution — and what remains
+    /// buys the rules below. A vectorized interior scan is the next lever if
+    /// the number ever matters (planning/investigate-later.md).
+    #[inline(never)]
+    fn read_attributes(&mut self, doc: &Doc, idx: u32, token: &Token, out: &mut Emit) {
+        let mut family = 0u32;
+        for event in attributes::attrs(doc.source, token) {
+            match event {
+                AttrEvent::Attr(attr) => {
+                    // The sid ledger, and the eid this list may be answering.
+                    // Recorded off the NAME, not off resolution: it is the
+                    // author's spelling that opens the family's obligation.
+                    match attr.name {
+                        b"sid" => self.sid_at[self.owner_idx as usize] = self.owner,
+                        b"eid" => self.eid_seen = true,
+                        _ => {}
+                    }
+                    // The corpus's whole attribute population, short-circuited:
+                    // `resolve` would answer `UserNamespace` for every `x-`/`z-`
+                    // name, and the pin in attributes.rs ("exact beats wildcard
+                    // beats namespace, which matters for nothing today") says no
+                    // defined name starts with either prefix — so this cannot
+                    // change an answer, and it keeps 4.35M table scans out of
+                    // en_ult's lint.
+                    if attr.name.starts_with(b"x-") || attr.name.starts_with(b"z-") {
+                        continue;
+                    }
+                    match attributes::resolve(attr.name, self.owner_idx) {
+                        AttrResolution::Defined { status, .. } => {
+                            family += 1;
+                            // The Version family's other half, read off the
+                            // resolution the row already handed back: `\xt`'s
+                            // `link-href` and `\jmp`'s `link-` trio.
+                            if status == AttrStatus::Deprecated {
+                                out.push(Observation::pair(
+                                    Code::DeprecatedAttribute,
+                                    idx,
+                                    self.owner,
+                                ));
+                            }
+                        }
+                        // Unreachable past the short-circuit above, and left
+                        // exhaustive on purpose: the verdict belongs to
+                        // `resolve`, and a fourth resolution would have to be
+                        // answered here rather than defaulted.
+                        AttrResolution::UserNamespace => {}
+                        AttrResolution::Unknown => out.push(Observation {
+                            code: Code::AttrUnknownName,
+                            anchor: idx,
+                            second: self.owner,
+                            // The flag the row documents: an empty name is the
+                            // BARE default form on a row with no
+                            // `default_attribute`, which is a different
+                            // authoring question with the same answer.
+                            aux: u32::from(attr.name.is_empty()),
+                        }),
+                    }
+                }
+                // Always the last event, so this is one finding per list.
+                AttrEvent::Malformed { why, .. } => out.push(Observation {
+                    code: Code::AttrMalformed,
+                    anchor: idx,
+                    second: self.owner,
+                    aux: malformed_slot(why),
+                }),
+            }
+        }
+        // `\ta`'s "one or more attributes, each beginning with `a-`": the row
+        // carries the wildcard and no fixed names, so an empty family here is
+        // the cardinality the row could not state. Asked once per LIST rather
+        // than kept as a per-marker flag — `\ta` is the only row it is ever
+        // true of, and a flag would put a table read on every token to learn
+        // it once per list.
+        let defined = generated::defined_attributes(self.owner_idx);
+        let wildcard = !defined.is_empty() && defined.iter().all(|(name, _)| name.ends_with('*'));
+        if wildcard && family == 0 {
+            out.push(Observation::pair(Code::AttrRequiredIf, idx, self.owner));
+        }
+    }
+
+    /// A deprecated marker, and the rename that repairs it where the spec's
+    /// replacement is a rename.
+    ///
+    /// `#[inline(never)]` and behind `generated::deprecated`: five rows in 153
+    /// reach it, so the cost on every other marker is one bitfield test.
+    #[inline(never)]
+    fn deprecated_marker(
+        &self,
+        doc: &Doc,
+        idx: u32,
+        marker_idx: generated::MarkerIdx,
+        out: &mut Emit,
+    ) {
+        let Some(row) = version_row(generated::name(marker_idx)) else {
+            return;
+        };
+        // THE GATE: a book that declares no version is a book of its own era,
+        // and `\addpn` is correct in 2.x. The row's `severity: None` base says
+        // the same thing to a consumer reading the ladder.
+        if !self
+            .version
+            .is_some_and(|declared| declared >= row.deprecated_in)
+        {
+            return;
+        }
+        let observation = Observation {
+            code: Code::DeprecatedMarker,
+            anchor: idx,
+            second: NO_TOKEN,
+            aux: row.deprecated_in as u32,
+        };
+        match row.replacement {
+            Some(replacement) => super::fix::rename(doc, out, observation, replacement),
+            None => out.push(observation),
+        }
+    }
+}
+
+/// [`MalformedAttr`] as `aux`, in the enum's declaration order (the mapping the
+/// `attr-malformed` row documents).
+fn malformed_slot(why: MalformedAttr) -> u32 {
+    match why {
+        MalformedAttr::UnterminatedQuote => 0,
+        MalformedAttr::EmptyName => 1,
+        MalformedAttr::MissingValue => 2,
+        MalformedAttr::BareJunk => 3,
     }
 }
 
@@ -746,9 +1030,14 @@ mod tests {
                 aux: UsfmVersion::V3_2 as u32,
             }]
         );
+        // The GATE and the escalation are one column now (the closeout
+        // window): the row is silent below 3.2 and an Error at 4, and this
+        // rule's `if` above asks it rather than restating the version.
+        let row = Code::AttrTrailingFormDeprecated.row();
+        assert_eq!(row.severity_at(Some(UsfmVersion::V3_0)), None);
         assert_eq!(
-            Code::AttrTrailingFormDeprecated.row().escalation,
-            Some((UsfmVersion::V4_0, Severity::Error))
+            row.severity_at(Some(UsfmVersion::V4_0)),
+            Some(Severity::Error)
         );
 
         // The node-initial form is what 3.2 wants, and says nothing.
@@ -778,7 +1067,9 @@ mod tests {
         );
 
         // One list per marker, twice over, is not two lists on one marker.
-        let (_, obs) = findings("\\p \\w a|k=\"v\"\\w* \\w b|k=\"v\"\\w*\n");
+        // (`lemma` rather than a made-up name: `w` defines `lemma`, so the k/v
+        // rules stay quiet and this test compares the finding list whole.)
+        let (_, obs) = findings("\\p \\w a|lemma=\"v\"\\w* \\w b|lemma=\"v\"\\w*\n");
         assert_eq!(obs, vec![]);
     }
 
@@ -829,8 +1120,315 @@ mod tests {
         let (_, obs) = findings("\\p a | b\n");
         assert_eq!(obs, vec![]);
 
-        // Neither does a marker that opens no attributes of its own.
-        let (_, obs) = findings("\\p \\add a | b\\add*\n");
+        // Neither does a marker that opens no attributes of its own — and this
+        // snippet says something sharper since the k/v rules landed. The
+        // scanner's back-position pipe needle IS armed for character rows, so
+        // `| b` lexed as a trailing LIST rather than as content: there is no
+        // pipe left in any Text token to hint about, and what the report says
+        // instead is the truth about that list — `\add` has no default
+        // attribute for a bare value to bind to (aux = 1).
+        let (tokens, obs) = findings("\\p \\add a | b\\add*\n");
+        assert_eq!(
+            obs,
+            vec![Observation {
+                code: Code::AttrUnknownName,
+                anchor: tokens
+                    .iter()
+                    .position(|t| t.kind() == TokenKind::AttrList)
+                    .unwrap() as u32,
+                second: token_named(&tokens, "add", 0),
+                aux: 1,
+            }]
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // Closeout: the k/v attribute rules
+    // -----------------------------------------------------------------
+
+    /// One helper for the whole family: the first list token, which is every
+    /// one of these codes' anchor (whole-token anchoring, ruled 2026-08-20).
+    fn first_list(tokens: &[Token]) -> u32 {
+        tokens
+            .iter()
+            .position(|t| t.kind() == TokenKind::AttrList)
+            .expect("no attribute list lexed") as u32
+    }
+
+    #[test]
+    fn attr_unknown_name_reads_the_row_and_lets_the_user_namespace_through() {
+        // A name `w` does not define. Anchored at the LIST, `second` at its
+        // owner, aux 0 (a named attribute, not the bare form).
+        let (tokens, obs) = findings("\\p \\w grace|nope=\"x\"\\w*\n");
+        assert_eq!(
+            obs,
+            vec![Observation {
+                code: Code::AttrUnknownName,
+                anchor: first_list(&tokens),
+                second: token_named(&tokens, "w", 0),
+                aux: 0,
+            }]
+        );
+
+        // Everything the row DOES define is silent — exact, the `a-*` wildcard,
+        // and the bare value bound through `default_attribute`.
+        for usfm in [
+            "\\p \\w grace|lemma=\"x\" strong=\"G1\"\\w*\n",
+            "\\p \\ta text|a-alt=\"x\"\\ta*\n",
+            "\\p \\w In|in\\w*\n",
+        ] {
+            let (_, obs) = findings(usfm);
+            assert_eq!(obs, vec![], "{usfm:?}");
+        }
+
+        // The `x-`/`z-` namespace is legal wherever attributes are, on a
+        // character marker and on a milestone alike — en_ult's 4.35M aligned
+        // attributes are all of this shape, so a finding here is a million
+        // findings there.
+        let (_, obs) = findings("\\p \\w grace|x-strong=\"G1\" z-mine=\"y\"\\w*\n");
         assert_eq!(obs, vec![]);
+        let (_, obs) = findings("\\p \\qt-s |x-who=\"Levi\"\\* a \\qt-e\\*\n");
+        assert_eq!(obs, vec![]);
+
+        // aux = 1 is the OTHER shape: the bare default form on a row that has
+        // no default attribute at all. `\fig` is the spec's own case. (Written
+        // at chapter level: `fig`'s mask carries no Para bit, so inside a `\p`
+        // it displaces the paragraph and this test would also see an
+        // `empty-paragraph`.)
+        let (tokens, obs) = findings("\\id GEN\n\\c 1\n\\fig |a.png\\fig*\n");
+        assert_eq!(
+            obs,
+            vec![Observation {
+                code: Code::AttrUnknownName,
+                anchor: first_list(&tokens),
+                second: token_named(&tokens, "fig", 0),
+                aux: 1,
+            }]
+        );
+
+        // Row 0 says nothing: `unknown-marker` has already said the one true
+        // thing about `\zfoo`, and its row defines nothing, so every attribute
+        // on it would otherwise be a finding.
+        // (The snippet draws other findings — a custom `\z` marker pops every
+        // open scope and its `\*` terminates nothing — so this asserts the one
+        // thing it is about.)
+        let (_, obs) = findings("\\p \\zfoo |k=\"v\"\\*\n");
+        assert!(
+            !codes(&obs).contains(&Code::AttrUnknownName),
+            "row 0 spoke about its attributes: {obs:?}"
+        );
+    }
+
+    #[test]
+    fn attr_malformed_carries_the_shape_in_aux() {
+        // One finding per list, whatever follows the blamed byte: `Malformed`
+        // ends the interpreter's walk.
+        let (tokens, obs) = findings("\\p \\w x|lemma=\"a\", strong=\"G1\"\\w*\n");
+        assert_eq!(
+            obs,
+            vec![Observation {
+                code: Code::AttrMalformed,
+                anchor: first_list(&tokens),
+                second: token_named(&tokens, "w", 0),
+                // BareJunk: a comma is not a separator (ruled — usfmtc drops
+                // the tail silently, we report it).
+                aux: 3,
+            }]
+        );
+
+        // The four shapes, in `MalformedAttr` declaration order.
+        for (usfm, aux) in [
+            ("\\p \\w x|lemma=\"grace\\w*\n", 0),
+            ("\\p \\w x|=\"v\"\\w*\n", 1),
+            ("\\p \\w x|lemma=\\w*\n", 2),
+            ("\\p \\w x|lemma=\"a\" oops\\w*\n", 3),
+        ] {
+            let (_, obs) = findings(usfm);
+            let malformed: Vec<&Observation> = obs
+                .iter()
+                .filter(|o| o.code == Code::AttrMalformed)
+                .collect();
+            assert_eq!(malformed.len(), 1, "{usfm:?}: {obs:?}");
+            assert_eq!(malformed[0].aux, aux, "{usfm:?}");
+        }
+    }
+
+    #[test]
+    fn attr_required_if_covers_the_eid_and_the_ta_family() {
+        // A `\qt-e` point whose family was opened with `sid` and which carries
+        // no `eid`: anchored at the milestone itself (there is no list),
+        // `second` at the `sid`-carrying point above it.
+        let (tokens, obs) = findings("\\p \\qt-s |sid=\"q1\"\\* a \\qt-e\\*\n");
+        assert_eq!(
+            obs,
+            vec![Observation::pair(
+                Code::AttrRequiredIf,
+                token_named(&tokens, "qt", 1),
+                token_named(&tokens, "qt", 0),
+            )]
+        );
+
+        // The pair written properly is silent…
+        let (_, obs) = findings("\\p \\qt-s |sid=\"q1\"\\* a \\qt-e |eid=\"q1\"\\*\n");
+        assert_eq!(obs, vec![]);
+        // …and so is a `-e` point in a book that never used `sid` at all: the
+        // obligation comes from the author's own earlier spelling, not from the
+        // row (which says Optional, and is right to).
+        let (_, obs) = findings("\\p \\qt-s |who=\"Levi\"\\* a \\qt-e\\*\n");
+        assert_eq!(obs, vec![]);
+
+        // `\ta`'s family cardinality: "one or more attributes, each beginning
+        // with `a-`" (char/features/ta.html). A list with none of it is the
+        // finding; one member is enough to satisfy it.
+        let (tokens, obs) = findings("\\p \\ta text|x-mine=\"y\"\\ta*\n");
+        assert_eq!(
+            obs,
+            vec![Observation::pair(
+                Code::AttrRequiredIf,
+                first_list(&tokens),
+                token_named(&tokens, "ta", 0),
+            )]
+        );
+        let (_, obs) = findings("\\p \\ta text|a-alt=\"y\"\\ta*\n");
+        assert_eq!(obs, vec![]);
+    }
+
+    // -----------------------------------------------------------------
+    // Closeout: the Version family
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn a_deprecated_marker_is_gated_on_a_declared_version() {
+        // No `\usfm` line: a book of its own era, and `\pro` is correct in it.
+        // THE GATE — and the reason it is not a guess.
+        let (_, obs) = findings("\\p \\pro x\\pro*\n");
+        assert_eq!(obs, vec![]);
+
+        // 3.0 declared: deprecated, with the deprecating version in aux.
+        let usfm = "\\id GEN\n\\usfm 3.0\n\\p \\pro x\\pro*\n";
+        let (tokens, obs) = findings(usfm);
+        assert_eq!(
+            obs,
+            vec![Observation {
+                code: Code::DeprecatedMarker,
+                anchor: token_named(&tokens, "pro", 0),
+                second: NO_TOKEN,
+                aux: UsfmVersion::V3_0 as u32,
+            }]
+        );
+        // Reported at the OPENER only: the closer is the same occurrence.
+        assert_eq!(obs.len(), 1);
+
+        // The row's ladder is what a consumer maps severity through.
+        let row = Code::DeprecatedMarker.row();
+        assert_eq!(row.severity_at(None), None);
+        assert_eq!(
+            row.severity_at(Some(UsfmVersion::V3_0)),
+            Some(Severity::Warning)
+        );
+        assert_eq!(
+            row.severity_at(Some(UsfmVersion::V4_0)),
+            Some(Severity::Error)
+        );
+
+        // A numbered spelling of a deprecated paragraph row is one finding at
+        // its own token, digits and all.
+        let (tokens, obs) = findings("\\id GEN\n\\usfm 3.2\n\\c 1\n\\ph2 hanging\n");
+        assert_eq!(
+            obs,
+            vec![Observation {
+                code: Code::DeprecatedMarker,
+                anchor: token_named(&tokens, "ph", 0),
+                second: NO_TOKEN,
+                aux: UsfmVersion::V3_0 as u32,
+            }]
+        );
+    }
+
+    /// The family's other half: an attribute the row marks
+    /// [`AttrStatus::Deprecated`] — `\xt`'s `link-href`, `\jmp`'s `link-` trio.
+    #[test]
+    fn a_deprecated_attribute_is_read_off_the_row_with_no_version_gate() {
+        // NO declared `\usfm`, and it fires anyway — deliberately, and unlike
+        // `deprecated-marker`: `AttrStatus` carries no version, so there is no
+        // rung to gate on and pretending otherwise would be inventing data.
+        let (tokens, obs) = findings("\\p \\xt Gen 1:1|link-href=\"#x\"\\xt*\n");
+        assert_eq!(
+            obs,
+            vec![Observation::pair(
+                Code::DeprecatedAttribute,
+                first_list(&tokens),
+                token_named(&tokens, "xt", 0),
+            )]
+        );
+
+        // The attribute is DEFINED, so `attr-unknown-name` stays quiet — the
+        // two rules are exclusive by construction, not by an `else`.
+        assert!(!codes(&obs).contains(&Code::AttrUnknownName));
+    }
+
+    // -----------------------------------------------------------------
+    // Closeout: the positional band
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn marker_out_of_band_judges_the_monotonic_positional_axis() {
+        // The book written in order: identification, headers, titles,
+        // introduction, chapter content. Every one of these advances the band
+        // and none of them looks back.
+        let (_, obs) = findings(
+            "\\id GEN\n\\usfm 3.0\n\\h Genesis\n\\toc1 Genesis\n\\mt1 Genesis\n\\ip intro\n\\c 1\n\\p \\v 1 a\n",
+        );
+        assert_eq!(obs, vec![]);
+
+        // A major title AFTER the book reached chapter content: every one of
+        // `mt`'s positional contexts (BookTitles, BookIntroductionEndTitles) is
+        // behind us, and there is nothing above to advance to.
+        let (tokens, obs) = findings("\\id GEN\n\\c 1\n\\p a\n\\mt1 late title\n");
+        assert_eq!(
+            obs,
+            vec![Observation::one(
+                Code::MarkerOutOfBand,
+                token_named(&tokens, "mt", 0)
+            )]
+        );
+        // The same for a header and a table-of-contents line.
+        let (tokens, obs) = findings("\\id GEN\n\\c 1\n\\p a\n\\h Genesis\n");
+        assert_eq!(
+            obs,
+            vec![Observation::one(
+                Code::MarkerOutOfBand,
+                token_named(&tokens, "h", 0)
+            )]
+        );
+        let (tokens, obs) = findings("\\id GEN\n\\c 1\n\\p a\n\\toc1 Genesis\n");
+        assert_eq!(
+            obs,
+            vec![Observation::one(
+                Code::MarkerOutOfBand,
+                token_named(&tokens, "toc", 0)
+            )]
+        );
+
+        // `\ip` after a chapter is NOT out of band, and this is the dual-context
+        // resolution the sketch asked to be tested: `ip`'s mask carries
+        // BookIntroduction AND ChapterContent, so the band stays where it is
+        // and the marker is legal. `\cl`'s two meanings fall out the same way.
+        let (_, obs) = findings("\\id GEN\n\\c 1\n\\p a\n\\ip introduction\n");
+        assert_eq!(obs, vec![]);
+        let (_, obs) = findings("\\id GEN\n\\cl Chapter\n\\c 1\n\\cl Chapter One\n\\p a\n");
+        assert_eq!(obs, vec![]);
+
+        // Markers a CONTAINER licenses abstain — the other axis. A character
+        // marker's mask carries BookTitles and BookIntroduction, so without
+        // that abstention every `\add` inside a paragraph would read as
+        // "behind us"; notes and table cells are the same case.
+        let (_, obs) = findings("\\id GEN\n\\c 1\n\\p \\add a\\add* \\f + \\ft n\\f*\n");
+        assert_eq!(obs, vec![]);
+
+        // Row 0 has no mask at all: en_ulb's `\s5` is 13_636 occurrences of
+        // exactly this, and `unknown-marker` is the whole of what lint says.
+        let (_, obs) = findings("\\id GEN\n\\c 1\n\\p a\n\\s5\n\\p b\n");
+        assert_eq!(codes(&obs), vec![Code::UnknownMarker]);
     }
 }

@@ -249,6 +249,38 @@ fn the_corpus_yields_exactly_the_known_findings() {
     //   * attr-pipe-hint / caller-shape — no stray pipe survives inside an
     //     attrs-capable marker, and every note caller in the corpus is `+`
     //     (5661 of them) or a mark of at most three bytes.
+    //
+    // The closeout window adds five more zeros, and each one is a DIFFERENT
+    // kind of evidence — three of them ride sweeps that do a great deal of
+    // work to say nothing:
+    //   * attr-unknown-name — the k/v interpreter resolves all 4,352,929
+    //     attributes in the corpus (tests/attr_corpus.rs pins that total and
+    //     reconciles it against a grep), and every single one is an `x-` name
+    //     on a `\w` or a `\zaln-s`. Not one canonical name, and not one bare
+    //     default value, in 226 books: `AttrResolution::UserNamespace` every
+    //     time. The rule is nevertheless the one most likely to cry wolf if
+    //     that namespace were ever mishandled — a million findings, instantly.
+    //   * attr-malformed — reconciles EXACTLY with the interpreter's own
+    //     corpus pin (`total.malformed == 0` over the same 1,253,766 lists).
+    //     Two sweeps, one number: if either moves alone, one of them is wrong.
+    //   * attr-required-if — no `sid=` and no `\ta` anywhere in the corpus
+    //     (checked at the bytes). en_ult's alignment is `x-`-namespaced on
+    //     `\zaln-s`, which is a custom `\z` row, so the milestone pairing this
+    //     rule watches simply does not occur here yet.
+    //   * deprecated-attribute — `AttrStatus::Deprecated` exists on exactly
+    //     four names (`\xt`'s `link-href` and `\jmp`'s `link-` trio) and not
+    //     one of them appears in the corpus.
+    //   * deprecated-marker — two independent reasons, and both are worth
+    //     knowing: 67 books declare `\usfm 3.0` (the rest declare nothing, so
+    //     the GATE alone would silence them), and not one occurrence of
+    //     `\addpn`, `\fdc`, `\ph`, `\pro` or `\xdc` exists in 113 MB.
+    //   * marker-out-of-band — the loudest zero. 65 rows have purely
+    //     positional masks and take part (`\id`, `\h`, `\toc#`, `\mt#`, the
+    //     whole introduction ladder, `\c`, every paragraph row): 111,000-odd
+    //     occurrences drive 679 band transitions across the 226 books, and not
+    //     one marker looks backwards. The corpora write their front matter in
+    //     spec order, which is exactly what the mask's positional half has
+    //     always claimed and nothing had checked.
     for code in [
         Code::UnclosedChar,
         Code::UnclosedAtEof,
@@ -275,6 +307,12 @@ fn the_corpus_yields_exactly_the_known_findings() {
         Code::AttrBothLists,
         Code::AttrTerminatorMismatch,
         Code::AttrPipeHint,
+        Code::AttrUnknownName,
+        Code::AttrMalformed,
+        Code::AttrRequiredIf,
+        Code::DeprecatedMarker,
+        Code::DeprecatedAttribute,
+        Code::MarkerOutOfBand,
     ] {
         assert_eq!(total(code), 0, "{} fired on clean data", code.row().name);
     }

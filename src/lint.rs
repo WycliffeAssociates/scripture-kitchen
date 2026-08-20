@@ -1,10 +1,11 @@
 //! Findings over an already-built document: `lex → cst::build → lint`.
 //!
-//! Phases 1-4 ship the STRUCTURAL, ORDERING, PAYLOAD, FORM and ADJACENCY
-//! families, the SHAPE-ONLY half of Attributes, and the FIX model. Still owed,
-//! each waiting on a piece that does not exist yet: the two attribute rules that
-//! need a k/v interpreter, and the Version family — see
-//! planning/lint-sketch.md "Build phases".
+//! 43 codes in six families, and NOTHING OWED. Phases 1-4 shipped the
+//! STRUCTURAL, ORDERING, PAYLOAD, FORM and ADJACENCY families, the shape-only
+//! half of Attributes, and the FIX model; the closeout window added the rules
+//! that needed the k/v interpreter ([`crate::attributes`]), the VERSION family
+//! (deprecated markers and deprecated attributes), and the judge for the context
+//! mask's positional half. There is no deferred rule and no parked lane.
 //!
 //! Three laws shape everything here:
 //!
@@ -24,16 +25,19 @@
 //!   report cross wasm as one flat `[code, anchor, second, aux] × n` array.
 //!
 //! Fixes ride the passes that find things, computed BESIDE the finding and
-//! never in a pass of their own: 14 of the 37 codes declare a
+//! never in a pass of their own: 15 of the 43 codes declare a
 //! [`LintRow::fix_label`], and a code emits a fix if and only if its row does
 //! (asserted both ways in tests). Every one is a byte splice — insert the ending
 //! the author left out, delete an orphan, write the expected number, upper-case
-//! three bytes — and every one is proved by [`check_fixes`], the oracle, over
-//! all 226 corpus books. Where a repair would be a MOVE or a guess it is not
-//! offered: `attr-trailing-form-deprecated` (relocating an attribute list is an
-//! interpretation of the content it jumps), `book-code-unknown` (which
-//! identifier was meant is not mechanical), the gap codes, and a renumber whose
-//! own successor would collide with it.
+//! three bytes, rename a deprecated marker AND its closer — and every one is
+//! proved by [`check_fixes`], the oracle, over all 226 corpus books. Where a
+//! repair would be a MOVE or a guess it is not offered:
+//! `attr-trailing-form-deprecated` (relocating an attribute list is an
+//! interpretation of the content it jumps), `marker-out-of-band` (the repair is
+//! moving the marker to where it belongs), `book-code-unknown` (which
+//! identifier was meant is not mechanical), the gap codes, a deprecation whose
+//! replacement is a restructure rather than a rename, and a renumber whose own
+//! successor would collide with it.
 //!
 //! **lint is ONE in-order walk of the CST**
 //! feeding four state machines. A short bounded prologue over the header
@@ -42,7 +46,10 @@
 //! every node close exactly once, handing each event to [`Structure`] (close
 //! verdicts, orphan closers), [`Ancestry`] (sidebar containment, paragraph-less
 //! verse runs), [`Ordering`] (the chapter/verse sequence) and [`Flat`] (the
-//! row-lookup, form, payload, adjacency and attribute rules). All four write
+//! row-lookup, form, payload, adjacency, version, positional-band and attribute
+//! rules — the closeout window gave this machine three new lanes rather than a
+//! fifth machine, because each wanted a u8 of state and no traversal of its
+//! own). All four write
 //! through one [`Emit`] sink and the findings are sorted once at the end, so
 //! report order is a property of the report and not of the traversal.
 //! The module map, one file per piece of that shape:
@@ -56,6 +63,13 @@
 //! and the diff port speak the same vocabulary. This file keeps the layer a
 //! caller sees: [`lint`], [`Observation`], [`LintReport`], [`header_scan`] and
 //! the missing-`\id` end check.
+//!
+//! **Cost** (min-of-8, `--lint-only`): ~9.4 ns/token on unaligned scripture
+//! (en_ulb, 30 iterations), ~15.5 ns/token on en_ult. The gap between the two is
+//! the k/v attribute rules and nothing else: en_ult is 31 MB of `\w` attribute
+//! interiors, and reading inside a list is work no earlier phase did. The
+//! measurement and the two reductions applied to it are on `Flat`'s
+//! `read_attributes`; the next lever is in planning/investigate-later.md.
 //!
 //! [`CloseReason`]: crate::cst::CloseReason
 
@@ -72,7 +86,9 @@ mod tests;
 
 pub use crate::edit::{Edit, FixStr, apply};
 pub use fix::{Fix, check_fixes};
-pub use rows::{AuxKind, Category, Code, LINT_ROWS, LintRow, Severity, UsfmVersion};
+pub use rows::{
+    AuxKind, Category, Code, LINT_ROWS, LintRow, Severity, UsfmVersion, VERSION_ROWS, VersionRow,
+};
 
 pub(crate) use ancestry::Ancestry;
 pub(crate) use flat::Flat;
@@ -136,11 +152,11 @@ pub struct LintReport {
     /// The version the `\usfm` line declares, `None` when there is no such
     /// line (the corpus majority) or its payload is not a version.
     ///
-    /// Phase 3 gives the [`LintRow::escalation`] column the fact it has always
-    /// needed: a consumer maps a finding's severity through that column using
-    /// THIS value, and one rule (`attr-trailing-form-deprecated`) uses it as a
-    /// gate rather than a dial, because "deprecated" is a claim about a
-    /// declared version and is false without one.
+    /// The fact the version columns key on: a consumer maps a finding's
+    /// severity through [`LintRow::severity_at`] with THIS value, and two rules
+    /// (`attr-trailing-form-deprecated`, `deprecated-marker`) are GATED on it
+    /// rather than merely escalated — "deprecated" is a claim about a declared
+    /// version and is false without one.
     pub declared_version: Option<UsfmVersion>,
     /// Sorted by `anchor`, then by code — one document order for consumers,
     /// independent of which internal pass produced a finding.
