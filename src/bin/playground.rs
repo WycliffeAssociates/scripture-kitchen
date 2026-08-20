@@ -17,6 +17,7 @@
 //   cargo run --release --bin playground -- --scalar            // no-memchr twin (prices SIMD)
 //   cargo run --release --bin playground -- --staged            // two-stage structural index (simdjson shape)
 //   cargo run --release --bin playground -- --chunked           // chapter-split, lexed serially (prices the split)
+//   cargo run --release --bin playground -- --utf16             // byte<->UTF-16 index: drift anchors vs fixed stride
 //   cargo run --release --features par --bin playground -- --par           // rayon over docs
 //   cargo run --release --features par --bin playground -- --chpar         // rayon over CHAPTERS within each doc
 //   samply record -- ./target/release/playground --iters 200    // profile (build first)
@@ -61,6 +62,9 @@ enum Mode {
     FusedNoop,
     /// The middle rung: lex + cst fused, no lint.
     FusedCst,
+    /// Not a lexer mode: prices the byte↔UTF-16 boundary index, both shapes.
+    /// Picks its own files (it needs a dense-script one) and ignores `<path>`.
+    Utf16,
 }
 
 fn main() {
@@ -98,6 +102,7 @@ fn main() {
             "--sweep-stops" => mode = Mode::SweepStops,
             "--sweep-cursor" => mode = Mode::SweepCursor,
             "--chunked" => mode = Mode::Chunked,
+            "--utf16" => mode = Mode::Utf16,
             "--chpar" => mode = Mode::ChapterPar,
             "--iters" => {
                 iters = args
@@ -108,6 +113,13 @@ fn main() {
             other => path = Some(PathBuf::from(other)),
         }
     }
+    // Handled before the corpus load: --utf16 names its own three files and
+    // would otherwise pay for reading all 66 en_ulb books first.
+    if mode == Mode::Utf16 {
+        report_utf16();
+        return;
+    }
+
     let path = path.unwrap_or_else(|| PathBuf::from(DEFAULT_CORPUS));
 
     let sources: Vec<String> = if path.is_dir() {
@@ -139,6 +151,7 @@ fn main() {
         Mode::SweepNl => "sweep-nl",
         Mode::SweepStops => "sweep-stops",
         Mode::SweepCursor => "sweep-cursor",
+        Mode::Utf16 => unreachable!("handled above"),
     };
     eprintln!(
         "playground: loaded {} source(s), {bytes} bytes total, iters={iters}, mode={mode_name}",
@@ -233,6 +246,7 @@ fn verify_variant(sources: &[String], mode: Mode) {
         // Identity is tests/fused_identity.rs's job — whole reports, not just
         // token streams, so it cannot be a `fn(&str) -> Vec<Token>` here.
         Mode::Fused | Mode::FusedNoop | Mode::FusedCst => return,
+        Mode::Utf16 => return, // not a lexer variant
         Mode::Scalar => usfm_onion_2::experiments::scalar::lex,
         Mode::Staged => usfm_onion_2::experiments::staged::lex,
         Mode::Chunked => usfm_onion_2::experiments::chapter_par::lex_chunked,
@@ -324,6 +338,7 @@ fn run_once(
                 std::hint::black_box(usfm_onion_2::cst::build(tokens));
             }
         }
+        Mode::Utf16 => unreachable!("handled in main before the corpus load"),
         Mode::Serial => {
             for source in sources {
                 std::hint::black_box(usfm_onion_2::lex(source));
@@ -408,6 +423,174 @@ fn collect_usfm_paths(root: &Path, paths: &mut Vec<PathBuf>) {
 fn read_source(path: &Path) -> String {
     fs::read_to_string(path)
         .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()))
+}
+
+/// The byte↔UTF-16 boundary index, priced on three deliberately different
+/// files: an ASCII-dominant prose book, a dense-Devanagari book (the case that
+/// breaks per-drift-change anchors), and the heaviest aligned book.
+///
+/// Strategy A = one anchor per non-ASCII char; strategy B = one anchor per
+/// [`usfm_onion_2::experiments::utf16::STRIDE`] bytes + a SWAR remainder count.
+/// See `src/experiments/utf16.rs` for both and for the stride-boundary rule.
+fn report_utf16() {
+    use usfm_onion_2::experiments::utf16::{
+        Anchors, STRIDE, Stride, reference_pairs, utf16_len_scalar, utf16_len_swar,
+    };
+
+    const QUERIES: usize = 10_000;
+    const REPS: u32 = 8; // min-of-8, the convention everywhere else here
+
+    /// Min-of-`REPS` wall time for one call of `f`, in seconds.
+    fn min_of<T>(mut f: impl FnMut() -> T) -> f64 {
+        let mut best = f64::INFINITY;
+        for _ in 0..REPS {
+            let at = Instant::now();
+            std::hint::black_box(f());
+            best = best.min(at.elapsed().as_secs_f64());
+        }
+        best
+    }
+
+    /// xorshift64* — the offsets must be pre-generated so the RNG is never on
+    /// the clock. (Randomness is fine in the playground; it is a measuring
+    /// tool, not a workflow.)
+    struct Rng(u64);
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            self.0
+        }
+    }
+
+    let files = [
+        (
+            "en_ulb 19-PSA (prose)",
+            "example-corpora/en_ulb/19-PSA.usfm",
+        ),
+        (
+            "hindi-IRV1 origin (dense)",
+            "testData/samples-from-wild/hindi-IRV1/origin.usfm",
+        ),
+        (
+            "en_ult 01-GEN (aligned)",
+            "example-corpora/en_ult/01-GEN.usfm",
+        ),
+    ];
+
+    println!("utf16 boundary index — stride={STRIDE}B, min-of-{REPS}, {QUERIES} queries/direction");
+    println!(
+        "{:<26} {:>10} {:>8} {:>12} {:>10} {:>12} {:>10}",
+        "file", "bytes", "non-asc", "A index", "A % src", "B index", "B % src"
+    );
+
+    let mut dense_source: Option<String> = None;
+
+    for (label, path) in files {
+        let path = Path::new(path);
+        if !path.exists() {
+            eprintln!("  skipping {label}: {} not mounted", path.display());
+            continue;
+        }
+        let src = read_source(path);
+        // Share of BYTES that are non-ASCII — the axis strategy A is sensitive
+        // to, and the one that makes hindi-IRV1 the interesting case.
+        let non_ascii_bytes = src.bytes().filter(|b| !b.is_ascii()).count();
+        let pct_non_ascii = 100.0 * non_ascii_bytes as f64 / src.len().max(1) as f64;
+
+        let a = Anchors::build(&src);
+        let b = Stride::build(&src);
+        assert_eq!(a.len_utf16(), b.len_utf16(), "{label}: strategies disagree");
+
+        let pct = |n: usize| 100.0 * n as f64 / src.len() as f64;
+        println!(
+            "{label:<26} {:>10} {:>7.0}% {:>12} {:>9.1}% {:>12} {:>9.1}%",
+            src.len(),
+            pct_non_ascii,
+            a.index_bytes(),
+            pct(a.index_bytes()),
+            b.index_bytes(),
+            pct(b.index_bytes()),
+        );
+
+        // Build cost.
+        let build_a = min_of(|| Anchors::build(&src));
+        let build_b = min_of(|| Stride::build(&src));
+        println!(
+            "    build      A {:>8.3} ms   B {:>8.3} ms   ({:.1}× faster)",
+            build_a * 1000.0,
+            build_b * 1000.0,
+            build_a / build_b
+        );
+
+        // Pre-generate boundary-legal offsets: every query must be a real
+        // character boundary, so both strategies answer the same question.
+        let pairs = reference_pairs(&src);
+        let mut rng = Rng(0x9E37_79B9_7F4A_7C15 ^ src.len() as u64);
+        let probes: Vec<(u32, u32)> = (0..QUERIES)
+            .map(|_| pairs[(rng.next() % pairs.len() as u64) as usize])
+            .collect();
+
+        let fwd_a = min_of(|| {
+            let mut acc = 0u64;
+            for &(byte, _) in &probes {
+                acc += a.byte_to_utf16(byte) as u64;
+            }
+            acc
+        });
+        let fwd_b = min_of(|| {
+            let mut acc = 0u64;
+            for &(byte, _) in &probes {
+                acc += b.byte_to_utf16(byte) as u64;
+            }
+            acc
+        });
+        let rev_a = min_of(|| {
+            let mut acc = 0u64;
+            for &(_, utf16) in &probes {
+                acc += a.utf16_to_byte(utf16) as u64;
+            }
+            acc
+        });
+        let rev_b = min_of(|| {
+            let mut acc = 0u64;
+            for &(_, utf16) in &probes {
+                acc += b.utf16_to_byte(utf16) as u64;
+            }
+            acc
+        });
+        let ns = |secs: f64| secs * 1e9 / QUERIES as f64;
+        println!(
+            "    byte→utf16 A {:>8.1} ns   B {:>8.1} ns",
+            ns(fwd_a),
+            ns(fwd_b)
+        );
+        println!(
+            "    utf16→byte A {:>8.1} ns   B {:>8.1} ns",
+            ns(rev_a),
+            ns(rev_b)
+        );
+        if label.starts_with("hindi") {
+            dense_source = Some(src);
+        }
+    }
+
+    // The remainder count's raw speed, on the dense file — the only place the
+    // SWAR path could plausibly matter.
+    if let Some(src) = dense_source {
+        let bytes = src.as_bytes();
+        let gib = |secs: f64| (bytes.len() as f64 / secs) / (1024.0 * 1024.0 * 1024.0);
+        let scalar = min_of(|| utf16_len_scalar(bytes));
+        let swar = min_of(|| utf16_len_swar(bytes));
+        assert_eq!(utf16_len_scalar(bytes), utf16_len_swar(bytes));
+        println!(
+            "utf16_len over the dense file: scalar {:>6.2} GiB/s   SWAR {:>6.2} GiB/s   ({:.1}×)",
+            gib(scalar),
+            gib(swar),
+            scalar / swar
+        );
+    }
 }
 
 /// Untimed corpus sweep: what does lint actually FIND in the wild? Per-code

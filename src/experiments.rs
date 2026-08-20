@@ -16,8 +16,13 @@
 //!   sink that builds the CST and runs lint during the scan. Prices fusing
 //!   the whole pipeline into one traversal.
 
+//! - [`utf16`] — NOT a lexer variant: the byte↔UTF-16 boundary index, in two
+//!   shapes (per-drift-change anchors vs fixed-stride anchors + SWAR count).
+//!   Prices the editor-session coordinate translation on dense scripts.
+
 pub mod chapter_par;
 pub mod fused;
 pub mod scalar;
 pub mod staged;
 pub mod sweeps;
+pub mod utf16;

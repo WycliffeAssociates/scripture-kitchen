@@ -37,7 +37,19 @@ originals below.
   string/ArrayBuffer crossing itself.
 - **UTF-16 is a boundary index** (byte↔UTF-16 drift breakpoints, binary
   search both ways; rust-analyzer's `line-index` is the precedent) —
-  never an eager conversion, never in the core.
+  never an eager conversion, never in the core. SHAPE AMENDED by
+  measurement (2026-08-19, Will's Hindi-IRV question;
+  experiments/utf16.rs is the record): per-drift-change anchors are
+  pathological on dense scripts — 236% of the source on Devanagari, 49%
+  on aligned en_ult — so the shape is FIXED-STRIDE anchors (256 B) +
+  SWAR remainder count (`len − continuations + count(≥0xF0)`, which
+  composes across a mid-character stride cut with zero special-casing):
+  1.6% of source on every script, builds 6-13× faster, byte→utf16
+  equal-or-faster where it matters (the bulk emit direction);
+  utf16→byte pays ~100 ns/query, invisible at cursor-position rates.
+  Hand-rolled SWAR (~10 lines), no dependency; simdutf/str_indices are
+  the graduation path if true SIMD ever earns it. Production adoption
+  happens when the wasm session is built.
 - **No JS table**: the table's JUDGMENTS cross stamped on ranges —
   category + `payload_kind` (2 bits) + `closing` (2 bits) per marker
   range. NOTE `Category` has 26 variants (> 4 bits): either two bytes,
