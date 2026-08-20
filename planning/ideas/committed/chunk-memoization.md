@@ -52,6 +52,32 @@ a memo table can't be wrong, only cold. Pre-scan boundaries need only be
 DETERMINISTIC, not semantically perfect — a pathological `\c` costs
 extra misses, never correctness.
 
+## Two questions resolved 2026-08-19 (design only — zero-cache stands)
+
+**"Should the lexer record chunk-relative offsets?" — the question
+dissolves.** Relativity is a property of the SLICE you hand the lexer:
+`lex(&source[chunk])` yields chunk-relative offsets by construction
+(the slice starts at 0); `lex(whole_file)` yields absolutes. Same
+lexer, no chunk-awareness (which would couple it to `\c` semantics the
+lexer is forbidden to know), and the TOC bridges the two frames in one
+subtraction (`absolute − base`). Nothing to build.
+
+**The lint cross-chunk monoid inventory** (the machines are already
+feedable structs, so per-chunk = `(incoming) → findings + (outgoing)`):
+Ordering's verse state resets at `\c` — chunk-local by construction;
+only the chapter sequence crosses (prev number + token, trivial).
+numbering-mix is a true monoid (bitmask OR, first-seen min; the
+finding is PLACED at compose time). missing-id/declared-version are
+chunk-0 facts broadcast forward. The CST seam (section above) remains
+the only genuinely unsolved crossing.
+
+**Budget check keeping all of this parked**: full staged pipeline
+~31 ns/token; heaviest aligned book ~7 ms native, ~15-20 ms at wasm's
+2-3×, behind a 150 ms debounce — order-of-magnitude headroom with zero
+cache. The subsystem that can't afford recompute is proofreading/sous,
+whose caching is ruled SOUS-SIDE (masked checksums over the slab);
+the engine takes no cache until a real device measurement demands it.
+
 ## Priced caveat: chunks are not perfectly independent for the CST
 
 A sidebar spanning `\c`; an unclosed frame at a chunk boundary is
