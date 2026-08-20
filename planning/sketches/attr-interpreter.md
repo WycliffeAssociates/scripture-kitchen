@@ -42,9 +42,14 @@ AttrLists on a node already draw `attr-both-lists`).
 
 - Interior = span minus delimiting pipe(s): leading `|` always; trailing
   `|` iff node-initial (U25001).
-- `name = "value"` pairs, `,`-separated in 3.2 / ws-separated legacy —
-  accept both separators, reading what the scanner's attr_list_end
-  already accepted (verify against scanner.rs before coding).
+- `name = "value"` pairs, WHITESPACE-separated only (RESOLVED
+  2026-08-20 by probe: usfmtc drops everything after a `,` — both
+  `"a", strong=` and `"a",strong=` silently lose `strong`; there is no
+  comma dialect). A comma between pairs is `Malformed { BareJunk }` at
+  the comma — where the reference implementation silently loses data,
+  we flag. (The scanner is no constraint either way: `attr_list_end`
+  only finds the span's END and never parses the interior, so the
+  scanner "blesses" any bytes.)
 - Quoted value: `"` … `"`, no escapes defined by the spec — a `\"` case
   is BareJunk, recorded not guessed.
 - Unquoted value: legal for the bare default form (`\w grace|strong\w*`)
@@ -73,8 +78,8 @@ AttrLists on a node already draw `attr-both-lists`).
 
 ## Open
 
-1. Separator dialect: does the scanner accept `,` and ws both? Encode
-   whatever it accepted — the interpreter must never reject a span the
-   scanner blessed (else lint fires on shapes the lexer ate silently).
-2. `attr-required-if` (eid-required-if-sid, ta's one-or-more) lands in
-   lint's Flat when this ships — same window, per the roadmap.
+None — both former opens closed 2026-08-20. (1) Separator dialect
+RESOLVED: whitespace only, comma = Malformed; see the grammar bullet.
+(2) was never a question, just scheduling: `attr-unknown-name` and
+`attr-required-if` (eid-required-if-sid, ta's one-or-more) land in
+lint's Flat in the same build window as this module. Ready to build.
