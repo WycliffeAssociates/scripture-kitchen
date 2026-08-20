@@ -10,31 +10,27 @@ investigate-later.md.
 ## Where we are (2026-08-20)
 
 Scanner COMPLETE (~1.7 GiB/s prose). `cst::build` COMPLETE (~6 ns/token,
-flat lossless CST). LINT COMPLETE and read by Will (src/lint/ — 37
-codes, one in-order walk feeding four machines at ~9 ns/token, the fix
-model with `check_fixes` as the oracle over every corpus fix; splice
-primitives in src/edit.rs). Full staged pipeline ~31 ns/token. The
-single-pass fusion experiment is measured and PARKED
-(experiments/fused.rs is the record); the UTF-16 wire shape is measured
-and amended (experiments/utf16.rs: stride-256 + SWAR — settled-facts).
+flat lossless CST). The ATTRIBUTE INTERPRETER is COMPLETE
+(src/attributes.rs — borrowed spans, no allocation, zero malformed over
+1.25M corpus lists). LINT IS CLOSED (src/lint/ — 43 codes in six
+families, NOTHING OWED: one in-order walk feeding four machines at ~9.4
+ns/token on unaligned scripture and ~15.5 on word-aligned en_ult, where
+the k/v attribute rules read 31 MB of list interiors nothing read before;
+15 codes offer a fix, with `check_fixes` as the oracle over every corpus
+fix; splice primitives in src/edit.rs). Full staged pipeline ~25 ns/token
+(en_ulb), ~38 on en_ult. The single-pass fusion experiment
+is measured and PARKED (experiments/fused.rs is the record); the UTF-16
+wire shape is measured and amended (experiments/utf16.rs: stride-256 +
+SWAR — settled-facts).
 
-Lint leftovers, each parked against its roadmap item: the two k/v
-attribute rules (item 1), the Version family (item 5), and the
-POSITIONAL-CONTEXT LANE (sketches/positional-context.md — NOT on the
-roadmap yet; slot it when ready).
+## Next code: exports
 
-## Next code: the attribute k/v interpreter
-
-Sketch: sketches/attr-interpreter.md. The designator interpreter's
-sibling — pure span → judgment over an AttrList token's interior:
-quoted/unquoted values, the default attribute (the row's
-`default_attribute`), `defined_attributes` matching, the `a-*` prefix
-wildcard, "later definition wins" merge. Judged, never repaired; no
-allocation on the read path.
-
-Unblocks two consumers at once: exports' k/v splatting (the lossy step)
-and the two owed lint rules (`attr-unknown-name`, `attr-required-if`).
-Built standalone, both consumers arrive with it already tested.
+Sketch: sketches/usj-export.md (USX/HTML follow it —
+sketches/usx-html-export.md). The first CONSUMER of the whole stack: the
+CST plus the interpreter's k/v reading, splatted into USJ's JSON shape.
+It is where the attribute interpreter's second consumer arrives (lint was
+the first), and where the LOSSY step lives — the token stays
+byte-identical, the export is what interprets.
 
 ## Standing laws
 

@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use rayon::prelude::*;
 use usfm_onion_2::cst::build;
 use usfm_onion_2::lex;
-use usfm_onion_2::lint::{Code, LINT_ROWS, check_fixes, lint};
+use usfm_onion_2::lint::{Code, LINT_ROWS, NO_TOKEN, check_fixes, lint};
 
 fn collect_usfm_paths(root: &Path, paths: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(root) else {
@@ -52,6 +52,18 @@ fn lint_corpus() -> Option<Vec<BookReport>> {
 
                 let mut counts = [0u64; LINT_ROWS.len()];
                 for obs in &report.observations {
+                    // THE ANCHOR INVARIANT, over every finding in 226 books:
+                    // the other party always PRECEDES the anchor. Every code
+                    // that fills `second` fills it with an opener, an owner,
+                    // the previous in sequence or a first occurrence — all of
+                    // them behind the token being reported — and consumers
+                    // (the report's sort, span highlighting) are built on it.
+                    assert!(
+                        obs.second == NO_TOKEN || obs.second < obs.anchor,
+                        "{}: {} put its second party at or after its anchor ({obs:?})",
+                        path.display(),
+                        obs.code.row().name,
+                    );
                     counts[obs.code as usize] += 1;
                 }
                 let book = report.book.map(|idx| {

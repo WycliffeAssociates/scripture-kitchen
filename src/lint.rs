@@ -56,7 +56,9 @@
 //! [`rows`] is the authored
 //! data (the codes and [`LINT_ROWS`], the sibling of `tables::rows`),
 //! [`walk`] is the driver ([`Doc`], the [`Emit`] sink, THE WALK),
-//! [`structure`], [`ancestry`], [`ordering`] and [`flat`] are one machine each,
+//! [`structure`], [`ancestry`], [`ordering`] and [`flat`] are one machine each
+//! ([`attr_rules`] is [`Flat`]'s attribute arm, split out for its own state
+//! cluster),
 //! and [`fix`] holds lint's half of the fix model — the offered repair, the sequence
 //! fixes and [`check_fixes`]. The byte-splice primitives those are built from
 //! ([`Edit`], [`FixStr`], [`apply`]) are `crate::edit`, because the formatter
@@ -68,12 +70,13 @@
 //! (en_ulb, 30 iterations), ~15.5 ns/token on en_ult. The gap between the two is
 //! the k/v attribute rules and nothing else: en_ult is 31 MB of `\w` attribute
 //! interiors, and reading inside a list is work no earlier phase did. The
-//! measurement and the two reductions applied to it are on `Flat`'s
+//! measurement and the two reductions applied to it are on `AttrRules`'
 //! `read_attributes`; the next lever is in planning/investigate-later.md.
 //!
 //! [`CloseReason`]: crate::cst::CloseReason
 
 pub(crate) mod ancestry;
+pub(crate) mod attr_rules;
 pub(crate) mod fix;
 pub(crate) mod flat;
 pub(crate) mod ordering;
@@ -114,6 +117,10 @@ pub const NO_TOKEN: u32 = u32::MAX;
 pub struct Observation {
     pub code: Code,
     pub anchor: u32,
+    /// INVARIANT: `second == NO_TOKEN || second < anchor` — the other party
+    /// (an opener, an owner, the previous in sequence, a first occurrence)
+    /// always PRECEDES the anchor. Pinned over the corpus in
+    /// tests/lint_corpus.rs.
     pub second: u32,
     pub aux: u32,
 }

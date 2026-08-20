@@ -74,17 +74,26 @@ pub struct LintRow {
     pub code: Code,
     pub name: &'static str,        // "unclosed-note"
     pub category: Category,
-    pub severity: Severity,        // default
-    // at/after this \usfm version, this severity instead; None = flat.
-    // This column OWNS the version facts no MarkerRow owns.
-    pub escalation: Option<(UsfmVersion, Severity)>,
+    // The base of the version ladder: the severity below its first rung.
+    // None = GATED — the rule says nothing at all down there (2026-08-20).
+    pub severity: Option<Severity>,
+    // The ladder, ascending; the last rung <= the declared \usfm wins, and
+    // an empty slice is flat. This column OWNS the version facts no
+    // MarkerRow owns. (Was Option<(UsfmVersion, Severity)> until the
+    // closeout window; a slice + the None base express a whole
+    // none -> Warning -> Error ladder as DATA.)
+    pub escalation: &'static [(UsfmVersion, Severity)],
     pub aux: AuxKind,              // what Observation.aux means here —
                                    //   the column that keeps aux non-opaque
     pub template: &'static str,    // default EN; {anchor} {second} {aux};
                                    //   rendering/localization = consumer's
     pub fix_label: Option<&'static str>,  // None = never offers a fix
 }
-pub enum AuxKind { None, ExpectedNumber, NumberingCap, Count, Version }
+// `severity_at(declared) -> Option<Severity>` reads the two columns; None
+// is SILENCE, and the machines ask before they push.
+pub enum AuxKind {
+    None, ExpectedNumber, NumberingCap, Count, Version, MalformedShape,
+}
 pub enum UsfmVersion { V3_0, V3_2, V4_0 }
 ```
 
@@ -303,8 +312,8 @@ lint(source, tokens, cst):
 3. **Token-walk rules**: adjacency (ca/cp/va/vp), form, payload
    (caller shape, numbering cap, numbering-mix aggregate), the four
    shape-only attribute rules. NOT the k/v-interpreter attr rules
-   (attr-unknown-name, attr-required-if) — those ride whenever the
-   attribute interpreter is built (exports want it too).
+   (attr-unknown-name, attr-required-if) — those rode the closeout
+   window below, once the interpreter existed.
 4. **Fixes**: Fix/Edit/FixStr, `Cst::extent(node, tokens)`, per-code
    fixes, and the fix ORACLE harness (apply → relex → relint: finding
    gone, nothing new) run over every corpus fix. LANDED 2026-08-19 —
@@ -315,9 +324,25 @@ lint(source, tokens, cst):
    hiding), and a renumber is offered only when the next number in the
    sequence is above the one it writes.
 
+5. **Closeout** (2026-08-20, sketches/lint-closeout.md): the three k/v
+   attribute rules the interpreter unblocked (`attr-unknown-name`,
+   `attr-malformed`, `attr-required-if`), the Version family
+   (`deprecated-marker` + a five-row authored `VERSION_ROWS`), the
+   POSITIONAL-BAND judge (`marker-out-of-band`), and `escalation` becoming
+   a `&[(UsfmVersion, Severity)]` SLICE with an `Option<Severity>` base —
+   `None` = gated, which deleted `attr-trailing-form`'s hand-coded `>= 3.2`
+   gate. 43 codes, six families, nothing owed.
+
 ## Still open (small)
-- messageParams audit vs onion — mechanical, do during build: every
-  onion param must be a span or fit aux.
+- ~~messageParams audit vs onion — mechanical, do during build: every
+  onion param must be a span or fit aux.~~ **STRUCK 2026-08-20 by Will**
+  (lint-closeout.md §5): no formal audit. The organic version ran instead
+  — the closeout window wrote the last five rules, and not one of them
+  wanted a param that was neither a SPAN (anchor/second) nor a small
+  integer (aux). `aux` gained two readings and both are small integers: a
+  `MalformedAttr` discriminant, and a flag telling
+  `attr-unknown-name`'s two shapes apart. The audit's question is
+  answered by the rules themselves.
 - ~~**`nd`'s context mask omits Footnote, and it costs three findings**
   (found by phase-4's fix preview, 2026-08-19): bsb GEN 2:4 writes a
   well-formed note whose `\fq` contains `\+nd`; the character marker's

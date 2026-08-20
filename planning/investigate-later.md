@@ -268,3 +268,44 @@ markup boundaries in aligned bibles) belongs to the same
 text_runs/slab layer — when the slab export gets built, ask whether
 header_scan's facts and the masks are both just rows of it. Goal is
 net deletion: if unifying adds a layer, the answer was no.
+
+## Pinned-count tests lean on gitignored corpora (Will, 2026-08-20)
+
+tests/lint_corpus.rs, attr_corpus.rs, cst_oracle.rs etc. pin exact
+counts (1,253,766 lists…) against example-corpora/, which is
+gitignored — the suite silently skips where the corpora aren't
+mounted, so CI or a fresh clone proves less than it looks like it
+proves. Fine for now (the numbers are derived and reconciled, not
+magic), but AT SOME POINT: bundle a small stable subset or re-target a
+tier of these tests at the SYMLINKED testData/ folder (hindi-IRV,
+samples-from-wild — already used by the utf16 experiment) so a clone
+without the big corpora still exercises real-data pins. Goal: one
+always-runs tier + one corpora-mounted tier, clearly labeled.
+
+## The k/v attribute rules read 31 MB byte-at-a-time (2026-08-20)
+
+The lint closeout's one perf event, measured and accepted rather than
+solved. `Flat::read_attributes` walks every attribute list's interior
+through `attributes::attrs` — the first rule in lint to read INSIDE a
+token — and a word-aligned corpus is largely made of those interiors.
+Min-of-8 `--lint-only`: en_ult 9.8 → 15.5 ns/token (+5.7), en_ulb 8.8 →
+9.4 (+0.6, which is the band/version bookkeeping, not this).
+
+Two reductions are already in: row 0 abstains (en_ult's 461,352
+`\zaln-s` lists, five attributes each — over half the attribute bytes in
+the corpus), and `x-`/`z-` names skip `resolve`. What remains is 792,414
+`\w` lists of `|x-occurrence="1" x-occurrences="1"`, i.e. ~31 MB scanned
+at ~0.85 GB/s. The interpreter is not slow; that is what a
+byte-at-a-time interior walk costs.
+
+LEVERS, unproven, in order of appeal:
+1. VECTORIZE the interior walk in src/attributes.rs (name run, HS run,
+   next quote — three scans that all want SWAR/memchr). Its own corpus
+   sweep (tests/attr_corpus.rs, exact 4,352,929-attribute reconciliation)
+   is a ready-made oracle, which is why this is the honest first move.
+2. The ruled per-RULE config knob (lint-sketch.md, "Suppressions"): a
+   consumer that does not want three Hint/Warning attr rules should not
+   pay 6 ns/token for them. Wants a config channel, which v1 has none of.
+3. A sound whole-list pre-filter ("every name here is user-namespace")
+   was considered and REJECTED: finding name starts is the same
+   byte-at-a-time scan, so it saves nothing.

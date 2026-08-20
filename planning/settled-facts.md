@@ -76,10 +76,15 @@ originals below.
   (`Document/BookSession { source, tokens, cst }`) answers who holds the
   buffer; owned strings exist only where serialization allocates anyway.
 - **Version data lives in LINT's rules table**
-  (`severity(code, declared_version)`, fed by `\usfm`): no version
-  column on `MarkerRow`; the decisive fact (trailing lists deprecated
-  3.2 / removed 4) is owned by no row. 46 spare row bits if ever truly
-  unavoidable.
+  (`severity(code, declared_version)`, fed by `\usfm`), and per-FORM
+  facts (trailing lists deprecated 3.2 / removed 4) can only live
+  there — no row owns a form's lifecycle. SOFTENED 2026-08-20 (Will):
+  per-MARKER version facts MAY ride `MarkerRow` when that is simpler —
+  it was never a hard rule; current lean keeps the small authored
+  VersionRow in lint (zero codegen touch) and migrates onto MarkerRow
+  only if the set grows. Escalation is a SLICE
+  (`&[(UsfmVersion, Severity)]`, ruled 2026-08-20) so whole
+  none→Warning→Error ladders are data, not hand gates.
 - **Exports are folds over the CST** (USJ/USX/HTML): codegen'd
   name-mapping (official USJ names — check the schema in usfm-grammar),
   the attribute interpreter for k/v splatting (the lossy step), plus
