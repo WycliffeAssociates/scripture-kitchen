@@ -32,6 +32,8 @@ mod parse_header;
 mod scanner;
 pub mod tables;
 mod token;
+#[cfg(feature = "usj")]
+pub mod usj;
 
 pub use parse_header::{ChapterRun, ParseHeader};
 pub use scanner::{lex, lex_general_path_only};

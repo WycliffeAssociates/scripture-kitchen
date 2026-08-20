@@ -12,6 +12,7 @@
 //! |x-strong="G2532" x-lemma="καί"  →  x-strong=G2532, x-lemma=καί   the corpus majority
 //! |in                              →  lemma=in            bare: whole interior → row's default_attribute
 //! |Fred Smith                      →  lemma=Fred Smith    bare is GREEDY: free text, ONE event, no invented junk
+//! |keyword ␠                       →  lemma=keyword␠      bare keeps its TRAILING HS: no closing pipe, no delimiter
 //! |lemma=grace                     →  lemma=grace         unquoted pair value; ends at HS or interior end
 //! |lemma="a"strong="G1"            →  lemma=a, strong=G1  a closing quote is its own delimiter
 //! |aid="x"| ␠                      →  aid=x               node-initial (U25001): closing pipe + its inner HS trimmed
@@ -151,13 +152,17 @@ pub fn attrs<'a>(source: &'a [u8], list: &Token) -> AttrIter<'a> {
     debug_assert_eq!(list.kind(), TokenKind::AttrList);
     let span = &source[list.start as usize..list.end() as usize];
 
-    // Leading `|` always; then trailing HS (U25001 keeps it inside the list,
-    // after the closing pipe); then the closing `|` if this is the
-    // node-initial form; then any HS on the inside of it.
+    // Leading `|` always. The CLOSING `|` of the node-initial form (U25001)
+    // next, with the HS on either side of it — that HS is delimiter, and the
+    // closing pipe is what says so. Without a closing pipe there is no
+    // delimiter at the tail, so trailing HS is the AUTHOR'S BYTES and stays:
+    // `\w word|keyword \w*` reads `keyword ` (testData
+    // paratextTests/WordlistMarkerKeywordEndsInSpace and its five siblings).
     let mut from = usize::from(span.first() == Some(&PIPE));
-    let mut to = trim_hs(span, from, span.len());
-    if to > from && span[to - 1] == PIPE {
-        to = trim_hs(span, from, to - 1);
+    let mut to = span.len();
+    let before_hs = trim_hs(span, from, to);
+    if before_hs > from && span[before_hs - 1] == PIPE {
+        to = trim_hs(span, from, before_hs - 1);
     }
     while from < to && is_hs(span[from]) {
         from += 1;

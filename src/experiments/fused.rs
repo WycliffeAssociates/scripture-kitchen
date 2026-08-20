@@ -841,6 +841,7 @@ impl<'a, const LINT: bool> FusedScanner<'a, LINT> {
                 pending_payload: Payload::None,
                 after_marker: false,
                 attr_frames: 0,
+                attr_list_ends_at_line: false,
             },
             opt_break_finder: memmem::Finder::new(b"//"),
             hot: HotIdx::resolve(),
@@ -987,6 +988,7 @@ impl<'a, const LINT: bool> FusedScanner<'a, LINT> {
                 self.mode.pending_payload = Payload::None;
                 self.mode.after_marker = false;
                 self.mode.attr_frames = 0;
+                self.mode.attr_list_ends_at_line = false;
                 Some(end)
             }
             _ => None,
@@ -1009,6 +1011,7 @@ impl<'a, const LINT: bool> FusedScanner<'a, LINT> {
         self.mode.pending_payload = Payload::None;
         self.mode.after_marker = false;
         self.mode.attr_frames = 0;
+        self.mode.attr_list_ends_at_line = false;
         let end = newline_end(self.bytes, index);
         self.sink.push_token(TokenKind::Newline, index, end);
         end
@@ -1035,7 +1038,10 @@ impl<'a, const LINT: bool> FusedScanner<'a, LINT> {
         };
         match kind {
             TokenKind::Marker { .. } if opens_attrs_frame(idx) => {
-                self.mode.attr_frames = self.mode.attr_frames.saturating_add(1)
+                self.mode.attr_frames = self.mode.attr_frames.saturating_add(1);
+                if generated::kind(idx) == MarkerKind::Periph {
+                    self.mode.attr_list_ends_at_line = true;
+                }
             }
             TokenKind::ClosingMarker { .. } | TokenKind::MilestoneTerminator => {
                 self.mode.attr_frames = self.mode.attr_frames.saturating_sub(1)
@@ -1057,6 +1063,13 @@ impl<'a, const LINT: bool> FusedScanner<'a, LINT> {
         {
             AttrScan::NodeInitial(end) => (end, true),
             AttrScan::Trailing(end) => (end, false),
+            // `\periph`'s list ends with the line — mirrors scanner.rs.
+            AttrScan::NotAList(stop)
+                if self.mode.attr_list_ends_at_line
+                    && matches!(self.bytes.get(stop), None | Some(&CR) | Some(&LF)) =>
+            {
+                (stop, false)
+            }
             AttrScan::NotAList(stop) => return Err(stop),
         };
         if pipe_at > text_from {

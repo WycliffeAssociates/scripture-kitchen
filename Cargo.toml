@@ -11,10 +11,17 @@ winnow = "1.0.4"
 rayon = { version = "1.10", optional = true }
 
 [features]
+default = ["usj"]
 par = ["dep:rayon"]
+# Exports are compile-time optional (sketches/usj-export.md): a size-sensitive
+# consumer sets `default-features = false` and the module is not in the binary.
+usj = []
 
 [dev-dependencies]
 criterion = "0.8.2"
+# ORACLE-SIDE ONLY. The library writes JSON by hand (no serde in src/); the
+# corpus test needs to PARSE testData's fixtures to compare as `Value`.
+serde_json = "1.0"
 # Integration tests DO see dev-deps (unlike src/bin — see rayon note above),
 # so tests get parallelism without the `par` feature or touching the lib.
 rayon = "1.10"

@@ -560,6 +560,9 @@ pub static ROWS: &[MarkerRow] = &[
             SpecContext::Para,
             SpecContext::List,
             SpecContext::Table,
+            // + Section: class-wide curation 2026-08-20 — see the note on the
+            // `x` row below.
+            SpecContext::Section,
         ],
         opens_scope: Some(ScopeKind::Note),
         closes_scope: None,
@@ -665,6 +668,9 @@ pub static ROWS: &[MarkerRow] = &[
             SpecContext::Para,
             SpecContext::List,
             SpecContext::Table,
+            // + Section: class-wide curation 2026-08-20 — see the note on the
+            // `x` row below.
+            SpecContext::Section,
         ],
         opens_scope: Some(ScopeKind::Note),
         closes_scope: None,
@@ -703,6 +709,9 @@ pub static ROWS: &[MarkerRow] = &[
             SpecContext::Para,
             SpecContext::List,
             SpecContext::Table,
+            // + Section: class-wide curation 2026-08-20 — see the note on the
+            // `x` row below.
+            SpecContext::Section,
         ],
         opens_scope: Some(ScopeKind::Note),
         closes_scope: None,
@@ -760,6 +769,9 @@ pub static ROWS: &[MarkerRow] = &[
             SpecContext::Para,
             SpecContext::List,
             SpecContext::Table,
+            // + Section: class-wide curation 2026-08-20 — see the note on the
+            // `x` row below.
+            SpecContext::Section,
         ],
         opens_scope: Some(ScopeKind::Note),
         closes_scope: None,
@@ -787,6 +799,22 @@ pub static ROWS: &[MarkerRow] = &[
             SpecContext::BookIntroductionEndTitles,
             SpecContext::ChapterContent,
             SpecContext::PeripheralContent,
+            // + Para/Footnote: curated 2026-08-20, RULED BY WILL over the
+            // spec-diff referee ("can adjust rows yep"). fig/index.html's
+            // "Valid In" names only the positional band, but `\fig` OPENS a
+            // scope, so with a mask that no container grants, a mid-verse
+            // `\fig` DISPLACED its own paragraph. Evidence is the committee's
+            // testData (the oracle): `\fig` occurs 8 times across the
+            // validated-pass fixtures — 7 inside a paragraph
+            // (paratextTests/FigureAttributesAreValid,
+            // InvalidFigureAttributesReported, Usfm30Usage,
+            // special-cases/figure_with_quotes_in_desc,
+            // specExamples/extended/sidebars, usfmjsTests/esb) and once inside
+            // a footnote's `\ft` (advanced/periph's sibling
+            // advanced/figureInNote) — and EVERY fixture nests it where it
+            // sits. Only the two contexts the fixtures demonstrate are added.
+            SpecContext::Para,
+            SpecContext::Footnote,
         ],
         opens_scope: Some(ScopeKind::Character),
         closes_scope: None,
@@ -2073,7 +2101,22 @@ pub static ROWS: &[MarkerRow] = &[
         ws_after_name: Ws::TagEndDelimiter, // ws: curated (onion MARKER_WHITESPACE row)
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
-        allowed_contexts: &[SpecContext::ChapterContent],
+        allowed_contexts: &[
+            SpecContext::ChapterContent,
+            // + PeripheralContent: curated 2026-08-20, RULED BY WILL over the
+            // spec-diff referee ("can adjust rows yep"). A `\periph` frame
+            // stamps PeripheralContent, and usx.rng's `PeripheralDivision`
+            // CONTAINS `PeripheralContent`, which is `Para | Section |
+            // PeriphPara | Chapter | Figure | Milestone | List | Table |
+            // Sidebar` — so a paragraph inside a peripheral division nests,
+            // and without this a `\p` after `\periph` DISPLACED the
+            // division. Evidence: testData advanced/periph nests the `\p`.
+            // The grammar grants the WHOLE Para/Section/List/Table class the
+            // same context; only `p` is added here because only `p` is
+            // demonstrated, and the class-wide pass belongs to its own
+            // spec-diff run.
+            SpecContext::PeripheralContent,
+        ],
         opens_scope: Some(ScopeKind::Para),
         closes_scope: None,
         defined_attributes: &[],
@@ -2132,7 +2175,14 @@ pub static ROWS: &[MarkerRow] = &[
         allowed_contexts: &[SpecContext::Peripheral],
         opens_scope: Some(ScopeKind::Periph),
         closes_scope: None,
-        defined_attributes: &[],
+        // `id` curated 2026-08-20 (RULED BY WILL, same override as the
+        // Para/Footnote additions above): usx.rng's `PeripheralDivision`
+        // gives `\periph` exactly two attributes — `alt`, which is the TITLE
+        // TEXT and so never written as a k/v pair, and `id` behind the pipe.
+        // testData advanced/periph writes `\periph My Title|id="title"`.
+        // Optional, not Required: the bare `\periph Title` form is legal
+        // (the grammar wraps the whole pipe group in `<optional>`).
+        defined_attributes: &[("id", AttrStatus::Optional)],
         default_attribute: None,
         closing: ClosingBehavior::None,
         deprecated: false,
@@ -3611,6 +3661,21 @@ pub static ROWS: &[MarkerRow] = &[
             SpecContext::Para,
             SpecContext::List,
             SpecContext::Table,
+            // + Section: curated 2026-08-20, RULED BY WILL over the spec-diff
+            // referee ("can adjust rows yep"). The same argument as the
+            // 2026-08-18 addition above, one container further: a section
+            // HEADING holds content too, and without this a `\x` opening
+            // inside `\s1` DISPLACED the section. Evidence is the
+            // committee's testData (the oracle): specExamples/cross-ref and
+            // usfmjsTests/usfmBodyTestD both write `\s1 heading\x - …\x*`
+            // and both fixtures nest the note in the heading. RULED CLASS-WIDE
+            // 2026-08-20 (same ruling, widened): the whole Note class —
+            // `f`/`fe`/`ef`/`ex` and this row — gets Section, because the
+            // grammar reason is the container's, not the marker's. Wild
+            // evidence for the footnote half: samples-from-wild/doo43-4 writes
+            // `\f …\f*` inside `\cl` (a Section-contributing heading), and
+            // before this the footnote DISPLACED the paragraph.
+            SpecContext::Section,
         ],
         opens_scope: Some(ScopeKind::Note),
         closes_scope: None,

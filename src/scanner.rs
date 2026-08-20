@@ -76,6 +76,12 @@ pub(crate) struct ScanState {
     // unclosed `\w`, which is the worse failure since prose is full of
     // character markers.
     pub(crate) attr_frames: u8,
+    // The one row whose attribute list is terminated by the LINE rather than
+    // by a closer: `\periph My Title|id="x"` (usx.rng's
+    // `PeripheralDivision`, testData advanced/periph). Set with the arming
+    // above, cleared with it at every newline, and read ONLY by
+    // `try_attr_list` — the byte-level boundary scan stays closer-shaped.
+    pub(crate) attr_list_ends_at_line: bool,
 }
 
 /// One scan in progress: the source, what has been emitted so far, the mode
@@ -167,6 +173,7 @@ impl<'a> Scanner<'a> {
                 pending_payload: Payload::None,
                 after_marker: false,
                 attr_frames: 0,
+                attr_list_ends_at_line: false,
             },
             opt_break_finder: memmem::Finder::new(b"//"),
             hot: HotIdx::resolve(),
@@ -388,6 +395,9 @@ impl Scanner<'_> {
                 self.mode.pending_payload = hot.payload;
                 if hot.attrs_frame {
                     self.mode.attr_frames = self.mode.attr_frames.saturating_add(1);
+                    // No hot row is a Periph, so the line-end shape cannot
+                    // arm here — asserted rather than assumed.
+                    debug_assert_ne!(generated::kind(hot.idx), MarkerKind::Periph);
                 }
                 Some(end)
             }
@@ -403,6 +413,9 @@ impl Scanner<'_> {
                 self.mode.pending_payload = hot.payload;
                 if hot.attrs_frame {
                     self.mode.attr_frames = self.mode.attr_frames.saturating_add(1);
+                    // No hot row is a Periph, so the line-end shape cannot
+                    // arm here — asserted rather than assumed.
+                    debug_assert_ne!(generated::kind(hot.idx), MarkerKind::Periph);
                 }
                 Some(name_end)
             }
@@ -418,6 +431,7 @@ impl Scanner<'_> {
                 // The line ended, so no frame this marker opened can still be
                 // collecting content on it — same reset the newline arm does.
                 self.mode.attr_frames = 0;
+                self.mode.attr_list_ends_at_line = false;
                 Some(end)
             }
             _ => None,
@@ -457,7 +471,14 @@ impl Scanner<'_> {
 /// text arm's pipe needle so a BACK-position (pre usfm 3.2 legacy trailing) list can be
 /// found inside a text run?
 ///
-/// Character and Figure only. Deliberately NOT:
+/// Character, Figure and Periph only. `\periph` is the one PARAGRAPH-shaped
+/// marker whose attributes come AFTER its content — `\periph My Title|id="x"`
+/// (usx.rng's `PeripheralDivision`: the title is the `alt` attribute, the
+/// pipe carries `id`) — so it needs the needle exactly the way `\w` does
+/// (testData advanced/periph). It costs one line: the count resets at the
+/// newline, and a `\periph` line is a title.
+///
+/// Deliberately NOT:
 /// - **milestones**, which have no content, so their pipe is always at a region
 ///   start and the dispatch arm already sees it;
 /// - **notes, paragraphs, verses**, which take the U25001 front form only —
@@ -470,7 +491,7 @@ impl Scanner<'_> {
 pub(crate) fn opens_attrs_frame(idx: generated::MarkerIdx) -> bool {
     matches!(
         generated::kind(idx),
-        MarkerKind::Character | MarkerKind::Figure
+        MarkerKind::Character | MarkerKind::Figure | MarkerKind::Periph
     )
 }
 
@@ -570,6 +591,7 @@ impl Scanner<'_> {
         // Attribute lists never span a line, so the needle is disarmed here —
         // the bound on what a stale count can cost.
         self.mode.attr_frames = 0;
+        self.mode.attr_list_ends_at_line = false;
         let end = newline_end(self.bytes, index);
         self.push_token(TokenKind::Newline, index, end);
         end
@@ -714,7 +736,10 @@ impl Scanner<'_> {
         // ladder, and pairing closers to openers is the walker's job.
         match kind {
             TokenKind::Marker { .. } if opens_attrs_frame(idx) => {
-                self.mode.attr_frames = self.mode.attr_frames.saturating_add(1)
+                self.mode.attr_frames = self.mode.attr_frames.saturating_add(1);
+                if generated::kind(idx) == MarkerKind::Periph {
+                    self.mode.attr_list_ends_at_line = true;
+                }
             }
             TokenKind::ClosingMarker { .. } | TokenKind::MilestoneTerminator => {
                 self.mode.attr_frames = self.mode.attr_frames.saturating_sub(1)
@@ -856,6 +881,17 @@ impl Scanner<'_> {
             AttrScan::NodeInitial(end) => (end, true),
             // A trailing list is followed by its closer, never by a delimiter.
             AttrScan::Trailing(end) => (end, false),
+            // `\periph Title|id="x"` has NO closer to be followed by — its
+            // list ends with the LINE (usx.rng's `PeripheralDivision`). That
+            // is a question about the open FRAME, not about the bytes, so
+            // `attr_list_end` (pure byte boundary) stays as it is and the mode
+            // answers it here. Any other refutation is still a refutation.
+            AttrScan::NotAList(stop)
+                if self.mode.attr_list_ends_at_line
+                    && matches!(self.bytes.get(stop), None | Some(&CR) | Some(&LF)) =>
+            {
+                (stop, false)
+            }
             AttrScan::NotAList(stop) => return Err(stop),
         };
         // The content this list trails, if any, goes out FIRST.

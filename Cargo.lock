@@ -516,6 +516,7 @@ dependencies = [
  "criterion",
  "memchr",
  "rayon",
+ "serde_json",
  "winnow",
 ]
 
