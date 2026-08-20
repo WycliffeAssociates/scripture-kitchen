@@ -1,4 +1,9 @@
-# Positional-context lane (lint leftover — not yet on the roadmap)
+# Positional-context lane (SLOTTED: roadmap item 5's window, with version-lint)
+
+RULED KEEP (Will, 2026-08-20): the mask's positional half currently has
+ZERO consumers — verified: `\mt1`/`\ip`/`\toc1` after `\c 1 \v 1` lint
+clean today — and this lane is its judge. Ships alongside the Version
+family (both are small authored-data-plus-one-rule lint additions).
 
 Design preserved verbatim from NEXT-STEPS when it slimmed (2026-08-20).
 Deferred from cst::build to lint; never built in lint phases 1-4. The

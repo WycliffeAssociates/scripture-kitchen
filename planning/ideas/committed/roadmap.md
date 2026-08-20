@@ -15,3 +15,5 @@
 
 7. Braid last — and, per its own trajectory, possibly nothing beyond "call the stateless analyze, debounced" plus multi-book concerns.
 ATM UNDER THIS WORLD BRAID WOULD BE, CACHING WORK? INCREMENTAL UPDATES / TILING BINARY?
+
+5.1 Positional-context lane rides item 5's window (ruled 2026-08-20) — sketches/positional-context.md: the judge for the mask's positional half, which today has zero consumers (\mt after \c lints clean).
