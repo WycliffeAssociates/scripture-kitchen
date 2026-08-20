@@ -10,6 +10,9 @@
 //! - [`designator`] — the chapter/verse designator interpreter: the one
 //!   reader of a `Designator` span's interior (ordering lint today, vref
 //!   exports later).
+//! - [`attributes`] — the attribute k/v interpreter: the one reader of an
+//!   `AttrList` span's interior, and the one place attribute NAMES are matched
+//!   against the marker table (lint today, export's k/v splat later).
 //! - [`scanner`] — the Scanner: the only code that owns position. `lex`,
 //!   the arms, the boundary finders, `classify_marker`.
 //! - [`parse_header`] — the first CONSUMER of tokens: a second pass that indexes
@@ -19,6 +22,7 @@
 //! and classification are kept strictly apart, and payload interiors belong
 //! to interpreters, on demand, later.
 
+pub mod attributes;
 pub mod cst;
 pub mod designator;
 pub mod edit;
