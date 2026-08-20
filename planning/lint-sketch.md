@@ -267,7 +267,10 @@ their misplacement)
 
 ### Form
 - `marker-not-ws-preceded` — byte before a marker token is non-ws
-  (`content\s1`; the para railroad requires ws — ruled 2026-08-18).
+  (`content\s1`). CORRECTED 2026-08-20 (Will's railroad read): the PARA
+  railroad's second branch is `/${Ws}\\/` with Ws ZERO-or-more, so
+  hugging is grammatically legal and newline is only the preferred
+  spelling — Hint severity (the formatter-bundle shape), not Warning.
 - `delimiter-shape` — the ws_after_name derivations (NBSP-after-name
   etc.; the Unicode-hs open question lands here).
 - `empty-paragraph` — paragraph node with no content children (Info).

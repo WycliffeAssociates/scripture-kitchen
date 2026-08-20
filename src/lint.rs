@@ -14,7 +14,7 @@
 //!   walker used at pop time ([`wants_closer`]), never a second notion of it.
 //! - **Flag, never repair.** No token is reordered, inserted or dropped
 //!   (the editor session's token→span→UTF-16 mapping depends on it), and no
-//!   text is rewritten. Phase 4's [`Fix`]es are *offered* byte edits: the rule
+//!   text is rewritten. [`Fix`]es are *offered* byte edits: the rule
 //!   governs TOKENS, and a fix is proposed TEXT that nothing here applies. Once
 //!   a user accepts one the bytes are real and the next re-lex is honest.
 //! - **No strings, anywhere.** An [`Observation`] is four u32s. Everything a
@@ -35,8 +35,8 @@
 //! identifier was meant is not mechanical), the gap codes, and a renumber whose
 //! own successor would collide with it.
 //!
-//! Shape of the pass, since 2026-08-19: **lint is ONE in-order walk of the CST
-//! feeding four state machines.** A short bounded prologue over the header
+//! **lint is ONE in-order walk of the CST**
+//! feeding four state machines. A short bounded prologue over the header
 //! ([`header_scan`]) reads the two whole-file facts the machines need, and then
 //! [`walk`] visits every node open, every leaf token in document order, and
 //! every node close exactly once, handing each event to [`Structure`] (close
@@ -45,54 +45,12 @@
 //! row-lookup, form, payload, adjacency and attribute rules). All four write
 //! through one [`Emit`] sink and the findings are sorted once at the end, so
 //! report order is a property of the report and not of the traversal.
-//!
-//! The four sweeps this replaced — a node sweep, a token sweep, a tree walk and
-//! an ordering sweep — each paid the same ~2.5 ns/token of dispatch before any
-//! rule ran, and the tree walk is a strict superset of a flat token sweep: the
-//! lifted partition oracle says `cst.in_order()` recovers `0..tokens.len()`, so
-//! one walk delivers every token in document order PLUS the ancestry its own
-//! stack carries PLUS the node boundaries. The machines are plain feedable
-//! structs — explicit state, event methods, no assumption that a slice of
-//! tokens exists — because the next driver is the CST Builder itself
-//! (planning/investigate-later.md, "Single-pass pipeline").
-//!
-//! PERF (measured 2026-08-19, `playground --lint-only`, min-of-8 with the two
-//! binaries run ALTERNATELY in one window, so trust the deltas over the
-//! absolutes; en_ulb is small enough that its numbers need `--iters 30`):
-//!
-//! | corpus | four passes | one walk |
-//! |--------|-------------|----------|
-//! | en_ult (6.57M tokens, 1.76M nodes) | 12.1 ns/token | **9.1** |
-//! | en_ulb (255k tokens)               | 12.8 ns/token | **8.4** |
-//!
-//! Split by machine on en_ult, by disabling each in turn: the bare walk ~3.6,
-//! `Flat` ~3.1, `Structure` ~1.4, `Ordering` ~0.6, `Ancestry` ~0.3. Four things
-//! bought the 3 ns, in order of size:
-//!
-//! - **The node-close fast out** (~0.5). 1.73M of en_ult's 1.76M nodes close
-//!   `Explicit` and have no verdict to report, so the shape question — which
-//!   reads the row and peeks at the next node — is asked only of the rest.
-//! - **The current frame in locals** (~0.8), with only the ancestors in the vec:
-//!   `stack.last_mut()` on every iteration was a load and a bounds check on the
-//!   hottest line in lint.
-//! - **[`Frame::scratch`]** (~1.0): the two ancestry bits computed at open and
-//!   handed back at close, instead of re-reading the row.
-//! - **Orphan closers judged at node close only** (~0.7): see [`Structure`].
-//!   This also deleted the `tokens.len()` consumed-closer bitset and the
-//!   `nodes.len()` container-end one, which the staged passes needed because
-//!   the fact was produced in one sweep and read in another.
-//!
-//! `Flat` is now the biggest single line, and it is the same rule bodies as
-//! before — the two Form rules read the source byte on either side of every
-//! opening marker, the attribute machine carries four fields across the walk,
-//! and `numbering-mix` zeroes two 153-entry arrays per document. Cutting it
-//! further means changing what the rules DO, which is a different exercise.
-//!
-//! The module map, one file per piece of that shape: [`rows`] is the authored
-//! data (the codes and [`LINT_ROWS`], the sibling of `tables::rows`), [`walk`]
-//! is the driver ([`Doc`], the [`Emit`] sink, THE WALK), [`structure`],
-//! [`ancestry`], [`ordering`] and [`flat`] are one machine each, and [`fix`]
-//! holds lint's half of the fix model — the offered repair, the sequence
+//! The module map, one file per piece of that shape:
+//! [`rows`] is the authored
+//! data (the codes and [`LINT_ROWS`], the sibling of `tables::rows`),
+//! [`walk`] is the driver ([`Doc`], the [`Emit`] sink, THE WALK),
+//! [`structure`], [`ancestry`], [`ordering`] and [`flat`] are one machine each,
+//! and [`fix`] holds lint's half of the fix model — the offered repair, the sequence
 //! fixes and [`check_fixes`]. The byte-splice primitives those are built from
 //! ([`Edit`], [`FixStr`], [`apply`]) are `crate::edit`, because the formatter
 //! and the diff port speak the same vocabulary. This file keeps the layer a

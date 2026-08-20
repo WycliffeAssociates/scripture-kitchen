@@ -10,7 +10,7 @@ use crate::tables::schema::MarkerKind;
 use crate::{Token, TokenKind};
 
 /// The Ordering subsystem: one linear sweep over the tokens, ignoring the CST
-/// entirely (NEXT-STEPS: "tokens only").
+/// entirely
 ///
 /// It is its own pass because it is the only part of lint that carries
 /// CROSS-TOKEN state — the previous chapter, the previous verse, whether a

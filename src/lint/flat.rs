@@ -147,10 +147,12 @@ impl Flat {
                         && token.start > 0
                         && !is_structural_ws(source[token.start as usize - 1])
                     {
-                        // A NEWLINE, not a space: the rule reports a paragraph
-                        // marker, and what the PARA railroad wants in front of
-                        // one is a line break. It also re-lexes into exactly the
-                        // shape the rest of the corpus is written in.
+                        // A NEWLINE, not a space: the PARA railroad's newline
+                        // branch is the canonical spelling (its other branch,
+                        // `/${Ws}\\/` with Ws zero-or-more, makes hugging
+                        // grammatically legal — hence Hint severity), and the
+                        // fix proposes the preferred form the rest of the
+                        // corpus is written in.
                         out.push_fixed(
                             Observation::one(Code::MarkerNotWsPreceded, idx),
                             token.start,

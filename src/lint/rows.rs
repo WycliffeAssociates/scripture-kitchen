@@ -611,14 +611,20 @@ pub const LINT_ROWS: [LintRow; 37] = [
     // narrowing is not a nicety: character markers legitimately hug, and
     // aligned USFM is built out of hugging (`\zaln-s |…\*\w In|…\w*\zaln-e\*`
     // — 6.5M tokens of it in en_ult), so an un-narrowed rule reports ~1.5M
-    // findings on a corpus with nothing wrong with it. What the spec actually
-    // states is the PARA railroad's requirement of a newline (or at least
-    // whitespace) before a paragraph marker, and that is what this reports.
+    // findings on a corpus with nothing wrong with it.
+    //
+    // HINT, not Warning (corrected 2026-08-20, Will's read of the PARA
+    // railroad): the diagram's two branches into a paragraph marker are
+    // `'\n\'` and `/${Ws}\\/`, and `Ws` is `/${anyws}*/` — ZERO or more —
+    // so `content\p` is grammatically VALID; the newline branch is the
+    // preferred/canonical spelling, not a requirement. That makes this a
+    // formatting preference — exactly the formatter-bundle shape (Hint +
+    // auto-fix), not a violation.
     LintRow {
         code: Code::MarkerNotWsPreceded,
         name: "marker-not-ws-preceded",
         category: Category::Form,
-        severity: Severity::Warning,
+        severity: Severity::Hint,
         escalation: None,
         aux: AuxKind::None,
         template: "\\{anchor} needs whitespace before it",
