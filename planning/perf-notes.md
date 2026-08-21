@@ -82,3 +82,63 @@ plain ASCII) — skipped the non-ASCII density case, flag if one gets added.
 - Full staged pipeline (lex+cst+lint): **~24.8 ns/token on en_ulb, ~37.2
   ns/token on en_ult** — matches the established "~25 ns/token en_ulb /
   ~38 ns/token en_ult" figures, no drift.
+
+## 5. wasm boundary (Node, 2026-08-21)
+
+Question: what does `analyze(source)` cost AT THE WASM BOUNDARY in Node —
+the "UTF-8 bytes cross into wasm once" line. Same M1 Max, node v24.4.1.
+
+Scaffolding lives outside the repo (a scratchpad `cdylib` with a plain
+`extern "C"` ABI — no wasm-bindgen, no glue, so the numbers are the boundary
+itself). `analyze` = `lex` + `cst::build` + `lint` + `toc`, returning a
+checksum so nothing folds away; the wasm and native builds return identical
+checksums. Both are `opt-level=3, lto=true, codegen-units=1`. `min / median`
+of 200 iterations after 50 warmup.
+
+| Stage (µs, min/median) | Median book (ECC, 34.6KB) | Largest (PSA, 273KB) |
+|---|---|---|
+| `TextEncoder.encode` (new array) | 71.7 / 81.6 | 531 / 563 |
+| `encodeInto` straight into wasm memory | 37.8 / 39.0 | 296 / 296 |
+| copy only (`.set` of pre-encoded bytes) | **0.5 / 0.6** | **4.4 / 4.5** |
+| `utf8_check` in wasm (`from_utf8`) | 2.5 / 2.6 | 19.7 / 19.8 |
+| `lex_only` wasm, no simd | 42.8 / 43.3 | 455 / 459 |
+| `lex_only` wasm, `+simd128` | 39.4 / 39.8 | 416 / 427 |
+| `lex_only` native | 21.3 / 23.2 | 251 / 256 |
+| `analyze` wasm, no simd | 115.3 / 119.5 | 1220 / 1247 |
+| `analyze` wasm, `+simd128` | 109.8 / 112.5 | 1175 / 1204 |
+| `analyze` native | 79.1 / 87.3 | 778 / 798 |
+
+Ratios (min, simd wasm ÷ native): **lex 1.85x / 1.66x, analyze 1.39x /
+1.51x**. Whole corpus, en_ulb (66 books, 4.5MB): encode-all 9.11ms, wasm
+`analyze` 10.3ms (simd) / 11.1ms (plain), wasm `lex` 4.3ms (simd) / 5.0ms;
+native `--lint` 6.59ms, native lex 2.59ms.
+
+Refresh: the probe crates are scratch, not repo files — rebuild with
+`cargo build --release --target wasm32-unknown-unknown` and again under
+`RUSTFLAGS="-C target-feature=+simd128"`, drive both with
+`WebAssembly.instantiate(fs.readFileSync(...))` and `process.hrtime.bigint()`.
+Native side: `playground --lint --iters 200 <file>` (that mode has no `toc`
+pass, so the table's native column comes from a matching scratch binary
+running the identical `analyze` body).
+
+**Interpretation.** The copy is free and the encode is not. Moving already-
+encoded bytes into wasm memory runs at tens of GB/s — 4.5µs for all of
+Psalms, noise against a 1.2ms analyze. But JS holds a UTF-16 string, and
+turning it into UTF-8 costs ~1 GB/s in V8: 296µs for Psalms, which is a
+quarter of the analyze time, and 38µs for a median book, a third of it.
+`encodeInto` (writing straight into wasm memory) is 1.8x cheaper than
+`encode` because it skips the allocation, and it shows no penalty for
+targeting wasm memory — so it is the call to use. Non-ASCII density does not
+matter here (the one-byte vs two-byte V8 string representations timed within
+noise); the encoder is simply not fast. The real escape is not encoding at
+all on every keystroke: keep the editor's buffer as bytes, or feed `edit.rs`
+incrementally. Even paying it in full, median-book `encodeInto` + `analyze`
+is ~148µs — still ~100x under a frame.
+
+wasm costs 1.4-1.9x native, worse on the lexer than on the whole pipeline —
+which is the expected shape, since lex is the memchr-bound stage and native
+gets NEON where wasm gets, at best, simd128. And `+simd128` is worth having
+but is not the story: ~8% off lex, ~4-5% off `analyze`, consistently, at both
+sizes. It buys nothing on `from_utf8` (core's validator has no wasm SIMD
+path). Turn it on — one RUSTFLAG for a free 8% on the hot stage — but do not
+expect it to close the gap to native.

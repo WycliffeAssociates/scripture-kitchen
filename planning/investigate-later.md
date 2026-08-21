@@ -309,3 +309,13 @@ LEVERS, unproven, in order of appeal:
 3. A sound whole-list pre-filter ("every name here is user-namespace")
    was considered and REJECTED: finding name starts is the same
    byte-at-a-time scan, so it saves nothing.
+
+## Chapter navigation grid (2026-08-21, from the Toc pass)
+
+A book presents chapters as a tappable grid (1 2 … 12b). ChapterRow now
+carries its `\c` token (16 B row, `designator_span` helper), so raw or
+capped labels are reachable — the grid itself is a client concern. The
+degenerate half: duplicated chapter numbers want `chapter_spans(n)`
+(plural) so a grid can render "the second 4" distinctly; lint already
+flags the duplication at full-document runs. Build none of it until a UI
+pulls.

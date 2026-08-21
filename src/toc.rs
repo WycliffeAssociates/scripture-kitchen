@@ -1,0 +1,531 @@
+//! `Toc`: WHERE things are — the book code, the chapter table, the verse
+//! anchors, and `locate()` over them.
+//!
+//! ```text
+//! \id GEN            book     = "GEN"
+//! \mt1 Genesis       chapters = [ 0: 0..24,  ← front matter is chapter 0
+//! \c 1                            1: 24..46 ]
+//! \p                 verses   = [ at 33, chapter 1, 1..1 ]
+//! \v 1 In the…       locate(40) = "GEN 1:1"   locate(10) = "GEN"
+//! ```
+//!
+//! A pure pass over TOKENS, no CST: `\c` and `\v` plus their designators are
+//! flat facts, so an editor can hold a Toc without ever building a tree. It
+//! owns no position and emits no tokens; it only INDEXES rows the scanner
+//! already emitted, and re-reads the source only for designator interiors and
+//! the book code.
+//!
+//! Chapter rows TILE `0..source.len()`, which is what makes [`Toc::locate`]
+//! total: every byte lands in some chapter, and the bytes before the first `\c`
+//! land in chapter 0 (a book-only sid, never a fabricated verse).
+
+use crate::designator::{self, Designator};
+use crate::tables::generated;
+use crate::tables::schema::MarkerKind;
+use crate::token::{Token, TokenKind};
+
+/// One chapter's number and the source bytes it covers.
+///
+/// Byte layout — `#[repr(C)]`, 16 bytes, stride 16 (a JS `DataView` over a
+/// `Vec<ChapterRow>` reads these offsets):
+///
+/// ```text
+/// 0  u32  start     first byte of the `\c` marker (0 for chapter 0)
+/// 4  u32  end       one past the last byte, exclusive
+/// 8  u32  token     that marker's token index (the raw label's way home);
+///                   u32::MAX for the synthetic front-matter row
+/// 12 u16  number    the designator's number; 0 = absent or malformed
+/// 14      —         2 bytes of trailing padding (14 bytes of content, align 4)
+/// ```
+///
+/// The u32s come first so the only padding is at the END: an interior hole
+/// would be a field a JS reader could silently mis-offset.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(C)]
+pub struct ChapterRow {
+    pub start: u32,
+    pub end: u32,
+    /// The `\c` marker's token index — `u32::MAX` for the front-matter row,
+    /// which no marker opens. What a navigation UI walks to for the raw
+    /// chapter label (`12b`) the `number` cannot carry.
+    pub token: u32,
+    /// The number [`designator::chapter`] read, saturated into u16. `0` for a
+    /// `\c` with no designator or a malformed one (`\c 12b`) — degrade, never
+    /// repair. Chapter 0 is also the synthetic front-matter row, told apart by
+    /// being row index 0.
+    pub number: u16,
+}
+
+/// Where one `\v` sits, and which verses it names.
+///
+/// Byte layout — `#[repr(C)]`, 16 bytes, stride 16:
+///
+/// ```text
+/// 0  u32  at        first byte of the `\v` marker — where the verse starts
+/// 4  u32  token     that marker's token index (the raw designator's way home)
+/// 8  u16  chapter   the enclosing chapter row's `number`
+/// 10 u16  first     lowest verse the designator names
+/// 12 u16  last      highest — `first == last` unless this is a bridge
+/// 14      —         2 bytes of trailing padding (14 bytes of content, align 4)
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(C)]
+pub struct VerseAnchor {
+    pub at: u32,
+    pub token: u32,
+    pub chapter: u16,
+    /// `first`/`last` are 0 when the designator is absent or malformed, and the
+    /// row still exists: dropping it would let the PREVIOUS verse's extent
+    /// silently swallow this verse's text.
+    pub first: u16,
+    pub last: u16,
+}
+
+// The layout is internal hygiene, not a versioned wire format — but it is the
+// shape a wasm consumer would read, so the widths are pinned here rather than
+// rediscovered there.
+const _: () = assert!(size_of::<ChapterRow>() == 16);
+const _: () = assert!(size_of::<VerseAnchor>() == 16);
+
+impl ChapterRow {
+    pub fn span(&self) -> core::ops::Range<u32> {
+        self.start..self.end
+    }
+
+    /// The `Designator` token's span, for the raw label (`12b`) `number`
+    /// cannot carry. `None` for the front-matter row or a `\c` with no
+    /// designator. `tokens` must be the stream the Toc was built from.
+    pub fn designator_span(&self, tokens: &[Token]) -> Option<(u32, u16)> {
+        if self.token == u32::MAX {
+            return None;
+        }
+        let token = tokens[designator_row(tokens, self.token as usize)?];
+        Some((token.start, token.len))
+    }
+}
+
+impl VerseAnchor {
+    /// The `Designator` token's span, for the raw spelling (`6a`, `7"`) the
+    /// numbers above cannot carry. `None` when the `\v` owns no designator.
+    ///
+    /// `tokens` must be the stream the Toc was built from.
+    pub fn designator_span(&self, tokens: &[Token]) -> Option<(u32, u16)> {
+        let token = tokens[designator_row(tokens, self.token as usize)?];
+        Some((token.start, token.len))
+    }
+}
+
+/// A located reference: book, chapter, and the verse range at that byte.
+///
+/// ```text
+/// GEN 1:1     first == last
+/// MRK 6:1-3   a bridge reports its WHOLE range; a renderer that wants
+///             ebible's first-verse keying reads `first` itself
+/// GEN 1       inside a chapter, ahead of its first verse (or on a verse
+///             whose designator was malformed)
+/// GEN         chapter 0 — front matter names no chapter and no verse
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Sid {
+    /// The book code's first three bytes, as-is — see [`Toc::book`].
+    pub book: [u8; 3],
+    pub chapter: u16,
+    pub first: u16,
+    pub last: u16,
+}
+
+/// Rendered when the book code is absent: a sid still has to name SOMETHING,
+/// and three question marks read as "unknown book" where three NUL bytes read
+/// as a corrupted string.
+const UNKNOWN_BOOK: &str = "###";
+
+impl core::fmt::Display for Sid {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let code = book_str(&self.book);
+        let code = if code.is_empty() { UNKNOWN_BOOK } else { &code };
+        f.write_str(code)?;
+        if self.chapter == 0 {
+            return Ok(());
+        }
+        write!(f, " {}", self.chapter)?;
+        match (self.first, self.last) {
+            (0, _) => Ok(()),
+            (first, last) if first == last => write!(f, ":{first}"),
+            (first, last) => write!(f, ":{first}-{last}"),
+        }
+    }
+}
+
+/// What a book's token stream says about where its contents are.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Toc {
+    /// The FIRST `\id`'s code, first three bytes, verbatim and zero-padded:
+    /// `\id gen` keeps its case, `\id GENESIS` keeps `GEN`, `\id 1` becomes
+    /// `1\0\0`, and no `\id` at all is all zeros. Validation is lint's — the
+    /// Toc never judges, it just renders what it was given.
+    pub book: [u8; 3],
+    /// The `BookCode` token index, or `None` when the book has no `\id` line
+    /// with a code (real in the wild: BSB Ecclesiastes). The full spelling and
+    /// its length live there; `book` above is only the sid's three bytes.
+    pub book_token: Option<u32>,
+    /// One row per chapter, in source order, TILING `0..source.len()`. Row 0 is
+    /// always present and always chapter 0 — the front matter, empty when the
+    /// file opens on `\c`.
+    pub chapters: Vec<ChapterRow>,
+    /// One row per `\v`, in source order, therefore sorted by `at`.
+    pub verses: Vec<VerseAnchor>,
+}
+
+/// Indexes an already-lexed book: the book code, the chapter table, the verse
+/// anchors.
+///
+/// `source` must be the bytes the tokens were lexed from — it is read only for
+/// the `\id` code and for designator interiors.
+pub fn toc(source: &[u8], tokens: &[Token]) -> Toc {
+    let end = source.len() as u32;
+    let mut out = Toc {
+        book: [0; 3],
+        book_token: None,
+        // The front-matter row, claiming the whole file until a `\c` takes the
+        // rest of it: the last row pushed is always already correct, so the
+        // pass needs no epilogue.
+        chapters: vec![ChapterRow {
+            start: 0,
+            end,
+            token: u32::MAX,
+            number: 0,
+        }],
+        verses: Vec::new(),
+    };
+
+    for (row, token) in tokens.iter().enumerate() {
+        match token.kind() {
+            // No marker lookup needed: `BookCode` belongs to exactly one row,
+            // so the first one in the stream IS the first `\id`'s code.
+            TokenKind::BookCode if out.book_token.is_none() => {
+                out.book_token = Some(row as u32);
+                let code = &source[token.start as usize..token.end() as usize];
+                let take = code.len().min(3);
+                out.book[..take].copy_from_slice(&code[..take]);
+            }
+            // The ROW is the authority on what opens a chapter or a verse, not
+            // the payload — `\ca`/`\cp`/`\va`/`\vp` carve a `Designator` too,
+            // and `\+c` is not a chapter marker at all.
+            TokenKind::Marker { nested: false } => match generated::kind(token.marker_idx) {
+                MarkerKind::Chapter => {
+                    let number = number_after(source, tokens, row, designator::chapter)
+                        .map_or(0, |(first, _)| first);
+                    if let Some(open) = out.chapters.last_mut() {
+                        open.end = token.start;
+                    }
+                    out.chapters.push(ChapterRow {
+                        start: token.start,
+                        end,
+                        token: row as u32,
+                        number,
+                    });
+                }
+                MarkerKind::Verse => {
+                    let (first, last) =
+                        number_after(source, tokens, row, designator::verse).unwrap_or((0, 0));
+                    out.verses.push(VerseAnchor {
+                        at: token.start,
+                        token: row as u32,
+                        chapter: out.chapters.last().map_or(0, |c| c.number),
+                        first,
+                        last,
+                    });
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+    out
+}
+
+impl Toc {
+    /// The reference at a source byte. TOTAL: a byte past the end of the
+    /// source reports the last chapter rather than nothing, because every
+    /// caller of this is labelling a position it already has.
+    pub fn locate(&self, src_byte: u32) -> Sid {
+        let chapter = self.chapters[self.chapter_row(src_byte)].number;
+        let (first, last) = self
+            .verse_at(src_byte)
+            .map_or((0, 0), |v| (v.first, v.last));
+        Sid {
+            book: self.book,
+            chapter,
+            first,
+            last,
+        }
+    }
+
+    /// The bytes chapter `n` covers — the editor's chapter window and its
+    /// clamp. `None` when the book has no such chapter; the FIRST run of a
+    /// number that repeats (a reopened chapter is real data, and this API
+    /// answers about a number, so it answers about the first).
+    pub fn chapter_span(&self, n: u16) -> Option<core::ops::Range<u32>> {
+        self.chapters
+            .iter()
+            .find(|row| row.number == n)
+            .map(ChapterRow::span)
+    }
+
+    /// The verse whose extent covers `src_byte`, or `None` for a byte in front
+    /// matter or ahead of its chapter's first verse.
+    ///
+    /// A verse runs from its own `\v` to the next `\v` or `\c` — so the answer
+    /// is the last anchor at or before the byte, unless that anchor belongs to
+    /// an earlier chapter.
+    pub fn verse_at(&self, src_byte: u32) -> Option<&VerseAnchor> {
+        let candidate = self.verses.partition_point(|v| v.at <= src_byte);
+        let anchor = self.verses.get(candidate.checked_sub(1)?)?;
+        let chapter = &self.chapters[self.chapter_row(src_byte)];
+        (anchor.at >= chapter.start).then_some(anchor)
+    }
+
+    /// Index into `chapters` of the row covering `src_byte`. Row 0 starts at
+    /// byte 0, so the search always lands on a row.
+    fn chapter_row(&self, src_byte: u32) -> usize {
+        self.chapters
+            .partition_point(|row| row.start <= src_byte)
+            .saturating_sub(1)
+    }
+}
+
+/// The `Designator` row belonging to the `\c`/`\v` at `marker_row`.
+///
+/// A front-position attribute list belongs to the marker and so sits between it
+/// and its payload (`\v |x-a="b"| 1`, the U25001 form). Exactly one kind can
+/// intervene, so this is a step, not a search.
+fn designator_row(tokens: &[Token], marker_row: usize) -> Option<usize> {
+    let mut next = marker_row + 1;
+    if matches!(tokens.get(next).map(Token::kind), Some(TokenKind::AttrList)) {
+        next += 1;
+    }
+    match tokens.get(next) {
+        Some(t) if t.kind() == TokenKind::Designator => Some(next),
+        _ => None,
+    }
+}
+
+/// `read`'s verdict on the designator after `marker_row`, as u16s. `None` for
+/// no designator or a malformed one — the caller degrades both to 0.
+///
+/// Numbers SATURATE into u16 (real maxima are ~150 chapters and ~176 verses, so
+/// anything near the ceiling is junk already, and it must stay ORDERED junk).
+fn number_after(
+    source: &[u8],
+    tokens: &[Token],
+    marker_row: usize,
+    read: fn(&[u8]) -> Designator,
+) -> Option<(u16, u16)> {
+    let token = tokens[designator_row(tokens, marker_row)?];
+    let span = &source[token.start as usize..token.end() as usize];
+    let (first, last) = read(span).range()?;
+    let narrow = |n: u32| n.min(u16::MAX as u32) as u16;
+    Some((narrow(first), narrow(last)))
+}
+
+/// A book code as text: trailing padding dropped, invalid UTF-8 replaced.
+///
+/// Lossy because the code is the first three BYTES of the `\id` payload, which
+/// a non-ASCII code (`\id ΓΕΝ`) can cut mid-scalar.
+fn book_str(book: &[u8; 3]) -> std::borrow::Cow<'_, str> {
+    let end = book.iter().position(|b| *b == 0).unwrap_or(book.len());
+    String::from_utf8_lossy(&book[..end])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lex;
+
+    fn built(source: &str) -> Toc {
+        toc(source.as_bytes(), &lex(source))
+    }
+
+    /// Every chapter row as `(number, span)` — the table a human would draw.
+    fn table(source: &str) -> Vec<(u16, core::ops::Range<u32>)> {
+        built(source)
+            .chapters
+            .iter()
+            .map(|row| (row.number, row.span()))
+            .collect()
+    }
+
+    fn sid(source: &str, at: u32) -> String {
+        built(source).locate(at).to_string()
+    }
+
+    #[test]
+    fn chapter_rows_tile_the_whole_source() {
+        let source = "\\id GEN\n\\c 1\n\\p a\n\\c 2\n\\p b\n";
+        let toc = built(source);
+        assert_eq!(toc.chapters.first().unwrap().start, 0);
+        assert_eq!(
+            toc.chapters.last().unwrap().end,
+            source.len() as u32,
+            "the last row must reach the end of the source"
+        );
+        for pair in toc.chapters.windows(2) {
+            assert_eq!(pair[0].end, pair[1].start);
+        }
+    }
+
+    #[test]
+    fn front_matter_is_chapter_zero() {
+        assert_eq!(
+            table("\\id GEN\n\\c 1\n\\p a\n"),
+            vec![(0, 0..8), (1, 8..18)]
+        );
+        // A file that opens on `\c` still gets row 0 — empty, so consumers
+        // iterating chapters never have to special-case its absence.
+        assert_eq!(table("\\c 1\n"), vec![(0, 0..0), (1, 0..5)]);
+        // No chapters at all: the whole book is front matter.
+        assert_eq!(table("\\id FRT\n\\periph Title Page\n"), vec![(0, 0..27)]);
+        assert_eq!(table(""), vec![(0, 0..0)]);
+    }
+
+    #[test]
+    fn a_chapter_zero_byte_locates_to_the_book_alone() {
+        let source = "\\id GEN\n\\c 1\n\\p \\v 1 a\n";
+        assert_eq!(sid(source, 0), "GEN");
+        assert_eq!(sid(source, 7), "GEN");
+        assert_eq!(sid(source, 8), "GEN 1");
+        assert_eq!(sid(source, 20), "GEN 1:1");
+    }
+
+    #[test]
+    fn a_bridge_reports_its_whole_range() {
+        let source = "\\id MRK\n\\c 6\n\\p \\v 1-3 a \\v 4 b\n";
+        let toc = built(source);
+        assert_eq!(toc.verses[0].first, 1);
+        assert_eq!(toc.verses[0].last, 3);
+        assert_eq!(sid(source, 22), "MRK 6:1-3");
+        assert_eq!(sid(source, 30), "MRK 6:4");
+    }
+
+    #[test]
+    fn a_malformed_designator_still_gets_a_row() {
+        // The en_ulb ZEC 12:7 shape: `\v 2"` glues the quote to the number, so
+        // the carved span is `2"`. The row exists with first/last 0, keeping
+        // verse 1's extent from swallowing this verse's text.
+        let source = "\\c 1\n\\p \\v 1 a \\v 2\" b \\v 3 c\n";
+        let toc = built(source);
+        assert_eq!(
+            toc.verses
+                .iter()
+                .map(|v| (v.first, v.last))
+                .collect::<Vec<_>>(),
+            vec![(1, 1), (0, 0), (3, 3)]
+        );
+        assert_eq!(sid(source, 20), "### 1");
+        // The raw spelling stays reachable through the token.
+        let (start, len) = toc.verses[1].designator_span(&lex(source)).unwrap();
+        assert_eq!(
+            &source[start as usize..(start + len as u32) as usize],
+            "2\""
+        );
+
+        // A `\c` with no designator: number 0, and the row still tiles.
+        assert_eq!(table("\\c\n\\p a\n"), vec![(0, 0..0), (0, 0..8)]);
+        // `\c 12b` fails the CHAPTER pattern (digits only) the same way.
+        assert_eq!(built("\\c 12b\n").chapters[1].number, 0);
+    }
+
+    #[test]
+    fn a_book_with_no_id_renders_a_raw_sid() {
+        let toc = built("\\c 1\n\\p \\v 1 a\n");
+        assert_eq!(toc.book, [0, 0, 0]);
+        assert_eq!(toc.book_token, None);
+        assert_eq!(toc.locate(12).to_string(), "### 1:1");
+        // The file opens on `\c`, so chapter 0 is empty and byte 0 is already
+        // chapter 1.
+        assert_eq!(toc.locate(0).to_string(), "### 1");
+    }
+
+    #[test]
+    fn the_book_code_is_the_first_ids_first_three_bytes() {
+        assert_eq!(built("\\id GEN\n").book, *b"GEN");
+        // A BOM lexes as Text, so `\id` is not token 0.
+        assert_eq!(built("\u{FEFF}\\id GEN\n").book, *b"GEN");
+        assert_eq!(built("\\id GEN Some description\n").book, *b"GEN");
+        // Kept verbatim: case, over-length and under-length alike.
+        assert_eq!(built("\\id gen\n").book, *b"gen");
+        assert_eq!(built("\\id GENESIS\n").book, *b"GEN");
+        assert_eq!(built("\\id 1\n").book, [b'1', 0, 0]);
+        assert_eq!(built("\\id 1\n").locate(0).to_string(), "1");
+        // Later `\id`s are ordinary tokens.
+        assert_eq!(built("\\id GEN\n\\id EXO\n").book, *b"GEN");
+    }
+
+    #[test]
+    fn verse_extents_run_to_the_next_verse_or_chapter() {
+        let source = "\\id GEN\n\\c 1\n\\p \\v 1 a \\v 2 b\n\\c 2\n\\s head\n\\p \\v 1 c\n";
+        let toc = built(source);
+        // Chapter 2's heading is inside chapter 2 but ahead of its first verse.
+        let heading = source.find("\\s head").unwrap() as u32;
+        assert!(toc.verse_at(heading).is_none());
+        assert_eq!(toc.locate(heading).to_string(), "GEN 2");
+        assert_eq!(toc.locate(source.len() as u32 - 2).to_string(), "GEN 2:1");
+        // Every anchor round-trips through the byte it names.
+        for anchor in &toc.verses {
+            let sid = toc.locate(anchor.at);
+            assert_eq!(
+                (sid.chapter, sid.first, sid.last),
+                (anchor.chapter, anchor.first, anchor.last)
+            );
+        }
+    }
+
+    #[test]
+    fn alternate_numbers_and_nested_spellings_open_nothing() {
+        // `\ca`/`\cp`/`\va`/`\vp` carve designators but are not chapters or
+        // verses; `\+c` is the nesting SPELLING, not a chapter marker.
+        let source = "\\c 1\n\\ca 2\\ca*\n\\cp A\n\\p \\v 1 a \\va 2\\va*\n\\+c 3\n";
+        let toc = built(source);
+        assert_eq!(toc.chapters.len(), 2);
+        assert_eq!(toc.verses.len(), 1);
+    }
+
+    #[test]
+    fn a_front_position_attribute_list_does_not_hide_the_designator() {
+        assert_eq!(built("\\c |x-a=\"b\"| 1\n").chapters[1].number, 1);
+        let toc = built("\\c 1\n\\p \\v |x-a=\"b\"| 7 a\n");
+        assert_eq!((toc.verses[0].first, toc.verses[0].last), (7, 7));
+    }
+
+    #[test]
+    fn chapter_span_answers_by_number_and_prefers_the_first_run() {
+        let source = "\\c 1\n\\p a\n\\c 2\n\\p b\n\\c 1\n\\p c\n";
+        let toc = built(source);
+        assert_eq!(toc.chapter_span(1), Some(0..10));
+        assert_eq!(toc.chapter_span(2), Some(10..20));
+        assert_eq!(toc.chapter_span(0), Some(0..0));
+        assert_eq!(toc.chapter_span(9), None);
+    }
+
+    #[test]
+    fn locate_is_total_past_the_end_of_the_source() {
+        let source = "\\id GEN\n\\c 1\n\\p \\v 1 a\n";
+        assert_eq!(sid(source, source.len() as u32), "GEN 1:1");
+        assert_eq!(sid(source, u32::MAX), "GEN 1:1");
+        assert_eq!(built("").locate(u32::MAX).to_string(), "###");
+    }
+
+    #[test]
+    fn huge_numbers_saturate_into_the_row() {
+        let source = format!("\\c {}\n\\p \\v {} a\n", "9".repeat(12), "9".repeat(12));
+        let toc = built(&source);
+        assert_eq!(toc.chapters[1].number, u16::MAX);
+        assert_eq!(toc.verses[0].first, u16::MAX);
+    }
+
+    #[test]
+    fn rows_are_fixed_width() {
+        assert_eq!(size_of::<ChapterRow>(), 16);
+        assert_eq!(size_of::<VerseAnchor>(), 16);
+    }
+}

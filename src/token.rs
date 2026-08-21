@@ -49,7 +49,7 @@ pub enum TokenKind {
     NoteCaller,
     /// The book identifier after `\id`: `GEN`, `1JN`. One span up to the first
     /// space, so `\id GEN Some description` leaves the description as Text —
-    /// the code is what `ParseHeader.book` points at. Shape and membership are
+    /// the code is what `Toc::book_token` points at. Shape and membership are
     /// both lint's, against an authored books table.
     BookCode,
     /// One attribute list, INCLUDING its delimiting pipe(s): `|lemma="grace"`

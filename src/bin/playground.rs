@@ -4,8 +4,9 @@
 //   cargo run --release --bin playground                        // serial, default corpus
 //   cargo run --release --bin playground -- <path>              // file or dir of *.usfm
 //   cargo run --release --bin playground -- --iters 100         // repeat for stable timing / profiling
-//   cargo run --release --bin playground -- --parse-header       // lex + ParseHeader (the whole pipeline)
-//   cargo run --release --bin playground -- --parse-header-only  // pre-lexed; times the SECOND PASS alone
+//   cargo run --release --bin playground -- --toc               // lex + toc (the whole pipeline)
+//   cargo run --release --bin playground -- --toc-only          // pre-lexed; times the SECOND PASS alone
+//   cargo run --release --bin playground -- --toc-trace <file>  // untimed: a readable Toc listing on stdout
 //   cargo run --release --bin playground -- --cst              // lex + cst::build (the whole pipeline)
 //   cargo run --release --bin playground -- --cst-only         // pre-lexed; times cst::build alone
 //   cargo run --release --bin playground -- --cst-stats        // untimed: CloseReason distribution over the corpus
@@ -40,8 +41,8 @@ const DEFAULT_CORPUS: &str = "example-corpora/en_ulb";
 enum Mode {
     Serial,
     /// Lex, then index the stream — what a real caller that wants a toc pays.
-    ParseHeader,
-    ParseHeaderOnly,
+    Toc,
+    TocOnly,
     Par,
     Scalar,
     Staged,
@@ -80,13 +81,15 @@ fn main() {
     let mut cst_stats = false;
     let mut lint_stats = false;
     let mut fix_preview: Option<String> = None;
+    let mut toc_trace = false;
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--par" => mode = Mode::Par,
-            "--parse-header" => mode = Mode::ParseHeader,
-            "--parse-header-only" => mode = Mode::ParseHeaderOnly,
+            "--toc" => mode = Mode::Toc,
+            "--toc-only" => mode = Mode::TocOnly,
+            "--toc-trace" => toc_trace = true,
             "--cst" => mode = Mode::Cst,
             "--cst-only" => mode = Mode::CstOnly,
             "--cst-stats" => cst_stats = true,
@@ -143,8 +146,8 @@ fn main() {
     let bytes: usize = sources.iter().map(|s| s.len()).sum();
     let mode_name = match mode {
         Mode::Serial => "serial",
-        Mode::ParseHeader => "parse-header",
-        Mode::ParseHeaderOnly => "parse-header-only",
+        Mode::Toc => "toc",
+        Mode::TocOnly => "toc-only",
         Mode::Cst => "cst",
         Mode::CstOnly => "cst-only",
         Mode::Lint => "lint",
@@ -180,12 +183,18 @@ fn main() {
         report_lint_stats(&sources, &path, fix_preview.as_deref());
         return;
     }
+    if toc_trace {
+        for source in &sources {
+            print!("{}", toc_listing(source));
+        }
+        return;
+    }
 
     // Lexed OUTSIDE the clock, so an `--*-only` mode prices its own pass and
     // nothing else.
     let prelexed: Vec<Vec<usfm_onion_2::Token>> = if matches!(
         mode,
-        Mode::ParseHeaderOnly
+        Mode::TocOnly
             | Mode::CstOnly
             | Mode::LintOnly
             | Mode::UsjOnly
@@ -200,7 +209,9 @@ fn main() {
     // of whether the lex itself is on the clock.
     let tokens_total: u64 = if matches!(
         mode,
-        Mode::Lint
+        Mode::Toc
+            | Mode::TocOnly
+            | Mode::Lint
             | Mode::LintOnly
             | Mode::Fused
             | Mode::FusedNoop
@@ -270,7 +281,7 @@ fn verify_variant(sources: &[String], mode: Mode) {
         // Sweeps produce counts, not token streams — nothing to verify.
         Mode::SweepNl | Mode::SweepStops | Mode::SweepCursor => return,
         // These all run the real lexer plus pure passes over its output.
-        Mode::ParseHeader | Mode::ParseHeaderOnly => return,
+        Mode::Toc | Mode::TocOnly => return,
         Mode::Cst | Mode::CstOnly => return,
         Mode::Lint | Mode::LintOnly => return,
         Mode::UsjOnly | Mode::UsxOnly | Mode::HtmlOnly => return,
@@ -376,15 +387,15 @@ fn run_once(
                 "--html-only needs the feature: cargo run --release --bin playground -- --html-only"
             );
         }
-        Mode::ParseHeader => {
+        Mode::Toc => {
             for source in sources {
                 let tokens = usfm_onion_2::lex(source);
-                std::hint::black_box(usfm_onion_2::ParseHeader::from_tokens(&tokens, source));
+                std::hint::black_box(usfm_onion_2::toc(source.as_bytes(), &tokens));
             }
         }
-        Mode::ParseHeaderOnly => {
+        Mode::TocOnly => {
             for (source, tokens) in sources.iter().zip(prelexed) {
-                std::hint::black_box(usfm_onion_2::ParseHeader::from_tokens(tokens, source));
+                std::hint::black_box(usfm_onion_2::toc(source.as_bytes(), tokens));
             }
         }
         Mode::Cst => {
@@ -647,6 +658,48 @@ fn report_utf16() {
             scalar / swar
         );
     }
+}
+
+/// The Toc as a human reads it: the chapter table, then the first few verse
+/// anchors of each chapter with the sid `locate` gives at that byte.
+fn toc_listing(source: &str) -> String {
+    const ANCHORS_PER_CHAPTER: usize = 6;
+
+    let tokens = usfm_onion_2::lex(source);
+    let toc = usfm_onion_2::toc(source.as_bytes(), &tokens);
+    let mut out = String::new();
+    out.push_str(&format!(
+        "{} — {} chapter rows, {} verse anchors, {} bytes\n\n",
+        toc.locate(0),
+        toc.chapters.len(),
+        toc.verses.len(),
+        source.len(),
+    ));
+    out.push_str("  ch            bytes  verses  first anchors\n");
+    for row in &toc.chapters {
+        let anchors: Vec<&usfm_onion_2::VerseAnchor> = toc
+            .verses
+            .iter()
+            .filter(|v| v.at >= row.start && v.at < row.end)
+            .collect();
+        let mut listed: Vec<String> = anchors
+            .iter()
+            .take(ANCHORS_PER_CHAPTER)
+            .map(|v| format!("{}@{}", toc.locate(v.at), v.at))
+            .collect();
+        if anchors.len() > ANCHORS_PER_CHAPTER {
+            listed.push(format!("… {} more", anchors.len() - ANCHORS_PER_CHAPTER));
+        }
+        out.push_str(&format!(
+            "{:>4}  {:>7}..{:<7}  {:>5}  {}\n",
+            row.number,
+            row.start,
+            row.end,
+            anchors.len(),
+            listed.join("  "),
+        ));
+    }
+    out
 }
 
 /// Untimed corpus sweep: what does lint actually FIND in the wild? Per-code
