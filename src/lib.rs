@@ -9,6 +9,8 @@
 //! - [`toc`](crate::toc) — the first token CONSUMER: indexes the book code, the chapter
 //!   table and the verse anchors out of an already-lexed stream, and answers
 //!   "what reference is this byte".
+//! - [`utf16`](crate::utf16) — the editor-wire translation layer: `byte ↔ utf16`
+//!   over any one string, a stride index costing 1.6% of it.
 //!
 //! The load-bearing contract (see scanner.rs): boundary finding and
 //! classification stay strictly apart, and payload interiors belong to
@@ -32,7 +34,9 @@ mod token;
 pub mod usj;
 #[cfg(feature = "usx")]
 pub mod usx;
+pub mod utf16;
 
 pub use scanner::{lex, lex_general_path_only};
 pub use toc::{ChapterRow, Sid, Toc, VerseAnchor, toc};
 pub use token::{Token, TokenKind};
+pub use utf16::{Utf16Index, utf16_index};

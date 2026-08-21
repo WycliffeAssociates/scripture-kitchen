@@ -90,3 +90,24 @@ from experiments and built in this window.
    exists, at==tokens[token].start checkable) + designator_span helper; pub
    fields; --toc-trace writes stdout, caller redirects; toc() free fn
    re-exported at crate root matching lint/usj/usx shape.
+
+## pass 2 — Utf16Index (2026-08-21, audited from the implementer's self-report)
+
+1. **Interior offsets snap DOWN, both directions** — a byte inside a
+   multi-byte char answers that char's unit offset; a utf16 offset inside a
+   surrogate pair answers the char's first byte. The SWAR formula's free
+   behavior was snap-UP; a ≤3-step back-up loop buys symmetry so a garbage
+   offset stays inside the character it touches. Total, no asserts
+   (Toc::locate's spirit). Sound, medium-high.
+2. **Both `utf16_index()` and `Utf16Index::new` exist** (one delegates) —
+   crate free-fn convention vs natural borrowing-type reading. Mild
+   duplication. RULED SOUND (Will), keep both.
+3. One-line sound discretion: &[u8] in, UTF-8 by contract (matches toc);
+   u32 offsets (banked widths); top-level src/utf16.rs (depends on
+   nothing); to_utf16/to_byte/len_utf16 names; utf16_len + STRIDE public
+   (playground prices them); index_bytes() kept for the size invariant;
+   index length len/256+1 (byte==len needs an entry); private strides, no
+   repr(C) (only scalars cross); tests/utf16_oracle.rs exhaustive
+   (107.5M boundaries, 227 files incl. Hindi) replacing the experiment's
+   every-1000th sampling; experiments/utf16.rs = record only, one
+   implementation, playground --utf16 exercises the promoted module.

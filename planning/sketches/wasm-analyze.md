@@ -172,3 +172,21 @@ consumers, not the editor — keep behind its `wants` bit).
    ~7 u32s + small strings; lazy only if eager gets fiddly).
 4. Index-free `to_byte`/`to_utf16` exports vs an opaque handle —
    measure first.
+
+## Galley method list (accumulating, 2026-08-21 — the composed bindings crate)
+
+The one-module composition (ideas/other_repos/sous.md): onion and sous
+stay independent library crates; "galley" is the thin stateful bindings
+crate depending on both — the retained source String, the shared
+Utf16Index, coordination, any caching. Methods pulled so far by real UI
+asks, all query-shaped (no bulk DataView until a profiler asks — the
+#[repr(C)] rows keep that door open):
+
+- `new(text: String) -> Galley` — the one string crossing
+- `diagnostics()` — onion lint + sous proofread, one stream, source bytes
+- `locate(byte: u32) -> String` — "MRK 6:3" (status bar, diagnostic labels)
+- `chapters()` — ≤151 rows for the navigation grid: number + start
+  (+ raw label via ChapterRow.token when the grid wants "12b")
+- `book() -> String` — the \id code; manifests own project-level naming
+- `to_utf16(byte) / to_byte(utf16)` — the wire translation, shared index
+- exports on demand: `usj() / usx() / html() -> String`

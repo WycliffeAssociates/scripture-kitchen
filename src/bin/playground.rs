@@ -500,11 +500,11 @@ fn read_source(path: &Path) -> String {
 /// an ASCII-dominant prose book, a dense-Devanagari book (the case that breaks
 /// per-drift-change anchors), and the heaviest aligned book. Strategy A = one
 /// anchor per non-ASCII char; strategy B = one anchor per
-/// [`usfm_onion_2::experiments::utf16::STRIDE`] bytes + a SWAR remainder count.
+/// [`usfm_onion_2::utf16::STRIDE`] bytes + a SWAR remainder count — the shape
+/// that won, now the production `Utf16Index`.
 fn report_utf16() {
-    use usfm_onion_2::experiments::utf16::{
-        Anchors, STRIDE, Stride, reference_pairs, utf16_len_scalar, utf16_len_swar,
-    };
+    use usfm_onion_2::experiments::utf16::{Anchors, reference_pairs, utf16_len_scalar};
+    use usfm_onion_2::utf16::{STRIDE, Utf16Index, utf16_len};
 
     const QUERIES: usize = 10_000;
     const REPS: u32 = 8; // min-of-8, the convention everywhere else here
@@ -568,7 +568,7 @@ fn report_utf16() {
         let pct_non_ascii = 100.0 * non_ascii_bytes as f64 / src.len().max(1) as f64;
 
         let a = Anchors::build(&src);
-        let b = Stride::build(&src);
+        let b = Utf16Index::new(src.as_bytes());
         assert_eq!(a.len_utf16(), b.len_utf16(), "{label}: strategies disagree");
 
         let pct = |n: usize| 100.0 * n as f64 / src.len() as f64;
@@ -583,7 +583,7 @@ fn report_utf16() {
         );
 
         let build_a = min_of(|| Anchors::build(&src));
-        let build_b = min_of(|| Stride::build(&src));
+        let build_b = min_of(|| Utf16Index::new(src.as_bytes()));
         println!(
             "    build      A {:>8.3} ms   B {:>8.3} ms   ({:.1}× faster)",
             build_a * 1000.0,
@@ -609,7 +609,7 @@ fn report_utf16() {
         let fwd_b = min_of(|| {
             let mut acc = 0u64;
             for &(byte, _) in &probes {
-                acc += b.byte_to_utf16(byte) as u64;
+                acc += b.to_utf16(byte) as u64;
             }
             acc
         });
@@ -623,7 +623,7 @@ fn report_utf16() {
         let rev_b = min_of(|| {
             let mut acc = 0u64;
             for &(_, utf16) in &probes {
-                acc += b.utf16_to_byte(utf16) as u64;
+                acc += b.to_byte(utf16) as u64;
             }
             acc
         });
@@ -649,8 +649,8 @@ fn report_utf16() {
         let bytes = src.as_bytes();
         let gib = |secs: f64| (bytes.len() as f64 / secs) / (1024.0 * 1024.0 * 1024.0);
         let scalar = min_of(|| utf16_len_scalar(bytes));
-        let swar = min_of(|| utf16_len_swar(bytes));
-        assert_eq!(utf16_len_scalar(bytes), utf16_len_swar(bytes));
+        let swar = min_of(|| utf16_len(bytes));
+        assert_eq!(utf16_len_scalar(bytes), utf16_len(bytes));
         println!(
             "utf16_len over the dense file: scalar {:>6.2} GiB/s   SWAR {:>6.2} GiB/s   ({:.1}×)",
             gib(scalar),
