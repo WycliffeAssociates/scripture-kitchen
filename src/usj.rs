@@ -360,7 +360,7 @@ impl<'a> Export<'a> {
                     self.lists[list].at_boundary = true;
                 }
                 None => {
-                    let number = self.span(token).to_string();
+                    let number = trim(self.span(token)).to_string();
                     // A designator with no chapter/verse in front of it is
                     // dropped rather than given a guessed owner; lint speaks.
                     if let Some(verse) = self.pending.as_ref().map(|pending| pending.verse) {

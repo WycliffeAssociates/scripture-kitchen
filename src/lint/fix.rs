@@ -65,8 +65,11 @@ pub(super) fn renumber(
 ) {
     let token = &tokens[observation.anchor as usize];
     let expected = observation.aux;
+    // The number alone: the delimiter the designator folded in stays put, so the
+    // splice replaces `12` of `12 ` and the verse text keeps its space.
+    let number = designator::label(span_of(source, token));
     let renumberable = observation.code.row().fix_label.is_some()
-        && span_of(source, token).iter().all(u8::is_ascii_digit)
+        && number.iter().all(u8::is_ascii_digit)
         && next_number(source, tokens, observation.anchor, verse)
             .is_none_or(|next| next > expected);
     if !renumberable {
@@ -77,7 +80,7 @@ pub(super) fn renumber(
     out.push_fixed(
         observation,
         token.start,
-        token.end(),
+        token.start + number.len() as u32,
         decimal(expected, &mut buf),
     );
 }

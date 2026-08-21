@@ -15,6 +15,7 @@
 //! 1,3      →  first 1,  last 3     the endpoints; the hole is not modelled
 //! 3-1      →  first 3,  last 3     `last` is the LARGEST number, so first <= last
 //! 1<RLM>-3 →  first 1,  last 3     U+200F belongs to the SEPARATOR, not the segment
+//! 12␠      →  first 12, last 12    the folded delimiter is not part of it
 //! 01       →  Malformed            no leading zero (but a continuation `1-03` is fine)
 //! 1-       →  Malformed            separator with nothing after it
 //! ```
@@ -71,8 +72,24 @@ impl Designator {
 /// U+200F RIGHT-TO-LEFT MARK, UTF-8. Legal immediately before a separator.
 const RLM: [u8; 3] = [0xE2, 0x80, 0x8F];
 
+/// The designator PROPER: the token span minus the DELIMITER run the scanner
+/// folded onto its tail (scanner.rs `payload_end`).
+///
+/// ```text
+/// "12 "  →  "12"      the delimiter before the verse text
+/// "12"   →  "12"      a newline delimiter is its own token, so nothing to trim
+/// ```
+///
+/// Every consumer of designator bytes starts here — the readers below, the
+/// exports' numbers, lint's renumber splice — because a designator never
+/// contains whitespace, so the trim can only take the delimiter.
+pub fn label(span: &[u8]) -> &[u8] {
+    crate::scanner::payload_label(span)
+}
+
 /// Reads a `\v` designator span against the spec's VERSE pattern.
 pub fn verse(span: &[u8]) -> Designator {
+    let span = label(span);
     let mut at = 0;
 
     // A leading zero is malformed rather than silently equal to the unpadded
@@ -107,6 +124,7 @@ pub fn verse(span: &[u8]) -> Designator {
 ///
 /// See the module doc for why letters are refused (`sid`'s `[0-9]+`).
 pub fn chapter(span: &[u8]) -> Designator {
+    let span = label(span);
     let mut at = 0;
     match take_number(span, &mut at, false) {
         Some(number) if at == span.len() => Designator::Wellformed {
@@ -218,6 +236,20 @@ mod tests {
         assert_eq!(v("1-03"), well(1, 3));
         assert_eq!(v("01"), Designator::Malformed);
         assert_eq!(v("0"), Designator::Malformed);
+    }
+
+    /// The span carries the delimiter the scanner folded into it, and reading it
+    /// begins by stepping back over that run.
+    #[test]
+    fn the_folded_delimiter_is_not_part_of_the_designator() {
+        assert_eq!(label(b"12 "), b"12");
+        assert_eq!(label(b"12  \t"), b"12");
+        assert_eq!(label(b"12"), b"12");
+        assert_eq!(v("1 "), well(1, 1));
+        assert_eq!(v("12-14 "), well(12, 14));
+        assert_eq!(c("150 "), well(150, 150));
+        // A space INSIDE is still junk — only a trailing run can be delimiter.
+        assert_eq!(v("1 2"), Designator::Malformed);
     }
 
     #[test]

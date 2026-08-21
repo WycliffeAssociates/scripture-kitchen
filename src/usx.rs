@@ -382,9 +382,9 @@ fn decorate(source: &[u8], tokens: &[Token], cst: &Cst) -> Decor {
             }
             TokenKind::BookCode => book = Some(trim(span(source, token)).to_string()),
             TokenKind::Designator => match awaiting.take() {
-                Some(false) => chapter = Some(span(source, token).to_string()),
+                Some(false) => chapter = Some(trim(span(source, token)).to_string()),
                 Some(true) => {
-                    let number = span(source, token);
+                    let number = trim(span(source, token));
                     if let (Some(book), Some(chapter)) = (book.as_deref(), chapter.as_deref()) {
                         open = Some(Open {
                             sid: format!("{book} {chapter}:{number}"),
@@ -653,7 +653,7 @@ impl<'a> Export<'a> {
                     self.lists[list].at_boundary = true;
                 }
                 None => {
-                    let number = self.span(token).to_string();
+                    let number = trim(self.span(token)).to_string();
                     // A designator with no chapter/verse in front of it is
                     // lint's finding; the projection drops it rather than
                     // guessing an owner.

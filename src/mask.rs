@@ -276,12 +276,6 @@ pub fn mask(source: &[u8], tokens: &[Token], cst: &Cst, filter: &Filter) -> Mask
     // The verdict of the most recent marker-class token, for the payload and
     // attribute-list tokens that RIDE it: nobody keeps `\v` and drops its `1`.
     let mut rides = false;
-    // A payload token just dropped, so the whitespace DELIMITING it drops too.
-    // The scanner folds a marker NAME's delimiter into the marker token, which
-    // is what makes dropping a marker whitespace-clean; a payload's delimiter
-    // opens the following Text token instead, so the mask has to do that half
-    // itself or every masked verse would start with a stray space.
-    let mut delimits_payload = false;
 
     loop {
         if cur.next == cur.end {
@@ -338,8 +332,7 @@ pub fn mask(source: &[u8], tokens: &[Token], cst: &Cst, filter: &Filter) -> Mask
         // A node's own closer is its LAST child (the tree builder's invariant),
         // so it needs no side table to be recognized.
         let last_child = cur.next == cur.end;
-        let mut from = token.start;
-        let delimited = std::mem::take(&mut delimits_payload);
+        let from = token.start;
         let survives = match kind {
             TokenKind::Marker { .. } | TokenKind::Milestone { .. } => {
                 state.observe(token, kind);
@@ -367,32 +360,20 @@ pub fn mask(source: &[u8], tokens: &[Token], cst: &Cst, filter: &Filter) -> Mask
                 };
                 rides
             }
-            // The three carved payloads ride the marker that consumed them.
-            TokenKind::Designator | TokenKind::BookCode | TokenKind::NoteCaller => {
-                delimits_payload = !rides;
-                rides
-            }
+            // The three carved payloads ride the marker that consumed them, and
+            // each owns its own delimiter, so dropping one is whitespace-clean.
+            TokenKind::Designator | TokenKind::BookCode | TokenKind::NoteCaller => rides,
             TokenKind::AttrList => filter.attr_lists && rides,
             TokenKind::Newline => filter.newlines,
             // `//` is a line-BREAK marker, so it goes with the paragraph
             // markers: `structure()` keeps it, and `verse_text()` unwrapping it
             // away is what turns `gr//ace` back into `grace`.
             TokenKind::OptBreak => filter.kinds[MarkerKind::Paragraph as usize] == Action::Keep,
-            TokenKind::Text => {
-                if delimited {
-                    // One horizontal run only: the delimiter, never the content
-                    // behind it. Newlines are their own tokens, so this cannot
-                    // eat a line break.
-                    while from < token.end() && matches!(source[from as usize], b' ' | b'\t') {
-                        from += 1;
-                    }
-                }
-                match filter.text {
-                    TextRule::All => true,
-                    TextRule::VerseExtent => state.in_verse_text(),
-                    TextRule::None => false,
-                }
-            }
+            TokenKind::Text => match filter.text {
+                TextRule::All => true,
+                TextRule::VerseExtent => state.in_verse_text(),
+                TextRule::None => false,
+            },
         };
         if survives {
             keep(from, token.end());
@@ -679,25 +660,28 @@ mod tests {
     #[test]
     fn a_tilde_survives_and_an_optional_break_does_not() {
         assert_eq!(verse_text("\\p \\v 1 Psalm~1 gr//ace\n"), "Psalm~1 grace\n");
-        assert_eq!(structure("\\p \\v 1 gr//ace\n"), "\\p \\v 1//\n");
+        assert_eq!(structure("\\p \\v 1 gr//ace\n"), "\\p \\v 1 //\n");
     }
 
+    /// A kept designator brings its delimiter with it, exactly as a kept marker
+    /// does — which is what makes the skeleton `\v 1 ` rather than `\v 1` glued
+    /// to whatever the next kept token is.
     #[test]
     fn structure_keeps_the_scaffolding_and_no_prose() {
         assert_eq!(
             structure("\\id GEN\n\\h Genesis\n\\c 1\n\\p \\v 1 In the beginning.\n"),
-            "\\id GEN\n\\h \n\\c 1\n\\p \\v 1\n"
+            "\\id GEN\n\\h \n\\c 1\n\\p \\v 1 \n"
         );
         // `\b`, the blank-line paragraph, is scaffolding like any other
         // paragraph marker, so a poetry stanza break survives.
         assert_eq!(
             structure("\\q1 \\v 1 a\n\\b\n\\q1 \\v 2 b\n"),
-            "\\q1 \\v 1\n\\b\n\\q1 \\v 2\n"
+            "\\q1 \\v 1 \n\\b\n\\q1 \\v 2 \n"
         );
         // Notes, character markup and their contents leave nothing at all.
         assert_eq!(
             structure("\\c 2\n\\q1 \\v 3 a\\f + \\ft n\\f* \\add b\\add*\n"),
-            "\\c 2\n\\q1 \\v 3\n"
+            "\\c 2\n\\q1 \\v 3 \n"
         );
     }
 
@@ -751,7 +735,8 @@ mod tests {
         f.markers.push(("f".into(), Action::Keep));
         assert_eq!(
             masked("\\p \\v 1 a\\f + \\ft n\\f* b\n", &f),
-            "\\p \\v 1\\f +\\f*\n"
+            // The kept caller brings its delimiter, as a kept marker does.
+            "\\p \\v 1 \\f + \\f*\n"
         );
         // "verse text including footnote text": the note unwraps instead.
         let mut f = Filter::verse_text();
@@ -798,12 +783,12 @@ mod tests {
         let source = "\\p \\v 1 \\w grace|lemma=\"x\"\\w*\n";
         // structure() keeps attr lists, but `\w` is Character = Remove, so the
         // list goes with it: riding means riding.
-        assert_eq!(structure(source), "\\p \\v 1\n");
+        assert_eq!(structure(source), "\\p \\v 1 \n");
         let mut f = Filter::structure();
         f.markers.push(("w".into(), Action::Keep));
-        assert_eq!(masked(source, &f), "\\p \\v 1\\w |lemma=\"x\"\\w*\n");
+        assert_eq!(masked(source, &f), "\\p \\v 1 \\w |lemma=\"x\"\\w*\n");
         f.attr_lists = false;
-        assert_eq!(masked(source, &f), "\\p \\v 1\\w \\w*\n");
+        assert_eq!(masked(source, &f), "\\p \\v 1 \\w \\w*\n");
         // A FRONT-position list rides the same way.
         let mut f = Filter::structure();
         f.attr_lists = false;
@@ -815,7 +800,7 @@ mod tests {
     fn newlines_are_a_flag_of_their_own() {
         let mut f = Filter::structure();
         f.newlines = false;
-        assert_eq!(masked("\\c 1\n\\p \\v 1 text\n", &f), "\\c 1\\p \\v 1");
+        assert_eq!(masked("\\c 1\n\\p \\v 1 text\n", &f), "\\c 1\\p \\v 1 ");
     }
 
     #[test]

@@ -151,3 +151,53 @@ from experiments and built in this window.
    structurally); marker names resolve in the spelling written (-s/-e →
    MilestoneOnly); empty mask total; pub fields per Toc precedent;
    MarkerKind::COUNT=14 pinned by const assert.
+
+## interposed pass — designator delimiter fold (2026-08-21, audited)
+
+1. **Net ADDITION (+157/−50), metric honestly missed.** Only mask's
+   designator-seam trim deleted (verse_text byte-identical = the proof);
+   five consumers gained trim-at-read. Cause: the NEWLINE delimiter keeps
+   every export seam rule alive — the fold moves horizontal runs only. The
+   buy is grammar-consistency + better structure() bytes, not code.
+2. **Nine mask assertions re-pinned by one space** — kept designators now
+   carry their delimiter (`\v 1 \f` not glued `\v 1\f`, itself a lint
+   shape); matches structure()'s documented promise. One-line revert
+   exists. Sound, medium-high.
+3. **NoteCaller/BookCode NOT folded** — ruling named the designator;
+   folding them is a second behavior change. The `\f + ` grammar argument
+   is nearly as strong — follow-up candidate, not smuggled. Sound, high.
+   OVERTURNED by the completion pass below.
+4. Sound: designator::label() added, verse/chapter step the run (else
+   every corpus verse is Malformed — tested); lint renumber splices the
+   label not the span (would have written `\v 2a`; check_fixes proves);
+   toc designator_span gained a source param (delimiter length isn't in
+   the Token; the method exists to hand back a raw LABEL); usj/usx/html
+   at_boundary kept by PROBED deletion (guards the newline-delimiter
+   case); \ca/\cp/\va/\vp fold by shared payload path; `\v 1 //x` emits
+   one fewer token (no consumer noticed, 629 fixtures agree).
+5. Perf: en_ulb +2.2%, en_ult −1.5% (consistent, unexplained by the work,
+   reads as layout noise; under the 2% stop threshold).
+
+## completion pass — caller + book-code delimiter fold
+
+1. **The fold is now unconditional in `text_arm`**: the railroad makes the
+   horizontal delimiter after a caller (`/[^\\\s]+/` then `' '|HS`) and
+   after a book code (code then `' '|TAGEND`) required grammar, the same
+   status the designator's has. One `ws_run_end` for all three kinds; the
+   `match kind` the designator pass introduced is gone. Sound, high.
+2. **mask's `delimits_payload` DELETED** (−18 lines in mask.rs, a real net
+   deletion): it existed only to strip the caller/book-code delimiter off
+   the head of the following Text, which the scanner now never leaves
+   there. verse_text's mask-oracle bytes are byte-identical — the proof
+   the fold replaces the mechanism exactly. Sound, high.
+3. **One mask unit pin re-pinned by one space** (`\f +\f*` → `\f + \f*`),
+   the same class as the designator pass's nine: a KEPT caller now brings
+   its delimiter, as a kept marker does. Sound, medium-high.
+4. **`scanner::payload_label` is the one implementation** of the fold's
+   inverse, and `designator::label` delegates to it — one trim, one doc,
+   designator.rs's public surface untouched. `pub(crate)`, because
+   `scanner` is a private module; external readers still have
+   `designator::label`. Sound, medium.
+5. Perf: max-of-8, en_ulb +35.8%, en_ult +2.2% — no regression. The ulb
+   figure is a 4.5MB corpus and reads as noise plus one fewer token per
+   note; the honest claim is "not slower". Medium.

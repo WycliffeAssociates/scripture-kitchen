@@ -148,3 +148,19 @@ measured-someday, not a design input. What remains genuinely braid's if
 anything: multi-book session concerns. Multi-book project format,
 diff/merge (onion's diff is trusted — expect a nearly wholesale port),
 publish, anchors/U25002/`aid`.
+
+## Whitespace tokenization: two rules, no exceptions (2026-08-21)
+
+The grammar's delimiter class is any reducible-WS run ([\t\n\r ]+); we
+honor it under two orthogonal rules rather than one uniform costume:
+1. A NEWLINE IS ALWAYS ITS OWN TOKEN — block seams, lint line
+   discipline, \n\c chunking, and the editor's line model all key on it.
+2. A HORIZONTAL delimiter run (space/tab) FOLDS into the token that
+   grammatically requires it (marker names; and each carved payload —
+   designator, note caller, book code). CR belongs to the newline
+   machinery.
+The delimiter always exists in the stream and always concatenates back
+(partition); which rule represents it depends only on its characters.
+A Roslyn-style trivia channel was considered and rejected: trivia buys
+fidelity when bytes would otherwise be lost — we never lose bytes, so
+it would cost a token kind in every consumer for zero information.

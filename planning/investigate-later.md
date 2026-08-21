@@ -341,3 +341,7 @@ token boundaries move — CST spans, lint anchors, export engines, pins.
 The oracles (187+195+434 fixtures, lint pins, partition) make the
 attempt SAFE to judge mechanically. Candidate: a dedicated measured
 pass after masks pass 4; keep only if deleted seam code outweighs churn.
+
+**RESOLVED 2026-08-21: done, and it is a net ADDITION (+143/−50) — the
+seam code it deletes is one mask arm, while five consumers gained a
+`designator::label` trim; every oracle green, lexer unchanged.**

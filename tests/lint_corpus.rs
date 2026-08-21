@@ -67,7 +67,10 @@ fn lint_corpus() -> Option<Vec<BookReport>> {
                 }
                 let book = report.book.map(|idx| {
                     let token = tokens[idx as usize];
-                    source[token.start as usize..token.end() as usize].to_string()
+                    // The code alone: the span carries the folded delimiter.
+                    source[token.start as usize..token.end() as usize]
+                        .trim_end()
+                        .to_string()
                 });
                 (path.clone(), counts, book)
             })

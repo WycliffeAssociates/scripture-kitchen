@@ -906,13 +906,14 @@ impl<'a, const LINT: bool> FusedScanner<'a, LINT> {
                 {
                     return None;
                 }
+                let designator_end = ws_run_end(bytes, end);
                 self.push_marker(index, digits_from, self.hot.v.idx);
                 self.sink
-                    .push_token(TokenKind::Designator, digits_from, end);
+                    .push_token(TokenKind::Designator, digits_from, designator_end);
                 self.mode.awaiting_delimiter_ws = false;
                 self.mode.pending_payload = Payload::None;
                 self.mode.after_marker = false;
-                Some(end)
+                Some(designator_end)
             }
             b'q' => self.fused_leveled(index, index + 2, self.hot.q),
             b's' => self.fused_leveled(index, index + 2, self.hot.s),
@@ -1096,6 +1097,7 @@ impl<'a, const LINT: bool> FusedScanner<'a, LINT> {
         if let Some(kind) = payload_kind {
             let end = payload_end(bytes, index);
             if end > index {
+                let end = ws_run_end(bytes, end);
                 self.sink.push_token(kind, index, end);
                 return end;
             }

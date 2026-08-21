@@ -73,7 +73,7 @@ same fixture pair disagrees with itself on identical bytes.
 - **BOM prefixes** are common; BSB Ecclesiastes ships with NO `\id` line at all,
   so `Toc::book_token == None` is the honest answer and `missing-id` is lint's.
 - **Malformed payloads in shipped books.** en_ulb ZEC 12:7 is written `\v 7"`
-  (the quote is glued to the number, so the designator span is `7"`); bdf_reg ROM
+  (the quote is glued to the number, so the designator reads `7"`); bdf_reg ROM
   3 writes `\v 10` twice then `\v 11`; examples.bsb's only non-`+` note caller is
   a stray `",`.
 

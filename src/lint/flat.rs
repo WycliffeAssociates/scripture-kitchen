@@ -7,6 +7,7 @@ use super::attr_rules::AttrRules;
 use super::rows::version_row;
 use super::walk::{is_structural_ws, span_of};
 use super::{Code, Doc, Emit, NO_TOKEN, Observation, UsfmVersion};
+use crate::scanner::payload_label;
 use crate::tables::books;
 use crate::tables::generated;
 use crate::tables::schema::{
@@ -102,7 +103,9 @@ impl Flat {
             // Byte-exact membership first, then the case-folded retry: exactly
             // one of the two findings fires.
             TokenKind::BookCode => {
-                let span = span_of(source, token);
+                // The label alone: the folded delimiter is not part of the code,
+                // and the case-fold splice below must not overwrite it.
+                let span = payload_label(span_of(source, token));
                 if books::is_book_code(span) {
                     return;
                 }
@@ -113,7 +116,7 @@ impl Flat {
                     Some(upper) => out.push_fixed(
                         Observation::one(Code::BookCodeNotUppercase, idx),
                         token.start,
-                        token.end(),
+                        token.start + span.len() as u32,
                         &upper,
                     ),
                     None => out.push(Observation::one(Code::BookCodeUnknown, idx)),
@@ -243,7 +246,7 @@ impl Flat {
             // Not an enumeration of `+`/`-`/`?`: those are conventions on one
             // general run, and up to three bytes is taken as deliberate.
             TokenKind::NoteCaller => {
-                if span_of(source, token).len() > 3 {
+                if payload_label(span_of(source, token)).len() > 3 {
                     out.push(Observation::one(Code::CallerShape, idx));
                 }
                 self.window = Window::Closed;

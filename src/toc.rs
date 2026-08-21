@@ -20,6 +20,7 @@
 //! land in chapter 0 (a book-only sid, never a fabricated verse).
 
 use crate::designator::{self, Designator};
+use crate::scanner::payload_label;
 use crate::tables::generated;
 use crate::tables::schema::MarkerKind;
 use crate::token::{Token, TokenKind};
@@ -92,26 +93,24 @@ impl ChapterRow {
         self.start..self.end
     }
 
-    /// The `Designator` token's span, for the raw label (`12b`) `number`
-    /// cannot carry. `None` for the front-matter row or a `\c` with no
-    /// designator. `tokens` must be the stream the Toc was built from.
-    pub fn designator_span(&self, tokens: &[Token]) -> Option<(u32, u16)> {
+    /// The designator's span, for the raw label (`12b`) `number` cannot carry.
+    /// `None` for the front-matter row or a `\c` with no designator. `source`
+    /// and `tokens` must be what the Toc was built from.
+    pub fn designator_span(&self, source: &[u8], tokens: &[Token]) -> Option<(u32, u16)> {
         if self.token == u32::MAX {
             return None;
         }
-        let token = tokens[designator_row(tokens, self.token as usize)?];
-        Some((token.start, token.len))
+        label_span(source, tokens, self.token as usize)
     }
 }
 
 impl VerseAnchor {
-    /// The `Designator` token's span, for the raw spelling (`6a`, `7"`) the
-    /// numbers above cannot carry. `None` when the `\v` owns no designator.
+    /// The designator's span, for the raw spelling (`6a`, `7"`) the numbers
+    /// above cannot carry. `None` when the `\v` owns no designator.
     ///
-    /// `tokens` must be the stream the Toc was built from.
-    pub fn designator_span(&self, tokens: &[Token]) -> Option<(u32, u16)> {
-        let token = tokens[designator_row(tokens, self.token as usize)?];
-        Some((token.start, token.len))
+    /// `source` and `tokens` must be what the Toc was built from.
+    pub fn designator_span(&self, source: &[u8], tokens: &[Token]) -> Option<(u32, u16)> {
+        label_span(source, tokens, self.token as usize)
     }
 }
 
@@ -204,7 +203,9 @@ pub fn toc(source: &[u8], tokens: &[Token]) -> Toc {
             // so the first one in the stream IS the first `\id`'s code.
             TokenKind::BookCode if out.book_token.is_none() => {
                 out.book_token = Some(row as u32);
-                let code = &source[token.start as usize..token.end() as usize];
+                // The label, not the span: a short or degraded code must not
+                // copy the delimiter the scanner folded onto it.
+                let code = payload_label(&source[token.start as usize..token.end() as usize]);
                 let take = code.len().min(3);
                 out.book[..take].copy_from_slice(&code[..take]);
             }
@@ -308,6 +309,14 @@ fn designator_row(tokens: &[Token], marker_row: usize) -> Option<usize> {
         Some(t) if t.kind() == TokenKind::Designator => Some(next),
         _ => None,
     }
+}
+
+/// The designator after `marker_row` MINUS the delimiter it folded in — the raw
+/// label a client renders ([`designator::label`]).
+fn label_span(source: &[u8], tokens: &[Token], marker_row: usize) -> Option<(u32, u16)> {
+    let token = tokens[designator_row(tokens, marker_row)?];
+    let span = &source[token.start as usize..token.end() as usize];
+    Some((token.start, designator::label(span).len() as u16))
 }
 
 /// `read`'s verdict on the designator after `marker_row`, as u16s. `None` for
@@ -423,7 +432,9 @@ mod tests {
         );
         assert_eq!(sid(source, 20), "### 1");
         // The raw spelling stays reachable through the token.
-        let (start, len) = toc.verses[1].designator_span(&lex(source)).unwrap();
+        let (start, len) = toc.verses[1]
+            .designator_span(source.as_bytes(), &lex(source))
+            .unwrap();
         assert_eq!(
             &source[start as usize..(start + len as u32) as usize],
             "2\""

@@ -494,7 +494,7 @@ impl<'a> Export<'a> {
                     self.lists[list].at_boundary = true;
                 }
                 None => {
-                    let number = self.span(token).to_string();
+                    let number = trim(self.span(token)).to_string();
                     // A designator with no chapter/verse in front of it is
                     // lint's finding; drop it rather than guess an owner.
                     if let Some(verse) = self.pending.as_ref().map(|pending| pending.verse) {

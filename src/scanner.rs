@@ -10,12 +10,33 @@
 //!
 //! ```text
 //! \v 1 gr//ace \w x|lemma="g"\w*
-//! → Marker("\v ") Designator("1") Text(" gr") OptBreak("//") Text("ace ")
+//! → Marker("\v ") Designator("1 ") Text("gr") OptBreak("//") Text("ace ")
 //!   Marker("\w ") Text("x") AttrList("|lemma=\"g\"") ClosingMarker("\w*")
 //! ```
 //!
 //! Concatenating every span reproduces the source byte for byte. That
 //! partition IS the losslessness guarantee.
+//!
+//! # Where the grammar's whitespace goes
+//!
+//! The delimiter class is `[\t\n\r ]+` and every byte of it stays in the
+//! stream; two rules decide which token holds it.
+//!
+//! 1. **A NEWLINE is always its own token.** No exceptions: block seams, lint's
+//!    line discipline, `\n\c` chunking and an editor's line model all key on it.
+//! 2. **A HORIZONTAL run (space/tab) folds into the token that grammatically
+//!    requires it** — a marker name's delimiter, and each carved payload's:
+//!    designator, note caller, book code.
+//!
+//! ```text
+//! \v 1 text    Marker("\v ") Designator("1 ") Text("text")
+//! \v 1\ntext   Marker("\v ") Designator("1") Newline("\n") Text("text")
+//! \f + \ft n   Marker("\f ") NoteCaller("+ ") Marker("\ft ") Text("n")
+//! \id GEN Gen  Marker("\id ") BookCode("GEN ") Text("Gen")
+//! ```
+//!
+//! Both spellings write the same required delimiter; neither is normalized into
+//! the other, and either concatenates back to the source.
 
 use memchr::memchr;
 use memchr::memchr3;
@@ -268,13 +289,16 @@ impl Scanner<'_> {
                 {
                     return None; // `\v \p`, `\v 1a`: the general path decides.
                 }
+                // The designator's own delimiter rides its span, exactly as the
+                // marker name's does (see `payload_end`).
+                let designator_end = ws_run_end(bytes, end);
                 self.push_marker(index, digits_from, self.hot.v.idx);
-                self.push_token(TokenKind::Designator, digits_from, end);
+                self.push_token(TokenKind::Designator, digits_from, designator_end);
                 self.mode.awaiting_delimiter_ws = false;
                 self.mode.pending_payload = Payload::None;
                 // The designator is content, so this arm ends on a non-marker.
                 self.mode.after_marker = false;
-                Some(end)
+                Some(designator_end)
             }
             // Numbered families: name + at most ONE level digit, checked
             // against the row's cap (an over-cap level is the general path's).
@@ -825,12 +849,36 @@ pub(crate) fn escape_len(bytes: &[u8], pos: usize) -> Option<usize> {
 ///   front-position attribute list, not a caller.
 /// - Stopping at the first space is what leaves `\id GEN Some description`'s
 ///   description as ordinary Text.
+///
+/// Each then takes one more step, its own delimiter run (`ws_run_end`): the
+/// whitespace after a `\c`/`\v` number, after a note caller and after a book
+/// code is required grammar the way the whitespace after a marker NAME is, so
+/// the module doc's second rule covers all three and `\v 1 text` carves
+/// `Designator("1 ")`.
 pub(crate) fn payload_end(bytes: &[u8], from: usize) -> usize {
     let mut index = from;
     while index < bytes.len() && !matches!(bytes[index], SPACE | TAB | CR | LF | BACKSLASH | PIPE) {
         index += 1;
     }
     index
+}
+
+/// The fold's inverse: a carved payload's span MINUS the delimiter run above.
+/// Every consumer that reads a payload's VALUE starts here.
+///
+/// ```text
+/// "1 "    →  "1"      "GEN\t"  →  "GEN"    "+ "  →  "+"
+/// "1"     →  "1"      a newline delimiter is its own token
+/// ```
+///
+/// Safe on every payload because `payload_end` stops at the first horizontal
+/// byte: only a folded delimiter can be at the tail.
+pub(crate) fn payload_label(span: &[u8]) -> &[u8] {
+    let mut end = span.len();
+    while end > 0 && matches!(span[end - 1], SPACE | TAB) {
+        end -= 1;
+    }
+    &span[..end]
 }
 
 impl Scanner<'_> {
@@ -860,6 +908,9 @@ impl Scanner<'_> {
             // A region opening with an escape (`\v \~…`) has nothing to take —
             // fall through to the ordinary scan and emit no empty token.
             if end > index {
+                // Every carved payload takes its delimiter with it
+                // (see `payload_end`).
+                let end = ws_run_end(bytes, end);
                 self.push_token(kind, index, end);
                 return end;
             }
@@ -993,15 +1044,16 @@ mod tests {
     }
 
     /// The region after `\c`/`\v` is ONE Designator token — digits, ranges,
-    /// junk alike; a designator-less `\v` emits nothing extra.
+    /// junk alike — plus the delimiter run behind it; a designator-less `\v`
+    /// emits nothing extra.
     #[test]
     fn chapter_and_verse_take_a_designator_token() {
         assert_eq!(
-            kinds_and_ranges(&lex("\\v 1 text")),
+            kinds_and_text("\\v 1 text"),
             vec![
-                (MARKER, 0, 3),
-                (TokenKind::Designator, 3, 4),
-                (TokenKind::Text, 4, 9),
+                (MARKER, "\\v "),
+                (TokenKind::Designator, "1 "),
+                (TokenKind::Text, "text"),
             ]
         );
         assert_eq!(
@@ -1014,8 +1066,22 @@ mod tests {
         );
         // Range + suffix stay ONE span; the scanner never parses inside.
         assert_eq!(
-            kinds_and_ranges(&lex("\\v 12-14a x"))[1],
-            (TokenKind::Designator, 3, 9)
+            kinds_and_text("\\v 12-14a x")[1],
+            (TokenKind::Designator, "12-14a ")
+        );
+        // The fold takes horizontal whitespace only, and the whole run of it.
+        assert_eq!(
+            kinds_and_text("\\v 1  \tx")[1],
+            (TokenKind::Designator, "1  \t")
+        );
+        assert_eq!(
+            kinds_and_text("\\v 1\ntext"),
+            vec![
+                (MARKER, "\\v "),
+                (TokenKind::Designator, "1"),
+                (TokenKind::Newline, "\n"),
+                (TokenKind::Text, "text"),
+            ]
         );
         // No designator present: the expectation dies with the next marker.
         assert_eq!(
@@ -1130,8 +1196,8 @@ mod tests {
             vec![
                 (MARKER, "\\v"),
                 (ATTRS, "|script=\"Arab\"| "),
-                (TokenKind::Designator, "1"),
-                (TEXT, " x"),
+                (TokenKind::Designator, "1 "),
+                (TEXT, "x"),
             ]
         );
         // The spec hangs node-initial vs 3.1-trailing on the closing pipe alone.
@@ -1191,15 +1257,15 @@ mod tests {
     }
 
     /// The note caller: one span after the delimiter, spec pattern `/[^\\\s]+/`,
-    /// so `+`/`-`/`?` are conventional values, never an enumeration.
+    /// so `+`/`-`/`?` are conventional values, never an enumeration. The
+    /// delimiter the grammar requires after it rides the span.
     #[test]
     fn notes_and_cross_references_carve_their_caller() {
         assert_eq!(
             kinds_and_text("\\f + \\ft text\\f*"),
             vec![
                 (MARKER, "\\f "),
-                (CALLER, "+"),
-                (TEXT, " "),
+                (CALLER, "+ "),
                 (MARKER, "\\ft "),
                 (TEXT, "text"),
                 (CLOSING, "\\f*"),
@@ -1211,22 +1277,22 @@ mod tests {
             kinds_and_text("\\f - bare note\\f*"),
             vec![
                 (MARKER, "\\f "),
-                (CALLER, "-"),
-                (TEXT, " bare note"),
+                (CALLER, "- "),
+                (TEXT, "bare note"),
                 (CLOSING, "\\f*"),
             ]
         );
         assert_eq!(
             kinds_and_text("\\f ?custom \\ft x\\f*")[1],
-            (CALLER, "?custom")
+            (CALLER, "?custom ")
         );
         // Cross-references owe one too (`x`, and `fe`/`ef`/`ex` alike).
-        assert_eq!(kinds_and_text("\\x - \\xo 1.1\\x*")[1], (CALLER, "-"));
+        assert_eq!(kinds_and_text("\\x - \\xo 1.1\\x*")[1], (CALLER, "- "));
         // A front-position list comes FIRST, and the caller expectation must
         // survive it.
         assert_eq!(
             kinds_and_text("\\f |aid=\"n1\"| + \\ft x\\f*")[..3],
-            [(MARKER, "\\f "), (ATTRS, "|aid=\"n1\"| "), (CALLER, "+")]
+            [(MARKER, "\\f "), (ATTRS, "|aid=\"n1\"| "), (CALLER, "+ ")]
         );
         // Nothing to take: no empty token.
         assert_eq!(
@@ -1245,8 +1311,8 @@ mod tests {
             kinds_and_text("\\id GEN Some description\n"),
             vec![
                 (MARKER, "\\id "),
-                (BOOK, "GEN"),
-                (TEXT, " Some description"),
+                (BOOK, "GEN "),
+                (TEXT, "Some description"),
                 (TokenKind::Newline, "\n"),
             ]
         );
@@ -1354,7 +1420,7 @@ mod tests {
     fn the_pipe_needle_is_off_outside_a_character_frame() {
         assert_eq!(kinds_and_text("\\p a|b|c d\n")[1], (TEXT, "a|b|c d"));
         // A note frame takes the front form only, so it does NOT arm the needle.
-        assert_eq!(kinds_and_text("\\f + x|y\\f*")[2], (TEXT, " x|y"));
+        assert_eq!(kinds_and_text("\\f + x|y\\f*")[2], (TEXT, "x|y"));
         // Closing the frame disarms it again.
         assert_eq!(kinds_and_text("\\w a\\w* b|c\n")[3], (TEXT, " b|c"));
     }
