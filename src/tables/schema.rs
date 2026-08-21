@@ -793,6 +793,14 @@ pub enum AttrStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HtmlElement {
     /// No element of its own; children flow into the parent.
+    ///
+    /// **NO ROW USES THIS as of the 2026-08-21 audit** (html-tables.md §1,
+    /// ACCEPTED): all 11 rows that carried it — `cat`, `h`, `toc`, `toca`,
+    /// `id`, `ide`, `rem`, `sts`, `usfm`, and row 0 — moved to [`Self::Span`],
+    /// because `Transparent` still EMITS the text while giving a consumer no
+    /// class to style, hide, or relocate it by. The variant is kept as a
+    /// rendering POLICY the export honours (children emit, no wrapper) so a
+    /// future row has somewhere to point; it is not dead code in `src/html.rs`.
     Transparent,
     /// `<p>`
     Para,
@@ -858,15 +866,26 @@ pub enum HtmlElement {
 /// three different heading levels, so `class + digit` alone is underspecified.
 ///
 /// Levels are `base + digit - 1`, clamped at 6 (see [`heading_level`]).
+/// AUDITED + RULED 2026-08-21 (planning/sketches/html-tables.md §2, ACCEPTED by
+/// Will): every family below was confirmed against its own 3.2 page, and `c`,
+/// `cp`, `cl` were REMOVED — none is a heading by its own page's words (`c` is
+/// filed under "Chapters and Verses" with TextType ChapterNumber; `cp` is a
+/// display override for `c`, the same relationship `vp` has to `v`; `cl` is
+/// "a paragraph-level element, not a heading or title marker"). Their
+/// `html_element` values moved in the same ruling — see `tables::rows`.
+///
+/// Two properties of the audited table, recorded rather than smoothed over:
+/// `s4` lands on `<h6>` EXACTLY (base 3 + 4 - 1), the deepest legal level; and
+/// the intro branch skips a level (`imt1` h1 → `is1` h3) because USFM has no
+/// marker between them — a WCAG heading-order smell that belongs to the spec's
+/// own two-tier intro structure, not to this table. Sibling `<h1>`s from `imt1`
+/// and `mt1` are likewise accepted: two genuinely separate top-level sections.
 pub const HEADING_BASE_LEVEL: &[(&str, u8)] = &[
     ("mt", 1),
     ("mte", 1),
     ("imt", 1),
     ("imte", 1),
     ("ms", 2),
-    ("c", 2),
-    ("cp", 2),
-    ("cl", 2),
     ("is", 3),
     ("iot", 3),
     ("s", 3),

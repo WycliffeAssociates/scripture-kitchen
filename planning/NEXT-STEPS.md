@@ -26,7 +26,14 @@ SWAR — settled-facts).
 ## Next code: exports
 
 Sketch: sketches/usj-export.md (USX/HTML follow it —
-sketches/usx-html-export.md). The first CONSUMER of the whole stack: the
+sketches/usx-export.md, sketches/html-export.md). **All three are BUILT**
+behind the `usj`/`usx`/`html` features, all in `default`: USJ 187/187 and
+USX 195/195 against testData's fixtures, HTML with no oracle by its own
+scope ruling (a zoo, a nesting/escaping smoke, and the text-identity
+invariant against our own USJ over 434 documents). The two authored HTML
+tables were audited and RULED ACCEPTED 2026-08-21
+(sketches/html-tables.md), which is what unblocked it.
+The first CONSUMER of the whole stack: the
 CST plus the interpreter's k/v reading, splatted into USJ's JSON shape.
 It is where the attribute interpreter's second consumer arrives (lint was
 the first), and where the LOSSY step lives — the token stays

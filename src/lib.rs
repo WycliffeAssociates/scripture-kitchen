@@ -27,6 +27,10 @@ pub mod cst;
 pub mod designator;
 pub mod edit;
 pub mod experiments;
+#[cfg(any(feature = "usj", feature = "usx", feature = "html"))]
+mod export;
+#[cfg(feature = "html")]
+pub mod html;
 pub mod lint;
 mod parse_header;
 mod scanner;
@@ -34,6 +38,8 @@ pub mod tables;
 mod token;
 #[cfg(feature = "usj")]
 pub mod usj;
+#[cfg(feature = "usx")]
+pub mod usx;
 
 pub use parse_header::{ChapterRun, ParseHeader};
 pub use scanner::{lex, lex_general_path_only};

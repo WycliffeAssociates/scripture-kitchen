@@ -5,17 +5,20 @@ edition = "2024"
 
 [dependencies]
 memchr = "2.8.3"
-winnow = "1.0.4"
 # Playground-only parallelism (dev-deps don't reach src/bin binaries, so:
 # optional dep + feature, cfg-gated in the playground, absent from the lib).
 rayon = { version = "1.10", optional = true }
 
 [features]
-default = ["usj"]
+default = ["usj", "usx", "html"]
 par = ["dep:rayon"]
 # Exports are compile-time optional (sketches/usj-export.md): a size-sensitive
 # consumer sets `default-features = false` and the module is not in the binary.
 usj = []
+usx = []
+# HTML is a VIEW export (sketches/html-export.md): no oracle, no round-trip
+# claim, and the same compile-time-optional deal as its two siblings.
+html = []
 
 [dev-dependencies]
 criterion = "0.8.2"

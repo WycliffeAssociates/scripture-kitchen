@@ -11,6 +11,9 @@
 //   cargo run --release --bin playground -- --cst-stats        // untimed: CloseReason distribution over the corpus
 //   cargo run --release --bin playground -- --lint             // lex + cst::build + lint (the whole pipeline)
 //   cargo run --release --bin playground -- --lint-stats       // untimed: per-code finding counts (and fix counts)
+//   cargo run --release --bin playground -- --usj-only         // pre-lexed+built; times the USJ serialization alone
+//   cargo run --release --bin playground -- --usx-only         // pre-lexed+built; times the USX serialization alone
+//   cargo run --release --bin playground -- --html-only        // pre-lexed+built; times the HTML serialization alone
 //   cargo run --release --bin playground -- --fix-preview unclosed-note  // …plus before/after windows for one code
 //   cargo run --release --bin playground -- --fused            // SINGLE PASS: lex+cst+lint off push_token
 //   cargo run --release --bin playground -- --fused-noop       // the fused traversal with the sink OFF (prices the hook)
@@ -56,6 +59,12 @@ enum Mode {
     Lint,
     /// Pre-lexed AND pre-built; times the lint pass by itself.
     LintOnly,
+    /// Pre-lexed AND pre-built; times the USJ serialization by itself.
+    UsjOnly,
+    /// Pre-lexed AND pre-built; times the USX serialization by itself.
+    UsxOnly,
+    /// Pre-lexed AND pre-built; times the HTML serialization by itself.
+    HtmlOnly,
     /// The single-pass experiment: lex + cst + lint in ONE traversal.
     Fused,
     /// The same traversal with the sink switched off — prices the hook alone.
@@ -86,6 +95,9 @@ fn main() {
             "--cst-stats" => cst_stats = true,
             "--lint" => mode = Mode::Lint,
             "--lint-only" => mode = Mode::LintOnly,
+            "--usj-only" => mode = Mode::UsjOnly,
+            "--usx-only" => mode = Mode::UsxOnly,
+            "--html-only" => mode = Mode::HtmlOnly,
             "--fused" => mode = Mode::Fused,
             "--fused-noop" => mode = Mode::FusedNoop,
             "--fused-cst" => mode = Mode::FusedCst,
@@ -140,6 +152,9 @@ fn main() {
         Mode::CstOnly => "cst-only",
         Mode::Lint => "lint",
         Mode::LintOnly => "lint-only",
+        Mode::UsjOnly => "usj-only",
+        Mode::UsxOnly => "usx-only",
+        Mode::HtmlOnly => "html-only",
         Mode::Fused => "fused",
         Mode::FusedNoop => "fused-noop",
         Mode::FusedCst => "fused-cst",
@@ -171,17 +186,31 @@ fn main() {
         return;
     }
 
-    let prelexed: Vec<Vec<usfm_onion_2::Token>> =
-        if matches!(mode, Mode::ParseHeaderOnly | Mode::CstOnly | Mode::LintOnly) {
-            sources.iter().map(|s| usfm_onion_2::lex(s)).collect()
-        } else {
-            Vec::new()
-        };
+    let prelexed: Vec<Vec<usfm_onion_2::Token>> = if matches!(
+        mode,
+        Mode::ParseHeaderOnly
+            | Mode::CstOnly
+            | Mode::LintOnly
+            | Mode::UsjOnly
+            | Mode::UsxOnly
+            | Mode::HtmlOnly
+    ) {
+        sources.iter().map(|s| usfm_onion_2::lex(s)).collect()
+    } else {
+        Vec::new()
+    };
     // The lint modes report ns/token, so they need the token count regardless
     // of whether the lex itself is on the clock.
     let tokens_total: u64 = if matches!(
         mode,
-        Mode::Lint | Mode::LintOnly | Mode::Fused | Mode::FusedNoop | Mode::FusedCst
+        Mode::Lint
+            | Mode::LintOnly
+            | Mode::Fused
+            | Mode::FusedNoop
+            | Mode::FusedCst
+            | Mode::UsjOnly
+            | Mode::UsxOnly
+            | Mode::HtmlOnly
     ) {
         if prelexed.is_empty() {
             sources
@@ -194,7 +223,10 @@ fn main() {
     } else {
         0
     };
-    let prebuilt: Vec<usfm_onion_2::cst::Cst> = if mode == Mode::LintOnly {
+    let prebuilt: Vec<usfm_onion_2::cst::Cst> = if matches!(
+        mode,
+        Mode::LintOnly | Mode::UsjOnly | Mode::UsxOnly | Mode::HtmlOnly
+    ) {
         prelexed
             .iter()
             .map(|t| usfm_onion_2::cst::build(t))
@@ -243,6 +275,8 @@ fn verify_variant(sources: &[String], mode: Mode) {
         Mode::ParseHeader | Mode::ParseHeaderOnly => return, // the real lexer plus a pure pass
         Mode::Cst | Mode::CstOnly => return,                 // the real lexer plus a pure pass
         Mode::Lint | Mode::LintOnly => return,               // the real lexer plus two pure passes
+        // the real lexer plus a pure pass
+        Mode::UsjOnly | Mode::UsxOnly | Mode::HtmlOnly => return,
         // Identity is tests/fused_identity.rs's job — whole reports, not just
         // token streams, so it cannot be a `fn(&str) -> Vec<Token>` here.
         Mode::Fused | Mode::FusedNoop | Mode::FusedCst => return,
@@ -315,6 +349,36 @@ fn run_once(
             for ((source, tokens), cst) in sources.iter().zip(prelexed).zip(prebuilt) {
                 std::hint::black_box(usfm_onion_2::lint::lint(source.as_bytes(), tokens, cst));
             }
+        }
+        Mode::UsjOnly => {
+            #[cfg(feature = "usj")]
+            for ((source, tokens), cst) in sources.iter().zip(prelexed).zip(prebuilt) {
+                std::hint::black_box(usfm_onion_2::usj::usj(source.as_bytes(), tokens, cst));
+            }
+            #[cfg(not(feature = "usj"))]
+            panic!(
+                "--usj-only needs the feature: cargo run --release --bin playground -- --usj-only"
+            );
+        }
+        Mode::UsxOnly => {
+            #[cfg(feature = "usx")]
+            for ((source, tokens), cst) in sources.iter().zip(prelexed).zip(prebuilt) {
+                std::hint::black_box(usfm_onion_2::usx::usx(source.as_bytes(), tokens, cst));
+            }
+            #[cfg(not(feature = "usx"))]
+            panic!(
+                "--usx-only needs the feature: cargo run --release --bin playground -- --usx-only"
+            );
+        }
+        Mode::HtmlOnly => {
+            #[cfg(feature = "html")]
+            for ((source, tokens), cst) in sources.iter().zip(prelexed).zip(prebuilt) {
+                std::hint::black_box(usfm_onion_2::html::html(source.as_bytes(), tokens, cst));
+            }
+            #[cfg(not(feature = "html"))]
+            panic!(
+                "--html-only needs the feature: cargo run --release --bin playground -- --html-only"
+            );
         }
         Mode::ParseHeader => {
             for source in sources {

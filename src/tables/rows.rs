@@ -62,7 +62,13 @@ pub static ROWS: &[MarkerRow] = &[
         default_attribute: None,
         closing: ClosingBehavior::None,
         deprecated: false,
-        html_element: Some(HtmlElement::Transparent),
+        // RULED 2026-08-21 (html-tables.md §1, ACCEPTED): was `Transparent`.
+        // Every unknown marker resolves here, and `Transparent` dropped it with
+        // no wrapper at all. The class is built off the TOKEN's lexeme (this
+        // row's `marker` is `""`), so `\s5` still reaches the page as
+        // `class="usfm-s5"`. Export takes the BLOCK spelling for an unknown
+        // marker in paragraph position — see src/html.rs.
+        html_element: Some(HtmlElement::Span),
         priority: None,
     },
     // ---- Character markers inside notes: the class-wide curation ---------
@@ -174,7 +180,11 @@ pub static ROWS: &[MarkerRow] = &[
         default_attribute: None,
         closing: ClosingBehavior::None,
         deprecated: false,
-        html_element: Some(HtmlElement::Span),
+        // RULED 2026-08-21 (html-tables.md §1, ACCEPTED): was `Span`. `\b` is
+        // "blank line… does not include any content (is always empty)" — the
+        // same shape `sd` already gets `Div` for, and an empty inline span
+        // cannot be a stanza break.
+        html_element: Some(HtmlElement::Div),
         priority: Some(5),
     },
     MarkerRow {
@@ -302,7 +312,12 @@ pub static ROWS: &[MarkerRow] = &[
         default_attribute: None,
         closing: ClosingBehavior::None,
         deprecated: false,
-        html_element: Some(HtmlElement::Heading),
+        // RULED 2026-08-21 (html-tables.md §1/§2, ACCEPTED): was `Heading`, and
+        // `c` was in `HEADING_BASE_LEVEL`. Its own 3.2 page files it under
+        // "Chapters and Verses", NOT "Titles and Sections", with TextType
+        // ChapterNumber — structural, not a display heading. Dropped from
+        // HEADING_BASE_LEVEL in the same ruling.
+        html_element: Some(HtmlElement::Span),
         priority: None,
     },
     MarkerRow {
@@ -405,7 +420,11 @@ pub static ROWS: &[MarkerRow] = &[
         deprecated: false,
         // Transparent, not Span: the category is metadata, so the term must not
         // render as inline text inside the note.
-        html_element: Some(HtmlElement::Transparent),
+        // RULED 2026-08-21 (html-tables.md §1, ACCEPTED): was `Transparent`.
+        // `\cat` is publishable vernacular content and CHAR-SHAPED (usx.md);
+        // USX turning it into an attribute is a projection artifact, not what
+        // the marker IS, so it gets the class every char-shaped sibling gets.
+        html_element: Some(HtmlElement::Span),
         priority: None,
     },
     MarkerRow {
@@ -444,7 +463,10 @@ pub static ROWS: &[MarkerRow] = &[
         default_attribute: None,
         closing: ClosingBehavior::None,
         deprecated: false,
-        html_element: Some(HtmlElement::Heading),
+        // RULED 2026-08-21 (html-tables.md §1/§2, ACCEPTED): was `Heading` + a
+        // HEADING_BASE_LEVEL entry. Its own page: "classified as a
+        // paragraph-level element, not a heading or title marker".
+        html_element: Some(HtmlElement::Para),
         priority: None,
     },
     MarkerRow {
@@ -485,7 +507,10 @@ pub static ROWS: &[MarkerRow] = &[
         default_attribute: None,
         closing: ClosingBehavior::None,
         deprecated: false,
-        html_element: Some(HtmlElement::Heading),
+        // RULED 2026-08-21 (html-tables.md §1/§2, ACCEPTED): was `Heading` + a
+        // HEADING_BASE_LEVEL entry. `cp` is a display OVERRIDE for `c`, exactly
+        // the relationship `vp` has to `v` — so it matches `vp`'s `Sup`.
+        html_element: Some(HtmlElement::Sup),
         priority: None,
     },
     MarkerRow {
@@ -570,7 +595,7 @@ pub static ROWS: &[MarkerRow] = &[
         default_attribute: None,
         closing: ClosingBehavior::RequiredExplicit,
         deprecated: false,
-        html_element: Some(HtmlElement::Aside),
+        html_element: Some(HtmlElement::Span),
         priority: None,
     },
     // [round 8] RECATEGORISED CharFormatting -> CharTextFeatures: 3.2
@@ -678,7 +703,7 @@ pub static ROWS: &[MarkerRow] = &[
         default_attribute: None,
         closing: ClosingBehavior::RequiredExplicit,
         deprecated: false,
-        html_element: Some(HtmlElement::Aside),
+        html_element: Some(HtmlElement::Span),
         priority: None,
     },
     // [round 8 / Q-H5] Aside is the note BODY container. The `<sup>` caller
@@ -719,7 +744,15 @@ pub static ROWS: &[MarkerRow] = &[
         default_attribute: None,
         closing: ClosingBehavior::RequiredExplicit,
         deprecated: false,
-        html_element: Some(HtmlElement::Aside),
+        // RULED 2026-08-21 (html-tables.md §3, ACCEPTED): was `Aside`. A note's
+        // caller sits MID-SENTENCE inside a `<p>`, whose content model is
+        // PHRASING content only — `<aside>` is flow content, so `<aside>` inside
+        // `<p>` is invalid HTML5 and the parser closes the `<p>` early to
+        // recover, silently breaking the paragraph. `<span>` is what
+        // sketches/html-export.md's own note bullet always said. `esb`/`esbe`
+        // keep `Aside`: a sidebar interrupts BETWEEN paragraphs, which is
+        // exactly where `<aside>` is legal.
+        html_element: Some(HtmlElement::Span),
         priority: Some(4),
     },
     MarkerRow {
@@ -779,7 +812,7 @@ pub static ROWS: &[MarkerRow] = &[
         default_attribute: None,
         closing: ClosingBehavior::RequiredExplicit,
         deprecated: false,
-        html_element: Some(HtmlElement::Aside),
+        html_element: Some(HtmlElement::Span),
         priority: None,
     },
     // opens a Character scope, NOT onion's Block — see flags
@@ -1107,7 +1140,10 @@ pub static ROWS: &[MarkerRow] = &[
         default_attribute: None,
         closing: ClosingBehavior::None,
         deprecated: false,
-        html_element: Some(HtmlElement::Transparent),
+        // RULED 2026-08-21 (html-tables.md §1, ACCEPTED): was `Transparent`.
+        // Publishable but CHROME, not reading flow — `Span` gives a consumer the
+        // class it needs to relocate this into real page chrome.
+        html_element: Some(HtmlElement::Span),
         priority: None,
     },
     MarkerRow {
@@ -1125,7 +1161,9 @@ pub static ROWS: &[MarkerRow] = &[
         default_attribute: None,
         closing: ClosingBehavior::None,
         deprecated: false,
-        html_element: Some(HtmlElement::Para),
+        // RULED 2026-08-21 (html-tables.md §1, ACCEPTED): was `Para`. The
+        // intro-context twin of `\b`, same empty-spacer reasoning.
+        html_element: Some(HtmlElement::Div),
         priority: None,
     },
     MarkerRow {
@@ -1148,7 +1186,12 @@ pub static ROWS: &[MarkerRow] = &[
         default_attribute: None,
         closing: ClosingBehavior::None,
         deprecated: false,
-        html_element: Some(HtmlElement::Transparent),
+        // RULED 2026-08-21 (html-tables.md §1, ACCEPTED): was `Transparent`,
+        // which still EMITS the text unwrapped — a reader saw raw book codes and
+        // internal remarks as bare text with no class to suppress them by.
+        // `Span` gives CSS a handle, the same deal the milestone ruling gave
+        // empty spans.
+        html_element: Some(HtmlElement::Span),
         priority: None,
     },
     MarkerRow {
@@ -1166,7 +1209,7 @@ pub static ROWS: &[MarkerRow] = &[
         default_attribute: None,
         closing: ClosingBehavior::None,
         deprecated: false,
-        html_element: Some(HtmlElement::Transparent),
+        html_element: Some(HtmlElement::Span),
         priority: None,
     },
     MarkerRow {
@@ -2754,7 +2797,7 @@ pub static ROWS: &[MarkerRow] = &[
         default_attribute: None,
         closing: ClosingBehavior::None,
         deprecated: false,
-        html_element: Some(HtmlElement::Transparent),
+        html_element: Some(HtmlElement::Span),
         priority: None,
     },
     MarkerRow {
@@ -2974,7 +3017,7 @@ pub static ROWS: &[MarkerRow] = &[
         default_attribute: None,
         closing: ClosingBehavior::None,
         deprecated: false,
-        html_element: Some(HtmlElement::Transparent),
+        html_element: Some(HtmlElement::Span),
         priority: None,
     },
     MarkerRow {
@@ -3222,7 +3265,7 @@ pub static ROWS: &[MarkerRow] = &[
         default_attribute: None,
         closing: ClosingBehavior::None,
         deprecated: false,
-        html_element: Some(HtmlElement::Transparent),
+        html_element: Some(HtmlElement::Span),
         priority: None,
     },
     // collapses: toca1, toca2, toca3
@@ -3243,7 +3286,7 @@ pub static ROWS: &[MarkerRow] = &[
         default_attribute: None,
         closing: ClosingBehavior::None,
         deprecated: false,
-        html_element: Some(HtmlElement::Transparent),
+        html_element: Some(HtmlElement::Span),
         priority: None,
     },
     MarkerRow {
@@ -3320,7 +3363,7 @@ pub static ROWS: &[MarkerRow] = &[
         default_attribute: None,
         closing: ClosingBehavior::None,
         deprecated: false,
-        html_element: Some(HtmlElement::Transparent),
+        html_element: Some(HtmlElement::Span),
         priority: None,
     },
     // measured 62.0k occurrences (en_ulb+bsb, 2026-08-10)
@@ -3683,7 +3726,7 @@ pub static ROWS: &[MarkerRow] = &[
         default_attribute: None,
         closing: ClosingBehavior::RequiredExplicit,
         deprecated: false,
-        html_element: Some(HtmlElement::Aside),
+        html_element: Some(HtmlElement::Span),
         priority: None,
     },
     MarkerRow {

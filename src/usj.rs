@@ -82,11 +82,11 @@
 //!
 //! `~` becomes the non-breaking space it names, and `//` its own `optbreak`.
 
-use core::ops::Range;
-use std::borrow::Cow;
-
 use crate::attributes::{AttrEvent, AttrResolution, attrs, resolve};
 use crate::cst::{CloseReason, Cst, NODE_ID_BIT, Node, ROOT_TOKEN, container_kind};
+use crate::export::{
+    canonical, is_ws, marker_name, note_peers, text_at, trim, trim_end, trim_start,
+};
 use crate::tables::generated::{self, MarkerIdx};
 use crate::tables::schema::MarkerKind;
 use crate::{Token, TokenKind};
@@ -97,28 +97,6 @@ const VERSION: &str = "3.1";
 
 /// The `content` key, named because the `\b` rewind measures it.
 const CONTENT: &str = ",\"content\":[";
-
-/// A FOOTNOTE's own PEER markers — the note-text elements that sit BESIDE each
-/// other inside `\f`/`\fe`/`\ef`. `\fv` is deliberately absent: the spec writes
-/// it `\fv ...\fv*` (an embedded verse number INSIDE footnote text), and
-/// specExamples/footnote reads it that way in both its `origin.json` and its
-/// `origin.xml`. `\fm` is absent for the reason its row already states — it is
-/// char-like, not a note peer.
-const FOOTNOTE_PEERS: &[&str] = &["fdc", "fk", "fl", "fp", "fq", "fqa", "fr", "ft", "fw"];
-
-/// A CROSS-REFERENCE's own peer markers, inside `\x`/`\ex`. `\xt` is one of
-/// THESE and not a footnote's, which is the whole of why `\xo 1.1 \xt Ps 135`
-/// siblings while `\ft … \xt ref\xt*` nests.
-const XREF_PEERS: &[&str] = &["xdc", "xk", "xnt", "xo", "xop", "xot", "xq", "xt", "xta"];
-
-/// Which peer family a note marker belongs to. `\x`/`\ex` are the
-/// cross-reference notes; `\f`/`\fe`/`\ef` are the footnotes.
-fn note_peers(marker: &str) -> &'static [&'static str] {
-    match marker {
-        "x" | "ex" => XREF_PEERS,
-        _ => FOOTNOTE_PEERS,
-    }
-}
 
 /// Folds a lexed + built document into USJ JSON.
 ///
@@ -226,72 +204,6 @@ struct ListState {
     /// A synthesized `table` wrapper is open, and items go inside it.
     table_open: bool,
     table_sep: bool,
-}
-
-/// Space, tab, CR, LF — the scanner's structural whitespace, and deliberately
-/// not `char::is_whitespace`: a no-break space in the text is CONTENT.
-fn is_ws(byte: u8) -> bool {
-    matches!(byte, b' ' | b'\t' | b'\r' | b'\n')
-}
-
-fn trim_start(text: &str) -> &str {
-    let bytes = text.as_bytes();
-    let mut at = 0;
-    while at < bytes.len() && is_ws(bytes[at]) {
-        at += 1;
-    }
-    &text[at..]
-}
-
-fn trim_end(text: &str) -> &str {
-    let bytes = text.as_bytes();
-    let mut to = bytes.len();
-    while to > 0 && is_ws(bytes[to - 1]) {
-        to -= 1;
-    }
-    &text[..to]
-}
-
-fn trim(text: &str) -> &str {
-    trim_end(trim_start(text))
-}
-
-/// One text token, canonicalized the way the fixtures are: every run of
-/// structural whitespace becomes ONE space (`"son of  david"` is
-/// `"son of david"`), and `~` — USFM's non-breaking space — becomes the
-/// character it names.
-fn canonical(text: &str) -> Cow<'_, str> {
-    // The common case is text that needs nothing done to it, and an export
-    // that allocated per TEXT TOKEN would allocate once per word of scripture.
-    let bytes = text.as_bytes();
-    let untouched = !bytes.iter().enumerate().any(|(at, &byte)| {
-        byte == b'~'
-            || (is_ws(byte) && (byte != b' ' || bytes.get(at + 1).is_some_and(|next| is_ws(*next))))
-    });
-    if untouched {
-        return Cow::Borrowed(text);
-    }
-    let mut out = String::with_capacity(text.len());
-    let mut in_ws = false;
-    for byte in text.chars() {
-        match byte {
-            ch if ch.is_ascii() && is_ws(ch as u8) => {
-                if !in_ws {
-                    out.push(' ');
-                }
-                in_ws = true;
-            }
-            '~' => {
-                out.push('\u{a0}');
-                in_ws = false;
-            }
-            ch => {
-                out.push(ch);
-                in_ws = false;
-            }
-        }
-    }
-    Cow::Owned(out)
 }
 
 // ---------------------------------------------------------------------------
@@ -683,13 +595,25 @@ impl<'a> Export<'a> {
         // The lifted markers emit NOTHING: their content becomes an
         // attribute somewhere else, and they must not break the text run
         // around them either (`\v 1 \va 3\va* text` is one delimiter).
+        //
+        // Unless the content is not PLAIN TEXT: an attribute value cannot
+        // hold markup, so `\vp \+it \+wj 21\+wj*\+it* \vp*` stays an
+        // ordinary char element with its nesting intact — which is what
+        // biblica/PublishingVersesWithFormatting writes in its origin.json
+        // as well as its origin.xml (the rule usx.rs landed first;
+        // usj-export.md open question 10, resolved 2026-08-21).
+        let liftable = !self
+            .cst
+            .child_ids
+            .get(node.children.start as usize..node.children.end as usize)
+            .is_some_and(|kids| kids.iter().any(|child| child & NODE_ID_BIT != 0));
         match marker.as_str() {
-            "ca" | "va" => {
+            "ca" | "va" if liftable => {
                 let value = self.node_text(id);
                 self.lift(Absorb::AltNumber, value, list);
                 return None;
             }
-            "cp" | "vp" => {
+            "cp" | "vp" if liftable => {
                 let value = self.node_text(id);
                 self.lift(Absorb::PubNumber, value, list);
                 return None;
@@ -1108,26 +1032,11 @@ impl<'a> Export<'a> {
     // -- spans -------------------------------------------------------------
 
     fn span(&self, token: &Token) -> &'a str {
-        self.text(token.start..token.end())
+        text_at(self.source, token.start..token.end())
     }
 
-    fn text(&self, range: Range<u32>) -> &'a str {
-        let bytes = &self.source[range.start as usize..range.end as usize];
-        // The scanner never splits a UTF-8 sequence, so this only ever fails
-        // on a source that was not UTF-8 to begin with.
-        core::str::from_utf8(bytes).unwrap_or("")
-    }
-
-    /// The marker as the AUTHOR spelled it: `q1`, `qt-s`, `zaln-e` — read off
-    /// the token's own bytes, not off the row (numbered markers share one
-    /// row, and milestones share one row with both halves of the pair).
     fn marker_name(&self, token: &Token) -> String {
-        let text = self.span(token);
-        let text = text.strip_prefix('\\').unwrap_or(text);
-        let text = text.strip_prefix('+').unwrap_or(text);
-        let text = trim_end(text);
-        let text = text.strip_suffix('*').unwrap_or(text);
-        trim_end(text).to_string()
+        marker_name(self.source, token)
     }
 
     /// One node's text content, whitespace-canonicalized the same way an
@@ -1275,6 +1184,17 @@ mod tests {
         assert_eq!(
             content("\\p \\cp M"),
             r#"{"type":"para","marker":"p","content":[{"type":"char","marker":"cp","content":["M"]}]}"#
+        );
+    }
+
+    #[test]
+    fn a_markup_bearing_lift_stays_an_ordinary_char_element() {
+        // An attribute value cannot hold markup (the rule usx.rs landed
+        // first, off biblica/PublishingVersesWithFormatting — both fixture
+        // formats agree), so the lift does not happen at all.
+        assert_eq!(
+            content("\\p \\vp \\+it 21\\+it*\\vp* text"),
+            r#"{"type":"para","marker":"p","content":[{"type":"char","marker":"vp","content":[{"type":"char","marker":"it","content":["21"]}]}," text"]}"#
         );
     }
 
