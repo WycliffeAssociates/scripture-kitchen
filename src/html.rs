@@ -25,64 +25,46 @@
 //!                                     <td class="usfm-tc1 align-start" …>a</td>…
 //! ```
 //!
-//! # No config, and everything in `data-*` (RULED 2026-08-21, Will)
+//! # No config; everything in `data-*`
 //!
 //! v1 has NO options — no footnote style, no element overrides, no caller
-//! scheme. Instead the fold SPLATS every fact it knows into `data-*`
-//! attributes, so a consumer attaches behavior, lookups, styling, or a
-//! post-hoc DOM remap keyed off them ("if you want to demote the imt1/mt1,
-//! just crawl your DOM based on marker data attrs we splat out"). The concrete
-//! element types therefore matter less than the payload: the authored tables
-//! (`MarkerRow::html_element`, [`crate::tables::schema::HEADING_BASE_LEVEL`],
-//! both audited and ACCEPTED 2026-08-21) give a defensible default, and the
-//! data attributes give everything else.
+//! scheme. The fold SPLATS every fact it knows into `data-*` instead, so a
+//! consumer attaches behavior, styling or a post-hoc DOM remap keyed off them
+//! (to demote `imt1`/`mt1`, crawl the DOM by `data-marker`). The element types
+//! therefore matter less than the payload.
 //!
-//! Every element carries `data-marker` (the marker AS SPELLED, `q1`/`qt-s`),
-//! `data-usfm-type` (the USJ type projection) and `data-usfm-category` (the
-//! spec's fine category). On top of that: every interpreter attribute as
-//! `data-<name>`, the lift-table targets (`data-altnumber`, `data-pubnumber`,
-//! `data-category`, `data-code`, `data-caller`, `data-alt`), chapter/verse
-//! `data-number` + `data-sid`, `data-align` on cells and `data-level` on
-//! headings.
+//! # No oracle, no round trip
 //!
-//! # HTML is a VIEW export — no oracle, no round trip
-//!
-//! There is no reference HTML to compare against (sketches/html-export.md's
-//! scope ruling), so what pins this module is the zoo below, a
+//! There is no reference HTML, so what pins this module is the zoo below, a
 //! render-without-panic smoke, and the TEXT-IDENTITY INVARIANT in
-//! `tests/html_corpus.rs`: strip the tags from our HTML and the remaining text
-//! must equal the string content of our own [`crate::usj`] output. Everything
-//! USJ lifts OUT of content and this fold renders VISIBLY (a chapter number, a
-//! note caller, `\cat`, `\usfm`'s version, `\periph`'s title, `\rb`'s gloss)
-//! is marked `class="usfm-lifted"` so that test can carve it out mechanically —
-//! that class is the CONTRACT between the two, not decoration.
+//! `tests/html_corpus.rs`: strip the tags and the remaining text must equal the
+//! string content of our own [`crate::usj`] output. Everything USJ lifts OUT of
+//! content and this fold renders VISIBLY (a chapter number, a note caller,
+//! `\cat`, `\usfm`'s version, `\periph`'s title, `\rb`'s gloss) carries
+//! `class="usfm-lifted"` so that test can carve it out — a CONTRACT, not
+//! decoration.
 //!
 //! # Whitespace: USJ's rules, all four
 //!
-//! Shared with USJ unchanged (see that module): one space per run, delimiters
-//! are not content, block seams drop, a whitespace-only run is not content.
-//! HTML collapses runs when it renders anyway, so USX's whitespace-is-content
-//! inversion would only bloat the output. USX's eid/vid two-pass is likewise
-//! absent: sids are `data-sid`, and nothing here needs to know where a verse
-//! ENDS.
+//! One space per run, delimiters are not content, block seams drop, a
+//! whitespace-only run is not content. HTML collapses runs when it renders, so
+//! USX's whitespace-is-content inversion would only bloat the output; USX's
+//! eid/vid two-pass is absent too, since sids are `data-sid` and nothing here
+//! needs to know where a verse ENDS.
 //!
-//! # What the build had to decide that the tables did not cover
+//! # What the tables did not cover
 //!
-//! Recorded in full in planning/sketches/html-export.md; the short list:
-//!
-//! - `HtmlElement::Para` renders `<div>` (RULED 2026-08-21; it first shipped
-//!   as `<p>`): `<figure>` inside `<p>` is invalid and figures-in-paragraphs
-//!   are the common case, so `<p>` made a browser reparse split the paragraph.
-//!   The p-vs-b distinction survives in class/data-marker.
-//! - `<ul>` is synthesized around a run of `\li`/`\lim` exactly the way
-//!   `<table>` is synthesized around a run of `\tr` (`HtmlElement::ListContainer`
-//!   says "synthesized by export, never mapped from a row").
+//! - `HtmlElement::Para` renders `<div>`, not `<p>`: `<figure>` inside `<p>` is
+//!   invalid and figures-in-paragraphs are the common case, so `<p>` made a
+//!   browser reparse split the paragraph. p-vs-b survives in class/data-marker.
+//! - `<ul>` is synthesized around a run of `\li`/`\lim` the way `<table>` is
+//!   synthesized around a run of `\tr`.
 //! - Cell alignment is THREE-way here (`tcc`/`thc` → `center`), where USJ/USX
 //!   have only `start`/`end`.
 //! - `\fig`'s `src` is NOT renamed (USJ calls it `file`): `<img src>` wants the
 //!   real name.
 //! - An unknown marker in PARAGRAPH position takes the block spelling
-//!   (`<div class="usfm-s5">`), not row 0's `Span` — row 0's value governs its
+//!   (`<div class="usfm-s5">`), not row 0's `Span` — row 0 governs its
 //!   inline/milestone spelling.
 
 use std::borrow::Cow;
@@ -96,16 +78,13 @@ use crate::tables::generated::{self, MarkerIdx};
 use crate::tables::schema::{Category, HtmlElement, MarkerKind, heading_level};
 use crate::{Token, TokenKind};
 
-/// The class that marks text this fold renders VISIBLY but USJ lifted into an
-/// attribute (or dropped). `tests/html_corpus.rs`'s text-identity invariant
-/// strips the content of every element carrying it — see the module doc.
+/// The class marking text this fold renders VISIBLY but USJ lifted into an
+/// attribute (or dropped); the text-identity invariant strips it.
 const LIFTED: &str = "usfm-lifted";
 
-/// Folds a lexed + built document into HTML.
-///
-/// `tokens` must be `lex(source)`'s output and `cst` must be
-/// [`crate::cst::build`]'s over those tokens — the fold reads token spans out of
-/// `source` and trusts the CST's shape.
+/// Folds a lexed + built document into HTML. `tokens` must be `lex(source)`'s
+/// output and `cst` [`crate::cst::build`]'s over those tokens — the fold reads
+/// spans out of `source` and trusts the CST's shape.
 pub fn html(source: &[u8], tokens: &[Token], cst: &Cst) -> String {
     let mut export = Export {
         source,
@@ -131,7 +110,7 @@ pub fn html(source: &[u8], tokens: &[Token], cst: &Cst) -> String {
 // ---------------------------------------------------------------------------
 
 /// The hand-rolled HTML writer: a `String` and two escapers. Same no-serde /
-/// no-template rationale as USJ's and USX's — the shape is small and closed, and
+/// no-template rationale as USJ's and USX's — the shape is small and closed and
 /// the library stays dependency-free.
 struct Out {
     out: String,
@@ -142,9 +121,9 @@ impl Out {
         self.out.push_str(text);
     }
 
-    /// Text content. `&` and `<` must be escaped; `>` is escaped too because a
-    /// uniform rule is cheaper to trust than a contextual one. C0 controls pass
-    /// through — unlike XML, HTML has no problem holding them.
+    /// Text content. `>` is escaped alongside the obligatory `&` and `<` because
+    /// a uniform rule is cheaper to trust than a contextual one. C0 controls pass
+    /// through — unlike XML, HTML holds them fine.
     fn text(&mut self, text: &str) {
         for ch in text.chars() {
             match ch {
@@ -170,7 +149,6 @@ impl Out {
         }
     }
 
-    /// ` name="value"`.
     fn attr(&mut self, name: &str, value: &str) {
         self.out.push(' ');
         self.raw(name);
@@ -189,12 +167,10 @@ impl Out {
     }
 }
 
-/// One attribute name, made legal for HTML: lowercased, and every byte outside
-/// `[a-z0-9-_.]` folded to `-`. USFM's own names (`lemma`, `link-href`, `x-foo`)
-/// pass through untouched; a deformed one (`a b`, `a:b`) is sanitized and its
-/// RAW spelling is preserved beside it in `data-usfm-raw-attrs` — see
-/// [`Export::write_data_attrs`], which is what "keep the raw name if
-/// sanitization is lossy" buys.
+/// One attribute name, made legal for HTML: lowercased, every byte outside
+/// `[a-z0-9-_.]` folded to `-`. `lemma`, `link-href`, `x-foo` pass through
+/// untouched; `a b` or `a:b` is sanitized AND kept verbatim in
+/// `data-usfm-raw-attrs` ([`Export::write_data_attrs`]), so nothing is lost.
 fn sanitize(name: &str) -> Cow<'_, str> {
     let clean = |byte: u8| {
         byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'-' | b'_' | b'.')
@@ -251,23 +227,20 @@ fn category_name(category: Category) -> &'static str {
     }
 }
 
-/// The element a row's [`HtmlElement`] renders as, and the string that closes
-/// it. The AUTHORED table picks the value; this is the one place a value becomes
-/// bytes.
+/// The element a row's [`HtmlElement`] renders as, plus its closing string. The
+/// AUTHORED table picks the value; this is where a value becomes bytes.
 fn element(
     html_element: HtmlElement,
     marker_idx: MarkerIdx,
     level: u8,
 ) -> (&'static str, &'static str) {
     match html_element {
-        // No row uses `Transparent` after the 2026-08-21 audit; the policy
-        // (children emit, no wrapper of our own) is still honoured.
+        // `Transparent`: children emit, no wrapper of our own. No row uses it.
         HtmlElement::Transparent => ("", ""),
-        // `<div>`, not `<p>` (RULED 2026-08-21): `\fig` inside a paragraph is
-        // the COMMON case post-F1, and `<figure>` inside `<p>` makes a browser
-        // reparse hoist the figure and split the paragraph — our output must
-        // parse to the DOM we wrote. The p/b distinction lives on in
-        // class/data-marker, which is where the v1 ruling says consumers look.
+        // `<div>`, not `<p>`: `\fig` inside a paragraph is the COMMON case, and
+        // `<figure>` inside `<p>` makes a browser reparse hoist the figure and
+        // split the paragraph — our output must parse to the DOM we wrote. The
+        // p/b distinction lives on in class/data-marker.
         HtmlElement::Para => ("div", "</div>"),
         HtmlElement::Heading => match level {
             1 => ("h1", "</h1>"),
@@ -275,9 +248,9 @@ fn element(
             3 => ("h3", "</h3>"),
             4 => ("h4", "</h4>"),
             5 => ("h5", "</h5>"),
-            // `s4` lands on h6 EXACTLY (the audited table's deepest legal
-            // level); anything past it would be a table bug, and `<h7>` is not
-            // an element, so it clamps here rather than emitting nonsense.
+            // `s4` lands on h6 EXACTLY, the deepest legal level; anything past
+            // it is a table bug, and `<h7>` is not an element, so it clamps
+            // rather than emitting nonsense.
             _ => ("h6", "</h6>"),
         },
         HtmlElement::Span | HtmlElement::SelfClosingSpan => ("span", "</span>"),
@@ -311,11 +284,9 @@ fn element(
 }
 
 /// Which cell alignment the cell marker's own name spells. THREE-way here, where
-/// USJ and USX have only `start`/`end`: `tcc`/`thc` are the CENTERED spellings
-/// and HTML has somewhere to put that (a class the app's CSS reads).
-///
-/// Read off the suffix AFTER the `tc`/`th` stem, not off the last byte the way
-/// USJ's `ends_with('r')` can afford to be — `tc` itself ends in `c`.
+/// USJ and USX have only `start`/`end`: `tcc`/`thc` are CENTERED and HTML has a
+/// class to put that in. Read off the suffix AFTER the `tc`/`th` stem, never off
+/// the last byte the way USJ's `ends_with('r')` can — `tc` itself ends in `c`.
 fn align(marker_idx: MarkerIdx) -> &'static str {
     let name = generated::name(marker_idx);
     match name.strip_prefix("tc").or_else(|| name.strip_prefix("th")) {
@@ -330,8 +301,7 @@ fn align(marker_idx: MarkerIdx) -> &'static str {
 // ---------------------------------------------------------------------------
 
 /// A container this fold SYNTHESIZES around a run of siblings, because USFM has
-/// no marker that opens one ([`HtmlElement::Table`] / [`HtmlElement::ListContainer`]
-/// are "synthesized by export, never mapped from a row").
+/// no marker that opens one.
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
 enum Wrap {
     #[default]
@@ -341,20 +311,16 @@ enum Wrap {
 }
 
 /// The state of ONE element's children while they are being written. Its own
-/// stack rather than a frame field, because a TRANSPARENT node (a U25003
-/// container) writes into its PARENT's: the frame stack and the list stack have
-/// different depths on purpose.
+/// stack rather than a frame field, because a TRANSPARENT node writes into its
+/// PARENT's: the frame and list stacks have different depths on purpose.
 #[derive(Default)]
 struct ListState {
-    /// The text run being accumulated between two elements.
     run: String,
-    /// Whitespace read but not yet committed to `run`, held VERBATIM until what
-    /// follows it is known — at a block seam the whole of it is dropped, and
-    /// anywhere else it is one space.
+    /// Whitespace held VERBATIM until what follows is known: dropped whole at a
+    /// block seam, one space anywhere else.
     ws: String,
     /// Leading whitespace here DELIMITS a payload and is not content.
     at_boundary: bool,
-    /// The synthesized container currently open in this list.
     wrap: Wrap,
 }
 
@@ -362,12 +328,11 @@ struct ListState {
 // The fold
 // ---------------------------------------------------------------------------
 //
-// A CONCRETE walker, like usj.rs's and usx.rs's, and deliberately not a shared
-// `Visit` trait: the three writers' per-element state (a JSON array's comma
-// bookkeeping, an XML element's rewind-to-self-closing, and this one's
-// synthesized containers plus caller counters) is exactly what a trait would
-// have to abstract over, and there is no fourth format asking for it. What the
-// folds genuinely SHARE already lives in `src/export.rs`.
+// A CONCRETE walker, like usj.rs's and usx.rs's, deliberately not a shared
+// `Visit` trait: each writer's per-element state (JSON commas, XML
+// rewind-to-self-closing, this one's synthesized containers and caller counters)
+// is exactly what the trait would abstract over. What the three folds genuinely
+// SHARE lives in `src/export.rs`.
 
 /// One frame of the driver's own stack — the same ChildCursor shape lint's walk
 /// uses (no recursion), plus which element's children this node writes into.
@@ -378,25 +343,24 @@ struct Frame {
     token: u32,
     /// Index into [`Export::lists`]. A transparent node shares its parent's.
     list: usize,
-    /// This frame pushed the list it points at, and pops it at close.
     owns_list: bool,
-    /// What this frame owes the writer when it ends — `"</div>"`, or `""` for a
-    /// node that opened no element at all.
+    /// What this frame owes the writer at its end; `""` when it opened no
+    /// element at all.
     close: &'static str,
     /// `\rb`'s gloss, written as `<rt>` after the base text and before the
     /// close. `None` for every other element.
     rt: Option<String>,
-    /// The one Text token this element rendered EARLY, as a lifted span:
-    /// `\periph My Title|id="x"`'s title. `u32::MAX` when there is none.
+    /// The one Text token rendered EARLY as a lifted span (`\periph`'s title);
+    /// `u32::MAX` when there is none.
     lifted_text: u32,
-    /// This frame is a NOTE element: its own family's PEER markers, so the F3
-    /// graft can tell a peer from an inline span.
+    /// A NOTE element's own family PEERS, so the graft can tell a peer from
+    /// an inline span.
     peers: Option<&'static [&'static str]>,
-    /// This frame is an UNCLOSED note-text element (`\ft`, `\fqa`, `\xo`, …), so
-    /// an explicitly-closed sibling GRAFTS into it instead of sealing it.
+    /// An UNCLOSED note-text element (`\ft`, `\fqa`, `\xo`, …): an
+    /// explicitly-closed sibling GRAFTS into it instead of sealing it.
     adopts: bool,
-    /// It has already grafted one span, so the direct note content that FOLLOWS
-    /// that span resumes this element rather than starting a new one.
+    /// Already grafted one span, so direct note content FOLLOWING that span
+    /// resumes this element rather than starting a new one.
     grafted: bool,
 }
 
@@ -410,9 +374,8 @@ struct Pending {
     sid: Option<String>,
 }
 
-/// Which lifted slot the next payload token belongs to. `\cp` and `\vp` are
-/// LEAVES (no scope, no closer), so their value arrives as the following token
-/// rather than as node content.
+/// Which lifted slot the next payload token belongs to. `\cp` and `\vp` can be
+/// LEAVES, so their value arrives as the following token, not as node content.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Absorb {
     AltNumber,
@@ -429,9 +392,8 @@ struct Export<'a> {
     chapter: Option<String>,
     pending: Option<Pending>,
     absorb: Option<Absorb>,
-    /// Auto-caller counters, `[footnote, cross-reference]` — a `+` caller
-    /// numbers per note KIND (the two families count separately), and both reset
-    /// at each `\id`.
+    /// Auto-caller counters, `[footnote, cross-reference]`: the two families
+    /// number separately, and both reset at each `\id`.
     callers: [u32; 2],
     /// The next token the walk will deliver — how a node close asks what comes
     /// AFTER it without looking at the stack.
@@ -462,10 +424,9 @@ impl<'a> Export<'a> {
 
         loop {
             if cur.next == cur.end {
-                // F3, the graft: an unclosed note-text element does NOT seal
+                // The graft: an unclosed note-text element does NOT seal
                 // just because its child list ran out — it STEALS the note's
-                // next child when that child is an explicitly-closed span (or
-                // the direct note content that follows one), one at a time.
+                // next child, one at a time, while `grafts` says so.
                 if cur.adopts && stack.last().is_some_and(|parent| self.grafts(parent, &cur)) {
                     let parent = stack.last_mut().expect("just checked");
                     let at = parent.next;
@@ -504,9 +465,8 @@ impl<'a> Export<'a> {
             return; // the node's own opening marker
         }
         if idx == frame.lifted_text {
-            // Already rendered at this element's open, as a lifted span
-            // (`\periph`'s title); like the book code and the note caller it
-            // only re-arms the delimiter rule for what follows.
+            // Already rendered at this element's open as a lifted span
+            // (`\periph`'s title); here it only re-arms the delimiter rule.
             self.lists[frame.list].at_boundary = true;
             return;
         }
@@ -524,8 +484,8 @@ impl<'a> Export<'a> {
                 self.out.raw("<br class=\"usfm-optbreak\">");
                 self.lists[list].at_boundary = false;
             }
-            // Both were already read at their node's open; here they only
-            // re-arm the delimiter rule for the text that follows them.
+            // Both were read at their node's open; here they only re-arm the
+            // delimiter rule.
             TokenKind::BookCode => self.lists[list].at_boundary = true,
             TokenKind::NoteCaller => self.lists[list].at_boundary = true,
             TokenKind::Designator => match self.absorb.take() {
@@ -536,8 +496,7 @@ impl<'a> Export<'a> {
                 None => {
                     let number = self.span(token).to_string();
                     // A designator with no chapter/verse in front of it is
-                    // lint's finding; the projection drops it rather than
-                    // guessing an owner.
+                    // lint's finding; drop it rather than guess an owner.
                     if let Some(verse) = self.pending.as_ref().map(|pending| pending.verse) {
                         if !verse {
                             self.chapter = Some(number.clone());
@@ -551,9 +510,8 @@ impl<'a> Export<'a> {
                 }
             },
             TokenKind::Marker { .. } => self.marker_leaf(idx, token, list),
-            // Whitespace in FRONT of an explicit closer is CONTENT — `\k ostrich
-            // \k*bird` keeps "ostrich " — so the closer commits it rather than
-            // letting the element's close decide.
+            // Whitespace in FRONT of an explicit closer is CONTENT: `\k ostrich
+            // \k*bird` keeps "ostrich ", so the closer commits it itself.
             TokenKind::ClosingMarker { .. } => self.commit_ws(list),
             TokenKind::MilestoneTerminator => self.lists[list].ws.clear(),
             TokenKind::AttrList => {}
@@ -562,14 +520,13 @@ impl<'a> Export<'a> {
     }
 
     /// A marker that opened no node: `\c`, `\v`, the lifted leaves, `\esbe`, an
-    /// unknown marker, and the bare-`\*` milestone spelling.
+    /// unknown marker, the bare-`\*` milestone spelling.
     fn marker_leaf(&mut self, idx: u32, token: &Token, list: usize) {
         let marker = self.marker_name(token);
         if token.marker_idx == generated::UNRESOLVED {
-            // `\zms\*`: the `\*` SPELLING says milestone, whatever the row does
-            // not know — and row 0's `Span` is that spelling's element. An
-            // unknown marker in PARAGRAPH position is a block instead: it stands
-            // where a `\p` stands, and USJ/USX both give it the para shape.
+            // `\zms\*`: the `\*` SPELLING says milestone even though the row
+            // knows nothing. An unknown marker in PARAGRAPH position is a block
+            // instead — it stands where a `\p` stands, as in USJ/USX.
             let milestone = matches!(
                 self.tokens.get(idx as usize + 1).map(Token::kind),
                 Some(TokenKind::MilestoneTerminator)
@@ -598,8 +555,7 @@ impl<'a> Export<'a> {
             MarkerKind::Chapter | MarkerKind::Verse => {
                 let verse = generated::kind(token.marker_idx) == MarkerKind::Verse;
                 self.flush_pending(list);
-                // A chapter is a block seam; a verse is not.
-                self.seal_run(list, !verse);
+                self.seal_run(list, !verse); // a chapter is a block seam; a verse is not
                 self.pending = Some(Pending {
                     verse,
                     number: String::new(),
@@ -616,9 +572,9 @@ impl<'a> Export<'a> {
         }
     }
 
-    /// Puts a lifted value on the pending chapter/verse. With no pending owner
-    /// the projection must not guess one, so the value becomes an ordinary span
-    /// and lint carries the placement complaint — the same answer USJ gives.
+    /// Puts a lifted value on the pending chapter/verse. With no owner the
+    /// projection must not guess one: the value becomes an ordinary span and
+    /// lint carries the placement complaint, as in USJ.
     fn lift(&mut self, slot: Absorb, value: String, list: usize) {
         match (&mut self.pending, slot) {
             (Some(pending), Absorb::AltNumber) => pending.altnumber = Some(value),
@@ -631,9 +587,8 @@ impl<'a> Export<'a> {
                     Absorb::PubNumber => "cp",
                 };
                 // `<sup>` is what all four of `ca`/`cp`/`va`/`vp` carry in the
-                // table — `cp`'s Sup is the 2026-08-21 audit's, replacing the
-                // `Heading` it wrongly had — and this orphan path is the only
-                // place a `\cp` reaches an element of its own at all.
+                // table, and this orphan path is the only place one of them
+                // reaches an element of its own at all.
                 self.out.raw("<sup");
                 self.class(&[], marker);
                 self.out.data("marker", marker);
@@ -648,11 +603,11 @@ impl<'a> Export<'a> {
         }
     }
 
-    // -- the note graft (F3) -----------------------------------------------
+    // -- the note graft ----------------------------------------------------
 
     /// Does the note's next child GRAFT into `open`, the note-text element that
-    /// just ran out of children? The rule and its measurements live on
-    /// [`crate::usj`]'s twin; this is the same projection, spelled in HTML.
+    /// just ran out of children? Same projection as [`crate::usj`]'s twin,
+    /// spelled in HTML.
     fn grafts(&self, parent: &Frame, open: &Frame) -> bool {
         let Some(peers) = parent.peers else {
             return false;
@@ -677,8 +632,8 @@ impl<'a> Export<'a> {
 
     // -- nodes -------------------------------------------------------------
 
-    /// Opens one child node. Returns the frame to descend into, or `None` when
-    /// the node emits nothing at all and its subtree is skipped.
+    /// Opens one child node. `None` when the node emits nothing at all and its
+    /// subtree is skipped.
     fn open_node(&mut self, id: u32, parent: &Frame) -> Option<Frame> {
         let node = &self.cst.nodes[id as usize];
         let token = &self.tokens[node.token as usize];
@@ -687,8 +642,7 @@ impl<'a> Export<'a> {
         let list = parent.list;
 
         // A U25003 container (`\list-s … \list-e`) is walker bookkeeping, not an
-        // element: its points emit inline where they sit and its children land
-        // beside them.
+        // element: children land beside its points, not inside a wrapper.
         if container_kind(marker_idx).is_some()
             && self
                 .cst
@@ -712,16 +666,13 @@ impl<'a> Export<'a> {
         }
 
         // `\ca`/`\va`/`\cp`/`\vp` emit NOTHING of their own: their content
-        // becomes `data-altnumber`/`data-pubnumber` on the chapter or verse, and
-        // they must not break the text run around them either. Unless the
-        // content is not PLAIN TEXT — an attribute cannot hold markup, so `\vp
-        // \+it 21\+it*\vp*` stays an ordinary span with its nesting intact (the
-        // rule both fixture formats agree on; see usj.rs).
+        // becomes `data-altnumber`/`data-pubnumber` and must not break the text
+        // run either — unless it is not PLAIN TEXT, since an attribute cannot
+        // hold markup, so `\vp \+it 21\+it*\vp*` stays an ordinary span.
         //
-        // `\cat` and `\usfm` are NOT in this list, where USJ drops both: the
-        // 2026-08-21 audit gave them `Span` precisely so a consumer has a class
-        // to find and hide them by, so they render — marked LIFTED, since their
-        // text is a `data-*` value on some other element in USJ's reading.
+        // `\cat` and `\usfm` are NOT in this list, where USJ drops both: they
+        // render as spans so a consumer has a class to hide them by, marked
+        // LIFTED because USJ reads their text as a `data-*` value elsewhere.
         let liftable = !self
             .cst
             .child_ids
@@ -742,12 +693,11 @@ impl<'a> Export<'a> {
         }
 
         let kind = generated::kind(marker_idx);
-        // Both auto-caller counters reset at each `\id` — "per note kind, reset
-        // per book" (sketches/html-export.md's caller table).
+        // Auto-callers number per note KIND and reset per book.
         if kind == MarkerKind::Header && marker == "id" {
             self.callers = [0, 0];
         }
-        // F3: a note-text element that supplied NO closer of its own is the one
+        // A note-text element that supplied NO closer of its own is the one
         // an explicitly-closed sibling grafts into (see `grafts`).
         let adopts = parent.peers.is_some()
             && kind == MarkerKind::Character
@@ -771,9 +721,9 @@ impl<'a> Export<'a> {
             },
         );
 
-        // A milestone POINT carries attributes and no content at all — an EMPTY
-        // ADDRESSABLE SPAN (RULED 2026-08-21): it costs nothing, CSS hides it by
-        // default, and alignment/quote milestones stay addressable for tooling.
+        // A milestone POINT carries attributes and no content: an EMPTY
+        // ADDRESSABLE SPAN, so alignment/quote milestones stay reachable by
+        // tooling and CSS can hide them.
         if is_milestone {
             self.out.raw("<span");
             self.class(&["ms"], &marker);
@@ -827,8 +777,7 @@ impl<'a> Export<'a> {
             MarkerKind::TableCell => "table:cell",
             MarkerKind::Meta => "cat",
             // Chapter/Verse never open a scope, Milestone went above, Unknown is
-            // row 0 (handled as a leaf). A row that opened a scope and lands
-            // here is a table bug, not damage in the document.
+            // row 0 (a leaf). Anything here is a table bug, not damaged input.
             _ => "para",
         };
 
@@ -890,8 +839,8 @@ impl<'a> Export<'a> {
         }
         // `\periph My Title|id="x"`: the TITLE TEXT is the division's `alt`
         // (usx.rng writes it as an attribute), so it becomes `data-alt` — and,
-        // unlike USJ, it is ALSO rendered, as a lifted span, because a `<section>`
-        // whose title is invisible is not a view.
+        // unlike USJ, is ALSO rendered as a lifted span, because a `<section>`
+        // with an invisible title is not a view.
         let mut lifted_text = u32::MAX;
         let mut title = None;
         let title_at = (kind == MarkerKind::Periph)
@@ -966,12 +915,11 @@ impl<'a> Export<'a> {
         })
     }
 
-    /// The note caller, per the kind-keyed table (sketches/html-export.md):
-    /// `+` auto-numbers per note KIND, `-` renders nothing visible, and anything
-    /// else renders the literal the author wrote. Both rendered forms are text
-    /// USJ holds in an attribute, hence [`LIFTED`]; the auto one additionally
-    /// carries `note-caller-generated`, which is the only text in the whole
-    /// output that no token supplied.
+    /// The note caller: `+` auto-numbers per note KIND, `-` renders nothing
+    /// visible, anything else renders the literal the author wrote. Both
+    /// rendered forms are text USJ holds in an attribute, hence [`LIFTED`]; the
+    /// auto one also carries `note-caller-generated` — the only output text no
+    /// token supplied.
     fn write_caller(&mut self, caller: &str, xref: bool) {
         match caller {
             "-" => {}
@@ -999,8 +947,8 @@ impl<'a> Export<'a> {
     fn close_frame(&mut self, frame: &mut Frame) {
         let list = frame.list;
         self.flush_pending(list);
-        // What ends this element decides its trailing whitespace: the next token
-        // in DOCUMENT order, which the cursor is already sitting on.
+        // The next token in DOCUMENT order decides this element's trailing
+        // whitespace, and the cursor is already sitting on it.
         self.seal_run(list, self.seam_at(Some(self.cursor)));
         self.begin_item(list, Wrap::None);
         if let Some(gloss) = frame.rt.take() {
@@ -1013,8 +961,7 @@ impl<'a> Export<'a> {
         self.out.raw(frame.close);
         if frame.owns_list {
             self.lists.pop();
-            // The element just written is a child of its PARENT's list, and the
-            // parent's boundary rule ends with it.
+            // The element just written is a child of its PARENT's list.
             if let Some(parent) = self.lists.last_mut() {
                 parent.at_boundary = false;
             }
@@ -1024,9 +971,9 @@ impl<'a> Export<'a> {
     // -- attributes --------------------------------------------------------
 
     /// One node's OWN attribute lists, resolved to name/value pairs. Later
-    /// definition wins (the interpreter's merge rule); `=` spacing and quote
-    /// style are the documented lossy step. No per-format RENAME here, unlike
-    /// USJ/USX's `src`→`file`: `<img src>` wants the real name.
+    /// definition wins; `=` spacing and quote style are the lossy step. No
+    /// per-format RENAME, unlike USJ/USX's `src`→`file`: `<img src>` wants the
+    /// real name.
     fn attr_pairs(&self, node: &Node, marker_idx: MarkerIdx) -> Vec<(String, String)> {
         let mut pairs: Vec<(String, String)> = Vec::new();
         for child in self.direct_children(node) {
@@ -1058,9 +1005,8 @@ impl<'a> Export<'a> {
     }
 
     /// Splats the pairs as `data-<name>`. A name that [`sanitize`] had to change
-    /// is ALSO reported verbatim in `data-usfm-raw-attrs`, so nothing the author
-    /// wrote is lost — the sanitized name is a lookup key, the raw list is the
-    /// record.
+    /// is ALSO reported verbatim in `data-usfm-raw-attrs`: the sanitized name is
+    /// a lookup key, the raw list is the record.
     fn write_data_attrs(&mut self, pairs: &[(String, String)]) {
         let mut raw: Option<String> = None;
         for (name, value) in pairs {
@@ -1082,8 +1028,7 @@ impl<'a> Export<'a> {
     }
 
     /// A carved payload token's text (`\id`'s book code, a note's caller), read
-    /// off the node's DIRECT children so it can be written before the open tag
-    /// closes.
+    /// off DIRECT children so it can be written before the open tag closes.
     fn payload_child(&self, node: &Node, kind: TokenKind) -> Option<String> {
         self.direct_children(node)
             .find(|child| self.tokens[*child as usize].kind() == kind)
@@ -1091,8 +1036,7 @@ impl<'a> Export<'a> {
     }
 
     /// A `\cat` child's content, lifted to `data-category` on this note/sidebar.
-    /// The `\cat` element itself still RENDERS (marked [`LIFTED`]) — this is the
-    /// attribute copy, not a replacement for it.
+    /// The `\cat` element still RENDERS: this is a copy, not a replacement.
     fn category(&self, node: &Node) -> Option<String> {
         for child in node.children.clone() {
             let id = self.cst.child_ids[child as usize];
@@ -1115,9 +1059,8 @@ impl<'a> Export<'a> {
             .filter(|id| id & NODE_ID_BIT == 0)
     }
 
-    /// `class="<extra…> usfm-<marker as spelled>"`. The marker class is the
-    /// scheme's whole hook: `q1`, `qt-s` and an unknown `\s5` all reach the page
-    /// under the spelling the author wrote.
+    /// `class="<extra…> usfm-<marker as spelled>"` — the scheme's whole hook:
+    /// `q1`, `qt-s` and an unknown `\s5` all reach the page as authored.
     fn class(&mut self, extra: &[&str], marker: &str) {
         self.out.raw(" class=\"");
         for class in extra {
@@ -1143,8 +1086,7 @@ impl<'a> Export<'a> {
 
     // -- text runs ---------------------------------------------------------
 
-    /// Whitespace joins the pending run; AT A BOUNDARY it is a delimiter and
-    /// never becomes content.
+    /// AT A BOUNDARY whitespace is a delimiter and never becomes content.
     fn push_ws(&mut self, list: usize, text: &str) {
         let state = &mut self.lists[list];
         if !state.at_boundary {
@@ -1171,9 +1113,8 @@ impl<'a> Export<'a> {
         let body = trim_end(body);
         let trail = &text[lead.len() + body.len()..];
         self.push_ws(list, lead);
-        // Whitespace-only text is held, not emitted — and it must not force a
-        // held-back chapter/verse out before its `\ca`/`\va` annotations have
-        // been read.
+        // Whitespace-only text is held, not emitted — and must not force a
+        // held-back chapter/verse out before its `\ca`/`\va` is read.
         if body.is_empty() {
             return;
         }
@@ -1190,7 +1131,7 @@ impl<'a> Export<'a> {
     }
 
     /// Resolves the held whitespace against what comes next, then writes the
-    /// run. THE whitespace decision, in one place.
+    /// run — THE whitespace decision, in one place.
     fn seal_run(&mut self, list: usize, seam: bool) {
         if seam {
             self.lists[list].ws.clear();
@@ -1223,9 +1164,8 @@ impl<'a> Export<'a> {
         }
     }
 
-    /// Writes the accumulated run as text. A run that is whitespace ONLY is
-    /// DROPPED — USJ's rule 4, kept here because HTML collapses runs when it
-    /// renders and a whitespace-only text node buys a view nothing.
+    /// Writes the accumulated run as text. A whitespace-ONLY run is DROPPED:
+    /// HTML collapses runs anyway, so such a text node buys a view nothing.
     fn flush_run(&mut self, list: usize) {
         let run = core::mem::take(&mut self.lists[list].run);
         if run.is_empty() || run.bytes().all(is_ws) {
@@ -1237,8 +1177,7 @@ impl<'a> Export<'a> {
 
     /// Opens or closes the SYNTHESIZED container this list currently wants: a
     /// `<table>` around a run of consecutive `\tr`, a `<ul>` around a run of
-    /// consecutive `\li`/`\lim`. Neither has a marker that opens it, which is
-    /// exactly why export synthesizes them.
+    /// consecutive `\li`/`\lim`.
     fn begin_item(&mut self, list: usize, want: Wrap) {
         if self.lists[list].wrap == want {
             return;
@@ -1268,11 +1207,9 @@ impl<'a> Export<'a> {
     }
 
     /// Writes the held-back chapter or verse. Chapter and verse are MARKERS, not
-    /// headings (sketches/html-export.md, and the 2026-08-21 audit that dropped
-    /// `c` from both the heading table and `Heading`): a `<span class="chapter-num">`
-    /// and a `<sup class="verse-num">`, and the app's CSS decides how they show.
-    /// The visible number is the SEQUENTIAL one; `data-pubnumber` carries the
-    /// published override for a consumer that prefers it.
+    /// headings: a `<span class="chapter-num">` and a `<sup class="verse-num">`,
+    /// and CSS decides how they show. The visible number is the SEQUENTIAL one;
+    /// `data-pubnumber` carries the published override.
     fn flush_pending(&mut self, list: usize) {
         let Some(pending) = self.pending.take() else {
             return;
@@ -1320,8 +1257,8 @@ impl<'a> Export<'a> {
         marker_name(self.source, token)
     }
 
-    /// One node's text content, whitespace-canonicalized the same way an
-    /// ordinary content run is — this is what a lift reads.
+    /// One node's text content, whitespace-canonicalized like an ordinary
+    /// content run — what a lift reads.
     fn node_text(&self, node: u32) -> String {
         let mut out = String::new();
         let opener = self.cst.nodes[node as usize].token;
@@ -1340,7 +1277,6 @@ impl<'a> Export<'a> {
     }
 }
 
-/// One resolved attribute's value by name.
 fn value_of<'p>(pairs: &'p [(String, String)], name: &str) -> Option<&'p str> {
     pairs
         .iter()
@@ -1349,14 +1285,13 @@ fn value_of<'p>(pairs: &'p [(String, String)], name: &str) -> Option<&'p str> {
 }
 
 // ---------------------------------------------------------------------------
-// THE ZOO: one hand-checked case per mapping row (sketches/html-tables.md).
+// THE ZOO: one hand-checked case per mapping row.
 // ---------------------------------------------------------------------------
 //
-// No oracle exists for HTML (the scope ruling), so these strings ARE the pin.
-// They are read through `brief`, which drops the two attributes every element
-// carries — `data-usfm-type` and `data-usfm-category` — so a case shows only
-// what it is about. `the_full_data_splat_is_on_every_element` below is the one
-// test that reads the unabridged bytes, and it is what pins those two.
+// No oracle exists for HTML, so these strings ARE the pin. Most read through
+// `brief`, which drops the two attributes every element carries, so a case
+// shows only what it is about; `the_full_data_splat_is_on_every_element` reads
+// the unabridged bytes and is what pins those two.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1382,8 +1317,8 @@ mod tests {
 
     #[test]
     fn the_full_data_splat_is_on_every_element() {
-        // The always-emit convention (`HtmlElement`'s own doc): a consumer
-        // restyles or remaps off these without needing a different element.
+        // Always emitted, so a consumer restyles or remaps off them without
+        // needing a different element.
         assert_eq!(
             render("\\p x"),
             r#"<div class="usfm-p" data-marker="p" data-usfm-type="para" data-usfm-category="para-body">x</div>"#
@@ -1392,8 +1327,7 @@ mod tests {
 
     #[test]
     fn a_node_takes_its_rows_element_and_a_marker_class() {
-        // `Span`, `Bold`, `Italic`, `Em`, `Sup` — the character rows whose
-        // element the 2026-08-21 audit CONFIRMED.
+        // `Span`, `Bold`, `Italic`, `Em`, `Sup` — one character row each.
         assert_eq!(
             brief("\\p plain \\nd LORD\\nd* \\bd b\\bd*\\it i\\it*\\em e\\em*\\sup s\\sup*"),
             r#"<div class="usfm-p" data-marker="p">plain <span class="usfm-nd" data-marker="nd">LORD</span><b class="usfm-bd" data-marker="bd">b</b><i class="usfm-it" data-marker="it">i</i><em class="usfm-em" data-marker="em">e</em><sup class="usfm-sup" data-marker="sup">s</sup></div>"#
@@ -1401,9 +1335,9 @@ mod tests {
     }
 
     #[test]
-    fn headings_come_off_the_audited_base_levels_table() {
+    fn headings_come_off_the_base_levels_table() {
         // mt 1, ms 2, is/iot/s 3, qa 4, `base + digit - 1` — and `s4` lands on
-        // `<h6>` EXACTLY, the cap the audit called out.
+        // `<h6>` EXACTLY, the cap.
         assert_eq!(
             brief(
                 "\\mt1 T\n\\mt3 T3\n\\ms Major\n\\ms2 M2\n\\is Intro\n\\iot Outline\n\\s1 S\n\\s2 S2\n\\s4 S4\n\\qa A"
@@ -1413,8 +1347,7 @@ mod tests {
     }
 
     #[test]
-    fn c_cp_and_cl_are_no_longer_headings() {
-        // The three rows the 2026-08-21 audit removed from `HEADING_BASE_LEVEL`:
+    fn c_cp_and_cl_are_not_headings() {
         // `\c` is a chapter-num span, `\cp` lifts to `data-pubnumber`, and `\cl`
         // is an ordinary paragraph. Not one `<h…>` in sight.
         let out = brief("\\c 1\n\\cp M\n\\cl Chapter\n\\p x");
@@ -1431,16 +1364,14 @@ mod tests {
             brief("\\p a<b> & c \\w x|lemma=\"A&B<>\"\\w*"),
             r#"<div class="usfm-p" data-marker="p">a&lt;b&gt; &amp; c <span class="usfm-w" data-marker="w" data-lemma="A&amp;B&lt;&gt;">x</span></div>"#
         );
-        // The quote is the one that only an ATTRIBUTE has to escape.
         assert!(render("\\p \\w x|lemma=\"q\"\\w*").contains(r#"data-lemma="q""#));
     }
 
     #[test]
     fn the_caller_trio_numbers_per_kind_and_resets_per_book() {
-        // `+` auto-numbers, and the footnote and cross-reference families count
-        // SEPARATELY (`\x` gets 1 while `\f` is on 2); `-` renders no visible
-        // caller at all; anything else renders the literal. Both counters reset
-        // at the second `\id`.
+        // The footnote and cross-reference families count SEPARATELY (`\x` gets
+        // 1 while `\f` is on 2); `-` renders no visible caller; anything else
+        // renders the literal. Both counters reset at the second `\id`.
         assert_eq!(
             brief(
                 "\\id GEN\n\\p \\f + \\ft one\\f*\\f + \\ft two\\f*\\x + \\xt r\\x*\\f - \\ft q\\f*\\f * \\ft star\\f*\n\\id MAT\n\\p \\f + \\ft again\\f*"
@@ -1451,8 +1382,8 @@ mod tests {
 
     #[test]
     fn a_note_is_a_span_and_never_an_aside() {
-        // The MUST-CHANGE of the audit: `<aside>` is flow content and cannot sit
-        // inside the `<p>` a caller lands in.
+        // `<aside>` is flow content and cannot sit inside the `<p>` a caller
+        // lands in.
         let out = render("\\p mid\\f + \\ft n\\f*sentence");
         assert!(!out.contains("aside"), "{out}");
         assert!(
@@ -1471,9 +1402,8 @@ mod tests {
 
     #[test]
     fn tables_are_real_tables_with_three_way_alignment() {
-        // The `<table>` is SYNTHESIZED around the run of rows; `th…` cells are
-        // `<th>`; and the suffix after the `tc`/`th` stem is the alignment
-        // (`c` → center, which USJ and USX have nowhere to put).
+        // `th…` cells are `<th>`, and the suffix after the `tc`/`th` stem is the
+        // alignment (`c` → center, which USJ and USX have nowhere to put).
         assert_eq!(
             brief("\\tr \\tc1 a\\tcc2 b\\tcr3 c\n\\tr \\th1 h\\thc2 hc\\thr3 hr\n\\p after"),
             r#"<table class="usfm-table"><tr class="usfm-tr" data-marker="tr"><td class="align-start usfm-tc1" data-marker="tc1" data-align="start">a</td><td class="align-center usfm-tcc2" data-marker="tcc2" data-align="center">b</td><td class="align-end usfm-tcr3" data-marker="tcr3" data-align="end">c</td></tr><tr class="usfm-tr" data-marker="tr"><th class="align-start usfm-th1" data-marker="th1" data-align="start">h</th><th class="align-center usfm-thc2" data-marker="thc2" data-align="center">hc</th><th class="align-end usfm-thr3" data-marker="thr3" data-align="end">hr</th></tr></table><div class="usfm-p" data-marker="p">after</div>"#
@@ -1482,8 +1412,8 @@ mod tests {
 
     #[test]
     fn a_run_of_list_items_gets_a_synthesized_ul() {
-        // `\lh`/`\lf` are paragraphs and therefore end the run, which is exactly
-        // where a list header and footer belong.
+        // `\lh`/`\lf` are paragraphs, so they end the run — which is where a
+        // list header and footer belong.
         assert_eq!(
             brief("\\lh head\n\\li one\n\\lim2 two\n\\lf foot"),
             r#"<div class="usfm-lh" data-marker="lh">head</div><ul class="usfm-list"><li class="usfm-li" data-marker="li">one</li><li class="usfm-lim2" data-marker="lim2">two</li></ul><div class="usfm-lf" data-marker="lf">foot</div>"#
@@ -1510,9 +1440,9 @@ mod tests {
 
     #[test]
     fn a_sidebar_is_an_aside_and_cat_both_renders_and_lifts() {
-        // `\esb` KEEPS `Aside` (it interrupts between paragraphs, where `<aside>`
-        // is legal); `\cat` renders as the char-shaped span the audit gave it AND
-        // copies to `data-category`, so it is marked LIFTED.
+        // `\esb` is an `<aside>` (it interrupts between paragraphs, where
+        // `<aside>` is legal); `\cat` renders as a char-shaped span AND copies
+        // to `data-category`, so it is marked LIFTED.
         assert_eq!(
             brief("\\esb \\cat People\\cat*\n\\p who\n\\esbe"),
             r#"<aside class="usfm-esb" data-marker="esb" data-category="People"><span class="usfm-lifted usfm-cat" data-marker="cat">People</span><div class="usfm-p" data-marker="p">who</div></aside>"#
@@ -1537,8 +1467,8 @@ mod tests {
 
     #[test]
     fn an_orphan_lift_is_a_sup_of_its_own() {
-        // No chapter to own it: the projection must not guess an owner, and `Sup`
-        // is what the audited row says `\cp` is.
+        // No chapter to own it: the projection must not guess an owner, and the
+        // row says `\cp` is a `Sup`.
         assert_eq!(
             brief("\\p \\cp M"),
             r#"<div class="usfm-p" data-marker="p"><sup class="usfm-cp" data-marker="cp">M</sup></div>"#
@@ -1563,8 +1493,8 @@ mod tests {
 
     #[test]
     fn the_nonpublishable_fields_keep_a_class_so_css_can_hide_them() {
-        // The whole point of killing `Transparent` (audit §1): `\id`'s code,
-        // `\usfm`'s version, `\rem`'s remark and the rest are addressable now.
+        // Nothing renders bare: `\id`'s code, `\usfm`'s version, `\rem`'s remark
+        // and the rest each get an element CSS can address.
         assert_eq!(
             brief(
                 "\\id GEN Genesis\n\\usfm 3.1\n\\ide UTF-8\n\\h Gen\n\\toc1 The Book\n\\rem note\n\\sts draft"
@@ -1583,7 +1513,7 @@ mod tests {
 
     #[test]
     fn a_closed_span_nests_in_the_open_note_text() {
-        // F3, the graft — the same projection USJ and USX make, spelled in HTML.
+        // The graft — the same projection USJ and USX make, spelled in HTML.
         assert_eq!(
             brief("\\p \\f + \\ft alpha \\xt ref\\xt* beta\\f*"),
             r#"<div class="usfm-p" data-marker="p"><span class="note usfm-f" role="note" data-marker="f" data-caller="+" data-note-kind="footnote"><sup class="note-caller note-caller-generated usfm-lifted">1</sup><span class="usfm-ft" data-marker="ft">alpha <a class="usfm-xt" data-marker="xt">ref</a> beta</span></span></div>"#
@@ -1598,7 +1528,6 @@ mod tests {
             brief("\\p a\nb  \tc \\p d"),
             r#"<div class="usfm-p" data-marker="p">a b c</div><div class="usfm-p" data-marker="p">d</div>"#
         );
-        // `~` is the non-breaking space it names.
         assert!(render("\\p a~b").contains("a\u{a0}b"));
     }
 

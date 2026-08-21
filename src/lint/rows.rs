@@ -17,7 +17,7 @@ pub enum Severity {
 /// future per-rule config addresses whole families at once.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Category {
-    /// Nesting, closers, barriers, recovery — everything phase 1 ships.
+    /// Nesting, closers, barriers, recovery.
     Structure,
     Ordering,
     Attributes,
@@ -27,9 +27,7 @@ pub enum Category {
 }
 
 /// What [`Observation::aux`] MEANS for a given code — the column that keeps a
-/// bare u32 from being opaque. Phase 1's codes are all [`Self::None`]; the
-/// variants exist because the enum is part of the ruled row shape and the
-/// later phases fill them in.
+/// bare u32 from being opaque.
 ///
 /// [`Observation::aux`]: super::Observation::aux
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,9 +62,8 @@ pub enum UsfmVersion {
 // ---------------------------------------------------------------------------
 
 /// One finding kind. DECLARATION ORDER IS THE DISCRIMINANT and indexes
-/// [`LINT_ROWS`] directly (asserted in tests) — but the number is per-build
-/// wire data only. The durable identity of a rule is its kebab-case
-/// [`LintRow::name`]; config and humans use that, never the integer.
+/// [`LINT_ROWS`] directly (asserted in tests), but the number is per-build wire
+/// data: a rule's durable identity is its kebab-case [`LintRow::name`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u16)]
 pub enum Code {
@@ -82,7 +79,7 @@ pub enum Code {
     UnknownMarker,
     NestedSpellingMisuse,
     MissingParagraph,
-    // --- phase 2: Ordering ------------------------------------------------
+    // --- Ordering ---------------------------------------------------------
     DesignatorMalformed,
     ChapterDuplicate,
     ChapterOutOfOrder,
@@ -93,34 +90,34 @@ pub enum Code {
     MissingVerseOne,
     VerseBeforeFirstChapter,
     MissingChapter,
-    // --- phase 2: Payload -------------------------------------------------
+    // --- Payload ----------------------------------------------------------
     MissingId,
     BookCodeUnknown,
     BookCodeNotUppercase,
     ChapterWithoutDesignator,
-    // --- phase 3: adjacency (filed Structure — see the rows) --------------
+    // --- adjacency (filed Structure — see the rows) -----------------------
     CaCpPlacement,
     VaVpPlacement,
-    // --- phase 3: Payload -------------------------------------------------
+    // --- Payload ----------------------------------------------------------
     CallerShape,
     NumberingMix,
-    // --- phase 3: Form ----------------------------------------------------
+    // --- Form -------------------------------------------------------------
     MarkerNotWsPreceded,
     DelimiterShape,
     EmptyParagraph,
-    // --- phase 3: Attributes (shape only — no k/v interpreter) ------------
+    // --- Attributes (shape only — no k/v interpreter) ---------------------
     AttrTrailingFormDeprecated,
     AttrBothLists,
     AttrTerminatorMismatch,
     AttrPipeHint,
-    // --- closeout: Attributes, through the k/v interpreter ----------------
+    // --- Attributes, through the k/v interpreter --------------------------
     AttrUnknownName,
     AttrMalformed,
     AttrRequiredIf,
-    // --- closeout: Version ------------------------------------------------
+    // --- Version ----------------------------------------------------------
     DeprecatedMarker,
     DeprecatedAttribute,
-    // --- closeout: the positional band ------------------------------------
+    // --- the positional band ----------------------------------------------
     MarkerOutOfBand,
 }
 
@@ -141,23 +138,19 @@ pub struct LintRow {
     /// The severity BELOW the ladder's first rung — no `\usfm` declaration, or
     /// one under `escalation[0]`'s version.
     ///
-    /// `None` is the GATE, and it is a rule's whole version story in one place:
-    /// the code says NOTHING at all until its first rung is declared
-    /// (`attr-trailing-form-deprecated`, `deprecated-marker`). A finding is not
-    /// raised and then filtered — the machine asks [`Self::severity_at`] and
-    /// stays silent — because "this form is deprecated" is FALSE in a document
-    /// that declares an earlier version, not merely quiet.
+    /// `None` is the GATE: the code says NOTHING until its first rung is
+    /// declared (`attr-trailing-form-deprecated`, `deprecated-marker`). The
+    /// finding is never raised and then filtered — the machine asks
+    /// [`Self::severity_at`] first — because "this form is deprecated" is FALSE
+    /// under an earlier version, not merely quiet.
     pub severity: Option<Severity>,
     /// The version LADDER, ascending: at or above each version, that severity.
     /// Empty = flat, and the last rung at or below the declared version wins
     /// ([`Self::severity_at`]).
     ///
     /// This column owns the version facts no `MarkerRow` owns: the spec
-    /// deprecates and then removes forms, and the table records the marker
-    /// page, never a version ladder. It is DATA — `attr-trailing-form`'s
-    /// none→Warning→Error ladder used to be half here and half a hand-coded
-    /// `>= 3.2` gate in `flat.rs`; the `None` base above is what let that gate
-    /// become this slice's first rung.
+    /// deprecates and then removes forms, and the marker table records the
+    /// spec page, never a version ladder.
     pub escalation: &'static [(UsfmVersion, Severity)],
     /// What [`Observation::aux`] means for this code.
     ///
@@ -167,16 +160,14 @@ pub struct LintRow {
     /// marker text at those token spans. Rendering and localization are the
     /// consumer's; the library never allocates a message.
     pub template: &'static str,
-    /// The label this code's fix carries. The row is the single place a
-    /// rule's affordances are declared: a code emits a fix iff its row has a
+    /// The label this code's fix carries. A code emits a fix iff its row has a
     /// label (tested), and the generators read the label from here.
     pub fix_label: Option<&'static str>,
 }
 
 impl LintRow {
     /// The severity this rule carries in a document that declares `version`, or
-    /// `None` when it is SILENT there — the whole reading of the two version
-    /// columns, in one place.
+    /// `None` when it is SILENT there.
     ///
     /// ```text
     /// severity          escalation                          undeclared  3.0      3.2      4.0
@@ -185,9 +176,8 @@ impl LintRow {
     /// None (GATED)      &[(V3_2, Warning), (V4_0, Error)]   —           —        Warning  Error
     /// ```
     ///
-    /// A `None` answer means the finding is never raised at all (the machine
-    /// asks before it pushes), which is why the gate is expressible as data
-    /// rather than as an `if` beside the rule.
+    /// A `None` answer means the finding is never raised at all — the machine
+    /// asks before it pushes, so the gate is data and not an `if` beside a rule.
     pub fn severity_at(&self, version: Option<UsfmVersion>) -> Option<Severity> {
         let mut severity = self.severity;
         if let Some(declared) = version {
@@ -203,30 +193,12 @@ impl LintRow {
     }
 }
 
-/// The authored rules table — one row per [`Code`], in the enum's order.
-///
-/// All six families, and nothing owed: phases 1-3 shipped Structure, Ordering,
-/// Payload, Form and the shape-only half of Attributes, and the closeout window
-/// added the three k/v attribute rules the interpreter unblocked, the Version
-/// family (the consumer `MarkerRow::deprecated` was waiting for) and the
-/// positional band's judge.
+/// The authored rules table — one row per [`Code`], in the enum's order. All
+/// six families have a pass.
 pub const LINT_ROWS: [LintRow; 43] = [
-    // A note frame the walker had to end without its `\f*`/`\x*`: something
-    // that cannot live inside a note (a `\c`, a bare `\v`, an unknown marker)
-    // arrived while it was open. Both live corpus instances (en_ulb ISA and
-    // MRK) are genuinely truncated footnotes.
-    //
-    // There used to be a third, and it was a TABLE bug rather than damaged
-    // data — phase 4's fix preview is what showed it. bsb GEN 2:4 writes a
-    // perfectly well-formed note whose `\fq` contains `\+nd`, and `nd`'s
-    // context mask omitted Footnote, so the nested character marker DISPLACED
-    // the whole note (taking that book's `\f*` down with it as an orphan
-    // closer). Will ruled the omission class-wide on 2026-08-19 — usfmtc nests
-    // character markers in notes, and the spec contradicts its own "Valid In"
-    // lists — so every character row now carries Footnote and CrossReference
-    // (see the note above the `add` row in tables::rows). The fix that would
-    // have truncated a good footnote is no longer offered there, because there
-    // is no longer a finding.
+    // Something that cannot live inside a note (a `\c`, a bare `\v`, an unknown
+    // marker) arrived while the frame was open. Both live corpus instances
+    // (en_ulb ISA, MRK) are genuinely truncated footnotes.
     LintRow {
         code: Code::UnclosedNote,
         name: "unclosed-note",
@@ -237,8 +209,7 @@ pub const LINT_ROWS: [LintRow; 43] = [
         template: "\\{anchor} was never closed",
         fix_label: Some("insert the note closer"),
     },
-    // Same event for a character marker: `\add` still open when its enclosing
-    // scope was forced to end. Character markers REQUIRE their `\X*`.
+    // The same, for a character marker, which REQUIRES its `\X*`.
     LintRow {
         code: Code::UnclosedChar,
         name: "unclosed-char",
@@ -249,9 +220,8 @@ pub const LINT_ROWS: [LintRow; 43] = [
         template: "\\{anchor} was never closed",
         fix_label: Some("insert the closer"),
     },
-    // The document simply ended with a closer-wanting frame open. Weaker than
-    // Recovery — nothing displaced it, the file just stopped. Paragraphs,
-    // cells and rows want no closer and are silent here.
+    // Weaker than Recovery: nothing displaced the frame, the file just stopped.
+    // Paragraphs, cells and rows want no closer and stay silent.
     LintRow {
         code: Code::UnclosedAtEof,
         name: "unclosed-at-eof",
@@ -262,9 +232,8 @@ pub const LINT_ROWS: [LintRow; 43] = [
         template: "\\{anchor} is still open at the end of the book",
         fix_label: Some("insert the closer"),
     },
-    // A U25003 `\list-s`/`\table-s` container ended by displacement instead of
-    // its `\list-e\*`. The closing milestone is OPTIONAL in 3.2 and REQUIRED
-    // in 4, which is exactly what the escalation column is for.
+    // A U25003 container ended by displacement, not by its `\list-e\*`. The end
+    // milestone is OPTIONAL in 3.2 and REQUIRED in 4 — hence the rung.
     LintRow {
         code: Code::UnterminatedContainer,
         name: "unterminated-container",
@@ -275,9 +244,8 @@ pub const LINT_ROWS: [LintRow; 43] = [
         template: "\\{anchor} container was not closed by its end milestone",
         fix_label: Some("insert the container end milestone"),
     },
-    // A milestone point never met its `\*`. Both Recovery and Eof mean the
-    // same thing for a point — its span is only its attribute list, so
-    // anything at all reaching it is the terminator going missing.
+    // Recovery and Eof are one fact for a point: its span is only its attribute
+    // list, so anything reaching it means the terminator went missing.
     LintRow {
         code: Code::UnterminatedMilestone,
         name: "unterminated-milestone",
@@ -288,9 +256,8 @@ pub const LINT_ROWS: [LintRow; 43] = [
         template: "\\{anchor} milestone is missing its \\*",
         fix_label: Some("insert \\*"),
     },
-    // A `\X*` that closed nothing: no open frame of that name was in reach
-    // (or the only one was behind a sidebar barrier). The walker leaves it an
-    // ordinary leaf; the finding is ours.
+    // No open frame of that name in reach (or only one behind a sidebar
+    // barrier). The walker leaves it an ordinary leaf; the finding is ours.
     LintRow {
         code: Code::OrphanCloser,
         name: "orphan-closer",
@@ -301,7 +268,6 @@ pub const LINT_ROWS: [LintRow; 43] = [
         template: "\\{anchor} closes nothing",
         fix_label: Some("delete the closer"),
     },
-    // A bare `\*` with no open milestone point in reach.
     LintRow {
         code: Code::OrphanTerminator,
         name: "orphan-terminator",
@@ -312,10 +278,8 @@ pub const LINT_ROWS: [LintRow; 43] = [
         template: "\\* terminates no milestone",
         fix_label: Some("delete \\*"),
     },
-    // A `\list-e`/`\table-e` whose container was not open (or sat behind a
-    // barrier). Distinct from `orphan-terminator`: the `-e` point's own `\*`
-    // DID close the point, so nothing about the terminator is orphaned — what
-    // is missing is the container the `-e` claims to end.
+    // Not `orphan-terminator`: the `-e` point's own `\*` DID close the point —
+    // what is missing is the container it claims to end.
     LintRow {
         code: Code::OrphanContainerEnd,
         name: "orphan-container-end",
@@ -327,9 +291,8 @@ pub const LINT_ROWS: [LintRow; 43] = [
         fix_label: None,
     },
     // A sidebar is a POP BARRIER, so a `\c` or `\v` written inside one stays
-    // inside it — structurally consistent, and exactly what the spec says must
-    // not happen. The walker deliberately does not "fix" it by unwinding;
-    // this is the finding that pays for that choice.
+    // inside it: consistent, and exactly what the spec forbids. The walker
+    // never unwinds to "fix" it — this finding pays for that.
     LintRow {
         code: Code::ContentOutsideSidebarRule,
         name: "content-outside-sidebar-rule",
@@ -340,12 +303,9 @@ pub const LINT_ROWS: [LintRow; 43] = [
         template: "\\{anchor} is inside the sidebar opened by \\{second}",
         fix_label: None,
     },
-    // A marker that resolved to row 0. Today that covers unknown names,
-    // illegal spellings AND every custom `\z` extension, because there is no
-    // configuration channel yet — when one lands, configured `\z` markers get
-    // real rows and stop reaching this rule. It is also the pop-all recovery
-    // event: the walker cannot trust any open scope across a marker it cannot
-    // classify.
+    // Row 0: unknown names, illegal spellings, and every custom `\z` extension
+    // until a configuration channel gives those real rows. Also the pop-all
+    // recovery event — no open scope survives an unclassifiable marker.
     LintRow {
         code: Code::UnknownMarker,
         name: "unknown-marker",
@@ -356,10 +316,8 @@ pub const LINT_ROWS: [LintRow; 43] = [
         template: "\\{anchor} is not a known marker",
         fix_label: None,
     },
-    // The `\+X` nested SPELLING on a row that is not a character marker. The
-    // lexer records the spelling wherever it appears precisely so this stays a
-    // table question; row 0 is excluded because `unknown-marker` already says
-    // everything there is to say about it.
+    // The lexer records the `\+X` spelling wherever it appears, so this stays a
+    // table question. Row 0 is excluded — `unknown-marker` speaks there.
     LintRow {
         code: Code::NestedSpellingMisuse,
         name: "nested-spelling-misuse",
@@ -370,21 +328,16 @@ pub const LINT_ROWS: [LintRow; 43] = [
         template: "\\+{anchor} is not a character marker; the nested spelling does not apply",
         fix_label: None,
     },
-    // A `\v` with no paragraph anywhere above it. usfmtc FABRICATES an
-    // implicit `\p` here (usfmparser.py:891); we flag and never repair —
-    // synthesizing a token would break the partition and lie to the editor.
-    // ONE finding per paragraph-less RUN, anchored at its first verse: that is
-    // where the single repairing `\p` belongs, and per-verse reporting turns
-    // one authoring slip into a chapter of noise.
+    // A `\v` with no paragraph anywhere above it. usfmtc FABRICATES an implicit
+    // `\p` here (usfmparser.py:891); we flag and never repair — synthesizing a
+    // token would break the partition. ONE finding per paragraph-less RUN,
+    // anchored at its first verse, where the single repairing `\p` belongs.
     //
-    // Phase 4 learned the limit of that aggregation, and it is worth stating
-    // where the rule is: a run can be re-opened. In en_ulb the `\s5` chunk
-    // marker is row 0, so its pop-all recovery kills whatever paragraph is
-    // standing — accepting the fix at the head of a run therefore repairs that
-    // site and UNMASKS the next segment, which was damaged all along and merely
-    // aggregated away. Nothing is created (PHM reports 36 before and 36 after)
-    // and the count never rises, which is why the fix oracle judges a fix by
-    // its own SITE rather than by a falling total. See `check_fixes`.
+    // A run can be RE-OPENED, so accepting a fix need not lower the total: in
+    // en_ulb the `\s5` chunk marker is row 0, and its pop-all recovery kills the
+    // standing paragraph, so repairing one run unmasks the next segment that
+    // aggregation was hiding. Hence the fix oracle judges a fix by its own SITE
+    // rather than by a falling count (`check_fixes`).
     LintRow {
         code: Code::MissingParagraph,
         name: "missing-paragraph",
@@ -396,11 +349,9 @@ pub const LINT_ROWS: [LintRow; 43] = [
         fix_label: Some("insert \\p"),
     },
     // ---- Ordering ---------------------------------------------------------
-    // A `\c`/`\v` payload that fails its pattern (see [`crate::designator`]).
-    // ALWAYS the first thing said about a designator, and the last: a
-    // malformed one is excluded from the sequence entirely, so it never
-    // cascades into a gap or a duplicate on the verses that follow. Flag,
-    // never reinterpret — guessing that `1O` meant `10` would be synthesis.
+    // A payload that fails its pattern ([`crate::designator`]) is excluded from
+    // the sequence, so one typo never cascades into a gap or duplicate later.
+    // Flag, never reinterpret — reading `1O` as `10` would be synthesis.
     LintRow {
         code: Code::DesignatorMalformed,
         name: "designator-malformed",
@@ -423,7 +374,6 @@ pub const LINT_ROWS: [LintRow; 43] = [
         template: "chapter {anchor} repeats the chapter at {second}; expected {aux}",
         fix_label: Some("renumber to the expected chapter"),
     },
-    // A chapter number BELOW the previous one.
     LintRow {
         code: Code::ChapterOutOfOrder,
         name: "chapter-out-of-order",
@@ -434,9 +384,8 @@ pub const LINT_ROWS: [LintRow; 43] = [
         template: "chapter {anchor} goes backwards from {second}; expected {aux}",
         fix_label: Some("renumber to the expected chapter"),
     },
-    // A jump of more than one. Chapters, unlike verses, have no tradition of
-    // legitimate holes — but the sequence is still only CONTIGUITY, never a
-    // versification scheme (ruled), so this stays a warning.
+    // Chapters, unlike verses, have no tradition of legitimate holes — but the
+    // check is CONTIGUITY, not a versification scheme, so it stays a warning.
     LintRow {
         code: Code::ChapterGap,
         name: "chapter-gap",
@@ -447,9 +396,8 @@ pub const LINT_ROWS: [LintRow; 43] = [
         template: "chapter {anchor} skips ahead; expected {aux}",
         fix_label: None,
     },
-    // A verse whose first number is exactly the previous designator's LAST
-    // covered verse — `\v 12-14` then `\v 14`. One code for the plain repeat
-    // and the range overlap, because they are the same fact.
+    // The first number equals the previous designator's LAST covered verse
+    // (`\v 12-14` then `\v 14`): repeat and range overlap are one fact.
     LintRow {
         code: Code::VerseDuplicate,
         name: "verse-duplicate",
@@ -471,10 +419,8 @@ pub const LINT_ROWS: [LintRow; 43] = [
         template: "verse {anchor} goes backwards from {second}; expected {aux}",
         fix_label: Some("renumber to the expected verse"),
     },
-    // A hole in the verse sequence. The rule the versification question lands
-    // on: traditions that legitimately omit a verse produce this warning, and
-    // the ruled answer for now is a per-rule off switch when a consumer asks,
-    // never a scheme table inside the linter.
+    // Traditions that legitimately omit a verse land here; the answer is a
+    // per-rule off switch, never a versification table inside the linter.
     LintRow {
         code: Code::VerseGap,
         name: "verse-gap",
@@ -485,9 +431,8 @@ pub const LINT_ROWS: [LintRow; 43] = [
         template: "verse {anchor} skips ahead; expected {aux}",
         fix_label: None,
     },
-    // A chapter whose FIRST verse is not 1. Fires INSTEAD of `verse-gap`,
-    // never beside it: there is no previous verse to have skipped from, and
-    // two findings for one authoring fact is noise. `aux` is always 1.
+    // A chapter whose FIRST verse is not 1. Fires INSTEAD of `verse-gap`: there
+    // is no previous verse to have skipped from. `aux` is always 1.
     LintRow {
         code: Code::MissingVerseOne,
         name: "missing-verse-one",
@@ -498,10 +443,8 @@ pub const LINT_ROWS: [LintRow; 43] = [
         template: "this chapter starts at verse {anchor}; expected {aux}",
         fix_label: None,
     },
-    // Scripture verses before the book's first `\c`. ONE finding, at the first
-    // such `\v` — the whole run is one misplacement — and only when a `\c`
-    // does arrive later; a book with no chapter at all is `missing-chapter`'s
-    // to report, and saying both about the same token helps nobody.
+    // ONE finding at the first such `\v`, and only when a `\c` does arrive
+    // later — a book with no chapter at all is `missing-chapter`'s to report.
     LintRow {
         code: Code::VerseBeforeFirstChapter,
         name: "verse-before-first-chapter",
@@ -512,9 +455,8 @@ pub const LINT_ROWS: [LintRow; 43] = [
         template: "\\{anchor} comes before the book's first \\c",
         fix_label: None,
     },
-    // Verses but no `\c` anywhere. Anchored at the first `\v`, and silent for
-    // a book with no verses either — front matter (FRT, GLO) is chapter-less
-    // by design and must never be nagged.
+    // Anchored at the first `\v`, and silent for a book with no verses: front
+    // matter (FRT, GLO) is chapter-less by design.
     LintRow {
         code: Code::MissingChapter,
         name: "missing-chapter",
@@ -526,11 +468,9 @@ pub const LINT_ROWS: [LintRow; 43] = [
         fix_label: None,
     },
     // ---- Payload ----------------------------------------------------------
-    // No `\id` line at all (real in the wild: BSB Ecclesiastes). Anchored at
-    // token 0 because the missing line belongs at the top of the file, and
-    // raised only for a file with markers in it — an empty or prose-only
-    // buffer is not a book and gets no opinion. `LintReport::book` still
-    // reports `None`; the observation is the message, not the state.
+    // Real in the wild (BSB Ecclesiastes). Anchored at token 0, and raised only
+    // for a file with markers in it — an empty or prose-only buffer is not a
+    // book. `LintReport::book` still reports `None`.
     LintRow {
         code: Code::MissingId,
         name: "missing-id",
@@ -554,8 +494,7 @@ pub const LINT_ROWS: [LintRow; 43] = [
         fix_label: None,
     },
     // A real identifier, written `gen` or `Gen`. Fires INSTEAD of
-    // `book-code-unknown` — the code IS known, only its casing is wrong, and
-    // reporting both would double-count one typo.
+    // `book-code-unknown`: the code IS known, only its casing is wrong.
     LintRow {
         code: Code::BookCodeNotUppercase,
         name: "book-code-not-uppercase",
@@ -566,10 +505,9 @@ pub const LINT_ROWS: [LintRow; 43] = [
         template: "book identifier {anchor} should be uppercase",
         fix_label: Some("uppercase the book identifier"),
     },
-    // A `\c` with no number after it. The scanner carves a `Designator` from
-    // the first content region after `\c` and abandons the expectation at a
-    // newline or a marker, so this is exactly "the `\c` line was empty".
-    // Attribute lists are stepped over: `\c |x="y"| 1` still has its number.
+    // The scanner carves a `Designator` from the first content region after `\c`
+    // and abandons the expectation at a newline or marker, so this is exactly
+    // "the `\c` line was empty". Attribute lists are stepped over.
     LintRow {
         code: Code::ChapterWithoutDesignator,
         name: "chapter-without-designator",
@@ -582,17 +520,13 @@ pub const LINT_ROWS: [LintRow; 43] = [
     },
     // ---- Adjacency --------------------------------------------------------
     // `\ca`/`\cp` may only follow `\c`'s designator, or the other of the pair.
-    // Filed under STRUCTURE rather than Payload: the fact reported is a
-    // marker sitting where it may not sit, which is exactly what
-    // `content-outside-sidebar-rule` reports and nothing like a malformed
-    // span. The sketch lists these separately only because they need a token
-    // of LOOKBEHIND — the CST cannot see them, since `ca`/`cp` open no scope
-    // — and "which pass computes it" is not a category.
+    // Filed under STRUCTURE, not Payload: the fact is a marker sitting where it
+    // may not sit, like `content-outside-sidebar-rule`. That it is computed over
+    // TOKENS (these open no scope, so the CST cannot see them) is not a category.
     //
-    // Whitespace between the parties is fine, newlines included: `\c 1\n\ca
-    // 2\ca*\n\cp א` is the shape the spec's own examples use, and the scanner
-    // emits a Newline token between them, so the rule steps over Newlines and
-    // whitespace-only Text and nothing else.
+    // Whitespace between the parties is fine, newlines included — `\c 1\n\ca
+    // 2\ca*\n\cp א` is the spec's own shape — so the rule steps over Newlines
+    // and whitespace-only Text, and nothing else.
     LintRow {
         code: Code::CaCpPlacement,
         name: "ca-cp-placement",
@@ -615,17 +549,12 @@ pub const LINT_ROWS: [LintRow; 43] = [
         fix_label: None,
     },
     // ---- Payload ----------------------------------------------------------
-    // A note caller that is none of the three conventional values (`+`, `-`,
-    // `?`) AND longer than three bytes. The spec pattern is `/[^\\\s]+/`, so a
-    // custom caller is perfectly legal and this can only ever be a HINT — the
-    // rule exists for the ACCIDENT (`\f + \ft` written `\f +\ft`, a quotation
-    // mark glued to the marker), not for the deliberate custom caller.
-    //
-    // Three bytes is the width that keeps it honest: every real custom caller
-    // seen in the wild is a mark or a short symbol, and the corpus's one
-    // non-`+` caller (`",` — examples.bsb, a stray quote) is two bytes and is
-    // deliberately NOT reported. Widening this rule to "not one of the three"
-    // would report that and every legitimate custom caller with it.
+    // Neither one of the three conventional values (`+`, `-`, `?`) nor three
+    // bytes or shorter. The spec pattern is `/[^\\\s]+/`, so a custom caller is
+    // legal and this can only be a HINT — the rule exists for the ACCIDENT
+    // (`\f +\ft`, a quote glued to the marker). Three bytes keeps it honest:
+    // real custom callers are short symbols, and the corpus's one non-`+`
+    // caller (`",` — examples.bsb) stays deliberately unreported.
     LintRow {
         code: Code::CallerShape,
         name: "caller-shape",
@@ -636,22 +565,15 @@ pub const LINT_ROWS: [LintRow; 43] = [
         template: "{anchor} is an unusual note caller",
         fix_label: None,
     },
-    // One book spelling a numbered family both ways — `\q` and `\q2`. The
-    // spec's own rule is that the bare form is a valid spelling ALWAYS and
-    // should be used when the text has a single level, so this is a
-    // consistency observation and never an error. ONE finding per family per
-    // book, anchored at the token that revealed the mix; `second` is the
-    // family's first occurrence, `aux` the row's numbering cap (`liv`, the one
-    // uncapped family, reports 0). The LEVELS are not in `aux` because they
-    // are not integers a message needs: both spellings are spans, reachable
-    // through `anchor` and `second`, which is the message-params rule.
+    // One book spelling a numbered family both ways — `\q` and `\q2`. The bare
+    // form is ALWAYS valid, so this is a consistency observation, never an
+    // error. ONE finding per family per book, anchored at the token that
+    // revealed the mix; `second` is the family's first occurrence, `aux` the
+    // row's numbering cap (`liv`, the one uncapped family, reports 0).
     //
-    // NOTE for the reader looking for `numbering-out-of-range`: it is not
-    // here, because it cannot fire. `generated::marker_idx` validates the
-    // level against the row's cap DURING resolution (`digits_ok`), so `\q7`
-    // never reaches the `q` row at all — it is row 0, and `unknown-marker`
-    // has already said everything there is to say about it. A rule for it
-    // would be dead code; see the report in git history.
+    // There is no `numbering-out-of-range` code because it could never fire:
+    // `generated::marker_idx` validates the level against the row's cap during
+    // resolution (`digits_ok`), so `\q7` is row 0 and `unknown-marker` speaks.
     LintRow {
         code: Code::NumberingMix,
         name: "numbering-mix",
@@ -663,20 +585,15 @@ pub const LINT_ROWS: [LintRow; 43] = [
         fix_label: None,
     },
     // ---- Form -------------------------------------------------------------
-    // The byte before a marker's backslash is neither whitespace nor the start
-    // of the file — `content\s1`. NARROWED to PARAGRAPH rows, and the
-    // narrowing is not a nicety: character markers legitimately hug, and
-    // aligned USFM is built out of hugging (`\zaln-s |…\*\w In|…\w*\zaln-e\*`
-    // — 6.5M tokens of it in en_ult), so an un-narrowed rule reports ~1.5M
-    // findings on a corpus with nothing wrong with it.
+    // `content\s1`. NARROWED to PARAGRAPH rows because character markers
+    // legitimately hug and aligned USFM is built out of hugging
+    // (`\zaln-s |…\*\w In|…\w*\zaln-e\*`): un-narrowed it reports ~1.5M findings
+    // on a corpus with nothing wrong with it.
     //
-    // HINT, not Warning (corrected 2026-08-20, Will's read of the PARA
-    // railroad): the diagram's two branches into a paragraph marker are
-    // `'\n\'` and `/${Ws}\\/`, and `Ws` is `/${anyws}*/` — ZERO or more —
-    // so `content\p` is grammatically VALID; the newline branch is the
-    // preferred/canonical spelling, not a requirement. That makes this a
-    // formatting preference — exactly the formatter-bundle shape (Hint +
-    // auto-fix), not a violation.
+    // HINT, not Warning: the PARA railroad's two branches into a paragraph
+    // marker are `'\n\'` and `/${Ws}\\/`, and `Ws` is `/${anyws}*/` — ZERO or
+    // more — so `content\p` is VALID and the newline branch is only the
+    // canonical spelling. A formatting preference, not a violation.
     LintRow {
         code: Code::MarkerNotWsPreceded,
         name: "marker-not-ws-preceded",
@@ -687,22 +604,17 @@ pub const LINT_ROWS: [LintRow; 43] = [
         template: "\\{anchor} needs whitespace before it",
         fix_label: Some("insert a line break"),
     },
-    // The delimiter after a marker NAME is written as something that is not
-    // structural whitespace — the NBSP-after-name case, and every other
-    // exotic separator with it (`\p\u{00A0}text`, `\v\u{2007}1`).
+    // NBSP after a marker name, and every other exotic separator with it
+    // (`\p\u{00A0}text`, `\v\u{2007}1`).
     //
-    // What this HONESTLY covers, and why it is not more: after the lex, the
-    // delimiter is not a token — it is folded into the marker's own span, so
-    // "how was it written" survives only as the marker's LENGTH and the byte
-    // that follows it. Two derivations exist there, and this rule ships the
-    // one that is unambiguous: the row requires a delimiter, the span absorbed
-    // none (`ws_run_end` folds space/tab only), and the next byte is not
-    // whitespace, not a marker or pipe (`TAGEND`'s other alternatives), and
-    // not the end of the file. The other derivation — "the delimiter is
-    // several spaces where one would do" — is deliberately left out: extra
-    // horizontal whitespace is legal in every row's pattern (`HS` is `+`, not
-    // `?`), so it is a FORMATTER's business, and phase 4's formatter bundle is
-    // where it belongs.
+    // After the lex the delimiter is folded into the marker's own span, so "how
+    // was it written" survives only as the marker's LENGTH plus the byte after
+    // it. The rule fires on the unambiguous reading: the row requires a
+    // delimiter, the span absorbed none (`ws_run_end` folds space/tab only), and
+    // the next byte is not whitespace, not a marker or pipe (`TAGEND`'s other
+    // alternatives), and not EOF. "Several spaces where one would do" is out of
+    // scope — `HS` is `+`, not `?`, in every row's pattern, so it is a
+    // FORMATTER's business.
     LintRow {
         code: Code::DelimiterShape,
         name: "delimiter-shape",
@@ -713,13 +625,10 @@ pub const LINT_ROWS: [LintRow; 43] = [
         template: "\\{anchor} is not followed by structural whitespace",
         fix_label: None,
     },
-    // A paragraph node with no content at all — nothing but Newlines under it,
-    // or nothing whatever. `\b` is EXCLUDED, because a blank line is a
-    // paragraph that is empty BY DESIGN; it is identified by the one column
-    // that says so, `ws_after_name: SingleNewline` (it is the table's only
-    // such row, and it is that value precisely because `\b` takes no content).
-    // `\pb` never reaches here at all — it is a Character row that opens no
-    // scope, so it is never a node.
+    // Nothing but Newlines under the node, or nothing at all. `\b` is EXCLUDED
+    // — a blank line is empty BY DESIGN — identified by the column that says so,
+    // `ws_after_name: SingleNewline` (the table's only such row). `\pb` never
+    // reaches here: a Character row opens no scope, so it is never a node.
     LintRow {
         code: Code::EmptyParagraph,
         name: "empty-paragraph",
@@ -732,33 +641,20 @@ pub const LINT_ROWS: [LintRow; 43] = [
     },
     // ---- Attributes (shape only) ------------------------------------------
     // The 3.1 TRAILING attribute form — `\w grace|lemma="x"\w*` — which 3.2
-    // deprecates and 4 removes.
+    // deprecates and 4 removes. Two gates, both load-bearing:
     //
-    // Two gates, both load-bearing:
+    // - CHARACTER rows only. `\zaln-s |x-strong="G1"\*` is a milestone's NORMAL
+    //   syntax and never deprecated; `\fig |src="a.png"…\fig*` is how the spec's
+    //   own figure examples are written.
+    // - The document must DECLARE `\usfm 3.2` or later — the `None` base below
+    //   plus the ladder's first rung. "Deprecated" is simply false in a file
+    //   that declares 3.0, where the trailing form is the correct spelling
+    //   (en_ult: 3.0 with 792,414 trailing lists, every one of them right).
     //
-    // - CHARACTER rows only. `\zaln-s |x-strong="G1"\*` is a milestone's
-    //   NORMAL syntax and never deprecated; `\fig |src="a.png"…\fig*` is how
-    //   the spec's own figure examples are written. Flagging either lights up
-    //   every alignment corpus for nothing.
-    // - The document must DECLARE `\usfm 3.2` or later. A rule that says "this
-    //   form is deprecated" to a file that declares 3.0 is simply wrong: the
-    //   trailing form is the correct spelling of the version in force. en_ult
-    //   declares 3.0 and contains 792,414 trailing lists — every one of them
-    //   right, and every one of them a false positive without this gate.
-    //
-    //   That gate USED TO BE an `if` beside the rule in flat.rs. It is now the
-    //   `None` base below plus the ladder's first rung, which is the whole
-    //   point of the slice: undeclared and 3.0 are silent, 3.2 is a Warning,
-    //   4 is an Error, and every one of those four facts is authored HERE.
-    //
-    // NO FIX, deliberately (phase 4). The 3.2 rewrite MOVES the list from back
-    // position to front — `\w grace|lemma="x"\w*` becomes
-    // `\w |lemma="x"|grace\w*` — and a move is not one splice: the content the
-    // list has to jump over is arbitrary, and deciding where inside it the
-    // boundary falls is an interpretation of the author's text. (The k/v
-    // interior IS readable now — `crate::attributes` — and it changes nothing:
-    // knowing the pairs does not locate the author's intended split.) A fix is
-    // a mechanical splice or it is not offered.
+    // NO FIX. The 3.2 rewrite MOVES the list from back to front —
+    // `\w grace|lemma="x"\w*` becomes `\w |lemma="x"|grace\w*` — and a move is
+    // not one splice: the content jumped over is arbitrary, and where inside it
+    // the boundary falls interprets the author's text.
     LintRow {
         code: Code::AttrTrailingFormDeprecated,
         name: "attr-trailing-form-deprecated",
@@ -772,11 +668,10 @@ pub const LINT_ROWS: [LintRow; 43] = [
         template: "the trailing attribute form is deprecated in USFM {aux}",
         fix_label: None,
     },
-    // Two attribute lists on one marker — the proposal's own "ridiculous but
-    // legal" `\w |Fred|Jésus|Jesus\w*`. Legal back-compat, so a warning and
-    // not an error; which one wins is the interpreter's merge rule ("later
-    // definition wins"), which is exactly why saying it twice is worth
-    // reporting. `second` is the first list.
+    // Two attribute lists on one marker — the spec's own "ridiculous but legal"
+    // `\w |Fred|Jésus|Jesus\w*`. Legal back-compat, hence a warning; the winner
+    // is the interpreter's merge rule ("later definition wins"), which is why
+    // saying it twice is worth reporting. `second` is the first list.
     LintRow {
         code: Code::AttrBothLists,
         name: "attr-both-lists",
@@ -787,17 +682,15 @@ pub const LINT_ROWS: [LintRow; 43] = [
         template: "a second attribute list overrides the one at {second}",
         fix_label: None,
     },
-    // A trailing-form list ended by the WRONG terminator: `\w a|k="v"\add*`,
-    // or a milestone list closed by a named closer instead of `\*`. This is
-    // the finding scanner.rs promises when it says the terminator is checked
-    // "only for BEING a closer, never for matching the open frame" — the list
-    // is well-formed, its owner's closer is not the one that arrived.
+    // `\w a|k="v"\add*`, or a milestone list closed by a named closer instead of
+    // `\*`. The list is well-formed; the scanner checks its terminator only for
+    // BEING a closer, never for matching the open frame, and this is that check.
     //
     // Node-initial lists are never reported: their terminator is their own
     // closing pipe, which the scanner found or the bytes would not be a list.
-    // That is also why "the list was never closed" has no code — a list that
-    // runs to a newline is not lexed as a list at all, so its pipe survives as
-    // Text and `attr-pipe-hint` below is what speaks.
+    // That is also why "the list was never closed" has no code — such bytes are
+    // not lexed as a list, so the pipe survives as Text and `attr-pipe-hint`
+    // speaks instead.
     LintRow {
         code: Code::AttrTerminatorMismatch,
         name: "attr-terminator-mismatch",
@@ -809,10 +702,9 @@ pub const LINT_ROWS: [LintRow; 43] = [
         fix_label: None,
     },
     // A raw `|` left in the content of a marker that DEFINES attributes: the
-    // author meant an attribute list and the list was refuted (it ran past the
-    // end of its line, or its closer never came), so the bytes stayed content.
-    // Hint, and gated on `defined_attributes` being non-empty, because a pipe
-    // in ordinary prose is ordinary prose.
+    // list was refuted (it ran past its line, or its closer never came) and the
+    // bytes stayed content. Gated on `defined_attributes` being non-empty,
+    // because a pipe in ordinary prose is ordinary prose.
     LintRow {
         code: Code::AttrPipeHint,
         name: "attr-pipe-hint",
@@ -824,26 +716,19 @@ pub const LINT_ROWS: [LintRow; 43] = [
         fix_label: None,
     },
     // ---- Attributes (the k/v half) ----------------------------------------
-    // An attribute name the owning marker's row does not define — read by
-    // `attributes::resolve`, which is the ONE place naming conventions live.
+    // A name the owning row does not define, judged by `attributes::resolve` —
+    // the ONE place naming conventions live. A HINT: `x-`/`z-` names are legal
+    // on any marker, so what reaches this rule is genuinely unrecognized, and
+    // the spec's extension story makes that "did you mean `x-…`?".
     //
-    // A HINT, and the corpus says why it must be: `x-`/`z-` names are legal on
-    // any marker and en_ult carries 4.35M of them, so the only names that reach
-    // this rule are genuinely unrecognized ones — and an unrecognized name is
-    // not damage. The spec's own extension story is "put it in `x-`", so the
-    // finding is "did you mean `x-…`?", not "this is wrong".
-    //
-    // TWO shapes, told apart by `aux`, because they are one authoring question
-    // asked twice:
+    // TWO shapes, told apart by `aux` (the interpreter reports `Unknown` for
+    // both, so the shape is read off `name.is_empty()` — `AttrResolution`):
     //   * aux = 0 — a NAMED attribute nothing matched (`\w a|nope="x"\w*`).
     //   * aux = 1 — the BARE default form on a row with no `default_attribute`
-    //     (`\fig |a.png\fig*`). The interpreter resolves bare through that
-    //     column itself and reports `Unknown` for both cases, so the shape is
-    //     read off `name.is_empty()` exactly as `AttrResolution` documents.
+    //     (`\fig |a.png\fig*`).
     //
-    // Row 0 owners are silent: `unknown-marker` has already said everything
-    // there is to say about `\zfoo |k="v"\*`, and its row defines nothing, so
-    // every attribute on it would otherwise be a finding.
+    // Row 0 owners are silent: its row defines nothing, so every attribute on
+    // `\zfoo |k="v"\*` would be a finding, and `unknown-marker` has spoken.
     LintRow {
         code: Code::AttrUnknownName,
         name: "attr-unknown-name",
@@ -854,21 +739,19 @@ pub const LINT_ROWS: [LintRow; 43] = [
         template: "\\{second} defines no such attribute",
         fix_label: None,
     },
-    // The interpreter's `Malformed` verdict: the list's bytes stopped making
-    // sense. ONE finding per list by construction — `Malformed` ends the walk,
-    // because a broken tail is one mistake and not one per remaining byte.
+    // ONE finding per list by construction — `Malformed` ends the interpreter's
+    // walk, because a broken tail is one mistake, not one per remaining byte.
     //
     // `aux` is the [`MalformedAttr`](crate::attributes::MalformedAttr)
-    // discriminant, and the mapping is the enum's declaration order:
+    // discriminant, in that enum's declaration order:
     //   0 = UnterminatedQuote (`|lemma="grace`)
     //   1 = EmptyName         (`|="x"`)
     //   2 = MissingValue      (`|lemma=`)
-    //   3 = BareJunk          (`|lemma="a", strong="G1"` — a comma is not a
-    //                          separator; usfmtc silently DROPS the tail, we
-    //                          report it)
+    //   3 = BareJunk          (`|lemma="a", strong="G1"` — a comma is no
+    //                          separator; usfmtc DROPS the tail, we report it)
     //
-    // Warning, not Error: the list lexed as a list, so the document is
-    // readable — what is lost is the attributes after the blamed byte.
+    // Warning, not Error: the list lexed as a list, so the document is readable
+    // — what is lost is the attributes after the blamed byte.
     LintRow {
         code: Code::AttrMalformed,
         name: "attr-malformed",
@@ -879,22 +762,19 @@ pub const LINT_ROWS: [LintRow; 43] = [
         template: "the attribute list on \\{second} stops making sense",
         fix_label: None,
     },
-    // The CONDITIONAL cardinality no row can express. `defined_attributes`
-    // says Optional because the attribute is optional in general; whether THIS
-    // occurrence owes one is a fact about the document, which makes it lint's.
+    // The CONDITIONAL cardinality no row can express: `defined_attributes` says
+    // Optional because the attribute is optional in general, and whether THIS
+    // occurrence owes one is a fact about the document.
     //
     // Two shapes, both anchored at the list (or at the milestone itself when
     // there is no list at all):
     //   * `eid` on a milestone END point whose family was opened with `sid`
-    //     (`\qt-s |sid="a"\* … \qt-e\*`). `second` is that earlier
-    //     sid-carrying point. Deliberately NOT pairing: which `sid` this `eid`
-    //     would answer is vref/pairing territory, unmodelled in the CST on
-    //     purpose, so the rule is per-POINT — the row was opened with `sid`
-    //     somewhere above, and this `-e` carries none.
+    //     (`\qt-s |sid="a"\* … \qt-e\*`); `second` is that earlier sid point.
+    //     NOT pairing — which `sid` this `eid` answers is vref territory,
+    //     unmodelled in the CST — so the test is per-POINT.
     //   * `\ta`'s "one or more attributes, each beginning with `a-`"
     //     (char/features/ta.html). The row carries the `a-*` wildcard and no
-    //     fixed names, so "the family is empty here" is the only reading of
-    //     its cardinality, and a list with none of it is the finding.
+    //     fixed names, so a list with none of that family is the finding.
     LintRow {
         code: Code::AttrRequiredIf,
         name: "attr-required-if",
@@ -906,19 +786,15 @@ pub const LINT_ROWS: [LintRow; 43] = [
         fix_label: None,
     },
     // ---- Version ----------------------------------------------------------
-    // A marker the spec deprecates — membership is [`VERSION_ROWS`], the small
-    // authored table below, because the decisive fact (WHICH version said so)
-    // is owned by no `MarkerRow` column.
+    // Membership is [`VERSION_ROWS`] below, because WHICH version said so is
+    // owned by no `MarkerRow` column.
     //
-    // GATED on a declared `\usfm`, via the `None` base: a 2.x-era book full of
-    // `\addpn` is correct for its era, and guessing that an undeclared file
-    // means "latest" would report every legacy book in the world. Warning from
-    // 3.0 (every seed marker's own deprecating version), Error at 4 — the era
-    // in which a deprecated form is expected to be gone.
+    // GATED on a declared `\usfm` via the `None` base: a 2.x-era book full of
+    // `\addpn` is correct for its era, and reading an undeclared file as
+    // "latest" would report every legacy book in the world.
     //
-    // `aux` is the DEPRECATING version, not the declared one: it is the fact
-    // the message needs ("deprecated since 3.0"), and the declared version is
-    // already in `LintReport::declared_version`.
+    // `aux` is the DEPRECATING version, not the declared one — that is what the
+    // message needs, and the declared one is in `LintReport::declared_version`.
     LintRow {
         code: Code::DeprecatedMarker,
         name: "deprecated-marker",
@@ -932,23 +808,16 @@ pub const LINT_ROWS: [LintRow; 43] = [
         template: "\\{anchor} is deprecated since USFM {aux}",
         fix_label: Some("rename to the replacement marker"),
     },
-    // The Version family's other half, and the reason it is HERE rather than
-    // under Attributes: the fact reported is a LIFECYCLE fact — the spec still
-    // recognizes this attribute and tells authors not to use it — which is what
-    // this family is for. `\xt`'s `link-href` and `\jmp`'s whole `link-`
-    // prefixed trio, deprecated in 3.1, are the entire membership, and it is
-    // read straight off [`AttrStatus::Deprecated`] as the interpreter resolves
-    // the name.
+    // Filed under Version, not Attributes: the fact is a LIFECYCLE one — the
+    // spec still recognizes the attribute and tells authors not to use it.
+    // Membership is `\xt`'s `link-href` and `\jmp`'s `link-` trio, read off
+    // [`AttrStatus::Deprecated`] as the interpreter resolves.
     //
-    // INFO, and NO GATE, both because of what the data is: `AttrStatus` carries
-    // no version, so "deprecated since when" cannot be said here the way
-    // `VERSION_ROWS` says it for a marker — and a rule that cannot name the
-    // version it keys on must not pretend to gate on one. The attribute is
-    // still legal to read, which is exactly Info's register.
+    // INFO and NO GATE, because `AttrStatus` carries no version: a rule that
+    // cannot name the version it keys on must not pretend to gate on one.
     //
-    // NO FIX: `link-href` → `href` looks mechanical, and might be, but the
-    // table records only the deprecated name — nothing authored says what
-    // replaces it. A fix is offered from data or it is not offered.
+    // NO FIX: `link-href` → `href` looks mechanical, but the table records only
+    // the deprecated name; nothing authored says what replaces it.
     LintRow {
         code: Code::DeprecatedAttribute,
         name: "deprecated-attribute",
@@ -960,28 +829,24 @@ pub const LINT_ROWS: [LintRow; 43] = [
         fix_label: None,
     },
     // ---- The positional band ----------------------------------------------
-    // A marker whose every POSITIONAL context is behind the document's
-    // position: `\ip` (BookIntroduction) after the book has reached
-    // ChapterContent, `\h` (BookHeaders) after its titles.
+    // Every POSITIONAL context of the row is behind the document's position:
+    // `\ip` (BookIntroduction) after ChapterContent, `\h` after the titles.
     //
     // The band is the mask's positional half — `Scripture` → … →
     // `ChapterContent`, the axis `SpecContext::is_positional` names — and it is
-    // MONOTONIC, which is the whole reason this rule needs no data: the
-    // document walks the eight bits forward exactly once, so a marker either
-    // fits where we are, advances us to the lowest of its contexts above us, or
-    // is behind us and is this finding. Markers listing two positional
-    // contexts (`mt#`, `cl`, `ip`) resolve by lowest-above-current, which is
-    // how `\cl`'s two meanings (before the first `\c`, and inside a chapter)
-    // fall out of one rule.
+    // MONOTONIC, which is why this rule needs no data: the document walks the
+    // eight bits forward exactly once, so a marker either fits where we are,
+    // advances us to the lowest of its contexts above us, or is behind us and is
+    // this finding. Two positional contexts (`mt#`, `cl`, `ip`) resolve by
+    // lowest-above-current, which is how `\cl`'s two meanings (before the first
+    // `\c`, and inside a chapter) fall out of one rule.
     //
-    // ABSTAINS on rows with no positional bit at all — every character marker,
+    // ABSTAINS on rows with no positional bit — every character marker, row 0,
     // and `\cp`, whose empty mask is deliberate (`ca`/`cp`/`va`/`vp` are an
-    // ADJACENCY question over tokens, ruled, and this lane says nothing about
-    // them). Row 0 abstains for the same reason: no mask, and `unknown-marker`
-    // has already spoken.
+    // ADJACENCY question over tokens, which this lane says nothing about).
     //
-    // Warning: the marker is legal, its PLACE is not, and the repair is a
-    // MOVE — never a splice — so no fix is offered.
+    // Warning, and no fix: the marker is legal, its PLACE is not, and the repair
+    // is a MOVE rather than a splice.
     LintRow {
         code: Code::MarkerOutOfBand,
         name: "marker-out-of-band",
@@ -1000,76 +865,56 @@ pub const LINT_ROWS: [LintRow; 43] = [
 
 /// Per-marker version facts lint owns, because no `MarkerRow` column does:
 /// `deprecated` is a BOOL, and "deprecated SINCE WHAT" is the fact the rule
-/// needs. (The "no version column on MarkerRow" law was softened 2026-08-20 —
-/// a column there is permitted when simpler — but a five-row table here touches
-/// no schema and no codegen, so it stays lint-side until the set grows.)
-///
-/// Keyed by ROW NAME, like the books table: the canonical name is what
-/// `generated::name` hands back, and a name comparison over five entries is
-/// cheaper than any index scheme this would need.
+/// needs. Keyed by ROW NAME, like the books table — `generated::name` hands the
+/// canonical name back, and five string compares beat any index scheme.
 pub struct VersionRow {
     pub marker: &'static str,
     /// The first version that says "don't".
     pub deprecated_in: UsfmVersion,
     /// The marker to rename to, when the spec's replacement is a RENAME. `None`
-    /// where it is a restructure — the same line `attr-trailing-form` draws:
-    /// a fix is a mechanical splice or it is not offered.
+    /// where it is a restructure: a fix is a mechanical splice or nothing.
     pub replacement: Option<&'static str>,
 }
 
-/// The five markers `tables::rows` marks `deprecated: true`, with the version
-/// the deprecation dates from.
+/// The five markers `tables::rows` marks `deprecated: true`. All five date from
+/// 3.0 (`ph` carries the page evidence: `para/paragraphs/ph.html`,
+/// "Deprecated: 3.0"); nothing in 3.1/3.2 re-dates them.
 ///
-/// All five date from 3.0 — USFM 3.0 is the release that deprecated the
-/// Chinese-typography markers (`addpn`, `pro`), the hanging-indent paragraph
-/// (`ph`) and the two deuterocanonical note halves (`fdc`, `xdc`). Our own
-/// `ph` row already carried the page evidence (`para/paragraphs/ph.html`,
-/// "Deprecated: 3.0"); the other four are stated as 3.0 on the same authority
-/// and nothing in 3.1/3.2 re-dates them.
-///
-/// NOTE — no `removed_in` column, and that is a reading of the spec rather than
-/// a shortcut: 3.2 still documents all five, so none has been REMOVED and the
-/// column would be five `None`s that nothing reads. The Error rung on
-/// `deprecated-marker`'s ladder carries the "this era expects it gone" fact
-/// instead. Add the column with the first marker the spec actually removes.
+/// No `removed_in` column: 3.2 still documents all five, so the column would be
+/// five `None`s. `deprecated-marker`'s Error rung carries "this era expects it
+/// gone" instead. Add the column with the first marker the spec removes.
 pub const VERSION_ROWS: [VersionRow; 5] = [
-    // char/addpn.html — the Chinese "added proper name". The replacement is
-    // `\add` WRAPPING `\pn`, i.e. two markers where there was one, so it is a
-    // restructure and no rename can express it.
+    // char/addpn.html — the Chinese "added proper name". Its replacement is
+    // `\add` WRAPPING `\pn`: two markers where there was one, so no rename.
     VersionRow {
         marker: "addpn",
         deprecated_in: UsfmVersion::V3_0,
         replacement: None,
     },
-    // char/fdc.html — footnote text that applies only to a deuterocanonical
-    // edition. Handled by publishing a different footnote, not by another
-    // marker: a restructure.
+    // char/fdc.html — footnote text for a deuterocanonical edition only, now
+    // handled by publishing a different footnote rather than by any marker.
     VersionRow {
         marker: "fdc",
         deprecated_in: UsfmVersion::V3_0,
         replacement: None,
     },
-    // para/paragraphs/ph.html, "Deprecated: 3.0" — the page names `\li#` as
-    // the form to use, and the level digit carries across unchanged (`ph`
-    // caps at 3, `li` at 4), so `\ph2` → `\li2` is a pure rename of the two
-    // name bytes.
+    // para/paragraphs/ph.html names `\li#` as the form to use, and the level
+    // digit carries across (`ph` caps at 3, `li` at 4): `\ph2` → `\li2` is a
+    // pure rename of two name bytes.
     VersionRow {
         marker: "ph",
         deprecated_in: UsfmVersion::V3_0,
         replacement: Some("li"),
     },
-    // char/pro.html — the Chinese pronunciation gloss, replaced by 3.0's ruby
-    // markup `\rb`. `rb`'s only attribute (`gloss`) is Optional, so
-    // `\pro x\pro*` → `\rb x\rb*` is legal on its own; the richer
-    // `|gloss="…"` form is an ENRICHMENT the author adds, not something the
-    // rename owes.
+    // char/pro.html — the Chinese pronunciation gloss, replaced by ruby markup
+    // `\rb`, whose only attribute (`gloss`) is Optional: `\pro x\pro*` →
+    // `\rb x\rb*` is legal on its own, and `|gloss="…"` is the author's to add.
     VersionRow {
         marker: "pro",
         deprecated_in: UsfmVersion::V3_0,
         replacement: Some("rb"),
     },
-    // char/xdc.html — `\fdc`'s cross-reference twin, and the same
-    // restructure.
+    // char/xdc.html — `\fdc`'s cross-reference twin, same restructure.
     VersionRow {
         marker: "xdc",
         deprecated_in: UsfmVersion::V3_0,
@@ -1077,13 +922,9 @@ pub const VERSION_ROWS: [VersionRow; 5] = [
     },
 ];
 
-/// The version facts for a marker row's canonical name.
-///
-/// A linear scan over five `&'static str`s — and it never runs on a token that
-/// is not already deprecated, because `MarkerRow::deprecated` (one bitfield
-/// read, false for 148 of 153 rows) is the filter in front of it. That split is
-/// why the family needs no stamped column: the BOOL says whether to look, and
-/// this table says what the answer is.
+/// The version facts for a marker row's canonical name. A linear scan over five
+/// `&'static str`s, guarded by `MarkerRow::deprecated` (false for 148 of 153
+/// rows): the BOOL says whether to look, this table says what the answer is.
 pub fn version_row(marker: &str) -> Option<&'static VersionRow> {
     VERSION_ROWS.iter().find(|row| row.marker == marker)
 }
@@ -1108,22 +949,18 @@ mod tests {
             assert!(!seen.contains(&row.name), "duplicate name {}", row.name);
             seen.push(row.name);
             assert_eq!(row.code.row().name, row.name);
-            // The ladder is ASCENDING and starts above the base: a rung out of
-            // order would make `severity_at` read the wrong severity, silently.
+            // An out-of-order rung makes `severity_at` read the wrong severity.
             for pair in row.escalation.windows(2) {
                 assert!(pair[0].0 < pair[1].0, "{}'s ladder is unsorted", row.name);
             }
-            // A GATED row (silent base) with no ladder would be silent for
-            // ever — that is a deleted rule, not a gated one.
+            // A gated row with no ladder is a deleted rule, not a gated one.
             assert!(
                 row.severity.is_some() || !row.escalation.is_empty(),
                 "{} is silent at every version",
                 row.name
             );
         }
-        // Every family now has a pass. (This assertion used to read the other
-        // way round — "no row may be Version, that pass does not exist" — and
-        // the closeout window is what turned it over.)
+        // Every family has at least one rule.
         for family in [
             Category::Structure,
             Category::Ordering,
@@ -1139,9 +976,8 @@ mod tests {
         }
     }
 
-    /// The escalation slice's whole contract, on the row that earned it: below
-    /// the first rung a GATED code says nothing at all, and each rung takes
-    /// over at its own version.
+    /// The escalation slice's contract: below the first rung a GATED code says
+    /// nothing at all, and each rung takes over at its own version.
     #[test]
     fn the_trailing_form_ladder_is_silent_then_warning_then_error() {
         let row = Code::AttrTrailingFormDeprecated.row();
@@ -1174,9 +1010,9 @@ mod tests {
         );
     }
 
-    /// The Version table and `MarkerRow::deprecated` must name the same five
-    /// markers: the bool is the filter the rule reads first, so a row in one
-    /// and not the other is a rule that cannot fire (or a lookup that misses).
+    /// The Version table and `MarkerRow::deprecated` name the same five markers:
+    /// the bool is the filter the rule reads first, so a row in one and not the
+    /// other is a rule that cannot fire (or a lookup that misses).
     #[test]
     fn the_version_table_matches_the_deprecated_column() {
         use crate::tables::generated;

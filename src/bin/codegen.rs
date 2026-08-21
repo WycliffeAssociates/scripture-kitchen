@@ -3,17 +3,16 @@
 //! (reviewable diffs; consumers never run this).
 //!
 //! **The table conforms to USFM 3.2** (<https://docs.usfm.bible/usfm/3.2/>) and
-//! nothing else: no version column, no version-tracking, no multi-version
-//! emissions.
+//! nothing else: no version column, no multi-version emissions.
 //!
-//! This is a thin main. The generator itself is `tables::emit`, in the library,
-//! so `tests/codegen_output_matches_input.rs` can regenerate to a buffer and fail the build
-//! when the checked-in file is stale.
+//! A thin main: the generator itself is `tables::emit`, in the library, so
+//! `tests/codegen_output_matches_input.rs` can regenerate to a buffer and fail
+//! the build when the checked-in file is stale.
 //!
-//! NOT emitted yet, deliberately (planning/NEXT-STEPS.md): `common_marker_checks`
-//! — the hot-marker fast path, which is built one pattern at a time and MEASURED,
-//! never speculated (the `priority` column is measurement, not a guess) — and the
-//! JS/TS registry + USJ projection, which arrive with the wasm/JS boundary work.
+//! Deliberately NOT emitted: `common_marker_checks`, the hot-marker fast path —
+//! built one pattern at a time and MEASURED, never speculated (the `priority`
+//! column is measurement, not a guess) — and the JS/TS registry + USJ
+//! projection, which wait on the wasm/JS boundary.
 
 use std::path::Path;
 

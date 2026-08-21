@@ -74,23 +74,20 @@ fn shape_of(tokens: &[Token], cst: &Cst, id: usize) -> Shape {
 ///
 /// The verdict half is a match on the walker's [`CloseReason`] — lint reads it,
 /// never re-derives it — and it is where four of the five INSERTION fixes are
-/// computed, because the close event is the one place both the missing text
-/// (the opening token's own spelling) and its position ([`Cst::extent`]) are in
-/// hand at once.
+/// computed, because the close event is the one place both the missing text (the
+/// opening token's own spelling) and its position ([`Cst::extent`]) are in hand.
 ///
-/// The orphan half is the only state, and it is TWO u32s where the staged
-/// passes needed a `tokens.len()` bitset and a `nodes.len()` one.
+/// The orphan half is the only state, and it is TWO u32s rather than a
+/// `tokens.len()` bitset plus a `nodes.len()` one.
 ///
 /// A `\X*`/`\*` leaf and a container's `-e` point node ask the same question —
 /// "am I the last child of the thing that consumed me?" — and a last child is
-/// always followed immediately by its parent's close. So the verdict is settled
-/// at the NEXT NODE CLOSE and nowhere else: whatever is pending is consumed iff
-/// that closing node is `Explicit` and its last child is the pending id, and is
-/// an orphan otherwise. Nothing has to happen on the leaves in between, because
-/// a leaf after the pending id is exactly what makes it not-last, which the
-/// last-child test already reports. The one leaf that must act is a SECOND
-/// closer arriving before any close: the first can no longer be anyone's last
-/// child, so it is flushed there.
+/// always followed immediately by its parent's close, so the verdict is settled
+/// at the NEXT NODE CLOSE and nowhere else: what is pending is consumed iff the
+/// closing node is `Explicit` and its last child is the pending id. Leaves in
+/// between need no work, because a leaf after the pending id is exactly what
+/// makes it not-last. The one leaf that must act is a SECOND closer arriving
+/// before any close: the first can no longer be anyone's last child.
 pub(crate) struct Structure {
     /// A closer leaf awaiting its verdict, or [`NO_TOKEN`].
     pending_closer: u32,
@@ -147,11 +144,10 @@ impl Structure {
         } else {
             Code::OrphanCloser
         };
-        // A PLAIN span delete, whitespace left exactly as written. Deleting
-        // `\f*` out of `text \f* more` does leave two spaces — and eating one of
-        // them would be a second, unasked-for edit to bytes the author chose.
-        // Extra horizontal whitespace is legal everywhere in USFM; the formatter
-        // bundle is where it belongs.
+        // A PLAIN span delete, whitespace left exactly as written: deleting
+        // `\f*` out of `text \f* more` leaves two spaces, and eating one is a
+        // second edit nobody asked for. Extra horizontal whitespace is legal
+        // everywhere in USFM — a formatter's business, not a fix's.
         let span = &doc.tokens[token as usize];
         out.push_fixed(Observation::one(code, token), span.start, span.end(), b"");
     }
@@ -194,15 +190,13 @@ impl Structure {
 
         // A container's `-e` point claims to end a container; whether it did is
         // the PARENT's close to say, which is the very next event if it did.
-        // (A `-e` milestone is a Point by construction, so [`shape_of`] is not
-        // consulted here — see its `end` arm.)
         if opener.kind() == (TokenKind::Milestone { end: true }) && is_container_row(marker_idx) {
             self.pending_end = id;
         }
 
         // A paragraph with nothing under it but line endings. `\b` abstains by
-        // its `SingleNewline` delimiter — the column that says "this row takes
-        // no content" (see the row).
+        // its `SingleNewline` delimiter: the column that says "takes no
+        // content".
         if generated::kind(marker_idx) == MarkerKind::Paragraph
             && generated::ws_after_name(marker_idx) != Ws::SingleNewline
             && is_empty_paragraph(tokens, cst, node)
@@ -210,10 +204,9 @@ impl Structure {
             out.push(Observation::one(Code::EmptyParagraph, anchor));
         }
 
-        // THE FAST OUT, and it is most of this machine's budget: 1.73M of
-        // en_ult's 1.76M nodes close Explicit, and a normally-closed frame has
-        // no verdict to report — so the shape question (which reads the row and
-        // peeks at the next node) is asked only of the ones that do.
+        // THE FAST OUT, most of this machine's budget: 1.73M of en_ult's 1.76M
+        // nodes close Explicit with no verdict to report, so the shape question
+        // (a row read plus a peek at the next node) is asked only of the rest.
         let reason = node.close_reason();
         if matches!(reason, CloseReason::Explicit | CloseReason::Implicit) {
             return;
@@ -221,8 +214,8 @@ impl Structure {
         let shape = shape_of(tokens, cst, id as usize);
 
         let code = match reason {
-            // The walker judged these normal. Note peers and displaced
-            // paragraphs both land here, and both are silent by ruling.
+            // The walker judged these normal — note peers and displaced
+            // paragraphs land here, and both are silent.
             CloseReason::Explicit | CloseReason::Implicit => None,
             CloseReason::Recovery => Some(match shape {
                 Shape::Container => Code::UnterminatedContainer,
@@ -231,10 +224,9 @@ impl Structure {
                     MarkerKind::Note => Code::UnclosedNote,
                     MarkerKind::Character => Code::UnclosedChar,
                     // Defensive: only RequiredExplicit/SelfClosingMilestone
-                    // rows are ever stamped Recovery, and on a Plain node that
-                    // means a note or a character marker. A row that grows a
-                    // third closer-wanting kind lands here rather than
-                    // panicking on real data.
+                    // rows are stamped Recovery, and on a Plain node that is a
+                    // note or a character marker. A third closer-wanting kind
+                    // lands here rather than panicking on real data.
                     _ => Code::UnclosedAtEof,
                 },
             }),
@@ -246,9 +238,8 @@ impl Structure {
         };
         let Some(code) = code else { return };
 
-        // Every one of these five findings has the same repair — write the
-        // ending the author left out — so the TEXT is a question about the
-        // node's shape, not about which code fired.
+        // All five findings share one repair — write the ending the author left
+        // out — so the TEXT depends on the node's shape, not on the code.
         let mut buf = [0u8; CLOSER_CAP];
         let text = match shape {
             Shape::Container => container_end_text(marker_idx, &mut buf),
@@ -287,22 +278,19 @@ fn consumed_by(doc: &Doc, closing: u32, child: u32) -> bool {
 
 /// The scratch every "write the missing ending" fix builds into. Enough for the
 /// table's two worst cases — `\+` + the longest name (6 bytes) + `*`, and
-/// `\table-e\*` — with room for a spelling the table does not have yet. It has
-/// nothing to do with [`FixStr::CAP`]: text longer than that splits, and this is
-/// only how much of it is composed at once.
+/// `\table-e\*` — with room to spare. Unrelated to [`FixStr::CAP`]: longer text
+/// splits, and this is only how much is composed at once.
 const CLOSER_CAP: usize = 16;
 
 /// The closer the author never wrote, in THEIR spelling: the opening token's own
 /// bytes with the folded delimiter trimmed, plus `*`.
 ///
-/// The row NAME would be wrong twice over — it is canonical, so `\+nd` would
-/// come back as `\nd*` (losing the nesting the author wrote) and `\q2` as `\q*`
-/// (losing the level). The token's bytes are the only record of the spelling in
-/// force, exactly as `spelled_level` reads them for `numbering-mix`.
+/// The row NAME would be wrong twice over — being canonical, it turns `\+nd`
+/// into `\nd*` (losing the nesting) and `\q2` into `\q*` (losing the level). The
+/// token's bytes are the only record of the spelling in force.
 ///
-/// `None` — no fix — for a span we cannot re-emit as short ASCII. Unreachable on
-/// today's table (every closer-wanting row is a known ASCII name), and cheaper
-/// than being wrong if a configuration channel ever gives row 0 real rows.
+/// `None` — no fix — for a span we cannot re-emit as short ASCII: unreachable on
+/// today's table, and cheaper than being wrong if configured rows ever arrive.
 fn closer_text<'a>(span: &[u8], buf: &'a mut [u8; CLOSER_CAP]) -> Option<&'a [u8]> {
     let name = trim_end_ws(span);
     if name.len() + 1 > buf.len() || !name.is_ascii() {
@@ -315,10 +303,9 @@ fn closer_text<'a>(span: &[u8], buf: &'a mut [u8; CLOSER_CAP]) -> Option<&'a [u8
 
 /// A U25003 container's end milestone: `\list-e\*`, `\table-e\*`.
 ///
-/// Built from the ROW name here, and that is not an inconsistency with
-/// [`closer_text`]: the `-s`/`-e` suffix pair is the row's own spelling of open
-/// and close, so the author's `-s` bytes are not text this fix can reuse — a
-/// bare `\list` opens a container too, and its ending is still `\list-e\*`.
+/// Built from the ROW name, unlike [`closer_text`]: the `-s`/`-e` pair is the
+/// row's own spelling of open and close, and a bare `\list` opens a container
+/// too, whose ending is still `\list-e\*`.
 fn container_end_text(
     marker_idx: generated::MarkerIdx,
     buf: &mut [u8; CLOSER_CAP],
@@ -337,12 +324,11 @@ fn container_end_text(
 /// Where a missing ending BELONGS: the node's last content byte.
 ///
 /// The extent END is a token boundary, and the last token of an unclosed node is
-/// very often the newline that ended the line — so inserting there strands the
-/// closer on the next line's doorstep (`\ft note\n\f*\v 5`). Backing off over
-/// trailing structural whitespace instead puts it where an author would have
-/// typed it: `\ft note\f*\n\v 5`. The `floor` (the opening marker's own span
-/// end) is what keeps the backoff out of the marker itself, so an empty
-/// `\add ` gets `\add \add*` and never `\add\add* `.
+/// often the newline that ended the line, so inserting there strands the closer
+/// on the next line's doorstep (`\ft note\n\f*\v 5`). Backing off over trailing
+/// structural whitespace puts it where an author would type it
+/// (`\ft note\f*\n\v 5`). The `floor` — the opening marker's span end — keeps
+/// the backoff out of the marker, so `\add ` gets `\add \add*`.
 fn content_end(source: &[u8], extent: Range<u32>, floor: u32) -> u32 {
     let mut at = extent.end;
     while at > floor && at > extent.start && is_structural_ws(source[at as usize - 1]) {
@@ -360,12 +346,11 @@ fn trim_end_ws(span: &[u8]) -> &[u8] {
     &span[..end]
 }
 
-/// Does this node hold anything a reader would see? A child NODE always
-/// counts; among token children only the node's own OPENING marker (which the
-/// walker files as its first child) and a `Newline` do not. Attribute lists DO
-/// count — `\p|cat="x"|` with nothing after it carries metadata and is a
-/// different authoring fact from a bare `\p`, and lumping the two together
-/// would report the deliberate one.
+/// Does this node hold anything a reader would see? A child NODE always counts;
+/// among token children only the node's own OPENING marker (filed as its first
+/// child) and a `Newline` do not. Attribute lists DO count — `\p|cat="x"|` with
+/// nothing after it carries metadata, which is a deliberate authoring fact and
+/// not an empty paragraph.
 fn is_empty_paragraph(tokens: &[Token], cst: &Cst, node: &Node) -> bool {
     cst.child_ids[node.children.start as usize..node.children.end as usize]
         .iter()
@@ -389,7 +374,7 @@ mod tests {
 
     #[test]
     fn unclosed_note() {
-        // `\c` is not allowed inside a footnote, so the walker stamps the note
+        // `\c` cannot live inside a footnote, so the walker stamps the note
         // Recovery — the shape of both live corpus findings.
         let (tokens, obs) = findings("\\c 1\n\\p \\v 1 a\\f + \\ft note\\c 2\n\\p b");
         assert_eq!(
@@ -403,11 +388,9 @@ mod tests {
 
     #[test]
     fn a_note_holding_nested_character_markers_is_silent() {
-        // bsb GEN 2:4, the bytes that used to produce an unclosed-note here and
-        // an orphan `\f*` downstream: the note's `\fq` holds a `\+nd`. Since
-        // the 2026-08-19 class-wide curation of the character rows' contexts
-        // the char nests instead of displacing, so this well-formed note is
-        // simply CLEAN — end to end, lex → build → lint.
+        // bsb GEN 2:4: the note's `\fq` holds a `\+nd`. Character rows carry
+        // Footnote in their context masks, so the char NESTS instead of
+        // displacing the note, and this well-formed note is clean end to end.
         let (_, obs) = findings(
             "\\c 2\n\\p \\v 1 in the beginning\n\\v 2 more\n\\v 3 more\n\\v 4 the \\nd Lord\\nd*\\f + \\fr 2:4 \\fq \\+nd Lord\\+nd*\\ft or \\fq \\+nd God\\+nd*\\ft , the proper name.\\f* God made them.",
         );
@@ -487,8 +470,8 @@ mod tests {
 
     #[test]
     fn orphan_container_end() {
-        // The `-e` point closes Explicit at its own `\*` — nothing about the
-        // terminator is orphaned; the CONTAINER it claims to end never opened.
+        // The `-e` point closes Explicit at its own `\*`: the CONTAINER it
+        // claims to end never opened.
         let (tokens, obs) = findings("\\p text\n\\list-e\\*");
         assert_eq!(
             obs,

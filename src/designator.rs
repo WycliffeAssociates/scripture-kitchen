@@ -2,73 +2,53 @@
 //! [`TokenKind::Designator`](crate::TokenKind::Designator) span.
 //!
 //! The scanner carves the region after `\c`/`\v` as ONE token and never looks
-//! at its bytes (scanner.rs `payload_end`). This module is the judgement half:
-//! span in, [`Designator`] out. It has its own module because ORDERING LINT is
-//! only its first consumer — the vref/reference exports want exactly the same
-//! reading, and the comparison rules below are the rules they will inherit.
+//! at its bytes (scanner.rs `payload_end`); this module is the judgement half:
+//! span in, [`Designator`] out. Ordering lint is only the first consumer — the
+//! vref/reference exports inherit the same reading and the rules below.
 //!
-//! # The patterns
-//!
-//! VERSE (the spec's own pattern, quoted in planning/NEXT-STEPS.md):
+//! # By example (span in → what it IS)
 //!
 //! ```text
-//! [1-9][0-9]*[\p{L}\p{Mn}]*(‏?[-,][0-9]+[\p{L}\p{Mn}]*)*
+//! 12       →  first 12, last 12
+//! 12a      →  first 12, last 12    a SEGMENT is a label, not a coordinate
+//! 12-14    →  first 12, last 14
+//! 1,3      →  first 1,  last 3     the endpoints; the hole is not modelled
+//! 3-1      →  first 3,  last 3     `last` is the LARGEST number, so first <= last
+//! 1<RLM>-3 →  first 1,  last 3     U+200F belongs to the SEPARATOR, not the segment
+//! 01       →  Malformed            no leading zero (but a continuation `1-03` is fine)
+//! 1-       →  Malformed            separator with nothing after it
 //! ```
 //!
-//! i.e. a leading integer with no leading zero, an optional letter/mark
-//! SEGMENT suffix (`12a`, `7ب`), then any number of `-` range or `,` list
-//! continuations, each of which may be preceded by U+200F RIGHT-TO-LEFT MARK
-//! (RTL scripts write the separator with the mark so the digits order
-//! visually). Continuation numbers are `[0-9]+` — the spec allows a leading
-//! zero there and we follow it rather than inventing a stricter rule.
-//!
-//! CHAPTER is the degenerate case: a bare positive integer. The 3.1 spec gives
-//! no explicit pattern for `\c`'s number, but the chapter milestone's `sid`
-//! attribute is patterned `[A-Z1-4]{3} ?[0-9]+` — digits only — and every
-//! example is numeric. ASSUMPTION RECORDED: `\c 12b` is MALFORMED here. If a
-//! real corpus ever shows lettered chapters, this is the one function to
-//! revisit.
+//! VERSE follows the spec's own pattern, `[1-9][0-9]*[\p{L}\p{Mn}]*` then any
+//! number of `RLM?[-,][0-9]+[\p{L}\p{Mn}]*` continuations. CHAPTER has no spec
+//! pattern, but the chapter milestone's `sid` is `[A-Z1-4]{3} ?[0-9]+` — digits
+//! only — so a bare integer it is, and `\c 12b` is MALFORMED. That assumption
+//! is the module's only one, and [`chapter`] the one place to revisit it.
 //!
 //! # Comparison rules (these become vref's)
 //!
-//! - A designator COVERS a closed integer range. `12` covers 12..=12,
-//!   `12-14` covers 12..=14, `1,3` covers 1..=3 (the list's endpoints; we do
-//!   not model the hole, because no consumer has asked for set semantics and
-//!   guessing one would be synthesis).
-//! - [`Designator::Wellformed::first`] is the FIRST component's number — what
-//!   a reference sorts by. [`Designator::Wellformed::last`] is the LARGEST
-//!   number anywhere in the designator — what the next verse must exceed.
-//!   For every sane designator these are the two endpoints; for a backwards
-//!   one (`3-1`) `last` stays 3, so `first <= last` always holds.
-//! - Two designators OVERLAP when neither's `last` is below the other's
-//!   `first`. Ordering lint's reading of an overlap is: equal firsts (or a
-//!   first landing exactly on the previous `last`) is a DUPLICATE, a first
-//!   below the previous `last` is OUT OF ORDER.
-//! - The SEGMENT suffix (`12a`) participates in no comparison at all. It is a
-//!   partial-verse label, not a coordinate, and two segments of one verse are
-//!   the same verse — which is precisely why `\v 12a` then `\v 12b` must not
-//!   read as a duplicate. Callers that need segment identity read the span.
-//! - Numbers SATURATE at [`u32::MAX`]. A designator of a thousand digits is
-//!   nonsense either way; it must never panic, and saturating keeps the
-//!   ordering monotonic instead of wrapping into a false "out of order".
+//! - `first` is what a reference sorts by, `last` what the next verse must
+//!   exceed; two designators OVERLAP when neither's `last` is below the other's
+//!   `first`. Lint reads an equal first (or one landing exactly on the previous
+//!   `last`) as a DUPLICATE, a lower one as OUT OF ORDER.
+//! - The SEGMENT suffix takes part in no comparison: two segments of one verse
+//!   are the same verse. Callers needing segment identity read the span.
+//! - Numbers SATURATE at [`u32::MAX`]: junk either way, but it must be ORDERED
+//!   junk rather than wrap into a false "out of order".
 //!
 //! # The Unicode reading (deliberately lenient)
 //!
-//! `\p{L}` and `\p{Mn}` would need a general-category table, and this crate
-//! ships no dependencies. The rule used instead: a segment character is an
-//! ASCII letter, or ANY non-ASCII scalar. That accepts a few things the spec
-//! would reject (a non-ASCII punctuation mark used as a segment), and rejects
-//! nothing the spec allows. That direction is chosen on purpose — lint's
-//! standing law is that crying wolf on valid text is worse than missing a
-//! nicety, and `designator-malformed` firing on a legitimate Arabic or
-//! Devanagari segment would be exactly that.
+//! `\p{L}`/`\p{Mn}` would need a general-category table and this crate ships no
+//! dependencies, so a segment character is an ASCII letter or ANY non-ASCII
+//! scalar: accepts a little the spec rejects, rejects nothing it allows.
+//! `designator-malformed` crying wolf on a legitimate Arabic or Devanagari
+//! segment would be worse than missing a nicety.
 
 /// What one designator span IS.
 ///
-/// Only two states, and no borrowed bytes: ordering lint needs the covered
-/// range and nothing else, and a `Malformed` designator is never
-/// reinterpreted — it is flagged and excluded from the sequence (never
-/// repaired, per the standing law).
+/// Two states and no borrowed bytes: consumers need the covered range and
+/// nothing else, and a `Malformed` designator is flagged and excluded from the
+/// sequence, never reinterpreted or repaired.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Designator {
     /// Matches the pattern. `first <= last`, both saturating.
@@ -95,8 +75,8 @@ const RLM: [u8; 3] = [0xE2, 0x80, 0x8F];
 pub fn verse(span: &[u8]) -> Designator {
     let mut at = 0;
 
-    // The leading integer: `[1-9][0-9]*`, so a leading zero is malformed
-    // rather than silently equal to the unpadded number.
+    // A leading zero is malformed rather than silently equal to the unpadded
+    // number.
     let Some(first) = take_number(span, &mut at, false) else {
         return Designator::Malformed;
     };
@@ -104,17 +84,15 @@ pub fn verse(span: &[u8]) -> Designator {
     let mut last = first;
 
     while at < span.len() {
-        // The RTL mark is optional and belongs to the SEPARATOR, not to the
-        // segment before it — consumed here so `1‏-3` and `1-3` read alike.
+        // The RTL mark belongs to the SEPARATOR, not the segment before it, so
+        // `1‏-3` and `1-3` read alike.
         if span[at..].starts_with(&RLM) {
             at += RLM.len();
         }
         match span.get(at) {
             Some(b'-' | b',') => at += 1,
-            // Anything else after a well-formed prefix is trailing junk.
             _ => return Designator::Malformed,
         }
-        // Continuation numbers are `[0-9]+`: a leading zero IS allowed here.
         let Some(number) = take_number(span, &mut at, true) else {
             return Designator::Malformed;
         };
@@ -153,8 +131,7 @@ fn take_number(span: &[u8], at: &mut usize, leading_zero_ok: bool) -> Option<u32
         if !byte.is_ascii_digit() {
             break;
         }
-        // Saturating, never wrapping: a 40-digit designator is junk, but it
-        // must stay ORDERED junk (see the module doc).
+        // Saturating, never wrapping: junk must stay ORDERED junk.
         value = value
             .saturating_mul(10)
             .saturating_add(u32::from(byte - b'0'));
@@ -174,10 +151,9 @@ fn take_segment(span: &[u8], at: &mut usize) {
             }
             *at += 1;
         } else {
-            // A continuation byte here would mean the span is not valid UTF-8;
-            // token spans always are, so this walks whole scalars. The RTL
-            // mark is the one non-ASCII scalar that must NOT be eaten as a
-            // segment — it introduces a separator.
+            // Token spans are always valid UTF-8, so this walks whole scalars.
+            // The RTL mark is the one non-ASCII scalar a segment must not eat:
+            // it introduces a separator.
             if span[*at..].starts_with(&RLM) {
                 return;
             }
@@ -211,11 +187,9 @@ mod tests {
 
     #[test]
     fn segments_do_not_change_the_range() {
-        // `12a` and `12b` are the same verse — that is the whole reason the
-        // segment is not part of the comparison.
+        // `12a` and `12b` are the same verse.
         assert_eq!(v("12a"), well(12, 12));
         assert_eq!(v("12b"), well(12, 12));
-        // Multi-letter and non-ASCII segments, under the lenient reading.
         assert_eq!(v("7ab"), well(7, 7));
         assert_eq!(v("7ب"), well(7, 7));
         assert_eq!(v("7\u{0951}"), well(7, 7)); // a combining mark (Mn)
@@ -227,8 +201,8 @@ mod tests {
         assert_eq!(v("1,3"), well(1, 3));
         assert_eq!(v("1-2,4-6"), well(1, 6));
         assert_eq!(v("12a-14b"), well(12, 14));
-        // Backwards is well-FORMED (the pattern allows it); `last` stays the
-        // largest number so ordering never sees a range that runs uphill.
+        // Backwards is well-FORMED; `last` stays the largest number, so
+        // ordering never sees a range that runs uphill.
         assert_eq!(v("3-1"), well(3, 3));
     }
 
@@ -236,7 +210,6 @@ mod tests {
     fn the_rtl_mark_is_part_of_the_separator() {
         assert_eq!(v("1\u{200F}-3"), well(1, 3));
         assert_eq!(v("1\u{200F},3"), well(1, 3));
-        // Trailing, with nothing after it: junk.
         assert_eq!(v("1\u{200F}"), Designator::Malformed);
     }
 
@@ -257,7 +230,7 @@ mod tests {
         assert_eq!(v("1--2"), Designator::Malformed);
         assert_eq!(v("1.2"), Designator::Malformed);
         assert_eq!(v("1a2"), Designator::Malformed); // digits cannot follow a segment
-        assert_eq!(v("1 2"), Designator::Malformed); // the scanner never carves this, but be sure
+        assert_eq!(v("1 2"), Designator::Malformed);
     }
 
     #[test]
@@ -272,7 +245,7 @@ mod tests {
     fn chapters_are_bare_integers() {
         assert_eq!(c("1"), well(1, 1));
         assert_eq!(c("150"), well(150, 150));
-        // The recorded assumption: no segments, no ranges, no leading zero.
+        // No segments, no ranges, no leading zero.
         assert_eq!(c("12b"), Designator::Malformed);
         assert_eq!(c("1-2"), Designator::Malformed);
         assert_eq!(c("01"), Designator::Malformed);

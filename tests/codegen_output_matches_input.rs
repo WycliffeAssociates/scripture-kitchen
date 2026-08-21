@@ -1,9 +1,8 @@
-//! Standing guard that `src/tables/generated.rs` is what the current authored
-//! rows + generator would produce. If this fails, the fix is always the same:
-//! `cargo run --bin codegen`, then read the diff.
+//! `src/tables/generated.rs` is what the current authored rows + generator
+//! would produce. On failure the fix is always `cargo run --bin codegen`.
 //!
 //! It exists because `generated.rs` is CHECKED IN — consumers never run codegen,
-//! so nothing else would ever notice a row edit that was not regenerated.
+//! so nothing else would notice a row edit that was not regenerated.
 
 use usfm_onion_2::tables::schema::{Numbering, SpellingShape};
 use usfm_onion_2::tables::{emit, generated, rows};
@@ -39,10 +38,9 @@ fn generated_rs_is_not_stale() {
     }
 }
 
-/// The generator's whole job, stated as a round trip: every authored row's own
-/// name must resolve back to that row's index, in every spelling the row claims.
-/// A wrong u64 key, a bad strip order, or an off-by-one in the emitted match all
-/// show up here.
+/// The generator's whole job as a round trip: every authored row's own name
+/// resolves back to that row's index, in every spelling the row claims. A wrong
+/// u64 key, a bad strip order or an off-by-one in the emitted match shows here.
 #[test]
 fn every_row_resolves_to_itself() {
     for (idx, row) in rows::ROWS.iter().enumerate() {
@@ -54,7 +52,7 @@ fn every_row_resolves_to_itself() {
             _ => SpellingShape::PlainOnly,
         };
 
-        // The bare spelling is always legal [D].
+        // The bare spelling is always legal.
         let mut spellings = vec![row.marker.to_string()];
         match row.numbered_max {
             Numbering::UpTo(cap) => {
@@ -97,7 +95,7 @@ fn unknown_markers_land_on_the_empty_row() {
         b"notamarker", // unknown name
         b"s5",         // real name, illegal level (`s` is UpTo(4))
         b"p9",         // real name, `p` takes no digits
-        b"ADD",        // right name, wrong case — data, per the schema's lint note
+        b"ADD",        // right name, wrong case
     ];
     for case in cases {
         assert_eq!(
@@ -109,9 +107,8 @@ fn unknown_markers_land_on_the_empty_row() {
     }
 }
 
-/// The derived facts codegen bakes must agree with the schema `const fn`s they
-/// were baked from — the point of baking them is that no consumer ever
-/// recomputes, so nothing else would catch a drift.
+/// The facts codegen bakes agree with the schema `const fn`s they came from.
+/// No consumer ever recomputes them, so nothing else would catch a drift.
 #[test]
 fn baked_derived_facts_match_the_schema() {
     for (idx, row) in rows::ROWS.iter().enumerate() {
@@ -125,14 +122,11 @@ fn baked_derived_facts_match_the_schema() {
     }
 }
 
-/// The context mask is EXACTLY what the row authored — nothing added.
-///
-/// This is a regression guard with a story: the generator used to PROMOTE bits
-/// here (Footnote/CrossReference onto any block-legal character marker, and
-/// PeripheralContent from ChapterContent). It made `allowed_in(fm, Footnote)`
-/// true against `fm`'s own spec page, and it flattened a real per-marker
-/// distinction — `bd` and `it` do list Footnote, `nd`/`add`/`wj`/`fm` do not.
-/// Deleted 2026-08-12. If a marker is legal somewhere, its ROW says so.
+/// The context mask is EXACTLY what the row authored — nothing added. The
+/// generator must never PROMOTE bits (e.g. Footnote onto every block-legal
+/// character marker): that flattens a real per-marker distinction — `bd` and
+/// `it` do list Footnote, `nd`/`add`/`wj`/`fm` do not. If a marker is legal
+/// somewhere, its ROW says so.
 #[test]
 fn context_mask_invents_nothing() {
     for (idx, row) in rows::ROWS.iter().enumerate() {

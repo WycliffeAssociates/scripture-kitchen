@@ -9,19 +9,15 @@ use crate::tables::generated;
 use crate::tables::schema::MarkerKind;
 use crate::{Token, TokenKind};
 
-/// The Ordering subsystem: one linear sweep over the tokens, ignoring the CST
-/// entirely
+/// The Ordering subsystem: one linear sweep over the tokens, ignoring the CST.
 ///
-/// It is its own pass because it is the only part of lint that carries
-/// CROSS-TOKEN state — the previous chapter, the previous verse, whether a
-/// `\c` has been seen at all — and threading that through the row-lookup
-/// sweep would entangle two unrelated shapes of rule.
+/// Its own pass because it is the only part of lint carrying CROSS-TOKEN state —
+/// the previous chapter, the previous verse, whether a `\c` has been seen at all.
 ///
 /// Two adjacency facts it depends on, both read off the scanner (scanner.rs
 /// `text_arm`/`newline_arm`): a `\c`/`\v` marker and its `Designator` are
-/// SEPARATE, adjacent tokens; and the only thing that can sit between them is
-/// an attribute list (`\v |script="Arab"| 1`), because a newline or any other
-/// marker abandons the payload expectation.
+/// SEPARATE, adjacent tokens; and only an attribute list can sit between them
+/// (`\v |script="Arab"| 1`), since anything else abandons the payload.
 ///
 /// Sequence policy, in one place:
 ///
@@ -32,9 +28,8 @@ use crate::{Token, TokenKind};
 /// - Verse state resets at every `\c`; chapter state runs for the whole book.
 /// - Ranges count as their span: after `\v 12-14` the sequence expects 15.
 ///
-/// Two of its four anomaly codes offer a fix — renumber to what the sequence
-/// expected — and both go through [`renumberable`], which is where the honest
-/// half of that fix lives.
+/// Two of the four anomaly codes offer a renumber fix, both through `renumber`.
+///
 /// Which marker is still owed its `Designator` token.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Awaiting {
@@ -49,10 +44,10 @@ pub(crate) struct Ordering {
     /// (number, the designator token that carried it) — `second` on a finding.
     prev_chapter: Option<(u32, u32)>,
     prev_verse: Option<(u32, u32)>,
-    /// True until this chapter's first verse has been read (well-formed or
-    /// not): the window in which `missing-verse-one` can fire. Starts FALSE —
-    /// the rule is about a CHAPTER's first verse, so a verse ahead of any `\c`
-    /// is verse-before-first-chapter's story alone, never also this one's.
+    /// True until this chapter's first verse has been read (well-formed or not):
+    /// the window in which `missing-verse-one` can fire. Starts FALSE, because
+    /// the rule is about a CHAPTER's first verse and a verse ahead of any `\c`
+    /// belongs to `verse-before-first-chapter` alone.
     first_verse_slot: bool,
     seen_chapter: bool,
     first_verse_token: Option<u32>,
@@ -93,9 +88,8 @@ impl Ordering {
                         Designator::Malformed => {
                             out.push(Observation::one(Code::DesignatorMalformed, idx));
                             // RESYNC, not just skip: the number is unknown, so
-                            // the NEXT chapter has nothing legitimate to be
-                            // compared against either. Dropping the state is
-                            // what keeps one bad number to one finding.
+                            // the NEXT chapter has nothing to compare against.
+                            // Dropping state keeps one typo to one finding.
                             self.prev_chapter = None;
                         }
                         Designator::Wellformed { first: number, .. } => {
@@ -134,16 +128,11 @@ impl Ordering {
                     match designator::verse(span_of(source, token)) {
                         Designator::Malformed => {
                             out.push(Observation::one(Code::DesignatorMalformed, idx));
-                            // RESYNC. Both slots are dropped, so the verse
-                            // AFTER the bad one is compared against nothing
-                            // and the sequence restarts from it. Skipping only
-                            // the malformed token itself is not enough: real
-                            // data proves it. en_ulb ZEC 12:7 is written
-                            // `\v 7"` (no space before the quote), so the
-                            // designator is `7"`; leaving `self.prev_verse` at 6
-                            // then made the perfectly good `\v 8` look like a
-                            // gap — one typo, two findings, the second of them
-                            // a lie.
+                            // RESYNC: both slots drop, so the verse AFTER the
+                            // bad one compares against nothing. Skipping only
+                            // the malformed token is not enough — en_ulb ZEC
+                            // 12:7 writes `\v 7"`, and keeping `prev_verse` at
+                            // 6 makes the good `\v 8` look like a gap.
                             self.prev_verse = None;
                             self.first_verse_slot = false;
                         }
@@ -211,8 +200,8 @@ impl Ordering {
             }
             // Text, a newline, a closer, anything else: the payload window is
             // over, exactly as the scanner's is. Guarded rather than
-            // unconditional because this is the arm nearly every token in the
-            // corpus takes, and a perfectly-predicted branch beats a store.
+            // unconditional because nearly every token takes this arm, and a
+            // perfectly-predicted branch beats a store.
             _ if self.awaiting != Awaiting::None => {
                 if let Awaiting::Chapter(marker) = self.awaiting {
                     out.push(Observation::one(Code::ChapterWithoutDesignator, marker));
@@ -253,12 +242,8 @@ mod tests {
     use super::*;
     use crate::lint::tests::{codes, findings, token_named};
 
-    // -----------------------------------------------------------------
-    // Phase 2: ordering
-    // -----------------------------------------------------------------
-
-    /// The index of the nth `Designator` token — the anchor every sequence
-    /// rule uses (the marker and its number are separate tokens).
+    /// The index of the nth `Designator` token — the anchor every sequence rule
+    /// uses (the marker and its number are separate tokens).
     fn designator_at(tokens: &[Token], nth: usize) -> u32 {
         tokens
             .iter()
@@ -279,9 +264,8 @@ mod tests {
 
     #[test]
     fn designator_malformed_flags_once_and_resyncs() {
-        // The en_ulb ZEC 12:7 shape: `\v 2"` glues the quote to the number,
-        // so the carved span is `2"`. ONE finding — the perfectly good `\v 3`
-        // that follows must NOT be reported as a gap.
+        // The en_ulb ZEC 12:7 shape: `\v 2"` glues the quote to the number, so
+        // the span is `2"`. ONE finding — the good `\v 3` is not a gap.
         let (tokens, obs) = findings("\\c 1\n\\p \\v 1 a\n\\v 2\" b\n\\v 3 c\n");
         assert_eq!(
             obs,
@@ -373,8 +357,8 @@ mod tests {
 
     #[test]
     fn segments_and_rtl_marks_are_ordinary_designators() {
-        // Two segments of one verse are the SAME verse, not a duplicate: the
-        // suffix takes no part in the comparison.
+        // Two segments of one verse are the SAME verse: the suffix takes no
+        // part in the comparison.
         let (_, obs) = findings("\\c 1\n\\p \\v 1 a \\v 2a b \\v 3 c");
         assert_eq!(obs, vec![]);
 
@@ -396,8 +380,7 @@ mod tests {
             }]
         );
 
-        // Starting well above 1 is still the SAME single finding — never a
-        // gap as well.
+        // Starting well above 1 is still that one finding, never a gap too.
         let (_, obs) = findings("\\c 1\n\\p \\v 7 a");
         assert_eq!(codes(&obs), vec![Code::MissingVerseOne]);
     }
@@ -426,8 +409,7 @@ mod tests {
             )]
         );
 
-        // With no `\c` at all it is `missing-chapter`'s story instead — the
-        // two never both describe the same token.
+        // With no `\c` at all it is `missing-chapter` instead: never both.
         let (tokens, obs) = findings("\\p \\v 1 a \\v 2 b");
         assert_eq!(
             obs,
@@ -437,9 +419,8 @@ mod tests {
             )]
         );
 
-        // A pre-chapter verse numbered other than 1 is still ONLY this rule's
-        // story — `missing-verse-one` is about a CHAPTER's first verse and
-        // stays quiet until a `\c` exists.
+        // A pre-chapter verse numbered other than 1 is still only this code:
+        // `missing-verse-one` is about a CHAPTER's first verse.
         let (tokens, obs) = findings("\\p \\v 5 a\n\\c 1\n\\p \\v 1 c");
         assert_eq!(
             obs,
@@ -459,8 +440,8 @@ mod tests {
 
     #[test]
     fn chapter_without_designator() {
-        // The scanner abandons the payload expectation at a newline, so this
-        // `\c` really does own no number.
+        // The scanner abandons the payload at a newline: this `\c` owns no
+        // number.
         let (tokens, obs) = findings("\\c\n\\p \\v 1 a");
         assert_eq!(
             obs,
@@ -480,10 +461,9 @@ mod tests {
             )]
         );
 
-        // An attribute list is stepped over, not mistaken for the payload.
-        // (The name is `x-`: `\v` defines no attributes of its own, so a
-        // canonical-looking one would draw an `attr-unknown-name` hint from the
-        // k/v rules and this test is not about that.)
+        // An attribute list is stepped over, not mistaken for the payload. (An
+        // `x-` name: `\v` defines no attributes, so any other would draw an
+        // `attr-unknown-name` hint this test is not about.)
         let (_, obs) = findings("\\c 1\n\\p \\v |x-script=\"Arab\"| 1 a");
         assert_eq!(obs, vec![]);
     }

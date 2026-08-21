@@ -1,7 +1,7 @@
-//! The FLAT machine: every rule whose evidence is a token row, its span, or
-//! the one token before it — row lookup, form, payload, adjacency, the version
-//! family, and the positional band. The ATTRIBUTE family is the one arm with a
-//! state cluster of its own, and it lives in [`super::attr_rules`].
+//! The FLAT machine: every rule whose evidence is a token row, its span, or the
+//! one token before it — row lookup, form, payload, adjacency, version, the
+//! positional band. The ATTRIBUTE arm keeps its own state cluster, in
+//! [`super::attr_rules`].
 
 use super::attr_rules::AttrRules;
 use super::rows::version_row;
@@ -14,7 +14,7 @@ use crate::tables::schema::{
 };
 use crate::{Token, TokenKind};
 
-/// Which designator family may be re-numbered at this point.
+/// Which designator family an annotation may still follow here.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Window {
     Closed,
@@ -22,31 +22,16 @@ enum Window {
     Verse,
 }
 
-/// The FLAT machine: every rule whose evidence is a token row, its span, or the
-/// one token before it — the row-lookup rules, the two Form rules, the caller
-/// and numbering payload rules, adjacency, and (through [`AttrRules`]) the
-/// attribute family. Fed one leaf at a time, exactly as the sketch draws it
-/// ("adjacency + form + payload + attributes: single token walk").
+/// Fed one leaf at a time. Its lookbehind lives in fields rather than in four
+/// separate sweeps' locals for a measured reason: a token sweep over this corpus
+/// costs ~2.5 ns/token in dispatch alone however little each arm does, so a
+/// family that needs no more than the last marker earns no traversal of its own.
 ///
-/// It carries a few small pieces of lookbehind state, and they are its fields
-/// rather than four separate sweeps' locals for a measured reason: a token
-/// sweep over this corpus costs ~2.5 ns/token in dispatch alone, however little
-/// each arm does, so a family that needs no more than the last marker earns no
-/// traversal of its own.
-///
-/// - **The adjacency window.** `\ca`/`\cp` are legal immediately after `\c`'s
-///   designator or after each other, `\va`/`\vp` likewise after `\v` — where
-///   "immediately" means "with nothing but whitespace between", because the
-///   scanner emits a Newline token at every line break and the spec's own
-///   examples put `\cp` on its own line. These markers open no scope, so the
-///   CST cannot see their misplacement; this is the only place the fact exists.
-/// - **The numbering-mix bitmasks**, closed out by the document simply ending.
-/// - **The positional BAND** (one u8, the closeout window): where the document
-///   has got to along `Scripture` → … → `ChapterContent`. Monotonic, so the
-///   whole judge is a mask AND and a `trailing_zeros` — no data, no stack.
+/// `\ca`/`\cp` are legal immediately after `\c`'s designator or after each other
+/// and `\va`/`\vp` after `\v`, where "immediately" allows whitespace between —
+/// the spec's own examples put `\cp` on its own line. They open no scope, so the
+/// CST cannot see their misplacement; the `window` is where the fact lives.
 pub(crate) struct Flat {
-    /// The `\usfm` version the header declared, the one fact this machine takes
-    /// from outside the walk.
     version: Option<UsfmVersion>,
     /// The four adjacency rows, resolved once instead of per token.
     ca: generated::MarkerIdx,
@@ -54,27 +39,24 @@ pub(crate) struct Flat {
     va: generated::MarkerIdx,
     vp: generated::MarkerIdx,
     window: Window,
-    /// The attribute family — its own state cluster, its own arms.
     attrs: AttrRules,
     /// How far along the POSITIONAL band the document has come, as a
     /// `SpecContext` discriminant (0 = `Scripture`, the state a book opens in).
+    /// Monotonic, so the whole judge is a mask AND and a `trailing_zeros`.
     band: u8,
     /// Levels-seen per numbered family, indexed by ROW: bit 0 = the bare
-    /// spelling, bit n = `\q<n>`, bit 15 = "already reported". A fixed array
-    /// rather than a map because the row index IS the family key and there are
-    /// only 153 rows — 306 bytes, no hashing, no allocation. `first_seen` is
-    /// only ever read when the mask says the family has been seen, so it needs
-    /// no sentinel initialization.
+    /// spelling, bit n = `\q<n>`, bit 15 = "already reported". An array rather
+    /// than a map because the row index IS the family key — 306 bytes, no
+    /// hashing. `first_seen` is read only where the mask says the family was
+    /// seen, so it needs no sentinel.
     levels: [u16; generated::ROW_COUNT],
     first_seen: [u32; generated::ROW_COUNT],
 }
 
 const REPORTED: u16 = 1 << 15;
 
-/// The context mask's POSITIONAL half — the eight bits
-/// [`SpecContext::is_positional`] names, and the only bits the band judge may
-/// look at. Folded from the enum itself so a new positional variant arrives
-/// here without an edit.
+/// The context mask's POSITIONAL half, the only bits the band judge may look at.
+/// Folded from the enum so a new positional variant arrives without an edit.
 const POSITIONAL: u32 = {
     let mut mask = 0;
     let mut at = 0;
@@ -117,9 +99,8 @@ impl Flat {
         let source = doc.source;
         let (ca, cp, va, vp) = (self.ca, self.cp, self.va, self.vp);
         match kind {
-            // Byte-exact membership first, then the case-folded retry: "known
-            // but lowercase" and "unknown" are different findings and exactly
-            // one of them fires.
+            // Byte-exact membership first, then the case-folded retry: exactly
+            // one of the two findings fires.
             TokenKind::BookCode => {
                 let span = span_of(source, token);
                 if books::is_book_code(span) {
@@ -129,8 +110,6 @@ impl Flat {
                 match folded {
                     // The one payload fix: the code IS a book identifier, so
                     // case-folding its three bytes is a splice and not a guess.
-                    // (`book-code-unknown` gets none — which identifier the
-                    // author meant is not a mechanical question.)
                     Some(upper) => out.push_fixed(
                         Observation::one(Code::BookCodeNotUppercase, idx),
                         token.start,
@@ -140,11 +119,9 @@ impl Flat {
                     None => out.push(Observation::one(Code::BookCodeUnknown, idx)),
                 }
             }
-            // Openers and milestones share this arm because they are the same
-            // thing to every rule below: the marker a list, a level or a
-            // designator belongs to. `nested` binds the two kinds' one
-            // spelling bit (`\+w`'s `+`, `\qt-e`'s `e`), and only the opener
-            // half ever reads it.
+            // Openers and milestones share this arm: to every rule below they
+            // are one thing, the marker a list, a level or a designator belongs
+            // to. `nested` binds the spelling bit (`\+w`'s `+`, `\qt-e`'s `e`).
             TokenKind::Marker { nested } | TokenKind::Milestone { end: nested } => {
                 let marker_idx = token.marker_idx;
                 let opener = matches!(kind, TokenKind::Marker { .. });
@@ -159,11 +136,8 @@ impl Flat {
                         && !is_structural_ws(source[token.start as usize - 1])
                     {
                         // A NEWLINE, not a space: the PARA railroad's newline
-                        // branch is the canonical spelling (its other branch,
-                        // `/${Ws}\\/` with Ws zero-or-more, makes hugging
-                        // grammatically legal — hence Hint severity), and the
-                        // fix proposes the preferred form the rest of the
-                        // corpus is written in.
+                        // branch is canonical, while its `/${Ws}\\/` branch (Ws
+                        // zero-or-more) makes hugging legal — hence Hint.
                         out.push_fixed(
                             Observation::one(Code::MarkerNotWsPreceded, idx),
                             token.start,
@@ -172,8 +146,8 @@ impl Flat {
                         );
                     }
                     // "The span absorbed no delimiter" is ONE byte to check: a
-                    // marker name never ends in whitespace, so a trailing
-                    // space or tab can only be the folded delimiter run.
+                    // marker name never ends in whitespace, so a trailing space
+                    // or tab can only be the folded delimiter run.
                     if wants_delimiter(marker_idx)
                         && !span_of(source, token)
                             .last()
@@ -185,23 +159,16 @@ impl Flat {
                         out.push(Observation::one(Code::DelimiterShape, idx));
                     }
 
-                    // --- the positional band ----------------------------
-                    // Stay if this marker is legal where we are; else advance
-                    // to the LOWEST of its positional contexts above us; else
-                    // every one of them is behind us and that is the finding.
-                    // Two instructions of state, and the mt#/cl/ip
-                    // dual-context question answers itself.
+                    // Stay if this marker is legal where we are; else advance to
+                    // the LOWEST of its positional contexts above us; else every
+                    // one is behind us and that is the finding. mt#/cl/ip's dual
+                    // contexts answer themselves.
                     //
-                    // A mask with any CONTAINER bit in it abstains, and this is
-                    // the lane's real boundary rather than a noise filter (it
-                    // was measured as one: `\add`'s mask carries BookTitles and
-                    // BookIntroduction, so without this every character marker
-                    // inside a paragraph would be "behind us"). A marker a
-                    // container licenses is judged by the WALKER's mask at pop
-                    // time — that is displacement, the other axis — so the band
-                    // speaks only for the markers whose sole license is where
-                    // the book has got to: `\id`, `\h`, `\toc#`, `\mt#`, the
-                    // introduction ladder, `\c`, and the paragraph rows.
+                    // A mask carrying any CONTAINER bit abstains — that is the
+                    // lane's boundary, not a noise filter. What a container
+                    // licenses is judged by the WALKER's mask at pop time (the
+                    // displacement axis), so the band speaks only for markers
+                    // whose sole license is where the book has got to.
                     let mask = generated::context_mask(marker_idx);
                     let positional = mask & POSITIONAL;
                     if positional != 0
@@ -216,17 +183,14 @@ impl Flat {
                         }
                     }
 
-                    // --- the Version family -----------------------------
-                    // The row's own BOOL is the filter; the five-row table
-                    // says since when. Reported at the OPENER only — a closer
-                    // is the same occurrence, and the fix rewrites both halves
-                    // from here.
+                    // The row's own BOOL is the filter; the five-row table says
+                    // since when. Reported at the OPENER only — a closer is the
+                    // same occurrence, and the fix rewrites both halves here.
                     if generated::deprecated(marker_idx) {
                         self.deprecated_marker(doc, idx, marker_idx, out);
                     }
                 }
 
-                // --- adjacency ------------------------------------------
                 let (code, opens) = if marker_idx == ca || marker_idx == cp {
                     (Some(Code::CaCpPlacement), Window::Chapter)
                 } else if marker_idx == va || marker_idx == vp {
@@ -239,9 +203,9 @@ impl Flat {
                         if self.window != opens {
                             out.push(Observation::one(code, idx));
                         }
-                        // The self.window stays open either way: `\ca 2\ca*\cp א`
-                        // is one legal run, and re-reporting every member of a
-                        // misplaced run turns one slip into three findings.
+                        // Open either way: `\ca 2\ca*\cp א` is one legal run,
+                        // and re-reporting each member of a misplaced run turns
+                        // one slip into three findings.
                         opens
                     }
                     None => match generated::kind(marker_idx) {
@@ -251,7 +215,6 @@ impl Flat {
                     },
                 };
 
-                // --- numbering-mix --------------------------------------
                 if has_levels(marker_idx) {
                     let slot = marker_idx as usize;
                     if self.levels[slot] == 0 {
@@ -277,18 +240,16 @@ impl Flat {
 
                 self.attrs.on_marker(idx, marker_idx, opener, nested);
             }
-            // Not an enumeration of `+`/`-`/`?` — those are the conventional
-            // values of one general run, and a caller of up to three bytes is
-            // taken as deliberate. See the row for why the width is what it is.
+            // Not an enumeration of `+`/`-`/`?`: those are conventions on one
+            // general run, and up to three bytes is taken as deliberate.
             TokenKind::NoteCaller => {
                 if span_of(source, token).len() > 3 {
                     out.push(Observation::one(Code::CallerShape, idx));
                 }
                 self.window = Window::Closed;
             }
-            // Whether a closer closed anything is [`Structure`]'s question,
-            // not this machine's: the answer is a property of the node that is
-            // about to close, and it arrives one event later.
+            // Whether a closer closed anything is [`Structure`]'s question: the
+            // answer is a property of the node about to close, one event later.
             TokenKind::ClosingMarker { nested } => {
                 if nested
                     && token.marker_idx != generated::UNRESOLVED
@@ -304,33 +265,30 @@ impl Flat {
             TokenKind::AttrList => self.attrs.on_attr_list(doc, idx, token, self.version, out),
             TokenKind::Text => {
                 self.attrs.on_text(doc, idx, token, out);
-                // GUARDED, and the guard is load-bearing: `\c 1 \ca` is the
-                // only shape that cares whether a Text run is blank, so asking
-                // the question unconditionally means reading every content byte
-                // in the document for a fact that matters after roughly one
-                // token in ten thousand.
+                // The guard is load-bearing: `\c 1 \ca` is the only shape that
+                // cares whether a Text run is blank, so asking unconditionally
+                // reads every content byte for a one-in-ten-thousand fact.
                 if self.window != Window::Closed
                     && !span_of(source, token).iter().all(|b| is_structural_ws(*b))
                 {
                     self.window = Window::Closed;
                 }
             }
-            // A line ending ends the ATTRIBUTE machine's reach, and
-            // deliberately leaves the adjacency window open: `\c 1` and its
-            // `\cp` are conventionally written on separate lines.
+            // Ends the ATTRIBUTE machine's reach and deliberately leaves the
+            // adjacency window open: `\c 1` and its `\cp` are conventionally
+            // written on separate lines.
             TokenKind::Newline => self.attrs.close_reach(),
-            // The designator of the `\c`/`\v`/`\ca`/`\vp` that opened the
-            // self.window belongs to the run; an optional break does not.
+            // The designator of whatever opened the window belongs to the run;
+            // an optional break does not.
             TokenKind::Designator => {}
             TokenKind::OptBreak => self.window = Window::Closed,
         }
     }
 
     /// A deprecated marker, and the rename that repairs it where the spec's
-    /// replacement is a rename.
-    ///
-    /// `#[inline(never)]` and behind `generated::deprecated`: five rows in 153
-    /// reach it, so the cost on every other marker is one bitfield test.
+    /// replacement is a rename. `#[inline(never)]` behind
+    /// `generated::deprecated`: five rows in 153 reach it, so the cost on every
+    /// other marker is one bitfield test.
     #[inline(never)]
     fn deprecated_marker(
         &self,
@@ -343,8 +301,7 @@ impl Flat {
             return;
         };
         // THE GATE: a book that declares no version is a book of its own era,
-        // and `\addpn` is correct in 2.x. The row's `severity: None` base says
-        // the same thing to a consumer reading the ladder.
+        // and `\addpn` is correct in 2.x.
         if !self
             .version
             .is_some_and(|declared| declared >= row.deprecated_in)
@@ -371,8 +328,7 @@ fn is_delimiter_byte(byte: u8) -> bool {
 }
 
 /// Does this row's `ws_after_name` REQUIRE something after the name? The
-/// optional forms (milestones' `Hs`, row 0's `NotRequired`) can never be
-/// missing one.
+/// optional forms (milestones' `Hs`, row 0's `NotRequired`) never can.
 fn wants_delimiter(marker_idx: generated::MarkerIdx) -> bool {
     matches!(
         generated::ws_after_name(marker_idx),
@@ -385,9 +341,8 @@ fn wants_delimiter(marker_idx: generated::MarkerIdx) -> bool {
 }
 
 /// The level digit an occurrence was SPELLED with — `\q2` → 2, `\q` → 0,
-/// `\qt3-s` → 3. Read off the span because that is the only place it exists:
-/// rows are canonical (`q`, not `q1`), so the token's own bytes are the sole
-/// record of which spelling was used.
+/// `\qt3-s` → 3. Read off the span because rows are canonical (`q`, not `q1`),
+/// so the token's own bytes are the sole record of the spelling used.
 fn spelled_level(span: &[u8]) -> u8 {
     let from = usize::from(span.get(1) == Some(&b'+')) + 1;
     let mut level = 0u8;
@@ -402,9 +357,8 @@ fn spelled_level(span: &[u8]) -> u8 {
 }
 
 /// Is this row numbered in the sense `numbering-mix` cares about — a family
-/// whose digit is a LEVEL? `TableColumns` rows (`\tc1`, `\tc1-2`) are excluded:
-/// their digits are a column number, i.e. payload, so `\tc` beside `\tc2` is
-/// not two spellings of one thing.
+/// whose digit is a LEVEL? `TableColumns` (`\tc1`, `\tc1-2`) is excluded: those
+/// digits are payload, so `\tc` beside `\tc2` is not two spellings of one thing.
 fn has_levels(marker_idx: generated::MarkerIdx) -> bool {
     matches!(
         generated::numbering(marker_idx),
@@ -442,7 +396,6 @@ mod tests {
         );
         assert_eq!(obs[0].anchor, token_named(&tokens, "f", 0));
 
-        // A real nested character pair is silent.
         let (_, obs) = findings("\\p \\add a \\+nd b\\+nd* c\\add*");
         assert_eq!(obs, vec![]);
     }
@@ -456,7 +409,6 @@ mod tests {
                 .unwrap() as u32
         };
 
-        // Known, uppercase, with a description after it: silent.
         let (_, obs) = findings("\\id 1JN Some description\n\\c 1\n\\p \\v 1 a");
         assert_eq!(obs, vec![]);
         // Peripherals count as book identifiers too.
@@ -475,37 +427,23 @@ mod tests {
         let (_, obs) = findings("\\id Gen\n\\c 1\n\\p \\v 1 a");
         assert_eq!(codes(&obs), vec![Code::BookCodeNotUppercase]);
 
-        // Not a code in any casing.
         let (tokens, obs) = findings("\\id ZZZ\n\\c 1\n\\p \\v 1 a");
         assert_eq!(
             obs,
             vec![Observation::one(Code::BookCodeUnknown, book_code(&tokens))]
         );
-        // `\id GENESIS` carves `GENESIS` as the code (one span up to the
-        // first space), which is simply not an identifier.
+        // `\id GENESIS` carves `GENESIS` as the code — one span up to the first
+        // space — which is simply not an identifier.
         let (_, obs) = findings("\\id GENESIS\n\\c 1\n\\p \\v 1 a");
         assert_eq!(codes(&obs), vec![Code::BookCodeUnknown]);
     }
 
-    // -----------------------------------------------------------------
-    // Phase 3: adjacency
-    // -----------------------------------------------------------------
-
-    /// Compared WHOLE since 2026-08-19. These tests used to filter for the
-    /// placement codes because a well-formed `\ca 2\ca*` drew a spurious
-    /// `orphan-closer` — the rows demanded an explicit closer while opening no
-    /// scope for it to close. Will's ruling made `ca`/`va`/`vp` scope openers
-    /// (see the `ca` row in `tables::rows`), so the closers now close their own
-    /// frames and the noise is gone. The adjacency rule itself is unchanged: it
-    /// reads TOKENS, never the CST.
+    /// The finding list is compared WHOLE: `ca`/`va`/`vp` open scopes, so a
+    /// well-formed `\ca 2\ca*` draws no `orphan-closer` to filter out.
     #[test]
     fn ca_and_cp_must_follow_their_chapter() {
-        // The spec's own shape: `\ca` on the `\c` line, `\cp` on the next one.
-        // A Newline between them is a token, and the rule steps over it.
         let (_, obs) = findings("\\c 1 \\ca 2\\ca*\n\\cp \u{5d0}\n\\p \\v 1 a");
         assert_eq!(obs, vec![]);
-
-        // …and the pair the other way round is equally legal.
         let (_, obs) = findings("\\c 1\n\\cp \u{5d0}\n\\ca 2\\ca*\n\\p \\v 1 a");
         assert_eq!(obs, vec![]);
 
@@ -519,10 +457,7 @@ mod tests {
             )]
         );
 
-        // A whole run out of place is ONE finding, not one per member. (The
-        // newline before `\cp` is only there to keep the snippet free of an
-        // unrelated `marker-not-ws-preceded`, now that these tests compare the
-        // finding list whole.)
+        // A whole run out of place is ONE finding, not one per member.
         let (tokens, obs) = findings("\\p text\n\\ca 2\\ca*\n\\cp \u{5d0}\n");
         assert_eq!(
             obs,
@@ -563,8 +498,8 @@ mod tests {
         );
     }
 
-    /// The other half of the ruling: an UNCLOSED `\ca` is now a real finding
-    /// (`unclosed-char`, with the insert-`\ca*` fix) rather than silence.
+    /// An UNCLOSED `\ca` is a real finding — `unclosed-char`, with the
+    /// insert-`\ca*` fix — and not silence.
     #[test]
     fn an_unclosed_chapter_annotation_is_an_unclosed_char() {
         // Displaced by the next chapter: the row is RequiredExplicit, so the
@@ -579,20 +514,14 @@ mod tests {
         );
     }
 
-    // -----------------------------------------------------------------
-    // Phase 3: payload
-    // -----------------------------------------------------------------
-
     #[test]
     fn caller_shape_only_reports_the_accidents() {
-        // The three conventional values, and a short custom one, are silent.
         for caller in ["+", "-", "?", "*", "\",", "abc"] {
             let (_, obs) = findings(&format!("\\p a\\f {caller} \\ft n\\f*"));
             assert_eq!(obs, vec![], "caller {caller:?}");
         }
 
-        // `\f +note` — the space after the caller was forgotten, so the whole
-        // word lexed as the caller.
+        // `\f +note`: the space was forgotten, so the word lexed as caller.
         let (tokens, obs) = findings("\\p a\\f +note \\ft n\\f*");
         let caller = tokens
             .iter()
@@ -601,11 +530,9 @@ mod tests {
         assert_eq!(obs, vec![Observation::one(Code::CallerShape, caller)]);
     }
 
-    /// `numbering-out-of-range` is NOT a code, and this is why: an over-cap
-    /// level never reaches its family's row. `generated::marker_idx` validates
-    /// the digits during resolution, so `\q7` IS row 0 and `unknown-marker`
-    /// has already said everything there is to say about it. If this test ever
-    /// fails, the rule became reachable and should be written.
+    /// `numbering-out-of-range` is NOT a code because an over-cap level never
+    /// reaches its family's row: `marker_idx` validates the digits, so `\q7` IS
+    /// row 0. Should this fail, the rule became reachable and wants writing.
     #[test]
     fn an_over_cap_level_is_an_unknown_marker_not_a_range_finding() {
         let (tokens, obs) = findings("\\c 1\n\\q7 poetry\n");
@@ -618,15 +545,12 @@ mod tests {
             .unwrap() as u32;
         assert_eq!(codes(&obs), vec![Code::UnknownMarker]);
         assert_eq!(obs[0].anchor, over_cap);
-        // …and the highest legal level resolves to the `q` row as it should.
         let (_, obs) = findings("\\c 1\n\\q4 poetry\n");
         assert_eq!(obs, vec![]);
     }
 
     #[test]
     fn numbering_mix_is_one_finding_per_family_per_book() {
-        // One family, both spellings: anchored at the token that revealed it,
-        // `second` at the family's first occurrence, `aux` the row's cap.
         let (tokens, obs) = findings("\\c 1\n\\q a\n\\q1 b\n\\q2 c\n\\q d\n");
         assert_eq!(
             obs,
@@ -638,7 +562,6 @@ mod tests {
             }]
         );
 
-        // Numbered-only and bare-only are both consistent.
         let (_, obs) = findings("\\c 1\n\\q1 a\n\\q2 b\n");
         assert_eq!(obs, vec![]);
         let (_, obs) = findings("\\c 1\n\\q a\n\\q b\n");
@@ -653,10 +576,6 @@ mod tests {
         assert_eq!(obs, vec![]);
     }
 
-    // -----------------------------------------------------------------
-    // Phase 3: form
-    // -----------------------------------------------------------------
-
     #[test]
     fn marker_not_ws_preceded_is_paragraphs_only() {
         let (tokens, obs) = findings("\\p text\\s1 heading\n\\p more");
@@ -668,13 +587,10 @@ mod tests {
             )]
         );
 
-        // Character markers legitimately hug — the nested spelling included,
-        // and aligned USFM is built out of exactly this.
+        // Character markers legitimately hug — aligned USFM is built of it.
         let (_, obs) = findings("\\p \\w grace\\+nd deep\\+nd*\\w*\\add x\\add*");
         assert_eq!(obs, vec![]);
 
-        // Start of file is not a finding either (the `\id` prefix this helper
-        // adds is itself the case).
         let (_, obs) = findings("\\id GEN\n\\p a");
         assert_eq!(obs, vec![]);
     }
@@ -691,7 +607,6 @@ mod tests {
             )]
         );
 
-        // A no-break space after the name is the same finding.
         let (tokens, obs) = findings("\\p a\n\\q\u{00A0}poetry\n");
         assert_eq!(
             obs,
@@ -701,8 +616,7 @@ mod tests {
             )]
         );
 
-        // Everything `TAGEND` allows is silent: whitespace, a line ending, a
-        // marker, an attribute list, end of file.
+        // Everything `TAGEND` allows, end of file included.
         for usfm in [
             "\\p text",
             "\\p\ttext",
@@ -719,18 +633,13 @@ mod tests {
         }
     }
 
-    // -----------------------------------------------------------------
-    // Closeout: the Version family
-    // -----------------------------------------------------------------
-
     #[test]
     fn a_deprecated_marker_is_gated_on_a_declared_version() {
-        // No `\usfm` line: a book of its own era, and `\pro` is correct in it.
-        // THE GATE — and the reason it is not a guess.
+        // THE GATE: no `\usfm` line means a book of its own era, and `\pro` is
+        // correct in it.
         let (_, obs) = findings("\\p \\pro x\\pro*\n");
         assert_eq!(obs, vec![]);
 
-        // 3.0 declared: deprecated, with the deprecating version in aux.
         let usfm = "\\id GEN\n\\usfm 3.0\n\\p \\pro x\\pro*\n";
         let (tokens, obs) = findings(usfm);
         assert_eq!(
@@ -745,7 +654,6 @@ mod tests {
         // Reported at the OPENER only: the closer is the same occurrence.
         assert_eq!(obs.len(), 1);
 
-        // The row's ladder is what a consumer maps severity through.
         let row = Code::DeprecatedMarker.row();
         assert_eq!(row.severity_at(None), None);
         assert_eq!(
@@ -757,8 +665,7 @@ mod tests {
             Some(Severity::Error)
         );
 
-        // A numbered spelling of a deprecated paragraph row is one finding at
-        // its own token, digits and all.
+        // A numbered spelling of a deprecated row: one finding, digits and all.
         let (tokens, obs) = findings("\\id GEN\n\\usfm 3.2\n\\c 1\n\\ph2 hanging\n");
         assert_eq!(
             obs,
@@ -775,9 +682,9 @@ mod tests {
     /// [`AttrStatus::Deprecated`] — `\xt`'s `link-href`, `\jmp`'s `link-` trio.
     #[test]
     fn a_deprecated_attribute_is_read_off_the_row_with_no_version_gate() {
-        // NO declared `\usfm`, and it fires anyway — deliberately, and unlike
-        // `deprecated-marker`: `AttrStatus` carries no version, so there is no
-        // rung to gate on and pretending otherwise would be inventing data.
+        // NO declared `\usfm` and it fires anyway, unlike `deprecated-marker`:
+        // `AttrStatus` carries no version, so there is no rung to gate on and
+        // pretending otherwise would be inventing data.
         let (tokens, obs) = findings("\\p \\xt Gen 1:1|link-href=\"#x\"\\xt*\n");
         let list = tokens
             .iter()
@@ -797,23 +704,15 @@ mod tests {
         assert!(!codes(&obs).contains(&Code::AttrUnknownName));
     }
 
-    // -----------------------------------------------------------------
-    // Closeout: the positional band
-    // -----------------------------------------------------------------
-
     #[test]
     fn marker_out_of_band_judges_the_monotonic_positional_axis() {
-        // The book written in order: identification, headers, titles,
-        // introduction, chapter content. Every one of these advances the band
-        // and none of them looks back.
+        // The book written in order: each marker advances, none looks back.
         let (_, obs) = findings(
             "\\id GEN\n\\usfm 3.0\n\\h Genesis\n\\toc1 Genesis\n\\mt1 Genesis\n\\ip intro\n\\c 1\n\\p \\v 1 a\n",
         );
         assert_eq!(obs, vec![]);
 
-        // A major title AFTER the book reached chapter content: every one of
-        // `mt`'s positional contexts (BookTitles, BookIntroductionEndTitles) is
-        // behind us, and there is nothing above to advance to.
+        // Both of `mt`'s positional contexts are behind us, nothing above.
         let (tokens, obs) = findings("\\id GEN\n\\c 1\n\\p a\n\\mt1 late title\n");
         assert_eq!(
             obs,
@@ -822,7 +721,6 @@ mod tests {
                 token_named(&tokens, "mt", 0)
             )]
         );
-        // The same for a header and a table-of-contents line.
         let (tokens, obs) = findings("\\id GEN\n\\c 1\n\\p a\n\\h Genesis\n");
         assert_eq!(
             obs,
@@ -840,24 +738,19 @@ mod tests {
             )]
         );
 
-        // `\ip` after a chapter is NOT out of band, and this is the dual-context
-        // resolution the sketch asked to be tested: `ip`'s mask carries
-        // BookIntroduction AND ChapterContent, so the band stays where it is
-        // and the marker is legal. `\cl`'s two meanings fall out the same way.
+        // `\ip`'s mask carries BookIntroduction AND ChapterContent, so the band
+        // stays put. `\cl`'s two meanings fall out the same way.
         let (_, obs) = findings("\\id GEN\n\\c 1\n\\p a\n\\ip introduction\n");
         assert_eq!(obs, vec![]);
         let (_, obs) = findings("\\id GEN\n\\cl Chapter\n\\c 1\n\\cl Chapter One\n\\p a\n");
         assert_eq!(obs, vec![]);
 
-        // Markers a CONTAINER licenses abstain — the other axis. A character
-        // marker's mask carries BookTitles and BookIntroduction, so without
-        // that abstention every `\add` inside a paragraph would read as
-        // "behind us"; notes and table cells are the same case.
+        // Markers a CONTAINER licenses abstain — the other axis.
         let (_, obs) = findings("\\id GEN\n\\c 1\n\\p \\add a\\add* \\f + \\ft n\\f*\n");
         assert_eq!(obs, vec![]);
 
-        // Row 0 has no mask at all: en_ulb's `\s5` is 13_636 occurrences of
-        // exactly this, and `unknown-marker` is the whole of what lint says.
+        // Row 0 has no mask at all: en_ulb's `\s5` is 13_636 occurrences of it,
+        // and `unknown-marker` is the whole of what lint says.
         let (_, obs) = findings("\\id GEN\n\\c 1\n\\p a\n\\s5\n\\p b\n");
         assert_eq!(codes(&obs), vec![Code::UnknownMarker]);
     }

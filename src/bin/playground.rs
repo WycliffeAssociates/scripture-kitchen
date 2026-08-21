@@ -25,10 +25,9 @@
 //   cargo run --release --features par --bin playground -- --chpar         // rayon over CHAPTERS within each doc
 //   samply record -- ./target/release/playground --iters 200    // profile (build first)
 //
-// Serial is the honest per-core measurement; --par answers "what does the
-// whole corpus cost wall-clock" (embarrassingly parallel over books, so it
-// mostly measures core count). --scalar / --chunked / --chpar run the
-// src/experiments/ variants; each is verified token-for-token against the
+// Serial is the honest per-core measurement; --par answers "what does the whole
+// corpus cost wall-clock" (embarrassingly parallel over books, so it mostly
+// measures core count). The src/experiments/ variants are verified against the
 // real lexer on the loaded corpus before any timing starts.
 
 use std::fs;
@@ -48,22 +47,20 @@ enum Mode {
     Staged,
     Chunked,
     ChapterPar,
-    // The stop-cost ladder (experiments::sweeps): scan ceiling → full stop
-    // set → the text arm's cursor-restart pattern. Full lex minus SweepCursor
-    // = the work inside the stops.
+    // The stop-cost ladder (experiments::sweeps): scan ceiling → full stop set →
+    // the text arm's cursor-restart pattern. Full lex minus SweepCursor = the
+    // work inside the stops.
     SweepNl,
     SweepStops,
     SweepCursor,
     Cst,
     CstOnly,
     Lint,
-    /// Pre-lexed AND pre-built; times the lint pass by itself.
+    /// The `*Only` family is pre-lexed AND pre-built: the lex and the build are
+    /// off the clock, so the timing is the named pass alone.
     LintOnly,
-    /// Pre-lexed AND pre-built; times the USJ serialization by itself.
     UsjOnly,
-    /// Pre-lexed AND pre-built; times the USX serialization by itself.
     UsxOnly,
-    /// Pre-lexed AND pre-built; times the HTML serialization by itself.
     HtmlOnly,
     /// The single-pass experiment: lex + cst + lint in ONE traversal.
     Fused,
@@ -102,8 +99,8 @@ fn main() {
             "--fused-noop" => mode = Mode::FusedNoop,
             "--fused-cst" => mode = Mode::FusedCst,
             "--lint-stats" => lint_stats = true,
-            // Implies --lint-stats: it is the same sweep, printing before/after
-            // windows for the first few fixes of ONE code.
+            // Implies --lint-stats: the same sweep, plus before/after windows
+            // for the first few fixes of ONE code.
             "--fix-preview" => {
                 lint_stats = true;
                 fix_preview = args.next();
@@ -125,8 +122,8 @@ fn main() {
             other => path = Some(PathBuf::from(other)),
         }
     }
-    // Handled before the corpus load: --utf16 names its own three files and
-    // would otherwise pay for reading all 66 en_ulb books first.
+    // Before the corpus load: --utf16 names its own three files and would
+    // otherwise pay for reading all 66 en_ulb books first.
     if mode == Mode::Utf16 {
         report_utf16();
         return;
@@ -175,8 +172,6 @@ fn main() {
 
     verify_variant(&sources, mode);
 
-    // Lexed OUTSIDE the clock: --parse-header-only prices the second pass by itself,
-    // so the lex it walks over must not be in the measurement.
     if cst_stats {
         report_cst_stats(&sources);
         return;
@@ -186,6 +181,8 @@ fn main() {
         return;
     }
 
+    // Lexed OUTSIDE the clock, so an `--*-only` mode prices its own pass and
+    // nothing else.
     let prelexed: Vec<Vec<usfm_onion_2::Token>> = if matches!(
         mode,
         Mode::ParseHeaderOnly
@@ -265,17 +262,17 @@ fn main() {
     }
 }
 
-/// Experiment variants must produce byte-identical token streams. Checked
-/// once per run, outside the timing loop; a mismatch aborts loudly.
+/// Checks an experiment variant against the real lexer once per run, outside the
+/// timing loop; a mismatch aborts loudly.
 fn verify_variant(sources: &[String], mode: Mode) {
     let run: fn(&str) -> Vec<usfm_onion_2::Token> = match mode {
         Mode::Serial | Mode::Par => return, // the reference itself
         // Sweeps produce counts, not token streams — nothing to verify.
         Mode::SweepNl | Mode::SweepStops | Mode::SweepCursor => return,
-        Mode::ParseHeader | Mode::ParseHeaderOnly => return, // the real lexer plus a pure pass
-        Mode::Cst | Mode::CstOnly => return,                 // the real lexer plus a pure pass
-        Mode::Lint | Mode::LintOnly => return,               // the real lexer plus two pure passes
-        // the real lexer plus a pure pass
+        // These all run the real lexer plus pure passes over its output.
+        Mode::ParseHeader | Mode::ParseHeaderOnly => return,
+        Mode::Cst | Mode::CstOnly => return,
+        Mode::Lint | Mode::LintOnly => return,
         Mode::UsjOnly | Mode::UsxOnly | Mode::HtmlOnly => return,
         // Identity is tests/fused_identity.rs's job — whole reports, not just
         // token streams, so it cannot be a `fn(&str) -> Vec<Token>` here.
@@ -297,10 +294,9 @@ fn verify_variant(sources: &[String], mode: Mode) {
     };
     for (i, source) in sources.iter().enumerate() {
         let variant = run(source);
-        // The variants are FROZEN pre-4.2 lexers: since the per-class ws fold
-        // landed, boundaries legitimately differ (closers and unresolved
-        // markers no longer absorb their trailing space). What must still
-        // hold for a variant is the partition invariant itself.
+        // The variants are FROZEN pre-4.2 lexers, so their token BOUNDARIES may
+        // legitimately differ from `crate::lex`. What a variant must still
+        // satisfy is the partition invariant itself.
         let mut cursor = 0usize;
         for (t, v) in variant.iter().enumerate() {
             assert_eq!(
@@ -454,8 +450,8 @@ fn run_once(
         Mode::ChapterPar => {
             #[cfg(feature = "par")]
             {
-                // Books stay serial; parallelism is INSIDE each book, over
-                // its chapters — that's the strategy being priced.
+                // Books stay serial; the parallelism being priced is INSIDE each
+                // book, over its chapters.
                 for source in sources {
                     std::hint::black_box(usfm_onion_2::experiments::chapter_par::lex_chunked_par(
                         source,
@@ -489,13 +485,11 @@ fn read_source(path: &Path) -> String {
         .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()))
 }
 
-/// The byte↔UTF-16 boundary index, priced on three deliberately different
-/// files: an ASCII-dominant prose book, a dense-Devanagari book (the case that
-/// breaks per-drift-change anchors), and the heaviest aligned book.
-///
-/// Strategy A = one anchor per non-ASCII char; strategy B = one anchor per
+/// The byte↔UTF-16 boundary index, priced on three deliberately different files:
+/// an ASCII-dominant prose book, a dense-Devanagari book (the case that breaks
+/// per-drift-change anchors), and the heaviest aligned book. Strategy A = one
+/// anchor per non-ASCII char; strategy B = one anchor per
 /// [`usfm_onion_2::experiments::utf16::STRIDE`] bytes + a SWAR remainder count.
-/// See `src/experiments/utf16.rs` for both and for the stride-boundary rule.
 fn report_utf16() {
     use usfm_onion_2::experiments::utf16::{
         Anchors, STRIDE, Stride, reference_pairs, utf16_len_scalar, utf16_len_swar,
@@ -515,9 +509,8 @@ fn report_utf16() {
         best
     }
 
-    /// xorshift64* — the offsets must be pre-generated so the RNG is never on
-    /// the clock. (Randomness is fine in the playground; it is a measuring
-    /// tool, not a workflow.)
+    /// xorshift64*, used only to pre-generate offsets — the RNG must never be on
+    /// the clock.
     struct Rng(u64);
     impl Rng {
         fn next(&mut self) -> u64 {
@@ -559,7 +552,7 @@ fn report_utf16() {
         }
         let src = read_source(path);
         // Share of BYTES that are non-ASCII — the axis strategy A is sensitive
-        // to, and the one that makes hindi-IRV1 the interesting case.
+        // to, and what makes hindi-IRV1 the interesting case.
         let non_ascii_bytes = src.bytes().filter(|b| !b.is_ascii()).count();
         let pct_non_ascii = 100.0 * non_ascii_bytes as f64 / src.len().max(1) as f64;
 
@@ -578,7 +571,6 @@ fn report_utf16() {
             pct(b.index_bytes()),
         );
 
-        // Build cost.
         let build_a = min_of(|| Anchors::build(&src));
         let build_b = min_of(|| Stride::build(&src));
         println!(
@@ -658,9 +650,8 @@ fn report_utf16() {
 }
 
 /// Untimed corpus sweep: what does lint actually FIND in the wild? Per-code
-/// counts first, then a sample of each code's sites (book, code name, byte
-/// offset of the anchor token) — enough to eyeball a class before pinning its
-/// count in tests/lint_corpus.rs.
+/// counts, then a sample of each code's sites (book, code, anchor offset) —
+/// enough to eyeball a class before pinning its count in tests/lint_corpus.rs.
 fn report_lint_stats(sources: &[String], root: &Path, preview_of: Option<&str>) {
     use usfm_onion_2::lint::LINT_ROWS;
 
@@ -722,9 +713,8 @@ fn report_lint_stats(sources: &[String], root: &Path, preview_of: Option<&str>) 
                 continue;
             };
             fixed[slot] += 1;
-            // A window of the repaired text beside the original, for the first
-            // few fixes of each code — the only way to see whether a proposal
-            // reads sanely in real scripture rather than in a test snippet.
+            // Repaired text beside the original: the only way to see whether a
+            // proposal reads sanely in real scripture, not in a test snippet.
             if previews.len() < PREVIEWS
                 && preview_of.is_some_and(|name| name == LINT_ROWS[slot].name)
             {
@@ -777,9 +767,9 @@ fn report_lint_stats(sources: &[String], root: &Path, preview_of: Option<&str>) 
     }
 }
 
-/// Untimed corpus sweep: how do frames actually CLOSE in the wild? Clean
-/// books should be nearly all Explicit/Implicit; Recovery clusters are
-/// either real data damage or a walker/table gap — eyeball them.
+/// Untimed corpus sweep: how do frames actually CLOSE in the wild? Clean books
+/// are nearly all Explicit/Implicit; a Recovery cluster is either real data
+/// damage or a walker/table gap — eyeball them.
 fn report_cst_stats(sources: &[String]) {
     use usfm_onion_2::cst::CloseReason;
     let mut totals = [0u64; 4];

@@ -1,9 +1,8 @@
-//! What the attribute interpreter actually reads in 226 real books — the
-//! pinned numbers.
+//! What the attribute interpreter reads in 226 real books — the pinned numbers.
 //!
-//! Same contract as tests/lint_corpus.rs: every nonzero malformed count is
-//! EXPLAINED at the byte, not tolerated. A `Malformed` on clean scripture is
-//! either real data or a bug in src/attributes.rs, and the comments say which.
+//! Every nonzero malformed count must be EXPLAINED at the byte, not tolerated:
+//! a `Malformed` on clean scripture is either real data or a bug in
+//! src/attributes.rs.
 //!
 //! The corpus is gitignored, so this test skips loudly when it is not mounted.
 
@@ -105,9 +104,8 @@ fn sweep() -> Option<(Vec<BookReport>, f64)> {
                         AttrEvent::Malformed { at, why } => {
                             tally.malformed[shape_slot(why)] += 1;
                             if first_site.is_none() {
-                                // The blamed byte, in context, so an
-                                // unexplained count can be read straight off
-                                // a failing run.
+                                // The blamed byte in context, so an unexplained
+                                // count reads straight off a failing run.
                                 let from = (at as usize).saturating_sub(40);
                                 let to = (at as usize + 40).min(bytes.len());
                                 first_site =
@@ -148,26 +146,22 @@ fn the_corpus_yields_exactly_the_known_attribute_reading() {
             .fold(Tally::default(), |acc, (_, tally, _)| acc.fold(*tally))
     };
 
-    // Lists per corpus. en_ult is word-aligned scripture, so it carries one
-    // `\w` list per word plus one `\zaln-s` list per aligned original-language
-    // word — 792_414 + 461_352 — which is why the sweep is worth timing.
+    // en_ult is word-aligned: one `\w` list per word plus one `\zaln-s` list
+    // per aligned original-language word — 792_414 + 461_352.
     assert_eq!(by_corpus("en_ult").lists, 1_253_766);
-    // en_ulb, bdf_reg and examples.bsb are unaligned: no attributes anywhere.
-    // (So every number below is en_ult's, and the corpus is not yet an oracle
-    // for `\fig`, `\rb` or the bare default form — src/attributes.rs's unit
-    // tests are.)
+    // The other three are unaligned, so every number below is en_ult's — the
+    // corpus is not an oracle for `\fig`, `\rb` or the bare default form
+    // (src/attributes.rs's unit tests are).
     assert_eq!(by_corpus("en_ulb").lists, 0);
     assert_eq!(by_corpus("bdf_reg").lists, 0);
     assert_eq!(by_corpus("examples.bsb").lists, 0);
     assert_eq!(total.lists, 1_253_766);
 
-    // Every list in the corpus is the pair form, and the total reconciles
-    // EXACTLY against `grep -oh 'x-[a-z]*=' | sort | uniq -c`:
-    //   * 2 * 1_253_766 — x-occurrence + x-occurrences, on every list of both
-    //     kinds;
+    // Every list is the pair form, and the total reconciles EXACTLY against
+    // `grep -oh 'x-[a-z]*=' | sort | uniq -c`:
+    //   * 2 * 1_253_766 — x-occurrence + x-occurrences, on both list kinds;
     //   * 3 *   461_352 — x-strong, x-morph, x-content on every `\zaln-s`;
     //   *       461_341 — x-lemma, on all but 11 of them.
-    // Not one bare default value, and not one empty list, in 226 books.
     assert_eq!(total.named, 4_352_929);
     assert_eq!(
         total.named,
@@ -178,9 +172,8 @@ fn the_corpus_yields_exactly_the_known_attribute_reading() {
     assert_eq!(total.empty, 0);
 
     // ZERO malformed in 226 books — the number that says the grammar matches
-    // real data rather than the sketch's imagination. If this ever moves,
-    // read the site the sweep prints before touching the pin: it is either
-    // genuinely deformed authoring (keep it, explain it here) or a bug in
+    // real data. If it moves, read the site the sweep prints before touching
+    // the pin: either deformed authoring (explain it here) or a bug in
     // src/attributes.rs (fix that instead).
     let sites: Vec<&String> = books
         .iter()
@@ -189,12 +182,9 @@ fn the_corpus_yields_exactly_the_known_attribute_reading() {
     assert_eq!(total.malformed_total(), 0, "malformed sites: {sites:?}");
     assert_eq!(total.malformed, [0; SHAPES]);
 
-    // Throughput, not a budget: the interpreter is on-demand code, and this
-    // only proves it is not accidentally quadratic. Measured 0.09s wall for
-    // 1.25M lists / 4.35M attributes across 8 rayon threads with the lex
-    // included — ~74ns per list, which is the LEX's cost more than this
-    // module's. The bound below is loose on purpose; it catches a hang, not a
-    // regression.
+    // Throughput, not a budget: ~0.09s wall for 1.25M lists / 4.35M attributes
+    // on 8 rayon threads, lex included (~74ns per list, mostly the LEX's cost).
+    // The bound is loose on purpose — it catches a hang, not a regression.
     eprintln!(
         "attr sweep: {} lists, {} attributes, {elapsed:.3}s wall ({:.0}ns/list incl. lex)",
         total.lists,

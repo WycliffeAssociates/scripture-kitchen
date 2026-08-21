@@ -1,5 +1,5 @@
 //! What the export folds SHARE — the pieces that are the same fact in USJ and
-//! USX, extracted once the second serializer made the shared half visible.
+//! USX.
 //!
 //! ```text
 //! canonical("son of  david")   ->  "son of david"     every ws run is ONE space
@@ -7,12 +7,11 @@
 //! marker_name(b"\\+nd ")       ->  "nd"               the AUTHOR's spelling
 //! ```
 //!
-//! Deliberately NOT here: the walker. `usj.rs` and `usx.rs` each weave their
-//! own writer through the fold (a JSON array's comma bookkeeping and an XML
-//! element's rewind-to-self-closing are not the same state), so a shared driver
-//! would be a trait with two implementors and no third fact in common. What IS
-//! shared is what a fold READS: whitespace canonicalization, marker spelling,
-//! and the note-peer sets that the F3 graft keys on.
+//! Deliberately NOT here: the walker. A JSON array's comma bookkeeping and an
+//! XML element's rewind-to-self-closing are not the same state, so `usj.rs` and
+//! `usx.rs` each weave their own writer through the fold and a shared driver
+//! would be a trait with two implementors. What IS shared is what a fold READS:
+//! whitespace canonicalization, marker spelling, the note-peer sets.
 
 use core::ops::Range;
 use std::borrow::Cow;
@@ -20,11 +19,9 @@ use std::borrow::Cow;
 use crate::Token;
 
 /// A FOOTNOTE's own PEER markers — the note-text elements that sit BESIDE each
-/// other inside `\f`/`\fe`/`\ef`. `\fv` is deliberately absent: the spec writes
-/// it `\fv ...\fv*` (an embedded verse number INSIDE footnote text), and
-/// specExamples/footnote reads it that way in both its `origin.json` and its
-/// `origin.xml`. `\fm` is absent for the reason its row already states — it is
-/// char-like, not a note peer.
+/// other inside `\f`/`\fe`/`\ef`. `\fv` is absent because it NESTS instead:
+/// `\fv ...\fv*` is a verse number inside footnote text (specExamples/footnote).
+/// `\fm` is absent as char-like, per its row.
 pub(crate) const FOOTNOTE_PEERS: &[&str] =
     &["fdc", "fk", "fl", "fp", "fq", "fqa", "fr", "ft", "fw"];
 
@@ -71,12 +68,11 @@ pub(crate) fn trim(text: &str) -> &str {
 }
 
 /// One text token, canonicalized the way the fixtures are: every run of
-/// structural whitespace becomes ONE space (`"son of  david"` is
-/// `"son of david"`), and `~` — USFM's non-breaking space — becomes the
-/// character it names.
+/// structural whitespace becomes ONE space, and `~` becomes the non-breaking
+/// space it names.
 pub(crate) fn canonical(text: &str) -> Cow<'_, str> {
-    // The common case is text that needs nothing done to it, and an export
-    // that allocated per TEXT TOKEN would allocate once per word of scripture.
+    // Borrow on the common case: allocating per TEXT TOKEN would allocate once
+    // per word of scripture.
     let bytes = text.as_bytes();
     let untouched = !bytes.iter().enumerate().any(|(at, &byte)| {
         byte == b'~'

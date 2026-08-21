@@ -12,7 +12,7 @@ use crate::tables::schema::{ClosingBehavior, MarkerKind};
 use crate::{Token, TokenKind};
 
 // ---------------------------------------------------------------------------
-// The fix model: byte-splice edit lists (model A, ruled 2026-08-19)
+// The fix model: byte-splice edit lists
 // ---------------------------------------------------------------------------
 
 /// One offered repair: a label and a range into [`LintReport::edit_list`].
@@ -23,16 +23,15 @@ use crate::{Token, TokenKind};
 /// them RIGHT TO LEFT ([`apply`]) and every offset stays valid.
 ///
 /// **Offered, never applied.** Never-synthesize governs TOKENS; a fix is
-/// proposed TEXT. Nothing in this module rewrites a byte — once a user accepts
-/// a fix the bytes are real and the next re-lex is honest about them.
+/// proposed TEXT. Nothing here rewrites a byte — once a user accepts a fix the
+/// bytes are real and the next re-lex is honest about them.
 ///
 /// [`FixStr`]: crate::edit::FixStr
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Fix {
-    /// From [`LintRow::fix_label`] — the row is where a rule's affordances are
-    /// declared, so the label is never authored twice. Static, like every other
-    /// string here: the digits of "renumber to 12" live in the EDIT, which is
-    /// why the label stays generic.
+    /// From [`LintRow::fix_label`], so a label is never authored twice. Static,
+    /// which is why it stays generic: the digits of "renumber to 12" live in the
+    /// EDIT, not in the label.
     ///
     /// [`LintRow::fix_label`]: super::LintRow::fix_label
     pub label: &'static str,
@@ -42,25 +41,21 @@ pub struct Fix {
 /// A sequence finding, plus "renumber to the expected number" WHEN that is a
 /// splice and not an interpretation.
 ///
-/// All four anomaly codes come through here and only the duplicate and
-/// out-of-order pairs are ever fixed; the two GAP codes are refused by the row
-/// column itself, which declares no label for them (closing a hole would
-/// renumber the rest of the chapter, and no single splice can do that). The row
-/// stays the one place a rule's affordances are declared.
+/// All four anomaly codes come through here, and only the duplicate and
+/// out-of-order pairs are ever fixed: the GAP codes declare no label, because
+/// closing a hole would renumber the rest of the chapter and no single splice
+/// can do that.
 ///
-/// Two further conditions, both learned from real text:
+/// Two further conditions:
 ///
-/// - The designator must be PLAIN DIGITS. `\v 12-14` renumbered to one number
-///   silently drops the verses the range covered, and `\v 2a` loses its segment
-///   — both are interpretations of what the author meant, not repairs of how
-///   they wrote it.
+/// - The designator must be PLAIN DIGITS. One number over `\v 12-14` drops the
+///   verses the range covered, and `\v 2a` loses its segment — interpretations
+///   of what the author meant, not repairs of how they wrote it.
 /// - The next number in the sequence must be strictly ABOVE the one we would
-///   write. bdf_reg ROM 3 is the case that earned this: it writes `\v 10` twice
-///   and then `\v 11`, so renumbering the duplicate to 11 would only move the
-///   duplicate one verse along. The same guard covers the mirror shape for
-///   out-of-order (`\v 5 \v 2 \v 3`, where renumbering the 2 to 6 would make
-///   the following 3 the one going backwards). The fix oracle catches both, and
-///   this is the fix admitting it rather than the oracle catching us.
+///   write. bdf_reg ROM 3 writes `\v 10` twice then `\v 11`, so renumbering the
+///   duplicate to 11 would only move it one verse along; the same guard covers
+///   the out-of-order mirror (`\v 5 \v 2 \v 3`, where renumbering the 2 to 6
+///   makes the following 3 the one going backwards).
 pub(super) fn renumber(
     source: &[u8],
     tokens: &[Token],
@@ -90,10 +85,9 @@ pub(super) fn renumber(
 /// The FIRST number of the next designator in this sequence — the one the
 /// renumber has to stay clear of.
 ///
-/// The only lookahead anywhere in lint, and it is affordable for the reason
-/// every fix computation is: it runs on a FINDING, never on a token. It also
-/// stops at the very next `\v`/`\c`, so the walk is a handful of tokens except
-/// for the last finding in a book.
+/// The only lookahead anywhere in lint, affordable because it runs on a FINDING
+/// and stops at the very next `\v`/`\c` — a handful of tokens, except for the
+/// last finding in a book.
 ///
 /// `None` covers three cases a renumber may treat alike: no next designator, a
 /// next one that is malformed (which resyncs the sequence, so it compares
@@ -135,18 +129,15 @@ fn next_number(source: &[u8], tokens: &[Token], from: u32, verse: bool) -> Optio
     None
 }
 
-/// A deprecated marker, and the RENAME the spec's replacement makes mechanical
-/// — both halves of it.
+/// A deprecated marker renamed at BOTH ends.
 ///
-/// `\pro x\pro*` → `\rb x\rb*` is two splices and ONE fix, because half a
-/// rename is a document with an orphan closer in it (the oracle says so: a fix
-/// may not hand back a new finding). Only the NAME bytes move: the level digits
-/// of `\ph2` → `\li2` ride along untouched, because a spelling is always the
-/// row's canonical name followed by them.
+/// `\pro x\pro*` → `\rb x\rb*` is two splices and ONE fix, because half a rename
+/// leaves an orphan closer and no fix may hand back a new finding. Only the NAME
+/// bytes move: `\ph2` → `\li2` carries its level digit along, since a spelling
+/// is always the row's canonical name followed by them.
 ///
-/// The fix is declined — the finding stands alone — when the row wants a closer
-/// and no closer of its own is in reach. That is the same line every other fix
-/// draws: a repair is a mechanical splice or it is not offered.
+/// Declined — the finding stands alone — when the row wants a closer and none of
+/// its own is in reach: a repair is a mechanical splice or nothing.
 pub(super) fn rename(doc: &Doc, out: &mut Emit, observation: Observation, replacement: &str) {
     let opener = &doc.tokens[observation.anchor as usize];
     let name = generated::name(opener.marker_idx).len() as u32;
@@ -174,10 +165,9 @@ pub(super) fn rename(doc: &Doc, out: &mut Emit, observation: Observation, replac
     }
 }
 
-/// Where a marker token's NAME begins: past the backslash, and past the `+` of
-/// a nested spelling. The row's canonical name is always a PREFIX of what is
-/// written there (`ph` of `ph2`), which is what makes a rename a fixed-width
-/// splice rather than a re-lex.
+/// Where a marker token's NAME begins: past the backslash, and past the `+` of a
+/// nested spelling. The row's canonical name is always a PREFIX of what is
+/// written there (`ph` of `ph2`), which makes a rename a fixed-width splice.
 fn name_at(token: &Token) -> u32 {
     let nested = matches!(
         token.kind(),
@@ -188,10 +178,10 @@ fn name_at(token: &Token) -> u32 {
 
 /// This opener's own closer, or `None` when it is not mechanically in reach.
 ///
-/// A forward scan, and affordable for the reason every fix computation is: it
-/// runs on a FINDING, never on a token. It stops at anything that would
-/// DISPLACE the frame — a chapter, a verse, a paragraph, an unknown marker —
-/// because past that point a closer of the same name is somebody else's.
+/// A forward scan, affordable because it runs on a FINDING, never on a token. It
+/// stops at anything that would DISPLACE the frame — a chapter, a verse, a
+/// paragraph, an unknown marker — past which a same-named closer is somebody
+/// else's.
 fn closer_of(tokens: &[Token], from: u32) -> Option<u32> {
     let marker_idx = tokens[from as usize].marker_idx;
     for (offset, token) in tokens[from as usize + 1..].iter().enumerate() {
@@ -245,21 +235,18 @@ fn decimal(number: u32, buf: &mut [u8; 10]) -> &[u8] {
 /// 3. NO code's count rises. A fix may not hand back a new finding;
 /// 4. the partition oracle still holds on the fixed text.
 ///
-/// Condition 2 is per-SITE and not a count, and the reason is a real corpus
-/// case rather than fastidiousness. `missing-paragraph` reports once per
-/// paragraph-less RUN; in en_ulb a run is repeatedly re-opened by `\s5`, whose
-/// row-0 pop-all kills whatever paragraph is standing — so inserting the
-/// proposed `\p` repairs the reported site and UNMASKS the next segment of the
-/// same run, which was damaged all along and merely aggregated away. The total
-/// does not move (36 findings before, 36 after in PHM), no damage is created,
-/// and a strict "the count went down" test would have called that a failure. A
-/// fix answers for its own site; it does not answer for what the rule's
-/// aggregation was hiding behind it.
+/// Condition 2 is per-SITE and not a count, because of a real corpus case:
+/// `missing-paragraph` reports once per paragraph-less RUN, and in en_ulb a run
+/// is repeatedly re-opened by `\s5`, whose row-0 pop-all kills the standing
+/// paragraph. Inserting the proposed `\p` repairs the reported site and UNMASKS
+/// the next segment of the same run (PHM: 36 findings before, 36 after), which a
+/// strict "the count went down" test would call a failure. A fix answers for its
+/// own site, not for what the rule's aggregation was hiding behind it.
 ///
 /// A verification tool, not part of the reporting path: it re-runs the whole
-/// pipeline and returns an allocated message. It is public because the rule it
-/// enforces is a property of the LIBRARY's fixes, and the tests that run it over
-/// 226 books live outside this module.
+/// pipeline and allocates a message. Public because the rule it enforces is a
+/// property of the LIBRARY's fixes, and the tests that run it over 226 books
+/// live outside this module.
 pub fn check_fixes(
     source: &str,
     tokens: &[Token],
@@ -287,8 +274,8 @@ pub fn check_fixes(
         targets.push((observation.code, tokens[observation.anchor as usize].start));
         edits.extend_from_slice(own);
     }
-    // Stable, so a fix's own concatenation chain keeps its (from, sequence)
-    // order after several fixes are merged into one dispatch.
+    // Stable, so a fix's concatenation chain keeps its (from, sequence) order
+    // when several fixes merge into one dispatch.
     edits.sort_by_key(|edit| edit.from);
     for pair in edits.windows(2) {
         if pair[1].from < pair[0].to {
@@ -320,11 +307,10 @@ pub fn check_fixes(
         after_counts[obs.code as usize] += 1;
     }
     for (code, site) in &targets {
-        // Where that anchor's first byte ended up: every edit that lands wholly
-        // at or before it moves it, and nothing else does. An insertion exactly
-        // AT the anchor (`missing-paragraph`, `marker-not-ws-preceded`) pushes
-        // it right; a replacement OF the anchor (a renumber) leaves it where it
-        // was, which is the same rule read the other way.
+        // Where that anchor's first byte ended up: every edit landing wholly at
+        // or before it moves it, nothing else does. An insertion exactly AT the
+        // anchor (`missing-paragraph`) pushes it right; a replacement OF the
+        // anchor (a renumber) leaves it where it was.
         let mut moved = i64::from(*site);
         for edit in &edits {
             if edit.to <= *site {
@@ -350,8 +336,7 @@ pub fn check_fixes(
         }
     }
 
-    // The standing invariant, re-asserted on text nobody has lexed before: the
-    // spans of the fixed source still concatenate back to it.
+    // The partition invariant, on text nobody has lexed before.
     let mut cursor = 0usize;
     for token in &tokens_after {
         if token.start as usize != cursor {
@@ -378,13 +363,8 @@ mod tests {
     use crate::edit::FixStr;
     use crate::lex;
 
-    // -----------------------------------------------------------------
-    // Phase 4: fixes
-    // -----------------------------------------------------------------
-
-    /// One document's report, for the fix tests — which state their snippet in
-    /// full (no `\id` prefix is added) because the repaired TEXT is the
-    /// assertion and a hidden prefix would not appear in it.
+    /// One document's report. These tests state their snippet in full (no `\id`
+    /// prefix is added) because the repaired TEXT is the assertion.
     fn report_of(usfm: &str) -> (Vec<Token>, LintReport) {
         let tokens = lex(usfm);
         let cst = build(&tokens);
@@ -403,10 +383,8 @@ mod tests {
     }
 
     /// Runs the ORACLE over the fixes for `code` and returns the repaired text.
-    ///
-    /// Every fix test below goes through here, so each one is also an oracle
-    /// test; what the test itself then states is the repaired document, which is
-    /// the only form in which an edit list is checkable by eye.
+    /// Every fix test goes through here, so each is also an oracle test and can
+    /// state its edit list as a document, which is checkable by eye.
     fn repaired(usfm: &str, code: Code) -> String {
         let (tokens, report) = report_of(usfm);
         let slots = slots_for(&report, code);
@@ -436,8 +414,7 @@ mod tests {
     #[test]
     fn text_longer_than_a_fixstr_splits_into_concatenating_edits() {
         // No fix in the table is this long (the worst is `\table-e\*`, ten
-        // bytes), so the splitter is exercised directly: it is the reason the
-        // inline string needs no cap.
+        // bytes), so the splitter is exercised directly.
         let mut out = Emit::default();
         let long = b"0123456789abcdefghijklmnopqr";
         out.push_fixed(Observation::one(Code::OrphanCloser, 0), 4, 7, long);
@@ -464,8 +441,8 @@ mod tests {
 
     #[test]
     fn a_missing_closer_lands_at_the_last_content_byte() {
-        // The corpus shape: a `\c` inside a footnote. The closer goes where the
-        // note's content ends, in front of what displaced it.
+        // A `\c` inside a footnote: the closer goes where the note's content
+        // ends, in front of what displaced it.
         assert_eq!(
             repaired(
                 "\\id GEN\n\\c 1\n\\p \\v 1 a\\f + \\ft note\\c 2\n\\p b",
@@ -491,8 +468,7 @@ mod tests {
             "\\id GEN\n\\p \\add a \\+nd b\\+nd*\\add*"
         );
 
-        // `\ca` is one of these since Will's 2026-08-19 ruling — a character
-        // scope like any other, so an unclosed one is repaired the same way.
+        // `\ca` is a character scope like any other, repaired the same way.
         assert_eq!(
             repaired(
                 "\\id GEN\n\\c 1\n\\ca 2\n\\c 2\n\\p \\v 1 a",
@@ -543,8 +519,7 @@ mod tests {
     #[test]
     fn an_orphan_is_deleted_span_and_nothing_more() {
         // The two spaces left behind are deliberate: extra horizontal
-        // whitespace is legal everywhere, and eating one would be a second edit
-        // nobody asked for.
+        // whitespace is legal everywhere, so eating one is a second edit.
         assert_eq!(
             repaired("\\id GEN\n\\p text \\w* more", Code::OrphanCloser),
             "\\id GEN\n\\p text  more"
@@ -565,9 +540,9 @@ mod tests {
             "\\id GEN\n\\c 1\n\\p\n\\v 1 no paragraph"
         );
 
-        // Glued to the preceding word, the `\p` needs a line break of its own —
-        // without it the repair would trade one finding for another
-        // (`marker-not-ws-preceded`), which the oracle refuses.
+        // Glued to the preceding word, the `\p` needs a line break of its own:
+        // without it the repair trades one finding for a
+        // `marker-not-ws-preceded`, which the oracle refuses.
         assert_eq!(
             repaired("\\id GEN\n\\c 1\ntext\\v 1 a", Code::MissingParagraph),
             "\\id GEN\n\\c 1\ntext\n\\p\n\\v 1 a"
@@ -620,9 +595,8 @@ mod tests {
             "\\id GEN\n\\c 1\n\\p \\v 1 a \\v 3 b \\v 4 c"
         );
 
-        // The bdf_reg ROM 3 shape: `\v 10` twice with `\v 11` after it.
-        // Renumbering the duplicate to 11 would only move it along, so no fix
-        // is offered at all — the finding stands on its own.
+        // The bdf_reg ROM 3 shape: `\v 10` twice with `\v 11` after it, where
+        // renumbering the duplicate to 11 only moves it along. No fix.
         assert!(!offers_fix(
             "\\id GEN\n\\c 1\n\\p \\v 10 a \\v 10 b \\v 11 c",
             Code::VerseDuplicate
@@ -632,8 +606,7 @@ mod tests {
             "\\id GEN\n\\c 1\n\\p \\v 5 a \\v 2 b \\v 3 c",
             Code::VerseOutOfOrder
         ));
-        // A RANGE is never renumbered: writing one number over `12-14` would
-        // drop the verses it covers, which is interpretation, not a splice.
+        // A RANGE is never renumbered: one number over `12-14` drops verses.
         assert!(!offers_fix(
             "\\id GEN\n\\c 1\n\\p \\v 1-11 a \\v 11-13 b",
             Code::VerseDuplicate
@@ -652,8 +625,7 @@ mod tests {
 
     #[test]
     fn fix_all_of_one_code_dispatches_as_a_single_edit_list() {
-        // Two findings of one code, concatenated, sorted, applied once — the
-        // "fix all X" affordance, and the composability rule at its sharpest.
+        // Two findings of one code, concatenated, sorted, applied once.
         assert_eq!(
             repaired(
                 "\\id GEN\n\\c 1\n\\p \\v 1 a \\v 1 b \\v 3 c \\v 3 d\n",
@@ -673,9 +645,8 @@ mod tests {
     /// The one MULTI-SPLICE fix: a deprecated marker renamed at both ends.
     #[test]
     fn the_deprecated_marker_rename_rewrites_both_halves_at_once() {
-        // `\pro` → `\rb`: two splices, one accepted change. Half of it would
-        // leave an orphan `\pro*` behind, which the oracle (run inside
-        // `repaired`) would refuse.
+        // `\pro` → `\rb`: two splices, one accepted change. Half of it leaves an
+        // orphan `\pro*`, which the oracle inside `repaired` refuses.
         assert_eq!(
             repaired(
                 "\\id GEN\n\\usfm 3.0\n\\c 1\n\\p \\v 1 \\pro x\\pro*",
@@ -694,8 +665,7 @@ mod tests {
             "\\id GEN\n\\usfm 3.0\n\\c 1\n\\li2 hanging\n"
         );
 
-        // No fix where the spec's replacement is a RESTRUCTURE (`\addpn` wants
-        // `\add` wrapping `\pn`, i.e. two markers where there was one)…
+        // No fix where the replacement is a RESTRUCTURE (`\addpn`)…
         assert!(!offers_fix(
             "\\id GEN\n\\usfm 3.0\n\\c 1\n\\p \\v 1 \\addpn x\\addpn*",
             Code::DeprecatedMarker
@@ -711,9 +681,8 @@ mod tests {
     #[test]
     fn a_fix_is_offered_exactly_where_the_row_declares_one() {
         // One snippet per code that DECLARES a label, so no label is a promise
-        // nothing keeps. (The converse — a code emitting a fix its row does not
-        // declare — is asserted on every snippet in this file, inside
-        // `findings`, and again over the whole corpus.)
+        // nothing keeps. The converse — a code emitting a fix its row does not
+        // declare — is asserted inside `findings` on every snippet here.
         let cases: [(Code, &str); 15] = [
             (
                 Code::UnclosedNote,

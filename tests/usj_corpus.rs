@@ -6,11 +6,10 @@
 //!     {"type":"USJ","version":"3.1","content":[…]}   ==   origin.json
 //! ```
 //!
-//! testData is the COMMITTEE'S data (sketches/usj-export.md's ruling), so the
-//! comparison is EXACT: no text normalizer, no key-order munging beyond what
-//! `Value ==` already forgives. A divergence is reported as the first JSON
-//! path that differs (`content[3].content[0].marker`) so the story can be told
-//! at the bytes.
+//! testData is the COMMITTEE'S data, so the comparison is EXACT: no text
+//! normalizer, no key-order munging beyond what `Value ==` already forgives. A
+//! divergence is reported as the first JSON path that differs
+//! (`content[3].content[0].marker`).
 //!
 //! `<validated>fail</validated>` cases stay out — that is where usfm-grammar's
 //! `unmatched` damage shapes live, and our answer to damage is lint.
@@ -24,16 +23,11 @@ use serde_json::Value;
 
 use usfm_onion_2::{cst, lex, usj::usj};
 
-/// The cases this pin does NOT claim, each with its one-line reason (the
-/// sketch's exclusion policy — a case may only leave the pin if the reason can
-/// be stated in one line). Matched against the case's path suffix. Three
-/// categories, all recorded in sketches/usj-export.md's "Divergence record":
-///
-/// * **ERRATUM** — the fixture states something the source bytes do not.
-/// * **PURPOSEFUL** — the fixtures contradict each other and we follow the
-///   majority (Will, 2026-08-20).
-/// * **OPEN** — a real divergence awaiting a ruling; the reason names it. None
-///   as of 2026-08-20 (the last one, doo43-4, was ruled and now passes).
+/// The cases this pin does NOT claim, matched by path suffix. A case may only
+/// leave the pin if its reason fits on ONE line, in one of three categories:
+/// **ERRATUM** (the fixture states something its source bytes do not),
+/// **PURPOSEFUL** (the fixtures contradict each other and we follow the
+/// majority), **OPEN** (awaiting a ruling — currently none).
 const EXCLUDED: &[(&str, &str)] = &[
     // ---- ERRATUM: the fixture disagrees with its own origin.usfm ----------
     (
@@ -78,10 +72,9 @@ const EXCLUDED: &[(&str, &str)] = &[
     ),
     // ---- PURPOSEFUL: the fixtures contradict, we follow the majority ------
     //
-    // Unknown-marker pop-all recovery (Will, 2026-08-20: "leave if 299 is
-    // majority and document purposeful ignore"). `\s5` occurs 299 times in 21
-    // validated-pass fixtures; 19 of them read our way, and the two that do
-    // not read it two DIFFERENT ways.
+    // Unknown-marker pop-all recovery: `\s5` occurs 299 times in 21
+    // validated-pass fixtures; 19 read our way, and the two that do not read it
+    // two DIFFERENT ways.
     (
         "usfmjsTests/luk_quotes",
         "PURPOSEFUL: wants `\\s5` to swallow the following `\\v 17` text; 299 sibling `\\s5` occurrences want our reading, so pop-all recovery stands",
@@ -94,10 +87,9 @@ const EXCLUDED: &[(&str, &str)] = &[
         "specExamples/milestone",
         "PURPOSEFUL: wants the row-0 milestone `\\zms\\*` to leave `\\q1` open; also carries the literal-newline erratum (`answer ...\\n  `)",
     ),
-    // Delimiter space at a seam (Will, 2026-08-20: "follow majority and our
-    // delimiter behavior"). A space on either side of a marker seam serializes
-    // to the same USFM, so USJ has two truthful spellings and the fixtures use
-    // both; we fold the delimiter and keep the majority reading.
+    // Delimiter space at a seam: a space on either side of a marker seam
+    // serializes to the same USFM, so USJ has two truthful spellings and the
+    // fixtures use both. We fold the delimiter, which is the majority reading.
     (
         "usfmjsTests/isa_inline_quotes",
         "PURPOSEFUL: puts the `\\fqa men \\ft ,` seam space at the START of the `\\ft` content; we fold it as the delimiter",
@@ -139,12 +131,9 @@ fn usj_matches_every_validated_pass_fixture() {
     let mut cases = Vec::new();
     collect(root, &mut cases);
     cases.sort();
-    // PINNED so the pin cannot shrink quietly: 207 validated-pass cases with
-    // an `origin.json`, 20 of them excluded above (2026-08-20). A new fixture
-    // or a mistyped exclusion suffix moves this number and must be read.
-    // 186 -> 187 (2026-08-20): samples-from-wild/doo43-4 stopped diverging once
-    // the Note class gained SpecContext::Section, so its `\f` inside `\cl`
-    // nests in the chapter label instead of displacing the paragraph.
+    // PINNED so the pin cannot shrink quietly: 207 validated-pass cases with an
+    // `origin.json`, 20 of them excluded above. A new fixture or a mistyped
+    // exclusion suffix moves this number and must be read.
     assert_eq!(
         cases.len(),
         187,
@@ -238,7 +227,7 @@ fn check(case: &Path) -> Result<(), String> {
     Err(format!("{}: {path}", case.display()))
 }
 
-/// The first path at which two values differ, in the shape a reader can paste
+/// The first path at which two values differ, in a shape a reader can paste
 /// into a fixture: `content[3].content[0].marker`.
 fn first_divergence(at: &str, ours: &Value, theirs: &Value) -> Option<String> {
     match (ours, theirs) {

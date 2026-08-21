@@ -37,11 +37,11 @@
 //! ```
 //!
 //! HS = space/tab; CR/LF cannot occur (a list never spans a line —
-//! `attr_list_end`). Whitespace is the ONLY separator: probed 2026-08-20,
-//! usfmtc silently DROPS everything after a comma, so there is no comma
-//! dialect to honour — we flag where the reference implementation loses
-//! data. The name charset enforces it: a pair may only begin where a name
-//! byte does, so any stray byte where a pair was due is `BareJunk`.
+//! `attr_list_end`). Whitespace is the ONLY separator: usfmtc silently DROPS
+//! everything after a comma, so there is no comma dialect to honour — we flag
+//! where the reference implementation loses data. The name charset enforces it:
+//! a pair may only begin where a name byte does, so any stray byte where a pair
+//! was due is `BareJunk`.
 //!
 //! # Bytes we refuse to touch (the spec defines NO escapes; neither do we)
 //!
@@ -55,14 +55,14 @@
 //! Only a quoted PAIR value's quotes are stripped — that one interpretation
 //! is the module's point.
 //!
-//! # vs usfmtc (probed 2026-08-20; every divergence deliberate)
+//! # vs usfmtc (every divergence deliberate)
 //!
 //! On ANY pair failure usfmtc silently rereads the WHOLE interior as the
 //! default value (`lemma=` → the value `lemma=`). That is a repair, and
 //! repairing is not ours: a failed pair attempt here is `Malformed` — the
 //! finding lint wants, the data loss exports must not paper over. We also
 //! READ `lemma=grace` where usfmtc rejects-then-swallows (accepting it
-//! invents no bytes). Cross-checked EXACT on en_ult TIT 1:1's 48 real lists.
+//! invents no bytes).
 //!
 //! # Cost
 //!
@@ -241,8 +241,7 @@ impl<'a> AttrIter<'a> {
                 return self.malformed(self.at - 1, MalformedAttr::MissingValue);
             }
             Some(b'"') => {
-                // No escapes: the first `"` closes the value, whatever
-                // precedes it (module doc).
+                // No escapes: the first `"` closes the value, whatever precedes it.
                 let quote_at = self.at;
                 value_from = self.at + 1;
                 match next_quote(&self.interior[value_from..]) {
@@ -254,7 +253,6 @@ impl<'a> AttrIter<'a> {
                 }
             }
             Some(_) => {
-                // Unquoted: ends at whitespace or at the interior's end.
                 value_from = self.at;
                 while self.interior.get(self.at).is_some_and(|&byte| !is_hs(byte)) {
                     self.at += 1;
@@ -585,10 +583,8 @@ mod tests {
 
     #[test]
     fn an_escaped_quote_never_reaches_this_module() {
-        // The sketch asks what `\"` inside a value means. The answer is that
-        // the scanner refuses the whole list first: `\"` is neither an escape
-        // (`escape_len` knows only `\|` and `\\`) nor a closer, so
-        // `attr_list_end` returns NotAList and the bytes stay TEXT.
+        // `\"` is neither an escape (`escape_len` knows only `\|` and `\\`) nor
+        // a closer, so `attr_list_end` returns NotAList and the bytes stay TEXT.
         let source = "\\w x|lemma=\"a\\\"b\"\\w*";
         assert!(!lex(source).iter().any(|t| t.kind() == TokenKind::AttrList));
 
@@ -631,9 +627,8 @@ mod tests {
 
     #[test]
     fn a_comma_between_pairs_is_junk_at_the_comma() {
-        // RULED 2026-08-20: there is no comma dialect. usfmtc drops `strong`
-        // silently in both of these; we keep the pair before the comma and
-        // flag AT the comma (offset 14 in both) instead.
+        // There is no comma dialect. usfmtc drops `strong` silently in both of
+        // these; we keep the pair before the comma and flag AT the comma.
         let events = walk("\\w x|lemma=\"a\", strong=\"G1\"\\w*");
         assert_eq!(events.len(), 2);
         assert_eq!(

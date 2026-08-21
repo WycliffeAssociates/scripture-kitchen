@@ -1,37 +1,32 @@
 //! The generator: `rows::ROWS` in, the TEXT of `generated.rs` out.
 //!
-//! Lives in the library rather than in `src/bin/codegen.rs` for one reason: the
-//! freshness test has to be able to call it (`tests/codegen_output_matches_input.rs`
-//! regenerates to a `String` and compares against the checked-in file). The bin
-//! is a thin main over [`generated_rs`].
+//! Lives in the library rather than in `src/bin/codegen.rs` so the freshness
+//! test can call it (regenerate to a `String`, compare against the checked-in
+//! file). The bin is a thin main over [`generated_rs`].
 // @TODO: THIS FEATURE GATING WHEN WE GET THERE.
-//! It should be feature-gated off for the wasm build — it is pure build-time
-//! machinery and has no business in the bundle. Not done yet; it is the same
-//! work item as the "feature-gate exports to shrink the wasm bundle" entry in
-//! planning/NEXT-STEPS.md, and gating it early would mean `cargo test` silently
-//! skipping the freshness check.
+//! Wants feature-gating off for the wasm build — pure build-time machinery with
+//! no business in the bundle — but gating it means `cargo test` silently skips
+//! the freshness check.
 //!
 //! ## Shape of the emission
 //!
-//! Everything in `generated.rs` that does not depend on the rows lives in
-//! `generated.rs.tmpl` as plain, readable Rust; the data-driven pieces are
-//! built here and spliced over the template's `@@TOKEN@@` lines by [`splice`].
-//! Read the template first — it IS the generated file, minus the data.
+//! Everything row-independent lives in `generated.rs.tmpl` as plain, readable
+//! Rust; the data-driven pieces are built here and spliced over the template's
+//! `@@TOKEN@@` lines by [`splice`]. Read the template first — it IS the
+//! generated file, minus the data.
 //!
 //! ## The one rule for editing this file
 //!
 //! **Position is the code.** The `&[(Variant, "path")]` tables below assign each
 //! enum variant its bit pattern BY POSITION, and the same tables emit the
 //! generated decoder — so encode and decode cannot drift, but reordering a table
-//! silently changes the bit layout. Appending is always safe. Anything else:
-//! rerun codegen and read the diff, which is exactly what the checked-in
-//! `generated.rs` is for.
+//! silently changes the bit layout. Appending is always safe; anything else,
+//! rerun codegen and read the diff (which is what the checked-in `generated.rs`
+//! is for).
 //!
-//! ## Bit layout
-//!
-//! One `u128` per row, 82 bits used, 46 spare. Widths are asserted at emit
-//! time — a value that outgrows its field panics the generator instead of
-//! wrapping into its neighbour.
+//! Bit layout: one `u128` per row, 82 bits used, 46 spare. Widths are asserted
+//! at emit time — a value that outgrows its field panics the generator instead
+//! of wrapping into its neighbour.
 
 use std::fmt::Write as _;
 
@@ -106,11 +101,9 @@ const SCOPES: &[(ScopeKind, &str)] = &[
     (ScopeKind::TableCell, "TableCell"),
     (ScopeKind::Sidebar, "Sidebar"),
     (ScopeKind::Periph, "Periph"),
-    // `Table` (K.1) takes the code `Meta` freed when it was retired (K.2), so no
-    // other variant's bit pattern moved. Position IS the code — see the module doc.
+    // `Table` reuses a freed code and `List` is appended, so no existing
+    // variant's bit pattern moved; 12 scopes still fit the same 4 bits.
     (ScopeKind::Table, "Table"),
-    // `List` is APPENDED for the same reason: a new code at the end moves no
-    // existing one, and 12 scopes still fit the same 4 bits.
     (ScopeKind::List, "List"),
 ];
 
@@ -213,9 +206,9 @@ const ATTR_STATUSES: &[(AttrStatus, &str)] = &[
     (AttrStatus::Deprecated, "Deprecated"),
 ];
 
-/// The code for `v` — its position in `table`. Panics if the variant is missing,
-/// which is the whole point: adding an enum variant and forgetting to list it
-/// here fails the generator rather than emitting a wrong bit pattern.
+/// The code for `v` — its position in `table`. Panics if the variant is missing:
+/// forgetting to list a new enum variant fails the generator rather than
+/// emitting a wrong bit pattern.
 fn code_of<T: PartialEq + Copy + std::fmt::Debug>(table: &[(T, &str)], v: T) -> u32 {
     table
         .iter()
@@ -294,8 +287,7 @@ fn put(word: &mut u128, field: &Field, value: u32, row: &MarkerRow) {
 }
 
 /// `Numbering` has no variant table because its code carries a PAYLOAD (the
-/// cap), per the packing note in schema.rs: 0 = Unnumbered, 1..=13 = `UpTo(n)`,
-/// 14 = Unbounded, 15 = TableColumns.
+/// cap): 0 = Unnumbered, 1..=13 = `UpTo(n)`, 14 = Unbounded, 15 = TableColumns.
 fn numbering_code(n: Numbering) -> u32 {
     match n {
         Numbering::Unnumbered => 0,
@@ -331,9 +323,8 @@ fn name_key(name: &str) -> u64 {
         "canonical name `{name}` does not fit a u64 load"
     );
     // The matcher is ONE compare because the alpha stem is the whole name. A
-    // canonical name carrying a digit would make `\p1` resolve to `p` + level 1
-    // instead of to itself — silently. `p1`/`p2` did exactly that until they were
-    // deleted as errata (2026-08-12), so the invariant is asserted, not assumed.
+    // canonical name carrying a digit would silently make `\p1` resolve to `p`
+    // + level 1 instead of to itself, so the invariant is asserted.
     assert!(
         name.bytes().all(|b| b.is_ascii_lowercase()),
         "canonical name `{name}` is not pure lowercase ASCII — the single-compare \
@@ -738,9 +729,9 @@ fn by_name_arms() -> String {
             let mut candidates = idxs.iter().filter(|i| ROWS[**i].shape.overlaps(*query));
             let resolved = match (candidates.next(), candidates.next()) {
                 (Some(only), None) => only.to_string(),
-                // `Any` against two disjoint rows is ambiguous by construction.
-                // The lexer always knows which spelling it saw, so this arm is
-                // a caller bug, answered with the inert row rather than a panic.
+                // `Any` against two disjoint rows is ambiguous by construction;
+                // the lexer always knows which spelling it saw, so reaching
+                // this arm is a caller bug, answered with the inert row.
                 _ => "UNRESOLVED".to_string(),
             };
             let _ = writeln!(
@@ -765,9 +756,9 @@ fn v_forbidden() -> String {
                 mask[idx / 64] |= 1 << (idx % 64);
                 listed.push(name);
             }
-            // Rail members 3.2 does not document — `k1`, `k2`, `restore`. They
-            // stay in the authored list because it records RAIL MEMBERSHIP; here
-            // they simply have no bit to set.
+            // Rail members 3.2 does not document (`k1`, `k2`, `restore`): the
+            // authored list records rail membership, so they stay there and
+            // simply have no bit to set.
             None => errata.push(name),
         }
     }

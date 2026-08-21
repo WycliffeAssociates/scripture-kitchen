@@ -1,13 +1,11 @@
 //! A compact structural tree over the scanner's stamped token stream.
 //!
-//! This module owns the CST walker: one generic scope loop (displacement by
-//! stamped context, same-kind eviction), the explicit-closer rules (`\X*`
-//! by name, `\esbe` by scope kind, note peers, the sidebar barrier),
-//! milestone points (`\zaln-s |…\*` — spelling pairs row-0 milestones with
-//! their `\*`), the U25003 list/table containers, unknown-marker pop-all
-//! recovery, one scratch tail feeding the shared child-id arena, and
-//! document order through [`Cst::in_order`]. The positional-context lane is
-//! deliberately deferred to lint (NEXT-STEPS).
+//! One generic scope loop (displacement by stamped context, same-kind
+//! eviction) plus the rules it cannot express: `\X*` by name, `\esbe` by scope
+//! kind, note peers, the sidebar barrier, milestone points, the U25003
+//! list/table containers, unknown-marker pop-all recovery. One scratch tail
+//! feeds the shared child-id arena; [`Cst::in_order`] reads document order
+//! back out. Positional context is lint's.
 
 use std::ops::Range;
 
@@ -45,10 +43,9 @@ impl CloseReason {
 
 /// One structural node. The node id is its index in [`Cst::nodes`].
 ///
-/// `children` indexes [`Cst::child_ids`], not `nodes`: the arena stores a
-/// mixed document-order stream of token ids and tagged node ids. The opening
-/// marker is the first token in its own child list and is also copied into
-/// `token` for direct access.
+/// `children` indexes [`Cst::child_ids`], not `nodes`: the arena stores a mixed
+/// document-order stream of token ids and tagged node ids. The opening marker is
+/// the first token in its own child list, and copied into `token` as well.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Node {
     /// The opening marker's token index. `u32::MAX` identifies the root.
@@ -62,12 +59,10 @@ pub struct Node {
 }
 
 impl Node {
-    /// Returns the walker verdict without making consumers know the packed form.
     pub fn close_reason(&self) -> CloseReason {
         CloseReason::from_u8(self.reason)
     }
 
-    /// Returns the context stamped when this node was opened.
     pub fn context(&self) -> SpecContext {
         SpecContext::from_u8(self.ctx)
     }
@@ -98,24 +93,18 @@ impl Cst {
     /// One node's BYTE extent: its opening marker's start through the end of
     /// its LAST DESCENDANT token.
     ///
-    /// Both ends are walked rather than read off `token`, because a child id is
+    /// Both ends are WALKED rather than read off `token`, because a child id is
     /// as likely to be a node as a token: the last child of `\f` is usually the
-    /// `\ft` node, whose own last child may be another node again. Two loops
-    /// down the first/last spine, no recursion and no iterator.
+    /// `\ft` node, whose own last child may be another node again.
     ///
-    /// A node's extent INCLUDES its explicit closer, which is the closer's
-    /// place in the child list ([`Builder::explicit_close`]) and the reason a
-    /// "replace this whole note" edit needs nothing else. The ROOT (`node` 0,
-    /// whose `token` is no token at all) extends over every token in the
-    /// document; an empty document is `0..0`.
-    ///
-    /// Consumers: lint's phase-4 fixes (where the missing closer belongs), and
-    /// later the app's content-extents read.
+    /// The extent INCLUDES the node's explicit closer (it is the node's last
+    /// child), so a "replace this whole note" edit needs nothing else. The ROOT
+    /// covers every token; an empty document is `0..0`.
     pub fn extent(&self, node: u32, tokens: &[Token]) -> Range<u32> {
         let children = &self.nodes[node as usize].children;
         if children.is_empty() {
-            // Only the root can be childless (every other node holds at least
-            // its own opening marker), and only for an empty document.
+            // Only the root can be childless, and only on an empty document:
+            // every other node holds at least its own opening marker.
             let start = self.nodes[node as usize].token;
             return match tokens.get(start as usize) {
                 Some(token) => token.start..token.start,
@@ -196,19 +185,16 @@ pub(crate) enum FrameRole {
     /// end it. A `\c` inside `\esb` therefore stays INSIDE the sidebar,
     /// which is lint's to flag, not the walker's to fix.
     Sidebar,
-    /// A milestone POINT (`\zaln-s |…\*`, `\ts-e\*`): the tiny frame from
-    /// the milestone token to its own `\*`. Content BETWEEN paired points
-    /// is deliberately not inside either — structurally they are points
-    /// (usfm-grammar's `_milestoneStart` node exactly; its comment defers
-    /// -s/-e pairing to post-processing, as does our sid/eid ruling).
-    /// `ends` is set on a container's `-e` point: when its `\*` closes the
-    /// point, the enclosing container of that kind closes with it.
+    /// A milestone POINT (`\zaln-s |…\*`, `\ts-e\*`): the tiny frame from the
+    /// milestone token to its own `\*`. Content BETWEEN paired points is in
+    /// neither — they are points, as in usfm-grammar's `_milestoneStart`, and
+    /// -s/-e pairing belongs to post-processing. `ends` on a container's `-e`
+    /// point closes that container when the point's `\*` lands.
     Point { ends: Option<ScopeKind> },
-    /// A U25003 list/table container, opened by `\list-s`/`\table-s` (keyed
-    /// on CATEGORY, not `opens_scope` — the row says Milestone). Also a
-    /// WALL for the same-kind and closer searches, but NOT a displacement
-    /// barrier: a `\p` may still end an unterminated container (legal in
-    /// 3.2, version-keyed lint severity thereafter).
+    /// A U25003 list/table container, opened by `\list-s`/`\table-s` (keyed on
+    /// CATEGORY, not `opens_scope` — the row says Milestone). A WALL for the
+    /// same-kind and closer searches, but NOT a displacement barrier: a `\p` may
+    /// still end an unterminated container, legal in 3.2.
     Container(ScopeKind),
 }
 
@@ -216,12 +202,11 @@ pub(crate) struct Frame {
     pub(crate) node: u32,
     /// The open frame owns the scratch tail beginning at this index.
     pub(crate) mark: u32,
-    /// The row of the frame's OPENING token, COPIED at push time. Every
-    /// closer rule keys on it, and holding it here rather than re-reading
-    /// `tokens[node.token]` is what makes the Builder streaming: see the
-    /// no-slice contract on [`Builder`]. The root frame's value is
-    /// [`generated::UNRESOLVED`] and is never read (all searches start at
-    /// depth 1).
+    /// The row of the frame's OPENING token, COPIED at push time. Holding it
+    /// here rather than re-reading `tokens[node.token]` is what makes the
+    /// Builder streaming — see the no-slice contract on [`Builder`]. The root
+    /// frame's [`generated::UNRESOLVED`] is never read: searches start at
+    /// depth 1.
     pub(crate) marker_idx: generated::MarkerIdx,
     /// The context resolved once at push time; transparent frames inherit it.
     pub(crate) ctx: u8,
@@ -242,28 +227,19 @@ impl Frame {
 
 /// The in-flight build state, driven ONE TOKEN AT A TIME: [`Builder::feed`]
 /// per token in document order, then [`Builder::finish`]. [`build`] is that
-/// loop over a slice; the scanner-sink experiment (NEXT-STEPS) is the same
-/// loop hanging off `push_token`.
-///
-/// A struct for the same reason the lexer grew `Scanner`: the closer rules
-/// each need the same four mutable pieces, and threading them through free
-/// functions buries the logic in signatures.
+/// loop over a slice; a scanner sink is the same loop off `push_token`.
 ///
 /// # The feed contract
 ///
-/// **The Builder never sees the token stream — only the token in hand.** It
-/// holds no `&[Token]` and does no lookahead OR look-BACK: everything the
-/// closer rules need from an earlier token (its row) was copied into
-/// [`Frame::marker_idx`] when that token opened its frame. So `feed` may be
-/// called from a driver whose tokens are not retained at all, and re-reading
-/// a fed token is never a question the Builder has to answer.
+/// **The Builder never sees the token stream — only the token in hand.** No
+/// `&[Token]`, no lookahead, no look-BACK: what the closer rules need from an
+/// earlier token (its row) was copied into [`Frame::marker_idx`] when that
+/// token opened its frame, so a driver may retain no tokens at all.
 ///
-/// The one thing a driver owes the Builder: **do not feed token N until token
-/// N is final.** The scanner's `whitespace_arm` extends the PREVIOUS token's
-/// len on a LATER iteration, so a `push_token` sink must feed token N only
-/// once N+1 exists (or at EOF). The Builder itself is indifferent — it reads
-/// `kind()` and `marker_idx`, not `len` — but consumers downstream of it are
-/// not, so the rule belongs with the driver.
+/// In return: **do not feed token N until token N is final.** The scanner's
+/// `whitespace_arm` extends the PREVIOUS token's len on a LATER iteration, so a
+/// `push_token` sink feeds N only once N+1 exists (or at EOF). The Builder
+/// reads `kind()` and `marker_idx`, not `len`, but consumers downstream do.
 pub(crate) struct Builder {
     nodes: Vec<Node>,
     child_ids: Vec<u32>,
@@ -273,27 +249,25 @@ pub(crate) struct Builder {
 
 /// Builds a CST from scanner-stamped tokens.
 ///
-/// Opening markers are included as the first leaf in their own node. This
-/// keeps the token partition complete while `Node::token` gives consumers a
-/// direct opening-marker handle. Only a scope-opening row, or a chapter/verse
-/// point with a non-empty context mask, may displace the current stack.
+/// Opening markers are the first leaf in their own node, which keeps the token
+/// partition complete while `Node::token` still hands consumers the opener
+/// directly. Only a scope-opening row, or a chapter/verse point with a non-empty
+/// context mask, may displace the current stack.
 ///
-/// PERF (measured 2026-08-18, `playground --cst-only`, min-of-8 at load ~14
-/// so trust the ratios): ~6 ns/token — 40.4ms over en_ult's 6.57M tokens,
-/// 1.41ms over en_ulb's 255k — about 40% of a lex, ~6× the ParseHeader
-/// floor (this pass has a stack, arena writes, and several table reads per
-/// marker). Heaviest aligned book ≈ 0.6ms; lex+build ≈ 2.1ms. Corpus health
-/// via `--cst-stats`: zero Recovery across all four corpora except three
-/// genuinely unclosed `\f` in the wild (en_ulb ISA/MRK, bsb GEN).
+/// # Cost
+///
+/// ~6 ns/token, about 40% of a lex (`playground --cst-only`); heaviest aligned
+/// book ≈ 0.6ms, lex+build ≈ 2.1ms. Corpus health via `--cst-stats`: zero
+/// Recovery except three genuinely unclosed `\f` in the wild (en_ulb ISA/MRK,
+/// bsb GEN).
 pub fn build(tokens: &[Token]) -> Cst {
     assert!(
         tokens.len() < NODE_ID_BIT as usize,
         "token ids must fit the tag bit"
     );
 
-    // One cheap counting pre-pass buys EXACT allocations for both vecs.
-    // Only a caller holding the whole slice can afford this; a streaming
-    // driver uses `Builder::with_capacity`'s estimate instead.
+    // One cheap counting pre-pass buys EXACT allocations for both vecs — only
+    // affordable for a caller holding the whole slice.
     let mut b = Builder::with_capacity(tokens.len(), exact_scope_openers(tokens));
     for (token_idx, token) in tokens.iter().enumerate() {
         b.feed(token_idx as u32, token);
@@ -301,11 +275,10 @@ pub fn build(tokens: &[Token]) -> Cst {
     b.finish()
 }
 
-/// The count that makes [`build`]'s allocations EXACT: nodes = openers +
-/// root, and child_ids = every token once + every non-root node once (the
-/// doc'd arena-length identity). Every milestone token opens a point (row 0
-/// included — the spelling override), and a container start opens a second
-/// node (the container itself).
+/// The count that makes [`build`]'s allocations EXACT: nodes = openers + root,
+/// child_ids = every token once + every non-root node once. Every milestone
+/// token opens a point (row 0 included — the spelling override), and a container
+/// start opens a second node, the container itself.
 fn exact_scope_openers(tokens: &[Token]) -> usize {
     tokens
         .iter()
@@ -333,19 +306,15 @@ impl CloseReason {
 }
 
 impl Builder {
-    /// A Builder that reserves nothing and grows. For a driver with no token
-    /// count in hand at all.
-    #[allow(dead_code)] // Its caller is the scanner-sink driver (step 3).
+    /// Reserves nothing and grows: for a driver with no token count in hand.
+    #[allow(dead_code)] // No in-crate caller: the entry point for a stream driver.
     pub(crate) fn new() -> Self {
         Self::with_capacity(0, 0)
     }
 
-    /// `tokens` is the expected token count and `scope_openers` the expected
-    /// number of scope-opening tokens; both are HINTS, and both being wrong
-    /// costs only a realloc. [`build`] passes exact counts (it has the
-    /// slice); a scanner-sink driver estimates from the source length —
-    /// measured over the corpora, tokens ≈ bytes/16 and openers ≈ tokens/8 on
-    /// prose, tokens/4 on aligned text (`--cst-stats` prints both counts).
+    /// `tokens` and `scope_openers` are HINTS; being wrong costs only a realloc.
+    /// A stream driver estimates from the source length — over the corpora,
+    /// tokens ≈ bytes/16, openers ≈ tokens/8 on prose, tokens/4 when aligned.
     pub(crate) fn with_capacity(tokens: usize, scope_openers: usize) -> Self {
         let mut b = Self {
             nodes: Vec::with_capacity(scope_openers + 1),
@@ -359,9 +328,8 @@ impl Builder {
                 role: FrameRole::Plain,
             }],
         };
-        // Reserve the root before the walk. Its range is patched by `finish`,
-        // after all child tails have reached the arena; it is never a
-        // synthesized token.
+        // The root is reserved here; `finish` patches its range once every child
+        // tail has reached the arena.
         b.nodes.push(Node {
             token: ROOT_TOKEN,
             children: 0..0,
@@ -371,11 +339,8 @@ impl Builder {
         b
     }
 
-    /// One token, in document order. `token_idx` is the id this token will
-    /// carry in the finished tree — the driver's own running count.
-    ///
-    /// See the type doc for the feed contract: nothing before or after this
-    /// token is read.
+    /// One token, in document order. `token_idx` is the id it will carry in the
+    /// finished tree — the driver's own running count.
     #[inline]
     pub(crate) fn feed(&mut self, token_idx: u32, token: &Token) {
         debug_assert!(token_idx < NODE_ID_BIT, "token ids must fit the tag bit");
@@ -399,24 +364,20 @@ impl Builder {
             }
         };
 
-        // A KNOWN milestone row in its BARE spelling — `\ts \*`,
-        // usfm-grammar's `_milestoneStandaloneMarker` — is still a point;
-        // the spelling adds nothing the row doesn't already say. Without
-        // this, every uW chunk marker opened a plain frame that only
-        // displacement could kill (12,062 Recovery stamps across en_ult,
-        // all of them `\ts`, found by `--cst-stats`).
+        // A KNOWN milestone row in its BARE spelling (`\ts \*`) is a point too —
+        // the row already says so. Otherwise every uW chunk marker opens a plain
+        // frame only displacement can kill (thousands of `\ts` Recovery stamps
+        // across en_ult).
         if generated::kind(marker_idx) == MarkerKind::Milestone {
             self.milestone_point(token_idx, marker_idx, false);
             return;
         }
 
-        // Unknown/illegal markers (row 0) RECOVER: pop everything and start
-        // fresh — the walker cannot trust any open scope across a marker it
-        // cannot classify. Each popped row keeps its own verdict (a
-        // paragraph's death is normal-shaped even here); the unknown marker
-        // itself is lint's finding, and it stays an ordinary leaf. Unknown
-        // CLOSERS and row-0 MILESTONES deliberately do not recover — the
-        // closer is an orphan leaf, the milestone is a point by spelling.
+        // Unknown/illegal markers (row 0) RECOVER: no open scope is trustworthy
+        // across a marker the walker cannot classify. Each popped row keeps its
+        // own verdict, and the unknown marker stays an ordinary leaf for lint.
+        // Unknown CLOSERS and row-0 MILESTONES do NOT recover: the closer is an
+        // orphan leaf, the milestone is a point by spelling.
         if marker_idx == generated::UNRESOLVED {
             while self.frames.len() > 1 {
                 let reason = CloseReason::for_displacement(self.top_marker_idx());
@@ -426,17 +387,14 @@ impl Builder {
             return;
         }
 
-        // `\esbe`-shaped rows close a scope by KIND rather than by name.
         if let Some(kind) = generated::closes_scope(marker_idx) {
             self.scope_close(token_idx, kind);
             return;
         }
 
-        // Note peers: an incoming `\ft`-class marker first ends an open
-        // sibling of the same class (`\fr` then `\ft` are peers, not
-        // parent/child). Displacement can't do this — both siblings sit in
-        // the same Footnote context, so the mask never pops one for the
-        // other.
+        // Note peers: `\fr` then `\ft` are siblings, not parent/child, and
+        // displacement cannot say so — both sit in the same Footnote context, so
+        // the mask never pops one for the other.
         if generated::closing(marker_idx) == ClosingBehavior::OptionalExplicitUntilNoteEnd
             && self.frames.len() > 1
             && generated::closing(self.top_marker_idx())
@@ -449,10 +407,9 @@ impl Builder {
         let opens_scope = generated::opens_scope(marker_idx);
         let mask = generated::context_mask(marker_idx);
         if opens_scope.is_some() {
-            // Same-kind eviction: like kinds never nest — without this,
-            // `\li` inside a list container (List IS in its mask, so
-            // displacement abstains) would nest under its own sibling
-            // forever. A new row also ends the previous row's open cells.
+            // Like kinds never nest: without this, `\li` inside a list
+            // container (List IS in its mask, so displacement abstains) would
+            // nest under its own sibling forever.
             self.same_kind_evict(marker_kind);
         }
         if displaces(marker_kind, opens_scope, mask) {
@@ -491,15 +448,15 @@ impl Builder {
                 },
             });
         } else {
-            // Empty-mask adjacency markers such as `ca` are ordinary leaves;
-            // they must not accidentally displace the enclosing paragraph.
+            // Empty-mask adjacency markers are ordinary leaves: they must not
+            // displace the enclosing paragraph.
             self.scratch.push(token_idx);
         }
     }
 
     /// Input ended: close survivors as Eof — lint judges each by its row (a
     /// paragraph at EOF is silent, a footnote at EOF is a finding) — then
-    /// patch the root's child range and hand over the tree.
+    /// patch the root's child range.
     pub(crate) fn finish(mut self) -> Cst {
         while self.frames.len() > 1 {
             self.close_top(CloseReason::Eof);
@@ -519,15 +476,13 @@ impl Builder {
         self.frames.last().expect("root frame remains")
     }
 
-    /// The marker row of the frame's OPENING token, read off the frame — see
-    /// [`Frame::marker_idx`].
     fn top_marker_idx(&self) -> generated::MarkerIdx {
         self.top().marker_idx
     }
 
-    /// Flush the top frame's scratch tail into the arena and stamp its
-    /// verdict. The closed node's own id replaces its tail on the scratch,
-    /// where it belongs to the parent frame.
+    /// Flush the top frame's scratch tail into the arena and stamp its verdict.
+    /// The closed node's own id replaces its tail on the scratch, where it now
+    /// belongs to the parent frame.
     fn close_top(&mut self, reason: CloseReason) {
         let frame = self.frames.pop().expect("a frame is open");
         let start = self.child_ids.len() as u32;
@@ -539,14 +494,12 @@ impl Builder {
         self.nodes[frame.node as usize].reason = reason as u8;
     }
 
-    /// `\X*`: search the open frames top-down for the matching frame and pop
-    /// THROUGH to it — anything still open above the match closes by the
-    /// same row-keyed verdict displacement uses; the match itself closes
-    /// Explicit with its closer token as its own last child (which is what
-    /// puts the closer's bytes inside the node's extent). The search stops
-    /// under a barrier. No match — an orphan closer, or one reaching past a
-    /// sidebar — leaves the token an ordinary leaf: flag-never-repair is
-    /// lint's, keyed on a ClosingMarker leaf.
+    /// `\X*` pops THROUGH to the frame of the same name: anything open above it
+    /// closes by the row-keyed verdict displacement uses, and the match closes
+    /// Explicit with the closer as its last child — which is what puts the
+    /// closer's bytes inside the node's extent. The search stops under a
+    /// barrier, and no match (an orphan closer, or one reaching past a sidebar)
+    /// leaves the token an ordinary leaf for lint.
     fn explicit_close(&mut self, token_idx: u32, closer_idx: generated::MarkerIdx) {
         let mut target = None;
         for depth in (1..self.frames.len()).rev() {
@@ -570,20 +523,17 @@ impl Builder {
         self.close_top(CloseReason::Explicit);
     }
 
-    /// A milestone-shaped token opens its POINT frame — the tiny scope from
-    /// the token to its own `\*`. This happens for KNOWN rows (their
-    /// `opens_scope` says Milestone) and equally for ROW 0: the `-s`/`-e`
-    /// SPELLING overrides the table for unknown rows, which is what pairs an
-    /// unknown `\zaln-s` with its `\*`. Start spellings on known rows
-    /// displace first, per their mask, like any opener; row 0 and `-e`
-    /// spellings displace nothing (an `-e` closes things, it opens no
-    /// content).
+    /// A milestone-shaped token opens its POINT frame — the tiny scope from the
+    /// token to its own `\*` — for KNOWN rows and equally for ROW 0, where the
+    /// `-s`/`-e` SPELLING overrides the table and so pairs an unknown
+    /// `\zaln-s` with its `\*`. Start spellings on known rows displace first,
+    /// per their mask; row 0 and `-e` spellings displace nothing (an `-e` opens
+    /// no content).
     ///
-    /// The U25003 containers ride here, keyed on CATEGORY: `\list-s` /
-    /// `\table-s` open the container frame first and their point inside it;
-    /// `\list-e` / `\table-e` pop back to the open container (if one is in
-    /// reach) so that when their point's `\*` lands, the container closes
-    /// with it — Explicit, with the whole `-e` point as its last child.
+    /// The U25003 containers ride here: `\list-s`/`\table-s` open the container
+    /// frame around their point, and `\list-e`/`\table-e` pop back to a
+    /// reachable container so its `\*` closes the container too — Explicit,
+    /// with the whole `-e` point as its last child.
     fn milestone_point(&mut self, token_idx: u32, marker_idx: generated::MarkerIdx, end: bool) {
         let container = container_kind(marker_idx);
 
@@ -601,9 +551,9 @@ impl Builder {
         let mut ends = None;
         if let Some(kind) = container {
             if end {
-                // Non-destructive search first: only pop back to the
-                // container if it is actually open (and not behind a
-                // barrier). An orphan `\list-e` stays a plain point.
+                // Non-destructive search first: pop back only to a container
+                // that is really open and not behind a barrier. An orphan
+                // `\list-e` stays a plain point.
                 let reachable = (1..self.frames.len())
                     .rev()
                     .take_while(|&d| !self.frames[d].barrier())
@@ -661,11 +611,9 @@ impl Builder {
         });
     }
 
-    /// `\*` ends the topmost open POINT — normally the frame directly on
-    /// top, since a point's interior is only its attribute list. Pops
-    /// through anything unclosed above it by the usual row-keyed verdicts;
-    /// an orphan `\*` (no open point in reach) is an ordinary leaf for
-    /// lint. Closing a container's `-e` point also closes the container.
+    /// `\*` ends the topmost open POINT — normally the frame directly on top, a
+    /// point's interior being only its attribute list. An orphan `\*` is an
+    /// ordinary leaf; closing a container's `-e` point closes the container.
     fn milestone_close(&mut self, token_idx: u32) {
         let mut target = None;
         for depth in (1..self.frames.len()).rev() {
@@ -694,11 +642,10 @@ impl Builder {
         }
     }
 
-    /// Like kinds never nest: a paragraph ends an open paragraph, a cell an
-    /// open cell, and a row both. Searches to the nearest WALL and pops
-    /// through the match inclusively. The mask cannot express this — a
-    /// container item legally lives in the container's context, so its
-    /// sibling shares a context the mask must allow.
+    /// Like kinds never nest: a paragraph ends an open paragraph, a cell an open
+    /// cell, and a row both. The mask cannot express this — a container item
+    /// legally lives in the container's context, so its sibling shares a context
+    /// the mask must allow.
     fn same_kind_evict(&mut self, incoming: MarkerKind) {
         let evicts = |kind: MarkerKind| match incoming {
             MarkerKind::Paragraph => kind == MarkerKind::Paragraph,
@@ -715,9 +662,9 @@ impl Builder {
                 let kind = generated::kind(self.frames[depth].marker_idx);
                 if evicts(kind) {
                     target = Some(depth);
-                    // An incoming row that found a CELL keeps looking for
-                    // the row beneath it — ending the cell but nesting
-                    // inside the stale row would be worse than either.
+                    // A row that found a CELL keeps looking for the row
+                    // beneath it: ending the cell but nesting inside the stale
+                    // row would be worse than either.
                     if !(incoming == MarkerKind::TableRow && kind == MarkerKind::TableCell) {
                         break;
                     }
@@ -763,9 +710,8 @@ pub(crate) fn displaces(kind: MarkerKind, opens_scope: Option<ScopeKind>, mask: 
     opens_scope.is_some() || (matches!(kind, MarkerKind::Chapter | MarkerKind::Verse) && mask != 0)
 }
 
-/// The U25003 containers, keyed on CATEGORY per the 2026-08-17 ruling — the
-/// rows' `opens_scope` says Milestone, and the `-s`/`-e` spelling picks
-/// open vs close.
+/// The U25003 containers, keyed on CATEGORY: the rows' `opens_scope` says
+/// Milestone, and the `-s`/`-e` spelling picks open vs close.
 pub(crate) fn container_kind(marker_idx: generated::MarkerIdx) -> Option<ScopeKind> {
     match generated::category(marker_idx) {
         Category::MilestoneList => Some(ScopeKind::List),
@@ -801,11 +747,9 @@ mod tests {
             .collect()
     }
 
-    /// The streaming Builder — no slice, no pre-count, one token at a time —
-    /// is the SAME walker `build` runs. This is the property step 3's
-    /// scanner sink depends on: if a bare `Builder` fed off `push_token`
-    /// could differ from `build`, the fusion would be a rewrite rather than
-    /// a re-driving.
+    /// The streaming Builder — no slice, no pre-count, one token at a time — is
+    /// the SAME walker `build` runs, so a scanner sink is a re-driving of it
+    /// rather than a rewrite.
     fn feeds_the_same_tree(source: &str) {
         let tokens = lex(source);
         let mut b = Builder::new();
@@ -839,9 +783,8 @@ mod tests {
         }
     }
 
-    /// The same equivalence over one REAL book — every shape the unit
-    /// snippets miss, at corpus scale. Skips when the (gitignored) corpora
-    /// are absent, like the oracle tests.
+    /// The same equivalence over one REAL book — every shape the unit snippets
+    /// miss. Skips when the (gitignored) corpora are absent.
     #[test]
     fn streaming_matches_the_slice_build_on_a_corpus_book() {
         let mut paths: Vec<std::path::PathBuf> = match std::fs::read_dir("example-corpora/en_ult") {
@@ -945,8 +888,8 @@ mod tests {
     #[test]
     fn verse_does_not_displace_its_paragraph_but_pops_an_unclosed_note() {
         // `\v`'s mask includes Para/List/Table, so verses are LEAVES inside
-        // their paragraph. Footnote is deliberately NOT in the mask (Q16 on
-        // the row): a bare `\v` means the note is definitively unclosed.
+        // their paragraph. Footnote is NOT in the mask: a bare `\v` means the
+        // note is definitively unclosed.
         let tokens = lex("\\p \\v 1 one \\v 2 two");
         let cst = build(&tokens);
         let p = node_for(&tokens, &cst, "p");
@@ -956,8 +899,8 @@ mod tests {
             (0..tokens.len() as u32).collect::<Vec<_>>()
         );
 
-        // `\q1` resolves to the shared `q` row (numbered markers), so the
-        // node is found by the ROW name.
+        // `\q1` resolves to the shared `q` row, so the node is found by the ROW
+        // name.
         let tokens = lex("\\q1 \\v 1 poetry line");
         let cst = build(&tokens);
         let q = node_for(&tokens, &cst, "q");
@@ -977,7 +920,7 @@ mod tests {
         let cst = build(&tokens);
         let add = node_for(&tokens, &cst, "add");
         assert_eq!(add.close_reason(), CloseReason::Explicit);
-        // The closer token is the node's LAST child — its bytes are inside
+        // The closer token is the node's LAST child, so its bytes are inside
         // the extent.
         let ids = &cst.child_ids[add.children.start as usize..add.children.end as usize];
         let closer = tokens
@@ -986,7 +929,6 @@ mod tests {
             .unwrap() as u32;
         assert_eq!(*ids.last().unwrap(), closer);
 
-        // A nested-spelling pair closes its own frame.
         let tokens = lex("\\p \\add a \\+nd b\\+nd* c\\add*");
         let cst = build(&tokens);
         assert_eq!(
@@ -1032,8 +974,8 @@ mod tests {
     fn note_peers_are_siblings_and_the_note_closes_explicitly() {
         let tokens = lex("\\f + \\fr 1:1 \\ft note\\f*");
         let cst = build(&tokens);
-        // `\ft` ends its `\fr` PEER (both OptionalExplicitUntilNoteEnd);
-        // `\f*` then pops through the open `\ft` to the note itself.
+        // `\ft` ends its `\fr` PEER; `\f*` then pops through the open `\ft` to
+        // the note itself.
         assert_eq!(
             node_for(&tokens, &cst, "fr").close_reason(),
             CloseReason::Implicit
@@ -1050,13 +992,8 @@ mod tests {
 
     #[test]
     fn a_character_marker_nests_inside_its_note_instead_of_displacing_it() {
-        // bsb GEN 2:4's shape, byte for byte in miniature. Until the
-        // 2026-08-19 class-wide curation (see the note above the `add` row in
-        // tables::rows) no character row carried Footnote, so `\+nd` DISPLACED
-        // the note: `\f` closed Recovery, lint called it unclosed, and the
-        // `\f*` 240 bytes later became an orphan closer. Now the note is a
-        // parent and the char sits inside it — still explicitly closed, which
-        // is the half of the ruling that did NOT change.
+        // bsb GEN 2:4's shape in miniature: character rows carry Footnote, so
+        // `\+nd` NESTS inside the note instead of displacing it.
         let tokens = lex("\\p \\f + \\fr 2:4 \\fq \\+nd Lord\\+nd*\\ft rest.\\f* after");
         let cst = build(&tokens);
 
@@ -1069,7 +1006,7 @@ mod tests {
         assert_eq!(fq.context(), SpecContext::Footnote);
         assert_eq!(nd.context(), SpecContext::Footnote);
 
-        // note:f → char:fq → char:nd, the tree usfmtc reads off the same bytes.
+        // note:f → char:fq → char:nd, the tree usfmtc reads off these bytes.
         let id_of = |name: &str| {
             cst.nodes
                 .iter()
@@ -1084,7 +1021,6 @@ mod tests {
         };
         assert!(children(f).contains(&(NODE_ID_BIT | id_of("fq"))));
         assert!(children(fq).contains(&(NODE_ID_BIT | id_of("nd"))));
-        // The paragraph survives too, and every token is still in the tree.
         assert!(children(node_for(&tokens, &cst, "p")).contains(&(NODE_ID_BIT | id_of("f"))));
         assert_eq!(
             cst.in_order().collect::<Vec<_>>(),
@@ -1094,8 +1030,8 @@ mod tests {
 
     #[test]
     fn the_sidebar_is_a_pop_barrier_only_esbe_ends() {
-        // `\c` inside `\esb` must NOT unwind the sidebar — it stays inside
-        // (lint's to flag). `\esbe` reaches the barrier frame itself.
+        // `\c` inside `\esb` must NOT unwind the sidebar; `\esbe` reaches the
+        // barrier frame itself.
         let tokens = lex("\\p out\\esb \\p in \\c 1 more\\esbe\\p after");
         let cst = build(&tokens);
         let esb_id = cst
@@ -1141,9 +1077,8 @@ mod tests {
         let container = container_for(&tokens, &cst, "list", SpecContext::List);
         assert_eq!(container.close_reason(), CloseReason::Explicit);
 
-        // Both items are siblings INSIDE the container (same-kind eviction
-        // ends the first; closing the container ends the second), and the
-        // whole `\list-e …\*` point is the container's LAST child.
+        // Both items are siblings INSIDE the container, and the whole
+        // `\list-e …\*` point is the container's LAST child.
         let li: Vec<&Node> = cst
             .nodes
             .iter()
@@ -1175,10 +1110,9 @@ mod tests {
         let container = container_for(&tokens, &cst, "table", SpecContext::Table);
         assert_eq!(container.close_reason(), CloseReason::Explicit);
 
-        // Exactly: root + container + two points + 2 rows + 3 cells = 9
-        // nodes — no synthesized second table frame.
+        // root + container + two points + 2 rows + 3 cells = 9: no synthesized
+        // second table frame, and rows sit DIRECTLY in the container.
         assert_eq!(cst.nodes.len(), 9);
-        // Rows sit DIRECTLY in the container.
         let kids =
             &cst.child_ids[container.children.start as usize..container.children.end as usize];
         let row_nodes = kids
@@ -1197,8 +1131,8 @@ mod tests {
     fn bare_rows_and_cells_evict_their_own_kind() {
         let tokens = lex("\\p x\n\\tr \\tc1 a\\tc2 b\n\\tr \\tc1 c\n\\p y");
         let cst = build(&tokens);
-        // First row's cells: tc1 evicted by tc2 (same kind), tc2 + row
-        // evicted by the second \tr, all Implicit (their rows close None).
+        // tc1 evicted by tc2 (same kind), tc2 + row by the second \tr, all
+        // Implicit (their rows close None).
         let cells: Vec<&Node> = cst
             .nodes
             .iter()
@@ -1220,9 +1154,8 @@ mod tests {
 
     #[test]
     fn a_paragraph_displaces_an_unterminated_container() {
-        // Legal in 3.2 (closing milestone optional); the container's closing
-        // behavior is SelfClosingMilestone, so displacement stamps Recovery
-        // and lint keys severity on the declared version.
+        // Legal in 3.2 (closing milestone optional), so displacement stamps
+        // Recovery and lint keys severity on the declared version.
         let tokens = lex("\\list-s\\*\n\\li a\n\\p prose");
         let cst = build(&tokens);
         let container = container_for(&tokens, &cst, "list", SpecContext::List);
@@ -1237,7 +1170,6 @@ mod tests {
     fn an_orphan_container_end_is_a_plain_point() {
         let tokens = lex("\\p text\n\\list-e\\*");
         let cst = build(&tokens);
-        // The -e point exists and closes at its star; nothing else closes.
         let point = node_for(&tokens, &cst, "list");
         assert_eq!(point.close_reason(), CloseReason::Explicit);
         assert_eq!(
@@ -1262,7 +1194,7 @@ mod tests {
             node_for(&tokens, &cst, "p").close_reason(),
             CloseReason::Implicit
         );
-        // The unknown marker and its text land at ROOT — fresh start.
+        // The unknown marker lands at ROOT: a fresh start.
         let root_kids = &cst.child_ids
             [cst.nodes[0].children.start as usize..cst.nodes[0].children.end as usize];
         let zfoo = tokens
@@ -1281,9 +1213,9 @@ mod tests {
 
     #[test]
     fn unknown_milestones_pair_with_their_star() {
-        // The aligned-corpus idiom: row-0 milestones. The SPELLING opens the
-        // point frame; each point contains exactly its own attrs + `\*`, and
-        // the word between the pair is NOT inside either point.
+        // The aligned-corpus idiom: row-0 milestones, where the SPELLING opens
+        // the point. Each point holds exactly its own attrs + `\*`, and the
+        // word between the pair is inside NEITHER.
         let tokens = lex("\\zaln-s |x-strong=\"G1\"\\*\\w In|lemma=\"in\"\\w*\\zaln-e\\*");
         let cst = build(&tokens);
         let points: Vec<&Node> = cst
@@ -1317,7 +1249,6 @@ mod tests {
         let p = node_for(&tokens, &cst, "p");
         assert_eq!(ts.close_reason(), CloseReason::Explicit);
         assert_eq!(p.close_reason(), CloseReason::Eof);
-        // "b" (the last token) is p's child, not the point's.
         let last = tokens.len() as u32 - 1;
         assert!(node_tokens(&cst, p).contains(&last));
         assert!(!node_tokens(&cst, ts).contains(&last));
@@ -1336,9 +1267,8 @@ mod tests {
 
     #[test]
     fn milestones_nest_where_containers_displace() {
-        // usfmtc's USJ (scratchpad probe, 2026-08-18): `\ts-s` stays INSIDE
-        // its paragraph; `\list-s` content lands BESIDE it. The row masks
-        // encode exactly that split.
+        // usfmtc's USJ keeps `\ts-s` INSIDE its paragraph and lands `\list-s`
+        // content BESIDE it; the row masks encode exactly that split.
         let tokens = lex("\\p \\v 1 before \\ts-s\\* after");
         let cst = build(&tokens);
         let p = node_for(&tokens, &cst, "p");
@@ -1368,9 +1298,9 @@ mod tests {
 
     #[test]
     fn empty_context_rows_do_not_displace() {
-        // `cp` is the last empty-mask row (a published chapter label: no
-        // closer, no frame). Its emptiness is safe precisely because it opens
-        // nothing — see `every_scope_opening_row_has_a_nonempty_context_mask`.
+        // `cp` is the last empty-mask row (a published chapter label: no closer,
+        // no frame). Its emptiness is safe because it opens nothing — see
+        // `every_scope_opening_row_has_a_nonempty_context_mask`.
         let tokens = lex("\\p before\n\\cp \u{5d0}\n after");
         let cst = build(&tokens);
         let p = node_for(&tokens, &cst, "p");
@@ -1382,14 +1312,13 @@ mod tests {
         );
     }
 
-    /// `ca`/`va`/`vp` open Character scopes (Will, 2026-08-19) and carry the
-    /// character class's context mask, so they NEST at both of the places the
-    /// spec puts them and displace nothing there.
+    /// `ca`/`va`/`vp` open Character scopes and carry the character class's
+    /// context mask, so they NEST at both of the places the spec puts them and
+    /// displace nothing there.
     #[test]
     fn chapter_and_verse_annotations_nest_like_character_markers() {
-        // Chapter level: `\c` is a point, so the stack is just the root, which
-        // the pop loop never touches. The `\p` and `\v` that follow are
-        // unaffected by the closed annotation.
+        // Chapter level: `\c` is a point, so the stack is just the root and the
+        // pop loop never touches it.
         let tokens = lex("\\c 1\n\\ca 2\\ca*\n\\p \\v 1 text");
         let cst = build(&tokens);
         let ca = node_for(&tokens, &cst, "ca");
@@ -1398,8 +1327,6 @@ mod tests {
         assert_eq!(ca.context(), SpecContext::Scripture);
         assert_eq!(p.close_reason(), CloseReason::Eof);
         assert_eq!(p.context(), SpecContext::Para);
-        // Three nodes and no more: root, `\ca`, `\p` — nothing was displaced
-        // and nothing else opened.
         assert_eq!(cst.nodes.len(), 3);
         assert_eq!(
             cst.in_order().collect::<Vec<_>>(),
@@ -1407,7 +1334,7 @@ mod tests {
         );
 
         // Verse level: `Para` in the mask is what keeps the paragraph open
-        // across both annotations, and the paragraph still ends at EOF.
+        // across both annotations.
         let tokens = lex("\\p \\v 1 \\va 3\\va* \\vp 3b\\vp* text");
         let cst = build(&tokens);
         let p = node_for(&tokens, &cst, "p");
@@ -1434,16 +1361,14 @@ mod tests {
     #[test]
     fn an_unclosed_chapter_annotation_is_displaced_as_recovery() {
         // `RequiredExplicit` + displacement = Recovery, the same verdict any
-        // other unclosed character marker earns. Before the rows opened a
-        // scope this was SILENT: no frame existed to be displaced.
+        // other unclosed character marker earns.
         let tokens = lex("\\c 1\n\\ca 2\n\\c 2");
         let cst = build(&tokens);
         let ca = node_for(&tokens, &cst, "ca");
         assert_eq!(ca.close_reason(), CloseReason::Recovery);
     }
 
-    /// The extent of a node is stated as the SOURCE TEXT it covers, which is
-    /// the only form in which the answer is checkable by eye.
+    /// An extent as the SOURCE TEXT it covers — the only form checkable by eye.
     fn extent_text<'a>(source: &'a str, tokens: &[Token], cst: &Cst, name: &str) -> &'a str {
         let node = node_for(tokens, cst, name);
         let id = cst
@@ -1464,8 +1389,8 @@ mod tests {
         assert_eq!(extent_text(source, &tokens, &cst, "p"), "\\p one two");
 
         // Ending in a NESTED NODE, twice over: `\p`'s last child is the `\f`
-        // node, whose last child is the `\ft` node. Neither node's own `token`
-        // could have answered this.
+        // node, whose last child is the `\ft` node — neither node's own `token`
+        // could answer this.
         let source = "\\p one \\f + \\ft note\\f* tail\n\\p next";
         let tokens = lex(source);
         let cst = build(&tokens);
@@ -1480,8 +1405,7 @@ mod tests {
             "\\p one \\f + \\ft note\\f* tail\n"
         );
 
-        // A node ending in a node ending in a node: the container's last
-        // descendant is two levels down.
+        // The container's last descendant is two levels down.
         let source = "\\list-s\\*\n\\li item\n\\list-e\\*";
         let tokens = lex(source);
         let cst = build(&tokens);

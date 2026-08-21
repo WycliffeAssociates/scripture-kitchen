@@ -21,11 +21,9 @@
 //! ```
 //!
 //! Same fold, same lossy step and same laws as [`crate::usj`] — read that
-//! module first; everything it says about the lift table, the attribute splat,
-//! the synthesized `table` wrapper, the dropped `\usfm`, milestone spellings and
-//! the F3 note graft is true here unchanged. What follows is only what USX ADDS
-//! or reads DIFFERENTLY, each line of it forced by `testData`'s `origin.xml`
-//! fixtures.
+//! module first; the lift table, the attribute splat, the synthesized `table`
+//! wrapper, milestone spellings and the note graft are all true here
+//! unchanged. What follows is only what USX adds or reads differently.
 //!
 //! # `style` is the marker, the type is the element
 //!
@@ -36,18 +34,21 @@
 //!
 //! # The root version is the DOCUMENT's, not a constant
 //!
-//! FIXTURE-FORCED: `<usx version="3.0">` in 205 of the 208 fixtures, but the
-//! three that declare `\usfm 3.1` write `version="3.1"`. So `\usfm` is not
-//! simply dropped the way USJ drops it: its payload IS the root version, and
-//! "3.0" is only the default. (USJ's envelope version is USJ's own — a
-//! different fact that happens to look similar.)
+//! ```text
+//! (nothing)     <usx version="3.0">
+//! \usfm 3.1     <usx version="3.1">
+//! ```
+//!
+//! `\usfm` is not simply dropped the way USJ drops it: its payload IS the root
+//! version, and "3.0" is only the default. (USJ's envelope version is USJ's
+//! own — a different fact that happens to look similar.)
 //!
 //! # sid, eid, and vid — the decoration USJ has no room for
 //!
 //! A USJ chapter/verse is one element with a `sid`. A USX one is a PAIR: the
 //! `sid` element where the marker sits and a separate `<verse eid="GEN 1:1" />`
 //! at the point the verse ends. Where that point is, is the only genuinely new
-//! mechanism in this module, and the fixtures place it like this:
+//! mechanism in this module:
 //!
 //! ```text
 //! \p                    <para style="p"><verse … sid="JHN 1:2" />It began …</para>
@@ -61,17 +62,15 @@
 //! A verse does NOT end at its own paragraph's close. It runs to the next `\v`,
 //! the next `\c`, or the end of the document; every BLOCK it crosses on the way
 //! carries `vid="<its sid>"`; and its `eid` lands at the end of the LAST block
-//! it reaches. Two corrections the fixtures forced on that last clause:
+//! it reaches. Two qualifications on that last clause:
 //!
 //! 1. **Trailing headings and empty blocks are TRIMMED.** `\v 2 …\n\s1 A
 //!    heading\n\p \v 3 …` closes verse 2 at its own paragraph, and the `\s1`
-//!    carries no `vid` (basic/section, advanced/list). A heading in the MIDDLE
-//!    of a verse still carries one (advanced/custom-attributes' `\s`), so this
-//!    is a backwards trim from the boundary, not a forward stop. An empty block
-//!    (`\b`, `\s5`) trims the same way (paratextTests/NoErrorsNesting).
-//! 2. **A CELL is a block and a `<table>` hoists the `vid`.** The one fixture
-//!    with a verse open across a table writes `<table vid="…">` and puts the
-//!    `eid` inside the last `<cell>` (specExamples/table).
+//!    carries no `vid` (basic/section). A heading in the MIDDLE of a verse
+//!    still carries one, so this is a backwards trim from the boundary, not a
+//!    forward stop. An empty block (`\b`, `\s5`) trims the same way.
+//! 2. **A CELL is a block and a `<table>` hoists the `vid`.** `<table vid="…">`
+//!    with the `eid` inside the last `<cell>` (specExamples/table).
 //!
 //! Because the close point is only knowable once the NEXT verse is in sight,
 //! this is a two-pass export: [`decorate`] scans the token stream and records
@@ -79,19 +78,13 @@
 //! writes. A projection artifact exactly like the synthesized `<table>` — the
 //! never-synthesize law governs TOKENS, and no token is invented.
 //!
-//! # Whitespace: three of USJ's four rules, and the fourth INVERTED
+//! # Whitespace
 //!
-//! Rules 1–3 carry over unchanged (every whitespace run is ONE space; a
-//! delimiter is not content; at a block seam and at EOF whitespace is dropped —
-//! measured: no fixture has whitespace in front of a `<para>`/`<chapter>` open
-//! tag, and no `<para>` ends with one).
+//! Unlike usj, a whitespace-only run IS content here:
 //!
-//! USJ's rule 4 — "a whitespace-only run is not content at all" — is FALSE for
-//! USX. `\f …\f*\n\v 4` writes `</note> <verse eid="MAT 1:3" />`: the folded
-//! newline survives as a whitespace-only text node, 7972 times across the
-//! corpus, and `<char style="ft"><char style="xt">ref</char> </char>` keeps one
-//! too. USX simply preserves more than USJ does, which is why this module keeps
-//! a run of pure whitespace that `usj.rs` drops.
+//! ```text
+//! \f …\f*\n\v 4     </note> <verse eid="MAT 1:3" />
+//! ```
 //!
 //! # XML 1.0 cannot spell a C0 control
 //!
@@ -110,8 +103,7 @@ use crate::tables::generated::{self, MarkerIdx};
 use crate::tables::schema::{Category, MarkerKind};
 use crate::{Token, TokenKind};
 
-/// The USX schema version a document that declares none is written as. 205 of
-/// the 208 validated-pass fixtures; the other three declare `\usfm 3.1`.
+/// The USX schema version a document that declares no `\usfm` is written as.
 const DEFAULT_VERSION: &str = "3.0";
 
 /// Folds a lexed + built document into USX XML.
@@ -145,10 +137,9 @@ pub fn usx(source: &[u8], tokens: &[Token], cst: &Cst) -> String {
 // The writer
 // ---------------------------------------------------------------------------
 
-/// The hand-rolled XML writer: a `String` and one escaper per context. Same
-/// no-serde rationale as USJ's — USX is a small CLOSED shape, and the library
-/// stays dependency-free. There is no XML READER in `src/`; the library only
-/// ever writes.
+/// The hand-rolled XML writer: a `String` and one escaper per context. USX is a
+/// small CLOSED shape, so the library stays dependency-free — and it only ever
+/// writes XML, never reads it.
 struct Xml {
     out: String,
 }
@@ -191,8 +182,7 @@ impl Xml {
     }
 
     /// A C0 control as a numeric character reference, anything else verbatim.
-    /// See the module doc: XML 1.0 has no legal spelling for these, and dropping
-    /// document content is the worse answer.
+    /// The reference is not legal XML 1.0, but dropping content is worse.
     fn control_or(&mut self, ch: char) {
         if (ch as u32) < 0x20 && !matches!(ch, '\t' | '\n' | '\r') {
             self.raw("&#x");
@@ -211,7 +201,7 @@ impl Xml {
 // ---------------------------------------------------------------------------
 
 /// Everything the fold cannot know when it gets there, because it depends on
-/// what comes NEXT (see the module doc's sid/eid/vid section).
+/// what comes NEXT.
 #[derive(Default)]
 struct Decor {
     /// Block node id → the `vid` attribute it carries.
@@ -238,9 +228,8 @@ struct Blk {
     content: bool,
 }
 
-/// Which paragraph families a verse never ENDS in. The spec's own grouping does
-/// the work — `Category::ParaTitlesSections` is exactly `mt# mte# ms# mr s# sr
-/// r d sp sd# cd cl`, which is the set the fixtures trim.
+/// Which paragraph families a verse never ENDS in. The spec's own categories are
+/// already exactly the set the fixtures trim, so no hand-written list is needed.
 fn is_heading(marker_idx: MarkerIdx) -> bool {
     matches!(
         generated::category(marker_idx),
@@ -249,7 +238,7 @@ fn is_heading(marker_idx: MarkerIdx) -> bool {
 }
 
 /// Scans the token stream once and answers the questions the fold will ask out
-/// of order. Cheap: one pass, one small `Blk` per block.
+/// of order.
 fn decorate(source: &[u8], tokens: &[Token], cst: &Cst) -> Decor {
     let mut node_of_token = vec![u32::MAX; tokens.len()];
     for (id, node) in cst.nodes.iter().enumerate() {
@@ -270,11 +259,9 @@ fn decorate(source: &[u8], tokens: &[Token], cst: &Cst) -> Decor {
     let mut chapter: Option<String> = None;
     // `Some(true)` = a `\v` is waiting for its designator, `Some(false)` a `\c`.
     let mut awaiting: Option<bool> = None;
-    // FIXTURE-FORCED: a SIDEBAR is its own scope. An open verse survives it —
-    // `usfmjsTests/esb` resumes the verse in the `\p` after `\esbe` and puts the
-    // eid there — but the sidebar's own paragraphs carry NO vid
-    // (specExamples/attributes, extended/sidebars, extended/contentCatogories2).
-    // So the scan simply looks away while one is open.
+    // A SIDEBAR is its own scope: an open verse survives it and resumes in the
+    // `\p` after `\esbe`, but the sidebar's own paragraphs carry NO vid
+    // (usfmjsTests/esb). So the scan looks away while one is open.
     let mut in_sidebar = false;
 
     /// Closes the open verse: picks the block its `eid` belongs at the end of
@@ -494,8 +481,8 @@ struct Frame {
     /// The one Text token this element LIFTED into an attribute instead of
     /// content — `\periph My Title|id="x"`, whose title becomes `alt`.
     lifted_text: u32,
-    /// This frame is a NOTE element: its own family's PEER markers, so the F3
-    /// graft can tell a peer from an inline span. `None` for anything else.
+    /// This frame is a NOTE element: its own family's PEER markers, so the graft
+    /// can tell a peer from an inline span. `None` for anything else.
     peers: Option<&'static [&'static str]>,
     /// This frame is an UNCLOSED note-text element (`\ft`, `\fqa`, `\xo`, …), so
     /// an explicitly-closed sibling GRAFTS into it instead of sealing it.
@@ -573,10 +560,10 @@ impl<'a> Export<'a> {
 
         loop {
             if cur.next == cur.end {
-                // F3, the graft: an unclosed note-text element does NOT seal
-                // just because its child list ran out — it STEALS the note's
-                // next child when that child is an explicitly-closed span (or
-                // the direct note content that follows one), one at a time.
+                // An unclosed note-text element does NOT seal just because its
+                // child list ran out: it STEALS the note's next child when that
+                // child is an explicitly-closed span (or the direct note content
+                // following one), one at a time.
                 if cur.adopts && stack.last().is_some_and(|parent| self.grafts(parent, &cur)) {
                     let parent = stack.last_mut().expect("just checked");
                     let at = parent.next;
@@ -637,9 +624,8 @@ impl<'a> Export<'a> {
             return; // the node's own opening marker
         }
         if idx == frame.lifted_text {
-            // Already written as an attribute at this element's open
-            // (`\periph`'s title → `alt`); like the book code and the note
-            // caller it only re-arms the delimiter rule for what follows.
+            // Already written as an attribute at this element's open; like the
+            // book code and the note caller it only re-arms the delimiter rule.
             self.lists[frame.list].at_boundary = true;
             return;
         }
@@ -768,11 +754,11 @@ impl<'a> Export<'a> {
         }
     }
 
-    // -- the note graft (F3) -----------------------------------------------
+    // -- the note graft ----------------------------------------------------
 
     /// Does the note's next child GRAFT into `open`, the note-text element that
-    /// just ran out of children? The rule and its measurements live on
-    /// [`crate::usj`]'s twin; this is the same projection, spelled in XML.
+    /// just ran out of children? The rule is shared by all three exports — see
+    /// planning/quirks.md.
     fn grafts(&self, parent: &Frame, open: &Frame) -> bool {
         let Some(peers) = parent.peers else {
             return false;
@@ -834,12 +820,9 @@ impl<'a> Export<'a> {
 
         // The lifted markers emit NOTHING: their content becomes an attribute
         // somewhere else, and they must not break the text run around them.
-        //
-        // FIXTURE-FORCED: unless the content is not PLAIN TEXT. An XML attribute
-        // cannot hold markup, so `\vp \+it \+wj 21\+wj*\+it* \vp*` stays an
-        // ordinary `<char style="vp">` with its nesting intact — which is what
-        // biblica/PublishingVersesWithFormatting writes, in its `origin.json`
-        // as well as its `origin.xml`.
+        // Unless that content is not PLAIN TEXT — an XML attribute cannot hold
+        // markup, so `\vp \+it 21\+it*\vp*` stays an ordinary `<char style="vp">`
+        // with its nesting intact (biblica/PublishingVersesWithFormatting).
         let liftable = !self
             .cst
             .child_ids
@@ -856,16 +839,15 @@ impl<'a> Export<'a> {
                 self.lift(Absorb::PubNumber, value, list);
                 return None;
             }
-            // `\cat` was already read by the enclosing note/sidebar's open.
-            // `\usfm` became the ROOT's version attribute (the one place USX
-            // parts company with USJ's outright drop).
+            // `\cat` was already read by the enclosing note/sidebar's open, and
+            // `\usfm` became the ROOT's version attribute.
             "cat" | "usfm" => return None,
             _ => {}
         }
 
         let kind = generated::kind(marker_idx);
-        // F3: a note-text element that supplied NO closer of its own is the one
-        // an explicitly-closed sibling grafts into (see `grafts`).
+        // A note-text element that supplied NO closer of its own is the one an
+        // explicitly-closed sibling grafts into (see `grafts`).
         let adopts = parent.peers.is_some()
             && kind == MarkerKind::Character
             && node.close_reason() != CloseReason::Explicit;
@@ -1181,8 +1163,7 @@ impl<'a> Export<'a> {
     }
 
     /// Writes the accumulated run as character data. Unlike USJ's twin, a run
-    /// that is whitespace ONLY is KEPT: `</note> <verse eid=…/>` is what the
-    /// fixtures hold, 7972 times.
+    /// that is whitespace ONLY is KEPT: `</note> <verse eid=…/>`.
     fn flush_run(&mut self, list: usize) {
         let run = core::mem::take(&mut self.lists[list].run);
         if run.is_empty() {
@@ -1297,15 +1278,14 @@ impl<'a> Export<'a> {
 }
 
 // ---------------------------------------------------------------------------
-// THE ZOO: one hand-written case per mapping row (sketches/usx-export.md).
+// THE ZOO: one hand-written case per mapping row.
 // ---------------------------------------------------------------------------
 //
-// These pin INTENT independently of testData: the corpus test
-// (tests/usx_corpus.rs) is the oracle, and it compares STRUCTURALLY, so it
-// forgives attribute order and pretty-print indentation. The zoo compares the
-// STRING, which is what pins the writer's fixed attribute order (the fixtures'
-// own: `code`/`caller` before `style`, splatted attributes after it, `vid` last)
-// and the self-closing spelling of an empty element.
+// The corpus oracle (tests/usx_corpus.rs) compares STRUCTURALLY, so it forgives
+// attribute order and indentation. These cases compare the STRING, which is what
+// pins the writer's fixed attribute order (`code`/`caller` before `style`,
+// splatted attributes after it, `vid` last) and the self-closing spelling of an
+// empty element.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1333,8 +1313,8 @@ mod tests {
     #[test]
     fn the_root_version_defaults_to_3_0_and_echoes_usfm() {
         assert_eq!(whole(""), r#"<usx version="3.0"></usx>"#);
-        // FIXTURE-FORCED: `\usfm` is not dropped the way USJ drops it — its
-        // payload IS the root version (3 fixtures declare 3.1 and say so).
+        // `\usfm` is not dropped the way USJ drops it — its payload IS the
+        // root version.
         assert_eq!(
             whole("\\usfm 3.1\n\\p x"),
             r#"<usx version="3.1"><para style="p">x</para></usx>"#
@@ -1406,9 +1386,8 @@ mod tests {
 
     #[test]
     fn a_verse_crosses_paragraphs_and_they_carry_its_vid() {
-        // basic/multiple-paragraphs' shape: the verse runs to the paragraph
-        // BEFORE the one that starts the next verse, and every block between
-        // wears `vid`.
+        // The verse runs to the paragraph BEFORE the one that starts the next
+        // verse, and every block between wears `vid` (basic/multiple-paragraphs).
         assert_eq!(
             content(
                 "\\id JHN\n\\c 1\n\\p\n\\v 1 one\n\\v 2 two\n\\q1 more\n\\q2 still\n\\q1\n\\v 3 three"
@@ -1425,8 +1404,8 @@ mod tests {
 
     #[test]
     fn a_trailing_heading_is_trimmed_off_the_verse() {
-        // basic/section: the `\s1` between two verses carries NO vid, and the
-        // eid stays in the paragraph the verse started in.
+        // The `\s1` between two verses carries NO vid, and the eid stays in the
+        // paragraph the verse started in (basic/section).
         assert_eq!(
             content("\\id GEN\n\\c 1\n\\p\n\\v 1 one\n\\s1 A heading\n\\p\n\\v 2 two"),
             r#"<book code="GEN" style="id" /><chapter number="1" style="c" sid="GEN 1" />"#
@@ -1440,8 +1419,8 @@ mod tests {
 
     #[test]
     fn a_sidebar_carries_no_vid_and_the_verse_survives_it() {
-        // usfmjsTests/esb: the sidebar's own paragraphs are outside the verse,
-        // and the paragraph AFTER `\esbe` resumes it.
+        // The sidebar's own paragraphs are outside the verse; the paragraph
+        // AFTER `\esbe` resumes it (usfmjsTests/esb).
         assert_eq!(
             content("\\id GEN\n\\c 1\n\\p \\v 1 x\n\\esb \\p inside\n\\esbe\n\\p after"),
             r#"<book code="GEN" style="id" /><chapter number="1" style="c" sid="GEN 1" />"#
@@ -1481,9 +1460,8 @@ mod tests {
             content("\\p \\cp M"),
             r#"<para style="p"><char style="cp">M</char></para>"#
         );
-        // FIXTURE-FORCED (biblica/PublishingVersesWithFormatting): an attribute
-        // cannot hold markup, so a lift whose content is not plain text does not
-        // happen at all.
+        // An attribute cannot hold markup, so a lift whose content is not plain
+        // text does not happen at all (biblica/PublishingVersesWithFormatting).
         assert_eq!(
             content("\\p \\vp \\+it 21\\+it*\\vp* text"),
             r#"<para style="p"><char style="vp"><char style="it">21</char></char> text</para>"#
@@ -1600,8 +1578,7 @@ mod tests {
             content("\\p \\k ostrich \\k*bird"),
             r#"<para style="p"><char style="k">ostrich </char>bird</para>"#
         );
-        // THE ONE WHITESPACE RULE USX DOES NOT SHARE WITH USJ: a whitespace-only
-        // run IS content here. `usj.rs`'s twin of this case drops the space.
+        // A whitespace-only run IS content here; `usj.rs`'s twin drops it.
         assert_eq!(
             content("\\p \\add a\\add* \\add b\\add*"),
             r#"<para style="p"><char style="add">a</char> <char style="add">b</char></para>"#
@@ -1610,7 +1587,8 @@ mod tests {
 
     #[test]
     fn a_closed_span_nests_in_the_open_note_text_and_an_unclosed_one_stays_a_peer() {
-        // F3, the same projection `usj.rs` documents at length.
+        // An explicitly-closed span foreign to the note's family nests in the
+        // open note text; an unclosed one stays a peer.
         assert_eq!(
             content("\\p \\f + \\ft alpha \\xt ref\\xt* beta\\f*"),
             r#"<para style="p"><note caller="+" style="f"><char style="ft">alpha <char style="xt">ref</char> beta</char></note></para>"#
@@ -1623,17 +1601,13 @@ mod tests {
 
     #[test]
     fn the_writer_escapes_what_xml_requires() {
-        // `<`, `&` and `>` in text, and a C0 control as a numeric reference
-        // (see the module doc — XML 1.0 has no legal spelling for one, and
-        // dropping document content is worse).
+        // `<`, `&` and `>` in text, and a C0 control as a numeric reference.
         assert_eq!(
             content("\\p a < b & c > d \u{1}"),
             r#"<para style="p">a &lt; b &amp; c &gt; d &#x01;</para>"#
         );
         // The same three in an ATTRIBUTE value. `"` cannot be tested here: USFM
-        // defines no escapes, so a quote inside an attribute value ends it —
-        // src/attributes.rs's law, and the reason
-        // special-cases/figure_with_quotes_in_desc is on the exclusion list.
+        // defines no escapes, so a quote inside a value ends it (attributes.rs).
         assert_eq!(
             content("\\p \\w x|lemma=\"a&b<c>d\"\\w*"),
             r#"<para style="p"><char style="w" lemma="a&amp;b&lt;c&gt;d">x</char></para>"#

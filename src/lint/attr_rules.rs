@@ -2,11 +2,10 @@
 //! owner-reach state cluster it needs — `\w grace|lemma="x"\w*` and the four
 //! `owner_*` fields that say whose list that is.
 //!
-//! Split out of [`Flat`](super::flat::Flat) because it is a machine within
-//! that machine: its own lookbehind, its own entry, and the only rules in lint
-//! that read INSIDE a token — which is where lint's one real perf event is
-//! (see [`AttrRules::read_attributes`], and the vectorization lever in
-//! planning/investigate-later.md).
+//! Split out of [`Flat`](super::flat::Flat) because it is a machine within that
+//! machine: its own lookbehind, its own entry, and the only rules in lint that
+//! read INSIDE a token — which is where lint's whole attribute cost lives
+//! ([`AttrRules::read_attributes`]).
 
 use super::walk::span_of;
 use super::{Code, Doc, Emit, NO_TOKEN, Observation, UsfmVersion};
@@ -18,12 +17,11 @@ use crate::{Token, TokenKind};
 /// The attribute family's whole state: who owns the list that arrives now, and
 /// what that owner still owes.
 ///
-/// - **The attribute owner.** Attributes belong to the last marker, exactly as
-///   [`TokenKind::AttrList`] documents, so the owner is the nearest preceding
-///   opener and a Newline ends its reach — the scanner bounds lists to a line,
-///   so nothing else would be honest.
-/// - **The sid ledger**, one token index per row, for the `eid`-required-if
-///   rule: "was this milestone family ever opened with a `sid`".
+/// - **The owner** is the nearest preceding opener, as [`TokenKind::AttrList`]
+///   documents, and a Newline ends its reach — the scanner bounds lists to a
+///   line, so nothing wider would be honest.
+/// - **The sid ledger**, one token index per row: "was this milestone family
+///   ever opened with a `sid`" (the `eid`-required-if rule).
 pub(crate) struct AttrRules {
     /// The owning marker of any attribute list that arrives now: its token
     /// index, its row, whether its terminator is `\*` rather than a named
@@ -75,9 +73,9 @@ impl AttrRules {
         self.owner = idx;
         self.owner_idx = marker_idx;
         self.owner_is_point = !opener || generated::kind(marker_idx) == MarkerKind::Milestone;
-        // Resolved HERE, once per marker, rather than per Text token:
-        // it is the flag that keeps the pipe scan off ordinary prose,
-        // so it must not itself cost a table read per token.
+        // Resolved once per marker, not per Text token: this flag
+        // keeps the pipe scan off prose, so it must not itself cost a
+        // table read per token.
         let defined = generated::defined_attributes(marker_idx);
         self.owner_has_attrs = !self.owner_is_point && !defined.is_empty();
         self.first_list = NO_TOKEN;
@@ -105,17 +103,15 @@ impl AttrRules {
         self.owner = NO_TOKEN;
         self.owner_has_attrs = false;
         self.first_list = NO_TOKEN;
-        // A point whose `\*` never came is `unterminated-milestone`, exactly
-        // and already; saying it also owes an `eid` would be two findings for
-        // one missing terminator.
+        // A point whose `\*` never came is already `unterminated-milestone`;
+        // adding "and it owes an `eid`" is two findings for one mistake.
         self.eid_owed = NO_TOKEN;
     }
 
-    /// The `-e` point is COMPLETE here, and only here: an `eid` that never
-    /// arrived is a fact about the whole point, not about any one list, so this
-    /// is where the verdict is given. Anchored at the list when there was one
-    /// and at the milestone itself when there was not — which is the shape the
-    /// rule is really about (`\qt-e\*` carrying nothing).
+    /// The `-e` point is COMPLETE here, and only here: a missing `eid` is a fact
+    /// about the whole point, not about any one list. Anchored at the list when
+    /// there was one, at the milestone itself when there was not (`\qt-e\*`
+    /// carrying nothing, which is the shape the rule is about).
     #[inline]
     pub(super) fn on_milestone_terminator(&mut self, out: &mut Emit) {
         if self.eid_owed != NO_TOKEN && !self.eid_seen {
@@ -133,15 +129,14 @@ impl AttrRules {
         self.close_reach();
     }
 
-    /// A raw pipe in the content of an attrs-capable marker. The owner flag
-    /// comes first on purpose: it is one already-loaded boolean, and it keeps
-    /// the byte scan off the ~85% of tokens that are ordinary prose.
+    /// A raw pipe in the content of an attrs-capable marker. The owner flag is
+    /// tested first: one already-loaded boolean keeps the byte scan off the
+    /// ~85% of tokens that are ordinary prose.
     ///
-    /// MILESTONE owners abstain, and that is the same line the scanner draws
-    /// when it arms its back-position pipe needle for Character and Figure rows
-    /// alone. A milestone has no content, so a pipe that stayed content there
-    /// means its `\*` never came — which `unterminated-milestone` already
-    /// reports, exactly, and this hint would only guess at.
+    /// MILESTONE owners abstain — the same line the scanner draws when it arms
+    /// its back-position pipe needle for Character and Figure rows alone. A
+    /// milestone has no content, so a pipe left there means its `\*` never came,
+    /// which `unterminated-milestone` already reports exactly.
     #[inline]
     pub(super) fn on_text(&mut self, doc: &Doc, idx: u32, token: &Token, out: &mut Emit) {
         if self.owner_has_attrs && span_of(doc.source, token).contains(&b'|') {
@@ -172,11 +167,9 @@ impl AttrRules {
         // NODE-INITIAL is "in front position AND self-closed": the
         // list is the token right after its marker, and its span ends
         // with the closing pipe (plus any HS the U25001 production
-        // puts inside the list). Everything else is the 3.1 trailing
-        // form. The one shape this would read as node-initial and is
-        // not is `\w a|b|\w*`, where a raw pipe ENDS a back-position
-        // value — but that list is not in front position either, so
-        // the front test already excludes it.
+        // puts inside it). Everything else is the 3.1 trailing form.
+        // `\w a|b|\w*` ends a back-position value with a raw pipe, but
+        // it fails the front test, so it is not mistaken for one.
         let span = span_of(source, token);
         let trailing = idx != self.owner + 1
             || !span
@@ -185,10 +178,9 @@ impl AttrRules {
                 .find(|byte| !matches!(byte, b' ' | b'\t'))
                 .is_some_and(|byte| *byte == b'|');
         if trailing {
-            // The version half of this rule is the ROW's, not the
-            // rule's: `severity_at` is `None` below the ladder's first
-            // rung, which is exactly the old hand-coded `>= 3.2` gate
-            // with the fact moved to where the fact is authored.
+            // The version half of this rule belongs to the ROW:
+            // `severity_at` is `None` below the ladder's first rung,
+            // so the gate is asked, never restated here.
             if generated::kind(self.owner_idx) == MarkerKind::Character
                 && Code::AttrTrailingFormDeprecated
                     .row()
@@ -220,16 +212,13 @@ impl AttrRules {
                 ));
             }
         }
-        // ROW 0 ABSTAINS, and it is both the honest line and the
-        // measured one. Honest: a custom `\z` marker has no row to
-        // judge its attributes against, and `unknown-marker` is the
-        // one finding lint owes on a marker it cannot classify (the
-        // same line `nested-spelling-misuse` draws). Measured: en_ult
-        // writes 461,352 `\zaln-s` lists of five attributes each,
-        // which is over half of every attribute byte in the corpus —
-        // reading them to say nothing costs ~7 ns/token. The day
-        // custom-marker configuration lands, `\zaln-s` gets a real row
-        // and its lists are read like anyone's.
+        // ROW 0 ABSTAINS, honestly and cheaply. Honest: a custom `\z`
+        // marker has no row to judge its attributes against, and
+        // `unknown-marker` is the one finding lint owes on a marker it
+        // cannot classify. Cheap: en_ult writes 461,352 `\zaln-s` lists
+        // of five attributes, over half of every attribute byte in the
+        // corpus, and reading them to say nothing costs ~7 ns/token.
+        // Configured `\z` markers get real rows and get read.
         if self.owner_idx != generated::UNRESOLVED {
             self.read_attributes(doc, idx, token, out);
         }
@@ -242,25 +231,20 @@ impl AttrRules {
     /// `#[inline(never)]`: it runs once per attribute LIST, never once per
     /// token, so it has no business inflating the dispatch tree above it.
     ///
-    /// THE COST, measured and named because it is the closeout window's one
-    /// real perf event: this is the first rule in lint to read INSIDE a list,
-    /// and a word-aligned corpus is largely made of list interiors. en_ult
-    /// writes 792,414 `\w` lists of `|x-occurrence="1" x-occurrences="1"` —
-    /// 31 MB of bytes — and walking them costs +5.7 ns/token there (9.8 → 15.5,
-    /// min-of-8) against +0.6 ns/token on the three unaligned corpora. It is
-    /// not the interpreter being slow (~0.85 GB/s byte-at-a-time is what that
-    /// walk is worth); it is 31 MB of work lint never did. The two honest
-    /// reductions are already applied — row 0 abstains (see the call site,
-    /// another 25 MB) and `x-`/`z-` names skip resolution — and what remains
-    /// buys the rules below. A vectorized interior scan is the next lever if
-    /// the number ever matters (planning/investigate-later.md).
+    /// THE COST: a word-aligned corpus is largely made of list interiors. en_ult
+    /// writes 792,414 `\w` lists of `|x-occurrence="1" x-occurrences="1"` — 31 MB
+    /// of bytes — and walking them costs +5.7 ns/token there (9.8 → 15.5,
+    /// min-of-8) against +0.6 ns/token on the three unaligned corpora. That is
+    /// not the interpreter being slow (~0.85 GB/s byte-at-a-time is what the walk
+    /// is worth); it is 31 MB of bytes. Both honest reductions are applied — row
+    /// 0 abstains (see the call site, another 25 MB) and `x-`/`z-` names skip
+    /// resolution — and what remains buys the rules below.
     #[inline(never)]
     fn read_attributes(&mut self, doc: &Doc, idx: u32, token: &Token, out: &mut Emit) {
         let mut family = 0u32;
         for event in attributes::attrs(doc.source, token) {
             match event {
                 AttrEvent::Attr(attr) => {
-                    // The sid ledger, and the eid this list may be answering.
                     // Recorded off the NAME, not off resolution: it is the
                     // author's spelling that opens the family's obligation.
                     match attr.name {
@@ -269,11 +253,9 @@ impl AttrRules {
                         _ => {}
                     }
                     // The corpus's whole attribute population, short-circuited:
-                    // `resolve` would answer `UserNamespace` for every `x-`/`z-`
-                    // name, and the pin in attributes.rs ("exact beats wildcard
-                    // beats namespace, which matters for nothing today") says no
-                    // defined name starts with either prefix — so this cannot
-                    // change an answer, and it keeps 4.35M table scans out of
+                    // `resolve` answers `UserNamespace` for every `x-`/`z-` name
+                    // and no defined name carries either prefix, so this cannot
+                    // change an answer — and it keeps 4.35M table scans out of
                     // en_ult's lint.
                     if attr.name.starts_with(b"x-") || attr.name.starts_with(b"z-") {
                         continue;
@@ -292,10 +274,9 @@ impl AttrRules {
                                 ));
                             }
                         }
-                        // Unreachable past the short-circuit above, and left
-                        // exhaustive on purpose: the verdict belongs to
-                        // `resolve`, and a fourth resolution would have to be
-                        // answered here rather than defaulted.
+                        // Unreachable past the short-circuit above; left
+                        // exhaustive so a fourth resolution must be answered
+                        // here rather than defaulted.
                         AttrResolution::UserNamespace => {}
                         AttrResolution::Unknown => out.push(Observation {
                             code: Code::AttrUnknownName,
@@ -319,11 +300,9 @@ impl AttrRules {
             }
         }
         // `\ta`'s "one or more attributes, each beginning with `a-`": the row
-        // carries the wildcard and no fixed names, so an empty family here is
-        // the cardinality the row could not state. Asked once per LIST rather
-        // than kept as a per-marker flag — `\ta` is the only row it is ever
-        // true of, and a flag would put a table read on every token to learn
-        // it once per list.
+        // carries the wildcard and no fixed names, so an empty family is the
+        // cardinality the row could not state. Asked once per LIST, not kept as
+        // a per-marker flag — `\ta` is the only row it is ever true of.
         let defined = generated::defined_attributes(self.owner_idx);
         let wildcard = !defined.is_empty() && defined.iter().all(|(name, _)| name.ends_with('*'));
         if wildcard && family == 0 {
@@ -349,8 +328,8 @@ mod tests {
     use crate::lint::Severity;
     use crate::lint::tests::{codes, findings, token_named};
 
-    /// One helper for the whole family: the first list token, which is every
-    /// one of these codes' anchor (whole-token anchoring, ruled 2026-08-20).
+    /// The first list token — every one of these codes anchors on the whole
+    /// list token.
     fn first_list(tokens: &[Token]) -> u32 {
         tokens
             .iter()
@@ -383,9 +362,8 @@ mod tests {
                 aux: UsfmVersion::V3_2 as u32,
             }]
         );
-        // The GATE and the escalation are one column now (the closeout
-        // window): the row is silent below 3.2 and an Error at 4, and this
-        // rule's `if` above asks it rather than restating the version.
+        // Gate and escalation are one column: the row is silent below 3.2 and
+        // an Error at 4, and the rule asks it rather than restating a version.
         let row = Code::AttrTrailingFormDeprecated.row();
         assert_eq!(row.severity_at(Some(UsfmVersion::V3_0)), None);
         assert_eq!(
@@ -397,8 +375,7 @@ mod tests {
         let (_, obs) = findings("\\id GEN\n\\usfm 3.2\n\\p \\w |lemma=\"x\"|grace\\w*\n");
         assert_eq!(obs, vec![]);
 
-        // A MILESTONE's trailing list is its normal syntax, never deprecated —
-        // this is the shape that would light up every alignment corpus.
+        // A MILESTONE's trailing list is its normal syntax, never deprecated.
         let (_, obs) =
             findings("\\id GEN\n\\usfm 3.2\n\\p a \\qt-s |who=\"Levi\"\\* b \\qt-e\\*\n");
         assert_eq!(obs, vec![]);
@@ -420,16 +397,15 @@ mod tests {
         );
 
         // One list per marker, twice over, is not two lists on one marker.
-        // (`lemma` rather than a made-up name: `w` defines `lemma`, so the k/v
-        // rules stay quiet and this test compares the finding list whole.)
+        // (`lemma` is a name `w` defines, so the k/v rules stay quiet and the
+        // finding list can be compared whole.)
         let (_, obs) = findings("\\p \\w a|lemma=\"v\"\\w* \\w b|lemma=\"v\"\\w*\n");
         assert_eq!(obs, vec![]);
     }
 
     #[test]
     fn an_attribute_list_closed_by_the_wrong_marker() {
-        // `\add*` ends `\w`'s list — the case scanner.rs names when it says
-        // the terminator is checked only for BEING a closer.
+        // `\add*` ends `\w`'s list: the scanner accepted it for BEING a closer.
         let (tokens, obs) = findings("\\p \\w grace|lemma=\"x\"\\add*\n");
         let list = tokens
             .iter()
@@ -457,8 +433,8 @@ mod tests {
 
     #[test]
     fn a_pipe_in_content_hints_only_inside_an_attrs_capable_marker() {
-        // The list was refuted (no closer before the end of the line), so the
-        // pipe survived as content — which is the whole reason for the hint.
+        // The list was refuted (no closer before the line ended), so the pipe
+        // survived as content — the whole reason for the hint.
         let (tokens, obs) = findings("\\p \\w gracious|lemma=\"grace\"\n\\p more\n");
         let hints: Vec<Observation> = obs
             .iter()
@@ -473,13 +449,12 @@ mod tests {
         let (_, obs) = findings("\\p a | b\n");
         assert_eq!(obs, vec![]);
 
-        // Neither does a marker that opens no attributes of its own — and this
-        // snippet says something sharper since the k/v rules landed. The
+        // Neither does a marker that opens no attributes of its own. The
         // scanner's back-position pipe needle IS armed for character rows, so
-        // `| b` lexed as a trailing LIST rather than as content: there is no
-        // pipe left in any Text token to hint about, and what the report says
-        // instead is the truth about that list — `\add` has no default
-        // attribute for a bare value to bind to (aux = 1).
+        // `| b` lexes as a trailing LIST rather than as content: no pipe is
+        // left in any Text token to hint about, and the report says the truth
+        // about that list — `\add` has no default attribute for a bare value
+        // to bind to (aux = 1).
         let (tokens, obs) = findings("\\p \\add a | b\\add*\n");
         assert_eq!(
             obs,
@@ -497,8 +472,8 @@ mod tests {
 
     #[test]
     fn attr_unknown_name_reads_the_row_and_lets_the_user_namespace_through() {
-        // A name `w` does not define. Anchored at the LIST, `second` at its
-        // owner, aux 0 (a named attribute, not the bare form).
+        // A name `w` does not define: anchored at the LIST, `second` at its
+        // owner, aux 0 (named, not the bare form).
         let (tokens, obs) = findings("\\p \\w grace|nope=\"x\"\\w*\n");
         assert_eq!(
             obs,
@@ -521,20 +496,18 @@ mod tests {
             assert_eq!(obs, vec![], "{usfm:?}");
         }
 
-        // The `x-`/`z-` namespace is legal wherever attributes are, on a
-        // character marker and on a milestone alike — en_ult's 4.35M aligned
-        // attributes are all of this shape, so a finding here is a million
-        // findings there.
+        // The `x-`/`z-` namespace is legal wherever attributes are, character
+        // marker and milestone alike — en_ult's 4.35M aligned attributes are
+        // all of this shape, so a finding here is a million findings there.
         let (_, obs) = findings("\\p \\w grace|x-strong=\"G1\" z-mine=\"y\"\\w*\n");
         assert_eq!(obs, vec![]);
         let (_, obs) = findings("\\p \\qt-s |x-who=\"Levi\"\\* a \\qt-e\\*\n");
         assert_eq!(obs, vec![]);
 
-        // aux = 1 is the OTHER shape: the bare default form on a row that has
-        // no default attribute at all. `\fig` is the spec's own case. (Written
-        // at chapter level: `fig`'s mask carries no Para bit, so inside a `\p`
-        // it displaces the paragraph and this test would also see an
-        // `empty-paragraph`.)
+        // aux = 1 is the OTHER shape: the bare default form on a row with no
+        // default attribute, `\fig` being the spec's own case. Written at
+        // chapter level because `fig`'s mask carries no Para bit, so inside a
+        // `\p` it displaces the paragraph and adds an `empty-paragraph`.
         let (tokens, obs) = findings("\\id GEN\n\\c 1\n\\fig |a.png\\fig*\n");
         assert_eq!(
             obs,
@@ -546,12 +519,10 @@ mod tests {
             }]
         );
 
-        // Row 0 says nothing: `unknown-marker` has already said the one true
-        // thing about `\zfoo`, and its row defines nothing, so every attribute
-        // on it would otherwise be a finding.
-        // (The snippet draws other findings — a custom `\z` marker pops every
-        // open scope and its `\*` terminates nothing — so this asserts the one
-        // thing it is about.)
+        // Row 0 says nothing about its attributes: `unknown-marker` has said
+        // the one true thing about `\zfoo`. The snippet draws other findings —
+        // a custom `\z` pops every scope and its `\*` terminates nothing — so
+        // this asserts only the code it is about.
         let (_, obs) = findings("\\p \\zfoo |k=\"v\"\\*\n");
         assert!(
             !codes(&obs).contains(&Code::AttrUnknownName),
@@ -570,8 +541,8 @@ mod tests {
                 code: Code::AttrMalformed,
                 anchor: first_list(&tokens),
                 second: token_named(&tokens, "w", 0),
-                // BareJunk: a comma is not a separator (ruled — usfmtc drops
-                // the tail silently, we report it).
+                // BareJunk: a comma is not a separator — usfmtc drops the
+                // tail silently, we report it.
                 aux: 3,
             }]
         );
@@ -595,9 +566,8 @@ mod tests {
 
     #[test]
     fn attr_required_if_covers_the_eid_and_the_ta_family() {
-        // A `\qt-e` point whose family was opened with `sid` and which carries
-        // no `eid`: anchored at the milestone itself (there is no list),
-        // `second` at the `sid`-carrying point above it.
+        // A `\qt-e` whose family was opened with `sid` and carries no `eid`:
+        // anchored at the milestone (no list), `second` at the `sid` point.
         let (tokens, obs) = findings("\\p \\qt-s |sid=\"q1\"\\* a \\qt-e\\*\n");
         assert_eq!(
             obs,
@@ -611,15 +581,14 @@ mod tests {
         // The pair written properly is silent…
         let (_, obs) = findings("\\p \\qt-s |sid=\"q1\"\\* a \\qt-e |eid=\"q1\"\\*\n");
         assert_eq!(obs, vec![]);
-        // …and so is a `-e` point in a book that never used `sid` at all: the
-        // obligation comes from the author's own earlier spelling, not from the
-        // row (which says Optional, and is right to).
+        // …and so is a `-e` point in a book that never used `sid`: the
+        // obligation comes from the author's earlier spelling, not from the row
+        // (which says Optional, and is right to).
         let (_, obs) = findings("\\p \\qt-s |who=\"Levi\"\\* a \\qt-e\\*\n");
         assert_eq!(obs, vec![]);
 
-        // `\ta`'s family cardinality: "one or more attributes, each beginning
-        // with `a-`" (char/features/ta.html). A list with none of it is the
-        // finding; one member is enough to satisfy it.
+        // `\ta`'s family cardinality (char/features/ta.html): a list with no
+        // `a-` attribute is the finding, one member satisfies it.
         let (tokens, obs) = findings("\\p \\ta text|x-mine=\"y\"\\ta*\n");
         assert_eq!(
             obs,

@@ -1,27 +1,20 @@
 //! The books AUXILIARY table: valid `\id` book identifiers, membership only.
 //!
-//! Not a `MarkerRow` column and not codegen output — it is a flat authored
-//! list, so it lives beside the marker table rather than inside it. Nothing
-//! here maps a code to a name, a number, a testament or a versification: lint
-//! asks one question ("is this a book identifier"), and the day an export
-//! needs English names or Paratext numbers is the day this grows a second
-//! column, not before.
+//! A flat authored list, not a `MarkerRow` column and not codegen output.
+//! Nothing here maps a code to a name, a number, a testament or a
+//! versification: lint asks one question ("is this a book identifier"), and the
+//! day an export needs English names or Paratext numbers is the day this grows
+//! a second column.
 //!
-//! PROVENANCE: transcribed from the USFM 3.1 spec's own Book Identifiers table
-//! (ubsicap/usfm `docs/identification/books.rst`, fetched 2026-08-19), in the
-//! spec's row order so a future spec-diff reads top to bottom. The older
-//! sibling project `usfm_onion` (`src/lexer.rs::is_valid_book_code`) carries
-//! the identical 116 codes in the identical order; the spec page was used as
-//! the referee anyway, per the standing law that the spec is the referee.
-//!
-//! Order is spec order, NOT sorted, so lookup is a linear scan of 116
-//! three-byte comparisons. That runs once per document (a book has one `\id`),
-//! which is why nothing cleverer is warranted.
+//! Source: the USFM 3.1 spec's Book Identifiers table (ubsicap/usfm
+//! `docs/identification/books.rst`), kept in spec row order — NOT sorted — so
+//! a future spec-diff reads top to bottom. Lookup is therefore a linear scan of
+//! 116 three-byte comparisons, run once per document (a book has one `\id`).
 
 /// Every 3-character book identifier the spec defines: 39 OT, 27 NT, the
 /// deuterocanon and its additions, the peripheral divisions, and XXA-XXG.
-/// Laid out by hand in the spec's sections, twelve to a line, so a reviewer
-/// can diff it against the spec page by eye.
+/// Grouped by the spec's sections, twelve to a line, so a reviewer can diff it
+/// against the spec page by eye.
 #[rustfmt::skip]
 pub const BOOK_CODES: [&[u8; 3]; 116] = [
     // 01-39: Old Testament.
@@ -40,8 +33,8 @@ pub const BOOK_CODES: [&[u8; 3]; 116] = [
     // canons, the Latin Laodiceans).
     b"EZA", b"5EZ", b"6EZ", b"DAG", b"PS3", b"2BA", b"LBA", b"JUB", b"ENO", b"1MQ", b"2MQ", b"3MQ",
     b"REP", b"4BA", b"LAO",
-    // A0-B1: peripheral divisions — a file of these carries no scripture, and
-    // ordering lint stays quiet about their missing chapters.
+    // A0-B1: peripheral divisions — no scripture, so ordering lint stays quiet
+    // about their missing chapters.
     b"FRT", b"BAK", b"OTH", b"INT", b"CNC", b"GLO", b"TDX", b"NDX",
     // 94-100: extra material, user-defined content.
     b"XXA", b"XXB", b"XXC", b"XXD", b"XXE", b"XXF", b"XXG",

@@ -10,12 +10,10 @@ use crate::edit::{Edit, FixStr};
 pub(super) const NODE_ID_BIT: u32 = 1 << 31;
 
 /// The sink every pass writes findings through, and the only place a fix is
-/// attached to one.
-///
-/// It exists because an [`Observation`] cannot carry its fix: the four-u32 shape
-/// is pinned, so the link is the parallel `fix_of` vec, and a parallel vec must
-/// be permuted with its partner when the findings are sorted. One sink keeps
-/// that pairing in a single place instead of at forty push sites.
+/// attached to one. An [`Observation`] cannot carry its fix — the four-u32 shape
+/// is pinned — so the link is the parallel `fix_of` vec, which must be permuted
+/// with its partner at sort time. One sink keeps that pairing in one place
+/// instead of at forty push sites.
 #[derive(Default)]
 pub(crate) struct Emit {
     pub(crate) observations: Vec<Observation>,
@@ -25,8 +23,6 @@ pub(crate) struct Emit {
 }
 
 impl Emit {
-    /// A finding with no repair — the common case, and the shape every phase
-    /// 1-3 call site already had.
     pub(crate) fn push(&mut self, observation: Observation) {
         self.observations.push(observation);
         self.fix_of.push(NO_FIX);
@@ -37,21 +33,17 @@ impl Emit {
     ///
     /// Text longer than a [`FixStr`] becomes a chain of same-position edits
     /// which concatenate; only the FIRST carries the replaced range, so applying
-    /// right to left splices once and then inserts the tail behind it.
-    ///
-    /// The label comes from the row, which is therefore the single declaration
-    /// of "this rule offers a fix" — a code that emits one without declaring it
-    /// is a table bug and fails loudly here rather than in a consumer.
+    /// right to left splices once and then inserts the tail behind it. The label
+    /// comes from the row, so a code that emits a fix its row does not declare
+    /// fails loudly here rather than in a consumer.
     pub(crate) fn push_fixed(&mut self, observation: Observation, from: u32, to: u32, text: &[u8]) {
         self.push_spliced(observation, &[(from, to, text)]);
     }
 
-    /// A finding and a repair made of SEVERAL splices, which the user accepts
-    /// as one change — `deprecated-marker` renames an opening marker and its
-    /// closer, and half a rename is worse than none.
-    ///
-    /// The splices must be sorted by `from` and non-overlapping, exactly as
-    /// [`check_fixes`](super::check_fixes) demands of the fix it hands back.
+    /// A repair made of SEVERAL splices, accepted as one change —
+    /// `deprecated-marker` renames an opening marker and its closer, and half a
+    /// rename is worse than none. The splices must be sorted by `from` and
+    /// non-overlapping, as [`check_fixes`](super::check_fixes) demands.
     pub(crate) fn push_spliced(&mut self, observation: Observation, splices: &[(u32, u32, &[u8])]) {
         let label = observation
             .code
@@ -90,12 +82,9 @@ impl Emit {
     }
 
     /// Document order, applied to the observations and their fix links at once.
-    ///
     /// Findings are rare relative to tokens, so one sort at the end is cheaper
-    /// than threading document order through four passes that each have a
-    /// natural order of their own. It sorts a PERMUTATION because `fix_of` has
-    /// to travel with its partner; both gathers are over a vec whose length is
-    /// the finding count, not the token count.
+    /// than threading document order through four passes with natural orders of
+    /// their own. A PERMUTATION, because `fix_of` travels with its partner.
     pub(crate) fn finish(
         self,
         book: Option<u32>,
@@ -124,54 +113,44 @@ impl Emit {
 }
 
 /// The three read-only slices every machine reads through — one argument
-/// instead of three at every event, and the thing a future Builder-driven
-/// pipeline replaces with its own live view.
+/// instead of three at every event.
 pub(crate) struct Doc<'a> {
     pub(crate) source: &'a [u8],
     pub(crate) tokens: &'a [Token],
     pub(crate) cst: &'a Cst,
 }
 
-/// One frame of the driver's own stack: where this node's child list has got
-/// to, and which node it is (so the close event can name it).
+/// One frame of the driver's stack: where this node's child list has got to,
+/// and which node it is (so the close event can name it).
 struct Frame {
     next: u32,
     end: u32,
     node: u32,
-    /// [`Ancestry`]'s two bits for this frame, handed back at close.
-    ///
-    /// The machines keep no copy of this stack — but a fact a machine computed
-    /// at OPEN and needs again at CLOSE has to live somewhere, and the frame is
-    /// where it is already paid for. A Builder-driven pipeline carries the same
-    /// byte on its own frames, which is why this is a machine-agnostic scratch
-    /// and not an ancestry field.
+    /// [`Ancestry`]'s two bits, handed back at close. The machines keep no copy
+    /// of this stack, but a fact computed at OPEN and needed again at CLOSE has
+    /// to live somewhere, and the frame is where it is already paid for. Kept
+    /// machine-agnostic so any driver with its own frames can carry the byte.
     scratch: u8,
 }
 
 /// THE WALK. One in-order pass over the CST, feeding four state machines.
 ///
 /// Every token index is delivered exactly once, in document order, as an
-/// `on_leaf` event — the lint-side reading of the lifted partition oracle
-/// (`cst.in_order()` recovers `0..tokens.len()`), and asserted as such by the
-/// debug counter below. A node's OPENING marker is one of those
-/// leaves: the walker files it as the node's own first child, so it arrives
-/// after that node's open event and inside its frame. Its explicit closer,
-/// symmetrically, is the LAST child and arrives immediately before the close.
+/// `on_leaf` event — the lint-side reading of the partition oracle
+/// (`cst.in_order()` recovers `0..tokens.len()`), asserted by the debug counter
+/// below. A node's OPENING marker is its own first child, arriving after the
+/// node's open event and inside its frame; an explicit closer is symmetrically
+/// the LAST child, immediately before the close.
 ///
-/// That last fact is why no consumed-closer bitset exists any more: a closer
-/// that closed something is by construction the last child of an `Explicit`
-/// node, so the very next event after it is that node's close. [`Structure`]
-/// holds one token of pending state and judges the closer on the following
+/// That last fact is why there is no consumed-closer bitset: a closer that
+/// closed something is by construction the last child of an `Explicit` node, so
+/// [`Structure`] can hold one token of pending state and judge it on the next
 /// event instead of on a `tokens.len()`-sized side table.
 ///
-/// The machines are plain structs with explicit state and no view of the walk's
-/// stack: the driver owns the stack, and the one per-frame fact a machine needs
-/// twice rides [`Frame::scratch`], a byte the driver hands back at close. That
-/// is what makes them FEEDABLE — tomorrow's driver is the CST Builder's own
-/// frame stack (planning/investigate-later.md, "Single-pass pipeline"), which
-/// can carry the same byte — and nothing here assumes a slice of tokens exists
-/// ahead of the cursor except the one token of lookahead
-/// `attr-terminator-mismatch` still wants, which is noted where it lives.
+/// The machines see none of this stack — the driver owns it, and the one
+/// per-frame fact a machine needs twice rides [`Frame::scratch`] — so nothing
+/// here assumes a slice of tokens exists ahead of the cursor, except the one
+/// token of lookahead `attr-terminator-mismatch` wants.
 pub(super) fn walk(doc: &Doc, version: Option<UsfmVersion>, out: &mut Emit) {
     let mut structure = Structure::new();
     let mut ancestry = Ancestry::new();
@@ -179,10 +158,9 @@ pub(super) fn walk(doc: &Doc, version: Option<UsfmVersion>, out: &mut Emit) {
     let mut flat = Flat::new(version);
 
     let root = &doc.cst.nodes[0];
-    // The CURRENT frame lives in locals and only the ancestors live in the vec:
-    // every iteration touches `cur.next`, and re-deriving it through
-    // `stack.last_mut()` each time costs a load and a bounds check on the
-    // hottest line in lint.
+    // The CURRENT frame lives in locals, only the ancestors in the vec: every
+    // iteration touches `cur.next`, and reaching it through `stack.last_mut()`
+    // costs a load and a bounds check on the hottest line in lint.
     let mut cur = Frame {
         next: root.children.start,
         end: root.children.end,
@@ -190,9 +168,6 @@ pub(super) fn walk(doc: &Doc, version: Option<UsfmVersion>, out: &mut Emit) {
         scratch: 0,
     };
     let mut stack: Vec<Frame> = Vec::new();
-    // Debug-only: the partition oracle, echoed on the lint side. Every leaf
-    // event is the next token index, so the walk delivers each token exactly
-    // once and in order — the property the whole fusion rests on.
     #[cfg(debug_assertions)]
     let mut expected_leaf = 0u32;
 
@@ -232,9 +207,8 @@ pub(super) fn walk(doc: &Doc, version: Option<UsfmVersion>, out: &mut Emit) {
             expected_leaf += 1;
         }
         let token = &doc.tokens[child as usize];
-        // Decoded ONCE and handed round: four machines that each asked the
-        // token for its kind would pay for four decodes and four dispatch
-        // trees over the same byte.
+        // Decoded ONCE and handed round: four machines each asking the token
+        // for its kind would pay four decodes over the same byte.
         let kind = token.kind();
         structure.on_leaf(doc, child, kind, out);
         ancestry.on_leaf(doc, child, token, kind, out);
@@ -259,9 +233,8 @@ pub(super) fn span_of<'a>(source: &'a [u8], token: &Token) -> &'a [u8] {
     &source[token.start as usize..token.end() as usize]
 }
 
-/// Space, tab, CR or LF — the four bytes the scanner treats as whitespace.
-/// Deliberately ASCII-only: it is the SPEC's structural whitespace, and a
-/// no-break space failing this test is the finding, not a gap.
+/// Space, tab, CR or LF. ASCII-only on purpose: this is the SPEC's structural
+/// whitespace, and a no-break space failing the test is the finding, not a gap.
 pub(super) fn is_structural_ws(byte: u8) -> bool {
     matches!(byte, b' ' | b'\t' | b'\r' | b'\n')
 }

@@ -1,77 +1,37 @@
 //! Findings over an already-built document: `lex → cst::build → lint`.
 //!
-//! 43 codes in six families, and NOTHING OWED. Phases 1-4 shipped the
-//! STRUCTURAL, ORDERING, PAYLOAD, FORM and ADJACENCY families, the shape-only
-//! half of Attributes, and the FIX model; the closeout window added the rules
-//! that needed the k/v interpreter ([`crate::attributes`]), the VERSION family
-//! (deprecated markers and deprecated attributes), and the judge for the context
-//! mask's positional half. There is no deferred rule and no parked lane.
+//! 43 codes in six families ([`Category`]): STRUCTURE, ORDERING, ATTRIBUTES,
+//! PAYLOAD, FORM and VERSION.
 //!
 //! Three laws shape everything here:
 //!
 //! - **Lint reads verdicts, it never re-derives them.** [`CloseReason`] is the
 //!   walker's judgement about how a frame ended; this module matches on it and
-//!   asks the row only "did that row want a closer" — the exact predicate the
-//!   walker used at pop time ([`wants_closer`]), never a second notion of it.
-//! - **Flag, never repair.** No token is reordered, inserted or dropped
-//!   (the editor session's token→span→UTF-16 mapping depends on it), and no
-//!   text is rewritten. [`Fix`]es are *offered* byte edits: the rule
-//!   governs TOKENS, and a fix is proposed TEXT that nothing here applies. Once
-//!   a user accepts one the bytes are real and the next re-lex is honest.
-//! - **No strings, anywhere.** An [`Observation`] is four u32s. Everything a
-//!   message needs textually is already a span reachable through
-//!   `anchor`/`second`; everything else is a small integer in `aux`, whose
-//!   meaning per code is the [`LintRow::aux`] column. That is what lets a
-//!   report cross wasm as one flat `[code, anchor, second, aux] × n` array.
+//!   asks the row only "did that row want a closer" — the walker's own predicate
+//!   at pop time, never a second notion of it.
+//! - **Flag, never repair.** No token is reordered, inserted or dropped (the
+//!   editor session's token→span→UTF-16 mapping depends on it). A [`Fix`] is an
+//!   *offered* byte edit that nothing here applies.
+//! - **No strings, anywhere.** An [`Observation`] is four u32s — two token
+//!   indices and an `aux` whose meaning per code is the [`LintRow::aux`] column
+//!   — so a report crosses wasm as one flat array.
 //!
-//! Fixes ride the passes that find things, computed BESIDE the finding and
-//! never in a pass of their own: 15 of the 43 codes declare a
-//! [`LintRow::fix_label`], and a code emits a fix if and only if its row does
-//! (asserted both ways in tests). Every one is a byte splice — insert the ending
-//! the author left out, delete an orphan, write the expected number, upper-case
-//! three bytes, rename a deprecated marker AND its closer — and every one is
-//! proved by [`check_fixes`], the oracle, over all 226 corpus books. Where a
-//! repair would be a MOVE or a guess it is not offered:
-//! `attr-trailing-form-deprecated` (relocating an attribute list is an
-//! interpretation of the content it jumps), `marker-out-of-band` (the repair is
-//! moving the marker to where it belongs), `book-code-unknown` (which
-//! identifier was meant is not mechanical), the gap codes, a deprecation whose
-//! replacement is a restructure rather than a rename, and a renumber whose own
-//! successor would collide with it.
+//! A code emits a fix if and only if its row declares a [`LintRow::fix_label`]
+//! (15 of the 43, asserted both ways in tests), computed BESIDE the finding and
+//! proved by [`check_fixes`] over all 226 corpus books. Where a repair would be
+//! a MOVE or a guess it is not offered — relocating an attribute list, moving an
+//! out-of-band marker, guessing which book identifier was meant, or renumbering
+//! into a collision with the successor.
 //!
-//! **lint is ONE in-order walk of the CST**
-//! feeding four state machines. A short bounded prologue over the header
-//! ([`header_scan`]) reads the two whole-file facts the machines need, and then
-//! [`walk`] visits every node open, every leaf token in document order, and
-//! every node close exactly once, handing each event to [`Structure`] (close
-//! verdicts, orphan closers), [`Ancestry`] (sidebar containment, paragraph-less
-//! verse runs), [`Ordering`] (the chapter/verse sequence) and [`Flat`] (the
-//! row-lookup, form, payload, adjacency, version, positional-band and attribute
-//! rules — the closeout window gave this machine three new lanes rather than a
-//! fifth machine, because each wanted a u8 of state and no traversal of its
-//! own). All four write
+//! **lint is ONE in-order walk of the CST** ([`walk`]) feeding four state
+//! machines — [`Structure`], [`Ancestry`], [`Ordering`] and [`Flat`] — after
+//! [`header_scan`] reads the two whole-file facts they need. All four write
 //! through one [`Emit`] sink and the findings are sorted once at the end, so
 //! report order is a property of the report and not of the traversal.
-//! The module map, one file per piece of that shape:
-//! [`rows`] is the authored
-//! data (the codes and [`LINT_ROWS`], the sibling of `tables::rows`),
-//! [`walk`] is the driver ([`Doc`], the [`Emit`] sink, THE WALK),
-//! [`structure`], [`ancestry`], [`ordering`] and [`flat`] are one machine each
-//! ([`attr_rules`] is [`Flat`]'s attribute arm, split out for its own state
-//! cluster),
-//! and [`fix`] holds lint's half of the fix model — the offered repair, the sequence
-//! fixes and [`check_fixes`]. The byte-splice primitives those are built from
-//! ([`Edit`], [`FixStr`], [`apply`]) are `crate::edit`, because the formatter
-//! and the diff port speak the same vocabulary. This file keeps the layer a
-//! caller sees: [`lint`], [`Observation`], [`LintReport`], [`header_scan`] and
-//! the missing-`\id` end check.
 //!
 //! **Cost** (min-of-8, `--lint-only`): ~9.4 ns/token on unaligned scripture
-//! (en_ulb, 30 iterations), ~15.5 ns/token on en_ult. The gap between the two is
-//! the k/v attribute rules and nothing else: en_ult is 31 MB of `\w` attribute
-//! interiors, and reading inside a list is work no earlier phase did. The
-//! measurement and the two reductions applied to it are on `AttrRules`'
-//! `read_attributes`; the next lever is in planning/investigate-later.md.
+//! (en_ulb), ~15.5 ns/token on en_ult. The gap is the k/v attribute rules and
+//! nothing else — en_ult is 31 MB of `\w` attribute interiors.
 //!
 //! [`CloseReason`]: crate::cst::CloseReason
 
@@ -111,16 +71,14 @@ use walk::walk;
 pub const NO_TOKEN: u32 = u32::MAX;
 
 /// One finding. Four u32s, `Copy`, no allocation: `anchor` and `second` are
-/// TOKEN indices into the linted slice (per-build, like `marker_idx`), and
-/// `second` is [`NO_TOKEN`] when the finding has only one party.
+/// TOKEN indices, and `second` is [`NO_TOKEN`] when there is only one party.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Observation {
     pub code: Code,
     pub anchor: u32,
-    /// INVARIANT: `second == NO_TOKEN || second < anchor` — the other party
-    /// (an opener, an owner, the previous in sequence, a first occurrence)
-    /// always PRECEDES the anchor. Pinned over the corpus in
-    /// tests/lint_corpus.rs.
+    /// INVARIANT: `second == NO_TOKEN || second < anchor` — the other party (an
+    /// opener, an owner, the previous in sequence, a first occurrence) always
+    /// PRECEDES the anchor. Pinned over the corpus in tests/lint_corpus.rs.
     pub second: u32,
     pub aux: u32,
 }
@@ -151,32 +109,27 @@ pub const NO_FIX: u32 = u32::MAX;
 /// Everything one lint run learned about one document.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct LintReport {
-    /// The `\id` line's BookCode token index. `None` IS the missing-`\id`
-    /// state (real in the wild: BSB Ecclesiastes) — never a crash, and in
-    /// phase 1 never an [`Observation`] either: the `missing-id` code is
-    /// phase 2's, and until then this field carries the fact by itself.
+    /// The `\id` line's BookCode token index. `None` IS the missing-`\id` state
+    /// (real in the wild: BSB Ecclesiastes) — never a crash. The fact is kept
+    /// here as well as reported as `missing-id`.
     pub book: Option<u32>,
-    /// The version the `\usfm` line declares, `None` when there is no such
-    /// line (the corpus majority) or its payload is not a version.
+    /// The version the `\usfm` line declares, `None` when there is no such line
+    /// (the corpus majority) or its payload is not a version.
     ///
-    /// The fact the version columns key on: a consumer maps a finding's
-    /// severity through [`LintRow::severity_at`] with THIS value, and two rules
-    /// (`attr-trailing-form-deprecated`, `deprecated-marker`) are GATED on it
-    /// rather than merely escalated — "deprecated" is a claim about a declared
-    /// version and is false without one.
+    /// A consumer maps severity through [`LintRow::severity_at`] with THIS
+    /// value, and two rules (`attr-trailing-form-deprecated`,
+    /// `deprecated-marker`) are GATED on it rather than merely escalated:
+    /// "deprecated" is a claim about a declared version, false without one.
     pub declared_version: Option<UsfmVersion>,
     /// Sorted by `anchor`, then by code — one document order for consumers,
     /// independent of which internal pass produced a finding.
     pub observations: Vec<Observation>,
     /// PARALLEL to `observations`: the [`Fix`] index each finding offers, or
-    /// [`NO_FIX`]. A side table rather than a fifth field on
-    /// [`Observation`] — the four-u32 shape is what lets a report cross wasm as
-    /// one flat array, most findings offer no fix at all, and every consumer
-    /// that only wants to LIST findings never touches this vec. Read it through
-    /// [`Self::fix`].
+    /// [`NO_FIX`]. A side table rather than a fifth field on [`Observation`],
+    /// whose four-u32 shape is what crosses wasm. Read through [`Self::fix`].
     pub fix_of: Vec<u32>,
-    /// Every offered repair, in no particular order — reached through
-    /// `fix_of`, never scanned.
+    /// Every offered repair, in no particular order — reached through `fix_of`,
+    /// never scanned.
     pub fixes: Vec<Fix>,
     /// The shared edit arena every [`Fix::edits`] range indexes. Flat, like
     /// `observations`: a wasm consumer reads `[from, to, len, bytes…]`.
@@ -198,21 +151,15 @@ impl LintReport {
     }
 }
 
-// ---------------------------------------------------------------------------
-// The pass
-// ---------------------------------------------------------------------------
-
 /// Lints one already-lexed, already-built document.
 ///
-/// INVARIANT: `lint` never reorders, inserts or drops tokens, and never
-/// touches `source` bytes destructively — the caller's `tokens` slice is the
-/// same slice afterwards. The editor session's token→span→UTF-16 mapping is
+/// INVARIANT: never reorders, inserts or drops tokens, and never touches
+/// `source` destructively — the editor session's token→span→UTF-16 mapping is
 /// built on that.
 ///
-/// `source` is read through spans the scanner already carved — plus, since
-/// phase 3, the single byte on either side of an opening marker's span, which
-/// is where the Form family's whole evidence lives. The structural rules still
-/// ask only the CST and the marker table.
+/// `source` is read through spans the scanner already carved, plus the single
+/// byte on either side of an opening marker's span, where the Form family's
+/// whole evidence lives.
 pub fn lint(source: &[u8], tokens: &[Token], cst: &Cst) -> LintReport {
     let (book, declared_version) = header_scan(source, tokens);
     let mut out = Emit::default();
@@ -227,10 +174,9 @@ pub fn lint(source: &[u8], tokens: &[Token], cst: &Cst) -> LintReport {
         &mut out,
     );
 
-    // A file with no `\id` at all. Raised here rather than in a pass because
-    // the fact is the ABSENCE of a token, which no sweep can see, and because
-    // `book` is the state it reads. Markers-only guard: a plain-prose or empty
-    // buffer is not a book that owes an `\id`.
+    // Raised here rather than in a pass because the fact is the ABSENCE of a
+    // token, which no sweep can see. The markers-only guard: a plain-prose or
+    // empty buffer is not a book that owes an `\id`.
     if book.is_none()
         && tokens.iter().any(|token| {
             matches!(
@@ -250,11 +196,10 @@ pub fn lint(source: &[u8], tokens: &[Token], cst: &Cst) -> LintReport {
 /// The two header facts every later pass wants: the `\id` line's BookCode
 /// token, and the version the `\usfm` line declares.
 ///
-/// BOUNDED AT THE FIRST `\c`, and that bound is the point: both markers live in
-/// the book header, so sweeping 6.5M tokens for a `\usfm` line that three of
-/// the four corpora do not have would cost more than every rule that reads it.
-/// Nothing after the first chapter can be an `\id` or a `\usfm` line — and a
-/// file that puts one there has a structural finding already, not a header.
+/// BOUNDED AT THE FIRST `\c`, and that bound is the point: sweeping 6.5M tokens
+/// for a `\usfm` line three of the four corpora do not have would cost more than
+/// every rule that reads it. A file that writes one below a chapter has a
+/// structural finding already, not a header.
 pub(crate) fn header_scan(source: &[u8], tokens: &[Token]) -> (Option<u32>, Option<UsfmVersion>) {
     let usfm = generated::marker_idx(b"usfm", SpellingShape::PlainOnly);
     let mut book = None;
@@ -268,10 +213,9 @@ pub(crate) fn header_scan(source: &[u8], tokens: &[Token]) -> (Option<u32>, Opti
                     break;
                 }
             }
-            // `\usfm` carves no payload (the scanner leaves the version string
-            // as ordinary Text, isolated by its line ending), so the fact is
-            // read off the ADJACENT token — the same adjacency shape the
-            // `ca`/`cp` rules use, and the reason scanner.rs carves nothing.
+            // `\usfm` carves no payload — the scanner leaves the version as
+            // ordinary Text, isolated by its line ending — so the fact is read
+            // off the ADJACENT token, the `ca`/`cp` rules' shape.
             TokenKind::Text if awaiting_version => {
                 version = parse_version(span_of(source, token));
                 awaiting_version = false;

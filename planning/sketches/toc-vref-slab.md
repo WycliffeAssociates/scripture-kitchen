@@ -1,3 +1,5 @@
+SUPERSEDED 2026-08-21 by masks-toc.md (vref = a renderer over the Toc; the "slab" IS the Toc).
+
 # TOC + masks + vref + sous slab (roadmap item 3)
 
 One addressing scheme, two artifacts, three consumers. Settled in

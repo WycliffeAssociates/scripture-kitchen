@@ -1,27 +1,24 @@
 //! The row format: the compact token representation and THE one mapping
-//! between the working enum and the packed byte. No scanning logic lives
-//! here — this is the part a future binary codec or JS twin cares about.
+//! between the working enum and the packed byte. No scanning logic here —
+//! this is the part a binary codec or JS twin cares about.
 
 /// The set of shapes a token can carry.
 ///
-/// `nested` records the `\+` SPELLING, not a legality judgment: per spec
-/// only character markers nest, but the lexer doesn't yet know a marker's
-/// class (that's a marker-table fact), so it records the spelling wherever
-/// it appears and leaves "was that legal here" to the table/lint. It rides
-/// on the two variants where the spelling occurs (`\+w` opens, `\+w*`
-/// closes); milestones don't participate (`\+zaln-s` isn't a thing).
+/// `nested` records the `\+` SPELLING, not a legality judgment: only
+/// character markers may nest, but the lexer doesn't know a marker's class
+/// (a table fact), so it records the spelling wherever it appears and leaves
+/// "was that legal here" to the table/lint. Milestones don't participate
+/// (`\+zaln-s` isn't a thing).
 ///
-/// `Milestone.end` records the `-e` SPELLING the same way — `\qt-e`,
-/// `\zaln-e` — because the suffix is the only place the fact exists (the
-/// row is shared with the `-s` form) and the walker needs it to tell a
-/// container OPENER (`\list-s`) from its CLOSER (`\list-e`) without
-/// re-reading source bytes. Any suffix that is not exactly `e` (including
-/// `-s`) is `end: false`; a weird suffix is the row/lint's problem.
-/// The working enum is 2 bytes (tag + payload — rustc doesn't bit-pack
-/// multi-payload enums), so the row does NOT store it directly: it stores
-/// the packed u8 from `to_bits`/`from_bits` below — low 4 bits = shape,
-/// bit 4 = nested. That pair is THE one place the mapping is defined; any
-/// future codec reuses it or it doesn't ship.
+/// `Milestone.end` records the `-e` SPELLING the same way, because the
+/// suffix is the only place the fact exists (the row is shared with the `-s`
+/// form) and the walker needs it to tell `\list-s` from `\list-e` without
+/// re-reading source bytes. Any suffix that is not exactly `e` is
+/// `end: false`; a weird suffix is the row/lint's problem.
+///
+/// The working enum is 2 bytes (rustc doesn't bit-pack multi-payload enums),
+/// so the row stores the packed u8 from `to_bits`/`from_bits` instead — THE
+/// one place the mapping is defined; a future codec reuses it or doesn't ship.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenKind {
     Marker {
@@ -31,9 +28,8 @@ pub enum TokenKind {
         nested: bool,
     },
     /// A NAMED milestone token — `\qt-s`, `\zaln-e`. `end` is which half of
-    /// the logical start/end PAIR the `-s`/`-e` spelling names; both halves
-    /// are otherwise identical elements (each takes attributes and is closed
-    /// by its own `\*`).
+    /// the start/end PAIR the spelling names; both halves are otherwise
+    /// identical elements (each takes attributes, each closed by its own `\*`).
     Milestone {
         end: bool,
     },
@@ -44,47 +40,35 @@ pub enum TokenKind {
     Newline,
     OptBreak,
     Text,
-    /// The one-span payload after `\c`/`\v`: `1`, `12-14a`, junk — the scanner
-    /// never looks inside; the designator INTERPRETER judges it against the
-    /// spec's `VERSE` pattern.
+    /// The one-span payload after `\c`/`\v` — `1`, `12-14a`, junk alike. The
+    /// scanner never looks inside; the designator interpreter judges it.
     Designator,
     /// The note caller after `\f`/`\fe`/`\ef`/`\x`/`\ex`: `+`, `-`, `?`, or a
-    /// custom string. Spec pattern is `/[^\\\s]+/`, so the conventional values
-    /// are just the common cases of one general run, never an enumeration.
+    /// custom string. The spec pattern is `/[^\\\s]+/`, so the conventional
+    /// values are common cases of one general run, never an enumeration.
     NoteCaller,
     /// The book identifier after `\id`: `GEN`, `1JN`. One span up to the first
-    /// space, so `\id GEN Some description` leaves the description as ordinary
-    /// Text. NOT validated here — "3 uppercase characters" and "is a known
-    /// code" are both lint's, against an authored books table.
-    ///
-    /// Deliberately not the id line's whole remainder: the code is what
-    /// `ParseHeader.book` wants to point at, and the description is content.
+    /// space, so `\id GEN Some description` leaves the description as Text —
+    /// the code is what `ParseHeader.book` points at. Shape and membership are
+    /// both lint's, against an authored books table.
     BookCode,
     /// One attribute list, INCLUDING its delimiting pipe(s): `|lemma="grace"`
     /// (legacy trailing) or `|cat="x"|` (U25001 node-initial, closing pipe and
-    /// any HS it absorbs included). A SPAN, never a container — the interior is
-    /// never parsed here and the k/v view is the attribute interpreter's, on
-    /// demand, exactly like `Designator`. That is what makes attribute
-    /// passthrough byte-identical for every shape the spec allows, deformed
-    /// ones included.
+    /// any HS it absorbs included). A SPAN, never a container — the k/v view is
+    /// the attribute interpreter's, on demand, which is what makes attribute
+    /// passthrough byte-identical for every shape, deformed ones included.
     ///
-    /// The list's FORM is not stored, because position already encodes it:
-    /// ends with `|` → node-initial, else trailing. A tree that files
-    /// attributes in a named slot forgets stream order and must therefore
-    /// derive and record the form itself; a token never carries it.
-    ///
-    /// Which marker owns the list is likewise not stored — attributes belong
-    /// to the last marker, so a consumer reads the owner off the adjacent
-    /// marker/closer token (the same adjacency shape as `ca`/`cp`/`va`/`vp`).
+    /// The list's FORM is not stored: position already encodes it (ends with
+    /// `|` → node-initial, else trailing). Nor is its owning marker —
+    /// attributes belong to the last marker, so a consumer reads the owner off
+    /// the adjacent token (the same adjacency shape as `ca`/`cp`/`va`/`vp`).
     AttrList,
 }
 
-// "A byte with only bit 4 set" (= 16). Shapes live in the low 4 bits
-// (values 0-15; the 9th shape, Designator, forced the slide from bit 3),
-// so OR-ing this flag on top can never collide with a shape. Bits 5-7 are
-// unused. Bit 4 is a SPELLING flag whose meaning is per-shape: `\+` nesting
-// on the two marker shapes, `-e` on Milestone. They can share the bit
-// because no shape carries both spellings.
+// Shapes live in the low 4 bits, so OR-ing bit 4 on top can never collide
+// with one. Bit 4 is a SPELLING flag whose meaning is per-shape: `\+` nesting
+// on the two marker shapes, `-e` on Milestone. They share the bit because no
+// shape carries both spellings.
 const NESTED_BIT: u8 = 0b1_0000;
 const END_BIT: u8 = NESTED_BIT;
 
@@ -92,9 +76,8 @@ impl TokenKind {
     /// Packs to the row's kind byte: low 4 bits = shape, bit 4 = nested.
     pub fn to_bits(self) -> u8 {
         match self {
-            // Shape number, with the nested flag OR'd on top when set —
-            // e.g. nested ClosingMarker = 1 | 0b1_0000 = 0b1_0001. (The `0 |`
-            // is a no-op, kept so the two arms read symmetrically.)
+            // The `0 |` is a no-op, kept so the two marker arms read
+            // symmetrically.
             Self::Marker { nested } => 0 | if nested { NESTED_BIT } else { 0 },
             Self::ClosingMarker { nested } => 1 | if nested { NESTED_BIT } else { 0 },
             Self::Milestone { end } => 2 | if end { END_BIT } else { 0 },
@@ -110,10 +93,9 @@ impl TokenKind {
         }
     }
 
-    /// Decodes the row's kind byte. The spelling bit is only meaningful on
-    /// the shapes that carry a spelling (`\+` markers, `-e` milestones); on
-    /// any other shape it would be a scanner bug, so it is refused loudly
-    /// rather than ignored.
+    /// Decodes the row's kind byte. The spelling bit is meaningful only on the
+    /// shapes that carry a spelling (`\+` markers, `-e` milestones); anywhere
+    /// else it is a scanner bug, refused loudly rather than ignored.
     pub fn from_bits(bits: u8) -> TokenKind {
         let nested = bits & NESTED_BIT != 0;
         match bits & !NESTED_BIT {
@@ -140,17 +122,11 @@ impl TokenKind {
 
 /// One compact token row: `start u32 · len u16 · kind_bits u8 · markerIdx u8`,
 /// 8 bytes total (asserted in tests). Text is always a slice of the source —
-/// tokens never carry strings.
+/// tokens never carry strings. `start` is an absolute byte offset.
 ///
-/// `start` is an absolute byte offset into the source FOR NOW. NOTE: this may
-/// move to chapter-relative spans (treating chapters as hunks/slots, with
-/// each hunk's base offset in the header's run table) so that an edit inside
-/// one chapter never shifts another chapter's rows. Undecided — see
-/// planning/ideas/committed/braidv2.md.
-///
-/// `marker_idx` indexes the marker table for spec markers; `0` is reserved
-/// as "unresolved / not a spec marker" (custom `\z*` markers resolve by
-/// reading the span). Stamped by the marker arm since step 4.1.
+/// `marker_idx` indexes the marker table for spec markers; `0` is reserved as
+/// "unresolved / not a spec marker" (custom `\z*` markers resolve by reading
+/// the span).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Token {
     pub start: u32,

@@ -1,25 +1,19 @@
 //! Proposed text changes: the byte-splice vocabulary the whole crate speaks.
 //!
-//! One shape of "here is a change to the text", with three intended speakers:
-//! lint's fixes today (a [`crate::lint::Fix`] is a label plus a run of these),
-//! the formatter — already ruled to be fix bundles rather than a rewriter —
-//! and the diff port, whose hunks are the same shape. The CodeMirror session
-//! consumes all three the same way, as byte splices it maps through the
-//! byte->UTF-16 shim it already owns.
-//!
-//! [`FixStr`]'s name predates this module: it was lint's inline string before
-//! the primitives moved out here, and renaming it is not this move's business.
+//! One shape of "here is a change to the text", with three speakers: lint's
+//! fixes (a [`crate::lint::Fix`] is a label plus a run of these), the formatter
+//! (fix bundles, not a rewriter), and the diff port, whose hunks are the same
+//! shape. A CodeMirror session consumes all three the same way, as byte splices
+//! through the byte->UTF-16 shim it already owns.
 
 /// Our own tiny inline string — the useful part of `CompactString` without the
 /// dependency or the heap path.
 ///
-/// Fix text is always short, engine-generated ASCII: a closer (`\add*`, `\+nd*`
-/// — 9 bytes at the table's worst), `\p\n`, an end milestone (`\table-e\*`, 10),
-/// a handful of renumber digits. Fifteen bytes covers every one of them, and
-/// anything longer (a custom `\z` closer, if configuration ever gives row 0 real
-/// rows) splits into ADJACENT SAME-POSITION edits which concatenate — fixed
-/// width with no cap. It stays ASCII so a JS consumer decodes with
-/// `String.fromCharCode` and needs no `TextEncoder`.
+/// Fix text is always short, engine-generated ASCII: a closer (9 bytes at the
+/// table's worst), `\p\n`, an end milestone (`\table-e\*`, 10), renumber digits.
+/// Fifteen bytes covers every one, and anything longer splits into ADJACENT
+/// SAME-POSITION edits which concatenate — fixed width with no cap. ASCII so a
+/// JS consumer decodes with `String.fromCharCode` and needs no `TextEncoder`.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct FixStr {
     len: u8,
@@ -90,11 +84,10 @@ pub struct Edit {
 /// Right to left, which is the whole trick: every `from`/`to` is an offset into
 /// the ORIGINAL text, and applying the last edit first means no earlier offset
 /// has moved by the time it is used. `edits` must be sorted by `from` and
-/// non-overlapping — which is what [`Fix`] guarantees, and what
-/// [`check_fixes`] re-checks before it trusts one.
+/// non-overlapping — what [`Fix`] guarantees and [`check_fixes`] re-checks.
 ///
-/// The library allocates here, and only here, because this is the serialization
-/// boundary the ownership law names: a consumer asked for the proposed TEXT.
+/// The library allocates here and only here: this is the serialization boundary
+/// the ownership law names — a consumer asked for the proposed TEXT.
 ///
 /// [`Fix`]: crate::lint::Fix
 /// [`check_fixes`]: crate::lint::check_fixes
@@ -115,13 +108,12 @@ mod tests {
     use crate::lint::Observation;
 
     #[test]
-    fn the_fix_types_are_the_ruled_widths() {
+    fn the_fix_types_keep_their_fixed_widths() {
         assert_eq!(core::mem::size_of::<Edit>(), 24);
         assert_eq!(FixStr::CAP, 15);
         assert!(FixStr::EMPTY.is_empty());
         assert_eq!(FixStr::new(b"\\table-e\\*").as_str(), "\\table-e\\*");
-        // The observation row is untouched by the fix model — the link is the
-        // side table, which is why this number is still four u32s.
+        // An Observation stays four u32s: the fix link is the side table.
         assert_eq!(core::mem::size_of::<Observation>(), 16);
     }
 }

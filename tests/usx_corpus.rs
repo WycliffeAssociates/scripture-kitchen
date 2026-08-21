@@ -7,30 +7,24 @@
 //!     <usx version="3.0">…</usx>   ==structurally==   origin.xml
 //! ```
 //!
-//! testData is the COMMITTEE'S data (sketches/usj-export.md's ruling), so the
-//! comparison is as EXACT as XML permits. Exactly two freedoms are forgiven,
-//! both of them properties of XML rather than of USX:
+//! testData is the COMMITTEE'S data, so the comparison is as EXACT as XML
+//! permits. Two freedoms are forgiven, both properties of XML not USX:
 //!
-//! 1. **Attribute ORDER** — the XML spec says an element's attributes are an
-//!    unordered set, and the fixtures prove it: `<book code style>` but
-//!    `<char style lemma>`. Compared as a MAP.
-//! 2. **Pretty-print INDENTATION** — the fixtures are formatted, so a block
-//!    element whose first child is an element carries a `"\n    "` text node
-//!    that no source byte asked for. A whitespace-only text node THAT CONTAINS
-//!    A NEWLINE is dropped on both sides. A whitespace-only run of SPACES is
-//!    kept — 7972 of them are real content (`</note> <verse eid…/>`), and this
-//!    is exactly where the USX whitespace policy parts company with USJ's.
+//! 1. **Attribute ORDER** — an unordered set per the XML spec, and the fixtures
+//!    prove it (`<book code style>` but `<char style lemma>`). Compared as a MAP.
+//! 2. **Pretty-print INDENTATION** — a whitespace-only text node CONTAINING A
+//!    NEWLINE is the formatter's, and is dropped on both sides. A run of SPACES
+//!    is KEPT: 7972 of them are real content (`</note> <verse eid…/>`), which is
+//!    where the USX whitespace policy parts company with USJ's.
 //!
 //! Nothing else is normalized: `"the first verse "` keeps its trailing space,
-//! `<para />` and `<para></para>` are the same element because they are, and a
-//! divergence is reported as the first structural path that differs
-//! (`usx/para[2]/char[0]@style`).
+//! `<para />` and `<para></para>` are the same element, and a divergence reports
+//! the first structural path that differs (`usx/para[2]/char[0]@style`).
 //!
-//! The reader below is HAND-ROLLED, ~130 lines, and deliberately not a
-//! dependency: the corpus is well-formed XML with no namespaces, no DTD, no
-//! comments, no CDATA and only the five predefined entities (measured), so
-//! roxmltree would buy generality nothing here needs — and the library side is
-//! a WRITER only, so there is no XML parser in `src/` to reuse.
+//! The reader below is HAND-ROLLED rather than a dependency: the corpus has no
+//! namespaces, no DTD, no comments, no CDATA and only the five predefined
+//! entities, so roxmltree would buy generality nothing here needs — and `src/`
+//! is a WRITER only, so there is no parser to reuse.
 
 #![cfg(feature = "usx")]
 
@@ -41,22 +35,14 @@ use rayon::prelude::*;
 
 use usfm_onion_2::{cst, lex, usx::usx};
 
-/// The cases this pin does NOT claim, each with its one-line reason (the
-/// sketch's exclusion policy — a case may only leave the pin if the reason can
-/// be stated in one line). Matched against the case's path suffix. The same
-/// three categories `tests/usj_corpus.rs` uses:
+/// The cases this pin does NOT claim, matched by path suffix. A case may only
+/// leave the pin if its reason fits on ONE line, in the same three categories
+/// `tests/usj_corpus.rs` uses (ERRATUM / PURPOSEFUL / OPEN).
 ///
-/// * **ERRATUM** — the fixture states something the source bytes do not.
-/// * **PURPOSEFUL** — the fixtures contradict each other and we follow the
-///   majority (Will, 2026-08-20).
-/// * **OPEN** — a real divergence awaiting a ruling; the reason names it.
-///
-/// Thirteen, against USJ's twenty. Seven cases the USJ pin cannot claim have an
+/// Thirteen, against USJ's twenty: eight cases the USJ pin cannot claim have an
 /// `origin.xml` that agrees with US against their own `origin.json` — the six
-/// seam-space fixtures and biblica/CrossRefWithPipe's phantom EOF space — and
-/// biblica/PublishingVersesWithFormatting's XML both spells `code="MAT"`
-/// correctly and confirms the non-liftable `\vp` rule that its JSON also
-/// confirms. Three exclusions are NEW here, all errata (see the reasons).
+/// seam-space fixtures, biblica/CrossRefWithPipe's phantom EOF space, and
+/// biblica/PublishingVersesWithFormatting's correct `code="MAT"`.
 const EXCLUDED: &[(&str, &str)] = &[
     // ---- ERRATUM: the fixture disagrees with its own origin.usfm ----------
     (
@@ -101,10 +87,9 @@ const EXCLUDED: &[(&str, &str)] = &[
     ),
     // ---- PURPOSEFUL: the fixtures contradict, we follow the majority ------
     //
-    // Unknown-marker pop-all recovery (Will, 2026-08-20: "leave if 299 is
-    // majority and document purposeful ignore"). Same three cases the USJ pin
-    // leaves out, for the same reason — `\s5` occurs 299 times in 21
-    // validated-pass fixtures and 19 of them read our way.
+    // Unknown-marker pop-all recovery, the same three cases the USJ pin leaves
+    // out for the same reason: `\s5` occurs 299 times in 21 validated-pass
+    // fixtures and 19 of them read our way.
     (
         "usfmjsTests/luk_quotes",
         "PURPOSEFUL: wants `\\s5` to swallow the following `\\v 17` text; pop-all recovery stands",
@@ -213,9 +198,7 @@ fn check(case: &Path) -> Result<(), String> {
     }
 }
 
-// ---------------------------------------------------------------------------
-// The comparison
-// ---------------------------------------------------------------------------
+// ---- The comparison -------------------------------------------------------
 
 fn first_divergence(at: &str, ours: &Element, theirs: &Element) -> Option<String> {
     if ours.name != theirs.name {
@@ -285,9 +268,7 @@ fn brief(node: &Node) -> String {
     }
 }
 
-// ---------------------------------------------------------------------------
-// The hand-rolled reader
-// ---------------------------------------------------------------------------
+// ---- The hand-rolled reader -----------------------------------------------
 
 #[derive(Debug)]
 struct Element {
@@ -304,13 +285,11 @@ enum Node {
     Element(Element),
 }
 
-/// One document's root element. Handles what the corpus actually contains: an
-/// optional `<?xml …?>` declaration, elements, attributes in either quote
-/// style, self-closing tags, text, and the five predefined entities plus
-/// numeric character references.
+/// One document's root element. Handles exactly what the corpus contains: an
+/// optional `<?xml …?>` declaration, elements, attributes in either quote style,
+/// self-closing tags, text, the five predefined entities, numeric refs.
 fn parse(text: &str) -> Result<Element, String> {
-    // Many fixtures are BOM-prefixed; a byte-order mark is an encoding signature,
-    // not document content.
+    // A BOM is an encoding signature, not document content.
     let bytes: Vec<char> = text.trim_start_matches('\u{feff}').chars().collect();
     let mut at = 0usize;
     let mut stack: Vec<Element> = Vec::new();
@@ -333,7 +312,6 @@ fn parse(text: &str) -> Result<Element, String> {
                 at = end + 1;
                 continue;
             }
-            // An open tag: name, then attributes, then `>` or `/>`.
             let mut cursor = at + 1;
             while cursor < bytes.len() && !" \t\r\n/>".contains(bytes[cursor]) {
                 cursor += 1;
@@ -386,9 +364,8 @@ fn parse(text: &str) -> Result<Element, String> {
             at += 1;
         }
         let raw: String = bytes[start..at].iter().collect();
-        // The ONE normalization: pretty-print indentation. A whitespace-only run
-        // that contains a NEWLINE is the formatter's, not the document's. A
-        // whitespace-only run of spaces IS content in USX.
+        // The ONE normalization: a whitespace-only run containing a NEWLINE is
+        // the formatter's indentation. A run of spaces IS content in USX.
         if raw.trim().is_empty() && raw.contains('\n') {
             continue;
         }

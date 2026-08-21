@@ -6,46 +6,24 @@
 //! origin.usfm --lex--> --cst::build--> --html()--> strip tags  ==  strings of usj()
 //! ```
 //!
-//! HTML has NO ORACLE (sketches/html-export.md's scope ruling: there is no
-//! reference implementation, and multiple readings are correct), so this file
-//! pins the two things that can be checked WITHOUT one:
+//! HTML has NO reference implementation and multiple readings are correct, so
+//! this file pins the two things checkable without an oracle:
 //!
-//! 1. **SMOKE** — every document renders without panicking, every `<` in the
-//!    output opens a tag we wrote (i.e. no content `<` escaped the escaper),
-//!    and the tags NEST (a mini-parser with a stack, which also catches a
-//!    stray or missing close).
-//! 2. **THE TEXT-IDENTITY INVARIANT (RULED 2026-08-21)** — strip the tags and
-//!    the remaining text must equal the string content of our own USJ output
-//!    for the same input, after whitespace canonicalization. No reference HTML
-//!    is needed, and it catches dropped or duplicated content mechanically.
-//!    What stays unpinned is only the aesthetic layer, which is legitimately
-//!    ours.
+//! 1. **SMOKE** — every document renders, every `<` in the output opens a tag we
+//!    wrote (no content `<` escaped the escaper), and the tags NEST.
+//! 2. **TEXT IDENTITY** — strip the tags and the remaining text equals the
+//!    string content of our own USJ for the same input, after whitespace
+//!    canonicalization. Dropped or duplicated content is then mechanical to
+//!    catch, and only the aesthetic layer stays unpinned.
 //!
-//! # The carve-outs, and why each one is exact rather than fudged
-//!
-//! USJ LIFTS several things out of content and into attributes; the HTML fold
-//! splats them into `data-*` too, but ALSO renders them, because a view whose
-//! chapter numbers and footnote callers are invisible is not a view. Every such
-//! element carries `class="usfm-lifted"`, and this test skips those subtrees —
-//! ONE mechanism, declared in `src/html.rs` as the `usfm-lifted` contract, not
-//! a per-case normalizer:
-//!
-//! | rendered text | USJ's home for it | why HTML renders it anyway |
-//! |---|---|---|
-//! | `\c`/`\v` number | `number` on the chapter/verse element | a reader needs to see the number |
-//! | a note's caller (`+` auto or a literal) | `caller` on the note | the caller IS the note's handle in the text |
-//! | `\cat`'s text | `category` on the note/sidebar | the audit ruled `\cat` publishable char-shaped content |
-//! | `\usfm`'s version | dropped outright | the audit ruled it addressable (`Span`), so it renders + hides via CSS |
-//! | `\periph`'s title | `alt` on the periph | a `<section>` with an invisible title is not a view |
-//! | `\rb`'s gloss | `gloss` attribute | `<ruby>` without `<rt>` is pointless |
-//!
-//! The AUTO note-caller number is the one piece of text in the output that no
-//! token supplied; it additionally carries `note-caller-generated`, so a
-//! consumer (and this test) can tell generated from merely relocated.
-//!
-//! Everything else is expected to be byte-for-byte the same text, and a
-//! divergence is a real dropped/duplicated-content bug — the failure prints a
-//! window around the first differing character so it can be told at the bytes.
+//! The carve-out: USJ LIFTS things out of content into attributes (`\c`/`\v`
+//! numbers, note callers, `\cat`, `\usfm`'s version, `\periph`'s title, `\rb`'s
+//! gloss); HTML splats them into `data-*` too but ALSO renders them, because a
+//! view whose chapter numbers and footnote callers are invisible is not a view.
+//! Every such element carries `class="usfm-lifted"` and this test skips those
+//! subtrees — ONE mechanism, not a per-case normalizer. The AUTO note-caller
+//! number is the one piece of output text no token supplied, so it also carries
+//! `note-caller-generated`: generated is distinguishable from relocated.
 
 #![cfg(all(feature = "html", feature = "usj"))]
 
@@ -56,8 +34,8 @@ use serde_json::Value;
 
 use usfm_onion_2::{cst, html::html, lex, usj::usj};
 
-/// The class that means "this element's text is not USJ string content" — the
-/// contract `src/html.rs` documents. Anything wearing it is skipped whole.
+/// "This element's text is not USJ string content" — anything wearing it is
+/// skipped whole.
 const LIFTED: &str = "usfm-lifted";
 
 /// Elements this fold writes with no closing tag.
@@ -123,7 +101,7 @@ fn check(case: &Path) -> Result<(), String> {
     ))
 }
 
-/// Strips the tags, skipping every subtree marked [`LIFTED`] (`usfm-lifted`), and validates on
+/// Strips the tags, skipping every subtree marked [`LIFTED`], and validates on
 /// the way through: every `<` must open a tag, and every close must match.
 fn strip(html: &str) -> Result<String, String> {
     let bytes = html.as_bytes();
@@ -230,8 +208,7 @@ fn utf8_len(byte: u8) -> usize {
 }
 
 /// Every string in USJ's `content` arrays, in document order. Attribute values
-/// are deliberately NOT collected: they are the lifts, which the HTML side marks
-/// [`LIFTED`] and this test skips on both sides.
+/// are deliberately NOT collected: they are the lifts, skipped on both sides.
 fn strings(value: &Value, out: &mut String) {
     match value {
         Value::String(text) => out.push_str(text),
@@ -247,9 +224,8 @@ fn strings(value: &Value, out: &mut String) {
 }
 
 /// Every whitespace run to ONE space, then trimmed — the comparison is about
-/// CHARACTERS OF TEXT, and the two folds' seam handling is allowed to put a
-/// space on either side of a marker (usj-export.md's "either side serializes
-/// identically" ruling, in the small).
+/// CHARACTERS OF TEXT, and either fold may put a marker's seam space on either
+/// side of it, since both spellings serialize back to the same USFM.
 fn canonical(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut in_ws = false;
@@ -267,8 +243,8 @@ fn canonical(text: &str) -> String {
     out
 }
 
-/// The first differing character, with a window either side — a whole book in a
-/// failure line hides the finding.
+/// The first differing character, with a window either side — a whole book in
+/// one failure line hides the finding.
 fn divergence(ours: &str, theirs: &str) -> String {
     let at = ours
         .char_indices()
@@ -298,9 +274,9 @@ fn floor_char(text: &str, mut at: usize) -> usize {
     at
 }
 
-/// Every `<validated>pass</validated>` case's `origin.usfm`. Unlike the USJ and
-/// USX oracles this needs no fixture of its own, so nothing is excluded: the
-/// invariant is against OUR OWN USJ, not against the committee's bytes.
+/// Every `<validated>pass</validated>` case's `origin.usfm`. Nothing is
+/// excluded: the invariant is against OUR OWN USJ, not the committee's bytes,
+/// so the fixture errata the USJ and USX oracles must dodge cannot bite here.
 fn collect_test_data(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;

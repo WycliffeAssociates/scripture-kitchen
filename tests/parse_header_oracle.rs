@@ -3,11 +3,10 @@
 //! The unit tests in src/header.rs pin the shapes; this pins the two
 //! properties the COORDINATE ADAPTER rests on, over real books:
 //!
-//! - **Runs tile the rows** from the first `\c` to the last token, with no
-//!   gap and no overlap, each opening on its own chapter marker.
-//! - **Therefore they tile the BYTES too** — the property braidv2's
-//!   slot-relative remap needs, checked here through the run table rather
-//!   than assumed from it.
+//! - **Runs tile the rows** from the first `\c` to the last token, with no gap
+//!   and no overlap, each opening on its own chapter marker.
+//! - **Therefore they tile the BYTES too** — what a slot-relative remap needs,
+//!   checked through the run table rather than assumed from it.
 //!
 //! Runs over every `*.usfm` under `example-corpora/` (gitignored — the test
 //! skips loudly when the corpora aren't on disk).
@@ -72,8 +71,8 @@ fn every_corpus_book_indexes_its_own_stream() {
                     "\\c",
                     "{where_}: run {i} opens on a token that is not a chapter marker",
                 );
-                // The label lies inside the run, and a non-empty one is the
-                // designator the scan carved right after the opener.
+                // The label lies inside the run: a non-empty one is the
+                // designator carved right after the opener.
                 assert!(
                     run.label.0 >= opener.start && run.label.0 + run.label.1 as u32 <= source.len() as u32,
                     "{where_}: run {i}'s label {:?} is not inside its own run",
@@ -108,10 +107,9 @@ fn every_corpus_book_indexes_its_own_stream() {
             }
 
             // A book code is found EXACTLY when there is an `\id` line with
-            // something after it. Cross-checked against the raw text rather
-            // than asserted as a corpus fact, because it isn't one: BSB
-            // Ecclesiastes ships with no `\id` at all, so `None` is the
-            // honest answer there and the missing marker is lint's finding.
+            // something after it — cross-checked against the raw text rather
+            // than pinned as a corpus fact, since BSB Ecclesiastes ships with
+            // no `\id` at all and `None` is the honest answer there.
             let id_line_with_a_code = source
                 .lines()
                 .any(|line| line.strip_prefix("\\id ").is_some_and(|rest| !rest.is_empty()));

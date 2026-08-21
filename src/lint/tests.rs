@@ -5,15 +5,11 @@ use super::*;
 use crate::cst::build;
 use crate::lex;
 
-/// Every test states its snippet and the exact findings it expects —
-/// codes AND anchors, so a rule that fires on the right marker for the
-/// wrong reason still fails.
-///
-/// A snippet that does not open with `\id` gets one: a file with markers
-/// and no `\id` line is itself a finding (`missing-id`), and a structural
-/// test should not have to restate that in every expectation. Anchors are
-/// always resolved by name or by kind, never by a literal index, so the
-/// prefix never leaks into an assertion.
+/// Every test states its snippet and the exact findings it expects — codes AND
+/// anchors, so a rule firing on the right marker for the wrong reason still
+/// fails. A snippet that does not open with `\id` gets one, because a file with
+/// markers and no `\id` line is itself a finding; anchors are resolved by name
+/// or kind, never by index, so that prefix never leaks into an assertion.
 pub(crate) fn findings(usfm: &str) -> (Vec<Token>, Vec<Observation>) {
     let usfm = if usfm.starts_with("\\id") {
         usfm.to_string()
@@ -23,10 +19,9 @@ pub(crate) fn findings(usfm: &str) -> (Vec<Token>, Vec<Observation>) {
     let tokens = lex(&usfm);
     let cst = build(&tokens);
     let report = lint(usfm.as_bytes(), &tokens, &cst);
-    // Half of the row/fix agreement, checked on EVERY snippet in the file
-    // rather than in one test: a fix may only appear where the row declared
-    // one, and it must carry that row's own label. (The other half — every
-    // declared label is actually reachable — is one table below.)
+    // Half of the row/fix agreement, checked on EVERY snippet rather than in one
+    // test: a fix may only appear where the row declared one, and it must carry
+    // that row's own label.
     for (index, obs) in report.observations.iter().enumerate() {
         if let Some(fix) = report.fix(index) {
             assert_eq!(
@@ -94,10 +89,6 @@ fn the_book_code_is_reported_without_an_observation() {
         vec![Observation::one(Code::MissingId, 0)]
     );
 }
-
-// -----------------------------------------------------------------
-// Phase 2: payload
-// -----------------------------------------------------------------
 
 #[test]
 fn missing_id_is_anchored_at_the_top_of_the_file() {
