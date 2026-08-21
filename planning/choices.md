@@ -111,3 +111,43 @@ from experiments and built in this window.
    (107.5M boundaries, 227 files incl. Hindi) replacing the experiment's
    every-1000th sampling; experiments/utf16.rs = record only, one
    implementation, playground --utf16 exercises the promoted module.
+
+## pass 3 — Mask + Filter (2026-08-21, audited from the implementer's self-report)
+
+1. **NEEDS-USER: aligned-corpus readability.** Word-aligned USFM (en_ult)
+   puts every \w on its own line, so verse_text with newlines-verbatim is
+   one-word-per-line and newlines:false smushes (the newline IS the word
+   separator there). A pretty view needs newline→space substitution, which
+   breaks text()[i]==source[to_source(i)] — normalization, ruled invention.
+   PROVISIONAL: accept as-is — the mask is an analysis input (sous treats
+   \n as whitespace; detection unaffected); a human-readable aligned VIEW
+   is a renderer concern if ever wanted (newline-as-space is same-width, so
+   the map survives — investigate-later). en_ulb/bsb read clean both
+   recipes. RULED: leave as-is (Will).
+2. **NEEDS-USER: the Keep gap.** Keep = "marker survives, children still
+   filtered" (the compositional meaning structure() requires). Consequence:
+   markers:[("f",Keep)] under text:None yields an empty \f +\f* shell —
+   "structure + real footnote text" is INEXPRESSIBLE with the pinned
+   fields. RULED INTENDED (Will): footnote text needs translation anyway,
+   and character markers wrap words that aren't portable across languages —
+   chars default opted-out, keep:("f"/chars) is the aligner's escape hatch.
+   No KeepAll.
+3. Sound: a dropped payload's DELIMITER whitespace drops with it (one
+   horizontal run, never a newline) — delimiter accounting, not trimming;
+   it is what makes "\v 1 Jesus" mask to "Jesus". High.
+4. Sound: unknown marker PANICS in mask(), Filter::resolve() -> Result is
+   the boundary pre-flight (two doors, one implementation). High.
+5. Sound one-liners: ranges merge to maximal runs (asserted corpus-wide);
+   ~ survives verbatim (a Text byte, no normalization); // takes the
+   Paragraph action (verse_text unwraps, structure keeps); Unwrap drops
+   the node's closer + attr list (recognized as last child, no side
+   table); \b kept by structure (stanza breaks survive, visible in dumps);
+   VerseExtent mirrors usx::decorate exactly (\v opens even malformed, \c/
+   EOF close, sidebars looked-away-from, \v inside a Removed subtree never
+   opens); unnamed kinds get Figure/Meta=Remove, cells Unwrap/Keep,
+   Periph Unwrap/Keep, Header Remove/Keep; kinds[Unknown] never read
+   (unknowns field is row 0's authority); U25003 containers are
+   transparent and un-Removable (share tokens with their points, detected
+   structurally); marker names resolve in the spelling written (-s/-e →
+   MilestoneOnly); empty mask total; pub fields per Toc precedent;
+   MarkerKind::COUNT=14 pinned by const assert.

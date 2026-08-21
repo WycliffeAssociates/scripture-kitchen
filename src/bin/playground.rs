@@ -7,6 +7,11 @@
 //   cargo run --release --bin playground -- --toc               // lex + toc (the whole pipeline)
 //   cargo run --release --bin playground -- --toc-only          // pre-lexed; times the SECOND PASS alone
 //   cargo run --release --bin playground -- --toc-trace <file>  // untimed: a readable Toc listing on stdout
+//   cargo run --release --bin playground -- --mask             // lex + cst + mask, BOTH recipes
+//   cargo run --release --bin playground -- --mask-only        // pre-lexed+built; times the mask walk alone
+//   cargo run --release --bin playground -- --mask-trace <file>            // untimed: the masked text of a book on stdout
+//   cargo run --release --bin playground -- --mask-trace <file> --mask-chapter 3  // …one chapter of it
+//   cargo run --release --bin playground -- --mask-trace <file> --mask-recipe structure  // …one recipe only
 //   cargo run --release --bin playground -- --cst              // lex + cst::build (the whole pipeline)
 //   cargo run --release --bin playground -- --cst-only         // pre-lexed; times cst::build alone
 //   cargo run --release --bin playground -- --cst-stats        // untimed: CloseReason distribution over the corpus
@@ -35,6 +40,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+use usfm_onion_2::mask::{Filter, Mask};
+
 const DEFAULT_CORPUS: &str = "example-corpora/en_ulb";
 
 #[derive(Clone, Copy, PartialEq)]
@@ -56,6 +63,10 @@ enum Mode {
     SweepCursor,
     Cst,
     CstOnly,
+    /// Lex + build + mask, both recipes — what a caller that wants a masked
+    /// view pays end to end.
+    Mask,
+    MaskOnly,
     Lint,
     /// The `*Only` family is pre-lexed AND pre-built: the lex and the build are
     /// off the clock, so the timing is the named pass alone.
@@ -82,6 +93,9 @@ fn main() {
     let mut lint_stats = false;
     let mut fix_preview: Option<String> = None;
     let mut toc_trace = false;
+    let mut mask_trace: Option<PathBuf> = None;
+    let mut mask_chapter: Option<u16> = None;
+    let mut mask_recipe: Option<String> = None;
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -90,6 +104,17 @@ fn main() {
             "--toc" => mode = Mode::Toc,
             "--toc-only" => mode = Mode::TocOnly,
             "--toc-trace" => toc_trace = true,
+            "--mask" => mode = Mode::Mask,
+            "--mask-only" => mode = Mode::MaskOnly,
+            "--mask-trace" => mask_trace = args.next().map(PathBuf::from),
+            "--mask-chapter" => {
+                mask_chapter = Some(
+                    args.next()
+                        .and_then(|n| n.parse().ok())
+                        .expect("--mask-chapter takes a chapter number"),
+                );
+            }
+            "--mask-recipe" => mask_recipe = args.next(),
             "--cst" => mode = Mode::Cst,
             "--cst-only" => mode = Mode::CstOnly,
             "--cst-stats" => cst_stats = true,
@@ -131,6 +156,14 @@ fn main() {
         report_utf16();
         return;
     }
+    // Same reason: --mask-trace names its own one file.
+    if let Some(path) = &mask_trace {
+        print!(
+            "{}",
+            mask_listing(&read_source(path), mask_chapter, mask_recipe.as_deref())
+        );
+        return;
+    }
 
     let path = path.unwrap_or_else(|| PathBuf::from(DEFAULT_CORPUS));
 
@@ -150,6 +183,8 @@ fn main() {
         Mode::TocOnly => "toc-only",
         Mode::Cst => "cst",
         Mode::CstOnly => "cst-only",
+        Mode::Mask => "mask",
+        Mode::MaskOnly => "mask-only",
         Mode::Lint => "lint",
         Mode::LintOnly => "lint-only",
         Mode::UsjOnly => "usj-only",
@@ -196,6 +231,7 @@ fn main() {
         mode,
         Mode::TocOnly
             | Mode::CstOnly
+            | Mode::MaskOnly
             | Mode::LintOnly
             | Mode::UsjOnly
             | Mode::UsxOnly
@@ -211,6 +247,8 @@ fn main() {
         mode,
         Mode::Toc
             | Mode::TocOnly
+            | Mode::Mask
+            | Mode::MaskOnly
             | Mode::Lint
             | Mode::LintOnly
             | Mode::Fused
@@ -233,7 +271,7 @@ fn main() {
     };
     let prebuilt: Vec<usfm_onion_2::cst::Cst> = if matches!(
         mode,
-        Mode::LintOnly | Mode::UsjOnly | Mode::UsxOnly | Mode::HtmlOnly
+        Mode::LintOnly | Mode::MaskOnly | Mode::UsjOnly | Mode::UsxOnly | Mode::HtmlOnly
     ) {
         prelexed
             .iter()
@@ -283,6 +321,7 @@ fn verify_variant(sources: &[String], mode: Mode) {
         // These all run the real lexer plus pure passes over its output.
         Mode::Toc | Mode::TocOnly => return,
         Mode::Cst | Mode::CstOnly => return,
+        Mode::Mask | Mode::MaskOnly => return,
         Mode::Lint | Mode::LintOnly => return,
         Mode::UsjOnly | Mode::UsxOnly | Mode::HtmlOnly => return,
         // Identity is tests/fused_identity.rs's job — whole reports, not just
@@ -386,6 +425,32 @@ fn run_once(
             panic!(
                 "--html-only needs the feature: cargo run --release --bin playground -- --html-only"
             );
+        }
+        Mode::Mask => {
+            for source in sources {
+                let tokens = usfm_onion_2::lex(source);
+                let cst = usfm_onion_2::cst::build(&tokens);
+                for filter in [Filter::verse_text(), Filter::structure()] {
+                    std::hint::black_box(usfm_onion_2::mask(
+                        source.as_bytes(),
+                        &tokens,
+                        &cst,
+                        &filter,
+                    ));
+                }
+            }
+        }
+        Mode::MaskOnly => {
+            for ((source, tokens), cst) in sources.iter().zip(prelexed).zip(prebuilt) {
+                for filter in [Filter::verse_text(), Filter::structure()] {
+                    std::hint::black_box(usfm_onion_2::mask(
+                        source.as_bytes(),
+                        tokens,
+                        cst,
+                        &filter,
+                    ));
+                }
+            }
         }
         Mode::Toc => {
             for source in sources {
@@ -698,6 +763,61 @@ fn toc_listing(source: &str) -> String {
             anchors.len(),
             listed.join("  "),
         ));
+    }
+    out
+}
+
+/// One book's masked text, both recipes, optionally narrowed to one chapter
+/// through the Toc's own `chapter_span` — the dumps a human reads to decide
+/// whether a recipe is right.
+fn mask_listing(source: &str, chapter: Option<u16>, only: Option<&str>) -> String {
+    let bytes = source.as_bytes();
+    let tokens = usfm_onion_2::lex(source);
+    let cst = usfm_onion_2::cst::build(&tokens);
+    let toc = usfm_onion_2::toc(bytes, &tokens);
+    let window = match chapter {
+        Some(n) => toc
+            .chapter_span(n)
+            .unwrap_or_else(|| panic!("no chapter {n} in this book")),
+        None => 0..bytes.len() as u32,
+    };
+
+    let mut out = String::new();
+    for (recipe, filter) in [
+        ("verse_text", Filter::verse_text()),
+        ("structure", Filter::structure()),
+    ] {
+        if only.is_some_and(|name| name != recipe) {
+            continue;
+        }
+        let m = usfm_onion_2::mask(bytes, &tokens, &cst, &filter);
+        let text = window_text(bytes, &m, &window);
+        out.push_str(&format!(
+            "=== {} {} — {recipe}: {} of {} window bytes kept, {} ranges whole-book\n\n",
+            toc.locate(window.start),
+            chapter.map_or_else(|| "whole book".to_string(), |n| format!("chapter {n}")),
+            text.len(),
+            window.end - window.start,
+            m.ranges.len(),
+        ));
+        out.push_str(&text);
+        if !text.ends_with('\n') {
+            out.push('\n');
+        }
+        out.push('\n');
+    }
+    out
+}
+
+/// The masked bytes that fall inside one source window.
+fn window_text(source: &[u8], m: &Mask, window: &std::ops::Range<u32>) -> String {
+    let mut out = String::new();
+    for range in &m.ranges {
+        let start = range.start.max(window.start) as usize;
+        let end = range.end.min(window.end) as usize;
+        if start < end {
+            out.push_str(std::str::from_utf8(&source[start..end]).expect("UTF-8 source"));
+        }
     }
     out
 }

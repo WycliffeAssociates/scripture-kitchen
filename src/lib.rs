@@ -11,6 +11,9 @@
 //!   "what reference is this byte".
 //! - [`utf16`](crate::utf16) — the editor-wire translation layer: `byte ↔ utf16`
 //!   over any one string, a stride index costing 1.6% of it.
+//! - [`mask`](crate::mask) — WHICH bytes survive a `Filter`, as a range set that
+//!   doubles as the offset map back to the source. Walks the CST, because
+//!   "text is not verse text" is a scope fact.
 //!
 //! The load-bearing contract (see scanner.rs): boundary finding and
 //! classification stay strictly apart, and payload interiors belong to
@@ -26,6 +29,7 @@ mod export;
 #[cfg(feature = "html")]
 pub mod html;
 pub mod lint;
+pub mod mask;
 mod scanner;
 pub mod tables;
 pub mod toc;
@@ -36,6 +40,7 @@ pub mod usj;
 pub mod usx;
 pub mod utf16;
 
+pub use mask::{Action, Filter, Mask, TextRule, mask};
 pub use scanner::{lex, lex_general_path_only};
 pub use toc::{ChapterRow, Sid, Toc, VerseAnchor, toc};
 pub use token::{Token, TokenKind};

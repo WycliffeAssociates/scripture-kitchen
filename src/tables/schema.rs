@@ -75,6 +75,15 @@ pub enum MarkerKind {
     Header,
 }
 
+impl MarkerKind {
+    /// How many variants there are — the width of a COMPLETE kind→value map
+    /// indexed by `kind as usize` (see `mask::Filter::kinds`). Pinned to the
+    /// last variant by a const assert, so adding a variant without widening the
+    /// count fails to compile.
+    pub const COUNT: usize = 14;
+}
+const _: () = assert!(MarkerKind::Header as usize == MarkerKind::COUNT - 1);
+
 /// The spec's own FINE category, one flat enum completing the two-level
 /// taxonomy [`MarkerKind`] × [`Category`].
 ///

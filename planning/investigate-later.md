@@ -319,3 +319,25 @@ degenerate half: duplicated chapter numbers want `chapter_spans(n)`
 (plural) so a grid can render "the second 4" distinctly; lint already
 flags the duplication at full-document runs. Build none of it until a UI
 pulls.
+
+## Mask text() newline-as-space render option (2026-08-21)
+
+Aligned corpora read one-word-per-line under newlines-verbatim. If a
+consumer ever wants prettier: \n and ' ' are both ONE BYTE, so a text()
+render option substituting space-for-newline leaves the offset map
+untouched — to_source of "the space" points at the newline byte (the
+separator's honest position). Invariant weakens only to "byte-identical
+except space-where-source-has-\n". Build on pull, not before.
+
+## Fold post-designator delimiter into the Designator token (2026-08-21)
+
+Will's railroad read: the whitespace AFTER a verse/chapter designator is
+required grammar (same as after the marker name), yet today it leaks as
+the next Text token's leading space — which is why mask needed payload-
+delimiter accounting and part of what usj/usx handle at that seam.
+Folding it (horizontal run only, never newline) makes the token model
+self-consistent and deletes seam-handling in three consumers. Price:
+token boundaries move — CST spans, lint anchors, export engines, pins.
+The oracles (187+195+434 fixtures, lint pins, partition) make the
+attempt SAFE to judge mechanically. Candidate: a dedicated measured
+pass after masks pass 4; keep only if deleted seam code outweighs churn.
