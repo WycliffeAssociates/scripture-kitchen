@@ -14,6 +14,8 @@
 //! - [`mask`](crate::mask) — WHICH bytes survive a `Filter`, as a range set that
 //!   doubles as the offset map back to the source. Walks the CST, because
 //!   "text is not verse text" is a scope fact.
+//! - [`vref`](crate::vref) — a line per verse over a `Toc` and a `Mask`: the
+//!   ebible-shaped renderer, bridges included. No walk of its own.
 //!
 //! The load-bearing contract (see scanner.rs): boundary finding and
 //! classification stay strictly apart, and payload interiors belong to
@@ -39,9 +41,13 @@ pub mod usj;
 #[cfg(feature = "usx")]
 pub mod usx;
 pub mod utf16;
+pub mod vref;
 
 pub use mask::{Action, Filter, Mask, TextRule, mask};
 pub use scanner::{lex, lex_general_path_only};
 pub use toc::{ChapterRow, Sid, Toc, VerseAnchor, toc};
 pub use token::{Token, TokenKind};
 pub use utf16::{Utf16Index, utf16_index};
+// Only the iterator: `keys`/`lines`/`joined` are names a crate root should not
+// own, and they read better qualified (`vref::lines(…)`).
+pub use vref::{Verses, verses};

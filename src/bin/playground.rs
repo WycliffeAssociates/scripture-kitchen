@@ -12,6 +12,9 @@
 //   cargo run --release --bin playground -- --mask-trace <file>            // untimed: the masked text of a book on stdout
 //   cargo run --release --bin playground -- --mask-trace <file> --mask-chapter 3  // …one chapter of it
 //   cargo run --release --bin playground -- --mask-trace <file> --mask-recipe structure  // …one recipe only
+//   cargo run --release --bin playground -- --vref <file>                   // untimed: one line per verse ("GEN 1:1\ttext") on stdout
+//   cargo run --release --bin playground -- --vref <file> --vref-chapter 1  // …one chapter of it
+//   cargo run --release --bin playground -- --vref-only        // pre-lexed+built; times toc + mask + render alone
 //   cargo run --release --bin playground -- --cst              // lex + cst::build (the whole pipeline)
 //   cargo run --release --bin playground -- --cst-only         // pre-lexed; times cst::build alone
 //   cargo run --release --bin playground -- --cst-stats        // untimed: CloseReason distribution over the corpus
@@ -67,6 +70,9 @@ enum Mode {
     /// view pays end to end.
     Mask,
     MaskOnly,
+    /// Pre-lexed+built: the vref render alone — toc + verse_text mask + the
+    /// string assembly a keys/lines pair costs.
+    VrefOnly,
     Lint,
     /// The `*Only` family is pre-lexed AND pre-built: the lex and the build are
     /// off the clock, so the timing is the named pass alone.
@@ -96,6 +102,8 @@ fn main() {
     let mut mask_trace: Option<PathBuf> = None;
     let mut mask_chapter: Option<u16> = None;
     let mut mask_recipe: Option<String> = None;
+    let mut vref_trace: Option<PathBuf> = None;
+    let mut vref_chapter: Option<u16> = None;
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -115,6 +123,15 @@ fn main() {
                 );
             }
             "--mask-recipe" => mask_recipe = args.next(),
+            "--vref" => vref_trace = args.next().map(PathBuf::from),
+            "--vref-chapter" => {
+                vref_chapter = Some(
+                    args.next()
+                        .and_then(|n| n.parse().ok())
+                        .expect("--vref-chapter takes a chapter number"),
+                );
+            }
+            "--vref-only" => mode = Mode::VrefOnly,
             "--cst" => mode = Mode::Cst,
             "--cst-only" => mode = Mode::CstOnly,
             "--cst-stats" => cst_stats = true,
@@ -156,6 +173,11 @@ fn main() {
         report_utf16();
         return;
     }
+    // Same reason: --vref and --mask-trace name their own one file.
+    if let Some(path) = &vref_trace {
+        print!("{}", vref_listing(&read_source(path), vref_chapter));
+        return;
+    }
     // Same reason: --mask-trace names its own one file.
     if let Some(path) = &mask_trace {
         print!(
@@ -185,6 +207,7 @@ fn main() {
         Mode::CstOnly => "cst-only",
         Mode::Mask => "mask",
         Mode::MaskOnly => "mask-only",
+        Mode::VrefOnly => "vref-only",
         Mode::Lint => "lint",
         Mode::LintOnly => "lint-only",
         Mode::UsjOnly => "usj-only",
@@ -232,6 +255,7 @@ fn main() {
         Mode::TocOnly
             | Mode::CstOnly
             | Mode::MaskOnly
+            | Mode::VrefOnly
             | Mode::LintOnly
             | Mode::UsjOnly
             | Mode::UsxOnly
@@ -249,6 +273,7 @@ fn main() {
             | Mode::TocOnly
             | Mode::Mask
             | Mode::MaskOnly
+            | Mode::VrefOnly
             | Mode::Lint
             | Mode::LintOnly
             | Mode::Fused
@@ -271,7 +296,12 @@ fn main() {
     };
     let prebuilt: Vec<usfm_onion_2::cst::Cst> = if matches!(
         mode,
-        Mode::LintOnly | Mode::MaskOnly | Mode::UsjOnly | Mode::UsxOnly | Mode::HtmlOnly
+        Mode::LintOnly
+            | Mode::MaskOnly
+            | Mode::VrefOnly
+            | Mode::UsjOnly
+            | Mode::UsxOnly
+            | Mode::HtmlOnly
     ) {
         prelexed
             .iter()
@@ -321,7 +351,7 @@ fn verify_variant(sources: &[String], mode: Mode) {
         // These all run the real lexer plus pure passes over its output.
         Mode::Toc | Mode::TocOnly => return,
         Mode::Cst | Mode::CstOnly => return,
-        Mode::Mask | Mode::MaskOnly => return,
+        Mode::Mask | Mode::MaskOnly | Mode::VrefOnly => return,
         Mode::Lint | Mode::LintOnly => return,
         Mode::UsjOnly | Mode::UsxOnly | Mode::HtmlOnly => return,
         // Identity is tests/fused_identity.rs's job — whole reports, not just
@@ -450,6 +480,15 @@ fn run_once(
                         &filter,
                     ));
                 }
+            }
+        }
+        Mode::VrefOnly => {
+            for ((source, tokens), cst) in sources.iter().zip(prelexed).zip(prebuilt) {
+                let bytes = source.as_bytes();
+                let toc = usfm_onion_2::toc(bytes, tokens);
+                let m = usfm_onion_2::mask(bytes, tokens, cst, &Filter::verse_text());
+                std::hint::black_box(usfm_onion_2::vref::keys(&toc, &m, bytes));
+                std::hint::black_box(usfm_onion_2::vref::lines(&toc, &m, bytes, true));
             }
         }
         Mode::Toc => {
@@ -805,6 +844,25 @@ fn mask_listing(source: &str, chapter: Option<u16>, only: Option<&str>) -> Strin
             out.push('\n');
         }
         out.push('\n');
+    }
+    out
+}
+
+/// One book as vref lines — `sid`, a tab, the verse's text — optionally
+/// narrowed to one chapter. The regenerator for debug/vref.*.txt.
+fn vref_listing(source: &str, chapter: Option<u16>) -> String {
+    let bytes = source.as_bytes();
+    let tokens = usfm_onion_2::lex(source);
+    let cst = usfm_onion_2::cst::build(&tokens);
+    let toc = usfm_onion_2::toc(bytes, &tokens);
+    let m = usfm_onion_2::mask(bytes, &tokens, &cst, &Filter::verse_text());
+
+    let mut out = String::new();
+    for (sid, text) in usfm_onion_2::verses(&toc, &m, bytes) {
+        if chapter.is_some_and(|n| n != sid.chapter) {
+            continue;
+        }
+        out.push_str(&format!("{sid}\t{}\n", text.trim()));
     }
     out
 }

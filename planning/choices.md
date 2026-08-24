@@ -201,3 +201,56 @@ from experiments and built in this window.
 5. Perf: max-of-8, en_ulb +35.8%, en_ult +2.2% — no regression. The ulb
    figure is a 4.5MB corpus and reads as noise plus one fewer token per
    note; the honest claim is "not slower". Medium.
+
+## fold completion — caller + book code (2026-08-21, audited)
+
+1. Sound: fold unconditional at the ONE carve site (three-way match was
+   dead weight); newline-after never folds (rule 1); EOF no-op; runs fold
+   whole (tabs included); degraded \id copies min(3) of the LABEL so no
+   space enters book[3].
+2. Sound-critical catches: lint's is_book_code would have fired
+   BookCodeUnknown on EVERY corpus book untrimmed; CallerShape would
+   false-fire on 3-byte callers; BookCodeNotUppercase's splice narrowed to
+   the label (would have eaten the delimiter — caught by reasoning, corpus
+   has no lowercase \id, unit pin covers the shape).
+3. **NEEDS-USER lite: no public label helper for caller/book-code bytes**
+   — scanner::payload_label is pub(crate) (the scanner module is private);
+   designator::label stays the only public one. A client reading raw
+   caller/code token bytes must trim itself. Export a public helper if
+   that client ever exists. Confidence: medium.
+4. Sound: exports needed NOTHING (payload_child already trims — why
+   187/195/434 held); header_scan reads indices not bytes; one mask pin
+   moved (\f + \f* — a kept caller brings its delimiter like a kept
+   marker); whole pass ≈ +48 lines with mask.rs -15 — one rule now, two
+   mechanisms before.
+
+## pass 4 — vref + chain test (2026-08-21, audited; tree left uncommitted for Monday)
+
+1. **NEEDS-USER: verses() substitutes \n→space and \t→space in verse text,
+   one byte for one byte** — the FORMAT forces it (a line-per-verse file
+   cannot hold a line break; the tab-joined column cannot hold its own
+   separator — en_ult PSA 55:8 really contains a tab, corpus-test-caught).
+   The one substitution beyond trim; same-width, renderer-level (the ruled
+   home for normalization), incidentally fixes aligned-corpus one-word-
+   per-line. Audit: sound; awaiting Will's bless. Medium-high.
+2. Malformed verse (first==0) KEEPS its line with a chapter-only key
+   ("ZEC 1\ttext", no colon) — dropping loses text, :0 names a nonexistent
+   verse; an ebible aligner must notice colon-less keys (2 in the corpus).
+   Sound, medium.
+3. Bridge lines: ONE extent, all text on line 1, literal <range> on
+   covered lines; each LINE's Sid names one verse while Toc::locate on a
+   byte still reports the full range (banked #5 untouched — keying is the
+   renderer's). Sound, high / medium-high.
+4. Sound one-liners: verses(toc, mask, source) — the mask stays the
+   caller's choice of view (no internal recipe hard-coding); only
+   verses/Verses re-exported at root; JOIN = tab; empty extent = empty
+   line never a skip (alignment); chapter 0 yields no line; duplicate
+   chapters render duplicate keys in source order (dedup = versification
+   opinion the engine doesn't own); join separates never terminates;
+   forward-only cursor over mask.ranges (one pass per book); --vref /
+   --vref-only playground modes. Chain test surfaced + encoded: Newline
+   tokens survive verse_text outside extents ("kept ⇒ in a verse" holds
+   for TEXT bytes only), and locate's (0,0) degrade matches a direct scan.
+5. Inherited by future work: master-vref padding needs a versification
+   table nobody owns; per-verse text split inside a bridge is not
+   attempted (would need a segmentation opinion).
