@@ -1,192 +1,315 @@
-# wasm `analyze()` sketch (roadmap 6 — NOT APPROVED, react to it)
+# wasm sketch (roadmap item 2 — build when the editor pulls)
 
-The stateless wasm surface. RULED foundation (settled-facts, 2026-08-18):
-one call, full re-lex + build + lint inside, UTF-16 index computed fresh
-per call, reads are typed arrays of UTF-16 numbers, JS never holds a
-token. The stateful `BookSession` stays a demoted, unbuilt optimization.
-Everything below either restates a ruling (marked RULED) or proposes a
-shape for Will to mark up (PROPOSED).
+Rewritten 2026-08-24 in plain terms after Will's questions. Same
+decisions as before (RULED markers kept); the shorthand is gone.
 
-## The one call
+APPROVED IN PRINCIPLE (Will, 2026-08-24), conditioned on what the
+design already claims: structurally drift-proof (one implementation,
+exports derived from the native API, ids and classifications rendered
+in Rust only, the TS wrapper versioned with the binary), sane code
+size (~1,000–1,400 lines all-in, half of it ordinary native Rust), no
+parallel API (analyze is an export SIBLING of usj/usx/html over the
+same fns), and the onion_editor_chef CM probe's needs served (the
+inventory table below — its hand-authored PARA/HEADING/FRONT regexes
+are replaced by the registry's class byte, its blockAt by span
+containment). Build trigger unchanged: when the editor pulls.
+
+## What "wasm" means for this crate, from zero
+
+WebAssembly is just a second compile target. `cargo build --target
+wasm32-unknown-unknown` compiles the SAME Rust — lexer, CST, lint,
+toc, mask, format, diff, the baked marker table, everything — into one
+`.wasm` binary that a browser (or Node) loads. There is no port, no
+rewrite, no second implementation: the measurement probe already
+compiled this engine to wasm unchanged, because it's pure Rust with no
+IO. The library IS wasm-ready today; what doesn't exist yet is the
+doorway.
+
+**The doorway is `#[wasm_bindgen]`, and tagged = the API.** JS cannot
+call arbitrary Rust; it can call the specific functions we tag. What
+you get for a tag (Will's question, answered): `wasm-pack build` emits
+an npm package containing the `.wasm`, a JS glue module whose exports
+ARE the tagged functions, and a **first-class `.d.ts`** with a typed
+signature for each — `&str` becomes `string`, `u32` becomes `number`,
+`Vec<u32>` becomes `Uint32Array`, a tagged struct becomes a JS class
+with typed getters. So yes: the tagged set is exactly the TypeScript
+surface a consumer sees and autocompletes against. We do NOT tag
+types, traits, or internals — those live inside the binary. The
+exports list below is maybe ten functions; the bindings crate holding
+them is ~100–200 lines, plus a small hand-written TS wrapper that
+ships IN the same npm package (below).
+
+**Why it's a separate tiny crate instead of tags in this one:** a
+wasm-callable binary needs `crate-type = ["cdylib"]` in Cargo.toml and
+a dependency on `wasm-bindgen`. Putting that here would make every
+native consumer carry wasm-bindgen for nothing. So: `usfm_onion_2`
+stays a plain library, and a sibling `onion-wasm/` crate (a workspace
+member) depends on it, tags the exports, and is what `wasm-pack build`
+runs against. The substance stays in the library; the bindings crate
+is a doorway you could delete and recreate in an afternoon.
+
+## Where the costs are (and are not)
+
+There is NO process hop. The wasm binary runs inside the same JS
+thread that calls it — a call into wasm is a function call, nanoseconds
+of overhead. (If we ever move it to a Web Worker for off-main-thread
+work, the hop becomes a `postMessage` copy; a native sidecar process
+over IPC would be a real process hop. Both are RULED parked: sync
+main-thread first, worker later, IPC behind both.)
+
+The real costs, measured (perf-notes §5):
+
+1. **Strings crossing INTO wasm.** JS strings are UTF-16; Rust wants
+   UTF-8. Passing a document in = one encode pass, ~1 GB/s in V8:
+   296µs for all of Psalms, 38µs for a median book. This is the
+   biggest boundary cost and it's still ~100x under a frame.
+   wasm-bindgen handles the conversion when the export takes `&str`.
+2. **Data crossing OUT.** Copying already-produced bytes out of wasm
+   memory is effectively free (tens of GB/s — 4.5µs for all of
+   Psalms). What matters is only HOW MUCH we choose to copy, which is
+   why the `wants` bitmask exists (below).
+3. **Offsets mean different things on each side.** Rust speaks byte
+   offsets into UTF-8; the editor (CodeMirror) speaks UTF-16 code-unit
+   offsets. Every offset we hand JS must be converted. This is solved
+   and cheap: converting every emitted offset in one document-order
+   sweep costs ~0.4ms on the worst book, and the random-access index
+   (for cursor positions coming the other way) is 1.6% of source size,
+   ~100ns per query, built in under half a millisecond.
+
+## What crosses well, what crosses badly (the onion lesson)
+
+- **Numbers and arrays of numbers**: perfect. A `Vec<u32>` becomes a
+  JS `Uint32Array` copy automatically. This is the shape of almost
+  everything we ship.
+- **Strings**: fine in moderation — pay the encode once per call.
+- **Rich structs/objects**: this is where onion's wasm crate became a
+  beast, and the trap to avoid. If JS holds a structured object (a
+  token, a skeleton), you need a JS-facing mirror type, a mapping
+  layer, serde, and tests for the mapper — and the mapper silently
+  drops any field it doesn't know about (onion's attribute-loss bug
+  lived exactly there). Our RULED contract — **JS never holds a
+  token** — deletes that entire category. Nothing rich crosses;
+  everything is flat arrays of numbers plus a few strings.
+
+**"Isn't a flat stride array just a binary format?" Honestly: yes**
+(Will called this out, 2026-08-24, and the earlier draft oversold the
+distinction). A stride-7 Uint32Array of diagnostics IS a fixed-width
+record format. The real distinctions are narrower and worth stating
+plainly:
+
+- **Width discipline**: every field is a whole u32 slot, so JS reads
+  plain numbers out of a typed array — no DataView, no endianness, no
+  mixed-width unpacking. That's the difference from freezing Rust
+  struct MEMORY layouts (`#[repr(C)]`) and letting JS reinterpret wasm
+  memory — which we never do; repr(C) on Toc rows stays internal
+  hygiene, not a wire promise.
+- **Who decodes (RULED 2026-08-24: we do)**: raw `arr[i*7+1]` indexing
+  is NOT the consumer experience. The npm package ships a thin
+  hand-written TS wrapper over the arrays — `analysis.diagnostics()`
+  yields `{code, from, to, aux, fix}` objects (lazily, off the array,
+  no copy of the array itself), same for chapters/blocks/etc. The
+  schema then lives in ONE place we own and version with the binary;
+  consumers never see a stride. The arrays stay the wire because
+  they're the cheap thing to copy out; the wrapper is ergonomics on
+  the JS side of the wall, ~a hundred lines, in the same package so it
+  can never drift from the .wasm it wraps.
+
+**The marker registry never crosses.** `marker_idx` indexes the baked
+codegen table, and that table is static data compiled INTO the .wasm
+binary — lookups happen inside, in Rust. JS never decodes an idx.
+What JS actually needs it gets two other ways: the marker NAME is
+bytes the editor already has in its own document (`doc.sliceString`),
+and the coarse rendering class rides packed inside the spans we ship.
+The ONE build artifact resembling a table crossing: a small `.json`
+side-table for diagnostics (per lint code: name, severity, message
+template, fix label), codegen'd from LINT_ROWS by the existing codegen
+bin and shipped in the same bundle — so no strings need to cross per
+finding, and the JS bundle can render "\\f was never closed" itself.
+
+## Why not just tag lex/cst/lint/mask and compose in JS like the playground?
+
+Will's question, and the answer is a hard technical wall plus a soft
+one — not taste:
+
+- **Lifetimes cannot cross.** The core types borrow: `Token<'a>` spans
+  the source, `Cst` borrows the tokens, `Mask` borrows all of it.
+  `#[wasm_bindgen]` can only export OWNED, `'static` values — there is
+  no way to hand JS a borrowed struct. Making the pipeline
+  JS-composable would mean making every intermediate owned (cloned
+  tokens, cloned text) — which is exactly onion's shape, the thing the
+  no-JS-holds-a-token ruling exists to kill.
+- **Opaque handles are the other trap.** wasm-bindgen CAN export a
+  struct as an opaque JS handle with methods — but every handle is
+  wasm-side state JS must manually `.free()` (GC does not manage wasm
+  memory; forget one and it leaks), and now the "stateless, race-free"
+  contract is gone: a handle from text-version-5 can be queried after
+  the text became version 6.
+- **Each JS→wasm call pays the string encode again** unless state is
+  retained, so JS-side composition would re-send the text per stage or
+  force the handle problem above.
+
+So the composition happens in Rust — `analyze()` IS the playground
+pattern (lex → build → lint → emit) moved behind one tagged function,
+borrows alive inside, nothing owned, nothing retained. To be explicit
+about status: **the `Analysis` type does not exist today.** Building it
+— the emit layer that walks the artifacts and writes the arrays — is
+the actual work of this milestone (~a few hundred lines of pure,
+natively-tested Rust). The tag is the trivial part; nobody should read
+`analyze()` in this sketch as existing code.
+
+## The JS-facing API (what gets the `#[wasm_bindgen]` tag)
+
+All stateless: text goes in, arrays/strings come out, nothing is
+retained between calls (RULED — race-free by construction; the caller
+pairs each result with the document version it sent, stale = discard).
 
 ```rust
-#[wasm_bindgen]
-pub fn analyze(text: &str, wants: u32 /* read-selection bitmask */)
-    -> Analysis;   // a JS object of typed-array getters, all fresh copies
+// The one read call. `wants` is a bitmask: one bit per read below.
+// Nothing is computed or copied for an unset bit.
+analyze(text: &str, wants: u32) -> Analysis   // typed-array getters
 
-// Inside, always the same three lines + the emitters:
-//   lex → cst::build → lint → emit(wants)
-// The result is stamped with nothing — JS stamps it: the caller pairs
-// the returned Analysis with the doc version it sent (stale ⇒ discard).
+// The write paths (both exist natively today):
+format_edits(text, opts) -> edits wire        // offsets utf16, eager
+format(text, opts) -> String
+diff(baseline, current) -> skeleton wire      // shape decided at build
+merge(baseline, current, decisions_json) -> String (or splice wire)
+
+// Offset translation for the stragglers (cursor → sid, etc.):
+to_byte(text, utf16: u32) -> u32
+to_utf16(text, byte: u32) -> u32
+// Rebuilds the 1.6% index per call (~0.1ms) — honest and stateless at
+// a handful of calls per user interaction. If that ever measures
+// dumb, an opaque handle is the fallback; don't pre-design it.
 ```
 
-- RULED: stateless, race-free, sync main-thread first; worker later;
-  Rust-over-IPC parked behind both.
-- PROPOSED: the `wants` bitmask. Reads have very different costs
-  (diagnostics ≈ hundreds of entries; token_spans ≈ 12 bytes × every
-  token — ~4 MB for aligned GEN). The editor asks for what it renders;
-  nothing is computed or copied for an unset bit. Costs nothing to the
-  stateless contract.
-- PROPOSED: an optional clip range (`clip_from`, `clip_to`, UTF-16) that
-  bounds only the EMIT step — analysis is always whole-book (the walker
-  needs the whole book anyway), but token-granularity reads can be
-  clipped to the viewport. Blocks/chapters/diagnostics stay whole-book.
+**What `analyze` ships (the "reads"):** each is one flat u32 array,
+fixed stride, offsets in UTF-16. The editor asks only for what it
+renders — reads differ in cost by 1000x (diagnostics: hundreds of
+entries; token_spans: 12 bytes × every token ≈ 4MB on aligned GEN,
+hence the bitmask, plus an optional clip range that bounds
+token-granularity reads to the viewport while analysis stays
+whole-book).
 
-## The reads (each a flat typed array; stride in u32s unless noted)
-
-| read | stride | fields | source artifact |
+| read | numbers per entry | the fields, spelled out | serves |
 |---|---|---|---|
-| `chapters` | 5 | ordinal, label_from, label_to, from, to | TOC chapter rows (sketches/toc-vref-slab.md) |
-| `blocks` | 4 | class+marker (packed, below), from, to | CST paragraph-kind nodes + extents |
-| `note_extents` | 3 | kind (f/x/ef/ex/fe row), from, to | `Cst::extent` over Note nodes |
-| `token_spans` | 3 | packed kind+judgments, from, to | tokens + the rows stamp |
-| `text_runs` | 2 | from, to | Text tokens (∩ clip) |
-| `verse_anchors` | 3 | chapter ordinal, num_from, num_to | TOC verse anchors |
-| `diagnostics` | 7 | code, from, to, second_from, second_to, aux, fix | LintReport (below) |
+| `chapters` | 5 | chapter ordinal; where its label ("12b") starts/ends; where the whole chapter starts/ends | nav grid, chapter clamp |
+| `blocks` | 4 | packed class byte (below); where the paragraph-level block starts/ends | paragraph rendering |
+| `note_extents` | 3 | which note family (\f/\x/\ef/\ex/\fe); where the whole note starts/ends | footnote widgets |
+| `token_spans` | 3 | packed kind+class byte; where the token starts/ends | syntax highlighting |
+| `text_runs` | 2 | where a run of plain text starts/ends | search/proofing views |
+| `verse_anchors` | 3 | which chapter it's in; where the verse NUMBER starts/ends | verse number widgets |
+| `diagnostics` | 7 | which lint code; primary span start/end; secondary span start/end (MAX = none); the code's aux integer; index of its fix (MAX = none) | squiggles + panel |
 
-All offsets UTF-16 (conversion below). All arrays are COPIES made fresh
-per call (RULED — no views into wasm memory that a later call would
-invalidate).
+("Where X starts/ends" is always a UTF-16 offset pair into the
+document JS already holds — the editor slices its own text for any
+display string, e.g. the marker name or the label. That, not the
+array format, is the load-bearing trick: spans instead of strings.)
 
-### The judgments stamp (the "no JS table" ruling, resolved)
+The packed class is 3 bits (para/char/note/milestone/chapter-verse/
+sidebar/table/other) + a few flag bits, one byte per entry — enough
+for the editor's shape decisions; per-marker CSS keys off the marker
+name, which is document bytes JS already holds. Diagnostics carry a
+per-build `code` number that indexes the codegen'd JSON side-table;
+message text renders JS-side from the template + document slices —
+zero strings cross per finding (RULED). Fixes cross EAGERLY (ruled
+2026-08-24): format_edits proved the shape at 1000x the volume —
+`[from, to] × n` + one concatenated ASCII insert string + a length
+array.
 
-PROPOSED resolution of the Category-26>4-bits question: ship a COARSE
-CLASS, 3 bits, on every stamped range:
+Everything above was checked against what the CodeMirror prototype
+(onion_editor_chef) actually consumes — every prototype need maps onto
+a read, no gaps.
 
-```text
-0 para  1 char  2 note  3 milestone  4 chapter/verse  5 sidebar  6 table  7 other
-```
+## What lives in THIS repo vs the combined crate (the sous question)
 
-packed per range as: `class (3) | payload_kind (2) | closing (2) |
-nested-spelling (1)` = one byte, u32-aligned in the arrays above. The
-app's shape inference needs only the class (its TEXT/FIELD/ATOM/CHROME
-vocabulary is derived app-side — RULED); per-marker CSS comes from the
-marker NAME, which is bytes the app already has (`doc.sliceString`).
-No table crosses; no codegen change (the class is a match over
-Category at emit time).
+Three thin bindings crates over two fat libraries
+(ideas/other_repos/sous.md, ruled 2026-08-21):
 
-### The diagnostics record
+- **`usfm_onion_2`** (this repo) — plain Rust library. No wasm
+  anything. Optionally grows a sibling `onion-wasm/` doorway crate for
+  STANDALONE JS use of just the engine (the exports above).
+- **`sous`** (sibling repo) — plain Rust library, same deal.
+- **`galley`** — the crate the EDITOR actually loads: depends on BOTH
+  libraries, linked into ONE wasm binary. This is where the composed
+  flow lives (analyze + proofread over the same mask, one diagnostic
+  stream, all offsets in source bytes until the one UTF-16 wall), and
+  crucially it is where STATE lives if any ever exists: the retained
+  source string, the shared Utf16Index, caching, debounce
+  coordination. The engines stay stateless forever; galley is braid's
+  stateful ancestor.
 
-One observation = 7 u32s: `code` (u16 widened — per-build number, valid
-ONLY against this build's JS side-table, per the name-is-identity
-ruling), `from`/`to` (the anchor token's span), `second_from`/`second_to`
-(u32::MAX sentinel when absent), `aux` (per-code integer, meaning in the
-side-table), `fix` (index into the fixes reads, MAX = none).
+Why one binary instead of editor-ferrying between onion.wasm and
+sous.wasm: every hop between two wasm modules re-copies and re-encodes
+the text. Rust→Rust inside one binary is a borrow — sous reads the
+mask onion built with no boundary at all. Two modules is justified
+only if they must DEPLOY independently, which nothing requires.
 
-The JS side-table is CODEGEN'D FROM LINT_ROWS at build time and ships
-inside the same bundle as the wasm: `{ name, categoryClass, severity,
-template, auxKind, fixLabel }` per code, indexed by the same per-build
-number. Severity maps 1:1 onto CM's ladder (RULED). Message rendering =
-the template + `doc.sliceString(from, to)` for `{anchor}`/`{second}` +
-`aux` — zero strings cross the boundary (RULED).
+So the decision rule for "where does an API live": if it's engine
+truth (lint, format, diff, exports), it's a library fn here, and the
+doorway crates merely tag it. If it needs both engines or any retained
+state, it's galley's. Nothing is ever implemented IN a bindings crate.
 
-### Fixes crossing (PROPOSED: lazily)
-
-Fixes are rare (≈ tens per damaged book) and applied rarer. The hot
-`analyze` path ships only the `fix` index; a second export fetches one
-fix's edits on demand:
-
-```rust
-#[wasm_bindgen]
-pub fn fix_edits(text: &str, observation: u32) -> Uint32Array
-// [from, to, insert_from, insert_to] × n — insert ranges into…
-pub fn fix_inserts(...) -> String   // …one concatenated ASCII string
-```
-
-…OR, simpler and probably right: re-run is cheap, so `fix_edits`
-re-analyzes and returns `[from, to] × n` (UTF-16) plus one JS string of
-inserts with a length array. The label is the side-table's `fixLabel`.
-CM applies as one transaction; offsets are pre-edit, applied right-to-
-left (the fix oracle's own discipline). OPEN: whether re-running inside
-`fix_edits` (≈ 2 ms worst) beats carrying the edit arrays eagerly
-(≈ 100 bytes) — eager is simpler than it looked, decide at build time.
-
-## UTF-16 at the wire (all measured, 2026-08-19/20)
-
-- BULK OUT (every array above): the streaming counter rides the emit
-  loop — offsets are written in document order, so one running
-  `(byte, utf16)` cursor + a SWAR gap-count converts EVERYTHING in one
-  sweep of the source (~0.4 ms worst book). No index consulted.
-- RANDOM IN (cursor positions, fix application): the stride-256 index —
-  1.6% of source on every script, built in 0.04–0.45 ms, ~100 ns per
-  utf16→byte query. Built inside `analyze` only if a `wants` bit asks
-  for the queryable index… PROPOSED: it never crosses; instead exports
-  `to_byte(text, utf16: u32) -> u32` / `to_utf16(text, byte: u32) -> u32`
-  that build the index on demand — at a handful of calls per
-  interaction, rebuilding per call (~0.1 ms) is honest and stateless.
-  If that measures dumb, an opaque handle is the fallback; do not
-  design it in ahead of the measurement.
-- `str_indices` is APPROVED-IN-PRINCIPLE (Will, 2026-08-20) as the
-  counting primitive at production time; the experiment's hand-rolled
-  SWAR is the fallback and the test oracle either way.
-- Strings IN cross via wasm-bindgen `&str` (TextEncoder → UTF-8, valid
-  by construction — no validation pass; debug_assert at most).
-
-## Perf budget (RULED numbers, restated)
-
-~31 ns/token native staged; ×2–3 wasm ⇒ worst aligned book ≈ 20 ms,
-prose book ≈ 200 µs, behind the probe's 150 ms debounce. The emit copies
-are the only new cost: token_spans for aligned GEN ≈ 4 MB — which is why
-`wants` + clip exist. En_ulb whole-66-book corpus ≈ 8.5 ms native.
-
-## What the CM prototype actually consumes today (inventoried 2026-08-20)
-
-onion_editor_chef/src/cm builds a JS stand-in `Scan` per change:
-
-| prototype need | engine read that serves it |
-|---|---|
-| `blocks` (kind, from, to) | `blocks` (class + marker name from doc bytes) |
-| `chapters` (ordinal, label, range) | `chapters` |
-| per-line marker/contentFrom | `token_spans` (marker token end = contentFrom) |
-| `\v`/`\c` num ranges (`numFrom/To`) | `verse_anchors` / Designator spans in `token_spans` |
-| note spans + kind | `note_extents` |
-| note ref/body DISPLAY text | app-side: slice the extent, strip via `token_spans` within it (interpretation stays app-side — RULED) |
-| `\w` surface + attr-tail ranges | `token_spans` (Marker/Text/AttrList/Closer kinds) |
-| milestones (from, to, name) | `token_spans` class 3; name = doc bytes |
-| its fabricated verse lint | `diagnostics` (replaces it outright) |
-| transforms (rewrite tr against startState) | the Analysis paired with startState's version — JS keeps the last result per version; nothing new needed |
-
-Gaps found: NONE engine-side — every prototype need decomposes onto the
-planned reads. Unused engine-side: `text_runs` (search/proofing
-consumers, not the editor — keep behind its `wants` bit).
-
-## Test methodology (intentionally minimal)
-
-1. THE identity oracle, native: `analyze_native(text, wants)` (the same
-   emit code path compiled natively) equals the three-liner's artifacts
-   re-derived by a dumb reference emitter, over the corpus. The emit
-   layer is pure Rust — test it natively, not through wasm.
-2. ONE wasm smoke test (`wasm-pack test --node`): a real book in,
-   assert a handful of known values out (chapter count, one diagnostic,
-   one utf16 offset against a hand-computed value on a non-ASCII book —
-   hindi-IRV is the fixture). The boundary is thin; don't build a JS
-   harness beyond this.
-3. UTF-16 correctness already lives in experiments/utf16.rs's oracle;
-   production adoption lifts those tests wholesale.
-
-## Open
-
-1. `wants` bitmask + clip range — confirm the shape.
-2. Coarse-class 3-bit table above — confirm the 8 classes.
-3. Fixes: lazy `fix_edits` vs eager arrays (lean: eager if it stays
-   ~7 u32s + small strings; lazy only if eager gets fiddly).
-4. Index-free `to_byte`/`to_utf16` exports vs an opaque handle —
-   measure first.
-
-## Galley method list (accumulating, 2026-08-21 — the composed bindings crate)
-
-The one-module composition (ideas/other_repos/sous.md): onion and sous
-stay independent library crates; "galley" is the thin stateful bindings
-crate depending on both — the retained source String, the shared
-Utf16Index, coordination, any caching. Methods pulled so far by real UI
-asks, all query-shaped (no bulk DataView until a profiler asks — the
-#[repr(C)] rows keep that door open):
+## Galley method list (accumulating as real UI asks arrive)
 
 - `new(text: String) -> Galley` — the one string crossing
 - `diagnostics()` — onion lint + sous proofread, one stream, source bytes
-- `locate(byte: u32) -> String` — "MRK 6:3" (status bar, diagnostic labels)
-- `chapters()` — ≤151 rows for the navigation grid: number + start
-  (+ raw label via ChapterRow.token when the grid wants "12b")
-- `book() -> String` — the \id code; manifests own project-level naming
-- `to_utf16(byte) / to_byte(utf16)` — the wire translation, shared index
-- exports on demand: `usj() / usx() / html() -> String`
+- `locate(byte) -> String` — "MRK 6:3" (status bar, labels)
+- `chapters()` — the navigation grid rows
+- `book() -> String` — the \id code
+- `to_utf16(byte)` / `to_byte(utf16)` — shared index, built once per text
+- `usj()` / `usx()` / `html() -> String` — exports on demand
+- `format_edits(opts)` / `format(opts)` — the opt-in write path (2026-08-24)
+- `diff(other)` / `merge(other, decisions)` / `revert(other, unit)` —
+  the two-input pair (2026-08-24)
+
+## The one rich structure: the diff skeleton (RULED 2026-08-24: serde JSON, B′ fallback)
+
+Will's ruling: the skeleton crosses as serde JSON (option A) — cold
+path, zero drift, the old editors' contract back for free. The
+documented fallback if a profiler ever catches the modal parse
+mattering: flat unit arrays PLUS one Rust-rendered id-string blob with
+offsets (B′). Plain flat arrays with JS-rendered ids are REJECTED —
+re-rendering "MRK 6:3_dup_1@2" in TS recreates the mapper-drift class
+in the one place identity is load-bearing; the id renderer stays Rust.
+
+
+The diff skeleton is the single API where JS wants structure (units
+with ids, statuses, slots) rather than spans — and it's a cold path:
+invoked when a diff modal opens, behind async loading, not per
+keystroke. Will's ruling: serde is fine for exactly this. The clean
+way to take it: serde (+ serde-wasm-bindgen or serde_json) becomes a
+dependency of the BINDINGS crate only, deriving on small wire structs
+defined there and converted from the engine's `DiffSkeleton` — the
+engine library stays serde-free, and the wire structs are the bindings
+crate's to version. That gives the old editors' camelCase JSON
+contract back nearly verbatim without hand-writing a serializer.
+Replay splices still cross like format edits (spans + ranges, hot-path
+shaped).
+
+## Tests (intentionally minimal)
+
+The emit layer — building the arrays, the UTF-16 sweep — is pure Rust,
+so it's tested NATIVELY like everything else (reference-emitter
+equality over the corpus). The boundary itself gets ONE smoke test
+(`wasm-pack test --node`): a real book in, a handful of known values
+out, including one UTF-16 offset on a Hindi book checked by hand. No
+JS test harness beyond that — with no mirror types there is nothing
+boundary-specific left to drift. No wasm benches in-repo: boundary
+costs are recorded in perf-notes §5; the probes stay scratch (RULED).
+
+## Standing decisions (compressed history)
+
+- Stateless one-call analyze; JS never holds a token; typed-array
+  copies, never views into wasm memory. (RULED 2026-08-18)
+- `wants` bitmask + viewport clip: confirmed. Coarse 3-bit class:
+  confirmed. Eager fix crossing: ruled 2026-08-24.
+- `str_indices` crate approved-in-principle as the UTF-16 counting
+  primitive; the hand-rolled SWAR is fallback + test oracle.
+- Serde: never in the engine library. Allowed in the BINDINGS crate
+  for the diff skeleton (ruled 2026-08-24 — cold path, modal-open
+  shaped). The other future argument is usj/usx INGEST, parked as
+  not-first-class.
+- Perf envelope: engine ×2–3 native cost under wasm ⇒ worst aligned
+  book ≈ 20ms, prose book ≈ 200µs, against a 150ms debounce. simd128
+  RUSTFLAG is a free ~8% on lex; turn it on, expect no more.
+- Build when the editor pulls; pure Rust until then. (Standing)
