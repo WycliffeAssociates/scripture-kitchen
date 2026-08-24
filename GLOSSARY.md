@@ -126,6 +126,13 @@ planning/; the definition records the current soft direction.
   Context legality, and the row's own flags.
 - **Scanner** — canonical, defined above. **"Lexer" is a synonym to AVOID** —
   one term per concept, and `scanner.rs` is the module.
+- **Formatter** — the pass that emits `Edit`s rather than Observations, over
+  the same rows table: `format_edits`. Opt-in, and the ONE pass allowed to
+  mutate, delete and invent bytes.
+- **Form channel** — the rows the formatter alone evaluates, marked
+  `Severity::Form`. Never a diagnostic: the Linter does not reach them. Rows
+  that are BOTH (a real finding whose fix is also a formatting action) are
+  **dual citizens** and carry `LintRow::formatter` instead.
 
 ## Naming collisions — RULED 2026-08-12
 

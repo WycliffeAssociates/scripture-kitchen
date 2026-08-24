@@ -74,6 +74,7 @@ const END_BIT: u8 = NESTED_BIT;
 
 impl TokenKind {
     /// Packs to the row's kind byte: low 4 bits = shape, bit 4 = nested.
+    #[allow(clippy::identity_op)] // the `0 |` keeps the marker arms symmetric
     pub fn to_bits(self) -> u8 {
         match self {
             // The `0 |` is a no-op, kept so the two marker arms read

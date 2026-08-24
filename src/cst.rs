@@ -635,10 +635,10 @@ impl Builder {
         }
         self.scratch.push(token_idx);
         self.close_top(CloseReason::Explicit);
-        if let Some(kind) = ends {
-            if self.top().role == FrameRole::Container(kind) {
-                self.close_top(CloseReason::Explicit);
-            }
+        if let Some(kind) = ends
+            && self.top().role == FrameRole::Container(kind)
+        {
+            self.close_top(CloseReason::Explicit);
         }
     }
 

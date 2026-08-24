@@ -110,6 +110,11 @@ impl Ancestry {
                 // here — each offending chapter is its own run.
                 self.run_reported = false;
             }
+            // Row 0 is the walker's POP-ALL recovery, so it kills the standing
+            // paragraph exactly as `\c` does: a `\p` proposed in front of it
+            // repairs nothing beyond it, which makes the verses after it a run
+            // of their own. en_ulb's `\s5` is 13,636 occurrences of this.
+            MarkerKind::Unknown => self.run_reported = false,
             MarkerKind::Verse => {
                 if self.sidebars > 0 {
                     out.push(Observation::pair(

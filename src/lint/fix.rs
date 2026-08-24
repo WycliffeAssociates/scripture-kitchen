@@ -6,7 +6,7 @@ use std::ops::Range;
 use super::walk::span_of;
 use super::{Code, Doc, Emit, LINT_ROWS, LintReport, Observation, lint};
 use crate::designator::{self, Designator};
-use crate::edit::{Edit, apply};
+use crate::edit::{Edit, apply, check_edits};
 use crate::tables::generated;
 use crate::tables::schema::{ClosingBehavior, MarkerKind};
 use crate::{Token, TokenKind};
@@ -280,20 +280,7 @@ pub fn check_fixes(
     // Stable, so a fix's concatenation chain keeps its (from, sequence) order
     // when several fixes merge into one dispatch.
     edits.sort_by_key(|edit| edit.from);
-    for pair in edits.windows(2) {
-        if pair[1].from < pair[0].to {
-            return Err(format!("merged fixes overlap: {pair:?}"));
-        }
-    }
-    if let Some(edit) = edits.iter().find(|edit| {
-        edit.to as usize > source.len()
-            || edit.from > edit.to
-            || !source.is_char_boundary(edit.to as usize)
-    }) {
-        return Err(format!(
-            "edit is not a valid splice of the source: {edit:?}"
-        ));
-    }
+    check_edits(source.as_bytes(), &edits)?;
 
     let fixed = apply(source.as_bytes(), &edits);
     let fixed = String::from_utf8(fixed).map_err(|error| format!("fix broke UTF-8: {error}"))?;
@@ -686,7 +673,7 @@ mod tests {
         // One snippet per code that DECLARES a label, so no label is a promise
         // nothing keeps. The converse — a code emitting a fix its row does not
         // declare — is asserted inside `findings` on every snippet here.
-        let cases: [(Code, &str); 15] = [
+        let cases: [(Code, &str); 16] = [
             (
                 Code::UnclosedNote,
                 "\\id GEN\n\\c 1\n\\p \\v 1 a\\f + \\ft n\\c 2\n\\p b",
@@ -704,6 +691,9 @@ mod tests {
             (Code::OrphanCloser, "\\id GEN\n\\p text\\w* more"),
             (Code::OrphanTerminator, "\\id GEN\n\\p text \\* more"),
             (Code::MissingParagraph, "\\id GEN\n\\c 1\n\\v 1 a"),
+            // The one UNAMBIGUOUS empty paragraph: the next one is spelled the
+            // same, so the first is duplication and not a choice.
+            (Code::EmptyParagraph, "\\id GEN\n\\c 1\n\\p\n\\p text\n"),
             (Code::ChapterDuplicate, "\\id GEN\n\\c 1\n\\c 1\n"),
             (Code::ChapterOutOfOrder, "\\id GEN\n\\c 2\n\\c 1\n"),
             (
@@ -735,7 +725,10 @@ mod tests {
             repaired(usfm, code);
             demonstrated.push(code);
         }
-        for row in LINT_ROWS.iter() {
+        // FORM-channel rows are excluded: `lint` never evaluates one, so no
+        // snippet here could demonstrate its fix. Their cases live in
+        // `crate::format`.
+        for row in LINT_ROWS.iter().filter(|row| !row.is_form()) {
             assert_eq!(
                 row.fix_label.is_some(),
                 demonstrated.contains(&row.code),

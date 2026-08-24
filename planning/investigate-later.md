@@ -345,3 +345,19 @@ pass after masks pass 4; keep only if deleted seam code outweighs churn.
 **RESOLVED 2026-08-21: done, and it is a net ADDITION (+143/−50) — the
 seam code it deletes is one mask arm, while five consumers gained a
 `designator::label` trim; every oracle green, lexer unchanged.**
+
+## hegel-rust for random-document property tests (2026-08-24)
+
+Format's invariant 7 is checked by EXHAUSTION over the finite option
+space (4,096 combos × 12 fixtures) — no proptest dep taken. The open
+gap is the INPUT side: random documents. hegel-rust
+(github.com/hegeldev/hegel-rust, `cargo add --dev hegeltest`) is
+Hypothesis-lineage — draw-based generation with integrated shrinking,
+strictly better minimal counterexamples than proptest's
+strategy-based shrinking; pure Rust, no external service. Fails the
+boring bar TODAY (beta, README says "we may make breaking changes"),
+dev-dep-only so the blast radius is test churn. Revisit at 1.0 —
+candidates: format's random-documents gap, the diff port's three
+algebraic laws (partition totality, byte round-trip, unknown-id
+rejection). Will 2026-08-24: "ok on hegel for now" — parked, not
+chosen.

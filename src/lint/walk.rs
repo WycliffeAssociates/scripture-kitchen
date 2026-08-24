@@ -45,8 +45,25 @@ impl Emit {
     /// rename is worse than none. The splices must be sorted by `from` and
     /// non-overlapping, as [`check_fixes`](super::check_fixes) demands.
     pub(crate) fn push_spliced(&mut self, observation: Observation, splices: &[(u32, u32, &[u8])]) {
-        let label = observation
-            .code
+        let fix = self.splice(observation.code, splices);
+        self.observations.push(observation);
+        self.fix_of.push(fix);
+    }
+
+    /// A fix attached to an observation ALREADY pushed, by its slot.
+    ///
+    /// The one derivation that cannot happen at its own emit site:
+    /// `empty-paragraph` is judged when its node closes and repaired only if the
+    /// paragraph that DISPLACED it is spelled the same and holds content, which
+    /// is a fact about tokens the close event has not reached yet.
+    pub(crate) fn attach_fixed(&mut self, slot: u32, from: u32, to: u32, text: &[u8]) {
+        let code = self.observations[slot as usize].code;
+        self.fix_of[slot as usize] = self.splice(code, &[(from, to, text)]);
+    }
+
+    /// The edits of one fix, appended to the arena; returns the fix's index.
+    fn splice(&mut self, code: super::Code, splices: &[(u32, u32, &[u8])]) -> u32 {
+        let label = code
             .row()
             .fix_label
             .expect("a code that emits a fix declares its label");
@@ -77,8 +94,7 @@ impl Emit {
             label,
             edits: start..self.edit_list.len() as u32,
         });
-        self.observations.push(observation);
-        self.fix_of.push(fix);
+        fix
     }
 
     /// Document order, applied to the observations and their fix links at once.

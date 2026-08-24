@@ -120,13 +120,13 @@ fn the_corpus_yields_exactly_the_known_findings() {
         );
     }
 
-    // Verses with no paragraph above them, ONE per paragraph-less run — and a
-    // run never crosses `\c`, since a `\p` inserted in one chapter repairs
-    // nothing in the next. Two real sources: en_ulb's `\s5` pops the open `\p`
-    // and the following verses land at root (2832), plus 33 places (31 en_ult,
-    // 2 bsb) where a chapter opens straight into `\v`. usfmtc repairs the
-    // latter by fabricating a `\p`; we flag it.
-    assert_eq!(total(Code::MissingParagraph), 2_865);
+    // Verses with no paragraph above them, ONE per paragraph-less run. A run
+    // ends wherever the repairing `\p` could not survive: at `\c`, and at the
+    // pop-all recovery of a row-0 marker. Two real sources: en_ulb's `\s5` pops
+    // the open `\p` and the following verses land at root (5401), plus 33 places
+    // (31 en_ult, 2 bsb) where a chapter opens straight into `\v`. usfmtc
+    // repairs the latter by fabricating a `\p`; we flag it.
+    assert_eq!(total(Code::MissingParagraph), 5_434);
     let outside_ulb: u64 = books
         .iter()
         .filter(|(path, _, _)| !path.to_string_lossy().contains("en_ulb"))
@@ -246,6 +246,17 @@ fn the_corpus_yields_exactly_the_known_findings() {
     //     111,000-odd occurrences, 679 band transitions, and not one marker
     //     looks backwards. The corpora write front matter in spec order, which
     //     is what the mask's positional half claims.
+    // The FORM CHANNEL is structurally absent, not merely clean: `lint` does not
+    // evaluate a `Severity::Form` row at all, so none can reach a report.
+    for row in LINT_ROWS.iter().filter(|row| row.is_form()) {
+        assert_eq!(
+            total(row.code),
+            0,
+            "{} escaped into a lint report",
+            row.name
+        );
+    }
+
     for code in [
         Code::UnclosedChar,
         Code::UnclosedAtEof,
@@ -367,14 +378,21 @@ fn every_corpus_fix_passes_the_oracle() {
     // finding in 226 books, each with a repair.
     assert_eq!(total(Code::UnclosedNote), 2);
     assert_eq!(total(Code::OrphanCloser), 1);
-    // One `\p` per paragraph-less run, all 2865 of them.
-    assert_eq!(total(Code::MissingParagraph), 2_865);
+    // One `\p` per paragraph-less run, all 5434 of them.
+    assert_eq!(total(Code::MissingParagraph), 5_434);
+    // The FORMATTER half of `empty-paragraph`: 25 of the 787 empty paragraphs
+    // are UNAMBIGUOUS duplication — the paragraph that displaced them is spelled
+    // exactly the same and holds the content (`\p\n\p\n\v 39 Hem…`, en_ulb
+    // ISA's 13 `\q\n\q` pairs). The other 762 are mixed pairs (`\m` then `\p`,
+    // the `\s5` chunk idiom) or chains of identical empties, where which one was
+    // meant is the author's to say — the diagnostic points and offers nothing.
+    assert_eq!(total(Code::EmptyParagraph), 25);
     // The corpus's ONE duplicate verse offers no fix: bdf_reg ROM 3 writes
     // `\v 10` twice and then `\v 11`, so renumbering the duplicate to 11 would
     // only move the duplicate one verse along. `renumber` declines — which is
     // why this reads 0 where the finding count above reads 1.
     assert_eq!(total(Code::VerseDuplicate), 0);
-    assert_eq!(totals.iter().sum::<u64>(), 2_868);
+    assert_eq!(totals.iter().sum::<u64>(), 5_462);
 }
 
 #[test]

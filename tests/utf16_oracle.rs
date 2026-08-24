@@ -44,57 +44,85 @@ fn corpus() -> Vec<PathBuf> {
     paths
 }
 
+/// Every boundary of one file, both directions. Returns the count checked.
+fn check_file(path: &Path) -> u64 {
+    let source = std::fs::read_to_string(path).unwrap();
+    let ix = Utf16Index::new(source.as_bytes());
+    let where_ = path.display();
+
+    assert_eq!(
+        ix.index_bytes(),
+        (source.len() / STRIDE + 1) * 4,
+        "{where_}: index is not one u32 per stride"
+    );
+
+    let mut utf16 = 0u32;
+    let mut checked = 0u64;
+    for (byte, ch) in source.char_indices() {
+        let byte = byte as u32;
+        assert_eq!(
+            ix.to_utf16(byte),
+            utf16,
+            "{where_}: to_utf16({byte}) disagrees with the walk"
+        );
+        assert_eq!(
+            ix.to_byte(utf16),
+            byte,
+            "{where_}: to_byte({utf16}) does not come back to {byte}"
+        );
+        utf16 += ch.len_utf16() as u32;
+        checked += 1;
+    }
+    // The end offset is a boundary too, and the only one the trailing
+    // partial stride block can be asked about.
+    assert_eq!(ix.len_utf16(), utf16, "{where_}: total length");
+    assert_eq!(ix.to_utf16(source.len() as u32), utf16, "{where_}: end fwd");
+    assert_eq!(
+        ix.to_byte(utf16),
+        source.len() as u32,
+        "{where_}: end reverse"
+    );
+    checked + 1
+}
+
+/// The always-on slice: every boundary of the densest script mounted (Hindi —
+/// byte and UTF-16 offsets drift on nearly every character) plus the largest
+/// English book. Seconds, not minutes; the whole-corpus sweep below is the
+/// end-stage gate.
 #[test]
+fn dense_script_and_the_largest_book_match_a_char_walk() {
+    let mut paths = Vec::new();
+    collect_usfm_paths(
+        Path::new("testData/samples-from-wild/hindi-IRV1"),
+        &mut paths,
+    );
+    let psalms = PathBuf::from("example-corpora/en_ulb/19-PSA.usfm");
+    if psalms.exists() {
+        paths.push(psalms);
+    }
+    if paths.is_empty() {
+        eprintln!("utf16 oracle SKIPPED: no *.usfm mounted");
+        return;
+    }
+    let boundaries: u64 = paths.par_iter().map(|path| check_file(path)).sum();
+    println!(
+        "utf16 fast slice: {} files, {boundaries} character boundaries",
+        paths.len()
+    );
+}
+
+/// The exhaustive sweep — every boundary of every mounted file (~107.5M).
+/// Ignored by default so the inner loop stays fast; it is part of the
+/// pass-end gate: `cargo test -- --include-ignored`.
+#[test]
+#[ignore = "minutes-long exhaustive sweep; run at pass end via --include-ignored"]
 fn every_corpus_boundary_matches_a_char_walk() {
     let paths = corpus();
     if paths.is_empty() {
         eprintln!("utf16 oracle SKIPPED: no *.usfm under example-corpora/ or testData/");
         return;
     }
-
-    let boundaries: u64 = paths
-        .par_iter()
-        .map(|path| {
-            let source = std::fs::read_to_string(path).unwrap();
-            let ix = Utf16Index::new(source.as_bytes());
-            let where_ = path.display();
-
-            assert_eq!(
-                ix.index_bytes(),
-                (source.len() / STRIDE + 1) * 4,
-                "{where_}: index is not one u32 per stride"
-            );
-
-            let mut utf16 = 0u32;
-            let mut checked = 0u64;
-            for (byte, ch) in source.char_indices() {
-                let byte = byte as u32;
-                assert_eq!(
-                    ix.to_utf16(byte),
-                    utf16,
-                    "{where_}: to_utf16({byte}) disagrees with the walk"
-                );
-                assert_eq!(
-                    ix.to_byte(utf16),
-                    byte,
-                    "{where_}: to_byte({utf16}) does not come back to {byte}"
-                );
-                utf16 += ch.len_utf16() as u32;
-                checked += 1;
-            }
-            // The end offset is a boundary too, and the only one the trailing
-            // partial stride block can be asked about.
-            assert_eq!(ix.len_utf16(), utf16, "{where_}: total length");
-            assert_eq!(ix.to_utf16(source.len() as u32), utf16, "{where_}: end fwd");
-            assert_eq!(
-                ix.to_byte(utf16),
-                source.len() as u32,
-                "{where_}: end reverse"
-            );
-            checked + 1
-        })
-        .sum();
-
+    let boundaries: u64 = paths.par_iter().map(|path| check_file(path)).sum();
     println!(
         "utf16 oracle: {} files, {boundaries} character boundaries, both directions",
         paths.len()

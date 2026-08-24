@@ -3,14 +3,22 @@
 //! [`Code`] is the identity, [`LINT_ROWS`] is the per-code data, and the four
 //! small enums are the columns' vocabularies. Nothing here reads a document.
 
-/// CodeMirror's exact `Diagnostic.severity` ladder; the editor session maps
-/// these 1:1 with no translation table.
+/// CodeMirror's `Diagnostic.severity` ladder plus one channel of our own; the
+/// editor session maps the first four 1:1 with no translation table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Severity {
     Error,
     Warning,
     Info,
     Hint,
+    /// The FORMATTER's channel: a row that draws no diagnostic at all.
+    /// [`lint`](crate::lint::lint) never evaluates such a row and no report ever
+    /// carries one; [`format_edits`](crate::format::format_edits) is its only
+    /// consumer.
+    ///
+    /// An explicit variant rather than `severity: None`, which already means
+    /// something else here — "gated until the document declares a version".
+    Form,
 }
 
 /// The subsystem a code belongs to. Consumers group by this; it is also how a
@@ -119,6 +127,22 @@ pub enum Code {
     DeprecatedAttribute,
     // --- the positional band ----------------------------------------------
     MarkerOutOfBand,
+    // --- the FORM CHANNEL --------------------------------------------------
+    // Never a diagnostic (`Severity::Form`), never evaluated by `lint`. THIS
+    // ORDER IS PRECEDENCE: where two of these want the same bytes, the earlier
+    // row wins the span and the later one is not emitted
+    // ([`crate::format::format_edits`]).
+    RemoveMarker,
+    BridgeEmptyVerses,
+    DedupeVerseNumber,
+    BlockMarkerOwnLine,
+    CharMarkerLineJoin,
+    CollapseBlankLines,
+    NormalizeNewlines,
+    TrimTextEdges,
+    DelimiterSingle,
+    DesignatorWsSingle,
+    MarkerWsAtLineStart,
 }
 
 impl Code {
@@ -160,6 +184,11 @@ pub struct LintRow {
     /// marker text at those token spans. Rendering and localization are the
     /// consumer's; the library never allocates a message.
     pub template: &'static str,
+    /// DUAL CITIZENSHIP: a real diagnostic whose fix is also a formatting
+    /// action, so `format_edits` takes it into the transaction without the
+    /// caller naming it. Always false on a [`Severity::Form`] row, where the
+    /// channel IS the membership ([`Self::formats`]).
+    pub formatter: bool,
     /// The label this code's fix carries. A code emits a fix iff its row has a
     /// label (tested), and the generators read the label from here.
     pub fix_label: Option<&'static str>,
@@ -191,11 +220,25 @@ impl LintRow {
         }
         severity
     }
+
+    /// A FORM-channel row: no diagnostic, ever. `lint` skips it and no consumer
+    /// of a [`LintReport`](super::LintReport) can see one.
+    pub fn is_form(&self) -> bool {
+        self.severity == Some(Severity::Form)
+    }
+
+    /// Is this row part of the formatting transaction by default — either a Form
+    /// row or a dual citizen? The `repairs` allowlist adds to this set; nothing
+    /// removes from it.
+    pub fn formats(&self) -> bool {
+        self.is_form() || self.formatter
+    }
 }
 
 /// The authored rules table — one row per [`Code`], in the enum's order. All
-/// six families have a pass.
-pub const LINT_ROWS: [LintRow; 43] = [
+/// six families have a pass; the FORM family's tail is the format channel, which
+/// `lint` never reaches (see [`Severity::Form`]).
+pub const LINT_ROWS: [LintRow; 54] = [
     // Something that cannot live inside a note (a `\c`, a bare `\v`, an unknown
     // marker) arrived while the frame was open. Both live corpus instances
     // (en_ulb ISA, MRK) are genuinely truncated footnotes.
@@ -207,6 +250,7 @@ pub const LINT_ROWS: [LintRow; 43] = [
         escalation: &[],
         aux: AuxKind::None,
         template: "\\{anchor} was never closed",
+        formatter: false,
         fix_label: Some("insert the note closer"),
     },
     // The same, for a character marker, which REQUIRES its `\X*`.
@@ -218,6 +262,7 @@ pub const LINT_ROWS: [LintRow; 43] = [
         escalation: &[],
         aux: AuxKind::None,
         template: "\\{anchor} was never closed",
+        formatter: false,
         fix_label: Some("insert the closer"),
     },
     // Weaker than Recovery: nothing displaced the frame, the file just stopped.
@@ -230,6 +275,7 @@ pub const LINT_ROWS: [LintRow; 43] = [
         escalation: &[],
         aux: AuxKind::None,
         template: "\\{anchor} is still open at the end of the book",
+        formatter: false,
         fix_label: Some("insert the closer"),
     },
     // A U25003 container ended by displacement, not by its `\list-e\*`. The end
@@ -242,6 +288,7 @@ pub const LINT_ROWS: [LintRow; 43] = [
         escalation: &[(UsfmVersion::V4_0, Severity::Error)],
         aux: AuxKind::None,
         template: "\\{anchor} container was not closed by its end milestone",
+        formatter: false,
         fix_label: Some("insert the container end milestone"),
     },
     // Recovery and Eof are one fact for a point: its span is only its attribute
@@ -254,6 +301,7 @@ pub const LINT_ROWS: [LintRow; 43] = [
         escalation: &[],
         aux: AuxKind::None,
         template: "\\{anchor} milestone is missing its \\*",
+        formatter: false,
         fix_label: Some("insert \\*"),
     },
     // No open frame of that name in reach (or only one behind a sidebar
@@ -266,6 +314,7 @@ pub const LINT_ROWS: [LintRow; 43] = [
         escalation: &[],
         aux: AuxKind::None,
         template: "\\{anchor} closes nothing",
+        formatter: false,
         fix_label: Some("delete the closer"),
     },
     LintRow {
@@ -276,6 +325,7 @@ pub const LINT_ROWS: [LintRow; 43] = [
         escalation: &[],
         aux: AuxKind::None,
         template: "\\* terminates no milestone",
+        formatter: false,
         fix_label: Some("delete \\*"),
     },
     // Not `orphan-terminator`: the `-e` point's own `\*` DID close the point —
@@ -288,6 +338,7 @@ pub const LINT_ROWS: [LintRow; 43] = [
         escalation: &[],
         aux: AuxKind::None,
         template: "\\{anchor} ends no open container",
+        formatter: false,
         fix_label: None,
     },
     // A sidebar is a POP BARRIER, so a `\c` or `\v` written inside one stays
@@ -301,6 +352,7 @@ pub const LINT_ROWS: [LintRow; 43] = [
         escalation: &[],
         aux: AuxKind::None,
         template: "\\{anchor} is inside the sidebar opened by \\{second}",
+        formatter: false,
         fix_label: None,
     },
     // Row 0: unknown names, illegal spellings, and every custom `\z` extension
@@ -314,6 +366,7 @@ pub const LINT_ROWS: [LintRow; 43] = [
         escalation: &[],
         aux: AuxKind::None,
         template: "\\{anchor} is not a known marker",
+        formatter: false,
         fix_label: None,
     },
     // The lexer records the `\+X` spelling wherever it appears, so this stays a
@@ -326,6 +379,7 @@ pub const LINT_ROWS: [LintRow; 43] = [
         escalation: &[],
         aux: AuxKind::None,
         template: "\\+{anchor} is not a character marker; the nested spelling does not apply",
+        formatter: false,
         fix_label: None,
     },
     // A `\v` with no paragraph anywhere above it. usfmtc FABRICATES an implicit
@@ -346,6 +400,7 @@ pub const LINT_ROWS: [LintRow; 43] = [
         escalation: &[],
         aux: AuxKind::None,
         template: "\\{anchor} is not inside a paragraph",
+        formatter: true,
         fix_label: Some("insert \\p"),
     },
     // ---- Ordering ---------------------------------------------------------
@@ -360,6 +415,7 @@ pub const LINT_ROWS: [LintRow; 43] = [
         escalation: &[],
         aux: AuxKind::None,
         template: "{anchor} is not a valid chapter/verse number",
+        formatter: false,
         fix_label: None,
     },
     // The same chapter number twice in one book. `second` is the previous
@@ -372,6 +428,7 @@ pub const LINT_ROWS: [LintRow; 43] = [
         escalation: &[],
         aux: AuxKind::ExpectedNumber,
         template: "chapter {anchor} repeats the chapter at {second}; expected {aux}",
+        formatter: false,
         fix_label: Some("renumber to the expected chapter"),
     },
     LintRow {
@@ -382,6 +439,7 @@ pub const LINT_ROWS: [LintRow; 43] = [
         escalation: &[],
         aux: AuxKind::ExpectedNumber,
         template: "chapter {anchor} goes backwards from {second}; expected {aux}",
+        formatter: false,
         fix_label: Some("renumber to the expected chapter"),
     },
     // Chapters, unlike verses, have no tradition of legitimate holes — but the
@@ -394,6 +452,7 @@ pub const LINT_ROWS: [LintRow; 43] = [
         escalation: &[],
         aux: AuxKind::ExpectedNumber,
         template: "chapter {anchor} skips ahead; expected {aux}",
+        formatter: false,
         fix_label: None,
     },
     // The first number equals the previous designator's LAST covered verse
@@ -406,6 +465,7 @@ pub const LINT_ROWS: [LintRow; 43] = [
         escalation: &[],
         aux: AuxKind::ExpectedNumber,
         template: "verse {anchor} repeats the verse at {second}; expected {aux}",
+        formatter: false,
         fix_label: Some("renumber to the expected verse"),
     },
     // A verse starting BELOW the previous designator's last covered verse.
@@ -417,6 +477,7 @@ pub const LINT_ROWS: [LintRow; 43] = [
         escalation: &[],
         aux: AuxKind::ExpectedNumber,
         template: "verse {anchor} goes backwards from {second}; expected {aux}",
+        formatter: false,
         fix_label: Some("renumber to the expected verse"),
     },
     // Traditions that legitimately omit a verse land here; the answer is a
@@ -429,6 +490,7 @@ pub const LINT_ROWS: [LintRow; 43] = [
         escalation: &[],
         aux: AuxKind::ExpectedNumber,
         template: "verse {anchor} skips ahead; expected {aux}",
+        formatter: false,
         fix_label: None,
     },
     // A chapter whose FIRST verse is not 1. Fires INSTEAD of `verse-gap`: there
@@ -441,6 +503,7 @@ pub const LINT_ROWS: [LintRow; 43] = [
         escalation: &[],
         aux: AuxKind::ExpectedNumber,
         template: "this chapter starts at verse {anchor}; expected {aux}",
+        formatter: false,
         fix_label: None,
     },
     // ONE finding at the first such `\v`, and only when a `\c` does arrive
@@ -453,6 +516,7 @@ pub const LINT_ROWS: [LintRow; 43] = [
         escalation: &[],
         aux: AuxKind::None,
         template: "\\{anchor} comes before the book's first \\c",
+        formatter: false,
         fix_label: None,
     },
     // Anchored at the first `\v`, and silent for a book with no verses: front
@@ -465,6 +529,7 @@ pub const LINT_ROWS: [LintRow; 43] = [
         escalation: &[],
         aux: AuxKind::None,
         template: "this book has verses but no \\c",
+        formatter: false,
         fix_label: None,
     },
     // ---- Payload ----------------------------------------------------------
@@ -479,6 +544,7 @@ pub const LINT_ROWS: [LintRow; 43] = [
         escalation: &[],
         aux: AuxKind::None,
         template: "this book has no \\id line",
+        formatter: false,
         fix_label: None,
     },
     // An `\id` payload that is not one of the spec's 116 identifiers, in any
@@ -491,6 +557,7 @@ pub const LINT_ROWS: [LintRow; 43] = [
         escalation: &[],
         aux: AuxKind::None,
         template: "{anchor} is not a book identifier",
+        formatter: false,
         fix_label: None,
     },
     // A real identifier, written `gen` or `Gen`. Fires INSTEAD of
@@ -503,6 +570,7 @@ pub const LINT_ROWS: [LintRow; 43] = [
         escalation: &[],
         aux: AuxKind::None,
         template: "book identifier {anchor} should be uppercase",
+        formatter: false,
         fix_label: Some("uppercase the book identifier"),
     },
     // The scanner carves a `Designator` from the first content region after `\c`
@@ -516,6 +584,7 @@ pub const LINT_ROWS: [LintRow; 43] = [
         escalation: &[],
         aux: AuxKind::None,
         template: "\\{anchor} has no chapter number",
+        formatter: false,
         fix_label: None,
     },
     // ---- Adjacency --------------------------------------------------------
@@ -535,6 +604,7 @@ pub const LINT_ROWS: [LintRow; 43] = [
         escalation: &[],
         aux: AuxKind::None,
         template: "\\{anchor} must follow the \\c it re-numbers",
+        formatter: false,
         fix_label: None,
     },
     // The same rule for `\va`/`\vp` after `\v`.
@@ -546,6 +616,7 @@ pub const LINT_ROWS: [LintRow; 43] = [
         escalation: &[],
         aux: AuxKind::None,
         template: "\\{anchor} must follow the \\v it re-numbers",
+        formatter: false,
         fix_label: None,
     },
     // ---- Payload ----------------------------------------------------------
@@ -563,6 +634,7 @@ pub const LINT_ROWS: [LintRow; 43] = [
         escalation: &[],
         aux: AuxKind::None,
         template: "{anchor} is an unusual note caller",
+        formatter: false,
         fix_label: None,
     },
     // One book spelling a numbered family both ways — `\q` and `\q2`. The bare
@@ -582,6 +654,7 @@ pub const LINT_ROWS: [LintRow; 43] = [
         escalation: &[],
         aux: AuxKind::NumberingCap,
         template: "\\{anchor} mixes numbered and bare spellings with \\{second} (levels 1-{aux})",
+        formatter: false,
         fix_label: None,
     },
     // ---- Form -------------------------------------------------------------
@@ -602,6 +675,7 @@ pub const LINT_ROWS: [LintRow; 43] = [
         escalation: &[],
         aux: AuxKind::None,
         template: "\\{anchor} needs whitespace before it",
+        formatter: true,
         fix_label: Some("insert a line break"),
     },
     // NBSP after a marker name, and every other exotic separator with it
@@ -623,6 +697,7 @@ pub const LINT_ROWS: [LintRow; 43] = [
         escalation: &[],
         aux: AuxKind::None,
         template: "\\{anchor} is not followed by structural whitespace",
+        formatter: false,
         fix_label: None,
     },
     // Nothing but Newlines under the node, or nothing at all. `\b` is EXCLUDED
@@ -637,7 +712,8 @@ pub const LINT_ROWS: [LintRow; 43] = [
         escalation: &[],
         aux: AuxKind::None,
         template: "\\{anchor} has no content",
-        fix_label: None,
+        formatter: true,
+        fix_label: Some("delete the duplicate paragraph"),
     },
     // ---- Attributes (shape only) ------------------------------------------
     // The 3.1 TRAILING attribute form — `\w grace|lemma="x"\w*` — which 3.2
@@ -666,6 +742,7 @@ pub const LINT_ROWS: [LintRow; 43] = [
         ],
         aux: AuxKind::Version,
         template: "the trailing attribute form is deprecated in USFM {aux}",
+        formatter: false,
         fix_label: None,
     },
     // Two attribute lists on one marker — the spec's own "ridiculous but legal"
@@ -680,6 +757,7 @@ pub const LINT_ROWS: [LintRow; 43] = [
         escalation: &[],
         aux: AuxKind::None,
         template: "a second attribute list overrides the one at {second}",
+        formatter: false,
         fix_label: None,
     },
     // `\w a|k="v"\add*`, or a milestone list closed by a named closer instead of
@@ -699,6 +777,7 @@ pub const LINT_ROWS: [LintRow; 43] = [
         escalation: &[],
         aux: AuxKind::None,
         template: "the attribute list on \\{second} is closed by the wrong marker",
+        formatter: false,
         fix_label: None,
     },
     // A raw `|` left in the content of a marker that DEFINES attributes: the
@@ -713,6 +792,7 @@ pub const LINT_ROWS: [LintRow; 43] = [
         escalation: &[],
         aux: AuxKind::None,
         template: "did you mean an attribute list on \\{second}?",
+        formatter: false,
         fix_label: None,
     },
     // ---- Attributes (the k/v half) ----------------------------------------
@@ -737,6 +817,7 @@ pub const LINT_ROWS: [LintRow; 43] = [
         escalation: &[],
         aux: AuxKind::Count,
         template: "\\{second} defines no such attribute",
+        formatter: false,
         fix_label: None,
     },
     // ONE finding per list by construction — `Malformed` ends the interpreter's
@@ -760,6 +841,7 @@ pub const LINT_ROWS: [LintRow; 43] = [
         escalation: &[],
         aux: AuxKind::MalformedShape,
         template: "the attribute list on \\{second} stops making sense",
+        formatter: false,
         fix_label: None,
     },
     // The CONDITIONAL cardinality no row can express: `defined_attributes` says
@@ -783,6 +865,7 @@ pub const LINT_ROWS: [LintRow; 43] = [
         escalation: &[],
         aux: AuxKind::None,
         template: "\\{second} is missing an attribute this occurrence requires",
+        formatter: false,
         fix_label: None,
     },
     // ---- Version ----------------------------------------------------------
@@ -806,6 +889,7 @@ pub const LINT_ROWS: [LintRow; 43] = [
         ],
         aux: AuxKind::Version,
         template: "\\{anchor} is deprecated since USFM {aux}",
+        formatter: false,
         fix_label: Some("rename to the replacement marker"),
     },
     // Filed under Version, not Attributes: the fact is a LIFECYCLE one — the
@@ -826,6 +910,7 @@ pub const LINT_ROWS: [LintRow; 43] = [
         escalation: &[],
         aux: AuxKind::None,
         template: "the attribute list on \\{second} uses a deprecated attribute",
+        formatter: false,
         fix_label: None,
     },
     // ---- The positional band ----------------------------------------------
@@ -855,7 +940,157 @@ pub const LINT_ROWS: [LintRow; 43] = [
         escalation: &[],
         aux: AuxKind::None,
         template: "\\{anchor} belongs earlier in the book than this",
+        formatter: false,
         fix_label: None,
+    },
+    // ---- The Form channel -------------------------------------------------
+    // Eleven rows nobody is ever shown. Their templates exist so a formatter UI
+    // can name what it changed ("42 line endings normalized"), never as a
+    // diagnostic message.
+    //
+    // Wholesale removal of a named marker, driven by `FormatOptions`: the row is
+    // the rule IDENTITY, its finding set is the caller's list. An empty list
+    // (the default) yields nothing at all.
+    LintRow {
+        code: Code::RemoveMarker,
+        name: "remove-marker",
+        category: Category::Form,
+        severity: Some(Severity::Form),
+        escalation: &[],
+        aux: AuxKind::None,
+        template: "\\{anchor} was removed on request",
+        formatter: false,
+        fix_label: Some("remove the marker"),
+    },
+    // A run of EMPTY `\v` markers bridged into the verse where text finally
+    // appears. Opt-in: the run's meaning is an editorial fact.
+    LintRow {
+        code: Code::BridgeEmptyVerses,
+        name: "bridge-empty-verses",
+        category: Category::Form,
+        severity: Some(Severity::Form),
+        escalation: &[],
+        aux: AuxKind::None,
+        template: "\\{anchor} opens a run of empty verses",
+        formatter: false,
+        fix_label: Some("bridge the empty verses"),
+    },
+    // `\v 2 2 men went` — the uW-era artifact where the verse number is written
+    // twice. Opt-in, and NUMBER-BOUNDED: `\v 2 2000 men` is prose.
+    LintRow {
+        code: Code::DedupeVerseNumber,
+        name: "dedupe-verse-number",
+        category: Category::Form,
+        severity: Some(Severity::Form),
+        escalation: &[],
+        aux: AuxKind::None,
+        template: "the text after \\{anchor} repeats the verse number",
+        formatter: false,
+        fix_label: Some("delete the repeated verse number"),
+    },
+    // Every BLOCK-LIKE marker starts its own line, block-likeness read off the
+    // marker table's `MarkerKind` and nothing else. `\v` is the configurable
+    // citizen (`verse_breaks`), which is also where the verse breaks are REMOVED.
+    LintRow {
+        code: Code::BlockMarkerOwnLine,
+        name: "block-marker-own-line",
+        category: Category::Form,
+        severity: Some(Severity::Form),
+        escalation: &[],
+        aux: AuxKind::None,
+        template: "\\{anchor} belongs at the start of a line",
+        formatter: false,
+        fix_label: Some("start a line here"),
+    },
+    // The aligned-corpus shape: one `\w` per line. Opt-in via
+    // `char_marker_breaks`, because the author's breaks are the author's.
+    LintRow {
+        code: Code::CharMarkerLineJoin,
+        name: "char-marker-line-join",
+        category: Category::Form,
+        severity: Some(Severity::Form),
+        escalation: &[],
+        aux: AuxKind::None,
+        template: "this line break sits on a character-marker boundary",
+        formatter: false,
+        fix_label: Some("join the line"),
+    },
+    // A vertical run collapses to ONE newline — the LAST of the run, so the
+    // break that survives is the one touching what follows it.
+    LintRow {
+        code: Code::CollapseBlankLines,
+        name: "collapse-blank-lines",
+        category: Category::Form,
+        severity: Some(Severity::Form),
+        escalation: &[],
+        aux: AuxKind::None,
+        template: "blank lines",
+        formatter: false,
+        fix_label: Some("collapse the blank lines"),
+    },
+    // Every EXISTING ending rewrites to the configured form. Mixed endings are
+    // exactly the "form" this feature exists for.
+    LintRow {
+        code: Code::NormalizeNewlines,
+        name: "normalize-newlines",
+        category: Category::Form,
+        severity: Some(Severity::Form),
+        escalation: &[],
+        aux: AuxKind::None,
+        template: "this line ending is not the configured form",
+        formatter: false,
+        fix_label: Some("normalize the line ending"),
+    },
+    // The EDGES of a text run only. The interior is content: `In  the
+    // beginning` keeps its double space, and NBSP is never structural.
+    LintRow {
+        code: Code::TrimTextEdges,
+        name: "trim-text-edges",
+        category: Category::Form,
+        severity: Some(Severity::Form),
+        escalation: &[],
+        aux: AuxKind::None,
+        template: "whitespace at the edge of a text run",
+        formatter: false,
+        fix_label: Some("collapse the edge whitespace"),
+    },
+    // The marker's own delimiter — folded into its span by the scanner — reduces
+    // to one space, or to nothing when the line ends right after it.
+    LintRow {
+        code: Code::DelimiterSingle,
+        name: "delimiter-single",
+        category: Category::Form,
+        severity: Some(Severity::Form),
+        escalation: &[],
+        aux: AuxKind::None,
+        template: "\\{anchor} is followed by more than one space",
+        formatter: false,
+        fix_label: Some("reduce the delimiter to one space"),
+    },
+    // The same fold, on the three PAYLOAD spans that carry one: a designator, a
+    // note caller, a book code.
+    LintRow {
+        code: Code::DesignatorWsSingle,
+        name: "designator-ws-single",
+        category: Category::Form,
+        severity: Some(Severity::Form),
+        escalation: &[],
+        aux: AuxKind::None,
+        template: "{anchor} is followed by more than one space",
+        formatter: false,
+        fix_label: Some("reduce the payload delimiter to one space"),
+    },
+    // No indentation in front of a line-leading marker.
+    LintRow {
+        code: Code::MarkerWsAtLineStart,
+        name: "marker-ws-at-line-start",
+        category: Category::Form,
+        severity: Some(Severity::Form),
+        escalation: &[],
+        aux: AuxKind::None,
+        template: "\\{anchor} is indented",
+        formatter: false,
+        fix_label: Some("delete the indentation"),
     },
 ];
 

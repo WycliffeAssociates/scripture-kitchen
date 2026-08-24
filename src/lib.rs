@@ -16,6 +16,8 @@
 //!   "text is not verse text" is a scope fact.
 //! - [`vref`](crate::vref) — a line per verse over a `Toc` and a `Mask`: the
 //!   ebible-shaped renderer, bridges included. No walk of its own.
+//! - [`format`](mod@crate::format) — the OPT-IN prettifier: lint's formatter-bit
+//!   fixes plus the Form-channel rows, merged into one transaction of `Edit`s.
 //!
 //! The load-bearing contract (see scanner.rs): boundary finding and
 //! classification stay strictly apart, and payload interiors belong to
@@ -28,6 +30,7 @@ pub mod edit;
 pub mod experiments;
 #[cfg(any(feature = "usj", feature = "usx", feature = "html"))]
 mod export;
+pub mod format;
 #[cfg(feature = "html")]
 pub mod html;
 pub mod lint;
@@ -43,6 +46,7 @@ pub mod usx;
 pub mod utf16;
 pub mod vref;
 
+pub use format::{CharBreaks, FormatOptions, Newline, VerseBreaks, format, format_edits};
 pub use mask::{Action, Filter, Mask, TextRule, mask};
 pub use scanner::{lex, lex_general_path_only};
 pub use toc::{ChapterRow, Sid, Toc, VerseAnchor, toc};

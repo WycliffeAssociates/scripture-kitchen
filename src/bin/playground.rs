@@ -104,6 +104,9 @@ fn main() {
     let mut mask_recipe: Option<String> = None;
     let mut vref_trace: Option<PathBuf> = None;
     let mut vref_chapter: Option<u16> = None;
+    let mut format_trace: Option<PathBuf> = None;
+    let mut format_chapter: Option<u16> = None;
+    let mut format_variant: Option<String> = None;
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -132,6 +135,15 @@ fn main() {
                 );
             }
             "--vref-only" => mode = Mode::VrefOnly,
+            "--format-trace" => format_trace = args.next().map(PathBuf::from),
+            "--format-chapter" => {
+                format_chapter = Some(
+                    args.next()
+                        .and_then(|n| n.parse().ok())
+                        .expect("--format-chapter takes a chapter number"),
+                );
+            }
+            "--format-variant" => format_variant = args.next(),
             "--cst" => mode = Mode::Cst,
             "--cst-only" => mode = Mode::CstOnly,
             "--cst-stats" => cst_stats = true,
@@ -176,6 +188,18 @@ fn main() {
     // Same reason: --vref and --mask-trace name their own one file.
     if let Some(path) = &vref_trace {
         print!("{}", vref_listing(&read_source(path), vref_chapter));
+        return;
+    }
+    // Same reason: --format-trace names its own one file.
+    if let Some(path) = &format_trace {
+        print!(
+            "{}",
+            format_listing(
+                &read_source(path),
+                format_chapter,
+                format_variant.as_deref().unwrap_or("default"),
+            )
+        );
         return;
     }
     // Same reason: --mask-trace names its own one file.
@@ -809,6 +833,67 @@ fn toc_listing(source: &str) -> String {
 /// One book's masked text, both recipes, optionally narrowed to one chapter
 /// through the Toc's own `chapter_span` — the dumps a human reads to decide
 /// whether a recipe is right.
+/// One book (or one chapter of it, sliced by the Toc) formatted under a named
+/// option variant, with the options and a wall-clock cost in the header. The
+/// regenerator for debug/formatting/*.txt.
+fn format_listing(source: &str, chapter: Option<u16>, variant: &str) -> String {
+    use usfm_onion_2::{CharBreaks, FormatOptions, VerseBreaks, format, format_edits};
+
+    let opts = match variant {
+        "default" => FormatOptions::default(),
+        "keep-verse-breaks" => FormatOptions {
+            verse_breaks: VerseBreaks::Keep,
+            ..FormatOptions::default()
+        },
+        "remove-s5" => FormatOptions {
+            remove_markers: &["s5"],
+            ..FormatOptions::default()
+        },
+        "join-chars" => FormatOptions {
+            char_marker_breaks: CharBreaks::Join,
+            ..FormatOptions::default()
+        },
+        other => panic!("unknown --format-variant {other}"),
+    };
+
+    // A chapter window slices the SOURCE first — the fragment formats on its
+    // own, so the dump stays small enough to read by eye.
+    let bytes = source.as_bytes();
+    let window = match chapter {
+        Some(n) => {
+            let tokens = usfm_onion_2::lex(source);
+            let toc = usfm_onion_2::toc(bytes, &tokens);
+            toc.chapter_span(n)
+                .unwrap_or_else(|| panic!("no chapter {n} in this book"))
+        }
+        None => 0..bytes.len() as u32,
+    };
+    let input = &bytes[window.start as usize..window.end as usize];
+
+    let edits = format_edits(input, &opts);
+    let best = (0..20)
+        .map(|_| {
+            let start = std::time::Instant::now();
+            std::hint::black_box(format_edits(std::hint::black_box(input), &opts));
+            start.elapsed()
+        })
+        .min()
+        .unwrap();
+
+    let mut out = format!(
+        "=== format {} — variant {variant}\n=== {opts:?}\n=== {} edits over {} bytes; format_edits {:.1?} (best of 20)\n\n",
+        chapter.map_or_else(|| "whole book".to_string(), |n| format!("chapter {n}")),
+        edits.len(),
+        input.len(),
+        best,
+    );
+    out.push_str(&String::from_utf8(format(input, &opts)).expect("formatted output is UTF-8"));
+    if !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out
+}
+
 fn mask_listing(source: &str, chapter: Option<u16>, only: Option<&str>) -> String {
     let bytes = source.as_bytes();
     let tokens = usfm_onion_2::lex(source);
@@ -1041,11 +1126,11 @@ fn report_cst_stats(sources: &[String]) {
         totals[CloseReason::Eof as usize],
     );
     let mut by_marker: Vec<_> = by_marker.into_iter().collect();
-    by_marker.sort_unstable_by(|a, b| b.1.cmp(&a.1));
+    by_marker.sort_unstable_by_key(|(_, count)| std::cmp::Reverse(*count));
     for (name, count) in by_marker.iter().take(10) {
         println!("  recovery marker \\{name} x{count}");
     }
-    worst.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+    worst.sort_unstable_by_key(|(count, _)| std::cmp::Reverse(*count));
     for (count, doc) in worst.iter().take(10) {
         println!("  recovery x{count} in doc #{doc}");
     }

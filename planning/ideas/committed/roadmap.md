@@ -1,38 +1,30 @@
 DONE (committed): 1. attr interpreter · 2. exports (USJ 187/187, USX
 195/195, HTML + ruled tables) · 5. version-family lint (deprecated-marker,
-VERSION_ROWS, deprecated-attribute) · 5.1 positional-context lane.
+VERSION_ROWS, deprecated-attribute) · 5.1 positional-context lane ·
+Masks/projections + TOC (0a22c73 + delimiter-fold passes d44f351..179ef60)
+· vref/ebible render (d2299d1).
 
-1. Masks/projections + the TOC index (reframed 2026-08-21, voice memo).
-   ONE mechanism — an in-order CST walk with subtree skipping (CST, not
-   tokens: "text is not verse text" is a property of the enclosing scope,
-   and skipping a footnote is O(1) at its node) — feeding TWO artifacts:
-   - MASK: sorted kept byte ranges + a small Filter (coarse token-kind
-     over fine CST-scope; include/exclude notes, character markup,
-     milestones, unknowns; presets like verse_text()/structure() are just
-     documented Filter constructors, so no presets-vs-options schism).
-     Consumers pick their view: .ranges() borrows for offset-preserving
-     callers (editor, diff), .text() materializes for readers (sous
-     proofreading), and offset mapping goes both ways so a finding on the
-     materialized string maps back to source bytes. Use cases driving it:
-     copy-a-Bible's-structure-minus-footnotes for new projects;
-     proofread-verse-text-only.
-   - TOC: the chapter/verse anchor index (ParseHeader grown to tile the
-     file). locate(byte or utf16) -> human sid for diagnostics and scroll
-     sync; chapter ranges give the CodeMirror chapter-window clamp. vref
-     is RENDERED FROM the TOC (resolves the old "maybe a mask instead?"
-     note — it's the verse-granularity index serialized, not a filter).
-   - Editor caret-validity/clamping stays CLIENT-side: it is a mask
-     consumed as ranges + TOC chapter bounds; braid/editor config picks
-     the filter. Nothing stateful in the engine; both artifacts built per
-     call (walks are ns/token — no caching until a measurement demands).
-2. Format (as usfm_onion's): remove extra line breaks, paras to their own
-   lines, none between verses, etc.
-3. The diff port — offset-world question settled before porting: port the
-   trusted algorithm, re-speak its boundary as crate::edit::Edit lists
-   over byte offsets, addressed by TOC coordinates (why diff sits after
-   item 1: addressing for free). Fallback: port as-is, adapt later.
-4. wasm analyze() when the editor prototype pulls for it — pure Rust
-   until then.
-5. Braid last — possibly nothing beyond "call the stateless analyze,
+1. Format — IN FLIGHT (arch settled with Will 2026-08-24, sketch fully
+   ruled: planning/sketches/format.md; rulings banked in choices.md).
+   The Form channel: severity gains an explicit 5th variant; formatter
+   = Form rows + formatter-bit dual citizens + repairs allowlist, all
+   through the existing Fix/check_fixes machinery as ONE transaction.
+   format_edits() -> Vec<Edit> and format() -> bytes at crate root.
+   Options not profiles: verse_breaks, char_marker_breaks, newline
+   (normalizes), remove_markers, repairs; block-like derived from the
+   tables category. Invariants section is the readable-layer contract
+   (idempotence, interior-verse-text sanctity, no invented content,
+   conserved diagnostics, determinism, total options).
+2. The diff port — sketch + research addendum ready for discussion
+   (planning/sketches/diff-port.md). Port from usfm_onion (NOT the
+   spike); anchor-cut blocks from the Toc replace String sids; units
+   are byte ranges; SpliceEdit is the replay artifact; round-trip law
+   asserted on bytes. "diffN" resolved: the planned n-way
+   generalization, no code exists — 2-way now, n-way is a later sketch
+   (the anchor cut already removes its known blocker). Open: SpliceEdit
+   home, `similar` dep, merge-surface timing, rayon gate.
+3. wasm analyze() when the editor prototype pulls for it — pure Rust
+   until then (galley method list accumulating in the wasm sketch).
+4. Braid last — possibly nothing beyond "call the stateless analyze,
    debounced" plus multi-book concerns. Under this world braid is the
    caching/incremental/tiling question, and the engine stays out of it.

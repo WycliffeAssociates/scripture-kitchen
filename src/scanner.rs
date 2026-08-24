@@ -166,11 +166,12 @@ impl<'a> Scanner<'a> {
         let bytes = self.bytes;
         let mut index = 0usize;
         while index < bytes.len() {
-            if FAST && bytes[index] == BACKSLASH {
-                if let Some(next) = self.common_marker_checks(index) {
-                    index = next;
-                    continue;
-                }
+            if FAST
+                && bytes[index] == BACKSLASH
+                && let Some(next) = self.common_marker_checks(index)
+            {
+                index = next;
+                continue;
             }
             index = match bytes[index] {
                 // A space run is special ONLY as a marker's awaited delimiter;

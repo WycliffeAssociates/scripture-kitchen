@@ -47,7 +47,7 @@ pub(crate) mod walk;
 #[cfg(test)]
 mod tests;
 
-pub use crate::edit::{Edit, FixStr, apply};
+pub use crate::edit::{Edit, FixStr, apply, check_edits};
 pub use fix::{Fix, check_fixes};
 pub use rows::{
     AuxKind, Category, Code, LINT_ROWS, LintRow, Severity, UsfmVersion, VERSION_ROWS, VersionRow,

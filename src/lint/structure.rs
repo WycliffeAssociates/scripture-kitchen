@@ -96,6 +96,11 @@ pub(crate) struct Structure {
     pending_is_terminator: bool,
     /// A container `-e` point node awaiting its verdict, or [`NO_TOKEN`].
     pending_end: u32,
+    /// `(observation slot, node id)` per empty paragraph, resolved into a fix at
+    /// [`Self::finish`] — the repair depends on the paragraph that DISPLACED it,
+    /// which the close event has not reached. The only allocation in this
+    /// machine, and it stays empty on a book with no empty paragraph.
+    empty_paragraphs: Vec<(u32, u32)>,
 }
 
 impl Structure {
@@ -104,6 +109,7 @@ impl Structure {
             pending_closer: NO_TOKEN,
             pending_is_terminator: false,
             pending_end: NO_TOKEN,
+            empty_paragraphs: Vec::new(),
         }
     }
 
@@ -176,6 +182,14 @@ impl Structure {
     /// is never closed.)
     pub(crate) fn finish(&mut self, doc: &Doc, out: &mut Emit) {
         self.resolve(doc, NO_TOKEN, out);
+        // The FORMATTER half of `empty-paragraph`, in the one place the whole
+        // token stream is in hand — the same finish-time shape the fused
+        // experiment already needs for its renumber correction.
+        for (slot, id) in std::mem::take(&mut self.empty_paragraphs) {
+            if let Some(extent) = duplicated_by_the_next_paragraph(doc, id) {
+                out.attach_fixed(slot, extent.start, extent.end, b"");
+            }
+        }
     }
 
     pub(crate) fn on_node_close(&mut self, doc: &Doc, id: u32, node: &Node, out: &mut Emit) {
@@ -201,6 +215,8 @@ impl Structure {
             && generated::ws_after_name(marker_idx) != Ws::SingleNewline
             && is_empty_paragraph(tokens, cst, node)
         {
+            self.empty_paragraphs
+                .push((out.observations.len() as u32, id));
             out.push(Observation::one(Code::EmptyParagraph, anchor));
         }
 
@@ -335,6 +351,61 @@ fn content_end(source: &[u8], extent: Range<u32>, floor: u32) -> u32 {
         at -= 1;
     }
     at
+}
+
+/// The empty paragraph's extent — its marker plus the line endings under it —
+/// WHEN deleting it is unambiguous: the paragraph that displaced it is spelled
+/// exactly the same, so `\p\p` is plain duplication.
+///
+/// A MIXED pair (`\m\p`) says nothing about which of the two was intended, so it
+/// gets no fix at all: the diagnostic points and a human chooses.
+fn duplicated_by_the_next_paragraph(doc: &Doc, id: u32) -> Option<Range<u32>> {
+    let extent = doc.cst.extent(id, doc.tokens);
+    // Tokens partition the source, so the displacer is one binary search away.
+    let at = doc.tokens.partition_point(|token| token.start < extent.end);
+    let next = doc.tokens.get(at)?;
+    if !matches!(next.kind(), TokenKind::Marker { .. })
+        || generated::kind(next.marker_idx) != MarkerKind::Paragraph
+    {
+        return None;
+    }
+    let opener = &doc.tokens[doc.cst.nodes[id as usize].token as usize];
+    let same = trim_end_ws(span_of(doc.source, next)) == trim_end_ws(span_of(doc.source, opener));
+    (same && holds_content(doc, at + 1)).then_some(extent)
+}
+
+/// Does the paragraph that starts at `from` hold anything?
+///
+/// A CHAIN of identical empties (`\p\n\p\n\q1`, real in en_ulb ISA) would
+/// otherwise offer every member a fix "repaired by" the next member, which is no
+/// repair at all: the fix oracle judges a fix by its own SITE, and the site is
+/// still empty afterwards. Only the empty whose survivor holds something is
+/// duplication.
+fn holds_content(doc: &Doc, from: usize) -> bool {
+    doc.tokens[from..]
+        .iter()
+        .find_map(|token| match token.kind() {
+            TokenKind::Newline => None,
+            // The markers that DISPLACE a paragraph rather than living inside
+            // one: reaching one means nothing came between.
+            TokenKind::Marker { .. }
+                if matches!(
+                    generated::kind(token.marker_idx),
+                    MarkerKind::Paragraph
+                        | MarkerKind::Chapter
+                        | MarkerKind::Sidebar
+                        | MarkerKind::Periph
+                        | MarkerKind::Header
+                        | MarkerKind::TableRow
+                        | MarkerKind::Unknown
+                ) =>
+            {
+                Some(false)
+            }
+            _ => Some(true),
+        })
+        // End of file: nothing came after, so nothing is in it.
+        .unwrap_or(false)
 }
 
 /// A span with its trailing space/tab/newline run removed.

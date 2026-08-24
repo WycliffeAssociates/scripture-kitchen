@@ -1,5 +1,35 @@
 # Choices ledger
 
+## format design (2026-08-24, pre-implementation — ruled with Will directly)
+
+Givens Will ruled in-session, not audit items (full rationale in
+planning/sketches/format.md):
+
+- The Form channel: severity grows an explicit 5th variant (Form) —
+  never `severity: None` overloaded; `lint()` skips Form rows entirely,
+  `format_edits()` evaluates them. Dual citizens (missing-paragraph,
+  empty-paragraph) keep real severity + a `formatter` bit.
+- format_edits() = call lint() internally (harvest formatter-bit +
+  repairs-allowlist fixes) + a Form-row pass; merge, one transaction.
+  No "lint first" caller protocol.
+- Format is opt-in and MAY mutate/delete/invent bytes — the mask's
+  no-normalization law does not bind it. remove-marker (`\s5`) is a
+  parameterized row, not a third lane.
+- Options over profiles: axes verse_breaks Keep|Remove (default
+  Remove), char_marker_breaks Keep|Join, newline Lf|CrLf (default Lf,
+  NORMALIZES existing endings too); params remove_markers, repairs.
+- Poetry NOT special-cased — `\q#` is block-like, derived from the
+  tables codegen category ONLY (no authored list, no onion-set
+  comparison: evolution, not port).
+- Interior verse-text ws never touched; edges trim. Renumbering never
+  formats. `\p\p`→`\p` yes, `\m\p` no (ambiguous). missing-paragraph
+  fix = `\p` on its own line before the first `\v`. dedupe-verse-number
+  + bridge-empty-verses exist as default-FALSE opt-ins. No
+  remove-marker safety rail (lint on output is the rail).
+- Not ported: RemoveOrphanEmptyVerse, RemoveBridgeVerseEnumerators,
+  MoveChapterLabel (positional `\cl` semantics), RecoverMalformedMarkers
+  (moot — re-lexing makes the state unrepresentable).
+
 Every decision made on Will's behalf where the spec was silent — surfaced,
 judged, banked. Banked is settled: entries here are givens for later passes.
 Entries keep their walked scenario forever (a headline-only entry has
@@ -254,3 +284,180 @@ from experiments and built in this window.
 5. Inherited by future work: master-vref padding needs a versification
    table nobody owns; per-verse text split inside a bridge is not
    attempted (would need a segmentation opinion).
+
+## pass 5 — format (2026-08-24, implementer's self-report)
+
+Everything the sketch RULED is implemented as ruled. What follows is only
+where the sketch was silent and a choice had to be made. Two entries are
+NEEDS-USER; the rest are judged sound.
+
+1. **NEEDS-USER: `missing-paragraph`'s run aggregation now ends at a row-0
+   marker, and the corpus count goes 2,865 → 5,434.** THE SCENARIO: en_ulb
+   JON writes `…least of them.` ␊ `\s5` ␊ `\v 6 Soon the news…`. `\s5` is
+   row 0, whose pop-all recovery kills the standing paragraph, so `\v 6`
+   really has no paragraph above it — but lint's `run_reported` flag only
+   reset at `\c` and at a paragraph OPEN, so the whole post-`\s5` stretch
+   was folded into one earlier finding. Format inserts the one `\p` lint
+   offered, re-walks, and lint finds a NEW paragraph-less run behind it:
+   the invariant "format converges in one pass" fails on 40-odd en_ulb
+   books. The one-line fix in `Ancestry::on_leaf` (row 0 resets the run,
+   for the same reason `\c` does — the repairing `\p` cannot survive
+   either) makes convergence hold. It also removes the confusion the fix
+   oracle's own doc comment describes ("PHM: 36 findings before, 36
+   after"): the aggregation was hiding repairs that a human clicking
+   "fix" would have wanted. This is a LINT behaviour change made for
+   format's sake, so it wants Will's eyes. Judged sound; confidence
+   medium-high. The alternative was to declare the sketch's headline
+   invariant unreachable, which reads worse.
+2. **NEEDS-USER: invariant 7 is checked by EXHAUSTION, not proptest.** THE
+   SCENARIO: the sketch says "proptest over random FormatOptions". The
+   option space is finite and small — 2 verse × 2 char × 2 newline × 2⁹
+   switches = 4,096 combinations — so `options_are_total` enumerates ALL
+   of them against 12 fixtures (49,152 format calls, ~1 s) and asserts
+   each yields a valid, settled transaction. That is a superset of what
+   random sampling could prove, and it avoids adding a third-party dev
+   dependency to a crate whose only dependency is memchr. If Will wants
+   proptest for the INPUT side (random documents rather than random
+   options), that is a real gap this does not close. Confidence high on
+   the reasoning, medium on the deviation being wanted.
+3. **A rewritten line break swallows the horizontal whitespace in front of
+   it; a rewritten delimiter at a line end goes away entirely.** THE
+   SCENARIO: `\p \v 1 a` under `verse_breaks: Keep` wants a break before
+   `\v`. Inserting one at the marker leaves `\p ␊\v 1 a` — a trailing
+   space the next pass deletes, so the document needs two passes. Every
+   newline-writing rule therefore replaces `[start of the horizontal run,
+   here)` rather than inserting at a point, and `delimiter-single` deletes
+   its run outright when a Newline follows (`\p   ␊` → `\p␊`, which
+   `delimiter-shape` already accepts as a legal spelling). Idempotence
+   forced both. Sound, high.
+4. **`collapse-blank-lines` keeps the LAST newline of a run, not the
+   first.** THE SCENARIO: `…text` ␊␊ `\v 4` with verse breaks removed. If
+   the run collapses to its first ending, the surviving byte is one the
+   verse-join rule never looked at and the joined break is one this rule
+   already deleted — two rules on one span, and a second pass to settle.
+   Keeping the last leaves the break that touches what follows, which is
+   the one every other rule speaks about, and the two edits are disjoint
+   by construction. A run is also read THROUGH whitespace-only text
+   (`␊   ␊` is a blank line however it was typed), which is what makes
+   `\n   \n` converge in one pass too. Sound, high.
+5. **`remove-marker` runs as a PRE-PASS and marks its tokens invisible.**
+   THE SCENARIO: en_ulb HEB `…sufferings.` ␊␊ `\s5` ␊ `\v 11 For both…`
+   with `remove_markers: ["s5"]`. Judged in document order, the break
+   before `\v 11` is followed by an `\s5` — not a verse — so the verse-join
+   declines; after the removal it IS followed by the verse, and pass two
+   joins it. Removing first and hiding the removed tokens makes every
+   later rule see the document the caller asked for. A removal also takes
+   the line ending behind it when the marker had the line to itself,
+   which is what the sketch's `\s5` ␊ `\p` → `\p` example shows. Sound,
+   high.
+6. **A harvested lint fix is RE-TARGETED to the options: every `\n` in its
+   `FixStr` becomes the configured ending, and `missing-paragraph`'s
+   TRAILING break becomes a space under `verse_breaks: Remove`.** THE
+   SCENARIO: `\c 1\v 1 Text` with `newline: CrLf`. Lint's fix text is the
+   literal `\n\p\n`, written before any formatter existed, so the output
+   would carry two LF breaks in a CRLF document — the sketch's "every
+   break in the output is `\r\n`, inserted and pre-existing alike" test
+   fails. And under `Remove` that fix's trailing break is a VERSE break,
+   which the axis owns: leaving it makes `\p` ␊ `\v` survive a Remove pass
+   and need a second one. Both rewrites are the OPTIONS speaking about
+   bytes lint had no way to know about, not a second opinion on the
+   repair. Sound, high.
+7. **The Form pass tells `close_run` which verses are about to receive a
+   `\p`.** THE SCENARIO: examples.bsb ZEC 12 writes `\s1 heading` ␊ `\d` ␊
+   `\v 1 This is the burden…`. `\d` is a Paragraph row, so the sweep's
+   cheap "is a paragraph open" state says yes and the break before `\v 1`
+   joins — but the `\v` DISPLACED `\d` in the tree, so lint says
+   missing-paragraph and format inserts a `\p` into the line it just
+   joined, giving `\d \p \v 1`. `harvest` therefore returns the byte
+   offsets where a `\p` lands, and a verse in that set keeps its break —
+   the `\p` is a block marker and wants the line. The mirror rule: any
+   `\v` marker now sets the sweep's paragraph state true, because a verse
+   either sits in a paragraph already or gets one in this very
+   transaction. Sound, medium-high (it is the one place the Form pass
+   depends on lint's answer rather than on the tokens).
+8. **`empty-paragraph`'s fix is derived at FINISH time, not at the close
+   event.** THE SCENARIO: the repair needs the paragraph that DISPLACED
+   the empty one — spelled the same? holding content? — and at
+   `on_node_close` that marker has not arrived. Deriving it there also
+   diverges the fused experiment, whose oracle demands byte-identical fix
+   links (`en_ulb/13-1CH` caught it). `Structure` now records
+   `(observation slot, node id)` and resolves them in `finish`, which both
+   the staged and the fused paths call with the whole stream in hand —
+   the same shape `correct_renumbers` already uses. Sound, high.
+9. **The fix is declined for a CHAIN of identical empties.** THE
+   SCENARIO: en_ulb ISA writes `\p` ␊ `\p` ␊ `\q1` ␊ `\v 3 …`. Both `\p`s
+   are empty and identical, so "delete the first, the second is the same
+   marker" holds for the first — but the survivor is empty too, and the
+   fix oracle (which judges a fix by its own SITE) sees empty-paragraph
+   still firing at that byte. The condition is now "the survivor holds
+   content", which is checked over the tokens against the same
+   paragraph-displacing kind set the sweep uses. 25 of the corpus's 787
+   empty paragraphs qualify; the rest are mixed pairs or chains. Sound,
+   medium-high.
+10. **Precedence is (position, row order) with ATOMIC claims, plus one
+    special case: two insertions at one point are legal, two line BREAKS
+    at one point are not.** THE SCENARIO: a truncated `\f` with
+    `repairs: [UnclosedNote]` inserts `\f*` exactly where
+    `block-marker-own-line` wants the break before the `\c` that
+    truncated it. Rejecting the second insert outright leaves `note\f*\c 2`
+    for a second pass; allowing both gives `note\f*␊\c 2`, correct in one.
+    But `missing-paragraph`'s `\n\p\n` and a block break at the same `\v`
+    would give a blank line nobody asked for. So a claim is refused only
+    if it would put a second line break at a point that already has one.
+    Claims are all-or-nothing because `bridge-empty-verses` is two edits
+    and half of it is worse than none. Sound, medium-high.
+11. **Sound one-liners.** Block-likeness is an EXHAUSTIVE match on
+    `MarkerKind` (Paragraph/Chapter/TableRow/Header/Sidebar/Periph, plus
+    Verse under `Keep`), so a new kind cannot arrive unclassified and no
+    marker list is authored anywhere; row 0 is NOT block-like (`\s5` is
+    `remove-markers`' business, and an unknown marker's row says nothing
+    about anything). `designator-ws-single` covers the note caller and the
+    book code as well as the designator — the delimiter fold made all
+    three the same span shape. `trim-text-edges` yields a line-leading
+    indent to `marker-ws-at-line-start` rather than relying on the
+    precedence dedup, so both rows have a snippet that fires exactly one
+    of them. Trailing whitespace at EOF is treated as trailing whitespace
+    at a line end (deleted). A glued `\v` stays glued under `Remove`
+    (`a\v 2 b`): the axis DELETES verse breaks, it never invents a
+    separator — the char-boundary law's spirit. Non-UTF-8 input yields an
+    empty edit list, never a panic and never a guess. `format_edits` takes
+    `&[u8]` (lint's contract) and lexes internally, so no caller runs a
+    "lex first" protocol. The eleven Form rows carry templates a formatter
+    UI could show ("42 line endings normalized"); nothing renders them
+    today. `edit::check_edits` was extracted from `check_fixes` so the
+    same pre-flight guards both transactions.
+12. **Not built, deliberately.** No playground mode for format (the
+    sketch names none, and every existing mode exists to price a walk).
+    No `Severity::Form` handling in any consumer — there is nothing to
+    handle, since no report can carry one, and a test asserts that over
+    the corpus. No preset constructors over `FormatOptions`.
+
+## pass 5 review (2026-08-24, Will's rulings on the self-report)
+
+1. Entry 1 (missing-paragraph run aggregation resets at row-0 markers,
+   2,865 → 5,434) — RULED CORRECT by Will: "annoying of the en_ulb but
+   correct behavior for the lib."
+2. Entry 2 (invariant 7 by exhaustion, no proptest dep) — RULED FINE
+   for now. hegel-rust noted as a revisit-at-stable candidate for the
+   random-documents side (beta today, fails the boring bar).
+3. Entry 12's "no playground mode" — OVERTURNED by Will: he wants
+   eyeball dumps. `--format-trace <file> [--format-chapter N]
+   [--format-variant default|keep-verse-breaks|remove-s5|join-chars]`
+   added, mirroring --mask-trace; regenerates debug/formatting/*.txt
+   with the options + wall-clock in the header. Whole-book PSA (272KB,
+   largest book): 3,971 edits, format_edits ~1.5ms.
+4. retarget() overflow no longer silently keeps the un-normalized fix —
+   RULED by Will (stack, don't skip): a rewrite that outgrows one
+   FixStr now rides adjacent edits at the splice point (first carries
+   the replacement span, the rest are pure insertions; apply
+   concatenates in order). Unreachable today (max fix is 6 bytes under
+   CrLf); unit-pinned via a synthetic 8-break fix.
+5. Slow-oracle split (Will's inner-loop concern, 2026-08-24): the 52s
+   utf16 exhaustive sweep is now `#[ignore]`d as the pass-end gate
+   (`cargo test -- --include-ignored`); an always-on fast slice (all
+   Hindi files + PSA, 0.8s) keeps both-script coverage in every run.
+   REVISES pass 2's "exhaustive replacing sampling" — the exhaustive
+   test still exists and still gates, it just isn't the inner loop.
+   Convention: agents in the loop run targeted tests
+   (`cargo test --lib format`, `--test format_corpus`); the full suite
+   + --include-ignored is the finish-line check.

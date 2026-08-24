@@ -142,3 +142,38 @@ but is not the story: ~8% off lex, ~4-5% off `analyze`, consistently, at both
 sizes. It buys nothing on `from_utf8` (core's validator has no wasm SIMD
 path). Turn it on — one RUSTFLAG for a free 8% on the hot stage — but do not
 expect it to close the gap to native.
+
+## 6. Format (2026-08-24, same machine)
+
+`format_edits` = lex + cst + lint (harvest) + the Form pass. Best of 20,
+release, from the `--format-trace` headers (refresh: the exact commands in
+debug/formatting/*.txt, or `playground --format-trace <file>`):
+
+| Scope | Edits | Time | Command |
+|---|---|---|---|
+| Jonah (7.4KB), default | 71 | 45.5µs | `playground --format-trace example-corpora/en_ulb/32-JON.usfm` |
+| Psalms (273KB), default | 3,971 | 1.5ms | `playground --format-trace example-corpora/en_ulb/19-PSA.usfm` |
+
+Shape to remember: format ≈ 2x the `--lint` pipeline on the same book
+(PSA 0.747ms lint vs 1.5ms format_edits) — the harvest IS a full lint run,
+the Form pass and the claims resolve are the rest. Still ~10x under a frame
+on the largest book.
+
+## 7. Diff: onion's measured baseline (pre-port, from onion's own profiling)
+
+No diff code here yet — these are the numbers the port must beat, recorded
+from ../usfm_onion's profiling memory (diff-perf-sid-stringification,
+2026-07-24) before porting:
+
+- 2-way diff of a book: ~ms scale, and ~100% of it allocation/String cost —
+  per-token `format!` sid strings, `to_vec` token clones, `text_full`
+  concatenation. Myers itself: ~62 of ~40k samples ("free").
+- Its rayon by-chapter gate sat at ≥20k combined tokens; the parallel
+  correctness oracle was byte-equality with a serial reference over a
+  263k-token book.
+- The port's anchor cut (Toc verse anchors -> byte-range blocks, Copy Sid
+  pairing keys) removes the entire measured cost class by construction: no
+  String sids, no token clones, no owned text anywhere in the skeleton.
+  Onion's ms-per-book is therefore the FLOOR, not the target; measure at
+  port time per the go-slow law (no rayon — parallelism deferred to
+  galley/braid).

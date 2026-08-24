@@ -102,6 +102,42 @@ pub fn apply(source: &[u8], edits: &[Edit]) -> Vec<u8> {
     fixed
 }
 
+/// The transaction pre-flight [`apply`] assumes: sorted by `from`,
+/// non-overlapping, and every offset a real char boundary of `source`.
+///
+/// Shared by lint's fix oracle ([`check_fixes`]) and the formatter, which merge
+/// edits from several rules and must prove the merge before splicing.
+///
+/// [`check_fixes`]: crate::lint::check_fixes
+pub fn check_edits(source: &[u8], edits: &[Edit]) -> Result<(), String> {
+    for pair in edits.windows(2) {
+        if pair[1].from < pair[0].to || pair[1].from < pair[0].from {
+            return Err(format!("edits are out of order or overlap: {pair:?}"));
+        }
+    }
+    if let Some(edit) = edits.iter().find(|edit| {
+        edit.to as usize > source.len()
+            || edit.from > edit.to
+            || !is_char_boundary(source, edit.from as usize)
+            || !is_char_boundary(source, edit.to as usize)
+    }) {
+        return Err(format!(
+            "edit is not a valid splice of the source: {edit:?}"
+        ));
+    }
+    Ok(())
+}
+
+/// `str::is_char_boundary` over bytes: a continuation byte is `10xxxxxx`, and
+/// one past the end is a boundary. Slicing an already-valid UTF-8 buffer here is
+/// what keeps the check O(1) per edit instead of O(source).
+fn is_char_boundary(source: &[u8], at: usize) -> bool {
+    match source.get(at) {
+        None => at == source.len(),
+        Some(byte) => byte & 0b1100_0000 != 0b1000_0000,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
