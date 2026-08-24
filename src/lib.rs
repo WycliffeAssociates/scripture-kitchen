@@ -16,6 +16,9 @@
 //!   "text is not verse text" is a scope fact.
 //! - [`vref`](crate::vref) — a line per verse over a `Toc` and a `Mask`: the
 //!   ebible-shaped renderer, bridges included. No walk of its own.
+//! - [`diff`](mod@crate::diff) — the crate's first TWO-input pass: two sources
+//!   cut into blocks at their `Toc` anchors, aligned by Myers, and merged back
+//!   as a pure projection over byte ranges.
 //! - [`format`](mod@crate::format) — the OPT-IN prettifier: lint's formatter-bit
 //!   fixes plus the Form-channel rows, merged into one transaction of `Edit`s.
 //!
@@ -26,6 +29,7 @@
 pub mod attributes;
 pub mod cst;
 pub mod designator;
+pub mod diff;
 pub mod edit;
 pub mod experiments;
 #[cfg(any(feature = "usj", feature = "usx", feature = "html"))]
@@ -46,6 +50,8 @@ pub mod usx;
 pub mod utf16;
 pub mod vref;
 
+pub use diff::{DecisionUnit, DiffSkeleton, MergeSide, Slot, diff, diff_with_text};
+pub use edit::{Edit, SpliceEdit, apply_splices};
 pub use format::{CharBreaks, FormatOptions, Newline, VerseBreaks, format, format_edits};
 pub use mask::{Action, Filter, Mask, TextRule, mask};
 pub use scanner::{lex, lex_general_path_only};

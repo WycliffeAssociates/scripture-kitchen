@@ -15,6 +15,7 @@
 //   cargo run --release --bin playground -- --vref <file>                   // untimed: one line per verse ("GEN 1:1\ttext") on stdout
 //   cargo run --release --bin playground -- --vref <file> --vref-chapter 1  // …one chapter of it
 //   cargo run --release --bin playground -- --vref-only        // pre-lexed+built; times toc + mask + render alone
+//   cargo run --release --bin playground -- --diff-trace <a> <b>          // untimed listing + timed diff of two books
 //   cargo run --release --bin playground -- --cst              // lex + cst::build (the whole pipeline)
 //   cargo run --release --bin playground -- --cst-only         // pre-lexed; times cst::build alone
 //   cargo run --release --bin playground -- --cst-stats        // untimed: CloseReason distribution over the corpus
@@ -107,6 +108,7 @@ fn main() {
     let mut format_trace: Option<PathBuf> = None;
     let mut format_chapter: Option<u16> = None;
     let mut format_variant: Option<String> = None;
+    let mut diff_trace: Option<(PathBuf, PathBuf)> = None;
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -144,6 +146,11 @@ fn main() {
                 );
             }
             "--format-variant" => format_variant = args.next(),
+            "--diff-trace" => {
+                let baseline = args.next().expect("--diff-trace takes two paths");
+                let current = args.next().expect("--diff-trace takes two paths");
+                diff_trace = Some((PathBuf::from(baseline), PathBuf::from(current)));
+            }
             "--cst" => mode = Mode::Cst,
             "--cst-only" => mode = Mode::CstOnly,
             "--cst-stats" => cst_stats = true,
@@ -199,6 +206,14 @@ fn main() {
                 format_chapter,
                 format_variant.as_deref().unwrap_or("default"),
             )
+        );
+        return;
+    }
+    // Same reason: --diff-trace names its own two files.
+    if let Some((baseline, current)) = &diff_trace {
+        print!(
+            "{}",
+            diff_listing(&read_source(baseline), &read_source(current))
         );
         return;
     }
@@ -617,6 +632,104 @@ fn collect_usfm_paths(root: &Path, paths: &mut Vec<PathBuf>) {
             paths.push(path);
         }
     }
+}
+
+/// Two documents diffed: the timing, the unit census, and every changed unit.
+/// Untimed output, timed diff — the header carries best-of-20 wall clock for
+/// `diff` alone and for `diff_with_text` (which adds a CST + mask per side).
+fn diff_listing(baseline: &str, current: &str) -> String {
+    use usfm_onion_2::diff::{
+        Decisions, MergeSide, Status, TextDiffMode, diff, diff_with_text, to_edits,
+    };
+
+    let best = |run: &dyn Fn()| {
+        (0..20)
+            .map(|_| {
+                let start = Instant::now();
+                run();
+                start.elapsed()
+            })
+            .min()
+            .unwrap()
+    };
+    let plain = best(&|| {
+        std::hint::black_box(diff(
+            std::hint::black_box(baseline),
+            std::hint::black_box(current),
+        ));
+    });
+    let with_text = best(&|| {
+        std::hint::black_box(diff_with_text(
+            std::hint::black_box(baseline),
+            std::hint::black_box(current),
+            TextDiffMode::Words,
+        ));
+    });
+
+    let skeleton = diff(baseline, current);
+    let edits = to_edits(&skeleton, &Decisions::new(), MergeSide::Current).expect("no decisions");
+    let census = |status: Status| {
+        skeleton
+            .units
+            .iter()
+            .filter(|unit| unit.status == status)
+            .count()
+    };
+
+    let mut out = format!(
+        "=== diff {} bytes vs {} bytes\n\
+         === {} slots, {} units: {} unchanged, {} modified, {} added, {} deleted, {} moved\n\
+         === {} replay splices; diff {:.1?}, diff_with_text(words) {:.1?} (best of 20)\n\n",
+        baseline.len(),
+        current.len(),
+        skeleton.slots.len(),
+        skeleton.units.len(),
+        census(Status::Unchanged),
+        census(Status::Modified),
+        census(Status::Added),
+        census(Status::Deleted),
+        census(Status::Moved),
+        edits.len(),
+        plain,
+        with_text,
+    );
+
+    for unit in &skeleton.units {
+        if unit.status == Status::Unchanged {
+            continue;
+        }
+        let address = |addr: Option<usfm_onion_2::diff::Addr>| {
+            addr.map_or_else(|| "-".to_string(), |addr| addr.to_string())
+        };
+        let mut flags = Vec::new();
+        if unit.is_whitespace_change {
+            flags.push("ws");
+        }
+        if unit.is_usfm_structure_change {
+            flags.push("usfm");
+        }
+        if unit.displaced {
+            flags.push("displaced");
+        }
+        if unit.relabeled {
+            flags.push("relabeled");
+        }
+        if unit.dup_context.is_dup() {
+            flags.push("dup");
+        }
+        if unit.covered_by.is_some() {
+            flags.push("covered");
+        }
+        out.push_str(&format!(
+            "{:<9?} {:<9?} {:<24} -> {:<24} {}\n",
+            unit.status,
+            unit.kind,
+            address(unit.baseline_addr),
+            address(unit.current_addr),
+            flags.join(","),
+        ));
+    }
+    out
 }
 
 fn read_source(path: &Path) -> String {

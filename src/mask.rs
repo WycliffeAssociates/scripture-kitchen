@@ -116,6 +116,12 @@ pub struct Filter {
     /// Attribute lists. An attr list RIDES its marker: it survives only when
     /// this is true AND the marker it belongs to was kept.
     pub attr_lists: bool,
+    /// `OptBreak` (`//`) tokens. Its own switch rather than a Paragraph-kind
+    /// verdict because the two views disagree: a structural skeleton keeps the
+    /// break, a reading text unwraps it away (`gr//ace` reads `grace`), and the
+    /// diff's reader text wants it back WITHOUT the paragraph markers around
+    /// it — three combinations one `kinds` slot cannot spell.
+    pub opt_breaks: bool,
 }
 
 impl Filter {
@@ -141,6 +147,28 @@ impl Filter {
             text: TextRule::VerseExtent,
             newlines: true,
             attr_lists: false,
+            opt_breaks: false,
+        }
+    }
+
+    /// The diff's reader text: every byte a reader would read, wherever it
+    /// sits.
+    ///
+    /// [`Self::verse_text`] with two differences, both because a diff UNIT is
+    /// not a verse: text outside a verse extent (front matter, `\h`, a heading)
+    /// belongs to some block and has to be diffable, and note prose rides in
+    /// undifferentiated rather than dropping with its subtree. Nothing is
+    /// [`Action::Remove`]d, so no text is unreachable; `//` survives, so a
+    /// break is a run of its own instead of gluing two words.
+    pub fn reader_text() -> Self {
+        Self {
+            kinds: [Action::Unwrap; MarkerKind::COUNT],
+            markers: Vec::new(),
+            unknowns: Action::Unwrap,
+            text: TextRule::All,
+            newlines: true,
+            attr_lists: false,
+            opt_breaks: true,
         }
     }
 
@@ -165,6 +193,7 @@ impl Filter {
             text: TextRule::None,
             newlines: true,
             attr_lists: true,
+            opt_breaks: true,
         }
     }
 
@@ -365,10 +394,7 @@ pub fn mask(source: &[u8], tokens: &[Token], cst: &Cst, filter: &Filter) -> Mask
             TokenKind::Designator | TokenKind::BookCode | TokenKind::NoteCaller => rides,
             TokenKind::AttrList => filter.attr_lists && rides,
             TokenKind::Newline => filter.newlines,
-            // `//` is a line-BREAK marker, so it goes with the paragraph
-            // markers: `structure()` keeps it, and `verse_text()` unwrapping it
-            // away is what turns `gr//ace` back into `grace`.
-            TokenKind::OptBreak => filter.kinds[MarkerKind::Paragraph as usize] == Action::Keep,
+            TokenKind::OptBreak => filter.opt_breaks,
             TokenKind::Text => match filter.text {
                 TextRule::All => true,
                 TextRule::VerseExtent => state.in_verse_text(),

@@ -102,6 +102,57 @@ pub fn apply(source: &[u8], edits: &[Edit]) -> Vec<u8> {
     fixed
 }
 
+/// One COPY splice: replace `from..to` of the baseline with `insert`, a range
+/// of the CURRENT document's bytes. 16 bytes, `Copy`.
+///
+/// The diff's replay artifact, and the second half of the crate's edit
+/// vocabulary: [`Edit`] carries authored micro-text (engine-generated ASCII in
+/// a [`FixStr`]), a `SpliceEdit` carries MOVED document text — a whole
+/// Devanagari verse the diff never authored, only relocated. Zero owned text,
+/// so a replay is lossless by construction: both sides are the user's own
+/// bytes.
+///
+/// `from`/`to` index the baseline, `insert` the current document; an empty
+/// `insert` is a pure deletion and `from == to` a pure insertion. An editor
+/// session applies one exactly like a fix — the span through its UTF-16 shim,
+/// the text read out of the current document it already holds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpliceEdit {
+    pub from: u32,
+    pub to: u32,
+    pub insert: core::ops::Range<u32>,
+}
+
+/// Replays splices onto a COPY of `baseline`, reading inserted text out of
+/// `current`.
+///
+/// `edits` must be sorted by `from` and non-overlapping (`to <= next.from`) —
+/// what [`crate::diff::to_edits`] emits. Built left to right in one pass, which
+/// is byte-identical to [`apply`]'s right-to-left splicing and keeps LIST order
+/// for several edits at one point (right-to-left splicing preserves that order
+/// too: the later edit lands first, the earlier one in front of it).
+///
+/// The library allocates here and only here — a consumer asked for the merged
+/// TEXT.
+pub fn apply_splices(baseline: &[u8], current: &[u8], edits: &[SpliceEdit]) -> Vec<u8> {
+    debug_assert!(
+        edits
+            .windows(2)
+            .all(|pair| pair[0].to <= pair[1].from && pair[0].from <= pair[0].to),
+        "splices must be sorted by `from` and non-overlapping"
+    );
+    let mut out = Vec::with_capacity(baseline.len());
+    let mut cursor = 0usize;
+    for edit in edits {
+        let from = (edit.from as usize).min(baseline.len()).max(cursor);
+        out.extend_from_slice(&baseline[cursor..from]);
+        out.extend_from_slice(&current[edit.insert.start as usize..edit.insert.end as usize]);
+        cursor = (edit.to as usize).min(baseline.len()).max(from);
+    }
+    out.extend_from_slice(&baseline[cursor..]);
+    out
+}
+
 /// The transaction pre-flight [`apply`] assumes: sorted by `from`,
 /// non-overlapping, and every offset a real char boundary of `source`.
 ///

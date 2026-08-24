@@ -177,3 +177,31 @@ from ../usfm_onion's profiling memory (diff-perf-sid-stringification,
   Onion's ms-per-book is therefore the FLOOR, not the target; measure at
   port time per the go-slow law (no rayon — parallelism deferred to
   galley/braid).
+
+### Measured after the port (2026-08-24, same machine)
+
+`diff` = lex + toc PER SIDE + blocks + Myers + coalescing + the classifiers.
+`diff_with_text` adds a CST + a `Filter::reader_text` mask per side and the
+UAX-29 word diff per changed unit. Best of 20, release, from the
+`--diff-trace` headers (refresh: `playground --diff-trace <a> <b>`, dumps in
+debug/diff/):
+
+| Pair | Units | `diff` | `diff_with_text` |
+|---|---|---|---|
+| en_ulb MRK vs en_ult MRK (84KB vs 2.4MB, aligned) | 695 (679 modified) | **3.0ms** | 32.6ms |
+| en_ulb PSA vs itself (273KB, the largest book) | 2,612 (all unchanged) | **2.2ms** | 3.0ms |
+| en_ulb MRK vs itself (84KB) | 695 | 552µs | 581µs |
+| en_ulb JON vs bdf_reg ROM (7KB vs 70KB, all-added) | 500 | 587µs | 696µs |
+
+Shape to remember: lex + toc is HALF of it (PSA 0.505ms/side ⇒ ~1.0ms of the
+2.2ms), and the rest is one `String` unit id per BLOCK — 2,612 of them for
+PSA, where onion allocated one sid `String` per TOKEN (30,892). The
+alignment itself is free: Myers over `Copy` addresses short-circuits on an
+identical pair, and the byte-range units mean no text is ever copied.
+Onion's ms-per-book floor is met on the largest book and beaten on a median
+one; the text-diff layer is the expensive one (the CST + mask + a word diff
+per modified unit — 32.6ms on a 2.4MB aligned side) and it is opt-in.
+
+Replay is minimal, not per-unit: 679 modified units in the MRK pair emit 17
+`SpliceEdit`s, because adjacent changed blocks coalesce into one splice and
+an unchanged block costs none (a book against itself is ZERO edits).

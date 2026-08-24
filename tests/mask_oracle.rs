@@ -54,6 +54,7 @@ fn keep_everything() -> Filter {
         text: TextRule::All,
         newlines: true,
         attr_lists: true,
+        opt_breaks: true,
     }
 }
 

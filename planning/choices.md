@@ -461,3 +461,117 @@ NEEDS-USER; the rest are judged sound.
    Convention: agents in the loop run targeted tests
    (`cargo test --lib format`, `--test format_corpus`); the full suite
    + --include-ignored is the finish-line check.
+
+## pass 6 — diff (2026-08-24, self-report)
+
+The port itself is the sketch's: anchor-cut blocks, Myers over the derived
+addresses, two-tier coalescing, the covered_by/dup_context/relabeled
+narration, the status-gated word diff, and merge-as-projection. All 23
+fixture cases and every narration pin from onion's `skeleton_fixtures.rs`
+reproduce byte-for-byte on the FIRST run of the port, so what follows is
+only where the spec was silent.
+
+1. **A malformed `\v` designator still cuts a block, and it addresses as
+   `BOOK c:0`.** THE SCENARIO: en_ulb ZEC 12:7 writes `\v 2"`, so the
+   designator reader refuses it and the Toc keeps the row with number 0
+   (dropping it would let verse 1 swallow verse 2's text). Onion has no such
+   row — `derive_canonical_sids` leaves the sid unchanged when the number
+   token is missing, so that text joins the PREVIOUS verse's block. The
+   anchor cut cannot un-see the row, so this port makes a block whose address
+   collides with the chapter open's `GEN 1:0`, and the `@N` id tiebreak keeps
+   the two decisions distinct (`GEN 1:0`, `GEN 1:0@1`). An assessed
+   divergence, kept: both documents derive it identically, so pairing, the
+   partition and the merge all stay total, and the degraded file gets a
+   MORE precise diff than onion's. Sound, medium-high.
+2. **`is_usfm_structure_change` compares TEXT-kind token bytes only, so a
+   verse NUMBER is not reader text.** Onion stripped `\marker` runs textually
+   and kept the digits, so it would call `\v 1 a` vs `\v 2 a` "not a
+   structure change"; the sketch ruled token-kind granularity, which puts
+   Designator/NoteCaller/BookCode/AttrList outside the comparison. THE
+   SCENARIO: case 15's coalesced `GEN 1:1` -> `GEN 1:1-2` pair, where the
+   designator differs and the prose does not — counting digits as reader text
+   narrates "the content changed", which is false. The number IS the address,
+   and the address is already narrated by the unit's two sids. Sound, high.
+3. **Whitespace means ASCII whitespace.** Onion's classifier used
+   `char::is_whitespace`, which counts U+00A0. THE SCENARIO: a reformat that
+   swaps a space for a no-break space reads `is_whitespace_change` in onion
+   and a plain `Modified` here. NBSP is a character the reader sees, not
+   layout, and the sketch ruled a zero-alloc byte walk. Sound, medium — flag
+   for Will if a corpus ever churns NBSPs at scale.
+4. **`Filter` grew an `opt_breaks` field.** THE SCENARIO: the ruled
+   reader-text kinds are text + newline + optBreak, but `//` survival was
+   hard-wired to `kinds[Paragraph] == Keep` — which also keeps `\p`. Three
+   views disagree (structure wants both, `verse_text()` wants neither so
+   `gr//ace` reads `grace`, reader text wants the break without the paragraph
+   markers), and one `kinds` slot cannot spell three answers. Every existing
+   recipe keeps its current behaviour. Sound, high.
+5. **`Filter::reader_text()` unwraps EVERYTHING and keeps all text.** THE
+   SCENARIO: case 19 diffs `\h Genesis` against `\h The Book of Genesis` —
+   front matter is not verse text, but it is a diff UNIT, so a
+   `verse_text()`-shaped filter would hand that unit an empty string. Nothing
+   is `Remove`d, so note prose rides in undifferentiated (onion's v1 choice,
+   kept explicitly). Sound, high.
+6. **`to_edits` reads an Unchanged Shared unit out of the BASELINE whatever
+   the decision says.** THE SCENARIO: MRK against itself with default side
+   Current — every unit is Shared/Unchanged, and honouring "Current"
+   literally emits 695 splices that each replace a byte range with identical
+   bytes. The two ranges hold the same bytes by definition of Unchanged, so
+   the merged document is the same either way; this is what makes "a book vs
+   itself costs zero edits" true and turns the MRK-vs-ULT replay from 679
+   splices into 17. `merge`'s bytes are unaffected (a test asserts the
+   projection equals an independently assembled chosen-side text). Sound,
+   high.
+7. **Several insertions at one splice point ride as adjacent zero-width
+   splices in LIST order.** THE SCENARIO: a reordered pair chosen Current
+   puts two non-contiguous current ranges at one baseline gap, and a
+   `SpliceEdit` carries exactly one insert range — so the run emits
+   `{from,to,insert0}` then `{to,to,insert1}`. `apply_splices` builds left to
+   right; the right-to-left splicing an editor session does (`edit::apply`'s
+   rule) yields the same bytes, because the later edit lands first and the
+   earlier one goes in front of it. Pinned by the round-trip law over 200
+   generated pairs. Sound, high.
+8. **One id-uniqueness mechanism, not two.** Onion made BLOCK ids unique with
+   `#N` (a non-contiguous sid reuse) and UNIT ids unique with `@N`. Here the
+   address already carries `_dup_N`/`_cdup_N` from the Toc's own occurrence
+   counts, so two blocks render the same string only in entry 1's corner —
+   `@N` alone covers it. Sound, medium-high.
+9. **`diff` takes `&str`.** `lex` does, and unlike `format_edits` (which
+   degrades non-UTF-8 to an empty edit list) a diff that degraded to "no
+   differences" would be a lie about two documents. Sound, high.
+10. **Anchors are `(unit, side)`, addresses render on demand.** Onion's
+    `Anchor` carried a sid `String` and its units carried two more. Here
+    `Addr` is a 12-byte `Copy` fact and `Display` is the renderer, so the only
+    strings the skeleton owns are the unit ids the consumer contract requires.
+    Sound, high.
+11. **The generated-pair laws use a hand-rolled xorshift, no proptest dep.**
+    As instructed, and it did not fight back: 200 pairs over verse/chapter
+    shapes (bridges, duplicate numbers, reopened chapters, CRLF/LF mixes) and
+    six edit shapes (delete, insert, reorder, renumber, retext, reformat),
+    seeded once so a failure is reproducible. Shrinking would have nothing to
+    shrink into — every generated document is already a handful of verses.
+    Sound, medium-high.
+12. **Not built, deliberately.** No n-ary unit model (2-way surface on
+    N-ready primitives — the pairing key is document-independent, so N sides
+    is a later widening, not a redesign). No serde/JSON (the session
+    serializes; nothing here owns a wire format). No `check_splices` sibling
+    to `check_edits` — the round-trip law over the corpus plus
+    `apply_splices`' debug-assert are the checker, and a splice list nobody
+    hand-authors needs no pre-flight. No by-chapter batching and no rayon
+    (ruled: deferred to galley/braid). No interim carried-sid calling
+    convention (this repo's Toc-derived addressing IS the always-derive
+    convention).
+13. **Divergence assessment (the pause-and-present stance).** Three places
+    where the anchor cut and onion's token machinery could have fought,
+    assessed rather than retreated from: entries 1, 2 and 3. None of them
+    blocks the port — every fixture, narration pin and merge byte-exactness
+    case passes unmodified — and none of them is a reason to port
+    `derive_canonical_sids`. They are listed here as the record of what was
+    weighed, and 1 and 3 are the two Will may want to overrule.
+
+## pass 6 review (2026-08-24, Will's rulings)
+
+All three flagged divergences RULED FINE by Will as-is: (1) malformed
+`\v` cuts a block and addresses `c:0` with the `@N` tiebreak; (2) verse
+numbers are not reader text in the structure classifier; (3) whitespace
+= ASCII whitespace (consistent with format's NBSP-is-content ruling).
+The `Filter.opt_breaks` field also stands.
