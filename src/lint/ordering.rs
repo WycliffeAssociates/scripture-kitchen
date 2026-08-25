@@ -36,7 +36,8 @@ enum Awaiting {
     None,
     /// The `\c` marker's token index — the anchor if no number arrives.
     Chapter(u32),
-    Verse,
+    /// The `\v` marker's token index, for the same reason.
+    Verse(u32),
 }
 
 pub(crate) struct Ordering {
@@ -123,7 +124,7 @@ impl Ordering {
                         }
                     }
                 }
-                Awaiting::Verse => {
+                Awaiting::Verse(_) => {
                     self.awaiting = Awaiting::None;
                     match designator::verse(span_of(source, token)) {
                         Designator::Malformed => {
@@ -178,9 +179,7 @@ impl Ordering {
                 Awaiting::None => {}
             },
             TokenKind::Marker { .. } => {
-                if let Awaiting::Chapter(marker) = self.awaiting {
-                    out.push(Observation::one(Code::ChapterWithoutDesignator, marker));
-                }
+                self.abandon(out);
                 self.awaiting = match generated::kind(token.marker_idx) {
                     MarkerKind::Chapter => {
                         self.seen_chapter = true;
@@ -193,7 +192,7 @@ impl Ordering {
                         if !self.seen_chapter {
                             self.first_pre_chapter_verse.get_or_insert(idx);
                         }
-                        Awaiting::Verse
+                        Awaiting::Verse(idx)
                     }
                     _ => Awaiting::None,
                 };
@@ -202,23 +201,38 @@ impl Ordering {
             // over, exactly as the scanner's is. Guarded rather than
             // unconditional because nearly every token takes this arm, and a
             // perfectly-predicted branch beats a store.
-            _ if self.awaiting != Awaiting::None => {
-                if let Awaiting::Chapter(marker) = self.awaiting {
-                    out.push(Observation::one(Code::ChapterWithoutDesignator, marker));
-                }
-                self.awaiting = Awaiting::None;
-            }
+            _ if self.awaiting != Awaiting::None => self.abandon(out),
             _ => {}
         }
+    }
+
+    /// The pending `\c`/`\v` never got a `Designator` token: its line ended, or
+    /// content started. Under the scanner's designator gate that includes
+    /// `\v Then He declared` — prose after `\v ` is Text, so a verse with no
+    /// NUMBER and a verse with no designator token are one fact.
+    fn abandon(&mut self, out: &mut Emit) {
+        match self.awaiting {
+            Awaiting::Chapter(marker) => {
+                out.push(Observation::one(Code::ChapterWithoutDesignator, marker))
+            }
+            Awaiting::Verse(marker) => {
+                out.push(Observation::one(Code::VerseWithoutDesignator, marker));
+                // RESYNC, exactly as a malformed designator does: the number is
+                // unknown, so the next verse must compare against nothing or one
+                // typo reads as a gap too.
+                self.prev_verse = None;
+                self.first_verse_slot = false;
+            }
+            Awaiting::None => {}
+        }
+        self.awaiting = Awaiting::None;
     }
 
     /// End of input: the whole-book facts, which are exactly the ones no token
     /// event could carry.
     pub(crate) fn finish(&mut self, out: &mut Emit) {
-        // A `\c` as the very last token of the file.
-        if let Awaiting::Chapter(marker) = self.awaiting {
-            out.push(Observation::one(Code::ChapterWithoutDesignator, marker));
-        }
+        // A `\c`/`\v` as the very last token of the file.
+        self.abandon(out);
 
         match (
             self.seen_chapter,
@@ -466,5 +480,37 @@ mod tests {
         // `attr-unknown-name` hint this test is not about.)
         let (_, obs) = findings("\\c 1\n\\p \\v |x-script=\"Arab\"| 1 a");
         assert_eq!(obs, vec![]);
+    }
+
+    /// The verse counterpart. Under the designator gate all three spellings of
+    /// "this `\v` names no verse" are ONE token shape, so they are one code.
+    #[test]
+    fn verse_without_designator() {
+        for source in [
+            "\\c 1\n\\p \\v Then He declared\n",
+            "\\c 1\n\\p \\v \\p x\n",
+            "\\c 1\n\\p \\v\n",
+        ] {
+            let (tokens, obs) = findings(source);
+            assert_eq!(
+                obs,
+                vec![Observation::one(
+                    Code::VerseWithoutDesignator,
+                    token_named(&tokens, "v", 0)
+                )],
+                "{source:?}"
+            );
+        }
+
+        // ONE finding, not two: the resync keeps `\v 3` from also reading as a
+        // gap — the same policy a malformed designator gets.
+        let (tokens, obs) = findings("\\c 1\n\\p \\v 1 a\n\\v Then He declared\n\\v 3 c\n");
+        assert_eq!(
+            obs,
+            vec![Observation::one(
+                Code::VerseWithoutDesignator,
+                token_named(&tokens, "v", 1)
+            )]
+        );
     }
 }

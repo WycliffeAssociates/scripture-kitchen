@@ -446,6 +446,31 @@ mod tests {
         assert_eq!(built("\\c 12b\n").chapters[1].number, 0);
     }
 
+    /// The designator gate's unification: prose after `\v ` carves no
+    /// designator, so `\v Then` is the row `\v \p` and `\v ⏎` already were —
+    /// anchored at the MARKER, numbers 0, and no designator span to reach.
+    #[test]
+    fn a_verse_without_a_designator_is_one_row_shape() {
+        for source in [
+            "\\c 1\n\\p \\v Then He declared\n",
+            "\\c 1\n\\p \\v \\p x\n",
+        ] {
+            let toc = built(source);
+            let tokens = lex(source);
+            let marker = toc.verses[0].token as usize;
+            assert_eq!(toc.verses.len(), 1);
+            assert_eq!((toc.verses[0].first, toc.verses[0].last), (0, 0));
+            assert_eq!(toc.verses[0].at, tokens[marker].start);
+            assert_eq!(&source[tokens[marker].start as usize..][..2], "\\v");
+            assert_eq!(
+                toc.verses[0].designator_span(source.as_bytes(), &tokens),
+                None
+            );
+            // The row still splits the chapter: the byte after `\v` is inside it.
+            assert_eq!(sid(source, toc.verses[0].at + 3), "### 1");
+        }
+    }
+
     #[test]
     fn a_book_with_no_id_renders_a_raw_sid() {
         let toc = built("\\c 1\n\\p \\v 1 a\n");

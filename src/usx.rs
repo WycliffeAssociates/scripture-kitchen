@@ -1382,6 +1382,12 @@ mod tests {
             content("\\p \\v 1 verse one\n\\v 2 verse two"),
             r#"<para style="p"><verse number="1" style="v" />verse one <verse number="2" style="v" />verse two</para>"#
         );
+        // The designator gate: `number="Then"` is unwritable — prose after
+        // `\v ` is Text, so the element carries an empty number.
+        assert_eq!(
+            content("\\p \\v Then He declared"),
+            r#"<para style="p"><verse number="" style="v" />Then He declared</para>"#
+        );
     }
 
     #[test]

@@ -103,6 +103,7 @@ pub enum Code {
     BookCodeUnknown,
     BookCodeNotUppercase,
     ChapterWithoutDesignator,
+    VerseWithoutDesignator,
     // --- adjacency (filed Structure — see the rows) -----------------------
     CaCpPlacement,
     VaVpPlacement,
@@ -238,7 +239,7 @@ impl LintRow {
 /// The authored rules table — one row per [`Code`], in the enum's order. All
 /// six families have a pass; the FORM family's tail is the format channel, which
 /// `lint` never reaches (see [`Severity::Form`]).
-pub const LINT_ROWS: [LintRow; 54] = [
+pub const LINT_ROWS: [LintRow; 55] = [
     // Something that cannot live inside a note (a `\c`, a bare `\v`, an unknown
     // marker) arrived while the frame was open. Both live corpus instances
     // (en_ulb ISA, MRK) are genuinely truncated footnotes.
@@ -584,6 +585,20 @@ pub const LINT_ROWS: [LintRow; 54] = [
         escalation: &[],
         aux: AuxKind::None,
         template: "{anchor} has no chapter number",
+        formatter: false,
+        fix_label: None,
+    },
+    // The verse counterpart, and — since the scanner's designator gate — the
+    // whole of "this `\v` names no verse": `\v`, `\v \p` and
+    // `\v Then He declared` are one shape, no designator token in any of them.
+    LintRow {
+        code: Code::VerseWithoutDesignator,
+        name: "verse-without-designator",
+        category: Category::Payload,
+        severity: Some(Severity::Error),
+        escalation: &[],
+        aux: AuxKind::None,
+        template: "{anchor} has no verse number",
         formatter: false,
         fix_label: None,
     },

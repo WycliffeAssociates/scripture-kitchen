@@ -1252,3 +1252,118 @@ book clean, appends Will's exact shape (`\p chain before` ␊ three empty `\p` �
 `\p chain after`), asserts the preview reports exactly ONE edit, applies it once,
 and asserts the tail collapsed to the two content paragraphs with a re-format
 proposing zero.
+
+## pass 13 — designator gate (2026-08-25, self-report)
+
+`planning/sketches/designator-gate.md`, ruled sound. A `Designator` token now
+requires a LEADING ASCII DIGIT; anything else after `\c `/`\v ` is ordinary
+Text. The six-case table in the sketch ships byte for byte
+(`scanner::tests::a_designator_token_requires_a_leading_digit`).
+
+1. **THE GATE IS `\c`/`\v`'s ALONE — `\ca`/`\cp`/`\va`/`\vp` are exempt.** THE
+   SCENARIO that forced it, five minutes in: `\cp M` (and `\vp א`, and the
+   `\cp` in the USJ/USX/HTML unit tests) carries `Payload::Designator` too, and
+   a published label is legitimately a letter. Gating on the payload enum alone
+   deleted those tokens and dropped `pubnumber` from three exports. The gate
+   therefore reads a second fact — is this row's payload a NUMBER — computed
+   from `MarkerKind::{Chapter, Verse}` in `scanner::designator_gated`,
+   precomputed into `Hot` for the fast arms and written into `ScanState`
+   alongside `pending_payload` at every site that arms one. The sketch says
+   "after `\c `/`\v `" and means it; the table was not touched. Sound, high.
+2. **`\v \p` ALREADY gets a toc row today, so the banked "malformed `\v` still
+   gets a row" ruling stands and toc.rs needed NO code change.** Verified before
+   writing anything (`toc()` pushes a `VerseAnchor` on the `\v` MARKER token,
+   numbers 0, `designator_span()` `None`), and now asserted as the unification:
+   `a_verse_without_a_designator_is_one_row_shape` runs the identical assertions
+   over `\v Then He declared` and `\v \p`. The `\v Then` row is a NEW row shape
+   for nobody — it is the row `\v \p` has always produced.
+3. **The new lint lane is `verse-without-designator`, and it RESYNCS the verse
+   sequence; the chapter lane does not change.** THE SCENARIO: `\v 1` `\v Then
+   He declared` `\v 3` used to be ONE finding (designator-malformed, which
+   resyncs). Without a resync in the new lane the gate would have turned one
+   typo into two findings — the absence, plus a verse-gap at `\v 3`. So the new
+   code drops `prev_verse` and `first_verse_slot` exactly as the malformed arm
+   does. `chapter-without-designator` keeps its existing non-resyncing behavior:
+   the sketch asked for the verse counterpart, chapter sequence policy is not
+   this pass's, and touching it would move pins for a reason nobody ruled on.
+   The asymmetry is deliberate and recorded here rather than fixed silently.
+4. **Adding a `Code` variant shifts every later discriminant, so
+   `diagnostics.json` was regenerated.** That side-table is index-addressed and
+   per-build wire data (a rule's durable identity is its kebab-case name), so
+   this is the documented cost of inserting a row in category order rather than
+   appending out of place. `codegen_output_matches_input` is the gate and is
+   green; the spike re-vendored the JSON with the `.wasm`.
+5. **Corpus pins moved by exactly one finding, sideways.** `designator-malformed`
+   2 → 1, `verse-without-designator` 0 → 1, total unchanged. The mover is
+   bdf_reg ACT 8:17, `\v +` — a bare note caller where the number belongs. `+`
+   is not a digit, so no designator is carved and the `\v` names no verse, which
+   is the same fact `\v \p` states. en_ulb ZEC 12:7 `\v 7"` STAYS malformed: a
+   leading digit is the gate's whole test, and the interpreter still refuses the
+   span. Those two are the only `\v `-not-a-digit sites in 226 books.
+6. **`NUMBER_SHAPED`'s meaning sharpened to "the interpreter accepted a
+   designator that is THERE", and the analyze test that pinned the old meaning
+   was rewritten.** THE SCENARIO: the old test used `\v 3b` as its
+   digit-start-but-unshaped case, but `3b` is a WELLFORMED verse (segment), so
+   after the gate the test had no example left of "token present, flag clear".
+   It now uses `\v 012` (leading zero — the interpreter's `[1-9]` law), beside
+   `\v  Then He declared` which reports the same empty slot a bare `\v` does.
+7. **Exports were verified, not assumed: `number=""` is now the only spelling.**
+   `number="Then"` is unwritable — no designator token exists to carry it — and
+   both projections lock it (`usj`: `{"type":"verse","marker":"v","number":""}`
+   plus the prose as content; `usx`: `<verse number="" style="v" />`). The
+   187/195 validated-pass oracles are unmoved; the one `testData` fixture with a
+   `\v No number"` line is `<validated>fail</validated>` and was already
+   excluded.
+8. **Diff and format needed no code and no pin change.** The pass-6 divergence
+   ruling stands verbatim (`\v 2"` starts with a digit, still tokenizes, still
+   cuts a block at `GEN 1:0` with the `@N` tiebreak); the designator-less twin
+   is now asserted beside it in the same test. `designator-ws-single` and
+   `dedupe-verse-number` read `Designator` tokens and simply never fire on an
+   absent one — the format corpus pins did not move.
+
+### The spike: what scan.ts lost (the second acceptance criterion)
+
+Both halves of the pass-9 phantom-caret patch are DELETED, not one:
+
+- the anchor-authority-over-lines special case (`line.contentFrom =
+  Math.min(verse.contentFrom, line.to)` and its paragraph of justification), and
+- the `const empty = !anchor.numberShaped` collapse in front of it.
+
+THE FINDING, since the brief asked: deleting only the first would have left the
+disagreement alive for a designator that IS there and IS malformed. `\v 2"`
+carves a token, so the LINES read reports content past it while the collapse
+still pushed the verse row back onto the marker's end — the same one-token
+disagreement, on the case the gate deliberately does not touch. With both gone,
+the two reads agree BY CONSTRUCTION for every input: both read past the
+designator token when there is one (`analyze::lines` and `analyze::slot` call
+`content_after` on the SAME token) and both stop at the marker's content
+boundary when there is not. `numberShaped` is no longer read anywhere in the
+spike; it stays on the wire as the interpreter's verdict, for styling and lint,
+never geometry. GAPS #16 and the pass-9 "NOT an ask" note are closed in
+`GAPS.md` with that reading.
+
+### Perf (go-slow law)
+
+`playground --serial --iters 20`, en_ulb 66 books, max of 8, INTERLEAVED
+before/after from two copies of the binary (a non-interleaved run first reported
+a 25% "gain" that was pure machine state — worth recording as a measurement
+trap): before 1252.5 MiB/s, after 1306.4 MiB/s. Noise in the predicted
+direction of nothing; the gate is one byte-compare in an already-branchy arm.
+
+### Verification
+
+Engine: `cargo test -- --include-ignored` green (339 lib tests plus every corpus
+oracle), `cargo clippy --all-targets` clean, `cargo build --target
+wasm32-unknown-unknown -p onion-wasm` clean, `cargo test -p onion-wasm` green.
+`src/experiments/fused.rs` mirrors the gate — it is verified token-for-token
+against `lex` before any timing, so it is not optional. `onion-wasm/pkg-web` and
+`pkg-bundler` rebuilt (committed artifacts) and `diagnostics.json` regenerated.
+debug/ dumps unchanged: the PSA books they show have no `\v ` without a digit.
+Spike (`../onion-2-spike`): re-vendored via `scripts/sync-engine.sh`, `tsc -b`
+clean, and the FULL probe suite green — `probe:engine` 19/19 (18 prior plus the
+new `empty-slot-takes-the-digit-before-the-space`, which deletes the digit of
+`\v 9 The true Light`, clicks the rendered slot and types `9`, asserting the doc
+reads `\v 9 The true Light` with the digit in front of the author's space),
+`probe:cm` 11/11 (F2 `caret-reaches-empty-slot` GREEN — it was the pass's first
+acceptance criterion), `probe:demo` 18/18, `probe:project` 9/9, `probe:stet`
+5/5, `probe:bidi` 2/2.

@@ -87,8 +87,8 @@ use crate::lint::{
 };
 use crate::scanner::{
     AttrScan, BACKSLASH, CR, HotIdx, LF, PIPE, SPACE, ScanState, TAB, attr_list_end,
-    classify_marker, escape_len, folds_delimiter, marker_end, newline_end, opens_attrs_frame,
-    payload_end, resolve_marker_idx, ws_run_end,
+    classify_marker, designator_gated, escape_len, folds_delimiter, marker_end, newline_end,
+    opens_attrs_frame, payload_end, resolve_marker_idx, ws_run_end,
 };
 use crate::tables::generated;
 use crate::tables::schema::{ClosingBehavior, MarkerKind, Payload, ScopeKind, SpecContext};
@@ -839,6 +839,7 @@ impl<'a, const LINT: bool> FusedScanner<'a, LINT> {
             mode: ScanState {
                 awaiting_delimiter_ws: false,
                 pending_payload: Payload::None,
+                designator_gated: false,
                 after_marker: false,
                 attr_frames: 0,
                 attr_list_ends_at_line: false,
@@ -965,6 +966,7 @@ impl<'a, const LINT: bool> FusedScanner<'a, LINT> {
                 self.mode.pending_payload = Payload::None;
                 self.mode.after_marker = true;
                 self.mode.pending_payload = hot.payload;
+                self.mode.designator_gated = hot.designator_gated;
                 if hot.attrs_frame {
                     self.mode.attr_frames = self.mode.attr_frames.saturating_add(1);
                 }
@@ -976,6 +978,7 @@ impl<'a, const LINT: bool> FusedScanner<'a, LINT> {
                 self.mode.pending_payload = Payload::None;
                 self.mode.after_marker = true;
                 self.mode.pending_payload = hot.payload;
+                self.mode.designator_gated = hot.designator_gated;
                 if hot.attrs_frame {
                     self.mode.attr_frames = self.mode.attr_frames.saturating_add(1);
                 }
@@ -1037,6 +1040,7 @@ impl<'a, const LINT: bool> FusedScanner<'a, LINT> {
         } else {
             Payload::None
         };
+        self.mode.designator_gated = designator_gated(idx);
         match kind {
             TokenKind::Marker { .. } if opens_attrs_frame(idx) => {
                 self.mode.attr_frames = self.mode.attr_frames.saturating_add(1);
@@ -1088,7 +1092,13 @@ impl<'a, const LINT: bool> FusedScanner<'a, LINT> {
         self.mode.awaiting_delimiter_ws = false;
         self.mode.after_marker = false;
         let payload_kind = match self.mode.pending_payload {
-            Payload::Designator => Some(TokenKind::Designator),
+            Payload::Designator
+                if !self.mode.designator_gated
+                    || bytes.get(index).is_some_and(u8::is_ascii_digit) =>
+            {
+                Some(TokenKind::Designator)
+            }
+            Payload::Designator => None,
             Payload::NoteCaller => Some(TokenKind::NoteCaller),
             Payload::BookCode => Some(TokenKind::BookCode),
             Payload::None | Payload::Version => None,

@@ -1159,11 +1159,12 @@ mod tests {
         );
     }
 
-    /// The one fact an editor cannot re-derive without re-reading the bytes: is
-    /// the designator a NUMBER, or the next word of scripture?
+    /// Under the designator gate the flag's meaning is sharp: it says the
+    /// INTERPRETER accepted a designator the scanner did carve. Prose after
+    /// `\v ` carves none at all, so it reports as the absent slot.
     #[test]
     fn a_designator_that_is_not_number_shaped_says_so() {
-        let source = "\\c 1\n\\p \\v 1 a\n\\v  Then He declared\n\\v 3b c\n\\v \n";
+        let source = "\\c 1\n\\p \\v 1 a\n\\v  Then He declared\n\\v 012 c\n\\v \n";
         let a = analyze(source, wants::VERSE_ANCHORS, None);
         let seen: Vec<(bool, &str)> = rows(&a.verse_anchors, stride::VERSE_ANCHORS)
             .iter()
@@ -1178,10 +1179,10 @@ mod tests {
             seen,
             vec![
                 (true, "1"),
-                // The lexer hands back whatever follows `\v `; the read says it
-                // is not a number, so nothing styles "Then" as a verse.
-                (false, "Then"),
-                (true, "3b"),
+                // "Then" is Text — the same empty slot a bare `\v` reports.
+                (false, ""),
+                // Digit-start but malformed: the token exists, the flag is clear.
+                (false, "012"),
                 // Absent: an EMPTY span, and it sits at the propped-open slot.
                 (false, ""),
             ]

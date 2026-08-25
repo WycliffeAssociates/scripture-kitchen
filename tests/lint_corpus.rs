@@ -134,17 +134,32 @@ fn the_corpus_yields_exactly_the_known_findings() {
         .sum();
     assert_eq!(outside_ulb, 33);
 
+    let by_corpus = |code: Code, corpus: &str| -> u64 {
+        books
+            .iter()
+            .filter(|(path, _, _)| path.to_string_lossy().contains(corpus))
+            .map(|(_, counts, _)| counts[code as usize])
+            .sum()
+    };
+
     // ---- Ordering + payload ----------------------------------------------
 
-    // Two designators fail their pattern, both genuine typos:
-    //   * bdf_reg ACT 8:17 is `\v +` — a bare note caller where the verse
-    //     number belongs (the `\v 18` after it is correct).
-    //   * en_ulb ZEC 12:7 is `\v 7"` with no space before the quote, so the
-    //     carved payload is `7"`.
-    // The second is why a malformed designator RESYNCS the sequence rather than
-    // being skipped: leaving `prev_verse` at 6 makes the good `\v 8` next to it
-    // read as a gap. One typo, one finding.
-    assert_eq!(total(Code::DesignatorMalformed), 2);
+    // ONE designator fails its pattern: en_ulb ZEC 12:7 writes `\v 7"` with no
+    // space before the quote, so the carved payload is `7"`. It still TOKENIZES
+    // under the designator gate — a leading digit is the gate's whole test — and
+    // the interpreter rejects it. This is why a malformed designator RESYNCS the
+    // sequence rather than being skipped: leaving `prev_verse` at 6 makes the
+    // good `\v 8` next to it read as a gap. One typo, one finding.
+    assert_eq!(total(Code::DesignatorMalformed), 1);
+
+    // The gate MOVED the corpus's other typo into this lane, one for one:
+    // bdf_reg ACT 8:17 is `\v +` — a bare note caller where the verse number
+    // belongs (the `\v 18` after it is correct). `+` is not a digit, so no
+    // designator is carved at all and the `\v` names no verse, which is the
+    // same fact `\v \p` and a bare `\v` state. Before the gate this counted as
+    // designator-malformed; the total across both codes is unchanged at 2.
+    assert_eq!(total(Code::VerseWithoutDesignator), 1);
+    assert_eq!(by_corpus(Code::VerseWithoutDesignator, "bdf_reg"), 1);
 
     // bdf_reg ROM 3 carries `\v 10` twice — the same verse translated twice,
     // the second copy left in. Real duplication, not a range overlap.
@@ -184,13 +199,6 @@ fn the_corpus_yields_exactly_the_known_findings() {
     // examples.bsb reads 0 because it uses the two spellings in DIFFERENT
     // books — which is what per-book aggregation is for.
     assert_eq!(total(Code::NumberingMix), 52);
-    let by_corpus = |code: Code, corpus: &str| -> u64 {
-        books
-            .iter()
-            .filter(|(path, _, _)| path.to_string_lossy().contains(corpus))
-            .map(|(_, counts, _)| counts[code as usize])
-            .sum()
-    };
     assert_eq!(by_corpus(Code::NumberingMix, "en_ulb"), 44);
     assert_eq!(by_corpus(Code::NumberingMix, "bdf_reg"), 6);
     assert_eq!(by_corpus(Code::NumberingMix, "en_ult"), 2);

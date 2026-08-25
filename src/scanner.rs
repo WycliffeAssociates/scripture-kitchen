@@ -37,6 +37,20 @@
 //!
 //! Both spellings write the same required delimiter; neither is normalized into
 //! the other, and either concatenates back to the source.
+//!
+//! # The designator gate
+//!
+//! A `Designator` after `\c`/`\v` requires a LEADING ASCII DIGIT; anything else
+//! is ordinary Text, so the token kind never claims prose is a number.
+//!
+//! ```text
+//! \v 012 text  Marker("\v ") Designator("012 ") Text("text")
+//! \v Then He…  Marker("\v ") Text("Then He…")
+//! ```
+//!
+//! One byte, and no more: `[1-9]`, segments and ranges are `crate::designator`'s
+//! grammar, judged where the judgment is richer. `\ca`/`\cp`/`\va`/`\vp` are NOT
+//! gated — their payload is a published label (`\cp M`), not a number.
 
 use memchr::memchr;
 use memchr::memchr3;
@@ -73,6 +87,11 @@ pub(crate) struct ScanState {
     // three carved payloads (`\c`/`\v` designator, note caller, `\id` book
     // code).
     pub(crate) pending_payload: Payload,
+    // Does the pending Designator have to START WITH A DIGIT to be carved? True
+    // for `\c`/`\v`, whose payload IS a number; false for `\ca`/`\cp`/`\va`/
+    // `\vp`, whose published labels (`M`, `א`) are legitimately not numbers.
+    // Read only while `pending_payload` is `Designator`, and written with it.
+    pub(crate) designator_gated: bool,
     // True from an opener/milestone token until ANY other token, so that
     // "pipe in FRONT position" (U25001: attributes precede content) reduces to
     // "the dispatch loop found this pipe" — no byte-scanning predicate.
@@ -151,6 +170,7 @@ impl<'a> Scanner<'a> {
             mode: ScanState {
                 awaiting_delimiter_ws: false,
                 pending_payload: Payload::None,
+                designator_gated: false,
                 after_marker: false,
                 attr_frames: 0,
                 attr_list_ends_at_line: false,
@@ -216,6 +236,8 @@ pub(crate) struct Hot {
     /// What this row owes after its delimiter — `NoteCaller` for `\f`,
     /// `Designator` for `\v`, `None` for the rest.
     pub(crate) payload: Payload,
+    /// The digit gate on that payload (see `ScanState::designator_gated`).
+    pub(crate) designator_gated: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -247,6 +269,7 @@ impl HotIdx {
                 },
                 attrs_frame: opens_attrs_frame(idx),
                 payload: generated::payload(idx),
+                designator_gated: designator_gated(idx),
             }
         };
         HotIdx {
@@ -351,6 +374,7 @@ impl Scanner<'_> {
                 // folded delimiter is in front position.
                 self.mode.after_marker = true;
                 self.mode.pending_payload = hot.payload;
+                self.mode.designator_gated = hot.designator_gated;
                 if hot.attrs_frame {
                     self.mode.attr_frames = self.mode.attr_frames.saturating_add(1);
                     // No hot row is a Periph — asserted, not assumed.
@@ -368,6 +392,7 @@ impl Scanner<'_> {
                 // this before any pipe can be reached.
                 self.mode.after_marker = true;
                 self.mode.pending_payload = hot.payload;
+                self.mode.designator_gated = hot.designator_gated;
                 if hot.attrs_frame {
                     self.mode.attr_frames = self.mode.attr_frames.saturating_add(1);
                     debug_assert_ne!(generated::kind(hot.idx), MarkerKind::Periph);
@@ -413,6 +438,16 @@ pub(crate) fn opens_attrs_frame(idx: generated::MarkerIdx) -> bool {
     matches!(
         generated::kind(idx),
         MarkerKind::Character | MarkerKind::Figure | MarkerKind::Periph
+    )
+}
+
+/// Is this row's `Designator` payload a NUMBER, and therefore subject to the
+/// digit gate? `\c`/`\v` yes; `\ca`/`\cp`/`\va`/`\vp` no — their payload is a
+/// published label, and `\cp M` must keep carving one.
+pub(crate) fn designator_gated(idx: generated::MarkerIdx) -> bool {
+    matches!(
+        generated::kind(idx),
+        MarkerKind::Chapter | MarkerKind::Verse
     )
 }
 
@@ -651,6 +686,7 @@ impl Scanner<'_> {
         } else {
             Payload::None
         };
+        self.mode.designator_gated = designator_gated(idx);
         // Any closer decrements, even a mismatched one: the count only gates a
         // needle, so being approximately right costs one refuted ladder at
         // most, and pairing closers to openers is the walker's job.
@@ -898,7 +934,18 @@ impl Scanner<'_> {
         // Text is already isolated by the line ending, and its only consumer
         // reads it off the adjacent marker.
         let payload_kind = match self.mode.pending_payload {
-            Payload::Designator => Some(TokenKind::Designator),
+            // THE DESIGNATOR GATE: a chapter/verse number starts with an ASCII
+            // digit, so `\v Then He declared` is ordinary Text, not a Designator
+            // the interpreter has to reject. Digit-start-but-wrong (`\v 012`,
+            // `\c 12b`) still tokenizes — the full grammar's judgment is
+            // `crate::designator`'s, and it is richer there.
+            Payload::Designator
+                if !self.mode.designator_gated
+                    || bytes.get(index).is_some_and(u8::is_ascii_digit) =>
+            {
+                Some(TokenKind::Designator)
+            }
+            Payload::Designator => None,
             Payload::NoteCaller => Some(TokenKind::NoteCaller),
             Payload::BookCode => Some(TokenKind::BookCode),
             Payload::None | Payload::Version => None,
@@ -1097,6 +1144,40 @@ mod tests {
         assert_eq!(
             kinds_and_ranges(&lex("\\p 12 x")),
             vec![(MARKER, 0, 3), (TokenKind::Text, 3, 7)]
+        );
+    }
+
+    /// THE DESIGNATOR GATE, byte for byte. One leading ASCII digit is the whole
+    /// test: `[1-9]`, segments and ranges are the interpreter's
+    /// ([`crate::designator`]), so `\v 012` must still reach it.
+    #[test]
+    fn a_designator_token_requires_a_leading_digit() {
+        // Digit-start: unchanged, wellformed or not.
+        assert_eq!(
+            kinds_and_text("\\v 2b text")[1],
+            (TokenKind::Designator, "2b ")
+        );
+        assert_eq!(
+            kinds_and_text("\\v 012 text")[1],
+            (TokenKind::Designator, "012 ")
+        );
+        assert_eq!(kinds_and_text("\\c 12b")[1], (TokenKind::Designator, "12b"));
+        // Prose after `\v `: Marker + Text, no designator token — the same
+        // shape `\v \p` and `\v ⏎` already had.
+        assert_eq!(
+            kinds_and_text("\\v Then He declared"),
+            vec![(MARKER, "\\v "), (TokenKind::Text, "Then He declared")]
+        );
+        assert_eq!(
+            kinds_and_text("\\c Chapter One"),
+            vec![(MARKER, "\\c "), (TokenKind::Text, "Chapter One")]
+        );
+        // The gate is `\c`/`\v`'s alone: `\cp`/`\va` carry PUBLISHED labels,
+        // which are letters by design.
+        assert_eq!(kinds_and_text("\\cp M\n")[1], (TokenKind::Designator, "M"));
+        assert_eq!(
+            kinds_and_text("\\vp א\\vp*")[1],
+            (TokenKind::Designator, "א")
         );
     }
 

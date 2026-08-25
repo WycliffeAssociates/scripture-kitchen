@@ -1316,6 +1316,15 @@ mod tests {
         let skeleton = diff(source, source);
         let ids: Vec<&str> = skeleton.units.iter().map(|unit| unit.id.as_str()).collect();
         assert_eq!(ids, vec!["GEN 0:0", "GEN 1:0", "GEN 1:0@1"]);
+
+        // A verse with NO designator at all (the designator gate makes
+        // `\v Then` one of these) cuts the same block at the same marker anchor
+        // and addresses the same way — the tiebreak carries the distinction.
+        let source = "\\id GEN\n\\c 1\n\\v Then He declared\n";
+        assert_eq!(addrs(source), vec!["GEN 0:0", "GEN 1:0", "GEN 1:0"]);
+        let skeleton = diff(source, source);
+        let ids: Vec<&str> = skeleton.units.iter().map(|unit| unit.id.as_str()).collect();
+        assert_eq!(ids, vec!["GEN 0:0", "GEN 1:0", "GEN 1:0@1"]);
     }
 
     #[test]

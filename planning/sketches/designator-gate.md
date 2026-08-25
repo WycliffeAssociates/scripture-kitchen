@@ -1,4 +1,9 @@
-# The designator gate (ruled sound by Will 2026-08-25, ready to build)
+# The designator gate (ruled sound by Will 2026-08-25; SHIPPED, pass 13)
+
+Built as written, with one addition the sketch was silent on: the gate is
+`\c`/`\v`'s alone, because `\ca`/`\cp`/`\va`/`\vp` carry the same payload
+kind and their published labels (`\cp M`) are letters by design. See
+`planning/choices.md`, "pass 13 — designator gate".
 
 ## The defect
 

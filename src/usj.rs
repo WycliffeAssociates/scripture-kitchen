@@ -1088,6 +1088,14 @@ mod tests {
             content("\\c 1"),
             r#"{"type":"chapter","marker":"c","number":"1"}"#
         );
+        // The designator gate: prose after `\v ` is Text, so the verse element
+        // reports an EMPTY number and the words stay content. `number":"Then"`
+        // is unwritable.
+        assert_eq!(
+            content("\\c 1\n\\p \\v Then He declared"),
+            r#"{"type":"chapter","marker":"c","number":"1"},"#.to_owned()
+                + r#"{"type":"para","marker":"p","content":[{"type":"verse","marker":"v","number":""},"Then He declared"]}"#
+        );
     }
 
     #[test]
