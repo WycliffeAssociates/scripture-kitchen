@@ -300,7 +300,7 @@ impl Toc {
 /// A front-position attribute list belongs to the marker and so sits between it
 /// and its payload (`\v |x-a="b"| 1`, the U25001 form). Exactly one kind can
 /// intervene, so this is a step, not a search.
-fn designator_row(tokens: &[Token], marker_row: usize) -> Option<usize> {
+pub(crate) fn designator_row(tokens: &[Token], marker_row: usize) -> Option<usize> {
     let mut next = marker_row + 1;
     if matches!(tokens.get(next).map(Token::kind), Some(TokenKind::AttrList)) {
         next += 1;

@@ -37,6 +37,7 @@
 
 pub(crate) mod ancestry;
 pub(crate) mod attr_rules;
+pub mod catalog;
 pub(crate) mod fix;
 pub(crate) mod flat;
 pub(crate) mod ordering;
@@ -48,6 +49,7 @@ pub(crate) mod walk;
 mod tests;
 
 pub use crate::edit::{Edit, FixStr, apply, check_edits};
+pub use catalog::diagnostics_json;
 pub use fix::{Fix, check_fixes};
 pub use rows::{
     AuxKind, Category, Code, LINT_ROWS, LintRow, Severity, UsfmVersion, VERSION_ROWS, VersionRow,

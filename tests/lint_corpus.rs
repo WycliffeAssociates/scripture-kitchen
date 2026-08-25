@@ -381,11 +381,14 @@ fn every_corpus_fix_passes_the_oracle() {
     // One `\p` per paragraph-less run, all 5434 of them.
     assert_eq!(total(Code::MissingParagraph), 5_434);
     // The FORMATTER half of `empty-paragraph`: 25 of the 787 empty paragraphs
-    // are UNAMBIGUOUS duplication — the paragraph that displaced them is spelled
-    // exactly the same and holds the content (`\p\n\p\n\v 39 Hem…`, en_ulb
-    // ISA's 13 `\q\n\q` pairs). The other 762 are mixed pairs (`\m` then `\p`,
-    // the `\s5` chunk idiom) or chains of identical empties, where which one was
-    // meant is the author's to say — the diagnostic points and offers nothing.
+    // are UNAMBIGUOUS duplication — the RUN of identical empties they open is
+    // survived by a paragraph spelled exactly the same, holding the content
+    // (`\p\n\p\n\v 39 Hem…`, en_ulb ISA's `\q\n\q` pairs). Every qualifying run
+    // in this corpus happens to be one marker long, so the chain-aware
+    // derivation leaves the number where the pairwise one had it; the other 762
+    // are mixed (`\m` then `\p`, the `\s5` chunk idiom) or are runs whose
+    // survivor is spelled differently (en_ulb ISA's `\p\n\p\n\q1`), where which
+    // one was meant is the author's to say.
     assert_eq!(total(Code::EmptyParagraph), 25);
     // The corpus's ONE duplicate verse offers no fix: bdf_reg ROM 3 writes
     // `\v 10` twice and then `\v 11`, so renumbering the duplicate to 11 would

@@ -575,3 +575,680 @@ All three flagged divergences RULED FINE by Will as-is: (1) malformed
 numbers are not reader text in the structure classifier; (3) whitespace
 = ASCII whitespace (consistent with format's NBSP-is-content ruling).
 The `Filter.opt_breaks` field also stands.
+
+## pass 7 — wasm/analyze (2026-08-24, self-report)
+
+Four pieces, per the sketch: the emit layer in the ENGINE (`src/analyze.rs`,
+seven flat u32 reads, offsets converted in one streaming sweep), the
+diagnostics side-table codegen (`lint::catalog` → `galley/diagnostics.json`),
+the bindings crate (`galley/`, ten tagged exports), and the hand-written TS
+wrapper (`galley/galley.ts`, the one place the stride schema lives on the JS
+side). Every RULED item in the sketch is honoured as written. What follows is
+where the spec was silent, plus the three places Will's eyes are wanted.
+
+1. **`blocks` stride 4 = `[class, from, content_from, to]`.** The sketch's
+   table says four numbers and then spells out three. THE SCENARIO:
+   `decorations.ts` hides `[from, contentFrom)` on every para line and
+   `structure.ts`'s `setBlockMarker` REPLACES exactly that span — so without a
+   content-start the editor has to re-lex the marker name to find where the
+   chrome ends, which is the whole thing this wire exists to stop. The fourth
+   number is the opening marker token's end (delimiter folded in, so it is the
+   real content start). Sound, high.
+2. **A block is a CST node whose row kind is Paragraph, Header, Periph,
+   TableRow or Sidebar.** A match over `MarkerKind`, no marker list. THE
+   SCENARIO: `\s5` resolves to NO row, so it is not block-level and opens no
+   block — which is exactly what the CM probe hand-codes ("in uW USFM a chunk
+   marker sits INSIDE a paragraph"). It still reaches the editor through
+   `token_spans` carrying `OTHER | UNKNOWN`. The same rule makes `\id`/`\h`/
+   `\toc1` blocks (kind Header/Paragraph), which is what gives the front
+   matter its chrome spans. Sound, high.
+3. **The class byte's flags are HEADING / FRONT / POETRY / CLOSER / UNKNOWN,
+   all read off `Category`.** THE SCENARIO: the probe's three regexes.
+   HEADING = `ParaTitlesSections`, FRONT = `ParaIdentification |
+   ParaIntroductions | ParaPeripheral | DocumentStructure`, POETRY =
+   `ParaPoetry | ParaLists` (the indented block classes). **DIVERGENCE, for
+   Will:** the probe's hand-authored HEADING regex includes `ip` and `iot`,
+   which are introduction PARAGRAPHS; the table files them FRONT. The regex is
+   the impurity (its own comment says so) and the table is the authority, so
+   the byte is right and the probe's rendering of an intro paragraph will
+   change when it switches over. Sound, medium-high — worth naming because it
+   is a visible behaviour change in the probe.
+4. **`\c` and `\v` share one coarse class (CHAPTER_VERSE); the two dedicated
+   reads tell them apart.** THE SCENARIO: `decorations.ts` needs `usfm-chap`
+   vs `usfm-num-v`, which is a chapter-or-verse question — and `chapters` and
+   `verse_anchors` answer it with the designator spans the widgets need
+   anyway. Spending a 9th coarse class (or a flag) on a fact two whole reads
+   already carry buys nothing. Sound, high.
+5. **NOT emitted: the front sub-class (`id ide usfm rem sts` = metadata vs
+   `h toc* toca* cl` = displayable).** THE SCENARIO: `decorations.ts` branches
+   `usfm-meta` vs `usfm-front` on exactly that split — and NO table column
+   makes it: `ide`/`rem`/`sts` share `ParaIdentification` with `h`/`toc`/
+   `toca`, while `id`/`usfm` are `DocumentStructure`. Emitting it would mean
+   an authored marker list in the class byte, which the sketch forbids. The
+   editor slices the marker name (3–8 bytes it already holds) for this one.
+   **Needs Will:** if that split has to be free, it belongs as a marker-table
+   COLUMN, authored once, not as a list in the emit layer.
+6. **`text_runs` is the reader-text MASK, not the Text tokens.** THE
+   SCENARIO: the read serves "search/proofing views", and vision §10.1 says
+   Sous needs an untrimmed projection that reads across markup boundaries —
+   which is `Filter::reader_text()` exactly (unwraps everything, keeps all
+   text including note prose, merges adjacent survivors into maximal runs).
+   Text tokens would hand back a run per marker boundary, which is the thing
+   a search must not see. This is also the only read that costs a mask, so
+   the wants bit genuinely gates a whole artifact. Sound, high.
+7. **An absent designator is an EMPTY span at the marker, not a sentinel.**
+   THE SCENARIO: `\c` with no number, and `\v 2"` (en_ulb ZEC 12:7), where the
+   Toc keeps the row with number 0. A consumer slicing `label.from..label.to`
+   gets `""` for the first and `2"` for the second — both of which are what it
+   would render anyway. `NONE` is reserved for the two places absence is
+   structurally different: a diagnostic's second span and its fix index.
+   Sound, high.
+8. **One sentinel, `u32::MAX`, everywhere.** So a decoder needs one rule.
+9. **The UTF-16 wall is a streaming `Cursor` with an ascending fast path and a
+   sorted-permutation fallback.** THE SCENARIO: three reads are NOT ascending
+   — a `\p` nests inside an `\esb` so blocks overlap, a diagnostic's `second`
+   always PRECEDES its anchor (the lint invariant), and a chapter's label sits
+   inside its own span. Those three are all small (hundreds to thousands of
+   rows), so they sort a position list first; `token_spans`, the read that is
+   millions of offsets on a big book, is ascending by construction (tokens
+   tile the document) and pays one `is_sorted`-style scan and nothing else.
+   The sketch said "one streaming cursor riding the emit in document order",
+   and this is that, with the honest admission that document order is per
+   READ and not global. Sound, high.
+10. **`Cursor` went into `src/utf16.rs`, beside the index it mirrors.** As
+    instructed — it reuses `utf16_len` (the SWAR count) and both of the
+    index's scan loops, and it is proved against `Utf16Index` at every byte
+    offset of the existing zoo, forwards, backwards and interleaved. No
+    random-access index is built for bulk out; the only `Utf16Index` uses left
+    are the format/diff wires (small, unsorted, random-access) and the two
+    `to_byte`/`to_utf16` stragglers.
+11. **Fixes cross as FOUR arrays, and a diagnostic's `fix` indexes the
+    `fixes` array, not an edit.** THE SCENARIO: a fix can hold several edits
+    (`bridge-empty-verses` deletes two `\v`s and rewrites a third), so the
+    ruled shape — `[from,to]` pairs + one ASCII blob + a lengths array — needs
+    a fourth array grouping edits into fixes. `format_edits`' precedent is the
+    inner three verbatim; the grouping is the only addition. Sound, high.
+12. **Diagnostics and fixes share ONE wants bit.** A fix is worthless without
+    the finding that offers it, and the fix arrays are tiny beside the
+    findings. Sound, high.
+13. **A clip keeps a span that OVERLAPS it, and needs BOTH ends.** THE
+    SCENARIO: a token straddling the viewport edge is half-drawn if the test
+    is containment. At the binding, one-sided (`clipFrom` without `clipTo`)
+    means NO clip rather than "to the end" — a half-specified viewport is a
+    caller bug, and silently analyzing a different range than asked is worse
+    than analyzing all of it. Sound, medium-high.
+14. **The LF contract is a documented degrade in the library and a
+    `debug_assert!` at the galley wall.** Per Will's ruling, and this is where
+    it can live: the corpus HAS CRLF books, and `tests/analyze_corpus.rs`
+    analyzes them — a library-level assert would fail the suite on real data
+    the engine handles correctly (it stays byte-honest and counts the CR as
+    its own unit). The offset contract is galley's, so the assert is galley's.
+    Sound, high.
+15. **The side-table carries `escalation` and the Form rows, neither of which
+    was asked for.** THE SCENARIO: `attr-trailing-form-deprecated` has
+    `severity: null` plus a ladder — without the ladder JS either shows a
+    gated rule as permanently silent or as its post-escalation rung, and both
+    are wrong. It is `[[version, severity], …]` and `galley.ts` has the
+    six-line `severityAt` that reads it. The Form rows are emitted so the
+    array stays DENSE and index-addressed (a finding carries `code` as a
+    number); they are marked `"severity": "form"` and a test asserts none of
+    them ever reaches a diagnostics read — over three shaped documents in the
+    unit test and over every corpus book in the oracle. Sound, high.
+16. **`galley/diagnostics.json` is a codegen artifact beside the crate that
+    ships it, checked in, with the marker table's staleness test.** Codegen
+    now writes two files and reports both. Sound, high.
+17. **`FormatOpts` is a tagged struct: `pub` scalar fields, the three enums as
+    u32 codes, `setRemoveMarkers` taking a comma-separated string and
+    `setRepairs` taking a `Uint32Array` of code indices.** THE SCENARIO:
+    twelve positional booleans in a `.d.ts` is a call site nobody can read,
+    and adding a switch later would renumber it. The enums are u32 rather than
+    tagged enums because a wasm-bindgen enum is a second name for a fact the
+    library already names — the codes are documented on the fields and the
+    wrapper hides them. `repairs` accepts side-table indices and silently
+    drops one that names no row (a stale bundle must not panic the engine).
+    Sound, medium-high.
+18. **`merge`/`merge_splices` are thin wrappers over `String`-erroring
+    bodies.** THE SCENARIO: `JsError` cannot be CONSTRUCTED off wasm, so a
+    native test of the loud-rejection contract (unknown unit id, unknown side
+    name, bad JSON) panics inside wasm-bindgen instead of seeing the
+    rejection. The split costs four lines and makes the rejection contract
+    testable in `cargo test`. Sound, high.
+19. **The diff wire flattens `dup_context` and renders `covered_by`'s sid.**
+    `baselineCount`/`currentCount`/`isDup` instead of a nested object, and
+    `coveredBy: {unit, sid, side}` with the address already rendered — the id
+    renderer stays Rust, per the ruling, and that applies to every address the
+    wire carries, not only the unit ids. Slots carry `afterUnit`/`afterSide`
+    for the same reason. Sound, medium-high.
+20. **The wasm smoke test INLINES a Hindi excerpt.** THE SCENARIO:
+    `testData/` and `example-corpora/` are gitignored, and `include_str!` of a
+    missing file is a COMPILE error where a missing corpus should be a skip —
+    which would make `wasm-pack test` unrunnable on a fresh clone. The excerpt
+    is verbatim `hindi-IRV1` MAT 1:1-2 plus a synthetic chapter 2 with a
+    footnote, and the pinned numbers are hand-counted (438 UTF-16 units for
+    844 bytes; `\c 1` at byte 196 = unit 156; `\c 2` at byte 700 = unit 364;
+    the last verse's designator at unit 405). The whole-corpus Hindi check
+    stays native, where it can read files. Sound, high.
+21. **No checksum export, on Will's ruling (2026-08-24).** Vision §13.4
+    assigns the canonical-source checksum to the composed facade; Will
+    deferred it as a higher-level concern — revisit when sous joins and the
+    host owns a source version. Recorded in `galley/README.md` and the module
+    doc as deliberately absent, not forgotten. No `twox-hash`, no hashing
+    dependency at all.
+22. **The bindings crate is `galley`, per Will's ruling** — ONE combined
+    bindings crate, no standalone `onion-wasm`, no standalone `sous-wasm`. Its
+    doc header says it is the vision's composed analysis host (§4.4, §9.4) and
+    that sous joins it later in the same binary.
+23. **Not built, deliberately.** No `Wants` TYPE — a bare `u32` plus a consts
+    module IS the wire, and a newtype would only need unwrapping at the tag.
+    No `locate`/`book`/`usj`/`usx`/`html` exports: the sketch's galley method
+    list accumulates "as real UI asks arrive", and none of those has arrived.
+    No opaque handle, no retained state, no worker, no async — all ruled, all
+    parked. No `simd128` in the crate's build config: it is a RUSTFLAG the
+    consumer sets, documented in the README, not a fact baked into a
+    `.cargo/config.toml` that would also change native builds. No wasm bench
+    in-repo (ruled: the probes stay scratch).
+24. **The playground grew `--analyze` and `--analyze-wants <mask>`** — the
+    perf instrument for §8, and the per-read breakdown in it.
+25. **The corpus oracle is NOT `#[ignore]`d.** The whole-corpus reference-
+    emitter sweep over all 226 books runs in ~7s (rayon, debug), which is not
+    the minutes the ignore convention exists for — so there is no fast slice
+    and no pass-end-only gate for this one, just the sweep plus the Hindi
+    hand-check. Sound, high.
+
+## pass 8 — spike feedback (2026-08-24, self-report)
+
+Nine asks from `planning/ideas/candidates/spike-gaps.md` — the CodeMirror
+spike's report after replacing every hand-rolled USFM fact in a real editor
+integration with `analyze`. The full evidence, with the workaround each ask
+was living with, is `onion-2-spike/GAPS.md`; each section there now carries a
+RESOLVED note with the shape that shipped. Ask 9 (`toByte` re-encode) was
+skipped as documented design. What follows is where the spec was silent.
+
+**Two pass-7 items are RESOLVED by this evidence.** Item 5 ("needs Will": the
+metadata-vs-displayable front split, which pass 7 declined to emit because no
+table column made it) — the spike CONFIRMED the split is load-bearing, listed
+the exact two groups, and showed that the one marker-name regex the class byte
+was meant to delete was still in the probe because of it. It is now a `META`
+flag read off the CATEGORIES, no authored list, no new table column (choice 3
+below). Item 3 (the `\ip`/`\iot` DIVERGENCE, where the probe's hand-authored
+HEADING regex disagreed with the table's FRONT) — the spike followed the
+engine and reports the engine was right; the divergence is settled in the
+table's favour and the regex is gone.
+
+1. **The class byte became a class WORD (u16), and `token_spans` moved its
+   kind byte from `<< 8` to `<< 16`.** THE SCENARIO: `META` is a ninth fact
+   and all eight bits were spent (3 coarse + HEADING/FRONT/POETRY/CLOSER/
+   UNKNOWN). The alternatives were splitting FRONT into two mutually exclusive
+   flags (which loses "is this front matter at all" for consumers that only
+   knew FRONT) or putting META at bit 8 in the reads where class owns a whole
+   u32 and nowhere else (dishonest — the same field would mean two things).
+   Widening keeps the low byte BIT-IDENTICAL, so every existing constant is
+   unchanged and only `token_spans`' companion field shifts. Sound, high.
+2. **`META` = `ParaIdentification | DocumentStructure`; plain `FRONT` =
+   `ParaIntroductions | ParaPeripheral`.** THE SCENARIO: the spike's own two
+   lists — `\id \ide \usfm \rem \sts \h \toc1-3` (machine metadata, dimmed or
+   hidden) against `\ip \iot \io1 \is \imt` (introduction prose the reader
+   sees) — fall exactly on that category line, which pass 7 had not checked
+   against a real list. No marker names anywhere, so a marker nobody
+   enumerated classifies itself. FRONT still covers both halves. Sound, high.
+3. **`NUMBER_SHAPED` rides the HIGH BIT of the `chapter`/`number` field
+   rather than a sixth/eighth slot.** THE SCENARIO: both fields are `u16`
+   values inside the engine (chapter and verse numbers saturate at `u16::MAX`
+   before they are ever emitted), so bit 31 is unreachable by real data — and
+   the ask proposed stride 5/7, which a packed flags slot would have made 6/8
+   for one bit. The verdict is the DESIGNATOR INTERPRETER's own
+   (`designator::verse`/`::chapter`), the same one `designator-malformed`
+   reports, not a second reading of the bytes. CLEAR is the conservative
+   answer. Sound, medium-high — a packed flag is the thing a decoder can get
+   wrong, which is why `galley.ts` decodes it into a boolean and no consumer
+   sees the mask.
+4. **An ABSENT designator now reports its empty span at `content_from` (the
+   marker's end), not at the marker's START.** THE SCENARIO: `\v \n` reported
+   `[48,48)` where the `\v ` token is `[48,51)`, so an editor rendering a
+   propped-open empty verse slot could not place it from the read — the spike
+   had to pair each anchor with the marker token before it, which is the main
+   reason its commit set carried whole-book `TOKEN_SPANS` at all. This is a
+   BEHAVIOUR CHANGE to an existing field, recorded as such: the old answer was
+   not wrong, it was just not the position anyone wanted. Sound, high.
+5. **A MARKED LINE is a line whose first NON-WHITESPACE token is an OPENING
+   marker.** THE SCENARIO: three sub-decisions.
+   (a) *Non-whitespace, not line-start.* `  \p text` is a marked line here
+   where the spike's own line-start test called it plain text. An indented
+   marker is a Form finding (`marker-ws-at-line-start`), not a non-marker, and
+   the leading whitespace lands inside the chrome run where it belongs.
+   (b) *Opening markers only.* A line starting with `\f*` or `\ts-s\*` gets no
+   row: a closer opens nothing, and a milestone is a point inside a line.
+   (c) *No class filter.* A line opening with `\w` gets a row carrying CHAR,
+   and the consumer decides that is content. The engine says what the line
+   IS; what to do about it is the editor's. Sound, medium-high — (a) is the
+   one place this deliberately diverges from the spike it was built for.
+6. **`content_from` on a line runs past the marker AND its designator.** THE
+   SCENARIO: `\c 1` and `\v 5 ` — the chrome an editor hides is the whole
+   numbered opener, and the designator token already folds its own trailing
+   delimiter, so one number covers both. Clamped to the line's end for the
+   degenerate `\v` at EOF. Sound, high.
+7. **`note_parts` rides the existing `NOTE_EXTENTS` bit rather than taking a
+   ninth.** THE SCENARIO: a part indexes an extent — `[note_index, …]` — so
+   the read is meaningless without it, which is the same argument diagnostics
+   and their fixes already share a bit on. It also keeps the wants mask a
+   description of ARTIFACTS rather than of arrays. Sound, high.
+8. **The four part kinds PARTITION the extent: CALLER / ORIGIN / BODY /
+   MARKUP.** THE SCENARIO: the spike wanted two different things out of a
+   note and was solving them separately — the apparatus row regexed `\fr`/`\ft`
+   out of the note's bytes, and the freeze filter walked every token in the
+   extent looking for markers. A partition serves both: render ORIGIN + BODY,
+   freeze CALLER + MARKUP, and every byte is accounted for. Adjacent text of
+   one kind merges into a single run, so a body wrapping a line comes back
+   whole (the spike's regex could not represent that at all). Sound, high.
+9. **`\fr`/`\xo` are resolved THROUGH the marker table by NAME.** THE
+   SCENARIO: no `Category` separates an origin reference from a `\ft` — both
+   are `CharNotes` — and no other column does either. The alternative was
+   positional ("the first note-internal child is the origin"), which
+   misreports `\f + \ft body\f*`, a shape the corpus has. This is the same
+   mechanism `note_family` already uses for the five note spellings: a
+   `marker_idx` comparison, so a renamed row degrades instead of
+   mislabelling. **Not a category, so it is the one place in this pass a
+   marker NAME appears in the emit layer** — named here rather than buried.
+   Sound, medium — if a third consumer wants it, it should become a column.
+10. **`usfm_version` is a SCALAR on the analysis, computed unconditionally,
+    and it reports the LADDER INDEX rather than resolving severities.** THE
+    SCENARIO: `header_scan` is bounded at the first `\c`, so it costs nothing
+    even at `wants == 0`; and the ask offered "report the version" or "emit
+    the effective severity per finding". The second would delete `severityAt`
+    from the wrapper but also delete the LADDER, which is what a settings UI
+    shows ("this becomes an error at 4.0"). `u32::MAX` is the undeclared
+    sentinel, matching every other absence on this wire — and undeclared is
+    NOT 3.0, which is the distinction two gated rules turn on. Sound, high.
+11. **Diagnostic spans are trimmed of the folded delimiter at EMIT — anchor
+    and second alike — and 27 templates lost a `\` they were double-printing.**
+    THE SCENARIO: the ask named ONE template (`unterminated-milestone`),
+    because that is what the spike's demo document surfaced. Sweeping all 262
+    corpus books with the new `--codes` listing shows every template
+    containing `\{anchor}` or `\{second}` has an anchor whose first byte IS
+    the backslash — `unclosed-note` rendered `\\f was never closed` too, and
+    26 more. Fixing one and leaving 26 would have left the wire inconsistent
+    in exactly the way that made the bug invisible. A `rows.rs` test now fails
+    the build if a template writes a backslash in front of a placeholder.
+    Sound, high — but a wider change than the ask, so: named.
+12. **`token_spans` is NOT trimmed.** THE SCENARIO: same family as 11 (the
+    spike's milestone pip eats the space after the token), but that read is
+    the LOSSLESS PARTITION of the document — a corpus law asserts the spans
+    tile it — and trimming would put a hole in the tiling. The pip's trim is
+    a rendering decision and stays in the consumer, three lines, where it can
+    see what it is drawing. Sound, high.
+13. **`locate` takes a UTF-16 offset, not a byte, and is TOTAL.** THE
+    SCENARIO: the sketch's method list said `locate(byte)`, but every caller
+    holds an editor offset — making them convert first puts a straggler
+    conversion at the one call site where getting it wrong is silent (a
+    slightly wrong sid still reads like a sid). `book` returns `""` rather
+    than `"###"` for a document with no `\id`: the `###` rendering belongs to
+    a SID, which has to name something, and an empty book code is a fact the
+    caller may want to branch on. Sound, high.
+14. **`consume()` is the paved free path; `view()` survives without the
+    free.** THE SCENARIO: `view()` never freed and nothing said who must, so
+    a consumer that missed it leaked one wasm allocation per keystroke.
+    `consume(analyze(...))` copies every read out and frees in a `finally`.
+    `view()` is kept for a caller that owns the handle's lifetime itself (a
+    `using` binding, or a test holding one handle across two views) — deleting
+    it would have made the safe thing the only thing at the cost of making an
+    honest use case impossible. Sound, high.
+15. **`WANTS_COMMIT` deliberately EXCLUDES `TOKEN_SPANS`.** THE SCENARIO: the
+    constant is documentation as much as convenience, and the point of the
+    line read is that an editor no longer needs token truth everywhere the
+    caret can go. The spike still ORs the bit in for two inline decoration
+    families and says so in a comment; the constant says what the set is FOR.
+    Sound, medium-high.
+16. **`AnalysisView.forEachToken(fn)` — an allocation-free token walk,
+    which nobody asked for.** THE SCENARIO: `tokens()` yields an object per
+    row, and the wrapper's own doc says the read "must never be materialised";
+    but a consumer scanning it for two shapes had no other way to obey that.
+    On John (6,146 tokens) the object generator was the whole remaining cost
+    of the spike's projection. Callback returns `false` to stop early. Sound,
+    medium-high.
+17. **`--codes` sweeps the LOADED corpus for examples rather than shipping
+    authored fixtures.** THE SCENARIO: the ask wanted "one rendered example"
+    per code, and 54 authored trigger documents in a bin is a second corpus to
+    maintain and to get wrong. Real bytes from real books are the point —
+    that is what made ask 11's true scope visible. Codes the corpus does not
+    trigger say so (6 of 54 over `testData/`); Form rows say what they are.
+    Sound, high.
+18. **The corpus oracle grew a SECOND derivation for each new read, not a
+    copy of the emitter.** `ref_note_parts` takes a note's tokens BY SPAN
+    (every token inside the extent) where the emitter walks the TREE; `ref_lines`
+    re-steps the token stream; `ref_slot` re-derives the designator by stepping
+    past an optional front attribute list. Agreement over 226 books is then
+    evidence rather than tautology. Sound, high.
+19. **Not done, deliberately.** No `words`/`milestones` read, though the
+    measurement now says that is what is left of the spike's projection
+    (0.70ms of 0.81ms on John) — recorded as a new ask at the bottom of
+    `GAPS.md`, because the honest argument for it is "the editor should never
+    touch a token read at all", and that claim wants a second consumer before
+    it becomes wire. No viewport clip wired into the spike (its `project` runs
+    inside a `StateField`, which cannot see a viewport — an editor-architecture
+    fix, not an engine one). No new probe checks in the spike: the gate is
+    11/11 and adding checks would have moved the number this pass is measured
+    against.
+
+## pass 9 — spike iteration (2026-08-25, self-report)
+
+The engine was read-mostly this pass; the work was in the CodeMirror spike. One
+additive change landed here.
+
+1. **`editList` / `consumeEdits` in `galley/galley.ts` — the format wire gets a
+   decoder, beside the fix decoder it duplicates.** THE SCENARIO: the spike grew
+   a Format command (book and chapter scope, preview, apply as one trusted
+   transaction) and had to turn `formatEdits`'s `{spans, lens, text}` into
+   `{from, to, insert}` records. That decode is the wire schema, and the wire
+   schema's one home is `galley.ts` — a copy in the spike is exactly the drift
+   the "we decode, and in one place" ruling exists to prevent. Eager rather than
+   lazy on purpose: a format transaction is small, a human looks at a preview
+   before applying it, and no wasm handle should stay alive across that wait.
+   No `.wasm` change, no export change; `Edits` already crossed. Sound, high.
+2. **Not done.** Chapter-scoped formatting is the SPIKE filtering a whole-book
+   edit list to the chapter's span — the engine has no ranged `format_edits`,
+   and whether it should is recorded as an ask in the spike's `GAPS.md` rather
+   than answered here.
+
+## pass 8/9 review (2026-08-25, Will's rulings)
+
+- Ask 12 (`\c 12b` NUMBER_SHAPED clear, `\v 2b` set) — RULED CORRECT
+  by Will: grammar-honest (chapters are bare integers, verses take
+  segments).
+- Crate layout CORRECTED: the five pieces are onion / onion-wasm /
+  sous / sous-wasm / galley, where GALLEY is the higher-level
+  workflows crate (dirty-marking, checksumming, ingest recipes, find,
+  onion↔sous coordination) and the crate currently named `galley/` in
+  this repo is actually ONION-WASM (bindgen + .d.ts + JS/UTF-16
+  utilities). Rename pending Will's go; planning/ideas/committed/
+  galley.md (renamed from braidv2) is where the real galley's design
+  accumulates.
+
+## pass 10 — onion-wasm rename (2026-08-25, self-report)
+
+Mechanical rename plus three behaviour changes at the JS wall. No engine
+(`src/`) logic changed; the corpus oracles and the diff/format/analyze surfaces
+are untouched.
+
+**What moved.** `galley/` → `onion-wasm/` (crate `onion-wasm`, lib `onion_wasm`),
+`galley/galley.ts` → `onion-wasm/onion-wasm.ts`, `diagnostics.json` in place.
+Workspace member, `.gitignore`, `src/bin/codegen.rs`'s output path,
+`tests/codegen_output_matches_input.rs`'s `include_str!`, and the doc references
+in `src/analyze.rs` / `src/bin/playground.rs` all follow. In the spike:
+`src/galley/` → `src/onion-wasm/` (vendored `pkg-web/`), `scripts/sync-galley.sh`
+→ `sync-engine.sh`, `scripts/probe-galley.mjs` → `probe-engine.mjs`, npm script
+`probe:galley` → `probe:engine`.
+
+1. **The TS file is `onion-wasm.ts`, not `index.ts`.** THE SCENARIO: the file is
+   vendored into a consumer's tree beside a `pkg-web/`, and an `index.ts` in a
+   stack trace or a grep tells you nothing about which package it belongs to.
+   The subpath export `./schema` gives the ergonomic import name without costing
+   the identity. Sound, high.
+2. **`analyze` returns a `js_sys::Object`, hand-built, rather than a
+   serde-wasm-bindgen struct.** THE SCENARIO: the return is fourteen keys of
+   already-flat data built once per keystroke. `js-sys` is a
+   `Object`/`Reflect`/`Uint32Array` dependency the wasm-bindgen tree already
+   carries; serde-wasm-bindgen would add a serializer and its derive machinery
+   to the hot read path to emit the same fourteen keys. Sound, high.
+3. **The generated `.d.ts` types the return as `object`, and the ONE cast lives
+   in `analysis()`.** THE SCENARIO: typing it properly needs an extern
+   `typescript_type`, which needs the fourteen-field interface DECLARED in Rust
+   — a second copy of a schema whose whole point is having one home
+   (`RawAnalysis` in `onion-wasm.ts`). So the binary stays honest about handing
+   back an object, and `analysis(analyze(...))` — the wrapper's single
+   `as RawAnalysis` — is what every call site writes. Sound, medium-high: a
+   consumer who skips the wrapper gets no field types, which is the intended
+   pressure toward using it.
+4. **`consume()` / `view()` / `OwnedAnalysis` deleted rather than deprecated.**
+   THE SCENARIO: nothing wasm-side outlives the call now, so a `free()` on the
+   analysis path is not merely unnecessary, it is a lie about the lifetime. One
+   spike consumer, renamed in the same pass. Sound, high.
+5. **`--weak-refs` is a BUILD flag in the scripts and the README, not a Cargo
+   feature.** THE SCENARIO: wasm-bindgen 0.2.127 has no such crate feature — it
+   is `wasm-pack build --weak-refs`, so it can only be enforced where builds are
+   spelled out. It is the backstop for the handles that remain (`FormatOpts`,
+   `Edits`, `Splices`), which are still freed explicitly. `using` /
+   `Symbol.dispose` is not used anywhere: it crashes older webviews (ruled).
+   Sound, high.
+6. **`WANTS_COMMIT` moved into the spike, and the wrapper gained a comment
+   saying why rather than a replacement constant.** THE SCENARIO: which reads an
+   editor needs per accepted change is a CodeMirror probe's opinion — the spike
+   already had to OR `TOKEN_SPANS` onto it, which is the tell. `WANTS` and
+   `WANTS_ALL` stay; the app composes `COMMIT_WANTS` from bits. Sound, high.
+7. **The lib.rs native tests moved onto a `reads()` helper.** THE SCENARIO:
+   `js_sys` values cannot be built off wasm, so the old native tests over the
+   `Analysis` handle would panic in the shim instead of reading numbers. Same
+   split the file already used for `merged` / `splices`. The BOUNDARY test
+   (`tests/node.rs`) now reads the object's keys BY NAME, which is the drift
+   check the plain object needs and the handle did not. Sound, high.
+8. **Packaging (Will's mid-pass ruling): both distributed builds are
+   COMMITTED.** `pkg-web/` (`--target web`, explicit `init()`) and
+   `pkg-bundler/` (the default) are in the tree; only the scratch `pkg/` and
+   `pkg-node/` stay ignored. A hand-written `onion-wasm/package.json` sits ABOVE
+   the two generated ones and maps subpaths (`.` → bundler, `./web` → web,
+   `./web/wasm`, `./schema`, `./diagnostics.json`) — chosen over editing either
+   generated `package.json`, which the next `wasm-pack build` would overwrite.
+   `"private": true` on it so nothing can be `npm publish`ed by accident; a git
+   install ignores the field. ONE build per target, full default features — no
+   lean prebuilts, no consumer asking. Sound, high.
+9. **`wasm-pack` writes a `.gitignore` of `*` into every out-dir**, which would
+   silently keep the committed artifacts out of a tag. The sync script deletes
+   both, and the README's build block says so. Sound, high.
+10. **The spike vendors `pkg-web/` under that name, not `pkg/`.** THE SCENARIO:
+    with two targets committed upstream, a bare `pkg/` in the consumer no longer
+    says which one is in it. Sound, high.
+11. **Names inside the spike followed the crate: `[galley]` log tags →
+    `[engine]`, `window.__galleyReady` → `__engineReady`, `/tmp/galley-probe` →
+    `/tmp/engine-probe`, the re-exported `GalleyBlock`/`GalleyLine`/`GalleySpan`
+    → `Engine*`.** THE SCENARIO: leaving them would teach the wrong name at
+    every console line and screenshot path. PERF.md's and README-SPIKE.md's run
+    commands were updated with them (they are instructions); GAPS.md got a
+    header note instead, because it is a dated report and rewriting its body
+    would be rewriting history. Sound, high.
+12. **`src/cm/grammar/` and `scripts/probe-grammar.mjs` deleted from the
+    spike.** Verified no live import: the only references left were a comment in
+    `probe-cm.mjs`, prose in `cmWysiwyg.md`, and the demo book's own text. The
+    reference model predates `analyze` supplying the same structure. `cmWysiwyg.md`
+    got a note at the top saying the model is gone and its RULES are live in
+    `src/cm/`; the demo book's text was left alone, because the probe asserts
+    against those bytes. Sound, high.
+13. **Not done.** The subdirectory problem for GitHub-tag installs is RECORDED,
+    not solved: `npm i github:org/usfm_onion_2#tag` installs the repo root, and
+    `onion-wasm/` is not the root. That wants a decision (subdirectory-aware
+    installer, or a split publish repo) before anyone is told to install from a
+    tag; it is in the sketch's §Distribution.
+
+## pass 11 — content_from single-delimiter (2026-08-25, self-report)
+
+The bug Will hit driving the editor (GAPS.md ask 14, his framing): `analyze`
+emitted `content_from` as the TOKEN's end, and the scanner's delimiter fold gives
+a marker/designator token its WHOLE horizontal-whitespace run. Verified live
+before touching anything — `\v 1 Put` → `content_from` 13; type one space at 13;
+`\v 1  Put` → `content_from` 14. The editor hides `[num_to, content_from)` as
+chrome, so it hid the byte the author had just typed: silent, invisible document
+growth. `format`'s delimiter-single row already called run-beyond-one-byte
+trimmable, so the two surfaces contradicted each other over the same bytes.
+
+1. **The fix is at the EMIT layer; the scanner's fold is untouched.** THE
+   SCENARIO: the fold is what makes a marker token lossless and every other
+   consumer (format's `delimiter`, `trimmed` for diagnostic anchors) depends on
+   the token owning its run. One helper, `content_after`, is the whole change:
+   payload label end + ONE delimiter byte when the folded run is non-empty, the
+   label's end when it is empty. Sound, high.
+2. **Applied UNIFORMLY, not just to `verse_anchors` where it was reported.**
+   THE SCENARIO: `\p    text` had the identical hole with no `num_to` to clamp
+   against — the editor hid four spaces. So `chapters.content_from`,
+   `blocks.content_from`, `lines.content_from` and `verse_anchors.content_from`
+   all run through the same helper, and `blocks` grew a `source` parameter to do
+   it. Sound, high.
+3. **The ABSENT-designator slot moved with it.** THE SCENARIO: `\v   ` with no
+   designator collapsed the propped-open slot onto the MARKER token's end, which
+   is past the whole run — the same disease one level over. It now collapses
+   onto the marker's own `content_after`, so `\v   ` props the slot open at 3,
+   not 5. `\v ` (one space) is unchanged, which is why no existing test moved.
+   Sound, high.
+4. **`note_parts` had the same disease and was fixed with it.** THE SCENARIO
+   (checked, present): a MARKUP part carried its token's whole run, so a space
+   typed after `\ft ` became frozen apparatus chrome; and a CALLER's run beyond
+   its label belonged to NO part at all, so `\f +   \ft` left three bytes the
+   "parts partition the extent" contract did not cover. Now MARKUP is the marker
+   plus one delimiter, CALLER stays the trimmed label (it is the analogue of a
+   designator's NUMBER span, not of `content_from`), and the remainder of either
+   run comes back as ORIGIN/BODY — leading content whitespace, merged into the
+   text run that follows it. `\f +   \ft   note\f*` → CALLER `+`, BODY `  `,
+   MARKUP `\ft `, BODY `  note`, MARKUP `\f*`. Sound, medium: it is the
+   consistent reading, and an apparatus that froze MARKUP had the same silent
+   growth, but nobody has driven the apparatus into it yet.
+5. **The note's own OPENER is still not a part.** THE SCENARIO: `\f  + x` — the
+   opener token is skipped outright by `note_parts`, so its extra space is
+   unpartitioned like the rest of the opener. Left alone: the opener is chrome
+   the EXTENT names, and making it a part would change what "the parts partition
+   the extent" has always meant. Recorded rather than fixed. Sound, medium.
+6. **The delimiter is DERIVABLE, not a new field.** THE SCENARIO: the ask
+   offered "report the delimiter as its own span". `[num_to, content_from)` is
+   now exactly one byte or empty by construction, so a span would be redundant
+   wire. No stride changed. Documented in `analyze.rs`'s module doc, the four
+   read docs, and the wrapper's `Chapter`/`Line`/`Block`/`VerseAnchor` types.
+   Sound, high.
+
+### Will's three rulings, as implemented — PROVISIONAL, pending his review
+
+All three fall out of the single rule; none needed a special case, which is the
+argument that the rule is the right one.
+
+7. **`\v 1\ttext`: the single delimiter byte is the TAB.** `content_from ==
+   num_to + 1` whichever horizontal-whitespace byte sits there (`payload_label`
+   already trims SPACE and TAB alike). `format`'s delimiter-single row
+   normalizes it to a space when run, so the two surfaces agree on the byte
+   count first and the spelling second. PROVISIONAL.
+8. **`\v 1` at end of line, content on the next line: `content_from ==
+   num_to`.** No horizontal delimiter EXISTS to step over — newlines never fold
+   — so the propped-open slot sits at EOL and the Newline token stays visible
+   structure. This is the one case where the delimiter span is EMPTY, and it is
+   why the rule is "+1 when the run is non-empty" rather than "+1". PROVISIONAL.
+9. **`\v 1` + trailing spaces + no content: `content_from == num_to + 1`.** The
+   remaining spaces are visible TRAILING whitespace, which format's at-line-end
+   delimiter rule deletes (its `at_line_end` branch replaces the run with `b""`).
+   PROVISIONAL.
+
+### Tests
+
+10. **The bug test replays the KEYSTROKE, it does not pin a number.** THE
+    SCENARIO: a test asserting `content_from == 13` would pass against a future
+    emitter that was wrong in a new way. `typing_a_space_at_content_from_...`
+    analyses `\v 1 Put`, splices one space in AT the emitted `content_from`,
+    re-analyses, and asserts the boundary is unchanged and the byte at it is the
+    space. Sound, high.
+11. **The corpus oracle's reference emitter re-derives the rule, it does not
+    call the helper.** `ref_content_from` counts the trailing SPACE/TAB run off
+    the bytes and keeps one; `analyze` reaches the same offsets through
+    `payload_label`. Green on all 226 books. Sound, high.
+12. **Nothing in the existing unit tests moved, and no corpus pin moved.** THE
+    SCENARIO worth recording: every example in the module doc, the read docs and
+    the existing tests uses a SINGLE delimiter, where old and new rules agree —
+    so the whole suite (`--include-ignored`) was green with zero pin edits. The
+    only rows that move in a real book are ones with a multi-byte run, and the
+    oracle re-derives those independently rather than pinning them.
+
+### Wrapper ergonomics (Will's mid-pass addition)
+
+13. **`wants({...})` is a TS-only helper; the wire tag stays `wants: u32`.** THE
+    SCENARIO, and the argument: a misspelled key in an object crossing into wasm
+    would be silently ignored and the read would come back empty with no error.
+    In TS an object literal cannot carry a property the `Wants` interface does
+    not declare, so the typo is a compile error. `WANTS` stays exported for
+    anyone composing bits dynamically. Sound, high.
+14. **The `Wants` keys are named after the DECODER METHODS, not the bit
+    constants**: `chapters`, `blocks`, `lines`, `notes`, `tokens`, `textRuns`,
+    `verseAnchors`, `diagnostics`. THE SCENARIO forcing a choice: the bits are
+    `NOTE_EXTENTS`/`TOKEN_SPANS`/`VERSE_ANCHORS` but the methods are
+    `notes()`/`tokens()`/`verseAnchors()`, and a consumer writes the ask and the
+    read in the same file — so what you ask for should be spelled the way you
+    read it back. `notes` covers both `notes()` and `noteParts()`, which is the
+    one key that is not one-to-one, and its doc says so. Sound, medium: it is a
+    naming call, and the other direction (mirror the bit names) is defensible.
+15. **There is no wrapper-level `analyze` to overload.** THE SCENARIO: the
+    better-shaped option Will offered — `analyze(text, Wants | number)` — has no
+    home, because consumers call the wasm export directly and the wrapper is
+    decoders only. A free `wants()` function was the available shape. Sound,
+    high.
+
+### Verification
+
+Engine: `cargo test --workspace -- --include-ignored` green (335 lib tests plus
+every corpus oracle), `cargo clippy --all-targets --workspace` clean, both wasm32
+targets built by `scripts/sync-engine.sh`. Spike: re-vendored, `npm run build`
+clean, `npm run probe:engine` 17/17 — the 16 prior checks plus a new
+`typed-space-is-content-not-chrome` that types a space at `content_from`, asserts
+the boundary did not move, asserts the line's ON-SCREEN text grew by one
+character (the byte rendered instead of being hidden), and types a second
+character to show it lands adjacent to visible text. No local clamp existed at
+`decorations.ts` `numberSlot` or `structure.ts` `chromeRanges`/`chromeGuard` and
+none was needed — those sites read `content_from` and self-healed.
+
+## pass 12 — empty-paragraph chains (2026-08-25, self-report)
+
+Will's live bug: `\p` ␊ `\p` ␊ `\p` ␊ `\p before …` lost ONE empty per format
+run. Pass 5 entry 9 declined the chain on purpose — the fix oracle judges a fix
+at its own SITE, and deleting one member leaves another empty paragraph at that
+byte. Will's ruling: N repeated empties reduce in one run. The fix is now
+CHAIN-AWARE, and pass 5 entry 9 is superseded by entry 1 below.
+
+1. **THE RULE, as implemented.** A maximal RUN of consecutive empty paragraphs
+   sharing one identical spelling, followed by a same-spelling paragraph that
+   HOLDS CONTENT, is duplication: one fix deletes every extent in the run (each
+   marker plus the line endings under it, the existing extent logic unchanged).
+   The two refusals pass 5 banked are untouched — a mixed spelling (`\m` then
+   `\p`, and equally `\p\n\p\n\m text`) offers nothing, and a run whose survivor
+   is empty or is EOF offers nothing. `\p\n\p\n\q1` (en_ulb ISA) is the second
+   kind: the run is two identical `\p`s and its survivor is a `\q1`, so it stays
+   fixless, exactly as before.
+2. **The fix ANCHORS on the run's FIRST member; the rest keep fixless Info
+   findings.** THE SCENARIO forcing a choice: three empties are three
+   observations but one repair, and the report's fix side-table is per
+   observation. Filing the one fix on the first member makes "site repaired"
+   true for it (the byte becomes the surviving `\p`, which holds content) and
+   makes the other two disappear in the SAME transaction — the oracle's
+   condition 3 ("no code's count rises") covers them, and they are gone from the
+   re-lint. Filing it on the LAST member would work identically for the oracle
+   but reads backwards to a human clicking a diagnostic: the run starts at the
+   first. Sound, high.
+3. **The derivation stays at `Structure::finish`, and the recorded empties are
+   SORTED by opening token there.** THE SCENARIO: a run is a contiguous slice
+   only if the entries arrive in document order. They do today (a paragraph node
+   closes when the next one displaces it), but the grouping now reads run
+   adjacency off the SOURCE — "the token after this extent is the next recorded
+   empty's opening marker" — so a future close-order change degrades to no fix
+   rather than to a wrong extent. Finish-time is also what pass 5 entry 8 ruled
+   for the fused-vs-staged oracle's byte-identical fix links, and the whole
+   derivation moved inside that same loop, so the two paths still agree. Sound,
+   high.
+4. **`repaired()` in the fix tests now sends the FIXED slots only.** THE
+   SCENARIO: the helper asserted every observation of a code carries a fix,
+   which a chain deliberately breaks. Filtering is what the real dispatch does —
+   `format::harvest` skips a fixless observation — so the helper now models it.
+   `offers_fix` still proves a declaring row offers something. Sound, high.
+5. **The corpus count does NOT move: still 25 of 787.** Expected movement, and
+   there is none, which is itself the finding. Every run in the 226 books that
+   is survived by a same-spelling paragraph holding content is ONE marker long
+   (en_ulb ISA's `\q\n\q` pairs, en_ulb EZR's one `\p\n\p`, en_ult PSA's two
+   `\q1\n\q1`); the multi-member runs that exist — eight `\p\n\p` and one
+   `\b\n\b` — are all survived by a DIFFERENT spelling and were, and remain,
+   refused. The pin's comment now says so, so the next reader does not read 25
+   as "the chain work did nothing".
+
+### Verification
+
+Engine: `cargo test --workspace --release -- --include-ignored` green (336 lib
+tests plus every corpus oracle, including `every_corpus_fix_passes_the_oracle`
+and the format corpus's convergence-in-one invariant), `cargo clippy --workspace
+--all-targets` clean, `cargo build --target wasm32-unknown-unknown -p onion-wasm`
+clean. `onion-wasm/diagnostics.json` needed no regeneration and
+`codegen_output_matches_input` confirms it — the row table is unchanged, only the
+fix derivation behind it. debug/ dumps unchanged for the same reason: no corpus
+book formats differently. Spike (`../onion-2-spike`): re-vendored via
+`scripts/sync-engine.sh`, `npm run build` clean, `npm run probe:engine` 18/18 —
+the 17 prior checks plus a new `format-empty-paragraph-chain` that formats the
+book clean, appends Will's exact shape (`\p chain before` ␊ three empty `\p` ␊
+`\p chain after`), asserts the preview reports exactly ONE edit, applies it once,
+and asserts the tail collapsed to the two content paragraphs with a re-format
+proposing zero.

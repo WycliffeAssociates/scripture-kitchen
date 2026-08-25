@@ -1,0 +1,18 @@
+{
+  "name": "onion-wasm",
+  "type": "module",
+  "description": "The JS doorway over the USFM engine — piece 2 of the five-crate layout (bindgen, .d.ts, UTF-16 walls).",
+  "version": "0.1.0",
+  "files": [
+    "onion_wasm_bg.wasm",
+    "onion_wasm.js",
+    "onion_wasm_bg.js",
+    "onion_wasm.d.ts"
+  ],
+  "main": "onion_wasm.js",
+  "types": "onion_wasm.d.ts",
+  "sideEffects": [
+    "./onion_wasm.js",
+    "./snippets/*"
+  ]
+}

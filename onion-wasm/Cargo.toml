@@ -1,0 +1,28 @@
+[package]
+name = "onion-wasm"
+version = "0.1.0"
+edition = "2024"
+description = "The JS doorway over the USFM engine — piece 2 of the five-crate layout (bindgen, .d.ts, UTF-16 walls)."
+
+[lib]
+name = "onion_wasm"
+# cdylib is what `wasm-pack build` links; rlib keeps `cargo test -p onion-wasm`
+# and a native consumer working against the same code.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+usfm_onion_2 = { path = ".." }
+wasm-bindgen = "0.2"
+# The plain-object `analyze` return. `Object`/`Reflect`/`Uint32Array` only —
+# lighter than serde-wasm-bindgen, which would pull serde's derive machinery
+# into the hot read path for a fourteen-key object built once per call.
+js-sys = "0.3"
+# RULED (sketches/wasm-analyze.md, 2026-08-24): serde lives HERE and never in
+# the engine. Its one job is the diff skeleton — a cold, modal-open path where
+# the old editors' camelCase JSON contract is worth having back verbatim.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+# The ONE boundary test (`wasm-pack test --node`). Native tests need nothing.
+wasm-bindgen-test = "0.3"

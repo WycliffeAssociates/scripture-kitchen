@@ -4,10 +4,12 @@
 //! It exists because `generated.rs` is CHECKED IN — consumers never run codegen,
 //! so nothing else would notice a row edit that was not regenerated.
 
+use usfm_onion_2::lint::{self, LINT_ROWS};
 use usfm_onion_2::tables::schema::{Numbering, SpellingShape};
 use usfm_onion_2::tables::{emit, generated, rows};
 
 const CHECKED_IN: &str = include_str!("../src/tables/generated.rs");
+const CHECKED_IN_DIAGNOSTICS: &str = include_str!("../onion-wasm/diagnostics.json");
 
 #[test]
 fn generated_rs_is_not_stale() {
@@ -35,6 +37,44 @@ fn generated_rs_is_not_stale() {
             CHECKED_IN.lines().count(),
             fresh.lines().count(),
         ),
+    }
+}
+
+/// The same deal for the diagnostics side-table the JS bundle loads: it is the
+/// ONE place a lint code's name, ladder rung and message template reach a
+/// consumer, and nothing else would notice a row edit that was not regenerated.
+#[test]
+fn diagnostics_json_is_not_stale() {
+    let fresh = lint::diagnostics_json();
+    if fresh == CHECKED_IN_DIAGNOSTICS {
+        return;
+    }
+    let at = fresh
+        .lines()
+        .zip(CHECKED_IN_DIAGNOSTICS.lines())
+        .position(|(a, b)| a != b);
+    panic!(
+        "onion-wasm/diagnostics.json is STALE — run `cargo run --bin codegen`.\n\
+         First difference at line {:?}:\n  checked in: {}\n  fresh:      {}",
+        at.map(|line| line + 1),
+        at.and_then(|line| CHECKED_IN_DIAGNOSTICS.lines().nth(line))
+            .unwrap_or("<eof>"),
+        at.and_then(|line| fresh.lines().nth(line)).unwrap_or("<eof>"),
+    );
+}
+
+/// The side-table is INDEX-ADDRESSED: a finding carries `code` as a number, so
+/// entry `n` must be the `n`th row and the array must be dense.
+#[test]
+fn the_side_table_is_dense_and_index_addressed() {
+    let json = lint::diagnostics_json();
+    for (code, row) in LINT_ROWS.iter().enumerate() {
+        assert_eq!(row.code as usize, code, "{} is out of order", row.name);
+        assert!(
+            json.contains(&format!("\"code\": {code}, \"name\": \"{}\"", row.name)),
+            "{} is missing from the side table",
+            row.name
+        );
     }
 }
 

@@ -6,3 +6,9 @@ planning/spec_contexts_diff.py
 planning/mine_fastpath_windows.py
 src/experiments/sweeps.rs
 debug/
+# wasm-pack's DISTRIBUTED output is COMMITTED: onion-wasm/pkg-web (explicit
+# init, `--target web`) and onion-wasm/pkg-bundler (the default `.` export).
+# Consumers install from a GitHub tag, so the built artifacts are in the tree.
+# Only scratch builds are ignored — the default out-dir and a node build.
+/onion-wasm/pkg
+/onion-wasm/pkg-node

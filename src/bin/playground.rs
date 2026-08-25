@@ -21,6 +21,7 @@
 //   cargo run --release --bin playground -- --cst-stats        // untimed: CloseReason distribution over the corpus
 //   cargo run --release --bin playground -- --lint             // lex + cst::build + lint (the whole pipeline)
 //   cargo run --release --bin playground -- --lint-stats       // untimed: per-code finding counts (and fix counts)
+//   cargo run --release --bin playground -- --codes            // untimed: the diagnostics side-table, browsable (name, ladder, template, fix, example)
 //   cargo run --release --bin playground -- --usj-only         // pre-lexed+built; times the USJ serialization alone
 //   cargo run --release --bin playground -- --usx-only         // pre-lexed+built; times the USX serialization alone
 //   cargo run --release --bin playground -- --html-only        // pre-lexed+built; times the HTML serialization alone
@@ -75,6 +76,9 @@ enum Mode {
     /// string assembly a keys/lines pair costs.
     VrefOnly,
     Lint,
+    /// The editor wire: lex + cst + lint + toc + mask + the emit and the
+    /// UTF-16 conversion, all seven reads. The `--lint` row is its floor.
+    Analyze,
     /// The `*Only` family is pre-lexed AND pre-built: the lex and the build are
     /// off the clock, so the timing is the named pass alone.
     LintOnly,
@@ -96,8 +100,10 @@ fn main() {
     let mut path: Option<PathBuf> = None;
     let mut mode = Mode::Serial;
     let mut iters: u32 = 1;
+    let mut analyze_wants = usfm_onion_2::analyze::wants::ALL;
     let mut cst_stats = false;
     let mut lint_stats = false;
+    let mut codes = false;
     let mut fix_preview: Option<String> = None;
     let mut toc_trace = false;
     let mut mask_trace: Option<PathBuf> = None;
@@ -155,6 +161,14 @@ fn main() {
             "--cst-only" => mode = Mode::CstOnly,
             "--cst-stats" => cst_stats = true,
             "--lint" => mode = Mode::Lint,
+            "--analyze" => mode = Mode::Analyze,
+            // The wants bitmask `--analyze` asks for; default is every read.
+            "--analyze-wants" => {
+                analyze_wants = args
+                    .next()
+                    .and_then(|n| n.parse().ok())
+                    .expect("--analyze-wants takes a bitmask");
+            }
             "--lint-only" => mode = Mode::LintOnly,
             "--usj-only" => mode = Mode::UsjOnly,
             "--usx-only" => mode = Mode::UsxOnly,
@@ -163,6 +177,9 @@ fn main() {
             "--fused-noop" => mode = Mode::FusedNoop,
             "--fused-cst" => mode = Mode::FusedCst,
             "--lint-stats" => lint_stats = true,
+            // The side-table, made browsable — the `{anchor}` conventions are
+            // only discoverable by rendering one.
+            "--codes" => codes = true,
             // Implies --lint-stats: the same sweep, plus before/after windows
             // for the first few fixes of ONE code.
             "--fix-preview" => {
@@ -248,6 +265,7 @@ fn main() {
         Mode::MaskOnly => "mask-only",
         Mode::VrefOnly => "vref-only",
         Mode::Lint => "lint",
+        Mode::Analyze => "analyze",
         Mode::LintOnly => "lint-only",
         Mode::UsjOnly => "usj-only",
         Mode::UsxOnly => "usx-only",
@@ -274,6 +292,10 @@ fn main() {
 
     if cst_stats {
         report_cst_stats(&sources);
+        return;
+    }
+    if codes {
+        report_codes(&sources);
         return;
     }
     if lint_stats {
@@ -315,6 +337,7 @@ fn main() {
             | Mode::VrefOnly
             | Mode::Lint
             | Mode::LintOnly
+            | Mode::Analyze
             | Mode::Fused
             | Mode::FusedNoop
             | Mode::FusedCst
@@ -352,7 +375,7 @@ fn main() {
 
     let started = Instant::now();
     for _ in 0..iters {
-        run_once(&sources, &prelexed, &prebuilt, mode);
+        run_once(analyze_wants, &sources, &prelexed, &prebuilt, mode);
     }
     let elapsed = started.elapsed();
 
@@ -391,7 +414,7 @@ fn verify_variant(sources: &[String], mode: Mode) {
         Mode::Toc | Mode::TocOnly => return,
         Mode::Cst | Mode::CstOnly => return,
         Mode::Mask | Mode::MaskOnly | Mode::VrefOnly => return,
-        Mode::Lint | Mode::LintOnly => return,
+        Mode::Lint | Mode::LintOnly | Mode::Analyze => return,
         Mode::UsjOnly | Mode::UsxOnly | Mode::HtmlOnly => return,
         // Identity is tests/fused_identity.rs's job — whole reports, not just
         // token streams, so it cannot be a `fn(&str) -> Vec<Token>` here.
@@ -432,6 +455,7 @@ fn verify_variant(sources: &[String], mode: Mode) {
 }
 
 fn run_once(
+    wants: u32,
     sources: &[String],
     prelexed: &[Vec<usfm_onion_2::Token>],
     prebuilt: &[usfm_onion_2::cst::Cst],
@@ -443,6 +467,11 @@ fn run_once(
                 let tokens = usfm_onion_2::lex(source);
                 let cst = usfm_onion_2::cst::build(&tokens);
                 std::hint::black_box(usfm_onion_2::lint::lint(source.as_bytes(), &tokens, &cst));
+            }
+        }
+        Mode::Analyze => {
+            for source in sources {
+                std::hint::black_box(usfm_onion_2::analyze::analyze(source, wants, None));
             }
         }
         Mode::Fused => {
@@ -1081,6 +1110,91 @@ fn window_text(source: &[u8], m: &Mask, window: &std::ops::Range<u32>) -> String
 /// Untimed corpus sweep: what does lint actually FIND in the wild? Per-code
 /// counts, then a sample of each code's sites (book, code, anchor offset) —
 /// enough to eyeball a class before pinning its count in tests/lint_corpus.rs.
+/// Every lint code as a UI would meet it: identity, ladder, template, fix
+/// label, and ONE rendered message off real bytes.
+///
+/// The rendering is the point. `{anchor}` is a token span the consumer slices
+/// out of its own document, and what that slice actually contains — the
+/// marker's backslash, the delimiter the scanner folded on — is not something a
+/// template reads like.
+fn report_codes(sources: &[String]) {
+    use usfm_onion_2::analyze::{NONE, analyze, stride, wants};
+    use usfm_onion_2::lint::{LINT_ROWS, Severity, UsfmVersion};
+
+    // The first real occurrence of each code, rendered the way `onion-wasm.ts`'s
+    // `message()` renders it: template plus two document slices.
+    let mut example: Vec<Option<String>> = vec![None; LINT_ROWS.len()];
+    for source in sources {
+        if example.iter().all(Option::is_some) {
+            break;
+        }
+        let a = analyze(source, wants::DIAGNOSTICS, None);
+        let units: Vec<u16> = source.encode_utf16().collect();
+        let slice = |from: u32, to: u32| String::from_utf16_lossy(&units[from as usize..to as usize]);
+        for row in a.diagnostics.chunks_exact(stride::DIAGNOSTICS) {
+            let slot = row[0] as usize;
+            if example[slot].is_some() {
+                continue;
+            }
+            let second = if row[3] == NONE {
+                String::new()
+            } else {
+                slice(row[3], row[4])
+            };
+            example[slot] = Some(
+                LINT_ROWS[slot]
+                    .template
+                    .replace("{anchor}", &slice(row[1], row[2]))
+                    .replace("{second}", &second)
+                    .replace("{aux}", &row[5].to_string()),
+            );
+        }
+    }
+
+    let name = |severity: Option<Severity>| match severity {
+        None => "gated",
+        Some(Severity::Error) => "error",
+        Some(Severity::Warning) => "warning",
+        Some(Severity::Info) => "info",
+        Some(Severity::Hint) => "hint",
+        Some(Severity::Form) => "form",
+    };
+    let version = |v: UsfmVersion| match v {
+        UsfmVersion::V3_0 => "3.0",
+        UsfmVersion::V3_2 => "3.2",
+        UsfmVersion::V4_0 => "4.0",
+    };
+
+    println!(
+        "codes n={} schema={} (examples from {} loaded source(s))",
+        LINT_ROWS.len(),
+        usfm_onion_2::lint::catalog::SCHEMA,
+        sources.len()
+    );
+    for (code, row) in LINT_ROWS.iter().enumerate() {
+        let mut ladder = String::from(name(row.severity));
+        for (rung, at) in row.escalation {
+            ladder.push_str(&format!(" → {}@{}", name(Some(*at)), version(*rung)));
+        }
+        println!();
+        println!("[{code:>2}] {}  ({:?})", row.name, row.category);
+        println!("     severity  {ladder}");
+        println!("     aux       {:?}", row.aux);
+        println!("     template  {:?}", row.template);
+        match row.fix_label {
+            Some(label) => println!("     fix       {label:?}{}", if row.formatter { "  (also a formatting action)" } else { "" }),
+            None => println!("     fix       —"),
+        }
+        match &example[code] {
+            Some(message) => println!("     example   {message:?}"),
+            None if row.is_form() => {
+                println!("     example   — (a Form row: the formatter's channel, never a diagnostic)")
+            }
+            None => println!("     example   — (not triggered by the loaded corpus)"),
+        }
+    }
+}
+
 fn report_lint_stats(sources: &[String], root: &Path, preview_of: Option<&str>) {
     use usfm_onion_2::lint::LINT_ROWS;
 

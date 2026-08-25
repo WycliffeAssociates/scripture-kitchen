@@ -96,10 +96,11 @@ pub(crate) struct Structure {
     pending_is_terminator: bool,
     /// A container `-e` point node awaiting its verdict, or [`NO_TOKEN`].
     pending_end: u32,
-    /// `(observation slot, node id)` per empty paragraph, resolved into a fix at
-    /// [`Self::finish`] — the repair depends on the paragraph that DISPLACED it,
-    /// which the close event has not reached. The only allocation in this
-    /// machine, and it stays empty on a book with no empty paragraph.
+    /// `(observation slot, node id)` per empty paragraph, resolved into fixes at
+    /// [`Self::finish`] — the repair depends on the whole RUN of empties this
+    /// one opens and on the paragraph that survives it, neither of which the
+    /// close event has reached. The only allocation in this machine, and it
+    /// stays empty on a book with no empty paragraph.
     empty_paragraphs: Vec<(u32, u32)>,
 }
 
@@ -185,10 +186,33 @@ impl Structure {
         // The FORMATTER half of `empty-paragraph`, in the one place the whole
         // token stream is in hand — the same finish-time shape the fused
         // experiment already needs for its renumber correction.
-        for (slot, id) in std::mem::take(&mut self.empty_paragraphs) {
-            if let Some(extent) = duplicated_by_the_next_paragraph(doc, id) {
-                out.attach_fixed(slot, extent.start, extent.end, b"");
+        let mut empties = std::mem::take(&mut self.empty_paragraphs);
+        // By opening token, so a RUN is a contiguous slice: nodes close in
+        // document order today, and the grouping below reads adjacency off the
+        // source rather than trusting that.
+        empties.sort_unstable_by_key(|(_, id)| doc.cst.nodes[*id as usize].token);
+        let mut at = 0;
+        while at < empties.len() {
+            let mut last = at;
+            while last + 1 < empties.len()
+                && twin_after(doc, empties[last].1)
+                    == Some(doc.cst.nodes[empties[last + 1].1 as usize].token as usize)
+            {
+                last += 1;
             }
+            // The whole run is duplication iff its SURVIVOR is a same-spelling
+            // paragraph holding content, and then ONE fix, filed on the run's
+            // FIRST member, deletes every extent in it. Per-member deletions
+            // would each fail "the site is repaired" — deleting one leaves
+            // another empty paragraph at that byte — which is why the run is the
+            // unit. The other members keep their fixless findings: the same
+            // transaction repairs them.
+            if twin_after(doc, empties[last].1).is_some_and(|next| holds_content(doc, next + 1)) {
+                let start = doc.cst.extent(empties[at].1, doc.tokens).start;
+                let end = doc.cst.extent(empties[last].1, doc.tokens).end;
+                out.attach_fixed(empties[at].0, start, end, b"");
+            }
+            at = last + 1;
         }
     }
 
@@ -353,13 +377,12 @@ fn content_end(source: &[u8], extent: Range<u32>, floor: u32) -> u32 {
     at
 }
 
-/// The empty paragraph's extent — its marker plus the line endings under it —
-/// WHEN deleting it is unambiguous: the paragraph that displaced it is spelled
-/// exactly the same, so `\p\p` is plain duplication.
+/// The token index of the paragraph that DISPLACED this one, when the two are
+/// spelled exactly the same — `\p\p` is plain duplication.
 ///
 /// A MIXED pair (`\m\p`) says nothing about which of the two was intended, so it
 /// gets no fix at all: the diagnostic points and a human chooses.
-fn duplicated_by_the_next_paragraph(doc: &Doc, id: u32) -> Option<Range<u32>> {
+fn twin_after(doc: &Doc, id: u32) -> Option<usize> {
     let extent = doc.cst.extent(id, doc.tokens);
     // Tokens partition the source, so the displacer is one binary search away.
     let at = doc.tokens.partition_point(|token| token.start < extent.end);
@@ -370,17 +393,15 @@ fn duplicated_by_the_next_paragraph(doc: &Doc, id: u32) -> Option<Range<u32>> {
         return None;
     }
     let opener = &doc.tokens[doc.cst.nodes[id as usize].token as usize];
-    let same = trim_end_ws(span_of(doc.source, next)) == trim_end_ws(span_of(doc.source, opener));
-    (same && holds_content(doc, at + 1)).then_some(extent)
+    (trim_end_ws(span_of(doc.source, next)) == trim_end_ws(span_of(doc.source, opener)))
+        .then_some(at)
 }
 
 /// Does the paragraph that starts at `from` hold anything?
 ///
-/// A CHAIN of identical empties (`\p\n\p\n\q1`, real in en_ulb ISA) would
-/// otherwise offer every member a fix "repaired by" the next member, which is no
-/// repair at all: the fix oracle judges a fix by its own SITE, and the site is
-/// still empty afterwards. Only the empty whose survivor holds something is
-/// duplication.
+/// A CHAIN of identical empties (`\p\n\p\n\q1`, real in en_ulb ISA) ends at the
+/// first survivor that holds something; a chain whose survivor is empty (or is
+/// EOF) is not duplication at all and gets no fix.
 fn holds_content(doc: &Doc, from: usize) -> bool {
     doc.tokens[from..]
         .iter()

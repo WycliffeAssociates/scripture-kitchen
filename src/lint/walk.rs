@@ -54,8 +54,9 @@ impl Emit {
     ///
     /// The one derivation that cannot happen at its own emit site:
     /// `empty-paragraph` is judged when its node closes and repaired only if the
-    /// paragraph that DISPLACED it is spelled the same and holds content, which
-    /// is a fact about tokens the close event has not reached yet.
+    /// RUN of identical empties it opens is survived by a paragraph spelled the
+    /// same that holds content, which is a fact about tokens the close event has
+    /// not reached yet.
     pub(crate) fn attach_fixed(&mut self, slot: u32, from: u32, to: u32, text: &[u8]) {
         let code = self.observations[slot as usize].code;
         self.fix_of[slot as usize] = self.splice(code, &[(from, to, text)]);

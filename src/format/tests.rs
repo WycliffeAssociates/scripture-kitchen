@@ -421,6 +421,17 @@ fn only_the_unambiguous_empty_paragraph_is_deleted() {
     // format changes nothing here.
     let mixed = "\\id GEN\n\\c 1\n\\m\n\\p text\n";
     assert_eq!(formatted(mixed, &FormatOptions::default()), mixed);
+
+    // A RUN of identical empties collapses in ONE run — the fix is chain-aware,
+    // so N repeats need N-of-nothing passes, not N.
+    let chain = "\\id GEN\n\\c 1\n\\p a\n\\p\n\\p\n\\p\n\\p b\n";
+    let once = formatted(chain, &FormatOptions::default());
+    assert_eq!(once, "\\id GEN\n\\c 1\n\\p a\n\\p b\n");
+    assert_eq!(formatted(&once, &FormatOptions::default()), once);
+
+    // A chain whose survivor is empty at EOF is left alone.
+    let dangling = "\\id GEN\n\\c 1\n\\p a\n\\p\n\\p\n\\p\n";
+    assert_eq!(formatted(dangling, &FormatOptions::default()), dangling);
 }
 
 #[test]

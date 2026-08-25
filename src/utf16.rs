@@ -200,6 +200,105 @@ impl<'s> Utf16Index<'s> {
     }
 }
 
+/// A STREAMING `(byte, utf16)` position over one string — the bulk-out sibling
+/// of [`Utf16Index`].
+///
+/// ```text
+/// let mut c = Cursor::new("\\v 1 λόγος ἦν".as_bytes());
+/// c.to_utf16(5)  == 5      // walks 0 → 5
+/// c.to_utf16(16) == 11     // walks 5 → 16, never re-counting the prefix
+/// c.to_byte(13)  == 20     // the same walk, driven from the other side
+/// ```
+///
+/// [`Utf16Index`] answers random-access queries and costs 1.6% of the source in
+/// heap. A cursor answers a SORTED sequence of queries in one pass and costs
+/// nothing: converting every offset an [`analyze`](mod@crate::analyze) read emits is
+/// one sweep of the document, not one binary search per offset. Both directions
+/// are total and snap the same way as the index; a query that goes BACKWARD is
+/// legal and rewinds to the start, so a caller that sorts is fast and a caller
+/// that doesn't is still correct.
+#[derive(Debug, Clone)]
+pub struct Cursor<'s> {
+    source: &'s [u8],
+    /// A char boundary of `source`, and `utf16 == utf16_len(&source[..byte])`.
+    byte: usize,
+    utf16: u32,
+}
+
+impl<'s> Cursor<'s> {
+    pub fn new(source: &'s [u8]) -> Self {
+        Self {
+            source,
+            byte: 0,
+            utf16: 0,
+        }
+    }
+
+    /// Back to the start of the string — what a backward query does implicitly,
+    /// and what a caller does between two independently sorted sequences.
+    pub fn reset(&mut self) {
+        self.byte = 0;
+        self.utf16 = 0;
+    }
+
+    /// The UTF-16 offset of a source byte offset, with [`Utf16Index::to_utf16`]'s
+    /// semantics (interior bytes snap down, past the end clamps).
+    pub fn to_utf16(&mut self, byte: u32) -> u32 {
+        let mut byte = (byte as usize).min(self.source.len());
+        while byte > 0 && byte < self.source.len() && self.source[byte] & 0xC0 == 0x80 {
+            byte -= 1;
+        }
+        if byte < self.byte {
+            self.reset();
+        }
+        self.utf16 += utf16_len(&self.source[self.byte..byte]);
+        self.byte = byte;
+        self.utf16
+    }
+
+    /// The source byte offset of a UTF-16 offset, with [`Utf16Index::to_byte`]'s
+    /// semantics (a surrogate interior snaps down, past the end clamps).
+    pub fn to_byte(&mut self, utf16: u32) -> u32 {
+        if utf16 < self.utf16 {
+            self.reset();
+        }
+        // Word-at-a-time skip, then the byte walk — the index's own two loops,
+        // started from where this cursor already stands instead of from a
+        // stride boundary.
+        while self.byte + 8 <= self.source.len() {
+            let step = utf16_len(&self.source[self.byte..self.byte + 8]);
+            if self.utf16 + step >= utf16 {
+                break;
+            }
+            self.utf16 += step;
+            self.byte += 8;
+        }
+        // The word skip can stop mid-character; its tail was counted whole at
+        // its lead, so stepping over it costs no units and restores the
+        // boundary the byte walk below reads lead bytes from.
+        while self.byte < self.source.len() && self.source[self.byte] & 0xC0 == 0x80 {
+            self.byte += 1;
+        }
+        while self.byte < self.source.len() {
+            if self.utf16 == utf16 {
+                return self.byte as u32;
+            }
+            let (width, step) = lead(self.source[self.byte]);
+            if self.utf16 + step > utf16 {
+                return self.byte as u32;
+            }
+            self.utf16 += step;
+            self.byte += width;
+        }
+        self.source.len() as u32
+    }
+
+    /// The whole string's UTF-16 length, leaving the cursor at the end.
+    pub fn len_utf16(&mut self) -> u32 {
+        self.to_utf16(self.source.len() as u32)
+    }
+}
+
 /// `(utf8 width, utf16 units)` for a lead byte.
 #[inline]
 fn lead(byte: u8) -> (usize, u32) {
@@ -288,6 +387,46 @@ mod tests {
     fn exact_at_every_boundary_of_the_zoo() {
         for source in zoo() {
             check_every_boundary(&source);
+        }
+    }
+
+    /// The streaming cursor answers exactly what the index answers — forward
+    /// (its fast path), backward (its rewind), and at every byte offset, not
+    /// only the boundaries.
+    #[test]
+    fn the_cursor_agrees_with_the_index() {
+        for source in zoo() {
+            let bytes = source.as_bytes();
+            let ix = utf16_index(bytes);
+
+            let mut forward = Cursor::new(bytes);
+            for at in 0..=bytes.len() as u32 {
+                assert_eq!(forward.to_utf16(at), ix.to_utf16(at), "fwd to_utf16 @{at}");
+            }
+            let mut backward = Cursor::new(bytes);
+            for at in (0..=bytes.len() as u32).rev() {
+                assert_eq!(backward.to_utf16(at), ix.to_utf16(at), "rev to_utf16 @{at}");
+            }
+
+            let units = ix.len_utf16();
+            let mut forward = Cursor::new(bytes);
+            for at in 0..=units {
+                assert_eq!(forward.to_byte(at), ix.to_byte(at), "fwd to_byte @{at}");
+            }
+            let mut backward = Cursor::new(bytes);
+            for at in (0..=units).rev() {
+                assert_eq!(backward.to_byte(at), ix.to_byte(at), "rev to_byte @{at}");
+            }
+
+            // Interleaved directions on ONE cursor: the two walks share the
+            // position, so a to_byte that landed mid-character must not confuse
+            // the next to_utf16.
+            let mut mixed = Cursor::new(bytes);
+            for at in 0..=bytes.len() as u32 {
+                let units = mixed.to_utf16(at);
+                assert_eq!(mixed.to_byte(units), ix.to_byte(units), "mixed @{at}");
+            }
+            assert_eq!(Cursor::new(bytes).len_utf16(), units);
         }
     }
 

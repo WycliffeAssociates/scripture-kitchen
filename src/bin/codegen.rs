@@ -9,6 +9,10 @@
 //! `tests/codegen_output_matches_input.rs` can regenerate to a buffer and fail
 //! the build when the checked-in file is stale.
 //!
+//! TWO artifacts now: the marker table (`src/tables/generated.rs`) and the
+//! diagnostics side-table the JS bundle loads (`onion-wasm/diagnostics.json` —
+//! `lint::catalog`). Both are checked in and both have a staleness test.
+//!
 //! Deliberately NOT emitted: `common_marker_checks`, the hot-marker fast path —
 //! built one pattern at a time and MEASURED, never speculated (the `priority`
 //! column is measurement, not a guess) — and the JS/TS registry + USJ
@@ -16,9 +20,11 @@
 
 use std::path::Path;
 
+use usfm_onion_2::lint;
 use usfm_onion_2::tables::{emit, rows};
 
 const OUT: &str = "src/tables/generated.rs";
+const DIAGNOSTICS: &str = "onion-wasm/diagnostics.json";
 
 fn main() -> std::io::Result<()> {
     let text = emit::generated_rs();
@@ -56,6 +62,22 @@ fn main() -> std::io::Result<()> {
             "CREATED"
         } else {
             "CHANGED — review the diff before committing"
+        }
+    );
+
+    let catalog = lint::diagnostics_json();
+    let path = Path::new(DIAGNOSTICS);
+    let stale = std::fs::read_to_string(path).unwrap_or_default() != catalog;
+    std::fs::write(path, &catalog)?;
+    println!("codegen → {DIAGNOSTICS}");
+    println!("  lint codes          {:>4}", lint::LINT_ROWS.len());
+    println!("  bytes written     {:>6}", catalog.len());
+    println!(
+        "  {}",
+        if stale {
+            "CHANGED — review the diff before committing"
+        } else {
+            "unchanged — checked-in file was already fresh"
         }
     );
     Ok(())

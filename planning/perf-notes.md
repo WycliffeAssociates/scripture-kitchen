@@ -176,7 +176,7 @@ from ../usfm_onion's profiling memory (diff-perf-sid-stringification,
   String sids, no token clones, no owned text anywhere in the skeleton.
   Onion's ms-per-book is therefore the FLOOR, not the target; measure at
   port time per the go-slow law (no rayon — parallelism deferred to
-  galley/braid).
+  galley (the workflows crate)).
 
 ### Measured after the port (2026-08-24, same machine)
 
@@ -205,3 +205,105 @@ per modified unit — 32.6ms on a 2.4MB aligned side) and it is opt-in.
 Replay is minimal, not per-unit: 679 modified units in the MRK pair emit 17
 `SpliceEdit`s, because adjacent changed blocks coalesce into one splice and
 an unchanged block costs none (a book against itself is ZERO edits).
+
+## 8. analyze: the editor wire (2026-08-24, same machine)
+
+`analyze(text, wants::ALL, None)` = lex + cst + lint + toc + the reader-text
+mask + the emit of all seven reads + the UTF-16 conversion of every offset in
+them. Best of 5 runs of 20 iterations, release, `playground --analyze` (per-read
+rows: `--analyze-wants <mask>`).
+
+| Book | `--serial` (lex) | `--lint` | `--analyze` (ALL) | analyze ÷ lint |
+|---|---|---|---|---|
+| en_ulb ZEC (35KB, median) | 0.020ms | 0.058ms | **0.201ms** | 3.5× |
+| en_ulb PSA (273KB, largest) | 0.331ms | 0.993ms | **3.08ms** | 3.1× |
+
+Per read, PSA, each bit ALONE (so each row includes the lex it cannot avoid,
+0.33ms, and the artifact it needs):
+
+| bit | read | PSA | what it pays for beyond lex |
+|---|---|---|---|
+| 1 | `chapters` | 0.51ms | toc |
+| 2 | `blocks` | 0.94ms | cst + a node sweep + a sorted-permutation conversion |
+| 4 | `note_extents` | 0.64ms | cst (few notes in Psalms) |
+| 8 | `token_spans` | 1.10ms | 30,892 rows = 371KB of u32, and their conversion |
+| 16 | `text_runs` | 1.16ms | cst + the reader-text mask |
+| 32 | `verse_anchors` | 0.57ms | toc |
+| 64 | `diagnostics` | 1.13ms | cst + lint |
+
+Shape to remember: **analyze ≈ 3× the `--lint` pipeline**, and the extra 2× is
+not the conversion — it is the two artifacts lint does not build (toc, mask)
+plus `token_spans`, which is a third of a megabyte of u32 on the largest book.
+The UTF-16 wall itself is the cheap part: `token_spans` alone is 1.10ms against
+a 0.33ms lex, so ~0.77ms buys 92,676 offsets emitted AND converted — the
+ascending fast path is one SWAR sweep of the document, no index, no allocation
+beyond the read.
+
+Against the sketch's envelope (engine ×2–3 under wasm, 150ms debounce): PSA at
+3.08ms native is ~6–9ms in the browser with every read on, and the reads an
+editor actually renders per commit (chapters + blocks + verse anchors +
+diagnostics, no `token_spans`, viewport-clipped where it wants spans) are well
+under half of it. `wants` is doing exactly the job it was designed for — the
+1000× cost spread the sketch predicted shows up as a 2× spread here only
+because Psalms is prose; on an aligned book (en_ult, 31MB of `\w` interiors)
+`token_spans` is the read that would dwarf the rest.
+
+en_ult PSA — the aligned stress case (5.1MB, 340,639 tokens; word-level
+alignment inflates 273KB of scripture 19×). avg of 20, release:
+
+| wants | reads | time |
+|---|---|---|
+| 1 | chapters only (lex+toc) | 6.6ms |
+| 64 | diagnostics (lex+cst+lint) | 14.0ms |
+| 99 | the editor per-commit set (chapters+blocks+verse_anchors+diagnostics) | 16.5ms |
+| ALL | everything incl. token_spans + mask | 25.8ms |
+
+(`--lint` alone on this file: 12.7ms — the pipeline, not the emit, is the
+cost at this size.) ×1.4–1.9 measured wasm ⇒ per-commit set ≈ 23–31ms in
+the browser on the single worst file in the corpus — inside the 150ms
+debounce, at/over one frame (the vision's §9.7 names 20–30ms "potentially
+acceptable"; the content-addressed rung is the ladder if real UI says no).
+Note the editing target is a translator's DRAFT (en_ulb-class, 3ms);
+aligned corpora are read-only references that don't re-analyze per
+keystroke.
+
+MEASURED wasm (2026-08-24, Node = V8, onion-wasm pkg-node build, no +simd128,
+best of 20, each call includes the string encode IN and one read copy-out):
+
+| Book | ALL | commit-set (wants=99) | vs native ALL |
+|---|---|---|---|
+| en_ulb ZEC | 0.23ms | 0.16ms | 1.14× |
+| en_ulb PSA | 3.36ms | 2.14ms | 1.09× |
+| en_ult PSA | 41.8ms | 30.2ms | 1.62× |
+
+The §5 multiplier (1.4–1.9×) only bites where LEXING dominates (the 5MB
+aligned file — memchr gets simd128, not NEON, and this build had simd128
+OFF: ~8% free there). Prose books run near-native: the ×2–3 envelope was
+pessimistic and the boundary costs are noise. The one number to watch:
+30ms commit-set on the worst aligned file — the vision's "20–30ms,
+observe real UI" band; mitigations ranked: aligned corpora are read-only
+references (no per-keystroke re-analysis), +simd128, then the
+content-addressed rung. Rebuild harness: `wasm-pack build --target
+nodejs --release -d pkg-node` in onion-wasm/, then a small node script
+timing analyze() per book.
+
+### Pass 8: what the widened wire cost, and what it bought (2026-08-24)
+
+`analyze` gained two reads (`lines` stride 4, `note_parts` stride 4), two
+widened ones (`chapters` 5→7, `verse_anchors` 3→5) and one scalar
+(`usfm_version`). Measured in the CM spike's browser probe on John (113KB,
+`onion-2-spike/PERF.md`):
+
+| | pass 7 | pass 8 |
+|---|---|---|
+| `analyze-commit` (whole book, per keystroke) | 0.74ms | 0.93ms |
+| the editor's JS projection over it | 1.06ms | 0.81ms |
+| …of which: rebuilding the line model | ~0.9ms | **~0.16ms** |
+| …of which: a token pass for inline decorations | — | 0.70ms |
+
+So the engine took ~0.19ms to delete ~0.74ms of JS. The keystroke median did
+not move (7ms on John, both passes) — at these sizes the commit is dominated
+by CodeMirror's own update and the decoration build, and BOTH sides of the
+wall together are under a third of it. The line read's real payoff is that
+whole-book `TOKEN_SPANS` is no longer a structural requirement, which makes
+that read clippable for the first time.

@@ -19,6 +19,8 @@
 //! - [`diff`](mod@crate::diff) — the crate's first TWO-input pass: two sources
 //!   cut into blocks at their `Toc` anchors, aligned by Myers, and merged back
 //!   as a pure projection over byte ranges.
+//! - [`analyze`](mod@crate::analyze) — the EDITOR wire: one pass over all of the
+//!   above, emitted as flat u32 reads with every offset in UTF-16.
 //! - [`format`](mod@crate::format) — the OPT-IN prettifier: lint's formatter-bit
 //!   fixes plus the Form-channel rows, merged into one transaction of `Edit`s.
 //!
@@ -26,6 +28,7 @@
 //! classification stay strictly apart, and payload interiors belong to
 //! interpreters, on demand, later.
 
+pub mod analyze;
 pub mod attributes;
 pub mod cst;
 pub mod designator;
@@ -50,6 +53,7 @@ pub mod usx;
 pub mod utf16;
 pub mod vref;
 
+pub use analyze::{Analysis, analyze};
 pub use diff::{DecisionUnit, DiffSkeleton, MergeSide, Slot, diff, diff_with_text};
 pub use edit::{Edit, SpliceEdit, apply_splices};
 pub use format::{CharBreaks, FormatOptions, Newline, VerseBreaks, format, format_edits};

@@ -1,258 +1,40 @@
-1. Author the table — new marker_rows data file in this repo, named struct fields (ws enums can live in their own module like onion's whitespace.rs, which ported cleanly). Pragmatic move: a throwaway script mechanically translates onion's marker_defs_data.rs into the new schema first, then you audit category-by-category (paragraphs one sitting, char markers another) rather than row-by-row from scratch — audit effort goes into judgment, not typing.
-2. Codegen script (a small src/bin/ binary): reads the rows, emits the packed u128 table + the strip-digits-then-match name→idx function into a generated file. JS registry projection comes later, same source.
-3. Load into the lexer: marker_idx assignment, the conditional ws fold (per-class, killing the TODO), and the payload column → NumberRange token kind — yes, that's the 9th shape, so NESTED_BIT slides to bit 4 (the comment on it already documents this exact move).
-4. Then attributes, on top of the stack that the kind column enables.
-e stores facts, codegen turns facts into instructions — same division as everywhere else.
-- Delimiter-ws in one instruction: same answer. The general path reads the ws-after-name column; the prelude bakes the delimiter into the pattern itself ("v " as a u16 compare is the delimiter check). Hot markers get it fused for free.
-- Multi-token templates ([\c][ ][#][nl][\p][nl] — six tokens, one load): possible, with a warning label. Two real frictions: CR-vs-LF doubles every pattern containing a newline (or needs a normalize-mask trick), and variable digit-count shifts every byte after it — so the tail compare needs a shift-by-digit-run first. Each template is a new bail-laden code path needing oracle coverage. The discipline: build the prelude one pattern at a time, measured — \v +digits first (biggest population), then \w , \zaln-s|, \c +digits — and stop the moment a pattern's delta drops below run noise. My bet is the single-marker patterns capture most of the win and the multi-token templates never earn their bail complexity — but the harness will just tell us.
+We're going to leave the probe for now so I can get my head around what's currently not commited and what you did as reflectedin gaps and analyze. 
 
-And yes — everything past "happy shape" falls back: 4+ digits, bridges (1-2), \va, CRLF surprises. Fast path recognizes; the general path defines.
+Wrt to spike 2, gaps.md and analyze. A large part of what I'm trying to do here is decide, what belongs in:
 
+Galley - (we shouldnt' have named /Users/willkelly/Documents/Work/Code/usfm_onion_2/galley) galley yet. Bc galley was going to be the combined crate that pulled together sous and onion.    I wanted 5 pieces I guess. 
+1. Onion - the rust crate
+2. onion - wasm. wasm bindgen, .d.ts, and any js specific helpful utitlities / methods that come with knowing you're likely working in a js environemennt that does utf 16 like stuff
+3. Sous - rust
+4. sous-wasm - same as 2
+5. Galley -> an opinionated set of higher workflows leveraging the primitives of 1/3 or 2/4.  Dirty marking, normalizing, anything that might be considered stateful, maybe checksumming? etc; I.e. the recipe for ingest string maybe, chop it into chapters, mask out to verse text only, feed to sous, map back to coordinate system of choice (utf8/16, chapter or absolute) etc;
 
+So, for those gaps, I'd like to know did we change stuff cause it's only a 
+1. Codemirror specific constraint / our approach, or a GENERAL utility that might be helpful for many consumer setups
 
+1. **Widen `verse_anchors` and `chapters` to carry the marker and content
+   offsets.** /show-me the b4 and after of this. Cause I thought that `\v  Then He
+   declared` → designator "Then")  would not parse as a designator cause I didn't think that passed VERSE in gloassary?
 
-# Document Structure
-A USFM or USX document consists of valid elements for Scripture or Peripheral content organized within a sequence of divisions.
+2.  **Add a line-level read.** -> why did we do this? Why does codemirror do this? Is this generically useful or?
+3. Proposed: a `META` flag bit -> You mean in the codegen table? We don't already have something like that via positionality that a marker is normally front matter?
+4.  **A `note_parts` read** -> on cst? explain?
+5. **Report the declared `\usfm` version in the Analysis* -> this one I get
+7. **`locate` / `book` are on galley's method list but not exported.** -> did we or didn't we do this? CM specific or general utility?
+8. **Wrapper hygiene in `galley.ts`.** `view()` never frees the wasm `Analysis` -> what did we do about this? anything? Expalin what blockAt is doing? WANTS.COMMIT feels like we're leaking our own codemirror internal app desires into what should be a generically resuable library?
+9.  **`toByte`/`toUtf16` re-encode the whole document per call** -> purpose of thiese? suggestion? Explain more the fallback sugggestion?
+10. No way to browse the side-table? what side table? for lint? 
 
-Scripture
-[Scripture]
-[BookIdentification] — Book Identification
-[BookHeaders] — Book Headers
-[BookTitles] — Book Titles
-[BookIntroduction] — Book Introduction
-[BookIntroductionEndTitles] — Book Introduction End Titles
-[BookChapterLabel] — Book Chapter Label
-[ChapterContent] — Chapter Content
 
-Book Identification
-[BookIdentification]
+Then: I'm going to resume the probe questions and a few tweaks to it in that repo, but these seem like that might be relevant to discuss for wasm? Can't tell if it's CM speicific or just our app wanting something?
 
-USFM: Document Structure > id, usfm
-USX: Document Structure > book
+11.  Ranged format_edits — chapter scope currently filters a whole-book edit list JS-side, which drops boundary-straddling edits and won't scale to project ops; an engine format_edits_in(range) is the ask.
+12.  \c 12b reports NUMBER_SHAPED I think that's right
+13. Half-typed notes — no read says whether an in-progress \f is well-formed enough to lay out as an apparatus row. ? Why: Isn't the CST for this just opens the children when \f or \x is present?  As long as that exists, wouldn't parse through cst produce a block/container for these?
 
-Rail Guide "r" = required
-{} a stop on the rail
-TAGEND
-Pattern: /(?:${ws}+|(?=[\\|]|$))/ Delimits a marker
 
-Where rail reads as: 
-{slash(r) or /?{anyws}*\\}{id}{space or TAGEND}{bookCodeTable or [0-9A-Z]{3}}{optional hs*}{\n or NL (r)}{O usfm tag and \d+\.\d+(\.\d+)?}{BookHeaders}{BookTitles(R)}{BookIntroduction(R)}{BookIntroductionEndTitles(R)}{BookChapterLabel(O)}{ChapterContent(R)}{Para | Section | Chapter | Milestone} | Footnotes | CrossReference | List | Table | Sidebar}
+Then not yet fully ready to process this (I.e there are 14 questions arleady in this prompt, but where I'm going is this for thinkin about when I'm comfrotable with the breakdown in here), from that long serfer-v2 file I pointed you at earlier: Getting a breakdown of how to build galley and what lives there: (i.e. find? coordination btw sous and onion etc; Here's the loose brain dump voice transcribe of that that will need to come back to later.  I jut renamed braidv2 to galley.md in the planning folder so we could probbly kill a lot of tht old markdown and oragnize our thoughts on that there)
 
-
-Book Identification
-[BookIdentification]
-
-USFM: Document Structure > id, usfm
-USX: Document Structure > book
-
-An optional collection of one or more paragraph elements for book name and abbreviation texts.
-
-Paragraphs > Identification > ide, h, toc#, toca#, rem, sts
-
-Where rail is: 
-{\n\\ or /${Ws}\\/}{ide/h1/h2/h3/h/toc1/toc2/toc3/toca1/toca2/toca3/remo/sts}{" " or TAGEND}{O TEXT}{O TEXTEND}
-
-Book Titles
-[BookTitles]
-
-A collection of one or more paragraph elements for book main titles.
-
-Paragraphs > Titles and Sections > mt#
-
-Paragraphs > Identification > rem
-
-An optional collection of one or more embedded elements.
-
-[Footnote] — Footnotes
-
-[CrossReference] — Cross References
-
-[Char] — Characters
-
-[Break] — Optional line break
-
-
-
-Book Introduction
-[BookIntroduction]
-
-USFM
-
-USX
-
-bkintro rail
-An optional collection of paragraph and table elements for book introductions.
-
-Paragraphs > Introductions > imt#, imte#, ib, ie, ili#, imi, imq, im, io#, iot, ipi, ipq, ipr, ip, iq#, is#, iex, rem
-
-[Table] — Paragraphs > Tables
-
-An optional collection of one or more embedded elements.
-
-[Footnote] — Footnotes
-
-[CrossReference] — Cross References
-
-[Char] — Characters
-
-[IntroChar] Introduction Characters
-
-[Milestone] — Milestones
-
-Book Introduction End Titles
-[BookIntroductionEndTitles]
-
-USFM
-
-USX
-
-bkintroend rail
-An optional collection of one or more paragraph elements for book titles occurring at the end of the book introduction.
-
-Paragraphs > Titles and Sections > mt#
-
-An optional collection of one or more embedded elements.
-
-[Footnote] — Footnotes
-
-[CrossReference] — Cross References
-
-[Char] — Characters
-
-[Milestone] — Milestones
-
-[Break] — Optional line break
-
-Book Chapter Label
-[BookChapterLabel]
-
-An optional paragraph element used for providing a chapter heading text which may be applied when formatting all chapters as headings.
-
-Paragraphs > Identification > cl
-
-Chapter Content
-[ChapterContent]
-
-USFM
-
-USX
-
-chaptercontent rail
-An optional collection of chapter, section, paragraph/poetry, list, table, or sidebar elements for the main content of a scripture book.
-
-[Chapter] — Chapters and Verses > c
-
-[Section] — Paragraphs > Titles and Sections > cd, cl, mr, ms#, mte#, r, s#, sp, sd#, sr
-
-Paragraphs > Introductions > iex, ip (study Bibles)
-
-[Para] — Paragraphs > Body Paragraphs > b, cls, m, mi#, nb, p, pc, ph, pi#, pm, pmc, pmo, pmr, po, pr
-
-Paragraphs > Poetry > b, q#, qa, qc, qd, qm#, qr
-
-[List] — Paragraphs > Lists > lf, lh, li#, lim#
-
-[Table] — Paragraphs > Tables
-
-[Sidebar] — Sidebars
-
-An optional collection of one or more embedded elements.
-
-[Verse] — v
-
-[Footnote] — Footnotes
-
-[CrossReference] — Cross References
-
-[Char] — Characters
-
-[Milestone] — Milestones
-
-[Break] — Optional line break
-
-Peripheral
-[Peripheral]
-
-See the documentation section on peripherals for more detail on the strategy for marking project peripheral contents.
-
-[PeripheralBook] — Peripheral Book - Standalone peripheral book.
-
-[PeripheralDividedBook] — Peripheral Divided Book - Peripheral book with optional divisions.
-
-Peripheral Book (Standalone)
-[PeripheralBook]
-
-[BookHeaders] — Book Headers
-
-[BookTitles] — Book Titles
-
-[BookIntroduction] — Book Introduction
-
-[BookIntroductionEndTitles] — Book Introduction End Titles
-
-[PeripheralContent] — Peripheral Content
-
-Peripheral Divided Book
-[PeripheralDividedBook]
-
-[PeripheralDivision] — Peripheral Division
-
-Peripheral Division
-[PeripheralDivision]
-
-USFM
-
-USX
-
-periph rail
-Peripherals > periph - Peripheral division identifier
-
-[BookHeaders] — Book Headers
-
-[BookTitles] — Book Titles
-
-[BookIntroduction] — Book Introduction
-
-[BookIntroductionEndTitles] — Book Introduction End Titles
-
-[PeripheralContent] — Peripheral Content
-
-Peripheral Content
-[PeripheralContent]
-
-USFM
-
-USX
-
-chaptercontent rail
-An optional collection of chapter, section, paragraph/poetry, list, table, or sidebar elements for the main content of a scripture book.
-
-[Chapter] — Chapters and Verses > c
-
-[Section] — Paragraphs > Titles and Sections > cd, cl, mr, ms#, mte#, r, s#, sp, sd#, sr
-
-Paragraphs > Introductions > iex, ip
-
-[Para] — Paragraphs > Body Paragraphs > b, cls, m, mi#, nb, p, pc, ph, pi#, pm, pmc, pmo, pmr, po, pr
-
-Paragraphs > Poetry > b, q#, qa, qc, qd, qm#, qr
-
-[List] — Paragraphs > Lists > lf, lh, li#, lim#
-
-[Table] — Paragraphs > Tables
-
-[Sidebar] — Sidebars
-
-An optional collection of one or more embedded elements.
-
-[Verse] — v
-
-[Footnote] — Footnotes
-
-[CrossReference] — Cross References
-
-[Char] — Characters
-
-[Milestone] — Milestones
-
-[Break] — Optional line break
+TRANSCRIPTION
+Wrt to after that:
+Um okay. What to think about today's work. Probably either editor or galley functions. Um I guess I'm kind of in the final stages of Kind of in the final stages of The first stop on the new version of the parser. Interestingly enough the line of code is nearly the exact same, which I don't know what to make of. I think it might be I don't know if we can break it down into test versus non-test code. Just to see. I'm just curious because I thought it was actually gonna be trimming the library down a little bit compared to what the other one does. Um we could put in a little benchmarking just for sanity's sake. Um I don't know. Anyway. In terms of next scope of what should be done is Su Chef needs implementation under the new regime. Measurements, early measurements suggest a rule of thumb of 2x. An only on WASM depending on what you're doing. Um We probably could use Ahoke. I just thought about a hope chorusic. We're just searching multiple needles across um text instead of MM, which is probably what we want actually for our hygiene sweep sweep sweet. Um find probably belongs in a galley crate because it's kind of application specific to search across boundaries. Um just probably be relevant. Mim first string search. Um It's gonna want to basically mask out using just first text and then map back into absolute positions. we may or may not want um we may or may not want to build in the galley I don't know what it would fully take to do chunk or chapter. Chapter chunk based stuff. Like right now the current speed on everything suggests it's overhead to um suggests it's overhead to pre scan, pre split, and pre scan pre split and um scan split to to to do that from a performance standpoint but I do think it would be useful for Suschef to do it, which is probably a galley concern. Um so as a as a pure function so chef just takes corpus. Corpus I guess can be I don't know, I need a proposal. What makes the most sense for how you should pass this is uh sh an array of strings? An array of use of them strings strings. They have to get T to some small book identifier. So maybe just an array of triples. Which is just like file paths. Not to read the file paths, just some sort of label for like associating You know a book to or something else and then everything else should be handled in USFM on USFM Onion in terms of the ability to mask out things. I don't know if Galley needs to just be a reexport. uh just simply re-export all of the onion surfaces inside of the galley and then it has stuff like Um Um What is higher level stuff that might be doing? Anything that's better to caching. So let's just think about caching. Or let's think about checksumming. Or hashing. dirtiness. Uh performance doesn't really suggest that we need to cash. I don't know how much complexity it potentially adds. So you could theoretically run a whole book always. But is there any monoid like factor inside of onions if we reused products? Like I think that's a name. I don't I don't know. I don't also wonder if there's any loop overhead, because it expects a full book so like if you split Fed Leks a split at a time, and then you had chapter level offset about to fall. And then you could have file level offsets as a prefix. Um just thinking my editor as of today I'm trying to say hey keep the whole file part of the whole file, but what is it what is needed in a chapter based world. And is there a version of check summing things that's just like you know if you keep any of it around in like a key value cache from what returns like I don't know. I guess you'd have to express it in monoid form or can l CST or Lit be expressed in map reduced form, I guess is the question. Um maybe that's a monoid. You don't have to explicitly declare this edges state to to replay the edges. It's just everything. And so the same way today that lent and um the same way today that went, and CST express their state. The whole book. You could still theoretically not change the logic if what they did is a pattern of mapping and reducing. Um So the table of contents uh covers every bite. I don't know, I guess it's really those two that I gotta figure out. Um You also wonder when you talk about you know okay diff can be as fast as possible. Um mark chapter segments individually as dirty. And maybe that's not worth it. Maybe you just do always do diff the whole book. Again, I don't know that we've seen the performances are in this. The question I have when it comes to diffing the whole book is do we return unchanged segments? Um because the chapter's a very natural segment and cancel like if I hand you the whole book and it says you only change one verse but we return the whole book back it's unchanged. Um because if that's the case it feels kinda I don't know like that's not what we want to do is it uh Uh so that's a question um is some of this is for uh some of this is four. The potential for sue to cash its products. Also find can cash its product Like I guess I'm really interested in fleshing out this idea of non-retained See here's the thing is performance has suggested that we don't have to retain it and maybe that's true and maybe I'm just pushing too much and you just say mark the whole book dirty. There's already a proven mechanism for chapters. Um maybe concrete syntax tree and lent are not monoid, map reduce friendly, to where you could just update one of the map terms, You know, walk up the checksums in order. Um if you checksum offsets or cache offsets then you have to adjust the length of every subsequent uh section unless everything is able to be fed a chapter. There's a relative. Galley gives you a mode. That mode sets the way that your handle works. Which is an assumption of a per chapter or absolute. And absolute gives you file, full file, per chapter only gives you chapter offsets, and that's assumed that's all of your document. You know, any UI that's doing that is gonna need to think about how they handle you know swapping out chapters, but it someone might wanna do it. Someone might wanna do it. Um

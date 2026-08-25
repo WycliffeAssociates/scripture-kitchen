@@ -377,8 +377,18 @@ mod tests {
     /// state its edit list as a document, which is checkable by eye.
     fn repaired(usfm: &str, code: Code) -> String {
         let (tokens, report) = report_of(usfm);
-        let slots = slots_for(&report, code);
-        assert!(!slots.is_empty(), "no {} in {usfm:?}", code.row().name);
+        // The FIXED slots only, which is what a "fix all of code X" dispatch
+        // sends: an `empty-paragraph` chain files its one fix on the run's first
+        // member and leaves the rest fixless.
+        let slots: Vec<u32> = slots_for(&report, code)
+            .into_iter()
+            .filter(|slot| report.fix(*slot as usize).is_some())
+            .collect();
+        assert!(
+            !slots.is_empty(),
+            "no fixed {} in {usfm:?}",
+            code.row().name
+        );
         check_fixes(usfm, &tokens, &report, &slots)
             .unwrap_or_else(|error| panic!("{} on {usfm:?}: {error}", code.row().name));
         let mut edits: Vec<Edit> = slots
@@ -537,6 +547,51 @@ mod tests {
             repaired("\\id GEN\n\\c 1\ntext\\v 1 a", Code::MissingParagraph),
             "\\id GEN\n\\c 1\ntext\n\\p\n\\v 1 a"
         );
+    }
+
+    #[test]
+    fn a_run_of_identical_empty_paragraphs_is_deleted_by_one_fix() {
+        // The single pair: the survivor is spelled the same and holds content.
+        assert_eq!(
+            repaired("\\id GEN\n\\c 1\n\\p\n\\p text\n", Code::EmptyParagraph),
+            "\\id GEN\n\\c 1\n\\p text\n"
+        );
+
+        // Will's demo shape — content, three empties, content. ONE fix, filed on
+        // the run's FIRST member, deletes all three: three separate deletions
+        // would each fail "the site is repaired", which is what pass 5 declined
+        // over.
+        let (_, report) = report_of("\\id GEN\n\\c 1\n\\p a\n\\p\n\\p\n\\p\n\\p b\n");
+        let fixed: Vec<u32> = slots_for(&report, Code::EmptyParagraph)
+            .into_iter()
+            .filter(|slot| report.fix(*slot as usize).is_some())
+            .collect();
+        assert_eq!(slots_for(&report, Code::EmptyParagraph).len(), 3);
+        assert_eq!(fixed.len(), 1);
+        assert_eq!(fixed[0], slots_for(&report, Code::EmptyParagraph)[0]);
+        let out = repaired(
+            "\\id GEN\n\\c 1\n\\p a\n\\p\n\\p\n\\p\n\\p b\n",
+            Code::EmptyParagraph,
+        );
+        assert_eq!(out, "\\id GEN\n\\c 1\n\\p a\n\\p b\n");
+        // Idempotent: the repaired text has nothing left to say.
+        let (_, again) = report_of(&out);
+        assert!(slots_for(&again, Code::EmptyParagraph).is_empty());
+
+        // A MIXED run says nothing about which spelling was meant.
+        assert!(!offers_fix(
+            "\\id GEN\n\\c 1\n\\m\n\\p text\n",
+            Code::EmptyParagraph
+        ));
+        assert!(!offers_fix(
+            "\\id GEN\n\\c 1\n\\p\n\\p\n\\m text\n",
+            Code::EmptyParagraph
+        ));
+        // A run whose survivor is empty at EOF is not duplication either.
+        assert!(!offers_fix(
+            "\\id GEN\n\\c 1\n\\p a\n\\p\n\\p\n\\p\n",
+            Code::EmptyParagraph
+        ));
     }
 
     #[test]

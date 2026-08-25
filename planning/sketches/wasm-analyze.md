@@ -1,5 +1,27 @@
 # wasm sketch (roadmap item 2 — build when the editor pulls)
 
+**NAMING CORRECTED 2026-08-25 (pass 10).** Everywhere below that says the
+bindings crate is `galley/` — including the "ONE combined crate, no standalone
+onion-wasm/sous-wasm" ruling — read **`onion-wasm/`**, and `galley.ts` as
+`onion-wasm.ts`. `galley` is the RESERVED name for the fifth crate, the
+workflows layer over onion + sous (ideas/committed/galley.md); this crate is
+piece 2 and will be one of its dependencies. The rest of the sketch stands as
+written. Also amended in pass 10: `analyze` returns a PLAIN JS OBJECT rather
+than a handle, so the `.free()` discipline the sketch describes applies only to
+the write-path handles (`FormatOpts`, `Edits`, `Splices`), with `--weak-refs`
+as their backstop.
+
+**BUILT 2026-08-24** (pass 7 — see planning/choices.md for the self-report and
+the three points wanting Will's eyes). Where it landed: the emit layer is
+`src/analyze.rs` (+ `utf16::Cursor` beside the index it mirrors), the
+diagnostics side-table is `lint::catalog` → `galley/diagnostics.json` (codegen,
+checked in, staleness-tested), the bindings crate is `galley/` (Will's ruling:
+ONE combined crate, no standalone onion-wasm/sous-wasm), and the TS wrapper is
+`galley/galley.ts`. Two amendments to what is below: the checksum export is
+DEFERRED (Will, 2026-08-24 — §13.4 is the composed facade's, revisit when sous
+joins), and `analyze` documents an LF-CANONICAL input contract for its UTF-16
+offsets.
+
 Rewritten 2026-08-24 in plain terms after Will's questions. Same
 decisions as before (RULED markers kept); the shorthand is gone.
 
@@ -192,13 +214,43 @@ whole-book).
 
 | read | numbers per entry | the fields, spelled out | serves |
 |---|---|---|---|
-| `chapters` | 5 | chapter ordinal; where its label ("12b") starts/ends; where the whole chapter starts/ends | nav grid, chapter clamp |
-| `blocks` | 4 | packed class byte (below); where the paragraph-level block starts/ends | paragraph rendering |
+| `chapters` | 7 | chapter ordinal (+ the number-shaped flag in bit 31); where its `\c` starts; where its label ("12b") starts/ends; where its content starts; where the whole chapter starts/ends | nav grid, chapter clamp, `\c` chrome |
+| `blocks` | 4 | packed class word (below); where the paragraph-level block starts/where content starts/ends | paragraph rendering |
+| `lines` | 4 | packed class word; where the MARKED line starts/where content starts/ends — one row per line whose first non-whitespace token is an opening marker | every line-level editing rule |
 | `note_extents` | 3 | which note family (\f/\x/\ef/\ex/\fe); where the whole note starts/ends | footnote widgets |
-| `token_spans` | 3 | packed kind+class byte; where the token starts/ends | syntax highlighting |
+| `note_parts` | 4 | which note; which part (caller/origin/body/markup); where it starts/ends | the note apparatus |
+| `token_spans` | 3 | class word + kind byte (`kind << 16`); where the token starts/ends | syntax highlighting |
 | `text_runs` | 2 | where a run of plain text starts/ends | search/proofing views |
-| `verse_anchors` | 3 | which chapter it's in; where the verse NUMBER starts/ends | verse number widgets |
+| `verse_anchors` | 5 | which chapter it's in (+ the number-shaped flag in bit 31); where the `\v` starts; where the verse NUMBER starts/ends; where content starts | verse number widgets, `\v` chrome |
 | `diagnostics` | 7 | which lint code; primary span start/end; secondary span start/end (MAX = none); the code's aux integer; index of its fix (MAX = none) | squiggles + panel |
+
+Plus one SCALAR beside the reads: `usfm_version`, the ladder index the `\usfm`
+line declares (MAX = undeclared). Several diagnostics are GATED on it — silent,
+not merely quiet — so a consumer that could not see it had to re-read the
+document's header to know whether a finding was showable at all.
+
+**Two designator facts the reads carry** (added 2026-08-24, pass 8, from the
+spike's integration): the marker/content offsets, because an editor hides
+`[marker_from, number_from)` and `[number_to, content_from)` and puts the caret
+at `content_from`; and the NUMBER-SHAPED flag in the number field's high bit,
+because a designator is positional — delete the number and the next word becomes
+the designator, so a read without that flag styles scripture as a verse number.
+An ABSENT designator reports its empty span AT `content_from`, the propped-open
+slot, not at the marker's start.
+
+**`content_from` is the label's end plus ONE delimiter byte** (fixed 2026-08-25,
+pass 11, from Will driving the editor). The SCANNER folds a marker's or
+payload's whole horizontal-whitespace run into that token and always will — that
+is the token contract. The READS do not: every `content_from` on `chapters`,
+`blocks`, `lines` and `verse_anchors` is `label_end + 1` when a run followed, and
+`label_end` when none did (a line ending after `\v 1` leaves no delimiter to step
+over). So `[label_end, content_from)` is the DELIMITER, derivable, one byte or
+empty; bytes past it are leading CONTENT whitespace — visible, editable, and
+format's delimiter-single row's to trim. Emitting the token's end instead meant a
+space typed at `content_from` was absorbed into chrome on the next analysis and
+the editor hid the byte the author had just typed. The same rule governs
+`note_parts`: CALLER is the label, MARKUP is the marker plus one delimiter, and
+the remainder of a folded run comes back as ORIGIN/BODY.
 
 ("Where X starts/ends" is always a UTF-16 offset pair into the
 document JS already holds — the editor slices its own text for any
@@ -206,9 +258,14 @@ display string, e.g. the marker name or the label. That, not the
 array format, is the load-bearing trick: spans instead of strings.)
 
 The packed class is 3 bits (para/char/note/milestone/chapter-verse/
-sidebar/table/other) + a few flag bits, one byte per entry — enough
-for the editor's shape decisions; per-marker CSS keys off the marker
-name, which is document bytes JS already holds. Diagnostics carry a
+sidebar/table/other) + six flag bits (heading/front/poetry/closer/
+unknown/meta) — a 16-bit WORD since pass 8, riding a whole u32 slot;
+enough for the editor's shape decisions, and per-marker CSS keys off
+the marker name, which is document bytes JS already holds. META splits
+FRONT into the machine header (`\id \usfm \h \toc1`, the
+Identification + DocumentStructure categories) and introduction prose
+the reader sees (`\ip \iot \is \imt`) — the one marker-name regex
+the class byte was supposed to delete, answered from the table. Diagnostics carry a
 per-build `code` number that indexes the codegen'd JSON side-table;
 message text renders JS-side from the template + document slices —
 zero strings cross per finding (RULED). Fixes cross EAGERLY (ruled
@@ -220,17 +277,31 @@ Everything above was checked against what the CodeMirror prototype
 (onion_editor_chef) actually consumes — every prototype need maps onto
 a read, no gaps.
 
-## What lives in THIS repo vs the combined crate (the sous question)
+## What lives in THIS repo vs the combined crate (RULED 2026-08-24: galley, and only galley)
 
-Three thin bindings crates over two fat libraries
-(ideas/other_repos/sous.md, ruled 2026-08-21):
+Will's ruling supersedes the three-doorways option: NO standalone
+onion-wasm, NO standalone sous-wasm — ONE combined bindings crate,
+named **galley** (wins over "braid"; the vision's "composed analysis
+host" gets its name). Two fat libraries under it:
 
 - **`usfm_onion_2`** (this repo) — plain Rust library. No wasm
-  anything. Optionally grows a sibling `onion-wasm/` doorway crate for
-  STANDALONE JS use of just the engine (the exports above).
+  anything, ever.
 - **`sous`** (sibling repo) — plain Rust library, same deal.
-- **`galley`** — the crate the EDITOR actually loads: depends on BOTH
-  libraries, linked into ONE wasm binary. This is where the composed
+- **`galley`** — the crate the EDITOR actually loads: today it wraps
+  onion alone; sous joins it later; linked into ONE wasm binary.
+
+Checksum (vision §13.4 asks the composed facade for xxh3-128-v1):
+RULED OUT of this build by Will — a higher-level concern; deliberately
+absent, revisit when sous joins galley.
+
+LF contract at the galley wall: emitted UTF-16 offsets assume
+LF-normalized input — CodeMirror counts every line break as ONE
+position (it normalizes to LF internally) while a literal `\r\n` is
+TWO UTF-16 code units, so CRLF input would disagree with editor
+positions. The vision (§6.3) commits the editor to LF canonicalization
+at ingress; galley documents the contract rather than repairing input.
+The engine stays byte-honest for any input; format's normalize-newlines
+row is the repair tool when a consumer needs one. This is where the composed
   flow lives (analyze + proofread over the same mask, one diagnostic
   stream, all offsets in source bytes until the one UTF-16 wall), and
   crucially it is where STATE lives if any ever exists: the retained
@@ -253,14 +324,23 @@ state, it's galley's. Nothing is ever implemented IN a bindings crate.
 
 - `new(text: String) -> Galley` — the one string crossing
 - `diagnostics()` — onion lint + sous proofread, one stream, source bytes
-- `locate(byte) -> String` — "MRK 6:3" (status bar, labels)
+- `locate(text, utf16) -> String` — "MRK 6:3" (status bar, labels) — EXPORTED
+  2026-08-24 (pass 8); the sid RENDERING has rules (bridges, an absent chapter,
+  an unknown book) and a JS re-implementation in every consumer is exactly the
+  drift no-strings-cross exists to prevent
 - `chapters()` — the navigation grid rows
-- `book() -> String` — the \id code
+- `book(text) -> String` — the \id code (EXPORTED 2026-08-24, pass 8)
 - `to_utf16(byte)` / `to_byte(utf16)` — shared index, built once per text
 - `usj()` / `usx()` / `html() -> String` — exports on demand
 - `format_edits(opts)` / `format(opts)` — the opt-in write path (2026-08-24)
 - `diff(other)` / `merge(other, decisions)` / `revert(other, unit)` —
   the two-input pair (2026-08-24)
+- `find(query)` — memmem/regex over a mask's text, hits mapped to
+  source spans via to_source; regex is a GALLEY dep (2026-08-24,
+  ideas/candidates/find-and-overlay.md — no new onion capability)
+- overlay workflow (skeleton refill) — the Sid-keyed splice PRIMITIVE
+  is an onion candidate beside diff; the command/policy is galley's
+  (same note)
 
 ## The one rich structure: the diff skeleton (RULED 2026-08-24: serde JSON, B′ fallback)
 
@@ -313,3 +393,40 @@ costs are recorded in perf-notes §5; the probes stay scratch (RULED).
   book ≈ 20ms, prose book ≈ 200µs, against a 150ms debounce. simd128
   RUSTFLAG is a free ~8% on lex; turn it on, expect no more.
 - Build when the editor pulls; pure Rust until then. (Standing)
+
+## Distribution (RULED 2026-08-25, pass 10)
+
+**Not publishing to npm yet.** Consumers install from GitHub tags; the spike
+vendors the package with `scripts/sync-engine.sh`. The built output is
+COMMITTED, mimicking the old `../usfm_onion` layout (and wa-sqlite's):
+
+- `onion-wasm/pkg-web/` — `wasm-pack build --target web --weak-refs`, the
+  explicit-`init()` path the CM spike uses.
+- `onion-wasm/pkg-bundler/` — `--target bundler --weak-refs`, the default.
+- Both are in the tree (`.gitignore` keeps only the scratch `pkg/` and
+  `pkg-node/` out); `wasm-pack`'s own `.gitignore` of `*` is deleted from each
+  out-dir by the sync script, or the artifacts never reach a tag.
+- `onion-wasm/package.json` (hand-written, above the two generated ones) maps
+  the subpaths: `.` → pkg-bundler, `./web` → pkg-web, `./web/wasm` → the binary,
+  `./schema` → `onion-wasm.ts`, `./diagnostics.json` → the side-table. The
+  wrapper and the side-table are reachable from BOTH builds, as they must be:
+  they are versioned with the binary.
+
+**One build per target, full default features** (usj/usx/html on). No
+all-vs-lean prebuilt variants: the binary is ~370 KB / ~152 KB gzipped and no
+size-sensitive consumer exists. A consumer who wants a lean binary builds from
+source with `default-features = false`; prebuilt lean variants are a later
+decision if one ever asks.
+
+Still open when npm publishing matures:
+
+- **The package lives in a SUBDIRECTORY of the engine repo.** `npm i
+  github:org/usfm_onion_2#tag` installs the repo ROOT, not `onion-wasm/`, so a
+  tag-install today needs a subdirectory-aware tool or a split publish repo.
+  Decide before telling a consumer to install from a tag.
+- **`sideEffects`** — wasm-pack emits `["./snippets/*"]` per generated package;
+  the hand-written one names the two glue modules explicitly so a bundler does
+  not tree-shake the module's init away. Worth re-checking against a real
+  bundler consumer.
+- `"private": true` sits on the top-level package.json so nothing can be
+  `npm publish`ed by accident; it does not affect a git install.

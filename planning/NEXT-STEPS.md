@@ -7,37 +7,39 @@ one design sketch per item in sketches/. Rulings that constrain later
 phases: settled-facts.md. Vocabulary: GLOSSARY.md. Unproven perf leads:
 investigate-later.md.
 
-## Where we are (2026-08-20)
+## Where we are (2026-08-25)
 
-Scanner COMPLETE (~1.7 GiB/s prose). `cst::build` COMPLETE (~6 ns/token,
-flat lossless CST). The ATTRIBUTE INTERPRETER is COMPLETE
-(src/attributes.rs — borrowed spans, no allocation, zero malformed over
-1.25M corpus lists). LINT IS CLOSED (src/lint/ — 43 codes in six
-families, NOTHING OWED: one in-order walk feeding four machines at ~9.4
-ns/token on unaligned scripture and ~15.5 on word-aligned en_ult, where
-the k/v attribute rules read 31 MB of list interiors nothing read before;
-15 codes offer a fix, with `check_fixes` as the oracle over every corpus
-fix; splice primitives in src/edit.rs). Full staged pipeline ~25 ns/token
-(en_ulb), ~38 on en_ult. The single-pass fusion experiment
-is measured and PARKED (experiments/fused.rs is the record); the UTF-16
-wire shape is measured and amended (experiments/utf16.rs: stride-256 +
-SWAR — settled-facts).
+Everything through the wasm milestone is BUILT: scanner, CST, attribute
+interpreter, lint (54 codes incl. the Form channel), exports (USJ/USX/
+HTML), masks + Toc + vref, utf16 index, FORMAT (pass 5, Form-channel
+rows, format_edits/format), the DIFF port (pass 6, anchor-cut skeleton,
+SpliceEdit replay), and ANALYZE + the wasm bindings crate (passes 7–9:
+seven-read editor wire, diagnostics side-table, TS wrapper). The
+CodeMirror spike at ../onion-2-spike consumes it end to end — 16/16
+driver checks, keystroke medians ~2–7 ms with the engine at <1 ms of it.
+Perf: perf-notes §6–§8 (incl. MEASURED wasm: en_ulb PSA all-reads
+3.36 ms, 1.09x native). Rulings ledger: choices.md through pass 9.
 
-## Next code: exports
+NAMING CORRECTED (pass 10, 2026-08-25): the bindings crate is
+`onion-wasm/` — piece 2 of the five-crate layout (see
+ideas/committed/galley.md). `galley` is reserved for the workflows
+crate over onion + sous. `analyze` now returns a plain JS object, the
+per-change `wants` set is the app's, and the two distributed builds
+(pkg-web, pkg-bundler) are committed for GitHub-tag installs.
 
-Sketch: sketches/usj-export.md (USX/HTML follow it —
-sketches/usx-export.md, sketches/html-export.md). **All three are BUILT**
-behind the `usj`/`usx`/`html` features, all in `default`: USJ 187/187 and
-USX 195/195 against testData's fixtures, HTML with no oracle by its own
-scope ruling (a zoo, a nesting/escaping smoke, and the text-identity
-invariant against our own USJ over 434 documents). The two authored HTML
-tables were audited and RULED ACCEPTED 2026-08-21
-(sketches/html-tables.md), which is what unblocked it.
-The first CONSUMER of the whole stack: the
-CST plus the interpreter's k/v reading, splatted into USJ's JSON shape.
-It is where the attribute interpreter's second consumer arrives (lint was
-the first), and where the LOSSY step lives — the token stays
-byte-identical, the export is what interprets.
+## Next code: the designator gate
+
+Sketch: sketches/designator-gate.md (ruled sound by Will 2026-08-25).
+A Designator token requires a leading ASCII digit; `\v Then` becomes
+Marker + Text, unifying with the already-handled designator-less case
+(`\v \p`). Full grammar stays the interpreter's. Ripples: toc anchor
+for the absent case, a verse-without-designator lint lane, export/diff/
+analyze verification, corpus pins re-pinned, spike re-sync (16 checks).
+
+## Queued after it (small, ruled)
+
+- `format_edits_in(range)` — apply formats cleanly within $scope
+  (spike-gaps ask 11, accepted as a candidate).
 
 ## Standing laws
 

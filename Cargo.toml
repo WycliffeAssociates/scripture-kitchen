@@ -1,3 +1,10 @@
+[workspace]
+# `onion-wasm` is the JS bindings crate (wasm-bindgen + js-sys + serde) — piece
+# 2 of the five-crate layout. It is a workspace member so it shares this lock
+# file and target dir; the library itself never depends on it, and none of its
+# dependencies reach src/.
+members = ["onion-wasm"]
+
 [package]
 name = "usfm_onion_2"
 version = "0.1.0"
