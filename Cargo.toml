@@ -3,10 +3,12 @@
 # 2 of the five-crate layout. It is a workspace member so it shares this lock
 # file and target dir; the library itself never depends on it, and none of its
 # dependencies reach src/.
-members = ["onion-wasm"]
+# `galley` is piece 5, the workflows crate: it depends on the engines (this
+# library, later scripture_sous_chef) and NEVER the reverse.
+members = ["onion-wasm", "galley"]
 
 [package]
-name = "usfm_onion_2"
+name = "usfm_onion"
 version = "0.1.0"
 edition = "2024"
 

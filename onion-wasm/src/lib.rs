@@ -47,13 +47,13 @@
 
 use js_sys::{Object, Reflect, Uint32Array};
 use serde::Serialize;
-use usfm_onion_2::analyze::{self, wants as want_bits};
-use usfm_onion_2::diff::{
+use usfm_onion::analyze::{self, wants as want_bits};
+use usfm_onion::diff::{
     self, Addr, CoveredSide, Decisions, DiffSkeleton, MergeSide, SlotRole, Status, UnitKind,
 };
-use usfm_onion_2::format::{CharBreaks, FormatOptions, Newline, VerseBreaks};
-use usfm_onion_2::lint::Code;
-use usfm_onion_2::utf16::Utf16Index;
+use usfm_onion::format::{CharBreaks, FormatOptions, Newline, VerseBreaks};
+use usfm_onion::lint::Code;
+use usfm_onion::utf16::Utf16Index;
 use wasm_bindgen::prelude::*;
 
 // ---------------------------------------------------------------------------
@@ -259,7 +259,7 @@ impl FormatOpts {
         self.repairs
             .iter()
             .filter_map(|code| {
-                usfm_onion_2::lint::LINT_ROWS
+                usfm_onion::lint::LINT_ROWS
                     .get(*code as usize)
                     .map(|row| row.code)
             })
@@ -306,7 +306,7 @@ impl Edits {
 pub fn format_edits(text: &str, opts: &FormatOpts) -> Edits {
     let names = opts.names();
     let codes = opts.codes();
-    let edits = usfm_onion_2::format_edits(text.as_bytes(), &opts.to_options(&names, &codes));
+    let edits = usfm_onion::format_edits(text.as_bytes(), &opts.to_options(&names, &codes));
     wire_edits(&Utf16Index::new(text.as_bytes()), &edits)
 }
 
@@ -324,7 +324,7 @@ pub fn format_edits_in(text: &str, from: u32, to: u32, opts: &FormatOpts) -> Edi
     let index = Utf16Index::new(text.as_bytes());
     let range = index.to_byte(from)..index.to_byte(to);
     let edits =
-        usfm_onion_2::format_edits_in(text.as_bytes(), range, &opts.to_options(&names, &codes));
+        usfm_onion::format_edits_in(text.as_bytes(), range, &opts.to_options(&names, &codes));
     wire_edits(&index, &edits)
 }
 
@@ -333,7 +333,7 @@ pub fn format_edits_in(text: &str, from: u32, to: u32, opts: &FormatOpts) -> Edi
 /// The index is built per call: an edit list is small and the conversion is
 /// random-access (edits are sorted, but a stride index is ~0.1ms and this is a
 /// user-triggered path, not a keystroke one).
-fn wire_edits(index: &Utf16Index, edits: &[usfm_onion_2::Edit]) -> Edits {
+fn wire_edits(index: &Utf16Index, edits: &[usfm_onion::Edit]) -> Edits {
     let mut out = Edits {
         spans: Vec::with_capacity(edits.len() * 2),
         lens: Vec::with_capacity(edits.len()),
@@ -353,7 +353,7 @@ fn wire_edits(index: &Utf16Index, edits: &[usfm_onion_2::Edit]) -> Edits {
 pub fn format(text: &str, opts: &FormatOpts) -> String {
     let names = opts.names();
     let codes = opts.codes();
-    let bytes = usfm_onion_2::format::format(text.as_bytes(), &opts.to_options(&names, &codes));
+    let bytes = usfm_onion::format::format(text.as_bytes(), &opts.to_options(&names, &codes));
     String::from_utf8_lossy(&bytes).into_owned()
 }
 
@@ -668,9 +668,9 @@ pub fn to_utf16(text: &str, byte: u32) -> u32 {
 #[wasm_bindgen]
 pub fn locate(text: &str, utf16: u32) -> String {
     let source = text.as_bytes();
-    let tokens = usfm_onion_2::lex(text);
+    let tokens = usfm_onion::lex(text);
     let byte = Utf16Index::new(source).to_byte(utf16);
-    usfm_onion_2::toc::toc(source, &tokens)
+    usfm_onion::toc::toc(source, &tokens)
         .locate(byte)
         .to_string()
 }
@@ -681,8 +681,8 @@ pub fn locate(text: &str, utf16: u32) -> String {
 #[wasm_bindgen]
 pub fn book(text: &str) -> String {
     let source = text.as_bytes();
-    let tokens = usfm_onion_2::lex(text);
-    let code = usfm_onion_2::toc::toc(source, &tokens).book;
+    let tokens = usfm_onion::lex(text);
+    let code = usfm_onion::toc::toc(source, &tokens).book;
     let end = code.iter().position(|b| *b == 0).unwrap_or(code.len());
     String::from_utf8_lossy(&code[..end]).into_owned()
 }

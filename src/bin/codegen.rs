@@ -20,8 +20,8 @@
 
 use std::path::Path;
 
-use usfm_onion_2::lint;
-use usfm_onion_2::tables::{emit, rows};
+use usfm_onion::lint;
+use usfm_onion::tables::{emit, rows};
 
 const OUT: &str = "src/tables/generated.rs";
 const DIAGNOSTICS: &str = "onion-wasm/diagnostics.json";
@@ -39,7 +39,7 @@ fn main() -> std::io::Result<()> {
         .sum();
     let overloaded = rows::ROWS
         .iter()
-        .filter(|row| !matches!(row.shape, usfm_onion_2::tables::schema::SpellingShape::Any))
+        .filter(|row| !matches!(row.shape, usfm_onion::tables::schema::SpellingShape::Any))
         .count();
 
     println!("codegen → {OUT}");

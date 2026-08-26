@@ -17,9 +17,9 @@
 use std::path::{Path, PathBuf};
 
 use rayon::prelude::*;
-use usfm_onion_2::tables::generated;
-use usfm_onion_2::tables::schema::MarkerKind;
-use usfm_onion_2::{Token, TokenKind, lex, toc};
+use usfm_onion::tables::generated;
+use usfm_onion::tables::schema::MarkerKind;
+use usfm_onion::{Token, TokenKind, lex, toc};
 
 fn collect_usfm_paths(root: &Path, paths: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(root) else {

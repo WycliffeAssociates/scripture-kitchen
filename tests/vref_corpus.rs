@@ -15,9 +15,9 @@
 use std::path::{Path, PathBuf};
 
 use rayon::prelude::*;
-use usfm_onion_2::mask::{Filter, mask};
-use usfm_onion_2::vref::{self, RANGE};
-use usfm_onion_2::{cst, lex, toc, verses};
+use usfm_onion::mask::{Filter, mask};
+use usfm_onion::vref::{self, RANGE};
+use usfm_onion::{cst, lex, toc, verses};
 
 fn collect_usfm_paths(root: &Path, paths: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(root) else {

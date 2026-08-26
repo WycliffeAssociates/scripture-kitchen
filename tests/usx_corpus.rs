@@ -33,7 +33,7 @@ use std::path::{Path, PathBuf};
 
 use rayon::prelude::*;
 
-use usfm_onion_2::{cst, lex, usx::usx};
+use usfm_onion::{cst, lex, usx::usx};
 
 /// The cases this pin does NOT claim, matched by path suffix. A case may only
 /// leave the pin if its reason fits on ONE line, in the same three categories

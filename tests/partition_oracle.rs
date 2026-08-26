@@ -13,7 +13,7 @@
 use std::path::{Path, PathBuf};
 
 use rayon::prelude::*;
-use usfm_onion_2::lex;
+use usfm_onion::lex;
 
 fn collect_usfm_paths(root: &Path, paths: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(root) else {

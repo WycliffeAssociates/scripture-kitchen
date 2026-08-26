@@ -24,15 +24,15 @@
 use std::path::{Path, PathBuf};
 
 use rayon::prelude::*;
-use usfm_onion_2::analyze::{Analysis, analyze, anchor, class_word, note_part, stride, wants};
-use usfm_onion_2::cst::Cst;
-use usfm_onion_2::lint::{LINT_ROWS, LintReport, NO_FIX, NO_TOKEN, Severity, lint};
-use usfm_onion_2::mask::{Filter, mask};
-use usfm_onion_2::tables::generated;
-use usfm_onion_2::tables::schema::MarkerKind;
-use usfm_onion_2::toc::{Toc, toc};
-use usfm_onion_2::utf16::Utf16Index;
-use usfm_onion_2::{Token, TokenKind, lex};
+use usfm_onion::analyze::{Analysis, analyze, anchor, class_word, note_part, stride, wants};
+use usfm_onion::cst::Cst;
+use usfm_onion::lint::{LINT_ROWS, LintReport, NO_FIX, NO_TOKEN, Severity, lint};
+use usfm_onion::mask::{Filter, mask};
+use usfm_onion::tables::generated;
+use usfm_onion::tables::schema::MarkerKind;
+use usfm_onion::toc::{Toc, toc};
+use usfm_onion::utf16::Utf16Index;
+use usfm_onion::{Token, TokenKind, lex};
 
 const NONE: u32 = u32::MAX;
 /// `Node::token` for the root — the one node with no opening marker.
@@ -62,7 +62,7 @@ struct Reference {
 fn reference(text: &str) -> Reference {
     let source = text.as_bytes();
     let tokens = lex(text);
-    let cst = usfm_onion_2::cst::build(&tokens);
+    let cst = usfm_onion::cst::build(&tokens);
     let table = toc(source, &tokens);
     let report = lint(source, &tokens, &cst);
     let ix = Utf16Index::new(source);
@@ -158,7 +158,7 @@ fn ref_chapters(source: &[u8], tokens: &[Token], table: &Toc, u: &dyn Fn(u32) ->
             }
         };
         let shaped = row.token != NONE
-            && usfm_onion_2::designator::chapter(ref_designator_bytes(source, tokens, row.token))
+            && usfm_onion::designator::chapter(ref_designator_bytes(source, tokens, row.token))
                 .range()
                 .is_some();
         out.extend_from_slice(&[
@@ -179,7 +179,7 @@ fn ref_verses(source: &[u8], tokens: &[Token], table: &Toc, u: &dyn Fn(u32) -> u
     for row in &table.verses {
         let (from, to, content) = ref_slot(source, tokens, row.token as usize);
         let shaped =
-            usfm_onion_2::designator::verse(ref_designator_bytes(source, tokens, row.token))
+            usfm_onion::designator::verse(ref_designator_bytes(source, tokens, row.token))
                 .range()
                 .is_some();
         out.extend_from_slice(&[

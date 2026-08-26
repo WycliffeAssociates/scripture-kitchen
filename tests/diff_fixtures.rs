@@ -9,11 +9,11 @@
 
 use std::collections::BTreeMap;
 
-use usfm_onion_2::diff::{
+use usfm_onion::diff::{
     CoveredSide, Decisions, DiffSkeleton, MergeError, MergeSide, SlotRole, Status, TextDiffMode,
     UnitKind, diff, diff_with_text, merge, revert, to_edits,
 };
-use usfm_onion_2::edit::apply_splices;
+use usfm_onion::edit::apply_splices;
 
 struct Case {
     n: u32,
@@ -171,7 +171,7 @@ fn current_addr(skeleton: &DiffSkeleton, unit: usize) -> Option<String> {
     skeleton.units[unit].current_addr.map(|a| a.to_string())
 }
 
-fn only(skeleton: &DiffSkeleton, kind: UnitKind) -> &usfm_onion_2::diff::DecisionUnit {
+fn only(skeleton: &DiffSkeleton, kind: UnitKind) -> &usfm_onion::diff::DecisionUnit {
     let mut found = skeleton.units.iter().filter(|unit| unit.kind == kind);
     let unit = found.next().unwrap_or_else(|| panic!("no {kind:?} unit"));
     assert!(found.next().is_none(), "expected exactly one {kind:?} unit");
@@ -873,12 +873,12 @@ fn text_diff_is_status_gated_and_reconstructs_each_side() {
                     assert!(
                         diff.baseline
                             .iter()
-                            .all(|run| run.kind != usfm_onion_2::diff::RunKind::Added)
+                            .all(|run| run.kind != usfm_onion::diff::RunKind::Added)
                     );
                     assert!(
                         diff.current
                             .iter()
-                            .all(|run| run.kind != usfm_onion_2::diff::RunKind::Removed)
+                            .all(|run| run.kind != usfm_onion::diff::RunKind::Removed)
                     );
                 }
             }
@@ -925,13 +925,13 @@ fn a_modified_unit_splits_into_word_runs_that_rebuild_the_reader_text() {
     let removed: Vec<&str> = diff
         .baseline
         .iter()
-        .filter(|run| run.kind == usfm_onion_2::diff::RunKind::Removed)
+        .filter(|run| run.kind == usfm_onion::diff::RunKind::Removed)
         .map(|run| run.text.as_str())
         .collect();
     let added: Vec<&str> = diff
         .current
         .iter()
-        .filter(|run| run.kind == usfm_onion_2::diff::RunKind::Added)
+        .filter(|run| run.kind == usfm_onion::diff::RunKind::Added)
         .map(|run| run.text.as_str())
         .collect();
     assert_eq!(removed, vec!["heaven"]);
@@ -977,7 +977,7 @@ fn a_reformat_only_pair_is_whitespace_change_everywhere() {
     let baseline = "\\id GEN\n\\c 1\n\\p\n\\v 1 one\n\\v 2 two\n";
     let current = "\\id GEN\n\\c 1\n\\p \\v 1 one   \\v 2 two\n";
     let skeleton = diff(baseline, current);
-    let changed: Vec<&usfm_onion_2::diff::DecisionUnit> = skeleton
+    let changed: Vec<&usfm_onion::diff::DecisionUnit> = skeleton
         .units
         .iter()
         .filter(|unit| unit.status == Status::Modified)

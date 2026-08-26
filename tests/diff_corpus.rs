@@ -8,10 +8,10 @@
 
 use std::path::{Path, PathBuf};
 
-use usfm_onion_2::diff::{
+use usfm_onion::diff::{
     Decisions, DiffSkeleton, MergeSide, SlotRole, Status, UnitKind, diff, merge, to_edits,
 };
-use usfm_onion_2::edit::apply_splices;
+use usfm_onion::edit::apply_splices;
 
 fn read(path: &str) -> String {
     std::fs::read_to_string(path).unwrap_or_else(|err| panic!("{path}: {err}"))

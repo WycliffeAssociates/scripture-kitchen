@@ -4,9 +4,9 @@
 //! It exists because `generated.rs` is CHECKED IN — consumers never run codegen,
 //! so nothing else would notice a row edit that was not regenerated.
 
-use usfm_onion_2::lint::{self, LINT_ROWS};
-use usfm_onion_2::tables::schema::{Numbering, SpellingShape};
-use usfm_onion_2::tables::{emit, generated, rows};
+use usfm_onion::lint::{self, LINT_ROWS};
+use usfm_onion::tables::schema::{Numbering, SpellingShape};
+use usfm_onion::tables::{emit, generated, rows};
 
 const CHECKED_IN: &str = include_str!("../src/tables/generated.rs");
 const CHECKED_IN_DIAGNOSTICS: &str = include_str!("../onion-wasm/diagnostics.json");

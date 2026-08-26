@@ -32,7 +32,7 @@ use std::path::{Path, PathBuf};
 use rayon::prelude::*;
 use serde_json::Value;
 
-use usfm_onion_2::{cst, html::html, lex, usj::usj};
+use usfm_onion::{cst, html::html, lex, usj::usj};
 
 /// "This element's text is not USJ string content" — anything wearing it is
 /// skipped whole.

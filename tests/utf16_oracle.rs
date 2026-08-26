@@ -17,7 +17,7 @@
 use std::path::{Path, PathBuf};
 
 use rayon::prelude::*;
-use usfm_onion_2::utf16::{STRIDE, Utf16Index};
+use usfm_onion::utf16::{STRIDE, Utf16Index};
 
 fn collect_usfm_paths(root: &Path, paths: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(root) else {

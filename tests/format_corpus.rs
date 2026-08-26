@@ -11,11 +11,11 @@
 use std::path::{Path, PathBuf};
 
 use rayon::prelude::*;
-use usfm_onion_2::cst::build;
-use usfm_onion_2::edit::apply;
-use usfm_onion_2::lint::{Code, LINT_ROWS, check_edits, lint};
-use usfm_onion_2::toc::toc;
-use usfm_onion_2::{Filter, FormatOptions, format, format_edits, format_edits_in, lex, mask};
+use usfm_onion::cst::build;
+use usfm_onion::edit::apply;
+use usfm_onion::lint::{Code, LINT_ROWS, check_edits, lint};
+use usfm_onion::toc::toc;
+use usfm_onion::{Filter, FormatOptions, format, format_edits, format_edits_in, lex, mask};
 
 fn collect_usfm_paths(root: &Path, paths: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(root) else {

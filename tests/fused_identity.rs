@@ -12,10 +12,10 @@
 use std::path::{Path, PathBuf};
 
 use rayon::prelude::*;
-use usfm_onion_2::cst::build;
-use usfm_onion_2::experiments::fused::{analyze_fused, analyze_fused_cst, lex_noop_sink};
-use usfm_onion_2::lex;
-use usfm_onion_2::lint::lint;
+use usfm_onion::cst::build;
+use usfm_onion::experiments::fused::{analyze_fused, analyze_fused_cst, lex_noop_sink};
+use usfm_onion::lex;
+use usfm_onion::lint::lint;
 
 fn assert_identical(label: &str, source: &str) {
     let tokens = lex(source);

@@ -19,10 +19,10 @@
 //! a proptest dependency: the shapes that matter here are USFM-specific and a
 //! generic shrinker has nothing to shrink into.
 
-use usfm_onion_2::diff::{
+use usfm_onion::diff::{
     Decisions, DiffSkeleton, MergeError, MergeSide, SlotRole, diff, merge, to_edits,
 };
-use usfm_onion_2::edit::apply_splices;
+use usfm_onion::edit::apply_splices;
 
 struct Rng(u64);
 
@@ -300,7 +300,7 @@ fn a_renumbered_verse_never_coalesces_and_a_swap_always_does() {
         skeleton
             .units
             .iter()
-            .filter(|unit| unit.kind == usfm_onion_2::diff::UnitKind::Coalesced)
+            .filter(|unit| unit.kind == usfm_onion::diff::UnitKind::Coalesced)
             .count(),
         0
     );
@@ -310,7 +310,7 @@ fn a_renumbered_verse_never_coalesces_and_a_swap_always_does() {
     let moved: Vec<_> = skeleton
         .units
         .iter()
-        .filter(|unit| unit.status == usfm_onion_2::diff::Status::Moved)
+        .filter(|unit| unit.status == usfm_onion::diff::Status::Moved)
         .collect();
     assert_eq!(moved.len(), 1);
     assert!(moved[0].displaced);

@@ -297,8 +297,8 @@ onion ◄── onion-wasm            sous ◄── sous-wasm
   bare `galley` is likely taken).
 - The wasm doorways follow their engines (onion-wasm / sous-wasm as
   directories; package names settle with the galley naming call).
-- The `usfm_onion_2 → usfm_onion` rename (package name + every
-  `usfm_onion_2::` path in tests/bins) lands WITH step 1's
+- The `usfm_onion → usfm_onion` rename (package name + every
+  `usfm_onion::` path in tests/bins) lands WITH step 1's
   workspace-ification — one mechanical commit, not two.
 
 ### The (hash → products) cache shape, noted for rung 2

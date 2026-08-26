@@ -10,8 +10,8 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use rayon::prelude::*;
-use usfm_onion_2::attributes::{AttrEvent, MalformedAttr, attrs};
-use usfm_onion_2::{TokenKind, lex};
+use usfm_onion::attributes::{AttrEvent, MalformedAttr, attrs};
+use usfm_onion::{TokenKind, lex};
 
 fn collect_usfm_paths(root: &Path, paths: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(root) else {

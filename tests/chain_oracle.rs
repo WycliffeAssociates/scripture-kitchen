@@ -21,8 +21,8 @@
 
 use std::path::Path;
 
-use usfm_onion_2::mask::{Filter, mask};
-use usfm_onion_2::{Toc, cst, lex, toc, utf16_index};
+use usfm_onion::mask::{Filter, mask};
+use usfm_onion::{Toc, cst, lex, toc, utf16_index};
 
 /// Sample points per file per hop.
 const SAMPLES: usize = 1_000;

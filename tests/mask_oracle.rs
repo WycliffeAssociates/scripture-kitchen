@@ -20,9 +20,9 @@
 use std::path::{Path, PathBuf};
 
 use rayon::prelude::*;
-use usfm_onion_2::mask::{Action, Filter, Mask, TextRule, mask};
-use usfm_onion_2::tables::schema::MarkerKind;
-use usfm_onion_2::{cst, lex};
+use usfm_onion::mask::{Action, Filter, Mask, TextRule, mask};
+use usfm_onion::tables::schema::MarkerKind;
+use usfm_onion::{cst, lex};
 
 fn collect_usfm_paths(root: &Path, paths: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(root) else {

@@ -11,7 +11,7 @@ name = "onion_wasm"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-usfm_onion_2 = { path = ".." }
+usfm_onion = { path = ".." }
 wasm-bindgen = "0.2"
 # The plain-object `analyze` return. `Object`/`Reflect`/`Uint32Array` only —
 # lighter than serde-wasm-bindgen, which would pull serde's derive machinery

@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 use rayon::prelude::*;
 use serde_json::Value;
 
-use usfm_onion_2::{cst, lex, usj::usj};
+use usfm_onion::{cst, lex, usj::usj};
 
 /// The cases this pin does NOT claim, matched by path suffix. A case may only
 /// leave the pin if its reason fits on ONE line, in one of three categories:

@@ -1,0 +1,7 @@
+[package]
+name = "usfm_galley"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+usfm_onion = { path = ".." }

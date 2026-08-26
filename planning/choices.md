@@ -1052,7 +1052,7 @@ in `src/analyze.rs` / `src/bin/playground.rs` all follow. In the spike:
     `src/cm/`; the demo book's text was left alone, because the probe asserts
     against those bytes. Sound, high.
 13. **Not done.** The subdirectory problem for GitHub-tag installs is RECORDED,
-    not solved: `npm i github:org/usfm_onion_2#tag` installs the repo root, and
+    not solved: `npm i github:org/usfm_onion#tag` installs the repo root, and
     `onion-wasm/` is not the root. That wants a decision (subdirectory-aware
     installer, or a split publish repo) before anyone is told to install from a
     tag; it is in the sketch's §Distribution.

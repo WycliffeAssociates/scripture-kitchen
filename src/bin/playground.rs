@@ -45,7 +45,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use usfm_onion_2::mask::{Filter, Mask};
+use usfm_onion::mask::{Filter, Mask};
 
 const DEFAULT_CORPUS: &str = "example-corpora/en_ulb";
 
@@ -100,7 +100,7 @@ fn main() {
     let mut path: Option<PathBuf> = None;
     let mut mode = Mode::Serial;
     let mut iters: u32 = 1;
-    let mut analyze_wants = usfm_onion_2::analyze::wants::ALL;
+    let mut analyze_wants = usfm_onion::analyze::wants::ALL;
     let mut cst_stats = false;
     let mut lint_stats = false;
     let mut codes = false;
@@ -311,7 +311,7 @@ fn main() {
 
     // Lexed OUTSIDE the clock, so an `--*-only` mode prices its own pass and
     // nothing else.
-    let prelexed: Vec<Vec<usfm_onion_2::Token>> = if matches!(
+    let prelexed: Vec<Vec<usfm_onion::Token>> = if matches!(
         mode,
         Mode::TocOnly
             | Mode::CstOnly
@@ -322,7 +322,7 @@ fn main() {
             | Mode::UsxOnly
             | Mode::HtmlOnly
     ) {
-        sources.iter().map(|s| usfm_onion_2::lex(s)).collect()
+        sources.iter().map(|s| usfm_onion::lex(s)).collect()
     } else {
         Vec::new()
     };
@@ -348,7 +348,7 @@ fn main() {
         if prelexed.is_empty() {
             sources
                 .iter()
-                .map(|s| usfm_onion_2::lex(s).len() as u64)
+                .map(|s| usfm_onion::lex(s).len() as u64)
                 .sum()
         } else {
             prelexed.iter().map(|t| t.len() as u64).sum()
@@ -356,7 +356,7 @@ fn main() {
     } else {
         0
     };
-    let prebuilt: Vec<usfm_onion_2::cst::Cst> = if matches!(
+    let prebuilt: Vec<usfm_onion::cst::Cst> = if matches!(
         mode,
         Mode::LintOnly
             | Mode::MaskOnly
@@ -367,7 +367,7 @@ fn main() {
     ) {
         prelexed
             .iter()
-            .map(|t| usfm_onion_2::cst::build(t))
+            .map(|t| usfm_onion::cst::build(t))
             .collect()
     } else {
         Vec::new()
@@ -406,7 +406,7 @@ fn main() {
 /// Checks an experiment variant against the real lexer once per run, outside the
 /// timing loop; a mismatch aborts loudly.
 fn verify_variant(sources: &[String], mode: Mode) {
-    let run: fn(&str) -> Vec<usfm_onion_2::Token> = match mode {
+    let run: fn(&str) -> Vec<usfm_onion::Token> = match mode {
         Mode::Serial | Mode::Par => return, // the reference itself
         // Sweeps produce counts, not token streams — nothing to verify.
         Mode::SweepNl | Mode::SweepStops | Mode::SweepCursor => return,
@@ -420,13 +420,13 @@ fn verify_variant(sources: &[String], mode: Mode) {
         // token streams, so it cannot be a `fn(&str) -> Vec<Token>` here.
         Mode::Fused | Mode::FusedNoop | Mode::FusedCst => return,
         Mode::Utf16 => return, // not a lexer variant
-        Mode::Scalar => usfm_onion_2::experiments::scalar::lex,
-        Mode::Staged => usfm_onion_2::experiments::staged::lex,
-        Mode::Chunked => usfm_onion_2::experiments::chapter_par::lex_chunked,
+        Mode::Scalar => usfm_onion::experiments::scalar::lex,
+        Mode::Staged => usfm_onion::experiments::staged::lex,
+        Mode::Chunked => usfm_onion::experiments::chapter_par::lex_chunked,
         Mode::ChapterPar => {
             #[cfg(feature = "par")]
             {
-                usfm_onion_2::experiments::chapter_par::lex_chunked_par
+                usfm_onion::experiments::chapter_par::lex_chunked_par
             }
             #[cfg(not(feature = "par"))]
             panic!(
@@ -457,47 +457,47 @@ fn verify_variant(sources: &[String], mode: Mode) {
 fn run_once(
     wants: u32,
     sources: &[String],
-    prelexed: &[Vec<usfm_onion_2::Token>],
-    prebuilt: &[usfm_onion_2::cst::Cst],
+    prelexed: &[Vec<usfm_onion::Token>],
+    prebuilt: &[usfm_onion::cst::Cst],
     mode: Mode,
 ) {
     match mode {
         Mode::Lint => {
             for source in sources {
-                let tokens = usfm_onion_2::lex(source);
-                let cst = usfm_onion_2::cst::build(&tokens);
-                std::hint::black_box(usfm_onion_2::lint::lint(source.as_bytes(), &tokens, &cst));
+                let tokens = usfm_onion::lex(source);
+                let cst = usfm_onion::cst::build(&tokens);
+                std::hint::black_box(usfm_onion::lint::lint(source.as_bytes(), &tokens, &cst));
             }
         }
         Mode::Analyze => {
             for source in sources {
-                std::hint::black_box(usfm_onion_2::analyze::analyze(source, wants, None));
+                std::hint::black_box(usfm_onion::analyze::analyze(source, wants, None));
             }
         }
         Mode::Fused => {
             for source in sources {
-                std::hint::black_box(usfm_onion_2::experiments::fused::analyze_fused(source));
+                std::hint::black_box(usfm_onion::experiments::fused::analyze_fused(source));
             }
         }
         Mode::FusedNoop => {
             for source in sources {
-                std::hint::black_box(usfm_onion_2::experiments::fused::lex_noop_sink(source));
+                std::hint::black_box(usfm_onion::experiments::fused::lex_noop_sink(source));
             }
         }
         Mode::FusedCst => {
             for source in sources {
-                std::hint::black_box(usfm_onion_2::experiments::fused::analyze_fused_cst(source));
+                std::hint::black_box(usfm_onion::experiments::fused::analyze_fused_cst(source));
             }
         }
         Mode::LintOnly => {
             for ((source, tokens), cst) in sources.iter().zip(prelexed).zip(prebuilt) {
-                std::hint::black_box(usfm_onion_2::lint::lint(source.as_bytes(), tokens, cst));
+                std::hint::black_box(usfm_onion::lint::lint(source.as_bytes(), tokens, cst));
             }
         }
         Mode::UsjOnly => {
             #[cfg(feature = "usj")]
             for ((source, tokens), cst) in sources.iter().zip(prelexed).zip(prebuilt) {
-                std::hint::black_box(usfm_onion_2::usj::usj(source.as_bytes(), tokens, cst));
+                std::hint::black_box(usfm_onion::usj::usj(source.as_bytes(), tokens, cst));
             }
             #[cfg(not(feature = "usj"))]
             panic!(
@@ -507,7 +507,7 @@ fn run_once(
         Mode::UsxOnly => {
             #[cfg(feature = "usx")]
             for ((source, tokens), cst) in sources.iter().zip(prelexed).zip(prebuilt) {
-                std::hint::black_box(usfm_onion_2::usx::usx(source.as_bytes(), tokens, cst));
+                std::hint::black_box(usfm_onion::usx::usx(source.as_bytes(), tokens, cst));
             }
             #[cfg(not(feature = "usx"))]
             panic!(
@@ -517,7 +517,7 @@ fn run_once(
         Mode::HtmlOnly => {
             #[cfg(feature = "html")]
             for ((source, tokens), cst) in sources.iter().zip(prelexed).zip(prebuilt) {
-                std::hint::black_box(usfm_onion_2::html::html(source.as_bytes(), tokens, cst));
+                std::hint::black_box(usfm_onion::html::html(source.as_bytes(), tokens, cst));
             }
             #[cfg(not(feature = "html"))]
             panic!(
@@ -526,10 +526,10 @@ fn run_once(
         }
         Mode::Mask => {
             for source in sources {
-                let tokens = usfm_onion_2::lex(source);
-                let cst = usfm_onion_2::cst::build(&tokens);
+                let tokens = usfm_onion::lex(source);
+                let cst = usfm_onion::cst::build(&tokens);
                 for filter in [Filter::verse_text(), Filter::structure()] {
-                    std::hint::black_box(usfm_onion_2::mask(
+                    std::hint::black_box(usfm_onion::mask(
                         source.as_bytes(),
                         &tokens,
                         &cst,
@@ -541,7 +541,7 @@ fn run_once(
         Mode::MaskOnly => {
             for ((source, tokens), cst) in sources.iter().zip(prelexed).zip(prebuilt) {
                 for filter in [Filter::verse_text(), Filter::structure()] {
-                    std::hint::black_box(usfm_onion_2::mask(
+                    std::hint::black_box(usfm_onion::mask(
                         source.as_bytes(),
                         tokens,
                         cst,
@@ -553,68 +553,68 @@ fn run_once(
         Mode::VrefOnly => {
             for ((source, tokens), cst) in sources.iter().zip(prelexed).zip(prebuilt) {
                 let bytes = source.as_bytes();
-                let toc = usfm_onion_2::toc(bytes, tokens);
-                let m = usfm_onion_2::mask(bytes, tokens, cst, &Filter::verse_text());
-                std::hint::black_box(usfm_onion_2::vref::keys(&toc, &m, bytes));
-                std::hint::black_box(usfm_onion_2::vref::lines(&toc, &m, bytes, true));
+                let toc = usfm_onion::toc(bytes, tokens);
+                let m = usfm_onion::mask(bytes, tokens, cst, &Filter::verse_text());
+                std::hint::black_box(usfm_onion::vref::keys(&toc, &m, bytes));
+                std::hint::black_box(usfm_onion::vref::lines(&toc, &m, bytes, true));
             }
         }
         Mode::Toc => {
             for source in sources {
-                let tokens = usfm_onion_2::lex(source);
-                std::hint::black_box(usfm_onion_2::toc(source.as_bytes(), &tokens));
+                let tokens = usfm_onion::lex(source);
+                std::hint::black_box(usfm_onion::toc(source.as_bytes(), &tokens));
             }
         }
         Mode::TocOnly => {
             for (source, tokens) in sources.iter().zip(prelexed) {
-                std::hint::black_box(usfm_onion_2::toc(source.as_bytes(), tokens));
+                std::hint::black_box(usfm_onion::toc(source.as_bytes(), tokens));
             }
         }
         Mode::Cst => {
             for source in sources {
-                let tokens = usfm_onion_2::lex(source);
-                std::hint::black_box(usfm_onion_2::cst::build(&tokens));
+                let tokens = usfm_onion::lex(source);
+                std::hint::black_box(usfm_onion::cst::build(&tokens));
             }
         }
         Mode::CstOnly => {
             for tokens in prelexed {
-                std::hint::black_box(usfm_onion_2::cst::build(tokens));
+                std::hint::black_box(usfm_onion::cst::build(tokens));
             }
         }
         Mode::Utf16 => unreachable!("handled in main before the corpus load"),
         Mode::Serial => {
             for source in sources {
-                std::hint::black_box(usfm_onion_2::lex(source));
+                std::hint::black_box(usfm_onion::lex(source));
             }
         }
         Mode::Scalar => {
             for source in sources {
-                std::hint::black_box(usfm_onion_2::experiments::scalar::lex(source));
+                std::hint::black_box(usfm_onion::experiments::scalar::lex(source));
             }
         }
         Mode::Staged => {
             for source in sources {
-                std::hint::black_box(usfm_onion_2::experiments::staged::lex(source));
+                std::hint::black_box(usfm_onion::experiments::staged::lex(source));
             }
         }
         Mode::Chunked => {
             for source in sources {
-                std::hint::black_box(usfm_onion_2::experiments::chapter_par::lex_chunked(source));
+                std::hint::black_box(usfm_onion::experiments::chapter_par::lex_chunked(source));
             }
         }
         Mode::SweepNl => {
             for source in sources {
-                std::hint::black_box(usfm_onion_2::experiments::sweeps::sweep_nl(source));
+                std::hint::black_box(usfm_onion::experiments::sweeps::sweep_nl(source));
             }
         }
         Mode::SweepStops => {
             for source in sources {
-                std::hint::black_box(usfm_onion_2::experiments::sweeps::sweep_stops(source));
+                std::hint::black_box(usfm_onion::experiments::sweeps::sweep_stops(source));
             }
         }
         Mode::SweepCursor => {
             for source in sources {
-                std::hint::black_box(usfm_onion_2::experiments::sweeps::sweep_cursor(source));
+                std::hint::black_box(usfm_onion::experiments::sweeps::sweep_cursor(source));
             }
         }
         Mode::Par => {
@@ -622,7 +622,7 @@ fn run_once(
             {
                 use rayon::prelude::*;
                 sources.par_iter().for_each(|source| {
-                    std::hint::black_box(usfm_onion_2::lex(source));
+                    std::hint::black_box(usfm_onion::lex(source));
                 });
             }
             #[cfg(not(feature = "par"))]
@@ -636,7 +636,7 @@ fn run_once(
                 // Books stay serial; the parallelism being priced is INSIDE each
                 // book, over its chapters.
                 for source in sources {
-                    std::hint::black_box(usfm_onion_2::experiments::chapter_par::lex_chunked_par(
+                    std::hint::black_box(usfm_onion::experiments::chapter_par::lex_chunked_par(
                         source,
                     ));
                 }
@@ -667,7 +667,7 @@ fn collect_usfm_paths(root: &Path, paths: &mut Vec<PathBuf>) {
 /// Untimed output, timed diff — the header carries best-of-20 wall clock for
 /// `diff` alone and for `diff_with_text` (which adds a CST + mask per side).
 fn diff_listing(baseline: &str, current: &str) -> String {
-    use usfm_onion_2::diff::{
+    use usfm_onion::diff::{
         Decisions, MergeSide, Status, TextDiffMode, diff, diff_with_text, to_edits,
     };
 
@@ -727,7 +727,7 @@ fn diff_listing(baseline: &str, current: &str) -> String {
         if unit.status == Status::Unchanged {
             continue;
         }
-        let address = |addr: Option<usfm_onion_2::diff::Addr>| {
+        let address = |addr: Option<usfm_onion::diff::Addr>| {
             addr.map_or_else(|| "-".to_string(), |addr| addr.to_string())
         };
         let mut flags = Vec::new();
@@ -770,11 +770,11 @@ fn read_source(path: &Path) -> String {
 /// an ASCII-dominant prose book, a dense-Devanagari book (the case that breaks
 /// per-drift-change anchors), and the heaviest aligned book. Strategy A = one
 /// anchor per non-ASCII char; strategy B = one anchor per
-/// [`usfm_onion_2::utf16::STRIDE`] bytes + a SWAR remainder count — the shape
+/// [`usfm_onion::utf16::STRIDE`] bytes + a SWAR remainder count — the shape
 /// that won, now the production `Utf16Index`.
 fn report_utf16() {
-    use usfm_onion_2::experiments::utf16::{Anchors, reference_pairs, utf16_len_scalar};
-    use usfm_onion_2::utf16::{STRIDE, Utf16Index, utf16_len};
+    use usfm_onion::experiments::utf16::{Anchors, reference_pairs, utf16_len_scalar};
+    use usfm_onion::utf16::{STRIDE, Utf16Index, utf16_len};
 
     const QUERIES: usize = 10_000;
     const REPS: u32 = 8; // min-of-8, the convention everywhere else here
@@ -935,8 +935,8 @@ fn report_utf16() {
 fn toc_listing(source: &str) -> String {
     const ANCHORS_PER_CHAPTER: usize = 6;
 
-    let tokens = usfm_onion_2::lex(source);
-    let toc = usfm_onion_2::toc(source.as_bytes(), &tokens);
+    let tokens = usfm_onion::lex(source);
+    let toc = usfm_onion::toc(source.as_bytes(), &tokens);
     let mut out = String::new();
     out.push_str(&format!(
         "{} — {} chapter rows, {} verse anchors, {} bytes\n\n",
@@ -947,7 +947,7 @@ fn toc_listing(source: &str) -> String {
     ));
     out.push_str("  ch            bytes  verses  first anchors\n");
     for row in &toc.chapters {
-        let anchors: Vec<&usfm_onion_2::VerseAnchor> = toc
+        let anchors: Vec<&usfm_onion::VerseAnchor> = toc
             .verses
             .iter()
             .filter(|v| v.at >= row.start && v.at < row.end)
@@ -979,7 +979,7 @@ fn toc_listing(source: &str) -> String {
 /// option variant, with the options and a wall-clock cost in the header. The
 /// regenerator for debug/formatting/*.txt.
 fn format_listing(source: &str, chapter: Option<u16>, variant: &str) -> String {
-    use usfm_onion_2::{CharBreaks, FormatOptions, VerseBreaks, format, format_edits};
+    use usfm_onion::{CharBreaks, FormatOptions, VerseBreaks, format, format_edits};
 
     let opts = match variant {
         "default" => FormatOptions::default(),
@@ -1003,8 +1003,8 @@ fn format_listing(source: &str, chapter: Option<u16>, variant: &str) -> String {
     let bytes = source.as_bytes();
     let window = match chapter {
         Some(n) => {
-            let tokens = usfm_onion_2::lex(source);
-            let toc = usfm_onion_2::toc(bytes, &tokens);
+            let tokens = usfm_onion::lex(source);
+            let toc = usfm_onion::toc(bytes, &tokens);
             toc.chapter_span(n)
                 .unwrap_or_else(|| panic!("no chapter {n} in this book"))
         }
@@ -1038,9 +1038,9 @@ fn format_listing(source: &str, chapter: Option<u16>, variant: &str) -> String {
 
 fn mask_listing(source: &str, chapter: Option<u16>, only: Option<&str>) -> String {
     let bytes = source.as_bytes();
-    let tokens = usfm_onion_2::lex(source);
-    let cst = usfm_onion_2::cst::build(&tokens);
-    let toc = usfm_onion_2::toc(bytes, &tokens);
+    let tokens = usfm_onion::lex(source);
+    let cst = usfm_onion::cst::build(&tokens);
+    let toc = usfm_onion::toc(bytes, &tokens);
     let window = match chapter {
         Some(n) => toc
             .chapter_span(n)
@@ -1056,7 +1056,7 @@ fn mask_listing(source: &str, chapter: Option<u16>, only: Option<&str>) -> Strin
         if only.is_some_and(|name| name != recipe) {
             continue;
         }
-        let m = usfm_onion_2::mask(bytes, &tokens, &cst, &filter);
+        let m = usfm_onion::mask(bytes, &tokens, &cst, &filter);
         let text = window_text(bytes, &m, &window);
         out.push_str(&format!(
             "=== {} {} — {recipe}: {} of {} window bytes kept, {} ranges whole-book\n\n",
@@ -1079,13 +1079,13 @@ fn mask_listing(source: &str, chapter: Option<u16>, only: Option<&str>) -> Strin
 /// narrowed to one chapter. The regenerator for debug/vref.*.txt.
 fn vref_listing(source: &str, chapter: Option<u16>) -> String {
     let bytes = source.as_bytes();
-    let tokens = usfm_onion_2::lex(source);
-    let cst = usfm_onion_2::cst::build(&tokens);
-    let toc = usfm_onion_2::toc(bytes, &tokens);
-    let m = usfm_onion_2::mask(bytes, &tokens, &cst, &Filter::verse_text());
+    let tokens = usfm_onion::lex(source);
+    let cst = usfm_onion::cst::build(&tokens);
+    let toc = usfm_onion::toc(bytes, &tokens);
+    let m = usfm_onion::mask(bytes, &tokens, &cst, &Filter::verse_text());
 
     let mut out = String::new();
-    for (sid, text) in usfm_onion_2::verses(&toc, &m, bytes) {
+    for (sid, text) in usfm_onion::verses(&toc, &m, bytes) {
         if chapter.is_some_and(|n| n != sid.chapter) {
             continue;
         }
@@ -1118,8 +1118,8 @@ fn window_text(source: &[u8], m: &Mask, window: &std::ops::Range<u32>) -> String
 /// marker's backslash, the delimiter the scanner folded on — is not something a
 /// template reads like.
 fn report_codes(sources: &[String]) {
-    use usfm_onion_2::analyze::{NONE, analyze, stride, wants};
-    use usfm_onion_2::lint::{LINT_ROWS, Severity, UsfmVersion};
+    use usfm_onion::analyze::{NONE, analyze, stride, wants};
+    use usfm_onion::lint::{LINT_ROWS, Severity, UsfmVersion};
 
     // The first real occurrence of each code, rendered the way `onion-wasm.ts`'s
     // `message()` renders it: template plus two document slices.
@@ -1169,7 +1169,7 @@ fn report_codes(sources: &[String]) {
     println!(
         "codes n={} schema={} (examples from {} loaded source(s))",
         LINT_ROWS.len(),
-        usfm_onion_2::lint::catalog::SCHEMA,
+        usfm_onion::lint::catalog::SCHEMA,
         sources.len()
     );
     for (code, row) in LINT_ROWS.iter().enumerate() {
@@ -1206,7 +1206,7 @@ fn report_codes(sources: &[String]) {
 }
 
 fn report_lint_stats(sources: &[String], root: &Path, preview_of: Option<&str>) {
-    use usfm_onion_2::lint::LINT_ROWS;
+    use usfm_onion::lint::LINT_ROWS;
 
     const SAMPLES_PER_CODE: usize = 12;
     const PREVIEWS: usize = 6;
@@ -1241,9 +1241,9 @@ fn report_lint_stats(sources: &[String], root: &Path, preview_of: Option<&str>) 
     let mut tokens_total = 0u64;
 
     for (i, source) in sources.iter().enumerate() {
-        let tokens = usfm_onion_2::lex(source);
-        let cst = usfm_onion_2::cst::build(&tokens);
-        let report = usfm_onion_2::lint::lint(source.as_bytes(), &tokens, &cst);
+        let tokens = usfm_onion::lex(source);
+        let cst = usfm_onion::cst::build(&tokens);
+        let report = usfm_onion::lint::lint(source.as_bytes(), &tokens, &cst);
         tokens_total += tokens.len() as u64;
 
         let book = match report.book {
@@ -1274,7 +1274,7 @@ fn report_lint_stats(sources: &[String], root: &Path, preview_of: Option<&str>) 
                 let edits = report.edits(fix);
                 let at = edits[0].from as usize;
                 let window = at.saturating_sub(60)..(at + 60).min(source.len());
-                let after = String::from_utf8(usfm_onion_2::lint::apply(source.as_bytes(), edits))
+                let after = String::from_utf8(usfm_onion::lint::apply(source.as_bytes(), edits))
                     .expect("fixes are ASCII");
                 let shift = window.start..(window.end + 8).min(after.len());
                 previews.push((
@@ -1324,15 +1324,15 @@ fn report_lint_stats(sources: &[String], root: &Path, preview_of: Option<&str>) 
 /// are nearly all Explicit/Implicit; a Recovery cluster is either real data
 /// damage or a walker/table gap — eyeball them.
 fn report_cst_stats(sources: &[String]) {
-    use usfm_onion_2::cst::CloseReason;
+    use usfm_onion::cst::CloseReason;
     let mut totals = [0u64; 4];
     let mut nodes_total = 0u64;
     let mut tokens_total = 0u64;
     let mut worst: Vec<(u64, usize)> = Vec::new();
     let mut by_marker: std::collections::BTreeMap<&str, u64> = std::collections::BTreeMap::new();
     for (i, source) in sources.iter().enumerate() {
-        let tokens = usfm_onion_2::lex(source);
-        let cst = usfm_onion_2::cst::build(&tokens);
+        let tokens = usfm_onion::lex(source);
+        let cst = usfm_onion::cst::build(&tokens);
         tokens_total += tokens.len() as u64;
         nodes_total += cst.nodes.len() as u64;
         let mut recoveries = 0u64;
@@ -1349,7 +1349,7 @@ fn report_cst_stats(sources: &[String]) {
         for node in &cst.nodes[1..] {
             if node.close_reason() == CloseReason::Recovery {
                 let idx = tokens[node.token as usize].marker_idx;
-                let name = usfm_onion_2::tables::generated::name(idx);
+                let name = usfm_onion::tables::generated::name(idx);
                 *by_marker.entry(name).or_insert(0u64) += 1;
             }
         }

@@ -1,4 +1,4 @@
-# usfm_onion_2
+# usfm_onion
 
 Rust USFM engine. Design authority lives in `planning/` — sketches per
 feature, `planning/choices.md` (the decision ledger: banked entries are

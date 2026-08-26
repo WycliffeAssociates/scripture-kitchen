@@ -64,7 +64,7 @@ ships IN the same npm package (below).
 **Why it's a separate tiny crate instead of tags in this one:** a
 wasm-callable binary needs `crate-type = ["cdylib"]` in Cargo.toml and
 a dependency on `wasm-bindgen`. Putting that here would make every
-native consumer carry wasm-bindgen for nothing. So: `usfm_onion_2`
+native consumer carry wasm-bindgen for nothing. So: `usfm_onion`
 stays a plain library, and a sibling `onion-wasm/` crate (a workspace
 member) depends on it, tags the exports, and is what `wasm-pack build`
 runs against. The substance stays in the library; the bindings crate
@@ -286,7 +286,7 @@ onion-wasm, NO standalone sous-wasm — ONE combined bindings crate,
 named **galley** (wins over "braid"; the vision's "composed analysis
 host" gets its name). Two fat libraries under it:
 
-- **`usfm_onion_2`** (this repo) — plain Rust library. No wasm
+- **`usfm_onion`** (this repo) — plain Rust library. No wasm
   anything, ever.
 - **`sous`** (sibling repo) — plain Rust library, same deal.
 - **`galley`** — the crate the EDITOR actually loads: today it wraps
@@ -427,7 +427,7 @@ decision if one ever asks.
 Still open when npm publishing matures:
 
 - **The package lives in a SUBDIRECTORY of the engine repo.** `npm i
-  github:org/usfm_onion_2#tag` installs the repo ROOT, not `onion-wasm/`, so a
+  github:org/usfm_onion#tag` installs the repo ROOT, not `onion-wasm/`, so a
   tag-install today needs a subdirectory-aware tool or a split publish repo.
   Decide before telling a consumer to install from a tag.
 - **`sideEffects`** — wasm-pack emits `["./snippets/*"]` per generated package;

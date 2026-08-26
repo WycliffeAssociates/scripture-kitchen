@@ -11,9 +11,9 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use rayon::prelude::*;
-use usfm_onion_2::cst::build;
-use usfm_onion_2::lex;
-use usfm_onion_2::lint::{Code, LINT_ROWS, NO_TOKEN, check_fixes, lint};
+use usfm_onion::cst::build;
+use usfm_onion::lex;
+use usfm_onion::lint::{Code, LINT_ROWS, NO_TOKEN, check_fixes, lint};
 
 fn collect_usfm_paths(root: &Path, paths: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(root) else {
@@ -345,7 +345,7 @@ fn the_two_unclosed_notes_are_isa_and_mrk() {
 /// THE FIX ORACLE: apply → re-lex → re-build → re-lint, for EVERY fix this
 /// corpus offers, one at a time. Each must repair its own finding and introduce
 /// none — the composability rule made executable
-/// ([`usfm_onion_2::lint::check_fixes`] states the four conditions).
+/// ([`usfm_onion::lint::check_fixes`] states the four conditions).
 #[test]
 fn every_corpus_fix_passes_the_oracle() {
     let mut paths = Vec::new();
