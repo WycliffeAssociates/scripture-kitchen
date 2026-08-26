@@ -148,6 +148,15 @@ struct Frame {
     /// to live somewhere, and the frame is where it is already paid for. Kept
     /// machine-agnostic so any driver with its own frames can carry the byte.
     scratch: u8,
+    /// This node's opening token, cached off the node so the leaf loop can ask
+    /// "is this leaf my own opener" without a node load.
+    opener: u32,
+    /// Is this node's stamped [`SpecContext`] positional — the answer for every
+    /// leaf under it EXCEPT its opener, which sits in the PARENT's context and
+    /// reads `open_positional` instead. Precomputed here so the hot loop pays a
+    /// branchless select, not an enum match.
+    leaf_positional: bool,
+    open_positional: bool,
 }
 
 /// THE WALK. One in-order pass over the CST, feeding four state machines.
@@ -178,11 +187,15 @@ pub(super) fn walk(doc: &Doc, version: Option<UsfmVersion>, out: &mut Emit) {
     // The CURRENT frame lives in locals, only the ancestors in the vec: every
     // iteration touches `cur.next`, and reaching it through `stack.last_mut()`
     // costs a load and a bounds check on the hottest line in lint.
+    let root_positional = root.context().is_positional();
     let mut cur = Frame {
         next: root.children.start,
         end: root.children.end,
         node: 0,
         scratch: 0,
+        opener: root.token,
+        leaf_positional: root_positional,
+        open_positional: root_positional,
     };
     let mut stack: Vec<Frame> = Vec::new();
     #[cfg(debug_assertions)]
@@ -205,12 +218,16 @@ pub(super) fn walk(doc: &Doc, version: Option<UsfmVersion>, out: &mut Emit) {
             let id = child & !NODE_ID_BIT;
             let node = &doc.cst.nodes[id as usize];
             let scratch = ancestry.on_node_open(doc, node);
+            let open_positional = cur.leaf_positional;
             stack.push(cur);
             cur = Frame {
                 next: node.children.start,
                 end: node.children.end,
                 node: id,
                 scratch,
+                opener: node.token,
+                leaf_positional: node.context().is_positional(),
+                open_positional,
             };
             continue;
         }
@@ -227,10 +244,17 @@ pub(super) fn walk(doc: &Doc, version: Option<UsfmVersion>, out: &mut Emit) {
         // Decoded ONCE and handed round: four machines each asking the token
         // for its kind would pay four decodes over the same byte.
         let kind = token.kind();
+        // A node's own opener sits in its PARENT's context, everything else
+        // under it in its own.
+        let in_positional = if child == cur.opener {
+            cur.open_positional
+        } else {
+            cur.leaf_positional
+        };
         structure.on_leaf(doc, child, kind, out);
         ancestry.on_leaf(doc, child, token, kind, out);
         ordering.on_leaf(doc, child, token, kind, out);
-        flat.on_leaf(doc, child, token, kind, out);
+        flat.on_leaf(doc, child, token, kind, in_positional, out);
     }
 
     #[cfg(debug_assertions)]
@@ -242,6 +266,7 @@ pub(super) fn walk(doc: &Doc, version: Option<UsfmVersion>, out: &mut Emit) {
 
     structure.finish(doc, out);
     ordering.finish(doc, out);
+    flat.finish(out);
 }
 
 /// A token's bytes. Lint reads `source` only through spans the scanner already

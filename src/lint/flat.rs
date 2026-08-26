@@ -11,7 +11,8 @@ use crate::scanner::payload_label;
 use crate::tables::books;
 use crate::tables::generated;
 use crate::tables::schema::{
-    MarkerKind, Numbering, SpecContext, SpellingShape, StructuralWhitespaceRequirement as Ws,
+    Category, MarkerKind, Numbering, SpecContext, SpellingShape,
+    StructuralWhitespaceRequirement as Ws,
 };
 use crate::{Token, TokenKind};
 
@@ -39,6 +40,21 @@ pub(crate) struct Flat {
     cp: generated::MarkerIdx,
     va: generated::MarkerIdx,
     vp: generated::MarkerIdx,
+    /// The `\id` row, for the once-per-book rule. `id_seen` is the first
+    /// occurrence's token, [`NO_TOKEN`] until one arrives.
+    id: generated::MarkerIdx,
+    id_seen: u32,
+    /// The first body/poetry paragraph the band judge caught ahead of the
+    /// first `\c`, resolved at [`Self::finish`]: "before the first chapter"
+    /// means nothing in a book with no `\c` at all, and when VERSES sit up
+    /// there too the run is `verse-before-first-chapter`'s finding, not ours.
+    pbfc_pending: u32,
+    seen_chapter: bool,
+    verse_pre_chapter: bool,
+    /// The `\id` code names a SCRIPTURE book — the gate on judging container-
+    /// licensed markers positionally: a top-level `\p` in FRT or GLO is legal
+    /// PeripheralContent, and in GEN it is not.
+    scripture_book: bool,
     window: Window,
     attrs: AttrRules,
     /// How far along the POSITIONAL band the document has come, as a
@@ -80,6 +96,12 @@ impl Flat {
             cp: idx_of(b"cp"),
             va: idx_of(b"va"),
             vp: idx_of(b"vp"),
+            id: idx_of(b"id"),
+            id_seen: NO_TOKEN,
+            pbfc_pending: NO_TOKEN,
+            seen_chapter: false,
+            verse_pre_chapter: false,
+            scripture_book: false,
             window: Window::Closed,
             attrs: AttrRules::new(),
             band: 0,
@@ -88,6 +110,10 @@ impl Flat {
         }
     }
 
+    /// `in_positional`: the context this leaf SITS IN (for a node's own opening
+    /// marker, its parent's) is a positional one — the walk reads it off the
+    /// stamped CST, and the band judge uses it to stop abstaining for
+    /// container-licensed markers that no container is actually licensing.
     #[inline]
     pub(crate) fn on_leaf(
         &mut self,
@@ -95,6 +121,7 @@ impl Flat {
         idx: u32,
         token: &Token,
         kind: TokenKind,
+        in_positional: bool,
         out: &mut Emit,
     ) {
         let source = doc.source;
@@ -106,6 +133,13 @@ impl Flat {
                 // The label alone: the folded delimiter is not part of the code,
                 // and the case-fold splice below must not overwrite it.
                 let span = payload_label(span_of(source, token));
+                // The FIRST `\id` names the book (`duplicate-id` leaves later
+                // ones inert), and a miscased code still names it.
+                if self.id_seen == NO_TOKEN || idx == self.id_seen + 1 {
+                    self.scripture_book = books::is_scripture_code(span)
+                        || books::upper3(span)
+                            .is_some_and(|upper| books::is_scripture_code(&upper));
+                }
                 if books::is_book_code(span) {
                     return;
                 }
@@ -133,6 +167,20 @@ impl Flat {
                         out.push(Observation::one(Code::UnknownMarker, idx));
                     } else if nested && generated::kind(marker_idx) != MarkerKind::Character {
                         out.push(Observation::one(Code::NestedSpellingMisuse, idx));
+                    }
+                    // Once per book: the FIRST `\id` is the identification and
+                    // every later one is the finding, pointed back at it.
+                    if marker_idx == self.id {
+                        if self.id_seen == NO_TOKEN {
+                            self.id_seen = idx;
+                        } else {
+                            out.push(Observation {
+                                code: Code::DuplicateId,
+                                anchor: idx,
+                                second: self.id_seen,
+                                aux: 0,
+                            });
+                        }
                     }
                     if generated::kind(marker_idx) == MarkerKind::Paragraph
                         && token.start > 0
@@ -167,22 +215,47 @@ impl Flat {
                     // one is behind us and that is the finding. mt#/cl/ip's dual
                     // contexts answer themselves.
                     //
-                    // A mask carrying any CONTAINER bit abstains — that is the
-                    // lane's boundary, not a noise filter. What a container
-                    // licenses is judged by the WALKER's mask at pop time (the
-                    // displacement axis), so the band speaks only for markers
-                    // whose sole license is where the book has got to.
+                    // A mask carrying a CONTAINER bit abstains — what a
+                    // container licenses is judged by the WALKER's mask at pop
+                    // time (the displacement axis) — UNLESS a PARAGRAPH row
+                    // opened at a POSITIONAL position in a scripture book:
+                    // there no container is licensing it, and where the book
+                    // has got to is the whole question. Paragraph rows only,
+                    // because a character row's mask is walker mechanics
+                    // (`\ca`'s slice keeps its frame poppable), not a
+                    // positional license; and scripture books only, so a
+                    // top-level `\p` in FRT stays legal PeripheralContent.
                     let mask = generated::context_mask(marker_idx);
                     let positional = mask & POSITIONAL;
-                    if positional != 0
-                        && mask & !POSITIONAL == 0
-                        && positional & (1 << self.band) == 0
+                    let judged = mask & !POSITIONAL == 0
+                        || (in_positional
+                            && self.scripture_book
+                            && generated::kind(marker_idx) == MarkerKind::Paragraph);
+                    if positional != 0 && judged && positional & (1 << self.band) == 0
                     {
                         let above = positional & !((1 << (self.band + 1)) - 1);
                         if above == 0 {
                             out.push(Observation::one(Code::MarkerOutOfBand, idx));
                         } else {
-                            self.band = above.trailing_zeros() as u8;
+                            let next = above.trailing_zeros() as u8;
+                            // Only `\c` walks into ChapterContent silently:
+                            // body/poetry content forced there ahead of the
+                            // first `\c` is the finding — the FIRST offender,
+                            // held for `finish` (which knows whether a `\c`
+                            // exists at all), and the band advances so the
+                            // paragraphs after it stay quiet. Section
+                            // paragraphs (`\ms` before `\c 1`) pass: live
+                            // corpus practice, spec-ambiguous.
+                            if next == SpecContext::ChapterContent as u8
+                                && self.pbfc_pending == NO_TOKEN
+                                && matches!(
+                                    generated::category(marker_idx),
+                                    Category::ParaBody | Category::ParaPoetry
+                                )
+                            {
+                                self.pbfc_pending = idx;
+                            }
+                            self.band = next;
                         }
                     }
 
@@ -212,8 +285,16 @@ impl Flat {
                         opens
                     }
                     None => match generated::kind(marker_idx) {
-                        MarkerKind::Chapter => Window::Chapter,
-                        MarkerKind::Verse => Window::Verse,
+                        MarkerKind::Chapter => {
+                            // A `\c` swallowed by a sidebar or note is not the
+                            // book reaching its chapters.
+                            self.seen_chapter |= in_positional;
+                            Window::Chapter
+                        }
+                        MarkerKind::Verse => {
+                            self.verse_pre_chapter |= !self.seen_chapter;
+                            Window::Verse
+                        }
                         _ => Window::Closed,
                     },
                 };
@@ -293,6 +374,19 @@ impl Flat {
     /// `generated::deprecated`: five rows in 153 reach it, so the cost on every
     /// other marker is one bitfield test.
     #[inline(never)]
+    /// End of input: `paragraph-before-first-chapter` is judged here because
+    /// "before the first `\c`" is only a fact once the book has shown whether
+    /// it HAS one — no `\c` is `missing-chapter`'s territory, and verses up
+    /// there make the run `verse-before-first-chapter`'s finding, never both.
+    pub(crate) fn finish(&mut self, out: &mut Emit) {
+        if self.pbfc_pending != NO_TOKEN && self.seen_chapter && !self.verse_pre_chapter {
+            out.push(Observation::one(
+                Code::ParagraphBeforeFirstChapter,
+                self.pbfc_pending,
+            ));
+        }
+    }
+
     fn deprecated_marker(
         &self,
         doc: &Doc,
@@ -705,6 +799,52 @@ mod tests {
         // The attribute is DEFINED, so `attr-unknown-name` stays quiet — the
         // two rules are exclusive by construction, not by an `else`.
         assert!(!codes(&obs).contains(&Code::AttrUnknownName));
+    }
+
+    #[test]
+    fn a_second_id_is_a_duplicate_pointed_at_the_first() {
+        let (tokens, obs) = findings("\\id dem\n\\id MAT\n\\c 1\n\\p \\v 1 a\n");
+        let first = token_named(&tokens, "id", 0);
+        let second = token_named(&tokens, "id", 1);
+        // `dem` also draws the case-fold finding; the duplicate is the point.
+        assert!(obs.contains(&Observation {
+            code: Code::DuplicateId,
+            anchor: second,
+            second: first,
+            aux: 0,
+        }));
+        // One `\id` is never a duplicate.
+        let (_, obs) = findings("\\id GEN\n\\c 1\n\\p \\v 1 a\n");
+        assert_eq!(obs, vec![]);
+    }
+
+    #[test]
+    fn body_content_before_the_first_chapter_is_one_finding() {
+        let (tokens, obs) = findings("\\id GEN\n\\p a\n\\c 1\n\\p \\v 1 b\n");
+        assert_eq!(
+            obs,
+            vec![Observation::one(
+                Code::ParagraphBeforeFirstChapter,
+                token_named(&tokens, "p", 0)
+            )]
+        );
+
+        // The band advances at the first offender, so a RUN is one finding.
+        let (_, obs) = findings("\\id GEN\n\\p a\n\\q1 b\n\\c 1\n\\p \\v 1 c\n");
+        assert_eq!(codes(&obs), vec![Code::ParagraphBeforeFirstChapter]);
+
+        // A peripheral book's top-level `\p` is legal PeripheralContent.
+        let (_, obs) = findings("\\id FRT\n\\p front matter\n");
+        assert_eq!(obs, vec![]);
+
+        // A sidebar licenses its own paragraphs — the container axis, not
+        // this one.
+        let (_, obs) = findings("\\id GEN\n\\esb\n\\p a\n\\esbe\n\\c 1\n\\p \\v 1 b\n");
+        assert_eq!(obs, vec![]);
+
+        // Section paragraphs before `\c 1` stay silent: live corpus practice.
+        let (_, obs) = findings("\\id PSA\n\\ms1 BOOK I\n\\c 1\n\\p \\v 1 a\n");
+        assert_eq!(obs, vec![]);
     }
 
     #[test]

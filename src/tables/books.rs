@@ -50,6 +50,19 @@ pub fn is_book_code(span: &[u8]) -> bool {
     BOOK_CODES.contains(&code)
 }
 
+/// A SCRIPTURE identifier — anything before the peripheral-division tail
+/// (FRT..NDX) and the user-defined XX codes. Byte-exact, like
+/// [`is_book_code`]: casing is the caller's business.
+pub fn is_scripture_code(span: &[u8]) -> bool {
+    let Ok(code) = <&[u8; 3]>::try_from(span) else {
+        return false;
+    };
+    BOOK_CODES[..SCRIPTURE_COUNT].contains(&code)
+}
+
+/// OT + NT + deuterocanon + the additional books: everything ahead of FRT.
+const SCRIPTURE_COUNT: usize = 101;
+
 /// ASCII-uppercases a 3-byte span, or `None` if the span is not 3 bytes.
 /// Non-letters pass through, so `1jn` → `1JN` and `1-n` → `1-N` (which is then
 /// simply not in the table).

@@ -1621,3 +1621,50 @@ lint_corpus` (fix oracle included), full default `cargo test`, and
 prose case (`\ts-s swallowed prose` → `\ts-s\* swallowed prose`).
 NOT rebuilt: onion-wasm pkgs (behavior crosses the wall — rebuild
 when Will vendors next).
+
+## pass 17 self-report (2026-08-26): duplicate-id and the paragraph ahead of \c
+
+Two new lint lanes from planning/ideas/committed/positional-gaps.md
+(Will's rulings recorded there), plus the walk now tells Flat whether
+each leaf sits in a POSITIONAL context (for a node's own opener, its
+parent's — read off the stamped CST, precomputed per frame as two
+bools so the hot loop pays a select).
+
+1. **`duplicate-id`** (Payload, Error, fixless): the FIRST `\id` is
+   the identification, every later one is the finding with `second`
+   pointing back (the numbering-mix shape). RULED (Will): never legal
+   anywhere.
+2. **`paragraph-before-first-chapter`** (Structure, Warning,
+   fixless): a BODY or POETRY paragraph the band judge would have
+   silently advanced into ChapterContent ahead of the first `\c`.
+
+Choices where the spec was silent, and what forced each:
+
+- **The band's container-abstention is now conditional — but for
+  PARAGRAPH rows only.** First cut judged every container-carrying
+  marker at positional positions; `\c 1 \ca 2\ca*` promptly flagged
+  `marker-out-of-band`, because `\ca`'s context slice is WALKER
+  MECHANICS (it keeps the frame poppable), not a positional license.
+  Paragraph rows are the class whose masks state placement truthfully.
+- **Scripture-book gate** (BOOK_CODES ahead of the FRT..NDX tail,
+  read at the BookCode leaf): a top-level `\p` in FRT/GLO is legal
+  PeripheralContent. `books::is_scripture_code` is new.
+- **Deferred to a new `Flat::finish`**: "before the first chapter"
+  is only a fact once the book shows it HAS one (the test-helper
+  corpus of `\id`-prefixed snippets with no `\c` made every body
+  paragraph light up). No `\c` → missing-chapter's territory; verses
+  up there → the run is verse-before-first-chapter's finding, never
+  both. One finding per book (the first offender), band advances so
+  the rest stay quiet.
+- **`seen_chapter` counts only a top-level `\c`**: the ancestry demo
+  (`\p out\esb \p in \c 1 more\esbe`) has its one `\c` inside the
+  sidebar — a swallowed `\c` is not the book reaching its chapters.
+- **Section paragraphs (`\ms`, `\s`) before `\c 1` stay silent**:
+  live corpus practice, spec-ambiguous — ruled open in the plan doc.
+
+Verification: `cargo test --lib lint` (76), `cargo test --test
+lint_corpus` — ZERO new corpus findings, no pins moved, fix oracle
+green — `cargo clippy --all-targets` clean, full `--include-ignored`
+suite run at pass end. diagnostics.json regenerated (two new rows).
+NOT rebuilt: onion-wasm pkgs (the new codes cross the wall — rebuild
+at next vendoring).

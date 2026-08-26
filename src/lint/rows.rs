@@ -128,6 +128,8 @@ pub enum Code {
     DeprecatedAttribute,
     // --- the positional band ----------------------------------------------
     MarkerOutOfBand,
+    DuplicateId,
+    ParagraphBeforeFirstChapter,
     // --- the FORM CHANNEL --------------------------------------------------
     // Never a diagnostic (`Severity::Form`), never evaluated by `lint`. THIS
     // ORDER IS PRECEDENCE: where two of these want the same bytes, the earlier
@@ -239,7 +241,7 @@ impl LintRow {
 /// The authored rules table — one row per [`Code`], in the enum's order. All
 /// six families have a pass; the FORM family's tail is the format channel, which
 /// `lint` never reaches (see [`Severity::Form`]).
-pub const LINT_ROWS: [LintRow; 55] = [
+pub const LINT_ROWS: [LintRow; 57] = [
     // Something that cannot live inside a note (a `\c`, a bare `\v`, an unknown
     // marker) arrived while the frame was open. Both live corpus instances
     // (en_ulb ISA, MRK) are genuinely truncated footnotes.
@@ -955,6 +957,36 @@ pub const LINT_ROWS: [LintRow; 55] = [
         escalation: &[],
         aux: AuxKind::None,
         template: "{anchor} belongs earlier in the book than this",
+        formatter: false,
+        fix_label: None,
+    },
+    // A second `\id` line. The FIRST is the book's identification — `second`
+    // points at it — and what the second one means is a human question, so no
+    // fix. RULED (Will): never legal anywhere.
+    LintRow {
+        code: Code::DuplicateId,
+        name: "duplicate-id",
+        category: Category::Payload,
+        severity: Some(Severity::Error),
+        escalation: &[],
+        aux: AuxKind::None,
+        template: "this book already has an \\id line",
+        formatter: false,
+        fix_label: None,
+    },
+    // A BODY or POETRY paragraph at book level in header/intro territory —
+    // the rails put `p`/`q`-class content in ChapterContent, which only `\c`
+    // opens. Section paragraphs (`\ms` before `\c 1`) stay silent: live corpus
+    // practice, spec-ambiguous. One finding, then the band advances — no
+    // cascade onto the paragraphs that follow.
+    LintRow {
+        code: Code::ParagraphBeforeFirstChapter,
+        name: "paragraph-before-first-chapter",
+        category: Category::Structure,
+        severity: Some(Severity::Warning),
+        escalation: &[],
+        aux: AuxKind::None,
+        template: "{anchor} body paragraph before the book's first \\c",
         formatter: false,
         fix_label: None,
     },

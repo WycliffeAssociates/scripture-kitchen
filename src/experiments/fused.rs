@@ -455,13 +455,24 @@ impl<'a, const LINT: bool> Sink<'a, LINT> {
             tokens: &self.tokens,
             cst: &self.cst,
         };
+        // The walk's rule: a node's own opener sits in its PARENT's context.
+        // The opener leaf always arrives right after its frame's push, so the
+        // parent is one below the top; the root's opener is `ROOT_TOKEN` and
+        // never matches a real leaf.
+        let top = self.frames.last().expect("root frame remains");
+        let ctx = if self.cst.nodes[top.frame.node as usize].token == token_idx {
+            self.frames[self.frames.len() - 2].frame.ctx
+        } else {
+            top.frame.ctx
+        };
+        let in_positional = SpecContext::from_u8(ctx).is_positional();
         self.structure.on_leaf(&doc, token_idx, kind, &mut self.out);
         self.ancestry
             .on_leaf(&doc, token_idx, &token, kind, &mut self.out);
         self.ordering
             .on_leaf(&doc, token_idx, &token, kind, &mut self.out);
         self.flat
-            .on_leaf(&doc, token_idx, &token, kind, &mut self.out);
+            .on_leaf(&doc, token_idx, &token, kind, in_positional, &mut self.out);
     }
 
     #[inline]
@@ -713,6 +724,7 @@ impl<'a, const LINT: bool> Sink<'a, LINT> {
         if LINT {
             self.structure.finish(&doc, &mut self.out);
             self.ordering.finish(&doc, &mut self.out);
+            self.flat.finish(&mut self.out);
             if self.book.is_none() && self.saw_marker {
                 self.out.push(Observation::one(Code::MissingId, 0));
             }

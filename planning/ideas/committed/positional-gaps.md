@@ -1,6 +1,10 @@
 # Positional gaps: duplicate \id and body content before \c
 
-STATUS: RULED (Will, 2026-08-26) — build now. Found in the spike:
+STATUS: BUILT (pass 17, 2026-08-26) — see planning/choices.md for the
+self-report; the amendment landed narrower than sketched (Paragraph
+rows only — `\ca`-class masks are walker mechanics) and the finding
+is judged at a new `Flat::finish` (a book must HAVE a `\c` for
+"before the first chapter" to mean anything). Found in the spike:
 `\id dem \id MAT \c 1` draws no finding on the second `\id`, and
 `\id dem \p a \c 1` draws none on the `\p`.
 
