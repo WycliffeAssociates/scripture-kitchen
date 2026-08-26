@@ -241,7 +241,7 @@ pub(super) fn walk(doc: &Doc, version: Option<UsfmVersion>, out: &mut Emit) {
     );
 
     structure.finish(doc, out);
-    ordering.finish(out);
+    ordering.finish(doc, out);
 }
 
 /// A token's bytes. Lint reads `source` only through spans the scanner already

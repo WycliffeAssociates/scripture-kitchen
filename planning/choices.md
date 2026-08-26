@@ -1367,3 +1367,257 @@ reads `\v 9 The true Light` with the digit in front of the author's space),
 `probe:cm` 11/11 (F2 `caret-reaches-empty-slot` GREEN — it was the pass's first
 acceptance criterion), `probe:demo` 18/18, `probe:project` 9/9, `probe:stet`
 5/5, `probe:bidi` 2/2.
+
+## pass 14 — format_edits_in (2026-08-25, self-report)
+
+`pub fn format_edits_in(source, range: Range<u32>, opts) -> Vec<Edit>` plus the
+`formatEditsIn(text, fromUtf16, toUtf16, opts)` export. Spike-gaps ask 11 ("apply
+formats cleanly within $scope"), which the spike works around today by filtering
+a whole-book edit list in JS — silently dropping boundary-straddling edits and
+re-running the whole computation per scope.
+
+1. **The filter runs AFTER precedence, not before.** `Claims::resolve` settles
+   which rule owns a contested byte over the WHOLE book; only then is the range
+   applied. The scenario that forced it: a straddling claim that BLOCKS an
+   in-range claim. Filtering first would let the blocked claim win the bytes, so
+   the ranged list would contain an edit `format_edits` never proposes — and the
+   spike's "ranged == whole-book filtered" mental model would be a lie. Post-
+   resolve filtering makes the ranged list a SUBSET by construction, which is
+   the property the corpus law pins.
+2. **The claim slot rides out of `resolve`.** It now returns `(Code, slot, Edit)`
+   and `format_edits`/`format_claims` drop what they do not need. Atomicity is
+   only expressible with the group id: `bridge-empty-verses` emits the `1-3`
+   write AND the deletion of the verses it swallowed, and a flat list cannot
+   tell those two from two independent edits. A JS-side filter has exactly this
+   blindness — it is the strongest reason the ask belongs engine-side.
+3. **A pure insertion ON either edge is INSIDE.** `range.start <= from &&
+   to <= range.end` says it in one line: a caret at the window's edge is in the
+   window. The scenario: `marker-not-ws-preceded` inserts `\n` at the first byte
+   of a `\q1` that opens a chapter — with the other rule the chapter-scoped
+   format of that chapter would never propose its own opening break.
+4. **An inverted range yields nothing; a zero-width one keeps insertions at its
+   point.** Falls out of the same rule rather than being special-cased. A caller
+   computing `chapter.start..chapter.start` gets the carets there and no spans,
+   which is the honest reading of the window it asked for.
+5. **IN-SCOPE IDEMPOTENCE IS WEAKER THAN THE BRIEF ASSUMED — the pass's one
+   finding.** The brief asked for "apply the ranged transaction, re-run on the
+   adjusted scope, get zero" as a flat law. It is FALSE when the window's edge
+   cuts INTO a dropped straddler. Concretely: `\c 1\n\p \v 1 a\n\n\n\v 2 b \q1 c\n`
+   with a window starting at byte 15, which is the middle of the `14..16`
+   blank-line collapse. That collapse is dropped, the verse break at `16..17`
+   is applied, and the leftover `\n\n ` is now a run whose collapse lies INSIDE
+   the window — real work for a second pass. It converges (three passes on that
+   fixture, `a_boundary_cut_through_a_straddler_converges_instead` pins the count
+   and the settled bytes) and never oscillates, but it is not one-pass.
+   SHIPPED AS: exact in-scope idempotence over a CLEAN boundary — one where no
+   dropped edit reaches into the window — and convergence otherwise. A chapter
+   span is clean that way, because its edges are marker boundaries and a
+   straddler ends where the window begins; the JON corpus test proves it per
+   chapter, and also that the per-chapter lists PARTITION the whole-book
+   transaction there (nothing straddles at all). The `format_edits_in` doc says
+   both, in those words.
+6. **No chapter-scope sugar, and the doc says why.** The caller already holds the
+   span (`Toc::chapters`, or the `chapters` read across the wall). A second entry
+   point would only re-derive what the consumer just read.
+7. **The wasm export translates the range on the SAME index the spans go out
+   through.** One `Utf16Index` per call, used for `to_byte` on the way in and
+   `to_utf16` on the way out — `wire_edits` is the extracted shared tail, so the
+   two format exports cannot drift in how they encode an edit. Out-of-range
+   `to` clamps (the index is total), so `formatEditsIn(text, from, 0xffffffff)`
+   is a legal "from here to the end".
+
+### Verification
+
+Engine: `cargo test -- --include-ignored` green, `cargo clippy --all-targets`
+clean, `cargo build --target wasm32-unknown-unknown -p onion-wasm` clean,
+`cargo test -p onion-wasm` green, `wasm-pack test --node` green. Both committed
+builds (`pkg-web`, `pkg-bundler`) rebuilt. New tests: five unit (straddle drop,
+atomic-group drop, boundary insertion, clean-boundary idempotence via a real
+chapter span, convergence over a cut straddler) plus the full-range equivalence
+over every fixture; two corpus (the equivalence law on GEN/PSA/JON/MAT and over
+seven arbitrary windows per book — where straddlers actually get dropped; and
+JON's chapter spans against the whole-book list filtered, with per-chapter
+idempotence). One wasm native test for the UTF-16 range translation and one node
+boundary test over the Devanagari book. Corpus pins unmoved — nothing about the
+whole-book transaction changed. debug/ dumps unchanged (no format bytes moved).
+The spike is NOT touched: wiring `formatEditsIn` there is Will's.
+
+## pass 15 — verse-bearing paragraphs + empty verse runs (2026-08-25, self-report)
+
+Two ruled specs in one pass, sharing the ancestry/emptiness machinery:
+`planning/ideas/candidates/verse-under-heading.md` (missing-paragraph consults
+`V_FORBIDDEN_IN_PARAGRAPHS`) and `.../empty-verse-runs.md`
+(verse-without-designator gains a fix for the unambiguous empty case).
+
+1. **THE VERSE-BEARING PREDICATE SHIPS AS RULED, AND ITS ONLY OBSERVABLE
+   CONSUMER IS `\qa` — THE PASS'S FINDING.** `on_node_open`'s para test is now
+   `MarkerKind::Paragraph && !forbids_verse(marker_idx)`, TableCell unchanged,
+   the close side untouched because it reads the same `IS_PARAGRAPH` bit the
+   open computed. But of the 18 v-forbidden rows, only `\qa` and `\lit`
+   actually HOLD a `\v` under today's context masks: `\s`, `\ip`, `\r`, `\cl`,
+   `\sp`, `\ms`, `\mr`, `\sr`, `\sd`, `\cd`, `\mte`, `\sts`, `\rem`, `\iex` all
+   DISPLACE the verse to the root (the CST probe is in the test comments), and
+   `\cp`/`\pb` open no scope at all. So Will's demo document
+   (`\s1 Hidden pieces…` ␊␊ `\v 1 Put…`) ALREADY fired missing-paragraph before
+   this pass — the spec's "today it is silent" reading was of the counter, not
+   of the walker that never lets the counter see the heading. The predicate is
+   still right and still wanted (it is the rule stated where it belongs rather
+   than as an accident of the masks), but the honest report is: it changes one
+   marker's behavior today, `\qa`, plus `\lit`.
+2. **CORPUS MOVEMENT FOR CHANGE 1: ZERO, MEASURED BOTH WAYS.** 5,434
+   missing-paragraph before and after, per book as well as in total (a
+   throwaway per-book diff over 226 books, run against two builds). The corpus
+   holds 88 `\qa` — all Psalm 119 acrostic headings, in en_ult, en_ulb and
+   examples.bsb — and every one is followed by `\q1 \v N`, a verse-bearing
+   paragraph between the heading and the verse. `\lit` appears nowhere. The
+   `\d` watch the spec asked for answers itself: `\d` is NOT in the rails'
+   forbidden set, so the predicate leaves it counting; the `\sp` watch the same
+   way (it is forbidden but is displaced, so it was already firing). The pin's
+   comment now carries this, so the next reader does not read "unchanged" as
+   "the change did nothing".
+3. **NEEDS-WILL, flagged not buried: a bare `\c 1` ␊ `\d psalm` ␊ `\v 1 text`
+   fires missing-paragraph, and always has.** `\d` is verse-bearing by the
+   rails, but the walker displaces `\v` out of it exactly as it does out of
+   `\s1`, so the finding comes from the CST, not from this pass. It looks
+   spec-legitimate to fire (usfm.org does not list `\v` as valid in `\d`) and
+   the corpus never hits it (`\q` always intervenes in PSA), so nothing was
+   changed. If the walker's masks are ever the thing under review, this is the
+   case to re-read.
+4. **THE EMPTY GATE IS A LOOKAHEAD AT THE ABANDON EVENT, AND IT DECIDES THE
+   RESYNC TOO — which is what makes the deletion safe.** THE SCENARIO that
+   forced it: `\v 1 a` ␊ `\v` ␊ `\v 3 b`. Pass 13's lane RESYNCS on a
+   designator-less verse, so the gap at `\v 3` is hidden; delete the empty `\v`
+   and the gap appears — a fix handing back a new finding, which the oracle's
+   condition 3 forbids and the codebase's law forbids outright. Rather than
+   guard the fix against the sequence, the sequence now steps OVER an empty
+   one: a designator-less `\v` with nothing but whitespace before the next
+   verse/chapter/paragraph marker names no verse AND holds none, so it is a
+   stray marker, not a mis-numbered verse, and `prev_verse`/`first_verse_slot`
+   survive it. Pass 13 entry 3's resync stands for the case it was ruled on —
+   `\v Then He declared`, where the verse IS there and only its number is
+   missing. The corpus does not move (its one case, bdf_reg ACT 8:17 `\v +`,
+   holds a caller and takes the resync path).
+5. **THE RUN COLLAPSES UNDER ONE FIX ON ITS FIRST MEMBER, DERIVED AT
+   `Ordering::finish` — pass 12's chain, verbatim.** The abandon event knows
+   the boundary token of ITS emptiness but not whether the next empty verse
+   follows, so the `(slot, marker, boundary)` triple is recorded and the runs
+   are grouped at finish, with adjacency read off the SOURCE ("this member's
+   boundary token IS the next member's marker"), exactly as the empty-paragraph
+   chain reads it. One deletion spans the run's first marker to the displacer's
+   first byte, which takes the markers and the line endings they sat alone on —
+   pass 12's extent, expressed over tokens because a `\v` is a LEAF and has no
+   `Cst::extent`. The other members keep fixless findings; the same transaction
+   repairs them.
+6. **A SECOND REFUSAL, forced by the same law: a run that is its paragraph's
+   WHOLE content gets no fix.** THE SCENARIO: `\p \v \v` ␊ `\p b` would repair
+   to `\p` ␊ `\p b`, handing back an `empty-paragraph` finding. The test is
+   two-sided and cheap — the paragraph survives if the run runs INTO a verse
+   (`\p \v \v 2 b`), or if anything but whitespace lies between the paragraph
+   marker and the run's first `\v` (`\p a` ␊ `\v \v`). Empty-paragraph's own
+   chain fix is the next transaction's business; a fix answers for its own
+   site.
+7. **THE INTERACTION COMPOSES — NEITHER FIX BLOCKS THE OTHER, and no
+   precedence rule was needed.** THE WALKED CASE: `\s1 head` ␊ `\v \v 1 text`.
+   missing-paragraph anchors on the run's first `\v` and inserts `\p\n` AT that
+   byte (`from == to`); the empty-run fix DELETES `[that byte, the real \v)`.
+   `Claims::resolve` accepts a claim whose `from >= claimed`, and a pure
+   insertion advances `claimed` only to its own point, so both are seated: the
+   output is `\s1 head` ␊ `\p \v 1 text` in ONE transaction, settled in one
+   pass (the format tests' `formatted` helper proves the second pass proposes
+   nothing). Row order would have given missing-paragraph the byte anyway, but
+   it never had to — the two edits are disjoint by construction. The same shape
+   over `\qa` is pinned beside it, since that is where the predicate rather
+   than the walker raises the finding.
+8. **The row becomes a DUAL CITIZEN (`formatter: true`) and declares a label,
+   so `diagnostics.json` was regenerated.** No `Code` variant was added, so no
+   discriminant moved; the only wire change is that row's `formatter`/`fixLabel`
+   pair. `codegen_output_matches_input` is the gate and is green. The
+   `a_fix_is_offered_exactly_where_the_row_declares_one` table gained its
+   demonstration case (17 declaring rows now, and lint.rs's doc count — stale at
+   "15 of the 43" since pass 13 — is corrected to 17 of the 44).
+9. **A marker that is neither verse, chapter nor paragraph ends the emptiness
+   as CONTENT, so no fix.** `\v \f + \ft note\f*`, `\v \tr`, `\v \s5` are all
+   fixless. The spec names the trio and the trio is what shipped: a row-0
+   pop-all or a table row is a displacement this fix does not model, and
+   guessing there is how a formatter eats somebody's document.
+
+### Perf (go-slow law)
+
+The predicate adds one bit test on an L1-resident 24-byte table, per NODE open
+(1.76M of them in en_ult), and the empty-verse lookahead runs on a FINDING, not
+on a token. `playground --lint-only --serial --iters 8`, en_ulb 66 books, three
+interleaved before/after pairs from two copies of the binary: 1122/1057,
+1290/1267, 1253/1252 MiB/s. Noise with at most a ~1% lean, which is the
+predicted size of one array read on the node-open path.
+
+### Verification
+
+Engine: `cargo test --workspace --release -- --include-ignored` green (432
+tests: 352 lib plus every corpus oracle, including
+`every_corpus_fix_passes_the_oracle` and the format corpus's convergence-in-one
+invariant), `cargo clippy --workspace --all-targets` clean, `cargo build
+--target wasm32-unknown-unknown -p onion-wasm` clean, `cargo test -p onion-wasm`
+green, `wasm-pack test --node` green. `onion-wasm/diagnostics.json` regenerated
+and both committed builds (`pkg-web`, `pkg-bundler`) rebuilt — the `.wasm`
+behavior does change (a new lint fix crosses the wall). New tests: three
+ancestry unit (the demo document, the `\qa` case the predicate owns, the
+close-side symmetry over `\p` then `\s1`), four ordering unit (sequence
+transparency, the run collapsing under one fix, both refusals, plus the fix
+table's demonstration case), two format unit (the default bundle collapsing
+`\v \v \v 1 text` in one apply and leaving `\v Then text` alone; the
+missing-paragraph × empty-run interaction over `\s1` and `\qa`). Corpus pins
+unmoved for both changes, with the reasons written INTO the pins. debug/ dumps
+verified unchanged by regenerating all six and diffing the bodies and edit
+counts (71/29/93 JON, 12/8/128 PSA). The spike (`../onion-2-spike`) is NOT
+touched: re-vendoring is Will's.
+
+## pass 15 review (2026-08-25, Will's rulings)
+
+- **\d does NOT hold verses — RULED (Will), current behavior kept.**
+  Evidence weighed: usfmtc NESTS the verse inside para[@style=d] (no
+  \p synthesized; verified live) and usx.rng leaves \d verse-bearing;
+  but the v.html prose page says body+poetry only, and the spec's own
+  \d example interposes \q1 before \v 1 (`\d A Psalm of David…` ␊
+  `\q1` ␊ `\v 1 O \nd Lord\nd*…`). USFM is underdefined here; Will
+  rules with the prose page + example. Our walker's displacement and
+  the missing-paragraph advisory on `\d text \v 1` are DELIBERATE
+  divergence from usfmtc, recorded here. No context-mask change.
+- Pass 15's two silent-spec rulings (empty-\v sequence-transparency;
+  no fix when the run is the paragraph's whole content) — RULED OK.
+- The "fix never hands back a new finding" law itself: Will questions
+  whether it must be iron. Standing for now (it is what makes format's
+  convergence-in-one oracle falsifiable and "Format document" a single
+  trustworthy transaction); revisit if its conservatism ever blocks a
+  fix worth more than the guarantee.
+
+## pass 16 self-report (2026-08-26): the point terminator lands on its marker
+
+One fix's anchor moved, Will's call after seeing it misfire in the
+spike: `unterminated-milestone`'s `\*` was inserted at the RECOVERY
+extent's content end — wherever the walker happened to recover — which
+on `\ts-s` mid-verse filed three verses of prose inside the milestone
+as attribute text. A point's span is only its attribute list (the
+row's own comment), so the terminator now lands at `point_end`: the
+end of the marker's trimmed span, or of its attribute list when one
+follows. Container/Plain closers keep the extent-end anchor — their
+content genuinely belongs inside.
+
+Choice where the spec was silent: with the `\*` missing, a TRAILING
+attribute list never lexes as AttrList (nothing terminates it) — it
+decays to Text. `point_end` therefore recognizes the orphaned list by
+its pipe FIRST BYTE on the token right after the marker (AttrList
+proper still arrives in the self-terminating node-initial `|cat="x"|`
+form). Known ambiguity, accepted: prose following attrs INSIDE that
+same pipe-initial Text run (`\ts-s |sid="x" then prose`) is kept
+inside the terminator, since where attrs end and prose begins is not
+decidable without interpreting attribute syntax — the fix oracle
+holds either way. Scenario that forced it: the existing
+`\qt-s |who="Levi"` fix test, whose repaired spelling
+(`…"Levi"\*`) is banked behavior this change must not regress.
+
+Verification: `cargo test --lib lint`, `cargo test --test
+lint_corpus` (fix oracle included), full default `cargo test`, and
+`cargo clippy --all-targets` all green. New fix test: the swallowed-
+prose case (`\ts-s swallowed prose` → `\ts-s\* swallowed prose`).
+NOT rebuilt: onion-wasm pkgs (behavior crosses the wall — rebuild
+when Will vendors next).

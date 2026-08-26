@@ -56,7 +56,9 @@ pub mod vref;
 pub use analyze::{Analysis, analyze};
 pub use diff::{DecisionUnit, DiffSkeleton, MergeSide, Slot, diff, diff_with_text};
 pub use edit::{Edit, SpliceEdit, apply_splices};
-pub use format::{CharBreaks, FormatOptions, Newline, VerseBreaks, format, format_edits};
+pub use format::{
+    CharBreaks, FormatOptions, Newline, VerseBreaks, format, format_edits, format_edits_in,
+};
 pub use mask::{Action, Filter, Mask, TextRule, mask};
 pub use scanner::{lex, lex_general_path_only};
 pub use toc::{ChapterRow, Sid, Toc, VerseAnchor, toc};

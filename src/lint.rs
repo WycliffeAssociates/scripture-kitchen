@@ -1,6 +1,6 @@
 //! Findings over an already-built document: `lex → cst::build → lint`.
 //!
-//! 43 codes in six families ([`Category`]): STRUCTURE, ORDERING, ATTRIBUTES,
+//! 44 codes in six families ([`Category`]): STRUCTURE, ORDERING, ATTRIBUTES,
 //! PAYLOAD, FORM and VERSION.
 //!
 //! Three laws shape everything here:
@@ -17,7 +17,7 @@
 //!   — so a report crosses wasm as one flat array.
 //!
 //! A code emits a fix if and only if its row declares a [`LintRow::fix_label`]
-//! (15 of the 43, asserted both ways in tests), computed BESIDE the finding and
+//! (17 of the 44, asserted both ways in tests), computed BESIDE the finding and
 //! proved by [`check_fixes`] over all 226 corpus books. Where a repair would be
 //! a MOVE or a guess it is not offered — relocating an attribute list, moving an
 //! out-of-band marker, guessing which book identifier was meant, or renumbering

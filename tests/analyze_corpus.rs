@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 use rayon::prelude::*;
 use usfm_onion_2::analyze::{Analysis, analyze, anchor, class_word, note_part, stride, wants};
 use usfm_onion_2::cst::Cst;
-use usfm_onion_2::lint::{LINT_ROWS, NO_FIX, NO_TOKEN, LintReport, Severity, lint};
+use usfm_onion_2::lint::{LINT_ROWS, LintReport, NO_FIX, NO_TOKEN, Severity, lint};
 use usfm_onion_2::mask::{Filter, mask};
 use usfm_onion_2::tables::generated;
 use usfm_onion_2::tables::schema::MarkerKind;
@@ -498,14 +498,24 @@ fn laws(where_: &str, a: &Analysis) {
             }
         }
     };
-    spans(&a.chapters, stride::CHAPTERS, &[1, 2, 3, 4, 5, 6], "chapters");
+    spans(
+        &a.chapters,
+        stride::CHAPTERS,
+        &[1, 2, 3, 4, 5, 6],
+        "chapters",
+    );
     spans(&a.blocks, stride::BLOCKS, &[1, 2, 3], "blocks");
     spans(&a.lines, stride::LINES, &[1, 2, 3], "lines");
     spans(&a.note_extents, stride::NOTE_EXTENTS, &[1, 2], "notes");
     spans(&a.note_parts, stride::NOTE_PARTS, &[2, 3], "note parts");
     spans(&a.token_spans, stride::TOKEN_SPANS, &[1, 2], "tokens");
     spans(&a.text_runs, stride::TEXT_RUNS, &[0, 1], "runs");
-    spans(&a.verse_anchors, stride::VERSE_ANCHORS, &[1, 2, 3, 4], "verses");
+    spans(
+        &a.verse_anchors,
+        stride::VERSE_ANCHORS,
+        &[1, 2, 3, 4],
+        "verses",
+    );
     spans(
         &a.diagnostics,
         stride::DIAGNOSTICS,
@@ -518,7 +528,10 @@ fn laws(where_: &str, a: &Analysis) {
     let mut at = 0;
     for row in a.chapters.chunks_exact(stride::CHAPTERS) {
         assert_eq!(row[5], at, "{where_}: chapter rows do not tile");
-        assert!(row[2] >= row[5] && row[3] <= row[6], "{where_}: label inside");
+        assert!(
+            row[2] >= row[5] && row[3] <= row[6],
+            "{where_}: label inside"
+        );
         // The chrome runs marker -> label -> content, and only the synthetic
         // front-matter row is allowed to have no marker at all.
         assert_eq!(
@@ -672,7 +685,11 @@ fn check_file(path: &Path) -> usize {
     // third of the document and check the survivors against the whole-book
     // rows verbatim.
     let clip = a.len_utf16 / 3..a.len_utf16 * 2 / 3;
-    let clipped = analyze(&text, wants::TOKEN_SPANS | wants::TEXT_RUNS, Some(clip.clone()));
+    let clipped = analyze(
+        &text,
+        wants::TOKEN_SPANS | wants::TEXT_RUNS,
+        Some(clip.clone()),
+    );
     let kept: Vec<&[u32]> = a
         .token_spans
         .chunks_exact(stride::TOKEN_SPANS)
@@ -719,7 +736,10 @@ fn corpus() -> Vec<PathBuf> {
         Path::new("testData/samples-from-wild/hindi-IRV1"),
         &mut paths,
     );
-    collect_usfm_paths(Path::new("testData/samples-from-wild/hindi-IRV2"), &mut paths);
+    collect_usfm_paths(
+        Path::new("testData/samples-from-wild/hindi-IRV2"),
+        &mut paths,
+    );
     paths.sort();
     paths
 }
@@ -731,7 +751,10 @@ fn corpus() -> Vec<PathBuf> {
 fn a_hindi_verse_anchor_is_utf16_not_bytes() {
     let path = Path::new("testData/samples-from-wild/hindi-IRV1/origin.usfm");
     let Ok(text) = std::fs::read_to_string(path) else {
-        eprintln!("hindi spot check SKIPPED: {} is not mounted", path.display());
+        eprintln!(
+            "hindi spot check SKIPPED: {} is not mounted",
+            path.display()
+        );
         return;
     };
     let a = analyze(&text, wants::VERSE_ANCHORS | wants::CHAPTERS, None);
@@ -765,8 +788,7 @@ fn a_hindi_verse_anchor_is_utf16_not_bytes() {
     );
     println!(
         "hindi: last verse designator at byte {at} is UTF-16 {} ({} units total)",
-        row[2],
-        a.len_utf16
+        row[2], a.len_utf16
     );
 }
 

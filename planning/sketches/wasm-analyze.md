@@ -192,6 +192,8 @@ analyze(text: &str, wants: u32) -> Analysis   // typed-array getters
 
 // The write paths (both exist natively today):
 format_edits(text, opts) -> edits wire        // offsets utf16, eager
+format_edits_in(text, from, to, opts)         // the same, scoped to a
+                                              // utf16 window (pass 14)
 format(text, opts) -> String
 diff(baseline, current) -> skeleton wire      // shape decided at build
 merge(baseline, current, decisions_json) -> String (or splice wire)
@@ -333,6 +335,10 @@ state, it's galley's. Nothing is ever implemented IN a bindings crate.
 - `to_utf16(byte)` / `to_byte(utf16)` — shared index, built once per text
 - `usj()` / `usx()` / `html() -> String` — exports on demand
 - `format_edits(opts)` / `format(opts)` — the opt-in write path (2026-08-24)
+- `format_edits_in(from, to, opts)` — the SCOPED write path (2026-08-25,
+  pass 14): whole-book analysis, filtered to a window. Straddling edits
+  are dropped whole and atomic claims kept whole, which is exactly what
+  a JS-side filter of the whole-book list cannot do.
 - `diff(other)` / `merge(other, decisions)` / `revert(other, unit)` —
   the two-input pair (2026-08-24)
 - `find(query)` — memmem/regex over a mask's text, hits mapped to

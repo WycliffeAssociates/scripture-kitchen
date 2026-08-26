@@ -599,8 +599,8 @@ pub const LINT_ROWS: [LintRow; 55] = [
         escalation: &[],
         aux: AuxKind::None,
         template: "{anchor} has no verse number",
-        formatter: false,
-        fix_label: None,
+        formatter: true,
+        fix_label: Some("delete the empty verse marker"),
     },
     // ---- Adjacency --------------------------------------------------------
     // `\ca`/`\cp` may only follow `\c`'s designator, or the other of the pair.

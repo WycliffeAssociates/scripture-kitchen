@@ -23,6 +23,10 @@
 //! The two edit sets merge, collide by ROW ORDER (first writer wins, the loser
 //! is simply not emitted), and apply as one transaction.
 //!
+//! [`format_edits_in`] is that same whole-book transaction filtered to a byte
+//! range — the scoped "format this chapter" button, with the straddle policy
+//! written on the function.
+//!
 //! Format is the one part of the crate allowed to mutate, delete and invent
 //! bytes; the mask's no-normalization law does not bind it. What it invents is
 //! whitespace and engine `FixStr`s — never document prose.
@@ -155,22 +159,90 @@ impl Default for FormatOptions<'_> {
 /// be guessing, and the contract is "a malformed document formats to a
 /// malformed-but-tidier document, never an error".
 pub fn format_edits(source: &[u8], opts: &FormatOptions) -> Vec<Edit> {
-    let Ok(text) = core::str::from_utf8(source) else {
+    let edits: Vec<Edit> = settle(source, opts)
+        .into_iter()
+        .map(|(_, _, edit)| edit)
+        .collect();
+    checked(source, edits)
+}
+
+/// The same transaction, RANGE-BOUNDED: only the edits whose bytes lie inside
+/// `range` (byte offsets into `source`).
+///
+/// What a chapter-scoped "format this section" button wants. The analysis is
+/// still WHOLE-BOOK — lint needs the book, and precedence between two rules that
+/// want the same byte is settled over the whole document before anything is
+/// filtered — so the ranged list is always a SUBSET of `format_edits`, never a
+/// different set of proposals.
+///
+/// THE STRADDLE POLICY: an edit is kept iff its ENTIRE span lies within the
+/// range; one that crosses a boundary is dropped WHOLE, never cut. Half an edit
+/// corrupts — a splice that replaces `\n   \n` with one break cannot be honored
+/// for the bytes on this side of the line only.
+///
+/// ```text
+/// source   \c 1\n\p \v 1 a\n\n\n\v 2 b\n
+///                        byte 14 ^^ 16
+///
+/// format_edits(source)            .. collapse-blank-lines 14..16, ""
+/// format_edits_in(source, 15..24) .. gone: 14..16 reaches out of the window
+/// format_edits_in(source, 14..24) .. kept: the span opens ON the edge
+/// ```
+///
+/// ATOMICITY BEATS SCOPE: an edit group that only makes sense whole
+/// (`bridge-empty-verses` writes the bridge AND deletes the empty `\v`s; a
+/// chained lint fix) is kept iff EVERY edit of the group is inside. A group half
+/// in the window is wholly absent.
+///
+/// BOUNDARY INSERTIONS ARE IN: a pure insertion (`from == to`) at `range.start`
+/// or at `range.end` is inside — a caret at the window's edge is in the window.
+/// The one rule `range.start <= from && to <= range.end` says both things.
+///
+/// IDEMPOTENCE IS IN-SCOPE ONLY, and only over a CLEAN boundary: apply the
+/// ranged transaction, widen the range by its own byte delta, and a second
+/// `format_edits_in` proposes nothing — provided no edit was dropped whose span
+/// reached INTO the window. A chapter span is clean that way (its edges are
+/// marker boundaries, so a straddler ends where the window begins). A window
+/// whose edge cuts through a straddler keeps the bytes that edit would have
+/// taken, so the next pass has real work: scoped formatting CONVERGES there
+/// rather than settling in one, and never oscillates.
+///
+/// Either way, a straddling edit is still proposed by WHOLE-BOOK `format_edits`
+/// afterward — dropping it did not fix those bytes, and scoped formatting never
+/// promised it had.
+///
+/// No chapter-scoped entry point exists, and none is wanted: the caller already
+/// holds the span it means, from [`Toc::chapters`] (`ChapterRow`'s `start..end`)
+/// or the `chapters` read of [`analyze`], and hands it in here.
+///
+/// An inverted range yields nothing; a zero-width one keeps only pure insertions
+/// at that point.
+///
+/// [`Toc::chapters`]: crate::toc::Toc::chapters
+/// [`analyze`]: crate::analyze::analyze
+pub fn format_edits_in(
+    source: &[u8],
+    range: core::ops::Range<u32>,
+    opts: &FormatOptions,
+) -> Vec<Edit> {
+    if range.start > range.end {
         return Vec::new();
-    };
-    let tokens = lex(text);
-    let cst = crate::cst::build(&tokens);
-    let mut claims = Claims::default();
-
-    let paragraphs = harvest(source, &tokens, &cst, opts, &mut claims);
-    form_pass(source, &tokens, &cst, opts, &paragraphs, &mut claims);
-
-    let edits: Vec<Edit> = claims.resolve().into_iter().map(|(_, edit)| edit).collect();
-    #[cfg(debug_assertions)]
-    if let Err(error) = crate::edit::check_edits(source, &edits) {
-        panic!("format built an invalid transaction: {error}");
     }
-    edits
+    let settled = settle(source, opts);
+    // Group-wise, and only AFTER precedence: a group is kept whole or not at all.
+    let groups = settled.iter().map(|(_, group, _)| *group + 1).max();
+    let mut keep = vec![true; groups.unwrap_or(0) as usize];
+    for (_, group, edit) in &settled {
+        if edit.from < range.start || edit.to > range.end {
+            keep[*group as usize] = false;
+        }
+    }
+    let edits: Vec<Edit> = settled
+        .into_iter()
+        .filter(|(_, group, _)| keep[*group as usize])
+        .map(|(_, _, edit)| edit)
+        .collect();
+    checked(source, edits)
 }
 
 /// The same transaction, each edit beside the ROW that won its bytes. The tests
@@ -178,6 +250,16 @@ pub fn format_edits(source: &[u8], opts: &FormatOptions) -> Vec<Edit> {
 /// codes dropped.
 #[cfg(test)]
 pub(crate) fn format_claims(source: &[u8], opts: &FormatOptions) -> Vec<(Code, Edit)> {
+    settle(source, opts)
+        .into_iter()
+        .map(|(code, _, edit)| (code, edit))
+        .collect()
+}
+
+/// Both passes and the precedence rule, whole-book: `(row, group, edit)` in
+/// document order. The group id is what makes an ATOMIC claim filterable
+/// downstream without re-running precedence.
+fn settle(source: &[u8], opts: &FormatOptions) -> Vec<(Code, u32, Edit)> {
     let Ok(text) = core::str::from_utf8(source) else {
         return Vec::new();
     };
@@ -187,6 +269,16 @@ pub(crate) fn format_claims(source: &[u8], opts: &FormatOptions) -> Vec<(Code, E
     let paragraphs = harvest(source, &tokens, &cst, opts, &mut claims);
     form_pass(source, &tokens, &cst, opts, &paragraphs, &mut claims);
     claims.resolve()
+}
+
+/// The transaction pre-flight, debug builds only: an invalid merge is an engine
+/// bug, not something a caller can be handed.
+fn checked(#[allow(unused_variables)] source: &[u8], edits: Vec<Edit>) -> Vec<Edit> {
+    #[cfg(debug_assertions)]
+    if let Err(error) = crate::edit::check_edits(source, &edits) {
+        panic!("format built an invalid transaction: {error}");
+    }
+    edits
 }
 
 /// The formatted bytes — `apply(source, &format_edits(source, opts))`.
@@ -981,13 +1073,15 @@ impl Claims {
     /// and the first writer wins. A claim overlapping bytes already spoken for
     /// is not emitted at all — which is what makes two rules that want the same
     /// newline yield ONE owner instead of an invalid transaction.
-    fn resolve(self) -> Vec<(Code, Edit)> {
+    /// Each surviving edit carries its CLAIM SLOT, so a consumer that filters
+    /// (`format_edits_in`) can keep or drop a multi-edit claim as one thing.
+    fn resolve(self) -> Vec<(Code, u32, Edit)> {
         let mut order: Vec<u32> = (0..self.claims.len() as u32).collect();
         order.sort_unstable_by_key(|slot| {
             let (code, start, _) = self.claims[*slot as usize];
             (self.edits[start as usize].from, code as u16, *slot)
         });
-        let mut out: Vec<(Code, Edit)> = Vec::new();
+        let mut out: Vec<(Code, u32, Edit)> = Vec::new();
         let mut claimed = 0u32;
         // Where an accepted insertion already put a LINE BREAK. Two insertions at
         // one point are legal and concatenate — `\f*` then the break in front of
@@ -1009,13 +1103,13 @@ impl Claims {
                 if ends_a_line(edit) {
                     broke_at = edit.from;
                 }
-                out.push((code, *edit));
+                out.push((code, slot, *edit));
             }
         }
         // (from, to): a pure insertion at a position sorts BEFORE a replacement
         // starting there, which is the order `apply`'s right-to-left splice and
         // `check_edits`' disjointness both want.
-        out.sort_by_key(|(_, edit)| (edit.from, edit.to));
+        out.sort_by_key(|(_, _, edit)| (edit.from, edit.to));
         out
     }
 }

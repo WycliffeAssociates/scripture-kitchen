@@ -438,7 +438,11 @@ pub fn analyze(text: &str, wants: u32, clip: Option<Range<u32>>) -> Analysis {
 /// absorbed into chrome by the next analysis.
 fn content_after(source: &[u8], token: &Token) -> u32 {
     let label = token.start + trimmed(source, token);
-    if label < token.end() { label + 1 } else { label }
+    if label < token.end() {
+        label + 1
+    } else {
+        label
+    }
 }
 
 /// The three offsets a designator slot has, from the marker's token row.
@@ -774,8 +778,8 @@ fn leaves(tokens: &[Token], cst: &Cst, node: u32) -> Vec<(u32, bool)> {
         }
         let child = child & !crate::cst::NODE_ID_BIT;
         let row = &cst.nodes[child as usize];
-        let inside = origin
-            || (row.token != ROOT_TOKEN && is_origin(tokens[row.token as usize].marker_idx));
+        let inside =
+            origin || (row.token != ROOT_TOKEN && is_origin(tokens[row.token as usize].marker_idx));
         stack.push((row.children.clone(), inside));
     }
     out
@@ -907,7 +911,9 @@ pub fn class_word(token: &Token) -> u16 {
     };
     if matches!(
         token.kind(),
-        TokenKind::ClosingMarker { .. } | TokenKind::MilestoneTerminator | TokenKind::Milestone { end: true }
+        TokenKind::ClosingMarker { .. }
+            | TokenKind::MilestoneTerminator
+            | TokenKind::Milestone { end: true }
     ) {
         byte |= class::CLOSER;
     }
@@ -960,7 +966,8 @@ fn to_utf16(source: &[u8], values: &mut [u32], stride: usize, fields: &[usize]) 
     if values.is_empty() {
         return;
     }
-    let positions = || (0..values.len() / stride).flat_map(|row| fields.iter().map(move |f| row * stride + f));
+    let positions =
+        || (0..values.len() / stride).flat_map(|row| fields.iter().map(move |f| row * stride + f));
 
     let mut ascending = true;
     let mut previous = 0u32;
@@ -1028,18 +1035,14 @@ mod tests {
                 &[u32::from(class::PARA), 13, 16, 55],
             ]
         );
-        assert_eq!(rows(&a.verse_anchors, stride::VERSE_ANCHORS), vec![&[
-            shaped(1),
-            16,
-            19,
-            20,
-            21
-        ]]);
-        assert_eq!(rows(&a.note_extents, stride::NOTE_EXTENTS), vec![&[
-            note_family::FOOTNOTE,
-            37,
-            53
-        ]]);
+        assert_eq!(
+            rows(&a.verse_anchors, stride::VERSE_ANCHORS),
+            vec![&[shaped(1), 16, 19, 20, 21]]
+        );
+        assert_eq!(
+            rows(&a.note_extents, stride::NOTE_EXTENTS),
+            vec![&[note_family::FOOTNOTE, 37, 53]]
+        );
         assert_eq!(
             rows(&a.note_parts, stride::NOTE_PARTS),
             vec![
@@ -1201,7 +1204,10 @@ mod tests {
         assert_eq!(table[0], &[0, NONE, 0, 0, NONE, 0, 0], "front matter");
         assert_eq!(table[1][0], 0, "`12b` is not a chapter number");
         assert_eq!(&source[table[1][2] as usize..table[1][3] as usize], "12b");
-        assert_eq!(&source[table[1][1] as usize..table[1][4] as usize], "\\c 12b");
+        assert_eq!(
+            &source[table[1][1] as usize..table[1][4] as usize],
+            "\\c 12b"
+        );
         // No designator at all: the label is empty AT the marker's end, which is
         // where a retyped number lands.
         assert_eq!(table[2][2], table[2][3]);
@@ -1218,7 +1224,10 @@ mod tests {
         assert_eq!(analyze("\\id GEN\n\\usfm 3.2\n", 0, None).usfm_version, 1);
         assert_eq!(analyze("\\id GEN\n\\usfm 4.0\n", 0, None).usfm_version, 2);
         // Not a version: undeclared, never a defaulted 3.0.
-        assert_eq!(analyze("\\id GEN\n\\usfm three\n", 0, None).usfm_version, NONE);
+        assert_eq!(
+            analyze("\\id GEN\n\\usfm three\n", 0, None).usfm_version,
+            NONE
+        );
     }
 
     #[test]
@@ -1278,7 +1287,9 @@ mod tests {
             .collect();
         assert_eq!(
             meta,
-            vec![true, true, true, true, true, false, false, false, false, false]
+            vec![
+                true, true, true, true, true, false, false, false, false, false
+            ]
         );
         // FRONT still covers both halves, so an existing consumer is unmoved.
         for row in rows(&a.lines, stride::LINES) {
@@ -1412,14 +1423,21 @@ mod tests {
         assert!(clipped.text_runs.len() < whole.text_runs.len());
         // Everything kept overlaps the clip.
         for row in rows(&clipped.token_spans, stride::TOKEN_SPANS) {
-            assert!(row[1] <= 8, "a kept token starts at or before the clip's end");
+            assert!(
+                row[1] <= 8,
+                "a kept token starts at or before the clip's end"
+            );
         }
     }
 
     #[test]
     fn a_finding_carries_its_span_its_second_and_its_fix() {
         // An unclosed `\f`: one finding, one fix, one edit inserting `\f*`.
-        let a = analyze("\\c 1\n\\p \\v 1 a\\f + \\ft note\n", wants::DIAGNOSTICS, None);
+        let a = analyze(
+            "\\c 1\n\\p \\v 1 a\\f + \\ft note\n",
+            wants::DIAGNOSTICS,
+            None,
+        );
         let found = rows(&a.diagnostics, stride::DIAGNOSTICS);
         let note = found
             .iter()

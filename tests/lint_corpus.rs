@@ -126,6 +126,15 @@ fn the_corpus_yields_exactly_the_known_findings() {
     // the open `\p` and the following verses land at root (5401), plus 33 places
     // (31 en_ult, 2 bsb) where a chapter opens straight into `\v`. usfmtc
     // repairs the latter by fabricating a `\p`; we flag it.
+    //
+    // The counter now asks whether the paragraph above is VERSE-BEARING
+    // (`V_FORBIDDEN_IN_PARAGRAPHS`), and this number does NOT move — which is
+    // the finding, not an absence of one. Of the 18 v-forbidden rows only `\qa`
+    // and `\lit` actually HOLD a verse under today's context masks; the other
+    // sixteen (`\s`, `\ip`, `\r`, `\cl`, `\sp`, `\d`'s neighbours…) are
+    // DISPLACED by the `\v`, so the verse was already at the root and already
+    // counted. The corpus's 88 `\qa` are all Psalm 119 acrostic headings with a
+    // `\q1` between the heading and the verse, and `\lit` appears nowhere.
     assert_eq!(total(Code::MissingParagraph), 5_434);
     let outside_ulb: u64 = books
         .iter()
@@ -160,6 +169,10 @@ fn the_corpus_yields_exactly_the_known_findings() {
     // designator-malformed; the total across both codes is unchanged at 2.
     assert_eq!(total(Code::VerseWithoutDesignator), 1);
     assert_eq!(by_corpus(Code::VerseWithoutDesignator, "bdf_reg"), 1);
+    // …and it offers NO fix, which is the whole point of the empty gate: `\v +`
+    // holds a caller, so the verse's identity is the translator's to write. The
+    // deletion fix is for the EMPTY spelling (`\v \v \v 1 text`), of which 226
+    // books hold none.
 
     // bdf_reg ROM 3 carries `\v 10` twice — the same verse translated twice,
     // the second copy left in. Real duplication, not a range overlap.
@@ -403,6 +416,9 @@ fn every_corpus_fix_passes_the_oracle() {
     // only move the duplicate one verse along. `renumber` declines — which is
     // why this reads 0 where the finding count above reads 1.
     assert_eq!(total(Code::VerseDuplicate), 0);
+    // The corpus's one `verse-without-designator` is `\v +`, which holds
+    // content: the empty-run deletion is offered nowhere in 226 books.
+    assert_eq!(total(Code::VerseWithoutDesignator), 0);
     assert_eq!(totals.iter().sum::<u64>(), 5_462);
 }
 

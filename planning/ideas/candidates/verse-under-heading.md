@@ -59,3 +59,7 @@ CORNER flagged to Will: his pasted poetry list includes \qa as
 verse-valid; the table (usx.rng OtherPara:1151) lists qa v-FORBIDDEN.
 Lean: table wins (qa is an acrostic HEADING, same disease as \s1);
 the referee law says rng over prose page. Awaiting his nod.
+
+\qa CORNER RULED (Will, 2026-08-25): the table wins — \qa is an
+acrostic HEADING, verses do not go in it. V_FORBIDDEN membership
+stands as baked. No open questions remain; ready to build.

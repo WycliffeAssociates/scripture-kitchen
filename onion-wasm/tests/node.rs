@@ -13,7 +13,7 @@
 //! COMPILE error where a missing corpus should be a skip.
 
 use js_sys::{Object, Reflect, Uint32Array};
-use onion_wasm::{analyze, wants_all};
+use onion_wasm::{FormatOpts, analyze, format_edits, format_edits_in, wants_all};
 use wasm_bindgen::JsValue;
 use wasm_bindgen_test::*;
 
@@ -59,7 +59,11 @@ fn a_real_book_crosses_the_wall_with_the_right_numbers() {
     // `\c 1` starts at byte 196, which is UTF-16 156; `\c 2` at byte 700 = 364.
     assert_eq!(chapters[CHAPTERS + 5], 156, "chapter 1 starts");
     assert_eq!(chapters[2 * CHAPTERS + 5], 364, "chapter 2 starts");
-    assert_eq!(chapters[CHAPTERS], 1 | NUMBER_SHAPED, "its number, and it IS one");
+    assert_eq!(
+        chapters[CHAPTERS],
+        1 | NUMBER_SHAPED,
+        "its number, and it IS one"
+    );
     assert_eq!(chapters[2 * CHAPTERS], 2 | NUMBER_SHAPED);
     // The `\c` marker is where the chapter starts, and content is past `\c 1`.
     assert_eq!(chapters[CHAPTERS + 1], 156, "the `\\c` marker");
@@ -79,10 +83,18 @@ fn a_real_book_crosses_the_wall_with_the_right_numbers() {
         2 | NUMBER_SHAPED,
         "it is in chapter 2, and its designator is a number"
     );
-    assert_eq!(verses[3 * VERSE_ANCHORS + 1], 402, "the `\\v` marker starts");
+    assert_eq!(
+        verses[3 * VERSE_ANCHORS + 1],
+        402,
+        "the `\\v` marker starts"
+    );
     assert_eq!(verses[3 * VERSE_ANCHORS + 2], 405, "its designator starts");
     assert_eq!(verses[3 * VERSE_ANCHORS + 3], 406, "and is one unit long");
-    assert_eq!(verses[3 * VERSE_ANCHORS + 4], 407, "content is past the delimiter");
+    assert_eq!(
+        verses[3 * VERSE_ANCHORS + 4],
+        407,
+        "content is past the delimiter"
+    );
 
     // One footnote, inside chapter 2 and inside the document.
     let notes = read(&a, "noteExtents");
@@ -112,7 +124,10 @@ fn a_real_book_crosses_the_wall_with_the_right_numbers() {
     assert_eq!(parts[0], 0, "they belong to note 0");
     assert_eq!(parts[1], 0, "and the first part is its CALLER");
     for part in parts.chunks_exact(NOTE_PARTS) {
-        assert!(part[2] >= notes[1] && part[3] <= notes[2], "inside the extent");
+        assert!(
+            part[2] >= notes[1] && part[3] <= notes[2],
+            "inside the extent"
+        );
     }
 
     // The `\usfm` line is absent from this book, and that is not 3.0.
@@ -132,4 +147,24 @@ fn a_clip_reaches_the_wall() {
     let clipped = analyze(BOOK, wants_all(), Some(0), Some(156));
     assert_eq!(read(&whole, "chapters"), read(&clipped, "chapters"));
     assert!(read(&clipped, "tokenSpans").len() < read(&whole, "tokenSpans").len());
+}
+
+/// The ranged write path across the wall: a chapter window given in UTF-16 over
+/// 3-byte-per-character Devanagari, and every edit it yields inside it.
+#[wasm_bindgen_test]
+fn a_ranged_format_takes_its_window_in_utf16() {
+    let opts = FormatOpts::new();
+    let whole = format_edits(BOOK, &opts).spans();
+    // Chapter 2 starts at UTF-16 364 (the byte offset is 700 — the wall matters).
+    let ranged = format_edits_in(BOOK, 364, u32::MAX, &opts).spans();
+    assert!(!whole.is_empty());
+    assert!(ranged.len() < whole.len());
+    assert!(ranged.chunks_exact(2).all(|span| span[0] >= 364));
+    // Every ranged edit is one of the whole-book edits — a subset, never a
+    // different proposal.
+    assert!(
+        ranged
+            .chunks_exact(2)
+            .all(|span| whole.chunks_exact(2).any(|other| other == span))
+    );
 }

@@ -650,9 +650,17 @@ export const declaredVersion = (a: { usfmVersion: number }): string | null =>
 // ---------------------------------------------------------------------------
 
 /**
- * A wasm `Edits` handle — what `formatEdits` returns. Same wire as a fix:
- * `[from, to]` per edit in UTF-16, one concatenated ASCII insert blob, one byte
- * length per edit.
+ * A wasm `Edits` handle — what `formatEdits` and `formatEditsIn` return. Same
+ * wire as a fix: `[from, to]` per edit in UTF-16, one concatenated ASCII insert
+ * blob, one byte length per edit.
+ *
+ * `formatEditsIn(text, from, to, opts)` is the SCOPED transaction — the same
+ * whole-book analysis, filtered to a UTF-16 window (a chapter's span out of the
+ * `chapters` read). Do not filter an edit list in JS instead: the engine drops a
+ * boundary-STRADDLING edit whole rather than cutting it, keeps a multi-edit
+ * claim only if all of it is inside, and counts a pure insertion sitting ON
+ * either edge as inside. A JS `filter` cannot see the claim groups, so it will
+ * happily keep half of a `bridge-empty-verses` pair — half an edit corrupts.
  */
 export interface RawEdits {
   readonly spans: Uint32Array;

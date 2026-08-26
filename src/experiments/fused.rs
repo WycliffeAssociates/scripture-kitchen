@@ -712,7 +712,7 @@ impl<'a, const LINT: bool> Sink<'a, LINT> {
         };
         if LINT {
             self.structure.finish(&doc, &mut self.out);
-            self.ordering.finish(&mut self.out);
+            self.ordering.finish(&doc, &mut self.out);
             if self.book.is_none() && self.saw_marker {
                 self.out.push(Observation::one(Code::MissingId, 0));
             }

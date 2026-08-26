@@ -289,11 +289,14 @@ impl Structure {
         let observation = Observation::one(code, anchor);
         match text {
             Some(text) => {
-                let at = content_end(
-                    source,
-                    cst.extent(id, tokens),
-                    tokens[anchor as usize].end(),
-                );
+                let at = match shape {
+                    Shape::Point => point_end(source, tokens, anchor),
+                    _ => content_end(
+                        source,
+                        cst.extent(id, tokens),
+                        tokens[anchor as usize].end(),
+                    ),
+                };
                 out.push_fixed(observation, at, at, text);
             }
             None => out.push(observation),
@@ -375,6 +378,29 @@ fn content_end(source: &[u8], extent: Range<u32>, floor: u32) -> u32 {
         at -= 1;
     }
     at
+}
+
+/// Where a point's missing `\*` belongs: after the marker's own bytes, or after
+/// its attribute list when one follows — the only content a point may hold. The
+/// recovery extent is NOT it: a missing terminator makes recovery swallow
+/// whatever prose follows, and an extent-end `\*` would file that prose inside
+/// the milestone as attribute text.
+fn point_end(source: &[u8], tokens: &[Token], anchor: u32) -> u32 {
+    let token = match tokens.get(anchor as usize + 1) {
+        // The attribute list the missing terminator orphaned. A trailing list
+        // with no `\*` to end it decays to Text, so it is recognized by its
+        // pipe first byte; AttrList proper still arrives in the node-initial
+        // `|cat="x"|` form, which self-terminates.
+        Some(next)
+            if next.kind() == TokenKind::AttrList
+                || (next.kind() == TokenKind::Text
+                    && span_of(source, next).first() == Some(&b'|')) =>
+        {
+            next
+        }
+        _ => &tokens[anchor as usize],
+    };
+    token.start + trim_end_ws(span_of(source, token)).len() as u32
 }
 
 /// The token index of the paragraph that DISPLACED this one, when the two are

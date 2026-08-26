@@ -93,6 +93,31 @@ accepted change is that editor's opinion, not a library fact, so an app composes
 its own from `WANTS`. Diagnostics are the debounced second call — lint is the
 expensive artifact.
 
+## The write path
+
+| export | what it gives back |
+|---|---|
+| `formatEdits(text, opts)` | the whole-book transaction — `Edits`, spans in UTF-16 |
+| `formatEditsIn(text, from, to, opts)` | the same transaction, scoped to a UTF-16 window |
+| `format(text, opts)` | the formatted document, in one call |
+| `diff` / `merge` | the review path (see below) |
+
+**Scope it engine-side, never in JS.** `formatEditsIn` runs the SAME whole-book
+analysis — lint needs the book, and which rule owns a contested byte is settled
+over the whole document — and then filters, so the scoped list is always a
+subset of `formatEdits`. The policy JS cannot reproduce:
+
+- an edit is kept only if its ENTIRE span is inside the window; one straddling
+  the boundary is dropped whole, never cut (half an edit corrupts);
+- a multi-edit claim (`bridge-empty-verses` writes a range AND deletes the
+  verses it swallowed) is kept only if ALL of it is inside — a JS `filter` sees
+  a flat list and would keep half of one;
+- a pure insertion sitting ON either edge is inside — a caret at the window's
+  edge is in the window.
+
+Chapter scope needs no second entry point: the window is `chapters[i]`'s span
+from the `chapters` read.
+
 ## The contract
 
 - **Stateless.** Text in, numbers and strings out, nothing retained between

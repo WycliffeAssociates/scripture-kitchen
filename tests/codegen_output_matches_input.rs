@@ -59,7 +59,8 @@ fn diagnostics_json_is_not_stale() {
         at.map(|line| line + 1),
         at.and_then(|line| CHECKED_IN_DIAGNOSTICS.lines().nth(line))
             .unwrap_or("<eof>"),
-        at.and_then(|line| fresh.lines().nth(line)).unwrap_or("<eof>"),
+        at.and_then(|line| fresh.lines().nth(line))
+            .unwrap_or("<eof>"),
     );
 }
 

@@ -63,9 +63,8 @@ fn entry(out: &mut String, code: usize, row: &LintRow) {
         // `null` is the GATE, not an omission: the code says nothing until a
         // `\usfm` line declares its first rung.
         None => out.push_str(", \"severity\": null"),
-        Some(severity) => {
-            write!(out, ", \"severity\": {}", quoted(severity_name(severity))).expect("String write")
-        }
+        Some(severity) => write!(out, ", \"severity\": {}", quoted(severity_name(severity)))
+            .expect("String write"),
     }
     out.push_str(", \"escalation\": [");
     for (at, (version, severity)) in row.escalation.iter().enumerate() {

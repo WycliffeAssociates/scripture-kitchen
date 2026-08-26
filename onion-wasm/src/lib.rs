@@ -307,14 +307,39 @@ pub fn format_edits(text: &str, opts: &FormatOpts) -> Edits {
     let names = opts.names();
     let codes = opts.codes();
     let edits = usfm_onion_2::format_edits(text.as_bytes(), &opts.to_options(&names, &codes));
-    let index = Utf16Index::new(text.as_bytes());
+    wire_edits(&Utf16Index::new(text.as_bytes()), &edits)
+}
 
+/// The same transaction bounded to `from..to` (UTF-16, the offsets the editor
+/// already holds — a chapter's span out of the `chapters` read).
+///
+/// The range crosses the wall in UTF-16 and is translated here, on the same
+/// index the edits go out through. The policy is the library's: an edit is kept
+/// only if its whole span is inside, a multi-edit claim only if all of it is,
+/// and a pure insertion sitting ON either edge is inside.
+#[wasm_bindgen(js_name = formatEditsIn)]
+pub fn format_edits_in(text: &str, from: u32, to: u32, opts: &FormatOpts) -> Edits {
+    let names = opts.names();
+    let codes = opts.codes();
+    let index = Utf16Index::new(text.as_bytes());
+    let range = index.to_byte(from)..index.to_byte(to);
+    let edits =
+        usfm_onion_2::format_edits_in(text.as_bytes(), range, &opts.to_options(&names, &codes));
+    wire_edits(&index, &edits)
+}
+
+/// The edit wire: spans converted to UTF-16, inserts concatenated.
+///
+/// The index is built per call: an edit list is small and the conversion is
+/// random-access (edits are sorted, but a stride index is ~0.1ms and this is a
+/// user-triggered path, not a keystroke one).
+fn wire_edits(index: &Utf16Index, edits: &[usfm_onion_2::Edit]) -> Edits {
     let mut out = Edits {
         spans: Vec::with_capacity(edits.len() * 2),
         lens: Vec::with_capacity(edits.len()),
         text: String::new(),
     };
-    for edit in &edits {
+    for edit in edits {
         out.spans
             .extend_from_slice(&[index.to_utf16(edit.from), index.to_utf16(edit.to)]);
         out.lens.push(edit.insert.as_bytes().len() as u32);
@@ -685,7 +710,9 @@ mod tests {
             reads(BOOK, wants_all(), Some(0), None).token_spans.len(),
             whole.token_spans.len()
         );
-        assert!(reads(BOOK, wants_all(), Some(0), Some(8)).token_spans.len() < whole.token_spans.len());
+        assert!(
+            reads(BOOK, wants_all(), Some(0), Some(8)).token_spans.len() < whole.token_spans.len()
+        );
     }
 
     #[test]
@@ -702,6 +729,31 @@ mod tests {
             edits.lens().iter().sum::<u32>() as usize,
             edits.text().len()
         );
+    }
+
+    /// The range crosses in UTF-16 and is translated on the SAME index the
+    /// spans go out through — multibyte text or not.
+    #[test]
+    fn format_edits_in_takes_its_range_in_utf16() {
+        let messy = "\\c 1\n\\p\n\\v 1 λόγος  ἦν\n\\c 2\n\\p\n\\v 1 a\n\\v 2 b\n";
+        let opts = FormatOpts::new();
+        let index = Utf16Index::new(messy.as_bytes());
+        let whole = format_edits(messy, &opts);
+        assert_eq!(
+            format_edits_in(messy, 0, index.len_utf16(), &opts).spans(),
+            whole.spans(),
+            "the full range is the whole book"
+        );
+
+        // Chapter 2 opens at the `\c 2` byte; in UTF-16 that is 10 units earlier
+        // than the byte offset (`λόγος  ἦν` is 2 bytes per Greek letter).
+        let at = messy.find("\\c 2").unwrap() as u32;
+        let from = index.to_utf16(at);
+        assert!(from < at, "the Greek made the wall matter");
+        let ranged = format_edits_in(messy, from, index.len_utf16(), &opts);
+        assert!(!ranged.spans().is_empty());
+        assert!(ranged.spans().len() < whole.spans().len());
+        assert!(ranged.spans().chunks_exact(2).all(|span| span[0] >= from));
     }
 
     #[test]
@@ -729,7 +781,10 @@ mod tests {
         let index = Utf16Index::new(current.as_bytes());
         // The span is UTF-16: the Greek ahead of it makes it shorter than the
         // byte offset it came from.
-        assert_eq!(index.to_byte(from) as usize, current.rfind("\\v 2").unwrap());
+        assert_eq!(
+            index.to_byte(from) as usize,
+            current.rfind("\\v 2").unwrap()
+        );
         assert!(from < index.to_byte(from));
     }
 
@@ -737,10 +792,7 @@ mod tests {
     fn a_merge_decision_is_honoured_and_a_stale_id_rejected() {
         let baseline = "\\id GEN\n\\c 1\n\\v 1 one\n";
         let current = "\\id GEN\n\\c 1\n\\v 1 ONE\n";
-        assert_eq!(
-            merged(baseline, current, "{}", "current").unwrap(),
-            current
-        );
+        assert_eq!(merged(baseline, current, "{}", "current").unwrap(), current);
         assert_eq!(
             merged(baseline, current, "{}", "baseline").unwrap(),
             baseline
@@ -794,7 +846,10 @@ mod tests {
         let utf16 = to_utf16(text, inside as u32);
         assert!(utf16 < inside as u32, "the offsets have drifted apart");
         assert_eq!(locate(text, utf16), "MRK 6:1");
-        assert_eq!(locate(text, to_utf16(text, text.len() as u32 - 2)), "MRK 6:2-4");
+        assert_eq!(
+            locate(text, to_utf16(text, text.len() as u32 - 2)),
+            "MRK 6:2-4"
+        );
         // Total past the end, and honest about a book with no `\id`.
         assert_eq!(locate(text, u32::MAX), "MRK 6:2-4");
         assert_eq!(book("\\c 1\n"), "");

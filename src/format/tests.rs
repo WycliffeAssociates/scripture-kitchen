@@ -434,6 +434,56 @@ fn only_the_unambiguous_empty_paragraph_is_deleted() {
     assert_eq!(formatted(dangling, &FormatOptions::default()), dangling);
 }
 
+/// The dual citizen of `empty-verse-runs`: an empty designator-less `\v`
+/// carries no identity and no content, so the default bundle deletes it — and a
+/// consecutive RUN goes in ONE transaction, not one per marker.
+#[test]
+fn an_empty_verse_run_collapses_into_the_verse_that_names_itself() {
+    assert_eq!(
+        formatted(
+            "\\id GEN\n\\c 1\n\\p \\v \\v \\v 1 Put the caret in the slot\n",
+            &FormatOptions::default()
+        ),
+        "\\id GEN\n\\c 1\n\\p \\v 1 Put the caret in the slot\n"
+    );
+
+    // A designator-less `\v` that HOLDS something names a verse nobody but the
+    // author can name: format leaves it exactly as written.
+    let named = "\\id GEN\n\\c 1\n\\p \\v Then He declared\n";
+    assert_eq!(formatted(named, &FormatOptions::default()), named);
+
+    // A run that is its paragraph's whole content is refused: deleting it would
+    // hand back an `empty-paragraph`.
+    let alone = "\\id GEN\n\\c 1\n\\p \\v \\v\n\\p b\n";
+    assert_eq!(formatted(alone, &FormatOptions::default()), alone);
+}
+
+/// The two repairs meeting on ONE byte: `\s1` holds no verse, so
+/// `missing-paragraph` inserts its `\p` at the empty `\v`, which the
+/// empty-run fix deletes from that same byte. A pure insertion at the head of a
+/// deletion is not an overlap — `Claims::resolve` seats both — so the two
+/// compose in one transaction rather than one blocking the other.
+#[test]
+fn a_heading_verse_that_is_also_an_empty_run_takes_both_repairs() {
+    assert_eq!(
+        formatted(
+            "\\id GEN\n\\c 1\n\\s1 Hidden pieces are not places\n\n\\v \\v 1 Put the caret\n",
+            &FormatOptions::default()
+        ),
+        "\\id GEN\n\\c 1\n\\s1 Hidden pieces are not places\n\\p \\v 1 Put the caret\n"
+    );
+
+    // The same over `\qa`, where the verse-bearing predicate — not the
+    // walker's displacement — is what raises the finding.
+    assert_eq!(
+        formatted(
+            "\\id GEN\n\\c 1\n\\qa ALEPH\n\\v \\v 1 Put the caret\n",
+            &FormatOptions::default()
+        ),
+        "\\id GEN\n\\c 1\n\\qa ALEPH\n\\p \\v 1 Put the caret\n"
+    );
+}
+
 #[test]
 fn the_missing_paragraph_fix_rides_the_verse_break_axis() {
     // Keep: the `\p` gets its own line and so does the verse.
@@ -605,3 +655,152 @@ fn an_overflowing_retarget_stacks_adjacent_edits() {
         .collect();
     assert_eq!(stacked, b"\r\n".repeat(8));
 }
+
+// ---------------------------------------------------------------------------
+// Ranged formatting
+// ---------------------------------------------------------------------------
+
+/// `[(from, to, insert)]` — what a ranged assertion actually reads.
+fn spans(edits: &[Edit]) -> Vec<(u32, u32, &str)> {
+    edits
+        .iter()
+        .map(|edit| (edit.from, edit.to, edit.insert.as_str()))
+        .collect()
+}
+
+/// The blank-line collapse at 14..16 crosses the window's start and is dropped
+/// WHOLE; the verse break at 16..17, entirely inside, survives.
+#[test]
+fn an_edit_straddling_the_boundary_is_dropped_not_cut() {
+    let source = "\\c 1\n\\p \\v 1 a\n\n\n\\v 2 b\n".as_bytes();
+    let opts = FormatOptions::default();
+    assert_eq!(
+        spans(&format_edits(source, &opts)),
+        [(14, 16, ""), (16, 17, " ")]
+    );
+    assert_eq!(
+        spans(&format_edits_in(source, 15..24, &opts)),
+        [(16, 17, " ")]
+    );
+    // One byte wider and the straddler is back — nothing about it changed but
+    // the window.
+    assert_eq!(
+        spans(&format_edits_in(source, 14..24, &opts)),
+        [(14, 16, ""), (16, 17, " ")]
+    );
+}
+
+/// `bridge-empty-verses` writes the range AND deletes the verses it swallowed.
+/// A window holding only the first half yields neither edit.
+#[test]
+fn an_atomic_group_half_inside_is_wholly_absent() {
+    let source = "\\c 1\n\\p \\v 1\\v 2\\v 3 asdf\n\\p \\v 4  x\n".as_bytes();
+    let opts = FormatOptions {
+        bridge_empty_verses: true,
+        ..FormatOptions::default()
+    };
+    assert_eq!(
+        spans(&format_edits(source, &opts)),
+        [(11, 12, "1-3"), (12, 20, ""), (33, 35, " ")]
+    );
+    // 0..15 holds the whole first edit and only part of the second.
+    assert_eq!(spans(&format_edits_in(source, 0..15, &opts)), []);
+    assert_eq!(
+        spans(&format_edits_in(source, 0..20, &opts)),
+        [(11, 12, "1-3"), (12, 20, "")]
+    );
+}
+
+/// A caret at the window's edge is in the window — at either edge.
+#[test]
+fn a_pure_insertion_on_the_boundary_is_inside() {
+    let source = "\\c 1\n\\p \\v 1 a\\q1 b\n".as_bytes();
+    let opts = FormatOptions::default();
+    let insertion = [(14u32, 14u32, "\n")];
+    assert_eq!(spans(&format_edits(source, &opts)), insertion);
+    assert_eq!(spans(&format_edits_in(source, 0..14, &opts)), insertion);
+    assert_eq!(spans(&format_edits_in(source, 14..20, &opts)), insertion);
+    assert_eq!(spans(&format_edits_in(source, 0..13, &opts)), []);
+    assert_eq!(spans(&format_edits_in(source, 15..20, &opts)), []);
+    // Even a zero-width window: the caret is on its point.
+    assert_eq!(spans(&format_edits_in(source, 14..14, &opts)), insertion);
+    // An inverted window is empty, not a panic.
+    let inverted = 20..source.len() as u32 - 6;
+    assert_eq!(spans(&format_edits_in(source, inverted, &opts)), []);
+}
+
+/// IN-SCOPE IDEMPOTENCE, the case a caller actually asks for: a CHAPTER span,
+/// whose edges are marker boundaries, so nothing straddles. Apply, widen the
+/// window by the transaction's own byte delta, and there is nothing left to do
+/// inside it.
+#[test]
+fn a_scoped_format_settles_inside_its_own_scope() {
+    let source = "\\c 1\n\\p \\v 1 a\n\n\n\\c 2\n\\p \\v 1 b  c \\q1 d\n".as_bytes();
+    let opts = FormatOptions::default();
+    let text = core::str::from_utf8(source).unwrap();
+    let toc = crate::toc::toc(source, &lex(text));
+    let chapter = toc.chapters.last().unwrap();
+    let range = chapter.start..chapter.end;
+
+    let edits = format_edits_in(source, range.clone(), &opts);
+    assert!(!edits.is_empty());
+    let delta = byte_delta(&edits);
+    let out = apply(source, &edits);
+    let widened = range.start..(range.end as i64 + delta) as u32;
+    assert_eq!(format_edits_in(&out, widened, &opts), vec![]);
+    // The blank run in chapter 1 is untouched — and whole-book still says so.
+    assert_eq!(spans(&format_edits(&out, &opts)), [(14, 16, "")]);
+}
+
+fn byte_delta(edits: &[Edit]) -> i64 {
+    edits
+        .iter()
+        .map(|edit| edit.insert.as_bytes().len() as i64 - (edit.to - edit.from) as i64)
+        .sum()
+}
+
+/// THE HONEST LIMIT: when the window's edge cuts INTO a dropped straddler, the
+/// bytes it would have taken stay in scope, so the next pass has real work —
+/// scoped formatting converges rather than settling in one. Left alone it walks
+/// the debris out; nothing oscillates.
+#[test]
+fn a_boundary_cut_through_a_straddler_converges_instead() {
+    let source = "\\c 1\n\\p \\v 1 a\n\n\n\\v 2 b \\q1 c\n".as_bytes();
+    let opts = FormatOptions::default();
+    // 15 sits INSIDE the 14..16 blank-line collapse.
+    let mut doc = source.to_vec();
+    let mut range = 15..source.len() as u32;
+    let mut rounds = 0;
+    loop {
+        let edits = format_edits_in(&doc, range.clone(), &opts);
+        if edits.is_empty() {
+            break;
+        }
+        rounds += 1;
+        assert!(rounds < 8, "scoped format did not converge: {doc:?}");
+        range = range.start..(range.end as i64 + byte_delta(&edits)) as u32;
+        doc = apply(&doc, &edits);
+    }
+    assert_eq!(rounds, 3);
+    assert_eq!(&doc, b"\\c 1\n\\p \\v 1 a\n\\v 2 b\n\\q1 c\n");
+}
+
+/// THE EQUIVALENCE LAW: the full range is the whole book.
+#[test]
+fn the_full_range_is_the_whole_book() {
+    let opts = FormatOptions {
+        bridge_empty_verses: true,
+        dedupe_verse_number: true,
+        remove_markers: &["s5"],
+        ..FormatOptions::default()
+    };
+    for fixture in FIXTURES {
+        let source = fixture.as_bytes();
+        assert_eq!(
+            format_edits_in(source, 0..source.len() as u32, &opts),
+            format_edits(source, &opts),
+            "{fixture:?}"
+        );
+    }
+}
+

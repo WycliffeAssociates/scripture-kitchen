@@ -64,8 +64,9 @@ ideas/committed/braidv2.md).
 7. **Monoid / map-reduce shape of the engine products.** Can CST /
    lint / toc be expressed as a fold over chunks so one edited chunk
    recomputes and the rest just shift offsets (prefix sums)? Toc is
-   friendly (it tiles every byte). CST and lint are the open
-   question. NOTE: this is rung-3 research (vision: "workers, IPC,
+   friendly (it tiles every byte). CST and lint were the open
+   question — now assessed: see "Monoid-friendliness: what it would
+   take" below. NOTE: this is rung-3 research (vision: "workers, IPC,
    splice replay, monoids before measurement" is on the REJECTED
    list) — it stays a question, not a plan, until a measurement
    fails. The braid-v2 fold-over-slots sketch is the prior art.
@@ -98,6 +99,137 @@ ideas/committed/braidv2.md).
   mask verse text, feed sous, map back" pipeline).
 - Whole-project operations: analyze every target book on open,
   aggregate ProjectDiagnostics (§11.1 / Horizon 2).
+
+## Monoid-friendliness: what it would take (assessed 2026-08-25 at 04a91df)
+
+Answers item 7's open question by reading what each stage actually
+threads across a line-initial `\c`. Two framing rules first:
+
+- **Adoption is per-subsystem and opt-in.** Nothing here obligates
+  lint or CST to BECOME folds — the minimal useful rung is `\c`
+  checksum chunks in galley for SOUS reuse alone (chop, checksum,
+  reuse the chunk's sous product on checksum hit), which touches no
+  onion product at all. Each level below stands on its own.
+- **The oracle is the law**: a product built per-chunk in isolation
+  and reduced must equal the fresh whole-book product, byte for
+  byte. That is the standing retained-vs-fresh equivalence test any
+  chunked path must keep green, and it is what makes every level
+  testable before it is trusted.
+
+### The carry analysis, stage by stage
+
+The flat-arena architecture (every product a vec of u32 indices /
+byte offsets) makes "compose two chunk products" almost everywhere
+SHIFT-BY-PREFIX-SUM + CONCAT — `chapter_par.rs`'s `rebased` is the
+existing proof of the shape. The obstruction is never state size;
+it is BOUNDARY LEAKAGE, captured per stage as a `Carry`:
+
+- **Lex: zero carry, proven.** The split point sits after a newline,
+  which ends every run and clears delimiter-ws mode; token-identical
+  across both corpora (experiments/chapter_par.rs). Chunk products
+  stored chunk-relative rebase by one add.
+- **CST: carry = the open scope stack at the boundary.** Root-only
+  on well-formed input (paragraphs close implicitly at `\c`), so the
+  carry is empty in the overwhelming case. What dirties it is
+  exactly what lint flags anyway: a sidebar straddling a chapter
+  (`\esb … \c 1 … \esbe`, ancestry.rs's own example) or an unclosed
+  `\f` running past a `\c` — a per-chunk build would close those
+  Eof/Recovery at the chunk end and diverge. Rule: a chunk product
+  records whether its boundary stack was root-only; a dirty carry
+  fuses that chunk with its neighbor and recomputes the pair.
+- **Lint: four machines, all small carries.**
+  - *Ordering* — the one self-declared cross-token machine, but
+    verse state RESETS at every `\c` by design, so the chunk
+    boundary is already its reset point. Chapter state is a
+    textbook semigroup: summary = (first chapter number, last
+    chapter number); duplicate/out-of-order/gap judged at the merge
+    seam between adjacent summaries.
+  - *Ancestry* — two stack-derived depths (zero at a clean
+    boundary) plus `run_reported`, a one-bit carry for a
+    paragraph-less verse run straddling `\c`.
+  - *Structure* — one pending token plus the empty-paragraph run
+    list; a run straddling a chapter end is a small carry.
+  - *Flat* — the genuinely whole-book state: the positional `band`
+    (one byte, monotonic — trivial carry-in) and the numbered-family
+    `levels`/`first_seen` arrays (~2KB of bitmasks composing by
+    OR/min, mixed-family re-judged at merge).
+  - *Emit/finish* — observations sort by (anchor, code), so
+    per-chunk reports are pre-sorted and merge by concat; fix
+    indices and edit_list offsets shift like everything else. The
+    `finish()` rules (missing chapter, verse-before-first-chapter,
+    empty-verse collapse) run once, on the merged summaries.
+
+### The design shape, if a measurement ever promotes it
+
+Per-chunk product + `Carry` (boundary stack state, pending runs,
+Flat's masks, Ordering's chapter summary). Clean carry → compose by
+shift+concat; dirty carry → fuse neighbors and recompute. Cache key:
+a chunk's product is a function of (bytes, carry-in), not bytes
+alone — so strictly (checksum, carry-in), degenerating to the bare
+checksum whenever the carry-in is the default one, i.e. almost
+always. Chunk 0 (everything before the first `\c`) is the special
+one: it owns `\id`/headers/intro and establishes the version and the
+positional band the chapters inherit.
+
+### Adoption ladder (each level independently testable)
+
+0. **Sous-only chunk checksums** (galley, no onion change): chop at
+   `chapter_chunk_starts`, checksum chunks, reuse per-chunk sous
+   products on hit. Test: chunked-and-reduced findings == fresh
+   whole-corpus findings.
+1. **Lex chunk reuse**: cache chunk-relative token vecs keyed by
+   chunk checksum. Test: rebase-concat == `crate::lex` whole-book
+   (the chapter_par equivalence, now as a standing corpus test).
+2. **CST/lint with carry**: per-chunk build + carry + neighbor
+   fusion. Test: isolation-built-and-reduced CST/LintReport ==
+   fresh whole-book on both corpora, PLUS adversarial straddle
+   cases (`\esb` across `\c`, unclosed `\f` across `\c`, empty-`\p`
+   and verse runs ending at a chapter seam, chapter numbering
+   anomalies ACROSS the seam) proving the dirty-carry fusion path
+   fires and converges to the oracle.
+
+The chunk surface can also earn its keep as pure API SHAPE (item 8:
+chapter-grain ingest for sous, the PER-CHAPTER coordinate mode's
+adapter) without any of the memoization machinery ever promoting.
+
+## The one-buffer wire: what it would take (assessed 2026-08-26)
+
+Today `analyze` crosses the wall as ~13 typed arrays + 2 scalars + 1
+string (the js-sys Object path). The single-buffer alternative — one
+`Vec<u8>` behind a header — matters for the SECOND host (Tauri IPC via
+`tauri::ipc::Response`), not for wasm, where the Object path is fine.
+Will's estimate ("90% there already") is right; the load-bearing fact
+is in onion-wasm.ts itself: `AnalysisView` never touches wasm — it
+consumes `RawAnalysis`, a plain bag of Uint32Arrays. The change is
+purely about where that bag comes from; nothing downstream moves.
+
+The concrete delta:
+
+- **Rust (~100–150 lines):** `Analysis::to_bytes() -> Vec<u8>`.
+  Header = magic, wire version, len_utf16, usfm_version, section
+  count, then a table of (section id, byte offset, byte len), then
+  the sections. One ordering trick kills padding entirely: emit all
+  u32 sections first (self-aligned — the header is u32s too, so every
+  section start is a multiple of 4 for free) and put the only
+  byte-shaped payload, `fix_text`, LAST. Zero pad bytes anywhere.
+- **TS (~40 lines):** `rawAnalysisFromBuffer(buf): RawAnalysis` —
+  read the table, one `new Uint32Array(buf, off, len/4)` view per
+  section, `TextDecoder` for fixText (the one real change: it crosses
+  as a JS string today, as UTF-8 bytes in the buffer). Everything
+  from `AnalysisView` down — stride loops, bit helpers, `blockAt` —
+  is untouched: that file already IS the interpreter, and it
+  interprets `RawAnalysis`, not wasm.
+- **Tests:** a Rust roundtrip (`to_bytes` → parse → equals the
+  struct) and one golden buffer the TS side decodes.
+
+The real cost is not the code, it is the CONTRACT: once bytes are the
+wire, the header's wire-version byte and a bump discipline become
+load-bearing (the Object path gets schema drift caught by TypeScript;
+the buffer path has only its version check). Sequencing: serde-JSON
+over plain `invoke` FIRST for the Tauri host (derive Serialize on
+`Analysis` — works today, measure it), promote to the buffer when a
+measurement fails. Serialization itself is memcpy-class either way —
+the products are already flat u32 planes.
 
 ## Recipes (the concrete v1 surface the transcript sketches)
 

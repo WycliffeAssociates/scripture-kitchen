@@ -1130,7 +1130,8 @@ fn report_codes(sources: &[String]) {
         }
         let a = analyze(source, wants::DIAGNOSTICS, None);
         let units: Vec<u16> = source.encode_utf16().collect();
-        let slice = |from: u32, to: u32| String::from_utf16_lossy(&units[from as usize..to as usize]);
+        let slice =
+            |from: u32, to: u32| String::from_utf16_lossy(&units[from as usize..to as usize]);
         for row in a.diagnostics.chunks_exact(stride::DIAGNOSTICS) {
             let slot = row[0] as usize;
             if example[slot].is_some() {
@@ -1182,13 +1183,22 @@ fn report_codes(sources: &[String]) {
         println!("     aux       {:?}", row.aux);
         println!("     template  {:?}", row.template);
         match row.fix_label {
-            Some(label) => println!("     fix       {label:?}{}", if row.formatter { "  (also a formatting action)" } else { "" }),
+            Some(label) => println!(
+                "     fix       {label:?}{}",
+                if row.formatter {
+                    "  (also a formatting action)"
+                } else {
+                    ""
+                }
+            ),
             None => println!("     fix       —"),
         }
         match &example[code] {
             Some(message) => println!("     example   {message:?}"),
             None if row.is_form() => {
-                println!("     example   — (a Form row: the formatter's channel, never a diagnostic)")
+                println!(
+                    "     example   — (a Form row: the formatter's channel, never a diagnostic)"
+                )
             }
             None => println!("     example   — (not triggered by the loaded corpus)"),
         }

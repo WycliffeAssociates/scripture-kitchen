@@ -36,6 +36,7 @@ export const edits_spans: (a: number) => [number, number];
 export const edits_text: (a: number) => [number, number];
 export const format: (a: number, b: number, c: number) => [number, number];
 export const formatEdits: (a: number, b: number, c: number) => number;
+export const formatEditsIn: (a: number, b: number, c: number, d: number, e: number) => number;
 export const formatopts_new: () => number;
 export const formatopts_setRemoveMarkers: (a: number, b: number, c: number) => void;
 export const formatopts_setRepairs: (a: number, b: number, c: number) => void;

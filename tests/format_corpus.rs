@@ -12,8 +12,10 @@ use std::path::{Path, PathBuf};
 
 use rayon::prelude::*;
 use usfm_onion_2::cst::build;
+use usfm_onion_2::edit::apply;
 use usfm_onion_2::lint::{Code, LINT_ROWS, check_edits, lint};
-use usfm_onion_2::{Filter, FormatOptions, format, format_edits, lex, mask};
+use usfm_onion_2::toc::toc;
+use usfm_onion_2::{Filter, FormatOptions, format, format_edits, format_edits_in, lex, mask};
 
 fn collect_usfm_paths(root: &Path, paths: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(root) else {
@@ -205,4 +207,97 @@ fn removing_s5_takes_the_chunk_markers_and_nothing_else() {
         })
         .sum();
     assert_eq!(removed, 13_636);
+}
+
+/// THE EQUIVALENCE LAW: `format_edits_in` over the whole source IS
+/// `format_edits`. Byte-equal, on real books.
+#[test]
+fn the_full_range_is_the_whole_book() {
+    let Some(paths) = corpus() else { return };
+    let books = ["19-PSA.usfm", "32-JON.usfm", "01-GEN.usfm", "40-MAT.usfm"];
+    let mut seen = 0;
+    for path in paths
+        .iter()
+        .filter(|path| books.contains(&path.file_name().unwrap().to_str().unwrap()))
+    {
+        let source = std::fs::read(path).unwrap();
+        let opts = FormatOptions::default();
+        assert_eq!(
+            format_edits_in(&source, 0..source.len() as u32, &opts),
+            format_edits(&source, &opts),
+            "{}",
+            path.display()
+        );
+        // And an ARBITRARY window, cutting wherever it lands: still exactly
+        // the whole-book list filtered to what lies wholly inside — which is
+        // where straddlers actually get dropped.
+        let whole = format_edits(&source, &opts);
+        let len = source.len() as u32;
+        for cut in 1..8u32 {
+            let range = len / 8 * cut..len / 8 * (cut + 1);
+            let expected: Vec<_> = whole
+                .iter()
+                .copied()
+                .filter(|edit| edit.from >= range.start && edit.to <= range.end)
+                .collect();
+            assert_eq!(
+                format_edits_in(&source, range.clone(), &opts),
+                expected,
+                "{} {range:?}",
+                path.display()
+            );
+        }
+        seen += 1;
+    }
+    assert!(seen >= 4, "expected the named books to be mounted");
+}
+
+/// CHAPTER SCOPE, the ask's own use: over every chapter span of en_ulb JON, the
+/// ranged list is exactly the whole-book list filtered to the edits that lie
+/// WHOLLY inside — the JS workaround's semantics, with the straddle policy now
+/// explicit and engine-side.
+#[test]
+fn a_chapter_span_is_the_whole_book_list_filtered() {
+    let Some(paths) = corpus() else { return };
+    let Some(path) = paths
+        .iter()
+        .find(|path| path.ends_with("en_ulb/32-JON.usfm"))
+    else {
+        return;
+    };
+    let source = std::fs::read(path).unwrap();
+    let opts = FormatOptions::default();
+    let whole = format_edits(&source, &opts);
+    let text = core::str::from_utf8(&source).unwrap();
+    let toc = toc(&source, &lex(text));
+
+    let mut covered = 0;
+    for chapter in &toc.chapters {
+        let range = chapter.start..chapter.end;
+        let ranged = format_edits_in(&source, range.clone(), &opts);
+        let expected: Vec<_> = whole
+            .iter()
+            .copied()
+            .filter(|edit| edit.from >= range.start && edit.to <= range.end)
+            .collect();
+        assert_eq!(ranged, expected, "chapter {}", chapter.number);
+        covered += ranged.len();
+
+        // IN-SCOPE IDEMPOTENCE over a chapter span: its edges are marker
+        // boundaries, so nothing straddles into it and one pass settles.
+        let delta: i64 = ranged
+            .iter()
+            .map(|edit| edit.insert.as_bytes().len() as i64 - (edit.to - edit.from) as i64)
+            .sum();
+        let out = apply(&source, &ranged);
+        let widened = range.start..(range.end as i64 + delta) as u32;
+        assert!(
+            format_edits_in(&out, widened, &opts).is_empty(),
+            "chapter {} did not settle",
+            chapter.number
+        );
+    }
+    // Every edit of the book lands in some chapter — JON's chapter boundaries
+    // are clean, so the scoped lists PARTITION the whole-book transaction.
+    assert_eq!(covered, whole.len());
 }

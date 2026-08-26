@@ -505,6 +505,16 @@ mod tests {
             "\\id GEN\n\\p a \\qt-s |who=\"Levi\"\\*"
         );
 
+        // The `\*` lands on the MARKER, never at the recovery extent: the
+        // prose the unterminated milestone swallowed stays outside it.
+        assert_eq!(
+            repaired(
+                "\\id GEN\n\\p a \\ts-s swallowed prose\n\\p b\n",
+                Code::UnterminatedMilestone
+            ),
+            "\\id GEN\n\\p a \\ts-s\\* swallowed prose\n\\p b\n"
+        );
+
         // The container's end milestone is built from the ROW name — the `-s`
         // and `-e` spellings are the row's, not the author's.
         assert_eq!(
@@ -728,7 +738,7 @@ mod tests {
         // One snippet per code that DECLARES a label, so no label is a promise
         // nothing keeps. The converse — a code emitting a fix its row does not
         // declare — is asserted inside `findings` on every snippet here.
-        let cases: [(Code, &str); 16] = [
+        let cases: [(Code, &str); 17] = [
             (
                 Code::UnclosedNote,
                 "\\id GEN\n\\c 1\n\\p \\v 1 a\\f + \\ft n\\c 2\n\\p b",
@@ -760,6 +770,10 @@ mod tests {
                 "\\id GEN\n\\c 1\n\\p \\v 1 a \\v 3 b \\v 2 c",
             ),
             (Code::BookCodeNotUppercase, "\\id gen\n\\c 1\n\\p \\v 1 a"),
+            (
+                Code::VerseWithoutDesignator,
+                "\\id GEN\n\\c 1\n\\p \\v \\v \\v 1 Put the caret in the slot",
+            ),
             (
                 Code::MarkerNotWsPreceded,
                 "\\id GEN\n\\p text\\s1 heading\n\\p more",

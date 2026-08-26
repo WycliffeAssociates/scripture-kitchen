@@ -426,6 +426,28 @@ export function formatEdits(text, opts) {
 }
 
 /**
+ * The same transaction bounded to `from..to` (UTF-16, the offsets the editor
+ * already holds — a chapter's span out of the `chapters` read).
+ *
+ * The range crosses the wall in UTF-16 and is translated here, on the same
+ * index the edits go out through. The policy is the library's: an edit is kept
+ * only if its whole span is inside, a multi-edit claim only if all of it is,
+ * and a pure insertion sitting ON either edge is inside.
+ * @param {string} text
+ * @param {number} from
+ * @param {number} to
+ * @param {FormatOpts} opts
+ * @returns {Edits}
+ */
+export function formatEditsIn(text, from, to, opts) {
+    const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    _assertClass(opts, FormatOpts);
+    const ret = wasm.formatEditsIn(ptr0, len0, from, to, opts.__wbg_ptr);
+    return Edits.__wrap(ret);
+}
+
+/**
  * The reference at a CodeMirror offset — `"MRK 6:3"`, `"MRK 6:1-3"` for a
  * bridge, `"MRK 6"` ahead of a chapter's first verse, `"MRK"` in front matter,
  * `"###"` when the book declares no `\id`.
