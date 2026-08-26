@@ -1668,3 +1668,57 @@ green — `cargo clippy --all-targets` clean, full `--include-ignored`
 suite run at pass end. diagnostics.json regenerated (two new rows).
 NOT rebuilt: onion-wasm pkgs (the new codes cross the wall — rebuild
 at next vendoring).
+
+## pass 18 self-report (2026-08-26): token_spans obeys the one-delimiter rule
+
+Will's editor probe caught two derivations of one fact disagreeing:
+`token_spans` emitted raw scanner extents (the fold gives a marker
+its WHOLE trailing whitespace run), while every curated read ends
+chrome at label + ONE delimiter byte. `\v      Put` painted six
+spaces as marker chrome in the source pane while `contentFrom` said
+content starts at byte 16 — the first Left press appeared to do
+nothing. Fixed at the EMIT, per the frame: `token_spans` now clips a
+folding token's `to` through the same `content_after` helper; the
+scanner and the Token vec are untouched (token extents stay the
+partition oracle format and fixes splice against).
+
+Choices where the spec was silent, and what forced each:
+
+- **Which kinds clip: the five whose fold is a DELIMITER before
+  content** — opening Marker, Milestone (both `folds_delimiter`
+  kinds), and the three carved payloads (Designator, NoteCaller,
+  BookCode — each takes its `ws_run_end` with it). Everything else is
+  untouched: closers never absorb, Text whitespace is content, and
+  `\b`-style SingleNewline rows fall out for free (`content_after`
+  adds nothing when nothing was folded — same answer the curated
+  reads give).
+- **AttrList is NOT clipped, both forms.** Node-initial DOES fold
+  (`absorbs_trailing_ws` re-arms the whitespace arm), but U25001 puts
+  the `<HS>*` INSIDE the attribute_list production — list bytes, not
+  a delimiter before content — and no curated read emits a
+  `contentFrom` for it, so there is nothing to agree with. The
+  trailing form settled it: its pre-closer whitespace
+  (`|lemma="x"  \w*`) is genuine list bytes a trim would misreport.
+  OPEN for Will: `\p|cat="x"|   text` still paints the folded run as
+  markup — the caret symptom can recur on node-initial lists; ruling
+  wanted on whether that form should clip too.
+- **The clip filter now tests the EMITTED span, not the raw extent**:
+  a viewport starting inside a clipped-away run would otherwise keep
+  a row the whole-book read says ends before the viewport, breaking
+  the corpus's subsequence law. The dropped bytes belong to no span
+  either way.
+- **The corpus tiling law weakened to exactly the new claim**: spans
+  are sorted-disjoint and every gap (trailing gap included) is
+  space/tab only — a folded run's remainder, checked against the
+  bytes through `Utf16Index::to_byte`. `ref_tokens` re-derives the
+  clip by the oracle's own route (`ref_content_from`, kind-gated).
+
+Verification: `cargo test --lib analyze` (24, two new: the four-case
+probe-agreement test asserting the last chrome span's `to` EQUALS the
+lines read's `contentFrom`, and the milestone clip), `cargo test
+--test analyze_corpus` (all books, laws + differential), full default
+`cargo test`, `cargo test -- --include-ignored`, and `cargo clippy
+--all-targets` all green. No corpus pins moved (the oracle is
+differential, not pinned). NOT rebuilt: onion-wasm pkgs (the clipped
+spans cross the wall — rebuild at next vendoring); wasm wrapper and
+node test docs updated in source only.

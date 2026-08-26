@@ -133,7 +133,9 @@ fn a_real_book_crosses_the_wall_with_the_right_numbers() {
     // The `\usfm` line is absent from this book, and that is not 3.0.
     assert_eq!(number(&a, "usfmVersion"), u32::MAX);
 
-    // Token spans tile the document — the losslessness claim, at the wall.
+    // Token spans reach both ends of the document. (They no longer tile it:
+    // a folded delimiter run's remainder belongs to no span — the
+    // one-delimiter rule; this book neither starts nor ends inside one.)
     let tokens = read(&a, "tokenSpans");
     assert!(!tokens.is_empty());
     assert_eq!(tokens[1], 0);

@@ -58,6 +58,13 @@
 //! `content_from` vanish into chrome on the next analysis, and contradicted
 //! format's own delimiter rule over the same bytes.
 //!
+//! `token_spans` obeys the same rule: a token whose span absorbed a folded run
+//! reports its `to` clipped to the label plus that one byte, so the source
+//! pane's marker styling and the curated reads' `content_from` are one fact
+//! (`\p    text` styles `\p ` and leaves three spaces of plain content). The
+//! clipped remainder belongs to no span — the READ does not tile the document;
+//! the scanner's Token vec still does.
+//!
 //! # What is computed, and what is copied
 //!
 //! [`wants`] gates both: an unset bit skips the artifact it needs (no CST when
@@ -294,6 +301,12 @@ pub struct Analysis {
     /// `[class | kind_bits << 16, from, to]` per token — the syntax-highlight
     /// read, and the one `clip` exists for. `kind_bits` is
     /// [`TokenKind::to_bits`].
+    ///
+    /// Marker chrome obeys [the emit rule](content_after) here too: a span
+    /// that absorbed a folded delimiter-whitespace run (an opening marker, a
+    /// milestone, a carved payload) ends at its label plus ONE delimiter
+    /// byte. The run's remainder is content and belongs to NO span, so this
+    /// read does not tile the document — only the scanner's Token vec does.
     pub token_spans: Vec<u32>,
     /// `[from, to]` per maximal run of reader-visible text
     /// ([`Filter::reader_text`]), markup removed.
@@ -398,7 +411,7 @@ pub fn analyze(text: &str, wants: u32, clip: Option<Range<u32>>) -> Analysis {
         }
     }
     if wants & wants::TOKEN_SPANS != 0 {
-        out.token_spans = token_spans(&tokens, clip.as_ref());
+        out.token_spans = token_spans(source, &tokens, clip.as_ref());
     }
     if wants & wants::LINES != 0 {
         out.lines = lines(source, &tokens);
@@ -797,14 +810,40 @@ fn trimmed(source: &[u8], token: &Token) -> u32 {
     }
 }
 
-fn token_spans(tokens: &[Token], clip: Option<&Range<u32>>) -> Vec<u32> {
+/// The kinds whose span may end in a FOLDED delimiter run — an opening marker
+/// or milestone (`folds_delimiter`) and the three carved payloads, each of
+/// which takes its delimiter run with it. Everything else ends at real bytes
+/// of its own: a closer never absorbs, an attribute list's trailing
+/// whitespace is inside the U25001 production, text whitespace is content.
+fn folds_trailing_ws(kind: TokenKind) -> bool {
+    matches!(
+        kind,
+        TokenKind::Marker { .. }
+            | TokenKind::Milestone { .. }
+            | TokenKind::Designator
+            | TokenKind::NoteCaller
+            | TokenKind::BookCode
+    )
+}
+
+fn token_spans(source: &[u8], tokens: &[Token], clip: Option<&Range<u32>>) -> Vec<u32> {
     let mut out = Vec::with_capacity(tokens.len() * stride::TOKEN_SPANS);
     for token in tokens {
-        if !overlaps(token.start, token.end(), clip) {
+        // The same one-delimiter rule as `content_after`, because it IS
+        // `content_after`: a span that absorbed a folded run ends one
+        // delimiter byte past its label, and the run's remainder is content
+        // belonging to no span. The read no longer tiles the document; the
+        // Token vec still does.
+        let to = if folds_trailing_ws(token.kind()) {
+            content_after(source, token)
+        } else {
+            token.end()
+        };
+        if !overlaps(token.start, to, clip) {
             continue;
         }
         let packed = u32::from(class_word(token)) | u32::from(token.kind_bits) << 16;
-        out.extend_from_slice(&[packed, token.start, token.end()]);
+        out.extend_from_slice(&[packed, token.start, to]);
     }
     out
 }
@@ -954,7 +993,7 @@ fn family(idx: MarkerIdx) -> u32 {
 /// Rewrites the `fields` of every row as UTF-16 offsets, in one sweep.
 ///
 /// The sweep needs its offsets in ASCENDING order, and most reads already are
-/// (tokens tile the document, mask ranges are sorted) — so the ordered case is
+/// (token spans are sorted, mask ranges are sorted) — so the ordered case is
 /// checked in one pass and converted in place with no allocation. The reads
 /// that are NOT ordered — a diagnostic's second span precedes its anchor, a
 /// chapter's label sits inside its own span, a `\p` nests inside an `\esb` —
@@ -1137,6 +1176,70 @@ mod tests {
         let bare = analyze("\\c 1\n\\p   \n\\p x\n", wants::BLOCKS, None);
         let first = rows(&bare.blocks, stride::BLOCKS)[0];
         assert_eq!(first[2], first[1] + 3, "`\\p` plus one space");
+    }
+
+    /// The editor probe's disagreement: the source pane styles marker chrome
+    /// off `token_spans` while caret rules read the curated reads'
+    /// `content_from` — two derivations of one fact, and they disagreed on
+    /// `\v      Put`. A token span that absorbed a folded delimiter run now
+    /// ends where `content_from` says chrome ends; the run's remainder is
+    /// content and belongs to NO span.
+    #[test]
+    fn token_spans_obey_the_one_delimiter_rule() {
+        // (source, the chrome the token read may claim on the marked line)
+        let cases: [(&str, &[&str]); 4] = [
+            // One space each: the plain case, byte-identical to the raw tokens.
+            ("\\c 1\n\\v 1 Put\n", &["\\v ", "1 "]),
+            // Extra run after the designator: the designator folded it, and
+            // its span ends one delimiter in.
+            ("\\c 1\n\\v 1    Put\n", &["\\v ", "1 "]),
+            // The designator gate leaves `Put` as Text, so the MARKER folded
+            // the whole run — the probe's exact disagreement.
+            ("\\c 1\n\\v      Put\n", &["\\v "]),
+            ("\\c 1\n\\p    Put\n", &["\\p "]),
+        ];
+        for (source, chrome) in cases {
+            let a = analyze(source, wants::TOKEN_SPANS | wants::LINES, None);
+            let put = source.find("Put").unwrap() as u32;
+            // The marked line's spans up to the content, sliced back.
+            let seen: Vec<&str> = rows(&a.token_spans, stride::TOKEN_SPANS)
+                .iter()
+                .filter(|row| row[1] >= 5 && row[2] <= put && row[1] < row[2])
+                .map(|row| &source[row[1] as usize..row[2] as usize])
+                .collect();
+            assert_eq!(seen, chrome, "{source:?}");
+            // The agreement that IS the regression test: the last chrome
+            // span ends exactly where the lines read says content begins.
+            let line = rows(&a.lines, stride::LINES)[1];
+            let last = rows(&a.token_spans, stride::TOKEN_SPANS)
+                .iter()
+                .filter(|row| row[1] >= 5 && row[2] <= put)
+                .map(|row| row[2])
+                .max()
+                .unwrap();
+            assert_eq!(last, line[2], "{source:?}: chrome end != content_from");
+        }
+    }
+
+    /// A milestone folds its delimiter run the way an opening marker does
+    /// (`folds_delimiter`), so its span is clipped by the same rule.
+    #[test]
+    fn a_milestone_token_span_keeps_one_delimiter() {
+        let source = "\\c 1\n\\p \\v 1 a \\qt-s   |who=\"P\"\\*said\n";
+        let a = analyze(source, wants::TOKEN_SPANS, None);
+        let milestone = rows(&a.token_spans, stride::TOKEN_SPANS)
+            .into_iter()
+            .find(|row| {
+                matches!(
+                    TokenKind::from_bits((row[0] >> 16) as u8),
+                    TokenKind::Milestone { .. }
+                )
+            })
+            .expect("the \\qt-s row");
+        assert_eq!(
+            &source[milestone[1] as usize..milestone[2] as usize],
+            "\\qt-s "
+        );
     }
 
     /// The same disease inside a note: MARKUP is chrome an apparatus freezes,

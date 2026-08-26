@@ -231,6 +231,96 @@ over plain `invoke` FIRST for the Tauri host (derive Serialize on
 measurement fails. Serialization itself is memcpy-class either way —
 the products are already flat u32 planes.
 
+## Build plan (in progress, 2026-08-26 — rulings as they land)
+
+### The dependency graph (corrects an earlier misreading)
+
+The five-crate layout stands EXACTLY as ruled: per-engine wasm crates
+enforce the boundary, and the engines never see each other. (The wasm
+sketch's pass-7 "one combined crate" note was superseded by the
+five-crate ruling; do not re-derive it.)
+
+```
+onion ◄── onion-wasm            sous ◄── sous-wasm
+  ▲            ▲                  ▲           ▲
+  │            │ (wasm feature)   │           │ (wasm feature)
+  └──────── galley ◄──────────────┘───────────┘
+```
+
+- galley deps onion + sous NATIVELY, always; it pulls onion-wasm and
+  sous-wasm only behind a `wasm` cargo feature.
+- `#[wasm_bindgen]` exports in a DEPENDENCY survive into the final
+  cdylib: `wasm-pack build galley` (feature on) emits one binary whose
+  exports are onion-wasm's tags + sous-wasm's tags + galley's own —
+  the vision's composed analysis host is galley compiled, no sixth
+  crate. Each engine's pkg stays standalone-buildable.
+- The TS layer composes the same way: `galley.ts` re-exports
+  onion-wasm.ts (the decoders consume typed arrays and do not care
+  which binary produced them) and adds galley's own decoders. The
+  editor installs galley's pkg; onion-wasm's remains for bare-engine
+  consumers.
+
+### Ordering
+
+1. Workspace-ify this repo (root `[workspace]`; members onion,
+   onion-wasm, galley). Sous + sous-wasm join as members when sous
+   starts — greenfield, zero migration. This repo IS the crates
+   monorepo.
+2. galley v0: `pub use onion;` (whole crate as a module — nothing
+   hidden, galley's own names are the curated layer), plus
+   `chunk_checksums`. Feature-gated bindgen tags inside galley.
+3. Frontend swaps pkgs: onion-wasm → galley (a superset).
+4. Sous lands; galley adds `proofread` behind the same shape.
+
+### Rulings (Will, 2026-08-26)
+
+- **The `\c` pre-scan is an ONION primitive** — promote
+  `chapter_chunk_starts` out of experiments/ into the library proper
+  (same class of primitive as `lex`; sous-side chunking wants it
+  without galley someday). Galley re-exports.
+- **xxhash-rust** (xxh3-128) is the checksum dep.
+- **Checksums cross the wall as HEX STRINGS**, not u32 quads: the
+  u32-plane convention is for OFFSETS; a checksum is an identity
+  whose consumer-side job is to key a JS Map, volume is dozens per
+  book, and strings key Maps natively. (Revises an earlier stride-4
+  lean.)
+- **v0 is checksums-only** — no ingest/LF-normalize yet; the read
+  documents the same LF-canonical input contract analyze already has
+  (the checksum is only stable against normalized text).
+
+### Naming (Will, 2026-08-26)
+
+- Workspace/repo: **usfm-workspace**.
+- Crates: **usfm_onion** (the `_2` dies everywhere — this is the
+  successor), **scripture_sous_chef**, **galley** (or `usfm_galley` —
+  open; publishing to crates.io/npm would favor the prefixed form,
+  bare `galley` is likely taken).
+- The wasm doorways follow their engines (onion-wasm / sous-wasm as
+  directories; package names settle with the galley naming call).
+- The `usfm_onion_2 → usfm_onion` rename (package name + every
+  `usfm_onion_2::` path in tests/bins) lands WITH step 1's
+  workspace-ification — one mechanical commit, not two.
+
+### The (hash → products) cache shape, noted for rung 2
+
+Content-addressed and label/order-free: `(chunk hash) → chunk-
+relative products`. No book name, no position in the key — pure
+reordering, relabeling, or a chapter shared verbatim between books
+all hit. Retrieval cost is REBASE MATH only, and that is proven, not
+hoped (chapter_par.rs `rebased()` is `start + base`): absolute mode
+adds the requesting book's chunk base (prefix sums), chapter-relative
+mode adds nothing. UTF-16 consumers need UTF-16 chunk bases, so the
+cache stores each chunk's UTF-16 length alongside — prefix sums
+again. Two standing caveats:
+
+- The carry rule from the monoid section: hash-only keys are valid
+  exactly when the `\c`-boundary carry is clean; dirty carries fuse
+  neighbors and recompute.
+- Memory is a MEASUREMENT to record, not an assumption: tokens run
+  ~8 bytes at ~1 per ~19 source bytes (a whole Bible's lex ≈ low
+  single-digit MB), and no corpus copy is retained (encodeInto is
+  fast) — but rung 2 promotes on a recorded number, per the ladder.
+
 ## Recipes (the concrete v1 surface the transcript sketches)
 
 - `ingest(text)` → LF-normalize (→ maybe checksum) → products.

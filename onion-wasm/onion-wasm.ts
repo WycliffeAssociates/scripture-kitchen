@@ -298,6 +298,16 @@ export interface Note extends Span {
   family: number;
 }
 
+/**
+ * One token, for the source pane's syntax styling.
+ *
+ * Marker chrome obeys the same ONE-delimiter rule as every `contentFrom`: a
+ * token that folded a trailing delimiter-whitespace run (an opening marker, a
+ * milestone, a designator, a note caller, a book code) reports `to` as its
+ * name plus ONE delimiter code unit. The remainder of the run is content —
+ * visible, editable — and belongs to NO span, so this read does not tile the
+ * document. `\p    text` styles `\p ` as chrome and leaves three plain spaces.
+ */
 export interface TokenSpan extends Span {
   /** The packed class word. */
   cls: number;

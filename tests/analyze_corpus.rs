@@ -10,7 +10,8 @@
 //!
 //! The structural laws ride along, because a reference emitter agreeing with a
 //! wrong emitter would still be wrong: chapters tile the document, token spans
-//! tile it, text runs are sorted and disjoint, every offset is inside the
+//! tile it up to the one-delimiter clip (every gap is a folded run's
+//! remainder), text runs are sorted and disjoint, every offset is inside the
 //! document, no Form-channel row ever reaches the diagnostics read, and every
 //! fix index resolves.
 //!
@@ -73,7 +74,7 @@ fn reference(text: &str) -> Reference {
         lines: ref_lines(source, &tokens, &u),
         note_extents: ref_notes(&tokens, &cst, &u),
         note_parts: ref_note_parts(source, &tokens, &cst, &u),
-        token_spans: ref_tokens(&tokens, &u),
+        token_spans: ref_tokens(source, &tokens, &u),
         text_runs: ref_runs(source, &tokens, &cst, &u),
         verse_anchors: ref_verses(source, &tokens, &table, &u),
         diagnostics: ref_diagnostics(source, &tokens, &report, &u),
@@ -380,11 +381,22 @@ fn ref_note_parts(source: &[u8], tokens: &[Token], cst: &Cst, u: &dyn Fn(u32) ->
     out
 }
 
-fn ref_tokens(tokens: &[Token], u: &dyn Fn(u32) -> u32) -> Vec<u32> {
+fn ref_tokens(source: &[u8], tokens: &[Token], u: &dyn Fn(u32) -> u32) -> Vec<u32> {
     let mut out = Vec::with_capacity(tokens.len() * stride::TOKEN_SPANS);
     for token in tokens {
+        // The kinds that fold a trailing delimiter run report their span
+        // clipped to the label plus ONE byte of it — the same rule as
+        // `content_from`, re-derived by the oracle's own route.
+        let to = match token.kind() {
+            TokenKind::Marker { .. }
+            | TokenKind::Milestone { .. }
+            | TokenKind::Designator
+            | TokenKind::NoteCaller
+            | TokenKind::BookCode => ref_content_from(source, token),
+            _ => token.end(),
+        };
         let packed = u32::from(class_word(token)) | u32::from(token.kind_bits) << 16;
-        out.extend_from_slice(&[packed, u(token.start), u(token.end())]);
+        out.extend_from_slice(&[packed, u(token.start), u(to)]);
     }
     out
 }
@@ -485,7 +497,7 @@ fn ref_fix_text(report: &LintReport) -> String {
 // The laws every book's analysis obeys
 // ---------------------------------------------------------------------------
 
-fn laws(where_: &str, a: &Analysis) {
+fn laws(where_: &str, a: &Analysis, source: &[u8], ix: &Utf16Index) {
     let end = a.len_utf16;
     let spans = |read: &[u32], stride: usize, fields: &[usize], name: &str| {
         for row in read.chunks_exact(stride) {
@@ -583,17 +595,29 @@ fn laws(where_: &str, a: &Analysis) {
         );
     }
 
-    // Token spans tile it too — the scanner is lossless, so every byte is in
-    // exactly one token.
+    // Token spans tile UP TO the one-delimiter rule: a span that absorbed a
+    // folded delimiter run is clipped to its label plus one byte, so the only
+    // bytes outside every span are the runs' remainders — horizontal
+    // whitespace, and nothing else. (The scanner's Token vec still tiles;
+    // this read no longer does.)
     let mut at = 0;
     for row in a.token_spans.chunks_exact(stride::TOKEN_SPANS) {
-        assert_eq!(row[1], at, "{where_}: token spans do not tile");
+        assert!(row[1] >= at, "{where_}: token spans overlap at {at}");
+        let gap = &source[ix.to_byte(at) as usize..ix.to_byte(row[1]) as usize];
+        assert!(
+            gap.iter().all(|b| *b == b' ' || *b == b'\t'),
+            "{where_}: the gap before {} is not a clipped delimiter run",
+            row[1]
+        );
         at = row[2];
     }
-    assert!(
-        a.token_spans.is_empty() || at == end,
-        "{where_}: token spans stop at {at}, not {end}"
-    );
+    if !a.token_spans.is_empty() {
+        let tail = &source[ix.to_byte(at) as usize..ix.to_byte(end) as usize];
+        assert!(
+            tail.iter().all(|b| *b == b' ' || *b == b'\t'),
+            "{where_}: token spans stop at {at}, not {end}"
+        );
+    }
 
     // Text runs are sorted, disjoint and non-empty (the mask's own contract,
     // preserved across the conversion).
@@ -674,12 +698,9 @@ fn check_file(path: &Path) -> usize {
     assert_eq!(a.fix_edits, r.fix_edits, "{where_}: fix edits");
     assert_eq!(a.fix_lens, r.fix_lens, "{where_}: fix lengths");
     assert_eq!(a.fix_text, r.fix_text, "{where_}: fix text");
-    assert_eq!(
-        a.len_utf16,
-        Utf16Index::new(text.as_bytes()).len_utf16(),
-        "{where_}: length"
-    );
-    laws(&where_, &a);
+    let ix = Utf16Index::new(text.as_bytes());
+    assert_eq!(a.len_utf16, ix.len_utf16(), "{where_}: length");
+    laws(&where_, &a, text.as_bytes(), &ix);
 
     // A clip never changes an offset — it only drops rows. Take the middle
     // third of the document and check the survivors against the whole-book
