@@ -149,18 +149,26 @@ anything: multi-book session concerns. Multi-book project format,
 diff/merge (onion's diff is trusted — expect a nearly wholesale port),
 publish, anchors/U25002/`aid`.
 
-## Whitespace tokenization: two rules, no exceptions (2026-08-21)
+## Whitespace tokenization: two rules, no exceptions (2026-08-21; rule 2 revised 2026-08-27)
 
 The grammar's delimiter class is any reducible-WS run ([\t\n\r ]+); we
 honor it under two orthogonal rules rather than one uniform costume:
 1. A NEWLINE IS ALWAYS ITS OWN TOKEN — block seams, lint line
    discipline, \n\c chunking, and the editor's line model all key on it.
-2. A HORIZONTAL delimiter run (space/tab) FOLDS into the token that
-   grammatically requires it (marker names; and each carved payload —
-   designator, note caller, book code). CR belongs to the newline
-   machinery.
+2. ONE HORIZONTAL code unit (space/tab) FOLDS into the token that
+   grammatically requires it (marker names; each carved payload —
+   designator, note caller, book code; a node-initial attribute list).
+   The run's SURPLUS is a `Pad` token: visible, editable, reducible —
+   never chrome (no paint stands in for it) and never content (text
+   views drop the kind whole). CR belongs to the newline machinery.
+   Revised per RFC-Lexer-change-8-27 (onion-2-spike): the whole-run
+   fold made hidden-ness underivable from the token stream and hid
+   author bytes no keystroke could reach.
 The delimiter always exists in the stream and always concatenates back
 (partition); which rule represents it depends only on its characters.
 A Roslyn-style trivia channel was considered and rejected: trivia buys
-fidelity when bytes would otherwise be lost — we never lose bytes, so
-it would cost a token kind in every consumer for zero information.
+fidelity when bytes would otherwise be lost — we never lose bytes. Pad
+looks like a step toward one but is not trivia: it exists for the
+editor's paint rule (a byte may hide only if paint stands in for it),
+carries a lint lane and a format fix, and consumers drop it BY KIND
+instead of re-deriving whitespace roles.

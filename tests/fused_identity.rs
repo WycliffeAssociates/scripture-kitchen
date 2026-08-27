@@ -1,3 +1,7 @@
+//! PARKED with experiments/fused.rs (2026-08-27, commented out there): the
+//! Pad pass paid the scan-loop copy tax twice. Un-cfg this with the module.
+#![cfg(any())]
+
 //! THE ORACLE for the single-pass experiment: the staged path is the
 //! definition, and `analyze_fused` must reproduce it exactly.
 //!

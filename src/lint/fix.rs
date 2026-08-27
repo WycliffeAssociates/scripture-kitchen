@@ -738,7 +738,7 @@ mod tests {
         // One snippet per code that DECLARES a label, so no label is a promise
         // nothing keeps. The converse — a code emitting a fix its row does not
         // declare — is asserted inside `findings` on every snippet here.
-        let cases: [(Code, &str); 17] = [
+        let cases: [(Code, &str); 18] = [
             (
                 Code::UnclosedNote,
                 "\\id GEN\n\\c 1\n\\p \\v 1 a\\f + \\ft n\\c 2\n\\p b",
@@ -781,6 +781,10 @@ mod tests {
             (
                 Code::DeprecatedMarker,
                 "\\id GEN\n\\usfm 3.0\n\\c 1\n\\p \\v 1 \\pro x\\pro*",
+            ),
+            (
+                Code::DelimiterSurplus,
+                "\\id GEN\n\\c 1\n\\p \\v 1     Put the caret before the pad",
             ),
         ];
         let mut demonstrated: Vec<Code> = Vec::new();

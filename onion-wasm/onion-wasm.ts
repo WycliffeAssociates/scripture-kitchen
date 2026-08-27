@@ -188,7 +188,7 @@ export const NOTE_PART = {
   /**
    * Every marker token inside the note but its own opener: the chrome to
    * freeze. The marker plus ONE delimiter code unit — `\ft   note` freezes
-   * `\ft ` and the two spaces left over come back as BODY.
+   * `\ft ` and the two Pad spaces left over come back as BODY.
    */
   MARKUP: 3,
 } as const;
@@ -209,6 +209,13 @@ export const TOKEN = {
   DESIGNATOR: 8,
   NOTE_CALLER: 9,
   BOOK_CODE: 10,
+  /**
+   * The reducible surplus of a delimiter run: every horizontal-whitespace
+   * code unit past the ONE a chrome token keeps. Visible, editable bytes —
+   * never hidden (no paint stands in for them), never content (text views
+   * drop the kind whole; lint flags it, format deletes it).
+   */
+  PAD: 11,
 } as const;
 
 /**
@@ -287,12 +294,18 @@ export interface Block extends Span {
   cls: number;
   /**
    * The opening marker's name plus ONE delimiter code unit:
-   * `from..contentFrom` is chrome. `\p    text` hides `\p ` and leaves three
-   * spaces of visible leading whitespace for the formatter, not the editor.
+   * `from..contentFrom` is chrome — the marker TOKEN's own span, no re-split.
+   * `\p    text` hides `\p ` and leaves three spaces of visible Pad.
    */
   contentFrom: number;
 }
 
+/**
+ * One note's extent — the whole `\f … \f*`, closer included. An UNCLOSED note
+ * recovers at its line end, and its extent stops IN FRONT OF the recovery
+ * newline: no line break is ever inside an extent, so hiding or replacing one
+ * whole never swallows document structure.
+ */
 export interface Note extends Span {
   /** One of `NOTE_FAMILY`. */
   family: number;
@@ -301,12 +314,13 @@ export interface Note extends Span {
 /**
  * One token, for the source pane's syntax styling.
  *
- * Marker chrome obeys the same ONE-delimiter rule as every `contentFrom`: a
- * token that folded a trailing delimiter-whitespace run (an opening marker, a
- * milestone, a designator, a note caller, a book code) reports `to` as its
- * name plus ONE delimiter code unit. The remainder of the run is content —
- * visible, editable — and belongs to NO span, so this read does not tile the
- * document. `\p    text` styles `\p ` as chrome and leaves three plain spaces.
+ * The spans TILE the document, and the ONE-delimiter rule is the lexer's own:
+ * a chrome token (an opening marker, a milestone, a designator, a note
+ * caller, a book code) carries its name plus at most ONE delimiter code unit,
+ * and a delimiter run's surplus is a `TOKEN.PAD` span — visible, editable,
+ * reducible. Hidden is therefore definable from this read alone: the
+ * chrome-kind spans, minus anchor slots. `\p    text` styles `\p ` as chrome
+ * and leaves three spaces of Pad.
  */
 export interface TokenSpan extends Span {
   /** The packed class word. */
@@ -328,7 +342,12 @@ export interface VerseAnchor extends Span {
   chapter: number;
   /** Is the slot a NUMBER? Clear means "do not style this as a verse number". */
   numberShaped: boolean;
-  /** Where the `\v` marker starts — `markerFrom..from` is the leading chrome. */
+  /**
+   * Where the `\v` marker starts. The leading CHROME is the marker token —
+   * `\v` plus at most one delimiter code unit; whitespace surplus between it
+   * and the number is a visible Pad token, so `markerFrom..from` is all
+   * chrome only when no Pad sits inside it.
+   */
   markerFrom: number;
   /**
    * Past the designator's delimiter — `to..contentFrom` is the trailing

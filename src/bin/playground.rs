@@ -26,8 +26,6 @@
 //   cargo run --release --bin playground -- --usx-only         // pre-lexed+built; times the USX serialization alone
 //   cargo run --release --bin playground -- --html-only        // pre-lexed+built; times the HTML serialization alone
 //   cargo run --release --bin playground -- --fix-preview unclosed-note  // …plus before/after windows for one code
-//   cargo run --release --bin playground -- --fused            // SINGLE PASS: lex+cst+lint off push_token
-//   cargo run --release --bin playground -- --fused-noop       // the fused traversal with the sink OFF (prices the hook)
 //   cargo run --release --bin playground -- --scalar            // no-memchr twin (prices SIMD)
 //   cargo run --release --bin playground -- --staged            // two-stage structural index (simdjson shape)
 //   cargo run --release --bin playground -- --chunked           // chapter-split, lexed serially (prices the split)
@@ -85,12 +83,8 @@ enum Mode {
     UsjOnly,
     UsxOnly,
     HtmlOnly,
-    /// The single-pass experiment: lex + cst + lint in ONE traversal.
-    Fused,
-    /// The same traversal with the sink switched off — prices the hook alone.
-    FusedNoop,
-    /// The middle rung: lex + cst fused, no lint.
-    FusedCst,
+    // The fused single-pass modes are PARKED with experiments/fused.rs
+    // (2026-08-27): the Pad pass paid its scan-loop copy tax twice.
     /// Not a lexer mode: prices the byte↔UTF-16 boundary index, both shapes.
     /// Picks its own files (it needs a dense-script one) and ignores `<path>`.
     Utf16,
@@ -173,9 +167,6 @@ fn main() {
             "--usj-only" => mode = Mode::UsjOnly,
             "--usx-only" => mode = Mode::UsxOnly,
             "--html-only" => mode = Mode::HtmlOnly,
-            "--fused" => mode = Mode::Fused,
-            "--fused-noop" => mode = Mode::FusedNoop,
-            "--fused-cst" => mode = Mode::FusedCst,
             "--lint-stats" => lint_stats = true,
             // The side-table, made browsable — the `{anchor}` conventions are
             // only discoverable by rendering one.
@@ -270,9 +261,6 @@ fn main() {
         Mode::UsjOnly => "usj-only",
         Mode::UsxOnly => "usx-only",
         Mode::HtmlOnly => "html-only",
-        Mode::Fused => "fused",
-        Mode::FusedNoop => "fused-noop",
-        Mode::FusedCst => "fused-cst",
         Mode::Par => "par",
         Mode::Scalar => "scalar",
         Mode::Staged => "staged",
@@ -338,9 +326,6 @@ fn main() {
             | Mode::Lint
             | Mode::LintOnly
             | Mode::Analyze
-            | Mode::Fused
-            | Mode::FusedNoop
-            | Mode::FusedCst
             | Mode::UsjOnly
             | Mode::UsxOnly
             | Mode::HtmlOnly
@@ -416,9 +401,6 @@ fn verify_variant(sources: &[String], mode: Mode) {
         Mode::Mask | Mode::MaskOnly | Mode::VrefOnly => return,
         Mode::Lint | Mode::LintOnly | Mode::Analyze => return,
         Mode::UsjOnly | Mode::UsxOnly | Mode::HtmlOnly => return,
-        // Identity is tests/fused_identity.rs's job — whole reports, not just
-        // token streams, so it cannot be a `fn(&str) -> Vec<Token>` here.
-        Mode::Fused | Mode::FusedNoop | Mode::FusedCst => return,
         Mode::Utf16 => return, // not a lexer variant
         Mode::Scalar => usfm_onion::experiments::scalar::lex,
         Mode::Staged => usfm_onion::experiments::staged::lex,
@@ -472,21 +454,6 @@ fn run_once(
         Mode::Analyze => {
             for source in sources {
                 std::hint::black_box(usfm_onion::analyze::analyze(source, wants, None));
-            }
-        }
-        Mode::Fused => {
-            for source in sources {
-                std::hint::black_box(usfm_onion::experiments::fused::analyze_fused(source));
-            }
-        }
-        Mode::FusedNoop => {
-            for source in sources {
-                std::hint::black_box(usfm_onion::experiments::fused::lex_noop_sink(source));
-            }
-        }
-        Mode::FusedCst => {
-            for source in sources {
-                std::hint::black_box(usfm_onion::experiments::fused::analyze_fused_cst(source));
             }
         }
         Mode::LintOnly => {

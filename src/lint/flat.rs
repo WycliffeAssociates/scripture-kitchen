@@ -365,6 +365,15 @@ impl Flat {
             // The designator of whatever opened the window belongs to the run;
             // an optional break does not.
             TokenKind::Designator => {}
+            // Delimiter surplus: reducible by definition, so the fix is the
+            // whole span. Blind to the adjacency window and the attribute
+            // machine, like the delimiter it extends.
+            TokenKind::Pad => out.push_fixed(
+                Observation::one(Code::DelimiterSurplus, idx),
+                token.start,
+                token.end(),
+                b"",
+            ),
             TokenKind::OptBreak => self.window = Window::Closed,
         }
     }

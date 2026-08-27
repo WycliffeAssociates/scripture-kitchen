@@ -554,6 +554,17 @@ fn form_pass(
                 }
                 at_line_start = false;
             }
+            // A node-initial list folds a delimiter like a marker does, so its
+            // Pad surplus is this rule's too. The trailing form never pads —
+            // its pre-closer whitespace is genuine list bytes.
+            TokenKind::AttrList
+                if tokens
+                    .get(idx as usize + 1)
+                    .is_some_and(|next| next.kind() == TokenKind::Pad) =>
+            {
+                delimiter(source, tokens, opts, idx, Code::DelimiterSingle, out);
+                at_line_start = false;
+            }
             _ => at_line_start = false,
         }
     }
@@ -773,8 +784,9 @@ fn block_break(source: &[u8], opts: &FormatOptions, token: &Token, out: &mut Cla
 }
 
 /// The delimiter the scanner folded onto the end of a marker's span (or of a
-/// designator/caller/book-code payload): one space, or nothing when the line
-/// ends right after it.
+/// designator/caller/book-code payload) PLUS the Pad token carrying the run's
+/// surplus: normalized to one space, or to nothing when the line ends right
+/// after it.
 fn delimiter(
     source: &[u8],
     tokens: &[Token],
@@ -789,15 +801,22 @@ fn delimiter(
     let token = &tokens[idx as usize];
     let bytes = span(source, token);
     let run = bytes.iter().rev().take_while(|byte| is_hws(**byte)).count() as u32;
-    if run == 0 {
+    let mut next = idx as usize + 1;
+    let mut to = token.end();
+    if let Some(pad) = tokens.get(next).filter(|t| t.kind() == TokenKind::Pad) {
+        to = pad.end();
+        next += 1;
+    }
+    if run == 0 && to == token.end() {
         return;
     }
     let at_line_end = tokens
-        .get(idx as usize + 1)
+        .get(next)
         .is_none_or(|next| next.kind() == TokenKind::Newline);
     let text: &[u8] = if at_line_end { b"" } else { b" " };
-    if &bytes[bytes.len() - run as usize..] != text {
-        out.one(code, token.end() - run, token.end(), text);
+    let from = token.end() - run;
+    if &source[from as usize..to as usize] != text {
+        out.one(code, from, to, text);
     }
 }
 
@@ -860,6 +879,16 @@ fn remove_markers(
         // Tokens partition the source, so the far end is one binary search away.
         let mut last = tokens.partition_point(|token| token.start < extent.end);
         let mut to = extent.end;
+        // The marker's delimiter surplus goes with it — it delimited nothing
+        // else, and leaving it would strand whitespace in front of the line
+        // ending this rule is about to judge.
+        if let Some(pad) = tokens
+            .get(last)
+            .filter(|token| token.kind() == TokenKind::Pad && token.start == to)
+        {
+            to = pad.end();
+            last += 1;
+        }
         if at_line_start(source, tokens, idx)
             && let Some(newline) = tokens
                 .get(last)

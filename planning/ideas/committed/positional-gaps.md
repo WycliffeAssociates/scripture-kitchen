@@ -71,10 +71,14 @@ vocabulary is needed; the gaps are enforcement policy:
    against the 3.2 docs, curation citations in comments, in the
    existing style.
 
-## Open rulings
+## Open rulings (ruled 2026-08-27 except where noted)
 
-- Is `\usfm` also once-per-book? (Same machinery; not yet ruled.)
-- `\h`, `\toc#` cardinality — later, with the audit.
-- Fix for `duplicate-id`: delete the second line, or stay fixless?
-- Section paragraphs (`\ms`, `\s`) before the first `\c`: allowed
-  silently for now (corpus practice); revisit with the audit.
+- Is `\usfm` also once-per-book? RULED YES — same machinery as
+  duplicate-id, and the duplicate offers a delete-the-line fix.
+  Rolls into the chunk-fold lint pass (chunk-fold.md "Roll-ins").
+- `\h`, `\toc#` cardinality — later, with the audit. (Still open.)
+- Fix for `duplicate-id`: RULED — offer the fix, delete the second
+  line. Rolls into the chunk-fold lint pass.
+- Section paragraphs (`\ms`, `\s`) before the first `\c`: DEFERRED
+  (Will, 2026-08-27 — "not sure") — stays silent for now; revisit
+  with the audit.

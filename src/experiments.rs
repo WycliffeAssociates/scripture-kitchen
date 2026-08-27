@@ -14,7 +14,9 @@
 
 //! - [`fused`] — the SINGLE-PASS pipeline: the scanner's `push_token` feeds a
 //!   sink that builds the CST and runs lint during the scan. Prices fusing
-//!   the whole pipeline into one traversal.
+//!   the whole pipeline into one traversal. PARKED 2026-08-27 (contents and
+//!   tests/fused_identity.rs commented out): it copies the scan loop's arms,
+//!   and the Pad pass paid that copy tax twice.
 
 //! - [`utf16`] — NOT a lexer variant: the byte↔UTF-16 boundary index, in two
 //!   shapes (per-drift-change anchors vs fixed-stride anchors + SWAR count).

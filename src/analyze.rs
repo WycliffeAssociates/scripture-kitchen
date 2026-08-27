@@ -43,20 +43,20 @@
 //!
 //! # The delimiter is ONE byte
 //!
-//! The scanner folds a marker's or payload's WHOLE horizontal-whitespace run
-//! into that token. The reads do not: every `content_from` is the label's end
-//! plus a SINGLE delimiter byte (nothing at all when no run followed), so
+//! The scanner folds at most ONE horizontal-whitespace byte into a marker or
+//! payload token and emits a run's surplus as a Pad token, so every
+//! `content_from` is simply the chrome token's end:
 //!
 //! ```text
-//! \v 1  Put     number 11..12   content_from 13   ← byte 13 is CONTENT
-//! \p    text    marker 5..7     content_from 8    ← bytes 8..11 are CONTENT
+//! \v 1  Put     number 11..12   content_from 13   ← byte 13 is Pad, VISIBLE
+//! \p    text    marker 5..7     content_from 8    ← bytes 8..11 are Pad
 //! ```
 //!
 //! `[label_end, content_from)` is the delimiter, derivable, one byte or empty.
-//! Everything past it is leading content whitespace: visible, editable, and the
-//! formatter's to trim. Emitting the whole run instead made a space typed at
-//! `content_from` vanish into chrome on the next analysis, and contradicted
-//! format's own delimiter rule over the same bytes.
+//! Everything past it is visible and editable — Pad where it is a delimiter
+//! run's surplus (lint flags it, format deletes it), content otherwise. A
+//! whole-run fold would make a space typed at `content_from` vanish into
+//! chrome on the next analysis, which is the bug this rule exists for.
 //!
 //! `token_spans` obeys the same rule: a token whose span absorbed a folded run
 //! reports its `to` clipped to the label plus that one byte, so the source
@@ -274,7 +274,8 @@ pub struct Analysis {
     /// byte past the label, or at the label's end when nothing followed it.
     ///
     /// `label_to..content_from` is therefore the DELIMITER, and it is exactly
-    /// one byte or empty (see [the emit rule](content_after)).
+    /// one byte or empty — the scanner folds no more than that; any surplus
+    /// whitespace is a visible Pad token past `content_from`.
     pub chapters: Vec<u32>,
     /// `[class, from, content_from, to]` per paragraph-level block —
     /// paragraphs, headers, peripherals, table rows, sidebars. `content_from`
@@ -302,11 +303,11 @@ pub struct Analysis {
     /// read, and the one `clip` exists for. `kind_bits` is
     /// [`TokenKind::to_bits`].
     ///
-    /// Marker chrome obeys [the emit rule](content_after) here too: a span
-    /// that absorbed a folded delimiter-whitespace run (an opening marker, a
-    /// milestone, a carved payload) ends at its label plus ONE delimiter
-    /// byte. The run's remainder is content and belongs to NO span, so this
-    /// read does not tile the document — only the scanner's Token vec does.
+    /// The spans TILE the document. A chrome span (opening marker, milestone,
+    /// carved payload) ends at its label plus at most ONE delimiter byte —
+    /// the scanner's own rule — and a delimiter run's surplus is its own Pad
+    /// span, so "hidden" is definable from this read alone: the chrome-kind
+    /// spans, minus anchor slots. Pad, Text and Newline are always visible.
     pub token_spans: Vec<u32>,
     /// `[from, to]` per maximal run of reader-visible text
     /// ([`Filter::reader_text`]), markup removed.
@@ -315,15 +316,16 @@ pub struct Analysis {
     /// The chapter is the enclosing row's NUMBER, carrying
     /// [`anchor::NUMBER_SHAPED`].
     ///
-    /// `marker_from..number_from` and `number_to..content_from` are the two
-    /// chrome runs an editor hides; `content_from` is where the caret goes. An
-    /// ABSENT designator reports an EMPTY number span AT `content_from` — the
+    /// `marker_from..number_from` and `number_to..content_from` bound the two
+    /// chrome runs an editor hides — each is marker/label plus at most ONE
+    /// delimiter byte; a surplus whitespace run between them is a visible Pad
+    /// token, never chrome. `content_from` is where the caret goes. An ABSENT
+    /// designator reports an EMPTY number span AT `content_from` — the
     /// propped-open slot, which is where a retyped number will land, not the
     /// marker's start.
     ///
     /// `number_to..content_from` is the DELIMITER: exactly one byte, or empty
-    /// when the line ends right after the number. Never the whole whitespace
-    /// run — see [the emit rule](content_after).
+    /// when the line ends right after the number.
     pub verse_anchors: Vec<u32>,
     /// `[code, from, to, second_from, second_to, aux, fix]`. `code` indexes the
     /// codegen'd diagnostics side-table (`onion-wasm/diagnostics.json`); the second
@@ -411,7 +413,7 @@ pub fn analyze(text: &str, wants: u32, clip: Option<Range<u32>>) -> Analysis {
         }
     }
     if wants & wants::TOKEN_SPANS != 0 {
-        out.token_spans = token_spans(source, &tokens, clip.as_ref());
+        out.token_spans = token_spans(&tokens, clip.as_ref());
     }
     if wants & wants::LINES != 0 {
         out.lines = lines(source, &tokens);
@@ -439,23 +441,17 @@ pub fn analyze(text: &str, wants: u32, clip: Option<Range<u32>>) -> Analysis {
 // The reads, in source bytes
 // ---------------------------------------------------------------------------
 
-/// Where a token's CONTENT begins: its payload label's end plus ONE delimiter
-/// byte when the scanner folded a horizontal-whitespace run onto it, the label's
-/// end when it folded nothing.
-///
-/// The scanner's fold gives a marker or payload token its WHOLE run — that is
-/// the token contract and it is not touched. This is the EMIT rule, and it is
-/// the reason `[label_end, content_from)` is exactly one byte or empty: bytes
-/// past that one delimiter are leading CONTENT whitespace, visible and editable,
-/// which is what keeps a space the author types at `content_from` from being
-/// absorbed into chrome by the next analysis.
+/// Where a token's CONTENT begins: its own end. The scanner folds AT MOST ONE
+/// delimiter byte into a token and emits any surplus as a Pad token, so
+/// `[label_end, content_from)` is exactly one byte or empty BY CONSTRUCTION —
+/// no re-split happens here anymore, the name only keeps the call sites
+/// saying what they mean.
 fn content_after(source: &[u8], token: &Token) -> u32 {
-    let label = token.start + trimmed(source, token);
-    if label < token.end() {
-        label + 1
-    } else {
-        label
-    }
+    debug_assert!(
+        token.end() - (token.start + trimmed(source, token)) <= 1,
+        "a token folded more than one delimiter byte"
+    );
+    token.end()
 }
 
 /// The three offsets a designator slot has, from the marker's token row.
@@ -671,9 +667,22 @@ fn notes(source: &[u8], tokens: &[Token], cst: &Cst) -> (Vec<u32>, Vec<u32>) {
             continue;
         }
         let index = (extents.len() / stride::NOTE_EXTENTS) as u32;
-        let extent = cst.extent(node as u32, tokens);
+        let mut extent = cst.extent(node as u32, tokens);
+        // An UNCLOSED note recovers at its line end, and the newline that
+        // popped it is the node's last child. That newline is STRUCTURE, not
+        // note — a consumer hiding the extent whole must never hide a line
+        // break — so the reported extent stops in front of it. (A closed
+        // note's last child is its closer; only recovery ends on a Newline.)
+        let last = tokens.partition_point(|t| t.start < extent.end);
+        if let Some(newline) = last
+            .checked_sub(1)
+            .map(|row| &tokens[row])
+            .filter(|t| t.kind() == TokenKind::Newline && t.end() == extent.end)
+        {
+            extent.end = newline.start;
+        }
         extents.extend_from_slice(&[family(token.marker_idx), extent.start, extent.end]);
-        note_parts(source, tokens, cst, node as u32, index, &mut parts);
+        note_parts(source, tokens, cst, node as u32, index, extent.end, &mut parts);
     }
     (extents, parts)
 }
@@ -697,6 +706,7 @@ fn note_parts(
     cst: &Cst,
     node: u32,
     index: u32,
+    extent_end: u32,
     out: &mut Vec<u32>,
 ) {
     let opener = cst.nodes[node as usize].token;
@@ -709,9 +719,16 @@ fn note_parts(
             continue;
         }
         let token = &tokens[token_id as usize];
+        // The recovery newline the extent clip excluded (see `notes`): the
+        // parts partition the extent, so it is outside them too.
+        if token.start >= extent_end {
+            continue;
+        }
         let kind = match token.kind() {
             TokenKind::NoteCaller => note_part::CALLER,
-            TokenKind::Text | TokenKind::Newline | TokenKind::OptBreak => {
+            // Pad rides the run like the folded surplus it replaced: the same
+            // bytes landed in ORIGIN/BODY when they were a markup token's tail.
+            TokenKind::Text | TokenKind::Newline | TokenKind::OptBreak | TokenKind::Pad => {
                 if origin {
                     note_part::ORIGIN
                 } else {
@@ -810,40 +827,17 @@ fn trimmed(source: &[u8], token: &Token) -> u32 {
     }
 }
 
-/// The kinds whose span may end in a FOLDED delimiter run — an opening marker
-/// or milestone (`folds_delimiter`) and the three carved payloads, each of
-/// which takes its delimiter run with it. Everything else ends at real bytes
-/// of its own: a closer never absorbs, an attribute list's trailing
-/// whitespace is inside the U25001 production, text whitespace is content.
-fn folds_trailing_ws(kind: TokenKind) -> bool {
-    matches!(
-        kind,
-        TokenKind::Marker { .. }
-            | TokenKind::Milestone { .. }
-            | TokenKind::Designator
-            | TokenKind::NoteCaller
-            | TokenKind::BookCode
-    )
-}
-
-fn token_spans(source: &[u8], tokens: &[Token], clip: Option<&Range<u32>>) -> Vec<u32> {
+fn token_spans(tokens: &[Token], clip: Option<&Range<u32>>) -> Vec<u32> {
     let mut out = Vec::with_capacity(tokens.len() * stride::TOKEN_SPANS);
     for token in tokens {
-        // The same one-delimiter rule as `content_after`, because it IS
-        // `content_after`: a span that absorbed a folded run ends one
-        // delimiter byte past its label, and the run's remainder is content
-        // belonging to no span. The read no longer tiles the document; the
-        // Token vec still does.
-        let to = if folds_trailing_ws(token.kind()) {
-            content_after(source, token)
-        } else {
-            token.end()
-        };
-        if !overlaps(token.start, to, clip) {
+        // Raw extents: the scanner itself keeps at most one delimiter byte on
+        // a chrome span (the surplus is a Pad token), so the read tiles the
+        // document and "hidden" is definable from these spans alone.
+        if !overlaps(token.start, token.end(), clip) {
             continue;
         }
         let packed = u32::from(class_word(token)) | u32::from(token.kind_bits) << 16;
-        out.extend_from_slice(&[packed, token.start, to]);
+        out.extend_from_slice(&[packed, token.start, token.end()]);
     }
     out
 }
@@ -1103,10 +1097,10 @@ mod tests {
     /// the caret at `content_from` types a space, and the byte they just typed
     /// must still be theirs afterwards.
     ///
-    /// The scanner's fold gives the designator token the whole run, so emitting
-    /// the token's end walked `content_from` forward with every keystroke and
-    /// the editor — which hides `[number_to, content_from)` as chrome — hid the
-    /// space. Silent, invisible document growth.
+    /// A whole-run fold would walk `content_from` forward with every
+    /// keystroke, and the editor — which hides `[number_to, content_from)` as
+    /// chrome — would hide the space. Silent, invisible document growth; the
+    /// typed byte lexes as Pad instead.
     #[test]
     fn typing_a_space_at_content_from_does_not_move_content_from() {
         let before = "\\c 1\n\\p \\v 1 Put\n";
@@ -1178,42 +1172,45 @@ mod tests {
         assert_eq!(first[2], first[1] + 3, "`\\p` plus one space");
     }
 
-    /// The editor probe's disagreement: the source pane styles marker chrome
-    /// off `token_spans` while caret rules read the curated reads'
-    /// `content_from` — two derivations of one fact, and they disagreed on
-    /// `\v      Put`. A token span that absorbed a folded delimiter run now
-    /// ends where `content_from` says chrome ends; the run's remainder is
-    /// content and belongs to NO span.
+    /// The editor probe's disagreement, settled in the LEXER: the source pane
+    /// styles marker chrome off `token_spans` while caret rules read the
+    /// curated reads' `content_from`, and both are now the same fact. A chrome
+    /// span carries its label plus at most ONE delimiter byte; the run's
+    /// surplus is a Pad span of its own, so the read tiles the document.
     #[test]
     fn token_spans_obey_the_one_delimiter_rule() {
-        // (source, the chrome the token read may claim on the marked line)
+        // (source, the marked line's spans up to the content: chrome, and any
+        // Pad surplus after it)
         let cases: [(&str, &[&str]); 4] = [
-            // One space each: the plain case, byte-identical to the raw tokens.
+            // One space each: no surplus anywhere.
             ("\\c 1\n\\v 1 Put\n", &["\\v ", "1 "]),
-            // Extra run after the designator: the designator folded it, and
-            // its span ends one delimiter in.
-            ("\\c 1\n\\v 1    Put\n", &["\\v ", "1 "]),
-            // The designator gate leaves `Put` as Text, so the MARKER folded
-            // the whole run — the probe's exact disagreement.
-            ("\\c 1\n\\v      Put\n", &["\\v "]),
-            ("\\c 1\n\\p    Put\n", &["\\p "]),
+            // Extra run after the designator: one byte rides it, three pad.
+            ("\\c 1\n\\v 1    Put\n", &["\\v ", "1 ", "   "]),
+            // The designator gate leaves `Put` as Text, so the MARKER keeps
+            // one byte of the run — the probe's exact disagreement.
+            ("\\c 1\n\\v      Put\n", &["\\v ", "     "]),
+            ("\\c 1\n\\p    Put\n", &["\\p ", "   "]),
         ];
-        for (source, chrome) in cases {
+        let pad = u32::from(TokenKind::Pad.to_bits());
+        for (source, spans) in cases {
             let a = analyze(source, wants::TOKEN_SPANS | wants::LINES, None);
             let put = source.find("Put").unwrap() as u32;
-            // The marked line's spans up to the content, sliced back.
-            let seen: Vec<&str> = rows(&a.token_spans, stride::TOKEN_SPANS)
-                .iter()
+            let before: Vec<_> = rows(&a.token_spans, stride::TOKEN_SPANS)
+                .into_iter()
                 .filter(|row| row[1] >= 5 && row[2] <= put && row[1] < row[2])
+                .collect();
+            let seen: Vec<&str> = before
+                .iter()
                 .map(|row| &source[row[1] as usize..row[2] as usize])
                 .collect();
-            assert_eq!(seen, chrome, "{source:?}");
-            // The agreement that IS the regression test: the last chrome
-            // span ends exactly where the lines read says content begins.
+            assert_eq!(seen, spans, "{source:?}");
+            // The agreement that IS the regression test: the last CHROME span
+            // (Pad is visible, not chrome) ends exactly where the lines read
+            // says content begins.
             let line = rows(&a.lines, stride::LINES)[1];
-            let last = rows(&a.token_spans, stride::TOKEN_SPANS)
+            let last = before
                 .iter()
-                .filter(|row| row[1] >= 5 && row[2] <= put)
+                .filter(|row| row[0] >> 16 != pad)
                 .map(|row| row[2])
                 .max()
                 .unwrap();

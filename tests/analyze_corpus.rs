@@ -10,8 +10,8 @@
 //!
 //! The structural laws ride along, because a reference emitter agreeing with a
 //! wrong emitter would still be wrong: chapters tile the document, token spans
-//! tile it up to the one-delimiter clip (every gap is a folded run's
-//! remainder), text runs are sorted and disjoint, every offset is inside the
+//! tile it byte for byte (the scanner emits delimiter surplus as Pad tokens),
+//! text runs are sorted and disjoint, every offset is inside the
 //! document, no Form-channel row ever reaches the diagnostics read, and every
 //! fix index resolves.
 //!
@@ -72,9 +72,9 @@ fn reference(text: &str) -> Reference {
         chapters: ref_chapters(source, &tokens, &table, &u),
         blocks: ref_blocks(source, &tokens, &cst, &u),
         lines: ref_lines(source, &tokens, &u),
-        note_extents: ref_notes(&tokens, &cst, &u),
+        note_extents: ref_notes(source, &tokens, &cst, &u),
         note_parts: ref_note_parts(source, &tokens, &cst, &u),
-        token_spans: ref_tokens(source, &tokens, &u),
+        token_spans: ref_tokens(&tokens, &u),
         text_runs: ref_runs(source, &tokens, &cst, &u),
         verse_anchors: ref_verses(source, &tokens, &table, &u),
         diagnostics: ref_diagnostics(source, &tokens, &report, &u),
@@ -261,7 +261,7 @@ fn ref_blocks(source: &[u8], tokens: &[Token], cst: &Cst, u: &dyn Fn(u32) -> u32
     out
 }
 
-fn ref_notes(tokens: &[Token], cst: &Cst, u: &dyn Fn(u32) -> u32) -> Vec<u32> {
+fn ref_notes(source: &[u8], tokens: &[Token], cst: &Cst, u: &dyn Fn(u32) -> u32) -> Vec<u32> {
     let mut out = Vec::new();
     for node in 0..cst.nodes.len() {
         let row = &cst.nodes[node];
@@ -283,10 +283,23 @@ fn ref_notes(tokens: &[Token], cst: &Cst, u: &dyn Fn(u32) -> u32) -> Vec<u32> {
             "ex" => 4,
             _ => 5,
         };
-        let extent = cst.extent(node as u32, tokens);
+        let extent = clipped_note_extent(source, cst.extent(node as u32, tokens));
         out.extend_from_slice(&[family, u(extent.start), u(extent.end)]);
     }
     out
+}
+
+/// An UNCLOSED note recovers at line end and the popping newline is its last
+/// child; the reported extent stops in front of it. Re-derived by BYTES — the
+/// production code walks tokens — so the two routes stay independent.
+fn clipped_note_extent(source: &[u8], mut extent: std::ops::Range<u32>) -> std::ops::Range<u32> {
+    if extent.end > extent.start && source[extent.end as usize - 1] == b'\n' {
+        extent.end -= 1;
+        if extent.end > extent.start && source[extent.end as usize - 1] == b'\r' {
+            extent.end -= 1;
+        }
+    }
+    extent
 }
 
 /// Every note's interior, re-derived by taking the tokens inside the extent BY
@@ -301,7 +314,7 @@ fn ref_note_parts(source: &[u8], tokens: &[Token], cst: &Cst, u: &dyn Fn(u32) ->
         {
             continue;
         }
-        let extent = cst.extent(node as u32, tokens);
+        let extent = clipped_note_extent(source, cst.extent(node as u32, tokens));
         let mut origin = false;
         let mut run: Option<(u32, u32, u32)> = None;
         for (at, token) in tokens.iter().enumerate() {
@@ -381,22 +394,13 @@ fn ref_note_parts(source: &[u8], tokens: &[Token], cst: &Cst, u: &dyn Fn(u32) ->
     out
 }
 
-fn ref_tokens(source: &[u8], tokens: &[Token], u: &dyn Fn(u32) -> u32) -> Vec<u32> {
+fn ref_tokens(tokens: &[Token], u: &dyn Fn(u32) -> u32) -> Vec<u32> {
     let mut out = Vec::with_capacity(tokens.len() * stride::TOKEN_SPANS);
     for token in tokens {
-        // The kinds that fold a trailing delimiter run report their span
-        // clipped to the label plus ONE byte of it — the same rule as
-        // `content_from`, re-derived by the oracle's own route.
-        let to = match token.kind() {
-            TokenKind::Marker { .. }
-            | TokenKind::Milestone { .. }
-            | TokenKind::Designator
-            | TokenKind::NoteCaller
-            | TokenKind::BookCode => ref_content_from(source, token),
-            _ => token.end(),
-        };
+        // Raw extents: the one-delimiter rule lives in the SCANNER now (the
+        // surplus is a Pad token), so the read has nothing to re-derive.
         let packed = u32::from(class_word(token)) | u32::from(token.kind_bits) << 16;
-        out.extend_from_slice(&[packed, u(token.start), u(to)]);
+        out.extend_from_slice(&[packed, u(token.start), u(token.end())]);
     }
     out
 }
@@ -497,7 +501,7 @@ fn ref_fix_text(report: &LintReport) -> String {
 // The laws every book's analysis obeys
 // ---------------------------------------------------------------------------
 
-fn laws(where_: &str, a: &Analysis, source: &[u8], ix: &Utf16Index) {
+fn laws(where_: &str, a: &Analysis) {
     let end = a.len_utf16;
     let spans = |read: &[u32], stride: usize, fields: &[usize], name: &str| {
         for row in read.chunks_exact(stride) {
@@ -595,28 +599,16 @@ fn laws(where_: &str, a: &Analysis, source: &[u8], ix: &Utf16Index) {
         );
     }
 
-    // Token spans tile UP TO the one-delimiter rule: a span that absorbed a
-    // folded delimiter run is clipped to its label plus one byte, so the only
-    // bytes outside every span are the runs' remainders — horizontal
-    // whitespace, and nothing else. (The scanner's Token vec still tiles;
-    // this read no longer does.)
+    // Token spans TILE the document: the scanner keeps at most one delimiter
+    // byte on a chrome span and emits any surplus as a Pad token, so the read
+    // is the raw extents again and concatenation covers every byte.
     let mut at = 0;
     for row in a.token_spans.chunks_exact(stride::TOKEN_SPANS) {
-        assert!(row[1] >= at, "{where_}: token spans overlap at {at}");
-        let gap = &source[ix.to_byte(at) as usize..ix.to_byte(row[1]) as usize];
-        assert!(
-            gap.iter().all(|b| *b == b' ' || *b == b'\t'),
-            "{where_}: the gap before {} is not a clipped delimiter run",
-            row[1]
-        );
+        assert_eq!(row[1], at, "{where_}: token spans do not tile at {at}");
         at = row[2];
     }
     if !a.token_spans.is_empty() {
-        let tail = &source[ix.to_byte(at) as usize..ix.to_byte(end) as usize];
-        assert!(
-            tail.iter().all(|b| *b == b' ' || *b == b'\t'),
-            "{where_}: token spans stop at {at}, not {end}"
-        );
+        assert_eq!(at, end, "{where_}: token spans stop at {at}, not {end}");
     }
 
     // Text runs are sorted, disjoint and non-empty (the mask's own contract,
@@ -700,7 +692,7 @@ fn check_file(path: &Path) -> usize {
     assert_eq!(a.fix_text, r.fix_text, "{where_}: fix text");
     let ix = Utf16Index::new(text.as_bytes());
     assert_eq!(a.len_utf16, ix.len_utf16(), "{where_}: length");
-    laws(&where_, &a, text.as_bytes(), &ix);
+    laws(&where_, &a);
 
     // A clip never changes an offset — it only drops rows. Take the middle
     // third of the document and check the survivors against the whole-book

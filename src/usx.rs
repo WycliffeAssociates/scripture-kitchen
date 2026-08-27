@@ -677,6 +677,9 @@ impl<'a> Export<'a> {
             TokenKind::MilestoneTerminator => self.lists[list].ws.clear(),
             TokenKind::AttrList => {}
             TokenKind::Milestone { .. } => {}
+            // Reducible delimiter surplus: contributes no text and leaves the
+            // boundary state exactly as the chrome that owned the run set it.
+            TokenKind::Pad => {}
         }
     }
 

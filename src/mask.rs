@@ -392,6 +392,10 @@ pub fn mask(source: &[u8], tokens: &[Token], cst: &Cst, filter: &Filter) -> Mask
             // The three carved payloads ride the marker that consumed them, and
             // each owns its own delimiter, so dropping one is whitespace-clean.
             TokenKind::Designator | TokenKind::BookCode | TokenKind::NoteCaller => rides,
+            // A delimiter run's surplus rides the same way: never content, so
+            // a text view drops it whole; a marker-keeping view keeps the
+            // bytes and the concatenation stays byte-identical.
+            TokenKind::Pad => rides,
             TokenKind::AttrList => filter.attr_lists && rides,
             TokenKind::Newline => filter.newlines,
             TokenKind::OptBreak => filter.opt_breaks,

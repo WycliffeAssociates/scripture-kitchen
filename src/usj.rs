@@ -385,6 +385,10 @@ impl<'a> Export<'a> {
             }
             TokenKind::AttrList => {}
             TokenKind::Milestone { .. } => {}
+            // Reducible delimiter surplus: contributes no text and leaves the
+            // boundary state exactly as the chrome that owned the run set it,
+            // so the output matches the fully-folded spelling byte for byte.
+            TokenKind::Pad => {}
         }
     }
 

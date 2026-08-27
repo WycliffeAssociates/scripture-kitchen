@@ -130,6 +130,8 @@ pub enum Code {
     MarkerOutOfBand,
     DuplicateId,
     ParagraphBeforeFirstChapter,
+    // --- Form (continued — appended so earlier row indices stay stable) ----
+    DelimiterSurplus,
     // --- the FORM CHANNEL --------------------------------------------------
     // Never a diagnostic (`Severity::Form`), never evaluated by `lint`. THIS
     // ORDER IS PRECEDENCE: where two of these want the same bytes, the earlier
@@ -241,7 +243,7 @@ impl LintRow {
 /// The authored rules table — one row per [`Code`], in the enum's order. All
 /// six families have a pass; the FORM family's tail is the format channel, which
 /// `lint` never reaches (see [`Severity::Form`]).
-pub const LINT_ROWS: [LintRow; 57] = [
+pub const LINT_ROWS: [LintRow; 58] = [
     // Something that cannot live inside a note (a `\c`, a bare `\v`, an unknown
     // marker) arrived while the frame was open. Both live corpus instances
     // (en_ulb ISA, MRK) are genuinely truncated footnotes.
@@ -989,6 +991,22 @@ pub const LINT_ROWS: [LintRow; 57] = [
         template: "{anchor} body paragraph before the book's first \\c",
         formatter: false,
         fix_label: None,
+    },
+    // A Pad token: delimiter whitespace past the one byte the chrome keeps.
+    // The bytes RENDER (no paint stands in for them), so the finding is what
+    // explains the ragged look; the fix deletes exactly the surplus. HINT —
+    // every delimiter pattern is `HS`+, so several spaces are VALID, only
+    // reducible.
+    LintRow {
+        code: Code::DelimiterSurplus,
+        name: "delimiter-surplus",
+        category: Category::Form,
+        severity: Some(Severity::Hint),
+        escalation: &[],
+        aux: AuxKind::None,
+        template: "{anchor} reducible whitespace after a delimiter",
+        formatter: true,
+        fix_label: Some("remove the extra whitespace"),
     },
     // ---- The Form channel -------------------------------------------------
     // Eleven rows nobody is ever shown. Their templates exist so a formatter UI

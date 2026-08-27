@@ -419,7 +419,10 @@ fn every_corpus_fix_passes_the_oracle() {
     // The corpus's one `verse-without-designator` is `\v +`, which holds
     // content: the empty-run deletion is offered nowhere in 226 books.
     assert_eq!(total(Code::VerseWithoutDesignator), 0);
-    assert_eq!(totals.iter().sum::<u64>(), 5_462);
+    // One per Pad token: delimiter whitespace past the byte the chrome keeps
+    // (en_ulb's `\s5  ` and `\q  ` trailing pairs are most of them).
+    assert_eq!(total(Code::DelimiterSurplus), 875);
+    assert_eq!(totals.iter().sum::<u64>(), 6_337);
 }
 
 #[test]

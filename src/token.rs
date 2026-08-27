@@ -63,6 +63,19 @@ pub enum TokenKind {
     /// attributes belong to the last marker, so a consumer reads the owner off
     /// the adjacent token (the same adjacency shape as `ca`/`cp`/`va`/`vp`).
     AttrList,
+    /// The REDUCIBLE SURPLUS of a structural delimiter run: every horizontal
+    /// whitespace byte past the ONE code unit a folding token keeps. Visible,
+    /// editable bytes — but never content (text views drop the kind whole) and
+    /// never chrome (no paint stands in for them, so they must render).
+    ///
+    /// ```text
+    /// \v   1   x   Marker("\v ") Pad("  ") Designator("1 ") Pad("  ") Text("x")
+    /// ```
+    ///
+    /// Exists only at delimiter positions — after a folding marker/milestone,
+    /// a carved payload, or a node-initial attribute list — so a whitespace
+    /// run INSIDE a text region can never be one.
+    Pad,
 }
 
 // Shapes live in the low 4 bits, so OR-ing bit 4 on top can never collide
@@ -91,6 +104,7 @@ impl TokenKind {
             Self::Designator => 8,
             Self::NoteCaller => 9,
             Self::BookCode => 10,
+            Self::Pad => 11,
         }
     }
 
@@ -114,6 +128,7 @@ impl TokenKind {
                     8 => Self::Designator,
                     9 => Self::NoteCaller,
                     10 => Self::BookCode,
+                    11 => Self::Pad,
                     _ => unreachable!("unknown kind bits {bits:#04b}"),
                 }
             }
@@ -174,6 +189,7 @@ mod tests {
             TokenKind::Designator,
             TokenKind::NoteCaller,
             TokenKind::BookCode,
+            TokenKind::Pad,
         ];
         for kind in all {
             assert_eq!(TokenKind::from_bits(kind.to_bits()), kind);

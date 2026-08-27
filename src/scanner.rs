@@ -24,12 +24,15 @@
 //!
 //! 1. **A NEWLINE is always its own token.** No exceptions: block seams, lint's
 //!    line discipline, `\n\c` chunking and an editor's line model all key on it.
-//! 2. **A HORIZONTAL run (space/tab) folds into the token that grammatically
-//!    requires it** — a marker name's delimiter, and each carved payload's:
-//!    designator, note caller, book code.
+//! 2. **ONE horizontal code unit (space/tab) folds into the token that
+//!    grammatically requires it** — a marker name's delimiter, and each carved
+//!    payload's: designator, note caller, book code. The run's surplus is a
+//!    `Pad` token: reducible bytes, visible to an editor, dropped whole by
+//!    text views.
 //!
 //! ```text
 //! \v 1 text    Marker("\v ") Designator("1 ") Text("text")
+//! \v   1 text  Marker("\v ") Pad("  ") Designator("1 ") Text("text")
 //! \v 1\ntext   Marker("\v ") Designator("1") Newline("\n") Text("text")
 //! \f + \ft n   Marker("\f ") NoteCaller("+ ") Marker("\ft ") Text("n")
 //! \id GEN Gen  Marker("\id ") BookCode("GEN ") Text("Gen")
@@ -313,11 +316,15 @@ impl Scanner<'_> {
                 {
                     return None; // `\v \p`, `\v 1a`: the general path decides.
                 }
-                // The designator's own delimiter rides its span, exactly as the
-                // marker name's does (see `payload_end`).
+                // ONE delimiter byte rides the designator's span, exactly as
+                // the marker name's does (see `payload_end`); surplus is Pad.
                 let designator_end = ws_run_end(bytes, end);
+                let keep = designator_end.min(end + 1);
                 self.push_marker(index, digits_from, self.hot.v.idx);
-                self.push_token(TokenKind::Designator, digits_from, designator_end);
+                self.push_token(TokenKind::Designator, digits_from, keep);
+                if designator_end > keep {
+                    self.push_token(TokenKind::Pad, keep, designator_end);
+                }
                 self.mode.awaiting_delimiter_ws = false;
                 self.mode.pending_payload = Payload::None;
                 // The designator is content, so this arm ends on a non-marker.
@@ -359,15 +366,18 @@ impl Scanner<'_> {
     }
 
     /// The shared tail of every non-`v` arm: after the (possibly leveled)
-    /// name, fold a space/tab delimiter run into the marker span, or take the
-    /// marker + its line ending in one hit. Any other next byte (alnum
-    /// continuing a longer name, `*`, `-`, EOF) bails.
+    /// name, fold ONE delimiter byte into the marker span (any surplus is a
+    /// Pad token), or take the marker + its line ending in one hit. Any other
+    /// next byte (alnum continuing a longer name, `*`, `-`, EOF) bails.
     #[inline(always)]
     fn fused_plain(&mut self, index: usize, name_end: usize, hot: Hot) -> Option<usize> {
         match self.bytes.get(name_end) {
             Some(&SPACE | &TAB) if hot.folds => {
                 let end = ws_run_end(self.bytes, name_end + 1);
-                self.push_marker(index, end, hot.idx);
+                self.push_marker(index, name_end + 1, hot.idx);
+                if end > name_end + 1 {
+                    self.push_token(TokenKind::Pad, name_end + 1, end);
+                }
                 self.mode.awaiting_delimiter_ws = false;
                 self.mode.pending_payload = Payload::None;
                 // Every hot marker is an opener, so a pipe right after the
@@ -528,15 +538,23 @@ pub(crate) fn ws_run_end(bytes: &[u8], from: usize) -> usize {
 }
 
 impl Scanner<'_> {
-    /// Folds a marker's structural delimiter run into that marker's span. Only
-    /// dispatched while `awaiting_delimiter_ws`; any other space run enters
-    /// the text arm as ordinary content.
+    /// Folds a marker's structural delimiter into that marker's span — ONE
+    /// code unit of it; the run's remainder is a Pad token. Only dispatched
+    /// while `awaiting_delimiter_ws`; any other space run enters the text arm
+    /// as ordinary content.
+    ///
+    /// A Pad push touches NO mode flag: the surplus is invisible to
+    /// classification, so a pending payload still carves across it and a
+    /// front-position pipe stays front.
     #[inline(always)]
     fn whitespace_arm(&mut self, index: usize) -> usize {
         let end = ws_run_end(self.bytes, index);
         self.mode.awaiting_delimiter_ws = false;
         if let Some(last) = self.tokens.last_mut() {
-            last.len = (end as u32 - last.start) as u16;
+            last.len = (index as u32 + 1 - last.start) as u16;
+        }
+        if end > index + 1 {
+            self.push_token(TokenKind::Pad, index + 1, end);
         }
         end
     }
@@ -887,11 +905,11 @@ pub(crate) fn escape_len(bytes: &[u8], pos: usize) -> Option<usize> {
 /// - Stopping at the first space is what leaves `\id GEN Some description`'s
 ///   description as ordinary Text.
 ///
-/// Each then takes one more step, its own delimiter run (`ws_run_end`): the
+/// Each then takes one more step, ONE byte of its delimiter run: the
 /// whitespace after a `\c`/`\v` number, after a note caller and after a book
 /// code is required grammar the way the whitespace after a marker NAME is, so
 /// the module doc's second rule covers all three and `\v 1 text` carves
-/// `Designator("1 ")`.
+/// `Designator("1 ")` — with any surplus of the run emitted as Pad.
 pub(crate) fn payload_end(bytes: &[u8], from: usize) -> usize {
     let mut index = from;
     while index < bytes.len() && !matches!(bytes[index], SPACE | TAB | CR | LF | BACKSLASH | PIPE) {
@@ -900,7 +918,7 @@ pub(crate) fn payload_end(bytes: &[u8], from: usize) -> usize {
     index
 }
 
-/// The fold's inverse: a carved payload's span MINUS the delimiter run above.
+/// The fold's inverse: a carved payload's span MINUS its one delimiter byte.
 /// Every consumer that reads a payload's VALUE starts here.
 ///
 /// ```text
@@ -956,11 +974,15 @@ impl Scanner<'_> {
             // A region opening with an escape (`\v \~…`) has nothing to take —
             // fall through to the ordinary scan and emit no empty token.
             if end > index {
-                // Every carved payload takes its delimiter with it
-                // (see `payload_end`).
-                let end = ws_run_end(bytes, end);
-                self.push_token(kind, index, end);
-                return end;
+                // Every carved payload takes ONE delimiter byte with it
+                // (see `payload_end`); the run's surplus is Pad.
+                let run_end = ws_run_end(bytes, end);
+                let keep = run_end.min(end + 1);
+                self.push_token(kind, index, keep);
+                if run_end > keep {
+                    self.push_token(TokenKind::Pad, keep, run_end);
+                }
+                return run_end;
             }
         }
         // Separate from `cursor` because a `//` found mid-run ends the current
@@ -1092,8 +1114,8 @@ mod tests {
     }
 
     /// The region after `\c`/`\v` is ONE Designator token — digits, ranges,
-    /// junk alike — plus the delimiter run behind it; a designator-less `\v`
-    /// emits nothing extra.
+    /// junk alike — plus one byte of the delimiter behind it (surplus is
+    /// Pad); a designator-less `\v` emits nothing extra.
     #[test]
     fn chapter_and_verse_take_a_designator_token() {
         assert_eq!(
@@ -1117,10 +1139,10 @@ mod tests {
             kinds_and_text("\\v 12-14a x")[1],
             (TokenKind::Designator, "12-14a ")
         );
-        // The fold takes horizontal whitespace only, and the whole run of it.
+        // The fold takes ONE horizontal code unit; the run's surplus is Pad.
         assert_eq!(
-            kinds_and_text("\\v 1  \tx")[1],
-            (TokenKind::Designator, "1  \t")
+            &kinds_and_text("\\v 1  \tx")[1..3],
+            [(TokenKind::Designator, "1 "), (TokenKind::Pad, " \t")]
         );
         assert_eq!(
             kinds_and_text("\\v 1\ntext"),
@@ -1145,6 +1167,29 @@ mod tests {
             kinds_and_ranges(&lex("\\p 12 x")),
             vec![(MARKER, 0, 3), (TokenKind::Text, 3, 7)]
         );
+    }
+
+    /// The RFC's load-bearing shape (`GAP v: WS+ both positions`): both
+    /// delimiter gaps keep one byte and pad the rest, the designator still
+    /// attaches across the surplus, and the spans tile.
+    #[test]
+    fn surplus_at_both_verse_gaps_is_pad() {
+        let source = "\\v       1     Text";
+        assert_eq!(
+            kinds_and_text(source),
+            vec![
+                (MARKER, "\\v "),
+                (TokenKind::Pad, "      "),
+                (TokenKind::Designator, "1 "),
+                (TokenKind::Pad, "    "),
+                (TokenKind::Text, "Text"),
+            ]
+        );
+        let concat: String = lex(source)
+            .iter()
+            .map(|t| &source[t.start as usize..t.end() as usize])
+            .collect();
+        assert_eq!(concat, source);
     }
 
     /// THE DESIGNATOR GATE, byte for byte. One leading ASCII digit is the whole

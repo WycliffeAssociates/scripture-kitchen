@@ -37,6 +37,12 @@ planning/; the definition records the current soft direction.
 - **Token** — the smallest lexed unit and the ONE working representation:
   `{ id, kind, markerIdx?, span }`. Everything richer is a derivation.
   (pending Q0: the exact eager field list — each added field is twin tax.)
+- **Pad** — the token kind for a delimiter run's REDUCIBLE SURPLUS: every
+  horizontal-whitespace code unit past the one a chrome token keeps
+  (RFC-Lexer-change-8-27). Visible and editable in the editor (no paint
+  stands in for it), dropped whole by text views (mask/vref/USJ/USX/HTML),
+  flagged by `delimiter-surplus`, deleted by format. Exists only at
+  delimiter positions — whitespace inside a text run is never Pad.
 
 - **Scope** — an open region on the stack: it opens, it takes Content, it
   closes. THE stack mechanism, and the reason a `\p` cannot be swallowed by an

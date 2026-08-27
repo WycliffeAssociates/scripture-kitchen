@@ -169,7 +169,10 @@ struct Carried {
     band: u8,                               // monotonic max
     family_masks: [Mask; FAMILIES],         // OR
     first_seen:   [u32;  FAMILIES],         // min; mixed re-judged at merge
-    has_id: bool, has_usfm: bool,
+    id_seen: Option<Anchor>, usfm_seen: Option<Anchor>,
+    // once-per-book markers: first occurrence wins; reduce judges a
+    // second sighting as duplicate and emits the delete-line fix at
+    // the LATER anchor (the 2026-08-27 roll-in rulings)
     // ancestry — one bit
     verse_run_reported: bool,               // paragraph-less run straddling \c
     // structure — THE ONLY REAL WORK: run stitching
@@ -193,6 +196,19 @@ struct Carried {
 - Future rules route themselves: chapter-local → write the walk,
   today's cost, cacheable and parallel for free; cross-book → add a
   Carried field + a reduce/finish arm — the declaration IS the field.
+
+## Roll-ins for the lint pass (ruled 2026-08-27 — do while in there)
+
+Small fixes banked to land WITH pass 2, since the same files are
+open (both are Flat-machine positional lanes, and both become
+Carried fields — `id_seen`/`usfm_seen` in the struct above):
+
+- **duplicate-id offers a fix**: delete the second `\id` line.
+- **`\usfm` is once-per-book**: same machinery as duplicate-id, and
+  the duplicate offers the same delete-the-line fix.
+- NOT rolled in: `\ms`/`\s` before `\c 1` stays silent (deferred,
+  Will unsure — revisit with the context audit); the caret-here
+  hint is OUT OF SCOPE for the engine (frontend affordance, closed).
 
 ## What this plan does NOT include (still measurement-gated)
 

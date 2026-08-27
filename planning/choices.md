@@ -1794,3 +1794,80 @@ existence.
 
 Verification: workspace green (30 binaries), clippy clean. Left
 uncommitted with the rest of pass 19 for Will's diff review.
+
+## pass 20 self-report (2026-08-27): the one-delimiter rule moves into the lexer — Pad
+
+RFC-Lexer-change-8-27 (onion-2-spike), rulings banked from Will the
+same day. Pass 18 put the ≤1 rule at the EMIT; the editor's byte-role
+grammar needed it in the scanner, because the G1 gap (`\v`/`\c` name →
+designator) had no correction anywhere: `\v       1` hid all seven
+spaces in the anchor lead. Now every fold site keeps AT MOST ONE
+horizontal code unit and emits the run's surplus as a new token kind,
+`Pad` (bits 11) — visible, editable, reducible, never content. The
+pass-18 clip is deleted (`content_after` is just `token.end()` plus a
+debug_assert), `token_spans` emits raw extents, and the corpus law
+strengthens back to strict tiling. Sketch: planning/sketches/pad-token.md.
+
+Choices where the spec/RFC was silent, and what forced each:
+
+- **Pad is emitted at the fold sites, not by a mode rewrite.** The
+  scanner still consumes the whole run per site (whitespace_arm, the
+  payload carve, fused_plain, the hot `\v` arm) and only the EMISSION
+  splits; a Pad push touches no mode flag. Forced by the designator
+  gate: the digit check runs at the cursor, so the cursor must still
+  cross the run in one step, and `after_marker`/`pending_payload` must
+  survive the surplus for `\v   1` to keep its designator and a
+  front-position pipe to stay front.
+- **Pad rides its owner in the mask** (same arm as the carved
+  payloads): the text mask drops it by kind — Will's ruling, "so long
+  as the mask accounts for Pad in offsets", which the removed-range
+  mapping does unchanged — while a marker-keeping view keeps the bytes
+  and still concatenates byte-identically.
+- **Pad is a no-op leaf in USJ/USX/HTML** (boundary state stands as
+  the chrome left it) and joins the ORIGIN/BODY run in note_parts —
+  both chosen to keep every export and the parts read byte-identical
+  to the folded spelling. The committee USJ pins verified it.
+- **`designator_row` skips Pad** (and still at most one AttrList, with
+  Pad legal on both sides of it): attachment is addressing, so toc
+  stays byteless — Will's ruling 1.
+- **AttrList node-initial clips too** — closes pass 18's OPEN ruling
+  (Will: yes). The trailing form's pre-closer whitespace stays inside
+  the list: genuine list bytes, pass 18's reasoning stands.
+- **`delimiter-surplus` is a real diagnostic row** (Hint, Category
+  Form, fix = delete the Pad), APPENDED after the positional lanes so
+  every existing code index survives; `DelimiterShape`'s "several
+  spaces are a FORMATTER's business" carve-out is thereby half-repealed
+  — the finding explains the newly visible ragged render (RFC
+  resolution 4). 875 fixes across the 226-book corpus, pinned.
+- **format's `delimiter()` grew pad-awareness instead of a new rule**:
+  the claim extends over a following Pad and the at-line-end judgment
+  moves past it, so the DelimiterSingle/DesignatorWsSingle options and
+  codes keep their meaning; an AttrList followed by a Pad routes
+  through the same helper. `remove_markers` swallows a Pad sitting
+  between a removed marker and its line ending — found by the
+  formatter's own one-pass convergence law on en_ulb PSA (`\s5  `,
+  trailing pair), which stranded the marker's newline.
+- **The `\f` recovery newline leaves the note extent** (the spike's
+  CST addendum): an unclosed note's reported extent now stops in front
+  of the newline that popped it, clipped at the `note_extents` EMIT —
+  not the CST pop — so USJ/codegen see nothing. The corpus oracle
+  re-derives the clip by bytes (`clipped_note_extent`), and the two
+  wild unclosed `\f` (en_ulb ISA, MRK) are the differential witnesses.
+- **The wire keeps its strides.** VerseAnchor's `markerFrom..from` is
+  no longer documented as "the leading chrome" — chrome is the marker
+  TOKEN, and the editor derives hidden from `token_spans` (which now
+  tiles), per the RFC's "hidden ≡ chrome-kind spans minus slots".
+
+Verification: `cargo test --lib` (360), all default suites (24 green),
+`cargo test -- --include-ignored`, `cargo clippy --all-targets` clean.
+diagnostics.json regenerated (delimiter-surplus row). Lint fix total
+re-pinned 5,462 → 6,337 (the 875 new surplus fixes). debug/ dumps
+byte-identical (timing lines aside) — not refreshed. onion-wasm
+pkg-web/pkg-bundler REBUILT (Pad's kind id and the tiling change cross
+the wall); `wasm-pack test --node` green.
+
+Addendum, same day (Will): **experiments/fused.rs is PARKED** —
+contents commented out by Will, tests/fused_identity.rs `#![cfg(any())]`,
+playground's three fused modes removed. The experiment copies the scan
+loop's emitting arms, so this pass paid every lexer change twice; the
+identity oracle proved the copy correct one last time before parking.

@@ -302,8 +302,16 @@ impl Toc {
 /// intervene, so this is a step, not a search.
 pub(crate) fn designator_row(tokens: &[Token], marker_row: usize) -> Option<usize> {
     let mut next = marker_row + 1;
+    // Delimiter surplus is invisible to attachment, exactly as it is to the
+    // scanner's own carve: `\v   1` still owns its designator.
+    while matches!(tokens.get(next).map(Token::kind), Some(TokenKind::Pad)) {
+        next += 1;
+    }
     if matches!(tokens.get(next).map(Token::kind), Some(TokenKind::AttrList)) {
         next += 1;
+        while matches!(tokens.get(next).map(Token::kind), Some(TokenKind::Pad)) {
+            next += 1;
+        }
     }
     match tokens.get(next) {
         Some(t) if t.kind() == TokenKind::Designator => Some(next),
