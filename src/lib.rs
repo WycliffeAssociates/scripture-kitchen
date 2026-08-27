@@ -6,6 +6,8 @@
 //! - [`attributes`] — reads an `AttrList` span's interior, and matches
 //!   attribute NAMES against the marker table.
 //! - [`scanner`] — the only code that owns position.
+//! - [`chunk`](crate::chunk) — the `\c` pre-scan: chunk starts + the
+//!   line-ending census in one memchr pass, ahead of any lexing.
 //! - [`toc`](crate::toc) — the first token CONSUMER: indexes the book code, the chapter
 //!   table and the verse anchors out of an already-lexed stream, and answers
 //!   "what reference is this byte".
@@ -30,6 +32,7 @@
 
 pub mod analyze;
 pub mod attributes;
+pub mod chunk;
 pub mod cst;
 pub mod designator;
 pub mod diff;

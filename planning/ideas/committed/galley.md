@@ -70,6 +70,11 @@ ideas/committed/braidv2.md).
    splice replay, monoids before measurement" is on the REJECTED
    list) — it stays a question, not a plan, until a measurement
    fails. The braid-v2 fold-over-slots sketch is the prior art.
+   [SUPERSEDED 2026-08-27: promoted to a plan —
+   ideas/committed/chunk-fold.md records the reasoning that moved
+   the line (the growth tax capped by one Carried struct; a
+   left-fold-only law; map observes, reduce judges). The oracle
+   stays the law, unchanged.]
 8. **Chapter chunking.** Current speeds say pre-split/pre-scan is
    overhead for onion — but sous may WANT chapter-grain inputs, and
    chunking is a galley concern either way. Sub-question: loop
@@ -269,6 +274,11 @@ onion ◄── onion-wasm            sous ◄── sous-wasm
 2. galley v0: `pub use onion;` (whole crate as a module — nothing
    hidden, galley's own names are the curated layer), plus
    `chunk_checksums`. Feature-gated bindgen tags inside galley.
+   DONE (pass 19, 2026-08-26) except the bindgen tags: the primitive
+   is `onion::chunk::pre_scan` (starts + a line-ending census, ruled
+   2026-08-26 — bare-`\n` vs `\r\n` counts so write-out can restore
+   the arrival style), the recipe is `usfm_galley::chunks` (hex
+   xxh3-128 per chunk + the census), `CHECKSUM_VERSION` exported.
 3. Frontend swaps pkgs: onion-wasm → galley (a superset).
 4. Sous lands; galley adds `proofread` behind the same shape.
 
@@ -320,6 +330,88 @@ again. Two standing caveats:
   ~8 bytes at ~1 per ~19 source bytes (a whole Bible's lex ≈ low
   single-digit MB), and no corpus copy is retained (encodeInto is
   fast) — but rung 2 promotes on a recorded number, per the ladder.
+
+### The cache candidates table (ruled 2026-08-26)
+
+Verdict = "cache it, keyed by content checksum". Carry = the cost of
+making CHUNK grain legal: 0 works today, 1 simple (guard + whole-book
+fallback), 2 considerable (fusion machinery), 3 a different algorithm.
+Carry is NOT worth — diff scores 3 and needs nothing.
+
+| Product              | Verdict          | Carry | Why |
+|----------------------|------------------|-------|-----|
+| lex tokens           | no (measured)    | 0     | big, recompute ~7ms — value/byte too low |
+| toc                  | no need          | 0     | tiny, already fast, nothing pulls |
+| sous findings        | YES (motivating) | 0*    | costliest stage, chapter-grain input by charter |
+| verse_anchors, lines | no               | 0–1   | token walks, recompute ≈ free |
+| token_spans/text_runs| no               | 0     | viewport-keyed — wrong shape for a content cache |
+| mask (verse_text)    | YES (candidate)  | 1     | small ranges FEEDING sous/find; guard = "chunk CST closed root-only", fallback = whole-book |
+| blocks               | no               | 2     | CST extents straddle; needs fusion |
+| CST                  | no               | 2     | as big as tokens, an intermediate — cache derivatives |
+| diagnostics/lint     | YES at BOOK grain| 2     | kilobytes embodying the whole pipeline; chunk grain blocked on finish()-rules + whole-book arrays |
+| format edits         | no               | 2     | inherits lint's score |
+| diff                 | no               | 3     | global alignment by nature — and already cheap (splices ~ edit size) |
+
+*sous's 0 is BY CHARTER, not proof: it holds only while sous is built
+with no cross-chapter state. Write that into sous's design
+constraints day one — the chapter-grain recipe leans on it.
+
+THE RULING THIS TABLE LANDS ON: chunk-grain content-addressing is
+reserved for TWO customers — sous findings and verse_text masks.
+Diagnostics caching needs no machinery at all: the caller keeps
+`<book, diagnostics>` and refreshes the book it hands to
+galley/analyze — the editor already knows what it edited. The
+CHECKSUM key upgrades that same map only where "did it change" is
+not known for free (project open over disk files, cross-session
+persistence). Cache leaves, never intermediates; book grain for
+anything CST/lint-flavored; the frontend's CodeMirror layer
+invalidates by TRANSACTION (RangeSet.map + viewport scoping), never
+by hash.
+
+MEASURED (2026-08-26, galley/tests/lex_chunk_equivalence.rs, release, en_ult):
+lex reuse with one edited chapter against a warm cache is byte-
+identical to fresh lex and runs PSA 7.09→1.18ms, GEN 4.81→1.27ms
+(~4-6x); the floor is the checksum pass (~0.9ms/5MB); cache ≈ 2.6MB
+of tokens per book. The rebasing utils exist (`extend_rebased`,
+`concat_absolute`, `chapter_relative`); per-chapter reads of cached
+chunks need no adapter at all. See the pass 19 addendum in
+choices.md.
+
+### 2026-08-27 revision — the fold is bought (see chunk-fold.md)
+
+The table above is REVISED by ideas/committed/chunk-fold.md
+(converged with Will, 2026-08-27); this section is the delta, the
+plan doc is the authority:
+
+- **Chunk-grain content-addressing now covers CST + lint too**, not
+  just sous/masks: per chunk the cache holds {ChapterCST, mask,
+  ChunkSummary{local diagnostics, Carried}}. Lint's carry-2 blocker
+  (finish() rules + whole-book arrays) is resolved by the Carried
+  struct: walks record cross-chunk observations, a left fold judges
+  them (reduce emits seam diagnostics; finish emits once-per-book).
+- **Lex tokens are NOT cached** — demoted to a per-dirty-chunk
+  intermediate (CST/lint are the downstream products; a clean chunk
+  never needs its tokens back). lex_chunk_equivalence.rs is kept as the PROOF of
+  the rebase-concat pattern and its measured numbers; its utils
+  become the merge primitives. (Revises this table's rung-1 row from
+  "cache candidate" to "pattern proof".)
+- **Storage is chunk-relative, always**; absolutize/utf16-ize are
+  opt-in maps on read (prefix sums). Entries never mutate; undo/redo
+  are pure cache hits.
+- **Checksums are the ONE dirtiness mechanism** — same path for
+  keystrokes, ingestCorpus baselines, disk project-open, sous.
+  Editor-transaction dirtiness (iterChangedRanges ∩ chunk starts)
+  is a parked HINT only.
+- **LRU is handrolled, byte-budget** (~8–16MB, evict min last-tick
+  by linear scan; `lru`/`quick_cache`/`mini-moka` considered and
+  declined — see chunk-fold.md).
+- **Left fold only; par map native-only.** Associativity is never
+  proven; wasm has no threads.
+
+The standing sentence "the frontend's CodeMirror layer invalidates
+by TRANSACTION, never by hash" survives — it governs DECORATIONS
+(viewport rebuild + RangeSet.map of the sparse residue,
+chapter-mode.md v4), while galley's product cache is hash-keyed.
 
 ## Recipes (the concrete v1 surface the transcript sketches)
 

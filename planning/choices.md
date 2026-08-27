@@ -1722,3 +1722,75 @@ lines read's `contentFrom`, and the milestone clip), `cargo test
 differential, not pinned). NOT rebuilt: onion-wasm pkgs (the clipped
 spans cross the wall — rebuild at next vendoring); wasm wrapper and
 node test docs updated in source only.
+
+## pass 19 self-report (2026-08-26): the chunk pre-scan and galley's checksums
+
+Galley v0's first real content, per the build plan in
+ideas/committed/galley.md.
+
+- **`onion::chunk::pre_scan`** (new src/chunk.rs): the `\c` pre-scan
+  promoted from experiments/chapter_par.rs to a library primitive,
+  and RULED (Will): the same pass runs a LINE-ENDING CENSUS — each
+  `\n` counted as bare or `\r\n` — so a writer can put an
+  LF-normalized document back in the ending style it arrived in.
+  One memchr sweep answers both questions (the memmem needle was
+  dropped for memchr-over-`\n` + a `starts_with(b"\\c ")` probe:
+  the census must visit every newline anyway). Equivalence with the
+  proven experimental split is a standing unit test.
+- **Choice where the spec was silent — a lone `\r` counts nothing:**
+  old-Mac endings are not a style the census reports, and a stray
+  `\r` should not tilt the majority. `dominant_ending()` breaks ties
+  (including zero newlines) toward `"\n"`, the canonical form.
+- **`usfm_galley::chunks`**: pre_scan + xxh3-128 per chunk
+  (xxhash-rust), checksums as 32-char lowercase hex STRINGS
+  (identity, not offsets — they key JS Maps), `CHECKSUM_VERSION =
+  "xxh3-128-v1"` exported for cache-key versioning. LF-canonical
+  input contract documented on the type; the census rides along as
+  `lf`/`crlf`.
+
+Verification: workspace tests green (29 binaries; new: 3 chunk unit
+tests in onion, 3 in galley — content-addressing/position-freedom,
+one-changed-chunk isolation, the census), clippy --workspace clean.
+Doc examples carry REAL checksum bytes. Left uncommitted for Will's
+diff review (his ask).
+
+## pass 19 addendum (2026-08-26): rebasing utils + the lex-reuse measurement
+
+Will's ask: prove rebase-and-reuse against lex (the lightest consumer)
+on a real en_ult book, and let it force the coordinate utils into
+existence.
+
+- **Galley rebasing utils**: `extend_rebased` (chunk-relative →
+  absolute, the one-add shape chapter_par proved), `concat_absolute`
+  (per-chunk products → whole-book ABSOLUTE mode), `chapter_relative`
+  (absolute → PER-CHAPTER mode for consumers holding whole-book
+  products). The per-chapter READ of a cached chunk needs no adapter
+  at all — chunk-relative IS chapter-relative — which is itself the
+  argument for storing chunk-relative.
+- **The equivalence law, now standing tests** (galley/tests/
+  lex_chunk_equivalence.rs): cache → rebase → concat is byte-identical to fresh
+  whole-book lex, on a synthetic doc AND on en_ult PSA; one edited
+  chapter is exactly ONE cache miss (asserted, both scales).
+- **The recorded measurement** (release, median of 9, one chapter
+  edited against a warm cache — the honest one-miss price, edited
+  entry evicted per run):
+
+      19-PSA (5.1MB, 151 chunks, 341k tokens, ~2.7MB cached):
+        fresh lex 7.09ms · pre-scan+checksum 0.94ms · reuse 1.18ms
+      01-GEN (5.2MB,  51 chunks, 326k tokens, ~2.5MB cached):
+        fresh lex 4.81ms · pre-scan+checksum 0.82ms · reuse 1.27ms
+
+  Reading: ~4-6x on lex alone; the FLOOR is the checksum pass itself
+  (~0.9ms — every byte is hashed per lookup), so reuse can never beat
+  ~1ms at this book size by this recipe. Memory: ~2.6MB of tokens per
+  5MB aligned book. The measured reuse path pays a double copy
+  (cache-clone per chunk, then the rebase copy) — a production recipe
+  rebasing straight off cache refs would shave it; recorded as an
+  observation, not built.
+- Choice: the bench lives as an `#[ignore]`d galley integration test
+  (`--release --ignored --nocapture`), not a criterion bench — the
+  rung ladder wants a recorded number with the equivalence assert in
+  the same body, and the corpus-skip convention carries over.
+
+Verification: workspace green (30 binaries), clippy clean. Left
+uncommitted with the rest of pass 19 for Will's diff review.

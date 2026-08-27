@@ -5,3 +5,6 @@ edition = "2024"
 
 [dependencies]
 usfm_onion = { path = ".." }
+# xxh3-128 for the content-addressed chunk checksums (vision §13.4:
+# xxh3-128-v1). no_std-friendly, wasm-clean.
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
