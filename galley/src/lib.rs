@@ -98,51 +98,6 @@ pub fn chunks(text: &str) -> Chunks {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Rebasing: the retrieval half of content-addressed reuse
-// ---------------------------------------------------------------------------
-
-use onion::Token;
-
-/// Chunk-relative tokens, appended as ABSOLUTE: every offset shifted by the
-/// chunk's base. The whole cost of reusing a cached chunk product is this
-/// add — the shape experiments/chapter_par.rs proved token-identical.
-pub fn extend_rebased(out: &mut Vec<Token>, chunk: &[Token], base: u32) {
-    out.extend(chunk.iter().map(|token| Token {
-        start: token.start + base,
-        ..*token
-    }));
-}
-
-/// Per-chunk products (each chunk-relative) → one absolute token stream, the
-/// ABSOLUTE coordinate mode. `parts` is index-aligned with `starts`
-/// ([`Chunks::starts`] / [`onion::chunk::PreScan::starts`]).
-///
-/// The PER-CHAPTER mode needs no counterpart: a chunk-relative product IS
-/// chapter-relative already (chunk `i ≥ 1` begins at its `\c`), which is why
-/// the cache stores chunk-relative and rebases only on absolute reads.
-pub fn concat_absolute(parts: &[Vec<Token>], starts: &[u32]) -> Vec<Token> {
-    let total = parts.iter().map(Vec::len).sum();
-    let mut out = Vec::with_capacity(total);
-    for (chunk, &base) in parts.iter().zip(starts) {
-        extend_rebased(&mut out, chunk, base);
-    }
-    out
-}
-
-/// ABSOLUTE tokens of one chapter → chapter-relative (the PER-CHAPTER mode's
-/// adapter for a consumer holding whole-book products): every offset shifted
-/// DOWN by the chapter's start.
-pub fn chapter_relative(tokens: &[Token], chapter_start: u32) -> Vec<Token> {
-    tokens
-        .iter()
-        .map(|token| Token {
-            start: token.start - chapter_start,
-            ..*token
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -182,4 +137,3 @@ mod tests {
         assert_eq!(chunks("\\id GEN\n\\c 1\n").dominant_ending(), "\n");
     }
 }
-

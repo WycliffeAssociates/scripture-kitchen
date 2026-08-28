@@ -4,7 +4,18 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-usfm_onion = { path = ".." }
+usfm_onion = { path = "../onion" }
 # xxh3-128 for the content-addressed chunk checksums (vision §13.4:
 # xxh3-128-v1). no_std-friendly, wasm-clean.
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
+
+[dev-dependencies]
+divan = "0.1.21"
+
+[features]
+# Bench-only: divan's AllocProfiler as the global allocator. See onion's.
+alloc-counts = []
+
+[[bench]]
+name = "fold"
+harness = false

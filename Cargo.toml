@@ -1,45 +1,30 @@
 [workspace]
-# `onion-wasm` is the JS bindings crate (wasm-bindgen + js-sys + serde) — piece
-# 2 of the five-crate layout. It is a workspace member so it shares this lock
-# file and target dir; the library itself never depends on it, and none of its
-# dependencies reach src/.
-# `galley` is piece 5, the workflows crate: it depends on the engines (this
-# library, later scripture_sous_chef) and NEVER the reverse.
-members = ["onion-wasm", "galley"]
+# The five-crate layout, each in its own named directory:
+# `onion` (piece 1, the engine), `onion-wasm` (piece 2, the JS bindings —
+# wasm-bindgen + js-sys + serde; the engine never depends on it, and none of
+# its dependencies reach onion/src), `galley` (piece 5, the workflows crate:
+# depends on the engines and NEVER the reverse).
+members = ["onion", "onion-wasm", "galley"]
+resolver = "2"
 
-[package]
-name = "usfm_onion"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-memchr = "2.8.3"
-# The diff port's two algorithm layers: Myers over block keys, and the UAX-29
-# word / grapheme diff inside a unit. Pure Rust, no_std-friendly, wasm-clean.
-similar = { version = "2.7", features = ["unicode"] }
-# Playground-only parallelism (dev-deps don't reach src/bin binaries, so:
-# optional dep + feature, cfg-gated in the playground, absent from the lib).
-rayon = { version = "1.10", optional = true }
-
-[features]
-default = ["usj", "usx", "html"]
-par = ["dep:rayon"]
-# Exports are compile-time optional (sketches/usj-export.md): a size-sensitive
-# consumer sets `default-features = false` and the module is not in the binary.
-usj = []
-usx = []
-# HTML is a VIEW export (sketches/html-export.md): no oracle, no round-trip
-# claim, and the same compile-time-optional deal as its two siblings.
-html = []
-
-[dev-dependencies]
-criterion = "0.8.2"
-# ORACLE-SIDE ONLY. The library writes JSON by hand (no serde in src/); the
-# corpus test needs to PARSE testData's fixtures to compare as `Value`.
-serde_json = "1.0"
-# Integration tests DO see dev-deps (unlike src/bin — see rayon note above),
-# so tests get parallelism without the `par` feature or touching the lib.
-rayon = "1.10"
-
+# One CGU so two builds of the same source produce the same code: a bench that
+# wobbles on CGU partitioning measures the compiler. Thin LTO is what carries
+# galley -> onion::{lex, cst::build, lint} and onion-wasm -> onion — non-generic
+# `pub fn`s, invisible to the caller's inliner without it.
+#
+# No `debug`: it never changed codegen, but on macOS it strands the DWARF in
+# target/'s object files and leaves the binary non-relocatable for symbolication.
+# `bench` inherits this and must NOT diverge — both write to target/release, so
+# differing flags refingerprint on every release/bench alternation.
 [profile.release]
-debug = true
+codegen-units = 1
+lto = "thin"
+
+# Release codegen plus the least debug info samply needs. Line tables carry
+# inline frames, which is the whole profile once LTO inlines `lex`. Custom, so
+# it gets target/profiling/ and never thrashes against release.
+#     cargo bench --profile profiling --no-run
+#     samply record -- target/profiling/deps/pipeline-<hash> lex::serial
+[profile.profiling]
+inherits = "release"
+debug = "line-tables-only"

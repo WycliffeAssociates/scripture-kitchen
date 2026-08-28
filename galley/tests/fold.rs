@@ -149,7 +149,7 @@ fn bench_fold_en_ult() {
     };
     for book in ["19-PSA.usfm", "01-GEN.usfm"] {
         let path = format!(
-            "{}/../example-corpora/en_ult/{book}",
+            "{}/../testData/exampleCorpora/en_ult/{book}",
             env!("CARGO_MANIFEST_DIR")
         );
         let Ok(text) = std::fs::read_to_string(&path) else {
@@ -191,7 +191,7 @@ fn bench_fold_en_ult() {
 #[test]
 #[ignore = "corpus-scale fold pipeline oracle; run --include-ignored at pass end"]
 fn fold_cache_equals_fresh_over_the_corpus() {
-    let root = format!("{}/../example-corpora", env!("CARGO_MANIFEST_DIR"));
+    let root = format!("{}/../testData/exampleCorpora", env!("CARGO_MANIFEST_DIR"));
     let mut paths = Vec::new();
     let mut stack = vec![std::path::PathBuf::from(root)];
     while let Some(dir) = stack.pop() {
@@ -208,7 +208,7 @@ fn fold_cache_equals_fresh_over_the_corpus() {
         }
     }
     if paths.is_empty() {
-        eprintln!("fold cache corpus SKIPPED: no *.usfm under example-corpora/");
+        eprintln!("fold cache corpus SKIPPED: no *.usfm under testData/exampleCorpora/");
         return;
     }
     paths.sort();
