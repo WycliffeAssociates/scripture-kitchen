@@ -738,7 +738,15 @@ mod tests {
         // One snippet per code that DECLARES a label, so no label is a promise
         // nothing keeps. The converse — a code emitting a fix its row does not
         // declare — is asserted inside `findings` on every snippet here.
-        let cases: [(Code, &str); 18] = [
+        let cases: [(Code, &str); 20] = [
+            (
+                Code::DuplicateId,
+                "\\id GEN\n\\id MAT\n\\c 1\n\\p \\v 1 a\n",
+            ),
+            (
+                Code::DuplicateUsfm,
+                "\\id GEN\n\\usfm 3.0\n\\usfm 3.2\n\\c 1\n\\p \\v 1 a\n",
+            ),
             (
                 Code::UnclosedNote,
                 "\\id GEN\n\\c 1\n\\p \\v 1 a\\f + \\ft n\\c 2\n\\p b",

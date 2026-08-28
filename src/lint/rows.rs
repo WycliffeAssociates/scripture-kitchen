@@ -57,8 +57,10 @@ pub enum AuxKind {
     MalformedShape,
 }
 
-/// The declared `\usfm` versions a rule's severity can key on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+/// The declared `\usfm` versions a rule's severity can key on. `Hash`
+/// because the fold's cache key is (content, declared version) — the one
+/// carry-in a chunk product depends on beside its own bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum UsfmVersion {
     V3_0,
     V3_2,
@@ -132,6 +134,8 @@ pub enum Code {
     ParagraphBeforeFirstChapter,
     // --- Form (continued — appended so earlier row indices stay stable) ----
     DelimiterSurplus,
+    // --- once-per-book cardinality (appended; earlier indices stay stable) --
+    DuplicateUsfm,
     // --- the FORM CHANNEL --------------------------------------------------
     // Never a diagnostic (`Severity::Form`), never evaluated by `lint`. THIS
     // ORDER IS PRECEDENCE: where two of these want the same bytes, the earlier
@@ -243,7 +247,7 @@ impl LintRow {
 /// The authored rules table — one row per [`Code`], in the enum's order. All
 /// six families have a pass; the FORM family's tail is the format channel, which
 /// `lint` never reaches (see [`Severity::Form`]).
-pub const LINT_ROWS: [LintRow; 58] = [
+pub const LINT_ROWS: [LintRow; 59] = [
     // Something that cannot live inside a note (a `\c`, a bare `\v`, an unknown
     // marker) arrived while the frame was open. Both live corpus instances
     // (en_ulb ISA, MRK) are genuinely truncated footnotes.
@@ -974,7 +978,7 @@ pub const LINT_ROWS: [LintRow; 58] = [
         aux: AuxKind::None,
         template: "this book already has an \\id line",
         formatter: false,
-        fix_label: None,
+        fix_label: Some("delete the duplicate line"),
     },
     // A BODY or POETRY paragraph at book level in header/intro territory —
     // the rails put `p`/`q`-class content in ChapterContent, which only `\c`
@@ -1016,6 +1020,20 @@ pub const LINT_ROWS: [LintRow; 58] = [
     // Wholesale removal of a named marker, driven by `FormatOptions`: the row is
     // the rule IDENTITY, its finding set is the caller's list. An empty list
     // (the default) yields nothing at all.
+    // `\usfm` is once-per-book, exactly as `\id` is: the FIRST declares the
+    // version, every later one is the finding, pointed back at it. Ruled
+    // 2026-08-27 (USER-OPEN item 7).
+    LintRow {
+        code: Code::DuplicateUsfm,
+        name: "duplicate-usfm",
+        category: Category::Payload,
+        severity: Some(Severity::Error),
+        escalation: &[],
+        aux: AuxKind::None,
+        template: "this book already has a \\usfm line",
+        formatter: false,
+        fix_label: Some("delete the duplicate line"),
+    },
     LintRow {
         code: Code::RemoveMarker,
         name: "remove-marker",

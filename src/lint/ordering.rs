@@ -9,6 +9,7 @@
 //!                            (delete `\v \v `: an EMPTY one names nothing)
 //! ```
 
+use super::carried::{Carried, ChapterEdge, ChapterEvent, ChapterExit};
 use super::fix::renumber;
 use super::walk::{is_structural_ws, span_of};
 use super::{Code, Doc, Emit, NO_TOKEN, Observation};
@@ -65,11 +66,19 @@ pub(crate) struct Ordering {
     first_verse_token: Option<u32>,
     first_pre_chapter_verse: Option<u32>,
     /// `(observation slot, the `\v` token, the token that ends its emptiness)`
-    /// per EMPTY designator-less verse, resolved into fixes at [`Self::finish`]
-    /// — the repair depends on the whole RUN of empties this one opens, which
-    /// the abandon event has not reached. The only allocation in this machine,
-    /// and it stays empty on a book with no such verse.
+    /// per EMPTY designator-less verse, resolved into fixes at
+    /// [`Self::finish_chunk`] — the repair depends on the whole RUN of empties
+    /// this one opens, which the abandon event has not reached. The only
+    /// allocation in this machine, and it stays empty on a book with no such
+    /// verse.
     empty_verses: Vec<(u32, u32, u32)>,
+    /// The fold's observations (chunk-fold.md): the chunk's first chapter
+    /// event with its renumber material, the number after it, and whether any
+    /// chapter-designator event happened at all (the exit-state distinction
+    /// between "resynced" and "untouched").
+    first_event: ChapterEvent,
+    second_number: Option<Option<u32>>,
+    touched: bool,
 }
 
 impl Ordering {
@@ -83,6 +92,9 @@ impl Ordering {
             first_verse_token: None,
             first_pre_chapter_verse: None,
             empty_verses: Vec::new(),
+            first_event: ChapterEvent::None,
+            second_number: None,
+            touched: false,
         }
     }
 
@@ -103,6 +115,7 @@ impl Ordering {
             TokenKind::Designator => match self.awaiting {
                 Awaiting::Chapter(_) => {
                     self.awaiting = Awaiting::None;
+                    self.touched = true;
                     match designator::chapter(span_of(source, token)) {
                         Designator::Malformed => {
                             out.push(Observation::one(Code::DesignatorMalformed, idx));
@@ -110,8 +123,39 @@ impl Ordering {
                             // the NEXT chapter has nothing to compare against.
                             // Dropping state keeps one typo to one finding.
                             self.prev_chapter = None;
+                            // The fold's observations: a malformed FIRST event
+                            // means the seam judges nothing; a malformed SECOND
+                            // constrains no seam renumber.
+                            match self.first_event {
+                                ChapterEvent::None => self.first_event = ChapterEvent::Malformed,
+                                ChapterEvent::Wellformed(_) if self.second_number.is_none() => {
+                                    self.second_number = Some(None);
+                                }
+                                _ => {}
+                            }
                         }
                         Designator::Wellformed { first: number, .. } => {
+                            // The fold's observations: the first wellformed
+                            // event is the seam's right-hand party, with the
+                            // splice window a seam renumber would need — reduce
+                            // holds no tokens, so the bytes-facts travel.
+                            match self.first_event {
+                                ChapterEvent::None => {
+                                    let span = span_of(source, token);
+                                    let label = designator::label(span);
+                                    self.first_event = ChapterEvent::Wellformed(ChapterEdge {
+                                        number,
+                                        anchor: idx,
+                                        splice_at: token.start,
+                                        label_len: label.len() as u32,
+                                        plain_digits: label.iter().all(u8::is_ascii_digit),
+                                    });
+                                }
+                                ChapterEvent::Wellformed(_) if self.second_number.is_none() => {
+                                    self.second_number = Some(Some(number));
+                                }
+                                _ => {}
+                            }
                             if let Some((previous, previous_token)) = self.prev_chapter {
                                 let expected = previous.saturating_add(1);
                                 let code = if number == previous {
@@ -258,27 +302,29 @@ impl Ordering {
         self.awaiting = Awaiting::None;
     }
 
-    /// End of input: the whole-book facts, which are exactly the ones no token
-    /// event could carry.
-    pub(crate) fn finish(&mut self, doc: &Doc, out: &mut Emit) {
-        // A `\c`/`\v` as the very last token of the file.
+    /// End of this CHUNK's input: the chunk-local closes (a `\c`/`\v` as the
+    /// very last token, the empty-verse runs), then the fold observations.
+    /// The whole-book verdicts this machine used to emit here —
+    /// missing-chapter, verse-before-first-chapter — are REDUCE's now
+    /// (map observes, reduce judges; carried.rs `finish`), which is what
+    /// makes the summary equal-in / equal-out with the whole-book walk.
+    pub(crate) fn finish_chunk(&mut self, doc: &Doc, out: &mut Emit, carried: &mut Carried) {
         self.abandon(doc, out);
         self.collapse_empty_verses(doc, out);
 
-        match (
-            self.seen_chapter,
-            self.first_verse_token,
-            self.first_pre_chapter_verse,
-        ) {
-            // Verses and no chapter anywhere: one finding at the first verse.
-            // (A book with neither — front matter, a glossary — says nothing.)
-            (false, Some(verse), _) => out.push(Observation::one(Code::MissingChapter, verse)),
-            // Verses ahead of the first `\c`: one finding for the whole run.
-            (true, _, Some(verse)) => {
-                out.push(Observation::one(Code::VerseBeforeFirstChapter, verse))
+        carried.first_chapter = core::mem::take(&mut self.first_event);
+        carried.second_chapter_number = self.second_number;
+        carried.exit_chapter = if !self.touched {
+            ChapterExit::Untouched
+        } else {
+            match self.prev_chapter {
+                None => ChapterExit::Reset,
+                Some((number, anchor)) => ChapterExit::At { number, anchor },
             }
-            _ => {}
-        }
+        };
+        carried.has_chapter = self.seen_chapter;
+        carried.first_verse = self.first_verse_token;
+        carried.first_pre_chapter_verse = self.first_pre_chapter_verse;
     }
 
     /// The FIX half of `verse-without-designator`, at finish for the reason

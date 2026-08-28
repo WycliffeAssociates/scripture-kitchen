@@ -1,12 +1,3 @@
-//! The ATTRIBUTE family: everything that judges an attribute list, and the
-//! owner-reach state cluster it needs — `\w grace|lemma="x"\w*` and the four
-//! `owner_*` fields that say whose list that is.
-//!
-//! Split out of [`Flat`](super::flat::Flat) because it is a machine within that
-//! machine: its own lookbehind, its own entry, and the only rules in lint that
-//! read INSIDE a token — which is where lint's whole attribute cost lives
-//! ([`AttrRules::read_attributes`]).
-
 use super::walk::span_of;
 use super::{Code, Doc, Emit, NO_TOKEN, Observation, UsfmVersion};
 use crate::attributes::{self, AttrEvent, AttrResolution, MalformedAttr};
@@ -14,9 +5,6 @@ use crate::tables::generated;
 use crate::tables::schema::{AttrStatus, MarkerKind};
 use crate::{Token, TokenKind};
 
-/// The attribute family's whole state: who owns the list that arrives now, and
-/// what that owner still owes.
-///
 /// - **The owner** is the nearest preceding opener, as [`TokenKind::AttrList`]
 ///   documents, and a Newline ends its reach — the scanner bounds lists to a
 ///   line, so nothing wider would be honest.
@@ -44,6 +32,13 @@ pub(crate) struct AttrRules {
     /// `levels` — the row IS the milestone family's key, and only four rows in
     /// the table define `sid`/`eid` at all.
     sid_at: [u32; generated::ROW_COUNT],
+    /// The `-e` point in reach is eid-defining but its family has NO in-chunk
+    /// sid — reduce's question, not this chunk's: if the point's `\*` finds
+    /// no `eid`, it is RECORDED as a candidate and judged against earlier
+    /// chunks' sids (carried.rs `sid_eid`).
+    eid_candidate: bool,
+    /// The recorded candidates: (row, the anchor the emission would use).
+    candidates: Vec<(u8, u32)>,
 }
 
 impl AttrRules {
@@ -57,6 +52,8 @@ impl AttrRules {
             eid_owed: NO_TOKEN,
             eid_seen: false,
             sid_at: [NO_TOKEN; generated::ROW_COUNT],
+            eid_candidate: false,
+            candidates: Vec::new(),
         }
     }
 
@@ -82,15 +79,15 @@ impl AttrRules {
         // An `-e` point's list is where an `eid` would be, so the
         // question opens here and is settled at its `\*`.
         self.eid_seen = false;
-        self.eid_owed = if !opener
-            && nested
-            && self.sid_at[marker_idx as usize] != NO_TOKEN
-            && defined.iter().any(|(name, _)| *name == "eid")
-        {
+        let owes_eid = !opener && nested && defined.iter().any(|(name, _)| *name == "eid");
+        self.eid_owed = if owes_eid && self.sid_at[marker_idx as usize] != NO_TOKEN {
             self.sid_at[marker_idx as usize]
         } else {
             NO_TOKEN
         };
+        // No in-chunk sid: whether an EARLIER chunk opened the family is
+        // reduce's question — remember the point as a candidate instead.
+        self.eid_candidate = owes_eid && self.sid_at[marker_idx as usize] == NO_TOKEN;
     }
 
     /// A closer, a `\*` or a line ending: the owner is out of reach.
@@ -106,6 +103,7 @@ impl AttrRules {
         // A point whose `\*` never came is already `unterminated-milestone`;
         // adding "and it owes an `eid`" is two findings for one mistake.
         self.eid_owed = NO_TOKEN;
+        self.eid_candidate = false;
     }
 
     /// The `-e` point is COMPLETE here, and only here: a missing `eid` is a fact
@@ -114,19 +112,35 @@ impl AttrRules {
     /// carrying nothing, which is the shape the rule is about).
     #[inline]
     pub(super) fn on_milestone_terminator(&mut self, out: &mut Emit) {
-        if self.eid_owed != NO_TOKEN && !self.eid_seen {
+        if !self.eid_seen && (self.eid_owed != NO_TOKEN || self.eid_candidate) {
             let anchor = if self.first_list == NO_TOKEN {
                 self.owner
             } else {
                 self.first_list
             };
-            out.push(Observation::pair(
-                Code::AttrRequiredIf,
-                anchor,
-                self.eid_owed,
-            ));
+            if self.eid_owed != NO_TOKEN {
+                out.push(Observation::pair(
+                    Code::AttrRequiredIf,
+                    anchor,
+                    self.eid_owed,
+                ));
+            } else {
+                self.candidates.push((self.owner_idx, anchor));
+            }
         }
         self.close_reach();
+    }
+
+    /// End of the chunk: sweep the fold observations into the summary — the
+    /// LAST sid per row (matching `sid_at`'s most-recent-wins overwrite) and
+    /// the `-e` points whose obligation only earlier chunks can settle.
+    pub(super) fn record(&mut self, carried: &mut super::carried::Carried) {
+        for (row, &sid) in self.sid_at.iter().enumerate() {
+            if sid != NO_TOKEN {
+                carried.sid_last.push((row as u8, sid));
+            }
+        }
+        carried.eid_candidates = core::mem::take(&mut self.candidates);
     }
 
     /// A raw pipe in the content of an attrs-capable marker. The owner flag is

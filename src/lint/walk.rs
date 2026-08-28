@@ -1,8 +1,12 @@
 //! The driver: [`Doc`], the [`Emit`] sink, and THE WALK that feeds the four
 //! machines.
 
+use super::carried::Carried;
 use super::fix::Fix;
-use super::{Ancestry, Flat, LintReport, NO_FIX, Observation, Ordering, Structure, UsfmVersion};
+use super::{
+    Ancestry, ChunkContext, Flat, LintReport, NO_FIX, Observation, Ordering, Structure,
+    UsfmVersion,
+};
 use crate::Token;
 use crate::cst::Cst;
 use crate::edit::{Edit, FixStr};
@@ -177,11 +181,16 @@ struct Frame {
 /// per-frame fact a machine needs twice rides [`Frame::scratch`] — so nothing
 /// here assumes a slice of tokens exists ahead of the cursor, except the one
 /// token of lookahead `attr-terminator-mismatch` wants.
-pub(super) fn walk(doc: &Doc, version: Option<UsfmVersion>, out: &mut Emit) {
+pub(super) fn walk(
+    doc: &Doc,
+    version: Option<UsfmVersion>,
+    ctx: &ChunkContext,
+    out: &mut Emit,
+) -> Carried {
     let mut structure = Structure::new();
     let mut ancestry = Ancestry::new();
     let mut ordering = Ordering::new();
-    let mut flat = Flat::new(version);
+    let mut flat = Flat::new(version, ctx.book_is_scripture);
 
     let root = &doc.cst.nodes[0];
     // The CURRENT frame lives in locals, only the ancestors in the vec: every
@@ -265,8 +274,12 @@ pub(super) fn walk(doc: &Doc, version: Option<UsfmVersion>, out: &mut Emit) {
     );
 
     structure.finish(doc, out);
-    ordering.finish(doc, out);
-    flat.finish(out);
+    // The fold's summary: what this walk OBSERVED across its boundary —
+    // judged by carried::reduce, never here (map observes, reduce judges).
+    let mut carried = Carried::default();
+    ordering.finish_chunk(doc, out, &mut carried);
+    flat.finish_chunk(&mut carried);
+    carried
 }
 
 /// A token's bytes. Lint reads `source` only through spans the scanner already

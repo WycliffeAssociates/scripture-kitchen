@@ -4,6 +4,7 @@
 //! [`super::attr_rules`].
 
 use super::attr_rules::AttrRules;
+use super::carried::{Carried, FamilyFirsts, LineOccurrence};
 use super::rows::version_row;
 use super::walk::{is_structural_ws, span_of};
 use super::{Code, Doc, Emit, NO_TOKEN, Observation, UsfmVersion};
@@ -28,11 +29,6 @@ enum Window {
 /// separate sweeps' locals for a measured reason: a token sweep over this corpus
 /// costs ~2.5 ns/token in dispatch alone however little each arm does, so a
 /// family that needs no more than the last marker earns no traversal of its own.
-///
-/// `\ca`/`\cp` are legal immediately after `\c`'s designator or after each other
-/// and `\va`/`\vp` after `\v`, where "immediately" allows whitespace between —
-/// the spec's own examples put `\cp` on its own line. They open no scope, so the
-/// CST cannot see their misplacement; the `window` is where the fact lives.
 pub(crate) struct Flat {
     version: Option<UsfmVersion>,
     /// The four adjacency rows, resolved once instead of per token.
@@ -40,10 +36,20 @@ pub(crate) struct Flat {
     cp: generated::MarkerIdx,
     va: generated::MarkerIdx,
     vp: generated::MarkerIdx,
-    /// The `\id` row, for the once-per-book rule. `id_seen` is the first
-    /// occurrence's token, [`NO_TOKEN`] until one arrives.
+    /// The `\id` and `\usfm` rows. `id_seen` still gates the BookCode arm
+    /// (the FIRST `\id` names the book); the once-per-book JUDGMENTS moved to
+    /// reduce (carried.rs), so every occurrence is RECORDED with its
+    /// delete-line extent instead of judged here.
     id: generated::MarkerIdx,
     id_seen: u32,
+    usfm: generated::MarkerIdx,
+    ids: Vec<LineOccurrence>,
+    usfms: Vec<LineOccurrence>,
+    /// Did any marker-shaped token arrive (reduce's missing-id guard).
+    has_markers: bool,
+    /// When `Some`, chunk 0's carry-in fixes the answer and the BookCode arm
+    /// must not re-derive it (a duplicate `\id` in a later chunk would lie).
+    scripture_override: Option<bool>,
     /// The first body/poetry paragraph the band judge caught ahead of the
     /// first `\c`, resolved at [`Self::finish`]: "before the first chapter"
     /// means nothing in a book with no `\c` at all, and when VERSES sit up
@@ -68,9 +74,12 @@ pub(crate) struct Flat {
     /// seen, so it needs no sentinel.
     levels: [u16; generated::ROW_COUNT],
     first_seen: [u32; generated::ROW_COUNT],
+    /// The fold's family observations: `numbering-mix` is judged ONLY by
+    /// reduce (a carry-in mask moves where a mix completes), so the map
+    /// records each spelling's first sighting and emits nothing.
+    first_bare: [u32; generated::ROW_COUNT],
+    first_numbered: [u32; generated::ROW_COUNT],
 }
-
-const REPORTED: u16 = 1 << 15;
 
 /// The context mask's POSITIONAL half, the only bits the band judge may look at.
 /// Folded from the enum so a new positional variant arrives without an edit.
@@ -88,7 +97,7 @@ const POSITIONAL: u32 = {
 };
 
 impl Flat {
-    pub(crate) fn new(version: Option<UsfmVersion>) -> Self {
+    pub(crate) fn new(version: Option<UsfmVersion>, scripture_override: Option<bool>) -> Self {
         let idx_of = |name: &[u8]| generated::marker_idx(name, SpellingShape::PlainOnly);
         Self {
             version,
@@ -98,15 +107,22 @@ impl Flat {
             vp: idx_of(b"vp"),
             id: idx_of(b"id"),
             id_seen: NO_TOKEN,
+            usfm: idx_of(b"usfm"),
+            ids: Vec::new(),
+            usfms: Vec::new(),
+            has_markers: false,
+            scripture_override,
             pbfc_pending: NO_TOKEN,
             seen_chapter: false,
             verse_pre_chapter: false,
-            scripture_book: false,
+            scripture_book: scripture_override.unwrap_or(false),
             window: Window::Closed,
             attrs: AttrRules::new(),
             band: 0,
             levels: [0u16; generated::ROW_COUNT],
             first_seen: [0u32; generated::ROW_COUNT],
+            first_bare: [NO_TOKEN; generated::ROW_COUNT],
+            first_numbered: [NO_TOKEN; generated::ROW_COUNT],
         }
     }
 
@@ -135,7 +151,9 @@ impl Flat {
                 let span = payload_label(span_of(source, token));
                 // The FIRST `\id` names the book (`duplicate-id` leaves later
                 // ones inert), and a miscased code still names it.
-                if self.id_seen == NO_TOKEN || idx == self.id_seen + 1 {
+                if self.scripture_override.is_none()
+                    && (self.id_seen == NO_TOKEN || idx == self.id_seen + 1)
+                {
                     self.scripture_book = books::is_scripture_code(span)
                         || books::upper3(span)
                             .is_some_and(|upper| books::is_scripture_code(&upper));
@@ -160,6 +178,7 @@ impl Flat {
             // are one thing, the marker a list, a level or a designator belongs
             // to. `nested` binds the spelling bit (`\+w`'s `+`, `\qt-e`'s `e`).
             TokenKind::Marker { nested } | TokenKind::Milestone { end: nested } => {
+                self.has_markers = true;
                 let marker_idx = token.marker_idx;
                 let opener = matches!(kind, TokenKind::Marker { .. });
                 if opener {
@@ -168,19 +187,29 @@ impl Flat {
                     } else if nested && generated::kind(marker_idx) != MarkerKind::Character {
                         out.push(Observation::one(Code::NestedSpellingMisuse, idx));
                     }
-                    // Once per book: the FIRST `\id` is the identification and
-                    // every later one is the finding, pointed back at it.
+                    // Once per book (rulings 2026-08-27): every `\id`/`\usfm`
+                    // is RECORDED with its delete-line extent; reduce judges
+                    // duplicates against the GLOBAL first — an in-chunk
+                    // judgment would point a later chunk's duplicate at the
+                    // wrong `second`.
                     if marker_idx == self.id {
                         if self.id_seen == NO_TOKEN {
                             self.id_seen = idx;
-                        } else {
-                            out.push(Observation {
-                                code: Code::DuplicateId,
-                                anchor: idx,
-                                second: self.id_seen,
-                                aux: 0,
-                            });
                         }
+                        let (from, to) = line_extent(doc, idx);
+                        self.ids.push(LineOccurrence {
+                            anchor: idx,
+                            from,
+                            to,
+                        });
+                    }
+                    if marker_idx == self.usfm {
+                        let (from, to) = line_extent(doc, idx);
+                        self.usfms.push(LineOccurrence {
+                            anchor: idx,
+                            from,
+                            to,
+                        });
                     }
                     if generated::kind(marker_idx) == MarkerKind::Paragraph
                         && token.start > 0
@@ -231,8 +260,7 @@ impl Flat {
                         || (in_positional
                             && self.scripture_book
                             && generated::kind(marker_idx) == MarkerKind::Paragraph);
-                    if positional != 0 && judged && positional & (1 << self.band) == 0
-                    {
+                    if positional != 0 && judged && positional & (1 << self.band) == 0 {
                         let above = positional & !((1 << (self.band + 1)) - 1);
                         if above == 0 {
                             out.push(Observation::one(Code::MarkerOutOfBand, idx));
@@ -300,25 +328,23 @@ impl Flat {
                 };
 
                 if has_levels(marker_idx) {
+                    // `numbering-mix` is reduce's (carried.rs): the map only
+                    // records each spelling's first sighting — a carry-in
+                    // mask moves where a mix completes, so no in-chunk
+                    // emission can be right under the fold.
                     let slot = marker_idx as usize;
                     if self.levels[slot] == 0 {
                         self.first_seen[slot] = idx;
                     }
-                    self.levels[slot] |= 1 << spelled_level(span_of(source, token)).min(14);
-                    let family = self.levels[slot];
-                    // Bare AND numbered, said once per family per book.
-                    if family & REPORTED == 0 && family & 1 != 0 && family & !(REPORTED | 1) != 0 {
-                        self.levels[slot] |= REPORTED;
-                        out.push(Observation {
-                            code: Code::NumberingMix,
-                            anchor: idx,
-                            second: self.first_seen[slot],
-                            aux: match generated::numbering(marker_idx) {
-                                Numbering::UpTo(cap) => u32::from(cap),
-                                // `liv` alone: numbered with no cap stated.
-                                _ => 0,
-                            },
-                        });
+                    let level = spelled_level(span_of(source, token)).min(14);
+                    self.levels[slot] |= 1 << level;
+                    let first = if level == 0 {
+                        &mut self.first_bare[slot]
+                    } else {
+                        &mut self.first_numbered[slot]
+                    };
+                    if *first == NO_TOKEN {
+                        *first = idx;
                     }
                 }
 
@@ -335,6 +361,7 @@ impl Flat {
             // Whether a closer closed anything is [`Structure`]'s question: the
             // answer is a property of the node about to close, one event later.
             TokenKind::ClosingMarker { nested } => {
+                self.has_markers = true;
                 if nested
                     && token.marker_idx != generated::UNRESOLVED
                     && generated::kind(token.marker_idx) != MarkerKind::Character
@@ -383,17 +410,34 @@ impl Flat {
     /// `generated::deprecated`: five rows in 153 reach it, so the cost on every
     /// other marker is one bitfield test.
     #[inline(never)]
-    /// End of input: `paragraph-before-first-chapter` is judged here because
-    /// "before the first `\c`" is only a fact once the book has shown whether
-    /// it HAS one — no `\c` is `missing-chapter`'s territory, and verses up
-    /// there make the run `verse-before-first-chapter`'s finding, never both.
-    pub(crate) fn finish(&mut self, out: &mut Emit) {
-        if self.pbfc_pending != NO_TOKEN && self.seen_chapter && !self.verse_pre_chapter {
-            out.push(Observation::one(
-                Code::ParagraphBeforeFirstChapter,
-                self.pbfc_pending,
-            ));
+    /// End of this CHUNK's input: sweep the fold observations into the
+    /// summary. The whole-book verdicts this machine used to emit —
+    /// `paragraph-before-first-chapter`, the once-per-book duplicates,
+    /// `numbering-mix` — are REDUCE's now (carried.rs), because each needs
+    /// facts from other chunks (whether the book HAS a `\c`, the global
+    /// first occurrence, the completed mix's true anchor).
+    pub(crate) fn finish_chunk(&mut self, carried: &mut Carried) {
+        carried.pbfc_pending = (self.pbfc_pending != NO_TOKEN).then_some(self.pbfc_pending);
+        carried.positional_chapter = self.seen_chapter;
+        carried.verse_pre_chapter = self.verse_pre_chapter;
+        carried.has_markers = self.has_markers;
+        carried.ids = core::mem::take(&mut self.ids);
+        carried.usfms = core::mem::take(&mut self.usfms);
+        carried.declared_version = self.version;
+        carried.book_is_scripture = self.scripture_book;
+        for slot in 0..generated::ROW_COUNT {
+            if self.levels[slot] != 0 {
+                carried.families.push(FamilyFirsts {
+                    row: slot as u8,
+                    first_any: self.first_seen[slot],
+                    first_bare: (self.first_bare[slot] != NO_TOKEN)
+                        .then_some(self.first_bare[slot]),
+                    first_numbered: (self.first_numbered[slot] != NO_TOKEN)
+                        .then_some(self.first_numbered[slot]),
+                });
+            }
         }
+        self.attrs.record(carried);
     }
 
     fn deprecated_marker(
@@ -425,6 +469,29 @@ impl Flat {
             None => out.push(observation),
         }
     }
+}
+
+/// A once-per-book marker's delete-the-LINE extent, recorded beside the
+/// occurrence so reduce (which holds no tokens) can offer the repair. The
+/// extent runs from the marker to the end of its line — newline included when
+/// the marker started the line, kept when something precedes it (deleting the
+/// only newline would glue that something to the next line's marker, and a
+/// fix may not hand back a finding).
+#[inline(never)]
+fn line_extent(doc: &Doc, anchor: u32) -> (u32, u32) {
+    let from = doc.tokens[anchor as usize].start;
+    let line_initial = from == 0 || doc.source[from as usize - 1] == b'\n';
+    let to = doc.tokens[anchor as usize + 1..]
+        .iter()
+        .find(|token| token.kind() == TokenKind::Newline)
+        .map_or(doc.source.len() as u32, |newline| {
+            if line_initial {
+                newline.end()
+            } else {
+                newline.start
+            }
+        });
+    (from, to)
 }
 
 /// What may legally follow a marker name: structural whitespace, or one of
@@ -824,6 +891,77 @@ mod tests {
         }));
         // One `\id` is never a duplicate.
         let (_, obs) = findings("\\id GEN\n\\c 1\n\\p \\v 1 a\n");
+        assert_eq!(obs, vec![]);
+    }
+
+    /// The two once-per-book duplicates offer the delete-the-line fix
+    /// (rulings 2026-08-27): the line goes, newline included when the marker
+    /// owned the line, newline kept when something preceded it.
+    #[test]
+    fn duplicate_id_and_usfm_offer_the_delete_line_fix() {
+        let fixed = |usfm: &str, code: Code| -> Vec<u8> {
+            let tokens = crate::lex(usfm);
+            let cst = crate::cst::build(&tokens);
+            let report = crate::lint::lint(usfm.as_bytes(), &tokens, &cst);
+            let slot = report
+                .observations
+                .iter()
+                .position(|obs| obs.code == code)
+                .unwrap_or_else(|| panic!("no {code:?} in {usfm:?}"));
+            let fix = report.fix(slot).expect("the duplicate offers a fix");
+            crate::edit::apply(usfm.as_bytes(), report.edits(fix))
+        };
+
+        assert_eq!(
+            fixed(
+                "\\id GEN\n\\id MAT\n\\c 1\n\\p \\v 1 a\n",
+                Code::DuplicateId
+            ),
+            b"\\id GEN\n\\c 1\n\\p \\v 1 a\n".to_vec()
+        );
+        assert_eq!(
+            fixed(
+                "\\id GEN\n\\usfm 3.0\n\\usfm 3.2\n\\c 1\n\\p \\v 1 a\n",
+                Code::DuplicateUsfm
+            ),
+            b"\\id GEN\n\\usfm 3.0\n\\c 1\n\\p \\v 1 a\n".to_vec()
+        );
+        // Duplicate as the LAST line, no trailing newline.
+        assert_eq!(
+            fixed("\\id GEN\n\\c 1\n\\p \\v 1 a\n\\id MAT", Code::DuplicateId),
+            b"\\id GEN\n\\c 1\n\\p \\v 1 a\n".to_vec()
+        );
+        // Glued mid-line: the newline stays, so the next line's marker is not
+        // handed a `marker-not-ws-preceded` finding by the repair.
+        assert_eq!(
+            fixed(
+                "\\id GEN\n\\c 1\n\\p \\v 1 a\\id MAT\n\\p b\n",
+                Code::DuplicateId
+            ),
+            b"\\id GEN\n\\c 1\n\\p \\v 1 a\n\\p b\n".to_vec()
+        );
+    }
+
+    #[test]
+    fn a_second_usfm_is_a_duplicate_pointed_at_the_first() {
+        let (tokens, obs) = findings("\\id GEN\n\\usfm 3.0\n\\usfm 3.2\n\\c 1\n\\p \\v 1 a\n");
+        assert_eq!(
+            obs,
+            vec![Observation {
+                code: Code::DuplicateUsfm,
+                anchor: token_named(&tokens, "usfm", 1),
+                second: token_named(&tokens, "usfm", 0),
+                aux: 0,
+            }]
+        );
+        // The FIRST declaration stays the declared version.
+        let usfm = "\\id GEN\n\\usfm 3.0\n\\usfm 3.2\n\\c 1\n\\p \\v 1 a\n";
+        let tokens = crate::lex(usfm);
+        let cst = crate::cst::build(&tokens);
+        let report = crate::lint::lint(usfm.as_bytes(), &tokens, &cst);
+        assert_eq!(report.declared_version, Some(UsfmVersion::V3_0));
+        // One `\usfm` is never a duplicate.
+        let (_, obs) = findings("\\id GEN\n\\usfm 3.0\n\\c 1\n\\p \\v 1 a\n");
         assert_eq!(obs, vec![]);
     }
 

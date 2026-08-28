@@ -1,6 +1,6 @@
 //! Findings over an already-built document: `lex → cst::build → lint`.
 //!
-//! 44 codes in six families ([`Category`]): STRUCTURE, ORDERING, ATTRIBUTES,
+//! 48 codes in six families ([`Category`]): STRUCTURE, ORDERING, ATTRIBUTES,
 //! PAYLOAD, FORM and VERSION.
 //!
 //! Three laws shape everything here:
@@ -17,7 +17,7 @@
 //!   — so a report crosses wasm as one flat array.
 //!
 //! A code emits a fix if and only if its row declares a [`LintRow::fix_label`]
-//! (17 of the 44, asserted both ways in tests), computed BESIDE the finding and
+//! (20 of the 48, asserted both ways in tests), computed BESIDE the finding and
 //! proved by [`check_fixes`] over all 226 corpus books. Where a repair would be
 //! a MOVE or a guess it is not offered — relocating an attribute list, moving an
 //! out-of-band marker, guessing which book identifier was meant, or renumbering
@@ -33,10 +33,20 @@
 //! (en_ulb), ~15.5 ns/token on en_ult. The gap is the k/v attribute rules and
 //! nothing else — en_ult is 31 MB of `\w` attribute interiors.
 //!
+//! **The fold**  map observes, reduce
+//! judges. [`lint_chunk`] is the map — the full walk over one chunk, emitting
+//! only what that chunk can prove and RECORDING its cross-boundary
+//! observations into a [`Carried`] summary. [`carried::reduce`] is the one
+//! judge of the summaries (seams, then finish), and [`merge_reports`] folds
+//! the halves back. [`lint`] itself is the single-unit fold, so every
+//! judgment exists exactly once; the law — folded == fresh — is
+//! tests/fold_oracle.rs, held over every corpus book.
+//!
 //! [`CloseReason`]: crate::cst::CloseReason
 
 pub(crate) mod ancestry;
 pub(crate) mod attr_rules;
+pub mod carried;
 pub mod catalog;
 pub(crate) mod fix;
 pub(crate) mod flat;
@@ -49,6 +59,7 @@ pub(crate) mod walk;
 mod tests;
 
 pub use crate::edit::{Edit, FixStr, apply, check_edits};
+pub use carried::{Carried, reduce};
 pub use catalog::diagnostics_json;
 pub use fix::{Fix, check_fixes};
 pub use rows::{
@@ -163,36 +174,126 @@ impl LintReport {
 /// byte on either side of an opening marker's span, where the Form family's
 /// whole evidence lives.
 pub fn lint(source: &[u8], tokens: &[Token], cst: &Cst) -> LintReport {
-    let (book, declared_version) = header_scan(source, tokens);
-    let mut out = Emit::default();
+    // THE WHOLE BOOK IS THE SINGLE-UNIT FOLD: one map, one reduce over one
+    // summary. Every cross-chunk judgment therefore exists exactly once — in
+    // carried::reduce — and the corpus pins hold both paths still.
+    let (local, summary) = lint_chunk(source, tokens, cst, &ChunkContext::default());
+    let seam = carried::reduce(&[&summary], &[0], &[0], local.book, local.declared_version);
+    merge_reports(&[&local], &[0], &[0], seam)
+}
 
-    walk(
+/// The per-book context a chunk's walk cannot derive from its own bytes —
+/// chunk 0's carry-outs. `None` fields mean SELF-SCAN (chunk 0, or the whole
+/// book as one unit); a fold passes chunk 0's answers to every later chunk,
+/// and a cache folds both into its keys.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ChunkContext {
+    /// The `\usfm` declaration (gates `deprecated-marker`,
+    /// `attr-trailing-form-deprecated`).
+    pub declared_version: Option<UsfmVersion>,
+    /// Does the `\id` code name a scripture book (gates the band judge's
+    /// paragraph rule).
+    pub book_is_scripture: Option<bool>,
+}
+
+/// Lints ONE CHUNK — the fold's map half (chunk-fold.md, ruled v2): the full
+/// four-machine walk over the chunk, returning the chunk-LOCAL report (every
+/// finding provable from this chunk alone, chunk-relative, cacheable by
+/// content) beside the [`Carried`] summary of what it OBSERVED across its
+/// boundary. [`carried::reduce`] is the only judge of the summaries.
+///
+/// `ctx` carries chunk 0's per-book facts; a cache key must include them
+/// (a chunk's product is a function of bytes AND context). Chunk 0 passes
+/// `ChunkContext::default()` — its own header scan is the source of both.
+pub fn lint_chunk(
+    source: &[u8],
+    tokens: &[Token],
+    cst: &Cst,
+    ctx: &ChunkContext,
+) -> (LintReport, Carried) {
+    let (book, scanned) = header_scan(source, tokens);
+    let version = ctx.declared_version.or(scanned);
+    let mut out = Emit::default();
+    let summary = walk(
         &Doc {
             source,
             tokens,
             cst,
         },
-        declared_version,
+        version,
+        ctx,
         &mut out,
     );
+    (out.finish(book, version), summary)
+}
 
-    // Raised here rather than in a pass because the fact is the ABSENCE of a
-    // token, which no sweep can see. The markers-only guard: a plain-prose or
-    // empty buffer is not a book that owes an `\id`.
-    if book.is_none()
-        && tokens.iter().any(|token| {
-            matches!(
-                token.kind(),
-                TokenKind::Marker { .. }
-                    | TokenKind::ClosingMarker { .. }
-                    | TokenKind::Milestone { .. }
-            )
-        })
-    {
-        out.push(Observation::one(Code::MissingId, 0));
+/// Chunk reports (each chunk-relative, index-aligned with `token_bases` /
+/// `byte_bases`) + the carried whole-book report → one report with the SAME
+/// observations and offered repairs as [`lint`] of the whole book. The fix
+/// ARENA layout is linkage, not contract: compare through
+/// [`LintReport::fix`]/[`LintReport::edits`], never by arena index.
+pub fn merge_reports(
+    parts: &[&LintReport],
+    token_bases: &[u32],
+    byte_bases: &[u32],
+    carried: LintReport,
+) -> LintReport {
+    // (observation, its resolved fix) with every offset rebased, gathered
+    // from all sources and sorted once — findings are rare, so the sort is
+    // cheaper than a careful multi-way merge.
+    type ResolvedFix = Option<(&'static str, Vec<Edit>)>;
+    let mut all: Vec<(Observation, ResolvedFix)> = Vec::new();
+    for ((part, &token_base), &byte_base) in parts.iter().zip(token_bases).zip(byte_bases) {
+        for (index, observation) in part.observations.iter().enumerate() {
+            let mut observation = *observation;
+            observation.anchor += token_base;
+            if observation.second != NO_TOKEN {
+                observation.second += token_base;
+            }
+            let fix = part.fix(index).map(|fix| {
+                let edits = part
+                    .edits(fix)
+                    .iter()
+                    .map(|edit| Edit {
+                        from: edit.from + byte_base,
+                        to: edit.to + byte_base,
+                        insert: edit.insert,
+                    })
+                    .collect();
+                (fix.label, edits)
+            });
+            all.push((observation, fix));
+        }
     }
+    for (index, observation) in carried.observations.iter().enumerate() {
+        let fix = carried
+            .fix(index)
+            .map(|fix| (fix.label, carried.edits(fix).to_vec()));
+        all.push((*observation, fix));
+    }
+    all.sort_by_key(|(observation, _)| (observation.anchor, observation.code as u16));
 
-    out.finish(book, declared_version)
+    let mut out = LintReport {
+        book: carried.book,
+        declared_version: carried.declared_version,
+        ..Default::default()
+    };
+    for (observation, fix) in all {
+        out.observations.push(observation);
+        out.fix_of.push(match fix {
+            None => NO_FIX,
+            Some((label, edits)) => {
+                let start = out.edit_list.len() as u32;
+                out.edit_list.extend(edits);
+                out.fixes.push(Fix {
+                    label,
+                    edits: start..out.edit_list.len() as u32,
+                });
+                out.fixes.len() as u32 - 1
+            }
+        });
+    }
+    out
 }
 
 /// The two header facts every later pass wants: the `\id` line's BookCode

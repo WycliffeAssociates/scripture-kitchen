@@ -1871,3 +1871,103 @@ contents commented out by Will, tests/fused_identity.rs `#![cfg(any())]`,
 playground's three fused modes removed. The experiment copies the scan
 loop's emitting arms, so this pass paid every lexer change twice; the
 identity oracle proved the copy correct one last time before parking.
+
+## pass 21 self-report (2026-08-27): the chunk fold lands — map observes, reduce judges
+
+chunk-fold.md executed at Will's green light. FIRST A CORRECTION THAT
+SHAPED THE PASS: the session initially misread Will's ruling and
+built the fold's lint half as a code-classification FILTER (a
+`carried` row column; per-chunk lint filtered to "local" codes, a
+whole-book walk filtered to "carried" ones). Will corrected it the
+same day — the ruling was the ChunkSummary/Carried STRUCT (his
+"opt2"), so a warm call is ONE chunk's walk PLUS THE REDUCE — and
+the filter approach was replaced in place. Its measured floor told
+the same story: filtered-walk folding saved only ~13% because the
+carried pass still lexed and walked the whole book.
+
+What the tree now holds:
+
+- **Onion, CST**: `cst::build_chunk` (per-chunk tree; finishes by
+  SIMULATING the next chunk's `\c` displacement — correct close
+  verdicts and the dirty-boundary detector in one move) and
+  `cst::concat` (shift + concat by prefix sums).
+- **Onion, lint**: `lint_chunk(source, tokens, cst, &ChunkContext)
+  -> (LintReport, Carried)` — the MAP: the full four-machine walk,
+  emitting only what the chunk can prove and RECORDING its
+  cross-boundary observations; `carried::reduce(&[&Carried], bases,
+  book, version)` — the one JUDGE of seams and finish() facts;
+  `merge_reports` folds the halves back. **Whole-book `lint()` is
+  the single-unit fold**, so every judgment exists exactly once and
+  the corpus pins hold both paths still (verified: pins unchanged).
+- **Galley**: `FoldCache` (handrolled byte-budget LRU) whose warm
+  call is pre-scan + checksums + reduce + merge — no whole-book lex,
+  no whole-book walk, no CST concat on the hot path.
+- **Roll-ins**: `duplicate-id` offers the delete-line fix;
+  `duplicate-usfm` is a new once-per-book lane with the same fix
+  (rows 58 → 59; diagnostics.json regenerated).
+
+Choices where the plan was silent, and what forced each:
+
+- **The boundary simulation IS `\c`'s own displacement loop**
+  (`Builder::displace_for_chapter`): a per-chunk build that just
+  Eof-closes diverges on every chunk's trailing paragraph (Eof vs
+  the Implicit the real `\c` stamps). Running the same pop loop
+  makes clean-boundary chunk trees byte-identical AND doubles as the
+  detector: whatever survives is `open_at_end`.
+- **An unclosed `\f` across `\c` is NOT a dirty boundary** — the
+  plan listed it as a fusion case, but the whole-book `\c` displaces
+  the note (Recovery) exactly as the simulation does. Dirty is only
+  what `\c` cannot pop: sidebar barriers and mask-allowed frames.
+- **Seam judgments carry their bytes-facts in the summary**: reduce
+  holds no source and no tokens, so the map records what a seam fix
+  needs — a chapter designator's splice window + plain-digits bit +
+  the next in-chunk number (`fix::next_number`'s three guards,
+  answered from summaries), a duplicate `\id`/`\usfm`'s
+  delete-line extent.
+- **Some rules are reduce-ONLY because no in-chunk emission can be
+  right under a carry-in**: `numbering-mix` (a carry-in mask moves
+  where the mix completes — anchor = the later of the two global
+  spelling-firsts), `duplicate-id`/`duplicate-usfm` (an in-chunk
+  judgment would point `second` at the wrong first). The maps record
+  firsts/occurrences and never emit these.
+- **Chapter-sequence judgment is SHARED, not duplicated**: interior
+  pairs judge in-walk exactly as before (per-chunk state starts
+  None, so a chunk's first designator is never interior-judged);
+  reduce judges only the seams, with `ChapterExit`
+  Untouched/Reset/At distinguishing "no designator events" from "the
+  sequence resynced".
+- **`ChunkContext` is the carry-in pair** — declared version AND the
+  is-scripture bit (the band judge's paragraph gate would silently
+  diverge on chunks that cannot see `\id`) — and both fold into the
+  cache key. Chunk 0 self-scans (`ChunkContext::default()`) and its
+  `Carried` exports both as accessors.
+- **sid/eid crosses chunks** (`attr-required-if`): a `\qt-e` with no
+  in-chunk sid is recorded as a CANDIDATE and judged by reduce
+  against earlier chunks' LAST sid per row (matching `sid_at`'s
+  most-recent-wins overwrite).
+- **Dirty boundaries are memoized** (`Cached::OpenBoundary`) so warm
+  calls widen to the fused unit without re-lexing to rediscover it.
+- **Report equality is semantic, not struct-raw**: merged fix ARENAS
+  cannot match fresh emission order, so the law compares every
+  consumer-visible fact (observations, book, version, each fix's
+  label + edits through the accessors).
+- **The delete-line fix keeps the newline when the duplicate marker
+  is glued mid-line** — deleting the line's only newline would hand
+  the next line's marker a `marker-not-ws-preceded` finding.
+
+MEASURED (release, en_ult, galley/tests/fold.rs bench_fold_en_ult):
+all-hit folded lint **0.91ms vs fresh 13.67ms on PSA (0.85 vs 12.82
+GEN, ~15x)** — the floor is pre-scan + checksums + reduce + merge,
+i.e. the checksum pass, as the plan predicted. A one-chapter edit
+adds that chunk's lex→cst→walk (~1ms class). Tokens stay uncached
+(the ruling stands — nothing needs them back).
+
+Verification: `cargo test --workspace --release -- --include-ignored`
+green — the fold oracle and the fold-cache oracle over all 226
+corpus books, the corpus PINS unchanged (whole-book lint as
+fold-of-one is bit-stable), `every_corpus_fix_passes_the_oracle`
+green over the new delete-line fixes — plus `cargo clippy
+--all-targets` clean. diagnostics.json regenerated (59 rows). Left
+uncommitted for Will's review. onion-wasm pkgs NOT rebuilt
+(USER-OPEN item 2 owns re-vendoring; the new lint row crosses the
+wall then).

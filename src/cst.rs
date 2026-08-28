@@ -454,6 +454,21 @@ impl Builder {
         }
     }
 
+    /// The displacement the NEXT chunk's line-initial `\c ` would run, without
+    /// its token: the same pop loop [`Builder::feed`] runs for a chapter
+    /// marker, keyed on the `c` row's mask. What it cannot pop (a barrier, a
+    /// mask-allowed frame) is [`build_chunk`]'s dirty boundary.
+    pub(crate) fn displace_for_chapter(&mut self) {
+        let mask = generated::context_mask(generated::marker_idx(b"c", SpellingShape::PlainOnly));
+        while self.frames.len() > 1
+            && !self.top().barrier()
+            && mask & context_bit(self.top().ctx) == 0
+        {
+            let reason = CloseReason::for_displacement(self.top_marker_idx());
+            self.close_top(reason);
+        }
+    }
+
     /// Input ended: close survivors as Eof — lint judges each by its row (a
     /// paragraph at EOF is silent, a footnote at EOF is a finding) — then
     /// patch the root's child range.
@@ -704,6 +719,120 @@ impl Builder {
         self.scratch.push(token_idx);
         self.close_top(CloseReason::Explicit);
     }
+}
+
+/// One chunk's tree plus the boundary verdict — [`build_chunk`]'s result.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChunkCst {
+    pub cst: Cst,
+    /// The stack was NOT root-only when the chunk ended: a frame the boundary
+    /// `\c` cannot displace (a sidebar's barrier, a mask-allowed scope) was
+    /// still open, so this tree diverges from the whole-book build. The
+    /// caller fuses this chunk with its successor and rebuilds the pair.
+    pub open_at_end: bool,
+}
+
+/// Builds one CHUNK's tree — the fold's per-chunk primitive
+/// A non-final chunk ends exactly where the next chunk's line-initial `\c `
+/// begins, so the build FINISHES BY SIMULATING that `\c`'s displacement:
+/// survivors close with the verdicts the real `\c` would stamp (`Implicit`
+/// for a paragraph, `Recovery` for an unclosed note), and on a clean boundary
+/// the tree is identical to the whole-book build restricted to the chunk.
+/// Whatever survives the simulation is the dirty boundary — `open_at_end`.
+/// The final chunk closes at Eof like any whole document.
+pub fn build_chunk(tokens: &[Token], last: bool) -> ChunkCst {
+    assert!(
+        tokens.len() < NODE_ID_BIT as usize,
+        "token ids must fit the tag bit"
+    );
+    let mut b = Builder::with_capacity(tokens.len(), exact_scope_openers(tokens));
+    for (token_idx, token) in tokens.iter().enumerate() {
+        b.feed(token_idx as u32, token);
+    }
+    let open_at_end = if last {
+        false
+    } else {
+        b.displace_for_chapter();
+        b.frames.len() > 1
+    };
+    ChunkCst {
+        cst: b.finish(),
+        open_at_end,
+    }
+}
+
+/// Per-chunk trees → the whole-book tree, by shift and concat: node ids,
+/// token ids and arena ranges all move by prefix sums, nothing is re-walked.
+/// `token_counts` is index-aligned with `parts` (each part's token count —
+/// the id space its child ids live in).
+///
+/// The law this must keep (tests/fold_oracle.rs): on clean boundaries,
+/// `concat(build_chunk each) == build(lex(whole))`, byte for byte. The one
+/// layout fact it leans on: a part's arena is its non-root flushes followed
+/// by its root tail, so the merged arena is every part's non-root region in
+/// order, then the concatenated root tails at the very end — exactly where a
+/// whole-book `finish` puts them.
+pub fn concat(parts: &[&Cst], token_counts: &[u32]) -> Cst {
+    assert_eq!(parts.len(), token_counts.len());
+    let nodes_total = 1 + parts.iter().map(|part| part.nodes.len() - 1).sum::<usize>();
+    let arena_total = parts.iter().map(|part| part.child_ids.len()).sum::<usize>();
+
+    let mut nodes = Vec::with_capacity(nodes_total);
+    let mut child_ids = Vec::with_capacity(arena_total);
+    nodes.push(Node {
+        token: ROOT_TOKEN,
+        children: 0..0,
+        reason: CloseReason::Eof as u8,
+        ctx: SpecContext::Scripture as u8,
+    });
+
+    // Pass 1: every part's non-root arena region and nodes, shifted.
+    let mut token_base = 0u32;
+    for (part, count) in parts.iter().zip(token_counts) {
+        let node_off = nodes.len() as u32; // local id 1 lands here
+        let arena_off = child_ids.len() as u32;
+        let root_tail = part.nodes[0].children.start;
+        let remap = |id: u32| {
+            if id & NODE_ID_BIT != 0 {
+                NODE_ID_BIT | ((id & !NODE_ID_BIT) - 1 + node_off)
+            } else {
+                id + token_base
+            }
+        };
+        child_ids.extend(
+            part.child_ids[..root_tail as usize]
+                .iter()
+                .map(|id| remap(*id)),
+        );
+        nodes.extend(part.nodes[1..].iter().map(|node| Node {
+            token: node.token + token_base,
+            children: node.children.start + arena_off..node.children.end + arena_off,
+            reason: node.reason,
+            ctx: node.ctx,
+        }));
+        token_base += count;
+    }
+
+    // Pass 2: the root tails, concatenated at the end. The remap needs each
+    // part's own bases again, so both prefix sums are rebuilt in step.
+    let root_start = child_ids.len() as u32;
+    let mut token_base = 0u32;
+    let mut node_off = 1u32;
+    for (part, count) in parts.iter().zip(token_counts) {
+        let root = &part.nodes[0].children;
+        for id in &part.child_ids[root.start as usize..root.end as usize] {
+            child_ids.push(if id & NODE_ID_BIT != 0 {
+                NODE_ID_BIT | ((id & !NODE_ID_BIT) - 1 + node_off)
+            } else {
+                id + token_base
+            });
+        }
+        node_off += part.nodes.len() as u32 - 1;
+        token_base += count;
+    }
+    nodes[0].children = root_start..child_ids.len() as u32;
+
+    Cst { nodes, child_ids }
 }
 
 pub(crate) fn displaces(kind: MarkerKind, opens_scope: Option<ScopeKind>, mask: u32) -> bool {
