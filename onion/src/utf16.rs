@@ -232,14 +232,25 @@ pub struct Runs {
 /// What a run map may cost, as a fraction of the source it maps, before a
 /// [`Cursor`] is the better tool. One entry is nine bytes.
 ///
-/// Deliberately tight because of where this runs: wasm linear memory GROWS AND
-/// NEVER SHRINKS, so a map that is transient to one call still raises the
-/// page's high-water mark for its lifetime. A sixteenth caps that at ~6% of the
-/// document. MEASURED: en_ulb needs 0.02% (1,808 runs over 4.5 MB), en_ult
-/// 0.8% — both far inside, so the cap only ever catches a document with almost
-/// no ASCII in it, which is exactly where the map stops paying anyway.
+/// Bounded because of where this runs: wasm linear memory GROWS AND NEVER
+/// SHRINKS, so a map transient to one call still raises the page's high-water
+/// mark for its lifetime.
+///
+/// A fraction ALONE is the wrong shape — it scales the allowance to the
+/// document, but the cost that matters is absolute. A 72 KB book of bsb needs
+/// ~700 entries: 6 KB of map, nothing at all, yet 9% of its source. So the
+/// allowance is the larger of a fraction and a floor, and only a document big
+/// enough for the fraction to exceed [`RUN_FLOOR`] is capped by it.
 const RUN_BUDGET_NUMERATOR: usize = 1;
-const RUN_BUDGET_DENOMINATOR: usize = 16;
+const RUN_BUDGET_DENOMINATOR: usize = 8;
+/// Map bytes any document may have regardless of its size.
+const RUN_FLOOR: usize = 256 << 10;
+
+/// Entries a document of `source_len` bytes may spend on its map.
+fn allowance(source_len: usize) -> usize {
+    let fraction = source_len * RUN_BUDGET_NUMERATOR / RUN_BUDGET_DENOMINATOR;
+    fraction.max(RUN_FLOOR) / ENTRY_BYTES
+}
 /// `byte` + `utf16` + `width` per entry.
 const ENTRY_BYTES: usize = 9;
 /// Bytes of [`Runs::promising`]'s look-ahead.
@@ -256,7 +267,7 @@ impl Runs {
     /// carrying a high bit falls to the byte walk.
     pub fn new(source: &[u8]) -> Option<Runs> {
         const HIGH: u64 = 0x8080_8080_8080_8080;
-        let budget = source.len() * RUN_BUDGET_NUMERATOR / RUN_BUDGET_DENOMINATOR / ENTRY_BYTES;
+        let budget = allowance(source.len());
         if !Runs::promising(source, budget) {
             return None;
         }
