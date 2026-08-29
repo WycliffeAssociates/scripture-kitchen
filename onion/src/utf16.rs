@@ -200,6 +200,193 @@ impl<'s> Utf16Index<'s> {
     }
 }
 
+/// Byte → UTF-16 with NO byte scanning: the document as runs of uniform
+/// character width.
+///
+/// ```text
+/// "\\v 1 λόγος ἦν"   →  [ (0, 0, w1), (5, 5, w2), (15, 10, w1), (16, 11, w3), (22, 13, w1) ]
+///                            ASCII       λόγος        space        ἦν            (end)
+/// ```
+///
+/// Inside a run the map is affine — `utf16 = run.utf16 + (byte − run.byte) /
+/// width` — so a query is a subtract, a divide by a constant, and an add.
+/// [`Cursor`] costs a SWAR scan of every byte between consecutive queries,
+/// which is one pass over the document PER caller; this costs one pass to
+/// build and none thereafter, so ten readers share the one build.
+///
+/// The size is one entry per width change, i.e. per non-ASCII run and the
+/// ASCII stretch after it. MEASURED: en_ulb 0.12% non-ASCII, 1,808 runs over
+/// 4.5 MB; en_ult 11.7%, 935k over 103 MB. A document with no ASCII at all
+/// approaches one entry per word, which is why [`Runs::worth_it`] exists.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Runs {
+    /// Ascending; `byte[i]` is the first byte of run `i`.
+    byte: Vec<u32>,
+    /// UTF-16 offset of `byte[i]`.
+    utf16: Vec<u32>,
+    /// Bytes per character in run `i` — 1, 2, 3 or 4.
+    width: Vec<u8>,
+    len_utf16: u32,
+}
+
+/// What a run map may cost, as a fraction of the source it maps, before a
+/// [`Cursor`] is the better tool. One entry is nine bytes.
+///
+/// Deliberately tight because of where this runs: wasm linear memory GROWS AND
+/// NEVER SHRINKS, so a map that is transient to one call still raises the
+/// page's high-water mark for its lifetime. A sixteenth caps that at ~6% of the
+/// document. MEASURED: en_ulb needs 0.02% (1,808 runs over 4.5 MB), en_ult
+/// 0.8% — both far inside, so the cap only ever catches a document with almost
+/// no ASCII in it, which is exactly where the map stops paying anyway.
+const RUN_BUDGET_NUMERATOR: usize = 1;
+const RUN_BUDGET_DENOMINATOR: usize = 16;
+/// `byte` + `utf16` + `width` per entry.
+const ENTRY_BYTES: usize = 9;
+/// Bytes of [`Runs::promising`]'s look-ahead.
+const PROBE: usize = 64 << 10;
+
+impl Runs {
+    /// One pass, ASCII eight bytes at a time — `None` when the document's shape
+    /// would blow the budget, ABANDONED as soon as that is known rather than
+    /// finished and discarded.
+    ///
+    /// A word with no high bit is eight width-1 characters, so the common case
+    /// never classifies a lead byte at all — which is the difference between
+    /// this and a `Cursor` scan on a document that is 99.9% ASCII. Only a word
+    /// carrying a high bit falls to the byte walk.
+    pub fn new(source: &[u8]) -> Option<Runs> {
+        const HIGH: u64 = 0x8080_8080_8080_8080;
+        let budget = source.len() * RUN_BUDGET_NUMERATOR / RUN_BUDGET_DENOMINATOR / ENTRY_BYTES;
+        if !Runs::promising(source, budget) {
+            return None;
+        }
+        let mut runs = Runs {
+            byte: Vec::new(),
+            utf16: Vec::new(),
+            width: Vec::new(),
+            len_utf16: 0,
+        };
+        let (mut at, mut units) = (0usize, 0u32);
+        let mut open: Option<u8> = None;
+        while at < source.len() {
+            if open == Some(1) && at + 8 <= source.len() {
+                // Skip whole ASCII words without touching a lead table.
+                let word = u64::from_ne_bytes(source[at..at + 8].try_into().expect("eight bytes"));
+                if word & HIGH == 0 {
+                    at += 8;
+                    units += 8;
+                    continue;
+                }
+            }
+            let (bytes, step) = lead(source[at]);
+            let width = bytes as u8;
+            if open != Some(width) {
+                if runs.byte.len() >= budget {
+                    return None;
+                }
+                runs.byte.push(at as u32);
+                runs.utf16.push(units);
+                runs.width.push(width);
+                open = Some(width);
+            }
+            at += bytes;
+            units += step;
+        }
+        runs.len_utf16 = units;
+        Some(runs)
+    }
+
+    pub fn len_utf16(&self) -> u32 {
+        self.len_utf16
+    }
+
+    /// A cheap read on whether the whole document can fit the budget, from its
+    /// first [`PROBE`] bytes.
+    ///
+    /// Abandoning mid-build still pays for however much was walked first — on a
+    /// script-heavy book that was a third of the document, walked and thrown
+    /// away. A probe costs a fixed 64 KB and answers before anything is built.
+    /// Density is not uniform, so the projection is allowed to be generous:
+    /// being wrong here costs a scan, never an answer.
+    fn promising(source: &[u8], budget: usize) -> bool {
+        const HIGH: u64 = 0x8080_8080_8080_8080;
+        let probe = source.len().min(PROBE);
+        if probe == 0 {
+            return true;
+        }
+        // Words carrying a high bit bound the width changes: a run boundary
+        // needs one, and eight ASCII bytes can never hold a boundary.
+        let mut mixed = 0usize;
+        for word in source[..probe].chunks_exact(8) {
+            let w = u64::from_ne_bytes(word.try_into().expect("eight bytes"));
+            mixed += usize::from(w & HIGH != 0);
+        }
+        // Two boundaries per mixed word is the worst shape (in, then out).
+        let projected = mixed * 2 * source.len() / probe;
+        projected <= budget
+    }
+
+    /// Run index for `byte`, searched from scratch. `at` from a previous call
+    /// on an ASCENDING sequence makes this a step instead — see [`Runs::walk`].
+    fn run_of(&self, byte: u32) -> usize {
+        self.byte
+            .partition_point(|start| *start <= byte)
+            .saturating_sub(1)
+    }
+
+    /// The UTF-16 offset of a source byte offset, with [`Cursor::to_utf16`]'s
+    /// semantics: an interior byte snaps down to its character (the division
+    /// does it), past the end clamps.
+    pub fn to_utf16(&self, byte: u32) -> u32 {
+        if self.byte.is_empty() {
+            return 0;
+        }
+        self.at_run(self.run_of(byte), byte)
+    }
+
+    /// `to_utf16` once the run is known.
+    fn at_run(&self, run: usize, byte: u32) -> u32 {
+        let base = self.byte[run];
+        let into = byte.saturating_sub(base);
+        let units = match self.width[run] {
+            1 => into,
+            2 => into / 2,
+            3 => into / 3,
+            _ => (into / 4) * 2,
+        };
+        (self.utf16[run] + units).min(self.len_utf16)
+    }
+
+    /// A cursor for one ASCENDING sequence of queries: the run index only ever
+    /// moves forward, so a whole read's offsets cost one walk of the RUNS —
+    /// never of the source.
+    pub fn walk(&self) -> RunWalk<'_> {
+        RunWalk { runs: self, at: 0 }
+    }
+}
+
+/// See [`Runs::walk`].
+pub struct RunWalk<'r> {
+    runs: &'r Runs,
+    at: usize,
+}
+
+impl RunWalk<'_> {
+    /// Total, like [`Runs::to_utf16`]. A backward query is legal and rewinds.
+    pub fn to_utf16(&mut self, byte: u32) -> u32 {
+        if self.runs.byte.is_empty() {
+            return 0;
+        }
+        if byte < self.runs.byte[self.at] {
+            self.at = 0;
+        }
+        while self.at + 1 < self.runs.byte.len() && self.runs.byte[self.at + 1] <= byte {
+            self.at += 1;
+        }
+        self.runs.at_run(self.at, byte)
+    }
+}
+
 /// A STREAMING `(byte, utf16)` position over one string — the bulk-out sibling
 /// of [`Utf16Index`].
 ///

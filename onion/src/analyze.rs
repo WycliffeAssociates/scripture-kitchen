@@ -466,10 +466,13 @@ pub fn analyze_from(
         out.lines = lines(source, tokens);
     }
 
-    // The one wall: every emitted byte offset becomes a UTF-16 offset, one
-    // sweep per read.
+    // The one wall: every emitted byte offset becomes a UTF-16 offset. Built
+    // ONCE and shared by all ten reads — a `Cursor` would rescan the document
+    // per read.
+    let runs = crate::utf16::Runs::new(source);
+    let runs = runs.as_ref();
     let convert = |values: &mut Vec<u32>, stride: usize, fields: &[usize]| {
-        to_utf16(source, values, stride, fields);
+        to_utf16_with(source, runs, values, stride, fields);
     };
     convert(&mut out.chapters, stride::CHAPTERS, &[1, 2, 3, 4, 5, 6]);
     convert(&mut out.blocks, stride::BLOCKS, &[1, 2, 3]);
@@ -1068,10 +1071,19 @@ fn family(idx: MarkerIdx) -> u32 {
 /// converts in one sweep of `source`; anything else sorts first, so the caller
 /// need not pre-order.
 pub fn rows_to_utf16(source: &[u8], values: &mut [u32], stride: usize, fields: &[usize]) {
-    to_utf16(source, values, stride, fields);
+    to_utf16_with(source, None, values, stride, fields);
 }
 
-fn to_utf16(source: &[u8], values: &mut [u32], stride: usize, fields: &[usize]) {
+/// The wall for one read. `runs` is the shared map when the document's shape
+/// makes one worth building; without it a [`Cursor`] walks the source, which is
+/// correct but costs a pass per read.
+fn to_utf16_with(
+    source: &[u8],
+    runs: Option<&crate::utf16::Runs>,
+    values: &mut [u32],
+    stride: usize,
+    fields: &[usize],
+) {
     if values.is_empty() {
         return;
     }
@@ -1089,18 +1101,27 @@ fn to_utf16(source: &[u8], values: &mut [u32], stride: usize, fields: &[usize]) 
         previous = value;
     }
 
-    let mut cursor = Cursor::new(source);
-    if ascending {
-        for at in positions() {
-            values[at] = cursor.to_utf16(values[at]);
-        }
-        return;
+    // One ascending walk either way: the run map steps a compact index, the
+    // cursor a SWAR scan of the bytes between queries.
+    macro_rules! convert {
+        ($walk:expr) => {{
+            let mut walk = $walk;
+            if ascending {
+                for at in positions() {
+                    values[at] = walk.to_utf16(values[at]);
+                }
+            } else {
+                let mut order: Vec<usize> = positions().filter(|at| values[*at] != NONE).collect();
+                order.sort_unstable_by_key(|at| values[*at]);
+                for at in order {
+                    values[at] = walk.to_utf16(values[at]);
+                }
+            }
+        }};
     }
-
-    let mut order: Vec<usize> = positions().filter(|at| values[*at] != NONE).collect();
-    order.sort_unstable_by_key(|at| values[*at]);
-    for at in order {
-        values[at] = cursor.to_utf16(values[at]);
+    match runs {
+        Some(runs) => convert!(runs.walk()),
+        None => convert!(Cursor::new(source)),
     }
 }
 
