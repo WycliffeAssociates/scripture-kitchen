@@ -1,6 +1,7 @@
 //! The three serializations, pre-lexed and pre-built — the pass alone.
 //!
 //!     cargo bench -p usfm_onion --bench export
+//!     # profiling: see the recipe in pipeline.rs
 //!
 //! Each is behind its own default-on feature, so a build that dropped one has
 //! no bench for it either. Rates are over SOURCE bytes and tokens, the two

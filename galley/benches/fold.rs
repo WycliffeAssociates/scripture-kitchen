@@ -2,6 +2,7 @@
 //!
 //!     cargo bench -p usfm_galley
 //!     cargo bench -p usfm_galley -- folded          # the cache path alone
+//!     # profiling: see the recipe in onion/benches/pipeline.rs
 //!
 //! The keystroke: one character typed into the middle chapter's first text
 //! token. Every call presents a NEVER-SEEN text, so the edited chunk is a

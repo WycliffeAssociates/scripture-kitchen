@@ -16,10 +16,18 @@
 //! - `pass_only` — pre-lexed AND pre-built, so the timing is the named pass
 //!   alone. Its `full` sibling is its ceiling.
 //!
-//! Profiling one of these:
-//!     cargo bench -p usfm_onion --profile profiling --no-run
-//!     samply record -- target/profiling/deps/pipeline-<hash> \
-//!         lex::serial --sample-count 1 --sample-size 200
+//! Profiling one of these — the SAME binary `cargo bench` runs, so a regression
+//! is profiled where it was measured, with no second harness to keep in step:
+//!
+//!     cargo bench --profile profiling --no-run          # prints the path
+//!     samply record --save-only --unstable-presymbolicate -o p.json.gz -- \
+//!         target/profiling/deps/pipeline-<hash> --bench lex::serial
+//!
+//! `--bench` is required — without it Divan follows the libtest convention and
+//! only LISTS. `--unstable-presymbolicate` writes the `.syms.json` sidecar the
+//! `profiling` profile's line tables feed; without it every frame is a raw
+//! address. Name one bench: a whole-suite profile mixes passes, and Divan's own
+//! frames go from ~2% of samples to ~5%.
 
 use usfm_onion::mask::Filter;
 

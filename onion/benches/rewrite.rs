@@ -1,6 +1,7 @@
 //! The two passes that REWRITE rather than read: format and diff.
 //!
 //!     cargo bench -p usfm_onion --bench rewrite
+//!     # profiling: see the recipe in pipeline.rs
 //!     cargo bench -p usfm_onion --bench rewrite -- variants
 //!
 //! These carry the measurements the playground's `--format-trace` and
