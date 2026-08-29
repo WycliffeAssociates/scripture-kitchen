@@ -9,7 +9,7 @@
 //! An all-hit call (the same text twice) is not benched here; it measures the
 //! pre-scan + checksum floor, not the fold.
 //!
-//! Three numbers per book:
+//! Per book, fresh against folded:
 //!
 //! - `analyze_fresh` — `onion::analyze` with every want. What the editor pays
 //!   per keystroke TODAY: [`FoldCache`] folds lint, not analyze, so this one
@@ -17,6 +17,11 @@
 //! - `lint_fresh` — the un-folded `lint(lex, build)` pipeline. The fold's
 //!   baseline.
 //! - `lint_folded` — the same answer with one dirty chunk.
+//! - `analyze_folded` — every read, with the lex, the CST build and the lint
+//!   walk served from cache for every clean chunk. `analyze_fresh` is what it
+//!   replaces.
+//! - `verse_text_folded` — the mask a downstream text consumer reads, off the
+//!   same assembled ingredients.
 //!
 //! `bytes/s` is over the WHOLE book on purpose: per keystroke the fold still
 //! pre-scans and checksums every byte, so the whole-book rate is the floor
@@ -49,6 +54,10 @@ const BOOKS: &[&str] = &[
 /// One keystroke per entry of `keystrokes`, each landing in the same chapter.
 struct Book {
     text: String,
+    /// Chunks in the unedited book. At or below galley's gate the cache is
+    /// bypassed entirely, so the folded rows measure the fresh path — kept in
+    /// the ladder on purpose, as the floor where folding has nothing to reuse.
+    chunks: usize,
     /// Successive states of typing into one chapter: `keystrokes[i]` has `i+1`
     /// characters inserted. Long enough that a bench run never wraps and
     /// re-presents a text the cache has already seen.
@@ -97,7 +106,11 @@ fn load(name: &str) -> Book {
         })
         .collect();
 
-    Book { text, keystrokes }
+    Book {
+        chunks: starts.len(),
+        text,
+        keystrokes,
+    }
 }
 
 fn book(name: &str) -> &'static Book {
@@ -120,10 +133,20 @@ fn warmed(book: &Book, name: &str) -> FoldCache {
     let before = cache.misses();
     cache.lint(&book.keystrokes[0]);
     let dirty = cache.misses() - before;
-    assert_eq!(
-        dirty, 1,
-        "{name}: one keystroke should dirty one chunk, dirtied {dirty}"
-    );
+    if cache.is_empty() {
+        // Below galley's chunk gate: nothing is cached, so every call recomputes
+        // every chunk. The invariant here is that the gate held, not that one
+        // chunk went dirty.
+        assert_eq!(
+            dirty, book.chunks as u64,
+            "{name}: a gated book recomputes every chunk"
+        );
+    } else {
+        assert_eq!(
+            dirty, 1,
+            "{name}: one keystroke should dirty one chunk, dirtied {dirty}"
+        );
+    }
     cache
 }
 
@@ -150,6 +173,49 @@ fn lint_fresh(bencher: divan::Bencher, name: &str) {
         let tokens = onion::lex(typed);
         let cst = onion::cst::build(&tokens);
         divan::black_box(onion::lint::lint(typed.as_bytes(), &tokens, &cst))
+    });
+}
+
+/// Every read per keystroke, folded — the number an editor actually pays.
+#[divan::bench(args = BOOKS, sample_count = SAMPLES, sample_size = 1)]
+fn analyze_folded(bencher: divan::Bencher, name: &str) {
+    let book = book(name);
+    let mut cache = warmed(book, name);
+    let mut next = 1;
+    bencher
+        .counter(BytesCount::new(book.text.len()))
+        .bench_local(|| {
+            let typed = &book.keystrokes[next];
+            next += 1;
+            divan::black_box(cache.analyze(divan::black_box(typed), onion::analyze::wants::ALL))
+        });
+}
+
+/// The verse-text mask off the cached ingredients, against building it fresh.
+#[divan::bench(args = BOOKS, sample_count = SAMPLES, sample_size = 1)]
+fn verse_text_folded(bencher: divan::Bencher, name: &str) {
+    let book = book(name);
+    let mut cache = warmed(book, name);
+    let filter = onion::mask::Filter::verse_text();
+    let mut next = 1;
+    bencher
+        .counter(BytesCount::new(book.text.len()))
+        .bench_local(|| {
+            let typed = &book.keystrokes[next];
+            next += 1;
+            divan::black_box(cache.masked(divan::black_box(typed), &filter))
+        });
+}
+
+#[divan::bench(args = BOOKS, sample_count = 20)]
+fn verse_text_fresh(bencher: divan::Bencher, name: &str) {
+    let book = book(name);
+    let typed = &book.keystrokes[0];
+    let filter = onion::mask::Filter::verse_text();
+    bencher.counter(BytesCount::new(book.text.len())).bench(|| {
+        let tokens = onion::lex(typed);
+        let tree = onion::cst::build(&tokens);
+        divan::black_box(onion::mask(typed.as_bytes(), &tokens, &tree, &filter))
     });
 }
 

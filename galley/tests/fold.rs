@@ -232,3 +232,163 @@ fn fold_cache_equals_fresh_over_the_corpus() {
     }
     println!("fold cache oracle held over {} books", paths.len());
 }
+
+// ---------------------------------------------------------------------------
+// The analyze fold: assembled ingredients must give onion's own answer.
+// ---------------------------------------------------------------------------
+
+/// Every `Analysis` field, folded vs fresh. Field-by-field rather than
+/// `assert_eq!` on the struct so a failure names the read that broke.
+fn assert_analysis_matches(folded: &onion::analyze::Analysis, text: &str, wants: u32, why: &str) {
+    let fresh = onion::analyze::analyze(text, wants, None);
+    assert_eq!(folded.len_utf16, fresh.len_utf16, "len_utf16 — {why}");
+    assert_eq!(
+        folded.usfm_version, fresh.usfm_version,
+        "usfm_version — {why}"
+    );
+    assert_eq!(folded.chapters, fresh.chapters, "chapters — {why}");
+    assert_eq!(folded.blocks, fresh.blocks, "blocks — {why}");
+    assert_eq!(folded.lines, fresh.lines, "lines — {why}");
+    assert_eq!(
+        folded.note_extents, fresh.note_extents,
+        "note_extents — {why}"
+    );
+    assert_eq!(folded.note_parts, fresh.note_parts, "note_parts — {why}");
+    assert_eq!(folded.token_spans, fresh.token_spans, "token_spans — {why}");
+    assert_eq!(folded.text_runs, fresh.text_runs, "text_runs — {why}");
+    assert_eq!(
+        folded.verse_anchors, fresh.verse_anchors,
+        "verse_anchors — {why}"
+    );
+    assert_eq!(folded.diagnostics, fresh.diagnostics, "diagnostics — {why}");
+    assert_eq!(folded.fixes, fresh.fixes, "fixes — {why}");
+    assert_eq!(folded.fix_edits, fresh.fix_edits, "fix_edits — {why}");
+    assert_eq!(folded.fix_lens, fresh.fix_lens, "fix_lens — {why}");
+    assert_eq!(folded.fix_text, fresh.fix_text, "fix_text — {why}");
+}
+
+#[test]
+fn the_analyze_fold_agrees_with_a_fresh_analyze() {
+    let wants = onion::analyze::wants::ALL;
+    let mut cache = FoldCache::new(64 << 20);
+    // Cold, warm, and after an edit — the three states that exercise a
+    // different mix of hits, misses and assembly.
+    assert_analysis_matches(&cache.analyze(BOOK, wants), BOOK, wants, "cold");
+    assert_analysis_matches(&cache.analyze(BOOK, wants), BOOK, wants, "warm");
+    let edited = BOOK.replace("a", "aa");
+    assert_analysis_matches(&cache.analyze(&edited, wants), &edited, wants, "edited");
+    assert_analysis_matches(&cache.analyze(BOOK, wants), BOOK, wants, "back again");
+
+    // A want subset must not drag in reads it did not ask for.
+    let some = onion::analyze::wants::LINES | onion::analyze::wants::CHAPTERS;
+    assert_analysis_matches(&cache.analyze(BOOK, some), BOOK, some, "subset");
+}
+
+#[test]
+fn the_masked_fold_agrees_with_a_fresh_mask() {
+    let mut cache = FoldCache::new(64 << 20);
+    for filter in [
+        onion::mask::Filter::verse_text(),
+        onion::mask::Filter::structure(),
+    ] {
+        let folded = cache.masked(BOOK, &filter);
+        let tokens = onion::lex(BOOK);
+        let tree = onion::cst::build(&tokens);
+        let fresh = onion::mask(BOOK.as_bytes(), &tokens, &tree, &filter);
+        assert_eq!(folded.ranges, fresh.ranges, "mask ranges");
+        assert_eq!(folded.starts, fresh.starts, "mask starts");
+    }
+}
+
+/// The corpus law: over every book, folded `analyze` and the verse_text mask
+/// equal the fresh pipeline — cold, then warm, then after a one-chapter edit.
+#[test]
+#[ignore = "corpus-scale oracle; run --release --ignored at pass end"]
+fn the_analyze_fold_holds_over_the_corpus() {
+    let wants = onion::analyze::wants::ALL;
+    let root = format!("{}/../testData/exampleCorpora", env!("CARGO_MANIFEST_DIR"));
+    let mut paths = Vec::new();
+    collect(std::path::Path::new(&root), &mut paths);
+    paths.sort();
+    assert!(!paths.is_empty(), "no corpus under {root}");
+
+    let mut books = 0;
+    for path in &paths {
+        let Ok(text) = std::fs::read_to_string(path) else {
+            continue;
+        };
+        let name = path.display().to_string();
+        let mut cache = FoldCache::new(64 << 20);
+        assert_analysis_matches(&cache.analyze(&text, wants), &text, wants, &name);
+        assert_analysis_matches(&cache.analyze(&text, wants), &text, wants, &name);
+
+        let filter = onion::mask::Filter::verse_text();
+        let folded = cache.masked(&text, &filter);
+        let tokens = onion::lex(&text);
+        let tree = onion::cst::build(&tokens);
+        let fresh = onion::mask(text.as_bytes(), &tokens, &tree, &filter);
+        assert_eq!(folded.ranges, fresh.ranges, "verse_text ranges — {name}");
+
+        // One chapter dirtied: the assembly now mixes a fresh unit with hits.
+        if let Some(mid) = text.char_indices().nth(text.len() / 2).map(|(i, _)| i) {
+            let at = mid + text[mid..].find(' ').unwrap_or(0);
+            let mut edited = text.clone();
+            edited.insert(at, 'x');
+            assert_analysis_matches(&cache.analyze(&edited, wants), &edited, wants, &name);
+        }
+        books += 1;
+    }
+    println!("analyze fold holds over {books} books");
+}
+
+fn collect(at: &std::path::Path, into: &mut Vec<std::path::PathBuf>) {
+    let Ok(dir) = std::fs::read_dir(at) else {
+        return;
+    };
+    for entry in dir.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect(&path, into);
+        } else if path.extension().is_some_and(|e| e == "usfm") {
+            into.push(path);
+        }
+    }
+}
+
+#[test]
+fn a_one_chapter_book_is_computed_and_never_cached() {
+    // Two chunks — front matter plus one chapter — so an entry could only ever
+    // serve the front matter. The answer must still be right.
+    const EPISTLE: &str = "\\id JUD\n\\h Jude\n\\c 1\n\\p \\v 1 Jude, a servant.\n\\v 2 Mercy.\n";
+    assert_eq!(
+        onion::chunk::pre_scan(EPISTLE.as_bytes()).starts.len(),
+        2,
+        "the fixture must sit at the gate"
+    );
+
+    let mut cache = FoldCache::new(16 << 20);
+    assert_matches(&cache.lint(EPISTLE), EPISTLE, "gated cold");
+    assert_matches(&cache.lint(EPISTLE), EPISTLE, "gated warm");
+    let wants = onion::analyze::wants::ALL;
+    assert_analysis_matches(
+        &cache.analyze(EPISTLE, wants),
+        EPISTLE,
+        wants,
+        "gated analyze",
+    );
+
+    assert_eq!(cache.len(), 0, "a gated book leaves no entries");
+    assert_eq!(cache.resident_bytes(), 0, "…and no residency");
+
+    // Typing into it must not accumulate anything either.
+    for n in 1..=20 {
+        let typed = EPISTLE.replace("Mercy", &format!("{}Mercy", "x".repeat(n)));
+        assert_matches(&cache.lint(&typed), &typed, "gated keystroke");
+    }
+    assert_eq!(cache.len(), 0, "twenty keystrokes, still no entries");
+
+    // And a book ABOVE the gate still caches, so the gate is not global.
+    let three_chapters = format!("{EPISTLE}\\c 2\n\\p \\v 1 more\n\\c 3\n\\p \\v 1 yet more\n");
+    cache.lint(&three_chapters);
+    assert!(!cache.is_empty(), "a multi-chapter book still caches");
+}

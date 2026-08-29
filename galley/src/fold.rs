@@ -14,6 +14,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::onion;
+use onion::analyze::Analysis;
 use onion::cst::{self, Cst};
 use onion::lint::{self, Carried, ChunkContext, LintReport, UsfmVersion};
 use xxhash_rust::xxh3::xxh3_128;
@@ -21,8 +22,10 @@ use xxhash_rust::xxh3::xxh3_128;
 /// One cached unit's products — a chunk, or a fused run of chunks whose
 /// interior boundaries were dirty. Everything chunk-relative.
 struct Products {
-    #[allow(dead_code)]
     cst: Cst,
+    /// The chunk's own token stream, `start` CHUNK-RELATIVE like everything
+    /// else here. Rebased on assembly, never mutated in place.
+    tokens: Vec<onion::Token>,
     /// The map half of lint (`onion::lint::lint_chunk`): chunk-relative,
     /// every finding this chunk can prove alone.
     local: LintReport,
@@ -65,6 +68,14 @@ struct Key {
     hash: u128,
     context: ContextKey,
 }
+
+/// At or below this many chunks a book has AT MOST ONE chapter, so an entry can
+/// only ever serve the front matter. Measured over en_ulb's five two-chunk
+/// books (3JN, 2JN, PHM, OBA, JUD): folded analyze is 1.02–1.14x fresh, i.e.
+/// break-even — while fifty keystrokes in Jude would leave 52 entries and 74 KB
+/// resident for a 3.9 KB book. Bypassing is not about speed; it keeps entries
+/// that never pay from evicting the large-book units that do.
+const UNCACHED_CHUNKS: usize = 2;
 
 /// handrolled byte-budget LRU (chunk-fold.md's ruling: at dozens-to-
 /// hundreds of entries, eviction is a linear scan and a crate such as moka is currently overkill
@@ -111,6 +122,49 @@ impl FoldCache {
     /// every clean chunk served from the cache: one dirty chunk's walk plus
     /// the reduce.
     pub fn lint(&mut self, text: &str) -> LintReport {
+        let units = self.resolve(text);
+        let (byte_bases, token_bases) = bases(&units);
+        reduce(&units, &byte_bases, &token_bases)
+    }
+
+    /// The whole book's `analyze` reads, with the lex, the CST build and the
+    /// lint walk served from the cache for every clean chunk.
+    ///
+    /// The ingredients are assembled, not re-derived: `cst::concat` shifts the
+    /// per-chunk trees into one, the token streams concatenate under their byte
+    /// bases, and the folded report is the one `onion` would have computed.
+    pub fn analyze(&mut self, text: &str, wants: u32) -> Analysis {
+        // One resolve for both halves: the reduce and the assembly read the
+        // same units.
+        let units = self.resolve(text);
+        let (byte_bases, token_bases) = bases(&units);
+        let report = reduce(&units, &byte_bases, &token_bases);
+        let (tokens, tree) = assemble(&units);
+        onion::analyze::analyze_from(
+            text.as_bytes(),
+            &onion::analyze::Prebuilt {
+                tokens: &tokens,
+                cst: Some(&tree),
+                lint: Some(&report),
+            },
+            wants,
+            None,
+        )
+    }
+
+    /// One recipe's mask over the same assembled ingredients — what a
+    /// downstream consumer of verse text reads. Not folded per chunk: the walk
+    /// is cheap once the tree it walks is free.
+    pub fn masked(&mut self, text: &str, filter: &onion::mask::Filter) -> onion::mask::Mask {
+        let units = self.resolve(text);
+        let (tokens, tree) = assemble(&units);
+        onion::mask(text.as_bytes(), &tokens, &tree, filter)
+    }
+
+    /// Resolve units front to back, serving from the cache or computing. Chunk
+    /// 0's product carries the context every later key needs, so the order is
+    /// load-bearing.
+    fn resolve(&mut self, text: &str) -> Vec<(u32, Rc<Products>)> {
         let bytes = text.as_bytes();
         let starts = onion::chunk::pre_scan(bytes).starts;
 
@@ -119,6 +173,8 @@ impl FoldCache {
         let mut units: Vec<(u32, Rc<Products>)> = Vec::new();
         let mut ctx = ChunkContext::default();
         let mut context_key = ContextKey::SelfScanned;
+        // A one-chapter book is computed and thrown away — see UNCACHED_CHUNKS.
+        let cacheable = starts.len() > UNCACHED_CHUNKS;
         let mut at = 0usize;
         while at < starts.len() {
             let start = starts[at] as usize;
@@ -129,28 +185,27 @@ impl FoldCache {
                     hash: xxh3_128(&bytes[start..end]),
                     context: context_key,
                 };
-                match self.map.get_mut(&key) {
-                    Some(entry) => {
-                        self.tick += 1;
-                        entry.last_tick = self.tick;
-                        match &entry.cached {
-                            Cached::Unit(products) => break products.clone(),
-                            Cached::OpenBoundary if next < starts.len() => {
-                                next += 1;
-                                continue;
-                            }
-                            // A stale open verdict on what is now the final
-                            // span cannot widen; recompute below.
-                            Cached::OpenBoundary => {}
+                if let Some(entry) = self.map.get_mut(&key).filter(|_| cacheable) {
+                    self.tick += 1;
+                    entry.last_tick = self.tick;
+                    match &entry.cached {
+                        Cached::Unit(products) => break products.clone(),
+                        Cached::OpenBoundary if next < starts.len() => {
+                            next += 1;
+                            continue;
                         }
+                        // A stale open verdict on what is now the final
+                        // span cannot widen; recompute below.
+                        Cached::OpenBoundary => {}
                     }
-                    None => {}
                 }
                 let slice = &text[start..end];
                 let tokens = onion::lex(slice);
                 let chunk = cst::build_chunk(&tokens, end == bytes.len());
                 if chunk.open_at_end && next < starts.len() {
-                    self.insert(key, Cached::OpenBoundary, 64);
+                    if cacheable {
+                        self.insert(key, Cached::OpenBoundary, 64);
+                    }
                     next += 1;
                     continue;
                 }
@@ -159,13 +214,16 @@ impl FoldCache {
                     lint::lint_chunk(slice.as_bytes(), &tokens, &chunk.cst, &ctx);
                 let products = Rc::new(Products {
                     token_count: tokens.len() as u32,
-                    bytes: product_bytes(&chunk.cst, &local),
+                    bytes: product_bytes(&chunk.cst, &local, &tokens),
                     cst: chunk.cst,
+                    tokens,
                     local,
                     carried,
                 });
-                let weight = products.bytes;
-                self.insert(key, Cached::Unit(products.clone()), weight);
+                if cacheable {
+                    let weight = products.bytes;
+                    self.insert(key, Cached::Unit(products.clone()), weight);
+                }
                 break products;
             };
             if at == 0 {
@@ -182,26 +240,7 @@ impl FoldCache {
             at = next;
         }
 
-        // THE REDUCE: seams and finish over the recorded summaries — ~50
-        // tiny structs, microseconds, no source, no tokens, no CST.
-        let byte_bases: Vec<u32> = units.iter().map(|(base, _)| *base).collect();
-        let token_bases: Vec<u32> = units
-            .iter()
-            .scan(0u32, |sum, (_, unit)| {
-                let base = *sum;
-                *sum += unit.token_count;
-                Some(base)
-            })
-            .collect();
-        let summaries: Vec<&Carried> = units.iter().map(|(_, unit)| &unit.carried).collect();
-        let (book, version) = units
-            .first()
-            .map(|(_, unit)| (unit.local.book, unit.local.declared_version))
-            .unwrap_or_default();
-        let seam = lint::reduce(&summaries, &token_bases, &byte_bases, book, version);
-
-        let locals: Vec<&LintReport> = units.iter().map(|(_, unit)| &unit.local).collect();
-        lint::merge_reports(&locals, &token_bases, &byte_bases, seam)
+        units
     }
 
     fn insert(&mut self, key: Key, cached: Cached, bytes: usize) {
@@ -239,10 +278,55 @@ impl FoldCache {
     }
 }
 
+/// THE REDUCE: seams and finish over the recorded summaries — ~50 tiny
+/// structs, microseconds, no source, no tokens, no CST.
+fn reduce(units: &[(u32, Rc<Products>)], byte_bases: &[u32], token_bases: &[u32]) -> LintReport {
+    let summaries: Vec<&Carried> = units.iter().map(|(_, unit)| &unit.carried).collect();
+    let (book, version) = units
+        .first()
+        .map(|(_, unit)| (unit.local.book, unit.local.declared_version))
+        .unwrap_or_default();
+    let seam = lint::reduce(&summaries, token_bases, byte_bases, book, version);
+    let locals: Vec<&LintReport> = units.iter().map(|(_, unit)| &unit.local).collect();
+    lint::merge_reports(&locals, token_bases, byte_bases, seam)
+}
+
+/// A unit's byte base and token base, index-aligned with `units`.
+fn bases(units: &[(u32, Rc<Products>)]) -> (Vec<u32>, Vec<u32>) {
+    let byte_bases = units.iter().map(|(base, _)| *base).collect();
+    let token_bases = units
+        .iter()
+        .scan(0u32, |sum, (_, unit)| {
+            let base = *sum;
+            *sum += unit.token_count;
+            Some(base)
+        })
+        .collect();
+    (byte_bases, token_bases)
+}
+
+/// Per-chunk products → the whole book's ingredients. Tokens shift by their
+/// chunk's byte base; the trees go through `cst::concat`, whose own oracle is
+/// `concat(build_chunk each) == build(lex(whole))`.
+fn assemble(units: &[(u32, Rc<Products>)]) -> (Vec<onion::Token>, Cst) {
+    let total = units.iter().map(|(_, u)| u.tokens.len()).sum();
+    let mut tokens: Vec<onion::Token> = Vec::with_capacity(total);
+    for (base, unit) in units {
+        tokens.extend(unit.tokens.iter().map(|token| onion::Token {
+            start: token.start + base,
+            ..*token
+        }));
+    }
+    let parts: Vec<&Cst> = units.iter().map(|(_, unit)| &unit.cst).collect();
+    let counts: Vec<u32> = units.iter().map(|(_, unit)| unit.token_count).collect();
+    (tokens, cst::concat(&parts, &counts))
+}
+
 /// Estimated resident size of one unit's products — the LRU weight. An
 /// estimate is enough: the budget bounds memory class, not exact bytes.
-fn product_bytes(cst: &Cst, local: &LintReport) -> usize {
-    cst.nodes.len() * 16
+fn product_bytes(cst: &Cst, local: &LintReport, tokens: &[onion::Token]) -> usize {
+    size_of_val(tokens)
+        + cst.nodes.len() * 16
         + cst.child_ids.len() * 4
         + local.observations.len() * 16
         + local.fix_of.len() * 4
