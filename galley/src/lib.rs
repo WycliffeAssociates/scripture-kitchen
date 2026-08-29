@@ -23,6 +23,9 @@ pub use usfm_onion as onion;
 pub mod fold;
 pub use fold::FoldCache;
 
+#[cfg(feature = "wasm")]
+pub mod wasm;
+
 /// The checksum algorithm the hex strings below come from. A consumer
 /// caching against these keys stores this tag alongside; a future
 /// algorithm change bumps the tag and every old key simply misses.

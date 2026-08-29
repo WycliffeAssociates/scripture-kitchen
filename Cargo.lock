@@ -490,7 +490,10 @@ name = "usfm_galley"
 version = "0.1.0"
 dependencies = [
  "divan",
+ "js-sys",
+ "onion-wasm",
  "usfm_onion",
+ "wasm-bindgen",
  "xxhash-rust",
 ]
 

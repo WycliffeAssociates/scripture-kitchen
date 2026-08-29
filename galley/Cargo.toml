@@ -3,16 +3,30 @@ name = "usfm_galley"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+# cdylib is what `wasm-pack build --features wasm` links; rlib keeps the native
+# consumers and `cargo test -p usfm_galley` working against the same code.
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 usfm_onion = { path = "../onion" }
 # xxh3-128 for the content-addressed chunk checksums (vision §13.4:
 # xxh3-128-v1). no_std-friendly, wasm-clean.
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 
+# The JS doorway, feature-gated so a native consumer pays nothing for it.
+# onion-wasm rides in as an rlib: its `#[wasm_bindgen]` exports are
+# export-named shims, so they are linker roots and land in the SAME module —
+# one engine copy, both doors.
+wasm-bindgen = { version = "0.2", optional = true }
+onion-wasm = { path = "../onion-wasm", optional = true }
+js-sys = { version = "0.3", optional = true }
+
 [dev-dependencies]
 divan = "0.1.21"
 
 [features]
+wasm = ["dep:wasm-bindgen", "dep:onion-wasm", "dep:js-sys"]
 # Bench-only: divan's AllocProfiler as the global allocator. See onion's.
 alloc-counts = []
 

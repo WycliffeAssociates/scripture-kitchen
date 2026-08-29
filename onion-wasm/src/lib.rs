@@ -67,7 +67,10 @@ use wasm_bindgen::prelude::*;
 /// array. The field names and the stride schema live in `onion-wasm.ts`
 /// (`RawAnalysis`), which ships in this package and is versioned with this
 /// binary. Nothing here is meant to be indexed by hand.
-fn object(a: &analyze::Analysis) -> Object {
+/// An [`analyze::Analysis`] as the plain JS object every caller reads. Public
+/// so a crate that produces an `Analysis` by another route emits the SAME
+/// fourteen keys rather than restating them.
+pub fn object(a: &analyze::Analysis) -> Object {
     let out = Object::new();
     let set = |key: &str, value: JsValue| {
         Reflect::set(&out, &JsValue::from_str(key), &value)
