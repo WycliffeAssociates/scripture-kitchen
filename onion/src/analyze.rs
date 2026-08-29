@@ -358,27 +358,69 @@ pub struct Analysis {
 /// Borrows stay inside: the tokens, the CST, the mask and the report are all
 /// dropped here, and what comes back owns only numbers.
 pub fn analyze(text: &str, wants: u32, clip: Option<Range<u32>>) -> Analysis {
-    let source = text.as_bytes();
+    let tokens = lex(text);
+    // The CST is the expensive shared artifact: four reads need it, and the
+    // mask walks it. Built only when one of them is asked for.
+    let needs_cst =
+        wants & (wants::BLOCKS | wants::NOTE_EXTENTS | wants::TEXT_RUNS | wants::DIAGNOSTICS) != 0;
+    let cst = needs_cst.then(|| crate::cst::build(&tokens));
+    let prebuilt = Prebuilt {
+        tokens: &tokens,
+        cst: cst.as_ref(),
+        lint: None,
+    };
+    analyze_from(text.as_bytes(), &prebuilt, wants, clip)
+}
+
+/// The artifacts [`analyze`] would otherwise build for itself, for a caller
+/// that already holds them.
+///
+/// Each is optional in the sense that `None` means "build it if a want needs
+/// it"; a supplied one is used as given and never rebuilt. Everything here is
+/// an engine type — nothing about where a caller got them crosses this line.
+pub struct Prebuilt<'a> {
+    /// The whole document's token stream. Not optional: every read walks it,
+    /// and a caller reaching for this entry point has one.
+    pub tokens: &'a [Token],
+    /// `None` builds it when a want needs one — `BLOCKS`, `NOTE_EXTENTS`,
+    /// `TEXT_RUNS` or `DIAGNOSTICS`.
+    pub cst: Option<&'a Cst>,
+    /// `None` runs the lint walk when `DIAGNOSTICS` is asked for.
+    pub lint: Option<&'a LintReport>,
+}
+
+/// [`analyze`] over ingredients the caller already holds — the reads and the
+/// UTF-16 wall, with the lex and the CST build off the clock.
+///
+/// Whatever [`Prebuilt`] leaves `None` is built here on demand, so this is a
+/// strict superset of [`analyze`]: supplying nothing but `tokens` costs exactly
+/// what `analyze` costs after its lex.
+pub fn analyze_from(
+    source: &[u8],
+    prebuilt: &Prebuilt<'_>,
+    wants: u32,
+    clip: Option<Range<u32>>,
+) -> Analysis {
+    let tokens = prebuilt.tokens;
+    // Built here only if the caller had none and a want needs one.
+    let owned_cst = (prebuilt.cst.is_none()
+        && wants & (wants::BLOCKS | wants::NOTE_EXTENTS | wants::TEXT_RUNS | wants::DIAGNOSTICS)
+            != 0)
+        .then(|| crate::cst::build(tokens));
+    let cst = prebuilt.cst.or(owned_cst.as_ref());
     let mut out = Analysis::default();
     let mut cursor = Cursor::new(source);
     out.len_utf16 = cursor.len_utf16();
 
-    let tokens = lex(text);
-
     // Bounded at the first `\c`, so this is free even at wants == 0 — and it
     // is the gate several diagnostics are silent under, which no read could
     // carry per finding.
-    out.usfm_version = match lint::header_scan(source, &tokens).1 {
+    out.usfm_version = match lint::header_scan(source, tokens).1 {
         Some(version) => version as u32,
         None => NONE,
     };
 
-    // The CST is the expensive shared artifact: three reads need it, and the
-    // mask walks it.
-    let needs_cst =
-        wants & (wants::BLOCKS | wants::NOTE_EXTENTS | wants::TEXT_RUNS | wants::DIAGNOSTICS) != 0;
-    let cst = needs_cst.then(|| crate::cst::build(&tokens));
-    let toc = (wants & (wants::CHAPTERS | wants::VERSE_ANCHORS) != 0).then(|| toc(source, &tokens));
+    let toc = (wants & (wants::CHAPTERS | wants::VERSE_ANCHORS) != 0).then(|| toc(source, tokens));
 
     let clip = clip.map(|range| {
         cursor.reset();
@@ -389,34 +431,39 @@ pub fn analyze(text: &str, wants: u32, clip: Option<Range<u32>>) -> Analysis {
 
     if let Some(toc) = &toc {
         if wants & wants::CHAPTERS != 0 {
-            out.chapters = chapters(source, &tokens, toc);
+            out.chapters = chapters(source, tokens, toc);
         }
         if wants & wants::VERSE_ANCHORS != 0 {
-            out.verse_anchors = verse_anchors(source, &tokens, toc);
+            out.verse_anchors = verse_anchors(source, tokens, toc);
         }
     }
-    if let Some(cst) = &cst {
+    if let Some(cst) = cst {
         if wants & wants::BLOCKS != 0 {
-            out.blocks = blocks(source, &tokens, cst);
+            out.blocks = blocks(source, tokens, cst);
         }
         if wants & wants::NOTE_EXTENTS != 0 {
-            let (extents, parts) = notes(source, &tokens, cst);
+            let (extents, parts) = notes(source, tokens, cst);
             out.note_extents = extents;
             out.note_parts = parts;
         }
         if wants & wants::TEXT_RUNS != 0 {
-            let mask = mask(source, &tokens, cst, &Filter::reader_text());
+            let mask = mask(source, tokens, cst, &Filter::reader_text());
             out.text_runs = text_runs(&mask.ranges, clip.as_ref());
         }
         if wants & wants::DIAGNOSTICS != 0 {
-            diagnostics(source, &tokens, &lint::lint(source, &tokens, cst), &mut out);
+            let owned = prebuilt
+                .lint
+                .is_none()
+                .then(|| lint::lint(source, tokens, cst));
+            let report = prebuilt.lint.or(owned.as_ref()).expect("one or the other");
+            diagnostics(source, tokens, report, &mut out);
         }
     }
     if wants & wants::TOKEN_SPANS != 0 {
-        out.token_spans = token_spans(&tokens, clip.as_ref());
+        out.token_spans = token_spans(tokens, clip.as_ref());
     }
     if wants & wants::LINES != 0 {
-        out.lines = lines(source, &tokens);
+        out.lines = lines(source, tokens);
     }
 
     // The one wall: every emitted byte offset becomes a UTF-16 offset, one
@@ -1012,6 +1059,18 @@ fn family(idx: MarkerIdx) -> u32 {
 /// small enough to have that shape.
 ///
 /// [`NONE`] is not an offset and is left alone.
+/// Byte offsets to UTF-16 offsets, in place, over a strided row array — the
+/// wall every [`analyze`] read passes through, for a caller assembling rows of
+/// its own.
+///
+/// `stride` is the row width (see [`stride`]) and `fields` names which of a
+/// row's slots are byte offsets. [`NONE`] passes through. An ascending sequence
+/// converts in one sweep of `source`; anything else sorts first, so the caller
+/// need not pre-order.
+pub fn rows_to_utf16(source: &[u8], values: &mut [u32], stride: usize, fields: &[usize]) {
+    to_utf16(source, values, stride, fields);
+}
+
 fn to_utf16(source: &[u8], values: &mut [u32], stride: usize, fields: &[usize]) {
     if values.is_empty() {
         return;

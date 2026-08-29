@@ -188,13 +188,56 @@ mod vref {
 mod analyze {
     use super::*;
 
+    use usfm_onion::analyze::{Prebuilt, wants};
+
+    /// The tree and tokens supplied, the lint report left to `analyze_from` —
+    /// the shape a caller holding ingredients but not products has.
+    fn prebuilt<'a>(
+        tokens: &'a [usfm_onion::Token],
+        cst: &'a usfm_onion::cst::Cst,
+    ) -> Prebuilt<'a> {
+        Prebuilt {
+            tokens,
+            cst: Some(cst),
+            lint: None,
+        }
+    }
+
     #[divan::bench]
     fn full(bencher: divan::Bencher) {
         bencher.counter(bytes()).bench(|| {
             for source in &CORPUS.sources {
-                divan::black_box(usfm_onion::analyze::analyze(
-                    source,
-                    usfm_onion::analyze::wants::ALL,
+                divan::black_box(usfm_onion::analyze::analyze(source, wants::ALL, None));
+            }
+        });
+    }
+
+    /// The ingredients off the clock — what a caller holding a cached tree and
+    /// token stream pays. `full` minus this is what caching them can ever buy.
+    #[divan::bench]
+    fn from_prebuilt(bencher: divan::Bencher) {
+        bencher.counter(bytes()).bench(|| {
+            for (source, tokens, cst) in built() {
+                divan::black_box(usfm_onion::analyze::analyze_from(
+                    source.as_bytes(),
+                    &prebuilt(tokens, cst),
+                    wants::ALL,
+                    None,
+                ));
+            }
+        });
+    }
+
+    /// …and with the one read the existing fold already caches cleared. The
+    /// floor the two cheap moves reach together.
+    #[divan::bench]
+    fn from_prebuilt_less_diagnostics(bencher: divan::Bencher) {
+        bencher.counter(bytes()).bench(|| {
+            for (source, tokens, cst) in built() {
+                divan::black_box(usfm_onion::analyze::analyze_from(
+                    source.as_bytes(),
+                    &prebuilt(tokens, cst),
+                    wants::ALL & !wants::DIAGNOSTICS,
                     None,
                 ));
             }
