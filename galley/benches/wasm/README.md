@@ -10,6 +10,11 @@ rather than two different experiments.
     node analyze.mjs       pkg-node ../../../testData/exampleCorpora   # stateless analyze, one book at a time
     node wants-decomp.mjs  pkg-node ../../../testData/exampleCorpora   # per-read marginal cost
 
+`analyze.mjs` and `wants-decomp.mjs` take EITHER build — galley's module carries
+onion-wasm's exports through linking, so `analyze` is in both, and pointing them
+at an `onion-wasm` pkg measures the engine without galley in the picture.
+`keystroke.mjs` needs the galley build; `Galley` only exists there.
+
 `keystroke.mjs` mirrors `fold.rs`'s bench exactly: a ring of successive typing
 states so every measured call is a NEVER-SEEN text, one dirty chapter, the rest
 served from the cache. It also PROVES three things before timing anything and

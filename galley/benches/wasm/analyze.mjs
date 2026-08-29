@@ -2,9 +2,19 @@
 // swamps a 17ms operation. Best-of-N with performance.now(), matching how the
 // native Divan numbers were taken (Divan's `fastest` column).
 import { createRequire } from 'node:module';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 const require = createRequire(import.meta.url);
-const onion = require(process.argv[2] + '/onion_wasm.js');
+// Either build serves: galley's module carries onion-wasm's exports through
+// linking, so `analyze` is present in both.
+const pkg = process.argv[2];
+const entry = ['usfm_galley.js', 'onion_wasm.js']
+  .map((f) => `${pkg}/${f}`)
+  .find((p) => existsSync(p));
+if (!entry) {
+  console.error(`no usfm_galley.js or onion_wasm.js in ${pkg}`);
+  process.exit(1);
+}
+const onion = require(entry);
 
 const CORPUS = process.argv[3];
 const BOOKS = [
