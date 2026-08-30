@@ -59,6 +59,11 @@ impl Galley {
 
     /// The verse text alone, as one string — the reading a downstream text
     /// consumer wants, off the same reused ingredients.
+    ///
+    /// TODO: this DISCARDS the mask. `Mask` carries `ranges`/`starts` — the map
+    /// from a masked offset back to the source — and sous needs it to report a
+    /// finding against the unmasked document. Returning the text alone means
+    /// whatever consumes this cannot get back.
     #[wasm_bindgen(js_name = verseText)]
     pub fn verse_text(&mut self, text: &str) -> String {
         let mask = self.cache.masked(text, &onion::mask::Filter::verse_text());

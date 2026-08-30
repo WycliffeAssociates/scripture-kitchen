@@ -2,6 +2,44 @@
 
 **State:** candidate only; discussed 2026-08-28, not committed or scheduled.
 
+**2026-08-29 — partly superseded.** This document asks how to serialize
+`analyze`'s output. `parse-handle-boundary.md` asks whether that output should
+exist, and measures that (a) one buffer instead of thirteen typed arrays saves
+9 microseconds on the largest book, 0.2% of a wasm `analyze`, and (b) a
+wasm-bindgen accessor call is ~5 ns, so an editor can ask questions instead of
+decoding planes. A first draft of that document kept this
+question alive for the **Tauri/native** path, where a call is an IPC round trip.
+That was withdrawn on 2026-08-29: wasm ships in the editor on every platform,
+Tauri included, so the keystroke path never crosses IPC and no read on it is
+async.
+
+IPC keeps a real job — the COLD project load, which is native because the
+filesystem and the thread pool are (66 books read, lexed, built and linted in
+28.80 ms across 10 threads). But its payload was measured too, and it does not
+want this format either: per-book severity counts for an entire Bible are
+**4.3 KB of JSON**, and even a full project-wide findings list with messages
+rendered native-side is 694 KB one time. The binary-row alternative saves 25% of
+those bytes and costs a seven-u32 stride mirrored into TypeScript — a bad trade
+against the one-definition goal.
+
+**Neither door needs this format for its PAYLOAD.** One narrow case survives and
+is worth reading in `parse-handle-boundary.md`: if the CST buffer is shipped for
+JS-side traversal, five structural layout facts must be known on both sides, and
+generating them beats writing them. flatc covers two of the five (the packed bit
+fields are inexpressible), or four if the packing is abandoned for a
+byte-identical flat struct. But it puts the SSOT in a `.fbs` when this repo's
+SSOT is the Rust, cannot generate the 153-row marker table at all, and adds a
+C++ build tool — so extending `onion/src/bin/codegen.rs` covers 5 of 5 with no
+new dependency. **Superseded again (same day):** a wasm-bindgen'd deserializer that OWNS its
+bytes reads at 4.6 ns and leaves JS with ZERO layout facts, so nothing needs
+generating for the JS side at all. This format wins only if consumers outside
+this repo, in languages we do not ship, need to read the tree — and even then,
+only for those consumers. Two further corrections to the sketch below: its struct vectors for
+`blocks`/`tokenSpans`/`diagnostics` would regress the hot path (flatc gives a
+`Uint32Array` accessor for `[uint]` and not for a struct vector), and the
+constant/bit-layout duplication it is partly motivated by is a codegen job
+(`onion/src/bin/codegen.rs`), not a wire-format one.
+
 ## The question
 
 Onion already returns nearly wire-shaped reads from `onion/src/analyze.rs`:
