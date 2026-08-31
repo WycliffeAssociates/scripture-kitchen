@@ -19,11 +19,11 @@ Nothing is published to crates.io or npm. Both consumers install from a tag.
 
 ```toml
 # Cargo.toml — one repo, both crates
-usfm_onion  = { git = "https://github.com/wycliffeassociates/usfm_onion", tag = "v0.1.0" }
-usfm_galley = { git = "https://github.com/wycliffeassociates/usfm_onion", tag = "v0.1.0" }
+usfm_onion  = { git = "https://github.com/WycliffeAssociates/scripture-kitchen", tag = "v0.1.0" }
+usfm_galley = { git = "https://github.com/WycliffeAssociates/scripture-kitchen", tag = "v0.1.0" }
 ```
 
 ```sh
-npm  i   github:wycliffeassociates/usfm_onion#v0.1.0
-pnpm add github:wycliffeassociates/usfm_onion#v0.1.0
+npm  i   github:WycliffeAssociates/scripture-kitchen#v0.1.0
+pnpm add github:WycliffeAssociates/scripture-kitchen#v0.1.0
 ```

@@ -26,3 +26,13 @@ serde_json = "1"
 [dev-dependencies]
 # The ONE boundary test (`wasm-pack test --node`). Native tests need nothing.
 wasm-bindgen-test = "0.3"
+
+# `-O` is wasm-pack's own release default; `--strip-producers` is the addition,
+# and it rides in the SAME wasm-opt pass so nothing is re-emitted twice (a
+# second bare pass costs ~440 bytes). The producers section records which BUILD
+# of wasm-bindgen and walrus processed the module — a git-hash suffix on one
+# CLI build, a different walrus patch on another — and that was the only thing
+# keeping the .wasm from being byte-identical across hosts. Verified: with it
+# stripped, macOS/arm64 and Linux/arm64 produce the same bytes.
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ['-O', '--strip-producers']

@@ -39,14 +39,32 @@ never be fetched from anywhere else.
 ## Build
 
 ```sh
-wasm-pack build --target web     --release --weak-refs --out-dir pkg-web
-wasm-pack build --target bundler --release --weak-refs --out-dir pkg-bundler
-rm -f pkg-web/.gitignore pkg-bundler/.gitignore   # wasm-pack writes `*`
+./build.sh                                 # BOTH committed packages — use this
 
 wasm-pack test --node                      # the one boundary test
 cargo build --target wasm32-unknown-unknown -p onion-wasm   # compile check
 cargo test -p onion-wasm                   # native tests (rlib, no wasm needed)
 ```
+
+`build.sh` is the only supported way to produce `pkg-web`/`pkg-bundler`, because
+the committed `.wasm` has to be BYTE-IDENTICAL on any machine — that is what
+lets CI gate the binary and not merely its interface. Two things leaked the
+build host into it, and both are now handled:
+
+- **Absolute paths.** Panic locations embed the tree that compiled them — a
+  registry checkout under `$CARGO_HOME`, and the rustup sysroot, whose name
+  carries the host triple. `build.sh` exports `--remap-path-prefix` for both, so
+  they read `/cargo/...` and `/rust/...`. Before this the binary also shipped
+  the builder's home directory to every consumer.
+- **The `producers` section**, which records the BUILD of wasm-bindgen and
+  walrus that processed the module (`0.2.127` on one machine, `0.2.127
+  (a579ee62b)` on another). `--strip-producers` in `Cargo.toml`'s wasm-opt args
+  removes it, inside wasm-pack's own pass so nothing is re-emitted twice.
+
+Verified end to end: the same source builds to `390672` bytes with one sha on
+macOS/arm64, Linux/arm64 and Linux/x86_64. The codegen was always deterministic;
+only this metadata was not — which is why CI can fail on a stale binary rather
+than merely warn.
 
 The spike's `scripts/sync-engine.sh` runs exactly that pair and then vendors
 `pkg-web/` — keep the two builds in step, they ship together.

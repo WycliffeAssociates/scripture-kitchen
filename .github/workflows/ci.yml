@@ -137,12 +137,11 @@ jobs:
           cache-key: wasm
       - uses: ./.github/actions/wasm-tools
 
+      # The same script Will runs. It exports the --remap-path-prefix flags that
+      # make the .wasm host-independent, so it is not optional here: building
+      # with the raw wasm-pack lines would produce different bytes.
       - name: rebuild both packages
-        working-directory: onion-wasm
-        run: |
-          wasm-pack build --target web     --release --weak-refs --out-dir pkg-web
-          wasm-pack build --target bundler --release --weak-refs --out-dir pkg-bundler
-          rm -f pkg-web/.gitignore pkg-bundler/.gitignore
+        run: ./onion-wasm/build.sh
 
       - name: what moved
         run: git diff --stat -- onion-wasm/pkg-web onion-wasm/pkg-bundler
@@ -157,19 +156,19 @@ jobs:
             ':!onion-wasm/pkg-web/onion_wasm_bg.wasm' \
             ':!onion-wasm/pkg-bundler/onion_wasm_bg.wasm'
 
-      # The binary is byte-reproducible for a fixed rustc + wasm-bindgen +
-      # wasm-opt (verified on macOS: two builds, identical bytes), but
-      # cross-machine identity is unproven — so this reports without failing
-      # until a green run says it holds. Then delete continue-on-error: an
-      # engine fix with no API change is exactly the stale package the
-      # interface check above cannot see.
+      # A hard gate, and it has to be: an engine fix that ships with no API
+      # change is exactly the stale package the interface check above cannot
+      # see. It is only safe to fail on because the build is byte-reproducible
+      # across hosts —  once build.sh remapped the paths and
+      # wasm-opt stripped the producers section. If this ever starts failing on
+      # an untouched tree, suspect a version drift in rustc, wasm-bindgen (via
+      # Cargo.lock) or wasm-opt before you suspect the check.
       - name: binary is fresh
-        continue-on-error: true
         run: |
           git diff --exit-code -- \
             onion-wasm/pkg-web/onion_wasm_bg.wasm \
             onion-wasm/pkg-bundler/onion_wasm_bg.wasm \
-            || { echo "::warning::committed .wasm differs from a CI rebuild"; exit 1; }
+            || { echo "::error::committed .wasm is stale — run ./onion-wasm/build.sh"; exit 1; }
 
       - uses: actions/upload-artifact@v4
         if: always()

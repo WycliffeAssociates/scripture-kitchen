@@ -1,5 +1,5 @@
 {
-  "name": "@wycliffeassociates/usfm-onion",
+  "name": "@wycliffeassociates/scripture-kitchen",
   "version": "0.1.0",
   "description": "The JS doorway over the USFM engine — piece 2 of the five-crate layout.",
   "type": "module",

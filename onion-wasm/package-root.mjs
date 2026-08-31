@@ -23,7 +23,7 @@ const push = (v) =>
       : Object.fromEntries(Object.entries(v).map(([k, x]) => [k, push(x)]));
 
 export const root = {
-  name: "@wycliffeassociates/usfm-onion",
+  name: "@wycliffeassociates/scripture-kitchen",
   version: inner.version,
   description: inner.description,
   type: inner.type,
