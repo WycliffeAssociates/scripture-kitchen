@@ -434,36 +434,44 @@ fn window_text(source: &[u8], m: &Mask, window: &std::ops::Range<u32>) -> String
 /// marker's backslash, the delimiter the scanner folded on — is not something a
 /// template reads like.
 fn report_codes(sources: &[String]) {
-    use usfm_onion::analyze::{NONE, analyze, stride, wants};
-    use usfm_onion::lint::{LINT_ROWS, Severity, UsfmVersion};
+    use usfm_onion::lint::{LINT_ROWS, NO_TOKEN, Severity, UsfmVersion};
 
-    // The first real occurrence of each code, rendered the way `onion-wasm.ts`'s
-    // `message()` renders it: template plus two document slices.
+    // The first real occurrence of each code, rendered the way `reader.ts`'s
+    // `message()` renders it: template plus two document slices. Straight off
+    // the lint walk — the wire adds nothing a dump wants, and byte spans read
+    // the same as the UTF-16 ones a browser would get.
     let mut example: Vec<Option<String>> = vec![None; LINT_ROWS.len()];
     for source in sources {
         if example.iter().all(Option::is_some) {
             break;
         }
-        let a = analyze(source, wants::DIAGNOSTICS, None);
-        let units: Vec<u16> = source.encode_utf16().collect();
-        let slice =
-            |from: u32, to: u32| String::from_utf16_lossy(&units[from as usize..to as usize]);
-        for row in a.diagnostics.chunks_exact(stride::DIAGNOSTICS) {
-            let slot = row[0] as usize;
+        let bytes = source.as_bytes();
+        let tokens = usfm_onion::lex(source);
+        let cst = usfm_onion::cst::build(&tokens);
+        let report = usfm_onion::lint::lint(bytes, &tokens, &cst);
+        let slice = |token: u32| match tokens.get(token as usize) {
+            Some(t) => String::from_utf8_lossy(
+                &bytes[t.start as usize..(t.start + t.trimmed_len(bytes)) as usize],
+            )
+            .into_owned(),
+            None => String::new(),
+        };
+        for obs in &report.observations {
+            let slot = obs.code as usize;
             if example[slot].is_some() {
                 continue;
             }
-            let second = if row[3] == NONE {
+            let second = if obs.second == NO_TOKEN {
                 String::new()
             } else {
-                slice(row[3], row[4])
+                slice(obs.second)
             };
             example[slot] = Some(
                 LINT_ROWS[slot]
                     .template
-                    .replace("{anchor}", &slice(row[1], row[2]))
+                    .replace("{anchor}", &slice(obs.anchor))
                     .replace("{second}", &second)
-                    .replace("{aux}", &row[5].to_string()),
+                    .replace("{aux}", &obs.aux.to_string()),
             );
         }
     }

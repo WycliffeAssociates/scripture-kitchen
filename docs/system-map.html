@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>usfm_onion — System Map</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0d1319; --bg2:#111a22; --surface:#151f28; --surface2:#1a2531; --recess:#0b1116;
+  --border:rgba(180,205,225,.11); --border-hi:rgba(180,205,225,.24);
+  --text:#dbe6ef; --dim:#8ea2b3; --dimmer:#617484;
+  --d-material:#8a949e; --d-scan:#2f9080; --d-table:#b0894a; --d-index:#4a80b5;
+  --d-judge:#c05a3e; --d-export:#6b9a4f; --d-wire:#d4a73a; --d-js:#a8536b; --d-harness:#5c6a76;
+  --font-b:'IBM Plex Sans',ui-sans-serif,sans-serif;
+  --font-m:'IBM Plex Mono',ui-monospace,monospace;
+}
+@media (prefers-color-scheme: light){
+  :root{
+    --bg:#eef1f4; --bg2:#e6ebef; --surface:#f9fbfc; --surface2:#eff3f6; --recess:#e3e9ed;
+    --border:rgba(20,45,70,.13); --border-hi:rgba(20,45,70,.28);
+    --text:#16222c; --dim:#4e6273; --dimmer:#78899a;
+    --d-material:#68757f; --d-scan:#1c7565; --d-table:#8e6b2c; --d-index:#2b619b;
+    --d-judge:#a54225; --d-export:#4e7a34; --d-wire:#a8801a; --d-js:#8a3a52; --d-harness:#56636e;
+  }
+}
+*{box-sizing:border-box;min-width:0}
+html,body{margin:0;padding:0}
+body{
+  background:
+    radial-gradient(1100px 620px at 12% -6%, rgba(47,144,128,.10), transparent 60%),
+    radial-gradient(860px 540px at 94% 4%, rgba(212,167,58,.07), transparent 58%),
+    linear-gradient(180deg,var(--bg),var(--bg2));
+  background-attachment:fixed;
+  color:var(--text); font-family:var(--font-b); font-size:15px; line-height:1.58;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1240px;margin:0 auto;padding:40px 26px 90px}
+
+header.hd{padding-bottom:24px;border-bottom:1px solid var(--border);margin-bottom:30px}
+.eyebrow{font-family:var(--font-m);font-size:11.5px;letter-spacing:.20em;text-transform:uppercase;color:var(--d-wire);display:flex;align-items:center;gap:9px}
+.eyebrow::before{content:"";width:20px;height:1px;background:var(--d-wire);opacity:.7}
+h1{font-size:clamp(29px,4.2vw,46px);line-height:1.05;margin:14px 0 10px;font-weight:600;letter-spacing:-.022em}
+h1 .mono{font-family:var(--font-m);font-weight:500}
+.tagline{color:var(--dim);max-width:72ch;font-size:16px;margin:0}
+.tagline b{color:var(--text);font-weight:600}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(112px,1fr));gap:1px;margin-top:24px;background:var(--border);border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.stat{background:var(--surface);padding:11px 14px}
+.stat .n{font-family:var(--font-m);font-size:18px;font-weight:600;letter-spacing:-.02em;line-height:1.15}
+.stat .n small{font-size:11px;color:var(--dim);font-weight:400}
+.stat .l{font-size:10px;letter-spacing:.10em;text-transform:uppercase;color:var(--dimmer);margin-top:3px;font-family:var(--font-m)}
+.stat.hi{background:linear-gradient(160deg,rgba(212,167,58,.13),var(--surface) 70%)}
+.stat.hi .n{color:var(--d-wire)}
+
+section{margin-top:50px}
+.sec-h{display:flex;align-items:baseline;gap:13px;margin-bottom:20px;border-bottom:1px solid var(--border);padding-bottom:10px;flex-wrap:wrap}
+.sec-h .num{font-family:var(--font-m);font-size:11px;color:var(--d-wire);letter-spacing:.1em}
+.sec-h h2{font-size:22px;margin:0;font-weight:600;letter-spacing:-.015em}
+.sec-h .sub{color:var(--dimmer);font-size:12.5px;margin-left:auto;font-family:var(--font-m)}
+
+/* ---- invariants ---- */
+.inv{border:1px solid var(--border);border-radius:11px;background:var(--surface);overflow:hidden}
+.inv ol{margin:0;padding:0;list-style:none;display:grid;grid-template-columns:repeat(auto-fit,minmax(452px,1fr))}
+.inv li{display:grid;grid-template-columns:26px 1fr auto;gap:11px;align-items:baseline;
+  padding:9px 16px;border-bottom:1px solid var(--border);border-right:1px solid var(--border)}
+.inv li .i{font-family:var(--font-m);font-size:11px;color:var(--dimmer);font-variant-numeric:tabular-nums}
+.inv li .t{font-size:14.5px;font-weight:500;letter-spacing:-.005em}
+.inv li .t b{color:var(--text);font-weight:600}
+.inv li .c{font-family:var(--font-m);font-size:10.5px;color:var(--dimmer);white-space:nowrap;justify-self:end}
+@media (max-width:760px){.inv li{grid-template-columns:22px 1fr}.inv li .c{grid-column:2;white-space:normal}}
+
+/* ---- route filter ---- */
+.bar{display:flex;flex-wrap:wrap;gap:7px;align-items:center;margin:0 0 18px}
+.bar .lbl{font-family:var(--font-m);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--dimmer);margin-right:4px}
+.chip{font-family:var(--font-m);font-size:12px;padding:5px 12px;border-radius:999px;cursor:pointer;
+  background:var(--surface);border:1px solid var(--border);color:var(--dim);transition:background .15s,color .15s,border-color .15s}
+.chip:hover{border-color:var(--border-hi);color:var(--text)}
+.chip[aria-pressed="true"]{background:var(--tint);border-color:var(--ink);color:var(--text)}
+.chip .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--ink,var(--dimmer));margin-right:7px;vertical-align:1px}
+
+/* ---- stage bands ---- */
+.band{border:1px solid var(--border);border-radius:11px;background:var(--surface);overflow:hidden}
+.band.off{background:var(--recess);border-style:dashed}
+.band-h{display:flex;gap:15px;align-items:baseline;padding:12px 17px;border-bottom:1px solid var(--border)}
+.band-h .no{font-family:var(--font-m);font-size:22px;font-weight:600;line-height:1;color:var(--ink);flex:0 0 auto;letter-spacing:-.03em;min-width:30px;font-variant-numeric:tabular-nums}
+.band.off .band-h .no{font-size:13px;letter-spacing:.14em}
+.band-h h3{margin:0;font-size:16px;font-weight:600;letter-spacing:-.01em;flex:0 0 auto}
+.band-h p{margin:0;color:var(--dim);font-size:13px;flex:1}
+.band-h .cnt{font-family:var(--font-m);font-size:10.5px;color:var(--dimmer);white-space:nowrap}
+@media (max-width:700px){.band-h{flex-wrap:wrap}.band-h p{flex-basis:100%}}
+
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(262px,1fr))}
+.card{padding:11px 15px 12px;border-left:3px solid var(--ink);
+  border-right:1px solid var(--border);border-bottom:1px solid var(--border);transition:opacity .2s}
+.card .nm{font-family:var(--font-m);font-size:13.5px;font-weight:600;letter-spacing:-.01em;
+  display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.card .nm em{font-style:normal;font-size:10px;color:var(--dimmer);font-weight:400;font-variant-numeric:tabular-nums}
+.card .rl{color:var(--dim);font-size:12.5px;line-height:1.45;margin-top:4px}
+.card dl{margin:8px 0 0;display:grid;grid-template-columns:26px 1fr;gap:2px 8px;font-family:var(--font-m);font-size:11px}
+.card dt{color:var(--dimmer);letter-spacing:.06em}
+.card dd{margin:0;color:var(--text);overflow-wrap:anywhere}
+.card.mute{opacity:.22}
+
+.seam{display:flex;align-items:center;gap:12px;padding-left:28px;height:42px}
+.seam::before{content:"";width:1px;height:100%;background:var(--border-hi);flex:0 0 1px}
+.seam .p{font-family:var(--font-m);font-size:11.5px;color:var(--dim);background:var(--recess);
+  border:1px solid var(--border);border-radius:999px;padding:4px 13px}
+.seam .p b{color:var(--text);font-weight:500}
+
+/* ---- route lanes ---- */
+.lane{border:1px solid var(--border);border-radius:11px;background:var(--surface);margin-bottom:12px;overflow:hidden}
+.lane-h{display:flex;align-items:baseline;gap:12px;padding:11px 16px;border-bottom:1px solid var(--border);flex-wrap:wrap;border-left:3px solid var(--ink)}
+.lane-h .ln{font-family:var(--font-m);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink)}
+.lane-h h4{margin:0;font-size:15px;font-weight:600;letter-spacing:-.01em}
+.lane-h code{font-family:var(--font-m);font-size:11.5px;color:var(--dimmer);margin-left:auto}
+.chain{list-style:none;margin:0;padding:13px 16px;display:flex;flex-wrap:wrap;align-items:stretch;row-gap:10px}
+.chain+.chain{padding-top:0}
+.chain li{display:flex;align-items:stretch;min-width:0}
+.chain .step{padding:6px 11px 7px;border:1px solid var(--border-hi);border-radius:6px;background:var(--recess)}
+.chain .step .n{font-family:var(--font-m);font-size:9px;color:var(--dimmer);letter-spacing:.12em}
+.chain .step .m{font-family:var(--font-m);font-size:12.5px;font-weight:600;white-space:nowrap}
+.chain .arw{display:flex;flex-direction:column;justify-content:center;align-items:center;padding:0 9px}
+.chain .arw .g{font-family:var(--font-m);font-size:13px;color:var(--dimmer);line-height:1}
+.chain .arw .pl{font-family:var(--font-m);font-size:10px;color:var(--dim);white-space:nowrap;margin-top:2px}
+.lane .note{padding:0 16px 13px;color:var(--dim);font-size:12.5px;max-width:96ch}
+@media (max-width:720px){
+  .chain{display:block}.chain li{display:block}
+  .chain .arw{flex-direction:row;justify-content:flex-start;gap:8px;padding:4px 0 4px 13px}
+  .chain .arw .g{transform:rotate(90deg)}.chain .arw .pl{margin-top:0}
+}
+
+/* ---- table ---- */
+table{width:100%;border-collapse:collapse;font-size:13px}
+.tw{overflow-x:auto}
+thead th{position:sticky;top:0;background:var(--surface2);text-align:left;font-family:var(--font-m);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--dimmer);font-weight:500;padding:9px 13px;border-bottom:1px solid var(--border);white-space:nowrap}
+tbody td{padding:8px 13px;border-bottom:1px solid var(--border);vertical-align:top}
+tbody tr:last-child td{border-bottom:none}
+tbody tr:nth-child(even){background:rgba(140,180,215,.032)}
+td.f{font-family:var(--font-m);font-size:12px;white-space:nowrap}
+td.n{font-family:var(--font-m);text-align:right;font-variant-numeric:tabular-nums;color:var(--dim)}
+td .tag{display:inline-block;font-family:var(--font-m);font-size:10px;padding:2px 7px;border-radius:999px;white-space:nowrap}
+details.fold{border:1px solid var(--border);border-radius:10px;background:var(--surface);overflow:hidden}
+details.fold>summary{cursor:pointer;padding:12px 16px;font-family:var(--font-m);font-size:12.5px;color:var(--dim);list-style:none;display:flex;align-items:center;gap:10px}
+details.fold>summary::-webkit-details-marker{display:none}
+details.fold>summary::before{content:"▸";color:var(--d-wire);transition:transform .18s;display:inline-block}
+details.fold[open]>summary::before{transform:rotate(90deg)}
+details.fold .body{border-top:1px solid var(--border)}
+
+.legend{margin-top:16px;display:flex;flex-wrap:wrap;gap:7px 20px;font-family:var(--font-m);font-size:11.5px;color:var(--dim)}
+.legend span{display:flex;align-items:center;gap:7px}
+.legend i{width:10px;height:10px;border-radius:3px;display:inline-block}
+
+.foot{margin-top:52px;padding-top:18px;border-top:1px solid var(--border);color:var(--dimmer);font-size:12px;font-family:var(--font-m);display:flex;flex-wrap:wrap;gap:6px 22px}
+.reveal{opacity:0;transform:translateY(9px);animation:fadeUp .45s cubic-bezier(.2,.7,.3,1) forwards}
+@keyframes fadeUp{to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.reveal{animation:none;opacity:1;transform:none}*{transition-duration:.001ms!important;animation-duration:.001ms!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hd reveal">
+  <div class="eyebrow">Repository atlas · onboarding &amp; roadmap</div>
+  <h1><span class="mono">usfm_onion</span> — what it is, why it's shaped this way</h1>
+  <p class="tagline">A lossless USFM scripture engine in Rust. Source bytes go in; <b>nothing is normalized, repaired, or copied</b> — every product is an index over, or a projection of, the original bytes.</p>
+  <div class="stats">
+    <div class="stat hi"><div class="n">33.5k</div><div class="l">Rust LOC</div></div>
+    <div class="stat"><div class="n">3</div><div class="l">crates</div></div>
+    <div class="stat"><div class="n">34</div><div class="l">modules</div></div>
+    <div class="stat"><div class="n">153</div><div class="l">marker rows</div></div>
+    <div class="stat"><div class="n">59</div><div class="l">lint codes</div></div>
+    <div class="stat"><div class="n">31</div><div class="l">offer fixes</div></div>
+    <div class="stat"><div class="n">9</div><div class="l">wire sections</div></div>
+    <div class="stat"><div class="n">20</div><div class="l">oracle suites</div></div>
+    <div class="stat"><div class="n">1.4<small> GiB/s</small></div><div class="l">serial lex</div></div>
+  </div>
+</header>
+
+<section class="reveal" style="margin-top:34px">
+  <div class="sec-h"><span class="num">01</span><h2>Invariants</h2><span class="sub">break one and something downstream is wrong</span></div>
+  <div class="inv"><ol id="inv"></ol></div>
+</section>
+
+<section class="reveal" id="pipeline">
+  <div class="sec-h"><span class="num">02</span><h2>The pipeline, stage by stage</h2><span class="sub">34 modules, 11 stages</span></div>
+  <div class="bar"><span class="lbl">Highlight a route</span><div id="chips" style="display:contents"></div></div>
+  <div id="bands"></div>
+  <div class="legend" id="legend"></div>
+</section>
+
+<section class="reveal" id="routes">
+  <div class="sec-h"><span class="num">03</span><h2>Six routes, end to end</h2><span class="sub">each arrow: what the step on its left hands on</span></div>
+  <div id="lanes"></div>
+</section>
+
+<section class="reveal">
+  <div class="sec-h"><span class="num">04</span><h2>File index</h2><span class="sub">largest first</span></div>
+  <details class="fold">
+    <summary>34 modules — file, stage, size</summary>
+    <div class="body"><div class="tw"><table id="index"></table></div></div>
+  </details>
+</section>
+
+<div class="foot">
+  <span>From the working tree · <span id="stamp"></span></span>
+  <span>Authority: <code>planning/</code> · <code>GLOSSARY.md</code></span>
+  <span>Gate: <code>cargo test -- --include-ignored</code> + <code>cargo clippy --all-targets</code></span>
+</div>
+
+</div>
+
+<script>
+/* ===================== MODEL ===================== */
+const D = {
+  material:{c:'--d-material', name:'material'},
+  scan:    {c:'--d-scan',     name:'scan & tree'},
+  table:   {c:'--d-table',    name:'table & mint'},
+  index:   {c:'--d-index',    name:'index & views'},
+  judge:   {c:'--d-judge',    name:'judge & repair'},
+  export:  {c:'--d-export',   name:'export folds'},
+  wire:    {c:'--d-wire',     name:'the wire'},
+  js:      {c:'--d-js',       name:'js & workflows'},
+  harness: {c:'--d-harness',  name:'harness'},
+};
+const TRACES = {
+  all:{label:'All',ink:'--d-wire'}, cold:{label:'Cold parse',ink:'--d-scan'},
+  key:{label:'Editor keystroke',ink:'--d-js'}, gen:{label:'Codegen',ink:'--d-table'},
+  view:{label:'Views & exports',ink:'--d-export'}, diff:{label:'Diff & merge',ink:'--d-index'},
+  fmt:{label:'Format transaction',ink:'--d-judge'},
+};
+
+const INV = [
+ ['Concatenated token spans reproduce the source exactly.','scanner.rs'],
+ ['The scanner never reads a payload’s interior.','scanner.rs'],
+ ['Interpreters are position-free — any bytes, any caller.','designator/attributes.rs'],
+ ['Lint flags; a Fix is offered, never applied.','lint.rs'],
+ ['A finding is four u32s — no strings cross.','lint/catalog.rs'],
+ ['Offsets are source bytes unless UTF-16 is asked for.','mask.rs · wire.rs'],
+ ['One schema generates both ends of the wire.','wire/schema.rs'],
+ ['Facts are authored; code is generated and staleness-tested.','tables.rs'],
+ ['Engines stay pure; all state lives in galley.','galley/lib.rs'],
+ ['Export folds are lossy, terminal, and never repair.','usj/usx/html.rs'],
+ ['The tree is the product; consumers project the rest.','wire.rs'],
+ ['Optimise on a measurement, never on a guess.','benches/pipeline.rs'],
+];
+
+/* s = stage. 10 = dev harness. */
+const M = [
+ /* 0 — build time */
+ {id:'rows',l:'tables::rows',f:'onion/src/tables/rows.rs',d:'table',s:0,loc:3910,
+  r:'153 authored marker rows — the audited source of every marker fact.',in:'USFM 3.2 spec',out:'&[MarkerRow; 153]'},
+ {id:'books',l:'tables::books',f:'onion/src/tables/books.rs',d:'table',s:0,loc:128,
+  r:'\\id book codes, membership only. Lint is the sole consumer.',in:'authored',out:'the code list'},
+ {id:'temit',l:'tables::emit',f:'onion/src/tables/emit.rs',d:'table',s:0,loc:838,
+  r:'Rows → the text of generated.rs. Pure fn, so a test can diff it.',in:'ROWS + BOOKS',out:'String'},
+ {id:'tgen',l:'tables::generated',f:'onion/src/tables/generated.rs',d:'table',s:0,loc:985,
+  r:'Checked-in packed table, name→idx matcher, side arrays.',in:'tables::emit',out:'MARKERS + matcher'},
+ {id:'wschema',l:'wire::schema',f:'onion/src/wire/schema.rs',d:'wire',s:0,loc:530,
+  r:'The one declaration. Both ends of the wire come from here.',in:'authored',out:'RECORDS · SECTIONS'},
+ {id:'wemit',l:'wire::emit',f:'onion/src/wire/emit.rs',d:'wire',s:0,loc:321,
+  r:'Schema → the Rust writer and the TypeScript reader.',in:'SECTIONS',out:'generated.rs + reader.ts'},
+ {id:'wgen',l:'wire::generated',f:'onion/src/wire/generated.rs',d:'wire',s:0,loc:178,
+  r:'The little-endian field writers plate() calls. No struct casts.',in:'engine types',out:'bytes'},
+
+ /* 1 — ingest */
+ {id:'source',l:'source',f:'the USFM document',d:'material',s:1,loc:null,
+  r:'One document’s bytes. Not normalized, not repaired.',in:'—',out:'&str'},
+ {id:'chunk',l:'chunk::pre_scan',f:'onion/src/chunk.rs',d:'scan',s:1,loc:126,
+  r:'memchr tiling at \\n\\c plus the line-ending census. Feeds caching and parallelism.',in:'&[u8]',out:'PreScan { starts, lf, crlf }'},
+
+ /* 2 — scan */
+ {id:'lex',l:'scanner::lex',f:'onion/src/scanner.rs',d:'scan',s:2,loc:1747,
+  r:'One fused memchr pass. The only code that owns position.',in:'&str + MARKERS',out:'Vec&lt;Token&gt;'},
+ {id:'token',l:'token',f:'onion/src/token.rs',d:'scan',s:2,loc:224,
+  r:'The packed-byte ↔ TokenKind mapping. No scanning logic.',in:'—',out:'Token · TokenKind'},
+
+ /* 3 — build */
+ {id:'cst',l:'cst::build',f:'onion/src/cst.rs',d:'scan',s:3,loc:1569,
+  r:'One scope loop plus the rules it can’t express, over a shared child arena.',in:'&[Token]',out:'Cst { nodes, child_ids }'},
+
+ /* 4 — interpret & index */
+ {id:'designator',l:'designator',f:'onion/src/designator.rs',d:'scan',s:4,loc:292,
+  r:'Reads a \\c / \\v payload span. 12-14a → first 12, last 14.',in:'span',out:'Designator | Malformed'},
+ {id:'attributes',l:'attributes',f:'onion/src/attributes.rs',d:'scan',s:4,loc:763,
+  r:'Reads an AttrList span; matches names against the table. Records, never resyncs.',in:'span',out:'k/v events | Malformed'},
+ {id:'toc',l:'toc',f:'onion/src/toc.rs',d:'index',s:4,loc:575,
+  r:'Book code, chapter table, verse anchors. Tokens only — no tree needed.',in:'&[u8] + &[Token]',out:'Toc'},
+ {id:'utf16',l:'utf16',f:'onion/src/utf16.rs',d:'index',s:4,loc:723,
+  r:'byte ↔ UTF-16 both ways, O(1). Costs 1.6% of the string.',in:'&[u8]',out:'Utf16Index'},
+
+ /* 5 — judge & project */
+ {id:'lint',l:'lint',f:'onion/src/lint/',d:'judge',s:5,loc:6942,
+  r:'One in-order walk feeding four state machines. 59 codes, 31 with offered fixes.',in:'src + tokens + cst',out:'LintReport'},
+ {id:'mask',l:'mask',f:'onion/src/mask.rs',d:'index',s:5,loc:922,
+  r:'Which bytes survive a Filter, as ranges that map back to source.',in:'cst + Filter',out:'Mask { ranges, starts }'},
+ {id:'vref',l:'vref',f:'onion/src/vref.rs',d:'index',s:5,loc:379,
+  r:'One line per verse, ebible-shaped. No walk of its own.',in:'&Toc + &Mask',out:'String'},
+ {id:'diff',l:'diff',f:'onion/src/diff.rs',d:'index',s:5,loc:1434,
+  r:'Two docs. Blocks cut at Toc anchors, Myers-aligned, one gapless interleave.',in:'two sources',out:'DiffSkeleton'},
+
+ /* 6 — emit */
+ {id:'usj',l:'usj',f:'onion/src/usj.rs',d:'export',s:6,loc:1338,
+  r:'The CST folded to usfm-grammar JSON.',in:'src + tokens + cst',out:'String · USJ 3.1'},
+ {id:'usx',l:'usx',f:'onion/src/usx.rs',d:'export',s:6,loc:1625,
+  r:'Same fold as XML: sid/eid pairs, style attrs, synthesized tables.',in:'src + tokens + cst',out:'String · USX 3.0'},
+ {id:'html',l:'html',f:'onion/src/html.rs',d:'export',s:6,loc:1557,
+  r:'Same fold as a view. No options — everything lands in data-*.',in:'src + tokens + cst',out:'String'},
+ {id:'format',l:'format',f:'onion/src/format.rs',d:'judge',s:6,loc:1957,
+  r:'Lint’s formatter-bit fixes plus the Form channel, merged into one transaction.',in:'&[u8] + FormatOptions',out:'Vec&lt;Edit&gt;'},
+ {id:'edit',l:'edit',f:'onion/src/edit.rs',d:'judge',s:6,loc:225,
+  r:'The byte-splice vocabulary. Lint, format and diff all speak it.',in:'fixes · hunks',out:'Edit · SpliceEdit'},
+
+ /* 7 — cross */
+ {id:'wire',l:'wire::parse · plate',f:'onion/src/wire.rs',d:'wire',s:7,loc:450,
+  r:'One parse into one buffer: ONWR, 32-byte header, 9-slot directory.',in:'&str + ParseOptions',out:'Vec&lt;u8&gt;'},
+
+ /* 8 — galley */
+ {id:'warmer',l:'galley::Warmer',f:'galley/src/warmer.rs',d:'js',s:8,loc:373,
+  r:'Per-chunk cache keyed by xxh3-128. Re-plates a byte-identical dish.',in:'&str + ParseOptions',out:'Vec&lt;u8&gt;'},
+ {id:'corpus',l:'galley::corpus',f:'galley/src/corpus.rs',d:'js',s:8,loc:213,
+  r:'A project in one buffer: ONCP, then one unmodified dish per book.',in:'&[(key, dish)]',out:'Vec&lt;u8&gt;'},
+ {id:'gwasm',l:'galley::wasm',f:'galley/src/wasm.rs',d:'js',s:8,loc:110,
+  r:'The stateful JS door. onion-wasm’s exports ride in as linked shims.',in:'JS string',out:'Uint8Array'},
+
+ /* 9 — js */
+ {id:'owasm',l:'onion-wasm',f:'onion-wasm/src/lib.rs',d:'js',s:9,loc:923,
+  r:'Bindgen tags over library fns, plus the UTF-16 walls. Stateless.',in:'JS string',out:'Uint8Array · handles'},
+ {id:'reader',l:'reader.ts',f:'onion-wasm/reader.ts',d:'js',s:9,loc:1603,
+  r:'The generated reader. Strip-only TS — no build step, no second copy.',in:'Uint8Array',out:'{ tree, tokens, diagnostics, toc }'},
+ {id:'owts',l:'onion-wasm.ts',f:'onion-wasm/onion-wasm.ts',d:'js',s:9,loc:220,
+  r:'The write path’s decoders. UTF-16 offsets, unconditionally.',in:'Edits handle',out:'FixEdit[]'},
+
+ /* dev */
+ {id:'play',l:'playground',f:'onion/src/bin/playground.rs',d:'harness',s:10,loc:698,
+  r:'--mask-trace, --vref, --format-trace, --diff-trace, --cst-stats.',in:'a corpus path',out:'debug/ dumps'},
+ {id:'tests',l:'oracles & benches',f:'onion/tests/ · benches/',d:'harness',s:10,loc:null,
+  r:'20 suites over 488 files; Divan benches over 66 books / 4.5 MB.',in:'testData/',out:'green, or a named failure'},
+];
+
+const STAGES = [
+ {n:'0',ink:'--d-table',off:1,st:0,title:'Build time',desc:'Authored facts in, generated code out. Nothing here runs at parse time.',
+  seam:'MARKERS[153] · generated.rs · reader.ts'},
+ {n:'1',ink:'--d-material',st:1,title:'Ingest',desc:'The bytes arrive untouched. One memchr sweep for chapter seams.',seam:'&str · LF-canonical'},
+ {n:'2',ink:'--d-scan',st:2,title:'Scan',desc:'Boundaries found and classified. No payload interior is read.',seam:'Vec<Token> — 8-byte rows'},
+ {n:'3',ink:'--d-scan',st:3,title:'Build',desc:'The flat stream becomes scopes.',seam:'Cst { nodes, child_ids }'},
+ {n:'4',ink:'--d-index',st:4,title:'Interpret & index',desc:'Payload readings on demand, plus the two flat indices.',seam:'Toc · Utf16Index · k/v events'},
+ {n:'5',ink:'--d-judge',st:5,title:'Judge & project',desc:'Read-only passes over the tree. Nothing mutates.',seam:'LintReport · Mask · DiffSkeleton'},
+ {n:'6',ink:'--d-export',st:6,title:'Emit',desc:'Three lossy views, plus the one write path.',seam:'String views · Vec<Edit>'},
+ {n:'7',ink:'--d-wire',st:7,title:'Cross',desc:'Everything bound for JavaScript funnels through one gate.',seam:'Vec<u8> — ONWR, 32-byte header, 9-slot directory'},
+ {n:'8',ink:'--d-js',st:8,title:'Workflows · galley',desc:'The stateful layer. The engines never see each other.',seam:'the same dish, most chunks from memory'},
+ {n:'9',ink:'--d-js',st:9,title:'Consume · JS',desc:'Bindings and the generated reader. No logic here.',seam:null},
+ {n:'DEV',ink:'--d-harness',off:1,st:10,title:'Harness',desc:'Beside every route: what gates a pass, and what makes a decision reviewable.',seam:null},
+];
+
+/* which modules each route touches */
+const ROUTE_MEMBERS = {
+ cold:['source','lex','token','tgen','cst','toc','utf16','lint','attributes','wire','wgen','owasm','reader'],
+ key: ['source','chunk','warmer','lex','cst','lint','mask','wire','gwasm','reader','corpus'],
+ gen: ['rows','books','temit','tgen','wschema','wemit','wgen','lex','lint','reader','owts','wire'],
+ view:['cst','mask','vref','toc','usj','usx','html','attributes','designator'],
+ diff:['source','lex','toc','designator','diff','edit','owasm'],
+ fmt: ['source','lex','cst','lint','format','edit','owts','owasm'],
+};
+
+const LANES = [
+ {no:'Route 01',k:'cold',title:'Cold parse',call:'onion::wire::parse(text, opts)',ink:'--d-scan',
+  rows:[[['source',''],['lex','&str'],['cst','Vec<Token>'],['lint','&Cst'],
+         ['wire','LintReport + Cst + Toc'],['owasm','Vec<u8> dish'],['reader','Uint8Array']]],
+  note:'The tree is unconditional — it <i>is</i> the product. <code>toc</code> and <code>lint</code> are the opt-ins. ~80&thinsp;µs for a typical book, which is why one call carries several products.'},
+
+ {no:'Route 02',k:'key',title:'Editor keystroke',call:'Galley::parse(text, …)',ink:'--d-js',
+  rows:[[['source',''],['chunk','bytes'],['warmer','chunk starts + census'],['lex','the dirty chunk only'],
+         ['cst','chunk tokens'],['lint','chunk tree'],['warmer','per-chunk products'],
+         ['wire','assembled Parsed'],['gwasm','Vec<u8> dish'],['reader','Uint8Array']]],
+  note:'Clean chunks come from memory; only the edited one is re-derived. The dish is <b>byte-identical</b> to a cold parse — proved by a test.'},
+
+ {no:'Route 03',k:'gen',title:'Codegen',call:'cargo run --bin codegen',ink:'--d-table',
+  rows:[[['rows',''],['temit','153 rows + book codes'],['tgen','generated.rs'],['lex','marker columns']],
+        [['wschema',''],['wemit','RECORDS · SECTIONS'],['wgen','the Rust writer'],['wire','field writers']],
+        [['wemit',''],['reader','the TS reader']],
+        [['lint',''],['owts','diagnostics.json']]],
+  note:'Four artifacts, one habit: author once, generate every projection, check it in, fail the build when it drifts.'},
+
+ {no:'Route 04',k:'view',title:'Views &amp; exports',call:'mask · vref · usj · usx · html',ink:'--d-export',
+  rows:[[['cst',''],['mask','Filter::verse_text()'],['vref','ranges + Toc anchors']],
+        [['cst',''],['usj','in-order walk']],
+        [['cst',''],['usx','in-order walk']],
+        [['cst',''],['html','in-order walk']]],
+  note:'All four read the same walk; none feeds back. The lossy step happens here and nowhere upstream.'},
+
+ {no:'Route 05',k:'diff',title:'Diff &amp; merge',call:'onion::diff(baseline, current)',ink:'--d-index',
+  rows:[[['source',''],['lex','per side'],['toc','per side'],['diff','block addrs'],
+         ['edit','DecisionUnits'],['owasm','SpliceEdits']]],
+  note:'Both inputs read-only, nothing shared. The law: <code>apply_splices(baseline, current, edits) == current</code>.'},
+
+ {no:'Route 06',k:'fmt',title:'Format transaction',call:'onion::format_edits(source, opts)',ink:'--d-judge',
+  rows:[[['source',''],['lex','&str'],['cst','Vec<Token>'],['lint','&Cst'],
+         ['format','fixes w/ the formatter bit'],['edit','+ the Form-channel walk'],['owts','one transaction']]],
+  note:'Two edit sets merge and collide by row order — first writer wins. Format is the one part allowed to mutate.'},
+];
+
+/* ===================== RENDER ===================== */
+const byId=Object.fromEntries(M.map(m=>[m.id,m]));
+const css=v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+document.getElementById('inv').innerHTML = INV.map(([t,c],i)=>
+  `<li><span class="i">${String(i+1).padStart(2,'0')}</span><span class="t">${t}</span><span class="c">${c}</span></li>`).join('');
+
+const bands=document.getElementById('bands');
+STAGES.forEach((st,i)=>{
+  const list=M.filter(m=>m.s===st.st);
+  const band=document.createElement('div');
+  band.className='band'+(st.off?' off':'');
+  band.style.setProperty('--ink',css(st.ink));
+  band.innerHTML=`<div class="band-h"><div class="no">${st.n}</div><h3>${st.title}</h3>
+      <p>${st.desc}</p><div class="cnt">${list.length}</div></div>
+    <div class="cards">${list.map(m=>`
+      <div class="card" data-id="${m.id}" style="--ink:${css(D[m.d].c)}">
+        <div class="nm"><span>${esc(m.l)}</span><em>${m.loc?m.loc.toLocaleString():''}</em></div>
+        <div class="rl">${m.r}</div>
+        <dl><dt>in</dt><dd>${m.in}</dd><dt>out</dt><dd>${m.out}</dd></dl>
+      </div>`).join('')}</div>`;
+  bands.appendChild(band);
+  const s=document.createElement('div'); s.className='seam';
+  if(st.seam) s.innerHTML=`<span class="p">↓&nbsp; <b>${esc(st.seam)}</b></span>`;
+  if(i<STAGES.length-1) bands.appendChild(s);
+});
+
+let trace='all';
+const chips=document.getElementById('chips');
+Object.entries(TRACES).forEach(([k,v])=>{
+  const b=document.createElement('button');
+  b.className='chip'; b.type='button'; b.setAttribute('aria-pressed',k===trace);
+  b.style.setProperty('--ink',css(v.ink)); b.style.setProperty('--tint',css(v.ink)+'26');
+  b.innerHTML=`<span class="dot"></span>${v.label}`;
+  b.onclick=()=>{trace=k;[...chips.children].forEach(c=>c.setAttribute('aria-pressed','false'));
+    b.setAttribute('aria-pressed','true');
+    const live=ROUTE_MEMBERS[k];
+    document.querySelectorAll('.card').forEach(c=>c.classList.toggle('mute',!!live&&!live.includes(c.dataset.id)));};
+  chips.appendChild(b);
+});
+
+document.getElementById('lanes').innerHTML=LANES.map(L=>`
+  <div class="lane" style="--ink:var(${L.ink})">
+    <div class="lane-h"><span class="ln">${L.no}</span><h4>${L.title}</h4><code>${esc(L.call)}</code></div>
+    ${L.rows.map(row=>`<ol class="chain">${row.map((step,i)=>{
+      const m=byId[step[0]];
+      return `<li>${i?`<div class="arw"><span class="g">→</span><span class="pl">${esc(step[1])}</span></div>`:''}
+        <div class="step"><div class="n">${String(i+1).padStart(2,'0')}</div>
+        <div class="m" style="color:${css(D[m.d].c)}">${esc(m.l)}</div></div></li>`;}).join('')}</ol>`).join('')}
+    <div class="note">${L.note}</div>
+  </div>`).join('');
+
+document.getElementById('legend').innerHTML=Object.entries(D).map(([k,v])=>
+  `<span><i style="background:${css(v.c)}"></i>${v.name} · ${M.filter(m=>m.d===k).length}</span>`).join('');
+
+document.getElementById('index').innerHTML=
+ '<thead><tr><th>Module</th><th>File</th><th>Stage</th><th>District</th><th style="text-align:right">LOC</th></tr></thead><tbody>'+
+ [...M].sort((a,b)=>(b.loc||0)-(a.loc||0)).map(m=>{
+   const v=D[m.d], st=STAGES.find(x=>x.st===m.s);
+   return `<tr><td class="f"><b>${esc(m.l)}</b></td><td class="f">${esc(m.f)}</td>
+     <td class="f">${st.n} · ${st.title.replace('&','&amp;')}</td>
+     <td><span class="tag" style="background:${css(v.c)}22;color:${css(v.c)}">${v.name}</span></td>
+     <td class="n">${m.loc?m.loc.toLocaleString():'—'}</td></tr>`;}).join('')+'</tbody>';
+
+document.getElementById('stamp').textContent=new Date().toISOString().slice(0,10);
+</script>
+</body>
+</html>

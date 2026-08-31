@@ -78,19 +78,6 @@ export class Splices {
 }
 
 /**
- * The one read call. `wants` is the bitmask in `onion-wasm.ts`; an unset bit
- * computes nothing and returns an empty array.
- *
- * `clipFrom`/`clipTo` are UTF-16 offsets and bound ONLY the token-granularity
- * reads (`tokenSpans`, `textRuns`) to a viewport — chapters, blocks and
- * diagnostics stay whole-book, because a finding's evidence is regularly
- * outside the viewport that shows it. Pass `undefined` for both to skip.
- *
- * `text` must be LF-normalized (see the module doc); a debug build asserts it.
- */
-export function analyze(text: string, wants: number, clip_from?: number | null, clip_to?: number | null): object;
-
-/**
  * The first `\id`'s book code — `"GEN"`. EMPTY when the document declares
  * none (real in the wild: BSB Ecclesiastes); the `missing-id` diagnostic is
  * where that becomes a finding, not here.
@@ -144,12 +131,46 @@ export function formatEditsIn(text: string, from: number, to: number, opts: Form
 export function locate(text: string, utf16: number): string;
 
 /**
+ * One mask recipe's text, and the map back to the source it was cut from.
+ *
+ * Not a section of a dish: a mask is a different question with its own
+ * parameter, and most callers never want one. Not hot and not large either,
+ * so it takes the string like any other call rather than the buffer.
+ *
+ * `ranges` are the kept SOURCE spans — sorted, disjoint, maximal — and
+ * `starts[i]` is the prefix sum, so `ranges[i]`'s bytes sit at `starts[i]..`
+ * in `text`. That pair is the map: a finding at a masked offset maps back by
+ * a binary search on `starts`.
+ *
+ * Offsets stay in UTF-8 bytes. The mask is onion-to-sous and never reaches an
+ * editor, which is the only consumer that counts in UTF-16.
+ */
+export function mask(text: string, recipe: string): object;
+
+/**
  * The merged document. An unknown unit id REJECTS loudly — the caller must
  * re-diff, and there is no fuzzy stale-id fallback.
  */
 export function merge(baseline: string, current: string, decisions_json: string, _default: string): string;
 
 export function mergeSplices(baseline: string, current: string, decisions_json: string, _default: string): Splices;
+
+/**
+ * THE read call. One document in, one buffer out.
+ *
+ * The buffer is a plated parse — tokens, the tree, and whatever `opts` asked
+ * for besides — read by `reader.ts`, which is generated from the same schema
+ * as the writer. Nothing is retained wasm-side: the `Uint8Array` is JS's, the
+ * collector reclaims it, and there is no `free`.
+ *
+ * The three booleans are positional because an object crossing the wall would
+ * be `Reflect::get` per key with a misspelling silently reading as `false`.
+ * `reader.ts` wraps this as `parse(text, { diagnostics, toc, utf16 })`, where
+ * a misspelled key is a compile error instead.
+ *
+ * `text` must be LF-normalized (see the module doc); a debug build asserts it.
+ */
+export function parse(text: string, diagnostics: boolean, toc: boolean, utf16: boolean): Uint8Array;
 
 /**
  * A CodeMirror offset as a source byte offset. Rebuilds the 1.6% stride index
@@ -162,12 +183,6 @@ export function toByte(text: string, utf16: number): number;
  * A source byte offset as a CodeMirror offset. Same deal.
  */
 export function toUtf16(text: string, byte: number): number;
-
-/**
- * `wants::ALL` — every read. Exported so a caller that wants everything does
- * not restate the bitmask.
- */
-export function wantsAll(): number;
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
@@ -200,7 +215,6 @@ export interface InitOutput {
     readonly __wbg_set_formatopts_trim_text_edges: (a: number, b: number) => void;
     readonly __wbg_set_formatopts_verse_breaks: (a: number, b: number) => void;
     readonly __wbg_splices_free: (a: number, b: number) => void;
-    readonly analyze: (a: number, b: number, c: number, d: number, e: number) => any;
     readonly book: (a: number, b: number) => [number, number];
     readonly diff: (a: number, b: number, c: number, d: number) => [number, number];
     readonly edits_lens: (a: number) => [number, number];
@@ -213,13 +227,14 @@ export interface InitOutput {
     readonly formatopts_setRemoveMarkers: (a: number, b: number, c: number) => void;
     readonly formatopts_setRepairs: (a: number, b: number, c: number) => void;
     readonly locate: (a: number, b: number, c: number) => [number, number];
+    readonly mask: (a: number, b: number, c: number, d: number) => any;
     readonly merge: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number, number];
     readonly mergeSplices: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number];
+    readonly parse: (a: number, b: number, c: number, d: number, e: number) => [number, number];
     readonly splices_inserts: (a: number) => [number, number];
     readonly splices_spans: (a: number) => [number, number];
     readonly toByte: (a: number, b: number, c: number) => number;
     readonly toUtf16: (a: number, b: number, c: number) => number;
-    readonly wantsAll: () => number;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_exn_store: (a: number) => void;

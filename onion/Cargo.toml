@@ -11,14 +11,14 @@ similar = { version = "2.7", features = ["unicode"] }
 
 [features]
 default = ["usj", "usx", "html"]
-# Exports are compile-time optional (sketches/usj-export.md): a size-sensitive
+# Exports are compile-time optional: a size-sensitive
 # consumer sets `default-features = false` and the module is not in the binary.
 usj = []
 usx = []
 # Bench-only: installs divan's AllocProfiler as the global allocator. Its
 # counters wrap every allocation, so counts and timings are separate runs.
 alloc-counts = []
-# HTML is a VIEW export (sketches/html-export.md): no oracle, no round-trip
+# HTML is a VIEW export: no oracle, no round-trip
 # claim, and the same compile-time-optional deal as its two siblings.
 html = []
 

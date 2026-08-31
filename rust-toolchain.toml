@@ -1,0 +1,8 @@
+# Pinned so a wasm artifact rebuilt in CI is byte-comparable to the one Will
+# committed: rustc version is an input to the .wasm, and onion-wasm/pkg-web +
+# pkg-bundler are CHECKED IN as the distribution. Bump deliberately, then
+# rebuild both packages in the same commit.
+[toolchain]
+channel = "1.97.1"
+components = ["rustfmt", "clippy"]
+targets = ["wasm32-unknown-unknown"]

@@ -1,0 +1,23 @@
+name: setup
+description: Pinned Rust toolchain (from rust-toolchain.toml) plus a warm cargo cache.
+
+inputs:
+  cache-key:
+    description: Extra cache key, so jobs building different profiles do not thrash.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    # rust-toolchain.toml carries the channel, components and wasm32 target;
+    # `rustup show` forces the install up front, so a toolchain problem fails
+    # here rather than mid-build.
+    - shell: bash
+      run: |
+        rustup show
+        rustc --version && cargo --version
+
+    - uses: Swatinem/rust-cache@v2
+      with:
+        key: ${{ inputs.cache-key }}

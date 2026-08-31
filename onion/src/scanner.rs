@@ -320,7 +320,7 @@ impl Scanner<'_> {
                 // the marker name's does (see `payload_end`); surplus is Pad.
                 let designator_end = ws_run_end(bytes, end);
                 let keep = designator_end.min(end + 1);
-                self.push_marker(index, digits_from, self.hot.v.idx);
+                self.push_marker(index, digits_from, self.hot.v.idx, 0);
                 self.push_token(TokenKind::Designator, digits_from, keep);
                 if designator_end > keep {
                     self.push_token(TokenKind::Pad, keep, designator_end);
@@ -335,34 +335,36 @@ impl Scanner<'_> {
             // against the row's cap (an over-cap level is the general path's).
             b'q' => self.fused_leveled(index, index + 2, self.hot.q),
             b's' => self.fused_leveled(index, index + 2, self.hot.s),
-            b'p' => self.fused_plain(index, index + 2, self.hot.p),
-            b'b' => self.fused_plain(index, index + 2, self.hot.b),
+            b'p' => self.fused_plain(index, index + 2, self.hot.p, 0),
+            b'b' => self.fused_plain(index, index + 2, self.hot.b, 0),
             b'f' => match bytes.get(index + 2) {
-                Some(&b't') => self.fused_plain(index, index + 3, self.hot.ft),
-                Some(&b'r') => self.fused_plain(index, index + 3, self.hot.fr),
-                _ => self.fused_plain(index, index + 2, self.hot.f),
+                Some(&b't') => self.fused_plain(index, index + 3, self.hot.ft, 0),
+                Some(&b'r') => self.fused_plain(index, index + 3, self.hot.fr, 0),
+                _ => self.fused_plain(index, index + 2, self.hot.f, 0),
             },
             b'x' if bytes.get(index + 2) == Some(&b't') => {
-                self.fused_plain(index, index + 3, self.hot.xt)
+                self.fused_plain(index, index + 3, self.hot.xt, 0)
             }
             _ => None,
         }
     }
 
     /// A hot NUMBERED marker: `name_end` sits after the alpha stem; accept at
-    /// most one digit `1..=hot.level_max` before the delimiter.
+    /// most one digit `1..=hot.level_max` before the delimiter. That digit IS
+    /// the token's level — the general path re-reads it from the name, and
+    /// `tests/fast_path_identity.rs` holds the two answers identical.
     #[inline(always)]
     fn fused_leveled(&mut self, index: usize, name_end: usize, hot: Hot) -> Option<usize> {
-        let name_end = match self.bytes.get(name_end) {
+        let (name_end, level) = match self.bytes.get(name_end) {
             Some(&d) if d.is_ascii_digit() => {
                 if !(b'1'..=b'0' + hot.level_max).contains(&d) {
                     return None; // over-cap level, or a second digit follows.
                 }
-                name_end + 1
+                (name_end + 1, d - b'0')
             }
-            _ => name_end,
+            _ => (name_end, 0),
         };
-        self.fused_plain(index, name_end, hot)
+        self.fused_plain(index, name_end, hot, level)
     }
 
     /// The shared tail of every non-`v` arm: after the (possibly leveled)
@@ -370,11 +372,11 @@ impl Scanner<'_> {
     /// Pad token), or take the marker + its line ending in one hit. Any other
     /// next byte (alnum continuing a longer name, `*`, `-`, EOF) bails.
     #[inline(always)]
-    fn fused_plain(&mut self, index: usize, name_end: usize, hot: Hot) -> Option<usize> {
+    fn fused_plain(&mut self, index: usize, name_end: usize, hot: Hot, level: u8) -> Option<usize> {
         match self.bytes.get(name_end) {
             Some(&SPACE | &TAB) if hot.folds => {
                 let end = ws_run_end(self.bytes, name_end + 1);
-                self.push_marker(index, name_end + 1, hot.idx);
+                self.push_marker(index, name_end + 1, hot.idx, level);
                 if end > name_end + 1 {
                     self.push_token(TokenKind::Pad, name_end + 1, end);
                 }
@@ -395,7 +397,7 @@ impl Scanner<'_> {
             Some(&SPACE | &TAB) => {
                 // Non-delimiter class (`\b`): the space is CONTENT — emit the
                 // marker alone and let the space open the next text run.
-                self.push_marker(index, name_end, hot.idx);
+                self.push_marker(index, name_end, hot.idx, level);
                 self.mode.awaiting_delimiter_ws = false;
                 self.mode.pending_payload = Payload::None;
                 // Still correct: the space is content, so the text arm clears
@@ -411,7 +413,7 @@ impl Scanner<'_> {
             }
             Some(&CR | &LF) => {
                 // Marker + its line ending in one hit.
-                self.push_marker(index, name_end, hot.idx);
+                self.push_marker(index, name_end, hot.idx, level);
                 let end = newline_end(self.bytes, name_end);
                 self.push_token(TokenKind::Newline, name_end, end);
                 self.mode.awaiting_delimiter_ws = false;
@@ -494,12 +496,13 @@ pub(crate) fn folds_delimiter(kind: TokenKind, idx: generated::MarkerIdx) -> boo
 // ---- emit -----------------------------------------------------------------
 
 impl Scanner<'_> {
-    /// A fused marker token: plain opener shape, row already known.
+    /// A fused marker token: plain opener shape, row and level already known.
     #[inline(always)]
-    fn push_marker(&mut self, start: usize, end: usize, idx: generated::MarkerIdx) {
+    fn push_marker(&mut self, start: usize, end: usize, idx: generated::MarkerIdx, level: u8) {
         self.push_token(TokenKind::Marker { nested: false }, start, end);
         if let Some(last) = self.tokens.last_mut() {
             last.marker_idx = idx;
+            last.level = level;
         }
     }
 
@@ -515,6 +518,7 @@ impl Scanner<'_> {
                 len: u16::MAX,
                 kind_bits: kind.to_bits(),
                 marker_idx: 0,
+                level: 0,
             });
             at += u16::MAX as usize;
         }
@@ -523,6 +527,7 @@ impl Scanner<'_> {
             len: (end - at) as u16,
             kind_bits: kind.to_bits(),
             marker_idx: 0,
+            level: 0,
         });
     }
 }
@@ -660,24 +665,55 @@ pub(crate) fn classify_marker(slice: &[u8]) -> TokenKind {
     TokenKind::Marker { nested }
 }
 
-/// Resolves an already-classified marker slice to its table row. The lexeme
-/// handed to the table is the NAME as spelled — leading `\`/`+` and trailing
-/// `*` stripped, `-s`/`-e` kept (the matcher strips those itself). `qt` is the
-/// one name where the plain and milestone rows differ, hence the `kind` arg.
-pub(crate) fn resolve_marker_idx(slice: &[u8], kind: TokenKind) -> generated::MarkerIdx {
-    let name_from = if slice.get(1) == Some(&PLUS) { 2 } else { 1 };
-    let name_to = if slice.last() == Some(&STAR) {
+/// The NAME as spelled: leading `\`/`+` and trailing `*` stripped, `-s`/`-e`
+/// kept — the table's matcher strips those itself.
+fn spelled_name(slice: &[u8]) -> &[u8] {
+    let from = if slice.get(1) == Some(&PLUS) { 2 } else { 1 };
+    let to = if slice.last() == Some(&STAR) {
         slice.len() - 1
     } else {
         slice.len()
     };
+    &slice[from..to]
+}
+
+/// The trailing number a marker's spelling names: `2` for `\q2`, `1` for
+/// `\tc1`, `0` for a bare `\q`.
+///
+/// Keyed on the ROW's numbering, so digits are read only where the row admits
+/// them at all — an over-cap suffix (`\s7`) has already resolved to row 0,
+/// whose numbering is `Unnumbered`. What the number MEANS stays the row's:
+/// `UpTo` makes it a nesting level, `TableColumns` a column index. `Unbounded`
+/// has no cap to clamp against, so a preposterous `\liv999` saturates.
+pub(crate) fn marker_level(slice: &[u8], idx: generated::MarkerIdx) -> u8 {
+    match generated::numbering(idx) {
+        Numbering::Unnumbered => 0,
+        Numbering::UpTo(_) | Numbering::Unbounded | Numbering::TableColumns => {
+            let name = spelled_name(slice);
+            // `\qt2-s` — the milestone suffix rides the name, so the digits
+            // are not at its end.
+            let stem = match name {
+                [head @ .., HYPHEN, MILESTONE_START | MILESTONE_END] => head,
+                _ => name,
+            };
+            let digits = stem.len() - stem.iter().rev().take_while(|b| b.is_ascii_digit()).count();
+            stem[digits..].iter().fold(0u8, |acc, &b| {
+                acc.saturating_mul(10).saturating_add(b - b'0')
+            })
+        }
+    }
+}
+
+/// Resolves an already-classified marker slice to its table row. `qt` is the
+/// one name where the plain and milestone rows differ, hence the `kind` arg.
+pub(crate) fn resolve_marker_idx(slice: &[u8], kind: TokenKind) -> generated::MarkerIdx {
     let shape = match kind {
         TokenKind::Milestone { .. } | TokenKind::MilestoneTerminator => {
             SpellingShape::MilestoneOnly
         }
         _ => SpellingShape::PlainOnly,
     };
-    generated::marker_idx(&slice[name_from..name_to], shape)
+    generated::marker_idx(spelled_name(slice), shape)
 }
 
 impl Scanner<'_> {
@@ -690,8 +726,10 @@ impl Scanner<'_> {
         self.push_token(kind, index, end);
         // A marker slice is far below the u16 split threshold, so `last` IS it.
         let idx = resolve_marker_idx(slice, kind);
+        let level = marker_level(slice, idx);
         if let Some(last) = self.tokens.last_mut() {
             last.marker_idx = idx;
+            last.level = level;
         }
         self.mode.awaiting_delimiter_ws = folds_delimiter(kind, idx);
         // Only an opener or milestone can have attributes in front of it.
@@ -1656,8 +1694,9 @@ mod tests {
         );
     }
 
-    /// Marker tokens carry their table row; every other spelling fact lives in
-    /// the span. Asserted by name round-trip, so row reordering can't break it.
+    /// Marker tokens carry their table row; every other spelling fact except
+    /// the level lives in the span. Asserted by name round-trip, so row
+    /// reordering can't break it.
     #[test]
     fn marker_tokens_are_stamped_with_their_row() {
         let named = |source: &str| {
@@ -1665,7 +1704,7 @@ mod tests {
             generated::name(tokens[0].marker_idx)
         };
         assert_eq!(named("\\p x"), "p");
-        assert_eq!(named("\\q2 x"), "q"); // level lives in the span
+        assert_eq!(named("\\q2 x"), "q"); // the row is bare; `level` holds the 2
         assert_eq!(named("\\+nd*"), "nd"); // nested + closing both strip
         assert_eq!(named("\\qt-s |who=\"P\"\\*"), "qt");
         assert_eq!(named("\\zaln-s x"), ""); // unconfigured extension → row 0
@@ -1677,5 +1716,37 @@ mod tests {
         assert_ne!(plain, milestone);
         assert_eq!(generated::name(plain), "qt");
         assert_eq!(generated::name(milestone), "qt");
+    }
+
+    /// The level, the one markup fact a consumer used to re-slice the span
+    /// for. Every case where digits are NOT a level is asserted here, because
+    /// each is a place a "read the trailing digits" implementation is wrong.
+    #[test]
+    fn marker_tokens_carry_their_level() {
+        let level = |source: &str| lex(source)[0].level;
+
+        assert_eq!(level("\\q2 x"), 2);
+        assert_eq!(level("\\toc3 x"), 3);
+        assert_eq!(level("\\mt1 x"), 1);
+        assert_eq!(level("\\q x"), 0, "bare is legal, and level 0");
+        assert_eq!(level("\\p x"), 0, "unnumbered row");
+        assert_eq!(level("\\liv4 x"), 4, "Unbounded reads the digits");
+        assert_eq!(level("\\liv999 x"), 255, "no cap to clamp to, so saturate");
+        // The milestone suffix rides the name, so the digits are not last.
+        assert_eq!(level("\\qt2-s |who=\"P\"\\*"), 2);
+        // A closer shares its opener's row, and its spelling names the level.
+        assert_eq!(level("\\liv2*"), 2);
+        // `TableColumns` reads its digits too — a column index, not a nesting
+        // level, which is what the row's `numbering` is for.
+        assert_eq!(level("\\tc1 x"), 1);
+        assert_eq!(level("\\tcr2 x"), 2);
+        // `\tc1-2` is NOT one token: `marker_end` stops at the alnum run, so
+        // the marker is `\tc1` and `-2` opens a text run.
+        assert_eq!(lex("\\tc1-2 x")[0].len, 4);
+        assert_eq!(level("\\tc1-2 x"), 1);
+        // Over cap: no row, so no level either.
+        assert_eq!(level("\\s7 x"), 0);
+        // Nothing but a marker has one.
+        assert!(lex("plain text").iter().all(|t| t.level == 0));
     }
 }

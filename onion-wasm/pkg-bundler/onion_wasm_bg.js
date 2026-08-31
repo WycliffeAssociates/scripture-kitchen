@@ -315,29 +315,6 @@ export class Splices {
 if (Symbol.dispose) Splices.prototype[Symbol.dispose] = Splices.prototype.free;
 
 /**
- * The one read call. `wants` is the bitmask in `onion-wasm.ts`; an unset bit
- * computes nothing and returns an empty array.
- *
- * `clipFrom`/`clipTo` are UTF-16 offsets and bound ONLY the token-granularity
- * reads (`tokenSpans`, `textRuns`) to a viewport — chapters, blocks and
- * diagnostics stay whole-book, because a finding's evidence is regularly
- * outside the viewport that shows it. Pass `undefined` for both to skip.
- *
- * `text` must be LF-normalized (see the module doc); a debug build asserts it.
- * @param {string} text
- * @param {number} wants
- * @param {number | null} [clip_from]
- * @param {number | null} [clip_to]
- * @returns {object}
- */
-export function analyze(text, wants, clip_from, clip_to) {
-    const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.analyze(ptr0, len0, wants, isLikeNone(clip_from) ? Number.MAX_SAFE_INTEGER : (clip_from) >>> 0, isLikeNone(clip_to) ? Number.MAX_SAFE_INTEGER : (clip_to) >>> 0);
-    return ret;
-}
-
-/**
  * The first `\id`'s book code — `"GEN"`. EMPTY when the document declares
  * none (real in the wild: BSB Ecclesiastes); the `missing-id` diagnostic is
  * where that becomes a finding, not here.
@@ -477,6 +454,33 @@ export function locate(text, utf16) {
 }
 
 /**
+ * One mask recipe's text, and the map back to the source it was cut from.
+ *
+ * Not a section of a dish: a mask is a different question with its own
+ * parameter, and most callers never want one. Not hot and not large either,
+ * so it takes the string like any other call rather than the buffer.
+ *
+ * `ranges` are the kept SOURCE spans — sorted, disjoint, maximal — and
+ * `starts[i]` is the prefix sum, so `ranges[i]`'s bytes sit at `starts[i]..`
+ * in `text`. That pair is the map: a finding at a masked offset maps back by
+ * a binary search on `starts`.
+ *
+ * Offsets stay in UTF-8 bytes. The mask is onion-to-sous and never reaches an
+ * editor, which is the only consumer that counts in UTF-16.
+ * @param {string} text
+ * @param {string} recipe
+ * @returns {object}
+ */
+export function mask(text, recipe) {
+    const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(recipe, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.mask(ptr0, len0, ptr1, len1);
+    return ret;
+}
+
+/**
  * The merged document. An unknown unit id REJECTS loudly — the caller must
  * re-diff, and there is no fuzzy stale-id fallback.
  * @param {string} baseline
@@ -536,6 +540,35 @@ export function mergeSplices(baseline, current, decisions_json, _default) {
 }
 
 /**
+ * THE read call. One document in, one buffer out.
+ *
+ * The buffer is a plated parse — tokens, the tree, and whatever `opts` asked
+ * for besides — read by `reader.ts`, which is generated from the same schema
+ * as the writer. Nothing is retained wasm-side: the `Uint8Array` is JS's, the
+ * collector reclaims it, and there is no `free`.
+ *
+ * The three booleans are positional because an object crossing the wall would
+ * be `Reflect::get` per key with a misspelling silently reading as `false`.
+ * `reader.ts` wraps this as `parse(text, { diagnostics, toc, utf16 })`, where
+ * a misspelled key is a compile error instead.
+ *
+ * `text` must be LF-normalized (see the module doc); a debug build asserts it.
+ * @param {string} text
+ * @param {boolean} diagnostics
+ * @param {boolean} toc
+ * @param {boolean} utf16
+ * @returns {Uint8Array}
+ */
+export function parse(text, diagnostics, toc, utf16) {
+    const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.parse(ptr0, len0, diagnostics, toc, utf16);
+    var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v2;
+}
+
+/**
  * A CodeMirror offset as a source byte offset. Rebuilds the 1.6% stride index
  * per call (~0.1ms) — honest and stateless at a handful of calls per user
  * interaction, which is what a cursor-to-sid lookup is.
@@ -560,16 +593,6 @@ export function toUtf16(text, byte) {
     const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len0 = WASM_VECTOR_LEN;
     const ret = wasm.toUtf16(ptr0, len0, byte);
-    return ret >>> 0;
-}
-
-/**
- * `wants::ALL` — every read. Exported so a caller that wants everything does
- * not restate the bitmask.
- * @returns {number}
- */
-export function wantsAll() {
-    const ret = wasm.wantsAll();
     return ret >>> 0;
 }
 export function __wbg_Error_408e67f47ca7b58b(arg0, arg1) {
@@ -598,12 +621,7 @@ export function __wbg_set_8155bb79a948541b() { return handleError(function (arg0
     const ret = Reflect.set(arg0, arg1, arg2);
     return ret;
 }, arguments); }
-export function __wbindgen_cast_0000000000000001(arg0) {
-    // Cast intrinsic for `F64 -> Externref`.
-    const ret = arg0;
-    return ret;
-}
-export function __wbindgen_cast_0000000000000002(arg0, arg1) {
+export function __wbindgen_cast_0000000000000001(arg0, arg1) {
     // Cast intrinsic for `Ref(String) -> Externref`.
     const ret = getStringFromWasm0(arg0, arg1);
     return ret;
@@ -709,6 +727,11 @@ function getArrayU32FromWasm0(ptr, len) {
     return getUint32ArrayMemory0().subarray(ptr / 4, ptr / 4 + len);
 }
 
+function getArrayU8FromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    return getUint8ArrayMemory0().subarray(ptr / 1, ptr / 1 + len);
+}
+
 let cachedDataViewMemory0 = null;
 function getDataViewMemory0() {
     if (cachedDataViewMemory0 === null || cachedDataViewMemory0.buffer.detached === true || (cachedDataViewMemory0.buffer.detached === undefined && cachedDataViewMemory0.buffer !== wasm.memory.buffer)) {
@@ -744,10 +767,6 @@ function handleError(f, args) {
         const idx = addToExternrefTable0(e);
         wasm.__wbindgen_exn_store(idx);
     }
-}
-
-function isLikeNone(x) {
-    return x === undefined || x === null;
 }
 
 function passArray32ToWasm0(arg, malloc) {

@@ -1,11 +1,12 @@
-//! The fold pipeline against the stateless oracle: [`FoldCache::lint`] must
+//! The fold pipeline against the stateless oracle: [`Warmer::lint`] must
 //! equal onion's fresh `lex → build → lint` on every text it is handed —
 //! cold, warm, edited, re-chunked, fused, evicted, undone.
 //!
 //! The corpus-scale half is `#[ignore]`d (pass-end gate); everything else is
 //! synthetic and fast.
 
-use usfm_galley::{FoldCache, onion};
+use onion::wire::ParseOptions;
+use usfm_galley::{Warmer, onion};
 
 fn fresh(text: &str) -> onion::lint::LintReport {
     let tokens = onion::lex(text);
@@ -42,7 +43,7 @@ const BOOK: &str = "\\id GEN\n\\usfm 3.0\n\\h Genesis\n\\mt1 Genesis\n\
 
 #[test]
 fn cold_and_warm_calls_equal_fresh_lint() {
-    let mut cache = FoldCache::new(16 << 20);
+    let mut cache = Warmer::new(16 << 20);
     assert_matches(&cache.lint(BOOK), BOOK, "cold");
     let cold_misses = cache.misses();
     assert_eq!(cold_misses, 4, "chunk 0 + three chapters");
@@ -53,7 +54,7 @@ fn cold_and_warm_calls_equal_fresh_lint() {
 
 #[test]
 fn one_edited_chapter_is_one_miss_and_undo_is_free() {
-    let mut cache = FoldCache::new(16 << 20);
+    let mut cache = Warmer::new(16 << 20);
     cache.lint(BOOK);
     let baseline = cache.misses();
 
@@ -68,7 +69,7 @@ fn one_edited_chapter_is_one_miss_and_undo_is_free() {
 
 #[test]
 fn chapter_add_delete_and_split_rechunk_cleanly() {
-    let mut cache = FoldCache::new(16 << 20);
+    let mut cache = Warmer::new(16 << 20);
     cache.lint(BOOK);
 
     // A pasted `\c` splits one chunk into two: the split chunk misses (as
@@ -86,7 +87,7 @@ fn chapter_add_delete_and_split_rechunk_cleanly() {
 #[test]
 fn a_straddling_sidebar_fuses_and_still_matches() {
     let text = "\\id GEN\n\\c 1\n\\p \\v 1 a\n\\esb \\p in\n\\c 2\n\\p more\n\\esbe\n\\p \\v 1 b\n";
-    let mut cache = FoldCache::new(16 << 20);
+    let mut cache = Warmer::new(16 << 20);
     assert_matches(&cache.lint(text), text, "fused cold");
     let cold = cache.misses();
     // The fused unit is cached under the fused span's hash — and the open
@@ -101,7 +102,7 @@ fn a_version_edit_in_chunk_0_invalidates_gated_chunks() {
     // later chunk's product, which the (hash, version) key must see.
     let with = "\\id GEN\n\\usfm 3.0\n\\c 1\n\\p \\v 1 \\pro x\\pro* a\n";
     let without = "\\id GEN\n\\c 1\n\\p \\v 1 \\pro x\\pro* a\n";
-    let mut cache = FoldCache::new(16 << 20);
+    let mut cache = Warmer::new(16 << 20);
     assert_matches(&cache.lint(with), with, "with version");
     assert_matches(&cache.lint(without), without, "without version");
     assert_matches(&cache.lint(with), with, "with version again");
@@ -111,7 +112,7 @@ fn a_version_edit_in_chunk_0_invalidates_gated_chunks() {
 fn the_byte_budget_evicts_and_correctness_survives() {
     // A budget far below one book's products: every call recomputes, the
     // answer never changes, and residency stays bounded.
-    let mut cache = FoldCache::new(512);
+    let mut cache = Warmer::new(512);
     assert_matches(&cache.lint(BOOK), BOOK, "starved cold");
     let first = cache.misses();
     assert_matches(&cache.lint(BOOK), BOOK, "starved warm");
@@ -124,7 +125,7 @@ fn the_byte_budget_evicts_and_correctness_survives() {
 
 #[test]
 fn empty_and_single_chunk_books() {
-    let mut cache = FoldCache::new(16 << 20);
+    let mut cache = Warmer::new(16 << 20);
     for text in ["", "\\id FRT\n\\p front matter only\n", "plain prose"] {
         assert_matches(&cache.lint(text), text, text);
     }
@@ -170,7 +171,7 @@ fn bench_fold_en_ult() {
         // Warm the cache on the ORIGINAL text; each measured run then pays
         // the true one-edited-chunk price (the edited chunk's entry is fresh
         // the first time and a hit after, so evict nothing — measure both).
-        let mut cache = FoldCache::new(32 << 20);
+        let mut cache = Warmer::new(32 << 20);
         cache.lint(&text);
         cache.lint(&edited);
         let folded_warm_ms = median_ms(9, {
@@ -215,7 +216,7 @@ fn fold_cache_equals_fresh_over_the_corpus() {
     for path in &paths {
         let text = std::fs::read_to_string(path).expect("readable book");
         let label = path.display().to_string();
-        let mut cache = FoldCache::new(32 << 20);
+        let mut cache = Warmer::new(32 << 20);
         assert_matches(&cache.lint(&text), &text, &label);
         // One byte inserted mid-book: warm run, then verify the edit. The
         // midpoint rounds up to a char boundary (Hebrew text mid-byte).
@@ -238,55 +239,65 @@ fn fold_cache_equals_fresh_over_the_corpus() {
 // ---------------------------------------------------------------------------
 
 /// Every `Analysis` field, folded vs fresh. Field-by-field rather than
-/// `assert_eq!` on the struct so a failure names the read that broke.
-fn assert_analysis_matches(folded: &onion::analyze::Analysis, text: &str, wants: u32, why: &str) {
-    let fresh = onion::analyze::analyze(text, wants, None);
-    assert_eq!(folded.len_utf16, fresh.len_utf16, "len_utf16 — {why}");
-    assert_eq!(
-        folded.usfm_version, fresh.usfm_version,
-        "usfm_version — {why}"
-    );
-    assert_eq!(folded.chapters, fresh.chapters, "chapters — {why}");
-    assert_eq!(folded.blocks, fresh.blocks, "blocks — {why}");
-    assert_eq!(folded.lines, fresh.lines, "lines — {why}");
-    assert_eq!(
-        folded.note_extents, fresh.note_extents,
-        "note_extents — {why}"
-    );
-    assert_eq!(folded.note_parts, fresh.note_parts, "note_parts — {why}");
-    assert_eq!(folded.token_spans, fresh.token_spans, "token_spans — {why}");
-    assert_eq!(folded.text_runs, fresh.text_runs, "text_runs — {why}");
-    assert_eq!(
-        folded.verse_anchors, fresh.verse_anchors,
-        "verse_anchors — {why}"
-    );
-    assert_eq!(folded.diagnostics, fresh.diagnostics, "diagnostics — {why}");
-    assert_eq!(folded.fixes, fresh.fixes, "fixes — {why}");
-    assert_eq!(folded.fix_edits, fresh.fix_edits, "fix_edits — {why}");
-    assert_eq!(folded.fix_lens, fresh.fix_lens, "fix_lens — {why}");
-    assert_eq!(folded.fix_text, fresh.fix_text, "fix_text — {why}");
+/// The folded dish must be BYTE-IDENTICAL to a cold one.
+///
+/// Stronger than the field-by-field comparison this replaced, and shorter: if
+/// the bytes agree then every field in every section agrees, including the ones
+/// nobody thought to assert.
+fn assert_dish_matches(cache: &mut Warmer, text: &str, opts: ParseOptions, why: &str) {
+    let folded = cache.parse(text, opts);
+    let fresh = onion::wire::plate(&onion::wire::parse(text, opts));
+    assert_eq!(folded.len(), fresh.len(), "dish length — {why}");
+    if folded != fresh {
+        let at = folded
+            .iter()
+            .zip(&fresh)
+            .position(|(a, b)| a != b)
+            .expect("lengths agreed, so a byte must differ");
+        panic!("dish differs at byte {at} — {why}");
+    }
 }
 
 #[test]
-fn the_analyze_fold_agrees_with_a_fresh_analyze() {
-    let wants = onion::analyze::wants::ALL;
-    let mut cache = FoldCache::new(64 << 20);
+fn the_folded_dish_is_byte_identical_to_a_cold_one() {
+    let all = ParseOptions {
+        diagnostics: true,
+        toc: true,
+        utf16: false,
+    };
+    let mut cache = Warmer::new(64 << 20);
     // Cold, warm, and after an edit — the three states that exercise a
     // different mix of hits, misses and assembly.
-    assert_analysis_matches(&cache.analyze(BOOK, wants), BOOK, wants, "cold");
-    assert_analysis_matches(&cache.analyze(BOOK, wants), BOOK, wants, "warm");
+    assert_dish_matches(&mut cache, BOOK, all, "cold");
+    assert_dish_matches(&mut cache, BOOK, all, "warm");
     let edited = BOOK.replace("a", "aa");
-    assert_analysis_matches(&cache.analyze(&edited, wants), &edited, wants, "edited");
-    assert_analysis_matches(&cache.analyze(BOOK, wants), BOOK, wants, "back again");
+    assert_dish_matches(&mut cache, &edited, all, "edited");
+    assert_dish_matches(&mut cache, BOOK, all, "back again");
 
-    // A want subset must not drag in reads it did not ask for.
-    let some = onion::analyze::wants::LINES | onion::analyze::wants::CHAPTERS;
-    assert_analysis_matches(&cache.analyze(BOOK, some), BOOK, some, "subset");
+    // Every combination of the options, over a warm cache: an option must not
+    // drag in a section it did not ask for, or drop one it did.
+    for diagnostics in [false, true] {
+        for toc in [false, true] {
+            for utf16 in [false, true] {
+                let opts = ParseOptions {
+                    diagnostics,
+                    toc,
+                    utf16,
+                };
+                assert_dish_matches(
+                    &mut cache,
+                    BOOK,
+                    opts,
+                    &format!("diagnostics={diagnostics} toc={toc} utf16={utf16}"),
+                );
+            }
+        }
+    }
 }
 
 #[test]
 fn the_masked_fold_agrees_with_a_fresh_mask() {
-    let mut cache = FoldCache::new(64 << 20);
+    let mut cache = Warmer::new(64 << 20);
     for filter in [
         onion::mask::Filter::verse_text(),
         onion::mask::Filter::structure(),
@@ -305,7 +316,11 @@ fn the_masked_fold_agrees_with_a_fresh_mask() {
 #[test]
 #[ignore = "corpus-scale oracle; run --release --ignored at pass end"]
 fn the_analyze_fold_holds_over_the_corpus() {
-    let wants = onion::analyze::wants::ALL;
+    let all = ParseOptions {
+        diagnostics: true,
+        toc: true,
+        utf16: false,
+    };
     let root = format!("{}/../testData/exampleCorpora", env!("CARGO_MANIFEST_DIR"));
     let mut paths = Vec::new();
     collect(std::path::Path::new(&root), &mut paths);
@@ -318,9 +333,9 @@ fn the_analyze_fold_holds_over_the_corpus() {
             continue;
         };
         let name = path.display().to_string();
-        let mut cache = FoldCache::new(64 << 20);
-        assert_analysis_matches(&cache.analyze(&text, wants), &text, wants, &name);
-        assert_analysis_matches(&cache.analyze(&text, wants), &text, wants, &name);
+        let mut cache = Warmer::new(64 << 20);
+        assert_dish_matches(&mut cache, &text, all, &name);
+        assert_dish_matches(&mut cache, &text, all, &name);
 
         let filter = onion::mask::Filter::verse_text();
         let folded = cache.masked(&text, &filter);
@@ -334,7 +349,7 @@ fn the_analyze_fold_holds_over_the_corpus() {
             let at = mid + text[mid..].find(' ').unwrap_or(0);
             let mut edited = text.clone();
             edited.insert(at, 'x');
-            assert_analysis_matches(&cache.analyze(&edited, wants), &edited, wants, &name);
+            assert_dish_matches(&mut cache, &edited, all, &name);
         }
         books += 1;
     }
@@ -366,16 +381,15 @@ fn a_one_chapter_book_is_computed_and_never_cached() {
         "the fixture must sit at the gate"
     );
 
-    let mut cache = FoldCache::new(16 << 20);
+    let mut cache = Warmer::new(16 << 20);
     assert_matches(&cache.lint(EPISTLE), EPISTLE, "gated cold");
     assert_matches(&cache.lint(EPISTLE), EPISTLE, "gated warm");
-    let wants = onion::analyze::wants::ALL;
-    assert_analysis_matches(
-        &cache.analyze(EPISTLE, wants),
-        EPISTLE,
-        wants,
-        "gated analyze",
-    );
+    let all = ParseOptions {
+        diagnostics: true,
+        toc: true,
+        utf16: false,
+    };
+    assert_dish_matches(&mut cache, EPISTLE, all, "gated parse");
 
     assert_eq!(cache.len(), 0, "a gated book leaves no entries");
     assert_eq!(cache.resident_bytes(), 0, "…and no residency");

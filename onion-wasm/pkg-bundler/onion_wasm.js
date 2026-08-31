@@ -5,5 +5,5 @@ import { __wbg_set_wasm } from "./onion_wasm_bg.js";
 __wbg_set_wasm(wasm);
 wasm.__wbindgen_start();
 export {
-    Edits, FormatOpts, Splices, analyze, book, diff, format, formatEdits, formatEditsIn, locate, merge, mergeSplices, toByte, toUtf16, wantsAll
+    Edits, FormatOpts, Splices, book, diff, format, formatEdits, formatEditsIn, locate, mask, merge, mergeSplices, parse, toByte, toUtf16
 } from "./onion_wasm_bg.js";

@@ -191,63 +191,67 @@ mod vref {
     }
 }
 
-/// The editor wire: all seven reads, including the emit and the UTF-16
-/// conversion. `lint::full` is its floor.
-mod analyze {
+/// The boundary: parse, then plate. `lint::full` is the floor of the first and
+/// the second is pure serialization, so the pair says what crossing costs over
+/// what computing costs.
+mod wire {
     use super::*;
 
-    use usfm_onion::analyze::{Prebuilt, wants};
+    use usfm_onion::wire::{self, ParseOptions};
 
-    /// The tree and tokens supplied, the lint report left to `analyze_from` —
-    /// the shape a caller holding ingredients but not products has.
-    fn prebuilt<'a>(
-        tokens: &'a [usfm_onion::Token],
-        cst: &'a usfm_onion::cst::Cst,
-    ) -> Prebuilt<'a> {
-        Prebuilt {
-            tokens,
-            cst: Some(cst),
-            lint: None,
-        }
-    }
+    const ALL: ParseOptions = ParseOptions {
+        diagnostics: true,
+        toc: true,
+        utf16: false,
+    };
 
+    /// Everything: lex, build, lint, toc, and the buffer.
     #[divan::bench]
     fn full(bencher: divan::Bencher) {
         bencher.counter(bytes()).bench(|| {
             for source in &CORPUS.sources {
-                divan::black_box(usfm_onion::analyze::analyze(source, wants::ALL, None));
+                let parsed = wire::parse(source, ALL);
+                divan::black_box(wire::plate(&parsed));
             }
         });
     }
 
-    /// The ingredients off the clock — what a caller holding a cached tree and
-    /// token stream pays. `full` minus this is what caching them can ever buy.
+    /// The same, in UTF-16 — the one sorted sweep over every offset in the
+    /// dish. `full` subtracted from this is what an editor's addressing costs.
     #[divan::bench]
-    fn from_prebuilt(bencher: divan::Bencher) {
+    fn full_utf16(bencher: divan::Bencher) {
+        let opts = ParseOptions { utf16: true, ..ALL };
         bencher.counter(bytes()).bench(|| {
-            for (source, tokens, cst) in built() {
-                divan::black_box(usfm_onion::analyze::analyze_from(
-                    source.as_bytes(),
-                    &prebuilt(tokens, cst),
-                    wants::ALL,
-                    None,
-                ));
+            for source in &CORPUS.sources {
+                let parsed = wire::parse(source, opts);
+                divan::black_box(wire::plate(&parsed));
             }
         });
     }
 
-    /// …and with the one read the existing fold already caches cleared. The
-    /// floor the two cheap moves reach together.
+    /// The tree alone — what a consumer that only renders structure pays.
     #[divan::bench]
-    fn from_prebuilt_less_diagnostics(bencher: divan::Bencher) {
+    fn tree_only(bencher: divan::Bencher) {
         bencher.counter(bytes()).bench(|| {
-            for (source, tokens, cst) in built() {
-                divan::black_box(usfm_onion::analyze::analyze_from(
-                    source.as_bytes(),
-                    &prebuilt(tokens, cst),
-                    wants::ALL & !wants::DIAGNOSTICS,
-                    None,
-                ));
+            for source in &CORPUS.sources {
+                let parsed = wire::parse(source, ParseOptions::default());
+                divan::black_box(wire::plate(&parsed));
+            }
+        });
+    }
+
+    /// PLATING ALONE, off an already-parsed document: the writer, and the
+    /// price of the boundary with the engine subtracted out.
+    #[divan::bench]
+    fn plate_only(bencher: divan::Bencher) {
+        let parsed: Vec<_> = CORPUS
+            .sources
+            .iter()
+            .map(|source| wire::parse(source, ALL))
+            .collect();
+        bencher.counter(bytes()).bench(|| {
+            for p in &parsed {
+                divan::black_box(wire::plate(p));
             }
         });
     }

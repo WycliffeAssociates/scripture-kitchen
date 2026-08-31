@@ -1,20 +1,42 @@
-//! Use case: Per keystroke the pipeline pays: one pre-scan (~1ms/5MB), one checksum
-//! checksum per "chapter" (byte range from \n\c). Onion internals (lex/cst/lint) intentionally model as per chapter units of work, where cross book concerns are added to an explicit Carry struct, and whole book products (cst, lint diagnostics) are completed via a final reduce
-//! Entries are chunk-relative and NEVER mutate; Absolute offsets out the door.
-//! The cache key is (content hash, chunk 0's carry-outs): the declared `\usfm` version and
-//! the is-scripture bit gate local rules, so a chunk's product is a function
-//! of its bytes AND that context. A dirty `\c` boundary (a sidebar
-//! straddling the seam) is remembered as [`Cached::OpenBoundary`], so repeat
-//! calls widen to the fused unit without re-lexing to rediscover it.
+//! The warmer: prepared plates, kept hot.
 //!
-//! INPUT CONTRACT: same as `onion::analyze` — checksums are only stable
+//! **This is a cache.** The name is the kitchen the crate is named for — a
+//! warmer holds food that is already cooked so it does not have to be cooked
+//! again — and the metaphor stops there. What it holds is per-chunk products;
+//! what it saves is re-deriving them.
+//!
+//! ```text
+//! warmer.parse(text, opts)  ->  the same bytes onion::wire::parse would plate,
+//!                               with every unchanged chunk served from memory
+//! ```
+//!
+//! Per keystroke the pipeline otherwise pays: one pre-scan (~1ms/5MB) and one
+//! checksum per "chapter" (the byte range from `\n\c`). Onion's internals
+//! (lex/cst/lint) deliberately model per-chapter units of work, with
+//! cross-book concerns collected into an explicit `Carried`, and whole-book
+//! products (the tree, the findings) completed by a final reduce.
+//!
+//! That map-then-reduce IS a fold, and the word is kept for it — `reduce`,
+//! `assemble`, `Products`. What is not a fold is this module, which used to be
+//! called one: a cache that happens to use a fold is still a cache.
+//!
+//! Entries are chunk-relative and NEVER mutate; absolute offsets go out the
+//! door. The cache key is (content hash, chunk 0's carry-outs): the declared
+//! `\usfm` version and the is-scripture bit gate local rules, so a chunk's
+//! product is a function of its bytes AND that context. A dirty `\c` boundary
+//! (a sidebar straddling the seam) is remembered as [`Cached::OpenBoundary`],
+//! so repeat calls widen to the fused unit without re-lexing to rediscover it.
+//!
+//! Keying on CONTENT is what makes the warmer safe to be wrong about: a stale
+//! entry cannot be served, only missed. Nothing here has to be invalidated.
+//!
+//! INPUT CONTRACT: same as `onion::wire::parse` — checksums are only stable
 //! against LF-normalized text (CRLF works, but is a different content hash).
 
 use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::onion;
-use onion::analyze::Analysis;
 use onion::cst::{self, Cst};
 use onion::lint::{self, Carried, ChunkContext, LintReport, UsfmVersion};
 use xxhash_rust::xxh3::xxh3_128;
@@ -71,15 +93,23 @@ struct Key {
 
 /// At or below this many chunks a book has AT MOST ONE chapter, so an entry can
 /// only ever serve the front matter. Measured over en_ulb's five two-chunk
-/// books (3JN, 2JN, PHM, OBA, JUD): folded analyze is 1.02–1.14x fresh, i.e.
+/// books (3JN, 2JN, PHM, OBA, JUD): a folded parse is 1.02–1.14x fresh, i.e.
 /// break-even — while fifty keystrokes in Jude would leave 52 entries and 74 KB
 /// resident for a 3.9 KB book. Bypassing is not about speed; it keeps entries
 /// that never pay from evicting the large-book units that do.
 const UNCACHED_CHUNKS: usize = 2;
 
-/// handrolled byte-budget LRU (chunk-fold.md's ruling: at dozens-to-
-/// hundreds of entries, eviction is a linear scan and a crate such as moka is currently overkill
-pub struct FoldCache {
+/// The cache itself: a hand-rolled byte-budget LRU.
+///
+/// Hand-rolled per chunk-fold.md's ruling — at dozens-to-hundreds of entries
+/// eviction is a linear scan, and a crate such as moka is currently overkill.
+///
+/// One per open document. Keyed on chapter CONTENT, so reordering chapters,
+/// undoing an edit, or reopening a book all hit; a changed chapter simply
+/// misses. The budget is a declared ceiling on resident products, which is
+/// what makes this safe to keep across a session — wasm linear memory grows
+/// and never shrinks, so a high-water mark is permanent.
+pub struct Warmer {
     map: HashMap<Key, Entry>,
     tick: u64,
     bytes: usize,
@@ -87,7 +117,7 @@ pub struct FoldCache {
     misses: u64,
 }
 
-impl FoldCache {
+impl Warmer {
     pub fn new(budget_bytes: usize) -> Self {
         Self {
             map: HashMap::new(),
@@ -127,29 +157,36 @@ impl FoldCache {
         reduce(&units, &byte_bases, &token_bases)
     }
 
-    /// The whole book's `analyze` reads, with the lex, the CST build and the
-    /// lint walk served from the cache for every clean chunk.
+    /// The whole book, plated — with the lex, the CST build and the lint walk
+    /// served from the cache for every chunk whose bytes did not change.
     ///
     /// The ingredients are assembled, not re-derived: `cst::concat` shifts the
     /// per-chunk trees into one, the token streams concatenate under their byte
-    /// bases, and the folded report is the one `onion` would have computed.
-    pub fn analyze(&mut self, text: &str, wants: u32) -> Analysis {
-        // One resolve for both halves: the reduce and the assembly read the
-        // same units.
+    /// bases, and the folded report is the one `onion` would have computed. The
+    /// dish those produce is byte-identical to a cold `onion::wire::parse`.
+    pub fn parse(&mut self, text: &str, opts: onion::wire::ParseOptions) -> Vec<u8> {
+        onion::wire::plate(&self.parsed(text, opts))
+    }
+
+    /// The same ingredients as engine types, for a caller that is not crossing
+    /// a boundary — a native consumer, or a test proving the fold agrees with a
+    /// cold parse.
+    ///
+    /// One resolve for both halves: the reduce and the assembly read the same
+    /// units.
+    pub fn parsed<'a>(
+        &mut self,
+        text: &'a str,
+        opts: onion::wire::ParseOptions,
+    ) -> onion::wire::Parsed<'a> {
         let units = self.resolve(text);
-        let (byte_bases, token_bases) = bases(&units);
-        let report = reduce(&units, &byte_bases, &token_bases);
-        let (tokens, tree) = assemble(&units);
-        onion::analyze::analyze_from(
-            text.as_bytes(),
-            &onion::analyze::Prebuilt {
-                tokens: &tokens,
-                cst: Some(&tree),
-                lint: Some(&report),
-            },
-            wants,
-            None,
-        )
+        let lint = opts.diagnostics.then(|| {
+            let (byte_bases, token_bases) = bases(&units);
+            reduce(&units, &byte_bases, &token_bases)
+        });
+        let (tokens, cst) = assemble(&units);
+        let toc = opts.toc.then(|| onion::toc::toc(text.as_bytes(), &tokens));
+        onion::wire::Parsed::from_parts(text, tokens, cst, lint, toc, opts)
     }
 
     /// One recipe's mask over the same assembled ingredients — what a

@@ -7,9 +7,12 @@
 use usfm_onion::lint::{self, LINT_ROWS};
 use usfm_onion::tables::schema::{Numbering, SpellingShape};
 use usfm_onion::tables::{emit, generated, rows};
+use usfm_onion::wire::emit as wire_emit;
 
 const CHECKED_IN: &str = include_str!("../src/tables/generated.rs");
 const CHECKED_IN_DIAGNOSTICS: &str = include_str!("../../onion-wasm/diagnostics.json");
+const CHECKED_IN_WIRE: &str = include_str!("../src/wire/generated.rs");
+const CHECKED_IN_READER: &str = include_str!("../../onion-wasm/reader.ts");
 
 #[test]
 fn generated_rs_is_not_stale() {
@@ -180,6 +183,80 @@ fn context_mask_invents_nothing() {
             authored,
             "{}: packed context mask is not exactly `allowed_contexts`",
             row.marker
+        );
+    }
+}
+
+/// The wire's WRITER. Stale here means the writer disagrees with the schema
+/// that the reader was generated from — the exact drift this design exists to
+/// make impossible.
+#[test]
+fn wire_writer_is_not_stale() {
+    let fresh = wire_emit::wire_generated_rs();
+    if fresh == CHECKED_IN_WIRE {
+        return;
+    }
+    let at = fresh
+        .lines()
+        .zip(CHECKED_IN_WIRE.lines())
+        .position(|(a, b)| a != b);
+    panic!(
+        "src/wire/generated.rs is stale — run `cargo run --bin codegen`.\n{}",
+        match at {
+            Some(line) => format!(
+                "first difference at line {}:\n  fresh:      {}\n  checked in: {}",
+                line + 1,
+                fresh.lines().nth(line).unwrap_or(""),
+                CHECKED_IN_WIRE.lines().nth(line).unwrap_or(""),
+            ),
+            None => "one file is a prefix of the other".to_string(),
+        }
+    );
+}
+
+/// The wire's READER. Stale here means the JS package ships a decoder for a
+/// wire the binary beside it no longer writes.
+#[test]
+fn wire_reader_is_not_stale() {
+    let fresh = wire_emit::reader_ts(
+        &wire_emit::marker_table_ts(),
+        &wire_emit::enums_ts(),
+        &wire_emit::catalog_ts(),
+    );
+    if fresh == CHECKED_IN_READER {
+        return;
+    }
+    let at = fresh
+        .lines()
+        .zip(CHECKED_IN_READER.lines())
+        .position(|(a, b)| a != b);
+    panic!(
+        "onion-wasm/reader.ts is stale — run `cargo run --bin codegen`.\n{}",
+        match at {
+            Some(line) => format!(
+                "first difference at line {}:\n  fresh:      {}\n  checked in: {}",
+                line + 1,
+                fresh.lines().nth(line).unwrap_or(""),
+                CHECKED_IN_READER.lines().nth(line).unwrap_or(""),
+            ),
+            None => "one file is a prefix of the other".to_string(),
+        }
+    );
+}
+
+/// Every wire record's stride is the sum of its field widths — the property
+/// that makes a reader's `at + offset` arithmetic sound. Nothing pads, because
+/// nothing casts.
+#[test]
+fn wire_strides_are_the_sum_of_their_fields() {
+    use usfm_onion::wire::schema;
+    for record in schema::RECORDS {
+        let sum: usize = record.fields.iter().map(|f| f.width.bytes()).sum();
+        assert_eq!(
+            record.stride(),
+            sum,
+            "{} stride disagrees with its fields",
+            record.name
         );
     }
 }

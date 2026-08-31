@@ -136,8 +136,9 @@ impl TokenKind {
     }
 }
 
-/// One compact token row: `start u32 · len u16 · kind_bits u8 · markerIdx u8`,
-/// 8 bytes total (asserted in tests). Text is always a slice of the source —
+/// One compact token row: `start u32 · len u16 · kind_bits u8 · markerIdx u8 ·
+/// level u8`, 12 bytes total (asserted in tests). Text is always a slice of the
+/// source —
 /// tokens never carry strings. `start` is an absolute byte offset.
 ///
 /// `marker_idx` indexes the marker table for spec markers; `0` is reserved as
@@ -151,6 +152,19 @@ pub struct Token {
     /// enum (`to_bits`/`from_bits`).
     pub kind_bits: u8,
     pub marker_idx: u8,
+    /// The trailing number as SPELLED: `2` for `\q2`, `1` for `\tc1`, `0` for
+    /// a bare `\q` and for every token that is not a numbered marker. The row
+    /// carries the CAP (`numbering`), never the number — `\q1` and `\q2` share
+    /// a row, so this is its only home outside the span.
+    ///
+    /// What it MEANS is the row's: a nesting level under `Numbering::UpTo`, a
+    /// column index under `TableColumns`. Zero when the row admits no digits,
+    /// which an illegal suffix (`\s7`) reaches by resolving to row 0.
+    ///
+    /// It does not reproduce the author's spelling — a milestone's `-s`/`-e`
+    /// is on `kind_bits`, and a saturated `\liv999` reads 255. Exports that
+    /// need the spelling still slice (`export::marker_name`).
+    pub level: u8,
 }
 
 impl Token {
@@ -161,6 +175,22 @@ impl Token {
     pub fn end(&self) -> u32 {
         self.start + self.len as u32
     }
+
+    /// This token's length minus the trailing whitespace the scanner folded
+    /// onto it. Never empties the span — a token that is only whitespace keeps
+    /// its bytes.
+    ///
+    /// The wire trims a finding's anchor this way, so a squiggle stops at the
+    /// marker rather than at the delimiter after it.
+    pub fn trimmed_len(&self, source: &[u8]) -> u32 {
+        let span = &source[self.start as usize..self.end() as usize];
+        let label = crate::scanner::payload_label(span);
+        if label.is_empty() {
+            u32::from(self.len)
+        } else {
+            label.len() as u32
+        }
+    }
 }
 
 #[cfg(test)]
@@ -168,8 +198,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn token_row_is_eight_bytes() {
-        assert_eq!(core::mem::size_of::<Token>(), 8);
+    fn token_row_is_twelve_bytes() {
+        assert_eq!(core::mem::size_of::<Token>(), 12);
     }
 
     #[test]

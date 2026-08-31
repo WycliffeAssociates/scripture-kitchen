@@ -13,11 +13,11 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 usfm_onion = { path = "../onion" }
 wasm-bindgen = "0.2"
-# The plain-object `analyze` return. `Object`/`Reflect`/`Uint32Array` only —
+# The plain-object `mask` return. `Object`/`Reflect`/`Uint32Array` only —
 # lighter than serde-wasm-bindgen, which would pull serde's derive machinery
-# into the hot read path for a fourteen-key object built once per call.
+# into a path that builds one small object per call.
 js-sys = "0.3"
-# RULED (sketches/wasm-analyze.md, 2026-08-24): serde lives HERE and never in
+# Serde lives HERE and never in
 # the engine. Its one job is the diff skeleton — a cold, modal-open path where
 # the old editors' camelCase JSON contract is worth having back verbatim.
 serde = { version = "1", features = ["derive"] }

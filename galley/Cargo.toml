@@ -31,5 +31,5 @@ wasm = ["dep:wasm-bindgen", "dep:onion-wasm", "dep:js-sys"]
 alloc-counts = []
 
 [[bench]]
-name = "fold"
+name = "warmer"
 harness = false

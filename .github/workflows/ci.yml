@@ -1,0 +1,238 @@
+name: ci
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+
+      - name: fmt
+        run: cargo fmt --all --check
+
+      - name: clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      # onion/Cargo.toml advertises usj/usx/html as compile-time optional, and
+      # every other job builds them all ON. Without this, no build in CI ever
+      # has one OFF, so `default-features = false` is an untested promise.
+      # All-off plus each single is the complete set: the three gates are
+      # independent `pub mod` lines and no gated module references another, so
+      # a pair could only fail if a single already did.
+      - name: feature permutations
+        run: |
+          for f in "" usj usx html; do
+            echo "::group::--no-default-features --features '$f'"
+            cargo check -p usfm_onion --no-default-features --features "$f"
+            echo "::endgroup::"
+          done
+
+      # galley's `wasm` feature is the both-doors-one-module build. It only ever
+      # links for wasm32, so a native clippy pass never sees it.
+      - name: galley wasm feature compiles
+        run: cargo check -p usfm_galley --features wasm --target wasm32-unknown-unknown
+
+  # The inner-loop suite, in DEBUG on purpose: two dozen `debug_assert!`s across
+  # the engine only fire here. It also includes codegen_output_matches_input, so
+  # a row edited without `cargo run --bin codegen` fails in this job — no
+  # separate regenerate-and-diff step is needed for generated.rs,
+  # wire/generated.rs, diagnostics.json or reader.ts.
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - run: cargo test --workspace
+
+  # The JS side of the wall. Node 24 because conformance.mjs imports reader.ts
+  # directly and leans on type stripping — there is no build step by design.
+  wasm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+        with:
+          cache-key: wasm
+      - uses: ./.github/actions/wasm-tools
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: boundary test
+        working-directory: onion-wasm
+        run: wasm-pack test --node
+
+      - name: build a node package
+        working-directory: onion-wasm
+        run: wasm-pack build --target nodejs --release --weak-refs --out-dir pkg-node
+
+      - name: reader/writer conformance
+        run: node onion-wasm/tests/conformance.mjs onion-wasm/pkg-node testData/exampleCorpora/en_ulb
+
+      # The root package.json is DERIVED from onion-wasm's — an inner export map
+      # edited without regenerating it ships a root map that points nowhere, and
+      # a stale `sideEffects` is worse than that: silent, and it tree-shakes the
+      # wasm glue out of a consumer's bundle.
+      - name: root package.json is not stale
+        run: |
+          node onion-wasm/package-root.mjs > /tmp/root.json
+          diff -u package.json /tmp/root.json \
+            || { echo "::error::run: node onion-wasm/package-root.mjs > package.json"; exit 1; }
+
+      # A git install clones the repo and then PACKS it through `files`, so what
+      # `npm pack` would emit is exactly what a consumer receives. `files` and
+      # `exports` are hand-maintained in onion-wasm/package.json; this catches
+      # an export naming something the pack leaves behind.
+      - name: a git install carries every exported path
+        run: |
+          npm pack --dry-run --json > /tmp/pack.json
+          node -e '
+            const [{ files }] = require("/tmp/pack.json");
+            const packed = new Set(files.map((f) => f.path));
+            const targets = new Set();
+            const walk = (v) =>
+              typeof v === "string"
+                ? targets.add(v)
+                : Object.values(v ?? {}).forEach(walk);
+            walk(require("./package.json").exports);
+            const missing = [...targets].filter(
+              (p) => !packed.has(p.replace(/^\.\//, "")),
+            );
+            if (missing.length) {
+              console.error("exports not in the tarball:", missing);
+              process.exit(1);
+            }
+            console.log(
+              `${packed.size} files packed, all ${targets.size} export targets present`,
+            );
+          '
+
+  # onion-wasm/pkg-web and pkg-bundler are COMMITTED — consumers install from a
+  # git tag, so a stale package there ships stale code with no other signal.
+  # Rebuild and compare.
+  artifacts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+        with:
+          cache-key: wasm
+      - uses: ./.github/actions/wasm-tools
+
+      - name: rebuild both packages
+        working-directory: onion-wasm
+        run: |
+          wasm-pack build --target web     --release --weak-refs --out-dir pkg-web
+          wasm-pack build --target bundler --release --weak-refs --out-dir pkg-bundler
+          rm -f pkg-web/.gitignore pkg-bundler/.gitignore
+
+      - name: what moved
+        run: git diff --stat -- onion-wasm/pkg-web onion-wasm/pkg-bundler
+
+      # The glue and the .d.ts are what a consumer's bundler and type-checker
+      # bind to, and wasm-bindgen writes them deterministically from the wasm's
+      # custom sections. A diff here is a stale package, full stop.
+      - name: interface is fresh
+        run: |
+          git diff --exit-code -- \
+            onion-wasm/pkg-web onion-wasm/pkg-bundler \
+            ':!onion-wasm/pkg-web/onion_wasm_bg.wasm' \
+            ':!onion-wasm/pkg-bundler/onion_wasm_bg.wasm'
+
+      # The binary is byte-reproducible for a fixed rustc + wasm-bindgen +
+      # wasm-opt (verified on macOS: two builds, identical bytes), but
+      # cross-machine identity is unproven — so this reports without failing
+      # until a green run says it holds. Then delete continue-on-error: an
+      # engine fix with no API change is exactly the stale package the
+      # interface check above cannot see.
+      - name: binary is fresh
+        continue-on-error: true
+        run: |
+          git diff --exit-code -- \
+            onion-wasm/pkg-web/onion_wasm_bg.wasm \
+            onion-wasm/pkg-bundler/onion_wasm_bg.wasm \
+            || { echo "::warning::committed .wasm differs from a CI rebuild"; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pkg-rebuilt
+          path: |
+            onion-wasm/pkg-web
+            onion-wasm/pkg-bundler
+
+  # The pass-end gate from CLAUDE.md: the exhaustive oracles, `#[ignore]`d
+  # because they are minutes-class in DEBUG. In release the whole suite is ~85s
+  # — cheaper than the debug run it supersedes — so it runs on every event,
+  # pull requests included. `test` is still its own job and not redundant: it
+  # carries the debug_assert!s that a release build compiles out.
+  oracles:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+        with:
+          cache-key: release
+      - run: cargo test --workspace --release -- --include-ignored
+
+  # The tag IS the distribution — both consumers install from it directly:
+  #   Cargo   usfm_onion = { git = "…/usfm_onion", tag = "v0.1.0" }
+  #   npm     npm i github:<org>/usfm_onion#v0.1.0
+  # So a tag becomes a Release only once the committed packages were proven
+  # fresh and the exhaustive oracles were green. The Release itself carries no
+  # artifact: there is nothing to download that the tag does not already hold.
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [lint, test, wasm, artifacts, oracles]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      # The tarball is named from package.json's version, and a Cargo consumer
+      # pins the crate version — so a tag whose manifests disagree with it ships
+      # something that calls itself the wrong thing.
+      - name: manifests agree with the tag
+        run: |
+          want="${GITHUB_REF_NAME#v}"
+          fail=0
+          for f in onion/Cargo.toml onion-wasm/Cargo.toml galley/Cargo.toml; do
+            got=$(sed -n 's/^version = "\(.*\)"/\1/p' "$f" | head -1)
+            [ "$got" = "$want" ] || { echo "$f is $got, tag says $want"; fail=1; }
+          done
+          for f in package.json onion-wasm/package.json; do
+            got=$(node -p "require('./$f').version")
+            [ "$got" = "$want" ] || { echo "$f is $got, tag says $want"; fail=1; }
+          done
+          exit $fail
+
+      - name: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes

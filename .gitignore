@@ -11,3 +11,12 @@ debug/
 /onion-wasm/pkg-node
 tcdocs/
 planning/scratch.md
+
+# The root package.json makes this repo installable by npm from a git tag;
+# these are what working in it locally leaves behind.
+/node_modules
+/*.tgz
+
+# Purged from git history 2026-08-31 along with planning/QUEUE.md; kept on disk
+# as a working queue. Never re-add.
+USER-OPEN.md

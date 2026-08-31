@@ -1,22 +1,23 @@
 //! The JS doorway over the workflows layer — the stateful half of the wall.
 //!
 //! ```text
-//! import init, { Galley, analyze } from "usfm-galley";
+//! import init, { Galley, parse } from "usfm-galley";
+//! import { deserialize } from "usfm-galley/reader.js";
 //!
-//! const g = new Galley();           // one handle, kept across keystrokes
-//! g.analyze(text, wantsAll());      // clean chapters served from the cache
-//! analyze(text, wantsAll());        // the stateless engine door, same module
+//! const g = new Galley();                       // one cache, kept across edits
+//! deserialize(g.parse(text, true, true, true)); // clean chunks from the cache
+//! deserialize(parse(text, true, true, true));   // the stateless door, same module
 //! ```
 //!
 //! `onion-wasm`'s exports ride into this module as linked shims, so a consumer
 //! imports ONE package and picks per call: the free functions compute from
 //! scratch, [`Galley`] reuses what did not change. Nothing here is a new
-//! rendering — [`Galley::analyze`] returns the object `onion_wasm::analyze`
-//! returns, built by the same emit.
+//! rendering — [`Galley::parse`] returns the buffer `onion_wasm::parse`
+//! returns, written by the same generated writer.
 
 use wasm_bindgen::prelude::*;
 
-use crate::FoldCache;
+use crate::Warmer;
 use crate::onion;
 
 /// Products for roughly three of the largest books in the wild. Measured: the
@@ -26,13 +27,13 @@ use crate::onion;
 /// the page falls back from.
 const DEFAULT_BUDGET: usize = 16 << 20;
 
-/// A kitchen that keeps its prep: the per-chapter fold, held across calls.
+/// A kitchen that keeps its prep: the [`Warmer`], held across calls.
 ///
 /// One per document. The cache keys on chapter CONTENT, so reordering
 /// chapters, undoing an edit, or reopening a book all hit.
 #[wasm_bindgen]
 pub struct Galley {
-    cache: FoldCache,
+    cache: Warmer,
 }
 
 #[wasm_bindgen]
@@ -44,17 +45,28 @@ impl Galley {
             .filter(|b| b.is_finite() && *b >= 0.0)
             .map_or(DEFAULT_BUDGET, |b| b as usize);
         Galley {
-            cache: FoldCache::new(budget),
+            cache: Warmer::new(budget),
         }
     }
 
-    /// Every read `onion_wasm::analyze` returns, with the lex, the tree and the
-    /// lint walk reused for every chapter whose bytes did not change.
+    /// The book, plated — the same buffer `onion_wasm::parse` returns, with the
+    /// lex, the tree and the lint walk reused for every chunk whose bytes did
+    /// not change.
+    ///
+    /// Read it with the same `reader.ts` the stateless door's output uses:
+    /// nothing here is a new rendering, only a cheaper route to the same bytes.
     ///
     /// `text` must be LF-normalized — the same contract the stateless door
-    /// documents, and the one the chapter checksums are stable against.
-    pub fn analyze(&mut self, text: &str, wants: u32) -> js_sys::Object {
-        onion_wasm::object(&self.cache.analyze(text, wants))
+    /// documents, and the one the chunk checksums are stable against.
+    pub fn parse(&mut self, text: &str, diagnostics: bool, toc: bool, utf16: bool) -> Vec<u8> {
+        self.cache.parse(
+            text,
+            onion::wire::ParseOptions {
+                diagnostics,
+                toc,
+                utf16,
+            },
+        )
     }
 
     /// The verse text alone, as one string — the reading a downstream text

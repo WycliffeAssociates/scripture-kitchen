@@ -22,14 +22,21 @@ use std::path::Path;
 
 use usfm_onion::lint;
 use usfm_onion::tables::{emit, rows};
+use usfm_onion::wire::emit as wire_emit;
+use usfm_onion::wire::schema;
 
+// Anchored to the crate, not the shell: `cargo run --bin codegen` writes the
+// same four files from the workspace root, from onion/, or from anywhere else.
+const CRATE: &str = env!("CARGO_MANIFEST_DIR");
 const OUT: &str = "src/tables/generated.rs";
-const DIAGNOSTICS: &str = "onion-wasm/diagnostics.json";
+const DIAGNOSTICS: &str = "../onion-wasm/diagnostics.json";
+const WIRE: &str = "src/wire/generated.rs";
+const READER: &str = "../onion-wasm/reader.ts";
 
 fn main() -> std::io::Result<()> {
     let text = emit::generated_rs();
 
-    let path = Path::new(OUT);
+    let path = &Path::new(CRATE).join(OUT);
     let previous = std::fs::read_to_string(path).unwrap_or_default();
     std::fs::write(path, &text)?;
 
@@ -66,7 +73,7 @@ fn main() -> std::io::Result<()> {
     );
 
     let catalog = lint::diagnostics_json();
-    let path = Path::new(DIAGNOSTICS);
+    let path = &Path::new(CRATE).join(DIAGNOSTICS);
     let stale = std::fs::read_to_string(path).unwrap_or_default() != catalog;
     std::fs::write(path, &catalog)?;
     println!("codegen → {DIAGNOSTICS}");
@@ -80,5 +87,45 @@ fn main() -> std::io::Result<()> {
             "unchanged — checked-in file was already fresh"
         }
     );
+    // The wire: one schema, both ends. The writer compiles into this crate;
+    // the reader ships in the JS package beside the .wasm it decodes.
+    let text = wire_emit::wire_generated_rs();
+    let path = &Path::new(CRATE).join(WIRE);
+    let stale = std::fs::read_to_string(path).unwrap_or_default() != text;
+    std::fs::write(path, &text)?;
+    println!("codegen \u{2192} {WIRE}");
+    println!("  wire records      {:>4}", schema::RECORDS.len());
+    println!("  sections          {:>4}", schema::SECTIONS.len());
+    println!("  bytes written   {:>6}", text.len());
+    println!(
+        "  {}",
+        if stale {
+            "CHANGED \u{2014} review the diff before committing"
+        } else {
+            "unchanged \u{2014} checked-in file was already fresh"
+        }
+    );
+
+    let text = wire_emit::reader_ts(
+        &wire_emit::marker_table_ts(),
+        &wire_emit::enums_ts(),
+        &wire_emit::catalog_ts(),
+    );
+    let path = &Path::new(CRATE).join(READER);
+    let stale = std::fs::read_to_string(path).unwrap_or_default() != text;
+    std::fs::write(path, &text)?;
+    println!("codegen \u{2192} {READER}");
+    println!("  marker rows       {:>4}", rows::ROWS.len());
+    println!("  lint codes        {:>4}", lint::LINT_ROWS.len());
+    println!("  bytes written   {:>6}", text.len());
+    println!(
+        "  {}",
+        if stale {
+            "CHANGED \u{2014} review the diff before committing"
+        } else {
+            "unchanged \u{2014} checked-in file was already fresh"
+        }
+    );
+
     Ok(())
 }

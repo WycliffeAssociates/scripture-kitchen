@@ -595,6 +595,7 @@ mod tests {
             len: 13,
             kind_bits: TokenKind::AttrList.to_bits(),
             marker_idx: 0,
+            level: 0,
         };
         let events: Vec<_> = attrs(source.as_bytes(), &list).collect();
         assert_eq!(events.len(), 2);

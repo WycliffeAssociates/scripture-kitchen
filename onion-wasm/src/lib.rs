@@ -1,7 +1,7 @@
 //! `onion-wasm` — the JS doorway over the USFM engine (`onion`).
 //!
 //! This is **piece 2 of the five-crate layout** (onion, ONION-WASM, sous,
-//! sous-wasm, galley — see `planning/ideas/committed/galley.md`): bindgen,
+//! sous-wasm, galley): bindgen,
 //! the `.d.ts`, and the JS-environment utilities (UTF-16 walls, the decoder
 //! wrapper) for THIS engine and nothing else.
 //!
@@ -16,27 +16,34 @@
 //!
 //! # The contract
 //!
-//! - **Stateless.** Text in, numbers and strings out, nothing retained between
-//!   calls. The caller pairs each result with the document version it sent;
-//!   stale = discard.
-//! - **`analyze` returns a PLAIN JS OBJECT.** Every read is built eagerly, so
-//!   nothing wasm-side outlives the call and there is nothing to free. The
-//!   write path still hands out handles (`FormatOpts`, `Edits`, `Splices`);
-//!   those are freed explicitly, with a `--weak-refs` build as the backstop.
-//! - **Nothing rich crosses.** Flat `Uint32Array`s (copies, never views into
-//!   wasm memory) and a few strings. JS never holds a token. The one structured
-//!   export is the diff skeleton, which is a cold modal-open path.
-//! - **UTF-16 offsets, LF-canonical input.** Every offset out is a CodeMirror
-//!   code-unit offset. That conversion assumes the text is LF-normalized —
-//!   CodeMirror counts a line break as ONE position, while a literal `\r\n` is
-//!   TWO UTF-16 code units, so CRLF input yields offsets one ahead of the
-//!   editor's from the first line onward. The vision canonicalizes at ingress
-//!   (§6.3), so LF-in is the contract; `analyze` debug-asserts it and never
-//!   repairs it.
-//! - **The marker registry never crosses.** Marker names are bytes the editor
-//!   already has (`doc.sliceString`); the coarse rendering class rides packed
-//!   in the spans. Lint codes index `diagnostics.json`, codegen'd from the same
-//!   rows and shipped in this package.
+//! - **Stateless.** Text in, bytes out, nothing retained between calls. The
+//!   caller pairs each result with the document version it sent; stale =
+//!   discard. The document crosses at ~80us for a typical book, which is why
+//!   ONE call carries several products rather than several calls carrying one.
+//! - **`parse` returns a BUFFER.** One plated dish — tokens, the tree, and
+//!   whatever the options asked for — read by `reader.ts`, which is generated
+//!   from the same schema as the writer. The `Uint8Array` is JS's and the
+//!   collector reclaims it; there is nothing to free. The write path still
+//!   hands out handles (`FormatOpts`, `Edits`, `Splices`), and wasm-bindgen
+//!   registers a `FinalizationRegistry` for those by default.
+//! - **Nothing rich crosses, and nothing is decoded by hand.** JS never holds a
+//!   token; it reads one out of the buffer through a generated accessor. The
+//!   one structured export is the diff skeleton, a cold modal-open path.
+//! - **Offsets are UTF-8 bytes unless asked otherwise.** `parse`'s `utf16` flag
+//!   converts every offset in the dish to a CodeMirror code-unit offset. It is
+//!   OPT-IN because bytes are what the engine holds, what a native consumer
+//!   wants, and what sous reads — only a JS editor counts in UTF-16.
+//! - **LF-canonical input.** CodeMirror counts a line break as ONE position
+//!   while a literal `\r\n` is TWO UTF-16 code units, so CRLF input yields
+//!   offsets one ahead of the editor's from the first line onward. The vision
+//!   canonicalizes at ingress (§6.3), so LF-in is the contract; `parse`
+//!   debug-asserts it and never repairs it.
+//! - **The marker table DOES cross — generated, not mirrored.** A token carries
+//!   its row index and `reader.ts` ships the 153 rows, so a consumer reads a
+//!   marker's kind and category without slicing the document and without
+//!   restating a bit layout. Nothing is coarsened on the way: all fourteen
+//!   kinds and all thirty categories arrive, because a consumer that wants its
+//!   own vocabulary must be able to switch exhaustively into it.
 //!
 //! # What is deliberately absent
 //!
@@ -47,98 +54,91 @@
 
 use js_sys::{Object, Reflect, Uint32Array};
 use serde::Serialize;
-use usfm_onion::analyze::{self, wants as want_bits};
 use usfm_onion::diff::{
     self, Addr, CoveredSide, Decisions, DiffSkeleton, MergeSide, SlotRole, Status, UnitKind,
 };
 use usfm_onion::format::{CharBreaks, FormatOptions, Newline, VerseBreaks};
 use usfm_onion::lint::Code;
+use usfm_onion::mask as mask_recipe;
 use usfm_onion::utf16::Utf16Index;
+use usfm_onion::wire;
 use wasm_bindgen::prelude::*;
 
 // ---------------------------------------------------------------------------
-// analyze
+// parse
 // ---------------------------------------------------------------------------
 
-/// One analysis as a PLAIN JS OBJECT — every read built eagerly, nothing
-/// wasm-side left alive, nothing for the caller to free.
+/// THE read call. One document in, one buffer out.
 ///
-/// Every key is always present; a read whose `wants` bit is clear is an empty
-/// array. The field names and the stride schema live in `onion-wasm.ts`
-/// (`RawAnalysis`), which ships in this package and is versioned with this
-/// binary. Nothing here is meant to be indexed by hand.
-/// An [`analyze::Analysis`] as the plain JS object every caller reads. Public
-/// so a crate that produces an `Analysis` by another route emits the SAME
-/// fourteen keys rather than restating them.
-pub fn object(a: &analyze::Analysis) -> Object {
+/// The buffer is a plated parse — tokens, the tree, and whatever `opts` asked
+/// for besides — read by `reader.ts`, which is generated from the same schema
+/// as the writer. Nothing is retained wasm-side: the `Uint8Array` is JS's, the
+/// collector reclaims it, and there is no `free`.
+///
+/// The three booleans are positional because an object crossing the wall would
+/// be `Reflect::get` per key with a misspelling silently reading as `false`.
+/// `reader.ts` wraps this as `parse(text, { diagnostics, toc, utf16 })`, where
+/// a misspelled key is a compile error instead.
+///
+/// `text` must be LF-normalized (see the module doc); a debug build asserts it.
+#[wasm_bindgen]
+pub fn parse(text: &str, diagnostics: bool, toc: bool, utf16: bool) -> Vec<u8> {
+    debug_assert!(
+        !text.as_bytes().contains(&b'\r'),
+        "onion_wasm::parse: the text must be LF-normalized — a CR makes every \
+         emitted offset disagree with CodeMirror's"
+    );
+    let opts = wire::ParseOptions {
+        diagnostics,
+        toc,
+        utf16,
+    };
+    wire::plate(&wire::parse(text, opts))
+}
+
+/// One mask recipe's text, and the map back to the source it was cut from.
+///
+/// Not a section of a dish: a mask is a different question with its own
+/// parameter, and most callers never want one. Not hot and not large either,
+/// so it takes the string like any other call rather than the buffer.
+///
+/// `ranges` are the kept SOURCE spans — sorted, disjoint, maximal — and
+/// `starts[i]` is the prefix sum, so `ranges[i]`'s bytes sit at `starts[i]..`
+/// in `text`. That pair is the map: a finding at a masked offset maps back by
+/// a binary search on `starts`.
+///
+/// Offsets stay in UTF-8 bytes. The mask is onion-to-sous and never reaches an
+/// editor, which is the only consumer that counts in UTF-16.
+#[wasm_bindgen(js_name = mask)]
+pub fn mask(text: &str, recipe: &str) -> Object {
+    let filter = match recipe {
+        "verseText" => mask_recipe::Filter::verse_text(),
+        "structure" => mask_recipe::Filter::structure(),
+        other => wasm_bindgen::throw_str(&format!(
+            "onion_wasm::mask: no such recipe {other:?} — expected \"verseText\" or \"structure\""
+        )),
+    };
+    let tokens = usfm_onion::lex(text);
+    let cst = usfm_onion::cst::build(&tokens);
+    let masked = usfm_onion::mask(text.as_bytes(), &tokens, &cst, &filter);
+
     let out = Object::new();
     let set = |key: &str, value: JsValue| {
         Reflect::set(&out, &JsValue::from_str(key), &value)
             .expect("a fresh Object always accepts a property");
     };
-    let array = |rows: &[u32]| JsValue::from(Uint32Array::from(rows));
-
-    set("lenUtf16", JsValue::from_f64(f64::from(a.len_utf16)));
-    // The `\usfm` line's version as a ladder index (0 = 3.0, 1 = 3.2,
-    // 2 = 4.0), or `NONE`. The severity ladder in `diagnostics.json` gates
-    // several codes on it, so without it a consumer re-reads the header.
-    set("usfmVersion", JsValue::from_f64(f64::from(a.usfm_version)));
-    set("chapters", array(&a.chapters));
-    set("blocks", array(&a.blocks));
-    set("lines", array(&a.lines));
-    set("noteExtents", array(&a.note_extents));
-    set("noteParts", array(&a.note_parts));
-    set("tokenSpans", array(&a.token_spans));
-    set("textRuns", array(&a.text_runs));
-    set("verseAnchors", array(&a.verse_anchors));
-    set("diagnostics", array(&a.diagnostics));
-    set("fixes", array(&a.fixes));
-    set("fixEdits", array(&a.fix_edits));
-    set("fixLens", array(&a.fix_lens));
-    set("fixText", JsValue::from_str(&a.fix_text));
-    out
-}
-
-/// The one read call. `wants` is the bitmask in `onion-wasm.ts`; an unset bit
-/// computes nothing and returns an empty array.
-///
-/// `clipFrom`/`clipTo` are UTF-16 offsets and bound ONLY the token-granularity
-/// reads (`tokenSpans`, `textRuns`) to a viewport — chapters, blocks and
-/// diagnostics stay whole-book, because a finding's evidence is regularly
-/// outside the viewport that shows it. Pass `undefined` for both to skip.
-///
-/// `text` must be LF-normalized (see the module doc); a debug build asserts it.
-#[wasm_bindgen]
-pub fn analyze(text: &str, wants: u32, clip_from: Option<u32>, clip_to: Option<u32>) -> Object {
-    object(&reads(text, wants, clip_from, clip_to))
-}
-
-/// `analyze`'s body, still in Rust types. Separate because `js_sys` values
-/// cannot be built off wasm, so a native test would panic inside the shim
-/// instead of reading the numbers it is checking.
-fn reads(
-    text: &str,
-    wants: u32,
-    clip_from: Option<u32>,
-    clip_to: Option<u32>,
-) -> analyze::Analysis {
-    debug_assert!(
-        !text.as_bytes().contains(&b'\r'),
-        "onion_wasm::analyze: the text must be LF-normalized — a CR makes every \
-         emitted offset disagree with CodeMirror's"
+    let mut ranges = Vec::with_capacity(masked.ranges.len() * 2);
+    for span in &masked.ranges {
+        ranges.push(span.start);
+        ranges.push(span.end);
+    }
+    set("text", JsValue::from_str(&masked.text(text.as_bytes())));
+    set("ranges", JsValue::from(Uint32Array::from(&ranges[..])));
+    set(
+        "starts",
+        JsValue::from(Uint32Array::from(&masked.starts[..])),
     );
-    let clip = match (clip_from, clip_to) {
-        (Some(from), Some(to)) => Some(from..to),
-        _ => None,
-    };
-    analyze::analyze(text, wants, clip)
-}
-
-/// `wants::ALL` — every read. Exported so a caller that wants everything does
-/// not restate the bitmask.
-#[wasm_bindgen(js_name = wantsAll)]
-pub fn wants_all() -> u32 {
-    want_bits::ALL
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -364,7 +364,7 @@ pub fn format(text: &str, opts: &FormatOpts) -> String {
 // diff — the one rich structure
 // ---------------------------------------------------------------------------
 
-/// RULED (sketches/wasm-analyze.md, 2026-08-24): the skeleton crosses as serde
+/// The skeleton crosses as serde
 /// JSON. Cold path (a modal opens), zero drift, and the old editors' camelCase
 /// contract back nearly verbatim. The unit ids are rendered in RUST — a JS-side
 /// id renderer is the one place identity could drift, and it is rejected.
@@ -694,28 +694,78 @@ pub fn book(text: &str) -> String {
 mod tests {
     use super::*;
 
-    const BOOK: &str = "\\id GEN\n\\c 1\n\\p \\v 1 In the beginning\\f + \\ft note\\f* .\n\\c 2\n\\p \\v 1 λόγος\n";
-
-    #[test]
-    fn the_reads_come_out_of_one_call() {
-        let a = reads(BOOK, wants_all(), None, None);
-        assert_eq!(a.chapters.len(), 3 * 7, "front matter plus two chapters");
-        assert_eq!(
-            a.len_utf16,
-            BOOK.chars().map(char::len_utf16).sum::<usize>() as u32
-        );
+    /// A section's byte length, through the exported header constants rather
+    /// than a literal — a hardcoded offset here is a test that passes until
+    /// the header grows and then asserts about the wrong bytes.
+    fn section_index(name: &str) -> usize {
+        wire::schema::SECTIONS
+            .iter()
+            .position(|s| s.name == name)
+            .expect("a declared section")
     }
 
+    fn section_len(dish: &[u8], section: usize) -> u32 {
+        let at = wire::HEADER_BYTES + section * wire::DIRECTORY_ENTRY_BYTES + 4;
+        u32::from_le_bytes(dish[at..at + 4].try_into().expect("four bytes"))
+    }
+
+    const BOOK: &str = "\\id GEN\n\\c 1\n\\p \\v 1 In the beginning\\f + \\ft note\\f* .\n\\c 2\n\\p \\v 1 λόγος\n";
+
+    /// The wall's own job: a string in, a readable dish out. What the dish
+    /// SAYS is `onion`'s test (`tests/wire_roundtrip.rs`); this checks only
+    /// that the boundary hands one over intact.
     #[test]
-    fn a_clip_needs_both_ends() {
-        let whole = reads(BOOK, wants_all(), None, None);
-        assert_eq!(
-            reads(BOOK, wants_all(), Some(0), None).token_spans.len(),
-            whole.token_spans.len()
-        );
-        assert!(
-            reads(BOOK, wants_all(), Some(0), Some(8)).token_spans.len() < whole.token_spans.len()
-        );
+    fn parse_returns_a_readable_dish() {
+        let dish = parse(BOOK, true, true, false);
+        let word = |at: usize| u32::from_le_bytes(dish[at..at + 4].try_into().unwrap());
+        assert_eq!(word(0), wire::MAGIC);
+        assert_eq!(word(4), wire::FORMAT_VERSION);
+        assert_eq!(word(8) as usize, wire::schema::SECTIONS.len());
+        assert_eq!(word(12) & wire::FLAG_UTF16, 0, "bytes unless asked");
+    }
+
+    /// The one flag that changes every offset in the buffer.
+    #[test]
+    fn utf16_is_opt_in_at_the_call() {
+        let bytes = parse(BOOK, false, false, false);
+        let units = parse(BOOK, false, false, true);
+        let flag = |d: &[u8]| u32::from_le_bytes(d[12..16].try_into().unwrap()) & wire::FLAG_UTF16;
+        assert_eq!(flag(&bytes), 0);
+        assert_ne!(flag(&units), 0);
+        // `λόγος` is two bytes per character and one code unit, so the buffers
+        // cannot be identical.
+        assert_ne!(bytes, units);
+    }
+
+    /// Asking for nothing computes nothing: the optional sections are empty,
+    /// and the tree is there either way because the tree is the product.
+    #[test]
+    fn the_optionals_are_off_by_default() {
+        let dish = parse(BOOK, false, false, false);
+        let len = |name: &str| section_len(&dish, section_index(name));
+        assert_eq!(len("diagnostics"), 0, "no lint walk was asked for");
+        assert_eq!(len("chapters"), 0, "no toc was asked for");
+        assert_eq!(len("verses"), 0);
+        assert!(len("tokens") > 0, "the tree is the product, always");
+        assert!(len("nodes") > 0);
+    }
+
+    /// The sous door: text out, and the map that puts a finding back.
+    #[test]
+    fn mask_recipes_resolve() {
+        let tokens = usfm_onion::lex(BOOK);
+        let cst = usfm_onion::cst::build(&tokens);
+        for recipe in [
+            mask_recipe::Filter::verse_text(),
+            mask_recipe::Filter::structure(),
+        ] {
+            let masked = usfm_onion::mask(BOOK.as_bytes(), &tokens, &cst, &recipe);
+            assert_eq!(
+                masked.starts.len(),
+                masked.ranges.len(),
+                "every kept range has its prefix sum"
+            );
+        }
     }
 
     #[test]
@@ -859,15 +909,15 @@ mod tests {
         assert_eq!(locate("\\c 1\n\\v 1 a\n", 8), "### 1:1");
     }
 
+    /// The `\usfm` version is a lint fact now, not a header field on a read:
+    /// it reaches a consumer through the catalog's severity ladder, which is
+    /// where it was always used.
     #[test]
-    fn the_new_reads_come_out_of_the_same_call() {
-        let a = reads(BOOK, wants_all(), None, None);
-        assert_eq!(a.lines.len(), 5 * 4, "five marked lines, stride 4");
-        assert!(!a.note_parts.is_empty(), "the footnote's interior");
-        assert_eq!(a.usfm_version, u32::MAX, "no `\\usfm` line");
-        assert_eq!(
-            reads("\\id GEN\n\\usfm 3.2\n", wants_all(), None, None).usfm_version,
-            1
-        );
+    fn the_tree_is_there_without_asking() {
+        let dish = parse(BOOK, false, false, false);
+        let len = |name: &str| section_len(&dish, section_index(name));
+        assert!(len("tokens") > 0);
+        assert!(len("nodes") > 0);
+        assert!(len("childIds") > 0);
     }
 }

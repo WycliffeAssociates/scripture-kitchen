@@ -13,7 +13,7 @@
 //! Per book, fresh against folded:
 //!
 //! - `analyze_fresh` — `onion::analyze` with every want. What the editor pays
-//!   per keystroke TODAY: [`FoldCache`] folds lint, not analyze, so this one
+//!   per keystroke TODAY: [`Warmer`] folds lint, not analyze, so this one
 //!   is un-foldable as things stand.
 //! - `lint_fresh` — the un-folded `lint(lex, build)` pipeline. The fold's
 //!   baseline.
@@ -31,7 +31,7 @@
 use std::sync::LazyLock;
 
 use divan::counter::BytesCount;
-use usfm_galley::{FoldCache, onion};
+use usfm_galley::{Warmer, onion};
 
 /// See the note in `onion/benches/pipeline.rs`: measured overhead is under the
 /// noise floor, so this is safe to leave on when the counts are wanted.
@@ -124,12 +124,12 @@ fn book(name: &str) -> &'static Book {
 
 /// A cache warm on the unedited book, plus the proof that one keystroke is
 /// exactly one miss. Asserted here rather than inside the timed closure.
-fn warmed(book: &Book, name: &str) -> FoldCache {
+fn warmed(book: &Book, name: &str) -> Warmer {
     // A budget, not an allocation — `new` builds an empty map and only compares
     // this against `resident_bytes()` when deciding to evict. Sized so nothing
     // evicts during a run: MEASURED worst case is en_ult PSA at 3.27 MB warm and
     // 4.62 MB after 50 keystrokes, so 16 MB is 3.5x headroom.
-    let mut cache = FoldCache::new(16 << 20);
+    let mut cache = Warmer::new(24 << 20);
     cache.lint(&book.text);
     let before = cache.misses();
     cache.lint(&book.keystrokes[0]);
@@ -177,9 +177,9 @@ fn lint_fresh(bencher: divan::Bencher, name: &str) {
     });
 }
 
-/// Every read per keystroke, folded — the number an editor actually pays.
+/// The whole dish per keystroke, folded — the number an editor actually pays.
 #[divan::bench(args = BOOKS, sample_count = SAMPLES, sample_size = 1)]
-fn analyze_folded(bencher: divan::Bencher, name: &str) {
+fn parse_folded(bencher: divan::Bencher, name: &str) {
     let book = book(name);
     let mut cache = warmed(book, name);
     let mut next = 1;
@@ -188,9 +188,16 @@ fn analyze_folded(bencher: divan::Bencher, name: &str) {
         .bench_local(|| {
             let typed = &book.keystrokes[next];
             next += 1;
-            divan::black_box(cache.analyze(divan::black_box(typed), onion::analyze::wants::ALL))
+            divan::black_box(cache.parse(divan::black_box(typed), EDITOR))
         });
 }
+
+/// What an editor asks for: everything, in the addressing CodeMirror counts in.
+const EDITOR: onion::wire::ParseOptions = onion::wire::ParseOptions {
+    diagnostics: true,
+    toc: true,
+    utf16: true,
+};
 
 /// The verse-text mask off the cached ingredients, against building it fresh.
 #[divan::bench(args = BOOKS, sample_count = SAMPLES, sample_size = 1)]
@@ -221,14 +228,10 @@ fn verse_text_fresh(bencher: divan::Bencher, name: &str) {
 }
 
 #[divan::bench(args = BOOKS, sample_count = 20)]
-fn analyze_fresh(bencher: divan::Bencher, name: &str) {
+fn parse_fresh(bencher: divan::Bencher, name: &str) {
     let book = book(name);
     let typed = &book.keystrokes[0];
-    bencher.counter(BytesCount::new(book.text.len())).bench(|| {
-        divan::black_box(onion::analyze::analyze(
-            typed,
-            onion::analyze::wants::ALL,
-            None,
-        ))
-    });
+    bencher
+        .counter(BytesCount::new(book.text.len()))
+        .bench(|| divan::black_box(onion::wire::plate(&onion::wire::parse(typed, EDITOR))));
 }

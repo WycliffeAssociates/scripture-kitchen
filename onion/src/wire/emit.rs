@@ -1,0 +1,321 @@
+//! The generator: [`schema`] in, both ends of the wire out.
+//!
+//! ```text
+//! schema::RECORDS  ->  wire_generated_rs()  ->  onion/src/wire/generated.rs
+//! schema::SECTIONS ->  reader_ts()          ->  onion-wasm/reader.ts
+//! ```
+//!
+//! Both artifacts are CHECKED IN and both have a staleness test, so a schema
+//! edit that was not regenerated fails the build rather than shipping a reader
+//! that disagrees with its writer.
+
+use super::schema::{self, Record, SectionKind, Space, Width};
+
+const RS_TEMPLATE: &str = include_str!("generated.rs.tmpl");
+const TS_TEMPLATE: &str = include_str!("../../../onion-wasm/reader.ts.tmpl");
+
+/// One writer per record: fields in order, little-endian, offsets recorded.
+pub fn wire_generated_rs() -> String {
+    let mut writers = String::new();
+    for record in schema::RECORDS {
+        writers.push_str(&writer(record));
+    }
+    RS_TEMPLATE.replace("@@WRITERS@@", writers.trim_end())
+}
+
+fn writer(record: &Record) -> String {
+    let mut out = String::new();
+    let converts = record.fields.iter().any(|f| f.space == Space::Offset);
+    out.push_str(&format!(
+        "/// {}\n///\n/// {} bytes per row.{}\n\
+         pub fn write_{}(rows: &[{}], out: &mut Vec<u8>, {}offsets: &mut Offsets) {{\n",
+        record.doc,
+        record.stride(),
+        if converts {
+            " `offsets` collects the position of every\n/// source offset written, for the UTF-16 pass."
+        } else {
+            " Every field is an index or a code, so nothing\n/// here is ever converted."
+        },
+        record.plural,
+        record.rust_ty,
+        if converts { "" } else { "_" },
+    ));
+    out.push_str(&format!(
+        "    out.reserve(rows.len() * {});\n    for {} in rows {{\n",
+        record.stride(),
+        record.binding
+    ));
+    for field in record.fields {
+        if field.space == Space::Offset {
+            out.push_str("        offsets.push(out.len());\n");
+        }
+        let value = format!("(({}) as {})", field.rust, rust_ty(field.width));
+        out.push_str(&format!(
+            "        // {}\n        out.extend_from_slice(&{}.to_le_bytes());\n",
+            field.doc, value
+        ));
+    }
+    out.push_str("    }\n}\n\n");
+    out
+}
+
+const fn rust_ty(width: Width) -> &'static str {
+    match width {
+        Width::U8 => "u8",
+        Width::U16 => "u16",
+        Width::U32 => "u32",
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The TypeScript reader
+// ---------------------------------------------------------------------------
+
+/// Offsets, strides, section indices, and one accessor class per record.
+pub fn reader_ts(marker_table: &str, enums: &str, catalog: &str) -> String {
+    TS_TEMPLATE
+        .replace("@@FORMAT_VERSION@@", &schema::FORMAT_VERSION.to_string())
+        .replace("@@SECTIONS@@", &sections_ts())
+        .replace("@@ROWS@@", &rows_ts())
+        .replace("@@ENUMS@@", enums.trim_end())
+        .replace("@@MARKER_TABLE@@", marker_table.trim_end())
+        .replace("@@LINT_CATALOG@@", catalog.trim_end())
+}
+
+fn sections_ts() -> String {
+    let mut out = String::from("export const SECTION = {\n");
+    for (at, section) in schema::SECTIONS.iter().enumerate() {
+        out.push_str(&format!(
+            "  /** {} */\n  {}: {},\n",
+            section.doc, section.name, at
+        ));
+    }
+    out.push_str("} as const;\n\nexport const SECTION_NAMES = [\n");
+    for section in schema::SECTIONS {
+        out.push_str(&format!("  \"{}\",\n", section.name));
+    }
+    out.push_str("] as const;\n");
+    out
+}
+
+/// One `class <Record>` per record: a cursor over a row, with a named getter
+/// per field. No stride or offset is ever written by hand on the JS side.
+fn rows_ts() -> String {
+    let mut out = String::new();
+    for section in schema::SECTIONS {
+        let SectionKind::Rows(record) = &section.kind else {
+            continue;
+        };
+        out.push_str(&format!(
+            "/**\n * {}\n *\n * {} bytes per row. A CURSOR: `seek` moves it, the getters read\n\
+             * the row it is on, and nothing is allocated per row.\n */\nexport class {}Row {{\n",
+            record.doc,
+            record.stride(),
+            record.name
+        ));
+        // NATIVE private fields. A wire field is free to be called `at` or
+        // `view` — `VerseRow.at` is — and an ordinary member of that name would
+        // be shadowed by the cursor's own, so the getter would return a row
+        // offset instead of reading the wire. `#` cannot collide with a getter
+        // name, so the hazard does not exist rather than being avoided.
+        out.push_str(
+            "  readonly #view: DataView;\n  #row = 0;\n\n  \
+             constructor(view: DataView) {\n    this.#view = view;\n  }\n\n  \
+             /** Rows in the section. */\n  get length(): number {\n    return \
+             (this.#view.byteLength / this.stride) | 0;\n  }\n\n",
+        );
+        out.push_str(&format!(
+            "  readonly stride = {};\n\n  /** Move to row `n`; returns `this` so reads chain. */\n  \
+             seek(n: number): this {{\n    this.#row = n * {};\n    return this;\n  }}\n\n",
+            record.stride(),
+            record.stride()
+        ));
+        let mut at = 0usize;
+        for field in record.fields {
+            if field.name != "pad" && field.name != "reserved" {
+                out.push_str(&format!(
+                    "  /** {} */\n  get {}(): number {{\n    return this.#view.{}(this.#row + {}{});\n  }}\n\n",
+                    field.doc,
+                    field.name,
+                    field.width.getter(),
+                    at,
+                    if field.width == Width::U8 { "" } else { ", true" },
+                ));
+            }
+            at += field.width.bytes();
+        }
+        out.push_str("}\n\n");
+    }
+    out
+}
+
+// ---------------------------------------------------------------------------
+// The tables the reader resolves through
+// ---------------------------------------------------------------------------
+
+use crate::tables::emit as tables_emit;
+use crate::tables::{generated, rows};
+
+/// Every enum a wire field names, as a TS const object. Variant names come
+/// from `tables::emit`'s own tables — the ones that already generate the Rust
+/// side — so a rename lands in both languages from one edit.
+pub fn enums_ts() -> String {
+    let mut out = String::new();
+
+    let block = |out: &mut String, doc: &str, name: &str, pairs: &[(&str, u32)]| {
+        out.push_str(&format!("/** {doc} */\nexport const {name} = {{\n"));
+        for (variant, code) in pairs {
+            out.push_str(&format!("  {variant}: {code},\n"));
+        }
+        out.push_str("} as const;\n\n");
+    };
+
+    let kinds: Vec<(&str, u32)> = tables_emit::KINDS
+        .iter()
+        .map(|(k, n)| (*n, *k as u32))
+        .collect();
+    block(
+        &mut out,
+        "What a marker IS. All fourteen — never coarsened.",
+        "MarkerKind",
+        &kinds,
+    );
+
+    let categories: Vec<(&str, u32)> = tables_emit::CATEGORIES
+        .iter()
+        .map(|(c, n)| (*n, *c as u32))
+        .collect();
+    block(
+        &mut out,
+        "The spec group a marker belongs to. ParaBody is distinct from ParaPoetry.",
+        "Category",
+        &categories,
+    );
+
+    let closings: Vec<(&str, u32)> = tables_emit::CLOSINGS
+        .iter()
+        .map(|(c, n)| (*n, *c as u32))
+        .collect();
+    block(
+        &mut out,
+        "Whether a marker requires, allows or refuses a closer.",
+        "ClosingBehavior",
+        &closings,
+    );
+
+    let shapes: Vec<(&str, u32)> = tables_emit::SHAPES
+        .iter()
+        .map(|(s, n)| (*n, *s as u32))
+        .collect();
+    block(
+        &mut out,
+        "Which spellings a row admits.",
+        "SpellingShape",
+        &shapes,
+    );
+
+    let contexts: Vec<(&str, u32)> = tables_emit::CONTEXTS
+        .iter()
+        .map(|(c, n)| (*n, *c as u32))
+        .collect();
+    block(
+        &mut out,
+        "Where in the document grammar a node sits — `NodeView.context()`.",
+        "SpecContext",
+        &contexts,
+    );
+
+    block(
+        &mut out,
+        "Why a node closed. `Explicit` is the well-formed answer.",
+        "CloseReason",
+        &[
+            ("Explicit", 0),
+            ("Implicit", 1),
+            ("Recovery", 2),
+            ("Eof", 3),
+        ],
+    );
+
+    // TokenKind's discriminants are `TokenKind::to_bits`, which is the one
+    // place they are stated; these names pair with that match arm for arm.
+    block(
+        &mut out,
+        "What shape a token is — `TokenView.kind()`, spelling bit stripped.",
+        "TokenKind",
+        &[
+            ("Marker", 0),
+            ("ClosingMarker", 1),
+            ("Milestone", 2),
+            ("MilestoneTerminator", 3),
+            ("Newline", 4),
+            ("OptBreak", 5),
+            ("AttrList", 6),
+            ("Text", 7),
+            ("Designator", 8),
+            ("NoteCaller", 9),
+            ("BookCode", 10),
+            ("Pad", 11),
+        ],
+    );
+
+    out.push_str(
+        "/**\n * Bit 4 of a token's kind byte, meaning PER SHAPE: `\\+` nesting on the two\n\
+         * marker shapes, the `-e` half on a milestone. No shape carries both.\n */\n\
+         export const TOKEN_SPELLING_BIT = 1 << 4;\n\n\
+         /** Do these kind bits name a marker, and so resolve to a table row? */\n\
+         export const isMarkerKind = (kind: number): boolean =>\n  \
+         kind === TokenKind.Marker ||\n  kind === TokenKind.ClosingMarker ||\n  \
+         kind === TokenKind.Milestone;\n",
+    );
+    out
+}
+
+/// The marker table, as the reader's lookup. One row per `MarkerIdx`, in row
+/// order, so `MARKERS[idx]` is the row a token names.
+pub fn marker_table_ts() -> String {
+    let mut out = String::from(
+        "/**\n * The marker table — 153 rows, generated from `tables::rows::ROWS`.\n\
+         *\n * Indexed by a token's `marker` field. Row 0 is UNRESOLVED: an unknown\n\
+         * name, a `\\z` extension, an illegal spelling. It has no name, so the\n\
+         * spelling is only in the document.\n\
+         *\n * `numbering` is a packed code: 0 unnumbered, 1..=13 the cap, 14 unbounded,\n\
+         * 15 table columns.\n */\nexport const MARKERS: readonly {\n  \
+         readonly name: string;\n  readonly kind: number;\n  readonly category: number;\n  \
+         readonly closing: number;\n  readonly shape: number;\n  readonly numbering: number;\n\
+         }[] = [\n",
+    );
+    for idx in 0..rows::ROWS.len() {
+        let i = idx as generated::MarkerIdx;
+        out.push_str(&format!(
+            "  {{ name: {:?}, kind: {}, category: {}, closing: {}, shape: {}, numbering: {} }},\n",
+            generated::name(i),
+            generated::kind(i) as u32,
+            generated::category(i) as u32,
+            generated::closing(i) as u32,
+            generated::shape(i) as u32,
+            tables_emit::numbering_code(generated::numbering(i)),
+        ));
+    }
+    out.push_str("];\n");
+    out
+}
+
+/// The lint catalog, as the reader's `CODES` lookup.
+///
+/// Embeds `lint::diagnostics_json()` verbatim rather than restating the field
+/// mapping: JSON is a valid TypeScript object literal, so the catalog the JS
+/// bundle already loads and the one the reader resolves through are the same
+/// bytes, produced once.
+pub fn catalog_ts() -> String {
+    format!(
+        "/**\n * The lint catalog — one row per code, from `lint::LINT_ROWS`.\n\
+         *\n * `severity` is the base rung and `escalation` the ladder above it, walked\n\
+         * with the document's declared `\\usfm` version. A `null` severity is a GATE:\n\
+         * the code says nothing until a version at or above its first rung is\n\
+         * declared.\n */\nexport const CATALOG = {} as const;\n\n\
+         /** The rows, by code. A diagnostic's `code` field indexes this. */\n\
+         export const CODES = CATALOG.codes;\n",
+        crate::lint::diagnostics_json().trim_end()
+    )
+}

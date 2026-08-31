@@ -40,7 +40,7 @@ use super::schema::{
 // Variant code tables. POSITION IS THE CODE — see the module doc.
 // ---------------------------------------------------------------------------
 
-const KINDS: &[(MarkerKind, &str)] = &[
+pub(crate) const KINDS: &[(MarkerKind, &str)] = &[
     (MarkerKind::Unknown, "Unknown"),
     (MarkerKind::Paragraph, "Paragraph"),
     (MarkerKind::Character, "Character"),
@@ -57,7 +57,7 @@ const KINDS: &[(MarkerKind, &str)] = &[
     (MarkerKind::Header, "Header"),
 ];
 
-const CATEGORIES: &[(Category, &str)] = &[
+pub(crate) const CATEGORIES: &[(Category, &str)] = &[
     (Category::Unknown, "Unknown"),
     (Category::ParaIdentification, "ParaIdentification"),
     (Category::ParaIntroductions, "ParaIntroductions"),
@@ -132,7 +132,7 @@ const PAYLOADS: &[(Payload, &str)] = &[
     (Payload::NoteCaller, "NoteCaller"),
 ];
 
-const CLOSINGS: &[(ClosingBehavior, &str)] = &[
+pub(crate) const CLOSINGS: &[(ClosingBehavior, &str)] = &[
     (ClosingBehavior::None, "None"),
     (ClosingBehavior::RequiredExplicit, "RequiredExplicit"),
     (
@@ -170,7 +170,7 @@ const HTML: &[(HtmlElement, &str)] = &[
 ];
 
 /// Position is the code AND the bit position in the context mask.
-const CONTEXTS: &[(SpecContext, &str)] = &[
+pub(crate) const CONTEXTS: &[(SpecContext, &str)] = &[
     (SpecContext::Scripture, "Scripture"),
     (SpecContext::BookIdentification, "BookIdentification"),
     (SpecContext::BookHeaders, "BookHeaders"),
@@ -194,7 +194,7 @@ const CONTEXTS: &[(SpecContext, &str)] = &[
     (SpecContext::CrossReference, "CrossReference"),
 ];
 
-const SHAPES: &[(SpellingShape, &str)] = &[
+pub(crate) const SHAPES: &[(SpellingShape, &str)] = &[
     (SpellingShape::Any, "Any"),
     (SpellingShape::PlainOnly, "PlainOnly"),
     (SpellingShape::MilestoneOnly, "MilestoneOnly"),
@@ -288,7 +288,7 @@ fn put(word: &mut u128, field: &Field, value: u32, row: &MarkerRow) {
 
 /// `Numbering` has no variant table because its code carries a PAYLOAD (the
 /// cap): 0 = Unnumbered, 1..=13 = `UpTo(n)`, 14 = Unbounded, 15 = TableColumns.
-fn numbering_code(n: Numbering) -> u32 {
+pub(crate) fn numbering_code(n: Numbering) -> u32 {
     match n {
         Numbering::Unnumbered => 0,
         Numbering::UpTo(cap) => {

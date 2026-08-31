@@ -1,0 +1,30 @@
+name: wasm-tools
+description: wasm-pack and wasm-opt, both pinned — they are inputs to the committed .wasm.
+
+runs:
+  using: composite
+  steps:
+    # `cargo install` over a release tarball on purpose: no asset-name guessing,
+    # and Swatinem/rust-cache keeps ~/.cargo/bin, so only the first run pays.
+    - shell: bash
+      run: |
+        if [ "$(wasm-pack --version 2>/dev/null)" != "wasm-pack ${WASM_PACK}" ]; then
+          cargo install wasm-pack --version "${WASM_PACK}" --locked
+        fi
+        wasm-pack --version
+      env:
+        WASM_PACK: 0.14.0
+
+    # Without this, wasm-pack downloads a wasm-opt of its own choosing. Pinning
+    # it here is what makes the freshness check in `artifacts` mean anything —
+    # wasm-opt's version changes the output bytes.
+    - shell: bash
+      run: |
+        curl -sSfL "https://github.com/WebAssembly/binaryen/releases/download/version_${BINARYEN}/binaryen-version_${BINARYEN}-x86_64-linux.tar.gz" \
+          | tar xz -C /opt
+        echo "/opt/binaryen-version_${BINARYEN}/bin" >> "$GITHUB_PATH"
+      env:
+        BINARYEN: 131
+
+    - shell: bash
+      run: wasm-opt --version

@@ -1,0 +1,35 @@
+{
+  "name": "@wycliffeassociates/usfm-onion",
+  "version": "0.1.0",
+  "description": "The JS doorway over the USFM engine — piece 2 of the five-crate layout.",
+  "type": "module",
+  "private": true,
+  "license": "UNLICENSED",
+  "files": [
+    "onion-wasm/pkg-bundler",
+    "onion-wasm/pkg-web",
+    "onion-wasm/reader.ts",
+    "onion-wasm/onion-wasm.ts",
+    "onion-wasm/diagnostics.json",
+    "onion-wasm/README.md"
+  ],
+  "sideEffects": [
+    "./onion-wasm/pkg-bundler/onion_wasm.js",
+    "./onion-wasm/pkg-bundler/snippets/*",
+    "./onion-wasm/pkg-web/onion_wasm.js"
+  ],
+  "exports": {
+    ".": {
+      "types": "./onion-wasm/pkg-bundler/onion_wasm.d.ts",
+      "default": "./onion-wasm/pkg-bundler/onion_wasm.js"
+    },
+    "./web": {
+      "types": "./onion-wasm/pkg-web/onion_wasm.d.ts",
+      "default": "./onion-wasm/pkg-web/onion_wasm.js"
+    },
+    "./web/wasm": "./onion-wasm/pkg-web/onion_wasm_bg.wasm",
+    "./schema": "./onion-wasm/reader.ts",
+    "./diagnostics.json": "./onion-wasm/diagnostics.json",
+    "./reader": "./onion-wasm/reader.ts"
+  }
+}

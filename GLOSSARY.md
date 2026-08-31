@@ -166,8 +166,6 @@ planning/; the definition records the current soft direction.
   emits ONE `Designator` token spanning the whole thing and never looks inside.
   Its fast path recognizes only the pure-digit happy shape and falls back for
   suffixes, ranges, sequences, the U+200F RLM, and junk.
-- **GLOSSARY.md location** — `src/lib.rs` cites `planning/GLOSSARY.md`; the file
-  is at the repo root. Still to fix; one of the two is wrong.
 
 ## Identity and location (the four jobs — never conflated)
 

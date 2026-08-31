@@ -4,8 +4,8 @@ The JS doorway over the USFM engine (`onion`) — **piece 2 of the five-crate
 layout**: bindgen, the `.d.ts`, and the JS-environment utilities (UTF-16 walls,
 the decoder wrapper) for THIS engine and nothing else.
 
-The five pieces (`planning/ideas/committed/galley.md`): **onion** (the engine),
-**onion-wasm** (this), **sous** (proofreading), **sous-wasm**, and **galley**.
+The five pieces: **onion** (the engine), **onion-wasm** (this), **sous**
+(proofreading), **sous-wasm**, and **galley**.
 
 `galley` is the RESERVED name for that last one — the opinionated WORKFLOWS
 crate over onion + sous: dirty-marking, checksums, ingest recipes, find,
@@ -24,7 +24,8 @@ the point.
 | file | what it is | who writes it |
 |---|---|---|
 | `src/lib.rs` | the tagged exports | by hand |
-| `onion-wasm.ts` | the decoders — **the JS-side schema**: strides, bit layouts, the sentinel | by hand |
+| `onion-wasm.ts` | the WRITE path's decoders — the format transaction's handle wrapper | by hand |
+| `reader.ts` | the typed door over the wire — every stride and offset, emitted from `wire::schema` | `cargo run --bin codegen` |
 | `diagnostics.json` | per lint code: name, severity ladder, category, message template, aux kind, fix label | `cargo run --bin codegen` |
 | `package.json` | the subpath map over the two builds | by hand |
 | `pkg-bundler/` | `--target bundler` output — **committed** | `wasm-pack build` |
@@ -50,8 +51,8 @@ cargo test -p onion-wasm                   # native tests (rlib, no wasm needed)
 The spike's `scripts/sync-engine.sh` runs exactly that pair and then vendors
 `pkg-web/` — keep the two builds in step, they ship together.
 
-`--weak-refs` is not optional in a real build. `analyze` returns a plain object
-and retains nothing, but the exports that still hand out a HANDLE (`FormatOpts`,
+`--weak-refs` is not optional in a real build. `parse` returns bytes and
+retains nothing, but the exports that still hand out a HANDLE (`FormatOpts`,
 `Edits`, `Splices`) rely on it as the backstop for a missed `.free()`. It is a
 backstop, not the paved path: the wrappers still free explicitly. (`using` /
 `Symbol.dispose` is banned — it crashes older webviews.)
@@ -66,32 +67,46 @@ directories are committed rather than gitignored. `package.json` maps the
 subpaths: `.` → `pkg-bundler`, `./web` → `pkg-web`, `./web/wasm` → the binary,
 `./schema` → `onion-wasm.ts`, `./diagnostics.json` → the side-table.
 
+That map is not what a consumer resolves against, though: npm cannot install a
+subdirectory of a git repo, so the REPO-ROOT `package.json` is the installable
+identity (`@wycliffeassociates/usfm-onion`). It is this file with every path
+pushed down one directory, derived by `node onion-wasm/package-root.mjs >
+package.json` — edit the map here and regenerate, never both by hand. CI diffs
+the derived file, because a stale `sideEffects` is silent: a bundler that does
+not see it tree-shakes the wasm glue out of a consumer's app.
+
 **One build per target, full default features** (`usj`/`usx`/`html` on). There
 are no all-vs-lean prebuilt variants: the binary is ~370 KB (~152 KB gzipped)
 and no size-sensitive consumer exists. A consumer who wants less builds from
 source with `default-features = false` and drops whichever exports it does not
 need; prebuilt lean variants are a later decision if one ever asks.
 
-Open questions are parked in `planning/sketches/wasm-analyze.md` §Distribution.
+## The read path
 
-## The reads, and how much each costs
+One call, one buffer, one tree. `parse(text, diagnostics, toc, utf16)` returns
+the dish — nine little-endian sections behind an `ONWR` header — and `reader.ts`
+is the typed door over it:
 
-| read | stride | serves |
-|---|---|---|
-| `chapters` | 7 | nav grid, chapter clamp, `\c` chrome |
-| `blocks` | 4 | paragraph grouping |
-| `lines` | 4 | every line-level editing rule |
-| `noteExtents` | 3 | footnote widgets |
-| `noteParts` | 4 | the note apparatus (rides `NOTE_EXTENTS`) |
-| `tokenSpans` | 3 | syntax highlighting — the one read `clip` exists for |
-| `textRuns` | 2 | search / proofing views |
-| `verseAnchors` | 5 | verse-number widgets, `\v` chrome |
-| `diagnostics` | 7 | squiggles + panel (with `fixes`/`fixEdits`/`fixLens`/`fixText`) |
+```ts
+import { reader } from "onion-wasm/schema";
+const onion = reader(rawParse);
+const { tree, tokens, diagnostics, toc } = onion.parse(text, { diagnostics: true });
+```
 
-There is no per-change "commit" set here: which reads an editor needs on each
-accepted change is that editor's opinion, not a library fact, so an app composes
-its own from `WANTS`. Diagnostics are the debounced second call — lint is the
-expensive artifact.
+| section | carries |
+|---|---|
+| `tokens`, `nodes`, `childIds` | the tree — every token, and the CST over it |
+| `diagnostics`, `fixes`, `edits`, `fixText` | squiggles, the panel, and each fix's transaction |
+| `chapters`, `verses` | the chapter/verse index (`toc`) |
+
+**No strides are written down here, on purpose.** `reader.ts` and
+`onion/src/wire/generated.rs` are both emitted from `onion/src/wire/schema.rs`,
+so the two ends cannot disagree and nothing is mirrored by hand — a stride in
+this README would be the one copy free to rot. `cargo run --bin codegen`
+regenerates both; `codegen_output_matches_input` fails if either is stale.
+
+`diagnostics` is the one expensive optional (it runs the lint walk), so it is
+the debounced second call. `toc` is cheap and needs no tree.
 
 ## The write path
 
@@ -116,17 +131,16 @@ subset of `formatEdits`. The policy JS cannot reproduce:
   edge is in the window.
 
 Chapter scope needs no second entry point: the window is `chapters[i]`'s span
-from the `chapters` read.
+from the `chapters` section.
 
 ## The contract
 
 - **Stateless.** Text in, numbers and strings out, nothing retained between
   calls. Pair every result with the document version you sent; stale = discard.
-- **`analyze` returns a PLAIN OBJECT.** Every read is built eagerly inside the
-  binary, so nothing wasm-side outlives the call and there is nothing to free.
-  `analysis(analyze(text, wants))` from `onion-wasm.ts` wraps it in the
-  decoders. The write path still hands out handles (`FormatOpts`, `Edits`,
-  `Splices`); those are freed explicitly, with `--weak-refs` as the backstop.
+- **`parse` returns BYTES.** The whole dish is built eagerly inside the binary,
+  so nothing wasm-side outlives the call and there is nothing to free. The
+  write path still hands out handles (`FormatOpts`, `Edits`, `Splices`); those
+  are freed explicitly, with `--weak-refs` as the backstop.
 - **Nothing rich crosses.** Flat `Uint32Array`s (copies, never views into wasm
   memory) plus a few strings. JS never holds a token. The one structured export
   is the diff skeleton — a cold, modal-open path where serde JSON buys back the
@@ -136,7 +150,7 @@ from the `chapters` read.
   line break as ONE position, a literal `\r\n` is TWO UTF-16 code units, so
   CRLF input yields offsets one ahead of the editor's from the first line
   onward. The vision canonicalizes at ingress (§6.3) — LF-in is the contract,
-  not something `analyze` repairs. Debug builds assert it.
+  not something `parse` repairs. Debug builds assert it.
 - **The marker registry never crosses.** Marker names are bytes the editor
   already has (`doc.sliceString`); the coarse rendering class rides packed in
   the spans; lint codes index `diagnostics.json`.

@@ -67,3 +67,39 @@ fn every_corpus_book_partitions_into_cst_children() {
 
     eprintln!("cst oracle: {} books, all tokens partitioned", paths.len());
 }
+
+/// Node ids ascend with their opening markers, so a row index IS document
+/// order.
+///
+/// The wire's `walkNodes()` reads the nodes section straight through instead of
+/// walking the child arena, which is only document order if this holds. It is a
+/// property of how the builder assigns ids, not something a type enforces — so
+/// it is asserted here rather than assumed there.
+#[test]
+fn node_ids_ascend_with_their_opening_markers() {
+    let mut paths = Vec::new();
+    collect_usfm_paths(Path::new("../testData/exampleCorpora"), &mut paths);
+    if paths.is_empty() {
+        eprintln!("cst ordering oracle SKIPPED: no *.usfm under testData/exampleCorpora/");
+        return;
+    }
+    paths.sort();
+
+    paths.par_iter().for_each(|path| {
+        let source = std::fs::read_to_string(path).unwrap();
+        let tokens = lex(&source);
+        let cst = build(&tokens);
+        let mut previous = 0u32;
+        for id in 1..cst.nodes.len() as u32 {
+            let start = cst.extent(id, &tokens).start;
+            assert!(
+                start >= previous,
+                "{}: node {id} starts at {start}, behind node {} at {previous} — a row \
+                 index is no longer document order, and wire::walkNodes is wrong",
+                path.display(),
+                id - 1,
+            );
+            previous = start;
+        }
+    });
+}

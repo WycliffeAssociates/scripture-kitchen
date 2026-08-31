@@ -2,11 +2,12 @@
   "name": "onion-wasm",
   "version": "0.1.0",
   "type": "module",
-  "description": "The JS doorway over the USFM engine — piece 2 of the five-crate layout.",
+  "description": "The JS doorway over the USFM engine \u2014 piece 2 of the five-crate layout.",
   "private": true,
   "files": [
     "pkg-bundler",
     "pkg-web",
+    "reader.ts",
     "onion-wasm.ts",
     "diagnostics.json",
     "README.md"
@@ -26,7 +27,8 @@
       "default": "./pkg-web/onion_wasm.js"
     },
     "./web/wasm": "./pkg-web/onion_wasm_bg.wasm",
-    "./schema": "./onion-wasm.ts",
-    "./diagnostics.json": "./diagnostics.json"
+    "./schema": "./reader.ts",
+    "./diagnostics.json": "./diagnostics.json",
+    "./reader": "./reader.ts"
   }
 }
