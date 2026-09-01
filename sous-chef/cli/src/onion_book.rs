@@ -5,7 +5,9 @@
 
 use core::ops::Range;
 
-use sous_core::{Chapter, InputError, ProjectedBook, TextRange, Verse, VerseKey, validate};
+use sous_core::{
+    BookKey, Chapter, InputError, ProjectedBook, TextRange, Verse, VerseKey, validate,
+};
 use usfm_onion::{Filter, Mask, Sid, Toc, cst, lex, mask, toc};
 
 pub(crate) struct OnionBook {
@@ -19,9 +21,6 @@ impl OnionBook {
         let tokens = lex(source);
         let tree = cst::build(&tokens);
         let toc = toc(source.as_bytes(), &tokens);
-        for anchor in &toc.verses {
-            VerseKey::new(anchor.chapter, anchor.first, anchor.last)?;
-        }
         let mask = mask(source.as_bytes(), &tokens, &tree, &Filter::verse_text());
         let text = mask.text(source.as_bytes());
         let book = Self { text, mask, toc };
@@ -29,8 +28,8 @@ impl OnionBook {
         Ok(book)
     }
 
-    pub(crate) fn book_code(&self) -> [u8; 3] {
-        self.toc.book
+    pub(crate) fn key(&self) -> BookKey {
+        BookKey::new(self.toc.book)
     }
 
     pub(crate) fn locate(&self, range: TextRange) -> Option<LocatedRange<'_>> {
@@ -52,6 +51,10 @@ impl OnionBook {
 }
 
 impl ProjectedBook for OnionBook {
+    fn key(&self) -> BookKey {
+        self.key()
+    }
+
     fn text(&self) -> &str {
         &self.text
     }
@@ -68,22 +71,28 @@ impl ProjectedBook for OnionBook {
     }
 
     fn verses(&self) -> impl Iterator<Item = Verse> {
-        self.toc.verses.iter().enumerate().map(|(at, anchor)| {
-            let chapter_row = self
-                .toc
-                .chapters
-                .partition_point(|chapter| chapter.start <= anchor.at)
-                .saturating_sub(1);
-            let chapter_end = self.toc.chapters[chapter_row].end;
-            let end = self
-                .toc
-                .verses
-                .get(at + 1)
-                .map_or(chapter_end, |next| next.at.min(chapter_end));
-            let key = VerseKey::new(anchor.chapter, anchor.first, anchor.last)
-                .expect("parse rejects malformed verse anchors");
-            Verse::new(key, projected(&self.mask, anchor.at..end))
-        })
+        self.toc
+            .verses
+            .iter()
+            .enumerate()
+            .filter_map(|(at, anchor)| {
+                // Onion retains malformed anchors so its structural lint can
+                // report them. Sous cannot align one without a numeric key,
+                // so only that unit abstains; the surrounding book survives.
+                let key = VerseKey::new(anchor.chapter, anchor.first, anchor.last).ok()?;
+                let chapter_row = self
+                    .toc
+                    .chapters
+                    .partition_point(|chapter| chapter.start <= anchor.at)
+                    .saturating_sub(1);
+                let chapter_end = self.toc.chapters[chapter_row].end;
+                let end = self
+                    .toc
+                    .verses
+                    .get(at + 1)
+                    .map_or(chapter_end, |next| next.at.min(chapter_end));
+                Some(Verse::new(key, projected(&self.mask, anchor.at..end)))
+            })
     }
 }
 
@@ -149,7 +158,7 @@ mod tests {
         let chapters: Vec<_> = book.chapters().collect();
         let verses: Vec<_> = book.verses().collect();
 
-        assert_eq!(book.book_code(), *b"MRK");
+        assert_eq!(book.key().as_bytes(), *b"MRK");
         assert_eq!(chapters.len(), 2);
         assert_eq!(verses.len(), 3);
         assert_eq!(verses[1].key(), VerseKey::new(1, 2, 3).unwrap());
@@ -186,5 +195,35 @@ mod tests {
                 .collect::<String>(),
             "Jesus  wept.\n"
         );
+    }
+
+    #[test]
+    fn malformed_verse_abstains_without_consuming_its_neighbors() {
+        let source = concat!(
+            "\\id ACT\n",
+            "\\c 8\n\\p\n",
+            "\\v 1 one\n",
+            "\\v + unkeyed\n",
+            "\\v 2 two\n",
+        );
+        let book = OnionBook::parse(source).unwrap();
+        let verses: Vec<_> = book.verses().collect();
+
+        assert_eq!(
+            verses.iter().map(|verse| verse.key()).collect::<Vec<_>>(),
+            vec![
+                VerseKey::new(8, 1, 1).unwrap(),
+                VerseKey::new(8, 2, 2).unwrap(),
+            ]
+        );
+        assert_eq!(
+            &book.text()[verses[0].text().from() as usize..verses[0].text().to() as usize],
+            "one\n"
+        );
+        assert_eq!(
+            &book.text()[verses[1].text().from() as usize..verses[1].text().to() as usize],
+            "two\n"
+        );
+        assert!(book.text().contains("unkeyed"));
     }
 }

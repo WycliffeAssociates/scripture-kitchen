@@ -5,4 +5,7 @@
 
 mod input;
 
-pub use input::{Chapter, InputError, ProjectedBook, TextRange, Verse, VerseKey, validate};
+pub use input::{
+    BookIndex, BookKey, Chapter, Corpus, InputError, ProjectedBook, TextRange, Verse, VerseKey,
+    validate,
+};

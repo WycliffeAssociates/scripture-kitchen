@@ -137,11 +137,24 @@ store the same index. The production core contract is:
 
 ```rust
 trait ProjectedBook {
+    fn key(&self) -> BookKey;
     fn text(&self) -> &str;
     fn chapters(&self) -> impl Iterator<Item = Chapter>;
     fn verses(&self) -> impl Iterator<Item = Verse>;
 }
+
+struct Corpus<'a, B> {
+    books: &'a [B],
+}
 ```
+
+`Corpus` validates the caller's immutable book table before analysis: it
+accepts at most 65,536 books, rejects duplicate `BookKey` values, and applies
+the projected-book validation to every entry. `BookKey` is scripture identity
+for matching books across corpora; the checked `BookIndex` is only the
+position in this caller-provided array. Book order may therefore vary between
+inputs without changing keyed semantics, while chapter and verse order within
+each book remains significant. No carry crosses a book boundary.
 
 `TextRange`, `Chapter`, `VerseKey`, and `Verse` make projected byte units and
 bridge identity explicit. Duplicate verse keys remain duplicate rows in
@@ -186,7 +199,11 @@ The semantic contract is:
 - target and source units pair by an explicit stable key plus occurrence
   ordinal, never merely by array position;
 - the ordinary scripture implementation yields verse units from Onion's TOC;
-- units arrive grouped by canonical book and chapter;
+- an Onion anchor with a missing or malformed numeric designator yields no
+  aligned verse unit. Onion retains and lints the structural error; its text
+  remains in the chapter projection for ordinary content analysis;
+- units arrive grouped by book and chapter; the caller's book-table order may
+  vary, so cross-corpus matching uses `BookKey` rather than array position;
 - a key absent from either side is skipped by proportionality;
 - exact duplicates pair by occurrence ordinal only when the pairing is
   unambiguous; otherwise that key abstains;

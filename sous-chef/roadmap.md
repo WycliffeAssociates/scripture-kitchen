@@ -21,8 +21,9 @@ Already present:
 - an Onion CLI adapter that composes the existing `Mask` and `Toc`, including
   projected chapter/verse ranges and reverse location to discontinuous raw
   source spans;
-- a typed `usage-rs` CLI that walks one USFM target and prints debug projection
-  rows without promising a stable output format;
+- a typed `usage-rs` CLI that walks the immediate `.sfm`/`.usfm` files in one
+  directory, validates a caller-ordered book table, and prints debug
+  projection rows without promising a stable output format;
 - an explicitly disposable probes crate;
 - a manifest-and-fetch corpus lane with no Git LFS dependency;
 - measured prototypes for byte hygiene, streaming classification, the shared
@@ -82,6 +83,11 @@ contract. It never means copy a module wholesale by default.
 - Three durable design files only: charter, rules/examples, roadmap/evidence.
 - A neutral projected-book view is the input boundary. Onion's masked
   text/TOC and a vref loader can both produce it.
+- `Corpus` validates the immutable caller-ordered book table. `BookKey` pairs
+  scripture books across corpora; checked `BookIndex` values address the
+  caller's snapshot position. Filesystem discovery is a CLI concern and is
+  immediate, extension-filtered, and lexically sorted only for deterministic
+  debug assignment.
 - Core findings use an immutable book-table index plus projected UTF-8 byte
   spans. The retained producer projection locates numeric verse designators,
   raw source spans, and UTF-16 editor positions outside core.
@@ -122,11 +128,11 @@ now executable contracts and keeps donor code from becoming an accidental API.
 | capability | production owner and current shape | next work |
 | --- | --- | --- |
 | projected offsets | `sous-core::TextRange`, checked as half-open projected UTF-8 bytes | reuse in rich findings and the packed codec |
-| chapter/verse input | `ProjectedBook` yields `Chapter` and ordered `Verse { VerseKey, TextRange }` rows | add aligned-pair semantics after the input cut is reviewed |
+| chapter/verse input | `ProjectedBook` yields `BookKey`, `Chapter`, and ordered `Verse { VerseKey, TextRange }` rows; `Corpus` validates the caller-ordered book table | add aligned-pair semantics after the input cut is reviewed |
 | Onion projection | CLI adapter materializes verse text once, derives ranges through `Mask::project_source`, and locates with `Mask::to_source` plus `Toc::locate` | move only reusable conveniences into Onion when a second host needs them |
 | vref projection | semantic contract is settled; no production loader yet | implement after the Onion path pins duplicate and bridge fixtures |
 | nonletter substrate | `donor/src/probe3.rs` and `donor/src/rows.rs` are measured donors only | port consumer-led classifier bits after Stage 0 closes |
-| finding transport | 16-byte layout and book-table semantics are chartered but not coded | next independent Stage 0 slice: codec, header, golden vectors, rejection tests |
+| finding transport | 16-byte layout and `BookIndex` book-table semantics are chartered; the neutral corpus seam is executable, but transport is not coded | next independent Stage 0 slice: codec, header, golden vectors, rejection tests |
 
 Do not begin classifier or rule ports merely because the input trait exists.
 The packed finding boundary and aligned-unit fixtures remain the Stage 0 stop
@@ -146,20 +152,22 @@ Work:
    raw file identity and document version remain host/Galley work.**
 2. Define the aligned-unit semantic tests using a tiny synthetic target/source
    pair, including duplicate keys, occurrence ordinals, empty units, absent
-   units, chapter seams, and incompatible ordering.
+   units, malformed unkeyed anchors, chapter seams, and incompatible ordering.
 3. Define the 16-byte finding record and versioned header in a tiny codec
    module. Keep rich `Finding` separate from `PackedFinding`.
 4. Hand-assign the dense active rule-code table for wire version 1. Reserve no
    ranges and keep no retired entries; removal or renumbering requires a new
    wire version. Do not pre-allocate a code for every idea-shelf rule.
-5. Define the immutable ordered book-table contract used by `book_idx`, then
-   generate Rust test vectors plus one language-neutral schema artifact; prove
+5. Define the immutable caller-ordered book-table contract used by `book_idx`,
+   with distinct stable `BookKey` identity and checked `BookIndex` navigation;
+   then generate Rust test vectors plus one language-neutral schema artifact; prove
    encode/decode round trips and malformed-buffer rejection.
 6. Replace the placeholder CLI with a minimal `usage-rs` command declaration.
-   It accepts a deliberately narrow target input, constructs the immutable
-   book table deterministically, and prints only debug output until real
-   findings exist. Keep all Onion adaptation in the CLI, not `sous-core`.
-   **Initial one-USFM walking command landed.**
+   It accepts one directory, discovers immediate `.sfm`/`.usfm` files in
+   lexical order, constructs the immutable caller-ordered book table, and
+   prints only debug output until real findings exist. Keep all Onion
+   adaptation in the CLI, not `sous-core`. **Initial directory walking command
+   landed.**
 
 Verification gate:
 
