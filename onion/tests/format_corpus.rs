@@ -155,13 +155,13 @@ fn the_default_bundle_holds_every_invariant_over_the_corpus() {
         .collect();
 
     // The invariants are only evidence if the formatter actually did something,
-    // so the transaction size is pinned like every other corpus number: 108,247
-    // edits over 113 MB — en_ulb 48,251, en_ult 20,971, examples.bsb 31,085,
+    // so the transaction size is pinned like every other corpus number: 108,979
+    // edits over 113 MB — en_ulb 48,934, en_ult 21,018, examples.bsb 31,087,
     // bdf_reg 7,940. The corpora are already tidy, so what this mostly is: verse
     // breaks joined into their paragraphs (the default axis), the blank line
     // above every `\s5`, and the `\p` a paragraph-less run owes.
     let total: u64 = edited.iter().sum();
-    assert_eq!(total, 108_247);
+    assert_eq!(total, 108_979);
     assert!(
         edited.iter().all(|count| *count > 0),
         "a book formatted to nothing"

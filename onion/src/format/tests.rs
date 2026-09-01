@@ -409,7 +409,7 @@ fn a_run_of_empty_verses_bridges_into_the_one_that_has_text() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn only_the_unambiguous_empty_paragraph_is_deleted() {
+fn an_empty_paragraph_is_deleted_whatever_its_spelling() {
     assert_eq!(
         formatted(
             "\\id GEN\n\\c 1\n\\p\n\\p text\n",
@@ -417,21 +417,39 @@ fn only_the_unambiguous_empty_paragraph_is_deleted() {
         ),
         "\\id GEN\n\\c 1\n\\p text\n"
     );
-    // A MIXED pair says nothing about which was meant: the diagnostic stands and
-    // format changes nothing here.
-    let mixed = "\\id GEN\n\\c 1\n\\m\n\\p text\n";
-    assert_eq!(formatted(mixed, &FormatOptions::default()), mixed);
+    // A MIXED pair goes too: neither marker holds a character, so there is no
+    // "which was meant" to settle — the `\p` renders the text before and after.
+    assert_eq!(
+        formatted(
+            "\\id GEN\n\\c 1\n\\m\n\\p text\n",
+            &FormatOptions::default()
+        ),
+        "\\id GEN\n\\c 1\n\\p text\n"
+    );
 
-    // A RUN of identical empties collapses in ONE run — the fix is chain-aware,
-    // so N repeats need N-of-nothing passes, not N.
-    let chain = "\\id GEN\n\\c 1\n\\p a\n\\p\n\\p\n\\p\n\\p b\n";
+    // A RUN collapses in ONE pass — the fix is chain-aware, so N repeats need
+    // N-of-nothing passes, not N — and the run is spelling-agnostic.
+    let chain = "\\id GEN\n\\c 1\n\\p a\n\\p\n\\m\n\\q1\n\\p b\n";
     let once = formatted(chain, &FormatOptions::default());
     assert_eq!(once, "\\id GEN\n\\c 1\n\\p a\n\\p b\n");
     assert_eq!(formatted(&once, &FormatOptions::default()), once);
 
-    // A chain whose survivor is empty at EOF is left alone.
-    let dangling = "\\id GEN\n\\c 1\n\\p a\n\\p\n\\p\n\\p\n";
-    assert_eq!(formatted(dangling, &FormatOptions::default()), dangling);
+    // Will's shape: a run of five, displaced by a heading rather than by a
+    // paragraph. Nothing about the heading or the verse after it moves.
+    let editor = "\\id GEN\n\\c 1\n\\p\n\\p\n\\p\n\\p\n\\p\n\\s1 Hidden pieces are not places\n\\p \\v 1 Put the caret\n";
+    assert_eq!(
+        formatted(editor, &FormatOptions::default()),
+        "\\id GEN\n\\c 1\n\\s1 Hidden pieces are not places\n\\p \\v 1 Put the caret\n"
+    );
+
+    // A run that reaches end of input goes with the rest.
+    assert_eq!(
+        formatted(
+            "\\id GEN\n\\c 1\n\\p a\n\\p\n\\p\n\\p\n",
+            &FormatOptions::default()
+        ),
+        "\\id GEN\n\\c 1\n\\p a\n"
+    );
 }
 
 /// The dual citizen of `empty-verse-runs`: an empty designator-less `\v`

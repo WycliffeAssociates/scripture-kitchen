@@ -97,10 +97,9 @@ pub(crate) struct Structure {
     /// A container `-e` point node awaiting its verdict, or [`NO_TOKEN`].
     pending_end: u32,
     /// `(observation slot, node id)` per empty paragraph, resolved into fixes at
-    /// [`Self::finish`] — the repair depends on the whole RUN of empties this
-    /// one opens and on the paragraph that survives it, neither of which the
-    /// close event has reached. The only allocation in this machine, and it
-    /// stays empty on a book with no empty paragraph.
+    /// [`Self::finish`] — the repair covers the whole RUN of empties this one
+    /// opens, which the close event has not reached. The only allocation in this
+    /// machine, and it stays empty on a book with no empty paragraph.
     empty_paragraphs: Vec<(u32, u32)>,
 }
 
@@ -195,23 +194,24 @@ impl Structure {
         while at < empties.len() {
             let mut last = at;
             while last + 1 < empties.len()
-                && twin_after(doc, empties[last].1)
-                    == Some(doc.cst.nodes[empties[last + 1].1 as usize].token as usize)
+                && displaced_by(doc, empties[last].1)
+                    == doc.cst.nodes[empties[last + 1].1 as usize].token as usize
             {
                 last += 1;
             }
-            // The whole run is duplication iff its SURVIVOR is a same-spelling
-            // paragraph holding content, and then ONE fix, filed on the run's
-            // FIRST member, deletes every extent in it. Per-member deletions
-            // would each fail "the site is repaired" — deleting one leaves
-            // another empty paragraph at that byte — which is why the run is the
-            // unit. The other members keep their fixless findings: the same
-            // transaction repairs them.
-            if twin_after(doc, empties[last].1).is_some_and(|next| holds_content(doc, next + 1)) {
-                let start = doc.cst.extent(empties[at].1, doc.tokens).start;
-                let end = doc.cst.extent(empties[last].1, doc.tokens).end;
-                out.attach_fixed(empties[at].0, start, end, b"");
-            }
+            // ONE fix per run, filed on the run's FIRST member, deleting every
+            // extent in it. The run is the unit because per-member deletions
+            // would each fail "the site is repaired": deleting one leaves the
+            // next at that byte, still empty. The other members keep their
+            // fixless findings — the same transaction repairs them.
+            //
+            // Spelling is not consulted. `\m\p` says nothing about which of the
+            // two was INTENDED, but neither holds a character, so the question
+            // never arises: whatever displaces the run is what the reader sees
+            // either way, and both extents go.
+            let start = doc.cst.extent(empties[at].1, doc.tokens).start;
+            let end = doc.cst.extent(empties[last].1, doc.tokens).end;
+            out.attach_fixed(empties[at].0, start, end, b"");
             at = last + 1;
         }
     }
@@ -403,56 +403,14 @@ fn point_end(source: &[u8], tokens: &[Token], anchor: u32) -> u32 {
     token.start + trim_end_ws(span_of(source, token)).len() as u32
 }
 
-/// The token index of the paragraph that DISPLACED this one, when the two are
-/// spelled exactly the same — `\p\p` is plain duplication.
-///
-/// A MIXED pair (`\m\p`) says nothing about which of the two was intended, so it
-/// gets no fix at all: the diagnostic points and a human chooses.
-fn twin_after(doc: &Doc, id: u32) -> Option<usize> {
+/// The token index of whatever DISPLACED this paragraph — `tokens.len()` at end
+/// of input, which no node's opener can be. What the displacer IS never matters,
+/// only whether it is the next empty paragraph's own opener: that is what makes
+/// the two one run.
+fn displaced_by(doc: &Doc, id: u32) -> usize {
     let extent = doc.cst.extent(id, doc.tokens);
     // Tokens partition the source, so the displacer is one binary search away.
-    let at = doc.tokens.partition_point(|token| token.start < extent.end);
-    let next = doc.tokens.get(at)?;
-    if !matches!(next.kind(), TokenKind::Marker { .. })
-        || generated::kind(next.marker_idx) != MarkerKind::Paragraph
-    {
-        return None;
-    }
-    let opener = &doc.tokens[doc.cst.nodes[id as usize].token as usize];
-    (trim_end_ws(span_of(doc.source, next)) == trim_end_ws(span_of(doc.source, opener)))
-        .then_some(at)
-}
-
-/// Does the paragraph that starts at `from` hold anything?
-///
-/// A CHAIN of identical empties (`\p\n\p\n\q1`, real in en_ulb ISA) ends at the
-/// first survivor that holds something; a chain whose survivor is empty (or is
-/// EOF) is not duplication at all and gets no fix.
-fn holds_content(doc: &Doc, from: usize) -> bool {
-    doc.tokens[from..]
-        .iter()
-        .find_map(|token| match token.kind() {
-            TokenKind::Newline => None,
-            // The markers that DISPLACE a paragraph rather than living inside
-            // one: reaching one means nothing came between.
-            TokenKind::Marker { .. }
-                if matches!(
-                    generated::kind(token.marker_idx),
-                    MarkerKind::Paragraph
-                        | MarkerKind::Chapter
-                        | MarkerKind::Sidebar
-                        | MarkerKind::Periph
-                        | MarkerKind::Header
-                        | MarkerKind::TableRow
-                        | MarkerKind::Unknown
-                ) =>
-            {
-                Some(false)
-            }
-            _ => Some(true),
-        })
-        // End of file: nothing came after, so nothing is in it.
-        .unwrap_or(false)
+    doc.tokens.partition_point(|token| token.start < extent.end)
 }
 
 /// A span with its trailing space/tab/newline run removed.

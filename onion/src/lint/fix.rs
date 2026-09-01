@@ -560,8 +560,8 @@ mod tests {
     }
 
     #[test]
-    fn a_run_of_identical_empty_paragraphs_is_deleted_by_one_fix() {
-        // The single pair: the survivor is spelled the same and holds content.
+    fn a_run_of_empty_paragraphs_is_deleted_by_one_fix() {
+        // The single pair.
         assert_eq!(
             repaired("\\id GEN\n\\c 1\n\\p\n\\p text\n", Code::EmptyParagraph),
             "\\id GEN\n\\c 1\n\\p text\n"
@@ -588,20 +588,37 @@ mod tests {
         let (_, again) = report_of(&out);
         assert!(slots_for(&again, Code::EmptyParagraph).is_empty());
 
-        // A MIXED run says nothing about which spelling was meant.
-        assert!(!offers_fix(
-            "\\id GEN\n\\c 1\n\\m\n\\p text\n",
-            Code::EmptyParagraph
-        ));
-        assert!(!offers_fix(
-            "\\id GEN\n\\c 1\n\\p\n\\p\n\\m text\n",
-            Code::EmptyParagraph
-        ));
-        // A run whose survivor is empty at EOF is not duplication either.
-        assert!(!offers_fix(
-            "\\id GEN\n\\c 1\n\\p a\n\\p\n\\p\n\\p\n",
-            Code::EmptyParagraph
-        ));
+        // SPELLING IS NOT CONSULTED. A mixed pair holds no character either way,
+        // so the run goes and the displacer is what the reader sees — `\p` here
+        // and `\p` after, with one empty `<para style="m"/>` fewer.
+        assert_eq!(
+            repaired("\\id GEN\n\\c 1\n\\m\n\\p text\n", Code::EmptyParagraph),
+            "\\id GEN\n\\c 1\n\\p text\n"
+        );
+        // A mixed RUN is one run: two extents, one fix.
+        assert_eq!(
+            repaired(
+                "\\id GEN\n\\c 1\n\\m\n\\p\n\\q1 text\n",
+                Code::EmptyParagraph
+            ),
+            "\\id GEN\n\\c 1\n\\q1 text\n"
+        );
+        // Nor does what displaces the run: a heading, a chapter and end of input
+        // all take it.
+        assert_eq!(
+            repaired(
+                "\\id GEN\n\\c 1\n\\p\n\\s1 A heading\n\\p text\n",
+                Code::EmptyParagraph
+            ),
+            "\\id GEN\n\\c 1\n\\s1 A heading\n\\p text\n"
+        );
+        assert_eq!(
+            repaired(
+                "\\id GEN\n\\c 1\n\\p a\n\\p\n\\p\n\\p\n",
+                Code::EmptyParagraph
+            ),
+            "\\id GEN\n\\c 1\n\\p a\n"
+        );
     }
 
     #[test]
@@ -764,8 +781,6 @@ mod tests {
             (Code::OrphanCloser, "\\id GEN\n\\p text\\w* more"),
             (Code::OrphanTerminator, "\\id GEN\n\\p text \\* more"),
             (Code::MissingParagraph, "\\id GEN\n\\c 1\n\\v 1 a"),
-            // The one UNAMBIGUOUS empty paragraph: the next one is spelled the
-            // same, so the first is duplication and not a choice.
             (Code::EmptyParagraph, "\\id GEN\n\\c 1\n\\p\n\\p text\n"),
             (Code::ChapterDuplicate, "\\id GEN\n\\c 1\n\\c 1\n"),
             (Code::ChapterOutOfOrder, "\\id GEN\n\\c 2\n\\c 1\n"),

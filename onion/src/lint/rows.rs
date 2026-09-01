@@ -727,6 +727,12 @@ pub const LINT_ROWS: [LintRow; 59] = [
     // — a blank line is empty BY DESIGN — identified by the column that says so,
     // `ws_after_name: SingleNewline` (the table's only such row). `\pb` never
     // reaches here: a Character row opens no scope, so it is never a node.
+    //
+    // The fix deletes it, and a RUN of adjacent empties goes under one fix
+    // filed on the first. Spelling is not consulted: an empty paragraph holds no
+    // character, so `\m\p` poses no "which was meant" question — what displaces
+    // the run is what a reader sees either way, and dropping the node is inert
+    // in USX apart from the empty `<para/>` element itself.
     LintRow {
         code: Code::EmptyParagraph,
         name: "empty-paragraph",
@@ -736,7 +742,7 @@ pub const LINT_ROWS: [LintRow; 59] = [
         aux: AuxKind::None,
         template: "{anchor} has no content",
         formatter: true,
-        fix_label: Some("delete the duplicate paragraph"),
+        fix_label: Some("delete the empty paragraph"),
     },
     // ---- Attributes (shape only) ------------------------------------------
     // The 3.1 TRAILING attribute form — `\w grace|lemma="x"\w*` — which 3.2

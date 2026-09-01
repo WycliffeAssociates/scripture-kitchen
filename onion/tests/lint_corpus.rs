@@ -401,16 +401,15 @@ fn every_corpus_fix_passes_the_oracle() {
     assert_eq!(total(Code::OrphanCloser), 1);
     // One `\p` per paragraph-less run, all 5434 of them.
     assert_eq!(total(Code::MissingParagraph), 5_434);
-    // The FORMATTER half of `empty-paragraph`: 25 of the 787 empty paragraphs
-    // are UNAMBIGUOUS duplication — the RUN of identical empties they open is
-    // survived by a paragraph spelled exactly the same, holding the content
-    // (`\p\n\p\n\v 39 Hem…`, en_ulb ISA's `\q\n\q` pairs). Every qualifying run
-    // in this corpus happens to be one marker long, so the chain-aware
-    // derivation leaves the number where the pairwise one had it; the other 762
-    // are mixed (`\m` then `\p`, the `\s5` chunk idiom) or are runs whose
-    // survivor is spelled differently (en_ulb ISA's `\p\n\p\n\q1`), where which
-    // one was meant is the author's to say.
-    assert_eq!(total(Code::EmptyParagraph), 25);
+    // The FORMATTER half of `empty-paragraph`: every one of the 787 empty
+    // paragraphs is deleted, under ONE fix per RUN filed on the run's first
+    // member — so the fix count is the number of RUNS. The 25 findings that are
+    // not a first member are the fixless remainder the same transaction
+    // repairs, and every run in 226 books that has one is exactly two long:
+    // 16 `\m\p` (the `\s5` chunk idiom re-opening twice), 5 `\p\p` in en_ulb
+    // ISA, 2 `\m\sp` in en_ult HAB, 1 `\p\m` in en_ulb ECC, and en_ult HOS's
+    // glued `\q2 \q2`.
+    assert_eq!(total(Code::EmptyParagraph), 762);
     // The corpus's ONE duplicate verse offers no fix: bdf_reg ROM 3 writes
     // `\v 10` twice and then `\v 11`, so renumbering the duplicate to 11 would
     // only move the duplicate one verse along. `renumber` declines — which is
@@ -422,7 +421,7 @@ fn every_corpus_fix_passes_the_oracle() {
     // One per Pad token: delimiter whitespace past the byte the chrome keeps
     // (en_ulb's `\s5  ` and `\q  ` trailing pairs are most of them).
     assert_eq!(total(Code::DelimiterSurplus), 875);
-    assert_eq!(totals.iter().sum::<u64>(), 6_337);
+    assert_eq!(totals.iter().sum::<u64>(), 7_074);
 }
 
 #[test]
