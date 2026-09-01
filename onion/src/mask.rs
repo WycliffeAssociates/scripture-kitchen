@@ -508,6 +508,17 @@ impl Mask {
         self.ranges.is_empty()
     }
 
+    /// Projects a raw-source interval into this mask's byte space.
+    ///
+    /// Dropped bytes contribute no width, so a marker-only interval becomes
+    /// an empty range. This is the bridge chapter and verse consumers need:
+    /// their extents are source-relative while analysis walks masked text.
+    /// Returns `None` only for a reversed source interval.
+    pub fn project_source(&self, source: core::ops::Range<u32>) -> Option<core::ops::Range<u32>> {
+        (source.start <= source.end)
+            .then(|| self.projected_boundary(source.start)..self.projected_boundary(source.end))
+    }
+
     /// The source byte a mask offset names. TOTAL, like `Toc::locate`: the
     /// mask's own length answers the end of the last range, and anything past
     /// it clamps there.
@@ -530,6 +541,18 @@ impl Mask {
             .checked_sub(1)?;
         let range = &self.ranges[row];
         (src_off < range.end).then(|| self.starts[row] + (src_off - range.start))
+    }
+
+    fn projected_boundary(&self, src_off: u32) -> u32 {
+        let row = self.ranges.partition_point(|range| range.end <= src_off);
+        let Some(range) = self.ranges.get(row) else {
+            return self.len();
+        };
+        if src_off <= range.start {
+            self.starts[row]
+        } else {
+            self.starts[row] + src_off.min(range.end) - range.start
+        }
     }
 }
 
@@ -650,6 +673,10 @@ mod tests {
         assert_eq!(m.to_source(3), 8);
         assert_eq!(m.to_source(13), 33);
         assert_eq!(m.from_source(20), None);
+        assert_eq!(m.project_source(0..5), Some(0..0));
+        assert_eq!(m.project_source(0..source.len() as u32), Some(0..19));
+        assert_eq!(m.project_source(8..33), Some(3..13));
+        assert_eq!(m.project_source(33..8), None);
     }
 
     #[test]

@@ -17,6 +17,17 @@ planning/scratch.md
 /node_modules
 /*.tgz
 
-# Purged from git history 2026-08-31 along with planning/QUEUE.md; kept on disk
-# as a working queue. Never re-add.
+
 USER-OPEN.md
+.codegraph
+
+/sous-chef/donor/
+
+# Credentials for sous-chef/corpora/fetch-corpora.sh (see .env.example).
+.env
+
+# The calibration tier: ~1500 bibles, 3.2GB raw / ~950MB as per-file .gz. This
+# repo is installed by git clone (`npm i github:...#v0.1.0` clones, then packs
+# through package.json `files`), so repo weight is a consumer cost. Fetched,
+# never carried. The committed corpora/*.txt are the test tier.
+/sous-chef/corpora/calibration-corpora/

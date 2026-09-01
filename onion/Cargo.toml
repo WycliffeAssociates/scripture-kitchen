@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-memchr = "2.8.3"
+memchr.workspace = true
 # The diff port's two algorithm layers: Myers over block keys, and the UAX-29
 # word / grapheme diff inside a unit. Pure Rust, no_std-friendly, wasm-clean.
 similar = { version = "2.7", features = ["unicode"] }
@@ -29,7 +29,7 @@ divan = "0.1.21"
 serde_json = "1.0"
 # Tests and benches DO see dev-deps (src/bin does not) — the corpus sweeps and
 # the whole-corpus bench get parallelism without the lib ever knowing.
-rayon = "1.10"
+rayon.workspace = true
 
 [[bench]]
 name = "pipeline"

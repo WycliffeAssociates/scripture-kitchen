@@ -1,0 +1,13 @@
+[package]
+name = "sous-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "sous"
+path = "src/main.rs"
+
+[dependencies]
+sous-core = { path = "../core" }
+usfm_onion = { path = "../../onion", default-features = false }
+usage.workspace = true
