@@ -31,3 +31,4 @@ USER-OPEN.md
 # through package.json `files`), so repo weight is a consumer cost. Fetched,
 # never carried. The committed corpora/*.txt are the test tier.
 /sous-chef/corpora/calibration-corpora/
+sous-chef/planning/

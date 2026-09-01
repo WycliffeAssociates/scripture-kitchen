@@ -6,12 +6,13 @@
 mod alignment;
 mod codec;
 mod corpus;
+pub mod hygiene;
 mod input;
 
 pub use alignment::{AlignedSide, AlignedUnit, Alignment, AlignmentFact, align};
 pub use codec::{
-    CodecError, FindingFlags, FindingKind, PackedFinding, ProportionalityDigest,
-    QuantizedDeviation, RECORD_LEN, RuleCode,
+    CodecError, FindingFlags, FindingKind, HygieneClass, HygieneDigest, PackedFinding,
+    ProportionalityDigest, QuantizedDeviation, RECORD_LEN, RuleCode,
 };
 pub use corpus::{
     CoordinateSpace, CorpusBook, CorpusSnapshot, CorpusWireError, DIRECTORY_ENTRY_BYTES,

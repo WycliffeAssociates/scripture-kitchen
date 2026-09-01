@@ -13,5 +13,7 @@ path = "src/main.rs"
 [dependencies]
 rayon.workspace = true
 sous-core = { path = "../core" }
+# Publication only: the stateless galley::sous seam. No Warmer, no cache.
+usfm_galley = { path = "../../galley" }
 usfm_onion = { path = "../../onion", default-features = false }
 usage.workspace = true

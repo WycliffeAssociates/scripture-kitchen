@@ -42,17 +42,30 @@ inside analyzable content, and coalesces maximal runs.
 
 ### Initial checks
 
+Landed in `sous-core::hygiene`, needing no Unicode data — every hit is a
+byte-pattern decision:
+
 - C0 controls except tab, LF, and the CR in a valid CRLF pair;
 - DEL and C1 controls;
-- Unicode replacement characters and invalid/noncharacter code points;
+- U+FFFD replacement characters;
+- a stray CR;
+- backslashes in content;
+- line-initial merge-conflict markers.
+
+Deferred until the Stage 1 classifier exists; they need Unicode classes and
+are not approximated by byte rules:
+
+- invalid/noncharacter code points beyond U+FFFD;
 - zero-width space and misplaced NBSP/format characters where the rule can
   make a deterministic claim;
-- combining marks without a base;
-- merge-conflict markers and stranded content backslashes.
+- combining marks without a base.
 
 Marker validity, empty marker structure, chapter/verse ordering, and metadata
-consistency remain Onion/editor responsibilities. “Empty verse content” may be
-a Sous check only when Onion has already established a valid verse anchor and
+consistency remain Onion/editor responsibilities. Through the Onion producer
+this includes any lone backslash: Onion lexes it as a marker, well-formed or
+not, and masks it out, so only a `\\` pair reaches Sous as content. A vref
+producer keeps every backslash as content. “Empty verse content” may be a
+Sous check only when Onion has already established a valid verse anchor and
 exposes an empty analyzable unit.
 
 ### Required examples
@@ -61,7 +74,10 @@ exposes an empty analyzable unit.
 - CRLF is silent; a stray CR is reported.
 - A backslash in masked-out USFM markup is silent; a stranded backslash in a
   content span is reported.
-- A decomposed grapheme's combining mark is not mistaken for a free mark.
+- A line-initial `<<<<<<< ours` line is reported; the same text mid-line is
+  not.
+- A decomposed grapheme's combining mark is not mistaken for a free mark
+  (waits for the classifier).
 
 ## Level 1b — nonletter convention inventory
 

@@ -2,7 +2,18 @@
 //!
 //! Output is deliberately a debug view while the finding contract is being
 //! frozen. The CLI owns filesystem discovery and Onion adaptation; core owns
-//! corpus validation and target/source alignment.
+//! corpus validation, target/source alignment, and the hygiene scan; galley
+//! owns publication to raw-book UTF-16.
+//!
+//! ```text
+//! sous --findings --publish out.sous book.usfm
+//!   finding target[0] MRK 1:1-1:1 C0Control 11..14 run 3 raw [46..49]
+//!   finding target[0] MRK 1:1-1:1 StrandedBackslash 17..19 run 2 raw [52..54]
+//!   published 2 findings for 1 books (SOUS v1, UTF-16) to out.sous
+//! ```
+//!
+//! Finding offsets are projected UTF-8; `raw` is the retained source run set
+//! behind them. The published buffer carries raw-book UTF-16 instead.
 
 mod onion_book;
 
@@ -15,8 +26,9 @@ use std::{
 
 use onion_book::OnionBook;
 use rayon::prelude::*;
-use sous_core::{Alignment, Corpus, ProjectedBook, align};
+use sous_core::{Alignment, Corpus, PackedFinding, ProjectedBook, SnapshotId, align, hygiene};
 use usage::Cli;
+use usfm_galley::sous::{OnionInputBook, publish_onion_findings};
 
 /// Inspect projected scripture text Sous Chef will analyze.
 #[derive(Cli)]
@@ -37,6 +49,14 @@ struct Args {
     /// Optional source file or directory to align against the target.
     #[usage(long)]
     source: Option<PathBuf>,
+
+    /// Print hygiene findings over the target with their raw source location.
+    #[usage(long)]
+    findings: bool,
+
+    /// Write the target's findings as a complete SOUS corpus buffer in raw-book UTF-16.
+    #[usage(long)]
+    publish: Option<PathBuf>,
 
     /// One .sfm/.usfm file or a directory of immediate .sfm/.usfm files.
     target: PathBuf,
@@ -91,10 +111,99 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             print_alignment(alignment);
         }
     }
+    if args.findings || args.publish.is_some() {
+        let findings = hygiene_findings(&target_corpus);
+        if args.findings {
+            print_findings(&target_corpus, &findings);
+        }
+        if let Some(path) = &args.publish {
+            let buffer = publish(target.sources, &findings)?;
+            fs::write(path, &buffer)
+                .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
+            eprintln!(
+                "published {} findings for {} books (SOUS v1, UTF-16) to {}",
+                findings.len(),
+                target_corpus.len(),
+                path.display()
+            );
+        }
+    }
     if let Some(stats) = stats {
         stats.print();
     }
     Ok(())
+}
+
+/// Hygiene over every target book, in projected UTF-8, ordered by book then
+/// offset. The only rule that exists yet; later rules append here.
+fn hygiene_findings(corpus: &Corpus<'_, OnionBook>) -> Vec<PackedFinding> {
+    let lengths: Vec<u32> = corpus
+        .books()
+        .iter()
+        .map(|book| book.text().len() as u32)
+        .collect();
+    let mut out = Vec::new();
+    for (index, book) in corpus.iter() {
+        for finding in hygiene::scan(book.text()) {
+            out.push(
+                finding
+                    .to_packed(index, &lengths)
+                    .expect("scan spans lie inside the book it scanned"),
+            );
+        }
+    }
+    out
+}
+
+fn print_findings(corpus: &Corpus<'_, OnionBook>, findings: &[PackedFinding]) {
+    for finding in findings {
+        let book = corpus
+            .get(finding.book_idx())
+            .expect("finding names a corpus book");
+        let sous_core::FindingKind::Hygiene(digest) = finding.kind() else {
+            continue;
+        };
+        let span = sous_core::TextRange::new(finding.from(), finding.to())
+            .expect("packed spans are ordered");
+        let (address, raw) = match book.locate(span) {
+            Some(located) => {
+                let first = located.first;
+                let last = located.last;
+                let raw: Vec<_> = located.spans.collect();
+                (
+                    format!(
+                        "{}:{}-{}:{}",
+                        first.chapter, first.first, last.chapter, last.last
+                    ),
+                    raw,
+                )
+            }
+            None => ("?".to_string(), Vec::new()),
+        };
+        println!(
+            "finding target[{}] {} {address} {} {}..{} run {} raw {raw:?}",
+            finding.book_idx().get(),
+            book.key(),
+            digest.class().name(),
+            finding.from(),
+            finding.to(),
+            digest.run(),
+        );
+    }
+}
+
+/// The snapshot identity is a Galley lifecycle decision not yet made; the
+/// CLI publishes a zero identity and says so here rather than inventing one.
+fn publish(
+    sources: Vec<String>,
+    findings: &[PackedFinding],
+) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    let books = sources.into_iter().map(OnionInputBook::new).collect();
+    Ok(publish_onion_findings(
+        books,
+        findings,
+        SnapshotId::new([0; 16]),
+    )?)
 }
 
 fn print_books(label: &str, paths: &[PathBuf], corpus: &Corpus<'_, OnionBook>) {
@@ -142,6 +251,8 @@ fn print_alignment(alignment: &Alignment) {
 struct LoadedBooks {
     paths: Vec<PathBuf>,
     books: Vec<OnionBook>,
+    /// Raw book strings, kept so publication can rebase against them.
+    sources: Vec<String>,
     source_bytes: usize,
 }
 
@@ -159,22 +270,22 @@ fn load_input(input: &Path, parallel: bool) -> Result<LoadedBooks, Box<dyn std::
             .collect::<Result<Vec<_>, _>>()
     }
     .map_err(std::io::Error::other)?;
-    let source_bytes = loaded.iter().map(|(_, bytes)| *bytes).sum();
-    let books = loaded.into_iter().map(|(book, _)| book).collect();
+    let source_bytes = loaded.iter().map(|(_, source)| source.len()).sum();
+    let (books, sources) = loaded.into_iter().unzip();
     Ok(LoadedBooks {
         paths,
         books,
+        sources,
         source_bytes,
     })
 }
 
-fn load_book(path: &Path) -> Result<(OnionBook, usize), String> {
+fn load_book(path: &Path) -> Result<(OnionBook, String), String> {
     let source = fs::read_to_string(path)
         .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
-    let source_bytes = source.len();
     let book = OnionBook::parse(&source)
         .map_err(|error| format!("cannot parse {}: {error}", path.display()))?;
-    Ok((book, source_bytes))
+    Ok((book, source))
 }
 
 fn paths_for_input(input: &Path) -> Result<Vec<PathBuf>, Box<dyn std::error::Error>> {
@@ -451,6 +562,39 @@ mod tests {
         books.sort_by_key(|book| book.as_bytes());
         assert_eq!(books, vec![target.books[1].key(), target.books[0].key()]);
         assert!(alignment.facts().is_empty());
+    }
+
+    #[test]
+    fn hygiene_findings_publish_through_galley_in_raw_utf16() {
+        use sous_core::{CoordinateSpace, CorpusSnapshot, FindingKind, HygieneClass};
+
+        let temp = TempDir::new();
+        // Onion lexes a lone `\` as a marker and masks it; a `\\` pair is
+        // content and reaches Sous. It sits past a 4-byte char, so the
+        // published UTF-16 span moves by two units less than the raw bytes.
+        let path = temp.0.join("mrk.usfm");
+        fs::write(&path, "\\id MRK\n\\c 1\n\\p\n\\v 1 An 🧅 \\\\ here.\n").unwrap();
+        let target = load_input(&path, false).unwrap();
+        let corpus = Corpus::try_new(&target.books).unwrap();
+        let findings = hygiene_findings(&corpus);
+        assert_eq!(findings.len(), 1);
+        let FindingKind::Hygiene(digest) = findings[0].kind() else {
+            panic!("hygiene kind")
+        };
+        assert_eq!(digest.class(), HygieneClass::StrandedBackslash);
+        assert_eq!(digest.run(), 2);
+        assert_eq!((findings[0].from(), findings[0].to()), (10, 12));
+
+        let buffer = publish(target.sources, &findings).unwrap();
+        let snapshot = CorpusSnapshot::open(&buffer).unwrap();
+        assert_eq!(snapshot.coordinate_space(), CoordinateSpace::Utf16);
+        let row = snapshot
+            .book(findings[0].book_idx())
+            .unwrap()
+            .at(0)
+            .unwrap();
+        // Raw bytes 29..31; the onion at 24..28 is two UTF-16 units.
+        assert_eq!((row.from(), row.to()), (27, 29));
     }
 
     #[test]

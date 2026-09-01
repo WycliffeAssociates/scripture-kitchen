@@ -270,17 +270,27 @@ Recommended v1 record, 16 bytes, little-endian:
 | 0..4 | `from: u32` | start in the book coordinate space declared by the owning container |
 | 4..8 | `to: u32` | end in that coordinate space, exclusive |
 | 8..10 | `book_idx: u16` | index into the snapshot's ordered book table |
-| 10 | `code: u8` | union tag; v1 code `0` is `LengthProportionality` |
+| 10 | `code: u8` | union tag into the v1 code table below |
 | 11 | `flags: u8` | representation flags; only `SATURATED` is currently valid |
-| 12..14 | code-specific `i16` lane | signed Q8.8 book-scope standardized deviation; `i16::MIN` means unavailable |
-| 14..16 | code-specific `i16` lane | signed Q8.8 project/corpus-scope standardized deviation; `i16::MIN` means unavailable |
+| 12..14 | code-specific `i16` lane | meaning owned by the rule code |
+| 14..16 | code-specific `i16` lane | meaning owned by the rule code |
+
+The v1 code table and each code's lanes:
+
+| code | kind | lane 12..14 | lane 14..16 | `SATURATED` means |
+| --- | --- | --- | --- | --- |
+| `0` | `LengthProportionality` | signed Q8.8 book-scope standardized deviation; `i16::MIN` unavailable | signed Q8.8 project/corpus-scope deviation; `i16::MIN` unavailable | a deviation was clamped |
+| `1` | `Hygiene` | `HygieneClass` discriminant | run length in code points, `1..=i16::MAX` | the run exceeds `i16::MAX`; the lane reads exactly `i16::MAX` |
 
 The 6-bit rule-id proposal does not save a byte in this layout and makes
 decoding and evolution harder, so the charter chooses an explicit `u8`.
 Each wire version has one dense table of active, hand-assigned codes. It has no
 reserved ranges and no retired entries. Removing or renumbering a code requires
 a new wire version rather than leaving tombstones in the current table.
-The initial v1 table contains exactly code `0`, `LengthProportionality`.
+Codes append within a wire version: `Hygiene` joined as `1` when the first
+deterministic rule landed. Each code's lane codec lives in its own
+`codec/<rule>.rs` beside the shared record, so the record module never
+becomes a dumping ground for payload shapes.
 
 `book_idx` is the caller's snapshot-local book-array index. During one
 invocation, each exact input string travels with its ordered projection,
@@ -297,14 +307,15 @@ This mapping is deliberately outside `sous-core`: an Onion book uses its
 the addressing space, and a USFM file or a vref corpus may both provide the
 book. `u16` is ample without spending four bytes per finding.
 
-The semantic record is a discriminated union: `PackedFinding` carries
-`FindingKind::LengthProportionality(ProportionalityDigest)`, and the wire code
-and payload interpretation are derived from that kind. The two active payload
-lanes are signed Q8.8 standardized deviations for book and project/corpus
-scope. `i16::MIN` is the unavailable sentinel and cannot be constructed as a
-`QuantizedDeviation`; `SATURATED` is derived from the typed payload. These
-lanes are compact representations, not the analysis truth. A packed row cannot
-reconstruct rich rule evidence, counts, or arguments.
+The semantic record is a discriminated union: `PackedFinding` carries a
+`FindingKind` — `LengthProportionality(ProportionalityDigest)` or
+`Hygiene(HygieneDigest)` — and the wire code, lanes, and `SATURATED` flag are
+derived from that kind. `i16::MIN` is proportionality's unavailable sentinel
+and cannot be constructed as a `QuantizedDeviation`; a hygiene run of zero
+cannot be constructed either, and decoders reject a `SATURATED` hygiene row
+whose lane is not exactly `i16::MAX`. These lanes are compact
+representations, not the analysis truth. A packed row cannot reconstruct rich
+rule evidence, counts, or arguments.
 
 An immutable snapshot row index plus an analysis identity forms an out-of-band
 `FindingHandle`. Galley/Sous uses that handle to request typed detail, after

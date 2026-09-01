@@ -145,10 +145,14 @@ now executable contracts and keeps donor code from becoming an accidental API.
 | Onion projection | CLI adapter materializes verse text once, derives ranges through `Mask::project_source`, and locates with `Mask::to_source` plus `Toc::locate` | move only reusable conveniences into Onion when a second host needs them |
 | vref projection | semantic contract is settled; no production loader yet | implement after the Onion path pins duplicate and bridge fixtures |
 | nonletter substrate | `donor/src/probe3.rs` and `donor/src/rows.rs` are measured donors only | port consumer-led classifier bits after Stage 0 closes |
-| finding transport | checked v1 corpus envelope, caller-ordered `BookKey` directory, fixed `PackedFinding` sections, shared golden buffers, and generated lazy TypeScript reader are executable; `galley::sous::publish_onion_findings` rebases projected UTF-8 through the Mask to raw-book UTF-16 (bounding spans over removed markup) and encodes the corpus buffer | Galley's canonical snapshot identity and checksum-keyed detached reuse remain Stage 2 lifecycle work |
+| finding transport | checked v1 corpus envelope, caller-ordered `BookKey` directory, fixed `PackedFinding` sections, shared golden buffers, and generated lazy TypeScript reader are executable; `galley::sous::publish_onion_findings` rebases projected UTF-8 through the Mask to raw-book UTF-16 (bounding spans over removed markup) and encodes the corpus buffer; code `1` `Hygiene` rides the same record with its lane codec in `codec/hygiene.rs` | Galley's canonical snapshot identity and checksum-keyed detached reuse remain Stage 2 lifecycle work |
+| hygiene | `sous-core::hygiene::scan` over projected text: C0/DEL range filter, `memchr3` needle filter, `memchr3` marker filter, maximal same-class runs; `sous --findings` prints rows with `Sid`, `sous --publish` writes the UTF-16 corpus buffer through galley | classifier-dependent checks after Stage 1 items 1–2; a snapshot identity instead of the CLI's zero id |
 
-Do not begin classifier or rule ports merely because the input trait exists.
-The packed finding boundary remains the Stage 0 stop gate.
+Stage 0 is closed. Stage 1 was entered hygiene-first rather than
+classifier-first: the byte-level checks need no Unicode data, they put the
+first real finding through the new publication seam, and they leave the
+classifier's bit set to be chosen by its actual consumers (the remaining
+hygiene checks and the Level 1b substrate) rather than by the donor layout.
 
 ## Stage 0 — Freeze the foundation contracts
 
@@ -234,9 +238,11 @@ Work:
 4. Implement grapheme-safe emitted boundaries with the fast atom rule and a
    correctness fallback/check for complex cases.
 5. Implement deterministic hygiene scans over raw bytes with content-mask hit
-   validation.
+   validation. **Byte-level checks landed over projected content (the mask
+   already excludes markup); classifier-dependent checks wait for items 1–2.**
 6. Expose the implemented hygiene findings through the same CLI command. This
    is the first real consumer path, not a separate playground API.
+   **`--findings` and `--publish` landed.**
 
 Verification gate:
 
@@ -494,6 +500,7 @@ depends on one.
 | question | observed result | architectural consequence |
 | --- | --- | --- |
 | byte hygiene cost | SWAR range scans about 5.3 GiB/s; fixed needles 2.3–41 GiB/s across stress corpora | rescan; do not retain hygiene state initially |
+| roofline, production hygiene (`cargo bench -p sous-core`, Apple Silicon, one core, 8-corpus test tier) | scalar dependent chain 1.05 GB/s; autovectorized compare 10 GB/s; `memchr3` 31 GB/s on clean text, 5.6 GB/s on French (0xC2 NBSP/guillemet density); `hygiene::scan` 8.6 GB/s on six corpora, 6.6 GB/s Greek, 3.8 GB/s French. Replacing three `memmem` marker passes with one `memchr3` took it from 5.8 to 8.6 GB/s | every pass is measured against the vectorized ceiling; the needle filter's hit density, not the range filter, is the remaining cost |
 | stream versus scalar tape | streaming was about 1.3–2.3× faster; tape cost worsened with corpus size | no ambient materialized tape |
 | full shared substrate | about 28 ms on the English probe corpus versus roughly 257 ms v1 cold analysis | simple whole-corpus/whole-book passes are viable |
 | expanded feature substrate | roughly 12–31% above the first shared-counter cut | counter-shaped additions can share the walk cheaply |

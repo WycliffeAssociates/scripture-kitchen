@@ -235,4 +235,31 @@ mod tests {
         );
         assert!(book.text().contains("unkeyed"));
     }
+
+    #[test]
+    fn markup_backslashes_are_silent_and_a_content_pair_locates_to_its_verse() {
+        use sous_core::{HygieneClass, hygiene};
+
+        // Every marker backslash is masked out, including the footnote's.
+        let clean = OnionBook::parse(USFM).unwrap();
+        assert!(hygiene::scan(clean.text()).is_empty());
+
+        // Onion lexes `\ ` and `\b` as markers — malformed ones are its lint's
+        // business — so only a `\\` pair reaches Sous as content.
+        let source = concat!(
+            "\\id MRK\n",
+            "\\c 1\n\\p\n",
+            "\\v 1 Jesus \\f + \\ft note\\f* wept \\ a\\b \\\\ here.\n",
+        );
+        let book = OnionBook::parse(source).unwrap();
+        let findings = hygiene::scan(book.text());
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].class(), HygieneClass::StrandedBackslash);
+        assert_eq!(findings[0].run(), 2);
+        let located = book.locate(findings[0].span()).unwrap();
+        assert_eq!((located.first.chapter, located.first.first), (1, 1));
+        let raw: Vec<_> = located.spans.collect();
+        assert_eq!(raw.len(), 1, "the pair is one retained run");
+        assert_eq!(&source[raw[0].start as usize..raw[0].end as usize], "\\\\");
+    }
 }

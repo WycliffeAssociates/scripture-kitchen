@@ -49,7 +49,26 @@ export interface LengthProportionalityFinding {
   readonly digest: ProportionalityDigest;
 }
 
-export type Finding = LengthProportionalityFinding;
+/** Wire lane 12..14 is the class index into this table. */
+export const HYGIENE_CLASSES = [@@HYGIENE_CLASSES@@] as const;
+export type HygieneClass = (typeof HYGIENE_CLASSES)[number];
+
+export interface HygieneDigest {
+  readonly class: HygieneClass;
+  /** Code points in the run; exact unless `saturated`. */
+  readonly run: number;
+  readonly saturated: boolean;
+}
+
+export interface HygieneFinding {
+  readonly kind: "Hygiene";
+  readonly from: number;
+  readonly to: number;
+  readonly bookIdx: number;
+  readonly hygiene: HygieneDigest;
+}
+
+export type Finding = LengthProportionalityFinding | HygieneFinding;
 
 export class FindingsSnapshotError extends Error {
   constructor(message: string) {
@@ -148,7 +167,7 @@ export class BookView {
       return fail(`finding row ${row} carries book index ${bookIdx}, expected ${this.#index}`);
     }
     const code = this.#view.getUint8(at + RECORD_CODE_OFFSET);
-    if (code !== 0) {
+    if (code !== 0 && code !== 1) {
       return fail(`unknown finding rule code ${code}`);
     }
     const flags = this.#view.getUint8(at + RECORD_FLAGS_OFFSET);
@@ -161,6 +180,22 @@ export class BookView {
     if (to > this.#entry.length) {
       return fail(`finding span ${from}..${to} exceeds book length ${this.#entry.length}`);
     }
+    const saturated = (flags & 1) !== 0;
+    if (code === 1) {
+      const classIndex = this.#view.getInt16(at + RECORD_BOOK_SCOPE_OFFSET, true);
+      const hygieneClass = HYGIENE_CLASSES[classIndex];
+      if (hygieneClass === undefined) {
+        return fail(`unknown hygiene class ${classIndex}`);
+      }
+      const run = this.#view.getInt16(at + RECORD_PROJECT_SCOPE_OFFSET, true);
+      if (run < 1) {
+        return fail("hygiene run length must be at least 1");
+      }
+      if (saturated && run !== 0x7fff) {
+        return fail("saturated hygiene run must read back as 0x7fff");
+      }
+      return { kind: "Hygiene", from, to, bookIdx, hygiene: { class: hygieneClass, run, saturated } };
+    }
     return {
       kind: "LengthProportionality",
       from,
@@ -169,7 +204,7 @@ export class BookView {
       digest: {
         bookScope: signedDeviation(this.#view, at + RECORD_BOOK_SCOPE_OFFSET),
         projectScope: signedDeviation(this.#view, at + RECORD_PROJECT_SCOPE_OFFSET),
-        saturated: (flags & 1) !== 0,
+        saturated,
       },
     };
   }

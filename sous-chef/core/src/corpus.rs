@@ -10,7 +10,7 @@ use core::fmt;
 use rustc_hash::FxHashSet;
 
 use crate::codec::{
-    CodecError, PackedFinding, RECORD_BOOK_INDEX_OFFSET, RECORD_BOOK_SCOPE_OFFSET,
+    CodecError, HygieneClass, PackedFinding, RECORD_BOOK_INDEX_OFFSET, RECORD_BOOK_SCOPE_OFFSET,
     RECORD_CODE_OFFSET, RECORD_FLAGS_OFFSET, RECORD_FROM_OFFSET, RECORD_LEN,
     RECORD_PROJECT_SCOPE_OFFSET, RECORD_TO_OFFSET,
 };
@@ -588,6 +588,14 @@ pub fn generated_reader_ts() -> String {
         .replace("@@MAGIC@@", &format!("0x{MAGIC:08x}"))
         .replace("@@FORMAT_VERSION@@", &FORMAT_VERSION.to_string())
         .replace("@@FLAG_UTF16@@", &FLAG_UTF16.to_string())
+        .replace(
+            "@@HYGIENE_CLASSES@@",
+            &HygieneClass::ALL
+                .iter()
+                .map(|class| format!("\"{}\"", class.name()))
+                .collect::<Vec<_>>()
+                .join(", "),
+        )
         .replace("@@HEADER_BYTES@@", &HEADER_BYTES.to_string())
         .replace(
             "@@DIRECTORY_ENTRY_BYTES@@",
@@ -657,7 +665,7 @@ pub fn generated_reader_ts() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{FindingKind, ProportionalityDigest, QuantizedDeviation};
+    use crate::{FindingKind, HygieneDigest, ProportionalityDigest, QuantizedDeviation};
 
     const GENERATED: &str = include_str!("../../reader.ts");
 
@@ -713,6 +721,61 @@ mod tests {
         assert_eq!(book.at(0).unwrap(), finding);
     }
 
+    /// Mixed kinds in one book: a proportionality row between an exact and a
+    /// saturated hygiene row.
+    #[test]
+    fn mixed_kind_golden_buffer_decodes_in_both_readers() {
+        let hygiene = |from, to, class, run| {
+            PackedFinding::new(
+                from,
+                to,
+                BookIndex::new(0).unwrap(),
+                FindingKind::Hygiene(HygieneDigest::new(class, run).unwrap()),
+                &[0x0100],
+            )
+            .unwrap()
+        };
+        let findings = [
+            hygiene(3, 6, HygieneClass::C0Control, 3),
+            PackedFinding::new(
+                0x10,
+                0x12,
+                BookIndex::new(0).unwrap(),
+                FindingKind::LengthProportionality(ProportionalityDigest::new(
+                    Some(QuantizedDeviation::from_raw(0x0180).unwrap()),
+                    None,
+                    false,
+                )),
+                &[0x0100],
+            )
+            .unwrap(),
+            hygiene(0x40, 0xa0, HygieneClass::Delete, 40_000),
+        ];
+        let section = PublicationBook::new(BookKey::new(*b"MRK"), 0x0100, &findings);
+        let encoded = encode_to_corpus_buffer(
+            SnapshotId::new(core::array::from_fn(|index| index as u8)),
+            CoordinateSpace::Utf8,
+            &[section],
+        )
+        .unwrap();
+        let golden: Vec<u8> = include_str!("../../testdata/corpus_v1_hygiene.hex")
+            .split_whitespace()
+            .map(|byte| u8::from_str_radix(byte, 16).unwrap())
+            .collect();
+        assert_eq!(encoded, golden);
+
+        let snapshot = CorpusSnapshot::open(&encoded).unwrap();
+        let book = snapshot.book_by_key(BookKey::new(*b"MRK")).unwrap();
+        assert_eq!(book.at(0).unwrap(), findings[0]);
+        assert_eq!(book.at(1).unwrap(), findings[1]);
+        let FindingKind::Hygiene(digest) = book.at(2).unwrap().kind() else {
+            panic!("hygiene kind")
+        };
+        assert_eq!(digest.class(), HygieneClass::Delete);
+        assert!(digest.saturated());
+        assert_eq!(digest.run(), 0x7fff);
+    }
+
     #[test]
     fn empty_corpus_and_empty_books_are_valid() {
         let empty =
@@ -756,11 +819,11 @@ mod tests {
         ));
 
         let mut bad_code = encoded;
-        bad_code[56 + 10] = 1;
+        bad_code[56 + 10] = 2;
         assert!(matches!(
             CorpusSnapshot::open(&bad_code),
             Err(CorpusWireError::Record {
-                error: CodecError::UnknownRuleCode(1),
+                error: CodecError::UnknownRuleCode(2),
                 ..
             })
         ));

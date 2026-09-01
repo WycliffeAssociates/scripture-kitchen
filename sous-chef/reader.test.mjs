@@ -90,6 +90,43 @@ test("decodes the galley-published UTF-16 golden with rebased spans", () => {
   });
 });
 
+test("decodes mixed proportionality and hygiene rows, saturation included", () => {
+  const snapshot = FindingsSnapshot.open(hexFixture("corpus_v1_hygiene.hex"));
+  const mark = snapshot.book("MRK");
+  assert.equal(mark.count, 3);
+  assert.deepEqual(mark.at(0), {
+    kind: "Hygiene",
+    from: 3,
+    to: 6,
+    bookIdx: 0,
+    hygiene: { class: "C0Control", run: 3, saturated: false },
+  });
+  assert.deepEqual(mark.at(1), {
+    kind: "LengthProportionality",
+    from: 0x10,
+    to: 0x12,
+    bookIdx: 0,
+    digest: { bookScope: 1.5, projectScope: null, saturated: false },
+  });
+  assert.deepEqual(mark.at(2), {
+    kind: "Hygiene",
+    from: 0x40,
+    to: 0xa0,
+    bookIdx: 0,
+    hygiene: { class: "Delete", run: 0x7fff, saturated: true },
+  });
+
+  const badClass = hexFixture("corpus_v1_hygiene.hex");
+  badClass[56 + 12] = 7;
+  assert.throws(() => FindingsSnapshot.open(badClass).book(0).at(0), FindingsSnapshotError);
+  const zeroRun = hexFixture("corpus_v1_hygiene.hex");
+  zeroRun[56 + 14] = 0;
+  assert.throws(() => FindingsSnapshot.open(zeroRun).book(0).at(0), FindingsSnapshotError);
+  const falseSaturation = hexFixture("corpus_v1_hygiene.hex");
+  falseSaturation[56 + 11] = 1;
+  assert.throws(() => FindingsSnapshot.open(falseSaturation).book(0).at(0), FindingsSnapshotError);
+});
+
 test("accepts a view without copying its surrounding bytes", () => {
   const bytes = fixture();
   const padded = new Uint8Array(bytes.length + 8);
@@ -139,7 +176,7 @@ test("fails closed on malformed envelope and lazily malformed rows", () => {
   expectOpenFailure(badKey);
 
   const badCode = bytes.slice();
-  badCode[56 + 10] = 1;
+  badCode[56 + 10] = 2;
   assert.throws(() => FindingsSnapshot.open(badCode).book(0).at(0), FindingsSnapshotError);
 
   const badFlagsRow = bytes.slice();

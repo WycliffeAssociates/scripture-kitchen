@@ -4,10 +4,20 @@
 //! snapshot envelope. Records validate their projection context at creation
 //! and decode time, while encoding derives the wire tag and payload from a
 //! typed finding-kind union.
+//!
+//! Bytes 12..16 are two `i16` lanes whose meaning is the rule code's alone.
+//! Each rule's payload lives in its own submodule with its `lanes()` /
+//! `from_lanes()` pair; this file holds only the record and the code table.
 
 use core::fmt;
 
 use crate::BookIndex;
+
+mod hygiene;
+mod proportionality;
+
+pub use hygiene::{HygieneClass, HygieneDigest};
+pub use proportionality::{ProportionalityDigest, QuantizedDeviation};
 
 pub const RECORD_LEN: usize = 16;
 pub const RECORD_FROM_OFFSET: usize = 0;
@@ -18,11 +28,12 @@ pub const RECORD_FLAGS_OFFSET: usize = 11;
 pub const RECORD_BOOK_SCOPE_OFFSET: usize = 12;
 pub const RECORD_PROJECT_SCOPE_OFFSET: usize = 14;
 
-/// The only active v1 rule discriminant.
+/// The dense, hand-assigned v1 rule table. Codes append; none retire.
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuleCode {
     LengthProportionality = 0,
+    Hygiene = 1,
 }
 
 impl TryFrom<u8> for RuleCode {
@@ -31,6 +42,7 @@ impl TryFrom<u8> for RuleCode {
     fn try_from(code: u8) -> Result<Self, Self::Error> {
         match code {
             0 => Ok(Self::LengthProportionality),
+            1 => Ok(Self::Hygiene),
             other => Err(CodecError::UnknownRuleCode(other)),
         }
     }
@@ -42,70 +54,13 @@ impl From<RuleCode> for u8 {
     }
 }
 
-/// A signed Q8.8 standardized deviation.
-///
-/// The wire value `i16::MIN` is reserved for an unavailable scope and is
-/// represented by `Option<QuantizedDeviation>` in [`ProportionalityDigest`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct QuantizedDeviation(i16);
-
-impl QuantizedDeviation {
-    pub fn from_raw(raw: i16) -> Result<Self, CodecError> {
-        if raw == i16::MIN {
-            return Err(CodecError::MissingDeviationSentinel);
-        }
-        Ok(Self(raw))
-    }
-
-    pub const fn raw(self) -> i16 {
-        self.0
-    }
-
-    pub fn as_f64(self) -> f64 {
-        f64::from(self.0) / 256.0
-    }
-}
-
-/// The typed payload for the currently active proportionality rule.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ProportionalityDigest {
-    book_scope: Option<QuantizedDeviation>,
-    project_scope: Option<QuantizedDeviation>,
-    saturated: bool,
-}
-
-impl ProportionalityDigest {
-    pub const fn new(
-        book_scope: Option<QuantizedDeviation>,
-        project_scope: Option<QuantizedDeviation>,
-        saturated: bool,
-    ) -> Self {
-        Self {
-            book_scope,
-            project_scope,
-            saturated,
-        }
-    }
-
-    pub const fn book_scope(self) -> Option<QuantizedDeviation> {
-        self.book_scope
-    }
-
-    pub const fn project_scope(self) -> Option<QuantizedDeviation> {
-        self.project_scope
-    }
-
-    pub const fn saturated(self) -> bool {
-        self.saturated
-    }
-}
-
 /// Code-specific semantic payloads. Adding a future payload requires a new
 /// rule code and an explicit wire interpretation; it cannot share a generic
 /// numerator/denominator shape accidentally.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FindingKind {
     LengthProportionality(ProportionalityDigest),
+    Hygiene(HygieneDigest),
 }
 
 /// A checked semantic representation of one 16-byte wire record.
@@ -155,19 +110,20 @@ impl PackedFinding {
     pub const fn code(self) -> RuleCode {
         match self.kind {
             FindingKind::LengthProportionality(_) => RuleCode::LengthProportionality,
+            FindingKind::Hygiene(_) => RuleCode::Hygiene,
         }
     }
 
     /// Returns representation flags derived from this finding's typed payload.
     pub const fn flags(self) -> FindingFlags {
-        match self.kind {
-            FindingKind::LengthProportionality(digest) => {
-                if digest.saturated() {
-                    FindingFlags::SATURATED
-                } else {
-                    FindingFlags::NONE
-                }
-            }
+        let saturated = match self.kind {
+            FindingKind::LengthProportionality(digest) => digest.saturated(),
+            FindingKind::Hygiene(digest) => digest.saturated(),
+        };
+        if saturated {
+            FindingFlags::SATURATED
+        } else {
+            FindingFlags::NONE
         }
     }
 
@@ -180,14 +136,13 @@ impl PackedFinding {
             .copy_from_slice(&self.book_idx.get().to_le_bytes());
         bytes[RECORD_CODE_OFFSET] = self.code().into();
         bytes[RECORD_FLAGS_OFFSET] = self.flags().bits();
-        match self.kind {
-            FindingKind::LengthProportionality(digest) => {
-                bytes[RECORD_BOOK_SCOPE_OFFSET..RECORD_PROJECT_SCOPE_OFFSET]
-                    .copy_from_slice(&raw_or_missing(digest.book_scope()).to_le_bytes());
-                bytes[RECORD_PROJECT_SCOPE_OFFSET..RECORD_LEN]
-                    .copy_from_slice(&raw_or_missing(digest.project_scope()).to_le_bytes());
-            }
-        }
+        let [first, second] = match self.kind {
+            FindingKind::LengthProportionality(digest) => digest.lanes(),
+            FindingKind::Hygiene(digest) => digest.lanes(),
+        };
+        bytes[RECORD_BOOK_SCOPE_OFFSET..RECORD_PROJECT_SCOPE_OFFSET]
+            .copy_from_slice(&first.to_le_bytes());
+        bytes[RECORD_PROJECT_SCOPE_OFFSET..RECORD_LEN].copy_from_slice(&second.to_le_bytes());
         bytes
     }
 
@@ -225,24 +180,23 @@ impl PackedFinding {
             BookIndex::new(usize::from(book_idx_raw)).expect("every u16 wire index fits BookIndex");
         let code = RuleCode::try_from(bytes[RECORD_CODE_OFFSET])?;
         let flags = FindingFlags::from_bits(bytes[RECORD_FLAGS_OFFSET])?;
-        let book_raw = i16::from_le_bytes(
-            bytes[RECORD_BOOK_SCOPE_OFFSET..RECORD_PROJECT_SCOPE_OFFSET]
-                .try_into()
-                .expect("record length checked"),
-        );
-        let project_raw = i16::from_le_bytes(
-            bytes[RECORD_PROJECT_SCOPE_OFFSET..RECORD_LEN]
-                .try_into()
-                .expect("record length checked"),
-        );
+        let lanes = [
+            i16::from_le_bytes(
+                bytes[RECORD_BOOK_SCOPE_OFFSET..RECORD_PROJECT_SCOPE_OFFSET]
+                    .try_into()
+                    .expect("record length checked"),
+            ),
+            i16::from_le_bytes(
+                bytes[RECORD_PROJECT_SCOPE_OFFSET..RECORD_LEN]
+                    .try_into()
+                    .expect("record length checked"),
+            ),
+        ];
         let kind = match code {
             RuleCode::LengthProportionality => {
-                FindingKind::LengthProportionality(ProportionalityDigest::new(
-                    deviation_from_raw(book_raw)?,
-                    deviation_from_raw(project_raw)?,
-                    flags.contains(FindingFlags::SATURATED),
-                ))
+                FindingKind::LengthProportionality(ProportionalityDigest::from_lanes(lanes, flags)?)
             }
+            RuleCode::Hygiene => FindingKind::Hygiene(HygieneDigest::from_lanes(lanes, flags)?),
         };
         if from > to {
             return Err(CodecError::ReversedSpan { from, to });
@@ -280,18 +234,6 @@ impl PackedFinding {
             });
         }
         Ok(())
-    }
-}
-
-fn raw_or_missing(value: Option<QuantizedDeviation>) -> i16 {
-    value.map_or(i16::MIN, QuantizedDeviation::raw)
-}
-
-fn deviation_from_raw(raw: i16) -> Result<Option<QuantizedDeviation>, CodecError> {
-    if raw == i16::MIN {
-        Ok(None)
-    } else {
-        QuantizedDeviation::from_raw(raw).map(Some)
     }
 }
 
@@ -346,6 +288,8 @@ pub enum CodecError {
     UnknownRuleCode(u8),
     UnknownFlags(u8),
     MissingDeviationSentinel,
+    UnknownHygieneClass(i16),
+    EmptyHygieneRun,
     ReversedSpan { from: u32, to: u32 },
     InvalidBookIndex { index: u16 },
     SpanOutOfBounds { from: u32, to: u32, book_len: u32 },
@@ -366,6 +310,8 @@ impl fmt::Display for CodecError {
             Self::MissingDeviationSentinel => {
                 f.write_str("i16::MIN is reserved for an unavailable deviation")
             }
+            Self::UnknownHygieneClass(raw) => write!(f, "unknown hygiene class {raw}"),
+            Self::EmptyHygieneRun => f.write_str("hygiene run length must be at least 1"),
             Self::ReversedSpan { from, to } => write!(f, "reversed finding span {from}..{to}"),
             Self::InvalidBookIndex { index } => {
                 write!(f, "book index {index} is absent from the book table")
@@ -392,11 +338,8 @@ impl std::error::Error for CodecError {}
 mod tests {
     use super::*;
 
-    const LENGTH_KIND: FindingKind = FindingKind::LengthProportionality(ProportionalityDigest {
-        book_scope: None,
-        project_scope: None,
-        saturated: false,
-    });
+    const LENGTH_KIND: FindingKind =
+        FindingKind::LengthProportionality(ProportionalityDigest::new(None, None, false));
     static BOOK_LENGTHS: [u32; 65_536] = [u32::MAX; 65_536];
 
     fn deviation(raw: i16) -> QuantizedDeviation {
@@ -452,7 +395,9 @@ mod tests {
             PackedFinding::decode(&record.encode(), &[4, 17]),
             Ok(record)
         );
-        let FindingKind::LengthProportionality(digest) = record.kind();
+        let FindingKind::LengthProportionality(digest) = record.kind() else {
+            panic!("proportionality kind")
+        };
         assert_eq!(digest.book_scope().unwrap().raw(), 0x0180);
         assert_eq!(digest.project_scope(), None);
     }
@@ -468,7 +413,9 @@ mod tests {
             false,
         );
         let decoded = PackedFinding::decode(&record.encode(), &[0]).unwrap();
-        let FindingKind::LengthProportionality(digest) = decoded.kind();
+        let FindingKind::LengthProportionality(digest) = decoded.kind() else {
+            panic!("proportionality kind")
+        };
         assert_eq!(digest.book_scope().unwrap().raw(), 0x0180);
         assert_eq!(digest.project_scope().unwrap().raw(), -0x0180);
         assert!((digest.book_scope().unwrap().as_f64() - 1.5).abs() < f64::EPSILON);
@@ -477,7 +424,10 @@ mod tests {
         let FindingKind::LengthProportionality(digest) =
             PackedFinding::decode(&missing.encode(), &[0])
                 .unwrap()
-                .kind();
+                .kind()
+        else {
+            panic!("proportionality kind")
+        };
         assert_eq!(digest.book_scope(), None);
         assert_eq!(digest.project_scope(), None);
     }
@@ -487,7 +437,9 @@ mod tests {
         let record = finding(0, 0, 0, None, None, true);
         assert!(record.flags().contains(FindingFlags::SATURATED));
         let decoded = PackedFinding::decode(&record.encode(), &[0]).unwrap();
-        let FindingKind::LengthProportionality(digest) = decoded.kind();
+        let FindingKind::LengthProportionality(digest) = decoded.kind() else {
+            panic!("proportionality kind")
+        };
         assert!(digest.saturated());
     }
 
@@ -505,7 +457,10 @@ mod tests {
         let FindingKind::LengthProportionality(digest) =
             PackedFinding::decode(&record.encode(), &[0])
                 .unwrap()
-                .kind();
+                .kind()
+        else {
+            panic!("proportionality kind")
+        };
         assert_eq!(digest.book_scope().unwrap().raw(), i16::MAX);
         assert_eq!(digest.project_scope().unwrap().raw(), i16::MAX);
     }
@@ -514,10 +469,10 @@ mod tests {
     fn malformed_wire_values_fail_closed() {
         let record = finding(0, 0, 0, None, None, false);
         let mut unknown_code = record.encode();
-        unknown_code[10] = 1;
+        unknown_code[10] = 2;
         assert_eq!(
             PackedFinding::decode(&unknown_code, &[0]),
-            Err(CodecError::UnknownRuleCode(1))
+            Err(CodecError::UnknownRuleCode(2))
         );
 
         let mut unknown_flags = record.encode();

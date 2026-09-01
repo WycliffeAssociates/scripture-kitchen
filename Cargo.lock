@@ -454,6 +454,7 @@ dependencies = [
  "rayon",
  "sous-core",
  "usage-rs",
+ "usfm_galley",
  "usfm_onion",
 ]
 
@@ -461,6 +462,7 @@ dependencies = [
 name = "sous-core"
 version = "0.1.0"
 dependencies = [
+ "divan",
  "memchr",
  "rustc-hash",
 ]
