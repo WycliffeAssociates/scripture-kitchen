@@ -3,6 +3,9 @@ name = "sous-core"
 version.workspace = true
 edition.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 memchr.workspace = true
 rustc-hash.workspace = true

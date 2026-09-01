@@ -1,7 +1,9 @@
 # Galley analysis-host boundary
 
-Status: accepted direction; the Onion `Warmer` exists, while the composed
-Onion + Sous host described below is not implemented yet.
+Status: accepted direction; the Onion `Warmer` exists, and the coordinate
+pipeline below is implemented as stateless `galley::sous::publish_onion_findings`
+(fresh derivation per invocation, no retained cache). The resident composed
+host and its reuse laws are not implemented yet.
 
 This note records the lifecycle decisions that belong to Galley rather than
 either engine. Sous remains independent of Onion. Galley supplies their shared

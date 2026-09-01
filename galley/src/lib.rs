@@ -23,6 +23,7 @@
 pub use usfm_onion as onion;
 
 pub mod corpus;
+pub mod sous;
 pub mod warmer;
 pub use warmer::Warmer;
 

@@ -13,9 +13,10 @@ alone — with its own authority in `sous-chef/charter.md`, `rules.md`,
 everything in `planning/` and `GLOSSARY.md` is onion's only.
 
 `sous-core` does NOT depend on onion: it takes a neutral borrowed view of the
-analysis, and `sous-cli` is the adapter allowed to depend on both. Do not add
-an onion dependency to `sous-core` — see the ownership boundaries in the
-charter.
+analysis. `sous-cli` and `galley` are the adapters allowed to depend on both —
+the CLI for analysis input, galley (`galley::sous`) for coordinate rebasing
+and findings publication. Do not add an onion dependency to `sous-core` — see
+the ownership boundaries in the charter.
 
 `sous-chef/donor/` (gitignored, local only, like debug/) is the v1 spike's
 source, copied from `scripture-sous-chef-2` to read and port from by hand. It

@@ -543,6 +543,8 @@ dependencies = [
  "divan",
  "js-sys",
  "onion-wasm",
+ "rustc-hash",
+ "sous-core",
  "usfm_onion",
  "wasm-bindgen",
  "xxhash-rust",
@@ -555,6 +557,7 @@ dependencies = [
  "divan",
  "memchr",
  "rayon",
+ "rustc-hash",
  "serde_json",
  "similar",
 ]

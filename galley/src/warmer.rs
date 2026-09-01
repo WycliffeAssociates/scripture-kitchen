@@ -33,8 +33,9 @@
 //! INPUT CONTRACT: same as `onion::wire::parse` — checksums are only stable
 //! against LF-normalized text (CRLF works, but is a different content hash).
 
-use std::collections::HashMap;
 use std::rc::Rc;
+
+use rustc_hash::FxHashMap;
 
 use crate::onion;
 use onion::cst::{self, Cst};
@@ -110,7 +111,7 @@ const UNCACHED_CHUNKS: usize = 2;
 /// what makes this safe to keep across a session — wasm linear memory grows
 /// and never shrinks, so a high-water mark is permanent.
 pub struct Warmer {
-    map: HashMap<Key, Entry>,
+    map: FxHashMap<Key, Entry>,
     tick: u64,
     bytes: usize,
     budget: usize,
@@ -120,7 +121,7 @@ pub struct Warmer {
 impl Warmer {
     pub fn new(budget_bytes: usize) -> Self {
         Self {
-            map: HashMap::new(),
+            map: FxHashMap::default(),
             tick: 0,
             bytes: 0,
             budget: budget_bytes,

@@ -427,6 +427,10 @@ impl<'a> CorpusBook<'a> {
         self.count
     }
 
+    pub const fn is_empty(&self) -> bool {
+        self.count == 0
+    }
+
     pub fn at(&self, row: usize) -> Result<PackedFinding, CorpusWireError> {
         if row >= self.count {
             return Err(CorpusWireError::RowOutOfBounds {

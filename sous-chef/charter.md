@@ -347,10 +347,12 @@ separate lifecycle decision.
 The envelope declares the record coordinate space. Sous analysis emits
 projected-book UTF-8 ranges; Galley publishes raw-book UTF-16 ranges for JS by
 composing the producer locator with UTF-8-to-UTF-16 conversion before corpus
-encoding. Split-mask and astral cases must prove this composition. The policy
-for a projected range that maps to discontinuous raw spans must be explicit
-before the publisher lands; it may not silently pretend the projection is
-contiguous.
+encoding. Split-mask and astral cases prove this composition. A projected
+range that maps to discontinuous raw spans publishes the declared BOUNDING
+range — first retained raw byte through last — as its navigation span. This is
+the documented contract, not a silent contiguity pretense: `from`/`to` are
+navigation coordinates, one logical finding stays one row, and the exact
+retained run set remains reachable through the typed-detail path.
 
 This buffer is a hot, derived findings publication, not serialization of the
 resident `AnalysisSnapshot`. Chapter observations and rule inventories remain

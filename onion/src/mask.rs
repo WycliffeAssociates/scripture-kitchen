@@ -663,6 +663,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::reversed_empty_ranges)] // 33..8 IS the reversed input under test
     fn the_module_doc_example() {
         let source = "\\v 1 Jesus wept.\\f + \\ft why\\f* Then…";
         let m = built(source, &Filter::verse_text());

@@ -145,7 +145,7 @@ now executable contracts and keeps donor code from becoming an accidental API.
 | Onion projection | CLI adapter materializes verse text once, derives ranges through `Mask::project_source`, and locates with `Mask::to_source` plus `Toc::locate` | move only reusable conveniences into Onion when a second host needs them |
 | vref projection | semantic contract is settled; no production loader yet | implement after the Onion path pins duplicate and bridge fixtures |
 | nonletter substrate | `donor/src/probe3.rs` and `donor/src/rows.rs` are measured donors only | port consumer-led classifier bits after Stage 0 closes |
-| finding transport | checked v1 corpus envelope, caller-ordered `BookKey` directory, fixed `PackedFinding` sections, shared golden buffer, and generated lazy TypeScript reader are executable | Galley later maps projected UTF-8 through the producer projection to published UTF-16 and supplies the opaque snapshot identity |
+| finding transport | checked v1 corpus envelope, caller-ordered `BookKey` directory, fixed `PackedFinding` sections, shared golden buffers, and generated lazy TypeScript reader are executable; `galley::sous::publish_onion_findings` rebases projected UTF-8 through the Mask to raw-book UTF-16 (bounding spans over removed markup) and encodes the corpus buffer | Galley's canonical snapshot identity and checksum-keyed detached reuse remain Stage 2 lifecycle work |
 
 Do not begin classifier or rule ports merely because the input trait exists.
 The packed finding boundary remains the Stage 0 stop gate.
@@ -186,7 +186,8 @@ Work:
    raw-source to UTF-16 rebasing through each invocation's checksum-matched
    producer projection and detached UTF-16 index data.
    **The v1 envelope, Rust reader/writer, generated TypeScript reader, and
-   cross-language golden buffer landed; Galley rebasing remains later work.**
+   cross-language golden buffer landed; the Galley rebasing seam landed as
+   stateless `galley::sous::publish_onion_findings`.**
 6. Replace the placeholder CLI with a minimal `usage-rs` command declaration.
    It accepts one target file or directory, mirrors that shape for an optional
    source, constructs caller-ordered book tables, and prints provisional
@@ -201,7 +202,10 @@ Verification gate:
 - a finding spanning astral text remains projection-byte-correct, locates to
   its producer source, and publishes the correct UTF-16 range through an Onion
   adapter test; split-mask mapping behavior is explicit and tested rather than
-  treated as a contiguous identity map;
+  treated as a contiguous identity map. **Landed in
+  `galley::sous::publish_onion_findings` with astral/split-mask goldens proved
+  through both the Rust and generated TypeScript readers; a discontinuous
+  projection publishes the documented bounding navigation span;**
 - schema generation is deterministic and `git diff --exit-code` clean after a
   second run.
 

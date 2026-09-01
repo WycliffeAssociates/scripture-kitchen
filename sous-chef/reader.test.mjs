@@ -7,13 +7,17 @@ import {
   FindingsSnapshotError,
 } from "./reader.ts";
 
-function fixture() {
+function hexFixture(name) {
   return Uint8Array.from(
-    readFileSync(new URL("./testdata/corpus_v1.hex", import.meta.url), "utf8")
+    readFileSync(new URL(`./testdata/${name}`, import.meta.url), "utf8")
       .trim()
       .split(/\s+/)
       .map((value) => Number.parseInt(value, 16)),
   );
+}
+
+function fixture() {
+  return hexFixture("corpus_v1.hex");
 }
 
 function expectOpenFailure(bytes) {
@@ -45,6 +49,45 @@ test("opens the shared golden buffer and lazily decodes a typed row", () => {
   });
   assert.equal(snapshot.book(0).key, "MRK");
   assert.equal(snapshot.book("GEN"), undefined);
+});
+
+test("decodes the galley-published UTF-16 golden with rebased spans", () => {
+  // Produced by galley::sous::publish_onion_findings: caller order MRK before
+  // GEN, a split-mask bounding span, an astral span, and a plain ASCII span.
+  const snapshot = FindingsSnapshot.open(hexFixture("corpus_v1_utf16.hex"));
+  assert.equal(snapshot.coordinateSpace, "utf16");
+  assert.deepEqual([...snapshot.snapshotId], [...Array(16).keys()]);
+  assert.equal(snapshot.length, 2);
+
+  const mark = snapshot.book("MRK");
+  assert.equal(mark.index, 0, "caller order wins over canonical order");
+  assert.equal(mark.publishedLength, 92);
+  assert.equal(mark.count, 2);
+  assert.deepEqual(mark.at(0), {
+    kind: "LengthProportionality",
+    from: 21,
+    to: 50,
+    bookIdx: 0,
+    digest: { bookScope: 1.5, projectScope: -1.5, saturated: true },
+  });
+  assert.deepEqual(mark.at(1), {
+    kind: "LengthProportionality",
+    from: 88,
+    to: 91,
+    bookIdx: 0,
+    digest: { bookScope: null, projectScope: 0.5, saturated: false },
+  });
+
+  const genesis = snapshot.book("GEN");
+  assert.equal(genesis.index, 1);
+  assert.equal(genesis.publishedLength, 39);
+  assert.deepEqual(genesis.at(0), {
+    kind: "LengthProportionality",
+    from: 28,
+    to: 37,
+    bookIdx: 1,
+    digest: { bookScope: -0.25, projectScope: null, saturated: false },
+  });
 });
 
 test("accepts a view without copying its surrounding bytes", () => {

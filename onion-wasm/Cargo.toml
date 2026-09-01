@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2024"
 description = "The JS doorway over the USFM engine — piece 2 of the five-crate layout (bindgen, .d.ts, UTF-16 walls)."
 
+[lints]
+workspace = true
+
 [lib]
 name = "onion_wasm"
 # cdylib is what `wasm-pack build` links; rlib keeps `cargo test -p onion-wasm`

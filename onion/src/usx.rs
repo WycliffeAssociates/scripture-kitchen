@@ -92,7 +92,7 @@
 //! references are not legal XML 1.0 — but neither is the raw byte, and the
 //! alternative is silently deleting document content. Recorded, not repaired.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use crate::attributes::{AttrEvent, AttrResolution, attrs, resolve};
 use crate::cst::{CloseReason, Cst, NODE_ID_BIT, Node, ROOT_TOKEN, container_kind};
@@ -205,12 +205,12 @@ impl Xml {
 #[derive(Default)]
 struct Decor {
     /// Block node id → the `vid` attribute it carries.
-    vid: HashMap<u32, String>,
+    vid: FxHashMap<u32, String>,
     /// Block node id → the verse `eid` to write just before its closing tag.
-    eid_at_close: HashMap<u32, String>,
+    eid_at_close: FxHashMap<u32, String>,
     /// Token index (always a `\v` or `\c`) → the verse `eid` to write just
     /// before that marker's own element.
-    eid_before: HashMap<u32, String>,
+    eid_before: FxHashMap<u32, String>,
     /// A verse still open at the end of a document that has no block to close
     /// it in — the `eid` goes at the root, last.
     root_eid: Option<String>,

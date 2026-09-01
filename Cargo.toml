@@ -7,7 +7,9 @@
 #
 # sous-chef/ is a separate product sharing the workspace: `sous-core` (the
 # count substrate, no dependency on onion — it takes a neutral borrowed view)
-# and `sous-cli`, the adapter that may depend on both. See sous-chef/charter.md.
+# and `sous-cli`, the adapter that may depend on both. galley also depends on
+# sous-core: `galley::sous` is where the two engines meet for coordinate
+# rebasing and findings publication. See sous-chef/charter.md.
 # sous-chef/donor/ is NOT a crate — it is the v1 spike's source, kept to read
 # and port from by hand.
 members = [
@@ -30,6 +32,12 @@ memchr = "2.8.3"
 rayon = "1.12.0"
 rustc-hash = "2.1.3"
 usage = { package = "usage-rs", version = "6" }
+
+# std::collections::{HashMap,HashSet} default to SipHash, an adversarial-DoS
+# hash we never need: content keys go through xxhash3, everything else through
+# rustc-hash. Banned in clippy.toml; crates opt in with `[lints] workspace = true`.
+[workspace.lints.clippy]
+disallowed_types = "deny"
 
 # One CGU so two builds of the same source produce the same code: a bench that
 # wobbles on CGU partitioning measures the compiler. Thin LTO is what carries

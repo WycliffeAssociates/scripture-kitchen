@@ -33,7 +33,9 @@
 //! carried over intact; what changed is the boundary, from cloned token vectors
 //! to byte ranges of the caller's own two sources.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::BTreeMap;
+
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::ops::Range;
 
 use similar::{Algorithm, ChangeTag, TextDiff, capture_diff_slices};
@@ -136,8 +138,8 @@ fn blocks(len: u32, toc: &Toc) -> Vec<Block> {
     let mut cuts: Vec<Addr> = Vec::with_capacity(toc.verses.len() + toc.chapters.len());
     let mut offsets: Vec<u32> = Vec::with_capacity(cuts.capacity());
 
-    let mut chapter_occurrence: HashMap<u16, u16> = HashMap::new();
-    let mut verse_occurrence: HashMap<(u16, u16), u16> = HashMap::new();
+    let mut chapter_occurrence: FxHashMap<u16, u16> = FxHashMap::default();
+    let mut verse_occurrence: FxHashMap<(u16, u16), u16> = FxHashMap::default();
     let mut chapter = 0u16;
     let mut cdup = 0u16;
 
@@ -453,8 +455,8 @@ fn build_skeleton(baseline: Side<'_>, current: Side<'_>) -> DiffSkeleton {
     let current_addrs: Vec<Addr> = current.blocks.iter().map(|b| b.addr).collect();
 
     let pairs = myers_pairs(&baseline_addrs, &current_addrs);
-    let shared_baseline: HashSet<usize> = pairs.iter().map(|&(b, _)| b).collect();
-    let shared_current: HashSet<usize> = pairs.iter().map(|&(_, c)| c).collect();
+    let shared_baseline: FxHashSet<usize> = pairs.iter().map(|&(b, _)| b).collect();
+    let shared_current: FxHashSet<usize> = pairs.iter().map(|&(_, c)| c).collect();
 
     // Between LCS anchors: the baseline-only run, then the current-only run,
     // then the shared block — the supersequence order.
@@ -490,16 +492,16 @@ fn build_skeleton(baseline: Side<'_>, current: Side<'_>) -> DiffSkeleton {
         .collect();
 
     let ordered_pairs = coalesce(&baseline, &baseline_only, &current, &current_only);
-    let paired_baseline: HashSet<usize> = ordered_pairs.iter().map(|&(b, _)| b).collect();
-    let paired_current: HashSet<usize> = ordered_pairs.iter().map(|&(_, c)| c).collect();
+    let paired_baseline: FxHashSet<usize> = ordered_pairs.iter().map(|&(b, _)| b).collect();
+    let paired_current: FxHashSet<usize> = ordered_pairs.iter().map(|&(_, c)| c).collect();
 
     // dup_context counts EVERY block sharing a pairing key, shared and
     // off-Myers alike.
-    let mut baseline_key_count: HashMap<Key, u32> = HashMap::new();
+    let mut baseline_key_count: FxHashMap<Key, u32> = FxHashMap::default();
     for addr in &baseline_addrs {
         *baseline_key_count.entry(addr.key()).or_insert(0) += 1;
     }
-    let mut current_key_count: HashMap<Key, u32> = HashMap::new();
+    let mut current_key_count: FxHashMap<Key, u32> = FxHashMap::default();
     for addr in &current_addrs {
         *current_key_count.entry(addr.key()).or_insert(0) += 1;
     }
@@ -508,9 +510,9 @@ fn build_skeleton(baseline: Side<'_>, current: Side<'_>) -> DiffSkeleton {
     // coalesced (pairing order), deleted (baseline order), added (current
     // order) — it is what the `@N` id tiebreak and the fixtures both pin.
     let mut units: Vec<DecisionUnit> = Vec::new();
-    let mut unit_for_baseline: HashMap<usize, u32> = HashMap::new();
-    let mut unit_for_current: HashMap<usize, u32> = HashMap::new();
-    let mut taken_ids: HashSet<String> = HashSet::new();
+    let mut unit_for_baseline: FxHashMap<usize, u32> = FxHashMap::default();
+    let mut unit_for_current: FxHashMap<usize, u32> = FxHashMap::default();
+    let mut taken_ids: FxHashSet<String> = FxHashSet::default();
 
     let mut push = |units: &mut Vec<DecisionUnit>,
                     kind: UnitKind,
@@ -654,7 +656,7 @@ fn coalesce(
     current: &Side<'_>,
     current_only: &[usize],
 ) -> Vec<(usize, usize)> {
-    let mut by_key: HashMap<Key, Vec<usize>> = HashMap::new();
+    let mut by_key: FxHashMap<Key, Vec<usize>> = FxHashMap::default();
     let mut key_order: Vec<Key> = Vec::new();
     for &index in baseline_only {
         let key = baseline.blocks[index].addr.key();
@@ -663,7 +665,7 @@ fn coalesce(
         }
         by_key.get_mut(&key).expect("just inserted").push(index);
     }
-    let mut current_by_key: HashMap<Key, Vec<usize>> = HashMap::new();
+    let mut current_by_key: FxHashMap<Key, Vec<usize>> = FxHashMap::default();
     for &index in current_only {
         current_by_key
             .entry(current.blocks[index].addr.key())
@@ -675,7 +677,7 @@ fn coalesce(
     for key in &key_order {
         let bis = by_key.get(key).cloned().unwrap_or_default();
         let cis = current_by_key.get(key).cloned().unwrap_or_default();
-        let mut used: HashSet<usize> = HashSet::new();
+        let mut used: FxHashSet<usize> = FxHashSet::default();
         let mut left: Vec<usize> = Vec::new();
 
         for &b in &bis {
@@ -707,7 +709,7 @@ fn coalesce(
 /// blocks render the same address only when a designator was malformed (a
 /// `\v 2"` addresses as `BOOK c:0`, like the chapter open), so this is the
 /// degrade path, not a normal one.
-fn unique_id(taken: &mut HashSet<String>, want: String) -> String {
+fn unique_id(taken: &mut FxHashSet<String>, want: String) -> String {
     if taken.insert(want.clone()) {
         return want;
     }
@@ -724,8 +726,8 @@ fn unique_id(taken: &mut HashSet<String>, want: String) -> String {
 /// slot, or a Shared slot sits strictly between them. One-sided Added/Deleted
 /// slots between the two do not count.
 fn finalize_displacement(units: &mut [DecisionUnit], slots: &[Slot]) {
-    let mut baseline_slot: HashMap<u32, usize> = HashMap::new();
-    let mut current_slot: HashMap<u32, usize> = HashMap::new();
+    let mut baseline_slot: FxHashMap<u32, usize> = FxHashMap::default();
+    let mut current_slot: FxHashMap<u32, usize> = FxHashMap::default();
     for (index, slot) in slots.iter().enumerate() {
         match slot.role {
             SlotRole::PairBaseline => {
@@ -893,7 +895,7 @@ fn token_slice<'a>(tokens: &'a [Token], range: &Range<u32>) -> &'a [Token] {
 /// Rejects a decision naming no unit. Runs before ANY output is assembled: a
 /// stale id must never half-produce a document.
 fn check_decisions(skeleton: &DiffSkeleton, decisions: &Decisions) -> Result<(), MergeError> {
-    let known: HashSet<&str> = skeleton.units.iter().map(|unit| unit.id.as_str()).collect();
+    let known: FxHashSet<&str> = skeleton.units.iter().map(|unit| unit.id.as_str()).collect();
     match decisions.keys().find(|id| !known.contains(id.as_str())) {
         Some(id) => Err(MergeError::UnknownUnitId(id.clone())),
         None => Ok(()),

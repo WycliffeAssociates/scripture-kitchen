@@ -1,0 +1,6 @@
+# No adversarial input needs SipHash. Use rustc_hash::{FxHashMap, FxHashSet}
+# for short/internal keys, or an xxhash3-keyed map for content.
+disallowed-types = [
+    { path = "std::collections::HashMap", reason = "use rustc_hash::FxHashMap (or an xxhash3-keyed map for content) instead of SipHash" },
+    { path = "std::collections::HashSet", reason = "use rustc_hash::FxHashSet (or an xxhash3-keyed set for content) instead of SipHash" },
+]
