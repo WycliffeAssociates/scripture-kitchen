@@ -259,16 +259,17 @@ Recommended v1 record, 16 bytes, little-endian:
 | 0..4 | `from: u32` | projected-book UTF-8 start |
 | 4..8 | `to: u32` | projected-book UTF-8 end, exclusive |
 | 8..10 | `book_idx: u16` | index into the snapshot's ordered book table |
-| 10 | `code: u8` | explicit append-only rule discriminant |
-| 11 | `flags: u8` | severity, evidence presence, saturation, reserved bits |
-| 12..14 | `numerator: u16` | compact display digest |
-| 14..16 | `denominator: u16` | compact display digest |
+| 10 | `code: u8` | union tag; v1 code `0` is `LengthProportionality` |
+| 11 | `flags: u8` | representation flags; only `SATURATED` is currently valid |
+| 12..14 | code-specific `i16` lane | signed Q8.8 book-scope standardized deviation; `i16::MIN` means unavailable |
+| 14..16 | code-specific `i16` lane | signed Q8.8 project/corpus-scope standardized deviation; `i16::MIN` means unavailable |
 
 The 6-bit rule-id proposal does not save a byte in this layout and makes
 decoding and evolution harder, so the charter chooses an explicit `u8`.
 Each wire version has one dense table of active, hand-assigned codes. It has no
 reserved ranges and no retired entries. Removing or renumbering a code requires
 a new wire version rather than leaving tombstones in the current table.
+The initial v1 table contains exactly code `0`, `LengthProportionality`.
 
 `book_idx` is the caller's snapshot-local book-array index. Galley retains the
 exact immutable ordered projections used for analysis; each projection carries
@@ -278,17 +279,27 @@ projection. It is deliberately positional rather than a canonical `BookId`:
 the caller owns the addressing space, and a USFM file or a vref corpus may both
 provide the book. `u16` is ample without spending four bytes per finding.
 
-The two count lanes are a compact UI digest, not the analysis truth. They
-saturate at `u16::MAX` and set a flag; rich `u32` counts and rule-specific
-arguments remain available through a typed detail path. Rules whose useful
-digest is not a count pair define a code-specific interpretation or write
-zeroes. A schema table and generated consumer declarations are single-sourced
-from Rust.
+The semantic record is a discriminated union: `PackedFinding` carries
+`FindingKind::LengthProportionality(ProportionalityDigest)`, and the wire code
+and payload interpretation are derived from that kind. The two active payload
+lanes are signed Q8.8 standardized deviations for book and project/corpus
+scope. `i16::MIN` is the unavailable sentinel and cannot be constructed as a
+`QuantizedDeviation`; `SATURATED` is derived from the typed payload. These
+lanes are compact representations, not the analysis truth. A packed row cannot
+reconstruct rich rule evidence, counts, or arguments.
 
-The buffer has a small header with magic, format version, record length,
-record count, engine/schema stamp, corpus revision/context, and analysis
-identity. Per-book producer versions live with the matching book table, not in
-every finding.
+Later, an immutable snapshot row index plus an analysis identity will form an
+out-of-band `FindingHandle`. Galley/Sous can use that handle to request typed
+detail, after validating snapshot identity and currentness; stale detail is
+recomputed or refused. `from`, `to`, and `book_idx` are navigation coordinates,
+not a universal detail key. A schema table and generated consumer declarations
+remain deferred until the surrounding snapshot envelope is adopted.
+
+The 16-byte record is currently a headerless slice. A future snapshot envelope
+may add magic, format version, record length, record count, engine/schema
+stamp, corpus revision/context, and analysis identity; that header and its
+schema identity remain unresolved. Per-book producer versions live with the
+matching book table, not in every finding.
 Decoders fail closed on unknown versions, codes, flags, malformed spans, or
 length mismatch. Complete snapshots replace previous snapshots; receiver-side
 reconciliation preserves object identity where useful.

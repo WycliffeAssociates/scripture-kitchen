@@ -1,8 +1,8 @@
 //! The first walking consumer for Sous Chef.
 //!
 //! Output is deliberately a debug view while the finding contract is being
-//! frozen. The typed CLI declaration can grow with the executable instead of
-//! being replaced after the engine is usable.
+//! frozen. The CLI owns filesystem discovery and Onion adaptation; core owns
+//! corpus validation and target/source alignment.
 
 mod onion_book;
 
@@ -15,23 +15,31 @@ use std::{
 
 use onion_book::OnionBook;
 use rayon::prelude::*;
-use sous_core::{Corpus, ProjectedBook};
+use sous_core::{Alignment, Corpus, ProjectedBook, align};
 use usage::Cli;
 
-/// Inspect the projected scripture text Sous Chef will analyze.
+/// Inspect projected scripture text Sous Chef will analyze.
 #[derive(Cli)]
 #[usage(bin = "sous", version = "0.1.0")]
 struct Args {
-    /// Print aggregate input and wall-clock throughput after the debug walk.
+    /// Print aggregate input, alignment, and wall-clock throughput after the debug walk.
     #[usage(long)]
     stats: bool,
 
-    /// Print only aggregate statistics, suppressing the per-book debug walk.
+    /// Print only aggregate statistics, suppressing all book and alignment debug rows.
     #[usage(long)]
     stats_only: bool,
 
-    /// Directory whose immediate .sfm and .usfm files are projected and inspected.
-    directory: PathBuf,
+    /// Load books in parallel; the default loader is genuinely serial.
+    #[usage(long)]
+    parallel: bool,
+
+    /// Optional source file or directory to align against the target.
+    #[usage(long)]
+    source: Option<PathBuf>,
+
+    /// One .sfm/.usfm file or a directory of immediate .sfm/.usfm files.
+    target: PathBuf,
 }
 
 fn main() -> ExitCode {
@@ -46,47 +54,41 @@ fn main() -> ExitCode {
 
 fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     let started = Instant::now();
-    let paths = discover_paths(&args.directory)?;
-    let loaded: Vec<_> = paths
-        .par_iter()
-        .map(|path| {
-            let source = fs::read_to_string(path)
-                .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
-            let source_bytes = source.len();
-            let book = OnionBook::parse(&source)
-                .map_err(|error| format!("cannot parse {}: {error}", path.display()))?;
-            Ok((book, source_bytes))
-        })
-        .collect::<Result<_, String>>()
-        .map_err(std::io::Error::other)?;
-    let source_bytes = loaded.iter().map(|(_, bytes)| bytes).sum();
-    let books: Vec<_> = loaded.into_iter().map(|(book, _)| book).collect();
-    let corpus = Corpus::try_new(&books).map_err(|error| format!("invalid corpus: {error}"))?;
+    let target = load_input(&args.target, args.parallel)?;
+    let target_corpus = Corpus::try_new(&target.books)
+        .map_err(|error| format!("invalid target corpus: {error}"))?;
+    let source = args
+        .source
+        .as_deref()
+        .map(|path| load_input(path, args.parallel))
+        .transpose()?;
+    let source_corpus = source
+        .as_ref()
+        .map(|loaded| Corpus::try_new(&loaded.books))
+        .transpose()
+        .map_err(|error| format!("invalid source corpus: {error}"))?;
+    let alignment = source_corpus
+        .as_ref()
+        .map(|source| align(&target_corpus, source));
+    let stats = (args.stats || args.stats_only).then(|| {
+        OperationStats::collect(
+            args.parallel,
+            &target_corpus,
+            source_corpus.as_ref(),
+            alignment.as_ref(),
+            target.source_bytes,
+            source.as_ref().map(|loaded| loaded.source_bytes),
+            started,
+        )
+    });
 
     if !args.stats_only {
-        for (index, book) in corpus.iter() {
-            let path = &paths[index.get() as usize];
-            let chapters: Vec<_> = book.chapters().collect();
-            let verses: Vec<_> = book.verses().collect();
-            println!(
-                "book[{}] {} -> {} (projected bytes: {}, chapters: {}, verses: {})",
-                index.get(),
-                book.key(),
-                path.display(),
-                book.text().len(),
-                chapters.len(),
-                verses.len()
-            );
-            println!("  chapters: {chapters:#?}");
-            println!("  verses: {verses:#?}");
-            if let Some(first_verse) = verses.first()
-                && let Some(located) = book.locate(first_verse.text())
-            {
-                let first = located.first;
-                let last = located.last;
-                let source_spans: Vec<_> = located.spans.collect();
-                println!("  first verse source: {first:?}..{last:?} {source_spans:?}");
-            }
+        print_books("target", &target.paths, &target_corpus);
+        if let (Some(source), Some(source_corpus)) = (&source, source_corpus.as_ref()) {
+            print_books("source", &source.paths, source_corpus);
+        }
+        if let Some(alignment) = &alignment {
+            print_alignment(alignment);
         }
     }
     if let Some(stats) = stats {
@@ -95,20 +97,158 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// CLI instrumentation, not a benchmark contract. Timing ends before the
-/// potentially dominant debug printing so repeated runs describe ingestion.
+fn print_books(label: &str, paths: &[PathBuf], corpus: &Corpus<'_, OnionBook>) {
+    for (index, book) in corpus.iter() {
+        let path = &paths[index.get() as usize];
+        let chapters: Vec<_> = book.chapters().collect();
+        let verses: Vec<_> = book.verses().collect();
+        println!(
+            "{label} book[{}] {} -> {} (projected bytes: {}, chapters: {}, verses: {})",
+            index.get(),
+            book.key(),
+            path.display(),
+            book.text().len(),
+            chapters.len(),
+            verses.len()
+        );
+        println!("  chapters: {chapters:#?}");
+        println!("  verses: {verses:#?}");
+        if let Some(first_verse) = verses.first()
+            && let Some(located) = book.locate(first_verse.text())
+        {
+            let first = located.first;
+            let last = located.last;
+            let source_spans: Vec<_> = located.spans.collect();
+            println!("  first verse source: {first:?}..{last:?} {source_spans:?}");
+        }
+    }
+}
+
+fn print_alignment(alignment: &Alignment) {
+    for unit in alignment.units() {
+        println!(
+            "alignment {} {:?}: target {:?}, source {:?}",
+            unit.book(),
+            unit.key(),
+            unit.target().ranges(),
+            unit.source().ranges()
+        );
+    }
+    for fact in alignment.facts() {
+        println!("alignment fact: {fact:?}");
+    }
+}
+
+struct LoadedBooks {
+    paths: Vec<PathBuf>,
+    books: Vec<OnionBook>,
+    source_bytes: usize,
+}
+
+fn load_input(input: &Path, parallel: bool) -> Result<LoadedBooks, Box<dyn std::error::Error>> {
+    let paths = paths_for_input(input)?;
+    let loaded = if parallel {
+        paths
+            .par_iter()
+            .map(|path| load_book(path))
+            .collect::<Result<Vec<_>, _>>()
+    } else {
+        paths
+            .iter()
+            .map(|path| load_book(path))
+            .collect::<Result<Vec<_>, _>>()
+    }
+    .map_err(std::io::Error::other)?;
+    let source_bytes = loaded.iter().map(|(_, bytes)| *bytes).sum();
+    let books = loaded.into_iter().map(|(book, _)| book).collect();
+    Ok(LoadedBooks {
+        paths,
+        books,
+        source_bytes,
+    })
+}
+
+fn load_book(path: &Path) -> Result<(OnionBook, usize), String> {
+    let source = fs::read_to_string(path)
+        .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+    let source_bytes = source.len();
+    let book = OnionBook::parse(&source)
+        .map_err(|error| format!("cannot parse {}: {error}", path.display()))?;
+    Ok((book, source_bytes))
+}
+
+fn paths_for_input(input: &Path) -> Result<Vec<PathBuf>, Box<dyn std::error::Error>> {
+    let metadata = fs::metadata(input)
+        .map_err(|error| format!("cannot inspect {}: {error}", input.display()))?;
+    if metadata.is_file() {
+        if !supported_extension(input) {
+            return Err(format!(
+                "unsupported input file {}; expected .sfm or .usfm",
+                input.display()
+            )
+            .into());
+        }
+        return Ok(vec![input.to_path_buf()]);
+    }
+    if !metadata.is_dir() {
+        return Err(format!(
+            "{} is neither a regular file nor a directory",
+            input.display()
+        )
+        .into());
+    }
+
+    let mut paths = Vec::new();
+    for entry in fs::read_dir(input)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+        let path = entry.path();
+        if supported_extension(&path) {
+            paths.push(path);
+        }
+    }
+    paths.sort();
+    if paths.is_empty() {
+        return Err(format!(
+            "no .sfm or .usfm files found directly in {}",
+            input.display()
+        )
+        .into());
+    }
+    Ok(paths)
+}
+
+fn supported_extension(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            extension.eq_ignore_ascii_case("sfm") || extension.eq_ignore_ascii_case("usfm")
+        })
+}
+
+/// CLI instrumentation, not a benchmark contract. Timing ends before debug printing.
 struct OperationStats {
+    parallel: bool,
+    target: CorpusStats,
+    source: Option<CorpusStats>,
+    aligned_units: usize,
+    alignment_facts: usize,
+    elapsed: Duration,
+}
+
+struct CorpusStats {
     files: usize,
     source_bytes: usize,
     projected_bytes: usize,
     chapters: usize,
     verses: usize,
     unkeyed_anchors: usize,
-    elapsed: Duration,
 }
 
-impl OperationStats {
-    fn collect(corpus: &Corpus<'_, OnionBook>, source_bytes: usize, started: Instant) -> Self {
+impl CorpusStats {
+    fn collect(corpus: &Corpus<'_, OnionBook>, source_bytes: usize) -> Self {
         let mut projected_bytes = 0;
         let mut chapters = 0;
         let mut verses = 0;
@@ -126,6 +266,28 @@ impl OperationStats {
             chapters,
             verses,
             unkeyed_anchors,
+        }
+    }
+}
+
+impl OperationStats {
+    fn collect(
+        parallel: bool,
+        target: &Corpus<'_, OnionBook>,
+        source: Option<&Corpus<'_, OnionBook>>,
+        alignment: Option<&Alignment>,
+        target_source_bytes: usize,
+        source_source_bytes: Option<usize>,
+        started: Instant,
+    ) -> Self {
+        Self {
+            parallel,
+            target: CorpusStats::collect(target, target_source_bytes),
+            source: source.map(|corpus| {
+                CorpusStats::collect(corpus, source_source_bytes.unwrap_or_default())
+            }),
+            aligned_units: alignment.map_or(0, |alignment| alignment.units().len()),
+            alignment_facts: alignment.map_or(0, |alignment| alignment.facts().len()),
             elapsed: started.elapsed(),
         }
     }
@@ -135,52 +297,37 @@ impl OperationStats {
         if seconds == 0.0 {
             return 0.0;
         }
-        self.source_bytes as f64 / (1024.0 * 1024.0) / seconds
+        let bytes =
+            self.target.source_bytes + self.source.as_ref().map_or(0, |source| source.source_bytes);
+        bytes as f64 / (1024.0 * 1024.0) / seconds
     }
 
     fn print(&self) {
+        let mode = if self.parallel { "parallel" } else { "serial" };
         eprintln!(
-            "stats: files={} source_bytes={} projected_bytes={} chapters={} verses={} unkeyed_anchors={} elapsed_ms={:.3} throughput_mib_s={:.2}",
-            self.files,
-            self.source_bytes,
-            self.projected_bytes,
-            self.chapters,
-            self.verses,
-            self.unkeyed_anchors,
+            "stats: mode={mode} target_files={} target_source_bytes={} target_projected_bytes={} target_chapters={} target_verses={} target_unkeyed_anchors={} source_files={} source_source_bytes={} source_projected_bytes={} source_chapters={} source_verses={} source_unkeyed_anchors={} aligned_units={} alignment_facts={} elapsed_ms={:.3} throughput_mib_s={:.2}",
+            self.target.files,
+            self.target.source_bytes,
+            self.target.projected_bytes,
+            self.target.chapters,
+            self.target.verses,
+            self.target.unkeyed_anchors,
+            self.source.as_ref().map_or(0, |source| source.files),
+            self.source.as_ref().map_or(0, |source| source.source_bytes),
+            self.source
+                .as_ref()
+                .map_or(0, |source| source.projected_bytes),
+            self.source.as_ref().map_or(0, |source| source.chapters),
+            self.source.as_ref().map_or(0, |source| source.verses),
+            self.source
+                .as_ref()
+                .map_or(0, |source| source.unkeyed_anchors),
+            self.aligned_units,
+            self.alignment_facts,
             self.elapsed.as_secs_f64() * 1_000.0,
             self.throughput_mib_per_second(),
         );
     }
-}
-
-fn discover_paths(directory: &Path) -> Result<Vec<PathBuf>, Box<dyn std::error::Error>> {
-    if !directory.is_dir() {
-        return Err(format!("{} is not a directory", directory.display()).into());
-    }
-
-    let mut paths = Vec::new();
-    for entry in fs::read_dir(directory)? {
-        let entry = entry?;
-        if !entry.file_type()?.is_file() {
-            continue;
-        }
-        let path = entry.path();
-        let Some(extension) = path.extension().and_then(|extension| extension.to_str()) else {
-            continue;
-        };
-        if extension.eq_ignore_ascii_case("sfm") || extension.eq_ignore_ascii_case("usfm") {
-            paths.push(path);
-        }
-    }
-    paths.sort();
-    if paths.is_empty() {
-        return Err(format!(
-            "no .sfm or .usfm files found directly in {}",
-            directory.display()
-        )
-        .into());
-    }
-    Ok(paths)
 }
 
 #[cfg(test)]
@@ -190,6 +337,9 @@ mod tests {
         sync::atomic::{AtomicUsize, Ordering},
         time::{SystemTime, UNIX_EPOCH},
     };
+
+    const MRK: &str = "\\id MRK\n\\c 1\n\\p\n\\v 1 Mark.\n";
+    const GEN: &str = "\\id GEN\n\\c 1\n\\p\n\\v 1 Genesis.\n";
 
     struct TempDir(PathBuf);
 
@@ -214,15 +364,23 @@ mod tests {
     }
 
     #[test]
-    fn discovery_filters_immediate_usfm_extensions_and_sorts_paths() {
+    fn file_input_is_supported_and_case_insensitive() {
         let temp = TempDir::new();
-        fs::write(temp.0.join("b.USFM"), "").unwrap();
-        fs::write(temp.0.join("a.sfm"), "").unwrap();
+        let path = temp.0.join("book.USFM");
+        fs::write(&path, MRK).unwrap();
+        assert_eq!(paths_for_input(&path).unwrap(), vec![path]);
+    }
+
+    #[test]
+    fn directory_input_filters_immediate_files_and_sorts_paths() {
+        let temp = TempDir::new();
+        fs::write(temp.0.join("b.USFM"), MRK).unwrap();
+        fs::write(temp.0.join("a.sfm"), GEN).unwrap();
         fs::write(temp.0.join("ignore.txt"), "").unwrap();
         fs::create_dir(temp.0.join("nested.usfm")).unwrap();
-        fs::write(temp.0.join("nested.usfm").join("c.usfm"), "").unwrap();
+        fs::write(temp.0.join("nested.usfm").join("c.usfm"), MRK).unwrap();
 
-        let paths = discover_paths(&temp.0).unwrap();
+        let paths = paths_for_input(&temp.0).unwrap();
         let names: Vec<_> = paths
             .iter()
             .map(|path| path.file_name().unwrap().to_str().unwrap())
@@ -231,24 +389,84 @@ mod tests {
     }
 
     #[test]
-    fn discovery_rejects_non_directory_and_empty_directory() {
+    fn unsupported_file_and_empty_directory_fail_clearly() {
         let temp = TempDir::new();
-        assert!(discover_paths(&temp.0.join("missing")).is_err());
-        assert!(discover_paths(&temp.0).is_err());
+        let unsupported = temp.0.join("book.txt");
+        fs::write(&unsupported, MRK).unwrap();
+        assert!(paths_for_input(&unsupported).is_err());
+        assert!(paths_for_input(&temp.0).is_err());
     }
 
     #[test]
-    fn throughput_uses_raw_input_bytes_and_wall_time() {
-        let stats = OperationStats {
-            files: 1,
-            source_bytes: 1024 * 1024,
-            projected_bytes: 0,
-            chapters: 0,
-            verses: 0,
-            unkeyed_anchors: 0,
-            elapsed: Duration::from_secs(2),
-        };
+    fn serial_and_parallel_loading_preserve_order_and_semantics() {
+        let temp = TempDir::new();
+        fs::write(temp.0.join("b.usfm"), MRK).unwrap();
+        fs::write(temp.0.join("a.sfm"), GEN).unwrap();
+        let serial = load_input(&temp.0, false).unwrap();
+        let parallel = load_input(&temp.0, true).unwrap();
+        assert_eq!(serial.paths, parallel.paths);
+        let serial_corpus = Corpus::try_new(&serial.books).unwrap();
+        let parallel_corpus = Corpus::try_new(&parallel.books).unwrap();
+        let serial_keys: Vec<_> = serial_corpus.iter().map(|(_, book)| book.key()).collect();
+        let parallel_keys: Vec<_> = parallel_corpus.iter().map(|(_, book)| book.key()).collect();
+        assert_eq!(serial_keys, parallel_keys);
+    }
 
-        assert_eq!(stats.throughput_mib_per_second(), 0.5);
+    #[test]
+    fn file_file_alignment_uses_book_key_and_target_only_mode_has_no_source() {
+        let temp = TempDir::new();
+        let target_path = temp.0.join("target.usfm");
+        let source_path = temp.0.join("source.sfm");
+        fs::write(&target_path, MRK).unwrap();
+        fs::write(&source_path, MRK).unwrap();
+        let target = load_input(&target_path, false).unwrap();
+        let source = load_input(&source_path, false).unwrap();
+        let target_corpus = Corpus::try_new(&target.books).unwrap();
+        let source_corpus = Corpus::try_new(&source.books).unwrap();
+        let alignment = align(&target_corpus, &source_corpus);
+        assert_eq!(alignment.units().len(), 1);
+        assert!(alignment.facts().is_empty());
+        assert!(source_corpus.index_of(target.books[0].key()).is_some());
+    }
+
+    #[test]
+    fn independently_ordered_directories_align_by_book_key() {
+        let temp = TempDir::new();
+        let target_dir = temp.0.join("target");
+        let source_dir = temp.0.join("source");
+        fs::create_dir(&target_dir).unwrap();
+        fs::create_dir(&source_dir).unwrap();
+        fs::write(target_dir.join("a-MRK.usfm"), MRK).unwrap();
+        fs::write(target_dir.join("b-GEN.usfm"), GEN).unwrap();
+        fs::write(source_dir.join("a-GEN.usfm"), GEN).unwrap();
+        fs::write(source_dir.join("b-MRK.usfm"), MRK).unwrap();
+
+        let target = load_input(&target_dir, false).unwrap();
+        let source = load_input(&source_dir, true).unwrap();
+        let target_corpus = Corpus::try_new(&target.books).unwrap();
+        let source_corpus = Corpus::try_new(&source.books).unwrap();
+        let alignment = align(&target_corpus, &source_corpus);
+
+        let mut books: Vec<_> = alignment.units().iter().map(|unit| unit.book()).collect();
+        books.sort_by_key(|book| book.as_bytes());
+        assert_eq!(books, vec![target.books[1].key(), target.books[0].key()]);
+        assert!(alignment.facts().is_empty());
+    }
+
+    #[test]
+    fn mismatched_single_books_are_reported_as_alignment_facts() {
+        let temp = TempDir::new();
+        let target_path = temp.0.join("target.usfm");
+        let source_path = temp.0.join("source.usfm");
+        fs::write(&target_path, MRK).unwrap();
+        fs::write(&source_path, GEN).unwrap();
+        let target = load_input(&target_path, false).unwrap();
+        let source = load_input(&source_path, false).unwrap();
+        let target_corpus = Corpus::try_new(&target.books).unwrap();
+        let source_corpus = Corpus::try_new(&source.books).unwrap();
+        let alignment = align(&target_corpus, &source_corpus);
+
+        assert!(alignment.units().is_empty());
+        assert_eq!(alignment.facts().len(), 2);
     }
 }

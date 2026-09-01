@@ -21,16 +21,19 @@ Already present:
 - an Onion CLI adapter that composes the existing `Mask` and `Toc`, including
   projected chapter/verse ranges and reverse location to discontinuous raw
   source spans;
-- a typed `usage-rs` CLI that walks the immediate `.sfm`/`.usfm` files in one
-  directory, loads independent books in parallel, validates a caller-ordered
-  book table, and prints debug
-  projection rows without promising a stable output format; optional `--stats`
-  reports aggregate ingestion counts and wall-clock throughput, while
-  `--stats-only` suppresses the debug rows. Timing excludes debug printing and
-  does not stand in for production Divan benchmarks;
+- a typed `usage-rs` CLI that accepts one `.sfm`/`.usfm` file or walks the
+  immediate files in one directory, uses genuinely serial loading by default
+  with explicit `--parallel`, validates caller-ordered target/source book
+  tables, and prints provisional projection/alignment rows; optional `--stats`
+  reports target/source counts, alignment facts, and wall-clock throughput,
+  while `--stats-only` suppresses debug rows. Timing excludes debug printing
+  and does not stand in for production Divan benchmarks;
 - a producer-neutral aligned-unit table that pairs by `BookKey`, preserves
   duplicate occurrence order, reports structural alignment facts separately,
   and retains bridge constituents as multiple projected ranges;
+- a headerless, checked 16-byte `PackedFinding` record with one active typed
+  finding kind, signed Q8.8 payload lanes, and fail-closed code/flag/span
+  decoding; snapshot envelope and schema identity remain unresolved;
 - an explicitly disposable probes crate;
 - a manifest-and-fetch corpus lane with no Git LFS dependency;
 - measured prototypes for byte hygiene, streaming classification, the shared
@@ -74,7 +77,7 @@ contract. It never means copy a module wholesale by default.
 | Review Depth framework | **change** | Start with explicit per-band thresholds. Add a global master mapping only after the fixed bands and user vocabulary are proven. No per-project self-normalization. |
 | proportionality median/MAD | **migrate with gates** | Preserve paired-unit ratios, book plus project scopes, and asymmetric spread as the starting model. Rebuild against the v2 aligned-unit contract and reproduce the paired survey before accepting defaults. |
 | untranslated-word candidate | **evaluate later** | It is a separate source-compared observation, not an extension of proportionality. Port only after counterexamples and excusals are re-adjudicated. |
-| packed 16-byte finding snapshots | **migrate concept, change layout** | Keep versioned fixed records, append-only codes, generated consumers, fail-closed decode, and complete snapshots. Change from `key_idx + u16 verse offsets` to `u16 book_idx + projected-book u32 from/to`; retain the producer projection to locate source positions, and keep count lanes as saturating display digests. |
+| packed 16-byte finding snapshots | **migrate concept, change layout** | Keep versioned fixed records, append-only codes, generated consumers, fail-closed decode, and complete snapshots. Change from `key_idx + u16 verse offsets` to `u16 book_idx + projected-book u32 from/to`; retain the producer projection to locate source positions, and use a typed rule-kind union with signed Q8.8 display digests. |
 | lazy rich finding args | **keep as a capability** | The compact record is not the full truth. Final host spelling waits until Galley is designed. |
 | content-derived analysis IDs | **evaluate during Galley** | Useful for cache validation, but not required to prove core rules or the first codec. Do not make persistence part of core. |
 | resident Galley state machine | **audit, then redesign** | Keep one stateful owner over a pure core and complete-snapshot semantics. Port only calls an actual host needs; do not preserve the v1 API for compatibility. |
@@ -105,8 +108,9 @@ contract. It never means copy a module wholesale by default.
   without a measured promotion gate.
 - Fixed-width serializable findings are designed before rule implementation.
 - Rule discriminants use explicit `u8`, not a packed 6-bit field.
-- `u16` numerator/denominator lanes saturate and are display digests; raw
-  evidence remains wider.
+- Active proportionality lanes are signed Q8.8 display digests with an
+  unavailable `i16::MIN` sentinel; saturation metadata is explicit, while rich
+  evidence remains out of band.
 - Corpora stay outside git and are pinned through a small manifest.
 - `sous-core` stays independent of Onion. The CLI initially depends on both and
   adapts Onion's projection into Sous's neutral borrowed input; extract a shared
@@ -139,7 +143,7 @@ now executable contracts and keeps donor code from becoming an accidental API.
 | Onion projection | CLI adapter materializes verse text once, derives ranges through `Mask::project_source`, and locates with `Mask::to_source` plus `Toc::locate` | move only reusable conveniences into Onion when a second host needs them |
 | vref projection | semantic contract is settled; no production loader yet | implement after the Onion path pins duplicate and bridge fixtures |
 | nonletter substrate | `donor/src/probe3.rs` and `donor/src/rows.rs` are measured donors only | port consumer-led classifier bits after Stage 0 closes |
-| finding transport | 16-byte layout and `BookIndex` book-table semantics are chartered; the neutral corpus seam is executable, but transport is not coded | next independent Stage 0 slice: codec, header, golden vectors, rejection tests |
+| finding transport | headerless checked `PackedFinding` record is executable with explicit little-endian encoding, one active typed `FindingKind`, Q8.8 missing/saturation semantics, and context validation | design the separate snapshot header/schema identity and out-of-band typed-detail handle; retain the record as the payload |
 
 Do not begin classifier or rule ports merely because the input trait exists.
 The packed finding boundary remains the Stage 0 stop gate.
@@ -160,28 +164,30 @@ Work:
    target/source pair, including duplicate keys, occurrence ordinals, empty
    units, absent units, bridge coalescing, chapter seams, and incompatible
    ordering. **Initial alignment table and structural-fact tests landed.**
-3. Define the 16-byte finding record and versioned header in a tiny codec
-   module. Keep rich `Finding` separate from `PackedFinding`.
+3. Define and implement the headerless 16-byte finding record in a tiny codec
+   module. Keep rich `Finding` separate from `PackedFinding`; make the wire
+   code a typed finding-kind union tag, with signed Q8.8 payload lanes and an
+   unavailable sentinel. Leave the snapshot header/schema identity and typed
+   detail handle unresolved. **Initial record codec and rejection/golden-vector
+   tests landed.**
 4. Hand-assign the dense active rule-code table for wire version 1. Reserve no
    ranges and keep no retired entries; removal or renumbering requires a new
    wire version. Do not pre-allocate a code for every idea-shelf rule.
-5. Define the immutable caller-ordered book-table contract used by `book_idx`,
-   with distinct stable `BookKey` identity and checked `BookIndex` navigation;
-   then generate Rust test vectors plus one language-neutral schema artifact; prove
-   encode/decode round trips and malformed-buffer rejection.
+   **The initial table contains only `LengthProportionality = 0`.**
+5. Design the separate snapshot header/schema identity around the landed
+   headerless record. Keep book-table context outside each record and defer
+   generated declarations until that envelope is adopted.
 6. Replace the placeholder CLI with a minimal `usage-rs` command declaration.
-   It accepts one directory, discovers immediate `.sfm`/`.usfm` files in
-   lexical order, constructs the immutable caller-ordered book table, and
-   prints only debug output until real findings exist. Keep all Onion
-   adaptation in the CLI, not `sous-core`. **Initial directory walking command
-   landed.**
+   It accepts one target file or directory, mirrors that shape for an optional
+   source, constructs caller-ordered book tables, and prints provisional
+   projection/alignment debug output. Keep all Onion adaptation in the CLI,
+   not `sous-core`. **Initial file/directory target/source command landed.**
 
 Verification gate:
 
-- layout size/alignment assertions and byte-exact golden vectors;
-- invalid book indices, reversed/out-of-bounds spans, bad
-  versions/codes/flags, count mismatch, saturation, and overflow all fail
-  explicitly;
+- exact 16-byte layout and byte-exact golden vectors;
+- invalid book indices, reversed/out-of-bounds spans, unknown codes/flags,
+  malformed lengths, and unavailable-sentinel misuse fail explicitly;
 - a finding spanning astral text remains projection-byte-correct, locates to
   its producer source, and projects to UTF-16 through an Onion adapter test;
 - schema generation is deterministic and `git diff --exit-code` clean after a
