@@ -33,7 +33,8 @@ Already present:
   and retains bridge constituents as multiple projected ranges;
 - a headerless, checked 16-byte `PackedFinding` record with one active typed
   finding kind, signed Q8.8 payload lanes, and fail-closed code/flag/span
-  decoding; snapshot envelope and schema identity remain unresolved;
+  decoding, now enclosed by a checked complete-corpus header/book directory
+  with a generated lazy TypeScript reader;
 - an explicitly disposable probes crate;
 - a manifest-and-fetch corpus lane with no Git LFS dependency;
 - measured prototypes for byte hygiene, streaming classification, the shared
@@ -77,7 +78,7 @@ contract. It never means copy a module wholesale by default.
 | Review Depth framework | **change** | Start with explicit per-band thresholds. Add a global master mapping only after the fixed bands and user vocabulary are proven. No per-project self-normalization. |
 | proportionality median/MAD | **migrate with gates** | Preserve paired-unit ratios, book plus project scopes, and asymmetric spread as the starting model. Rebuild against the v2 aligned-unit contract and reproduce the paired survey before accepting defaults. |
 | untranslated-word candidate | **evaluate later** | It is a separate source-compared observation, not an extension of proportionality. Port only after counterexamples and excusals are re-adjudicated. |
-| packed 16-byte finding snapshots | **migrate concept, change layout** | Keep versioned fixed records, append-only codes, generated consumers, fail-closed decode, and complete snapshots. Change from `key_idx + u16 verse offsets` to `u16 book_idx + projected-book u32 from/to`; retain the producer projection to locate source positions, and use a typed rule-kind union with signed Q8.8 display digests. |
+| packed 16-byte finding snapshots | **migrate concept, change layout** | Keep versioned fixed records, append-only codes, generated consumers, fail-closed decode, and complete snapshots. Change from `key_idx + u16 verse offsets` to `u16 book_idx + projected-book u32 from/to`; use the invocation's checksum-matched producer projection to locate source positions, and use a typed rule-kind union with signed Q8.8 display digests. |
 | lazy rich finding args | **keep as a capability** | The compact record is not the full truth. Final host spelling waits until Galley is designed. |
 | content-derived analysis IDs | **evaluate during Galley** | Useful for cache validation, but not required to prove core rules or the first codec. Do not make persistence part of core. |
 | resident Galley state machine | **audit, then redesign** | Keep one stateful owner over a pure core and complete-snapshot semantics. Port only calls an actual host needs; do not preserve the v1 API for compatibility. |
@@ -99,8 +100,9 @@ contract. It never means copy a module wholesale by default.
   immediate, extension-filtered, and lexically sorted only for deterministic
   debug assignment.
 - Core findings use an immutable book-table index plus projected UTF-8 byte
-  spans. The retained producer projection locates numeric verse designators,
-  raw source spans, and UTF-16 editor positions outside core.
+  spans. The invocation's matching producer projection locates numeric verse
+  designators and raw source spans; checksum-keyed UTF-16 index data maps
+  editor positions outside core without retaining the source string.
 - Book is the discourse unit; chapter is the independently mappable rebuild
   unit; ordered reduction stitches boundary state.
 - Counts are config-free; judgment is a cheap pure read over observations.
@@ -129,7 +131,7 @@ contract. It never means copy a module wholesale by default.
 Proportionality retains the current calibrated defaults: `z_long = 3.5`,
 `z_short = 3.5`, and `min_verses = 50`. The v2 paired survey verifies them; it
 is not an open redesign gate. Galley caches target/source chapter observations
-independently, so a source mutation never invalidates target-only work.
+independently, so a changed source input never invalidates target-only work.
 
 ## Opening implementation ledger
 
@@ -143,7 +145,7 @@ now executable contracts and keeps donor code from becoming an accidental API.
 | Onion projection | CLI adapter materializes verse text once, derives ranges through `Mask::project_source`, and locates with `Mask::to_source` plus `Toc::locate` | move only reusable conveniences into Onion when a second host needs them |
 | vref projection | semantic contract is settled; no production loader yet | implement after the Onion path pins duplicate and bridge fixtures |
 | nonletter substrate | `donor/src/probe3.rs` and `donor/src/rows.rs` are measured donors only | port consumer-led classifier bits after Stage 0 closes |
-| finding transport | headerless checked `PackedFinding` record is executable with explicit little-endian encoding, one active typed `FindingKind`, Q8.8 missing/saturation semantics, and context validation | design the separate snapshot header/schema identity and out-of-band typed-detail handle; retain the record as the payload |
+| finding transport | checked v1 corpus envelope, caller-ordered `BookKey` directory, fixed `PackedFinding` sections, shared golden buffer, and generated lazy TypeScript reader are executable | Galley later maps projected UTF-8 through the producer projection to published UTF-16 and supplies the opaque snapshot identity |
 
 Do not begin classifier or rule ports merely because the input trait exists.
 The packed finding boundary remains the Stage 0 stop gate.
@@ -174,9 +176,17 @@ Work:
    ranges and keep no retired entries; removal or renumbering requires a new
    wire version. Do not pre-allocate a code for every idea-shelf rule.
    **The initial table contains only `LengthProportionality = 0`.**
-5. Design the separate snapshot header/schema identity around the landed
-   headerless record. Keep book-table context outside each record and defer
-   generated declarations until that envelope is adopted.
+5. Implement one complete corpus findings publication around the landed
+   record: versioned header, ordered `BookKey` directory, per-book published
+   length/offset/count, aligned record sections, and a generated lazy
+   TypeScript `DataView` reader. Copy Onion's assembly law: reusable chapter
+   products feed a fresh complete publication. Keep the resident observations
+   and rule summaries out of this wire. The corpus publisher accepts
+   publication-ready book coordinates; Galley later owns projected-UTF-8 to
+   raw-source to UTF-16 rebasing through each invocation's checksum-matched
+   producer projection and detached UTF-16 index data.
+   **The v1 envelope, Rust reader/writer, generated TypeScript reader, and
+   cross-language golden buffer landed; Galley rebasing remains later work.**
 6. Replace the placeholder CLI with a minimal `usage-rs` command declaration.
    It accepts one target file or directory, mirrors that shape for an optional
    source, constructs caller-ordered book tables, and prints provisional
@@ -189,7 +199,9 @@ Verification gate:
 - invalid book indices, reversed/out-of-bounds spans, unknown codes/flags,
   malformed lengths, and unavailable-sentinel misuse fail explicitly;
 - a finding spanning astral text remains projection-byte-correct, locates to
-  its producer source, and projects to UTF-16 through an Onion adapter test;
+  its producer source, and publishes the correct UTF-16 range through an Onion
+  adapter test; split-mask mapping behavior is explicit and tested rather than
+  treated as a contiguous identity map;
 - schema generation is deterministic and `git diff --exit-code` clean after a
   second run.
 
@@ -242,18 +254,22 @@ Work:
 1. Define the pass contract with a chapter observation, schema stamp, minimal
    associated `Carry`, disposable aggregate, and consumers. `Carry = ()` for a
    pass with no seam behavior.
-2. Add the workspace's minimal Galley coordinator. It owns target text/TOCs,
-   optional source text/TOCs, config, and independently content-addressed
-   target/source chapter observations; the pure Sous map/reduce functions own
-   no resident cache.
+2. Add the workspace's minimal Galley coordinator. Each invocation owns its
+   complete target and optional source strings/TOCs only for that call. Galley
+   retains config and independently content-addressed target/source chapter
+   observations plus checksum-keyed detached projection and UTF-16 index data;
+   it does not retain a canonical rope or accept splices. The pure Sous
+   map/reduce functions own no resident cache.
 3. Implement ordered book reduction over independently mapped chapters. Keep
    only the smallest carry facts needed for nonletter adjacency, casing
    terminal state, and doubled-word state; do not create a generic monoid
    framework or retained book contribution layer.
-4. Implement target replacement/insertion/deletion and
-   `update_source_text`/source removal. A source mutation preserves target
-   observations, remaps only affected source chapters, and reruns cheap
-   pairing and source-rule reduction.
+4. Drive successive invocations with complete corpus snapshots containing
+   target/source replacement, insertion, deletion, and source removal. Reuse
+   coordinate data only for byte-identical raw-book checksums and observations
+   only for matching declared inputs. A changed source preserves eligible
+   target observations, remaps only changed source books/chapters, and reruns
+   cheap pairing and source-rule reduction.
 5. Mark-and-sweep unreachable chapter observations. Keep carry, paired ratios,
    and book/corpus aggregates derived on demand; add no rollup cache.
 
@@ -261,11 +277,14 @@ Verification gate:
 
 - cold analysis equals chapter-at-a-time rebuild after every chapter is
   replaced in sequence;
-- randomized edit/insert/delete operations equal a fresh rebuild after each
-  step;
+- randomized edit/insert/delete operations, submitted as complete new input
+  strings, equal a fresh rebuild after each step;
 - every raw edit refreshes the Onion projection; a markup-only edit whose
   projected pass inputs are unchanged reuses target observations while the
   new source map rebinds positions;
+- an unchanged raw-book checksum reuses detached projection/UTF-16 index data,
+  while all returned offsets still resolve against the exact string supplied
+  to that invocation;
 - identical chapter content reuses mapping but is counted at both positions;
 - seam contributions change only where an adjacent prefix/suffix changed;
 - serial and parallel chapter mapping reduce to byte-identical results in
@@ -348,9 +367,11 @@ Work:
    projection, exposing borrowed `chapters()` and `chapter.verses()` views.
    Keep that work in the Onion workspace. The Sous CLI adapter composes
    target/source Onion views without making `sous-core` depend on Onion.
-2. Store optional source text in Galley. `update_source_text` is its mutation
-   boundary; map target and source per-unit grapheme lengths independently,
-   then pair by exact key plus occurrence ordinal during analysis.
+2. Accept the complete optional source corpus on each applicable Galley
+   invocation. Retain only checksum-keyed derived source observations and
+   coordinate indexes between calls; map target and source per-unit grapheme
+   lengths independently, then pair by exact key plus occurrence ordinal
+   during analysis.
    Also accept an addressless `BOOK C:V<TAB>text` vref source loader in the CLI;
    only the target side must provide an addressable projected book. Preserve
    `<range>` placeholders so a concrete row followed by contiguous placeholders
@@ -423,8 +444,9 @@ and the transport contract are stable.
 Work:
 
 1. Harden the minimal Galley introduced in Stage 2 into the public resident
-   owner: update document/TOC, `update_source_text`, remove source, change
-   judging config, analyze, query sites/details, and manage suppressions.
+   derived-state owner: analyze complete target/optional-source inputs, change
+   judging config, query sites/details, and manage suppressions. Keep document
+   mutation and rope ownership outside Galley; expose no splice protocol.
 2. Preserve one invalidation policy and complete packed snapshots. Do not port
    v1 methods solely for compatibility.
 3. Decide whether content-derived analysis identity and persisted-snapshot

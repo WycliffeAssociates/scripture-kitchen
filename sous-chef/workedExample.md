@@ -207,6 +207,45 @@ If a future rule cannot reconstruct that selector from its span—for example, a
 
 This example also validates the discriminated payload decision: proportionality uses its lanes for signed deviations, while punctuation rarity can use the same physical lanes for `matching / eligible` counts. The full inventory remains typed retained state behind the rule.
 
+### Publication scope and coordinates
+
+The inventory and the finding rows have different reuse laws. Galley retains
+chapter observations, then performs an ordered whole-corpus reduction to
+derive current rule summaries and judgments. An edit in one chapter may change
+a denominator used to judge findings in another book, so the published result
+is one complete corpus findings snapshot rather than independently reusable
+book buffers.
+
+The buffer has a book directory, allowing the UI to seek without materializing
+the rest of the corpus:
+
+```ts
+const snapshot = FindingsSnapshot.open(buffer);
+const mark = snapshot.book("MRK");
+const first = mark.at(0);
+```
+
+Sous's analysis range is projected-book UTF-8. Before the invocation releases
+its owned input strings, Galley uses the matching producer projection to map it
+back to raw book coordinates, then converts those raw UTF-8 boundaries to
+UTF-16 for the JS/editor wire. A byte-identical book may reuse detached
+projection and UTF-16 index data keyed by its raw checksum; a borrow-bearing
+cursor is recreated against the current invocation's string. Thus the hot path
+is:
+
+```text
+chapter observations
+    -> whole-corpus reduction
+    -> projected UTF-8 findings
+    -> producer source-map rebasing
+    -> raw-book UTF-16 findings
+    -> complete corpus ArrayBuffer
+```
+
+The `ArrayBuffer` remains only the compact findings publication. The resident
+chapter observations and rule inventories are not serialized into it; detail,
+inventory, and site-search APIs query the matching live Galley snapshot.
+
 
 | Kind | Byte 11 | Bytes 12–13 | Bytes 14–15 | Lazy detail |
 |---|---|---|---|---|

@@ -11,6 +11,11 @@
 //! find, onion↔sous coordination — anything that might be considered
 //! stateful lives here and NEVER in the engines. The engines never see
 //! each other; galley is the only place they meet.
+//!
+//! The accepted ownership, cache, coordinate, and findings-publication model
+//! for the future composed Onion + Sous host is recorded in
+//! `galley/docs/analysis-host.md`. It is a design boundary, not a claim that
+//! the current Onion-only [`Warmer`] or WASM API already implements Sous.
 
 /// The whole engine, as a module: `galley::onion::lex`, `galley::onion::
 /// analyze` — nothing hidden, so a consumer never needs to reach around

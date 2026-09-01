@@ -10,6 +10,13 @@ use core::fmt;
 use crate::BookIndex;
 
 pub const RECORD_LEN: usize = 16;
+pub const RECORD_FROM_OFFSET: usize = 0;
+pub const RECORD_TO_OFFSET: usize = 4;
+pub const RECORD_BOOK_INDEX_OFFSET: usize = 8;
+pub const RECORD_CODE_OFFSET: usize = 10;
+pub const RECORD_FLAGS_OFFSET: usize = 11;
+pub const RECORD_BOOK_SCOPE_OFFSET: usize = 12;
+pub const RECORD_PROJECT_SCOPE_OFFSET: usize = 14;
 
 /// The only active v1 rule discriminant.
 #[repr(u8)]
@@ -167,15 +174,17 @@ impl PackedFinding {
     /// Writes exactly the v1 record fields in little-endian order.
     pub fn encode(self) -> [u8; RECORD_LEN] {
         let mut bytes = [0; RECORD_LEN];
-        bytes[0..4].copy_from_slice(&self.from.to_le_bytes());
-        bytes[4..8].copy_from_slice(&self.to.to_le_bytes());
-        bytes[8..10].copy_from_slice(&self.book_idx.get().to_le_bytes());
-        bytes[10] = self.code().into();
-        bytes[11] = self.flags().bits();
+        bytes[RECORD_FROM_OFFSET..RECORD_TO_OFFSET].copy_from_slice(&self.from.to_le_bytes());
+        bytes[RECORD_TO_OFFSET..RECORD_BOOK_INDEX_OFFSET].copy_from_slice(&self.to.to_le_bytes());
+        bytes[RECORD_BOOK_INDEX_OFFSET..RECORD_CODE_OFFSET]
+            .copy_from_slice(&self.book_idx.get().to_le_bytes());
+        bytes[RECORD_CODE_OFFSET] = self.code().into();
+        bytes[RECORD_FLAGS_OFFSET] = self.flags().bits();
         match self.kind {
             FindingKind::LengthProportionality(digest) => {
-                bytes[12..14].copy_from_slice(&raw_or_missing(digest.book_scope()).to_le_bytes());
-                bytes[14..16]
+                bytes[RECORD_BOOK_SCOPE_OFFSET..RECORD_PROJECT_SCOPE_OFFSET]
+                    .copy_from_slice(&raw_or_missing(digest.book_scope()).to_le_bytes());
+                bytes[RECORD_PROJECT_SCOPE_OFFSET..RECORD_LEN]
                     .copy_from_slice(&raw_or_missing(digest.project_scope()).to_le_bytes());
             }
         }
@@ -184,22 +193,48 @@ impl PackedFinding {
 
     /// Decodes one record and validates its span against the supplied book table.
     pub fn decode(bytes: &[u8], book_lengths: &[u32]) -> Result<Self, CodecError> {
+        let finding = Self::decode_wire(bytes)?;
+        validate_context(finding.from, finding.to, finding.book_idx, book_lengths)?;
+        Ok(finding)
+    }
+
+    /// Decodes the fixed fields without a book-table lookup. The corpus
+    /// envelope uses this after selecting the directory entry for the row.
+    pub(crate) fn decode_wire(bytes: &[u8]) -> Result<Self, CodecError> {
         if bytes.len() != RECORD_LEN {
             return Err(CodecError::InvalidLength {
                 actual: bytes.len(),
             });
         }
-        let from = u32::from_le_bytes(bytes[0..4].try_into().expect("record length checked"));
-        let to = u32::from_le_bytes(bytes[4..8].try_into().expect("record length checked"));
-        let book_idx_raw =
-            u16::from_le_bytes(bytes[8..10].try_into().expect("record length checked"));
+        let from = u32::from_le_bytes(
+            bytes[RECORD_FROM_OFFSET..RECORD_TO_OFFSET]
+                .try_into()
+                .expect("record length checked"),
+        );
+        let to = u32::from_le_bytes(
+            bytes[RECORD_TO_OFFSET..RECORD_BOOK_INDEX_OFFSET]
+                .try_into()
+                .expect("record length checked"),
+        );
+        let book_idx_raw = u16::from_le_bytes(
+            bytes[RECORD_BOOK_INDEX_OFFSET..RECORD_CODE_OFFSET]
+                .try_into()
+                .expect("record length checked"),
+        );
         let book_idx =
             BookIndex::new(usize::from(book_idx_raw)).expect("every u16 wire index fits BookIndex");
-        let code = RuleCode::try_from(bytes[10])?;
-        let flags = FindingFlags::from_bits(bytes[11])?;
-        let book_raw = i16::from_le_bytes(bytes[12..14].try_into().expect("record length checked"));
-        let project_raw =
-            i16::from_le_bytes(bytes[14..16].try_into().expect("record length checked"));
+        let code = RuleCode::try_from(bytes[RECORD_CODE_OFFSET])?;
+        let flags = FindingFlags::from_bits(bytes[RECORD_FLAGS_OFFSET])?;
+        let book_raw = i16::from_le_bytes(
+            bytes[RECORD_BOOK_SCOPE_OFFSET..RECORD_PROJECT_SCOPE_OFFSET]
+                .try_into()
+                .expect("record length checked"),
+        );
+        let project_raw = i16::from_le_bytes(
+            bytes[RECORD_PROJECT_SCOPE_OFFSET..RECORD_LEN]
+                .try_into()
+                .expect("record length checked"),
+        );
         let kind = match code {
             RuleCode::LengthProportionality => {
                 FindingKind::LengthProportionality(ProportionalityDigest::new(
@@ -209,7 +244,42 @@ impl PackedFinding {
                 ))
             }
         };
-        Self::new(from, to, book_idx, kind, book_lengths)
+        if from > to {
+            return Err(CodecError::ReversedSpan { from, to });
+        }
+        Ok(Self {
+            from,
+            to,
+            book_idx,
+            kind,
+        })
+    }
+
+    pub(crate) fn validate_for_book(
+        self,
+        expected: BookIndex,
+        book_len: u32,
+    ) -> Result<(), CodecError> {
+        if self.book_idx != expected {
+            return Err(CodecError::BookIndexMismatch {
+                expected: expected.get(),
+                actual: self.book_idx.get(),
+            });
+        }
+        if self.from > self.to {
+            return Err(CodecError::ReversedSpan {
+                from: self.from,
+                to: self.to,
+            });
+        }
+        if self.to > book_len {
+            return Err(CodecError::SpanOutOfBounds {
+                from: self.from,
+                to: self.to,
+                book_len,
+            });
+        }
+        Ok(())
     }
 }
 
@@ -279,6 +349,7 @@ pub enum CodecError {
     ReversedSpan { from: u32, to: u32 },
     InvalidBookIndex { index: u16 },
     SpanOutOfBounds { from: u32, to: u32, book_len: u32 },
+    BookIndexMismatch { expected: u16, actual: u16 },
 }
 
 impl fmt::Display for CodecError {
@@ -303,6 +374,12 @@ impl fmt::Display for CodecError {
                 write!(
                     f,
                     "finding span {from}..{to} exceeds selected book length {book_len}"
+                )
+            }
+            Self::BookIndexMismatch { expected, actual } => {
+                write!(
+                    f,
+                    "finding carries book index {actual}; expected {expected}"
                 )
             }
         }

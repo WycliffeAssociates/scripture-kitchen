@@ -5,12 +5,18 @@
 
 mod alignment;
 mod codec;
+mod corpus;
 mod input;
 
 pub use alignment::{AlignedSide, AlignedUnit, Alignment, AlignmentFact, align};
 pub use codec::{
     CodecError, FindingFlags, FindingKind, PackedFinding, ProportionalityDigest,
     QuantizedDeviation, RECORD_LEN, RuleCode,
+};
+pub use corpus::{
+    CoordinateSpace, CorpusBook, CorpusSnapshot, CorpusWireError, DIRECTORY_ENTRY_BYTES,
+    FLAG_UTF16, FORMAT_VERSION, HEADER_BYTES, MAGIC, PublicationBook, SnapshotId,
+    encode_to_corpus_buffer, generated_reader_ts,
 };
 pub use input::{
     BookIndex, BookKey, Chapter, Corpus, InputError, ProjectedBook, TextRange, Verse, VerseKey,

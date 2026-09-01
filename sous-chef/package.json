@@ -1,0 +1,8 @@
+{
+  "name": "sous-chef-wire-reader",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --experimental-strip-types --test reader.test.mjs"
+  }
+}

@@ -61,10 +61,14 @@ localization.
 ### Hosts own lifecycle and presentation
 
 CLI, WASM, and editor adapters provide I/O and presentation. The workspace's
-Galley is the resident coordinator: it holds the target corpus, optional source
-corpus, chapter-observation caches, judging config, and suppression workflow.
-It may execute independent maps in parallel, but it may not change reduction
-order or rule semantics.
+Galley is resident in its derived caches, judging config, and suppression
+workflow, not in the editor's canonical text. Each analysis invocation takes
+ownership of the complete target and optional source strings for its duration,
+and returns numbers and offsets relative to exactly those strings. It does not
+retain a second rope or accept splices between calls. This avoids a distributed
+mutation protocol whose revisions or coordinates could diverge from the
+editor. Galley may execute independent maps in parallel, but it may not change
+reduction order or rule semantics.
 
 ## Text, seam, and coordinate invariants
 
@@ -84,10 +88,12 @@ order or rule semantics.
 5. **Findings use projected book coordinates.** Core and wire findings name a
    book in the snapshot's immutable ordered book table, then carry half-open
    `u32` UTF-8 byte offsets into that book's analyzed text projection. The
-   retained producer projection maps those offsets back to its source: Onion
-   resolves raw-USFM/editor spans, while a vref projection resolves the source
-   line and numeric verse designator. Sous carries no scripture-key strings or
-   parallel coordinate systems in every finding.
+   invocation's matching producer projection maps those offsets back to its
+   source; its detached data may have been reused only after an exact raw-book
+   checksum match. Onion resolves raw-USFM/editor spans, while a vref
+   projection resolves the source line and numeric verse designator. Sous
+   carries no scripture-key strings or parallel coordinate systems in every
+   finding.
 6. **Findings never split a rendered grapheme.** The walk may use a proven
    fast atom rule; emitted span edges are checked against full grapheme
    boundaries.
@@ -107,6 +113,11 @@ order or rule semantics.
   is a pure function of one chapter's declared local inputs and schema stamp;
   all neighboring context is represented by the pass's explicit `Carry` and
   resolved during ordered reduction.
+- A raw-book checksum is the identity boundary for reusable coordinate data.
+  Galley may retain detached producer-map and UTF-16 index data for an
+  unchanged book, then bind it to the byte-identical string supplied by a later
+  invocation. Per-invocation borrow-bearing cursors are recreated; the source
+  string itself is not part of the resident cache.
 - Every raw-source edit rebuilds or updates the producer projection and source
   map. If a pass's projected chapter inputs are unchanged, Galley may reuse its
   Sous observation and resolve the same projected offsets through the new map.
@@ -190,9 +201,9 @@ file; it cannot recreate USFM whitespace or markup discarded during export.
 Structural `<range>` rows remain part of alignment. Onion and vref are equal
 producers of the Sous contract without claiming byte-identical projections.
 
-Galley retains target and optional source projections. `update_source_text`
-is the source mutation boundary; ordinary analysis does not receive the source
-again. Galley composes the two borrowed verse iterators into aligned pairs for
+Every applicable analysis invocation supplies the complete target and optional
+source strings. Galley owns them only while that invocation builds or rebinds
+their projections and composes the verse iterators into aligned pairs for
 Sous. A source may instead be an addressless vref stream such as
 `MRK 7:21<TAB>text`; source units need stable keys and content, but only the
 target must provide finding coordinates. The vref loader preserves structural
@@ -226,7 +237,7 @@ The semantic contract is:
 Proportionality caches target and source per-unit lengths independently, then
 pairs and reduces them in book and project order. Adding or removing a source
 does not throw away the target walk. Pairing, ratios, and median/MAD are cheap
-derived state recomputed after `update_source_text`.
+derived state recomputed from the current invocation after any corpus change.
 
 ## Rule and configuration invariants
 
@@ -256,8 +267,8 @@ Recommended v1 record, 16 bytes, little-endian:
 
 | bytes | field | contract |
 | --- | --- | --- |
-| 0..4 | `from: u32` | projected-book UTF-8 start |
-| 4..8 | `to: u32` | projected-book UTF-8 end, exclusive |
+| 0..4 | `from: u32` | start in the book coordinate space declared by the owning container |
+| 4..8 | `to: u32` | end in that coordinate space, exclusive |
 | 8..10 | `book_idx: u16` | index into the snapshot's ordered book table |
 | 10 | `code: u8` | union tag; v1 code `0` is `LengthProportionality` |
 | 11 | `flags: u8` | representation flags; only `SATURATED` is currently valid |
@@ -271,13 +282,20 @@ reserved ranges and no retired entries. Removing or renumbering a code requires
 a new wire version rather than leaving tombstones in the current table.
 The initial v1 table contains exactly code `0`, `LengthProportionality`.
 
-`book_idx` is the caller's snapshot-local book-array index. Galley retains the
-exact immutable ordered projections used for analysis; each projection carries
-its caller-owned navigation identity, chapter/verse rows, and source map.
-Selecting a finding resolves `book_idx`, then calls `locate(from..to)` on that
-projection. It is deliberately positional rather than a canonical `BookId`:
-the caller owns the addressing space, and a USFM file or a vref corpus may both
-provide the book. `u16` is ample without spending four bytes per finding.
+`book_idx` is the caller's snapshot-local book-array index. During one
+invocation, each exact input string travels with its ordered projection,
+caller-owned navigation identity, chapter/verse rows, and source map. Before
+publication, a Sous finding's range is projected-book UTF-8. Galley resolves
+`book_idx`, maps that range through the invocation's producer projection to the
+raw book, then converts the raw UTF-8 boundaries to the destination coordinate
+space. A checksum-validated detached map or UTF-16 index may satisfy that work;
+no borrowed slice or retained source string crosses the invocation boundary.
+The ordinary JS publication uses raw-book UTF-16, just as Onion's wire does.
+This mapping is deliberately outside `sous-core`: an Onion book uses its
+`Mask`, while another producer may supply a different locator.
+`book_idx` remains positional rather than a canonical `BookId`; the caller owns
+the addressing space, and a USFM file or a vref corpus may both provide the
+book. `u16` is ample without spending four bytes per finding.
 
 The semantic record is a discriminated union: `PackedFinding` carries
 `FindingKind::LengthProportionality(ProportionalityDigest)`, and the wire code
@@ -288,17 +306,61 @@ scope. `i16::MIN` is the unavailable sentinel and cannot be constructed as a
 lanes are compact representations, not the analysis truth. A packed row cannot
 reconstruct rich rule evidence, counts, or arguments.
 
-Later, an immutable snapshot row index plus an analysis identity will form an
-out-of-band `FindingHandle`. Galley/Sous can use that handle to request typed
-detail, after validating snapshot identity and currentness; stale detail is
-recomputed or refused. `from`, `to`, and `book_idx` are navigation coordinates,
-not a universal detail key. A schema table and generated consumer declarations
-remain deferred until the surrounding snapshot envelope is adopted.
+An immutable snapshot row index plus an analysis identity forms an out-of-band
+`FindingHandle`. Galley/Sous uses that handle to request typed detail, after
+validating snapshot identity and currentness; stale detail is recomputed or
+refused. `from`, `to`, and `book_idx` are navigation coordinates, not a
+universal detail key.
 
-The 16-byte record is currently a headerless slice. A future snapshot envelope
-may add magic, format version, record length, record count, engine/schema
-stamp, corpus revision/context, and analysis identity; that header and its
-schema identity remain unresolved. Per-book producer versions live with the
+### Complete corpus publication
+
+Chapter observations are the reusable cache. Book and project rule summaries,
+judgments, and packed findings are cheap products of an ordered whole-corpus
+reduction. A change in one chapter may alter a project denominator and thereby
+add, remove, or change findings in an otherwise untouched book, especially at
+small support counts. Publication therefore replaces one complete corpus
+findings snapshot; it does not promise independently reusable per-book finding
+buffers or finding patches.
+
+The corpus buffer follows Onion's assembly model one level higher: a versioned
+header and book directory precede aligned `PackedFinding` sections. Directory
+position is `BookIndex`; each entry carries `BookKey`, the published book
+length, section offset, and finding count. Consumers can seek directly by
+index or key and lazily decode only one book:
+
+```ts
+const snapshot = FindingsSnapshot.open(buffer);
+const mark = snapshot.book("MRK");
+mark.length;
+mark.at(0);
+```
+
+The landed v1 envelope has a 40-byte little-endian header: `SOUS` magic,
+format version, checked coordinate flags, book count, 16-byte record stride,
+total finding count, and an opaque 16-byte `SnapshotId`. Its caller-ordered
+directory uses one 16-byte row per book: three `BookKey` bytes plus a zero
+terminator, published length, absolute section offset, and finding count.
+Record sections follow contiguously with no incidental padding. The snapshot
+identity is carried now; Galley's canonical identity calculation remains a
+separate lifecycle decision.
+
+The envelope declares the record coordinate space. Sous analysis emits
+projected-book UTF-8 ranges; Galley publishes raw-book UTF-16 ranges for JS by
+composing the producer locator with UTF-8-to-UTF-16 conversion before corpus
+encoding. Split-mask and astral cases must prove this composition. The policy
+for a projected range that maps to discontinuous raw spans must be explicit
+before the publisher lands; it may not silently pretend the projection is
+contiguous.
+
+This buffer is a hot, derived findings publication, not serialization of the
+resident `AnalysisSnapshot`. Chapter observations and rule inventories remain
+inside Galley. Typed detail, rule-summary, inventory, and site-search calls may
+initially use ordinary serde responses; a separate packed form is justified
+only by measurement. A future disk cache may wrap the same publication, but
+persistence does not shape this first envelope.
+
+A Rust-owned schema generates the checked-in TypeScript `DataView` reader, and
+a freshness test rejects drift. Per-book producer versions live with the
 matching book table, not in every finding.
 Decoders fail closed on unknown versions, codes, flags, malformed spans, or
 length mismatch. Complete snapshots replace previous snapshots; receiver-side
