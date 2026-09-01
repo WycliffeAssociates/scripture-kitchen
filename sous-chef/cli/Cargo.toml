@@ -8,6 +8,7 @@ name = "sous"
 path = "src/main.rs"
 
 [dependencies]
+rayon.workspace = true
 sous-core = { path = "../core" }
 usfm_onion = { path = "../../onion", default-features = false }
 usage.workspace = true

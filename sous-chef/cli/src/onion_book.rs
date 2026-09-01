@@ -32,6 +32,14 @@ impl OnionBook {
         BookKey::new(self.toc.book)
     }
 
+    pub(crate) fn unkeyed_anchor_count(&self) -> usize {
+        self.toc
+            .verses
+            .iter()
+            .filter(|anchor| VerseKey::new(anchor.chapter, anchor.first, anchor.last).is_err())
+            .count()
+    }
+
     pub(crate) fn locate(&self, range: TextRange) -> Option<LocatedRange<'_>> {
         if range.is_empty() || range.to() > self.text.len() as u32 {
             return None;
@@ -209,6 +217,7 @@ mod tests {
         let book = OnionBook::parse(source).unwrap();
         let verses: Vec<_> = book.verses().collect();
 
+        assert_eq!(book.unkeyed_anchor_count(), 1);
         assert_eq!(
             verses.iter().map(|verse| verse.key()).collect::<Vec<_>>(),
             vec![

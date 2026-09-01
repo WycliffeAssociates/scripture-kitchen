@@ -22,8 +22,15 @@ Already present:
   projected chapter/verse ranges and reverse location to discontinuous raw
   source spans;
 - a typed `usage-rs` CLI that walks the immediate `.sfm`/`.usfm` files in one
-  directory, validates a caller-ordered book table, and prints debug
-  projection rows without promising a stable output format;
+  directory, loads independent books in parallel, validates a caller-ordered
+  book table, and prints debug
+  projection rows without promising a stable output format; optional `--stats`
+  reports aggregate ingestion counts and wall-clock throughput, while
+  `--stats-only` suppresses the debug rows. Timing excludes debug printing and
+  does not stand in for production Divan benchmarks;
+- a producer-neutral aligned-unit table that pairs by `BookKey`, preserves
+  duplicate occurrence order, reports structural alignment facts separately,
+  and retains bridge constituents as multiple projected ranges;
 - an explicitly disposable probes crate;
 - a manifest-and-fetch corpus lane with no Git LFS dependency;
 - measured prototypes for byte hygiene, streaming classification, the shared
@@ -128,15 +135,14 @@ now executable contracts and keeps donor code from becoming an accidental API.
 | capability | production owner and current shape | next work |
 | --- | --- | --- |
 | projected offsets | `sous-core::TextRange`, checked as half-open projected UTF-8 bytes | reuse in rich findings and the packed codec |
-| chapter/verse input | `ProjectedBook` yields `BookKey`, `Chapter`, and ordered `Verse { VerseKey, TextRange }` rows; `Corpus` validates the caller-ordered book table | add aligned-pair semantics after the input cut is reviewed |
+| chapter/verse input | `ProjectedBook` yields `BookKey`, `Chapter`, and ordered `Verse { VerseKey, TextRange }` rows; `Corpus` validates the caller-ordered book table | consume the aligned-unit/fact table from later source-comparison rules |
 | Onion projection | CLI adapter materializes verse text once, derives ranges through `Mask::project_source`, and locates with `Mask::to_source` plus `Toc::locate` | move only reusable conveniences into Onion when a second host needs them |
 | vref projection | semantic contract is settled; no production loader yet | implement after the Onion path pins duplicate and bridge fixtures |
 | nonletter substrate | `donor/src/probe3.rs` and `donor/src/rows.rs` are measured donors only | port consumer-led classifier bits after Stage 0 closes |
 | finding transport | 16-byte layout and `BookIndex` book-table semantics are chartered; the neutral corpus seam is executable, but transport is not coded | next independent Stage 0 slice: codec, header, golden vectors, rejection tests |
 
 Do not begin classifier or rule ports merely because the input trait exists.
-The packed finding boundary and aligned-unit fixtures remain the Stage 0 stop
-gate.
+The packed finding boundary remains the Stage 0 stop gate.
 
 ## Stage 0 — Freeze the foundation contracts
 
@@ -150,9 +156,10 @@ Work:
    consumed by `sous-core`. For Onion, compose existing mask spans and TOC
    anchors rather than defining duplicate stored rows. **Initial cut landed;
    raw file identity and document version remain host/Galley work.**
-2. Define the aligned-unit semantic tests using a tiny synthetic target/source
-   pair, including duplicate keys, occurrence ordinals, empty units, absent
-   units, malformed unkeyed anchors, chapter seams, and incompatible ordering.
+2. Define and implement the aligned-unit table using a tiny synthetic
+   target/source pair, including duplicate keys, occurrence ordinals, empty
+   units, absent units, bridge coalescing, chapter seams, and incompatible
+   ordering. **Initial alignment table and structural-fact tests landed.**
 3. Define the 16-byte finding record and versioned header in a tiny codec
    module. Keep rich `Finding` separate from `PackedFinding`.
 4. Hand-assign the dense active rule-code table for wire version 1. Reserve no

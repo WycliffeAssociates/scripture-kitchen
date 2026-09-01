@@ -156,6 +156,11 @@ position in this caller-provided array. Book order may therefore vary between
 inputs without changing keyed semantics, while chapter and verse order within
 each book remains significant. No carry crosses a book boundary.
 
+The core alignment operation returns paired `AlignedUnit` rows separately
+from `AlignmentFact` rows. Missing keys, duplicate ambiguity, and partial
+range overlap remain structural facts for the host or rule to interpret; they
+do not become findings or cause a shorter duplicate prefix to pair silently.
+
 `TextRange`, `Chapter`, `VerseKey`, and `Verse` make projected byte units and
 bridge identity explicit. Duplicate verse keys remain duplicate rows in
 producer order; pairing derives occurrence ordinals later instead of storing

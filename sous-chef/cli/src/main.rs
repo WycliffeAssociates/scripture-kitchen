@@ -10,9 +10,11 @@ use std::{
     fs,
     path::{Path, PathBuf},
     process::ExitCode,
+    time::{Duration, Instant},
 };
 
 use onion_book::OnionBook;
+use rayon::prelude::*;
 use sous_core::{Corpus, ProjectedBook};
 use usage::Cli;
 
@@ -20,6 +22,14 @@ use usage::Cli;
 #[derive(Cli)]
 #[usage(bin = "sous", version = "0.1.0")]
 struct Args {
+    /// Print aggregate input and wall-clock throughput after the debug walk.
+    #[usage(long)]
+    stats: bool,
+
+    /// Print only aggregate statistics, suppressing the per-book debug walk.
+    #[usage(long)]
+    stats_only: bool,
+
     /// Directory whose immediate .sfm and .usfm files are projected and inspected.
     directory: PathBuf,
 }
@@ -35,44 +45,112 @@ fn main() -> ExitCode {
 }
 
 fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
+    let started = Instant::now();
     let paths = discover_paths(&args.directory)?;
-    let books: Vec<_> = paths
-        .iter()
+    let loaded: Vec<_> = paths
+        .par_iter()
         .map(|path| {
             let source = fs::read_to_string(path)
                 .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
-            OnionBook::parse(&source)
-                .map_err(|error| format!("cannot parse {}: {error}", path.display()))
+            let source_bytes = source.len();
+            let book = OnionBook::parse(&source)
+                .map_err(|error| format!("cannot parse {}: {error}", path.display()))?;
+            Ok((book, source_bytes))
         })
         .collect::<Result<_, String>>()
         .map_err(std::io::Error::other)?;
+    let source_bytes = loaded.iter().map(|(_, bytes)| bytes).sum();
+    let books: Vec<_> = loaded.into_iter().map(|(book, _)| book).collect();
     let corpus = Corpus::try_new(&books).map_err(|error| format!("invalid corpus: {error}"))?;
 
-    for (index, book) in corpus.iter() {
-        let path = &paths[index.get() as usize];
-        let chapters: Vec<_> = book.chapters().collect();
-        let verses: Vec<_> = book.verses().collect();
-        println!(
-            "book[{}] {} -> {} (projected bytes: {}, chapters: {}, verses: {})",
-            index.get(),
-            book.key(),
-            path.display(),
-            book.text().len(),
-            chapters.len(),
-            verses.len()
-        );
-        println!("  chapters: {chapters:#?}");
-        println!("  verses: {verses:#?}");
-        if let Some(first_verse) = verses.first()
-            && let Some(located) = book.locate(first_verse.text())
-        {
-            let first = located.first;
-            let last = located.last;
-            let source_spans: Vec<_> = located.spans.collect();
-            println!("  first verse source: {first:?}..{last:?} {source_spans:?}");
+    if !args.stats_only {
+        for (index, book) in corpus.iter() {
+            let path = &paths[index.get() as usize];
+            let chapters: Vec<_> = book.chapters().collect();
+            let verses: Vec<_> = book.verses().collect();
+            println!(
+                "book[{}] {} -> {} (projected bytes: {}, chapters: {}, verses: {})",
+                index.get(),
+                book.key(),
+                path.display(),
+                book.text().len(),
+                chapters.len(),
+                verses.len()
+            );
+            println!("  chapters: {chapters:#?}");
+            println!("  verses: {verses:#?}");
+            if let Some(first_verse) = verses.first()
+                && let Some(located) = book.locate(first_verse.text())
+            {
+                let first = located.first;
+                let last = located.last;
+                let source_spans: Vec<_> = located.spans.collect();
+                println!("  first verse source: {first:?}..{last:?} {source_spans:?}");
+            }
         }
     }
+    if let Some(stats) = stats {
+        stats.print();
+    }
     Ok(())
+}
+
+/// CLI instrumentation, not a benchmark contract. Timing ends before the
+/// potentially dominant debug printing so repeated runs describe ingestion.
+struct OperationStats {
+    files: usize,
+    source_bytes: usize,
+    projected_bytes: usize,
+    chapters: usize,
+    verses: usize,
+    unkeyed_anchors: usize,
+    elapsed: Duration,
+}
+
+impl OperationStats {
+    fn collect(corpus: &Corpus<'_, OnionBook>, source_bytes: usize, started: Instant) -> Self {
+        let mut projected_bytes = 0;
+        let mut chapters = 0;
+        let mut verses = 0;
+        let mut unkeyed_anchors = 0;
+        for (_, book) in corpus.iter() {
+            projected_bytes += book.text().len();
+            chapters += book.chapters().count();
+            verses += book.verses().count();
+            unkeyed_anchors += book.unkeyed_anchor_count();
+        }
+        Self {
+            files: corpus.len(),
+            source_bytes,
+            projected_bytes,
+            chapters,
+            verses,
+            unkeyed_anchors,
+            elapsed: started.elapsed(),
+        }
+    }
+
+    fn throughput_mib_per_second(&self) -> f64 {
+        let seconds = self.elapsed.as_secs_f64();
+        if seconds == 0.0 {
+            return 0.0;
+        }
+        self.source_bytes as f64 / (1024.0 * 1024.0) / seconds
+    }
+
+    fn print(&self) {
+        eprintln!(
+            "stats: files={} source_bytes={} projected_bytes={} chapters={} verses={} unkeyed_anchors={} elapsed_ms={:.3} throughput_mib_s={:.2}",
+            self.files,
+            self.source_bytes,
+            self.projected_bytes,
+            self.chapters,
+            self.verses,
+            self.unkeyed_anchors,
+            self.elapsed.as_secs_f64() * 1_000.0,
+            self.throughput_mib_per_second(),
+        );
+    }
 }
 
 fn discover_paths(directory: &Path) -> Result<Vec<PathBuf>, Box<dyn std::error::Error>> {
@@ -157,5 +235,20 @@ mod tests {
         let temp = TempDir::new();
         assert!(discover_paths(&temp.0.join("missing")).is_err());
         assert!(discover_paths(&temp.0).is_err());
+    }
+
+    #[test]
+    fn throughput_uses_raw_input_bytes_and_wall_time() {
+        let stats = OperationStats {
+            files: 1,
+            source_bytes: 1024 * 1024,
+            projected_bytes: 0,
+            chapters: 0,
+            verses: 0,
+            unkeyed_anchors: 0,
+            elapsed: Duration::from_secs(2),
+        };
+
+        assert_eq!(stats.throughput_mib_per_second(), 0.5);
     }
 }
