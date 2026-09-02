@@ -44,14 +44,20 @@ fn main() -> std::io::Result<()> {
 
 /// One `lo..hi ; Property` line, with the trailing `# comment` dropped.
 fn for_each_range(path: &Path, mut visit: impl FnMut(&str, u32, u32)) {
-    let text = std::fs::read_to_string(path)
-        .unwrap_or_else(|error| panic!("pinned UCD extract {} must be present: {error}", path.display()));
+    let text = std::fs::read_to_string(path).unwrap_or_else(|error| {
+        panic!(
+            "pinned UCD extract {} must be present: {error}",
+            path.display()
+        )
+    });
     for line in text.lines() {
         let body = line.split('#').next().unwrap_or("").trim();
         if body.is_empty() {
             continue;
         }
-        let (range, rest) = body.split_once(';').expect("a UCD data line has a property");
+        let (range, rest) = body
+            .split_once(';')
+            .expect("a UCD data line has a property");
         // `InCB; Linker` is two fields; join them so callers name the whole
         // property path.
         let property = rest
@@ -81,43 +87,52 @@ fn classify(ucd: &Path) -> Vec<u16> {
         }
     };
 
-    for_each_range(&ucd.join("DerivedGeneralCategory.txt"), |property, lo, hi| {
-        let bit = match property {
-            "Mn" | "Mc" | "Me" => bits::MARK,
-            "Pc" | "Pd" | "Ps" | "Pe" | "Pi" | "Pf" | "Po" => bits::PUNCTUATION,
-            "Sm" | "Sc" | "Sk" | "So" => bits::SYMBOL,
-            "Nd" => bits::DECIMAL_DIGIT,
-            "Cc" => bits::CONTROL,
-            "Cf" => bits::FORMAT,
-            _ => return,
-        };
-        set(lo, hi, bit, &mut class);
-    });
-    for_each_range(&ucd.join("DerivedCoreProperties.txt"), |property, lo, hi| {
-        let bit = match property {
-            "Alphabetic" => bits::ALPHABETIC,
-            "Uppercase" => bits::UPPERCASE,
-            "Lowercase" => bits::LOWERCASE,
-            "InCB; Linker" => bits::LINKER,
-            _ => return,
-        };
-        set(lo, hi, bit, &mut class);
-    });
+    for_each_range(
+        &ucd.join("DerivedGeneralCategory.txt"),
+        |property, lo, hi| {
+            let bit = match property {
+                "Mn" | "Mc" | "Me" => bits::MARK,
+                "Pc" | "Pd" | "Ps" | "Pe" | "Pi" | "Pf" | "Po" => bits::PUNCTUATION,
+                "Sm" | "Sc" | "Sk" | "So" => bits::SYMBOL,
+                "Nd" => bits::DECIMAL_DIGIT,
+                "Cc" => bits::CONTROL,
+                "Cf" => bits::FORMAT,
+                _ => return,
+            };
+            set(lo, hi, bit, &mut class);
+        },
+    );
+    for_each_range(
+        &ucd.join("DerivedCoreProperties.txt"),
+        |property, lo, hi| {
+            let bit = match property {
+                "Alphabetic" => bits::ALPHABETIC,
+                "Uppercase" => bits::UPPERCASE,
+                "Lowercase" => bits::LOWERCASE,
+                "InCB; Linker" => bits::LINKER,
+                _ => return,
+            };
+            set(lo, hi, bit, &mut class);
+        },
+    );
     for_each_range(&ucd.join("PropList.txt"), |property, lo, hi| {
         if property == "White_Space" {
             set(lo, hi, bits::WHITESPACE, &mut class);
         }
     });
-    for_each_range(&ucd.join("GraphemeBreakProperty.txt"), |property, lo, hi| {
-        let bit = match property {
-            "Extend" | "SpacingMark" | "ZWJ" => bits::EXTENDER,
-            "Control" | "CR" | "LF" => bits::COMPLEX | bits::GCB_CONTROL,
-            "Prepend" => bits::COMPLEX | bits::PREPEND,
-            "Regional_Indicator" | "L" | "V" | "T" | "LV" | "LVT" => bits::COMPLEX,
-            _ => return,
-        };
-        set(lo, hi, bit, &mut class);
-    });
+    for_each_range(
+        &ucd.join("GraphemeBreakProperty.txt"),
+        |property, lo, hi| {
+            let bit = match property {
+                "Extend" | "SpacingMark" | "ZWJ" => bits::EXTENDER,
+                "Control" | "CR" | "LF" => bits::COMPLEX | bits::GCB_CONTROL,
+                "Prepend" => bits::COMPLEX | bits::PREPEND,
+                "Regional_Indicator" | "L" | "V" | "T" | "LV" | "LVT" => bits::COMPLEX,
+                _ => return,
+            };
+            set(lo, hi, bit, &mut class);
+        },
+    );
     for_each_range(&ucd.join("emoji-data.txt"), |property, lo, hi| {
         if property == "Extended_Pictographic" {
             set(lo, hi, bits::COMPLEX, &mut class);
@@ -162,6 +177,7 @@ fn render(class: &[u16]) -> String {
          //! {ranges} nonzero ranges, {blocks} deduplicated {BLOCK}-scalar blocks.\n\
          \n\
          /// Coalesced runs of equal nonzero bits over every plane, ascending.\n\
+         #[rustfmt::skip]\n\
          pub(super) const CLASS_RANGES: &[(u32, u32, u16)] = &[\n",
         ranges = ranges.len(),
         blocks = blocks.len(),
@@ -180,6 +196,7 @@ fn render(class: &[u16]) -> String {
         "/// Index of the first [`CLASS_RANGES`] entry at or above U+10000.\n\
          pub(super) const ASTRAL_START: usize = {astral_start};\n\n\
          /// Flat classes for U+0000..=U+007F: one load, no indirection.\n\
+         #[rustfmt::skip]\n\
          pub(super) static ASCII: [u16; 128] = [\n"
     );
     emit_u16_rows(&mut out, &class[..128], 8);
@@ -189,6 +206,7 @@ fn render(class: &[u16]) -> String {
         out,
         "/// One [`BLOCKS`] id per BMP `cp >> 6`. A UTF-8 lead/continuation\n\
          /// pair yields the same index without decoding the scalar.\n\
+         #[rustfmt::skip]\n\
          pub(super) static BLOCK_INDEX: [u16; {}] = [\n",
         index.len()
     );
@@ -198,6 +216,7 @@ fn render(class: &[u16]) -> String {
     let _ = write!(
         out,
         "/// Deduplicated second-level blocks; block 0 is all-zero.\n\
+         #[rustfmt::skip]\n\
          pub(super) static BLOCKS: [[u16; {BLOCK}]; {}] = [\n",
         blocks.len()
     );

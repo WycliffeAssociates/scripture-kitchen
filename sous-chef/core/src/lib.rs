@@ -8,6 +8,7 @@ mod codec;
 mod corpus;
 pub mod hygiene;
 mod input;
+mod pass;
 pub mod unicode;
 
 pub use alignment::{AlignedSide, AlignedUnit, Alignment, AlignmentFact, align};
@@ -24,3 +25,4 @@ pub use input::{
     BookIndex, BookKey, Chapter, Corpus, InputError, ProjectedBook, TextRange, Verse, VerseKey,
     validate,
 };
+pub use pass::{ChapterInput, ChapterKey, ChapterObs, ChapterPass, Findings, SchemaStamp, analyze};

@@ -78,8 +78,9 @@ pub(crate) fn trie_at(bytes: &[u8]) -> (Class, usize) {
 
 /// Baseline: decode every scalar, then one [`class_of`] per scalar.
 pub fn walk(text: &str) -> u64 {
-    text.chars()
-        .fold(0u64, |acc, c| acc.wrapping_add(u64::from(class_of(c).bits())))
+    text.chars().fold(0u64, |acc, c| {
+        acc.wrapping_add(u64::from(class_of(c).bits()))
+    })
 }
 
 /// The byte trie as a walk: no scalar is ever decoded.

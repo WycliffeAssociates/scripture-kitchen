@@ -47,7 +47,10 @@ fn main() {
 }
 
 fn name(path: &Path) -> String {
-    path.file_stem().unwrap_or_default().to_string_lossy().into_owned()
+    path.file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned()
 }
 
 fn sweep(path: &Path) -> (u64, u64) {

@@ -22,10 +22,46 @@
 //! What each class claims and when it stays silent: `rules/hygiene.md`.
 //! Scan shape, throughput, and the lone-backslash caveat: hygiene.md.
 
+use crate::pass::{ChapterInput, ChapterObs, ChapterPass, Findings, SchemaStamp};
 use crate::unicode::{Class, atoms::widen_to_atoms, bits, class_of, lookup::trie_at};
 use crate::{
     BookIndex, CodecError, FindingKind, HygieneClass, HygieneDigest, PackedFinding, TextRange,
 };
+
+/// The Level 1a pass: one scan per chapter, no seam state.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Hygiene;
+
+impl ChapterPass for Hygiene {
+    type Observation = Vec<HygieneFinding>;
+    type Carry = ();
+    const SCHEMA: SchemaStamp = SchemaStamp::new(1);
+
+    fn map(&self, chapter: ChapterInput<'_>) -> Self::Observation {
+        scan(chapter.text)
+    }
+
+    /// A run abutting a masked `\c` is two findings, one per chapter.
+    fn reduce(&self, book: &[ChapterObs<Self::Observation>], _carry: &mut (), out: &mut Findings) {
+        for chapter in book {
+            for finding in &chapter.obs {
+                let span = TextRange::new(
+                    finding.span.from() + chapter.start,
+                    finding.span.to() + chapter.start,
+                )
+                .expect("a rebased chapter span keeps its order");
+                out.push(
+                    span,
+                    FindingKind::Hygiene(
+                        HygieneDigest::new(finding.class, finding.run)
+                            .expect("a scanned run is never empty"),
+                    ),
+                )
+                .expect("a chapter lies inside the book it came from");
+            }
+        }
+    }
+}
 
 /// One maximal run in projected-book UTF-8 coordinates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -275,9 +311,13 @@ fn suspect_run(text: &str, at: usize, class: Class, out: &mut Vec<HygieneFinding
             return at + class_width(text, at);
         }
         // Every mark after the first is equally baseless: one finding.
-        return scalar_run(text, at, HygieneClass::FreeCombiningMark, out, |text, at| {
-            class_at(text, at).is_mark()
-        });
+        return scalar_run(
+            text,
+            at,
+            HygieneClass::FreeCombiningMark,
+            out,
+            |text, at| class_at(text, at).is_mark(),
+        );
     }
     if format_is_placed(text, at, class) {
         return at + class_width(text, at);
@@ -308,8 +348,7 @@ fn format_is_placed(text: &str, at: usize, class: Class) -> bool {
             && next_class(text, at).is_some_and(joinable);
     }
     if class.is_prepend() {
-        return next_class(text, at)
-            .is_some_and(|next| joinable(next) || next.is_decimal_digit());
+        return next_class(text, at).is_some_and(|next| joinable(next) || next.is_decimal_digit());
     }
     false
 }

@@ -14,10 +14,9 @@ fn a_second_generator_run_reproduces_the_committed_table() {
     assert!(status.success(), "gen-unicode exited with {status}");
 
     let regenerated = std::fs::read(&out).expect("the generator wrote its output");
-    let committed = std::fs::read(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/unicode/table.rs"),
-    )
-    .expect("the committed table is present");
+    let committed =
+        std::fs::read(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/unicode/table.rs"))
+            .expect("the committed table is present");
     assert_eq!(
         regenerated.len(),
         committed.len(),
@@ -26,10 +25,7 @@ fn a_second_generator_run_reproduces_the_committed_table() {
         regenerated.len(),
         committed.len()
     );
-    let first_difference = regenerated
-        .iter()
-        .zip(&committed)
-        .position(|(a, b)| a != b);
+    let first_difference = regenerated.iter().zip(&committed).position(|(a, b)| a != b);
     assert_eq!(
         first_difference, None,
         "regenerated table diverges; run `cargo run -p sous-core --bin gen-unicode`"

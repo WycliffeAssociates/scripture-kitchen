@@ -4,6 +4,7 @@
 //! 3251 nonzero ranges, 207 deduplicated 64-scalar blocks.
 
 /// Coalesced runs of equal nonzero bits over every plane, ascending.
+#[rustfmt::skip]
 pub(super) const CLASS_RANGES: &[(u32, u32, u16)] = &[
     (0x00000, 0x00008, 0x3100), (0x00009, 0x0000D, 0x3108), (0x0000E, 0x0001F, 0x3100), (0x00020, 0x00020, 0x0008),
     (0x00021, 0x00023, 0x0040), (0x00024, 0x00024, 0x0080), (0x00025, 0x0002A, 0x0040), (0x0002B, 0x0002B, 0x0080),
@@ -824,6 +825,7 @@ pub(super) const CLASS_RANGES: &[(u32, u32, u16)] = &[
 pub(super) const ASTRAL_START: usize = 2362;
 
 /// Flat classes for U+0000..=U+007F: one load, no indirection.
+#[rustfmt::skip]
 pub(super) static ASCII: [u16; 128] = [
     0x3100, 0x3100, 0x3100, 0x3100, 0x3100, 0x3100, 0x3100, 0x3100,
     0x3100, 0x3108, 0x3108, 0x3108, 0x3108, 0x3108, 0x3100, 0x3100,
@@ -845,6 +847,7 @@ pub(super) static ASCII: [u16; 128] = [
 
 /// One [`BLOCKS`] id per BMP `cp >> 6`. A UTF-8 lead/continuation
 /// pair yields the same index without decoding the scalar.
+#[rustfmt::skip]
 pub(super) static BLOCK_INDEX: [u16; 1024] = [
     0x0001, 0x0002, 0x0003, 0x0004, 0x0005, 0x0006, 0x0007, 0x0008, 0x0009, 0x000A, 0x000B, 0x000C, 0x000D, 0x000E, 0x000F, 0x0010,
     0x0011, 0x0012, 0x0013, 0x0014, 0x0015, 0x0016, 0x0017, 0x0018, 0x0019, 0x001A, 0x001B, 0x001C, 0x001D, 0x001E, 0x001F, 0x0020,
@@ -913,6 +916,7 @@ pub(super) static BLOCK_INDEX: [u16; 1024] = [
 ];
 
 /// Deduplicated second-level blocks; block 0 is all-zero.
+#[rustfmt::skip]
 pub(super) static BLOCKS: [[u16; 64]; 207] = [
     [
     0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,

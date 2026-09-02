@@ -108,10 +108,7 @@ pub fn publish_onion_findings(
             let at = book.mask.to_source(from);
             (at, at)
         } else {
-            (
-                book.mask.to_source(from),
-                book.mask.to_source(to - 1) + 1,
-            )
+            (book.mask.to_source(from), book.mask.to_source(to - 1) + 1)
         };
         let rebased = PackedFinding::new(
             book.utf16.to_utf16(raw_from),
@@ -132,15 +129,18 @@ pub fn publish_onion_findings(
             PublicationBook::new(book.key, published_len, findings)
         })
         .collect();
-    encode_to_corpus_buffer(snapshot, CoordinateSpace::Utf16, &sections)
-        .map_err(PublishError::Wire)
+    encode_to_corpus_buffer(snapshot, CoordinateSpace::Utf16, &sections).map_err(PublishError::Wire)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PublishError {
     /// The book at this caller position has no `\id` line to key it.
-    MissingBookKey { book: usize },
-    DuplicateBookKey { key: BookKey },
+    MissingBookKey {
+        book: usize,
+    },
+    DuplicateBookKey {
+        key: BookKey,
+    },
     BookIndexOutOfRange {
         row: usize,
         index: u16,
@@ -154,8 +154,14 @@ pub enum PublishError {
         projected_len: u32,
     },
     /// A range endpoint splits a character of the projected text.
-    NotCharBoundary { row: usize, offset: u32 },
-    Rebase { row: usize, error: CodecError },
+    NotCharBoundary {
+        row: usize,
+        offset: u32,
+    },
+    Rebase {
+        row: usize,
+        error: CodecError,
+    },
     Wire(CorpusWireError),
 }
 
@@ -184,7 +190,10 @@ impl fmt::Display for PublishError {
                 "finding {row} span {from}..{to} exceeds projected length {projected_len}"
             ),
             Self::NotCharBoundary { row, offset } => {
-                write!(f, "finding {row} offset {offset} splits a projected character")
+                write!(
+                    f,
+                    "finding {row} offset {offset} splits a projected character"
+                )
             }
             Self::Rebase { row, error } => write!(f, "finding {row} failed to rebase: {error}"),
             Self::Wire(error) => write!(f, "corpus encoding failed: {error}"),
@@ -228,7 +237,14 @@ mod tests {
     fn finding(from: u32, to: u32, book: usize, kind: FindingKind) -> PackedFinding {
         // A generous fake book table keeps these tests about publish's own
         // validation, not the caller's.
-        PackedFinding::new(from, to, BookIndex::new(book).unwrap(), kind, &[u32::MAX; 4]).unwrap()
+        PackedFinding::new(
+            from,
+            to,
+            BookIndex::new(book).unwrap(),
+            kind,
+            &[u32::MAX; 4],
+        )
+        .unwrap()
     }
 
     fn range_of(projected: &str, needle: &str) -> (u32, u32) {
@@ -252,7 +268,12 @@ mod tests {
         let (astral_from, astral_to) = range_of(&mrk, "🧅.");
         let (plain_from, plain_to) = range_of(&genesis, "beginning");
         let findings = [
-            finding(split_from, split_to, 0, kind(Some(0x0180), Some(-0x0180), true)),
+            finding(
+                split_from,
+                split_to,
+                0,
+                kind(Some(0x0180), Some(-0x0180), true),
+            ),
             finding(astral_from, astral_to, 0, kind(None, Some(0x0080), false)),
             finding(plain_from, plain_to, 1, kind(Some(-0x0040), None, false)),
         ];
@@ -324,7 +345,11 @@ mod tests {
         )
         .unwrap();
         let snapshot = CorpusSnapshot::open(&buffer).unwrap();
-        let row = snapshot.book(BookIndex::new(0).unwrap()).unwrap().at(0).unwrap();
+        let row = snapshot
+            .book(BookIndex::new(0).unwrap())
+            .unwrap()
+            .at(0)
+            .unwrap();
         assert_eq!((row.from(), row.to()), (57, 57), "raw 'T' of Two");
     }
 
@@ -340,7 +365,9 @@ mod tests {
     fn validation_failures_are_typed() {
         assert_eq!(
             publish_onion_findings(
-                vec![OnionInputBook::new("\\c 1\n\\p\n\\v 1 keyless\n".to_string())],
+                vec![OnionInputBook::new(
+                    "\\c 1\n\\p\n\\v 1 keyless\n".to_string()
+                )],
                 &[],
                 SnapshotId::new([0; 16]),
             ),
@@ -394,7 +421,12 @@ mod tests {
         assert_eq!(
             publish_onion_findings(
                 books(),
-                &[finding(onion_at + 2, onion_at + 4, 0, kind(None, None, false))],
+                &[finding(
+                    onion_at + 2,
+                    onion_at + 4,
+                    0,
+                    kind(None, None, false)
+                )],
                 SnapshotId::new([0; 16]),
             ),
             Err(PublishError::NotCharBoundary {

@@ -9,8 +9,12 @@ fn ucd(file: &str) -> String {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("testdata/ucd")
         .join(file);
-    std::fs::read_to_string(&path)
-        .unwrap_or_else(|error| panic!("pinned UCD extract {} must be present: {error}", path.display()))
+    std::fs::read_to_string(&path).unwrap_or_else(|error| {
+        panic!(
+            "pinned UCD extract {} must be present: {error}",
+            path.display()
+        )
+    })
 }
 
 /// An oracle written against the file format rather than against the
@@ -43,11 +47,31 @@ fn oracle() -> Vec<u16> {
         ("GraphemeBreakProperty.txt", "Extend", bits::EXTENDER),
         ("GraphemeBreakProperty.txt", "SpacingMark", bits::EXTENDER),
         ("GraphemeBreakProperty.txt", "ZWJ", bits::EXTENDER),
-        ("GraphemeBreakProperty.txt", "Control", bits::COMPLEX | bits::GCB_CONTROL),
-        ("GraphemeBreakProperty.txt", "CR", bits::COMPLEX | bits::GCB_CONTROL),
-        ("GraphemeBreakProperty.txt", "LF", bits::COMPLEX | bits::GCB_CONTROL),
-        ("GraphemeBreakProperty.txt", "Prepend", bits::COMPLEX | bits::PREPEND),
-        ("GraphemeBreakProperty.txt", "Regional_Indicator", bits::COMPLEX),
+        (
+            "GraphemeBreakProperty.txt",
+            "Control",
+            bits::COMPLEX | bits::GCB_CONTROL,
+        ),
+        (
+            "GraphemeBreakProperty.txt",
+            "CR",
+            bits::COMPLEX | bits::GCB_CONTROL,
+        ),
+        (
+            "GraphemeBreakProperty.txt",
+            "LF",
+            bits::COMPLEX | bits::GCB_CONTROL,
+        ),
+        (
+            "GraphemeBreakProperty.txt",
+            "Prepend",
+            bits::COMPLEX | bits::PREPEND,
+        ),
+        (
+            "GraphemeBreakProperty.txt",
+            "Regional_Indicator",
+            bits::COMPLEX,
+        ),
         ("GraphemeBreakProperty.txt", "L", bits::COMPLEX),
         ("GraphemeBreakProperty.txt", "V", bits::COMPLEX),
         ("GraphemeBreakProperty.txt", "T", bits::COMPLEX),
@@ -111,11 +135,17 @@ fn table_matches_a_fresh_ucd_parse_for_every_scalar() {
         if got != expected {
             drifted += 1;
             if samples.len() < 8 {
-                samples.push(format!("U+{:04X} table {got:#06x} ucd {expected:#06x}", c as u32));
+                samples.push(format!(
+                    "U+{:04X} table {got:#06x} ucd {expected:#06x}",
+                    c as u32
+                ));
             }
         }
     }
-    assert_eq!(drifted, 0, "scalars drifted from UCD 17.0.0; first: {samples:?}");
+    assert_eq!(
+        drifted, 0,
+        "scalars drifted from UCD 17.0.0; first: {samples:?}"
+    );
 }
 
 #[test]
@@ -131,8 +161,7 @@ fn std_char_predicates_agree_over_every_scalar() {
         counts[3] += u32::from(class.is_whitespace() != c.is_whitespace());
     }
     assert_eq!(
-        counts,
-        [0; 4],
+        counts, [0; 4],
         "alphabetic/uppercase/lowercase/whitespace disagree with std"
     );
 }
@@ -166,8 +195,18 @@ fn the_two_index_paths_agree_over_every_scalar() {
     let mut buf = [0u8; 4];
     for c in scalars() {
         let (trie, width) = trie_at(c.encode_utf8(&mut buf).as_bytes());
-        assert_eq!(class_of(c), trie, "UTF-8 trie disagrees at U+{:04X}", c as u32);
-        assert_eq!(width, c.len_utf8(), "trie width disagrees at U+{:04X}", c as u32);
+        assert_eq!(
+            class_of(c),
+            trie,
+            "UTF-8 trie disagrees at U+{:04X}",
+            c as u32
+        );
+        assert_eq!(
+            width,
+            c.len_utf8(),
+            "trie width disagrees at U+{:04X}",
+            c as u32
+        );
     }
 }
 

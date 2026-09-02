@@ -30,7 +30,8 @@ fn read(path: PathBuf) -> String {
 
 /// Every `÷`/`×` line of `GraphemeBreakTest.txt` as (text, break offsets).
 fn break_test_cases() -> Vec<(String, Vec<usize>)> {
-    let text = read(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/ucd/GraphemeBreakTest.txt"));
+    let text =
+        read(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/ucd/GraphemeBreakTest.txt"));
     text.lines()
         .filter_map(|line| {
             let body = line.split('#').next().unwrap_or("").trim();
@@ -65,7 +66,10 @@ fn no_atom_boundary_falls_inside_a_graphemebreaktest_cluster() {
                 continue;
             }
             if is_atom_boundary(text, at) && !breaks.contains(&at) {
-                invented.push(format!("{:?} at byte {at}", text.escape_debug().to_string()));
+                invented.push(format!(
+                    "{:?} at byte {at}",
+                    text.escape_debug().to_string()
+                ));
             }
         }
     }
@@ -113,7 +117,10 @@ fn the_test_tier_has_no_cluster_the_atom_rule_would_split() {
         let text = read(root.join(name));
         let split = split_clusters(&text);
         report.push(format!("{name}: {split}"));
-        assert_eq!(split, 0, "{name} has {split} clusters split by the atom rule");
+        assert_eq!(
+            split, 0,
+            "{name} has {split} clusters split by the atom rule"
+        );
     }
     println!("clusters split by the atom rule — {}", report.join(", "));
 }

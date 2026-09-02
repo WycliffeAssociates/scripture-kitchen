@@ -48,9 +48,16 @@ invariant 6 working, not drift.
 
 ## Pass contract
 
-`Carry = ()`. The scan over one chapter's masked text is the whole
-observation, there is no reduce, and Galley may cache rows by chapter content.
-A run abutting a masked `\c` marker is two findings by design.
+`hygiene::Hygiene` implements `ChapterPass` with
+`Observation = Vec<HygieneFinding>` in chapter-relative coordinates and
+`Carry = ()`; `map` is `scan` over the chapter slice and `reduce` only rebases
+each row by its chapter's projected start. The contract itself, and why reduce
+cannot tell a cached observation from a fresh one:
+[`pass.md`](pass.md).
+
+A run abutting a masked `\c` marker is two findings by design, and front
+matter is outside every chapter row, so it is outside the pass. Galley may
+cache rows by chapter content.
 
 No config changes observations; enablement only filters.
 

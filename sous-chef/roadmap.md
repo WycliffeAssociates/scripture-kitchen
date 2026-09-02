@@ -274,7 +274,9 @@ Work:
 
 1. Define the pass contract with a chapter observation, schema stamp, minimal
    associated `Carry`, disposable aggregate, and consumers. `Carry = ()` for a
-   pass with no seam behavior.
+   pass with no seam behavior. **Landed as `sous_core::ChapterPass` and
+   `analyze`, with hygiene as the first pass and the CLI as its caller; see
+   [core/src/pass.md](core/src/pass.md).**
 2. Add the workspace's minimal Galley coordinator. Each invocation owns its
    complete target and optional source strings/TOCs only for that call. Galley
    retains config and independently content-addressed target/source chapter
@@ -314,6 +316,14 @@ Verification gate:
 ## Stage 3 — Shared hygiene and nonletter rules
 
 **Goal:** deliver the small engine that replaces most v1 rule modules.
+
+Rule of thumb (ruled 2026-09-02): **one scalar walk per chapter; byte sweeps
+as many as are useful.** A byte sweep (range compare, `memchr`) runs near
+memory bandwidth over a chapter already in cache and costs nothing to keep
+separate. A scalar walk (decode, classify, look at neighbors) is 10–30×
+slower and is the cost that must not multiply: every rule that needs class
+bits reads them from the substrate walk's observation. Hygiene's byte classes
+stay their own sweep; its four scalar classes move onto the substrate walk.
 
 Work:
 
