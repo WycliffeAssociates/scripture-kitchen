@@ -12,6 +12,9 @@
 //!   typed into one chapter of MRK, then the same publish. The update's
 //!   re-derivation (lex, CST, mask, UTF-16 table for that book) and the one
 //!   chapter's re-map are INSIDE the timer: it is what a keystroke costs.
+//! - `publish_cold` — a fresh Expediter over the same corpus, registered
+//!   outside the timer, publishing for the first time: every chapter mapped.
+//!   Run it with and without `--features parallel` for the two map costs.
 //! - `publish_after_sweep_churn` — the edit row again, after `CHURN` earlier
 //!   edits each published, so the mark-and-sweep walks a book at its full
 //!   generation ring. The churn is setup; the delta against
@@ -164,6 +167,24 @@ fn edit_one_chapter_then_publish(bencher: divan::Bencher) {
             .unwrap();
         divan::black_box(sous.publish().unwrap())
     });
+}
+
+/// A fresh Expediter over the whole corpus, published once: every book
+/// projected and every chapter mapped. Registration is the input, so the row
+/// is the publication itself — and under `--features parallel` it is the same
+/// publication with the chapter map on rayon.
+#[divan::bench(sample_count = SAMPLES, sample_size = 1)]
+fn publish_cold(bencher: divan::Bencher) {
+    let corpus = &*CORPUS;
+    bencher
+        .with_inputs(|| {
+            let mut sous = Expediter::new(Hygiene, 64 << 20);
+            for (id, text) in &corpus.books {
+                sous.update(id.as_str(), Role::Target, text).unwrap();
+            }
+            sous
+        })
+        .bench_local_refs(|sous| divan::black_box(sous.publish().unwrap()));
 }
 
 #[divan::bench(sample_count = SAMPLES, sample_size = 1)]

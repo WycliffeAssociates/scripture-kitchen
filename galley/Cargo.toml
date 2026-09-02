@@ -22,6 +22,9 @@ sous-core = { path = "../sous-chef/core" }
 # xxh3-128-v1). no_std-friendly, wasm-clean.
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 rustc-hash.workspace = true
+# Per-publish chapter mapping only, behind `parallel`; galley adds no pool of
+# its own and no background work.
+rayon = { workspace = true, optional = true }
 
 # The JS doorway, feature-gated so a native consumer pays nothing for it.
 # onion-wasm rides in as an rlib: its `#[wasm_bindgen]` exports are
@@ -36,6 +39,9 @@ divan = "0.1.21"
 
 [features]
 wasm = ["dep:wasm-bindgen", "dep:onion-wasm", "dep:js-sys"]
+# Map a book's missing chapters on rayon's global pool. Opt-in, and the
+# published bytes are identical either way — `galley/tests/equivalence.rs`.
+parallel = ["dep:rayon"]
 # Bench-only: divan's AllocProfiler as the global allocator. See onion's.
 alloc-counts = []
 

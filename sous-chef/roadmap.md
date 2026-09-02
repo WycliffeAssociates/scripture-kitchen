@@ -292,7 +292,10 @@ Work:
    handle `lint`, `parse`, and the detached products all answer from. B2 landed
    too: `galley::sous::Expediter` maps lazily at `publish`, keyed by
    `ObservationKey`, and publishes a complete corpus buffer byte-equal to cold
-   `analyze`; see [../galley/src/sous/expediter.md](../galley/src/sous/expediter.md).**
+   `analyze`. C2 added the opt-in `parallel` feature — a book's missing
+   chapters map on rayon, inserted in chapter order, with no pool of galley's
+   own, no scheduler and no background work — and `resident_bytes`. See
+   [../galley/src/sous/expediter.md](../galley/src/sous/expediter.md).**
 3. Implement ordered book reduction over independently mapped chapters. Keep
    only the smallest carry facts needed for nonletter adjacency, casing
    terminal state, and doubled-word state; do not create a generic monoid
@@ -312,22 +315,63 @@ Work:
    reduce borrows its observations. See
    [../galley/src/sous/expediter.md](../galley/src/sous/expediter.md).**
 
-Verification gate:
+Verification gate — **green for a target-only pass; two bullets name the half
+that waits for a consumer.** The harness is
+[../galley/tests/equivalence.rs](../galley/tests/equivalence.rs): a seeded edit
+churn that republishes after every step, asserts the bytes against a cold
+`analyze` of the same texts, and asserts that no more chapters were mapped than
+the step's own analysis inputs changed. The bound is recomputed there from
+`for_each_chapter`, not read off the cache it bounds, and a failure prints
+`seed=… step=… edit=…`.
 
 - cold analysis equals chapter-at-a-time rebuild after every chapter is
-  replaced in sequence;
+  replaced in sequence — `every_chapter_replaced_in_sequence_equals_cold`, and
+  `every_chapter_of_a_whole_bible_book_replaced_in_sequence_equals_cold` over
+  the committed 66-book corpus;
 - randomized edit/insert/delete operations, submitted as complete new input
-  strings, equal a fresh rebuild after each step;
+  strings, equal a fresh rebuild after each step —
+  `churn_over_a_synthetic_corpus` (200 steps) and `churn_over_en_ulb` (50
+  steps), each from two fixed seeds. The menu is insert/delete/replace of a
+  random content run, a masked footnote, a chapter appended or dropped, two
+  chapters moved, a chapter copied between books, NUL runs either side of a
+  chapter seam, and a book added or removed;
 - every raw edit refreshes the Onion projection; a markup-only edit whose
-  projected pass inputs are unchanged reuses target observations while the
-  new source map rebinds positions;
+  projected pass inputs are unchanged reuses target observations while the new
+  source map rebinds positions —
+  `a_markup_only_edit_reuses_every_observation_and_still_rebinds`, plus every
+  footnote step of the churn, which asserts a zero bound and zero maps;
 - an unchanged raw-book checksum reuses detached projection/UTF-16 index data,
   while all returned offsets still resolve against the exact string supplied
-  to that invocation;
-- identical chapter content reuses mapping but is counted at both positions;
-- seam contributions change only where an adjacent prefix/suffix changed;
+  to that invocation — `an_identical_update_derives_nothing_and_recopies_no_text`
+  and `a_second_publish_maps_nothing_and_republishes_the_same_bytes`; every
+  churn step re-checks the offsets, because the cold oracle rebases from the
+  very string that step supplied;
+- identical chapter content reuses mapping but is counted at both positions —
+  `two_identical_chapters_share_one_observation_and_report_both` and
+  `a_chapter_copied_onto_another_maps_nothing_and_publishes_both`, plus every
+  copy step of the churn;
+- seam contributions change only where an adjacent prefix/suffix changed — the
+  churn's seam edits pin the chapter boundary for a `Carry = ()` pass, which is
+  every pass so far. **Open:** the bullet's real claim needs the first pass that
+  carries seam state, which is work item 3;
 - serial and parallel chapter mapping reduce to byte-identical results in
-  deterministic order.
+  deterministic order — `the_parallel_map_publishes_the_serial_bytes` compares
+  both inside one binary, and
+  `parallel_publish_byte_equals_the_serial_cold_oracle_over_en_ulb` puts the
+  whole-Bible publication against the cold oracle. The gate runs both ways:
+  `cargo test --release -p usfm_galley --features parallel -- --include-ignored`.
+  The feature is off by default, and measured: for `Hygiene` the parallel map
+  is 1.7× slower than the serial one, because the map is a tenth of a cold
+  publication and allocates per chapter ([evidence.md](evidence.md));
+- **Open, and not this slice's:** work item 4's source half. `Pantry` registers
+  `Role::Target` only, so "a changed source preserves eligible target
+  observations" has nothing to change yet; it lands with Stage 5's source
+  corpus.
+
+**Stop gate — ready for review.** Items 1, 2 and 5 landed and their gate
+bullets are pinned by name above. The two open lines are item 3's real carry
+and item 4's source half; both wait on a consumer that does not exist until
+Stage 3 and Stage 5, so they are what to adjudicate before Stage 3 opens.
 
 ## Stage 3 — Shared hygiene and nonletter rules
 

@@ -552,6 +552,7 @@ dependencies = [
  "js-sys",
  "mise",
  "onion-wasm",
+ "rayon",
  "rustc-hash",
  "sous-core",
  "usfm_onion",

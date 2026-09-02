@@ -72,8 +72,9 @@ and both `analyze` and the Expediter call it, so neither can build an input the
 other would not. Reduce is provenance-blind — it cannot tell a cached
 observation from a fresh one — and both publishers rebase through the same
 `rebase_span`, so the two paths differ in what work they skip and in nothing
-else. `publish_byte_equals_cold_analyze_through_the_string_taking_publisher`
-pins that as bytes, not as a claim.
+else. `galley/tests/equivalence.rs` pins that as bytes, not as a claim: a
+seeded edit churn republishes after every step and compares against a cold
+`analyze` of the same texts, over a synthetic corpus and over a whole Bible.
 
 ## Mark and sweep, N generations deep
 
@@ -87,12 +88,44 @@ Why keep any previous generation at all: an undo restores byte-identical
 chapter text and therefore the identical `ObservationKey`, so an undo within
 `n` edits is a table hit and maps nothing.
 
+`resident_bytes` reports what the sweep bounds: the Pantry's own products plus
+one entry per resident observation, chapter row, and ring slot. Shallow in one
+place — a pass's heap inside an observation is not counted, because
+`ChapterPass` states no size.
+
 The sweep is skipped outright when no table was added and no ring aged since
 the last one — a republication of an untouched corpus has nothing to free, and
 pays nothing to learn it (`publish_unchanged` is unchanged at 14 µs;
 evidence.md).
 
+## Parallel map
+
+`--features parallel` maps a book's missing chapters on rayon's global pool,
+and changes nothing a publication says. The missing chapters are queued in
+chapter order, `par_iter` keeps that order, and the observations are inserted
+from it afterwards, so the chapter table and the buffer are the serial ones
+byte for byte. Both settings drop a repeated chapter from the queue the same
+way, so `last_mapped` is the same number too.
+
+The map is the only parallel part, and only over the chapters a publication
+actually misses. Galley adds no pool of its own, no scheduler, and no
+background work: `publish` still returns when the last chapter is mapped. The
+queue owns a copy of each missing chapter's projected text and verse rows,
+because `for_each_chapter` lends its `ChapterInput` for the callback only; the
+serial path stays inside that callback and copies nothing, so it pays for none
+of this.
+
+`the_parallel_map_publishes_the_serial_bytes` compares the two publications
+inside one binary, and the equivalence gate runs under both settings.
+
+It is off by default because it is measured, not assumed: for `Hygiene` the map
+is about half a millisecond of a 5.6 ms cold whole-Bible publication and
+allocates one `Vec` per chapter, so the parallel path runs 1.7× SLOWER —
+work-stealing and allocator contention cost more than the map saves
+(evidence.md). The feature is here so a costlier pass can switch it on against
+a gate that already holds; the first thing to change then is one `par_iter`
+over the whole corpus rather than one per book.
+
 ## What is not here yet
 
-Parallel map is Slice C's other half; `publish` is serial and deterministic. A
-config stamp joins `SnapshotId` when judging config exists.
+A config stamp joins `SnapshotId` when judging config exists.

@@ -16,11 +16,15 @@
 //! publication sweeps what no retained generation names. Why the two hashes
 //! divide the work this way: `expediter.md`.
 
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use sous_core::{
     BookIndex, ChapterInput, ChapterObs, ChapterPass, CoordinateSpace, CorpusWireError, Findings,
     PackedFinding, PublicationBook, SnapshotId, encode_to_corpus_buffer, for_each_chapter,
 };
+#[cfg(feature = "parallel")]
+use sous_core::{ChapterKey, ProjectedBook, Verse};
 use xxhash_rust::xxh3::Xxh3Default;
 
 use mise::books::BookKey;
@@ -100,9 +104,30 @@ pub struct Expediter<P: ChapterPass> {
     /// Chapters mapped since the last publication, eager and lazy alike.
     pending: u64,
     misses: u64,
+    /// Whether a book's missing chapters are mapped on rayon; the two
+    /// settings publish the same bytes.
+    #[cfg(feature = "parallel")]
+    parallel: bool,
 }
 
-impl<P: ChapterPass> Expediter<P> {
+/// One missing chapter's map input as ranges: `for_each_chapter` lends its
+/// `ChapterInput` for the callback only, and a parallel map outlives that.
+///
+/// Ranges, not copies — the projected text is the book's own, and the verse
+/// rows are pooled into one allocation for the whole book.
+#[cfg(feature = "parallel")]
+struct Queued {
+    observation: ObservationKey,
+    /// Into the projected book text.
+    text: core::ops::Range<usize>,
+    /// Into this book's verse pool.
+    verses: core::ops::Range<usize>,
+    key: ChapterKey,
+}
+
+/// `Sync` unconditionally, so the `parallel` feature adds no bound the serial
+/// build does not already carry: a pass is a stateless rule, not a session.
+impl<P: ChapterPass + Sync> Expediter<P> {
     /// `budget_bytes` is the Pantry's Warmer LRU ceiling.
     pub fn new(pass: P, budget_bytes: usize) -> Self {
         Self {
@@ -115,7 +140,17 @@ impl<P: ChapterPass> Expediter<P> {
             dirty: false,
             pending: 0,
             misses: 0,
+            #[cfg(feature = "parallel")]
+            parallel: true,
         }
+    }
+
+    /// Test-only: the serial map inside a build that would take the parallel
+    /// one, so one binary can compare the two publications.
+    #[cfg(all(test, feature = "parallel"))]
+    fn serial(mut self) -> Self {
+        self.parallel = false;
+        self
     }
 
     /// Previous chapter tables kept per book, the current one aside; the
@@ -191,12 +226,35 @@ impl<P: ChapterPass> Expediter<P> {
         self.chapter_tables.len()
     }
 
+    /// The Pantry's retained products plus this cache's own rows.
+    ///
+    /// Shallow in one place: an observation counts its own size, not the heap
+    /// a pass hangs off it, because [`ChapterPass`] exposes no size of its own.
+    pub fn resident_bytes(&self) -> usize {
+        let rows: usize = self
+            .chapter_tables
+            .values()
+            .map(|table| size_of::<RawChecksum>() + table.len() * size_of::<ChapterRow>())
+            .sum();
+        let rings: usize = self
+            .generations
+            .values()
+            .map(|ring| size_of::<BookId>() + ring.len() * size_of::<RawChecksum>())
+            .sum();
+        self.pantry.resident_bytes()
+            + self.observations.len() * (size_of::<ObservationKey>() + size_of::<P::Observation>())
+            + rows
+            + rings
+    }
+
     /// Keys this book's chapters under the Pantry's current checksum and maps
     /// the ones the cache is missing; a checksum already keyed only ages.
     ///
     /// `supplied` is the update's own text, the only source for a book whose
     /// products retain none.
     fn index_book(&mut self, id: &BookId, supplied: Option<&str>) -> Result<(), PublishError> {
+        #[cfg(feature = "parallel")]
+        let parallel = self.parallel;
         let Self {
             pantry,
             pass,
@@ -232,14 +290,58 @@ impl<P: ChapterPass> Expediter<P> {
                 error,
             })?;
         let mut table = Vec::new();
+        #[cfg(feature = "parallel")]
+        let (mut queued, mut pool, mut seen) = (
+            Vec::<Queued>::new(),
+            Vec::<Verse>::new(),
+            FxHashSet::default(),
+        );
         for_each_chapter(&book, |start, chapter| {
             let observation = ObservationKey::of::<P>(&chapter);
             table.push(ChapterRow { observation, start });
+            #[cfg(feature = "parallel")]
+            if parallel {
+                // The same dedup the serial `entry` does, so both settings map
+                // a repeated chapter once and count it once.
+                if !observations.contains_key(&observation) && seen.insert(observation) {
+                    let text = start as usize..start as usize + chapter.text.len();
+                    debug_assert_eq!(&book.text()[text.clone()], chapter.text);
+                    let from = pool.len();
+                    pool.extend_from_slice(chapter.verses);
+                    queued.push(Queued {
+                        observation,
+                        text,
+                        verses: from..pool.len(),
+                        key: chapter.key,
+                    });
+                }
+                return;
+            }
             observations.entry(observation).or_insert_with(|| {
                 *pending += 1;
                 pass.map(chapter)
             });
         });
+        // Collected in chapter order and inserted in it: the map is content
+        // keyed, so the table it feeds is the same either way.
+        #[cfg(feature = "parallel")]
+        if parallel {
+            let text = book.text();
+            let mapped: Vec<P::Observation> = queued
+                .par_iter()
+                .map(|chapter| {
+                    pass.map(ChapterInput {
+                        text: &text[chapter.text.clone()],
+                        verses: &pool[chapter.verses.clone()],
+                        key: chapter.key,
+                    })
+                })
+                .collect();
+            *pending += mapped.len() as u64;
+            for (chapter, observation) in queued.iter().zip(mapped) {
+                observations.insert(chapter.observation, observation);
+            }
+        }
         chapter_tables.insert(checksum, table);
         *dirty = true;
         Ok(())
@@ -376,10 +478,9 @@ fn snapshot_id<P: ChapterPass>(pantry: &Pantry, books: &[(BookId, BookKey)]) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sous_core::{Corpus, CorpusSnapshot, FindingKind, analyze, hygiene::Hygiene};
+    use sous_core::{CorpusSnapshot, FindingKind, hygiene::Hygiene};
 
     use crate::pantry::Retain;
-    use crate::sous::{OnionInputBook, publish_onion_findings};
 
     /// A `\\` pair is the one backslash Onion's mask hands to Sous as content,
     /// so every chapter body below carries exactly one hygiene finding.
@@ -444,38 +545,17 @@ mod tests {
             .collect()
     }
 
-    /// `analyze` + the string-taking publisher over the same books, under the
-    /// snapshot identity the Expediter chose.
-    fn cold(books: &[(&str, String)], snapshot: SnapshotId) -> Vec<u8> {
-        let parsed: Vec<OnionBook> = books
-            .iter()
-            .map(|(_, source)| OnionBook::parse(source).unwrap())
-            .collect();
-        let corpus = Corpus::try_new(&parsed).unwrap();
-        let findings = analyze(&corpus, &Hygiene).into_rows();
-        let inputs = books
-            .iter()
-            .map(|(id, source)| OnionInputBook::new(*id, source.clone()))
-            .collect();
-        publish_onion_findings(inputs, &findings, snapshot).unwrap()
-    }
-
+    /// Byte equality with a cold `analyze` is pinned where its oracle lives,
+    /// in `galley/tests/equivalence.rs`; these tests pin what is reused.
     #[test]
-    fn publish_byte_equals_cold_analyze_through_the_string_taking_publisher() {
-        let (mark, genesis) = (mark(), genesis());
+    fn the_publication_is_in_canonical_order_and_maps_every_chapter_once() {
         let mut sous = sous();
-        sous.update("b/mrk.usfm", Role::Target, &mark).unwrap();
-        sous.update("a/gen.usfm", Role::Target, &genesis).unwrap();
+        sous.update("b/mrk.usfm", Role::Target, &mark()).unwrap();
+        sous.update("a/gen.usfm", Role::Target, &genesis()).unwrap();
         let buffer = sous.publish().unwrap();
         assert_eq!(sous.last_mapped(), 4, "one GEN chapter, three MRK");
-
         // Canonical order, not update order: GEN before MRK.
         assert_eq!(ids(&buffer), vec!["a/gen.usfm", "b/mrk.usfm"]);
-        let snapshot = CorpusSnapshot::open(&buffer).unwrap().snapshot_id();
-        assert_eq!(
-            buffer,
-            cold(&[("a/gen.usfm", genesis), ("b/mrk.usfm", mark)], snapshot)
-        );
     }
 
     #[test]
@@ -721,6 +801,33 @@ mod tests {
             snapshot.book_by_id("a/gen.usfm").unwrap().index().get(),
             1,
             "the second row is reachable only by id"
+        );
+    }
+
+    /// The other half of the parallel gate: `galley/tests/equivalence.rs`
+    /// holds the whole-Bible run against the cold oracle.
+    #[cfg(feature = "parallel")]
+    #[test]
+    fn the_parallel_map_publishes_the_serial_bytes() {
+        // The twin is the same chapters under a second id, so the cross-book
+        // dedup the parallel queue does for itself is exercised too.
+        let books = [
+            ("a/gen.usfm", genesis()),
+            ("b/mrk.usfm", mark()),
+            ("c/mrk-copy.usfm", mark()),
+        ];
+        let mut serial = sous().serial();
+        let mut parallel = sous();
+        for (id, text) in &books {
+            serial.update(*id, Role::Target, text).unwrap();
+            parallel.update(*id, Role::Target, text).unwrap();
+        }
+        assert_eq!(serial.publish().unwrap(), parallel.publish().unwrap());
+        assert_eq!(serial.last_mapped(), 4, "GEN's chapter and MRK's three");
+        assert_eq!(parallel.last_mapped(), serial.last_mapped());
+        assert_eq!(
+            parallel.resident_observations(),
+            serial.resident_observations()
         );
     }
 
