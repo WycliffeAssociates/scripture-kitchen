@@ -14,25 +14,29 @@ workflow, cache, coordinate conversion, and publication boundary.
 
 Revised 2026-09-02. The caller registers each book under an opaque `BookId`
 it keeps consistent (a file path in practice) with a role, `Target` or
-`Reference`, and replaces a book only whole: `update(id, text)`. Galley
-derives the book's products while the string is present — chunk products,
-TOC, mask, detached UTF-16 index, chapter observations — then drops the
-string. Unchanged books are never resent; publication serves them from
-detached products keyed by raw checksum. Book order in a publication is
+`Reference`, and replaces a book only whole: `update(id, text)`. For a
+target, Galley retains the text as last updated and derives its products
+beside it — chunk products, TOC, mask, detached UTF-16 index, chapter
+observations. Unchanged books are never resent; analysis, publication, and
+find run against the retained copy. A host may opt a target out of text
+retention (`Retain::ProductsOnly`); text-needing operations then return a
+typed refusal and the host supplies the text. Measured motivation: marshaling
+a 5 MB corpus into WASM costs 3.5–5 ms, a quarter of a frame, while 5 MB of
+retained text is cheap (evidence.md, 2026-09-02). Book order in a publication is
 canonical by `BookKey` within a role, ties by id, so `BookIndex` does not
 depend on the order of updates, and the corpus buffer carries the ids in a
 string table.
 
-Galley does not retain the editor's rope, accept splice edits, or maintain a
-second mutable copy of a document. Whole-book replacement is idempotent and
-cannot shift coordinates inside a book; the one failure a forgetful caller can
-cause is a stale book, healed by its next update. Resending the whole corpus
-was the earlier rule and remains a valid resync; it is no longer required per
-call, because a 100 MB aligned corpus would otherwise be re-encoded on every
-keystroke.
+Galley never accepts a splice and never mutates its copy in place; the copy
+is replaced whole or not at all, so it cannot drift from the editor's buffer
+by anything but staleness, and staleness heals on the next update. The
+earlier rule — resend every string every call — remains a valid resync and is
+no longer required, because a 100 MB aligned corpus would otherwise be
+re-encoded on every keystroke. A host with such a corpus decides for itself
+whether to retain its text (edit and search it) or opt out.
 
 Every returned location is numeric and relative to the exact string last
-supplied for that book. Borrowed source slices do not cross the call boundary.
+supplied for that book, which is also the string Galley retains.
 
 The implemented Onion `Warmer` already follows the important half of this law:
 `parse` receives the complete current `&str` on every call and retains only

@@ -65,13 +65,16 @@ CLI, WASM, and editor adapters provide I/O and presentation. The workspace's
 Galley is resident in its derived caches, judging config, and suppression
 workflow, not in the editor's canonical text. The caller registers each book
 under an opaque id it keeps consistent (a file path in practice) and replaces
-a book only whole: `update(id, text)`. Galley derives that book's products
-while the string is present and drops the string; unchanged books are served
-from detached products keyed by raw checksum. It never retains a second rope
-and never accepts a splice, so coordinates cannot shift inside a book; a book
-the caller forgot to resend is stale as a whole and heals on its next update.
-Retention follows role: a target corpus keeps what publication needs, a
-reference corpus keeps only TOC and per-verse observations. Galley may execute
+a book only whole: `update(id, text)`. Galley retains a copy of that text as
+last updated, plus the products derived from it; every other operation —
+analysis, publication, find — runs against the retained copy, so nothing is
+resent. The editor's buffer stays canonical and Galley's copy is exactly as
+current as its last update. There is no splice API, so coordinates cannot
+shift inside a book; a book the caller forgot to resend is stale as a whole
+and heals on its next update. Retention follows role: a target keeps its text
+and everything publication needs; a reference keeps only TOC and per-verse
+observations. A host may opt a target out of text retention and then supplies
+text itself when asked. Galley may execute
 independent maps in parallel, but it may not change reduction order or rule
 semantics.
 

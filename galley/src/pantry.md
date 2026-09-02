@@ -7,20 +7,23 @@ presentation") states the same rule from Sous's side.
 
 ## The text rule
 
-**A method that takes `&str` needs the current bytes and the caller supplies
-them; a method that does not promises to work from detached products alone.**
+**`update` is the only method that takes text.** A target book's text is
+retained as last updated, so analysis, publication, and find run against the
+copy and nothing is resent per call. The editor's buffer is canonical; the copy
+is exactly as current as its last update.
 
-`update(id, role, text)` and `changed_since_update(id, text)` take text.
-`books`, `checksum_for`, `mask_for`, `toc_for`, `utf16_for`,
-`published_len_for` and `resident_bytes` do not, and never will: they are what
-a publication runs on when no book was touched this call.
+A host may opt a target out with `Retain::ProductsOnly`; text-needing methods
+then return `Err(PantryError::NoText { id })` and the host supplies the text
+itself. The common path has no `Option`; the opt-out path cannot silently do
+nothing.
 
-The Pantry retains no string and no borrow into one — the `Book` struct is
-asserted `'static` at compile time, which is the mechanical form of that
-promise. There is no splice API and never will be: the only mutation is
-whole-book replacement under a caller-chosen opaque id, which is idempotent and
-cannot shift coordinates inside a book. A book the caller forgets to resend is
-stale as a whole and heals on its next update.
+There is no splice API and never will be: the only mutation is whole-book
+replacement under a caller-chosen opaque id, which is idempotent and cannot
+shift coordinates inside a book. A book the caller forgets to resend is stale
+as a whole and heals on its next update.
+
+Status: text retention, `Retain`, and the per-book `Entry` handle land in the
+moves slice after B1; until then the Pantry holds products only.
 
 ## Two questions, two answers
 
