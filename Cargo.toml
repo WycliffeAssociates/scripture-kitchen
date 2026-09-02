@@ -5,6 +5,10 @@
 # its dependencies reach onion/src), `galley` (piece 5, the workflows crate:
 # depends on the engines and NEVER the reverse).
 #
+# `mise` is the LEAF beneath all of them: zero dependencies, spec data tables
+# and borrow-free data structures only. It is how onion and sous-core share
+# `BookKey` and the UTF-16 offset types without sharing each other.
+#
 # sous-chef/ is a separate product sharing the workspace: `sous-core` (the
 # count substrate, no dependency on onion — it takes a neutral borrowed view)
 # and `sous-cli`, the adapter that may depend on both. galley also depends on
@@ -12,7 +16,12 @@
 # rebasing and findings publication. See sous-chef/charter.md.
 # sous-chef/donor/ is NOT a crate — it is the v1 spike's source, kept to read
 # and port from by hand.
+#
+#   mise ◄── onion ◄── onion-wasm            mise ◄── sous-core
+#      ▲        ▲                                        ▲
+#      ╰────────┴──────────── galley ◄──────────────────╯
 members = [
+    "mise",
     "onion",
     "onion-wasm",
     "galley",

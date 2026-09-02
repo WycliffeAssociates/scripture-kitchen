@@ -1,6 +1,8 @@
 //! galley — the workflows crate (piece 5 of the five-crate layout).
 //!
 //! ```text
+//!              mise — spec tables, borrow-free structures, zero deps
+//!                ▲                                  ▲
 //! usfm_onion ◄── onion-wasm          scripture_sous_chef ◄── sous-wasm
 //!     ▲              ▲                        ▲                   ▲
 //!     │              │ (wasm feature)         │                   │
@@ -25,10 +27,11 @@ pub use usfm_onion as onion;
 pub mod corpus;
 pub mod pantry;
 pub mod sous;
-pub mod utf16;
 pub mod warmer;
-pub use pantry::{BookId, Fingerprint, Pantry, PantryError, RawChecksum, Role, fingerprint};
-pub use utf16::{Utf16Table, utf16_table};
+pub use mise::utf16::{Utf16Table, utf16_table};
+pub use pantry::{
+    BookId, Entry, Fingerprint, Pantry, PantryError, RawChecksum, Retain, Role, fingerprint,
+};
 pub use warmer::Warmer;
 
 #[cfg(feature = "wasm")]

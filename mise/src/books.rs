@@ -1,4 +1,11 @@
-//! The books AUXILIARY table: valid `\id` book identifiers, membership only.
+//! The `\id` book identifiers, and the three-byte key that names one.
+//!
+//! ```text
+//! is_book_code(b"1JN")         -> true    membership, byte-exact
+//! is_scripture_code(b"FRT")    -> false   a peripheral division
+//! upper3(b"1jn")               -> 1JN     then ask again
+//! canonical_rank(MRK)          -> 40      spec order, not sorted order
+//! ```
 //!
 //! A flat authored list, not a `MarkerRow` column and not codegen output.
 //! Nothing here maps a code to a name, a number, a testament or a
@@ -10,6 +17,8 @@
 //! `docs/identification/books.rst`), kept in spec row order — NOT sorted — so
 //! a future spec-diff reads top to bottom. Lookup is therefore a linear scan of
 //! 116 three-byte comparisons, run once per document (a book has one `\id`).
+
+use core::fmt;
 
 /// Every 3-character book identifier the spec defines: 39 OT, 27 NT, the
 /// deuterocanon and its additions, the peripheral divisions, and XXA-XXG.
@@ -75,6 +84,52 @@ pub fn upper3(span: &[u8]) -> Option<[u8; 3]> {
     ])
 }
 
+/// The stable scripture identity that pairs books across producer inputs — a
+/// book identifier's three bytes, uninterpreted.
+///
+/// Byte-exact, like [`is_book_code`]: a key may hold a code the table does not,
+/// and casing is the caller's business.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct BookKey([u8; 3]);
+
+impl BookKey {
+    pub const fn new(bytes: [u8; 3]) -> Self {
+        Self(bytes)
+    }
+
+    pub const fn as_bytes(self) -> [u8; 3] {
+        self.0
+    }
+}
+
+impl From<[u8; 3]> for BookKey {
+    fn from(bytes: [u8; 3]) -> Self {
+        Self::new(bytes)
+    }
+}
+
+impl fmt::Display for BookKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match core::str::from_utf8(&self.0) {
+            Ok(code) => f.write_str(code),
+            Err(_) => write!(f, "{:02X}{:02X}{:02X}", self.0[0], self.0[1], self.0[2]),
+        }
+    }
+}
+
+/// A book's position in [`BOOK_CODES`], which is the spec's order; a code
+/// outside the table ranks after every code inside it.
+///
+/// Ties there are broken by the caller — `BOOK_CODES.len()` for all of them —
+/// so a caller sorting on this compares the key's bytes next.
+pub fn canonical_rank(key: BookKey) -> usize {
+    let bytes = key.as_bytes();
+    BOOK_CODES
+        .iter()
+        .position(|code| **code == bytes)
+        .unwrap_or(BOOK_CODES.len())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -124,5 +179,23 @@ mod tests {
         assert_eq!(upper3(b"1jn"), Some(*b"1JN"));
         assert_eq!(upper3(b"GEN"), Some(*b"GEN"));
         assert_eq!(upper3(b"GENESIS"), None);
+    }
+
+    #[test]
+    fn a_key_ranks_by_spec_order_and_unknown_codes_rank_last() {
+        assert_eq!(canonical_rank(BookKey::new(*b"GEN")), 0);
+        assert_eq!(canonical_rank(BookKey::new(*b"MRK")), 40);
+        assert_eq!(canonical_rank(BookKey::new(*b"XXG")), BOOK_CODES.len() - 1);
+        // Not the table's order: PSA precedes MAT, which sorting would reverse.
+        assert!(canonical_rank(BookKey::new(*b"PSA")) < canonical_rank(BookKey::new(*b"MAT")));
+        assert_eq!(canonical_rank(BookKey::new(*b"ZZZ")), BOOK_CODES.len());
+        assert_eq!(canonical_rank(BookKey::new(*b"gen")), BOOK_CODES.len());
+    }
+
+    #[test]
+    fn a_key_prints_its_code_and_falls_back_to_hex() {
+        assert_eq!(BookKey::new(*b"MRK").to_string(), "MRK");
+        assert_eq!(BookKey::from(*b"1JN").as_bytes(), *b"1JN");
+        assert_eq!(BookKey::new([0xFF, 0x00, 0x41]).to_string(), "FF0041");
     }
 }

@@ -8,6 +8,9 @@ workspace = true
 
 [dependencies]
 memchr.workspace = true
+# The zero-dependency leaf: the spec's book table and the UTF-16 offset types,
+# shared with sous-core without either engine seeing the other.
+mise = { path = "../mise" }
 rustc-hash.workspace = true
 # The diff port's two algorithm layers: Myers over block keys, and the UAX-29
 # word / grapheme diff inside a unit. Pure Rust, no_std-friendly, wasm-clean.

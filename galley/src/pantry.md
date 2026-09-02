@@ -22,8 +22,10 @@ replacement under a caller-chosen opaque id, which is idempotent and cannot
 shift coordinates inside a book. A book the caller forgets to resend is stale
 as a whole and heals on its next update.
 
-Status: text retention, `Retain`, and the per-book `Entry` handle land in the
-moves slice after B1; until then the Pantry holds products only.
+Status: landed. `update` returns an `Entry` — a per-book handle borrowing the
+Pantry mutably, because its `lint`/`parse` pass-throughs run the Warmer — and
+`pantry.book(&id)` reopens one later. The read-only `*_for(id)` accessors are
+gone; the `Entry` is the one way in.
 
 ## Two questions, two answers
 
@@ -66,27 +68,30 @@ no UTF-16 table, because a reference corpus never publishes a coordinate. B1
 ships `Target` alone; the enum carries the second variant's shape as a doc line
 rather than as dead code.
 
-Retained per `Target` book, roughly 25% of the raw text:
+Retained per `Target` book — the text under `Retain::Text`, and roughly 25% of
+it again in products:
 
 | Product | Source | Why it survives the string |
 | --- | --- | --- |
 | chunk products | the owned `Warmer` | content-addressed; an unchanged chapter is never re-lexed |
 | `Toc` | `onion::toc` | chapter/verse anchors in raw bytes |
 | `Mask` | `onion::mask`, verse-text filter | owned ranges + starts; already detached |
-| `Utf16Table` | `galley::utf16` | byte → UTF-16 with no source present |
+| `Utf16Table` | `mise::utf16` | byte → UTF-16 with no source present |
 | published length | the table | a publication's `published_len` |
 | `Fingerprint` | `galley::pantry::fingerprint` | the baseline for the next update |
+| the text | `update`'s argument | `Retain::Text`; `resident_bytes` counts it |
 
-Order is canonical by `BookKey` — Onion's `tables::books::BOOK_CODES` order,
-which is the USFM spec's — ties broken by id, so `BookIndex` never depends on
-the order updates arrived in. Two ids carrying the same `\id` are both present;
-Galley never parses an id.
+Order is canonical by `BookKey` — `mise::books::canonical_rank` over
+`BOOK_CODES`, which is the USFM spec's order — ties broken by id, so
+`BookIndex` never depends on the order updates arrived in. Two ids carrying the
+same `\id` are both present; Galley never parses an id.
 
 ## The detached UTF-16 table
 
-Onion's `Utf16Index` stores one cumulative `u32` per 256 bytes and counts the
-remainder by scanning the source. With the source gone, the remainder has to be
-counted from the table itself, so `Utf16Table` adds **one bit per source byte**:
+`mise::utf16::Utf16Index` stores one cumulative `u32` per 256 bytes and counts
+the remainder by scanning the source. With the source gone, the remainder has
+to be counted from the table itself, so `Utf16Table` adds **one bit per source
+byte**:
 set where a UTF-16 code unit STARTS — at every character's lead byte, and again
 at the byte after a 4-byte lead, which is exactly the low surrogate. One mask
 therefore counts units directly, where separate character and astral masks would
@@ -99,11 +104,11 @@ to_utf16(byte) = totals[byte / 256] + popcount(marks over [stride start, byte))
 Cost is 8 bytes of mask per 64 source bytes plus 4 bytes of cumulative total per
 256 — 36 bytes per 256, **14.06%**, measured identical on all eight tier corpora
 (the ratio is a function of length, not script). A 64-byte stride would spend
-`4 + 8` bytes per 64 = 18.75% for a shorter scan; 256 matches Onion's `STRIDE`,
-bounds a query at four population counts, and leaves room under the 25% ceiling
-for the rest of a book's products.
+`4 + 8` bytes per 64 = 18.75% for a shorter scan; 256 matches the index's
+`STRIDE`, bounds a query at four population counts, and leaves room under the
+25% ceiling for the rest of a book's products.
 
-The table answers character-boundary offsets. Onion's index snaps an interior
-byte down to its character by reading the source; with no source there is
-nothing to snap with, and every offset the Pantry rebases — mask ranges, TOC
+The table answers character-boundary offsets. The borrowing index snaps an
+interior byte down to its character by reading the source; with no source there
+is nothing to snap with, and every offset the Pantry rebases — mask ranges, TOC
 anchors, finding spans — is boundary-legal already.

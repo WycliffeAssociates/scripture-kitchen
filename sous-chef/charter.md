@@ -41,6 +41,12 @@ and reverse source coordinates. A host adapter may depend on both crates and
 construct that view from Onion. The CLI is the first such adapter; extract a
 shared adapter crate only when a second consumer needs it.
 
+Onion owns canonical order as a RULE; the spec table it reads lives in the
+workspace's `mise` leaf crate (zero dependencies, spec data and borrow-free
+structures only), because Sous keys on the same three bytes. `BookKey` and
+`canonical_rank` are `mise::books`; owning the bytes is not owning the
+semantics, and `mise` is how `sous-core` gets them without getting Onion.
+
 Onion presents each file as raw UTF-8 bytes plus a monotone table of contents:
 
 - book ranges in canonical order;

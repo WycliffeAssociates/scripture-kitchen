@@ -1,29 +1,30 @@
-//! The pantry: what a book leaves behind after its text goes home.
+//! The pantry: what a book leaves behind, and the text it keeps beside it.
 //!
 //! ```text
-//! pantry.update("books/mrk.usfm", Role::Target, &text)?   -> BookKey MRK
-//!     retained   chunk products (Warmer), Toc, verse-text Mask,
-//!                detached UTF-16 table, published UTF-16 length, Fingerprint
-//!     dropped    the string, and every borrow into it
+//! pantry.update("books/mrk.usfm", Role::Target, &text)?   -> Entry for MRK
+//!     .lint()          the Warmer's report, fed from the retained text
+//!     .mask()          the verse-text projection, no text needed
+//!     .text()          Ok(&str) — or Err(NoText) under Retain::ProductsOnly
 //!
+//! pantry.book(&id)                            -> Option<Entry<'_>>
 //! pantry.changed_since_update(&id, &edited)   -> [1_284..2_006]   // one chapter
 //! pantry.books(Role::Target)                  -> [(id, GEN), (id, MRK)]
 //! ```
 //!
 //! The id-keyed registry beneath lint, CST, and Sous: one whole-book
-//! replacement per id, canonical `BookKey` order out, and no splice API.
-//! Strings are never retained; products are. Why, and the two hashes' separate
-//! jobs: `galley/src/pantry.md`.
+//! replacement per id, canonical `BookKey` order out, and no splice API. A
+//! target keeps its text as last updated unless the host opts out. Why, and
+//! the two hashes' separate jobs: `galley/src/pantry.md`.
 
 use core::fmt;
 use core::ops::Range;
 
+use mise::books::{BookKey, canonical_rank};
+use mise::utf16::{Utf16Table, utf16_table};
 use rustc_hash::{FxHashMap, FxHashSet};
-use sous_core::BookKey;
 use xxhash_rust::xxh3::xxh3_128;
 
-use crate::onion::{self, Filter, Mask, Toc, tables::books::BOOK_CODES};
-use crate::utf16::{Utf16Table, utf16_table};
+use crate::onion::{self, Filter, Mask, Toc, lint::LintReport};
 use crate::warmer::Warmer;
 
 /// The caller's opaque book identity, kept consistent across updates — a file
@@ -95,12 +96,23 @@ impl fmt::Display for RawChecksum {
 /// What a registered corpus is FOR, which is what its retention costs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Role {
-    /// Full detached products; publishes findings.
+    /// Full detached products, the text beside them, and it publishes findings.
     ///
     /// `Reference` — TOC and per-verse observations only, no mask and no UTF-16
     /// table — is designed and lands with its first consumer, Stage 5
     /// proportionality.
     Target,
+}
+
+/// Whether a target keeps its text beside its products.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum Retain {
+    /// The text as last updated, so nothing is resent per call.
+    #[default]
+    Text,
+    /// No text: the host holds it, and text-needing methods refuse rather than
+    /// quietly answering from nothing.
+    ProductsOnly,
 }
 
 /// Chunk starts plus per-chunk raw checksums: ~1 KB per book, and no text.
@@ -179,8 +191,9 @@ impl Fingerprint {
     }
 }
 
-/// One book's detached products; the assertion below is the compiler's word for
-/// "nothing here borrows the text".
+/// One book's detached products, plus the text they came from under
+/// [`Retain::Text`]; the assertion below is the compiler's word for "nothing
+/// here borrows".
 struct Book {
     key: BookKey,
     role: Role,
@@ -192,6 +205,8 @@ struct Book {
     utf16: Utf16Table,
     /// The raw book's UTF-16 length — a publication's `published_len`.
     len_utf16: u32,
+    /// The text as last updated; `None` under [`Retain::ProductsOnly`].
+    text: Option<String>,
     bytes: usize,
 }
 
@@ -200,11 +215,25 @@ const _: () = {
     detached::<Book>();
 };
 
+impl Book {
+    /// What the last update kept, read back off the text rather than stored
+    /// twice.
+    fn retain(&self) -> Retain {
+        if self.text.is_some() {
+            Retain::Text
+        } else {
+            Retain::ProductsOnly
+        }
+    }
+}
+
 /// The Galley-wide, id-keyed registry of detached per-book products.
 ///
 /// Owns a [`Warmer`] for the chunk-level products and adds the book-level ones.
-/// THE TEXT RULE: a method taking `&str` needs the current bytes and the caller
-/// supplies them; a method that does not works from detached products alone.
+/// THE TEXT RULE: a target keeps its text, so [`update`](Self::update) is the
+/// only method that has to be GIVEN it — the one other `&str` argument,
+/// [`changed_since_update`](Self::changed_since_update), takes a candidate
+/// because a diff names both its sides.
 pub struct Pantry {
     warmer: Warmer,
     books: FxHashMap<BookId, Book>,
@@ -225,24 +254,37 @@ impl Pantry {
         }
     }
 
-    /// Derive and retain this book's products, then drop the text.
+    /// Derive and retain this book's products and its text.
     ///
-    /// Idempotent: text whose raw checksum matches the retained one derives
-    /// nothing. Whole-book replacement is the only mutation, so coordinates
-    /// cannot shift inside a book.
+    /// [`update_with`](Self::update_with) under [`Retain::Text`].
     pub fn update(
         &mut self,
         id: impl Into<BookId>,
         role: Role,
         text: &str,
-    ) -> Result<BookKey, PantryError> {
+    ) -> Result<Entry<'_>, PantryError> {
+        self.update_with(id, role, Retain::Text, text)
+    }
+
+    /// Derive and retain this book's products, keeping or dropping its text.
+    ///
+    /// Idempotent: text whose raw checksum, role and retain mode all match the
+    /// retained ones derives nothing and copies nothing. Whole-book replacement
+    /// is the only mutation, so coordinates cannot shift inside a book.
+    pub fn update_with(
+        &mut self,
+        id: impl Into<BookId>,
+        role: Role,
+        retain: Retain,
+        text: &str,
+    ) -> Result<Entry<'_>, PantryError> {
         let id = id.into();
         let checksum = RawChecksum::of(text.as_bytes());
-        if let Some(book) = self.books.get(&id)
-            && book.checksum == checksum
-            && book.role == role
-        {
-            return Ok(book.key);
+        let served = self.books.get(&id).is_some_and(|book| {
+            book.checksum == checksum && book.role == role && book.retain() == retain
+        });
+        if served {
+            return Ok(Entry { pantry: self, id });
         }
 
         let parsed = self.warmer.parsed(
@@ -265,16 +307,21 @@ impl Pantry {
         );
         let utf16 = utf16_table(text.as_bytes());
         let print = fingerprint(text);
+        let kept = match retain {
+            Retain::Text => Some(text.to_string()),
+            Retain::ProductsOnly => None,
+        };
         let book = Book {
             key,
             role,
             checksum,
             len_utf16: utf16.len_utf16(),
-            bytes: book_bytes(&toc, &mask, &utf16, &print, &id),
+            bytes: book_bytes(&toc, &mask, &utf16, &print, &id, kept.as_deref()),
             fingerprint: print,
             toc,
             mask,
             utf16,
+            text: kept,
         };
         self.derivations += 1;
         let reordered = self
@@ -284,10 +331,24 @@ impl Pantry {
         if reordered {
             self.reorder();
         }
-        Ok(key)
+        Ok(Entry { pantry: self, id })
     }
 
-    /// Drop a book's products. `false` when the id was not registered.
+    /// A handle on one registered book, or `None` when the id is unknown.
+    ///
+    /// `&mut` because [`Entry::lint`] and [`Entry::parse`] run the Warmer.
+    pub fn book(&mut self, id: &BookId) -> Option<Entry<'_>> {
+        if !self.books.contains_key(id) {
+            return None;
+        }
+        Some(Entry {
+            pantry: self,
+            id: id.clone(),
+        })
+    }
+
+    /// Drop a book's products and its text. `false` when the id was not
+    /// registered.
     pub fn remove(&mut self, id: &BookId) -> bool {
         let removed = self.books.remove(id).is_some();
         if removed {
@@ -296,16 +357,11 @@ impl Pantry {
         removed
     }
 
-    pub fn checksum_for(&self, id: &BookId) -> Option<RawChecksum> {
-        self.books.get(id).map(|book| book.checksum)
-    }
-
-    pub fn fingerprint_for(&self, id: &BookId) -> Option<&Fingerprint> {
-        self.books.get(id).map(|book| &book.fingerprint)
-    }
-
     /// Ranges of `text` whose chunk checksum this book's last update never saw
     /// — the chunks a caller would have to re-derive.
+    ///
+    /// Takes text because it names BOTH sides of the diff: the retained
+    /// baseline, and a candidate the host has not sent yet.
     pub fn changed_since_update(&self, id: &BookId, text: &str) -> Option<Vec<Range<u32>>> {
         let book = self.books.get(id)?;
         Some(book.fingerprint.changed_chunks(&fingerprint(text)))
@@ -318,35 +374,8 @@ impl Pantry {
         }
     }
 
-    pub fn key_for(&self, id: &BookId) -> Option<BookKey> {
-        self.books.get(id).map(|book| book.key)
-    }
-
-    pub fn role_for(&self, id: &BookId) -> Option<Role> {
-        self.books.get(id).map(|book| book.role)
-    }
-
-    /// The retained verse-text projection: source ranges and their mask starts.
-    pub fn mask_for(&self, id: &BookId) -> Option<&Mask> {
-        self.books.get(id).map(|book| &book.mask)
-    }
-
-    pub fn toc_for(&self, id: &BookId) -> Option<&Toc> {
-        self.books.get(id).map(|book| &book.toc)
-    }
-
-    /// The retained byte → UTF-16 table, valid against the exact text of the
-    /// last update.
-    pub fn utf16_for(&self, id: &BookId) -> Option<&Utf16Table> {
-        self.books.get(id).map(|book| &book.utf16)
-    }
-
-    /// The raw book's UTF-16 length — a publication's `published_len`.
-    pub fn published_len_for(&self, id: &BookId) -> Option<u32> {
-        self.books.get(id).map(|book| book.len_utf16)
-    }
-
-    /// The Warmer's resident products plus the Pantry's own detached ones.
+    /// The Warmer's resident products plus the Pantry's own — detached
+    /// products and retained text alike.
     pub fn resident_bytes(&self) -> usize {
         self.warmer.resident_bytes() + self.books.values().map(|book| book.bytes).sum::<usize>()
     }
@@ -360,6 +389,24 @@ impl Pantry {
     /// Read-only, for the chunk-level miss and residency counters.
     pub fn warmer(&self) -> &Warmer {
         &self.warmer
+    }
+
+    /// The Warmer's lint over one book's retained text. Split-borrowed, which
+    /// is why this is not `Entry::text` plus a call.
+    fn lint_book(&mut self, id: &BookId) -> Result<LintReport, PantryError> {
+        let text = retained(&self.books, id)?;
+        Ok(self.warmer.lint(text))
+    }
+
+    /// The Warmer's parse over one book's retained text. See
+    /// [`lint_book`](Self::lint_book).
+    fn parse_book(
+        &mut self,
+        id: &BookId,
+        opts: onion::wire::ParseOptions,
+    ) -> Result<Vec<u8>, PantryError> {
+        let text = retained(&self.books, id)?;
+        Ok(self.warmer.parse(text, opts))
     }
 
     fn reorder(&mut self) {
@@ -379,23 +426,95 @@ impl Pantry {
     }
 }
 
-/// A book's position in the spec's book-identifier order, which Onion owns;
-/// codes outside the table sort after every code inside it, by their bytes.
-fn canonical_rank(key: BookKey) -> usize {
-    let bytes = key.as_bytes();
-    BOOK_CODES
-        .iter()
-        .position(|code| **code == bytes)
-        .unwrap_or(BOOK_CODES.len())
+/// One book, one handle: `pantry.update(id, role, &text)?.lint()`.
+///
+/// Borrows the Pantry MUTABLY, because the Warmer pass-throughs run the cache;
+/// the read-only accessors ride along rather than pay for a second handle type.
+pub struct Entry<'p> {
+    pantry: &'p mut Pantry,
+    id: BookId,
 }
 
-/// Estimated resident size of one book's detached products.
+impl Entry<'_> {
+    pub fn key(&self) -> BookKey {
+        self.book().key
+    }
+
+    pub fn role(&self) -> Role {
+        self.book().role
+    }
+
+    /// The xxh3-128 of the raw bytes of the last update.
+    pub fn checksum(&self) -> RawChecksum {
+        self.book().checksum
+    }
+
+    /// Chunk starts plus per-chunk checksums — the baseline for the next
+    /// update.
+    pub fn fingerprint(&self) -> &Fingerprint {
+        &self.book().fingerprint
+    }
+
+    /// The text as last updated, or the refusal a `ProductsOnly` book answers
+    /// with.
+    pub fn text(&self) -> Result<&str, PantryError> {
+        retained(&self.pantry.books, &self.id)
+    }
+
+    /// The retained verse-text projection: source ranges and their mask starts.
+    pub fn mask(&self) -> &Mask {
+        &self.book().mask
+    }
+
+    pub fn toc(&self) -> &Toc {
+        &self.book().toc
+    }
+
+    /// The retained byte → UTF-16 table, valid against the exact text of the
+    /// last update.
+    pub fn utf16(&self) -> &Utf16Table {
+        &self.book().utf16
+    }
+
+    /// The raw book's UTF-16 length — a publication's `published_len`.
+    pub fn published_len(&self) -> u32 {
+        self.book().len_utf16
+    }
+
+    /// [`Warmer::lint`] over the retained text.
+    pub fn lint(&mut self) -> Result<LintReport, PantryError> {
+        self.pantry.lint_book(&self.id)
+    }
+
+    /// [`Warmer::parse`] over the retained text.
+    pub fn parse(&mut self, opts: onion::wire::ParseOptions) -> Result<Vec<u8>, PantryError> {
+        self.pantry.parse_book(&self.id, opts)
+    }
+
+    /// An entry is only ever built for a registered id, and it holds the
+    /// Pantry exclusively, so nothing can remove the book underneath it.
+    fn book(&self) -> &Book {
+        self.pantry.books.get(&self.id).expect("registered id")
+    }
+}
+
+/// One book's text, keyed off a borrow of the map alone so a caller can hold
+/// `&mut self.warmer` at the same time.
+fn retained<'b>(books: &'b FxHashMap<BookId, Book>, id: &BookId) -> Result<&'b str, PantryError> {
+    books
+        .get(id)
+        .and_then(|book| book.text.as_deref())
+        .ok_or_else(|| PantryError::NoText { id: id.clone() })
+}
+
+/// Estimated resident size of one book's detached products and retained text.
 fn book_bytes(
     toc: &Toc,
     mask: &Mask,
     utf16: &Utf16Table,
     print: &Fingerprint,
     id: &BookId,
+    text: Option<&str>,
 ) -> usize {
     size_of_val(&toc.chapters[..])
         + size_of_val(&toc.verses[..])
@@ -404,20 +523,25 @@ fn book_bytes(
         + utf16.index_bytes()
         + print.resident_bytes()
         + id.as_str().len()
+        + text.map_or(0, str::len)
         + size_of::<Book>()
 }
 
-/// Why an update could not be retained.
+/// Why an update could not be retained, or a retained book could not answer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PantryError {
     /// The text has no `\id` line to key it.
     MissingBookKey { id: BookId },
+    /// The book was registered [`Retain::ProductsOnly`], so the host holds its
+    /// text and this operation needs it.
+    NoText { id: BookId },
 }
 
 impl fmt::Display for PantryError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::MissingBookKey { id } => write!(f, "book {id} has no \\id line to key it"),
+            Self::NoText { id } => write!(f, "book {id} retains no text"),
         }
     }
 }
@@ -540,19 +664,26 @@ mod tests {
         Pantry::new(1 << 20)
     }
 
+    fn mrk() -> BookId {
+        BookId::from("books/mrk.usfm")
+    }
+
     #[test]
-    fn an_identical_update_derives_nothing() {
+    fn an_identical_update_derives_nothing_and_recopies_no_text() {
         let mut pantry = pantry();
         let text = mark();
-        let id = BookId::from("books/mrk.usfm");
-        assert_eq!(
-            pantry.update(id.clone(), Role::Target, &text).unwrap(),
-            BookKey::new(*b"MRK")
-        );
+        let id = mrk();
+        let first = pantry.update(id.clone(), Role::Target, &text).unwrap();
+        assert_eq!(first.key(), BookKey::new(*b"MRK"));
+        let retained = first.text().unwrap().as_ptr();
         let (derivations, misses) = (pantry.derivations(), pantry.warmer().misses());
+
+        let again = pantry.update(id, Role::Target, &text).unwrap();
+        assert_eq!(again.key(), BookKey::new(*b"MRK"));
         assert_eq!(
-            pantry.update(id, Role::Target, &text).unwrap(),
-            BookKey::new(*b"MRK")
+            again.text().unwrap().as_ptr(),
+            retained,
+            "text not recopied"
         );
         assert_eq!(pantry.derivations(), derivations, "no book derivation");
         assert_eq!(pantry.warmer().misses(), misses, "no chunk work");
@@ -561,11 +692,11 @@ mod tests {
     #[test]
     fn a_changed_update_replaces_the_products() {
         let mut pantry = pantry();
-        let id = BookId::from("books/mrk.usfm");
+        let id = mrk();
         let before = mark();
-        pantry.update(id.clone(), Role::Target, &before).unwrap();
-        let first = pantry.checksum_for(&id).unwrap();
-        let published = pantry.published_len_for(&id).unwrap();
+        let entry = pantry.update(id.clone(), Role::Target, &before).unwrap();
+        let first = entry.checksum();
+        let published = entry.published_len();
 
         let after = before.replace(
             "A man with a withered hand.",
@@ -575,14 +706,16 @@ mod tests {
         assert_eq!(rework, rework_by_bytes(&before, &after));
         assert_eq!(rework.len(), 1);
 
-        pantry.update(id.clone(), Role::Target, &after).unwrap();
-        assert_ne!(pantry.checksum_for(&id).unwrap(), first);
+        let entry = pantry.update(id.clone(), Role::Target, &after).unwrap();
+        assert_ne!(entry.checksum(), first);
+        assert_eq!(entry.checksum(), RawChecksum::of(after.as_bytes()));
         assert_eq!(
-            pantry.checksum_for(&id).unwrap(),
-            RawChecksum::of(after.as_bytes())
+            entry.text().unwrap(),
+            after,
+            "the copy moved with the update"
         );
         // The inserted " 🖐" is a space plus a surrogate pair: three units.
-        assert_eq!(pantry.published_len_for(&id).unwrap(), published + 3);
+        assert_eq!(entry.published_len(), published + 3);
         assert_eq!(
             pantry.changed_since_update(&id, &after).unwrap(),
             Vec::new(),
@@ -594,11 +727,9 @@ mod tests {
     fn the_retained_products_answer_without_the_text() {
         let mut pantry = pantry();
         let text = mark();
-        let id = BookId::from("books/mrk.usfm");
-        pantry.update(id.clone(), Role::Target, &text).unwrap();
+        let entry = pantry.update(mrk(), Role::Target, &text).unwrap();
 
-        let mask = pantry.mask_for(&id).unwrap();
-        let projected = mask.text(text.as_bytes());
+        let projected = entry.mask().text(text.as_bytes());
         assert!(
             !projected.contains('\\'),
             "no markup survives: {projected:?}"
@@ -608,21 +739,115 @@ mod tests {
             6,
             "six verses"
         );
-        let numbers: Vec<u16> = pantry
-            .toc_for(&id)
-            .unwrap()
-            .chapters
-            .iter()
-            .map(|row| row.number)
-            .collect();
+        let numbers: Vec<u16> = entry.toc().chapters.iter().map(|row| row.number).collect();
         assert_eq!(numbers, vec![0, 1, 2, 3, 4, 5, 6], "front matter plus six");
-        let utf16 = pantry.utf16_for(&id).unwrap();
         let index = onion::utf16_index(text.as_bytes());
-        for range in &mask.ranges {
-            assert_eq!(utf16.to_utf16(range.start), index.to_utf16(range.start));
-            assert_eq!(utf16.to_utf16(range.end), index.to_utf16(range.end));
+        for range in &entry.mask().ranges {
+            assert_eq!(
+                entry.utf16().to_utf16(range.start),
+                index.to_utf16(range.start)
+            );
+            assert_eq!(entry.utf16().to_utf16(range.end), index.to_utf16(range.end));
         }
-        assert_eq!(pantry.published_len_for(&id).unwrap(), index.len_utf16());
+        assert_eq!(entry.published_len(), index.len_utf16());
+    }
+
+    #[test]
+    fn a_target_retains_its_text_by_default() {
+        let mut pantry = pantry();
+        let text = mark();
+        let mut entry = pantry.update(mrk(), Role::Target, &text).unwrap();
+        assert_eq!(entry.text().unwrap(), text);
+        assert_eq!(entry.role(), Role::Target);
+        assert_eq!(
+            entry.lint().unwrap().observations,
+            Warmer::new(1 << 20).lint(&text).observations
+        );
+    }
+
+    #[test]
+    fn products_only_refuses_the_text_and_everything_that_needs_it() {
+        let mut pantry = pantry();
+        let id = mrk();
+        let mut entry = pantry
+            .update_with(id.clone(), Role::Target, Retain::ProductsOnly, &mark())
+            .unwrap();
+        let refused = Err(PantryError::NoText { id: id.clone() });
+        assert_eq!(entry.text(), refused);
+        assert_eq!(entry.lint().err(), refused.clone().err());
+        assert_eq!(
+            entry.parse(onion::wire::ParseOptions::default()).err(),
+            refused.err()
+        );
+        // The detached products never needed the string in the first place.
+        assert!(!entry.mask().ranges.is_empty());
+        assert_eq!(entry.toc().chapters.len(), 7);
+        assert!(entry.utf16().len_utf16() > 0);
+        assert_eq!(entry.key(), BookKey::new(*b"MRK"));
+    }
+
+    #[test]
+    fn a_retained_lint_equals_the_warmers_own() {
+        let mut pantry = pantry();
+        let text = mark();
+        let through_entry = pantry
+            .update(mrk(), Role::Target, &text)
+            .unwrap()
+            .lint()
+            .unwrap();
+        let direct = Warmer::new(1 << 20).lint(&text);
+        assert_eq!(through_entry.observations, direct.observations);
+
+        let opts = onion::wire::ParseOptions {
+            toc: true,
+            ..Default::default()
+        };
+        let plated = pantry.book(&mrk()).unwrap().parse(opts).unwrap();
+        assert_eq!(plated, Warmer::new(1 << 20).parse(&text, opts));
+    }
+
+    #[test]
+    fn retention_is_what_resident_bytes_grows_by() {
+        let text = mark();
+        let mut kept = pantry();
+        kept.update(mrk(), Role::Target, &text).unwrap();
+        let mut dropped = pantry();
+        dropped
+            .update_with(mrk(), Role::Target, Retain::ProductsOnly, &text)
+            .unwrap();
+
+        let difference = kept.resident_bytes() - dropped.resident_bytes();
+        assert_eq!(difference, text.len(), "the text and nothing else");
+    }
+
+    #[test]
+    fn switching_retention_mode_rederives() {
+        let mut pantry = pantry();
+        let text = mark();
+        pantry.update(mrk(), Role::Target, &text).unwrap();
+        let derivations = pantry.derivations();
+
+        pantry
+            .update_with(mrk(), Role::Target, Retain::ProductsOnly, &text)
+            .unwrap();
+        assert_eq!(
+            pantry.derivations(),
+            derivations + 1,
+            "a different retention"
+        );
+        assert!(pantry.book(&mrk()).unwrap().text().is_err());
+    }
+
+    #[test]
+    fn book_answers_for_a_registered_id_only() {
+        let mut pantry = pantry();
+        let id = mrk();
+        let key = pantry
+            .update(id.clone(), Role::Target, &mark())
+            .unwrap()
+            .key();
+        assert_eq!(pantry.book(&id).unwrap().key(), key);
+        assert!(pantry.book(&BookId::from("books/luk.usfm")).is_none());
     }
 
     #[test]
@@ -660,18 +885,14 @@ mod tests {
     #[test]
     fn remove_drops_the_products() {
         let mut pantry = pantry();
-        let id = BookId::from("books/mrk.usfm");
+        let id = mrk();
         pantry.update(id.clone(), Role::Target, &mark()).unwrap();
         let resident = pantry.resident_bytes();
         assert!(resident > 0);
 
         assert!(pantry.remove(&id));
         assert!(pantry.resident_bytes() < resident);
-        assert_eq!(pantry.checksum_for(&id), None);
-        assert_eq!(pantry.fingerprint_for(&id), None);
-        assert!(pantry.mask_for(&id).is_none());
-        assert!(pantry.toc_for(&id).is_none());
-        assert!(pantry.utf16_for(&id).is_none());
+        assert!(pantry.book(&id).is_none());
         assert_eq!(pantry.changed_since_update(&id, &mark()), None);
         assert!(pantry.books(Role::Target).is_empty());
         assert!(!pantry.remove(&id), "already gone");
@@ -681,8 +902,10 @@ mod tests {
     fn a_book_with_no_id_line_is_refused() {
         let mut pantry = pantry();
         assert_eq!(
-            pantry.update("scratch.usfm", Role::Target, "\\c 1\n\\p\n\\v 1 keyless\n"),
-            Err(PantryError::MissingBookKey {
+            pantry
+                .update("scratch.usfm", Role::Target, "\\c 1\n\\p\n\\v 1 keyless\n")
+                .err(),
+            Some(PantryError::MissingBookKey {
                 id: BookId::from("scratch.usfm")
             })
         );

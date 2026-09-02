@@ -12,7 +12,8 @@
 //!   table and the verse anchors out of an already-lexed stream, and answers
 //!   "what reference is this byte".
 //! - [`utf16`](crate::utf16) — the editor-wire translation layer: `byte ↔ utf16`
-//!   over any one string, a stride index costing 1.6% of it.
+//!   over any one string, a stride index costing 1.6% of it. Owned by
+//!   [`mise`], re-exported here.
 //! - [`mask`](crate::mask) — WHICH bytes survive a `Filter`, as a range set that
 //!   doubles as the offset map back to the source. Walks the CST, because
 //!   "text is not verse text" is a scope fact.
@@ -53,7 +54,11 @@ mod token;
 pub mod usj;
 #[cfg(feature = "usx")]
 pub mod usx;
-pub mod utf16;
+/// Byte ↔ UTF-16 offsets over one string — [`mise::utf16`], re-exported so
+/// onion's callers and its public API never name the leaf crate.
+pub mod utf16 {
+    pub use mise::utf16::{Cursor, RunWalk, Runs, STRIDE, Utf16Index, utf16_index, utf16_len};
+}
 pub mod vref;
 pub mod wire;
 

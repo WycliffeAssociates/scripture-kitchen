@@ -2,8 +2,8 @@
 //!
 //!     cargo run -p sous-core --release --example atom_fleet
 //!
-//! Not a test: it reads `sous-chef/corpora/calibration-corpora/`, which CI
-//! does not have. It fails loudly when that directory is absent rather than
+//! Not a test: it reads the workspace's `corpora/calibration-corpora/`, which
+//! CI does not have. It fails loudly when that directory is absent rather than
 //! passing by doing nothing. Record what it found in evidence.md.
 
 use std::path::{Path, PathBuf};
@@ -13,7 +13,7 @@ use unicode_segmentation::UnicodeSegmentation;
 
 fn main() {
     let dir = std::env::args().nth(1).map_or_else(
-        || PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../corpora/calibration-corpora"),
+        || PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../corpora/calibration-corpora"),
         PathBuf::from,
     );
     let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)

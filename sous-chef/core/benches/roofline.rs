@@ -24,7 +24,7 @@ use divan::{
 };
 use sous_core::unicode::lookup::{walk, walk_trie, walk_trie_swar};
 
-const ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../corpora/");
+const ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../corpora/");
 const FILES: [&str; 8] = [
     "WA-en-ulb.txt",
     "amh.txt",

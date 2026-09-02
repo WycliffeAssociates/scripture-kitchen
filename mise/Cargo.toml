@@ -1,0 +1,11 @@
+[package]
+name = "mise"
+version.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+# ZERO dependencies, and that is the point: mise is the leaf both engines may
+# depend on without depending on each other. Adding one here is a design change.
+[dependencies]

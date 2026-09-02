@@ -10,34 +10,9 @@ use rustc_hash::FxHashSet;
 /// The stable scripture identity that pairs books across producer inputs.
 ///
 /// Distinct from [`BookIndex`] on purpose: a caller may present books in any
-/// order, while findings still name that caller's snapshot position.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct BookKey([u8; 3]);
-
-impl BookKey {
-    pub const fn new(bytes: [u8; 3]) -> Self {
-        Self(bytes)
-    }
-
-    pub const fn as_bytes(self) -> [u8; 3] {
-        self.0
-    }
-}
-
-impl From<[u8; 3]> for BookKey {
-    fn from(bytes: [u8; 3]) -> Self {
-        Self::new(bytes)
-    }
-}
-
-impl fmt::Display for BookKey {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match core::str::from_utf8(&self.0) {
-            Ok(code) => f.write_str(code),
-            Err(_) => write!(f, "{:02X}{:02X}{:02X}", self.0[0], self.0[1], self.0[2]),
-        }
-    }
-}
+/// order, while findings still name that caller's snapshot position. Owned by
+/// [`mise::books`], the leaf crate that keeps sous-core off onion.
+pub use mise::books::BookKey;
 
 /// A checked position in the caller-owned corpus book table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

@@ -12,6 +12,8 @@ workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+# The leaf both engines share: `BookKey`, canonical order, `Utf16Table`.
+mise = { path = "../mise" }
 usfm_onion = { path = "../onion" }
 # The other engine galley coordinates. Never the reverse: sous-core keeps no
 # onion dependency and sees only neutral projected coordinates.

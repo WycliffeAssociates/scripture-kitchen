@@ -8,6 +8,8 @@ workspace = true
 
 [dependencies]
 memchr.workspace = true
+# The zero-dependency leaf `BookKey` lives in, so sous-core needs no onion.
+mise = { path = "../../mise" }
 rustc-hash.workspace = true
 
 [dev-dependencies]

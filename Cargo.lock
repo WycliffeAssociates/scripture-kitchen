@@ -250,6 +250,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "mise"
+version = "0.1.0"
+
+[[package]]
 name = "nu-ansi-term"
 version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -464,6 +468,7 @@ version = "0.1.0"
 dependencies = [
  "divan",
  "memchr",
+ "mise",
  "rustc-hash",
  "unicode-segmentation",
 ]
@@ -545,6 +550,7 @@ version = "0.1.0"
 dependencies = [
  "divan",
  "js-sys",
+ "mise",
  "onion-wasm",
  "rustc-hash",
  "sous-core",
@@ -559,6 +565,7 @@ version = "0.1.0"
 dependencies = [
  "divan",
  "memchr",
+ "mise",
  "rayon",
  "rustc-hash",
  "serde_json",

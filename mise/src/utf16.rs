@@ -1,43 +1,36 @@
-//! `Utf16Index`: byte ↔ UTF-16 offsets over one string, both directions O(1).
+//! Byte ↔ UTF-16 offsets: one type for a string you still have, one for a
+//! string you no longer do.
 //!
-//! The engine counts bytes; a JS editor counts UTF-16 code units. Over
-//! `\v 1 λόγος ἦν` the two spaces drift apart:
+//! ```text
+//! have the string, need both directions   -> Utf16Index (borrows it)
+//!     let ix = utf16_index("\\v 1 λόγος ἦν".as_bytes());
+//!     ix.to_utf16(16) == 11        ix.to_byte(11) == 16        ix.len_utf16() == 13
+//!
+//! string gone, need byte -> utf16 at character boundaries -> Utf16Table (owns bits)
+//!     let t = utf16_table("\\v 1 λόγος ἦν".as_bytes());   // then drop the string
+//!     t.to_utf16(16) == 11         t.len_utf16() == 13
+//! ```
 //!
 //! ```text
 //! bytes   \  v  ␠  1  ␠  CE BB CF 8C CE B3 CE BF CF 82 ␠  E1 BC A6 CE BD
 //! byte#   0  1  2  3  4  5     7     9     11    13    15 16       19
 //! utf16#  0  1  2  3  4  5     6     7     8     9     10 11       12
 //!                        λ     ό     γ     ο     ς        ἦ        ν
-//!
-//! let ix = utf16_index("\\v 1 λόγος ἦν".as_bytes());
-//! ix.to_utf16(16) == 11        // the ἦ's first byte is the 11th unit
-//! ix.to_byte(11)  == 16
-//! ix.len_utf16()  == 13
 //! ```
 //!
-//! One `u32` per [`STRIDE`] bytes holds the unit count at that boundary
-//! (4 bytes per 256 = 1.6% of the string), so a query is a table read plus a
-//! SWAR count over ≤`STRIDE` bytes. Nothing decodes; the count needs only byte
-//! CLASSES, because UTF-16 units are
-//! `bytes − continuations + (leads ≥ 0xF0)` for every character:
-//!
-//! ```text
-//! char      utf8 bytes         utf16   formula
-//! e         1  (65)            1       1 − 0 + 0
-//! λ         2  (CE BB)         1       2 − 1 + 0
-//! ἦ         3  (E1 BC A6)      1       3 − 2 + 0
-//! 𝕽 U+1D57D 4  (F0 9D 95 BD)   2       4 − 3 + 1   (a surrogate pair)
-//! ```
-//!
-//! An index belongs to exactly ONE string — it borrows the bytes it indexes, so
-//! pointing a source index at a masked view is unrepresentable. Nothing is
-//! cached: a whole book builds in microseconds from bytes the caller already
-//! holds, so no invalidation story exists to get wrong.
+//! The engine counts bytes; a JS editor counts UTF-16 code units, and above
+//! `\v 1 λόγος ἦν` the two spaces drift apart. Nothing here decodes — the
+//! count needs only byte CLASSES, and [`utf16_len`] states the formula.
+//! Sizes, and which of the two a retaining host wants: `galley/src/pantry.md`.
 
-/// Bytes between stride boundaries. 256 costs `n/64` index bytes (1.6% of the
-/// source) and bounds every query's scan at 256 bytes — a handful of SWAR
-/// words. 1024 would cost 0.4% for a 4× longer scan.
+/// Bytes between cumulative entries, shared by both structures. 256 costs
+/// `n/64` index bytes (1.6% of the source) for [`Utf16Index`] and bounds every
+/// query's scan at 256 bytes — a handful of SWAR words, or four population
+/// counts for [`Utf16Table`]. 1024 would cost 0.4% for a 4× longer scan.
 pub const STRIDE: usize = 256;
+
+/// Bytes per [`Utf16Table`] mark word.
+const WORD: usize = 64;
 
 /// UTF-16 code units for `bytes`, counting each character at its LEAD byte.
 ///
@@ -48,10 +41,21 @@ pub const STRIDE: usize = 256;
 /// utf16_len(&"😀".as_bytes()[2..]) == 0  // …and its orphaned tail scores 0
 /// ```
 ///
-/// The last two lines are load-bearing: `bytes` need not be a whole number of
-/// characters, and the "whole at the lead, 0 per continuation" rule is what
-/// lets a stride boundary fall mid-character with no special case — see
-/// [`Utf16Index::to_utf16`].
+/// UTF-16 units are `bytes − continuations + (leads ≥ 0xF0)` for every
+/// character:
+///
+/// ```text
+/// char      utf8 bytes         utf16   formula
+/// e         1  (65)            1       1 − 0 + 0
+/// λ         2  (CE BB)         1       2 − 1 + 0
+/// ἦ         3  (E1 BC A6)      1       3 − 2 + 0
+/// 𝕽 U+1D57D 4  (F0 9D 95 BD)   2       4 − 3 + 1   (a surrogate pair)
+/// ```
+///
+/// The example's last two lines are load-bearing: `bytes` need not be a whole
+/// number of characters, and the "whole at the lead, 0 per continuation" rule
+/// is what lets a stride boundary fall mid-character with no special case —
+/// see [`Utf16Index::to_utf16`].
 ///
 /// Two population counts per 8 bytes, endian-agnostic (every operation is
 /// per-byte and every shift's cross-byte spill lands in bits `HIGH` discards):
@@ -410,7 +414,7 @@ impl RunWalk<'_> {
 ///
 /// [`Utf16Index`] answers random-access queries and costs 1.6% of the source in
 /// heap. A cursor answers a SORTED sequence of queries in one pass and costs
-/// nothing: converting every offset an [`analyze`](mod@crate::analyze) read emits is
+/// nothing: converting every offset an engine read emits is
 /// one sweep of the document, not one binary search per offset. Both directions
 /// are total and snap the same way as the index; a query that goes BACKWARD is
 /// legal and rewinds to the start, so a caller that sorts is fast and a caller
@@ -508,6 +512,111 @@ fn lead(byte: u8) -> (usize, u32) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// The detached form: byte -> UTF-16 with the source bytes GONE.
+// ---------------------------------------------------------------------------
+
+/// Where every UTF-16 unit of one string starts, without the string.
+///
+/// One bit per source byte, set at a character's lead byte and again at the
+/// byte after a 4-byte lead — which is exactly the low surrogate, so ONE mask
+/// counts units where separate character and astral masks would need two.
+/// 36 bytes per 256 of source, 14.06%, and it answers character-boundary
+/// offsets only.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Utf16Table {
+    /// Bit `i % 64` of word `i / 64` is set when source byte `i` starts a
+    /// UTF-16 unit, so the units in any byte range are its population count.
+    marks: Vec<u64>,
+    /// `totals[k]` is the unit count of `source[..k * STRIDE]`, which bounds
+    /// a query's popcounts at `STRIDE / WORD`.
+    totals: Vec<u32>,
+    len_utf16: u32,
+    source_len: u32,
+}
+
+/// Builds the table for `source`, which must be valid UTF-8.
+///
+/// One linear pass, one bit per byte.
+pub fn utf16_table(source: &[u8]) -> Utf16Table {
+    let mut marks = vec![0u64; source.len().div_ceil(WORD)];
+    // A unit starts at every non-continuation byte, and again at the
+    // continuation after a 4-byte lead: that second mark IS the low surrogate,
+    // which is what lets one mask count units instead of two masks counting
+    // characters and astral characters apart.
+    let mut prev = 0u8;
+    for (at, &byte) in source.iter().enumerate() {
+        if byte & 0xC0 != 0x80 || prev >= 0xF0 {
+            marks[at / WORD] |= 1 << (at % WORD);
+        }
+        prev = byte;
+    }
+
+    let mut totals = Vec::with_capacity(source.len() / STRIDE + 1);
+    let mut units = 0u32;
+    for (word, bits) in marks.iter().enumerate() {
+        if word % (STRIDE / WORD) == 0 {
+            totals.push(units);
+        }
+        units += bits.count_ones();
+    }
+    // A source that ends exactly on a stride boundary has one more boundary
+    // than it has stride-leading words.
+    while totals.len() < source.len() / STRIDE + 1 {
+        totals.push(units);
+    }
+
+    Utf16Table {
+        marks,
+        totals,
+        len_utf16: units,
+        source_len: source.len() as u32,
+    }
+}
+
+impl Utf16Table {
+    /// [`utf16_table`], for callers who prefer the associated form.
+    pub fn new(source: &[u8]) -> Self {
+        utf16_table(source)
+    }
+
+    /// The whole string's UTF-16 length.
+    pub fn len_utf16(&self) -> u32 {
+        self.len_utf16
+    }
+
+    /// The source byte length the table was built from.
+    pub fn source_len(&self) -> u32 {
+        self.source_len
+    }
+
+    /// Heap bytes this table occupies — the number a retention budget counts.
+    pub fn index_bytes(&self) -> usize {
+        self.marks.len() * size_of::<u64>() + self.totals.len() * size_of::<u32>()
+    }
+
+    /// The UTF-16 offset of a CHARACTER-BOUNDARY source byte offset; past the
+    /// end clamps to [`len_utf16`](Self::len_utf16).
+    ///
+    /// PRECONDITION: `byte` starts a character. [`Utf16Index`] snaps an
+    /// interior byte down by reading the source; with no source there is
+    /// nothing to snap with, and every offset a retaining host rebases — mask
+    /// ranges, TOC anchors, finding spans — is already boundary-legal.
+    pub fn to_utf16(&self, byte: u32) -> u32 {
+        let byte = (byte as usize).min(self.source_len as usize);
+        let mut units = self.totals[byte / STRIDE];
+        let last = byte / WORD;
+        for word in byte / STRIDE * (STRIDE / WORD)..last {
+            units += self.marks[word].count_ones();
+        }
+        let into = byte % WORD;
+        if into > 0 {
+            units += (self.marks[last] & ((1 << into) - 1)).count_ones();
+        }
+        units
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -545,6 +654,10 @@ mod tests {
             "\u{1f600}".to_string(),
             "a".to_string(),
             "\u{0905}".to_string(),
+            // CRLF, and lengths that land exactly on a stride boundary.
+            "\\id GEN\r\n\\c 1\r\n\\v 1 In the beginning God created.\r\n".to_string(),
+            "x".repeat(STRIDE),
+            "x".repeat(STRIDE * 2),
         ];
 
         // A multi-byte character straddling a stride boundary, one string per
@@ -719,5 +832,52 @@ mod tests {
                 );
             }
         }
+    }
+
+    // ---- the detached table, against the borrowing index ------------------
+
+    #[test]
+    fn the_table_equals_the_index_at_every_character_boundary() {
+        for source in zoo() {
+            let table = utf16_table(source.as_bytes());
+            let index = utf16_index(source.as_bytes());
+            assert_eq!(table.len_utf16(), index.len_utf16(), "{source:?} total");
+            assert_eq!(table.source_len(), source.len() as u32, "{source:?} bytes");
+            for (byte, _) in source.char_indices() {
+                assert_eq!(
+                    table.to_utf16(byte as u32),
+                    index.to_utf16(byte as u32),
+                    "{source:?} @{byte}"
+                );
+            }
+            let end = source.len() as u32;
+            assert_eq!(table.to_utf16(end), index.to_utf16(end), "{source:?} @end");
+            assert_eq!(table.to_utf16(u32::MAX), table.len_utf16(), "past the end");
+        }
+    }
+
+    #[test]
+    fn the_table_answers_the_greek_doc_example() {
+        let table = utf16_table("\\v 1 λόγος ἦν".as_bytes());
+        assert_eq!(table.to_utf16(16), 11);
+        assert_eq!(table.len_utf16(), 13);
+        assert_eq!(Utf16Table::new("\\v 1 λόγος ἦν".as_bytes()), table);
+    }
+
+    /// The size claim: one bit per byte plus one `u32` per stride.
+    #[test]
+    fn the_table_is_one_bit_per_byte_plus_a_stride_total() {
+        let source = DEVANAGARI.repeat(200);
+        let table = utf16_table(source.as_bytes());
+        assert_eq!(
+            table.index_bytes(),
+            source.len().div_ceil(WORD) * 8 + (source.len() / STRIDE + 1) * 4
+        );
+        assert!(
+            table.index_bytes() * 4 <= source.len(),
+            "{} table bytes for {} of source",
+            table.index_bytes(),
+            source.len()
+        );
     }
 }

@@ -1,5 +1,5 @@
-//! The detached UTF-16 table against Onion's borrowing index, over the
-//! committed 8-corpus test tier.
+//! The detached table against the borrowing index, over the committed
+//! 8-corpus test tier.
 //!
 //! ```text
 //! for every character boundary of every corpus:
@@ -10,10 +10,9 @@
 //! Byte source: the committed test tier only. A missing file is a loud
 //! failure, never a silent skip.
 
-use usfm_galley::onion::utf16::utf16_index;
-use usfm_galley::utf16_table;
+use mise::utf16::{utf16_index, utf16_table};
 
-const ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../sous-chef/corpora/");
+const ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../corpora/");
 const FILES: [&str; 8] = [
     "WA-en-ulb.txt",
     "amh.txt",
@@ -34,7 +33,7 @@ fn corpus(name: &str) -> String {
 /// The table's whole reason to exist: the same answers with no source bytes.
 #[test]
 #[ignore = "exhaustive oracle: every character boundary of ~35 MB — 21 s debug, 0.6 s release"]
-fn the_table_equals_onions_index_at_every_boundary_of_the_tier() {
+fn the_table_equals_the_index_at_every_boundary_of_the_tier() {
     for name in FILES {
         let text = corpus(name);
         let table = utf16_table(text.as_bytes());

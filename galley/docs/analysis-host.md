@@ -3,8 +3,9 @@
 Status: accepted direction; the Onion `Warmer` exists, and the coordinate
 pipeline below is implemented as stateless `galley::sous::publish_onion_findings`
 (fresh derivation per invocation, no retained cache). The registry half of the
-resident host has landed as `galley::Pantry` (see `galley/src/pantry.md`); the
-composed publication that reads from it has not.
+resident host has landed as `galley::Pantry`, text retention and the per-book
+`Entry` handle included (see `galley/src/pantry.md`); the composed publication
+that reads from it has not.
 
 This note records the lifecycle decisions that belong to Galley rather than
 either engine. Sous remains independent of Onion. Galley supplies their shared
@@ -14,18 +15,18 @@ workflow, cache, coordinate conversion, and publication boundary.
 
 Revised 2026-09-02. The caller registers each book under an opaque `BookId`
 it keeps consistent (a file path in practice) with a role, `Target` or
-`Reference`, and replaces a book only whole: `update(id, text)`. For a
+`Reference`, and replaces a book only whole: `update(id, role, text)`. For a
 target, Galley retains the text as last updated and derives its products
 beside it — chunk products, TOC, mask, detached UTF-16 index, chapter
 observations. Unchanged books are never resent; analysis, publication, and
 find run against the retained copy. A host may opt a target out of text
-retention (`Retain::ProductsOnly`); text-needing operations then return a
-typed refusal and the host supplies the text. Measured motivation: marshaling
-a 5 MB corpus into WASM costs 3.5–5 ms, a quarter of a frame, while 5 MB of
-retained text is cheap (evidence.md, 2026-09-02). Book order in a publication is
-canonical by `BookKey` within a role, ties by id, so `BookIndex` does not
-depend on the order of updates, and the corpus buffer carries the ids in a
-string table.
+retention (`update_with(id, role, Retain::ProductsOnly, text)`); text-needing
+operations then return `Err(PantryError::NoText)` and the host supplies the
+text. Measured motivation: marshaling a 5 MB corpus into WASM costs 3.5–5 ms,
+a quarter of a frame, while 5 MB of retained text is cheap (evidence.md,
+2026-09-02). Book order in a publication is canonical by `BookKey` within a
+role, ties by id, so `BookIndex` does not depend on the order of updates, and
+the corpus buffer carries the ids in a string table.
 
 Galley never accepts a splice and never mutates its copy in place; the copy
 is replaced whole or not at all, so it cannot drift from the editor's buffer
@@ -52,7 +53,7 @@ identity laws:
 | --- | --- | --- |
 | Onion/Sous chapter observations | checksum of every declared local input plus schema/context stamp; which chapters those are is `Fingerprint::changed_chunks` | unchanged chapters skip their expensive map work |
 | producer projection/source-map data | exact raw-book `RawChecksum` plus producer/schema stamp | projected offsets may be mapped through a byte-identical later input |
-| detached UTF-16 index/map data | exact raw-book `RawChecksum` plus UTF-16 schema stamp | unchanged books skip rebuilding their byte-to-UTF-16 map, retained as `galley::Utf16Table` |
+| detached UTF-16 index/map data | exact raw-book `RawChecksum` plus UTF-16 schema stamp | unchanged books skip rebuilding their byte-to-UTF-16 map, retained as `mise::utf16::Utf16Table` |
 | per-invocation UTF-16 cursor | none | recreate it against the current string; its traversal position is not reusable state |
 | book/corpus summaries and judgments | none independently | recompute from current observations in deterministic order |
 | packed findings | complete analysis snapshot identity | replace as one corpus publication; do not reuse an unchanged book section alone |
@@ -62,7 +63,7 @@ exact values therefore cannot outlive an invocation unless Galley also retains
 the source, which this contract forbids. Reusing UTF-16 work means retaining a
 detached table such as owned run/index data and binding or applying it only
 after the new input matches the raw checksum. The concrete detached type is a
-host implementation choice: `galley::Utf16Table`, one bit per source byte
+host implementation choice: `mise::utf16::Utf16Table`, one bit per source byte
 marking where a UTF-16 unit starts, is what `galley::Pantry` retains.
 
 A markup-only edit changes the raw checksum, so its projection and UTF-16

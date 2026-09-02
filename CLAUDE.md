@@ -19,6 +19,12 @@ the CLI for analysis input, galley (`galley::sous`) for coordinate rebasing
 and findings publication. Do not add an onion dependency to `sous-core` — see
 the ownership boundaries in the charter.
 
+What the two engines DO share is `mise/`, the workspace's zero-dependency leaf:
+spec-derived data tables and borrow-free data structures only (`BookKey`, the
+spec's book order, the UTF-16 offset types). `sous-core` depends on `mise`, not
+on onion; onion re-exports from it so its own public API is unchanged. The
+scope rule, and what it excludes, is `mise/README.md`.
+
 `sous-chef/donor/` (gitignored, local only, like debug/) is the v1 spike's
 source, copied from `scripture-sous-chef-2` to read and port from by hand. It
 is not a crate and nothing builds it; `donor/deps.toml.txt` records what it
@@ -50,9 +56,9 @@ once compiled against. The original repo is still on disk if it is lost.
   playground modes (`--mask-trace`, `--vref`, `--format-trace`); refresh
   them when the bytes they show change.
 - Two corpus tiers, and NO `#[test]` may read the second:
-  `sous-chef/corpora/*.txt` is the test tier — 8 corpora chosen for script
+  `corpora/*.txt` is the test tier — 8 corpora chosen for script
   spread, committed, ~9MB packed, so a clone can run the suite.
-  `sous-chef/corpora/calibration-corpora/` is ~1500 bibles, gitignored, and
+  `corpora/calibration-corpora/` is ~1500 bibles, gitignored, and
   fetched with R2 credentials CI does not have. Sweeps over it are a bin or
   an example you run deliberately; record what they found (see the ledger
   practice) rather than asserting on it.

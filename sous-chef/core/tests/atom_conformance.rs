@@ -111,7 +111,7 @@ fn widening_any_sub_range_of_a_cluster_returns_the_whole_cluster() {
 
 #[test]
 fn the_test_tier_has_no_cluster_the_atom_rule_would_split() {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../corpora");
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../corpora");
     let mut report = Vec::new();
     for name in CORPORA {
         let text = read(root.join(name));

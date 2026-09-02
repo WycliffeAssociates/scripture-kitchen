@@ -286,8 +286,11 @@ Work:
    the id-keyed registry of detached per-book products (Warmer, TOC, mask,
    detached UTF-16 table, published length, `Fingerprint`), canonical `BookKey`
    order, `Target` role only; see
-   [../galley/src/pantry.md](../galley/src/pantry.md). B2, the `Expediter` that
-   publishes from it, is next.**
+   [../galley/src/pantry.md](../galley/src/pantry.md). Text retention landed
+   next to it: a target keeps its text unless the host passes
+   `Retain::ProductsOnly`, and `update` hands back an `Entry` — the per-book
+   handle `lint`, `parse`, and the detached products all answer from. B2, the
+   `Expediter` that publishes from it, is next.**
 3. Implement ordered book reduction over independently mapped chapters. Keep
    only the smallest carry facts needed for nonletter adjacency, casing
    terminal state, and doubled-word state; do not create a generic monoid

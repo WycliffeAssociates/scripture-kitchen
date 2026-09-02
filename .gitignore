@@ -23,12 +23,12 @@ USER-OPEN.md
 
 /sous-chef/donor/
 
-# Credentials for sous-chef/corpora/fetch-corpora.sh (see .env.example).
+# Credentials for corpora/fetch-corpora.sh (see .env.example).
 .env
 
 # The calibration tier: ~1500 bibles, 3.2GB raw / ~950MB as per-file .gz. This
 # repo is installed by git clone (`npm i github:...#v0.1.0` clones, then packs
 # through package.json `files`), so repo weight is a consumer cost. Fetched,
 # never carried. The committed corpora/*.txt are the test tier.
-/sous-chef/corpora/calibration-corpora/
+/corpora/calibration-corpora/
 sous-chef/planning/

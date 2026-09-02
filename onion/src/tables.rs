@@ -5,8 +5,9 @@
 //! - [`rows`] — the authored data, one `MarkerRow` per canonical marker.
 //!   Spellings collapse by stripping `-s`/`-e` first, then digits, so `q1..q4`
 //!   are one row `q` and `qt3-s` is one row `qt`. Index 0 is the EMPTY row.
-//! - [`books`] — the `\id` book identifiers, membership only; authored, and
-//!   lint's `book-code-*` rules are its only consumer.
+//! - [`books`] — the `\id` book identifiers, membership only; authored in
+//!   [`mise::books`] because Sous keys on the same table, and lint's
+//!   `book-code-*` rules are onion's only consumer.
 //! - [`emit`] — the generator: `rows::ROWS` in, the text of `generated.rs` out.
 //!   A pure `String`-returning function so the freshness test can call it;
 //!   `src/bin/codegen.rs` is a thin main over it.
@@ -22,7 +23,12 @@
 //! instructions (the u64 match, `common_marker_checks`), the LEXER reads
 //! columns. One authored source, several generated projections.
 
-pub mod books;
+/// The `\id` book identifiers — [`mise::books`], re-exported. Onion still owns
+/// what canonical order MEANS; the leaf crate only holds the bytes.
+pub mod books {
+    pub use mise::books::{BOOK_CODES, is_book_code, is_scripture_code, upper3};
+}
+
 pub mod emit;
 pub mod generated;
 pub mod rows;
