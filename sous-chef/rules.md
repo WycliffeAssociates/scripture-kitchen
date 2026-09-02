@@ -52,13 +52,28 @@ byte-pattern decision:
 - backslashes in content;
 - line-initial merge-conflict markers.
 
-Deferred until the Stage 1 classifier exists; they need Unicode classes and
-are not approximated by byte rules:
+Landed with the Stage 1 classifier, each reading `sous-core::unicode` bits
+rather than approximating them with byte rules:
 
-- invalid/noncharacter code points beyond U+FFFD;
-- zero-width space and misplaced NBSP/format characters where the rule can
-  make a deterministic claim;
-- combining marks without a base.
+- noncharacters (`U+FDD0..=U+FDEF`, every `U+xxFFFE`/`U+xxFFFF`);
+- combining marks without a base — a `Mark` whose preceding scalar is
+  absent, whitespace, a control, or a non-glue format character;
+- misplaced format characters — a `Cf` scalar outside any glue position.
+  ZWJ/ZWNJ between letters and a Prepend introducing what follows it are
+  doing their defined job and stay silent; a zero-width space, a stray BOM,
+  or a bidi control adrift in a verse is reported;
+- NBSP where the claim is deterministic — beside other whitespace, or at an
+  edge of the analyzed text. NBSP inside a phrase is convention, not damage.
+
+Every emitted span is snapped out to grapheme-atom edges, so a finding
+never splits a rendered grapheme. A run whose scalars hang off a base
+therefore publishes a span one atom wider than its code-point count.
+
+Still deferred:
+
+- NBSP leading or trailing a *verse*. `scan` sees one projected book, so
+  "edge" currently means the edge of the analyzed text. The verse-grained
+  form waits for the chapter/verse-aware walk in Stage 2.
 
 Marker validity, empty marker structure, chapter/verse ordering, and metadata
 consistency remain Onion/editor responsibilities. Through the Onion producer
@@ -76,8 +91,12 @@ exposes an empty analyzable unit.
   content span is reported.
 - A line-initial `<<<<<<< ours` line is reported; the same text mid-line is
   not.
-- A decomposed grapheme's combining mark is not mistaken for a free mark
-  (waits for the classifier).
+- A decomposed grapheme's combining mark is not mistaken for a free mark; a
+  bare U+0301 after a space is reported.
+- ZWJ and ZWNJ between Indic letters are silent; a joiner with nothing to
+  join is reported.
+- U+FDD0 is reported; U+FFFD keeps its own class.
+- A stray U+FEFF mid-verse is reported; NBSP inside a French phrase is not.
 
 ## Level 1b — nonletter convention inventory
 

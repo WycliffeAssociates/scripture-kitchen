@@ -37,6 +37,10 @@ Already present:
   with a generated lazy TypeScript reader;
 - an explicitly disposable probes crate;
 - a manifest-and-fetch corpus lane with no Git LFS dependency;
+- a generated, committed Unicode classification table from pinned UCD 17.0.0
+  extracts, with exhaustive drift, `std` cross-check, lookup-agreement, and
+  generator-determinism gates, plus the grapheme atom rule and its two
+  conformance differentials;
 - measured prototypes for byte hygiene, streaming classification, the shared
   nonletter substrate, per-chapter rows, reduction, bands, dispersion, and
   grapheme fast-path fidelity;
@@ -146,7 +150,8 @@ now executable contracts and keeps donor code from becoming an accidental API.
 | vref projection | semantic contract is settled; no production loader yet | implement after the Onion path pins duplicate and bridge fixtures |
 | nonletter substrate | `donor/src/probe3.rs` and `donor/src/rows.rs` are measured donors only | port consumer-led classifier bits after Stage 0 closes |
 | finding transport | checked v1 corpus envelope, caller-ordered `BookKey` directory, fixed `PackedFinding` sections, shared golden buffers, and generated lazy TypeScript reader are executable; `galley::sous::publish_onion_findings` rebases projected UTF-8 through the Mask to raw-book UTF-16 (bounding spans over removed markup) and encodes the corpus buffer; code `1` `Hygiene` rides the same record with its lane codec in `codec/hygiene.rs` | Galley's canonical snapshot identity and checksum-keyed detached reuse remain Stage 2 lifecycle work |
-| hygiene | `sous-core::hygiene::scan` over projected text: C0/DEL range filter, `memchr3` needle filter, `memchr3` marker filter, maximal same-class runs; `sous --findings` prints rows with `Sid`, `sous --publish` writes the UTF-16 corpus buffer through galley | classifier-dependent checks after Stage 1 items 1–2; a snapshot identity instead of the CLI's zero id |
+| unicode classification | `sous-core::unicode`: `Class(u16)`, `class_of`, `is_glue`, a committed `table.rs` from `bin/gen-unicode`, and `atoms::widen_to_atoms` for grapheme-safe emission. Three lookup shapes behind one API so the bench can choose; the walk lane is the byte trie plus an ASCII chunk | Level 1b consumes the bits in Stage 3; casing beyond the two predicate bits waits for Stage 4 |
+| hygiene | `sous-core::hygiene::scan` over projected text: C0/DEL range filter, `memchr3` needle filter, `memchr3` marker filter, a SWAR-skipped scalar pass for free marks, misplaced format characters, NBSP, and noncharacters, maximal same-class runs, every span snapped to atom edges; `sous --findings` prints rows with `Sid`, `sous --publish` writes the UTF-16 corpus buffer through galley | NBSP's verse-edge case once the walk is verse-grained; a snapshot identity instead of the CLI's zero id |
 
 Stage 0 is closed. Stage 1 was entered hygiene-first rather than
 classifier-first: the byte-level checks need no Unicode data, they put the
@@ -225,9 +230,18 @@ Work:
    Start from consumer questions, not the donor bit layout: alphabetic,
    casing, decimal digit, whitespace, mark, punctuation/symbol, extender,
    grapheme-complex, and only proven refinements.
+   **Landed as `sous-core::unicode` with `cargo run -p sous-core --bin
+   gen-unicode` over trimmed, checksummed UCD 17.0.0 extracts in
+   `core/testdata/ucd/`; `Class(u16)` carries the charter's list plus the
+   three refinements the atom rule proved it needs (gcb-control, prepend,
+   linker).**
 2. Commit generated compact ranges plus an at-runtime BMP lookup strategy.
    Compare a static expanded table against a local snapshot only if both are
    viable in the new workspace; choose by measured whole-walk cost and memory.
+   **Landed: `CLASS_RANGES` plus a static two-level table (1024 `cp >> 6`
+   indices into 207 deduplicated 64-scalar blocks, ~28.7 KiB of `.rodata`),
+   one pool serving both the decoded lookup and the byte trie. The bench
+   chose it over the lazy 128 KiB flat BMP array on a near tie.**
 3. Implement masked iteration over Onion's projection in projected UTF-8
    coordinates. Chapter and verse APIs derive ranges from the existing `Mask`
    and `Toc`; they do not allocate per-chapter/per-verse strings or store a
@@ -237,23 +251,51 @@ Work:
    waits for a second host.**
 4. Implement grapheme-safe emitted boundaries with the fast atom rule and a
    correctness fallback/check for complex cases.
+   **Landed as `unicode::atoms::widen_to_atoms`. `COMPLEX` runs widen
+   conservatively instead of segmenting, so the runtime carries no
+   segmentation dependency; `unicode-segmentation` is a dev-dependency
+   oracle only.**
 5. Implement deterministic hygiene scans over raw bytes with content-mask hit
    validation. **Byte-level checks landed over projected content (the mask
-   already excludes markup); classifier-dependent checks wait for items 1–2.**
+   already excludes markup). The four classifier-dependent checks — free
+   combining mark, misplaced format character, NBSP, noncharacter — landed
+   with items 1–2 and ride an eight-byte SWAR ASCII skip ahead of the byte
+   trie. Every emitted span passes through `widen_to_atoms`. NBSP's
+   verse-edge case waits for the verse-aware walk.**
 6. Expose the implemented hygiene findings through the same CLI command. This
    is the first real consumer path, not a separate playground API.
    **`--findings` and `--publish` landed.**
 
 Verification gate:
 
-- exhaustive generated-table agreement with source predicates/UCD data;
+- exhaustive generated-table agreement with source predicates/UCD data.
+  **Green: `table_matches_a_fresh_ucd_parse_for_every_scalar` re-parses the
+  extracts with an independent oracle, `std_char_predicates_agree_over_every_scalar`
+  pins the pin against `std`, and `every_lookup_candidate_agrees_over_every_scalar`
+  keeps the three lookups identical. `a_second_generator_run_reproduces_the_committed_table`
+  keeps the artifact deterministic;**
 - script-diverse UAX/grapheme differential, including ZWJ/ZWNJ and the regional
-  indicator edge;
+  indicator edge. **Green: `no_atom_boundary_falls_inside_a_graphemebreaktest_cluster`
+  and `widening_any_sub_range_of_a_cluster_returns_the_whole_cluster` over the
+  pristine `GraphemeBreakTest.txt`, plus
+  `the_test_tier_has_no_cluster_the_atom_rule_would_split` against
+  `unicode-segmentation`;**
 - every reported span lies in projected content and on UTF-8/grapheme
-  boundaries, and `locate()` returns the correct raw producer position;
-- CRLF, astral, markup-only, empty-span, and split-mask synthetic cases;
+  boundaries, and `locate()` returns the correct raw producer position.
+  **Green: `every_emitted_span_lies_on_atom_boundaries`, plus the byte-level
+  classes' `debug_assert` that widening cannot move them;**
+- CRLF, astral, markup-only, empty-span, and split-mask synthetic cases.
+  **CRLF, astral, and empty-span landed here; markup-only and split-mask
+  remain proven at the Stage 0 publication seam;**
 - production benchmark remains within an explicitly reviewed regression band
   of the probe floor; absolute probe numbers are evidence, not a promise.
+  **Recorded in the evidence table below. `hygiene::scan` drops from
+  8.6/3.8 GB/s to 3.9 GB/s (Latin) and 0.36 GB/s (Hindi) now that it carries
+  the classifier walk; that is the pass every Level 1b observation rides.**
+
+**Stop:** Stage 1 items 1, 2, 4, 5 are landed; item 3 is proven by the CLI
+adapter and item 6 by the hygiene CLI path, so the Stage 1 gate review can
+run before Stage 2 opens.
 
 ## Stage 2 — Galley chapter cache and ordered reduction
 
@@ -505,6 +547,8 @@ depends on one.
 | full shared substrate | about 28 ms on the English probe corpus versus roughly 257 ms v1 cold analysis | simple whole-corpus/whole-book passes are viable |
 | expanded feature substrate | roughly 12–31% above the first shared-counter cut | counter-shaped additions can share the walk cheaply |
 | grapheme atom differential | after fixing extender classification, one nonletter-involving mismatch over 1,504 corpora | fast walk plus grapheme-safe emission is viable |
+| roofline, Stage 1 classifier walk (`cargo bench -p sous-core`, Apple Silicon, one core, 8-corpus test tier, medians, ns/scalar) | plain lookup (static two-level) 1.64 en/nya/swh, 1.83 spa, 2.00 fra, 3.66 amh, 3.90 hin, 4.17 grc. Lazy 128 KiB flat BMP 1.97/2.14/2.26/3.36/3.57/3.79 — faster on non-Latin by 8–10%, slower on Latin by 17%. Byte trie over raw UTF-8 1.31/1.51/1.65/3.23/3.46/3.89: faster than the plain lookup on every corpus. Byte trie plus 8-byte SWAR ASCII with hysteresis 0.22 en/nya, 0.36 swh, 1.49 spa, 1.76 fra, 3.40 amh, 3.62 hin, 4.01 grc. SWAR over the *decoded* lookup taxes amh/hin 24% and grc 13% | **table:** static two-level wins the near tie on size — 28.7 KiB of `.rodata`, no heap, no `OnceLock`, nothing extra in the `.wasm`, against 128 KiB built at first use. **Fast lanes:** the byte trie ships, and the SWAR ASCII chunk ships on top of it — no corpus in the tier is slower than the plain lookup, and the chunk costs the bare trie only 3–7% on non-Latin. The decoding SWAR variant is rejected: v1's failure mode reproduced exactly, and taxing Indic and Greek to speed English is the wrong trade |
+| atom rule fleet differential (`cargo run -p sous-core --release --example atom_fleet`) | 1,079 corpora, 1,809,448,088 UAX #29 clusters, 0 split by the atom rule, 0 corpora affected. Run over the donor's `ebible-main/corpus` checkout because `corpora/calibration-corpora/` is not present on this machine | the conservative widening rule is safe to ship with no runtime segmenter. GB9c is the one place it needs help: without the linker bit, 102,139 Hindi clusters (3.6% of `hin2017`) split |
 | per-chapter row reduce | about 17–25 µs for 8k–12k glyph rows; edit plus reduce under 50 µs in the probe | derive aggregates on read; no rollup cache |
 | band sweep | default staircase gave about p50 10, p90 36, p95 44 rows/corpus; low cloud tracked `0.8/sqrt(n)` | readable fraction bands are credible shipping candidates |
 | dispersion | clustering changed gradually with share; genre remained a confound; above-band clustered rows about 0.3/corpus | annotation/ranking only, never a hard gate |

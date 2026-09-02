@@ -12,6 +12,10 @@ rustc-hash.workspace = true
 
 [dev-dependencies]
 divan = "0.1.21"
+# Oracle only. `sous-core` ships no segmenter; this pins the atom rule's
+# "never split a cluster" claim against UAX #29 at the same Unicode version
+# as `testdata/ucd/`.
+unicode-segmentation = "1.13.3"
 
 [[bench]]
 name = "roofline"

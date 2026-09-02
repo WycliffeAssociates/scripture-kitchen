@@ -27,10 +27,18 @@ pub enum HygieneClass {
     StrandedBackslash = 5,
     /// A line-initial `<<<<<<< `, `=======`, or `>>>>>>> `.
     ConflictMarker = 6,
+    /// A combining mark with nothing to combine with.
+    FreeCombiningMark = 7,
+    /// A General_Category `Cf` scalar outside any glue position.
+    MisplacedFormat = 8,
+    /// U+00A0 beside other whitespace or at an edge of the analyzed text.
+    NoBreakSpace = 9,
+    /// U+FDD0..=U+FDEF or U+xxFFFE/U+xxFFFF.
+    Noncharacter = 10,
 }
 
 impl HygieneClass {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 11] = [
         Self::C0Control,
         Self::Delete,
         Self::C1Control,
@@ -38,6 +46,10 @@ impl HygieneClass {
         Self::StrayCarriageReturn,
         Self::StrandedBackslash,
         Self::ConflictMarker,
+        Self::FreeCombiningMark,
+        Self::MisplacedFormat,
+        Self::NoBreakSpace,
+        Self::Noncharacter,
     ];
 
     pub const fn name(self) -> &'static str {
@@ -49,6 +61,10 @@ impl HygieneClass {
             Self::StrayCarriageReturn => "StrayCarriageReturn",
             Self::StrandedBackslash => "StrandedBackslash",
             Self::ConflictMarker => "ConflictMarker",
+            Self::FreeCombiningMark => "FreeCombiningMark",
+            Self::MisplacedFormat => "MisplacedFormat",
+            Self::NoBreakSpace => "NoBreakSpace",
+            Self::Noncharacter => "Noncharacter",
         }
     }
 }
@@ -65,8 +81,11 @@ impl TryFrom<i16> for HygieneClass {
 }
 
 /// The compact hygiene payload: the class and how many code points the
-/// maximal run holds. `run` saturates at `i16::MAX` and sets `SATURATED`;
-/// the span itself stays exact.
+/// maximal run holds. `run` saturates at `i16::MAX` and sets `SATURATED`.
+///
+/// `run` counts the offending scalars. The span is that run snapped out to
+/// grapheme-atom edges (charter invariant 6), so a scalar-level class whose
+/// run hangs off a base publishes a span one atom wider than its count.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HygieneDigest {
     class: HygieneClass,
@@ -172,10 +191,10 @@ mod tests {
     fn hygiene_wire_fails_closed_on_class_run_and_flag_misuse() {
         let record = hygiene(0, 1, HygieneClass::ConflictMarker, 1);
         let mut bad_class = record.encode();
-        bad_class[12] = 7;
+        bad_class[12] = 11;
         assert_eq!(
             PackedFinding::decode(&bad_class, &[1]),
-            Err(CodecError::UnknownHygieneClass(7))
+            Err(CodecError::UnknownHygieneClass(11))
         );
         let mut zero_run = record.encode();
         zero_run[14..16].copy_from_slice(&0i16.to_le_bytes());

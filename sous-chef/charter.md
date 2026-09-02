@@ -94,9 +94,12 @@ reduction order or rule semantics.
    projection resolves the source line and numeric verse designator. Sous
    carries no scripture-key strings or parallel coordinate systems in every
    finding.
-6. **Findings never split a rendered grapheme.** The walk may use a proven
-   fast atom rule; emitted span edges are checked against full grapheme
-   boundaries.
+6. **Findings never split a rendered grapheme.** The walk uses a proven fast
+   atom rule — `sous_core::unicode::atoms::widen_to_atoms` — that snaps every
+   emitted edge outward to an atom boundary. The claim it makes is exactly
+   "no atom boundary falls inside a UAX #29 cluster", proven against the
+   UCD's own break test and a whole-fleet segmenter differential rather than
+   re-checked at runtime. Over-wide spans are allowed; split ones are not.
 7. **Digit pooling is mandatory.** Unicode decimal digits share one judging
    lane so number systems do not become punctuation anomalies.
 8. **Glue is Mark plus grapheme extenders.** In particular ZWJ/ZWNJ and other

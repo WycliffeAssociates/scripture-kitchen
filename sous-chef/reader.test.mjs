@@ -117,7 +117,7 @@ test("decodes mixed proportionality and hygiene rows, saturation included", () =
   });
 
   const badClass = hexFixture("corpus_v1_hygiene.hex");
-  badClass[56 + 12] = 7;
+  badClass[56 + 12] = 11;
   assert.throws(() => FindingsSnapshot.open(badClass).book(0).at(0), FindingsSnapshotError);
   const zeroRun = hexFixture("corpus_v1_hygiene.hex");
   zeroRun[56 + 14] = 0;

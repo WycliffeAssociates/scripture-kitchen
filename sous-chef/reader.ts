@@ -50,7 +50,7 @@ export interface LengthProportionalityFinding {
 }
 
 /** Wire lane 12..14 is the class index into this table. */
-export const HYGIENE_CLASSES = ["C0Control", "Delete", "C1Control", "ReplacementChar", "StrayCarriageReturn", "StrandedBackslash", "ConflictMarker"] as const;
+export const HYGIENE_CLASSES = ["C0Control", "Delete", "C1Control", "ReplacementChar", "StrayCarriageReturn", "StrandedBackslash", "ConflictMarker", "FreeCombiningMark", "MisplacedFormat", "NoBreakSpace", "Noncharacter"] as const;
 export type HygieneClass = (typeof HYGIENE_CLASSES)[number];
 
 export interface HygieneDigest {

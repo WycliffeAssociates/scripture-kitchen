@@ -18,7 +18,11 @@
 
 use std::sync::LazyLock;
 
-use divan::{Bencher, counter::BytesCount};
+use divan::{
+    Bencher,
+    counter::{BytesCount, ItemsCount},
+};
+use sous_core::unicode::lookup::{Lookup, walk, walk_swar_ascii, walk_trie, walk_trie_swar};
 
 const ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../corpora/");
 const FILES: [&str; 8] = [
@@ -94,4 +98,58 @@ fn hygiene(bencher: Bencher, name: &str) {
     bencher
         .counter(BytesCount::of_str(text))
         .bench(|| sous_core::hygiene::scan(text).len());
+}
+
+// ── The classifier walk (Stage 1) ───────────────────────────────────────
+//
+// One `Class` per scalar over the whole corpus. Read against the ceilings
+// above: the walk is a dependent load chain, so the scalar row is its real
+// neighbour, not `memchr3`. Candidates differ only in the arithmetic that
+// reaches the table; lanes differ in whether a scalar is decoded at all.
+
+fn classified(bencher: Bencher, name: &str, walk: impl Fn(&str) -> u64 + Sync) {
+    let text = corpus(name);
+    bencher
+        .counter(BytesCount::of_str(text))
+        .counter(ItemsCount::new(text.chars().count()))
+        .bench(|| walk(text));
+}
+
+/// Candidate 1: static two-level table, `.rodata` only.
+#[divan::bench(args = FILES)]
+fn class_two_level(bencher: Bencher, name: &str) {
+    classified(bencher, name, |text| walk(Lookup::TwoLevel, text));
+}
+
+/// Candidate 2: 128 KiB flat BMP array built at first use, as v1 shipped.
+#[divan::bench(args = FILES)]
+fn class_flat_bmp(bencher: Bencher, name: &str) {
+    classified(bencher, name, |text| walk(Lookup::FlatBmp, text));
+}
+
+/// Candidate 3 through the per-scalar API: the trie pays a re-encode here,
+/// which is what `lane_trie_bytes` removes.
+#[divan::bench(args = FILES)]
+fn class_trie_scalar(bencher: Bencher, name: &str) {
+    classified(bencher, name, |text| walk(Lookup::Trie, text));
+}
+
+/// Fast lane 1: the byte trie walking raw UTF-8, no scalar decode.
+#[divan::bench(args = FILES)]
+fn lane_trie_bytes(bencher: Bencher, name: &str) {
+    classified(bencher, name, walk_trie);
+}
+
+/// Fast lane 2: eight-byte SWAR ASCII with hysteresis over candidate 1.
+#[divan::bench(args = FILES)]
+fn lane_swar_ascii(bencher: Bencher, name: &str) {
+    classified(bencher, name, walk_swar_ascii);
+}
+
+/// Fast lane 3: the same ASCII chunk over the byte trie, so the lane's cost
+/// is measured against the walk that actually wins rather than against a
+/// decoding one.
+#[divan::bench(args = FILES)]
+fn lane_trie_swar(bencher: Bencher, name: &str) {
+    classified(bencher, name, walk_trie_swar);
 }

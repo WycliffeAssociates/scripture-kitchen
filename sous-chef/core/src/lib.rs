@@ -8,6 +8,7 @@ mod codec;
 mod corpus;
 pub mod hygiene;
 mod input;
+pub mod unicode;
 
 pub use alignment::{AlignedSide, AlignedUnit, Alignment, AlignmentFact, align};
 pub use codec::{
