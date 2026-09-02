@@ -1,13 +1,17 @@
-//! The headerless fixed-width finding record used by Sous transport.
+//! The headerless 16-byte finding record.
 //!
-//! This module freezes one semantic record without choosing a surrounding
-//! snapshot envelope. Records validate their projection context at creation
-//! and decode time, while encoding derives the wire tag and payload from a
-//! typed finding-kind union.
+//! ```text
+//! PackedFinding::new(7, 230, book 0, Hygiene(C0Control, run 223))
+//!   → 07 00 00 00 | e6 00 00 00 | 00 00 | 01 | 00 | 00 00 | df 00
+//!      from         to            book    code  flags  lanes
+//! ```
 //!
-//! Bytes 12..16 are two `i16` lanes whose meaning is the rule code's alone.
-//! Each rule's payload lives in its own submodule with its `lanes()` /
-//! `from_lanes()` pair; this file holds only the record and the code table.
+//! `code`, `flags`, and both lanes derive from the typed `FindingKind`, so a
+//! caller cannot set a code that disagrees with its payload. Each rule's
+//! payload lives in its own submodule with a `lanes()` / `from_lanes()` pair.
+//!
+//! Layout table, code table, fail-closed rules, and how to add a code:
+//! README.md.
 
 use core::fmt;
 
@@ -54,9 +58,8 @@ impl From<RuleCode> for u8 {
     }
 }
 
-/// Code-specific semantic payloads. Adding a future payload requires a new
-/// rule code and an explicit wire interpretation; it cannot share a generic
-/// numerator/denominator shape accidentally.
+/// Code-specific semantic payloads. A new payload requires a new rule code
+/// and an explicit wire interpretation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FindingKind {
     LengthProportionality(ProportionalityDigest),
@@ -73,7 +76,7 @@ pub struct PackedFinding {
 }
 
 impl PackedFinding {
-    /// Constructs a record after checking the span against its selected book.
+    /// Checks the span against its selected book before constructing.
     pub fn new(
         from: u32,
         to: u32,
@@ -106,7 +109,7 @@ impl PackedFinding {
         self.kind
     }
 
-    /// Returns the active code derived from this finding's typed kind.
+    /// The active code, derived from the typed kind.
     pub const fn code(self) -> RuleCode {
         match self.kind {
             FindingKind::LengthProportionality(_) => RuleCode::LengthProportionality,
@@ -114,7 +117,7 @@ impl PackedFinding {
         }
     }
 
-    /// Returns representation flags derived from this finding's typed payload.
+    /// Representation flags, derived from the typed payload.
     pub const fn flags(self) -> FindingFlags {
         let saturated = match self.kind {
             FindingKind::LengthProportionality(digest) => digest.saturated(),
@@ -153,8 +156,8 @@ impl PackedFinding {
         Ok(finding)
     }
 
-    /// Decodes the fixed fields without a book-table lookup. The corpus
-    /// envelope uses this after selecting the directory entry for the row.
+    /// Decodes the fixed fields without a book-table lookup; the corpus
+    /// envelope has already selected the row's directory entry.
     pub(crate) fn decode_wire(bytes: &[u8]) -> Result<Self, CodecError> {
         if bytes.len() != RECORD_LEN {
             return Err(CodecError::InvalidLength {

@@ -8,15 +8,13 @@
 //! is_glue('\u{094D}') → true                   // DEVANAGARI SIGN VIRAMA
 //! ```
 //!
-//! The bits are exactly the charter's authorized list — "alphabetic, casing,
-//! decimal digit, whitespace, mark, punctuation/symbol, extender,
-//! grapheme-complex, and only proven refinements" — plus the three
-//! refinements [`atoms`] needs to keep every UCD grapheme cluster whole:
-//! [`Class::is_gcb_control`], [`Class::is_prepend`], and [`Class::is_linker`].
-//! There is no script lane, quote set, word-break lane, or normalization
-//! prefilter: each returns only with a consumer.
+//! The bits are the charter's authorized list plus the three refinements
+//! [`atoms`] needs to keep a UCD grapheme cluster whole. Each remaining lane —
+//! script, quote set, word break, normalization prefilter — returns only with
+//! a consumer.
 //!
-//! `table.rs` is generated and committed; `sous-core` reads no file at runtime.
+//! `table.rs` is generated and committed; `sous-core` reads no file at
+//! runtime. Bit table, generator, index paths, and gates: README.md.
 
 pub mod atoms;
 pub mod lookup;
@@ -24,12 +22,8 @@ mod table;
 #[cfg(test)]
 mod tests;
 
-pub use lookup::{Lookup, class_of_with};
-
-/// One scalar's classification bits.
-///
-/// The layout is an implementation detail shared with `bin/gen-unicode.rs`;
-/// callers read it through the predicates.
+/// One scalar's classification bits. Callers read them through the
+/// predicates; the layout belongs to `bin/gen-unicode.rs`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Class(u16);
 
@@ -60,14 +54,13 @@ pub mod bits {
     pub const NONCHARACTER: u16 = 1 << 10;
     /// Grapheme_Cluster_Break `Extend | SpacingMark | ZWJ`.
     pub const EXTENDER: u16 = 1 << 11;
-    /// Grapheme_Cluster_Break `Prepend | Control | CR | LF | Regional_Indicator
-    /// | L | V | T | LV | LVT`, plus emoji-data `Extended_Pictographic`.
+    /// Grapheme_Cluster_Break `Prepend | Control | CR | LF |
+    /// Regional_Indicator | L | V | T | LV | LVT`, plus `Extended_Pictographic`.
     pub const COMPLEX: u16 = 1 << 12;
     /// Grapheme_Cluster_Break `Control | CR | LF` — the COMPLEX members that
-    /// break on both sides (UAX #29 GB4/GB5) instead of joining.
+    /// break on both sides (GB4/GB5) instead of joining.
     pub const GCB_CONTROL: u16 = 1 << 13;
-    /// Grapheme_Cluster_Break `Prepend` — the COMPLEX members that join
-    /// forward onto an ordinary base (GB9b).
+    /// Grapheme_Cluster_Break `Prepend` — joins forward onto a base (GB9b).
     pub const PREPEND: u16 = 1 << 14;
     /// DerivedCoreProperties `InCB; Linker` — the viramas GB9c joins through.
     pub const LINKER: u16 = 1 << 15;
@@ -157,10 +150,10 @@ impl Class {
     }
 }
 
-/// The classification of one scalar, through the shipped lookup.
+/// The classification of one scalar.
 #[inline]
 pub fn class_of(c: char) -> Class {
-    lookup::class_of_default(c)
+    lookup::class_of(c)
 }
 
 /// Charter invariant 8, as a scalar predicate.

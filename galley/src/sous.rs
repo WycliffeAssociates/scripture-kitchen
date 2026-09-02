@@ -12,13 +12,11 @@
 //! ```
 //!
 //! Each invocation owns its book strings and derives mask, TOC, and UTF-16
-//! index fresh; nothing is retained after the call. The rebase is
-//! `projected UTF-8 → Mask source runs → raw-book UTF-8 → raw-book UTF-16`.
+//! index fresh; nothing survives the call. A projected range crossing removed
+//! markup publishes the BOUNDING raw range as its navigation span — the exact
+//! retained runs stay reachable through the typed-detail path.
 //!
-//! A projected range crossing removed markup publishes the BOUNDING raw
-//! range — first retained byte through last — as its navigation span. The
-//! exact retained run set stays reachable through the typed-detail path; it
-//! never becomes extra rows here.
+//! Envelope layout and coordinate contract: `sous-chef/core/src/codec/README.md`.
 
 use core::fmt;
 
@@ -103,9 +101,9 @@ pub fn publish_onion_findings(
                 return Err(PublishError::NotCharBoundary { row, offset });
             }
         }
-        // Bounding raw span: the first retained byte through the last. `to`
-        // is exclusive and char-aligned, so `to - 1` names a byte of the last
-        // retained character and `+ 1` lands back on a source char boundary.
+        // Bounding raw span: first retained byte through last. `to` is
+        // exclusive and char-aligned, so `to - 1` names a byte of the last
+        // retained character and `+ 1` lands back on a char boundary.
         let (raw_from, raw_to) = if from == to {
             let at = book.mask.to_source(from);
             (at, at)
@@ -228,8 +226,8 @@ mod tests {
     }
 
     fn finding(from: u32, to: u32, book: usize, kind: FindingKind) -> PackedFinding {
-        // Caller-side construction validates against SOME table; a generous
-        // fake one keeps these tests about publish's own validation.
+        // A generous fake book table keeps these tests about publish's own
+        // validation, not the caller's.
         PackedFinding::new(from, to, BookIndex::new(book).unwrap(), kind, &[u32::MAX; 4]).unwrap()
     }
 
@@ -245,8 +243,8 @@ mod tests {
         ]
     }
 
-    /// The shared fixture: caller order MRK before GEN (non-canonical), one
-    /// split-mask finding, one astral finding, one plain finding.
+    /// Caller order MRK before GEN (non-canonical), with one split-mask, one
+    /// astral, and one plain finding.
     fn fixture_publication() -> Vec<u8> {
         let mrk = projected(MRK);
         let genesis = projected(GEN);
@@ -268,9 +266,8 @@ mod tests {
 
     #[test]
     fn split_mask_finding_publishes_the_bounding_utf16_range() {
-        // "Jesus " is raw 21..27, " wept.\n" is raw 43..50; the removed
-        // footnote sits between. The published span bounds both: 21..50,
-        // ASCII throughout, so UTF-16 equals raw UTF-8.
+        // "Jesus " is raw 21..27 and " wept.\n" is raw 43..50, with the
+        // removed footnote between. The span bounds both, all ASCII.
         let buffer = fixture_publication();
         let snapshot = CorpusSnapshot::open(&buffer).unwrap();
         assert_eq!(snapshot.coordinate_space(), CoordinateSpace::Utf16);
@@ -281,8 +278,8 @@ mod tests {
 
     #[test]
     fn astral_finding_publishes_surrogate_pair_correct_utf16() {
-        // "🧅." is raw bytes 88..93; the onion is 4 UTF-8 bytes but 2 UTF-16
-        // units, so the span is 88..91 and MRK's published length is 92.
+        // The onion is 4 UTF-8 bytes but 2 UTF-16 units, so raw 88..93
+        // publishes as 88..91 and MRK's published length is 92.
         let buffer = fixture_publication();
         let snapshot = CorpusSnapshot::open(&buffer).unwrap();
         let mark = snapshot.book_by_key(BookKey::new(*b"MRK")).unwrap();

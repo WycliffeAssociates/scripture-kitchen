@@ -1,9 +1,8 @@
 //! Pairs target and source verse rows without depending on either producer.
 //!
-//! The result keeps alignment facts separate from analyzable units. A fact
-//! describes why a row was not paired; it is not itself a finding. Bridge
-//! units retain every constituent projected range so later measurements do
-//! not pretend that separated source ranges are one contiguous span.
+//! Alignment facts stay separate from analyzable units: a fact says why a row
+//! did not pair, and is never a finding. Bridge units keep every constituent
+//! range, so no measurement treats separated ranges as one contiguous span.
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -221,9 +220,9 @@ fn align_book(
         }
     }
 
-    // A bridge on one side may equal a contiguous run of ordinary verses on
-    // the other. Keep the run as a list of ranges and pair duplicate runs only
-    // when their multiplicities are equal.
+    // A bridge may equal a contiguous run of ordinary verses on the other
+    // side. Keep the run as a list of ranges; pair duplicate runs only when
+    // their multiplicities are equal.
     for key in keys.iter().copied().filter(|key| key.first() < key.last()) {
         let target_indices: Vec<_> = target
             .iter()
@@ -266,9 +265,9 @@ fn align_book(
         }
     }
 
-    // Do the reverse bridge direction after the first pass. Used rows cannot
-    // be consumed twice, and any remaining interval intersection is reported
-    // as structural partial overlap below.
+    // The reverse bridge direction runs after the first pass. Used rows
+    // cannot be consumed twice; a remaining intersection reports as partial
+    // overlap below.
     for key in keys.iter().copied().filter(|key| key.first() < key.last()) {
         let source_indices: Vec<_> = source
             .iter()

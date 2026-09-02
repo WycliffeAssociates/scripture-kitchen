@@ -1,6 +1,5 @@
 //! Lanes for `RuleCode::Hygiene`: the class discriminant, then the run
-//! length. The scan itself lives in `crate::hygiene`; this is only its wire
-//! shape.
+//! length. The scan is `crate::hygiene`; this is only its wire shape.
 //!
 //! ```text
 //! lanes  [0, 223]              →  C0Control, a 223-code-point run
@@ -9,8 +8,8 @@
 
 use super::{CodecError, FindingFlags};
 
-/// One deterministic hygiene class. The wire carries the discriminant in the
-/// first payload lane, so values are fixed and append-only like rule codes.
+/// One deterministic hygiene class. The discriminant rides the first payload
+/// lane, so values are fixed and append-only like rule codes.
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum HygieneClass {
@@ -80,12 +79,11 @@ impl TryFrom<i16> for HygieneClass {
     }
 }
 
-/// The compact hygiene payload: the class and how many code points the
-/// maximal run holds. `run` saturates at `i16::MAX` and sets `SATURATED`.
+/// The class and the offending code points in the maximal run. `run`
+/// saturates at `i16::MAX` and sets `SATURATED`.
 ///
-/// `run` counts the offending scalars. The span is that run snapped out to
-/// grapheme-atom edges (charter invariant 6), so a scalar-level class whose
-/// run hangs off a base publishes a span one atom wider than its count.
+/// The span is that run snapped out to grapheme-atom edges, so a run hanging
+/// off a base publishes a span one atom wider than its count.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HygieneDigest {
     class: HygieneClass,
@@ -126,8 +124,7 @@ impl HygieneDigest {
     pub(super) fn from_lanes(lanes: [i16; 2], flags: FindingFlags) -> Result<Self, CodecError> {
         let class = HygieneClass::try_from(lanes[0])?;
         let run = u32::try_from(lanes[1]).map_err(|_| CodecError::EmptyHygieneRun)?;
-        // A saturated row reads back exactly i16::MAX; anything else claiming
-        // saturation is malformed.
+        // A saturated row reads back exactly i16::MAX.
         let saturated = flags.contains(FindingFlags::SATURATED);
         if saturated && run != i16::MAX as u32 {
             return Err(CodecError::UnknownFlags(flags.bits()));

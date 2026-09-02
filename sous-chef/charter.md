@@ -6,10 +6,11 @@ what a translation normally does, reports the evidence in plain counts, and
 leaves the linguistic decision to a person.
 
 This file is the durable authority for purpose, ownership, and cross-boundary
-contracts. [rules.md](rules.md) defines the checks and their examples.
-[roadmap.md](roadmap.md) says how to build and verify them. If an implementation
-choice conflicts with this charter, stop and change the plan or amend the
-charter deliberately.
+contracts. [rules/](rules/) defines the checks and their examples.
+[roadmap.md](roadmap.md) says how to build and verify them, and
+[evidence.md](evidence.md) is the ledger of measurements they rest on. If an
+implementation choice conflicts with this charter, stop and change the plan or
+amend the charter deliberately.
 
 ## The product promise
 
@@ -100,6 +101,7 @@ reduction order or rule semantics.
    "no atom boundary falls inside a UAX #29 cluster", proven against the
    UCD's own break test and a whole-fleet segmenter differential rather than
    re-checked at runtime. Over-wide spans are allowed; split ones are not.
+   The rule and its gates: [core/src/unicode/README.md](core/src/unicode/README.md).
 7. **Digit pooling is mandatory.** Unicode decimal digits share one judging
    lane so number systems do not become punctuation anomalies.
 8. **Glue is Mark plus grapheme extenders.** In particular ZWJ/ZWNJ and other
@@ -264,7 +266,9 @@ derived state recomputed from the current invocation after any corpus change.
 
 The in-memory finding model may carry rich typed evidence. The hot transport
 is a versioned fixed-width snapshot designed from day one, not a serialized
-Rust struct and not an array of JS objects.
+Rust struct and not an array of JS objects. The implementation, its
+fail-closed rules, and the procedure for adding a code are in
+[core/src/codec/README.md](core/src/codec/README.md).
 
 Recommended v1 record, 16 bytes, little-endian:
 

@@ -8,9 +8,10 @@ Rust USFM engine. Design authority lives in `planning/` — `ideas/`
 
 `onion` / `onion-wasm` / `galley` are the engine. `sous-chef/` is a separate
 product — it finds reviewable inconsistencies in scripture text from counts
-alone — with its own authority in `sous-chef/charter.md`, `rules.md`,
-`roadmap.md`. Everything above about tests and conventions applies to both;
-everything in `planning/` and `GLOSSARY.md` is onion's only.
+alone — with its own authority in `sous-chef/charter.md`, `rules/`,
+`roadmap.md`, and the `evidence.md` ledger. Everything above about tests and
+conventions applies to both; everything in `planning/` and `GLOSSARY.md` is
+onion's only.
 
 `sous-core` does NOT depend on onion: it takes a neutral borrowed view of the
 analysis. `sous-cli` and `galley` are the adapters allowed to depend on both —

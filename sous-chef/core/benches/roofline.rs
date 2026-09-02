@@ -10,8 +10,8 @@
 //!     ╰─ hygiene ...      x ms    │        │             the real pass
 //!
 //! Every pass below is an intentional subtraction from the ceiling above it,
-//! not a profile-guided guess. Numbers are recorded in roadmap.md's evidence
-//! table; nothing here asserts on them.
+//! not a profile-guided guess. Numbers are recorded in evidence.md;
+//! nothing here asserts on them.
 //!
 //! Byte source: the committed test-tier corpora only. A missing file is a
 //! loud failure, never a silent skip.
@@ -22,7 +22,7 @@ use divan::{
     Bencher,
     counter::{BytesCount, ItemsCount},
 };
-use sous_core::unicode::lookup::{Lookup, walk, walk_swar_ascii, walk_trie, walk_trie_swar};
+use sous_core::unicode::lookup::{walk, walk_trie, walk_trie_swar};
 
 const ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../corpora/");
 const FILES: [&str; 8] = [
@@ -104,8 +104,8 @@ fn hygiene(bencher: Bencher, name: &str) {
 //
 // One `Class` per scalar over the whole corpus. Read against the ceilings
 // above: the walk is a dependent load chain, so the scalar row is its real
-// neighbour, not `memchr3`. Candidates differ only in the arithmetic that
-// reaches the table; lanes differ in whether a scalar is decoded at all.
+// neighbour, not `memchr3`. Rejected candidates live in
+// `sous-chef/experiments/`.
 
 fn classified(bencher: Bencher, name: &str, walk: impl Fn(&str) -> u64 + Sync) {
     let text = corpus(name);
@@ -115,40 +115,19 @@ fn classified(bencher: Bencher, name: &str, walk: impl Fn(&str) -> u64 + Sync) {
         .bench(|| walk(text));
 }
 
-/// Candidate 1: static two-level table, `.rodata` only.
+/// The plain per-scalar walk: decode, then one two-level lookup.
 #[divan::bench(args = FILES)]
 fn class_two_level(bencher: Bencher, name: &str) {
-    classified(bencher, name, |text| walk(Lookup::TwoLevel, text));
+    classified(bencher, name, walk);
 }
 
-/// Candidate 2: 128 KiB flat BMP array built at first use, as v1 shipped.
-#[divan::bench(args = FILES)]
-fn class_flat_bmp(bencher: Bencher, name: &str) {
-    classified(bencher, name, |text| walk(Lookup::FlatBmp, text));
-}
-
-/// Candidate 3 through the per-scalar API: the trie pays a re-encode here,
-/// which is what `lane_trie_bytes` removes.
-#[divan::bench(args = FILES)]
-fn class_trie_scalar(bencher: Bencher, name: &str) {
-    classified(bencher, name, |text| walk(Lookup::Trie, text));
-}
-
-/// Fast lane 1: the byte trie walking raw UTF-8, no scalar decode.
+/// The byte trie walking raw UTF-8, no scalar decode.
 #[divan::bench(args = FILES)]
 fn lane_trie_bytes(bencher: Bencher, name: &str) {
     classified(bencher, name, walk_trie);
 }
 
-/// Fast lane 2: eight-byte SWAR ASCII with hysteresis over candidate 1.
-#[divan::bench(args = FILES)]
-fn lane_swar_ascii(bencher: Bencher, name: &str) {
-    classified(bencher, name, walk_swar_ascii);
-}
-
-/// Fast lane 3: the same ASCII chunk over the byte trie, so the lane's cost
-/// is measured against the walk that actually wins rather than against a
-/// decoding one.
+/// The shipped lane: an eight-byte SWAR ASCII chunk over the byte trie.
 #[divan::bench(args = FILES)]
 fn lane_trie_swar(bencher: Bencher, name: &str) {
     classified(bencher, name, walk_trie_swar);

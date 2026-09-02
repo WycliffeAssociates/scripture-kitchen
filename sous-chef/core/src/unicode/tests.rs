@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use super::{Class, Lookup, bits, class_of, class_of_with};
+use super::{Class, bits, class_of, lookup::trie_at};
 
 fn ucd(file: &str) -> String {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -162,22 +162,12 @@ fn the_decimal_digit_lane_is_nd_not_every_numeric() {
 }
 
 #[test]
-fn every_lookup_candidate_agrees_over_every_scalar() {
+fn the_two_index_paths_agree_over_every_scalar() {
+    let mut buf = [0u8; 4];
     for c in scalars() {
-        let two_level = class_of_with(Lookup::TwoLevel, c);
-        assert_eq!(
-            two_level,
-            class_of_with(Lookup::FlatBmp, c),
-            "flat BMP disagrees at U+{:04X}",
-            c as u32
-        );
-        assert_eq!(
-            two_level,
-            class_of_with(Lookup::Trie, c),
-            "UTF-8 trie disagrees at U+{:04X}",
-            c as u32
-        );
-        assert_eq!(two_level, class_of(c));
+        let (trie, width) = trie_at(c.encode_utf8(&mut buf).as_bytes());
+        assert_eq!(class_of(c), trie, "UTF-8 trie disagrees at U+{:04X}", c as u32);
+        assert_eq!(width, c.len_utf8(), "trie width disagrees at U+{:04X}", c as u32);
     }
 }
 

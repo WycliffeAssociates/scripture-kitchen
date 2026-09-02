@@ -4,8 +4,7 @@
 //!
 //! Not a test: it reads `sous-chef/corpora/calibration-corpora/`, which CI
 //! does not have. It fails loudly when that directory is absent rather than
-//! passing by doing nothing. Record what it found in roadmap.md's evidence
-//! table.
+//! passing by doing nothing. Record what it found in evidence.md.
 
 use std::path::{Path, PathBuf};
 

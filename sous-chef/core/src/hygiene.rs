@@ -16,44 +16,11 @@
 //!     Noncharacter        14..17  run 1
 //! ```
 //!
-//! Rule contract (rules.md):
-//! 1. Observation: maximal same-class runs of C0 controls (bar tab, LF, and
-//!    the CR of CRLF), DEL, C1 controls, U+FFFD, stray CR, backslashes,
-//!    line-initial merge-conflict markers, combining marks with no base,
-//!    misplaced format characters, NBSP beside whitespace, and
-//!    noncharacters, in projected content.
-//! 2. Claim: "this content contains bytes that are mechanically suspect"
-//!    — a hit inside analyzable text, not a language judgment.
-//! 3. Not established: intent. A tab-separated table or an escaped
-//!    backslash convention is content the reviewer may accept.
-//! 4. Deterministic lane: enable/disable only; no floor, no bands.
-//! 5. Per chapter: the scan over one chapter's masked text is the whole
-//!    observation; there is no reduce, so Galley may cache the rows by
-//!    chapter content. `Carry = ()`: a run is maximal within its chapter,
-//!    and a run abutting a masked `\c` marker is two findings by design.
-//! 6. Config: none changes observations; enablement only filters.
-//! 7. Wire: class and run length ride the two payload lanes; the span is the
-//!    exact run.
-//! 8. Pinned: the 223-NUL run, CRLF/stray CR, masked-vs-stranded backslash,
-//!    and the conflict marker, in this module and the Onion adapter tests.
+//! One finding per maximal same-class run, every span snapped out to
+//! grapheme-atom edges. `Carry = ()`, so a run is maximal within its chapter.
 //!
-//! The four classifier-dependent checks make only deterministic claims. A
-//! decomposed grapheme's mark has a base and stays silent; ZWJ/ZWNJ between
-//! letters stays silent; NBSP inside a phrase stays silent, because none of
-//! those is mechanically wrong. NBSP's "leading or trailing a verse" case
-//! reads the edges of the analyzed text, which is the whole book until the
-//! verse-aware walk lands.
-//!
-//! Every emitted span passes through `widen_to_atoms`, so a finding never
-//! splits a rendered grapheme (charter invariant 6). The five control-shaped
-//! classes provably cannot move; U+FFFD and a stranded backslash are
-//! ordinary bases, so a following combining mark legitimately joins them.
-//!
-//! Scan shape, measured against the roofline bench: an autovectorized
-//! range filter for C0/DEL, `memchr3` for the lead bytes `\`, `C2`, `EF`,
-//! a second `memchr3` for marker lead bytes, and an eight-byte SWAR ASCII
-//! skip ahead of the byte trie for the scalar pass. Clean text never leaves
-//! the fast paths.
+//! What each class claims and when it stays silent: `rules/hygiene.md`.
+//! Scan shape, throughput, and the lone-backslash caveat: hygiene.md.
 
 use crate::unicode::{Class, atoms::widen_to_atoms, bits, class_of, lookup::trie_at};
 use crate::{
@@ -77,7 +44,7 @@ impl HygieneFinding {
         self.span
     }
 
-    /// Offending code points in the run (marker lines count as one). The
+    /// Offending code points in the run; a marker line counts as one. The
     /// span may be one atom wider after grapheme snapping.
     pub const fn run(self) -> u32 {
         self.run
@@ -131,8 +98,8 @@ fn scan_controls(text: &str, out: &mut Vec<HygieneFinding>) {
     let mut at = 0;
     while at < bytes.len() {
         let end = (at + BLOCK).min(bytes.len());
-        // A pure OR-reduction so the block test vectorizes; the branch sits
-        // once per block, not once per byte.
+        // A pure OR-reduction: the block test vectorizes and the branch
+        // sits once per block.
         let hit = bytes[at..end]
             .iter()
             .fold(false, |acc, &b| acc | is_control(b));
@@ -228,10 +195,9 @@ fn needle_class(bytes: &[u8], at: usize) -> Option<(HygieneClass, usize)> {
     }
 }
 
-/// Marker lines start with seven of one byte; `=======` is the whole line,
-/// the other two carry a label. One `memchr3` over the three lead bytes
-/// replaces three `memmem` passes: `<`, `=`, `>` are rare in scripture text,
-/// so this pass runs at needle speed.
+/// A line-initial run of three or more `<`, `=`, or `>` is a marker line.
+/// Git writes seven, but a truncated or half-resolved conflict leaves fewer,
+/// so the check accepts the short form; the whole line is the span.
 fn scan_conflict_markers(text: &str, out: &mut Vec<HygieneFinding>) {
     let bytes = text.as_bytes();
     let mut resume = 0;
@@ -240,22 +206,12 @@ fn scan_conflict_markers(text: &str, out: &mut Vec<HygieneFinding>) {
             continue;
         }
         let lead = bytes[at];
-        let Some(head) = bytes.get(at..at + 7) else {
-            break;
-        };
-        if head.iter().any(|&b| b != lead) {
-            continue;
-        }
-        let after = bytes.get(at + 7).copied();
-        let well_formed = match lead {
-            b'=' => matches!(after, None | Some(b'\n' | b'\r')),
-            _ => after == Some(b' '),
-        };
-        if !well_formed {
+        let run = bytes[at..].iter().take_while(|&&b| b == lead).count();
+        if run < 3 {
             continue;
         }
         let end =
-            memchr::memchr2(b'\n', b'\r', &bytes[at + 7..]).map_or(bytes.len(), |n| at + 7 + n);
+            memchr::memchr2(b'\n', b'\r', &bytes[at + run..]).map_or(bytes.len(), |n| at + run + n);
         push(text, out, HygieneClass::ConflictMarker, at, end, 1);
         resume = end;
     }
@@ -263,13 +219,13 @@ fn scan_conflict_markers(text: &str, out: &mut Vec<HygieneFinding>) {
 
 // ── Scalar-level checks ─────────────────────────────────────────────────
 
-/// The bits that put a scalar on the slow path. Every one of them lives
-/// above U+007F, which is what lets the ASCII lane skip whole words.
+/// The bits that put a scalar on the slow path. All live above U+007F, so
+/// the ASCII lane can skip whole words.
 const SUSPECT: u16 = bits::MARK | bits::FORMAT | bits::NONCHARACTER;
 const NBSP: [u8; 2] = [0xc2, 0xa0];
 const HIGH_BITS: u64 = 0x8080_8080_8080_8080;
 /// Consecutive ASCII scalars before the eight-byte lane re-arms. Without
-/// hysteresis the chunk test costs Indic and Greek text more than it saves.
+/// hysteresis the chunk test costs Indic and Greek more than it saves.
 const REARM_AFTER: u32 = 32;
 
 fn scan_scalars(text: &str, out: &mut Vec<HygieneFinding>) {
@@ -318,8 +274,7 @@ fn suspect_run(text: &str, at: usize, class: Class, out: &mut Vec<HygieneFinding
         if !mark_is_free(text, at) {
             return at + class_width(text, at);
         }
-        // Every mark after the first is equally baseless, so the run is one
-        // finding.
+        // Every mark after the first is equally baseless: one finding.
         return scalar_run(text, at, HygieneClass::FreeCombiningMark, out, |text, at| {
             class_at(text, at).is_mark()
         });
@@ -333,9 +288,8 @@ fn suspect_run(text: &str, at: usize, class: Class, out: &mut Vec<HygieneFinding
     })
 }
 
-/// "A decomposed grapheme's combining mark is not a free mark" (rules.md):
-/// only a mark with nothing behind it, or with something that cannot carry
-/// a mark, is reportable.
+/// Only a mark with nothing behind it, or with something that cannot carry a
+/// mark, is reportable. A decomposed grapheme has a base.
 fn mark_is_free(text: &str, at: usize) -> bool {
     match prev_class(text, at) {
         None => true,
@@ -345,11 +299,8 @@ fn mark_is_free(text: &str, at: usize) -> bool {
     }
 }
 
-/// A `Cf` scalar is placed when it is doing the one job its class defines:
-/// joining two letters (ZWJ/ZWNJ, which rules.md requires stay silent in
-/// Indic text) or introducing the scalar after it (Grapheme_Cluster_Break
-/// Prepend). Everything else — a stray BOM, a bidi control adrift in a
-/// verse — is reportable.
+/// A `Cf` scalar is placed when it does the one job its class defines: joins
+/// two letters (ZWJ/ZWNJ), or introduces the scalar after it (GCB Prepend).
 fn format_is_placed(text: &str, at: usize, class: Class) -> bool {
     let joinable = |class: Class| class.is_alphabetic() || class.is_mark();
     if class.is_extender() {
@@ -363,9 +314,8 @@ fn format_is_placed(text: &str, at: usize, class: Class) -> bool {
     false
 }
 
-/// NBSP claims nothing about typography: it is reportable only where it
-/// cannot be doing its job — beside other whitespace, or at an edge of the
-/// analyzed text.
+/// NBSP claims nothing about typography. It is reportable only where it
+/// cannot be doing its job: beside whitespace, or at an edge of the text.
 fn nbsp_is_suspect(text: &str, at: usize) -> bool {
     match (prev_class(text, at), next_class(text, at)) {
         (None, _) | (_, None) => true,
@@ -390,8 +340,7 @@ fn next_class(text: &str, at: usize) -> Option<Class> {
     text[at..].chars().nth(1).map(class_of)
 }
 
-/// Consumes the maximal run of scalars `member` accepts and pushes one
-/// finding over it.
+/// Consumes the maximal run `member` accepts and pushes one finding.
 fn scalar_run(
     text: &str,
     at: usize,
@@ -409,10 +358,9 @@ fn scalar_run(
     end
 }
 
-/// Classes whose scalars are Grapheme_Cluster_Break Control, CR, or LF, so
-/// UAX #29 breaks on both of their edges and widening provably cannot move
-/// them. U+FFFD and a backslash are ordinary bases; a combining mark behind
-/// one legitimately joins it, and that is invariant 6 working, not drift.
+/// Classes whose scalars are GCB Control, CR, or LF: UAX #29 breaks on both
+/// edges, so widening provably cannot move them. U+FFFD and a backslash are
+/// ordinary bases and may legitimately widen.
 const UNMOVABLE: [HygieneClass; 5] = [
     HygieneClass::C0Control,
     HygieneClass::Delete,
@@ -527,7 +475,7 @@ mod tests {
     }
 
     #[test]
-    fn conflict_markers_must_be_line_initial_and_equals_must_fill_the_line() {
+    fn conflict_markers_are_line_initial_runs_of_three_or_more() {
         let text = "a\n<<<<<<< ours\nx\n=======\ny\n>>>>>>> theirs\n";
         assert_eq!(
             rows(text),
@@ -537,10 +485,18 @@ mod tests {
                 (HygieneClass::ConflictMarker, 27, 41, 1),
             ]
         );
-        assert!(rows("a <<<<<<< b\n======= c\n").is_empty());
+        assert!(rows("a <<<<<<< b\n== c\n>> d\n").is_empty());
         assert_eq!(
             rows("=======\r\n"),
             vec![(HygieneClass::ConflictMarker, 0, 7, 1)]
+        );
+        // Truncated or half-resolved markers still count from three bytes.
+        assert_eq!(
+            rows("<<< ours\n=== theirs\n"),
+            vec![
+                (HygieneClass::ConflictMarker, 0, 8, 1),
+                (HygieneClass::ConflictMarker, 9, 19, 1),
+            ]
         );
         assert_eq!(
             rows(">>>>>>> end"),
@@ -580,7 +536,7 @@ mod tests {
 
     #[test]
     fn a_decomposed_graphemes_combining_mark_is_not_a_free_mark() {
-        // rules.md, Level 1a required examples.
+        // rules/hygiene.md, required examples.
         assert!(rows("e\u{301}tait").is_empty());
         assert!(rows("\u{3b1}\u{314}\u{301}").is_empty());
         // Marks stacked on a real base stay silent however deep.
@@ -610,7 +566,7 @@ mod tests {
 
     #[test]
     fn zwj_and_zwnj_between_letters_are_silent() {
-        // rules.md: ZWJ/ZWNJ in Indic text never enters the inventory.
+        // ZWJ/ZWNJ in Indic text never enters the inventory.
         assert!(rows("\u{915}\u{94d}\u{200d}\u{937}").is_empty());
         assert!(rows("\u{915}\u{94d}\u{200c}\u{937}").is_empty());
         assert!(rows("\u{62a}\u{200c}\u{62a}").is_empty());

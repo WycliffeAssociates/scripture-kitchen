@@ -9,13 +9,11 @@
 //! ```
 //!
 //! An *atom* is a base scalar plus everything that cannot stand without it.
-//! [`is_atom_boundary`] is the whole rule; every atom boundary is also a UAX
-//! #29 cluster boundary, which is the claim `GraphemeBreakTest.txt` pins.
-//! The converse does not hold and is not wanted: two adjacent emoji, two
-//! adjacent Hangul syllables, or two adjacent regional indicators widen into
-//! one atom. The invariant is "never split", not "minimal", and that is what
-//! lets `sous-core` carry no segmentation dependency at all —
-//! `unicode-segmentation` enters only as the dev-dependency oracle.
+//! [`is_atom_boundary`] is the whole rule. Complex runs widen as one atom;
+//! over-wide is allowed, split is not.
+//!
+//! The claim, the conformance argument, and why the runtime carries no
+//! segmenter: README.md.
 
 use crate::TextRange;
 
@@ -47,8 +45,8 @@ pub fn widen_to_atoms(text: &str, range: TextRange) -> TextRange {
 
 /// Whether `at` may be an emitted span edge.
 ///
-/// The rules are UAX #29's, conservatively fused: where the algorithm needs
-/// state this seals the boundary instead, because sealing can only widen.
+/// UAX #29's rules, conservatively fused: where the algorithm needs state
+/// this seals the boundary instead, because sealing can only widen.
 pub fn is_atom_boundary(text: &str, at: usize) -> bool {
     if at == 0 || at == text.len() {
         return true;
@@ -64,9 +62,8 @@ pub fn is_atom_boundary(text: &str, at: usize) -> bool {
         return false;
     }
     let (before, after) = (class_of(prev), class_of(next));
-    // GB4/GB5: Control, CR, and LF break on both sides, ahead of every rule
-    // below. This is also what keeps a byte-level hygiene run next to a
-    // newline exactly as wide as the run.
+    // GB4/GB5: Control, CR, and LF break on both sides, ahead of everything
+    // below. This keeps a hygiene run next to a newline exactly as wide.
     if before.is_gcb_control() || after.is_gcb_control() {
         return true;
     }
@@ -74,9 +71,8 @@ pub fn is_atom_boundary(text: &str, at: usize) -> bool {
     if after.is_glue() {
         return false;
     }
-    // GB9c, without the InCB lanes: a virama anywhere in the glue run behind
-    // `at` joins whatever follows. Wider than the conjunct rule, never
-    // narrower.
+    // GB9c without the InCB lanes: a virama anywhere in the glue run behind
+    // `at` joins what follows. Wider than the conjunct rule, never narrower.
     for c in text[..at].chars().rev() {
         let class = class_of(c);
         if !class.is_glue() {
@@ -90,8 +86,7 @@ pub fn is_atom_boundary(text: &str, at: usize) -> bool {
     if before.is_prepend() {
         return false;
     }
-    // GB6-GB8 (Hangul), GB11 (emoji ZWJ), GB12/GB13 (regional indicators):
-    // one conservative rule for every scalar that joins forward.
+    // GB6-GB8, GB11, GB12/GB13: one rule for every scalar joining forward.
     !((before.is_complex() || before.is_glue()) && after.is_complex())
 }
 
@@ -114,7 +109,7 @@ mod tests {
 
     #[test]
     fn a_devanagari_conjunct_is_one_atom_from_either_end() {
-        // क ् ष — GB9c joins across the virama, so no sub-range splits it.
+        // क ् ष — GB9c joins across the virama; no sub-range splits it.
         let text = "\u{915}\u{94d}\u{937}";
         for from in [0usize, 3, 6] {
             for to in [3usize, 6, 9] {
@@ -136,7 +131,7 @@ mod tests {
 
     #[test]
     fn a_control_run_next_to_a_newline_does_not_widen() {
-        // The byte-level hygiene classes must survive widening untouched.
+        // The byte-level hygiene classes survive widening untouched.
         assert_eq!(widen("abc\n\0\0\0def", 4, 7), (4, 7));
         assert_eq!(widen("\u{fffd}\n", 0, 3), (0, 3));
         assert_eq!(widen("a\r\rb", 1, 3), (1, 3));
@@ -151,7 +146,7 @@ mod tests {
 
     #[test]
     fn an_empty_range_snaps_to_the_nearest_boundaries() {
-        // Inside a decomposed grapheme an empty probe still widens outward.
+        // Inside a decomposed grapheme an empty probe still widens.
         assert_eq!(widen("e\u{301}", 1, 1), (0, 3));
         assert_eq!(widen("ab", 1, 1), (1, 1));
     }

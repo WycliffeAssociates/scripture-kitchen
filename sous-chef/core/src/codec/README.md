@@ -1,0 +1,132 @@
+# `sous_core::codec` and the corpus envelope
+
+The hot transport for findings: a versioned fixed-width snapshot designed from
+day one, not a serialized Rust struct and not an array of JS objects. The rich
+in-memory finding model may carry typed evidence; these lanes are a compact
+representation of it, never the analysis truth.
+
+## The 16-byte record
+
+Little-endian, headerless. The surrounding container declares the coordinate
+space.
+
+| bytes | field | contract |
+| --- | --- | --- |
+| 0..4 | `from: u32` | start in the book coordinate space the container declares |
+| 4..8 | `to: u32` | end in that space, exclusive |
+| 8..10 | `book_idx: u16` | index into the snapshot's ordered book table |
+| 10 | `code: u8` | union tag into the v1 code table |
+| 11 | `flags: u8` | representation flags; only `SATURATED` is valid |
+| 12..14 | `i16` lane | meaning owned by the rule code |
+| 14..16 | `i16` lane | meaning owned by the rule code |
+
+`book_idx` is the caller's snapshot-local array index, not a canonical book
+id: a USFM file and a vref corpus may both supply the book, and the caller
+owns the addressing space. `u16` is ample without spending four bytes per
+finding.
+
+## The v1 code table
+
+Dense, hand-assigned, append-only. No reserved ranges, no retired entries.
+Removing or renumbering a code requires a new wire version rather than leaving
+a tombstone.
+
+| code | kind | lane 12..14 | lane 14..16 | `SATURATED` means |
+| --- | --- | --- | --- | --- |
+| 0 | `LengthProportionality` | signed Q8.8 book-scope deviation; `i16::MIN` unavailable | signed Q8.8 project-scope deviation; `i16::MIN` unavailable | a deviation was clamped |
+| 1 | `Hygiene` | `HygieneClass` discriminant | run length in code points, `1..=i16::MAX` | the run exceeds `i16::MAX`; the lane reads exactly `i16::MAX` |
+
+The record is a discriminated union in Rust: `PackedFinding` carries a
+`FindingKind`, and `code`, `flags`, and both lanes are *derived* from it. A
+caller cannot set a code that disagrees with its payload.
+
+Each code's lane codec lives in its own `codec/<rule>.rs` with a matching
+`lanes()` / `from_lanes()` pair, so `mod.rs` never becomes a dumping ground for
+payload shapes.
+
+## Fail-closed rules
+
+Decoding refuses rather than guesses:
+
+| rejected | error |
+| --- | --- |
+| a buffer that is not exactly 16 bytes | `InvalidLength` |
+| a code outside the table | `UnknownRuleCode` |
+| any flag bit outside `SATURATED` | `UnknownFlags` |
+| `from > to` | `ReversedSpan` |
+| `to` past the selected book's published length | `SpanOutOfBounds` |
+| a `book_idx` with no directory entry | `InvalidBookIndex` |
+| a record whose `book_idx` is not its section's book | `BookIndexMismatch` |
+| `i16::MIN` read as a proportionality value | `MissingDeviationSentinel` |
+| a hygiene class discriminant past the table | `UnknownHygieneClass` |
+| a hygiene run of zero or negative | `EmptyHygieneRun` |
+| `SATURATED` on a hygiene row whose lane is not exactly `i16::MAX` | `UnknownFlags` |
+
+`i16::MIN` cannot be constructed as a `QuantizedDeviation`, and a zero run
+cannot be constructed as a `HygieneDigest`, so the invalid states are
+unrepresentable on the way in as well as rejected on the way out.
+
+## The corpus envelope
+
+One complete corpus publication replaces the previous one. It promises no
+independently reusable per-book buffers and no finding patches: a change in one
+chapter may move a project denominator and thereby add or remove findings in an
+untouched book.
+
+```text
+  header  40 bytes   SOUS magic · format version · coordinate flags ·
+                     book count · record stride (16) · total findings ·
+                     opaque 16-byte SnapshotId
+  directory          one 16-byte row per book, in caller order:
+                     3 BookKey bytes + zero terminator · published length ·
+                     absolute section offset · finding count
+  sections           contiguous 16-byte records, no incidental padding
+```
+
+Directory position *is* `BookIndex`, so a consumer seeks by index or by key and
+lazily decodes one book:
+
+```ts
+const snapshot = FindingsSnapshot.open(buffer);
+const mark = snapshot.book("MRK");
+mark.length;
+mark.at(0);
+```
+
+Sous analysis emits projected-book UTF-8 ranges; `galley::sous` composes the
+producer locator with UTF-8-to-UTF-16 conversion and publishes raw-book UTF-16
+for JS. A projected range that maps to discontinuous raw spans publishes the
+declared **bounding** range — first retained raw byte through last — as its
+navigation span. That is the documented contract, not a silent contiguity
+pretense; the exact retained run set stays reachable through the typed-detail
+path.
+
+## The generated TypeScript reader
+
+Rust owns the schema. `reader.ts` is generated and committed:
+
+```sh
+cargo run -p sous-core --bin codegen     # reader.ts.tmpl → ../reader.ts
+```
+
+`corpus::generated_reader_ts()` substitutes `@@NAME@@` placeholders in
+`sous-chef/reader.ts.tmpl` with the Rust constants — every offset, the magic,
+the format version, the UTF-16 flag, and the `HygieneClass` name list. The
+freshness test `corpus::tests::checked_in_reader_is_fresh` compares the
+committed file against a fresh render, so a constant that moves without a
+regenerate fails the suite. `sous-chef/reader.test.mjs` (`npm test`) decodes
+the same golden buffers the Rust tests use, so both readers are pinned to one
+set of bytes.
+
+## Adding a code
+
+1. Append the variant to `RuleCode` with the next free `u8`. Never renumber.
+2. Add its payload type in a new `codec/<rule>.rs` with `lanes()` /
+   `from_lanes()`, making the invalid lane values unconstructible.
+3. Add the variant to `FindingKind` and to `code()`, `flags()`, `encode()`,
+   and `decode_wire()`.
+4. Add a golden-vector test and a fail-closed test beside the payload.
+5. If the payload adds a name list the reader needs, add a `@@PLACEHOLDER@@`
+   to `reader.ts.tmpl` and its substitution in `generated_reader_ts()`, then
+   re-run the codegen bin.
+6. Add the row to the code table above and to `charter.md`.

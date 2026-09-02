@@ -9,48 +9,46 @@ desired checks with much less code and state.
 This roadmap is capability-led. It records what to carry, what to leave
 behind, the order in which contracts become real, and the gates that may still
 say no. It does not authorize unreviewed implementation beyond the named
-stage. [charter.md](charter.md) and [rules.md](rules.md) are the two durable
-semantic authorities.
+stage.
+
+The durable authorities are [charter.md](charter.md) for purpose, ownership,
+and cross-boundary contracts; [rules/](rules/) for what each lane may claim;
+this file for sequencing and gates; and [evidence.md](evidence.md) for every
+measurement they rest on. Implementation detail lives beside its code, in the
+module READMEs the ledger below names.
 
 ## Current baseline
 
-Already present:
+Landed:
 
 - a Cargo workspace with production `core`/`cli` crate boundaries;
-- checked projected-book domain types and a producer-neutral iterator contract;
-- an Onion CLI adapter that composes the existing `Mask` and `Toc`, including
+- checked projected-book domain types and a producer-neutral iterator
+  contract;
+- an Onion CLI adapter composing the existing `Mask` and `Toc`, including
   projected chapter/verse ranges and reverse location to discontinuous raw
   source spans;
-- a typed `usage-rs` CLI that accepts one `.sfm`/`.usfm` file or walks the
-  immediate files in one directory, uses genuinely serial loading by default
-  with explicit `--parallel`, validates caller-ordered target/source book
-  tables, and prints provisional projection/alignment rows; optional `--stats`
-  reports target/source counts, alignment facts, and wall-clock throughput,
-  while `--stats-only` suppresses debug rows. Timing excludes debug printing
-  and does not stand in for production Divan benchmarks;
-- a producer-neutral aligned-unit table that pairs by `BookKey`, preserves
-  duplicate occurrence order, reports structural alignment facts separately,
-  and retains bridge constituents as multiple projected ranges;
-- a headerless, checked 16-byte `PackedFinding` record with one active typed
-  finding kind, signed Q8.8 payload lanes, and fail-closed code/flag/span
-  decoding, now enclosed by a checked complete-corpus header/book directory
-  with a generated lazy TypeScript reader;
+- a typed `usage-rs` CLI over one file or one directory, serial by default
+  with explicit `--parallel`, printing provisional projection/alignment rows
+  plus optional `--stats`/`--stats-only`. Its wall-clock timing is debug
+  output, not a benchmark;
+- a producer-neutral aligned-unit table pairing by `BookKey`, preserving
+  duplicate occurrence order, reporting structural alignment facts separately,
+  and retaining bridge constituents as multiple projected ranges;
+- a headerless, checked 16-byte finding record inside a checked
+  complete-corpus envelope, with a generated lazy TypeScript reader;
+- a generated, committed Unicode classification table from pinned UCD 17.0.0
+  extracts, with its drift, `std` cross-check, agreement, and determinism
+  gates, plus the grapheme atom rule and its two conformance differentials;
+- deterministic byte and classifier hygiene checks over projected content,
+  exposed through the CLI and published through galley;
 - an explicitly disposable probes crate;
 - a manifest-and-fetch corpus lane with no Git LFS dependency;
-- a generated, committed Unicode classification table from pinned UCD 17.0.0
-  extracts, with exhaustive drift, `std` cross-check, lookup-agreement, and
-  generator-determinism gates, plus the grapheme atom rule and its two
-  conformance differentials;
-- measured prototypes for byte hygiene, streaming classification, the shared
-  nonletter substrate, per-chapter rows, reduction, bands, dispersion, and
-  grapheme fast-path fidelity;
 - a clean ownership direction for Onion TOC/content masks and file-relative
   findings;
 - a catalog mapping the PO checks into Sous, Onion/editor, or unresolved
   lanes.
 
-The production library has started only at the Stage 0 input boundary. Probe
-types and APIs remain evidence, not a compatibility surface.
+Probe types and APIs remain evidence, not a compatibility surface.
 
 ## Testing posture
 
@@ -88,14 +86,16 @@ contract. It never means copy a module wholesale by default.
 | resident Galley state machine | **audit, then redesign** | Keep one stateful owner over a pure core and complete-snapshot semantics. Port only calls an actual host needs; do not preserve the v1 API for compatibility. |
 | JS reconcile-in-place helper | **evaluate with the consumer** | Receiver-owned identity reuse is sound, but implement only when a real UI consumes snapshots. |
 | WASM/TS mirror structs | **ditch** | The binary schema is the boundary. Generate declarations and keep hand-written adapters thin. |
-| rule-development contract | **migrate and shorten** | Preserve claim/counterclaim, evidence roles, typed observations, calibration, and surface/verification gates in the shared contract in `rules.md`. |
+| rule-development contract | **migrate and shorten** | Preserve claim/counterclaim, evidence roles, typed observations, calibration, and surface/verification gates in the shared contract in [rules/README.md](rules/README.md). |
 | byte-identical full-fleet oracle infrastructure | **do not port wholesale** | Keep small/fleet dump-and-compare capabilities. Exact parity gates unchanged deterministic ports; redesigned statistical rules use explicit divergence adjudication. |
 | corpus blobs and Git LFS-era storage | **ditch** | Keep checksum-pinned fetch manifests. Add a local derived blob only if file-open/parse cost becomes a measured bottleneck. |
 | v1 playground | **replace** | Do not rebuild the visual playground as the development harness. Grow the real CLI as a thin walking consumer from the first executable capability; consider a visual consumer later only for editor-specific workflows. |
 
 ## Decisions already made
 
-- Three durable design files only: charter, rules/examples, roadmap/evidence.
+- Four durable authorities only: [charter.md](charter.md), the
+  [rules/](rules/) folder, this roadmap, and the [evidence.md](evidence.md)
+  ledger. Implementation detail belongs in a README beside its code.
 - A neutral projected-book view is the input boundary. Onion's masked
   text/TOC and a vref loader can both produce it.
 - `Corpus` validates the immutable caller-ordered book table. `BookKey` pairs
@@ -139,52 +139,51 @@ independently, so a changed source input never invalidates target-only work.
 
 ## Opening implementation ledger
 
-This is the first-pass coordination map. It records which earlier sketches are
-now executable contracts and keeps donor code from becoming an accidental API.
+Which capability each production owner holds now, and what it owes next.
+Shapes and layouts live in the module README each row names.
 
-| capability | production owner and current shape | next work |
+| capability | production owner | next work |
 | --- | --- | --- |
-| projected offsets | `sous-core::TextRange`, checked as half-open projected UTF-8 bytes | reuse in rich findings and the packed codec |
-| chapter/verse input | `ProjectedBook` yields `BookKey`, `Chapter`, and ordered `Verse { VerseKey, TextRange }` rows; `Corpus` validates the caller-ordered book table | consume the aligned-unit/fact table from later source-comparison rules |
-| Onion projection | CLI adapter materializes verse text once, derives ranges through `Mask::project_source`, and locates with `Mask::to_source` plus `Toc::locate` | move only reusable conveniences into Onion when a second host needs them |
-| vref projection | semantic contract is settled; no production loader yet | implement after the Onion path pins duplicate and bridge fixtures |
-| nonletter substrate | `donor/src/probe3.rs` and `donor/src/rows.rs` are measured donors only | port consumer-led classifier bits after Stage 0 closes |
-| finding transport | checked v1 corpus envelope, caller-ordered `BookKey` directory, fixed `PackedFinding` sections, shared golden buffers, and generated lazy TypeScript reader are executable; `galley::sous::publish_onion_findings` rebases projected UTF-8 through the Mask to raw-book UTF-16 (bounding spans over removed markup) and encodes the corpus buffer; code `1` `Hygiene` rides the same record with its lane codec in `codec/hygiene.rs` | Galley's canonical snapshot identity and checksum-keyed detached reuse remain Stage 2 lifecycle work |
-| unicode classification | `sous-core::unicode`: `Class(u16)`, `class_of`, `is_glue`, a committed `table.rs` from `bin/gen-unicode`, and `atoms::widen_to_atoms` for grapheme-safe emission. Three lookup shapes behind one API so the bench can choose; the walk lane is the byte trie plus an ASCII chunk | Level 1b consumes the bits in Stage 3; casing beyond the two predicate bits waits for Stage 4 |
-| hygiene | `sous-core::hygiene::scan` over projected text: C0/DEL range filter, `memchr3` needle filter, `memchr3` marker filter, a SWAR-skipped scalar pass for free marks, misplaced format characters, NBSP, and noncharacters, maximal same-class runs, every span snapped to atom edges; `sous --findings` prints rows with `Sid`, `sous --publish` writes the UTF-16 corpus buffer through galley | NBSP's verse-edge case once the walk is verse-grained; a snapshot identity instead of the CLI's zero id |
+| projected offsets | `sous-core::TextRange`, checked half-open projected UTF-8 bytes | reuse in rich findings |
+| chapter/verse input | `ProjectedBook` rows; `Corpus` validates the caller-ordered book table | consume the aligned-unit/fact table from source-comparison rules |
+| Onion projection | the CLI adapter, over `Mask` and `Toc` | move reusable conveniences into Onion when a second host needs them |
+| vref projection | semantic contract settled; no production loader yet | implement after the Onion path pins duplicate and bridge fixtures |
+| nonletter substrate | `donor/` probes are measured donors only | port consumer-led classifier bits in Stage 3 |
+| finding transport | `sous-core::codec` and `sous-core::corpus`, rebased and published by `galley::sous`. See [core/src/codec/README.md](core/src/codec/README.md) | Galley's canonical snapshot identity and checksum-keyed detached reuse (Stage 2) |
+| unicode classification | `sous-core::unicode`. See [core/src/unicode/README.md](core/src/unicode/README.md) | Level 1b consumes the bits in Stage 3; casing beyond the two predicate bits waits for Stage 4 |
+| hygiene | `sous-core::hygiene::scan` over projected text. See [core/src/hygiene.md](core/src/hygiene.md) and [rules/hygiene.md](rules/hygiene.md) | NBSP's verse-edge case once the walk is verse-grained; a snapshot identity instead of the CLI's zero id |
 
 Stage 0 is closed. Stage 1 was entered hygiene-first rather than
 classifier-first: the byte-level checks need no Unicode data, they put the
 first real finding through the new publication seam, and they leave the
-classifier's bit set to be chosen by its actual consumers (the remaining
-hygiene checks and the Level 1b substrate) rather than by the donor layout.
+classifier's bit set to be chosen by its actual consumers rather than by the
+donor layout.
 
 ## Stage 0 — Freeze the foundation contracts
 
 **Goal:** make the smallest hard-to-reverse decisions executable before rule
-code creates pressure to bend them.
+code creates pressure to bend them. **Closed.**
 
 Work:
 
 1. Define production domain types for projected text ranges, chapter rows,
    verse/bridge keys, typed input refusal, and the neutral borrowed book view
    consumed by `sous-core`. For Onion, compose existing mask spans and TOC
-   anchors rather than defining duplicate stored rows. **Initial cut landed;
-   raw file identity and document version remain host/Galley work.**
+   anchors rather than defining duplicate stored rows. **Landed; raw file
+   identity and document version remain host/Galley work.**
 2. Define and implement the aligned-unit table using a tiny synthetic
    target/source pair, including duplicate keys, occurrence ordinals, empty
    units, absent units, bridge coalescing, chapter seams, and incompatible
-   ordering. **Initial alignment table and structural-fact tests landed.**
+   ordering. **Landed.**
 3. Define and implement the headerless 16-byte finding record in a tiny codec
    module. Keep rich `Finding` separate from `PackedFinding`; make the wire
    code a typed finding-kind union tag, with signed Q8.8 payload lanes and an
    unavailable sentinel. Leave the snapshot header/schema identity and typed
-   detail handle unresolved. **Initial record codec and rejection/golden-vector
-   tests landed.**
+   detail handle unresolved. **Landed.**
 4. Hand-assign the dense active rule-code table for wire version 1. Reserve no
    ranges and keep no retired entries; removal or renumbering requires a new
    wire version. Do not pre-allocate a code for every idea-shelf rule.
-   **The initial table contains only `LengthProportionality = 0`.**
+   **Landed.**
 5. Implement one complete corpus findings publication around the landed
    record: versioned header, ordered `BookKey` directory, per-book published
    length/offset/count, aligned record sections, and a generated lazy
@@ -193,17 +192,15 @@ Work:
    and rule summaries out of this wire. The corpus publisher accepts
    publication-ready book coordinates; Galley later owns projected-UTF-8 to
    raw-source to UTF-16 rebasing through each invocation's checksum-matched
-   producer projection and detached UTF-16 index data.
-   **The v1 envelope, Rust reader/writer, generated TypeScript reader, and
-   cross-language golden buffer landed; the Galley rebasing seam landed as
-   stateless `galley::sous::publish_onion_findings`.**
+   producer projection and detached UTF-16 index data. **Landed, with the
+   rebasing seam stateless in `galley::sous`.**
 6. Replace the placeholder CLI with a minimal `usage-rs` command declaration.
    It accepts one target file or directory, mirrors that shape for an optional
    source, constructs caller-ordered book tables, and prints provisional
    projection/alignment debug output. Keep all Onion adaptation in the CLI,
-   not `sous-core`. **Initial file/directory target/source command landed.**
+   not `sous-core`. **Landed.**
 
-Verification gate:
+Verification gate — **green**:
 
 - exact 16-byte layout and byte-exact golden vectors;
 - invalid book indices, reversed/out-of-bounds spans, unknown codes/flags,
@@ -211,91 +208,63 @@ Verification gate:
 - a finding spanning astral text remains projection-byte-correct, locates to
   its producer source, and publishes the correct UTF-16 range through an Onion
   adapter test; split-mask mapping behavior is explicit and tested rather than
-  treated as a contiguous identity map. **Landed in
-  `galley::sous::publish_onion_findings` with astral/split-mask goldens proved
-  through both the Rust and generated TypeScript readers; a discontinuous
-  projection publishes the documented bounding navigation span;**
+  treated as a contiguous identity map. A discontinuous projection publishes
+  the documented bounding navigation span;
 - schema generation is deterministic and `git diff --exit-code` clean after a
   second run.
 
-**Stop:** no classifier or rule port until this gate is reviewed.
-
 ## Stage 1 — Unicode and content-walk foundation
 
-**Goal:** establish the one walk every later observation trusts.
+**Goal:** establish the one walk every later observation trusts. **Items 1, 2,
+4, and 5 landed; item 3 is proven by the CLI adapter and item 6 by the hygiene
+CLI path, so the gate review can run before Stage 2 opens.**
 
 Work:
 
 1. Port the minimal Unicode classifier generator with pinned Unicode inputs.
    Start from consumer questions, not the donor bit layout: alphabetic,
    casing, decimal digit, whitespace, mark, punctuation/symbol, extender,
-   grapheme-complex, and only proven refinements.
-   **Landed as `sous-core::unicode` with `cargo run -p sous-core --bin
-   gen-unicode` over trimmed, checksummed UCD 17.0.0 extracts in
-   `core/testdata/ucd/`; `Class(u16)` carries the charter's list plus the
-   three refinements the atom rule proved it needs (gcb-control, prepend,
-   linker).**
+   grapheme-complex, and only proven refinements. **Landed as
+   `sous-core::unicode`; the atom rule proved three refinements the charter
+   list needed.**
 2. Commit generated compact ranges plus an at-runtime BMP lookup strategy.
    Compare a static expanded table against a local snapshot only if both are
    viable in the new workspace; choose by measured whole-walk cost and memory.
-   **Landed: `CLASS_RANGES` plus a static two-level table (1024 `cp >> 6`
-   indices into 207 deduplicated 64-scalar blocks, ~28.7 KiB of `.rodata`),
-   one pool serving both the decoded lookup and the byte trie. The bench
-   chose it over the lazy 128 KiB flat BMP array on a near tie.**
+   **Landed as one static pool with two index paths; the rejected shape is in
+   [experiments/](experiments/).**
 3. Implement masked iteration over Onion's projection in projected UTF-8
    coordinates. Chapter and verse APIs derive ranges from the existing `Mask`
    and `Toc`; they do not allocate per-chapter/per-verse strings or store a
    parallel key table. Implement numeric `locate()` by composing
    `Mask::to_source` with `Toc::locate`, without scripture-key strings.
-   **The CLI adapter proves this shape; promotion to a shared Onion convenience
-   waits for a second host.**
+   **Proven by the CLI adapter; promotion to a shared Onion convenience waits
+   for a second host.**
 4. Implement grapheme-safe emitted boundaries with the fast atom rule and a
-   correctness fallback/check for complex cases.
-   **Landed as `unicode::atoms::widen_to_atoms`. `COMPLEX` runs widen
-   conservatively instead of segmenting, so the runtime carries no
-   segmentation dependency; `unicode-segmentation` is a dev-dependency
-   oracle only.**
+   correctness fallback/check for complex cases. **Landed; the runtime carries
+   no segmentation dependency.**
 5. Implement deterministic hygiene scans over raw bytes with content-mask hit
-   validation. **Byte-level checks landed over projected content (the mask
-   already excludes markup). The four classifier-dependent checks — free
-   combining mark, misplaced format character, NBSP, noncharacter — landed
-   with items 1–2 and ride an eight-byte SWAR ASCII skip ahead of the byte
-   trie. Every emitted span passes through `widen_to_atoms`. NBSP's
-   verse-edge case waits for the verse-aware walk.**
+   validation. **Landed over projected content, byte-level and
+   classifier-dependent checks both. One deferred item, in
+   [rules/hygiene.md](rules/hygiene.md).**
 6. Expose the implemented hygiene findings through the same CLI command. This
-   is the first real consumer path, not a separate playground API.
-   **`--findings` and `--publish` landed.**
+   is the first real consumer path, not a separate playground API. **Landed as
+   `--findings` and `--publish`.**
 
-Verification gate:
+Verification gate — **green**:
 
-- exhaustive generated-table agreement with source predicates/UCD data.
-  **Green: `table_matches_a_fresh_ucd_parse_for_every_scalar` re-parses the
-  extracts with an independent oracle, `std_char_predicates_agree_over_every_scalar`
-  pins the pin against `std`, and `every_lookup_candidate_agrees_over_every_scalar`
-  keeps the three lookups identical. `a_second_generator_run_reproduces_the_committed_table`
-  keeps the artifact deterministic;**
+- exhaustive generated-table agreement with source predicates/UCD data, and a
+  deterministic second generator run;
 - script-diverse UAX/grapheme differential, including ZWJ/ZWNJ and the regional
-  indicator edge. **Green: `no_atom_boundary_falls_inside_a_graphemebreaktest_cluster`
-  and `widening_any_sub_range_of_a_cluster_returns_the_whole_cluster` over the
-  pristine `GraphemeBreakTest.txt`, plus
-  `the_test_tier_has_no_cluster_the_atom_rule_would_split` against
-  `unicode-segmentation`;**
+  indicator edge, against the pristine `GraphemeBreakTest.txt` and a segmenter
+  oracle;
 - every reported span lies in projected content and on UTF-8/grapheme
-  boundaries, and `locate()` returns the correct raw producer position.
-  **Green: `every_emitted_span_lies_on_atom_boundaries`, plus the byte-level
-  classes' `debug_assert` that widening cannot move them;**
-- CRLF, astral, markup-only, empty-span, and split-mask synthetic cases.
-  **CRLF, astral, and empty-span landed here; markup-only and split-mask
-  remain proven at the Stage 0 publication seam;**
+  boundaries, and `locate()` returns the correct raw producer position;
+- CRLF, astral, and empty-span synthetic cases here; markup-only and split-mask
+  stay proven at the Stage 0 publication seam;
 - production benchmark remains within an explicitly reviewed regression band
-  of the probe floor; absolute probe numbers are evidence, not a promise.
-  **Recorded in the evidence table below. `hygiene::scan` drops from
-  8.6/3.8 GB/s to 3.9 GB/s (Latin) and 0.36 GB/s (Hindi) now that it carries
-  the classifier walk; that is the pass every Level 1b observation rides.**
-
-**Stop:** Stage 1 items 1, 2, 4, 5 are landed; item 3 is proven by the CLI
-adapter and item 6 by the hygiene CLI path, so the Stage 1 gate review can
-run before Stage 2 opens.
+  of the probe floor. Carrying the classifier walk costs `hygiene::scan` real
+  throughput; the rows are in [evidence.md](evidence.md), and that is the pass
+  every Level 1b observation rides.
 
 ## Stage 2 — Galley chapter cache and ordered reduction
 
@@ -365,7 +334,8 @@ Work:
 
 Verification gate:
 
-- every required Level 1a/1b example in `rules.md` is pinned at claim level;
+- every required Level 1a/1b example in [rules/](rules/) is pinned at claim
+  level;
 - entitlement falls back to a coarser comparison rather than to silence;
 - convention examples and small-corpus examples abstain/fire for the documented
   reason;
@@ -533,29 +503,10 @@ Verification gate:
 - binary snapshot diffs, worker execution, persistent observation caches, and
   corpus rollups only after measurement.
 
-## Compact evidence record
+## Evidence
 
-These probe results justify the roadmap's starting architecture. They are not
-production guarantees; rerun the relevant probe when a production choice
-depends on one.
-
-| question | observed result | architectural consequence |
-| --- | --- | --- |
-| byte hygiene cost | SWAR range scans about 5.3 GiB/s; fixed needles 2.3–41 GiB/s across stress corpora | rescan; do not retain hygiene state initially |
-| roofline, production hygiene (`cargo bench -p sous-core`, Apple Silicon, one core, 8-corpus test tier) | scalar dependent chain 1.05 GB/s; autovectorized compare 10 GB/s; `memchr3` 31 GB/s on clean text, 5.6 GB/s on French (0xC2 NBSP/guillemet density); `hygiene::scan` 8.6 GB/s on six corpora, 6.6 GB/s Greek, 3.8 GB/s French. Replacing three `memmem` marker passes with one `memchr3` took it from 5.8 to 8.6 GB/s | every pass is measured against the vectorized ceiling; the needle filter's hit density, not the range filter, is the remaining cost |
-| stream versus scalar tape | streaming was about 1.3–2.3× faster; tape cost worsened with corpus size | no ambient materialized tape |
-| full shared substrate | about 28 ms on the English probe corpus versus roughly 257 ms v1 cold analysis | simple whole-corpus/whole-book passes are viable |
-| expanded feature substrate | roughly 12–31% above the first shared-counter cut | counter-shaped additions can share the walk cheaply |
-| grapheme atom differential | after fixing extender classification, one nonletter-involving mismatch over 1,504 corpora | fast walk plus grapheme-safe emission is viable |
-| roofline, Stage 1 classifier walk (`cargo bench -p sous-core`, Apple Silicon, one core, 8-corpus test tier, medians, ns/scalar) | plain lookup (static two-level) 1.64 en/nya/swh, 1.83 spa, 2.00 fra, 3.66 amh, 3.90 hin, 4.17 grc. Lazy 128 KiB flat BMP 1.97/2.14/2.26/3.36/3.57/3.79 — faster on non-Latin by 8–10%, slower on Latin by 17%. Byte trie over raw UTF-8 1.31/1.51/1.65/3.23/3.46/3.89: faster than the plain lookup on every corpus. Byte trie plus 8-byte SWAR ASCII with hysteresis 0.22 en/nya, 0.36 swh, 1.49 spa, 1.76 fra, 3.40 amh, 3.62 hin, 4.01 grc. SWAR over the *decoded* lookup taxes amh/hin 24% and grc 13% | **table:** static two-level wins the near tie on size — 28.7 KiB of `.rodata`, no heap, no `OnceLock`, nothing extra in the `.wasm`, against 128 KiB built at first use. **Fast lanes:** the byte trie ships, and the SWAR ASCII chunk ships on top of it — no corpus in the tier is slower than the plain lookup, and the chunk costs the bare trie only 3–7% on non-Latin. The decoding SWAR variant is rejected: v1's failure mode reproduced exactly, and taxing Indic and Greek to speed English is the wrong trade |
-| atom rule fleet differential (`cargo run -p sous-core --release --example atom_fleet`) | 1,079 corpora, 1,809,448,088 UAX #29 clusters, 0 split by the atom rule, 0 corpora affected. Run over the donor's `ebible-main/corpus` checkout because `corpora/calibration-corpora/` is not present on this machine | the conservative widening rule is safe to ship with no runtime segmenter. GB9c is the one place it needs help: without the linker bit, 102,139 Hindi clusters (3.6% of `hin2017`) split |
-| per-chapter row reduce | about 17–25 µs for 8k–12k glyph rows; edit plus reduce under 50 µs in the probe | derive aggregates on read; no rollup cache |
-| band sweep | default staircase gave about p50 10, p90 36, p95 44 rows/corpus; low cloud tracked `0.8/sqrt(n)` | readable fraction bands are credible shipping candidates |
-| dispersion | clustering changed gradually with share; genre remained a confound; above-band clustered rows about 0.3/corpus | annotation/ranking only, never a hard gate |
-| packed v1 wire donor | fixed 16-byte buffers made wasm/transfer/decode nearly flat and far cheaper than object arrays in the old measurements | preserve fixed binary snapshots, but redesign addressing |
-| proportionality paired survey | project scope covered small books; 10–20% chops were nearly invisible; source choice materially changed results | keep dual scopes and narrow claims; reproduce before defaults |
-
-Current probe entry points live under `spikes/probes`; `cargo test -p probes`
-and the Criterion benches are the local starting points. The old repository's
-calibration notes remain historical evidence in git and in the donor checkout;
-they are intentionally not duplicated into this three-file authority set.
+Every measurement this roadmap's architecture rests on is in
+[evidence.md](evidence.md): the roofline and fleet-differential runs with their
+dates, machines, and commands, and the v2 probe results behind the starting
+architecture. Rejected implementations keep their code in
+[experiments/](experiments/).

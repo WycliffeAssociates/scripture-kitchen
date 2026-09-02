@@ -1,17 +1,16 @@
 //! The producer-neutral text boundary consumed by Sous passes.
 //!
-//! Onion and vref retain their own source maps and addressing. This module
-//! names only the projected UTF-8 ranges and scripture units the analysis
-//! engine needs, so `sous-core` does not learn either producer's storage.
+//! Onion and vref keep their own source maps. This module names only the
+//! projected UTF-8 ranges and scripture units the analysis needs, so
+//! `sous-core` learns neither producer's storage.
 
 use core::{fmt, ops::Range};
 use rustc_hash::FxHashSet;
 
-/// The stable scripture identity used to pair books across producer inputs.
+/// The stable scripture identity that pairs books across producer inputs.
 ///
-/// This is deliberately distinct from [`BookIndex`]: a caller may present
-/// the same books in any order, while findings still refer to that caller's
-/// exact snapshot position.
+/// Distinct from [`BookIndex`] on purpose: a caller may present books in any
+/// order, while findings still name that caller's snapshot position.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BookKey([u8; 3]);
 
@@ -198,9 +197,8 @@ pub trait ProjectedBook {
 
 /// A caller-owned, immutable book table for one analysis snapshot.
 ///
-/// Book order is accepted as supplied. The index is navigation identity for
-/// that snapshot, while [`BookKey`] is the identity used when comparing
-/// corresponding books from another corpus.
+/// Book order is accepted as supplied. The index is navigation identity in
+/// this snapshot; [`BookKey`] is identity across corpora.
 pub struct Corpus<'a, B> {
     books: &'a [B],
 }
@@ -256,7 +254,7 @@ impl<'a, B: ProjectedBook> Corpus<'a, B> {
     }
 }
 
-/// Checks the neutral boundary once so analysis passes may trust its ranges,
+/// Checks the neutral boundary once, so analysis passes trust its ranges,
 /// ordering, and UTF-8 edges without repeating producer validation.
 pub fn validate(book: &impl ProjectedBook) -> Result<(), InputError> {
     let text = book.text();

@@ -1,9 +1,13 @@
 //! Complete-corpus findings publication.
 //!
-//! The envelope is deliberately separate from the resident analysis model: it
-//! is a fresh, publication-ready buffer whose rows use the declared coordinate
-//! space. The producer owns any source/UTF-16 rebasing before calling the
-//! writer.
+//! ```text
+//! encode_to_corpus_buffer(id, Utf16, [PublicationBook("MRK", 50, [finding])])
+//!   → 40-byte header · one 16-byte directory row · one 16-byte record
+//! ```
+//!
+//! A fresh publication-ready buffer, not a serialization of the resident
+//! analysis model. The producer owns any source/UTF-16 rebasing before calling
+//! the writer. Envelope layout: codec/README.md.
 
 use core::fmt;
 
@@ -582,7 +586,7 @@ impl fmt::Display for CorpusWireError {
 
 impl std::error::Error for CorpusWireError {}
 
-/// Emit the checked-in TypeScript reader from the Rust-owned wire schema.
+/// Render the checked-in TypeScript reader from the Rust-owned wire schema.
 pub fn generated_reader_ts() -> String {
     include_str!("../../reader.ts.tmpl")
         .replace("@@MAGIC@@", &format!("0x{MAGIC:08x}"))

@@ -1,16 +1,15 @@
 //! The first walking consumer for Sous Chef.
 //!
-//! Output is deliberately a debug view while the finding contract is being
-//! frozen. The CLI owns filesystem discovery and Onion adaptation; core owns
-//! corpus validation, target/source alignment, and the hygiene scan; galley
-//! owns publication to raw-book UTF-16.
-//!
 //! ```text
 //! sous --findings --publish out.sous book.usfm
 //!   finding target[0] MRK 1:1-1:1 C0Control 11..14 run 3 raw [46..49]
 //!   finding target[0] MRK 1:1-1:1 StrandedBackslash 17..19 run 2 raw [52..54]
 //!   published 2 findings for 1 books (SOUS v1, UTF-16) to out.sous
 //! ```
+//!
+//! Output is a debug view while the finding contract freezes. The CLI owns
+//! filesystem discovery and Onion adaptation; core owns corpus validation,
+//! alignment, and the hygiene scan; galley owns UTF-16 publication.
 //!
 //! Finding offsets are projected UTF-8; `raw` is the retained source run set
 //! behind them. The published buffer carries raw-book UTF-16 instead.
@@ -135,7 +134,7 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Hygiene over every target book, in projected UTF-8, ordered by book then
-/// offset. The only rule that exists yet; later rules append here.
+/// offset. Later rules append here.
 fn hygiene_findings(corpus: &Corpus<'_, OnionBook>) -> Vec<PackedFinding> {
     let lengths: Vec<u32> = corpus
         .books()
@@ -569,9 +568,9 @@ mod tests {
         use sous_core::{CoordinateSpace, CorpusSnapshot, FindingKind, HygieneClass};
 
         let temp = TempDir::new();
-        // Onion lexes a lone `\` as a marker and masks it; a `\\` pair is
-        // content and reaches Sous. It sits past a 4-byte char, so the
-        // published UTF-16 span moves by two units less than the raw bytes.
+        // Onion masks a lone `\` as a marker; a `\\` pair reaches Sous as
+        // content. It sits past a 4-byte char, so the UTF-16 span moves two
+        // units less than the raw bytes.
         let path = temp.0.join("mrk.usfm");
         fs::write(&path, "\\id MRK\n\\c 1\n\\p\n\\v 1 An 🧅 \\\\ here.\n").unwrap();
         let target = load_input(&path, false).unwrap();

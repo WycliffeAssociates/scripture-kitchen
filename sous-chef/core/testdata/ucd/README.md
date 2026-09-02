@@ -74,10 +74,10 @@ The pin must match two other things or the gates disagree with each other:
    commands above; update the checksum table.
 2. Bump `unicode-segmentation` to the release targeting that version.
 3. `cargo run -p sous-core --bin gen-unicode`.
-4. `cargo test -p sous-core` — drift, std cross-check, candidate agreement,
+4. `cargo test -p sous-core` — drift, std cross-check, index-path agreement,
    generator determinism, and both conformance gates must stay green. Run
    `cargo run -p sous-core --release --example atom_fleet` as the calibration
-   check and record its count in roadmap.md.
+   check and record its count in `sous-chef/evidence.md`.
 
 ## Licence
 

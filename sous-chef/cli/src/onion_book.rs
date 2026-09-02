@@ -84,9 +84,9 @@ impl ProjectedBook for OnionBook {
             .iter()
             .enumerate()
             .filter_map(|(at, anchor)| {
-                // Onion retains malformed anchors so its structural lint can
-                // report them. Sous cannot align one without a numeric key,
-                // so only that unit abstains; the surrounding book survives.
+                // Onion retains malformed anchors for its own lint. Sous
+                // cannot align one without a numeric key, so that unit
+                // abstains and the surrounding book survives.
                 let key = VerseKey::new(anchor.chapter, anchor.first, anchor.last).ok()?;
                 let chapter_row = self
                     .toc
@@ -118,8 +118,8 @@ pub(crate) struct LocatedRange<'a> {
 }
 
 /// Iterates only the retained raw runs behind a projected finding. A finding
-/// can cross removed markup, so claiming one contiguous USFM span would be
-/// lossy at exactly the boundary this adapter exists to preserve.
+/// can cross removed markup, so one contiguous USFM span would be lossy at
+/// exactly the boundary this adapter preserves.
 pub(crate) struct SourceSpans<'a> {
     mask: &'a Mask,
     projected: TextRange,
@@ -244,8 +244,8 @@ mod tests {
         let clean = OnionBook::parse(USFM).unwrap();
         assert!(hygiene::scan(clean.text()).is_empty());
 
-        // Onion lexes `\ ` and `\b` as markers — malformed ones are its lint's
-        // business — so only a `\\` pair reaches Sous as content.
+        // Onion lexes `\ ` and `\b` as markers, malformed or not, so only a
+        // `\\` pair reaches Sous as content.
         let source = concat!(
             "\\id MRK\n",
             "\\c 1\n\\p\n",
