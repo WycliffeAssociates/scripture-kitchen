@@ -289,8 +289,10 @@ Work:
    [../galley/src/pantry.md](../galley/src/pantry.md). Text retention landed
    next to it: a target keeps its text unless the host passes
    `Retain::ProductsOnly`, and `update` hands back an `Entry` — the per-book
-   handle `lint`, `parse`, and the detached products all answer from. B2, the
-   `Expediter` that publishes from it, is next.**
+   handle `lint`, `parse`, and the detached products all answer from. B2 landed
+   too: `galley::sous::Expediter` maps lazily at `publish`, keyed by
+   `ObservationKey`, and publishes a complete corpus buffer byte-equal to cold
+   `analyze`; see [../galley/src/sous/expediter.md](../galley/src/sous/expediter.md).**
 3. Implement ordered book reduction over independently mapped chapters. Keep
    only the smallest carry facts needed for nonletter adjacency, casing
    terminal state, and doubled-word state; do not create a generic monoid
@@ -302,7 +304,13 @@ Work:
    target observations, remaps only changed source books/chapters, and reruns
    cheap pairing and source-rule reduction.
 5. Mark-and-sweep unreachable chapter observations. Keep carry, paired ratios,
-   and book/corpus aggregates derived on demand; add no rollup cache.
+   and book/corpus aggregates derived on demand; add no rollup cache. **C1
+   landed: every `Expediter::publish` sweeps the chapter tables outside a
+   book's generation ring (its current `RawChecksum` plus `with_generations(n)`
+   before it, four by default) and every observation no surviving table names;
+   the host mutates through `Expediter::{update, update_with, remove}` and
+   reduce borrows its observations. See
+   [../galley/src/sous/expediter.md](../galley/src/sous/expediter.md).**
 
 Verification gate:
 

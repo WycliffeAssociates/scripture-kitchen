@@ -42,9 +42,9 @@ impl ChapterPass for Hygiene {
     }
 
     /// A run abutting a masked `\c` is two findings, one per chapter.
-    fn reduce(&self, book: &[ChapterObs<Self::Observation>], _carry: &mut (), out: &mut Findings) {
+    fn reduce(&self, book: &[ChapterObs<&Self::Observation>], _carry: &mut (), out: &mut Findings) {
         for chapter in book {
-            for finding in &chapter.obs {
+            for finding in chapter.obs {
                 let span = TextRange::new(
                     finding.span.from() + chapter.start,
                     finding.span.to() + chapter.start,

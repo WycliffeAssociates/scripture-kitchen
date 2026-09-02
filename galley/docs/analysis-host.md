@@ -1,11 +1,14 @@
 # Galley analysis-host boundary
 
-Status: accepted direction; the Onion `Warmer` exists, and the coordinate
-pipeline below is implemented as stateless `galley::sous::publish_onion_findings`
-(fresh derivation per invocation, no retained cache). The registry half of the
-resident host has landed as `galley::Pantry`, text retention and the per-book
-`Entry` handle included (see `galley/src/pantry.md`); the composed publication
-that reads from it has not.
+Status: implemented for one pass. `galley::sous::publish_onion_findings` is the
+stateless cold path (fresh derivation per invocation, no retained cache);
+`galley::Pantry` is the registry, text retention and the per-book `Entry`
+handle included (see `galley/src/pantry.md`); and `galley::sous::Expediter`
+(see `galley/src/sous/expediter.md`) is the composed publication that reads
+from it — chapter observations keyed by content, mapped at `publish` or, for a
+book the Pantry keeps no text for, at `update`, rebased through the retained
+mask and UTF-16 table, and swept per publication down to a book's retained
+generations. Parallel map and the `Reference` role are not built.
 
 This note records the lifecycle decisions that belong to Galley rather than
 either engine. Sous remains independent of Onion. Galley supplies their shared
@@ -57,6 +60,10 @@ identity laws:
 | per-invocation UTF-16 cursor | none | recreate it against the current string; its traversal position is not reusable state |
 | book/corpus summaries and judgments | none independently | recompute from current observations in deterministic order |
 | packed findings | complete analysis snapshot identity | replace as one corpus publication; do not reuse an unchanged book section alone |
+
+The chapter observation's reuse key is `galley::sous::ObservationKey`, and the
+snapshot identity is xxh3-128 over the canonical (`BookKey`, `BookId`,
+`RawChecksum`) table plus the pass schema.
 
 The current Onion `Utf16Index<'s>` and `Cursor<'s>` borrow their source. Those
 exact values therefore cannot outlive an invocation unless Galley also retains

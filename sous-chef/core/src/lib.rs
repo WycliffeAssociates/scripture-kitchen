@@ -18,11 +18,14 @@ pub use codec::{
 };
 pub use corpus::{
     CoordinateSpace, CorpusBook, CorpusSnapshot, CorpusWireError, DIRECTORY_ENTRY_BYTES,
-    FLAG_UTF16, FORMAT_VERSION, HEADER_BYTES, MAGIC, PublicationBook, SnapshotId,
-    encode_to_corpus_buffer, generated_reader_ts,
+    DIRECTORY_ID_OFFSET, FLAG_UTF16, FORMAT_VERSION, HEADER_BYTES, ID_PREFIX_BYTES, MAGIC,
+    PublicationBook, SECTION_ALIGNMENT, SnapshotId, encode_to_corpus_buffer, generated_reader_ts,
 };
 pub use input::{
     BookIndex, BookKey, Chapter, Corpus, InputError, ProjectedBook, TextRange, Verse, VerseKey,
     validate,
 };
-pub use pass::{ChapterInput, ChapterKey, ChapterObs, ChapterPass, Findings, SchemaStamp, analyze};
+pub use pass::{
+    ChapterInput, ChapterKey, ChapterObs, ChapterPass, Findings, SchemaStamp, analyze,
+    for_each_chapter,
+};

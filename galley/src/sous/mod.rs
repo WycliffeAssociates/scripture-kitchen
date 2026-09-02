@@ -2,40 +2,94 @@
 //!
 //! ```text
 //! publish_onion_findings(
-//!     vec![OnionInputBook::new("\\id MRK\n\\c 1\n\\p\n\\v 1 Jesus \\f + \\ft note\\f* wept.\n".into())],
+//!     vec![OnionInputBook::new("books/mrk.usfm", "\\id MRK\n\\c 1\n\\p\n\\v 1 Jesus \\f + \\ft note\\f* wept.\n".into())],
 //!     &[finding],            // projected-book UTF-8: 0..13 over "Jesus  wept.\n"
 //!     snapshot,
 //! )
 //!   → SOUS corpus buffer, CoordinateSpace::Utf16
-//!       directory  MRK  published_len 50  count 1
-//!       record     from 21  to 50         // raw-book UTF-16
+//!       directory  MRK  books/mrk.usfm  published_len 50  count 1
+//!       record     from 21  to 50                        // raw-book UTF-16
 //! ```
 //!
-//! Each invocation owns its book strings and derives mask, TOC, and UTF-16
-//! index fresh; nothing survives the call. A projected range crossing removed
-//! markup publishes the BOUNDING raw range as its navigation span — the exact
-//! retained runs stay reachable through the typed-detail path.
-//!
-//! Envelope layout and coordinate contract: `sous-chef/core/src/codec/README.md`.
+//! [`publish_onion_findings`] is the COLD path, deriving mask, TOC, and UTF-16
+//! index per invocation and keeping nothing; [`Expediter`] is the resident one,
+//! publishing the same bytes from a Pantry's retained products. Both rebase
+//! through the same core, so a projected range crossing removed markup
+//! publishes the BOUNDING raw range either way. Envelope layout and coordinate
+//! contract: `sous-chef/core/src/codec/README.md`.
+
+mod expediter;
+mod onion_book;
 
 use core::fmt;
+use core::ops::Range;
 
 use rustc_hash::FxHashSet;
 use sous_core::{
-    BookKey, CodecError, CoordinateSpace, CorpusWireError, PackedFinding, PublicationBook,
-    SnapshotId, encode_to_corpus_buffer,
+    BookKey, CodecError, CoordinateSpace, CorpusWireError, InputError, PackedFinding,
+    PublicationBook, SnapshotId, encode_to_corpus_buffer,
 };
-use usfm_onion::{Filter, Mask, Utf16Index, cst, lex, mask, toc, utf16_index};
 
-/// One complete raw USFM book, owned for the duration of the invocation.
+use crate::onion::{Filter, Mask, Utf16Index, cst, lex, mask, toc, utf16_index};
+use crate::pantry::{BookId, PantryError};
+
+pub use expediter::{Expediter, ObservationKey};
+pub use onion_book::{LocatedRange, OnionBook, SourceSpans};
+
+/// One complete raw USFM book under its host id, owned for the duration of the
+/// invocation.
 pub struct OnionInputBook {
+    id: BookId,
     source: String,
 }
 
 impl OnionInputBook {
-    pub fn new(source: String) -> Self {
-        Self { source }
+    pub fn new(id: impl Into<BookId>, source: String) -> Self {
+        Self {
+            id: id.into(),
+            source,
+        }
     }
+}
+
+/// A projected-book span as its BOUNDING raw span, converted by `to_published`.
+///
+/// First retained byte through last: a span crossing removed markup stays one
+/// navigation row rather than pretending the raw bytes were contiguous.
+fn rebase_span(mask: &Mask, to_published: impl Fn(u32) -> u32, span: Range<u32>) -> (u32, u32) {
+    if span.start == span.end {
+        let at = to_published(mask.to_source(span.start));
+        return (at, at);
+    }
+    // `end` is exclusive and char-aligned, so `end - 1` names a byte of the
+    // last retained character and `+ 1` lands back on a char boundary.
+    (
+        to_published(mask.to_source(span.start)),
+        to_published(mask.to_source(span.end - 1) + 1),
+    )
+}
+
+/// Refuses a span [`rebase_span`] cannot carry: past the projection, or
+/// splitting one of its characters.
+fn check_projected(projected: &str, mask: &Mask, span: Range<u32>) -> Result<(), SpanError> {
+    if span.end > mask.len() {
+        return Err(SpanError::OutOfBounds {
+            projected_len: mask.len(),
+        });
+    }
+    for offset in [span.start, span.end] {
+        if !projected.is_char_boundary(offset as usize) {
+            return Err(SpanError::NotCharBoundary { offset });
+        }
+    }
+    Ok(())
+}
+
+/// Why one projected span is not publishable, before it names its row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SpanError {
+    OutOfBounds { projected_len: u32 },
+    NotCharBoundary { offset: u32 },
 }
 
 /// Rebase projected-book UTF-8 findings to raw-book UTF-16 and encode one
@@ -53,7 +107,7 @@ pub fn publish_onion_findings(
     }
 
     let mut derived = Vec::with_capacity(books.len());
-    let mut keys = FxHashSet::with_capacity_and_hasher(books.len(), rustc_hash::FxBuildHasher);
+    let mut ids = FxHashSet::with_capacity_and_hasher(books.len(), rustc_hash::FxBuildHasher);
     for (index, book) in books.iter().enumerate() {
         let bytes = book.source.as_bytes();
         let tokens = lex(&book.source);
@@ -62,14 +116,15 @@ pub fn publish_onion_findings(
         if toc.book_token.is_none() {
             return Err(PublishError::MissingBookKey { book: index });
         }
-        let key = BookKey::new(toc.book);
-        if !keys.insert(toc.book) {
-            return Err(PublishError::DuplicateBookKey { key });
+        if !ids.insert(book.id.clone()) {
+            return Err(PublishError::DuplicateBookId {
+                id: book.id.clone(),
+            });
         }
         let mask = mask(bytes, &tokens, &tree, &Filter::verse_text());
         let projected = mask.text(bytes);
         derived.push(Derived {
-            key,
+            key: BookKey::new(toc.book),
             mask,
             projected,
             utf16: utf16_index(bytes),
@@ -88,31 +143,13 @@ pub fn publish_onion_findings(
             });
         };
         let (from, to) = (finding.from(), finding.to());
-        if to > book.mask.len() {
-            return Err(PublishError::SpanOutOfBounds {
-                row,
-                from,
-                to,
-                projected_len: book.mask.len(),
-            });
-        }
-        for offset in [from, to] {
-            if !book.projected.is_char_boundary(offset as usize) {
-                return Err(PublishError::NotCharBoundary { row, offset });
-            }
-        }
-        // Bounding raw span: first retained byte through last. `to` is
-        // exclusive and char-aligned, so `to - 1` names a byte of the last
-        // retained character and `+ 1` lands back on a char boundary.
-        let (raw_from, raw_to) = if from == to {
-            let at = book.mask.to_source(from);
-            (at, at)
-        } else {
-            (book.mask.to_source(from), book.mask.to_source(to - 1) + 1)
-        };
+        check_projected(&book.projected, &book.mask, from..to)
+            .map_err(|error| PublishError::span(row, from, to, error))?;
+        let (published_from, published_to) =
+            rebase_span(&book.mask, |byte| book.utf16.to_utf16(byte), from..to);
         let rebased = PackedFinding::new(
-            book.utf16.to_utf16(raw_from),
-            book.utf16.to_utf16(raw_to),
+            published_from,
+            published_to,
             finding.book_idx(),
             finding.kind(),
             &published_lens,
@@ -123,10 +160,11 @@ pub fn publish_onion_findings(
 
     let sections: Vec<PublicationBook<'_>> = derived
         .iter()
+        .zip(&books)
         .zip(&per_book)
         .zip(&published_lens)
-        .map(|((book, findings), &published_len)| {
-            PublicationBook::new(book.key, published_len, findings)
+        .map(|(((book, input), findings), &published_len)| {
+            PublicationBook::new(book.key, input.id.as_str(), published_len, findings)
         })
         .collect();
     encode_to_corpus_buffer(snapshot, CoordinateSpace::Utf16, &sections).map_err(PublishError::Wire)
@@ -138,8 +176,22 @@ pub enum PublishError {
     MissingBookKey {
         book: usize,
     },
-    DuplicateBookKey {
-        key: BookKey,
+    /// Two input books under one host id; `\id` may repeat, an id may not.
+    DuplicateBookId {
+        id: BookId,
+    },
+    /// The Pantry refused the update behind this publication.
+    Pantry(PantryError),
+    /// A target registered [`Retain::ProductsOnly`](crate::Retain) still needs
+    /// mapping, so the Expediter has no text to project. Reachable only past
+    /// [`Expediter::update_with`], which keys such a book while it has the text.
+    NoText {
+        id: BookId,
+    },
+    /// The book's projection is not a valid `sous-core` input.
+    InvalidBook {
+        id: BookId,
+        error: InputError,
     },
     BookIndexOutOfRange {
         row: usize,
@@ -171,7 +223,10 @@ impl fmt::Display for PublishError {
             Self::MissingBookKey { book } => {
                 write!(f, "book {book} has no \\id line to key it")
             }
-            Self::DuplicateBookKey { key } => write!(f, "duplicate input book key {key}"),
+            Self::DuplicateBookId { id } => write!(f, "duplicate input book id {id}"),
+            Self::Pantry(error) => write!(f, "{error}"),
+            Self::NoText { id } => write!(f, "book {id} retains no text to project"),
+            Self::InvalidBook { id, error } => write!(f, "book {id} is not analyzable: {error}"),
             Self::BookIndexOutOfRange {
                 row,
                 index,
@@ -197,6 +252,20 @@ impl fmt::Display for PublishError {
             }
             Self::Rebase { row, error } => write!(f, "finding {row} failed to rebase: {error}"),
             Self::Wire(error) => write!(f, "corpus encoding failed: {error}"),
+        }
+    }
+}
+
+impl PublishError {
+    fn span(row: usize, from: u32, to: u32, error: SpanError) -> Self {
+        match error {
+            SpanError::OutOfBounds { projected_len } => Self::SpanOutOfBounds {
+                row,
+                from,
+                to,
+                projected_len,
+            },
+            SpanError::NotCharBoundary { offset } => Self::NotCharBoundary { row, offset },
         }
     }
 }
@@ -254,8 +323,8 @@ mod tests {
 
     fn books() -> Vec<OnionInputBook> {
         vec![
-            OnionInputBook::new(MRK.to_string()),
-            OnionInputBook::new(GEN.to_string()),
+            OnionInputBook::new("books/mrk.usfm", MRK.to_string()),
+            OnionInputBook::new("books/gen.usfm", GEN.to_string()),
         ]
     }
 
@@ -327,7 +396,7 @@ mod tests {
 
     #[test]
     fn publication_matches_the_shared_golden_buffer() {
-        let golden: Vec<u8> = include_str!("../../sous-chef/testdata/corpus_v1_utf16.hex")
+        let golden: Vec<u8> = include_str!("../../../sous-chef/testdata/corpus_v1_utf16.hex")
             .split_whitespace()
             .map(|byte| u8::from_str_radix(byte, 16).unwrap())
             .collect();
@@ -353,6 +422,31 @@ mod tests {
         assert_eq!((row.from(), row.to()), (57, 57), "raw 'T' of Two");
     }
 
+    /// Two files of one `\id`: the string table, not the key, tells them apart.
+    #[test]
+    fn one_id_line_under_two_ids_publishes_two_rows() {
+        let buffer = publish_onion_findings(
+            vec![
+                OnionInputBook::new("a/gen-copy.usfm", GEN.to_string()),
+                OnionInputBook::new("a/gen.usfm", GEN.to_string()),
+            ],
+            &[],
+            SnapshotId::new([0; 16]),
+        )
+        .unwrap();
+        let snapshot = CorpusSnapshot::open(&buffer).unwrap();
+        assert_eq!(snapshot.len(), 2);
+        assert_eq!(
+            snapshot.book_by_id("a/gen.usfm").unwrap().index().get(),
+            1,
+            "the second row is reachable only by id"
+        );
+        assert_eq!(
+            snapshot.book_by_key(BookKey::new(*b"GEN")).unwrap().id(),
+            "a/gen-copy.usfm"
+        );
+    }
+
     #[test]
     fn empty_findings_still_publish_every_book_directory_row() {
         let buffer = publish_onion_findings(books(), &[], SnapshotId::new([7; 16])).unwrap();
@@ -366,6 +460,7 @@ mod tests {
         assert_eq!(
             publish_onion_findings(
                 vec![OnionInputBook::new(
+                    "scratch.usfm",
                     "\\c 1\n\\p\n\\v 1 keyless\n".to_string()
                 )],
                 &[],
@@ -377,14 +472,14 @@ mod tests {
         assert_eq!(
             publish_onion_findings(
                 vec![
-                    OnionInputBook::new(GEN.to_string()),
-                    OnionInputBook::new(GEN.to_string()),
+                    OnionInputBook::new("a/gen.usfm", GEN.to_string()),
+                    OnionInputBook::new("a/gen.usfm", GEN.to_string()),
                 ],
                 &[],
                 SnapshotId::new([0; 16]),
             ),
-            Err(PublishError::DuplicateBookKey {
-                key: BookKey::new(*b"GEN")
+            Err(PublishError::DuplicateBookId {
+                id: BookId::from("a/gen.usfm")
             })
         );
 

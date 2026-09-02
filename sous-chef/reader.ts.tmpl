@@ -24,6 +24,9 @@ export const DIRECTORY_KEY_TERMINATOR_OFFSET = @@DIRECTORY_KEY_TERMINATOR_OFFSET
 export const DIRECTORY_LENGTH_OFFSET = @@DIRECTORY_LENGTH_OFFSET@@;
 export const DIRECTORY_SECTION_OFFSET = @@DIRECTORY_SECTION_OFFSET@@;
 export const DIRECTORY_FINDING_COUNT_OFFSET = @@DIRECTORY_FINDING_COUNT_OFFSET@@;
+export const DIRECTORY_ID_OFFSET = @@DIRECTORY_ID_OFFSET@@;
+export const ID_PREFIX_BYTES = @@ID_PREFIX_BYTES@@;
+export const SECTION_ALIGNMENT = @@SECTION_ALIGNMENT@@;
 export const RECORD_FROM_OFFSET = @@RECORD_FROM_OFFSET@@;
 export const RECORD_TO_OFFSET = @@RECORD_TO_OFFSET@@;
 export const RECORD_BOOK_INDEX_OFFSET = @@RECORD_BOOK_INDEX_OFFSET@@;
@@ -79,6 +82,8 @@ export class FindingsSnapshotError extends Error {
 
 interface BookEntry {
   readonly key: string;
+  /** The host's opaque book id, unique where `key` need not be. */
+  readonly id: string;
   readonly length: number;
   readonly offset: number;
   readonly count: number;
@@ -117,6 +122,26 @@ function checkKey(view: DataView, at: number): string {
   return String.fromCharCode(...bytes);
 }
 
+const UTF8 = new TextDecoder("utf-8", { fatal: true });
+
+/** One `u16` length-prefixed UTF-8 id, with the offset just past it. */
+function readId(view: DataView, offset: number, book: number): [string, number] {
+  if (offset + ID_PREFIX_BYTES > view.byteLength) {
+    return fail(`book ${book} id runs past the corpus buffer`);
+  }
+  const length = view.getUint16(offset, true);
+  const end = offset + ID_PREFIX_BYTES + length;
+  if (end > view.byteLength) {
+    return fail(`book ${book} id runs past the corpus buffer`);
+  }
+  const bytes = new Uint8Array(view.buffer, view.byteOffset + offset + ID_PREFIX_BYTES, length);
+  try {
+    return [UTF8.decode(bytes), end];
+  } catch {
+    return fail(`book ${book} id is not valid UTF-8`);
+  }
+}
+
 function signedDeviation(view: DataView, at: number): number | null {
   const raw = view.getInt16(at, true);
   return raw === -0x8000 ? null : raw / 256;
@@ -135,6 +160,11 @@ export class BookView {
 
   get key(): string {
     return this.#entry.key;
+  }
+
+  /** The host id this book was published under. */
+  get id(): string {
+    return this.#entry.id;
   }
 
   get index(): number {
@@ -214,6 +244,7 @@ export class FindingsSnapshot {
   readonly #view: DataView;
   readonly #entries: readonly BookEntry[];
   readonly #byKey: ReadonlyMap<string, number>;
+  readonly #byId: ReadonlyMap<string, number>;
   readonly snapshotId: Uint8Array;
   readonly coordinateSpace: CoordinateSpace;
 
@@ -225,7 +256,9 @@ export class FindingsSnapshot {
   ) {
     this.#view = view;
     this.#entries = entries;
-    this.#byKey = new Map(entries.map((entry, index) => [entry.key, index]));
+    // First position wins: two ids may publish the same `\id`.
+    this.#byKey = new Map([...entries].reverse().map((entry, at) => [entry.key, entries.length - 1 - at]));
+    this.#byId = new Map(entries.map((entry, index) => [entry.id, index]));
     this.snapshotId = snapshotId;
     this.coordinateSpace = coordinateSpace;
   }
@@ -255,22 +288,42 @@ export class FindingsSnapshot {
     }
     const totalFindings = u32(view, HEADER_TOTAL_FINDINGS_OFFSET);
     const snapshotId = new Uint8Array(view.buffer, view.byteOffset + HEADER_SNAPSHOT_ID_OFFSET, 16).slice();
-    const directoryEnd = HEADER_BYTES + bookCount * DIRECTORY_ENTRY_BYTES;
-    if (directoryEnd > view.byteLength) {
+    const idStart = HEADER_BYTES + bookCount * DIRECTORY_ENTRY_BYTES;
+    if (idStart > view.byteLength) {
       return fail("book directory exceeds corpus buffer");
     }
 
+    // The id string table, in directory order: each offset must be the running
+    // cursor, so the strings cannot overlap, reorder, or hide bytes.
+    const ids: string[] = [];
+    const seenIds = new Set<string>();
+    let idCursor = idStart;
+    for (let index = 0; index < bookCount; index += 1) {
+      const at = HEADER_BYTES + index * DIRECTORY_ENTRY_BYTES + DIRECTORY_ID_OFFSET;
+      const offset = u32(view, at);
+      if (offset !== idCursor) {
+        return fail(`book ${index} id starts at ${offset}, expected ${idCursor}`);
+      }
+      const [id, end] = readId(view, offset, index);
+      if (seenIds.has(id)) {
+        return fail(`book ${index} repeats a host id already published`);
+      }
+      seenIds.add(id);
+      ids.push(id);
+      idCursor = end;
+    }
+    const directoryEnd =
+      idStart + Math.ceil((idCursor - idStart) / SECTION_ALIGNMENT) * SECTION_ALIGNMENT;
+    if (directoryEnd > view.byteLength) {
+      return fail("book id table exceeds corpus buffer");
+    }
+
     const entries: BookEntry[] = [];
-    const keys = new Set<string>();
     let cursor = directoryEnd;
     let totalSeen = 0;
     for (let index = 0; index < bookCount; index += 1) {
       const at = HEADER_BYTES + index * DIRECTORY_ENTRY_BYTES;
       const key = checkKey(view, at + DIRECTORY_KEY_OFFSET);
-      if (keys.has(key)) {
-        return fail(`duplicate corpus book key ${key}`);
-      }
-      keys.add(key);
       const length = u32(view, at + DIRECTORY_LENGTH_OFFSET);
       const offset = u32(view, at + DIRECTORY_SECTION_OFFSET);
       const count = u32(view, at + DIRECTORY_FINDING_COUNT_OFFSET);
@@ -281,7 +334,7 @@ export class FindingsSnapshot {
       if (!Number.isSafeInteger(end) || end > view.byteLength) {
         return fail(`book ${index} section exceeds corpus buffer`);
       }
-      entries.push({ key, length, offset, count });
+      entries.push({ key, id: ids[index], length, offset, count });
       cursor = end;
       totalSeen += count;
     }
@@ -298,11 +351,27 @@ export class FindingsSnapshot {
     return this.#entries.length;
   }
 
+  /** By directory position, or the first book carrying that `BookKey`. */
   book(keyOrIndex: string | number): BookView | undefined {
     const index = typeof keyOrIndex === "string" ? this.#byKey.get(keyOrIndex) : keyOrIndex;
     if (index === undefined || !Number.isSafeInteger(index) || index < 0 || index >= this.#entries.length) {
       return undefined;
     }
     return new BookView(this.#view, this.#entries[index], index);
+  }
+
+  /** Seeks the id string table; ids are unique where keys need not be. */
+  bookById(id: string): BookView | undefined {
+    const index = this.#byId.get(id);
+    return index === undefined ? undefined : this.book(index);
+  }
+
+  /** Every finding published under one host id, decoded eagerly. */
+  findingsFor(id: string): Finding[] {
+    const book = this.bookById(id);
+    if (book === undefined) {
+      return [];
+    }
+    return Array.from({ length: book.count }, (_, row) => book.at(row));
   }
 }

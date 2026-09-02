@@ -9,9 +9,9 @@
 # Anything already present and verifying is skipped, so this is a no-op on a
 # machine that has the corpora on disk.
 #
-# Credentials: see ../.env.example.
+# Credentials: see ../sous-chef/.env.example.
 #
-# Fetch paths, in order of preference (creds via op run --env-file ../.env):
+# Fetch paths, in order of preference (creds via op run --env-file ../sous-chef/.env):
 #   R2_ACCESS_KEY_ID set -> S3 data plane (R2_SECRET_ACCESS_KEY, an
 #                           R2_* endpoint var, R2_BUCKET; no rate limits)
 #   SSC_BUCKET set       -> wrangler via the Cloudflare management API

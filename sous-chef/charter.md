@@ -369,9 +369,12 @@ mark.at(0);
 The landed v1 envelope has a 40-byte little-endian header: `SOUS` magic,
 format version, checked coordinate flags, book count, 16-byte record stride,
 total finding count, and an opaque 16-byte `SnapshotId`. Its caller-ordered
-directory uses one 16-byte row per book: three `BookKey` bytes plus a zero
-terminator, published length, absolute section offset, and finding count.
-Record sections follow contiguously with no incidental padding. The snapshot
+directory uses one 20-byte row per book: three `BookKey` bytes plus a zero
+terminator, published length, absolute section offset, finding count, and the
+absolute offset of the host's id in the string table that follows the
+directory. Ids are the publication's unique identity — two files may carry the
+same `\id`, so two rows may carry the same `BookKey`. Record sections follow
+contiguously with no incidental padding. The snapshot
 identity is carried now; Galley's canonical identity calculation remains a
 separate lifecycle decision.
 

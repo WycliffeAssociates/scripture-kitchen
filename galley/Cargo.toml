@@ -42,3 +42,7 @@ alloc-counts = []
 [[bench]]
 name = "warmer"
 harness = false
+
+[[bench]]
+name = "expediter"
+harness = false

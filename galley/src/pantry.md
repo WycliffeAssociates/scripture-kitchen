@@ -27,6 +27,11 @@ Pantry mutably, because its `lint`/`parse` pass-throughs run the Warmer — and
 `pantry.book(&id)` reopens one later. The read-only `*_for(id)` accessors are
 gone; the `Entry` is the one way in.
 
+A host running Sous mutates through `Expediter::{update, update_with, remove}`
+instead, which forward here; the Expediter's own `pantry()` is `&Pantry`. It
+has to see every mutation, because a `ProductsOnly` update is the last moment
+that book's text exists — `galley/src/sous/expediter.md`.
+
 ## Two questions, two answers
 
 An editor asks two different things about an edited book, and the sketch's
@@ -53,9 +58,10 @@ method silently picks a reference point.
 
 `RawChecksum` is the xxh3-128 of a book's raw bytes — the whole-book form of the
 per-chunk hash `galley::chunks` prints as hex, and the key under which detached
-projection and UTF-16 data may be reused. A Sous `ObservationKey` (Slice B2) is
-a different newtype over the same algorithm, keyed on a chapter's *projected*
-inputs plus a pass schema stamp. Keeping them distinct is what lets a
+projection and UTF-16 data may be reused. A Sous `ObservationKey` is a different
+newtype over the same algorithm, keyed on a chapter's *projected* inputs plus a
+pass schema stamp; what it buys, and the third hash beside it, is
+`galley/src/sous/expediter.md`. Keeping them distinct is what lets a
 markup-only edit move the raw checksum, invalidating the projection and the
 UTF-16 table, while the observation key stands still and the observation is
 reused with rebased coordinates.

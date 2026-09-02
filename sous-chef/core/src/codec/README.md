@@ -77,21 +77,46 @@ untouched book.
   header  40 bytes   SOUS magic · format version · coordinate flags ·
                      book count · record stride (16) · total findings ·
                      opaque 16-byte SnapshotId
-  directory          one 16-byte row per book, in caller order:
+  directory          one 20-byte row per book, in caller order:
                      3 BookKey bytes + zero terminator · published length ·
-                     absolute section offset · finding count
+                     absolute section offset · finding count ·
+                     absolute id offset
+  id strings         one per book, directory order, each a u16 little-endian
+                     byte length followed by that many UTF-8 bytes; the
+                     section is zero-padded to a 4-byte boundary
   sections           contiguous 16-byte records, no incidental padding
 ```
 
-Directory position *is* `BookIndex`, so a consumer seeks by index or by key and
-lazily decodes one book:
+Directory position *is* `BookIndex`, so a consumer seeks by index, by key, or
+by the host's id and lazily decodes one book:
 
 ```ts
 const snapshot = FindingsSnapshot.open(buffer);
 const mark = snapshot.book("MRK");
 mark.length;
 mark.at(0);
+snapshot.findingsFor("books/mrk.usfm");
 ```
+
+### The id string table
+
+The host's opaque `BookId` — a file path in practice — travels in the wire so a
+consumer can address a book the way it registered it. It is also the only
+unique identity a publication has: **two books may carry the same `BookKey`**,
+because two files may carry the same `\id`, and both are published as
+independent rows. A repeated *id* is refused on the way in and on the way out.
+
+Each id offset is absolute into the buffer, like the section offset beside it,
+and must be exactly the running cursor, so the strings cannot overlap,
+reorder, or hide bytes. The length prefix means an id needs no forbidden byte
+and no scan. The 4-byte padding after the section keeps every record section
+aligned for a typed-array view.
+
+This is a **v1 layout edit**, made while nothing is released: the directory row
+grew from 16 bytes to 20 and both hex goldens were re-pinned. It is the last
+one that gets to be free. The charter's rule — a layout change means a new wire
+version — applies from the first release, and from then on this table's shape
+is frozen inside version 1.
 
 Sous analysis emits projected-book UTF-8 ranges; `galley::sous` composes the
 producer locator with UTF-8-to-UTF-16 conversion and publishes raw-book UTF-16

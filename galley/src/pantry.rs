@@ -391,6 +391,21 @@ impl Pantry {
         &self.warmer
     }
 
+    /// One book's retained products, borrowed together.
+    ///
+    /// Crate-private, because publication reads every book at once where an
+    /// [`Entry`] borrows the whole Pantry mutably for one.
+    pub(crate) fn products(&self, id: &BookId) -> Option<Products<'_>> {
+        self.books.get(id).map(|book| Products {
+            checksum: book.checksum,
+            toc: &book.toc,
+            mask: &book.mask,
+            utf16: &book.utf16,
+            published_len: book.len_utf16,
+            text: book.text.as_deref(),
+        })
+    }
+
     /// The Warmer's lint over one book's retained text. Split-borrowed, which
     /// is why this is not `Entry::text` plus a call.
     fn lint_book(&mut self, id: &BookId) -> Result<LintReport, PantryError> {
@@ -424,6 +439,18 @@ impl Pantry {
                     .then_with(|| left_id.cmp(right_id))
             });
     }
+}
+
+/// One book's retained products, borrowed for one read.
+pub(crate) struct Products<'a> {
+    pub(crate) checksum: RawChecksum,
+    pub(crate) toc: &'a Toc,
+    pub(crate) mask: &'a Mask,
+    pub(crate) utf16: &'a Utf16Table,
+    /// The raw book's UTF-16 length — a publication's `published_len`.
+    pub(crate) published_len: u32,
+    /// `None` under [`Retain::ProductsOnly`].
+    pub(crate) text: Option<&'a str>,
 }
 
 /// One book, one handle: `pantry.update(id, role, &text)?.lint()`.

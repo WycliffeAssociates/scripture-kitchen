@@ -14,8 +14,6 @@
 //! Finding offsets are projected UTF-8; `raw` is the retained source run set
 //! behind them. The published buffer carries raw-book UTF-16 instead.
 
-mod onion_book;
-
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -23,13 +21,12 @@ use std::{
     time::{Duration, Instant},
 };
 
-use onion_book::OnionBook;
 use rayon::prelude::*;
 use sous_core::{
     Alignment, Corpus, PackedFinding, ProjectedBook, SnapshotId, align, analyze, hygiene::Hygiene,
 };
 use usage::Cli;
-use usfm_galley::sous::{OnionInputBook, publish_onion_findings};
+use usfm_galley::sous::{OnionBook, OnionInputBook, publish_onion_findings};
 
 /// Inspect projected scripture text Sous Chef will analyze.
 #[derive(Cli)]
@@ -118,7 +115,7 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             print_findings(&target_corpus, &findings);
         }
         if let Some(path) = &args.publish {
-            let buffer = publish(target.sources, &findings)?;
+            let buffer = publish(&target.paths, target.sources, &findings)?;
             fs::write(path, &buffer)
                 .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
             eprintln!(
@@ -181,10 +178,15 @@ fn print_findings(corpus: &Corpus<'_, OnionBook>, findings: &[PackedFinding]) {
 /// The snapshot identity is a Galley lifecycle decision not yet made; the
 /// CLI publishes a zero identity and says so here rather than inventing one.
 fn publish(
+    paths: &[PathBuf],
     sources: Vec<String>,
     findings: &[PackedFinding],
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    let books = sources.into_iter().map(OnionInputBook::new).collect();
+    let books = paths
+        .iter()
+        .zip(sources)
+        .map(|(path, source)| OnionInputBook::new(path.display().to_string(), source))
+        .collect();
     Ok(publish_onion_findings(
         books,
         findings,
@@ -571,7 +573,7 @@ mod tests {
         assert_eq!(digest.run(), 2);
         assert_eq!((findings[0].from(), findings[0].to()), (10, 12));
 
-        let buffer = publish(target.sources, &findings).unwrap();
+        let buffer = publish(&target.paths, target.sources, &findings).unwrap();
         let snapshot = CorpusSnapshot::open(&buffer).unwrap();
         assert_eq!(snapshot.coordinate_space(), CoordinateSpace::Utf16);
         let row = snapshot

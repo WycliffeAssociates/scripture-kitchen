@@ -20,6 +20,10 @@ function fixture() {
   return hexFixture("corpus_v1.hex");
 }
 
+// One book under "books/mrk.usfm": 40-byte header, one 20-byte directory row,
+// a 16-byte id table, then the records.
+const FIRST_RECORD = 40 + 20 + 16;
+
 function expectOpenFailure(bytes) {
   assert.throws(() => FindingsSnapshot.open(bytes), FindingsSnapshotError);
 }
@@ -49,6 +53,29 @@ test("opens the shared golden buffer and lazily decodes a typed row", () => {
   });
   assert.equal(snapshot.book(0).key, "MRK");
   assert.equal(snapshot.book("GEN"), undefined);
+  assert.equal(mark.id, "books/mrk.usfm");
+});
+
+test("seeks by host id through the string table", () => {
+  const snapshot = FindingsSnapshot.open(hexFixture("corpus_v1_utf16.hex"));
+  assert.deepEqual(
+    [snapshot.book(0).id, snapshot.book(1).id],
+    ["books/mrk.usfm", "books/gen.usfm"],
+  );
+  assert.equal(snapshot.bookById("books/gen.usfm").index, 1);
+  assert.equal(snapshot.bookById("books/nowhere.usfm"), undefined);
+
+  const genesis = snapshot.findingsFor("books/gen.usfm");
+  assert.equal(genesis.length, 1);
+  assert.deepEqual(genesis[0], {
+    kind: "LengthProportionality",
+    from: 28,
+    to: 37,
+    bookIdx: 1,
+    digest: { bookScope: -0.25, projectScope: null, saturated: false },
+  });
+  assert.equal(snapshot.findingsFor("books/mrk.usfm").length, 2);
+  assert.deepEqual(snapshot.findingsFor("books/nowhere.usfm"), []);
 });
 
 test("decodes the galley-published UTF-16 golden with rebased spans", () => {
@@ -117,13 +144,13 @@ test("decodes mixed proportionality and hygiene rows, saturation included", () =
   });
 
   const badClass = hexFixture("corpus_v1_hygiene.hex");
-  badClass[56 + 12] = 11;
+  badClass[FIRST_RECORD + 12] = 11;
   assert.throws(() => FindingsSnapshot.open(badClass).book(0).at(0), FindingsSnapshotError);
   const zeroRun = hexFixture("corpus_v1_hygiene.hex");
-  zeroRun[56 + 14] = 0;
+  zeroRun[FIRST_RECORD + 14] = 0;
   assert.throws(() => FindingsSnapshot.open(zeroRun).book(0).at(0), FindingsSnapshotError);
   const falseSaturation = hexFixture("corpus_v1_hygiene.hex");
-  falseSaturation[56 + 11] = 1;
+  falseSaturation[FIRST_RECORD + 11] = 1;
   assert.throws(() => FindingsSnapshot.open(falseSaturation).book(0).at(0), FindingsSnapshotError);
 });
 
@@ -142,20 +169,33 @@ test("supports empty corpus and caller-ordered empty books", () => {
   emptyView.setUint32(16, 16, true);
   assert.equal(FindingsSnapshot.open(empty).length, 0);
 
-  const books = new Uint8Array(40 + 2 * 16);
+  // Two empty books: header, two 20-byte rows, then "g" and "m" as their ids
+  // (3 bytes each, padded to 8) and no records at all.
+  const idStart = 40 + 2 * 20;
+  const books = new Uint8Array(idStart + 8);
   const view = new DataView(books.buffer);
   view.setUint32(0, 0x53554f53, true);
   view.setUint32(4, 1, true);
   view.setUint32(12, 2, true);
   view.setUint32(16, 16, true);
   books.set([71, 69, 78], 40);
-  books.set([77, 82, 75], 56);
-  view.setUint32(40 + 4, 0, true);
-  view.setUint32(40 + 8, 72, true);
-  view.setUint32(56 + 4, 0, true);
-  view.setUint32(56 + 8, 72, true);
+  books.set([77, 82, 75], 60);
+  view.setUint32(40 + 8, books.length, true);
+  view.setUint32(40 + 16, idStart, true);
+  view.setUint32(60 + 8, books.length, true);
+  view.setUint32(60 + 16, idStart + 3, true);
+  view.setUint16(idStart, 1, true);
+  books.set([103], idStart + 2);
+  view.setUint16(idStart + 3, 1, true);
+  books.set([109], idStart + 5);
+
   assert.equal(FindingsSnapshot.open(books).book("MRK").index, 1);
   assert.equal(FindingsSnapshot.open(books).book(0).key, "GEN");
+  assert.equal(FindingsSnapshot.open(books).bookById("m").key, "MRK");
+
+  const repeatedId = books.slice();
+  repeatedId[idStart + 5] = 103;
+  expectOpenFailure(repeatedId);
 });
 
 test("fails closed on malformed envelope and lazily malformed rows", () => {
@@ -176,18 +216,18 @@ test("fails closed on malformed envelope and lazily malformed rows", () => {
   expectOpenFailure(badKey);
 
   const badCode = bytes.slice();
-  badCode[56 + 10] = 2;
+  badCode[FIRST_RECORD + 10] = 2;
   assert.throws(() => FindingsSnapshot.open(badCode).book(0).at(0), FindingsSnapshotError);
 
   const badFlagsRow = bytes.slice();
-  badFlagsRow[56 + 11] = 0x80;
+  badFlagsRow[FIRST_RECORD + 11] = 0x80;
   assert.throws(() => FindingsSnapshot.open(badFlagsRow).book(0).at(0), FindingsSnapshotError);
 
   const badBookIndex = bytes.slice();
-  badBookIndex[56 + 8] = 1;
+  badBookIndex[FIRST_RECORD + 8] = 1;
   assert.throws(() => FindingsSnapshot.open(badBookIndex).book(0).at(0), FindingsSnapshotError);
 
   const badSpan = bytes.slice();
-  badSpan[56] = 0x20;
+  badSpan[FIRST_RECORD] = 0x20;
   assert.throws(() => FindingsSnapshot.open(badSpan).book(0).at(0), FindingsSnapshotError);
 });

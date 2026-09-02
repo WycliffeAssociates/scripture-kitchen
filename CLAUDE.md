@@ -14,10 +14,12 @@ conventions applies to both; everything in `planning/` and `GLOSSARY.md` is
 onion's only.
 
 `sous-core` does NOT depend on onion: it takes a neutral borrowed view of the
-analysis. `sous-cli` and `galley` are the adapters allowed to depend on both —
-the CLI for analysis input, galley (`galley::sous`) for coordinate rebasing
-and findings publication. Do not add an onion dependency to `sous-core` — see
-the ownership boundaries in the charter.
+analysis. `galley` is the adapter allowed to depend on both — `galley::sous`
+owns the Onion→Sous seam entire: `OnionBook` (the `ProjectedBook` over Onion's
+mask and TOC), coordinate rebasing, and findings publication, cold
+(`publish_onion_findings`) or resident (`Expediter`). `sous-cli` depends on
+both only to call them. Do not add an onion dependency to `sous-core` — see the
+ownership boundaries in the charter.
 
 What the two engines DO share is `mise/`, the workspace's zero-dependency leaf:
 spec-derived data tables and borrow-free data structures only (`BookKey`, the

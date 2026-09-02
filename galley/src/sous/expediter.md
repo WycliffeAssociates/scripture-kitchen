@@ -1,0 +1,98 @@
+# The Expediter
+
+The Sous coordinator: one `ChapterPass`, one `Pantry`, one complete corpus
+publication per call. `galley/docs/analysis-host.md` states the lifecycle
+contract it implements; `galley/src/pantry.md` states the registry's half.
+
+This is its own note rather than a section of `pantry.md` because the two
+answer different questions. The Pantry's question is ownership — who holds the
+text, what survives it, what an id means. The Expediter's is reuse — what makes
+skipping a `map` safe, and why a cold analysis and an incremental one publish
+the same bytes.
+
+## Mutations go through the Expediter
+
+`Expediter::update`, `update_with` and `remove` forward to the Pantry, and
+`pantry()` hands back `&Pantry` only. The registry is not sealed off for
+tidiness: the Expediter has to see every mutation, because for one retention
+mode the update is the last moment the text exists.
+
+## Eager for a text the Pantry will not keep, lazy for one it will
+
+`Pantry::update` stays pure Onion: lex, CST, TOC, mask, UTF-16 table, and
+nothing of Sous. A host that updates ten `Retain::Text` books and publishes
+once pays for one pass over the ten, not ten passes, and the indexing waits:
+
+```text
+chapter table for this RawChecksum?
+  hit   -> no text is touched, nothing is projected
+  miss  -> OnionBook::from_parts(text, mask.clone(), toc.clone())
+           for_each_chapter -> ObservationKey per chapter
+              absent -> pass.map, mapped += 1
+           store the table, DROP the projected text
+```
+
+A `Retain::ProductsOnly` book cannot wait. Its text is gone the moment
+`update_with` returns, so its table is built there, from the caller's own
+`&str`, before the Pantry drops it. That is the whole reason mutation is the
+Expediter's method: the earlier arrangement — mutate the Pantry directly, index
+at publish — could only answer `Err(NoText)` for the second publication of a
+book the host holds the text of.
+
+Projected text is never retained either way. It exists for exactly as long as
+it takes to key a book's chapters, and only for a book whose table is missing.
+`last_mapped` counts both kinds of map, so an eager one is still visible in the
+publication it served.
+
+## The two hashes, and the third
+
+| key | over | moves when |
+| --- | --- | --- |
+| `RawChecksum` | the book's raw bytes | any edit at all, markup included |
+| `ObservationKey` | one chapter's projected text + its rebased verse rows + `P::SCHEMA` | the analysis input changes |
+| `SnapshotId` | the canonical (`BookKey`, id, `RawChecksum`) table + `P::SCHEMA` | the corpus is a different corpus |
+
+That split is the whole point. Insert a footnote whose content the verse-text
+mask removes and the raw checksum moves, so the projection and the UTF-16 table
+are rebuilt and every published offset after the insertion shifts — while every
+`ObservationKey` stands still, so not one chapter is mapped again. Retype a
+verse marker without touching a content byte and the reverse happens: the
+projected text is identical but the verse rows are rekeyed, so exactly that
+chapter re-maps.
+
+`ObservationKey` deliberately excludes the chapter's own address, which is what
+lets one observation serve identical chapters in two books while reduce still
+counts both positions. A pass whose `map` reads `ChapterInput::key` would break
+that and does not belong behind this cache.
+
+## Why the buffers are equal
+
+`sous_core::for_each_chapter` is the only place a `ChapterInput` is assembled,
+and both `analyze` and the Expediter call it, so neither can build an input the
+other would not. Reduce is provenance-blind — it cannot tell a cached
+observation from a fresh one — and both publishers rebase through the same
+`rebase_span`, so the two paths differ in what work they skip and in nothing
+else. `publish_byte_equals_cold_analyze_through_the_string_taking_publisher`
+pins that as bytes, not as a claim.
+
+## Mark and sweep, N generations deep
+
+Every publication ends by sweeping: a chapter table survives only if some
+book's ring names its checksum, and an observation only if some surviving table
+names its key. A book's ring is its current `RawChecksum` plus the last
+`with_generations(n)` before it, four by default; `remove` drops the ring, so
+the book's tables go at the next publication.
+
+Why keep any previous generation at all: an undo restores byte-identical
+chapter text and therefore the identical `ObservationKey`, so an undo within
+`n` edits is a table hit and maps nothing.
+
+The sweep is skipped outright when no table was added and no ring aged since
+the last one — a republication of an untouched corpus has nothing to free, and
+pays nothing to learn it (`publish_unchanged` is unchanged at 14 µs;
+evidence.md).
+
+## What is not here yet
+
+Parallel map is Slice C's other half; `publish` is serial and deterministic. A
+config stamp joins `SnapshotId` when judging config exists.

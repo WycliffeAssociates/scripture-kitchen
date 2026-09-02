@@ -32,7 +32,7 @@ and it starts from `Default` at every book.
 
 ## Why reduce is provenance-blind
 
-`reduce` takes `&[ChapterObs<Observation>]` and nothing else. There is no
+`reduce` takes `&[ChapterObs<&Observation>]` and nothing else. There is no
 `Some(prior)` argument, no cache handle, and no freshness flag, so a reduce
 cannot branch on where an observation came from. A host that retained half the
 rows under their chapter content keys and mapped the other half this call hands
@@ -40,9 +40,16 @@ reduce a slice indistinguishable from a cold one — which is exactly the
 statement "an incremental analysis equals a cold analysis", made structural
 instead of tested per rule.
 
+The observations are BORROWED, so a cache stays their owner and a publication
+copies none of them: `ChapterObs<O>` is generic, `analyze` builds its view over
+the vector it just mapped, and `galley::sous::Expediter` builds one straight
+over its resident map. `Observation` therefore need not be `Clone` —
+`a_pass_whose_observation_is_not_clone_analyzes` is a pass whose observation is
+not, compiling.
+
 The obligation this puts on a pass author is that `Observation` must be
-`Clone + Send + 'static` and chapter-relative. A borrow, an absolute offset, or
-a neighbour's fact smuggled into an observation would silently break reuse; the
+`Send + 'static` and chapter-relative. A borrow, an absolute offset, or a
+neighbour's fact smuggled into an observation would silently break reuse; the
 trait bound refuses the first two.
 
 ## Scope: what a pass does not see

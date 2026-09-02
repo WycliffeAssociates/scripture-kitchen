@@ -79,7 +79,7 @@ pub struct ChapterObs<O> {
 pub trait ChapterPass {
     /// Detached, chapter-relative, borrow-free. A host may retain it across
     /// invocations under the chapter's content key.
-    type Observation: Clone + Send + 'static;
+    type Observation: Send + 'static;
     /// Seam state carried book-forward during reduce, reset at every book.
     type Carry: Default;
     /// Part of every cache key a host builds for this pass.
@@ -89,9 +89,11 @@ pub trait ChapterPass {
     fn map(&self, chapter: ChapterInput<'_>) -> Self::Observation;
 
     /// Folds one book's chapters in order, rebasing each to book coordinates.
+    ///
+    /// Borrows the observations, so a cache stays their owner.
     fn reduce(
         &self,
-        book: &[ChapterObs<Self::Observation>],
+        book: &[ChapterObs<&Self::Observation>],
         carry: &mut Self::Carry,
         out: &mut Findings,
     );
@@ -150,6 +152,29 @@ impl Findings {
     }
 }
 
+/// Calls `visit` with each chapter's projected start and its map input.
+///
+/// The one place a chapter input is assembled, so [`analyze`] and an
+/// incremental host cannot build two different ones from the same book.
+pub fn for_each_chapter<B: ProjectedBook>(book: &B, mut visit: impl FnMut(u32, ChapterInput<'_>)) {
+    let text = book.text();
+    let rows: Vec<Verse> = book.verses().collect();
+    let mut verses = Vec::new();
+    let mut at = 0;
+    for chapter in book.chapters() {
+        let span = chapter.text();
+        at = collect_verses(&rows, at, chapter, &mut verses);
+        visit(
+            span.from(),
+            ChapterInput {
+                text: &text[span.from() as usize..span.to() as usize],
+                verses: &verses,
+                key: ChapterKey::new(book.key(), chapter.number()),
+            },
+        );
+    }
+}
+
 /// Maps every chapter and reduces every book in caller order.
 ///
 /// This is the whole-corpus oracle an incremental host is measured against.
@@ -161,29 +186,18 @@ pub fn analyze<B: ProjectedBook, P: ChapterPass>(corpus: &Corpus<'_, B>, pass: &
         .collect();
     let mut out = Findings::new(book_lengths);
 
-    let mut observations = Vec::new();
-    let mut verses = Vec::new();
+    let mut observations: Vec<(u32, P::Observation)> = Vec::new();
     for (index, book) in corpus.iter() {
-        let text = book.text();
-        let rows: Vec<Verse> = book.verses().collect();
-        let mut at = 0;
-
         observations.clear();
-        for chapter in book.chapters() {
-            let span = chapter.text();
-            at = collect_verses(&rows, at, chapter, &mut verses);
-            observations.push(ChapterObs {
-                start: span.from(),
-                obs: pass.map(ChapterInput {
-                    text: &text[span.from() as usize..span.to() as usize],
-                    verses: &verses,
-                    key: ChapterKey::new(book.key(), chapter.number()),
-                }),
-            });
-        }
-
+        for_each_chapter(book, |start, input| {
+            observations.push((start, pass.map(input)));
+        });
+        let rows: Vec<ChapterObs<&P::Observation>> = observations
+            .iter()
+            .map(|(start, obs)| ChapterObs { start: *start, obs })
+            .collect();
         out.open_book(index);
-        pass.reduce(&observations, &mut P::Carry::default(), &mut out);
+        pass.reduce(&rows, &mut P::Carry::default(), &mut out);
     }
     out
 }
@@ -330,11 +344,11 @@ mod tests {
             &[
                 ChapterObs {
                     start: 0,
-                    obs: first,
+                    obs: &first,
                 },
                 ChapterObs {
                     start: 3,
-                    obs: second,
+                    obs: &second,
                 },
             ],
             &mut (),
@@ -344,7 +358,7 @@ mod tests {
         Hygiene.reduce(
             &[ChapterObs {
                 start: 0,
-                obs: third,
+                obs: &third,
             }],
             &mut (),
             &mut hand,
@@ -410,7 +424,7 @@ mod tests {
 
             fn reduce(
                 &self,
-                _book: &[ChapterObs<Self::Observation>],
+                _book: &[ChapterObs<&Self::Observation>],
                 _carry: &mut (),
                 _out: &mut Findings,
             ) {
@@ -523,10 +537,10 @@ mod tests {
         assert!(analyze(&corpus, &Hygiene).is_empty());
     }
 
-    const fn detached<O: Clone + Send + 'static>() {}
+    const fn detached<O: Send + 'static>() {}
 
     #[test]
-    fn a_hygiene_observation_is_clone_send_and_borrow_free() {
+    fn a_hygiene_observation_is_send_and_borrow_free() {
         detached::<<Hygiene as ChapterPass>::Observation>();
         detached::<<LastByte as ChapterPass>::Observation>();
     }
@@ -544,7 +558,7 @@ mod tests {
             chapter.text.as_bytes().last().copied().unwrap_or(0)
         }
 
-        fn reduce(&self, book: &[ChapterObs<u8>], carry: &mut Option<u8>, out: &mut Findings) {
+        fn reduce(&self, book: &[ChapterObs<&u8>], carry: &mut Option<u8>, out: &mut Findings) {
             for chapter in book {
                 let seen = carry.unwrap_or(0);
                 out.push(
@@ -554,7 +568,7 @@ mod tests {
                     ),
                 )
                 .expect("a chapter start lies inside its book");
-                *carry = Some(chapter.obs);
+                *carry = Some(*chapter.obs);
             }
         }
     }
@@ -580,7 +594,7 @@ mod tests {
         let text = book.text();
         let rows: Vec<Verse> = book.verses().collect();
 
-        let mut fresh = Vec::new();
+        let mut mapped = Vec::new();
         let mut verses = Vec::new();
         let mut at = 0;
         for chapter in book.chapters() {
@@ -591,11 +605,12 @@ mod tests {
                 verses: &verses,
                 key: ChapterKey::new(book.key(), chapter.number()),
             };
-            fresh.push(ChapterObs {
-                start: span.from(),
-                obs: LastByte.map(input),
-            });
+            mapped.push((span.from(), LastByte.map(input)));
         }
+        let fresh: Vec<ChapterObs<&u8>> = mapped
+            .iter()
+            .map(|(start, obs)| ChapterObs { start: *start, obs })
+            .collect();
 
         let mut reused = fresh.clone();
         reused.reverse();

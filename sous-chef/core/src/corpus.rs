@@ -1,8 +1,9 @@
 //! Complete-corpus findings publication.
 //!
 //! ```text
-//! encode_to_corpus_buffer(id, Utf16, [PublicationBook("MRK", 50, [finding])])
-//!   → 40-byte header · one 16-byte directory row · one 16-byte record
+//! encode_to_corpus_buffer(id, Utf16, [PublicationBook("MRK", "books/mrk.usfm", 50, [finding])])
+//!   → 40-byte header · one 20-byte directory row · "books/mrk.usfm" in the id
+//!     string table · one 16-byte record
 //! ```
 //!
 //! A fresh publication-ready buffer, not a serialization of the resident
@@ -24,7 +25,7 @@ pub const MAGIC: u32 = 0x5355_4f53; // ASCII "SOUS", little endian.
 pub const FORMAT_VERSION: u32 = 1;
 pub const FLAG_UTF16: u32 = 1 << 0;
 pub const HEADER_BYTES: usize = 40;
-pub const DIRECTORY_ENTRY_BYTES: usize = 16;
+pub const DIRECTORY_ENTRY_BYTES: usize = 20;
 pub const HEADER_MAGIC_OFFSET: usize = 0;
 pub const HEADER_VERSION_OFFSET: usize = 4;
 pub const HEADER_FLAGS_OFFSET: usize = 8;
@@ -37,6 +38,12 @@ pub const DIRECTORY_KEY_TERMINATOR_OFFSET: usize = 3;
 pub const DIRECTORY_LENGTH_OFFSET: usize = 4;
 pub const DIRECTORY_SECTION_OFFSET: usize = 8;
 pub const DIRECTORY_FINDING_COUNT_OFFSET: usize = 12;
+pub const DIRECTORY_ID_OFFSET: usize = 16;
+/// Bytes of `u16` little-endian length in front of each id's UTF-8 bytes.
+pub const ID_PREFIX_BYTES: usize = 2;
+/// The id string table is padded to this boundary so record sections stay
+/// 4-byte aligned for a typed-array view.
+pub const SECTION_ALIGNMENT: usize = 4;
 
 /// The opaque identity of the immutable snapshot a publication belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -89,14 +96,23 @@ impl TryFrom<u32> for CoordinateSpace {
 /// One publication-ready book section in caller order.
 pub struct PublicationBook<'a> {
     key: BookKey,
+    id: &'a str,
     published_len: u32,
     findings: &'a [PackedFinding],
 }
 
 impl<'a> PublicationBook<'a> {
-    pub const fn new(key: BookKey, published_len: u32, findings: &'a [PackedFinding]) -> Self {
+    /// `id` is the host's opaque book identity; it must be unique in the
+    /// publication, where [`BookKey`] need not be.
+    pub const fn new(
+        key: BookKey,
+        id: &'a str,
+        published_len: u32,
+        findings: &'a [PackedFinding],
+    ) -> Self {
         Self {
             key,
+            id,
             published_len,
             findings,
         }
@@ -104,6 +120,10 @@ impl<'a> PublicationBook<'a> {
 
     pub const fn key(&self) -> BookKey {
         self.key
+    }
+
+    pub const fn id(&self) -> &'a str {
+        self.id
     }
 
     pub const fn published_len(&self) -> u32 {
@@ -131,14 +151,19 @@ pub fn encode_to_corpus_buffer(
         });
     }
 
-    let mut keys = FxHashSet::default();
-    keys.reserve(sections.len());
+    let mut ids = FxHashSet::default();
+    ids.reserve(sections.len());
     let mut total_findings = 0u32;
+    let mut id_bytes = 0usize;
     for (index, section) in sections.iter().enumerate() {
         validate_key(section.key)?;
-        if !keys.insert(section.key) {
-            return Err(CorpusWireError::DuplicateBookKey { key: section.key });
+        if u16::try_from(section.id.len()).is_err() {
+            return Err(CorpusWireError::BookIdTooLong { book: index });
         }
+        if !ids.insert(section.id) {
+            return Err(CorpusWireError::DuplicateBookId { book: index });
+        }
+        id_bytes += ID_PREFIX_BYTES + section.id.len();
         total_findings = total_findings
             .checked_add(u32::try_from(section.findings.len()).map_err(|_| {
                 CorpusWireError::FindingCountOverflow {
@@ -163,8 +188,11 @@ pub fn encode_to_corpus_buffer(
         .len()
         .checked_mul(DIRECTORY_ENTRY_BYTES)
         .ok_or(CorpusWireError::SizeOverflow)?;
-    let data_start = HEADER_BYTES
+    let id_start = HEADER_BYTES
         .checked_add(directory_bytes)
+        .ok_or(CorpusWireError::SizeOverflow)?;
+    let data_start = id_start
+        .checked_add(padded(id_bytes).ok_or(CorpusWireError::SizeOverflow)?)
         .ok_or(CorpusWireError::SizeOverflow)?;
     let total_bytes = data_start
         .checked_add(
@@ -186,6 +214,7 @@ pub fn encode_to_corpus_buffer(
     out.extend_from_slice(&snapshot_id.as_bytes());
 
     let mut section_offset = data_start;
+    let mut id_offset = id_start;
     for (index, section) in sections.iter().enumerate() {
         out.extend_from_slice(&section.key.as_bytes());
         out.push(0);
@@ -203,6 +232,11 @@ pub fn encode_to_corpus_buffer(
                 })?
                 .to_le_bytes(),
         );
+        out.extend_from_slice(
+            &u32::try_from(id_offset)
+                .map_err(|_| CorpusWireError::SizeOverflow)?
+                .to_le_bytes(),
+        );
         section_offset = section_offset
             .checked_add(
                 section
@@ -212,7 +246,14 @@ pub fn encode_to_corpus_buffer(
                     .ok_or(CorpusWireError::SizeOverflow)?,
             )
             .ok_or(CorpusWireError::SizeOverflow)?;
+        id_offset += ID_PREFIX_BYTES + section.id.len();
     }
+
+    for section in sections {
+        out.extend_from_slice(&(section.id.len() as u16).to_le_bytes());
+        out.extend_from_slice(section.id.as_bytes());
+    }
+    out.resize(data_start, 0);
 
     for section in sections {
         for finding in section.findings {
@@ -231,12 +272,13 @@ pub struct CorpusSnapshot<'a> {
     bytes: &'a [u8],
     snapshot_id: SnapshotId,
     coordinate_space: CoordinateSpace,
-    books: Vec<BookMeta>,
+    books: Vec<BookMeta<'a>>,
 }
 
 #[derive(Debug, Clone, Copy)]
-struct BookMeta {
+struct BookMeta<'a> {
     key: BookKey,
+    id: &'a str,
     published_len: u32,
     offset: usize,
     count: usize,
@@ -246,6 +288,7 @@ pub struct CorpusBook<'a> {
     bytes: &'a [u8],
     index: BookIndex,
     key: BookKey,
+    id: &'a str,
     published_len: u32,
     offset: usize,
     count: usize,
@@ -282,8 +325,17 @@ impl<'a> CorpusSnapshot<'a> {
         let directory_bytes = book_count
             .checked_mul(DIRECTORY_ENTRY_BYTES)
             .ok_or(CorpusWireError::SizeOverflow)?;
-        let data_start = HEADER_BYTES
+        let id_start = HEADER_BYTES
             .checked_add(directory_bytes)
+            .ok_or(CorpusWireError::SizeOverflow)?;
+        if id_start > bytes.len() {
+            return Err(CorpusWireError::InvalidLength {
+                actual: bytes.len(),
+            });
+        }
+        let (ids, id_end) = read_id_table(bytes, book_count, id_start)?;
+        let data_start = id_start
+            .checked_add(padded(id_end - id_start).ok_or(CorpusWireError::SizeOverflow)?)
             .ok_or(CorpusWireError::SizeOverflow)?;
         if data_start > bytes.len() {
             return Err(CorpusWireError::InvalidLength {
@@ -291,12 +343,10 @@ impl<'a> CorpusSnapshot<'a> {
             });
         }
 
-        let mut keys = FxHashSet::default();
-        keys.reserve(book_count);
         let mut books = Vec::with_capacity(book_count);
         let mut cursor = data_start;
         let mut total_seen = 0u32;
-        for index in 0..book_count {
+        for (index, id) in ids.into_iter().enumerate() {
             let at = HEADER_BYTES + index * DIRECTORY_ENTRY_BYTES;
             let key_bytes: [u8; 3] = bytes[at..at + 3].try_into().expect("directory checked");
             if bytes[at + 3] != 0 {
@@ -304,9 +354,6 @@ impl<'a> CorpusSnapshot<'a> {
             }
             let key = BookKey::new(key_bytes);
             validate_key(key)?;
-            if !keys.insert(key) {
-                return Err(CorpusWireError::DuplicateBookKey { key });
-            }
             let published_len = read_u32(bytes, at + 4);
             let offset = usize::try_from(read_u32(bytes, at + 8))
                 .map_err(|_| CorpusWireError::SizeOverflow)?;
@@ -350,6 +397,7 @@ impl<'a> CorpusSnapshot<'a> {
                 .ok_or(CorpusWireError::TotalFindingCountOverflow)?;
             books.push(BookMeta {
                 key,
+                id,
                 published_len,
                 offset,
                 count,
@@ -397,20 +445,25 @@ impl<'a> CorpusSnapshot<'a> {
             bytes: self.bytes,
             index,
             key: meta.key,
+            id: meta.id,
             published_len: meta.published_len,
             offset: meta.offset,
             count: meta.count,
         })
     }
 
+    /// The FIRST book carrying this key; two ids may publish the same `\id`.
     pub fn book_by_key(&self, key: BookKey) -> Option<CorpusBook<'a>> {
-        self.books
-            .iter()
-            .position(|meta| meta.key == key)
-            .map(|index| {
-                self.book(BookIndex::new(index).expect("book count was checked"))
-                    .expect("position came from the same table")
-            })
+        self.at(self.books.iter().position(|meta| meta.key == key)?)
+    }
+
+    /// The book under this host id, which is unique in a publication.
+    pub fn book_by_id(&self, id: &str) -> Option<CorpusBook<'a>> {
+        self.at(self.books.iter().position(|meta| meta.id == id)?)
+    }
+
+    fn at(&self, index: usize) -> Option<CorpusBook<'a>> {
+        self.book(BookIndex::new(index).expect("book count was checked"))
     }
 }
 
@@ -421,6 +474,11 @@ impl<'a> CorpusBook<'a> {
 
     pub const fn key(&self) -> BookKey {
         self.key
+    }
+
+    /// The host id this book was published under.
+    pub const fn id(&self) -> &'a str {
+        self.id
     }
 
     pub const fn published_len(&self) -> u32 {
@@ -463,6 +521,58 @@ impl<'a> CorpusBook<'a> {
     }
 }
 
+/// The id table read in directory order: every offset must be the running
+/// cursor, so the strings cannot overlap, reorder, or hide bytes.
+fn read_id_table(
+    bytes: &[u8],
+    book_count: usize,
+    id_start: usize,
+) -> Result<(Vec<&str>, usize), CorpusWireError> {
+    let mut ids = Vec::with_capacity(book_count);
+    let mut seen = FxHashSet::default();
+    seen.reserve(book_count);
+    let mut cursor = id_start;
+    for index in 0..book_count {
+        let at = HEADER_BYTES + index * DIRECTORY_ENTRY_BYTES + DIRECTORY_ID_OFFSET;
+        let offset =
+            usize::try_from(read_u32(bytes, at)).map_err(|_| CorpusWireError::SizeOverflow)?;
+        if offset != cursor {
+            return Err(CorpusWireError::BookIdOutOfOrder {
+                book: index,
+                expected: cursor,
+                actual: offset,
+            });
+        }
+        let end = offset
+            .checked_add(ID_PREFIX_BYTES)
+            .ok_or(CorpusWireError::SizeOverflow)?;
+        if end > bytes.len() {
+            return Err(CorpusWireError::InvalidBookId { book: index });
+        }
+        let len = usize::from(u16::from_le_bytes(
+            bytes[offset..end].try_into().expect("two bytes"),
+        ));
+        let text_end = end.checked_add(len).ok_or(CorpusWireError::SizeOverflow)?;
+        if text_end > bytes.len() {
+            return Err(CorpusWireError::InvalidBookId { book: index });
+        }
+        let id = core::str::from_utf8(&bytes[end..text_end])
+            .map_err(|_| CorpusWireError::InvalidBookId { book: index })?;
+        if !seen.insert(id) {
+            return Err(CorpusWireError::DuplicateBookId { book: index });
+        }
+        ids.push(id);
+        cursor = text_end;
+    }
+    Ok((ids, cursor))
+}
+
+/// `len` rounded up to [`SECTION_ALIGNMENT`].
+fn padded(len: usize) -> Option<usize> {
+    len.checked_add(SECTION_ALIGNMENT - 1)
+        .map(|rounded| rounded & !(SECTION_ALIGNMENT - 1))
+}
+
 fn validate_key(key: BookKey) -> Result<(), CorpusWireError> {
     let bytes = key.as_bytes();
     if bytes
@@ -501,8 +611,21 @@ pub enum CorpusWireError {
     InvalidBookKey {
         bytes: [u8; 3],
     },
-    DuplicateBookKey {
-        key: BookKey,
+    /// Two books published under one host id, the identity a repeated `\id`
+    /// cannot collide with.
+    DuplicateBookId {
+        book: usize,
+    },
+    BookIdTooLong {
+        book: usize,
+    },
+    InvalidBookId {
+        book: usize,
+    },
+    BookIdOutOfOrder {
+        book: usize,
+        expected: usize,
+        actual: usize,
     },
     FindingCountOverflow {
         book: usize,
@@ -551,7 +674,21 @@ impl fmt::Display for CorpusWireError {
                 write!(f, "corpus contains {count} books; maximum is 65536")
             }
             Self::InvalidBookKey { bytes } => write!(f, "invalid ASCII book key {bytes:02x?}"),
-            Self::DuplicateBookKey { key } => write!(f, "duplicate corpus book key {key}"),
+            Self::DuplicateBookId { book } => {
+                write!(f, "book {book} repeats a host id already published")
+            }
+            Self::BookIdTooLong { book } => write!(f, "book {book} has an id longer than 65535"),
+            Self::InvalidBookId { book } => {
+                write!(
+                    f,
+                    "book {book} has no readable UTF-8 id in the string table"
+                )
+            }
+            Self::BookIdOutOfOrder {
+                book,
+                expected,
+                actual,
+            } => write!(f, "book {book} id starts at {actual}, expected {expected}"),
             Self::FindingCountOverflow { book, count } => {
                 write!(f, "book {book} has too many findings: {count}")
             }
@@ -648,6 +785,9 @@ pub fn generated_reader_ts() -> String {
             "@@DIRECTORY_FINDING_COUNT_OFFSET@@",
             &DIRECTORY_FINDING_COUNT_OFFSET.to_string(),
         )
+        .replace("@@DIRECTORY_ID_OFFSET@@", &DIRECTORY_ID_OFFSET.to_string())
+        .replace("@@ID_PREFIX_BYTES@@", &ID_PREFIX_BYTES.to_string())
+        .replace("@@SECTION_ALIGNMENT@@", &SECTION_ALIGNMENT.to_string())
         .replace("@@RECORD_FROM_OFFSET@@", &RECORD_FROM_OFFSET.to_string())
         .replace("@@RECORD_TO_OFFSET@@", &RECORD_TO_OFFSET.to_string())
         .replace(
@@ -672,6 +812,9 @@ mod tests {
     use crate::{FindingKind, HygieneDigest, ProportionalityDigest, QuantizedDeviation};
 
     const GENERATED: &str = include_str!("../../reader.ts");
+    /// One book under `books/mrk.usfm`: header, one directory row, a padded
+    /// 16-byte id table, then the records.
+    const FIRST_RECORD: usize = HEADER_BYTES + DIRECTORY_ENTRY_BYTES + 16;
 
     fn fixture_bytes() -> Vec<u8> {
         include_str!("../../testdata/corpus_v1.hex")
@@ -704,7 +847,8 @@ mod tests {
     fn writer_matches_shared_golden_buffer_and_reader_view() {
         let finding = fixture_finding();
         let findings = [finding];
-        let section = PublicationBook::new(BookKey::new(*b"MRK"), 0x0200, &findings);
+        let section =
+            PublicationBook::new(BookKey::new(*b"MRK"), "books/mrk.usfm", 0x0200, &findings);
         let encoded = encode_to_corpus_buffer(
             SnapshotId::new(core::array::from_fn(|index| index as u8)),
             CoordinateSpace::Utf8,
@@ -721,8 +865,14 @@ mod tests {
         assert_eq!(snapshot.coordinate_space(), CoordinateSpace::Utf8);
         let book = snapshot.book_by_key(BookKey::new(*b"MRK")).unwrap();
         assert_eq!(book.index().get(), 0);
+        assert_eq!(book.id(), "books/mrk.usfm");
         assert_eq!(book.published_len(), 0x0200);
         assert_eq!(book.at(0).unwrap(), finding);
+        assert_eq!(
+            snapshot.book_by_id("books/mrk.usfm").unwrap().index().get(),
+            0
+        );
+        assert!(snapshot.book_by_id("books/gen.usfm").is_none());
     }
 
     /// Mixed kinds in one book: a proportionality row between an exact and a
@@ -755,7 +905,8 @@ mod tests {
             .unwrap(),
             hygiene(0x40, 0xa0, HygieneClass::Delete, 40_000),
         ];
-        let section = PublicationBook::new(BookKey::new(*b"MRK"), 0x0100, &findings);
+        let section =
+            PublicationBook::new(BookKey::new(*b"MRK"), "books/mrk.usfm", 0x0100, &findings);
         let encoded = encode_to_corpus_buffer(
             SnapshotId::new(core::array::from_fn(|index| index as u8)),
             CoordinateSpace::Utf8,
@@ -788,8 +939,8 @@ mod tests {
         assert!(CorpusSnapshot::open(&empty).unwrap().is_empty());
 
         let books = [
-            PublicationBook::new(BookKey::new(*b"GEN"), 0, &[]),
-            PublicationBook::new(BookKey::new(*b"MRK"), 0, &[]),
+            PublicationBook::new(BookKey::new(*b"GEN"), "a/gen.usfm", 0, &[]),
+            PublicationBook::new(BookKey::new(*b"MRK"), "b/mrk.usfm", 0, &[]),
         ];
         let encoded =
             encode_to_corpus_buffer(SnapshotId::new([1; 16]), CoordinateSpace::Utf16, &books)
@@ -806,11 +957,77 @@ mod tests {
         );
     }
 
+    /// The string table is what makes two files of one `\id` addressable.
+    #[test]
+    fn duplicate_book_keys_are_legal_and_the_ids_tell_them_apart() {
+        let books = [
+            PublicationBook::new(BookKey::new(*b"GEN"), "a/gen-copy.usfm", 4, &[]),
+            PublicationBook::new(BookKey::new(*b"GEN"), "a/gen.usfm", 8, &[]),
+        ];
+        let encoded =
+            encode_to_corpus_buffer(SnapshotId::new([2; 16]), CoordinateSpace::Utf8, &books)
+                .unwrap();
+        let snapshot = CorpusSnapshot::open(&encoded).unwrap();
+
+        assert_eq!(snapshot.len(), 2);
+        assert_eq!(
+            snapshot.book_by_key(BookKey::new(*b"GEN")).unwrap().id(),
+            "a/gen-copy.usfm",
+            "a key seeks the first of its rows"
+        );
+        assert_eq!(snapshot.book_by_id("a/gen.usfm").unwrap().index().get(), 1);
+        assert_eq!(
+            snapshot.book_by_id("a/gen.usfm").unwrap().published_len(),
+            8
+        );
+    }
+
+    #[test]
+    fn a_repeated_id_is_refused_on_the_way_in_and_out() {
+        let books = [
+            PublicationBook::new(BookKey::new(*b"GEN"), "same.usfm", 0, &[]),
+            PublicationBook::new(BookKey::new(*b"MRK"), "same.usfm", 0, &[]),
+        ];
+        assert_eq!(
+            encode_to_corpus_buffer(SnapshotId::new([0; 16]), CoordinateSpace::Utf8, &books),
+            Err(CorpusWireError::DuplicateBookId { book: 1 })
+        );
+    }
+
+    #[test]
+    fn a_moved_or_malformed_id_offset_fails_closed() {
+        let books = [PublicationBook::new(
+            BookKey::new(*b"MRK"),
+            "books/mrk.usfm",
+            0,
+            &[],
+        )];
+        let encoded =
+            encode_to_corpus_buffer(SnapshotId::new([0; 16]), CoordinateSpace::Utf8, &books)
+                .unwrap();
+
+        let mut moved = encoded.clone();
+        moved[HEADER_BYTES + DIRECTORY_ID_OFFSET] = 0xff;
+        assert!(matches!(
+            CorpusSnapshot::open(&moved),
+            Err(CorpusWireError::BookIdOutOfOrder { book: 0, .. })
+        ));
+
+        let mut torn = encoded;
+        // The id's second UTF-8 byte, replaced by a continuation byte.
+        torn[HEADER_BYTES + DIRECTORY_ENTRY_BYTES + ID_PREFIX_BYTES] = 0x80;
+        assert_eq!(
+            CorpusSnapshot::open(&torn).err(),
+            Some(CorpusWireError::InvalidBookId { book: 0 })
+        );
+    }
+
     #[test]
     fn malformed_directory_and_record_fail_closed() {
         let finding = fixture_finding();
         let findings = [finding];
-        let section = PublicationBook::new(BookKey::new(*b"MRK"), 0x0200, &findings);
+        let section =
+            PublicationBook::new(BookKey::new(*b"MRK"), "books/mrk.usfm", 0x0200, &findings);
         let encoded =
             encode_to_corpus_buffer(SnapshotId::new([0; 16]), CoordinateSpace::Utf8, &[section])
                 .unwrap();
@@ -823,7 +1040,7 @@ mod tests {
         ));
 
         let mut bad_code = encoded;
-        bad_code[56 + 10] = 2;
+        bad_code[FIRST_RECORD + 10] = 2;
         assert!(matches!(
             CorpusSnapshot::open(&bad_code),
             Err(CorpusWireError::Record {

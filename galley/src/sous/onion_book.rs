@@ -1,38 +1,60 @@
-//! Adapts Onion's native `Mask + Toc` projection to `sous-core`.
+//! Onion's native `Mask + Toc` projection, as a `sous-core` `ProjectedBook`.
 //!
-//! This stays in the first host instead of either engine: Onion remains the
-//! USFM authority, while Sous sees only projected ranges and numeric units.
+//! ```text
+//! OnionBook::parse("\\id MRK\n\\c 1\n\\p\n\\v 1 Jesus \\f + \\ft note\\f* wept.\n")
+//!   .text()      "Jesus  wept.\n"          // verse text, markup gone
+//!   .chapters()  [Chapter 1 at 0..13]
+//!   .locate(0..13)                          // -> MRK 1:1, raw runs [21..27, 43..50]
+//! ```
+//!
+//! This lives in galley, not in either engine: Onion remains the USFM
+//! authority, while Sous sees only projected ranges and numeric units.
+//! [`OnionBook::from_parts`] rebuilds one from a Pantry's retained mask and TOC
+//! without lexing again.
 
 use core::ops::Range;
 
+use crate::onion::{Filter, Mask, Sid, Toc, cst, lex, mask, toc};
 use sous_core::{
     BookKey, Chapter, InputError, ProjectedBook, TextRange, Verse, VerseKey, validate,
 };
-use usfm_onion::{Filter, Mask, Sid, Toc, cst, lex, mask, toc};
 
-pub(crate) struct OnionBook {
+pub struct OnionBook {
     text: String,
     mask: Mask,
     toc: Toc,
 }
 
 impl OnionBook {
-    pub(crate) fn parse(source: &str) -> Result<Self, InputError> {
+    /// Lex, build, TOC, mask, then [`from_parts`](Self::from_parts).
+    pub fn parse(source: &str) -> Result<Self, InputError> {
         let tokens = lex(source);
         let tree = cst::build(&tokens);
         let toc = toc(source.as_bytes(), &tokens);
         let mask = mask(source.as_bytes(), &tokens, &tree, &Filter::verse_text());
-        let text = mask.text(source.as_bytes());
-        let book = Self { text, mask, toc };
+        Self::from_parts(source, mask, toc)
+    }
+
+    /// The same book from products already derived: gathers the projected text
+    /// over the mask ranges and lexes nothing.
+    ///
+    /// `mask` and `toc` must be the ones derived from exactly `text`.
+    pub fn from_parts(text: &str, mask: Mask, toc: Toc) -> Result<Self, InputError> {
+        let book = Self {
+            text: mask.text(text.as_bytes()),
+            mask,
+            toc,
+        };
         validate(&book)?;
         Ok(book)
     }
 
-    pub(crate) fn key(&self) -> BookKey {
+    pub fn key(&self) -> BookKey {
         BookKey::new(self.toc.book)
     }
 
-    pub(crate) fn unkeyed_anchor_count(&self) -> usize {
+    /// Verse anchors Onion kept for its own lint that carry no numeric key.
+    pub fn unkeyed_anchor_count(&self) -> usize {
         self.toc
             .verses
             .iter()
@@ -40,7 +62,8 @@ impl OnionBook {
             .count()
     }
 
-    pub(crate) fn locate(&self, range: TextRange) -> Option<LocatedRange<'_>> {
+    /// The scripture address of a projected range, and its raw source runs.
+    pub fn locate(&self, range: TextRange) -> Option<LocatedRange<'_>> {
         if range.is_empty() || range.to() > self.text.len() as u32 {
             return None;
         }
@@ -111,16 +134,18 @@ fn projected(mask: &Mask, source: Range<u32>) -> TextRange {
     TextRange::new(range.start, range.end).expect("mask projection is ordered")
 }
 
-pub(crate) struct LocatedRange<'a> {
-    pub(crate) first: Sid,
-    pub(crate) last: Sid,
-    pub(crate) spans: SourceSpans<'a>,
+/// Where a projected range starts and ends in scripture, and the raw runs
+/// under it.
+pub struct LocatedRange<'a> {
+    pub first: Sid,
+    pub last: Sid,
+    pub spans: SourceSpans<'a>,
 }
 
 /// Iterates only the retained raw runs behind a projected finding. A finding
 /// can cross removed markup, so one contiguous USFM span would be lossy at
 /// exactly the boundary this adapter preserves.
-pub(crate) struct SourceSpans<'a> {
+pub struct SourceSpans<'a> {
     mask: &'a Mask,
     projected: TextRange,
     at: usize,
