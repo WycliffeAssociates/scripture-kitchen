@@ -23,8 +23,12 @@
 pub use usfm_onion as onion;
 
 pub mod corpus;
+pub mod pantry;
 pub mod sous;
+pub mod utf16;
 pub mod warmer;
+pub use pantry::{BookId, Fingerprint, Pantry, PantryError, RawChecksum, Role, fingerprint};
+pub use utf16::{Utf16Table, utf16_table};
 pub use warmer::Warmer;
 
 #[cfg(feature = "wasm")]

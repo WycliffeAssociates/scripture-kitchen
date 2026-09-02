@@ -2,8 +2,9 @@
 
 Status: accepted direction; the Onion `Warmer` exists, and the coordinate
 pipeline below is implemented as stateless `galley::sous::publish_onion_findings`
-(fresh derivation per invocation, no retained cache). The resident composed
-host and its reuse laws are not implemented yet.
+(fresh derivation per invocation, no retained cache). The registry half of the
+resident host has landed as `galley::Pantry` (see `galley/src/pantry.md`); the
+composed publication that reads from it has not.
 
 This note records the lifecycle decisions that belong to Galley rather than
 either engine. Sous remains independent of Onion. Galley supplies their shared
@@ -45,9 +46,9 @@ identity laws:
 
 | Product | Reuse key | Reuse consequence |
 | --- | --- | --- |
-| Onion/Sous chapter observations | checksum of every declared local input plus schema/context stamp | unchanged chapters skip their expensive map work |
-| producer projection/source-map data | exact raw-book checksum plus producer/schema stamp | projected offsets may be mapped through a byte-identical later input |
-| detached UTF-16 index/map data | exact raw-book checksum plus UTF-16 schema stamp | unchanged books skip rebuilding their byte-to-UTF-16 map |
+| Onion/Sous chapter observations | checksum of every declared local input plus schema/context stamp; which chapters those are is `Fingerprint::changed_chunks` | unchanged chapters skip their expensive map work |
+| producer projection/source-map data | exact raw-book `RawChecksum` plus producer/schema stamp | projected offsets may be mapped through a byte-identical later input |
+| detached UTF-16 index/map data | exact raw-book `RawChecksum` plus UTF-16 schema stamp | unchanged books skip rebuilding their byte-to-UTF-16 map, retained as `galley::Utf16Table` |
 | per-invocation UTF-16 cursor | none | recreate it against the current string; its traversal position is not reusable state |
 | book/corpus summaries and judgments | none independently | recompute from current observations in deterministic order |
 | packed findings | complete analysis snapshot identity | replace as one corpus publication; do not reuse an unchanged book section alone |
@@ -56,8 +57,9 @@ The current Onion `Utf16Index<'s>` and `Cursor<'s>` borrow their source. Those
 exact values therefore cannot outlive an invocation unless Galley also retains
 the source, which this contract forbids. Reusing UTF-16 work means retaining a
 detached table such as owned run/index data and binding or applying it only
-after the new input matches the raw checksum. The concrete detached type is an
-implementation choice, not yet a public API commitment.
+after the new input matches the raw checksum. The concrete detached type is a
+host implementation choice: `galley::Utf16Table`, one bit per source byte
+marking where a UTF-16 unit starts, is what `galley::Pantry` retains.
 
 A markup-only edit changes the raw checksum, so its projection and UTF-16
 coordinate data must be rebuilt. If the rule's projected chapter input is

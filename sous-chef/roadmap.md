@@ -282,7 +282,12 @@ Work:
    retains config and independently content-addressed target/source chapter
    observations plus checksum-keyed detached projection and UTF-16 index data;
    it does not retain a canonical rope or accept splices. The pure Sous
-   map/reduce functions own no resident cache.
+   map/reduce functions own no resident cache. **B1 landed as `galley::Pantry`:
+   the id-keyed registry of detached per-book products (Warmer, TOC, mask,
+   detached UTF-16 table, published length, `Fingerprint`), canonical `BookKey`
+   order, `Target` role only; see
+   [../galley/src/pantry.md](../galley/src/pantry.md). B2, the `Expediter` that
+   publishes from it, is next.**
 3. Implement ordered book reduction over independently mapped chapters. Keep
    only the smallest carry facts needed for nonletter adjacency, casing
    terminal state, and doubled-word state; do not create a generic monoid
