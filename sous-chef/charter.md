@@ -63,13 +63,17 @@ localization.
 
 CLI, WASM, and editor adapters provide I/O and presentation. The workspace's
 Galley is resident in its derived caches, judging config, and suppression
-workflow, not in the editor's canonical text. Each analysis invocation takes
-ownership of the complete target and optional source strings for its duration,
-and returns numbers and offsets relative to exactly those strings. It does not
-retain a second rope or accept splices between calls. This avoids a distributed
-mutation protocol whose revisions or coordinates could diverge from the
-editor. Galley may execute independent maps in parallel, but it may not change
-reduction order or rule semantics.
+workflow, not in the editor's canonical text. The caller registers each book
+under an opaque id it keeps consistent (a file path in practice) and replaces
+a book only whole: `update(id, text)`. Galley derives that book's products
+while the string is present and drops the string; unchanged books are served
+from detached products keyed by raw checksum. It never retains a second rope
+and never accepts a splice, so coordinates cannot shift inside a book; a book
+the caller forgot to resend is stale as a whole and heals on its next update.
+Retention follows role: a target corpus keeps what publication needs, a
+reference corpus keeps only TOC and per-verse observations. Galley may execute
+independent maps in parallel, but it may not change reduction order or rule
+semantics.
 
 ## Text, seam, and coordinate invariants
 

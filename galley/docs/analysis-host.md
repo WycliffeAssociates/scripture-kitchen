@@ -9,23 +9,29 @@ This note records the lifecycle decisions that belong to Galley rather than
 either engine. Sous remains independent of Onion. Galley supplies their shared
 workflow, cache, coordinate conversion, and publication boundary.
 
-## Invocation owns text; Galley does not own the document
+## Update owns text; Galley does not own the document
 
-An analysis invocation receives a caller-ordered list of complete books. Each
-book carries its caller navigation identity and an owned source string for the
-duration of that invocation. An optional source corpus follows the same shape.
-Book array order is not scripture identity: Sous pairs target and source books
-by `BookKey`, while `BookIndex` points back into the caller's particular list.
+Revised 2026-09-02. The caller registers each book under an opaque `BookId`
+it keeps consistent (a file path in practice) with a role, `Target` or
+`Reference`, and replaces a book only whole: `update(id, text)`. Galley
+derives the book's products while the string is present — chunk products,
+TOC, mask, detached UTF-16 index, chapter observations — then drops the
+string. Unchanged books are never resent; publication serves them from
+detached products keyed by raw checksum. Book order in a publication is
+canonical by `BookKey` within a role, ties by id, so `BookIndex` does not
+depend on the order of updates, and the corpus buffer carries the ids in a
+string table.
 
 Galley does not retain the editor's rope, accept splice edits, or maintain a
-second mutable copy of a document between calls. Paying the small cost to move
-or encode the complete current strings avoids a distributed mutation protocol
-whose revisions or coordinates could diverge when a splice is lost, rejected,
-or expressed in the wrong coordinate space.
+second mutable copy of a document. Whole-book replacement is idempotent and
+cannot shift coordinates inside a book; the one failure a forgetful caller can
+cause is a stale book, healed by its next update. Resending the whole corpus
+was the earlier rule and remains a valid resync; it is no longer required per
+call, because a 100 MB aligned corpus would otherwise be re-encoded on every
+keystroke.
 
-Every returned location is numeric and relative to exactly the string supplied
-for that invocation. Borrowed source slices do not cross the call boundary.
-After publication is complete, the invocation may drop its strings.
+Every returned location is numeric and relative to the exact string last
+supplied for that book. Borrowed source slices do not cross the call boundary.
 
 The implemented Onion `Warmer` already follows the important half of this law:
 `parse` receives the complete current `&str` on every call and retains only
