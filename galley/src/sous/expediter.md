@@ -65,6 +65,26 @@ lets one observation serve identical chapters in two books while reduce still
 counts both positions. A pass whose `map` reads `ChapterInput::key` would break
 that and does not belong behind this cache.
 
+## The reduce cache
+
+A book whose raw text has not changed reduces to the same projected rows, so
+`publish` stores each book's reduce output — `(from, to, FindingKind)` in
+projected-book coordinates — under its `RawChecksum` and replays it next time.
+Spans and kinds rather than `PackedFinding`s, because the row's book index is
+whatever *this* publication assigns; a book that moved from index 3 to index 2
+still replays. `last_reduced()` counts the books that missed, and a
+republication with nothing updated reports zero.
+
+The key is the `RawChecksum` alone for now, because judging is config-free
+until D2; when D2 adds bands, the key gains a judgment stamp.
+
+This is worth having because `Brigade`'s reduce is not free the way
+`HygieneBytes`' was: `fold_book` merges every lane of all 1,189 chapters, which
+measured 697 µs of a warm whole-Bible republication with nothing changed
+(evidence.md). The sweep retains a cached row set exactly as it retains a
+chapter table — while some book's ring names its checksum — and
+`resident_bytes` counts it.
+
 ## Why the buffers are equal
 
 `sous_core::for_each_chapter` is the only place a `ChapterInput` is assembled,
@@ -89,14 +109,14 @@ chapter text and therefore the identical `ObservationKey`, so an undo within
 `n` edits is a table hit and maps nothing.
 
 `resident_bytes` reports what the sweep bounds: the Pantry's own products plus
-one entry per resident observation, chapter row, and ring slot. Shallow in one
-place — a pass's heap inside an observation is not counted, because
-`ChapterPass` states no size.
+one entry per resident observation, chapter row, cached reduce row, and ring
+slot. Shallow in one place — a pass's heap inside an observation is not counted,
+because `ChapterPass` states no size.
 
 The sweep is skipped outright when no table was added and no ring aged since
 the last one — a republication of an untouched corpus has nothing to free, and
-pays nothing to learn it (`publish_unchanged` is unchanged at 14 µs;
-evidence.md).
+pays nothing to learn it. With the reduce cache in front of it, that whole
+republication is 6.9 µs for a 66-book Bible (evidence.md).
 
 ## Parallel map
 
@@ -118,13 +138,15 @@ of this.
 `the_parallel_map_publishes_the_serial_bytes` compares the two publications
 inside one binary, and the equivalence gate runs under both settings.
 
-It is off by default because it is measured, not assumed: for `Hygiene` the map
-is about half a millisecond of a 5.6 ms cold whole-Bible publication and
+It is off by default because it is measured, not assumed: for `HygieneBytes`
+the map is about half a millisecond of a 5.6 ms cold whole-Bible publication and
 allocates one `Vec` per chapter, so the parallel path runs 1.7× SLOWER —
 work-stealing and allocator contention cost more than the map saves
-(evidence.md). The feature is here so a costlier pass can switch it on against
-a gate that already holds; the first thing to change then is one `par_iter`
-over the whole corpus rather than one per book.
+(evidence.md). `Brigade` is that costlier pass, and it does pay for a cold
+open — 33 ms serial against 24 ms parallel — while staying a wash on a
+keystroke, so the feature is still opt-in and a host asks for it. The first
+thing to change then is one `par_iter` over the whole corpus rather than one
+per book.
 
 ## What is not here yet
 

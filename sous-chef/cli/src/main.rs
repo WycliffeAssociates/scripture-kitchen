@@ -23,7 +23,7 @@ use std::{
 
 use rayon::prelude::*;
 use sous_core::{
-    Alignment, Corpus, PackedFinding, ProjectedBook, SnapshotId, align, analyze, hygiene::Hygiene,
+    Alignment, Brigade, Corpus, PackedFinding, ProjectedBook, SnapshotId, align, analyze,
 };
 use usage::Cli;
 use usfm_galley::sous::{OnionBook, OnionInputBook, publish_onion_findings};
@@ -135,7 +135,7 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
 /// Hygiene over every target book, in projected UTF-8, ordered by book then
 /// offset. Later passes join the same `analyze` call.
 fn hygiene_findings(corpus: &Corpus<'_, OnionBook>) -> Vec<PackedFinding> {
-    analyze(corpus, &Hygiene).into_rows()
+    analyze(corpus, &Brigade::default()).into_rows()
 }
 
 fn print_findings(corpus: &Corpus<'_, OnionBook>, findings: &[PackedFinding]) {

@@ -1,7 +1,7 @@
 //! The resident Sous coordinator: one pass, one Pantry, one snapshot out.
 //!
 //! ```text
-//! let mut sous = Expediter::new(Hygiene, 1 << 20);
+//! let mut sous = Expediter::new(Brigade::default(), 1 << 20);
 //! sous.update("books/mrk.usfm", Role::Target, &text)?;
 //! sous.publish()?          -> SOUS corpus buffer, raw-book UTF-16
 //! sous.last_mapped()       -> 6      // six chapters mapped
@@ -20,8 +20,9 @@
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use sous_core::{
-    BookIndex, ChapterInput, ChapterObs, ChapterPass, CoordinateSpace, CorpusWireError, Findings,
-    PackedFinding, PublicationBook, SnapshotId, encode_to_corpus_buffer, for_each_chapter,
+    BookIndex, ChapterInput, ChapterObs, ChapterPass, CoordinateSpace, CorpusWireError,
+    FindingKind, Findings, PackedFinding, PublicationBook, SnapshotId, TextRange,
+    encode_to_corpus_buffer, for_each_chapter,
 };
 #[cfg(feature = "parallel")]
 use sous_core::{ChapterKey, ProjectedBook, Verse};
@@ -76,6 +77,9 @@ struct ChapterRow {
     start: u32,
 }
 
+/// One book's reduced rows, book index left out: span and kind only.
+type BookRows = Box<[(u32, u32, FindingKind)]>;
+
 /// Previous checksums a book keeps beside its current one, so an undo of that
 /// many edits still lands on a retained chapter table.
 const DEFAULT_GENERATIONS: usize = 4;
@@ -93,6 +97,10 @@ pub struct Expediter<P: ChapterPass> {
     /// Keyed by the book's raw checksum, so an unchanged book publishes
     /// without touching its text.
     chapter_tables: FxHashMap<RawChecksum, Vec<ChapterRow>>,
+    /// One book's reduce output, replayable into a later publication under
+    /// whatever book index it has then — which is why the rows carry spans
+    /// and kinds rather than `PackedFinding`s.
+    book_rows: FxHashMap<RawChecksum, BookRows>,
     /// Per book, its current checksum ahead of the previous ones still kept —
     /// exactly the tables the sweep spares.
     generations: FxHashMap<BookId, Vec<RawChecksum>>,
@@ -104,6 +112,7 @@ pub struct Expediter<P: ChapterPass> {
     /// Chapters mapped since the last publication, eager and lazy alike.
     pending: u64,
     misses: u64,
+    reduces: u64,
     /// Whether a book's missing chapters are mapped on rayon; the two
     /// settings publish the same bytes.
     #[cfg(feature = "parallel")]
@@ -135,11 +144,13 @@ impl<P: ChapterPass + Sync> Expediter<P> {
             pass,
             observations: FxHashMap::default(),
             chapter_tables: FxHashMap::default(),
+            book_rows: FxHashMap::default(),
             generations: FxHashMap::default(),
             kept: DEFAULT_GENERATIONS,
             dirty: false,
             pending: 0,
             misses: 0,
+            reduces: 0,
             #[cfg(feature = "parallel")]
             parallel: true,
         }
@@ -220,6 +231,12 @@ impl<P: ChapterPass + Sync> Expediter<P> {
         self.misses
     }
 
+    /// Books reduced for the last [`publish`](Self::publish); the rest
+    /// replayed their cached rows.
+    pub fn last_reduced(&self) -> u64 {
+        self.reduces
+    }
+
     /// Observations the cache holds after the last sweep.
     pub fn resident_observations(&self) -> usize {
         self.observations.len()
@@ -241,6 +258,11 @@ impl<P: ChapterPass + Sync> Expediter<P> {
             .values()
             .map(|table| size_of::<RawChecksum>() + table.len() * size_of::<ChapterRow>())
             .sum();
+        let cached: usize = self
+            .book_rows
+            .values()
+            .map(|rows| size_of::<RawChecksum>() + size_of_val(&**rows))
+            .sum();
         let rings: usize = self
             .generations
             .values()
@@ -249,6 +271,7 @@ impl<P: ChapterPass + Sync> Expediter<P> {
         self.pantry.resident_bytes()
             + self.observations.len() * (size_of::<ObservationKey>() + size_of::<P::Observation>())
             + rows
+            + cached
             + rings
     }
 
@@ -364,6 +387,7 @@ impl<P: ChapterPass + Sync> Expediter<P> {
         let live: FxHashSet<RawChecksum> = self.generations.values().flatten().copied().collect();
         self.chapter_tables
             .retain(|checksum, _| live.contains(checksum));
+        self.book_rows.retain(|checksum, _| live.contains(checksum));
         let named: FxHashSet<ObservationKey> = self
             .chapter_tables
             .values()
@@ -400,26 +424,54 @@ impl<P: ChapterPass + Sync> Expediter<P> {
         }
 
         // Scoped so the borrowed observations are released before the sweep.
+        let mut reduces = 0;
         let projected = {
+            let Self {
+                pantry,
+                pass,
+                observations,
+                chapter_tables,
+                book_rows,
+                ..
+            } = &mut *self;
             let mut findings = Findings::new(projected_lens);
             let mut chapters: Vec<ChapterObs<&P::Observation>> = Vec::new();
             for (index, (id, _)) in books.iter().enumerate() {
-                let checksum = self
-                    .pantry
+                let checksum = pantry
                     .products(id)
                     .expect("the pantry listed this id")
                     .checksum;
-                chapters.clear();
-                chapters.extend(self.chapter_tables[&checksum].iter().map(|row| ChapterObs {
-                    start: row.start,
-                    obs: &self.observations[&row.observation],
-                }));
                 findings.open_book(BookIndex::new(index).expect("the book count was checked"));
-                self.pass
-                    .reduce(&chapters, &mut P::Carry::default(), &mut findings);
+                if let Some(rows) = book_rows.get(&checksum) {
+                    // The book's text is unchanged, so its projected rows are
+                    // too; only the book index they land under is this call's.
+                    for &(from, to, kind) in rows {
+                        findings
+                            .push(
+                                TextRange::new(from, to).expect("a cached span keeps its order"),
+                                kind,
+                            )
+                            .expect("a cached row lies inside the book it came from");
+                    }
+                    continue;
+                }
+                let mark = findings.mark();
+                chapters.clear();
+                chapters.extend(chapter_tables[&checksum].iter().map(|row| ChapterObs {
+                    start: row.start,
+                    obs: &observations[&row.observation],
+                }));
+                pass.reduce(&chapters, &mut P::Carry::default(), &mut findings);
+                reduces += 1;
+                let tail: BookRows = findings.rows()[mark..]
+                    .iter()
+                    .map(|row| (row.from(), row.to(), row.kind()))
+                    .collect();
+                book_rows.insert(checksum, tail);
             }
             findings.into_rows()
         };
+        self.reduces = reduces;
         self.sweep();
 
         let mut per_book: Vec<Vec<PackedFinding>> = (0..books.len()).map(|_| Vec::new()).collect();
@@ -483,7 +535,7 @@ fn snapshot_id<P: ChapterPass>(pantry: &Pantry, books: &[(BookId, BookKey)]) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sous_core::{CorpusSnapshot, FindingKind, hygiene::Hygiene};
+    use sous_core::{Brigade, CorpusSnapshot, FindingKind};
 
     use crate::pantry::Retain;
 
@@ -512,8 +564,8 @@ mod tests {
         book("GEN", &["In the \\\\ beginning."])
     }
 
-    fn sous() -> Expediter<Hygiene> {
-        Expediter::new(Hygiene, 1 << 20)
+    fn sous() -> Expediter<Brigade> {
+        Expediter::new(Brigade::default(), 1 << 20)
     }
 
     /// Every row of a published buffer as (book index, id, from, to).
@@ -834,6 +886,32 @@ mod tests {
             parallel.resident_observations(),
             serial.resident_observations()
         );
+    }
+
+    #[test]
+    fn publish_unchanged_replays_rows_identical_to_a_fresh_reduce() {
+        let mut sous = sous();
+        sous.update("b/mrk.usfm", Role::Target, &mark()).unwrap();
+        sous.update("a/gen.usfm", Role::Target, &genesis()).unwrap();
+        let first = sous.publish().unwrap();
+        assert_eq!(sous.last_reduced(), 2, "both books cold");
+
+        let second = sous.publish().unwrap();
+        assert_eq!(sous.last_reduced(), 0, "no book's projection moved");
+        assert_eq!(first, second, "the replayed rows are the reduced ones");
+    }
+
+    #[test]
+    fn only_an_edited_book_is_reduced_again() {
+        let mut sous = sous();
+        sous.update("b/mrk.usfm", Role::Target, &mark()).unwrap();
+        sous.update("a/gen.usfm", Role::Target, &genesis()).unwrap();
+        sous.publish().unwrap();
+
+        let after = mark().replace("A withered", "A shrivelled");
+        sous.update("b/mrk.usfm", Role::Target, &after).unwrap();
+        sous.publish().unwrap();
+        assert_eq!(sous.last_reduced(), 1, "GEN replayed its cached rows");
     }
 
     #[test]

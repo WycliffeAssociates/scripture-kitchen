@@ -30,6 +30,21 @@ projected offset `analyze` mapped it at. It rebases to book coordinates and
 pushes rows into `Findings`. `Carry` is the only channel between chapters,
 and it starts from `Default` at every book.
 
+## A tuple is a pass
+
+`(A, B)` implements `ChapterPass`, so two rules ride one set of chapter
+inputs: `map` calls both and pairs the observations, `reduce` splits the
+borrowed pairs into two views and runs both. The composed `SCHEMA` is
+`A::SCHEMA.then(B::SCHEMA)` — order-sensitive and never either half, so a host
+cannot key a tuple's observations under one member's stamp. `Carry` is the
+pair of carries, each still `Default` at every book.
+
+A tuple's reduce appends A's rows then B's, then sorts that tail by
+`(from, to)` with a stable sort, so rows within a book ascend by start and A
+comes first on a tie. No wire rule demands that order; the CLI and the tests
+read it, and `sous_core::Brigade` — `(HygieneBytes, Substrate)` — is the
+product pass that relies on it.
+
 ## Why reduce is provenance-blind
 
 `reduce` takes `&[ChapterObs<&Observation>]` and nothing else. There is no

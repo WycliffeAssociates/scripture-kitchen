@@ -26,7 +26,7 @@
 
 use std::sync::LazyLock;
 
-use sous_core::hygiene::Hygiene;
+use sous_core::Brigade;
 use usfm_galley::sous::Expediter;
 use usfm_galley::{Role, onion};
 
@@ -121,8 +121,8 @@ fn load() -> Corpus {
 
 /// Every book registered and one publication already done, so the next one
 /// answers entirely from the chapter tables.
-fn warmed(corpus: &Corpus) -> Expediter<Hygiene> {
-    let mut sous = Expediter::new(Hygiene, 64 << 20);
+fn warmed(corpus: &Corpus) -> Expediter<Brigade> {
+    let mut sous = Expediter::new(Brigade::default(), 64 << 20);
     for (id, text) in &corpus.books {
         sous.update(id.as_str(), Role::Target, text).unwrap();
     }
@@ -178,7 +178,7 @@ fn publish_cold(bencher: divan::Bencher) {
     let corpus = &*CORPUS;
     bencher
         .with_inputs(|| {
-            let mut sous = Expediter::new(Hygiene, 64 << 20);
+            let mut sous = Expediter::new(Brigade::default(), 64 << 20);
             for (id, text) in &corpus.books {
                 sous.update(id.as_str(), Role::Target, text).unwrap();
             }

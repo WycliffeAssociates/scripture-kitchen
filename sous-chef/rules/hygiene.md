@@ -45,7 +45,10 @@ a base therefore publishes a span one atom wider than its code-point count.
 ### Classifier-dependent checks
 
 These read `sous-core::unicode` bits rather than approximating them with byte
-rules, and each makes only a deterministic claim.
+rules, and each makes only a deterministic claim. They ride the Level 1b
+substrate walk rather than a scan of their own — one scalar walk per chapter —
+and come out in the chapter row's `hygiene` lane; the tests below live beside
+it in `core/src/substrate.rs`.
 
 | check | observation | silent when | pinned by |
 | --- | --- | --- | --- |
@@ -74,9 +77,9 @@ Cross-cutting: `clean_multilingual_text_is_silent` and
 
 ## Deferred
 
-- **NBSP leading or trailing a *verse*.** `scan` sees one projected book, so
-  "edge" currently means the edge of the analyzed text. The verse-grained form
-  waits for the chapter/verse-aware walk in Stage 2.
+- **NBSP leading or trailing a *verse*.** The walk sees one chapter, so "edge"
+  currently means the edge of that chapter's text. The verse-grained form
+  waits for a verse-aware walk.
 
 ## Not hygiene's job
 

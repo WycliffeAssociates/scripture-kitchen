@@ -18,8 +18,8 @@
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use sous_core::{
-    ChapterPass, Corpus, CorpusSnapshot, SnapshotId, analyze, for_each_chapter, hygiene::Hygiene,
-    substrate::Substrate,
+    Brigade, ChapterPass, Corpus, CorpusSnapshot, SnapshotId, analyze, for_each_chapter,
+    hygiene::HygieneBytes, substrate::Substrate,
 };
 use usfm_galley::onion::{Filter, cst, lex, mask};
 use usfm_galley::sous::{Expediter, OnionBook, OnionInputBook, publish_onion_findings};
@@ -624,18 +624,25 @@ fn en_ulb() -> Vec<Book> {
 
 #[test]
 fn churn_over_a_synthetic_corpus() {
-    churn(Hygiene, "synthetic", 0x5EED_0001, 200, synthetic());
+    churn(HygieneBytes, "synthetic", 0x5EED_0001, 200, synthetic());
 }
 
 #[test]
 fn churn_over_a_synthetic_corpus_from_a_second_seed() {
     churn(
-        Hygiene,
+        HygieneBytes,
         "synthetic-b",
         0xD00D_1234_5678_9ABD,
         200,
         synthetic(),
     );
+}
+
+/// The product pass through the same churn: the tuple's tail sort, the
+/// substrate's hygiene lane, and the Expediter's reduce cache all at once.
+#[test]
+fn churn_over_a_synthetic_corpus_with_brigade() {
+    churn(Brigade::default(), "brigade", 0x5EED_0004, 200, synthetic());
 }
 
 /// The Level 1b substrate through the same churn. It publishes no findings
@@ -649,13 +656,19 @@ fn churn_over_a_synthetic_corpus_with_substrate() {
 #[test]
 #[ignore = "corpus-scale oracle: 50 cold whole-Bible publications; run --include-ignored at pass end"]
 fn churn_over_en_ulb() {
-    churn(Hygiene, "en_ulb", 0x5EED_0002, 50, en_ulb());
+    churn(HygieneBytes, "en_ulb", 0x5EED_0002, 50, en_ulb());
 }
 
 #[test]
 #[ignore = "corpus-scale oracle: 50 cold whole-Bible publications; run --include-ignored at pass end"]
 fn churn_over_en_ulb_from_a_second_seed() {
-    churn(Hygiene, "en_ulb-b", 0xBEEF_0F0F_0F0F_0F0F, 50, en_ulb());
+    churn(
+        HygieneBytes,
+        "en_ulb-b",
+        0xBEEF_0F0F_0F0F_0F0F,
+        50,
+        en_ulb(),
+    );
 }
 
 // --------------------------------------------------- the named gate bullets
@@ -665,7 +678,7 @@ fn churn_over_en_ulb_from_a_second_seed() {
 #[test]
 fn publish_byte_equals_cold_analyze_through_the_string_taking_publisher() {
     let books = synthetic();
-    let mut sous = Expediter::new(Hygiene, BUDGET);
+    let mut sous = Expediter::new(HygieneBytes, BUDGET);
     // Registered backwards: the publication is canonical order either way,
     // which is what `cold_publish` is handed.
     for (id, text) in books.iter().rev() {
@@ -677,7 +690,7 @@ fn publish_byte_equals_cold_analyze_through_the_string_taking_publisher() {
 
 /// The Stage 2 bullet: cold analysis equals the chapter-at-a-time rebuild.
 fn replace_every_chapter(name: &str, mut books: Vec<Book>, edited: usize) {
-    let mut sous = Expediter::new(Hygiene, BUDGET);
+    let mut sous = Expediter::new(HygieneBytes, BUDGET);
     for (id, text) in &books {
         sous.update(id.as_str(), Role::Target, text).unwrap();
     }
@@ -728,7 +741,7 @@ fn a_chapter_copied_onto_another_maps_nothing_and_publishes_both() {
     let mut books = synthetic();
     // No ring: the replaced chapter's observation is swept at the very next
     // publication, so the count is the corpus's own.
-    let mut sous = Expediter::new(Hygiene, BUDGET).with_generations(0);
+    let mut sous = Expediter::new(HygieneBytes, BUDGET).with_generations(0);
     for (id, text) in &books {
         sous.update(id.as_str(), Role::Target, text).unwrap();
     }
@@ -753,7 +766,7 @@ fn a_chapter_copied_onto_another_maps_nothing_and_publishes_both() {
 #[test]
 fn a_markup_only_edit_reuses_every_observation_and_still_rebinds() {
     let mut books = synthetic();
-    let mut sous = Expediter::new(Hygiene, BUDGET);
+    let mut sous = Expediter::new(HygieneBytes, BUDGET);
     for (id, text) in &books {
         sous.update(id.as_str(), Role::Target, text).unwrap();
     }
@@ -775,7 +788,7 @@ fn a_markup_only_edit_reuses_every_observation_and_still_rebinds() {
 #[test]
 fn removing_a_book_lowers_resident_bytes() {
     let books = synthetic();
-    let mut sous = Expediter::new(Hygiene, BUDGET);
+    let mut sous = Expediter::new(HygieneBytes, BUDGET);
     for (id, text) in &books {
         sous.update(id.as_str(), Role::Target, text).unwrap();
     }
@@ -798,7 +811,7 @@ fn removing_a_book_lowers_resident_bytes() {
 #[ignore = "corpus-scale oracle: a cold whole-Bible publication both ways; run --include-ignored at pass end"]
 fn parallel_publish_byte_equals_the_serial_cold_oracle_over_en_ulb() {
     let books = en_ulb();
-    let mut sous = Expediter::new(Hygiene, BUDGET);
+    let mut sous = Expediter::new(HygieneBytes, BUDGET);
     for (id, text) in &books {
         sous.update(id.as_str(), Role::Target, text).unwrap();
     }

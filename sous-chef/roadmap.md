@@ -151,7 +151,7 @@ Shapes and layouts live in the module README each row names.
 | nonletter substrate | `donor/` probes are measured donors only | port consumer-led classifier bits in Stage 3 |
 | finding transport | `sous-core::codec` and `sous-core::corpus`, rebased and published by `galley::sous`. See [core/src/codec/README.md](core/src/codec/README.md) | Galley's canonical snapshot identity and checksum-keyed detached reuse (Stage 2) |
 | unicode classification | `sous-core::unicode`. See [core/src/unicode/README.md](core/src/unicode/README.md) | Level 1b consumes the bits in Stage 3; casing beyond the two predicate bits waits for Stage 4 |
-| hygiene | `sous-core::hygiene::scan` over projected text. See [core/src/hygiene.md](core/src/hygiene.md) and [rules/hygiene.md](rules/hygiene.md) | NBSP's verse-edge case once the walk is verse-grained; a snapshot identity instead of the CLI's zero id |
+| hygiene | `sous-core::hygiene::scan` for the byte classes, the substrate row's `hygiene` lane for the four scalar ones. See [core/src/hygiene.md](core/src/hygiene.md) and [rules/hygiene.md](rules/hygiene.md) | NBSP's verse-edge case once the walk is verse-grained; a snapshot identity instead of the CLI's zero id |
 
 Stage 0 is closed. Stage 1 was entered hygiene-first rather than
 classifier-first: the byte-level checks need no Unicode data, they put the
@@ -360,7 +360,7 @@ the step's own analysis inputs changed. The bound is recomputed there from
   `parallel_publish_byte_equals_the_serial_cold_oracle_over_en_ulb` puts the
   whole-Bible publication against the cold oracle. The gate runs both ways:
   `cargo test --release -p usfm_galley --features parallel -- --include-ignored`.
-  The feature is off by default, and measured: for `Hygiene` the parallel map
+  The feature is off by default, and measured: for `HygieneBytes` the parallel map
   is 1.7× slower than the serial one, because the map is a tenth of a cold
   publication and allocates per chapter ([evidence.md](evidence.md));
 - **Open, and not this slice's:** work item 4's source half. `Pantry` registers
@@ -390,7 +390,10 @@ Work:
 1. Add dense scalar interning, digit pooling, topology, run composition,
    directed pairs, run lengths, per-book occurrence masks, and the terminal
    follow table. Substrate walk landed (D1a): `sous_core::substrate` maps the
-   chapter row and folds a book's seams;
+   chapter row and folds a book's seams. Hygiene's four scalar classes now ride
+   that walk too (D1b): `scan_scalars` is retired, the row carries a `hygiene`
+   site lane, and `sous_core::Brigade` — `(HygieneBytes, Substrate)` — is the
+   product pass;
 2. Keep sites absent from stored observations. Implement semantic
    `sites(query)` and `sites_many(queries)` operations returning projection-true
    spans that the retained producer can locate. Choose `memchr`, `memmem`,

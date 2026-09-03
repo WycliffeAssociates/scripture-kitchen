@@ -11,17 +11,27 @@
 //!   counts   21 scalars, 5 words
 //! ```
 //!
+//! ```text
+//! map("a \u{301} \u{feff}b\u{a0}\u{a0}c\u{fdd0}").hygiene()
+//!   → FreeCombiningMark   1..4    run 1   // no base; the span takes the space it hangs on
+//!     MisplacedFormat     5..8    run 1   // a stray BOM mid-text
+//!     NoBreakSpace        9..13   run 2   // NBSP beside NBSP
+//!     Noncharacter        14..17  run 1
+//! ```
+//!
 //! Every lane is a sorted vector of plain scalars, so a reduce merges two of
 //! them in one pass and a host may cache one under its chapter key. The
 //! layout table, the interning argument, and the seam argument: substrate.md.
 
 use rustc_hash::FxHashMap;
 
+use crate::hygiene::{HygieneFinding, NBSP, SUSPECT, ScalarSites};
 use crate::pass::{ChapterInput, ChapterObs, ChapterPass, Findings, SchemaStamp};
 use crate::unicode::{
     Class,
     lookup::{ascii_class, trie_at},
 };
+use crate::{FindingKind, HygieneDigest, TextRange};
 
 // ── Keys ────────────────────────────────────────────────────────────────
 
@@ -214,6 +224,7 @@ pub struct ChapterRow {
     runs: Box<[(u32, u32, u32)]>,
     run_atoms: Box<[ScalarKey]>,
     follows: Box<[(ScalarKey, FollowCounts)]>,
+    hygiene: Box<[HygieneFinding]>,
     lead: Edge,
     trail: Edge,
     scalar_count: u32,
@@ -255,6 +266,13 @@ impl ChapterRow {
         &self.follows
     }
 
+    /// Hygiene's four scalar classes, chapter-relative and ordered by start.
+    ///
+    /// The one site lane a row carries; substrate.md says why it earns it.
+    pub fn hygiene(&self) -> &[HygieneFinding] {
+        &self.hygiene
+    }
+
     pub const fn lead(&self) -> Edge {
         self.lead
     }
@@ -279,6 +297,7 @@ impl ChapterRow {
             + size_of_val(&*self.runs)
             + size_of_val(&*self.run_atoms)
             + size_of_val(&*self.follows)
+            + size_of_val(&*self.hygiene)
     }
 }
 
@@ -313,15 +332,34 @@ pub struct Substrate;
 impl ChapterPass for Substrate {
     type Observation = ChapterRow;
     type Carry = Edge;
-    const SCHEMA: SchemaStamp = SchemaStamp::new(1);
+    const SCHEMA: SchemaStamp = SchemaStamp::new(2);
 
     fn map(&self, chapter: ChapterInput<'_>) -> ChapterRow {
         walk(chapter.text)
     }
 
-    /// Folds the book into a [`BookAggregate`] and emits nothing: D1a counts,
-    /// D2's rule reducers judge.
-    fn reduce(&self, book: &[ChapterObs<&ChapterRow>], carry: &mut Edge, _out: &mut Findings) {
+    /// Publishes the hygiene lane and folds the counts into a [`BookAggregate`]
+    /// nothing yet reads: D1a counts, D2's rule reducers judge.
+    ///
+    /// A site run abutting a masked `\c` is two findings, one per chapter.
+    fn reduce(&self, book: &[ChapterObs<&ChapterRow>], carry: &mut Edge, out: &mut Findings) {
+        for chapter in book {
+            for finding in chapter.obs.hygiene() {
+                let span = TextRange::new(
+                    finding.span().from() + chapter.start,
+                    finding.span().to() + chapter.start,
+                )
+                .expect("a rebased chapter span keeps its order");
+                out.push(
+                    span,
+                    FindingKind::Hygiene(
+                        HygieneDigest::new(finding.class(), finding.run())
+                            .expect("a scanned run is never empty"),
+                    ),
+                )
+                .expect("a chapter lies inside the book it came from");
+            }
+        }
         let _aggregate = fold_book(book, carry);
     }
 }
@@ -607,7 +645,7 @@ fn merge_runs(
 // ── The walk ────────────────────────────────────────────────────────────
 
 /// Consecutive ASCII scalars before the eight-byte lane re-arms; the
-/// hysteresis `hygiene::scan_scalars` measured.
+/// hysteresis the Stage 1 classifier bench measured.
 const REARM_AFTER: u32 = 32;
 const HIGH_BITS: u64 = 0x8080_8080_8080_8080;
 /// No dense id yet, and no run or pending pair open.
@@ -628,11 +666,16 @@ struct Slot {
 /// The per-scalar state, kept in a local the counters cannot alias.
 ///
 /// Every counter write below goes through a heap pointer, so a compiler that
-/// found this state behind the same `&mut` would reload all eleven fields
-/// after each one. It is 24 bytes and never escapes, so it stays in registers.
+/// found this state behind the same `&mut` would reload all twelve fields
+/// after each one. It is small and never escapes, so it stays in registers.
 #[derive(Clone, Copy)]
 struct Hot {
     prev: OuterClass,
+    /// The previous scalar's own bits, which is what a hygiene site reads.
+    prev_class: Class,
+    /// Mirrors `ScalarSites::pending`, so the gate reads a register rather
+    /// than the counter struct — worth 3pt on Latin.
+    site_pending: bool,
     /// A nonletter whose `next` class the following scalar supplies.
     pending: u32,
     pending_prev: OuterClass,
@@ -652,6 +695,8 @@ impl Hot {
     const fn new() -> Self {
         Self {
             prev: OuterClass::Edge,
+            prev_class: Class::from_bits(0),
+            site_pending: false,
             pending: NO_ID,
             pending_prev: OuterClass::Edge,
             pending_first: false,
@@ -684,6 +729,7 @@ struct Counters {
     run_spans: Vec<(u32, u32)>,
     lead: Edge,
     trail_pair: Option<(ScalarKey, OuterClass)>,
+    sites: ScalarSites,
 }
 
 fn walk(text: &str) -> ChapterRow {
@@ -695,8 +741,14 @@ fn walk(text: &str) -> ChapterRow {
         if armed && at + 8 <= bytes.len() {
             let word = u64::from_le_bytes(bytes[at..at + 8].try_into().expect("eight bytes"));
             if word & HIGH_BITS == 0 {
-                for &byte in &bytes[at..at + 8] {
-                    counters.step(&mut hot, u32::from(byte), ascii_class(byte));
+                for (offset, &byte) in bytes[at..at + 8].iter().enumerate() {
+                    counters.step::<true>(
+                        &mut hot,
+                        u32::from(byte),
+                        ascii_class(byte),
+                        at + offset,
+                        1,
+                    );
                 }
                 at += 8;
                 continue;
@@ -705,7 +757,7 @@ fn walk(text: &str) -> ChapterRow {
             ascii_run = 0;
         }
         let (class, width) = trie_at(&bytes[at..]);
-        counters.step(&mut hot, scalar_at(&bytes[at..], width), class);
+        counters.step::<false>(&mut hot, scalar_at(&bytes[at..], width), class, at, width);
         if width == 1 {
             ascii_run += 1;
             armed |= ascii_run >= REARM_AFTER;
@@ -714,7 +766,7 @@ fn walk(text: &str) -> ChapterRow {
         }
         at += width;
     }
-    counters.finish(hot)
+    counters.finish(hot, text)
 }
 
 /// The code point at `bytes[0]`, whose UTF-8 width `trie_at` already read.
@@ -764,11 +816,22 @@ impl Counters {
             run_spans: Vec::with_capacity(hint / 32),
             lead: Edge::default(),
             trail_pair: None,
+            sites: ScalarSites::new(),
         }
     }
 
+    /// `ASCII` is the eight-byte lane, where no scalar is a mark, a format
+    /// character, a noncharacter, or U+00A0: only a pending verdict reaches
+    /// the site machine there, so the gate is one branch.
     #[inline(always)]
-    fn step(&mut self, hot: &mut Hot, cp: u32, class: Class) {
+    fn step<const ASCII: bool>(
+        &mut self,
+        hot: &mut Hot,
+        cp: u32,
+        class: Class,
+        at: usize,
+        width: usize,
+    ) {
         let outer = OuterClass::of(class);
         if hot.scalar_count == 0 {
             self.lead.outer = outer;
@@ -831,7 +894,19 @@ impl Counters {
             hot.in_word = false;
         }
 
+        let gated = if ASCII {
+            hot.site_pending
+        } else {
+            (class.bits() & SUSPECT != 0) | (cp == NBSP) | hot.site_pending
+        };
+        if gated {
+            let prev = (hot.scalar_count > 0).then_some(hot.prev_class);
+            self.sites.step(at, width, cp, class, prev);
+            hot.site_pending = self.sites.pending();
+        }
+
         hot.prev = outer;
+        hot.prev_class = class;
         hot.scalar_count += 1;
     }
 
@@ -908,7 +983,7 @@ impl Counters {
         id
     }
 
-    fn finish(mut self, mut hot: Hot) -> ChapterRow {
+    fn finish(mut self, mut hot: Hot, text: &str) -> ChapterRow {
         if hot.pending != NO_ID {
             let slot = &mut self.slots[hot.pending as usize];
             slot.pairs[pair_index(hot.pending_prev, OuterClass::Edge)] += 1;
@@ -919,6 +994,7 @@ impl Counters {
             self.trail_pair = Some((key, hot.pending_prev));
         }
         self.close_run(&mut hot);
+        let hygiene = self.sites.finish(text);
 
         let trail = Edge {
             outer: hot.prev,
@@ -1009,6 +1085,7 @@ impl Counters {
             runs: runs.into_boxed_slice(),
             run_atoms: run_atoms.into_boxed_slice(),
             follows: follows.into_boxed_slice(),
+            hygiene,
             lead: self.lead,
             trail,
             scalar_count: hot.scalar_count,
@@ -1309,11 +1386,169 @@ mod tests {
     }
 
     /// The lanes are what a resident cache pays per chapter, so the inline
-    /// size is a fact worth pinning: it is 20% of the tier's median row.
+    /// size is a fact worth pinning: it is 20% of the tier's median row. The
+    /// hygiene lane is 16 of these bytes and is almost always empty.
     #[test]
     fn the_row_and_its_edges_are_the_size_the_budget_assumes() {
-        assert_eq!(size_of::<ChapterRow>(), 128);
+        assert_eq!(size_of::<ChapterRow>(), 144);
         assert_eq!(size_of::<Edge>(), 20);
+    }
+
+    /// Hygiene's four scalar classes, read off the lane the walk fills.
+    mod hygiene_sites {
+        use crate::HygieneClass;
+
+        fn rows(text: &str) -> Vec<(HygieneClass, u32, u32, u32)> {
+            super::row(text)
+                .hygiene()
+                .iter()
+                .map(|f| (f.class(), f.span().from(), f.span().to(), f.run()))
+                .collect()
+        }
+
+        #[test]
+        fn scalar_doc_example_is_exact() {
+            let text = "a \u{301} \u{feff}b\u{a0}\u{a0}c\u{fdd0}";
+            assert_eq!(
+                rows(text),
+                vec![
+                    (HygieneClass::FreeCombiningMark, 1, 4, 1),
+                    (HygieneClass::MisplacedFormat, 5, 8, 1),
+                    (HygieneClass::NoBreakSpace, 9, 13, 2),
+                    (HygieneClass::Noncharacter, 14, 17, 1),
+                ]
+            );
+        }
+
+        #[test]
+        fn a_decomposed_graphemes_combining_mark_is_not_a_free_mark() {
+            // rules/hygiene.md, required examples.
+            assert!(rows("e\u{301}tait").is_empty());
+            assert!(rows("\u{3b1}\u{314}\u{301}").is_empty());
+            // Marks stacked on a real base stay silent however deep.
+            assert!(rows("a\u{301}\u{308}\u{327}").is_empty());
+        }
+
+        #[test]
+        fn a_bare_combining_mark_after_a_space_or_at_the_start_is_reported() {
+            assert_eq!(
+                rows("word \u{301}\u{308} next"),
+                vec![(HygieneClass::FreeCombiningMark, 4, 9, 2)]
+            );
+            assert_eq!(
+                rows("\u{301}word"),
+                vec![(HygieneClass::FreeCombiningMark, 0, 2, 1)]
+            );
+            // A mark behind a control has no base either; the control run is
+            // `HygieneBytes`' own row, not the walk's.
+            assert_eq!(
+                rows("a\0\u{301}b"),
+                vec![(HygieneClass::FreeCombiningMark, 2, 4, 1)]
+            );
+        }
+
+        #[test]
+        fn zwj_and_zwnj_between_letters_are_silent() {
+            // ZWJ/ZWNJ in Indic text never enters the inventory.
+            assert!(rows("\u{915}\u{94d}\u{200d}\u{937}").is_empty());
+            assert!(rows("\u{915}\u{94d}\u{200c}\u{937}").is_empty());
+            assert!(rows("\u{62a}\u{200c}\u{62a}").is_empty());
+            // The same joiner with nothing to join is reportable.
+            assert_eq!(
+                rows("\u{200d} a"),
+                vec![(HygieneClass::MisplacedFormat, 0, 3, 1)]
+            );
+        }
+
+        #[test]
+        fn a_stray_byte_order_mark_mid_text_is_reported() {
+            assert_eq!(
+                rows("in the\u{feff} beginning"),
+                vec![(HygieneClass::MisplacedFormat, 6, 9, 1)]
+            );
+            // An Arabic number sign is Prepend: introducing a digit is its job.
+            assert!(rows("\u{600}7").is_empty());
+            // The span takes the space with it: a Prepend owns what follows.
+            assert_eq!(
+                rows("\u{600} "),
+                vec![(HygieneClass::MisplacedFormat, 0, 3, 1)]
+            );
+        }
+
+        #[test]
+        fn noncharacters_are_reported_as_runs() {
+            assert_eq!(
+                rows("a\u{fdd0}\u{fdd1}b"),
+                vec![(HygieneClass::Noncharacter, 1, 7, 2)]
+            );
+            assert_eq!(
+                rows("a\u{ffff}b"),
+                vec![(HygieneClass::Noncharacter, 1, 4, 1)]
+            );
+            assert_eq!(
+                rows("a\u{10fffe}b"),
+                vec![(HygieneClass::Noncharacter, 1, 5, 1)]
+            );
+            // U+FFFD keeps its own class and is a byte sweep's row, not one here.
+            assert!(rows("a\u{fffd}b").is_empty());
+        }
+
+        #[test]
+        fn nbsp_speaks_only_where_the_claim_is_deterministic() {
+            // French spacing around punctuation is convention, not damage.
+            assert!(rows("J\u{e9}sus\u{a0}: parle").is_empty());
+            assert!(rows("\u{ab}\u{a0}mot\u{a0}\u{bb}").is_empty());
+            assert_eq!(
+                rows("word \u{a0}next"),
+                vec![(HygieneClass::NoBreakSpace, 5, 7, 1)]
+            );
+            assert_eq!(
+                rows("word\u{a0} next"),
+                vec![(HygieneClass::NoBreakSpace, 4, 6, 1)]
+            );
+            assert_eq!(
+                rows("\u{a0}word"),
+                vec![(HygieneClass::NoBreakSpace, 0, 2, 1)]
+            );
+            assert_eq!(
+                rows("word\u{a0}"),
+                vec![(HygieneClass::NoBreakSpace, 4, 6, 1)]
+            );
+        }
+
+        #[test]
+        fn every_emitted_span_lies_on_atom_boundaries() {
+            let text = "a\u{301}\0\u{301} \u{a0}\u{a0}\u{fdd0}\\\u{feff}\r\n\u{915}\u{94d}\u{937}";
+            for finding in super::row(text).hygiene() {
+                let span = finding.span();
+                assert_eq!(
+                    crate::unicode::atoms::widen_to_atoms(text, span),
+                    span,
+                    "{:?} at {}..{} is not atom-aligned",
+                    finding.class(),
+                    span.from(),
+                    span.to()
+                );
+            }
+        }
+
+        /// A chapter end is an edge of text, so a run abutting a masked `\c`
+        /// is one finding per chapter — the hygiene ruling, kept.
+        #[test]
+        fn a_site_run_stops_at_the_chapter_edge() {
+            assert_eq!(
+                rows("a \u{301}\u{301}"),
+                vec![(HygieneClass::FreeCombiningMark, 1, 6, 2)]
+            );
+            assert_eq!(
+                rows("a \u{301}"),
+                vec![(HygieneClass::FreeCombiningMark, 1, 4, 1)]
+            );
+            assert_eq!(
+                rows("\u{301}"),
+                vec![(HygieneClass::FreeCombiningMark, 0, 2, 1)]
+            );
+        }
     }
 
     const fn detached<O: Send + 'static>() {}

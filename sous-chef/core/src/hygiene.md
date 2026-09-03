@@ -6,29 +6,37 @@ the implementation.
 
 ## Scan shape
 
-Four passes over one projected book, each chosen so that clean text never
-leaves a fast path. Rows are merged and sorted by start offset at the end.
+Three byte sweeps over one projected book, each chosen so that clean text
+never leaves a fast path. Rows are merged and sorted by start offset at the
+end.
 
 | pass | filter | finds |
 | --- | --- | --- |
 | `scan_controls` | 64-byte blocks, an OR-reduction the compiler autovectorizes | C0 controls, DEL, stray CR |
 | `scan_needles` | one `memchr3` over `\`, `C2`, `EF` | stranded backslash, C1 controls, U+FFFD |
 | `scan_conflict_markers` | one `memchr3` over `<`, `=`, `>` | line-initial merge-conflict markers |
-| `scan_scalars` | eight-byte SWAR ASCII skip ahead of `unicode::lookup::trie_at` | free marks, misplaced format characters, NBSP, noncharacters |
 
-Two details carry the cost:
+The four scalar classes — free marks, misplaced format characters, NBSP,
+noncharacters — are not a sweep here at all. They ride the substrate walk:
+`ScalarSites` below is the streaming machine `substrate.rs` drives, and the
+row's `hygiene` lane is where they come out. See
+[`substrate.md`](substrate.md).
 
-- **The range filter branches once per block, not per byte.** `is_control` is
-  folded with `|` rather than short-circuited, so the block test vectorizes;
-  only a block that reports a hit pays the per-byte walk.
-- **The SWAR lane has hysteresis.** It re-arms only after 32 consecutive ASCII
-  scalars. Without that, non-Latin text pays the eight-byte test on every
-  chunk and loses more than the chunk saves — the failure mode measured in
-  [`../../evidence.md`](../../evidence.md) and kept in
-  [`../../experiments/`](../../experiments/).
+One detail carries the cost: **the range filter branches once per block, not
+per byte.** `is_control` is folded with `|` rather than short-circuited, so the
+block test vectorizes; only a block that reports a hit pays the per-byte walk.
 
-Every scalar-level check lives above U+007F, which is exactly what lets the
-ASCII lane skip whole words without looking at a class.
+Every scalar-level check lives above U+007F, which is what lets the substrate
+walk's eight-byte ASCII lane reach `ScalarSites` through one branch — a
+pending verdict — and never through a class test.
+
+`ScalarSites` restates the retired `scan_scalars` for streaming. A verdict
+that needs the *next* scalar (a format character, an NBSP) is pending until
+the following `step`, or until `finish` resolves it against no next scalar at
+all; run members are contiguous, so a gated scalar that does not abut the open
+run closes it. A chapter end is an edge of text, exactly as it was, which is
+what keeps the lane byte-for-byte equal to the old scan
+(`tests/hygiene_scalar_reference.rs`).
 
 ## Runs and spans
 
@@ -48,12 +56,13 @@ invariant 6 working, not drift.
 
 ## Pass contract
 
-`hygiene::Hygiene` implements `ChapterPass` with
+`hygiene::HygieneBytes` implements `ChapterPass` with
 `Observation = Vec<HygieneFinding>` in chapter-relative coordinates and
 `Carry = ()`; `map` is `scan` over the chapter slice and `reduce` only rebases
-each row by its chapter's projected start. The contract itself, and why reduce
-cannot tell a cached observation from a fresh one:
-[`pass.md`](pass.md).
+each row by its chapter's projected start. The product pass is
+`sous_core::Brigade` — `(HygieneBytes, Substrate)` — which is what a host
+registers to get all seven classes. The contract itself, and why reduce cannot
+tell a cached observation from a fresh one: [`pass.md`](pass.md).
 
 A run abutting a masked `\c` marker is two findings by design, and front
 matter is outside every chapter row, so it is outside the pass. Galley may
@@ -64,9 +73,10 @@ No config changes observations; enablement only filters.
 ## Throughput
 
 Measured against the roofline ceilings in
-[`../../evidence.md`](../../evidence.md) — `cargo bench -p sous-core`. Carrying
-the classifier walk costs real throughput, and that is the pass every Level 1b
-observation will ride. Nothing in the bench asserts on a number.
+[`../../evidence.md`](../../evidence.md) — `cargo bench -p sous-core`. The
+`hygiene` row is the three byte sweeps alone now that the classifier walk has
+moved to `substrate_map`, which is the row that carries it. Nothing in the
+bench asserts on a number.
 
 ## The lone-backslash caveat
 

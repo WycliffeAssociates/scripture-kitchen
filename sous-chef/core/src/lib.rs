@@ -34,3 +34,7 @@ pub use substrate::{
     BookAggregate, Case, ChapterRow, Edge, FollowCounts, OuterClass, PairKey, RUN_BUCKETS,
     RunLengths, ScalarKey, Substrate,
 };
+
+/// The product pass: hygiene's byte sweeps and the substrate walk over the
+/// same chapters, reduced into one span-ordered row set per book.
+pub type Brigade = (hygiene::HygieneBytes, substrate::Substrate);

@@ -2,7 +2,7 @@
 //! findings out.
 //!
 //! ```text
-//! analyze(corpus, &Hygiene)
+//! analyze(corpus, &HygieneBytes)
 //!   MRK chapter 1 at 0   "wept \\ here.\0\0\0"  → map → [StrandedBackslash 5..7, C0Control 13..16]
 //!   MRK chapter 2 at 16  "An \0 more."          → map → [C0Control 3..4]
 //!   reduce([obs at 0, obs at 16], &mut (), out)
@@ -34,6 +34,14 @@ impl SchemaStamp {
 
     pub const fn get(self) -> u32 {
         self.0
+    }
+
+    /// The stamp of `self` composed with `other`, in that order.
+    ///
+    /// Order-sensitive and not either half, so a tuple pass cannot inherit a
+    /// member's key.
+    pub const fn then(self, other: Self) -> Self {
+        Self((self.0.rotate_left(16) ^ other.0).wrapping_mul(0x9E37_79B1))
     }
 }
 
@@ -99,6 +107,46 @@ pub trait ChapterPass {
     );
 }
 
+/// Two passes over the same chapters as one: both maps run, both reduces run,
+/// and the rows come out in span order per book.
+impl<A: ChapterPass, B: ChapterPass> ChapterPass for (A, B) {
+    type Observation = (A::Observation, B::Observation);
+    type Carry = (A::Carry, B::Carry);
+    const SCHEMA: SchemaStamp = A::SCHEMA.then(B::SCHEMA);
+
+    fn map(&self, chapter: ChapterInput<'_>) -> Self::Observation {
+        (self.0.map(chapter), self.1.map(chapter))
+    }
+
+    fn reduce(
+        &self,
+        book: &[ChapterObs<&Self::Observation>],
+        carry: &mut Self::Carry,
+        out: &mut Findings,
+    ) {
+        let mark = out.mark();
+        // Two views over the borrowed pairs: a reduce takes one observation
+        // type. Two small vectors per book per publication.
+        let left: Vec<ChapterObs<&A::Observation>> = book
+            .iter()
+            .map(|chapter| ChapterObs {
+                start: chapter.start,
+                obs: &chapter.obs.0,
+            })
+            .collect();
+        let right: Vec<ChapterObs<&B::Observation>> = book
+            .iter()
+            .map(|chapter| ChapterObs {
+                start: chapter.start,
+                obs: &chapter.obs.1,
+            })
+            .collect();
+        self.0.reduce(&left, &mut carry.0, out);
+        self.1.reduce(&right, &mut carry.1, out);
+        out.sort_tail(mark);
+    }
+}
+
 /// The reduce sink: rows in projected book coordinates, each naming its book.
 ///
 /// A host builds one per invocation, names a book before reducing it, and
@@ -137,6 +185,16 @@ impl Findings {
 
     pub fn rows(&self) -> &[PackedFinding] {
         &self.rows
+    }
+
+    /// The row count now; hand it back to [`sort_tail`](Self::sort_tail).
+    pub fn mark(&self) -> usize {
+        self.rows.len()
+    }
+
+    /// Stable-sorts the rows pushed since `mark` by `(from, to)`.
+    pub fn sort_tail(&mut self, mark: usize) {
+        self.rows[mark..].sort_by_key(|row| (row.from(), row.to()));
     }
 
     pub fn into_rows(self) -> Vec<PackedFinding> {
@@ -238,7 +296,10 @@ fn collect_verses(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{HygieneClass, HygieneDigest, VerseKey, hygiene::Hygiene, validate};
+    use crate::{
+        Brigade, HygieneClass, HygieneDigest, VerseKey, hygiene::HygieneBytes,
+        substrate::Substrate, validate,
+    };
 
     struct Book {
         key: BookKey,
@@ -324,23 +385,23 @@ mod tests {
         let corpus = Corpus::try_new(&books).unwrap();
 
         let mut hand = Findings::new(vec![6, 3]);
-        let first = Hygiene.map(ChapterInput {
+        let first = HygieneBytes.map(ChapterInput {
             text: "x\0y",
             verses: &[verse(1, 1, 0, 3)],
             key: ChapterKey::new(BookKey::new(*b"MRK"), 1),
         });
-        let second = Hygiene.map(ChapterInput {
+        let second = HygieneBytes.map(ChapterInput {
             text: "\0\0z",
             verses: &[verse(2, 1, 0, 3)],
             key: ChapterKey::new(BookKey::new(*b"MRK"), 2),
         });
-        let third = Hygiene.map(ChapterInput {
+        let third = HygieneBytes.map(ChapterInput {
             text: "p\0q",
             verses: &[verse(1, 1, 0, 3)],
             key: ChapterKey::new(BookKey::new(*b"GEN"), 1),
         });
         hand.open_book(BookIndex::new(0).unwrap());
-        Hygiene.reduce(
+        HygieneBytes.reduce(
             &[
                 ChapterObs {
                     start: 0,
@@ -355,7 +416,7 @@ mod tests {
             &mut hand,
         );
         hand.open_book(BookIndex::new(1).unwrap());
-        Hygiene.reduce(
+        HygieneBytes.reduce(
             &[ChapterObs {
                 start: 0,
                 obs: &third,
@@ -364,7 +425,7 @@ mod tests {
             &mut hand,
         );
 
-        let composed = analyze(&corpus, &Hygiene);
+        let composed = analyze(&corpus, &HygieneBytes);
         assert_eq!(
             hygiene_rows(&composed),
             vec![
@@ -380,8 +441,8 @@ mod tests {
     fn analyze_reduces_books_in_caller_order() {
         let forward = vec![mrk(), genesis()];
         let reversed = vec![genesis(), mrk()];
-        let forward = analyze(&Corpus::try_new(&forward).unwrap(), &Hygiene);
-        let reversed = analyze(&Corpus::try_new(&reversed).unwrap(), &Hygiene);
+        let forward = analyze(&Corpus::try_new(&forward).unwrap(), &HygieneBytes);
+        let reversed = analyze(&Corpus::try_new(&reversed).unwrap(), &HygieneBytes);
 
         let keys: Vec<_> = forward.rows().iter().map(|row| row.book_idx()).collect();
         assert_eq!(
@@ -500,7 +561,7 @@ mod tests {
             })
             .collect();
 
-        assert_eq!(hygiene_rows(&analyze(&corpus, &Hygiene)), whole);
+        assert_eq!(hygiene_rows(&analyze(&corpus, &HygieneBytes)), whole);
     }
 
     #[test]
@@ -514,7 +575,7 @@ mod tests {
         assert_eq!((whole[0].span().from(), whole[0].span().to()), (1, 7));
 
         assert_eq!(
-            hygiene_rows(&analyze(&corpus, &Hygiene)),
+            hygiene_rows(&analyze(&corpus, &HygieneBytes)),
             vec![
                 (0, 1, 4, HygieneClass::C0Control, 3),
                 (0, 4, 7, HygieneClass::C0Control, 3),
@@ -534,14 +595,97 @@ mod tests {
         let corpus = Corpus::try_new(&books).unwrap();
 
         assert_eq!(crate::hygiene::scan(books[0].text()).len(), 1);
-        assert!(analyze(&corpus, &Hygiene).is_empty());
+        assert!(analyze(&corpus, &HygieneBytes).is_empty());
+    }
+
+    /// Chapter 1 carries a byte class and a scalar class alternately, so the
+    /// two halves of a tuple emit rows that must interleave.
+    fn mixed() -> Book {
+        // "\u{301}a\0 \u{301}\0": free mark 0..2, NUL 3..4, free mark 4..7
+        // (it takes the space it hangs on), NUL 7..8.
+        Book {
+            key: BookKey::new(*b"LUK"),
+            text: "\u{301}a\0 \u{301}\0",
+            chapters: vec![chapter(1, 0, 8)],
+            verses: vec![verse(1, 1, 0, 8)],
+        }
+    }
+
+    #[test]
+    fn a_tuple_maps_both_and_reduces_in_span_order() {
+        let books = vec![mixed()];
+        let corpus = Corpus::try_new(&books).unwrap();
+        assert_eq!(
+            hygiene_rows(&analyze(&corpus, &Brigade::default())),
+            vec![
+                (0, 0, 2, HygieneClass::FreeCombiningMark, 1),
+                (0, 3, 4, HygieneClass::C0Control, 1),
+                (0, 4, 7, HygieneClass::FreeCombiningMark, 1),
+                (0, 7, 8, HygieneClass::C0Control, 1),
+            ]
+        );
+    }
+
+    /// Test-only stubs: two stamps, no rows.
+    struct Stamped<const S: u32>;
+
+    impl<const S: u32> ChapterPass for Stamped<S> {
+        type Observation = ();
+        type Carry = ();
+        const SCHEMA: SchemaStamp = SchemaStamp::new(S);
+
+        fn map(&self, _chapter: ChapterInput<'_>) -> Self::Observation {}
+
+        fn reduce(&self, _book: &[ChapterObs<&()>], _carry: &mut (), _out: &mut Findings) {}
+    }
+
+    #[test]
+    fn a_tuple_schema_is_order_sensitive_and_not_either_half() {
+        type Left = Stamped<1>;
+        type Right = Stamped<2>;
+        let forward = <(Left, Right) as ChapterPass>::SCHEMA;
+        let backward = <(Right, Left) as ChapterPass>::SCHEMA;
+        assert_ne!(forward, backward);
+        assert_ne!(forward, Left::SCHEMA);
+        assert_ne!(forward, Right::SCHEMA);
+        // The shipped tuple, whose halves happen to share a stamp.
+        let brigade = <Brigade as ChapterPass>::SCHEMA;
+        assert_ne!(brigade, HygieneBytes::SCHEMA);
+        assert_ne!(brigade, Substrate::SCHEMA);
+    }
+
+    #[test]
+    fn a_tuple_carry_resets_per_book_for_both_halves() {
+        let books = vec![mrk(), genesis()];
+        let corpus = Corpus::try_new(&books).unwrap();
+        // Substrate contributes no row to these books; LastByte's runs spell
+        // out the carry it was handed.
+        let carried: Vec<_> = hygiene_rows(&analyze(&corpus, &(LastByte, Substrate)))
+            .into_iter()
+            .map(|(book, from, _, _, run)| (book, from, run - 1))
+            .collect();
+
+        assert_eq!(carried, vec![(0, 0, 0), (0, 3, u32::from(b'y')), (1, 0, 0)]);
+    }
+
+    #[test]
+    fn analyze_over_a_tuple_equals_the_two_passes_analyzed_separately() {
+        let books = vec![mixed(), mrk(), genesis()];
+        let corpus = Corpus::try_new(&books).unwrap();
+        let mut apart = hygiene_rows(&analyze(&corpus, &HygieneBytes));
+        apart.extend(hygiene_rows(&analyze(&corpus, &Substrate)));
+        // Stable, so the first pass keeps its place on a tie — as the tuple's
+        // own tail sort does.
+        apart.sort_by_key(|row| (row.0, row.1, row.2));
+
+        assert_eq!(hygiene_rows(&analyze(&corpus, &Brigade::default())), apart);
     }
 
     const fn detached<O: Send + 'static>() {}
 
     #[test]
     fn a_hygiene_observation_is_send_and_borrow_free() {
-        detached::<<Hygiene as ChapterPass>::Observation>();
+        detached::<<HygieneBytes as ChapterPass>::Observation>();
         detached::<<LastByte as ChapterPass>::Observation>();
     }
 
