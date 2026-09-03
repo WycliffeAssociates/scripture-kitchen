@@ -43,6 +43,14 @@ fn astral(cp: u32) -> Class {
     }
 }
 
+/// The class of one ASCII byte, for a caller that already proved the byte is
+/// ASCII — a SWAR chunk test, say.
+#[inline]
+pub(crate) fn ascii_class(byte: u8) -> Class {
+    debug_assert!(byte < 0x80, "the caller proves the byte is ASCII");
+    Class::from_bits(table::ASCII[usize::from(byte & 0x7f)])
+}
+
 /// The class and UTF-8 width of the scalar at `bytes[0]`, read off the
 /// encoding without reassembling a scalar. `bytes` must start on a char
 /// boundary of well-formed UTF-8.

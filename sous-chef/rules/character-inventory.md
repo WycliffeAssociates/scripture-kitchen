@@ -1,11 +1,14 @@
-# Level 1b — nonletter convention inventory
+# Level 1b — character inventory
 
-One shared observation substrate counts punctuation, symbols, digits, and
-nonletter grapheme atoms. It records placement, directed neighbors, run shape,
-and dispersion without retaining occurrence lists. These are views over one
-model, not twenty independent rule implementations. Convention-learned lane.
+One shared observation substrate counts every scalar a chapter holds. The
+census covers letters too, so a stray letter in a small alphabet reaches the
+rarity roster; placement, directed neighbors, run shape, and dispersion are
+recorded for punctuation, symbols, digits, and nonletter grapheme atoms only,
+and never as occurrence lists. These are views over one model, not twenty
+independent rule implementations. Convention-learned lane.
 
-Status: designed, not implemented. Stage 3 in [../roadmap.md](../roadmap.md).
+Status: substrate walk landed (`sous_core::substrate`), rules not yet
+reducing. Stage 3 in [../roadmap.md](../roadmap.md).
 
 ## Evidence questions
 
@@ -39,16 +42,15 @@ A very low corpus count produces a roster for review. Rarity is a list, not a
 claim that a glyph is wrong. Accepted glyphs use suppression, not a threshold
 distortion.
 
-**Open (Stage 3 scoping): letters in the rarity roster.** A Hawaiian
-translation uses thirteen letters; a stray `z` is exactly the kind of slip a
-rarity roster should surface, and the dense scalar census already counts
-every scalar. The neighbor ladder still never individuates letters; this is
-the census only. The open question is abstention for large letter
-inventories: a logographic corpus has thousands of letters used once or
+**Letters are in the roster.** A Hawaiian translation uses thirteen letters;
+a stray `z` is exactly the kind of slip a rarity roster should surface, and
+the `scalars` lane counts every scalar. The neighbor ladder still never
+individuates letters; this is the census only. **Open:** abstention for large
+letter inventories. A logographic corpus has thousands of letters used once or
 twice, and a roster over them is noise. A candidate rule is to abstain when
 the distinct-letter inventory exceeds a bound (order of a few hundred), and
 otherwise treat letters like any other glyph in the roster. Decide with fleet
-counts before the Stage 3 substrate slice is specified.
+counts before the D2 rule reducers are specified.
 
 ### Dispersion
 
@@ -56,6 +58,24 @@ Books-touched versus books-possible is annotation and ranking only. Genre can
 legitimately cluster punctuation, so dispersion does not convict. A small
 "forgiven but clustered" review group may surface above-band patterns without
 turning dispersion into a gate.
+
+## Observation
+
+`sous_core::substrate` is the one walk every question above reads from. One
+`ChapterRow` per chapter, each lane a sorted vector, seams resolved at reduce
+(shape and argument: [`../core/src/substrate.md`](../core/src/substrate.md)).
+
+| lane | answers |
+| --- | --- |
+| `scalars` | absolute rarity, the dense census letters included, and every denominator |
+| `pairs` | G0 placement: the outer class either side of a nonletter |
+| `runs` | run composition — the exact scalar sequence, so G1 conditioning and the G2/G3 in-run neighbours are reads, not a second walk |
+| `run_lengths` | run length against that glyph's own history, derived from `runs` rather than stored twice |
+| `follows` | the casing a run terminal hands off to |
+| `lead`, `trail` | the two open edges a masked `\c` would otherwise swallow |
+
+Dispersion and per-book occurrence are reduce products over these, not stored
+rows. Sites are absent by construction: nothing here records a position.
 
 ## Fraction bands
 
@@ -99,8 +119,7 @@ finding.
   small-sample silence.
 - Low Line used 28 times across six books reads "rare but dispersed"; `}` used
   once or twice appears in the rarity roster.
-- ZWJ/ZWNJ in Indic text never enters the nonletter inventory (charter
-  invariant 8).
+- ZWJ/ZWNJ in Indic text never enters the inventory (charter invariant 8).
 
 ## PO checklist absorbed by this lane
 

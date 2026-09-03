@@ -389,7 +389,8 @@ Work:
 
 1. Add dense scalar interning, digit pooling, topology, run composition,
    directed pairs, run lengths, per-book occurrence masks, and the terminal
-   follow table.
+   follow table. Substrate walk landed (D1a): `sous_core::substrate` maps the
+   chapter row and folds a book's seams;
 2. Keep sites absent from stored observations. Implement semantic
    `sites(query)` and `sites_many(queries)` operations returning projection-true
    spans that the retained producer can locate. Choose `memchr`, `memmem`,

@@ -17,7 +17,10 @@
 //! by cutting that test's step count down to the printed step.
 
 use rustc_hash::{FxHashMap, FxHashSet};
-use sous_core::{Corpus, CorpusSnapshot, SnapshotId, analyze, for_each_chapter, hygiene::Hygiene};
+use sous_core::{
+    ChapterPass, Corpus, CorpusSnapshot, SnapshotId, analyze, for_each_chapter, hygiene::Hygiene,
+    substrate::Substrate,
+};
 use usfm_galley::onion::{Filter, cst, lex, mask};
 use usfm_galley::sous::{Expediter, OnionBook, OnionInputBook, publish_onion_findings};
 use usfm_galley::{BookId, Role};
@@ -32,7 +35,7 @@ type Book = (String, String);
 ///
 /// The snapshot identity is an input, not a result, so both paths publish
 /// under the one the caller names.
-fn cold_publish(books: &[Book], snapshot: SnapshotId) -> Vec<u8> {
+fn cold_publish<P: ChapterPass + Sync>(pass: &P, books: &[Book], snapshot: SnapshotId) -> Vec<u8> {
     let parsed: Vec<OnionBook> = books
         .iter()
         .map(|(id, text)| {
@@ -40,7 +43,7 @@ fn cold_publish(books: &[Book], snapshot: SnapshotId) -> Vec<u8> {
         })
         .collect();
     let corpus = Corpus::try_new(&parsed).expect("the harness registers distinct book keys");
-    let findings = analyze(&corpus, &Hygiene).into_rows();
+    let findings = analyze(&corpus, pass).into_rows();
     let inputs = books
         .iter()
         .map(|(id, text)| OnionInputBook::new(id.as_str(), text.clone()))
@@ -49,7 +52,10 @@ fn cold_publish(books: &[Book], snapshot: SnapshotId) -> Vec<u8> {
 }
 
 /// The Expediter's own books, in the canonical order it publishes them.
-fn ordered(sous: &Expediter<Hygiene>, texts: &FxHashMap<String, String>) -> Vec<Book> {
+fn ordered<P: ChapterPass + Sync>(
+    sous: &Expediter<P>,
+    texts: &FxHashMap<String, String>,
+) -> Vec<Book> {
     sous.pantry()
         .books(Role::Target)
         .iter()
@@ -62,13 +68,18 @@ fn ordered(sous: &Expediter<Hygiene>, texts: &FxHashMap<String, String>) -> Vec<
 }
 
 /// Publish both ways and assert the bytes, under the incremental snapshot id.
-fn assert_publications_agree(sous: &mut Expediter<Hygiene>, books: &[Book], context: &str) -> u64 {
+fn assert_publications_agree<P: ChapterPass + Sync + Copy>(
+    sous: &mut Expediter<P>,
+    books: &[Book],
+    context: &str,
+) -> u64 {
     let texts: FxHashMap<String, String> = books.iter().cloned().collect();
     let buffer = sous
         .publish()
         .unwrap_or_else(|error| panic!("{context}: {error}"));
     let snapshot = CorpusSnapshot::open(&buffer).unwrap().snapshot_id();
-    let cold = cold_publish(&ordered(sous, &texts), snapshot);
+    let pass = *sous.pass();
+    let cold = cold_publish(&pass, &ordered(sous, &texts), snapshot);
     assert_eq!(buffer, cold, "published bytes differ from cold: {context}");
     sous.last_mapped()
 }
@@ -445,17 +456,23 @@ const BUDGET: usize = 64 << 20;
 
 /// Residency past that budgeted LRU: the chapter cache and the per-book
 /// products, which are what an edit churn could grow without bound.
-fn cache_bytes(sous: &Expediter<Hygiene>) -> usize {
+fn cache_bytes<P: ChapterPass + Sync>(sous: &Expediter<P>) -> usize {
     sous.resident_bytes() - sous.pantry().warmer().resident_bytes()
 }
 
 /// Registers `books`, then runs `steps` seeded edits, asserting equality and
 /// the work bound after each.
-fn churn(name: &str, seed: u64, steps: usize, books: Vec<Book>) {
+fn churn<P: ChapterPass + Sync + Copy>(
+    pass: P,
+    name: &str,
+    seed: u64,
+    steps: usize,
+    books: Vec<Book>,
+) {
     let mut rng = Rng(seed);
     let mut spares: Vec<&'static str> = SPARE_CODES.to_vec();
     let mut books = books;
-    let mut sous = Expediter::new(Hygiene, BUDGET);
+    let mut sous = Expediter::new(pass, BUDGET);
     for (id, text) in &books {
         sous.update(id.as_str(), Role::Target, text).unwrap();
     }
@@ -539,7 +556,7 @@ fn churn(name: &str, seed: u64, steps: usize, books: Vec<Book>) {
     // Residency is bounded by what the corpus IS, not by how many edits it
     // took: the ring keeps `kept + 1` tables per book and the observations
     // those tables name, and the sweep frees the rest.
-    let mut fresh = Expediter::new(Hygiene, BUDGET);
+    let mut fresh = Expediter::new(pass, BUDGET);
     for (id, text) in &books {
         fresh.update(id.as_str(), Role::Target, text).unwrap();
     }
@@ -607,24 +624,38 @@ fn en_ulb() -> Vec<Book> {
 
 #[test]
 fn churn_over_a_synthetic_corpus() {
-    churn("synthetic", 0x5EED_0001, 200, synthetic());
+    churn(Hygiene, "synthetic", 0x5EED_0001, 200, synthetic());
 }
 
 #[test]
 fn churn_over_a_synthetic_corpus_from_a_second_seed() {
-    churn("synthetic-b", 0xD00D_1234_5678_9ABD, 200, synthetic());
+    churn(
+        Hygiene,
+        "synthetic-b",
+        0xD00D_1234_5678_9ABD,
+        200,
+        synthetic(),
+    );
+}
+
+/// The Level 1b substrate through the same churn. It publishes no findings
+/// yet, so what this pins is the cache: which chapters are mapped, what the
+/// ring keeps, and that a reduce cannot tell a reused row from a fresh one.
+#[test]
+fn churn_over_a_synthetic_corpus_with_substrate() {
+    churn(Substrate, "substrate", 0x5EED_0003, 200, synthetic());
 }
 
 #[test]
 #[ignore = "corpus-scale oracle: 50 cold whole-Bible publications; run --include-ignored at pass end"]
 fn churn_over_en_ulb() {
-    churn("en_ulb", 0x5EED_0002, 50, en_ulb());
+    churn(Hygiene, "en_ulb", 0x5EED_0002, 50, en_ulb());
 }
 
 #[test]
 #[ignore = "corpus-scale oracle: 50 cold whole-Bible publications; run --include-ignored at pass end"]
 fn churn_over_en_ulb_from_a_second_seed() {
-    churn("en_ulb-b", 0xBEEF_0F0F_0F0F_0F0F, 50, en_ulb());
+    churn(Hygiene, "en_ulb-b", 0xBEEF_0F0F_0F0F_0F0F, 50, en_ulb());
 }
 
 // --------------------------------------------------- the named gate bullets

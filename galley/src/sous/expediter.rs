@@ -209,6 +209,11 @@ impl<P: ChapterPass + Sync> Expediter<P> {
         &self.pantry
     }
 
+    /// The pass this coordinator maps and reduces with.
+    pub fn pass(&self) -> &P {
+        &self.pass
+    }
+
     /// Chapters mapped for the last [`publish`](Self::publish), the eager maps
     /// of the updates before it included.
     pub fn last_mapped(&self) -> u64 {

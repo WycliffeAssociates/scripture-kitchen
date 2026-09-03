@@ -12,6 +12,11 @@ memchr.workspace = true
 mise = { path = "../../mise" }
 rustc-hash.workspace = true
 
+[features]
+# Bench-only: divan's AllocProfiler as the global allocator, so the substrate
+# rows show their allocations per chapter. See onion's.
+alloc-counts = []
+
 [dev-dependencies]
 divan = "0.1.21"
 # Oracle only. `sous-core` ships no segmenter; this pins the atom rule's

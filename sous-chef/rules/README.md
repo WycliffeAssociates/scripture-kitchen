@@ -43,7 +43,7 @@ Every rule answers these eight questions before implementation:
 | level | lane | file | kind | status |
 | --- | --- | --- | --- | --- |
 | 1a | hygiene | [hygiene.md](hygiene.md) | deterministic | landed (one deferred item) |
-| 1b | nonletter convention inventory | [nonletter-inventory.md](nonletter-inventory.md) | convention-learned | designed; Stage 3 |
+| 1b | character inventory | [character-inventory.md](character-inventory.md) | convention-learned | designed; Stage 3 |
 | 2 | word conventions | [word-conventions.md](word-conventions.md) | convention-learned | designed; Stage 4, bands blocked |
 | 3 | length proportionality | [length-proportionality.md](length-proportionality.md) | source-compared | designed; Stage 5 |
 | 3 | source-copy residue | [source-copy-residue.md](source-copy-residue.md) | source-compared | parked pending re-adjudication |

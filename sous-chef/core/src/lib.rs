@@ -9,6 +9,7 @@ mod corpus;
 pub mod hygiene;
 mod input;
 mod pass;
+pub mod substrate;
 pub mod unicode;
 
 pub use alignment::{AlignedSide, AlignedUnit, Alignment, AlignmentFact, align};
@@ -28,4 +29,8 @@ pub use input::{
 pub use pass::{
     ChapterInput, ChapterKey, ChapterObs, ChapterPass, Findings, SchemaStamp, analyze,
     for_each_chapter,
+};
+pub use substrate::{
+    BookAggregate, Case, ChapterRow, Edge, FollowCounts, OuterClass, PairKey, RUN_BUCKETS,
+    RunLengths, ScalarKey, Substrate,
 };
