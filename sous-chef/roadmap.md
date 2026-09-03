@@ -273,16 +273,16 @@ Verification gate — **green**:
 Work:
 
 1. Define the pass contract with a chapter observation, schema stamp, minimal
-   associated `Carry`, disposable aggregate, and consumers. `Carry = ()` for a
-   pass with no seam behavior. **Landed as `sous_core::ChapterPass` and
-   `analyze`, with hygiene as the first pass and the CLI as its caller; see
-   [core/src/pass.md](core/src/pass.md).**
+   fold-owned seam state, book aggregate, and consumers. **Landed as
+   `sous_core::ChapterPass` and `analyze`, with hygiene as the first pass and
+   the CLI as its caller; D2a-1 split it into map / fold / judge, with judging
+   corpus-level and config-driven; see [core/src/pass.md](core/src/pass.md).**
 2. Add the workspace's minimal Galley coordinator. Each invocation owns its
    complete target and optional source strings/TOCs only for that call. Galley
    retains config and independently content-addressed target/source chapter
    observations plus checksum-keyed detached projection and UTF-16 index data;
    it does not retain a canonical rope or accept splices. The pure Sous
-   map/reduce functions own no resident cache. **B1 landed as `galley::Pantry`:
+   map/fold/judge functions own no resident cache. **B1 landed as `galley::Pantry`:
    the id-keyed registry of detached per-book products (Warmer, TOC, mask,
    detached UTF-16 table, published length, `Fingerprint`), canonical `BookKey`
    order, `Target` role only; see
@@ -311,8 +311,8 @@ Work:
    landed: every `Expediter::publish` sweeps the chapter tables outside a
    book's generation ring (its current `RawChecksum` plus `with_generations(n)`
    before it, four by default) and every observation no surviving table names;
-   the host mutates through `Expediter::{update, update_with, remove}` and
-   reduce borrows its observations. See
+   the host mutates through `Expediter::{update, update_with, remove}` and the
+   fold borrows its observations. See
    [../galley/src/sous/expediter.md](../galley/src/sous/expediter.md).**
 
 Verification gate — **green for a target-only pass; two bullets name the half
@@ -351,10 +351,11 @@ the step's own analysis inputs changed. The bound is recomputed there from
   `a_chapter_copied_onto_another_maps_nothing_and_publishes_both`, plus every
   copy step of the churn;
 - seam contributions change only where an adjacent prefix/suffix changed — the
-  churn's seam edits pin the chapter boundary for a `Carry = ()` pass, which is
-  every pass so far. **Open:** the bullet's real claim needs the first pass that
-  carries seam state, which is work item 3;
-- serial and parallel chapter mapping reduce to byte-identical results in
+  churn's seam edits pin the chapter boundary for a pass whose fold carries no
+  seam state, which is every emitting pass so far. **Open:** the bullet's real
+  claim needs the first emitting pass that carries seam state, which is work
+  item 3;
+- serial and parallel chapter mapping fold to byte-identical results in
   deterministic order — `the_parallel_map_publishes_the_serial_bytes` compares
   both inside one binary, and
   `parallel_publish_byte_equals_the_serial_cold_oracle_over_en_ulb` puts the
@@ -414,7 +415,7 @@ Verification gate:
 - convention examples and small-corpus examples abstain/fire for the documented
   reason;
 - one maximal run yields one finding with all independently firing reasons;
-- changing judgment bands maps/reduces zero chapters;
+- changing judgment bands maps zero chapters and folds zero books;
 - current-text site rescan agrees with the pattern counts it materializes.
 
 Fleet gate:

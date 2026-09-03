@@ -107,9 +107,10 @@ lossy vref export has raw-USFM coordinates.
 
 ## Reduction and publication
 
-Chapter observations are the authoritative reusable cache. Carry, aligned
-units, book summaries, project inventories, denominators, judgments, and
-packed findings are products of the current deterministic reduction.
+Chapter observations and book aggregates are the authoritative reusable
+caches. Fold seam state, aligned units, project inventories, denominators,
+judgments, and packed findings are products of the current deterministic
+reduction.
 
 A change in one chapter may change a corpus denominator and therefore add,
 remove, or alter findings in an otherwise untouched book. This is visible at

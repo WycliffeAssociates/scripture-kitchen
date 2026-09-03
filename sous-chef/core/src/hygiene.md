@@ -57,12 +57,14 @@ invariant 6 working, not drift.
 ## Pass contract
 
 `hygiene::HygieneBytes` implements `ChapterPass` with
-`Observation = Vec<HygieneFinding>` in chapter-relative coordinates and
-`Carry = ()`; `map` is `scan` over the chapter slice and `reduce` only rebases
-each row by its chapter's projected start. The product pass is
-`sous_core::Brigade` — `(HygieneBytes, Substrate)` — which is what a host
-registers to get all seven classes. The contract itself, and why reduce cannot
-tell a cached observation from a fresh one: [`pass.md`](pass.md).
+`Observation = Vec<HygieneFinding>` in chapter-relative coordinates,
+`Aggregate = Box<[HygieneFinding]>` in book coordinates, and `Config = ()`.
+`map` is `scan` over the chapter slice, `fold` only rebases each row by its
+chapter's projected start, and `judge` pushes each book's rows under its
+index. The product pass is `sous_core::Brigade` — `(HygieneBytes, Substrate)` —
+which is what a host registers to get all seven classes. The contract itself,
+and why neither fold nor judge can tell a cached input from a fresh one:
+[`pass.md`](pass.md).
 
 A run abutting a masked `\c` marker is two findings by design, and front
 matter is outside every chapter row, so it is outside the pass. Galley may

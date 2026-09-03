@@ -16,9 +16,10 @@ Wire lanes: [`../core/src/codec/README.md`](../core/src/codec/README.md).
 3. **Not established:** intent. A tab-separated table or an escaped-backslash
    convention is content the reviewer may accept.
 4. **Conditioning:** none. Every hit is its own evidence.
-5. **Map/reduce:** the scan over one chapter's masked text is the whole
-   observation. `Carry = ()` — a run is maximal within its chapter, and a run
-   abutting a masked `\c` marker is two findings by design.
+5. **Map/fold/judge:** the scan over one chapter's masked text is the whole
+   observation; the fold only rebases it and carries no seam state, so a run
+   is maximal within its chapter and a run abutting a masked `\c` marker is
+   two findings by design. Judging is unconditional.
 6. **Config:** none changes observations; enablement only filters.
 7. **Wire:** class and run length ride the two payload lanes; the span is the
    run, snapped out to grapheme-atom edges.

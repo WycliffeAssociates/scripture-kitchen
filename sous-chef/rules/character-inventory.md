@@ -62,7 +62,7 @@ turning dispersion into a gate.
 ## Observation
 
 `sous_core::substrate` is the one walk every question above reads from. One
-`ChapterRow` per chapter, each lane a sorted vector, seams resolved at reduce
+`ChapterRow` per chapter, each lane a sorted vector, seams resolved in the fold
 (shape and argument: [`../core/src/substrate.md`](../core/src/substrate.md)).
 
 | lane | answers |
@@ -74,7 +74,7 @@ turning dispersion into a gate.
 | `follows` | the casing a run terminal hands off to |
 | `lead`, `trail` | the two open edges a masked `\c` would otherwise swallow |
 
-Dispersion and per-book occurrence are reduce products over these, not stored
+Dispersion and per-book occurrence are fold products over these, not stored
 rows. Sites are absent by construction: nothing here records a position.
 
 ## Fraction bands

@@ -61,38 +61,45 @@ projected text is identical but the verse rows are rekeyed, so exactly that
 chapter re-maps.
 
 `ObservationKey` deliberately excludes the chapter's own address, which is what
-lets one observation serve identical chapters in two books while reduce still
-counts both positions. A pass whose `map` reads `ChapterInput::key` would break
+lets one observation serve identical chapters in two books while the fold
+still counts both positions. A pass whose `map` reads `ChapterInput::key` would break
 that and does not belong behind this cache.
 
-## The reduce cache
+## The aggregate cache
 
-A book whose raw text has not changed reduces to the same projected rows, so
-`publish` stores each book's reduce output — `(from, to, FindingKind)` in
-projected-book coordinates — under its `RawChecksum` and replays it next time.
-Spans and kinds rather than `PackedFinding`s, because the row's book index is
-whatever *this* publication assigns; a book that moved from index 3 to index 2
-still replays. `last_reduced()` counts the books that missed, and a
-republication with nothing updated reports zero.
+What is cached is the fold product: one `P::Aggregate` per book, in projected
+book coordinates and carrying no book index, keyed by the book's
+`RawChecksum`. A book whose raw text has not changed folds to the same
+aggregate, so `publish` folds only the books whose checksum has no entry.
+`last_folded()` counts those, and a republication with nothing updated reports
+zero. No book index inside, because the index is whatever *this* publication
+assigns; a book that moved from 3 to 2 judges from the same aggregate.
 
-The key is the `RawChecksum` alone for now, because judging is config-free
-until D2; when D2 adds bands, the key gains a judgment stamp.
+Judging is not cached and is not per book. Every publication calls
+`pass.judge` once over every Target book's aggregate in `BookIndex` order,
+because a convention is a corpus fact — what one book's counts mean depends on
+the others. `Findings::finish` then puts the rows in `(book_idx, from, to)`
+order and the rebase runs as before.
 
-This is worth having because `Brigade`'s reduce is not free the way
+That is also why the config lives here rather than in the key:
+`set_config` is a re-judge and never a re-fold or a re-map, since neither
+`map` nor `fold` is handed the config at all.
+
+The cache is worth having because `Brigade`'s fold is not free the way
 `HygieneBytes`' was: `fold_book` merges every lane of all 1,189 chapters, which
 measured 697 µs of a warm whole-Bible republication with nothing changed
-(evidence.md). The sweep retains a cached row set exactly as it retains a
-chapter table — while some book's ring names its checksum — and
-`resident_bytes` counts it.
+(evidence.md). The sweep retains an aggregate exactly as it retains a chapter
+table — while some book's ring names its checksum — and `resident_bytes`
+counts it.
 
 ## Why the buffers are equal
 
 `sous_core::for_each_chapter` is the only place a `ChapterInput` is assembled,
 and both `analyze` and the Expediter call it, so neither can build an input the
-other would not. Reduce is provenance-blind — it cannot tell a cached
-observation from a fresh one — and both publishers rebase through the same
-`rebase_span`, so the two paths differ in what work they skip and in nothing
-else. `galley/tests/equivalence.rs` pins that as bytes, not as a claim: a
+other would not. Fold and judge are provenance-blind — neither can tell a
+cached observation or aggregate from a fresh one — and both publishers rebase
+through the same `rebase_span`, so the two paths differ in what work they skip
+and in nothing else. `galley/tests/equivalence.rs` pins that as bytes, not as a claim: a
 seeded edit churn republishes after every step and compares against a cold
 `analyze` of the same texts, over a synthetic corpus and over a whole Bible.
 
@@ -109,13 +116,13 @@ chapter text and therefore the identical `ObservationKey`, so an undo within
 `n` edits is a table hit and maps nothing.
 
 `resident_bytes` reports what the sweep bounds: the Pantry's own products plus
-one entry per resident observation, chapter row, cached reduce row, and ring
-slot. Shallow in one place — a pass's heap inside an observation is not counted,
-because `ChapterPass` states no size.
+one entry per resident observation, chapter row, cached aggregate, and ring
+slot. Shallow in two places — the heap a pass hangs off an observation or an
+aggregate is not counted, because `ChapterPass` states no size.
 
 The sweep is skipped outright when no table was added and no ring aged since
 the last one — a republication of an untouched corpus has nothing to free, and
-pays nothing to learn it. With the reduce cache in front of it, that whole
+pays nothing to learn it. With the aggregate cache in front of it, that whole
 republication is 6.9 µs for a 66-book Bible (evidence.md).
 
 ## Parallel map
@@ -150,4 +157,6 @@ per book.
 
 ## What is not here yet
 
-A config stamp joins `SnapshotId` when judging config exists.
+A config stamp joins `SnapshotId` when the judging config carries bands: today
+`P::Config` is `()` for every shipped pass, so two publications under different
+configs cannot exist.

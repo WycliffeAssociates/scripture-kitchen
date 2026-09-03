@@ -28,7 +28,7 @@ pub use input::{
 };
 pub use pass::{
     ChapterInput, ChapterKey, ChapterObs, ChapterPass, Findings, SchemaStamp, analyze,
-    for_each_chapter,
+    analyze_with, for_each_chapter,
 };
 pub use substrate::{
     BookAggregate, Case, ChapterRow, Edge, FollowCounts, OuterClass, PairKey, RUN_BUCKETS,
@@ -36,5 +36,5 @@ pub use substrate::{
 };
 
 /// The product pass: hygiene's byte sweeps and the substrate walk over the
-/// same chapters, reduced into one span-ordered row set per book.
+/// same chapters, judged into one span-ordered row set per book.
 pub type Brigade = (hygiene::HygieneBytes, substrate::Substrate);

@@ -92,13 +92,14 @@ semantics.
 2. **Book is the discourse unit.** State never crosses a book boundary unless
    a rule explicitly declares a different semantic scope.
 3. **Chapter is the rebuild unit.** A chapter edit invalidates that chapter's
-   raw observation. Each pass declares a minimal `Carry`, reset at book
-   boundaries, that ordered reduction uses to resolve chapter-seam behavior.
+   raw observation. Each pass's ordered book fold owns whatever minimal seam
+   state resolves chapter-seam behavior, and that state starts fresh at every
+   book boundary.
 4. **Chapter mapping is independently executable.** A chapter observation is
    a pure function of that chapter's declared local inputs. It never reads a
-   neighboring chapter. Cross-chapter facts arise only when deterministic
-   ordered reduction applies the pass's `Carry`. This keeps mapping
-   parallelizable without requiring threads or workers.
+   neighboring chapter. Cross-chapter facts arise only when the deterministic
+   ordered fold resolves the seam. This keeps mapping parallelizable without
+   requiring threads or workers.
 5. **Findings use projected book coordinates.** Core and wire findings name a
    book in the snapshot's immutable ordered book table, then carry half-open
    `u32` UTF-8 byte offsets into that book's analyzed text projection. The
@@ -125,12 +126,11 @@ semantics.
 - Raw observations are config-free. Judgment config never participates in a
   chapter-observation cache key.
 - Each corpus-relative rule declares: inputs, chapter observation, boundary
-  state, ordered reductions, consumers, observation-affecting config, and
+  state, ordered fold, judgment, consumers, observation-affecting config, and
   judging-only config.
 - Galley owns content-addressed chapter-observation reuse. A cached observation
   is a pure function of one chapter's declared local inputs and schema stamp;
-  all neighboring context is represented by the pass's explicit `Carry` and
-  resolved during ordered reduction.
+  all neighboring context is seam state the ordered fold owns and resolves.
 - A raw-book checksum is the identity boundary for reusable coordinate data.
   Galley may retain detached producer-map and UTF-16 index data for an
   unchanged book, then bind it to the byte-identical string supplied by a later
@@ -144,9 +144,11 @@ semantics.
   or changing source text preserves target-only observations; Galley remaps
   only changed source chapters and reruns source pairing/proportionality
   reduction.
-- `Carry`, book aggregates, paired ratios, and corpus aggregates are minimal
-  disposable reduce products, not a second mutable cache, until measurement
-  proves otherwise.
+- Fold seam state, paired ratios, and corpus aggregates are minimal disposable
+  fold products, not a second mutable cache, until measurement proves
+  otherwise. The one exception measurement has already earned is the book
+  aggregate, which Galley retains per raw-book checksum so judging a corpus
+  does not refold every unchanged book.
 - Sites are re-derived from current text through first-class `sites(query)`
   and `sites_many(queries)` operations. The public query describes the
   pattern, not the search algorithm: exact literals may use `memchr`/`memmem`,
@@ -253,7 +255,7 @@ The semantic contract is:
   typed refusal or a separate shear observation, but may not silently realign.
 
 Proportionality caches target and source per-unit lengths independently, then
-pairs and reduces them in book and project order. Adding or removing a source
+pairs and folds them in book and project order. Adding or removing a source
 does not throw away the target walk. Pairing, ratios, and median/MAD are cheap
 derived state recomputed from the current invocation after any corpus change.
 

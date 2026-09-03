@@ -6,8 +6,8 @@
 //! chapter tables and every observation are already resident. Then:
 //!
 //! - `publish_unchanged` — the whole corpus republished with nothing updated:
-//!   chapter-table hits, reduce, rebase through the retained mask and UTF-16
-//!   table, and encode. No book is projected and no chapter is mapped.
+//!   chapter-table hits, judge, rebase through the retained mask and UTF-16
+//!   table, and encode. No book is projected, mapped, or folded.
 //! - `edit_one_chapter_then_publish` — `Expediter::update` with one character
 //!   typed into one chapter of MRK, then the same publish. The update's
 //!   re-derivation (lex, CST, mask, UTF-16 table for that book) and the one

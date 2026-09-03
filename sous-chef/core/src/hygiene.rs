@@ -9,9 +9,10 @@
 //! ```
 //!
 //! One finding per maximal same-class run, every span snapped out to
-//! grapheme-atom edges. `Carry = ()`, so a run is maximal within its chapter.
-//! The four scalar classes ride the substrate walk instead: `ScalarSites`
-//! is the machine it drives, and `substrate.rs` publishes the lane.
+//! grapheme-atom edges. A chapter is an edge of text, so a run is maximal
+//! within its chapter. The four scalar classes ride the substrate walk
+//! instead: `ScalarSites` is the machine it drives, and `substrate.rs`
+//! publishes the lane.
 //!
 //! What each class claims and when it stays silent: `rules/hygiene.md`.
 //! Scan shape, throughput, and the lone-backslash caveat: hygiene.md.
@@ -28,7 +29,8 @@ pub struct HygieneBytes;
 
 impl ChapterPass for HygieneBytes {
     type Observation = Vec<HygieneFinding>;
-    type Carry = ();
+    type Aggregate = Box<[HygieneFinding]>;
+    type Config = ();
     const SCHEMA: SchemaStamp = SchemaStamp::new(2);
 
     fn map(&self, chapter: ChapterInput<'_>) -> Self::Observation {
@@ -36,22 +38,22 @@ impl ChapterPass for HygieneBytes {
     }
 
     /// A run abutting a masked `\c` is two findings, one per chapter.
-    fn reduce(&self, book: &[ChapterObs<&Self::Observation>], _carry: &mut (), out: &mut Findings) {
-        for chapter in book {
-            for finding in chapter.obs {
-                let span = TextRange::new(
-                    finding.span.from() + chapter.start,
-                    finding.span.to() + chapter.start,
-                )
-                .expect("a rebased chapter span keeps its order");
-                out.push(
-                    span,
-                    FindingKind::Hygiene(
-                        HygieneDigest::new(finding.class, finding.run)
-                            .expect("a scanned run is never empty"),
-                    ),
-                )
-                .expect("a chapter lies inside the book it came from");
+    fn fold(&self, book: &[ChapterObs<&Self::Observation>]) -> Self::Aggregate {
+        book.iter()
+            .flat_map(|chapter| {
+                chapter
+                    .obs
+                    .iter()
+                    .map(|finding| finding.rebased(chapter.start))
+            })
+            .collect()
+    }
+
+    fn judge(&self, corpus: &[&Self::Aggregate], _config: &(), out: &mut Findings) {
+        for (index, book) in corpus.iter().enumerate() {
+            out.open_book(BookIndex::new(index).expect("a corpus indexes every book"));
+            for finding in book.iter() {
+                finding.push_into(out);
             }
         }
     }
@@ -78,6 +80,26 @@ impl HygieneFinding {
     /// span may be one atom wider after grapheme snapping.
     pub const fn run(self) -> u32 {
         self.run
+    }
+
+    /// The same finding in book coordinates, given its chapter's start.
+    pub(crate) fn rebased(self, start: u32) -> Self {
+        Self {
+            span: TextRange::new(self.span.from() + start, self.span.to() + start)
+                .expect("a rebased chapter span keeps its order"),
+            ..self
+        }
+    }
+
+    /// Pushes this book-coordinate finding into the open book.
+    pub(crate) fn push_into(self, out: &mut Findings) {
+        out.push(
+            self.span,
+            FindingKind::Hygiene(
+                HygieneDigest::new(self.class, self.run).expect("a scanned run is never empty"),
+            ),
+        )
+        .expect("a folded span lies inside the book it came from");
     }
 
     pub fn to_packed(

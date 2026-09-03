@@ -1,23 +1,24 @@
 # `sous_core::pass`
 
 The seam every Stage 2 rule hangs on: a chapter map that reads nothing else,
-and an ordered book reduce that stitches the seams. The invariants it
-implements are charter "Text, seam, and coordinate invariants" 2–5 and
-"Observation and cache invariants".
+an ordered book fold that stitches the seams, and one corpus-level judgment
+over every book's fold product. The invariants it implements are charter
+"Text, seam, and coordinate invariants" 2–5 and "Observation and cache
+invariants".
 
-## Map and reduce
+## Map, fold, judge
 
 ```text
 book MRK, projected text, chapters in order
   ┌ chapter 1  start 0   ─ map ─→ Observation  ┐
   ├ chapter 2  start 16  ─ map ─→ Observation  ├─ ChapterObs rows, book order
   └ chapter 3  start 41  ─ map ─→ Observation  ┘
-                                        │
-              Carry::default() ─────────┤ reduce(rows, &mut carry, &mut out)
+                                        │ fold(rows)
                                         ↓
-                            Findings, projected book coordinates
-book GEN
-              Carry::default() ← a fresh carry; no state crosses a book
+                                    Aggregate, book coordinates
+book GEN ─ map, fold ─→ Aggregate      ← no state crosses a book
+                                        │
+   judge([&MRK, &GEN], &config, &mut out) ─→ Findings ─→ finish()
 ```
 
 `map` receives `ChapterInput`: the chapter's masked projected text, its
@@ -25,40 +26,56 @@ verse rows rebased to that text, and its `ChapterKey`. It may read nothing
 else, which is what makes chapters independently executable — in any order, on
 any thread, or not at all when a host already holds the answer.
 
-`reduce` receives every chapter of one book in order, each paired with the
-projected offset `analyze` mapped it at. It rebases to book coordinates and
-pushes rows into `Findings`. `Carry` is the only channel between chapters,
-and it starts from `Default` at every book.
+`fold` receives every chapter of one book in order, each paired with the
+projected offset it was mapped at, and returns one `Aggregate` in book
+coordinates with every seam resolved. Seam state is the fold's own local
+business; there is no `Carry` on the trait, so nothing can leak between books.
+
+`judge` receives every book's aggregate at once, in `BookIndex` order, changed
+or not, plus a `Config`. It is corpus-level because a convention is a corpus
+fact: whether "comma attached to a letter" is a slip depends on what every
+other book does. It calls `out.open_book(i)` before pushing book `i`'s rows.
+
+Judging is also the only step a `Config` reaches, which is what lets a host
+re-judge on a config change without remapping a chapter or refolding a book.
+
+## Row order comes from `finish`
+
+`Findings::finish` stable-sorts every row by `(book_idx, from, to)`, and a
+host calls it once after the last judge — `analyze` and
+`galley::sous::Expediter::publish` both do. Judges therefore push in whatever
+order suits them; the tie-break is the pushing judge's turn, so within a book
+A's row precedes B's on an identical span. No wire rule demands that order;
+the CLI and the tests read it.
 
 ## A tuple is a pass
 
 `(A, B)` implements `ChapterPass`, so two rules ride one set of chapter
-inputs: `map` calls both and pairs the observations, `reduce` splits the
-borrowed pairs into two views and runs both. The composed `SCHEMA` is
+inputs: `map` calls both and pairs the observations, `fold` splits the
+borrowed pairs into two views and folds both, and `judge` splits the corpus
+of pairs into two views and judges both. The composed `SCHEMA` is
 `A::SCHEMA.then(B::SCHEMA)` — order-sensitive and never either half, so a host
-cannot key a tuple's observations under one member's stamp. `Carry` is the
-pair of carries, each still `Default` at every book.
+cannot key a tuple's observations under one member's stamp. `Aggregate` and
+`Config` are the pairs. `sous_core::Brigade` — `(HygieneBytes, Substrate)` —
+is the product pass.
 
-A tuple's reduce appends A's rows then B's, then sorts that tail by
-`(from, to)` with a stable sort, so rows within a book ascend by start and A
-comes first on a tie. No wire rule demands that order; the CLI and the tests
-read it, and `sous_core::Brigade` — `(HygieneBytes, Substrate)` — is the
-product pass that relies on it.
+## Why fold and judge are provenance-blind
 
-## Why reduce is provenance-blind
-
-`reduce` takes `&[ChapterObs<&Observation>]` and nothing else. There is no
-`Some(prior)` argument, no cache handle, and no freshness flag, so a reduce
-cannot branch on where an observation came from. A host that retained half the
-rows under their chapter content keys and mapped the other half this call hands
-reduce a slice indistinguishable from a cold one — which is exactly the
-statement "an incremental analysis equals a cold analysis", made structural
-instead of tested per rule.
+`fold` takes `&[ChapterObs<&Observation>]` and nothing else; `judge` takes
+`&[&Aggregate]` and a config. There is no `Some(prior)` argument, no cache
+handle, and no freshness flag, so neither can branch on where its input came
+from. A host that retained half the rows under their chapter content keys and
+mapped the other half this call hands `fold` a slice indistinguishable from a
+cold one, and hands `judge` cached and fresh aggregates it cannot tell apart —
+which is exactly the statement "an incremental analysis equals a cold
+analysis", made structural instead of tested per rule.
 
 The observations are BORROWED, so a cache stays their owner and a publication
 copies none of them: `ChapterObs<O>` is generic, `analyze` builds its view over
 the vector it just mapped, and `galley::sous::Expediter` builds one straight
-over its resident map. `Observation` therefore need not be `Clone` —
+over its resident map; the same holds one level up, where the corpus view is
+built over the Expediter's resident aggregates. `Observation` therefore need
+not be `Clone` —
 `a_pass_whose_observation_is_not_clone_analyzes` is a pass whose observation is
 not, compiling.
 
@@ -77,8 +94,8 @@ the ruled chapter grain, not a gap to patch here — pinned by
 
 The same grain makes a run abutting a masked `\c` two findings, one per
 chapter, rather than one crossing the seam. A pass that wants the joined run
-must declare a `Carry` and merge in reduce; hygiene declares `Carry = ()` and
-accepts the split. See [../../rules/hygiene.md](../../rules/hygiene.md).
+merges it in its own fold; hygiene carries no seam state and accepts the
+split. See [../../rules/hygiene.md](../../rules/hygiene.md).
 
 ## `SchemaStamp`
 
@@ -98,9 +115,9 @@ a rule needs evidence the 16-byte record cannot carry, that richer row type
 joins here and packs on the way out; nothing in this module presumes it stays
 a `Vec<PackedFinding>`.
 
-`open_book` before each book's reduce is what lets `push` take a book-relative
-span and check it against the right length. A host driving reduce itself
-(Galley, in slice B) does the same two calls `analyze` does.
+`open_book` before each book's rows is what lets `push` take a book-relative
+span and check it against the right length. A host driving the pass itself
+(Galley's `Expediter`) makes the same judge-then-`finish` calls `analyze` does.
 
 ## Passes are not walks
 

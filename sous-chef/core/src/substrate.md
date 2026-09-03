@@ -111,12 +111,12 @@ chapter k  "… good."          chapter k+1  "Then he …"
   word    "good" ended             →  no join; two words
 ```
 
-So the row records two open edges and reduce resolves them:
+So the row records two open edges and the fold resolves them:
 
 - `outer` — the edge scalar's own class, which is all the neighbour needs.
 - `open_pair` — the edge scalar when it is a nonletter, with the one neighbour
-  class it already knows. Reduce decrements the triple that names `Edge` and
-  increments the resolved one.
+  class it already knows. The fold decrements the triple that names `Edge`
+  and increments the resolved one.
 - `open_follow` (trailing) — a run terminal with only whitespace between it
   and the chapter end.
 - `edge_case` (leading) — the casing of the first non-whitespace scalar, when
@@ -125,8 +125,9 @@ So the row records two open edges and reduce resolves them:
 - `blank` (trailing) — the chapter held whitespace and nothing else, so the
   previous chapter's `open_follow` survives it.
 
-`Carry` is that trailing edge, `Default` at every book. Two cases need saying:
-an **empty** chapter is not a neighbour at all, so the carry passes through it
+The fold carries that trailing edge, `Default` at every book — seam state is
+the fold's own and nothing crosses a book. Two cases need saying: an **empty**
+chapter is not a neighbour at all, so the carried edge passes through it
 untouched; and a **one-scalar** chapter is its own lead and trail, so the
 trailing edge inherits the `prev` its leading fix just resolved.
 
@@ -137,10 +138,10 @@ pins.
 
 `fold_book` merges every counting lane by sorted merge — one pass, no hashing,
 and the same result whether a row came from a cache or from this call, which is
-what makes an incremental analysis equal a cold one. It ignores the `hygiene`
-lane: a chapter edge is an edge of text for a site, which is what keeps the
-lane equal to the whole-chapter scan it replaced.
+what makes an incremental analysis equal a cold one. It rebases the `hygiene`
+lane by each chapter's projected start and joins nothing: a chapter edge is an
+edge of text for a site, which is what keeps the lane equal to the
+whole-chapter scan it replaced.
 
-`Substrate::reduce` publishes that lane, rebased by each chapter's projected
-start, and drops the `BookAggregate` the counts fold into; D2's rule reducers
-are what will judge the aggregate.
+`Substrate::judge` publishes that lane off the `BookAggregate`, one book at a
+time in `BookIndex` order; the counts beside it wait for D2a-2's rules.

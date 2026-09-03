@@ -25,3 +25,4 @@ is append-only. This folder holds the code those rows describe.
 | --- | --- | --- |
 | `unicode-lookup-flat-bmp.rs` | a lazy 128 KiB flat BMP array against the static two-level table | rejected on size at a near tie |
 | `unicode-lookup-swar-decoding.rs` | the SWAR ASCII chunk over the decoding lookup instead of over the byte trie | rejected: taxes Indic and Greek to speed English |
+| `needle-search.rs` | site-rescan crossover: memchr-per-needle vs memmem-per-needle vs one Aho-Corasick pass, by N and hit density, on three scripts | memmem per needle ships; memchr on a lead byte loses 6× on Devanagari; Aho-Corasick only pays at ≥10 rare needles per book |

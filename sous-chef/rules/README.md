@@ -18,9 +18,9 @@ Every rule answers these eight questions before implementation:
 4. What are the conditioning variables, primary signal, opportunity count,
    support floor, and abstention conditions?
 5. What is mapped per chapter, what boundary state is stitched per book, and
-   what is reduced across the corpus? These are the `Observation`, `Carry`, and
-   `reduce` of a `sous_core::ChapterPass` — see
-   [`../core/src/pass.md`](../core/src/pass.md).
+   what is judged across the corpus? These are the `Observation`, `Aggregate`,
+   and `Config` of a `sous_core::ChapterPass`, and its `map`, `fold`, and
+   `judge` — see [`../core/src/pass.md`](../core/src/pass.md).
 6. Which config changes observations and which merely re-judge them?
 7. Which raw counts or facts must reach the finding detail and compact wire
    digest?

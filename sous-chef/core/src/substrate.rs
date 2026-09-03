@@ -19,19 +19,19 @@
 //!     Noncharacter        14..17  run 1
 //! ```
 //!
-//! Every lane is a sorted vector of plain scalars, so a reduce merges two of
+//! Every lane is a sorted vector of plain scalars, so a fold merges two of
 //! them in one pass and a host may cache one under its chapter key. The
 //! layout table, the interning argument, and the seam argument: substrate.md.
 
 use rustc_hash::FxHashMap;
 
+use crate::BookIndex;
 use crate::hygiene::{HygieneFinding, NBSP, SUSPECT, ScalarSites};
 use crate::pass::{ChapterInput, ChapterObs, ChapterPass, Findings, SchemaStamp};
 use crate::unicode::{
     Class,
     lookup::{ascii_class, trie_at},
 };
-use crate::{FindingKind, HygieneDigest, TextRange};
 
 // ── Keys ────────────────────────────────────────────────────────────────
 
@@ -70,7 +70,7 @@ pub enum OuterClass {
     Space = 1,
     Digit = 2,
     Nonletter = 3,
-    /// Off the end of the chapter; reduce resolves it at a seam.
+    /// Off the end of the chapter; the fold resolves it at a seam.
     #[default]
     Edge = 4,
 }
@@ -325,56 +325,52 @@ fn tally_run_lengths(atoms: &[ScalarKey], count: u32, out: &mut Vec<(ScalarKey, 
 
 // ── The pass ────────────────────────────────────────────────────────────
 
-/// The Level 1b walk: one scalar pass per chapter, seams resolved at reduce.
+/// The Level 1b walk: one scalar pass per chapter, seams resolved in the fold.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Substrate;
 
 impl ChapterPass for Substrate {
     type Observation = ChapterRow;
-    type Carry = Edge;
+    type Aggregate = BookAggregate;
+    /// D2a-2 replaces this with the judging bands.
+    type Config = ();
     const SCHEMA: SchemaStamp = SchemaStamp::new(2);
 
     fn map(&self, chapter: ChapterInput<'_>) -> ChapterRow {
         walk(chapter.text)
     }
 
-    /// Publishes the hygiene lane and folds the counts into a [`BookAggregate`]
-    /// nothing yet reads: D1a counts, D2's rule reducers judge.
+    fn fold(&self, book: &[ChapterObs<&ChapterRow>]) -> BookAggregate {
+        fold_book(book, &mut Edge::default())
+    }
+
+    /// Publishes the hygiene lane; the counts D1a folded wait for D2a-2.
     ///
     /// A site run abutting a masked `\c` is two findings, one per chapter.
-    fn reduce(&self, book: &[ChapterObs<&ChapterRow>], carry: &mut Edge, out: &mut Findings) {
-        for chapter in book {
-            for finding in chapter.obs.hygiene() {
-                let span = TextRange::new(
-                    finding.span().from() + chapter.start,
-                    finding.span().to() + chapter.start,
-                )
-                .expect("a rebased chapter span keeps its order");
-                out.push(
-                    span,
-                    FindingKind::Hygiene(
-                        HygieneDigest::new(finding.class(), finding.run())
-                            .expect("a scanned run is never empty"),
-                    ),
-                )
-                .expect("a chapter lies inside the book it came from");
+    fn judge(&self, corpus: &[&BookAggregate], _config: &(), out: &mut Findings) {
+        for (index, book) in corpus.iter().enumerate() {
+            out.open_book(BookIndex::new(index).expect("a corpus indexes every book"));
+            for finding in &book.hygiene {
+                finding.push_into(out);
             }
         }
-        let _aggregate = fold_book(book, carry);
     }
 }
 
 // ── The book aggregate ──────────────────────────────────────────────────
 
-/// One book's merged counts with every chapter seam resolved.
+/// One book's merged counts with every chapter seam resolved, plus the
+/// hygiene lane in book coordinates.
 ///
-/// A disposable reduce product, not a second cache: D2 judges it and drops it.
+/// The fold product a host caches per book checksum; judging reads it and
+/// keeps nothing.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BookAggregate {
     scalars: Vec<(ScalarKey, u32)>,
     pairs: Vec<(PairKey, u32)>,
     runs: Vec<(Box<[ScalarKey]>, u32)>,
     follows: Vec<(ScalarKey, FollowCounts)>,
+    hygiene: Vec<HygieneFinding>,
     scalar_count: u64,
     word_count: u64,
     chapters: u32,
@@ -407,6 +403,11 @@ impl BookAggregate {
         &self.follows
     }
 
+    /// The scalar hygiene sites of every chapter, in book coordinates.
+    pub fn hygiene(&self) -> &[HygieneFinding] {
+        &self.hygiene
+    }
+
     pub const fn scalar_count(&self) -> u64 {
         self.scalar_count
     }
@@ -421,7 +422,7 @@ impl BookAggregate {
 }
 
 /// Merges one book's rows in order, resolving each chapter seam against the
-/// previous chapter's trailing edge.
+/// previous chapter's trailing edge, and rebases the hygiene lane.
 ///
 /// A nonletter run that straddles a masked `\c` stays two runs, as it does
 /// for hygiene; every other lane reads as if the book were one string.
@@ -439,6 +440,8 @@ pub fn fold_book(book: &[ChapterObs<&ChapterRow>], carry: &mut Edge) -> BookAggr
         merge_counts(&mut out.pairs, &row.pairs, &mut pair_scratch);
         merge_runs(&mut out.runs, row, &mut run_scratch);
         merge_follows(&mut out.follows, &row.follows, &mut follow_scratch);
+        out.hygiene
+            .extend(row.hygiene.iter().map(|site| site.rebased(chapter.start)));
         out.scalar_count += u64::from(row.scalar_count);
         out.word_count += u64::from(row.word_count);
 
@@ -1339,11 +1342,11 @@ mod tests {
     /// Charter invariant 2: no state crosses a book, so the second book's
     /// first chapter sees `Edge` on its left, not the first book's last scalar.
     #[test]
-    fn every_book_folds_from_a_fresh_carry() {
+    fn every_book_folds_from_a_fresh_edge() {
         let books = vec![book(b"GEN", "a,", 2), book(b"MRK", ",b", 2)];
         let corpus = Corpus::try_new(&books).unwrap();
-        // D1a emits nothing, so what reduce running proves is only that it
-        // runs; the carry claim is the two folds below.
+        // These books hold no hygiene site, so judging emits nothing; the
+        // seam claim is the three folds below.
         assert!(analyze(&corpus, &Substrate).is_empty());
 
         // The same two chapters inside one book resolve their seam; in two

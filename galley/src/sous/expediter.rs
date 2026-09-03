@@ -20,9 +20,8 @@
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use sous_core::{
-    BookIndex, ChapterInput, ChapterObs, ChapterPass, CoordinateSpace, CorpusWireError,
-    FindingKind, Findings, PackedFinding, PublicationBook, SnapshotId, TextRange,
-    encode_to_corpus_buffer, for_each_chapter,
+    ChapterInput, ChapterObs, ChapterPass, CoordinateSpace, CorpusWireError, Findings,
+    PackedFinding, PublicationBook, SnapshotId, encode_to_corpus_buffer, for_each_chapter,
 };
 #[cfg(feature = "parallel")]
 use sous_core::{ChapterKey, ProjectedBook, Verse};
@@ -69,16 +68,13 @@ impl ObservationKey {
 /// What publication needs of one chapter without its text: whose observation,
 /// and where to rebase it to.
 ///
-/// No `ChapterKey`: reduce rebases by `start` and never reads an address.
+/// No `ChapterKey`: a fold rebases by `start` and never reads an address.
 #[derive(Debug, Clone, Copy)]
 struct ChapterRow {
     observation: ObservationKey,
-    /// Projected-book offset the reduce rebases chapter coordinates by.
+    /// Projected-book offset the fold rebases chapter coordinates by.
     start: u32,
 }
-
-/// One book's reduced rows, book index left out: span and kind only.
-type BookRows = Box<[(u32, u32, FindingKind)]>;
 
 /// Previous checksums a book keeps beside its current one, so an undo of that
 /// many edits still lands on a retained chapter table.
@@ -91,16 +87,17 @@ const DEFAULT_GENERATIONS: usize = 4;
 pub struct Expediter<P: ChapterPass> {
     pantry: Pantry,
     pass: P,
+    /// What judging may vary without touching a chapter or a book.
+    config: P::Config,
     /// Content-addressed across books: two identical chapters are one entry,
-    /// and reduce still counts both positions.
+    /// and a fold still counts both positions.
     observations: FxHashMap<ObservationKey, P::Observation>,
     /// Keyed by the book's raw checksum, so an unchanged book publishes
     /// without touching its text.
     chapter_tables: FxHashMap<RawChecksum, Vec<ChapterRow>>,
-    /// One book's reduce output, replayable into a later publication under
-    /// whatever book index it has then — which is why the rows carry spans
-    /// and kinds rather than `PackedFinding`s.
-    book_rows: FxHashMap<RawChecksum, BookRows>,
+    /// One book's fold product, in book coordinates and free of a book index,
+    /// so a later publication judges it under whatever index it has then.
+    aggregates: FxHashMap<RawChecksum, P::Aggregate>,
     /// Per book, its current checksum ahead of the previous ones still kept —
     /// exactly the tables the sweep spares.
     generations: FxHashMap<BookId, Vec<RawChecksum>>,
@@ -112,7 +109,7 @@ pub struct Expediter<P: ChapterPass> {
     /// Chapters mapped since the last publication, eager and lazy alike.
     pending: u64,
     misses: u64,
-    reduces: u64,
+    folds: u64,
     /// Whether a book's missing chapters are mapped on rayon; the two
     /// settings publish the same bytes.
     #[cfg(feature = "parallel")]
@@ -142,15 +139,16 @@ impl<P: ChapterPass + Sync> Expediter<P> {
         Self {
             pantry: Pantry::new(budget_bytes),
             pass,
+            config: P::Config::default(),
             observations: FxHashMap::default(),
             chapter_tables: FxHashMap::default(),
-            book_rows: FxHashMap::default(),
+            aggregates: FxHashMap::default(),
             generations: FxHashMap::default(),
             kept: DEFAULT_GENERATIONS,
             dirty: false,
             pending: 0,
             misses: 0,
-            reduces: 0,
+            folds: 0,
             #[cfg(feature = "parallel")]
             parallel: true,
         }
@@ -220,9 +218,20 @@ impl<P: ChapterPass + Sync> Expediter<P> {
         &self.pantry
     }
 
-    /// The pass this coordinator maps and reduces with.
+    /// The pass this coordinator maps, folds, and judges with.
     pub fn pass(&self) -> &P {
         &self.pass
+    }
+
+    /// The judging config the next [`publish`](Self::publish) uses.
+    pub fn config(&self) -> &P::Config {
+        &self.config
+    }
+
+    /// Replaces the judging config; no chapter is remapped and no book
+    /// refolded, because neither reads it.
+    pub fn set_config(&mut self, config: P::Config) {
+        self.config = config;
     }
 
     /// Chapters mapped for the last [`publish`](Self::publish), the eager maps
@@ -231,10 +240,10 @@ impl<P: ChapterPass + Sync> Expediter<P> {
         self.misses
     }
 
-    /// Books reduced for the last [`publish`](Self::publish); the rest
-    /// replayed their cached rows.
-    pub fn last_reduced(&self) -> u64 {
-        self.reduces
+    /// Books folded for the last [`publish`](Self::publish); the rest judged
+    /// their cached aggregate.
+    pub fn last_folded(&self) -> u64 {
+        self.folds
     }
 
     /// Observations the cache holds after the last sweep.
@@ -250,19 +259,16 @@ impl<P: ChapterPass + Sync> Expediter<P> {
 
     /// The Pantry's retained products plus this cache's own rows.
     ///
-    /// Shallow in one place: an observation counts its own size, not the heap
-    /// a pass hangs off it, because [`ChapterPass`] exposes no size of its own.
+    /// Shallow in two places: an observation and an aggregate each count their
+    /// own inline size and not the heap a pass hangs off them, because
+    /// [`ChapterPass`] exposes no size of its own.
     pub fn resident_bytes(&self) -> usize {
         let rows: usize = self
             .chapter_tables
             .values()
             .map(|table| size_of::<RawChecksum>() + table.len() * size_of::<ChapterRow>())
             .sum();
-        let cached: usize = self
-            .book_rows
-            .values()
-            .map(|rows| size_of::<RawChecksum>() + size_of_val(&**rows))
-            .sum();
+        let cached = self.aggregates.len() * (size_of::<RawChecksum>() + size_of::<P::Aggregate>());
         let rings: usize = self
             .generations
             .values()
@@ -387,7 +393,8 @@ impl<P: ChapterPass + Sync> Expediter<P> {
         let live: FxHashSet<RawChecksum> = self.generations.values().flatten().copied().collect();
         self.chapter_tables
             .retain(|checksum, _| live.contains(checksum));
-        self.book_rows.retain(|checksum, _| live.contains(checksum));
+        self.aggregates
+            .retain(|checksum, _| live.contains(checksum));
         let named: FxHashSet<ObservationKey> = self
             .chapter_tables
             .values()
@@ -400,8 +407,8 @@ impl<P: ChapterPass + Sync> Expediter<P> {
     /// One complete corpus publication over every `Target` book, in canonical
     /// order, in raw-book UTF-16.
     ///
-    /// Maps only chapters whose [`ObservationKey`] is absent, projects only a
-    /// book whose chapter table is missing, and sweeps once reduce is done.
+    /// Maps only chapters whose [`ObservationKey`] is absent, folds only a
+    /// book whose aggregate is missing, judges every Target book, and sweeps.
     pub fn publish(&mut self) -> Result<Vec<u8>, PublishError> {
         let books: Vec<(BookId, BookKey)> = self.pantry.books(Role::Target).to_vec();
         if books.len() > usize::from(u16::MAX) + 1 {
@@ -424,54 +431,50 @@ impl<P: ChapterPass + Sync> Expediter<P> {
         }
 
         // Scoped so the borrowed observations are released before the sweep.
-        let mut reduces = 0;
+        let mut folds = 0;
         let projected = {
             let Self {
                 pantry,
                 pass,
+                config,
                 observations,
                 chapter_tables,
-                book_rows,
+                aggregates,
                 ..
             } = &mut *self;
-            let mut findings = Findings::new(projected_lens);
+            let checksums: Vec<RawChecksum> = books
+                .iter()
+                .map(|(id, _)| {
+                    pantry
+                        .products(id)
+                        .expect("the pantry listed this id")
+                        .checksum
+                })
+                .collect();
             let mut chapters: Vec<ChapterObs<&P::Observation>> = Vec::new();
-            for (index, (id, _)) in books.iter().enumerate() {
-                let checksum = pantry
-                    .products(id)
-                    .expect("the pantry listed this id")
-                    .checksum;
-                findings.open_book(BookIndex::new(index).expect("the book count was checked"));
-                if let Some(rows) = book_rows.get(&checksum) {
-                    // The book's text is unchanged, so its projected rows are
-                    // too; only the book index they land under is this call's.
-                    for &(from, to, kind) in rows {
-                        findings
-                            .push(
-                                TextRange::new(from, to).expect("a cached span keeps its order"),
-                                kind,
-                            )
-                            .expect("a cached row lies inside the book it came from");
-                    }
+            for checksum in &checksums {
+                if aggregates.contains_key(checksum) {
                     continue;
                 }
-                let mark = findings.mark();
                 chapters.clear();
-                chapters.extend(chapter_tables[&checksum].iter().map(|row| ChapterObs {
+                chapters.extend(chapter_tables[checksum].iter().map(|row| ChapterObs {
                     start: row.start,
                     obs: &observations[&row.observation],
                 }));
-                pass.reduce(&chapters, &mut P::Carry::default(), &mut findings);
-                reduces += 1;
-                let tail: BookRows = findings.rows()[mark..]
-                    .iter()
-                    .map(|row| (row.from(), row.to(), row.kind()))
-                    .collect();
-                book_rows.insert(checksum, tail);
+                aggregates.insert(*checksum, pass.fold(&chapters));
+                folds += 1;
             }
+            // Judging is corpus-level: every Target book, changed or not.
+            let corpus: Vec<&P::Aggregate> = checksums
+                .iter()
+                .map(|checksum| &aggregates[checksum])
+                .collect();
+            let mut findings = Findings::new(projected_lens);
+            pass.judge(&corpus, config, &mut findings);
+            findings.finish();
             findings.into_rows()
         };
-        self.reduces = reduces;
+        self.folds = folds;
         self.sweep();
 
         let mut per_book: Vec<Vec<PackedFinding>> = (0..books.len()).map(|_| Vec::new()).collect();
@@ -480,7 +483,7 @@ impl<P: ChapterPass + Sync> Expediter<P> {
             let products = self
                 .pantry
                 .products(&books[index].0)
-                .expect("reduce named an open book");
+                .expect("judge named an open book");
             let (from, to) = rebase_span(
                 products.mask,
                 |byte| products.utf16.to_utf16(byte),
@@ -535,7 +538,7 @@ fn snapshot_id<P: ChapterPass>(pantry: &Pantry, books: &[(BookId, BookKey)]) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sous_core::{Brigade, CorpusSnapshot, FindingKind};
+    use sous_core::{BookIndex, Brigade, CorpusSnapshot, FindingKind};
 
     use crate::pantry::Retain;
 
@@ -889,20 +892,20 @@ mod tests {
     }
 
     #[test]
-    fn publish_unchanged_replays_rows_identical_to_a_fresh_reduce() {
+    fn publish_unchanged_folds_nothing_and_rejudges_to_the_same_bytes() {
         let mut sous = sous();
         sous.update("b/mrk.usfm", Role::Target, &mark()).unwrap();
         sous.update("a/gen.usfm", Role::Target, &genesis()).unwrap();
         let first = sous.publish().unwrap();
-        assert_eq!(sous.last_reduced(), 2, "both books cold");
+        assert_eq!(sous.last_folded(), 2, "both books cold");
 
         let second = sous.publish().unwrap();
-        assert_eq!(sous.last_reduced(), 0, "no book's projection moved");
-        assert_eq!(first, second, "the replayed rows are the reduced ones");
+        assert_eq!(sous.last_folded(), 0, "no book's projection moved");
+        assert_eq!(first, second, "the cached aggregates judge the same");
     }
 
     #[test]
-    fn only_an_edited_book_is_reduced_again() {
+    fn only_an_edited_book_is_folded_again() {
         let mut sous = sous();
         sous.update("b/mrk.usfm", Role::Target, &mark()).unwrap();
         sous.update("a/gen.usfm", Role::Target, &genesis()).unwrap();
@@ -911,7 +914,24 @@ mod tests {
         let after = mark().replace("A withered", "A shrivelled");
         sous.update("b/mrk.usfm", Role::Target, &after).unwrap();
         sous.publish().unwrap();
-        assert_eq!(sous.last_reduced(), 1, "GEN replayed its cached rows");
+        assert_eq!(sous.last_folded(), 1, "GEN judged its cached aggregate");
+    }
+
+    /// A config change is a re-judge and never a re-fold or a re-map. With
+    /// `Brigade`'s `Config = ()` this is trivially true today; it is the hook
+    /// D2a-2's judging bands land on.
+    #[test]
+    fn setting_the_config_folds_nothing_and_maps_nothing() {
+        let mut sous = sous();
+        sous.update("b/mrk.usfm", Role::Target, &mark()).unwrap();
+        sous.update("a/gen.usfm", Role::Target, &genesis()).unwrap();
+        let first = sous.publish().unwrap();
+
+        sous.set_config(<Brigade as ChapterPass>::Config::default());
+        let second = sous.publish().unwrap();
+        assert_eq!(sous.last_folded(), 0);
+        assert_eq!(sous.last_mapped(), 0);
+        assert_eq!(first, second, "the same config judges the same bytes");
     }
 
     #[test]

@@ -1,20 +1,21 @@
-//! One chapter in, one detached observation out; ordered observations in,
-//! findings out.
+//! One chapter in, one detached observation out; one book's observations in,
+//! one aggregate out; every book's aggregates in, findings out.
 //!
 //! ```text
 //! analyze(corpus, &HygieneBytes)
 //!   MRK chapter 1 at 0   "wept \\ here.\0\0\0"  → map → [StrandedBackslash 5..7, C0Control 13..16]
 //!   MRK chapter 2 at 16  "An \0 more."          → map → [C0Control 3..4]
-//!   reduce([obs at 0, obs at 16], &mut (), out)
+//!   fold([obs at 0, obs at 16])   → [StrandedBackslash 5..7, C0Control 13..16, C0Control 19..20]
+//!   judge([&MRK aggregate], &(), out)
 //!     → target[0] MRK  5..7   StrandedBackslash run 2
 //!       target[0] MRK 13..16  C0Control run 3
 //!       target[0] MRK 19..20  C0Control run 1
 //! ```
 //!
 //! [`ChapterPass::map`] reads one chapter and nothing else, so a host may run
-//! it in any order or retain its result. Reduce cannot tell a cached
-//! observation from a fresh one; that is what makes cold and incremental
-//! analysis equal. The carry rules and that argument in full: pass.md.
+//! it in any order or retain its result. Neither fold nor judge can tell a
+//! cached input from a fresh one; that is what makes cold and incremental
+//! analysis equal. The fold and judge rules in full: pass.md.
 
 use crate::{
     BookIndex, BookKey, Chapter, CodecError, Corpus, FindingKind, PackedFinding, ProjectedBook,
@@ -76,56 +77,51 @@ pub struct ChapterInput<'a> {
     pub key: ChapterKey,
 }
 
-/// One observation and the projected book offset reduce rebases it by.
+/// One observation and the projected book offset a fold rebases it by.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChapterObs<O> {
     pub start: u32,
     pub obs: O,
 }
 
-/// A rule's chapter map and its ordered book reduction.
+/// A rule's chapter map, its book fold, and its corpus-level judgment.
 pub trait ChapterPass {
-    /// Detached, chapter-relative, borrow-free. A host may retain it across
-    /// invocations under the chapter's content key.
+    /// Detached, chapter-relative, borrow-free; cached by chapter content.
     type Observation: Send + 'static;
-    /// Seam state carried book-forward during reduce, reset at every book.
-    type Carry: Default;
+    /// One book's folded observations in book coordinates, every seam
+    /// resolved; cached by book checksum.
+    type Aggregate: Send + 'static;
+    /// What judging may vary without touching a chapter or a book.
+    type Config: Default;
     /// Part of every cache key a host builds for this pass.
     const SCHEMA: SchemaStamp;
 
     /// A pure function of this chapter; it never reads a neighbor.
     fn map(&self, chapter: ChapterInput<'_>) -> Self::Observation;
 
-    /// Folds one book's chapters in order, rebasing each to book coordinates.
-    ///
-    /// Borrows the observations, so a cache stays their owner.
-    fn reduce(
-        &self,
-        book: &[ChapterObs<&Self::Observation>],
-        carry: &mut Self::Carry,
-        out: &mut Findings,
-    );
+    /// Folds one book's chapters in order, borrowing them so a cache stays
+    /// their owner; seam state is the fold's own and nothing crosses a book.
+    fn fold(&self, book: &[ChapterObs<&Self::Observation>]) -> Self::Aggregate;
+
+    /// Judges every book at once: `corpus[i]` is book `i`'s aggregate, and a
+    /// judge calls `out.open_book(i)` before pushing that book's rows.
+    fn judge(&self, corpus: &[&Self::Aggregate], config: &Self::Config, out: &mut Findings);
 }
 
-/// Two passes over the same chapters as one: both maps run, both reduces run,
-/// and the rows come out in span order per book.
+/// Two passes over the same chapters as one: both maps run, both folds run,
+/// both judges run, and [`Findings::finish`] puts the rows in span order.
 impl<A: ChapterPass, B: ChapterPass> ChapterPass for (A, B) {
     type Observation = (A::Observation, B::Observation);
-    type Carry = (A::Carry, B::Carry);
+    type Aggregate = (A::Aggregate, B::Aggregate);
+    type Config = (A::Config, B::Config);
     const SCHEMA: SchemaStamp = A::SCHEMA.then(B::SCHEMA);
 
     fn map(&self, chapter: ChapterInput<'_>) -> Self::Observation {
         (self.0.map(chapter), self.1.map(chapter))
     }
 
-    fn reduce(
-        &self,
-        book: &[ChapterObs<&Self::Observation>],
-        carry: &mut Self::Carry,
-        out: &mut Findings,
-    ) {
-        let mark = out.mark();
-        // Two views over the borrowed pairs: a reduce takes one observation
+    fn fold(&self, book: &[ChapterObs<&Self::Observation>]) -> Self::Aggregate {
+        // Two views over the borrowed pairs: a fold takes one observation
         // type. Two small vectors per book per publication.
         let left: Vec<ChapterObs<&A::Observation>> = book
             .iter()
@@ -141,15 +137,20 @@ impl<A: ChapterPass, B: ChapterPass> ChapterPass for (A, B) {
                 obs: &chapter.obs.1,
             })
             .collect();
-        self.0.reduce(&left, &mut carry.0, out);
-        self.1.reduce(&right, &mut carry.1, out);
-        out.sort_tail(mark);
+        (self.0.fold(&left), self.1.fold(&right))
+    }
+
+    fn judge(&self, corpus: &[&Self::Aggregate], config: &Self::Config, out: &mut Findings) {
+        let left: Vec<&A::Aggregate> = corpus.iter().map(|book| &book.0).collect();
+        let right: Vec<&B::Aggregate> = corpus.iter().map(|book| &book.1).collect();
+        self.0.judge(&left, &config.0, out);
+        self.1.judge(&right, &config.1, out);
     }
 }
 
-/// The reduce sink: rows in projected book coordinates, each naming its book.
+/// The judge sink: rows in projected book coordinates, each naming its book.
 ///
-/// A host builds one per invocation, names a book before reducing it, and
+/// A host builds one per invocation, names a book before judging it, and
 /// publishes the rows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Findings {
@@ -187,14 +188,12 @@ impl Findings {
         &self.rows
     }
 
-    /// The row count now; hand it back to [`sort_tail`](Self::sort_tail).
-    pub fn mark(&self) -> usize {
-        self.rows.len()
-    }
-
-    /// Stable-sorts the rows pushed since `mark` by `(from, to)`.
-    pub fn sort_tail(&mut self, mark: usize) {
-        self.rows[mark..].sort_by_key(|row| (row.from(), row.to()));
+    /// Puts every row in publication order: stable by `(book_idx, from, to)`,
+    /// so a tie keeps the pushing judge's turn. A host calls it once, after
+    /// the last judge.
+    pub fn finish(&mut self) {
+        self.rows
+            .sort_by_key(|row| (row.book_idx().get(), row.from(), row.to()));
     }
 
     pub fn into_rows(self) -> Vec<PackedFinding> {
@@ -233,10 +232,20 @@ pub fn for_each_chapter<B: ProjectedBook>(book: &B, mut visit: impl FnMut(u32, C
     }
 }
 
-/// Maps every chapter and reduces every book in caller order.
+/// [`analyze_with`] under the pass's default config.
 ///
 /// This is the whole-corpus oracle an incremental host is measured against.
 pub fn analyze<B: ProjectedBook, P: ChapterPass>(corpus: &Corpus<'_, B>, pass: &P) -> Findings {
+    analyze_with(corpus, pass, &P::Config::default())
+}
+
+/// Maps every chapter, folds every book in caller order, judges the corpus
+/// once, and orders the rows.
+pub fn analyze_with<B: ProjectedBook, P: ChapterPass>(
+    corpus: &Corpus<'_, B>,
+    pass: &P,
+    config: &P::Config,
+) -> Findings {
     let book_lengths: Vec<u32> = corpus
         .books()
         .iter()
@@ -245,7 +254,8 @@ pub fn analyze<B: ProjectedBook, P: ChapterPass>(corpus: &Corpus<'_, B>, pass: &
     let mut out = Findings::new(book_lengths);
 
     let mut observations: Vec<(u32, P::Observation)> = Vec::new();
-    for (index, book) in corpus.iter() {
+    let mut aggregates: Vec<P::Aggregate> = Vec::with_capacity(corpus.books().len());
+    for (_, book) in corpus.iter() {
         observations.clear();
         for_each_chapter(book, |start, input| {
             observations.push((start, pass.map(input)));
@@ -254,9 +264,11 @@ pub fn analyze<B: ProjectedBook, P: ChapterPass>(corpus: &Corpus<'_, B>, pass: &
             .iter()
             .map(|(start, obs)| ChapterObs { start: *start, obs })
             .collect();
-        out.open_book(index);
-        pass.reduce(&rows, &mut P::Carry::default(), &mut out);
+        aggregates.push(pass.fold(&rows));
     }
+    let views: Vec<&P::Aggregate> = aggregates.iter().collect();
+    pass.judge(&views, config, &mut out);
+    out.finish();
     out
 }
 
@@ -380,7 +392,7 @@ mod tests {
     }
 
     #[test]
-    fn analyze_equals_map_then_reduce_composed_by_hand() {
+    fn analyze_equals_map_then_fold_then_judge_composed_by_hand() {
         let books = vec![mrk(), genesis()];
         let corpus = Corpus::try_new(&books).unwrap();
 
@@ -400,30 +412,22 @@ mod tests {
             verses: &[verse(1, 1, 0, 3)],
             key: ChapterKey::new(BookKey::new(*b"GEN"), 1),
         });
-        hand.open_book(BookIndex::new(0).unwrap());
-        HygieneBytes.reduce(
-            &[
-                ChapterObs {
-                    start: 0,
-                    obs: &first,
-                },
-                ChapterObs {
-                    start: 3,
-                    obs: &second,
-                },
-            ],
-            &mut (),
-            &mut hand,
-        );
-        hand.open_book(BookIndex::new(1).unwrap());
-        HygieneBytes.reduce(
-            &[ChapterObs {
+        let mark = HygieneBytes.fold(&[
+            ChapterObs {
                 start: 0,
-                obs: &third,
-            }],
-            &mut (),
-            &mut hand,
-        );
+                obs: &first,
+            },
+            ChapterObs {
+                start: 3,
+                obs: &second,
+            },
+        ]);
+        let genesis = HygieneBytes.fold(&[ChapterObs {
+            start: 0,
+            obs: &third,
+        }]);
+        HygieneBytes.judge(&[&mark, &genesis], &(), &mut hand);
+        hand.finish();
 
         let composed = analyze(&corpus, &HygieneBytes);
         assert_eq!(
@@ -438,7 +442,7 @@ mod tests {
     }
 
     #[test]
-    fn analyze_reduces_books_in_caller_order() {
+    fn analyze_judges_books_in_caller_order() {
         let forward = vec![mrk(), genesis()];
         let reversed = vec![genesis(), mrk()];
         let forward = analyze(&Corpus::try_new(&forward).unwrap(), &HygieneBytes);
@@ -469,7 +473,8 @@ mod tests {
 
         impl ChapterPass for Echo {
             type Observation = (String, Vec<(u16, u32, u32)>);
-            type Carry = ();
+            type Aggregate = ();
+            type Config = ();
             const SCHEMA: SchemaStamp = SchemaStamp::new(0);
 
             fn map(&self, chapter: ChapterInput<'_>) -> Self::Observation {
@@ -483,13 +488,9 @@ mod tests {
                 )
             }
 
-            fn reduce(
-                &self,
-                _book: &[ChapterObs<&Self::Observation>],
-                _carry: &mut (),
-                _out: &mut Findings,
-            ) {
-            }
+            fn fold(&self, _book: &[ChapterObs<&Self::Observation>]) {}
+
+            fn judge(&self, _corpus: &[&()], _config: &(), _out: &mut Findings) {}
         }
 
         let book = Book {
@@ -612,7 +613,7 @@ mod tests {
     }
 
     #[test]
-    fn a_tuple_maps_both_and_reduces_in_span_order() {
+    fn a_tuple_maps_both_and_judges_in_span_order() {
         let books = vec![mixed()];
         let corpus = Corpus::try_new(&books).unwrap();
         assert_eq!(
@@ -631,12 +632,15 @@ mod tests {
 
     impl<const S: u32> ChapterPass for Stamped<S> {
         type Observation = ();
-        type Carry = ();
+        type Aggregate = ();
+        type Config = ();
         const SCHEMA: SchemaStamp = SchemaStamp::new(S);
 
         fn map(&self, _chapter: ChapterInput<'_>) -> Self::Observation {}
 
-        fn reduce(&self, _book: &[ChapterObs<&()>], _carry: &mut (), _out: &mut Findings) {}
+        fn fold(&self, _book: &[ChapterObs<&()>]) {}
+
+        fn judge(&self, _corpus: &[&()], _config: &(), _out: &mut Findings) {}
     }
 
     #[test]
@@ -655,7 +659,7 @@ mod tests {
     }
 
     #[test]
-    fn a_tuple_carry_resets_per_book_for_both_halves() {
+    fn a_tuple_folds_each_book_from_a_fresh_state_in_both_halves() {
         let books = vec![mrk(), genesis()];
         let corpus = Corpus::try_new(&books).unwrap();
         // Substrate contributes no row to these books; LastByte's runs spell
@@ -689,36 +693,52 @@ mod tests {
         detached::<<LastByte as ChapterPass>::Observation>();
     }
 
-    /// Test-only. Records the carry it was handed, so the emitted runs spell
-    /// out reduce's chapter order and every book's fresh `Carry::default()`.
+    /// Test-only. Records the seam state it carried into each chapter, so the
+    /// emitted runs spell out fold's chapter order and every book's fresh
+    /// start.
     struct LastByte;
 
     impl ChapterPass for LastByte {
         type Observation = u8;
-        type Carry = Option<u8>;
+        /// `(chapter start, the byte the previous chapter ended on)`.
+        type Aggregate = Vec<(u32, u8)>;
+        type Config = ();
         const SCHEMA: SchemaStamp = SchemaStamp::new(u32::MAX);
 
         fn map(&self, chapter: ChapterInput<'_>) -> u8 {
             chapter.text.as_bytes().last().copied().unwrap_or(0)
         }
 
-        fn reduce(&self, book: &[ChapterObs<&u8>], carry: &mut Option<u8>, out: &mut Findings) {
-            for chapter in book {
-                let seen = carry.unwrap_or(0);
-                out.push(
-                    TextRange::new(chapter.start, chapter.start).unwrap(),
-                    FindingKind::Hygiene(
-                        HygieneDigest::new(HygieneClass::C0Control, u32::from(seen) + 1).unwrap(),
-                    ),
-                )
-                .expect("a chapter start lies inside its book");
-                *carry = Some(*chapter.obs);
+        fn fold(&self, book: &[ChapterObs<&u8>]) -> Vec<(u32, u8)> {
+            let mut carry = None;
+            book.iter()
+                .map(|chapter| {
+                    let seen = carry.unwrap_or(0);
+                    carry = Some(*chapter.obs);
+                    (chapter.start, seen)
+                })
+                .collect()
+        }
+
+        fn judge(&self, corpus: &[&Vec<(u32, u8)>], _config: &(), out: &mut Findings) {
+            for (index, book) in corpus.iter().enumerate() {
+                out.open_book(BookIndex::new(index).unwrap());
+                for &(start, seen) in book.iter() {
+                    out.push(
+                        TextRange::new(start, start).unwrap(),
+                        FindingKind::Hygiene(
+                            HygieneDigest::new(HygieneClass::C0Control, u32::from(seen) + 1)
+                                .unwrap(),
+                        ),
+                    )
+                    .expect("a chapter start lies inside its book");
+                }
             }
         }
     }
 
     #[test]
-    fn every_book_reduces_from_a_fresh_carry() {
+    fn every_book_folds_from_a_fresh_state() {
         let books = vec![mrk(), genesis()];
         let corpus = Corpus::try_new(&books).unwrap();
         let carried: Vec<_> = hygiene_rows(&analyze(&corpus, &LastByte))
@@ -731,7 +751,7 @@ mod tests {
     }
 
     #[test]
-    fn reduce_cannot_tell_a_reused_observation_from_a_fresh_one() {
+    fn fold_cannot_tell_a_reused_observation_from_a_fresh_one() {
         let books = vec![mrk()];
         let corpus = Corpus::try_new(&books).unwrap();
         let book = &books[0];
@@ -760,15 +780,11 @@ mod tests {
         reused.reverse();
         reused.sort_by_key(|chapter| chapter.start);
 
-        let first = BookIndex::new(0).unwrap();
-        let mut direct = Findings::new(vec![6]);
-        direct.open_book(first);
-        LastByte.reduce(&fresh, &mut None, &mut direct);
-        let mut roundtripped = Findings::new(vec![6]);
-        roundtripped.open_book(first);
-        LastByte.reduce(&reused, &mut None, &mut roundtripped);
+        assert_eq!(LastByte.fold(&fresh), LastByte.fold(&reused));
 
-        assert_eq!(direct, roundtripped);
+        let mut direct = Findings::new(vec![6]);
+        LastByte.judge(&[&LastByte.fold(&fresh)], &(), &mut direct);
+        direct.finish();
         assert_eq!(direct.rows(), analyze(&corpus, &LastByte).rows());
     }
 }

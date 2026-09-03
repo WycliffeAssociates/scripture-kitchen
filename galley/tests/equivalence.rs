@@ -247,8 +247,8 @@ enum Edit {
     MoveChapter,
     /// One chapter's body copied onto another's: one observation, two rows.
     CopyChapter,
-    /// A NUL run either side of a chapter seam, which reduce must publish as
-    /// two findings rather than one.
+    /// A NUL run either side of a chapter seam, which the fold must publish
+    /// as two findings rather than one.
     ChapterSeam,
     AddBook,
     RemoveBook,
@@ -638,8 +638,8 @@ fn churn_over_a_synthetic_corpus_from_a_second_seed() {
     );
 }
 
-/// The product pass through the same churn: the tuple's tail sort, the
-/// substrate's hygiene lane, and the Expediter's reduce cache all at once.
+/// The product pass through the same churn: the finish sort, the
+/// substrate's hygiene lane, and the Expediter's aggregate cache all at once.
 #[test]
 fn churn_over_a_synthetic_corpus_with_brigade() {
     churn(Brigade::default(), "brigade", 0x5EED_0004, 200, synthetic());
@@ -647,7 +647,7 @@ fn churn_over_a_synthetic_corpus_with_brigade() {
 
 /// The Level 1b substrate through the same churn. It publishes no findings
 /// yet, so what this pins is the cache: which chapters are mapped, what the
-/// ring keeps, and that a reduce cannot tell a reused row from a fresh one.
+/// ring keeps, and that a fold cannot tell a reused row from a fresh one.
 #[test]
 fn churn_over_a_synthetic_corpus_with_substrate() {
     churn(Substrate, "substrate", 0x5EED_0003, 200, synthetic());
