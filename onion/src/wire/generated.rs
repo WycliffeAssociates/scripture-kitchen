@@ -28,7 +28,12 @@ pub type Offsets = Vec<usize>;
 ///
 /// 12 bytes per row. `offsets` collects the position of every
 /// source offset written, for the UTF-16 pass.
-pub fn write_tokens(rows: &[crate::Token], out: &mut Vec<u8>, offsets: &mut Offsets) {
+pub fn write_tokens(
+    rows: &[crate::Token],
+    source: &[u8],
+    out: &mut Vec<u8>,
+    offsets: &mut Offsets,
+) {
     out.reserve(rows.len() * 12);
     for t in rows {
         offsets.push(out.len());
@@ -43,8 +48,8 @@ pub fn write_tokens(rows: &[crate::Token], out: &mut Vec<u8>, offsets: &mut Offs
         out.extend_from_slice(&((t.marker_idx) as u8).to_le_bytes());
         // The trailing number as spelled: 2 for `\q2`, 1 for `\tc1`, 0 for a bare `\q`. The row's `numbering` says whether it is a nesting level or a column index.
         out.extend_from_slice(&((t.level) as u8).to_le_bytes());
-        // Rounds the row to 12 bytes. Sections are 4-aligned, so every row's `start` and `end` land aligned for a typed-array view.
-        out.extend_from_slice(&((0) as u8).to_le_bytes());
+        // `TOKEN_DELIMITER_FOLDED` | `TOKEN_BLANK`. Also rounds the row to 12 bytes, so every row's `start` and `end` land aligned for a typed-array view over a 4-aligned section.
+        out.extend_from_slice(&((t.wire_flags(source)) as u8).to_le_bytes());
     }
 }
 

@@ -660,7 +660,7 @@ pub static ROWS: &[MarkerRow] = &[
         marker: "fdc",
         shape: SpellingShape::Any,
         kind: MarkerKind::Character,
-        category: Category::CharNotes,
+        category: Category::CharNotesFootnote,
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
@@ -752,7 +752,7 @@ pub static ROWS: &[MarkerRow] = &[
         marker: "fk",
         shape: SpellingShape::Any,
         kind: MarkerKind::Character,
-        category: Category::CharNotes,
+        category: Category::CharNotesFootnote,
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
@@ -774,7 +774,7 @@ pub static ROWS: &[MarkerRow] = &[
         marker: "fl",
         shape: SpellingShape::Any,
         kind: MarkerKind::Character,
-        category: Category::CharNotes,
+        category: Category::CharNotesFootnote,
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
@@ -796,7 +796,7 @@ pub static ROWS: &[MarkerRow] = &[
         marker: "fm",
         shape: SpellingShape::Any,
         kind: MarkerKind::Character,
-        category: Category::CharNotes,
+        category: Category::CharNotesFootnote,
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
@@ -833,7 +833,7 @@ pub static ROWS: &[MarkerRow] = &[
         marker: "fp",
         shape: SpellingShape::Any,
         kind: MarkerKind::Character,
-        category: Category::CharNotes,
+        category: Category::CharNotesFootnote,
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
@@ -855,7 +855,7 @@ pub static ROWS: &[MarkerRow] = &[
         marker: "fq",
         shape: SpellingShape::Any,
         kind: MarkerKind::Character,
-        category: Category::CharNotes,
+        category: Category::CharNotesFootnote,
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
@@ -879,7 +879,7 @@ pub static ROWS: &[MarkerRow] = &[
         marker: "fqa",
         shape: SpellingShape::Any,
         kind: MarkerKind::Character,
-        category: Category::CharNotes,
+        category: Category::CharNotesFootnote,
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
@@ -902,7 +902,7 @@ pub static ROWS: &[MarkerRow] = &[
         marker: "fr",
         shape: SpellingShape::Any,
         kind: MarkerKind::Character,
-        category: Category::CharNotes,
+        category: Category::CharNotesFootnote,
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
@@ -925,7 +925,7 @@ pub static ROWS: &[MarkerRow] = &[
         marker: "ft",
         shape: SpellingShape::Any,
         kind: MarkerKind::Character,
-        category: Category::CharNotes,
+        category: Category::CharNotesFootnote,
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
@@ -947,7 +947,7 @@ pub static ROWS: &[MarkerRow] = &[
         marker: "fv",
         shape: SpellingShape::Any,
         kind: MarkerKind::Character,
-        category: Category::CharNotes,
+        category: Category::CharNotesFootnote,
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
@@ -969,7 +969,7 @@ pub static ROWS: &[MarkerRow] = &[
         marker: "fw",
         shape: SpellingShape::Any,
         kind: MarkerKind::Character,
-        category: Category::CharNotes,
+        category: Category::CharNotesFootnote,
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
@@ -3472,7 +3472,7 @@ pub static ROWS: &[MarkerRow] = &[
         marker: "xdc",
         shape: SpellingShape::Any,
         kind: MarkerKind::Character,
-        category: Category::CharNotes,
+        category: Category::CharNotesCrossReference,
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
@@ -3494,7 +3494,7 @@ pub static ROWS: &[MarkerRow] = &[
         marker: "xk",
         shape: SpellingShape::Any,
         kind: MarkerKind::Character,
-        category: Category::CharNotes,
+        category: Category::CharNotesCrossReference,
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
@@ -3516,7 +3516,7 @@ pub static ROWS: &[MarkerRow] = &[
         marker: "xnt",
         shape: SpellingShape::Any,
         kind: MarkerKind::Character,
-        category: Category::CharNotes,
+        category: Category::CharNotesCrossReference,
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
@@ -3538,7 +3538,7 @@ pub static ROWS: &[MarkerRow] = &[
         marker: "xo",
         shape: SpellingShape::Any,
         kind: MarkerKind::Character,
-        category: Category::CharNotes,
+        category: Category::CharNotesCrossReference,
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
@@ -3560,7 +3560,7 @@ pub static ROWS: &[MarkerRow] = &[
         marker: "xop",
         shape: SpellingShape::Any,
         kind: MarkerKind::Character,
-        category: Category::CharNotes,
+        category: Category::CharNotesCrossReference,
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
@@ -3582,7 +3582,7 @@ pub static ROWS: &[MarkerRow] = &[
         marker: "xot",
         shape: SpellingShape::Any,
         kind: MarkerKind::Character,
-        category: Category::CharNotes,
+        category: Category::CharNotesCrossReference,
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
@@ -3604,7 +3604,7 @@ pub static ROWS: &[MarkerRow] = &[
         marker: "xq",
         shape: SpellingShape::Any,
         kind: MarkerKind::Character,
-        category: Category::CharNotes,
+        category: Category::CharNotesCrossReference,
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
@@ -3629,7 +3629,7 @@ pub static ROWS: &[MarkerRow] = &[
         marker: "xt",
         shape: SpellingShape::Any,
         kind: MarkerKind::Character,
-        category: Category::CharNotes,
+        category: Category::CharNotesCrossReference,
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,
@@ -3657,7 +3657,7 @@ pub static ROWS: &[MarkerRow] = &[
         marker: "xta",
         shape: SpellingShape::Any,
         kind: MarkerKind::Character,
-        category: Category::CharNotes,
+        category: Category::CharNotesCrossReference,
         ws_after_name: Ws::TagEndDelimiter, // ws: derived from category default
         payload: Payload::None,
         numbered_max: Numbering::Unnumbered,

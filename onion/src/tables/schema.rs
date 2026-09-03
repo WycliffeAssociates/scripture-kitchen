@@ -142,8 +142,12 @@ pub enum Category {
     CharLists,
     /// Table cell content markers — `th#`, `thr#`, `thc#`, `tc#`, `tcr#`, `tcc#`.
     CharTables,
-    /// Note-internal character markers — `fr`, `ft`, `fq`, `xo`, `xt`, ….
-    CharNotes,
+    /// Characters > Footnotes — `fr`, `ft`, `fq`, `fqa`, `fk`, `fl`, `fw`, `fp`,
+    /// `fv`, `fdc`, `fm`.
+    CharNotesFootnote,
+    /// Characters > Cross References — `xo`, `xop`, `xk`, `xq`, `xt`, `xta`,
+    /// `xot`, `xnt`, `xdc`.
+    CharNotesCrossReference,
 
     // ---- Notes ----------------------------------------------------------
     /// Footnote containers — `f`, `fe`, `ef`.
@@ -213,7 +217,8 @@ impl Category {
                     | C::CharIntroductions
                     | C::CharPoetry
                     | C::CharLists
-                    | C::CharNotes
+                    | C::CharNotesFootnote
+                    | C::CharNotesCrossReference
                     | C::ChapterVerse
             ),
             K::Note => matches!(self, C::NoteFootnote | C::NoteCrossReference),

@@ -14,11 +14,12 @@
 //! let dish   = plate(&parsed);
 //!
 //! dish[0..4]    "ONWR"          magic
-//! dish[4..8]    2               format version
+//! dish[4..8]    4               format version
 //! dish[8..12]   9               section count
 //! dish[12..16]  0               flags (bit 0 = offsets are UTF-16)
 //! dish[16..20]  MAX             the declared `\usfm` version, or NONE
-//! dish[20..32]  0               spare
+//! dish[20..24]  39              source length, in the dish's offset space
+//! dish[24..32]  0x…             xxh3-64 of the source BYTES
 //! dish[32..]    [off, len] x 9  the directory, then the sections
 //! ```
 //!
@@ -39,7 +40,7 @@ pub mod emit;
 pub mod generated;
 pub mod schema;
 
-pub use schema::{FLAG_UTF16, FORMAT_VERSION, MAGIC, NONE};
+pub use schema::{FLAG_UTF16, FORMAT_VERSION, MAGIC, NONE, TOKEN_BLANK, TOKEN_DELIMITER_FOLDED};
 
 /// What a parse should compute. Everything defaults OFF except the tree, which
 /// is the product.
@@ -261,10 +262,11 @@ impl Findings {
 
 /// Bytes of header before the section directory.
 ///
-/// Eight words rather than the four that are used: magic, format version,
-/// section count, flags, the declared `\usfm` version, and three spare. Room
-/// costs 16 bytes once per dish and saves a format bump the next time a
-/// document-level scalar has to cross.
+/// Eight words, all spoken for: magic, format version, section count, flags,
+/// the declared `\usfm` version, the source's length, and its xxh3-64 across
+/// the last two. The length is in the dish's own offset space; the hash is
+/// always over the source BYTES, so two dishes of one document agree on it
+/// whichever space they were plated in.
 pub const HEADER_BYTES: usize = 32;
 /// One directory entry: byte offset, byte length.
 pub const DIRECTORY_ENTRY_BYTES: usize = 8;
@@ -314,17 +316,22 @@ pub fn plate(parsed: &Parsed<'_>) -> Vec<u8> {
     let mut offsets: Vec<(usize, usize)> = Vec::new(); // (section, position)
 
     macro_rules! rows {
-        ($record:expr, $rows:expr, $write:path) => {{
+        ($record:expr, $rows:expr, $write:path $(, $context:expr)*) => {{
             let mut bytes = Vec::with_capacity($rows.len() * $record.stride());
             let mut positions = Vec::new();
-            $write($rows, &mut bytes, &mut positions);
+            $write($rows $(, $context)*, &mut bytes, &mut positions);
             let at = sections.len();
             offsets.extend(positions.into_iter().map(|p| (at, p)));
             sections.push(bytes);
         }};
     }
 
-    rows!(schema::TOKEN, &parsed.tokens, generated::write_tokens);
+    rows!(
+        schema::TOKEN,
+        &parsed.tokens,
+        generated::write_tokens,
+        source
+    );
     rows!(schema::NODE, &parsed.cst.nodes, generated::write_nodes);
     {
         let mut bytes = Vec::with_capacity(parsed.cst.child_ids.len() * 4);
@@ -350,7 +357,18 @@ pub fn plate(parsed: &Parsed<'_>) -> Vec<u8> {
         to_utf16(source, &mut sections, &offsets);
     }
 
-    assemble(&sections, parsed.options.utf16, parsed.usfm_version)
+    let length = if parsed.options.utf16 {
+        crate::utf16::utf16_len(source)
+    } else {
+        source.len() as u32
+    };
+    assemble(
+        &sections,
+        parsed.options.utf16,
+        parsed.usfm_version,
+        length,
+        xxhash_rust::xxh3::xxh3_64(source),
+    )
 }
 
 /// Every source offset in the dish, converted in one ascending sweep.
@@ -407,7 +425,13 @@ fn to_utf16(source: &[u8], sections: &mut [Vec<u8>], offsets: &[(usize, usize)])
 }
 
 /// Header, directory, then the sections, each 4-aligned.
-fn assemble(sections: &[Vec<u8>], utf16: bool, usfm_version: u32) -> Vec<u8> {
+fn assemble(
+    sections: &[Vec<u8>],
+    utf16: bool,
+    usfm_version: u32,
+    source_length: u32,
+    source_hash: u64,
+) -> Vec<u8> {
     let directory = HEADER_BYTES + sections.len() * DIRECTORY_ENTRY_BYTES;
     let body: usize = sections.iter().map(|s| align4(s.len())).sum();
     let mut out = Vec::with_capacity(directory + body);
@@ -417,7 +441,8 @@ fn assemble(sections: &[Vec<u8>], utf16: bool, usfm_version: u32) -> Vec<u8> {
     out.extend_from_slice(&(sections.len() as u32).to_le_bytes());
     out.extend_from_slice(&(if utf16 { FLAG_UTF16 } else { 0 }).to_le_bytes());
     out.extend_from_slice(&usfm_version.to_le_bytes());
-    out.extend_from_slice(&[0u8; 12]);
+    out.extend_from_slice(&source_length.to_le_bytes());
+    out.extend_from_slice(&source_hash.to_le_bytes());
 
     let mut at = directory;
     for section in sections {

@@ -10,6 +10,7 @@
 //! that disagrees with its writer.
 
 use super::schema::{self, Record, SectionKind, Space, Width};
+use crate::attributes::{AttrResolution, MalformedAttr};
 
 const RS_TEMPLATE: &str = include_str!("generated.rs.tmpl");
 const TS_TEMPLATE: &str = include_str!("../../../onion-wasm/reader.ts.tmpl");
@@ -27,8 +28,7 @@ fn writer(record: &Record) -> String {
     let mut out = String::new();
     let converts = record.fields.iter().any(|f| f.space == Space::Offset);
     out.push_str(&format!(
-        "/// {}\n///\n/// {} bytes per row.{}\n\
-         pub fn write_{}(rows: &[{}], out: &mut Vec<u8>, {}offsets: &mut Offsets) {{\n",
+        "/// {}\n///\n/// {} bytes per row.{}\n",
         record.doc,
         record.stride(),
         if converts {
@@ -36,10 +36,8 @@ fn writer(record: &Record) -> String {
         } else {
             " Every field is an index or a code, so nothing\n/// here is ever converted."
         },
-        record.plural,
-        record.rust_ty,
-        if converts { "" } else { "_" },
     ));
+    out.push_str(&signature(record, converts));
     out.push_str(&format!(
         "    out.reserve(rows.len() * {});\n    for {} in rows {{\n",
         record.stride(),
@@ -56,6 +54,32 @@ fn writer(record: &Record) -> String {
         ));
     }
     out.push_str("    }\n}\n\n");
+    out
+}
+
+/// The writer's `fn` line, wrapped the way rustfmt would wrap it. The emitted
+/// file is checked in and `cargo fmt` must leave it alone — a generator whose
+/// output the formatter rewrites reports itself stale on every run.
+fn signature(record: &Record, converts: bool) -> String {
+    const MAX: usize = 100;
+    let mut params = vec![format!("rows: &[{}]", record.rust_ty)];
+    params.extend(record.context.iter().map(|(n, ty)| format!("{n}: {ty}")));
+    params.push("out: &mut Vec<u8>".to_string());
+    params.push(format!(
+        "{}offsets: &mut Offsets",
+        if converts { "" } else { "_" }
+    ));
+
+    let head = format!("pub fn write_{}(", record.plural);
+    let line = format!("{head}{}) {{", params.join(", "));
+    if line.len() <= MAX {
+        return line + "\n";
+    }
+    let mut out = format!("{head}\n");
+    for param in &params {
+        out.push_str(&format!("    {param},\n"));
+    }
+    out.push_str(") {\n");
     out
 }
 
@@ -214,6 +238,17 @@ pub fn enums_ts() -> String {
         &shapes,
     );
 
+    let wsreqs: Vec<(&str, u32)> = tables_emit::WSREQS
+        .iter()
+        .map(|(w, n)| (*n, *w as u32))
+        .collect();
+    block(
+        &mut out,
+        "What must follow a marker's name — `Marker.ws()`.",
+        "StructuralWhitespaceRequirement",
+        &wsreqs,
+    );
+
     let contexts: Vec<(&str, u32)> = tables_emit::CONTEXTS
         .iter()
         .map(|(c, n)| (*n, *c as u32))
@@ -234,6 +269,29 @@ pub fn enums_ts() -> String {
             ("Implicit", 1),
             ("Recovery", 2),
             ("Eof", 3),
+        ],
+    );
+
+    block(
+        &mut out,
+        "Why an attribute list stopped parsing — `attrs`'s trailing code.",
+        "MalformedAttr",
+        &[
+            ("UnterminatedQuote", MalformedAttr::UnterminatedQuote as u32),
+            ("EmptyName", MalformedAttr::EmptyName as u32),
+            ("MissingValue", MalformedAttr::MissingValue as u32),
+            ("BareJunk", MalformedAttr::BareJunk as u32),
+        ],
+    );
+
+    block(
+        &mut out,
+        "What the marker table says about an attribute name — `attrResolve`.",
+        "AttrResolution",
+        &[
+            ("Defined", AttrResolution::DEFINED),
+            ("UserNamespace", AttrResolution::USER_NAMESPACE),
+            ("Unknown", AttrResolution::UNKNOWN),
         ],
     );
 
@@ -259,9 +317,21 @@ pub fn enums_ts() -> String {
         ],
     );
 
+    out.push_str(&format!(
+        "/**\n * Bit 0 of a token's flags byte: the last byte of the span is the one\n\
+         \u{20}* horizontal delimiter the scanner folded on, so the payload ends at\n\
+         \u{20}* `end - 1`. Read it through `TokenView.payloadEnd()`.\n */\n\
+         export const TOKEN_DELIMITER_FOLDED = {};\n\n\
+         /**\n * Bit 1 of a token's flags byte: a `Text` token of nothing but horizontal\n\
+         \u{20}* whitespace. Never set on another kind.\n */\n\
+         export const TOKEN_BLANK = {};\n\n",
+        schema::TOKEN_DELIMITER_FOLDED,
+        schema::TOKEN_BLANK,
+    ));
+
     out.push_str(
         "/**\n * Bit 4 of a token's kind byte, meaning PER SHAPE: `\\+` nesting on the two\n\
-         * marker shapes, the `-e` half on a milestone. No shape carries both.\n */\n\
+         \u{20}* marker shapes, the `-e` half on a milestone. No shape carries both.\n */\n\
          export const TOKEN_SPELLING_BIT = 1 << 4;\n\n\
          /** Do these kind bits name a marker, and so resolve to a table row? */\n\
          export const isMarkerKind = (kind: number): boolean =>\n  \
@@ -280,21 +350,27 @@ pub fn marker_table_ts() -> String {
          * name, a `\\z` extension, an illegal spelling. It has no name, so the\n\
          * spelling is only in the document.\n\
          *\n * `numbering` is a packed code: 0 unnumbered, 1..=13 the cap, 14 unbounded,\n\
-         * 15 table columns.\n */\nexport const MARKERS: readonly {\n  \
+         * 15 table columns.\n\
+         *\n * `ws` is a `StructuralWhitespaceRequirement`: what must follow the marker's\n\
+         * name. `SingleNewline` is the rule for a marker that takes no content on\n\
+         * its own line.\n */\nexport const MARKERS: readonly {\n  \
          readonly name: string;\n  readonly kind: number;\n  readonly category: number;\n  \
-         readonly closing: number;\n  readonly shape: number;\n  readonly numbering: number;\n\
+         readonly closing: number;\n  readonly shape: number;\n  readonly numbering: number;\n  \
+         readonly ws: number;\n\
          }[] = [\n",
     );
     for idx in 0..rows::ROWS.len() {
         let i = idx as generated::MarkerIdx;
         out.push_str(&format!(
-            "  {{ name: {:?}, kind: {}, category: {}, closing: {}, shape: {}, numbering: {} }},\n",
+            "  {{ name: {:?}, kind: {}, category: {}, closing: {}, shape: {}, numbering: {}, \
+             ws: {} }},\n",
             generated::name(i),
             generated::kind(i) as u32,
             generated::category(i) as u32,
             generated::closing(i) as u32,
             generated::shape(i) as u32,
             tables_emit::numbering_code(generated::numbering(i)),
+            generated::ws_after_name(i) as u32,
         ));
     }
     out.push_str("];\n");

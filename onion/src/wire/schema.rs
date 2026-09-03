@@ -68,6 +68,10 @@ pub struct Record {
     /// The Rust type the writer iterates, and the binding its fields use.
     pub rust_ty: &'static str,
     pub binding: &'static str,
+    /// Extra `(name, type)` parameters the writer takes, ahead of `out`. A
+    /// field whose value is not on the row alone declares what it needs here,
+    /// so the schema still states the whole writer signature.
+    pub context: &'static [(&'static str, &'static str)],
     pub fields: &'static [Field],
     pub doc: &'static str,
 }
@@ -113,6 +117,7 @@ pub const TOKEN: Record = Record {
     plural: "tokens",
     rust_ty: "crate::Token",
     binding: "t",
+    context: &[("source", "&[u8]")],
     doc: "One lexical token: the leaves of the tree.",
     fields: &[
         Field {
@@ -153,12 +158,13 @@ pub const TOKEN: Record = Record {
                   nesting level or a column index.",
         },
         Field {
-            name: "reserved",
+            name: "flags",
             width: U8,
             space: Plain,
-            rust: "0",
-            doc: "Rounds the row to 12 bytes. Sections are 4-aligned, so every \
-                  row's `start` and `end` land aligned for a typed-array view.",
+            rust: "t.wire_flags(source)",
+            doc: "`TOKEN_DELIMITER_FOLDED` | `TOKEN_BLANK`. Also rounds the row \
+                  to 12 bytes, so every row's `start` and `end` land aligned \
+                  for a typed-array view over a 4-aligned section.",
         },
     ],
 };
@@ -169,6 +175,7 @@ pub const NODE: Record = Record {
     plural: "nodes",
     rust_ty: "crate::cst::Node",
     binding: "n",
+    context: &[],
     doc: "One structural node. `token` and the child range are indices, not offsets.",
     fields: &[
         Field {
@@ -219,6 +226,7 @@ pub const DIAGNOSTIC: Record = Record {
     plural: "diagnostics",
     rust_ty: "Diagnostic",
     binding: "d",
+    context: &[],
     doc: "One finding, with its anchor resolved from a token index to a span.",
     fields: &[
         Field {
@@ -286,6 +294,7 @@ pub const FIX: Record = Record {
     plural: "fixes",
     rust_ty: "Fix",
     binding: "f",
+    context: &[],
     doc: "One offered repair: the edits it owns.",
     fields: &[
         Field {
@@ -313,6 +322,7 @@ pub const EDIT: Record = Record {
     plural: "edits",
     rust_ty: "Edit",
     binding: "e",
+    context: &[],
     doc: "One edit of a repair: replace [from, to) with the named text.",
     fields: &[
         Field {
@@ -352,6 +362,7 @@ pub const CHAPTER: Record = Record {
     plural: "chapters",
     rust_ty: "Chapter",
     binding: "c",
+    context: &[],
     doc: "One chapter's extent and number. The rows tile the document.",
     fields: &[
         Field {
@@ -399,6 +410,7 @@ pub const VERSE: Record = Record {
     plural: "verses",
     rust_ty: "Verse",
     binding: "v",
+    context: &[],
     doc: "One verse anchor and the range of verse numbers it names.",
     fields: &[
         Field {
@@ -519,13 +531,23 @@ pub const SECTIONS: &[Section] = &[
 
 /// Bumped whenever [`SECTIONS`] or any [`Record`] changes shape. A reader
 /// refuses a dish it does not recognise rather than misreading one.
-pub const FORMAT_VERSION: u32 = 3;
+pub const FORMAT_VERSION: u32 = 4;
 
 /// `"ONWR"`, little-endian — the dish's first four bytes.
 pub const MAGIC: u32 = u32::from_le_bytes(*b"ONWR");
 
 /// Set in the header's flag word when every offset is a UTF-16 code unit.
 pub const FLAG_UTF16: u32 = 1 << 0;
+
+/// Set on a token whose last byte is the one horizontal delimiter the scanner
+/// folded onto it. Its payload therefore ends at `end - 1`, in byte and UTF-16
+/// space alike — a space or a tab is one unit in each. Only the shapes that
+/// fold carry it: `Marker`, `Milestone`, `Designator`, `NoteCaller`, `BookCode`.
+pub const TOKEN_DELIMITER_FOLDED: u8 = 1 << 0;
+
+/// Set on a `Text` token that is nothing but horizontal whitespace. Never set
+/// on another kind; `Pad` is whitespace by definition.
+pub const TOKEN_BLANK: u8 = 1 << 1;
 
 /// "No such offset / no such index", the one absent-value rule.
 pub const NONE: u32 = u32::MAX;

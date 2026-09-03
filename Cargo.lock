@@ -571,6 +571,7 @@ dependencies = [
  "rustc-hash",
  "serde_json",
  "similar",
+ "xxhash-rust",
 ]
 
 [[package]]

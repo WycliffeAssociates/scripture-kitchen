@@ -13,6 +13,8 @@ struct Dish {
     sections: Vec<(usize, usize)>,
     utf16: bool,
     usfm_version: u32,
+    source_length: u32,
+    source_hash: u64,
 }
 
 impl Dish {
@@ -24,6 +26,8 @@ impl Dish {
         assert_eq!(count, schema::SECTIONS.len(), "section count");
         let utf16 = word(12) & schema::FLAG_UTF16 != 0;
         let usfm_version = word(16);
+        let source_length = word(20);
+        let source_hash = u64::from_le_bytes(bytes[24..32].try_into().unwrap());
         let sections = (0..count)
             .map(|n| (word(32 + n * 8) as usize, word(32 + n * 8 + 4) as usize))
             .collect();
@@ -32,6 +36,8 @@ impl Dish {
             sections,
             utf16,
             usfm_version,
+            source_length,
+            source_hash,
         }
     }
 
@@ -110,8 +116,85 @@ fn tokens_round_trip() {
             u32::from(token.level),
             "level {i}"
         );
-        assert_eq!(d.field(0, &schema::TOKEN, i, "reserved"), 0, "reserved {i}");
+        assert_eq!(
+            d.field(0, &schema::TOKEN, i, "flags"),
+            u32::from(token.wire_flags(SAMPLE.as_bytes())),
+            "flags {i}"
+        );
     }
+}
+
+/// The two token flag bits, against the spans they describe.
+#[test]
+fn token_flags_name_the_fold_and_the_blank_run() {
+    // The run between the two `\add` spans is Text and nothing but whitespace;
+    // the same bytes after a carved payload would be `Pad` instead.
+    let text = "\\id GEN\n\\c 1\n\\p \\v 1 \\add x\\add* \t \\add y\\add*\n";
+    let parsed = wire::parse(text, ParseOptions::default());
+    let d = Dish::read(wire::plate(&parsed));
+    let mut folded = 0;
+    let mut blank = 0;
+    for (i, token) in parsed.tokens.iter().enumerate() {
+        let flags = d.field(0, &schema::TOKEN, i, "flags") as u8;
+        let span = &text.as_bytes()[token.start as usize..token.end() as usize];
+        if flags & wire::TOKEN_DELIMITER_FOLDED != 0 {
+            folded += 1;
+            assert!(
+                matches!(span.last(), Some(b' ' | b'\t')),
+                "token {i} claims a fold but does not end in one"
+            );
+            assert!(
+                matches!(
+                    token.kind(),
+                    usfm_onion::TokenKind::Marker { .. }
+                        | usfm_onion::TokenKind::Milestone { .. }
+                        | usfm_onion::TokenKind::Designator
+                        | usfm_onion::TokenKind::NoteCaller
+                        | usfm_onion::TokenKind::BookCode
+                ),
+                "token {i} is not a shape that folds"
+            );
+        }
+        if flags & wire::TOKEN_BLANK != 0 {
+            blank += 1;
+            assert_eq!(token.kind(), usfm_onion::TokenKind::Text);
+            assert!(span.iter().all(|b| matches!(b, b' ' | b'\t')));
+        }
+        // A blank run is never also a fold: the two bits name disjoint shapes.
+        assert_ne!(
+            flags,
+            wire::TOKEN_DELIMITER_FOLDED | wire::TOKEN_BLANK,
+            "token {i}"
+        );
+    }
+    assert!(folded > 0, "`\\id `, `\\c `, `\\v ` all fold");
+    assert_eq!(blank, 1, "the run between the two `\\add` spans");
+}
+
+/// The source's own length and hash, in the header's last three words.
+#[test]
+fn the_header_carries_the_source_length_and_hash() {
+    let d = dish(SAMPLE, ParseOptions::default());
+    assert_eq!(d.source_length as usize, SAMPLE.len());
+    assert_eq!(d.source_hash, xxhash_rust::xxh3::xxh3_64(SAMPLE.as_bytes()));
+
+    // Devanagari: the length follows the offsets into UTF-16, the hash does not.
+    let text = "\\id MAT\n\\c 1\n\\p \\v 1 अब्राहम\n";
+    let bytes = dish(text, ParseOptions::default());
+    let units = dish(
+        text,
+        ParseOptions {
+            utf16: true,
+            ..Default::default()
+        },
+    );
+    assert_eq!(bytes.source_length as usize, text.len());
+    assert_eq!(
+        units.source_length,
+        usfm_onion::utf16::utf16_len(text.as_bytes())
+    );
+    assert!(units.source_length < bytes.source_length);
+    assert_eq!(units.source_hash, bytes.source_hash, "always over bytes");
 }
 
 #[test]

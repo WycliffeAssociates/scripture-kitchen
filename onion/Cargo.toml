@@ -15,6 +15,9 @@ rustc-hash.workspace = true
 # The diff port's two algorithm layers: Myers over block keys, and the UAX-29
 # word / grapheme diff inside a unit. Pure Rust, no_std-friendly, wasm-clean.
 similar = { version = "2.7", features = ["unicode"] }
+# xxh3-64 of the source, in every dish's header, so a consumer can tell one
+# document's parse from another's without holding both texts.
+xxhash-rust.workspace = true
 
 [features]
 default = ["usj", "usx", "html"]
@@ -37,6 +40,8 @@ serde_json = "1.0"
 # Tests and benches DO see dev-deps (src/bin does not) — the corpus sweeps and
 # the whole-corpus bench get parallelism without the lib ever knowing.
 rayon.workspace = true
+# The dish's source hash, recomputed independently in `wire_roundtrip`.
+xxhash-rust.workspace = true
 
 [[bench]]
 name = "pipeline"

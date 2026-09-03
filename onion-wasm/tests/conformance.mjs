@@ -19,9 +19,25 @@ const pkg = resolve(process.argv[2] ?? "pkg-node");
 const corpus = process.argv[3];
 const here = import.meta.dirname;
 
-const { parse: rawParse } = await import(join(pkg, "onion_wasm.js"));
-const { reader, deserialize, deserializeCorpus, declaredVersion, MARKERS, CODES, TokenKind } =
-  await import(resolve(here, "../reader.ts"));
+const {
+  parse: rawParse,
+  attrs: rawAttrs,
+  attrResolve,
+} = await import(join(pkg, "onion_wasm.js"));
+const {
+  reader,
+  deserialize,
+  deserializeCorpus,
+  declaredVersion,
+  MARKERS,
+  CODES,
+  TokenKind,
+  StructuralWhitespaceRequirement,
+  MalformedAttr,
+  AttrResolution,
+  attrList,
+  NONE,
+} = await import(resolve(here, "../reader.ts"));
 
 // Everything below goes through the typed door, which is what a consumer uses;
 // `deserialize` is exercised directly once, at the end, to prove the raw shape
@@ -116,6 +132,62 @@ const BOOK = `\\id GEN
   }
   eq(MARKERS.length, 153, "the whole marker table shipped");
   check(MARKERS[0].name === "", "row 0 has no name");
+
+  // `\b` is the one marker taking no content on its own line.
+  const blankLine = MARKERS.findIndex((row) => row.name === "b");
+  eq(
+    MARKERS[blankLine].ws,
+    StructuralWhitespaceRequirement.SingleNewline,
+    "the whitespace rule crossed with the row",
+  );
+}
+
+/**
+ * Reassemble the punctuation `spelling()` drops and the document's own bytes
+ * come back. Holds over a real book, where `\+nd`, milestones and unknown `\z`
+ * markers actually occur. UTF-16 offsets, because a JS string indexes that way.
+ */
+const spellsBackToTheDocument = (doc, tokens, where) => {
+  for (const t of tokens) {
+    const spelled = t.spelling(doc);
+    if (t.marker() === null) {
+      eq(spelled, "", `${where}: token ${t.id} is no marker, so it spells nothing`);
+      continue;
+    }
+    const plus = t.spelled() && t.kind() !== TokenKind.Milestone ? "+" : "";
+    const star = t.kind() === TokenKind.ClosingMarker ? "*" : "";
+    eq(
+      `\\${plus}${spelled}${star}`,
+      doc.slice(t.span().from, t.payloadEnd()),
+      `${where}: token ${t.id} does not spell back to its own bytes`,
+    );
+  }
+};
+
+// --- the flags byte: the fold, and the blank run --------------------------
+{
+  const dish = onion.parse(BOOK, { utf16: true });
+  const { tokens } = dish;
+  eq(dish.sourceLength, BOOK.length, "the source's own length crossed");
+  check(typeof dish.sourceHash === "bigint" && dish.sourceHash !== 0n, "…and its hash");
+
+  let folded = 0;
+  for (const t of tokens) {
+    const { from, to } = t.span();
+    if (t.delimiterFolded()) {
+      folded++;
+      check(" \t".includes(BOOK[to - 1]), `token ${t.id} claims a fold it does not carry`);
+      eq(t.payloadEnd(), to - 1, `token ${t.id} payload stops short of the delimiter`);
+    } else {
+      eq(t.payloadEnd(), to, `token ${t.id} payload is the whole span`);
+    }
+    if (t.isBlank()) {
+      eq(t.kind(), TokenKind.Text, `token ${t.id} is blank but not Text`);
+      eq(BOOK.slice(from, to).trim(), "", `token ${t.id} is not blank after all`);
+    }
+  }
+  check(folded > 0, "`\\c ` and `\\v ` fold their delimiter");
+  spellsBackToTheDocument(BOOK, tokens, "BOOK");
 }
 
 // --- the LEVEL crosses, so nobody re-parses a marker's digits -------------
@@ -314,6 +386,83 @@ const levelIsSpelled = (doc, tokens, where) => {
   eq(units.tokens.at(units.tokens.length - 1).span().to, hindi.length, "UTF-16 EOF");
 }
 
+// --- the edges and the ownership map agree with the walk ------------------
+{
+  const { tree, tokens } = (parse(BOOK, false, false, false));
+  const owners = tree.owners();
+  eq(owners.length, tokens.length, "one owner slot per token");
+  check([...owners].every((owner) => owner !== NONE), "every token is owned");
+  eq(tree.parent(0), NONE, "the root has no parent");
+
+  for (let node = 0; node < tree.nodeCount(); node++) {
+    const span = tree.extent(node);
+    const first = tree.firstToken(node);
+    const last = tree.lastToken(node);
+    eq(tokens.at(first).span().from, span.from, `node ${node} starts at firstToken`);
+    eq(tokens.at(last).span().to, span.to, `node ${node} ends at lastToken`);
+    if (node === 0) continue;
+    // Every parent chain reaches the root, and a parent's extent contains it.
+    const parent = tree.parent(node);
+    const outer = tree.extent(parent);
+    check(
+      outer.from <= span.from && span.to <= outer.to,
+      `node ${node} escapes its parent ${parent}`,
+    );
+  }
+
+  // The owner is the INNERMOST node, which is to say the one whose own child
+  // list the token is in.
+  for (const t of tokens) {
+    const owner = owners[t.id];
+    const r = tree.nodes.seek(owner);
+    const slots = tree.childIds.subarray(r.childFrom, r.childTo);
+    eq(
+      slots.filter((id) => id === t.id).length,
+      1,
+      `token ${t.id} is not a direct child of its owner ${owner}`,
+    );
+  }
+}
+
+// --- the attribute view, through its typed wrapper ------------------------
+//
+// UTF-16 throughout: the span goes in in the caller's space and every word
+// comes back in it, so the document's own `slice` reads the answer.
+{
+  const doc = "\\p \u{1d11e}\n\\w grace|lemma=\"grace\" x-y=\"z\"\\w*\n";
+  const { tokens } = onion.parse(doc, { utf16: true });
+  const listOf = (text, tks) => {
+    for (const t of tks) if (t.kind() === TokenKind.AttrList) return t.span();
+    throw new Error("no attribute list");
+  };
+  const span = listOf(doc, tokens);
+  const list = attrList(rawAttrs(doc, span.from, span.to, 1));
+  eq(list.attrs.length, 2, "two attributes came back");
+  eq(doc.slice(list.attrs[0].name.from, list.attrs[0].name.to), "lemma", "the name span");
+  eq(doc.slice(list.attrs[0].value.from, list.attrs[0].value.to), "grace", "the value span");
+  eq(doc.slice(list.attrs[1].name.from, list.attrs[1].name.to), "x-y", "the second name");
+  check(list.malformed === undefined, "a clean list reports nothing malformed");
+
+  // A bare value: an empty name span at the value's start.
+  const bare = "\\w In|in\\w*";
+  const bareList = attrList(rawAttrs(bare, listOf(bare, onion.parse(bare, {}).tokens).from, bare.length, 0));
+  eq(bareList.attrs.length, 1, "one bare value");
+  eq(bareList.attrs[0].name.from, bareList.attrs[0].name.to, "…with an empty name");
+
+  // An unterminated quote ends the walk with one finding.
+  const broken = '\\w x|lemma="grace\\w*';
+  const brokenSpan = listOf(broken, onion.parse(broken, {}).tokens);
+  const brokenList = attrList(rawAttrs(broken, brokenSpan.from, brokenSpan.to, 0));
+  eq(brokenList.attrs.length, 0, "nothing parsed before the break");
+  eq(brokenList.malformed.code, MalformedAttr.UnterminatedQuote, "the code names the break");
+  eq(broken[brokenList.malformed.at], '"', "…at the opening quote");
+
+  const w = MARKERS.findIndex((row) => row.name === "w");
+  eq(attrResolve("lemma", w), AttrResolution.Defined, "the table knows `lemma`");
+  eq(attrResolve("x-strong", w), AttrResolution.UserNamespace, "…and the user namespace");
+  eq(attrResolve("nonesuch", w), AttrResolution.Unknown, "…and what it does not know");
+}
+
 // --- forEach agrees with the iterator -------------------------------------
 {
   const { tokens } = (parse(BOOK, false, false, false));
@@ -337,6 +486,7 @@ if (corpus && existsSync(corpus)) {
     check(seen.size === tokens.length, `${name}: the walk reaches every token`);
     check(toc.chapters().length > 0, `${name}: has a chapter table`);
     levelIsSpelled(text, tokens, name);
+    spellsBackToTheDocument(text, tokens, name);
     books++;
   }
   console.log(`corpus: ${books} books walked`);

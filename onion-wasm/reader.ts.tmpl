@@ -52,7 +52,11 @@ export const NONE = 0xffffffff;
 /** Bit 31 of a child id: the id names a NODE, not a token. */
 export const NODE_ID_BIT = 0x80000000;
 
-/** Header bytes before the section directory. */
+/**
+ * Header bytes before the section directory: magic, format version, section
+ * count, flags, the declared `\usfm` version, the source's length, and its
+ * xxh3-64 across the last two words.
+ */
 export const HEADER_BYTES = 32;
 
 /** The `\usfm` ladder, indexed by `Dish.usfmVersion`. */
@@ -117,9 +121,18 @@ export class Marker {
   }
 
   /**
+   * One of `StructuralWhitespaceRequirement`: what must follow this marker's
+   * name. `SingleNewline` is the rule for a marker that takes no content on its
+   * own line.
+   */
+  ws(): number {
+    return MARKERS[this.idx]?.ws ?? 0;
+  }
+
+  /**
    * Row 0: an unknown name, a `\z` extension, an illegal spelling. The row has
-   * no name, so the actual spelling is only in the document — slice the
-   * token's span for it.
+   * no name, so the actual spelling is only in the document —
+   * `TokenView.spelling(text)` reads it, and is the one place to.
    */
   isUnknown(): boolean {
     return this.idx === 0;
@@ -145,6 +158,56 @@ export class TokenView {
   /** One of `TokenKind`, with the spelling bit stripped. */
   kind(): number {
     return this.rows.seek(this.id).kind & ~TOKEN_SPELLING_BIT;
+  }
+
+  /**
+   * The last byte of the span is the one horizontal delimiter the scanner
+   * folded on — `\v ` keeps the space, `\v  1` puts the surplus in a `Pad`.
+   * Only `Marker`, `Milestone`, `Designator`, `NoteCaller` and `BookCode` fold.
+   */
+  delimiterFolded(): boolean {
+    return (this.rows.seek(this.id).flags & TOKEN_DELIMITER_FOLDED) !== 0;
+  }
+
+  /** A `Text` token of nothing but spaces and tabs. */
+  isBlank(): boolean {
+    return (this.rows.seek(this.id).flags & TOKEN_BLANK) !== 0;
+  }
+
+  /**
+   * Where the token's PAYLOAD ends: `end`, or one back from it when a
+   * delimiter is folded on. One in either space — a space and a tab are one
+   * byte and one UTF-16 code unit alike — so this is right whichever the parse
+   * asked for.
+   */
+  payloadEnd(): number {
+    const r = this.rows.seek(this.id);
+    return (r.flags & TOKEN_DELIMITER_FOLDED) !== 0 ? r.end - 1 : r.end;
+  }
+
+  /**
+   * The marker as the author SPELLED it, `text` being the document this parse
+   * came from: `"q2"`, `"+add"` sliced past the `+`, `"qt1-s"`, `"w"` from
+   * `\w*`. `""` for a kind that is not marker-shaped.
+   *
+   *   \q2 → "q2"   \+nd → "nd"   \zaln-s → "zaln-s"   \add* → "add"
+   *
+   * Level digits and a milestone's `-s`/`-e` half are part of the spelling;
+   * the `\`, the `+` and a closer's `*` are punctuation and are not. THE place
+   * to read an unknown marker's name — `Marker.name()` is `null` on row 0.
+   *
+   * A JS string indexes in UTF-16, so `text` and the dish must agree: parse
+   * with `utf16: true`, or hold an all-ASCII document.
+   */
+  spelling(text: string): string {
+    const r = this.rows.seek(this.id);
+    const kind = r.kind & ~TOKEN_SPELLING_BIT;
+    if (!isMarkerKind(kind)) return "";
+    let from = r.start + 1;
+    if (kind !== TokenKind.Milestone && (r.kind & TOKEN_SPELLING_BIT) !== 0) from += 1;
+    let to = this.payloadEnd();
+    if (kind === TokenKind.ClosingMarker && text[to - 1] === "*") to -= 1;
+    return text.slice(from, to);
   }
 
   /** `\+` nesting on a marker, the `-e` half on a milestone. */
@@ -249,6 +312,7 @@ export class Tree {
   readonly nodes: NodeRow;
   readonly tokens: TokenRow;
   readonly childIds: Uint32Array;
+  private cachedOwnership: { owners: Uint32Array; parents: Uint32Array } | null = null;
 
   constructor(nodes: NodeRow, tokens: TokenRow, childIds: Uint32Array) {
     this.nodes = nodes;
@@ -313,36 +377,98 @@ export class Tree {
   }
 
   /**
-   * One node's BYTE extent: its opening marker through the end of its last
-   * descendant TOKEN. Walked, because a child is as likely to be a node as a
-   * token — the last child of `\f` is usually the `\ft` node.
+   * The FIRST descendant token's INDEX.
+   *
+   *   \p \v 1 a\f + \ft note\f*    firstToken(the note) → the `\f` token
+   *                                lastToken(the note)  → the `\f*` token
+   *
+   * A descent, because a child is as likely to be a node as a token — the last
+   * child of `\f` is usually the `\ft` node. A childless node answers with its
+   * own opening marker, the only token it has, which is `NONE` on the root of
+   * an empty document.
    */
-  extent(node: number): Span {
-    const [from, to] = this.childRange(node);
-    if (from === to) {
-      // Only the root is childless, and only on an empty document.
-      const token = this.nodes.seek(node).token;
-      if (token === NONE || token >= this.tokens.length) return { from: 0, to: 0 };
-      const r = this.tokens.seek(token);
-      return { from: r.start, to: r.start };
-    }
-    return { from: this.edgeToken(from, true), to: this.edgeToken(to - 1, false) };
+  firstToken(node: number): number {
+    return this.edgeToken(node, true);
   }
 
-  /** The first (or last) TOKEN reachable from one child slot. */
-  private edgeToken(slot: number, first: boolean): number {
-    let id = this.childIds[slot];
-    while ((id & NODE_ID_BIT) !== 0) {
-      const [from, to] = this.childRange(id & ~NODE_ID_BIT);
-      if (from === to) break;
-      id = this.childIds[first ? from : to - 1];
+  /** The LAST descendant token's index. `firstToken`'s twin. */
+  lastToken(node: number): number {
+    return this.edgeToken(node, false);
+  }
+
+  /**
+   * One node's extent: its opening marker through the end of its last
+   * descendant TOKEN, in whichever space the parse was asked for.
+   */
+  extent(node: number): Span {
+    const first = this.firstToken(node);
+    if (first === NONE || first >= this.tokens.length) return { from: 0, to: 0 };
+    const from = this.tokens.seek(first).start;
+    // Only the root is childless, and only on an empty document.
+    const r = this.nodes.seek(node);
+    if (r.childFrom === r.childTo) return { from, to: from };
+    return { from, to: this.tokens.seek(this.lastToken(node)).end };
+  }
+
+  /**
+   * The descent behind both edges. Every field of a row is read BEFORE the
+   * step that moves the cursor off it, so no read is stale.
+   */
+  private edgeToken(node: number, first: boolean): number {
+    for (;;) {
+      const r = this.nodes.seek(node);
+      const childFrom = r.childFrom;
+      const childTo = r.childTo;
+      if (childFrom === childTo) return r.token;
+      const id = this.childIds[first ? childFrom : childTo - 1];
+      if ((id & NODE_ID_BIT) === 0) return id;
+      node = id & ~NODE_ID_BIT;
     }
-    if ((id & NODE_ID_BIT) !== 0) {
-      const r = this.tokens.seek(this.nodes.seek(id & ~NODE_ID_BIT).token);
-      return first ? r.start : r.end;
+  }
+
+  /**
+   * Token index → the id of the innermost node that owns it.
+   *
+   *   \p \v 1 a\f + \ft note\f*
+   *           ^         ^ the `\ft` node, not the `\f` that contains it
+   *           the `\p` node
+   *
+   * Every token id appears EXACTLY ONCE in the child arena, so ownership is
+   * total and unambiguous: no token is unowned and none has two owners.
+   *
+   * Built on first call from ONE walk of the arena, and kept — `parent()`
+   * comes out of the same pass.
+   */
+  owners(): Uint32Array {
+    return this.ownership().owners;
+  }
+
+  /** A node's parent, `NONE` on the root. The same one walk as `owners()`. */
+  parent(node: number): number {
+    return this.ownership().parents[node] ?? NONE;
+  }
+
+  private ownership(): { owners: Uint32Array; parents: Uint32Array } {
+    if (this.cachedOwnership !== null) return this.cachedOwnership;
+    const owners = new Uint32Array(this.tokens.length).fill(NONE);
+    const parents = new Uint32Array(this.nodes.length).fill(NONE);
+    const stack = [0];
+    while (stack.length) {
+      const node = stack.pop() as number;
+      const [from, to] = this.childRange(node);
+      for (let slot = from; slot < to; slot++) {
+        const id = this.childIds[slot];
+        if ((id & NODE_ID_BIT) === 0) {
+          owners[id] = node;
+        } else {
+          const child = id & ~NODE_ID_BIT;
+          parents[child] = node;
+          stack.push(child);
+        }
+      }
     }
-    const r = this.tokens.seek(id);
-    return first ? r.start : r.end;
+    this.cachedOwnership = { owners, parents };
+    return this.cachedOwnership;
   }
 
   private childRange(node: number): number[] {
@@ -660,6 +786,42 @@ export class Toc {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Attributes — the one export whose wire is a flat array, not a dish
+// ---------------------------------------------------------------------------
+
+/** u32s per attribute in what `attrs` returns: name span, then value span. */
+export const ATTR_STRIDE = 4;
+
+/** One attribute list, decoded. A bare value has an EMPTY name span. */
+export interface AttrList {
+  attrs: { name: Span; value: Span }[];
+  /** `code` is a `MalformedAttr`. Absent when the list parsed clean. */
+  malformed?: { code: number; at: number };
+}
+
+/**
+ * What the wasm `attrs(text, from, to, utf16)` export returns, as objects.
+ *
+ *   const list = attrList(rawAttrs(text, from, to, 1));
+ *   for (const { name, value } of list.attrs) …
+ *
+ * Four words per attribute and two at the tail, in whatever space the call
+ * asked for. A malformed tail ENDS the list, so it is one finding and always
+ * the last thing in the array.
+ */
+export function attrList(flat: Uint32Array | readonly number[]): AttrList {
+  const attrs: { name: Span; value: Span }[] = [];
+  for (let at = 0; at + ATTR_STRIDE <= flat.length - 2; at += ATTR_STRIDE) {
+    attrs.push({
+      name: { from: flat[at], to: flat[at + 1] },
+      value: { from: flat[at + 2], to: flat[at + 3] },
+    });
+  }
+  const code = flat[flat.length - 2];
+  return code === NONE ? { attrs } : { attrs, malformed: { code, at: flat[flat.length - 1] } };
+}
+
 /** What a parse should compute. Everything defaults off except the tree. */
 export interface ParseOptions {
   /** Run the lint walk — the one expensive optional. */
@@ -717,6 +879,17 @@ export interface Dish {
    * version is declared.
    */
   usfmVersion: number;
+  /**
+   * The source's length in the same space as every offset here — bytes, or
+   * UTF-16 code units under `utf16`. An end-of-document position without
+   * holding the text.
+   */
+  sourceLength: number;
+  /**
+   * xxh3-64 of the source BYTES, whatever space the offsets are in. Two dishes
+   * of one document agree; the flag does not enter into it.
+   */
+  sourceHash: bigint;
 }
 
 /** The declared version as the string `DiagnosticView.severity` wants. */
@@ -792,6 +965,8 @@ export function deserialize(dish: Uint8Array): Dish {
   const count = head.getUint32(8, true);
   const utf16 = (head.getUint32(12, true) & FLAG_UTF16) !== 0;
   const usfmVersion = head.getUint32(16, true);
+  const sourceLength = head.getUint32(20, true);
+  const sourceHash = head.getBigUint64(24, true);
 
   const view = (n: number): DataView => {
     const at = head.getUint32(HEADER_BYTES + n * 8, true);
@@ -827,5 +1002,7 @@ export function deserialize(dish: Uint8Array): Dish {
     toc: new Toc(new ChapterRow(view(SECTION.chapters)), new VerseRow(view(SECTION.verses))),
     utf16,
     usfmVersion,
+    sourceLength,
+    sourceHash,
   };
 }

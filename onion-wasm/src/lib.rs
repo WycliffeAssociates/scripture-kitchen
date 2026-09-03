@@ -41,27 +41,31 @@
 //! - **The marker table DOES cross — generated, not mirrored.** A token carries
 //!   its row index and `reader.ts` ships the 153 rows, so a consumer reads a
 //!   marker's kind and category without slicing the document and without
-//!   restating a bit layout. Nothing is coarsened on the way: all fourteen
-//!   kinds and all thirty categories arrive, because a consumer that wants its
-//!   own vocabulary must be able to switch exhaustively into it.
+//!   restating a bit layout. Nothing is coarsened on the way: every kind and
+//!   every category arrives, because a consumer that wants its own vocabulary
+//!   must be able to switch exhaustively into it.
 //!
 //! # What is deliberately absent
 //!
 //! A **checksum** export. Vision §13.4 puts the canonical-source checksum on
 //! this facade; Will deferred it (2026-08-24) as a higher-level concern — it
-//! lands in `galley`, which is where save/dirty machinery will live. There is
-//! no hashing dependency here, on purpose.
+//! lands in `galley`, which is where save/dirty machinery will live. A dish's
+//! header carries an xxh3-64 of the source it was plated from, which answers
+//! "is this the parse of that text" and nothing wider.
 
 use js_sys::{Object, Reflect, Uint32Array};
 use serde::Serialize;
+use usfm_onion::attributes::{self, AttrEvent};
 use usfm_onion::diff::{
     self, Addr, CoveredSide, Decisions, DiffSkeleton, MergeSide, SlotRole, Status, UnitKind,
 };
 use usfm_onion::format::{CharBreaks, FormatOptions, Newline, VerseBreaks};
 use usfm_onion::lint::Code;
 use usfm_onion::mask as mask_recipe;
+use usfm_onion::tables::generated::MarkerIdx;
 use usfm_onion::utf16::Utf16Index;
 use usfm_onion::wire;
+use usfm_onion::{Token, TokenKind};
 use wasm_bindgen::prelude::*;
 
 // ---------------------------------------------------------------------------
@@ -676,6 +680,76 @@ pub fn locate(text: &str, utf16: u32) -> String {
     usfm_onion::toc::toc(source, &tokens)
         .locate(byte)
         .to_string()
+}
+
+// ---------------------------------------------------------------------------
+// Attributes
+// ---------------------------------------------------------------------------
+
+/// The k/v view of one `AttrList` token, flat.
+///
+/// `[from, to)` is the list token's span in the CALLER's space — UTF-16 when
+/// `utf16` is non-zero, bytes otherwise, as `locate` reads it — and every word
+/// comes back in that same space.
+///
+/// ```text
+/// |lemma="grace" x-y="z"   ->  [nameFrom nameTo valueFrom valueTo] x 2, NONE, NONE
+/// |grace                   ->  one quadruple, its name span EMPTY at the value
+/// |lemma="grace            ->  no quadruple, then UnterminatedQuote and the quote's offset
+/// ```
+///
+/// Four words per attribute, then two: the `MalformedAttr` code and its
+/// offset, both `NONE` when the list parsed clean. A malformed tail is always
+/// the last event, so it can only be the last pair of words.
+#[wasm_bindgen]
+pub fn attrs(text: &str, from: u32, to: u32, utf16: u32) -> Vec<u32> {
+    let source = text.as_bytes();
+    // A byte caller pays for no index.
+    let index = (utf16 != 0).then(|| Utf16Index::new(source));
+    let (start, end) = match &index {
+        Some(index) => (index.to_byte(from), index.to_byte(to)),
+        None => (from, to),
+    };
+    let out_space = |byte: u32| match &index {
+        Some(index) => index.to_utf16(byte),
+        None => byte,
+    };
+
+    // The interpreter reads a SPAN; it never needs the row a scan would have
+    // built around it, so the span is handed over as one rather than re-lexed.
+    debug_assert!(start <= end && (end - start) <= u32::from(u16::MAX));
+    let list = Token {
+        start,
+        len: (end - start) as u16,
+        kind_bits: TokenKind::AttrList.to_bits(),
+        marker_idx: 0,
+        level: 0,
+    };
+
+    let mut out = Vec::new();
+    let mut malformed = [wire::NONE, wire::NONE];
+    for event in attributes::attrs(source, &list) {
+        match event {
+            AttrEvent::Attr(attr) => out.extend_from_slice(&[
+                out_space(attr.name_span.start),
+                out_space(attr.name_span.end),
+                out_space(attr.value_span.start),
+                out_space(attr.value_span.end),
+            ]),
+            AttrEvent::Malformed { at, why } => malformed = [why as u32, out_space(at)],
+        }
+    }
+    out.extend_from_slice(&malformed);
+    out
+}
+
+/// One attribute name against one marker row: the `AttrResolution` code.
+///
+/// An empty name is the bare default-value form, which resolves through the
+/// row's own default — so it is a legitimate argument, not a mistake.
+#[wasm_bindgen(js_name = attrResolve)]
+pub fn attr_resolve(name: &str, marker: u32) -> u32 {
+    attributes::resolve(name.as_bytes(), marker as MarkerIdx).code()
 }
 
 /// The first `\id`'s book code — `"GEN"`. EMPTY when the document declares

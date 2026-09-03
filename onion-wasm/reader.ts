@@ -41,7 +41,7 @@
 export const MAGIC = 0x52574e4f;
 
 /** Bumped whenever the schema changes shape. */
-export const FORMAT_VERSION = 3;
+export const FORMAT_VERSION = 4;
 
 /** Set when every offset in the dish is a UTF-16 code unit. */
 export const FLAG_UTF16 = 1 << 0;
@@ -52,7 +52,11 @@ export const NONE = 0xffffffff;
 /** Bit 31 of a child id: the id names a NODE, not a token. */
 export const NODE_ID_BIT = 0x80000000;
 
-/** Header bytes before the section directory. */
+/**
+ * Header bytes before the section directory: magic, format version, section
+ * count, flags, the declared `\usfm` version, the source's length, and its
+ * xxh3-64 across the last two words.
+ */
 export const HEADER_BYTES = 32;
 
 /** The `\usfm` ladder, indexed by `Dish.usfmVersion`. */
@@ -128,20 +132,21 @@ export const Category = {
   CharPoetry: 13,
   CharLists: 14,
   CharTables: 15,
-  CharNotes: 16,
-  NoteFootnote: 17,
-  NoteCrossReference: 18,
-  MilestoneList: 19,
-  MilestoneTable: 20,
-  MilestoneQt: 21,
-  MilestoneTs: 22,
-  MilestoneVid: 23,
-  ChapterVerse: 24,
-  Sidebar: 25,
-  Meta: 26,
-  Peripheral: 27,
-  DocumentStructure: 28,
-  Figure: 29,
+  CharNotesFootnote: 16,
+  CharNotesCrossReference: 17,
+  NoteFootnote: 18,
+  NoteCrossReference: 19,
+  MilestoneList: 20,
+  MilestoneTable: 21,
+  MilestoneQt: 22,
+  MilestoneTs: 23,
+  MilestoneVid: 24,
+  ChapterVerse: 25,
+  Sidebar: 26,
+  Meta: 27,
+  Peripheral: 28,
+  DocumentStructure: 29,
+  Figure: 30,
 } as const;
 
 /** Whether a marker requires, allows or refuses a closer. */
@@ -157,6 +162,18 @@ export const SpellingShape = {
   Any: 0,
   PlainOnly: 1,
   MilestoneOnly: 2,
+} as const;
+
+/** What must follow a marker's name — `Marker.ws()`. */
+export const StructuralWhitespaceRequirement = {
+  NotRequired: 7,
+  TagEndDelimiter: 6,
+  AtLeastOneHorizontalWhitespace: 0,
+  OptionalHorizontalWhitespace: 1,
+  AtLeastOneWhitespace: 2,
+  OptionalWhitespace: 3,
+  SingleNewline: 4,
+  AtLeastOneNewline: 5,
 } as const;
 
 /** Where in the document grammar a node sits — `NodeView.context()`. */
@@ -189,6 +206,21 @@ export const CloseReason = {
   Eof: 3,
 } as const;
 
+/** Why an attribute list stopped parsing — `attrs`'s trailing code. */
+export const MalformedAttr = {
+  UnterminatedQuote: 0,
+  EmptyName: 1,
+  MissingValue: 2,
+  BareJunk: 3,
+} as const;
+
+/** What the marker table says about an attribute name — `attrResolve`. */
+export const AttrResolution = {
+  Defined: 0,
+  UserNamespace: 1,
+  Unknown: 2,
+} as const;
+
 /** What shape a token is — `TokenView.kind()`, spelling bit stripped. */
 export const TokenKind = {
   Marker: 0,
@@ -206,8 +238,21 @@ export const TokenKind = {
 } as const;
 
 /**
+ * Bit 0 of a token's flags byte: the last byte of the span is the one
+ * horizontal delimiter the scanner folded on, so the payload ends at
+ * `end - 1`. Read it through `TokenView.payloadEnd()`.
+ */
+export const TOKEN_DELIMITER_FOLDED = 1;
+
+/**
+ * Bit 1 of a token's flags byte: a `Text` token of nothing but horizontal
+ * whitespace. Never set on another kind.
+ */
+export const TOKEN_BLANK = 2;
+
+/**
  * Bit 4 of a token's kind byte, meaning PER SHAPE: `\+` nesting on the two
-* marker shapes, the `-e` half on a milestone. No shape carries both.
+ * marker shapes, the `-e` half on a milestone. No shape carries both.
  */
 export const TOKEN_SPELLING_BIT = 1 << 4;
 
@@ -267,6 +312,11 @@ export class TokenRow {
   /** The trailing number as spelled: 2 for `\q2`, 1 for `\tc1`, 0 for a bare `\q`. The row's `numbering` says whether it is a nesting level or a column index. */
   get level(): number {
     return this.#view.getUint8(this.#row + 10);
+  }
+
+  /** `TOKEN_DELIMITER_FOLDED` | `TOKEN_BLANK`. Also rounds the row to 12 bytes, so every row's `start` and `end` land aligned for a typed-array view over a 4-aligned section. */
+  get flags(): number {
+    return this.#view.getUint8(this.#row + 11);
   }
 
 }
@@ -601,6 +651,10 @@ export class VerseRow {
 *
  * `numbering` is a packed code: 0 unnumbered, 1..=13 the cap, 14 unbounded,
 * 15 table columns.
+*
+ * `ws` is a `StructuralWhitespaceRequirement`: what must follow the marker's
+* name. `SingleNewline` is the rule for a marker that takes no content on
+* its own line.
  */
 export const MARKERS: readonly {
   readonly name: string;
@@ -609,160 +663,161 @@ export const MARKERS: readonly {
   readonly closing: number;
   readonly shape: number;
   readonly numbering: number;
+  readonly ws: number;
 }[] = [
-  { name: "", kind: 0, category: 0, closing: 0, shape: 0, numbering: 0 },
-  { name: "add", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0 },
-  { name: "addpn", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0 },
-  { name: "b", kind: 1, category: 5, closing: 0, shape: 0, numbering: 0 },
-  { name: "bd", kind: 2, category: 10, closing: 1, shape: 0, numbering: 0 },
-  { name: "bdit", kind: 2, category: 10, closing: 1, shape: 0, numbering: 0 },
-  { name: "bk", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0 },
-  { name: "c", kind: 4, category: 24, closing: 0, shape: 0, numbering: 0 },
-  { name: "ca", kind: 2, category: 24, closing: 1, shape: 0, numbering: 0 },
-  { name: "cat", kind: 10, category: 26, closing: 1, shape: 0, numbering: 0 },
-  { name: "cd", kind: 1, category: 3, closing: 0, shape: 0, numbering: 0 },
-  { name: "cl", kind: 1, category: 3, closing: 0, shape: 0, numbering: 0 },
-  { name: "cls", kind: 1, category: 4, closing: 0, shape: 0, numbering: 0 },
-  { name: "cp", kind: 1, category: 24, closing: 0, shape: 0, numbering: 0 },
-  { name: "d", kind: 1, category: 3, closing: 0, shape: 0, numbering: 0 },
-  { name: "dc", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0 },
-  { name: "ef", kind: 3, category: 17, closing: 1, shape: 0, numbering: 0 },
-  { name: "em", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0 },
-  { name: "esb", kind: 8, category: 25, closing: 0, shape: 0, numbering: 0 },
-  { name: "esbe", kind: 8, category: 25, closing: 0, shape: 0, numbering: 0 },
-  { name: "ex", kind: 3, category: 18, closing: 1, shape: 0, numbering: 0 },
-  { name: "f", kind: 3, category: 17, closing: 1, shape: 0, numbering: 0 },
-  { name: "fdc", kind: 2, category: 16, closing: 2, shape: 0, numbering: 0 },
-  { name: "fe", kind: 3, category: 17, closing: 1, shape: 0, numbering: 0 },
-  { name: "fig", kind: 7, category: 29, closing: 1, shape: 0, numbering: 0 },
-  { name: "fk", kind: 2, category: 16, closing: 2, shape: 0, numbering: 0 },
-  { name: "fl", kind: 2, category: 16, closing: 2, shape: 0, numbering: 0 },
-  { name: "fm", kind: 2, category: 16, closing: 1, shape: 0, numbering: 0 },
-  { name: "fp", kind: 2, category: 16, closing: 2, shape: 0, numbering: 0 },
-  { name: "fq", kind: 2, category: 16, closing: 2, shape: 0, numbering: 0 },
-  { name: "fqa", kind: 2, category: 16, closing: 2, shape: 0, numbering: 0 },
-  { name: "fr", kind: 2, category: 16, closing: 2, shape: 0, numbering: 0 },
-  { name: "ft", kind: 2, category: 16, closing: 2, shape: 0, numbering: 0 },
-  { name: "fv", kind: 2, category: 16, closing: 2, shape: 0, numbering: 0 },
-  { name: "fw", kind: 2, category: 16, closing: 2, shape: 0, numbering: 0 },
-  { name: "h", kind: 1, category: 1, closing: 0, shape: 0, numbering: 3 },
-  { name: "ib", kind: 1, category: 2, closing: 0, shape: 0, numbering: 0 },
-  { name: "id", kind: 13, category: 28, closing: 0, shape: 0, numbering: 0 },
-  { name: "ide", kind: 1, category: 1, closing: 0, shape: 0, numbering: 0 },
-  { name: "ie", kind: 1, category: 2, closing: 0, shape: 0, numbering: 0 },
-  { name: "iex", kind: 1, category: 2, closing: 0, shape: 0, numbering: 0 },
-  { name: "ili", kind: 1, category: 2, closing: 0, shape: 0, numbering: 2 },
-  { name: "im", kind: 1, category: 2, closing: 0, shape: 0, numbering: 0 },
-  { name: "imi", kind: 1, category: 2, closing: 0, shape: 0, numbering: 0 },
-  { name: "imq", kind: 1, category: 2, closing: 0, shape: 0, numbering: 0 },
-  { name: "imt", kind: 1, category: 2, closing: 0, shape: 0, numbering: 4 },
-  { name: "imte", kind: 1, category: 2, closing: 0, shape: 0, numbering: 2 },
-  { name: "io", kind: 1, category: 2, closing: 0, shape: 0, numbering: 4 },
-  { name: "ior", kind: 2, category: 12, closing: 1, shape: 0, numbering: 0 },
-  { name: "iot", kind: 1, category: 2, closing: 0, shape: 0, numbering: 0 },
-  { name: "ip", kind: 1, category: 2, closing: 0, shape: 0, numbering: 0 },
-  { name: "ipc", kind: 1, category: 2, closing: 0, shape: 0, numbering: 0 },
-  { name: "ipi", kind: 1, category: 2, closing: 0, shape: 0, numbering: 0 },
-  { name: "ipq", kind: 1, category: 2, closing: 0, shape: 0, numbering: 0 },
-  { name: "ipr", kind: 1, category: 2, closing: 0, shape: 0, numbering: 0 },
-  { name: "iq", kind: 1, category: 2, closing: 0, shape: 0, numbering: 3 },
-  { name: "iqt", kind: 2, category: 12, closing: 1, shape: 0, numbering: 0 },
-  { name: "is", kind: 1, category: 2, closing: 0, shape: 0, numbering: 2 },
-  { name: "it", kind: 2, category: 10, closing: 1, shape: 0, numbering: 0 },
-  { name: "jmp", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0 },
-  { name: "k", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0 },
-  { name: "lf", kind: 1, category: 6, closing: 0, shape: 0, numbering: 0 },
-  { name: "lh", kind: 1, category: 6, closing: 0, shape: 0, numbering: 0 },
-  { name: "li", kind: 1, category: 6, closing: 0, shape: 0, numbering: 4 },
-  { name: "lik", kind: 2, category: 14, closing: 1, shape: 0, numbering: 0 },
-  { name: "lim", kind: 1, category: 6, closing: 0, shape: 0, numbering: 4 },
-  { name: "list", kind: 6, category: 19, closing: 3, shape: 0, numbering: 0 },
-  { name: "lit", kind: 1, category: 4, closing: 0, shape: 0, numbering: 0 },
-  { name: "litl", kind: 2, category: 14, closing: 1, shape: 0, numbering: 0 },
-  { name: "liv", kind: 2, category: 14, closing: 1, shape: 0, numbering: 14 },
-  { name: "m", kind: 1, category: 4, closing: 0, shape: 0, numbering: 0 },
-  { name: "mi", kind: 1, category: 4, closing: 0, shape: 0, numbering: 3 },
-  { name: "mr", kind: 1, category: 3, closing: 0, shape: 0, numbering: 0 },
-  { name: "ms", kind: 1, category: 3, closing: 0, shape: 0, numbering: 3 },
-  { name: "mt", kind: 1, category: 3, closing: 0, shape: 0, numbering: 4 },
-  { name: "mte", kind: 1, category: 3, closing: 0, shape: 0, numbering: 2 },
-  { name: "nb", kind: 1, category: 4, closing: 0, shape: 0, numbering: 0 },
-  { name: "nd", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0 },
-  { name: "no", kind: 2, category: 10, closing: 1, shape: 0, numbering: 0 },
-  { name: "ord", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0 },
-  { name: "p", kind: 1, category: 4, closing: 0, shape: 0, numbering: 0 },
-  { name: "pb", kind: 2, category: 11, closing: 0, shape: 0, numbering: 0 },
-  { name: "pc", kind: 1, category: 4, closing: 0, shape: 0, numbering: 0 },
-  { name: "periph", kind: 9, category: 27, closing: 0, shape: 0, numbering: 0 },
-  { name: "ph", kind: 1, category: 4, closing: 0, shape: 0, numbering: 3 },
-  { name: "pi", kind: 1, category: 4, closing: 0, shape: 0, numbering: 3 },
-  { name: "pm", kind: 1, category: 4, closing: 0, shape: 0, numbering: 0 },
-  { name: "pmc", kind: 1, category: 4, closing: 0, shape: 0, numbering: 0 },
-  { name: "pmo", kind: 1, category: 4, closing: 0, shape: 0, numbering: 0 },
-  { name: "pmr", kind: 1, category: 4, closing: 0, shape: 0, numbering: 0 },
-  { name: "pn", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0 },
-  { name: "png", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0 },
-  { name: "po", kind: 1, category: 4, closing: 0, shape: 0, numbering: 0 },
-  { name: "pr", kind: 1, category: 4, closing: 0, shape: 0, numbering: 0 },
-  { name: "pro", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0 },
-  { name: "q", kind: 1, category: 5, closing: 0, shape: 0, numbering: 4 },
-  { name: "qa", kind: 1, category: 5, closing: 0, shape: 0, numbering: 0 },
-  { name: "qac", kind: 2, category: 13, closing: 1, shape: 0, numbering: 0 },
-  { name: "qc", kind: 1, category: 5, closing: 0, shape: 0, numbering: 0 },
-  { name: "qd", kind: 1, category: 5, closing: 0, shape: 0, numbering: 0 },
-  { name: "qm", kind: 1, category: 5, closing: 0, shape: 0, numbering: 3 },
-  { name: "qr", kind: 1, category: 5, closing: 0, shape: 0, numbering: 0 },
-  { name: "qs", kind: 2, category: 13, closing: 1, shape: 0, numbering: 0 },
-  { name: "qt", kind: 6, category: 21, closing: 3, shape: 2, numbering: 5 },
-  { name: "qt", kind: 2, category: 9, closing: 1, shape: 1, numbering: 0 },
-  { name: "r", kind: 1, category: 3, closing: 0, shape: 0, numbering: 0 },
-  { name: "rb", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0 },
-  { name: "ref", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0 },
-  { name: "rem", kind: 1, category: 1, closing: 0, shape: 0, numbering: 0 },
-  { name: "rq", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0 },
-  { name: "s", kind: 1, category: 3, closing: 0, shape: 0, numbering: 4 },
-  { name: "sc", kind: 2, category: 10, closing: 1, shape: 0, numbering: 0 },
-  { name: "sd", kind: 1, category: 3, closing: 0, shape: 0, numbering: 4 },
-  { name: "sig", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0 },
-  { name: "sls", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0 },
-  { name: "sp", kind: 1, category: 3, closing: 0, shape: 0, numbering: 0 },
-  { name: "sr", kind: 1, category: 3, closing: 0, shape: 0, numbering: 0 },
-  { name: "sts", kind: 1, category: 1, closing: 0, shape: 0, numbering: 0 },
-  { name: "sup", kind: 2, category: 10, closing: 1, shape: 0, numbering: 0 },
-  { name: "ta", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0 },
-  { name: "table", kind: 6, category: 20, closing: 3, shape: 0, numbering: 0 },
-  { name: "tc", kind: 12, category: 15, closing: 0, shape: 0, numbering: 15 },
-  { name: "tcc", kind: 12, category: 15, closing: 0, shape: 0, numbering: 15 },
-  { name: "tcr", kind: 12, category: 15, closing: 0, shape: 0, numbering: 15 },
-  { name: "th", kind: 12, category: 15, closing: 0, shape: 0, numbering: 15 },
-  { name: "thc", kind: 12, category: 15, closing: 0, shape: 0, numbering: 15 },
-  { name: "thr", kind: 12, category: 15, closing: 0, shape: 0, numbering: 15 },
-  { name: "tl", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0 },
-  { name: "toc", kind: 1, category: 1, closing: 0, shape: 0, numbering: 3 },
-  { name: "toca", kind: 1, category: 1, closing: 0, shape: 0, numbering: 3 },
-  { name: "tr", kind: 11, category: 7, closing: 0, shape: 0, numbering: 0 },
-  { name: "ts", kind: 6, category: 22, closing: 3, shape: 0, numbering: 0 },
-  { name: "usfm", kind: 13, category: 28, closing: 0, shape: 0, numbering: 0 },
-  { name: "v", kind: 5, category: 24, closing: 0, shape: 0, numbering: 0 },
-  { name: "va", kind: 2, category: 24, closing: 1, shape: 0, numbering: 0 },
-  { name: "vid", kind: 6, category: 23, closing: 3, shape: 0, numbering: 0 },
-  { name: "vp", kind: 2, category: 24, closing: 1, shape: 0, numbering: 0 },
-  { name: "w", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0 },
-  { name: "wa", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0 },
-  { name: "wg", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0 },
-  { name: "wh", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0 },
-  { name: "wj", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0 },
-  { name: "wl", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0 },
-  { name: "x", kind: 3, category: 18, closing: 1, shape: 0, numbering: 0 },
-  { name: "xdc", kind: 2, category: 16, closing: 2, shape: 0, numbering: 0 },
-  { name: "xk", kind: 2, category: 16, closing: 2, shape: 0, numbering: 0 },
-  { name: "xnt", kind: 2, category: 16, closing: 2, shape: 0, numbering: 0 },
-  { name: "xo", kind: 2, category: 16, closing: 2, shape: 0, numbering: 0 },
-  { name: "xop", kind: 2, category: 16, closing: 2, shape: 0, numbering: 0 },
-  { name: "xot", kind: 2, category: 16, closing: 2, shape: 0, numbering: 0 },
-  { name: "xq", kind: 2, category: 16, closing: 2, shape: 0, numbering: 0 },
-  { name: "xt", kind: 2, category: 16, closing: 2, shape: 0, numbering: 0 },
-  { name: "xta", kind: 2, category: 16, closing: 2, shape: 0, numbering: 0 },
+  { name: "", kind: 0, category: 0, closing: 0, shape: 0, numbering: 0, ws: 7 },
+  { name: "add", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0, ws: 6 },
+  { name: "addpn", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0, ws: 6 },
+  { name: "b", kind: 1, category: 5, closing: 0, shape: 0, numbering: 0, ws: 4 },
+  { name: "bd", kind: 2, category: 10, closing: 1, shape: 0, numbering: 0, ws: 6 },
+  { name: "bdit", kind: 2, category: 10, closing: 1, shape: 0, numbering: 0, ws: 6 },
+  { name: "bk", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0, ws: 6 },
+  { name: "c", kind: 4, category: 25, closing: 0, shape: 0, numbering: 0, ws: 0 },
+  { name: "ca", kind: 2, category: 25, closing: 1, shape: 0, numbering: 0, ws: 0 },
+  { name: "cat", kind: 10, category: 27, closing: 1, shape: 0, numbering: 0, ws: 1 },
+  { name: "cd", kind: 1, category: 3, closing: 0, shape: 0, numbering: 0, ws: 0 },
+  { name: "cl", kind: 1, category: 3, closing: 0, shape: 0, numbering: 0, ws: 0 },
+  { name: "cls", kind: 1, category: 4, closing: 0, shape: 0, numbering: 0, ws: 6 },
+  { name: "cp", kind: 1, category: 25, closing: 0, shape: 0, numbering: 0, ws: 0 },
+  { name: "d", kind: 1, category: 3, closing: 0, shape: 0, numbering: 0, ws: 0 },
+  { name: "dc", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0, ws: 6 },
+  { name: "ef", kind: 3, category: 18, closing: 1, shape: 0, numbering: 0, ws: 6 },
+  { name: "em", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0, ws: 6 },
+  { name: "esb", kind: 8, category: 26, closing: 0, shape: 0, numbering: 0, ws: 6 },
+  { name: "esbe", kind: 8, category: 26, closing: 0, shape: 0, numbering: 0, ws: 6 },
+  { name: "ex", kind: 3, category: 19, closing: 1, shape: 0, numbering: 0, ws: 6 },
+  { name: "f", kind: 3, category: 18, closing: 1, shape: 0, numbering: 0, ws: 6 },
+  { name: "fdc", kind: 2, category: 16, closing: 2, shape: 0, numbering: 0, ws: 6 },
+  { name: "fe", kind: 3, category: 18, closing: 1, shape: 0, numbering: 0, ws: 6 },
+  { name: "fig", kind: 7, category: 30, closing: 1, shape: 0, numbering: 0, ws: 6 },
+  { name: "fk", kind: 2, category: 16, closing: 2, shape: 0, numbering: 0, ws: 6 },
+  { name: "fl", kind: 2, category: 16, closing: 2, shape: 0, numbering: 0, ws: 6 },
+  { name: "fm", kind: 2, category: 16, closing: 1, shape: 0, numbering: 0, ws: 6 },
+  { name: "fp", kind: 2, category: 16, closing: 2, shape: 0, numbering: 0, ws: 6 },
+  { name: "fq", kind: 2, category: 16, closing: 2, shape: 0, numbering: 0, ws: 6 },
+  { name: "fqa", kind: 2, category: 16, closing: 2, shape: 0, numbering: 0, ws: 6 },
+  { name: "fr", kind: 2, category: 16, closing: 2, shape: 0, numbering: 0, ws: 6 },
+  { name: "ft", kind: 2, category: 16, closing: 2, shape: 0, numbering: 0, ws: 6 },
+  { name: "fv", kind: 2, category: 16, closing: 2, shape: 0, numbering: 0, ws: 6 },
+  { name: "fw", kind: 2, category: 16, closing: 2, shape: 0, numbering: 0, ws: 6 },
+  { name: "h", kind: 1, category: 1, closing: 0, shape: 0, numbering: 3, ws: 0 },
+  { name: "ib", kind: 1, category: 2, closing: 0, shape: 0, numbering: 0, ws: 6 },
+  { name: "id", kind: 13, category: 29, closing: 0, shape: 0, numbering: 0, ws: 0 },
+  { name: "ide", kind: 1, category: 1, closing: 0, shape: 0, numbering: 0, ws: 0 },
+  { name: "ie", kind: 1, category: 2, closing: 0, shape: 0, numbering: 0, ws: 6 },
+  { name: "iex", kind: 1, category: 2, closing: 0, shape: 0, numbering: 0, ws: 6 },
+  { name: "ili", kind: 1, category: 2, closing: 0, shape: 0, numbering: 2, ws: 6 },
+  { name: "im", kind: 1, category: 2, closing: 0, shape: 0, numbering: 0, ws: 6 },
+  { name: "imi", kind: 1, category: 2, closing: 0, shape: 0, numbering: 0, ws: 6 },
+  { name: "imq", kind: 1, category: 2, closing: 0, shape: 0, numbering: 0, ws: 6 },
+  { name: "imt", kind: 1, category: 2, closing: 0, shape: 0, numbering: 4, ws: 6 },
+  { name: "imte", kind: 1, category: 2, closing: 0, shape: 0, numbering: 2, ws: 6 },
+  { name: "io", kind: 1, category: 2, closing: 0, shape: 0, numbering: 4, ws: 6 },
+  { name: "ior", kind: 2, category: 12, closing: 1, shape: 0, numbering: 0, ws: 6 },
+  { name: "iot", kind: 1, category: 2, closing: 0, shape: 0, numbering: 0, ws: 6 },
+  { name: "ip", kind: 1, category: 2, closing: 0, shape: 0, numbering: 0, ws: 6 },
+  { name: "ipc", kind: 1, category: 2, closing: 0, shape: 0, numbering: 0, ws: 6 },
+  { name: "ipi", kind: 1, category: 2, closing: 0, shape: 0, numbering: 0, ws: 6 },
+  { name: "ipq", kind: 1, category: 2, closing: 0, shape: 0, numbering: 0, ws: 6 },
+  { name: "ipr", kind: 1, category: 2, closing: 0, shape: 0, numbering: 0, ws: 6 },
+  { name: "iq", kind: 1, category: 2, closing: 0, shape: 0, numbering: 3, ws: 6 },
+  { name: "iqt", kind: 2, category: 12, closing: 1, shape: 0, numbering: 0, ws: 6 },
+  { name: "is", kind: 1, category: 2, closing: 0, shape: 0, numbering: 2, ws: 6 },
+  { name: "it", kind: 2, category: 10, closing: 1, shape: 0, numbering: 0, ws: 6 },
+  { name: "jmp", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0, ws: 6 },
+  { name: "k", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0, ws: 6 },
+  { name: "lf", kind: 1, category: 6, closing: 0, shape: 0, numbering: 0, ws: 6 },
+  { name: "lh", kind: 1, category: 6, closing: 0, shape: 0, numbering: 0, ws: 6 },
+  { name: "li", kind: 1, category: 6, closing: 0, shape: 0, numbering: 4, ws: 6 },
+  { name: "lik", kind: 2, category: 14, closing: 1, shape: 0, numbering: 0, ws: 6 },
+  { name: "lim", kind: 1, category: 6, closing: 0, shape: 0, numbering: 4, ws: 6 },
+  { name: "list", kind: 6, category: 20, closing: 3, shape: 0, numbering: 0, ws: 1 },
+  { name: "lit", kind: 1, category: 4, closing: 0, shape: 0, numbering: 0, ws: 6 },
+  { name: "litl", kind: 2, category: 14, closing: 1, shape: 0, numbering: 0, ws: 6 },
+  { name: "liv", kind: 2, category: 14, closing: 1, shape: 0, numbering: 14, ws: 6 },
+  { name: "m", kind: 1, category: 4, closing: 0, shape: 0, numbering: 0, ws: 6 },
+  { name: "mi", kind: 1, category: 4, closing: 0, shape: 0, numbering: 3, ws: 6 },
+  { name: "mr", kind: 1, category: 3, closing: 0, shape: 0, numbering: 0, ws: 0 },
+  { name: "ms", kind: 1, category: 3, closing: 0, shape: 0, numbering: 3, ws: 0 },
+  { name: "mt", kind: 1, category: 3, closing: 0, shape: 0, numbering: 4, ws: 0 },
+  { name: "mte", kind: 1, category: 3, closing: 0, shape: 0, numbering: 2, ws: 0 },
+  { name: "nb", kind: 1, category: 4, closing: 0, shape: 0, numbering: 0, ws: 6 },
+  { name: "nd", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0, ws: 6 },
+  { name: "no", kind: 2, category: 10, closing: 1, shape: 0, numbering: 0, ws: 6 },
+  { name: "ord", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0, ws: 6 },
+  { name: "p", kind: 1, category: 4, closing: 0, shape: 0, numbering: 0, ws: 6 },
+  { name: "pb", kind: 2, category: 11, closing: 0, shape: 0, numbering: 0, ws: 6 },
+  { name: "pc", kind: 1, category: 4, closing: 0, shape: 0, numbering: 0, ws: 6 },
+  { name: "periph", kind: 9, category: 28, closing: 0, shape: 0, numbering: 0, ws: 0 },
+  { name: "ph", kind: 1, category: 4, closing: 0, shape: 0, numbering: 3, ws: 6 },
+  { name: "pi", kind: 1, category: 4, closing: 0, shape: 0, numbering: 3, ws: 6 },
+  { name: "pm", kind: 1, category: 4, closing: 0, shape: 0, numbering: 0, ws: 6 },
+  { name: "pmc", kind: 1, category: 4, closing: 0, shape: 0, numbering: 0, ws: 6 },
+  { name: "pmo", kind: 1, category: 4, closing: 0, shape: 0, numbering: 0, ws: 6 },
+  { name: "pmr", kind: 1, category: 4, closing: 0, shape: 0, numbering: 0, ws: 6 },
+  { name: "pn", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0, ws: 6 },
+  { name: "png", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0, ws: 6 },
+  { name: "po", kind: 1, category: 4, closing: 0, shape: 0, numbering: 0, ws: 6 },
+  { name: "pr", kind: 1, category: 4, closing: 0, shape: 0, numbering: 0, ws: 6 },
+  { name: "pro", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0, ws: 6 },
+  { name: "q", kind: 1, category: 5, closing: 0, shape: 0, numbering: 4, ws: 6 },
+  { name: "qa", kind: 1, category: 5, closing: 0, shape: 0, numbering: 0, ws: 6 },
+  { name: "qac", kind: 2, category: 13, closing: 1, shape: 0, numbering: 0, ws: 6 },
+  { name: "qc", kind: 1, category: 5, closing: 0, shape: 0, numbering: 0, ws: 6 },
+  { name: "qd", kind: 1, category: 5, closing: 0, shape: 0, numbering: 0, ws: 6 },
+  { name: "qm", kind: 1, category: 5, closing: 0, shape: 0, numbering: 3, ws: 6 },
+  { name: "qr", kind: 1, category: 5, closing: 0, shape: 0, numbering: 0, ws: 6 },
+  { name: "qs", kind: 2, category: 13, closing: 1, shape: 0, numbering: 0, ws: 6 },
+  { name: "qt", kind: 6, category: 22, closing: 3, shape: 2, numbering: 5, ws: 1 },
+  { name: "qt", kind: 2, category: 9, closing: 1, shape: 1, numbering: 0, ws: 6 },
+  { name: "r", kind: 1, category: 3, closing: 0, shape: 0, numbering: 0, ws: 0 },
+  { name: "rb", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0, ws: 6 },
+  { name: "ref", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0, ws: 6 },
+  { name: "rem", kind: 1, category: 1, closing: 0, shape: 0, numbering: 0, ws: 0 },
+  { name: "rq", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0, ws: 6 },
+  { name: "s", kind: 1, category: 3, closing: 0, shape: 0, numbering: 4, ws: 6 },
+  { name: "sc", kind: 2, category: 10, closing: 1, shape: 0, numbering: 0, ws: 6 },
+  { name: "sd", kind: 1, category: 3, closing: 0, shape: 0, numbering: 4, ws: 0 },
+  { name: "sig", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0, ws: 6 },
+  { name: "sls", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0, ws: 6 },
+  { name: "sp", kind: 1, category: 3, closing: 0, shape: 0, numbering: 0, ws: 0 },
+  { name: "sr", kind: 1, category: 3, closing: 0, shape: 0, numbering: 0, ws: 0 },
+  { name: "sts", kind: 1, category: 1, closing: 0, shape: 0, numbering: 0, ws: 0 },
+  { name: "sup", kind: 2, category: 10, closing: 1, shape: 0, numbering: 0, ws: 6 },
+  { name: "ta", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0, ws: 6 },
+  { name: "table", kind: 6, category: 21, closing: 3, shape: 0, numbering: 0, ws: 1 },
+  { name: "tc", kind: 12, category: 15, closing: 0, shape: 0, numbering: 15, ws: 6 },
+  { name: "tcc", kind: 12, category: 15, closing: 0, shape: 0, numbering: 15, ws: 6 },
+  { name: "tcr", kind: 12, category: 15, closing: 0, shape: 0, numbering: 15, ws: 6 },
+  { name: "th", kind: 12, category: 15, closing: 0, shape: 0, numbering: 15, ws: 6 },
+  { name: "thc", kind: 12, category: 15, closing: 0, shape: 0, numbering: 15, ws: 6 },
+  { name: "thr", kind: 12, category: 15, closing: 0, shape: 0, numbering: 15, ws: 6 },
+  { name: "tl", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0, ws: 6 },
+  { name: "toc", kind: 1, category: 1, closing: 0, shape: 0, numbering: 3, ws: 0 },
+  { name: "toca", kind: 1, category: 1, closing: 0, shape: 0, numbering: 3, ws: 0 },
+  { name: "tr", kind: 11, category: 7, closing: 0, shape: 0, numbering: 0, ws: 6 },
+  { name: "ts", kind: 6, category: 23, closing: 3, shape: 0, numbering: 0, ws: 1 },
+  { name: "usfm", kind: 13, category: 29, closing: 0, shape: 0, numbering: 0, ws: 0 },
+  { name: "v", kind: 5, category: 25, closing: 0, shape: 0, numbering: 0, ws: 2 },
+  { name: "va", kind: 2, category: 25, closing: 1, shape: 0, numbering: 0, ws: 0 },
+  { name: "vid", kind: 6, category: 24, closing: 3, shape: 0, numbering: 0, ws: 1 },
+  { name: "vp", kind: 2, category: 25, closing: 1, shape: 0, numbering: 0, ws: 0 },
+  { name: "w", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0, ws: 6 },
+  { name: "wa", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0, ws: 6 },
+  { name: "wg", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0, ws: 6 },
+  { name: "wh", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0, ws: 6 },
+  { name: "wj", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0, ws: 6 },
+  { name: "wl", kind: 2, category: 9, closing: 1, shape: 0, numbering: 0, ws: 6 },
+  { name: "x", kind: 3, category: 19, closing: 1, shape: 0, numbering: 0, ws: 6 },
+  { name: "xdc", kind: 2, category: 17, closing: 2, shape: 0, numbering: 0, ws: 6 },
+  { name: "xk", kind: 2, category: 17, closing: 2, shape: 0, numbering: 0, ws: 6 },
+  { name: "xnt", kind: 2, category: 17, closing: 2, shape: 0, numbering: 0, ws: 6 },
+  { name: "xo", kind: 2, category: 17, closing: 2, shape: 0, numbering: 0, ws: 6 },
+  { name: "xop", kind: 2, category: 17, closing: 2, shape: 0, numbering: 0, ws: 6 },
+  { name: "xot", kind: 2, category: 17, closing: 2, shape: 0, numbering: 0, ws: 6 },
+  { name: "xq", kind: 2, category: 17, closing: 2, shape: 0, numbering: 0, ws: 6 },
+  { name: "xt", kind: 2, category: 17, closing: 2, shape: 0, numbering: 0, ws: 6 },
+  { name: "xta", kind: 2, category: 17, closing: 2, shape: 0, numbering: 0, ws: 6 },
 ];
 
 /**
@@ -890,9 +945,18 @@ export class Marker {
   }
 
   /**
+   * One of `StructuralWhitespaceRequirement`: what must follow this marker's
+   * name. `SingleNewline` is the rule for a marker that takes no content on its
+   * own line.
+   */
+  ws(): number {
+    return MARKERS[this.idx]?.ws ?? 0;
+  }
+
+  /**
    * Row 0: an unknown name, a `\z` extension, an illegal spelling. The row has
-   * no name, so the actual spelling is only in the document — slice the
-   * token's span for it.
+   * no name, so the actual spelling is only in the document —
+   * `TokenView.spelling(text)` reads it, and is the one place to.
    */
   isUnknown(): boolean {
     return this.idx === 0;
@@ -918,6 +982,56 @@ export class TokenView {
   /** One of `TokenKind`, with the spelling bit stripped. */
   kind(): number {
     return this.rows.seek(this.id).kind & ~TOKEN_SPELLING_BIT;
+  }
+
+  /**
+   * The last byte of the span is the one horizontal delimiter the scanner
+   * folded on — `\v ` keeps the space, `\v  1` puts the surplus in a `Pad`.
+   * Only `Marker`, `Milestone`, `Designator`, `NoteCaller` and `BookCode` fold.
+   */
+  delimiterFolded(): boolean {
+    return (this.rows.seek(this.id).flags & TOKEN_DELIMITER_FOLDED) !== 0;
+  }
+
+  /** A `Text` token of nothing but spaces and tabs. */
+  isBlank(): boolean {
+    return (this.rows.seek(this.id).flags & TOKEN_BLANK) !== 0;
+  }
+
+  /**
+   * Where the token's PAYLOAD ends: `end`, or one back from it when a
+   * delimiter is folded on. One in either space — a space and a tab are one
+   * byte and one UTF-16 code unit alike — so this is right whichever the parse
+   * asked for.
+   */
+  payloadEnd(): number {
+    const r = this.rows.seek(this.id);
+    return (r.flags & TOKEN_DELIMITER_FOLDED) !== 0 ? r.end - 1 : r.end;
+  }
+
+  /**
+   * The marker as the author SPELLED it, `text` being the document this parse
+   * came from: `"q2"`, `"+add"` sliced past the `+`, `"qt1-s"`, `"w"` from
+   * `\w*`. `""` for a kind that is not marker-shaped.
+   *
+   *   \q2 → "q2"   \+nd → "nd"   \zaln-s → "zaln-s"   \add* → "add"
+   *
+   * Level digits and a milestone's `-s`/`-e` half are part of the spelling;
+   * the `\`, the `+` and a closer's `*` are punctuation and are not. THE place
+   * to read an unknown marker's name — `Marker.name()` is `null` on row 0.
+   *
+   * A JS string indexes in UTF-16, so `text` and the dish must agree: parse
+   * with `utf16: true`, or hold an all-ASCII document.
+   */
+  spelling(text: string): string {
+    const r = this.rows.seek(this.id);
+    const kind = r.kind & ~TOKEN_SPELLING_BIT;
+    if (!isMarkerKind(kind)) return "";
+    let from = r.start + 1;
+    if (kind !== TokenKind.Milestone && (r.kind & TOKEN_SPELLING_BIT) !== 0) from += 1;
+    let to = this.payloadEnd();
+    if (kind === TokenKind.ClosingMarker && text[to - 1] === "*") to -= 1;
+    return text.slice(from, to);
   }
 
   /** `\+` nesting on a marker, the `-e` half on a milestone. */
@@ -1022,6 +1136,7 @@ export class Tree {
   readonly nodes: NodeRow;
   readonly tokens: TokenRow;
   readonly childIds: Uint32Array;
+  private cachedOwnership: { owners: Uint32Array; parents: Uint32Array } | null = null;
 
   constructor(nodes: NodeRow, tokens: TokenRow, childIds: Uint32Array) {
     this.nodes = nodes;
@@ -1086,36 +1201,98 @@ export class Tree {
   }
 
   /**
-   * One node's BYTE extent: its opening marker through the end of its last
-   * descendant TOKEN. Walked, because a child is as likely to be a node as a
-   * token — the last child of `\f` is usually the `\ft` node.
+   * The FIRST descendant token's INDEX.
+   *
+   *   \p \v 1 a\f + \ft note\f*    firstToken(the note) → the `\f` token
+   *                                lastToken(the note)  → the `\f*` token
+   *
+   * A descent, because a child is as likely to be a node as a token — the last
+   * child of `\f` is usually the `\ft` node. A childless node answers with its
+   * own opening marker, the only token it has, which is `NONE` on the root of
+   * an empty document.
    */
-  extent(node: number): Span {
-    const [from, to] = this.childRange(node);
-    if (from === to) {
-      // Only the root is childless, and only on an empty document.
-      const token = this.nodes.seek(node).token;
-      if (token === NONE || token >= this.tokens.length) return { from: 0, to: 0 };
-      const r = this.tokens.seek(token);
-      return { from: r.start, to: r.start };
-    }
-    return { from: this.edgeToken(from, true), to: this.edgeToken(to - 1, false) };
+  firstToken(node: number): number {
+    return this.edgeToken(node, true);
   }
 
-  /** The first (or last) TOKEN reachable from one child slot. */
-  private edgeToken(slot: number, first: boolean): number {
-    let id = this.childIds[slot];
-    while ((id & NODE_ID_BIT) !== 0) {
-      const [from, to] = this.childRange(id & ~NODE_ID_BIT);
-      if (from === to) break;
-      id = this.childIds[first ? from : to - 1];
+  /** The LAST descendant token's index. `firstToken`'s twin. */
+  lastToken(node: number): number {
+    return this.edgeToken(node, false);
+  }
+
+  /**
+   * One node's extent: its opening marker through the end of its last
+   * descendant TOKEN, in whichever space the parse was asked for.
+   */
+  extent(node: number): Span {
+    const first = this.firstToken(node);
+    if (first === NONE || first >= this.tokens.length) return { from: 0, to: 0 };
+    const from = this.tokens.seek(first).start;
+    // Only the root is childless, and only on an empty document.
+    const r = this.nodes.seek(node);
+    if (r.childFrom === r.childTo) return { from, to: from };
+    return { from, to: this.tokens.seek(this.lastToken(node)).end };
+  }
+
+  /**
+   * The descent behind both edges. Every field of a row is read BEFORE the
+   * step that moves the cursor off it, so no read is stale.
+   */
+  private edgeToken(node: number, first: boolean): number {
+    for (;;) {
+      const r = this.nodes.seek(node);
+      const childFrom = r.childFrom;
+      const childTo = r.childTo;
+      if (childFrom === childTo) return r.token;
+      const id = this.childIds[first ? childFrom : childTo - 1];
+      if ((id & NODE_ID_BIT) === 0) return id;
+      node = id & ~NODE_ID_BIT;
     }
-    if ((id & NODE_ID_BIT) !== 0) {
-      const r = this.tokens.seek(this.nodes.seek(id & ~NODE_ID_BIT).token);
-      return first ? r.start : r.end;
+  }
+
+  /**
+   * Token index → the id of the innermost node that owns it.
+   *
+   *   \p \v 1 a\f + \ft note\f*
+   *           ^         ^ the `\ft` node, not the `\f` that contains it
+   *           the `\p` node
+   *
+   * Every token id appears EXACTLY ONCE in the child arena, so ownership is
+   * total and unambiguous: no token is unowned and none has two owners.
+   *
+   * Built on first call from ONE walk of the arena, and kept — `parent()`
+   * comes out of the same pass.
+   */
+  owners(): Uint32Array {
+    return this.ownership().owners;
+  }
+
+  /** A node's parent, `NONE` on the root. The same one walk as `owners()`. */
+  parent(node: number): number {
+    return this.ownership().parents[node] ?? NONE;
+  }
+
+  private ownership(): { owners: Uint32Array; parents: Uint32Array } {
+    if (this.cachedOwnership !== null) return this.cachedOwnership;
+    const owners = new Uint32Array(this.tokens.length).fill(NONE);
+    const parents = new Uint32Array(this.nodes.length).fill(NONE);
+    const stack = [0];
+    while (stack.length) {
+      const node = stack.pop() as number;
+      const [from, to] = this.childRange(node);
+      for (let slot = from; slot < to; slot++) {
+        const id = this.childIds[slot];
+        if ((id & NODE_ID_BIT) === 0) {
+          owners[id] = node;
+        } else {
+          const child = id & ~NODE_ID_BIT;
+          parents[child] = node;
+          stack.push(child);
+        }
+      }
     }
-    const r = this.tokens.seek(id);
-    return first ? r.start : r.end;
+    this.cachedOwnership = { owners, parents };
+    return this.cachedOwnership;
   }
 
   private childRange(node: number): number[] {
@@ -1433,6 +1610,42 @@ export class Toc {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Attributes — the one export whose wire is a flat array, not a dish
+// ---------------------------------------------------------------------------
+
+/** u32s per attribute in what `attrs` returns: name span, then value span. */
+export const ATTR_STRIDE = 4;
+
+/** One attribute list, decoded. A bare value has an EMPTY name span. */
+export interface AttrList {
+  attrs: { name: Span; value: Span }[];
+  /** `code` is a `MalformedAttr`. Absent when the list parsed clean. */
+  malformed?: { code: number; at: number };
+}
+
+/**
+ * What the wasm `attrs(text, from, to, utf16)` export returns, as objects.
+ *
+ *   const list = attrList(rawAttrs(text, from, to, 1));
+ *   for (const { name, value } of list.attrs) …
+ *
+ * Four words per attribute and two at the tail, in whatever space the call
+ * asked for. A malformed tail ENDS the list, so it is one finding and always
+ * the last thing in the array.
+ */
+export function attrList(flat: Uint32Array | readonly number[]): AttrList {
+  const attrs: { name: Span; value: Span }[] = [];
+  for (let at = 0; at + ATTR_STRIDE <= flat.length - 2; at += ATTR_STRIDE) {
+    attrs.push({
+      name: { from: flat[at], to: flat[at + 1] },
+      value: { from: flat[at + 2], to: flat[at + 3] },
+    });
+  }
+  const code = flat[flat.length - 2];
+  return code === NONE ? { attrs } : { attrs, malformed: { code, at: flat[flat.length - 1] } };
+}
+
 /** What a parse should compute. Everything defaults off except the tree. */
 export interface ParseOptions {
   /** Run the lint walk — the one expensive optional. */
@@ -1490,6 +1703,17 @@ export interface Dish {
    * version is declared.
    */
   usfmVersion: number;
+  /**
+   * The source's length in the same space as every offset here — bytes, or
+   * UTF-16 code units under `utf16`. An end-of-document position without
+   * holding the text.
+   */
+  sourceLength: number;
+  /**
+   * xxh3-64 of the source BYTES, whatever space the offsets are in. Two dishes
+   * of one document agree; the flag does not enter into it.
+   */
+  sourceHash: bigint;
 }
 
 /** The declared version as the string `DiagnosticView.severity` wants. */
@@ -1565,6 +1789,8 @@ export function deserialize(dish: Uint8Array): Dish {
   const count = head.getUint32(8, true);
   const utf16 = (head.getUint32(12, true) & FLAG_UTF16) !== 0;
   const usfmVersion = head.getUint32(16, true);
+  const sourceLength = head.getUint32(20, true);
+  const sourceHash = head.getBigUint64(24, true);
 
   const view = (n: number): DataView => {
     const at = head.getUint32(HEADER_BYTES + n * 8, true);
@@ -1600,5 +1826,7 @@ export function deserialize(dish: Uint8Array): Dish {
     toc: new Toc(new ChapterRow(view(SECTION.chapters)), new VerseRow(view(SECTION.verses))),
     utf16,
     usfmVersion,
+    sourceLength,
+    sourceHash,
   };
 }

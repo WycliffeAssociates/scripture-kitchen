@@ -113,19 +113,21 @@ pub enum AttrEvent<'a> {
     },
 }
 
-/// Why a list stopped parsing.
+/// Why a list stopped parsing. The discriminants are the wire's — a consumer
+/// across a wall gets the number, never the name.
+#[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MalformedAttr {
     /// A value opened with `"` and no second `"` followed. `at` is the OPENING
     /// quote — the byte the author must look at.
-    UnterminatedQuote,
+    UnterminatedQuote = 0,
     /// An `=` with no name before it (`|="x"`).
-    EmptyName,
+    EmptyName = 1,
     /// A `name=` with nothing after the `=` (`|lemma=`).
-    MissingValue,
+    MissingValue = 2,
     /// Where a pair should begin, something else does: a comma between pairs,
     /// a bare word after a pair, a stray quote, the tail after a `\"`.
-    BareJunk,
+    BareJunk = 3,
 }
 
 /// Walks one AttrList token's interior.
@@ -299,6 +301,23 @@ pub enum AttrResolution {
     /// `default_attribute` (`\fig`), which is a shape that PARSED and a
     /// question for lint, never a [`MalformedAttr`].
     Unknown,
+}
+
+impl AttrResolution {
+    /// The wire's numbers, stated once: `code` reads them, codegen emits them.
+    pub const DEFINED: u32 = 0;
+    pub const USER_NAMESPACE: u32 = 1;
+    pub const UNKNOWN: u32 = 2;
+
+    /// The variant as the one number that crosses a wall. The payload does
+    /// not: `defined` is a table string, and no string is on the wire.
+    pub fn code(self) -> u32 {
+        match self {
+            AttrResolution::Defined { .. } => Self::DEFINED,
+            AttrResolution::UserNamespace => Self::USER_NAMESPACE,
+            AttrResolution::Unknown => Self::UNKNOWN,
+        }
+    }
 }
 
 /// Matches one attribute name against a marker's row. THE one place that

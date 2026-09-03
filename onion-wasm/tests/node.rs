@@ -18,7 +18,7 @@
 //! `include_str!`d: the corpus trees are gitignored, and a missing file is a
 //! COMPILE error where a missing corpus should be a skip.
 
-use onion_wasm::{FormatOpts, format_edits, format_edits_in, parse};
+use onion_wasm::{FormatOpts, attr_resolve, attrs, format_edits, format_edits_in, parse, to_utf16};
 use usfm_onion::wire;
 use wasm_bindgen_test::*;
 
@@ -66,6 +66,24 @@ fn the_wall_hands_over_an_intact_dish() {
     }
 }
 
+/// The header's last three words: the source's length in the dish's own offset
+/// space, and its hash over the bytes whichever space that is.
+#[wasm_bindgen_test]
+fn the_header_names_the_source_it_came_from() {
+    let bytes = parse(BOOK, false, false, false);
+    let units = parse(BOOK, false, false, true);
+    let hash = |d: &[u8]| u64::from_le_bytes(d[24..32].try_into().expect("eight bytes"));
+
+    assert_eq!(word(&bytes, 20) as usize, BOOK.len());
+    assert_eq!(
+        word(&units, 20),
+        BOOK.encode_utf16().count() as u32,
+        "Devanagari is three bytes and one code unit"
+    );
+    assert!(word(&units, 20) < word(&bytes, 20));
+    assert_eq!(hash(&bytes), hash(&units), "always over the bytes");
+}
+
 #[wasm_bindgen_test]
 fn the_hand_count_holds() {
     let dish = parse(BOOK, false, true, false);
@@ -102,6 +120,91 @@ fn utf16_is_opt_in_and_actually_converts() {
     let (ba, bl) = section(&bytes, "childIds");
     let (ua, ul) = section(&units, "childIds");
     assert_eq!(&bytes[ba..ba + bl], &units[ua..ua + ul]);
+}
+
+/// The attribute interpreter's four shapes, across the wall. The span the
+/// caller passes is the LIST TOKEN's, found here the way an editor would find
+/// it — off a parse it already holds.
+#[wasm_bindgen_test]
+fn the_attribute_view_crosses() {
+    // (four words per attribute, then the malformed code and its offset)
+    let read = |text: &str, utf16: bool| -> Vec<u32> {
+        let list = usfm_onion::lex(text)
+            .into_iter()
+            .find(|t| t.kind() == usfm_onion::TokenKind::AttrList)
+            .expect("an attribute list");
+        let (from, to) = if utf16 {
+            (to_utf16(text, list.start), to_utf16(text, list.end()))
+        } else {
+            (list.start, list.end())
+        };
+        attrs(text, from, to, u32::from(utf16))
+    };
+    fn slice(text: &str, from: u32, to: u32) -> &str {
+        &text[from as usize..to as usize]
+    }
+
+    // Pairs.
+    let text = "\\w grace|lemma=\"grace\" x-y=\"z\"\\w*";
+    let flat = read(text, false);
+    assert_eq!(flat.len(), 2 * 4 + 2);
+    assert_eq!(slice(text, flat[0], flat[1]), "lemma");
+    assert_eq!(slice(text, flat[2], flat[3]), "grace");
+    assert_eq!(slice(text, flat[4], flat[5]), "x-y");
+    assert_eq!(slice(text, flat[6], flat[7]), "z");
+    assert_eq!(&flat[8..], [wire::NONE, wire::NONE], "nothing malformed");
+
+    // Bare: an EMPTY name span sitting at the value's start.
+    let text = "\\w In|in\\w*";
+    let flat = read(text, false);
+    assert_eq!(flat.len(), 4 + 2);
+    assert_eq!(flat[0], flat[1], "a bare name span is empty");
+    assert_eq!(flat[1], flat[2], "…and sits at the value");
+    assert_eq!(slice(text, flat[2], flat[3]), "in");
+
+    // Node-initial: the closing pipe and the HS it absorbed are delimiters.
+    let text = "\\p|cat=\"emphasised\"| text";
+    let flat = read(text, false);
+    assert_eq!(flat.len(), 4 + 2);
+    assert_eq!(slice(text, flat[0], flat[1]), "cat");
+    assert_eq!(slice(text, flat[2], flat[3]), "emphasised");
+
+    // Unterminated quote: no attribute, and the OPENING quote is the offset.
+    let text = "\\w x|lemma=\"grace\\w*";
+    let flat = read(text, false);
+    assert_eq!(flat.len(), 2, "a malformed tail ends the walk");
+    assert_eq!(flat[0], 0, "UnterminatedQuote");
+    assert_eq!(&text[flat[1] as usize..flat[1] as usize + 1], "\"");
+
+    // UTF-16, with a non-BMP character ahead of the list: two code units for
+    // one character, so every word must come back short of its byte offset.
+    let text = "\\p \u{1d11e}\n\\w grace|lemma=\"grace\"\\w*";
+    let bytes = read(text, false);
+    let units = read(text, true);
+    assert_eq!(units.len(), bytes.len());
+    let doc: Vec<u16> = text.encode_utf16().collect();
+    assert!(units[0] < bytes[0], "the offsets have drifted apart");
+    assert_eq!(
+        String::from_utf16(&doc[units[0] as usize..units[1] as usize]).expect("a name"),
+        "lemma"
+    );
+    assert_eq!(
+        String::from_utf16(&doc[units[2] as usize..units[3] as usize]).expect("a value"),
+        "grace"
+    );
+}
+
+/// A name against a row: the resolution code, and nothing that is a string.
+#[wasm_bindgen_test]
+fn attribute_names_resolve_against_the_table() {
+    let w = usfm_onion::tables::generated::marker_idx(
+        b"w",
+        usfm_onion::tables::schema::SpellingShape::PlainOnly,
+    );
+    assert_eq!(attr_resolve("lemma", u32::from(w)), 0, "Defined");
+    assert_eq!(attr_resolve("", u32::from(w)), 0, "the bare default is one");
+    assert_eq!(attr_resolve("x-strong", u32::from(w)), 1, "UserNamespace");
+    assert_eq!(attr_resolve("nonesuch", u32::from(w)), 2, "Unknown");
 }
 
 #[wasm_bindgen_test]

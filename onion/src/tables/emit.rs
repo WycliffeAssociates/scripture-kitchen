@@ -74,7 +74,8 @@ pub(crate) const CATEGORIES: &[(Category, &str)] = &[
     (Category::CharPoetry, "CharPoetry"),
     (Category::CharLists, "CharLists"),
     (Category::CharTables, "CharTables"),
-    (Category::CharNotes, "CharNotes"),
+    (Category::CharNotesFootnote, "CharNotesFootnote"),
+    (Category::CharNotesCrossReference, "CharNotesCrossReference"),
     (Category::NoteFootnote, "NoteFootnote"),
     (Category::NoteCrossReference, "NoteCrossReference"),
     (Category::MilestoneList, "MilestoneList"),
@@ -107,7 +108,7 @@ const SCOPES: &[(ScopeKind, &str)] = &[
     (ScopeKind::List, "List"),
 ];
 
-const WSREQS: &[(Ws, &str)] = &[
+pub(crate) const WSREQS: &[(Ws, &str)] = &[
     (Ws::NotRequired, "NotRequired"),
     (Ws::TagEndDelimiter, "TagEndDelimiter"),
     (

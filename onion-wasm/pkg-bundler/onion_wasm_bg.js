@@ -315,6 +315,53 @@ export class Splices {
 if (Symbol.dispose) Splices.prototype[Symbol.dispose] = Splices.prototype.free;
 
 /**
+ * One attribute name against one marker row: the `AttrResolution` code.
+ *
+ * An empty name is the bare default-value form, which resolves through the
+ * row's own default — so it is a legitimate argument, not a mistake.
+ * @param {string} name
+ * @param {number} marker
+ * @returns {number}
+ */
+export function attrResolve(name, marker) {
+    const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.attrResolve(ptr0, len0, marker);
+    return ret >>> 0;
+}
+
+/**
+ * The k/v view of one `AttrList` token, flat.
+ *
+ * `[from, to)` is the list token's span in the CALLER's space — UTF-16 when
+ * `utf16` is non-zero, bytes otherwise, as `locate` reads it — and every word
+ * comes back in that same space.
+ *
+ * ```text
+ * |lemma="grace" x-y="z"   ->  [nameFrom nameTo valueFrom valueTo] x 2, NONE, NONE
+ * |grace                   ->  one quadruple, its name span EMPTY at the value
+ * |lemma="grace            ->  no quadruple, then UnterminatedQuote and the quote's offset
+ * ```
+ *
+ * Four words per attribute, then two: the `MalformedAttr` code and its
+ * offset, both `NONE` when the list parsed clean. A malformed tail is always
+ * the last event, so it can only be the last pair of words.
+ * @param {string} text
+ * @param {number} from
+ * @param {number} to
+ * @param {number} utf16
+ * @returns {Uint32Array}
+ */
+export function attrs(text, from, to, utf16) {
+    const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.attrs(ptr0, len0, from, to, utf16);
+    var v2 = getArrayU32FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+    return v2;
+}
+
+/**
  * The first `\id`'s book code — `"GEN"`. EMPTY when the document declares
  * none (real in the wild: BSB Ecclesiastes); the `missing-id` diagnostic is
  * where that becomes a finding, not here.

@@ -191,6 +191,39 @@ impl Token {
             label.len() as u32
         }
     }
+
+    /// The wire row's flags byte —
+    /// [`TOKEN_DELIMITER_FOLDED`](crate::wire::schema::TOKEN_DELIMITER_FOLDED)
+    /// and [`TOKEN_BLANK`](crate::wire::schema::TOKEN_BLANK).
+    ///
+    /// ```text
+    /// "\v "  Marker  DELIMITER_FOLDED   the payload is `\v`, one byte back
+    /// "  "   Text    BLANK              horizontal whitespace, all of it
+    /// "In "  Text    -                  a trailing space in Text is content
+    /// ```
+    ///
+    /// The fold is a per-shape fact, not a whitespace test: only the shapes the
+    /// scanner folds a delimiter onto can end in one that is not content.
+    pub fn wire_flags(&self, source: &[u8]) -> u8 {
+        use crate::wire::schema::{TOKEN_BLANK, TOKEN_DELIMITER_FOLDED};
+        let span = &source[self.start as usize..self.end() as usize];
+        let label = crate::scanner::payload_label(span);
+        match self.kind() {
+            TokenKind::Marker { .. }
+            | TokenKind::Milestone { .. }
+            | TokenKind::Designator
+            | TokenKind::NoteCaller
+            | TokenKind::BookCode
+                if label.len() < span.len() =>
+            {
+                TOKEN_DELIMITER_FOLDED
+            }
+            // A `Text` span never holds a CR or an LF — the text arm stops at
+            // both — so "no label left" is "horizontal whitespace throughout".
+            TokenKind::Text if label.is_empty() && !span.is_empty() => TOKEN_BLANK,
+            _ => 0,
+        }
+    }
 }
 
 #[cfg(test)]

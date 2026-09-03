@@ -175,10 +175,12 @@ from the `chapters` section.
 
 ## Deliberately absent
 
-- **A checksum export.** Vision §13.4 puts the canonical-source checksum on this
-  facade. Will deferred it (2026-08-24) as a higher-level concern — revisit when
-  sous joins and the host owns a source version. No hashing dependency is here,
-  on purpose.
+- **A checksum export.** Vision §13.4 puts the canonical-source checksum on
+  this facade; Will deferred it (2026-08-24) as a higher-level concern — revisit
+  when sous joins and the host owns a source version. Every dish's header does
+  carry an xxh3-64 of the source it was plated from (`Dish.sourceHash`), which
+  answers "is this the parse of that text"; it is not a source identity the host
+  can hand around.
 - **Any stateful handle.** Ruled: stateless first. If a profiler ever catches
   the per-call index build mattering, an opaque handle is the documented
   fallback — do not pre-design it.

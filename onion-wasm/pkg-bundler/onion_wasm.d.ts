@@ -78,6 +78,33 @@ export class Splices {
 }
 
 /**
+ * One attribute name against one marker row: the `AttrResolution` code.
+ *
+ * An empty name is the bare default-value form, which resolves through the
+ * row's own default — so it is a legitimate argument, not a mistake.
+ */
+export function attrResolve(name: string, marker: number): number;
+
+/**
+ * The k/v view of one `AttrList` token, flat.
+ *
+ * `[from, to)` is the list token's span in the CALLER's space — UTF-16 when
+ * `utf16` is non-zero, bytes otherwise, as `locate` reads it — and every word
+ * comes back in that same space.
+ *
+ * ```text
+ * |lemma="grace" x-y="z"   ->  [nameFrom nameTo valueFrom valueTo] x 2, NONE, NONE
+ * |grace                   ->  one quadruple, its name span EMPTY at the value
+ * |lemma="grace            ->  no quadruple, then UnterminatedQuote and the quote's offset
+ * ```
+ *
+ * Four words per attribute, then two: the `MalformedAttr` code and its
+ * offset, both `NONE` when the list parsed clean. A malformed tail is always
+ * the last event, so it can only be the last pair of words.
+ */
+export function attrs(text: string, from: number, to: number, utf16: number): Uint32Array;
+
+/**
  * The first `\id`'s book code — `"GEN"`. EMPTY when the document declares
  * none (real in the wild: BSB Ecclesiastes); the `missing-id` diagnostic is
  * where that becomes a finding, not here.

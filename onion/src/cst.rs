@@ -92,44 +92,116 @@ impl Cst {
         }
     }
 
+    /// The FIRST descendant token's index.
+    ///
+    /// ```text
+    /// \p \v 1 a\f + \ft note\f*     first_token(the note) = the `\f` token
+    ///                               last_token(the note)  = the `\f*` token
+    /// ```
+    ///
+    /// Walked rather than read off `token`, because a child id is as likely to
+    /// be a node as a token: the last child of `\f` is usually the `\ft` node,
+    /// whose own last child may be another node again. A childless node
+    /// answers with its own opening marker, the only token it has —
+    /// [`ROOT_TOKEN`] on the root of an empty document.
+    pub fn first_token(&self, node: u32) -> u32 {
+        self.edge_token(node, true)
+    }
+
+    /// The LAST descendant token's index. [`Self::first_token`]'s twin.
+    pub fn last_token(&self, node: u32) -> u32 {
+        self.edge_token(node, false)
+    }
+
+    fn edge_token(&self, node: u32, first: bool) -> u32 {
+        let mut node = node;
+        loop {
+            let children = &self.nodes[node as usize].children;
+            if children.is_empty() {
+                return self.nodes[node as usize].token;
+            }
+            let slot = if first {
+                children.start
+            } else {
+                children.end - 1
+            };
+            let child = self.child_ids[slot as usize];
+            if child & NODE_ID_BIT == 0 {
+                return child;
+            }
+            node = child & !NODE_ID_BIT;
+        }
+    }
+
     /// One node's BYTE extent: its opening marker's start through the end of
     /// its LAST DESCENDANT token.
     ///
-    /// Both ends are WALKED rather than read off `token`, because a child id is
-    /// as likely to be a node as a token: the last child of `\f` is usually the
-    /// `\ft` node, whose own last child may be another node again.
-    ///
     /// The extent INCLUDES the node's explicit closer (it is the node's last
     /// child), so a "replace this whole note" edit needs nothing else. The ROOT
-    /// covers every token; an empty document is `0..0`.
+    /// covers every token; an empty document is `0..0`, and a childless node is
+    /// the empty span at its own marker.
     pub fn extent(&self, node: u32, tokens: &[Token]) -> Range<u32> {
-        let children = &self.nodes[node as usize].children;
-        if children.is_empty() {
-            // Only the root can be childless, and only on an empty document:
-            // every other node holds at least its own opening marker.
-            let start = self.nodes[node as usize].token;
-            return match tokens.get(start as usize) {
-                Some(token) => token.start..token.start,
-                None => 0..0,
-            };
+        let Some(start) = tokens
+            .get(self.first_token(node) as usize)
+            .map(|token| token.start)
+        else {
+            return 0..0;
+        };
+        // Only the root can be childless, and only on an empty document: every
+        // other node holds at least its own opening marker.
+        if self.nodes[node as usize].children.is_empty() {
+            return start..start;
         }
-        let mut spine = children.clone();
-        let first = loop {
-            let child = self.child_ids[spine.start as usize];
+        start..tokens[self.last_token(node) as usize].end()
+    }
+
+    /// Token index → the id of the innermost node that owns it.
+    ///
+    /// ```text
+    /// \p \v 1 a\f + \ft note\f*
+    ///         ^         ^ the `\ft` node, not the `\f` that contains it
+    ///         the `\p` node
+    /// ```
+    ///
+    /// Every token id appears EXACTLY ONCE in the arena, so ownership is total
+    /// and unambiguous: no token is unowned, and none has two owners. Unreached
+    /// entries stay `u32::MAX`, which only a `token_count` past the tree's own
+    /// leaves produces.
+    pub fn owners(&self, token_count: usize) -> Vec<u32> {
+        let mut owners = vec![u32::MAX; token_count];
+        self.each_child(|node, child| {
             if child & NODE_ID_BIT == 0 {
-                break child;
+                owners[child as usize] = node;
             }
-            spine = self.nodes[(child & !NODE_ID_BIT) as usize].children.clone();
-        };
-        let mut spine = children.clone();
-        let last = loop {
-            let child = self.child_ids[spine.end as usize - 1];
-            if child & NODE_ID_BIT == 0 {
-                break child;
+        });
+        owners
+    }
+
+    /// Node id → its parent's id, `u32::MAX` on the root. One walk, like
+    /// [`Self::owners`].
+    pub fn parents(&self) -> Vec<u32> {
+        let mut parents = vec![u32::MAX; self.nodes.len()];
+        self.each_child(|node, child| {
+            if child & NODE_ID_BIT != 0 {
+                parents[(child & !NODE_ID_BIT) as usize] = node;
             }
-            spine = self.nodes[(child & !NODE_ID_BIT) as usize].children.clone();
-        };
-        tokens[first as usize].start..tokens[last as usize].end()
+        });
+        parents
+    }
+
+    /// Every (owner, child id) pair in the arena, once, from one walk with an
+    /// explicit stack.
+    fn each_child(&self, mut visit: impl FnMut(u32, u32)) {
+        let mut stack = vec![0u32];
+        while let Some(node) = stack.pop() {
+            for slot in self.nodes[node as usize].children.clone() {
+                let child = self.child_ids[slot as usize];
+                visit(node, child);
+                if child & NODE_ID_BIT != 0 {
+                    stack.push(child & !NODE_ID_BIT);
+                }
+            }
+        }
     }
 }
 
@@ -1565,5 +1637,82 @@ mod tests {
         let tokens = lex("");
         let cst = build(&tokens);
         assert_eq!(cst.extent(0, &tokens), 0..0);
+    }
+
+    /// The two ends `extent` is built on, named as token indices.
+    #[test]
+    fn the_edge_tokens_are_the_ends_of_the_extent() {
+        let source = "\\p one \\f + \\ft note\\f* tail\n\\p next";
+        let tokens = lex(source);
+        let cst = build(&tokens);
+        for name in ["p", "f", "ft"] {
+            let node = node_for(&tokens, &cst, name);
+            let id = cst
+                .nodes
+                .iter()
+                .position(|candidate| candidate == node)
+                .expect("the node came from this tree") as u32;
+            let extent = cst.extent(id, &tokens);
+            assert_eq!(tokens[cst.first_token(id) as usize].start, extent.start);
+            assert_eq!(tokens[cst.last_token(id) as usize].end(), extent.end);
+        }
+        // The root reaches the very first and the very last token.
+        assert_eq!(cst.first_token(0), 0);
+        assert_eq!(cst.last_token(0) as usize, tokens.len() - 1);
+
+        // A childless node answers with its own marker, so an empty document's
+        // root reports no token at all.
+        let empty = build(&lex(""));
+        assert_eq!(empty.first_token(0), ROOT_TOKEN);
+        assert_eq!(empty.last_token(0), ROOT_TOKEN);
+    }
+
+    /// Ownership is TOTAL: one walk names an owner for every token and a parent
+    /// for every node but the root.
+    #[test]
+    fn every_token_has_one_owner_and_every_node_a_parent() {
+        let source = "\\id GEN\n\\c 1\n\\p \\v 1 a\\f + \\ft note\\f* b\n";
+        let tokens = lex(source);
+        let cst = build(&tokens);
+        let owners = cst.owners(tokens.len());
+        let parents = cst.parents();
+
+        assert!(
+            owners.iter().all(|owner| *owner != u32::MAX),
+            "a token with no owner"
+        );
+        assert_eq!(parents[0], u32::MAX, "the root has no parent");
+        assert!(
+            parents[1..].iter().all(|parent| *parent != u32::MAX),
+            "a node with no parent"
+        );
+
+        // The note's inner tokens belong to `\ft`, not to the `\f` that
+        // contains it — the owner is the INNERMOST node.
+        let ft = node_for(&tokens, &cst, "ft");
+        let ft_id = cst
+            .nodes
+            .iter()
+            .position(|node| node == ft)
+            .expect("the node came from this tree") as u32;
+        let note_text = tokens
+            .iter()
+            .position(|t| &source[t.start as usize..t.end() as usize] == "note")
+            .expect("the note's text");
+        assert_eq!(owners[note_text], ft_id);
+
+        // Every parent chain reaches the root, and an owner is always a node
+        // the token's own extent contains.
+        for (token, owner) in owners.iter().enumerate() {
+            let extent = cst.extent(*owner, &tokens);
+            assert!(extent.start <= tokens[token].start && tokens[token].end() <= extent.end);
+            let mut at = *owner;
+            let mut hops = 0;
+            while at != 0 {
+                at = parents[at as usize];
+                hops += 1;
+                assert!(hops <= cst.nodes.len(), "a parent chain that loops");
+            }
+        }
     }
 }
