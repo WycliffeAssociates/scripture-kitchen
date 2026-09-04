@@ -280,6 +280,16 @@ derived state recomputed from the current invocation after any corpus change.
   content/context, survive unrelated edits, expire when reviewed text changes,
   and filter publication without rewriting the corpus's observations or
   denominators.
+- Script mixing is not a rule of its own. A stray script's letters are rare in
+  a corpus that does not mix them, so letter rarity already carries it.
+- Normalization is a project-level fact — "uses mixed normalization" — not a
+  row per site. Field translators do not act on NFC/NFD detail.
+- Untranslated words belong to the paired source-comparison path beside length
+  proportionality, and as a boolean: some language pairs legitimately share
+  words, so there is no scale to tune.
+- Bracket pairing is undecided. LIFO is easy to write and easy to blow up on
+  prose; whatever ships must be bounded, and bounding it for prose is the hard
+  part.
 
 ## Finding and wire contract
 

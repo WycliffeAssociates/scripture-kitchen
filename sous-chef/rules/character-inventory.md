@@ -10,7 +10,8 @@ independent rule implementations. Convention-learned lane.
 Status: substrate walk landed (`sous_core::substrate`); judging landed
 (`sous_core::judge`), so a project's patterns are on the wire; sites landed
 (`sous_core::sites`, D2b), so each pattern's matching runs are on the wire
-beside it as `Convention` rows. Book scope and dispersion are D3. Stage 3 in
+beside it as `Convention` rows. D3 completed the ladder with G2's pooled
+neighbours and put books-touched on every row. Stage 3 in
 [../roadmap.md](../roadmap.md).
 
 ## Evidence questions
@@ -23,12 +24,22 @@ Ask where a glyph or run sits, from coarse to fine:
 | --- | --- | --- |
 | G0 | outer class: letter, space, digit, nonletter | attached versus spaced |
 | G1 | outer class conditioned by run composition | attached inside a digit-bearing run |
-| G2 | pooled neighbor category | followed by a quote or digit — **D3**: it needs a pooling table the classifier does not carry, so the shipped ladder is G3 → G1 → G0 |
+| G2 | pooled neighbor category | followed by a quote of any spelling, or by a sentence terminal of any script |
 | G3 | exact nonletter neighbor | followed specifically by `.` |
 
 Letters are never individuated as neighbors. Fine grain is used only when its
 opportunity count clears the evidence floor; otherwise judgment falls back to
 the coarser pool rather than becoming silent.
+
+G2's pools are derived from Unicode properties, never from an ASCII list:
+`Quotation_Mark`, then `Ps | Pe | Pi | Pf`, then `Dash`, `Sentence_Terminal`,
+`Terminal_Punctuation`, `Nd`, symbol, other — first match wins, so `«` is a
+quote and not a bracket, Ethiopic `።` and danda `।` are terminals beside `.`,
+and the Arabic comma `،` is a separator. G2 and G3 share a denominator, so
+they are entitled together: G2's contribution is that it names a *kind* of
+neighbour, gathering three spellings of one convention into one row. A pool's
+share is never under a member's, so a G2 row never fires alone; the channel is
+off by default and the pool table is kept for grouping and later rules.
 
 Directed pairs belong to their first member and are described as logical
 start/end relationships, never visual left/right.
@@ -41,8 +52,15 @@ denominator, and the glyph is judged by its other side.
 ### Run length and composition
 
 Run length is judged against that glyph's own run history and is conditioned
-by composition so `12,345,678` does not teach punctuation pile-up. Same-glyph
-continuations and mixed runs remain distinguishable in retained observations.
+by composition. Same-glyph continuations and mixed runs remain distinguishable
+in retained observations.
+
+A **digit breaks a run** and is never a member of one, so `12,345,678` is two
+lone commas each between two digits rather than one mixed run of nine. The G0
+pair says what a reviewer would say — a comma between digits — and G1 is left
+to describe punctuation pile-up, which is what it is for. Digits still pool
+into the census under one key, still form G0 pairs, and are still an outer
+class; only the run lanes stop seeing them.
 
 ### Absolute rarity
 
@@ -66,10 +84,12 @@ such floor. `LetterRoster::Auto | Always | Never` overrides both.
 
 ### Dispersion
 
-Books-touched versus books-possible is annotation and ranking only. Genre can
-legitimately cluster punctuation, so dispersion does not convict. A small
-"forgiven but clustered" review group may surface above-band patterns without
-turning dispersion into a gate.
+Books-touched rides on the pattern row and books-possible is the publication's
+book count; there is no gate. Genre can legitimately cluster punctuation and
+the project's book set is not the engine's business, so nothing thresholds,
+flags, or suppresses on dispersion — it is annotation and ranking only. A
+small "forgiven but clustered" review group may surface above-band patterns
+without turning dispersion into a gate.
 
 ## Observation
 
@@ -83,7 +103,7 @@ emission order — is [`../core/src/judge.md`](../core/src/judge.md).
 | --- | --- |
 | `scalars` | absolute rarity, the dense census letters included, and every denominator |
 | `pairs` | G0 placement: the outer class either side of a nonletter |
-| `runs` | run composition — the exact scalar sequence, so G1 conditioning and the G2/G3 in-run neighbours are reads, not a second walk |
+| `runs` | run composition — the exact scalar sequence, so G1 conditioning and the G2/G3 in-run neighbours are reads, not a second walk; a digit breaks a run and is never a member |
 | `run_lengths` | run length against that glyph's own history, derived from `runs` rather than stored twice |
 | `follows` | the casing a run terminal hands off to |
 | `lead`, `trail` | the two open edges a masked `\c` would otherwise swallow |
@@ -128,6 +148,8 @@ finding.
 - `word?.` can fire on the exact pair when its specific opportunity set is
   strong even though the individual glyphs are common.
 - `,..,` can fire on run length when its outer placement is ordinary.
+- `600,000` is a lone comma between two digits, not a mixed run of six, and
+  `130.` is a period standing alone: a digit breaks a run.
 - `...` in an ellipsis-writing corpus is excused by its entitled run history.
 - A strange comma/backtick pair fires through the rare member when the common
   comma has no entitled exact-pair evidence.
@@ -137,6 +159,8 @@ finding.
   small-sample silence.
 - Low Line used 28 times across six books reads "rare but dispersed"; `}` used
   once or twice appears in the rarity roster.
+- A question mark before `”`, `"`, and `’` is one pooled-quote row, not three
+  exact pairs a reviewer has to add up.
 - ZWJ/ZWNJ in Indic text never enters the inventory (charter invariant 8).
 
 ## PO checklist absorbed by this lane

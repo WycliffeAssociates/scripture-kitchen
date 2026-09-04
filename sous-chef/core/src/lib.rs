@@ -31,7 +31,7 @@ pub use input::{
 };
 pub use judge::{
     BandStep, Channel, Channels, JudgingConfig, LetterRoster, Pattern, PatternIndex, PatternKey,
-    Side, Staircase,
+    Side, Staircase, books_touched,
 };
 pub use pass::{
     ChapterInput, ChapterKey, ChapterObs, ChapterPass, Findings, SchemaStamp, analyze,

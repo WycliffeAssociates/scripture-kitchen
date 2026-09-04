@@ -90,6 +90,42 @@ fn a_word_medial_apostrophe_reads_letter_to_letter() {
     assert_eq!(row.word_count(), 4);
 }
 
+/// A digit breaks a run and is never a member, so `600,000` is a lone comma
+/// between two digits rather than a mixed run of six.
+#[test]
+fn a_digit_breaks_a_run() {
+    let row = row("600,000");
+    let runs: Vec<(Vec<ScalarKey>, u32)> = row
+        .runs()
+        .map(|(atoms, count)| (atoms.to_vec(), count))
+        .collect();
+    assert_eq!(runs, vec![(vec![ScalarKey::of(',')], 1)]);
+    assert_eq!(pair(&row, ',', OuterClass::Digit, OuterClass::Digit), 1);
+    assert_eq!(
+        row.scalars()
+            .iter()
+            .find(|entry| entry.0 == ScalarKey::DIGITS)
+            .map(|entry| entry.1),
+        Some(6),
+        "the digits still pool into the census"
+    );
+}
+
+/// `130.` is a pure run of one, not a mixed run of four.
+#[test]
+fn a_digit_bearing_run_has_no_digit_atoms() {
+    let row = row("130.");
+    let runs: Vec<(Vec<ScalarKey>, u32)> = row
+        .runs()
+        .map(|(atoms, count)| (atoms.to_vec(), count))
+        .collect();
+    assert_eq!(runs, vec![(vec![ScalarKey::of('.')], 1)]);
+    assert_eq!(
+        row.run_lengths(),
+        vec![(ScalarKey::of('.'), [1, 0, 0, 0, 0, 0])]
+    );
+}
+
 #[test]
 fn a_run_of_the_same_glyph_lands_in_its_own_length_bucket() {
     let lengths = row("a,b,,c,,,d,,,,,,,e").run_lengths();
@@ -171,6 +207,9 @@ fn a_seam_resolves_to_the_counts_of_the_unsplit_text() {
     assert_seam_agrees("word", &["wo", "rd"]);
     assert_seam_agrees("one.  Two", &["one. ", " ", "Two"]);
     assert_seam_agrees("one. Two", &["one.", "", " Two"]);
+    // A chapter ending in a digit: the pair reads across, the follow does not.
+    assert_seam_agrees("one 12,345 two", &["one 12", ",345 two"]);
+    assert_seam_agrees("one. 42 Two", &["one. 42", " Two"]);
 }
 
 /// The hygiene ruling, kept: a run abutting a masked `\c` is two runs.

@@ -263,6 +263,14 @@ pub fn encode_to_corpus_buffer(
         pattern
             .validate()
             .map_err(|field| CorpusWireError::InvalidPattern { row, field })?;
+        // Books-possible is this publication's own book count, which only the
+        // envelope knows.
+        if usize::from(pattern.books) > sections.len() {
+            return Err(CorpusWireError::InvalidPattern {
+                row,
+                field: "books",
+            });
+        }
         out.extend_from_slice(&pattern_row::encode_pattern(pattern));
     }
     debug_assert_eq!(out.len(), data_start);
@@ -387,7 +395,7 @@ impl<'a> CorpusSnapshot<'a> {
         }
         for row in 0..pattern_count {
             let at = pattern_start + row * PATTERN_ROW_LEN;
-            pattern_row::decode_pattern(&bytes[at..at + PATTERN_ROW_LEN], row)?;
+            pattern_row::decode_pattern(&bytes[at..at + PATTERN_ROW_LEN], row, book_count)?;
         }
 
         let mut books = Vec::with_capacity(book_count);
@@ -489,7 +497,11 @@ impl<'a> CorpusSnapshot<'a> {
             });
         }
         let at = self.pattern_start + index * PATTERN_ROW_LEN;
-        pattern_row::decode_pattern(&self.bytes[at..at + PATTERN_ROW_LEN], index)
+        pattern_row::decode_pattern(
+            &self.bytes[at..at + PATTERN_ROW_LEN],
+            index,
+            self.books.len(),
+        )
     }
 
     /// The whole table, in emission order.

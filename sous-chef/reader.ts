@@ -46,7 +46,9 @@ export const PATTERN_FLAGS_OFFSET = 11;
 export const PATTERN_NUMERATOR_OFFSET = 12;
 export const PATTERN_DENOMINATOR_OFFSET = 16;
 export const PATTERN_SHARE_OFFSET = 20;
-export const PATTERN_RESERVED_OFFSET = 22;
+/** Books whose counts hold part of the numerator; books-possible is `bookCount`. */
+export const PATTERN_BOOKS_OFFSET = 22;
+export const PATTERN_RESERVED_OFFSET = 23;
 /** The band byte a `Rarity` row carries: no staircase step. */
 export const PATTERN_BAND_NONE = 255;
 /** The pooled decimal-digit lane, which is not a scalar. */
@@ -98,12 +100,17 @@ export type Channel = (typeof CHANNELS)[number];
 export const OUTER_CLASSES = ["Letter", "Space", "Digit", "Nonletter", "Edge"] as const;
 export type OuterClass = (typeof OUTER_CLASSES)[number];
 
+/** The G2 neighbour categories; a `PooledNeighbor` key byte indexes this. */
+export const POOLS = ["Quote", "Bracket", "Dash", "Terminal", "Separator", "Digit", "Symbol", "Other"] as const;
+export type Pool = (typeof POOLS)[number];
+
 /** Convention lane 14..16 is a bitmask over this table, low bit first. */
 export const CONVENTION_REASONS = ["PlacementBefore", "PlacementAfter", "RunShape", "ExactNeighbor", "Rarity", "PooledNeighbor"] as const;
 export type ConventionReason = (typeof CONVENTION_REASONS)[number];
 
 export type PatternKey =
   | { readonly kind: "ExactNeighbor"; readonly neighbor: number }
+  | { readonly kind: "PooledNeighbor"; readonly pool: Pool }
   | { readonly kind: "RunShape"; readonly pure: boolean; readonly bucket: number }
   | { readonly kind: "Placement"; readonly side: "prev" | "next"; readonly class: OuterClass }
   | { readonly kind: "Rarity" };
@@ -120,6 +127,9 @@ export interface Pattern {
   readonly numerator: number;
   readonly denominator: number;
   readonly shareBp: number;
+  /** Books holding part of the numerator, out of the snapshot's `bookCount`.
+   * Information only: nothing in the engine gates on dispersion. */
+  readonly books: number;
 }
 
 export interface ConventionDigest {
@@ -209,11 +219,11 @@ function readId(view: DataView, offset: number, book: number): [string, number] 
 }
 
 /** One 24-byte pattern row, refusing every value the encoder cannot write. */
-function readPattern(view: DataView, at: number, row: number): Pattern {
+function readPattern(view: DataView, at: number, row: number, bookCount: number): Pattern {
   if (view.getUint8(at + PATTERN_FLAGS_OFFSET) !== 0) {
     return fail(`pattern row ${row} has an invalid flags`);
   }
-  if (view.getUint16(at + PATTERN_RESERVED_OFFSET, true) !== 0) {
+  if (view.getUint8(at + PATTERN_RESERVED_OFFSET) !== 0) {
     return fail(`pattern row ${row} has an invalid reserved`);
   }
   const glyph = u32(view, at + PATTERN_GLYPH_OFFSET);
@@ -222,7 +232,7 @@ function readPattern(view: DataView, at: number, row: number): Pattern {
   }
   const neighbor = u32(view, at + PATTERN_NEIGHBOR_OFFSET);
   const channel = CHANNELS[view.getUint8(at + PATTERN_CHANNEL_OFFSET)];
-  if (channel === undefined || channel === "PooledNeighbor") {
+  if (channel === undefined) {
     return fail(`pattern row ${row} has an invalid channel`);
   }
   const raw = view.getUint8(at + PATTERN_KEY_OFFSET);
@@ -241,7 +251,13 @@ function readPattern(view: DataView, at: number, row: number): Pattern {
     if (neighbor !== 0) {
       return fail(`pattern row ${row} has an invalid neighbor`);
     }
-    if (channel === "RunShape") {
+    if (channel === "PooledNeighbor") {
+      const pool = POOLS[raw];
+      if (pool === undefined) {
+        return fail(`pattern row ${row} has an invalid key`);
+      }
+      key = { kind: "PooledNeighbor", pool };
+    } else if (channel === "RunShape") {
       if (high > 1 || low === 0 || low > RUN_BUCKETS) {
         return fail(`pattern row ${row} has an invalid key`);
       }
@@ -276,14 +292,20 @@ function readPattern(view: DataView, at: number, row: number): Pattern {
   if (shareBp > 10000) {
     return fail(`pattern row ${row} has an invalid share`);
   }
+  const numerator = u32(view, at + PATTERN_NUMERATOR_OFFSET);
+  const books = view.getUint8(at + PATTERN_BOOKS_OFFSET);
+  if (books > bookCount || (books === 0 && numerator > 0)) {
+    return fail(`pattern row ${row} has an invalid books`);
+  }
   return {
     glyph,
     channel,
     key,
     band,
-    numerator: u32(view, at + PATTERN_NUMERATOR_OFFSET),
+    numerator,
     denominator: u32(view, at + PATTERN_DENOMINATOR_OFFSET),
     shareBp,
+    books,
   };
 }
 
@@ -505,7 +527,7 @@ export class FindingsSnapshot {
       return fail("pattern table exceeds corpus buffer");
     }
     for (let row = 0; row < patternCount; row += 1) {
-      readPattern(view, patternStart + row * PATTERN_ROW_LEN, row);
+      readPattern(view, patternStart + row * PATTERN_ROW_LEN, row, bookCount);
     }
 
     const entries: BookEntry[] = [];
@@ -551,7 +573,12 @@ export class FindingsSnapshot {
     if (!Number.isSafeInteger(index) || index < 0 || index >= this.#patternCount) {
       return fail(`pattern ${index} is outside a table of ${this.#patternCount}`);
     }
-    return readPattern(this.#view, this.#patternStart + index * PATTERN_ROW_LEN, index);
+    return readPattern(
+      this.#view,
+      this.#patternStart + index * PATTERN_ROW_LEN,
+      index,
+      this.#entries.length,
+    );
   }
 
   /** The whole table, in emission order. */

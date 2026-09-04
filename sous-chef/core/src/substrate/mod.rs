@@ -5,7 +5,7 @@
 //!   scalars  ' '×3  ','×2  '.'  '\u{201C}'  '\u{201D}'  'H' 'e' 'a' …  D×5
 //!   pairs    (',', Letter, Space)  ('.', Letter, Nonletter)  (D, Digit, Edge)
 //!            ('\u{201C}', Space, Letter)  ('\u{201D}', Nonletter, Space)  (',', Digit, Digit)
-//!   runs     [',']  ['.', '\u{201D}']  ['\u{201C}']  [D, D, ',', D, D, D]
+//!   runs     [',']×2  ['.', '\u{201D}']  ['\u{201C}']   // a digit breaks a run
 //!   follows  '\u{201C}' → upper 1                    // its run ends before `G`
 //!   lead     Letter, upper                        trail  Digit, D open both ways
 //!   counts   21 scalars, 5 words
@@ -145,11 +145,20 @@ impl OuterClass {
 }
 
 /// Not a letter, not glue, not whitespace: what the nonletter inventory
-/// counts and what a run is built from, digits included — they pool into one
-/// key, not out of the lane.
+/// counts, digits included — they pool into one key, not out of the lane.
 #[inline]
 pub const fn is_nonletter(class: Class) -> bool {
     !class.is_alphabetic() && !class.is_glue() && !class.is_whitespace()
+}
+
+/// What a run is built from: a nonletter that is not a decimal digit.
+///
+/// A digit breaks a run and joins none, so `600,000` is a lone comma between
+/// two digits rather than a mixed run of six. Digits still pool under
+/// [`ScalarKey::DIGITS`] for the census, the denominators, and the G0 pairs.
+#[inline]
+pub const fn is_run_atom(class: Class) -> bool {
+    is_nonletter(class) && !class.is_decimal_digit()
 }
 
 /// One G0 pair triple: a nonletter and the outer class either side of it.

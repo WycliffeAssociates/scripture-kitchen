@@ -15,6 +15,7 @@ import {
   MAGIC,
   FORMAT_VERSION,
   PATTERN_ROW_LEN,
+  POOLS,
   RECORD_LEN,
 } from "./reader.ts";
 
@@ -34,7 +35,7 @@ function fixture() {
 // One book under "books/mrk.usfm": the header, one directory row, a 16-byte
 // id table, then the pattern table, then the records.
 const FIRST_RECORD = HEADER_BYTES + DIRECTORY_ENTRY_BYTES + 16;
-const FIRST_MIXED_RECORD = FIRST_RECORD + 4 * PATTERN_ROW_LEN;
+const FIRST_MIXED_RECORD = FIRST_RECORD + 5 * PATTERN_ROW_LEN;
 
 function expectOpenFailure(bytes) {
   assert.throws(() => FindingsSnapshot.open(bytes), FindingsSnapshotError);
@@ -168,7 +169,7 @@ test("decodes mixed proportionality and hygiene rows, saturation included", () =
 
 test("decodes the pattern table the judge published", () => {
   const snapshot = FindingsSnapshot.open(hexFixture("corpus_v1_hygiene.hex"));
-  assert.equal(snapshot.patternCount, 4);
+  assert.equal(snapshot.patternCount, 5);
   assert.deepEqual(snapshot.patterns(), [
     {
       glyph: 0x60,
@@ -178,6 +179,7 @@ test("decodes the pattern table the judge published", () => {
       numerator: 1,
       denominator: 48213,
       shareBp: 0,
+      books: 1,
     },
     {
       glyph: 0x3f,
@@ -187,6 +189,17 @@ test("decodes the pattern table the judge published", () => {
       numerator: 3,
       denominator: 403,
       shareBp: 74,
+      books: 1,
+    },
+    {
+      glyph: 0x3f,
+      channel: "PooledNeighbor",
+      key: { kind: "PooledNeighbor", pool: "Quote" },
+      band: 2,
+      numerator: 5,
+      denominator: 403,
+      shareBp: 124,
+      books: 1,
     },
     {
       glyph: 0x2c,
@@ -196,6 +209,7 @@ test("decodes the pattern table the judge published", () => {
       numerator: 1,
       denominator: 601,
       shareBp: 16,
+      books: 1,
     },
     {
       glyph: 0xffffffff,
@@ -205,17 +219,31 @@ test("decodes the pattern table the judge published", () => {
       numerator: 12,
       denominator: 9812,
       shareBp: 12,
+      books: 1,
     },
   ]);
-  assert.throws(() => snapshot.pattern(4), FindingsSnapshotError);
+  assert.throws(() => snapshot.pattern(5), FindingsSnapshotError);
 
   // Every field the reader refuses, one at a time.
   const start = FIRST_RECORD;
-  for (const [offset, byte] of [[11, 1], [22, 1], [8, 1], [8, 5], [10, 0], [9, 1]]) {
+  for (const [offset, byte] of [
+    [11, 1],   // flags
+    [23, 1],   // reserved
+    [8, 5],    // channel: past the table
+    [10, 0],   // band: a step on a Rarity row
+    [9, 1],    // key: a nonzero key on a Rarity row
+    [22, 2],   // books: past the snapshot's book count
+    [22, 0],   // books: none, on a row with a numerator
+  ]) {
     const torn = hexFixture("corpus_v1_hygiene.hex");
     torn[start + offset] = byte;
     expectOpenFailure(torn);
   }
+  // Channel 1 is a live channel; its key byte is a POOLS index.
+  const badPool = hexFixture("corpus_v1_hygiene.hex");
+  badPool[start + 2 * PATTERN_ROW_LEN + 9] = POOLS.length;
+  expectOpenFailure(badPool);
+
   const moved = hexFixture("corpus_v1_hygiene.hex");
   moved[HEADER_PATTERN_OFFSET_OFFSET] = 0xff;
   expectOpenFailure(moved);

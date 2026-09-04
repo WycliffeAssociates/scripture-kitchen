@@ -8,7 +8,9 @@
 
 use rustc_hash::FxHashMap;
 
-use super::{Case, ChapterRow, Edge, FollowCounts, OuterClass, PairKey, ScalarKey, is_nonletter};
+use super::{
+    Case, ChapterRow, Edge, FollowCounts, OuterClass, PairKey, ScalarKey, is_nonletter, is_run_atom,
+};
 use crate::hygiene::{NBSP, SUSPECT, ScalarSites};
 use crate::unicode::{
     Class,
@@ -229,10 +231,15 @@ impl Counters {
 
         if is_nonletter(class) {
             let id = self.intern(cp, class);
-            if hot.run_open == NO_ID {
-                hot.run_open = self.run_atoms.len() as u32;
+            if is_run_atom(class) {
+                if hot.run_open == NO_ID {
+                    hot.run_open = self.run_atoms.len() as u32;
+                }
+                self.run_atoms.push(id);
+            } else {
+                // A digit breaks the run it interrupts and opens none.
+                self.close_run(hot);
             }
-            self.run_atoms.push(id);
             hot.awaiting = NO_ID;
             hot.pending = id;
             hot.pending_prev = hot.prev;

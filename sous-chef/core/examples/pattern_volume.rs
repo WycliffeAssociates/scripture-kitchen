@@ -38,8 +38,9 @@ const CORPORA: &[&str] = &[
 const VREF: &str = "/Users/willkelly/Documents/Work/Code/scripture-sous-chef/corpora/vref";
 
 /// The channels a volume row splits by, in emission order.
-const CHANNELS: [Channel; 4] = [
+const CHANNELS: [Channel; 5] = [
     Channel::ExactNeighbor,
+    Channel::PooledNeighbor,
     Channel::RunShape,
     Channel::Placement,
     Channel::Rarity,
@@ -55,8 +56,8 @@ fn main() {
 
     println!("### test tier (corpora/*.txt) ###\n");
     println!(
-        "{:<12}{:>8}{:>10}{:>10}{:>10}{:>10}",
-        "corpus", "total", "exact", "runshape", "placement", "rarity"
+        "{:<12}{:>8}{:>8}{:>8}{:>10}{:>8}{:>10}{:>8}",
+        "corpus", "total", "exact", "pooled", "runshape", "mixed", "placement", "rarity"
     );
     for name in CORPORA {
         let path = dir.join(format!("{name}.txt"));
@@ -161,8 +162,8 @@ fn patterns_of(raw: &str, path: &Path, config: &JudgingConfig) -> Vec<Pattern> {
     findings.patterns().to_vec()
 }
 
-fn by_channel(patterns: &[Pattern]) -> [usize; 4] {
-    let mut counts = [0usize; 4];
+fn by_channel(patterns: &[Pattern]) -> [usize; CHANNELS.len()] {
+    let mut counts = [0usize; CHANNELS.len()];
     for pattern in patterns {
         let at = CHANNELS
             .iter()
@@ -173,16 +174,27 @@ fn by_channel(patterns: &[Pattern]) -> [usize; 4] {
     counts
 }
 
+/// Run-shape rows whose key is a mixed run. A digit is not a run atom, so a
+/// number never lands here.
+fn mixed_run_shapes(patterns: &[Pattern]) -> usize {
+    patterns
+        .iter()
+        .filter(|row| matches!(row.key, PatternKey::RunShape { pure: false, .. }))
+        .count()
+}
+
 fn print_row(name: &str, patterns: &[Pattern]) {
     let counts = by_channel(patterns);
     println!(
-        "{:<12}{:>8}{:>10}{:>10}{:>10}{:>10}",
+        "{:<12}{:>8}{:>8}{:>8}{:>10}{:>8}{:>10}{:>8}",
         name,
         patterns.len(),
         counts[0],
         counts[1],
         counts[2],
-        counts[3]
+        mixed_run_shapes(patterns),
+        counts[3],
+        counts[4]
     );
 }
 
@@ -220,7 +232,7 @@ fn sweep(dir: &Path, config: &JudgingConfig) {
     }
 
     let mut totals: Vec<usize> = Vec::new();
-    let mut per_channel: [Vec<usize>; 4] = Default::default();
+    let mut per_channel: [Vec<usize>; CHANNELS.len()] = Default::default();
     let mut largest: Vec<(usize, String, Vec<Pattern>)> = Vec::new();
     let mut skipped = 0usize;
 
@@ -290,6 +302,7 @@ fn describe(pattern: &Pattern) -> String {
             if pure { "pure" } else { "mixed" }
         ),
         PatternKey::ExactNeighbor(neighbor) => format!("exact-neighbor {}", glyph(neighbor)),
+        PatternKey::PooledNeighbor(pool) => format!("pooled-neighbor {}", pool.name()),
     };
     format!(
         "{} {evidence} {}/{} {:.2}%",

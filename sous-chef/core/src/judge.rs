@@ -20,8 +20,8 @@
 use rustc_hash::FxHashMap;
 
 use crate::pass::Findings;
-use crate::substrate::{BookAggregate, OuterClass, PairKey, RUN_BUCKETS, ScalarKey};
-use crate::unicode::class_of;
+use crate::substrate::{BookAggregate, OuterClass, RUN_BUCKETS, ScalarKey};
+use crate::unicode::{Pool, class_of, pool_of};
 
 // ── The config ──────────────────────────────────────────────────────────
 
@@ -114,12 +114,16 @@ pub enum LetterRoster {
     Never,
 }
 
-/// Per-channel enable bits; all on by default.
+/// Per-channel enable bits. All on by default except `pooled_neighbor`: a
+/// pool's share is never under a member's, so every G2 row rides beside its
+/// G3 rows and adds a coarser sentence, not a finding. A host that wants the
+/// grouped statement turns it on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Channels {
     pub placement: bool,
     pub run_shape: bool,
     pub exact_neighbor: bool,
+    pub pooled_neighbor: bool,
     pub rarity: bool,
 }
 
@@ -129,6 +133,7 @@ impl Default for Channels {
             placement: true,
             run_shape: true,
             exact_neighbor: true,
+            pooled_neighbor: false,
             rarity: true,
         }
     }
@@ -178,7 +183,7 @@ impl Default for JudgingConfig {
 pub enum Channel {
     /// G3: the exact nonletter that follows a glyph inside its run.
     ExactNeighbor = 0,
-    /// G2: reserved for D3's pooled neighbor categories; never emitted.
+    /// G2: the pool the atom following a glyph inside its run falls in.
     PooledNeighbor = 1,
     /// G1: the shape of the runs a glyph appears in.
     RunShape = 2,
@@ -232,6 +237,8 @@ impl Side {
 pub enum PatternKey {
     /// The scalar that follows the glyph inside a run.
     ExactNeighbor(ScalarKey),
+    /// The pool the scalar that follows the glyph inside a run belongs to.
+    PooledNeighbor(Pool),
     /// Whether every atom is the glyph, and the run's length bucket `1..=6`.
     RunShape {
         pure: bool,
@@ -257,6 +264,12 @@ pub struct Pattern {
     pub denominator: u32,
     /// `numerator * 10_000 / denominator`, saturating.
     pub share_bp: u16,
+    /// Books whose own counts hold part of the numerator, saturating at 255.
+    ///
+    /// Dispersion is information, never a judgement: genre clusters
+    /// punctuation legitimately, so nothing gates on it. Books-possible is the
+    /// publication's own `book_count`. [`books_touched`] recomputes it.
+    pub books: u8,
 }
 
 impl Pattern {
@@ -268,14 +281,14 @@ impl Pattern {
         if self.band.is_none() != (self.channel == Channel::Rarity) {
             return Err("band");
         }
-        if self.channel == Channel::PooledNeighbor {
-            return Err("channel");
-        }
         if self.numerator > self.denominator {
             return Err("numerator");
         }
         if self.share_bp != share_bp(u64::from(self.numerator), u64::from(self.denominator)) {
             return Err("share_bp");
+        }
+        if self.books == 0 && self.numerator > 0 {
+            return Err("books");
         }
         if let PatternKey::RunShape { bucket, .. } = self.key
             && !(1..=RUN_BUCKETS as u8).contains(&bucket)
@@ -310,24 +323,27 @@ pub(crate) fn judge_corpus(corpus: &[&BookAggregate], config: &JudgingConfig, ou
         roster(&scalars, total_scalars, config, out);
     }
 
-    let pairs = merged_pairs(corpus);
-    let runs = merged_runs(corpus);
-    let shapes = run_evidence(&runs);
-    for group in pairs.chunk_by(|a, b| a.0.scalar() == b.0.scalar()) {
-        let glyph = group[0].0.scalar();
-        let evidence = shapes.get(&glyph);
+    let placements = placement_evidence(corpus);
+    let shapes = run_evidence(corpus);
+    for (glyph, marginals) in &placements {
+        let evidence = shapes.get(glyph);
         if config.channels.exact_neighbor
             && let Some(evidence) = evidence
         {
-            neighbors(glyph, evidence, config, out);
+            neighbors(*glyph, evidence, config, out);
+        }
+        if config.channels.pooled_neighbor
+            && let Some(evidence) = evidence
+        {
+            pooled_neighbors(*glyph, evidence, config, out);
         }
         if config.channels.run_shape
             && let Some(evidence) = evidence
         {
-            run_shapes(glyph, evidence, config, out);
+            run_shapes(*glyph, evidence, config, out);
         }
         if config.channels.placement {
-            placement(glyph, group, config, out);
+            placement(*glyph, marginals, config, out);
         }
     }
 }
@@ -335,14 +351,14 @@ pub(crate) fn judge_corpus(corpus: &[&BookAggregate], config: &JudgingConfig, ou
 /// Every scalar under `rarity_floor`, letters included when the corpus is
 /// alphabetic enough for a letter roster to mean anything.
 fn roster(
-    scalars: &[(ScalarKey, u64)],
+    scalars: &[(ScalarKey, Tally)],
     total_scalars: u64,
     config: &JudgingConfig,
     out: &mut Findings,
 ) {
     let letters = letters_are_rostered(scalars, config);
-    for &(glyph, count) in scalars {
-        if glyph.is_digits() || count >= u64::from(config.rarity_floor) {
+    for &(glyph, tally) in scalars {
+        if glyph.is_digits() || tally.count >= u64::from(config.rarity_floor) {
             continue;
         }
         if is_letter(glyph) && !letters {
@@ -353,26 +369,27 @@ fn roster(
             channel: Channel::Rarity,
             key: PatternKey::Rarity,
             band: None,
-            numerator: saturate(count),
+            numerator: saturate(tally.count),
             denominator: saturate(total_scalars),
-            share_bp: share_bp(count, total_scalars),
+            share_bp: share_bp(tally.count, total_scalars),
+            books: tally.books(),
         });
     }
 }
 
 /// A logographic corpus has thousands of letters used once, and a ten-verse
 /// draft has `q`, `x`, `z` used once by sample size; both abstain.
-fn letters_are_rostered(scalars: &[(ScalarKey, u64)], config: &JudgingConfig) -> bool {
+fn letters_are_rostered(scalars: &[(ScalarKey, Tally)], config: &JudgingConfig) -> bool {
     match config.letters {
         LetterRoster::Always => true,
         LetterRoster::Never => false,
         LetterRoster::Auto => {
             let mut distinct = 0u32;
             let mut total = 0u64;
-            for &(glyph, count) in scalars {
+            for &(glyph, tally) in scalars {
                 if is_letter(glyph) {
                     distinct += 1;
-                    total += count;
+                    total += tally.count;
                 }
             }
             distinct <= config.letter_roster_bound
@@ -388,27 +405,21 @@ fn letters_are_rostered(scalars: &[(ScalarKey, u64)], config: &JudgingConfig) ->
 /// fact about the file, and the glyph is judged by its other side.
 fn placement(
     glyph: ScalarKey,
-    group: &[(PairKey, u64)],
+    marginals: &PlacementEvidence,
     config: &JudgingConfig,
     out: &mut Findings,
 ) {
-    let denominator: u64 = group.iter().map(|entry| entry.1).sum();
-    let Some((band, ceiling)) = entitled(denominator, config) else {
+    let Some((band, ceiling)) = entitled(marginals.denominator, config) else {
         return;
     };
-    let mut sides = [[0u64; OuterClass::ALL.len()]; 2];
-    for &(key, count) in group {
-        sides[Side::Prev as usize][key.prev() as usize] += count;
-        sides[Side::Next as usize][key.next() as usize] += count;
-    }
     for side in Side::ALL {
         for class in OuterClass::ALL {
             if class == OuterClass::Edge {
                 continue;
             }
-            let count = sides[side as usize][class as usize];
-            let share = share_bp(count, denominator);
-            if count == 0 || share >= ceiling {
+            let tally = marginals.sides[side as usize][class as usize];
+            let share = share_bp(tally.count, marginals.denominator);
+            if tally.count == 0 || share >= ceiling {
                 continue;
             }
             out.push_pattern(Pattern {
@@ -416,9 +427,10 @@ fn placement(
                 channel: Channel::Placement,
                 key: PatternKey::Placement { side, class },
                 band: Some(band),
-                numerator: saturate(count),
-                denominator: saturate(denominator),
+                numerator: saturate(tally.count),
+                denominator: saturate(marginals.denominator),
                 share_bp: share,
+                books: tally.books(),
             });
         }
     }
@@ -435,8 +447,8 @@ fn run_shapes(
     let Some((band, ceiling)) = entitled(evidence.runs, config) else {
         return;
     };
-    for &((pure, bucket), count) in &evidence.shapes {
-        let share = share_bp(count, evidence.runs);
+    for &((pure, bucket), tally) in &evidence.shapes {
+        let share = share_bp(tally.count, evidence.runs);
         if share >= ceiling {
             continue;
         }
@@ -445,9 +457,10 @@ fn run_shapes(
             channel: Channel::RunShape,
             key: PatternKey::RunShape { pure, bucket },
             band: Some(band),
-            numerator: saturate(count),
+            numerator: saturate(tally.count),
             denominator: saturate(evidence.runs),
             share_bp: share,
+            books: tally.books(),
         });
     }
 }
@@ -458,8 +471,8 @@ fn neighbors(glyph: ScalarKey, evidence: &RunEvidence, config: &JudgingConfig, o
     let Some((band, ceiling)) = entitled(evidence.positions, config) else {
         return;
     };
-    for &(neighbor, count) in &evidence.neighbors {
-        let share = share_bp(count, evidence.positions);
+    for &(neighbor, tally) in &evidence.neighbors {
+        let share = share_bp(tally.count, evidence.positions);
         if share >= ceiling {
             continue;
         }
@@ -468,9 +481,39 @@ fn neighbors(glyph: ScalarKey, evidence: &RunEvidence, config: &JudgingConfig, o
             channel: Channel::ExactNeighbor,
             key: PatternKey::ExactNeighbor(neighbor),
             band: Some(band),
-            numerator: saturate(count),
+            numerator: saturate(tally.count),
             denominator: saturate(evidence.positions),
             share_bp: share,
+            books: tally.books(),
+        });
+    }
+}
+
+/// G2: which pool follows the glyph inside a run, against the same positions
+/// G3 counts — so a pair too thin to name exactly can still be named by kind.
+fn pooled_neighbors(
+    glyph: ScalarKey,
+    evidence: &RunEvidence,
+    config: &JudgingConfig,
+    out: &mut Findings,
+) {
+    let Some((band, ceiling)) = entitled(evidence.positions, config) else {
+        return;
+    };
+    for &(pool, tally) in &evidence.pools {
+        let share = share_bp(tally.count, evidence.positions);
+        if share >= ceiling {
+            continue;
+        }
+        out.push_pattern(Pattern {
+            glyph,
+            channel: Channel::PooledNeighbor,
+            key: PatternKey::PooledNeighbor(pool),
+            band: Some(band),
+            numerator: saturate(tally.count),
+            denominator: saturate(evidence.positions),
+            share_bp: share,
+            books: tally.books(),
         });
     }
 }
@@ -484,95 +527,238 @@ fn entitled(denominator: u64, config: &JudgingConfig) -> Option<(u8, u16)> {
     config.bands.band_for(saturate(denominator))
 }
 
+// ── Dispersion ──────────────────────────────────────────────────────────
+
+/// A numerator under construction: the running sum, and how many books have
+/// contributed to it.
+///
+/// Books arrive in `BookIndex` order, so a distinct count needs the last
+/// contributor and not a set.
+#[derive(Clone, Copy, Default)]
+struct Tally {
+    count: u64,
+    books: u32,
+    /// One past the last contributing book's index; 0 before the first.
+    last: u32,
+}
+
+impl Tally {
+    fn add(&mut self, count: u64, book: u32) {
+        self.count += count;
+        if self.last != book + 1 {
+            self.books += 1;
+            self.last = book + 1;
+        }
+    }
+
+    /// Saturating: the wire lane is a `u8` and the canon is 66 books.
+    const fn books(self) -> u8 {
+        if self.books > u8::MAX as u32 {
+            u8::MAX
+        } else {
+            self.books as u8
+        }
+    }
+}
+
+/// The pool of one run atom.
+///
+/// [`ScalarKey::DIGITS`] answers [`Pool::Digit`] for completeness: a digit
+/// breaks a run and joins none, so it never reaches here as an atom.
+pub(crate) fn pool_of_key(key: ScalarKey) -> Pool {
+    match key.scalar() {
+        Some(scalar) => pool_of(scalar),
+        None => Pool::Digit,
+    }
+}
+
+/// Books whose own counts hold part of `pattern`'s numerator, saturating at
+/// 255 — the dispersion on the row, recomputed from the retained aggregates.
+///
+/// The judge counts this during the merge that produces the numerator; this
+/// is the same number for any pattern a host holds, and the oracle that merge
+/// is tested against. Books-possible is the publication's `book_count`.
+pub fn books_touched(corpus: &[&BookAggregate], pattern: &Pattern) -> u8 {
+    let touched = corpus
+        .iter()
+        .filter(|book| numerator_in(book, pattern) > 0)
+        .count();
+    u8::try_from(touched).unwrap_or(u8::MAX)
+}
+
+/// One book's own contribution to a pattern's numerator, in the unit that
+/// channel counts.
+fn numerator_in(book: &BookAggregate, pattern: &Pattern) -> u64 {
+    match pattern.key {
+        PatternKey::Placement { side, class } => book
+            .pairs()
+            .iter()
+            .filter(|(key, _)| key.scalar() == pattern.glyph)
+            .filter(|(key, _)| {
+                class
+                    == match side {
+                        Side::Prev => key.prev(),
+                        Side::Next => key.next(),
+                    }
+            })
+            .map(|(_, count)| u64::from(*count))
+            .sum(),
+        PatternKey::RunShape { pure, bucket } => book
+            .runs()
+            .filter(|(atoms, _)| atoms.contains(&pattern.glyph))
+            .filter(|(atoms, _)| {
+                (
+                    atoms.iter().all(|atom| *atom == pattern.glyph),
+                    atoms.len().min(RUN_BUCKETS) as u8,
+                ) == (pure, bucket)
+            })
+            .map(|(_, count)| u64::from(count))
+            .sum(),
+        PatternKey::ExactNeighbor(neighbor) => book
+            .runs()
+            .map(|(atoms, count)| {
+                let pairs = atoms
+                    .windows(2)
+                    .filter(|pair| pair[0] == pattern.glyph && pair[1] == neighbor)
+                    .count() as u64;
+                pairs * u64::from(count)
+            })
+            .sum(),
+        PatternKey::PooledNeighbor(pool) => book
+            .runs()
+            .map(|(atoms, count)| {
+                let pairs = atoms
+                    .windows(2)
+                    .filter(|pair| pair[0] == pattern.glyph && pool_of_key(pair[1]) == pool)
+                    .count() as u64;
+                pairs * u64::from(count)
+            })
+            .sum(),
+        PatternKey::Rarity => book
+            .scalars()
+            .iter()
+            .find(|(key, _)| *key == pattern.glyph)
+            .map_or(0, |(_, count)| u64::from(*count)),
+    }
+}
+
 // ── Corpus totals ───────────────────────────────────────────────────────
+
+/// One glyph's G0 marginals: the denominator both sides share, and a tally
+/// per side and outer class.
+#[derive(Default)]
+struct PlacementEvidence {
+    denominator: u64,
+    sides: [[Tally; OuterClass::ALL.len()]; Side::ALL.len()],
+}
 
 /// One glyph's run history: which shapes hold it, and what follows it inside
 /// them.
 #[derive(Default)]
 struct RunEvidence {
-    /// `((pure, length bucket), count)`.
-    shapes: Vec<((bool, u8), u64)>,
-    neighbors: Vec<(ScalarKey, u64)>,
+    /// `((pure, length bucket), tally)`.
+    shapes: Vec<((bool, u8), Tally)>,
+    neighbors: Vec<(ScalarKey, Tally)>,
+    pools: Vec<(Pool, Tally)>,
     /// Runs holding the glyph at all.
     runs: u64,
     /// Positions where the glyph is followed by another atom.
     positions: u64,
 }
 
-/// Every run's contribution to every glyph it holds, in one pass.
-fn run_evidence(runs: &[(&[ScalarKey], u64)]) -> FxHashMap<ScalarKey, RunEvidence> {
+/// Every book's pairs into one glyph-keyed table, ascending by glyph.
+fn placement_evidence(corpus: &[&BookAggregate]) -> Vec<(ScalarKey, PlacementEvidence)> {
+    let mut out: FxHashMap<ScalarKey, PlacementEvidence> = FxHashMap::default();
+    for (book, aggregate) in corpus.iter().enumerate() {
+        let book = book as u32;
+        for &(key, count) in aggregate.pairs() {
+            let count = u64::from(count);
+            let evidence = out.entry(key.scalar()).or_default();
+            evidence.denominator += count;
+            evidence.sides[Side::Prev as usize][key.prev() as usize].add(count, book);
+            evidence.sides[Side::Next as usize][key.next() as usize].add(count, book);
+        }
+    }
+    let mut rows: Vec<(ScalarKey, PlacementEvidence)> = out.into_iter().collect();
+    rows.sort_unstable_by_key(|row| row.0);
+    rows
+}
+
+/// Every run's contribution to every glyph it holds, book by book so the
+/// numerators carry their dispersion.
+fn run_evidence(corpus: &[&BookAggregate]) -> FxHashMap<ScalarKey, RunEvidence> {
     let mut out: FxHashMap<ScalarKey, RunEvidence> = FxHashMap::default();
     let mut seen: Vec<ScalarKey> = Vec::new();
-    for &(atoms, count) in runs {
-        seen.clear();
-        for atom in atoms {
-            if seen.contains(atom) {
-                continue;
+    for (book, aggregate) in corpus.iter().enumerate() {
+        let book = book as u32;
+        for (atoms, count) in aggregate.runs() {
+            let count = u64::from(count);
+            seen.clear();
+            for atom in atoms {
+                if seen.contains(atom) {
+                    continue;
+                }
+                seen.push(*atom);
+                let pure = atoms.iter().all(|other| other == atom);
+                let bucket = atoms.len().min(RUN_BUCKETS) as u8;
+                let evidence = out.entry(*atom).or_default();
+                evidence.runs += count;
+                bump(&mut evidence.shapes, (pure, bucket), count, book);
             }
-            seen.push(*atom);
-            let pure = atoms.iter().all(|other| other == atom);
-            let bucket = atoms.len().min(RUN_BUCKETS) as u8;
-            let evidence = out.entry(*atom).or_default();
-            evidence.runs += count;
-            bump(&mut evidence.shapes, (pure, bucket), count);
-        }
-        for pair in atoms.windows(2) {
-            let evidence = out.entry(pair[0]).or_default();
-            evidence.positions += count;
-            bump(&mut evidence.neighbors, pair[1], count);
+            for pair in atoms.windows(2) {
+                let evidence = out.entry(pair[0]).or_default();
+                evidence.positions += count;
+                bump(&mut evidence.neighbors, pair[1], count, book);
+                bump(&mut evidence.pools, pool_of_key(pair[1]), count, book);
+            }
         }
     }
     for evidence in out.values_mut() {
         evidence.shapes.sort_unstable_by_key(|entry| entry.0);
         evidence.neighbors.sort_unstable_by_key(|entry| entry.0);
+        evidence.pools.sort_unstable_by_key(|entry| entry.0);
     }
     out
 }
 
 /// Linear: a glyph holds a handful of shapes and a handful of neighbors.
-fn bump<K: PartialEq>(counts: &mut Vec<(K, u64)>, key: K, count: u64) {
+fn bump<K: PartialEq>(counts: &mut Vec<(K, Tally)>, key: K, count: u64, book: u32) {
     match counts.iter_mut().find(|entry| entry.0 == key) {
-        Some(entry) => entry.1 += count,
-        None => counts.push((key, count)),
+        Some(entry) => entry.1.add(count, book),
+        None => {
+            let mut tally = Tally::default();
+            tally.add(count, book);
+            counts.push((key, tally));
+        }
     }
 }
 
-fn merged_scalars(corpus: &[&BookAggregate]) -> Vec<(ScalarKey, u64)> {
-    coalesce(
-        corpus
-            .iter()
-            .flat_map(|book| book.scalars().iter().map(|&(key, count)| (key, count)))
-            .collect(),
-    )
-}
-
-fn merged_pairs(corpus: &[&BookAggregate]) -> Vec<(PairKey, u64)> {
-    coalesce(
-        corpus
-            .iter()
-            .flat_map(|book| book.pairs().iter().map(|&(key, count)| (key, count)))
-            .collect(),
-    )
-}
-
-fn merged_runs<'a>(corpus: &[&'a BookAggregate]) -> Vec<(&'a [ScalarKey], u64)> {
-    coalesce(
-        corpus
-            .iter()
-            .flat_map(|book| book.runs().map(|(atoms, count)| (atoms, u64::from(count))))
-            .collect(),
-    )
-}
-
-/// Sorts and sums; each book's lane is already sorted, so this is a merge the
-/// sort does for us over 66 short vectors.
-fn coalesce<K: Ord + Copy, C: Into<u64> + Copy>(mut rows: Vec<(K, C)>) -> Vec<(K, u64)> {
-    rows.sort_unstable_by_key(|row| row.0);
-    let mut out: Vec<(K, u64)> = Vec::with_capacity(rows.len());
-    for (key, count) in rows {
+/// The census, summed across books and carrying how many held each scalar.
+///
+/// Each book's lane is already sorted; sorting the concatenation by
+/// `(key, book)` makes one pass enough and keeps the book order a `Tally`
+/// needs.
+fn merged_scalars(corpus: &[&BookAggregate]) -> Vec<(ScalarKey, Tally)> {
+    let mut rows: Vec<(ScalarKey, u32, u32)> = corpus
+        .iter()
+        .enumerate()
+        .flat_map(|(book, aggregate)| {
+            aggregate
+                .scalars()
+                .iter()
+                .map(move |&(key, count)| (key, book as u32, count))
+        })
+        .collect();
+    rows.sort_unstable();
+    let mut out: Vec<(ScalarKey, Tally)> = Vec::with_capacity(rows.len());
+    for (key, book, count) in rows {
         match out.last_mut() {
-            Some(last) if last.0 == key => last.1 += count.into(),
-            _ => out.push((key, count.into())),
+            Some(last) if last.0 == key => last.1.add(u64::from(count), book),
+            _ => {
+                let mut tally = Tally::default();
+                tally.add(u64::from(count), book);
+                out.push((key, tally));
+            }
         }
     }
     out
@@ -627,6 +813,45 @@ mod tests {
             Staircase::new(Staircase::DEFAULT_STEPS),
             Some(Staircase::default())
         );
+    }
+
+    /// `books_touched` recounts dispersion from the retained aggregates; the
+    /// merge that produced each numerator must agree with it row for row.
+    #[test]
+    fn books_touched_is_the_oracle_for_the_merge_time_count() {
+        use crate::pass::{ChapterObs, Findings};
+        use crate::substrate::{Edge, fold_book, walk};
+
+        let texts = [
+            format!("{}c;d ,,, 12,345", "a; b ".repeat(40)),
+            "e;f ... `rare` ;; 7,8 quiz".to_string(),
+            "no punctuation at all in this one".to_string(),
+            "x; y; z, w ,, q?. r?\" s".to_string(),
+        ];
+        let rows: Vec<_> = texts.iter().map(|text| walk::walk(text)).collect();
+        let aggregates: Vec<BookAggregate> = rows
+            .iter()
+            .map(|obs| fold_book(&[ChapterObs { start: 0, obs }], &mut Edge::default()))
+            .collect();
+        let views: Vec<&BookAggregate> = aggregates.iter().collect();
+        let config = JudgingConfig {
+            support_floor: 1,
+            letters: LetterRoster::Always,
+            ..JudgingConfig::default()
+        };
+        let mut findings = Findings::new(texts.iter().map(|text| text.len() as u32).collect());
+        judge_corpus(&views, &config, &mut findings);
+        assert!(
+            findings.patterns().len() > 20,
+            "the sample must judge something: {} rows",
+            findings.patterns().len()
+        );
+        let mut dispersed = 0;
+        for pattern in findings.patterns() {
+            assert_eq!(books_touched(&views, pattern), pattern.books, "{pattern:?}");
+            dispersed += usize::from(pattern.books > 1);
+        }
+        assert!(dispersed > 0, "no pattern reached two books");
     }
 
     /// A ten-million-count corpus stays inside its wire widths.

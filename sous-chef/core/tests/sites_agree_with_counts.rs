@@ -14,6 +14,7 @@
 use sous_core::judge::{Channel, Pattern, PatternIndex, PatternKey, Side};
 use sous_core::sites;
 use sous_core::substrate::{BookAggregate, Edge, OuterClass, RUN_BUCKETS, ScalarKey, fold_book};
+use sous_core::unicode::pool_of;
 use sous_core::{
     BookKey, Chapter, ChapterObs, ChapterPass, Corpus, Findings, JudgingConfig, ProjectedBook,
     Substrate, TextRange, Verse, VerseKey, analyze_with, for_each_chapter,
@@ -130,6 +131,19 @@ fn counted(book: &BookAggregate, pattern: &Pattern) -> u64 {
                 let pairs = atoms
                     .windows(2)
                     .filter(|pair| pair[0] == glyph && pair[1] == neighbor)
+                    .count() as u64;
+                pairs * u64::from(count)
+            })
+            .sum(),
+        PatternKey::PooledNeighbor(pool) => book
+            .runs()
+            .map(|(atoms, count)| {
+                let pairs = atoms
+                    .windows(2)
+                    .filter(|pair| {
+                        pair[0] == glyph
+                            && pair[1].scalar().is_some_and(|next| pool_of(next) == pool)
+                    })
                     .count() as u64;
                 pairs * u64::from(count)
             })
@@ -253,6 +267,10 @@ fn permissive() -> JudgingConfig {
         support_floor: 1,
         rarity_floor: 5,
         letters: sous_core::LetterRoster::Always,
+        channels: sous_core::Channels {
+            pooled_neighbor: true,
+            ..sous_core::Channels::default()
+        },
         ..JudgingConfig::default()
     }
 }
@@ -276,7 +294,6 @@ fn the_rescan_agrees_with_the_counts_over_a_synthetic_sweep() {
 #[test]
 fn the_synthetic_sweep_reaches_every_channel_and_both_placement_sides() {
     let mut seen: Vec<(Channel, Option<Side>)> = Vec::new();
-    let mut pooled = false;
     for seed in 1..=12u64 {
         let books = generated(seed, 3, 4, 400);
         let corpus = Corpus::try_new(&books).unwrap();
@@ -289,8 +306,7 @@ fn the_synthetic_sweep_reaches_every_channel_and_both_placement_sides() {
             if !seen.contains(&(row.channel, side)) {
                 seen.push((row.channel, side));
             }
-            pooled |= row.glyph == ScalarKey::DIGITS;
-            // Item 0: a book edge is never a convention.
+            // A book edge is never a convention.
             assert!(
                 !matches!(
                     row.key,
@@ -303,7 +319,12 @@ fn the_synthetic_sweep_reaches_every_channel_and_both_placement_sides() {
             );
         }
     }
-    for channel in [Channel::ExactNeighbor, Channel::RunShape, Channel::Rarity] {
+    for channel in [
+        Channel::ExactNeighbor,
+        Channel::PooledNeighbor,
+        Channel::RunShape,
+        Channel::Rarity,
+    ] {
         assert!(
             seen.contains(&(channel, None)),
             "no {channel:?} pattern fired"
@@ -315,7 +336,38 @@ fn the_synthetic_sweep_reaches_every_channel_and_both_placement_sides() {
             "no placement on {side:?}"
         );
     }
-    assert!(pooled, "the pooled digit lane must be judged too");
+}
+
+/// The pooled digit lane is judged and sited too. A digit breaks a run and
+/// joins none, so placement is the one channel that can still name it.
+#[test]
+fn the_pooled_digit_lane_is_judged_and_sited() {
+    let books = vec![book(
+        BookKey::new(*b"MRK"),
+        &[format!("{}b1,c", "a1 ".repeat(200))],
+    )];
+    let corpus = Corpus::try_new(&books).expect("a synthetic corpus is valid");
+    let findings: Findings = analyze_with(&corpus, &Substrate, &JudgingConfig::default());
+    let pooled: Vec<_> = findings
+        .patterns()
+        .iter()
+        .filter(|row| row.glyph == ScalarKey::DIGITS)
+        .map(|row| (row.channel, row.key, row.numerator, row.denominator))
+        .collect();
+    assert_eq!(
+        pooled,
+        vec![(
+            Channel::Placement,
+            PatternKey::Placement {
+                side: Side::Next,
+                class: OuterClass::Nonletter,
+            },
+            1,
+            201
+        )],
+        "the one digit a comma follows, against two hundred that a space does"
+    );
+    agree(&books, &JudgingConfig::default());
 }
 
 // ── The tier ────────────────────────────────────────────────────────────

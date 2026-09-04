@@ -44,7 +44,9 @@ decision stands and the number is recorded rather than acted on.
 **The pooled digit key has no literal.** `ScalarKey::DIGITS` covers every
 `Nd` scalar, so a pattern on it scans the chapter's scalars once with
 `is_decimal_digit`. That is the only classifier pass here, and it runs only
-when a digit pattern fired.
+when a digit pattern fired. A digit is not a run atom, so it sites its own
+scalar and `Placement` is the one channel that can name it — the same
+narrowing `is_run_atom` makes in the walk.
 
 The search is per **chapter**, not per book, because that is also the clip a run
 takes. Searching the whole book once per needle and looking a hit's chapter up
@@ -59,7 +61,7 @@ Three reads, all over the classifier and `OuterClass::of`:
 | --- | --- | --- |
 | `prev_outer(at)` | the outer class before the scalar at `at` | the book starts there |
 | `next_outer(at)` | the outer class after it | the book ends there |
-| `run_around(at)` | the maximal nonletter run holding it, clipped to its chapter | — empty when the scalar is not a run atom |
+| `run_around(at)` | the maximal run holding it, clipped to its chapter | — empty when the scalar is not a run atom |
 
 This is exactly `fold_book`'s seam behaviour, which is what makes the counts and
 the rescan the same claim:
@@ -86,6 +88,7 @@ every firing glyph the run contains is tested:
 | `Placement{side, class}` | an occurrence of `g` in the run sees `class` on `side` | those occurrences |
 | `RunShape{pure, bucket}` | the run's own shape is that | one, the run |
 | `ExactNeighbor(n)` | some occurrence of `g` is immediately followed by `n` | those positions |
+| `PooledNeighbor(p)` | some occurrence of `g` is immediately followed by an atom of pool `p` | those positions |
 | `Rarity` | `g` occurs in the run | those occurrences |
 
 A glyph's neighbours *inside* a run are `Nonletter` by construction; only the
@@ -96,7 +99,8 @@ it in the denominator.
 
 If anything matched, the run is **one** `Site`: the span is the whole run
 widened to atom edges inside its chapter, lane A is the *headline* pattern —
-finest channel first (`ExactNeighbor` > `RunShape` > `Placement` > `Rarity`),
+finest channel first (`ExactNeighbor` > `PooledNeighbor` > `RunShape` >
+`Placement` > `Rarity`),
 ties by lowest table position — and lane B is the union of every rung any
 matched pattern belongs to, placement split before/after. So one span is drawn
 once with every way it is anomalous, and the wire needs no `MULTI` flag.
@@ -107,10 +111,11 @@ and a placement appears under the run shape, with `PlacementBefore` beside
 `RunShape` in its reasons. The pattern table is still the evidence; the site
 count under a row is not that row's numerator.
 
-**Rarity for a letter** is the exception to "the site is a run": a letter — or a
-rare whitespace scalar — is never a run atom, so its site is its own atom.
-Placement, run shape, and exact neighbour never name one, because those lanes
-count nonletters alone.
+**A scalar that is not a run atom** is the exception to "the site is a run":
+its site is its own atom. A letter — or a rare whitespace scalar — reaches one
+only through `Rarity`, because placement, run shape, and exact neighbour count
+nonletters alone. A digit reaches one only through `Placement`, because the
+pairs lane counts it and the runs lane does not.
 
 ## Cost
 

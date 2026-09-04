@@ -68,6 +68,7 @@ Decoding refuses rather than guesses:
 | a convention `pattern_idx` at or past `pattern_count`, or a direct `pattern(index)` call past the table | `PatternIndexPastTable` |
 | a pattern row's reserved byte or `flags` set | `InvalidPattern` |
 | a pattern channel, key, band, or share outside its table | `InvalidPattern` |
+| a pattern `books` of zero on a row with a numerator, or past the header's `book_count` | `InvalidPattern` |
 | a `pattern_offset` that is not the running cursor | `PatternSectionOutOfOrder` |
 | more than 65,535 patterns | `PatternCountOverflow` |
 
@@ -112,13 +113,18 @@ position matched — so ten thousand sites of one convention cost ten thousand
 | 0..4 | `glyph: u32` (`ScalarKey` raw; `u32::MAX` is the pooled digit key) |
 | 4..8 | `neighbor: u32` (the G3 key; 0 on every other channel) |
 | 8 | `channel: u8` (`Channel` discriminant, finest grain first) |
-| 9 | `key: u8` (Placement: `side << 4 \| OuterClass`; RunShape: `pure << 4 \| bucket`; else 0) |
+| 9 | `key: u8` (Placement: `side << 4 \| OuterClass`; RunShape: `pure << 4 \| bucket`; PooledNeighbor: `Pool`; else 0) |
 | 10 | `band: u8` (staircase step index; `0xFF` = none, which only `Rarity` carries) |
 | 11 | `flags: u8` (reserved, 0; the decoder refuses nonzero) |
 | 12..16 | `numerator: u32` |
 | 16..20 | `denominator: u32` |
 | 20..22 | `share_bp: u16`, at most 10,000 |
-| 22..24 | reserved `u16` 0 (the decoder refuses nonzero) |
+| 22 | `books: u8` — books holding part of the numerator; books-possible is the header's `book_count` |
+| 23 | reserved `u8` 0 (the decoder refuses nonzero) |
+
+`books` is dispersion, and dispersion is information: nothing in the engine
+gates on it. A row with a numerator names at least one book, and no row may
+name more books than the publication has.
 
 `pattern_count` is capped at `u16::MAX`, because a `PatternIndex` is a `u16`.
 What the channels mean, and the order the rows arrive in: `../judge.md`. Who
@@ -175,7 +181,8 @@ cargo run -p sous-core --bin codegen     # reader.ts.tmpl → ../reader.ts
 
 `corpus::generated_reader_ts()` substitutes `@@NAME@@` placeholders in
 `sous-chef/reader.ts.tmpl` with the Rust constants — every offset, the magic,
-the format version, the UTF-16 flag, and the `HygieneClass` name list. The
+the format version, the UTF-16 flag, and the `HygieneClass`, `Channel`,
+`OuterClass`, `Pool`, and `Reasons` name lists. The
 freshness test `corpus::tests::checked_in_reader_is_fresh` compares the
 committed file against a fresh render, so a constant that moves without a
 regenerate fails the suite. `sous-chef/reader.test.mjs` (`npm test`) decodes

@@ -83,6 +83,12 @@ fn is_nonletter(c: char) -> bool {
     !class.is_alphabetic() && !is_glue(c) && !class.is_whitespace()
 }
 
+/// A digit breaks a run and joins none, so run membership is narrower than
+/// the nonletter inventory the pairs lane counts.
+fn is_run_atom(c: char) -> bool {
+    is_nonletter(c) && !class_of(c).is_decimal_digit()
+}
+
 fn outer(c: Option<char>) -> OuterClass {
     match c {
         None => OuterClass::Edge,
@@ -117,18 +123,18 @@ fn word_member(c: char) -> bool {
     class.is_alphabetic() || is_glue(c) || class.is_decimal_digit()
 }
 
-/// Every maximal nonletter run as `(start index, scalars)`.
+/// Every maximal run of run atoms as `(start index, scalars)`.
 fn runs_of(chars: &[char]) -> Vec<(usize, Vec<ScalarKey>)> {
     let mut out = Vec::new();
     let mut at = 0;
     while at < chars.len() {
-        if !is_nonletter(chars[at]) {
+        if !is_run_atom(chars[at]) {
             at += 1;
             continue;
         }
         let start = at;
         let mut run = Vec::new();
-        while at < chars.len() && is_nonletter(chars[at]) {
+        while at < chars.len() && is_run_atom(chars[at]) {
             run.push(key_of(chars[at]));
             at += 1;
         }
@@ -319,6 +325,10 @@ const SAMPLE: &[&str] = &[
     ",,",
     "He said, \u{201C}Go.\u{201D}",
     "12,345.67 and \u{967}\u{968}\u{969}",
+    "600,000",
+    "130.",
+    "one. 42 Two",
+    "a,1b \u{966},\u{967}",
     "ng'ombe na ng'ombe",
     "e\u{301}te\u{301} \u{915}\u{94d}\u{937} \u{915}\u{200d}\u{915}",
     "\u{5d0}\u{5d1}. \u{5d2}\u{5d3}",

@@ -21,7 +21,7 @@ Nothing borrows, nothing hashes, nothing carries a coordinate.
 | --- | --- | --- | --- | --- |
 | `scalars` | `ScalarKey` (a scalar, or the pooled `DIGITS`) | count | 8 | absolute rarity, the dense census, every denominator |
 | `pairs` | `(ScalarKey, prev outer, next outer)` | count | 12 | G0 placement, and G1 once conditioned by `runs` |
-| `runs` | the run's scalar sequence | count | 12 + 4/atom | run composition, G2/G3 neighbours inside a run |
+| `runs` | the run's scalar sequence, digits excluded | count | 12 + 4/atom | run composition, G2/G3 neighbours inside a run |
 | `follows` | `ScalarKey` of a run terminal | upper/lower/uncased | 16 | lowercase after a learned terminal |
 | `hygiene` | — | one `HygieneFinding` per site | 16/site | hygiene's four scalar classes, with exact spans |
 | `lead`, `trail` | — | one open edge each | 20 each | the seam (below) |
@@ -53,9 +53,14 @@ Four shapes are deliberate:
   (11 sites over the whole committed tier), and an empty lane costs the row 16
   inline bytes. `hygiene::ScalarSites` is the machine; `hygiene.md` has its
   semantics.
-- **Digits pool everywhere a scalar is a key** — inventory, pair, run atom,
-  follow. Charter invariant 7 is one judging lane, so `12,345` and `१२,३४५`
-  are the same run shape and the same pair triple.
+- **Digits pool wherever a scalar is a key, and are never run atoms.** Charter
+  invariant 7 is one judging lane, so `12,345` and `१२,३४५` are the same pair
+  triple. But a digit *breaks* a run and joins none, so `600,000` is a lone
+  comma with `prev = Digit next = Digit` rather than a mixed run of six, and
+  `130.` is a period standing alone rather than a mixed run of four. `runs`,
+  `run_lengths`, G1, and G3 never see a digit; `scalars`, `pairs`, `follows`,
+  and `OuterClass::Digit` all still do. `is_run_atom` is that narrower
+  predicate, beside `is_nonletter`, which still defines the inventory.
 
 Glue is the mirror rule: a Mark or extender is never a scalar, a pair member,
 or a run atom (charter invariant 8), but it still *reads* as `Letter` when a

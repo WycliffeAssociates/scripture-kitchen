@@ -7,9 +7,10 @@
 //! the wire layout is the codec's.
 
 use sous_core::{
-    BookKey, Channel, Chapter, Corpus, JudgingConfig, LetterRoster, Pattern, PatternKey,
+    BookKey, Channel, Channels, Chapter, Corpus, JudgingConfig, LetterRoster, Pattern, PatternKey,
     ProjectedBook, ScalarKey, Side, Substrate, TextRange, Verse, VerseKey, analyze_with,
     substrate::OuterClass,
+    unicode::{Pool, pool_of},
 };
 
 // ── The harness ─────────────────────────────────────────────────────────
@@ -60,6 +61,28 @@ fn patterns_with(text: impl Into<String>, config: &JudgingConfig) -> Vec<Pattern
 
 fn patterns(text: impl Into<String>) -> Vec<Pattern> {
     patterns_with(text, &JudgingConfig::default())
+}
+
+/// One book per text, so dispersion has something to disperse over.
+fn patterns_of_books(texts: &[String]) -> Vec<Pattern> {
+    let books: Vec<Book> = texts
+        .iter()
+        .enumerate()
+        .map(|(index, text)| {
+            book(
+                &[
+                    b'A' + u8::try_from(index).expect("a short corpus"),
+                    b'A',
+                    b'A',
+                ],
+                text.clone(),
+            )
+        })
+        .collect();
+    let corpus = Corpus::try_new(&books).expect("a synthetic corpus is valid");
+    analyze_with(&corpus, &Substrate, &JudgingConfig::default())
+        .patterns()
+        .to_vec()
 }
 
 /// Every pattern for one glyph on one channel.
@@ -263,6 +286,103 @@ fn four_commas_abstain_under_the_support_floor() {
     assert!(on(&rows, ',', Channel::Placement).is_empty());
 }
 
+/// Dispersion counts books, not occurrences: 818 semicolons in one book and
+/// one in another put `books = 2` on the row, not 819.
+///
+/// It is information, never a gate — nothing below suppresses or promotes the
+/// pattern because of it.
+#[test]
+fn dispersion_counts_books_not_occurrences() {
+    let texts = [
+        format!("{}c;d", "a; b ".repeat(817)),
+        "e;f".to_string(),
+        "a book with no semicolon in it".to_string(),
+    ];
+    let rows = patterns_of_books(&texts);
+    let fired = on(&rows, ';', Channel::Placement);
+    assert_eq!(
+        fired
+            .iter()
+            .map(|row| (row.key, row.numerator, row.denominator, row.books))
+            .collect::<Vec<_>>(),
+        vec![(
+            PatternKey::Placement {
+                side: Side::Next,
+                class: OuterClass::Letter
+            },
+            2,
+            819,
+            2
+        )],
+        "two letter-attached semicolons, in two of three books"
+    );
+}
+
+/// G2 says in one row what G3 splits over three: five question marks before
+/// some quotation mark, against four hundred before a full stop.
+///
+/// G2 and G3 share a denominator — the in-run positions where the glyph is
+/// followed by anything — so the two are entitled together and the pool is the
+/// coarser *statement*, not a fallback for an abstaining G3.
+#[test]
+fn a_glyph_followed_by_a_quote_fires_the_pool_the_exact_pairs_split() {
+    let text = format!(
+        "{}{}{}d?\u{2019} end",
+        "a?. ".repeat(400),
+        "b?\u{201d} ".repeat(2),
+        "c?\" ".repeat(2),
+    );
+    let rows = patterns_with(
+        text,
+        &JudgingConfig {
+            channels: Channels {
+                pooled_neighbor: true,
+                ..Channels::default()
+            },
+            ..JudgingConfig::default()
+        },
+    );
+    assert_eq!(
+        on(&rows, '?', Channel::PooledNeighbor)
+            .iter()
+            .map(|row| (row.key, row.numerator, row.denominator))
+            .collect::<Vec<_>>(),
+        vec![(PatternKey::PooledNeighbor(Pool::Quote), 5, 405)],
+        "one pool row; the four hundred full stops are Terminal and ordinary"
+    );
+    assert_eq!(
+        on(&rows, '?', Channel::ExactNeighbor)
+            .iter()
+            .map(|row| (row.key, row.numerator))
+            .collect::<Vec<_>>(),
+        vec![
+            (PatternKey::ExactNeighbor(ScalarKey::of('"')), 2),
+            (PatternKey::ExactNeighbor(ScalarKey::of('\u{2019}')), 1),
+            (PatternKey::ExactNeighbor(ScalarKey::of('\u{201d}')), 2),
+        ],
+        "three exact pairs, each a fraction of the pool's five"
+    );
+}
+
+/// Pool precedence is first-match-wins, and the pairs the charter kept apart
+/// stay apart.
+#[test]
+fn pool_precedence_is_documented() {
+    assert_eq!(
+        pool_of('\u{ab}'),
+        Pool::Quote,
+        "« is a Quotation_Mark before it is Pi"
+    );
+    assert_eq!(pool_of('\u{964}'), Pool::Terminal, "danda ends a sentence");
+    assert_eq!(
+        pool_of('\u{60c}'),
+        Pool::Separator,
+        "the Arabic comma is Terminal_Punctuation and no more"
+    );
+    assert_eq!(pool_of('('), Pool::Bracket);
+    assert_eq!(pool_of('\u{2014}'), Pool::Dash);
+}
+
 // ── The rarity roster ───────────────────────────────────────────────────
 
 /// Low Line used 28 times is not rare; `}` used twice is.
@@ -373,5 +493,28 @@ fn the_config_moves_the_roster_and_the_channels() {
         patterns_with(text, &quiet)
             .iter()
             .all(|row| row.channel != Channel::Rarity)
+    );
+
+    // The G2 switch: off by default, on by request.
+    let quotes = format!(
+        "{}b?\u{201d} c?\u{201d} d?\u{201d} e?\u{201d} f?\u{201d} g",
+        "a?. ".repeat(400)
+    );
+    assert!(
+        patterns(quotes.clone())
+            .iter()
+            .all(|row| row.channel != Channel::PooledNeighbor)
+    );
+    let pooled = JudgingConfig {
+        channels: Channels {
+            pooled_neighbor: true,
+            ..Channels::default()
+        },
+        ..JudgingConfig::default()
+    };
+    assert!(
+        patterns_with(quotes, &pooled)
+            .iter()
+            .any(|row| row.channel == Channel::PooledNeighbor)
     );
 }

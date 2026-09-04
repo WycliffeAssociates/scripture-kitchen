@@ -5,6 +5,7 @@ public surface is small on purpose:
 
 ```rust
 class_of(c) -> Class      // the bits for one scalar
+pool_of(c)  -> Pool       // G2's neighbour category, judge-time only
 is_glue(c)  -> bool       // charter invariant 8
 atoms::widen_to_atoms(text, range) -> TextRange
 atoms::is_atom_boundary(text, at)  -> bool
@@ -47,11 +48,11 @@ Noncharacters are a spec constant, not a UCD file.
 ## Generation
 
 ```sh
-cargo run -p sous-core --bin gen-unicode      # testdata/ucd/*.txt → src/unicode/table.rs
+cargo run -p sous-core --bin gen-unicode      # testdata/ucd/*.txt → table.rs, pools.rs
 ```
 
-Never a `build.rs`. `table.rs` is a committed, reviewable artifact, and a
-second run must leave `git diff --exit-code` clean. Inputs, their checksums,
+Never a `build.rs`. Both are committed, reviewable artifacts, and a second run
+must leave `git diff --exit-code` clean. Inputs, their checksums,
 the trim commands that produced them, and the version-bump procedure are in
 [`../../testdata/ucd/README.md`](../../testdata/ucd/README.md).
 
@@ -88,6 +89,34 @@ BMP array and the rejected decoding SWAR walk keep their code and numbers in
 [`../../../experiments/`](../../../experiments/); the measurements are in
 [`../../../evidence.md`](../../../evidence.md).
 
+## The G2 pools
+
+`Pool` is the neighbour category G2 judges on: `Quote`, `Bracket`, `Dash`,
+`Terminal`, `Separator`, `Digit`, `Symbol`, `Other`. Precedence is first match
+wins, so `«` is a quote rather than a bracket and `U+2212 MINUS SIGN` is a dash
+rather than a symbol.
+
+| pool | source | needs a row |
+| --- | --- | --- |
+| `Quote` | PropList `Quotation_Mark` | yes |
+| `Bracket` | General_Category `Ps \| Pe \| Pi \| Pf` | yes |
+| `Dash` | PropList `Dash` | yes |
+| `Terminal` | PropList `Sentence_Terminal` | yes |
+| `Separator` | PropList `Terminal_Punctuation` | yes |
+| `Digit` | `DECIMAL_DIGIT` bit | no |
+| `Symbol` | `SYMBOL` bit | no |
+| `Other` | everything else | no |
+
+`pools.rs` is 504 sorted `(u32, Pool)` rows — only the scalars a `Class` bit
+cannot already answer. `Nd` is above every pool it could collide with and no
+`Nd` carries one of the four properties, so the digit lane answers before the
+search; `Symbol` is the last pool before `Other`, so it answers only where no
+row claimed the scalar first. No bit is spent on any of this: `pool_of` runs at
+judge time over run atoms, never in the walk.
+
+`Pool::Digit` cannot occur as an in-run neighbour, because a digit is not a run
+atom. It exists so `pool_of` is total over every scalar.
+
 ## The atom rule
 
 An *atom* is a base scalar plus everything that cannot stand without it.
@@ -120,6 +149,8 @@ the dev-dependency oracle.
 | `tests::the_decimal_digit_lane_is_nd_not_every_numeric` | `Nd` only, both directions |
 | `tests::the_two_index_paths_agree_over_every_scalar` | `class_of(c)` equals `trie_at(c)` and its width, for every scalar |
 | `tests::the_bit_list_is_the_one_the_charter_authorizes` | one named scalar per bit |
-| `tests/unicode_generator.rs` | a second generator run reproduces the committed bytes |
+| `tests::the_pool_table_matches_a_fresh_ucd_parse_for_every_scalar` | `pool_of` equals an independent re-parse of the extracts, for all 0x110000 scalars, and no `Nd` is claimed by a punctuation pool |
+| `tests::pool_precedence_is_first_match_wins` | one named scalar per pool, and `Pool::from_raw` round trips |
+| `tests/unicode_generator.rs` | a second generator run reproduces `table.rs` and `pools.rs` byte for byte |
 | `tests/atom_conformance.rs` | no atom boundary falls inside a `GraphemeBreakTest.txt` cluster; widening any sub-range of a cluster returns the whole cluster; the test tier holds no cluster the rule would split |
 | `examples/atom_fleet.rs` | the same claim over the calibration fleet — a deliberate run, not a test |

@@ -1,8 +1,8 @@
 //! The `--report` page: one self-contained HTML file, no dependencies.
 //!
 //! ```text
-//! sous --report debug/d2b-en_ulb.html testData/exampleCorpora/en_ulb
-//!   pattern[7] U+002C ',' placement next=Digit  12/9,812  0.12% band 4
+//! sous --report debug/d3-en_ulb.html testData/exampleCorpora/en_ulb
+//!   pattern[7] U+002C ',' placement next=Digit  12/9,812  0.12% band 4  3/66 books
 //!     MRK 7:21  … he said , 12 men …          PlacementAfter
 //!     LUK 2:4   … came , 40 days …            PlacementAfter
 //! ```
@@ -56,6 +56,7 @@ pub fn render(
             "<details class=\"p\"{}><summary><span class=\"i\">#{index}</span> \
              <span class=\"g\">{}</span> <span class=\"c\">{}</span> \
              <span class=\"e\">{}</span> <span class=\"f\">{}/{} · {:.2}%{}</span> \
+             <span class=\"d\">{}/{} books</span> \
              <span class=\"n\">{} site{}</span></summary>",
             if rows.is_empty() { "" } else { " open" },
             escape(&glyph(pattern.glyph)),
@@ -68,6 +69,8 @@ pub fn render(
                 Some(step) => format!(" · band {step}"),
                 None => String::new(),
             },
+            pattern.books,
+            corpus.len(),
             rows.len(),
             if rows.len() == 1 { "" } else { "s" },
         ));
@@ -165,6 +168,7 @@ fn evidence(pattern: &Pattern) -> String {
             if bucket == 6 { "+" } else { "" }
         ),
         PatternKey::ExactNeighbor(neighbor) => format!("followed by {}", glyph(neighbor)),
+        PatternKey::PooledNeighbor(pool) => format!("followed by a {}", pool.name().to_lowercase()),
     }
 }
 
@@ -207,6 +211,7 @@ summary::marker { color: #8887; }
 .c { opacity: .8; }
 .e { opacity: .8; font-style: italic; }
 .f { opacity: .6; font-variant-numeric: tabular-nums; }
+.d { opacity: .6; font-variant-numeric: tabular-nums; }
 .n { margin-left: auto; opacity: .6; }
 .s { margin: .35rem 0 .35rem 1.5rem; padding: .2rem .4rem; border-left: 2px solid transparent; }
 .s:focus, .s.on { outline: none; border-left-color: currentColor; background: #8881; }

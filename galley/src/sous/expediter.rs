@@ -166,6 +166,7 @@ fn key_bytes(key: PatternKey) -> [u8; 6] {
         PatternKey::RunShape { pure, bucket } => [1, u8::from(pure), bucket, 0, 0, 0],
         PatternKey::Placement { side, class } => [2, side as u8, class as u8, 0, 0, 0],
         PatternKey::Rarity => [3, 0, 0, 0, 0, 0],
+        PatternKey::PooledNeighbor(pool) => [4, pool as u8, 0, 0, 0, 0],
     }
 }
 

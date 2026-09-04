@@ -1,7 +1,7 @@
 # Unicode Character Database extracts (UCD 17.0.0)
 
-The pinned inputs behind `src/unicode/table.rs` and the grapheme-atom
-conformance gate. They are committed reference data, read only by
+The pinned inputs behind `src/unicode/table.rs`, `src/unicode/pools.rs`, and
+the grapheme-atom conformance gate. They are committed reference data, read only by
 `bin/gen-unicode.rs` and by tests — `sous-core` opens no file at runtime.
 
 Each extract keeps the file's pristine eight-line header (title, date,
@@ -15,7 +15,7 @@ only the lines the generator reads. `GraphemeBreakTest.txt` and
 | --- | --- | --- | --- |
 | `DerivedGeneralCategory.txt` | `extracted/DerivedGeneralCategory.txt` | GC ∈ M\*, P\*, S\*, Nd, Cc, Cf | mark, punctuation, symbol, decimal digit, control, format |
 | `DerivedCoreProperties.txt` | `DerivedCoreProperties.txt` | Alphabetic, Uppercase, Lowercase, `InCB; Linker` | alphabetic, casing, linker |
-| `PropList.txt` | `PropList.txt` | White_Space | whitespace |
+| `PropList.txt` | `PropList.txt` | White_Space, Quotation_Mark, Dash, Sentence_Terminal, Terminal_Punctuation | whitespace; the four G2 pools of `src/unicode/pools.rs` |
 | `GraphemeBreakProperty.txt` | `auxiliary/GraphemeBreakProperty.txt` | pristine | extender, complex, gcb-control, prepend |
 | `emoji-data.txt` | `emoji/emoji-data.txt` | Extended_Pictographic | complex |
 | `GraphemeBreakTest.txt` | `auxiliary/GraphemeBreakTest.txt` | pristine | `tests/atom_conformance.rs` only |
@@ -33,7 +33,7 @@ xxh3-64 of each committed file, so a silent edit is visible:
 | `DerivedGeneralCategory.txt` | `e36a96d517790f5b` | 92115 |
 | `GraphemeBreakProperty.txt` | `989f35989eaea2d1` | 99377 |
 | `GraphemeBreakTest.txt` | `38c0549730f9c575` | 126570 |
-| `PropList.txt` | `e9d53165a25c179b` | 996 |
+| `PropList.txt` | `86cd819867f34195` | 21783 |
 | `emoji-data.txt` | `dba1f22ec5cbd739` | 39444 |
 
 ## Reproducing the extracts
@@ -50,7 +50,10 @@ From a directory holding the six pristine downloads:
   grep -E '; InCB; Linker' DerivedCoreProperties.txt
 } > out/DerivedCoreProperties.txt
 
-{ sed -n '1,8p' PropList.txt; grep -E '; White_Space ' PropList.txt; } > out/PropList.txt
+{ sed -n '1,8p' PropList.txt
+  grep -E '; (White_Space|Quotation_Mark|Dash|Sentence_Terminal|Terminal_Punctuation) ' \
+    PropList.txt
+} > out/PropList.txt
 { sed -n '1,8p' emoji-data.txt; grep -E '; Extended_Pictographic' emoji-data.txt; } > out/emoji-data.txt
 cp GraphemeBreakProperty.txt GraphemeBreakTest.txt out/
 ```

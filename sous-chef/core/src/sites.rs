@@ -20,8 +20,8 @@
 
 use memchr::memmem::Finder;
 
-use crate::judge::{Channel, Pattern, PatternIndex, PatternKey, Side};
-use crate::substrate::{BookAggregate, OuterClass, RUN_BUCKETS, ScalarKey, is_nonletter};
+use crate::judge::{Channel, Pattern, PatternIndex, PatternKey, Side, pool_of_key};
+use crate::substrate::{BookAggregate, OuterClass, RUN_BUCKETS, ScalarKey, is_run_atom};
 use crate::unicode::{atoms::widen_to_atoms, class_of};
 use crate::{Chapter, Reasons, TextRange};
 
@@ -132,9 +132,9 @@ pub fn locate_counted(
                 .chars()
                 .next()
                 .expect("a hit lands on a scalar");
-            if !is_nonletter(class_of(scalar)) {
-                // A run is a nonletter concept; a rostered letter or space
-                // sites its own atom.
+            if !is_run_atom(class_of(scalar)) {
+                // A rostered letter or space, or a digit: not a run atom, so
+                // it sites its own atom.
                 let own = TextRange::new(at, at + scalar.len_utf8() as u32)
                     .expect("a scalar has a positive width");
                 lone(
@@ -179,8 +179,12 @@ pub fn locate_counted(
     }
 }
 
-/// A rostered letter or space: its own atom, and only [`Channel::Rarity`] can
-/// name it — every other channel counts nonletters alone.
+/// A scalar that is not a run atom, sited on its own: only the two channels a
+/// single atom can answer may name it.
+///
+/// [`Channel::Rarity`] names a rostered letter or space; [`Channel::Placement`]
+/// names a digit, whose G0 pair the walk still counts. Run shape and exact
+/// neighbour need a run, and a digit is in none.
 #[allow(clippy::too_many_arguments)]
 fn lone(
     patterns: &[(PatternIndex, Pattern)],
@@ -191,11 +195,20 @@ fn lone(
     out: &mut Vec<Site>,
     tally: &mut [u64],
 ) {
+    let atoms = [(own.from(), needle.glyph)];
     let matched: Vec<(usize, u64)> = needle
         .patterns
         .iter()
-        .filter(|&&slot| patterns[slot].1.channel == Channel::Rarity)
-        .map(|&slot| (slot, 1))
+        .filter(|&&slot| {
+            matches!(
+                patterns[slot].1.channel,
+                Channel::Rarity | Channel::Placement
+            )
+        })
+        .filter_map(|&slot| {
+            let count = occurrences(&patterns[slot].1, needle.glyph, &atoms, cursor);
+            (count > 0).then_some((slot, count))
+        })
         .collect();
     emit(patterns, &matched, own, chapter, cursor, out, tally);
 }
@@ -236,6 +249,7 @@ fn emit(
 fn rung(pattern: &Pattern) -> Reasons {
     match pattern.key {
         PatternKey::ExactNeighbor(_) => Reasons::EXACT_NEIGHBOR,
+        PatternKey::PooledNeighbor(_) => Reasons::POOLED_NEIGHBOR,
         PatternKey::RunShape { .. } => Reasons::RUN_SHAPE,
         PatternKey::Placement { side, .. } => match side {
             Side::Prev => Reasons::PLACEMENT_BEFORE,
@@ -274,6 +288,10 @@ fn occurrences(
         PatternKey::ExactNeighbor(neighbor) => atoms
             .windows(2)
             .filter(|pair| pair[0].1 == glyph && pair[1].1 == neighbor)
+            .count() as u64,
+        PatternKey::PooledNeighbor(pool) => atoms
+            .windows(2)
+            .filter(|pair| pair[0].1 == glyph && pool_of_key(pair[1].1) == pool)
             .count() as u64,
         PatternKey::Rarity => atoms.iter().filter(|atom| atom.1 == glyph).count() as u64,
     }
@@ -379,8 +397,9 @@ impl<'a> Cursor<'a> {
         OuterClass::Edge
     }
 
-    /// The maximal nonletter run holding the scalar at `at`, clipped to its
-    /// chapter; empty when that scalar is not a run atom.
+    /// The maximal run holding the scalar at `at`, clipped to its chapter;
+    /// empty when that scalar is not a run atom — a letter, whitespace, or a
+    /// digit.
     pub fn run_around(&self, at: u32) -> TextRange {
         let empty = TextRange::new(at, at).expect("an empty range is ordered");
         let Some(chapter) = self.chapter_at(at) else {
@@ -389,7 +408,7 @@ impl<'a> Cursor<'a> {
         let span = self.chapters[chapter].text();
         let mut to = at;
         for (offset, scalar) in self.text[at as usize..span.to() as usize].char_indices() {
-            if !is_nonletter(class_of(scalar)) {
+            if !is_run_atom(class_of(scalar)) {
                 break;
             }
             to = at + offset as u32 + scalar.len_utf8() as u32;
@@ -399,7 +418,7 @@ impl<'a> Cursor<'a> {
         }
         let mut from = at;
         for scalar in self.text[span.from() as usize..at as usize].chars().rev() {
-            if !is_nonletter(class_of(scalar)) {
+            if !is_run_atom(class_of(scalar)) {
                 break;
             }
             from -= scalar.len_utf8() as u32;
@@ -464,6 +483,7 @@ mod tests {
             numerator: 1,
             denominator: 1,
             share_bp: 10_000,
+            books: 1,
         }
     }
 
@@ -652,17 +672,43 @@ mod tests {
         );
     }
 
+    /// A digit is not a run atom, so the pooled key sites its own scalar and
+    /// only placement can name it.
     #[test]
     fn digits_site_through_the_scan() {
         let text = "in 12,345 and \u{966}\u{967} too";
-        let pooled = Pattern {
+        let pooled = |side, class| Pattern {
             glyph: ScalarKey::DIGITS,
-            ..run_shape('0', false, 6)
+            ..placement('0', side, class)
         };
         assert_eq!(
-            found(text, &whole(text), &[pooled]),
-            vec![(3, 9, 0, Reasons::RUN_SHAPE.bits())],
-            "one mixed six-atom run; the Devanagari pair is a pure two"
+            found(
+                text,
+                &whole(text),
+                &[pooled(Side::Prev, OuterClass::Nonletter)]
+            ),
+            vec![(6, 7, 0, Reasons::PLACEMENT_BEFORE.bits())],
+            "the one digit standing after the comma"
+        );
+        assert_eq!(
+            found(text, &whole(text), &[pooled(Side::Prev, OuterClass::Space)]),
+            vec![
+                (3, 4, 0, Reasons::PLACEMENT_BEFORE.bits()),
+                (14, 17, 0, Reasons::PLACEMENT_BEFORE.bits()),
+            ],
+            "one Latin and one Devanagari digit, each its own atom"
+        );
+        assert_eq!(
+            found(
+                text,
+                &whole(text),
+                &[Pattern {
+                    glyph: ScalarKey::DIGITS,
+                    ..run_shape('0', false, 6)
+                }]
+            ),
+            Vec::new(),
+            "a run-shape row on the pooled key, which the judge no longer emits"
         );
     }
 

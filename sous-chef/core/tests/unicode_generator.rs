@@ -1,33 +1,44 @@
-//! The generated Unicode table is a committed artifact: a fresh run of
-//! `gen-unicode` must reproduce it byte for byte.
+//! The generated Unicode tables are committed artifacts: a fresh run of
+//! `gen-unicode` must reproduce them byte for byte.
 
 use std::path::PathBuf;
 use std::process::Command;
 
 #[test]
-fn a_second_generator_run_reproduces_the_committed_table() {
-    let out = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("regenerated-table.rs");
+fn a_second_generator_run_reproduces_the_committed_tables() {
+    let scratch = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    let table = scratch.join("regenerated-table.rs");
+    let pools = scratch.join("regenerated-pools.rs");
     let status = Command::new(env!("CARGO_BIN_EXE_gen-unicode"))
-        .arg(&out)
+        .arg(&table)
+        .arg(&pools)
         .status()
         .expect("the generator binary runs");
     assert!(status.success(), "gen-unicode exited with {status}");
 
-    let regenerated = std::fs::read(&out).expect("the generator wrote its output");
-    let committed =
-        std::fs::read(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/unicode/table.rs"))
-            .expect("the committed table is present");
+    let src = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/unicode");
+    assert_reproduces(&table, &src.join("table.rs"));
+    assert_reproduces(&pools, &src.join("pools.rs"));
+}
+
+fn assert_reproduces(regenerated: &PathBuf, committed: &PathBuf) {
+    let fresh = std::fs::read(regenerated).expect("the generator wrote its output");
+    let held = std::fs::read(committed).unwrap_or_else(|error| {
+        panic!("committed {} must be present: {error}", committed.display())
+    });
     assert_eq!(
-        regenerated.len(),
-        committed.len(),
-        "regenerated table is {} bytes, committed is {}; run \
+        fresh.len(),
+        held.len(),
+        "regenerated {} is {} bytes, committed is {}; run \
          `cargo run -p sous-core --bin gen-unicode`",
-        regenerated.len(),
-        committed.len()
+        committed.display(),
+        fresh.len(),
+        held.len(),
     );
-    let first_difference = regenerated.iter().zip(&committed).position(|(a, b)| a != b);
     assert_eq!(
-        first_difference, None,
-        "regenerated table diverges; run `cargo run -p sous-core --bin gen-unicode`"
+        fresh.iter().zip(&held).position(|(a, b)| a != b),
+        None,
+        "regenerated {} diverges; run `cargo run -p sous-core --bin gen-unicode`",
+        committed.display(),
     );
 }

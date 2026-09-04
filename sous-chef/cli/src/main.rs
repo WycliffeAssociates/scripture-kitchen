@@ -4,7 +4,7 @@
 //! sous --findings --publish out.sous --report sites.html book.usfm
 //!   finding target[0] MRK 1:1-1:1 C0Control 11..14 run 3 raw [46..49]
 //!   finding target[0] MRK 1:1-1:1 StrandedBackslash 17..19 run 2 raw [52..54]
-//!   pattern[0] U+002C ',' placement next=Digit 12/9812 0.12% band 4 11 sites
+//!   pattern[0] U+002C ',' placement next=Digit 12/9812 0.12% band 4 · 3/66 books 11 sites
 //!     site MRK 118..119
 //!   published 2 findings for 1 books (SOUS v1, UTF-16) to out.sous
 //!   wrote 1 patterns and 11 sites to sites.html
@@ -204,17 +204,22 @@ fn print_patterns(
             PatternKey::ExactNeighbor(neighbor) => {
                 format!("exact-neighbor {}", glyph(neighbor))
             }
+            PatternKey::PooledNeighbor(pool) => {
+                format!("pooled-neighbor {}", pool.name())
+            }
         };
         let band = match pattern.band {
             Some(step) => format!(" band {step}"),
             None => String::new(),
         };
         println!(
-            "pattern[{index}] {} {evidence} {}/{} {:.2}%{band} {} sites",
+            "pattern[{index}] {} {evidence} {}/{} {:.2}%{band} · {}/{} books {} sites",
             glyph(pattern.glyph),
             pattern.numerator,
             pattern.denominator,
             f64::from(pattern.share_bp) / 100.0,
+            pattern.books,
+            corpus.len(),
             sites[index].len(),
         );
         for finding in sites[index].iter().take(SHOWN) {

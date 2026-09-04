@@ -151,7 +151,7 @@ Shapes and layouts live in the module README each row names.
 | nonletter substrate | `donor/` probes are measured donors only | port consumer-led classifier bits in Stage 3 |
 | finding transport | `sous-core::codec` and `sous-core::corpus`, rebased and published by `galley::sous`. See [core/src/codec/README.md](core/src/codec/README.md) | Galley's canonical snapshot identity and checksum-keyed detached reuse (Stage 2) |
 | unicode classification | `sous-core::unicode`. See [core/src/unicode/README.md](core/src/unicode/README.md) | Level 1b consumes the bits in Stage 3; casing beyond the two predicate bits waits for Stage 4 |
-| convention judging | `sous-core::judge`, published as the envelope's pattern table. See [core/src/judge.md](core/src/judge.md) | book scope and dispersion (D3), G2's pooled neighbor categories (D3) |
+| convention judging | `sous-core::judge`, published as the envelope's pattern table, all four grains plus rarity. See [core/src/judge.md](core/src/judge.md) | whether Terminal vs Separator is the split that matters, and whether Quote and Bracket should merge — both open until fleet evidence says |
 | convention sites | `sous-core::sites` behind `ChapterPass::locate`, cached per book by `(RawChecksum, FiringHash)` in `galley::sous::Expediter`. See [core/src/sites.md](core/src/sites.md) | Aho-Corasick if a corpus ever shows many rare needles per book (evidence.md, 2026-09-04); a general one-pass byte-class sweep, still unbuilt |
 | hygiene | `sous-core::hygiene::scan` for the byte classes, the substrate row's `hygiene` lane for the four scalar ones. See [core/src/hygiene.md](core/src/hygiene.md) and [rules/hygiene.md](rules/hygiene.md) | NBSP's verse-edge case once the walk is verse-grained; a snapshot identity instead of the CLI's zero id |
 
@@ -408,11 +408,15 @@ Work:
    rather than an engine. Aho-Corasick is measured and not taken; a general
    one-pass byte-class sweep is not built, and the needles/hits/sites per book
    that would justify either are recorded (evidence.md, 2026-09-04);
-3. Implement rarity rosters and the G0–G3 evidence ladder. Landed for G0, G1,
-   G3 and rarity (D2a-2): `sous_core::judge` reads the folded counts and emits
-   one pattern row per firing claim. G2's pooled neighbor categories are D3 —
-   they need a pooling table the classifier does not carry — and its `Channel`
-   discriminant is reserved unused;
+3. Implement rarity rosters and the G0–G3 evidence ladder. Landed whole
+   (D2a-2, completed D3): `sous_core::judge` reads the folded counts and emits
+   one pattern row per firing claim on every grain. G2's pools are derived from
+   pinned UCD properties into `unicode::pools.rs` rather than hard-coded, so a
+   danda and an Ethiopic full stop are terminals beside `.`; G2 shares G3's
+   denominator, so the two are entitled together and G2's contribution is the
+   coarser *statement*, not a fallback for an abstaining G3. D3 also took
+   digits out of runs: a digit breaks a run and joins none, so `600,000` is a
+   lone comma between two digits and G0 and G1 tell one story about digits;
 4. Implement the fraction-band judge with explicit numerator, denominator,
    support floor, fallback grain, abstention, and union-of-reasons behavior.
    Landed (D2a-2, completed D2b): `JudgingConfig` carries the staircase in basis
@@ -423,12 +427,18 @@ Work:
    matched in it. `OuterClass::Edge` counts in the denominator and fires no
    placement row: a book boundary is a fact about the file;
 5. Add dispersion annotation and the narrowly defined “forgiven but
-   clustered” view without making dispersion a conviction gate.
+   clustered” view without making dispersion a conviction gate. The annotation
+   landed (D3): `Pattern::books` is books-touched, books-possible is the
+   header's `book_count`, and `judge::books_touched` recomputes it from the
+   retained aggregates. Nothing gates on it — no threshold, no flag, no config
+   — so the "forgiven but clustered" grouping is a front-end read of the rows,
+   not an engine verdict.
 6. Pack compact count evidence and expose typed rich evidence. The compact
    half landed (D2a-2): the 24-byte pattern table rides the corpus envelope,
    so a convention's argument is published once and a site names it by index.
    D2b put sites on that wire, and `sous --report <out.html>` is the
-   self-contained page that reads them back in context.
+   self-contained page that reads them back in context. D3 spent one of the
+   row's two reserved bytes on `books` and left the other reserved.
 
 Verification gate:
 

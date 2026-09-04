@@ -23,7 +23,6 @@ impl Reasons {
     pub const RUN_SHAPE: Self = Self(1 << 2);
     pub const EXACT_NEIGHBOR: Self = Self(1 << 3);
     pub const RARITY: Self = Self(1 << 4);
-    /// D3's pooled neighbor category; the encoder never sets it yet.
     pub const POOLED_NEIGHBOR: Self = Self(1 << 5);
     const KNOWN_BITS: u16 = 0b0011_1111;
     /// Bit order on the wire, low bit first.

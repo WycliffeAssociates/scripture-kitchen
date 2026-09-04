@@ -9,9 +9,8 @@ rows come out in.
 ## Scope is the project
 
 Every Target book's counts, summed. A convention is a corpus fact: whether
-"comma attached to a letter" is a slip depends on what every other book does,
-so book scope and dispersion are D3's, not this module's. Judging reads the
-`BookAggregate`s and keeps nothing.
+"comma attached to a letter" is a slip depends on what every other book does.
+Judging reads the `BookAggregate`s and keeps nothing.
 
 ## The channels
 
@@ -22,8 +21,8 @@ finding.
 
 | channel | grain | numerator | denominator |
 | --- | --- | --- | --- |
-| `ExactNeighbor` | G3 | runs where `g` is followed by `n` | runs where `g` is followed by any nonletter |
-| `PooledNeighbor` | G2 | — | — (D3; the discriminant is reserved) |
+| `ExactNeighbor` | G3 | in-run positions where `g` is followed by `n` | in-run positions where `g` is followed by anything |
+| `PooledNeighbor` | G2 | in-run positions where `g` is followed by an atom of that pool | the same positions G3 counts |
 | `RunShape` | G1 | runs of `g` with this `(pure, length bucket)` | runs containing `g` |
 | `Placement` | G0 | occurrences of `g` with this outer class, one side | every occurrence of `g` |
 | `Rarity` | — | corpus count of the glyph | every scalar counted |
@@ -41,6 +40,18 @@ it is still an occurrence. The rows stay per side; the collapse a reviewer
 wants happens at the site, where `Reasons::PLACEMENT_BEFORE | PLACEMENT_AFTER`
 ride one span.
 
+`PooledNeighbor` names a **kind** of neighbour rather than a scalar, so a
+convention that a script spells three ways — `”`, `"`, `’` — is one row
+instead of three. The eight pools come from pinned UCD properties
+(`unicode::Pool`), first match wins, so Ethiopic `።`, danda `।`, and `.` are
+all `Terminal` without an ASCII allow-list. It shares G3's
+denominator, so the two are entitled and abstain **together**: G2 is the
+coarser statement over the same evidence, not a fallback for a G3 that went
+silent — and because a pool's share is never under a member's, a G2 row never
+fires alone. It is therefore **off by default** (`Channels::pooled_neighbor`);
+the pool table stays for grouping and for later rules. `Pool::Digit` cannot occur — a digit is not a run atom — and exists so
+`pool_of` is total.
+
 `Rarity` is its own channel and its own kind of claim: a list for review, not
 an assertion that a glyph is wrong. It carries no band. Digits are one pooled
 key and never rare; glue never reaches the inventory at all (charter invariant
@@ -52,7 +63,7 @@ A channel is **entitled** when its denominator is at least `support_floor`
 (default 5). Below that it abstains: it emits nothing, and it makes no claim
 that nothing is wrong.
 
-The ladder is **finest-entitled-first**, G3 → G1 → G0, and what it rules is
+The ladder is **finest-entitled-first**, G3 → G2 → G1 → G0, and what it rules is
 that *abstention is not silence*. A glyph whose finest channel abstains is
 still judged at the next coarser grain, so the corpus's answer falls back to a
 coarser comparison rather than disappearing. Because the channels are
@@ -68,6 +79,7 @@ runs      [',']  ×5,000        [',', '`']  ×1
 G3 for ','   positions where ',' is followed by an atom: 1
              1 < support_floor 5  → ABSTAIN, and the comma emits no
                                     ExactNeighbor row
+G2 for ','   the same denominator                        → ABSTAIN too
 G1 for ','   runs containing ',': 5,001, keys (pure,1)×5,000 and (mixed,2)×1
              band for 5,001 is 100 bp; 1/5,001 = 1 bp  → FIRES
 G0 for ','   5,001 occurrences, two sides                → judged as usual
@@ -77,6 +89,24 @@ Rarity '`'   corpus count 1 < rarity_floor 5             → rostered
 The pair is reviewable through the rare member and through the run shape. The
 comma's own exact-pair evidence was never entitled, and that is a fact about
 the opportunity set, not a verdict.
+
+## Dispersion
+
+`Pattern::books` is how many Target books hold part of that row's numerator,
+saturating at 255. Books-possible is the publication's own `book_count`;
+nothing is stored for it.
+
+It is **information, not a judgement**. Genre clusters punctuation
+legitimately and a project's book set is not the engine's business, so no
+threshold, flag, or squiggle reads it — a front end can say "818 letter-attached
+commas, in 3 of 40 books" and leave the ruling to a person.
+
+The count is taken during the same merge that builds the numerator: books
+arrive in `BookIndex` order, so a `Tally` needs only the last contributor to
+count distinct ones, and nothing walks the aggregates twice.
+`judge::books_touched(corpus, pattern)` recomputes it from the retained
+aggregates for any pattern a host holds, and is the oracle the merge is tested
+against.
 
 ## The bands
 
@@ -106,7 +136,7 @@ Deterministic, because the wire pins it:
 2. then, per glyph ascending, that glyph's rows sorted by `(channel, key)`.
 
 `Channel`'s discriminants run finest grain first, so sorting by channel *is*
-sorting finest first. `ScalarKey` orders by code point with the pooled digit
+sorting finest first, and G2 comes out between G3 and G1 without a sort. `ScalarKey` orders by code point with the pooled digit
 lane last.
 
 ## Where the row goes

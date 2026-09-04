@@ -37,7 +37,10 @@ pub const PATTERN_FLAGS_OFFSET: usize = 11;
 pub const PATTERN_NUMERATOR_OFFSET: usize = 12;
 pub const PATTERN_DENOMINATOR_OFFSET: usize = 16;
 pub const PATTERN_SHARE_OFFSET: usize = 20;
-pub const PATTERN_RESERVED_OFFSET: usize = 22;
+/// Books whose counts hold part of the numerator; books-possible is the
+/// header's `book_count`.
+pub const PATTERN_BOOKS_OFFSET: usize = 22;
+pub const PATTERN_RESERVED_OFFSET: usize = 23;
 /// A band byte naming no staircase step, which is what `Rarity` carries.
 pub const PATTERN_BAND_NONE: u8 = 0xFF;
 /// The pooled digit lane's glyph value, [`ScalarKey::DIGITS`] on the wire.

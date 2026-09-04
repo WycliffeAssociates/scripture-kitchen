@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use super::{Class, bits, class_of, lookup::trie_at};
+use super::{Class, Pool, bits, class_of, lookup::trie_at, pool_of};
 
 fn ucd(file: &str) -> String {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -146,6 +146,121 @@ fn table_matches_a_fresh_ucd_parse_for_every_scalar() {
         drifted, 0,
         "scalars drifted from UCD 17.0.0; first: {samples:?}"
     );
+}
+
+/// The G2 pools, re-derived from the extracts without reading `pools.rs`:
+/// the same precedence `unicode::Pool` documents, applied to every scalar.
+fn pool_oracle() -> Vec<Pool> {
+    const RULES: &[(&str, &[&str], Pool)] = &[
+        ("PropList.txt", &["Terminal_Punctuation"], Pool::Separator),
+        ("PropList.txt", &["Sentence_Terminal"], Pool::Terminal),
+        ("PropList.txt", &["Dash"], Pool::Dash),
+        (
+            "DerivedGeneralCategory.txt",
+            &["Ps", "Pe", "Pi", "Pf"],
+            Pool::Bracket,
+        ),
+        ("PropList.txt", &["Quotation_Mark"], Pool::Quote),
+    ];
+
+    let mut want = vec![Pool::Other; 0x11_0000];
+    // Lowest precedence first, each pass overwriting: first match wins.
+    for &(file, properties, pool) in RULES {
+        let text = ucd(file);
+        for line in text.lines() {
+            let Some(body) = line.split('#').next().map(str::trim) else {
+                continue;
+            };
+            let mut fields = body.split(';').map(str::trim);
+            let Some(scalars) = fields.next().filter(|field| !field.is_empty()) else {
+                continue;
+            };
+            let named = fields.collect::<Vec<_>>().join("; ");
+            if !properties.contains(&named.as_str()) {
+                continue;
+            }
+            let mut ends = scalars.split("..");
+            let lo = u32::from_str_radix(ends.next().expect("a low scalar"), 16).unwrap();
+            let hi = ends
+                .next()
+                .map_or(lo, |hi| u32::from_str_radix(hi, 16).unwrap());
+            for cp in lo..=hi {
+                want[cp as usize] = pool;
+            }
+        }
+    }
+    // The two pools a Class bit fixes, below every property above them.
+    for cp in 0..0x11_0000u32 {
+        if want[cp as usize] != Pool::Other {
+            continue;
+        }
+        let Some(scalar) = char::from_u32(cp) else {
+            continue;
+        };
+        let class = class_of(scalar);
+        if class.is_decimal_digit() {
+            want[cp as usize] = Pool::Digit;
+        } else if class.is_symbol() {
+            want[cp as usize] = Pool::Symbol;
+        }
+    }
+    want
+}
+
+#[test]
+fn the_pool_table_matches_a_fresh_ucd_parse_for_every_scalar() {
+    let want = pool_oracle();
+    let mut samples = Vec::new();
+    let mut drifted = 0u32;
+    for c in scalars() {
+        let got = pool_of(c);
+        if got != want[c as usize] {
+            drifted += 1;
+            if samples.len() < 8 {
+                samples.push(format!(
+                    "U+{:04X} table {got:?} ucd {:?}",
+                    c as u32, want[c as usize]
+                ));
+            }
+        }
+    }
+    assert_eq!(
+        drifted, 0,
+        "pools drifted from UCD 17.0.0; first: {samples:?}"
+    );
+    // No decimal digit carries one of the four pinned properties, which is
+    // what lets `pool_of` answer `Digit` before it searches.
+    assert!(
+        scalars().all(|c| !class_of(c).is_decimal_digit() || pool_of(c) == Pool::Digit),
+        "an Nd scalar was claimed by a punctuation pool"
+    );
+}
+
+/// First match wins, and the two pairs the charter kept apart stay apart.
+#[test]
+fn pool_precedence_is_first_match_wins() {
+    assert_eq!(
+        pool_of('\u{ab}'),
+        Pool::Quote,
+        "« is a quote, not a bracket"
+    );
+    assert_eq!(pool_of('('), Pool::Bracket);
+    assert_eq!(
+        pool_of('\u{2212}'),
+        Pool::Dash,
+        "MINUS SIGN is Sm and a Dash"
+    );
+    assert_eq!(pool_of('\u{964}'), Pool::Terminal, "danda");
+    assert_eq!(pool_of('\u{1362}'), Pool::Terminal, "Ethiopic full stop");
+    assert_eq!(pool_of('\u{60c}'), Pool::Separator, "Arabic comma");
+    assert_eq!(pool_of('\u{967}'), Pool::Digit, "Devanagari one");
+    assert_eq!(pool_of('$'), Pool::Symbol);
+    assert_eq!(pool_of('a'), Pool::Other);
+    assert_eq!(pool_of('_'), Pool::Other, "Pc is no pool of its own");
+    for (raw, pool) in Pool::ALL.iter().enumerate() {
+        assert_eq!(Pool::from_raw(raw as u8), Some(*pool));
+    }
+    assert_eq!(Pool::from_raw(Pool::ALL.len() as u8), None);
 }
 
 #[test]

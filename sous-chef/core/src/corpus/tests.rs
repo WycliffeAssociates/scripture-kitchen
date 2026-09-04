@@ -5,6 +5,7 @@ use super::*;
 use crate::codec::{CodecError, HygieneClass};
 use crate::judge::{Channel, PatternKey, Side};
 use crate::substrate::{OuterClass, ScalarKey};
+use crate::unicode::Pool;
 use crate::{
     ConventionDigest, FindingKind, HygieneDigest, PatternIndex, ProportionalityDigest,
     QuantizedDeviation, Reasons,
@@ -25,6 +26,7 @@ fn fixture_patterns() -> Vec<Pattern> {
             numerator: 1,
             denominator: 48_213,
             share_bp: 0,
+            books: 1,
         },
         Pattern {
             glyph: ScalarKey::of('?'),
@@ -34,6 +36,17 @@ fn fixture_patterns() -> Vec<Pattern> {
             numerator: 3,
             denominator: 403,
             share_bp: 74,
+            books: 1,
+        },
+        Pattern {
+            glyph: ScalarKey::of('?'),
+            channel: Channel::PooledNeighbor,
+            key: PatternKey::PooledNeighbor(Pool::Quote),
+            band: Some(2),
+            numerator: 5,
+            denominator: 403,
+            share_bp: 124,
+            books: 1,
         },
         Pattern {
             glyph: ScalarKey::of(','),
@@ -46,6 +59,7 @@ fn fixture_patterns() -> Vec<Pattern> {
             numerator: 1,
             denominator: 601,
             share_bp: 16,
+            books: 1,
         },
         Pattern {
             glyph: ScalarKey::DIGITS,
@@ -58,6 +72,7 @@ fn fixture_patterns() -> Vec<Pattern> {
             numerator: 12,
             denominator: 9_812,
             share_bp: 12,
+            books: 1,
         },
     ]
 }
@@ -185,6 +200,8 @@ fn header_is_48_bytes() {
     assert_eq!(HEADER_PATTERN_OFFSET_OFFSET, 28);
     assert_eq!(HEADER_SNAPSHOT_ID_OFFSET, 32);
     assert_eq!(PATTERN_ROW_LEN, 24);
+    assert_eq!(PATTERN_BOOKS_OFFSET, 22);
+    assert_eq!(PATTERN_RESERVED_OFFSET, 23);
     let empty =
         encode_to_corpus_buffer(SnapshotId::new([0; 16]), CoordinateSpace::Utf8, &[], &[]).unwrap();
     assert_eq!(empty.len(), HEADER_BYTES);
@@ -212,13 +229,13 @@ fn pattern_table_round_trips() {
     )
     .unwrap();
     let snapshot = CorpusSnapshot::open(&encoded).unwrap();
-    assert_eq!(snapshot.pattern_count(), 4);
+    assert_eq!(snapshot.pattern_count(), 5);
     assert_eq!(snapshot.patterns().unwrap(), patterns);
     assert_eq!(
-        snapshot.pattern(4),
+        snapshot.pattern(5),
         Err(CorpusWireError::PatternIndexPastTable {
-            index: 4,
-            count: 4,
+            index: 5,
+            count: 5,
             at: None
         })
     );
@@ -228,10 +245,11 @@ fn pattern_table_round_trips() {
     for (offset, byte, field) in [
         (PATTERN_FLAGS_OFFSET, 1u8, "flags"),
         (PATTERN_RESERVED_OFFSET, 1, "reserved"),
-        (PATTERN_CHANNEL_OFFSET, 1, "channel"),
         (PATTERN_CHANNEL_OFFSET, 5, "channel"),
         (PATTERN_BAND_OFFSET, 0, "band"),
         (PATTERN_KEY_OFFSET, 1, "key"),
+        (PATTERN_BOOKS_OFFSET, 2, "books"),
+        (PATTERN_BOOKS_OFFSET, 0, "books"),
     ] {
         let mut torn = encoded.clone();
         torn[start + offset] = byte;
@@ -241,6 +259,18 @@ fn pattern_table_round_trips() {
             "pattern {field} {byte} decoded"
         );
     }
+    // Channel 1 is a live channel; its key byte is a `Pool` discriminant.
+    const POOLED_ROW: usize = 2;
+    let mut bad_pool = encoded.clone();
+    bad_pool[start + POOLED_ROW * PATTERN_ROW_LEN + PATTERN_KEY_OFFSET] = Pool::ALL.len() as u8;
+    assert_eq!(
+        CorpusSnapshot::open(&bad_pool).err(),
+        Some(CorpusWireError::InvalidPattern {
+            row: POOLED_ROW,
+            field: "key"
+        })
+    );
+
     let mut moved = encoded;
     moved[HEADER_PATTERN_OFFSET_OFFSET] = 0xff;
     assert!(matches!(
@@ -300,6 +330,7 @@ fn an_inconsistent_share_is_refused_on_the_way_in_and_out() {
 #[test]
 fn pattern_index_past_count_is_refused() {
     let patterns = fixture_patterns();
+    let past = patterns.len() as u16;
     let row = |pattern: u16| {
         PackedFinding::new(
             0,
@@ -313,7 +344,7 @@ fn pattern_index_past_count_is_refused() {
         )
         .unwrap()
     };
-    let inside = [row(3)];
+    let inside = [row(past - 1)];
     let books = [PublicationBook::new(
         BookKey::new(*b"MRK"),
         "books/mrk.usfm",
@@ -337,12 +368,12 @@ fn pattern_index_past_count_is_refused() {
         inside[0]
     );
 
-    let past = [row(4)];
+    let outside = [row(past)];
     let books = [PublicationBook::new(
         BookKey::new(*b"MRK"),
         "books/mrk.usfm",
         0,
-        &past,
+        &outside,
     )];
     let encoded = encode_to_corpus_buffer(
         SnapshotId::new([0; 16]),
@@ -354,8 +385,8 @@ fn pattern_index_past_count_is_refused() {
     assert_eq!(
         CorpusSnapshot::open(&encoded).err(),
         Some(CorpusWireError::PatternIndexPastTable {
-            index: 4,
-            count: 4,
+            index: usize::from(past),
+            count: usize::from(past),
             at: Some((0, 0)),
         })
     );

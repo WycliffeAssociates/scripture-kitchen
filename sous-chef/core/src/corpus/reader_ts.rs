@@ -13,10 +13,11 @@ use crate::codec::{
 };
 use crate::judge::{Channel, Staircase};
 use crate::substrate::{OuterClass, RUN_BUCKETS};
+use crate::unicode::Pool;
 
 /// Render the checked-in TypeScript reader from the Rust-owned wire schema.
 pub fn generated_reader_ts() -> String {
-    let substitutions: [(&str, String); 49] = [
+    let substitutions: [(&str, String); 51] = [
         ("@@MAGIC@@", format!("0x{MAGIC:08x}")),
         ("@@FORMAT_VERSION@@", FORMAT_VERSION.to_string()),
         ("@@FLAG_UTF16@@", FLAG_UTF16.to_string()),
@@ -86,6 +87,7 @@ pub fn generated_reader_ts() -> String {
             PATTERN_DENOMINATOR_OFFSET.to_string(),
         ),
         ("@@PATTERN_SHARE_OFFSET@@", PATTERN_SHARE_OFFSET.to_string()),
+        ("@@PATTERN_BOOKS_OFFSET@@", PATTERN_BOOKS_OFFSET.to_string()),
         (
             "@@PATTERN_RESERVED_OFFSET@@",
             PATTERN_RESERVED_OFFSET.to_string(),
@@ -99,6 +101,14 @@ pub fn generated_reader_ts() -> String {
             Channel::ALL
                 .iter()
                 .map(|channel| format!("\"{}\"", channel.name()))
+                .collect::<Vec<_>>()
+                .join(", "),
+        ),
+        (
+            "@@POOLS@@",
+            Pool::ALL
+                .iter()
+                .map(|pool| format!("\"{}\"", pool.name()))
                 .collect::<Vec<_>>()
                 .join(", "),
         ),
