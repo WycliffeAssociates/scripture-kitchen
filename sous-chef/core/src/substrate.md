@@ -6,6 +6,12 @@ this file is the observation's shape and the two arguments behind it. It
 implements charter invariants 2–4, 7, and 8, and the roadmap's Stage 3 rule of
 thumb: **one scalar walk per chapter**.
 
+## Layout
+
+`mod.rs` holds the keys, the row, `Substrate`, and `BookAggregate`. `walk.rs`
+is the per-chapter scan; `fold.rs` merges chapter rows across a seam;
+`tests.rs` covers both through the public row/aggregate surface.
+
 ## The row
 
 One `ChapterRow` per chapter, every lane a sorted vector of plain scalars.

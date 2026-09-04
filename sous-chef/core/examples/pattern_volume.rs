@@ -8,9 +8,9 @@
 //! Reads `corpora/*.txt` (vref: `BOOK C:V<TAB>text`), groups lines by
 //! book+chapter as `examples/inventory_census.rs` does, then maps, folds, and
 //! judges each corpus exactly as `analyze_with` would and counts the pattern
-//! table. When the 1,504-corpus vref tier is on this machine the same figures
-//! are swept over it and reported as percentiles; absent, that section is
-//! skipped.
+//! table, then sweeps the same figures as percentiles over the 1,504-corpus
+//! vref tier. That tier is local-only and not committed; run this on a
+//! machine that has it, or not at all — it panics rather than skip silently.
 //!
 //! Not a test: it prints tables for the ledger rather than asserting on them.
 
@@ -66,19 +66,12 @@ fn main() {
     }
 
     let candidates = [dir.join("calibration-corpora"), PathBuf::from(VREF)];
-    match candidates.iter().find(|path| path.is_dir()) {
-        Some(fleet) => {
-            println!("\n### fleet sweep ({}) ###\n", fleet.display());
-            sweep(fleet, &config);
-        }
-        None => println!(
-            "\n(no fleet corpora at {:?} — skipping the sweep)",
-            candidates
-                .iter()
-                .map(|path| path.display().to_string())
-                .collect::<Vec<_>>()
-        ),
-    }
+    let fleet = candidates
+        .iter()
+        .find(|path| path.is_dir())
+        .unwrap_or_else(|| panic!("no fleet corpora at {candidates:?}; this tier is local-only"));
+    println!("\n### fleet sweep ({}) ###\n", fleet.display());
+    sweep(fleet, &config);
 }
 
 // ── One corpus ──────────────────────────────────────────────────────────

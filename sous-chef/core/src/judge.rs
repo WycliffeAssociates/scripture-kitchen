@@ -20,7 +20,7 @@
 use rustc_hash::FxHashMap;
 
 use crate::pass::Findings;
-use crate::substrate::{BookAggregate, OuterClass, ScalarKey};
+use crate::substrate::{BookAggregate, OuterClass, PairKey, RUN_BUCKETS, ScalarKey};
 use crate::unicode::class_of;
 
 // ── The config ──────────────────────────────────────────────────────────
@@ -171,7 +171,8 @@ impl Default for JudgingConfig {
 // ── The pattern ─────────────────────────────────────────────────────────
 
 /// One evidence channel. The discriminants run finest grain first, which is
-/// the order patterns are emitted in.
+/// the order a glyph's own rows are emitted in; `Rarity` rows come first of
+/// all, ahead of every glyph (judge.md).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u8)]
 pub enum Channel {
@@ -258,6 +259,33 @@ pub struct Pattern {
     pub share_bp: u16,
 }
 
+impl Pattern {
+    /// Refuses a row whose fields disagree with each other, returning the
+    /// offending field's name. The wire's own byte-level checks (flags,
+    /// reserved, key nibbles) stay in `decode_pattern`; this is what a typed
+    /// `Pattern` can express and a corrupted round trip cannot fake.
+    pub(crate) fn validate(&self) -> Result<(), &'static str> {
+        if self.band.is_none() != (self.channel == Channel::Rarity) {
+            return Err("band");
+        }
+        if self.channel == Channel::PooledNeighbor {
+            return Err("channel");
+        }
+        if self.numerator > self.denominator {
+            return Err("numerator");
+        }
+        if self.share_bp != share_bp(u64::from(self.numerator), u64::from(self.denominator)) {
+            return Err("share_bp");
+        }
+        if let PatternKey::RunShape { bucket, .. } = self.key
+            && !(1..=RUN_BUCKETS as u8).contains(&bucket)
+        {
+            return Err("key");
+        }
+        Ok(())
+    }
+}
+
 /// A pattern's position in the publication's pattern table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PatternIndex(u16);
@@ -285,8 +313,8 @@ pub(crate) fn judge_corpus(corpus: &[&BookAggregate], config: &JudgingConfig, ou
     let pairs = merged_pairs(corpus);
     let runs = merged_runs(corpus);
     let shapes = run_evidence(&runs);
-    for group in glyph_groups(&pairs) {
-        let glyph = pairs[group.start].0.scalar();
+    for group in pairs.chunk_by(|a, b| a.0.scalar() == b.0.scalar()) {
+        let glyph = group[0].0.scalar();
         let evidence = shapes.get(&glyph);
         if config.channels.exact_neighbor
             && let Some(evidence) = evidence
@@ -299,7 +327,7 @@ pub(crate) fn judge_corpus(corpus: &[&BookAggregate], config: &JudgingConfig, ou
             run_shapes(glyph, evidence, config, out);
         }
         if config.channels.placement {
-            placement(glyph, &pairs[group.clone()], config, out);
+            placement(glyph, group, config, out);
         }
     }
 }
@@ -357,7 +385,7 @@ fn letters_are_rostered(scalars: &[(ScalarKey, u64)], config: &JudgingConfig) ->
 /// distribution over all of that glyph's occurrences.
 fn placement(
     glyph: ScalarKey,
-    group: &[(crate::substrate::PairKey, u64)],
+    group: &[(PairKey, u64)],
     config: &JudgingConfig,
     out: &mut Findings,
 ) {
@@ -401,9 +429,7 @@ fn run_shapes(
     let Some((band, ceiling)) = entitled(evidence.runs, config) else {
         return;
     };
-    let mut shapes = evidence.shapes.clone();
-    shapes.sort_unstable_by_key(|entry| entry.0);
-    for ((pure, bucket), count) in shapes {
+    for &((pure, bucket), count) in &evidence.shapes {
         let share = share_bp(count, evidence.runs);
         if share >= ceiling {
             continue;
@@ -426,9 +452,7 @@ fn neighbors(glyph: ScalarKey, evidence: &RunEvidence, config: &JudgingConfig, o
     let Some((band, ceiling)) = entitled(evidence.positions, config) else {
         return;
     };
-    let mut neighbors = evidence.neighbors.clone();
-    neighbors.sort_unstable_by_key(|entry| entry.0);
-    for (neighbor, count) in neighbors {
+    for &(neighbor, count) in &evidence.neighbors {
         let share = share_bp(count, evidence.positions);
         if share >= ceiling {
             continue;
@@ -481,7 +505,7 @@ fn run_evidence(runs: &[(&[ScalarKey], u64)]) -> FxHashMap<ScalarKey, RunEvidenc
             }
             seen.push(*atom);
             let pure = atoms.iter().all(|other| other == atom);
-            let bucket = atoms.len().min(crate::substrate::RUN_BUCKETS) as u8;
+            let bucket = atoms.len().min(RUN_BUCKETS) as u8;
             let evidence = out.entry(*atom).or_default();
             evidence.runs += count;
             bump(&mut evidence.shapes, (pure, bucket), count);
@@ -491,6 +515,10 @@ fn run_evidence(runs: &[(&[ScalarKey], u64)]) -> FxHashMap<ScalarKey, RunEvidenc
             evidence.positions += count;
             bump(&mut evidence.neighbors, pair[1], count);
         }
+    }
+    for evidence in out.values_mut() {
+        evidence.shapes.sort_unstable_by_key(|entry| entry.0);
+        evidence.neighbors.sort_unstable_by_key(|entry| entry.0);
     }
     out
 }
@@ -512,7 +540,7 @@ fn merged_scalars(corpus: &[&BookAggregate]) -> Vec<(ScalarKey, u64)> {
     )
 }
 
-fn merged_pairs(corpus: &[&BookAggregate]) -> Vec<(crate::substrate::PairKey, u64)> {
+fn merged_pairs(corpus: &[&BookAggregate]) -> Vec<(PairKey, u64)> {
     coalesce(
         corpus
             .iter()
@@ -542,22 +570,6 @@ fn coalesce<K: Ord + Copy, C: Into<u64> + Copy>(mut rows: Vec<(K, C)>) -> Vec<(K
         }
     }
     out
-}
-
-/// The contiguous run of pair rows each glyph owns, in glyph order.
-fn glyph_groups(pairs: &[(crate::substrate::PairKey, u64)]) -> Vec<std::ops::Range<usize>> {
-    let mut groups = Vec::new();
-    let mut at = 0;
-    while at < pairs.len() {
-        let glyph = pairs[at].0.scalar();
-        let mut end = at + 1;
-        while end < pairs.len() && pairs[end].0.scalar() == glyph {
-            end += 1;
-        }
-        groups.push(at..end);
-        at = end;
-    }
-    groups
 }
 
 fn is_letter(glyph: ScalarKey) -> bool {

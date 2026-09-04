@@ -65,7 +65,7 @@ Decoding refuses rather than guesses:
 | a convention reasons lane of zero | `EmptyReasons` |
 | a convention reasons bit outside the table | `UnknownReasons` |
 | `SATURATED` on a convention row | `UnknownFlags` |
-| a convention `pattern_idx` at or past `pattern_count` | `PatternIndexPastTable` |
+| a convention `pattern_idx` at or past `pattern_count`, or a direct `pattern(index)` call past the table | `PatternIndexPastTable` |
 | a pattern row's reserved byte or `flags` set | `InvalidPattern` |
 | a pattern channel, key, band, or share outside its table | `InvalidPattern` |
 | a `pattern_offset` that is not the running cursor | `PatternSectionOutOfOrder` |
