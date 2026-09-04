@@ -456,6 +456,7 @@ name = "sous-cli"
 version = "0.1.0"
 dependencies = [
  "rayon",
+ "rustc-hash",
  "sous-core",
  "usage-rs",
  "usfm_galley",

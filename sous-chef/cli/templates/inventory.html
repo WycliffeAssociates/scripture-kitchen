@@ -1,0 +1,488 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Punctuation & Symbol Inventory</title>
+<style>
+:root{
+  --paper:#fafbf9; --ink:#1c211f; --muted:#68716c; --line:#dde3df;
+  --cell:#f1f4f2; --accent:#0e6e64; --accent-ink:#fff; --amber:#a8731d;
+  --amber-bg:#f7efe0; --bar:#c7d6d2; --bar-hot:#0e6e64; --good:#3d7a46;
+}
+@media (prefers-color-scheme: dark){:root{
+  --paper:#141817; --ink:#e6eae8; --muted:#8b948f; --line:#2b322f;
+  --cell:#1c2220; --accent:#3cb8a9; --accent-ink:#0c1211; --amber:#d9a049;
+  --amber-bg:#2a2317; --bar:#31413d; --bar-hot:#3cb8a9; --good:#6fbf7a;
+}}
+:root[data-theme="dark"]{
+  --paper:#141817; --ink:#e6eae8; --muted:#8b948f; --line:#2b322f;
+  --cell:#1c2220; --accent:#3cb8a9; --accent-ink:#0c1211; --amber:#d9a049;
+  --amber-bg:#2a2317; --bar:#31413d; --bar-hot:#3cb8a9; --good:#6fbf7a;
+}
+:root[data-theme="light"]{
+  --paper:#fafbf9; --ink:#1c211f; --muted:#68716c; --line:#dde3df;
+  --cell:#f1f4f2; --accent:#0e6e64; --accent-ink:#fff; --amber:#a8731d;
+  --amber-bg:#f7efe0; --bar:#c7d6d2; --bar-hot:#0e6e64; --good:#3d7a46;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);
+  font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+h1,h2,h3,.specimen{font-family:Charter,Georgia,"Times New Roman",serif}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  font-variant-numeric:tabular-nums}
+header{padding:18px 24px 0;border-bottom:1px solid var(--line)}
+.hrow{display:flex;align-items:baseline;gap:16px;flex-wrap:wrap}
+header h1{margin:0;font-size:22px;font-weight:600}
+header .sub{color:var(--muted);font-size:13px}
+.switch{margin-left:auto;display:flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.switch button{border:0;background:transparent;color:var(--ink);padding:6px 14px;font-size:13px;cursor:pointer}
+.switch button.on{background:var(--accent);color:var(--accent-ink)}
+.tabs{display:flex;gap:2px;margin-top:12px}
+.tabs button{border:1px solid var(--line);border-bottom:0;background:transparent;color:var(--muted);
+  padding:7px 18px;font-size:13.5px;cursor:pointer;border-radius:7px 7px 0 0}
+.tabs button.on{background:var(--cell);color:var(--ink);font-weight:600}
+button:focus-visible,.cellcard:focus-visible,tr[tabindex]:focus-visible,.arow:focus-visible,summary:focus-visible{
+  outline:2px solid var(--accent);outline-offset:1px}
+.app{display:flex;min-height:calc(100vh - 100px)}
+aside{width:238px;flex:none;border-right:1px solid var(--line);
+  max-height:calc(100vh - 100px);overflow-y:auto;position:sticky;top:0}
+.sorttog{display:flex;gap:6px;padding:10px 12px;border-bottom:1px solid var(--line);
+  position:sticky;top:0;background:var(--paper);z-index:2}
+.sorttog button{border:1px solid var(--line);background:transparent;color:var(--muted);
+  border-radius:5px;padding:3px 9px;font-size:12px;cursor:pointer}
+.sorttog button.on{border-color:var(--accent);color:var(--accent)}
+.grow{width:100%;border:0;background:transparent;text-align:left;cursor:pointer;
+  display:flex;align-items:center;gap:10px;padding:7px 12px;color:var(--ink)}
+.grow:hover{background:var(--cell)}
+.grow.sel{background:var(--cell);box-shadow:inset 3px 0 0 var(--accent)}
+.grow .specimen{font-size:22px;width:30px;text-align:center;flex:none}
+.grow .meta .n{font-size:13px}
+.grow .meta .cp{font-size:11px;color:var(--muted)}
+.grow .bar{height:3px;background:var(--bar);border-radius:2px;margin-top:3px;width:120px}
+.grow .bar i{display:block;height:3px;background:var(--bar-hot);border-radius:2px}
+main{flex:1;min-width:0;padding:22px 26px 60px}
+.gh{display:flex;align-items:center;gap:18px;margin-bottom:6px}
+.gh .specimen{font-size:54px;line-height:1;background:var(--cell);
+  border:1px solid var(--line);border-radius:10px;width:76px;height:76px;
+  display:flex;align-items:center;justify-content:center;flex:none}
+.gh h2{margin:0;font-size:19px;font-weight:600}
+.gh .facts{color:var(--muted);font-size:13px;margin-top:2px}
+section{margin-top:26px}
+section>h3{font-size:15px;margin:0 0 4px;font-weight:600}
+.note{color:var(--muted);font-size:12.5px;margin:0 0 10px;max-width:72ch}
+table{border-collapse:collapse;font-size:13.5px}
+th{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);
+  font-weight:600;text-align:left;padding:4px 14px 4px 0}
+td{padding:4px 14px 4px 0;border-top:1px solid var(--line)}
+td .bar{display:inline-block;vertical-align:middle;height:8px;background:var(--bar-hot);
+  border-radius:2px;margin-left:8px}
+.twrap{overflow-x:auto}
+.cells{display:flex;gap:10px;flex-wrap:wrap}
+.cellcard{border:1px solid var(--line);border-radius:8px;padding:10px 14px;min-width:150px;max-width:200px;
+  background:transparent;color:var(--ink);cursor:pointer;text-align:left}
+.cellcard:hover{border-color:var(--accent)}
+.cellcard.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.cellcard .t{font-size:12px;color:var(--muted);line-height:1.35}
+.cellcard .n{font-size:19px;font-weight:600;margin:2px 0}
+.cellcard .pc{font-size:12px;color:var(--muted)}
+.cellcard.hot{background:var(--amber-bg)}
+.cellcard.hot .pc{color:var(--amber);font-weight:600}
+.pairs tr[tabindex]{cursor:pointer}
+.pairs tr[tabindex]:hover td{background:var(--cell)}
+.pairs tr.sel td{background:var(--cell);box-shadow:inset 3px 0 0 var(--accent)}
+.hotpc{color:var(--amber);font-weight:600}
+.runs{display:flex;gap:26px;flex-wrap:wrap}
+.runs .mono{font-size:13px}
+.runs h4{margin:0 0 6px;font-size:12px;text-transform:uppercase;letter-spacing:.06em;
+  color:var(--muted);font-weight:600}
+.runbtn{border:1px solid var(--line);background:transparent;color:var(--ink);
+  border-radius:5px;padding:2px 8px;font-size:12.5px;cursor:pointer;margin:0 4px 6px 0}
+.runbtn:hover{border-color:var(--accent);color:var(--accent)}
+.runbtn.sel{border-color:var(--accent);color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+#samples,.arow .drawer{border:1px solid var(--line);border-radius:8px;background:var(--cell);
+  padding:14px 16px;margin-top:14px}
+#samples h4{margin:0 0 8px;font-size:13px;font-weight:600}
+#samples ul,.drawer ul{list-style:none;margin:0;padding:0;font-size:13px}
+#samples li,.drawer li{padding:6px 0;border-top:1px solid var(--line)}
+#samples li:first-child,.drawer li:first-child{border-top:0}
+.srow{display:flex;gap:12px}
+.ref{color:var(--muted);flex:none;width:86px;font-size:12px}
+mark{background:transparent;color:var(--amber);font-weight:700}
+.snip{overflow-wrap:anywhere}
+.ctxd{margin:4px 0 2px 98px}
+.ctxd summary{cursor:pointer;color:var(--accent);font-size:12px;list-style:none}
+.ctxd summary::before{content:"▸ "}
+.ctxd[open] summary::before{content:"▾ "}
+.ctxd .cbody{border-left:2px solid var(--line);padding-left:12px;margin-top:6px;
+  font-size:13px;max-width:70ch}
+.ctxd .cprev,.ctxd .cnext{color:var(--muted)}
+.ctxd .ccur{margin:4px 0}
+.empty{color:var(--muted);font-size:13px}
+/* audit view */
+.qbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:4px 0 6px}
+.qbar label{font-size:13.5px}
+.qbar input[type=range]{accent-color:var(--accent);width:160px;vertical-align:middle}
+.qbar .thv{font-weight:600}
+.qnote{color:var(--muted);font-size:12.5px;margin:0 0 12px;max-width:78ch}
+.qgroup{margin-top:22px}
+.qgroup>h3{display:flex;align-items:baseline;gap:10px}
+.qgroup>h3 .cnt{font-size:12px;color:var(--muted);font-weight:400}
+.arow{border:1px solid var(--line);border-radius:8px;margin-top:8px;padding:10px 14px}
+.arow .top{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.arow .claim{flex:1;min-width:220px;font-size:14px}
+.arow .claim .g{font-family:Charter,Georgia,serif;font-size:17px}
+.arow .stats{color:var(--muted);font-size:12.5px}
+.arow .contrast{color:var(--amber);font-weight:600}
+.dispo{display:flex;gap:6px}
+.dispo button{border:1px solid var(--line);background:transparent;color:var(--muted);
+  border-radius:5px;padding:3px 10px;font-size:12px;cursor:pointer}
+.dispo button:hover{border-color:var(--accent);color:var(--accent)}
+.dispo button.acc{border-color:var(--good);color:var(--good)}
+.dispo button.fix{border-color:var(--amber);color:var(--amber)}
+.arow.done{opacity:.55}
+.arow.done .claim{text-decoration:line-through;text-decoration-color:var(--muted)}
+.showbtn{border:0;background:transparent;color:var(--accent);font-size:12.5px;cursor:pointer;padding:2px 0}
+.acceptedhead{margin-top:30px;color:var(--muted);font-size:13px;border-top:1px solid var(--line);padding-top:14px}
+/* judge tab */
+.cfg{border:1px solid var(--line);border-radius:10px;padding:14px 18px;background:var(--cell);margin-bottom:18px}
+.cfg h3{margin:0 0 2px;font-size:14px}
+.cfg .cnote{color:var(--muted);font-size:12px;margin:0 0 10px;max-width:80ch}
+.cfgrow{display:flex;gap:22px;flex-wrap:wrap;align-items:flex-end;margin-top:8px}
+.knob{display:flex;flex-direction:column;gap:2px}
+.knob label{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.knob input[type=range]{accent-color:var(--accent);width:110px}
+.knob .v{font-size:12.5px;font-weight:600}
+.knob.big input{width:150px}
+.cfg .counts{margin-top:12px;font-size:13px;border-top:1px solid var(--line);padding-top:10px}
+.cfg .counts b{color:var(--accent)}
+.cfg .counts .ed{color:var(--amber);font-weight:600}
+.ebadge{background:var(--amber);color:#fff;border-radius:4px;font-size:10px;padding:1px 6px;
+  vertical-align:2px;margin-left:8px;letter-spacing:.04em;text-transform:uppercase}
+.stbar{display:inline-block;vertical-align:middle;height:8px;background:var(--bar);border-radius:2px;width:64px;margin-right:6px}
+.stbar i{display:block;height:8px;background:var(--amber);border-radius:2px}
+.grainchip{font-size:10.5px;border:1px solid var(--line);border-radius:4px;padding:1px 6px;color:var(--muted);
+  text-transform:uppercase;letter-spacing:.04em;flex:none}
+.cellcard.ehot{border-color:var(--amber);box-shadow:0 0 0 1px var(--amber)}
+.runbtn.fired{border-color:var(--amber);color:var(--amber)}
+/* the-idea tab */
+.philo{max-width:74ch;font-size:15.5px}
+.philo h3{font-size:17px;margin:30px 0 8px}
+.philo h3:first-child{margin-top:6px}
+.philo p{margin:0 0 12px}
+.philo ul{margin:0 0 12px;padding-left:22px}
+.philo li{margin-bottom:6px}
+.philo .lede{font-size:17px;line-height:1.55}
+.profiles{display:flex;gap:12px;flex-wrap:wrap;margin:14px 0}
+.profile{border:1px solid var(--line);border-radius:8px;padding:12px 15px;flex:1;min-width:200px}
+.profile h4{margin:0 0 6px;font-size:13.5px}
+.profile p{font-size:13px;color:var(--muted);margin:0}
+.profile .sig{font-size:12px;margin-top:8px;color:var(--ink)}
+figure.venn{margin:18px 0;text-align:center}
+figure.venn svg{max-width:100%;height:auto;color:var(--ink)}
+figure.venn figcaption{font-size:12.5px;color:var(--muted);max-width:60ch;margin:6px auto 0;text-align:left}
+.exlink{color:var(--accent);cursor:pointer;background:none;border:none;font:inherit;padding:0;text-decoration:underline}
+@media (max-width:760px){.app{flex-direction:column}aside{width:100%;max-height:220px;position:static}.ctxd{margin-left:0}}
+@media (prefers-reduced-motion:no-preference){.cellcard,.grow,.arow{transition:background .12s,border-color .12s,opacity .2s}}
+</style>
+<header>
+  <div class="hrow">
+    <h1>Punctuation &amp; Symbol Inventory</h1>
+    <div class="sub">how this translation actually uses its punctuation, digits, and symbols — and what stands out</div>
+    <div class="switch" id="corpusSwitch" role="group" aria-label="translation"></div>
+  </div>
+  <div class="tabs">
+    <button id="tabPhilo">The idea</button>
+    <button id="tabBrowse">Character by character</button>
+  </div>
+</header>
+<div class="app" id="app"></div>
+<script>
+const CORPORA = @@CORPORA@@;
+const S = {c:0, view:"philo", g:null, railSort:"freq", pairSort:"desc", pick:null,
+           open:null};
+const $=(s,el=document)=>el.querySelector(s);
+const esc=t=>String(t).replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));
+const fmt=n=>n.toLocaleString("en-US");
+const pct=(n,d)=>d?(100*n/d).toFixed(n&&100*n/d<0.1?2:1)+"%":"–";
+const TOPO=["Both","StartOnly","EndOnly","Neither","in-run"];
+const TLABEL={Both:"Touching letters on both sides",StartOnly:"Letter before it, space after it",
+  EndOnly:"Space before it, letter after it",Neither:"Standing alone between spaces",
+  "in-run":"Inside a punctuation cluster"};
+const TPHRASE={Both:"touching letters on both sides",StartOnly:"with a letter before it and a space after it",
+  EndOnly:"with a space before it and a letter after it",Neither:"standing alone between spaces"};
+const SIDECLS=["letter","space","edge","run:digit","run:quote","run:punct"];
+const CLSLABEL={letter:"a letter",space:"a space",edge:"start or end of the verse",
+  "run:digit":"a digit in the same cluster","run:quote":"a quote mark in the same cluster",
+  "run:punct":"other punctuation in the same cluster"};
+function corpus(){return CORPORA[S.c]}
+function judgeable(g){return TOPO.slice(0,4).reduce((a,t)=>a+((g.topo[t]||{}).n||0),0)}
+
+function renderSample(s){
+  const [ref,snip,idx,L,cprev,ccur,cidx,cnext]=s;
+  const len=L||1;
+  const pre=esc(snip.slice(0,idx)),run=esc(snip.slice(idx,idx+len)),post=esc(snip.slice(idx+len));
+  let ctx="";
+  if(ccur!==undefined){
+    const cpre=esc(ccur.slice(0,cidx)),crun=esc(ccur.slice(cidx,cidx+len)),cpost=esc(ccur.slice(cidx+len));
+    ctx=`<details class="ctxd"><summary>see context</summary><div class="cbody">
+      ${cprev?`<div class="cprev">${esc(cprev)}</div>`:""}
+      <div class="ccur"><strong class="ref mono" style="width:auto">${esc(ref)}</strong>&nbsp; ${cpre}<mark>${crun}</mark>${cpost}</div>
+      ${cnext?`<div class="cnext">${esc(cnext)}</div>`:""}</div></details>`;
+  }
+  return `<li><div class="srow"><span class="ref mono">${esc(ref)}</span>
+    <span class="snip mono">…${pre}<mark>${run}</mark>${post}…</span></div>${ctx}</li>`;
+}
+
+/* ---------- character-by-character view ---------- */
+function glyphsSorted(){
+  const gs=[...corpus().glyphs];
+  gs.sort((a,b)=>S.railSort==="freq"?b.total-a.total:a.total-b.total);
+  return gs;
+}
+function sideTable(g){
+  const t=g.total;
+  let rows=SIDECLS.map(c=>{
+    const s=g.side.start[c]||0,e=g.side.end[c]||0;
+    if(!s&&!e)return"";
+    return `<tr><td>${CLSLABEL[c]}</td>
+      <td class="mono">${fmt(s)}</td><td class="mono">${pct(s,t)}<span class="bar" style="width:${60*s/t}px"></span></td>
+      <td class="mono">${fmt(e)}</td><td class="mono">${pct(e,t)}<span class="bar" style="width:${60*e/t}px"></span></td></tr>`;
+  }).join("");
+  return `<section><h3>What sits beside it</h3>
+    <p class="note">For every appearance: what comes immediately before it, and immediately after it.
+      “In the same cluster” means it was touching other punctuation, digits, or quote marks with no space between.</p>
+    <div class="twrap"><table><tr><th>neighbour</th><th>before · count</th><th>before · share</th><th>after · count</th><th>after · share</th></tr>${rows}</table></div></section>`;
+}
+function topoCards(g){
+  const judge=judgeable(g);
+  const cards=TOPO.map(t=>{
+    const c=g.topo[t];if(!c||!c.n)return"";
+    const isRun=t==="in-run";
+    const share=isRun?pct(c.n,g.total)+" of all uses":pct(c.n,judge)+" of stand-alone uses";
+    const cls=c.flag?" hot":"";
+    return `<button class="cellcard${cls}${S.pick&&S.pick.k==="t"&&S.pick.v===t?" sel":""}"
+      data-t="${t}"><div class="t">${TLABEL[t]}</div><div class="n mono">${fmt(c.n)}</div>
+      <div class="pc">${share} · ${c.books} book${c.books>1?"s":""}</div></button>`;
+  }).join("");
+  return `<section><h3>How it attaches to words</h3>
+    <p class="note">Counting the ${fmt(judge)} times this character appears on its own, next to words —
+      not inside a cluster of other punctuation. Amber cards are flagged by the current judge
+      settings, shown at the top. Click a card to see real verses.</p>
+    <div class="cells" id="topoCells">${cards}</div></section>`;
+}
+function pairTable(g){
+  if(!g.pairs.length)return"";
+  const tot=g.pairs.reduce((a,p)=>a+p.n,0);
+  const ps=[...g.pairs].sort((a,b)=>S.pairSort==="desc"?b.n-a.n:a.n-b.n);
+  const rows=ps.slice(0,40).map(p=>{
+    const hot=!!p.flag;
+    const sel=S.pick&&S.pick.k==="p"&&S.pick.v===p.p;
+    return `<tr tabindex="0" data-p="${esc(p.p)}" class="${sel?"sel":""}">
+      <td class="mono">${esc(g.g)} then ${esc(p.p)}</td>
+      <td class="mono">${fmt(p.n)}</td>
+      <td class="mono${hot?" hotpc":""}">${pct(p.n,tot)}</td></tr>`;
+  }).join("");
+  return `<section><h3>What comes right after it in a cluster</h3>
+    <p class="note">Counted every time another mark follows ${esc(g.g)} with no space between
+      (${fmt(tot)} times in total). Each digit is counted separately in this table.
+      <button id="pairTog" style="border:1px solid var(--line);background:transparent;color:var(--accent);border-radius:5px;padding:2px 8px;font-size:12px;cursor:pointer">${S.pairSort==="desc"?"most common first":"rarest first"}</button>
+      Click a row to see real verses.</p>
+    <div class="twrap"><table class="pairs"><tr><th>combination</th><th>count</th><th>share</th></tr>${rows}</table></div></section>`;
+}
+function runStrip(g){
+  const mk=(o,key)=>Object.keys(o).sort((a,b)=>a-b).map(l=>{
+    const sel=S.pick&&S.pick.k==="r"&&S.pick.v===`${key}:${l}`;
+    const cell=o[l],f=cell.flag;
+    return `<button class="runbtn mono${sel?" sel":""}${f?" fired":""}" data-r="${key}:${l}">size ${l}: ${fmt(cell.n)}</button>`;
+  }).join("")||"—";
+  return `<section><h3>Cluster sizes</h3>
+    <p class="note">A cluster is an unbroken stretch of punctuation or symbols — no letters, spaces, or
+      digits inside it. A digit ends a cluster, so ordinary numbers like 12,000 never look alarming.
+      "Only this mark" is a cluster made of this character alone; "with other marks" is one where it
+      sits beside different punctuation. Click a size to see the actual clusters.</p>
+    <div class="runs"><div><h4>only this mark</h4><div>${mk(g.runlen.pure||{},"pure")}</div></div>
+    <div><h4>with other marks</h4><div>${mk(g.runlen.mixed||{},"mixed")}</div></div></div></section>`;
+}
+function samplesPanel(g){
+  if(!S.pick)return`<div id="samples" class="empty" style="margin-top:20px">Click an attachment card, a combination row, or a cluster size to see real verses from the translation.</div>`;
+  let title="",list=[];
+  if(S.pick.k==="t"){const c=g.topo[S.pick.v];title=TLABEL[S.pick.v];list=c?c.samples:[]}
+  else if(S.pick.k==="r"){const [key,l]=S.pick.v.split(":");
+    title=`Clusters of size ${l} (${key==="pure"?"only this mark":"with other marks"}) that include ${g.g}`;
+    list=((g.runlen_samples||{})[key]||{})[l]||[]}
+  else{const p=g.pairs.find(x=>x.p===S.pick.v);title=`${g.g} followed directly by ${S.pick.v}`;list=p?p.samples:[]}
+  const lis=list.map(renderSample).join("");
+  return `<div id="samples"><h4>${esc(title)}</h4><ul>${lis||"<li class='empty'>no examples retained for this group</li>"}</ul></div>`;
+}
+function drawBrowse(){
+  $("#app").innerHTML=`<aside>
+      <div class="sorttog">
+        <button id="sFreq" class="${S.railSort==="freq"?"on":""}">most common first</button>
+        <button id="sRare" class="${S.railSort==="rare"?"on":""}">rarest first</button>
+      </div><div id="rail"></div></aside><main id="bmain"></main>`;
+  const max=Math.max(...corpus().glyphs.map(g=>g.total));
+  const rail=$("#rail");
+  glyphsSorted().forEach(g=>{
+    const b=document.createElement("button");
+    b.className="grow"+(g.g===S.g?" sel":"");
+    b.innerHTML=`<span class="specimen">${esc(g.g)}</span>
+      <span class="meta"><div class="n mono">${fmt(g.total)}</div>
+      <div class="cp mono">${g.books} book${g.books>1?"s":""}</div>
+      <div class="bar"><i style="width:${Math.max(1,100*g.total/max)}%"></i></div></span>`;
+    b.onclick=()=>{S.g=g.g;S.pick=null;drawBrowse()};
+    rail.appendChild(b);
+  });
+  $("#sFreq").onclick=()=>{S.railSort="freq";drawBrowse()};
+  $("#sRare").onclick=()=>{S.railSort="rare";drawBrowse()};
+  const g=corpus().glyphs.find(x=>x.g===S.g)||corpus().glyphs[0];S.g=g.g;
+  const share=pct(g.total,corpus().glyphs.reduce((a,x)=>a+x.total,0));
+  $("#bmain").innerHTML=`
+    <p class="note mono">${esc(corpus().judging)}</p>
+    <div class="gh"><div class="specimen">${esc(g.g)}</div>
+      <div><h2>${esc(g.uname)}</h2>
+      <div class="facts mono">appears ${fmt(g.total)} times · ${share} of all punctuation and symbols · in ${g.books} book${g.books>1?"s":""}</div></div></div>
+    ${sideTable(g)}${topoCards(g)}${samplesPanel(g)}${pairTable(g)}${runStrip(g)}`;
+  document.querySelectorAll("#topoCells .cellcard").forEach(b=>
+    b.onclick=()=>{S.pick={k:"t",v:b.dataset.t};drawBrowse()});
+  document.querySelectorAll(".pairs tr[tabindex]").forEach(r=>{
+    const go=()=>{S.pick={k:"p",v:r.dataset.p};drawBrowse()};
+    r.onclick=go;r.onkeydown=e=>{if(e.key==="Enter")go()};
+  });
+  const pt=$("#pairTog");if(pt)pt.onclick=()=>{S.pairSort=S.pairSort==="desc"?"asc":"desc";drawBrowse()};
+  document.querySelectorAll(".runbtn").forEach(b=>
+    b.onclick=()=>{S.pick={k:"r",v:b.dataset.r};drawBrowse()});
+}
+
+/* ---------- the-idea view ---------- */
+function drawPhilo(){
+  $("#app").innerHTML=`<main><div class="philo">
+  <p class="lede">A translation is a smallish book in a language the computer has never seen —
+  no dictionary, no grammar, no spell-checker. So this tool asks the only authority available:
+  <strong>the translation itself.</strong> It learns how this text normally writes, and then
+  points at the places that don't match.</p>
+
+  <h3>The questions we are really asking</h3>
+  <ul>
+    <li>In a small text, how do you find real mistakes without drowning in false alarms?</li>
+    <li>Without asking the translator to configure anything about their language, how do we
+        tell a <em>writing habit</em> from a <em>slip of the finger</em>?</li>
+    <li>What does damaged text look like, as opposed to merely unfamiliar text?</li>
+  </ul>
+
+  <h3>Three profiles the text itself reveals</h3>
+  <div class="profiles">
+    <div class="profile"><h4>A habit</h4>
+      <p>Used many times, spread evenly across many books, always in the same shape.</p>
+      <p class="sig">Example: <span class="mono">ng'</span> in this translation — 851 times,
+      everywhere. It's spelling, not error.</p></div>
+    <div class="profile"><h4>A slip</h4>
+      <p>Rare, scattered thinly, and contradicting a strong habit the same text shows everywhere else.</p>
+      <p class="sig">Example: <span class="mono">ng' ombe</span> — a space has crept inside a word,
+      in a translation that writes it solid a thousand times.</p></div>
+    <div class="profile"><h4>Damage</h4>
+      <p>Clumps of text no writing system produces: long strings of punctuation, characters
+      from nowhere.</p>
+      <p class="sig">Example: a verse containing 227 invisible zero-characters — a broken file,
+      not a choice.</p></div>
+  </div>
+
+  <h3>Three ways of looking, one judgement</h3>
+  <p>Every punctuation mark, digit, and symbol gets examined from three independent angles:</p>
+  <figure class="venn">
+    <svg viewBox="0 0 520 400" role="img"
+      aria-label="Three overlapping circles labelled Rarity, Placement, and Company. Any one circle alone is enough to make something worth a look.">
+      <g fill="currentColor" opacity="0.05">
+        <circle cx="195" cy="150" r="105"/>
+        <circle cx="325" cy="150" r="105"/>
+        <circle cx="260" cy="270" r="105"/>
+      </g>
+      <g fill="none" stroke="currentColor" stroke-width="1.2">
+        <circle cx="195" cy="150" r="105"/>
+        <circle cx="325" cy="150" r="105"/>
+        <circle cx="260" cy="270" r="105"/>
+      </g>
+      <g font-size="14" fill="currentColor" text-anchor="middle" font-weight="600">
+        <text x="148" y="112">Rarity</text>
+        <text x="372" y="112">Placement</text>
+        <text x="260" y="316">Company</text>
+      </g>
+      <g font-size="11" fill="currentColor" text-anchor="middle" opacity="0.75">
+        <text x="148" y="130">how rare is</text>
+        <text x="148" y="144">the mark itself?</text>
+        <text x="372" y="130">where does it</text>
+        <text x="372" y="144">sit next to words?</text>
+        <text x="260" y="334">what does it touch?</text>
+        <text x="260" y="348">how long do clusters get?</text>
+      </g>
+      <text x="260" y="196" font-size="12" font-weight="600" text-anchor="middle" fill="var(--accent)">worth a look</text>
+    </svg>
+    <figcaption><strong>Any one circle alone is enough</strong> to make an occurrence worth
+    a look — a mark seen once in the whole Bible needs no second reason. When angles overlap
+    they give more <em>ways to explain</em> what's odd, not a louder alarm: one strange
+    occurrence seen from three angles is still one strange occurrence.</figcaption>
+  </figure>
+  <p>And two cross-checks arbitrate every claim: <strong>spread</strong> — is it in two verses
+  or two hundred, one book or forty? — and <strong>comparison</strong> — how does this
+  occurrence stack against what the same text does everywhere else?</p>
+
+  <h3>One character, four jobs — a real example</h3>
+  <p>The apostrophe in this Nyanja translation appears 8,466 times, and the text itself
+  sorts it into four distinct roles, with no dictionary and no settings:</p>
+  <ul>
+    <li><strong>Part of spelling</strong> — sitting inside words
+      (<span class="mono">pan'gono</span>, <span class="mono">ng'ombe</span>):
+      about 71% of its stand-alone uses, spread across 51 books. A habit. Silent.</li>
+    <li><strong>Opening quoted speech</strong> — 755 times, letter right after it. A habit. Silent.</li>
+    <li><strong>Working alongside other marks</strong> — inside punctuation clusters like
+      <span class="mono">,'</span> and <span class="mono">.'"</span>: 63% of all its uses. Established. Silent.</li>
+    <li><strong>The fishy 1.1%</strong> — 35 places with a letter before it and a space after it.
+      Some are honest quote-closings; some are words split in half
+      (<span class="mono">ng' ombe</span>). This is the cell worth a human's eyes.</li>
+  </ul>
+  <p>That judgement used every angle at once: <em>rarity</em> (1.1% against strong habits),
+  <em>placement</em> (which side the letters are on), <em>company</em> (cluster uses counted
+  apart), <em>spread</em> (51 books vs a scatter of 17), and <em>comparison</em> (35 against
+  2,228). The character tab shows these same angles, made clickable.</p>
+
+  <h3>What we hold ourselves to</h3>
+  <ul>
+    <li><strong>The translator configures nothing.</strong> No language settings, no rule
+      lists. The text teaches the tool — which is why the same method worked on a language
+      none of us can read.</li>
+    <li><strong>Every claim is explainable in verses,</strong> not scores. Click any number
+      on any tab and the actual verses appear. If we can't show it, we don't say it.</li>
+    <li><strong>Interrupt rarely, hide nothing.</strong> Inside the editor, only the
+      strongest suspicions should ever interrupt a translator mid-verse. Everything else —
+      including patterns judged perfectly normal — stays visible here, so a reviewer can
+      look from any angle whenever they choose.</li>
+  </ul>
+
+  <h3>Scope</h3>
+  <p>This covers punctuation, digits, and symbols. A word-level question the same method
+  reaches — capitalization — is a later stage, once these marks' own habits are settled.
+  Spelling and vocabulary remain separate problems — a translation is usually too small to
+  learn word-spelling habits the way it learns punctuation habits.</p>
+  </div></main>`;
+}
+
+/* ---------- shell ---------- */
+function drawSwitch(){
+  const el=$("#corpusSwitch");el.innerHTML="";
+  CORPORA.forEach((c,i)=>{
+    const b=document.createElement("button");
+    b.textContent=c.name;b.className=i===S.c?"on":"";
+    b.onclick=()=>{S.c=i;S.g=corpus().glyphs[0].g;S.pick=null;S.open=null;draw()};
+    el.appendChild(b);
+  });
+}
+function drawTabs(){
+  $("#tabPhilo").className=S.view==="philo"?"on":"";
+  $("#tabBrowse").className=S.view==="browse"?"on":"";
+}
+function draw(){drawSwitch();drawTabs();
+  S.view==="philo"?drawPhilo():drawBrowse()}
+$("#tabPhilo").onclick=()=>{S.view="philo";draw()};
+$("#tabBrowse").onclick=()=>{S.view="browse";draw()};
+S.g=CORPORA[0].glyphs[0].g;
+draw();
+</script>
+

@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 rayon.workspace = true
+rustc-hash.workspace = true
 sous-core = { path = "../core" }
 # Publication only: the stateless galley::sous seam. No Warmer, no cache.
 usfm_galley = { path = "../../galley" }

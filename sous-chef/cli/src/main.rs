@@ -130,13 +130,16 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             print_patterns(&target_corpus, &findings, &patterns);
         }
         if let Some(path) = &args.report {
-            let page = report::render(&target_corpus, &findings, &patterns);
+            let name = args.target.file_name().map_or_else(
+                || args.target.display().to_string(),
+                |name| name.to_string_lossy().into_owned(),
+            );
+            let page = report::render(&name, &target_corpus, &patterns);
             fs::write(path, &page)
                 .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
             eprintln!(
-                "wrote {} patterns and {} sites to {}",
+                "wrote the {name} inventory ({} patterns judged) to {}",
                 patterns.len(),
-                site_count(&findings),
                 path.display()
             );
         }
@@ -162,14 +165,6 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
 /// by book then offset, and the corpus-level pattern table beside them.
 fn brigade_findings(corpus: &Corpus<'_, OnionBook>) -> (Vec<PackedFinding>, Vec<Pattern>) {
     analyze(corpus, &Brigade::default()).into_parts()
-}
-
-/// Convention rows across the whole publication.
-fn site_count(findings: &[PackedFinding]) -> usize {
-    findings
-        .iter()
-        .filter(|row| matches!(row.kind(), FindingKind::Convention(_)))
-        .count()
 }
 
 /// One line per firing pattern, in emission order, with its sites under it.

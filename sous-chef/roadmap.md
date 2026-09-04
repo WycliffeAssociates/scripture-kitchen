@@ -438,7 +438,10 @@ Work:
    so a convention's argument is published once and a site names it by index.
    D2b put sites on that wire, and `sous --report <out.html>` is the
    self-contained page that reads them back in context. D3 spent one of the
-   row's two reserved bytes on `books` and left the other reserved.
+   row's two reserved bytes on `books` and left the other reserved. `--report`
+   now writes the v1 "Punctuation & Symbol Inventory" page fed by these
+   counts, amber wherever `Findings::patterns()` fired: it is the review
+   surface until a wasm handle exists.
 
 Verification gate:
 
