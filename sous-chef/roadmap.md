@@ -151,6 +151,7 @@ Shapes and layouts live in the module README each row names.
 | nonletter substrate | `donor/` probes are measured donors only | port consumer-led classifier bits in Stage 3 |
 | finding transport | `sous-core::codec` and `sous-core::corpus`, rebased and published by `galley::sous`. See [core/src/codec/README.md](core/src/codec/README.md) | Galley's canonical snapshot identity and checksum-keyed detached reuse (Stage 2) |
 | unicode classification | `sous-core::unicode`. See [core/src/unicode/README.md](core/src/unicode/README.md) | Level 1b consumes the bits in Stage 3; casing beyond the two predicate bits waits for Stage 4 |
+| convention judging | `sous-core::judge`, published as the envelope's pattern table. See [core/src/judge.md](core/src/judge.md) | sites (D2b), book scope and dispersion (D3), G2's pooled neighbor categories (D3) |
 | hygiene | `sous-core::hygiene::scan` for the byte classes, the substrate row's `hygiene` lane for the four scalar ones. See [core/src/hygiene.md](core/src/hygiene.md) and [rules/hygiene.md](rules/hygiene.md) | NBSP's verse-edge case once the walk is verse-grained; a snapshot identity instead of the CLI's zero id |
 
 Stage 0 is closed. Stage 1 was entered hygiene-first rather than
@@ -400,12 +401,23 @@ Work:
    spans that the retained producer can locate. Choose `memchr`, `memmem`,
    optional measured Aho-Corasick, or a
    classifier rescan internally; callers never select the search engine.
-3. Implement rarity rosters and the G0–G3 evidence ladder.
+3. Implement rarity rosters and the G0–G3 evidence ladder. Landed for G0, G1,
+   G3 and rarity (D2a-2): `sous_core::judge` reads the folded counts and emits
+   one pattern row per firing claim. G2's pooled neighbor categories are D3 —
+   they need a pooling table the classifier does not carry — and its `Channel`
+   discriminant is reserved unused;
 4. Implement the fraction-band judge with explicit numerator, denominator,
    support floor, fallback grain, abstention, and union-of-reasons behavior.
+   Landed (D2a-2) except the union, which needs the sites D2b materializes:
+   `JudgingConfig` carries the staircase in basis points, a channel under the
+   support floor abstains, and every pattern row publishes its own numerator
+   and denominator. Wire code 2 (`Convention`) is defined with a `Reasons`
+   bitmask lane so a site can carry every rung it matched;
 5. Add dispersion annotation and the narrowly defined “forgiven but
    clustered” view without making dispersion a conviction gate.
-6. Pack compact count evidence and expose typed rich evidence.
+6. Pack compact count evidence and expose typed rich evidence. The compact
+   half landed (D2a-2): the 24-byte pattern table rides the corpus envelope,
+   so a convention's argument is published once and a site names it by index.
 
 Verification gate:
 

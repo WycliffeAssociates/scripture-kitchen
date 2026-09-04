@@ -87,6 +87,11 @@ it again in products:
 | `Fingerprint` | `galley::pantry::fingerprint` | the baseline for the next update |
 | the text | `update`'s argument | `Retain::Text`; `resident_bytes` counts it |
 
+`Pantry::text_bytes()` sums the retained text alone and `Fingerprint::resident_bytes`
+is public, so a host can read `resident_bytes() - warmer().resident_bytes() -
+text_bytes()` for the Pantry's own per-book products (`Toc` + `Mask` +
+`Utf16Table` + `Fingerprint` + struct overhead) without a residual.
+
 Order is canonical by `BookKey` — `mise::books::canonical_rank` over
 `BOOK_CODES`, which is the USFM spec's order — ties broken by id, so
 `BookIndex` never depends on the order updates arrived in. Two ids carrying the

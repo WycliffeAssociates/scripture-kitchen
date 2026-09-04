@@ -35,6 +35,7 @@ a tombstone.
 | --- | --- | --- | --- | --- |
 | 0 | `LengthProportionality` | signed Q8.8 book-scope deviation; `i16::MIN` unavailable | signed Q8.8 project-scope deviation; `i16::MIN` unavailable | a deviation was clamped |
 | 1 | `Hygiene` | `HygieneClass` discriminant | run length in code points, `1..=i16::MAX` | the run exceeds `i16::MAX`; the lane reads exactly `i16::MAX` |
+| 2 | `Convention` | pattern-table index, `u16` bits in the signed lane | `Reasons` bitmask over the ladder rungs the site matched | never set |
 
 The record is a discriminated union in Rust: `PackedFinding` carries a
 `FindingKind`, and `code`, `flags`, and both lanes are *derived* from it. A
@@ -61,6 +62,14 @@ Decoding refuses rather than guesses:
 | a hygiene class discriminant past the table | `UnknownHygieneClass` |
 | a hygiene run of zero or negative | `EmptyHygieneRun` |
 | `SATURATED` on a hygiene row whose lane is not exactly `i16::MAX` | `UnknownFlags` |
+| a convention reasons lane of zero | `EmptyReasons` |
+| a convention reasons bit outside the table | `UnknownReasons` |
+| `SATURATED` on a convention row | `UnknownFlags` |
+| a convention `pattern_idx` at or past `pattern_count` | `PatternIndexPastTable` |
+| a pattern row's reserved byte or `flags` set | `InvalidPattern` |
+| a pattern channel, key, band, or share outside its table | `InvalidPattern` |
+| a `pattern_offset` that is not the running cursor | `PatternSectionOutOfOrder` |
+| more than 65,535 patterns | `PatternCountOverflow` |
 
 `i16::MIN` cannot be constructed as a `QuantizedDeviation`, and a zero run
 cannot be constructed as a `HygieneDigest`, so the invalid states are
@@ -74,8 +83,9 @@ chapter may move a project denominator and thereby add or remove findings in an
 untouched book.
 
 ```text
-  header  40 bytes   SOUS magic · format version · coordinate flags ·
+  header  48 bytes   SOUS magic · format version · coordinate flags ·
                      book count · record stride (16) · total findings ·
+                     pattern count · absolute pattern offset ·
                      opaque 16-byte SnapshotId
   directory          one 20-byte row per book, in caller order:
                      3 BookKey bytes + zero terminator · published length ·
@@ -84,8 +94,34 @@ untouched book.
   id strings         one per book, directory order, each a u16 little-endian
                      byte length followed by that many UTF-8 bytes; the
                      section is zero-padded to a 4-byte boundary
+  pattern table      contiguous 24-byte rows in emission order, corpus-level
+                     and not per book; a row is 4-byte aligned, so the
+                     sections behind it stay aligned however many fired
   sections           contiguous 16-byte records, no incidental padding
 ```
+
+### The pattern table
+
+The judge's output, one row per firing pattern. It is the corpus's evidence,
+and a `Convention` record carries only a position in it plus the reasons that
+position matched — so ten thousand sites of one convention cost ten thousand
+16-byte records and *one* 24-byte row of argument.
+
+| bytes | field |
+| --- | --- |
+| 0..4 | `glyph: u32` (`ScalarKey` raw; `u32::MAX` is the pooled digit key) |
+| 4..8 | `neighbor: u32` (the G3 key; 0 on every other channel) |
+| 8 | `channel: u8` (`Channel` discriminant, finest grain first) |
+| 9 | `key: u8` (Placement: `side << 4 \| OuterClass`; RunShape: `pure << 4 \| bucket`; else 0) |
+| 10 | `band: u8` (staircase step index; `0xFF` = none, which only `Rarity` carries) |
+| 11 | `flags: u8` (reserved, 0; the decoder refuses nonzero) |
+| 12..16 | `numerator: u32` |
+| 16..20 | `denominator: u32` |
+| 20..22 | `share_bp: u16`, at most 10,000 |
+| 22..24 | reserved `u16` 0 (the decoder refuses nonzero) |
+
+`pattern_count` is capped at `u16::MAX`, because a `PatternIndex` is a `u16`.
+What the channels mean, and the order the rows arrive in: `../judge.md`.
 
 Directory position *is* `BookIndex`, so a consumer seeks by index, by key, or
 by the host's id and lazily decodes one book:
@@ -113,7 +149,8 @@ and no scan. The 4-byte padding after the section keeps every record section
 aligned for a typed-array view.
 
 This is a **v1 layout edit**, made while nothing is released: the directory row
-grew from 16 bytes to 20 and both hex goldens were re-pinned. It is the last
+grew from 16 bytes to 20, then the header grew from 40 bytes to 48 for the
+pattern table, and the hex goldens were re-pinned each time. It is the last
 one that gets to be free. The charter's rule — a layout change means a new wire
 version — applies from the first release, and from then on this table's shape
 is frozen inside version 1.

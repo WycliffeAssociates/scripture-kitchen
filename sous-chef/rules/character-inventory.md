@@ -7,8 +7,9 @@ recorded for punctuation, symbols, digits, and nonletter grapheme atoms only,
 and never as occurrence lists. These are views over one model, not twenty
 independent rule implementations. Convention-learned lane.
 
-Status: substrate walk landed (`sous_core::substrate`), rules not yet
-reducing. Stage 3 in [../roadmap.md](../roadmap.md).
+Status: substrate walk landed (`sous_core::substrate`); judging landed
+(`sous_core::judge`), so a project's patterns are on the wire. Sites are D2b.
+Stage 3 in [../roadmap.md](../roadmap.md).
 
 ## Evidence questions
 
@@ -20,7 +21,7 @@ Ask where a glyph or run sits, from coarse to fine:
 | --- | --- | --- |
 | G0 | outer class: letter, space, edge | attached versus spaced |
 | G1 | outer class conditioned by run composition | attached inside a digit-bearing run |
-| G2 | pooled neighbor category | followed by a quote or digit |
+| G2 | pooled neighbor category | followed by a quote or digit — **D3**: it needs a pooling table the classifier does not carry, so the shipped ladder is G3 → G1 → G0 |
 | G3 | exact nonletter neighbor | followed specifically by `.` |
 
 Letters are never individuated as neighbors. Fine grain is used only when its
@@ -45,12 +46,16 @@ distortion.
 **Letters are in the roster.** A Hawaiian translation uses thirteen letters;
 a stray `z` is exactly the kind of slip a rarity roster should surface, and
 the `scalars` lane counts every scalar. The neighbor ladder still never
-individuates letters; this is the census only. **Open:** abstention for large
-letter inventories. A logographic corpus has thousands of letters used once or
-twice, and a roster over them is noise. A candidate rule is to abstain when
-the distinct-letter inventory exceeds a bound (order of a few hundred), and
-otherwise treat letters like any other glyph in the roster. Decide with fleet
-counts before the D2 rule reducers are specified.
+individuates letters; this is the census only.
+
+Abstention for large letter inventories is **ruled**: `letter_roster_bound`
+defaults to 500 distinct letters, above which letters leave the roster and the
+report says so. The fleet census found every alphabet under 300 distinct
+letters and every logographic corpus above 3,000, with an empty band between
+(see the inventory census row in [../evidence.md](../evidence.md)). A second
+floor, `letter_roster_min_letters` (default 5,000, about two chapters), keeps a
+ten-verse draft from rostering `q`, `x`, `z` by sample size; nonletters have no
+such floor. `LetterRoster::Auto | Always | Never` overrides both.
 
 ### Dispersion
 
@@ -64,6 +69,8 @@ turning dispersion into a gate.
 `sous_core::substrate` is the one walk every question above reads from. One
 `ChapterRow` per chapter, each lane a sorted vector, seams resolved in the fold
 (shape and argument: [`../core/src/substrate.md`](../core/src/substrate.md)).
+What the counts are judged into — the entitlement rule, the ladder, and the
+emission order — is [`../core/src/judge.md`](../core/src/judge.md).
 
 | lane | answers |
 | --- | --- |
@@ -90,6 +97,10 @@ constant:
 | up to 1,000 | 3% |
 | up to 10,000 | 1% |
 | above 10,000 | 0.3% |
+
+Judging expresses these in basis points, so 0.3% is exact and every step is a
+config field (`sous_core::judge::Staircase`). A key fires when its share is
+strictly under its rung.
 
 Fleet evidence found this approximates `0.8 / sqrt(n)` and sits in a broad
 valley between slip-shaped minorities and competing conventions (see the band

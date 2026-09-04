@@ -17,9 +17,11 @@ use core::fmt;
 
 use crate::BookIndex;
 
+mod convention;
 mod hygiene;
 mod proportionality;
 
+pub use convention::{ConventionDigest, Reasons};
 pub use hygiene::{HygieneClass, HygieneDigest};
 pub use proportionality::{ProportionalityDigest, QuantizedDeviation};
 
@@ -38,6 +40,7 @@ pub const RECORD_PROJECT_SCOPE_OFFSET: usize = 14;
 pub enum RuleCode {
     LengthProportionality = 0,
     Hygiene = 1,
+    Convention = 2,
 }
 
 impl TryFrom<u8> for RuleCode {
@@ -47,6 +50,7 @@ impl TryFrom<u8> for RuleCode {
         match code {
             0 => Ok(Self::LengthProportionality),
             1 => Ok(Self::Hygiene),
+            2 => Ok(Self::Convention),
             other => Err(CodecError::UnknownRuleCode(other)),
         }
     }
@@ -64,6 +68,8 @@ impl From<RuleCode> for u8 {
 pub enum FindingKind {
     LengthProportionality(ProportionalityDigest),
     Hygiene(HygieneDigest),
+    /// One site matching a row of the publication's pattern table.
+    Convention(ConventionDigest),
 }
 
 /// A checked semantic representation of one 16-byte wire record.
@@ -114,6 +120,7 @@ impl PackedFinding {
         match self.kind {
             FindingKind::LengthProportionality(_) => RuleCode::LengthProportionality,
             FindingKind::Hygiene(_) => RuleCode::Hygiene,
+            FindingKind::Convention(_) => RuleCode::Convention,
         }
     }
 
@@ -122,6 +129,7 @@ impl PackedFinding {
         let saturated = match self.kind {
             FindingKind::LengthProportionality(digest) => digest.saturated(),
             FindingKind::Hygiene(digest) => digest.saturated(),
+            FindingKind::Convention(digest) => digest.saturated(),
         };
         if saturated {
             FindingFlags::SATURATED
@@ -142,6 +150,7 @@ impl PackedFinding {
         let [first, second] = match self.kind {
             FindingKind::LengthProportionality(digest) => digest.lanes(),
             FindingKind::Hygiene(digest) => digest.lanes(),
+            FindingKind::Convention(digest) => digest.lanes(),
         };
         bytes[RECORD_BOOK_SCOPE_OFFSET..RECORD_PROJECT_SCOPE_OFFSET]
             .copy_from_slice(&first.to_le_bytes());
@@ -200,6 +209,9 @@ impl PackedFinding {
                 FindingKind::LengthProportionality(ProportionalityDigest::from_lanes(lanes, flags)?)
             }
             RuleCode::Hygiene => FindingKind::Hygiene(HygieneDigest::from_lanes(lanes, flags)?),
+            RuleCode::Convention => {
+                FindingKind::Convention(ConventionDigest::from_lanes(lanes, flags)?)
+            }
         };
         if from > to {
             return Err(CodecError::ReversedSpan { from, to });
@@ -293,6 +305,8 @@ pub enum CodecError {
     MissingDeviationSentinel,
     UnknownHygieneClass(i16),
     EmptyHygieneRun,
+    UnknownReasons(u16),
+    EmptyReasons,
     ReversedSpan { from: u32, to: u32 },
     InvalidBookIndex { index: u16 },
     SpanOutOfBounds { from: u32, to: u32, book_len: u32 },
@@ -315,6 +329,8 @@ impl fmt::Display for CodecError {
             }
             Self::UnknownHygieneClass(raw) => write!(f, "unknown hygiene class {raw}"),
             Self::EmptyHygieneRun => f.write_str("hygiene run length must be at least 1"),
+            Self::UnknownReasons(bits) => write!(f, "unknown convention reasons 0x{bits:04x}"),
+            Self::EmptyReasons => f.write_str("a convention row carries at least one reason"),
             Self::ReversedSpan { from, to } => write!(f, "reversed finding span {from}..{to}"),
             Self::InvalidBookIndex { index } => {
                 write!(f, "book index {index} is absent from the book table")
@@ -472,10 +488,10 @@ mod tests {
     fn malformed_wire_values_fail_closed() {
         let record = finding(0, 0, 0, None, None, false);
         let mut unknown_code = record.encode();
-        unknown_code[10] = 2;
+        unknown_code[10] = 3;
         assert_eq!(
             PackedFinding::decode(&unknown_code, &[0]),
-            Err(CodecError::UnknownRuleCode(2))
+            Err(CodecError::UnknownRuleCode(3))
         );
 
         let mut unknown_flags = record.encode();

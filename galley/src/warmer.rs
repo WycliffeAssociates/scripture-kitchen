@@ -56,7 +56,8 @@ struct Products {
     /// chunk 0) the carry-outs the rest of the book keys on.
     carried: Carried,
     token_count: u32,
-    /// The LRU weight: estimated resident bytes.
+    /// The LRU weight: exact heap bytes this unit retains. See
+    /// [`product_bytes`] for what "exact" excludes.
     bytes: usize,
 }
 
@@ -116,6 +117,7 @@ pub struct Warmer {
     bytes: usize,
     budget: usize,
     misses: u64,
+    hits: u64,
 }
 
 impl Warmer {
@@ -126,6 +128,7 @@ impl Warmer {
             bytes: 0,
             budget: budget_bytes,
             misses: 0,
+            hits: 0,
         }
     }
 
@@ -133,6 +136,11 @@ impl Warmer {
     /// diffs to prove "one edited chapter is one miss".
     pub fn misses(&self) -> u64 {
         self.misses
+    }
+
+    /// Units served from the cache rather than recomputed, cumulative.
+    pub fn hits(&self) -> u64 {
+        self.hits
     }
 
     pub fn len(&self) -> usize {
@@ -143,9 +151,20 @@ impl Warmer {
         self.map.is_empty()
     }
 
-    /// Resident product bytes (estimated), the value the budget bounds.
+    /// Resident bytes: the exact heap of every retained unit's CST, tokens
+    /// and lint report (`self.bytes`, also the value the budget bounds) plus
+    /// the map's own backing-table bytes (`map_bytes`). Not an estimate —
+    /// see [`product_bytes`] for the one named gap.
     pub fn resident_bytes(&self) -> usize {
-        self.bytes
+        self.bytes + self.map_bytes()
+    }
+
+    /// The cache map's own bookkeeping: one row's worth of `Key` + `Entry`
+    /// per allocated slot. Approximate only in that hashbrown's real slot
+    /// array carries one control byte per slot and some load-factor slack
+    /// this can't see from outside; both are small next to a chunk's CST.
+    fn map_bytes(&self) -> usize {
+        self.map.capacity() * (size_of::<Key>() + size_of::<Entry>())
     }
 
     /// The whole-book lint report, equal to the fresh
@@ -227,7 +246,10 @@ impl Warmer {
                     self.tick += 1;
                     entry.last_tick = self.tick;
                     match &entry.cached {
-                        Cached::Unit(products) => break products.clone(),
+                        Cached::Unit(products) => {
+                            self.hits += 1;
+                            break products.clone();
+                        }
                         Cached::OpenBoundary if next < starts.len() => {
                             next += 1;
                             continue;
@@ -242,7 +264,9 @@ impl Warmer {
                 let chunk = cst::build_chunk(&tokens, end == bytes.len());
                 if chunk.open_at_end && next < starts.len() {
                     if cacheable {
-                        self.insert(key, Cached::OpenBoundary, 64);
+                        // No product, so no heap weight; the map row itself
+                        // is `map_bytes`'s job.
+                        self.insert(key, Cached::OpenBoundary, 0);
                     }
                     next += 1;
                     continue;
@@ -250,9 +274,10 @@ impl Warmer {
                 self.misses += 1;
                 let (local, carried) =
                     lint::lint_chunk(slice.as_bytes(), &tokens, &chunk.cst, &ctx);
+                let bytes = product_bytes(&chunk.cst, &local, &tokens);
                 let products = Rc::new(Products {
                     token_count: tokens.len() as u32,
-                    bytes: product_bytes(&chunk.cst, &local, &tokens),
+                    bytes,
                     cst: chunk.cst,
                     tokens,
                     local,
@@ -360,15 +385,108 @@ fn assemble(units: &[(u32, Rc<Products>)]) -> (Vec<onion::Token>, Cst) {
     (tokens, cst::concat(&parts, &counts))
 }
 
-/// Estimated resident size of one unit's products — the LRU weight. An
-/// estimate is enough: the budget bounds memory class, not exact bytes.
-fn product_bytes(cst: &Cst, local: &LintReport, tokens: &[onion::Token]) -> usize {
-    size_of_val(tokens)
-        + cst.nodes.len() * 16
-        + cst.child_ids.len() * 4
-        + local.observations.len() * 16
-        + local.fix_of.len() * 4
-        + local.fixes.len() * 24
-        + local.edit_list.len() * 24
-        + 128
+/// Exact heap bytes of one unit's products — the LRU weight and the number
+/// [`Warmer::resident_bytes`] sums. `capacity`, not `len`: what a `Vec`
+/// actually holds on the heap is what it allocated, not what it filled.
+///
+/// GAP: `Carried`'s own `Vec` fields (`ids`, `usfms`, `families`, `sid_last`,
+/// `eid_candidates`) are `pub(crate)` inside `onion::lint::carried` with no
+/// accessor, so their heap is real but unreachable from here. They hold a
+/// handful of small tuples per chunk at most — not the CST/token-sized cost
+/// this function exists to catch.
+#[allow(
+    clippy::ptr_arg,
+    reason = "needs Vec::capacity, which &[T] cannot give"
+)]
+fn product_bytes(cst: &Cst, local: &LintReport, tokens: &Vec<onion::Token>) -> usize {
+    tokens.capacity() * size_of::<onion::Token>()
+        + cst.nodes.capacity() * size_of::<cst::Node>()
+        + cst.child_ids.capacity() * size_of::<u32>()
+        + local.observations.capacity() * size_of::<lint::Observation>()
+        + local.fix_of.capacity() * size_of::<u32>()
+        + local.fixes.capacity() * size_of::<lint::Fix>()
+        + local.edit_list.capacity() * size_of::<lint::Edit>()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Six chapters, each with distinct text, so no two chunks share a
+    /// cache key — every resolved unit is its own map entry.
+    fn book() -> String {
+        let mut text = String::from("\\id MRK\n\\h Mark\n");
+        for (n, body) in [
+            "In the beginning of the good news.",
+            "He entered Capernaum again.",
+            "A man with a withered hand.",
+            "The sower went out to sow.",
+            "They came to the other side.",
+            "Is this not the carpenter?",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            text.push_str(&format!("\\c {}\n\\p\n\\v 1 {body}\n", n + 1));
+        }
+        text
+    }
+
+    #[test]
+    fn resident_bytes_equals_the_computed_footprint() {
+        let mut warmer = Warmer::new(usize::MAX);
+        let text = book();
+        let units = warmer.resolve(&text);
+        // Distinct chapters, so one map entry per unit — no double count.
+        assert_eq!(units.len(), warmer.len(), "no two units share a key");
+        let expected: usize =
+            units.iter().map(|(_, unit)| unit.bytes).sum::<usize>() + warmer.map_bytes();
+        assert_eq!(warmer.resident_bytes(), expected);
+        // And every unit's own weight matches the same formula fresh.
+        for (_, unit) in &units {
+            assert_eq!(
+                unit.bytes,
+                product_bytes(&unit.cst, &unit.local, &unit.tokens)
+            );
+        }
+    }
+
+    #[test]
+    fn eviction_triggers_at_the_exact_budget() {
+        let text = book();
+        // First, learn each unit's exact weight with no budget pressure.
+        let mut probe = Warmer::new(usize::MAX);
+        let units = probe.resolve(&text);
+        let weights: Vec<usize> = units.iter().map(|(_, unit)| unit.bytes).collect();
+        assert!(
+            weights.iter().all(|&w| w > 0),
+            "chapters have real products"
+        );
+
+        // A budget that fits every chapter but the last: resolving front to
+        // back, the retained heap (`bytes`, what eviction actually bounds)
+        // never exceeds it, and at least one unit was evicted to stay there.
+        let fits_all_but_last: usize = weights[..weights.len() - 1].iter().sum();
+        let mut warmer = Warmer::new(fits_all_but_last);
+        warmer.resolve(&text);
+        assert!(
+            warmer.bytes <= fits_all_but_last,
+            "over budget: {} > {}",
+            warmer.bytes,
+            fits_all_but_last
+        );
+        assert!(warmer.len() < weights.len(), "at least one entry evicted");
+
+        // One byte under the single heaviest unit's weight: that unit alone
+        // cannot fit, so resolving still stays under budget (the loop only
+        // stops evicting when one entry remains) and heap never exceeds it
+        // once at least two units have been seen.
+        let heaviest = *weights.iter().max().unwrap();
+        let mut tight = Warmer::new(heaviest - 1);
+        tight.resolve(&text);
+        assert!(
+            tight.len() <= 1,
+            "the tightest budget keeps at most one unit"
+        );
+    }
 }

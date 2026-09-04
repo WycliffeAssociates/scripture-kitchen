@@ -186,8 +186,10 @@ impl Fingerprint {
         self.starts[i]..self.starts.get(i + 1).copied().unwrap_or(self.len)
     }
 
-    fn resident_bytes(&self) -> usize {
-        size_of_val(&self.starts[..]) + size_of_val(&self.checksums[..])
+    /// Heap bytes this fingerprint occupies — capacity, not length.
+    pub fn resident_bytes(&self) -> usize {
+        self.starts.capacity() * size_of::<u32>()
+            + self.checksums.capacity() * size_of::<RawChecksum>()
     }
 }
 
@@ -380,6 +382,19 @@ impl Pantry {
         self.warmer.resident_bytes() + self.books.values().map(|book| book.bytes).sum::<usize>()
     }
 
+    /// Bytes of text retained across every registered book — zero for a book
+    /// under [`Retain::ProductsOnly`]. The other component of
+    /// [`resident_bytes`](Self::resident_bytes) not already reachable
+    /// through [`warmer`](Self::warmer): what's left is `resident_bytes()
+    /// - warmer().resident_bytes() - text_bytes()`, the Pantry's own
+    /// per-book products (`Toc`, `Mask`, `Utf16Table`, `Fingerprint`).
+    pub fn text_bytes(&self) -> usize {
+        self.books
+            .values()
+            .map(|book| book.text.as_deref().map_or(0, str::len))
+            .sum()
+    }
+
     /// Books derived rather than served from the retained products, cumulative
     /// — the number that proves an idempotent update did no work.
     pub fn derivations(&self) -> u64 {
@@ -534,7 +549,9 @@ fn retained<'b>(books: &'b FxHashMap<BookId, Book>, id: &BookId) -> Result<&'b s
         .ok_or_else(|| PantryError::NoText { id: id.clone() })
 }
 
-/// Estimated resident size of one book's detached products and retained text.
+/// Resident size of one book's detached products and retained text —
+/// capacity, not length, since capacity is what a `Vec` actually holds on
+/// the heap.
 fn book_bytes(
     toc: &Toc,
     mask: &Mask,
@@ -543,10 +560,10 @@ fn book_bytes(
     id: &BookId,
     text: Option<&str>,
 ) -> usize {
-    size_of_val(&toc.chapters[..])
-        + size_of_val(&toc.verses[..])
-        + size_of_val(&mask.ranges[..])
-        + size_of_val(&mask.starts[..])
+    toc.chapters.capacity() * size_of::<onion::ChapterRow>()
+        + toc.verses.capacity() * size_of::<onion::VerseAnchor>()
+        + mask.ranges.capacity() * size_of::<Range<u32>>()
+        + mask.starts.capacity() * size_of::<u32>()
         + utf16.index_bytes()
         + print.resident_bytes()
         + id.as_str().len()

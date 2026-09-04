@@ -23,7 +23,8 @@ use std::{
 
 use rayon::prelude::*;
 use sous_core::{
-    Alignment, Brigade, Corpus, PackedFinding, ProjectedBook, SnapshotId, align, analyze,
+    Alignment, Brigade, Corpus, PackedFinding, Pattern, PatternKey, ProjectedBook, ScalarKey,
+    SnapshotId, align, analyze,
 };
 use usage::Cli;
 use usfm_galley::sous::{OnionBook, OnionInputBook, publish_onion_findings};
@@ -110,12 +111,13 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     if args.findings || args.publish.is_some() {
-        let findings = hygiene_findings(&target_corpus);
+        let (findings, patterns) = brigade_findings(&target_corpus);
         if args.findings {
             print_findings(&target_corpus, &findings);
+            print_patterns(&patterns);
         }
         if let Some(path) = &args.publish {
-            let buffer = publish(&target.paths, target.sources, &findings)?;
+            let buffer = publish(&target.paths, target.sources, &findings, &patterns)?;
             fs::write(path, &buffer)
                 .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
             eprintln!(
@@ -132,10 +134,49 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Hygiene over every target book, in projected UTF-8, ordered by book then
-/// offset. Later passes join the same `analyze` call.
-fn hygiene_findings(corpus: &Corpus<'_, OnionBook>) -> Vec<PackedFinding> {
-    analyze(corpus, &Brigade::default()).into_rows()
+/// The product pass over every target book: rows in projected UTF-8, ordered
+/// by book then offset, and the corpus-level pattern table beside them.
+fn brigade_findings(corpus: &Corpus<'_, OnionBook>) -> (Vec<PackedFinding>, Vec<Pattern>) {
+    analyze(corpus, &Brigade::default()).into_parts()
+}
+
+/// One line per firing pattern, in emission order.
+fn print_patterns(patterns: &[Pattern]) {
+    for (index, pattern) in patterns.iter().enumerate() {
+        let evidence = match pattern.key {
+            PatternKey::Rarity => "rarity".to_string(),
+            PatternKey::Placement { side, class } => {
+                format!("placement {}={}", side.name(), class.name())
+            }
+            PatternKey::RunShape { pure, bucket } => format!(
+                "run-shape {} len {bucket}{}",
+                if pure { "pure" } else { "mixed" },
+                if bucket == 6 { "+" } else { "" }
+            ),
+            PatternKey::ExactNeighbor(neighbor) => {
+                format!("exact-neighbor {}", glyph(neighbor))
+            }
+        };
+        let band = match pattern.band {
+            Some(step) => format!(" band {step}"),
+            None => String::new(),
+        };
+        println!(
+            "pattern[{index}] {} {evidence} {}/{} {:.2}%{band}",
+            glyph(pattern.glyph),
+            pattern.numerator,
+            pattern.denominator,
+            f64::from(pattern.share_bp) / 100.0,
+        );
+    }
+}
+
+/// `U+002C ','`, or the pooled digit lane.
+fn glyph(key: ScalarKey) -> String {
+    match key.scalar() {
+        Some(scalar) => format!("U+{:04X} {scalar:?}", scalar as u32),
+        None => "digits".to_string(),
+    }
 }
 
 fn print_findings(corpus: &Corpus<'_, OnionBook>, findings: &[PackedFinding]) {
@@ -181,6 +222,7 @@ fn publish(
     paths: &[PathBuf],
     sources: Vec<String>,
     findings: &[PackedFinding],
+    patterns: &[Pattern],
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     let books = paths
         .iter()
@@ -190,6 +232,7 @@ fn publish(
     Ok(publish_onion_findings(
         books,
         findings,
+        patterns,
         SnapshotId::new([0; 16]),
     )?)
 }
@@ -564,7 +607,7 @@ mod tests {
         fs::write(&path, "\\id MRK\n\\c 1\n\\p\n\\v 1 An 🧅 \\\\ here.\n").unwrap();
         let target = load_input(&path, false).unwrap();
         let corpus = Corpus::try_new(&target.books).unwrap();
-        let findings = hygiene_findings(&corpus);
+        let (findings, patterns) = brigade_findings(&corpus);
         assert_eq!(findings.len(), 1);
         let FindingKind::Hygiene(digest) = findings[0].kind() else {
             panic!("hygiene kind")
@@ -573,7 +616,7 @@ mod tests {
         assert_eq!(digest.run(), 2);
         assert_eq!((findings[0].from(), findings[0].to()), (10, 12));
 
-        let buffer = publish(&target.paths, target.sources, &findings).unwrap();
+        let buffer = publish(&target.paths, target.sources, &findings, &patterns).unwrap();
         let snapshot = CorpusSnapshot::open(&buffer).unwrap();
         assert_eq!(snapshot.coordinate_space(), CoordinateSpace::Utf16);
         let row = snapshot

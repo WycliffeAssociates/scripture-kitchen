@@ -20,6 +20,7 @@
 use crate::{
     BookIndex, BookKey, Chapter, CodecError, Corpus, FindingKind, PackedFinding, ProjectedBook,
     TextRange, Verse,
+    judge::{Pattern, PatternIndex},
 };
 
 /// The observation schema a host folds into every chapter-cache key.
@@ -157,6 +158,7 @@ pub struct Findings {
     book_lengths: Vec<u32>,
     book: Option<BookIndex>,
     rows: Vec<PackedFinding>,
+    patterns: Vec<Pattern>,
 }
 
 impl Findings {
@@ -166,6 +168,7 @@ impl Findings {
             book_lengths,
             book: None,
             rows: Vec::new(),
+            patterns: Vec::new(),
         }
     }
 
@@ -184,8 +187,23 @@ impl Findings {
         Ok(())
     }
 
+    /// Records one corpus-level pattern and returns its table position.
+    ///
+    /// Patterns belong to the corpus, not to a book, so they may be pushed
+    /// either side of any [`open_book`](Self::open_book). A table past
+    /// `u16::MAX` rows saturates here and the encoder refuses it.
+    pub fn push_pattern(&mut self, pattern: Pattern) -> PatternIndex {
+        let index = u16::try_from(self.patterns.len()).unwrap_or(u16::MAX);
+        self.patterns.push(pattern);
+        PatternIndex::new(index)
+    }
+
     pub fn rows(&self) -> &[PackedFinding] {
         &self.rows
+    }
+
+    pub fn patterns(&self) -> &[Pattern] {
+        &self.patterns
     }
 
     /// Puts every row in publication order: stable by `(book_idx, from, to)`,
@@ -196,8 +214,8 @@ impl Findings {
             .sort_by_key(|row| (row.book_idx().get(), row.from(), row.to()));
     }
 
-    pub fn into_rows(self) -> Vec<PackedFinding> {
-        self.rows
+    pub fn into_parts(self) -> (Vec<PackedFinding>, Vec<Pattern>) {
+        (self.rows, self.patterns)
     }
 
     pub fn len(&self) -> usize {

@@ -43,12 +43,12 @@ fn cold_publish<P: ChapterPass + Sync>(pass: &P, books: &[Book], snapshot: Snaps
         })
         .collect();
     let corpus = Corpus::try_new(&parsed).expect("the harness registers distinct book keys");
-    let findings = analyze(&corpus, pass).into_rows();
+    let (findings, patterns) = analyze(&corpus, pass).into_parts();
     let inputs = books
         .iter()
         .map(|(id, text)| OnionInputBook::new(id.as_str(), text.clone()))
         .collect();
-    publish_onion_findings(inputs, &findings, snapshot).expect("cold publication")
+    publish_onion_findings(inputs, &findings, &patterns, snapshot).expect("cold publication")
 }
 
 /// The Expediter's own books, in the canonical order it publishes them.

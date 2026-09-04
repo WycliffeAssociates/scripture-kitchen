@@ -115,6 +115,11 @@ a rule needs evidence the 16-byte record cannot carry, that richer row type
 joins here and packs on the way out; nothing in this module presumes it stays
 a `Vec<PackedFinding>`.
 
+`Findings` carries the corpus's pattern table beside its rows:
+`push_pattern` takes a `judge::Pattern` and returns its table position, and
+`into_parts` hands both to the encoder. Patterns are corpus-level, so they are
+pushed either side of any `open_book`.
+
 `open_book` before each book's rows is what lets `push` take a book-relative
 span and check it against the right length. A host driving the pass itself
 (Galley's `Expediter`) makes the same judge-then-`finish` calls `analyze` does.

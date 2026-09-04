@@ -17,14 +17,16 @@ use rustc_hash::FxHashSet;
 use crate::codec::{
     CodecError, HygieneClass, PackedFinding, RECORD_BOOK_INDEX_OFFSET, RECORD_BOOK_SCOPE_OFFSET,
     RECORD_CODE_OFFSET, RECORD_FLAGS_OFFSET, RECORD_FROM_OFFSET, RECORD_LEN,
-    RECORD_PROJECT_SCOPE_OFFSET, RECORD_TO_OFFSET,
+    RECORD_PROJECT_SCOPE_OFFSET, RECORD_TO_OFFSET, Reasons,
 };
+use crate::judge::{Channel, Pattern, PatternKey, Side, Staircase};
+use crate::substrate::{OuterClass, ScalarKey};
 use crate::{BookIndex, BookKey};
 
 pub const MAGIC: u32 = 0x5355_4f53; // ASCII "SOUS", little endian.
 pub const FORMAT_VERSION: u32 = 1;
 pub const FLAG_UTF16: u32 = 1 << 0;
-pub const HEADER_BYTES: usize = 40;
+pub const HEADER_BYTES: usize = 48;
 pub const DIRECTORY_ENTRY_BYTES: usize = 20;
 pub const HEADER_MAGIC_OFFSET: usize = 0;
 pub const HEADER_VERSION_OFFSET: usize = 4;
@@ -32,7 +34,9 @@ pub const HEADER_FLAGS_OFFSET: usize = 8;
 pub const HEADER_BOOK_COUNT_OFFSET: usize = 12;
 pub const HEADER_RECORD_LEN_OFFSET: usize = 16;
 pub const HEADER_TOTAL_FINDINGS_OFFSET: usize = 20;
-pub const HEADER_SNAPSHOT_ID_OFFSET: usize = 24;
+pub const HEADER_PATTERN_COUNT_OFFSET: usize = 24;
+pub const HEADER_PATTERN_OFFSET_OFFSET: usize = 28;
+pub const HEADER_SNAPSHOT_ID_OFFSET: usize = 32;
 pub const DIRECTORY_KEY_OFFSET: usize = 0;
 pub const DIRECTORY_KEY_TERMINATOR_OFFSET: usize = 3;
 pub const DIRECTORY_LENGTH_OFFSET: usize = 4;
@@ -41,9 +45,26 @@ pub const DIRECTORY_FINDING_COUNT_OFFSET: usize = 12;
 pub const DIRECTORY_ID_OFFSET: usize = 16;
 /// Bytes of `u16` little-endian length in front of each id's UTF-8 bytes.
 pub const ID_PREFIX_BYTES: usize = 2;
-/// The id string table is padded to this boundary so record sections stay
-/// 4-byte aligned for a typed-array view.
+/// The id string table is padded to this boundary so the pattern table and
+/// the record sections stay 4-byte aligned for a typed-array view.
 pub const SECTION_ALIGNMENT: usize = 4;
+/// One pattern-table row. A multiple of [`SECTION_ALIGNMENT`], so the record
+/// sections behind it stay aligned however many patterns fired.
+pub const PATTERN_ROW_LEN: usize = 24;
+pub const PATTERN_GLYPH_OFFSET: usize = 0;
+pub const PATTERN_NEIGHBOR_OFFSET: usize = 4;
+pub const PATTERN_CHANNEL_OFFSET: usize = 8;
+pub const PATTERN_KEY_OFFSET: usize = 9;
+pub const PATTERN_BAND_OFFSET: usize = 10;
+pub const PATTERN_FLAGS_OFFSET: usize = 11;
+pub const PATTERN_NUMERATOR_OFFSET: usize = 12;
+pub const PATTERN_DENOMINATOR_OFFSET: usize = 16;
+pub const PATTERN_SHARE_OFFSET: usize = 20;
+pub const PATTERN_RESERVED_OFFSET: usize = 22;
+/// A band byte naming no staircase step, which is what `Rarity` carries.
+pub const PATTERN_BAND_NONE: u8 = 0xFF;
+/// The pooled digit lane's glyph value, [`ScalarKey::DIGITS`] on the wire.
+pub const PATTERN_DIGIT_GLYPH: u32 = u32::MAX;
 
 /// The opaque identity of the immutable snapshot a publication belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -135,12 +156,20 @@ impl<'a> PublicationBook<'a> {
     }
 }
 
-/// Encode one complete corpus publication.
+/// Encode one complete corpus publication: the pattern table the judge
+/// produced, then every book's records.
 pub fn encode_to_corpus_buffer(
     snapshot_id: SnapshotId,
     coordinate_space: CoordinateSpace,
     sections: &[PublicationBook<'_>],
+    patterns: &[Pattern],
 ) -> Result<Vec<u8>, CorpusWireError> {
+    if patterns.len() > usize::from(u16::MAX) {
+        return Err(CorpusWireError::PatternCountOverflow {
+            count: patterns.len(),
+        });
+    }
+    let pattern_count = patterns.len() as u32;
     let book_count =
         u32::try_from(sections.len()).map_err(|_| CorpusWireError::BookCountOverflow {
             count: sections.len(),
@@ -191,8 +220,16 @@ pub fn encode_to_corpus_buffer(
     let id_start = HEADER_BYTES
         .checked_add(directory_bytes)
         .ok_or(CorpusWireError::SizeOverflow)?;
-    let data_start = id_start
+    let pattern_start = id_start
         .checked_add(padded(id_bytes).ok_or(CorpusWireError::SizeOverflow)?)
+        .ok_or(CorpusWireError::SizeOverflow)?;
+    let data_start = pattern_start
+        .checked_add(
+            patterns
+                .len()
+                .checked_mul(PATTERN_ROW_LEN)
+                .ok_or(CorpusWireError::SizeOverflow)?,
+        )
         .ok_or(CorpusWireError::SizeOverflow)?;
     let total_bytes = data_start
         .checked_add(
@@ -211,6 +248,12 @@ pub fn encode_to_corpus_buffer(
     out.extend_from_slice(&book_count.to_le_bytes());
     out.extend_from_slice(&(RECORD_LEN as u32).to_le_bytes());
     out.extend_from_slice(&total_findings.to_le_bytes());
+    out.extend_from_slice(&pattern_count.to_le_bytes());
+    out.extend_from_slice(
+        &u32::try_from(pattern_start)
+            .map_err(|_| CorpusWireError::SizeOverflow)?
+            .to_le_bytes(),
+    );
     out.extend_from_slice(&snapshot_id.as_bytes());
 
     let mut section_offset = data_start;
@@ -253,7 +296,12 @@ pub fn encode_to_corpus_buffer(
         out.extend_from_slice(&(section.id.len() as u16).to_le_bytes());
         out.extend_from_slice(section.id.as_bytes());
     }
-    out.resize(data_start, 0);
+    out.resize(pattern_start, 0);
+
+    for pattern in patterns {
+        out.extend_from_slice(&encode_pattern(pattern));
+    }
+    debug_assert_eq!(out.len(), data_start);
 
     for section in sections {
         for finding in section.findings {
@@ -273,6 +321,8 @@ pub struct CorpusSnapshot<'a> {
     snapshot_id: SnapshotId,
     coordinate_space: CoordinateSpace,
     books: Vec<BookMeta<'a>>,
+    pattern_start: usize,
+    pattern_count: usize,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -292,6 +342,7 @@ pub struct CorpusBook<'a> {
     published_len: u32,
     offset: usize,
     count: usize,
+    pattern_count: usize,
 }
 
 impl<'a> CorpusSnapshot<'a> {
@@ -320,8 +371,20 @@ impl<'a> CorpusSnapshot<'a> {
         if record_len != RECORD_LEN as u32 {
             return Err(CorpusWireError::InvalidRecordLength { actual: record_len });
         }
-        let total_findings = read_u32(bytes, 20);
-        let snapshot_id = SnapshotId::new(bytes[24..40].try_into().expect("header checked"));
+        let total_findings = read_u32(bytes, HEADER_TOTAL_FINDINGS_OFFSET);
+        let pattern_count_raw = read_u32(bytes, HEADER_PATTERN_COUNT_OFFSET);
+        let pattern_count = usize::try_from(pattern_count_raw)
+            .map_err(|_| CorpusWireError::PatternCountOverflow { count: usize::MAX })?;
+        if pattern_count > usize::from(u16::MAX) {
+            return Err(CorpusWireError::PatternCountOverflow {
+                count: pattern_count,
+            });
+        }
+        let snapshot_id = SnapshotId::new(
+            bytes[HEADER_SNAPSHOT_ID_OFFSET..HEADER_BYTES]
+                .try_into()
+                .expect("header checked"),
+        );
         let directory_bytes = book_count
             .checked_mul(DIRECTORY_ENTRY_BYTES)
             .ok_or(CorpusWireError::SizeOverflow)?;
@@ -334,13 +397,33 @@ impl<'a> CorpusSnapshot<'a> {
             });
         }
         let (ids, id_end) = read_id_table(bytes, book_count, id_start)?;
-        let data_start = id_start
+        let pattern_start = id_start
             .checked_add(padded(id_end - id_start).ok_or(CorpusWireError::SizeOverflow)?)
+            .ok_or(CorpusWireError::SizeOverflow)?;
+        if read_u32(bytes, HEADER_PATTERN_OFFSET_OFFSET)
+            != u32::try_from(pattern_start).unwrap_or(u32::MAX)
+        {
+            return Err(CorpusWireError::PatternSectionOutOfOrder {
+                expected: pattern_start,
+                actual: usize::try_from(read_u32(bytes, HEADER_PATTERN_OFFSET_OFFSET))
+                    .unwrap_or(usize::MAX),
+            });
+        }
+        let data_start = pattern_start
+            .checked_add(
+                pattern_count
+                    .checked_mul(PATTERN_ROW_LEN)
+                    .ok_or(CorpusWireError::SizeOverflow)?,
+            )
             .ok_or(CorpusWireError::SizeOverflow)?;
         if data_start > bytes.len() {
             return Err(CorpusWireError::InvalidLength {
                 actual: bytes.len(),
             });
+        }
+        for row in 0..pattern_count {
+            let at = pattern_start + row * PATTERN_ROW_LEN;
+            decode_pattern(&bytes[at..at + PATTERN_ROW_LEN], row)?;
         }
 
         let mut books = Vec::with_capacity(book_count);
@@ -391,6 +474,7 @@ impl<'a> CorpusSnapshot<'a> {
                         row,
                         error,
                     })?;
+                validate_pattern_ref(finding, pattern_count, index, row)?;
             }
             total_seen = total_seen
                 .checked_add(u32::try_from(count).map_err(|_| CorpusWireError::SizeOverflow)?)
@@ -421,7 +505,33 @@ impl<'a> CorpusSnapshot<'a> {
             snapshot_id,
             coordinate_space,
             books,
+            pattern_start,
+            pattern_count,
         })
+    }
+
+    /// Rows in the publication's pattern table.
+    pub const fn pattern_count(&self) -> usize {
+        self.pattern_count
+    }
+
+    /// One pattern table row, decoded.
+    pub fn pattern(&self, index: usize) -> Result<Pattern, CorpusWireError> {
+        if index >= self.pattern_count {
+            return Err(CorpusWireError::PatternIndexOutOfRange {
+                index,
+                count: self.pattern_count,
+            });
+        }
+        let at = self.pattern_start + index * PATTERN_ROW_LEN;
+        decode_pattern(&self.bytes[at..at + PATTERN_ROW_LEN], index)
+    }
+
+    /// The whole table, in emission order.
+    pub fn patterns(&self) -> Result<Vec<Pattern>, CorpusWireError> {
+        (0..self.pattern_count)
+            .map(|row| self.pattern(row))
+            .collect()
     }
 
     pub const fn snapshot_id(&self) -> SnapshotId {
@@ -449,6 +559,7 @@ impl<'a> CorpusSnapshot<'a> {
             published_len: meta.published_len,
             offset: meta.offset,
             count: meta.count,
+            pattern_count: self.pattern_count,
         })
     }
 
@@ -517,6 +628,7 @@ impl<'a> CorpusBook<'a> {
                 row,
                 error,
             })?;
+        validate_pattern_ref(finding, self.pattern_count, self.index.get() as usize, row)?;
         Ok(finding)
     }
 }
@@ -567,10 +679,136 @@ fn read_id_table(
     Ok((ids, cursor))
 }
 
+/// One pattern-table row: the glyph, the channel and its key, the band, and
+/// the fraction behind the claim. Layout: codec/README.md.
+fn encode_pattern(pattern: &Pattern) -> [u8; PATTERN_ROW_LEN] {
+    let mut row = [0u8; PATTERN_ROW_LEN];
+    row[PATTERN_GLYPH_OFFSET..PATTERN_NEIGHBOR_OFFSET]
+        .copy_from_slice(&pattern.glyph.raw().to_le_bytes());
+    let (neighbor, key) = match pattern.key {
+        PatternKey::ExactNeighbor(neighbor) => (neighbor.raw(), 0),
+        PatternKey::RunShape { pure, bucket } => (0, (u8::from(pure) << 4) | bucket),
+        PatternKey::Placement { side, class } => (0, ((side as u8) << 4) | class as u8),
+        PatternKey::Rarity => (0, 0),
+    };
+    row[PATTERN_NEIGHBOR_OFFSET..PATTERN_CHANNEL_OFFSET].copy_from_slice(&neighbor.to_le_bytes());
+    row[PATTERN_CHANNEL_OFFSET] = pattern.channel as u8;
+    row[PATTERN_KEY_OFFSET] = key;
+    row[PATTERN_BAND_OFFSET] = pattern.band.unwrap_or(PATTERN_BAND_NONE);
+    row[PATTERN_NUMERATOR_OFFSET..PATTERN_DENOMINATOR_OFFSET]
+        .copy_from_slice(&pattern.numerator.to_le_bytes());
+    row[PATTERN_DENOMINATOR_OFFSET..PATTERN_SHARE_OFFSET]
+        .copy_from_slice(&pattern.denominator.to_le_bytes());
+    row[PATTERN_SHARE_OFFSET..PATTERN_RESERVED_OFFSET]
+        .copy_from_slice(&pattern.share_bp.to_le_bytes());
+    row
+}
+
+/// Refuses every row the encoder cannot have written: a reserved byte set, a
+/// channel or key outside its table, a band past the staircase, a share over
+/// 10,000 basis points.
+fn decode_pattern(bytes: &[u8], row: usize) -> Result<Pattern, CorpusWireError> {
+    let bad = |field: &'static str| CorpusWireError::InvalidPattern { row, field };
+    if bytes[PATTERN_FLAGS_OFFSET] != 0 {
+        return Err(bad("flags"));
+    }
+    if bytes[PATTERN_RESERVED_OFFSET..PATTERN_ROW_LEN] != [0, 0] {
+        return Err(bad("reserved"));
+    }
+    let glyph = ScalarKey::from_raw(read_u32(bytes, PATTERN_GLYPH_OFFSET)).ok_or(bad("glyph"))?;
+    let neighbor_raw = read_u32(bytes, PATTERN_NEIGHBOR_OFFSET);
+    let channel = *Channel::ALL
+        .get(usize::from(bytes[PATTERN_CHANNEL_OFFSET]))
+        .ok_or(bad("channel"))?;
+    let raw_key = bytes[PATTERN_KEY_OFFSET];
+    let (high, low) = (raw_key >> 4, raw_key & 0x0f);
+    let key = match channel {
+        Channel::ExactNeighbor => {
+            if raw_key != 0 {
+                return Err(bad("key"));
+            }
+            PatternKey::ExactNeighbor(ScalarKey::from_raw(neighbor_raw).ok_or(bad("neighbor"))?)
+        }
+        Channel::RunShape => {
+            if high > 1 || low == 0 || usize::from(low) > crate::substrate::RUN_BUCKETS {
+                return Err(bad("key"));
+            }
+            PatternKey::RunShape {
+                pure: high == 1,
+                bucket: low,
+            }
+        }
+        Channel::Placement => PatternKey::Placement {
+            side: match high {
+                0 => Side::Prev,
+                1 => Side::Next,
+                _ => return Err(bad("key")),
+            },
+            class: OuterClass::from_raw(low).ok_or(bad("key"))?,
+        },
+        Channel::Rarity => {
+            if raw_key != 0 {
+                return Err(bad("key"));
+            }
+            PatternKey::Rarity
+        }
+        Channel::PooledNeighbor => return Err(bad("channel")),
+    };
+    if !matches!(channel, Channel::ExactNeighbor) && neighbor_raw != 0 {
+        return Err(bad("neighbor"));
+    }
+    let band = match (bytes[PATTERN_BAND_OFFSET], channel) {
+        (PATTERN_BAND_NONE, Channel::Rarity) => None,
+        (step, channel) if channel != Channel::Rarity && usize::from(step) < Staircase::STEPS => {
+            Some(step)
+        }
+        _ => return Err(bad("band")),
+    };
+    let share_bp = u16::from_le_bytes(
+        bytes[PATTERN_SHARE_OFFSET..PATTERN_RESERVED_OFFSET]
+            .try_into()
+            .expect("two bytes"),
+    );
+    if share_bp > 10_000 {
+        return Err(bad("share"));
+    }
+    Ok(Pattern {
+        glyph,
+        channel,
+        key,
+        band,
+        numerator: read_u32(bytes, PATTERN_NUMERATOR_OFFSET),
+        denominator: read_u32(bytes, PATTERN_DENOMINATOR_OFFSET),
+        share_bp,
+    })
+}
+
 /// `len` rounded up to [`SECTION_ALIGNMENT`].
 fn padded(len: usize) -> Option<usize> {
     len.checked_add(SECTION_ALIGNMENT - 1)
         .map(|rounded| rounded & !(SECTION_ALIGNMENT - 1))
+}
+
+/// A `Convention` row names a table position; past the table it is refused.
+fn validate_pattern_ref(
+    finding: PackedFinding,
+    pattern_count: usize,
+    book: usize,
+    row: usize,
+) -> Result<(), CorpusWireError> {
+    let crate::FindingKind::Convention(digest) = finding.kind() else {
+        return Ok(());
+    };
+    let index = usize::from(digest.pattern().get());
+    if index >= pattern_count {
+        return Err(CorpusWireError::PatternIndexPastTable {
+            book,
+            row,
+            index,
+            count: pattern_count,
+        });
+    }
+    Ok(())
 }
 
 fn validate_key(key: BookKey) -> Result<(), CorpusWireError> {
@@ -658,6 +896,29 @@ pub enum CorpusWireError {
         row: usize,
         count: usize,
     },
+    PatternCountOverflow {
+        count: usize,
+    },
+    PatternSectionOutOfOrder {
+        expected: usize,
+        actual: usize,
+    },
+    /// The pattern row's named field is not a value the encoder can write.
+    InvalidPattern {
+        row: usize,
+        field: &'static str,
+    },
+    PatternIndexOutOfRange {
+        index: usize,
+        count: usize,
+    },
+    /// A `Convention` record naming a pattern the table does not hold.
+    PatternIndexPastTable {
+        book: usize,
+        row: usize,
+        index: usize,
+        count: usize,
+    },
 }
 
 impl fmt::Display for CorpusWireError {
@@ -717,6 +978,27 @@ impl fmt::Display for CorpusWireError {
             Self::RowOutOfBounds { row, count } => {
                 write!(f, "finding row {row} is outside book length {count}")
             }
+            Self::PatternCountOverflow { count } => {
+                write!(f, "corpus declares {count} patterns; maximum is 65535")
+            }
+            Self::PatternSectionOutOfOrder { expected, actual } => {
+                write!(f, "pattern table starts at {actual}, expected {expected}")
+            }
+            Self::InvalidPattern { row, field } => {
+                write!(f, "pattern row {row} has an invalid {field}")
+            }
+            Self::PatternIndexOutOfRange { index, count } => {
+                write!(f, "pattern {index} is outside a table of {count}")
+            }
+            Self::PatternIndexPastTable {
+                book,
+                row,
+                index,
+                count,
+            } => write!(
+                f,
+                "book {book} row {row} names pattern {index} in a table of {count}"
+            ),
         }
     }
 }
@@ -762,8 +1044,82 @@ pub fn generated_reader_ts() -> String {
             &HEADER_TOTAL_FINDINGS_OFFSET.to_string(),
         )
         .replace(
+            "@@HEADER_PATTERN_COUNT_OFFSET@@",
+            &HEADER_PATTERN_COUNT_OFFSET.to_string(),
+        )
+        .replace(
+            "@@HEADER_PATTERN_OFFSET_OFFSET@@",
+            &HEADER_PATTERN_OFFSET_OFFSET.to_string(),
+        )
+        .replace(
             "@@HEADER_SNAPSHOT_ID_OFFSET@@",
             &HEADER_SNAPSHOT_ID_OFFSET.to_string(),
+        )
+        .replace("@@PATTERN_ROW_LEN@@", &PATTERN_ROW_LEN.to_string())
+        .replace(
+            "@@PATTERN_GLYPH_OFFSET@@",
+            &PATTERN_GLYPH_OFFSET.to_string(),
+        )
+        .replace(
+            "@@PATTERN_NEIGHBOR_OFFSET@@",
+            &PATTERN_NEIGHBOR_OFFSET.to_string(),
+        )
+        .replace(
+            "@@PATTERN_CHANNEL_OFFSET@@",
+            &PATTERN_CHANNEL_OFFSET.to_string(),
+        )
+        .replace("@@PATTERN_KEY_OFFSET@@", &PATTERN_KEY_OFFSET.to_string())
+        .replace("@@PATTERN_BAND_OFFSET@@", &PATTERN_BAND_OFFSET.to_string())
+        .replace(
+            "@@PATTERN_FLAGS_OFFSET@@",
+            &PATTERN_FLAGS_OFFSET.to_string(),
+        )
+        .replace(
+            "@@PATTERN_NUMERATOR_OFFSET@@",
+            &PATTERN_NUMERATOR_OFFSET.to_string(),
+        )
+        .replace(
+            "@@PATTERN_DENOMINATOR_OFFSET@@",
+            &PATTERN_DENOMINATOR_OFFSET.to_string(),
+        )
+        .replace(
+            "@@PATTERN_SHARE_OFFSET@@",
+            &PATTERN_SHARE_OFFSET.to_string(),
+        )
+        .replace(
+            "@@PATTERN_RESERVED_OFFSET@@",
+            &PATTERN_RESERVED_OFFSET.to_string(),
+        )
+        .replace("@@PATTERN_BAND_NONE@@", &PATTERN_BAND_NONE.to_string())
+        .replace("@@PATTERN_DIGIT_GLYPH@@", &PATTERN_DIGIT_GLYPH.to_string())
+        .replace("@@BAND_STEPS@@", &Staircase::STEPS.to_string())
+        .replace(
+            "@@RUN_BUCKETS@@",
+            &crate::substrate::RUN_BUCKETS.to_string(),
+        )
+        .replace(
+            "@@CHANNELS@@",
+            &Channel::ALL
+                .iter()
+                .map(|channel| format!("\"{}\"", channel.name()))
+                .collect::<Vec<_>>()
+                .join(", "),
+        )
+        .replace(
+            "@@OUTER_CLASSES@@",
+            &OuterClass::ALL
+                .iter()
+                .map(|class| format!("\"{}\"", class.name()))
+                .collect::<Vec<_>>()
+                .join(", "),
+        )
+        .replace(
+            "@@CONVENTION_REASONS@@",
+            &Reasons::NAMES
+                .iter()
+                .map(|name| format!("\"{name}\""))
+                .collect::<Vec<_>>()
+                .join(", "),
         )
         .replace(
             "@@DIRECTORY_KEY_OFFSET@@",
@@ -809,12 +1165,62 @@ pub fn generated_reader_ts() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{FindingKind, HygieneDigest, ProportionalityDigest, QuantizedDeviation};
+    use crate::{
+        ConventionDigest, FindingKind, HygieneDigest, PatternIndex, ProportionalityDigest,
+        QuantizedDeviation, Reasons,
+    };
 
     const GENERATED: &str = include_str!("../../reader.ts");
     /// One book under `books/mrk.usfm`: header, one directory row, a padded
     /// 16-byte id table, then the records.
     const FIRST_RECORD: usize = HEADER_BYTES + DIRECTORY_ENTRY_BYTES + 16;
+    /// One of each channel and key shape, in emission order.
+    fn fixture_patterns() -> Vec<Pattern> {
+        vec![
+            Pattern {
+                glyph: ScalarKey::of('`'),
+                channel: Channel::Rarity,
+                key: PatternKey::Rarity,
+                band: None,
+                numerator: 1,
+                denominator: 48_213,
+                share_bp: 0,
+            },
+            Pattern {
+                glyph: ScalarKey::of('?'),
+                channel: Channel::ExactNeighbor,
+                key: PatternKey::ExactNeighbor(ScalarKey::of('.')),
+                band: Some(2),
+                numerator: 3,
+                denominator: 403,
+                share_bp: 74,
+            },
+            Pattern {
+                glyph: ScalarKey::of(','),
+                channel: Channel::RunShape,
+                key: PatternKey::RunShape {
+                    pure: false,
+                    bucket: 4,
+                },
+                band: Some(2),
+                numerator: 1,
+                denominator: 601,
+                share_bp: 16,
+            },
+            Pattern {
+                glyph: ScalarKey::DIGITS,
+                channel: Channel::Placement,
+                key: PatternKey::Placement {
+                    side: Side::Next,
+                    class: OuterClass::Letter,
+                },
+                band: Some(3),
+                numerator: 12,
+                denominator: 9_812,
+                share_bp: 12,
+            },
+        ]
+    }
 
     fn fixture_bytes() -> Vec<u8> {
         include_str!("../../testdata/corpus_v1.hex")
@@ -853,6 +1259,7 @@ mod tests {
             SnapshotId::new(core::array::from_fn(|index| index as u8)),
             CoordinateSpace::Utf8,
             &[section],
+            &[],
         )
         .unwrap();
         assert_eq!(encoded, fixture_bytes());
@@ -911,6 +1318,7 @@ mod tests {
             SnapshotId::new(core::array::from_fn(|index| index as u8)),
             CoordinateSpace::Utf8,
             &[section],
+            &fixture_patterns(),
         )
         .unwrap();
         let golden: Vec<u8> = include_str!("../../testdata/corpus_v1_hygiene.hex")
@@ -920,6 +1328,7 @@ mod tests {
         assert_eq!(encoded, golden);
 
         let snapshot = CorpusSnapshot::open(&encoded).unwrap();
+        assert_eq!(snapshot.patterns().unwrap(), fixture_patterns());
         let book = snapshot.book_by_key(BookKey::new(*b"MRK")).unwrap();
         assert_eq!(book.at(0).unwrap(), findings[0]);
         assert_eq!(book.at(1).unwrap(), findings[1]);
@@ -932,9 +1341,159 @@ mod tests {
     }
 
     #[test]
+    fn header_is_48_bytes() {
+        assert_eq!(HEADER_BYTES, 48);
+        assert_eq!(HEADER_PATTERN_COUNT_OFFSET, 24);
+        assert_eq!(HEADER_PATTERN_OFFSET_OFFSET, 28);
+        assert_eq!(HEADER_SNAPSHOT_ID_OFFSET, 32);
+        assert_eq!(PATTERN_ROW_LEN, 24);
+        let empty =
+            encode_to_corpus_buffer(SnapshotId::new([0; 16]), CoordinateSpace::Utf8, &[], &[])
+                .unwrap();
+        assert_eq!(empty.len(), HEADER_BYTES);
+        assert_eq!(read_u32(&empty, HEADER_PATTERN_COUNT_OFFSET), 0);
+        assert_eq!(
+            read_u32(&empty, HEADER_PATTERN_OFFSET_OFFSET),
+            HEADER_BYTES as u32
+        );
+    }
+
+    #[test]
+    fn pattern_table_round_trips() {
+        let patterns = fixture_patterns();
+        let books = [PublicationBook::new(
+            BookKey::new(*b"MRK"),
+            "books/mrk.usfm",
+            0,
+            &[],
+        )];
+        let encoded = encode_to_corpus_buffer(
+            SnapshotId::new([7; 16]),
+            CoordinateSpace::Utf8,
+            &books,
+            &patterns,
+        )
+        .unwrap();
+        let snapshot = CorpusSnapshot::open(&encoded).unwrap();
+        assert_eq!(snapshot.pattern_count(), 4);
+        assert_eq!(snapshot.patterns().unwrap(), patterns);
+        assert_eq!(
+            snapshot.pattern(4),
+            Err(CorpusWireError::PatternIndexOutOfRange { index: 4, count: 4 })
+        );
+
+        // Every field the decoder refuses, one at a time.
+        let start = HEADER_BYTES + DIRECTORY_ENTRY_BYTES + 16;
+        for (offset, byte, field) in [
+            (PATTERN_FLAGS_OFFSET, 1u8, "flags"),
+            (PATTERN_RESERVED_OFFSET, 1, "reserved"),
+            (PATTERN_CHANNEL_OFFSET, 1, "channel"),
+            (PATTERN_CHANNEL_OFFSET, 5, "channel"),
+            (PATTERN_BAND_OFFSET, 0, "band"),
+            (PATTERN_KEY_OFFSET, 1, "key"),
+        ] {
+            let mut torn = encoded.clone();
+            torn[start + offset] = byte;
+            assert_eq!(
+                CorpusSnapshot::open(&torn).err(),
+                Some(CorpusWireError::InvalidPattern { row: 0, field }),
+                "pattern {field} {byte} decoded"
+            );
+        }
+        let mut moved = encoded;
+        moved[HEADER_PATTERN_OFFSET_OFFSET] = 0xff;
+        assert!(matches!(
+            CorpusSnapshot::open(&moved),
+            Err(CorpusWireError::PatternSectionOutOfOrder { .. })
+        ));
+    }
+
+    /// A `Convention` row names a table position, and the envelope is the
+    /// only place that knows how long the table is.
+    #[test]
+    fn pattern_index_past_count_is_refused() {
+        let patterns = fixture_patterns();
+        let row = |pattern: u16| {
+            PackedFinding::new(
+                0,
+                0,
+                BookIndex::new(0).unwrap(),
+                FindingKind::Convention(ConventionDigest::new(
+                    PatternIndex::new(pattern),
+                    Reasons::RARITY,
+                )),
+                &[0],
+            )
+            .unwrap()
+        };
+        let inside = [row(3)];
+        let books = [PublicationBook::new(
+            BookKey::new(*b"MRK"),
+            "books/mrk.usfm",
+            0,
+            &inside,
+        )];
+        let encoded = encode_to_corpus_buffer(
+            SnapshotId::new([0; 16]),
+            CoordinateSpace::Utf8,
+            &books,
+            &patterns,
+        )
+        .unwrap();
+        assert_eq!(
+            CorpusSnapshot::open(&encoded)
+                .unwrap()
+                .book(BookIndex::new(0).unwrap())
+                .unwrap()
+                .at(0)
+                .unwrap(),
+            inside[0]
+        );
+
+        let past = [row(4)];
+        let books = [PublicationBook::new(
+            BookKey::new(*b"MRK"),
+            "books/mrk.usfm",
+            0,
+            &past,
+        )];
+        let encoded = encode_to_corpus_buffer(
+            SnapshotId::new([0; 16]),
+            CoordinateSpace::Utf8,
+            &books,
+            &patterns,
+        )
+        .unwrap();
+        assert_eq!(
+            CorpusSnapshot::open(&encoded).err(),
+            Some(CorpusWireError::PatternIndexPastTable {
+                book: 0,
+                row: 0,
+                index: 4,
+                count: 4,
+            })
+        );
+    }
+
+    #[test]
+    fn a_pattern_table_over_sixty_five_thousand_rows_is_refused() {
+        let patterns = vec![fixture_patterns()[0]; usize::from(u16::MAX) + 1];
+        assert_eq!(
+            encode_to_corpus_buffer(
+                SnapshotId::new([0; 16]),
+                CoordinateSpace::Utf8,
+                &[],
+                &patterns
+            ),
+            Err(CorpusWireError::PatternCountOverflow { count: 65_536 })
+        );
+    }
+
+    #[test]
     fn empty_corpus_and_empty_books_are_valid() {
         let empty =
-            encode_to_corpus_buffer(SnapshotId::new([0; 16]), CoordinateSpace::Utf16, &[]).unwrap();
+            encode_to_corpus_buffer(SnapshotId::new([0; 16]), CoordinateSpace::Utf16, &[], &[])
+                .unwrap();
         assert_eq!(empty.len(), HEADER_BYTES);
         assert!(CorpusSnapshot::open(&empty).unwrap().is_empty());
 
@@ -942,9 +1501,13 @@ mod tests {
             PublicationBook::new(BookKey::new(*b"GEN"), "a/gen.usfm", 0, &[]),
             PublicationBook::new(BookKey::new(*b"MRK"), "b/mrk.usfm", 0, &[]),
         ];
-        let encoded =
-            encode_to_corpus_buffer(SnapshotId::new([1; 16]), CoordinateSpace::Utf16, &books)
-                .unwrap();
+        let encoded = encode_to_corpus_buffer(
+            SnapshotId::new([1; 16]),
+            CoordinateSpace::Utf16,
+            &books,
+            &[],
+        )
+        .unwrap();
         let snapshot = CorpusSnapshot::open(&encoded).unwrap();
         assert_eq!(snapshot.len(), 2);
         assert_eq!(
@@ -965,7 +1528,7 @@ mod tests {
             PublicationBook::new(BookKey::new(*b"GEN"), "a/gen.usfm", 8, &[]),
         ];
         let encoded =
-            encode_to_corpus_buffer(SnapshotId::new([2; 16]), CoordinateSpace::Utf8, &books)
+            encode_to_corpus_buffer(SnapshotId::new([2; 16]), CoordinateSpace::Utf8, &books, &[])
                 .unwrap();
         let snapshot = CorpusSnapshot::open(&encoded).unwrap();
 
@@ -989,7 +1552,7 @@ mod tests {
             PublicationBook::new(BookKey::new(*b"MRK"), "same.usfm", 0, &[]),
         ];
         assert_eq!(
-            encode_to_corpus_buffer(SnapshotId::new([0; 16]), CoordinateSpace::Utf8, &books),
+            encode_to_corpus_buffer(SnapshotId::new([0; 16]), CoordinateSpace::Utf8, &books, &[]),
             Err(CorpusWireError::DuplicateBookId { book: 1 })
         );
     }
@@ -1003,7 +1566,7 @@ mod tests {
             &[],
         )];
         let encoded =
-            encode_to_corpus_buffer(SnapshotId::new([0; 16]), CoordinateSpace::Utf8, &books)
+            encode_to_corpus_buffer(SnapshotId::new([0; 16]), CoordinateSpace::Utf8, &books, &[])
                 .unwrap();
 
         let mut moved = encoded.clone();
@@ -1028,23 +1591,27 @@ mod tests {
         let findings = [finding];
         let section =
             PublicationBook::new(BookKey::new(*b"MRK"), "books/mrk.usfm", 0x0200, &findings);
-        let encoded =
-            encode_to_corpus_buffer(SnapshotId::new([0; 16]), CoordinateSpace::Utf8, &[section])
-                .unwrap();
+        let encoded = encode_to_corpus_buffer(
+            SnapshotId::new([0; 16]),
+            CoordinateSpace::Utf8,
+            &[section],
+            &[],
+        )
+        .unwrap();
 
         let mut bad_key = encoded.clone();
-        bad_key[40] = 0xff;
+        bad_key[HEADER_BYTES] = 0xff;
         assert!(matches!(
             CorpusSnapshot::open(&bad_key),
             Err(CorpusWireError::InvalidBookKey { .. })
         ));
 
         let mut bad_code = encoded;
-        bad_code[FIRST_RECORD + 10] = 2;
+        bad_code[FIRST_RECORD + 10] = 3;
         assert!(matches!(
             CorpusSnapshot::open(&bad_code),
             Err(CorpusWireError::Record {
-                error: CodecError::UnknownRuleCode(2),
+                error: CodecError::UnknownRuleCode(3),
                 ..
             })
         ));

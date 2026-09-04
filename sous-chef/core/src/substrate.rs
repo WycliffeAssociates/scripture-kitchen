@@ -27,6 +27,7 @@ use rustc_hash::FxHashMap;
 
 use crate::BookIndex;
 use crate::hygiene::{HygieneFinding, NBSP, SUSPECT, ScalarSites};
+use crate::judge::JudgingConfig;
 use crate::pass::{ChapterInput, ChapterObs, ChapterPass, Findings, SchemaStamp};
 use crate::unicode::{
     Class,
@@ -58,6 +59,20 @@ impl ScalarKey {
     pub const fn is_digits(self) -> bool {
         self.0 == DIGITS_RAW
     }
+
+    /// The wire value: a code point, or `u32::MAX` for the pooled lane.
+    pub const fn raw(self) -> u32 {
+        self.0
+    }
+
+    /// `None` for a value that is neither a scalar nor the pooled key.
+    pub const fn from_raw(raw: u32) -> Option<Self> {
+        if raw == DIGITS_RAW || char::from_u32(raw).is_some() {
+            Some(Self(raw))
+        } else {
+            None
+        }
+    }
 }
 
 /// A neighbor's outer class — the G0 rung of the evidence ladder.
@@ -77,6 +92,36 @@ pub enum OuterClass {
 
 impl OuterClass {
     const COUNT: usize = 5;
+
+    pub const ALL: [Self; Self::COUNT] = [
+        Self::Letter,
+        Self::Space,
+        Self::Digit,
+        Self::Nonletter,
+        Self::Edge,
+    ];
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Letter => "Letter",
+            Self::Space => "Space",
+            Self::Digit => "Digit",
+            Self::Nonletter => "Nonletter",
+            Self::Edge => "Edge",
+        }
+    }
+
+    /// `None` for a discriminant past the table.
+    pub const fn from_raw(raw: u8) -> Option<Self> {
+        match raw {
+            0 => Some(Self::Letter),
+            1 => Some(Self::Space),
+            2 => Some(Self::Digit),
+            3 => Some(Self::Nonletter),
+            4 => Some(Self::Edge),
+            _ => None,
+        }
+    }
 
     /// The order matters: whitespace first, then the pooled digit lane, then
     /// anything a word is built from.
@@ -332,8 +377,7 @@ pub struct Substrate;
 impl ChapterPass for Substrate {
     type Observation = ChapterRow;
     type Aggregate = BookAggregate;
-    /// D2a-2 replaces this with the judging bands.
-    type Config = ();
+    type Config = JudgingConfig;
     const SCHEMA: SchemaStamp = SchemaStamp::new(2);
 
     fn map(&self, chapter: ChapterInput<'_>) -> ChapterRow {
@@ -344,16 +388,18 @@ impl ChapterPass for Substrate {
         fold_book(book, &mut Edge::default())
     }
 
-    /// Publishes the hygiene lane; the counts D1a folded wait for D2a-2.
+    /// Publishes the hygiene lane, then judges the corpus's counts into the
+    /// pattern table.
     ///
     /// A site run abutting a masked `\c` is two findings, one per chapter.
-    fn judge(&self, corpus: &[&BookAggregate], _config: &(), out: &mut Findings) {
+    fn judge(&self, corpus: &[&BookAggregate], config: &JudgingConfig, out: &mut Findings) {
         for (index, book) in corpus.iter().enumerate() {
             out.open_book(BookIndex::new(index).expect("a corpus indexes every book"));
             for finding in &book.hygiene {
                 finding.push_into(out);
             }
         }
+        crate::judge::judge_corpus(corpus, config, out);
     }
 }
 

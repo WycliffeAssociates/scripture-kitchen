@@ -432,7 +432,7 @@ impl<P: ChapterPass + Sync> Expediter<P> {
 
         // Scoped so the borrowed observations are released before the sweep.
         let mut folds = 0;
-        let projected = {
+        let (projected, patterns) = {
             let Self {
                 pantry,
                 pass,
@@ -472,7 +472,7 @@ impl<P: ChapterPass + Sync> Expediter<P> {
             let mut findings = Findings::new(projected_lens);
             pass.judge(&corpus, config, &mut findings);
             findings.finish();
-            findings.into_rows()
+            findings.into_parts()
         };
         self.folds = folds;
         self.sweep();
@@ -510,7 +510,7 @@ impl<P: ChapterPass + Sync> Expediter<P> {
             })
             .collect();
         let snapshot = snapshot_id::<P>(&self.pantry, &books);
-        encode_to_corpus_buffer(snapshot, CoordinateSpace::Utf16, &sections)
+        encode_to_corpus_buffer(snapshot, CoordinateSpace::Utf16, &sections, &patterns)
             .map_err(PublishError::Wire)
     }
 }
@@ -538,7 +538,7 @@ fn snapshot_id<P: ChapterPass>(pantry: &Pantry, books: &[(BookId, BookKey)]) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sous_core::{BookIndex, Brigade, CorpusSnapshot, FindingKind};
+    use sous_core::{BookIndex, Brigade, CorpusSnapshot, FindingKind, JudgingConfig};
 
     use crate::pantry::Retain;
 
@@ -917,9 +917,7 @@ mod tests {
         assert_eq!(sous.last_folded(), 1, "GEN judged its cached aggregate");
     }
 
-    /// A config change is a re-judge and never a re-fold or a re-map. With
-    /// `Brigade`'s `Config = ()` this is trivially true today; it is the hook
-    /// D2a-2's judging bands land on.
+    /// A config change is a re-judge and never a re-fold or a re-map.
     #[test]
     fn setting_the_config_folds_nothing_and_maps_nothing() {
         let mut sous = sous();
@@ -932,6 +930,33 @@ mod tests {
         assert_eq!(sous.last_folded(), 0);
         assert_eq!(sous.last_mapped(), 0);
         assert_eq!(first, second, "the same config judges the same bytes");
+    }
+
+    /// The same aggregates, a different config, a different pattern table:
+    /// judging is the only step a config reaches.
+    #[test]
+    fn changing_the_config_re_judges_from_cached_aggregates() {
+        let mut sous = sous();
+        sous.update("b/mrk.usfm", Role::Target, &mark()).unwrap();
+        sous.update("a/gen.usfm", Role::Target, &genesis()).unwrap();
+        let before = CorpusSnapshot::open(&sous.publish().unwrap())
+            .unwrap()
+            .pattern_count();
+
+        sous.set_config((
+            (),
+            JudgingConfig {
+                rarity_floor: 10_000,
+                ..JudgingConfig::default()
+            },
+        ));
+        let buffer = sous.publish().unwrap();
+        assert_eq!(sous.last_mapped(), 0);
+        assert_eq!(sous.last_folded(), 0);
+        assert_ne!(
+            CorpusSnapshot::open(&buffer).unwrap().pattern_count(),
+            before
+        );
     }
 
     #[test]
