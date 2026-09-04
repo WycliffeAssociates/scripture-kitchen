@@ -24,6 +24,9 @@
 //! subtrees — ONE mechanism, not a per-case normalizer. The AUTO note-caller
 //! number is the one piece of output text no token supplied, so it also carries
 //! `note-caller-generated`: generated is distinguishable from relocated.
+//!
+//! Instrument: SHAPES + VOLUME — `testData/usfmtc` and the whole test tier,
+//! `testData/exampleCorpora`. Absent bytes are a loud failure, never a silent skip.
 
 #![cfg(all(feature = "html", feature = "usj"))]
 
@@ -44,13 +47,22 @@ const VOID: &[&str] = &["br", "img"];
 #[test]
 fn html_renders_and_keeps_every_character_of_text() {
     let mut cases: Vec<PathBuf> = Vec::new();
-    collect_test_data(Path::new("../testData/usfmtc"), &mut cases);
-    collect_corpora(Path::new("../testData/exampleCorpora"), &mut cases);
+    collect_test_data(
+        Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../testData/usfmtc")),
+        &mut cases,
+    );
+    collect_corpora(
+        Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../testData/exampleCorpora"
+        )),
+        &mut cases,
+    );
     cases.sort();
-    if cases.is_empty() {
-        eprintln!("html corpus SKIPPED: no testData/usfmtc/ and no testData/exampleCorpora/");
-        return;
-    }
+    assert!(
+        !cases.is_empty(),
+        "no testData/usfmtc/ and no testData/exampleCorpora/"
+    );
 
     let results: Vec<Result<(), String>> = cases.par_iter().map(|case| check(case)).collect();
     let failures: Vec<&String> = results.iter().filter_map(|r| r.as_ref().err()).collect();

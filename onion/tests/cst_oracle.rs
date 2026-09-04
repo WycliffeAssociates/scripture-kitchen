@@ -1,7 +1,8 @@
 //! The lifted CST partition oracle: every token is in exactly one child list,
 //! and the shared in-order iterator recovers the scanner's token sequence.
 //!
-//! The corpus is committed under testData/; this guard is a defensive fallback.
+//! Instrument: VOLUME — the whole test tier, `testData/exampleCorpora` (12.8 MB,
+//! 160 books). Absent bytes are a loud failure, never a silent skip.
 
 use std::path::{Path, PathBuf};
 
@@ -25,11 +26,17 @@ fn collect_usfm_paths(root: &Path, paths: &mut Vec<PathBuf>) {
 #[test]
 fn every_corpus_book_partitions_into_cst_children() {
     let mut paths = Vec::new();
-    collect_usfm_paths(Path::new("../testData/exampleCorpora"), &mut paths);
-    if paths.is_empty() {
-        eprintln!("cst oracle SKIPPED: no *.usfm under testData/exampleCorpora/");
-        return;
-    }
+    collect_usfm_paths(
+        Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../testData/exampleCorpora"
+        )),
+        &mut paths,
+    );
+    assert!(
+        !paths.is_empty(),
+        "no *.usfm under testData/exampleCorpora/"
+    );
     paths.sort();
 
     paths.par_iter().for_each(|path| {
@@ -78,11 +85,17 @@ fn every_corpus_book_partitions_into_cst_children() {
 #[test]
 fn node_ids_ascend_with_their_opening_markers() {
     let mut paths = Vec::new();
-    collect_usfm_paths(Path::new("../testData/exampleCorpora"), &mut paths);
-    if paths.is_empty() {
-        eprintln!("cst ordering oracle SKIPPED: no *.usfm under testData/exampleCorpora/");
-        return;
-    }
+    collect_usfm_paths(
+        Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../testData/exampleCorpora"
+        )),
+        &mut paths,
+    );
+    assert!(
+        !paths.is_empty(),
+        "no *.usfm under testData/exampleCorpora/"
+    );
     paths.sort();
 
     paths.par_iter().for_each(|path| {

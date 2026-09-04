@@ -2,8 +2,10 @@
 //! equal onion's fresh `lex → build → lint` on every text it is handed —
 //! cold, warm, edited, re-chunked, fused, evicted, undone.
 //!
-//! The corpus-scale half is `#[ignore]`d (pass-end gate); everything else is
-//! synthetic and fast.
+//! The corpus-scale half sweeps the tier; everything else is synthetic.
+//!
+//! Instrument: VOLUME — the whole test tier, `testData/exampleCorpora` (12.8 MB,
+//! 160 books). Absent bytes are a loud failure, never a silent skip.
 
 use onion::wire::ParseOptions;
 use usfm_galley::{Warmer, onion};
@@ -131,66 +133,9 @@ fn empty_and_single_chunk_books() {
     }
 }
 
-/// The recorded measurement (the ladder promotes on numbers, not vibes).
-/// Run with:
-///     cargo test -p usfm_galley --release --test fold -- --ignored --nocapture
-#[test]
-#[ignore = "corpus-scale measurement; run --release --ignored at pass end"]
-fn bench_fold_en_ult() {
-    let median_ms = |runs: usize, mut work: Box<dyn FnMut()>| -> f64 {
-        let mut times: Vec<f64> = (0..runs)
-            .map(|_| {
-                let start = std::time::Instant::now();
-                work();
-                start.elapsed().as_secs_f64() * 1e3
-            })
-            .collect();
-        times.sort_by(|a, b| a.total_cmp(b));
-        times[runs / 2]
-    };
-    for book in ["19-PSA.usfm", "01-GEN.usfm"] {
-        let path = format!(
-            "{}/../testData/exampleCorpora/en_ult/{book}",
-            env!("CARGO_MANIFEST_DIR")
-        );
-        let Ok(text) = std::fs::read_to_string(&path) else {
-            eprintln!("fold bench SKIPPED: {path} not mounted");
-            return;
-        };
-        let mid = text.len() / 2;
-        let at = mid + text[mid..].find(' ').expect("a space mid-book");
-        let mut edited = text.clone();
-        edited.insert(at, 'x');
-
-        let fresh_ms = median_ms(9, {
-            let edited = edited.clone();
-            Box::new(move || {
-                std::hint::black_box(fresh(&edited));
-            })
-        });
-        // Warm the cache on the ORIGINAL text; each measured run then pays
-        // the true one-edited-chunk price (the edited chunk's entry is fresh
-        // the first time and a hit after, so evict nothing — measure both).
-        let mut cache = Warmer::new(32 << 20);
-        cache.lint(&text);
-        cache.lint(&edited);
-        let folded_warm_ms = median_ms(9, {
-            let edited = edited.clone();
-            Box::new(move || {
-                std::hint::black_box(cache.lint(&edited));
-            })
-        });
-        println!(
-            "{book}: {} bytes\n  fresh lex+cst+lint      {fresh_ms:.2}ms\n  folded (all-hit call)   {folded_warm_ms:.2}ms",
-            text.len(),
-        );
-    }
-}
-
 /// The corpus-scale law, cache-warm and cache-cold, plus a one-chapter edit
-/// per book. `#[ignore]`: minutes-class, part of the pass-end gate.
+/// per book.
 #[test]
-#[ignore = "corpus-scale fold pipeline oracle; run --include-ignored at pass end"]
 fn fold_cache_equals_fresh_over_the_corpus() {
     let root = format!("{}/../testData/exampleCorpora", env!("CARGO_MANIFEST_DIR"));
     let mut paths = Vec::new();
@@ -208,10 +153,10 @@ fn fold_cache_equals_fresh_over_the_corpus() {
             }
         }
     }
-    if paths.is_empty() {
-        eprintln!("fold cache corpus SKIPPED: no *.usfm under testData/exampleCorpora/");
-        return;
-    }
+    assert!(
+        !paths.is_empty(),
+        "no *.usfm under testData/exampleCorpora/"
+    );
     paths.sort();
     for path in &paths {
         let text = std::fs::read_to_string(path).expect("readable book");
@@ -314,7 +259,6 @@ fn the_masked_fold_agrees_with_a_fresh_mask() {
 /// The corpus law: over every book, folded `analyze` and the verse_text mask
 /// equal the fresh pipeline — cold, then warm, then after a one-chapter edit.
 #[test]
-#[ignore = "corpus-scale oracle; run --release --ignored at pass end"]
 fn the_analyze_fold_holds_over_the_corpus() {
     let all = ParseOptions {
         diagnostics: true,

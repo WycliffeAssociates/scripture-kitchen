@@ -10,6 +10,9 @@
 //!
 //! Chapters come from `corpora/*.txt` (vref: `BOOK C:V<TAB>text`), grouped by
 //! book and chapter as `tests/substrate_reference.rs` groups them.
+//!
+//! Instrument: the sous 8-corpus tier, `corpora/*.txt` (35 MB).
+//! Absent bytes are a loud failure, never a silent skip.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -305,7 +308,7 @@ fn chapters_of(path: &Path) -> Vec<String> {
 }
 
 #[test]
-#[ignore = "exhaustive oracle: every chapter of the 8-corpus tier scanned twice; run --include-ignored at pass end"]
+#[ignore = "only proof that the hygiene lane equals the reference scan on every chapter of the 8-corpus tier"]
 fn the_lane_equals_the_reference_over_the_whole_tier() {
     let dir = corpora_dir();
     for name in CORPORA {

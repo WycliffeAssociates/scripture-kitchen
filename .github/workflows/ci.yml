@@ -54,7 +54,7 @@ jobs:
   # wire/generated.rs, diagnostics.json or reader.ts.
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup
@@ -178,11 +178,12 @@ jobs:
             onion-wasm/pkg-web
             onion-wasm/pkg-bundler
 
-  # The pass-end gate from CLAUDE.md: the exhaustive oracles, `#[ignore]`d
-  # because they are minutes-class in DEBUG. In release the whole suite is ~85s
-  # — cheaper than the debug run it supersedes — so it runs on every event,
-  # pull requests included. `test` is still its own job and not redundant: it
-  # carries the debug_assert!s that a release build compiles out.
+  # The seven `#[ignore]`d oracles, each naming a claim nothing else makes:
+  # galley's four whole-Bible publication laws, mise's UTF-16 boundary sweep of
+  # the sous tier, and sous-core's two 8-corpus reference walks. Release keeps
+  # them out of the local gate's budget; the whole suite here is ~11s warm, so
+  # it runs on every event, pull requests included. `test` is still its own job
+  # and not redundant: it carries the debug_assert!s release compiles out.
   oracles:
     runs-on: ubuntu-latest
     timeout-minutes: 30

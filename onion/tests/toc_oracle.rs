@@ -11,8 +11,8 @@
 //! - **Counts reconcile with the token stream**, so a row can neither be
 //!   invented nor dropped.
 //!
-//! Runs over every `*.usfm` under `testData/exampleCorpora/` (committed under testData/exampleCorpora/ — the test
-//! skips loudly when the corpora aren't on disk).
+//! Instrument: VOLUME — the whole test tier, `testData/exampleCorpora` (12.8 MB,
+//! 160 books). Absent bytes are a loud failure, never a silent skip.
 
 use std::path::{Path, PathBuf};
 
@@ -37,7 +37,13 @@ fn collect_usfm_paths(root: &Path, paths: &mut Vec<PathBuf>) {
 
 fn corpus() -> Vec<PathBuf> {
     let mut paths = Vec::new();
-    collect_usfm_paths(Path::new("../testData/exampleCorpora"), &mut paths);
+    collect_usfm_paths(
+        Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../testData/exampleCorpora"
+        )),
+        &mut paths,
+    );
     paths.sort();
     paths
 }
@@ -72,10 +78,10 @@ struct Tally {
 #[test]
 fn every_corpus_book_indexes_its_own_stream() {
     let paths = corpus();
-    if paths.is_empty() {
-        eprintln!("toc oracle SKIPPED: no *.usfm under testData/exampleCorpora/");
-        return;
-    }
+    assert!(
+        !paths.is_empty(),
+        "no *.usfm under testData/exampleCorpora/"
+    );
 
     let tallies: Vec<Tally> = paths
         .par_iter()
@@ -236,10 +242,10 @@ fn every_corpus_book_indexes_its_own_stream() {
 
     assert_eq!(
         paths.len(),
-        226,
+        160,
         "corpus size changed — re-read the numbers"
     );
-    // RECONCILED with tests/lint_corpus.rs over the same 226 books: lint pins
+    // RECONCILED with tests/lint_corpus.rs over the same 160 books: lint pins
     // `designator-malformed` at 2 (bdf_reg ACT `\v +`, en_ulb ZEC `\v 7"`) and
     // `chapter-without-designator` at 0. Those are exactly the rows the Toc
     // degrades to number 0 — two verses, no chapters. If either side moves

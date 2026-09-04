@@ -25,6 +25,9 @@
 //! namespaces, no DTD, no comments, no CDATA and only the five predefined
 //! entities, so roxmltree would buy generality nothing here needs — and `src/`
 //! is a WRITER only, so there is no parser to reuse.
+//!
+//! Instrument: SHAPES — `testData/usfmtc`, the committee's weird-shape encoder.
+//! Absent bytes are a loud failure, never a silent skip.
 
 #![cfg(feature = "usx")]
 
@@ -106,11 +109,8 @@ const EXCLUDED: &[(&str, &str)] = &[
 
 #[test]
 fn usx_matches_every_validated_pass_fixture() {
-    let root = Path::new("../testData/usfmtc");
-    if !root.is_dir() {
-        eprintln!("usx corpus SKIPPED: no testData/usfmtc/");
-        return;
-    }
+    let root = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../testData/usfmtc"));
+    assert!(root.is_dir(), "no testData/usfmtc/");
 
     let mut cases = Vec::new();
     collect(root, &mut cases);

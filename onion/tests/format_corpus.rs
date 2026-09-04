@@ -1,4 +1,4 @@
-//! What `format` does to 226 real books — the invariants, at corpus scale.
+//! What `format` does to 160 real books — the invariants, at corpus scale.
 //!
 //! Seven claims, all of them checked per book on the default bundle:
 //! determinism, one valid transaction, a partition that still holds,
@@ -6,7 +6,8 @@
 //! sanctity of verse text, and — with `remove_markers: ["s5"]` — that a
 //! wholesale removal takes exactly what it was asked for and nothing else.
 //!
-//! The corpus is committed under testData/; this guard is a defensive fallback.
+//! Instrument: VOLUME — the whole test tier, `testData/exampleCorpora` (12.8 MB,
+//! 160 books). Absent bytes are a loud failure, never a silent skip.
 
 use std::path::{Path, PathBuf};
 
@@ -31,15 +32,21 @@ fn collect_usfm_paths(root: &Path, paths: &mut Vec<PathBuf>) {
     }
 }
 
-fn corpus() -> Option<Vec<PathBuf>> {
+fn corpus() -> Vec<PathBuf> {
     let mut paths = Vec::new();
-    collect_usfm_paths(Path::new("../testData/exampleCorpora"), &mut paths);
-    if paths.is_empty() {
-        eprintln!("format corpus SKIPPED: no *.usfm under testData/exampleCorpora/");
-        return None;
-    }
+    collect_usfm_paths(
+        Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../testData/exampleCorpora"
+        )),
+        &mut paths,
+    );
+    assert!(
+        !paths.is_empty(),
+        "no *.usfm under testData/exampleCorpora/"
+    );
     paths.sort();
-    Some(paths)
+    paths
 }
 
 /// Per-code finding counts.
@@ -70,10 +77,10 @@ fn verse_words(source: &[u8]) -> String {
 
 #[test]
 fn the_default_bundle_holds_every_invariant_over_the_corpus() {
-    let Some(paths) = corpus() else { return };
+    let paths = corpus();
     assert_eq!(
         paths.len(),
-        226,
+        160,
         "corpus size changed — re-read the numbers"
     );
 
@@ -155,13 +162,13 @@ fn the_default_bundle_holds_every_invariant_over_the_corpus() {
         .collect();
 
     // The invariants are only evidence if the formatter actually did something,
-    // so the transaction size is pinned like every other corpus number: 108,979
-    // edits over 113 MB — en_ulb 48,934, en_ult 21,018, examples.bsb 31,087,
-    // bdf_reg 7,940. The corpora are already tidy, so what this mostly is: verse
+    // so the transaction size is pinned like every other corpus number: 88,648
+    // edits over 12.8 MB — en_ulb 48,934, examples.bsb 31,087, bdf_reg 7,940,
+    // en_ult-fixtures 687. The corpora are already tidy, so what this mostly is: verse
     // breaks joined into their paragraphs (the default axis), the blank line
     // above every `\s5`, and the `\p` a paragraph-less run owes.
     let total: u64 = edited.iter().sum();
-    assert_eq!(total, 108_979);
+    assert_eq!(total, 88_648);
     assert!(
         edited.iter().all(|count| *count > 0),
         "a book formatted to nothing"
@@ -173,7 +180,7 @@ fn the_default_bundle_holds_every_invariant_over_the_corpus() {
 /// and no `\s5` left anywhere.
 #[test]
 fn removing_s5_takes_the_chunk_markers_and_nothing_else() {
-    let Some(paths) = corpus() else { return };
+    let paths = corpus();
     let removed: u64 = paths
         .par_iter()
         .map(|path| {
@@ -213,8 +220,8 @@ fn removing_s5_takes_the_chunk_markers_and_nothing_else() {
 /// `format_edits`. Byte-equal, on real books.
 #[test]
 fn the_full_range_is_the_whole_book() {
-    let Some(paths) = corpus() else { return };
-    let books = ["19-PSA.usfm", "32-JON.usfm", "01-GEN.usfm", "40-MAT.usfm"];
+    let paths = corpus();
+    let books = ["19-PSA.usfm", "32-JON.usfm", "01-GEN.usfm", "42-MRK.usfm"];
     let mut seen = 0;
     for path in paths
         .iter()
@@ -249,7 +256,7 @@ fn the_full_range_is_the_whole_book() {
         }
         seen += 1;
     }
-    assert!(seen >= 4, "expected the named books to be mounted");
+    assert_eq!(seen, 6, "expected the named books to be mounted");
 }
 
 /// CHAPTER SCOPE, the ask's own use: over every chapter span of en_ulb JON, the
@@ -258,7 +265,7 @@ fn the_full_range_is_the_whole_book() {
 /// explicit and engine-side.
 #[test]
 fn a_chapter_span_is_the_whole_book_list_filtered() {
-    let Some(paths) = corpus() else { return };
+    let paths = corpus();
     let Some(path) = paths
         .iter()
         .find(|path| path.ends_with("en_ulb/32-JON.usfm"))

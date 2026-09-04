@@ -2,9 +2,11 @@
 //! narration on genuine data (a real doubled `\v 10`, two translations of one
 //! book).
 //!
-//! The exhaustive sweep (every en_ulb book against its en_ult twin, plus a
-//! mutation of each shape) is `#[ignore]`d as the pass-end gate; the fast slice
-//! above it runs in every `cargo test`.
+//! The exhaustive sweep is every book against its ULT twin where there is one,
+//! plus a deleted, a duplicated and a reordered verse of each.
+//!
+//! Instrument: VOLUME — the whole test tier, `testData/exampleCorpora` (12.8 MB,
+//! 160 books). Absent bytes are a loud failure, never a silent skip.
 
 use std::path::{Path, PathBuf};
 
@@ -136,9 +138,18 @@ fn reorder_two_verses(source: &str) -> String {
 
 // ---- the fast slice ------------------------------------------------------
 
-const MRK_ULB: &str = "../testData/exampleCorpora/en_ulb/42-MRK.usfm";
-const MRK_ULT: &str = "../testData/exampleCorpora/en_ult/42-MRK.usfm";
-const ROM_BDF: &str = "../testData/exampleCorpora/bdf_reg/46-ROM.usfm";
+const MRK_ULB: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../testData/exampleCorpora/en_ulb/42-MRK.usfm"
+);
+const MRK_ULT: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../testData/exampleCorpora/en_ult-fixtures/42-MRK.usfm"
+);
+const ROM_BDF: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../testData/exampleCorpora/bdf_reg/46-ROM.usfm"
+);
 
 #[test]
 fn two_translations_of_mark_round_trip() {
@@ -273,10 +284,15 @@ fn collect_usfm(dir: &Path, out: &mut Vec<PathBuf>) {
 }
 
 #[test]
-#[ignore = "exhaustive corpus gate (minutes); run with `cargo test -- --include-ignored`"]
 fn every_corpus_book_round_trips_against_its_twin_and_its_mutations() {
     let mut paths = Vec::new();
-    collect_usfm(Path::new("../testData/exampleCorpora"), &mut paths);
+    collect_usfm(
+        Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../testData/exampleCorpora"
+        )),
+        &mut paths,
+    );
     paths.sort();
     assert!(!paths.is_empty(), "expected corpus fixtures");
 
@@ -307,7 +323,7 @@ fn every_corpus_book_round_trips_against_its_twin_and_its_mutations() {
         if let Some(twin) = path
             .to_str()
             .filter(|p| p.contains("/en_ulb/"))
-            .map(|p| p.replace("/en_ulb/", "/en_ult/"))
+            .map(|p| p.replace("/en_ulb/", "/en_ult-fixtures/"))
             && let Ok(other) = std::fs::read_to_string(&twin)
         {
             check_pair(&format!("{label} vs {twin}"), &source, &other);

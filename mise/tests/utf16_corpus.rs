@@ -7,8 +7,8 @@
 //! and the table costs ≤ 25% of the raw bytes it replaces.
 //! ```
 //!
-//! Byte source: the committed test tier only. A missing file is a loud
-//! failure, never a silent skip.
+//! Instrument: the sous 8-corpus tier, `corpora/*.txt` (35 MB).
+//! Absent bytes are a loud failure, never a silent skip.
 
 use mise::utf16::{utf16_index, utf16_table};
 
@@ -32,7 +32,7 @@ fn corpus(name: &str) -> String {
 
 /// The table's whole reason to exist: the same answers with no source bytes.
 #[test]
-#[ignore = "exhaustive oracle: every character boundary of ~35 MB — 21 s debug, 0.6 s release"]
+#[ignore = "only proof that the UTF-16 table equals a char walk at EVERY boundary of the 8-corpus tier (35 MB)"]
 fn the_table_equals_the_index_at_every_boundary_of_the_tier() {
     for name in FILES {
         let text = corpus(name);

@@ -8,6 +8,9 @@
 //! Chapters come from `corpora/*.txt` (vref: `BOOK C:V<TAB>text`), grouped by
 //! book and chapter exactly as `examples/observation_size.rs` groups them, so
 //! the byte figures printed here compare with the ledger's sizing row.
+//!
+//! Instrument: the sous 8-corpus tier, `corpora/*.txt` (35 MB).
+//! Absent bytes are a loud failure, never a silent skip.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -387,7 +390,7 @@ fn percentile(sorted: &[usize], p: f64) -> usize {
 }
 
 #[test]
-#[ignore = "exhaustive oracle: every chapter of the 8-corpus tier walked twice; run --include-ignored at pass end"]
+#[ignore = "only proof that the scalar map equals the reference walk on every chapter of the 8-corpus tier"]
 fn map_equals_the_reference_over_the_whole_tier() {
     let dir = corpora_dir();
     let mut sizes = Vec::new();

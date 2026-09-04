@@ -15,6 +15,9 @@
 //! A failure prints its seed and step. Every draw descends from the seed the
 //! failing test names, so rerunning that test reproduces it exactly; narrow it
 //! by cutting that test's step count down to the printed step.
+//!
+//! Instrument: VOLUME — the whole test tier, `testData/exampleCorpora` (12.8 MB,
+//! 160 books). Absent bytes are a loud failure, never a silent skip.
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use sous_core::{
@@ -654,13 +657,13 @@ fn churn_over_a_synthetic_corpus_with_substrate() {
 }
 
 #[test]
-#[ignore = "corpus-scale oracle: 50 cold whole-Bible publications; run --include-ignored at pass end"]
+#[ignore = "only proof that 50 cold whole-Bible publications and their resident replay stay byte-equal under random churn"]
 fn churn_over_en_ulb() {
     churn(HygieneBytes, "en_ulb", 0x5EED_0002, 50, en_ulb());
 }
 
 #[test]
-#[ignore = "corpus-scale oracle: 50 cold whole-Bible publications; run --include-ignored at pass end"]
+#[ignore = "the churn oracle again from a second seed: the only guard against a seed-shaped hole"]
 fn churn_over_en_ulb_from_a_second_seed() {
     churn(
         HygieneBytes,
@@ -724,7 +727,7 @@ fn every_chapter_replaced_in_sequence_equals_cold() {
 }
 
 #[test]
-#[ignore = "corpus-scale oracle: one cold whole-Bible publication per chapter; run --include-ignored at pass end"]
+#[ignore = "only proof that replacing every chapter of a whole Bible in sequence equals one cold publication"]
 fn every_chapter_of_a_whole_bible_book_replaced_in_sequence_equals_cold() {
     let books = en_ulb();
     let edited = books
@@ -808,7 +811,7 @@ fn removing_a_book_lowers_resident_bytes() {
 /// serial cold oracle's bytes either way.
 #[cfg(feature = "parallel")]
 #[test]
-#[ignore = "corpus-scale oracle: a cold whole-Bible publication both ways; run --include-ignored at pass end"]
+#[ignore = "only proof that a parallel whole-Bible publish is byte-equal to the serial cold oracle"]
 fn parallel_publish_byte_equals_the_serial_cold_oracle_over_en_ulb() {
     let books = en_ulb();
     let mut sous = Expediter::new(HygieneBytes, BUDGET);

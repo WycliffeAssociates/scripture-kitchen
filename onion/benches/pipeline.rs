@@ -3,7 +3,7 @@
 //!     cargo bench -p usfm_onion                     # everything
 //!     cargo bench -p usfm_onion -- lint             # lint::full and lint::pass_only
 //!     cargo bench -p usfm_onion --features alloc-counts   # + alloc/dealloc columns
-//!     ONION_BENCH_CORPUS=../testData/exampleCorpora/en_ult cargo bench -p usfm_onion
+//!     ONION_BENCH_CORPUS=../testData/stressCorpora/en_ult cargo bench -p usfm_onion
 //!
 //!     lex                    fastest │ median │ mean   │ bytes/s
 //!     ├─ serial              3.1 ms  │ 3.2 ms │ 3.2 ms │ 1.4 GiB/s

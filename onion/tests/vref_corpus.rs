@@ -9,8 +9,8 @@
 //! - no line contains a newline or a tab, which would forge a line or a column;
 //! - the `<range>` lines are exactly the verses the bridges cover.
 //!
-//! Runs over every `*.usfm` under `testData/exampleCorpora/` (committed under testData/exampleCorpora/ — the test
-//! skips loudly when the corpora aren't on disk).
+//! Instrument: VOLUME — the whole test tier, `testData/exampleCorpora` (12.8 MB,
+//! 160 books). Absent bytes are a loud failure, never a silent skip.
 
 use std::path::{Path, PathBuf};
 
@@ -35,7 +35,13 @@ fn collect_usfm_paths(root: &Path, paths: &mut Vec<PathBuf>) {
 
 fn corpus() -> Vec<PathBuf> {
     let mut paths = Vec::new();
-    collect_usfm_paths(Path::new("../testData/exampleCorpora"), &mut paths);
+    collect_usfm_paths(
+        Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../testData/exampleCorpora"
+        )),
+        &mut paths,
+    );
     paths.sort();
     paths
 }
@@ -53,10 +59,10 @@ fn line_count(rendered: &str) -> usize {
 #[test]
 fn every_corpus_book_renders_two_files_that_line_up() {
     let paths = corpus();
-    if paths.is_empty() {
-        eprintln!("vref corpus SKIPPED: no *.usfm under testData/exampleCorpora/");
-        return;
-    }
+    assert!(
+        !paths.is_empty(),
+        "no *.usfm under testData/exampleCorpora/"
+    );
 
     let tallies: Vec<(u64, u64, u64)> = paths
         .par_iter()
@@ -139,6 +145,6 @@ fn every_corpus_book_renders_two_files_that_line_up() {
         sum(|t| t.2),
     );
     // RECONCILED with tests/toc_oracle.rs, which counts 3 bridges over the same
-    // 226 books: each spans two verses, so each owes exactly one `<range>` line.
+    // 160 books: each spans two verses, so each owes exactly one `<range>` line.
     assert_eq!(sum(|t| t.2), 3);
 }

@@ -1,0 +1,8 @@
+# Build policy for every checkout of this workspace. Machine-shaped settings —
+# cache paths, target placement, gc, linker selection — live in the platform
+# config per machine: a linker selector depends on what that box has installed.
+
+# Two builds of the same source must produce the same code: `codegen-units = 1`
+# is what keeps a bench from measuring CGU partitioning, and the checked-in
+# onion-wasm packages are byte-compared in CI. Incremental defeats both.
+incremental = false

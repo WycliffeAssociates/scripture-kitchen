@@ -1,10 +1,11 @@
-//! What the attribute interpreter reads in 226 real books — the pinned numbers.
+//! What the attribute interpreter reads in 160 real books — the pinned numbers.
 //!
 //! Every nonzero malformed count must be EXPLAINED at the byte, not tolerated:
 //! a `Malformed` on clean scripture is either real data or a bug in
 //! src/attributes.rs.
 //!
-//! The corpus is committed under testData/; this guard is a defensive fallback.
+//! Instrument: VOLUME — the whole test tier, `testData/exampleCorpora` (12.8 MB,
+//! 160 books). Absent bytes are a loud failure, never a silent skip.
 
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -71,13 +72,19 @@ impl Tally {
 /// One row per book: `(path, tally, the first malformed site as text)`.
 type BookReport = (PathBuf, Tally, Option<String>);
 
-fn sweep() -> Option<(Vec<BookReport>, f64)> {
+fn sweep() -> (Vec<BookReport>, f64) {
     let mut paths = Vec::new();
-    collect_usfm_paths(Path::new("../testData/exampleCorpora"), &mut paths);
-    if paths.is_empty() {
-        eprintln!("attr corpus SKIPPED: no *.usfm under testData/exampleCorpora/");
-        return None;
-    }
+    collect_usfm_paths(
+        Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../testData/exampleCorpora"
+        )),
+        &mut paths,
+    );
+    assert!(
+        !paths.is_empty(),
+        "no *.usfm under testData/exampleCorpora/"
+    );
     paths.sort();
 
     let started = Instant::now();
@@ -122,17 +129,15 @@ fn sweep() -> Option<(Vec<BookReport>, f64)> {
         })
         .collect();
     let elapsed = started.elapsed().as_secs_f64();
-    Some((books, elapsed))
+    (books, elapsed)
 }
 
 #[test]
 fn the_corpus_yields_exactly_the_known_attribute_reading() {
-    let Some((books, elapsed)) = sweep() else {
-        return;
-    };
+    let (books, elapsed) = sweep();
     assert_eq!(
         books.len(),
-        226,
+        160,
         "corpus size changed — re-read the numbers"
     );
 
@@ -146,32 +151,31 @@ fn the_corpus_yields_exactly_the_known_attribute_reading() {
             .fold(Tally::default(), |acc, (_, tally, _)| acc.fold(*tally))
     };
 
-    // en_ult is word-aligned: one `\w` list per word plus one `\zaln-s` list
-    // per aligned original-language word — 792_414 + 461_352.
-    assert_eq!(by_corpus("en_ult").lists, 1_253_766);
-    // The other three are unaligned, so every number below is en_ult's — the
-    // corpus is not an oracle for `\fig`, `\rb` or the bare default form
+    // The ULT Mark fixture is word-aligned: one `\w` list per word plus one
+    // `\zaln-s` list per aligned original-language word — 15_209 + 11_824.
+    assert_eq!(by_corpus("en_ult-fixtures").lists, 27_033);
+    // The other three are unaligned, so every number below is the fixture's —
+    // the corpus is not an oracle for `\fig`, `\rb` or the bare default form
     // (src/attributes.rs's unit tests are).
     assert_eq!(by_corpus("en_ulb").lists, 0);
     assert_eq!(by_corpus("bdf_reg").lists, 0);
     assert_eq!(by_corpus("examples.bsb").lists, 0);
-    assert_eq!(total.lists, 1_253_766);
+    assert_eq!(total.lists, 27_033);
 
     // Every list is the pair form, and the total reconciles EXACTLY against
     // `grep -oh 'x-[a-z]*=' | sort | uniq -c`:
-    //   * 2 * 1_253_766 — x-occurrence + x-occurrences, on both list kinds;
-    //   * 3 *   461_352 — x-strong, x-morph, x-content on every `\zaln-s`;
-    //   *       461_341 — x-lemma, on all but 11 of them.
-    assert_eq!(total.named, 4_352_929);
+    //   * 2 * 27_033 — x-occurrence + x-occurrences, on both list kinds;
+    //   * 4 * 11_824 — x-strong, x-morph, x-content, x-lemma on every `\zaln-s`.
+    assert_eq!(total.named, 101_362);
     assert_eq!(
         total.named,
-        2 * 1_253_766 + 3 * 461_352 + 461_341,
+        2 * 27_033 + 4 * 11_824,
         "the attribute total no longer reconciles against the grep"
     );
     assert_eq!(total.bare, 0);
     assert_eq!(total.empty, 0);
 
-    // ZERO malformed in 226 books — the number that says the grammar matches
+    // ZERO malformed in 160 books — the number that says the grammar matches
     // real data. If it moves, read the site the sweep prints before touching
     // the pin: either deformed authoring (explain it here) or a bug in
     // src/attributes.rs (fix that instead).
@@ -182,7 +186,7 @@ fn the_corpus_yields_exactly_the_known_attribute_reading() {
     assert_eq!(total.malformed_total(), 0, "malformed sites: {sites:?}");
     assert_eq!(total.malformed, [0; SHAPES]);
 
-    // Throughput, not a budget: ~0.09s wall for 1.25M lists / 4.35M attributes
+    // Throughput, not a budget: 27k lists / 101k attributes
     // on 8 rayon threads, lex included (~74ns per list, mostly the LEX's cost).
     // The bound is loose on purpose — it catches a hang, not a regression.
     eprintln!(

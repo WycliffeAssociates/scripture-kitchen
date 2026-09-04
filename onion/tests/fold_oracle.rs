@@ -7,9 +7,11 @@
 //!
 //! The fast half runs the adversarial straddles (a sidebar across `\c`, an
 //! unclosed `\f` across `\c`, runs ending at a seam, sequence anomalies
-//! ACROSS the seam, the version carry) on snippets; the `#[ignore]`d half is
-//! the same law over every corpus book. The corpus is committed under testData/, so that
-//! half skips loudly when `testData/exampleCorpora/` is not mounted.
+//! ACROSS the seam, the version carry) on snippets; the other half is the same
+//! law over every corpus book.
+//!
+//! Instrument: VOLUME — the whole test tier, `testData/exampleCorpora` (12.8 MB,
+//! 160 books). Absent bytes are a loud failure, never a silent skip.
 
 use std::path::{Path, PathBuf};
 
@@ -298,10 +300,8 @@ fn carried_facts_cross_the_seam() {
     }
 }
 
-/// The corpus-scale law. `#[ignore]`: minutes-class, part of the pass-end
-/// gate (`cargo test -- --include-ignored`), not the inner loop.
+/// The corpus-scale law: the same fold over every book of the tier.
 #[test]
-#[ignore = "corpus-scale oracle; run --include-ignored at pass end"]
 fn fold_oracle_over_every_corpus_book() {
     let mut paths: Vec<PathBuf> = Vec::new();
     fn collect(root: &Path, paths: &mut Vec<PathBuf>) {
@@ -317,11 +317,17 @@ fn fold_oracle_over_every_corpus_book() {
             }
         }
     }
-    collect(Path::new("../testData/exampleCorpora"), &mut paths);
-    if paths.is_empty() {
-        eprintln!("fold oracle SKIPPED: no *.usfm under testData/exampleCorpora/");
-        return;
-    }
+    collect(
+        Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../testData/exampleCorpora"
+        )),
+        &mut paths,
+    );
+    assert!(
+        !paths.is_empty(),
+        "no *.usfm under testData/exampleCorpora/"
+    );
     paths.sort();
     for path in &paths {
         let text = std::fs::read_to_string(path).expect("readable book");

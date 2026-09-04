@@ -12,7 +12,9 @@
 //! Files: every `*.usfm` under `testData/exampleCorpora/` (ASCII-dominant English) plus
 //! `testData/usfmtc/samples-from-wild/hindi-IRV1/` (dense Devanagari — 3 bytes per
 //! character, where byte and UTF-16 offsets drift on nearly every character).
-//! Both trees are committed under testData/; the test skips loudly when neither is mounted.
+//!
+//! Instrument: SHAPES + VOLUME — `testData/usfmtc` and the whole test tier,
+//! `testData/exampleCorpora`. Absent bytes are a loud failure, never a silent skip.
 
 use std::path::{Path, PathBuf};
 
@@ -35,9 +37,18 @@ fn collect_usfm_paths(root: &Path, paths: &mut Vec<PathBuf>) {
 
 fn corpus() -> Vec<PathBuf> {
     let mut paths = Vec::new();
-    collect_usfm_paths(Path::new("../testData/exampleCorpora"), &mut paths);
     collect_usfm_paths(
-        Path::new("../testData/usfmtc/samples-from-wild/hindi-IRV1"),
+        Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../testData/exampleCorpora"
+        )),
+        &mut paths,
+    );
+    collect_usfm_paths(
+        Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../testData/usfmtc/samples-from-wild/hindi-IRV1"
+        )),
         &mut paths,
     );
     paths.sort();
@@ -93,17 +104,20 @@ fn check_file(path: &Path) -> u64 {
 fn dense_script_and_the_largest_book_match_a_char_walk() {
     let mut paths = Vec::new();
     collect_usfm_paths(
-        Path::new("../testData/usfmtc/samples-from-wild/hindi-IRV1"),
+        Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../testData/usfmtc/samples-from-wild/hindi-IRV1"
+        )),
         &mut paths,
     );
-    let psalms = PathBuf::from("../testData/exampleCorpora/en_ulb/19-PSA.usfm");
+    let psalms = PathBuf::from(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../testData/exampleCorpora/en_ulb/19-PSA.usfm"
+    ));
     if psalms.exists() {
         paths.push(psalms);
     }
-    if paths.is_empty() {
-        eprintln!("utf16 oracle SKIPPED: no *.usfm mounted");
-        return;
-    }
+    assert!(!paths.is_empty(), "no *.usfm mounted");
     let boundaries: u64 = paths.par_iter().map(|path| check_file(path)).sum();
     println!(
         "utf16 fast slice: {} files, {boundaries} character boundaries",
@@ -115,15 +129,12 @@ fn dense_script_and_the_largest_book_match_a_char_walk() {
 /// Ignored by default so the inner loop stays fast; it is part of the
 /// pass-end gate: `cargo test -- --include-ignored`.
 #[test]
-#[ignore = "minutes-long exhaustive sweep; run at pass end via --include-ignored"]
 fn every_corpus_boundary_matches_a_char_walk() {
     let paths = corpus();
-    if paths.is_empty() {
-        eprintln!(
-            "utf16 oracle SKIPPED: no *.usfm under testData/exampleCorpora/ or testData/usfmtc/"
-        );
-        return;
-    }
+    assert!(
+        !paths.is_empty(),
+        "no *.usfm under testData/exampleCorpora/ or testData/usfmtc/"
+    );
     let boundaries: u64 = paths.par_iter().map(|path| check_file(path)).sum();
     println!(
         "utf16 oracle: {} files, {boundaries} character boundaries, both directions",

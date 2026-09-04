@@ -13,6 +13,9 @@
 //!
 //! `<validated>fail</validated>` cases stay out — that is where usfm-grammar's
 //! `unmatched` damage shapes live, and our answer to damage is lint.
+//!
+//! Instrument: SHAPES — `testData/usfmtc`, the committee's weird-shape encoder.
+//! Absent bytes are a loud failure, never a silent skip.
 
 #![cfg(feature = "usj")]
 
@@ -122,11 +125,8 @@ const EXCLUDED: &[(&str, &str)] = &[
 
 #[test]
 fn usj_matches_every_validated_pass_fixture() {
-    let root = Path::new("../testData/usfmtc");
-    if !root.is_dir() {
-        eprintln!("usj corpus SKIPPED: no testData/usfmtc/");
-        return;
-    }
+    let root = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../testData/usfmtc"));
+    assert!(root.is_dir(), "no testData/usfmtc/");
 
     let mut cases = Vec::new();
     collect(root, &mut cases);

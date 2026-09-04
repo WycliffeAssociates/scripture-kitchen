@@ -14,8 +14,8 @@
 //! - **A keep-everything filter is the identity**: one range covering the whole
 //!   file. The walk cannot silently lose a token shape it never met.
 //!
-//! Runs over every `*.usfm` under `testData/exampleCorpora/` (committed under testData/exampleCorpora/ — the test
-//! skips loudly when the corpora aren't on disk).
+//! Instrument: VOLUME — the whole test tier, `testData/exampleCorpora` (12.8 MB,
+//! 160 books). Absent bytes are a loud failure, never a silent skip.
 
 use std::path::{Path, PathBuf};
 
@@ -40,7 +40,13 @@ fn collect_usfm_paths(root: &Path, paths: &mut Vec<PathBuf>) {
 
 fn corpus() -> Vec<PathBuf> {
     let mut paths = Vec::new();
-    collect_usfm_paths(Path::new("../testData/exampleCorpora"), &mut paths);
+    collect_usfm_paths(
+        Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../testData/exampleCorpora"
+        )),
+        &mut paths,
+    );
     paths.sort();
     paths
 }
@@ -138,10 +144,10 @@ fn check(label: &str, source: &[u8], m: &Mask) -> u64 {
 #[test]
 fn every_corpus_book_masks_to_an_honest_offset_map() {
     let paths = corpus();
-    if paths.is_empty() {
-        eprintln!("mask oracle SKIPPED: no *.usfm under testData/exampleCorpora/");
-        return;
-    }
+    assert!(
+        !paths.is_empty(),
+        "no *.usfm under testData/exampleCorpora/"
+    );
 
     /// A named recipe constructor — factored out so the array's type is
     /// readable at the one place it is written.
@@ -193,10 +199,9 @@ fn every_corpus_book_masks_to_an_honest_offset_map() {
 #[test]
 fn the_recipes_actually_differ() {
     let paths = corpus();
-    let Some(path) = paths.first() else {
-        eprintln!("mask oracle SKIPPED: no *.usfm under testData/exampleCorpora/");
-        return;
-    };
+    let path = paths
+        .first()
+        .expect("no *.usfm under testData/exampleCorpora/");
     let source = std::fs::read(path).expect("readable book");
     let tokens = lex(std::str::from_utf8(&source).expect("UTF-8 corpus"));
     let cst = cst::build(&tokens);

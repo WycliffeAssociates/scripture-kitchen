@@ -987,26 +987,16 @@ mod tests {
     }
 
     /// The same equivalence over one REAL book — every shape the unit snippets
-    /// miss. Skips when the corpora are absent (defensive; they are committed).
+    /// miss. The ULT Mark fixture: word alignment, so `\w` lists nest inside
+    /// `\zaln` milestones at depth.
     #[test]
     fn streaming_matches_the_slice_build_on_a_corpus_book() {
-        let mut paths: Vec<std::path::PathBuf> =
-            match std::fs::read_dir("../testData/exampleCorpora/en_ult") {
-                Ok(dir) => dir
-                    .filter_map(|entry| entry.ok().map(|entry| entry.path()))
-                    .filter(|path| path.extension().is_some_and(|ext| ext == "usfm"))
-                    .collect(),
-                Err(_) => {
-                    eprintln!("streaming equivalence SKIPPED: no testData/exampleCorpora/en_ult");
-                    return;
-                }
-            };
-        paths.sort();
-        let Some(path) = paths.first() else {
-            eprintln!("streaming equivalence SKIPPED: no *.usfm in en_ult");
-            return;
-        };
-        feeds_the_same_tree(&std::fs::read_to_string(path).expect("readable book"));
+        const BOOK: &str = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../testData/exampleCorpora/en_ult-fixtures/42-MRK.usfm"
+        );
+        let source = std::fs::read_to_string(BOOK).unwrap_or_else(|e| panic!("{BOOK}: {e}"));
+        feeds_the_same_tree(&source);
     }
 
     #[test]

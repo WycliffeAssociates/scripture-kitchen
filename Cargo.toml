@@ -72,3 +72,13 @@ lto = "thin"
 [profile.profiling]
 inherits = "release"
 debug = "line-tables-only"
+
+# The test suite sweeps tens of MB of scripture; at opt-level 0 that is minutes
+# of wall per run. Level 1 keeps `debug_assertions` on (the reason the debug leg
+# exists) and costs little compile time. `test` inherits `dev`, but state it so
+# a future `dev` edit cannot silently drop it from test binaries.
+[profile.dev]
+opt-level = 1
+
+[profile.test]
+opt-level = 1

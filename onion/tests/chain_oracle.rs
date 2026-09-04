@@ -18,6 +18,9 @@
 //!
 //! The Hindi book is the point of the non-ASCII file: byte 15 and UTF-16 15 are
 //! different positions there, which is exactly the drift a wrong chain hides.
+//!
+//! Instrument: VOLUME — the whole test tier, `testData/exampleCorpora` (12.8 MB,
+//! 160 books). Absent bytes are a loud failure, never a silent skip.
 
 use std::path::Path;
 
@@ -29,9 +32,18 @@ const SAMPLES: usize = 1_000;
 
 /// The files: one dense non-ASCII book, two ASCII ones for volume.
 const FILES: [&str; 3] = [
-    "../testData/usfmtc/samples-from-wild/hindi-IRV1/origin.usfm",
-    "../testData/exampleCorpora/en_ulb/19-PSA.usfm",
-    "../testData/exampleCorpora/en_ulb/41-MAT.usfm",
+    concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../testData/usfmtc/samples-from-wild/hindi-IRV1/origin.usfm"
+    ),
+    concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../testData/exampleCorpora/en_ulb/19-PSA.usfm"
+    ),
+    concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../testData/exampleCorpora/en_ulb/41-MAT.usfm"
+    ),
 ];
 
 /// An LCG (Numerical Recipes' constants). A test that samples must sample the

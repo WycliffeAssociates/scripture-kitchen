@@ -116,8 +116,14 @@ mod diff {
             .iter()
             .map(|name| {
                 let (b, c) = match *name {
-                    "jon.ulb-vs-rom.bdf" => ("en_ulb/32-JON.usfm", "bdf_reg/46-ROM.usfm"),
-                    "mrk.ulb-vs-ult" => ("en_ulb/42-MRK.usfm", "en_ult/42-MRK.usfm"),
+                    "jon.ulb-vs-rom.bdf" => (
+                        "exampleCorpora/en_ulb/32-JON.usfm",
+                        "exampleCorpora/bdf_reg/46-ROM.usfm",
+                    ),
+                    "mrk.ulb-vs-ult" => (
+                        "exampleCorpora/en_ulb/42-MRK.usfm",
+                        "stressCorpora/en_ult/42-MRK.usfm",
+                    ),
                     other => panic!("unknown pair {other}"),
                 };
                 (
@@ -132,10 +138,7 @@ mod diff {
     });
 
     fn read(rel: &str) -> String {
-        let path = format!(
-            "{}/../testData/exampleCorpora/{rel}",
-            env!("CARGO_MANIFEST_DIR")
-        );
+        let path = format!("{}/../testData/{rel}", env!("CARGO_MANIFEST_DIR"));
         std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"))
     }
 

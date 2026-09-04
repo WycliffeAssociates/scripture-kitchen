@@ -1,11 +1,12 @@
-//! What lint finds in 226 real books — the pinned numbers.
+//! What lint finds in 160 real books — the pinned numbers.
 //!
 //! Every nonzero class below is EXPLAINED, not tolerated: a rule that fires on
 //! clean scripture is a bug, so a moving count is either real data or a
 //! regression. Regenerate with
 //! `cargo run --release --bin playground -- --lint-stats testData/exampleCorpora`.
 //!
-//! The corpus is committed under testData/; this guard is a defensive fallback.
+//! Instrument: VOLUME — the whole test tier, `testData/exampleCorpora` (12.8 MB,
+//! 160 books). Absent bytes are a loud failure, never a silent skip.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -32,58 +33,62 @@ fn collect_usfm_paths(root: &Path, paths: &mut Vec<PathBuf>) {
 /// One row per book: `(path, per-code counts, book code as text)`.
 type BookReport = (PathBuf, [u64; LINT_ROWS.len()], Option<String>);
 
-fn lint_corpus() -> Option<Vec<BookReport>> {
+fn lint_corpus() -> Vec<BookReport> {
     let mut paths = Vec::new();
-    collect_usfm_paths(Path::new("../testData/exampleCorpora"), &mut paths);
-    if paths.is_empty() {
-        eprintln!("lint corpus SKIPPED: no *.usfm under testData/exampleCorpora/");
-        return None;
-    }
+    collect_usfm_paths(
+        Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../testData/exampleCorpora"
+        )),
+        &mut paths,
+    );
+    assert!(
+        !paths.is_empty(),
+        "no *.usfm under testData/exampleCorpora/"
+    );
     paths.sort();
 
-    Some(
-        paths
-            .par_iter()
-            .map(|path| {
-                let source = std::fs::read_to_string(path).unwrap();
-                let tokens = lex(&source);
-                let cst = build(&tokens);
-                let report = lint(source.as_bytes(), &tokens, &cst);
+    paths
+        .par_iter()
+        .map(|path| {
+            let source = std::fs::read_to_string(path).unwrap();
+            let tokens = lex(&source);
+            let cst = build(&tokens);
+            let report = lint(source.as_bytes(), &tokens, &cst);
 
-                let mut counts = [0u64; LINT_ROWS.len()];
-                for obs in &report.observations {
-                    // THE ANCHOR INVARIANT: the other party always PRECEDES the
-                    // anchor. `second` is always an opener, an owner, the
-                    // previous in sequence or a first occurrence — all behind
-                    // the reported token — and consumers (the report's sort,
-                    // span highlighting) are built on that.
-                    assert!(
-                        obs.second == NO_TOKEN || obs.second < obs.anchor,
-                        "{}: {} put its second party at or after its anchor ({obs:?})",
-                        path.display(),
-                        obs.code.row().name,
-                    );
-                    counts[obs.code as usize] += 1;
-                }
-                let book = report.book.map(|idx| {
-                    let token = tokens[idx as usize];
-                    // The code alone: the span carries the folded delimiter.
-                    source[token.start as usize..token.end() as usize]
-                        .trim_end()
-                        .to_string()
-                });
-                (path.clone(), counts, book)
-            })
-            .collect(),
-    )
+            let mut counts = [0u64; LINT_ROWS.len()];
+            for obs in &report.observations {
+                // THE ANCHOR INVARIANT: the other party always PRECEDES the
+                // anchor. `second` is always an opener, an owner, the
+                // previous in sequence or a first occurrence — all behind
+                // the reported token — and consumers (the report's sort,
+                // span highlighting) are built on that.
+                assert!(
+                    obs.second == NO_TOKEN || obs.second < obs.anchor,
+                    "{}: {} put its second party at or after its anchor ({obs:?})",
+                    path.display(),
+                    obs.code.row().name,
+                );
+                counts[obs.code as usize] += 1;
+            }
+            let book = report.book.map(|idx| {
+                let token = tokens[idx as usize];
+                // The code alone: the span carries the folded delimiter.
+                source[token.start as usize..token.end() as usize]
+                    .trim_end()
+                    .to_string()
+            });
+            (path.clone(), counts, book)
+        })
+        .collect()
 }
 
 #[test]
 fn the_corpus_yields_exactly_the_known_findings() {
-    let Some(books) = lint_corpus() else { return };
+    let books = lint_corpus();
     assert_eq!(
         books.len(),
-        226,
+        160,
         "corpus size changed — re-read the numbers"
     );
 
@@ -101,7 +106,7 @@ fn the_corpus_yields_exactly_the_known_findings() {
 
     // examples.bsb 1SA 16:9 writes `\+xt 2 Samuel 13:3, \+xt 2 Samuel
     // 21:21\+xt* and \+xt* …` — one more `\+xt*` than there are opens. A real
-    // authoring slip in the BSB, and the only orphan closer in 226 books.
+    // authoring slip in the BSB, and the only orphan closer in 160 books.
     assert_eq!(total(Code::OrphanCloser), 1);
 
     // `\s5` — the unfoldingWord chunk marker, not a spec marker — in every
@@ -123,8 +128,8 @@ fn the_corpus_yields_exactly_the_known_findings() {
     // Verses with no paragraph above them, ONE per paragraph-less run. A run
     // ends wherever the repairing `\p` could not survive: at `\c`, and at the
     // pop-all recovery of a row-0 marker. Two real sources: en_ulb's `\s5` pops
-    // the open `\p` and the following verses land at root (5401), plus 33 places
-    // (31 en_ult, 2 bsb) where a chapter opens straight into `\v`. usfmtc
+    // the open `\p` and the following verses land at root (5401), plus 2 places
+    // in the BSB where a chapter opens straight into `\v`. usfmtc
     // repairs the latter by fabricating a `\p`; we flag it.
     //
     // The counter now asks whether the paragraph above is VERSE-BEARING
@@ -135,13 +140,13 @@ fn the_corpus_yields_exactly_the_known_findings() {
     // DISPLACED by the `\v`, so the verse was already at the root and already
     // counted. The corpus's 88 `\qa` are all Psalm 119 acrostic headings with a
     // `\q1` between the heading and the verse, and `\lit` appears nowhere.
-    assert_eq!(total(Code::MissingParagraph), 5_434);
+    assert_eq!(total(Code::MissingParagraph), 5_403);
     let outside_ulb: u64 = books
         .iter()
         .filter(|(path, _, _)| !path.to_string_lossy().contains("en_ulb"))
         .map(|(_, counts, _)| counts[Code::MissingParagraph as usize])
         .sum();
-    assert_eq!(outside_ulb, 33);
+    assert_eq!(outside_ulb, 2);
 
     let by_corpus = |code: Code, corpus: &str| -> u64 {
         books
@@ -207,17 +212,16 @@ fn the_corpus_yields_exactly_the_known_findings() {
     // ---- Token-walk rules ------------------------------------------------
 
     // One book mixing bare and numbered spellings of one family, said once per
-    // family per book. All 52 are the poetry ladder: en_ulb x44 mostly
-    // `\q1`/`\q2` with stray bare `\q`, bdf_reg x6 the mirror image, en_ult x2.
+    // family per book. All 50 are the poetry ladder: en_ulb x44 mostly
+    // `\q1`/`\q2` with stray bare `\q`, bdf_reg x6 the mirror image.
     // examples.bsb reads 0 because it uses the two spellings in DIFFERENT
     // books — which is what per-book aggregation is for.
-    assert_eq!(total(Code::NumberingMix), 52);
+    assert_eq!(total(Code::NumberingMix), 50);
     assert_eq!(by_corpus(Code::NumberingMix, "en_ulb"), 44);
     assert_eq!(by_corpus(Code::NumberingMix, "bdf_reg"), 6);
-    assert_eq!(by_corpus(Code::NumberingMix, "en_ult"), 2);
     assert_eq!(by_corpus(Code::NumberingMix, "examples.bsb"), 0);
 
-    // ONE marker in 113 MB is followed by something that is not structural
+    // ONE marker in 12.8 MB is followed by something that is not structural
     // whitespace: en_ulb REV writes `\m(for fine linen is the righteous
     // acts…)`. A genuine typo, and the only one — the evidence that this rule
     // is narrow enough.
@@ -225,17 +229,15 @@ fn the_corpus_yields_exactly_the_known_findings() {
 
     // Paragraphs with nothing in them, info-tier, all harmless authoring
     // artifacts: en_ulb x726 (the `\s5` chunk idiom writes `\m` then `\p` on
-    // the next line), en_ult x59 (`\p` then `\s1`, empty `\d` psalm titles),
-    // examples.bsb x2 (an empty `\d` and a `\q1` used as a spacer). `\b`, the
-    // paragraph empty BY DESIGN, is excluded by the rule and appears in all
-    // four corpora — so a zero here would be the bug.
-    assert_eq!(total(Code::EmptyParagraph), 787);
+    // the next line), examples.bsb x2 (an empty `\d` and a `\q1` used as a
+    // spacer). `\b`, the paragraph empty BY DESIGN, is excluded by the rule and
+    // appears in every corpus — so a zero here would be the bug.
+    assert_eq!(total(Code::EmptyParagraph), 728);
     assert_eq!(by_corpus(Code::EmptyParagraph, "en_ulb"), 726);
-    assert_eq!(by_corpus(Code::EmptyParagraph, "en_ult"), 59);
     assert_eq!(by_corpus(Code::EmptyParagraph, "examples.bsb"), 2);
     assert_eq!(by_corpus(Code::EmptyParagraph, "bdf_reg"), 0);
 
-    // Everything else is CLEAN across 226 books and must stay that way. What
+    // Everything else is CLEAN across 160 books and must stay that way. What
     // the zeros PROVE — several of these are the rules most likely to cry wolf:
     //
     //   * ids/chapters — every `\id` is one of the spec's 116 identifiers, in
@@ -261,7 +263,7 @@ fn the_corpus_yields_exactly_the_known_findings() {
     //     the milestone pairing this rule watches does not occur here yet.
     //   * deprecated-attribute / deprecated-marker — the four deprecated names
     //     (`\xt`'s `link-href`, `\jmp`'s `link-` trio) and the five deprecated
-    //     markers occur nowhere in 113 MB; the version GATE is not doing the
+    //     markers occur nowhere in 12.8 MB; the version GATE is not doing the
     //     silencing, since 67 books do declare `\usfm 3.0`.
     //   * marker-out-of-band — the loudest zero: 65 positional-mask rows,
     //     111,000-odd occurrences, 679 band transitions, and not one marker
@@ -317,7 +319,7 @@ fn the_corpus_yields_exactly_the_known_findings() {
 
 #[test]
 fn the_two_unclosed_notes_are_isa_and_mrk() {
-    let Some(books) = lint_corpus() else { return };
+    let books = lint_corpus();
 
     let mut sites: BTreeMap<String, u64> = BTreeMap::new();
     for (path, counts, book) in &books {
@@ -349,11 +351,17 @@ fn the_two_unclosed_notes_are_isa_and_mrk() {
 #[test]
 fn every_corpus_fix_passes_the_oracle() {
     let mut paths = Vec::new();
-    collect_usfm_paths(Path::new("../testData/exampleCorpora"), &mut paths);
-    if paths.is_empty() {
-        eprintln!("fix oracle SKIPPED: no *.usfm under testData/exampleCorpora/");
-        return;
-    }
+    collect_usfm_paths(
+        Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../testData/exampleCorpora"
+        )),
+        &mut paths,
+    );
+    assert!(
+        !paths.is_empty(),
+        "no *.usfm under testData/exampleCorpora/"
+    );
     paths.sort();
 
     // The oracle is only evidence if it actually ran, so the number of fixes
@@ -396,37 +404,36 @@ fn every_corpus_fix_passes_the_oracle() {
     let total = |code: Code| totals[code as usize];
 
     // The two truncated footnotes and the one orphan `\+xt*` — every structural
-    // finding in 226 books, each with a repair.
+    // finding in 160 books, each with a repair.
     assert_eq!(total(Code::UnclosedNote), 2);
     assert_eq!(total(Code::OrphanCloser), 1);
     // One `\p` per paragraph-less run, all 5434 of them.
-    assert_eq!(total(Code::MissingParagraph), 5_434);
+    assert_eq!(total(Code::MissingParagraph), 5_403);
     // The FORMATTER half of `empty-paragraph`: every one of the 787 empty
     // paragraphs is deleted, under ONE fix per RUN filed on the run's first
     // member — so the fix count is the number of RUNS. The 25 findings that are
     // not a first member are the fixless remainder the same transaction
-    // repairs, and every run in 226 books that has one is exactly two long:
+    // repairs, and every run in 160 books that has one is exactly two long:
     // 16 `\m\p` (the `\s5` chunk idiom re-opening twice), 5 `\p\p` in en_ulb
-    // ISA, 2 `\m\sp` in en_ult HAB, 1 `\p\m` in en_ulb ECC, and en_ult HOS's
-    // glued `\q2 \q2`.
-    assert_eq!(total(Code::EmptyParagraph), 762);
+    // ISA, and 1 `\p\m` in en_ulb ECC.
+    assert_eq!(total(Code::EmptyParagraph), 706);
     // The corpus's ONE duplicate verse offers no fix: bdf_reg ROM 3 writes
     // `\v 10` twice and then `\v 11`, so renumbering the duplicate to 11 would
     // only move the duplicate one verse along. `renumber` declines — which is
     // why this reads 0 where the finding count above reads 1.
     assert_eq!(total(Code::VerseDuplicate), 0);
     // The corpus's one `verse-without-designator` is `\v +`, which holds
-    // content: the empty-run deletion is offered nowhere in 226 books.
+    // content: the empty-run deletion is offered nowhere in 160 books.
     assert_eq!(total(Code::VerseWithoutDesignator), 0);
     // One per Pad token: delimiter whitespace past the byte the chrome keeps
     // (en_ulb's `\s5  ` and `\q  ` trailing pairs are most of them).
-    assert_eq!(total(Code::DelimiterSurplus), 875);
-    assert_eq!(totals.iter().sum::<u64>(), 7_074);
+    assert_eq!(total(Code::DelimiterSurplus), 39);
+    assert_eq!(totals.iter().sum::<u64>(), 6_151);
 }
 
 #[test]
 fn exactly_one_corpus_book_has_no_id_line() {
-    let Some(books) = lint_corpus() else { return };
+    let books = lint_corpus();
     // BSB Ecclesiastes. `LintReport::book == None` is the STATE; the
     // `missing-id` observation is raised beside it (counted above).
     let missing: Vec<&PathBuf> = books

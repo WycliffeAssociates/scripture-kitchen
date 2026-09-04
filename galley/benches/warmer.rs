@@ -46,10 +46,10 @@ fn main() {
 /// A size ladder across four decades: the biggest book in the corpus, the
 /// same book in a lighter translation, a gospel, and a one-chapter epistle.
 const BOOKS: &[&str] = &[
-    "en_ult/19-PSA.usfm",
-    "en_ulb/19-PSA.usfm",
-    "en_ulb/41-MAT.usfm",
-    "en_ulb/66-JUD.usfm",
+    "stressCorpora/en_ult/19-PSA.usfm",
+    "exampleCorpora/en_ulb/19-PSA.usfm",
+    "exampleCorpora/en_ulb/41-MAT.usfm",
+    "exampleCorpora/en_ulb/66-JUD.usfm",
 ];
 
 /// One keystroke per entry of `keystrokes`, each landing in the same chapter.
@@ -74,10 +74,7 @@ static CORPUS: LazyLock<Vec<(&'static str, Book)>> =
     LazyLock::new(|| BOOKS.iter().map(|name| (*name, load(name))).collect());
 
 fn load(name: &str) -> Book {
-    let path = format!(
-        "{}/../testData/exampleCorpora/{name}",
-        env!("CARGO_MANIFEST_DIR")
-    );
+    let path = format!("{}/../testData/{name}", env!("CARGO_MANIFEST_DIR"));
     let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
 
     // A middle chapter, never the self-scanned chunk 0 — chunk 0's carry-outs
