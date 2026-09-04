@@ -121,7 +121,9 @@ position matched — so ten thousand sites of one convention cost ten thousand
 | 22..24 | reserved `u16` 0 (the decoder refuses nonzero) |
 
 `pattern_count` is capped at `u16::MAX`, because a `PatternIndex` is a `u16`.
-What the channels mean, and the order the rows arrive in: `../judge.md`.
+What the channels mean, and the order the rows arrive in: `../judge.md`. Who
+emits the code-2 rows that name these, and why one maximal run is one of them:
+`../sites.md`.
 
 Directory position *is* `BookIndex`, so a consumer seeks by index, by key, or
 by the host's id and lazily decodes one book:

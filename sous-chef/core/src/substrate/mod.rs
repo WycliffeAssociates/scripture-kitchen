@@ -23,11 +23,12 @@
 //! them in one pass and a host may cache one under its chapter key. The
 //! layout table, the interning argument, and the seam argument: substrate.md.
 
-use crate::BookIndex;
 use crate::hygiene::HygieneFinding;
-use crate::judge::JudgingConfig;
+use crate::judge::{JudgingConfig, PatternIndex};
 use crate::pass::{ChapterInput, ChapterObs, ChapterPass, Findings, SchemaStamp};
+use crate::sites;
 use crate::unicode::Class;
+use crate::{BookIndex, ConventionDigest, FindingKind};
 
 pub(crate) mod fold;
 #[cfg(test)]
@@ -127,7 +128,10 @@ impl OuterClass {
 
     /// The order matters: whitespace first, then the pooled digit lane, then
     /// anything a word is built from.
-    const fn of(class: Class) -> Self {
+    ///
+    /// Glue answers `Letter` rather than its base's class, so a neighbour asks
+    /// its immediate neighbour and never walks back over a mark.
+    pub const fn of(class: Class) -> Self {
         if class.is_whitespace() {
             Self::Space
         } else if class.is_decimal_digit() {
@@ -138,6 +142,14 @@ impl OuterClass {
             Self::Nonletter
         }
     }
+}
+
+/// Not a letter, not glue, not whitespace: what the nonletter inventory
+/// counts and what a run is built from, digits included — they pool into one
+/// key, not out of the lane.
+#[inline]
+pub const fn is_nonletter(class: Class) -> bool {
+    !class.is_alphabetic() && !class.is_glue() && !class.is_whitespace()
 }
 
 /// One G0 pair triple: a nonletter and the outer class either side of it.
@@ -402,6 +414,48 @@ impl ChapterPass for Substrate {
             }
         }
         crate::judge::judge_corpus(corpus, config, out);
+    }
+
+    /// Rescans this book's text for every pattern its own counts hold, and
+    /// pushes one `Convention` row per matching run.
+    fn locate(
+        &self,
+        book: BookIndex,
+        text: &str,
+        chapters: &[crate::Chapter],
+        aggregate: &BookAggregate,
+        out: &mut Findings,
+    ) {
+        let mut set = Vec::new();
+        sites::firing(aggregate, out.patterns(), &mut set);
+        if set.is_empty() {
+            return;
+        }
+        // Copied because `Findings` cannot lend its table and take a row at
+        // once; a firing set is tens of rows, not thousands.
+        let table: Vec<(PatternIndex, crate::judge::Pattern)> = set
+            .iter()
+            .map(|&index| (index, out.patterns()[usize::from(index.get())]))
+            .collect();
+        let mut found = Vec::new();
+        sites::locate(text, chapters, &table, &mut found);
+        out.open_book(book);
+        for site in found {
+            out.push(
+                site.span,
+                FindingKind::Convention(ConventionDigest::new(site.headline, site.reasons)),
+            )
+            .expect("a located span lies inside the book it was found in");
+        }
+    }
+
+    fn firing(
+        &self,
+        aggregate: &BookAggregate,
+        patterns: &[crate::judge::Pattern],
+        out: &mut Vec<PatternIndex>,
+    ) {
+        sites::firing(aggregate, patterns, out);
     }
 }
 

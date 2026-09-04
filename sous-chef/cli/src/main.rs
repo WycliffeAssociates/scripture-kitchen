@@ -1,10 +1,13 @@
 //! The first walking consumer for Sous Chef.
 //!
 //! ```text
-//! sous --findings --publish out.sous book.usfm
+//! sous --findings --publish out.sous --report sites.html book.usfm
 //!   finding target[0] MRK 1:1-1:1 C0Control 11..14 run 3 raw [46..49]
 //!   finding target[0] MRK 1:1-1:1 StrandedBackslash 17..19 run 2 raw [52..54]
+//!   pattern[0] U+002C ',' placement next=Digit 12/9812 0.12% band 4 11 sites
+//!     site MRK 118..119
 //!   published 2 findings for 1 books (SOUS v1, UTF-16) to out.sous
+//!   wrote 1 patterns and 11 sites to sites.html
 //! ```
 //!
 //! Output is a debug view while the finding contract freezes. The CLI owns
@@ -13,6 +16,10 @@
 //!
 //! Finding offsets are projected UTF-8; `raw` is the retained source run set
 //! behind them. The published buffer carries raw-book UTF-16 instead.
+//!
+//! A site is listed under its HEADLINE pattern — the finest channel it matched
+//! — so a site count under a pattern row is not that row's numerator. The
+//! `--report` page shows each site's reasons beside it; `report.rs` renders it.
 
 use std::{
     fs,
@@ -21,10 +28,12 @@ use std::{
     time::{Duration, Instant},
 };
 
+mod report;
+
 use rayon::prelude::*;
 use sous_core::{
-    Alignment, Brigade, Corpus, PackedFinding, Pattern, PatternKey, ProjectedBook, ScalarKey,
-    SnapshotId, align, analyze,
+    Alignment, Brigade, Corpus, FindingKind, PackedFinding, Pattern, PatternKey, ProjectedBook,
+    ScalarKey, SnapshotId, align, analyze,
 };
 use usage::Cli;
 use usfm_galley::sous::{OnionBook, OnionInputBook, publish_onion_findings};
@@ -56,6 +65,10 @@ struct Args {
     /// Write the target's findings as a complete SOUS corpus buffer in raw-book UTF-16.
     #[usage(long)]
     publish: Option<PathBuf>,
+
+    /// Write a self-contained HTML page of every pattern and its sites in context.
+    #[usage(long)]
+    report: Option<PathBuf>,
 
     /// One .sfm/.usfm file or a directory of immediate .sfm/.usfm files.
     target: PathBuf,
@@ -110,11 +123,22 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             print_alignment(alignment);
         }
     }
-    if args.findings || args.publish.is_some() {
+    if args.findings || args.publish.is_some() || args.report.is_some() {
         let (findings, patterns) = brigade_findings(&target_corpus);
         if args.findings {
             print_findings(&target_corpus, &findings);
-            print_patterns(&patterns);
+            print_patterns(&target_corpus, &findings, &patterns);
+        }
+        if let Some(path) = &args.report {
+            let page = report::render(&target_corpus, &findings, &patterns);
+            fs::write(path, &page)
+                .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
+            eprintln!(
+                "wrote {} patterns and {} sites to {}",
+                patterns.len(),
+                site_count(&findings),
+                path.display()
+            );
         }
         if let Some(path) = &args.publish {
             let buffer = publish(&target.paths, target.sources, &findings, &patterns)?;
@@ -140,8 +164,32 @@ fn brigade_findings(corpus: &Corpus<'_, OnionBook>) -> (Vec<PackedFinding>, Vec<
     analyze(corpus, &Brigade::default()).into_parts()
 }
 
-/// One line per firing pattern, in emission order.
-fn print_patterns(patterns: &[Pattern]) {
+/// Convention rows across the whole publication.
+fn site_count(findings: &[PackedFinding]) -> usize {
+    findings
+        .iter()
+        .filter(|row| matches!(row.kind(), FindingKind::Convention(_)))
+        .count()
+}
+
+/// One line per firing pattern, in emission order, with its sites under it.
+fn print_patterns(
+    corpus: &Corpus<'_, OnionBook>,
+    findings: &[PackedFinding],
+    patterns: &[Pattern],
+) {
+    /// Sites printed per pattern before the tail line.
+    const SHOWN: usize = 20;
+
+    let mut sites: Vec<Vec<&PackedFinding>> = vec![Vec::new(); patterns.len()];
+    for finding in findings {
+        if let FindingKind::Convention(digest) = finding.kind() {
+            let at = usize::from(digest.pattern().get());
+            if let Some(rows) = sites.get_mut(at) {
+                rows.push(finding);
+            }
+        }
+    }
     for (index, pattern) in patterns.iter().enumerate() {
         let evidence = match pattern.key {
             PatternKey::Rarity => "rarity".to_string(),
@@ -162,12 +210,22 @@ fn print_patterns(patterns: &[Pattern]) {
             None => String::new(),
         };
         println!(
-            "pattern[{index}] {} {evidence} {}/{} {:.2}%{band}",
+            "pattern[{index}] {} {evidence} {}/{} {:.2}%{band} {} sites",
             glyph(pattern.glyph),
             pattern.numerator,
             pattern.denominator,
             f64::from(pattern.share_bp) / 100.0,
+            sites[index].len(),
         );
+        for finding in sites[index].iter().take(SHOWN) {
+            let book = corpus
+                .get(finding.book_idx())
+                .expect("a finding names a corpus book");
+            println!("  site {} {}..{}", book.key(), finding.from(), finding.to());
+        }
+        if sites[index].len() > SHOWN {
+            println!("  \u{2026} and {} more", sites[index].len() - SHOWN);
+        }
     }
 }
 
@@ -608,22 +666,28 @@ mod tests {
         let target = load_input(&path, false).unwrap();
         let corpus = Corpus::try_new(&target.books).unwrap();
         let (findings, patterns) = brigade_findings(&corpus);
-        assert_eq!(findings.len(), 1);
-        let FindingKind::Hygiene(digest) = findings[0].kind() else {
+        // The one-verse book rosters every glyph it holds, so the pair rides
+        // beside a handful of rarity sites.
+        let hygiene: Vec<_> = findings
+            .iter()
+            .filter(|row| matches!(row.kind(), FindingKind::Hygiene(_)))
+            .collect();
+        assert_eq!(hygiene.len(), 1);
+        let FindingKind::Hygiene(digest) = hygiene[0].kind() else {
             panic!("hygiene kind")
         };
         assert_eq!(digest.class(), HygieneClass::StrandedBackslash);
         assert_eq!(digest.run(), 2);
-        assert_eq!((findings[0].from(), findings[0].to()), (10, 12));
+        assert_eq!((hygiene[0].from(), hygiene[0].to()), (10, 12));
 
         let buffer = publish(&target.paths, target.sources, &findings, &patterns).unwrap();
         let snapshot = CorpusSnapshot::open(&buffer).unwrap();
         assert_eq!(snapshot.coordinate_space(), CoordinateSpace::Utf16);
-        let row = snapshot
-            .book(findings[0].book_idx())
-            .unwrap()
-            .at(0)
-            .unwrap();
+        let book = snapshot.book(hygiene[0].book_idx()).unwrap();
+        let row = (0..book.len())
+            .map(|at| book.at(at).unwrap())
+            .find(|row| matches!(row.kind(), FindingKind::Hygiene(_)))
+            .expect("the pair is a hygiene row");
         // Raw bytes 29..31; the onion at 24..28 is two UTF-16 units.
         assert_eq!((row.from(), row.to()), (27, 29));
     }

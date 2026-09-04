@@ -1,5 +1,10 @@
 //! What an incremental publication owes a cold one, proved step by seeded step.
 //!
+//! The comparison is the published BYTES, so it covers the site rows the
+//! Expediter replays out of its cache as much as the hygiene rows it judges
+//! fresh: a replayed convention row has to land on the same span AND resolve to
+//! the same pattern index this publication assigned that pattern's content.
+//!
 //! ```text
 //! thread 'churn_over_a_synthetic_corpus' panicked at galley/tests/equivalence.rs:
 //!   published bytes differ from cold: synthetic: seed=0x5eed0001 step=37

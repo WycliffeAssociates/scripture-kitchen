@@ -383,6 +383,9 @@ fn letters_are_rostered(scalars: &[(ScalarKey, u64)], config: &JudgingConfig) ->
 
 /// G0: the outer class either side of one glyph, each side its own marginal
 /// distribution over all of that glyph's occurrences.
+///
+/// `Edge` counts in the denominator and fires nothing: a book boundary is a
+/// fact about the file, and the glyph is judged by its other side.
 fn placement(
     glyph: ScalarKey,
     group: &[(PairKey, u64)],
@@ -400,6 +403,9 @@ fn placement(
     }
     for side in Side::ALL {
         for class in OuterClass::ALL {
+            if class == OuterClass::Edge {
+                continue;
+            }
             let count = sides[side as usize][class as usize];
             let share = share_bp(count, denominator);
             if count == 0 || share >= ceiling {

@@ -185,9 +185,10 @@ pub enum PublishError {
     },
     /// The Pantry refused the update behind this publication.
     Pantry(PantryError),
-    /// A target registered [`Retain::ProductsOnly`](crate::Retain) still needs
-    /// mapping, so the Expediter has no text to project. Reachable only past
-    /// [`Expediter::update_with`], which keys such a book while it has the text.
+    /// A registered book keeps no text, so the Expediter cannot project it to
+    /// map or locate. A `Target` is refused at
+    /// [`Expediter::update_with`](Expediter::update_with) rather than reaching
+    /// here; this is the refusal a text-less role answers with.
     NoText {
         id: BookId,
     },

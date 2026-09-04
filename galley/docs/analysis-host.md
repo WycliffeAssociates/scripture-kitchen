@@ -22,10 +22,11 @@ it keeps consistent (a file path in practice) with a role, `Target` or
 target, Galley retains the text as last updated and derives its products
 beside it — chunk products, TOC, mask, detached UTF-16 index, chapter
 observations. Unchanged books are never resent; analysis, publication, and
-find run against the retained copy. A host may opt a target out of text
-retention (`update_with(id, role, Retain::ProductsOnly, text)`); text-needing
-operations then return `Err(PantryError::NoText)` and the host supplies the
-text. Measured motivation: marshaling a 5 MB corpus into WASM costs 3.5–5 ms,
+find run against the retained copy. A target may NOT opt out of text retention: placing its findings rescans that
+text, so `update_with(id, Role::Target, Retain::ProductsOnly, text)` returns
+`Err(PantryError::TargetNeedsText)` rather than registering a book publication
+would fail on. `Retain::ProductsOnly` belongs to `Reference`, and
+`Err(PantryError::NoText)` is what a text-needing operation answers for one. Measured motivation: marshaling a 5 MB corpus into WASM costs 3.5–5 ms,
 a quarter of a frame, while 5 MB of retained text is cheap (evidence.md,
 2026-09-02). Book order in a publication is canonical by `BookKey` within a
 role, ties by id, so `BookIndex` does not depend on the order of updates, and
@@ -37,7 +38,8 @@ by anything but staleness, and staleness heals on the next update. The
 earlier rule — resend every string every call — remains a valid resync and is
 no longer required, because a 100 MB aligned corpus would otherwise be
 re-encoded on every keystroke. A host with such a corpus decides for itself
-whether to retain its text (edit and search it) or opt out.
+whether to retain its text (edit and search it) or opt out — a reference may;
+a target may not.
 
 Every returned location is numeric and relative to the exact string last
 supplied for that book, which is also the string Galley retains.

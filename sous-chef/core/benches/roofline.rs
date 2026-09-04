@@ -31,9 +31,14 @@ use divan::{
     Bencher,
     counter::{BytesCount, ItemsCount},
 };
+use sous_core::judge::{Pattern, PatternIndex};
+use sous_core::sites;
 use sous_core::substrate::{ChapterRow, Edge, Substrate, fold_book};
 use sous_core::unicode::lookup::{walk, walk_trie, walk_trie_swar};
-use sous_core::{BookKey, ChapterInput, ChapterKey, ChapterObs, ChapterPass};
+use sous_core::{
+    BookKey, Chapter, ChapterInput, ChapterKey, ChapterObs, ChapterPass, Corpus, JudgingConfig,
+    ProjectedBook, TextRange, Verse, VerseKey, analyze_with,
+};
 
 /// See the note in `onion/benches/pipeline.rs`: measured overhead is under
 /// the noise floor, so this is safe to leave on when the counts are wanted.
@@ -282,4 +287,183 @@ fn substrate_reduce(bencher: Bencher, name: &str) {
         }
         total
     });
+}
+
+// ── The site rescan (Stage 3, D2b) ──────────────────────────────────────
+//
+// `substrate_map` above is the ceiling this must stay under: the rescan reads
+// text only to PLACE what the counts already decided, so a full-corpus locate
+// that approached the walk would mean the second walk the roadmap forbids.
+// One `memmem::Finder` per distinct firing glyph, plus one classifier pass per
+// chapter when the pooled digit key fires.
+
+/// One book prepared for the rescan: its joined projected text, chapter rows,
+/// and its own firing set out of the corpus's judged table.
+type Prepared = Vec<(String, Vec<Chapter>, Vec<(PatternIndex, Pattern)>)>;
+
+/// A corpus's books as `sous-core` inputs; the bench owns the text.
+struct BenchBook {
+    key: BookKey,
+    text: String,
+    chapters: Vec<Chapter>,
+    verses: Vec<Verse>,
+}
+
+impl ProjectedBook for BenchBook {
+    fn key(&self) -> BookKey {
+        self.key
+    }
+
+    fn text(&self) -> &str {
+        &self.text
+    }
+
+    fn chapters(&self) -> impl Iterator<Item = Chapter> {
+        self.chapters.iter().copied()
+    }
+
+    fn verses(&self) -> impl Iterator<Item = Verse> {
+        self.verses.iter().copied()
+    }
+}
+
+fn bench_book(index: usize, texts: &[String]) -> BenchBook {
+    let mut text = String::new();
+    let mut chapters = Vec::new();
+    let mut verses = Vec::new();
+    for (at, chapter) in texts.iter().enumerate() {
+        let number = at as u16 + 1;
+        let from = text.len() as u32;
+        text.push_str(chapter);
+        let span = TextRange::new(from, text.len() as u32).expect("a chapter grows forward");
+        chapters.push(Chapter::new(number, span).expect("chapters number from one"));
+        verses.push(Verse::new(
+            VerseKey::new(number, 1, 1).expect("a well-formed key"),
+            span,
+        ));
+    }
+    BenchBook {
+        key: BookKey::new([
+            b'A' + (index / 26) as u8 % 26,
+            b'A' + index as u8 % 26,
+            b'A',
+        ]),
+        text,
+        chapters,
+        verses,
+    }
+}
+
+static SITES: LazyLock<Vec<(&'static str, Prepared)>> = LazyLock::new(|| {
+    CHAPTERS
+        .iter()
+        .map(|(name, books)| {
+            let inputs: Vec<BenchBook> = books
+                .iter()
+                .enumerate()
+                .map(|(index, texts)| bench_book(index, texts))
+                .collect();
+            let corpus = Corpus::try_new(&inputs).expect("a tier corpus is a valid input");
+            let judged = analyze_with(&corpus, &Substrate, &JudgingConfig::default());
+            let patterns = judged.patterns().to_vec();
+
+            let mut prepared: Prepared = Vec::new();
+            let (mut needles, mut hits, mut found) = (Vec::new(), Vec::new(), Vec::new());
+            for book in &inputs {
+                let counts = fold_book(
+                    &mapped(book)
+                        .iter()
+                        .map(|(start, obs)| ChapterObs { start: *start, obs })
+                        .collect::<Vec<_>>(),
+                    &mut Edge::default(),
+                );
+                let mut set = Vec::new();
+                sites::firing(&counts, &patterns, &mut set);
+                let table: Vec<(PatternIndex, Pattern)> = set
+                    .iter()
+                    .map(|&at| (at, patterns[usize::from(at.get())]))
+                    .collect();
+
+                let mut glyphs: Vec<_> = table.iter().map(|(_, row)| row.glyph).collect();
+                glyphs.sort_unstable();
+                glyphs.dedup();
+                needles.push(glyphs.len());
+                hits.push(
+                    glyphs
+                        .iter()
+                        .map(|glyph| {
+                            counts
+                                .scalars()
+                                .iter()
+                                .find(|(key, _)| key == glyph)
+                                .map_or(0u64, |(_, count)| u64::from(*count))
+                        })
+                        .sum::<u64>(),
+                );
+                let mut out = Vec::new();
+                sites::locate(&book.text, &book.chapters, &table, &mut out);
+                found.push(out.len());
+                prepared.push((book.text.clone(), book.chapters.clone(), table));
+            }
+            eprintln!(
+                "sites shape {name}: {} books, {} patterns; needles/book {}, hits/book {}, sites/book {}",
+                inputs.len(),
+                patterns.len(),
+                spread(&mut needles),
+                spread64(&mut hits),
+                spread(&mut found),
+            );
+            (*name, prepared)
+        })
+        .collect()
+});
+
+/// `median/p90/max`, the shape the evidence ledger records.
+fn spread(values: &mut [usize]) -> String {
+    values.sort_unstable();
+    let at = |q: f64| values[((values.len() as f64 * q) as usize).min(values.len() - 1)];
+    format!("{}/{}/{}", at(0.5), at(0.9), values[values.len() - 1])
+}
+
+fn spread64(values: &mut [u64]) -> String {
+    values.sort_unstable();
+    let at = |q: f64| values[((values.len() as f64 * q) as usize).min(values.len() - 1)];
+    format!("{}/{}/{}", at(0.5), at(0.9), values[values.len() - 1])
+}
+
+fn mapped(book: &BenchBook) -> Vec<(u32, ChapterRow)> {
+    let mut rows = Vec::new();
+    sous_core::for_each_chapter(book, |start, input| {
+        rows.push((start, Substrate.map(input)))
+    });
+    rows
+}
+
+fn prepared(name: &str) -> &'static Prepared {
+    &SITES
+        .iter()
+        .find(|(file, _)| *file == name)
+        .expect("bench arg names a listed corpus")
+        .1
+}
+
+/// One whole-corpus rescan: every book's firing set located in its own text.
+/// Counted per book, since what a keystroke pays is one book's locate.
+#[divan::bench(args = FILES)]
+fn sites_locate(bencher: Bencher, name: &str) {
+    let books = prepared(name);
+    let bytes: usize = books.iter().map(|(text, _, _)| text.len()).sum();
+    bencher
+        .counter(BytesCount::new(bytes))
+        .counter(ItemsCount::new(books.len()))
+        .bench(|| {
+            let mut out = Vec::new();
+            let mut total = 0;
+            for (text, chapters, table) in books {
+                out.clear();
+                sites::locate(text, chapters, table, &mut out);
+                total += out.len();
+            }
+            total
+        });
 }

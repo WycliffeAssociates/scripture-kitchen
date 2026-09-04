@@ -21,7 +21,8 @@ amend the charter deliberately.
 - Separate reasons remain separate. One strong signal may speak by itself;
   unrelated signals are not blended into an opaque confidence number.
 - Findings are patterns first and sites second: one review row may expand to
-  all matching spans. A maximal bad run produces one finding.
+  all matching spans. A maximal bad run produces one finding, carrying every
+  way it is anomalous rather than only the strongest.
 - The engine is useful on a new language from the first corpus. It ships no
   trained language artifact and does not silently normalize itself to each
   project as the project changes.
@@ -79,8 +80,8 @@ current as its last update. There is no splice API, so coordinates cannot
 shift inside a book; a book the caller forgot to resend is stale as a whole
 and heals on its next update. Retention follows role: a target keeps its text
 and everything publication needs; a reference keeps only TOC and per-verse
-observations. A host may opt a target out of text retention and then supplies
-text itself when asked. Galley may execute
+observations. A target may not opt out of text retention, because placing its
+findings rescans that text; the opt-out belongs to a reference. Galley may execute
 independent maps in parallel, but it may not change reduction order or rule
 semantics.
 
@@ -153,7 +154,10 @@ semantics.
   and `sites_many(queries)` operations. The public query describes the
   pattern, not the search algorithm: exact literals may use `memchr`/`memmem`,
   many literals may use Aho-Corasick when justified, and semantic
-  topology/run/digit patterns rescan through the classifier.
+  topology/run/digit patterns rescan through the classifier. A host caches a
+  book's sites under its raw checksum AND the content of its own firing set,
+  so a publication that renumbered the pattern table because some other book's
+  counts moved rescans nothing.
 - Identical content may share stored observations, but reduction counts every
   positional occurrence.
 - Deletion, insertion, edit, source replacement, and config-only re-judgment

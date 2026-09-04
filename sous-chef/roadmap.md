@@ -151,7 +151,8 @@ Shapes and layouts live in the module README each row names.
 | nonletter substrate | `donor/` probes are measured donors only | port consumer-led classifier bits in Stage 3 |
 | finding transport | `sous-core::codec` and `sous-core::corpus`, rebased and published by `galley::sous`. See [core/src/codec/README.md](core/src/codec/README.md) | Galley's canonical snapshot identity and checksum-keyed detached reuse (Stage 2) |
 | unicode classification | `sous-core::unicode`. See [core/src/unicode/README.md](core/src/unicode/README.md) | Level 1b consumes the bits in Stage 3; casing beyond the two predicate bits waits for Stage 4 |
-| convention judging | `sous-core::judge`, published as the envelope's pattern table. See [core/src/judge.md](core/src/judge.md) | sites (D2b), book scope and dispersion (D3), G2's pooled neighbor categories (D3) |
+| convention judging | `sous-core::judge`, published as the envelope's pattern table. See [core/src/judge.md](core/src/judge.md) | book scope and dispersion (D3), G2's pooled neighbor categories (D3) |
+| convention sites | `sous-core::sites` behind `ChapterPass::locate`, cached per book by `(RawChecksum, FiringHash)` in `galley::sous::Expediter`. See [core/src/sites.md](core/src/sites.md) | Aho-Corasick if a corpus ever shows many rare needles per book (evidence.md, 2026-09-04); a general one-pass byte-class sweep, still unbuilt |
 | hygiene | `sous-core::hygiene::scan` for the byte classes, the substrate row's `hygiene` lane for the four scalar ones. See [core/src/hygiene.md](core/src/hygiene.md) and [rules/hygiene.md](rules/hygiene.md) | NBSP's verse-edge case once the walk is verse-grained; a snapshot identity instead of the CLI's zero id |
 
 Stage 0 is closed. Stage 1 was entered hygiene-first rather than
@@ -288,8 +289,8 @@ Work:
    detached UTF-16 table, published length, `Fingerprint`), canonical `BookKey`
    order, `Target` role only; see
    [../galley/src/pantry.md](../galley/src/pantry.md). Text retention landed
-   next to it: a target keeps its text unless the host passes
-   `Retain::ProductsOnly`, and `update` hands back an `Entry` — the per-book
+   next to it: a target keeps its text — D2b made that mandatory, since placing
+   its findings rescans it — and `update` hands back an `Entry`, the per-book
    handle `lint`, `parse`, and the detached products all answer from. B2 landed
    too: `galley::sous::Expediter` maps lazily at `publish`, keyed by
    `ObservationKey`, and publishes a complete corpus buffer byte-equal to cold
@@ -401,6 +402,12 @@ Work:
    spans that the retained producer can locate. Choose `memchr`, `memmem`,
    optional measured Aho-Corasick, or a
    classifier rescan internally; callers never select the search engine.
+   Landed (D2b): `sous_core::sites` rescans a book's current text behind
+   `ChapterPass::locate`, one `memmem::Finder` per distinct firing glyph and a
+   classifier pass for the pooled digit key, and the caller names patterns
+   rather than an engine. Aho-Corasick is measured and not taken; a general
+   one-pass byte-class sweep is not built, and the needles/hits/sites per book
+   that would justify either are recorded (evidence.md, 2026-09-04);
 3. Implement rarity rosters and the G0–G3 evidence ladder. Landed for G0, G1,
    G3 and rarity (D2a-2): `sous_core::judge` reads the folded counts and emits
    one pattern row per firing claim. G2's pooled neighbor categories are D3 —
@@ -408,16 +415,20 @@ Work:
    discriminant is reserved unused;
 4. Implement the fraction-band judge with explicit numerator, denominator,
    support floor, fallback grain, abstention, and union-of-reasons behavior.
-   Landed (D2a-2) except the union, which needs the sites D2b materializes:
-   `JudgingConfig` carries the staircase in basis points, a channel under the
-   support floor abstains, and every pattern row publishes its own numerator
-   and denominator. Wire code 2 (`Convention`) is defined with a `Reasons`
-   bitmask lane so a site can carry every rung it matched;
+   Landed (D2a-2, completed D2b): `JudgingConfig` carries the staircase in basis
+   points, a channel under the support floor abstains, and every pattern row
+   publishes its own numerator and denominator. The union landed with the sites
+   — one maximal run is one `Convention` row whose lane A names the finest
+   matched pattern and whose `Reasons` lane carries every rung any pattern
+   matched in it. `OuterClass::Edge` counts in the denominator and fires no
+   placement row: a book boundary is a fact about the file;
 5. Add dispersion annotation and the narrowly defined “forgiven but
    clustered” view without making dispersion a conviction gate.
 6. Pack compact count evidence and expose typed rich evidence. The compact
    half landed (D2a-2): the 24-byte pattern table rides the corpus envelope,
    so a convention's argument is published once and a site names it by index.
+   D2b put sites on that wire, and `sous --report <out.html>` is the
+   self-contained page that reads them back in context.
 
 Verification gate:
 
@@ -426,9 +437,16 @@ Verification gate:
 - entitlement falls back to a coarser comparison rather than to silence;
 - convention examples and small-corpus examples abstain/fire for the documented
   reason;
-- one maximal run yields one finding with all independently firing reasons;
-- changing judgment bands maps zero chapters and folds zero books;
-- current-text site rescan agrees with the pattern counts it materializes.
+- one maximal run yields one finding with all independently firing reasons —
+  met (D2b): `sites::locate` emits one row per run, headlined by the finest
+  matched channel, with every matched rung in its `Reasons` lane;
+- changing judgment bands maps zero chapters and folds zero books — met;
+  `set_config_relocates_from_cached_aggregates_without_mapping` pins that a
+  re-judge maps and folds nothing, and re-places its sites from the cached
+  aggregates;
+- current-text site rescan agrees with the pattern counts it materializes —
+  met (D2b): `core/tests/sites_agree_with_counts.rs`, occurrence for
+  occurrence over every book of the committed tier.
 
 Fleet gate:
 

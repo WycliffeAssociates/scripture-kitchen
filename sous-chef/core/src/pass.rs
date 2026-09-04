@@ -107,6 +107,37 @@ pub trait ChapterPass {
     /// Judges every book at once: `corpus[i]` is book `i`'s aggregate, and a
     /// judge calls `out.open_book(i)` before pushing that book's rows.
     fn judge(&self, corpus: &[&Self::Aggregate], config: &Self::Config, out: &mut Findings);
+
+    /// Rescans one book's current text for the sites of what [`judge`](Self::judge)
+    /// emitted, calling `out.open_book(book)` first. Default: none.
+    ///
+    /// The one step besides `map` that reads text, and it reads it only to
+    /// PLACE what the counts already decided.
+    fn locate(
+        &self,
+        book: BookIndex,
+        text: &str,
+        chapters: &[Chapter],
+        aggregate: &Self::Aggregate,
+        out: &mut Findings,
+    ) {
+        let _ = (book, text, chapters, aggregate, out);
+    }
+
+    /// The table positions [`locate`](Self::locate) would scan this book for.
+    ///
+    /// A host caches sites under a hash of these rows' content, so a book whose
+    /// own firing set did not move replays instead of rescanning. Default: none,
+    /// matching the default `locate`.
+    fn firing(
+        &self,
+        aggregate: &Self::Aggregate,
+        patterns: &[Pattern],
+        out: &mut Vec<PatternIndex>,
+    ) {
+        let _ = (aggregate, patterns);
+        out.clear();
+    }
 }
 
 /// Two passes over the same chapters as one: both maps run, both folds run,
@@ -146,6 +177,30 @@ impl<A: ChapterPass, B: ChapterPass> ChapterPass for (A, B) {
         let right: Vec<&B::Aggregate> = corpus.iter().map(|book| &book.1).collect();
         self.0.judge(&left, &config.0, out);
         self.1.judge(&right, &config.1, out);
+    }
+
+    fn locate(
+        &self,
+        book: BookIndex,
+        text: &str,
+        chapters: &[Chapter],
+        aggregate: &Self::Aggregate,
+        out: &mut Findings,
+    ) {
+        self.0.locate(book, text, chapters, &aggregate.0, out);
+        self.1.locate(book, text, chapters, &aggregate.1, out);
+    }
+
+    fn firing(
+        &self,
+        aggregate: &Self::Aggregate,
+        patterns: &[Pattern],
+        out: &mut Vec<PatternIndex>,
+    ) {
+        let mut second = Vec::new();
+        self.0.firing(&aggregate.0, patterns, out);
+        self.1.firing(&aggregate.1, patterns, &mut second);
+        out.append(&mut second);
     }
 }
 
@@ -286,6 +341,18 @@ pub fn analyze_with<B: ProjectedBook, P: ChapterPass>(
     }
     let views: Vec<&P::Aggregate> = aggregates.iter().collect();
     pass.judge(&views, config, &mut out);
+    let mut chapters: Vec<Chapter> = Vec::new();
+    for (index, book) in corpus.iter() {
+        chapters.clear();
+        chapters.extend(book.chapters());
+        pass.locate(
+            index,
+            book.text(),
+            &chapters,
+            &aggregates[index.get() as usize],
+            &mut out,
+        );
+    }
     out.finish();
     out
 }
@@ -390,21 +457,23 @@ mod tests {
         }
     }
 
+    /// The hygiene half of a row set; a substrate corpus judges conventions
+    /// beside them and sites them.
     fn hygiene_rows(findings: &Findings) -> Vec<(u16, u32, u32, HygieneClass, u32)> {
         findings
             .rows()
             .iter()
-            .map(|row| {
+            .filter_map(|row| {
                 let FindingKind::Hygiene(digest) = row.kind() else {
-                    panic!("hygiene kind")
+                    return None;
                 };
-                (
+                Some((
                     row.book_idx().get(),
                     row.from(),
                     row.to(),
                     digest.class(),
                     digest.run(),
-                )
+                ))
             })
             .collect()
     }

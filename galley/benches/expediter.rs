@@ -20,13 +20,17 @@
 //!   generation ring. The churn is setup; the delta against
 //!   `edit_one_chapter_then_publish` is what the ring costs a publication.
 //!
+//! - `set_config_then_publish` — a judging knob moved, then the same publish:
+//!   no map and no fold, but every book's firing set is recomputed and every
+//!   book whose set moved rescans its own text for sites.
+//!
 //! No byte counter: no row's cost is a function of corpus bytes.
 //! `publish_unchanged` reads no text at all, and the edit row reads exactly one
 //! book's.
 
 use std::sync::LazyLock;
 
-use sous_core::Brigade;
+use sous_core::{Brigade, JudgingConfig};
 use usfm_galley::sous::Expediter;
 use usfm_galley::{Role, onion};
 
@@ -210,4 +214,25 @@ fn publish_after_sweep_churn(bencher: divan::Bencher) {
             .unwrap();
             divan::black_box(sous.publish().unwrap())
         });
+}
+
+/// A judging-config change and the publication after it: nothing is mapped or
+/// folded, every book's firing set is recomputed, and every book whose set
+/// moved rescans its text. The flush cost of a knob.
+#[divan::bench(sample_count = SAMPLES, sample_size = 1)]
+fn set_config_then_publish(bencher: divan::Bencher) {
+    let corpus = &*CORPUS;
+    let mut sous = warmed(corpus);
+    let mut floor = 2u32;
+    bencher.bench_local(|| {
+        floor = if floor == 2 { 8 } else { 2 };
+        sous.set_config((
+            (),
+            JudgingConfig {
+                rarity_floor: floor,
+                ..JudgingConfig::default()
+            },
+        ));
+        divan::black_box(sous.publish().unwrap())
+    });
 }

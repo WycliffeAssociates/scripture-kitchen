@@ -39,6 +39,26 @@ other book does. It calls `out.open_book(i)` before pushing book `i`'s rows.
 Judging is also the only step a `Config` reaches, which is what lets a host
 re-judge on a config change without remapping a chapter or refolding a book.
 
+## Then `locate` places what `judge` decided
+
+```text
+judge([&MRK, &GEN], &config, out)   → the corpus's pattern table, no coordinates
+locate(MRK, MRK's text, MRK's chapters, &MRK aggregate, out)  → MRK's rows
+locate(GEN, GEN's text, GEN's chapters, &GEN aggregate, out)  → GEN's rows
+finish()
+```
+
+`locate` is the one step besides `map` that reads text, and it reads it only to
+PLACE what the counts already decided — never to decide anything. It defaults
+to a no-op, so a pass with nothing to site says nothing; `Substrate`'s reads
+`out.patterns()`, keeps the rows whose glyph this book's own counts hold, and
+pushes one `Convention` per matching run. See [sites.md](sites.md).
+
+`firing` is the same filter without the text: it names the table positions
+`locate` would scan for, so a resident host can hash them and decide whether
+to rescan a book at all. `galley::sous::Expediter` caches a book's rows under
+`(RawChecksum, FiringHash)` and replays them when neither moved.
+
 ## Row order comes from `finish`
 
 `Findings::finish` stable-sorts every row by `(book_idx, from, to)`, and a

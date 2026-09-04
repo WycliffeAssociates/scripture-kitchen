@@ -13,15 +13,17 @@ the same bytes.
 ## Mutations go through the Expediter
 
 `Expediter::update`, `update_with` and `remove` forward to the Pantry, and
-`pantry()` hands back `&Pantry` only. The registry is not sealed off for
-tidiness: the Expediter has to see every mutation, because for one retention
-mode the update is the last moment the text exists.
+`pantry()` hands back `&Pantry` only, so no book can be registered behind these
+caches' backs. `update_with` is where a `Target` asking for
+`Retain::ProductsOnly` is refused — a target's findings are placed by rescanning
+its own text, so a target that kept none could be judged and never sited
+(`pantry.md`).
 
-## Eager for a text the Pantry will not keep, lazy for one it will
+## Lazy: nothing is projected until a publication needs it
 
 `Pantry::update` stays pure Onion: lex, CST, TOC, mask, UTF-16 table, and
-nothing of Sous. A host that updates ten `Retain::Text` books and publishes
-once pays for one pass over the ten, not ten passes, and the indexing waits:
+nothing of Sous. A host that updates ten books and publishes once pays for one
+pass over the ten, not ten passes, and the indexing waits:
 
 ```text
 chapter table for this RawChecksum?
@@ -32,17 +34,10 @@ chapter table for this RawChecksum?
            store the table, DROP the projected text
 ```
 
-A `Retain::ProductsOnly` book cannot wait. Its text is gone the moment
-`update_with` returns, so its table is built there, from the caller's own
-`&str`, before the Pantry drops it. That is the whole reason mutation is the
-Expediter's method: the earlier arrangement — mutate the Pantry directly, index
-at publish — could only answer `Err(NoText)` for the second publication of a
-book the host holds the text of.
-
-Projected text is never retained either way. It exists for exactly as long as
-it takes to key a book's chapters, and only for a book whose table is missing.
-`last_mapped` counts both kinds of map, so an eager one is still visible in the
-publication it served.
+Projected text is never retained. It exists for exactly as long as it takes to
+key a book's chapters — or, at publication, to locate one book's sites — and
+only for a book whose cache is missing. Reprojecting costs about 38 µs a book,
+which is why there is no second copy of the text on either path.
 
 ## The two hashes, and the third
 
@@ -83,7 +78,39 @@ order and the rebase runs as before.
 
 That is also why the config lives here rather than in the key:
 `set_config` is a re-judge and never a re-fold or a re-map, since neither
-`map` nor `fold` is handed the config at all.
+`map` nor `fold` is handed the config at all. It may be a re-*locate*, because
+moving a band can change which patterns fire — measured at 3.2 ms for the
+66-book corpus, against 206 µs for a republication that changed nothing
+(evidence.md).
+
+## The site cache
+
+A judged pattern has no coordinates; `pass.locate` gives it some by rescanning
+one book's current text (`sous-chef/core/src/sites.md`). That is text reading,
+so it is cached:
+
+```text
+sites[RawChecksum] = (FiringHash, [SiteRow])
+```
+
+`FiringHash` is xxh3-128 over the book's firing patterns' **content** — glyph,
+channel, key — in table order, and never over their indices. The distinction is
+the whole point: a publication renumbers the pattern table whenever any other
+book's counts move a denominator, while what THIS book can be sited for is
+unchanged, so an index-keyed cache would miss on every keystroke anywhere in
+the corpus. For the same reason a cached row names its pattern by content
+(`PatternRef`) and resolves to this publication's `PatternIndex` at replay.
+
+A book whose checksum and firing hash both stand replays its rows and reads no
+text. `last_located()` counts the books that did not — one after a keystroke,
+all of them on a cold open, none on a warm republication. The sweep retains a
+site entry exactly as it retains a chapter table, and `resident_bytes` counts
+it: the inline row plus its boxed slice.
+
+What this cache does NOT key on is the numerator and denominator of a firing
+pattern. Those move constantly and change nothing about where the pattern
+occurs; the published row carries only an index into the table, and the table
+is re-encoded every publication anyway.
 
 The cache is worth having because `Brigade`'s fold is not free the way
 `HygieneBytes`' was: `fold_book` merges every lane of all 1,189 chapters, which
@@ -97,9 +124,10 @@ counts it.
 `sous_core::for_each_chapter` is the only place a `ChapterInput` is assembled,
 and both `analyze` and the Expediter call it, so neither can build an input the
 other would not. Fold and judge are provenance-blind — neither can tell a
-cached observation or aggregate from a fresh one — and both publishers rebase
-through the same `rebase_span`, so the two paths differ in what work they skip
-and in nothing else. `galley/tests/equivalence.rs` pins that as bytes, not as a claim: a
+cached observation or aggregate from a fresh one — `locate` is handed the same
+text and chapter rows either way, and both publishers rebase through the same
+`rebase_span`, so the two paths differ in what work they skip and in nothing
+else. `galley/tests/equivalence.rs` pins that as bytes, not as a claim: a
 seeded edit churn republishes after every step and compares against a cold
 `analyze` of the same texts, over a synthetic corpus and over a whole Bible.
 

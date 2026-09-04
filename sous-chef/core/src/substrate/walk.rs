@@ -8,7 +8,7 @@
 
 use rustc_hash::FxHashMap;
 
-use super::{Case, ChapterRow, Edge, FollowCounts, OuterClass, PairKey, ScalarKey};
+use super::{Case, ChapterRow, Edge, FollowCounts, OuterClass, PairKey, ScalarKey, is_nonletter};
 use crate::hygiene::{NBSP, SUSPECT, ScalarSites};
 use crate::unicode::{
     Class,
@@ -103,7 +103,7 @@ struct Counters {
     sites: ScalarSites,
 }
 
-pub(super) fn walk(text: &str) -> ChapterRow {
+pub(crate) fn walk(text: &str) -> ChapterRow {
     let bytes = text.as_bytes();
     let mut counters = Counters::new(bytes.len());
     let mut hot = Hot::new();
@@ -158,13 +158,6 @@ fn scalar_at(bytes: &[u8], width: usize) -> u32 {
                 | u32::from(bytes[3] & 0x3F)
         }
     }
-}
-
-/// Not a letter, not glue, not whitespace: what the nonletter inventory
-/// counts, digits included — they pool into one key, not out of the lane.
-#[inline]
-const fn is_nonletter(class: Class) -> bool {
-    !class.is_alphabetic() && !class.is_glue() && !class.is_whitespace()
 }
 
 impl Counters {

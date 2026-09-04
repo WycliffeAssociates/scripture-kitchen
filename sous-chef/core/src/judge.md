@@ -33,6 +33,14 @@ outer class after `g` are two distributions over
 `{Letter, Space, Digit, Nonletter, Edge}`, each against the same denominator.
 A side fires on a class whose share is under the band.
 
+`Edge` is the one class that **counts and never fires**. A glyph at the start
+or end of a book has a neighbour that is a fact about the file, not about the
+language, so the edge side emits nothing and the glyph is judged by its other
+side — while the occurrence stays in the denominator both sides share, because
+it is still an occurrence. The rows stay per side; the collapse a reviewer
+wants happens at the site, where `Reasons::PLACEMENT_BEFORE | PLACEMENT_AFTER`
+ride one span.
+
 `Rarity` is its own channel and its own kind of claim: a list for review, not
 an assertion that a glyph is wrong. It carries no band. Digits are one pooled
 key and never rare; glue never reaches the inventory at all (charter invariant
@@ -108,6 +116,11 @@ pushed either side of any `open_book`. The 24-byte wire row, the header's
 `pattern_count`/`pattern_offset`, and wire code 2 (`Convention`, which names a
 pattern from a site) are
 [`codec/README.md`](codec/README.md).
+
+A pattern has no coordinates. `ChapterPass::locate` runs after judging and
+gives it some: [`sites.md`](sites.md) rescans each book's current text for the
+patterns its own counts hold, and each matching run becomes one `Convention`
+row naming this table.
 
 ## Arithmetic
 

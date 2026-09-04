@@ -12,10 +12,14 @@ retained as last updated, so analysis, publication, and find run against the
 copy and nothing is resent per call. The editor's buffer is canonical; the copy
 is exactly as current as its last update.
 
-A host may opt a target out with `Retain::ProductsOnly`; text-needing methods
-then return `Err(PantryError::NoText { id })` and the host supplies the text
-itself. The common path has no `Option`; the opt-out path cannot silently do
-nothing.
+**A `Target` cannot opt out.** Placing a target's findings rescans its current
+text — a pattern is a corpus fact with no coordinates, and `sites::locate`
+gives it some — so a target that kept no text could be judged and never sited.
+`update_with(.., Role::Target, Retain::ProductsOnly, ..)` returns
+`Err(PantryError::TargetNeedsText { id })` rather than registering a book
+publication would later fail on. `Retain::ProductsOnly` is for `Role::Reference`,
+which lands with proportionality; `PantryError::NoText { id }` is the refusal a
+text-needing method answers with once such a book exists.
 
 There is no splice API and never will be: the only mutation is whole-book
 replacement under a caller-chosen opaque id, which is idempotent and cannot
@@ -28,9 +32,9 @@ Pantry mutably, because its `lint`/`parse` pass-throughs run the Warmer — and
 gone; the `Entry` is the one way in.
 
 A host running Sous mutates through `Expediter::{update, update_with, remove}`
-instead, which forward here; the Expediter's own `pantry()` is `&Pantry`. It
-has to see every mutation, because a `ProductsOnly` update is the last moment
-that book's text exists — `galley/src/sous/expediter.md`.
+instead, which forward here; the Expediter's own `pantry()` is `&Pantry`, so a
+book cannot be registered behind its caches' backs —
+`galley/src/sous/expediter.md`.
 
 ## Two questions, two answers
 

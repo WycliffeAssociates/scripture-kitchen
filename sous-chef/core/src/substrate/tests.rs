@@ -232,9 +232,17 @@ fn book(key: &[u8; 3], text: &'static str, len: u32) -> Book {
 fn every_book_folds_from_a_fresh_edge() {
     let books = vec![book(b"GEN", "a,", 2), book(b"MRK", ",b", 2)];
     let corpus = Corpus::try_new(&books).unwrap();
-    // These books hold no hygiene site, so judging emits nothing; the
-    // seam claim is the three folds below.
-    assert!(analyze(&corpus, &Substrate).is_empty());
+    // These books hold no hygiene site; the comma is under the rarity floor,
+    // so what judging emits is its one site per book. The seam claim is the
+    // three folds below.
+    let rows = analyze(&corpus, &Substrate);
+    assert_eq!(
+        rows.rows()
+            .iter()
+            .map(|row| (row.book_idx().get(), row.from(), row.to()))
+            .collect::<Vec<_>>(),
+        vec![(0, 1, 2), (1, 0, 1)]
+    );
 
     // The same two chapters inside one book resolve their seam; in two
     // books each keeps the `Edge` its own end saw.

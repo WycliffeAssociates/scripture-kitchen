@@ -10,6 +10,7 @@ pub mod hygiene;
 mod input;
 pub mod judge;
 mod pass;
+pub mod sites;
 pub mod substrate;
 pub mod unicode;
 
@@ -36,6 +37,7 @@ pub use pass::{
     ChapterInput, ChapterKey, ChapterObs, ChapterPass, Findings, SchemaStamp, analyze,
     analyze_with, for_each_chapter,
 };
+pub use sites::Site;
 pub use substrate::{
     BookAggregate, Case, ChapterRow, Edge, FollowCounts, OuterClass, PairKey, RUN_BUCKETS,
     RunLengths, ScalarKey, Substrate,

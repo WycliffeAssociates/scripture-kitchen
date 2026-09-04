@@ -226,6 +226,36 @@ fn a_ten_verse_draft_judges_at_the_small_band() {
     );
 }
 
+/// A book boundary is a fact about the file, not a convention: the edge side
+/// emits nothing and the glyph is judged by its other side, while `Edge` still
+/// counts in the denominator both sides share.
+#[test]
+fn an_edge_neighbor_never_fires_a_placement_pattern() {
+    // The leading comma is the only one whose `prev` is the start of the book.
+    let text = format!(",{}zz", "aa, bb, cc, dd, ee, ff, ".repeat(2));
+    let rows = patterns(text);
+    let fired = on(&rows, ',', Channel::Placement);
+    assert!(
+        fired.iter().all(|row| row.key
+            != PatternKey::Placement {
+                side: Side::Prev,
+                class: OuterClass::Edge
+            }),
+        "the edge is not a convention"
+    );
+    assert!(
+        fired.iter().any(|row| row.key
+            == PatternKey::Placement {
+                side: Side::Next,
+                class: OuterClass::Letter
+            }),
+        "the same comma is still judged by its other side"
+    );
+    // Thirteen commas, and the edge occurrence is one of the thirteen every
+    // side's share is taken over.
+    assert!(fired.iter().all(|row| row.denominator == 13));
+}
+
 /// Under the support floor a channel abstains; rarity owns the roster there.
 #[test]
 fn four_commas_abstain_under_the_support_floor() {

@@ -150,4 +150,9 @@ edge of text for a site, which is what keeps the lane equal to the
 whole-chapter scan it replaced.
 
 `Substrate::judge` publishes that lane off the `BookAggregate`, one book at a
-time in `BookIndex` order; the counts beside it wait for D2a-2's rules.
+time in `BookIndex` order, then judges the counts beside it into the corpus's
+pattern table. `Substrate::locate` follows: it rescans each book's current text
+for the patterns that book's own counts hold and pushes one `Convention` row
+per matching run. That is the other half of "sites are absent from stored
+observations" — the rescan is the site lane every counting lane goes without,
+and `sites.md` is the machine.

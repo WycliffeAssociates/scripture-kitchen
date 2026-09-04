@@ -85,3 +85,59 @@ fn findings_rows_are_unchanged_for_the_footnote_fixture() {
         ]
     );
 }
+
+/// `--findings` lists a pattern's sites under it, and `--report` writes the
+/// same information as one self-contained page.
+#[test]
+fn sites_print_under_their_pattern_and_the_report_page_stands_alone() {
+    let temp = TempDir::new();
+    let book = temp.0.join("MRK.usfm");
+    // Five commas attached to a letter and one after a space: the odd one out
+    // fires placement, and its site is the comma itself.
+    fs::write(
+        &book,
+        concat!(
+            "\\id MRK\n\\c 1\n\\p\n",
+            "\\v 1 aa, bb, cc, dd, ee, ff ,gg.\n",
+        ),
+    )
+    .unwrap();
+    let page = temp.0.join("sites.html");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_sous"))
+        .arg("--findings")
+        .arg("--report")
+        .arg(&page)
+        .arg(&book)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let comma = stdout
+        .lines()
+        .position(|line| {
+            line.starts_with("pattern[") && line.contains("U+002C ',' placement prev=Space")
+        })
+        .expect("the lone spaced comma fires");
+    let site = stdout.lines().nth(comma + 1).expect("its site follows it");
+    assert_eq!(site, "  site MRK 25..26");
+
+    let rendered = fs::read_to_string(&page).unwrap();
+    assert!(rendered.starts_with("<!doctype html>"));
+    assert!(rendered.ends_with("</html>\n"));
+    assert!(
+        !rendered.contains("src=\"http") && !rendered.contains("href=\"http"),
+        "the page fetches nothing"
+    );
+    assert!(
+        rendered.contains("<mark>,</mark>"),
+        "the span is highlighted"
+    );
+    assert!(rendered.contains("MRK 1:1-1:1"));
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains(" sites to ")
+    );
+}

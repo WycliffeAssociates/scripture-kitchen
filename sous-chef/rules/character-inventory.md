@@ -8,8 +8,10 @@ and never as occurrence lists. These are views over one model, not twenty
 independent rule implementations. Convention-learned lane.
 
 Status: substrate walk landed (`sous_core::substrate`); judging landed
-(`sous_core::judge`), so a project's patterns are on the wire. Sites are D2b.
-Stage 3 in [../roadmap.md](../roadmap.md).
+(`sous_core::judge`), so a project's patterns are on the wire; sites landed
+(`sous_core::sites`, D2b), so each pattern's matching runs are on the wire
+beside it as `Convention` rows. Book scope and dispersion are D3. Stage 3 in
+[../roadmap.md](../roadmap.md).
 
 ## Evidence questions
 
@@ -19,7 +21,7 @@ Ask where a glyph or run sits, from coarse to fine:
 
 | grain | comparison | example for comma |
 | --- | --- | --- |
-| G0 | outer class: letter, space, edge | attached versus spaced |
+| G0 | outer class: letter, space, digit, nonletter | attached versus spaced |
 | G1 | outer class conditioned by run composition | attached inside a digit-bearing run |
 | G2 | pooled neighbor category | followed by a quote or digit — **D3**: it needs a pooling table the classifier does not carry, so the shipped ladder is G3 → G1 → G0 |
 | G3 | exact nonletter neighbor | followed specifically by `.` |
@@ -30,6 +32,11 @@ the coarser pool rather than becoming silent.
 
 Directed pairs belong to their first member and are described as logical
 start/end relationships, never visual left/right.
+
+A **book edge** is the fifth outer class the substrate records and the one G0
+never convicts on: the neighbour a glyph has at the start or end of a file is a
+fact about the file, not about the language. The edge occurrence stays in the
+denominator, and the glyph is judged by its other side.
 
 ### Run length and composition
 

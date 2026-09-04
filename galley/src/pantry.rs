@@ -281,6 +281,9 @@ impl Pantry {
         text: &str,
     ) -> Result<Entry<'_>, PantryError> {
         let id = id.into();
+        if role == Role::Target && retain == Retain::ProductsOnly {
+            return Err(PantryError::TargetNeedsText { id });
+        }
         let checksum = RawChecksum::of(text.as_bytes());
         let served = self.books.get(&id).is_some_and(|book| {
             book.checksum == checksum && book.role == role && book.retain() == retain
@@ -579,6 +582,9 @@ pub enum PantryError {
     /// The book was registered [`Retain::ProductsOnly`], so the host holds its
     /// text and this operation needs it.
     NoText { id: BookId },
+    /// A target publishes findings, and placing them rescans its text, so it
+    /// keeps it. [`Retain::ProductsOnly`] is for a reference.
+    TargetNeedsText { id: BookId },
 }
 
 impl fmt::Display for PantryError {
@@ -586,6 +592,9 @@ impl fmt::Display for PantryError {
         match self {
             Self::MissingBookKey { id } => write!(f, "book {id} has no \\id line to key it"),
             Self::NoText { id } => write!(f, "book {id} retains no text"),
+            Self::TargetNeedsText { id } => {
+                write!(f, "target {id} must retain its text to be sited")
+            }
         }
     }
 }
@@ -809,25 +818,26 @@ mod tests {
         );
     }
 
+    /// A target's findings are placed by rescanning its current text, so a
+    /// target that keeps none cannot be registered at all. `ProductsOnly`
+    /// waits for `Role::Reference`.
     #[test]
-    fn products_only_refuses_the_text_and_everything_that_needs_it() {
+    fn a_target_cannot_be_products_only() {
         let mut pantry = pantry();
         let id = mrk();
-        let mut entry = pantry
-            .update_with(id.clone(), Role::Target, Retain::ProductsOnly, &mark())
-            .unwrap();
-        let refused = Err(PantryError::NoText { id: id.clone() });
-        assert_eq!(entry.text(), refused);
-        assert_eq!(entry.lint().err(), refused.clone().err());
         assert_eq!(
-            entry.parse(onion::wire::ParseOptions::default()).err(),
-            refused.err()
+            pantry
+                .update_with(id.clone(), Role::Target, Retain::ProductsOnly, &mark())
+                .err(),
+            Some(PantryError::TargetNeedsText { id: id.clone() })
         );
-        // The detached products never needed the string in the first place.
-        assert!(!entry.mask().ranges.is_empty());
-        assert_eq!(entry.toc().chapters.len(), 7);
-        assert!(entry.utf16().len_utf16() > 0);
-        assert_eq!(entry.key(), BookKey::new(*b"MRK"));
+        assert!(
+            pantry.books(Role::Target).is_empty(),
+            "a refused update registers nothing"
+        );
+        // The default retention is the one a target has.
+        let entry = pantry.update(id, Role::Target, &mark()).unwrap();
+        assert_eq!(entry.text().unwrap(), mark());
     }
 
     #[test]
@@ -855,31 +865,7 @@ mod tests {
         let text = mark();
         let mut kept = pantry();
         kept.update(mrk(), Role::Target, &text).unwrap();
-        let mut dropped = pantry();
-        dropped
-            .update_with(mrk(), Role::Target, Retain::ProductsOnly, &text)
-            .unwrap();
-
-        let difference = kept.resident_bytes() - dropped.resident_bytes();
-        assert_eq!(difference, text.len(), "the text and nothing else");
-    }
-
-    #[test]
-    fn switching_retention_mode_rederives() {
-        let mut pantry = pantry();
-        let text = mark();
-        pantry.update(mrk(), Role::Target, &text).unwrap();
-        let derivations = pantry.derivations();
-
-        pantry
-            .update_with(mrk(), Role::Target, Retain::ProductsOnly, &text)
-            .unwrap();
-        assert_eq!(
-            pantry.derivations(),
-            derivations + 1,
-            "a different retention"
-        );
-        assert!(pantry.book(&mrk()).unwrap().text().is_err());
+        assert_eq!(kept.text_bytes(), text.len(), "the text and nothing else");
     }
 
     #[test]
