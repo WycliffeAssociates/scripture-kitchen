@@ -879,9 +879,9 @@ impl Findings {
     /// either side of any [`open_book`](Self::open_book). A table past
     /// `u16::MAX` rows saturates here and the encoder refuses it.
     pub fn push_pattern(&mut self, pattern: Pattern) -> PatternIndex {
-        let index = u16::try_from(self.patterns.len()).unwrap_or(u16::MAX);
+        let index = PatternIndex::at(self.patterns.len());
         self.patterns.push(pattern);
-        PatternIndex::new(index)
+        index
     }
 
     pub fn rows(&self) -> &[PackedFinding] {
@@ -1040,7 +1040,11 @@ pub fn analyze_paired<B: ProjectedBook, P: ChapterPass>(
 
 /// Rebases this chapter's verse rows into `verses`, returning where the next
 /// chapter resumes. Rows are non-decreasing by key, so each run is contiguous.
-fn collect_verses(
+///
+/// The one rule for chapter membership: a map and a rescan that disagreed on
+/// which verses a chapter holds would site a verse-start capital the walk
+/// never counted.
+pub(crate) fn collect_verses(
     rows: &[Verse],
     mut at: usize,
     chapter: Chapter,

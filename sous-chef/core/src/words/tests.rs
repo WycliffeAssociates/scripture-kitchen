@@ -192,6 +192,24 @@ fn a_verse_start_is_forced() {
     assert!(before.iter().filter(|at| !at.is_free(&empty)).count() == 2);
 }
 
+/// A verse that starts inside a word: the word already stood, so the verse
+/// start belongs to no word and the NEXT one is not a verse-start capital.
+#[test]
+fn a_verse_start_inside_a_word_does_not_travel_to_the_next_one() {
+    let text = "onetwo Three";
+    let verse = |number, from, to| {
+        Verse::new(
+            VerseKey::new(1, number, number).unwrap(),
+            TextRange::new(from, to).unwrap(),
+        )
+    };
+    // Verse 2 opens at the `t` of `two`, three bytes into the first word.
+    let verses = [verse(1, 0, 3), verse(2, 3, 12)];
+    let mut before = Vec::new();
+    for_each_word(text, &verses, |word| before.push(word.before));
+    assert_eq!(before, vec![Before::Start, Before::None]);
+}
+
 // ── The row ─────────────────────────────────────────────────────────────
 
 fn row(text: &str) -> WordRow {

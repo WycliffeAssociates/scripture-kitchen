@@ -270,7 +270,7 @@ one book's current text (`sous-chef/core/src/sites.md`). That is text reading,
 so it is cached:
 
 ```text
-sites[RawChecksum] = (FiringHash, [SiteRow])
+sites[RawChecksum] = (FiringHash, TerminalHash, [SiteRow])
 ```
 
 `FiringHash` is xxh3-128 over the book's firing patterns' **content** — glyph,
@@ -281,8 +281,12 @@ unchanged, so an index-keyed cache would miss on every keystroke anywhere in
 the corpus. For the same reason a cached row names its pattern by content
 (`PatternRef`) and resolves to this publication's `PatternIndex` at replay.
 
-A book whose checksum and firing hash both stand replays its rows and reads no
-text. `last_located()` counts the books that did not — one after a keystroke,
+A book whose checksum, firing hash, and terminal hash all stand replays its
+rows and reads no text. The terminal hash is in the key for the same reason it
+is in the chapter key below: the word walk reads the corpus's terminal table to
+PLACE rows, so a table that moved anywhere in the corpus decides this book's
+occurrences differently while its own text and firing set stand still.
+`last_located()` counts the books that did not — one after a keystroke,
 all of them on a cold open, none on a warm republication. The sweep retains a
 site entry exactly as it retains a chapter table, and `resident_bytes` counts
 it: the inline row plus its boxed slice.
@@ -313,9 +317,9 @@ book goes hot or the firing set moves.
 `TerminalHash` is in the key and not in `FiringHash` because the word walk reads
 the corpus's terminal table to split free occurrences from forced, and a firing
 set is position-blind about exactly that: the same rows fire while the table
-decides differently which occurrences they cover. The book-level entry above is
-unchanged, terminal hash and all — it replays only a book whose own text stood
-still, and this one replays chapters of a book that moved.
+decides differently which occurrences they cover. The book-level entry above
+carries the same hash for the same reason; what the two keys divide is grain,
+not evidence — this one replays chapters of a book whose checksum moved.
 
 Eviction follows the hot set rather than the sweep: each publication keeps
 exactly the keys its hot books name, so a book pushed out of the set gives its

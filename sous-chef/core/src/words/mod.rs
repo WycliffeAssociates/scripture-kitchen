@@ -28,7 +28,9 @@
 use rustc_hash::FxHashMap;
 
 use crate::judge::{JudgingConfig, Pattern, PatternIndex, PatternKey, TerminalTable};
-use crate::pass::{ChapterInput, ChapterObs, ChapterPass, CorpusTotals, Findings, SchemaStamp};
+use crate::pass::{
+    ChapterInput, ChapterObs, ChapterPass, CorpusTotals, Findings, SchemaStamp, collect_verses,
+};
 use crate::substrate::ScalarKey;
 use crate::{BookIndex, Chapter, ConventionDigest, FindingKind, Reasons, TextRange, Verse};
 
@@ -798,7 +800,7 @@ impl ChapterPass for Words {
         for chapter in &chapters[range] {
             let span = chapter.text();
             let slice = &text[span.from() as usize..span.to() as usize];
-            cursor = chapter_verses(verses, cursor, span, &mut rebased);
+            cursor = collect_verses(verses, cursor, *chapter, &mut rebased);
             let before = found.len();
             sites.walk(slice, span.from(), &rebased, &mut found);
             counts.push((found.len() - before) as u32);
@@ -845,7 +847,7 @@ impl ChapterPass for Words {
                     .letter_runs_for(pattern.glyph)
                     .is_some_and(|lanes| lanes[letter_run_lane(length)] > 0)
                 {
-                    out.push(PatternIndex::new(index as u16));
+                    out.push(PatternIndex::at(index));
                 }
                 continue;
             }
@@ -883,7 +885,7 @@ impl ChapterPass for Words {
                 }
             };
             if held {
-                out.push(PatternIndex::new(index as u16));
+                out.push(PatternIndex::at(index));
             }
         }
     }
@@ -1071,26 +1073,4 @@ impl WordSites {
             }
         });
     }
-}
-
-/// This chapter's verse rows, rebased to it, returning where the next chapter
-/// resumes. Rows are non-decreasing, so each chapter's run is contiguous.
-fn chapter_verses(verses: &[Verse], mut at: usize, span: TextRange, out: &mut Vec<Verse>) -> usize {
-    out.clear();
-    while verses
-        .get(at)
-        .is_some_and(|row| row.text().to() <= span.from())
-    {
-        at += 1;
-    }
-    while let Some(row) = verses.get(at).filter(|row| row.text().to() <= span.to()) {
-        let text = row.text();
-        if text.from() >= span.from() {
-            let rebased = TextRange::new(text.from() - span.from(), text.to() - span.from())
-                .expect("a chapter-relative range keeps its order");
-            out.push(Verse::new(row.key(), rebased));
-        }
-        at += 1;
-    }
-    at
 }

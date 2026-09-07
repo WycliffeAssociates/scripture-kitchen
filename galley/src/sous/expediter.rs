@@ -306,9 +306,12 @@ pub struct Expediter<P: ChapterPass> {
     /// One book's fold product, in book coordinates and free of a book index,
     /// so a later publication judges it under whatever index it has then.
     aggregates: FxHashMap<RawChecksum, P::Aggregate>,
-    /// One book's located rows for the last firing set seen, keyed by the same
-    /// checksum: unchanged text plus an unchanged firing set is a replay.
-    sites: FxHashMap<RawChecksum, (FiringHash, Box<[SiteRow]>)>,
+    /// One book's located rows for the last firing set and terminal table
+    /// seen, keyed by the same checksum: a replay needs all three, because the
+    /// word walk reads the terminal table to PLACE its rows and a table that
+    /// moved elsewhere in the corpus decides this book's occurrences
+    /// differently while its own text and firing set stand still.
+    sites: FxHashMap<RawChecksum, (FiringHash, TerminalHash, Box<[SiteRow]>)>,
     /// One book's firing hash for the pattern table it was walked against:
     /// a table whose rows say the same thing fires the same set, whatever
     /// this publication's counts and numbering are.
@@ -684,8 +687,11 @@ impl<P: ChapterPass + Sync> Expediter<P> {
         let sites: usize = self
             .sites
             .values()
-            .map(|(_, rows)| {
-                size_of::<RawChecksum>() + size_of::<FiringHash>() + size_of_val(&**rows)
+            .map(|(_, _, rows)| {
+                size_of::<RawChecksum>()
+                    + size_of::<FiringHash>()
+                    + size_of::<TerminalHash>()
+                    + size_of_val(&**rows)
             })
             .sum();
         let firing = self.firing.len()
@@ -775,6 +781,9 @@ impl<P: ChapterPass + Sync> Expediter<P> {
                 while hot.len() > *hot_ceiling {
                     cooling.push(hot.pop().expect("longer than the ceiling"));
                 }
+                // A book that came back owes nothing back, and a cooling list
+                // that keeps naming it grows across publications.
+                cooling.retain(|seen| !hot.contains(seen));
             }
         }
         let regrain = !P::RETAIN_CHAPTERS && !aggregates.contains_key(&checksum);
@@ -1110,9 +1119,11 @@ impl<P: ChapterPass + Sync> Expediter<P> {
                 // paired again: the ratios, their order statistics, and the
                 // presence rows are a pure function of both sides' rows
                 // (`expediter.md`).
+                // All three channels, the same set `judge_paired` gates on: a
+                // host running source-copy alone still pairs.
                 let lengths = pass
                     .length_config(config)
-                    .filter(|lengths| lengths.enabled || lengths.presence);
+                    .filter(|lengths| lengths.enabled || lengths.presence || lengths.source_copy);
                 // First wins: a caller may present two files under one key, and
                 // the choice has to be its order rather than a hash's.
                 type Source<'a> = (RawChecksum, &'a [SourceVerse], Option<&'a SourceWords>);
@@ -1206,7 +1217,7 @@ impl<P: ChapterPass + Sync> Expediter<P> {
             let resolver: FxHashMap<PatternRef, PatternIndex> = table
                 .iter()
                 .enumerate()
-                .map(|(at, pattern)| (PatternRef::of(pattern), PatternIndex::new(at as u16)))
+                .map(|(at, pattern)| (PatternRef::of(pattern), PatternIndex::at(at)))
                 .collect();
             let terminals = TerminalHash::of(findings.terminals());
             let identity = TableHash::of(&table);
@@ -1242,10 +1253,14 @@ impl<P: ChapterPass + Sync> Expediter<P> {
                     false => Vec::new(),
                 };
                 named.extend(keys.iter().copied());
-                if let Some((seen, rows)) = sites.get(&checksum)
+                if let Some((seen, table, rows)) = sites.get(&checksum)
                     && *seen == hash
+                    && *table == terminals
                 {
                     replay(book, rows, 0, &resolver, &mut findings);
+                    // The pair step's projection, if it made one: this book is
+                    // done, so nothing is held to the end of the publication.
+                    views[index] = None;
                     continue;
                 }
                 // The pair step's projection where it made one, and one of its
@@ -1279,7 +1294,7 @@ impl<P: ChapterPass + Sync> Expediter<P> {
                     .iter()
                     .map(|row| SiteRow::of(row, &table))
                     .collect();
-                sites.insert(checksum, (hash, cached));
+                sites.insert(checksum, (hash, terminals, cached));
                 located += 1;
             }
             chapter_sites.retain(|key, _| named.contains(key));

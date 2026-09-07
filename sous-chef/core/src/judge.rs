@@ -523,6 +523,13 @@ impl PatternIndex {
         Self(index)
     }
 
+    /// A table position, saturating. A table past `u16::MAX` rows cannot be
+    /// named on the wire and the encoder refuses it, so the clamp surfaces as
+    /// that refusal rather than as a truncated index naming the wrong row.
+    pub fn at(index: usize) -> Self {
+        Self(u16::try_from(index).unwrap_or(u16::MAX))
+    }
+
     pub const fn get(self) -> u16 {
         self.0
     }
@@ -601,7 +608,7 @@ fn sentence_start(
         band: Some(band),
         numerator: saturate(lower),
         denominator: saturate(cased),
-        share_bp: share_bp(lower, cased),
+        share_bp: reported_share(lower, cased),
         books: handoffs.lower.books(),
     });
 }
@@ -629,7 +636,7 @@ fn roster(
             band: None,
             numerator: saturate(tally.count),
             denominator: saturate(total_scalars),
-            share_bp: share_bp(tally.count, total_scalars),
+            share_bp: reported_share(tally.count, total_scalars),
             books: tally.books(),
         });
     }
@@ -687,7 +694,7 @@ fn placement(
                 band: Some(band),
                 numerator: saturate(tally.count),
                 denominator: saturate(marginals.denominator),
-                share_bp: share,
+                share_bp: reported_share(tally.count, marginals.denominator),
                 books: tally.books(),
             });
         }
@@ -717,7 +724,7 @@ fn run_shapes(
             band: Some(band),
             numerator: saturate(tally.count),
             denominator: saturate(evidence.runs),
-            share_bp: share,
+            share_bp: reported_share(tally.count, evidence.runs),
             books: tally.books(),
         });
     }
@@ -741,7 +748,7 @@ fn neighbors(glyph: ScalarKey, evidence: &RunEvidence, config: &JudgingConfig, o
             band: Some(band),
             numerator: saturate(tally.count),
             denominator: saturate(evidence.positions),
-            share_bp: share,
+            share_bp: reported_share(tally.count, evidence.positions),
             books: tally.books(),
         });
     }
@@ -770,7 +777,7 @@ fn pooled_neighbors(
             band: Some(band),
             numerator: saturate(tally.count),
             denominator: saturate(evidence.positions),
-            share_bp: share,
+            share_bp: reported_share(tally.count, evidence.positions),
             books: tally.books(),
         });
     }
@@ -1080,6 +1087,18 @@ fn saturate(count: u64) -> u32 {
     u32::try_from(count).unwrap_or(u32::MAX)
 }
 
+/// The share a row REPORTS, from the pair as the row carries it.
+///
+/// A count past `u32::MAX` clamps on the way to the wire, and
+/// [`Pattern::validate`] recomputes the share from the clamped pair; the raw
+/// share is still what decides whether the row fires at all.
+fn reported_share(numerator: u64, denominator: u64) -> u16 {
+    share_bp(
+        u64::from(saturate(numerator)),
+        u64::from(saturate(denominator)),
+    )
+}
+
 // ── The terminal table ──────────────────────────────────────────────────
 
 /// Which glyphs this corpus puts a capital after, learned from the substrate's
@@ -1309,7 +1328,7 @@ fn letter_run(
             band: Some(band),
             numerator: saturate(count),
             denominator: saturate(runs),
-            share_bp: share,
+            share_bp: reported_share(count, runs),
             books: word_books(corpus, row.letter, &key, &TerminalTable::default()),
         });
     }
@@ -1438,7 +1457,7 @@ fn doubled_word(
             band: Some(band),
             numerator: saturate(count),
             denominator: saturate(total),
-            share_bp: share,
+            share_bp: reported_share(count, total),
             books: word_books(corpus, ScalarKey::NONE, &key, table),
         });
     }
@@ -1517,7 +1536,7 @@ fn casing_word(
             band: Some(band),
             numerator: saturate(count),
             denominator: saturate(total),
-            share_bp: share,
+            share_bp: reported_share(count, total),
             books: word_books(corpus, ScalarKey::NONE, &key, table),
         });
     }

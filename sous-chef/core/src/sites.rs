@@ -58,7 +58,7 @@ pub fn firing(book: &BookAggregate, patterns: &[Pattern], out: &mut Vec<PatternI
             .binary_search_by_key(&pattern.glyph, |entry| entry.0)
             .is_ok();
         if held {
-            out.push(PatternIndex::new(index as u16));
+            out.push(PatternIndex::at(index));
         }
     }
 }

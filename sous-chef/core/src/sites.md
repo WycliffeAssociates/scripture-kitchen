@@ -27,6 +27,12 @@ some other book's counts moved rescans nothing. It is also the shape of "a book
 without the glyph reads no text" — the counts answer, and the text is never
 opened.
 
+Those two parts are the whole key for the SUBSTRATE's rows, which are a
+function of the book's own text and nothing else. The word channels read a
+third thing to place a row — the corpus's terminal table decides which
+occurrences of a firing pattern are free — so the Expediter's key carries that
+table's hash beside these two (`galley/src/sous/expediter.md`).
+
 ## The engine
 
 **One `memmem::Finder` per distinct firing glyph, searched per chapter.**

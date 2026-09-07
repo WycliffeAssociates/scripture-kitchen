@@ -66,6 +66,11 @@ struct Args {
     #[usage(long)]
     source: Option<PathBuf>,
 
+    /// Report runs of consecutive target words the declared source already
+    /// holds in the paired verse; the lane ships off.
+    #[usage(long)]
+    source_copy: bool,
+
     /// Consecutive target words a source-copy run needs before it is a row;
     /// the default is the shipped floor, and below two nothing fires.
     #[usage(long)]
@@ -151,27 +156,33 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         // The declared source enters as lengths alone; the alignment above is
         // the same pairing over the same keys, kept for the facts and for the
         // texts the CLI shows beside a fired row.
-        let lengths: Vec<(sous_core::BookKey, Vec<SourceVerse>, SourceWords)> = source_corpus
-            .iter()
-            .flat_map(|corpus| corpus.books())
-            .map(|book| {
-                (
-                    ProjectedBook::key(book),
-                    source_lengths(book),
-                    SourceWords::of(book),
-                )
-            })
-            .collect();
+        // The word lane is walked only for the lane that reads it.
+        let lengths: Vec<(sous_core::BookKey, Vec<SourceVerse>, Option<SourceWords>)> =
+            source_corpus
+                .iter()
+                .flat_map(|corpus| corpus.books())
+                .map(|book| {
+                    (
+                        ProjectedBook::key(book),
+                        source_lengths(book),
+                        args.source_copy.then(|| SourceWords::of(book)),
+                    )
+                })
+                .collect();
         let source: Vec<SourceLengths<'_>> = lengths
             .iter()
             .map(|(key, verses, words)| SourceLengths {
                 book: *key,
                 verses,
-                words: Some(words),
+                words: words.as_ref(),
             })
             .collect();
-        let (findings, patterns, paired) =
-            brigade_findings(&target_corpus, &source, args.source_copy_min_run);
+        let (findings, patterns, paired) = brigade_findings(
+            &target_corpus,
+            &source,
+            args.source_copy,
+            args.source_copy_min_run,
+        );
         if args.findings {
             print_findings(&target_corpus, &findings);
             if let (Some(alignment), Some(source_corpus)) = (&alignment, source_corpus.as_ref()) {
@@ -340,9 +351,12 @@ fn format_typo_report(groups: &[sous_core::typos::TypoGroup]) -> String {
 fn brigade_findings(
     corpus: &Corpus<'_, OnionBook>,
     source: &[SourceLengths<'_>],
+    source_copy: bool,
     min_run: Option<u32>,
 ) -> (Vec<PackedFinding>, Vec<Pattern>, Paired) {
     let mut config = <Brigade as ChapterPass>::Config::default();
+    config.1.lengths.source_copy = source_copy;
+    config.2.lengths.source_copy = source_copy;
     if let Some(min_run) = min_run {
         config.1.lengths.source_copy_min_run = min_run;
         config.2.lengths.source_copy_min_run = min_run;
@@ -1178,7 +1192,7 @@ mod tests {
         fs::write(&path, "\\id MRK\n\\c 1\n\\p\n\\v 1 An 🧅 \\\\ here.\n").unwrap();
         let target = load_input(&path, false).unwrap();
         let corpus = Corpus::try_new(&target.books).unwrap();
-        let (findings, patterns, _) = brigade_findings(&corpus, &[], None);
+        let (findings, patterns, _) = brigade_findings(&corpus, &[], false, None);
         // The one-verse book rosters every glyph it holds, so the pair rides
         // beside a handful of rarity sites.
         let hygiene: Vec<_> = findings

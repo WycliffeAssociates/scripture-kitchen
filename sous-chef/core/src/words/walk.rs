@@ -243,7 +243,9 @@ pub fn for_each_word(text: &str, verses: &[Verse], mut visit: impl FnMut(Occurre
     for (at, scalar) in text.char_indices() {
         let at = at as u32;
         while verses.get(verse).is_some_and(|row| row.text().from() <= at) {
-            scan.opened = true;
+            // Only when no word is standing: a verse that starts inside one
+            // does not make the NEXT word a verse-start capital.
+            scan.opened = scan.word.is_none();
             verse += 1;
         }
         scan.step(at, scalar, &mut visit);

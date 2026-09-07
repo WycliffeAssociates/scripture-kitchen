@@ -533,6 +533,61 @@ fn edit_one(rng: &mut Rng, edit: Edit, text: &mut String) -> Option<()> {
     Some(())
 }
 
+/// The edits one book's own text takes, so a declared source can be churned
+/// the way a target is; the three the caller handles are absent.
+const TEXT_MENU: &[Edit] = &[
+    Edit::InsertRun,
+    Edit::DeleteRun,
+    Edit::ReplaceRun,
+    Edit::InsertFootnote,
+    Edit::AppendChapter,
+    Edit::DropChapter,
+    Edit::MoveChapter,
+    Edit::ChapterSeam,
+];
+
+/// Replaces, withdraws, or restores one declared source, returning what it
+/// did.
+///
+/// The pairing cache is keyed by BOTH sides, and the project-scope order
+/// statistics are pooled over every pairing: a source that moves while every
+/// target stands still is the half of that key no target edit reaches.
+fn edit_a_reference<P: ChapterPass + Sync>(
+    rng: &mut Rng,
+    sous: &mut Expediter<P>,
+    references: &mut Vec<Book>,
+    withdrawn: &mut Vec<Book>,
+) -> &'static str {
+    let draw = rng.below(4);
+    if (draw == 3 || references.is_empty()) && !withdrawn.is_empty() {
+        let (id, text) = withdrawn.remove(rng.below(withdrawn.len()));
+        sous.update(id.as_str(), Role::Reference, &text).unwrap();
+        references.push((id, text));
+        return "restored";
+    }
+    if references.is_empty() {
+        return "none";
+    }
+    let at = rng.below(references.len());
+    if draw == 2 {
+        let (id, text) = references.remove(at);
+        assert!(sous.remove(&BookId::from(id.as_str())), "a live reference");
+        withdrawn.push((id, text));
+        return "withdrawn";
+    }
+    for _attempt in 0..8 {
+        let mut next = references[at].1.clone();
+        let drawn = TEXT_MENU[rng.below(TEXT_MENU.len())];
+        if edit_one(rng, drawn, &mut next).is_some() && OnionBook::parse(&next).is_ok() {
+            references[at].1 = next;
+            let (id, text) = &references[at];
+            sous.update(id.as_str(), Role::Reference, text).unwrap();
+            return "replaced";
+        }
+    }
+    "none"
+}
+
 fn two_of(rng: &mut Rng, len: usize) -> (usize, usize) {
     let left = rng.below(len);
     let right = (left + 1 + rng.below(len - 1)) % len;
@@ -550,6 +605,89 @@ fn cache_bytes<P: ChapterPass + Sync>(sous: &Expediter<P>) -> usize {
     sous.resident_bytes() - sous.pantry().warmer().resident_bytes()
 }
 
+/// What a churn run varies beyond the target texts.
+///
+/// Everything here is a cache key the Expediter does NOT derive from a target
+/// book's own bytes: the judging config, the declared source, and the two
+/// ceilings that decide what the cache is allowed to keep.
+struct Churn<C> {
+    /// Drawn per step and set before the publication; the cold oracle runs
+    /// under whatever it drew.
+    configs: Option<fn(&mut Rng) -> C>,
+    /// Whether a step may replace or withdraw a registered reference.
+    reference_edits: bool,
+    /// [`Expediter::with_hot_books`], when the run names one.
+    hot_books: Option<usize>,
+    /// [`Expediter::with_generations`], when the run names one.
+    generations: Option<usize>,
+}
+
+impl<C> Churn<C> {
+    /// The shipped ceilings, a fixed config, and a fixed source.
+    fn plain() -> Self {
+        Self {
+            configs: None,
+            reference_edits: false,
+            hot_books: None,
+            generations: None,
+        }
+    }
+}
+
+/// A judging config per step out of a small set: every channel switch and
+/// every threshold the word and length lanes key a cache on.
+///
+/// The first row is the shipped one, so a run that draws it still fires the
+/// rows the fixed-config runs fire.
+fn brigade_configs(rng: &mut Rng) -> <Brigade as ChapterPass>::Config {
+    let mut config = JudgingConfig::default();
+    match rng.below(8) {
+        0 => {}
+        1 => {
+            config.channels = Channels {
+                placement: false,
+                run_shape: false,
+                exact_neighbor: false,
+                pooled_neighbor: false,
+                rarity: false,
+                casing: false,
+                word_length: false,
+                doubled: false,
+                letter_runs: false,
+                sentence_start: false,
+            };
+        }
+        2 => {
+            config.terminal_upper_share_bp = 9_000;
+            config.sentence_start_upper_bp = 9_000;
+        }
+        3 => {
+            config.terminal_upper_share_bp = 8_000;
+            config.doubles_productive_bp = 0;
+        }
+        4 => {
+            config.channels.casing = false;
+            config.channels.doubled = false;
+            config.channels.letter_runs = false;
+        }
+        5 => {
+            config.lengths.enabled = false;
+            config.lengths.presence = false;
+            config.lengths.source_copy = true;
+        }
+        6 => {
+            config.lengths.presence = false;
+            config.lengths.source_copy = true;
+        }
+        _ => {
+            config.lengths.enabled = false;
+            config.lengths.source_copy = true;
+            config.terminal_upper_share_bp = 9_000;
+        }
+    }
+    ((), config, config)
+}
+
 /// Registers `books`, then runs `steps` seeded edits, asserting equality and
 /// the work bound after each.
 fn churn<P: ChapterPass + Sync + Copy>(
@@ -558,13 +696,13 @@ fn churn<P: ChapterPass + Sync + Copy>(
     seed: u64,
     steps: usize,
     books: Vec<Book>,
-) {
+) where
+    P::Config: Clone,
+{
     churn_paired(pass, name, seed, steps, books, Vec::new());
 }
 
-/// The same run with a fixed declared source registered beside the targets:
-/// every target edit is judged against it, and the resident publication still
-/// has to equal a cold one that pairs the same way.
+/// The same run with a fixed declared source registered beside the targets.
 fn churn_paired<P: ChapterPass + Sync + Copy>(
     pass: P,
     name: &str,
@@ -572,17 +710,50 @@ fn churn_paired<P: ChapterPass + Sync + Copy>(
     steps: usize,
     books: Vec<Book>,
     references: Vec<Book>,
-) {
+) where
+    P::Config: Clone,
+{
+    churn_with(pass, name, seed, steps, books, references, Churn::plain());
+}
+
+/// The churn proper: every target edit is judged against whatever config and
+/// declared source the step left standing, and the resident publication still
+/// has to equal a cold one over exactly those inputs.
+fn churn_with<P: ChapterPass + Sync + Copy>(
+    pass: P,
+    name: &str,
+    seed: u64,
+    steps: usize,
+    books: Vec<Book>,
+    references: Vec<Book>,
+    churn: Churn<P::Config>,
+) where
+    P::Config: Clone,
+{
     let mut rng = Rng(seed);
     let mut spares: Vec<&'static str> = SPARE_CODES.to_vec();
     let mut books = books;
     let mut sous = Expediter::new(pass, BUDGET);
+    if let Some(hot) = churn.hot_books {
+        sous = sous.with_hot_books(hot);
+    }
+    if let Some(kept) = churn.generations {
+        sous = sous.with_generations(kept);
+    }
     for (id, text) in &books {
         sous.update(id.as_str(), Role::Target, text).unwrap();
     }
+    let mut references = references;
+    let mut withdrawn: Vec<Book> = Vec::new();
     for (id, text) in &references {
         sous.update(id.as_str(), Role::Reference, text).unwrap();
     }
+    // A reference keeps the word lane only while the config that registered it
+    // would read one, so a run that switches `source_copy` on re-sends the
+    // text the way a host told to by `last_wordless_references` would.
+    let mut copying = pass
+        .length_config(sous.config())
+        .is_some_and(|lengths| lengths.source_copy);
     let mut digests: FxHashMap<String, Vec<String>> = books
         .iter()
         .map(|(id, text)| (id.clone(), chapter_digests(text)))
@@ -614,7 +785,25 @@ fn churn_paired<P: ChapterPass + Sync + Copy>(
             continue;
         };
         spares = spare_draw;
-        let context = format!("{name}: seed={seed:#x} step={step} edit={edit:?}");
+        let mut context = format!("{name}: seed={seed:#x} step={step} edit={edit:?}");
+
+        if let Some(draw) = churn.configs {
+            let config = draw(&mut rng);
+            let wants = pass
+                .length_config(&config)
+                .is_some_and(|lengths| lengths.source_copy);
+            sous.set_config(config);
+            if wants && !copying {
+                for (id, text) in &references {
+                    sous.update(id.as_str(), Role::Reference, text).unwrap();
+                }
+            }
+            copying = wants;
+        }
+        if churn.reference_edits && !(references.is_empty() && withdrawn.is_empty()) {
+            let moved = edit_a_reference(&mut rng, &mut sous, &mut references, &mut withdrawn);
+            context.push_str(&format!(" reference={moved}"));
+        }
 
         let live: FxHashSet<&String> = next.iter().map(|(id, _)| id).collect();
         let mut after: FxHashMap<String, Vec<String>> = FxHashMap::default();
@@ -683,6 +872,13 @@ fn churn_paired<P: ChapterPass + Sync + Copy>(
     // took: the ring keeps `kept + 1` tables per book and the observations
     // those tables name, and the sweep frees the rest.
     let mut fresh = Expediter::new(pass, BUDGET);
+    if let Some(hot) = churn.hot_books {
+        fresh = fresh.with_hot_books(hot);
+    }
+    if let Some(kept) = churn.generations {
+        fresh = fresh.with_generations(kept);
+    }
+    fresh.set_config(sous.config().clone());
     for (id, text) in &books {
         fresh.update(id.as_str(), Role::Target, text).unwrap();
     }
@@ -1011,6 +1207,323 @@ fn published(buffer: &[u8], lengths: bool) -> Vec<(u16, u32, u32)> {
             })
         })
         .collect()
+}
+
+/// A corpus whose `;` is followed by a capital 17 times in 20 — between the
+/// shipped `terminal_upper_share_bp` and 9,000, so the same bytes read the
+/// glyph two ways under two configs.
+///
+/// `ndeti` stands lowercase in both books and Title once in each: after a
+/// comma in the first, which decides nothing either way, and after the `;` in
+/// the second. The casing pattern is in the table under both configs and both
+/// books fire it under both — a firing set is position-blind — so the only
+/// thing that moves is where the second book's rows LAND.
+fn terminal_split_books() -> Vec<Book> {
+    // Enough free occurrences that ONE more Title still clears the word
+    // ladder's 30 bp rung: the row is in the table under both configs, and
+    // only where the second book's copy lands moves.
+    let filler = "ndeti wa ".repeat(350);
+    let mut first = String::from("\\id GEN\n\\h GEN\n\\c 1\n\\p\n");
+    first.push_str(&format!("\\v 1 {filler}\n"));
+    first.push_str("\\v 2 esa, Ndeti wa\n");
+    for verse in 0..16 {
+        first.push_str(&format!("\\v {} esa; Aet wa\n", verse + 3));
+    }
+    for verse in 0..3 {
+        first.push_str(&format!("\\v {} esa; aet wa\n", verse + 19));
+    }
+    let mut second = String::from("\\id EXO\n\\h EXO\n\\c 1\n\\p\n");
+    second.push_str(&format!("\\v 1 {filler}\n"));
+    second.push_str("\\v 2 esa; Ndeti wa\n");
+    vec![
+        ("target/GEN.usfm".to_string(), first),
+        ("target/EXO.usfm".to_string(), second),
+    ]
+}
+
+/// The corpus's terminal table decides WHERE a word row lands, not only which
+/// rows the judge emits: a book whose own text and firing set stand still
+/// still has to be sited again when the table under it moves.
+#[test]
+fn moving_the_terminal_table_re_sites_a_book_whose_own_text_stood_still() {
+    let books = terminal_split_books();
+    // No hot set, so both books answer from the book-grain site cache — the
+    // one keyed by the firing set alone.
+    let mut sous = Expediter::new(Brigade::default(), BUDGET).with_hot_books(0);
+    let forcing = JudgingConfig::default();
+    let free = JudgingConfig {
+        terminal_upper_share_bp: 9_000,
+        ..JudgingConfig::default()
+    };
+    sous.set_config(((), forcing, forcing));
+    for (id, text) in &books {
+        sous.update(id.as_str(), Role::Target, text).unwrap();
+    }
+    assert_publications_agree(&mut sous, &books, "terminals: `;` forces");
+    let under_forcing = sous.publish().unwrap();
+
+    sous.set_config(((), free, free));
+    assert_publications_agree(&mut sous, &books, "terminals: `;` is free");
+    let under_free = sous.publish().unwrap();
+    assert_eq!(sous.last_mapped(), 0, "no chapter was re-mapped");
+    assert_eq!(sous.last_folded(), 0, "no book was re-folded");
+    assert_ne!(
+        under_forcing, under_free,
+        "the knob is what the fixture is for"
+    );
+}
+
+/// The judging config redrawn per step: every channel switch, both casing
+/// thresholds, the doubling recusal bar, and the three length channels.
+///
+/// What it proves is that no cache key is blind to the config that filled it —
+/// the firing hash, the terminal hash the site caches carry, the pairing key's
+/// walked flag, and the kept word verdicts.
+fn churn_config<P: ChapterPass + Sync + Copy>(
+    pass: P,
+    name: &str,
+    seed: u64,
+    steps: usize,
+    books: Vec<Book>,
+    references: Vec<Book>,
+    draw: fn(&mut Rng) -> P::Config,
+) where
+    P::Config: Clone,
+{
+    let churn = Churn {
+        configs: Some(draw),
+        ..Churn::plain()
+    };
+    churn_with(pass, name, seed, steps, books, references, churn);
+}
+
+/// The declared source replaced, withdrawn, and put back mid-run.
+fn churn_reference<P: ChapterPass + Sync + Copy>(
+    pass: P,
+    name: &str,
+    seed: u64,
+    steps: usize,
+    books: Vec<Book>,
+    references: Vec<Book>,
+) where
+    P::Config: Clone,
+{
+    let churn = Churn {
+        reference_edits: true,
+        ..Churn::plain()
+    };
+    churn_with(pass, name, seed, steps, books, references, churn);
+}
+
+/// One hot book and two kept generations: the smallest cache the ceilings
+/// allow, so a book leaves the hot set on nearly every edit and an undo of two
+/// steps is the deepest one a ring can answer.
+fn churn_small_cache<P: ChapterPass + Sync + Copy>(
+    pass: P,
+    name: &str,
+    seed: u64,
+    steps: usize,
+    books: Vec<Book>,
+    references: Vec<Book>,
+) where
+    P::Config: Clone,
+{
+    let churn = Churn {
+        hot_books: Some(1),
+        generations: Some(2),
+        ..Churn::plain()
+    };
+    churn_with(pass, name, seed, steps, books, references, churn);
+}
+
+#[test]
+fn churn_over_a_synthetic_corpus_under_a_drifting_config() {
+    churn_config(
+        Brigade::default(),
+        "drifting",
+        0x5EED_0006,
+        200,
+        worded_books("target", SHARED),
+        worded_books("source", SHARED),
+        brigade_configs,
+    );
+}
+
+#[test]
+fn churn_over_a_synthetic_corpus_under_a_drifting_config_from_a_second_seed() {
+    churn_config(
+        Brigade::default(),
+        "drifting-b",
+        0xD00D_0000_0000_0006,
+        200,
+        worded_books("target", SHARED),
+        worded_books("source", SHARED),
+        brigade_configs,
+    );
+}
+
+#[test]
+fn churn_over_a_synthetic_corpus_with_a_moving_reference() {
+    churn_reference(
+        Brigade::default(),
+        "moving-source",
+        0x5EED_0007,
+        200,
+        paired_targets(),
+        flat_sources(),
+    );
+}
+
+#[test]
+fn churn_over_a_synthetic_corpus_with_a_moving_reference_from_a_second_seed() {
+    churn_reference(
+        Brigade::default(),
+        "moving-source-b",
+        0xD00D_0000_0000_0007,
+        200,
+        paired_targets(),
+        flat_sources(),
+    );
+}
+
+#[test]
+fn churn_over_a_synthetic_corpus_with_a_small_cache() {
+    churn_small_cache(
+        Brigade::default(),
+        "small-cache",
+        0x5EED_0008,
+        200,
+        synthetic(),
+        Vec::new(),
+    );
+}
+
+#[test]
+fn churn_over_a_synthetic_corpus_with_a_small_cache_from_a_second_seed() {
+    churn_small_cache(
+        Brigade::default(),
+        "small-cache-b",
+        0xD00D_0000_0000_0008,
+        200,
+        synthetic(),
+        Vec::new(),
+    );
+}
+
+/// The first `count` books of the committed corpus again under source ids,
+/// every verse padded a little and every fortieth cut to one word.
+///
+/// They carry the target's own `BookKey`s, so those books pair and the rest
+/// publish unpaired — the mixed corpus a host actually holds. An untouched
+/// copy pairs one to one, and a copy cut in a few places alone puts every
+/// point above the median inside the outlier itself; the padding is what
+/// gives the ratios a median and a small MAD for the cuts to stand out from.
+fn en_ulb_sources(count: usize) -> Vec<Book> {
+    en_ulb()
+        .into_iter()
+        .take(count)
+        .map(|(id, text)| {
+            let mut out = String::with_capacity(text.len() + text.len() / 8);
+            let mut seen = 0usize;
+            for line in text.split_inclusive('\n') {
+                let Some(rest) = line.strip_prefix("\\v ") else {
+                    out.push_str(line);
+                    continue;
+                };
+                seen += 1;
+                let number = rest.split_whitespace().next().unwrap_or("1");
+                if seen.is_multiple_of(40) {
+                    out.push_str(&format!("\\v {number} short\n"));
+                    continue;
+                }
+                out.push_str(line.trim_end_matches('\n'));
+                out.push(' ');
+                out.push_str(&"ya ".repeat(1 + seen % 5));
+                out.push('\n');
+            }
+            (format!("source/{id}"), out)
+        })
+        .collect()
+}
+
+#[test]
+#[ignore = "only proof that a whole-Bible corpus republished under a config that moves every step stays byte-equal to a cold publication under the config it drew"]
+fn churn_over_en_ulb_under_a_drifting_config() {
+    churn_config(
+        Brigade::default(),
+        "en_ulb-drifting",
+        0x5EED_0106,
+        50,
+        en_ulb(),
+        en_ulb_sources(4),
+        brigade_configs,
+    );
+}
+
+#[test]
+#[ignore = "the drifting-config whole-Bible churn from a second seed: the only guard against a seed-shaped hole in the config draws"]
+fn churn_over_en_ulb_under_a_drifting_config_from_a_second_seed() {
+    churn_config(
+        Brigade::default(),
+        "en_ulb-drifting-b",
+        0xD00D_0000_0000_0106,
+        50,
+        en_ulb(),
+        en_ulb_sources(4),
+        brigade_configs,
+    );
+}
+
+#[test]
+#[ignore = "only proof that a whole-Bible corpus whose declared source is replaced, withdrawn, and restored mid-run stays byte-equal to a cold publication over the sources still registered"]
+fn churn_over_en_ulb_with_a_moving_reference() {
+    churn_reference(
+        Brigade::default(),
+        "en_ulb-moving-source",
+        0x5EED_0107,
+        50,
+        en_ulb(),
+        en_ulb_sources(4),
+    );
+}
+
+#[test]
+#[ignore = "the moving-source whole-Bible churn from a second seed"]
+fn churn_over_en_ulb_with_a_moving_reference_from_a_second_seed() {
+    churn_reference(
+        Brigade::default(),
+        "en_ulb-moving-source-b",
+        0xD00D_0000_0000_0107,
+        50,
+        en_ulb(),
+        en_ulb_sources(4),
+    );
+}
+
+#[test]
+#[ignore = "only proof that a whole-Bible corpus under the smallest hot set and shortest generation ring still replays byte-equal to a cold publication"]
+fn churn_over_en_ulb_with_a_small_cache() {
+    churn_small_cache(
+        Brigade::default(),
+        "en_ulb-small-cache",
+        0x5EED_0108,
+        50,
+        en_ulb(),
+        Vec::new(),
+    );
+}
+
+#[test]
+#[ignore = "the small-cache whole-Bible churn from a second seed"]
+fn churn_over_en_ulb_with_a_small_cache_from_a_second_seed() {
+    churn_small_cache(
+        Brigade::default(),
+        "en_ulb-small-cache-b",
+        0xD00D_0000_0000_0108,
+        50,
+        en_ulb(),
+        Vec::new(),
+    );
 }
 
 #[test]
