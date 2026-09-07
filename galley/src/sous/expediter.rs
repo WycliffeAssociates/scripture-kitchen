@@ -191,6 +191,14 @@ fn key_bytes(key: PatternKey) -> [u8; 10] {
 /// many edits still lands on a retained chapter table.
 const DEFAULT_GENERATIONS: usize = 4;
 
+/// Books whose released member's chapter rows are kept anyway, most recently
+/// edited first: a keystroke lands in the book the last one landed in, and
+/// that book then re-maps one chapter instead of all of them.
+///
+/// Two, because the price is that member's rows for a whole book — about
+/// 100-150 KB of `Words` per Bible book (evidence.md, W1 grain).
+const DEFAULT_HOT_BOOKS: usize = 2;
+
 /// The Sous coordinator over one [`ChapterPass`].
 ///
 /// Holds the [`Pantry`] the host mutates it through, the observation cache
@@ -223,6 +231,14 @@ pub struct Expediter<P: ChapterPass> {
     generations: FxHashMap<BookId, Vec<RawChecksum>>,
     /// Ring depth behind the current checksum.
     kept: usize,
+    /// The books whose chapter rows survive [`ChapterPass::release`], most
+    /// recently edited first; never longer than `hot_ceiling`.
+    hot: Vec<BookId>,
+    /// How many books keep them; [`DEFAULT_HOT_BOOKS`] unless a host says.
+    hot_ceiling: usize,
+    /// Books that fell out of [`Self::hot`] and still owe their rows back;
+    /// released at the end of the next publication, never before its folds.
+    cooling: Vec<BookId>,
     /// Set when a table or a ring changed, so something may now be
     /// unreachable; a publication that finds it clear skips the sweep.
     dirty: bool,
@@ -284,6 +300,9 @@ impl<P: ChapterPass + Sync> Expediter<P> {
             tallied: FxHashMap::default(),
             generations: FxHashMap::default(),
             kept: DEFAULT_GENERATIONS,
+            hot: Vec::new(),
+            hot_ceiling: DEFAULT_HOT_BOOKS,
+            cooling: Vec::new(),
             dirty: false,
             pending: 0,
             pending_remaps: 0,
@@ -309,6 +328,32 @@ impl<P: ChapterPass + Sync> Expediter<P> {
     pub fn with_generations(mut self, kept: usize) -> Self {
         self.kept = kept;
         self
+    }
+
+    /// How many recently edited books keep a book-grain member's chapter rows
+    /// instead of shedding them; the default is [`DEFAULT_HOT_BOOKS`].
+    ///
+    /// Zero is the behaviour before there was a hot set: every book re-maps
+    /// whole. A pass that retains chapters never sheds any, so this changes
+    /// nothing for it.
+    pub fn with_hot_books(mut self, hot: usize) -> Self {
+        self.hot_ceiling = hot;
+        self.cool_beyond_ceiling();
+        self
+    }
+
+    /// The books whose chapter rows the next publication will not shed, most
+    /// recently edited first.
+    pub fn hot_books(&self) -> &[BookId] {
+        &self.hot
+    }
+
+    /// Moves whatever no longer fits the ceiling into [`Self::cooling`].
+    fn cool_beyond_ceiling(&mut self) {
+        while self.hot.len() > self.hot_ceiling {
+            self.cooling
+                .push(self.hot.pop().expect("longer than the ceiling"));
+        }
     }
 
     /// Derive and retain this book's products and its text; its chapters are
@@ -346,6 +391,10 @@ impl<P: ChapterPass + Sync> Expediter<P> {
     /// `false` when the id was not registered.
     pub fn remove(&mut self, id: &BookId) -> bool {
         self.dirty |= self.generations.remove(id).is_some();
+        // The rows go with the ring at the next sweep, so a removed book owes
+        // nothing back and leaves no slot warm.
+        self.hot.retain(|seen| seen != id);
+        self.cooling.retain(|seen| seen != id);
         self.pantry.remove(id)
     }
 
@@ -418,9 +467,9 @@ impl<P: ChapterPass + Sync> Expediter<P> {
 
     /// The Pantry's retained products plus this cache's own rows.
     ///
-    /// Shallow in one place: an observation counts only its own inline size,
-    /// because [`ChapterPass`] states no size for one. An aggregate is real —
-    /// [`ChapterPass::aggregate_bytes`] sums the heap a pass hangs off it.
+    /// Real on both sides: [`ChapterPass::aggregate_bytes`] and
+    /// [`ChapterPass::observation_bytes`] sum the heap a pass hangs off each,
+    /// so a hot book's unshed chapter rows are counted where they are held.
     pub fn resident_bytes(&self) -> usize {
         let rows: usize = self
             .chapter_tables
@@ -444,8 +493,13 @@ impl<P: ChapterPass + Sync> Expediter<P> {
             .values()
             .map(|ring| size_of::<BookId>() + ring.len() * size_of::<RawChecksum>())
             .sum();
+        let held: usize = self
+            .observations
+            .values()
+            .map(|obs| size_of::<ObservationKey>() + self.pass.observation_bytes(obs))
+            .sum();
         self.pantry.resident_bytes()
-            + self.observations.len() * (size_of::<ObservationKey>() + size_of::<P::Observation>())
+            + held
             + rows
             + cached
             + sites
@@ -481,6 +535,9 @@ impl<P: ChapterPass + Sync> Expediter<P> {
             aggregates,
             generations,
             kept,
+            hot,
+            hot_ceiling,
+            cooling,
             dirty,
             pending,
             pending_remaps,
@@ -494,10 +551,27 @@ impl<P: ChapterPass + Sync> Expediter<P> {
             ring.insert(0, checksum);
             ring.truncate(*kept + 1);
             *dirty = true;
+            // The book's text moved, so it goes to the front of the hot set
+            // and whatever that pushes off owes its rows back.
+            if hot.first() != Some(id) {
+                hot.retain(|seen| seen != id);
+                hot.insert(0, id.clone());
+                while hot.len() > *hot_ceiling {
+                    cooling.push(hot.pop().expect("longer than the ceiling"));
+                }
+            }
         }
         let regrain = !P::RETAIN_CHAPTERS && !aggregates.contains_key(&checksum);
+        // A row a hot book kept is as good as one mapped this publication:
+        // `release` is what a fold may not read, and it never ran on these.
         if let Some(table) = chapter_tables.get(&checksum)
-            && (!regrain || table.iter().all(|row| fresh.contains(&row.observation)))
+            && (!regrain
+                || table.iter().all(|row| {
+                    fresh.contains(&row.observation)
+                        || observations
+                            .get(&row.observation)
+                            .is_some_and(|held| !pass.is_released(held))
+                }))
         {
             return Ok(());
         }
@@ -681,6 +755,9 @@ impl<P: ChapterPass + Sync> Expediter<P> {
                 sites,
                 totals,
                 tallied,
+                generations,
+                hot,
+                cooling,
                 ..
             } = &mut *self;
             let checksums: Vec<RawChecksum> = books
@@ -709,12 +786,33 @@ impl<P: ChapterPass + Sync> Expediter<P> {
                 folded.push(*checksum);
             }
             // Book grain: every fold this publication needed has run, so the
-            // rows it read are dropped. The aggregate is what survives.
+            // rows it read are dropped — except the hot set's, which are the
+            // point of keeping one. The aggregate is what survives either way.
+            let cooled = core::mem::take(cooling);
             if !P::RETAIN_CHAPTERS {
-                for checksum in &folded {
+                let warm: FxHashSet<RawChecksum> = hot
+                    .iter()
+                    .filter_map(|id| generations.get(id)?.first().copied())
+                    .collect();
+                let mut shed = |checksum: &RawChecksum| {
+                    if warm.contains(checksum) {
+                        return;
+                    }
                     for row in &chapter_tables[checksum] {
                         if let Some(obs) = observations.get_mut(&row.observation) {
                             pass.release(obs);
+                        }
+                    }
+                };
+                for checksum in &folded {
+                    shed(checksum);
+                }
+                // A book that fell out of the hot set gives back every
+                // generation's rows, this publication's folds all done.
+                for id in &cooled {
+                    for checksum in generations.get(id).into_iter().flatten() {
+                        if chapter_tables.contains_key(checksum) {
+                            shed(checksum);
                         }
                     }
                 }
@@ -1182,11 +1280,12 @@ mod tests {
         assert_eq!(rows(&buffer).len(), 3, "still one finding per chapter");
     }
 
-    /// `Words` retains no chapter rows, so an edit anywhere in a book re-maps
-    /// that whole book — and no other.
+    /// `Words` retains no chapter rows, so an edit anywhere in a COLD book
+    /// re-maps that whole book — and no other. `with_hot_books(0)` is what
+    /// makes every book cold; the hot set's own claim is pinned below.
     #[test]
     fn a_book_grain_pass_remaps_the_edited_book_and_nothing_else() {
-        let mut sous = sous();
+        let mut sous = sous().with_hot_books(0);
         sous.update("b/mrk.usfm", Role::Target, &mark()).unwrap();
         sous.update("a/gen.usfm", Role::Target, &genesis()).unwrap();
         sous.publish().unwrap();
@@ -1203,7 +1302,7 @@ mod tests {
     /// rows: the fold reads them and the publication drops them.
     #[test]
     fn a_book_grain_pass_sheds_its_chapter_rows_after_the_fold() {
-        let mut sous = sous();
+        let mut sous = sous().with_hot_books(0);
         sous.update("b/mrk.usfm", Role::Target, &mark()).unwrap();
         sous.publish().unwrap();
         assert_eq!(sous.resident_observations(), 3);
@@ -1221,7 +1320,7 @@ mod tests {
     #[test]
     fn a_keystroke_in_one_chapter_rewalks_words_for_the_book_but_glyphs_only_for_the_chapter() {
         let mut sous: Expediter<(Counting<Substrate>, Words)> =
-            Expediter::new((Counting::default(), Words), 1 << 20);
+            Expediter::new((Counting::default(), Words), 1 << 20).with_hot_books(0);
         sous.update("b/mrk.usfm", Role::Target, &mark()).unwrap();
         let before = sous.publish().unwrap();
         assert_eq!(sous.last_mapped(), 3, "cold: every chapter");
@@ -1252,6 +1351,123 @@ mod tests {
             "a member that shed nothing is not asked to walk again"
         );
         assert_ne!(published, before, "the edit is published");
+    }
+
+    /// Four books in canonical order, so a cold publication leaves the last
+    /// two hot and the first two cold.
+    fn four_books(sous: &mut Expediter<Brigade>) {
+        for (id, code) in [
+            ("a/gen.usfm", "GEN"),
+            ("b/mrk.usfm", "MRK"),
+            ("c/luk.usfm", "LUK"),
+            ("d/rev.usfm", "REV"),
+        ] {
+            let text = match code {
+                "GEN" => genesis(),
+                "MRK" => mark(),
+                other => book(other, &["A first \\\\ chapter.", "A second \\\\ one."]),
+            };
+            sous.update(id, Role::Target, &text).unwrap();
+        }
+        sous.publish().unwrap();
+    }
+
+    /// Every word row the observation cache is holding right now.
+    fn word_row_bytes(sous: &Expediter<Brigade>) -> usize {
+        sous.observations
+            .values()
+            .map(|(_, _, words)| words.resident_bytes())
+            .sum()
+    }
+
+    /// The hot set is what turns the second keystroke in one book into one
+    /// chapter's walk: the first one's rows were shed at the last fold, and
+    /// the edit that shed them is what made the book hot.
+    #[test]
+    fn a_second_keystroke_in_a_hot_book_remaps_only_the_chapter_it_moved() {
+        let mut sous = sous();
+        four_books(&mut sous);
+        assert_eq!(
+            sous.hot_books(),
+            [BookId::from("d/rev.usfm"), BookId::from("c/luk.usfm")],
+            "the last two indexed"
+        );
+
+        let once = mark().replace("A withered", "A shrivelled");
+        sous.update("b/mrk.usfm", Role::Target, &once).unwrap();
+        sous.publish().unwrap();
+        assert_eq!(sous.last_mapped(), 3, "cold: MRK's three chapters");
+        assert_eq!(sous.last_remapped(), 2, "two of them kept a glyph row");
+        assert_eq!(sous.hot_books()[0], BookId::from("b/mrk.usfm"));
+
+        let twice = once.replace("He entered", "He walked into");
+        sous.update("b/mrk.usfm", Role::Target, &twice).unwrap();
+        let published = sous.publish().unwrap();
+        assert_eq!(sous.last_mapped(), 1, "hot: the moved chapter alone");
+        assert_eq!(sous.last_remapped(), 0, "nothing was shed to walk again");
+        assert_eq!(rows(&published).len(), 8, "one finding per chapter");
+    }
+
+    /// And it is bounded: the third book edited after it pushes the first out,
+    /// and the rows it was keeping go back at that publication.
+    #[test]
+    fn a_book_that_falls_out_of_the_hot_set_walks_whole_again() {
+        let mut sous = sous();
+        four_books(&mut sous);
+        let edited = mark().replace("A withered", "A shrivelled");
+        sous.update("b/mrk.usfm", Role::Target, &edited).unwrap();
+        sous.publish().unwrap();
+        let warm = word_row_bytes(&sous);
+
+        for (id, code) in [("c/luk.usfm", "LUK"), ("d/rev.usfm", "REV")] {
+            let text = book(code, &["A first \\\\ chapter.", "A later \\\\ one."]);
+            sous.update(id, Role::Target, &text).unwrap();
+            sous.publish().unwrap();
+        }
+        assert!(
+            !sous.hot_books().contains(&BookId::from("b/mrk.usfm")),
+            "two other books were edited after it"
+        );
+        assert!(
+            word_row_bytes(&sous) < warm,
+            "MRK's word rows went back: {} B against {warm} B",
+            word_row_bytes(&sous)
+        );
+
+        let again = edited.replace("He entered", "He walked into");
+        sous.update("b/mrk.usfm", Role::Target, &again).unwrap();
+        sous.publish().unwrap();
+        assert_eq!(sous.last_mapped(), 3, "cold again: the whole book");
+        assert_eq!(sous.last_remapped(), 2);
+    }
+
+    /// What the hot set costs is the rows it keeps, and `resident_bytes`
+    /// says so: the same corpus with the set switched off is smaller by
+    /// exactly one book's word rows.
+    #[test]
+    fn resident_bytes_counts_the_rows_a_hot_book_keeps() {
+        let mut cold = sous().with_hot_books(0);
+        let mut hot = sous();
+        for sous in [&mut cold, &mut hot] {
+            sous.update("b/mrk.usfm", Role::Target, &mark()).unwrap();
+            sous.publish().unwrap();
+        }
+        let kept: usize = hot
+            .observations
+            .values()
+            .map(|obs| hot.pass().observation_bytes(obs))
+            .sum::<usize>()
+            - cold
+                .observations
+                .values()
+                .map(|obs| cold.pass().observation_bytes(obs))
+                .sum::<usize>();
+        assert!(kept > 0, "MRK's three chapters hold cased words");
+        assert_eq!(
+            hot.resident_bytes() - cold.resident_bytes(),
+            kept,
+            "the difference is the rows and nothing else"
+        );
     }
 
     /// The same chapter 1 in two books: one cache entry, two published rows.
@@ -1456,7 +1672,7 @@ mod tests {
     /// and re-folds the book it lands on — and publishes the identical bytes.
     #[test]
     fn a_book_grain_pass_keeps_one_aggregate_per_book_through_edits_and_an_undo() {
-        let mut sous = sous().with_generations(4);
+        let mut sous = sous().with_generations(4).with_hot_books(0);
         sous.update("a/gen.usfm", Role::Target, &genesis()).unwrap();
         let versions: Vec<String> = ["one", "two", "three", "four"]
             .iter()

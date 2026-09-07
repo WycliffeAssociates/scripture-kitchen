@@ -405,6 +405,12 @@ impl ChapterPass for Words {
         aggregate.resident_bytes()
     }
 
+    /// The rows, not the 24-byte header: a host keeping a hot book's chapters
+    /// unreleased pays this per chapter.
+    fn observation_bytes(&self, observation: &WordRow) -> usize {
+        observation.resident_bytes()
+    }
+
     fn tally(&self, totals: &mut CorpusTotals, books: &[&WordAggregate]) {
         totals.words.add(books);
     }

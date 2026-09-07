@@ -62,6 +62,11 @@ impl ChapterPass for HygieneBytes {
     fn aggregate_bytes(&self, aggregate: &Self::Aggregate) -> usize {
         size_of::<Self::Aggregate>() + size_of_val(&**aggregate)
     }
+
+    /// Capacity, not length: the `Vec` `scan` handed back keeps what it grew.
+    fn observation_bytes(&self, observation: &Self::Observation) -> usize {
+        size_of::<Self::Observation>() + observation.capacity() * size_of::<HygieneFinding>()
+    }
 }
 
 /// One maximal run in projected-book UTF-8 coordinates.

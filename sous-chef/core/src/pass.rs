@@ -171,6 +171,19 @@ pub trait ChapterPass {
         size_of::<Self::Aggregate>()
     }
 
+    /// Real bytes one resident chapter observation holds, inline size
+    /// included — the same claim [`aggregate_bytes`](Self::aggregate_bytes)
+    /// makes one level up.
+    ///
+    /// Default: `size_of::<Self::Observation>()`. A host that keeps a
+    /// book-grain member's rows unreleased for its hot books pays this per
+    /// chapter, so a pass whose observation owns a `Vec` or a `Box<[_]>`
+    /// overrides it or the host's byte count is a fiction.
+    fn observation_bytes(&self, observation: &Self::Observation) -> usize {
+        let _ = observation;
+        size_of::<Self::Observation>()
+    }
+
     /// Adds these books to the corpus totals a host keeps resident.
     /// Default: none — the pass merges whatever it judges, every time.
     fn tally(&self, totals: &mut CorpusTotals, books: &[&Self::Aggregate]) {
@@ -295,6 +308,10 @@ impl<A: ChapterPass, B: ChapterPass> ChapterPass for (A, B) {
 
     fn aggregate_bytes(&self, aggregate: &Self::Aggregate) -> usize {
         self.0.aggregate_bytes(&aggregate.0) + self.1.aggregate_bytes(&aggregate.1)
+    }
+
+    fn observation_bytes(&self, observation: &Self::Observation) -> usize {
+        self.0.observation_bytes(&observation.0) + self.1.observation_bytes(&observation.1)
     }
 
     fn tally(&self, totals: &mut CorpusTotals, books: &[&Self::Aggregate]) {
@@ -439,6 +456,12 @@ impl<A: ChapterPass, B: ChapterPass, C: ChapterPass> ChapterPass for (A, B, C) {
         self.0.aggregate_bytes(&aggregate.0)
             + self.1.aggregate_bytes(&aggregate.1)
             + self.2.aggregate_bytes(&aggregate.2)
+    }
+
+    fn observation_bytes(&self, observation: &Self::Observation) -> usize {
+        self.0.observation_bytes(&observation.0)
+            + self.1.observation_bytes(&observation.1)
+            + self.2.observation_bytes(&observation.2)
     }
 
     fn tally(&self, totals: &mut CorpusTotals, books: &[&Self::Aggregate]) {

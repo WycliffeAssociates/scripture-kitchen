@@ -191,8 +191,11 @@ still a row a fresh merge holds, and only its last book leaving takes it away.
 an uncased chapter's row is empty too, and it is whole. A host re-walks a whole
 edited book instead of one chapter and keeps 3.4-5.3 MB per Bible instead of
 7.5-9.6 (evidence.md, W1 grain and W3); only this member re-walks, because the
-tuple's `remap` leaves its neighbours' retained rows alone. The seam is
-`galley/src/sous/expediter.md`.
+tuple's `remap` leaves its neighbours' retained rows alone. A host is free to
+exempt a few books it expects the next keystroke in — `galley::sous::Expediter`
+exempts two, and pays `observation_bytes` for them — which buys back the
+one-chapter walk for the book being typed in without buying the whole Bible.
+The seam is `galley/src/sous/expediter.md`.
 
 ## Judging, and placing
 

@@ -446,6 +446,10 @@ impl ChapterPass for Substrate {
         aggregate.resident_bytes()
     }
 
+    fn observation_bytes(&self, observation: &ChapterRow) -> usize {
+        observation.resident_bytes()
+    }
+
     /// Rescans this book's text for every pattern its own counts hold, and
     /// pushes one `Convention` row per matching run.
     fn locate(

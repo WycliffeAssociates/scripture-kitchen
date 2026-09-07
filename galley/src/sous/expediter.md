@@ -116,6 +116,44 @@ walk the edited book whole, the glyph walk runs for the edited chapter alone.
 The flag is why the check is honest — `release` sets it, so an uncased
 chapter's genuinely empty row is never taken for a shed one.
 
+## The hot set: two books do not shed at all
+
+Shedding is per book, so the last step of a publication asks which books are
+worth exempting. The answer is the ones a keystroke will land in again: an
+editor types into one book for minutes at a time, and the second keystroke
+there should not pay for the first one's decision.
+
+```text
+hot = the books whose text moved most recently, newest first, at most N (2)
+
+fold done -> for every book folded this publication:
+               in hot -> keep its rows whole
+               else    -> pass.release each observation
+             for every book that just fell out of hot:
+               pass.release each observation of every generation it holds
+```
+
+The set is ordered by *edits*, not by publications: `index_book` moves a book
+to the front exactly when its ring takes a new checksum, so republishing an
+untouched corpus reorders nothing. `with_hot_books(0)` is the behaviour before
+there was a set, and every test that pins the shed-grain law asks for it.
+
+What this buys is the difference between a cold book's keystroke and a hot
+one's. Cold, the aggregate is gone and every chapter's rows are shed, so the
+whole book walks again — `last_mapped` 16, `last_remapped` 15 for MRK. Hot,
+the rows are still whole, so only the chapter whose `ObservationKey` moved is
+absent: `last_mapped` 1, `last_remapped` 0. That is the entire word rewalk of
+an edited book, gone from every keystroke after the first
+(evidence.md, W1e step 2).
+
+What it costs is N books' word rows, which `resident_bytes` counts through
+`ChapterPass::observation_bytes`: 281 KB for two books of `en_ulb`, ~137 KB
+each, against the 24 B a shed row leaves. `remove` takes a book out of the set
+without owing anything, because its rows go with its ring at the next sweep.
+Releasing is never a correctness question — a released row is walked again on
+demand — so a row two books share may be shed for the cold one and simply
+re-walked for the hot one.
+
 So a markup-only edit, which moves the `RawChecksum` and not one
 `ObservationKey`, now re-maps the book it touched: the aggregate is keyed by
 the raw checksum, and the rows that could have folded it again are gone.
@@ -234,9 +272,10 @@ undo re-maps and re-folds regardless.
 one entry per resident observation, chapter row, cached aggregate, and ring
 slot, plus the corpus tally's own rows — which the sweep does not bound,
 because the tally holds one row per word the current corpus has and no
-generation of it. Shallow in one place: the heap a pass hangs off an
-observation is not counted, because `ChapterPass` states no size for one. An
-aggregate's real heap IS counted, via `ChapterPass::aggregate_bytes`.
+generation of it. Both sides are real heap and not inline size:
+`ChapterPass::aggregate_bytes` for an aggregate and
+`ChapterPass::observation_bytes` for a chapter row, which is what makes a hot
+book's unshed rows visible where they are held rather than free by omission.
 
 The sweep is skipped outright when no table was added and no ring aged since
 the last one — a republication of an untouched corpus has nothing to free, and

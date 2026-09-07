@@ -105,12 +105,17 @@ across publications: a pass that answers `false` gets it back only for a
 book's current checksum, never an older generation
 (`galley/src/sous/expediter.md`).
 
-A third hook, `fn aggregate_bytes(&Aggregate) -> usize`, says what a resident
-aggregate really costs: default `size_of::<Aggregate>()`, right for an
-aggregate with no heap of its own. `Substrate`, `Words`, and `HygieneBytes`
-override it to sum the `Vec`s and boxed slices they hang off theirs, and a
-tuple sums its members' — a `WordAggregate` holding thousands of rows is not
-32 B (evidence.md, 2026-09-04 "the ~58 MiB").
+Two more hooks say what a resident cache really costs:
+`fn aggregate_bytes(&Aggregate) -> usize` and
+`fn observation_bytes(&Observation) -> usize`. Both default to the inline size,
+right for a product with no heap of its own; `Substrate`, `Words`, and
+`HygieneBytes` override both to sum the `Vec`s and boxed slices they hang off
+theirs, and a tuple sums its members'. A `WordAggregate` holding thousands of
+rows is not 32 B (evidence.md, 2026-09-04 "the ~58 MiB"), and a `WordRow` a
+host kept instead of shedding is not 24 B — which is the whole point of the
+second hook, since a host that exempts its hot books from `release`
+(`galley/src/sous/expediter.md`) is holding those rows on purpose and has to
+say so.
 
 `CorpusTotals` is concrete rather than an associated type: a host holds exactly
 one whatever pass it drives, and a rule that wants resident totals adds its own
