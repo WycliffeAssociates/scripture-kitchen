@@ -20,7 +20,7 @@
 use rustc_hash::FxHashMap;
 
 use crate::pass::Findings;
-use crate::substrate::{BookAggregate, OuterClass, RUN_BUCKETS, ScalarKey};
+use crate::substrate::{BookAggregate, Case, FollowCounts, OuterClass, RUN_BUCKETS, ScalarKey};
 use crate::unicode::{Pool, class_of, pool_of};
 use crate::words::{Form, WordAggregate, WordTotals};
 
@@ -47,6 +47,32 @@ pub struct Staircase {
 impl Staircase {
     /// Rungs in the staircase; a band index names one of them.
     pub const STEPS: usize = 5;
+
+    /// The glyph staircase at a tenth of its shares, which is what the fleet
+    /// sweep put word casing at the glyph channels' own volume: p50 11 rows
+    /// per corpus against their p50 10 (evidence.md, W3).
+    pub const WORD_STEPS: [BandStep; 5] = [
+        BandStep {
+            up_to: 10,
+            share_bp: 250,
+        },
+        BandStep {
+            up_to: 100,
+            share_bp: 100,
+        },
+        BandStep {
+            up_to: 1_000,
+            share_bp: 30,
+        },
+        BandStep {
+            up_to: 10_000,
+            share_bp: 10,
+        },
+        BandStep {
+            up_to: u32::MAX,
+            share_bp: 3,
+        },
+    ];
 
     /// 25% up to 10, 10% up to 100, 3% up to 1,000, 1% up to 10,000, 0.3%
     /// above.
@@ -127,6 +153,9 @@ pub struct Channels {
     pub pooled_neighbor: bool,
     pub rarity: bool,
     pub casing: bool,
+    /// Long words against the corpus's own length distribution. Off: names
+    /// and loanwords are the long tail, and they are not slips.
+    pub word_length: bool,
 }
 
 impl Default for Channels {
@@ -138,6 +167,7 @@ impl Default for Channels {
             pooled_neighbor: false,
             rarity: true,
             casing: true,
+            word_length: false,
         }
     }
 }
@@ -161,11 +191,17 @@ pub struct JudgingConfig {
     pub letters: LetterRoster,
     /// A word judged on fewer free positions than this abstains.
     pub word_support_floor: u32,
-    /// The minority share that flags a word's case form. The glyph staircase
-    /// for now: v1 saw word casing at eight times glyph volume under shared
-    /// bands, so the fleet run sets this before defaults ship
-    /// (`rules/word-conventions.md`).
+    /// The minority share that flags a word's case form:
+    /// [`Staircase::WORD_STEPS`], the glyph ladder at a tenth. Word casing
+    /// fires at twenty times glyph volume under shared bands, so the shares
+    /// are its own (`rules/word-conventions.md`).
     pub word_bands: Staircase,
+    /// The share of a glyph's handoffs that must be uppercase before the
+    /// corpus is held to capitalize after it, in basis points.
+    pub terminal_upper_share_bp: u16,
+    /// Whole standard deviations above the corpus's mean word length that a
+    /// word must reach before [`Channel::WordLength`] names it.
+    pub word_length_sigma: u8,
     pub channels: Channels,
 }
 
@@ -178,8 +214,10 @@ impl Default for JudgingConfig {
             letter_roster_bound: 500,
             letter_roster_min_letters: 5_000,
             letters: LetterRoster::default(),
-            word_support_floor: 5,
-            word_bands: Staircase::default(),
+            word_support_floor: 20,
+            word_bands: Staircase::new(Staircase::WORD_STEPS).expect("the word bounds ascend"),
+            terminal_upper_share_bp: 8_000,
+            word_length_sigma: 4,
             channels: Channels::default(),
         }
     }
@@ -207,17 +245,27 @@ pub enum Channel {
     /// scalar, so its `glyph` field is [`ScalarKey::NONE`] and the wire
     /// carries the word hash in its place.
     Casing = 5,
+    /// One case-folded word far longer than the corpus's own words. It judges
+    /// no scalar either, and carries the word hash the same way.
+    WordLength = 6,
 }
 
 impl Channel {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::ExactNeighbor,
         Self::PooledNeighbor,
         Self::RunShape,
         Self::Placement,
         Self::Rarity,
         Self::Casing,
+        Self::WordLength,
     ];
+
+    /// Whether the channel's `glyph` field carries a word hash instead of a
+    /// scalar. The two word channels do; every substrate channel does not.
+    pub const fn is_word(self) -> bool {
+        matches!(self, Self::Casing | Self::WordLength)
+    }
 
     pub const fn name(self) -> &'static str {
         match self {
@@ -227,6 +275,7 @@ impl Channel {
             Self::Placement => "Placement",
             Self::Rarity => "Rarity",
             Self::Casing => "Casing",
+            Self::WordLength => "WordLength",
         }
     }
 }
@@ -272,6 +321,12 @@ pub enum PatternKey {
         hash: u64,
         form: Form,
     },
+    /// The case-folded word, and how many whole standard deviations its length
+    /// stands above the corpus mean, saturating.
+    WordLength {
+        hash: u64,
+        sigma: u8,
+    },
 }
 
 /// One firing pattern: a glyph, the channel that convicted it, and the
@@ -296,10 +351,10 @@ pub struct Pattern {
 }
 
 impl Pattern {
-    /// The word hash a `Casing` row carries, `None` on every other channel.
+    /// The word hash a word channel's row carries, `None` on every other.
     pub const fn word_hash(&self) -> Option<u64> {
         match self.key {
-            PatternKey::Casing { hash, .. } => Some(hash),
+            PatternKey::Casing { hash, .. } | PatternKey::WordLength { hash, .. } => Some(hash),
             _ => None,
         }
     }
@@ -326,16 +381,26 @@ impl Pattern {
         {
             return Err("key");
         }
-        if (self.channel == Channel::Casing) != matches!(self.key, PatternKey::Casing { .. }) {
+        let keyed = match self.key {
+            PatternKey::Casing { .. } => Channel::Casing,
+            PatternKey::WordLength { .. } => Channel::WordLength,
+            PatternKey::ExactNeighbor(_) => Channel::ExactNeighbor,
+            PatternKey::PooledNeighbor(_) => Channel::PooledNeighbor,
+            PatternKey::RunShape { .. } => Channel::RunShape,
+            PatternKey::Placement { .. } => Channel::Placement,
+            PatternKey::Rarity => Channel::Rarity,
+        };
+        if keyed != self.channel {
             return Err("channel");
         }
-        if let PatternKey::Casing { form, .. } = self.key {
-            if form == Form::Uncased {
-                return Err("key");
-            }
-            if self.glyph != ScalarKey::NONE {
-                return Err("glyph");
-            }
+        if let PatternKey::Casing { form, .. } = self.key
+            && form == Form::Uncased
+        {
+            return Err("key");
+        }
+        // A word channel judges no scalar, so the glyph field carries its hash.
+        if self.channel.is_word() && self.glyph != ScalarKey::NONE {
+            return Err("glyph");
         }
         Ok(())
     }
@@ -681,9 +746,9 @@ fn numerator_in(book: &BookAggregate, pattern: &Pattern) -> u64 {
             .iter()
             .find(|(key, _)| *key == pattern.glyph)
             .map_or(0, |(_, count)| u64::from(*count)),
-        // A casing row is judged over word aggregates, which these are not;
+        // A word row is judged over word aggregates, which these are not;
         // `words::free_in` is its oracle.
-        PatternKey::Casing { .. } => 0,
+        PatternKey::Casing { .. } | PatternKey::WordLength { .. } => 0,
     }
 }
 
@@ -828,60 +893,287 @@ fn saturate(count: u64) -> u32 {
     u32::try_from(count).unwrap_or(u32::MAX)
 }
 
-// ── The casing channel ──────────────────────────────────────────────────
+// ── The terminal table ──────────────────────────────────────────────────
 
-/// One row per case-folded word whose minority form in FREE positions falls
-/// under the word staircase.
+/// Which glyphs this corpus puts a capital after, learned from the substrate's
+/// `follows` lane rather than listed.
 ///
-/// Forced positions — a chapter or verse start, or a sentence terminal before
-/// the word — are already out of the counts: the position put the capital
-/// there, not the word. A word common in both forms therefore fires nothing,
-/// which is why bivariance needs no rule of its own.
-pub(crate) fn judge_casing(corpus: &[&WordAggregate], config: &JudgingConfig, out: &mut Findings) {
-    if corpus.iter().all(|book| !book.cased()) {
-        return;
-    }
-    judge_casing_totals(&WordTotals::merge(corpus), config, out);
+/// ```text
+/// learn(en_ulb: '.' upper 33,332 of 33,338 cased, ',' upper 4,836 of 47,291)
+///   at 8,000 bp   '.' forces (9,998 bp), ',' does not (1,022 bp)
+/// ```
+///
+/// A glyph forces when the share of the cased letters it hands off to that are
+/// uppercase reaches [`JudgingConfig::terminal_upper_share_bp`], on at least
+/// `support_floor` handoffs. So the danda and `።` force wherever a corpus
+/// writes them that way, and a comma forces in a corpus that reports speech
+/// after one — no ASCII allow-list, and no rule per script.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TerminalTable {
+    forcing: Box<[ScalarKey]>,
 }
 
-/// The same channel walk over totals a host already holds — the merge above is
-/// the only thing it skips, and `WordTotals` guarantees the two are the same
-/// rows.
-pub(crate) fn judge_casing_totals(totals: &WordTotals, config: &JudgingConfig, out: &mut Findings) {
-    for row in totals.rows() {
-        let free: u64 = row.free.iter().map(|count| u64::from(*count)).sum();
-        let Some((band, ceiling)) = entitled_words(free, config) else {
+impl TerminalTable {
+    /// The forcing glyphs of a corpus-merged follow lane.
+    pub fn learn(follows: &[(ScalarKey, FollowCounts)], config: &JudgingConfig) -> Self {
+        let mut forcing: Vec<ScalarKey> = follows
+            .iter()
+            .filter(|(_, counts)| forces_a_capital(*counts, config))
+            .map(|(key, _)| *key)
+            .collect();
+        forcing.sort_unstable();
+        forcing.dedup();
+        Self {
+            forcing: forcing.into_boxed_slice(),
+        }
+    }
+
+    /// Every forcing glyph, ascending.
+    pub fn forcing(&self) -> &[ScalarKey] {
+        &self.forcing
+    }
+
+    pub fn forces(&self, glyph: ScalarKey) -> bool {
+        self.forcing.binary_search(&glyph).is_ok()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.forcing.is_empty()
+    }
+}
+
+/// Entitlement and the share, in one place: the denominator is the cased
+/// handoffs, so a glyph followed only by uncased letters decides nothing.
+fn forces_a_capital(counts: FollowCounts, config: &JudgingConfig) -> bool {
+    let upper = u64::from(counts.get(Case::Upper));
+    let cased = upper + u64::from(counts.get(Case::Lower));
+    cased >= u64::from(config.support_floor)
+        && share_bp(upper, cased) >= config.terminal_upper_share_bp
+}
+
+/// Every book's follow lane merged into one, by key ascending.
+pub fn merged_follows(corpus: &[&BookAggregate]) -> Vec<(ScalarKey, FollowCounts)> {
+    let mut out: Vec<(ScalarKey, FollowCounts)> = Vec::new();
+    for book in corpus {
+        for (key, counts) in book.follows() {
+            match out.binary_search_by_key(key, |entry| entry.0) {
+                Ok(at) => out[at].1.absorb(*counts),
+                Err(at) => out.insert(at, (*key, *counts)),
+            }
+        }
+    }
+    out
+}
+
+// ── The word channels ───────────────────────────────────────────────────
+
+/// One row per case-folded word whose minority form in FREE positions falls
+/// under the word staircase, then one per word far longer than the corpus's.
+///
+/// Free is decided here and not in the walk: the row carries the glyph that
+/// stood before each occurrence, and `table` says which glyphs this corpus
+/// capitalizes after. A position the punctuation decided is out of both
+/// numerator and denominator.
+pub(crate) fn judge_words(
+    corpus: &[&WordAggregate],
+    totals: &WordTotals,
+    table: &TerminalTable,
+    config: &JudgingConfig,
+    out: &mut Findings,
+) {
+    if config.channels.casing {
+        casing(corpus, totals, table, config, out);
+    }
+    if config.channels.word_length {
+        word_length(corpus, totals, config, out);
+    }
+}
+
+/// The casing channel over a corpus tally: rows of one hash are contiguous, so
+/// one walk sums the free lanes of every `Before` the word was seen under.
+fn casing(
+    corpus: &[&WordAggregate],
+    totals: &WordTotals,
+    table: &TerminalTable,
+    config: &JudgingConfig,
+    out: &mut Findings,
+) {
+    for word in totals.by_word() {
+        let mut free = [0u64; 4];
+        for row in word {
+            if !row.before().is_free(table) {
+                continue;
+            }
+            for (lane, count) in free.iter_mut().zip(row.counts) {
+                *lane += u64::from(count);
+            }
+        }
+        let total: u64 = free.iter().sum();
+        let Some((band, ceiling)) = entitled_words(total, config) else {
             continue;
         };
         for (lane, form) in Form::JUDGED.iter().enumerate() {
-            let count = u64::from(row.free[lane]);
-            let share = share_bp(count, free);
+            let count = free[lane];
+            let share = share_bp(count, total);
             if count == 0 || share >= ceiling {
                 continue;
             }
+            let key = PatternKey::Casing {
+                hash: word[0].hash,
+                form: *form,
+            };
             out.push_pattern(Pattern {
                 glyph: ScalarKey::NONE,
                 channel: Channel::Casing,
-                key: PatternKey::Casing {
-                    hash: row.hash,
-                    form: *form,
-                },
+                key,
                 band: Some(band),
                 numerator: saturate(count),
-                denominator: saturate(free),
+                denominator: saturate(total),
                 share_bp: share,
-                books: saturate_books(row.books[lane]),
+                books: word_books(corpus, &key, table),
             });
         }
     }
 }
 
-/// The wire lane is a `u8` and the canon is 66 books.
-const fn saturate_books(books: u32) -> u8 {
-    if books > u8::MAX as u32 {
-        u8::MAX
-    } else {
-        books as u8
+/// The corpus's own word length distribution, occurrence-weighted, and the
+/// words standing `word_length_sigma` deviations above it.
+///
+/// Only the long end: a short word is a word, and the tail this names is
+/// names, loanwords, and compounds — which is why the channel ships off.
+fn word_length(
+    corpus: &[&WordAggregate],
+    totals: &WordTotals,
+    config: &JudgingConfig,
+    out: &mut Findings,
+) {
+    let Some(shape) = LengthShape::of(corpus) else {
+        return;
+    };
+    let ceiling = shape.at(config.word_length_sigma);
+    let occurrences = saturate(shape.occurrences);
+    let Some((band, _)) = config.word_bands.band_for(occurrences) else {
+        return;
+    };
+    for word in totals.by_word() {
+        let count: u64 = word.iter().flat_map(|row| row.counts).map(u64::from).sum();
+        if count < u64::from(config.word_support_floor) {
+            continue;
+        }
+        let Some(len) = shape.len_of(word[0].hash) else {
+            continue;
+        };
+        if f64::from(len) < ceiling {
+            continue;
+        }
+        let key = PatternKey::WordLength {
+            hash: word[0].hash,
+            sigma: shape.sigma(len),
+        };
+        out.push_pattern(Pattern {
+            glyph: ScalarKey::NONE,
+            channel: Channel::WordLength,
+            key,
+            band: Some(band),
+            numerator: saturate(count),
+            denominator: occurrences,
+            share_bp: share_bp(count, u64::from(occurrences)),
+            books: word_books(corpus, &key, &TerminalTable::default()),
+        });
+    }
+}
+
+/// Mean and standard deviation of word length over every occurrence the
+/// corpus counted, from the same `len` byte the row carries, plus the length
+/// of each word so the sweep below reads it once instead of probing 66 books
+/// per candidate.
+struct LengthShape {
+    occurrences: u64,
+    mean: f64,
+    deviation: f64,
+    lengths: FxHashMap<u64, u8>,
+}
+
+impl LengthShape {
+    /// `None` when nothing was counted; a corpus with no cased word has no
+    /// length distribution to judge against either.
+    fn of(corpus: &[&WordAggregate]) -> Option<Self> {
+        let (mut occurrences, mut sum, mut squares) = (0u64, 0f64, 0f64);
+        let mut lengths: FxHashMap<u64, u8> = FxHashMap::default();
+        for book in corpus {
+            for row in book.words() {
+                let count = f64::from(saturate(row.total()));
+                let len = f64::from(row.len);
+                occurrences += row.total();
+                sum += len * count;
+                squares += len * len * count;
+                lengths.entry(row.hash).or_insert(row.len);
+            }
+        }
+        if occurrences == 0 {
+            return None;
+        }
+        let n = occurrences as f64;
+        let mean = sum / n;
+        Some(Self {
+            occurrences,
+            mean,
+            deviation: (squares / n - mean * mean).max(0.0).sqrt(),
+            lengths,
+        })
+    }
+
+    /// The length `sigma` whole deviations above the mean.
+    fn at(&self, sigma: u8) -> f64 {
+        self.mean + f64::from(sigma) * self.deviation
+    }
+
+    /// Whole deviations above the mean, saturating; a corpus whose words are
+    /// all one length has no spread and answers `u8::MAX`.
+    fn sigma(&self, len: u8) -> u8 {
+        if self.deviation <= 0.0 {
+            return u8::MAX;
+        }
+        let over = (f64::from(len) - self.mean) / self.deviation;
+        if over >= f64::from(u8::MAX) {
+            u8::MAX
+        } else {
+            over as u8
+        }
+    }
+
+    /// The scalar count the corpus recorded for one word.
+    fn len_of(&self, hash: u64) -> Option<u8> {
+        self.lengths.get(&hash).copied()
+    }
+}
+
+/// Books whose own counts hold part of this word row's numerator, saturating.
+///
+/// Recomputed from the aggregates rather than carried through the tally: a
+/// word row's numerator sums the `Before`s the table left free, and which
+/// those are is a judging decision the config may move.
+fn word_books(corpus: &[&WordAggregate], key: &PatternKey, table: &TerminalTable) -> u8 {
+    let touched = corpus
+        .iter()
+        .filter(|book| free_of(book, key, table) > 0)
+        .count();
+    u8::try_from(touched).unwrap_or(u8::MAX)
+}
+
+/// One book's contribution to a word row's numerator.
+pub(crate) fn free_of(book: &WordAggregate, key: &PatternKey, table: &TerminalTable) -> u64 {
+    match *key {
+        PatternKey::Casing { hash, form } => book
+            .rows_for(hash)
+            .iter()
+            .filter(|row| row.before().is_free(table))
+            .map(|row| u64::from(row.count_of(form)))
+            .sum(),
+        PatternKey::WordLength { hash, .. } => {
+            book.rows_for(hash).iter().map(|row| row.total()).sum()
+        }
+        _ => 0,
     }
 }
 

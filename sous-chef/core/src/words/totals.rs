@@ -2,70 +2,80 @@
 //! updates a resident host makes instead of merging them again.
 //!
 //! ```text
-//! merge([GEN, MRK])   hash(david) free [2, 40, 0, 0]  books [1, 2, 0, 0]  holders 2
-//! remove([old MRK])   hash(david) free [2, 38, 0, 0]  books [1, 1, 0, 0]  holders 1
-//! add([new MRK])      hash(david) free [2, 39, 0, 0]  books [1, 2, 0, 0]  holders 2
+//! merge([GEN, MRK])   hash(david) None [2, 40, 0, 0]  holders 2
+//! remove([old MRK])   hash(david) None [2, 38, 0, 0]  holders 1
+//! add([new MRK])      hash(david) None [2, 39, 0, 0]  holders 2
 //! ```
 //!
 //! The tally after any sequence of updates is the merge of the books resident
-//! then — counts, dispersion, and rows alike — which is what lets a host judge
-//! the casing channel from it instead of from 66 aggregates. A row survives
-//! while `holders` is nonzero, so a word held only in forced positions keeps
-//! its all-zero row exactly as a fresh merge does.
+//! then — counts and rows alike — which is what lets a host judge the word
+//! channels from it instead of from 66 aggregates. A row survives while
+//! `holders` is nonzero. The key is `(hash, before)` and not the hash alone,
+//! because forced and free are a judging decision the config may move, so the
+//! tally cannot pre-sum them; [`WordTotals::by_word`] hands the judge one
+//! word's rows at a time.
 
-use super::WordAggregate;
+use super::{Before, WordAggregate};
 
-/// One case-folded word's corpus totals, by free-position [`super::Form`] lane.
+/// One case-folded word's corpus totals under one [`Before`], by [`super::Form`]
+/// lane.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct WordTally {
     pub hash: u64,
-    /// Free-position occurrences per lane, saturating.
-    pub free: [u32; 4],
-    /// Books whose own counts hold each lane — the row's dispersion.
-    pub books: [u32; 4],
-    /// Books holding the word at all, in any position; the row lives while
-    /// this does.
+    /// Occurrences per lane, saturating.
+    pub counts: [u32; 4],
+    /// [`Before`], packed.
+    before: u32,
+    /// Books holding this `(hash, before)`; the row lives while this does.
     pub holders: u32,
 }
 
 impl WordTally {
-    fn of(hash: u64) -> Self {
+    fn of(hash: u64, before: u32) -> Self {
         Self {
             hash,
+            before,
             ..Self::default()
         }
     }
 
+    pub const fn before(&self) -> Before {
+        match Before::from_raw(self.before) {
+            Some(before) => before,
+            None => Before::None,
+        }
+    }
+
+    /// The sort key: the hash, then the packed `Before`.
+    const fn key(&self) -> (u64, u32) {
+        (self.hash, self.before)
+    }
+
     /// One book's chapter-folded lane counts.
-    fn absorb_book(&mut self, free: [u32; 4]) {
+    fn absorb_book(&mut self, counts: [u32; 4]) {
         self.holders += 1;
-        for (lane, count) in free.iter().enumerate() {
-            if *count > 0 {
-                self.free[lane] = self.free[lane].saturating_add(*count);
-                self.books[lane] += 1;
-            }
+        for (lane, count) in counts.iter().enumerate() {
+            self.counts[lane] = self.counts[lane].saturating_add(*count);
         }
     }
 
     fn absorb(&mut self, other: &Self) {
         self.holders += other.holders;
-        for (lane, count) in other.free.iter().enumerate() {
-            self.free[lane] = self.free[lane].saturating_add(*count);
-            self.books[lane] += other.books[lane];
+        for (lane, count) in other.counts.iter().enumerate() {
+            self.counts[lane] = self.counts[lane].saturating_add(*count);
         }
     }
 
     fn release(&mut self, other: &Self) {
         self.holders = self.holders.saturating_sub(other.holders);
-        for (lane, count) in other.free.iter().enumerate() {
-            self.free[lane] = self.free[lane].saturating_sub(*count);
-            self.books[lane] = self.books[lane].saturating_sub(other.books[lane]);
+        for (lane, count) in other.counts.iter().enumerate() {
+            self.counts[lane] = self.counts[lane].saturating_sub(*count);
         }
     }
 }
 
-/// The corpus's word counts, one row per case-folded word, by hash ascending —
-/// the emission order the wire pins.
+/// The corpus's word counts, one row per `(case-folded word, before)`, by hash
+/// ascending — the emission order the wire pins.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct WordTotals {
     rows: Vec<WordTally>,
@@ -79,9 +89,15 @@ impl WordTotals {
         }
     }
 
-    /// Rows by hash ascending.
+    /// Rows by `(hash, before)` ascending.
     pub fn rows(&self) -> &[WordTally] {
         &self.rows
+    }
+
+    /// One word's rows at a time, in hash order: the judge sums the lanes of
+    /// whichever `Before`s the terminal table left free.
+    pub fn by_word(&self) -> impl Iterator<Item = &[WordTally]> {
+        self.rows.chunk_by(|left, right| left.hash == right.hash)
     }
 
     pub fn is_empty(&self) -> bool {
@@ -112,11 +128,11 @@ impl WordTotals {
         let (mut at, mut dead) = (0usize, false);
         let mut missing: Vec<usize> = Vec::new();
         for (index, row) in delta.iter().enumerate() {
-            while self.rows.get(at).is_some_and(|seen| seen.hash < row.hash) {
+            while self.rows.get(at).is_some_and(|seen| seen.key() < row.key()) {
                 at += 1;
             }
             match self.rows.get_mut(at) {
-                Some(seen) if seen.hash == row.hash => {
+                Some(seen) if seen.key() == row.key() => {
                     if add {
                         seen.absorb(row);
                     } else {
@@ -152,7 +168,7 @@ impl WordTotals {
         for &index in missing.iter().rev() {
             let row = delta[index];
             let mut from = read;
-            while from > 0 && self.rows[from - 1].hash > row.hash {
+            while from > 0 && self.rows[from - 1].key() > row.key() {
                 from -= 1;
             }
             if from < read {
@@ -170,24 +186,24 @@ impl WordTotals {
 /// These books merged into rows of their own: the same shape the tally holds,
 /// so adding and removing are one walk over two sorted sequences.
 fn delta_of(corpus: &[&WordAggregate]) -> Vec<WordTally> {
-    let mut flat: Vec<(u64, u32, [u32; 4])> = corpus
+    let mut flat: Vec<(u64, u32, u32, [u32; 4])> = corpus
         .iter()
         .enumerate()
         .flat_map(|(book, aggregate)| {
             aggregate
                 .words()
                 .iter()
-                .map(move |word| (word.hash, book as u32, word.free))
+                .map(move |word| (word.hash, word.before_raw(), book as u32, word.counts))
         })
         .collect();
     flat.sort_unstable();
     let mut rows: Vec<WordTally> = Vec::with_capacity(flat.len());
-    for (hash, _, free) in flat {
+    for (hash, before, _, counts) in flat {
         match rows.last_mut() {
-            Some(last) if last.hash == hash => last.absorb_book(free),
+            Some(last) if last.key() == (hash, before) => last.absorb_book(counts),
             _ => {
-                let mut row = WordTally::of(hash);
-                row.absorb_book(free);
+                let mut row = WordTally::of(hash, before);
+                row.absorb_book(counts);
                 rows.push(row);
             }
         }

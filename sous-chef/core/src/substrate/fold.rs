@@ -80,7 +80,7 @@ fn resolve_seam(out: &mut BookAggregate, trail: Edge, lead: Edge) {
         let mut counts = FollowCounts::default();
         counts.0[case as usize] = 1;
         match out.follows.binary_search_by_key(&key, |entry| entry.0) {
-            Ok(at) => out.follows[at].1.add(counts),
+            Ok(at) => out.follows[at].1.absorb(counts),
             Err(at) => out.follows.insert(at, (key, counts)),
         }
     }
@@ -179,7 +179,7 @@ fn merge_follows(
             }
             std::cmp::Ordering::Equal => {
                 let mut counts = dst[left].1;
-                counts.add(src[right].1);
+                counts.absorb(src[right].1);
                 scratch.push((dst[left].0, counts));
                 left += 1;
                 right += 1;

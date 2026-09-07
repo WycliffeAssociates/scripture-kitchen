@@ -22,7 +22,7 @@ Nothing borrows, nothing hashes, nothing carries a coordinate.
 | `scalars` | `ScalarKey` (a scalar, or the pooled `DIGITS`) | count | 8 | absolute rarity, the dense census, every denominator |
 | `pairs` | `(ScalarKey, prev outer, next outer)` | count | 12 | G0 placement, and G1 once conditioned by `runs` |
 | `runs` | the run's scalar sequence, digits excluded | count | 12 + 4/atom | run composition, G2/G3 neighbours inside a run |
-| `follows` | `ScalarKey` of a run terminal | upper/lower/uncased | 16 | lowercase after a learned terminal |
+| `follows` | `ScalarKey` of a run terminal | upper/lower/uncased | 16 | lowercase after a learned terminal; and the terminal table the word channels read |
 | `hygiene` | — | one `HygieneFinding` per site | 16/site | hygiene's four scalar classes, with exact spans |
 | `lead`, `trail` | — | one open edge each | 20 each | the seam (below) |
 | `scalar_count`, `word_count` | — | — | 8 | denominators and the Stage 4 word seam |

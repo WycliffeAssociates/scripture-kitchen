@@ -89,6 +89,20 @@ fn fixture_patterns() -> Vec<Pattern> {
             share_bp: 500,
             books: 1,
         },
+        // The other word channel: the same hash lanes, a sigma key byte.
+        Pattern {
+            glyph: ScalarKey::NONE,
+            channel: Channel::WordLength,
+            key: PatternKey::WordLength {
+                hash: 0x0123_4567_89ab_cdef,
+                sigma: 5,
+            },
+            band: Some(4),
+            numerator: 7,
+            denominator: 128_000,
+            share_bp: 0,
+            books: 1,
+        },
     ]
 }
 
@@ -244,13 +258,13 @@ fn pattern_table_round_trips() {
     )
     .unwrap();
     let snapshot = CorpusSnapshot::open(&encoded).unwrap();
-    assert_eq!(snapshot.pattern_count(), 6);
+    assert_eq!(snapshot.pattern_count(), 7);
     assert_eq!(snapshot.patterns().unwrap(), patterns);
     assert_eq!(
-        snapshot.pattern(6),
+        snapshot.pattern(7),
         Err(CorpusWireError::PatternIndexPastTable {
-            index: 6,
-            count: 6,
+            index: 7,
+            count: 7,
             at: None
         })
     );
@@ -260,7 +274,7 @@ fn pattern_table_round_trips() {
     for (offset, byte, field) in [
         (PATTERN_FLAGS_OFFSET, 1u8, "flags"),
         (PATTERN_RESERVED_OFFSET, 1, "reserved"),
-        (PATTERN_CHANNEL_OFFSET, 6, "channel"),
+        (PATTERN_CHANNEL_OFFSET, 7, "channel"),
         (PATTERN_BAND_OFFSET, 0, "band"),
         (PATTERN_KEY_OFFSET, 1, "key"),
         (PATTERN_BOOKS_OFFSET, 2, "books"),

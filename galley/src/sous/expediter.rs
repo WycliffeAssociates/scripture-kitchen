@@ -178,6 +178,11 @@ fn key_bytes(key: PatternKey) -> [u8; 10] {
             out[1] = form as u8;
             out[2..10].copy_from_slice(&hash.to_le_bytes());
         }
+        PatternKey::WordLength { hash, sigma } => {
+            out[0] = 6;
+            out[1] = sigma;
+            out[2..10].copy_from_slice(&hash.to_le_bytes());
+        }
     }
     out
 }

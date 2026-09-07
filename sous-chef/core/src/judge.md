@@ -27,6 +27,7 @@ finding.
 | `Placement` | G0 | occurrences of `g` with this outer class, one side | every occurrence of `g` |
 | `Rarity` | — | corpus count of the glyph | every scalar counted |
 | `Casing` | word | free-position occurrences of one case-folded word in one case form | that word's free-position occurrences, all forms |
+| `WordLength` | word | corpus occurrences of one long case-folded word | every word occurrence the corpus counted |
 
 `Placement` is **per side, marginal**: the outer class before `g` and the
 outer class after `g` are two distributions over
@@ -91,6 +92,38 @@ The pair is reviewable through the rare member and through the run shape. The
 comma's own exact-pair evidence was never entitled, and that is a fact about
 the opportunity set, not a verdict.
 
+## The terminal table
+
+Before either word channel judges, `Substrate::judge` learns one thing from
+its own `follows` lane and publishes it into the sink: **which glyphs this
+corpus puts a capital after.**
+
+```text
+en_ulb, follows merged over the corpus
+   '.'  upper 33,332 of 33,338 cased handoffs
+   ','  upper  4,836 of 47,291
+terminal_upper_share_bp 8,000, support_floor 5
+   '.' 9,998 bp → forces        ',' 1,022 bp → does not
+```
+
+A glyph forces when `upper / (upper + lower)` of the letters it hands off to
+reaches `terminal_upper_share_bp` on at least `support_floor` cased handoffs.
+The denominator is the cased handoffs, so a glyph followed only by uncased
+letters decides nothing and an uncased corpus learns an empty table.
+
+That single number replaces every hard-coded punctuation rule the casing
+channel used to need. `he said, \u{201C}Stop\u{201D}` is the case it settles: the quote
+is transparent, so `Stop` records the comma, and the comma's own share decides.
+In en_ulb it is nowhere near 80%, so `Stop` is free evidence; in a corpus that
+reports speech after a comma everywhere it forces, and `Stop` abstains. The
+per-corpus tables the committed tier learns are in
+[`words.md`](words.md).
+
+`Findings` carries the table beside the pattern table, because three readers
+need the same one: the casing judge, `Words::locate`'s rescan, and any host
+re-judging from a resident tally. `Words` judged with no substrate beside it
+finds none and abstains — an abstention, never a guess.
+
 ## `Casing` is a word channel
 
 `Casing` judges [`words.md`](words.md)'s counts rather than the substrate's,
@@ -101,29 +134,52 @@ and it is the one channel whose key is not a scalar. Its `glyph` field is
 The claim is: **for one case-folded word, a case form whose share of that
 word's FREE positions is under the word band.** `David` \u{d7}40 against `david`
 \u{d7}2 flags the two; a word common in both forms fires nothing, so bivariance
-needs no rule of its own. Forced positions — a chapter or verse start, a
-sentence terminal, an opening quote after one — are out of both numerator and
-denominator, because there the punctuation chose the capital and not the word.
+needs no rule of its own. Forced positions are out of both numerator and
+denominator, because there the punctuation chose the capital and not the word;
+the row itself stores the glyph, and the table above says which ones those are.
 
 Two knobs, and the reason they are separate from the glyph pair:
-`word_support_floor` (default 5) and `word_bands` (the glyph staircase for
-now). v1 measured word casing at roughly **eight times** glyph-rule volume
-under shared bands, so copying the glyph defaults is blocked until a fleet run
-sets these — `rules/word-conventions.md` carries that block. `channels.casing`
-turns the whole lane off.
+`word_support_floor` (20) and `word_bands` (`Staircase::WORD_STEPS`, the glyph
+staircase at a tenth of its shares). The fleet sweep is why: at shared bands
+word casing fires p50 201 rows per corpus against the glyph channels' p50 10,
+and a tenth of the shares brings it to p50 11 / p90 31 / p95 42
+(`examples/word_volume.rs`, evidence.md W3). `channels.casing` turns the whole
+lane off; it ships **on**, because that volume holds.
 
 A corpus whose word aggregates are all `cased == false` emits nothing and
 hashes nothing: an uncased script pays for this channel exactly zero.
 
-Emission order for these rows is by word hash ascending, then by form, which
-is deterministic without being meaningful — a hash has no reading. They follow
-every substrate row, because `Brigade` judges `Words` last.
+## `WordLength` is the other one, and it ships off
+
+The claim is: **one case-folded word whose scalar length stands
+`word_length_sigma` whole standard deviations or more above the corpus's own
+mean word length.** The mean and the deviation are occurrence-weighted over
+every `len` byte the aggregates carry, so they are the corpus's own scale and
+not a constant. The key is that sigma, saturating in a `u8`; the numerator is
+the word's corpus count and the denominator every word occurrence, so the row
+reads as "this word, this long, this often". Long end only.
+
+It is `channels.word_length = false` by default, and the reason is a
+counterexample, not a volume: names, loanwords, and productive compounds fill
+this tail, and none of them is a slip. It exists because the length is already
+in the row, and because a corpus whose typography really has run words
+together has no other lane that sees it. It abstains in uncased scripts, since
+an uncased word is in no row at all.
+
+Its sites are the word's spans, every occurrence and not only the free ones —
+length is a property of the word, not of a position. A word both channels name
+is **one** site row carrying `CASING | WORD_LENGTH`.
 
 ## Dispersion
 
 `Pattern::books` is how many Target books hold part of that row's numerator,
 saturating at 255. Books-possible is the publication's own `book_count`;
 nothing is stored for it.
+
+On a word channel it is recomputed from the aggregates at judge time rather
+than carried through the tally, because which stored `Before`s count toward a
+numerator is a config-dependent judging decision and a tally that pre-summed
+them could not answer a re-judge.
 
 It is **information, not a judgement**. Genre clusters punctuation
 legitimately and a project's book set is not the engine's business, so no
@@ -151,6 +207,9 @@ fell in.
 | 2 | 1,000 | 300 bp |
 | 3 | 10,000 | 100 bp |
 | 4 | `u32::MAX` | 30 bp |
+
+`Staircase::WORD_STEPS` is the same table at a tenth — 250, 100, 30, 10, 3 bp
+— and `word_bands` defaults to it.
 
 A key fires when its share is **strictly under** the rung's share, so a key
 that owns every occurrence never fires. Every rung is a config field, and

@@ -1,16 +1,22 @@
 //! Instrument: VOLUME. The word rescan against the counts it materializes.
 //!
-//! For every book and every firing casing pattern, the sites `Words::locate`
-//! places equal that book's own free-position count for the pattern's
-//! `(hash, form)` — the number the word walk put there. The rescan runs the
-//! same walk over the same chapters, so this pins that the two agree about
-//! word boundaries, case folding, and which positions are free.
+//! For every book and every firing word pattern, the sites `Words::locate`
+//! places equal that book's own count for the pattern's key — free positions
+//! only on a casing row, every occurrence on a length row. The rescan runs the
+//! same walk over the same chapters and reads the same terminal table, so this
+//! pins that the two agree about word boundaries, case folding, and which
+//! positions the corpus forced.
+//!
+//! The pass under test is `(Substrate, Words)`: the terminal table is the
+//! substrate's follow lane, and `Words` alone abstains. One channel at a time,
+//! because a span both channels name is one row carrying both reasons.
 //!
 //! The default sweep is synthetic and fast. The ignored one runs the same
 //! equality over the committed corpus tier, where real glue, apostrophes,
 //! quote conventions, and chapter seams are.
 
-use sous_core::judge::{BandStep, Channel, PatternIndex, Staircase};
+use sous_core::judge::{BandStep, Channels, PatternIndex, Staircase};
+use sous_core::substrate::Substrate;
 use sous_core::words::{WordAggregate, Words, fold_book, free_in};
 use sous_core::{
     BookKey, Chapter, ChapterObs, ChapterPass, Corpus, FindingKind, JudgingConfig, ProjectedBook,
@@ -96,12 +102,18 @@ fn aggregate(book: &Book) -> WordAggregate {
 /// Returns `(books, patterns compared, occurrences compared)`.
 fn agree(books: &[Book], config: &JudgingConfig) -> (usize, usize, u64) {
     let corpus = Corpus::try_new(books).expect("a synthetic corpus is valid");
-    let findings = analyze_with(&corpus, &Words, config);
+    let findings = analyze_with(&corpus, &(Substrate, Words), &(*config, *config));
     let patterns = findings.patterns().to_vec();
-    assert!(
-        patterns.iter().all(|row| row.channel == Channel::Casing),
-        "the word pass judges one channel"
-    );
+    let table = findings
+        .terminals()
+        .expect("the substrate publishes a terminal table")
+        .clone();
+    let word: Vec<usize> = patterns
+        .iter()
+        .enumerate()
+        .filter(|(_, row)| row.channel.is_word())
+        .map(|(at, _)| at)
+        .collect();
 
     let mut compared = 0;
     let mut occurrences = 0;
@@ -112,16 +124,18 @@ fn agree(books: &[Book], config: &JudgingConfig) -> (usize, usize, u64) {
             if row.book_idx() != index {
                 continue;
             }
-            let FindingKind::Convention(digest) = row.kind() else {
-                panic!("the word pass pushes convention rows only")
-            };
-            sited[usize::from(digest.pattern().get())] += 1;
+            // The substrate publishes its scalar hygiene lane beside the
+            // convention rows; only the latter name a pattern.
+            if let FindingKind::Convention(digest) = row.kind() {
+                sited[usize::from(digest.pattern().get())] += 1;
+            }
         }
 
         let mut set = Vec::new();
         Words.firing(&counts, &patterns, &mut set);
-        for (at, pattern) in patterns.iter().enumerate() {
-            let walked = free_in(&counts, pattern);
+        for &at in &word {
+            let pattern = &patterns[at];
+            let walked = free_in(&counts, pattern, &table);
             assert_eq!(
                 sited[at],
                 walked,
@@ -129,8 +143,13 @@ fn agree(books: &[Book], config: &JudgingConfig) -> (usize, usize, u64) {
                 books[index.get() as usize].key,
                 pattern.key,
             );
-            let listed = set.contains(&PatternIndex::new(at as u16));
-            assert_eq!(listed, walked > 0, "the firing set names what locate finds");
+            // The firing set is position-blind, so it may name a row this book
+            // holds only where the corpus forced the capital; it may never
+            // miss one `locate` places.
+            assert!(
+                set.contains(&PatternIndex::new(at as u16)) || walked == 0,
+                "the firing set names what locate finds"
+            );
             compared += 1;
             occurrences += walked;
         }
@@ -217,6 +236,19 @@ fn permissive() -> JudgingConfig {
     }
 }
 
+/// The length channel alone, on a sigma any sweep reaches.
+fn lengthy() -> JudgingConfig {
+    JudgingConfig {
+        word_length_sigma: 2,
+        channels: Channels {
+            casing: false,
+            word_length: true,
+            ..Channels::default()
+        },
+        ..permissive()
+    }
+}
+
 #[test]
 fn the_rescan_agrees_with_the_counts_over_a_synthetic_sweep() {
     let mut fired = 0;
@@ -226,6 +258,9 @@ fn the_rescan_agrees_with_the_counts_over_a_synthetic_sweep() {
         let (_, compared, found) = agree(&books, &permissive());
         fired += compared;
         occurrences += found;
+        let (_, long, sited) = agree(&books, &lengthy());
+        fired += long;
+        occurrences += sited;
     }
     assert!(
         fired > 100 && occurrences > 100,
@@ -234,10 +269,11 @@ fn the_rescan_agrees_with_the_counts_over_a_synthetic_sweep() {
 }
 
 /// The shipped defaults, on the claim `rules/word-conventions.md` states:
-/// `David` many times against `david` twice flags the two.
+/// `David` many times against `david` twice flags the two. The shipped word
+/// ladder is a tenth of the glyph one, so "many" is twenty thousand.
 #[test]
 fn the_default_config_sites_the_minority_form() {
-    let mut text = "and David went. ".repeat(40);
+    let mut text = "and David went. ".repeat(20_000);
     text.push_str("and david went and david went.");
     let books = vec![book(BookKey::new(*b"MRK"), &[text])];
     let (_, compared, occurrences) = agree(&books, &JudgingConfig::default());
@@ -303,6 +339,10 @@ fn the_rescan_agrees_with_the_counts_over_the_tier() {
             .collect();
         assert!(!books.is_empty(), "{name} holds books");
         let (count, compared, occurrences) = agree(&books, &JudgingConfig::default());
-        println!("{name}: {count} books, {compared} rows compared, {occurrences} sites");
+        let (_, long, long_sites) = agree(&books, &lengthy());
+        println!(
+            "{name}: {count} books, {compared} casing rows / {occurrences} sites, \
+             {long} length rows / {long_sites} sites"
+        );
     }
 }

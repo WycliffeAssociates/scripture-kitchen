@@ -93,7 +93,7 @@ export interface HygieneFinding {
 }
 
 /** Wire byte 8 of a pattern row is the index into this table. */
-export const CHANNELS = ["ExactNeighbor", "PooledNeighbor", "RunShape", "Placement", "Rarity", "Casing"] as const;
+export const CHANNELS = ["ExactNeighbor", "PooledNeighbor", "RunShape", "Placement", "Rarity", "Casing", "WordLength"] as const;
 export type Channel = (typeof CHANNELS)[number];
 
 /** The outer class either side of a glyph. */
@@ -105,7 +105,7 @@ export const POOLS = ["Quote", "Bracket", "Dash", "Terminal", "Separator", "Digi
 export type Pool = (typeof POOLS)[number];
 
 /** Convention lane 14..16 is a bitmask over this table, low bit first. */
-export const CONVENTION_REASONS = ["PlacementBefore", "PlacementAfter", "RunShape", "ExactNeighbor", "Rarity", "PooledNeighbor", "Casing"] as const;
+export const CONVENTION_REASONS = ["PlacementBefore", "PlacementAfter", "RunShape", "ExactNeighbor", "Rarity", "PooledNeighbor", "Casing", "WordLength"] as const;
 export type ConventionReason = (typeof CONVENTION_REASONS)[number];
 
 /** How a word occurrence is cased; a `Casing` key byte indexes this.
@@ -119,13 +119,14 @@ export type PatternKey =
   | { readonly kind: "RunShape"; readonly pure: boolean; readonly bucket: number }
   | { readonly kind: "Placement"; readonly side: "prev" | "next"; readonly class: OuterClass }
   | { readonly kind: "Rarity" }
-  | { readonly kind: "Casing"; readonly hash: bigint; readonly form: CasingForm };
+  | { readonly kind: "Casing"; readonly hash: bigint; readonly form: CasingForm }
+  | { readonly kind: "WordLength"; readonly hash: bigint; readonly sigma: number };
 
 /** One corpus-level pattern: a glyph, the channel that convicted it, and the
  * fraction behind the claim. */
 export interface Pattern {
   /** A code point, or `PATTERN_DIGIT_GLYPH` for the pooled digit lane. Zero on
-   * `Casing`, which judges no scalar: bytes 0..8 carry the word hash instead. */
+   * a word channel, which judges no scalar: bytes 0..8 carry the word hash. */
   readonly glyph: number;
   readonly channel: Channel;
   readonly key: PatternKey;
@@ -239,22 +240,28 @@ function readPattern(view: DataView, at: number, row: number, bookCount: number)
   if (channel === undefined) {
     return fail(`pattern row ${row} has an invalid channel`);
   }
-  // Bytes 0..8 are a u64 word hash on `Casing`, so no scalar check applies.
-  const casing = channel === "Casing";
-  const glyph = casing ? 0 : rawGlyph;
-  if (!casing && glyph !== PATTERN_DIGIT_GLYPH && (glyph > 0x10ffff || (glyph >= 0xd800 && glyph <= 0xdfff))) {
+  // Bytes 0..8 are a u64 word hash on a word channel, so no scalar check
+  // applies there.
+  const word = channel === "Casing" || channel === "WordLength";
+  const glyph = word ? 0 : rawGlyph;
+  if (!word && glyph !== PATTERN_DIGIT_GLYPH && (glyph > 0x10ffff || (glyph >= 0xd800 && glyph <= 0xdfff))) {
     return fail(`pattern row ${row} has an invalid glyph`);
   }
   const raw = view.getUint8(at + PATTERN_KEY_OFFSET);
   const high = raw >> 4;
   const low = raw & 0x0f;
   let key: PatternKey;
-  if (casing) {
-    const form = CASING_FORMS[raw];
-    if (form === undefined || form === "Uncased") {
-      return fail(`pattern row ${row} has an invalid key`);
+  if (word) {
+    const hash = (BigInt(neighbor) << 32n) | BigInt(rawGlyph);
+    if (channel === "WordLength") {
+      key = { kind: "WordLength", hash, sigma: raw };
+    } else {
+      const form = CASING_FORMS[raw];
+      if (form === undefined || form === "Uncased") {
+        return fail(`pattern row ${row} has an invalid key`);
+      }
+      key = { kind: "Casing", hash, form };
     }
-    key = { kind: "Casing", hash: (BigInt(neighbor) << 32n) | BigInt(rawGlyph), form };
   } else if (channel === "ExactNeighbor") {
     if (raw !== 0) {
       return fail(`pattern row ${row} has an invalid key`);

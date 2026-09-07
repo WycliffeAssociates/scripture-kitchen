@@ -35,7 +35,7 @@ function fixture() {
 // One book under "books/mrk.usfm": the header, one directory row, a 16-byte
 // id table, then the pattern table, then the records.
 const FIRST_RECORD = HEADER_BYTES + DIRECTORY_ENTRY_BYTES + 16;
-const FIRST_MIXED_RECORD = FIRST_RECORD + 6 * PATTERN_ROW_LEN;
+const FIRST_MIXED_RECORD = FIRST_RECORD + 7 * PATTERN_ROW_LEN;
 
 function expectOpenFailure(bytes) {
   assert.throws(() => FindingsSnapshot.open(bytes), FindingsSnapshotError);
@@ -169,7 +169,7 @@ test("decodes mixed proportionality and hygiene rows, saturation included", () =
 
 test("decodes the pattern table the judge published", () => {
   const snapshot = FindingsSnapshot.open(hexFixture("corpus_v1_hygiene.hex"));
-  assert.equal(snapshot.patternCount, 6);
+  assert.equal(snapshot.patternCount, 7);
   assert.deepEqual(snapshot.patterns(), [
     {
       glyph: 0x60,
@@ -232,15 +232,26 @@ test("decodes the pattern table the judge published", () => {
       shareBp: 500,
       books: 1,
     },
+    {
+      // The other word channel: the same hash lanes, a sigma key byte.
+      glyph: 0,
+      channel: "WordLength",
+      key: { kind: "WordLength", hash: 0x0123456789abcdefn, sigma: 5 },
+      band: 4,
+      numerator: 7,
+      denominator: 128000,
+      shareBp: 0,
+      books: 1,
+    },
   ]);
-  assert.throws(() => snapshot.pattern(6), FindingsSnapshotError);
+  assert.throws(() => snapshot.pattern(7), FindingsSnapshotError);
 
   // Every field the reader refuses, one at a time.
   const start = FIRST_RECORD;
   for (const [offset, byte] of [
     [11, 1],   // flags
     [23, 1],   // reserved
-    [8, 6],    // channel: past the table
+    [8, 7],    // channel: past the table
     [10, 0],   // band: a step on a Rarity row
     [9, 1],    // key: a nonzero key on a Rarity row
     [22, 2],   // books: past the snapshot's book count

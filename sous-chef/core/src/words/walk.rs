@@ -2,14 +2,18 @@
 //!
 //! ```text
 //! walk("He said. \u{201C}Go,\u{201D} said david. David went.", &[])
-//!   he     Title  forced   // the chapter's first word
-//!   said   Lower  free
-//!   go     Title  forced   // an opening quote, and a terminal before it
-//!   said   Lower  free     // the comma broke the chain
-//!   david  Lower  free
-//!   david  Title  forced   // the terminal before it
-//!   went   Lower  free
+//!   he     Title  Start        // the chapter's first word
+//!   said   Lower  None
+//!   go     Title  Glyph('.')   // the quote is transparent; the terminal is not
+//!   said   Lower  Glyph(',')
+//!   david  Lower  None
+//!   david  Title  Glyph('.')
+//!   went   Lower  None
 //! ```
+//!
+//! The walk decides nothing about capitals. It records what stood before each
+//! word and leaves forced or free to the judge, which reads the corpus's own
+//! terminal table ([`crate::judge::TerminalTable`]).
 //!
 //! A word is a maximal run of letters and glue, extended through ONE nonletter
 //! with a letter immediately on both sides (`ng'ombe`, `don't`,
@@ -24,9 +28,9 @@
 use rustc_hash::FxHashMap;
 use xxhash_rust::xxh3::xxh3_64;
 
-use super::{Form, WordCount, WordRow};
+use super::{Before, Form, WordCount, WordRow};
 use crate::Verse;
-use crate::substrate::is_run_atom;
+use crate::substrate::{ScalarKey, is_run_atom};
 use crate::unicode::{Class, Pool, class_of, pool_of};
 
 /// One word as the walk saw it, in the coordinates of the text scanned.
@@ -38,29 +42,18 @@ pub struct Occurrence {
     /// never hashed.
     pub hash: u64,
     pub form: Form,
-    /// The position, not the word, put a capital here: a chapter or verse
-    /// start, a `Pool::Terminal` before it, or an opening quote after one.
-    pub forced: bool,
+    /// What stood before the word, quotes and brackets ridden through.
+    pub before: Before,
     /// Scalar count, saturating.
     pub len: u8,
 }
 
-/// What one run atom does to the "a capital is expected next" chain.
-enum Chain {
-    /// A sentence terminal opens it.
-    Open,
-    /// A quote or bracket rides through it.
-    Ride,
-    /// Anything else ends it.
-    Close,
-}
-
-fn chain_of(scalar: char) -> Chain {
-    match pool_of(scalar) {
-        Pool::Terminal => Chain::Open,
-        Pool::Quote | Pool::Bracket => Chain::Ride,
-        _ => Chain::Close,
-    }
+/// Whether an atom is transparent to what stands behind it.
+///
+/// The one thing the walk still reads a pool for. An opening quote hides the
+/// terminal in front of it, and it is the terminal the capital answers to.
+fn rides(scalar: char) -> bool {
+    matches!(pool_of(scalar), Pool::Quote | Pool::Bracket)
 }
 
 /// What a word is built from before the joiner rule extends it.
@@ -80,7 +73,7 @@ const fn is_letterish(class: Class) -> bool {
 #[derive(Clone, Copy)]
 struct Building {
     from: u32,
-    forced: bool,
+    before: Before,
     scalars: u32,
     letters: bool,
     upper: u32,
@@ -90,10 +83,10 @@ struct Building {
 }
 
 impl Building {
-    const fn new(from: u32, forced: bool) -> Self {
+    const fn new(from: u32, before: Before) -> Self {
         Self {
             from,
-            forced,
+            before,
             scalars: 0,
             letters: false,
             upper: 0,
@@ -138,8 +131,8 @@ struct Scan<'a> {
     text: &'a str,
     /// The case-folded word, refilled per cased word and never per scalar.
     scratch: String,
-    /// A `Pool::Terminal` stands behind the cursor, through quotes and space.
-    chain: bool,
+    /// What stands behind the cursor, through quotes, brackets, and space.
+    chain: Before,
     /// A chapter or verse started and no word has claimed it yet.
     opened: bool,
     word: Option<Building>,
@@ -153,7 +146,7 @@ impl<'a> Scan<'a> {
         Self {
             text,
             scratch: String::new(),
-            chain: false,
+            chain: Before::None,
             opened: true,
             word: None,
             joiner: None,
@@ -176,9 +169,14 @@ impl<'a> Scan<'a> {
                 }
             }
             if self.word.is_none() {
-                self.word = Some(Building::new(at, self.opened || self.chain));
+                let before = if self.opened {
+                    Before::Start
+                } else {
+                    self.chain
+                };
+                self.word = Some(Building::new(at, before));
                 self.opened = false;
-                self.chain = false;
+                self.chain = Before::None;
             }
             self.word.as_mut().expect("just opened").add(class);
         } else if class.is_whitespace() {
@@ -192,10 +190,8 @@ impl<'a> Scan<'a> {
                 None if self.word.is_some() && self.prev_letterish => self.joiner = Some(at),
                 None => self.close(at, visit),
             }
-            match chain_of(scalar) {
-                Chain::Open => self.chain = true,
-                Chain::Ride => {}
-                Chain::Close => self.chain = false,
+            if !rides(scalar) {
+                self.chain = Before::Glyph(ScalarKey::of(scalar));
             }
         }
         self.prev_letterish = letterish;
@@ -221,7 +217,7 @@ impl<'a> Scan<'a> {
             to,
             hash,
             form,
-            forced: built.forced,
+            before: built.before,
             len: u8::try_from(built.scalars).unwrap_or(u8::MAX),
         });
     }
@@ -246,33 +242,24 @@ pub fn for_each_word(text: &str, verses: &[Verse], mut visit: impl FnMut(Occurre
     scan.close(to, &mut visit);
 }
 
-/// One chapter's word counts, sorted by hash. An uncased chapter hashes
-/// nothing and returns an empty row.
+/// One chapter's word counts, sorted by hash and then by what preceded them.
+/// An uncased chapter hashes nothing and returns an empty row.
 pub(crate) fn walk(text: &str, verses: &[Verse]) -> WordRow {
     let mut rows: Vec<WordCount> = Vec::new();
-    let mut slots: FxHashMap<u64, u32> = FxHashMap::default();
+    let mut slots: FxHashMap<(u64, u32), u32> = FxHashMap::default();
     for_each_word(text, verses, |word| {
         if word.form == Form::Uncased {
             return;
         }
-        let slot = *slots.entry(word.hash).or_insert_with(|| {
-            rows.push(WordCount {
-                hash: word.hash,
-                free: [0; 4],
-                forced: 0,
-                len: word.len,
-            });
+        let key = (word.hash, word.before.raw());
+        let slot = *slots.entry(key).or_insert_with(|| {
+            rows.push(WordCount::new(word.hash, word.before, word.len));
             rows.len() as u32 - 1
         });
-        let row = &mut rows[slot as usize];
-        if word.forced {
-            row.forced = row.forced.saturating_add(1);
-        } else {
-            let lane = &mut row.free[word.form as usize];
-            *lane = lane.saturating_add(1);
-        }
+        let lane = &mut rows[slot as usize].counts[word.form as usize];
+        *lane = lane.saturating_add(1);
     });
-    rows.sort_unstable_by_key(|row| row.hash);
+    rows.sort_unstable_by_key(|row| (row.hash, row.before().raw()));
     WordRow {
         cased: !rows.is_empty(),
         words: rows.into_boxed_slice(),

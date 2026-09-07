@@ -2,8 +2,8 @@
 
 The Level 2 walk. What the counts are *for* is
 [`../../rules/word-conventions.md`](../../rules/word-conventions.md); this file
-is the word rule, the forced rule, the row's shape, and the two arguments
-behind them.
+is the word rule, what the row records instead of a verdict, the row's shape,
+and the two arguments behind them.
 
 ## Layout
 
@@ -11,21 +11,21 @@ behind them.
 is the per-chapter scan; `fold.rs` merges chapter rows into a book;
 `totals.rs` merges books into the corpus tally judging reads, and keeps it
 current one book at a time; `tests.rs` covers all four through the public
-surface. The casing channel itself lives beside the
-other judges in [`judge.md`](judge.md).
+surface. The two word channels themselves live beside the other judges in
+[`judge.md`](judge.md), and so does the terminal table they read.
 
 ## What a word is
 
 ```text
 "He said. \u{201C}Go,\u{201D} said don't-3rd \u{5d0}\u{5d1}\u{5d2} a--b 12,345"
-   He        Title    forced   the chapter's first word
-   said      Lower    free
-   Go        Title    forced   an opening quote, and a terminal before it
-   said      Lower    free     the comma broke the chain
-   don't-3rd Lower    free     two joiners, and a digit riding a letter
-   \u{5d0}\u{5d1}\u{5d2}       Uncased  \u{2014}      dropped: no cased letter, no convention
-   a, b      Lower    free     `--` is two atoms, so it joins nothing
-   (nothing)                   a digit run holding no letter is not a word
+   He        Title    Start        the chapter's first word
+   said      Lower    None
+   Go        Title    Glyph('.')   the quote is transparent; the stop is not
+   said      Lower    Glyph(',')
+   don't-3rd Lower    None         two joiners, and a digit riding a letter
+   \u{5d0}\u{5d1}\u{5d2}       Uncased  \u{2014}            dropped: no cased letter, no convention
+   a, b      Lower    None, Glyph(',')   `--` is two atoms, so it joins nothing
+   (nothing)                      a digit run holding no letter is not a word
 ```
 
 A word is a **maximal run of letters and glue, extended through ONE nonletter
@@ -57,21 +57,52 @@ length back, so the row carries the scalar count in one byte beside it: mean
 and standard deviation over a corpus come from that alone, and hapax rate is a
 fold over the same rows. Neither judges anything yet.
 
-## Forced, and free
+## What stood before, and who decides
 
-A casing claim may only use positions where the *word* chose the capital. An
-occurrence is **forced** when:
+A casing claim may only use positions where the *word* chose the capital. The
+walk does not decide that. It records what stood in front of each occurrence —
 
-- it is the first word of the chapter, or of a verse (`ChapterInput::verses`);
-- the nearest non-space text before it ends in a run whose LAST atom is
-  `Pool::Terminal` (`pool_of`, the same pinned UCD properties the G2 pools use,
-  so Ethiopic `\u{1362}` and the danda `\u{964}` force a capital without an ASCII
-  allow-list);
-- it follows an opening quote or bracket that itself follows one of those.
+```text
+Before::None        a word, or space and then a word
+Before::Start       the first word of the chapter, or of a verse
+Before::Glyph(g)    the last atom of the nonletter run in front of it
+```
 
-Everything else is **free**. The walk carries that as a two-state chain: a
-terminal opens it, a quote or bracket rides through it, any other atom closes
-it, and a word reads it once, when it begins.
+— and the judge asks the corpus's own **terminal table** what each glyph does.
+Quotes and brackets are transparent in the chain, so `He said. \u{201C}Go` records
+`Glyph('.')` and `he said, \u{201C}Stop` records `Glyph(',')`: what the capital
+answers to is the mark behind the quote. Whitespace is transparent too, and a
+word closes the chain behind it.
+
+The table is `TerminalTable`, learned in [`judge.md`](judge.md) from the
+substrate's `follows` lane: for each glyph, `upper / (upper + lower)` of the
+letters it hands off to across the corpus. A glyph **forces** when that share
+reaches `JudgingConfig::terminal_upper_share_bp` (8,000 = 80%) on at least
+`support_floor` cased handoffs. `Start` always forces; `None` never does;
+everything else is the corpus's answer.
+
+This is why there is no punctuation allow-list and no rule per script. Over
+the committed tier the tables learned are:
+
+```text
+WA-en-ulb   '!' '"' '.' ':' '?'
+francl      '!' '*' '.' '?' '«' '»' '“' '”'
+grcsr       '.' ';'                      // the Greek question mark
+spaRV1909   '.' '?' '¡'                  // the inverted opener, not '¿'
+swhulb      '!' '.' '?' '‘' '“' '”'
+amh, hin2017  (nothing forces — the script is uncased)
+```
+
+and the `he said, \u{201C}Stop` case answers itself: **en_ulb's comma is not in
+that table** — it hands off a capital 4,836 times in 47,291, which is 1,022 bp
+against an 8,000 bp bar. So `Stop` is a free position there and stays reviewable,
+and a corpus that does report speech after a comma 80% of the time gets the
+abstention instead. The v1 comma dial and the "an opening quote opens the
+chain" proposal are both replaced by that one measurement.
+
+The table's own key is the run's LAST atom, so a quote can appear in it (`"`
+in en_ulb, after `."`). No `Before` ever names one, because the chain rides
+through quotes; those rows are learned and never read.
 
 The verse clause is an **abstention, not a discourse claim**. Charter invariant
 1 says a verse start is an address rather than a sentence boundary and that
@@ -82,15 +113,26 @@ regardless, which removes a numerator rather than adding a claim.
 
 ## The row
 
-One `WordRow` per chapter, one `WordCount` per distinct case-folded word,
-sorted by hash. `size_of::<WordCount>()` is **24 B**:
+One `WordRow` per chapter, one `WordCount` per distinct
+`(case-folded word, Before)`, sorted by that pair. `size_of::<WordCount>()` is
+still **24 B**:
 
 | field | bytes | answers |
 | --- | --- | --- |
 | `hash: u64` | 8 | the key; there is no packed alternative outside Latin |
-| `free: [u16; 4]` | 8 | Lower, Title, Upper, Mixed in free positions |
-| `forced: u16` | 2 | positions the punctuation decided, kept out of every claim |
-| `len: u8` | 1 | scalar count, for a later length or hapax fold |
+| `counts: [u16; 4]` | 8 | Lower, Title, Upper, Mixed under this `Before` |
+| `before: u32` | 4 | the packed `Before` |
+| `len: u8` | 1 | scalar count, for the length channel and a hapax fold |
+
+`Before` packs into four bytes because a `ScalarKey` is a code point and two
+sentinels one past the last one spell `None` and `Start`. That is what keeps
+the row at 24 B and makes `(hash, before.raw())` the sort key.
+
+Widening the key costs rows, not bytes per row, and only at book grain: over
+the committed tier a cased Bible's merged aggregate goes from 2.70-4.47 MB
+keyed by hash alone to 3.35-5.25 MB keyed by the pair, **+17% to +24%**
+(evidence.md, W3). Chapter grain barely moves — a chapter's vocabulary mostly
+appears under one `Before` anyway.
 
 Two shapes are deliberate:
 
@@ -100,6 +142,8 @@ Two shapes are deliberate:
   nothing at all: measured, Amharic pays 48 B a chapter against 5.3 KB for
   English, and its walk is *faster* than the substrate's (evidence.md,
   2026-09-04). "Uncased scripts pay nothing" is a measurement, not a slogan.
+  The price is that `Channel::WordLength` abstains there too: a long uncased
+  word is in no row to judge.
 - **Counts saturate at `u16`.** A chapter is not where a word reaches 65,535
   occurrences, and the aggregate widens to `u32` immediately.
 
@@ -116,48 +160,68 @@ cached row and a fresh one indistinguishable.
 ## The corpus tally
 
 `WordTotals` is the fold one level up: every book's `WordAggregate` merged by
-hash into one row per case-folded word, carrying the four free lanes, how many
-books hold each lane, and how many hold the word at all. It is what
-`Channel::Casing` actually reads.
+`(hash, before)` into one row per pair, carrying the four form lanes and how
+many books hold the pair at all. `WordTotals::by_word` hands the judge one
+word's rows at a time, and the judge sums whichever `Before`s the table left
+free.
 
 ```text
-merge([GEN, MRK])   hash(david) free [2, 40, 0, 0]  books [1, 2, 0, 0]  holders 2
-remove([old MRK])   hash(david) free [2, 38, 0, 0]  books [1, 1, 0, 0]  holders 1
-add([new MRK])      hash(david) free [2, 39, 0, 0]  books [1, 2, 0, 0]  holders 2
+merge([GEN, MRK])   hash(david) None [2, 40, 0, 0]  holders 2
+remove([old MRK])   hash(david) None [2, 38, 0, 0]  holders 1
+add([new MRK])      hash(david) None [2, 39, 0, 0]  holders 2
 ```
+
+The before dimension has to survive into the tally: which positions are free
+is a *judging* decision, and a host must be able to move
+`terminal_upper_share_bp` and re-judge without re-walking a chapter. For the
+same reason dispersion is no longer carried here — a row's `books` is counted
+at judge time from the aggregates, because it counts books holding part of a
+numerator whose shape the config decides.
 
 The point of the two updates is that a resident host does not merge 66 books
 again on every publication — 4.7 ms of a 4.9 ms warm republication before this
 existed (evidence.md, W1). `add` and `remove` are one tandem walk over two
 hash-sorted sequences, and the result is exactly `merge` over the books left:
-`holders` is why, since a word held only in forced positions has an all-zero
-row that a fresh merge holds too, and only its last book leaving takes it away.
+`holders` is why, since a row whose lanes the table later reads as forced is
+still a row a fresh merge holds, and only its last book leaving takes it away.
 
 `Words` is therefore retained at BOOK grain — `RETAIN_CHAPTERS = false`, and
 `release` puts the chapter's row back to its 24-byte default, flagged
 `released`, once the fold has read it. The flag is what `is_released` reads:
 an uncased chapter's row is empty too, and it is whole. A host re-walks a whole
-edited book instead of one chapter and keeps 2-3.4 MB per Bible instead of
-6.4-8.2 (evidence.md, "W1 grain"); only this member re-walks, because the
+edited book instead of one chapter and keeps 3.4-5.3 MB per Bible instead of
+7.5-9.6 (evidence.md, W1 grain and W3); only this member re-walks, because the
 tuple's `remap` leaves its neighbours' retained rows alone. The seam is
 `galley/src/sous/expediter.md`.
 
 ## Judging, and placing
 
-`Words::judge` merges the tally and calls the casing channel
-([`judge.md`](judge.md)); `Words::judge_resident` calls the same channel over a
-tally a host already holds, which is the only difference between the two. A
+`Words::judge` merges the tally and calls the word channels
+([`judge.md`](judge.md)); `Words::judge_resident` calls the same channels over
+a tally a host already holds, which is the only difference between the two. A
 corpus whose aggregates are all `cased == false` emits nothing and hashes
 nothing.
-`Words::firing` names the table positions whose `(hash, form)` this book's own
-counts hold, so a book without the word reads no text. `Words::locate` rewalks
-the book with the same scan and sites every free occurrence whose hash and form
-a firing row named, one `Convention` row per word span with
-`Reasons::CASING`.
 
-The rescan is the same walk, so it must agree with the counts exactly:
-`tests/casing_agree_with_counts.rs` is that equality over a synthetic sweep
-and, ignored, over every chapter of the 8-corpus tier. It is why `locate`
-takes the book's verse rows — the map read them to decide which positions were
-free, and a rescan that could not read them would place occurrences it never
-counted.
+Both read the terminal table out of the sink, where `Substrate::judge` put it.
+That is a real order: `Brigade` judges the substrate first, and **`Words`
+alone abstains** rather than invent a forced rule of its own — pinned by
+`words_alone_abstain_because_nothing_published_a_terminal_table`. The table is
+corpus evidence the substrate already holds, and merging its follow lane a
+second time inside the word pass would be the same numbers computed twice.
+
+`Words::firing` names the table positions whose word this book's own counts
+hold, so a book without the word reads no text. It is deliberately
+**position-blind**: it asks whether the book holds the `(hash, form)` at all,
+not whether it holds it free. A superset costs a rescan that finds nothing;
+reading the terminal table there would put a judging decision inside a site
+cache key. `Words::locate` rewalks the book with the same scan, reads the same
+table, and sites what the counts named — a casing row's free occurrences, a
+length row's every occurrence — one `Convention` row per word span, carrying
+`Reasons::CASING`, `Reasons::WORD_LENGTH`, or both when one word fires both.
+
+The rescan is the same walk over the same table, so it must agree with the
+counts exactly: `tests/casing_agree_with_counts.rs` is that equality over a
+synthetic sweep and, ignored, over every chapter of the 8-corpus tier, one
+channel at a time. It is why `locate` takes the book's verse rows — the map
+read them to record `Before::Start`, and a rescan that could not read them
+would place occurrences it never counted.

@@ -32,7 +32,7 @@ pub use input::{
 };
 pub use judge::{
     BandStep, Channel, Channels, JudgingConfig, LetterRoster, Pattern, PatternIndex, PatternKey,
-    Side, Staircase, books_touched,
+    Side, Staircase, TerminalTable, books_touched, merged_follows,
 };
 pub use pass::{
     ChapterInput, ChapterKey, ChapterObs, ChapterPass, CorpusTotals, Findings, SchemaStamp,
@@ -43,7 +43,9 @@ pub use substrate::{
     BookAggregate, Case, ChapterRow, Edge, FollowCounts, OuterClass, PairKey, RUN_BUCKETS,
     RunLengths, ScalarKey, Substrate,
 };
-pub use words::{Form, WordAggregate, WordCount, WordRow, WordTally, WordTotal, WordTotals, Words};
+pub use words::{
+    Before, Form, WordAggregate, WordCount, WordRow, WordTally, WordTotal, WordTotals, Words,
+};
 
 /// The product pass: hygiene's byte sweeps, the substrate walk, and the word
 /// walk over the same chapters, judged into one span-ordered row set per book.

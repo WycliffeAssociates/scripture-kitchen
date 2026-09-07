@@ -16,8 +16,9 @@ use crate::words::Form;
 /// the fraction behind the claim. Layout: codec/README.md.
 pub(super) fn encode_pattern(pattern: &Pattern) -> [u8; PATTERN_ROW_LEN] {
     let mut row = [0u8; PATTERN_ROW_LEN];
-    // On `Casing` the first eight bytes are the u64 word hash, little-endian:
-    // low half where a glyph would be, high half where a neighbor would be.
+    // On a word channel the first eight bytes are the u64 word hash,
+    // little-endian: low half where a glyph would be, high half where a
+    // neighbor would be.
     let (glyph, neighbor, key) = match pattern.key {
         PatternKey::ExactNeighbor(neighbor) => (pattern.glyph.raw(), neighbor.raw(), 0),
         PatternKey::PooledNeighbor(pool) => (pattern.glyph.raw(), 0, pool as u8),
@@ -29,6 +30,7 @@ pub(super) fn encode_pattern(pattern: &Pattern) -> [u8; PATTERN_ROW_LEN] {
         }
         PatternKey::Rarity => (pattern.glyph.raw(), 0, 0),
         PatternKey::Casing { hash, form } => (hash as u32, (hash >> 32) as u32, form as u8),
+        PatternKey::WordLength { hash, sigma } => (hash as u32, (hash >> 32) as u32, sigma),
     };
     row[PATTERN_GLYPH_OFFSET..PATTERN_NEIGHBOR_OFFSET].copy_from_slice(&glyph.to_le_bytes());
     row[PATTERN_NEIGHBOR_OFFSET..PATTERN_CHANNEL_OFFSET].copy_from_slice(&neighbor.to_le_bytes());
@@ -65,12 +67,14 @@ pub(super) fn decode_pattern(
     let channel = *Channel::ALL
         .get(usize::from(bytes[PATTERN_CHANNEL_OFFSET]))
         .ok_or(bad("channel"))?;
-    // The glyph field carries no scalar on `Casing`, so `ScalarKey::from_raw`
-    // is not applied to it there.
-    let glyph = match channel {
-        Channel::Casing => ScalarKey::NONE,
-        _ => ScalarKey::from_raw(glyph_raw).ok_or(bad("glyph"))?,
+    // The glyph field carries no scalar on a word channel, so
+    // `ScalarKey::from_raw` is not applied to it there.
+    let glyph = if channel.is_word() {
+        ScalarKey::NONE
+    } else {
+        ScalarKey::from_raw(glyph_raw).ok_or(bad("glyph"))?
     };
+    let word_hash = u64::from(glyph_raw) | (u64::from(neighbor_raw) << 32);
     let raw_key = bytes[PATTERN_KEY_OFFSET];
     let (high, low) = (raw_key >> 4, raw_key & 0x0f);
     let key = match channel {
@@ -112,12 +116,16 @@ pub(super) fn decode_pattern(
                 return Err(bad("key"));
             }
             PatternKey::Casing {
-                hash: u64::from(glyph_raw) | (u64::from(neighbor_raw) << 32),
+                hash: word_hash,
                 form,
             }
         }
+        Channel::WordLength => PatternKey::WordLength {
+            hash: word_hash,
+            sigma: raw_key,
+        },
     };
-    if !matches!(channel, Channel::ExactNeighbor | Channel::Casing) && neighbor_raw != 0 {
+    if channel != Channel::ExactNeighbor && !channel.is_word() && neighbor_raw != 0 {
         return Err(bad("neighbor"));
     }
     let band = match (bytes[PATTERN_BAND_OFFSET], channel) {

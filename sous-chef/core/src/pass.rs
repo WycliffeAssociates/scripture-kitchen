@@ -20,7 +20,7 @@
 use crate::{
     BookIndex, BookKey, Chapter, CodecError, Corpus, FindingKind, PackedFinding, ProjectedBook,
     TextRange, Verse,
-    judge::{Pattern, PatternIndex},
+    judge::{Pattern, PatternIndex, TerminalTable},
     words::WordTotals,
 };
 
@@ -516,6 +516,7 @@ pub struct Findings {
     book: Option<BookIndex>,
     rows: Vec<PackedFinding>,
     patterns: Vec<Pattern>,
+    terminals: Option<TerminalTable>,
 }
 
 impl Findings {
@@ -526,6 +527,7 @@ impl Findings {
             book: None,
             rows: Vec::new(),
             patterns: Vec::new(),
+            terminals: None,
         }
     }
 
@@ -561,6 +563,21 @@ impl Findings {
 
     pub fn patterns(&self) -> &[Pattern] {
         &self.patterns
+    }
+
+    /// The corpus's terminal table, once a judge has learned it.
+    ///
+    /// Corpus evidence rather than a row: `Substrate` publishes it, the word
+    /// channels read it to split free from forced, and `Words::locate` reads
+    /// the same one so a rescan cannot disagree with the counts. `None` until
+    /// something publishes one, which is not the same as an empty table — a
+    /// corpus may genuinely capitalize after nothing.
+    pub const fn terminals(&self) -> Option<&TerminalTable> {
+        self.terminals.as_ref()
+    }
+
+    pub fn set_terminals(&mut self, table: TerminalTable) {
+        self.terminals = Some(table);
     }
 
     /// Puts every row in publication order: stable by `(book_idx, from, to)`,
@@ -1069,10 +1086,14 @@ mod tests {
 
     /// The word member is not decoration: a corpus with a casing minority gets
     /// its row and its site out of the shipped triple, beside the other two.
+    ///
+    /// The word ladder is a tenth of the glyph one, so the sample is the size
+    /// a three-basis-point rung needs.
     #[test]
     fn the_brigade_judges_and_sites_its_word_member() {
         let text: &'static str = Box::leak(
-            (("and David went. ".repeat(40)) + "and david went and david went.").into_boxed_str(),
+            (("and David went. ".repeat(20_000)) + "and david went and david went.")
+                .into_boxed_str(),
         );
         let books = vec![Book {
             key: BookKey::new(*b"MRK"),
@@ -1089,7 +1110,7 @@ mod tests {
             .filter(|row| row.channel == crate::Channel::Casing)
             .collect();
         assert_eq!(casing.len(), 1);
-        assert_eq!((casing[0].numerator, casing[0].denominator), (2, 42));
+        assert_eq!((casing[0].numerator, casing[0].denominator), (2, 20_002));
         assert!(casing[0].word_hash().is_some());
 
         let sites: Vec<_> = findings

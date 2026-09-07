@@ -152,7 +152,7 @@ Shapes and layouts live in the module README each row names.
 | finding transport | `sous-core::codec` and `sous-core::corpus`, rebased and published by `galley::sous`. See [core/src/codec/README.md](core/src/codec/README.md) | Galley's canonical snapshot identity and checksum-keyed detached reuse (Stage 2) |
 | unicode classification | `sous-core::unicode`. See [core/src/unicode/README.md](core/src/unicode/README.md) | Level 1b consumes the bits in Stage 3; casing beyond the two predicate bits waits for Stage 4 |
 | convention judging | `sous-core::judge`, published as the envelope's pattern table, all four grains plus rarity. See [core/src/judge.md](core/src/judge.md) | whether Terminal vs Separator is the split that matters, and whether Quote and Bracket should merge — both open until fleet evidence says |
-| word conventions | `sous-core::words` in `Brigade`, judged as `Channel::Casing` and sited by `Words::locate`. See [core/src/words.md](core/src/words.md) | the word support floor and band column, placeholders until the fleet sweep; whether spaceless scripts get a dictionary fallback or keep abstaining |
+| word conventions | `sous-core::words` in `Brigade`, judged as `Channel::Casing` and `Channel::WordLength` over a learned `TerminalTable`, sited by `Words::locate`. See [core/src/words.md](core/src/words.md) | whether spaceless scripts get a dictionary fallback or keep abstaining; whether the length channel ever earns being on |
 | convention sites | `sous-core::sites` behind `ChapterPass::locate`, cached per book by `(RawChecksum, FiringHash)` in `galley::sous::Expediter`. See [core/src/sites.md](core/src/sites.md) | Aho-Corasick if a corpus ever shows many rare needles per book (evidence.md, 2026-09-04); a general one-pass byte-class sweep, still unbuilt |
 | hygiene | `sous-core::hygiene::scan` for the byte classes, the substrate row's `hygiene` lane for the four scalar ones. See [core/src/hygiene.md](core/src/hygiene.md) and [rules/hygiene.md](rules/hygiene.md) | NBSP's verse-edge case once the walk is verse-grained; a snapshot identity instead of the CLI's zero id |
 
@@ -485,9 +485,13 @@ Work:
    table and small chapter seam state. **Landed (W1):** `sous_core::words`
    rides beside `Substrate` in `Brigade`, `Channel::Casing` judges the minority
    form of a case-folded word in free positions, and `Words::locate` sites it.
-   Forced positions come from `Pool::Terminal` and the pinned UCD properties
-   rather than a learned per-corpus table, and a word never crosses a masked
-   `\c`, so the fold carries no seam state at all. See
+   A word never crosses a masked `\c`, so the fold carries no seam state at
+   all. **Completed (W3):** the terminal table is learned after all. The row
+   stores the glyph that stood before each word (`Before`), quotes and brackets
+   transparent, and the judge asks a `TerminalTable` built from the substrate's
+   own follow lane which glyphs this corpus capitalizes after — so `¡`, `;`,
+   and the danda force where their corpora put capitals after them and a comma
+   forces only where reported speech really follows one. See
    [core/src/words.md](core/src/words.md). **Landed (W1b):** word rows are
    retained at BOOK grain (`ChapterPass::RETAIN_CHAPTERS`) and the corpus word
    tally is resident in `galley::sous::Expediter`, moved one changed book at a
@@ -496,7 +500,19 @@ Work:
 3. Implement adjacent and punctuation-separated doubled-word observations as
    distinct claims.
 4. Measure a word-specific evidence floor/band column; do not reuse glyph
-   bands after the observed eightfold volume difference.
+   bands after the observed eightfold volume difference. **Landed (W3):** the
+   fleet run measured twentyfold, not eightfold — p50 201 casing rows per
+   corpus against the glyph channels' p50 10 over all 1,504 corpora
+   (`core/examples/word_volume.rs`). `word_bands` is the glyph staircase at a
+   tenth of its shares (`Staircase::WORD_STEPS`) and `word_support_floor` is
+   20, which puts casing at p50 11 / p90 31 / p95 42; `channels.casing` ships
+   on, because that was the condition.
+5. **Added by W3, off by default:** `Channel::WordLength`, one row per
+   case-folded word standing `word_length_sigma` (4) whole standard deviations
+   above the corpus's own occurrence-weighted mean word length. Long end only,
+   sited on the word's spans, `channels.word_length = false` — names and
+   loanwords are this tail. [rules/word-conventions.md](rules/word-conventions.md)
+   carries why it left the idea shelf as a deviation rather than a rule.
 
 Verification gate:
 
@@ -507,8 +523,10 @@ Verification gate:
 - fleet calibration includes volume tails and representative false/ambiguous
   cases before defaults are accepted.
 
-**Deferred:** n-gram surprisal, hapax, length, and compound-split ideas remain
+**Deferred:** n-gram surprisal, hapax, and compound-split ideas remain
 separate probes. They do not ride this stage merely because word tokens exist.
+Length is the one that left, as an off-by-default channel and a logged
+deviation, not as an approved rule.
 
 ## Stage 5 — Aligned source comparison and proportionality
 

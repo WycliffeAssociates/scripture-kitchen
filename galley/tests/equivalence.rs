@@ -857,13 +857,17 @@ fn parallel_publish_byte_equals_the_serial_cold_oracle_over_en_ulb() {
 
 // ------------------------------------------------------------------- the words
 
-/// Two books whose cased words fire the casing channel: `david` is written
-/// three ways in free positions, against a verse-initial word that is forced.
+/// Two books whose cased words fire the casing channel: one `David` in one
+/// chapter of one book against seven hundred free `david`.
+///
+/// The word ladder is a tenth of the glyph one, so a minority needs a
+/// denominator in the hundreds before its share is under a rung.
 fn cased_books() -> Vec<Book> {
+    let bulk = "david and ".repeat(60);
     let verses = [
-        "we saw david and david and david and david and David and david there",
-        "they told david and david and david and david and david and david then",
-        "he gave the lord and the lord and the lord and the Lord and the lord bread",
+        format!("we saw {bulk}david there"),
+        format!("they told {bulk}david then"),
+        format!("he gave the lord and {bulk}the lord bread"),
     ];
     ["GEN", "MRK"]
         .iter()
@@ -873,6 +877,10 @@ fn cased_books() -> Vec<Book> {
                 text.push_str(&format!("\\c {chapter}\n\\p\n"));
                 for (number, verse) in verses.iter().enumerate() {
                     text.push_str(&format!("\\v {} {verse}\n", number + 1));
+                }
+                // One book, one chapter, one capital: the minority itself.
+                if *code == "GEN" && chapter == 1 {
+                    text.push_str("\\v 4 they saw David and david again\n");
                 }
             }
             (format!("cased/{code}.usfm"), text)
@@ -915,7 +923,7 @@ fn a_casing_edit_republishes_the_cold_bytes_from_the_resident_tally() {
     }
     assert_publications_agree(&mut sous, &books, "casing: cold");
 
-    books[0].1 = books[0].1.replacen("and David and", "and DAVID and", 1);
+    books[0].1 = books[0].1.replacen("saw David and", "saw DAVID and", 1);
     sous.update(books[0].0.as_str(), Role::Target, &books[0].1)
         .unwrap();
     assert_publications_agree(&mut sous, &books, "casing: after one chapter recased");

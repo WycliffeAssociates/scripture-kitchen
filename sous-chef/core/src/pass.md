@@ -56,10 +56,10 @@ pushes one `Convention` per matching run. See [sites.md](sites.md).
 
 Its structural inputs are `map`'s own, book-wide: the text, the chapter rows,
 and the verse rows. A rule whose map read verse rows to decide something —
-`Words` reads them to decide which word positions were forced — has to read the
-same rows here, or the rescan would place occurrences the counts never held.
-`Substrate` ignores them: every substrate claim is about scalars and their
-neighbours.
+`Words` reads them to record which occurrences stood at a verse start — has to
+read the same rows here, or the rescan would place occurrences the counts never
+held. `Substrate` ignores them: every substrate claim is about scalars and
+their neighbours.
 
 `firing` is the same filter without the text: it names the table positions
 `locate` would scan for, so a resident host can hash them and decide whether
@@ -67,9 +67,9 @@ to rescan a book at all. `galley::sous::Expediter` caches a book's rows under
 `(RawChecksum, FiringHash)` and replays them when neither moved.
 
 The pattern table is the whole corpus's, so each member of a tuple filters it
-down to its own rows: `sites::firing` skips the `Casing` channel, whose key is
-a word hash and not a glyph, and `Words::firing` keeps only that channel. A
-member that claimed a row it cannot place would rescan text for nothing.
+down to its own rows: `sites::firing` skips the two word channels, whose key is
+a hash and not a glyph, and `Words::firing` keeps only those. A member that
+claimed a row it cannot place would rescan text for nothing.
 
 ## Retention grain, and resident totals
 
@@ -209,6 +209,12 @@ a `Vec<PackedFinding>`.
 `push_pattern` takes a `judge::Pattern` and returns its table position, and
 `into_parts` hands both to the encoder. Patterns are corpus-level, so they are
 pushed either side of any `open_book`.
+
+It also carries the corpus's `TerminalTable`, which is judged evidence rather
+than a row: `Substrate::judge` publishes it, and the word channels and
+`Words::locate` read it back so a rescan cannot disagree with the counts. That
+is the one ordering the `Brigade` tuple guarantees; a `Words` judged without it
+abstains rather than guess ([judge.md](judge.md)).
 
 `open_book` before each book's rows is what lets `push` take a book-relative
 span and check it against the right length. A host driving the pass itself

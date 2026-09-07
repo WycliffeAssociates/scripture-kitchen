@@ -15,8 +15,10 @@ use std::path::{Path, PathBuf};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use sous_core::unicode::{class_of, is_glue};
-use sous_core::words::WordCount;
-use sous_core::{BookKey, ChapterInput, ChapterKey, ChapterPass, Words};
+use sous_core::words::{WordCount, WordRow, WordTotal, fold_book};
+use sous_core::{
+    BookKey, ChapterInput, ChapterKey, ChapterObs, ChapterPass, TextRange, Verse, VerseKey, Words,
+};
 
 const CORPORA: &[&str] = &[
     "WA-en-ulb",
@@ -264,7 +266,7 @@ fn stats_f64(values: &[f64]) -> (f64, f64, f64) {
 /// `None` for a front-matter row (chapter `?`, e.g. book title/encoding
 /// lines some vref exports carry) — not chapter content, silently skipped.
 /// Anything else that doesn't fit `BOOK C:V<TAB>text` is a hard failure.
-fn parse_ref(line: &str) -> Option<(&str, u32, &str)> {
+fn parse_ref(line: &str) -> Option<(&str, u32, u32, &str)> {
     let (refpart, text) = line
         .split_once('\t')
         .unwrap_or_else(|| panic!("no tab in vref line: {line:?}"));
@@ -275,56 +277,97 @@ fn parse_ref(line: &str) -> Option<(&str, u32, &str)> {
     let cv = parts
         .next()
         .unwrap_or_else(|| panic!("no chapter:verse in vref line: {line:?}"));
-    let (chapter, _verse) = cv
+    let (chapter, verse) = cv
         .split_once(':')
         .unwrap_or_else(|| panic!("no ':' in chapter:verse: {line:?}"));
     let chapter: u32 = chapter.parse().ok()?;
-    Some((book, chapter, text))
+    Some((book, chapter, verse.parse().ok()?, text))
 }
 
 /// One chapter through the shipped word walk, as a resident cache would hold
-/// it. Verse rows only move the forced/free split, never the row's size.
-fn real_word_row_bytes(text: &str) -> u64 {
-    Words
-        .map(ChapterInput {
-            text,
-            verses: &[],
-            key: ChapterKey::new(BookKey::new(*b"MRK"), 1),
-        })
-        .resident_bytes() as u64
+/// it. Verse rows belong here: a verse start is one of the `Before`s the row
+/// keys on, so it moves the row count and not only the split.
+fn word_row(text: &str, verses: &[Verse]) -> WordRow {
+    Words.map(ChapterInput {
+        text,
+        verses,
+        key: ChapterKey::new(BookKey::new(*b"MRK"), 1),
+    })
 }
 
 fn report(name: &str, path: &Path) {
     let raw = std::fs::read_to_string(path)
         .unwrap_or_else(|error| panic!("{} must be readable: {error}", path.display()));
 
-    // Group verse text into per-chapter strings, keyed by (book, chapter).
-    let mut chapters: BTreeMap<(String, u32), String> = BTreeMap::new();
+    // Group verse text into per-chapter strings with their verse spans,
+    // keyed by (book, chapter).
+    let mut chapters: BTreeMap<(String, u32), (String, Vec<Verse>)> = BTreeMap::new();
     for line in raw.lines() {
         if line.is_empty() {
             continue;
         }
-        let Some((book, chapter, text)) = parse_ref(line) else {
+        let Some((book, chapter, verse, text)) = parse_ref(line) else {
             continue;
         };
         let entry = chapters.entry((book.to_string(), chapter)).or_default();
-        if !entry.is_empty() {
-            entry.push(' ');
+        if !entry.0.is_empty() {
+            entry.0.push(' ');
         }
-        entry.push_str(text);
+        let from = entry.0.len() as u32;
+        entry.0.push_str(text);
+        let span = TextRange::new(from, entry.0.len() as u32).expect("a verse grows forward");
+        if let Ok(key) = VerseKey::new(chapter as u16, verse as u16, verse as u16) {
+            entry.1.push(Verse::new(key, span));
+        }
     }
     assert!(!chapters.is_empty(), "{} has no chapters", path.display());
 
     // The lanes below are estimates from distinct-word counts; this is the
     // shipped row, so the two can be read against each other.
     let mut word_row_bytes: Vec<u64> = Vec::with_capacity(chapters.len());
+    // Book grain is what a host keeps: `Words::RETAIN_CHAPTERS` is false, so
+    // the chapter rows above are shed and only these aggregates survive.
+    let mut aggregate_bytes = 0u64;
+    // What the merged rows actually hold, so the gap to the line above is
+    // `fold_book`'s one-shot `with_capacity` over the pre-merge rows.
+    let mut aggregate_rows = 0u64;
+    // The same rows keyed by hash alone, which is what the aggregate held
+    // before `Before` joined the key.
+    let mut aggregate_words = 0u64;
+    let mut fold = |rows: &mut Vec<WordRow>, resident: &mut u64, merged: &mut u64| {
+        if rows.is_empty() {
+            return;
+        }
+        let view: Vec<ChapterObs<&WordRow>> = rows
+            .iter()
+            .map(|obs| ChapterObs { start: 0, obs })
+            .collect();
+        let folded = fold_book(&view);
+        *resident += folded.resident_bytes() as u64;
+        *merged += size_of_val(folded.words()) as u64;
+        let hashes = folded
+            .words()
+            .chunk_by(|left, right| left.hash == right.hash)
+            .count();
+        aggregate_words += (hashes * size_of::<WordTotal>()) as u64;
+        rows.clear();
+    };
+    let mut book_rows: Vec<WordRow> = Vec::new();
+    let mut current = String::new();
     let metrics: Vec<((String, u32), ChapterMetrics)> = chapters
         .into_iter()
-        .map(|(key, text)| {
-            word_row_bytes.push(real_word_row_bytes(&text));
+        .map(|(key, (text, verses))| {
+            if key.0 != current {
+                fold(&mut book_rows, &mut aggregate_bytes, &mut aggregate_rows);
+                current = key.0.clone();
+            }
+            let row = word_row(&text, &verses);
+            word_row_bytes.push(row.resident_bytes() as u64);
+            book_rows.push(row);
             (key, analyze_chapter(&text))
         })
         .collect();
+    fold(&mut book_rows, &mut aggregate_bytes, &mut aggregate_rows);
 
     // Lane C: distinct folded words at book grain, divided evenly back
     // across the book's chapters for the per-chapter figure.
@@ -423,6 +466,27 @@ fn report(name: &str, path: &Path) {
     };
     row_bytes_u64("scalar lanes (1+2+3)", &scalar_lane_bytes);
     row_bytes_u64("word row (WordRow, real)", &word_row_bytes);
+    println!(
+        "{:<28}{:>12}{:>12}{aggregate_words:>14}{:>10.3}",
+        "word aggregate, hash alone",
+        "",
+        "",
+        aggregate_words as f64 / 1e6
+    );
+    println!(
+        "{:<28}{:>12}{:>12}{aggregate_rows:>14}{:>10.3}",
+        "word aggregate rows",
+        "",
+        "",
+        aggregate_rows as f64 / 1e6
+    );
+    println!(
+        "{:<28}{:>12}{:>12}{aggregate_bytes:>14}{:>10.3}",
+        "word aggregate (resident)",
+        "",
+        "",
+        aggregate_bytes as f64 / 1e6
+    );
     row_bytes_f64("word lane A (u128+flags)", &lane_a_bytes);
     row_bytes_u64("word lane B (u64 hash)", &lane_b_bytes);
     row_bytes_f64("word lane C (book grain)", &lane_c_per_chapter);

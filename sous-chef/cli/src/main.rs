@@ -186,9 +186,14 @@ fn print_patterns(
         }
     }
     for (index, pattern) in patterns.iter().enumerate() {
-        // A casing row names a word hash, not a glyph; the CLI has the text,
-        // so it shows the word its first site landed on.
-        if let PatternKey::Casing { hash, form } = pattern.key {
+        // A word row names a hash, not a glyph; the CLI has the text, so it
+        // shows the word its first site landed on.
+        if let Some(hash) = pattern.word_hash() {
+            let claim = match pattern.key {
+                PatternKey::Casing { form, .. } => form.name().to_string(),
+                PatternKey::WordLength { sigma, .. } => format!("{sigma}\u{3c3}"),
+                _ => unreachable!("a word hash comes from a word channel"),
+            };
             let word = sites[index].first().map_or_else(String::new, |finding| {
                 let book = corpus
                     .get(finding.book_idx())
@@ -199,8 +204,7 @@ fn print_patterns(
                 )
             });
             println!(
-                "pattern[{index}] word #{hash:016x} {}{word} {}/{} {:.2}% band {} \u{b7} {}/{} books {} sites",
-                form.name(),
+                "pattern[{index}] word #{hash:016x} {claim}{word} {}/{} {:.2}% band {} \u{b7} {}/{} books {} sites",
                 pattern.numerator,
                 pattern.denominator,
                 f64::from(pattern.share_bp) / 100.0,
@@ -228,7 +232,9 @@ fn print_patterns(
             PatternKey::PooledNeighbor(pool) => {
                 format!("pooled-neighbor {}", pool.name())
             }
-            PatternKey::Casing { .. } => unreachable!("handled above"),
+            PatternKey::Casing { .. } | PatternKey::WordLength { .. } => {
+                unreachable!("handled above")
+            }
         };
         let band = match pattern.band {
             Some(step) => format!(" band {step}"),

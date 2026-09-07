@@ -201,7 +201,7 @@ pub enum Case {
 }
 
 impl Case {
-    const COUNT: usize = 3;
+    pub const COUNT: usize = 3;
 
     const fn of(class: Class) -> Self {
         if class.is_uppercase() {
@@ -219,6 +219,11 @@ impl Case {
 pub struct FollowCounts([u32; Case::COUNT]);
 
 impl FollowCounts {
+    /// Upper, Lower, Uncased, in [`Case`] order.
+    pub const fn new(counts: [u32; Case::COUNT]) -> Self {
+        Self(counts)
+    }
+
     pub const fn get(self, case: Case) -> u32 {
         self.0[case as usize]
     }
@@ -227,7 +232,7 @@ impl FollowCounts {
         self.0[0] + self.0[1] + self.0[2]
     }
 
-    fn add(&mut self, other: Self) {
+    pub fn absorb(&mut self, other: Self) {
         for (slot, count) in self.0.iter_mut().zip(other.0) {
             *slot += count;
         }
@@ -415,11 +420,19 @@ impl ChapterPass for Substrate {
         fold_book(book, &mut Edge::default())
     }
 
-    /// Publishes the hygiene lane, then judges the corpus's counts into the
-    /// pattern table.
+    /// Publishes the hygiene lane and the corpus's terminal table, then judges
+    /// the corpus's counts into the pattern table.
+    ///
+    /// The terminal table is this pass's follow lane, resolved against the
+    /// config; the word channels read it out of the sink rather than merge the
+    /// same counts again ([`crate::judge::TerminalTable`]).
     ///
     /// A site run abutting a masked `\c` is two findings, one per chapter.
     fn judge(&self, corpus: &[&BookAggregate], config: &JudgingConfig, out: &mut Findings) {
+        out.set_terminals(crate::judge::TerminalTable::learn(
+            &crate::judge::merged_follows(corpus),
+            config,
+        ));
         for (index, book) in corpus.iter().enumerate() {
             out.open_book(BookIndex::new(index).expect("a corpus indexes every book"));
             for finding in &book.hygiene {
