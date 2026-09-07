@@ -122,13 +122,18 @@ impl WordCount {
 
 /// One chapter's word counts: sorted by hash, detached, coordinate-free.
 ///
-/// [`Default`] is the empty row a host leaves behind when it retains this pass
-/// at book grain ([`ChapterPass::RETAIN_CHAPTERS`]) — the same 24 B an uncased
-/// chapter's row costs.
+/// [`ChapterPass::release`] leaves the empty row a host keeps when it retains
+/// this pass at book grain ([`ChapterPass::RETAIN_CHAPTERS`]) — the same 24 B
+/// an uncased chapter's row costs, and flagged, so an uncased chapter's
+/// honestly empty row is never mistaken for a shed one. [`Default`] is NOT
+/// released.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct WordRow {
     words: Box<[WordCount]>,
     cased: bool,
+    /// Set only by [`ChapterPass::release`]; read by
+    /// [`ChapterPass::is_released`] to decide the row must be walked again.
+    released: bool,
 }
 
 impl WordRow {
@@ -238,7 +243,16 @@ impl ChapterPass for Words {
     }
 
     fn release(&self, obs: &mut WordRow) {
-        *obs = WordRow::default();
+        *obs = WordRow {
+            released: true,
+            ..WordRow::default()
+        };
+    }
+
+    /// The flag, not the emptiness: an uncased chapter's row is empty and
+    /// still whole.
+    fn is_released(&self, observation: &WordRow) -> bool {
+        observation.released
     }
 
     fn judge(&self, corpus: &[&WordAggregate], config: &JudgingConfig, out: &mut Findings) {

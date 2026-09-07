@@ -80,16 +80,26 @@ writes neither.
 ```text
 const RETAIN_CHAPTERS: bool    may a host keep my per-chapter observation?
 fn release(&mut Observation)   empty what it may not, once the fold has read it
+fn is_released(&Observation)   did release empty this one?
+fn remap(chapter, &mut Observation)   walk it again, in place
 
 fn tally / untally(&mut CorpusTotals, &[&Aggregate])   books in, books out
 fn judge_resident(corpus, &CorpusTotals, config, out)  judge from what is held
 ```
 
+`is_released` reads a flag `release` set, never the rows being empty: an
+uncased chapter's word row is empty and whole. `remap` defaults to the whole
+`map`, and a tuple overrides it to run only the members that `is_released` —
+which is what lets a host re-map a book for its book-grain member while its
+chapter-grain neighbours keep every slot they hold. A tuple `is_released` if
+any member does.
+
 `Words` answers `false` to the first: a chapter's word rows are ~5 KB of cased
 Latin against the substrate's 0.3, and rewalking one edited book costs ~200 µs
 ([../../evidence.md](../../evidence.md), "W1 grain"). A tuple retains chapters
 only if every member does — one observation carries them all, so a host that
-sheds one member's slot re-maps the whole book, every member with it.
+sheds one member's slot re-maps the whole book. Through `remap`, though, only
+that member walks again; the rest keep the rows the cache still holds.
 `RETAIN_CHAPTERS` also says how long a resident host may keep the AGGREGATE
 across publications: a pass that answers `false` gets it back only for a
 book's current checksum, never an older generation

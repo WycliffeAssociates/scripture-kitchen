@@ -136,6 +136,26 @@ pub trait ChapterPass {
         let _ = obs;
     }
 
+    /// Whether [`release`](Self::release) emptied this observation, so a fold
+    /// may not read it until it is walked again. Default: no.
+    ///
+    /// A pass that sheds rows says so from a flag it sets in `release`, not
+    /// from the rows being empty: a chapter that honestly holds nothing is not
+    /// a shed one.
+    fn is_released(&self, observation: &Self::Observation) -> bool {
+        let _ = observation;
+        false
+    }
+
+    /// Walks this chapter again into an observation a `release` emptied.
+    ///
+    /// Default: the whole [`map`](Self::map). A tuple overrides it to run only
+    /// the members that are released, so a host re-mapping one book-grain
+    /// member's rows does not re-walk the chapters its neighbours still hold.
+    fn remap(&self, chapter: ChapterInput<'_>, observation: &mut Self::Observation) {
+        *observation = self.map(chapter);
+    }
+
     /// Judges every book at once: `corpus[i]` is book `i`'s aggregate, and a
     /// judge calls `out.open_book(i)` before pushing that book's rows.
     fn judge(&self, corpus: &[&Self::Aggregate], config: &Self::Config, out: &mut Findings);
@@ -250,6 +270,20 @@ impl<A: ChapterPass, B: ChapterPass> ChapterPass for (A, B) {
     fn release(&self, obs: &mut Self::Observation) {
         self.0.release(&mut obs.0);
         self.1.release(&mut obs.1);
+    }
+
+    fn is_released(&self, observation: &Self::Observation) -> bool {
+        self.0.is_released(&observation.0) || self.1.is_released(&observation.1)
+    }
+
+    /// Only the released members walk again; the rest keep the slot they hold.
+    fn remap(&self, chapter: ChapterInput<'_>, observation: &mut Self::Observation) {
+        if self.0.is_released(&observation.0) {
+            self.0.remap(chapter, &mut observation.0);
+        }
+        if self.1.is_released(&observation.1) {
+            self.1.remap(chapter, &mut observation.1);
+        }
     }
 
     fn judge(&self, corpus: &[&Self::Aggregate], config: &Self::Config, out: &mut Findings) {
@@ -371,6 +405,25 @@ impl<A: ChapterPass, B: ChapterPass, C: ChapterPass> ChapterPass for (A, B, C) {
         self.0.release(&mut obs.0);
         self.1.release(&mut obs.1);
         self.2.release(&mut obs.2);
+    }
+
+    fn is_released(&self, observation: &Self::Observation) -> bool {
+        self.0.is_released(&observation.0)
+            || self.1.is_released(&observation.1)
+            || self.2.is_released(&observation.2)
+    }
+
+    /// Only the released members walk again; the rest keep the slot they hold.
+    fn remap(&self, chapter: ChapterInput<'_>, observation: &mut Self::Observation) {
+        if self.0.is_released(&observation.0) {
+            self.0.remap(chapter, &mut observation.0);
+        }
+        if self.1.is_released(&observation.1) {
+            self.1.remap(chapter, &mut observation.1);
+        }
+        if self.2.is_released(&observation.2) {
+            self.2.remap(chapter, &mut observation.2);
+        }
     }
 
     fn judge(&self, corpus: &[&Self::Aggregate], config: &Self::Config, out: &mut Findings) {

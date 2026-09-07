@@ -92,16 +92,29 @@ save the ~200 µs it takes to rewalk one edited book (evidence.md, "W1 grain").
 A phone kills a tab for memory and never notices 200 µs. A tuple retains
 chapters only if every member does, because one observation carries them all.
 
-That also means the cost is paid in whole books — the tuple's `map` runs every
-member at once, so there is no remapping one member's slot:
+That cost is paid in whole books, but not in whole observations: a chapter
+whose `ObservationKey` still stands keeps the members `release` never emptied,
+and `ChapterPass::remap` walks only the shed ones.
 
 ```text
 this book's checksum has an aggregate?
   yes -> nothing mapped, nothing folded, no text read
-  no  -> map EVERY chapter of the book, fold once, keep the aggregate,
-         then pass.release each observation — WordRow::default(), 24 B,
-         the same as an uncased chapter's row
+  no  -> for EVERY chapter of the book:
+           key absent      -> pass.map, every member walks
+           key held, shed  -> pass.remap in place, only the shed member walks
+           key held, whole -> nothing
+         fold once, keep the aggregate, then pass.release each observation
+         — an empty WordRow flagged released, 24 B, the same as an
+         uncased chapter's row
 ```
+
+`last_mapped` counts a remap as a map of that chapter, because a chapter was
+read and walked; `last_remapped` is how many of those kept an observation.
+`a_keystroke_in_one_chapter_rewalks_words_for_the_book_but_glyphs_only_for_the_chapter`
+pins the split through a counting wrapper around one tuple member: the words
+walk the edited book whole, the glyph walk runs for the edited chapter alone.
+The flag is why the check is honest — `release` sets it, so an uncased
+chapter's genuinely empty row is never taken for a shed one.
 
 So a markup-only edit, which moves the `RawChecksum` and not one
 `ObservationKey`, now re-maps the book it touched: the aggregate is keyed by

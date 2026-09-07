@@ -134,9 +134,12 @@ hash-sorted sequences, and the result is exactly `merge` over the books left:
 row that a fresh merge holds too, and only its last book leaving takes it away.
 
 `Words` is therefore retained at BOOK grain — `RETAIN_CHAPTERS = false`, and
-`release` puts the chapter's row back to its 24-byte default once the fold has
-read it. A host re-walks a whole edited book instead of one chapter and keeps
-2-3.4 MB per Bible instead of 6.4-8.2 (evidence.md, "W1 grain"); the seam is
+`release` puts the chapter's row back to its 24-byte default, flagged
+`released`, once the fold has read it. The flag is what `is_released` reads:
+an uncased chapter's row is empty too, and it is whole. A host re-walks a whole
+edited book instead of one chapter and keeps 2-3.4 MB per Bible instead of
+6.4-8.2 (evidence.md, "W1 grain"); only this member re-walks, because the
+tuple's `remap` leaves its neighbours' retained rows alone. The seam is
 `galley/src/sous/expediter.md`.
 
 ## Judging, and placing

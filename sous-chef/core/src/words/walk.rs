@@ -276,6 +276,7 @@ pub(crate) fn walk(text: &str, verses: &[Verse]) -> WordRow {
     WordRow {
         cased: !rows.is_empty(),
         words: rows.into_boxed_slice(),
+        released: false,
     }
 }
 

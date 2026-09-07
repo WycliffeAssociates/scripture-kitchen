@@ -223,7 +223,10 @@ pub struct Expediter<P: ChapterPass> {
     dirty: bool,
     /// Chapters mapped since the last publication.
     pending: u64,
+    /// How many of those were a re-walk of what `release` shed, in place.
+    pending_remaps: u64,
     misses: u64,
+    remaps: u64,
     folds: u64,
     located: u64,
     /// Whether a book's missing chapters are mapped on rayon; the two
@@ -238,13 +241,25 @@ pub struct Expediter<P: ChapterPass> {
 /// Ranges, not copies — the projected text is the book's own, and the verse
 /// rows are pooled into one allocation for the whole book.
 #[cfg(feature = "parallel")]
-struct Queued {
+struct Queued<O> {
     observation: ObservationKey,
     /// Into the projected book text.
     text: core::ops::Range<usize>,
     /// Into this book's verse pool.
     verses: core::ops::Range<usize>,
     key: ChapterKey,
+    /// A shed observation lifted out of the cache, to be re-walked in place
+    /// and put back; `None` maps from nothing.
+    held: Option<O>,
+}
+
+/// What one chapter's cache entry owes this publication.
+#[derive(Clone, Copy)]
+enum Redo {
+    /// No entry at all: every member maps.
+    Whole,
+    /// An entry a `release` emptied: only the shed members walk again.
+    Shed,
 }
 
 /// `Sync` unconditionally, so the `parallel` feature adds no bound the serial
@@ -266,7 +281,9 @@ impl<P: ChapterPass + Sync> Expediter<P> {
             kept: DEFAULT_GENERATIONS,
             dirty: false,
             pending: 0,
+            pending_remaps: 0,
             misses: 0,
+            remaps: 0,
             folds: 0,
             located: 0,
             #[cfg(feature = "parallel")]
@@ -350,8 +367,18 @@ impl<P: ChapterPass + Sync> Expediter<P> {
     }
 
     /// Chapters mapped for the last [`publish`](Self::publish).
+    ///
+    /// A chapter whose retained observation was only partly re-walked counts
+    /// here too — a remap is a map of that chapter, honestly.
+    /// [`last_remapped`](Self::last_remapped) says how many of these were.
     pub fn last_mapped(&self) -> u64 {
         self.misses
+    }
+
+    /// Chapters of [`last_mapped`](Self::last_mapped) that kept an observation
+    /// and re-walked only the members [`ChapterPass::release`] had shed.
+    pub fn last_remapped(&self) -> u64 {
+        self.remaps
     }
 
     /// Books folded for the last [`publish`](Self::publish); the rest judged
@@ -425,11 +452,15 @@ impl<P: ChapterPass + Sync> Expediter<P> {
     /// Keys this book's chapters under the Pantry's current checksum and maps
     /// the ones the cache is missing; a checksum already keyed only ages.
     ///
-    /// `fresh` names the observations THIS publication mapped and has not shed
-    /// yet. A pass retained at book grain ([`ChapterPass::RETAIN_CHAPTERS`])
-    /// empties a member's chapter rows once the fold has read them, so a book
-    /// whose aggregate is gone may only fold from those: it re-maps every
-    /// chapter of its own that is not already in the set.
+    /// `fresh` names the observations this publication has already found whole
+    /// and has not shed yet. A pass retained at book grain
+    /// ([`ChapterPass::RETAIN_CHAPTERS`]) empties a member's chapter rows once
+    /// the fold has read them, so a book whose aggregate is gone may only fold
+    /// from those: it re-maps every chapter of its own that is not in the set.
+    /// A chapter that kept its [`ObservationKey`] re-maps through
+    /// [`ChapterPass::remap`], which walks only the members that were shed —
+    /// so a keystroke rewalks the edited book's words and nothing else's
+    /// glyphs.
     fn index_book(
         &mut self,
         id: &BookId,
@@ -447,6 +478,7 @@ impl<P: ChapterPass + Sync> Expediter<P> {
             kept,
             dirty,
             pending,
+            pending_remaps,
             ..
         } = self;
         let products = pantry.products(id).expect("the caller named a live book");
@@ -477,62 +509,82 @@ impl<P: ChapterPass + Sync> Expediter<P> {
             })?;
         let mut table = Vec::new();
         #[cfg(feature = "parallel")]
-        let (mut queued, mut pool, mut seen) = (
-            Vec::<Queued>::new(),
-            Vec::<Verse>::new(),
-            FxHashSet::default(),
-        );
+        let (mut queued, mut pool) = (Vec::<Queued<P::Observation>>::new(), Vec::<Verse>::new());
         for_each_chapter(&book, |start, chapter| {
             let observation = ObservationKey::of::<P>(&chapter);
             table.push(ChapterRow { observation, start });
-            // A shed observation is not a hit, so a re-grained book maps
-            // anything this publication has not mapped already.
-            let wanted = !fresh.contains(&observation)
-                && (regrain || !observations.contains_key(&observation));
-            #[cfg(feature = "parallel")]
-            if parallel {
-                // The same dedup the serial map does, so both settings map a
-                // repeated chapter once and count it once.
-                if wanted && seen.insert(observation) {
-                    let text = start as usize..start as usize + chapter.text.len();
-                    debug_assert_eq!(&book.text()[text.clone()], chapter.text);
-                    let from = pool.len();
-                    pool.extend_from_slice(chapter.verses);
-                    queued.push(Queued {
-                        observation,
-                        text,
-                        verses: from..pool.len(),
-                        key: chapter.key,
-                    });
-                }
+            // Both settings visit a repeated chapter once and count it once.
+            if fresh.contains(&observation) {
                 return;
             }
-            if wanted {
-                *pending += 1;
-                let mapped = pass.map(chapter);
-                observations.insert(observation, mapped);
-                fresh.insert(observation);
+            // A shed observation is not a hit: a re-grained book walks again
+            // whatever `release` emptied, and only that.
+            let redo = match observations.get(&observation) {
+                None => Some(Redo::Whole),
+                Some(held) if regrain && pass.is_released(held) => Some(Redo::Shed),
+                Some(_) => None,
+            };
+            fresh.insert(observation);
+            let Some(redo) = redo else { return };
+            #[cfg(feature = "parallel")]
+            if parallel {
+                let text = start as usize..start as usize + chapter.text.len();
+                debug_assert_eq!(&book.text()[text.clone()], chapter.text);
+                let from = pool.len();
+                pool.extend_from_slice(chapter.verses);
+                queued.push(Queued {
+                    observation,
+                    text,
+                    verses: from..pool.len(),
+                    key: chapter.key,
+                    held: match redo {
+                        Redo::Whole => None,
+                        Redo::Shed => observations.remove(&observation),
+                    },
+                });
+                return;
             }
+            match redo {
+                Redo::Whole => {
+                    let mapped = pass.map(chapter);
+                    observations.insert(observation, mapped);
+                }
+                Redo::Shed => {
+                    let held = observations
+                        .get_mut(&observation)
+                        .expect("the entry this arm just read");
+                    pass.remap(chapter, held);
+                    *pending_remaps += 1;
+                }
+            }
+            *pending += 1;
         });
         // Collected in chapter order and inserted in it: the map is content
         // keyed, so the table it feeds is the same either way.
         #[cfg(feature = "parallel")]
         if parallel {
             let text = book.text();
+            *pending_remaps += queued.iter().filter(|row| row.held.is_some()).count() as u64;
             let mapped: Vec<P::Observation> = queued
-                .par_iter()
+                .par_iter_mut()
                 .map(|chapter| {
-                    pass.map(ChapterInput {
+                    let input = ChapterInput {
                         text: &text[chapter.text.clone()],
                         verses: &pool[chapter.verses.clone()],
                         key: chapter.key,
-                    })
+                    };
+                    match chapter.held.take() {
+                        Some(mut held) => {
+                            pass.remap(input, &mut held);
+                            held
+                        }
+                        None => pass.map(input),
+                    }
                 })
                 .collect();
             *pending += mapped.len() as u64;
             for (chapter, observation) in queued.iter().zip(mapped) {
                 observations.insert(chapter.observation, observation);
-                fresh.insert(chapter.observation);
             }
         }
         chapter_tables.insert(checksum, table);
@@ -601,6 +653,7 @@ impl<P: ChapterPass + Sync> Expediter<P> {
             self.index_book(id, &mut fresh)?;
         }
         self.misses = core::mem::take(&mut self.pending);
+        self.remaps = core::mem::take(&mut self.pending_remaps);
 
         let mut projected_lens = Vec::with_capacity(books.len());
         let mut published_lens = Vec::with_capacity(books.len());
@@ -844,9 +897,14 @@ fn snapshot_id<P: ChapterPass>(pantry: &Pantry, books: &[(BookId, BookKey)]) -> 
 
 #[cfg(test)]
 mod tests {
+    use core::sync::atomic::{AtomicU64, Ordering};
+
     use super::*;
     use sous_core::hygiene::HygieneBytes;
-    use sous_core::{BookIndex, Brigade, CorpusSnapshot, FindingKind, JudgingConfig};
+    use sous_core::{
+        BookIndex, Brigade, CorpusSnapshot, FindingKind, JudgingConfig, SchemaStamp, Substrate,
+        Words,
+    };
 
     use crate::pantry::{PantryError, Retain};
 
@@ -884,6 +942,103 @@ mod tests {
     /// only visible through a pass that keeps its chapters.
     fn grain() -> Expediter<HygieneBytes> {
         Expediter::new(HygieneBytes, 1 << 20)
+    }
+
+    /// One member's own map and remap calls, which `last_mapped` cannot
+    /// separate: it counts chapters, not the walks a chapter ran.
+    #[derive(Debug, Default)]
+    struct Counting<P> {
+        inner: P,
+        maps: AtomicU64,
+        remaps: AtomicU64,
+    }
+
+    impl<P> Counting<P> {
+        fn maps(&self) -> u64 {
+            self.maps.load(Ordering::Relaxed)
+        }
+
+        fn remaps(&self) -> u64 {
+            self.remaps.load(Ordering::Relaxed)
+        }
+    }
+
+    impl<P: ChapterPass> ChapterPass for Counting<P> {
+        type Observation = P::Observation;
+        type Aggregate = P::Aggregate;
+        type Config = P::Config;
+        const SCHEMA: SchemaStamp = P::SCHEMA;
+        const RETAIN_CHAPTERS: bool = P::RETAIN_CHAPTERS;
+
+        fn map(&self, chapter: ChapterInput<'_>) -> Self::Observation {
+            self.maps.fetch_add(1, Ordering::Relaxed);
+            self.inner.map(chapter)
+        }
+
+        fn fold(&self, book: &[ChapterObs<&Self::Observation>]) -> Self::Aggregate {
+            self.inner.fold(book)
+        }
+
+        fn release(&self, obs: &mut Self::Observation) {
+            self.inner.release(obs);
+        }
+
+        fn is_released(&self, observation: &Self::Observation) -> bool {
+            self.inner.is_released(observation)
+        }
+
+        fn remap(&self, chapter: ChapterInput<'_>, observation: &mut Self::Observation) {
+            self.remaps.fetch_add(1, Ordering::Relaxed);
+            self.inner.remap(chapter, observation);
+        }
+
+        fn judge(&self, corpus: &[&Self::Aggregate], config: &Self::Config, out: &mut Findings) {
+            self.inner.judge(corpus, config, out);
+        }
+
+        fn aggregate_bytes(&self, aggregate: &Self::Aggregate) -> usize {
+            self.inner.aggregate_bytes(aggregate)
+        }
+
+        fn tally(&self, totals: &mut CorpusTotals, books: &[&Self::Aggregate]) {
+            self.inner.tally(totals, books);
+        }
+
+        fn untally(&self, totals: &mut CorpusTotals, books: &[&Self::Aggregate]) {
+            self.inner.untally(totals, books);
+        }
+
+        fn judge_resident(
+            &self,
+            corpus: &[&Self::Aggregate],
+            totals: &CorpusTotals,
+            config: &Self::Config,
+            out: &mut Findings,
+        ) {
+            self.inner.judge_resident(corpus, totals, config, out);
+        }
+
+        fn locate(
+            &self,
+            book: BookIndex,
+            text: &str,
+            chapters: &[Chapter],
+            verses: &[sous_core::Verse],
+            aggregate: &Self::Aggregate,
+            out: &mut Findings,
+        ) {
+            self.inner
+                .locate(book, text, chapters, verses, aggregate, out);
+        }
+
+        fn firing(
+            &self,
+            aggregate: &Self::Aggregate,
+            patterns: &[Pattern],
+            out: &mut Vec<PatternIndex>,
+        ) {
+            self.inner.firing(aggregate, patterns, out);
+        }
     }
 
     /// Every HYGIENE row of a published buffer as (book index, id, from, to).
@@ -1053,6 +1208,45 @@ mod tests {
                 .all(|(_, _, words)| words.words().is_empty()),
             "every word row is back to its empty default"
         );
+    }
+
+    /// A book-grain member sheds its rows, so its book is walked whole again —
+    /// but only IT is: the chapter-grain member beside it keeps every slot the
+    /// edit did not move, and maps the one chapter it did.
+    #[test]
+    fn a_keystroke_in_one_chapter_rewalks_words_for_the_book_but_glyphs_only_for_the_chapter() {
+        let mut sous: Expediter<(Counting<Substrate>, Words)> =
+            Expediter::new((Counting::default(), Words), 1 << 20);
+        sous.update("b/mrk.usfm", Role::Target, &mark()).unwrap();
+        let before = sous.publish().unwrap();
+        assert_eq!(sous.last_mapped(), 3, "cold: every chapter");
+        assert_eq!(sous.last_remapped(), 0, "nothing was held to re-walk");
+        assert_eq!(sous.pass().0.maps(), 3, "the glyph walk ran three times");
+
+        let after = mark().replace("A withered", "A shrivelled");
+        sous.update("b/mrk.usfm", Role::Target, &after).unwrap();
+        let published = sous.publish().unwrap();
+        assert_eq!(
+            sous.last_mapped(),
+            3,
+            "the words are still a book-wide walk"
+        );
+        assert_eq!(
+            sous.last_remapped(),
+            2,
+            "two chapters kept their glyph rows"
+        );
+        assert_eq!(
+            sous.pass().0.maps(),
+            4,
+            "one more glyph walk, for the edited chapter alone"
+        );
+        assert_eq!(
+            sous.pass().0.remaps(),
+            0,
+            "a member that shed nothing is not asked to walk again"
+        );
+        assert_ne!(published, before, "the edit is published");
     }
 
     /// The same chapter 1 in two books: one cache entry, two published rows.
