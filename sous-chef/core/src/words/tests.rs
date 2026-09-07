@@ -238,7 +238,10 @@ fn an_uncased_chapter_stores_no_casing_row_and_one_doubles_row_per_word() {
     assert!(hebrew.words().is_empty());
     assert!(!hebrew.cased());
     assert_eq!(hebrew.doubles().len(), 2, "two distinct words");
-    assert_eq!(hebrew.doubles()[0].bare + hebrew.doubles()[0].separated, 0);
+    assert_eq!(
+        u32::from(hebrew.doubles()[0].bare) + hebrew.doubles()[0].separated_total(),
+        0
+    );
     assert_eq!(
         hebrew.doubles().iter().map(|row| row.uncased).sum::<u16>(),
         3
@@ -259,13 +262,13 @@ fn doubles_of(text: &str, word: &str) -> DoubleCount {
         .doubles()
         .iter()
         .find(|row| row.hash == hash)
-        .copied()
+        .cloned()
         .unwrap_or(DoubleCount::new(hash))
 }
 
 #[test]
-fn the_double_count_is_sixteen_bytes() {
-    assert_eq!(size_of::<DoubleCount>(), 16);
+fn the_double_count_is_thirty_two_bytes() {
+    assert_eq!(size_of::<DoubleCount>(), 32);
 }
 
 /// Two claims, kept apart, and compared by the case fold: `The the` is a
@@ -273,8 +276,8 @@ fn the_double_count_is_sixteen_bytes() {
 #[test]
 fn adjacent_and_separated_doubles_are_different_counters() {
     assert_eq!(doubles_of("go go on", "go").bare, 1);
-    assert_eq!(doubles_of("go go on", "go").separated, 0);
-    assert_eq!(doubles_of("na, na now", "na").separated, 1);
+    assert_eq!(doubles_of("go go on", "go").separated_total(), 0);
+    assert_eq!(doubles_of("na, na now", "na").separated_total(), 1);
     assert_eq!(doubles_of("na, na now", "na").bare, 0);
     assert_eq!(doubles_of("The the end", "the").bare, 1);
     // A newline is whitespace, so a line break is still bare.
@@ -291,10 +294,10 @@ fn adjacent_and_separated_doubles_are_different_counters() {
 #[test]
 fn a_word_between_two_occurrences_is_not_a_double() {
     assert_eq!(doubles_of("go on go", "go").bare, 0);
-    assert_eq!(doubles_of("na 3 na", "na").separated, 0);
+    assert_eq!(doubles_of("na 3 na", "na").separated_total(), 0);
     assert_eq!(doubles_of("na 3 na", "na").bare, 0);
     // `a--b` is two words, so `go--go` is a separated double.
-    assert_eq!(doubles_of("go--go on", "go").separated, 1);
+    assert_eq!(doubles_of("go--go on", "go").separated_total(), 1);
 }
 
 /// The lane is keyed by hash alone: a double is a double whatever stood
@@ -372,7 +375,7 @@ fn the_fold_merges_by_hash_and_carries_no_seam() {
 fn the_fold_merges_the_doubles_lane_and_the_seam_ends_a_pair() {
     let joined = fold(&["go go on", "go, go on"]);
     let go = joined.doubles_for(hash_of("go")).expect("one row");
-    assert_eq!((go.bare, go.separated), (1, 1));
+    assert_eq!((u64::from(go.bare), go.count_of(true)), (1, 1));
 
     // A cased word that never doubles is in no doubles row at all, which is
     // what keeps the lane cheap in a cased script.
@@ -838,6 +841,58 @@ fn na_comma_na_is_a_separate_claim() {
     assert!(sited(&books, &findings, Reasons::DOUBLED_BARE).is_empty());
 }
 
+/// A separated pair whose separator's LAST glyph forces a capital in this
+/// corpus's own terminal table is a sentence terminal, not a doubled word:
+/// `go. Go` is two sentences. Learned, not listed — the same corpus with the
+/// same pair but without the forcing evidence keeps the row.
+#[test]
+fn a_pair_across_a_sentence_terminal_is_not_a_double() {
+    // Five free `go`s, none of them adjacent, plus the pair: seven total,
+    // over `loose()`'s support floor of five.
+    let free_go = "I go there. She will go home too. They go far away. \
+                    We go near. He can go too. ";
+
+    // Plenty of `.` evidence, all of it a capital: the period forces here.
+    let mut forcing = String::new();
+    for word in ["Alpha", "Beta", "Gamma", "Delta", "Epsilon", "Zeta"] {
+        forcing.push_str(&format!("Word. {word} thing. "));
+    }
+    let mut text = forcing.clone();
+    text.push_str(free_go);
+    text.push_str("go. Go home.");
+    let books = [book(b"MRK", text)];
+    assert!(
+        doubled_rows(&books, &always(&loose())).is_empty(),
+        "the period forces a capital here, so `go. Go` is not a double"
+    );
+
+    // The same pair and the same `go` denominator, but a corpus whose periods
+    // hand off to lowercase almost always: the period does not force, and the
+    // pair is a real doubling.
+    let mut not_forcing = String::new();
+    for word in ["alpha", "beta", "gamma", "delta", "epsilon", "zeta"] {
+        not_forcing.push_str(&format!("word. {word} thing. "));
+    }
+    let mut text = not_forcing;
+    text.push_str(free_go);
+    text.push_str("go. Go home.");
+    let books = [book(b"MRK", text)];
+    let rows = doubled_rows(&books, &always(&loose()));
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        rows[0].key,
+        PatternKey::Doubled {
+            hash: hash_of("go"),
+            separated: true,
+        }
+    );
+    let findings = analyzed(&books, &always(&loose()));
+    assert_eq!(
+        sited(&books, &findings, Reasons::DOUBLED_SEPARATED),
+        ["go. Go"]
+    );
+}
+
 /// Charter invariant 1: a verse start is an address, not a sentence boundary,
 /// so word state crosses it and a pair straddling the seam is a real pair.
 #[test]
@@ -1029,7 +1084,11 @@ fn the_doubles_lane_adds_and_removes_like_the_casing_lane() {
         .iter()
         .find(|row| row.hash == hash_of("na"))
         .expect("two books hold na");
-    assert_eq!((na.bare, na.separated, na.holders), (1, 1, 2));
+    let empty = TerminalTable::default();
+    assert_eq!(
+        (u64::from(na.bare), na.separated_free(&empty), na.holders),
+        (1, 1, 2)
+    );
 
     // An uncased word is in the doubles lane alone, so the union counts it.
     let hebrew = tally
@@ -1039,7 +1098,7 @@ fn the_doubles_lane_adds_and_removes_like_the_casing_lane() {
         .expect("one book holds it");
     assert_eq!((hebrew.uncased, hebrew.bare), (2, 1));
     assert!(!tally.by_word().any(|word| word[0].hash == hebrew.hash));
-    assert!(tally.doubling_share_bp() > 0);
+    assert!(tally.doubling_share_bp(&empty) > 0);
 
     let mut built = WordTotals::default();
     for book in &views {

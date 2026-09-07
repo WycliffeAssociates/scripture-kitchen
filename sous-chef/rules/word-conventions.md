@@ -36,7 +36,11 @@ and the terminal table are [../core/src/judge.md](../core/src/judge.md).
   against 60,000 `the`s fires. A word doubled every time it appears owns its
   whole denominator and never fires, so there is no allow-list. State crosses a
   verse seam and stops at a chapter one, which is the same rule the fold
-  already runs for a word.
+  already runs for a word. A separated pair whose separator's last glyph
+  forces a capital in the same learned `TerminalTable` the casing channel
+  reads is a sentence boundary, not a doubling — `go. Go` is two sentences —
+  so the separated numerator sums only the non-forcing glyphs (evidence.md,
+  W2: 33 rows fall to 28 on `en_ulb`).
 - **Doubling has nothing to do with case, so uncased scripts are judged too.**
   That is the one place they stop paying nothing: the walk now hashes every
   word and an uncased chapter keeps one doubles row per distinct word. Measured

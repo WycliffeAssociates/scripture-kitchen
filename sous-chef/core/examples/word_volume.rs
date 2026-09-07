@@ -272,7 +272,9 @@ impl Corpus {
     /// corpus's whole vocabulary, in basis points.
     fn doubling_share_bp(&self) -> u16 {
         let words: Vec<&WordAggregate> = self.words.iter().collect();
-        WordTotals::merge(&words).doubling_share_bp()
+        let findings = self.judged(&JudgingConfig::default());
+        let table = findings.terminals().cloned().unwrap_or_default();
+        WordTotals::merge(&words).doubling_share_bp(&table)
     }
 
     /// The busiest handoffs, whether they force or not: `glyph upper/cased

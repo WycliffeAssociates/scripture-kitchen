@@ -1028,8 +1028,8 @@ pub(crate) fn judge_words(
     if config.channels.word_length {
         word_length(corpus, totals, config, out);
     }
-    if config.channels.doubled && judges_doubles(totals, config) {
-        doubled(corpus, totals, config, out);
+    if config.channels.doubled && judges_doubles(totals, table, config) {
+        doubled(corpus, totals, table, config, out);
     }
 }
 
@@ -1037,12 +1037,15 @@ pub(crate) fn judge_words(
 ///
 /// The share is of the vocabulary, never a count: Jonah and a whole Bible must
 /// answer the same way. `Always` and `Never` are the host's override, the same
-/// shape [`LetterRoster`] has.
-fn judges_doubles(totals: &WordTotals, config: &JudgingConfig) -> bool {
+/// shape [`LetterRoster`] has. A separated pair whose separator forces a
+/// capital is a sentence boundary rather than a doubling, so it does not
+/// count toward the recusal either — a language does not become "productive"
+/// from `go. Go` and `Up! Up`.
+fn judges_doubles(totals: &WordTotals, table: &TerminalTable, config: &JudgingConfig) -> bool {
     match config.doubles {
         DoublesPolicy::Always => true,
         DoublesPolicy::Never => false,
-        DoublesPolicy::Auto => totals.doubling_share_bp() <= config.doubles_productive_bp,
+        DoublesPolicy::Auto => totals.doubling_share_bp(table) <= config.doubles_productive_bp,
     }
 }
 
@@ -1055,17 +1058,24 @@ fn judges_doubles(totals: &WordTotals, config: &JudgingConfig) -> bool {
 /// 0.17 bp and fires. A word doubled every time it appears owns its whole
 /// denominator and never fires.
 ///
+/// The separated numerator sums only the glyphs `table` does NOT force: a
+/// separator that forces a capital ends one sentence and starts the next, so
+/// `go. Go` and `Up! Up` are never a doubling here — the pair is real to the
+/// walk, which cannot read the table, and unreal to the judge, which can.
+///
 /// The two lanes are hash-sorted, so this is one tandem walk and not a probe
 /// per doubled word.
 fn doubled(
     corpus: &[&WordAggregate],
     totals: &WordTotals,
+    table: &TerminalTable,
     config: &JudgingConfig,
     out: &mut Findings,
 ) {
     let mut cased = totals.by_word().peekable();
     for row in totals.doubles() {
-        if row.bare == 0 && row.separated == 0 {
+        let free_separated = row.separated_free(table);
+        if row.bare == 0 && free_separated == 0 {
             continue;
         }
         while cased.peek().is_some_and(|word| word[0].hash < row.hash) {
@@ -1083,8 +1093,7 @@ fn doubled(
         let Some((band, ceiling)) = entitled_words(total, config) else {
             continue;
         };
-        for (separated, count) in [(false, row.bare), (true, row.separated)] {
-            let count = u64::from(count);
+        for (separated, count) in [(false, u64::from(row.bare)), (true, free_separated)] {
             let share = share_bp(count, total);
             if count == 0 || share >= ceiling {
                 continue;
@@ -1101,7 +1110,7 @@ fn doubled(
                 numerator: saturate(count),
                 denominator: saturate(total),
                 share_bp: share,
-                books: word_books(corpus, &key, &TerminalTable::default()),
+                books: word_books(corpus, &key, table),
             });
         }
     }
@@ -1291,9 +1300,13 @@ pub(crate) fn free_of(book: &WordAggregate, key: &PatternKey, table: &TerminalTa
         PatternKey::WordLength { hash, .. } => {
             book.rows_for(hash).iter().map(|row| row.total()).sum()
         }
-        PatternKey::Doubled { hash, separated } => book
-            .doubles_for(hash)
-            .map_or(0, |row| u64::from(row.count_of(separated))),
+        PatternKey::Doubled { hash, separated } => book.doubles_for(hash).map_or(0, |row| {
+            if separated {
+                row.free_separated(table)
+            } else {
+                row.count_of(false)
+            }
+        }),
         _ => 0,
     }
 }

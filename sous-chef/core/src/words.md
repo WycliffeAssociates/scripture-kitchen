@@ -150,7 +150,7 @@ Two shapes are deliberate:
 ## The doubles lane
 
 The second lane the same walk fills, one `DoubleCount` per case-folded word,
-sorted by hash. **16 B**, and keyed by the hash alone — a double is a double
+sorted by hash. **32 B**, and keyed by the hash alone — a double is a double
 whatever stood before it, so `Before` has no business here.
 
 | field | bytes | answers |
@@ -158,12 +158,31 @@ whatever stood before it, so `Before` has no business here.
 | `hash: u64` | 8 | the key, the same xxh3-64 the casing lane uses |
 | `uncased: u16` | 2 | occurrences the casing lane refused |
 | `bare: u16` | 2 | followed by itself, whitespace only between |
-| `separated: u16` | 2 | followed by itself, a nonletter run between |
+| `separated: Box<[(ScalarKey, u16)]>` | 16 | followed by itself, a nonletter run between, one entry per distinct last glyph of that run |
 
 `bare` and `separated` are two claims and never one: `na na` and `na, na` have
 different denominators and different reasons to be a slip
 ([`../../rules/word-conventions.md`](../../rules/word-conventions.md)). The
 comparison is by the case-folded hash, so `The the` is a double.
+
+**`separated` is keyed by the separator's own last glyph, not by a bare
+count, because a comma-separated pair and a period-separated one are not the
+same claim.** A real Bible's separated rows are half sentence-boundary
+coincidence — `go. Go home.` is the end of one sentence and the start of the
+next, not a doubled `go` — and the walk cannot tell the two apart; it does not
+read the terminal table. The judge does: it sums only the glyphs
+[`TerminalTable::forces`](judge.md) says NO to, so a separator whose last
+glyph forces a capital contributes nothing to the numerator, and a word whose
+EVERY separated pair forces never gets a row at all. `Words::locate` reads the
+same table before it sites a separated pair, so the counts and the sites never
+disagree about which pairs are real. This is learned per corpus like
+everything else the terminal table decides — no punctuation allow-list, and a
+`.` that does not force in one corpus can still force in another. Measured on
+`en_ulb` (evidence.md, W2): 33 doubled rows fall to 28, because five words —
+`go`, `in`, `there`, `up`, `all` — had no separated pair whose separator was
+anything but a forcing glyph, while a word like `Israel` (both a comma pair
+and a period pair) keeps its row at a smaller count, since the pattern key is
+still `(hash, separated)` and not per glyph.
 
 **A pair rides through nothing.** Only a letter, glue, or digit between the two
 occurrences disqualifies them — and each of those means the walk dropped a

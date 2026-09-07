@@ -11,12 +11,17 @@
 //!     david  Title  Glyph('.')
 //!     went   Lower  None
 //!   doubles lane
-//!     hash(go)   bare 0  separated 1   // `Go, go`: a comma stood between
+//!     hash(go)   bare 0  separated [(',', 1)]   // `Go, go`: a comma stood between
 //! ```
 //!
 //! The walk decides nothing about capitals. It records what stood before each
 //! word and leaves forced or free to the judge, which reads the corpus's own
-//! terminal table ([`crate::judge::TerminalTable`]).
+//! terminal table ([`crate::judge::TerminalTable`]) — and the doubles lane
+//! leans on the same table: `separated` is keyed by the separator's own last
+//! glyph rather than a bare count, because a pair a comma splits and a pair a
+//! period-then-capital splits are different claims. The judge folds only the
+//! glyphs that do not force a capital into the doubling numerator, so
+//! `go. Go` is two sentences and never a doubled word.
 //!
 //! A word is a maximal run of letters and glue, extended through ONE nonletter
 //! with a letter immediately on both sides (`ng'ombe`, `don't`,
@@ -245,13 +250,18 @@ pub fn for_each_word(text: &str, verses: &[Verse], mut visit: impl FnMut(Occurre
 /// What stood between two occurrences of one word, when they are a double.
 ///
 /// Two claims, not one: `na na` and `na, na` have different denominators and
-/// different reasons to be a slip, so they never share a key.
+/// different reasons to be a slip, so they never share a key. `Separated`
+/// carries the run's LAST scalar as a [`ScalarKey`] — the same key
+/// [`Before::Glyph`](super::Before::Glyph) stores — because that is the atom
+/// the judge's terminal table reads to decide whether this is a sentence
+/// boundary rather than a doubled word.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Gap {
     /// Whitespace only.
     Bare,
-    /// A nonletter run, with or without whitespace around it.
-    Separated,
+    /// A nonletter run, with or without whitespace around it. The last glyph
+    /// of the run.
+    Separated(ScalarKey),
 }
 
 /// How two adjacent word occurrences are separated, or `None` when something
@@ -261,17 +271,20 @@ pub enum Gap {
 /// walk dropped a token between the two words (a digit run holds no letter, so
 /// it is no word at all), which is exactly the case a double must not claim.
 pub fn gap_between(text: &str, from: u32, to: u32) -> Option<Gap> {
-    let mut gap = Gap::Bare;
+    let mut last_glyph: Option<ScalarKey> = None;
     for scalar in text[from as usize..to as usize].chars() {
         let class = class_of(scalar);
         if is_core(class) {
             return None;
         }
         if !class.is_whitespace() {
-            gap = Gap::Separated;
+            last_glyph = Some(ScalarKey::of(scalar));
         }
     }
-    Some(gap)
+    Some(match last_glyph {
+        None => Gap::Bare,
+        Some(glyph) => Gap::Separated(glyph),
+    })
 }
 
 /// One chapter's word counts: the casing lane sorted by `(hash, before)`, and

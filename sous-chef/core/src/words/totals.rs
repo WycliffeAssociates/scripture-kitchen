@@ -17,7 +17,9 @@
 //! double is a double whatever stood before it — and rides the same two
 //! updates.
 
-use super::{Before, DoubleTotal, WordAggregate};
+use super::{Before, DoubleTotal, WordAggregate, merge_glyph_lane};
+use crate::judge::TerminalTable;
+use crate::substrate::ScalarKey;
 
 /// One case-folded word's corpus totals under one [`Before`], by [`super::Form`]
 /// lane.
@@ -88,12 +90,15 @@ impl Lane for WordTally {
 /// `uncased` is the word's occurrences the casing lane refuses, so the two
 /// lanes partition the word's occurrences and the doubled channel's
 /// denominator is their sum.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct DoubleTally {
     pub hash: u64,
     pub uncased: u32,
     pub bare: u32,
-    pub separated: u32,
+    /// One entry per distinct separator glyph, ascending. A pair whose glyph
+    /// forces a capital in the corpus's own [`TerminalTable`] is a sentence
+    /// boundary, not a doubling — [`Self::separated_free`] is the judged sum.
+    pub separated: Box<[(ScalarKey, u32)]>,
     /// Books holding this hash; the row lives while this does.
     pub holders: u32,
 }
@@ -104,7 +109,7 @@ impl DoubleTally {
             hash: row.hash,
             uncased: 0,
             bare: 0,
-            separated: 0,
+            separated: Box::default(),
             holders: 0,
         }
     }
@@ -113,13 +118,25 @@ impl DoubleTally {
         self.holders += 1;
         self.uncased = self.uncased.saturating_add(row.uncased);
         self.bare = self.bare.saturating_add(row.bare);
-        self.separated = self.separated.saturating_add(row.separated);
+        self.separated = merge_glyph_lane(&self.separated, &row.separated, true);
+    }
+
+    /// The separated lane's occurrences whose last glyph does NOT force a
+    /// capital in `table`.
+    pub fn separated_free(&self, table: &TerminalTable) -> u64 {
+        self.separated
+            .iter()
+            .filter(|&&(glyph, _)| !table.forces(glyph))
+            .map(|&(_, count)| u64::from(count))
+            .sum()
     }
 
     /// Whether the corpus doubled this word at all, which is what the recusal
-    /// share counts.
-    pub const fn doubles(&self) -> bool {
-        self.bare + self.separated >= 2
+    /// share counts — bare plus the separated pairs whose separator does not
+    /// force a capital, so a sentence boundary never counts toward doubling
+    /// being productive in this language.
+    pub fn doubles(&self, table: &TerminalTable) -> bool {
+        u64::from(self.bare) + self.separated_free(table) >= 2
     }
 }
 
@@ -138,19 +155,19 @@ impl Lane for DoubleTally {
         self.holders += other.holders;
         self.uncased = self.uncased.saturating_add(other.uncased);
         self.bare = self.bare.saturating_add(other.bare);
-        self.separated = self.separated.saturating_add(other.separated);
+        self.separated = merge_glyph_lane(&self.separated, &other.separated, true);
     }
 
     fn release(&mut self, other: &Self) {
         self.holders = self.holders.saturating_sub(other.holders);
         self.uncased = self.uncased.saturating_sub(other.uncased);
         self.bare = self.bare.saturating_sub(other.bare);
-        self.separated = self.separated.saturating_sub(other.separated);
+        self.separated = merge_glyph_lane(&self.separated, &other.separated, false);
     }
 }
 
 /// What both lanes have in common, so `add` and `remove` are written once.
-trait Lane: Copy + Default {
+trait Lane: Clone + Default {
     type Key: Ord + Copy;
 
     fn key(&self) -> Self::Key;
@@ -199,7 +216,11 @@ impl WordTotals {
     /// A share, never a count: Jonah and a whole Bible must answer the same
     /// way. The vocabulary is the union of the two lanes, because a word with
     /// no cased letter is in the doubles lane alone.
-    pub fn doubling_share_bp(&self) -> u16 {
+    ///
+    /// A pair whose separator forces a capital in `table` is a sentence
+    /// boundary, so it counts toward neither the word's doubling nor the
+    /// share — the recusal answers to the same evidence the numerator does.
+    pub fn doubling_share_bp(&self, table: &TerminalTable) -> u16 {
         let mut distinct = 0u64;
         let mut doubling = 0u64;
         let mut cased = self.by_word().peekable();
@@ -212,7 +233,7 @@ impl WordTotals {
                 cased.next();
             }
             distinct += 1;
-            doubling += u64::from(row.doubles());
+            doubling += u64::from(row.doubles(table));
         }
         distinct += cased.count() as u64;
         crate::judge::share_bp(doubling, distinct)
@@ -236,9 +257,17 @@ impl WordTotals {
         apply(&mut self.doubles, &doubles_of(corpus), false);
     }
 
-    /// Inline size plus both lanes' own allocation; what a resident host pays.
+    /// Inline size plus both lanes' own allocation, each doubled row's own
+    /// per-glyph lane included; what a resident host pays.
     pub fn resident_bytes(&self) -> usize {
-        size_of::<Self>() + size_of_val(&*self.rows) + size_of_val(&*self.doubles)
+        size_of::<Self>()
+            + size_of_val(&*self.rows)
+            + size_of_val(&*self.doubles)
+            + self
+                .doubles
+                .iter()
+                .map(|row| size_of_val(&*row.separated))
+                .sum::<usize>()
     }
 }
 
@@ -280,27 +309,22 @@ fn apply<L: Lane>(held: &mut Vec<L>, delta: &[L], add: bool) {
     }
 }
 
-/// Merges the absent rows in from the back, so only the tail past the lowest
-/// new key moves at all.
+/// Merges the absent rows in: `missing` names them in ascending key order
+/// (the order `apply` walked `delta`), so this is one tandem merge of two
+/// sorted sequences rather than a probe per new row.
 fn splice<L: Lane>(rows: &mut Vec<L>, delta: &[L], missing: &[usize]) {
-    let end = rows.len();
-    rows.resize(end + missing.len(), L::default());
-    let (mut write, mut read) = (rows.len(), end);
-    for &index in missing.iter().rev() {
-        let row = delta[index];
-        let mut from = read;
-        while from > 0 && rows[from - 1].key() > row.key() {
-            from -= 1;
+    let mut merged: Vec<L> = Vec::with_capacity(rows.len() + missing.len());
+    let mut at = 0usize;
+    for &index in missing {
+        let key = delta[index].key();
+        while at < rows.len() && rows[at].key() < key {
+            merged.push(rows[at].clone());
+            at += 1;
         }
-        if from < read {
-            write -= read - from;
-            rows.copy_within(from..read, write);
-            read = from;
-        }
-        write -= 1;
-        rows[write] = row;
+        merged.push(delta[index].clone());
     }
-    debug_assert_eq!(write, read, "every hole is filled exactly once");
+    merged.extend_from_slice(&rows[at..]);
+    *rows = merged;
 }
 
 /// These books merged into rows of their own: the same shape the tally holds,
@@ -340,7 +364,7 @@ fn doubles_of(corpus: &[&WordAggregate]) -> Vec<DoubleTally> {
             aggregate
                 .doubles()
                 .iter()
-                .map(move |row| (row.hash, book as u32, *row))
+                .map(move |row| (row.hash, book as u32, row.clone()))
         })
         .collect();
     flat.sort_unstable_by_key(|(hash, book, _)| (*hash, *book));

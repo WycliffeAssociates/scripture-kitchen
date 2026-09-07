@@ -228,7 +228,14 @@ impl WordCount {
 /// by [`WordCount`], so the two lanes **partition** a word's occurrences and
 /// the doubled channel's denominator is their sum — which is what lets an
 /// uncased script be judged for doubling at all.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// `separated` is a lane of its own, keyed by the separator's last glyph and
+/// sorted by it: a pair split by a glyph that forces a capital in this
+/// corpus's own [`TerminalTable`] is two sentences, not a double, and the walk
+/// cannot know the table. Rows exist only for a word that actually doubled, so
+/// the extra heap word this lane costs is spent on rows that are already rare
+/// (`words.md`).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DoubleCount {
     /// xxh3-64 of the word's case-folded scalars.
     pub hash: u64,
@@ -237,31 +244,52 @@ pub struct DoubleCount {
     /// Times this word was immediately followed by itself, whitespace only
     /// between. Saturating.
     pub bare: u16,
-    /// The same with a nonletter run between (`na, na`). Saturating.
-    pub separated: u16,
+    /// The same with a nonletter run between (`na, na`), one entry per
+    /// distinct last glyph of the run, ascending, each count saturating.
+    pub separated: Box<[(ScalarKey, u16)]>,
 }
 
 impl DoubleCount {
-    pub(crate) const fn new(hash: u64) -> Self {
+    pub(crate) fn new(hash: u64) -> Self {
         Self {
             hash,
             uncased: 0,
             bare: 0,
-            separated: 0,
+            separated: Box::default(),
         }
     }
 
     pub(crate) fn add(&mut self, gap: Gap) {
-        let lane = match gap {
-            Gap::Bare => &mut self.bare,
-            Gap::Separated => &mut self.separated,
-        };
-        *lane = lane.saturating_add(1);
+        match gap {
+            Gap::Bare => self.bare = self.bare.saturating_add(1),
+            Gap::Separated(glyph) => self.add_separated(glyph),
+        }
     }
 
-    /// The lane one pattern key counts.
-    pub const fn count_of(&self, separated: bool) -> u16 {
-        if separated { self.separated } else { self.bare }
+    fn add_separated(&mut self, glyph: ScalarKey) {
+        match self.separated.binary_search_by_key(&glyph, |&(g, _)| g) {
+            Ok(at) => {
+                let count = &mut self.separated[at].1;
+                *count = count.saturating_add(1);
+            }
+            Err(at) => {
+                let mut grown = Vec::with_capacity(self.separated.len() + 1);
+                grown.extend_from_slice(&self.separated[..at]);
+                grown.push((glyph, 1));
+                grown.extend_from_slice(&self.separated[at..]);
+                self.separated = grown.into_boxed_slice();
+            }
+        }
+    }
+
+    /// Every separated occurrence, whatever the separator — the superset a
+    /// book claims a row for, before the judge's own forcing filter narrows
+    /// it to a numerator.
+    pub fn separated_total(&self) -> u32 {
+        self.separated
+            .iter()
+            .map(|&(_, count)| u32::from(count))
+            .sum()
     }
 }
 
@@ -300,9 +328,17 @@ impl WordRow {
         self.cased
     }
 
-    /// Inline size plus every byte both lanes own; what a resident cache pays.
+    /// Inline size plus every byte both lanes own, the doubles lane's own
+    /// per-glyph heap included; what a resident cache pays.
     pub fn resident_bytes(&self) -> usize {
-        size_of::<Self>() + size_of_val(&*self.words) + size_of_val(&*self.doubles)
+        size_of::<Self>()
+            + size_of_val(&*self.words)
+            + size_of_val(&*self.doubles)
+            + self
+                .doubles
+                .iter()
+                .map(|row| size_of_val(&*row.separated))
+                .sum::<usize>()
     }
 }
 
@@ -355,18 +391,41 @@ impl WordTotal {
     }
 }
 
-/// One case-folded word's doubling over one book.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// One case-folded word's doubling over one book, `separated` widened to
+/// `u32` per glyph and merged by [`merge_glyph_lane`].
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct DoubleTotal {
     pub hash: u64,
     pub uncased: u32,
     pub bare: u32,
-    pub separated: u32,
+    /// One entry per distinct separator glyph, ascending.
+    pub separated: Box<[(ScalarKey, u32)]>,
 }
 
 impl DoubleTotal {
-    pub const fn count_of(&self, separated: bool) -> u32 {
-        if separated { self.separated } else { self.bare }
+    /// Every occurrence of this lane, whatever the separator — the superset a
+    /// book claims a row for; [`Self::free_separated`] is the judged
+    /// numerator.
+    pub fn count_of(&self, separated: bool) -> u64 {
+        if separated {
+            self.separated
+                .iter()
+                .map(|&(_, count)| u64::from(count))
+                .sum()
+        } else {
+            u64::from(self.bare)
+        }
+    }
+
+    /// The separated lane's occurrences whose last glyph does NOT force a
+    /// capital in `table` — a pair whose separator forces one is a sentence
+    /// boundary, not a doubling.
+    pub fn free_separated(&self, table: &TerminalTable) -> u64 {
+        self.separated
+            .iter()
+            .filter(|&&(glyph, _)| !table.forces(glyph))
+            .map(|&(_, count)| u64::from(count))
+            .sum()
     }
 }
 
@@ -431,11 +490,72 @@ impl WordAggregate {
 
     /// Inline size plus both lanes' real heap: capacity, not length, since
     /// `fold_book` reserves `with_capacity` once and shrinks after the merge.
+    /// Each doubles row's own per-glyph lane is separate heap, counted by its
+    /// length since that box is never over-reserved.
     pub fn resident_bytes(&self) -> usize {
         size_of::<Self>()
             + self.words.capacity() * size_of::<WordTotal>()
             + self.doubles.capacity() * size_of::<DoubleTotal>()
+            + self
+                .doubles
+                .iter()
+                .map(|row| size_of_val(&*row.separated))
+                .sum::<usize>()
     }
+}
+
+/// Merges two glyph-keyed lanes, sorted ascending, into a third: `add` sums a
+/// shared key, `remove` (`add: false`) subtracts and drops any key whose count
+/// reaches zero — which only removal can produce, and only when the last book
+/// holding that separator glyph leaves. Shared by the book fold and the corpus
+/// tally, since both merge the same shape.
+pub(crate) fn merge_glyph_lane(
+    a: &[(ScalarKey, u32)],
+    b: &[(ScalarKey, u32)],
+    add: bool,
+) -> Box<[(ScalarKey, u32)]> {
+    let mut out = Vec::with_capacity(a.len() + b.len());
+    let (mut i, mut j) = (0usize, 0usize);
+    loop {
+        match (a.get(i), b.get(j)) {
+            (Some(&(ka, va)), Some(&(kb, vb))) => match ka.cmp(&kb) {
+                core::cmp::Ordering::Less => {
+                    out.push((ka, va));
+                    i += 1;
+                }
+                core::cmp::Ordering::Greater => {
+                    if add {
+                        out.push((kb, vb));
+                    }
+                    j += 1;
+                }
+                core::cmp::Ordering::Equal => {
+                    let merged = if add {
+                        va.saturating_add(vb)
+                    } else {
+                        va.saturating_sub(vb)
+                    };
+                    if merged > 0 {
+                        out.push((ka, merged));
+                    }
+                    i += 1;
+                    j += 1;
+                }
+            },
+            (Some(&(ka, va)), None) => {
+                out.push((ka, va));
+                i += 1;
+            }
+            (None, Some(&(kb, vb))) => {
+                if add {
+                    out.push((kb, vb));
+                }
+                j += 1;
+            }
+            (None, None) => break,
+        }
+    }
+    out.into_boxed_slice()
 }
 
 // ── The pass ────────────────────────────────────────────────────────────
@@ -583,14 +703,23 @@ impl ChapterPass for Words {
                 if let Some((hash, from, to)) = previous.replace((word.hash, word.from, word.to))
                     && hash == word.hash
                     && let Some(gap) = gap_between(slice, to, word.from)
-                    && let Some(&index) = twice.get(&(hash, gap == Gap::Separated))
+                    // A separator whose last glyph forces a capital in this
+                    // corpus's own table is a sentence terminal, not a
+                    // doubling: `go. Go` is two sentences.
+                    && let Some(separated) = match gap {
+                        Gap::Bare => Some(false),
+                        Gap::Separated(glyph) if !table.forces(glyph) => Some(true),
+                        Gap::Separated(_) => None,
+                    }
+                    && let Some(&index) = twice.get(&(hash, separated))
                 {
                     // The span covers both words and what stood between them.
                     let at = TextRange::new(span.from() + from, span.from() + word.to)
                         .expect("a pair grows forward");
-                    let reason = match gap {
-                        Gap::Bare => Reasons::DOUBLED_BARE,
-                        Gap::Separated => Reasons::DOUBLED_SEPARATED,
+                    let reason = if separated {
+                        Reasons::DOUBLED_SEPARATED
+                    } else {
+                        Reasons::DOUBLED_BARE
                     };
                     found.push((at, index, reason));
                 }
@@ -637,8 +766,11 @@ impl ChapterPass for Words {
     /// On the casing lane, position-blind on purpose: a book claims a row whose
     /// word it holds at all, and `locate` applies the free/forced split. A
     /// superset costs a rescan that finds nothing; reading the terminal table
-    /// here would put a judging decision in a cache key. The doubles lane has
-    /// no such split, so a book claims a doubled row exactly when it holds it.
+    /// here would put a judging decision in a cache key. The doubles lane's
+    /// `separated` key is blind the same way now: a book claims the row when
+    /// ANY separator glyph doubled the word, forcing ones included, and
+    /// `locate` is where the table narrows it to the non-forcing glyphs the
+    /// judge actually counted.
     fn firing(&self, aggregate: &WordAggregate, patterns: &[Pattern], out: &mut Vec<PatternIndex>) {
         out.clear();
         let words = aggregate.words();
@@ -698,8 +830,10 @@ fn holds(rows: &[WordTotal], pattern: &Pattern) -> bool {
     }
 }
 
-/// The same for the doubles lane, which has no free/forced split to be blind
-/// about: a book claims the row exactly when it doubled the word that way.
+/// The same for the doubles lane: `count_of` is the unfiltered superset over
+/// every separator glyph, so this can hold true for a book whose only
+/// `separated` occurrences all force a capital — `locate` is what applies the
+/// table and finds nothing there, exactly as the casing lane's superset does.
 fn holds_double(row: Option<&DoubleTotal>, separated: bool) -> bool {
     row.is_some_and(|row| row.count_of(separated) > 0)
 }

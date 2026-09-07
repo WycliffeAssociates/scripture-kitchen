@@ -11,7 +11,7 @@
 //! splits was never counted, so there is nothing to carry. Book coordinates
 //! never enter: the row counts.
 
-use super::{ChapterObs, DoubleTotal, WordAggregate, WordRow, WordTotal};
+use super::{ChapterObs, DoubleTotal, WordAggregate, WordRow, WordTotal, merge_glyph_lane};
 
 /// Merges one book's rows in order. Order is irrelevant to the result, which
 /// is what makes a cached row and a fresh one indistinguishable.
@@ -34,11 +34,17 @@ pub fn fold_book(book: &[ChapterObs<&WordRow>]) -> WordAggregate {
                 word.len,
             )
         }));
-        doubles.extend(chapter.obs.doubles().iter().map(|row| DoubleTotal {
-            hash: row.hash,
-            uncased: u32::from(row.uncased),
-            bare: u32::from(row.bare),
-            separated: u32::from(row.separated),
+        doubles.extend(chapter.obs.doubles().iter().map(|row| {
+            DoubleTotal {
+                hash: row.hash,
+                uncased: u32::from(row.uncased),
+                bare: u32::from(row.bare),
+                separated: row
+                    .separated
+                    .iter()
+                    .map(|&(glyph, count)| (glyph, u32::from(count)))
+                    .collect(),
+            }
         }));
     }
     rows.sort_unstable_by_key(|row| (row.hash, row.before_raw()));
@@ -61,7 +67,7 @@ pub fn fold_book(book: &[ChapterObs<&WordRow>]) -> WordAggregate {
             Some(last) if last.hash == row.hash => {
                 last.uncased = last.uncased.saturating_add(row.uncased);
                 last.bare = last.bare.saturating_add(row.bare);
-                last.separated = last.separated.saturating_add(row.separated);
+                last.separated = merge_glyph_lane(&last.separated, &row.separated, true);
             }
             _ => lane.push(row),
         }
