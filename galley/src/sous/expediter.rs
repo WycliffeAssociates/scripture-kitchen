@@ -24,8 +24,8 @@ use sous_core::substrate::ScalarKey;
 use sous_core::{
     BookIndex, Chapter, ChapterInput, ChapterObs, ChapterPass, ConventionDigest, CoordinateSpace,
     CorpusTotals, CorpusWireError, FindingKind, Findings, PackedFinding, Pattern, PatternIndex,
-    ProjectedBook, PublicationBook, Reasons, SnapshotId, TextRange, encode_to_corpus_buffer,
-    for_each_chapter,
+    ProjectedBook, PublicationBook, Reasons, SnapshotId, SourceLengths, TargetLengths, TextRange,
+    encode_to_corpus_buffer, for_each_chapter, judge_lengths,
 };
 #[cfg(feature = "parallel")]
 use sous_core::{ChapterKey, Verse};
@@ -361,15 +361,20 @@ impl<P: ChapterPass + Sync> Expediter<P> {
         }
     }
 
-    /// Derive and retain this book's products and its text; its chapters are
-    /// keyed at the next [`publish`](Self::publish).
+    /// Derive and retain this book's products under the role's own retention:
+    /// a target keeps its text, a reference keeps none. A target's chapters
+    /// are keyed at the next [`publish`](Self::publish).
     pub fn update(
         &mut self,
         id: impl Into<BookId>,
         role: Role,
         text: &str,
     ) -> Result<BookKey, PublishError> {
-        self.update_with(id, role, Retain::Text, text)
+        Ok(self
+            .pantry
+            .update(id, role, text)
+            .map_err(PublishError::Pantry)?
+            .key())
     }
 
     /// Derive and retain this book's products, keeping or dropping its text.
@@ -724,6 +729,7 @@ impl<P: ChapterPass + Sync> Expediter<P> {
     /// book whose aggregate is missing, judges every Target book, and sweeps.
     pub fn publish(&mut self) -> Result<Vec<u8>, PublishError> {
         let books: Vec<(BookId, BookKey)> = self.pantry.books(Role::Target).to_vec();
+        let references: Vec<(BookId, BookKey)> = self.pantry.books(Role::Reference).to_vec();
         if books.len() > usize::from(u16::MAX) + 1 {
             return Err(PublishError::Wire(CorpusWireError::BookCountOverflow {
                 count: books.len(),
@@ -868,6 +874,35 @@ impl<P: ChapterPass + Sync> Expediter<P> {
                     .map(|checksum| &aggregates[checksum])
                     .collect();
                 pass.judge_resident(&corpus, totals, config, &mut findings);
+
+                // Then the source comparison, from lengths both sides already
+                // retain. Every Target pairs with the Reference of the same
+                // `BookKey`; a Target with none gets no ratios and no rows,
+                // which is the contract and not an error. The pairing facts
+                // are alignment structure, never findings, so they are
+                // dropped here — a host that wants them runs the cold path.
+                if let Some(lengths) = pass.length_config(config) {
+                    let source: Vec<SourceLengths<'_>> = references
+                        .iter()
+                        .filter_map(|(id, key)| {
+                            Some(SourceLengths {
+                                book: *key,
+                                verses: pantry.reference_lengths(id)?,
+                            })
+                        })
+                        .collect();
+                    if !source.is_empty() {
+                        let target: Vec<TargetLengths<'_>> = books
+                            .iter()
+                            .zip(&corpus)
+                            .map(|((_, key), aggregate)| TargetLengths {
+                                book: *key,
+                                verses: pass.verse_lengths(aggregate),
+                            })
+                            .collect();
+                        judge_lengths(&target, &source, &lengths, &mut findings);
+                    }
+                }
             }
 
             // Then place what judging decided, per book, from the current text.
@@ -951,7 +986,7 @@ impl<P: ChapterPass + Sync> Expediter<P> {
                 PublicationBook::new(*key, id.as_str(), published_len, findings)
             })
             .collect();
-        let snapshot = snapshot_id::<P>(&self.pantry, &books);
+        let snapshot = snapshot_id::<P>(&self.pantry, &books, &references);
         encode_to_corpus_buffer(snapshot, CoordinateSpace::Utf16, &sections, &patterns)
             .map_err(PublishError::Wire)
     }
@@ -985,19 +1020,27 @@ fn replay(
 
 /// xxh3-128 over the canonical (`BookKey`, id, `RawChecksum`) table plus the
 /// pass schema: what the publication is OF, not what it says.
-fn snapshot_id<P: ChapterPass>(pantry: &Pantry, books: &[(BookId, BookKey)]) -> SnapshotId {
+fn snapshot_id<P: ChapterPass>(
+    pantry: &Pantry,
+    books: &[(BookId, BookKey)],
+    references: &[(BookId, BookKey)],
+) -> SnapshotId {
     let mut hasher = Xxh3Default::new();
-    for (id, key) in books {
-        hasher.update(&key.as_bytes());
-        hasher.update(&(id.as_str().len() as u32).to_le_bytes());
-        hasher.update(id.as_str().as_bytes());
-        hasher.update(
-            &pantry
-                .products(id)
-                .expect("the pantry listed this id")
-                .checksum
-                .as_bytes(),
-        );
+    // References ride the identity too: swapping the declared source changes
+    // what the publication is OF, not only what it says.
+    for (role, rows) in [(0u8, books), (1, references)] {
+        hasher.update(&[role]);
+        for (id, key) in rows {
+            hasher.update(&key.as_bytes());
+            hasher.update(&(id.as_str().len() as u32).to_le_bytes());
+            hasher.update(id.as_str().as_bytes());
+            hasher.update(
+                &pantry
+                    .checksum(id)
+                    .expect("the pantry listed this id")
+                    .as_bytes(),
+            );
+        }
     }
     hasher.update(&P::SCHEMA.get().to_le_bytes());
     SnapshotId::new(hasher.digest128().to_be_bytes())
@@ -1837,6 +1880,184 @@ mod tests {
             CorpusSnapshot::open(&buffer).unwrap().pattern_count(),
             before
         );
+    }
+
+    // ---------------------------------------------------- the source pairing
+
+    /// A book of `count` one-verse chapters is too slow to build; this is one
+    /// chapter of `count` verses, verse `i` as long as `length(i)` says.
+    fn sized(code: &str, count: usize, length: impl Fn(usize) -> usize) -> String {
+        let mut text = format!("\\id {code}\n\\h {code}\n\\c 1\n\\p\n");
+        for verse in 0..count {
+            text.push_str(&format!(
+                "\\v {} {}\n",
+                verse + 1,
+                "a".repeat(length(verse))
+            ));
+        }
+        text
+    }
+
+    /// Sixty verses whose lengths cycle 40..=46, which is the varied sample a
+    /// median and a MAD need; verse 61 is half length and verse 62 double.
+    fn paired_target() -> String {
+        sized("MRK", 62, |verse| match verse {
+            60 => 20,
+            61 => 80,
+            other => 40 + other % 7,
+        })
+    }
+
+    /// The same keys at a constant 40 characters.
+    fn paired_source() -> String {
+        sized("MRK", 62, |_| 40)
+    }
+
+    /// Every length row of a published buffer, as (book index, from, to).
+    fn length_rows(buffer: &[u8]) -> Vec<(u16, u32, u32)> {
+        let snapshot = CorpusSnapshot::open(buffer).unwrap();
+        (0..snapshot.len())
+            .flat_map(|index| {
+                let book = snapshot
+                    .book(BookIndex::new(index).unwrap())
+                    .expect("directory position");
+                (0..book.len()).filter_map(move |row| {
+                    let finding = book.at(row).unwrap();
+                    matches!(finding.kind(), FindingKind::LengthProportionality(_))
+                        .then(|| (finding.book_idx().get(), finding.from(), finding.to()))
+                })
+            })
+            .collect()
+    }
+
+    /// A reference is a whole optional corpus: with none registered the target
+    /// publishes exactly what it published alone, and with one it gains the
+    /// two verses whose length the source disagrees with.
+    #[test]
+    fn a_reference_of_the_same_key_adds_length_rows_and_nothing_else() {
+        let mut sous = sous();
+        sous.update("t/mrk.usfm", Role::Target, &paired_target())
+            .unwrap();
+        let alone = sous.publish().unwrap();
+        assert!(length_rows(&alone).is_empty(), "no source, no ratios");
+
+        sous.update("s/mrk.usfm", Role::Reference, &paired_source())
+            .unwrap();
+        let paired = sous.publish().unwrap();
+        assert_eq!(sous.last_mapped(), 0, "a reference maps no target chapter");
+        assert_eq!(sous.last_folded(), 0, "and folds no target book");
+        assert_eq!(length_rows(&paired).len(), 2, "the short one and the long");
+        assert_eq!(
+            ids(&paired),
+            vec!["t/mrk.usfm"],
+            "a reference publishes no section of its own"
+        );
+        assert_eq!(
+            rows(&paired),
+            rows(&alone),
+            "every target-only row survives the source"
+        );
+        assert_eq!(site_rows(&paired), site_rows(&alone));
+    }
+
+    /// The gate the charter names: the source choice legitimately changes the
+    /// results without invalidating the target-only observations.
+    #[test]
+    fn replacing_the_reference_moves_only_the_length_rows() {
+        let mut sous = sous();
+        sous.update("t/mrk.usfm", Role::Target, &paired_target())
+            .unwrap();
+        sous.update("s/mrk.usfm", Role::Reference, &paired_source())
+            .unwrap();
+        let before = sous.publish().unwrap();
+        assert_eq!(length_rows(&before).len(), 2);
+
+        // A source that matches the target verse for verse: every ratio is
+        // one, and the sample is degenerate, so nothing is an outlier.
+        sous.update("s/mrk.usfm", Role::Reference, &paired_target())
+            .unwrap();
+        let after = sous.publish().unwrap();
+        assert_eq!(sous.last_mapped(), 0, "no target chapter was re-mapped");
+        assert_eq!(sous.last_folded(), 0, "no target book was re-folded");
+        assert_eq!(sous.last_located(), 0, "no target text was read again");
+        assert!(length_rows(&after).is_empty(), "against itself, nothing");
+        assert_eq!(rows(&after), rows(&before), "target-only rows stand");
+        assert_eq!(site_rows(&after), site_rows(&before));
+        assert_ne!(
+            CorpusSnapshot::open(&before).unwrap().snapshot_id(),
+            CorpusSnapshot::open(&after).unwrap().snapshot_id(),
+            "a different source is a different publication"
+        );
+    }
+
+    /// Removing the reference removes the ratios and leaves the rest.
+    #[test]
+    fn removing_the_reference_removes_the_length_rows() {
+        let mut sous = sous();
+        sous.update("t/mrk.usfm", Role::Target, &paired_target())
+            .unwrap();
+        let alone = sous.publish().unwrap();
+        sous.update("s/mrk.usfm", Role::Reference, &paired_source())
+            .unwrap();
+        assert_eq!(length_rows(&sous.publish().unwrap()).len(), 2);
+
+        assert!(sous.remove(&BookId::from("s/mrk.usfm")));
+        let after = sous.publish().unwrap();
+        assert!(length_rows(&after).is_empty());
+        assert_eq!(rows(&after), rows(&alone));
+    }
+
+    /// The length knobs live on the same judging config as every other knob,
+    /// so moving them maps nothing and folds nothing.
+    #[test]
+    fn a_length_knob_re_judges_without_mapping_or_folding() {
+        let mut sous = sous();
+        sous.update("t/mrk.usfm", Role::Target, &paired_target())
+            .unwrap();
+        sous.update("s/mrk.usfm", Role::Reference, &paired_source())
+            .unwrap();
+        let before = sous.publish().unwrap();
+        assert_eq!(length_rows(&before).len(), 2);
+
+        let config = JudgingConfig {
+            lengths: sous_core::LengthConfig {
+                z_long: 1_000.0,
+                ..sous_core::LengthConfig::default()
+            },
+            ..JudgingConfig::default()
+        };
+        sous.set_config(((), config, config));
+        let after = sous.publish().unwrap();
+        assert_eq!(sous.last_mapped(), 0);
+        assert_eq!(sous.last_folded(), 0);
+        assert_eq!(
+            length_rows(&after).len(),
+            1,
+            "the long side is out of reach"
+        );
+
+        let off = JudgingConfig {
+            lengths: sous_core::LengthConfig {
+                enabled: false,
+                ..sous_core::LengthConfig::default()
+            },
+            ..JudgingConfig::default()
+        };
+        sous.set_config(((), off, off));
+        assert!(length_rows(&sous.publish().unwrap()).is_empty());
+    }
+
+    /// A reference of another key pairs with nothing, and says nothing.
+    #[test]
+    fn a_reference_of_another_book_is_silence_not_an_error() {
+        let mut sous = sous();
+        sous.update("t/mrk.usfm", Role::Target, &paired_target())
+            .unwrap();
+        sous.update("s/gen.usfm", Role::Reference, &sized("GEN", 62, |_| 40))
+            .unwrap();
+        let buffer = sous.publish().unwrap();
+        assert!(length_rows(&buffer).is_empty());
+        assert_eq!(ids(&buffer), vec!["t/mrk.usfm"]);
     }
 
     #[test]

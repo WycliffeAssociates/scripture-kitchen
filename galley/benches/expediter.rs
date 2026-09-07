@@ -25,6 +25,11 @@
 //! - `set_config_then_publish` — a judging knob moved, then the same publish:
 //!   no map and no fold, but every book's firing set is recomputed and every
 //!   book whose set moved rescans its own text for sites.
+//! - `edit_one_chapter_then_publish_paired` — the keystroke row again with the
+//!   same 66 books registered a second time as `Role::Reference`, so every
+//!   publication also pairs 31k verses and judges their length ratios. The
+//!   delta against `edit_one_chapter_then_publish` is what a declared source
+//!   costs a keystroke.
 //!
 //! No byte counter: no row's cost is a function of corpus bytes.
 //! `publish_unchanged` reads no text at all, and the edit row reads exactly one
@@ -184,6 +189,52 @@ fn edit_one_chapter_then_publish(bencher: divan::Bencher) {
 /// projected and every chapter mapped. Registration is the input, so the row
 /// is the publication itself — and under `--features parallel` it is the same
 /// publication with the chapter map on rayon.
+/// The same corpus registered a second time as the declared source, so the
+/// keystroke row also pairs and judges every verse.
+fn warmed_paired(corpus: &Corpus) -> Expediter<Brigade> {
+    let mut sous = Expediter::new(Brigade::default(), 64 << 20);
+    for (id, text) in &corpus.books {
+        sous.update(id.as_str(), Role::Target, text).unwrap();
+        sous.update(format!("source/{id}"), Role::Reference, text)
+            .unwrap();
+    }
+    sous.publish().unwrap();
+    sous.publish().unwrap();
+    assert_eq!(sous.last_mapped(), 0, "the second maps none");
+    sous
+}
+
+#[divan::bench(sample_count = SAMPLES, sample_size = 1)]
+fn edit_one_chapter_then_publish_paired(bencher: divan::Bencher) {
+    let corpus = &*CORPUS;
+    let mut sous = warmed_paired(corpus);
+    sous.update(
+        corpus.edited_id.as_str(),
+        Role::Target,
+        &corpus.keystrokes[0],
+    )
+    .unwrap();
+    sous.publish().unwrap();
+
+    let mut next = 1;
+    bencher.bench_local(|| {
+        let typed = &corpus.keystrokes[next];
+        next += 1;
+        sous.update(corpus.edited_id.as_str(), Role::Target, typed)
+            .unwrap();
+        divan::black_box(sous.publish().unwrap())
+    });
+}
+
+/// The warm republication with the same source loaded: no map, no fold, and
+/// the whole pairing and re-judge on every call.
+#[divan::bench(sample_count = SAMPLES, sample_size = 1)]
+fn publish_unchanged_paired(bencher: divan::Bencher) {
+    let corpus = &*CORPUS;
+    let mut sous = warmed_paired(corpus);
+    bencher.bench_local(|| divan::black_box(sous.publish().unwrap()));
+}
+
 #[divan::bench(sample_count = SAMPLES, sample_size = 1)]
 fn publish_cold(bencher: divan::Bencher) {
     let corpus = &*CORPUS;

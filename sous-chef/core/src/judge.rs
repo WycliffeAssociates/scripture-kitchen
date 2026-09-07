@@ -20,6 +20,7 @@
 use rustc_hash::FxHashMap;
 
 use crate::pass::Findings;
+use crate::proportionality::LengthConfig;
 use crate::substrate::{BookAggregate, Case, FollowCounts, OuterClass, RUN_BUCKETS, ScalarKey};
 use crate::unicode::{Pool, class_of, pool_of};
 use crate::words::{Form, WordAggregate, WordTotals};
@@ -226,6 +227,11 @@ pub struct JudgingConfig {
     /// [`Channel::Doubled`] abstains for the whole corpus, in basis points.
     pub doubles_productive_bp: u16,
     pub doubles: DoublesPolicy,
+    /// The source-compared lane's own knobs. Judged by
+    /// [`crate::proportionality::judge_lengths`], which is a corpus-level step
+    /// beside the chapter passes rather than one of them; a resident host
+    /// reaches it through [`crate::ChapterPass::length_config`].
+    pub lengths: LengthConfig,
     pub channels: Channels,
 }
 
@@ -244,6 +250,7 @@ impl Default for JudgingConfig {
             word_length_sigma: 4,
             doubles_productive_bp: 300,
             doubles: DoublesPolicy::default(),
+            lengths: LengthConfig::default(),
             channels: Channels::default(),
         }
     }
@@ -1365,7 +1372,7 @@ mod tests {
             "no punctuation at all in this one".to_string(),
             "x; y; z, w ,, q?. r?\" s".to_string(),
         ];
-        let rows: Vec<_> = texts.iter().map(|text| walk::walk(text)).collect();
+        let rows: Vec<_> = texts.iter().map(|text| walk::walk(text, &[])).collect();
         let aggregates: Vec<BookAggregate> = rows
             .iter()
             .map(|obs| fold_book(&[ChapterObs { start: 0, obs }], &mut Edge::default()))

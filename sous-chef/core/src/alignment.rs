@@ -166,6 +166,42 @@ fn align_book(
 ) {
     let target: Vec<Row> = target.into_iter().map(Row::from).collect();
     let source: Vec<Row> = source.into_iter().map(Row::from).collect();
+    pair_keys(
+        book,
+        &keys_of(&target),
+        &keys_of(&source),
+        &mut |key, left, right| {
+            units.push(unit(
+                book,
+                key,
+                left.iter().map(|at| target[*at].text).collect(),
+                right.iter().map(|at| source[*at].text).collect(),
+            ));
+        },
+        facts,
+    );
+}
+
+fn keys_of(rows: &[Row]) -> Vec<VerseKey> {
+    rows.iter().map(|row| row.key).collect()
+}
+
+/// Pairs one book's verse keys: exact key plus occurrence ordinal, then a
+/// bridge against the exact contiguous constituent run on the other side.
+/// Everything left is a fact.
+///
+/// The pairing law is the aligned-unit contract's and nothing else's, so the
+/// text-carrying [`align`] and the length-carrying
+/// [`crate::proportionality`] cannot drift apart. `unit` is called with each
+/// pair as positions into the two slices, never as an owned list: an ordinary
+/// verse pairs one row with one row, and a whole Bible is 31k of them.
+pub(crate) fn pair_keys(
+    book: BookKey,
+    target: &[VerseKey],
+    source: &[VerseKey],
+    unit: &mut impl FnMut(VerseKey, &[usize], &[usize]),
+    facts: &mut Vec<AlignmentFact>,
+) {
     let mut target_used = vec![false; target.len()];
     let mut source_used = vec![false; source.len()];
     let mut target_blocked = vec![false; target.len()];
@@ -173,50 +209,46 @@ fn align_book(
 
     let mut keys = Vec::new();
     let mut seen_keys = FxHashSet::default();
-    for row in target.iter().chain(source.iter()) {
-        if seen_keys.insert(row.key) {
-            keys.push(row.key);
+    for key in target.iter().chain(source.iter()).copied() {
+        if seen_keys.insert(key) {
+            keys.push(key);
         }
     }
 
     let mut target_by_key: FxHashMap<VerseKey, Vec<usize>> = FxHashMap::default();
     let mut source_by_key: FxHashMap<VerseKey, Vec<usize>> = FxHashMap::default();
-    for (index, row) in target.iter().enumerate() {
-        target_by_key.entry(row.key).or_default().push(index);
+    for (index, key) in target.iter().enumerate() {
+        target_by_key.entry(*key).or_default().push(index);
     }
-    for (index, row) in source.iter().enumerate() {
-        source_by_key.entry(row.key).or_default().push(index);
+    for (index, key) in source.iter().enumerate() {
+        source_by_key.entry(*key).or_default().push(index);
     }
 
     // Exact keys, including equal bridges, are the unambiguous fast path.
     // Pairing by zip preserves each producer's occurrence order.
     for key in keys.iter().copied() {
-        let target_indices = target_by_key.get(&key).cloned().unwrap_or_default();
-        let source_indices = source_by_key.get(&key).cloned().unwrap_or_default();
-
-        if target_indices.is_empty() || source_indices.is_empty() {
+        // Borrowed, not cloned: the two index maps are distinct locals from
+        // the used/blocked lanes, and a whole Bible is 31k keys.
+        let (Some(target_indices), Some(source_indices)) =
+            (target_by_key.get(&key), source_by_key.get(&key))
+        else {
             continue;
-        }
+        };
         if target_indices.len() != source_indices.len() {
             push_fact(facts, AlignmentFact::AmbiguousDuplicate { book, key });
             for index in target_indices {
-                target_blocked[index] = true;
+                target_blocked[*index] = true;
             }
             for index in source_indices {
-                source_blocked[index] = true;
+                source_blocked[*index] = true;
             }
             continue;
         }
 
-        for (target_index, source_index) in target_indices.into_iter().zip(source_indices) {
-            target_used[target_index] = true;
-            source_used[source_index] = true;
-            units.push(unit(
-                book,
-                key,
-                vec![target[target_index].text],
-                vec![source[source_index].text],
-            ));
+        for (target_index, source_index) in target_indices.iter().zip(source_indices) {
+            target_used[*target_index] = true;
+            source_used[*source_index] = true;
+            unit(key, &[*target_index], &[*source_index]);
         }
     }
 
@@ -227,30 +259,20 @@ fn align_book(
         let target_indices: Vec<_> = target
             .iter()
             .enumerate()
-            .filter(|(index, row)| {
-                row.key == key && !target_used[*index] && !target_blocked[*index]
-            })
+            .filter(|(index, row)| **row == key && !target_used[*index] && !target_blocked[*index])
             .map(|(index, _)| index)
             .collect();
         if target_indices.is_empty() {
             continue;
         }
-        let candidates = exact_sequences(&source, key, &source_used, &source_blocked);
+        let candidates = exact_sequences(source, key, &source_used, &source_blocked);
         if candidates.len() == target_indices.len() {
             for (target_index, candidate) in target_indices.into_iter().zip(candidates) {
                 target_used[target_index] = true;
                 for source_index in &candidate {
                     source_used[*source_index] = true;
                 }
-                units.push(unit(
-                    book,
-                    key,
-                    vec![target[target_index].text],
-                    candidate
-                        .into_iter()
-                        .map(|index| source[index].text)
-                        .collect(),
-                ));
+                unit(key, &[target_index], &candidate);
             }
         } else if !candidates.is_empty() {
             push_fact(facts, AlignmentFact::AmbiguousDuplicate { book, key });
@@ -272,30 +294,20 @@ fn align_book(
         let source_indices: Vec<_> = source
             .iter()
             .enumerate()
-            .filter(|(index, row)| {
-                row.key == key && !source_used[*index] && !source_blocked[*index]
-            })
+            .filter(|(index, row)| **row == key && !source_used[*index] && !source_blocked[*index])
             .map(|(index, _)| index)
             .collect();
         if source_indices.is_empty() {
             continue;
         }
-        let candidates = exact_sequences(&target, key, &target_used, &target_blocked);
+        let candidates = exact_sequences(target, key, &target_used, &target_blocked);
         if candidates.len() == source_indices.len() {
             for (source_index, candidate) in source_indices.into_iter().zip(candidates) {
                 source_used[source_index] = true;
                 for target_index in &candidate {
                     target_used[*target_index] = true;
                 }
-                units.push(unit(
-                    book,
-                    key,
-                    candidate
-                        .into_iter()
-                        .map(|index| target[index].text)
-                        .collect(),
-                    vec![source[source_index].text],
-                ));
+                unit(key, &candidate, &[source_index]);
             }
         } else if !candidates.is_empty() {
             push_fact(facts, AlignmentFact::AmbiguousDuplicate { book, key });
@@ -310,35 +322,36 @@ fn align_book(
         }
     }
 
-    for (target_index, target_row) in target.iter().enumerate() {
+    for (target_index, target_key) in target.iter().copied().enumerate() {
         if target_used[target_index] || target_blocked[target_index] {
             continue;
         }
-        let overlaps: Vec<_> = source
+        let overlapping: Vec<_> = source
             .iter()
+            .copied()
             .enumerate()
-            .filter(|(source_index, source_row)| {
+            .filter(|(source_index, source_key)| {
                 !source_used[*source_index]
                     && !source_blocked[*source_index]
-                    && overlaps(target_row.key, source_row.key)
+                    && overlaps(target_key, *source_key)
             })
-            .map(|(_, row)| row.key)
+            .map(|(_, key)| key)
             .collect();
-        if overlaps.is_empty() {
+        if overlapping.is_empty() {
             push_fact(
                 facts,
                 AlignmentFact::TargetOnly {
                     book,
-                    key: target_row.key,
+                    key: target_key,
                 },
             );
         } else {
-            for source_key in overlaps {
+            for source_key in overlapping {
                 push_fact(
                     facts,
                     AlignmentFact::PartialOverlap {
                         book,
-                        target: target_row.key,
+                        target: target_key,
                         source: source_key,
                     },
                 );
@@ -346,21 +359,25 @@ fn align_book(
         }
     }
 
-    for (source_index, source_row) in source.iter().enumerate() {
+    for (source_index, source_key) in source.iter().copied().enumerate() {
         if source_used[source_index] || source_blocked[source_index] {
             continue;
         }
-        let overlaps = target.iter().enumerate().any(|(target_index, target_row)| {
-            !target_used[target_index]
-                && !target_blocked[target_index]
-                && overlaps(target_row.key, source_row.key)
-        });
-        if !overlaps {
+        let overlapping = target
+            .iter()
+            .copied()
+            .enumerate()
+            .any(|(target_index, target_key)| {
+                !target_used[target_index]
+                    && !target_blocked[target_index]
+                    && overlaps(target_key, source_key)
+            });
+        if !overlapping {
             push_fact(
                 facts,
                 AlignmentFact::SourceOnly {
                     book,
-                    key: source_row.key,
+                    key: source_key,
                 },
             );
         }
@@ -368,7 +385,7 @@ fn align_book(
 }
 
 fn exact_sequences(
-    rows: &[Row],
+    rows: &[VerseKey],
     bridge: VerseKey,
     used: &[bool],
     blocked: &[bool],
@@ -382,15 +399,15 @@ fn exact_sequences(
                 valid = false;
                 break;
             };
-            let Some(row) = rows.get(index) else {
+            let Some(row) = rows.get(index).copied() else {
                 valid = false;
                 break;
             };
             if used[index]
                 || blocked[index]
-                || row.key.chapter() != bridge.chapter()
-                || row.key.first() != number
-                || row.key.last() != number
+                || row.chapter() != bridge.chapter()
+                || row.first() != number
+                || row.last() != number
             {
                 valid = false;
                 break;

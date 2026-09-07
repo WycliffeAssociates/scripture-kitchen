@@ -746,7 +746,7 @@ mod tests {
         let counts = crate::substrate::fold_book(
             &[crate::ChapterObs {
                 start: 0,
-                obs: &crate::substrate::walk::walk("no punctuation here"),
+                obs: &crate::substrate::walk::walk("no punctuation here", &[]),
             }],
             &mut crate::substrate::Edge::default(),
         );

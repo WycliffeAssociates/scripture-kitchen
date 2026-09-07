@@ -24,10 +24,11 @@ Nothing borrows, nothing hashes, nothing carries a coordinate.
 | `runs` | the run's scalar sequence, digits excluded | count | 12 + 4/atom | run composition, G2/G3 neighbours inside a run |
 | `follows` | `ScalarKey` of a run terminal | upper/lower/uncased | 16 | lowercase after a learned terminal; and the terminal table the word channels read |
 | `hygiene` | — | one `HygieneFinding` per site | 16/site | hygiene's four scalar classes, with exact spans |
+| `verses` | `VerseKey` | grapheme count + the projected span | 20/verse | the target half of the source comparison ([`proportionality.md`](proportionality.md)) |
 | `lead`, `trail` | — | one open edge each | 20 each | the seam (below) |
 | `scalar_count`, `word_count` | — | — | 8 | denominators and the Stage 4 word seam |
 
-`size_of::<ChapterRow>()` is 144 B; the rest is what the six lanes own.
+`size_of::<ChapterRow>()` is 160 B; the rest is what the seven lanes own.
 Measured over the committed tier (the ignored oracle in
 `tests/substrate_reference.rs` prints it): median **980 B**, p90 **1,340 B**,
 per-corpus medians 844 B (Spanish) to 1,768 B (Greek). The budget is 1.5 KB
@@ -43,6 +44,16 @@ Four shapes are deliberate:
   run history; the run *sequences* already carry it exactly, so
   `ChapterRow::run_lengths()` decomposes them on read rather than the row
   paying ~260 B a chapter to say the same thing twice.
+- **The `verses` lane is the second exception to "sites are absent", and the
+  cheapest one.** Length proportionality needs each verse's grapheme count and
+  the span a row over it would name. Both are free here — the walk already has
+  the chapter's text and `ChapterInput::verses` — and neither can be
+  reconstructed later without reading text again, since a reference retains
+  none. The lane is 20 B per verse, about 620 KB over a whole Bible's 31k
+  verses; a chapter with no verse rows carries an empty box and 16 inline
+  bytes. Counting is the shipped atom rule (`unicode::atoms::count_atoms`),
+  the same one the reference side uses, so the two never disagree about what a
+  grapheme is.
 - **The `hygiene` lane is the one exception to "sites are absent".** Every
   other lane is a count, and D2 rescans retained text for the spans behind a
   count. Hygiene cannot: deciding that a mark is *free* or a format character

@@ -24,7 +24,10 @@ use mise::utf16::{Utf16Table, utf16_table};
 use rustc_hash::{FxHashMap, FxHashSet};
 use xxhash_rust::xxh3::xxh3_128;
 
+use sous_core::{InputError, SourceVerse, source_lengths};
+
 use crate::onion::{self, Filter, Mask, Toc, lint::LintReport};
+use crate::sous::OnionBook;
 use crate::warmer::Warmer;
 
 /// The caller's opaque book identity, kept consistent across updates — a file
@@ -97,11 +100,25 @@ impl fmt::Display for RawChecksum {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Role {
     /// Full detached products, the text beside them, and it publishes findings.
-    ///
-    /// `Reference` — TOC and per-verse observations only, no mask and no UTF-16
-    /// table — is designed and lands with its first consumer, Stage 5
-    /// proportionality.
     Target,
+    /// A declared source: `Toc` and one projected grapheme length per verse,
+    /// and nothing else — no mask, no UTF-16 table, no text.
+    ///
+    /// A reference publishes no findings and is never a target, so it needs no
+    /// coordinate of its own. [`Retain::Text`] is accepted and pointless: no
+    /// operation on a reference reads text.
+    Reference,
+}
+
+impl Role {
+    /// What this role keeps by default: a target its text, a reference
+    /// nothing but the products above.
+    const fn retention(self) -> Retain {
+        match self {
+            Self::Target => Retain::Text,
+            Self::Reference => Retain::ProductsOnly,
+        }
+    }
 }
 
 /// Whether a target keeps its text beside its products.
@@ -202,14 +219,23 @@ struct Book {
     checksum: RawChecksum,
     fingerprint: Fingerprint,
     toc: Toc,
-    /// The verse-text projection, as source ranges plus their mask starts.
+    /// [`Role::Target`] only: what publication needs to place a finding.
+    projection: Option<Projection>,
+    /// [`Role::Reference`] only: one row per keyed verse, in TOC order.
+    lengths: Option<Box<[SourceVerse]>>,
+    /// The text as last updated; `None` under [`Retain::ProductsOnly`].
+    text: Option<String>,
+    bytes: usize,
+}
+
+/// A target's coordinate products: the verse-text projection and the table
+/// that turns its bytes into the units a host publishes.
+struct Projection {
+    /// Source ranges plus their mask starts.
     mask: Mask,
     utf16: Utf16Table,
     /// The raw book's UTF-16 length — a publication's `published_len`.
     len_utf16: u32,
-    /// The text as last updated; `None` under [`Retain::ProductsOnly`].
-    text: Option<String>,
-    bytes: usize,
 }
 
 const _: () = {
@@ -241,6 +267,8 @@ pub struct Pantry {
     books: FxHashMap<BookId, Book>,
     /// Canonical by [`BookKey`], ties by id — never insertion order.
     targets: Vec<(BookId, BookKey)>,
+    /// The same order over the declared sources.
+    references: Vec<(BookId, BookKey)>,
     derivations: u64,
 }
 
@@ -252,20 +280,22 @@ impl Pantry {
             warmer: Warmer::new(budget_bytes),
             books: FxHashMap::default(),
             targets: Vec::new(),
+            references: Vec::new(),
             derivations: 0,
         }
     }
 
-    /// Derive and retain this book's products and its text.
+    /// Derive and retain this book's products under the role's own retention:
+    /// a target keeps its text, a reference keeps none.
     ///
-    /// [`update_with`](Self::update_with) under [`Retain::Text`].
+    /// [`update_with`](Self::update_with) is how a host overrides that.
     pub fn update(
         &mut self,
         id: impl Into<BookId>,
         role: Role,
         text: &str,
     ) -> Result<Entry<'_>, PantryError> {
-        self.update_with(id, role, Retain::Text, text)
+        self.update_with(id, role, role.retention(), text)
     }
 
     /// Derive and retain this book's products, keeping or dropping its text.
@@ -310,7 +340,31 @@ impl Pantry {
             &parsed.cst,
             &Filter::verse_text(),
         );
-        let utf16 = utf16_table(text.as_bytes());
+        // A reference counts its verses once, here, and then owns neither the
+        // mask that projected them nor the text they came from.
+        let lengths =
+            match role {
+                Role::Target => None,
+                Role::Reference => {
+                    let projected = OnionBook::from_parts(text, mask.clone(), toc.clone())
+                        .map_err(|error| PantryError::InvalidBook {
+                            id: id.clone(),
+                            error,
+                        })?;
+                    Some(source_lengths(&projected).into_boxed_slice())
+                }
+            };
+        let projection = match role {
+            Role::Target => {
+                let utf16 = utf16_table(text.as_bytes());
+                Some(Projection {
+                    len_utf16: utf16.len_utf16(),
+                    mask,
+                    utf16,
+                })
+            }
+            Role::Reference => None,
+        };
         let print = fingerprint(text);
         let kept = match retain {
             Retain::Text => Some(text.to_string()),
@@ -320,12 +374,18 @@ impl Pantry {
             key,
             role,
             checksum,
-            len_utf16: utf16.len_utf16(),
-            bytes: book_bytes(&toc, &mask, &utf16, &print, &id, kept.as_deref()),
+            bytes: book_bytes(
+                &toc,
+                projection.as_ref(),
+                lengths.as_deref(),
+                &print,
+                &id,
+                kept.as_deref(),
+            ),
             fingerprint: print,
             toc,
-            mask,
-            utf16,
+            projection,
+            lengths,
             text: kept,
         };
         self.derivations += 1;
@@ -372,10 +432,11 @@ impl Pantry {
         Some(book.fingerprint.changed_chunks(&fingerprint(text)))
     }
 
-    /// Registered books in canonical [`BookKey`] order, ties by id.
+    /// Registered books of one role in canonical [`BookKey`] order, ties by id.
     pub fn books(&self, role: Role) -> &[(BookId, BookKey)] {
         match role {
             Role::Target => &self.targets,
+            Role::Reference => &self.references,
         }
     }
 
@@ -414,14 +475,27 @@ impl Pantry {
     /// Crate-private, because publication reads every book at once where an
     /// [`Entry`] borrows the whole Pantry mutably for one.
     pub(crate) fn products(&self, id: &BookId) -> Option<Products<'_>> {
-        self.books.get(id).map(|book| Products {
+        let book = self.books.get(id)?;
+        let projection = book.projection.as_ref()?;
+        Some(Products {
             checksum: book.checksum,
             toc: &book.toc,
-            mask: &book.mask,
-            utf16: &book.utf16,
-            published_len: book.len_utf16,
+            mask: &projection.mask,
+            utf16: &projection.utf16,
+            published_len: projection.len_utf16,
             text: book.text.as_deref(),
         })
+    }
+
+    /// One registered book's raw checksum, whatever its role.
+    pub(crate) fn checksum(&self, id: &BookId) -> Option<RawChecksum> {
+        self.books.get(id).map(|book| book.checksum)
+    }
+
+    /// One reference book's retained per-verse lengths, or `None` for an
+    /// unknown id or a book of another role.
+    pub(crate) fn reference_lengths(&self, id: &BookId) -> Option<&[SourceVerse]> {
+        self.books.get(id)?.lengths.as_deref()
     }
 
     /// The Warmer's lint over one book's retained text. Split-borrowed, which
@@ -443,19 +517,24 @@ impl Pantry {
     }
 
     fn reorder(&mut self) {
-        self.targets = self
+        self.targets = self.ordered(Role::Target);
+        self.references = self.ordered(Role::Reference);
+    }
+
+    fn ordered(&self, role: Role) -> Vec<(BookId, BookKey)> {
+        let mut books: Vec<(BookId, BookKey)> = self
             .books
             .iter()
-            .filter(|(_, book)| book.role == Role::Target)
+            .filter(|(_, book)| book.role == role)
             .map(|(id, book)| (id.clone(), book.key))
             .collect();
-        self.targets
-            .sort_unstable_by(|(left_id, left), (right_id, right)| {
-                canonical_rank(*left)
-                    .cmp(&canonical_rank(*right))
-                    .then_with(|| left.as_bytes().cmp(&right.as_bytes()))
-                    .then_with(|| left_id.cmp(right_id))
-            });
+        books.sort_unstable_by(|(left_id, left), (right_id, right)| {
+            canonical_rank(*left)
+                .cmp(&canonical_rank(*right))
+                .then_with(|| left.as_bytes().cmp(&right.as_bytes()))
+                .then_with(|| left_id.cmp(right_id))
+        });
+        books
     }
 }
 
@@ -506,9 +585,10 @@ impl Entry<'_> {
         retained(&self.pantry.books, &self.id)
     }
 
-    /// The retained verse-text projection: source ranges and their mask starts.
-    pub fn mask(&self) -> &Mask {
-        &self.book().mask
+    /// The retained verse-text projection: source ranges and their mask
+    /// starts, or the refusal a reference answers with — it keeps none.
+    pub fn mask(&self) -> Result<&Mask, PantryError> {
+        self.projection().map(|projection| &projection.mask)
     }
 
     pub fn toc(&self) -> &Toc {
@@ -516,14 +596,25 @@ impl Entry<'_> {
     }
 
     /// The retained byte → UTF-16 table, valid against the exact text of the
-    /// last update.
-    pub fn utf16(&self) -> &Utf16Table {
-        &self.book().utf16
+    /// last update. A reference keeps none.
+    pub fn utf16(&self) -> Result<&Utf16Table, PantryError> {
+        self.projection().map(|projection| &projection.utf16)
     }
 
     /// The raw book's UTF-16 length — a publication's `published_len`.
-    pub fn published_len(&self) -> u32 {
-        self.book().len_utf16
+    pub fn published_len(&self) -> Result<u32, PantryError> {
+        self.projection().map(|projection| projection.len_utf16)
+    }
+
+    /// One projected grapheme length per keyed verse, in TOC order — what a
+    /// reference retains instead of a projection. A target keeps none.
+    pub fn verse_lengths(&self) -> Result<&[SourceVerse], PantryError> {
+        self.book()
+            .lengths
+            .as_deref()
+            .ok_or_else(|| PantryError::NoLengths {
+                id: self.id.clone(),
+            })
     }
 
     /// [`Warmer::lint`] over the retained text.
@@ -541,6 +632,15 @@ impl Entry<'_> {
     fn book(&self) -> &Book {
         self.pantry.books.get(&self.id).expect("registered id")
     }
+
+    fn projection(&self) -> Result<&Projection, PantryError> {
+        self.book()
+            .projection
+            .as_ref()
+            .ok_or_else(|| PantryError::NoProjection {
+                id: self.id.clone(),
+            })
+    }
 }
 
 /// One book's text, keyed off a borrow of the map alone so a caller can hold
@@ -557,17 +657,22 @@ fn retained<'b>(books: &'b FxHashMap<BookId, Book>, id: &BookId) -> Result<&'b s
 /// the heap.
 fn book_bytes(
     toc: &Toc,
-    mask: &Mask,
-    utf16: &Utf16Table,
+    projection: Option<&Projection>,
+    lengths: Option<&[SourceVerse]>,
     print: &Fingerprint,
     id: &BookId,
     text: Option<&str>,
 ) -> usize {
+    let projected = projection.map_or(0, |projection| {
+        projection.mask.ranges.capacity() * size_of::<Range<u32>>()
+            + projection.mask.starts.capacity() * size_of::<u32>()
+            + projection.utf16.index_bytes()
+            + size_of::<Projection>()
+    });
     toc.chapters.capacity() * size_of::<onion::ChapterRow>()
         + toc.verses.capacity() * size_of::<onion::VerseAnchor>()
-        + mask.ranges.capacity() * size_of::<Range<u32>>()
-        + mask.starts.capacity() * size_of::<u32>()
-        + utf16.index_bytes()
+        + projected
+        + lengths.map_or(0, size_of_val)
         + print.resident_bytes()
         + id.as_str().len()
         + text.map_or(0, str::len)
@@ -585,6 +690,14 @@ pub enum PantryError {
     /// A target publishes findings, and placing them rescans its text, so it
     /// keeps it. [`Retain::ProductsOnly`] is for a reference.
     TargetNeedsText { id: BookId },
+    /// The book is a [`Role::Reference`], which retains no verse-text
+    /// projection and no UTF-16 table, and this operation needs one.
+    NoProjection { id: BookId },
+    /// The book is a [`Role::Target`], which retains a projection rather than
+    /// per-verse lengths.
+    NoLengths { id: BookId },
+    /// The book's projection is not an analyzable `sous-core` input.
+    InvalidBook { id: BookId, error: InputError },
 }
 
 impl fmt::Display for PantryError {
@@ -594,6 +707,13 @@ impl fmt::Display for PantryError {
             Self::NoText { id } => write!(f, "book {id} retains no text"),
             Self::TargetNeedsText { id } => {
                 write!(f, "target {id} must retain its text to be sited")
+            }
+            Self::NoProjection { id } => {
+                write!(f, "reference {id} retains no verse-text projection")
+            }
+            Self::NoLengths { id } => write!(f, "target {id} retains no verse lengths"),
+            Self::InvalidBook { id, error } => {
+                write!(f, "book {id} is not analyzable: {error}")
             }
         }
     }
@@ -749,7 +869,7 @@ mod tests {
         let before = mark();
         let entry = pantry.update(id.clone(), Role::Target, &before).unwrap();
         let first = entry.checksum();
-        let published = entry.published_len();
+        let published = entry.published_len().unwrap();
 
         let after = before.replace(
             "A man with a withered hand.",
@@ -768,7 +888,7 @@ mod tests {
             "the copy moved with the update"
         );
         // The inserted " 🖐" is a space plus a surrogate pair: three units.
-        assert_eq!(entry.published_len(), published + 3);
+        assert_eq!(entry.published_len().unwrap(), published + 3);
         assert_eq!(
             pantry.changed_since_update(&id, &after).unwrap(),
             Vec::new(),
@@ -782,7 +902,7 @@ mod tests {
         let text = mark();
         let entry = pantry.update(mrk(), Role::Target, &text).unwrap();
 
-        let projected = entry.mask().text(text.as_bytes());
+        let projected = entry.mask().unwrap().text(text.as_bytes());
         assert!(
             !projected.contains('\\'),
             "no markup survives: {projected:?}"
@@ -795,14 +915,17 @@ mod tests {
         let numbers: Vec<u16> = entry.toc().chapters.iter().map(|row| row.number).collect();
         assert_eq!(numbers, vec![0, 1, 2, 3, 4, 5, 6], "front matter plus six");
         let index = onion::utf16_index(text.as_bytes());
-        for range in &entry.mask().ranges {
+        for range in &entry.mask().unwrap().ranges {
             assert_eq!(
-                entry.utf16().to_utf16(range.start),
+                entry.utf16().unwrap().to_utf16(range.start),
                 index.to_utf16(range.start)
             );
-            assert_eq!(entry.utf16().to_utf16(range.end), index.to_utf16(range.end));
+            assert_eq!(
+                entry.utf16().unwrap().to_utf16(range.end),
+                index.to_utf16(range.end)
+            );
         }
-        assert_eq!(entry.published_len(), index.len_utf16());
+        assert_eq!(entry.published_len().unwrap(), index.len_utf16());
     }
 
     #[test]
@@ -926,6 +1049,134 @@ mod tests {
         assert_eq!(pantry.changed_since_update(&id, &mark()), None);
         assert!(pantry.books(Role::Target).is_empty());
         assert!(!pantry.remove(&id), "already gone");
+    }
+
+    /// A reference is TOC plus one grapheme count per verse, and nothing
+    /// else: it publishes no coordinate, so it retains none.
+    #[test]
+    fn a_reference_keeps_its_verse_lengths_and_no_projection() {
+        let mut pantry = pantry();
+        let id = mrk();
+        let entry = pantry.update(id.clone(), Role::Reference, &mark()).unwrap();
+
+        assert_eq!(entry.role(), Role::Reference);
+        assert_eq!(entry.key(), BookKey::new(*b"MRK"));
+        assert_eq!(
+            entry.mask().err(),
+            Some(PantryError::NoProjection { id: id.clone() })
+        );
+        assert_eq!(
+            entry.utf16().err(),
+            Some(PantryError::NoProjection { id: id.clone() })
+        );
+        assert_eq!(
+            entry.published_len().err(),
+            Some(PantryError::NoProjection { id: id.clone() })
+        );
+        assert_eq!(
+            entry.text().err(),
+            Some(PantryError::NoText { id: id.clone() })
+        );
+
+        let lengths = entry.verse_lengths().unwrap();
+        assert_eq!(lengths.len(), 6, "one row per verse");
+        // "In the beginning of the good news." plus the newline the mask keeps.
+        assert_eq!(lengths[0].graphemes(), 35);
+        assert_eq!(lengths[0].key(), sous_core::VerseKey::new(1, 1, 1).unwrap());
+
+        assert!(pantry.books(Role::Target).is_empty());
+        assert_eq!(
+            pantry.books(Role::Reference),
+            &[(id, BookKey::new(*b"MRK"))]
+        );
+        assert_eq!(pantry.text_bytes(), 0, "no text is retained");
+    }
+
+    /// The whole point of the role: the same book costs a fraction as a
+    /// reference, because the mask and the UTF-16 table are the weight.
+    #[test]
+    fn a_reference_costs_a_fraction_of_a_target() {
+        // A book big enough that the retained text, the mask, and the UTF-16
+        // table dominate the per-book struct both roles pay for.
+        let chapters: Vec<String> = (0..40)
+            .map(|at| format!("Chapter {at} of a book long enough to weigh something."))
+            .collect();
+        let text = book(
+            "MRK",
+            &chapters.iter().map(String::as_str).collect::<Vec<_>>(),
+        );
+        let mut target = pantry();
+        target.update(mrk(), Role::Target, &text).unwrap();
+        let mut reference = pantry();
+        reference.update(mrk(), Role::Reference, &text).unwrap();
+
+        let warmer = |pantry: &Pantry| pantry.warmer().resident_bytes();
+        let target_own = target.resident_bytes() - warmer(&target);
+        let reference_own = reference.resident_bytes() - warmer(&reference);
+        assert!(
+            reference_own * 2 < target_own,
+            "reference {reference_own} B against target {target_own} B"
+        );
+        assert!(reference_own > 0);
+    }
+
+    /// A target refuses `ProductsOnly` and a reference accepts `Text`; the
+    /// second is allowed and pointless, since nothing reads a reference's
+    /// text.
+    #[test]
+    fn a_reference_may_keep_text_it_will_never_be_asked_for() {
+        let mut pantry = pantry();
+        let entry = pantry
+            .update_with(mrk(), Role::Reference, Retain::Text, &mark())
+            .unwrap();
+        assert_eq!(entry.text().unwrap(), mark());
+        assert_eq!(entry.verse_lengths().unwrap().len(), 6);
+        assert_eq!(pantry.text_bytes(), mark().len());
+    }
+
+    /// Both roles order canonically and neither sees the other.
+    #[test]
+    fn the_two_roles_are_ordered_and_listed_apart() {
+        let mut pantry = pantry();
+        pantry
+            .update("t/rev.usfm", Role::Target, &book("REV", &["A revelation."]))
+            .unwrap();
+        pantry.update("t/mrk.usfm", Role::Target, &mark()).unwrap();
+        pantry
+            .update("s/mrk.usfm", Role::Reference, &mark())
+            .unwrap();
+        pantry
+            .update(
+                "s/gen.usfm",
+                Role::Reference,
+                &book("GEN", &["In the beginning."]),
+            )
+            .unwrap();
+
+        let names = |rows: &[(BookId, BookKey)]| {
+            rows.iter()
+                .map(|(id, _)| id.as_str().to_string())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            names(pantry.books(Role::Target)),
+            vec!["t/mrk.usfm", "t/rev.usfm"]
+        );
+        assert_eq!(
+            names(pantry.books(Role::Reference)),
+            vec!["s/gen.usfm", "s/mrk.usfm"]
+        );
+    }
+
+    #[test]
+    fn a_target_retains_no_verse_lengths() {
+        let mut pantry = pantry();
+        let id = mrk();
+        let entry = pantry.update(id.clone(), Role::Target, &mark()).unwrap();
+        assert_eq!(
+            entry.verse_lengths().err(),
+            Some(PantryError::NoLengths { id })
+        );
     }
 
     #[test]

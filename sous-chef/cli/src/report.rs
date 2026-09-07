@@ -71,15 +71,61 @@ const TOPO: [(&str, OuterClass, OuterClass); 4] = [
     ("Neither", OuterClass::Space, OuterClass::Space),
 ];
 
+/// One fired length row as the page shows it: the address, the ratio, both
+/// scopes, and the two texts side by side.
+///
+/// The wire record carries the two deviations and a span; everything else
+/// here the CLI recomputed from the two corpora it holds.
+pub struct PairedUnit {
+    pub address: String,
+    pub ratio: f64,
+    pub book_z: Option<f64>,
+    pub project_z: Option<f64>,
+    pub target: String,
+    pub source: String,
+}
+
+/// The source comparison's contribution to the page; empty when no source
+/// was declared, which is what hides the tab.
+#[derive(Default)]
+pub struct Paired {
+    pub units: Vec<PairedUnit>,
+}
+
 /// The self-contained inventory page for the target corpus.
 pub fn render(
     name: &str,
     corpus: &Corpus<'_, OnionBook>,
     patterns: &[Pattern],
     findings: &[PackedFinding],
+    paired: &Paired,
 ) -> String {
-    let json = corpus_json(name, corpus, patterns, findings);
+    let json = corpus_json(name, corpus, patterns, findings, paired);
     TEMPLATE.replace("@@CORPORA@@", &format!("[{json}]"))
+}
+
+/// `len[]`: one record per fired length row, in publication order.
+fn lengths_json(paired: &Paired) -> String {
+    let rows: Vec<String> = paired
+        .units
+        .iter()
+        .map(|unit| {
+            let scope = |value: Option<f64>| match value {
+                Some(value) => format!("{value:.2}"),
+                None => "null".to_string(),
+            };
+            format!(
+                "{{\"ref\":{},\"ratio\":{:.4},\"zb\":{},\"zp\":{},\"t\":{},\"s\":{}}}",
+                json_str(&unit.address),
+                unit.ratio,
+                scope(unit.book_z),
+                scope(unit.project_z),
+                json_str(unit.target.trim()),
+                json_str(unit.source.trim()),
+            )
+        })
+        .collect();
+    format!("[{}]", rows.join(","))
 }
 
 const TEMPLATE: &str = include_str!("../templates/inventory.html");
@@ -179,6 +225,7 @@ fn corpus_json(
     corpus: &Corpus<'_, OnionBook>,
     patterns: &[Pattern],
     findings: &[PackedFinding],
+    paired: &Paired,
 ) -> String {
     let aggregates = book_aggregates(corpus);
     let (scalars, glyphs) = glyph_roster(&aggregates);
@@ -206,11 +253,12 @@ fn corpus_json(
         ));
     }
     format!(
-        r#"{{"name":{},"judging":{},"glyphs":[{}],"cap":[{}]}}"#,
+        r#"{{"name":{},"judging":{},"glyphs":[{}],"cap":[{}],"len":{}}}"#,
         json_str(name),
         json_str(&judging),
         glyph_json.join(","),
         cap_json(corpus, patterns, findings),
+        lengths_json(paired),
     )
 }
 

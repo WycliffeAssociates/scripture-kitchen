@@ -17,9 +17,12 @@ text — a pattern is a corpus fact with no coordinates, and `sites::locate`
 gives it some — so a target that kept no text could be judged and never sited.
 `update_with(.., Role::Target, Retain::ProductsOnly, ..)` returns
 `Err(PantryError::TargetNeedsText { id })` rather than registering a book
-publication would later fail on. `Retain::ProductsOnly` is for `Role::Reference`,
-which lands with proportionality; `PantryError::NoText { id }` is the refusal a
-text-needing method answers with once such a book exists.
+publication would later fail on. `Retain::ProductsOnly` is what
+`Role::Reference` takes by default, and `PantryError::NoText { id }` is the
+refusal a text-needing method answers with. `update` picks the ROLE's own
+retention — a target keeps its text, a reference keeps none — and `update_with`
+is how a host overrides that; `Retain::Text` on a reference is accepted and
+pointless, since no operation on one reads text.
 
 There is no splice API and never will be: the only mutation is whole-book
 replacement under a caller-chosen opaque id, which is idempotent and cannot
@@ -73,10 +76,28 @@ reused with rebased coordinates.
 ## Roles and retention
 
 A book is registered as `Target` — full detached products, publishes findings —
-or, from Stage 5, `Reference`: TOC and per-verse observations only, no mask and
-no UTF-16 table, because a reference corpus never publishes a coordinate. B1
-ships `Target` alone; the enum carries the second variant's shape as a doc line
-rather than as dead code.
+or as `Reference`: `Toc` plus one projected grapheme length per verse, and
+nothing else, because a reference corpus never publishes a coordinate and
+nothing ever asks it for text. Both roles are live; `books(role)` lists each in
+the same canonical order and neither sees the other.
+
+The asymmetry is the point, and it is measured (evidence.md, 2026-09-07): over
+the committed 66-book `en_ulb`, a target's own products are **7.29 MB** (162%
+of the 4.51 MB raw, of which 4.51 MB is the retained text) and a reference's
+are **1.17 MB** (26%). The verse rows themselves are 12 B each, 31,101 of them,
+0.37 MB; the rest is the `Toc` both roles keep.
+
+A reference derives the mask to project its verses and then drops it: the
+lengths are counted once, at `update`, by the same
+`sous_core::proportionality::source_lengths` an Onion or a vref producer uses,
+so the two sides of a ratio cannot disagree about what a grapheme is. A book
+whose projection is not an analyzable `sous-core` input is refused there rather
+than at publication, as `PantryError::InvalidBook`.
+
+`Entry::mask`, `utf16`, and `published_len` therefore answer
+`Err(PantryError::NoProjection)` on a reference, and `Entry::verse_lengths`
+answers `Err(PantryError::NoLengths)` on a target — the same shape `text()`
+already had. There is no accessor that quietly returns something empty.
 
 Retained per `Target` book — the text under `Retain::Text`, and roughly 25% of
 it again in products:
@@ -90,6 +111,15 @@ it again in products:
 | published length | the table | a publication's `published_len` |
 | `Fingerprint` | `galley::pantry::fingerprint` | the baseline for the next update |
 | the text | `update`'s argument | `Retain::Text`; `resident_bytes` counts it |
+
+And per `Reference` book, which is the whole list:
+
+| Product | Source | Why it survives the string |
+| --- | --- | --- |
+| chunk products | the owned `Warmer` | budget-bound and shared; a reference is parsed once |
+| `Toc` | `onion::toc` | chapter/verse anchors, the book's identity |
+| verse lengths | `sous_core::source_lengths` over the transient mask | 12 B per verse; the source half of a length ratio |
+| `Fingerprint` | `galley::pantry::fingerprint` | the baseline for the next update |
 
 `Pantry::text_bytes()` sums the retained text alone and `Fingerprint::resident_bytes`
 is public, so a host can read `resident_bytes() - warmer().resident_bytes() -

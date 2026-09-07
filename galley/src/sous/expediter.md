@@ -14,8 +14,9 @@ the same bytes.
 
 `Expediter::update`, `update_with` and `remove` forward to the Pantry, and
 `pantry()` hands back `&Pantry` only, so no book can be registered behind these
-caches' backs. `update_with` is where a `Target` asking for
-`Retain::ProductsOnly` is refused — a target's findings are placed by rescanning
+caches' backs. `update` takes the role's own retention, so
+`update(id, Role::Reference, text)` keeps no text; `update_with` is where a
+`Target` asking for `Retain::ProductsOnly` is refused — a target's findings are placed by rescanning
 its own text, so a target that kept none could be judged and never sited
 (`pantry.md`).
 
@@ -241,6 +242,58 @@ measured 697 µs of a warm whole-Bible republication with nothing changed
 `ChapterPass::aggregate_bytes`, not its inline size; `Brigade` is book-grain
 overall (`Words` alone is), so the sweep keeps its aggregate for a book's
 current checksum only, not the whole ring — the previous section.
+
+## The declared source
+
+A `Role::Reference` book is not a target and never becomes one: it is mapped by
+nobody, folded by nobody, holds no chapter table and no aggregate, and
+publishes no section of its own. What it holds is one grapheme count per verse,
+counted once at `update` (`pantry.md`).
+
+`publish` runs the source comparison immediately after `judge_resident` and
+before `locate`, from the lengths both sides already retain:
+
+```text
+pass.length_config(config)         -> the knobs, from the member that owns the lane
+pass.verse_lengths(aggregate)      -> the target lane, per Target book
+pantry.reference_lengths(id)       -> the source rows, per Reference book
+judge_lengths(target, source, ..)  -> rows over target spans; facts dropped here
+```
+
+Every Target pairs with the Reference of the same `BookKey` — the first, if a
+caller registers two files under one key, since `books(Role::Reference)` is
+canonically ordered and the choice has to be an order rather than a hash. A
+Target with no Reference gets no ratios and no rows; that is the contract, not
+an error, so a host may declare a source for part of a corpus.
+
+Three properties follow, and each is a test:
+
+- **a source change touches no target observation.** Registering, replacing, or
+  removing a reference moves no target checksum, so nothing is re-mapped,
+  re-folded, or re-located, and every target-only row is byte-identical either
+  side of the swap. The length rows are the only thing that moves. This is the
+  charter's "source choice legitimately changes results without invalidating
+  target-only observations", pinned in `equivalence.rs` and in the Expediter's
+  own tests;
+- **the length knobs are the same judging config as every other knob.** They
+  ride `JudgingConfig::lengths` and reach the step through
+  `ChapterPass::length_config`, so `set_config` moves them and still maps
+  nothing and folds nothing;
+- **references ride `SnapshotId`.** Swapping the declared source changes what
+  the publication is OF, not only what it says, so the reference table is
+  hashed beside the target one under its own role byte.
+
+The facts `judge_lengths` returns — target-only and source-only keys, ambiguous
+duplicates, partial overlaps — are dropped here. They are alignment structure,
+never findings (`rules/presence-shear.md`); a host that wants them runs the
+cold `analyze_paired`, which returns them, and `sous-cli` prints them as
+per-book counts.
+
+What it costs is recomputing the whole pairing on every publication, and that
+is measured: a warm 66-book republication goes from 0.77 ms to 4.9 ms and a
+keystroke from 2.6 ms to 6.6 ms with the same corpus declared as its own source
+(evidence.md, 2026-09-07). The lever, unspent: the pairing is a pure function
+of the two books' key sequences, and neither moves on an unrelated edit.
 
 ## Why the buffers are equal
 

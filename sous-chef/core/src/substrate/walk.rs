@@ -9,9 +9,12 @@
 use rustc_hash::FxHashMap;
 
 use super::{
-    Case, ChapterRow, Edge, FollowCounts, OuterClass, PairKey, ScalarKey, is_nonletter, is_run_atom,
+    Case, ChapterRow, Edge, FollowCounts, OuterClass, PairKey, ScalarKey, VerseLength,
+    is_nonletter, is_run_atom,
 };
+use crate::Verse;
 use crate::hygiene::{NBSP, SUSPECT, ScalarSites};
+use crate::unicode::atoms::count_atoms;
 use crate::unicode::{
     Class,
     lookup::{ascii_class, trie_at},
@@ -105,7 +108,7 @@ struct Counters {
     sites: ScalarSites,
 }
 
-pub(crate) fn walk(text: &str) -> ChapterRow {
+pub(crate) fn walk(text: &str, verses: &[Verse]) -> ChapterRow {
     let bytes = text.as_bytes();
     let mut counters = Counters::new(bytes.len());
     let mut hot = Hot::new();
@@ -139,7 +142,7 @@ pub(crate) fn walk(text: &str) -> ChapterRow {
         }
         at += width;
     }
-    counters.finish(hot, text)
+    counters.finish(hot, text, verses)
 }
 
 /// The code point at `bytes[0]`, whose UTF-8 width `trie_at` already read.
@@ -354,7 +357,7 @@ impl Counters {
         id
     }
 
-    fn finish(mut self, mut hot: Hot, text: &str) -> ChapterRow {
+    fn finish(mut self, mut hot: Hot, text: &str, verses: &[Verse]) -> ChapterRow {
         if hot.pending != NO_ID {
             let slot = &mut self.slots[hot.pending as usize];
             slot.pairs[pair_index(hot.pending_prev, OuterClass::Edge)] += 1;
@@ -450,6 +453,20 @@ impl Counters {
             runs.push((at, len, 1));
         }
 
+        // The one second read of this chapter's text, over the verse spans
+        // alone: the walk counts scalars and the ratio rule needs graphemes.
+        let verses: Box<[VerseLength]> = verses
+            .iter()
+            .map(|verse| {
+                let span = verse.text();
+                VerseLength::new(
+                    verse.key(),
+                    count_atoms(&text[span.from() as usize..span.to() as usize]),
+                    span,
+                )
+            })
+            .collect();
+
         ChapterRow {
             scalars: scalars.into_boxed_slice(),
             pairs: pairs.into_boxed_slice(),
@@ -457,6 +474,7 @@ impl Counters {
             run_atoms: run_atoms.into_boxed_slice(),
             follows: follows.into_boxed_slice(),
             hygiene,
+            verses,
             lead: self.lead,
             trail,
             scalar_count: hot.scalar_count,

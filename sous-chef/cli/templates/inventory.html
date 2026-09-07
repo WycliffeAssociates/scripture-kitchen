@@ -163,6 +163,12 @@ mark{background:transparent;color:var(--amber);font-weight:700}
   text-transform:uppercase;letter-spacing:.04em;flex:none}
 .cellcard.ehot{border-color:var(--amber);box-shadow:0 0 0 1px var(--amber)}
 .runbtn.fired{border-color:var(--amber);color:var(--amber)}
+/* verse-length tab */
+.lenpair{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:10px}
+.lenpair .specimen{font-size:15px;line-height:1.55}
+.lenlabel{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.06em;
+  margin-bottom:3px}
+@media (max-width:720px){.lenpair{grid-template-columns:1fr}}
 /* the-idea tab */
 .philo{max-width:74ch;font-size:15.5px}
 .philo h3{font-size:17px;margin:30px 0 8px}
@@ -193,6 +199,7 @@ figure.venn figcaption{font-size:12.5px;color:var(--muted);max-width:60ch;margin
     <button id="tabPhilo">The idea</button>
     <button id="tabBrowse">Character by character</button>
     <button id="tabCap">Capitalization</button>
+    <button id="tabLen">Verse length</button>
   </div>
 </header>
 <div class="app" id="app"></div>
@@ -525,6 +532,42 @@ function drawCap(){
 }
 function judging(){return esc(corpus().judging||"")}
 
+/* ---------- verse length against the source ---------- */
+function lenRows(){return corpus().len||[]}
+function scope(z){return z===null||z===undefined?"\u2014":(z>0?"+":"")+z.toFixed(2)}
+function lenRowHTML(r){
+  return `<div class="arow">
+    <div class="top"><span class="grainchip">${esc(r.ref)}</span>
+      <div class="claim">ratio ${r.ratio.toFixed(2)}</div>
+      <div class="stats mono">book ${scope(r.zb)} \u00b7 project ${scope(r.zp)}</div></div>
+    <div class="lenpair">
+      <div><div class="lenlabel">target</div><div class="specimen">${esc(r.t)}</div></div>
+      <div><div class="lenlabel">source</div><div class="specimen">${esc(r.s)}</div></div>
+    </div></div>`;
+}
+function drawLen(){
+  const rows=lenRows();
+  $("#app").innerHTML=`<main>
+    <div class="cfg">
+      <h3>Only one claim</h3>
+      <p class="cnote">Every verse below was paired with the declared source by its own
+      scripture key \u2014 never by position \u2014 and its length compared, in rendered
+      characters, with the source verse it paired with. The claim is only that this verse
+      is an unusual length <em>relative to this source and the verses around it</em>. It is
+      not an omission, not a mistranslation, and not a wrong language: a different source
+      legitimately gives a different list. Two distributions judge each verse, its own book
+      and the whole paired project; a book with too few paired verses is judged by the
+      project alone and shows a dash for its book column.</p>
+      <div class="counts">${judging()}</div>
+    </div>
+    <div class="qgroup"><h3>Verse length against the source <span class="cnt">${rows.length}</span></h3>
+      <p class="note">Both texts are shown so the number never stands alone. A verse with
+      no counterpart, an empty verse, and an ambiguous key pair produce no ratio at all and
+      are not here.</p>
+      ${rows.map(lenRowHTML).join("")||"<p class='empty'>No source was declared, or nothing was flagged against it.</p>"}</div>
+  </main>`;
+}
+
 /* ---------- shell ---------- */
 function drawSwitch(){
   const el=$("#corpusSwitch");el.innerHTML="";
@@ -539,12 +582,14 @@ function drawTabs(){
   $("#tabPhilo").className=S.view==="philo"?"on":"";
   $("#tabBrowse").className=S.view==="browse"?"on":"";
   $("#tabCap").className=S.view==="cap"?"on":"";
+  $("#tabLen").className=S.view==="len"?"on":"";
 }
 function draw(){drawSwitch();drawTabs();
-  S.view==="philo"?drawPhilo():S.view==="cap"?drawCap():drawBrowse()}
+  S.view==="philo"?drawPhilo():S.view==="cap"?drawCap():S.view==="len"?drawLen():drawBrowse()}
 $("#tabPhilo").onclick=()=>{S.view="philo";draw()};
 $("#tabBrowse").onclick=()=>{S.view="browse";draw()};
 $("#tabCap").onclick=()=>{S.view="cap";S.open=null;draw()};
+$("#tabLen").onclick=()=>{S.view="len";S.open=null;draw()};
 S.g=CORPORA[0].glyphs[0].g;
 draw();
 </script>

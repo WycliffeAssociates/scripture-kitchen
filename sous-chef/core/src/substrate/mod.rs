@@ -26,9 +26,10 @@
 use crate::hygiene::HygieneFinding;
 use crate::judge::{JudgingConfig, PatternIndex};
 use crate::pass::{ChapterInput, ChapterObs, ChapterPass, Findings, SchemaStamp};
+use crate::proportionality::LengthConfig;
 use crate::sites;
 use crate::unicode::Class;
-use crate::{BookIndex, ConventionDigest, FindingKind};
+use crate::{BookIndex, ConventionDigest, FindingKind, TextRange, VerseKey};
 
 pub(crate) mod fold;
 #[cfg(test)]
@@ -239,6 +240,51 @@ impl FollowCounts {
     }
 }
 
+/// One verse's projected grapheme length beside the span it was counted over.
+///
+/// The target half of the source comparison in [`crate::proportionality`]:
+/// the walk already has the chapter's text, so the count is taken there and
+/// the pairing pass never reads text again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VerseLength {
+    key: VerseKey,
+    graphemes: u32,
+    text: TextRange,
+}
+
+impl VerseLength {
+    pub const fn new(key: VerseKey, graphemes: u32, text: TextRange) -> Self {
+        Self {
+            key,
+            graphemes,
+            text,
+        }
+    }
+
+    pub const fn key(self) -> VerseKey {
+        self.key
+    }
+
+    /// Extended grapheme clusters over the projected verse text.
+    pub const fn graphemes(self) -> u32 {
+        self.graphemes
+    }
+
+    /// The projected span a finding over this verse names.
+    pub const fn text(self) -> TextRange {
+        self.text
+    }
+
+    /// The same row rebased into book coordinates by its chapter's start.
+    fn rebased(self, start: u32) -> Self {
+        Self {
+            text: TextRange::new(self.text.from() + start, self.text.to() + start)
+                .expect("a rebased range keeps its order"),
+            ..self
+        }
+    }
+}
+
 /// Continuation-length buckets for one glyph: 1, 2, 3, 4, 5, and 6-or-more.
 pub const RUN_BUCKETS: usize = 6;
 
@@ -302,6 +348,8 @@ pub struct ChapterRow {
     run_atoms: Box<[ScalarKey]>,
     follows: Box<[(ScalarKey, FollowCounts)]>,
     hygiene: Box<[HygieneFinding]>,
+    /// One row per verse the chapter declared, in producer order.
+    verses: Box<[VerseLength]>,
     lead: Edge,
     trail: Edge,
     scalar_count: u32,
@@ -350,6 +398,12 @@ impl ChapterRow {
         &self.hygiene
     }
 
+    /// Per-verse projected grapheme lengths, chapter-relative and in producer
+    /// order.
+    pub fn verses(&self) -> &[VerseLength] {
+        &self.verses
+    }
+
     pub const fn lead(&self) -> Edge {
         self.lead
     }
@@ -375,6 +429,7 @@ impl ChapterRow {
             + size_of_val(&*self.run_atoms)
             + size_of_val(&*self.follows)
             + size_of_val(&*self.hygiene)
+            + size_of_val(&*self.verses)
     }
 }
 
@@ -410,10 +465,10 @@ impl ChapterPass for Substrate {
     type Observation = ChapterRow;
     type Aggregate = BookAggregate;
     type Config = JudgingConfig;
-    const SCHEMA: SchemaStamp = SchemaStamp::new(2);
+    const SCHEMA: SchemaStamp = SchemaStamp::new(3);
 
     fn map(&self, chapter: ChapterInput<'_>) -> ChapterRow {
-        walk::walk(chapter.text)
+        walk::walk(chapter.text, chapter.verses)
     }
 
     fn fold(&self, book: &[ChapterObs<&ChapterRow>]) -> BookAggregate {
@@ -448,6 +503,16 @@ impl ChapterPass for Substrate {
 
     fn observation_bytes(&self, observation: &ChapterRow) -> usize {
         observation.resident_bytes()
+    }
+
+    /// The verse lane this walk fills; the corpus-level source comparison
+    /// reads it and never touches text again.
+    fn verse_lengths<'a>(&self, aggregate: &'a BookAggregate) -> &'a [VerseLength] {
+        &aggregate.verses
+    }
+
+    fn length_config(&self, config: &JudgingConfig) -> Option<LengthConfig> {
+        Some(config.lengths)
     }
 
     /// Rescans this book's text for every pattern its own counts hold, and
@@ -511,6 +576,8 @@ pub struct BookAggregate {
     runs: Vec<(Box<[ScalarKey]>, u32)>,
     follows: Vec<(ScalarKey, FollowCounts)>,
     hygiene: Vec<HygieneFinding>,
+    /// Every chapter's verse rows in order, rebased into book coordinates.
+    verses: Vec<VerseLength>,
     scalar_count: u64,
     word_count: u64,
     chapters: u32,
@@ -548,6 +615,12 @@ impl BookAggregate {
         &self.hygiene
     }
 
+    /// Every verse's projected grapheme length, in book coordinates and in
+    /// producer order.
+    pub fn verses(&self) -> &[VerseLength] {
+        &self.verses
+    }
+
     pub const fn scalar_count(&self) -> u64 {
         self.scalar_count
     }
@@ -574,5 +647,6 @@ impl BookAggregate {
                 .sum::<usize>()
             + size_of_val(&*self.follows)
             + size_of_val(&*self.hygiene)
+            + size_of_val(&*self.verses)
     }
 }

@@ -167,11 +167,12 @@ impl<'n> Find<'n> {
 
     /// Every hit in one registered book's verse-text projection.
     ///
-    /// A book that retains no text has nothing to search and yields nothing.
+    /// A book that retains no text — or no projection, which is a reference —
+    /// has nothing to search and yields nothing.
     pub fn in_book<'a>(&'a self, book: &'a Entry<'_>) -> Hits<'a> {
-        match book.text() {
-            Ok(text) => self.in_projection(book.mask(), text.as_bytes()),
-            Err(_) => self.in_projection(&EMPTY_MASK, b""),
+        match (book.text(), book.mask()) {
+            (Ok(text), Ok(mask)) => self.in_projection(mask, text.as_bytes()),
+            _ => self.in_projection(&EMPTY_MASK, b""),
         }
     }
 

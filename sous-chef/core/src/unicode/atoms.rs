@@ -6,18 +6,21 @@
 //! widen_to_atoms("a\r\nb", 2..3)                     → 1..3   // CRLF stays whole
 //! widen_to_atoms("\u{915}\u{94D}\u{937}", 6..9)      → 0..9   // the conjunct stays whole
 //! widen_to_atoms("ab\0\0cd", 2..4)                   → 2..4   // controls are their own atoms
+//! count_atoms("qx\u{0301}\r\n")                      → 3      // q, x́, CRLF
 //! ```
 //!
 //! An *atom* is a base scalar plus everything that cannot stand without it.
-//! [`is_atom_boundary`] is the whole rule. Complex runs widen as one atom;
-//! over-wide is allowed, split is not.
+//! [`breaks`] is the whole rule; [`is_atom_boundary`] asks it about one
+//! position and [`count_atoms`] asks it about every position in one forward
+//! pass. Complex runs widen as one atom; over-wide is allowed, split is not.
 //!
 //! The claim, the conformance argument, and why the runtime carries no
 //! segmenter: README.md.
 
 use crate::TextRange;
 
-use super::class_of;
+use super::lookup::trie_at;
+use super::{Class, class_of};
 
 /// Snaps a projected UTF-8 range outward to atom boundaries.
 ///
@@ -57,11 +60,38 @@ pub fn is_atom_boundary(text: &str, at: usize) -> bool {
     let Some(next) = text[at..].chars().next() else {
         return true;
     };
+    // GB9c needs the whole glue run behind `at`; a forward walk carries the
+    // same answer in a flag ([`count_atoms`]).
+    let linked = text[..at]
+        .chars()
+        .rev()
+        .map(class_of)
+        .take_while(|class: &Class| class.is_glue())
+        .any(|class| class.is_linker());
+    breaks(
+        class_of(prev),
+        prev == '\r',
+        class_of(next),
+        next == '\n',
+        linked,
+    )
+}
+
+/// The rule itself: whether an atom edge falls between two adjacent scalars.
+///
+/// `linker_run` is GB9c's only state — whether the maximal run of glue
+/// scalars ending at `before` holds a linker.
+pub fn breaks(
+    before: Class,
+    before_is_cr: bool,
+    after: Class,
+    after_is_lf: bool,
+    linker_run: bool,
+) -> bool {
     // GB3: CRLF is one atom.
-    if prev == '\r' && next == '\n' {
+    if before_is_cr && after_is_lf {
         return false;
     }
-    let (before, after) = (class_of(prev), class_of(next));
     // GB4/GB5: Control, CR, and LF break on both sides, ahead of everything
     // below. This keeps a hygiene run next to a newline exactly as wide.
     if before.is_gcb_control() || after.is_gcb_control() {
@@ -72,15 +102,10 @@ pub fn is_atom_boundary(text: &str, at: usize) -> bool {
         return false;
     }
     // GB9c without the InCB lanes: a virama anywhere in the glue run behind
-    // `at` joins what follows. Wider than the conjunct rule, never narrower.
-    for c in text[..at].chars().rev() {
-        let class = class_of(c);
-        if !class.is_glue() {
-            break;
-        }
-        if class.is_linker() {
-            return false;
-        }
+    // the edge joins what follows. Wider than the conjunct rule, never
+    // narrower.
+    if linker_run {
+        return false;
     }
     // GB9b: a Prepend owns what follows it.
     if before.is_prepend() {
@@ -88,6 +113,39 @@ pub fn is_atom_boundary(text: &str, at: usize) -> bool {
     }
     // GB6-GB8, GB11, GB12/GB13: one rule for every scalar joining forward.
     !((before.is_complex() || before.is_glue()) && after.is_complex())
+}
+
+/// Extended grapheme clusters in `text`, by the rule [`breaks`] seals.
+///
+/// One forward pass, one classification per scalar: the GB9c look-behind is a
+/// flag rather than a rescan, so this is linear where calling
+/// [`is_atom_boundary`] at every position is not.
+pub fn count_atoms(text: &str) -> u32 {
+    let bytes = text.as_bytes();
+    let mut atoms = 0u32;
+    let mut at = 0usize;
+    let mut before: Option<Class> = None;
+    let mut before_is_cr = false;
+    let mut linker_run = false;
+    while at < bytes.len() {
+        let (class, width) = trie_at(&bytes[at..]);
+        let ascii = width == 1;
+        atoms += u32::from(match before {
+            None => true,
+            Some(before) => breaks(
+                before,
+                before_is_cr,
+                class,
+                ascii && bytes[at] == b'\n',
+                linker_run,
+            ),
+        });
+        linker_run = class.is_glue() && (linker_run || class.is_linker());
+        before_is_cr = ascii && bytes[at] == b'\r';
+        before = Some(class);
+        at += width;
+    }
+    atoms
 }
 
 #[cfg(test)]
@@ -99,12 +157,59 @@ mod tests {
         (out.from(), out.to())
     }
 
+    /// Every string the two counting paths are compared over: ASCII, marks,
+    /// conjuncts, CRLF, prepends, emoji, flags, and the empty case.
+    const SAMPLES: &[&str] = &[
+        "",
+        "a",
+        "abc",
+        "qx\u{301}",
+        "a\r\nb",
+        "a\r\rb",
+        "\u{915}\u{94d}\u{937}",
+        "\u{915}\u{94d}\u{937}\u{940} \u{905}",
+        "ab\0\0cd",
+        "\u{600}7",
+        "\u{1f6d1}\u{200d}\u{1f6d1}",
+        "\u{1f1fa}\u{1f1f8}\u{1f1fa}\u{1f1f8}",
+        "e\u{301}\u{302}\u{303}",
+        "\u{a0}\u{a0}mot",
+        "\u{5d0}\u{5b8}\u{5d1} \u{5d2}",
+        "\u{1200}\u{1361}\u{1362}",
+        "one\ntwo\r\nthree\r",
+    ];
+
+    /// The forward pass counts exactly the boundaries the position rule seals.
+    fn boundaries(text: &str) -> u32 {
+        (0..text.len())
+            .filter(|at| text.is_char_boundary(*at) && is_atom_boundary(text, *at))
+            .count() as u32
+    }
+
     #[test]
     fn module_doc_examples_are_exact() {
         assert_eq!(widen("qx\u{301}", 2, 4), (1, 4));
         assert_eq!(widen("a\r\nb", 2, 3), (1, 3));
         assert_eq!(widen("\u{915}\u{94d}\u{937}", 6, 9), (0, 9));
         assert_eq!(widen("ab\0\0cd", 2, 4), (2, 4));
+        assert_eq!(count_atoms("qx\u{301}\r\n"), 3);
+    }
+
+    #[test]
+    fn counting_forward_equals_asking_every_position() {
+        for text in SAMPLES {
+            assert_eq!(count_atoms(text), boundaries(text), "{text:?}");
+        }
+    }
+
+    #[test]
+    fn an_empty_string_holds_no_atoms_and_a_scalar_holds_one() {
+        assert_eq!(count_atoms(""), 0);
+        assert_eq!(count_atoms("a"), 1);
+        assert_eq!(count_atoms("\u{1f6d1}"), 1);
+        // A decomposed cluster is one atom however many scalars it spends.
+        assert_eq!(count_atoms("e\u{301}\u{302}"), 1);
+        assert_eq!(count_atoms("\u{915}\u{94d}\u{937}"), 1);
     }
 
     #[test]

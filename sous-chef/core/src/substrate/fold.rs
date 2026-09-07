@@ -30,6 +30,8 @@ pub fn fold_book(book: &[ChapterObs<&ChapterRow>], carry: &mut Edge) -> BookAggr
         merge_follows(&mut out.follows, &row.follows, &mut follow_scratch);
         out.hygiene
             .extend(row.hygiene.iter().map(|site| site.rebased(chapter.start)));
+        out.verses
+            .extend(row.verses.iter().map(|verse| verse.rebased(chapter.start)));
         out.scalar_count += u64::from(row.scalar_count);
         out.word_count += u64::from(row.word_count);
 

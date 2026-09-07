@@ -120,6 +120,97 @@ fn sites_print_under_their_pattern() {
     assert_eq!(site, "  site MRK 25..26");
 }
 
+/// Sixty verses of one chapter, verse `i` as long as `length(i)` says: a
+/// sample big enough for a median and a MAD to mean anything.
+fn sized(code: &str, count: usize, length: impl Fn(usize) -> usize) -> String {
+    let mut text = format!("\\id {code}\n\\c 1\n\\p\n");
+    for verse in 0..count {
+        text.push_str(&format!(
+            "\\v {} {}\n",
+            verse + 1,
+            "a".repeat(length(verse))
+        ));
+    }
+    text
+}
+
+/// A declared source is read as USFM or as a vref stream, and either way one
+/// verse the source disagrees with gets a `length` row, both scopes printed,
+/// with the alignment facts beside it as counts and never as rows.
+#[test]
+fn a_declared_source_prints_length_rows_and_unpaired_counts() {
+    let temp = TempDir::new();
+    let target = temp.0.join("MRK.usfm");
+    fs::write(
+        &target,
+        sized(
+            "MRK",
+            60,
+            |verse| if verse == 59 { 20 } else { 40 + verse % 7 },
+        ),
+    )
+    .unwrap();
+
+    // The same keys at a constant length, once as USFM and once as vref, with
+    // one verse the target does not have so an unpaired key is reported.
+    let usfm_source = temp.0.join("source.usfm");
+    fs::write(&usfm_source, sized("MRK", 61, |_| 40)).unwrap();
+    let vref_source = temp.0.join("source.txt");
+    let mut rows = String::new();
+    for verse in 1..=61 {
+        rows.push_str(&format!("MRK 1:{verse}\t{}\n", "a".repeat(40)));
+    }
+    fs::write(&vref_source, &rows).unwrap();
+
+    for source in [&usfm_source, &vref_source] {
+        let output = Command::new(env!("CARGO_BIN_EXE_sous"))
+            .arg("--stats-only")
+            .arg("--findings")
+            .arg("--source")
+            .arg(source)
+            .arg(&target)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{}", source.display());
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        let lengths: Vec<&str> = stdout
+            .lines()
+            .filter(|line| line.starts_with("length "))
+            .collect();
+        assert_eq!(lengths.len(), 1, "{}: {stdout}", source.display());
+        assert!(
+            lengths[0].starts_with("length target[0] MRK 1:60 ratio 0.5"),
+            "{}",
+            lengths[0]
+        );
+        assert!(lengths[0].contains("z_book -"), "{}", lengths[0]);
+        assert!(
+            stdout
+                .contains("unpaired MRK target-only 0 source-only 1 ambiguous 0 partial-overlap 0"),
+            "the facts are counts, not rows: {stdout}"
+        );
+    }
+}
+
+/// A target with no source declared says nothing about length at all.
+#[test]
+fn no_source_means_no_length_rows() {
+    let temp = TempDir::new();
+    let target = temp.0.join("MRK.usfm");
+    fs::write(&target, sized("MRK", 60, |verse| 40 + verse % 7)).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_sous"))
+        .arg("--stats-only")
+        .arg("--findings")
+        .arg(&target)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(!stdout.contains("length target["));
+    assert!(!stdout.contains("unpaired "));
+}
+
 /// `--report` writes the v1 inventory page as one self-contained file, its
 /// `const CORPORA` literal a valid, balanced JSON array.
 #[test]
@@ -154,6 +245,10 @@ fn report_writes_a_self_contained_inventory_page() {
     assert!(
         rendered.contains("Capitalization") && rendered.contains(r#""cap":["#),
         "the word tab and its data are present"
+    );
+    assert!(
+        rendered.contains("Verse length") && rendered.contains(r#""len":[]"#),
+        "the source tab is present and empty with no source declared"
     );
     assert!(rendered.contains("MRK.usfm"), "the corpus name appears");
     assert!(rendered.contains("U+002C"), "the comma's code appears");

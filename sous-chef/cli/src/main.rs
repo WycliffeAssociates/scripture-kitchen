@@ -1,9 +1,11 @@
 //! The first walking consumer for Sous Chef.
 //!
 //! ```text
-//! sous --findings --publish out.sous --report sites.html book.usfm
+//! sous --findings --source source.usfm --publish out.sous --report sites.html book.usfm
 //!   finding target[0] MRK 1:1-1:1 C0Control 11..14 run 3 raw [46..49]
 //!   finding target[0] MRK 1:1-1:1 StrandedBackslash 17..19 run 2 raw [52..54]
+//!   length target[0] MRK 1:9 ratio 0.14 z_book -8.72 z_project -6.05
+//!   unpaired MRK target-only 2 source-only 0 ambiguous 0 partial-overlap 1
 //!   pattern[0] U+002C ',' placement next=Digit 12/9812 0.12% band 4 · 3/66 books 11 sites
 //!     site MRK 118..119
 //!   published 2 findings for 1 books (SOUS v1, UTF-16) to out.sous
@@ -29,11 +31,15 @@ use std::{
 };
 
 mod report;
+mod source;
 
 use rayon::prelude::*;
+use rustc_hash::FxHashMap;
+use sous_core::unicode::atoms::count_atoms;
 use sous_core::{
-    Alignment, Brigade, Corpus, FindingKind, PackedFinding, Pattern, PatternKey, ProjectedBook,
-    ScalarKey, SnapshotId, align, analyze,
+    AlignedUnit, Alignment, AlignmentFact, Brigade, ChapterPass, Corpus, FindingKind,
+    PackedFinding, Pattern, PatternKey, ProjectedBook, ScalarKey, SnapshotId, SourceLengths,
+    SourceVerse, TextRange, align, analyze_paired, source_lengths,
 };
 use usage::Cli;
 use usfm_galley::sous::{OnionBook, OnionInputBook, publish_onion_findings};
@@ -54,7 +60,8 @@ struct Args {
     #[usage(long)]
     parallel: bool,
 
-    /// Optional source file or directory to align against the target.
+    /// Declared source to compare lengths against: USFM like the target, or an
+    /// addressless `BOOK C:V<TAB>text` vref file.
     #[usage(long)]
     source: Option<PathBuf>,
 
@@ -89,19 +96,22 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     let target = load_input(&args.target, args.parallel)?;
     let target_corpus = Corpus::try_new(&target.books)
         .map_err(|error| format!("invalid target corpus: {error}"))?;
-    let source = args
+    let source_books = args
         .source
         .as_deref()
-        .map(|path| load_input(path, args.parallel))
+        .map(|path| source::load(path, args.parallel))
         .transpose()?;
-    let source_corpus = source
-        .as_ref()
-        .map(|loaded| Corpus::try_new(&loaded.books))
+    let source_corpus = source_books
+        .as_deref()
+        .map(Corpus::try_new)
         .transpose()
         .map_err(|error| format!("invalid source corpus: {error}"))?;
     let alignment = source_corpus
         .as_ref()
         .map(|source| align(&target_corpus, source));
+    let source_bytes = source_books
+        .as_deref()
+        .map(|books| books.iter().map(|book| book.text().len()).sum());
     let stats = (args.stats || args.stats_only).then(|| {
         OperationStats::collect(
             args.parallel,
@@ -109,24 +119,40 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             source_corpus.as_ref(),
             alignment.as_ref(),
             target.source_bytes,
-            source.as_ref().map(|loaded| loaded.source_bytes),
+            source_bytes,
             started,
         )
     });
 
     if !args.stats_only {
         print_books("target", &target.paths, &target_corpus);
-        if let (Some(source), Some(source_corpus)) = (&source, source_corpus.as_ref()) {
-            print_books("source", &source.paths, source_corpus);
+        if let Some(source_corpus) = source_corpus.as_ref() {
+            print_source_books(source_corpus);
         }
         if let Some(alignment) = &alignment {
             print_alignment(alignment);
         }
     }
     if args.findings || args.publish.is_some() || args.report.is_some() {
-        let (findings, patterns) = brigade_findings(&target_corpus);
+        // The declared source enters as lengths alone; the alignment above is
+        // the same pairing over the same keys, kept for the facts and for the
+        // texts the CLI shows beside a fired row.
+        let lengths: Vec<(sous_core::BookKey, Vec<SourceVerse>)> = source_corpus
+            .iter()
+            .flat_map(|corpus| corpus.books())
+            .map(|book| (ProjectedBook::key(book), source_lengths(book)))
+            .collect();
+        let source: Vec<SourceLengths<'_>> = lengths
+            .iter()
+            .map(|(key, verses)| SourceLengths { book: *key, verses })
+            .collect();
+        let (findings, patterns) = brigade_findings(&target_corpus, &source);
         if args.findings {
             print_findings(&target_corpus, &findings);
+            if let (Some(alignment), Some(source_corpus)) = (&alignment, source_corpus.as_ref()) {
+                print_length_findings(&target_corpus, source_corpus, alignment, &findings);
+                print_unpaired(alignment);
+            }
             print_patterns(&target_corpus, &findings, &patterns);
         }
         if let Some(path) = &args.report {
@@ -134,7 +160,14 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                 || args.target.display().to_string(),
                 |name| name.to_string_lossy().into_owned(),
             );
-            let page = report::render(&name, &target_corpus, &patterns, &findings);
+            let paired = alignment
+                .as_ref()
+                .zip(source_corpus.as_ref())
+                .map(|(alignment, source)| report::Paired {
+                    units: paired_rows(&target_corpus, source, alignment, &findings),
+                })
+                .unwrap_or_default();
+            let page = report::render(&name, &target_corpus, &patterns, &findings, &paired);
             fs::write(path, &page)
                 .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
             eprintln!(
@@ -161,10 +194,158 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// The product pass over every target book: rows in projected UTF-8, ordered
-/// by book then offset, and the corpus-level pattern table beside them.
-fn brigade_findings(corpus: &Corpus<'_, OnionBook>) -> (Vec<PackedFinding>, Vec<Pattern>) {
-    analyze(corpus, &Brigade::default()).into_parts()
+/// The product pass over every target book, plus the source comparison: rows
+/// in projected UTF-8, ordered by book then offset, and the corpus-level
+/// pattern table beside them.
+fn brigade_findings(
+    corpus: &Corpus<'_, OnionBook>,
+    source: &[SourceLengths<'_>],
+) -> (Vec<PackedFinding>, Vec<Pattern>) {
+    let config = <Brigade as ChapterPass>::Config::default();
+    analyze_paired(corpus, &Brigade::default(), &config, source)
+        .0
+        .into_parts()
+}
+
+/// One fired length row with everything the wire does not carry: the address,
+/// the ratio, and both sides' text.
+///
+/// The CLI holds both corpora, so it recomputes the ratio from the aligned
+/// unit rather than asking the record for a number the record does not have.
+fn paired_rows(
+    target: &Corpus<'_, OnionBook>,
+    source: &Corpus<'_, source::SourceBook>,
+    alignment: &Alignment,
+    findings: &[PackedFinding],
+) -> Vec<report::PairedUnit> {
+    let mut units: FxHashMap<(u16, u32, u32), &AlignedUnit> = FxHashMap::default();
+    for unit in alignment.units() {
+        let Some(index) = target.index_of(unit.book()) else {
+            continue;
+        };
+        let Some(span) = bounding(unit.target().ranges()) else {
+            continue;
+        };
+        units.insert((index.get(), span.from(), span.to()), unit);
+    }
+
+    let mut out = Vec::new();
+    for finding in findings {
+        let FindingKind::LengthProportionality(digest) = finding.kind() else {
+            continue;
+        };
+        let key = (finding.book_idx().get(), finding.from(), finding.to());
+        let Some(unit) = units.get(&key) else {
+            continue;
+        };
+        let book = target
+            .get(finding.book_idx())
+            .expect("a finding names a corpus book");
+        let source_book = source
+            .index_of(unit.book())
+            .and_then(|index| source.get(index))
+            .expect("the unit paired with a source book");
+        let target_text: String = unit
+            .target()
+            .ranges()
+            .iter()
+            .map(|range| &book.text()[range.from() as usize..range.to() as usize])
+            .collect();
+        let source_text: String = unit
+            .source()
+            .ranges()
+            .iter()
+            .map(|range| source_book.slice(*range))
+            .collect();
+        let long = count_atoms(&target_text);
+        let short = count_atoms(&source_text);
+        out.push(report::PairedUnit {
+            address: format!("{} {}", unit.book(), address_of(unit.key())),
+            ratio: if short == 0 {
+                0.0
+            } else {
+                f64::from(long) / f64::from(short)
+            },
+            book_z: digest
+                .book_scope()
+                .map(sous_core::QuantizedDeviation::as_f64),
+            project_z: digest
+                .project_scope()
+                .map(sous_core::QuantizedDeviation::as_f64),
+            target: target_text,
+            source: source_text,
+        });
+    }
+    out
+}
+
+/// `1:9`, or `1:9-11` for a bridge.
+fn address_of(key: sous_core::VerseKey) -> String {
+    if key.first() == key.last() {
+        format!("{}:{}", key.chapter(), key.first())
+    } else {
+        format!("{}:{}-{}", key.chapter(), key.first(), key.last())
+    }
+}
+
+/// The bounding range of a unit's side — first byte through last, which is
+/// the span a row over a bridge names.
+fn bounding(ranges: &[TextRange]) -> Option<TextRange> {
+    let from = ranges.iter().map(|range| range.from()).min()?;
+    let to = ranges.iter().map(|range| range.to()).max()?;
+    TextRange::new(from, to).ok()
+}
+
+/// One line per fired length row: the verse, its ratio, and both scopes.
+fn print_length_findings(
+    target: &Corpus<'_, OnionBook>,
+    source: &Corpus<'_, source::SourceBook>,
+    alignment: &Alignment,
+    findings: &[PackedFinding],
+) {
+    let rows = paired_rows(target, source, alignment, findings);
+    let scope = |value: Option<f64>| match value {
+        Some(value) => format!("{value:+.2}"),
+        None => "-".to_string(),
+    };
+    for (index, finding) in findings
+        .iter()
+        .filter(|row| matches!(row.kind(), FindingKind::LengthProportionality(_)))
+        .enumerate()
+    {
+        let Some(row) = rows.get(index) else { continue };
+        println!(
+            "length target[{}] {} ratio {:.2} z_book {} z_project {}",
+            finding.book_idx().get(),
+            row.address,
+            row.ratio,
+            scope(row.book_z),
+            scope(row.project_z),
+        );
+    }
+}
+
+/// Alignment facts as counts per book. Presence and versification shear are
+/// parked rules: an unpaired key is structure, and never a finding.
+fn print_unpaired(alignment: &Alignment) {
+    let mut counts: FxHashMap<sous_core::BookKey, [u32; 4]> = FxHashMap::default();
+    for fact in alignment.facts() {
+        let (book, lane) = match *fact {
+            AlignmentFact::TargetOnly { book, .. } => (book, 0),
+            AlignmentFact::SourceOnly { book, .. } => (book, 1),
+            AlignmentFact::AmbiguousDuplicate { book, .. } => (book, 2),
+            AlignmentFact::PartialOverlap { book, .. } => (book, 3),
+        };
+        counts.entry(book).or_default()[lane] += 1;
+    }
+    let mut books: Vec<_> = counts.into_iter().collect();
+    books.sort_by_key(|(book, _)| book.as_bytes());
+    for (book, lanes) in books {
+        println!(
+            "unpaired {book} target-only {} source-only {} ambiguous {} partial-overlap {}",
+            lanes[0], lanes[1], lanes[2], lanes[3]
+        );
+    }
 }
 
 /// One line per firing pattern, in emission order, with its sites under it.
@@ -339,6 +520,22 @@ fn publish(
     )?)
 }
 
+/// The declared source's own rows, which carry no raw-file coordinates: a
+/// vref line locates back to itself and to nothing in USFM.
+fn print_source_books(corpus: &Corpus<'_, source::SourceBook>) {
+    for (index, book) in corpus.iter() {
+        println!(
+            "source book[{}] {} -> {} (projected bytes: {}, chapters: {}, verses: {})",
+            index.get(),
+            ProjectedBook::key(book),
+            book.id(),
+            book.text().len(),
+            book.chapters().count(),
+            book.verses().count(),
+        );
+    }
+}
+
 fn print_books(label: &str, paths: &[PathBuf], corpus: &Corpus<'_, OnionBook>) {
     for (index, book) in corpus.iter() {
         let path = &paths[index.get() as usize];
@@ -492,16 +689,20 @@ struct CorpusStats {
 }
 
 impl CorpusStats {
-    fn collect(corpus: &Corpus<'_, OnionBook>, source_bytes: usize) -> Self {
+    /// `unkeyed_anchors` is Onion's own count of verse anchors with no numeric
+    /// designator; a vref row cannot have one, so a source counts zero.
+    fn collect<B: ProjectedBook>(
+        corpus: &Corpus<'_, B>,
+        source_bytes: usize,
+        unkeyed_anchors: usize,
+    ) -> Self {
         let mut projected_bytes = 0;
         let mut chapters = 0;
         let mut verses = 0;
-        let mut unkeyed_anchors = 0;
         for (_, book) in corpus.iter() {
             projected_bytes += book.text().len();
             chapters += book.chapters().count();
             verses += book.verses().count();
-            unkeyed_anchors += book.unkeyed_anchor_count();
         }
         Self {
             files: corpus.len(),
@@ -518,17 +719,21 @@ impl OperationStats {
     fn collect(
         parallel: bool,
         target: &Corpus<'_, OnionBook>,
-        source: Option<&Corpus<'_, OnionBook>>,
+        source: Option<&Corpus<'_, source::SourceBook>>,
         alignment: Option<&Alignment>,
         target_source_bytes: usize,
         source_source_bytes: Option<usize>,
         started: Instant,
     ) -> Self {
+        let unkeyed = target
+            .iter()
+            .map(|(_, book)| book.unkeyed_anchor_count())
+            .sum();
         Self {
             parallel,
-            target: CorpusStats::collect(target, target_source_bytes),
+            target: CorpusStats::collect(target, target_source_bytes, unkeyed),
             source: source.map(|corpus| {
-                CorpusStats::collect(corpus, source_source_bytes.unwrap_or_default())
+                CorpusStats::collect(corpus, source_source_bytes.unwrap_or_default(), 0)
             }),
             aligned_units: alignment.map_or(0, |alignment| alignment.units().len()),
             alignment_facts: alignment.map_or(0, |alignment| alignment.facts().len()),
@@ -709,7 +914,7 @@ mod tests {
         fs::write(&path, "\\id MRK\n\\c 1\n\\p\n\\v 1 An 🧅 \\\\ here.\n").unwrap();
         let target = load_input(&path, false).unwrap();
         let corpus = Corpus::try_new(&target.books).unwrap();
-        let (findings, patterns) = brigade_findings(&corpus);
+        let (findings, patterns) = brigade_findings(&corpus, &[]);
         // The one-verse book rosters every glyph it holds, so the pair rides
         // beside a handful of rarity sites.
         let hygiene: Vec<_> = findings

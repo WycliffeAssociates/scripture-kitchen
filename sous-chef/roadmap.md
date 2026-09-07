@@ -551,6 +551,8 @@ Work:
    projection, exposing borrowed `chapters()` and `chapter.verses()` views.
    Keep that work in the Onion workspace. The Sous CLI adapter composes
    target/source Onion views without making `sous-core` depend on Onion.
+   Landed: `galley::sous::OnionBook` is the `ProjectedBook` over Onion's mask
+   and TOC, and sous reads `chapters()`/`verses()` off it.
 2. Accept the complete optional source corpus on each applicable Galley
    invocation. Retain only checksum-keyed derived source observations and
    coordinate indexes between calls; map target and source per-unit grapheme
@@ -563,14 +565,25 @@ Work:
    The same loader may produce an addressable target projection for vref fleet
    work: projected offsets locate back to the original vref line and typed
    designator rather than pretending to be raw-USFM offsets.
+   Landed (S1): `Pantry::Role::Reference` retains `Toc` plus one grapheme count
+   per verse — 1.17 MB against a target's 7.29 MB over `en_ulb` — and the
+   target lane rides the substrate's chapter row. `sous-cli`'s `--source` takes
+   either producer; the vref loader fuses `<range>` placeholders into one
+   interval unit and lays its rows out in key order, because a projection has
+   to be monotone and a vref export's line order is not always.
 3. Derive ordered per-book ratio vectors and a project pool. Recompute
    medians/MADs from the small ratio sets; do not build a mutable order-
-   statistic cache.
+   statistic cache. Landed (S1): recomputed per publication, no cache; the
+   cost is a ledger row and the lever behind it is named there.
 4. Port v1's asymmetric one-sided MAD with pooled fallback, preserving its
    accepted semantics and defaults; use the survey to catch port drift.
+   Landed (S1): `sous_core::proportionality`, with v1's `0.6745` scale and its
+   three-deviation per-side floor. The survey caught no drift.
 5. Resolve presence/shear ownership (open gate 1). Retain the current
    proportionality defaults and use the paired survey as their regression
-   gate.
+   gate. **Still open**, and deliberately: presence and shear stay parked. S1
+   reports unpaired keys as per-book counts in the CLI and as
+   `Paired::facts` in the library, and emits no row for either.
 
 Verification gate:
 
@@ -587,6 +600,13 @@ Verification gate:
   small-book behavior, source sensitivity, and shear exclusions;
 - every divergence from v1 receives “fix, accepted model change, or upstream
   ownership” disposition.
+
+**Status after S1:** every gate bullet is met except the shear half of the
+last-but-one, which has no rule to exclude anything from yet. The dispositions
+are in `planning/RESUME-2026-09-04.md` §8 and the survey rows in
+`evidence.md` (2026-09-07). What Stage 5 has NOT built, and did not promise to:
+untranslated-word detection, the vref loader's target-side projection, and any
+resident cache for the pairing.
 
 ## Stage 6 — Behavioral bookend and port closure
 

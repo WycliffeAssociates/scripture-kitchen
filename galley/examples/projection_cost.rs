@@ -83,7 +83,7 @@ fn main() {
 
     for (id, text) in &corpus {
         let entry = pantry.update(id.as_str(), Role::Target, text).unwrap();
-        let mask = entry.mask().clone();
+        let mask = entry.mask().unwrap().clone();
         let toc = entry.toc().clone();
         drop(entry);
 

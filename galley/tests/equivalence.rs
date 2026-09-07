@@ -26,8 +26,9 @@
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use sous_core::{
-    Brigade, Channel, Channels, ChapterPass, Corpus, CorpusSnapshot, JudgingConfig, SnapshotId,
-    analyze_with, for_each_chapter, hygiene::HygieneBytes, substrate::Substrate,
+    Brigade, Channel, Channels, ChapterPass, Corpus, CorpusSnapshot, JudgingConfig, ProjectedBook,
+    SnapshotId, SourceLengths, SourceVerse, analyze_paired, analyze_with, for_each_chapter,
+    hygiene::HygieneBytes, source_lengths, substrate::Substrate,
 };
 use usfm_galley::onion::{Filter, cst, lex, mask};
 use usfm_galley::sous::{Expediter, OnionBook, OnionInputBook, publish_onion_findings};
@@ -38,20 +39,18 @@ type Book = (String, String);
 
 // ---------------------------------------------------------------- the oracle
 
-/// `analyze` over freshly parsed books, published through the string-taking
-/// publisher: the bytes an incremental publication has to equal.
+/// `analyze_paired` over freshly parsed books, published through the
+/// string-taking publisher: the bytes an incremental publication has to equal.
 ///
 /// The snapshot identity is an input, not a result, so both paths publish
 /// under the one the caller names.
-fn cold_publish<P: ChapterPass + Sync>(pass: &P, books: &[Book], snapshot: SnapshotId) -> Vec<u8> {
-    cold_publish_with(pass, &P::Config::default(), books, snapshot)
-}
-
-/// The same oracle under a named config, for the rows a judging knob moves.
+/// The same oracle under a named config and an optional declared source, for
+/// the rows a judging knob or a source replacement moves.
 fn cold_publish_with<P: ChapterPass + Sync>(
     pass: &P,
     config: &P::Config,
     books: &[Book],
+    references: &[Book],
     snapshot: SnapshotId,
 ) -> Vec<u8> {
     let parsed: Vec<OnionBook> = books
@@ -61,7 +60,21 @@ fn cold_publish_with<P: ChapterPass + Sync>(
         })
         .collect();
     let corpus = Corpus::try_new(&parsed).expect("the harness registers distinct book keys");
-    let (findings, patterns) = analyze_with(&corpus, pass, config).into_parts();
+    let sources: Vec<(sous_core::BookKey, Vec<SourceVerse>)> = references
+        .iter()
+        .map(|(id, text)| {
+            let book = OnionBook::parse(text)
+                .unwrap_or_else(|error| panic!("{id} is not analyzable: {error}"));
+            (ProjectedBook::key(&book), source_lengths(&book))
+        })
+        .collect();
+    let source: Vec<SourceLengths<'_>> = sources
+        .iter()
+        .map(|(key, verses)| SourceLengths { book: *key, verses })
+        .collect();
+    let (findings, patterns) = analyze_paired(&corpus, pass, config, &source)
+        .0
+        .into_parts();
     let inputs = books
         .iter()
         .map(|(id, text)| OnionInputBook::new(id.as_str(), text.clone()))
@@ -69,13 +82,16 @@ fn cold_publish_with<P: ChapterPass + Sync>(
     publish_onion_findings(inputs, &findings, &patterns, snapshot).expect("cold publication")
 }
 
-/// The Expediter's own books, in the canonical order it publishes them.
+/// The Expediter's own books of one role, in the canonical order it reads
+/// them: pairing takes the FIRST source of a key, so the order is part of the
+/// oracle and is read off the registry rather than guessed.
 fn ordered<P: ChapterPass + Sync>(
     sous: &Expediter<P>,
+    role: Role,
     texts: &FxHashMap<String, String>,
 ) -> Vec<Book> {
     sous.pantry()
-        .books(Role::Target)
+        .books(role)
         .iter()
         .map(|(id, _)| {
             let id = id.as_str().to_string();
@@ -91,15 +107,35 @@ fn assert_publications_agree<P: ChapterPass + Sync + Copy>(
     books: &[Book],
     context: &str,
 ) -> u64 {
-    let texts: FxHashMap<String, String> = books.iter().cloned().collect();
+    assert_paired_publications_agree(sous, books, &[], context).0
+}
+
+/// The same, with a declared source registered beside the targets: the cold
+/// oracle runs `analyze_paired` over exactly the reference texts the registry
+/// holds, in the order it holds them. Returns the chapters mapped and the
+/// length rows published, so a paired run can prove it was not vacuous.
+fn assert_paired_publications_agree<P: ChapterPass + Sync + Copy>(
+    sous: &mut Expediter<P>,
+    books: &[Book],
+    references: &[Book],
+    context: &str,
+) -> (u64, usize) {
+    let mut texts: FxHashMap<String, String> = books.iter().cloned().collect();
+    texts.extend(references.iter().cloned());
     let buffer = sous
         .publish()
         .unwrap_or_else(|error| panic!("{context}: {error}"));
     let snapshot = CorpusSnapshot::open(&buffer).unwrap().snapshot_id();
     let pass = *sous.pass();
-    let cold = cold_publish(&pass, &ordered(sous, &texts), snapshot);
+    let cold = cold_publish_with(
+        &pass,
+        &P::Config::default(),
+        &ordered(sous, Role::Target, &texts),
+        &ordered(sous, Role::Reference, &texts),
+        snapshot,
+    );
     assert_eq!(buffer, cold, "published bytes differ from cold: {context}");
-    sous.last_mapped()
+    (sous.last_mapped(), lengths_of(&buffer).len())
 }
 
 // ------------------------------------------------------------- the work bound
@@ -495,6 +531,20 @@ fn churn<P: ChapterPass + Sync + Copy>(
     steps: usize,
     books: Vec<Book>,
 ) {
+    churn_paired(pass, name, seed, steps, books, Vec::new());
+}
+
+/// The same run with a fixed declared source registered beside the targets:
+/// every target edit is judged against it, and the resident publication still
+/// has to equal a cold one that pairs the same way.
+fn churn_paired<P: ChapterPass + Sync + Copy>(
+    pass: P,
+    name: &str,
+    seed: u64,
+    steps: usize,
+    books: Vec<Book>,
+    references: Vec<Book>,
+) {
     let mut rng = Rng(seed);
     let mut spares: Vec<&'static str> = SPARE_CODES.to_vec();
     let mut books = books;
@@ -502,15 +552,20 @@ fn churn<P: ChapterPass + Sync + Copy>(
     for (id, text) in &books {
         sous.update(id.as_str(), Role::Target, text).unwrap();
     }
+    for (id, text) in &references {
+        sous.update(id.as_str(), Role::Reference, text).unwrap();
+    }
     let mut digests: FxHashMap<String, Vec<String>> = books
         .iter()
         .map(|(id, text)| (id.clone(), chapter_digests(text)))
         .collect();
-    assert_publications_agree(
+    let mut length_rows = assert_paired_publications_agree(
         &mut sous,
         &books,
+        &references,
         &format!("{name}: seed={seed:#x} step=cold"),
-    );
+    )
+    .1;
 
     let mut skipped = 0;
     for step in 0..steps {
@@ -560,7 +615,9 @@ fn churn<P: ChapterPass + Sync + Copy>(
             book_grain_bound(&after, &changed)
         };
 
-        let mapped = assert_publications_agree(&mut sous, &next, &context);
+        let (mapped, rows) =
+            assert_paired_publications_agree(&mut sous, &next, &references, &context);
+        length_rows += rows;
         assert!(
             mapped <= bound,
             "{context}: mapped {mapped} chapters for a bound of {bound}"
@@ -588,6 +645,11 @@ fn churn<P: ChapterPass + Sync + Copy>(
         skipped * 4 < steps,
         "{name}: {skipped} of {steps} draws found nothing to edit"
     );
+    // A paired run that never fired a ratio would be comparing two silences.
+    assert!(
+        references.is_empty() || length_rows > 0,
+        "{name}: a declared source published no length row in {steps} steps"
+    );
 
     // Residency is bounded by what the corpus IS, not by how many edits it
     // took: the ring keeps `kept + 1` tables per book and the observations
@@ -595,6 +657,9 @@ fn churn<P: ChapterPass + Sync + Copy>(
     let mut fresh = Expediter::new(pass, BUDGET);
     for (id, text) in &books {
         fresh.update(id.as_str(), Role::Target, text).unwrap();
+    }
+    for (id, text) in &references {
+        fresh.update(id.as_str(), Role::Reference, text).unwrap();
     }
     fresh.publish().unwrap();
     assert!(
@@ -687,6 +752,142 @@ fn churn_over_a_synthetic_corpus_with_brigade() {
 #[test]
 fn churn_over_a_synthetic_corpus_with_substrate() {
     churn(Substrate, "substrate", 0x5EED_0003, 200, synthetic());
+}
+
+/// The same churn with a declared source registered: every target edit moves
+/// the ratios it is judged by, and the resident publication still equals a
+/// cold one that pairs the same way.
+///
+/// The corpus is the paired fixture rather than `synthetic()`: 48-byte verses
+/// edited by ±32 bytes scatter the ratios so widely that the MAD swallows
+/// every one of them, and a run that fires nothing compares two silences. The
+/// end-of-run assertion in `churn_paired` is what caught that.
+#[test]
+fn churn_over_a_synthetic_corpus_against_a_reference() {
+    let books = paired_targets();
+    churn_paired(
+        Brigade::default(),
+        "paired",
+        0x5EED_0005,
+        200,
+        books,
+        flat_sources(),
+    );
+}
+
+/// The gate the charter names: a source choice legitimately changes the
+/// results without invalidating the target-only observations.
+#[test]
+fn replacing_the_reference_changes_rows_without_touching_a_target_only_row() {
+    let books = paired_targets();
+    // A source identical to the target verse for verse, then one of even
+    // lengths: the same targets, judged against two declared sources.
+    let references: Vec<Book> = books
+        .iter()
+        .map(|(id, text)| (id.replace("target/", "source/"), text.clone()))
+        .collect();
+    let mut sous = Expediter::new(Brigade::default(), BUDGET);
+    for (id, text) in &books {
+        sous.update(id.as_str(), Role::Target, text).unwrap();
+    }
+    for (id, text) in &references {
+        sous.update(id.as_str(), Role::Reference, text).unwrap();
+    }
+    // Against itself every ratio is one, so nothing is an outlier of anything.
+    assert_paired_publications_agree(&mut sous, &books, &references, "paired: identical source");
+    let matched = sous.publish().unwrap();
+    assert!(lengths_of(&matched).is_empty());
+
+    let replaced = flat_sources();
+    for (id, text) in &replaced {
+        sous.update(id.as_str(), Role::Reference, text).unwrap();
+    }
+    assert_paired_publications_agree(&mut sous, &books, &replaced, "paired: source replaced");
+    assert_eq!(sous.last_mapped(), 0, "no target chapter was re-mapped");
+    assert_eq!(sous.last_folded(), 0, "no target book was re-folded");
+    assert_eq!(sous.last_located(), 0, "no target text was read again");
+
+    let against_even = sous.publish().unwrap();
+    assert!(
+        !lengths_of(&against_even).is_empty(),
+        "the replacement is what the ratios are measured against"
+    );
+    assert_eq!(
+        others_of(&against_even),
+        others_of(&matched),
+        "every row that is not about the source stands"
+    );
+}
+
+/// Chapters and verses per paired-fixture book: 80 paired units over the two,
+/// which clears `min_verses` for the project scope and not for either book —
+/// so the fixture exercises the small-book fallback as well as the pairing.
+const PAIRED_CHAPTERS: usize = 4;
+const PAIRED_VERSES: usize = 10;
+
+/// Two books whose verse lengths cycle 40..=46, so the pooled ratios have a
+/// real median and a small MAD, with one half-length verse in the first.
+fn paired_targets() -> Vec<Book> {
+    paired_books("target", |code, at| {
+        if code == "GEN" && at + 1 == PAIRED_CHAPTERS * PAIRED_VERSES {
+            20
+        } else {
+            40 + at % 7
+        }
+    })
+}
+
+/// The same keys at one constant length: the target's own variation is then
+/// the whole evidence.
+fn flat_sources() -> Vec<Book> {
+    paired_books("source", |_, _| 43)
+}
+
+fn paired_books(prefix: &str, width: impl Fn(&str, usize) -> usize) -> Vec<Book> {
+    ["GEN", "MRK"]
+        .iter()
+        .map(|code| {
+            let mut text = format!("\\id {code}\n\\h {code}\n");
+            let mut at = 0;
+            for chapter in 1..=PAIRED_CHAPTERS {
+                text.push_str(&format!("\\c {chapter}\n\\p\n"));
+                for verse in 1..=PAIRED_VERSES {
+                    text.push_str(&format!("\\v {verse} {}\n", "a".repeat(width(code, at))));
+                    at += 1;
+                }
+            }
+            (format!("{prefix}/{code}.usfm"), text)
+        })
+        .collect()
+}
+
+/// Published rows split by whether they are about the source at all.
+fn lengths_of(buffer: &[u8]) -> Vec<(u16, u32, u32)> {
+    published(buffer, true)
+}
+
+fn others_of(buffer: &[u8]) -> Vec<(u16, u32, u32)> {
+    published(buffer, false)
+}
+
+fn published(buffer: &[u8], lengths: bool) -> Vec<(u16, u32, u32)> {
+    let snapshot = CorpusSnapshot::open(buffer).unwrap();
+    (0..snapshot.len())
+        .flat_map(|index| {
+            let book = snapshot
+                .book(sous_core::BookIndex::new(index).unwrap())
+                .expect("directory position");
+            (0..book.len()).filter_map(move |row| {
+                let finding = book.at(row).unwrap();
+                let is_length = matches!(
+                    finding.kind(),
+                    sous_core::FindingKind::LengthProportionality(_)
+                );
+                (is_length == lengths)
+                    .then(|| (finding.book_idx().get(), finding.from(), finding.to()))
+            })
+        })
+        .collect()
 }
 
 #[test]
@@ -960,7 +1161,8 @@ fn flipping_the_casing_channel_republishes_the_cold_bytes() {
     let cold = cold_publish_with(
         &Brigade::default(),
         &config,
-        &ordered(&sous, &texts),
+        &ordered(&sous, Role::Target, &texts),
+        &[],
         snapshot,
     );
     assert_eq!(buffer, cold, "the channel off, judged from the same tally");

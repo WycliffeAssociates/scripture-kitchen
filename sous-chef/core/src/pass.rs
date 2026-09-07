@@ -21,6 +21,8 @@ use crate::{
     BookIndex, BookKey, Chapter, CodecError, Corpus, FindingKind, PackedFinding, ProjectedBook,
     TextRange, Verse,
     judge::{Pattern, PatternIndex, TerminalTable},
+    proportionality::{LengthConfig, Paired, SourceLengths, TargetLengths, judge_lengths},
+    substrate::VerseLength,
     words::WordTotals,
 };
 
@@ -231,6 +233,28 @@ pub trait ChapterPass {
         let _ = (book, text, chapters, verses, aggregate, out);
     }
 
+    /// The per-verse projected grapheme lengths this pass's aggregate carries,
+    /// for the corpus-level source comparison a host runs beside it.
+    ///
+    /// Default: none — a pass that does not walk verse rows pairs nothing. A
+    /// tuple answers with its first member that carries any, since one member
+    /// owns the lane and the rest are silent about it.
+    fn verse_lengths<'a>(&self, aggregate: &'a Self::Aggregate) -> &'a [VerseLength] {
+        let _ = aggregate;
+        &[]
+    }
+
+    /// The length-proportionality knobs this pass's config carries, so a host
+    /// moves one judging config rather than two.
+    ///
+    /// Default: none, which reads as the rule being off for this pass. The
+    /// member that fills [`verse_lengths`](Self::verse_lengths) is the one
+    /// that answers here, and a tuple takes its first answer.
+    fn length_config(&self, config: &Self::Config) -> Option<LengthConfig> {
+        let _ = config;
+        None
+    }
+
     /// The table positions [`locate`](Self::locate) would scan this book for.
     ///
     /// A host caches sites under a hash of these rows' content, so a book whose
@@ -366,6 +390,21 @@ impl<A: ChapterPass, B: ChapterPass> ChapterPass for (A, B) {
         self.0.firing(&aggregate.0, patterns, out);
         self.1.firing(&aggregate.1, patterns, &mut second);
         out.append(&mut second);
+    }
+
+    fn verse_lengths<'a>(&self, aggregate: &'a Self::Aggregate) -> &'a [VerseLength] {
+        let first = self.0.verse_lengths(&aggregate.0);
+        if first.is_empty() {
+            self.1.verse_lengths(&aggregate.1)
+        } else {
+            first
+        }
+    }
+
+    fn length_config(&self, config: &Self::Config) -> Option<LengthConfig> {
+        self.0
+            .length_config(&config.0)
+            .or_else(|| self.1.length_config(&config.1))
     }
 }
 
@@ -527,6 +566,26 @@ impl<A: ChapterPass, B: ChapterPass, C: ChapterPass> ChapterPass for (A, B, C) {
         self.2.firing(&aggregate.2, patterns, &mut rest);
         out.append(&mut rest);
     }
+
+    fn verse_lengths<'a>(&self, aggregate: &'a Self::Aggregate) -> &'a [VerseLength] {
+        for lane in [
+            self.0.verse_lengths(&aggregate.0),
+            self.1.verse_lengths(&aggregate.1),
+            self.2.verse_lengths(&aggregate.2),
+        ] {
+            if !lane.is_empty() {
+                return lane;
+            }
+        }
+        &[]
+    }
+
+    fn length_config(&self, config: &Self::Config) -> Option<LengthConfig> {
+        self.0
+            .length_config(&config.0)
+            .or_else(|| self.1.length_config(&config.1))
+            .or_else(|| self.2.length_config(&config.2))
+    }
 }
 
 /// The judge sink: rows in projected book coordinates, each naming its book.
@@ -654,13 +713,28 @@ pub fn analyze<B: ProjectedBook, P: ChapterPass>(corpus: &Corpus<'_, B>, pass: &
     analyze_with(corpus, pass, &P::Config::default())
 }
 
-/// Maps every chapter, folds every book in caller order, judges the corpus
-/// once, and orders the rows.
+/// [`analyze_paired`] with no source: the pass's own rows and nothing else.
 pub fn analyze_with<B: ProjectedBook, P: ChapterPass>(
     corpus: &Corpus<'_, B>,
     pass: &P,
     config: &P::Config,
 ) -> Findings {
+    analyze_paired(corpus, pass, config, &[]).0
+}
+
+/// Maps every chapter, folds every book in caller order, judges the corpus
+/// once, compares each book's verse lengths against the source book of the
+/// same key, and orders the rows.
+///
+/// The cold oracle for a paired resident host, so it runs the same two steps
+/// in the same order. Returns the pairing failures beside the findings: they
+/// are structural facts a host reports, never rows.
+pub fn analyze_paired<B: ProjectedBook, P: ChapterPass>(
+    corpus: &Corpus<'_, B>,
+    pass: &P,
+    config: &P::Config,
+    source: &[SourceLengths<'_>],
+) -> (Findings, Paired) {
     let book_lengths: Vec<u32> = corpus
         .books()
         .iter()
@@ -683,6 +757,21 @@ pub fn analyze_with<B: ProjectedBook, P: ChapterPass>(
     }
     let views: Vec<&P::Aggregate> = aggregates.iter().collect();
     pass.judge(&views, config, &mut out);
+
+    let paired = match pass.length_config(config) {
+        Some(lengths) if !source.is_empty() => {
+            let target: Vec<TargetLengths<'_>> = corpus
+                .iter()
+                .map(|(index, book)| TargetLengths {
+                    book: book.key(),
+                    verses: pass.verse_lengths(&aggregates[index.get() as usize]),
+                })
+                .collect();
+            judge_lengths(&target, source, &lengths, &mut out)
+        }
+        _ => Paired::default(),
+    };
+
     let mut chapters: Vec<Chapter> = Vec::new();
     let mut verses: Vec<Verse> = Vec::new();
     for (index, book) in corpus.iter() {
@@ -700,7 +789,7 @@ pub fn analyze_with<B: ProjectedBook, P: ChapterPass>(
         );
     }
     out.finish();
-    out
+    (out, paired)
 }
 
 /// Rebases this chapter's verse rows into `verses`, returning where the next

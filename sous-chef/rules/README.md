@@ -45,7 +45,7 @@ Every rule answers these eight questions before implementation:
 | 1a | hygiene | [hygiene.md](hygiene.md) | deterministic | landed (one deferred item) |
 | 1b | character inventory | [character-inventory.md](character-inventory.md) | convention-learned | designed; Stage 3 |
 | 2 | word conventions | [word-conventions.md](word-conventions.md) | convention-learned | designed; Stage 4, bands blocked |
-| 3 | length proportionality | [length-proportionality.md](length-proportionality.md) | source-compared | designed; Stage 5 |
+| 3 | length proportionality | [length-proportionality.md](length-proportionality.md) | source-compared | landed (S1) |
 | 3 | source-copy residue | [source-copy-residue.md](source-copy-residue.md) | source-compared | parked pending re-adjudication |
 | 3 | presence and shear | [presence-shear.md](presence-shear.md) | source-compared | parked; needs its own claim |
 | — | delimiter pairing | [delimiter-pairing.md](delimiter-pairing.md) | deterministic | parked pending a carry probe |
@@ -55,4 +55,5 @@ Implementation detail sits beside the code it describes:
 [`../core/src/pass.md`](../core/src/pass.md),
 [`../core/src/hygiene.md`](../core/src/hygiene.md),
 [`../core/src/unicode/README.md`](../core/src/unicode/README.md),
-[`../core/src/codec/README.md`](../core/src/codec/README.md).
+[`../core/src/codec/README.md`](../core/src/codec/README.md),
+[`../core/src/proportionality.md`](../core/src/proportionality.md).

@@ -324,11 +324,13 @@ fn every_book_folds_from_a_fresh_edge() {
 
 /// The lanes are what a resident cache pays per chapter, so the inline
 /// size is a fact worth pinning: it is 20% of the tier's median row. The
-/// hygiene lane is 16 of these bytes and is almost always empty.
+/// hygiene lane is 16 of these bytes and is almost always empty; the verse
+/// lane is 16 more and is empty only for a chapter with no verse rows.
 #[test]
 fn the_row_and_its_edges_are_the_size_the_budget_assumes() {
-    assert_eq!(size_of::<ChapterRow>(), 144);
+    assert_eq!(size_of::<ChapterRow>(), 160);
     assert_eq!(size_of::<Edge>(), 20);
+    assert_eq!(size_of::<VerseLength>(), 20);
 }
 
 /// Hygiene's four scalar classes, read off the lane the walk fills.

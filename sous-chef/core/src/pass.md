@@ -154,6 +154,21 @@ default does and as the CLI and `galley::sous::Expediter`'s tests do. Sharing
 one config across passes without the copy is a later plumbing slice; nothing
 reads a divergent pair, and the two slots are not a feature.
 
+## The two hooks a corpus-level step reads
+
+`verse_lengths` and `length_config` are the whole surface
+`sous_core::proportionality` needs from a pass, and both default to nothing.
+The source comparison is not a `ChapterPass` — a ratio is a function of two
+corpora, and a chapter observation may only read its own chapter (charter
+invariant 4) — so it runs beside the passes, after `judge` and before
+`locate`, in `analyze_paired` and in `Expediter::publish` alike.
+
+`Substrate` answers both, because it owns the verse lane; a tuple takes its
+first member that answers, which is what keeps a host moving ONE judging config
+and the Expediter generic over the pass it drives. A pass that walks no verse
+rows says nothing and pairs nothing.
+[`proportionality.md`](proportionality.md) is the step itself.
+
 ## Why fold and judge are provenance-blind
 
 `fold` takes `&[ChapterObs<&Observation>]` and nothing else; `judge` takes

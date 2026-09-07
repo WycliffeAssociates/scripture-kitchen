@@ -10,6 +10,7 @@ pub mod hygiene;
 mod input;
 pub mod judge;
 mod pass;
+pub mod proportionality;
 pub mod sites;
 pub mod substrate;
 pub mod unicode;
@@ -36,12 +37,15 @@ pub use judge::{
 };
 pub use pass::{
     ChapterInput, ChapterKey, ChapterObs, ChapterPass, CorpusTotals, Findings, SchemaStamp,
-    analyze, analyze_with, for_each_chapter,
+    analyze, analyze_paired, analyze_with, for_each_chapter,
+};
+pub use proportionality::{
+    LengthConfig, Paired, SourceLengths, SourceVerse, TargetLengths, judge_lengths, source_lengths,
 };
 pub use sites::Site;
 pub use substrate::{
     BookAggregate, Case, ChapterRow, Edge, FollowCounts, OuterClass, PairKey, RUN_BUCKETS,
-    RunLengths, ScalarKey, Substrate,
+    RunLengths, ScalarKey, Substrate, VerseLength,
 };
 pub use words::{
     Before, DoubleCount, DoubleTally, DoubleTotal, Form, Gap, WordAggregate, WordCount, WordRow,

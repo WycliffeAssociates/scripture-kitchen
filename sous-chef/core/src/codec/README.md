@@ -34,6 +34,7 @@ a tombstone.
 | code | kind | lane 12..14 | lane 14..16 | `SATURATED` means |
 | --- | --- | --- | --- | --- |
 | 0 | `LengthProportionality` | signed Q8.8 book-scope deviation; `i16::MIN` unavailable | signed Q8.8 project-scope deviation; `i16::MIN` unavailable | a deviation was clamped |
+
 | 1 | `Hygiene` | `HygieneClass` discriminant | run length in code points, `1..=i16::MAX` | the run exceeds `i16::MAX`; the lane reads exactly `i16::MAX` |
 | 2 | `Convention` | pattern-table index, `u16` bits in the signed lane | `Reasons` bitmask over the ladder rungs the site matched, the word rungs included | never set |
 
@@ -44,6 +45,13 @@ caller cannot set a code that disagrees with its payload.
 Each code's lane codec lives in its own `codec/<rule>.rs` with a matching
 `lanes()` / `from_lanes()` pair, so `mod.rs` never becomes a dumping ground for
 payload shapes.
+
+All three codes are emitted. Code 0 is `sous_core::proportionality`, which
+publishes BOTH lanes on every row: a book scope and a project scope, and
+`i16::MIN` where a scope did not judge. That sentinel is also, by construction,
+the under-`min_verses` flag — a book with too few paired verses is judged by
+the project alone — so no flag bit says the same thing twice
+([`../proportionality.md`](../proportionality.md)).
 
 ## Fail-closed rules
 
