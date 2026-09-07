@@ -548,6 +548,11 @@ Verification gate:
 - fleet calibration includes volume tails and representative false/ambiguous
   cases before defaults are accepted.
 
+**Landed, on demand:** `sous_core::typos` and `sous --typos <corpus>` — rare
+words one edit from a frequent word, grouped by target. Not a channel: no
+`PatternKey`, never judged, never rides `Brigade`. `core/src/typos.md` and
+the two 2026-09-07 `evidence.md` rows carry the measurement and the ruling.
+
 **Deferred:** n-gram surprisal, hapax, and compound-split ideas remain
 separate probes. They do not ride this stage merely because word tokens exist.
 Length is the one that left, as an off-by-default channel and a logged

@@ -13,6 +13,7 @@ mod pass;
 pub mod proportionality;
 pub mod sites;
 pub mod substrate;
+pub mod typos;
 pub mod unicode;
 pub mod words;
 

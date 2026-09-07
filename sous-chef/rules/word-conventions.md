@@ -117,6 +117,10 @@ UAX 29 splits and this rule joins. Per-script rates: evidence.md, 2026-09-04.
 - character n-gram surprisal;
 - hapax-rate context;
 - compound/split comparison against the corpus vocabulary.
+- ~~typos as one edit from a frequent word~~ — left the shelf as
+  `sous --typos <corpus>`, an on-demand reviewer action (`typos.md`), never a
+  channel: too slow to judge on every publication and too noisy to trust
+  silently on a short-word language (`evidence.md`, 2026-09-07).
 
 These remain probes until each can state a narrow claim, fair comparison
 population, counterexamples, and actionable result. "Not in the vocabulary" is
