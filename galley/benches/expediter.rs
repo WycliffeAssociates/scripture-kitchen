@@ -13,7 +13,8 @@
 //!   re-derivation (lex, CST, mask, UTF-16 table for that book) and the book's
 //!   re-map are INSIDE the timer: it is what a keystroke costs. `Brigade`
 //!   carries `Words`, which is retained at book grain, so the edited book's
-//!   whole chapter set is re-mapped and no other book's is.
+//!   whole chapter set is re-mapped and no other book's is — and its word
+//!   sites are placed for the chapter that moved and replayed for the rest.
 //! - `publish_cold` — a fresh Expediter over the same corpus, registered
 //!   outside the timer, publishing for the first time: every chapter mapped.
 //!   Run it with and without `--features parallel` for the two map costs.
@@ -174,8 +175,20 @@ fn edit_one_chapter_then_publish(bencher: divan::Bencher) {
         chapters,
         "one keystroke, the edited book and no other"
     );
+    sous.update(
+        corpus.edited_id.as_str(),
+        Role::Target,
+        &corpus.keystrokes[1],
+    )
+    .unwrap();
+    sous.publish().unwrap();
+    assert_eq!(
+        sous.last_sited_chapters(),
+        1,
+        "and the second sites the chapter it moved, replaying the rest"
+    );
 
-    let mut next = 1;
+    let mut next = 2;
     bencher.bench_local(|| {
         let typed = &corpus.keystrokes[next];
         next += 1;

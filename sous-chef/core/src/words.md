@@ -347,6 +347,12 @@ bits and the finer channel's index — the same merge casing and length already
 make. The count is runs and not words, so the rare word holding two firing runs
 emits a row per run, and the first of them is the one the merge absorbs.
 
+The walk restarts at every chapter — a word chain and a doubled pair both end
+at a seam — so one chapter's rows are the rows a whole-book rescan finds there.
+`Words` therefore answers yes to `ChapterPass::CHAPTER_SITES`, places nothing in
+`locate_book`, and puts every row in `locate_chapters`, which a host may call
+for one chapter and replay the rest of the book from a cache.
+
 The rescan is the same walk over the same table, so it must agree with the
 counts exactly: `tests/casing_agree_with_counts.rs` is that equality over a
 synthetic sweep and, ignored, over every chapter of the 8-corpus tier, one

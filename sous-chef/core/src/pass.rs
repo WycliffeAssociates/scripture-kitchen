@@ -17,6 +17,8 @@
 //! cached input from a fresh one; that is what makes cold and incremental
 //! analysis equal. The fold and judge rules in full: pass.md.
 
+use core::ops::Range;
+
 use crate::{
     BookIndex, BookKey, Chapter, CodecError, Corpus, FindingKind, PackedFinding, ProjectedBook,
     TextRange, Verse,
@@ -124,6 +126,13 @@ pub trait ChapterPass {
     /// A tuple retains chapters only if every member does, because one
     /// observation carries them all.
     const RETAIN_CHAPTERS: bool = true;
+    /// Whether [`locate_book`](Self::locate_book) and
+    /// [`locate_chapters`](Self::locate_chapters) really split this pass's
+    /// rows, so a host may site one chapter and replay the others.
+    ///
+    /// A tuple says yes only when exactly one member does: two would each
+    /// count every chapter, and the host could not tell whose rows are whose.
+    const CHAPTER_SITES: bool = false;
 
     /// A pure function of this chapter; it never reads a neighbor.
     fn map(&self, chapter: ChapterInput<'_>) -> Self::Observation;
@@ -233,6 +242,50 @@ pub trait ChapterPass {
         let _ = (book, text, chapters, verses, aggregate, out);
     }
 
+    /// Sites the rows [`locate`](Self::locate) places that no single chapter
+    /// owns, calling `out.open_book(book)` first if it places any.
+    ///
+    /// Default: the whole `locate` — right for a pass whose walk reads across
+    /// chapters, since it then owns every row it places.
+    fn locate_book(
+        &self,
+        book: BookIndex,
+        text: &str,
+        chapters: &[Chapter],
+        verses: &[Verse],
+        aggregate: &Self::Aggregate,
+        out: &mut Findings,
+    ) {
+        self.locate(book, text, chapters, verses, aggregate, out);
+    }
+
+    /// Sites `chapters[range]`, pushing for each chapter in turn exactly the
+    /// rows [`locate`](Self::locate) would push for it, and appending that
+    /// chapter's row count to `counts`.
+    ///
+    /// Default: nothing, matching a [`locate_book`](Self::locate_book) that
+    /// placed every row. A pass overrides both together, and the pair must
+    /// equal `locate` over `0..chapters.len()`, row for row and in order.
+    ///
+    /// Only a pass whose walk restarts at every chapter may override it. A
+    /// tuple forwards to each member in turn, so `counts` is one run per
+    /// overriding member: a host that splits the rows by chapter needs the
+    /// tuple to hold exactly one.
+    #[allow(clippy::too_many_arguments)]
+    fn locate_chapters(
+        &self,
+        book: BookIndex,
+        text: &str,
+        chapters: &[Chapter],
+        verses: &[Verse],
+        range: Range<usize>,
+        aggregate: &Self::Aggregate,
+        counts: &mut Vec<u32>,
+        out: &mut Findings,
+    ) {
+        let _ = (book, text, chapters, verses, range, aggregate, counts, out);
+    }
+
     /// The per-verse projected grapheme lengths this pass's aggregate carries,
     /// for the corpus-level source comparison a host runs beside it.
     ///
@@ -279,6 +332,7 @@ impl<A: ChapterPass, B: ChapterPass> ChapterPass for (A, B) {
     type Config = (A::Config, B::Config);
     const SCHEMA: SchemaStamp = A::SCHEMA.then(B::SCHEMA);
     const RETAIN_CHAPTERS: bool = A::RETAIN_CHAPTERS && B::RETAIN_CHAPTERS;
+    const CHAPTER_SITES: bool = A::CHAPTER_SITES ^ B::CHAPTER_SITES;
 
     fn map(&self, chapter: ChapterInput<'_>) -> Self::Observation {
         (self.0.map(chapter), self.1.map(chapter))
@@ -380,6 +434,54 @@ impl<A: ChapterPass, B: ChapterPass> ChapterPass for (A, B) {
             .locate(book, text, chapters, verses, &aggregate.1, out);
     }
 
+    fn locate_book(
+        &self,
+        book: BookIndex,
+        text: &str,
+        chapters: &[Chapter],
+        verses: &[Verse],
+        aggregate: &Self::Aggregate,
+        out: &mut Findings,
+    ) {
+        self.0
+            .locate_book(book, text, chapters, verses, &aggregate.0, out);
+        self.1
+            .locate_book(book, text, chapters, verses, &aggregate.1, out);
+    }
+
+    fn locate_chapters(
+        &self,
+        book: BookIndex,
+        text: &str,
+        chapters: &[Chapter],
+        verses: &[Verse],
+        range: Range<usize>,
+        aggregate: &Self::Aggregate,
+        counts: &mut Vec<u32>,
+        out: &mut Findings,
+    ) {
+        self.0.locate_chapters(
+            book,
+            text,
+            chapters,
+            verses,
+            range.clone(),
+            &aggregate.0,
+            counts,
+            out,
+        );
+        self.1.locate_chapters(
+            book,
+            text,
+            chapters,
+            verses,
+            range,
+            &aggregate.1,
+            counts,
+            out,
+        );
+    }
+
     fn firing(
         &self,
         aggregate: &Self::Aggregate,
@@ -417,6 +519,8 @@ impl<A: ChapterPass, B: ChapterPass, C: ChapterPass> ChapterPass for (A, B, C) {
     type Config = (A::Config, B::Config, C::Config);
     const SCHEMA: SchemaStamp = A::SCHEMA.then(B::SCHEMA).then(C::SCHEMA);
     const RETAIN_CHAPTERS: bool = A::RETAIN_CHAPTERS && B::RETAIN_CHAPTERS && C::RETAIN_CHAPTERS;
+    const CHAPTER_SITES: bool =
+        A::CHAPTER_SITES as u8 + B::CHAPTER_SITES as u8 + C::CHAPTER_SITES as u8 == 1;
 
     fn map(&self, chapter: ChapterInput<'_>) -> Self::Observation {
         (
@@ -551,6 +655,66 @@ impl<A: ChapterPass, B: ChapterPass, C: ChapterPass> ChapterPass for (A, B, C) {
             .locate(book, text, chapters, verses, &aggregate.1, out);
         self.2
             .locate(book, text, chapters, verses, &aggregate.2, out);
+    }
+
+    fn locate_book(
+        &self,
+        book: BookIndex,
+        text: &str,
+        chapters: &[Chapter],
+        verses: &[Verse],
+        aggregate: &Self::Aggregate,
+        out: &mut Findings,
+    ) {
+        self.0
+            .locate_book(book, text, chapters, verses, &aggregate.0, out);
+        self.1
+            .locate_book(book, text, chapters, verses, &aggregate.1, out);
+        self.2
+            .locate_book(book, text, chapters, verses, &aggregate.2, out);
+    }
+
+    fn locate_chapters(
+        &self,
+        book: BookIndex,
+        text: &str,
+        chapters: &[Chapter],
+        verses: &[Verse],
+        range: Range<usize>,
+        aggregate: &Self::Aggregate,
+        counts: &mut Vec<u32>,
+        out: &mut Findings,
+    ) {
+        self.0.locate_chapters(
+            book,
+            text,
+            chapters,
+            verses,
+            range.clone(),
+            &aggregate.0,
+            counts,
+            out,
+        );
+        self.1.locate_chapters(
+            book,
+            text,
+            chapters,
+            verses,
+            range.clone(),
+            &aggregate.1,
+            counts,
+            out,
+        );
+        self.2.locate_chapters(
+            book,
+            text,
+            chapters,
+            verses,
+            range,
+            &aggregate.2,
+            counts,
+            out,
+        );
     }
 
     fn firing(

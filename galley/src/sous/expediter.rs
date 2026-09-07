@@ -21,17 +21,17 @@ use rayon::prelude::*;
 use std::collections::hash_map::Entry;
 
 use rustc_hash::{FxHashMap, FxHashSet};
+#[cfg(feature = "parallel")]
+use sous_core::ChapterKey;
 use sous_core::judge::{Channel, PatternKey};
 use sous_core::substrate::ScalarKey;
 use sous_core::{
     AlignmentFact, BookIndex, Chapter, ChapterInput, ChapterObs, ChapterPass, ConventionDigest,
     CoordinateSpace, CorpusTotals, CorpusWireError, FindingKind, Findings, PackedFinding,
     PairedBook, Pattern, PatternIndex, ProjectSpread, ProjectedBook, PublicationBook, Reasons,
-    SnapshotId, SourceVerse, SourceWords, TextRange, encode_to_corpus_buffer, for_each_chapter,
-    judge_paired,
+    SnapshotId, SourceVerse, SourceWords, TerminalTable, TextRange, Verse, encode_to_corpus_buffer,
+    for_each_chapter, judge_paired,
 };
-#[cfg(feature = "parallel")]
-use sous_core::{ChapterKey, Verse};
 use xxhash_rust::xxh3::Xxh3Default;
 
 use mise::books::BookKey;
@@ -89,7 +89,7 @@ struct ChapterRow {
 /// Never over the indices — a publication renumbers the table whenever another
 /// book's counts move a denominator, while what THIS book can be sited for is
 /// unchanged.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct FiringHash([u8; 16]);
 
 impl FiringHash {
@@ -103,6 +103,42 @@ impl FiringHash {
         }
         Self(hasher.digest128().to_be_bytes())
     }
+}
+
+/// The corpus evidence a chapter's word sites read beside its own text:
+/// xxh3-128 over this publication's forcing glyphs, ascending.
+///
+/// Its own hash rather than a share of [`FiringHash`], because a firing set is
+/// position-blind: the same rows fire while the terminal table decides
+/// differently which of their occurrences are free.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct TerminalHash([u8; 16]);
+
+impl TerminalHash {
+    fn of(table: Option<&TerminalTable>) -> Self {
+        let mut hasher = Xxh3Default::new();
+        // An absent table is not an empty one: a corpus may genuinely
+        // capitalize after nothing.
+        match table {
+            None => hasher.update(&[0]),
+            Some(table) => {
+                hasher.update(&[1]);
+                for glyph in table.forcing() {
+                    hasher.update(&glyph.raw().to_le_bytes());
+                }
+            }
+        }
+        Self(hasher.digest128().to_be_bytes())
+    }
+}
+
+/// One chapter's site identity: what it says, what its book fires, and what
+/// the corpus's terminal table makes of that.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct ChapterSiteKey {
+    chapter: ObservationKey,
+    firing: FiringHash,
+    terminals: TerminalHash,
 }
 
 /// A pattern's identity across publications, which its table position is not.
@@ -155,6 +191,17 @@ impl SiteRow {
             from: row.from(),
             to: row.to(),
             kind,
+        }
+    }
+
+    /// The same row against a chapter's own start, so a chapter cached under
+    /// one book's coordinates replays under another's.
+    fn rebased(self, start: u32) -> Self {
+        debug_assert!(self.from >= start, "a chapter's row starts inside it");
+        Self {
+            from: self.from - start,
+            to: self.to - start,
+            ..self
         }
     }
 }
@@ -240,6 +287,11 @@ pub struct Expediter<P: ChapterPass> {
     /// One book's located rows for the last firing set seen, keyed by the same
     /// checksum: unchanged text plus an unchanged firing set is a replay.
     sites: FxHashMap<RawChecksum, (FiringHash, Box<[SiteRow]>)>,
+    /// One HOT book chapter's own rows, in chapter-relative coordinates and
+    /// keyed by content: a keystroke walks the chapter it landed in and
+    /// replays its neighbours rebased. Held for the hot set alone, and every
+    /// publication keeps exactly the keys that set names.
+    chapter_sites: FxHashMap<ChapterSiteKey, Box<[SiteRow]>>,
     /// One target book's ratios against its declared source, keyed by BOTH
     /// checksums: the pairing is a pure function of the two books' rows, so a
     /// publication re-pairs only the books whose side moved.
@@ -281,6 +333,7 @@ pub struct Expediter<P: ChapterPass> {
     remaps: u64,
     folds: u64,
     located: u64,
+    sited: u64,
     pairings: u64,
     /// Whether a book's missing chapters are mapped on rayon; the two
     /// settings publish the same bytes.
@@ -328,6 +381,7 @@ impl<P: ChapterPass + Sync> Expediter<P> {
             chapter_tables: FxHashMap::default(),
             aggregates: FxHashMap::default(),
             sites: FxHashMap::default(),
+            chapter_sites: FxHashMap::default(),
             paired: FxHashMap::default(),
             project: None,
             wordless: 0,
@@ -345,6 +399,7 @@ impl<P: ChapterPass + Sync> Expediter<P> {
             remaps: 0,
             folds: 0,
             located: 0,
+            sited: 0,
             pairings: 0,
             #[cfg(feature = "parallel")]
             parallel: true,
@@ -512,6 +567,15 @@ impl<P: ChapterPass + Sync> Expediter<P> {
         self.located
     }
 
+    /// Chapters of [`last_located`](Self::last_located)'s books whose word
+    /// rows were walked; the rest replayed the rows their chapter cache held.
+    ///
+    /// Zero for a book outside the hot set, which is sited whole or not at
+    /// all. A keystroke into a hot book answers one.
+    pub fn last_sited_chapters(&self) -> u64 {
+        self.sited
+    }
+
     /// Declared sources the last [`publish`](Self::publish) would have walked
     /// for source-copy runs and could not, because they were registered while
     /// `LengthConfig::source_copy` was off and so kept no word lane.
@@ -570,6 +634,11 @@ impl<P: ChapterPass + Sync> Expediter<P> {
                 size_of::<RawChecksum>() + size_of::<FiringHash>() + size_of_val(&**rows)
             })
             .sum();
+        let chapter_sites: usize = self
+            .chapter_sites
+            .values()
+            .map(|rows| size_of::<ChapterSiteKey>() + size_of_val(&**rows))
+            .sum();
         let pairs: usize = self
             .paired
             .values()
@@ -590,6 +659,7 @@ impl<P: ChapterPass + Sync> Expediter<P> {
             + rows
             + cached
             + sites
+            + chapter_sites
             + pairs
             + rings
             + self.totals.resident_bytes()
@@ -832,7 +902,7 @@ impl<P: ChapterPass + Sync> Expediter<P> {
         }
 
         // Scoped so the borrowed observations are released before the sweep.
-        let (mut folds, mut located, mut pairings, mut wordless) = (0, 0, 0, 0);
+        let (mut folds, mut located, mut sited, mut pairings, mut wordless) = (0, 0, 0, 0, 0);
         let (projected, patterns) = {
             let Self {
                 pantry,
@@ -842,6 +912,7 @@ impl<P: ChapterPass + Sync> Expediter<P> {
                 chapter_tables,
                 aggregates,
                 sites,
+                chapter_sites,
                 paired,
                 project,
                 totals,
@@ -1070,6 +1141,12 @@ impl<P: ChapterPass + Sync> Expediter<P> {
                 .enumerate()
                 .map(|(at, pattern)| (PatternRef::of(pattern), PatternIndex::new(at as u16)))
                 .collect();
+            let terminals = TerminalHash::of(findings.terminals());
+            let hot_ids: FxHashSet<&BookId> = hot.iter().collect();
+            // Every key this publication's hot books name, hit or miss: what
+            // the chapter cache keeps once the loop is done, so a book that
+            // left the hot set takes its chapters with it.
+            let mut named: FxHashSet<ChapterSiteKey> = FxHashSet::default();
             let mut firing: Vec<PatternIndex> = Vec::new();
             for (index, (id, _)) in books.iter().enumerate() {
                 let book = BookIndex::new(index).expect("a corpus indexes every book");
@@ -1077,10 +1154,22 @@ impl<P: ChapterPass + Sync> Expediter<P> {
                 let aggregate = &aggregates[&checksum];
                 pass.firing(aggregate, &table, &mut firing);
                 let hash = FiringHash::of(&firing, &table);
+                let keys: Vec<ChapterSiteKey> = match P::CHAPTER_SITES && hot_ids.contains(id) {
+                    true => chapter_tables[&checksum]
+                        .iter()
+                        .map(|row| ChapterSiteKey {
+                            chapter: row.observation,
+                            firing: hash,
+                            terminals,
+                        })
+                        .collect(),
+                    false => Vec::new(),
+                };
+                named.extend(keys.iter().copied());
                 if let Some((seen, rows)) = sites.get(&checksum)
                     && *seen == hash
                 {
-                    replay(book, rows, &resolver, &mut findings);
+                    replay(book, rows, 0, &resolver, &mut findings);
                     continue;
                 }
                 // The pair step's projection where it made one, and one of its
@@ -1092,8 +1181,24 @@ impl<P: ChapterPass + Sync> Expediter<P> {
                 };
                 let rows: Vec<Chapter> = view.chapters().collect();
                 let before = findings.len();
-                let verses: Vec<sous_core::Verse> = view.verses().collect();
-                pass.locate(book, view.text(), &rows, &verses, aggregate, &mut findings);
+                let verses: Vec<Verse> = view.verses().collect();
+                if keys.is_empty() {
+                    pass.locate(book, view.text(), &rows, &verses, aggregate, &mut findings);
+                } else {
+                    sited += site_by_chapter(
+                        pass,
+                        book,
+                        view.text(),
+                        &rows,
+                        &verses,
+                        aggregate,
+                        &keys,
+                        chapter_sites,
+                        &table,
+                        &resolver,
+                        &mut findings,
+                    );
+                }
                 let cached: Box<[SiteRow]> = findings.rows()[before..]
                     .iter()
                     .map(|row| SiteRow::of(row, &table))
@@ -1101,11 +1206,13 @@ impl<P: ChapterPass + Sync> Expediter<P> {
                 sites.insert(checksum, (hash, cached));
                 located += 1;
             }
+            chapter_sites.retain(|key, _| named.contains(key));
             findings.finish();
             findings.into_parts()
         };
         self.folds = folds;
         self.located = located;
+        self.sited = sited;
         self.pairings = pairings;
         self.wordless = wordless;
         self.sweep();
@@ -1148,11 +1255,6 @@ impl<P: ChapterPass + Sync> Expediter<P> {
     }
 }
 
-/// Pushes one book's cached rows back, each convention row under the pattern
-/// index THIS publication gave its content.
-///
-/// A row whose pattern the table no longer holds cannot happen: the firing
-/// hash covers exactly the contents that produced these rows.
 /// One registered book's projected view, rebuilt from the products it already
 /// retains. The text is borrowed, never copied.
 fn projection(pantry: &Pantry, id: &BookId) -> Result<OnionBook, PublishError> {
@@ -1168,9 +1270,93 @@ fn projection(pantry: &Pantry, id: &BookId) -> Result<OnionBook, PublishError> {
     })
 }
 
+/// One hot book's rows chapter by chapter: the book-wide members place theirs
+/// as they always do, then every chapter either replays the rows its key
+/// already names or is walked with the run of missing chapters around it.
+///
+/// Rows land in chapter order, so the sequence is the one a whole-book
+/// [`ChapterPass::locate`] would have pushed. One walk per RUN, not per
+/// chapter: reading a firing set is per book, and a keystroke leaves exactly
+/// one chapter missing anyway.
+///
+/// Returns the chapters walked.
+#[allow(clippy::too_many_arguments)]
+fn site_by_chapter<P: ChapterPass>(
+    pass: &P,
+    book: BookIndex,
+    text: &str,
+    chapters: &[Chapter],
+    verses: &[Verse],
+    aggregate: &P::Aggregate,
+    keys: &[ChapterSiteKey],
+    cache: &mut FxHashMap<ChapterSiteKey, Box<[SiteRow]>>,
+    table: &[Pattern],
+    resolver: &FxHashMap<PatternRef, PatternIndex>,
+    out: &mut Findings,
+) -> u64 {
+    debug_assert_eq!(keys.len(), chapters.len(), "one key per chapter");
+    pass.locate_book(book, text, chapters, verses, aggregate, out);
+    let mut counts: Vec<u32> = Vec::new();
+    let mut walked = 0;
+    let mut at = 0;
+    while at < keys.len() {
+        if let Some(rows) = cache.get(&keys[at]) {
+            replay(book, rows, chapters[at].text().from(), resolver, out);
+            at += 1;
+            continue;
+        }
+        let mut end = at + 1;
+        while end < keys.len() && !cache.contains_key(&keys[end]) {
+            end += 1;
+        }
+        counts.clear();
+        let from = out.len();
+        pass.locate_chapters(
+            book,
+            text,
+            chapters,
+            verses,
+            at..end,
+            aggregate,
+            &mut counts,
+            out,
+        );
+        assert_eq!(
+            counts.len(),
+            end - at,
+            "a chapter-scoped pass counts every chapter it was given"
+        );
+        let mut row = from;
+        for (offset, count) in counts.iter().enumerate() {
+            let to = row + *count as usize;
+            let start = chapters[at + offset].text().from();
+            cache.insert(
+                keys[at + offset],
+                out.rows()[row..to]
+                    .iter()
+                    .map(|packed| SiteRow::of(packed, table).rebased(start))
+                    .collect(),
+            );
+            row = to;
+        }
+        debug_assert_eq!(row, out.len(), "the counts cover every row pushed");
+        walked += (end - at) as u64;
+        at = end;
+    }
+    walked
+}
+
+/// Pushes cached rows back, each convention row under the pattern index THIS
+/// publication gave its content, and each span moved forward by `start`.
+///
+/// `start` is zero for a book's own rows and the chapter's projected start for
+/// rows cached per chapter. A row whose pattern the table no longer holds
+/// cannot happen: the firing hash covers exactly the contents that produced
+/// these rows.
 fn replay(
     book: BookIndex,
     rows: &[SiteRow],
+    start: u32,
     resolver: &FxHashMap<PatternRef, PatternIndex>,
     out: &mut Findings,
 ) {
@@ -1183,7 +1369,8 @@ fn replay(
             }
             CachedKind::Other(kind) => kind,
         };
-        let span = TextRange::new(row.from, row.to).expect("a cached span keeps its order");
+        let span = TextRange::new(row.from + start, row.to + start)
+            .expect("a cached span keeps its order");
         out.push(span, kind)
             .expect("a replayed span lies inside the book it was found in");
     }
@@ -1291,6 +1478,7 @@ mod tests {
         type Config = P::Config;
         const SCHEMA: SchemaStamp = P::SCHEMA;
         const RETAIN_CHAPTERS: bool = P::RETAIN_CHAPTERS;
+        const CHAPTER_SITES: bool = P::CHAPTER_SITES;
 
         fn map(&self, chapter: ChapterInput<'_>) -> Self::Observation {
             self.maps.fetch_add(1, Ordering::Relaxed);
@@ -1351,6 +1539,34 @@ mod tests {
         ) {
             self.inner
                 .locate(book, text, chapters, verses, aggregate, out);
+        }
+
+        fn locate_book(
+            &self,
+            book: BookIndex,
+            text: &str,
+            chapters: &[Chapter],
+            verses: &[sous_core::Verse],
+            aggregate: &Self::Aggregate,
+            out: &mut Findings,
+        ) {
+            self.inner
+                .locate_book(book, text, chapters, verses, aggregate, out);
+        }
+
+        fn locate_chapters(
+            &self,
+            book: BookIndex,
+            text: &str,
+            chapters: &[Chapter],
+            verses: &[sous_core::Verse],
+            range: core::ops::Range<usize>,
+            aggregate: &Self::Aggregate,
+            counts: &mut Vec<u32>,
+            out: &mut Findings,
+        ) {
+            self.inner
+                .locate_chapters(book, text, chapters, verses, range, aggregate, counts, out);
         }
 
         fn firing(
@@ -1599,6 +1815,14 @@ mod tests {
             .sum()
     }
 
+    /// One keystroke into MRK and the publication after it.
+    impl Expediter<Brigade> {
+        fn publish_after(&mut self, text: &str) -> Vec<u8> {
+            self.update("b/mrk.usfm", Role::Target, text).unwrap();
+            self.publish().unwrap()
+        }
+    }
+
     /// The hot set is what turns the second keystroke in one book into one
     /// chapter's walk: the first one's rows were shed at the last fold, and
     /// the edit that shed them is what made the book hot.
@@ -1625,6 +1849,66 @@ mod tests {
         assert_eq!(sous.last_mapped(), 1, "hot: the moved chapter alone");
         assert_eq!(sous.last_remapped(), 0, "nothing was shed to walk again");
         assert_eq!(rows(&published).len(), 8, "one finding per chapter");
+    }
+
+    /// The site cache follows the same grain: a keystroke walks the chapter it
+    /// landed in for word rows and replays the rest of the book rebased.
+    #[test]
+    fn a_keystroke_re_sites_one_chapter() {
+        let mut sous = sous().with_hot_books(1);
+        four_books(&mut sous);
+        let once = mark().replace("A withered", "A shrivelled");
+        sous.update("b/mrk.usfm", Role::Target, &once).unwrap();
+        sous.publish().unwrap();
+        assert_eq!(sous.last_located(), 1, "MRK alone rescanned");
+        assert_eq!(sous.last_sited_chapters(), 3, "none of them cached yet");
+
+        let twice = once.replace("He entered", "He walked into");
+        let published = sous.publish_after(&twice);
+        assert_eq!(sous.last_located(), 1, "MRK alone again");
+        assert_eq!(sous.last_sited_chapters(), 1, "the chapter it moved");
+        assert_eq!(rows(&published).len(), 8, "one finding per chapter");
+    }
+
+    /// A moved judging knob renumbers and re-decides the whole table, so every
+    /// chapter's key moves with it and nothing replays.
+    #[test]
+    fn a_pattern_change_re_sites_every_chapter() {
+        let mut sous = sous().with_hot_books(1);
+        sous.update("b/mrk.usfm", Role::Target, &mark()).unwrap();
+        sous.publish().unwrap();
+        assert_eq!(sous.last_sited_chapters(), 3, "cold: none of them cached");
+        sous.publish_after(&mark().replace("A withered", "A shrivelled"));
+        assert_eq!(sous.last_sited_chapters(), 1, "warm before the knob");
+
+        let config = JudgingConfig {
+            rarity_floor: 1,
+            ..JudgingConfig::default()
+        };
+        sous.set_config(((), config, config));
+        sous.publish().unwrap();
+        assert_eq!(sous.last_mapped(), 0, "a knob maps nothing");
+        assert_eq!(
+            sous.last_sited_chapters(),
+            3,
+            "a new firing set is a new key for every chapter"
+        );
+    }
+
+    /// And the rows go when the book does: the hot set is what keeps them, so
+    /// a book pushed out of it leaves nothing behind.
+    #[test]
+    fn a_book_leaving_the_hot_set_drops_its_chapter_rows() {
+        let mut sous = sous().with_hot_books(1);
+        four_books(&mut sous);
+        sous.publish_after(&mark().replace("A withered", "A shrivelled"));
+        assert_eq!(sous.chapter_sites.len(), 3, "MRK's three chapters");
+
+        let text = book("LUK", &["A first \\\\ chapter.", "A later \\\\ one."]);
+        sous.update("c/luk.usfm", Role::Target, &text).unwrap();
+        sous.publish().unwrap();
+        assert_eq!(sous.hot_books(), [BookId::from("c/luk.usfm")]);
+        assert_eq!(sous.chapter_sites.len(), 2, "LUK's two, and MRK's are gone");
     }
 
     /// And it is bounded: the third book edited after it pushes the first out,
@@ -1682,10 +1966,17 @@ mod tests {
                 .map(|obs| cold.pass().observation_bytes(obs))
                 .sum::<usize>();
         assert!(kept > 0, "MRK's three chapters hold cased words");
+        let sited: usize = hot
+            .chapter_sites
+            .values()
+            .map(|rows| size_of::<ChapterSiteKey>() + size_of_val(&**rows))
+            .sum();
+        assert!(sited > 0, "and their own site rows");
+        assert!(cold.chapter_sites.is_empty(), "a cold book keeps none");
         assert_eq!(
             hot.resident_bytes() - cold.resident_bytes(),
-            kept,
-            "the difference is the rows and nothing else"
+            kept + sited,
+            "the difference is the rows a hot book keeps and nothing else"
         );
     }
 

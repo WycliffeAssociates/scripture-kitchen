@@ -622,6 +622,10 @@ impl ChapterPass for Words {
     /// substrate's 0.3, and the whole book is rewalked for the ~200 µs a phone
     /// never notices. `rules/word-conventions.md` carries the ruling.
     const RETAIN_CHAPTERS: bool = false;
+    /// The walk restarts at every chapter — a word chain and a doubled pair
+    /// both end at a seam — so one chapter's rows are the rows a whole-book
+    /// walk finds there.
+    const CHAPTER_SITES: bool = true;
 
     fn map(&self, chapter: ChapterInput<'_>) -> WordRow {
         walk::walk(chapter.text, chapter.verses)
@@ -711,129 +715,61 @@ impl ChapterPass for Words {
         aggregate: &WordAggregate,
         out: &mut Findings,
     ) {
-        let mut set = Vec::new();
-        self.firing(aggregate, out.patterns(), &mut set);
-        if set.is_empty() {
-            return;
-        }
-        let table = out.terminals().cloned().unwrap_or_default();
-        // Copied because `Findings` cannot lend its table and take a row at
-        // once; a firing set is tens of rows, not thousands.
-        let mut cased: FxHashMap<(u64, Form), PatternIndex> = FxHashMap::default();
-        let mut long: FxHashMap<u64, PatternIndex> = FxHashMap::default();
-        let mut twice: FxHashMap<(u64, bool), PatternIndex> = FxHashMap::default();
-        let mut sticky: FxHashMap<(ScalarKey, u8), PatternIndex> = FxHashMap::default();
-        for &index in &set {
-            let pattern = out.patterns()[usize::from(index.get())];
-            match pattern.key {
-                PatternKey::Casing { hash, form } => {
-                    cased.insert((hash, form), index);
-                }
-                PatternKey::WordLength { hash, .. } => {
-                    long.insert(hash, index);
-                }
-                PatternKey::Doubled { hash, separated } => {
-                    twice.insert((hash, separated), index);
-                }
-                PatternKey::LetterRun { length } => {
-                    sticky.insert((pattern.glyph, length), index);
-                }
-                _ => {}
-            }
-        }
+        let mut counts = Vec::new();
+        self.locate_chapters(
+            book,
+            text,
+            chapters,
+            verses,
+            0..chapters.len(),
+            aggregate,
+            &mut counts,
+            out,
+        );
+    }
 
+    /// None: every row this pass places is the chapter's own, so
+    /// [`locate_chapters`](ChapterPass::locate_chapters) places them all.
+    fn locate_book(
+        &self,
+        book: BookIndex,
+        text: &str,
+        chapters: &[Chapter],
+        verses: &[Verse],
+        aggregate: &WordAggregate,
+        out: &mut Findings,
+    ) {
+        let _ = (book, text, chapters, verses, aggregate, out);
+    }
+
+    /// The firing set and its lane maps are read once for the whole range; the
+    /// walk itself restarts at every chapter, so one chapter's rows are the
+    /// rows a whole-book walk would have found there.
+    fn locate_chapters(
+        &self,
+        book: BookIndex,
+        text: &str,
+        chapters: &[Chapter],
+        verses: &[Verse],
+        range: core::ops::Range<usize>,
+        aggregate: &WordAggregate,
+        counts: &mut Vec<u32>,
+        out: &mut Findings,
+    ) {
+        let Some(sites) = WordSites::of(self, aggregate, out) else {
+            counts.extend(range.map(|_| 0));
+            return;
+        };
         let mut found: Vec<(TextRange, PatternIndex, Reasons)> = Vec::new();
-        let mut runs: Vec<PatternIndex> = Vec::new();
         let mut rebased: Vec<Verse> = Vec::new();
         let mut cursor = 0usize;
-        for chapter in chapters {
+        for chapter in &chapters[range] {
             let span = chapter.text();
             let slice = &text[span.from() as usize..span.to() as usize];
             cursor = chapter_verses(verses, cursor, span, &mut rebased);
-            // The pair, not the word: a chapter seam ends it, which is what a
-            // fresh scan per chapter already says.
-            let mut previous: Option<(u64, u32, u32)> = None;
-            for_each_word(slice, &rebased, |word| {
-                if let Some((hash, from, to)) = previous.replace((word.hash, word.from, word.to))
-                    && hash == word.hash
-                    && let Some(gap) = gap_between(slice, to, word.from)
-                    // A separator whose last glyph forces a capital in this
-                    // corpus's own table is a sentence terminal, not a
-                    // doubling: `go. Go` is two sentences.
-                    && let Some(separated) = match gap {
-                        Gap::Bare => Some(false),
-                        Gap::Separated(glyph) if !table.forces(glyph) => Some(true),
-                        Gap::Separated(_) => None,
-                    }
-                    && let Some(&index) = twice.get(&(hash, separated))
-                {
-                    // The span covers both words and what stood between them.
-                    let at = TextRange::new(span.from() + from, span.from() + word.to)
-                        .expect("a pair grows forward");
-                    let reason = if separated {
-                        Reasons::DOUBLED_SEPARATED
-                    } else {
-                        Reasons::DOUBLED_BARE
-                    };
-                    found.push((at, index, reason));
-                }
-                // The letter-run rows this word holds, one per RUN: the
-                // channel counts runs, and a word may hold two of one length.
-                runs.clear();
-                if !sticky.is_empty() {
-                    let text = &slice[word.from as usize..word.to as usize];
-                    for_each_letter_run(text, |letter, length| {
-                        if let Some(&index) = sticky.get(&(letter, length)) {
-                            runs.push(index);
-                        }
-                    });
-                }
-                let (casing, length) = if word.form == Form::Uncased {
-                    // An uncased word is in no casing row; its runs still are.
-                    (None, None)
-                } else {
-                    (
-                        word.before
-                            .is_free(&table)
-                            .then(|| cased.get(&(word.hash, word.form)))
-                            .flatten(),
-                        long.get(&word.hash),
-                    )
-                };
-                // One span, one row: a word two channels named carries both
-                // reasons and the finer channel's index, as a run does.
-                let named = match (casing, length) {
-                    (Some(&index), Some(_)) => {
-                        Some((index, Reasons::CASING.union(Reasons::WORD_LENGTH)))
-                    }
-                    (Some(&index), None) => Some((index, Reasons::CASING)),
-                    (None, Some(&index)) => Some((index, Reasons::WORD_LENGTH)),
-                    (None, None) => None,
-                };
-                if named.is_none() && runs.is_empty() {
-                    return;
-                }
-                let at = TextRange::new(span.from() + word.from, span.from() + word.to)
-                    .expect("a word grows forward");
-                // A merged row keeps the finer channel's index, so the first
-                // run's own row is the one the bit rides; any further run of
-                // the same word is a row of its own.
-                let rest = match named {
-                    Some((index, reasons)) => {
-                        let reasons = if runs.is_empty() {
-                            reasons
-                        } else {
-                            reasons.union(Reasons::LETTER_RUN)
-                        };
-                        found.push((at, index, reasons));
-                        1
-                    }
-                    None => 0,
-                };
-                for &index in runs.iter().skip(rest) {
-                    found.push((at, index, Reasons::LETTER_RUN));
-                }
-            });
+            let before = found.len();
+            sites.walk(slice, span.from(), &rebased, &mut found);
+            counts.push((found.len() - before) as u32);
         }
         if found.is_empty() {
             return;
@@ -956,6 +892,153 @@ fn judges_anything(corpus: &[&WordAggregate], config: &JudgingConfig) -> bool {
 /// corpus fact and not a property of this book.
 pub fn free_in(book: &WordAggregate, pattern: &Pattern, table: &TerminalTable) -> u64 {
     crate::judge::free_of(book, pattern.glyph, &pattern.key, table)
+}
+/// One book's firing set, resolved into the lane maps the walk probes, plus
+/// the corpus terminal table it reads free from forced with.
+///
+/// Read once per publication per book: the walk itself is per chapter, and
+/// nothing here varies between them.
+struct WordSites {
+    table: TerminalTable,
+    cased: FxHashMap<(u64, Form), PatternIndex>,
+    long: FxHashMap<u64, PatternIndex>,
+    twice: FxHashMap<(u64, bool), PatternIndex>,
+    sticky: FxHashMap<(ScalarKey, u8), PatternIndex>,
+}
+
+impl WordSites {
+    /// `None` when this book fires nothing, so no chapter of it is walked.
+    fn of(words: &Words, aggregate: &WordAggregate, out: &Findings) -> Option<Self> {
+        let mut set = Vec::new();
+        words.firing(aggregate, out.patterns(), &mut set);
+        if set.is_empty() {
+            return None;
+        }
+        // Copied because `Findings` cannot lend its table and take a row at
+        // once; a firing set is tens of rows, not thousands.
+        let mut sites = Self {
+            table: out.terminals().cloned().unwrap_or_default(),
+            cased: FxHashMap::default(),
+            long: FxHashMap::default(),
+            twice: FxHashMap::default(),
+            sticky: FxHashMap::default(),
+        };
+        for &index in &set {
+            let pattern = out.patterns()[usize::from(index.get())];
+            match pattern.key {
+                PatternKey::Casing { hash, form } => {
+                    sites.cased.insert((hash, form), index);
+                }
+                PatternKey::WordLength { hash, .. } => {
+                    sites.long.insert(hash, index);
+                }
+                PatternKey::Doubled { hash, separated } => {
+                    sites.twice.insert((hash, separated), index);
+                }
+                PatternKey::LetterRun { length } => {
+                    sites.sticky.insert((pattern.glyph, length), index);
+                }
+                _ => {}
+            }
+        }
+        Some(sites)
+    }
+
+    /// One chapter's rows, in walk order, spans rebased by the chapter's
+    /// projected `start`.
+    fn walk(
+        &self,
+        slice: &str,
+        start: u32,
+        verses: &[Verse],
+        found: &mut Vec<(TextRange, PatternIndex, Reasons)>,
+    ) {
+        let mut runs: Vec<PatternIndex> = Vec::new();
+        // The pair, not the word: a chapter seam ends it, which is what a
+        // fresh scan per chapter already says.
+        let mut previous: Option<(u64, u32, u32)> = None;
+        for_each_word(slice, verses, |word| {
+            if let Some((hash, from, to)) = previous.replace((word.hash, word.from, word.to))
+                && hash == word.hash
+                && let Some(gap) = gap_between(slice, to, word.from)
+                // A separator whose last glyph forces a capital in this
+                // corpus's own table is a sentence terminal, not a
+                // doubling: `go. Go` is two sentences.
+                && let Some(separated) = match gap {
+                    Gap::Bare => Some(false),
+                    Gap::Separated(glyph) if !self.table.forces(glyph) => Some(true),
+                    Gap::Separated(_) => None,
+                }
+                && let Some(&index) = self.twice.get(&(hash, separated))
+            {
+                // The span covers both words and what stood between them.
+                let at =
+                    TextRange::new(start + from, start + word.to).expect("a pair grows forward");
+                let reason = if separated {
+                    Reasons::DOUBLED_SEPARATED
+                } else {
+                    Reasons::DOUBLED_BARE
+                };
+                found.push((at, index, reason));
+            }
+            // The letter-run rows this word holds, one per RUN: the
+            // channel counts runs, and a word may hold two of one length.
+            runs.clear();
+            if !self.sticky.is_empty() {
+                let text = &slice[word.from as usize..word.to as usize];
+                for_each_letter_run(text, |letter, length| {
+                    if let Some(&index) = self.sticky.get(&(letter, length)) {
+                        runs.push(index);
+                    }
+                });
+            }
+            let (casing, length) = if word.form == Form::Uncased {
+                // An uncased word is in no casing row; its runs still are.
+                (None, None)
+            } else {
+                (
+                    word.before
+                        .is_free(&self.table)
+                        .then(|| self.cased.get(&(word.hash, word.form)))
+                        .flatten(),
+                    self.long.get(&word.hash),
+                )
+            };
+            // One span, one row: a word two channels named carries both
+            // reasons and the finer channel's index, as a run does.
+            let named = match (casing, length) {
+                (Some(&index), Some(_)) => {
+                    Some((index, Reasons::CASING.union(Reasons::WORD_LENGTH)))
+                }
+                (Some(&index), None) => Some((index, Reasons::CASING)),
+                (None, Some(&index)) => Some((index, Reasons::WORD_LENGTH)),
+                (None, None) => None,
+            };
+            if named.is_none() && runs.is_empty() {
+                return;
+            }
+            let at =
+                TextRange::new(start + word.from, start + word.to).expect("a word grows forward");
+            // A merged row keeps the finer channel's index, so the first
+            // run's own row is the one the bit rides; any further run of
+            // the same word is a row of its own.
+            let rest = match named {
+                Some((index, reasons)) => {
+                    let reasons = if runs.is_empty() {
+                        reasons
+                    } else {
+                        reasons.union(Reasons::LETTER_RUN)
+                    };
+                    found.push((at, index, reasons));
+                    1
+                }
+                None => 0,
+            };
+            for &index in runs.iter().skip(rest) {
+                found.push((at, index, Reasons::LETTER_RUN));
+            }
+        });
+    }
 }
 
 /// This chapter's verse rows, rebased to it, returning where the next chapter

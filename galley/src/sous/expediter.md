@@ -230,6 +230,40 @@ all of them on a cold open, none on a warm republication. The sweep retains a
 site entry exactly as it retains a chapter table, and `resident_bytes` counts
 it: the inline row plus its boxed slice.
 
+### Per chapter, for a hot book
+
+A keystroke moves the edited book's checksum, so its book entry misses and it
+rescans — all sixteen chapters of MRK to place rows in the one that moved. For
+a book in the hot set (the same set that keeps its chapter observation rows) the
+rows are kept a second way:
+
+```text
+chapter_sites[(ObservationKey, FiringHash, TerminalHash)] = [SiteRow]
+```
+
+The rows are stored in CHAPTER-relative coordinates and rebased by the
+chapter's projected start on replay, so the same chapter under two checksums —
+or in two books — is one entry. A pass says whether this split is real:
+`ChapterPass::CHAPTER_SITES` is true only when `locate_book` plus
+`locate_chapters` over every chapter equals `locate` row for row, and a tuple
+says yes only when exactly one member does. In `Brigade` that member is `Words`,
+whose walk restarts at every chapter; `Substrate` places its rows in
+`locate_book` as before. So a keystroke runs the substrate's rescan whole and
+the word walk for one chapter. `last_sited_chapters()` counts the chapters
+walked — one after a keystroke into a hot book, all of them the first time a
+book goes hot or the firing set moves.
+
+`TerminalHash` is in the key and not in `FiringHash` because the word walk reads
+the corpus's terminal table to split free occurrences from forced, and a firing
+set is position-blind about exactly that: the same rows fire while the table
+decides differently which occurrences they cover. The book-level entry above is
+unchanged, terminal hash and all — it replays only a book whose own text stood
+still, and this one replays chapters of a book that moved.
+
+Eviction follows the hot set rather than the sweep: each publication keeps
+exactly the keys its hot books name, so a book pushed out of the set gives its
+chapter rows back with its observations. `resident_bytes` counts them.
+
 What this cache does NOT key on is the numerator and denominator of a firing
 pattern. Those move constantly and change nothing about where the pattern
 occurs; the published row carries only an index into the table, and the table

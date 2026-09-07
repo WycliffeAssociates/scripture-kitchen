@@ -1211,6 +1211,91 @@ fn casing_rows(books: &[Book], config: &<Brigade as ChapterPass>::Config) -> usi
         .count()
 }
 
+/// Two books whose repeated `lord lord` fires the doubling channel, with each
+/// chapter ending in `lord` and the next beginning with it.
+///
+/// The seam pair is the one a whole-book walk refuses — the walk restarts at a
+/// chapter start — so a chapter-scoped siting that joined them would publish a
+/// row the cold oracle does not.
+fn seam_books() -> Vec<Book> {
+    let bulk = "the lord came and ".repeat(60);
+    ["GEN", "MRK"]
+        .iter()
+        .map(|code| {
+            let mut text = format!("\\id {code}\n\\h {code}\n");
+            for chapter in 1..=3 {
+                text.push_str(&format!("\\c {chapter}\n\\p\n"));
+                text.push_str(&format!("\\v 1 lord went out {bulk}he saw them\n"));
+                // The seam: this chapter's last word, and the next chapter's
+                // first. Plus the corpus's one real pair, in GEN 1.
+                match (*code, chapter) {
+                    ("GEN", 1) => text.push_str("\\v 2 they told the lord lord and the lord\n"),
+                    _ => text.push_str("\\v 2 they told the people and the lord\n"),
+                }
+            }
+            (format!("seam/{code}.usfm"), text)
+        })
+        .collect()
+}
+
+/// Doubling patterns a cold analysis of these books emits.
+fn doubled_rows(books: &[Book]) -> usize {
+    let parsed: Vec<OnionBook> = books
+        .iter()
+        .map(|(id, text)| {
+            OnionBook::parse(text).unwrap_or_else(|error| panic!("{id} is not analyzable: {error}"))
+        })
+        .collect();
+    let corpus = Corpus::try_new(&parsed).expect("distinct book keys");
+    analyze_with(
+        &corpus,
+        &Brigade::default(),
+        &<Brigade as ChapterPass>::Config::default(),
+    )
+    .patterns()
+    .iter()
+    .filter(|pattern| pattern.channel == Channel::Doubled)
+    .count()
+}
+
+/// A chapter's word rows are cached and replayed per chapter for a hot book,
+/// so a pair that straddles a chapter start is the case that would show it:
+/// each chapter here ends in `lord` and the next begins with it.
+#[test]
+fn a_doubled_pair_across_a_chapter_start_publishes_the_cold_bytes() {
+    let mut books = seam_books();
+    assert!(doubled_rows(&books) > 0, "the fixture has to fire doubling");
+
+    let mut sous = Expediter::new(Brigade::default(), BUDGET);
+    for (id, text) in &books {
+        sous.update(id.as_str(), Role::Target, text).unwrap();
+    }
+    assert_publications_agree(&mut sous, &books, "seam: cold");
+
+    // One keystroke per chapter of one book: each publication walks the
+    // chapter that moved and replays the two that did not, seam included.
+    let mut sited = Vec::new();
+    for chapter in 1..=3 {
+        books[0].1 = books[0].1.replacen(
+            &format!("\\c {chapter}\n\\p\n\\v 1 lord went out"),
+            &format!("\\c {chapter}\n\\p\n\\v 1 lord walked out"),
+            1,
+        );
+        sous.update(books[0].0.as_str(), Role::Target, &books[0].1)
+            .unwrap();
+        assert_publications_agree(&mut sous, &books, "seam: after a keystroke");
+        sited.push(sous.last_sited_chapters());
+    }
+    // Not the first: it is the keystroke that puts `walked` in the corpus, so
+    // the pattern table it fires against is new and every chapter re-sites.
+    assert_eq!(
+        &sited[1..],
+        [1, 1],
+        "a keystroke walks its own chapter and replays the seams"
+    );
+    assert!(doubled_rows(&books) > 0, "and still fires it");
+}
+
 /// The word tally is resident and updated one book at a time, so an edited
 /// book has to leave it at its old rows and re-enter at its new ones exactly:
 /// one wrong count moves every share the channel judges.
