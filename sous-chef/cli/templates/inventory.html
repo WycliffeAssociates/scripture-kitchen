@@ -292,6 +292,18 @@ function rarityCard(g){
       <div class="t">Absolute rarity</div><div class="n mono">${fmt(g.total)}</div>
       <div class="pc">${g.books} book${g.books>1?"s":""}</div></button></div></section>`;
 }
+function sentenceCard(g){
+  if(!g.sentence)return"";
+  const s=g.sentence;
+  const sel=S.pick&&S.pick.k==="c"?" sel":"";
+  return `<section><h3>Capital expected</h3>
+    <p class="note">This translation writes a capital after ${esc(g.g)} ${pct(s.d-s.n,s.d)} of the
+      time \u2014 ${fmt(s.d-s.n)} of ${fmt(s.d)} times it is followed by a cased letter. These
+      ${fmt(s.n)} are the exceptions, in ${s.books} book${s.books>1?"s":""}. Click to read them.</p>
+    <div class="cells"><button class="cellcard hot${sel}" data-c="1">
+      <div class="t">Lowercase after ${esc(g.g)}</div><div class="n mono">${fmt(s.n)}</div>
+      <div class="pc">of ${fmt(s.d)}</div></button></div></section>`;
+}
 function pairTable(g){
   if(!g.pairs.length)return"";
   const tot=g.pairs.reduce((a,p)=>a+p.n,0);
@@ -336,6 +348,7 @@ function samplesPanel(g){
   let title="",list=[];
   if(S.pick.k==="t"){const c=g.topo[S.pick.v];title=TLABEL[S.pick.v];list=c?c.samples:[]}
   else if(S.pick.k==="z"){title=`Every occurrence of ${g.g}`;list=g.rarity?g.rarity.samples:[]}
+  else if(S.pick.k==="c"){title=`Words after ${g.g} that start lowercase`;list=g.sentence?g.sentence.samples:[]}
   else if(S.pick.k==="r"){const [key,l]=S.pick.v.split(":");
     title=`Clusters of size ${l} (${key==="pure"?"only this mark":"with other marks"}) that include ${g.g}`;
     list=((g.runlen_samples||{})[key]||{})[l]||[]}
@@ -370,11 +383,13 @@ function drawBrowse(){
     <div class="gh"><div class="specimen">${esc(g.g)}</div>
       <div><h2>${esc(g.uname)}</h2>
       <div class="facts mono">appears ${fmt(g.total)} times · ${share} of all punctuation and symbols · in ${g.books} book${g.books>1?"s":""}</div></div></div>
-    ${rarityCard(g)}${sideTable(g)}${topoCards(g)}${samplesPanel(g)}${pairTable(g)}${runStrip(g)}`;
+    ${rarityCard(g)}${sentenceCard(g)}${sideTable(g)}${topoCards(g)}${samplesPanel(g)}${pairTable(g)}${runStrip(g)}`;
   document.querySelectorAll("#topoCells .cellcard").forEach(b=>
     b.onclick=()=>{S.pick={k:"t",v:b.dataset.t};drawBrowse()});
   document.querySelectorAll("[data-z]").forEach(b=>
     b.onclick=()=>{S.pick={k:"z"};drawBrowse()});
+  document.querySelectorAll("[data-c]").forEach(b=>
+    b.onclick=()=>{S.pick={k:"c"};drawBrowse()});
   document.querySelectorAll(".pairs tr[tabindex]").forEach(r=>{
     const go=()=>{S.pick={k:"p",v:r.dataset.p};drawBrowse()};
     r.onclick=go;r.onkeydown=e=>{if(e.key==="Enter")go()};

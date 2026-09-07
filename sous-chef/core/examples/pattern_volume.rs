@@ -310,6 +310,7 @@ fn describe(pattern: &Pattern) -> String {
             if separated { "separated" } else { "bare" }
         ),
         PatternKey::LetterRun { length } => format!("letter-run {length}"),
+        PatternKey::SentenceStart => "sentence-start".to_string(),
     };
     format!(
         "{} {evidence} {}/{} {:.2}%",

@@ -181,6 +181,10 @@ pub struct Channels {
     /// handful of rows per corpus, and the denominator is the letter's own
     /// repeat history, so no script needs a rule of its own.
     pub letter_runs: bool,
+    /// A lowercase letter after a glyph the corpus almost always capitalizes
+    /// after. On: the bar is high enough that every exception is worth a look,
+    /// and the tier fires at the glyph channels' own volume.
+    pub sentence_start: bool,
 }
 
 impl Default for Channels {
@@ -195,6 +199,7 @@ impl Default for Channels {
             word_length: false,
             doubled: true,
             letter_runs: true,
+            sentence_start: true,
         }
     }
 }
@@ -226,6 +231,16 @@ pub struct JudgingConfig {
     /// The share of a glyph's handoffs that must be uppercase before the
     /// corpus is held to capitalize after it, in basis points.
     pub terminal_upper_share_bp: u16,
+    /// The share of a glyph's cased handoffs that must be uppercase before
+    /// every lowercase one is reviewable, in basis points.
+    ///
+    /// A separate knob from `terminal_upper_share_bp` because the two answer
+    /// different questions on the same counts: 80% decides whether a capital
+    /// after this glyph was the punctuation's doing, so a word there is no
+    /// evidence about the word; 98% decides whether a lowercase letter after
+    /// it is an exception worth reading. A glyph can force at 80% and say
+    /// nothing here.
+    pub sentence_start_upper_bp: u16,
     /// Whole standard deviations above the corpus's mean word length that a
     /// word must reach before [`Channel::WordLength`] names it.
     pub word_length_sigma: u8,
@@ -254,6 +269,7 @@ impl Default for JudgingConfig {
             word_support_floor: 20,
             word_bands: Staircase::new(Staircase::WORD_STEPS).expect("the word bounds ascend"),
             terminal_upper_share_bp: 8_000,
+            sentence_start_upper_bp: 9_800,
             word_length_sigma: 4,
             doubles_productive_bp: 300,
             doubles: DoublesPolicy::default(),
@@ -295,10 +311,15 @@ pub enum Channel {
     /// The word walk feeds it, but the key IS a scalar: the glyph field holds
     /// the folded letter and the key byte the run length.
     LetterRun = 8,
+    /// A lowercase letter after a glyph this corpus almost always capitalizes
+    /// after. The mirror of [`Self::Casing`], on the same `follows` lane: that
+    /// asks what form a WORD wears in a free position, this what case a GLYPH
+    /// hands off to.
+    SentenceStart = 9,
 }
 
 impl Channel {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::ExactNeighbor,
         Self::PooledNeighbor,
         Self::RunShape,
@@ -308,6 +329,7 @@ impl Channel {
         Self::WordLength,
         Self::Doubled,
         Self::LetterRun,
+        Self::SentenceStart,
     ];
 
     /// Whether the channel's `glyph` field carries a word hash instead of a
@@ -335,6 +357,7 @@ impl Channel {
             Self::WordLength => "WordLength",
             Self::Doubled => "Doubled",
             Self::LetterRun => "LetterRun",
+            Self::SentenceStart => "SentenceStart",
         }
     }
 }
@@ -398,6 +421,9 @@ pub enum PatternKey {
     LetterRun {
         length: u8,
     },
+    /// The glyph is the row's own; the claim needs nothing else, so the key is
+    /// a unit and the wire's key byte is zero.
+    SentenceStart,
 }
 
 /// One firing pattern: a glyph, the channel that convicted it, and the
@@ -464,6 +490,7 @@ impl Pattern {
             PatternKey::Placement { .. } => Channel::Placement,
             PatternKey::Rarity => Channel::Rarity,
             PatternKey::LetterRun { .. } => Channel::LetterRun,
+            PatternKey::SentenceStart => Channel::SentenceStart,
         };
         if keyed != self.channel {
             return Err("channel");
@@ -512,6 +539,7 @@ pub(crate) fn judge_corpus(corpus: &[&BookAggregate], config: &JudgingConfig, ou
 
     let placements = placement_evidence(corpus);
     let shapes = run_evidence(corpus);
+    let handoffs = follow_evidence(corpus);
     for (glyph, marginals) in &placements {
         let evidence = shapes.get(glyph);
         if config.channels.exact_neighbor
@@ -532,7 +560,49 @@ pub(crate) fn judge_corpus(corpus: &[&BookAggregate], config: &JudgingConfig, ou
         if config.channels.placement {
             placement(*glyph, marginals, config, out);
         }
+        if config.channels.sentence_start
+            && let Some(handoffs) = handoffs.get(glyph)
+        {
+            sentence_start(*glyph, handoffs, config, out);
+        }
     }
+}
+
+/// The mirror of the terminal table, on the same counts: a glyph this corpus
+/// almost always capitalizes after, and the handoffs where it did not.
+///
+/// `upper / (upper + lower)` decides whether the glyph speaks at all; the row
+/// then reports the lowercase handoffs against the cased ones, so the fraction
+/// a reviewer reads is the exception's own. A glyph followed only by uncased
+/// letters decides nothing, exactly as [`TerminalTable`] has it — the
+/// denominator is the cased handoffs and not every handoff. The band is the
+/// glyph staircase over that denominator and is cosmetic: the threshold above
+/// is the whole firing rule.
+fn sentence_start(
+    glyph: ScalarKey,
+    handoffs: &FollowEvidence,
+    config: &JudgingConfig,
+    out: &mut Findings,
+) {
+    let upper = u64::from(handoffs.counts.get(Case::Upper));
+    let lower = u64::from(handoffs.counts.get(Case::Lower));
+    let cased = upper + lower;
+    let Some((band, _)) = entitled(cased, config) else {
+        return;
+    };
+    if lower == 0 || share_bp(upper, cased) < config.sentence_start_upper_bp {
+        return;
+    }
+    out.push_pattern(Pattern {
+        glyph,
+        channel: Channel::SentenceStart,
+        key: PatternKey::SentenceStart,
+        band: Some(band),
+        numerator: saturate(lower),
+        denominator: saturate(cased),
+        share_bp: share_bp(lower, cased),
+        books: handoffs.lower.books(),
+    });
 }
 
 /// Every scalar under `rarity_floor`, letters included when the corpus is
@@ -826,6 +896,11 @@ fn numerator_in(book: &BookAggregate, pattern: &Pattern) -> u64 {
             .iter()
             .find(|(key, _)| *key == pattern.glyph)
             .map_or(0, |(_, count)| u64::from(*count)),
+        PatternKey::SentenceStart => book
+            .follows()
+            .iter()
+            .find(|(key, _)| *key == pattern.glyph)
+            .map_or(0, |(_, counts)| u64::from(counts.get(Case::Lower))),
         // A word row is judged over word aggregates, which these are not;
         // `words::free_in` is its oracle.
         PatternKey::Casing { .. }
@@ -857,6 +932,34 @@ struct RunEvidence {
     runs: u64,
     /// Positions where the glyph is followed by another atom.
     positions: u64,
+}
+
+/// One glyph's handoffs: the merged counts, and the books holding part of the
+/// lowercase lane, which is the numerator [`Channel::SentenceStart`] reports.
+#[derive(Default)]
+struct FollowEvidence {
+    counts: FollowCounts,
+    lower: Tally,
+}
+
+/// Every book's follow lane into one glyph-keyed table.
+///
+/// [`merged_follows`] answers the same question without dispersion, and the
+/// terminal table is all it needs; this one carries the `Tally` a row does.
+fn follow_evidence(corpus: &[&BookAggregate]) -> FxHashMap<ScalarKey, FollowEvidence> {
+    let mut out: FxHashMap<ScalarKey, FollowEvidence> = FxHashMap::default();
+    for (book, aggregate) in corpus.iter().enumerate() {
+        let book = book as u32;
+        for &(key, counts) in aggregate.follows() {
+            let evidence = out.entry(key).or_default();
+            evidence.counts.absorb(counts);
+            let lower = u64::from(counts.get(Case::Lower));
+            if lower > 0 {
+                evidence.lower.add(lower, book);
+            }
+        }
+    }
+    out
 }
 
 /// Every book's pairs into one glyph-keyed table, ascending by glyph.

@@ -124,7 +124,7 @@ position matched — so ten thousand sites of one convention cost ten thousand
 | 0..4 | `glyph: u32` (`ScalarKey` raw; `u32::MAX` is the pooled digit key) |
 | 4..8 | `neighbor: u32` (the G3 key; 0 on every other channel) |
 | 8 | `channel: u8` (`Channel` discriminant, finest grain first) |
-| 9 | `key: u8` (Placement: `side << 4 \| OuterClass`; RunShape: `pure << 4 \| bucket`; PooledNeighbor: `Pool`; Casing: `Form`; WordLength: whole deviations above the mean; Doubled: 0 adjacent, 1 separated; LetterRun: run length `2..=8`; else 0) |
+| 9 | `key: u8` (Placement: `side << 4 \| OuterClass`; RunShape: `pure << 4 \| bucket`; PooledNeighbor: `Pool`; Casing: `Form`; WordLength: whole deviations above the mean; Doubled: 0 adjacent, 1 separated; LetterRun: run length `2..=8`; SentenceStart: 0; else 0) |
 | 10 | `band: u8` (staircase step index; `0xFF` = none, which only `Rarity` carries) |
 | 11 | `flags: u8` (reserved, 0; the decoder refuses nonzero) |
 | 12..16 | `numerator: u32` |
@@ -132,6 +132,14 @@ position matched — so ten thousand sites of one convention cost ten thousand
 | 20..22 | `share_bp: u16`, at most 10,000 |
 | 22 | `books: u8` — books holding part of the numerator; books-possible is the header's `book_count` |
 | 23 | reserved `u8` 0 (the decoder refuses nonzero) |
+
+**Channel 9 `SentenceStart` is an ordinary glyph row with an empty key:** the
+glyph field carries the run terminal as a `ScalarKey`, the neighbor field is
+zero, and the key byte is zero, because the claim needs nothing beside the
+glyph. Unlike `Rarity`, which is the other zero-key channel, it carries a band.
+It judges the substrate's `follows` lane rather than its pairs or runs, so
+`Channel::is_word` and `judged_by_words` are both false and `Substrate` owns
+its sites.
 
 **Channel 8 `LetterRun` comes out of the same word walk and is NOT one of
 them:** it judges a real scalar, so bytes 0..4 carry the folded letter as an
@@ -153,11 +161,11 @@ decodes it as a `bigint`. Why a hash and not the bytes: `../words.md`.
 
 `Reasons` **is the full `i16` lane B, not its low byte.** Bit 7,
 `WORD_LENGTH`, was the last one a `u8` could hold; W2 spent bits 8 and 9 on
-`DOUBLED_BARE` and `DOUBLED_SEPARATED` and W4 bit 10 on `LETTER_RUN`, which
-cost nothing on the wire because the lane was always sixteen bits and both
-readers always read it as one — Rust holds `Reasons` in a `u16` and the
-generated reader calls `getUint16`. Five bits are left, and `KNOWN_BITS` is the
-whole of what is legal: bit 11 is refused, which
+`DOUBLED_BARE` and `DOUBLED_SEPARATED`, W4 bit 10 on `LETTER_RUN`, and W5 bit
+11 on `SENTENCE_START`, which cost nothing on the wire because the lane was
+always sixteen bits and both readers always read it as one — Rust holds
+`Reasons` in a `u16` and the generated reader calls `getUint16`. Four bits are
+left, and `KNOWN_BITS` is the whole of what is legal: bit 12 is refused, which
 `convention_refuses_unknown_reason_bits` pins.
 
 `books` is dispersion, and dispersion is information: nothing in the engine

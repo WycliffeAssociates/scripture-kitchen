@@ -23,6 +23,7 @@ use memchr::memmem::Finder;
 use crate::judge::{Channel, Pattern, PatternIndex, PatternKey, Side, pool_of_key};
 use crate::substrate::{BookAggregate, OuterClass, RUN_BUCKETS, ScalarKey, is_run_atom};
 use crate::unicode::{atoms::widen_to_atoms, class_of};
+use crate::words::word_around;
 use crate::{Chapter, Reasons, TextRange};
 
 /// One matching run in projected-book coordinates.
@@ -95,6 +96,7 @@ pub fn locate_counted(
     if patterns.is_empty() {
         return;
     }
+    let base = out.len();
     let needles = needles(patterns);
     let cursor = Cursor::new(text, chapters);
     let mut hits: Vec<(u32, u32)> = Vec::new();
@@ -181,8 +183,55 @@ pub fn locate_counted(
                 }
             }
             emit(patterns, &matched, run, index, &cursor, out, tally);
+            // The follows lane credits the run's LAST atom, so only that one
+            // can have handed a capital off — and its site is a different span
+            // from this run's, which is why it is a row of its own.
+            if let Some(&(terminal, key)) = atoms.last()
+                && let Some(needle) = needles.iter().find(|needle| needle.glyph == key)
+            {
+                sentence_start(patterns, needle, terminal, &cursor, out, tally);
+            }
         }
     }
+    // A sentence-start row names the word AFTER its run, which may sit past
+    // the next run's own site; the promised order is the span's.
+    out[base..].sort_by_key(|site| (site.span.from(), site.span.to()));
+}
+
+/// The one channel whose site is not the run that matched it: the pattern is
+/// glyph-side, but the reviewable thing is the lowercase word the glyph handed
+/// off to, so the span is that word and the row carries it alone.
+///
+/// One row per lowercase handoff, which is exactly what the `follows` lane
+/// counted — the run terminal's, whitespace ridden through and nothing else,
+/// across a chapter seam as the fold's carry is.
+fn sentence_start(
+    patterns: &[(PatternIndex, Pattern)],
+    needle: &Needle,
+    terminal: u32,
+    cursor: &Cursor<'_>,
+    out: &mut Vec<Site>,
+    tally: &mut [u64],
+) {
+    let Some(&slot) = needle
+        .patterns
+        .iter()
+        .find(|&&slot| patterns[slot].1.channel == Channel::SentenceStart)
+    else {
+        return;
+    };
+    let Some((chapter, at, letter)) = cursor.handoff(terminal) else {
+        return;
+    };
+    if !class_of(letter).is_lowercase() {
+        return;
+    }
+    tally[slot] += 1;
+    out.push(Site {
+        span: cursor.word(at, chapter),
+        headline: patterns[slot].0,
+        reasons: Reasons::SENTENCE_START,
+    });
 }
 
 /// A scalar that is not a run atom, sited on its own: only the two channels a
@@ -262,6 +311,7 @@ fn rung(pattern: &Pattern) -> Reasons {
             Side::Next => Reasons::PLACEMENT_AFTER,
         },
         PatternKey::Rarity => Reasons::RARITY,
+        PatternKey::SentenceStart => Reasons::SENTENCE_START,
         // `firing` never lets one through: the word pass owns them.
         PatternKey::LetterRun { .. } => Reasons::LETTER_RUN,
         PatternKey::Casing { .. } => Reasons::CASING,
@@ -311,6 +361,8 @@ fn occurrences(
             .filter(|pair| pair[0].1 == glyph && pool_of_key(pair[1].1) == pool)
             .count() as u64,
         PatternKey::Rarity => atoms.iter().filter(|atom| atom.1 == glyph).count() as u64,
+        // Its site is the word after the run, never the run: `sentence_start`.
+        PatternKey::SentenceStart => 0,
         PatternKey::Casing { .. }
         | PatternKey::WordLength { .. }
         | PatternKey::Doubled { .. }
@@ -416,6 +468,45 @@ impl<'a> Cursor<'a> {
             }
         }
         OuterClass::Edge
+    }
+
+    /// The letter a run terminal at `at` hands off to: the first non-whitespace
+    /// scalar after it, with the chapter and offset holding it.
+    ///
+    /// Whitespace is ridden through and nothing else — a nonletter opens a new
+    /// run and a mark clears the handoff, which is what the walk does when it
+    /// drops `awaiting`. Across a seam the fold pairs a chapter's `open_follow`
+    /// with the next one's `edge_case`, and a blank chapter passes the follow
+    /// through, so the scan crosses a seam the same way the pair reads across
+    /// one. `None` at the end of the book.
+    pub fn handoff(&self, at: u32) -> Option<(usize, u32, char)> {
+        let chapter = self.chapter_at(at)?;
+        let span = self.chapters[chapter].text();
+        let mut rest = self.text[at as usize..span.to() as usize].char_indices();
+        rest.next();
+        for (offset, scalar) in rest {
+            if !class_of(scalar).is_whitespace() {
+                return Some((chapter, at + offset as u32, scalar));
+            }
+        }
+        for (later, held) in self.chapters.iter().enumerate().skip(chapter + 1) {
+            let start = held.text().from();
+            for (offset, scalar) in self.slice(held).char_indices() {
+                if !class_of(scalar).is_whitespace() {
+                    return Some((later, start + offset as u32, scalar));
+                }
+            }
+        }
+        None
+    }
+
+    /// The word holding the scalar at `at`, widened to atom edges: the same
+    /// span the word lane draws, clipped to the chapter as that walk is.
+    pub fn word(&self, at: u32, chapter: usize) -> TextRange {
+        let start = self.chapters[chapter].text().from();
+        let (from, to) = word_around(self.slice(&self.chapters[chapter]), at - start);
+        let span = TextRange::new(from + start, to + start).expect("a word grows forward");
+        self.widen(span, chapter)
     }
 
     /// The maximal run holding the scalar at `at`, clipped to its chapter;

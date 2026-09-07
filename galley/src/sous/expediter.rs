@@ -193,6 +193,8 @@ fn key_bytes(key: PatternKey) -> [u8; 10] {
         // The letter itself rides `glyph`, which the digest hashes beside
         // this; only the run length is the key's own.
         PatternKey::LetterRun { length } => out[..2].copy_from_slice(&[8, length]),
+        // The glyph is the whole key; the digest hashes it beside this.
+        PatternKey::SentenceStart => out[0] = 9,
     }
     out
 }

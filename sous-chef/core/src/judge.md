@@ -30,6 +30,7 @@ finding.
 | `WordLength` | word | corpus occurrences of one long case-folded word | every word occurrence the corpus counted |
 | `Doubled` | word | one case-folded word immediately repeated, adjacent OR separated | that word's occurrences, cased and uncased |
 | `LetterRun` | word walk | runs of one letter of exactly this length | runs of that letter of ANY length ≥ 2 |
+| `SentenceStart` | run terminal | lowercase letters this glyph handed off to | cased letters it handed off to |
 
 `Placement` is **per side, marginal**: the outer class before `g` and the
 outer class after `g` are two distributions over
@@ -253,6 +254,47 @@ statistic would have had to measure.
 Its sites are the word each run sits inside, one row per run; a word this
 channel and the casing channel both name is one row carrying both bits.
 
+## `SentenceStart` is the terminal table read the other way
+
+The same `follows` lane the table above learns from, asked the opposite
+question. The table asks *did the punctuation choose this capital*, so a word
+after a forcing glyph is no evidence about the word. This channel asks *did the
+punctuation not get the capital it almost always gets*, so a lowercase letter
+after a near-certain glyph is one row for review.
+
+```text
+en_ulb, follows merged over the corpus
+   '.'  upper 33,333 of 33,339 cased handoffs   9,998 bp >= 9,800  -> FIRES 6/33,339
+   ','  upper  4,836 of 47,291                  1,022 bp           -> silent
+   '!'  upper  1,212 of 1,221                   9,926 bp           -> FIRES 9/1,221
+```
+
+Per glyph with at least `support_floor` cased handoffs: `upper / (upper +
+lower)` decides whether the glyph speaks, and the row then reports `lower /
+cased` — the exception's own fraction, which is what a reviewer reads. No row
+when `lower` is zero: a glyph that never slipped has nothing to show. The band
+is the glyph staircase over the cased handoffs and is **cosmetic**; the
+threshold is the whole firing rule, which is why a band of 4 sits beside a
+share far under its rung.
+
+**Two knobs, and they are not the same number.** `terminal_upper_share_bp`
+(8,000) decides forced from free for a WORD: above it the punctuation chose the
+capital, so the word's own habit is unobservable there. `sentence_start_upper_bp`
+(9,800) decides whether every exception is worth a look. A glyph can force at
+80% and say nothing here, and the reverse cannot happen, because 98% is inside
+80%. Sharing one number would mean either flagging every lowercase word after a
+glyph that capitalizes four times in five — thousands of rows — or refusing to
+hold a 98% glyph to its own habit.
+
+The denominator is the **cased** handoffs, the same one the table uses, so an
+uncased script is judged here exactly as it is there: it decides nothing and
+abstains. A glyph followed only by uncased letters has a denominator of zero.
+
+Its sites are the exception's own word, not the glyph's run — the one other
+channel whose span is not what matched it is `Doubled`, and for the same
+reason. Which atom the lane credits, and why the site rule must match it
+exactly, is [`sites.md`](sites.md).
+
 ## Dispersion
 
 `Pattern::books` is how many Target books hold part of that row's numerator,
@@ -308,6 +350,9 @@ Deterministic, because the wire pins it:
 
 `Channel`'s discriminants run finest grain first, so sorting by channel *is*
 sorting finest first, and G2 comes out between G3 and G1 without a sort.
+`SentenceStart` is channel 9 and comes last of a glyph's own rows, which is
+where appending it put it: it is not on the grain ladder at all, so no order
+claim was disturbed.
 The word pass's channels are last, in channel order — `Casing`, `WordLength`,
 `Doubled`, then `LetterRun` — each hash-ascending within itself, and
 `LetterRun` letter-ascending. Their rows are a separate pass's, so they never

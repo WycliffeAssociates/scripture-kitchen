@@ -7,8 +7,9 @@
 //! the wire layout is the codec's.
 
 use sous_core::{
-    BookKey, Channel, Channels, Chapter, Corpus, JudgingConfig, LetterRoster, Pattern, PatternKey,
-    ProjectedBook, ScalarKey, Side, Substrate, TextRange, Verse, VerseKey, analyze_with,
+    BookKey, Channel, Channels, Chapter, Corpus, FindingKind, Findings, JudgingConfig,
+    LetterRoster, Pattern, PatternKey, ProjectedBook, Reasons, ScalarKey, Side, Substrate,
+    TextRange, Verse, VerseKey, analyze_with,
     substrate::OuterClass,
     unicode::{Pool, pool_of},
 };
@@ -49,6 +50,50 @@ fn book(key: &[u8; 3], text: String) -> Book {
         chapters: vec![Chapter::new(1, span).unwrap()],
         verses: vec![Verse::new(VerseKey::new(1, 1, 1).unwrap(), span)],
     }
+}
+
+/// One book of several chapters, joined with no gap, each its own verse — so
+/// a seam is a real seam and a chapter start is a real verse start.
+fn book_of(key: &[u8; 3], chapters: &[&str]) -> Book {
+    let mut text = String::new();
+    let (mut spans, mut verses) = (Vec::new(), Vec::new());
+    for (index, chapter) in chapters.iter().enumerate() {
+        let number = index as u16 + 1;
+        let from = u32::try_from(text.len()).expect("a synthetic corpus is small");
+        text.push_str(chapter);
+        let to = u32::try_from(text.len()).expect("a synthetic corpus is small");
+        let span = TextRange::new(from, to).unwrap();
+        spans.push(Chapter::new(number, span).unwrap());
+        verses.push(Verse::new(VerseKey::new(number, 1, 1).unwrap(), span));
+    }
+    Book {
+        key: BookKey::new(*key),
+        text,
+        chapters: spans,
+        verses,
+    }
+}
+
+/// The whole sink, so a fixture can read the sites beside the rows.
+fn findings_of(books: &[Book], config: &JudgingConfig) -> Findings {
+    let corpus = Corpus::try_new(books).expect("a synthetic corpus is valid");
+    analyze_with(&corpus, &Substrate, config)
+}
+
+/// The text every site carrying `reason` landed on, in publication order.
+fn sited<'a>(books: &'a [Book], findings: &Findings, reason: Reasons) -> Vec<&'a str> {
+    findings
+        .rows()
+        .iter()
+        .filter(|row| match row.kind() {
+            FindingKind::Convention(digest) => digest.reasons().contains(reason),
+            _ => false,
+        })
+        .map(|row| {
+            let text = &books[usize::from(row.book_idx().get())].text;
+            &text[row.from() as usize..row.to() as usize]
+        })
+        .collect()
 }
 
 fn patterns_with(text: impl Into<String>, config: &JudgingConfig) -> Vec<Pattern> {
@@ -517,4 +562,146 @@ fn the_config_moves_the_roster_and_the_channels() {
             .iter()
             .any(|row| row.channel == Channel::PooledNeighbor)
     );
+}
+
+// ── A capital the corpus expects, and did not get ───────────────────────
+
+/// Every sentence-start row a corpus fires, as `(glyph, numerator/denominator)`.
+fn expects_capital(rows: &[Pattern]) -> Vec<(Option<char>, u32, u32)> {
+    rows.iter()
+        .filter(|row| row.channel == Channel::SentenceStart)
+        .map(|row| (row.glyph.scalar(), row.numerator, row.denominator))
+        .collect()
+}
+
+/// The claim in one line: five hundred capitals after a period, two lowercase
+/// words, and both of those are the row.
+#[test]
+fn a_lowercase_after_a_period_in_a_capitalizing_corpus_fires() {
+    let books = [book_of(
+        b"MRK",
+        &[&("Alpha. Beta. ".repeat(250) + "Go. one. two.")],
+    )];
+    let findings = findings_of(&books, &JudgingConfig::default());
+    let rows = findings.patterns().to_vec();
+    assert_eq!(expects_capital(&rows), vec![(Some('.'), 2, 502)]);
+    assert_eq!(
+        rows.iter()
+            .find(|row| row.channel == Channel::SentenceStart)
+            .expect("the row above")
+            .key,
+        PatternKey::SentenceStart
+    );
+    // The site is the lowercase word, never the glyph's own run.
+    assert_eq!(
+        sited(&books, &findings, Reasons::SENTENCE_START),
+        ["one", "two"]
+    );
+}
+
+/// A glyph a tenth of whose handoffs are capitals decides nothing here: it is
+/// not a sentence terminal in this corpus, so a lowercase word after it is the
+/// ordinary case and not an exception.
+#[test]
+fn a_glyph_under_the_bar_says_nothing() {
+    let books = [book_of(
+        b"MRK",
+        &[&("and x, y. ".repeat(90) + &"and x, Y. ".repeat(10))],
+    )];
+    let rows = findings_of(&books, &JudgingConfig::default())
+        .patterns()
+        .to_vec();
+    assert!(
+        !rows
+            .iter()
+            .any(|row| row.channel == Channel::SentenceStart && row.glyph == ScalarKey::of(',')),
+        "the comma is at 10% capitals: {rows:?}"
+    );
+}
+
+/// The bar is one number, and the channel is one switch.
+#[test]
+fn the_bar_is_configurable() {
+    let books = [book_of(
+        b"MRK",
+        &[&("Alpha. Beta. ".repeat(250) + "Go. one. two.")],
+    )];
+    // 500 of 502 handoffs are capitals: 9,960 basis points.
+    assert_eq!(JudgingConfig::default().sentence_start_upper_bp, 9_800);
+    let strict = JudgingConfig {
+        sentence_start_upper_bp: 9_990,
+        ..JudgingConfig::default()
+    };
+    assert!(expects_capital(findings_of(&books, &strict).patterns()).is_empty());
+
+    assert!(JudgingConfig::default().channels.sentence_start);
+    let off = JudgingConfig {
+        channels: Channels {
+            sentence_start: false,
+            ..Channels::default()
+        },
+        ..JudgingConfig::default()
+    };
+    assert!(expects_capital(findings_of(&books, &off).patterns()).is_empty());
+}
+
+/// A quote is NOT transparent here, and that is the ruling: the `follows` lane
+/// credits a run's TERMINAL, so `.\u{201d} then` is the quote's handoff and not
+/// the period's. The word walk rides through a quote to find the glyph a
+/// capital answers to; this lane does not, and the site rule matches the lane
+/// rather than the walk — otherwise the count oracle would not hold.
+#[test]
+fn a_quote_between_is_transparent() {
+    let books = [book_of(
+        b"MRK",
+        &[&("Go.\u{201d} Then. ".repeat(250) + "Go.\u{201d} then.")],
+    )];
+    let findings = findings_of(&books, &JudgingConfig::default());
+    let rows = findings.patterns().to_vec();
+    assert_eq!(expects_capital(&rows), vec![(Some('\u{201d}'), 1, 251)]);
+    assert!(
+        !rows
+            .iter()
+            .any(|row| row.channel == Channel::SentenceStart && row.glyph == ScalarKey::of('.')),
+        "the period is inside the run, so it hands nothing off"
+    );
+    assert_eq!(sited(&books, &findings, Reasons::SENTENCE_START), ["then"]);
+}
+
+/// A word with no glyph in front of it is in no row: the book's own first word
+/// answers to nothing. A chapter seam is different — the fold pairs one
+/// chapter's open follow with the next one's first letter — so the lowercase
+/// word after a seam IS the period's handoff and IS a site.
+#[test]
+fn a_verse_start_is_not_a_handoff() {
+    let books = [book_of(
+        b"MRK",
+        &[
+            &("alpha Go. Beta. ".to_string() + &"Go. Beta. ".repeat(249) + "Go."),
+            " one. Two.",
+        ],
+    )];
+    let findings = findings_of(&books, &JudgingConfig::default());
+    assert_eq!(
+        expects_capital(findings.patterns()),
+        vec![(Some('.'), 1, 502)]
+    );
+    assert_eq!(
+        sited(&books, &findings, Reasons::SENTENCE_START),
+        ["one"],
+        "`alpha` opens the book and answers to no glyph"
+    );
+}
+
+/// An uncased script hands off no cased letter at all, so the denominator is
+/// zero and the channel abstains — the same denominator [`TerminalTable`] uses.
+#[test]
+fn an_uncased_script_is_silent() {
+    let books = [book_of(
+        b"MRK",
+        &[&"\u{5d0}\u{5d1}. \u{5d2}\u{5d3}. ".repeat(200)],
+    )];
+    let findings = findings_of(&books, &JudgingConfig::default());
+    assert!(expects_capital(findings.patterns()).is_empty());
+    assert!(sited(&books, &findings, Reasons::SENTENCE_START).is_empty());
 }

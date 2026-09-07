@@ -32,9 +32,12 @@ impl Reasons {
     pub const DOUBLED_SEPARATED: Self = Self(1 << 9);
     /// A letter repeated longer than the corpus repeats it, inside this word.
     pub const LETTER_RUN: Self = Self(1 << 10);
-    const KNOWN_BITS: u16 = 0b111_1111_1111;
+    /// A lowercase word after a glyph the corpus almost always capitalizes
+    /// after; the span is that word.
+    pub const SENTENCE_START: Self = Self(1 << 11);
+    const KNOWN_BITS: u16 = 0b1111_1111_1111;
     /// Bit order on the wire, low bit first.
-    pub const NAMES: [&'static str; 11] = [
+    pub const NAMES: [&'static str; 12] = [
         "PlacementBefore",
         "PlacementAfter",
         "RunShape",
@@ -46,6 +49,7 @@ impl Reasons {
         "DoubledBare",
         "DoubledSeparated",
         "LetterRun",
+        "SentenceStart",
     ];
 
     pub const fn bits(self) -> u16 {
@@ -174,20 +178,21 @@ mod tests {
 
     #[test]
     fn convention_refuses_unknown_reason_bits() {
-        // Bit 10 is the last the table holds; bit 11 is the first past it.
+        // Bit 11 is the last the table holds; bit 12 is the first past it.
         assert_eq!(Reasons::from_bits(1 << 8), Ok(Reasons::DOUBLED_BARE));
         assert_eq!(Reasons::from_bits(1 << 9), Ok(Reasons::DOUBLED_SEPARATED));
         assert_eq!(Reasons::from_bits(1 << 10), Ok(Reasons::LETTER_RUN));
+        assert_eq!(Reasons::from_bits(1 << 11), Ok(Reasons::SENTENCE_START));
         assert_eq!(
-            Reasons::from_bits(1 << 11),
-            Err(CodecError::UnknownReasons(2_048))
+            Reasons::from_bits(1 << 12),
+            Err(CodecError::UnknownReasons(4_096))
         );
         let record = convention(0, 1, 0, Reasons::RUN_SHAPE);
         let mut unknown = record.encode();
-        unknown[14..16].copy_from_slice(&0x0800i16.to_le_bytes());
+        unknown[14..16].copy_from_slice(&0x1000i16.to_le_bytes());
         assert_eq!(
             PackedFinding::decode(&unknown, &[1]),
-            Err(CodecError::UnknownReasons(0x0800))
+            Err(CodecError::UnknownReasons(0x1000))
         );
         let mut negative = record.encode();
         negative[14..16].copy_from_slice(&(-1i16).to_le_bytes());

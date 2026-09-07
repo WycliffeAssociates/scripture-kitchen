@@ -498,15 +498,7 @@ fn print_patterns(
                 .to_string(),
                 _ => unreachable!("a word hash comes from a word channel"),
             };
-            let word = sites[index].first().map_or_else(String::new, |finding| {
-                let book = corpus
-                    .get(finding.book_idx())
-                    .expect("a finding names a corpus book");
-                format!(
-                    " {:?}",
-                    &book.text()[finding.from() as usize..finding.to() as usize]
-                )
-            });
+            let word = first_site_text(corpus, &sites[index]);
             println!(
                 "pattern[{index}] word #{hash:016x} {claim}{word} {}/{} {:.2}% band {} \u{b7} {}/{} books {} sites",
                 pattern.numerator,
@@ -540,6 +532,11 @@ fn print_patterns(
                 "letter-run {length}{}",
                 if length == LETTER_RUN_MAX { "+" } else { "" }
             ),
+            // Glyph-side, but the site is the word after it, so the row reads
+            // the way a word row does.
+            PatternKey::SentenceStart => {
+                format!("sentence-start{}", first_site_text(corpus, &sites[index]))
+            }
             PatternKey::Casing { .. }
             | PatternKey::WordLength { .. }
             | PatternKey::Doubled { .. } => unreachable!("handled above"),
@@ -563,6 +560,20 @@ fn print_patterns(
 }
 
 /// A pattern's sites, capped, with a tail line for the rest.
+/// The text the row's first site landed on, quoted, or nothing when it has
+/// none: what a row whose key is not a glyph shows instead of one.
+fn first_site_text(corpus: &Corpus<'_, OnionBook>, sites: &[&PackedFinding]) -> String {
+    sites.first().map_or_else(String::new, |finding| {
+        let book = corpus
+            .get(finding.book_idx())
+            .expect("a finding names a corpus book");
+        format!(
+            " {:?}",
+            &book.text()[finding.from() as usize..finding.to() as usize]
+        )
+    })
+}
+
 fn print_sites(corpus: &Corpus<'_, OnionBook>, sites: &[&PackedFinding], shown: usize) {
     for finding in sites.iter().take(shown) {
         let book = corpus

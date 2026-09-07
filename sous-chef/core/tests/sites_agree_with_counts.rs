@@ -13,7 +13,9 @@
 
 use sous_core::judge::{Channel, Pattern, PatternIndex, PatternKey, Side};
 use sous_core::sites;
-use sous_core::substrate::{BookAggregate, Edge, OuterClass, RUN_BUCKETS, ScalarKey, fold_book};
+use sous_core::substrate::{
+    BookAggregate, Case, Edge, OuterClass, RUN_BUCKETS, ScalarKey, fold_book,
+};
 use sous_core::unicode::pool_of;
 use sous_core::{
     BookKey, Chapter, ChapterObs, ChapterPass, Corpus, Findings, JudgingConfig, ProjectedBook,
@@ -153,6 +155,13 @@ fn counted(book: &BookAggregate, pattern: &Pattern) -> u64 {
             .iter()
             .find(|(key, _)| *key == glyph)
             .map_or(0, |(_, count)| u64::from(*count)),
+        // The lowercase handoffs of this glyph as a run TERMINAL, which is the
+        // only atom the follows lane ever credits.
+        PatternKey::SentenceStart => book
+            .follows()
+            .iter()
+            .find(|(key, _)| *key == glyph)
+            .map_or(0, |(_, counts)| u64::from(counts.get(Case::Lower))),
         // A word hash is not a glyph: `tests/casing_agree_with_counts.rs`.
         PatternKey::Casing { .. }
         | PatternKey::WordLength { .. }

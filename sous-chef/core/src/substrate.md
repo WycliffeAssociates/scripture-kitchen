@@ -22,7 +22,7 @@ Nothing borrows, nothing hashes, nothing carries a coordinate.
 | `scalars` | `ScalarKey` (a scalar, or the pooled `DIGITS`) | count | 8 | absolute rarity, the dense census, every denominator |
 | `pairs` | `(ScalarKey, prev outer, next outer)` | count | 12 | G0 placement, and G1 once conditioned by `runs` |
 | `runs` | the run's scalar sequence, digits excluded | count | 12 + 4/atom | run composition, G2/G3 neighbours inside a run |
-| `follows` | `ScalarKey` of a run terminal | upper/lower/uncased | 16 | lowercase after a learned terminal; and the terminal table the word channels read |
+| `follows` | `ScalarKey` of a run terminal | upper/lower/uncased | 16 | the terminal table the word channels read, and `Channel::SentenceStart` reading it the other way |
 | `hygiene` | — | one `HygieneFinding` per site | 16/site | hygiene's four scalar classes, with exact spans |
 | `verses` | `VerseKey` | grapheme count + the projected span | 20/verse | the target half of the source comparison ([`proportionality.md`](proportionality.md)) |
 | `lead`, `trail` | — | one open edge each | 20 each | the seam (below) |
@@ -40,6 +40,11 @@ Four shapes are deliberate:
 - **Letters are counted.** A Hawaiian `z` has to be able to reach the rarity
   roster, so the census is dense. It is also the single biggest lane —
   Greek's 107 distinct scalars per chapter are 856 of its 1,768 bytes.
+- **A run's LAST atom is the one credited a handoff.** `close_run` leaves the
+  run's terminal `awaiting` a letter, so `.\u{201d} he` credits `\u{201d}` and
+  not `.`, and a digit or a mark between clears the wait as a new run would.
+  That is the claim [`sites.md`](sites.md)'s sentence-start rule has to
+  reproduce exactly, since the count oracle compares the two.
 - **`run_lengths` is derived, not stored.** The rule wants each glyph's own
   run history; the run *sequences* already carry it exactly, so
   `ChapterRow::run_lengths()` decomposes them on read rather than the row

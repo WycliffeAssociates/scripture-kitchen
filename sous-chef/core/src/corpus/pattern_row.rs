@@ -36,6 +36,7 @@ pub(super) fn encode_pattern(pattern: &Pattern) -> [u8; PATTERN_ROW_LEN] {
         }
         // A real scalar in the glyph field: the letter is what was repeated.
         PatternKey::LetterRun { length } => (pattern.glyph.raw(), 0, length),
+        PatternKey::SentenceStart => (pattern.glyph.raw(), 0, 0),
     };
     row[PATTERN_GLYPH_OFFSET..PATTERN_NEIGHBOR_OFFSET].copy_from_slice(&glyph.to_le_bytes());
     row[PATTERN_NEIGHBOR_OFFSET..PATTERN_CHANNEL_OFFSET].copy_from_slice(&neighbor.to_le_bytes());
@@ -142,6 +143,12 @@ pub(super) fn decode_pattern(
                 return Err(bad("key"));
             }
             PatternKey::LetterRun { length: raw_key }
+        }
+        Channel::SentenceStart => {
+            if raw_key != 0 {
+                return Err(bad("key"));
+            }
+            PatternKey::SentenceStart
         }
     };
     if channel != Channel::ExactNeighbor && !channel.is_word() && neighbor_raw != 0 {

@@ -35,7 +35,7 @@ function fixture() {
 // One book under "books/mrk.usfm": the header, one directory row, a 16-byte
 // id table, then the pattern table, then the records.
 const FIRST_RECORD = HEADER_BYTES + DIRECTORY_ENTRY_BYTES + 16;
-const FIRST_MIXED_RECORD = FIRST_RECORD + 9 * PATTERN_ROW_LEN;
+const FIRST_MIXED_RECORD = FIRST_RECORD + 10 * PATTERN_ROW_LEN;
 
 function expectOpenFailure(bytes) {
   assert.throws(() => FindingsSnapshot.open(bytes), FindingsSnapshotError);
@@ -133,7 +133,7 @@ test("decodes the galley-published UTF-16 golden with rebased spans", () => {
 test("decodes mixed proportionality and hygiene rows, saturation included", () => {
   const snapshot = FindingsSnapshot.open(hexFixture("corpus_v1_hygiene.hex"));
   const mark = snapshot.book("MRK");
-  assert.equal(mark.count, 5);
+  assert.equal(mark.count, 6);
   assert.deepEqual(mark.at(0), {
     kind: "Hygiene",
     from: 3,
@@ -171,6 +171,14 @@ test("decodes mixed proportionality and hygiene rows, saturation included", () =
     bookIdx: 0,
     convention: { pattern: 8, reasons: ["LetterRun"] },
   });
+  // Bit 11, the sentence-start row: the span is the word after the glyph.
+  assert.deepEqual(mark.at(5), {
+    kind: "Convention",
+    from: 0xd0,
+    to: 0xd3,
+    bookIdx: 0,
+    convention: { pattern: 9, reasons: ["SentenceStart"] },
+  });
 
   const badClass = hexFixture("corpus_v1_hygiene.hex");
   badClass[FIRST_MIXED_RECORD + 12] = 11;
@@ -185,7 +193,7 @@ test("decodes mixed proportionality and hygiene rows, saturation included", () =
 
 test("decodes the pattern table the judge published", () => {
   const snapshot = FindingsSnapshot.open(hexFixture("corpus_v1_hygiene.hex"));
-  assert.equal(snapshot.patternCount, 9);
+  assert.equal(snapshot.patternCount, 10);
   assert.deepEqual(snapshot.patterns(), [
     {
       glyph: 0x60,
@@ -282,15 +290,27 @@ test("decodes the pattern table the judge published", () => {
       shareBp: 2,
       books: 1,
     },
+    {
+      // The glyph is the whole key, so the key byte is zero like Rarity's —
+      // and unlike Rarity's the row carries a band.
+      glyph: 0x2e,
+      channel: "SentenceStart",
+      key: { kind: "SentenceStart" },
+      band: 4,
+      numerator: 6,
+      denominator: 33338,
+      shareBp: 1,
+      books: 1,
+    },
   ]);
-  assert.throws(() => snapshot.pattern(9), FindingsSnapshotError);
+  assert.throws(() => snapshot.pattern(10), FindingsSnapshotError);
 
   // Every field the reader refuses, one at a time.
   const start = FIRST_RECORD;
   for (const [offset, byte] of [
     [11, 1],   // flags
     [23, 1],   // reserved
-    [8, 9],    // channel: past the table
+    [8, 10],   // channel: past the table
     [10, 0],   // band: a step on a Rarity row
     [9, 1],    // key: a nonzero key on a Rarity row
     [22, 2],   // books: past the snapshot's book count

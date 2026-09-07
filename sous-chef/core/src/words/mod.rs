@@ -40,7 +40,7 @@ pub mod walk;
 
 pub use fold::fold_book;
 pub use totals::{DoubleTally, RunTally, WordTally, WordTotals};
-pub use walk::{Gap, Occurrence, for_each_letter_run, for_each_word, gap_between};
+pub use walk::{Gap, Occurrence, for_each_letter_run, for_each_word, gap_between, word_around};
 
 // ── The letter-run lane ─────────────────────────────────────────────────
 

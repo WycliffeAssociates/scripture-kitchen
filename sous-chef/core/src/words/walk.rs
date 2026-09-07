@@ -252,6 +252,78 @@ pub fn for_each_word(text: &str, verses: &[Verse], mut visit: impl FnMut(Occurre
     scan.close(to, &mut visit);
 }
 
+/// The word span holding the scalar at `at`, by the same rule
+/// [`for_each_word`] builds one.
+///
+/// ```text
+/// word_around("he said, don\u{2019}t go", 13)   → 9..15     // the joiner is inside
+/// word_around("go. he went", 4)               → 4..6      // `he`
+/// ```
+///
+/// `at` is the byte offset of a scalar the word rule counts as core, and the
+/// span is clipped to `text` — one chapter's slice in practice, which is what
+/// the walk itself scans. It exists so a site that names a word can draw the
+/// same span the word lane would, without a second pass over the chapter.
+pub fn word_around(text: &str, at: u32) -> (u32, u32) {
+    (word_start(text, at), word_end(text, at))
+}
+
+/// Forward from `at` through core scalars, riding at most one nonletter that
+/// has a letter on both sides.
+fn word_end(text: &str, at: u32) -> u32 {
+    let mut to = at;
+    let mut joiner = false;
+    let mut letterish = false;
+    for (offset, scalar) in text[at as usize..].char_indices() {
+        let class = class_of(scalar);
+        if is_core(class) {
+            // `a-3`: a digit does not confirm a joiner, so the word ended.
+            if joiner && !is_letterish(class) {
+                break;
+            }
+            joiner = false;
+            to = at + offset as u32 + scalar.len_utf8() as u32;
+            letterish = is_letterish(class);
+        } else if is_run_atom(class) && !joiner && letterish {
+            joiner = true;
+            letterish = false;
+        } else {
+            break;
+        }
+    }
+    to
+}
+
+/// The same walk backwards; `a--b` ends at the first atom either way.
+fn word_start(text: &str, at: u32) -> u32 {
+    let mut from = at;
+    let mut joiner = false;
+    let mut letterish = text[at as usize..]
+        .chars()
+        .next()
+        .is_some_and(|scalar| is_letterish(class_of(scalar)));
+    let mut cursor = at;
+    for scalar in text[..at as usize].chars().rev() {
+        let class = class_of(scalar);
+        let start = cursor - scalar.len_utf8() as u32;
+        if is_core(class) {
+            if joiner && !is_letterish(class) {
+                break;
+            }
+            joiner = false;
+            from = start;
+            letterish = is_letterish(class);
+        } else if is_run_atom(class) && !joiner && letterish {
+            joiner = true;
+            letterish = false;
+        } else {
+            break;
+        }
+        cursor = start;
+    }
+    from
+}
+
 /// Calls `visit` with every same-letter run of two or more inside one word.
 ///
 /// ```text

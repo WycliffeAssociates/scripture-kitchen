@@ -152,7 +152,7 @@ Shapes and layouts live in the module README each row names.
 | finding transport | `sous-core::codec` and `sous-core::corpus`, rebased and published by `galley::sous`. See [core/src/codec/README.md](core/src/codec/README.md) | Galley's canonical snapshot identity and checksum-keyed detached reuse (Stage 2) |
 | unicode classification | `sous-core::unicode`. See [core/src/unicode/README.md](core/src/unicode/README.md) | Level 1b consumes the bits in Stage 3; casing beyond the two predicate bits waits for Stage 4 |
 | convention judging | `sous-core::judge`, published as the envelope's pattern table, all four grains plus rarity. See [core/src/judge.md](core/src/judge.md) | whether Terminal vs Separator is the split that matters, and whether Quote and Bracket should merge — both open until fleet evidence says |
-| word conventions | `sous-core::words` in `Brigade`, judged as `Channel::Casing` and `Channel::WordLength` over a learned `TerminalTable`, sited by `Words::locate`. See [core/src/words.md](core/src/words.md) | whether spaceless scripts get a dictionary fallback or keep abstaining; whether the length channel ever earns being on |
+| word conventions | `sous-core::words` in `Brigade`, judged as `Channel::Casing` and `Channel::WordLength` over a learned `TerminalTable`, sited by `Words::locate`; the same table's counts read the other way are the glyph-side `Channel::SentenceStart`. See [core/src/words.md](core/src/words.md) | whether spaceless scripts get a dictionary fallback or keep abstaining; whether the length channel ever earns being on |
 | convention sites | `sous-core::sites` behind `ChapterPass::locate`, cached per book by `(RawChecksum, FiringHash)` in `galley::sous::Expediter`. See [core/src/sites.md](core/src/sites.md) | Aho-Corasick if a corpus ever shows many rare needles per book (evidence.md, 2026-09-04); a general one-pass byte-class sweep, still unbuilt |
 | hygiene | `sous-core::hygiene::scan` for the byte classes, the substrate row's `hygiene` lane for the four scalar ones. See [core/src/hygiene.md](core/src/hygiene.md) and [rules/hygiene.md](rules/hygiene.md) | NBSP's verse-edge case once the walk is verse-grained; a snapshot identity instead of the CLI's zero id |
 
@@ -427,6 +427,15 @@ Work:
    matched pattern and whose `Reasons` lane carries every rung any pattern
    matched in it. `OuterClass::Edge` counts in the denominator and fires no
    placement row: a book boundary is a fact about the file;
+4b. Judge the capital a glyph hands off to. Landed (W5):
+   `Channel::SentenceStart` reads the substrate's own `follows` lane against
+   `sentence_start_upper_bp` (9,800), so a glyph that almost always precedes a
+   capital makes every lowercase letter after it one site for review. It is a
+   glyph rule and not a word one — the key is the glyph, the site is the word
+   the glyph handed off to, and `Substrate` owns both. The knob is separate
+   from `terminal_upper_share_bp` because the two ask opposite questions of one
+   count: 80% decides whether the punctuation chose a capital, 98% decides
+   whether it failed to get the one it always gets;
 5. Add dispersion annotation and the narrowly defined “forgiven but
    clustered” view without making dispersion a conviction gate. The annotation
    landed (D3): `Pattern::books` is books-touched, books-possible is the

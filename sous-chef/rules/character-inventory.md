@@ -82,6 +82,33 @@ floor, `letter_roster_min_letters` (default 5,000, about two chapters), keeps a
 ten-verse draft from rostering `q`, `x`, `z` by sample size; nonletters have no
 such floor. `LetterRoster::Auto | Always | Never` overrides both.
 
+### The capital a glyph hands off to
+
+The `follows` lane records, per run terminal, the case of the letter it hands
+off to. Two rules read it, and they are opposite questions on one count.
+
+`terminal_upper_share_bp` (80%) decides **forced from free** for a word: above
+it, the punctuation chose the capital, so that position is no evidence about
+the word's own habit ([word-conventions.md](word-conventions.md)).
+
+`sentence_start_upper_bp` (98%) decides **whether every exception is worth a
+look**: a glyph that hands a capital off 98% of the time or more is held to
+that, and each lowercase letter after it is one site for review. The row is
+`lower / cased`, so the fraction a reviewer reads is the exception's own. A
+glyph that never slipped fires nothing, and a glyph followed only by uncased
+letters has no denominator and abstains — so an uncased script pays nothing
+here, as it pays nothing for word casing.
+
+The bar is high on purpose. At 80% this would flag every lowercase word after
+a comma in a corpus that reports speech; at 98% it flags only what the
+translation itself treats as a near-certainty, which is why the committed tier
+fires a mean of 0.9 rows per corpus (see the sentence-start row in
+[../evidence.md](../evidence.md)).
+
+The atom credited is the run's **terminal**, not the glyph a reader would name:
+`.\u{201d} he` is the closing quote's handoff. That is what the counts say, and
+the sites must agree with the counts.
+
 ### Dispersion
 
 Books-touched rides on the pattern row and books-possible is the publication's
@@ -162,6 +189,10 @@ finding.
 - A question mark before `”`, `"`, and `’` is one pooled-quote row, not three
   exact pairs a reviewer has to add up.
 - ZWJ/ZWNJ in Indic text never enters the inventory (charter invariant 8).
+- A corpus that writes a capital after 500 of 502 periods flags the two
+  lowercase words, and the site is the word, not the period.
+- A comma a tenth of whose handoffs are capitals says nothing about the
+  lowercase words after it.
 
 ## PO checklist absorbed by this lane
 

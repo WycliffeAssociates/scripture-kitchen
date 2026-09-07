@@ -117,6 +117,37 @@ only through `Rarity`, because placement, run shape, and exact neighbour count
 nonletters alone. A digit reaches one only through `Placement`, because the
 pairs lane counts it and the runs lane does not.
 
+## The one site that is not its run
+
+`Channel::SentenceStart` is glyph-side, but the reviewable thing is the
+lowercase word the glyph handed off to, so its span is that word and its row is
+its own. `Doubled` is the other channel whose span is not what matched it, and
+the reason is the same: a different span cannot merge into one row.
+
+**The rule is the `follows` lane's, atom for atom, because the count oracle
+compares the two.** The lane credits a run's TERMINAL — its last atom — so
+`?\u{201d}` credits the quote and never the question mark, and the walk's own
+`close_run` is where that is decided ([`substrate.md`](substrate.md)). From
+there it rides whitespace and nothing else: a nonletter opens a new run, a
+digit breaks one, and a mark clears the wait, each of which drops the handoff.
+`Cursor::handoff` is that scan, and it crosses a chapter seam the way
+`prev_outer`/`next_outer` do, because the fold pairs a chapter's `open_follow`
+with the next one's `edge_case` and passes it through a blank chapter
+untouched.
+
+This is where the site rule and the WORD walk part company. `words::walk` rides
+through quotes and brackets to find the glyph a capital answers to, so it reads
+`.\u{201d} Go` as the period's. The follows lane does not, and the row is the
+quote's. Matching the walk here would make the sites disagree with the counts,
+so the lane wins and the difference is a documented one, pinned by
+`a_quote_between_is_transparent`.
+
+The span itself is `words::word_around` — the same word rule the word lane
+draws, joiner and all, so `don't` is one span — widened to atom edges inside
+its chapter. Because a word can sit past the next run's own site, the rows are
+sorted by span before `locate` returns, which is the order the module has
+always promised.
+
 ## Cost
 
 `cargo bench -p sous-core -- sites_locate`, whole-corpus rescan over the tier:

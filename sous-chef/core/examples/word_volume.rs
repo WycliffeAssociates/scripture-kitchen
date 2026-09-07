@@ -56,6 +56,9 @@ const VREF: &str = "/Users/willkelly/Documents/Work/Code/scripture-sous-chef/cor
 /// The support floors swept, in rows.
 const FLOORS: [u32; 3] = [5, 10, 20];
 
+/// The upper-share bars swept for `sentence_start_upper_bp`, in basis points.
+const SENTENCE_BARS: [u16; 3] = [9_700, 9_800, 9_900];
+
 /// The candidate staircases: the glyph ladder, then the same rungs at a half,
 /// a fifth, and a tenth of its shares.
 const LADDERS: [(&str, u16); 4] = [("glyph", 1), ("half", 2), ("fifth", 5), ("tenth", 10)];
@@ -141,6 +144,38 @@ fn main() {
         total,
         total as f64 / CORPORA.len() as f64
     );
+
+    println!("\n### test tier: sentence-start rows per upper-share bar ###\n");
+    print!("{:<12}", "corpus");
+    for bar in SENTENCE_BARS {
+        print!("{:>8}", format!("{}%", f64::from(bar) / 100.0));
+    }
+    println!("   rows at the shipped bar");
+    let mut totals = [0usize; SENTENCE_BARS.len()];
+    for name in CORPORA {
+        let path = dir.join(format!("{name}.txt"));
+        let raw = std::fs::read_to_string(&path).expect("read above");
+        let corpus = Corpus::of(&raw, &path);
+        print!("{name:<12}");
+        let mut shipped = Vec::new();
+        for (slot, bar) in SENTENCE_BARS.iter().enumerate() {
+            let rows = corpus.sentence_start_rows(&JudgingConfig {
+                sentence_start_upper_bp: *bar,
+                ..JudgingConfig::default()
+            });
+            totals[slot] += rows.len();
+            print!("{:>8}", rows.len());
+            if *bar == JudgingConfig::default().sentence_start_upper_bp {
+                shipped = rows;
+            }
+        }
+        println!("   {}", shipped.join("  "));
+    }
+    print!("{:<12}", "mean");
+    for total in totals {
+        print!("{:>8.2}", total as f64 / CORPORA.len() as f64);
+    }
+    println!();
 
     println!("\n### terminal tables the test tier learned ###\n");
     for name in CORPORA {
@@ -286,6 +321,24 @@ impl Corpus {
             .iter()
             .filter(|row| row.channel == Channel::Doubled)
             .count()
+    }
+
+    /// The sentence-start rows, each as `glyph n/d`, so the bar can be read
+    /// against the exceptions it actually surfaces.
+    fn sentence_start_rows(&self, config: &JudgingConfig) -> Vec<String> {
+        self.judged(config)
+            .patterns()
+            .iter()
+            .filter(|row| row.channel == Channel::SentenceStart)
+            .map(|row| {
+                format!(
+                    "{} {}/{}",
+                    row.glyph.scalar().unwrap_or(char::REPLACEMENT_CHARACTER),
+                    row.numerator,
+                    row.denominator
+                )
+            })
+            .collect()
     }
 
     /// The letter-run rows, and the letters they name, so the volume rule can

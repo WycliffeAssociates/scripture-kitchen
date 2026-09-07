@@ -262,6 +262,10 @@ fn corpus_json(
         shares(&cfg.word_bands),
     );
 
+    let verses: Vec<Vec<Verse>> = corpus
+        .iter()
+        .map(|(_, book)| book.verses().collect())
+        .collect();
     let mut glyph_json = Vec::with_capacity(glyphs.len());
     for glyph in glyphs {
         glyph_json.push(glyph_object(
@@ -271,6 +275,8 @@ fn corpus_json(
             &aggregates,
             corpus,
             patterns,
+            findings,
+            &verses,
         ));
     }
     format!(
@@ -385,6 +391,8 @@ fn glyph_object(
     aggregates: &[BookAggregate],
     corpus: &Corpus<'_, OnionBook>,
     patterns: &[Pattern],
+    findings: &[PackedFinding],
+    verses: &[Vec<Verse>],
 ) -> String {
     let (total, books) = scalars.get(glyph);
     let (g, cp, uname) = match glyph.scalar() {
@@ -693,7 +701,7 @@ fn glyph_object(
     let (runlen_mixed_json, runlen_mixed_samples) = runlen_half(false);
 
     format!(
-        r#"{{"g":{g_json},"uname":{uname_json},"cp":{cp_json},"total":{total},"books":{books},"side":{{"start":{{{side_start}}},"end":{{{side_end}}}}},"topo":{{{topo}}},"pairs":[{pairs}],"runlen":{{"pure":{{{runlen_pure}}},"mixed":{{{runlen_mixed}}}}},"runlen_samples":{{"pure":{{{runlen_pure_samples}}},"mixed":{{{runlen_mixed_samples}}}}},"rarity":{{"flag":{rarity_flag},"samples":[{rarity_samples}]}}}}"#,
+        r#"{{"g":{g_json},"uname":{uname_json},"cp":{cp_json},"total":{total},"books":{books},"side":{{"start":{{{side_start}}},"end":{{{side_end}}}}},"topo":{{{topo}}},"pairs":[{pairs}],"runlen":{{"pure":{{{runlen_pure}}},"mixed":{{{runlen_mixed}}}}},"runlen_samples":{{"pure":{{{runlen_pure_samples}}},"mixed":{{{runlen_mixed_samples}}}}},"rarity":{{"flag":{rarity_flag},"samples":[{rarity_samples}]}},"sentence":{sentence}}}"#,
         g_json = json_str(&g),
         uname_json = json_str(&uname),
         cp_json = json_str(&cp),
@@ -707,6 +715,59 @@ fn glyph_object(
         runlen_mixed_samples = runlen_mixed_samples,
         rarity_flag = rarity_fires,
         rarity_samples = samples_json(Some(&rarity_samples)),
+        sentence = sentence_json(glyph, corpus, patterns, findings, verses),
+    )
+}
+
+/// The "Capital expected" list for one glyph: the lowercase words it handed
+/// off to where the corpus almost always hands off a capital.
+///
+/// `null` unless the glyph fired [`Channel::SentenceStart`]; the words come
+/// from the sites, whose span IS the word by construction.
+fn sentence_json(
+    glyph: ScalarKey,
+    corpus: &Corpus<'_, OnionBook>,
+    patterns: &[Pattern],
+    findings: &[PackedFinding],
+    verses: &[Vec<Verse>],
+) -> String {
+    let Some((index, pattern)) = patterns.iter().enumerate().find(|(_, row)| {
+        row.glyph == glyph
+            && row.channel == Channel::SentenceStart
+            && row.key == PatternKey::SentenceStart
+    }) else {
+        return "null".to_string();
+    };
+    let mut sites = 0usize;
+    let mut samples = Vec::new();
+    for finding in findings {
+        let FindingKind::Convention(digest) = finding.kind() else {
+            continue;
+        };
+        if usize::from(digest.pattern().get()) != index {
+            continue;
+        }
+        sites += 1;
+        if samples.len() < SAMPLE_CAP {
+            let at = finding.book_idx();
+            let book = corpus.get(at).expect("a finding names a corpus book");
+            if let Some(sample) = build_sample(
+                book.text(),
+                finding.from(),
+                finding.to() - finding.from(),
+                &verses[at.get() as usize],
+                book.key(),
+            ) {
+                samples.push(sample);
+            }
+        }
+    }
+    format!(
+        r#"{{"n":{},"d":{},"books":{},"sites":{sites},"samples":[{}]}}"#,
+        pattern.numerator,
+        pattern.denominator,
+        pattern.books,
+        samples_json(Some(&samples)),
     )
 }
 
