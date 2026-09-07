@@ -183,6 +183,11 @@ fn key_bytes(key: PatternKey) -> [u8; 10] {
             out[1] = sigma;
             out[2..10].copy_from_slice(&hash.to_le_bytes());
         }
+        PatternKey::Doubled { hash, separated } => {
+            out[0] = 7;
+            out[1] = u8::from(separated);
+            out[2..10].copy_from_slice(&hash.to_le_bytes());
+        }
     }
     out
 }

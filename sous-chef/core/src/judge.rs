@@ -141,6 +141,20 @@ pub enum LetterRoster {
     Never,
 }
 
+/// Whether the doubled-word channel judges this corpus.
+///
+/// The same shape as [`LetterRoster`], and for the same reason: `Auto` is a
+/// measurement about the corpus — how much of its vocabulary doubles — and a
+/// host that knows better overrides it either way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DoublesPolicy {
+    /// Judged unless the corpus doubles productively.
+    #[default]
+    Auto,
+    Always,
+    Never,
+}
+
 /// Per-channel enable bits. All on by default except `pooled_neighbor`: a
 /// pool's share is never under a member's, so every G2 row rides beside its
 /// G3 rows and adds a coarser sentence, not a finding. A host that wants the
@@ -156,6 +170,10 @@ pub struct Channels {
     /// Long words against the corpus's own length distribution. Off: names
     /// and loanwords are the long tail, and they are not slips.
     pub word_length: bool,
+    /// A word written twice in a row. On: a low-volume, cheap claim, and a
+    /// language that doubles productively recuses itself corpus-wide rather
+    /// than through the band ([`DoublesPolicy`]).
+    pub doubled: bool,
 }
 
 impl Default for Channels {
@@ -168,6 +186,7 @@ impl Default for Channels {
             rarity: true,
             casing: true,
             word_length: false,
+            doubled: true,
         }
     }
 }
@@ -202,6 +221,11 @@ pub struct JudgingConfig {
     /// Whole standard deviations above the corpus's mean word length that a
     /// word must reach before [`Channel::WordLength`] names it.
     pub word_length_sigma: u8,
+    /// The share of a corpus's distinct words that may appear doubled before
+    /// doubling is held to be productive in this language and
+    /// [`Channel::Doubled`] abstains for the whole corpus, in basis points.
+    pub doubles_productive_bp: u16,
+    pub doubles: DoublesPolicy,
     pub channels: Channels,
 }
 
@@ -218,6 +242,8 @@ impl Default for JudgingConfig {
             word_bands: Staircase::new(Staircase::WORD_STEPS).expect("the word bounds ascend"),
             terminal_upper_share_bp: 8_000,
             word_length_sigma: 4,
+            doubles_productive_bp: 300,
+            doubles: DoublesPolicy::default(),
             channels: Channels::default(),
         }
     }
@@ -248,10 +274,13 @@ pub enum Channel {
     /// One case-folded word far longer than the corpus's own words. It judges
     /// no scalar either, and carries the word hash the same way.
     WordLength = 6,
+    /// One case-folded word written twice in a row, adjacent or separated by
+    /// a nonletter run. It judges no scalar either.
+    Doubled = 7,
 }
 
 impl Channel {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::ExactNeighbor,
         Self::PooledNeighbor,
         Self::RunShape,
@@ -259,12 +288,13 @@ impl Channel {
         Self::Rarity,
         Self::Casing,
         Self::WordLength,
+        Self::Doubled,
     ];
 
     /// Whether the channel's `glyph` field carries a word hash instead of a
-    /// scalar. The two word channels do; every substrate channel does not.
+    /// scalar. The three word channels do; every substrate channel does not.
     pub const fn is_word(self) -> bool {
-        matches!(self, Self::Casing | Self::WordLength)
+        matches!(self, Self::Casing | Self::WordLength | Self::Doubled)
     }
 
     pub const fn name(self) -> &'static str {
@@ -276,6 +306,7 @@ impl Channel {
             Self::Rarity => "Rarity",
             Self::Casing => "Casing",
             Self::WordLength => "WordLength",
+            Self::Doubled => "Doubled",
         }
     }
 }
@@ -327,6 +358,13 @@ pub enum PatternKey {
         hash: u64,
         sigma: u8,
     },
+    /// The case-folded word, and whether a nonletter run stood between the
+    /// two occurrences. The two are separate claims with separate
+    /// denominators, so they are separate keys.
+    Doubled {
+        hash: u64,
+        separated: bool,
+    },
 }
 
 /// One firing pattern: a glyph, the channel that convicted it, and the
@@ -354,7 +392,9 @@ impl Pattern {
     /// The word hash a word channel's row carries, `None` on every other.
     pub const fn word_hash(&self) -> Option<u64> {
         match self.key {
-            PatternKey::Casing { hash, .. } | PatternKey::WordLength { hash, .. } => Some(hash),
+            PatternKey::Casing { hash, .. }
+            | PatternKey::WordLength { hash, .. }
+            | PatternKey::Doubled { hash, .. } => Some(hash),
             _ => None,
         }
     }
@@ -384,6 +424,7 @@ impl Pattern {
         let keyed = match self.key {
             PatternKey::Casing { .. } => Channel::Casing,
             PatternKey::WordLength { .. } => Channel::WordLength,
+            PatternKey::Doubled { .. } => Channel::Doubled,
             PatternKey::ExactNeighbor(_) => Channel::ExactNeighbor,
             PatternKey::PooledNeighbor(_) => Channel::PooledNeighbor,
             PatternKey::RunShape { .. } => Channel::RunShape,
@@ -748,7 +789,7 @@ fn numerator_in(book: &BookAggregate, pattern: &Pattern) -> u64 {
             .map_or(0, |(_, count)| u64::from(*count)),
         // A word row is judged over word aggregates, which these are not;
         // `words::free_in` is its oracle.
-        PatternKey::Casing { .. } | PatternKey::WordLength { .. } => 0,
+        PatternKey::Casing { .. } | PatternKey::WordLength { .. } | PatternKey::Doubled { .. } => 0,
     }
 }
 
@@ -882,7 +923,7 @@ fn is_letter(glyph: ScalarKey) -> bool {
 
 /// Shares are computed in `u64` so a corpus of ten million scalars cannot
 /// wrap on the way to a wire width.
-fn share_bp(numerator: u64, denominator: u64) -> u16 {
+pub(crate) fn share_bp(numerator: u64, denominator: u64) -> u16 {
     if denominator == 0 {
         return 0;
     }
@@ -986,6 +1027,83 @@ pub(crate) fn judge_words(
     }
     if config.channels.word_length {
         word_length(corpus, totals, config, out);
+    }
+    if config.channels.doubled && judges_doubles(totals, config) {
+        doubled(corpus, totals, config, out);
+    }
+}
+
+/// Whether doubling is a slip in this corpus or a feature of the language.
+///
+/// The share is of the vocabulary, never a count: Jonah and a whole Bible must
+/// answer the same way. `Always` and `Never` are the host's override, the same
+/// shape [`LetterRoster`] has.
+fn judges_doubles(totals: &WordTotals, config: &JudgingConfig) -> bool {
+    match config.doubles {
+        DoublesPolicy::Always => true,
+        DoublesPolicy::Never => false,
+        DoublesPolicy::Auto => totals.doubling_share_bp() <= config.doubles_productive_bp,
+    }
+}
+
+/// One row per case-folded word doubled under the word staircase, adjacent and
+/// punctuation-separated kept apart.
+///
+/// The denominator is the word's own occurrences — every one the corpus
+/// counted, forced or free, cased or not — so `vous vous` x300 against `vous`
+/// x9,000 is 3.3% and silent, while `the the` once against `the` x60,000 is
+/// 0.17 bp and fires. A word doubled every time it appears owns its whole
+/// denominator and never fires.
+///
+/// The two lanes are hash-sorted, so this is one tandem walk and not a probe
+/// per doubled word.
+fn doubled(
+    corpus: &[&WordAggregate],
+    totals: &WordTotals,
+    config: &JudgingConfig,
+    out: &mut Findings,
+) {
+    let mut cased = totals.by_word().peekable();
+    for row in totals.doubles() {
+        if row.bare == 0 && row.separated == 0 {
+            continue;
+        }
+        while cased.peek().is_some_and(|word| word[0].hash < row.hash) {
+            cased.next();
+        }
+        // The two lanes partition a word's occurrences: a cased occurrence is
+        // in the casing lane, an uncased one is counted here.
+        let held: u64 = cased
+            .peek()
+            .filter(|word| word[0].hash == row.hash)
+            .map_or(0, |word| {
+                word.iter().flat_map(|row| row.counts).map(u64::from).sum()
+            });
+        let total = held + u64::from(row.uncased);
+        let Some((band, ceiling)) = entitled_words(total, config) else {
+            continue;
+        };
+        for (separated, count) in [(false, row.bare), (true, row.separated)] {
+            let count = u64::from(count);
+            let share = share_bp(count, total);
+            if count == 0 || share >= ceiling {
+                continue;
+            }
+            let key = PatternKey::Doubled {
+                hash: row.hash,
+                separated,
+            };
+            out.push_pattern(Pattern {
+                glyph: ScalarKey::NONE,
+                channel: Channel::Doubled,
+                key,
+                band: Some(band),
+                numerator: saturate(count),
+                denominator: saturate(total),
+                share_bp: share,
+                books: word_books(corpus, &key, &TerminalTable::default()),
+            });
+        }
     }
 }
 
@@ -1173,6 +1291,9 @@ pub(crate) fn free_of(book: &WordAggregate, key: &PatternKey, table: &TerminalTa
         PatternKey::WordLength { hash, .. } => {
             book.rows_for(hash).iter().map(|row| row.total()).sum()
         }
+        PatternKey::Doubled { hash, separated } => book
+            .doubles_for(hash)
+            .map_or(0, |row| u64::from(row.count_of(separated))),
         _ => 0,
     }
 }

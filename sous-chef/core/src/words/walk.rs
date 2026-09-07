@@ -1,14 +1,17 @@
-//! The word scan: one pass per chapter, and no hashing where nothing is cased.
+//! The word scan: one pass per chapter, two lanes out of it.
 //!
 //! ```text
-//! walk("He said. \u{201C}Go,\u{201D} said david. David went.", &[])
-//!   he     Title  Start        // the chapter's first word
-//!   said   Lower  None
-//!   go     Title  Glyph('.')   // the quote is transparent; the terminal is not
-//!   said   Lower  Glyph(',')
-//!   david  Lower  None
-//!   david  Title  Glyph('.')
-//!   went   Lower  None
+//! walk("He said. \u{201C}Go,\u{201D} said david. David went. Go, go.", &[])
+//!   casing lane
+//!     he     Title  Start        // the chapter's first word
+//!     said   Lower  None
+//!     go     Title  Glyph('.')   // the quote is transparent; the terminal is not
+//!     said   Lower  Glyph(',')
+//!     david  Lower  None
+//!     david  Title  Glyph('.')
+//!     went   Lower  None
+//!   doubles lane
+//!     hash(go)   bare 0  separated 1   // `Go, go`: a comma stood between
 //! ```
 //!
 //! The walk decides nothing about capitals. It records what stood before each
@@ -28,7 +31,7 @@
 use rustc_hash::FxHashMap;
 use xxhash_rust::xxh3::xxh3_64;
 
-use super::{Before, Form, WordCount, WordRow};
+use super::{Before, DoubleCount, Form, WordCount, WordRow};
 use crate::Verse;
 use crate::substrate::{ScalarKey, is_run_atom};
 use crate::unicode::{Class, Pool, class_of, pool_of};
@@ -38,8 +41,9 @@ use crate::unicode::{Class, Pool, class_of, pool_of};
 pub struct Occurrence {
     pub from: u32,
     pub to: u32,
-    /// xxh3-64 of the case-folded scalars; 0 for [`Form::Uncased`], which is
-    /// never hashed.
+    /// xxh3-64 of the case-folded scalars. Every word is hashed, uncased
+    /// ones included: the doubled lane compares by hash and doubling has
+    /// nothing to do with case.
     pub hash: u64,
     pub form: Form,
     /// What stood before the word, quotes and brackets ridden through.
@@ -207,11 +211,7 @@ impl<'a> Scan<'a> {
         let source: &'a str = self.text;
         let word = &source[built.from as usize..to as usize];
         let form = built.form();
-        let hash = if form == Form::Uncased {
-            0
-        } else {
-            fold_hash(word, &mut self.scratch)
-        };
+        let hash = fold_hash(word, &mut self.scratch);
         visit(Occurrence {
             from: built.from,
             to,
@@ -242,15 +242,74 @@ pub fn for_each_word(text: &str, verses: &[Verse], mut visit: impl FnMut(Occurre
     scan.close(to, &mut visit);
 }
 
-/// One chapter's word counts, sorted by hash and then by what preceded them.
-/// An uncased chapter hashes nothing and returns an empty row.
+/// What stood between two occurrences of one word, when they are a double.
+///
+/// Two claims, not one: `na na` and `na, na` have different denominators and
+/// different reasons to be a slip, so they never share a key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Gap {
+    /// Whitespace only.
+    Bare,
+    /// A nonletter run, with or without whitespace around it.
+    Separated,
+}
+
+/// How two adjacent word occurrences are separated, or `None` when something
+/// stood between them that a double may not ride through.
+///
+/// Only a letter, glue, or digit disqualifies — and each of those means the
+/// walk dropped a token between the two words (a digit run holds no letter, so
+/// it is no word at all), which is exactly the case a double must not claim.
+pub fn gap_between(text: &str, from: u32, to: u32) -> Option<Gap> {
+    let mut gap = Gap::Bare;
+    for scalar in text[from as usize..to as usize].chars() {
+        let class = class_of(scalar);
+        if is_core(class) {
+            return None;
+        }
+        if !class.is_whitespace() {
+            gap = Gap::Separated;
+        }
+    }
+    Some(gap)
+}
+
+/// One chapter's word counts: the casing lane sorted by `(hash, before)`, and
+/// the doubles lane sorted by hash.
+///
+/// An uncased chapter's casing lane is empty — a word with no cased letter can
+/// hold no casing convention — but its doubles lane is not: doubling has
+/// nothing to do with case, so every word is hashed and every uncased
+/// occurrence is counted here, which is where the doubled channel's
+/// denominator comes from when the casing lane holds nothing.
 pub(crate) fn walk(text: &str, verses: &[Verse]) -> WordRow {
     let mut rows: Vec<WordCount> = Vec::new();
     let mut slots: FxHashMap<(u64, u32), u32> = FxHashMap::default();
+    let mut doubles: Vec<DoubleCount> = Vec::new();
+    let mut lanes: FxHashMap<u64, u32> = FxHashMap::default();
+    let mut cased = false;
+    let mut previous: Option<(u64, u32)> = None;
+
     for_each_word(text, verses, |word| {
+        let mut lane_of = |hash: u64, doubles: &mut Vec<DoubleCount>| {
+            *lanes.entry(hash).or_insert_with(|| {
+                doubles.push(DoubleCount::new(hash));
+                doubles.len() as u32 - 1
+            }) as usize
+        };
+        if let Some((hash, to)) = previous.replace((word.hash, word.to))
+            && hash == word.hash
+            && let Some(gap) = gap_between(text, to, word.from)
+        {
+            let slot = lane_of(hash, &mut doubles);
+            doubles[slot].add(gap);
+        }
         if word.form == Form::Uncased {
+            let slot = lane_of(word.hash, &mut doubles);
+            doubles[slot].uncased = doubles[slot].uncased.saturating_add(1);
             return;
         }
+        cased = true;
         let key = (word.hash, word.before.raw());
         let slot = *slots.entry(key).or_insert_with(|| {
             rows.push(WordCount::new(word.hash, word.before, word.len));
@@ -259,10 +318,13 @@ pub(crate) fn walk(text: &str, verses: &[Verse]) -> WordRow {
         let lane = &mut rows[slot as usize].counts[word.form as usize];
         *lane = lane.saturating_add(1);
     });
+
     rows.sort_unstable_by_key(|row| (row.hash, row.before().raw()));
+    doubles.sort_unstable_by_key(|row| row.hash);
     WordRow {
-        cased: !rows.is_empty(),
+        cased,
         words: rows.into_boxed_slice(),
+        doubles: doubles.into_boxed_slice(),
         released: false,
     }
 }

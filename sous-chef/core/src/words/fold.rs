@@ -7,14 +7,17 @@
 //!
 //! A word never crosses a masked `\c` — the chapter seam is an edge of text
 //! for a word exactly as it is for a run — so there is no seam state here and
-//! the fold is a plain merge. Book coordinates never enter: the row counts.
+//! the fold is a plain merge. That rules the doubles lane too: a pair the seam
+//! splits was never counted, so there is nothing to carry. Book coordinates
+//! never enter: the row counts.
 
-use super::{ChapterObs, WordAggregate, WordRow, WordTotal};
+use super::{ChapterObs, DoubleTotal, WordAggregate, WordRow, WordTotal};
 
 /// Merges one book's rows in order. Order is irrelevant to the result, which
 /// is what makes a cached row and a fresh one indistinguishable.
 pub fn fold_book(book: &[ChapterObs<&WordRow>]) -> WordAggregate {
     let mut rows: Vec<WordTotal> = Vec::new();
+    let mut doubles: Vec<DoubleTotal> = Vec::new();
     let mut cased = false;
     for chapter in book {
         cased |= chapter.obs.cased();
@@ -31,6 +34,12 @@ pub fn fold_book(book: &[ChapterObs<&WordRow>]) -> WordAggregate {
                 word.len,
             )
         }));
+        doubles.extend(chapter.obs.doubles().iter().map(|row| DoubleTotal {
+            hash: row.hash,
+            uncased: u32::from(row.uncased),
+            bare: u32::from(row.bare),
+            separated: u32::from(row.separated),
+        }));
     }
     rows.sort_unstable_by_key(|row| (row.hash, row.before_raw()));
     let mut out: Vec<WordTotal> = Vec::with_capacity(rows.len());
@@ -44,8 +53,23 @@ pub fn fold_book(book: &[ChapterObs<&WordRow>]) -> WordAggregate {
             _ => out.push(row),
         }
     }
+
+    doubles.sort_unstable_by_key(|row| row.hash);
+    let mut lane: Vec<DoubleTotal> = Vec::with_capacity(doubles.len());
+    for row in doubles {
+        match lane.last_mut() {
+            Some(last) if last.hash == row.hash => {
+                last.uncased = last.uncased.saturating_add(row.uncased);
+                last.bare = last.bare.saturating_add(row.bare);
+                last.separated = last.separated.saturating_add(row.separated);
+            }
+            _ => lane.push(row),
+        }
+    }
+
     // Reserved for every pre-merge row; a book merges to a third of that, and
     // this aggregate is what the resident cache keeps.
     out.shrink_to_fit();
-    WordAggregate::new(out, cased)
+    lane.shrink_to_fit();
+    WordAggregate::new(out, lane, cased)
 }

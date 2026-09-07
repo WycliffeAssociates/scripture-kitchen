@@ -28,6 +28,7 @@ finding.
 | `Rarity` | — | corpus count of the glyph | every scalar counted |
 | `Casing` | word | free-position occurrences of one case-folded word in one case form | that word's free-position occurrences, all forms |
 | `WordLength` | word | corpus occurrences of one long case-folded word | every word occurrence the corpus counted |
+| `Doubled` | word | one case-folded word immediately repeated, adjacent OR separated | that word's occurrences, cased and uncased |
 
 `Placement` is **per side, marginal**: the outer class before `g` and the
 outer class after `g` are two distributions over
@@ -127,7 +128,7 @@ finds none and abstains — an abstention, never a guess.
 ## `Casing` is a word channel
 
 `Casing` judges [`words.md`](words.md)'s counts rather than the substrate's,
-and it is the one channel whose key is not a scalar. Its `glyph` field is
+and it is one of three channels whose key is not a scalar. Its `glyph` field is
 `ScalarKey::NONE` and the wire carries the u64 word hash in its place
 ([`codec/README.md`](codec/README.md)); `Pattern::word_hash` reads it back.
 
@@ -169,6 +170,49 @@ an uncased word is in no row at all.
 Its sites are the word's spans, every occurrence and not only the free ones —
 length is a property of the word, not of a position. A word both channels name
 is **one** site row carrying `CASING | WORD_LENGTH`.
+
+## `Doubled` is the third, and it ships on
+
+The claim is: **one case-folded word written twice in a row, judged against
+that word's own count.** Two keys, never pooled — `bare` (whitespace only
+between) and `separated` (a nonletter run between, `na, na`) — because they
+have different denominators and different reasons to be a slip.
+
+```text
+vous  x9,000 in the corpus, 300 of them `vous vous`
+   300/9,000 = 3,333 bp, band 3's ceiling is 10 bp   → SILENT, it is a
+                                                       construction
+the   x60,000, one `the the`
+   1/60,000 = 0 bp                                   → FIRES
+na    x2,000, one `na, na`                            → a SEPARATE key
+```
+
+The denominator is every occurrence the corpus counted of that word, forced or
+free, cased or not — the two lanes of `words.md` partition it, so the sum needs
+no special case per script and **an uncased script is judged here** although it
+pays nothing for `Casing`. A word doubled every time it appears owns its whole
+denominator and never fires, which is why the band alone excuses `vous vous`
+without an allow-list.
+
+**The recusal is corpus-level, not a band.** `WordTotals::doubling_share_bp` is
+the share of the corpus's distinct words that appear doubled twice or more, in
+basis points; above `JudgingConfig::doubles_productive_bp` (300 = 3%) the
+channel abstains for the whole corpus, because doubling is productive in that
+language and no per-word fraction can say so. `JudgingConfig::doubles`
+(`DoublesPolicy::{Auto, Always, Never}`) is the host's override, the same shape
+`LetterRoster` has. A share and never a count: Jonah and a whole Bible must
+answer the same way.
+
+Both numbers are the fleet's (evidence.md, W2). Volume at the shipped ladder is
+p50 10 / p90 29 / p95 35 / max 81 rows per corpus over 1,504 corpora — the
+glyph channels' own volume — so `channels.doubled` ships **true**. The share
+distribution has **no knee**: p50 20 / p90 91 / p95 132 bp with a maximum of
+511, so 300 bp recuses the 8 most reduplicating corpora (0.5%) and 500 would
+have recused one.
+
+A doubled site's span covers **both words and the separator**, so it is not the
+word's span and never merges with a casing or length row; it carries
+`Reasons::DOUBLED_BARE` or `Reasons::DOUBLED_SEPARATED`.
 
 ## Dispersion
 
@@ -225,8 +269,9 @@ Deterministic, because the wire pins it:
 
 `Channel`'s discriminants run finest grain first, so sorting by channel *is*
 sorting finest first, and G2 comes out between G3 and G1 without a sort.
-`Casing` is last, and its rows are a separate pass's, so they never compete
-for a headline with a glyph's. `ScalarKey` orders by code point with the pooled digit
+The word channels are last, in channel order — `Casing`, then `WordLength`,
+then `Doubled`, each hash-ascending within itself — and their rows are a
+separate pass's, so they never compete for a headline with a glyph's. `ScalarKey` orders by code point with the pooled digit
 lane last.
 
 ## Where the row goes

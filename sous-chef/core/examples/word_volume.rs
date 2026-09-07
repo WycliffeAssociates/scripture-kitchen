@@ -1,6 +1,8 @@
 //! How many casing rows a corpus fires at each candidate word staircase, so
 //! `word_bands` and `word_support_floor` are set from the fleet and not from
-//! the glyph defaults.
+//! the glyph defaults — and, at the shipped ladder, how many doubled-word rows
+//! it fires and how much of its vocabulary doubles, which is what sets
+//! `doubles_productive_bp`.
 //!
 //! ```text
 //! cargo run -p sous-core --release --example word_volume
@@ -8,6 +10,7 @@
 //!   WA-en-ulb       5    430   214     96     44
 //!   …
 //!   fleet, floor 20 / tenth      p50 14   p90 61   p95 92   max 640
+//!   doubling share bp            p50 62   p90 214  p95 318  max 4,101
 //! ```
 //!
 //! Reads `corpora/*.txt` (vref: `BOOK C:V<TAB>text`) the way
@@ -25,9 +28,9 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use sous_core::judge::{BandStep, Staircase, merged_follows};
+use sous_core::judge::{BandStep, DoublesPolicy, Staircase, merged_follows};
 use sous_core::substrate::{Case, Edge, fold_book as fold_glyphs};
-use sous_core::words::{WordAggregate, WordRow, Words, fold_book as fold_words};
+use sous_core::words::{WordAggregate, WordRow, WordTotals, Words, fold_book as fold_words};
 use sous_core::{
     BookAggregate, BookKey, Channel, ChapterInput, ChapterKey, ChapterObs, ChapterPass, ChapterRow,
     Findings, JudgingConfig, Substrate, TextRange, Verse, VerseKey,
@@ -98,6 +101,25 @@ fn main() {
             }
             println!();
         }
+    }
+
+    println!("\n### test tier: doubled rows at the shipped defaults ###\n");
+    println!(
+        "{:<12}{:>10}{:>10}{:>12}{:>10}",
+        "corpus", "auto", "always", "share bp", "recused"
+    );
+    for name in CORPORA {
+        let path = dir.join(format!("{name}.txt"));
+        let raw = std::fs::read_to_string(&path).expect("read above");
+        let corpus = Corpus::of(&raw, &path);
+        let share = corpus.doubling_share_bp();
+        let auto = corpus.doubled_rows(&JudgingConfig::default());
+        let always = corpus.doubled_rows(&JudgingConfig {
+            doubles: DoublesPolicy::Always,
+            ..JudgingConfig::default()
+        });
+        let recused = share > JudgingConfig::default().doubles_productive_bp;
+        println!("{name:<12}{auto:>10}{always:>10}{share:>12}{:>10}", recused);
     }
 
     println!("\n### terminal tables the test tier learned ###\n");
@@ -238,6 +260,21 @@ impl Corpus {
             .count()
     }
 
+    fn doubled_rows(&self, config: &JudgingConfig) -> usize {
+        self.judged(config)
+            .patterns()
+            .iter()
+            .filter(|row| row.channel == Channel::Doubled)
+            .count()
+    }
+
+    /// The recusal statistic: distinct words doubled twice or more, over the
+    /// corpus's whole vocabulary, in basis points.
+    fn doubling_share_bp(&self) -> u16 {
+        let words: Vec<&WordAggregate> = self.words.iter().collect();
+        WordTotals::merge(&words).doubling_share_bp()
+    }
+
     /// The busiest handoffs, whether they force or not: `glyph upper/cased
     /// share`, which is the number the table thresholds.
     fn handoffs(&self) -> String {
@@ -321,6 +358,14 @@ fn sweep(dir: &Path) {
     let mut rows: Vec<Vec<usize>> = vec![Vec::new(); candidates.len()];
     let mut cased = 0usize;
     let mut skipped = 0usize;
+    let mut shares: Vec<usize> = Vec::new();
+    let mut by_corpus: Vec<(usize, String)> = Vec::new();
+    let mut doubled_auto: Vec<usize> = Vec::new();
+    let mut doubled_always: Vec<usize> = Vec::new();
+    let forced = JudgingConfig {
+        doubles: DoublesPolicy::Always,
+        ..JudgingConfig::default()
+    };
 
     for path in &files {
         let Ok(raw) = std::fs::read_to_string(path) else {
@@ -339,6 +384,19 @@ fn sweep(dir: &Path) {
         for (lane, (_, config)) in rows.iter_mut().zip(&candidates) {
             lane.push(corpus.casing_rows(config));
         }
+        shares.push(usize::from(corpus.doubling_share_bp()));
+        by_corpus.push((
+            usize::from(corpus.doubling_share_bp()),
+            format!(
+                "{:<12} {:>4} rows",
+                path.file_stem()
+                    .map(|stem| stem.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+                corpus.doubled_rows(&forced)
+            ),
+        ));
+        doubled_auto.push(corpus.doubled_rows(&JudgingConfig::default()));
+        doubled_always.push(corpus.doubled_rows(&forced));
     }
 
     println!(
@@ -356,4 +414,35 @@ fn sweep(dir: &Path) {
         println!("{name:<22}{p50:>8}{p90:>8}{p95:>8}{max:>8}{silent:>10}");
     }
     println!("\ntarget: p50 10-20 rows per corpus, the glyph channels' own volume");
+
+    println!("\n### doubled words over the same fleet, shipped ladder ###\n");
+    println!(
+        "{:<22}{:>8}{:>8}{:>8}{:>8}{:>10}",
+        "measure", "p50", "p90", "p95", "max", "silent"
+    );
+    for (name, values) in [
+        ("doubling share bp", &mut shares),
+        ("rows, Always", &mut doubled_always),
+        ("rows, Auto (shipped)", &mut doubled_auto),
+    ] {
+        let silent = values.iter().filter(|count| **count == 0).count();
+        let (p50, p90, p95, max) = spread(values);
+        println!("{name:<22}{p50:>8}{p90:>8}{p95:>8}{max:>8}{silent:>10}");
+    }
+    by_corpus.sort_unstable_by_key(|row| std::cmp::Reverse(row.0));
+    println!("\nthe most-doubling corpora, by vocabulary share:");
+    for (share, name) in by_corpus.iter().take(12) {
+        println!("  {share:>5} bp  {name}");
+    }
+    // The knee: where the vocabulary share stops looking like a slip rate and
+    // starts looking like a construction.
+    println!("\ncorpora above a candidate `doubles_productive_bp`:");
+    for bound in [100u16, 200, 300, 500, 750, 1_000, 1_500, 2_000, 3_000] {
+        let over = shares.iter().filter(|bp| **bp > usize::from(bound)).count();
+        println!(
+            "  {bound:>5} bp  {over:>5} of {} corpora recuse ({:.1}%)",
+            shares.len(),
+            100.0 * over as f64 / shares.len() as f64
+        );
+    }
 }

@@ -69,6 +69,7 @@ Decoding refuses rather than guesses:
 | a pattern row's reserved byte or `flags` set | `InvalidPattern` |
 | a pattern channel, key, band, or share outside its table | `InvalidPattern` |
 | a `Casing` key byte of `Uncased`, or a `Casing` row carrying a glyph | `InvalidPattern` |
+| a `Doubled` key byte above 1 | `InvalidPattern` |
 | a pattern `books` of zero on a row with a numerator, or past the header's `book_count` | `InvalidPattern` |
 | a `pattern_offset` that is not the running cursor | `PatternSectionOutOfOrder` |
 | more than 65,535 patterns | `PatternCountOverflow` |
@@ -114,7 +115,7 @@ position matched — so ten thousand sites of one convention cost ten thousand
 | 0..4 | `glyph: u32` (`ScalarKey` raw; `u32::MAX` is the pooled digit key) |
 | 4..8 | `neighbor: u32` (the G3 key; 0 on every other channel) |
 | 8 | `channel: u8` (`Channel` discriminant, finest grain first) |
-| 9 | `key: u8` (Placement: `side << 4 \| OuterClass`; RunShape: `pure << 4 \| bucket`; PooledNeighbor: `Pool`; Casing: `Form`; WordLength: whole deviations above the mean; else 0) |
+| 9 | `key: u8` (Placement: `side << 4 \| OuterClass`; RunShape: `pure << 4 \| bucket`; PooledNeighbor: `Pool`; Casing: `Form`; WordLength: whole deviations above the mean; Doubled: 0 adjacent, 1 separated; else 0) |
 | 10 | `band: u8` (staircase step index; `0xFF` = none, which only `Rarity` carries) |
 | 11 | `flags: u8` (reserved, 0; the decoder refuses nonzero) |
 | 12..16 | `numerator: u32` |
@@ -123,19 +124,24 @@ position matched — so ten thousand sites of one convention cost ten thousand
 | 22 | `books: u8` — books holding part of the numerator; books-possible is the header's `book_count` |
 | 23 | reserved `u8` 0 (the decoder refuses nonzero) |
 
-**The two word channels, 5 `Casing` and 6 `WordLength`, read bytes 0..8 as one
-thing:** the u64 word hash, little-endian, low half where a glyph would be and
-high half where a neighbor would be. They judge no scalar, so
-`ScalarKey::from_raw` is not applied to the glyph field there and a decoder
+**The three word channels, 5 `Casing`, 6 `WordLength`, and 7 `Doubled`, read
+bytes 0..8 as one thing:** the u64 word hash, little-endian, low half where a
+glyph would be and high half where a neighbor would be. They judge no scalar,
+so `ScalarKey::from_raw` is not applied to the glyph field there and a decoder
 returns `ScalarKey::NONE` for it. The key byte is a `Form` discriminant `0..4`
-on `Casing`, with `Uncased` refused, and a saturating sigma on `WordLength`,
-where every value is legal. Every other channel still refuses a nonzero
-neighbor. `Pattern::word_hash` reads the pair back on either, and the generated
-reader decodes it as a `bigint`. Why a hash and not the bytes: `../words.md`.
+on `Casing`, with `Uncased` refused; a saturating sigma on `WordLength`, where
+every value is legal; and `0` (adjacent) or `1` (separated) on `Doubled`, with
+everything above refused. Every other channel still refuses a nonzero neighbor.
+`Pattern::word_hash` reads the pair back on all three, and the generated reader
+decodes it as a `bigint`. Why a hash and not the bytes: `../words.md`.
 
-`Reasons` bit 7, `WORD_LENGTH`, is the **last free bit in the `u8` half of the
-convention lane**; the next reason widens past a byte and is a wire decision,
-not an append.
+`Reasons` **is the full `i16` lane B, not its low byte.** Bit 7,
+`WORD_LENGTH`, was the last one a `u8` could hold; W2 spent bits 8 and 9 on
+`DOUBLED_BARE` and `DOUBLED_SEPARATED`, which cost nothing on the wire because
+the lane was always sixteen bits and both readers always read it as one — Rust
+holds `Reasons` in a `u16` and the generated reader calls `getUint16`. Six bits
+are left, and `KNOWN_BITS` is the whole of what is legal: bit 10 is refused,
+which `convention_refuses_unknown_reason_bits` pins.
 
 `books` is dispersion, and dispersion is information: nothing in the engine
 gates on it. A row with a numerator names at least one book, and no row may

@@ -471,19 +471,27 @@ const FORM_PHRASE={Lower:"all lowercase",Title:"with a capital first letter",
 function capRows(){return corpus().cap||[]}
 function capRowHTML(r,i){
   const id="w:"+i;
+  const doubled=r.kind==="doubled";
   const drawer=S.open===id?
     `<div class="drawer"><ul>${r.samples.length?r.samples.map(renderSample).join(""):"<li class='empty'>no examples retained for this row</li>"}</ul></div>`:"";
+  const claim=doubled?
+    `<span class="g">${esc(r.w)}</span> \u2014 this word stands twice in a row
+      ${r.form==="separated"?"with punctuation between them":"with only a space between them"}
+      ${r.n===1?"once":fmt(r.n)+" times"} in ${fmt(r.d)} uses of the word`:
+    `<span class="g">${esc(r.w)}</span> is written
+      ${FORM_PHRASE[r.form]||esc(r.form)} ${r.n===1?"once":fmt(r.n)+" times"} in
+      ${fmt(r.d)} free uses \u2014 the rest are written some other way`;
   return `<div class="arow" data-id="${esc(id)}">
-    <div class="top"><span class="grainchip">word casing</span>
-      <div class="claim"><span class="g">${esc(r.w)}</span> is written
-        ${FORM_PHRASE[r.form]||esc(r.form)} ${r.n===1?"once":fmt(r.n)+" times"} in
-        ${fmt(r.d)} free uses \u2014 the rest are written some other way</div>
+    <div class="top"><span class="grainchip">${doubled?"repeated word":"word casing"}</span>
+      <div class="claim">${claim}</div>
       <div class="stats mono">${fmt(r.n)} of ${fmt(r.d)} (${pct(r.n,r.d)}) \u00b7
         ${r.books} book${r.books===1?"":"s"} \u00b7 ${fmt(r.sites)} site${r.sites===1?"":"s"}</div></div>
     <button class="showbtn">${S.open===id?"hide examples":"show examples"}</button>${drawer}</div>`;
 }
 function drawCap(){
   const rows=capRows();
+  const cased=rows.filter(r=>r.kind!=="doubled");
+  const twice=rows.filter(r=>r.kind==="doubled");
   const render=()=>{
     $("#app").innerHTML=`<main>
       <div class="cfg">
@@ -498,10 +506,16 @@ function drawCap(){
         both forms is convention, and says nothing.</p>
         <div class="counts">${judging()}</div>
       </div>
-      <div class="qgroup"><h3>Words that break their own casing habit <span class="cnt">${rows.length}</span></h3>
+      <div class="qgroup"><h3>Words that break their own casing habit <span class="cnt">${cased.length}</span></h3>
         <p class="note">Every row here is one the judge already fired; nothing is recomputed
         in the page. The fraction is free uses only.</p>
-        ${rows.map(capRowHTML).join("")||"<p class='empty'>Nothing flagged at these settings.</p>"}</div>
+        ${cased.map(capRowHTML).join("")||"<p class='empty'>Nothing flagged at these settings.</p>"}</div>
+      <div class="qgroup"><h3>Words written twice in a row <span class="cnt">${twice.length}</span></h3>
+        <p class="note">Adjacent and punctuation-separated repeats are separate claims, each
+        judged against that word\u2019s own count \u2014 so a construction that repeats a word
+        on purpose excuses itself, and a lone residue stays reviewable. A language that
+        doubles productively abstains here entirely.</p>
+        ${twice.map(capRowHTML).join("")||"<p class='empty'>Nothing flagged at these settings.</p>"}</div>
     </main>`;
     document.querySelectorAll("#app .arow .showbtn").forEach(b=>{
       b.onclick=()=>{const id=b.closest(".arow").dataset.id;S.open=S.open===id?null:id;render()};

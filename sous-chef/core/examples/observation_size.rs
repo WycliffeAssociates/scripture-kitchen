@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use sous_core::unicode::{class_of, is_glue};
-use sous_core::words::{WordCount, WordRow, WordTotal, fold_book};
+use sous_core::words::{DoubleCount, DoubleTotal, WordCount, WordRow, WordTotal, fold_book};
 use sous_core::{
     BookKey, ChapterInput, ChapterKey, ChapterObs, ChapterPass, TextRange, Verse, VerseKey, Words,
 };
@@ -36,7 +36,13 @@ fn corpora_dir() -> PathBuf {
 }
 
 fn main() {
-    println!("size_of::<WordCount>() = {} B\n", size_of::<WordCount>());
+    println!(
+        "size_of::<WordCount>() = {} B   size_of::<DoubleCount>() = {} B   \
+         size_of::<DoubleTotal>() = {} B\n",
+        size_of::<WordCount>(),
+        size_of::<DoubleCount>(),
+        size_of::<DoubleTotal>()
+    );
     let dir = corpora_dir();
     for name in CORPORA {
         let path = dir.join(format!("{name}.txt"));
@@ -334,6 +340,9 @@ fn report(name: &str, path: &Path) {
     // The same rows keyed by hash alone, which is what the aggregate held
     // before `Before` joined the key.
     let mut aggregate_words = 0u64;
+    // The W2 doubles lane, separated out: it is one row per doubled word in a
+    // cased script and one per distinct word in an uncased one.
+    let mut aggregate_doubles = 0u64;
     let mut fold = |rows: &mut Vec<WordRow>, resident: &mut u64, merged: &mut u64| {
         if rows.is_empty() {
             return;
@@ -350,8 +359,10 @@ fn report(name: &str, path: &Path) {
             .chunk_by(|left, right| left.hash == right.hash)
             .count();
         aggregate_words += (hashes * size_of::<WordTotal>()) as u64;
+        aggregate_doubles += size_of_val(folded.doubles()) as u64;
         rows.clear();
     };
+    let mut doubles_row_bytes: Vec<u64> = Vec::new();
     let mut book_rows: Vec<WordRow> = Vec::new();
     let mut current = String::new();
     let metrics: Vec<((String, u32), ChapterMetrics)> = chapters
@@ -363,6 +374,7 @@ fn report(name: &str, path: &Path) {
             }
             let row = word_row(&text, &verses);
             word_row_bytes.push(row.resident_bytes() as u64);
+            doubles_row_bytes.push(size_of_val(row.doubles()) as u64);
             book_rows.push(row);
             (key, analyze_chapter(&text))
         })
@@ -466,6 +478,7 @@ fn report(name: &str, path: &Path) {
     };
     row_bytes_u64("scalar lanes (1+2+3)", &scalar_lane_bytes);
     row_bytes_u64("word row (WordRow, real)", &word_row_bytes);
+    row_bytes_u64("  of which doubles lane", &doubles_row_bytes);
     println!(
         "{:<28}{:>12}{:>12}{aggregate_words:>14}{:>10.3}",
         "word aggregate, hash alone",
@@ -479,6 +492,13 @@ fn report(name: &str, path: &Path) {
         "",
         "",
         aggregate_rows as f64 / 1e6
+    );
+    println!(
+        "{:<28}{:>12}{:>12}{aggregate_doubles:>14}{:>10.3}",
+        "  of which doubles lane",
+        "",
+        "",
+        aggregate_doubles as f64 / 1e6
     );
     println!(
         "{:<28}{:>12}{:>12}{aggregate_bytes:>14}{:>10.3}",

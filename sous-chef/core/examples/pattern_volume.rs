@@ -305,6 +305,10 @@ fn describe(pattern: &Pattern) -> String {
         PatternKey::PooledNeighbor(pool) => format!("pooled-neighbor {}", pool.name()),
         PatternKey::Casing { hash, form } => format!("casing #{hash:016x} {}", form.name()),
         PatternKey::WordLength { hash, sigma } => format!("length #{hash:016x} {sigma}\u{3c3}"),
+        PatternKey::Doubled { hash, separated } => format!(
+            "doubled #{hash:016x} {}",
+            if separated { "separated" } else { "bare" }
+        ),
     };
     format!(
         "{} {evidence} {}/{} {:.2}%",

@@ -38,11 +38,12 @@
 //! in this workspace): it repeats `cp` beside the scalar itself.
 //!
 //! The **Capitalization** tab reads one more key, `cap[]`, one entry per
-//! [`PatternKey::Casing`] row: `w` is the word its first site landed on,
-//! `form` the flagged minority form, `n`/`d` the free-position fraction,
-//! `books` the dispersion, and `samples` up to 8 of that row's sites in the
-//! tuple shape the glyph cards use. Amber is the row's own existence — the
-//! Rust judge fired it — never a JS recomputation.
+//! [`PatternKey::Casing`] or [`PatternKey::Doubled`] row: `kind` says which,
+//! `w` is the word (or the pair) its first site landed on, `form` the flagged
+//! minority form or `bare`/`separated`, `n`/`d` the fraction, `books` the
+//! dispersion, and `samples` up to 8 of that row's sites in the tuple shape
+//! the glyph cards use. Amber is the row's own existence — the Rust judge
+//! fired it — never a JS recomputation.
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -224,11 +225,13 @@ fn shares(bands: &Staircase) -> String {
 
 // -- Capitalization -----------------------------------------------------
 
-/// One row per firing casing pattern: the word its sites landed on, the
-/// minority form, the fraction, and up to eight of those sites in context.
+/// One row per firing word pattern: the word its sites landed on, the claim,
+/// the fraction, and up to eight of those sites in context.
 ///
 /// The word itself is not on the wire — a pattern carries a hash — so it comes
-/// from the text its sites point at, which is that word by construction.
+/// from the text its sites point at, which is that word by construction. A
+/// doubled row's span covers both words and the separator, so its `w` reads
+/// back as the pair.
 fn cap_json(
     corpus: &Corpus<'_, OnionBook>,
     patterns: &[Pattern],
@@ -249,8 +252,12 @@ fn cap_json(
 
     let mut rows = Vec::new();
     for (index, pattern) in patterns.iter().enumerate() {
-        let PatternKey::Casing { form, .. } = pattern.key else {
-            continue;
+        let (kind, form) = match pattern.key {
+            PatternKey::Casing { form, .. } => ("casing", form.name()),
+            PatternKey::Doubled { separated, .. } => {
+                ("doubled", if separated { "separated" } else { "bare" })
+            }
+            _ => continue,
         };
         let mut word = String::new();
         let mut samples = Vec::new();
@@ -274,9 +281,10 @@ fn cap_json(
             }
         }
         rows.push(format!(
-            r#"{{"w":{},"form":{},"n":{},"d":{},"books":{},"sites":{},"samples":[{}]}}"#,
+            r#"{{"kind":{},"w":{},"form":{},"n":{},"d":{},"books":{},"sites":{},"samples":[{}]}}"#,
+            json_str(kind),
             json_str(&word),
-            json_str(form.name()),
+            json_str(form),
             pattern.numerator,
             pattern.denominator,
             pattern.books,

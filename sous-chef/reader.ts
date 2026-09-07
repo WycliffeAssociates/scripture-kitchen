@@ -93,7 +93,7 @@ export interface HygieneFinding {
 }
 
 /** Wire byte 8 of a pattern row is the index into this table. */
-export const CHANNELS = ["ExactNeighbor", "PooledNeighbor", "RunShape", "Placement", "Rarity", "Casing", "WordLength"] as const;
+export const CHANNELS = ["ExactNeighbor", "PooledNeighbor", "RunShape", "Placement", "Rarity", "Casing", "WordLength", "Doubled"] as const;
 export type Channel = (typeof CHANNELS)[number];
 
 /** The outer class either side of a glyph. */
@@ -105,7 +105,7 @@ export const POOLS = ["Quote", "Bracket", "Dash", "Terminal", "Separator", "Digi
 export type Pool = (typeof POOLS)[number];
 
 /** Convention lane 14..16 is a bitmask over this table, low bit first. */
-export const CONVENTION_REASONS = ["PlacementBefore", "PlacementAfter", "RunShape", "ExactNeighbor", "Rarity", "PooledNeighbor", "Casing", "WordLength"] as const;
+export const CONVENTION_REASONS = ["PlacementBefore", "PlacementAfter", "RunShape", "ExactNeighbor", "Rarity", "PooledNeighbor", "Casing", "WordLength", "DoubledBare", "DoubledSeparated"] as const;
 export type ConventionReason = (typeof CONVENTION_REASONS)[number];
 
 /** How a word occurrence is cased; a `Casing` key byte indexes this.
@@ -120,7 +120,8 @@ export type PatternKey =
   | { readonly kind: "Placement"; readonly side: "prev" | "next"; readonly class: OuterClass }
   | { readonly kind: "Rarity" }
   | { readonly kind: "Casing"; readonly hash: bigint; readonly form: CasingForm }
-  | { readonly kind: "WordLength"; readonly hash: bigint; readonly sigma: number };
+  | { readonly kind: "WordLength"; readonly hash: bigint; readonly sigma: number }
+  | { readonly kind: "Doubled"; readonly hash: bigint; readonly separated: boolean };
 
 /** One corpus-level pattern: a glyph, the channel that convicted it, and the
  * fraction behind the claim. */
@@ -242,7 +243,7 @@ function readPattern(view: DataView, at: number, row: number, bookCount: number)
   }
   // Bytes 0..8 are a u64 word hash on a word channel, so no scalar check
   // applies there.
-  const word = channel === "Casing" || channel === "WordLength";
+  const word = channel === "Casing" || channel === "WordLength" || channel === "Doubled";
   const glyph = word ? 0 : rawGlyph;
   if (!word && glyph !== PATTERN_DIGIT_GLYPH && (glyph > 0x10ffff || (glyph >= 0xd800 && glyph <= 0xdfff))) {
     return fail(`pattern row ${row} has an invalid glyph`);
@@ -255,6 +256,11 @@ function readPattern(view: DataView, at: number, row: number, bookCount: number)
     const hash = (BigInt(neighbor) << 32n) | BigInt(rawGlyph);
     if (channel === "WordLength") {
       key = { kind: "WordLength", hash, sigma: raw };
+    } else if (channel === "Doubled") {
+      if (raw > 1) {
+        return fail(`pattern row ${row} has an invalid key`);
+      }
+      key = { kind: "Doubled", hash, separated: raw === 1 };
     } else {
       const form = CASING_FORMS[raw];
       if (form === undefined || form === "Uncased") {

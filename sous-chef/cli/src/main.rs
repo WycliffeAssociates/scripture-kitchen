@@ -192,6 +192,12 @@ fn print_patterns(
             let claim = match pattern.key {
                 PatternKey::Casing { form, .. } => form.name().to_string(),
                 PatternKey::WordLength { sigma, .. } => format!("{sigma}\u{3c3}"),
+                PatternKey::Doubled { separated, .. } => if separated {
+                    "doubled, separated"
+                } else {
+                    "doubled"
+                }
+                .to_string(),
                 _ => unreachable!("a word hash comes from a word channel"),
             };
             let word = sites[index].first().map_or_else(String::new, |finding| {
@@ -232,9 +238,9 @@ fn print_patterns(
             PatternKey::PooledNeighbor(pool) => {
                 format!("pooled-neighbor {}", pool.name())
             }
-            PatternKey::Casing { .. } | PatternKey::WordLength { .. } => {
-                unreachable!("handled above")
-            }
+            PatternKey::Casing { .. }
+            | PatternKey::WordLength { .. }
+            | PatternKey::Doubled { .. } => unreachable!("handled above"),
         };
         let band = match pattern.band {
             Some(step) => format!(" band {step}"),

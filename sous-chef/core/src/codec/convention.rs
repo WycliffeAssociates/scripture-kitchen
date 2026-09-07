@@ -26,9 +26,13 @@ impl Reasons {
     pub const POOLED_NEIGHBOR: Self = Self(1 << 5);
     pub const CASING: Self = Self(1 << 6);
     pub const WORD_LENGTH: Self = Self(1 << 7);
-    const KNOWN_BITS: u16 = 0b1111_1111;
+    /// A word immediately followed by itself, whitespace only between.
+    pub const DOUBLED_BARE: Self = Self(1 << 8);
+    /// The same, with a nonletter run between (`na, na`).
+    pub const DOUBLED_SEPARATED: Self = Self(1 << 9);
+    const KNOWN_BITS: u16 = 0b11_1111_1111;
     /// Bit order on the wire, low bit first.
-    pub const NAMES: [&'static str; 8] = [
+    pub const NAMES: [&'static str; 10] = [
         "PlacementBefore",
         "PlacementAfter",
         "RunShape",
@@ -37,6 +41,8 @@ impl Reasons {
         "PooledNeighbor",
         "Casing",
         "WordLength",
+        "DoubledBare",
+        "DoubledSeparated",
     ];
 
     pub const fn bits(self) -> u16 {
@@ -165,18 +171,20 @@ mod tests {
 
     #[test]
     fn convention_refuses_unknown_reason_bits() {
-        // Bit 7 is the last the u8 lane holds; bit 8 is the first past it.
+        // Bit 9 is the last the table holds; bit 10 is the first past it.
         assert_eq!(Reasons::from_bits(1 << 7), Ok(Reasons::WORD_LENGTH));
+        assert_eq!(Reasons::from_bits(1 << 8), Ok(Reasons::DOUBLED_BARE));
+        assert_eq!(Reasons::from_bits(1 << 9), Ok(Reasons::DOUBLED_SEPARATED));
         assert_eq!(
-            Reasons::from_bits(1 << 8),
-            Err(CodecError::UnknownReasons(256))
+            Reasons::from_bits(1 << 10),
+            Err(CodecError::UnknownReasons(1_024))
         );
         let record = convention(0, 1, 0, Reasons::RUN_SHAPE);
         let mut unknown = record.encode();
-        unknown[14..16].copy_from_slice(&0x0100i16.to_le_bytes());
+        unknown[14..16].copy_from_slice(&0x0400i16.to_le_bytes());
         assert_eq!(
             PackedFinding::decode(&unknown, &[1]),
-            Err(CodecError::UnknownReasons(0x0100))
+            Err(CodecError::UnknownReasons(0x0400))
         );
         let mut negative = record.encode();
         negative[14..16].copy_from_slice(&(-1i16).to_le_bytes());

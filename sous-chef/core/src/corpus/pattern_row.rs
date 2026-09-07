@@ -31,6 +31,9 @@ pub(super) fn encode_pattern(pattern: &Pattern) -> [u8; PATTERN_ROW_LEN] {
         PatternKey::Rarity => (pattern.glyph.raw(), 0, 0),
         PatternKey::Casing { hash, form } => (hash as u32, (hash >> 32) as u32, form as u8),
         PatternKey::WordLength { hash, sigma } => (hash as u32, (hash >> 32) as u32, sigma),
+        PatternKey::Doubled { hash, separated } => {
+            (hash as u32, (hash >> 32) as u32, u8::from(separated))
+        }
     };
     row[PATTERN_GLYPH_OFFSET..PATTERN_NEIGHBOR_OFFSET].copy_from_slice(&glyph.to_le_bytes());
     row[PATTERN_NEIGHBOR_OFFSET..PATTERN_CHANNEL_OFFSET].copy_from_slice(&neighbor.to_le_bytes());
@@ -123,6 +126,14 @@ pub(super) fn decode_pattern(
         Channel::WordLength => PatternKey::WordLength {
             hash: word_hash,
             sigma: raw_key,
+        },
+        Channel::Doubled => PatternKey::Doubled {
+            hash: word_hash,
+            separated: match raw_key {
+                0 => false,
+                1 => true,
+                _ => return Err(bad("key")),
+            },
         },
     };
     if channel != Channel::ExactNeighbor && !channel.is_word() && neighbor_raw != 0 {

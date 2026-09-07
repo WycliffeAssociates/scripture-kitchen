@@ -1,7 +1,7 @@
 //! Coverage for the word walk, the fold, and the casing channel over them.
 
 use super::*;
-use crate::judge::{Channel, Channels, LetterRoster, Staircase, TerminalTable};
+use crate::judge::{Channel, Channels, DoublesPolicy, LetterRoster, Staircase, TerminalTable};
 use crate::pass::analyze_with;
 use crate::substrate::{FollowCounts, ScalarKey, Substrate};
 use crate::{BookKey, Chapter, Corpus, ProjectedBook, VerseKey};
@@ -229,13 +229,93 @@ fn a_word_row_counts_forms_by_hash_and_by_what_stood_before() {
     );
 }
 
+/// An uncased chapter holds no casing row — a word with no cased letter can
+/// carry no casing convention — but it does hold a doubles row per word, which
+/// is where the doubled channel's denominator comes from there.
 #[test]
-fn an_uncased_chapter_stores_nothing_and_hashes_nothing() {
+fn an_uncased_chapter_stores_no_casing_row_and_one_doubles_row_per_word() {
     let hebrew = row("\u{5d0}\u{5d1}\u{5d2} \u{5d3}\u{5d4}. \u{5d0}\u{5d1}\u{5d2}");
     assert!(hebrew.words().is_empty());
     assert!(!hebrew.cased());
-    assert_eq!(hebrew.resident_bytes(), size_of::<WordRow>());
+    assert_eq!(hebrew.doubles().len(), 2, "two distinct words");
+    assert_eq!(hebrew.doubles()[0].bare + hebrew.doubles()[0].separated, 0);
+    assert_eq!(
+        hebrew.doubles().iter().map(|row| row.uncased).sum::<u16>(),
+        3
+    );
+    assert_eq!(
+        hebrew.resident_bytes(),
+        size_of::<WordRow>() + 2 * size_of::<DoubleCount>()
+    );
     assert!(row("David").cased());
+}
+
+// ── The doubles lane ────────────────────────────────────────────────────
+
+/// One word's doubles row, or the zero row when the chapter holds none.
+fn doubles_of(text: &str, word: &str) -> DoubleCount {
+    let hash = hash_of(word);
+    row(text)
+        .doubles()
+        .iter()
+        .find(|row| row.hash == hash)
+        .copied()
+        .unwrap_or(DoubleCount::new(hash))
+}
+
+#[test]
+fn the_double_count_is_sixteen_bytes() {
+    assert_eq!(size_of::<DoubleCount>(), 16);
+}
+
+/// Two claims, kept apart, and compared by the case fold: `The the` is a
+/// double.
+#[test]
+fn adjacent_and_separated_doubles_are_different_counters() {
+    assert_eq!(doubles_of("go go on", "go").bare, 1);
+    assert_eq!(doubles_of("go go on", "go").separated, 0);
+    assert_eq!(doubles_of("na, na now", "na").separated, 1);
+    assert_eq!(doubles_of("na, na now", "na").bare, 0);
+    assert_eq!(doubles_of("The the end", "the").bare, 1);
+    // A newline is whitespace, so a line break is still bare.
+    assert_eq!(doubles_of("go\ngo on", "go").bare, 1);
+    // Three in a row are two pairs.
+    assert_eq!(doubles_of("go go go on", "go").bare, 2);
+    // The chapter is the walk's whole world, so its edges bound a pair too.
+    assert_eq!(doubles_of("go go", "go").bare, 1);
+}
+
+/// Only a letter, glue, or digit between disqualifies a pair. Each of those
+/// means the walk dropped a token there — a digit run holds no letter, so it
+/// is no word at all — and a double must not claim across one.
+#[test]
+fn a_word_between_two_occurrences_is_not_a_double() {
+    assert_eq!(doubles_of("go on go", "go").bare, 0);
+    assert_eq!(doubles_of("na 3 na", "na").separated, 0);
+    assert_eq!(doubles_of("na 3 na", "na").bare, 0);
+    // `a--b` is two words, so `go--go` is a separated double.
+    assert_eq!(doubles_of("go--go on", "go").separated, 1);
+}
+
+/// The lane is keyed by hash alone: a double is a double whatever stood
+/// before it, so one row carries every position.
+#[test]
+fn the_doubles_lane_is_keyed_by_hash_alone() {
+    let observed = row("Go go on. Go go on, go go.");
+    let go = observed
+        .doubles()
+        .iter()
+        .filter(|row| row.hash == hash_of("go"))
+        .count();
+    assert_eq!(go, 1);
+    assert_eq!(doubles_of("Go go on. Go go on, go go.", "go").bare, 3);
+    assert!(
+        observed
+            .doubles()
+            .windows(2)
+            .all(|pair| pair[0].hash < pair[1].hash),
+        "the lane is sorted and distinct"
+    );
 }
 
 #[test]
@@ -286,11 +366,27 @@ fn the_fold_merges_by_hash_and_carries_no_seam() {
     assert!(!fold(&["\u{5d0}\u{5d1}", "\u{5d2}"]).cased());
 }
 
+/// The doubles lane merges by hash, and the seam carries nothing: a pair the
+/// chapter edge split was never counted, so there is nothing to fold.
+#[test]
+fn the_fold_merges_the_doubles_lane_and_the_seam_ends_a_pair() {
+    let joined = fold(&["go go on", "go, go on"]);
+    let go = joined.doubles_for(hash_of("go")).expect("one row");
+    assert_eq!((go.bare, go.separated), (1, 1));
+
+    // A cased word that never doubles is in no doubles row at all, which is
+    // what keeps the lane cheap in a cased script.
+    let split = fold(&["and go", "go and"]);
+    assert!(split.doubles().is_empty());
+}
+
 // ── The channel ─────────────────────────────────────────────────────────
 
 struct Book {
     key: BookKey,
     text: String,
+    chapters: Vec<Chapter>,
+    verses: Vec<Verse>,
 }
 
 impl ProjectedBook for Book {
@@ -303,23 +399,79 @@ impl ProjectedBook for Book {
     }
 
     fn chapters(&self) -> impl Iterator<Item = Chapter> {
-        std::iter::once(
-            Chapter::new(1, TextRange::new(0, self.text.len() as u32).unwrap()).unwrap(),
-        )
+        self.chapters.iter().copied()
     }
 
     fn verses(&self) -> impl Iterator<Item = Verse> {
-        std::iter::once(Verse::new(
-            VerseKey::new(1, 1, 1).unwrap(),
-            TextRange::new(0, self.text.len() as u32).unwrap(),
-        ))
+        self.verses.iter().copied()
     }
 }
 
 fn book(key: &[u8; 3], text: impl Into<String>) -> Book {
+    let text = text.into();
+    let whole = TextRange::new(0, text.len() as u32).unwrap();
     Book {
         key: BookKey::new(*key),
-        text: text.into(),
+        text,
+        chapters: vec![Chapter::new(1, whole).unwrap()],
+        verses: vec![Verse::new(VerseKey::new(1, 1, 1).unwrap(), whole)],
+    }
+}
+
+/// The parts joined by one space, each part its own span; the joining spaces
+/// belong to no part, which is what makes a chapter seam a real edge of text.
+fn parts(texts: &[&str]) -> (String, Vec<TextRange>) {
+    let mut text = String::new();
+    let mut spans = Vec::new();
+    for part in texts {
+        if !text.is_empty() {
+            text.push(' ');
+        }
+        let from = text.len() as u32;
+        text.push_str(part);
+        spans.push(TextRange::new(from, text.len() as u32).unwrap());
+    }
+    (text, spans)
+}
+
+/// One chapter, one verse per part: verse state crosses the seam, which is
+/// exactly what a doubled pair must ride through.
+fn versed(key: &[u8; 3], texts: &[&str]) -> Book {
+    let (text, spans) = parts(texts);
+    let whole = TextRange::new(0, text.len() as u32).unwrap();
+    Book {
+        key: BookKey::new(*key),
+        text,
+        chapters: vec![Chapter::new(1, whole).unwrap()],
+        verses: spans
+            .iter()
+            .enumerate()
+            .map(|(at, span)| {
+                Verse::new(
+                    VerseKey::new(1, at as u16 + 1, at as u16 + 1).unwrap(),
+                    *span,
+                )
+            })
+            .collect(),
+    }
+}
+
+/// One chapter per part, each holding one verse: the seam is an edge of text.
+fn chaptered(key: &[u8; 3], texts: &[&str]) -> Book {
+    let (text, spans) = parts(texts);
+    Book {
+        key: BookKey::new(*key),
+        text,
+        chapters: spans
+            .iter()
+            .enumerate()
+            .map(|(at, span)| Chapter::new(at as u16 + 1, *span).unwrap())
+            .collect(),
+        verses: spans
+            .iter()
+            .enumerate()
+            .map(|(at, span)| Verse::new(VerseKey::new(at as u16 + 1, 1, 1).unwrap(), *span))
+            .collect(),
     }
 }
 
@@ -590,6 +742,201 @@ fn the_length_channel_ships_off() {
     );
 }
 
+// ── The doubled channel ─────────────────────────────────────────────────
+
+/// The recusal off, so a fixture whose point is the band is not answered by
+/// the corpus statistic instead.
+fn always(config: &JudgingConfig) -> JudgingConfig {
+    JudgingConfig {
+        doubles: DoublesPolicy::Always,
+        ..*config
+    }
+}
+
+fn doubled_rows(books: &[Book], config: &JudgingConfig) -> Vec<Pattern> {
+    judged(books, config)
+        .into_iter()
+        .filter(|row| row.channel == Channel::Doubled)
+        .collect()
+}
+
+/// French `vous vous` is a construction, not a slip: 300 doublings against
+/// 9,000 uses is 3.3%, far above band 3's 10 basis points, so the word
+/// excuses itself against its own count and no allow-list is needed.
+#[test]
+fn vous_vous_three_hundred_times_is_convention_and_silent() {
+    let mut text = String::new();
+    for index in 0..300 {
+        text.push_str(&format!("w{} vous vous ", index % 100));
+    }
+    for index in 0..8_400 {
+        text.push_str(&format!("w{} vous ", index % 100));
+    }
+    let books = [book(b"MRK", text)];
+    assert!(doubled_rows(&books, &JudgingConfig::default()).is_empty());
+    // Not the recusal: a hundred other words keep the corpus's doubling share
+    // at 99 bp, and forcing the channel on changes nothing.
+    assert!(doubled_rows(&books, &always(&JudgingConfig::default())).is_empty());
+}
+
+/// The other half of the same rule: one `the the` against two thousand
+/// ordinary `the`s is 4 basis points and stays reviewable.
+#[test]
+fn the_the_once_is_flagged_bare() {
+    let mut text = "and the word ".repeat(2_000);
+    text.push_str("and the the word");
+    let books = [book(b"MRK", text)];
+    let findings = analyzed(&books, &JudgingConfig::default());
+    let rows: Vec<Pattern> = findings
+        .patterns()
+        .iter()
+        .filter(|row| row.channel == Channel::Doubled)
+        .copied()
+        .collect();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        rows[0].key,
+        PatternKey::Doubled {
+            hash: hash_of("the"),
+            separated: false,
+        }
+    );
+    assert_eq!((rows[0].numerator, rows[0].denominator), (1, 2_002));
+    assert_eq!(rows[0].books, 1);
+    // The span covers both words and nothing else.
+    assert_eq!(sited(&books, &findings, Reasons::DOUBLED_BARE), ["the the"]);
+}
+
+/// `na, na` is a second key with its own denominator, never pooled with the
+/// adjacent one: a comma between them is a different claim about the text.
+#[test]
+fn na_comma_na_is_a_separate_claim() {
+    let mut text = "and na now ".repeat(2_000);
+    text.push_str("and na, na now");
+    let books = [book(b"MRK", text)];
+    let findings = analyzed(&books, &JudgingConfig::default());
+    let rows: Vec<Pattern> = findings
+        .patterns()
+        .iter()
+        .filter(|row| row.channel == Channel::Doubled)
+        .copied()
+        .collect();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        rows[0].key,
+        PatternKey::Doubled {
+            hash: hash_of("na"),
+            separated: true,
+        }
+    );
+    assert_eq!((rows[0].numerator, rows[0].denominator), (1, 2_002));
+    // The span covers both words AND the separator.
+    assert_eq!(
+        sited(&books, &findings, Reasons::DOUBLED_SEPARATED),
+        ["na, na"]
+    );
+    assert!(sited(&books, &findings, Reasons::DOUBLED_BARE).is_empty());
+}
+
+/// Charter invariant 1: a verse start is an address, not a sentence boundary,
+/// so word state crosses it and a pair straddling the seam is a real pair.
+#[test]
+fn a_double_across_a_verse_seam_counts() {
+    let lead = "and na now ".repeat(2_000) + "and na";
+    let books = [versed(b"MRK", &[&lead, "na now"])];
+    let findings = analyzed(&books, &JudgingConfig::default());
+    let rows: Vec<Pattern> = findings
+        .patterns()
+        .iter()
+        .filter(|row| row.channel == Channel::Doubled)
+        .copied()
+        .collect();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].numerator, 1);
+    assert_eq!(sited(&books, &findings, Reasons::DOUBLED_BARE), ["na na"]);
+}
+
+/// A chapter seam is an edge of text for a word, which the fold's own rule
+/// already says: the walk is per chapter, so the pair simply never forms.
+#[test]
+fn a_double_across_a_chapter_seam_does_not() {
+    let lead = "and na now ".repeat(2_000) + "and na";
+    let books = [chaptered(b"MRK", &[&lead, "na now"])];
+    assert!(doubled_rows(&books, &JudgingConfig::default()).is_empty());
+}
+
+/// Genuinely productive reduplication is a corpus-level fact, not a band: a
+/// language that doubles three words in ten abstains entirely, and `Always`
+/// is the host's override.
+#[test]
+fn a_reduplicating_corpus_recuses_itself() {
+    let mut text = String::new();
+    for _ in 0..100 {
+        for word in 0..10 {
+            text.push_str(&format!("w{word} "));
+        }
+    }
+    for word in 0..3 {
+        text.push_str(&format!("w{word} w{word} w5 w{word} w{word} w5 "));
+    }
+    let books = [book(b"MRK", text)];
+    assert!(doubled_rows(&books, &loose()).is_empty(), "3 of 10 double");
+    let forced = doubled_rows(&books, &always(&loose()));
+    assert_eq!(forced.len(), 3);
+    assert!(forced.iter().all(|row| row.numerator == 2));
+
+    let never = JudgingConfig {
+        doubles: DoublesPolicy::Never,
+        ..loose()
+    };
+    assert!(doubled_rows(&books, &never).is_empty());
+}
+
+/// Doubling has nothing to do with case, so an uncased script — which pays
+/// nothing for the casing channel — is still judged here. Its denominator
+/// comes from the doubles lane's own `uncased` count, because the casing lane
+/// refuses every one of its words.
+#[test]
+fn an_uncased_script_still_counts_doubles() {
+    let word = "\u{5d0}\u{5d1}";
+    let mut text = format!("{word} \u{5d2}\u{5d3} ").repeat(200);
+    text.push_str(&format!("{word} {word}"));
+    let books = [book(b"MRK", text)];
+    let findings = analyzed(&books, &loose());
+    let rows: Vec<Pattern> = findings
+        .patterns()
+        .iter()
+        .filter(|row| row.channel.is_word())
+        .copied()
+        .collect();
+    assert_eq!(rows.len(), 1, "the casing channel says nothing here");
+    assert_eq!(rows[0].channel, Channel::Doubled);
+    assert_eq!((rows[0].numerator, rows[0].denominator), (1, 202));
+    assert_eq!(
+        sited(&books, &findings, Reasons::DOUBLED_BARE),
+        [format!("{word} {word}")]
+    );
+}
+
+/// It ships on: the volume is low and the claim is cheap.
+#[test]
+fn the_doubled_channel_ships_on() {
+    assert!(JudgingConfig::default().channels.doubled);
+    assert_eq!(JudgingConfig::default().doubles, DoublesPolicy::Auto);
+    assert_eq!(JudgingConfig::default().doubles_productive_bp, 300);
+
+    let mut text = "and the word ".repeat(2_000);
+    text.push_str("and the the word");
+    let off = JudgingConfig {
+        channels: Channels {
+            doubled: false,
+            ..Channels::default()
+        },
+        ..JudgingConfig::default()
+    };
+    assert!(doubled_rows(&[book(b"MRK", text)], &off).is_empty());
+}
+
 // ── The corpus tally ────────────────────────────────────────────────────
 
 /// Five books whose words overlap in every way that matters: shared hashes,
@@ -597,9 +944,9 @@ fn the_length_channel_ships_off() {
 fn corpus_books() -> Vec<WordAggregate> {
     [
         "David went. david wept. DAVID sang.",
-        "Solomon spoke. david slept.",
-        "David rose and david ran and Ruth wept.",
-        "Ruth. ruth. RUTH gleaned in david's field.",
+        "Solomon spoke. david slept. na, na.",
+        "David rose and david ran and Ruth wept. na na.",
+        "Ruth. ruth. RUTH gleaned in david's field. \u{5d0}\u{5d1} \u{5d0}\u{5d1}",
         "Boaz.",
     ]
     .iter()
@@ -668,6 +1015,45 @@ fn one_aggregate_tallied_twice_is_two_books() {
     assert_eq!(tally, totals_of(&[&book]));
     tally.remove(&[&book]);
     assert!(tally.is_empty(), "no book holds any word");
+}
+
+/// The doubles lane rides the same two updates as the casing lane, and the
+/// recusal statistic is a share of the union of the two vocabularies.
+#[test]
+fn the_doubles_lane_adds_and_removes_like_the_casing_lane() {
+    let books = corpus_books();
+    let views: Vec<&WordAggregate> = books.iter().collect();
+    let tally = totals_of(&views);
+    let na = tally
+        .doubles()
+        .iter()
+        .find(|row| row.hash == hash_of("na"))
+        .expect("two books hold na");
+    assert_eq!((na.bare, na.separated, na.holders), (1, 1, 2));
+
+    // An uncased word is in the doubles lane alone, so the union counts it.
+    let hebrew = tally
+        .doubles()
+        .iter()
+        .find(|row| row.hash == hash_of("\u{5d0}\u{5d1}"))
+        .expect("one book holds it");
+    assert_eq!((hebrew.uncased, hebrew.bare), (2, 1));
+    assert!(!tally.by_word().any(|word| word[0].hash == hebrew.hash));
+    assert!(tally.doubling_share_bp() > 0);
+
+    let mut built = WordTotals::default();
+    for book in &views {
+        built.add(&[book]);
+    }
+    assert_eq!(built, tally);
+    built.remove(&[views[1]]);
+    let left: Vec<&WordAggregate> = views
+        .iter()
+        .enumerate()
+        .filter(|(at, _)| *at != 1)
+        .map(|(_, book)| *book)
+        .collect();
+    assert_eq!(built, totals_of(&left));
 }
 
 /// A word only ever in a forced position has an all-zero row, and a fresh

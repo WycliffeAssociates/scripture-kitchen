@@ -1,22 +1,26 @@
-//! Level 2 words: one scan per chapter, counted by hash, by case form, and by
-//! the glyph that stood before the word.
+//! Level 2 words: one scan per chapter, two lanes out of it — counts by hash,
+//! case form and preceding glyph, and doubling by hash alone.
 //!
 //! ```text
-//! map("Then david went. David wept. DAVID sang.")
-//!   hash(david)  Glyph('.')  [Lower 0, Title 1, Upper 0, Mixed 0]  len 5
-//!   hash(david)  None        [Lower 1, Title 0, Upper 1, Mixed 0]  len 5
-//!   hash(then)   Start       [Lower 0, Title 1, Upper 0, Mixed 0]  len 4
-//!   hash(went)   None        [Lower 1, …]                          len 4
-//!   …
+//! map("Then david went. David wept. DAVID sang. Go go.")
+//!   casing lane
+//!     hash(david)  Glyph('.')  [Lower 0, Title 1, Upper 0, Mixed 0]  len 5
+//!     hash(david)  None        [Lower 1, Title 0, Upper 1, Mixed 0]  len 5
+//!     hash(then)   Start       [Lower 0, Title 1, Upper 0, Mixed 0]  len 4
+//!     hash(went)   None        [Lower 1, …]                          len 4
+//!     …
+//!   doubles lane
+//!     hash(go)     uncased 0  bare 1  separated 0
 //! judge, terminal table forces '.', word_support_floor 2, 25% at this size
 //!   → Casing { hash(david), Upper }   1/2   5,000 bp   band 0
 //! ```
 //!
 //! The walk decides nothing about capitals; the judge splits free from forced
 //! by asking the corpus's own terminal table what each stored glyph does. The
-//! row skips every word with no cased letter: it can hold no casing
-//! convention, so an uncased script hashes nothing and stores nothing. The
-//! walk rule, the terminal rule, and the fold's seam argument: words.md.
+//! casing lane skips every word with no cased letter — it can hold no casing
+//! convention — and the doubles lane counts those words instead, because
+//! doubling has nothing to do with case. The walk rule, the terminal rule, and
+//! the fold's seam argument: words.md.
 
 use rustc_hash::FxHashMap;
 
@@ -32,8 +36,8 @@ mod totals;
 pub mod walk;
 
 pub use fold::fold_book;
-pub use totals::{WordTally, WordTotals};
-pub use walk::{Occurrence, for_each_word};
+pub use totals::{DoubleTally, WordTally, WordTotals};
+pub use walk::{Gap, Occurrence, for_each_word, gap_between};
 
 // ── What stood before ───────────────────────────────────────────────────
 
@@ -215,6 +219,52 @@ impl WordCount {
     }
 }
 
+// ── The doubles lane ────────────────────────────────────────────────────
+
+/// One case-folded word's doubling in one chapter, keyed by hash alone: a
+/// double is a double whatever stood before it.
+///
+/// `uncased` is the lane's other job. A word with no cased letter is refused
+/// by [`WordCount`], so the two lanes **partition** a word's occurrences and
+/// the doubled channel's denominator is their sum — which is what lets an
+/// uncased script be judged for doubling at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DoubleCount {
+    /// xxh3-64 of the word's case-folded scalars.
+    pub hash: u64,
+    /// Occurrences of this word with no cased letter. Saturating.
+    pub uncased: u16,
+    /// Times this word was immediately followed by itself, whitespace only
+    /// between. Saturating.
+    pub bare: u16,
+    /// The same with a nonletter run between (`na, na`). Saturating.
+    pub separated: u16,
+}
+
+impl DoubleCount {
+    pub(crate) const fn new(hash: u64) -> Self {
+        Self {
+            hash,
+            uncased: 0,
+            bare: 0,
+            separated: 0,
+        }
+    }
+
+    pub(crate) fn add(&mut self, gap: Gap) {
+        let lane = match gap {
+            Gap::Bare => &mut self.bare,
+            Gap::Separated => &mut self.separated,
+        };
+        *lane = lane.saturating_add(1);
+    }
+
+    /// The lane one pattern key counts.
+    pub const fn count_of(&self, separated: bool) -> u16 {
+        if separated { self.separated } else { self.bare }
+    }
+}
+
 /// One chapter's word counts: sorted by hash, detached, coordinate-free.
 ///
 /// [`ChapterPass::release`] leaves the empty row a host keeps when it retains
@@ -225,6 +275,7 @@ impl WordCount {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct WordRow {
     words: Box<[WordCount]>,
+    doubles: Box<[DoubleCount]>,
     cased: bool,
     /// Set only by [`ChapterPass::release`]; read by
     /// [`ChapterPass::is_released`] to decide the row must be walked again.
@@ -238,14 +289,20 @@ impl WordRow {
         &self.words
     }
 
+    /// Every word the chapter doubled, plus every word with an uncased
+    /// occurrence, sorted by hash.
+    pub fn doubles(&self) -> &[DoubleCount] {
+        &self.doubles
+    }
+
     /// Whether the chapter holds a cased letter at all.
     pub const fn cased(&self) -> bool {
         self.cased
     }
 
-    /// Inline size plus every byte the lane owns; what a resident cache pays.
+    /// Inline size plus every byte both lanes own; what a resident cache pays.
     pub fn resident_bytes(&self) -> usize {
-        size_of::<Self>() + size_of_val(&*self.words)
+        size_of::<Self>() + size_of_val(&*self.words) + size_of_val(&*self.doubles)
     }
 }
 
@@ -298,16 +355,49 @@ impl WordTotal {
     }
 }
 
+/// One case-folded word's doubling over one book.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct DoubleTotal {
+    pub hash: u64,
+    pub uncased: u32,
+    pub bare: u32,
+    pub separated: u32,
+}
+
+impl DoubleTotal {
+    pub const fn count_of(&self, separated: bool) -> u32 {
+        if separated { self.separated } else { self.bare }
+    }
+}
+
 /// One book's word counts, merged by hash.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct WordAggregate {
     words: Vec<WordTotal>,
+    doubles: Vec<DoubleTotal>,
     cased: bool,
 }
 
 impl WordAggregate {
-    pub(crate) fn new(words: Vec<WordTotal>, cased: bool) -> Self {
-        Self { words, cased }
+    pub(crate) fn new(words: Vec<WordTotal>, doubles: Vec<DoubleTotal>, cased: bool) -> Self {
+        Self {
+            words,
+            doubles,
+            cased,
+        }
+    }
+
+    /// The doubles lane, by hash ascending.
+    pub fn doubles(&self) -> &[DoubleTotal] {
+        &self.doubles
+    }
+
+    /// This book's doubles row for one word, if it holds one.
+    pub fn doubles_for(&self, hash: u64) -> Option<&DoubleTotal> {
+        self.doubles
+            .binary_search_by_key(&hash, |row| row.hash)
+            .ok()
+            .map(|at| &self.doubles[at])
     }
 
     /// Sorted by `(hash, before)`, so the judge merges books without hashing
@@ -339,10 +429,12 @@ impl WordAggregate {
         &self.words[from..to]
     }
 
-    /// Inline size plus the words vector's real heap: capacity, not length,
-    /// since `fold_book` reserves `with_capacity` once and never regrows.
+    /// Inline size plus both lanes' real heap: capacity, not length, since
+    /// `fold_book` reserves `with_capacity` once and shrinks after the merge.
     pub fn resident_bytes(&self) -> usize {
-        size_of::<Self>() + self.words.capacity() * size_of::<WordTotal>()
+        size_of::<Self>()
+            + self.words.capacity() * size_of::<WordTotal>()
+            + self.doubles.capacity() * size_of::<DoubleTotal>()
     }
 }
 
@@ -392,7 +484,7 @@ impl ChapterPass for Words {
     /// nobody measured. `Brigade` judges `Substrate` first, which is what puts
     /// it there; `Words` alone abstains and says so.
     fn judge(&self, corpus: &[&WordAggregate], config: &JudgingConfig, out: &mut Findings) {
-        if !judges_anything(config) || corpus.iter().all(|book| !book.cased()) {
+        if !judges_anything(corpus, config) {
             return;
         }
         let Some(table) = out.terminals().cloned() else {
@@ -428,7 +520,7 @@ impl ChapterPass for Words {
         config: &JudgingConfig,
         out: &mut Findings,
     ) {
-        if !judges_anything(config) || corpus.iter().all(|book| !book.cased()) {
+        if !judges_anything(corpus, config) {
             return;
         }
         let Some(table) = out.terminals().cloned() else {
@@ -438,9 +530,10 @@ impl ChapterPass for Words {
     }
 
     /// Rewalks this book's words and sites what the counts named: a casing
-    /// row's free occurrences of one `(hash, form)`, and a length row's every
-    /// occurrence of one hash. The rescan reads the same terminal table the
-    /// judge did, or it would place positions the counts never held.
+    /// row's free occurrences of one `(hash, form)`, a length row's every
+    /// occurrence of one hash, and a doubled row's every pair, whose span
+    /// covers both words and the separator. The rescan reads the same terminal
+    /// table the judge did, or it would place positions the counts never held.
     fn locate(
         &self,
         book: BookIndex,
@@ -460,6 +553,7 @@ impl ChapterPass for Words {
         // once; a firing set is tens of rows, not thousands.
         let mut cased: FxHashMap<(u64, Form), PatternIndex> = FxHashMap::default();
         let mut long: FxHashMap<u64, PatternIndex> = FxHashMap::default();
+        let mut twice: FxHashMap<(u64, bool), PatternIndex> = FxHashMap::default();
         for &index in &set {
             match out.patterns()[usize::from(index.get())].key {
                 PatternKey::Casing { hash, form } => {
@@ -467,6 +561,9 @@ impl ChapterPass for Words {
                 }
                 PatternKey::WordLength { hash, .. } => {
                     long.insert(hash, index);
+                }
+                PatternKey::Doubled { hash, separated } => {
+                    twice.insert((hash, separated), index);
                 }
                 _ => {}
             }
@@ -479,7 +576,24 @@ impl ChapterPass for Words {
             let span = chapter.text();
             let slice = &text[span.from() as usize..span.to() as usize];
             cursor = chapter_verses(verses, cursor, span, &mut rebased);
+            // The pair, not the word: a chapter seam ends it, which is what a
+            // fresh scan per chapter already says.
+            let mut previous: Option<(u64, u32, u32)> = None;
             for_each_word(slice, &rebased, |word| {
+                if let Some((hash, from, to)) = previous.replace((word.hash, word.from, word.to))
+                    && hash == word.hash
+                    && let Some(gap) = gap_between(slice, to, word.from)
+                    && let Some(&index) = twice.get(&(hash, gap == Gap::Separated))
+                {
+                    // The span covers both words and what stood between them.
+                    let at = TextRange::new(span.from() + from, span.from() + word.to)
+                        .expect("a pair grows forward");
+                    let reason = match gap {
+                        Gap::Bare => Reasons::DOUBLED_BARE,
+                        Gap::Separated => Reasons::DOUBLED_SEPARATED,
+                    };
+                    found.push((at, index, reason));
+                }
                 if word.form == Form::Uncased {
                     return;
                 }
@@ -515,43 +629,60 @@ impl ChapterPass for Words {
         }
     }
 
-    /// One merge walk over two hash-sorted lists, not one binary search per
-    /// row: the judge emits word rows in hash order and the aggregate is
-    /// sorted the same way, and a probe per row into a 5k-row table for each
-    /// of 66 books was a cache miss per probe — a quarter of a keystroke.
+    /// One merge walk per lane, not one binary search per row: the judge emits
+    /// each lane's rows in hash order and the aggregate is sorted the same way,
+    /// and a probe per row into a 5k-row table for each of 66 books was a cache
+    /// miss per probe — a quarter of a keystroke.
     ///
-    /// Position-blind on purpose: a book claims a row whose word it holds at
-    /// all, and `locate` applies the free/forced split. A superset costs a
-    /// rescan that finds nothing; reading the terminal table here would put a
-    /// judging decision in a cache key.
+    /// On the casing lane, position-blind on purpose: a book claims a row whose
+    /// word it holds at all, and `locate` applies the free/forced split. A
+    /// superset costs a rescan that finds nothing; reading the terminal table
+    /// here would put a judging decision in a cache key. The doubles lane has
+    /// no such split, so a book claims a doubled row exactly when it holds it.
     fn firing(&self, aggregate: &WordAggregate, patterns: &[Pattern], out: &mut Vec<PatternIndex>) {
         out.clear();
-        if !aggregate.cased() {
-            return;
-        }
         let words = aggregate.words();
-        let mut at = 0usize;
-        let mut last = 0u64;
+        let doubles = aggregate.doubles();
+        // One cursor per lane: each lane's rows arrive in hash order, but the
+        // doubles rows come after the casing rows and restart at the lowest
+        // hash again.
+        let (mut word_at, mut word_last) = (0usize, 0u64);
+        let (mut double_at, mut double_last) = (0usize, 0u64);
         for (index, pattern) in patterns.iter().enumerate() {
             let Some(hash) = pattern.word_hash() else {
                 continue;
             };
-            if hash < last {
-                // Rows out of hash order: fall back to the probe for this one.
-                if holds(aggregate.rows_for(hash), pattern) {
-                    out.push(PatternIndex::new(index as u16));
+            let held = match pattern.key {
+                PatternKey::Doubled { separated, .. } => {
+                    if hash < double_last {
+                        // Rows out of hash order: probe for this one.
+                        holds_double(aggregate.doubles_for(hash), separated)
+                    } else {
+                        double_last = hash;
+                        while double_at < doubles.len() && doubles[double_at].hash < hash {
+                            double_at += 1;
+                        }
+                        holds_double(
+                            doubles.get(double_at).filter(|row| row.hash == hash),
+                            separated,
+                        )
+                    }
                 }
-                continue;
-            }
-            last = hash;
-            while at < words.len() && words[at].hash < hash {
-                at += 1;
-            }
-            let mut end = at;
-            while end < words.len() && words[end].hash == hash {
-                end += 1;
-            }
-            if holds(&words[at..end], pattern) {
+                _ if !aggregate.cased() => false,
+                _ if hash < word_last => holds(aggregate.rows_for(hash), pattern),
+                _ => {
+                    word_last = hash;
+                    while word_at < words.len() && words[word_at].hash < hash {
+                        word_at += 1;
+                    }
+                    let mut end = word_at;
+                    while end < words.len() && words[end].hash == hash {
+                        end += 1;
+                    }
+                    holds(&words[word_at..end], pattern)
+                }
+            };
+            if held {
                 out.push(PatternIndex::new(index as u16));
             }
         }
@@ -567,9 +698,20 @@ fn holds(rows: &[WordTotal], pattern: &Pattern) -> bool {
     }
 }
 
-/// Whether either word channel is on.
-const fn judges_anything(config: &JudgingConfig) -> bool {
-    config.channels.casing || config.channels.word_length
+/// The same for the doubles lane, which has no free/forced split to be blind
+/// about: a book claims the row exactly when it doubled the word that way.
+fn holds_double(row: Option<&DoubleTotal>, separated: bool) -> bool {
+    row.is_some_and(|row| row.count_of(separated) > 0)
+}
+
+/// Whether any word channel has something to judge here.
+///
+/// The two casing-lane channels need a cased corpus; `Doubled` does not, so an
+/// uncased script no longer short-circuits the whole pass.
+fn judges_anything(corpus: &[&WordAggregate], config: &JudgingConfig) -> bool {
+    let cased = (config.channels.casing || config.channels.word_length)
+        && corpus.iter().any(|book| book.cased());
+    cased || config.channels.doubled
 }
 
 /// One book's contribution to a word pattern's numerator — the oracle

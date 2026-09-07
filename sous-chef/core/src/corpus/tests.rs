@@ -103,6 +103,20 @@ fn fixture_patterns() -> Vec<Pattern> {
             share_bp: 0,
             books: 1,
         },
+        // The third word channel: the same hash lanes, a key byte of 0 or 1.
+        Pattern {
+            glyph: ScalarKey::NONE,
+            channel: Channel::Doubled,
+            key: PatternKey::Doubled {
+                hash: 0x0123_4567_89ab_cdef,
+                separated: true,
+            },
+            band: Some(3),
+            numerator: 1,
+            denominator: 9_000,
+            share_bp: 1,
+            books: 1,
+        },
     ]
 }
 
@@ -194,6 +208,19 @@ fn mixed_kind_golden_buffer_decodes_in_both_readers() {
         )
         .unwrap(),
         hygiene(0x40, 0xa0, HygieneClass::Delete, 40_000),
+        // The widened reasons lane: bit 9 rides the i16 the u8 half could not
+        // hold, and it names the doubled row above.
+        PackedFinding::new(
+            0xb0,
+            0xb8,
+            BookIndex::new(0).unwrap(),
+            FindingKind::Convention(ConventionDigest::new(
+                PatternIndex::new(7),
+                Reasons::DOUBLED_SEPARATED,
+            )),
+            &[0x0100],
+        )
+        .unwrap(),
     ];
     let section = PublicationBook::new(BookKey::new(*b"MRK"), "books/mrk.usfm", 0x0100, &findings);
     let encoded = encode_to_corpus_buffer(
@@ -220,6 +247,11 @@ fn mixed_kind_golden_buffer_decodes_in_both_readers() {
     assert_eq!(digest.class(), HygieneClass::Delete);
     assert!(digest.saturated());
     assert_eq!(digest.run(), 0x7fff);
+    let FindingKind::Convention(digest) = book.at(3).unwrap().kind() else {
+        panic!("convention kind")
+    };
+    assert_eq!(digest.pattern().get(), 7);
+    assert_eq!(digest.reasons(), Reasons::DOUBLED_SEPARATED);
 }
 
 #[test]
@@ -258,13 +290,13 @@ fn pattern_table_round_trips() {
     )
     .unwrap();
     let snapshot = CorpusSnapshot::open(&encoded).unwrap();
-    assert_eq!(snapshot.pattern_count(), 7);
+    assert_eq!(snapshot.pattern_count(), 8);
     assert_eq!(snapshot.patterns().unwrap(), patterns);
     assert_eq!(
-        snapshot.pattern(7),
+        snapshot.pattern(8),
         Err(CorpusWireError::PatternIndexPastTable {
-            index: 7,
-            count: 7,
+            index: 8,
+            count: 8,
             at: None
         })
     );
@@ -274,7 +306,7 @@ fn pattern_table_round_trips() {
     for (offset, byte, field) in [
         (PATTERN_FLAGS_OFFSET, 1u8, "flags"),
         (PATTERN_RESERVED_OFFSET, 1, "reserved"),
-        (PATTERN_CHANNEL_OFFSET, 7, "channel"),
+        (PATTERN_CHANNEL_OFFSET, 8, "channel"),
         (PATTERN_BAND_OFFSET, 0, "band"),
         (PATTERN_KEY_OFFSET, 1, "key"),
         (PATTERN_BOOKS_OFFSET, 2, "books"),

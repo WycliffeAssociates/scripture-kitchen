@@ -35,7 +35,7 @@ function fixture() {
 // One book under "books/mrk.usfm": the header, one directory row, a 16-byte
 // id table, then the pattern table, then the records.
 const FIRST_RECORD = HEADER_BYTES + DIRECTORY_ENTRY_BYTES + 16;
-const FIRST_MIXED_RECORD = FIRST_RECORD + 7 * PATTERN_ROW_LEN;
+const FIRST_MIXED_RECORD = FIRST_RECORD + 8 * PATTERN_ROW_LEN;
 
 function expectOpenFailure(bytes) {
   assert.throws(() => FindingsSnapshot.open(bytes), FindingsSnapshotError);
@@ -133,7 +133,7 @@ test("decodes the galley-published UTF-16 golden with rebased spans", () => {
 test("decodes mixed proportionality and hygiene rows, saturation included", () => {
   const snapshot = FindingsSnapshot.open(hexFixture("corpus_v1_hygiene.hex"));
   const mark = snapshot.book("MRK");
-  assert.equal(mark.count, 3);
+  assert.equal(mark.count, 4);
   assert.deepEqual(mark.at(0), {
     kind: "Hygiene",
     from: 3,
@@ -155,6 +155,14 @@ test("decodes mixed proportionality and hygiene rows, saturation included", () =
     bookIdx: 0,
     hygiene: { class: "Delete", run: 0x7fff, saturated: true },
   });
+  // The widened reasons lane: bit 9 rides the i16 the u8 half could not hold.
+  assert.deepEqual(mark.at(3), {
+    kind: "Convention",
+    from: 0xb0,
+    to: 0xb8,
+    bookIdx: 0,
+    convention: { pattern: 7, reasons: ["DoubledSeparated"] },
+  });
 
   const badClass = hexFixture("corpus_v1_hygiene.hex");
   badClass[FIRST_MIXED_RECORD + 12] = 11;
@@ -169,7 +177,7 @@ test("decodes mixed proportionality and hygiene rows, saturation included", () =
 
 test("decodes the pattern table the judge published", () => {
   const snapshot = FindingsSnapshot.open(hexFixture("corpus_v1_hygiene.hex"));
-  assert.equal(snapshot.patternCount, 7);
+  assert.equal(snapshot.patternCount, 8);
   assert.deepEqual(snapshot.patterns(), [
     {
       glyph: 0x60,
@@ -243,15 +251,26 @@ test("decodes the pattern table the judge published", () => {
       shareBp: 0,
       books: 1,
     },
+    {
+      // The third word channel: the same hash lanes, a key byte of 0 or 1.
+      glyph: 0,
+      channel: "Doubled",
+      key: { kind: "Doubled", hash: 0x0123456789abcdefn, separated: true },
+      band: 3,
+      numerator: 1,
+      denominator: 9000,
+      shareBp: 1,
+      books: 1,
+    },
   ]);
-  assert.throws(() => snapshot.pattern(7), FindingsSnapshotError);
+  assert.throws(() => snapshot.pattern(8), FindingsSnapshotError);
 
   // Every field the reader refuses, one at a time.
   const start = FIRST_RECORD;
   for (const [offset, byte] of [
     [11, 1],   // flags
     [23, 1],   // reserved
-    [8, 7],    // channel: past the table
+    [8, 8],    // channel: past the table
     [10, 0],   // band: a step on a Rarity row
     [9, 1],    // key: a nonzero key on a Rarity row
     [22, 2],   // books: past the snapshot's book count

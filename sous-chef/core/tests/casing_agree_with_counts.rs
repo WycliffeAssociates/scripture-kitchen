@@ -2,10 +2,11 @@
 //!
 //! For every book and every firing word pattern, the sites `Words::locate`
 //! places equal that book's own count for the pattern's key — free positions
-//! only on a casing row, every occurrence on a length row. The rescan runs the
-//! same walk over the same chapters and reads the same terminal table, so this
-//! pins that the two agree about word boundaries, case folding, and which
-//! positions the corpus forced.
+//! only on a casing row, every occurrence on a length row, every pair on a
+//! doubled row. The rescan runs the same walk over the same chapters and reads
+//! the same terminal table, so this pins that the two agree about word
+//! boundaries, case folding, which positions the corpus forced, and what
+//! counts as a gap between two occurrences of one word.
 //!
 //! The pass under test is `(Substrate, Words)`: the terminal table is the
 //! substrate's follow lane, and `Words` alone abstains. One channel at a time,
@@ -15,7 +16,7 @@
 //! equality over the committed corpus tier, where real glue, apostrophes,
 //! quote conventions, and chapter seams are.
 
-use sous_core::judge::{BandStep, Channels, PatternIndex, Staircase};
+use sous_core::judge::{BandStep, Channels, DoublesPolicy, PatternIndex, Staircase};
 use sous_core::substrate::Substrate;
 use sous_core::words::{WordAggregate, Words, fold_book, free_in};
 use sous_core::{
@@ -193,6 +194,8 @@ const GAPS: [&str; 8] = [
     " \u{2014} ",
 ];
 
+/// A sixteen-word vocabulary over eight gaps doubles often enough on its own
+/// that the doubled channel is exercised without a fixture seeded for it.
 fn generated(seed: u64, books: usize, chapters: usize, words: usize) -> Vec<Book> {
     let mut state = seed | 1;
     let mut next = move || {
@@ -223,7 +226,8 @@ fn generated(seed: u64, books: usize, chapters: usize, words: usize) -> Vec<Book
 }
 
 /// Every rung at half, so any form that is not the majority fires and the
-/// sweep exercises the rescan instead of abstaining through most of it.
+/// sweep exercises the rescan instead of abstaining through most of it. One
+/// channel at a time, so a span two channels name is never one row here.
 fn permissive() -> JudgingConfig {
     let steps = Staircase::DEFAULT_STEPS.map(|step| BandStep {
         share_bp: 5_000,
@@ -232,7 +236,24 @@ fn permissive() -> JudgingConfig {
     JudgingConfig {
         word_support_floor: 1,
         word_bands: Staircase::new(steps).expect("the default bounds ascend"),
+        channels: Channels {
+            doubled: false,
+            ..Channels::default()
+        },
         ..JudgingConfig::default()
+    }
+}
+
+/// The doubled channel alone, recusal off, on bands any sweep reaches.
+fn doubling() -> JudgingConfig {
+    JudgingConfig {
+        doubles: DoublesPolicy::Always,
+        channels: Channels {
+            casing: false,
+            doubled: true,
+            ..Channels::default()
+        },
+        ..permissive()
     }
 }
 
@@ -243,6 +264,7 @@ fn lengthy() -> JudgingConfig {
         channels: Channels {
             casing: false,
             word_length: true,
+            doubled: false,
             ..Channels::default()
         },
         ..permissive()
@@ -253,6 +275,7 @@ fn lengthy() -> JudgingConfig {
 fn the_rescan_agrees_with_the_counts_over_a_synthetic_sweep() {
     let mut fired = 0;
     let mut occurrences = 0;
+    let (mut pairs, mut paired) = (0, 0);
     for seed in 1..=12u64 {
         let books = generated(seed, 3, 4, 120);
         let (_, compared, found) = agree(&books, &permissive());
@@ -261,10 +284,17 @@ fn the_rescan_agrees_with_the_counts_over_a_synthetic_sweep() {
         let (_, long, sited) = agree(&books, &lengthy());
         fired += long;
         occurrences += sited;
+        let (_, doubles, sites) = agree(&books, &doubling());
+        pairs += doubles;
+        paired += sites;
     }
     assert!(
         fired > 100 && occurrences > 100,
         "the sweep must judge and site something: {fired} rows, {occurrences} sites"
+    );
+    assert!(
+        pairs > 10 && paired > 10,
+        "the doubled channel must be exercised too: {pairs} rows, {paired} sites"
     );
 }
 
@@ -340,9 +370,11 @@ fn the_rescan_agrees_with_the_counts_over_the_tier() {
         assert!(!books.is_empty(), "{name} holds books");
         let (count, compared, occurrences) = agree(&books, &JudgingConfig::default());
         let (_, long, long_sites) = agree(&books, &lengthy());
+        let (_, pairs, paired) = agree(&books, &doubling());
         println!(
             "{name}: {count} books, {compared} casing rows / {occurrences} sites, \
-             {long} length rows / {long_sites} sites"
+             {long} length rows / {long_sites} sites, \
+             {pairs} doubled rows / {paired} sites"
         );
     }
 }

@@ -264,6 +264,13 @@ fn rung(pattern: &Pattern) -> Reasons {
         // `firing` never lets one through: a word hash is not a glyph.
         PatternKey::Casing { .. } => Reasons::CASING,
         PatternKey::WordLength { .. } => Reasons::WORD_LENGTH,
+        PatternKey::Doubled { separated, .. } => {
+            if separated {
+                Reasons::DOUBLED_SEPARATED
+            } else {
+                Reasons::DOUBLED_BARE
+            }
+        }
     }
 }
 
@@ -302,7 +309,7 @@ fn occurrences(
             .filter(|pair| pair[0].1 == glyph && pool_of_key(pair[1].1) == pool)
             .count() as u64,
         PatternKey::Rarity => atoms.iter().filter(|atom| atom.1 == glyph).count() as u64,
-        PatternKey::Casing { .. } | PatternKey::WordLength { .. } => 0,
+        PatternKey::Casing { .. } | PatternKey::WordLength { .. } | PatternKey::Doubled { .. } => 0,
     }
 }
 

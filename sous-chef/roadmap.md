@@ -498,7 +498,18 @@ Work:
    time instead of re-merged every publication. Caching policy only: not a byte
    of the publication changed.
 3. Implement adjacent and punctuation-separated doubled-word observations as
-   distinct claims.
+   distinct claims. **Landed (W2):** the same word walk fills a second lane,
+   `DoubleCount` keyed by hash alone (16 B), and `Channel::Doubled` judges two
+   keys — adjacent and nonletter-separated — against the word's own
+   occurrences, so `vous vous` x300 of 9,000 is silent and one `the the` fires.
+   Sites span both words and the separator. Productive reduplication recuses
+   the whole corpus through `doubles_productive_bp` (300 bp of the vocabulary),
+   overridable with `doubles: Auto | Always | Never`. `channels.doubled` ships
+   **on**: the fleet run puts it at p50 10 / p90 29 rows per corpus, the glyph
+   channels' own volume. Doubling has nothing to do with case, so **uncased
+   scripts are judged here and pay for it** — hin2017's word rows go from ~0 to
+   4.96 MB a Bible and it fires 14 rows. `Reasons` widened to the full i16 lane
+   B for the two new bits. See [core/src/words.md](core/src/words.md).
 4. Measure a word-specific evidence floor/band column; do not reuse glyph
    bands after the observed eightfold volume difference. **Landed (W3):** the
    fleet run measured twentyfold, not eightfold — p50 201 casing rows per
@@ -518,7 +529,8 @@ Verification gate:
 
 - uncased scripts abstain and avoid expensive case-fold work;
 - `David, david said`, bivariant words, cross-verse doubles, French repeated
-  forms, names, and productive case variants have explicit tests;
+  forms, names, and productive case variants have explicit tests — all present
+  as of W2, `core/src/words/tests.rs`;
 - word config re-judges retained observations without rewalking text;
 - fleet calibration includes volume tails and representative false/ambiguous
   cases before defaults are accepted.

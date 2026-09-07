@@ -7,12 +7,15 @@ and the two arguments behind them.
 
 ## Layout
 
-`mod.rs` holds `Form`, the row, the aggregate, and the `Words` pass. `walk.rs`
-is the per-chapter scan; `fold.rs` merges chapter rows into a book;
+`mod.rs` holds `Form`, the two rows, the aggregate, and the `Words` pass.
+`walk.rs` is the per-chapter scan; `fold.rs` merges chapter rows into a book;
 `totals.rs` merges books into the corpus tally judging reads, and keeps it
 current one book at a time; `tests.rs` covers all four through the public
-surface. The two word channels themselves live beside the other judges in
+surface. The three word channels themselves live beside the other judges in
 [`judge.md`](judge.md), and so does the terminal table they read.
+
+One walk fills **two lanes**: the casing lane keyed by `(hash, Before)`, and
+the doubles lane keyed by hash alone. They are described in that order below.
 
 ## What a word is
 
@@ -111,7 +114,7 @@ keeps its chain, its open word, and its joiner across the seam. All the clause
 does is drop evidence at a position where nearly every translation capitalizes
 regardless, which removes a numerator rather than adding a claim.
 
-## The row
+## The casing row
 
 One `WordRow` per chapter, one `WordCount` per distinct
 `(case-folded word, Before)`, sorted by that pair. `size_of::<WordCount>()` is
@@ -136,21 +139,64 @@ appears under one `Before` anyway.
 
 Two shapes are deliberate:
 
-- **A word with no cased letter is skipped entirely.** It cannot hold a casing
-  convention, so `Form::Uncased` is counted nowhere and refused on the wire.
-  The consequence is that an uncased chapter's row is empty and the scan hashes
-  nothing at all: measured, Amharic pays 48 B a chapter against 5.3 KB for
-  English, and its walk is *faster* than the substrate's (evidence.md,
-  2026-09-04). "Uncased scripts pay nothing" is a measurement, not a slogan.
-  The price is that `Channel::WordLength` abstains there too: a long uncased
-  word is in no row to judge.
+- **A word with no cased letter is skipped by this lane entirely.** It cannot
+  hold a casing convention, so `Form::Uncased` is counted nowhere here and
+  refused on the wire. The price is that `Channel::WordLength` abstains in an
+  uncased script too: a long uncased word is in no casing row to judge. What
+  such a word is *not* absent from is the doubles lane below.
 - **Counts saturate at `u16`.** A chapter is not where a word reaches 65,535
   occurrences, and the aggregate widens to `u32` immediately.
 
+## The doubles lane
+
+The second lane the same walk fills, one `DoubleCount` per case-folded word,
+sorted by hash. **16 B**, and keyed by the hash alone — a double is a double
+whatever stood before it, so `Before` has no business here.
+
+| field | bytes | answers |
+| --- | --- | --- |
+| `hash: u64` | 8 | the key, the same xxh3-64 the casing lane uses |
+| `uncased: u16` | 2 | occurrences the casing lane refused |
+| `bare: u16` | 2 | followed by itself, whitespace only between |
+| `separated: u16` | 2 | followed by itself, a nonletter run between |
+
+`bare` and `separated` are two claims and never one: `na na` and `na, na` have
+different denominators and different reasons to be a slip
+([`../../rules/word-conventions.md`](../../rules/word-conventions.md)). The
+comparison is by the case-folded hash, so `The the` is a double.
+
+**A pair rides through nothing.** Only a letter, glue, or digit between the two
+occurrences disqualifies them — and each of those means the walk dropped a
+token there, since a digit run holding no letter is no word at all. So
+`na 3 na` is not a double, and `go--go` is a separated one, because `a--b` is
+already two words.
+
+`uncased` is the lane's other job, and it is what lets an uncased script be
+judged for doubling at all. The two lanes **partition** a word's occurrences —
+a cased occurrence is counted by `WordCount`, an uncased one by
+`DoubleCount::uncased` — so the doubled channel's denominator is their sum and
+needs no special case per script.
+
+**This is where "uncased scripts pay nothing" stops being true, on purpose.**
+The walk now hashes every word, and an uncased chapter holds one doubles row
+per distinct word instead of an empty casing row. Measured over the tier
+(evidence.md, W2), per Bible: a cased corpus's doubles lane is 1 KB to 17 KB of
+chapter rows against 2.0-9.6 MB of casing rows — under 0.3% — because only a
+word that actually doubled gets a row. An uncased corpus pays the whole lane:
+amh 1.09 MB of chapter rows and a 1.04 MB aggregate against ~0 before, hin2017
+4.96 MB and 2.35 MB. That is the price of the channel in an uncased script, and
+hin2017 fires 14 doubled rows for it while amh fires none.
+
+**The seam rule is the fold's own.** The walk is per chapter, so a chapter seam
+ends a pair and there is no carry — the same ruling `substrate.md` makes for a
+run. A **verse** seam does not: the scan keeps its state across one, which is
+charter invariant 1 (a verse start is an address, not a sentence boundary).
+
 ## The fold
 
-`WordAggregate` is the book's rows merged by hash with `u32` counts, plus
-`cased: bool` — whether the book holds a cased letter at all. **A word never
+`WordAggregate` is the book's rows merged by hash with `u32` counts — both
+lanes, each in its own key order — plus `cased: bool`, whether the book holds a
+cased letter at all. **A word never
 crosses a masked `\c`**: the chapter seam is an edge of text for a word exactly
 as it is for a nonletter run, which is the ruling `substrate.md` already makes.
 So there is no seam state here, no carry, and the fold is a plain merge whose
@@ -170,6 +216,12 @@ merge([GEN, MRK])   hash(david) None [2, 40, 0, 0]  holders 2
 remove([old MRK])   hash(david) None [2, 38, 0, 0]  holders 1
 add([new MRK])      hash(david) None [2, 39, 0, 0]  holders 2
 ```
+
+The doubles lane rides the same tally and the same two updates, keyed by hash
+alone, and answers one more question there: `WordTotals::doubling_share_bp` is
+the **recusal statistic** — distinct words doubled twice or more, over the
+union of the two lanes' vocabularies, in basis points. It is a share and never
+a count, so Jonah and a whole Bible answer the same way.
 
 The before dimension has to survive into the tally: which positions are free
 is a *judging* decision, and a host must be able to move
@@ -202,10 +254,12 @@ The seam is `galley/src/sous/expediter.md`.
 `Words::judge` merges the tally and calls the word channels
 ([`judge.md`](judge.md)); `Words::judge_resident` calls the same channels over
 a tally a host already holds, which is the only difference between the two. A
-corpus whose aggregates are all `cased == false` emits nothing and hashes
-nothing.
+corpus whose aggregates are all `cased == false` emits no casing and no length
+row; the doubled channel judges it anyway.
 
-Both read the terminal table out of the sink, where `Substrate::judge` put it.
+All three read the terminal table out of the sink, where `Substrate::judge` put
+it — `Doubled` does not use it, but it abstains with the others rather than make
+`Words` alone into a pass that publishes.
 That is a real order: `Brigade` judges the substrate first, and **`Words`
 alone abstains** rather than invent a forced rule of its own — pinned by
 `words_alone_abstain_because_nothing_published_a_terminal_table`. The table is
@@ -213,14 +267,22 @@ corpus evidence the substrate already holds, and merging its follow lane a
 second time inside the word pass would be the same numbers computed twice.
 
 `Words::firing` names the table positions whose word this book's own counts
-hold, so a book without the word reads no text. It is deliberately
-**position-blind**: it asks whether the book holds the `(hash, form)` at all,
-not whether it holds it free. A superset costs a rescan that finds nothing;
-reading the terminal table there would put a judging decision inside a site
-cache key. `Words::locate` rewalks the book with the same scan, reads the same
-table, and sites what the counts named — a casing row's free occurrences, a
-length row's every occurrence — one `Convention` row per word span, carrying
-`Reasons::CASING`, `Reasons::WORD_LENGTH`, or both when one word fires both.
+hold, so a book without the word reads no text. It walks each lane with its own
+cursor, because the doubled rows come after the casing rows and restart at the
+lowest hash. On the casing lane it is deliberately **position-blind**: it asks
+whether the book holds the `(hash, form)` at all, not whether it holds it free.
+A superset costs a rescan that finds nothing; reading the terminal table there
+would put a judging decision inside a site cache key. On the doubles lane there
+is no free/forced split to be blind about, so a book claims a doubled row
+exactly when it doubled that word that way.
+
+`Words::locate` rewalks the book with the same scan, reads the same table, and
+sites what the counts named — a casing row's free occurrences, a length row's
+every occurrence, a doubled row's every pair — one `Convention` row per span,
+carrying `Reasons::CASING`, `Reasons::WORD_LENGTH`, or both when one word fires
+both. A doubled pair is its own span and its own row, because the span covers
+**both words and the separator** and so is not the word's span at all; it
+carries `Reasons::DOUBLED_BARE` or `Reasons::DOUBLED_SEPARATED`.
 
 The rescan is the same walk over the same table, so it must agree with the
 counts exactly: `tests/casing_agree_with_counts.rs` is that equality over a

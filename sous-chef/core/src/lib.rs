@@ -31,8 +31,8 @@ pub use input::{
     validate,
 };
 pub use judge::{
-    BandStep, Channel, Channels, JudgingConfig, LetterRoster, Pattern, PatternIndex, PatternKey,
-    Side, Staircase, TerminalTable, books_touched, merged_follows,
+    BandStep, Channel, Channels, DoublesPolicy, JudgingConfig, LetterRoster, Pattern, PatternIndex,
+    PatternKey, Side, Staircase, TerminalTable, books_touched, merged_follows,
 };
 pub use pass::{
     ChapterInput, ChapterKey, ChapterObs, ChapterPass, CorpusTotals, Findings, SchemaStamp,
@@ -44,7 +44,8 @@ pub use substrate::{
     RunLengths, ScalarKey, Substrate,
 };
 pub use words::{
-    Before, Form, WordAggregate, WordCount, WordRow, WordTally, WordTotal, WordTotals, Words,
+    Before, DoubleCount, DoubleTally, DoubleTotal, Form, Gap, WordAggregate, WordCount, WordRow,
+    WordTally, WordTotal, WordTotals, Words,
 };
 
 /// The product pass: hygiene's byte sweeps, the substrate walk, and the word

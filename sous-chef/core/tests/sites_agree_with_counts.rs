@@ -154,7 +154,7 @@ fn counted(book: &BookAggregate, pattern: &Pattern) -> u64 {
             .find(|(key, _)| *key == glyph)
             .map_or(0, |(_, count)| u64::from(*count)),
         // A word hash is not a glyph: `tests/casing_agree_with_counts.rs`.
-        PatternKey::Casing { .. } | PatternKey::WordLength { .. } => 0,
+        PatternKey::Casing { .. } | PatternKey::WordLength { .. } | PatternKey::Doubled { .. } => 0,
     }
 }
 
