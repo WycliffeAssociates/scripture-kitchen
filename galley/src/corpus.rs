@@ -177,18 +177,31 @@ mod tests {
         assert_eq!(word(&bytes, 8), 0);
     }
 
-    /// Write a fixture the JS conformance harness reads, so the TypeScript
-    /// reader is held to bytes THIS writer produced rather than to a JS
-    /// restatement of the layout. Skipped silently if the directory is not
-    /// there — a fixture is a convenience, never a reason to fail a build.
+    /// Two books under keys a reader has to carry verbatim — a bare code and a
+    /// path with a spaced em dash — plated with every optional section on.
+    ///
+    /// The same bytes are dropped in `target/` for hand-checking a reader
+    /// against what THIS writer produces; the assertions are the test.
     #[test]
-    fn emit_a_fixture_for_the_js_reader() {
+    fn a_two_book_corpus_plates_both_keys_and_both_dishes_aligned() {
         let opts = onion::wire::ParseOptions {
             toc: true,
             diagnostics: true,
             ..Default::default()
         };
-        let bytes = plate_texts(&[("GEN", GEN), ("books/02 — Exodus.usfm", EXO)], opts);
+        let keys = ["GEN", "books/02 — Exodus.usfm"];
+        let bytes = plate_texts(&[(keys[0], GEN), (keys[1], EXO)], opts);
+        assert_eq!(word(&bytes, 8), 2, "two entries");
+        for (n, key) in keys.iter().enumerate() {
+            let entry = HEADER_BYTES + n * ENTRY_BYTES;
+            let key_at = word(&bytes, entry) as usize;
+            let key_len = word(&bytes, entry + 4) as usize;
+            let dish_at = word(&bytes, entry + 8) as usize;
+            let dish_len = word(&bytes, entry + 12) as usize;
+            assert_eq!(&bytes[key_at..key_at + key_len], key.as_bytes());
+            assert!(dish_len > 0, "{key} plated a dish");
+            assert_eq!(dish_at % 4, 0, "a dish must be 4-aligned to view");
+        }
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../target");
         if dir.is_dir() {
             let _ = std::fs::write(dir.join("corpus-fixture.bin"), &bytes);

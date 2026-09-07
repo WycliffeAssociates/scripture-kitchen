@@ -273,10 +273,11 @@ fn the_analyze_fold_holds_over_the_corpus() {
 
     let mut books = 0;
     for path in &paths {
-        let Ok(text) = std::fs::read_to_string(path) else {
-            continue;
-        };
         let name = path.display().to_string();
+        // A corpus file that cannot be read is the failure, not a book to
+        // skip: a silent `continue` here passes over an empty tier.
+        let text = std::fs::read_to_string(path)
+            .unwrap_or_else(|error| panic!("{name} is not readable: {error}"));
         let mut cache = Warmer::new(64 << 20);
         assert_dish_matches(&mut cache, &text, all, &name);
         assert_dish_matches(&mut cache, &text, all, &name);
@@ -301,9 +302,8 @@ fn the_analyze_fold_holds_over_the_corpus() {
 }
 
 fn collect(at: &std::path::Path, into: &mut Vec<std::path::PathBuf>) {
-    let Ok(dir) = std::fs::read_dir(at) else {
-        return;
-    };
+    let dir = std::fs::read_dir(at)
+        .unwrap_or_else(|error| panic!("{} is not readable: {error}", at.display()));
     for entry in dir.flatten() {
         let path = entry.path();
         if path.is_dir() {

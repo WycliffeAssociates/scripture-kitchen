@@ -102,7 +102,7 @@ its own `follows` lane and publishes it into the sink: **which glyphs this
 corpus puts a capital after.**
 
 ```text
-en_ulb, follows merged over the corpus
+WA-en-ulb (the vref tier), follows merged over the corpus
    '.'  upper 33,332 of 33,338 cased handoffs
    ','  upper  4,836 of 47,291
 terminal_upper_share_bp 8,000, support_floor 5
@@ -263,11 +263,15 @@ punctuation not get the capital it almost always gets*, so a lowercase letter
 after a near-certain glyph is one row for review.
 
 ```text
-en_ulb, follows merged over the corpus
+testData/exampleCorpora/en_ulb (onion-projected), follows merged
    '.'  upper 33,333 of 33,339 cased handoffs   9,998 bp >= 9,800  -> FIRES 6/33,339
    ','  upper  4,836 of 47,291                  1,022 bp           -> silent
    '!'  upper  1,212 of 1,221                   9,926 bp           -> FIRES 9/1,221
 ```
+
+The two blocks are two COPIES of the same translation — the vref tier's
+`WA-en-ulb` above, the onion-projected 66-book corpus here — so the `.`
+denominators differ by one and no arithmetic connects them.
 
 Per glyph with at least `support_floor` cased handoffs: `upper / (upper +
 lower)` decides whether the glyph speaks, and the row then reports `lower /

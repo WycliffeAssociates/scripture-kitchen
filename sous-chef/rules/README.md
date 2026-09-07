@@ -43,11 +43,11 @@ Every rule answers these eight questions before implementation:
 | level | lane | file | kind | status |
 | --- | --- | --- | --- | --- |
 | 1a | hygiene | [hygiene.md](hygiene.md) | deterministic | landed (one deferred item) |
-| 1b | character inventory | [character-inventory.md](character-inventory.md) | convention-learned | designed; Stage 3 |
-| 2 | word conventions | [word-conventions.md](word-conventions.md) | convention-learned | designed; Stage 4, bands blocked |
+| 1b | character inventory | [character-inventory.md](character-inventory.md) | convention-learned | landed (wire codes 0, 1) |
+| 2 | word conventions | [word-conventions.md](word-conventions.md) | convention-learned | landed (casing, word length, doubling, letter runs, sentence start) |
 | 3 | length proportionality | [length-proportionality.md](length-proportionality.md) | source-compared | landed (S1) |
-| 3 | source-copy residue | [source-copy-residue.md](source-copy-residue.md) | source-compared | parked pending re-adjudication |
-| 3 | presence and shear | [presence-shear.md](presence-shear.md) | source-compared | parked; needs its own claim |
+| 3 | source-copy residue | [source-copy-residue.md](source-copy-residue.md) | source-compared | landed (wire code 3), ships off |
+| 3 | presence and shear | [presence-shear.md](presence-shear.md) | source-compared | landed (wire code 2) |
 | — | delimiter pairing | [delimiter-pairing.md](delimiter-pairing.md) | deterministic | parked pending a carry probe |
 | — | not our job | [outside-sous.md](outside-sous.md) | — | outside Sous |
 

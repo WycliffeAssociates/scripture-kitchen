@@ -729,7 +729,6 @@ Verification gate:
 ## Deferred lanes
 
 - delimiter pairing after its bounded carry probe;
-- untranslated/source-copy residue after counterexample adjudication;
 - word idea-shelf models after individual claim/calibration packets;
 - suppression UI and persistent policy beyond Galley's initial in-memory
   workflow;

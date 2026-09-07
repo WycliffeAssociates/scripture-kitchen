@@ -89,7 +89,7 @@ Decoding refuses rather than guesses:
 | a convention `pattern_idx` at or past `pattern_count`, or a direct `pattern(index)` call past the table | `PatternIndexPastTable` |
 | a pattern row's reserved byte or `flags` set | `InvalidPattern` |
 | a pattern channel, key, band, or share outside its table | `InvalidPattern` |
-| a `Casing` key byte of `Uncased`, or a `Casing` row carrying a glyph | `InvalidPattern` |
+| a `Casing` key byte of `Uncased` | `InvalidPattern` |
 | a `Doubled` key byte above 1 | `InvalidPattern` |
 | a `LetterRun` key byte outside `2..=8` | `InvalidPattern` |
 | a pattern `books` of zero on a row with a numerator, or past the header's `book_count` | `InvalidPattern` |
@@ -183,9 +183,17 @@ always sixteen bits and both readers always read it as one — Rust holds
 left, and `KNOWN_BITS` is the whole of what is legal: bit 12 is refused, which
 `convention_refuses_unknown_reason_bits` pins.
 
+A word channel's glyph field carries the low half of the word hash, so "a
+`Casing` row with a glyph" is not a state the wire can express: the decoder
+hands back `ScalarKey::NONE` for it and reads those bytes as the hash. The
+typed check that a word-channel `Pattern` carries no scalar lives in
+`Pattern::validate`, on the way in.
+
 `books` is dispersion, and dispersion is information: nothing in the engine
 gates on it. A row with a numerator names at least one book, and no row may
-name more books than the publication has.
+name more books than the publication has. It is a `u8` that **saturates**: a
+publication of more than 255 books reports 255 for a pattern every book holds,
+and no reader may read the lane as an exact count past that.
 
 `pattern_count` is capped at `u16::MAX`, because a `PatternIndex` is a `u16`.
 What the channels mean, and the order the rows arrive in: `../judge.md`. Who
@@ -262,3 +270,10 @@ set of bytes.
    to `reader.ts.tmpl` and its substitution in `generated_reader_ts()`, then
    re-run the codegen bin.
 6. Add the row to the code table above and to `charter.md`.
+
+A code, a reason bit, and a channel added inside `FORMAT_VERSION` 1 are all
+**fail-closed for an old reader**: `KNOWN_BITS` grew 10 → 12 for `LETTER_RUN`
+and `SENTENCE_START`, and a reader built before them refuses those rows rather
+than mis-reading one. That is the right failure and it is still a compatibility
+break, so it is free only while v1 is unreleased. From the first release the
+charter's rule applies: a new code, bit, or channel means a new wire version.

@@ -13,9 +13,12 @@
 
 ## The ignore rule
 
-- Seven tests are `#[ignore]`d. Each reason string names the claim nothing
-  else makes (whole-Bible publication equality, the UTF-16 boundary sweep of
-  the 8-corpus tier, sous-core's two reference walks).
+- Fifteen tests are `#[ignore]`d, ten of them in `galley/tests/equivalence.rs`
+  — eight whole-Bible churns, two seeds per variant. Each reason string names
+  the claim nothing else makes (whole-Bible publication equality under churn,
+  under a config that moves every step, under a source replaced and withdrawn
+  mid-run, and under the smallest hot set and generation ring; the UTF-16
+  boundary sweep of the 8-corpus tier; sous-core's four reference walks).
 - Adding an `#[ignore]` means writing that sentence. A reason that says WHEN
   to run instead of WHAT it proves is the smell. A bulk rerun of a law
   already proven synthetically is not a test; delete it.

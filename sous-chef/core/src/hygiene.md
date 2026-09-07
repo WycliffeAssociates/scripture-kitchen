@@ -18,7 +18,7 @@ end.
 
 The four scalar classes — free marks, misplaced format characters, NBSP,
 noncharacters — are not a sweep here at all. They ride the substrate walk:
-`ScalarSites` below is the streaming machine `substrate.rs` drives, and the
+`ScalarSites` below is the streaming machine `substrate/walk.rs` drives, and the
 row's `hygiene` lane is where they come out. See
 [`substrate.md`](substrate.md).
 
@@ -61,8 +61,9 @@ invariant 6 working, not drift.
 `Aggregate = Box<[HygieneFinding]>` in book coordinates, and `Config = ()`.
 `map` is `scan` over the chapter slice, `fold` only rebases each row by its
 chapter's projected start, and `judge` pushes each book's rows under its
-index. The product pass is `sous_core::Brigade` — `(HygieneBytes, Substrate)` —
-which is what a host registers to get all seven classes. The contract itself,
+index. The product pass is `sous_core::Brigade` —
+`(HygieneBytes, Substrate, Words)` — which is what a host registers to get all
+seven classes. The contract itself,
 and why neither fold nor judge can tell a cached input from a fresh one:
 [`pass.md`](pass.md).
 

@@ -285,8 +285,9 @@ derived state recomputed from the current invocation after any corpus change.
 - Normalization is a project-level fact — "uses mixed normalization" — not a
   row per site. Field translators do not act on NFC/NFD detail.
 - Untranslated words belong to the paired source-comparison path beside length
-  proportionality, and as a boolean: some language pairs legitimately share
-  words, so there is no scale to tune.
+  proportionality, and as a run length rather than a score: some language pairs
+  legitimately share words, so `LengthConfig::source_copy_min_run` is a floor
+  on how many consecutive words a row needs and not a sensitivity dial.
 - Bracket pairing is undecided. LIFO is easy to write and easy to blow up on
   prose; whatever ships must be bounded, and bounding it for prose is the hard
   part.
@@ -356,7 +357,8 @@ book. `u16` is ample without spending four bytes per finding.
 
 The semantic record is a discriminated union: `PackedFinding` carries a
 `FindingKind` — `LengthProportionality(ProportionalityDigest)`,
-`Hygiene(HygieneDigest)`, or `Convention(ConventionDigest)` — and the wire
+`Hygiene(HygieneDigest)`, `Convention(ConventionDigest)`,
+`Presence(PresenceDigest)`, or `SourceCopy(SourceCopyDigest)` — and the wire
 code, lanes, and `SATURATED` flag are derived from that kind. `i16::MIN` is proportionality's unavailable sentinel
 and cannot be constructed as a `QuantizedDeviation`; a hygiene run of zero
 cannot be constructed either, and decoders reject a `SATURATED` hygiene row
@@ -395,9 +397,10 @@ mark.length;
 mark.at(0);
 ```
 
-The landed v1 envelope has a 40-byte little-endian header: `SOUS` magic,
+The landed v1 envelope has a 48-byte little-endian header: `SOUS` magic,
 format version, checked coordinate flags, book count, 16-byte record stride,
-total finding count, and an opaque 16-byte `SnapshotId`. Its caller-ordered
+total finding count, the corpus pattern table's row count and absolute offset,
+and an opaque 16-byte `SnapshotId`. Its caller-ordered
 directory uses one 20-byte row per book: three `BookKey` bytes plus a zero
 terminator, published length, absolute section offset, finding count, and the
 absolute offset of the host's id in the string table that follows the

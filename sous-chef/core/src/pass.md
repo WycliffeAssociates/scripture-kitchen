@@ -185,9 +185,8 @@ copies none of them: `ChapterObs<O>` is generic, `analyze` builds its view over
 the vector it just mapped, and `galley::sous::Expediter` builds one straight
 over its resident map; the same holds one level up, where the corpus view is
 built over the Expediter's resident aggregates. `Observation` therefore need
-not be `Clone` —
-`a_pass_whose_observation_is_not_clone_analyzes` is a pass whose observation is
-not, compiling.
+not be `Clone`; what a pass owes instead is `Send + 'static`, which
+`a_hygiene_observation_is_send_and_borrow_free` pins.
 
 The obligation this puts on a pass author is that `Observation` must be
 `Send + 'static` and chapter-relative. A borrow, an absolute offset, or a

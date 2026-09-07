@@ -379,10 +379,21 @@ function readPattern(view: DataView, at: number, row: number, bookCount: number)
     band = rawBand;
   }
   const shareBp = view.getUint16(at + PATTERN_SHARE_OFFSET, true);
-  if (shareBp > 10000) {
+  const numerator = u32(view, at + PATTERN_NUMERATOR_OFFSET);
+  const denominator = u32(view, at + PATTERN_DENOMINATOR_OFFSET);
+  if (numerator > denominator) {
+    return fail(`pattern row ${row} has an invalid numerator`);
+  }
+  // The same fraction the producer computes, from the same clamped pair: a
+  // row whose share does not follow from its own counts is refused, not
+  // reported.
+  const expected =
+    denominator === 0
+      ? 0
+      : Math.min(Math.floor((numerator * 10000) / denominator), 10000);
+  if (shareBp > 10000 || shareBp !== expected) {
     return fail(`pattern row ${row} has an invalid share`);
   }
-  const numerator = u32(view, at + PATTERN_NUMERATOR_OFFSET);
   const books = view.getUint8(at + PATTERN_BOOKS_OFFSET);
   if (books > bookCount || (books === 0 && numerator > 0)) {
     return fail(`pattern row ${row} has an invalid books`);
@@ -393,7 +404,7 @@ function readPattern(view: DataView, at: number, row: number, bookCount: number)
     key,
     band,
     numerator,
-    denominator: u32(view, at + PATTERN_DENOMINATOR_OFFSET),
+    denominator,
     shareBp,
     books,
   };

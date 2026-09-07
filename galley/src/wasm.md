@@ -96,7 +96,7 @@ touches only the knobs, adding them later changes nothing that already works.
 ## What the handle does not do yet
 
 `fingerprint`, `changedSinceUpdate`, `lint`, and `find` are in
-`plans/consumer-api-sketch.md` and are not here. The onion methods still take
+`sous-chef/planning/plans/consumer-api-sketch.md` and are not here. The onion methods still take
 their text per call rather than reading the Pantry's retained copy — the
 Warmer keys on chunk content, so they hit, but they marshal a string that the
 handle already holds.
