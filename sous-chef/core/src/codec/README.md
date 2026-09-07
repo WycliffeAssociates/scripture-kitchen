@@ -35,7 +35,7 @@ a tombstone.
 | --- | --- | --- | --- | --- |
 | 0 | `LengthProportionality` | signed Q8.8 book-scope deviation; `i16::MIN` unavailable | signed Q8.8 project-scope deviation; `i16::MIN` unavailable | a deviation was clamped |
 | 1 | `Hygiene` | `HygieneClass` discriminant | run length in code points, `1..=i16::MAX` | the run exceeds `i16::MAX`; the lane reads exactly `i16::MAX` |
-| 2 | `Convention` | pattern-table index, `u16` bits in the signed lane | `Reasons` bitmask over the ladder rungs the site matched | never set |
+| 2 | `Convention` | pattern-table index, `u16` bits in the signed lane | `Reasons` bitmask over the ladder rungs the site matched, `CASING` included | never set |
 
 The record is a discriminated union in Rust: `PackedFinding` carries a
 `FindingKind`, and `code`, `flags`, and both lanes are *derived* from it. A
@@ -68,6 +68,7 @@ Decoding refuses rather than guesses:
 | a convention `pattern_idx` at or past `pattern_count`, or a direct `pattern(index)` call past the table | `PatternIndexPastTable` |
 | a pattern row's reserved byte or `flags` set | `InvalidPattern` |
 | a pattern channel, key, band, or share outside its table | `InvalidPattern` |
+| a `Casing` key byte of `Uncased`, or a `Casing` row carrying a glyph | `InvalidPattern` |
 | a pattern `books` of zero on a row with a numerator, or past the header's `book_count` | `InvalidPattern` |
 | a `pattern_offset` that is not the running cursor | `PatternSectionOutOfOrder` |
 | more than 65,535 patterns | `PatternCountOverflow` |
@@ -113,7 +114,7 @@ position matched — so ten thousand sites of one convention cost ten thousand
 | 0..4 | `glyph: u32` (`ScalarKey` raw; `u32::MAX` is the pooled digit key) |
 | 4..8 | `neighbor: u32` (the G3 key; 0 on every other channel) |
 | 8 | `channel: u8` (`Channel` discriminant, finest grain first) |
-| 9 | `key: u8` (Placement: `side << 4 \| OuterClass`; RunShape: `pure << 4 \| bucket`; PooledNeighbor: `Pool`; else 0) |
+| 9 | `key: u8` (Placement: `side << 4 \| OuterClass`; RunShape: `pure << 4 \| bucket`; PooledNeighbor: `Pool`; Casing: `Form`; else 0) |
 | 10 | `band: u8` (staircase step index; `0xFF` = none, which only `Rarity` carries) |
 | 11 | `flags: u8` (reserved, 0; the decoder refuses nonzero) |
 | 12..16 | `numerator: u32` |
@@ -121,6 +122,15 @@ position matched — so ten thousand sites of one convention cost ten thousand
 | 20..22 | `share_bp: u16`, at most 10,000 |
 | 22 | `books: u8` — books holding part of the numerator; books-possible is the header's `book_count` |
 | 23 | reserved `u8` 0 (the decoder refuses nonzero) |
+
+**Channel 5, `Casing`, reads bytes 0..8 as one thing:** the u64 word hash,
+little-endian, low half where a glyph would be and high half where a neighbor
+would be. It judges no scalar, so `ScalarKey::from_raw` is not applied to the
+glyph field there and a decoder returns `ScalarKey::NONE` for it; the key byte
+is a `Form` discriminant, `0..4`, with `Uncased` refused. Every other channel
+still refuses a nonzero neighbor. `Pattern::word_hash` reads the pair back, and
+the generated reader decodes it as a `bigint`. Why a hash and not the bytes:
+`../words.md`.
 
 `books` is dispersion, and dispersion is information: nothing in the engine
 gates on it. A row with a numerator names at least one book, and no row may

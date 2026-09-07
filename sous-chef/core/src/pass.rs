@@ -21,7 +21,26 @@ use crate::{
     BookIndex, BookKey, Chapter, CodecError, Corpus, FindingKind, PackedFinding, ProjectedBook,
     TextRange, Verse,
     judge::{Pattern, PatternIndex},
+    words::WordTotals,
 };
+
+/// Corpus-level counts a judge reads, kept resident by a host and updated one
+/// book at a time instead of merged again every publication.
+///
+/// One concrete value rather than an associated type per pass: a host holds
+/// exactly one whatever pass it drives, and a rule that wants resident totals
+/// adds its own lane here. Today only [`crate::Words`] fills one.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CorpusTotals {
+    pub words: WordTotals,
+}
+
+impl CorpusTotals {
+    /// Inline size plus every lane's own allocation.
+    pub fn resident_bytes(&self) -> usize {
+        self.words.resident_bytes()
+    }
+}
 
 /// The observation schema a host folds into every chapter-cache key.
 ///
@@ -96,6 +115,13 @@ pub trait ChapterPass {
     type Config: Default;
     /// Part of every cache key a host builds for this pass.
     const SCHEMA: SchemaStamp;
+    /// Whether a host may keep this pass's per-chapter observations between
+    /// publications. A pass that says no is re-mapped over a whole book when
+    /// that book's text moves, and the host keeps only the book's aggregate.
+    ///
+    /// A tuple retains chapters only if every member does, because one
+    /// observation carries them all.
+    const RETAIN_CHAPTERS: bool = true;
 
     /// A pure function of this chapter; it never reads a neighbor.
     fn map(&self, chapter: ChapterInput<'_>) -> Self::Observation;
@@ -104,24 +130,61 @@ pub trait ChapterPass {
     /// their owner; seam state is the fold's own and nothing crosses a book.
     fn fold(&self, book: &[ChapterObs<&Self::Observation>]) -> Self::Aggregate;
 
+    /// Empties what a member that does not retain chapters holds per chapter,
+    /// once the fold has read it. Default: nothing — the pass keeps its own.
+    fn release(&self, obs: &mut Self::Observation) {
+        let _ = obs;
+    }
+
     /// Judges every book at once: `corpus[i]` is book `i`'s aggregate, and a
     /// judge calls `out.open_book(i)` before pushing that book's rows.
     fn judge(&self, corpus: &[&Self::Aggregate], config: &Self::Config, out: &mut Findings);
+
+    /// Adds these books to the corpus totals a host keeps resident.
+    /// Default: none — the pass merges whatever it judges, every time.
+    fn tally(&self, totals: &mut CorpusTotals, books: &[&Self::Aggregate]) {
+        let _ = (totals, books);
+    }
+
+    /// Removes books previously tallied, exactly: the totals left are the
+    /// totals of the books left.
+    fn untally(&self, totals: &mut CorpusTotals, books: &[&Self::Aggregate]) {
+        let _ = (totals, books);
+    }
+
+    /// Judges from totals a host already holds instead of merging them out of
+    /// `corpus` again. Default: [`judge`](Self::judge), which merges its own.
+    ///
+    /// Equal to `judge` whenever `totals` is [`tally`](Self::tally) over
+    /// exactly `corpus`. `galley/tests/equivalence.rs` pins that as bytes.
+    fn judge_resident(
+        &self,
+        corpus: &[&Self::Aggregate],
+        totals: &CorpusTotals,
+        config: &Self::Config,
+        out: &mut Findings,
+    ) {
+        let _ = totals;
+        self.judge(corpus, config, out);
+    }
 
     /// Rescans one book's current text for the sites of what [`judge`](Self::judge)
     /// emitted, calling `out.open_book(book)` first. Default: none.
     ///
     /// The one step besides `map` that reads text, and it reads it only to
-    /// PLACE what the counts already decided.
+    /// PLACE what the counts already decided. Its structural inputs are `map`'s
+    /// own, book-wide: a rule whose map read verse rows has to read the same
+    /// rows here or it would place something it did not count.
     fn locate(
         &self,
         book: BookIndex,
         text: &str,
         chapters: &[Chapter],
+        verses: &[Verse],
         aggregate: &Self::Aggregate,
         out: &mut Findings,
     ) {
-        let _ = (book, text, chapters, aggregate, out);
+        let _ = (book, text, chapters, verses, aggregate, out);
     }
 
     /// The table positions [`locate`](Self::locate) would scan this book for.
@@ -147,6 +210,7 @@ impl<A: ChapterPass, B: ChapterPass> ChapterPass for (A, B) {
     type Aggregate = (A::Aggregate, B::Aggregate);
     type Config = (A::Config, B::Config);
     const SCHEMA: SchemaStamp = A::SCHEMA.then(B::SCHEMA);
+    const RETAIN_CHAPTERS: bool = A::RETAIN_CHAPTERS && B::RETAIN_CHAPTERS;
 
     fn map(&self, chapter: ChapterInput<'_>) -> Self::Observation {
         (self.0.map(chapter), self.1.map(chapter))
@@ -172,6 +236,11 @@ impl<A: ChapterPass, B: ChapterPass> ChapterPass for (A, B) {
         (self.0.fold(&left), self.1.fold(&right))
     }
 
+    fn release(&self, obs: &mut Self::Observation) {
+        self.0.release(&mut obs.0);
+        self.1.release(&mut obs.1);
+    }
+
     fn judge(&self, corpus: &[&Self::Aggregate], config: &Self::Config, out: &mut Findings) {
         let left: Vec<&A::Aggregate> = corpus.iter().map(|book| &book.0).collect();
         let right: Vec<&B::Aggregate> = corpus.iter().map(|book| &book.1).collect();
@@ -179,16 +248,46 @@ impl<A: ChapterPass, B: ChapterPass> ChapterPass for (A, B) {
         self.1.judge(&right, &config.1, out);
     }
 
+    fn tally(&self, totals: &mut CorpusTotals, books: &[&Self::Aggregate]) {
+        let left: Vec<&A::Aggregate> = books.iter().map(|book| &book.0).collect();
+        let right: Vec<&B::Aggregate> = books.iter().map(|book| &book.1).collect();
+        self.0.tally(totals, &left);
+        self.1.tally(totals, &right);
+    }
+
+    fn untally(&self, totals: &mut CorpusTotals, books: &[&Self::Aggregate]) {
+        let left: Vec<&A::Aggregate> = books.iter().map(|book| &book.0).collect();
+        let right: Vec<&B::Aggregate> = books.iter().map(|book| &book.1).collect();
+        self.0.untally(totals, &left);
+        self.1.untally(totals, &right);
+    }
+
+    fn judge_resident(
+        &self,
+        corpus: &[&Self::Aggregate],
+        totals: &CorpusTotals,
+        config: &Self::Config,
+        out: &mut Findings,
+    ) {
+        let left: Vec<&A::Aggregate> = corpus.iter().map(|book| &book.0).collect();
+        let right: Vec<&B::Aggregate> = corpus.iter().map(|book| &book.1).collect();
+        self.0.judge_resident(&left, totals, &config.0, out);
+        self.1.judge_resident(&right, totals, &config.1, out);
+    }
+
     fn locate(
         &self,
         book: BookIndex,
         text: &str,
         chapters: &[Chapter],
+        verses: &[Verse],
         aggregate: &Self::Aggregate,
         out: &mut Findings,
     ) {
-        self.0.locate(book, text, chapters, &aggregate.0, out);
-        self.1.locate(book, text, chapters, &aggregate.1, out);
+        self.0
+            .locate(book, text, chapters, verses, &aggregate.0, out);
+        self.1
+            .locate(book, text, chapters, verses, &aggregate.1, out);
     }
 
     fn firing(
@@ -201,6 +300,135 @@ impl<A: ChapterPass, B: ChapterPass> ChapterPass for (A, B) {
         self.0.firing(&aggregate.0, patterns, out);
         self.1.firing(&aggregate.1, patterns, &mut second);
         out.append(&mut second);
+    }
+}
+
+/// Three passes over the same chapters as one, mirroring the pair: the
+/// composed `SCHEMA` is `A.then(B).then(C)`, so no arrangement of the same
+/// members shares a key.
+impl<A: ChapterPass, B: ChapterPass, C: ChapterPass> ChapterPass for (A, B, C) {
+    type Observation = (A::Observation, B::Observation, C::Observation);
+    type Aggregate = (A::Aggregate, B::Aggregate, C::Aggregate);
+    type Config = (A::Config, B::Config, C::Config);
+    const SCHEMA: SchemaStamp = A::SCHEMA.then(B::SCHEMA).then(C::SCHEMA);
+    const RETAIN_CHAPTERS: bool = A::RETAIN_CHAPTERS && B::RETAIN_CHAPTERS && C::RETAIN_CHAPTERS;
+
+    fn map(&self, chapter: ChapterInput<'_>) -> Self::Observation {
+        (
+            self.0.map(chapter),
+            self.1.map(chapter),
+            self.2.map(chapter),
+        )
+    }
+
+    fn fold(&self, book: &[ChapterObs<&Self::Observation>]) -> Self::Aggregate {
+        // Three views over the borrowed triples: a fold takes one observation
+        // type. Three small vectors per book per publication.
+        let left: Vec<ChapterObs<&A::Observation>> = book
+            .iter()
+            .map(|chapter| ChapterObs {
+                start: chapter.start,
+                obs: &chapter.obs.0,
+            })
+            .collect();
+        let middle: Vec<ChapterObs<&B::Observation>> = book
+            .iter()
+            .map(|chapter| ChapterObs {
+                start: chapter.start,
+                obs: &chapter.obs.1,
+            })
+            .collect();
+        let right: Vec<ChapterObs<&C::Observation>> = book
+            .iter()
+            .map(|chapter| ChapterObs {
+                start: chapter.start,
+                obs: &chapter.obs.2,
+            })
+            .collect();
+        (
+            self.0.fold(&left),
+            self.1.fold(&middle),
+            self.2.fold(&right),
+        )
+    }
+
+    fn release(&self, obs: &mut Self::Observation) {
+        self.0.release(&mut obs.0);
+        self.1.release(&mut obs.1);
+        self.2.release(&mut obs.2);
+    }
+
+    fn judge(&self, corpus: &[&Self::Aggregate], config: &Self::Config, out: &mut Findings) {
+        let left: Vec<&A::Aggregate> = corpus.iter().map(|book| &book.0).collect();
+        let middle: Vec<&B::Aggregate> = corpus.iter().map(|book| &book.1).collect();
+        let right: Vec<&C::Aggregate> = corpus.iter().map(|book| &book.2).collect();
+        self.0.judge(&left, &config.0, out);
+        self.1.judge(&middle, &config.1, out);
+        self.2.judge(&right, &config.2, out);
+    }
+
+    fn tally(&self, totals: &mut CorpusTotals, books: &[&Self::Aggregate]) {
+        let left: Vec<&A::Aggregate> = books.iter().map(|book| &book.0).collect();
+        let middle: Vec<&B::Aggregate> = books.iter().map(|book| &book.1).collect();
+        let right: Vec<&C::Aggregate> = books.iter().map(|book| &book.2).collect();
+        self.0.tally(totals, &left);
+        self.1.tally(totals, &middle);
+        self.2.tally(totals, &right);
+    }
+
+    fn untally(&self, totals: &mut CorpusTotals, books: &[&Self::Aggregate]) {
+        let left: Vec<&A::Aggregate> = books.iter().map(|book| &book.0).collect();
+        let middle: Vec<&B::Aggregate> = books.iter().map(|book| &book.1).collect();
+        let right: Vec<&C::Aggregate> = books.iter().map(|book| &book.2).collect();
+        self.0.untally(totals, &left);
+        self.1.untally(totals, &middle);
+        self.2.untally(totals, &right);
+    }
+
+    fn judge_resident(
+        &self,
+        corpus: &[&Self::Aggregate],
+        totals: &CorpusTotals,
+        config: &Self::Config,
+        out: &mut Findings,
+    ) {
+        let left: Vec<&A::Aggregate> = corpus.iter().map(|book| &book.0).collect();
+        let middle: Vec<&B::Aggregate> = corpus.iter().map(|book| &book.1).collect();
+        let right: Vec<&C::Aggregate> = corpus.iter().map(|book| &book.2).collect();
+        self.0.judge_resident(&left, totals, &config.0, out);
+        self.1.judge_resident(&middle, totals, &config.1, out);
+        self.2.judge_resident(&right, totals, &config.2, out);
+    }
+
+    fn locate(
+        &self,
+        book: BookIndex,
+        text: &str,
+        chapters: &[Chapter],
+        verses: &[Verse],
+        aggregate: &Self::Aggregate,
+        out: &mut Findings,
+    ) {
+        self.0
+            .locate(book, text, chapters, verses, &aggregate.0, out);
+        self.1
+            .locate(book, text, chapters, verses, &aggregate.1, out);
+        self.2
+            .locate(book, text, chapters, verses, &aggregate.2, out);
+    }
+
+    fn firing(
+        &self,
+        aggregate: &Self::Aggregate,
+        patterns: &[Pattern],
+        out: &mut Vec<PatternIndex>,
+    ) {
+        let mut rest = Vec::new();
+        self.0.firing(&aggregate.0, patterns, out);
+        self.1.firing(&aggregate.1, patterns, &mut rest);
+        out.append(&mut rest);
+        self.2.firing(&aggregate.2, patterns, &mut rest);
+        out.append(&mut rest);
     }
 }
 
@@ -342,13 +570,17 @@ pub fn analyze_with<B: ProjectedBook, P: ChapterPass>(
     let views: Vec<&P::Aggregate> = aggregates.iter().collect();
     pass.judge(&views, config, &mut out);
     let mut chapters: Vec<Chapter> = Vec::new();
+    let mut verses: Vec<Verse> = Vec::new();
     for (index, book) in corpus.iter() {
         chapters.clear();
         chapters.extend(book.chapters());
+        verses.clear();
+        verses.extend(book.verses());
         pass.locate(
             index,
             book.text(),
             &chapters,
+            &verses,
             &aggregates[index.get() as usize],
             &mut out,
         );
@@ -394,8 +626,8 @@ fn collect_verses(
 mod tests {
     use super::*;
     use crate::{
-        Brigade, HygieneClass, HygieneDigest, VerseKey, hygiene::HygieneBytes,
-        substrate::Substrate, validate,
+        Brigade, HygieneClass, HygieneDigest, Reasons, VerseKey, hygiene::HygieneBytes,
+        substrate::Substrate, validate, words::Words,
     };
 
     struct Book {
@@ -739,10 +971,63 @@ mod tests {
         assert_ne!(forward, backward);
         assert_ne!(forward, Left::SCHEMA);
         assert_ne!(forward, Right::SCHEMA);
-        // The shipped tuple, whose halves happen to share a stamp.
+    }
+
+    #[test]
+    fn a_triple_schema_is_order_sensitive_and_not_a_member_or_a_pair() {
+        type A = Stamped<1>;
+        type B = Stamped<2>;
+        type C = Stamped<3>;
+        let forward = <(A, B, C) as ChapterPass>::SCHEMA;
+        assert_ne!(forward, <(A, C, B) as ChapterPass>::SCHEMA);
+        assert_ne!(forward, <(C, B, A) as ChapterPass>::SCHEMA);
+        assert_ne!(forward, <(A, B) as ChapterPass>::SCHEMA);
+        assert_ne!(forward, <(B, C) as ChapterPass>::SCHEMA);
+        assert_ne!(forward, A::SCHEMA);
+        assert_ne!(forward, C::SCHEMA);
+        // The shipped triple, whose members do not share a stamp.
         let brigade = <Brigade as ChapterPass>::SCHEMA;
         assert_ne!(brigade, HygieneBytes::SCHEMA);
         assert_ne!(brigade, Substrate::SCHEMA);
+        assert_ne!(brigade, Words::SCHEMA);
+        assert_ne!(brigade, <(HygieneBytes, Substrate) as ChapterPass>::SCHEMA);
+    }
+
+    /// The word member is not decoration: a corpus with a casing minority gets
+    /// its row and its site out of the shipped triple, beside the other two.
+    #[test]
+    fn the_brigade_judges_and_sites_its_word_member() {
+        let text: &'static str = Box::leak(
+            (("and David went. ".repeat(40)) + "and david went and david went.").into_boxed_str(),
+        );
+        let books = vec![Book {
+            key: BookKey::new(*b"MRK"),
+            text,
+            chapters: vec![chapter(1, 0, text.len() as u32)],
+            verses: vec![verse(1, 1, 0, text.len() as u32)],
+        }];
+        let corpus = Corpus::try_new(&books).unwrap();
+        let findings = analyze(&corpus, &Brigade::default());
+
+        let casing: Vec<_> = findings
+            .patterns()
+            .iter()
+            .filter(|row| row.channel == crate::Channel::Casing)
+            .collect();
+        assert_eq!(casing.len(), 1);
+        assert_eq!((casing[0].numerator, casing[0].denominator), (2, 42));
+        assert!(casing[0].word_hash().is_some());
+
+        let sites: Vec<_> = findings
+            .rows()
+            .iter()
+            .filter(|row| match row.kind() {
+                FindingKind::Convention(digest) => digest.reasons().contains(Reasons::CASING),
+                _ => false,
+            })
+            .map(|row| &text[row.from() as usize..row.to() as usize])
+            .collect();
+        assert_eq!(sites, vec!["david", "david"]);
     }
 
     #[test]
@@ -759,8 +1044,10 @@ mod tests {
         assert_eq!(carried, vec![(0, 0, 0), (0, 3, u32::from(b'y')), (1, 0, 0)]);
     }
 
+    /// Over the hygiene-kind rows, which are the two members that emit them;
+    /// the word member's rows are convention-kind and are tested above.
     #[test]
-    fn analyze_over_a_tuple_equals_the_two_passes_analyzed_separately() {
+    fn analyze_over_the_brigade_equals_its_members_analyzed_separately() {
         let books = vec![mixed(), mrk(), genesis()];
         let corpus = Corpus::try_new(&books).unwrap();
         let mut apart = hygiene_rows(&analyze(&corpus, &HygieneBytes));

@@ -303,6 +303,7 @@ fn describe(pattern: &Pattern) -> String {
         ),
         PatternKey::ExactNeighbor(neighbor) => format!("exact-neighbor {}", glyph(neighbor)),
         PatternKey::PooledNeighbor(pool) => format!("pooled-neighbor {}", pool.name()),
+        PatternKey::Casing { hash, form } => format!("casing #{hash:016x} {}", form.name()),
     };
     format!(
         "{} {evidence} {}/{} {:.2}%",

@@ -22,9 +22,13 @@
 //! Corpus and loading: `en_ulb`, the same 66-book fixture
 //! `galley/benches/expediter.rs` uses. Keystroke simulation follows the same
 //! recipe as that bench (insert one character into a middle chapter's first
-//! text token) but cycles across ten books, not only MRK, so the churn isn't
-//! one book's story. Each keystroke's `update` + `publish` is timed with
-//! `Instant`; the report is the median of the 200.
+//! text token), cycled round-robin across all 66 books — not ten — for
+//! `KEYSTROKES` (10,000) steps, so every book is revisited roughly every 66
+//! keystrokes (edit A, edit B, ... back to A) and the Warmer's LRU history is
+//! actually exercised rather than grown once and left alone. Each keystroke's
+//! `update` + `publish` is timed with `Instant`; medians and p99s are
+//! reported over the keystrokes seen so far at each of the 1k/5k/10k
+//! checkpoints.
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -216,6 +220,18 @@ fn median(durations: &[Duration]) -> Duration {
     sorted[sorted.len() / 2]
 }
 
+/// The 99th percentile of a duration slice — sorts a clone, leaves the input.
+/// Where eviction cost shows: a median stays flat while the tail grows.
+fn p99(durations: &[Duration]) -> Duration {
+    let mut sorted = durations.to_vec();
+    sorted.sort_unstable();
+    let index = ((sorted.len() as f64 * 0.99) as usize).min(sorted.len() - 1);
+    sorted[index]
+}
+
+const KEYSTROKES: usize = 10_000;
+const CHECKPOINTS: [usize; 3] = [1_000, 5_000, 10_000];
+
 fn main() {
     header();
     let budget = warmer_budget_bytes();
@@ -230,10 +246,11 @@ fn main() {
         &format!("raw text total = {}", fmt_bytes(raw_total)),
     );
 
-    // Ten books spread across the corpus, so the churn below is not just one
-    // book's story. Each keeps its own growing copy, separate from the
-    // Pantry's retained one, so the harness can insert without re-reading.
-    let churn_books: Vec<usize> = (0..10).map(|i| i * corpus.len() / 10).collect();
+    // All 66 books, round-robin, so the churn below is the whole corpus's
+    // story and every book comes back into view every 66 keystrokes. Each
+    // keeps its own growing copy, separate from the Pantry's retained one,
+    // so the harness can insert without re-reading.
+    let churn_books: Vec<usize> = (0..corpus.len()).collect();
     let edit_points: FxHashMap<usize, usize> = churn_books
         .iter()
         .map(|&i| (i, edit_point(&corpus[i].1)))
@@ -241,6 +258,19 @@ fn main() {
     let mut live_texts: FxHashMap<usize, String> = churn_books
         .iter()
         .map(|&i| (i, corpus[i].1.clone()))
+        .collect();
+    // A book's chunk count at rest — one keystroke rarely moves a `\c`
+    // boundary, so this stands in for "how many units this book's parse
+    // touches" without re-scanning every step. Used only to classify a
+    // miss event below, never to gate correctness.
+    let chunk_counts: FxHashMap<usize, usize> = churn_books
+        .iter()
+        .map(|&i| {
+            (
+                i,
+                onion::chunk::pre_scan(corpus[i].1.as_bytes()).starts.len(),
+            )
+        })
         .collect();
 
     // ---- 2. register all 66 as Role::Target -------------------------------
@@ -290,34 +320,77 @@ fn main() {
     );
     drop(wire_warm);
 
-    // ---- 5. 200 keystrokes across 10 books, publishing after each ---------
+    // ---- 5. thousands of keystrokes across all 66 books, round-robin ------
+    //
+    // Round-robin visits every book once every 66 keystrokes — edit A, edit
+    // B, ..., back to A — so a book evicted from the Warmer between visits
+    // is forced to re-derive whole, not just re-lex the one edited chunk.
+    // Each miss event (a `resolve()` inside this keystroke's `update`) is
+    // classified by comparing the misses it added against that book's
+    // resting chunk count: if every chunk of the book missed, the Warmer
+    // held nothing of it and this is a whole-book re-derivation; otherwise
+    // it is an ordinary single-chunk re-lex.
     let mut prev_step = 0usize;
     let mut allocs_at_prev = alloc_calls();
-    let mut keystroke_times: Vec<Duration> = Vec::with_capacity(200);
-    for step in 1..=200usize {
+    let mut keystroke_times: Vec<Duration> = Vec::with_capacity(KEYSTROKES);
+    let mut chunk_relex_misses: u64 = 0;
+    let mut book_rederivation_misses: u64 = 0;
+    let mut chunk_relex_events: u64 = 0;
+    let mut book_rederivation_events: u64 = 0;
+    let mut first_eviction_step: Option<usize> = None;
+    for step in 1..=KEYSTROKES {
         let index = churn_books[(step - 1) % churn_books.len()];
         let text = live_texts.get_mut(&index).unwrap();
         let at = edit_points[&index].min(text.len());
         text.insert(at, 'x');
+
+        let misses_before = sous.pantry().warmer().misses();
         let started = Instant::now();
         sous.update(corpus[index].0.as_str(), Role::Target, text.as_str())
             .unwrap();
         sous.publish().unwrap();
         keystroke_times.push(started.elapsed());
+        let misses_added = sous.pantry().warmer().misses() - misses_before;
 
-        if step == 50 || step == 100 || step == 200 {
+        if misses_added > 0 {
+            if misses_added as usize >= chunk_counts[&index] {
+                book_rederivation_misses += misses_added;
+                book_rederivation_events += 1;
+            } else {
+                chunk_relex_misses += misses_added;
+                chunk_relex_events += 1;
+            }
+        }
+        if first_eviction_step.is_none() && sous.pantry().warmer().evictions() > 0 {
+            first_eviction_step = Some(step);
+        }
+
+        if CHECKPOINTS.contains(&step) {
             let checkpoint = snapshot(format!("5. after {step} keystrokes+publishes"));
             let allocs_in_interval = checkpoint.allocs - allocs_at_prev;
             let keystrokes_in_interval = step - prev_step;
             print_row(
                 &checkpoint,
                 &format!(
-                    "resident_bytes={} avg allocs/(keystroke+publish) over [{prev_step},{step}] = {:.0} warmer hits/misses={}/{}",
+                    "resident_bytes={} avg allocs/(keystroke+publish) over [{prev_step},{step}] = {:.0} warmer hits/misses/evictions={}/{}/{}",
                     fmt_bytes(sous.resident_bytes()),
                     allocs_in_interval as f64 / keystrokes_in_interval as f64,
                     sous.pantry().warmer().hits(),
                     sous.pantry().warmer().misses(),
+                    sous.pantry().warmer().evictions(),
                 ),
+            );
+            println!(
+                "    median/p99 over first {step} keystrokes: {:.1} / {:.1} µs; misses so far: {} chunk-relex ({} events), {} whole-book-rederivation ({} events); first eviction at keystroke {}",
+                median(&keystroke_times[..step]).as_secs_f64() * 1e6,
+                p99(&keystroke_times[..step]).as_secs_f64() * 1e6,
+                chunk_relex_misses,
+                chunk_relex_events,
+                book_rederivation_misses,
+                book_rederivation_events,
+                first_eviction_step
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| "none yet".to_string()),
             );
             prev_step = step;
             allocs_at_prev = checkpoint.allocs;
@@ -348,9 +421,10 @@ fn main() {
         sous.pantry().warmer().misses(),
     );
     let keystroke_median = median(&keystroke_times);
+    let keystroke_p99 = p99(&keystroke_times);
 
     // The harness's own bookkeeping is on the same heap as the host's: the
-    // original 66 texts (`corpus`, held for the whole run) and the ten
+    // original 66 texts (`corpus`, held for the whole run) and the 66
     // growing edited copies (`live_texts`) are ours, not the Expediter's.
     // Excluded here so "unattributed" is not just our own test fixture.
     let harness_bytes = raw_total + live_texts.values().map(String::len).sum::<usize>();
@@ -362,7 +436,7 @@ fn main() {
 
     println!();
     println!(
-        "breakdown after 200 keystrokes, by owner (host-only; harness's own corpus copies excluded):"
+        "breakdown after {KEYSTROKES} keystrokes, by owner (host-only; harness's own corpus copies excluded):"
     );
     println!("{:<58} {:>12}", "owner", "bytes");
     println!("{}", "-".repeat(72));
@@ -415,12 +489,23 @@ fn main() {
     );
     println!();
     println!(
-        "Warmer hits={warmer_hits} misses={warmer_misses} (of {} lookups)",
+        "Warmer hits={warmer_hits} misses={warmer_misses} evictions={} (of {} lookups)",
+        sous.pantry().warmer().evictions(),
         warmer_hits + warmer_misses
     );
     println!(
-        "keystroke (update+publish) median over 200: {:.1} µs",
-        keystroke_median.as_secs_f64() * 1e6
+        "  misses: {chunk_relex_misses} chunk-relex ({chunk_relex_events} events), {book_rederivation_misses} whole-book-rederivation ({book_rederivation_events} events)"
+    );
+    println!(
+        "  first eviction at keystroke: {}",
+        first_eviction_step
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| format!("none in {KEYSTROKES}"))
+    );
+    println!(
+        "keystroke (update+publish) median/p99 over {KEYSTROKES}: {:.1} / {:.1} µs",
+        keystroke_median.as_secs_f64() * 1e6,
+        keystroke_p99.as_secs_f64() * 1e6,
     );
 
     // ---- 7. what resident_bytes() misses: an isolated construction check --

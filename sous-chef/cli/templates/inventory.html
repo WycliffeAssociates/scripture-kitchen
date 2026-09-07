@@ -192,6 +192,7 @@ figure.venn figcaption{font-size:12.5px;color:var(--muted);max-width:60ch;margin
   <div class="tabs">
     <button id="tabPhilo">The idea</button>
     <button id="tabBrowse">Character by character</button>
+    <button id="tabCap">Capitalization</button>
   </div>
 </header>
 <div class="app" id="app"></div>
@@ -464,6 +465,52 @@ function drawPhilo(){
   </div></main>`;
 }
 
+/* ---------- capitalization ---------- */
+const FORM_PHRASE={Lower:"all lowercase",Title:"with a capital first letter",
+  Upper:"in all capitals",Mixed:"with capitals inside it"};
+function capRows(){return corpus().cap||[]}
+function capRowHTML(r,i){
+  const id="w:"+i;
+  const drawer=S.open===id?
+    `<div class="drawer"><ul>${r.samples.length?r.samples.map(renderSample).join(""):"<li class='empty'>no examples retained for this row</li>"}</ul></div>`:"";
+  return `<div class="arow" data-id="${esc(id)}">
+    <div class="top"><span class="grainchip">word casing</span>
+      <div class="claim"><span class="g">${esc(r.w)}</span> is written
+        ${FORM_PHRASE[r.form]||esc(r.form)} ${r.n===1?"once":fmt(r.n)+" times"} in
+        ${fmt(r.d)} free uses \u2014 the rest are written some other way</div>
+      <div class="stats mono">${fmt(r.n)} of ${fmt(r.d)} (${pct(r.n,r.d)}) \u00b7
+        ${r.books} book${r.books===1?"":"s"} \u00b7 ${fmt(r.sites)} site${r.sites===1?"":"s"}</div></div>
+    <button class="showbtn">${S.open===id?"hide examples":"show examples"}</button>${drawer}</div>`;
+}
+function drawCap(){
+  const rows=capRows();
+  const render=()=>{
+    $("#app").innerHTML=`<main>
+      <div class="cfg">
+        <h3>One walk, no chicken-and-egg</h3>
+        <p class="cnote">Capitalization looks circular: to judge a word's casing you must
+        excuse sentence starts, and to know where sentences start you need the punctuation
+        verdicts. The resolution is that the <em>position</em> decides, not a second pass.
+        A word at the start of a chapter or verse, straight after a sentence terminal, or
+        after an opening quote that itself follows one, is set aside \u2014 the mark put the
+        capital there, not the word. What is left are the <em>free</em> positions, and a
+        word's minority form among those is what this list is drawn from. A word common in
+        both forms is convention, and says nothing.</p>
+        <div class="counts">${judging()}</div>
+      </div>
+      <div class="qgroup"><h3>Words that break their own casing habit <span class="cnt">${rows.length}</span></h3>
+        <p class="note">Every row here is one the judge already fired; nothing is recomputed
+        in the page. The fraction is free uses only.</p>
+        ${rows.map(capRowHTML).join("")||"<p class='empty'>Nothing flagged at these settings.</p>"}</div>
+    </main>`;
+    document.querySelectorAll("#app .arow .showbtn").forEach(b=>{
+      b.onclick=()=>{const id=b.closest(".arow").dataset.id;S.open=S.open===id?null:id;render()};
+    });
+  };
+  render();
+}
+function judging(){return esc(corpus().judging||"")}
+
 /* ---------- shell ---------- */
 function drawSwitch(){
   const el=$("#corpusSwitch");el.innerHTML="";
@@ -477,11 +524,13 @@ function drawSwitch(){
 function drawTabs(){
   $("#tabPhilo").className=S.view==="philo"?"on":"";
   $("#tabBrowse").className=S.view==="browse"?"on":"";
+  $("#tabCap").className=S.view==="cap"?"on":"";
 }
 function draw(){drawSwitch();drawTabs();
-  S.view==="philo"?drawPhilo():drawBrowse()}
+  S.view==="philo"?drawPhilo():S.view==="cap"?drawCap():drawBrowse()}
 $("#tabPhilo").onclick=()=>{S.view="philo";draw()};
 $("#tabBrowse").onclick=()=>{S.view="browse";draw()};
+$("#tabCap").onclick=()=>{S.view="cap";S.open=null;draw()};
 S.g=CORPORA[0].glyphs[0].g;
 draw();
 </script>

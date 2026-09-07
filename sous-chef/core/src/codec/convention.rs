@@ -24,15 +24,17 @@ impl Reasons {
     pub const EXACT_NEIGHBOR: Self = Self(1 << 3);
     pub const RARITY: Self = Self(1 << 4);
     pub const POOLED_NEIGHBOR: Self = Self(1 << 5);
-    const KNOWN_BITS: u16 = 0b0011_1111;
+    pub const CASING: Self = Self(1 << 6);
+    const KNOWN_BITS: u16 = 0b0111_1111;
     /// Bit order on the wire, low bit first.
-    pub const NAMES: [&'static str; 6] = [
+    pub const NAMES: [&'static str; 7] = [
         "PlacementBefore",
         "PlacementAfter",
         "RunShape",
         "ExactNeighbor",
         "Rarity",
         "PooledNeighbor",
+        "Casing",
     ];
 
     pub const fn bits(self) -> u16 {
@@ -162,15 +164,15 @@ mod tests {
     #[test]
     fn convention_refuses_unknown_reason_bits() {
         assert_eq!(
-            Reasons::from_bits(1 << 6),
-            Err(CodecError::UnknownReasons(64))
+            Reasons::from_bits(1 << 7),
+            Err(CodecError::UnknownReasons(128))
         );
         let record = convention(0, 1, 0, Reasons::RUN_SHAPE);
         let mut unknown = record.encode();
-        unknown[14..16].copy_from_slice(&0x0040i16.to_le_bytes());
+        unknown[14..16].copy_from_slice(&0x0080i16.to_le_bytes());
         assert_eq!(
             PackedFinding::decode(&unknown, &[1]),
-            Err(CodecError::UnknownReasons(0x0040))
+            Err(CodecError::UnknownReasons(0x0080))
         );
         let mut negative = record.encode();
         negative[14..16].copy_from_slice(&(-1i16).to_le_bytes());

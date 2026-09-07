@@ -118,6 +118,7 @@ pub struct Warmer {
     budget: usize,
     misses: u64,
     hits: u64,
+    evictions: u64,
 }
 
 impl Warmer {
@@ -129,6 +130,7 @@ impl Warmer {
             budget: budget_bytes,
             misses: 0,
             hits: 0,
+            evictions: 0,
         }
     }
 
@@ -141,6 +143,13 @@ impl Warmer {
     /// Units served from the cache rather than recomputed, cumulative.
     pub fn hits(&self) -> u64 {
         self.hits
+    }
+
+    /// Units removed to stay under budget, cumulative — zero until the
+    /// budget has actually bitten. A caller sweeping this after every
+    /// keystroke can name the first one that pushed the cache over budget.
+    pub fn evictions(&self) -> u64 {
+        self.evictions
     }
 
     pub fn len(&self) -> usize {
@@ -337,6 +346,7 @@ impl Warmer {
             };
             let evicted = self.map.remove(&oldest).expect("just found");
             self.bytes -= evicted.bytes;
+            self.evictions += 1;
         }
     }
 }

@@ -26,6 +26,7 @@ finding.
 | `RunShape` | G1 | runs of `g` with this `(pure, length bucket)` | runs containing `g` |
 | `Placement` | G0 | occurrences of `g` with this outer class, one side | every occurrence of `g` |
 | `Rarity` | — | corpus count of the glyph | every scalar counted |
+| `Casing` | word | free-position occurrences of one case-folded word in one case form | that word's free-position occurrences, all forms |
 
 `Placement` is **per side, marginal**: the outer class before `g` and the
 outer class after `g` are two distributions over
@@ -90,6 +91,34 @@ The pair is reviewable through the rare member and through the run shape. The
 comma's own exact-pair evidence was never entitled, and that is a fact about
 the opportunity set, not a verdict.
 
+## `Casing` is a word channel
+
+`Casing` judges [`words.md`](words.md)'s counts rather than the substrate's,
+and it is the one channel whose key is not a scalar. Its `glyph` field is
+`ScalarKey::NONE` and the wire carries the u64 word hash in its place
+([`codec/README.md`](codec/README.md)); `Pattern::word_hash` reads it back.
+
+The claim is: **for one case-folded word, a case form whose share of that
+word's FREE positions is under the word band.** `David` \u{d7}40 against `david`
+\u{d7}2 flags the two; a word common in both forms fires nothing, so bivariance
+needs no rule of its own. Forced positions — a chapter or verse start, a
+sentence terminal, an opening quote after one — are out of both numerator and
+denominator, because there the punctuation chose the capital and not the word.
+
+Two knobs, and the reason they are separate from the glyph pair:
+`word_support_floor` (default 5) and `word_bands` (the glyph staircase for
+now). v1 measured word casing at roughly **eight times** glyph-rule volume
+under shared bands, so copying the glyph defaults is blocked until a fleet run
+sets these — `rules/word-conventions.md` carries that block. `channels.casing`
+turns the whole lane off.
+
+A corpus whose word aggregates are all `cased == false` emits nothing and
+hashes nothing: an uncased script pays for this channel exactly zero.
+
+Emission order for these rows is by word hash ascending, then by form, which
+is deterministic without being meaningful — a hash has no reading. They follow
+every substrate row, because `Brigade` judges `Words` last.
+
 ## Dispersion
 
 `Pattern::books` is how many Target books hold part of that row's numerator,
@@ -136,7 +165,9 @@ Deterministic, because the wire pins it:
 2. then, per glyph ascending, that glyph's rows sorted by `(channel, key)`.
 
 `Channel`'s discriminants run finest grain first, so sorting by channel *is*
-sorting finest first, and G2 comes out between G3 and G1 without a sort. `ScalarKey` orders by code point with the pooled digit
+sorting finest first, and G2 comes out between G3 and G1 without a sort.
+`Casing` is last, and its rows are a separate pass's, so they never compete
+for a headline with a glyph's. `ScalarKey` orders by code point with the pooled digit
 lane last.
 
 ## Where the row goes

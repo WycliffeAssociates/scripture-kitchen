@@ -1,5 +1,6 @@
 //! First-draft sizing for a per-chapter Level 1b observation and the Stage 4
-//! word lanes, measured on the committed 8-corpus test tier.
+//! word lanes, measured on the committed 8-corpus test tier, beside the real
+//! `WordRow` the shipped walk builds.
 //!
 //!     cargo run -p sous-core --release --example observation_size
 //!
@@ -14,6 +15,8 @@ use std::path::{Path, PathBuf};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use sous_core::unicode::{class_of, is_glue};
+use sous_core::words::WordCount;
+use sous_core::{BookKey, ChapterInput, ChapterKey, ChapterPass, Words};
 
 const CORPORA: &[&str] = &[
     "WA-en-ulb",
@@ -31,6 +34,7 @@ fn corpora_dir() -> PathBuf {
 }
 
 fn main() {
+    println!("size_of::<WordCount>() = {} B\n", size_of::<WordCount>());
     let dir = corpora_dir();
     for name in CORPORA {
         let path = dir.join(format!("{name}.txt"));
@@ -278,6 +282,18 @@ fn parse_ref(line: &str) -> Option<(&str, u32, &str)> {
     Some((book, chapter, text))
 }
 
+/// One chapter through the shipped word walk, as a resident cache would hold
+/// it. Verse rows only move the forced/free split, never the row's size.
+fn real_word_row_bytes(text: &str) -> u64 {
+    Words
+        .map(ChapterInput {
+            text,
+            verses: &[],
+            key: ChapterKey::new(BookKey::new(*b"MRK"), 1),
+        })
+        .resident_bytes() as u64
+}
+
 fn report(name: &str, path: &Path) {
     let raw = std::fs::read_to_string(path)
         .unwrap_or_else(|error| panic!("{} must be readable: {error}", path.display()));
@@ -299,9 +315,15 @@ fn report(name: &str, path: &Path) {
     }
     assert!(!chapters.is_empty(), "{} has no chapters", path.display());
 
+    // The lanes below are estimates from distinct-word counts; this is the
+    // shipped row, so the two can be read against each other.
+    let mut word_row_bytes: Vec<u64> = Vec::with_capacity(chapters.len());
     let metrics: Vec<((String, u32), ChapterMetrics)> = chapters
         .into_iter()
-        .map(|(key, text)| (key, analyze_chapter(&text)))
+        .map(|(key, text)| {
+            word_row_bytes.push(real_word_row_bytes(&text));
+            (key, analyze_chapter(&text))
+        })
         .collect();
 
     // Lane C: distinct folded words at book grain, divided evenly back
@@ -400,6 +422,7 @@ fn report(name: &str, path: &Path) {
         );
     };
     row_bytes_u64("scalar lanes (1+2+3)", &scalar_lane_bytes);
+    row_bytes_u64("word row (WordRow, real)", &word_row_bytes);
     row_bytes_f64("word lane A (u128+flags)", &lane_a_bytes);
     row_bytes_u64("word lane B (u64 hash)", &lane_b_bytes);
     row_bytes_f64("word lane C (book grain)", &lane_c_per_chapter);

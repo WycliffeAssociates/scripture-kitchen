@@ -50,6 +50,10 @@ impl ScalarKey {
     /// Charter invariant 7: every Unicode decimal digit counts here.
     pub const DIGITS: Self = Self(DIGITS_RAW);
 
+    /// The unused glyph field of a channel that judges no scalar. `Casing`
+    /// is the one such channel; the wire carries a word hash in its place.
+    pub const NONE: Self = Self(0);
+
     pub const fn of(c: char) -> Self {
         Self(c as u32)
     }
@@ -432,9 +436,13 @@ impl ChapterPass for Substrate {
         book: BookIndex,
         text: &str,
         chapters: &[crate::Chapter],
+        verses: &[crate::Verse],
         aggregate: &BookAggregate,
         out: &mut Findings,
     ) {
+        // Every substrate claim is about scalars and their neighbours; a verse
+        // row decides nothing here.
+        let _ = verses;
         let mut set = Vec::new();
         sites::firing(aggregate, out.patterns(), &mut set);
         if set.is_empty() {

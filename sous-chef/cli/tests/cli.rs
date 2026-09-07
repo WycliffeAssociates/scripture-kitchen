@@ -151,6 +151,10 @@ fn report_writes_a_self_contained_inventory_page() {
         "the page fetches nothing"
     );
     assert!(rendered.contains("Character by character"));
+    assert!(
+        rendered.contains("Capitalization") && rendered.contains(r#""cap":["#),
+        "the word tab and its data are present"
+    );
     assert!(rendered.contains("MRK.usfm"), "the corpus name appears");
     assert!(rendered.contains("U+002C"), "the comma's code appears");
     assert!(

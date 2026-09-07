@@ -54,10 +54,51 @@ to a no-op, so a pass with nothing to site says nothing; `Substrate`'s reads
 `out.patterns()`, keeps the rows whose glyph this book's own counts hold, and
 pushes one `Convention` per matching run. See [sites.md](sites.md).
 
+Its structural inputs are `map`'s own, book-wide: the text, the chapter rows,
+and the verse rows. A rule whose map read verse rows to decide something —
+`Words` reads them to decide which word positions were forced — has to read the
+same rows here, or the rescan would place occurrences the counts never held.
+`Substrate` ignores them: every substrate claim is about scalars and their
+neighbours.
+
 `firing` is the same filter without the text: it names the table positions
 `locate` would scan for, so a resident host can hash them and decide whether
 to rescan a book at all. `galley::sous::Expediter` caches a book's rows under
 `(RawChecksum, FiringHash)` and replays them when neither moved.
+
+The pattern table is the whole corpus's, so each member of a tuple filters it
+down to its own rows: `sites::firing` skips the `Casing` channel, whose key is
+a word hash and not a glyph, and `Words::firing` keeps only that channel. A
+member that claimed a row it cannot place would rescan text for nothing.
+
+## Retention grain, and resident totals
+
+Two hooks say what a host may keep between publications; both default to the
+behaviour every pass had before either existed, so a rule that wants neither
+writes neither.
+
+```text
+const RETAIN_CHAPTERS: bool    may a host keep my per-chapter observation?
+fn release(&mut Observation)   empty what it may not, once the fold has read it
+
+fn tally / untally(&mut CorpusTotals, &[&Aggregate])   books in, books out
+fn judge_resident(corpus, &CorpusTotals, config, out)  judge from what is held
+```
+
+`Words` answers `false` to the first: a chapter's word rows are ~5 KB of cased
+Latin against the substrate's 0.3, and rewalking one edited book costs ~200 µs
+([../../evidence.md](../../evidence.md), "W1 grain"). A tuple retains chapters
+only if every member does — one observation carries them all, so a host that
+sheds one member's slot re-maps the whole book, every member with it.
+
+`CorpusTotals` is concrete rather than an associated type: a host holds exactly
+one whatever pass it drives, and a rule that wants resident totals adds its own
+lane to it. Today only `Words` fills one, and the contract on it is an
+equality — `tally` over a corpus, in any order and with any intervening
+`untally` of books since removed, equals a fresh merge of the books left, so
+`judge_resident` and `judge` cannot disagree. `analyze_with` calls `judge`; the
+resident host calls `judge_resident`; `galley/tests/equivalence.rs` compares
+their bytes.
 
 ## Row order comes from `finish`
 
@@ -70,14 +111,22 @@ the CLI and the tests read it.
 
 ## A tuple is a pass
 
-`(A, B)` implements `ChapterPass`, so two rules ride one set of chapter
-inputs: `map` calls both and pairs the observations, `fold` splits the
-borrowed pairs into two views and folds both, and `judge` splits the corpus
-of pairs into two views and judges both. The composed `SCHEMA` is
-`A::SCHEMA.then(B::SCHEMA)` — order-sensitive and never either half, so a host
-cannot key a tuple's observations under one member's stamp. `Aggregate` and
-`Config` are the pairs. `sous_core::Brigade` — `(HygieneBytes, Substrate)` —
-is the product pass.
+`(A, B)` and `(A, B, C)` implement `ChapterPass`, so two or three rules ride
+one set of chapter inputs: `map` calls each and tuples the observations, `fold`
+splits the borrowed tuples into one view per member and folds each, and `judge`
+splits the corpus of tuples the same way. The composed `SCHEMA` is
+`A::SCHEMA.then(B::SCHEMA)`, or `.then(C::SCHEMA)` again — order-sensitive and
+never any member's own, so a host cannot key a tuple's observations under one
+member's stamp. `Aggregate` and `Config` are the tuples.
+`sous_core::Brigade` — `(HygieneBytes, Substrate, Words)` — is the product
+pass, and its config is `((), JudgingConfig, JudgingConfig)`.
+
+`Substrate` and `Words` judge under the *same* config type, because the word
+knobs are fields of the one `JudgingConfig` struct rather than a second one. A
+host therefore places the same `Copy` value in both slots, as `analyze`'s
+default does and as the CLI and `galley::sous::Expediter`'s tests do. Sharing
+one config across passes without the copy is a later plumbing slice; nothing
+reads a divergent pair, and the two slots are not a feature.
 
 ## Why fold and judge are provenance-blind
 

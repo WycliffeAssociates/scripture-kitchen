@@ -46,6 +46,11 @@ pub struct Site {
 pub fn firing(book: &BookAggregate, patterns: &[Pattern], out: &mut Vec<PatternIndex>) {
     out.clear();
     for (index, pattern) in patterns.iter().enumerate() {
+        // The table is the whole corpus's, and a `Casing` row names a word
+        // hash rather than a glyph. It is `words::Words`'s to place.
+        if pattern.channel == Channel::Casing {
+            continue;
+        }
         let held = book
             .scalars()
             .binary_search_by_key(&pattern.glyph, |entry| entry.0)
@@ -256,6 +261,8 @@ fn rung(pattern: &Pattern) -> Reasons {
             Side::Next => Reasons::PLACEMENT_AFTER,
         },
         PatternKey::Rarity => Reasons::RARITY,
+        // `firing` never lets one through: a word hash is not a glyph.
+        PatternKey::Casing { .. } => Reasons::CASING,
     }
 }
 
@@ -294,6 +301,7 @@ fn occurrences(
             .filter(|pair| pair[0].1 == glyph && pool_of_key(pair[1].1) == pool)
             .count() as u64,
         PatternKey::Rarity => atoms.iter().filter(|atom| atom.1 == glyph).count() as u64,
+        PatternKey::Casing { .. } => 0,
     }
 }
 

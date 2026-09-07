@@ -108,17 +108,24 @@ export type Pool = (typeof POOLS)[number];
 export const CONVENTION_REASONS = [@@CONVENTION_REASONS@@] as const;
 export type ConventionReason = (typeof CONVENTION_REASONS)[number];
 
+/** How a word occurrence is cased; a `Casing` key byte indexes this.
+ * `Uncased` is counted nowhere and refused on the wire. */
+export const CASING_FORMS = [@@CASING_FORMS@@] as const;
+export type CasingForm = (typeof CASING_FORMS)[number];
+
 export type PatternKey =
   | { readonly kind: "ExactNeighbor"; readonly neighbor: number }
   | { readonly kind: "PooledNeighbor"; readonly pool: Pool }
   | { readonly kind: "RunShape"; readonly pure: boolean; readonly bucket: number }
   | { readonly kind: "Placement"; readonly side: "prev" | "next"; readonly class: OuterClass }
-  | { readonly kind: "Rarity" };
+  | { readonly kind: "Rarity" }
+  | { readonly kind: "Casing"; readonly hash: bigint; readonly form: CasingForm };
 
 /** One corpus-level pattern: a glyph, the channel that convicted it, and the
  * fraction behind the claim. */
 export interface Pattern {
-  /** A code point, or `PATTERN_DIGIT_GLYPH` for the pooled digit lane. */
+  /** A code point, or `PATTERN_DIGIT_GLYPH` for the pooled digit lane. Zero on
+   * `Casing`, which judges no scalar: bytes 0..8 carry the word hash instead. */
   readonly glyph: number;
   readonly channel: Channel;
   readonly key: PatternKey;
@@ -226,20 +233,29 @@ function readPattern(view: DataView, at: number, row: number, bookCount: number)
   if (view.getUint8(at + PATTERN_RESERVED_OFFSET) !== 0) {
     return fail(`pattern row ${row} has an invalid reserved`);
   }
-  const glyph = u32(view, at + PATTERN_GLYPH_OFFSET);
-  if (glyph !== PATTERN_DIGIT_GLYPH && (glyph > 0x10ffff || (glyph >= 0xd800 && glyph <= 0xdfff))) {
-    return fail(`pattern row ${row} has an invalid glyph`);
-  }
+  const rawGlyph = u32(view, at + PATTERN_GLYPH_OFFSET);
   const neighbor = u32(view, at + PATTERN_NEIGHBOR_OFFSET);
   const channel = CHANNELS[view.getUint8(at + PATTERN_CHANNEL_OFFSET)];
   if (channel === undefined) {
     return fail(`pattern row ${row} has an invalid channel`);
   }
+  // Bytes 0..8 are a u64 word hash on `Casing`, so no scalar check applies.
+  const casing = channel === "Casing";
+  const glyph = casing ? 0 : rawGlyph;
+  if (!casing && glyph !== PATTERN_DIGIT_GLYPH && (glyph > 0x10ffff || (glyph >= 0xd800 && glyph <= 0xdfff))) {
+    return fail(`pattern row ${row} has an invalid glyph`);
+  }
   const raw = view.getUint8(at + PATTERN_KEY_OFFSET);
   const high = raw >> 4;
   const low = raw & 0x0f;
   let key: PatternKey;
-  if (channel === "ExactNeighbor") {
+  if (casing) {
+    const form = CASING_FORMS[raw];
+    if (form === undefined || form === "Uncased") {
+      return fail(`pattern row ${row} has an invalid key`);
+    }
+    key = { kind: "Casing", hash: (BigInt(neighbor) << 32n) | BigInt(rawGlyph), form };
+  } else if (channel === "ExactNeighbor") {
     if (raw !== 0) {
       return fail(`pattern row ${row} has an invalid key`);
     }

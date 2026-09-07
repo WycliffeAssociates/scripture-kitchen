@@ -23,8 +23,9 @@ use sous_core::judge::{Channel, PatternKey};
 use sous_core::substrate::ScalarKey;
 use sous_core::{
     BookIndex, Chapter, ChapterInput, ChapterObs, ChapterPass, ConventionDigest, CoordinateSpace,
-    CorpusWireError, FindingKind, Findings, PackedFinding, Pattern, PatternIndex, ProjectedBook,
-    PublicationBook, Reasons, SnapshotId, TextRange, encode_to_corpus_buffer, for_each_chapter,
+    CorpusTotals, CorpusWireError, FindingKind, Findings, PackedFinding, Pattern, PatternIndex,
+    ProjectedBook, PublicationBook, Reasons, SnapshotId, TextRange, encode_to_corpus_buffer,
+    for_each_chapter,
 };
 #[cfg(feature = "parallel")]
 use sous_core::{ChapterKey, Verse};
@@ -157,17 +158,28 @@ impl SiteRow {
 
 /// The `PatternKey` variant and its fields, flat, so the hash reads the claim
 /// and not a pointer.
-fn key_bytes(key: PatternKey) -> [u8; 6] {
+fn key_bytes(key: PatternKey) -> [u8; 10] {
+    let mut out = [0u8; 10];
     match key {
         PatternKey::ExactNeighbor(neighbor) => {
-            let raw = neighbor.raw().to_le_bytes();
-            [0, raw[0], raw[1], raw[2], raw[3], 0]
+            out[0] = 0;
+            out[1..5].copy_from_slice(&neighbor.raw().to_le_bytes());
         }
-        PatternKey::RunShape { pure, bucket } => [1, u8::from(pure), bucket, 0, 0, 0],
-        PatternKey::Placement { side, class } => [2, side as u8, class as u8, 0, 0, 0],
-        PatternKey::Rarity => [3, 0, 0, 0, 0, 0],
-        PatternKey::PooledNeighbor(pool) => [4, pool as u8, 0, 0, 0, 0],
+        PatternKey::RunShape { pure, bucket } => {
+            out[..3].copy_from_slice(&[1, u8::from(pure), bucket]);
+        }
+        PatternKey::Placement { side, class } => {
+            out[..3].copy_from_slice(&[2, side as u8, class as u8]);
+        }
+        PatternKey::Rarity => out[0] = 3,
+        PatternKey::PooledNeighbor(pool) => out[..2].copy_from_slice(&[4, pool as u8]),
+        PatternKey::Casing { hash, form } => {
+            out[0] = 5;
+            out[1] = form as u8;
+            out[2..10].copy_from_slice(&hash.to_le_bytes());
+        }
     }
+    out
 }
 
 /// Previous checksums a book keeps beside its current one, so an undo of that
@@ -195,6 +207,12 @@ pub struct Expediter<P: ChapterPass> {
     /// One book's located rows for the last firing set seen, keyed by the same
     /// checksum: unchanged text plus an unchanged firing set is a replay.
     sites: FxHashMap<RawChecksum, (FiringHash, Box<[SiteRow]>)>,
+    /// The corpus counts judging reads, kept across publications: a book whose
+    /// checksum moved is subtracted at its old one and added at its new, and
+    /// the rest are never touched.
+    totals: CorpusTotals,
+    /// Which checksum each book contributes to [`Self::totals`] right now.
+    tallied: FxHashMap<BookId, RawChecksum>,
     /// Per book, its current checksum ahead of the previous ones still kept —
     /// exactly the tables the sweep spares.
     generations: FxHashMap<BookId, Vec<RawChecksum>>,
@@ -242,6 +260,8 @@ impl<P: ChapterPass + Sync> Expediter<P> {
             chapter_tables: FxHashMap::default(),
             aggregates: FxHashMap::default(),
             sites: FxHashMap::default(),
+            totals: CorpusTotals::default(),
+            tallied: FxHashMap::default(),
             generations: FxHashMap::default(),
             kept: DEFAULT_GENERATIONS,
             dirty: false,
@@ -387,11 +407,23 @@ impl<P: ChapterPass + Sync> Expediter<P> {
             + cached
             + sites
             + rings
+            + self.totals.resident_bytes()
+            + self.tallied.len() * (size_of::<BookId>() + size_of::<RawChecksum>())
     }
 
     /// Keys this book's chapters under the Pantry's current checksum and maps
     /// the ones the cache is missing; a checksum already keyed only ages.
-    fn index_book(&mut self, id: &BookId) -> Result<(), PublishError> {
+    ///
+    /// `fresh` names the observations THIS publication mapped and has not shed
+    /// yet. A pass retained at book grain ([`ChapterPass::RETAIN_CHAPTERS`])
+    /// empties a member's chapter rows once the fold has read them, so a book
+    /// whose aggregate is gone may only fold from those: it re-maps every
+    /// chapter of its own that is not already in the set.
+    fn index_book(
+        &mut self,
+        id: &BookId,
+        fresh: &mut FxHashSet<ObservationKey>,
+    ) -> Result<(), PublishError> {
         #[cfg(feature = "parallel")]
         let parallel = self.parallel;
         let Self {
@@ -399,6 +431,7 @@ impl<P: ChapterPass + Sync> Expediter<P> {
             pass,
             observations,
             chapter_tables,
+            aggregates,
             generations,
             kept,
             dirty,
@@ -414,7 +447,10 @@ impl<P: ChapterPass + Sync> Expediter<P> {
             ring.truncate(*kept + 1);
             *dirty = true;
         }
-        if chapter_tables.contains_key(&checksum) {
+        let regrain = !P::RETAIN_CHAPTERS && !aggregates.contains_key(&checksum);
+        if let Some(table) = chapter_tables.get(&checksum)
+            && (!regrain || table.iter().all(|row| fresh.contains(&row.observation)))
+        {
             return Ok(());
         }
 
@@ -438,11 +474,15 @@ impl<P: ChapterPass + Sync> Expediter<P> {
         for_each_chapter(&book, |start, chapter| {
             let observation = ObservationKey::of::<P>(&chapter);
             table.push(ChapterRow { observation, start });
+            // A shed observation is not a hit, so a re-grained book maps
+            // anything this publication has not mapped already.
+            let wanted = !fresh.contains(&observation)
+                && (regrain || !observations.contains_key(&observation));
             #[cfg(feature = "parallel")]
             if parallel {
-                // The same dedup the serial `entry` does, so both settings map
-                // a repeated chapter once and count it once.
-                if !observations.contains_key(&observation) && seen.insert(observation) {
+                // The same dedup the serial map does, so both settings map a
+                // repeated chapter once and count it once.
+                if wanted && seen.insert(observation) {
                     let text = start as usize..start as usize + chapter.text.len();
                     debug_assert_eq!(&book.text()[text.clone()], chapter.text);
                     let from = pool.len();
@@ -456,10 +496,12 @@ impl<P: ChapterPass + Sync> Expediter<P> {
                 }
                 return;
             }
-            observations.entry(observation).or_insert_with(|| {
+            if wanted {
                 *pending += 1;
-                pass.map(chapter)
-            });
+                let mapped = pass.map(chapter);
+                observations.insert(observation, mapped);
+                fresh.insert(observation);
+            }
         });
         // Collected in chapter order and inserted in it: the map is content
         // keyed, so the table it feeds is the same either way.
@@ -479,6 +521,7 @@ impl<P: ChapterPass + Sync> Expediter<P> {
             *pending += mapped.len() as u64;
             for (chapter, observation) in queued.iter().zip(mapped) {
                 observations.insert(chapter.observation, observation);
+                fresh.insert(chapter.observation);
             }
         }
         chapter_tables.insert(checksum, table);
@@ -523,8 +566,11 @@ impl<P: ChapterPass + Sync> Expediter<P> {
             }));
         }
 
+        // Cleared per publication: what it names is what a book-grain pass may
+        // still fold from.
+        let mut fresh: FxHashSet<ObservationKey> = FxHashSet::default();
         for (id, _) in &books {
-            self.index_book(id)?;
+            self.index_book(id, &mut fresh)?;
         }
         self.misses = core::mem::take(&mut self.pending);
 
@@ -547,6 +593,8 @@ impl<P: ChapterPass + Sync> Expediter<P> {
                 chapter_tables,
                 aggregates,
                 sites,
+                totals,
+                tallied,
                 ..
             } = &mut *self;
             let checksums: Vec<RawChecksum> = books
@@ -558,19 +606,71 @@ impl<P: ChapterPass + Sync> Expediter<P> {
                         .checksum
                 })
                 .collect();
-            let mut chapters: Vec<ChapterObs<&P::Observation>> = Vec::new();
+            let mut folded: Vec<RawChecksum> = Vec::new();
             for checksum in &checksums {
                 if aggregates.contains_key(checksum) {
                     continue;
                 }
-                chapters.clear();
-                chapters.extend(chapter_tables[checksum].iter().map(|row| ChapterObs {
-                    start: row.start,
-                    obs: &observations[&row.observation],
-                }));
+                let chapters: Vec<ChapterObs<&P::Observation>> = chapter_tables[checksum]
+                    .iter()
+                    .map(|row| ChapterObs {
+                        start: row.start,
+                        obs: &observations[&row.observation],
+                    })
+                    .collect();
                 aggregates.insert(*checksum, pass.fold(&chapters));
                 folds += 1;
+                folded.push(*checksum);
             }
+            // Book grain: every fold this publication needed has run, so the
+            // rows it read are dropped. The aggregate is what survives.
+            if !P::RETAIN_CHAPTERS {
+                for checksum in &folded {
+                    for row in &chapter_tables[checksum] {
+                        if let Some(obs) = observations.get_mut(&row.observation) {
+                            pass.release(obs);
+                        }
+                    }
+                }
+            }
+
+            // The resident corpus totals: only a book whose checksum moved is
+            // subtracted at its old one and added at its new.
+            let mut stale: Vec<&P::Aggregate> = Vec::new();
+            let mut added: Vec<&P::Aggregate> = Vec::new();
+            let live: FxHashSet<&BookId> = books.iter().map(|(id, _)| id).collect();
+            for (index, (id, _)) in books.iter().enumerate() {
+                match tallied.get(id) {
+                    Some(seen) if *seen == checksums[index] => {}
+                    seen => {
+                        if let Some(seen) = seen {
+                            stale.push(&aggregates[seen]);
+                        }
+                        added.push(&aggregates[&checksums[index]]);
+                    }
+                }
+            }
+            for (id, seen) in tallied.iter() {
+                if !live.contains(id) {
+                    stale.push(&aggregates[seen]);
+                }
+            }
+            if !stale.is_empty() {
+                pass.untally(totals, &stale);
+            }
+            if !added.is_empty() {
+                pass.tally(totals, &added);
+            }
+            tallied.retain(|id, _| live.contains(id));
+            for (index, (id, _)) in books.iter().enumerate() {
+                match tallied.get_mut(id) {
+                    Some(seen) => *seen = checksums[index],
+                    None => {
+                        tallied.insert(id.clone(), checksums[index]);
+                    }
+                }
+            }
+
             let mut findings = Findings::new(projected_lens);
             {
                 // Judging is corpus-level: every Target book, changed or not.
@@ -578,7 +678,7 @@ impl<P: ChapterPass + Sync> Expediter<P> {
                     .iter()
                     .map(|checksum| &aggregates[checksum])
                     .collect();
-                pass.judge(&corpus, config, &mut findings);
+                pass.judge_resident(&corpus, totals, config, &mut findings);
             }
 
             // Then place what judging decided, per book, from the current text.
@@ -614,7 +714,8 @@ impl<P: ChapterPass + Sync> Expediter<P> {
                     })?;
                 let rows: Vec<Chapter> = view.chapters().collect();
                 let before = findings.len();
-                pass.locate(book, view.text(), &rows, aggregate, &mut findings);
+                let verses: Vec<sous_core::Verse> = view.verses().collect();
+                pass.locate(book, view.text(), &rows, &verses, aggregate, &mut findings);
                 let cached: Box<[SiteRow]> = findings.rows()[before..]
                     .iter()
                     .map(|row| SiteRow::of(row, &table))
@@ -716,6 +817,7 @@ fn snapshot_id<P: ChapterPass>(pantry: &Pantry, books: &[(BookId, BookKey)]) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sous_core::hygiene::HygieneBytes;
     use sous_core::{BookIndex, Brigade, CorpusSnapshot, FindingKind, JudgingConfig};
 
     use crate::pantry::{PantryError, Retain};
@@ -747,6 +849,13 @@ mod tests {
 
     fn sous() -> Expediter<Brigade> {
         Expediter::new(Brigade::default(), 1 << 20)
+    }
+
+    /// A chapter-grain pass: `Brigade` carries `Words`, which is retained at
+    /// book grain, so what one chapter's cache key does and does not cover is
+    /// only visible through a pass that keeps its chapters.
+    fn grain() -> Expediter<HygieneBytes> {
+        Expediter::new(HygieneBytes, 1 << 20)
     }
 
     /// Every HYGIENE row of a published buffer as (book index, id, from, to).
@@ -842,7 +951,7 @@ mod tests {
     fn a_markup_only_edit_maps_nothing_and_shifts_the_published_offsets() {
         let before = mark();
         let after = before.replace("Jesus", "Jesus\\f + \\ft note\\f*");
-        let mut sous = sous();
+        let mut sous = grain();
         sous.update("b/mrk.usfm", Role::Target, &before).unwrap();
         let first = rows(&sous.publish().unwrap());
 
@@ -862,7 +971,7 @@ mod tests {
     fn a_verse_marker_edit_with_unchanged_content_remaps_only_its_chapter() {
         let before = mark();
         let after = before.replace("\\v 1 He entered", "\\v 1-2 He entered");
-        let mut sous = sous();
+        let mut sous = grain();
         sous.update("b/mrk.usfm", Role::Target, &before).unwrap();
         sous.publish().unwrap();
 
@@ -875,7 +984,7 @@ mod tests {
     fn a_one_chapter_content_edit_maps_exactly_one_chapter() {
         let before = mark();
         let after = before.replace("A withered", "A shrivelled");
-        let mut sous = sous();
+        let mut sous = grain();
         sous.update("b/mrk.usfm", Role::Target, &before).unwrap();
         sous.publish().unwrap();
 
@@ -883,6 +992,39 @@ mod tests {
         let buffer = sous.publish().unwrap();
         assert_eq!(sous.last_mapped(), 1);
         assert_eq!(rows(&buffer).len(), 3, "still one finding per chapter");
+    }
+
+    /// `Words` retains no chapter rows, so an edit anywhere in a book re-maps
+    /// that whole book — and no other.
+    #[test]
+    fn a_book_grain_pass_remaps_the_edited_book_and_nothing_else() {
+        let mut sous = sous();
+        sous.update("b/mrk.usfm", Role::Target, &mark()).unwrap();
+        sous.update("a/gen.usfm", Role::Target, &genesis()).unwrap();
+        sous.publish().unwrap();
+
+        let after = mark().replace("A withered", "A shrivelled");
+        sous.update("b/mrk.usfm", Role::Target, &after).unwrap();
+        let buffer = sous.publish().unwrap();
+        assert_eq!(sous.last_mapped(), 3, "MRK's three chapters, GEN's none");
+        assert_eq!(sous.last_folded(), 1, "GEN judged its cached aggregate");
+        assert_eq!(rows(&buffer).len(), 4, "still one finding per chapter");
+    }
+
+    /// What a book-grain member leaves resident is its aggregate, not its
+    /// rows: the fold reads them and the publication drops them.
+    #[test]
+    fn a_book_grain_pass_sheds_its_chapter_rows_after_the_fold() {
+        let mut sous = sous();
+        sous.update("b/mrk.usfm", Role::Target, &mark()).unwrap();
+        sous.publish().unwrap();
+        assert_eq!(sous.resident_observations(), 3);
+        assert!(
+            sous.observations
+                .values()
+                .all(|(_, _, words)| words.words().is_empty()),
+            "every word row is back to its empty default"
+        );
     }
 
     /// The same chapter 1 in two books: one cache entry, two published rows.
@@ -1002,13 +1144,11 @@ mod tests {
         sous.update("b/mrk.usfm", Role::Target, &mark()).unwrap();
         let before = sous.publish().unwrap();
 
-        sous.set_config((
-            (),
-            JudgingConfig {
-                rarity_floor: 1,
-                ..JudgingConfig::default()
-            },
-        ));
+        let config = JudgingConfig {
+            rarity_floor: 1,
+            ..JudgingConfig::default()
+        };
+        sous.set_config(((), config, config));
         let after = sous.publish().unwrap();
         assert_eq!(sous.last_mapped(), 0, "no chapter was mapped");
         assert_eq!(sous.last_folded(), 0, "no book was folded");
@@ -1062,7 +1202,7 @@ mod tests {
 
     #[test]
     fn an_undo_beyond_the_ring_remaps_only_its_chapter() {
-        let mut sous = sous().with_generations(1);
+        let mut sous = grain().with_generations(1);
         let versions: Vec<String> = ["one", "two", "three"]
             .iter()
             .map(|word| mark().replace("A withered", word))
@@ -1195,13 +1335,11 @@ mod tests {
             .unwrap()
             .pattern_count();
 
-        sous.set_config((
-            (),
-            JudgingConfig {
-                rarity_floor: 10_000,
-                ..JudgingConfig::default()
-            },
-        ));
+        let config = JudgingConfig {
+            rarity_floor: 10_000,
+            ..JudgingConfig::default()
+        };
+        sous.set_config(((), config, config));
         let buffer = sous.publish().unwrap();
         assert_eq!(sous.last_mapped(), 0);
         assert_eq!(sous.last_folded(), 0);

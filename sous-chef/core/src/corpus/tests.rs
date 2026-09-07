@@ -6,6 +6,7 @@ use crate::codec::{CodecError, HygieneClass};
 use crate::judge::{Channel, PatternKey, Side};
 use crate::substrate::{OuterClass, ScalarKey};
 use crate::unicode::Pool;
+use crate::words::Form;
 use crate::{
     ConventionDigest, FindingKind, HygieneDigest, PatternIndex, ProportionalityDigest,
     QuantizedDeviation, Reasons,
@@ -72,6 +73,20 @@ fn fixture_patterns() -> Vec<Pattern> {
             numerator: 12,
             denominator: 9_812,
             share_bp: 12,
+            books: 1,
+        },
+        // A word hash rides bytes 0..8, so this row carries no glyph.
+        Pattern {
+            glyph: ScalarKey::NONE,
+            channel: Channel::Casing,
+            key: PatternKey::Casing {
+                hash: 0x0123_4567_89ab_cdef,
+                form: Form::Upper,
+            },
+            band: Some(1),
+            numerator: 2,
+            denominator: 40,
+            share_bp: 500,
             books: 1,
         },
     ]
@@ -229,13 +244,13 @@ fn pattern_table_round_trips() {
     )
     .unwrap();
     let snapshot = CorpusSnapshot::open(&encoded).unwrap();
-    assert_eq!(snapshot.pattern_count(), 5);
+    assert_eq!(snapshot.pattern_count(), 6);
     assert_eq!(snapshot.patterns().unwrap(), patterns);
     assert_eq!(
-        snapshot.pattern(5),
+        snapshot.pattern(6),
         Err(CorpusWireError::PatternIndexPastTable {
-            index: 5,
-            count: 5,
+            index: 6,
+            count: 6,
             at: None
         })
     );
@@ -245,7 +260,7 @@ fn pattern_table_round_trips() {
     for (offset, byte, field) in [
         (PATTERN_FLAGS_OFFSET, 1u8, "flags"),
         (PATTERN_RESERVED_OFFSET, 1, "reserved"),
-        (PATTERN_CHANNEL_OFFSET, 5, "channel"),
+        (PATTERN_CHANNEL_OFFSET, 6, "channel"),
         (PATTERN_BAND_OFFSET, 0, "band"),
         (PATTERN_KEY_OFFSET, 1, "key"),
         (PATTERN_BOOKS_OFFSET, 2, "books"),

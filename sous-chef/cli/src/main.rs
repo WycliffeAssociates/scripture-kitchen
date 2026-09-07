@@ -134,7 +134,7 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                 || args.target.display().to_string(),
                 |name| name.to_string_lossy().into_owned(),
             );
-            let page = report::render(&name, &target_corpus, &patterns);
+            let page = report::render(&name, &target_corpus, &patterns, &findings);
             fs::write(path, &page)
                 .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
             eprintln!(
@@ -186,6 +186,32 @@ fn print_patterns(
         }
     }
     for (index, pattern) in patterns.iter().enumerate() {
+        // A casing row names a word hash, not a glyph; the CLI has the text,
+        // so it shows the word its first site landed on.
+        if let PatternKey::Casing { hash, form } = pattern.key {
+            let word = sites[index].first().map_or_else(String::new, |finding| {
+                let book = corpus
+                    .get(finding.book_idx())
+                    .expect("a finding names a corpus book");
+                format!(
+                    " {:?}",
+                    &book.text()[finding.from() as usize..finding.to() as usize]
+                )
+            });
+            println!(
+                "pattern[{index}] word #{hash:016x} {}{word} {}/{} {:.2}% band {} \u{b7} {}/{} books {} sites",
+                form.name(),
+                pattern.numerator,
+                pattern.denominator,
+                f64::from(pattern.share_bp) / 100.0,
+                pattern.band.unwrap_or_default(),
+                pattern.books,
+                corpus.len(),
+                sites[index].len(),
+            );
+            print_sites(corpus, &sites[index], SHOWN);
+            continue;
+        }
         let evidence = match pattern.key {
             PatternKey::Rarity => "rarity".to_string(),
             PatternKey::Placement { side, class } => {
@@ -202,6 +228,7 @@ fn print_patterns(
             PatternKey::PooledNeighbor(pool) => {
                 format!("pooled-neighbor {}", pool.name())
             }
+            PatternKey::Casing { .. } => unreachable!("handled above"),
         };
         let band = match pattern.band {
             Some(step) => format!(" band {step}"),
@@ -217,15 +244,20 @@ fn print_patterns(
             corpus.len(),
             sites[index].len(),
         );
-        for finding in sites[index].iter().take(SHOWN) {
-            let book = corpus
-                .get(finding.book_idx())
-                .expect("a finding names a corpus book");
-            println!("  site {} {}..{}", book.key(), finding.from(), finding.to());
-        }
-        if sites[index].len() > SHOWN {
-            println!("  \u{2026} and {} more", sites[index].len() - SHOWN);
-        }
+        print_sites(corpus, &sites[index], SHOWN);
+    }
+}
+
+/// A pattern's sites, capped, with a tail line for the rest.
+fn print_sites(corpus: &Corpus<'_, OnionBook>, sites: &[&PackedFinding], shown: usize) {
+    for finding in sites.iter().take(shown) {
+        let book = corpus
+            .get(finding.book_idx())
+            .expect("a finding names a corpus book");
+        println!("  site {} {}..{}", book.key(), finding.from(), finding.to());
+    }
+    if sites.len() > shown {
+        println!("  \u{2026} and {} more", sites.len() - shown);
     }
 }
 

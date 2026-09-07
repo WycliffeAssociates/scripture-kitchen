@@ -71,10 +71,10 @@ zero. No book index inside, because the index is whatever *this* publication
 assigns; a book that moved from 3 to 2 judges from the same aggregate.
 
 Judging is not cached and is not per book. Every publication calls
-`pass.judge` once over every Target book's aggregate in `BookIndex` order,
-because a convention is a corpus fact — what one book's counts mean depends on
-the others. `Findings::finish` then puts the rows in `(book_idx, from, to)`
-order and the rebase runs as before.
+`pass.judge_resident` once over every Target book's aggregate in `BookIndex`
+order, because a convention is a corpus fact — what one book's counts mean
+depends on the others. `Findings::finish` then puts the rows in
+`(book_idx, from, to)` order and the rebase runs as before.
 
 That is also why the config lives here rather than in the key:
 `set_config` is a re-judge and never a re-fold or a re-map, since neither
@@ -82,6 +82,65 @@ That is also why the config lives here rather than in the key:
 moving a band can change which patterns fire — measured at 3.2 ms for the
 66-book corpus, against 206 µs for a republication that changed nothing
 (evidence.md).
+
+## Retention grain: every chapter, or one book's aggregate
+
+`ChapterPass::RETAIN_CHAPTERS` is each rule's answer to "may a host keep my
+per-chapter observation?". `Words` says no: its rows are about 5 KB a chapter
+of cased Latin against the substrate's 0.3, which is 4-5 MB more per Bible to
+save the ~200 µs it takes to rewalk one edited book (evidence.md, "W1 grain").
+A phone kills a tab for memory and never notices 200 µs. A tuple retains
+chapters only if every member does, because one observation carries them all.
+
+That also means the cost is paid in whole books — the tuple's `map` runs every
+member at once, so there is no remapping one member's slot:
+
+```text
+this book's checksum has an aggregate?
+  yes -> nothing mapped, nothing folded, no text read
+  no  -> map EVERY chapter of the book, fold once, keep the aggregate,
+         then pass.release each observation — WordRow::default(), 24 B,
+         the same as an uncased chapter's row
+```
+
+So a markup-only edit, which moves the `RawChecksum` and not one
+`ObservationKey`, now re-maps the book it touched: the aggregate is keyed by
+the raw checksum, and the rows that could have folded it again are gone.
+`a_markup_only_edit_maps_nothing_and_shifts_the_published_offsets` pins the
+chapter-grain claim through `HygieneBytes`, and
+`a_book_grain_pass_remaps_the_edited_book_and_nothing_else` pins this one.
+
+Within one publication a chapter mapped for one book is still a hit for the
+next, because nothing is shed until every fold that publication needed has
+run. That is what keeps two identical books one map, and `last_mapped` honest.
+
+## The resident corpus totals
+
+Judging words used to re-merge every book's rows into corpus totals on every
+publication: 4.7 ms of a 4.9 ms warm republication (evidence.md, W1). The
+Expediter keeps the totals instead, in one `CorpusTotals`, and moves a book at
+a time.
+
+```text
+tallied[BookId] = the RawChecksum this book contributes to the totals now
+
+checksum unchanged -> nothing at all
+checksum moved     -> pass.untally the old aggregate, pass.tally the new
+book gone          -> pass.untally, and the id leaves the table
+```
+
+The old aggregate is still resident when it is subtracted: a checksum leaves
+the ring in `index_book` and leaves `aggregates` in the sweep at the END of the
+same publication, and the totals are moved between the two.
+
+What makes it safe is that the tally is exactly a merge. `WordTotals` after any
+sequence of adds and removes equals `WordTotals::merge` over the books resident
+then — counts, dispersion, and which rows exist at all, so a word held only in
+forced positions keeps its all-zero row exactly as a fresh merge does. Cold
+`analyze` builds no tally; it calls `judge`, which merges its own. The two
+paths' bytes are therefore the same claim `galley/tests/equivalence.rs` already
+makes, plus the two words cases it gained: a chapter recased, and the casing
+channel flipped off.
 
 ## The site cache
 
@@ -145,7 +204,9 @@ chapter text and therefore the identical `ObservationKey`, so an undo within
 
 `resident_bytes` reports what the sweep bounds: the Pantry's own products plus
 one entry per resident observation, chapter row, cached aggregate, and ring
-slot. Shallow in two places — the heap a pass hangs off an observation or an
+slot, plus the corpus tally's own rows — which the sweep does not bound,
+because the tally holds one row per word the current corpus has and no
+generation of it. Shallow in two places — the heap a pass hangs off an observation or an
 aggregate is not counted, because `ChapterPass` states no size.
 
 The sweep is skipped outright when no table was added and no ring aged since

@@ -22,6 +22,7 @@ use rustc_hash::FxHashMap;
 use crate::pass::Findings;
 use crate::substrate::{BookAggregate, OuterClass, RUN_BUCKETS, ScalarKey};
 use crate::unicode::{Pool, class_of, pool_of};
+use crate::words::{Form, WordAggregate, WordTotals};
 
 // ── The config ──────────────────────────────────────────────────────────
 
@@ -125,6 +126,7 @@ pub struct Channels {
     pub exact_neighbor: bool,
     pub pooled_neighbor: bool,
     pub rarity: bool,
+    pub casing: bool,
 }
 
 impl Default for Channels {
@@ -135,6 +137,7 @@ impl Default for Channels {
             exact_neighbor: true,
             pooled_neighbor: false,
             rarity: true,
+            casing: true,
         }
     }
 }
@@ -156,6 +159,13 @@ pub struct JudgingConfig {
     /// not by convention. Nonletters have no such floor.
     pub letter_roster_min_letters: u32,
     pub letters: LetterRoster,
+    /// A word judged on fewer free positions than this abstains.
+    pub word_support_floor: u32,
+    /// The minority share that flags a word's case form. The glyph staircase
+    /// for now: v1 saw word casing at eight times glyph volume under shared
+    /// bands, so the fleet run sets this before defaults ship
+    /// (`rules/word-conventions.md`).
+    pub word_bands: Staircase,
     pub channels: Channels,
 }
 
@@ -168,6 +178,8 @@ impl Default for JudgingConfig {
             letter_roster_bound: 500,
             letter_roster_min_letters: 5_000,
             letters: LetterRoster::default(),
+            word_support_floor: 5,
+            word_bands: Staircase::default(),
             channels: Channels::default(),
         }
     }
@@ -191,15 +203,20 @@ pub enum Channel {
     Placement = 3,
     /// The absolute-rarity roster, which is a list and not a claim.
     Rarity = 4,
+    /// One case-folded word's minority form in free positions. It judges no
+    /// scalar, so its `glyph` field is [`ScalarKey::NONE`] and the wire
+    /// carries the word hash in its place.
+    Casing = 5,
 }
 
 impl Channel {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::ExactNeighbor,
         Self::PooledNeighbor,
         Self::RunShape,
         Self::Placement,
         Self::Rarity,
+        Self::Casing,
     ];
 
     pub const fn name(self) -> &'static str {
@@ -209,6 +226,7 @@ impl Channel {
             Self::RunShape => "RunShape",
             Self::Placement => "Placement",
             Self::Rarity => "Rarity",
+            Self::Casing => "Casing",
         }
     }
 }
@@ -249,6 +267,11 @@ pub enum PatternKey {
         class: OuterClass,
     },
     Rarity,
+    /// The case-folded word, and the form that is its minority.
+    Casing {
+        hash: u64,
+        form: Form,
+    },
 }
 
 /// One firing pattern: a glyph, the channel that convicted it, and the
@@ -273,6 +296,14 @@ pub struct Pattern {
 }
 
 impl Pattern {
+    /// The word hash a `Casing` row carries, `None` on every other channel.
+    pub const fn word_hash(&self) -> Option<u64> {
+        match self.key {
+            PatternKey::Casing { hash, .. } => Some(hash),
+            _ => None,
+        }
+    }
+
     /// Refuses a row whose fields disagree with each other, returning the
     /// offending field's name. The wire's own byte-level checks (flags,
     /// reserved, key nibbles) stay in `decode_pattern`; this is what a typed
@@ -294,6 +325,17 @@ impl Pattern {
             && !(1..=RUN_BUCKETS as u8).contains(&bucket)
         {
             return Err("key");
+        }
+        if (self.channel == Channel::Casing) != matches!(self.key, PatternKey::Casing { .. }) {
+            return Err("channel");
+        }
+        if let PatternKey::Casing { form, .. } = self.key {
+            if form == Form::Uncased {
+                return Err("key");
+            }
+            if self.glyph != ScalarKey::NONE {
+                return Err("glyph");
+            }
         }
         Ok(())
     }
@@ -639,6 +681,9 @@ fn numerator_in(book: &BookAggregate, pattern: &Pattern) -> u64 {
             .iter()
             .find(|(key, _)| *key == pattern.glyph)
             .map_or(0, |(_, count)| u64::from(*count)),
+        // A casing row is judged over word aggregates, which these are not;
+        // `words::free_in` is its oracle.
+        PatternKey::Casing { .. } => 0,
     }
 }
 
@@ -781,6 +826,72 @@ fn share_bp(numerator: u64, denominator: u64) -> u16 {
 
 fn saturate(count: u64) -> u32 {
     u32::try_from(count).unwrap_or(u32::MAX)
+}
+
+// ── The casing channel ──────────────────────────────────────────────────
+
+/// One row per case-folded word whose minority form in FREE positions falls
+/// under the word staircase.
+///
+/// Forced positions — a chapter or verse start, or a sentence terminal before
+/// the word — are already out of the counts: the position put the capital
+/// there, not the word. A word common in both forms therefore fires nothing,
+/// which is why bivariance needs no rule of its own.
+pub(crate) fn judge_casing(corpus: &[&WordAggregate], config: &JudgingConfig, out: &mut Findings) {
+    if corpus.iter().all(|book| !book.cased()) {
+        return;
+    }
+    judge_casing_totals(&WordTotals::merge(corpus), config, out);
+}
+
+/// The same channel walk over totals a host already holds — the merge above is
+/// the only thing it skips, and `WordTotals` guarantees the two are the same
+/// rows.
+pub(crate) fn judge_casing_totals(totals: &WordTotals, config: &JudgingConfig, out: &mut Findings) {
+    for row in totals.rows() {
+        let free: u64 = row.free.iter().map(|count| u64::from(*count)).sum();
+        let Some((band, ceiling)) = entitled_words(free, config) else {
+            continue;
+        };
+        for (lane, form) in Form::JUDGED.iter().enumerate() {
+            let count = u64::from(row.free[lane]);
+            let share = share_bp(count, free);
+            if count == 0 || share >= ceiling {
+                continue;
+            }
+            out.push_pattern(Pattern {
+                glyph: ScalarKey::NONE,
+                channel: Channel::Casing,
+                key: PatternKey::Casing {
+                    hash: row.hash,
+                    form: *form,
+                },
+                band: Some(band),
+                numerator: saturate(count),
+                denominator: saturate(free),
+                share_bp: share,
+                books: saturate_books(row.books[lane]),
+            });
+        }
+    }
+}
+
+/// The wire lane is a `u8` and the canon is 66 books.
+const fn saturate_books(books: u32) -> u8 {
+    if books > u8::MAX as u32 {
+        u8::MAX
+    } else {
+        books as u8
+    }
+}
+
+/// A word's band, or `None` when its free positions are under the word
+/// support floor and it abstains.
+fn entitled_words(free: u64, config: &JudgingConfig) -> Option<(u8, u16)> {
+    if free < u64::from(config.word_support_floor) {
+        return None;
+    }
+    config.word_bands.band_for(saturate(free))
 }
 
 #[cfg(test)]

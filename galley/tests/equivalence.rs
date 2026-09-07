@@ -26,8 +26,8 @@
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use sous_core::{
-    Brigade, ChapterPass, Corpus, CorpusSnapshot, SnapshotId, analyze, for_each_chapter,
-    hygiene::HygieneBytes, substrate::Substrate,
+    Brigade, Channel, Channels, ChapterPass, Corpus, CorpusSnapshot, JudgingConfig, SnapshotId,
+    analyze_with, for_each_chapter, hygiene::HygieneBytes, substrate::Substrate,
 };
 use usfm_galley::onion::{Filter, cst, lex, mask};
 use usfm_galley::sous::{Expediter, OnionBook, OnionInputBook, publish_onion_findings};
@@ -44,6 +44,16 @@ type Book = (String, String);
 /// The snapshot identity is an input, not a result, so both paths publish
 /// under the one the caller names.
 fn cold_publish<P: ChapterPass + Sync>(pass: &P, books: &[Book], snapshot: SnapshotId) -> Vec<u8> {
+    cold_publish_with(pass, &P::Config::default(), books, snapshot)
+}
+
+/// The same oracle under a named config, for the rows a judging knob moves.
+fn cold_publish_with<P: ChapterPass + Sync>(
+    pass: &P,
+    config: &P::Config,
+    books: &[Book],
+    snapshot: SnapshotId,
+) -> Vec<u8> {
     let parsed: Vec<OnionBook> = books
         .iter()
         .map(|(id, text)| {
@@ -51,7 +61,7 @@ fn cold_publish<P: ChapterPass + Sync>(pass: &P, books: &[Book], snapshot: Snaps
         })
         .collect();
     let corpus = Corpus::try_new(&parsed).expect("the harness registers distinct book keys");
-    let (findings, patterns) = analyze(&corpus, pass).into_parts();
+    let (findings, patterns) = analyze_with(&corpus, pass, config).into_parts();
     let inputs = books
         .iter()
         .map(|(id, text)| OnionInputBook::new(id.as_str(), text.clone()))
@@ -120,8 +130,8 @@ fn chapter_digests(text: &str) -> Vec<String> {
     digests
 }
 
-/// Distinct chapter inputs the corpus gained in this step — the most chapters
-/// a publication may map.
+/// The most chapters a publication may map when the pass retains chapters:
+/// the distinct chapter inputs the corpus gained in this step.
 ///
 /// An upper bound, not an equality: an input the cache kept from an earlier
 /// generation is a hit the corpus-wide difference cannot see.
@@ -136,6 +146,14 @@ fn work_bound(
         .filter(|digest| !held.contains(*digest))
         .collect();
     gained.len() as u64
+}
+
+/// The same bound for a pass retained at book grain
+/// ([`ChapterPass::RETAIN_CHAPTERS`]): its rows are shed once folded, so every
+/// chapter of every book whose RAW text moved is re-mapped — a markup-only
+/// edit included, since the aggregate is keyed by the raw checksum.
+fn book_grain_bound(after: &FxHashMap<String, Vec<String>>, changed: &FxHashSet<String>) -> u64 {
+    changed.iter().map(|id| after[id].len() as u64).sum()
 }
 
 // ------------------------------------------------------------------ the seeds
@@ -517,6 +535,7 @@ fn churn<P: ChapterPass + Sync + Copy>(
 
         let live: FxHashSet<&String> = next.iter().map(|(id, _)| id).collect();
         let mut after: FxHashMap<String, Vec<String>> = FxHashMap::default();
+        let mut changed: FxHashSet<String> = FxHashSet::default();
         for (id, text) in &next {
             let unchanged = books
                 .iter()
@@ -525,6 +544,7 @@ fn churn<P: ChapterPass + Sync + Copy>(
                 digests[id].clone()
             } else {
                 sous.update(id.as_str(), Role::Target, text).unwrap();
+                changed.insert(id.clone());
                 chapter_digests(text)
             };
             after.insert(id.clone(), rows);
@@ -534,23 +554,31 @@ fn churn<P: ChapterPass + Sync + Copy>(
                 assert!(sous.remove(&BookId::from(id.as_str())), "{context}");
             }
         }
-        let bound = work_bound(&digests, &after);
+        let bound = if P::RETAIN_CHAPTERS {
+            work_bound(&digests, &after)
+        } else {
+            book_grain_bound(&after, &changed)
+        };
 
         let mapped = assert_publications_agree(&mut sous, &next, &context);
         assert!(
             mapped <= bound,
             "{context}: mapped {mapped} chapters for a bound of {bound}"
         );
-        match edit {
-            Edit::InsertFootnote => {
-                assert_eq!(bound, 0, "{context}: a masked footnote moves no input");
-                assert_eq!(mapped, 0, "{context}: and so maps nothing");
+        // Both claims are about a chapter input that did not move, so both
+        // belong to a pass that keys its cache on one.
+        if P::RETAIN_CHAPTERS {
+            match edit {
+                Edit::InsertFootnote => {
+                    assert_eq!(bound, 0, "{context}: a masked footnote moves no input");
+                    assert_eq!(mapped, 0, "{context}: and so maps nothing");
+                }
+                Edit::CopyChapter => {
+                    assert_eq!(bound, 0, "{context}: the copy's input was already here");
+                    assert_eq!(mapped, 0, "{context}: and so maps nothing");
+                }
+                _ => {}
             }
-            Edit::CopyChapter => {
-                assert_eq!(bound, 0, "{context}: the copy's input was already here");
-                assert_eq!(mapped, 0, "{context}: and so maps nothing");
-            }
-            _ => {}
         }
         books = next;
         digests = after;
@@ -825,4 +853,107 @@ fn parallel_publish_byte_equals_the_serial_cold_oracle_over_en_ulb() {
     }
     let mapped = assert_publications_agree(&mut sous, &books, "parallel: en_ulb");
     assert!(mapped > 1000, "a whole Bible maps every chapter cold");
+}
+
+// ------------------------------------------------------------------- the words
+
+/// Two books whose cased words fire the casing channel: `david` is written
+/// three ways in free positions, against a verse-initial word that is forced.
+fn cased_books() -> Vec<Book> {
+    let verses = [
+        "we saw david and david and david and david and David and david there",
+        "they told david and david and david and david and david and david then",
+        "he gave the lord and the lord and the lord and the Lord and the lord bread",
+    ];
+    ["GEN", "MRK"]
+        .iter()
+        .map(|code| {
+            let mut text = format!("\\id {code}\n\\h {code}\n");
+            for chapter in 1..=2 {
+                text.push_str(&format!("\\c {chapter}\n\\p\n"));
+                for (number, verse) in verses.iter().enumerate() {
+                    text.push_str(&format!("\\v {} {verse}\n", number + 1));
+                }
+            }
+            (format!("cased/{code}.usfm"), text)
+        })
+        .collect()
+}
+
+/// Casing patterns a cold analysis of these books emits — what the two tests
+/// below would prove nothing without.
+fn casing_rows(books: &[Book], config: &<Brigade as ChapterPass>::Config) -> usize {
+    let parsed: Vec<OnionBook> = books
+        .iter()
+        .map(|(id, text)| {
+            OnionBook::parse(text).unwrap_or_else(|error| panic!("{id} is not analyzable: {error}"))
+        })
+        .collect();
+    let corpus = Corpus::try_new(&parsed).expect("distinct book keys");
+    analyze_with(&corpus, &Brigade::default(), config)
+        .patterns()
+        .iter()
+        .filter(|pattern| pattern.channel == Channel::Casing)
+        .count()
+}
+
+/// The word tally is resident and updated one book at a time, so an edited
+/// book has to leave it at its old rows and re-enter at its new ones exactly:
+/// one wrong count moves every share the channel judges.
+#[test]
+fn a_casing_edit_republishes_the_cold_bytes_from_the_resident_tally() {
+    let default = <Brigade as ChapterPass>::Config::default();
+    let mut books = cased_books();
+    assert!(
+        casing_rows(&books, &default) > 0,
+        "the fixture has to fire the channel"
+    );
+
+    let mut sous = Expediter::new(Brigade::default(), BUDGET);
+    for (id, text) in &books {
+        sous.update(id.as_str(), Role::Target, text).unwrap();
+    }
+    assert_publications_agree(&mut sous, &books, "casing: cold");
+
+    books[0].1 = books[0].1.replacen("and David and", "and DAVID and", 1);
+    sous.update(books[0].0.as_str(), Role::Target, &books[0].1)
+        .unwrap();
+    assert_publications_agree(&mut sous, &books, "casing: after one chapter recased");
+    assert!(casing_rows(&books, &default) > 0, "and still fires it");
+}
+
+/// A judging knob is the other way the tally can go out of step: it changes
+/// what is read from the totals without changing a single count.
+#[test]
+fn flipping_the_casing_channel_republishes_the_cold_bytes() {
+    let books = cased_books();
+    let texts: FxHashMap<String, String> = books.iter().cloned().collect();
+    let mut sous = Expediter::new(Brigade::default(), BUDGET);
+    for (id, text) in &books {
+        sous.update(id.as_str(), Role::Target, text).unwrap();
+    }
+    let before = sous.publish().unwrap();
+
+    let off = JudgingConfig {
+        channels: Channels {
+            casing: false,
+            ..Channels::default()
+        },
+        ..JudgingConfig::default()
+    };
+    let config = ((), JudgingConfig::default(), off);
+    sous.set_config(config);
+    let buffer = sous.publish().unwrap();
+    assert_eq!(sous.last_mapped(), 0, "a knob maps nothing");
+    assert_eq!(sous.last_folded(), 0, "and folds nothing");
+    assert_ne!(buffer, before, "the casing rows are gone");
+
+    let snapshot = CorpusSnapshot::open(&buffer).unwrap().snapshot_id();
+    let cold = cold_publish_with(
+        &Brigade::default(),
+        &config,
+        &ordered(&sous, &texts),
+        snapshot,
+    );
+    assert_eq!(buffer, cold, "the channel off, judged from the same tally");
 }

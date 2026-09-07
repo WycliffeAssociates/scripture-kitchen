@@ -152,6 +152,7 @@ Shapes and layouts live in the module README each row names.
 | finding transport | `sous-core::codec` and `sous-core::corpus`, rebased and published by `galley::sous`. See [core/src/codec/README.md](core/src/codec/README.md) | Galley's canonical snapshot identity and checksum-keyed detached reuse (Stage 2) |
 | unicode classification | `sous-core::unicode`. See [core/src/unicode/README.md](core/src/unicode/README.md) | Level 1b consumes the bits in Stage 3; casing beyond the two predicate bits waits for Stage 4 |
 | convention judging | `sous-core::judge`, published as the envelope's pattern table, all four grains plus rarity. See [core/src/judge.md](core/src/judge.md) | whether Terminal vs Separator is the split that matters, and whether Quote and Bracket should merge — both open until fleet evidence says |
+| word conventions | `sous-core::words` in `Brigade`, judged as `Channel::Casing` and sited by `Words::locate`. See [core/src/words.md](core/src/words.md) | the word support floor and band column, placeholders until the fleet sweep; whether spaceless scripts get a dictionary fallback or keep abstaining |
 | convention sites | `sous-core::sites` behind `ChapterPass::locate`, cached per book by `(RawChecksum, FiringHash)` in `galley::sous::Expediter`. See [core/src/sites.md](core/src/sites.md) | Aho-Corasick if a corpus ever shows many rare needles per book (evidence.md, 2026-09-04); a general one-pass byte-class sweep, still unbuilt |
 | hygiene | `sous-core::hygiene::scan` for the byte classes, the substrate row's `hygiene` lane for the four scalar ones. See [core/src/hygiene.md](core/src/hygiene.md) and [rules/hygiene.md](rules/hygiene.md) | NBSP's verse-edge case once the walk is verse-grained; a snapshot identity instead of the CLI's zero id |
 
@@ -476,9 +477,22 @@ Fleet gate:
 Work:
 
 1. Add short-word packed keys and a rare long-word overflow path only after the
-   Level 1 walk is stable.
+   Level 1 walk is stable. **Superseded and closed:** words fit a `u64` only
+   12-23% of the time outside Latin (evidence.md, 2026-09-02), so `WordCount`
+   keys by xxh3-64 and carries the scalar count in one byte beside it. There is
+   no packed lane and no overflow path.
 2. Implement free-position casing observations using the learned terminal
-   table and small chapter seam state.
+   table and small chapter seam state. **Landed (W1):** `sous_core::words`
+   rides beside `Substrate` in `Brigade`, `Channel::Casing` judges the minority
+   form of a case-folded word in free positions, and `Words::locate` sites it.
+   Forced positions come from `Pool::Terminal` and the pinned UCD properties
+   rather than a learned per-corpus table, and a word never crosses a masked
+   `\c`, so the fold carries no seam state at all. See
+   [core/src/words.md](core/src/words.md). **Landed (W1b):** word rows are
+   retained at BOOK grain (`ChapterPass::RETAIN_CHAPTERS`) and the corpus word
+   tally is resident in `galley::sous::Expediter`, moved one changed book at a
+   time instead of re-merged every publication. Caching policy only: not a byte
+   of the publication changed.
 3. Implement adjacent and punctuation-separated doubled-word observations as
    distinct claims.
 4. Measure a word-specific evidence floor/band column; do not reuse glyph

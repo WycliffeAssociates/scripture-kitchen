@@ -10,20 +10,27 @@ use crate::codec::PackedFinding;
 use crate::judge::{Channel, Pattern, PatternKey, Side, Staircase};
 use crate::substrate::{OuterClass, RUN_BUCKETS, ScalarKey};
 use crate::unicode::Pool;
+use crate::words::Form;
 
 /// One pattern-table row: the glyph, the channel and its key, the band, and
 /// the fraction behind the claim. Layout: codec/README.md.
 pub(super) fn encode_pattern(pattern: &Pattern) -> [u8; PATTERN_ROW_LEN] {
     let mut row = [0u8; PATTERN_ROW_LEN];
-    row[PATTERN_GLYPH_OFFSET..PATTERN_NEIGHBOR_OFFSET]
-        .copy_from_slice(&pattern.glyph.raw().to_le_bytes());
-    let (neighbor, key) = match pattern.key {
-        PatternKey::ExactNeighbor(neighbor) => (neighbor.raw(), 0),
-        PatternKey::PooledNeighbor(pool) => (0, pool as u8),
-        PatternKey::RunShape { pure, bucket } => (0, (u8::from(pure) << 4) | bucket),
-        PatternKey::Placement { side, class } => (0, ((side as u8) << 4) | class as u8),
-        PatternKey::Rarity => (0, 0),
+    // On `Casing` the first eight bytes are the u64 word hash, little-endian:
+    // low half where a glyph would be, high half where a neighbor would be.
+    let (glyph, neighbor, key) = match pattern.key {
+        PatternKey::ExactNeighbor(neighbor) => (pattern.glyph.raw(), neighbor.raw(), 0),
+        PatternKey::PooledNeighbor(pool) => (pattern.glyph.raw(), 0, pool as u8),
+        PatternKey::RunShape { pure, bucket } => {
+            (pattern.glyph.raw(), 0, (u8::from(pure) << 4) | bucket)
+        }
+        PatternKey::Placement { side, class } => {
+            (pattern.glyph.raw(), 0, ((side as u8) << 4) | class as u8)
+        }
+        PatternKey::Rarity => (pattern.glyph.raw(), 0, 0),
+        PatternKey::Casing { hash, form } => (hash as u32, (hash >> 32) as u32, form as u8),
     };
+    row[PATTERN_GLYPH_OFFSET..PATTERN_NEIGHBOR_OFFSET].copy_from_slice(&glyph.to_le_bytes());
     row[PATTERN_NEIGHBOR_OFFSET..PATTERN_CHANNEL_OFFSET].copy_from_slice(&neighbor.to_le_bytes());
     row[PATTERN_CHANNEL_OFFSET] = pattern.channel as u8;
     row[PATTERN_KEY_OFFSET] = key;
@@ -53,11 +60,17 @@ pub(super) fn decode_pattern(
     if bytes[PATTERN_RESERVED_OFFSET..PATTERN_ROW_LEN] != [0] {
         return Err(bad("reserved"));
     }
-    let glyph = ScalarKey::from_raw(read_u32(bytes, PATTERN_GLYPH_OFFSET)).ok_or(bad("glyph"))?;
+    let glyph_raw = read_u32(bytes, PATTERN_GLYPH_OFFSET);
     let neighbor_raw = read_u32(bytes, PATTERN_NEIGHBOR_OFFSET);
     let channel = *Channel::ALL
         .get(usize::from(bytes[PATTERN_CHANNEL_OFFSET]))
         .ok_or(bad("channel"))?;
+    // The glyph field carries no scalar on `Casing`, so `ScalarKey::from_raw`
+    // is not applied to it there.
+    let glyph = match channel {
+        Channel::Casing => ScalarKey::NONE,
+        _ => ScalarKey::from_raw(glyph_raw).ok_or(bad("glyph"))?,
+    };
     let raw_key = bytes[PATTERN_KEY_OFFSET];
     let (high, low) = (raw_key >> 4, raw_key & 0x0f);
     let key = match channel {
@@ -93,8 +106,18 @@ pub(super) fn decode_pattern(
         Channel::PooledNeighbor => {
             PatternKey::PooledNeighbor(Pool::from_raw(raw_key).ok_or(bad("key"))?)
         }
+        Channel::Casing => {
+            let form = Form::from_raw(raw_key).ok_or(bad("key"))?;
+            if form == Form::Uncased {
+                return Err(bad("key"));
+            }
+            PatternKey::Casing {
+                hash: u64::from(glyph_raw) | (u64::from(neighbor_raw) << 32),
+                form,
+            }
+        }
     };
-    if !matches!(channel, Channel::ExactNeighbor) && neighbor_raw != 0 {
+    if !matches!(channel, Channel::ExactNeighbor | Channel::Casing) && neighbor_raw != 0 {
         return Err(bad("neighbor"));
     }
     let band = match (bytes[PATTERN_BAND_OFFSET], channel) {

@@ -36,6 +36,13 @@
 //!
 //! `uname` has no Unicode name lookup (no `unicode_names2` dependency exists
 //! in this workspace): it repeats `cp` beside the scalar itself.
+//!
+//! The **Capitalization** tab reads one more key, `cap[]`, one entry per
+//! [`PatternKey::Casing`] row: `w` is the word its first site landed on,
+//! `form` the flagged minority form, `n`/`d` the free-position fraction,
+//! `books` the dispersion, and `samples` up to 8 of that row's sites in the
+//! tuple shape the glyph cards use. Amber is the row's own existence — the
+//! Rust judge fired it — never a JS recomputation.
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -44,8 +51,8 @@ use sous_core::sites::Cursor;
 use sous_core::substrate::{BookAggregate, ChapterRow, OuterClass, PairKey, ScalarKey};
 use sous_core::unicode::{Pool, class_of, pool_of};
 use sous_core::{
-    Chapter, ChapterObs, ChapterPass, Corpus, JudgingConfig, Pattern, ProjectedBook, Substrate,
-    Verse, for_each_chapter,
+    Chapter, ChapterObs, ChapterPass, Corpus, FindingKind, JudgingConfig, PackedFinding, Pattern,
+    ProjectedBook, Staircase, Substrate, Verse, for_each_chapter,
 };
 use usfm_galley::sous::OnionBook;
 
@@ -64,8 +71,13 @@ const TOPO: [(&str, OuterClass, OuterClass); 4] = [
 ];
 
 /// The self-contained inventory page for the target corpus.
-pub fn render(name: &str, corpus: &Corpus<'_, OnionBook>, patterns: &[Pattern]) -> String {
-    let json = corpus_json(name, corpus, patterns);
+pub fn render(
+    name: &str,
+    corpus: &Corpus<'_, OnionBook>,
+    patterns: &[Pattern],
+    findings: &[PackedFinding],
+) -> String {
+    let json = corpus_json(name, corpus, patterns, findings);
     TEMPLATE.replace("@@CORPORA@@", &format!("[{json}]"))
 }
 
@@ -161,22 +173,24 @@ struct Sample {
     cnext: String,
 }
 
-fn corpus_json(name: &str, corpus: &Corpus<'_, OnionBook>, patterns: &[Pattern]) -> String {
+fn corpus_json(
+    name: &str,
+    corpus: &Corpus<'_, OnionBook>,
+    patterns: &[Pattern],
+    findings: &[PackedFinding],
+) -> String {
     let aggregates = book_aggregates(corpus);
     let (scalars, glyphs) = glyph_roster(&aggregates);
     let pairs = Merged::build(aggregates.iter().map(BookAggregate::pairs));
 
     let cfg = JudgingConfig::default();
     let judging = format!(
-        "judge: support floor {} \u{b7} rarity floor {} \u{b7} bands {}",
+        "judge: support floor {} \u{b7} rarity floor {} \u{b7} bands {} \u{b7} word floor {} \u{b7} word bands {}",
         cfg.support_floor,
         cfg.rarity_floor,
-        cfg.bands
-            .steps
-            .iter()
-            .map(|step| format!("{:.2}%", f64::from(step.share_bp) / 100.0))
-            .collect::<Vec<_>>()
-            .join("/"),
+        shares(&cfg.bands),
+        cfg.word_support_floor,
+        shares(&cfg.word_bands),
     );
 
     let mut glyph_json = Vec::with_capacity(glyphs.len());
@@ -191,11 +205,86 @@ fn corpus_json(name: &str, corpus: &Corpus<'_, OnionBook>, patterns: &[Pattern])
         ));
     }
     format!(
-        r#"{{"name":{},"judging":{},"glyphs":[{}]}}"#,
+        r#"{{"name":{},"judging":{},"glyphs":[{}],"cap":[{}]}}"#,
         json_str(name),
         json_str(&judging),
-        glyph_json.join(",")
+        glyph_json.join(","),
+        cap_json(corpus, patterns, findings),
     )
+}
+
+fn shares(bands: &Staircase) -> String {
+    bands
+        .steps
+        .iter()
+        .map(|step| format!("{:.2}%", f64::from(step.share_bp) / 100.0))
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+// -- Capitalization -----------------------------------------------------
+
+/// One row per firing casing pattern: the word its sites landed on, the
+/// minority form, the fraction, and up to eight of those sites in context.
+///
+/// The word itself is not on the wire — a pattern carries a hash — so it comes
+/// from the text its sites point at, which is that word by construction.
+fn cap_json(
+    corpus: &Corpus<'_, OnionBook>,
+    patterns: &[Pattern],
+    findings: &[PackedFinding],
+) -> String {
+    let mut sites: Vec<Vec<&PackedFinding>> = vec![Vec::new(); patterns.len()];
+    for finding in findings {
+        if let FindingKind::Convention(digest) = finding.kind()
+            && let Some(rows) = sites.get_mut(usize::from(digest.pattern().get()))
+        {
+            rows.push(finding);
+        }
+    }
+    let verses: Vec<Vec<Verse>> = corpus
+        .iter()
+        .map(|(_, book)| book.verses().collect())
+        .collect();
+
+    let mut rows = Vec::new();
+    for (index, pattern) in patterns.iter().enumerate() {
+        let PatternKey::Casing { form, .. } = pattern.key else {
+            continue;
+        };
+        let mut word = String::new();
+        let mut samples = Vec::new();
+        for finding in &sites[index] {
+            let at = finding.book_idx();
+            let book = corpus.get(at).expect("a finding names a corpus book");
+            let text = book.text();
+            if word.is_empty() {
+                word = text[finding.from() as usize..finding.to() as usize].to_string();
+            }
+            if samples.len() < SAMPLE_CAP
+                && let Some(sample) = build_sample(
+                    text,
+                    finding.from(),
+                    finding.to() - finding.from(),
+                    &verses[at.get() as usize],
+                    book.key(),
+                )
+            {
+                samples.push(sample);
+            }
+        }
+        rows.push(format!(
+            r#"{{"w":{},"form":{},"n":{},"d":{},"books":{},"sites":{},"samples":[{}]}}"#,
+            json_str(&word),
+            json_str(form.name()),
+            pattern.numerator,
+            pattern.denominator,
+            pattern.books,
+            sites[index].len(),
+            samples_json(Some(&samples)),
+        ));
+    }
+    rows.join(",")
 }
 
 #[allow(clippy::too_many_arguments)]

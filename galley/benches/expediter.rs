@@ -10,8 +10,10 @@
 //!   table, and encode. No book is projected, mapped, or folded.
 //! - `edit_one_chapter_then_publish` — `Expediter::update` with one character
 //!   typed into one chapter of MRK, then the same publish. The update's
-//!   re-derivation (lex, CST, mask, UTF-16 table for that book) and the one
-//!   chapter's re-map are INSIDE the timer: it is what a keystroke costs.
+//!   re-derivation (lex, CST, mask, UTF-16 table for that book) and the book's
+//!   re-map are INSIDE the timer: it is what a keystroke costs. `Brigade`
+//!   carries `Words`, which is retained at book grain, so the edited book's
+//!   whole chapter set is re-mapped and no other book's is.
 //! - `publish_cold` — a fresh Expediter over the same corpus, registered
 //!   outside the timer, publishing for the first time: every chapter mapped.
 //!   Run it with and without `--features parallel` for the two map costs.
@@ -161,7 +163,12 @@ fn edit_one_chapter_then_publish(bencher: divan::Bencher) {
     )
     .unwrap();
     sous.publish().unwrap();
-    assert_eq!(sous.last_mapped(), 1, "one keystroke, one chapter");
+    let chapters = corpus.keystrokes[0].matches("\n\\c ").count() as u64;
+    assert_eq!(
+        sous.last_mapped(),
+        chapters,
+        "one keystroke, the edited book and no other"
+    );
 
     let mut next = 1;
     bencher.bench_local(|| {
@@ -226,13 +233,11 @@ fn set_config_then_publish(bencher: divan::Bencher) {
     let mut floor = 2u32;
     bencher.bench_local(|| {
         floor = if floor == 2 { 8 } else { 2 };
-        sous.set_config((
-            (),
-            JudgingConfig {
-                rarity_floor: floor,
-                ..JudgingConfig::default()
-            },
-        ));
+        let config = JudgingConfig {
+            rarity_floor: floor,
+            ..JudgingConfig::default()
+        };
+        sous.set_config(((), config, config));
         divan::black_box(sous.publish().unwrap())
     });
 }

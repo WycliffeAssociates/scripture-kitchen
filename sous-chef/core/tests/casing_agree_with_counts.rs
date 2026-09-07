@@ -1,0 +1,308 @@
+//! Instrument: VOLUME. The word rescan against the counts it materializes.
+//!
+//! For every book and every firing casing pattern, the sites `Words::locate`
+//! places equal that book's own free-position count for the pattern's
+//! `(hash, form)` — the number the word walk put there. The rescan runs the
+//! same walk over the same chapters, so this pins that the two agree about
+//! word boundaries, case folding, and which positions are free.
+//!
+//! The default sweep is synthetic and fast. The ignored one runs the same
+//! equality over the committed corpus tier, where real glue, apostrophes,
+//! quote conventions, and chapter seams are.
+
+use sous_core::judge::{BandStep, Channel, PatternIndex, Staircase};
+use sous_core::words::{WordAggregate, Words, fold_book, free_in};
+use sous_core::{
+    BookKey, Chapter, ChapterObs, ChapterPass, Corpus, FindingKind, JudgingConfig, ProjectedBook,
+    TextRange, Verse, VerseKey, WordRow, analyze_with, for_each_chapter,
+};
+
+const TIER: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../corpora/");
+const FILES: [&str; 8] = [
+    "WA-en-ulb.txt",
+    "amh.txt",
+    "francl.txt",
+    "grcsr.txt",
+    "hin2017.txt",
+    "nya.txt",
+    "spaRV1909.txt",
+    "swhulb.txt",
+];
+
+// ── The harness ─────────────────────────────────────────────────────────
+
+struct Book {
+    key: BookKey,
+    text: String,
+    chapters: Vec<Chapter>,
+    verses: Vec<Verse>,
+}
+
+impl ProjectedBook for Book {
+    fn key(&self) -> BookKey {
+        self.key
+    }
+
+    fn text(&self) -> &str {
+        &self.text
+    }
+
+    fn chapters(&self) -> impl Iterator<Item = Chapter> {
+        self.chapters.iter().copied()
+    }
+
+    fn verses(&self) -> impl Iterator<Item = Verse> {
+        self.verses.iter().copied()
+    }
+}
+
+/// One book from its chapter texts, joined in order with no gap; each chapter
+/// is one verse, so a verse start is also a chapter start here.
+fn book(key: BookKey, texts: &[String]) -> Book {
+    let mut text = String::new();
+    let mut chapters = Vec::new();
+    let mut verses = Vec::new();
+    for (index, chapter) in texts.iter().enumerate() {
+        let number = index as u16 + 1;
+        let from = text.len() as u32;
+        text.push_str(chapter);
+        let span = TextRange::new(from, text.len() as u32).expect("a chapter grows forward");
+        chapters.push(Chapter::new(number, span).expect("chapters are numbered from one"));
+        verses.push(Verse::new(
+            VerseKey::new(number, 1, 1).expect("a verse key is well formed"),
+            span,
+        ));
+    }
+    Book {
+        key,
+        text,
+        chapters,
+        verses,
+    }
+}
+
+/// The fold product of one book, mapped chapter by chapter as a host would.
+fn aggregate(book: &Book) -> WordAggregate {
+    let mut rows: Vec<(u32, WordRow)> = Vec::new();
+    for_each_chapter(book, |start, input| rows.push((start, Words.map(input))));
+    let view: Vec<ChapterObs<&WordRow>> = rows
+        .iter()
+        .map(|(start, obs)| ChapterObs { start: *start, obs })
+        .collect();
+    fold_book(&view)
+}
+
+/// Judges the corpus, then compares each book's sites against its own counts.
+/// Returns `(books, patterns compared, occurrences compared)`.
+fn agree(books: &[Book], config: &JudgingConfig) -> (usize, usize, u64) {
+    let corpus = Corpus::try_new(books).expect("a synthetic corpus is valid");
+    let findings = analyze_with(&corpus, &Words, config);
+    let patterns = findings.patterns().to_vec();
+    assert!(
+        patterns.iter().all(|row| row.channel == Channel::Casing),
+        "the word pass judges one channel"
+    );
+
+    let mut compared = 0;
+    let mut occurrences = 0;
+    for (index, _) in corpus.iter() {
+        let counts = aggregate(&books[index.get() as usize]);
+        let mut sited = vec![0u64; patterns.len()];
+        for row in findings.rows() {
+            if row.book_idx() != index {
+                continue;
+            }
+            let FindingKind::Convention(digest) = row.kind() else {
+                panic!("the word pass pushes convention rows only")
+            };
+            sited[usize::from(digest.pattern().get())] += 1;
+        }
+
+        let mut set = Vec::new();
+        Words.firing(&counts, &patterns, &mut set);
+        for (at, pattern) in patterns.iter().enumerate() {
+            let walked = free_in(&counts, pattern);
+            assert_eq!(
+                sited[at],
+                walked,
+                "book {} pattern[{at}] {:?}",
+                books[index.get() as usize].key,
+                pattern.key,
+            );
+            let listed = set.contains(&PatternIndex::new(at as u16));
+            assert_eq!(listed, walked > 0, "the firing set names what locate finds");
+            compared += 1;
+            occurrences += walked;
+        }
+    }
+    (books.len(), compared, occurrences)
+}
+
+// ── The synthetic sweep ─────────────────────────────────────────────────
+
+/// Words drawn to exercise every form, the joiner rule, digits, glue, and an
+/// uncased script riding beside cased ones.
+const VOCABULARY: [&str; 16] = [
+    "david",
+    "David",
+    "DAVID",
+    "McDonald",
+    "don't",
+    "Don't",
+    "mother-in-law",
+    "ng'ombe",
+    "1Ki",
+    "3rd",
+    "he\u{301}llo",
+    "HE\u{301}LLO",
+    "\u{5d0}\u{5d1}\u{5d2}",
+    "the",
+    "The",
+    "and",
+];
+
+/// The gaps between words: spaces, terminals, separators, and quotes, so the
+/// forced rule is exercised in both directions.
+const GAPS: [&str; 8] = [
+    " ",
+    ". ",
+    ", ",
+    "; ",
+    "! ",
+    " \u{201C}",
+    "\u{201D} ",
+    " \u{2014} ",
+];
+
+fn generated(seed: u64, books: usize, chapters: usize, words: usize) -> Vec<Book> {
+    let mut state = seed | 1;
+    let mut next = move || {
+        state = state
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1);
+        (state >> 33) as usize
+    };
+    let mut out = Vec::new();
+    for index in 0..books {
+        let mut texts = Vec::new();
+        for _ in 0..chapters {
+            let mut text = String::new();
+            for _ in 0..words {
+                text.push_str(VOCABULARY[next() % VOCABULARY.len()]);
+                text.push_str(GAPS[next() % GAPS.len()]);
+            }
+            texts.push(text);
+        }
+        let key = BookKey::new([
+            b'A' + (index / 26) as u8 % 26,
+            b'A' + index as u8 % 26,
+            b'A',
+        ]);
+        out.push(book(key, &texts));
+    }
+    out
+}
+
+/// Every rung at half, so any form that is not the majority fires and the
+/// sweep exercises the rescan instead of abstaining through most of it.
+fn permissive() -> JudgingConfig {
+    let steps = Staircase::DEFAULT_STEPS.map(|step| BandStep {
+        share_bp: 5_000,
+        ..step
+    });
+    JudgingConfig {
+        word_support_floor: 1,
+        word_bands: Staircase::new(steps).expect("the default bounds ascend"),
+        ..JudgingConfig::default()
+    }
+}
+
+#[test]
+fn the_rescan_agrees_with_the_counts_over_a_synthetic_sweep() {
+    let mut fired = 0;
+    let mut occurrences = 0;
+    for seed in 1..=12u64 {
+        let books = generated(seed, 3, 4, 120);
+        let (_, compared, found) = agree(&books, &permissive());
+        fired += compared;
+        occurrences += found;
+    }
+    assert!(
+        fired > 100 && occurrences > 100,
+        "the sweep must judge and site something: {fired} rows, {occurrences} sites"
+    );
+}
+
+/// The shipped defaults, on the claim `rules/word-conventions.md` states:
+/// `David` many times against `david` twice flags the two.
+#[test]
+fn the_default_config_sites_the_minority_form() {
+    let mut text = "and David went. ".repeat(40);
+    text.push_str("and david went and david went.");
+    let books = vec![book(BookKey::new(*b"MRK"), &[text])];
+    let (_, compared, occurrences) = agree(&books, &JudgingConfig::default());
+    assert_eq!((compared, occurrences), (1, 2));
+}
+
+/// A corpus with no cased letter judges nothing and sites nothing, without
+/// hashing a word.
+#[test]
+fn an_uncased_corpus_is_silent() {
+    let hebrew = "\u{5d0}\u{5d1}\u{5d2} \u{5d3}\u{5d4}\u{5d5}. ".repeat(60);
+    let books = vec![book(BookKey::new(*b"MRK"), &[hebrew])];
+    let (_, compared, occurrences) = agree(&books, &JudgingConfig::default());
+    assert_eq!((compared, occurrences), (0, 0));
+}
+
+// ── The tier ────────────────────────────────────────────────────────────
+
+/// One corpus's vref lines as books of chapter texts.
+fn group(raw: &str) -> Vec<(BookKey, Vec<String>)> {
+    let mut books: Vec<(BookKey, Vec<String>)> = Vec::new();
+    let mut seen: Option<(String, u32)> = None;
+    for line in raw.lines() {
+        let Some((address, text)) = line.split_once('\t') else {
+            continue;
+        };
+        let mut parts = address.split_whitespace();
+        let (Some(code), Some(cv)) = (parts.next(), parts.next()) else {
+            continue;
+        };
+        let Some(chapter) = cv.split_once(':').and_then(|(c, _)| c.parse::<u32>().ok()) else {
+            continue;
+        };
+        let bytes: [u8; 3] = code.as_bytes()[..3].try_into().expect("a three-byte code");
+        if seen.as_ref().map(|(held, _)| held.as_str()) != Some(code) {
+            books.push((BookKey::new(bytes), Vec::new()));
+        }
+        let chapters = &mut books.last_mut().expect("just pushed").1;
+        if seen.as_ref() != Some(&(code.to_string(), chapter)) {
+            chapters.push(String::new());
+        }
+        let held = chapters.last_mut().expect("just pushed");
+        if !held.is_empty() {
+            held.push(' ');
+        }
+        held.push_str(text);
+        seen = Some((code.to_string(), chapter));
+    }
+    books
+}
+
+#[test]
+#[ignore = "only proof that the word rescan and the word walk agree on free positions and forms on every chapter of the 8-corpus tier"]
+fn the_rescan_agrees_with_the_counts_over_the_tier() {
+    for name in FILES {
+        let path = format!("{TIER}{name}");
+        let raw = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("test-tier corpus {path} must be present: {error}"));
+        let books: Vec<Book> = group(&raw)
+            .iter()
+            .filter(|(_, chapters)| !chapters.is_empty())
+            .map(|(key, chapters)| book(*key, chapters))
+            .collect();
+        assert!(!books.is_empty(), "{name} holds books");
+        let (count, compared, occurrences) = agree(&books, &JudgingConfig::default());
+        println!("{name}: {count} books, {compared} rows compared, {occurrences} sites");
+    }
+}

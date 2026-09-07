@@ -37,7 +37,7 @@ use sous_core::substrate::{ChapterRow, Edge, Substrate, fold_book};
 use sous_core::unicode::lookup::{walk, walk_trie, walk_trie_swar};
 use sous_core::{
     BookKey, Chapter, ChapterInput, ChapterKey, ChapterObs, ChapterPass, Corpus, JudgingConfig,
-    ProjectedBook, TextRange, Verse, VerseKey, analyze_with,
+    ProjectedBook, TextRange, Verse, VerseKey, Words, analyze_with,
 };
 
 /// See the note in `onion/benches/pipeline.rs`: measured overhead is under
@@ -264,6 +264,39 @@ fn substrate_map(bencher: Bencher, name: &str) {
             for book in books {
                 for text in book {
                     total += u64::from(map(text).scalar_count());
+                }
+            }
+            total
+        });
+}
+
+/// The Stage 4 word walk over the same chapters, so its ns/scalar reads
+/// directly against `substrate_map` above. An uncased chapter hashes nothing,
+/// which is what the Ethiopic and Hebrew rows show.
+#[divan::bench(args = FILES)]
+fn word_map(bencher: Bencher, name: &str) {
+    let books = books(name);
+    let bytes: usize = books.iter().flatten().map(|text| text.len()).sum();
+    let scalars: usize = books
+        .iter()
+        .flatten()
+        .map(|text| text.chars().count())
+        .sum();
+    bencher
+        .counter(BytesCount::new(bytes))
+        .counter(ItemsCount::new(scalars))
+        .bench(|| {
+            let mut total = 0u64;
+            for book in books {
+                for text in book {
+                    total += Words
+                        .map(ChapterInput {
+                            text,
+                            verses: &[],
+                            key: ChapterKey::new(BookKey::new(*b"MRK"), 1),
+                        })
+                        .words()
+                        .len() as u64;
                 }
             }
             total

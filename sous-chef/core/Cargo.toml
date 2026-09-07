@@ -11,6 +11,9 @@ memchr.workspace = true
 # The zero-dependency leaf `BookKey` lives in, so sous-core needs no onion.
 mise = { path = "../../mise" }
 rustc-hash.workspace = true
+# The word row keys by hash: words fit a u64 only 12-23% of the time outside
+# Latin (evidence.md, 2026-09-02), so a packed key is not available.
+xxhash-rust.workspace = true
 
 [features]
 # Bench-only: divan's AllocProfiler as the global allocator, so the substrate
