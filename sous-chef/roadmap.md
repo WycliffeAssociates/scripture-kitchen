@@ -689,6 +689,12 @@ Work:
 6. Harden CLI help, tests, generated usage specification, and distribution.
    Build a read-only editor view only if scroll-to-finding, pattern expansion,
    band controls, or suppression feedback need a real visual consumer.
+7. The wasm handle exists (X1). `galley::wasm::Galley` is one opaque handle
+   over `Expediter<Brigade>`: whole books by id, `publish()` out as the corpus
+   buffer `sous-chef/reader.ts` reads, `Knobs` in and out. The publication is
+   byte-identical to the native one, pinned by three tests over one committed
+   fixture corpus (`galley/src/wasm.md`). Still absent from it: fingerprints,
+   `changedSinceUpdate`, lint, find, detail, suppression.
 
 Verification gate:
 

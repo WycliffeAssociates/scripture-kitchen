@@ -1,0 +1,31 @@
+\id RUT
+\h Ruth
+\toc1 The Book of Ruth
+\mt1 Ruth
+\rem Fixture: the length lane. 20 verses, under min_verses 50, so the BOOK
+\rem lane is i16::MIN and the project lane judges alone. 1:3 runs at a tenth
+\rem of the length its source declares; the rest run within a few percent.
+\c 1
+\p
+\v 1 The sheep water’s fish vine of the sickle and the sickle beside the wall in the jar.
+\v 2 The flame plough sickle’s of the harvest and the dye beside the ash in the flame.
+\v 3 The seed of the field.
+\v 4 The net rain’s of the spring and the river beside the orchard in the ash.
+\v 5 The meadow lamp’s goat of the net and the thorn beside the net in the wick.
+\v 6 The rope furrow’s of the thorn and the sheep beside the harvest in the olive.
+\v 7 The fish basket jar’s of the jar and the spring beside the basket in the vine.
+\v 8 The vine valley staff of the sickle and the yoke beside the ox in the river.
+\v 9 The bread light of the wall and the meadow beside the field in the olive.
+\v 10 The furrow jar road tower of the spring and the net beside the orchard in the fig.
+\c 2
+\p
+\v 1 The wool sheep light of the linen and the staff beside the harvest in the thread.
+\v 2 The pine flame of the stone and the olive beside the sheep in the linen.
+\v 3 The goat ox of the dove and the thread beside the well in the dust.
+\v 4 The fish brick of the meadow and the staff beside the field in the dye.
+\v 5 The clay pine of the jar and the shore beside the harvest in the linen.
+\v 6 The shore thorn of the sand and the water beside the flint in the seed.
+\v 7 The cedar shore goat olive of the gate and the oil beside the jar in the brick.
+\v 8 The linen lamp of the yoke and the orchard beside the stone in the plough.
+\v 9 The ox beam staff of the ember and the sheep beside the rain in the thread.
+\v 10 The staff hillside of the salt and the wick beside the tower in the pasture.

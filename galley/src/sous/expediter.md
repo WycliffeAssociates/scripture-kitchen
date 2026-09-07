@@ -393,6 +393,12 @@ keystroke, so the feature is still opt-in and a host asks for it. The first
 thing to change then is one `par_iter` over the whole corpus rather than one
 per book.
 
+## The handle over it
+
+`galley::wasm::Galley` IS an `Expediter<Brigade>` and nothing else, so the
+publication a JS host reads is this one. `galley/src/wasm.md` states the
+equivalence and its three tests.
+
 ## What is not here yet
 
 A config stamp joins `SnapshotId` when the judging config carries bands: today

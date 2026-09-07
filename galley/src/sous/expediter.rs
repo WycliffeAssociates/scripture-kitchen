@@ -438,6 +438,13 @@ impl<P: ChapterPass + Sync> Expediter<P> {
         &self.pantry
     }
 
+    /// The Pantry's chunk cache, mutably — the one piece a host reaches past
+    /// the registry for, because a Warmer derivation over loose text takes
+    /// `&mut` and touches no registered book.
+    pub fn warmer_mut(&mut self) -> &mut crate::Warmer {
+        self.pantry.warmer_mut()
+    }
+
     /// The pass this coordinator maps, folds, and judges with.
     pub fn pass(&self) -> &P {
         &self.pass

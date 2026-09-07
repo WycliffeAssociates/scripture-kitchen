@@ -2,6 +2,8 @@
 
 - Local gate: `cargo nextest run`, whole workspace, ~5s warm (plain
   `cargo test` ~9s). Run it, not a filtered subset; there is nothing to save.
+- The wall, by hand: `cd galley && wasm-pack test --node --features wasm
+  --test wasm_wall` publishes the goldens `tests/sous_goldens.rs` pins.
 - Finish line for a pass: that plus `cargo clippy --all-targets` clean.
   `cargo test --release -- --include-ignored` (~11s) is what CI runs anyway;
   `.github/workflows/ci.yml` runs debug for the `debug_assert!`s and release

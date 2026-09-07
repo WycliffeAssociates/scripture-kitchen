@@ -41,6 +41,9 @@ divan = "0.1.21"
 # Example-only heap profiler (galley/examples/heap_profile.rs): attributes
 # live bytes at global max to allocation sites, not just totals.
 dhat = "0.3.3"
+# `galley/tests/wasm_wall.rs` only, which is `cfg(target_arch = "wasm32")`:
+# the same three publications the native pin drives, through the JS handle.
+wasm-bindgen-test = "0.3"
 
 [features]
 wasm = ["dep:wasm-bindgen", "dep:onion-wasm", "dep:js-sys"]

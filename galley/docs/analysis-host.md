@@ -161,6 +161,9 @@ rule-inventory workflows.
 - no independently authoritative per-book findings buffers;
 - no persisted binary codec for the full analysis state yet;
 - no requirement that Sous depend on Onion;
-- no promise that the current Onion-only WASM `Galley` API is the final
-  composed-analysis API.
+- no promise that the WASM `Galley` API is the final composed-analysis API.
+  It is no longer Onion-only: the handle holds an `Expediter<Brigade>`, takes
+  whole books by id, and publishes the corpus buffer this note describes, byte
+  for byte with the native publisher (`galley/src/wasm.md`). What is still
+  absent from it is `fingerprint`, `changedSinceUpdate`, `lint`, and `find`.
 

@@ -1,0 +1,68 @@
+\id GEN
+\h Genesis
+\toc1 The Book of Genesis
+\mt1 Genesis
+\rem Fixture: fires every wire code the goldens pin.
+\rem 1:3 carries one NO-BREAK SPACE (hygiene). 1:5 and 3:2 hold the only two
+\rem straight apostrophes in the corpus, against 59 curly ones (rarity).
+\rem 2:4 writes `the the` (doubled) among 438 free uses of `the`; 2:11
+\rem capitalizes one of them (casing). 3:7 opens lowercase where every
+\rem other verse opens with a capital after a full stop (sentence start).
+\rem GEN-edited.usfm is this file with one word of 2:9 changed, and nothing
+\rem else: the keystroke the edit golden pins.
+\c 1
+\p
+\v 1 The well wind’s of the basket and the flint beside the net in the dove.
+\v 2 The dove rope’s of the flint and the wind beside the dawn in the cloak.
+\v 3 The  cedar quail dust’s of the salt and the sickle beside the salt in the seed.
+\v 4 The harvest dust fish’s of the fig and the hillside beside the water in the river.
+\v 5 The staff salt's jar of the bread and the valley beside the wall in the meadow.
+\v 6 The water cloud’s stone of the sand and the clay beside the sheep in the field.
+\v 7 The gate staff’s of the cloud and the wind beside the valley in the rope.
+\v 8 The basket ash’s pine vine of the staff and the tower beside the hillside in the dawn.
+\v 9 The dawn pine’s of the field and the rain beside the river in the pine.
+\v 10 The seed stone flint’s wine of the sheep and the furrow beside the wall in the bread.
+\v 11 The ash flame’s sheep field of the light and the knife beside the gate in the well.
+\v 12 The well fig sand’s hillside of the hillside and the wool beside the goat in the wick.
+\v 13 The pine net’s of the net and the linen beside the olive in the oil.
+\v 14 The salt spring’s of the cedar and the goat beside the olive in the thread.
+\v 15 The wine seed’s of the goat and the dust beside the wine in the quail.
+\v 16 The sand light’s dust vine of the wick and the hillside beside the field in the harvest.
+\v 17 The sheep basket’s lamp flame of the briar and the furrow beside the ash in the thorn.
+\v 18 The orchard rain seed’s wind of the clay and the dye beside the dust in the salt.
+\c 2
+\p
+\v 1 The cloud rain’s of the dawn and the meadow beside the light in the rain.
+\v 2 The seed dye’s of the thorn and the linen beside the salt in the harvest.
+\v 3 The water ash’s sickle stone of the knife and the sheep beside the furrow in the valley.
+\v 4 The dust cedar’s of the field and the flint beside the dove in the the light.
+\v 5 The grain goat well’s of the fig and the hillside beside the road in the salt.
+\v 6 The dawn ember’s goat of the tower and the pasture beside the plough in the wind.
+\v 7 The field plough’s tower brick of the meadow and the bread beside the rain in the yoke.
+\v 8 The stone light’s of the well and the rope beside the ox in the stone.
+\v 9 The wellspring cloud’s of the dust and the linen beside the dye in the pine.
+\v 10 The thread stone’s of the wick and the lamp beside the road in the wind.
+\v 11 The cloud beam’s of the brick and the olive beside The fig in the wick.
+\v 12 The flint brick’s of the beam and the cedar beside the valley in the olive.
+\v 13 The brick lamp’s olive dove of the net and the shore beside the dove in the cedar.
+\v 14 The stone clay’s yoke of the dawn and the jar beside the sandal in the ash.
+\v 15 The plough knife salt flame’s of the dawn and the well beside the stone in the salt.
+\v 16 The salt cloak’s of the sand and the wine beside the cloak in the linen.
+\c 3
+\p
+\v 1 The clay road orchard’s of the stone and the sandal beside the rain in the gate.
+\v 2 The seed ash's thread of the water and the bread beside the clay in the sand.
+\v 3 The wall sheep clay’s of the sheep and the quail beside the sheep in the furrow.
+\v 4 The oil flame’s linen harvest of the wall and the yoke beside the harvest in the orchard.
+\v 5 The pasture fish’s of the shore and the wall beside the sickle in the yoke.
+\v 6 The basket dove basket oil’s of the goat and the sand beside the vine in the furrow.
+\v 7 the ash bread’s of the well and the wick beside the linen in the pasture.
+\v 8 The fish briar jar’s dust of the vine and the ash beside the olive in the cedar.
+\v 9 The yoke wine’s beam of the knife and the gate beside the thread in the pine.
+\v 10 The jar knife’s plough of the bread and the light beside the flame in the ember.
+\v 11 The reed wall’s of the rope and the sheep beside the valley in the harvest.
+\v 12 The linen thread’s salt cloak of the bread and the pasture beside the fig in the field.
+\v 13 The gate jar’s of the spring and the ember beside the brick in the dawn.
+\v 14 The dye field brick’s of the ash and the sandal beside the sand in the sand.
+\v 15 The ash road of the hillside and the sheep beside the wine in the clay.
+\v 16 The shore lamp jar olive of the ox and the gate beside the orchard in the yoke.

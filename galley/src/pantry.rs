@@ -470,6 +470,13 @@ impl Pantry {
         &self.warmer
     }
 
+    /// The same cache, for the ad-hoc derivations a host asks of arbitrary
+    /// text: the Warmer keys on chunk CONTENT, so a book already in the
+    /// Pantry is already warm for them.
+    pub fn warmer_mut(&mut self) -> &mut Warmer {
+        &mut self.warmer
+    }
+
     /// One book's retained products, borrowed together.
     ///
     /// Crate-private, because publication reads every book at once where an

@@ -9,6 +9,9 @@ debug/
 # Only scratch builds are ignored — the default out-dir and a node build.
 /onion-wasm/pkg
 /onion-wasm/pkg-node
+# galley's wasm builds are scratch: nothing installs from them yet.
+/galley/pkg
+/galley/pkg-node
 tcdocs/
 planning/scratch.md
 
