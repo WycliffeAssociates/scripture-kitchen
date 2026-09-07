@@ -44,7 +44,7 @@ a target may not.
 Every returned location is numeric and relative to the exact string last
 supplied for that book, which is also the string Galley retains.
 
-The implemented Onion `Warmer` already follows the important half of this law:
+The implemented chunk cache already follows the important half of this law:
 `parse` receives the complete current `&str` on every call and retains only
 content-addressed products. The future Sous composition must preserve that
 property rather than turning Galley into a document owner.

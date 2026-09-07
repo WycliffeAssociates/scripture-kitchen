@@ -1,14 +1,20 @@
 # The Expediter
 
 The Sous coordinator: one `ChapterPass`, one `Pantry`, one complete corpus
-publication per call. `galley/docs/analysis-host.md` states the lifecycle
-contract it implements; `galley/src/pantry.md` states the registry's half.
+publication per call.
 
-This is its own note rather than a section of `pantry.md` because the two
-answer different questions. The Pantry's question is ownership — who holds the
-text, what survives it, what an id means. The Expediter's is reuse — what makes
-skipping a `map` safe, and why a cold analysis and an incremental one publish
-the same bytes.
+```text
+sous.update("books/mrk.usfm", Role::Target, &text)?
+sous.publish()?          -> SOUS corpus buffer, raw-book UTF-16
+sous.last_mapped()       -> 6      // six chapters mapped
+sous.publish()?          -> the same bytes
+sous.last_mapped()       -> 0      // nothing re-read, nothing re-mapped
+```
+
+This note is publication ORDER and the counters that report it. What every
+cache is keyed by, and what invalidates it, is one table in
+`galley/src/pantry.md` — the caching layer this sits on.
+`galley/docs/analysis-host.md` states the lifecycle contract both implement.
 
 ## Mutations go through the Expediter
 
@@ -16,73 +22,81 @@ the same bytes.
 `pantry()` hands back `&Pantry` only, so no book can be registered behind these
 caches' backs. `update` takes the role's own retention, so
 `update(id, Role::Reference, text)` keeps no text; `update_with` is where a
-`Target` asking for `Retain::ProductsOnly` is refused — a target's findings are placed by rescanning
-its own text, so a target that kept none could be judged and never sited
-(`pantry.md`).
+`Target` asking for `Retain::ProductsOnly` is refused (`pantry.md`).
 
-## Lazy: nothing is projected until a publication needs it
+The four free-text doors — `lint`, `parse`, `parsed`, `masked` — forward to the
+Pantry too. They take loose text the host holds, register nothing, and are how
+a wasm handle serves an editor's onion products off the same warm chunks the
+analysis reads.
+
+## The order of a publication
 
 `Pantry::update` stays pure Onion: lex, CST, TOC, mask, UTF-16 table, and
 nothing of Sous. A host that updates ten books and publishes once pays for one
-pass over the ten, not ten passes, and the indexing waits:
+pass over the ten, not ten passes, and the indexing waits until `publish`:
 
 ```text
-chapter table for this RawChecksum?
-  hit   -> no text is touched, nothing is projected
-  miss  -> OnionBook::from_parts(text, mask.clone(), toc.clone())
-           for_each_chapter -> ObservationKey per chapter
-              absent -> pass.map, mapped += 1
-           store the table, DROP the projected text
+1  index    per Target book, key its chapters and map the missing ones
+              chapter table for this RawChecksum?
+                hit  -> no text is touched, nothing is projected
+                miss -> OnionBook::from_parts(text, mask, toc)
+                        for_each_chapter -> ObservationKey per chapter
+                           absent      -> pass.map        every member walks
+                           held, shed  -> pass.remap      only the shed member
+                           held, whole -> nothing
+                        store the table, DROP the projected text
+2  fold     per book with no aggregate: pass.fold, then release the rows it
+              read — except the hot set's, which are the point of keeping one
+3  tally    the books whose checksum moved: untally the old, tally the new,
+              and name the word keys those two moves touch
+4  judge    pass.judge_kept over EVERY Target aggregate, in BookIndex order,
+              re-deciding only the named keys and keeping the rest
+5  pair     every Target against the Reference of its BookKey, from lengths
+              both sides already retain; judge_paired pushes codes 0, 3 and 4
+6  locate   per book: replay the cached site rows, or rescan its text —
+              chapter by chapter for a hot book, whole otherwise
+7  sweep    drop every table outside a ring, and every observation no
+              surviving table names
+8  rebase   each row through its book's retained mask and UTF-16 table,
+              then encode
 ```
 
 Projected text is never retained. It exists for exactly as long as it takes to
-key a book's chapters — or, at publication, to locate one book's sites — and
-only for a book whose cache is missing. Reprojecting costs about 38 µs a book,
-which is why there is no second copy of the text on either path.
+key a book's chapters — or, at step 5 or 6, to read one book's text — and only
+for a book whose cache missed. One projection per book per publication at most:
+the pair step fills a slot on a miss and the locate step TAKES it. Reprojecting
+costs about 38 µs a book, which is why there is no second copy on either path.
 
-## The two hashes, and the third
+Judging is corpus-level and never per book: what one book's counts mean depends
+on the others, so step 4 runs over every Target aggregate whether or not
+anything moved. `Findings::finish` then puts the rows in `(book_idx, from, to)`
+order.
 
-| key | over | moves when |
+## The counters
+
+Every one of these is "what the LAST publication did", and every one is zero on
+a republication with nothing updated.
+
+| counter | counts | after one keystroke |
 | --- | --- | --- |
-| `RawChecksum` | the book's raw bytes | any edit at all, markup included |
-| `ObservationKey` | one chapter's projected text + its rebased verse rows + `P::SCHEMA` | the analysis input changes |
-| `SnapshotId` | the canonical (`BookKey`, id, `RawChecksum`) table + `P::SCHEMA` | the corpus is a different corpus |
+| `last_mapped()` | chapters mapped, remaps included | 1 hot, 16 cold (MRK) |
+| `last_remapped()` | of those, the ones that kept an observation and re-walked only what `release` shed | 0 hot, 15 cold |
+| `last_folded()` | books folded; the rest judged a cached aggregate | 1 |
+| `last_words_judged()` | corpus word-tally keys re-decided | 1,731 of 14,093 |
+| `last_firing_walks()` | books whose firing set was walked | 1 |
+| `last_located()` | books rescanned for sites | 1 |
+| `last_sited_chapters()` | chapters of those books whose word rows were walked; zero for a book outside the hot set, which is sited whole or not at all | 1 |
+| `last_paired()` | Target books re-paired against their source | 1 |
+| `last_wordless_references()` | sources that would have been walked for copy runs and kept no word lane | 0 |
+| `resident_observations()` / `resident_tables()` / `resident_aggregates()` | what the cache holds after the last sweep | — |
+| `resident_bytes()` / `tally()` / `budget()` | `pantry.md` | — |
 
-That split is the whole point. Insert a footnote whose content the verse-text
-mask removes and the raw checksum moves, so the projection and the UTF-16 table
-are rebuilt and every published offset after the insertion shifts — while every
-`ObservationKey` stands still, so not one chapter is mapped again. Retype a
-verse marker without touching a content byte and the reverse happens: the
-projected text is identical but the verse rows are rekeyed, so exactly that
-chapter re-maps.
-
-`ObservationKey` deliberately excludes the chapter's own address, which is what
-lets one observation serve identical chapters in two books while the fold
-still counts both positions. A pass whose `map` reads `ChapterInput::key` would break
-that and does not belong behind this cache.
-
-## The aggregate cache
-
-What is cached is the fold product: one `P::Aggregate` per book, in projected
-book coordinates and carrying no book index, keyed by the book's
-`RawChecksum`. A book whose raw text has not changed folds to the same
-aggregate, so `publish` folds only the books whose checksum has no entry.
-`last_folded()` counts those, and a republication with nothing updated reports
-zero. No book index inside, because the index is whatever *this* publication
-assigns; a book that moved from 3 to 2 judges from the same aggregate.
-
-Judging is not cached and is not per book. Every publication calls
-`pass.judge_resident` once over every Target book's aggregate in `BookIndex`
-order, because a convention is a corpus fact — what one book's counts mean
-depends on the others. `Findings::finish` then puts the rows in
-`(book_idx, from, to)` order and the rebase runs as before.
-
-That is also why the config lives here rather than in the key:
-`set_config` is a re-judge and never a re-fold or a re-map, since neither
-`map` nor `fold` is handed the config at all. It may be a re-*locate*, because
-moving a band can change which patterns fire — measured at 3.2 ms for the
-66-book corpus, against 206 µs for a republication that changed nothing
-(evidence.md).
+`last_mapped` counts a remap as a map of that chapter, because a chapter was
+read and walked. A cold open answers "all of them" to every row above; a knob
+moved through `set_config` answers zero to `last_mapped` and `last_folded` and
+"all of them" to `last_firing_walks` and `last_located`, because moving a band
+can change which patterns fire — measured at 3.2 ms for the 66-book corpus,
+against 206 µs for a republication that changed nothing (evidence.md).
 
 ## Retention grain: every chapter, or one book's aggregate
 
@@ -95,95 +109,62 @@ chapters only if every member does, because one observation carries them all.
 
 That cost is paid in whole books, but not in whole observations: a chapter
 whose `ObservationKey` still stands keeps the members `release` never emptied,
-and `ChapterPass::remap` walks only the shed ones.
+and `ChapterPass::remap` walks only the shed ones. `release` sets a flag, which
+is what keeps the check honest — an uncased chapter's genuinely empty row is
+never taken for a shed one.
 
-```text
-this book's checksum has an aggregate?
-  yes -> nothing mapped, nothing folded, no text read
-  no  -> for EVERY chapter of the book:
-           key absent      -> pass.map, every member walks
-           key held, shed  -> pass.remap in place, only the shed member walks
-           key held, whole -> nothing
-         fold once, keep the aggregate, then pass.release each observation
-         — an empty WordRow flagged released, 24 B, the same as an
-         uncased chapter's row
-```
-
-`last_mapped` counts a remap as a map of that chapter, because a chapter was
-read and walked; `last_remapped` is how many of those kept an observation.
-`a_keystroke_in_one_chapter_rewalks_words_for_the_book_but_glyphs_only_for_the_chapter`
-pins the split through a counting wrapper around one tuple member: the words
-walk the edited book whole, the glyph walk runs for the edited chapter alone.
-The flag is why the check is honest — `release` sets it, so an uncased
-chapter's genuinely empty row is never taken for a shed one.
+Within one publication a chapter mapped for one book is still a hit for the
+next, because nothing is shed until every fold that publication needed has run.
+That is what keeps two identical books one map, and `last_mapped` honest.
 
 ## The hot set: two books do not shed at all
 
-Shedding is per book, so the last step of a publication asks which books are
-worth exempting. The answer is the ones a keystroke will land in again: an
-editor types into one book for minutes at a time, and the second keystroke
-there should not pay for the first one's decision.
+Shedding is per book, so step 2 asks which books are worth exempting: the ones
+a keystroke will land in again. An editor types into one book for minutes at a
+time, and the second keystroke there should not pay for the first one's
+decision.
 
 ```text
 hot = the books whose text moved most recently, newest first, at most N (2)
 
-fold done -> for every book folded this publication:
-               in hot -> keep its rows whole
-               else    -> pass.release each observation
-             for every book that just fell out of hot:
-               pass.release each observation of every generation it holds
+fold done -> book in hot -> keep its rows whole
+             else        -> pass.release each observation
+             book that just fell out of hot ->
+                            release every generation's rows it still holds
 ```
 
-The set is ordered by *edits*, not by publications: `index_book` moves a book
-to the front exactly when its ring takes a new checksum, so republishing an
+The set is ordered by *edits*, not by publications: `index_book` moves a book to
+the front exactly when its ring takes a new checksum, so republishing an
 untouched corpus reorders nothing. `with_hot_books(0)` is the behaviour before
 there was a set, and every test that pins the shed-grain law asks for it.
 
-What this buys is the difference between a cold book's keystroke and a hot
-one's. Cold, the aggregate is gone and every chapter's rows are shed, so the
-whole book walks again — `last_mapped` 16, `last_remapped` 15 for MRK. Hot,
-the rows are still whole, so only the chapter whose `ObservationKey` moved is
-absent: `last_mapped` 1, `last_remapped` 0. That is the entire word rewalk of
-an edited book, gone from every keystroke after the first
-(evidence.md, W1e step 2).
+Cold, an edited book's aggregate is gone and every chapter's rows are shed, so
+the whole book walks again: `last_mapped` 16, `last_remapped` 15 for MRK. Hot,
+the rows are whole, so only the chapter whose `ObservationKey` moved is absent:
+`last_mapped` 1, `last_remapped` 0. That is the entire word rewalk of an edited
+book, gone from every keystroke after the first (evidence.md, W1e step 2). It
+costs N books' word rows — 281 KB for two books of `en_ulb` against the 24 B a
+shed row leaves — counted in the hot tier (`pantry.md`).
 
-What it costs is N books' word rows, which `resident_bytes` counts through
-`ChapterPass::observation_bytes`: 281 KB for two books of `en_ulb`, ~137 KB
-each, against the 24 B a shed row leaves. `remove` takes a book out of the set
-without owing anything, because its rows go with its ring at the next sweep.
-Releasing is never a correctness question — a released row is walked again on
-demand — so a row two books share may be shed for the cold one and simply
-re-walked for the hot one.
+`remove` takes a book out of the set without owing anything, because its rows go
+with its ring at the next sweep. Releasing is never a correctness question — a
+released row is walked again on demand — so a row two books share may be shed
+for the cold one and re-walked for the hot one.
 
-So a markup-only edit, which moves the `RawChecksum` and not one
-`ObservationKey`, now re-maps the book it touched: the aggregate is keyed by
-the raw checksum, and the rows that could have folded it again are gone.
-`a_markup_only_edit_maps_nothing_and_shifts_the_published_offsets` pins the
-chapter-grain claim through `HygieneBytes`, and
-`a_book_grain_pass_remaps_the_edited_book_and_nothing_else` pins this one.
+A book-grain pass's aggregate does not ride the ring: the sweep keeps it for a
+book's CURRENT checksum only, dropping every older generation even while the
+ring and the chapter tables behind it survive for `with_generations` more edits.
+A `WordAggregate` holding thousands of rows costs the same to keep five
+generations deep as one (evidence.md, 2026-09-04 "the ~58 MiB"). An undo inside
+the ring therefore still re-maps and re-folds a book-grain pass's book; a
+chapter-grain pass's undo stays free.
 
-Within one publication a chapter mapped for one book is still a hit for the
-next, because nothing is shed until every fold that publication needed has
-run. That is what keeps two identical books one map, and `last_mapped` honest.
-
-A book-grain pass's aggregate also does not ride the ring: the sweep keeps it
-only for a book's CURRENT checksum, dropping every older generation even
-while the ring and the chapter tables behind it survive for `with_generations`
-more edits. A `WordAggregate` holding thousands of rows costs the same to keep
-five generations deep as it does one, which is exactly the heap
-`aggregate_bytes` below made visible (evidence.md, 2026-09-04 "the ~58 MiB").
-An undo inside the ring therefore still re-maps and re-folds a book-grain
-pass's book — the regrain check in `index_book` already forces that whenever
-the aggregate is missing — while a chapter-grain pass's undo stays free.
-`a_book_grain_pass_keeps_one_aggregate_per_book_through_edits_and_an_undo`
-pins it.
-
-## The resident corpus totals
+## The resident corpus totals and the kept verdicts
 
 Judging words used to re-merge every book's rows into corpus totals on every
-publication: 4.7 ms of a 4.9 ms warm republication (evidence.md, W1). The
-Expediter keeps the totals instead, in one `CorpusTotals`, and moves a book at
-a time.
+publication (4.7 ms of a 4.9 ms warm republication, evidence.md W1) and
+re-decide every word in the corpus (about a third of a warm republication).
+Steps 3 and 4 move a book at a time instead.
 
 ```text
 tallied[BookId] = the RawChecksum this book contributes to the totals now
@@ -193,161 +174,33 @@ checksum moved     -> pass.untally the old aggregate, pass.tally the new
 book gone          -> pass.untally, and the id leaves the table
 ```
 
-The old aggregate is still resident when it is subtracted: a checksum leaves
-the ring in `index_book` and leaves `aggregates` in the sweep at the END of the
-same publication, and the totals are moved between the two.
+The old aggregate is still resident when it is subtracted: a checksum leaves the
+ring in step 1 and leaves `aggregates` in step 7 of the same publication, and
+the totals move between the two.
 
 What makes it safe is that the tally is exactly a merge. `WordTotals` after any
 sequence of adds and removes equals `WordTotals::merge` over the books resident
 then — counts, dispersion, and which rows exist at all, so a word held only in
 forced positions keeps its all-zero row exactly as a fresh merge does. Cold
-`analyze` builds no tally; it calls `judge`, which merges its own. The two
-paths' bytes are therefore the same claim `galley/tests/equivalence.rs` already
-makes, plus the two words cases it gained: a chapter recased, and the casing
-channel flipped off.
+`analyze` builds no tally; it calls `judge`, which merges its own.
 
-## The kept word verdicts
-
-Judging words used to re-decide every word in the corpus on every publication:
-about a third of a warm republication, though one book's words moved. The
-Expediter keeps the word channels' patterns instead, beside the evidence they
-stand on.
-
-```text
-verdicts = WordVerdicts { terminal table, judging config, doubling recusal,
-                          patterns hash-ascending per channel }
-
-table, config and recusal all stand -> judge only the keys in this
-                                       publication's delta, merge into the kept
-                                       list, one tandem walk
-any of the three moved              -> judge the whole tally as before
-```
-
-The delta is named, not guessed: `ChapterPass::moved_keys` reports the tally
-keys of exactly the aggregates `untally` and `tally` move, so a key whose
-counts did not change cannot be in it. A word's verdict is a function of its own
-tally rows, the table, the config and — for `Doubled` — the corpus-wide
-recusal, so those four are the whole cache identity (`judge.md`). The one
-channel that is not is `WordLength`, whose ceiling is the corpus's own length
-distribution: it is off by default, and judged whole whenever it is on.
-
-Whether a key moved is the only question the merge asks, so a kept pattern is
-dropped exactly when the fresh list holds its replacement, and the result is
-the list a whole `judge_words` produces — `debug_assert_eq!`ed against one on
-every publication a debug build makes, which is the whole test suite and both
-churn oracles.
-
-`last_words_judged()` is the tally keys the last publication judged: 14,093 for
-a cold `en_ulb` — which keeps 57 word patterns — 1,731 after a keystroke into
-MRK, and 14,093 again after a moved knob or a moved terminal table. What this buys is the warm republication, where
-the delta is empty and the word judge does nothing at all; a keystroke pays the
-same walk either way, because the moved keys are scattered through the tally and
-reaching them IS the walk (evidence.md, W6).
-
-## The firing cache
-
-`pass.firing` walks every book's aggregate against the pattern table once per
-publication, 66 times for a Bible, only to hash what it found. What a book
-fires is a function of its own counts and the table's CLAIMS — never of a
-numerator, which every keystroke anywhere in the corpus moves — so the hash is
-kept:
-
-```text
-firing[RawChecksum] = (TableHash, FiringHash)
-```
-
-`TableHash` is xxh3-128 over every row's glyph, channel and key in table order:
-the same bytes `FiringHash` reads, over the whole table rather than one book's
-share of it. A publication whose table says what the last one said replays every
-book's firing hash and walks nobody's; a book whose own text moved walks its
-own. `last_firing_walks()` counts them — all of them on a cold open or after a
-knob that adds a row, one after a keystroke, none on a warm republication.
-
-## The site cache
-
-A judged pattern has no coordinates; `pass.locate` gives it some by rescanning
-one book's current text (`sous-chef/core/src/sites.md`). That is text reading,
-so it is cached:
-
-```text
-sites[RawChecksum] = (FiringHash, TerminalHash, [SiteRow])
-```
-
-`FiringHash` is xxh3-128 over the book's firing patterns' **content** — glyph,
-channel, key — in table order, and never over their indices. The distinction is
-the whole point: a publication renumbers the pattern table whenever any other
-book's counts move a denominator, while what THIS book can be sited for is
-unchanged, so an index-keyed cache would miss on every keystroke anywhere in
-the corpus. For the same reason a cached row names its pattern by content
-(`PatternRef`) and resolves to this publication's `PatternIndex` at replay.
-
-A book whose checksum, firing hash, and terminal hash all stand replays its
-rows and reads no text. The terminal hash is in the key for the same reason it
-is in the chapter key below: the word walk reads the corpus's terminal table to
-PLACE rows, so a table that moved anywhere in the corpus decides this book's
-occurrences differently while its own text and firing set stand still.
-`last_located()` counts the books that did not — one after a keystroke,
-all of them on a cold open, none on a warm republication. The sweep retains a
-site entry exactly as it retains a chapter table, and `resident_bytes` counts
-it: the inline row plus its boxed slice.
-
-### Per chapter, for a hot book
-
-A keystroke moves the edited book's checksum, so its book entry misses and it
-rescans — all sixteen chapters of MRK to place rows in the one that moved. For
-a book in the hot set (the same set that keeps its chapter observation rows) the
-rows are kept a second way:
-
-```text
-chapter_sites[(ObservationKey, FiringHash, TerminalHash)] = [SiteRow]
-```
-
-The rows are stored in CHAPTER-relative coordinates and rebased by the
-chapter's projected start on replay, so the same chapter under two checksums —
-or in two books — is one entry. A pass says whether this split is real:
-`ChapterPass::CHAPTER_SITES` is true only when `locate_book` plus
-`locate_chapters` over every chapter equals `locate` row for row, and a tuple
-says yes only when exactly one member does. In `Brigade` that member is `Words`,
-whose walk restarts at every chapter; `Substrate` places its rows in
-`locate_book` as before. So a keystroke runs the substrate's rescan whole and
-the word walk for one chapter. `last_sited_chapters()` counts the chapters
-walked — one after a keystroke into a hot book, all of them the first time a
-book goes hot or the firing set moves.
-
-`TerminalHash` is in the key and not in `FiringHash` because the word walk reads
-the corpus's terminal table to split free occurrences from forced, and a firing
-set is position-blind about exactly that: the same rows fire while the table
-decides differently which occurrences they cover. The book-level entry above
-carries the same hash for the same reason; what the two keys divide is grain,
-not evidence — this one replays chapters of a book whose checksum moved.
-
-Eviction follows the hot set rather than the sweep: each publication keeps
-exactly the keys its hot books name, so a book pushed out of the set gives its
-chapter rows back with its observations. `resident_bytes` counts them.
-
-What this cache does NOT key on is the numerator and denominator of a firing
-pattern. Those move constantly and change nothing about where the pattern
-occurs; the published row carries only an index into the table, and the table
-is re-encoded every publication anyway.
-
-The cache is worth having because `Brigade`'s fold is not free the way
-`HygieneBytes`' was: `fold_book` merges every lane of all 1,189 chapters, which
-measured 697 µs of a warm whole-Bible republication with nothing changed
-(evidence.md). `resident_bytes` counts an aggregate's real heap via
-`ChapterPass::aggregate_bytes`, not its inline size; `Brigade` is book-grain
-overall (`Words` alone is), so the sweep keeps its aggregate for a book's
-current checksum only, not the whole ring — the previous section.
+The delta the judge re-decides is named, not guessed: `ChapterPass::moved_keys`
+reports the tally keys of exactly the aggregates `untally` and `tally` move, so
+a key whose counts did not change cannot be in it. The merge is
+`debug_assert_eq!`ed against a whole `judge_words` on every publication a debug
+build makes, which is the whole test suite and both churn oracles. The one
+channel outside the scheme is `WordLength`, whose ceiling is the corpus's own
+length distribution: it is off by default, and judged whole whenever it is on.
 
 ## The declared source
 
 A `Role::Reference` book is not a target and never becomes one: it is mapped by
-nobody, folded by nobody, holds no chapter table and no aggregate, and
-publishes no section of its own. What it holds is one grapheme count per verse,
-and that verse's word hashes only when the config in force at `update` would
-judge with them (`pantry.md`).
+nobody, folded by nobody, holds no chapter table and no aggregate, and publishes
+no section of its own. What it holds is one grapheme count per verse, and that
+verse's word hashes only when the config in force at `update` would judge with
+them (`pantry.md`).
 
-`publish` runs the source comparison immediately after `judge_resident` and
-before `locate`, from the lengths both sides already retain:
+Step 5 runs from the lengths both sides already retain:
 
 ```text
 pass.length_config(config)         -> the knobs, from the member that owns the lane
@@ -361,17 +214,14 @@ judge_paired(books, project, ..)   -> codes 0, 3 and 4 over target spans
 ```
 
 The source-copy lane is the one part of this step that reads text: on a pair
-MISS with the lane on, the target book's projection is rebuilt from the
-products it already retains and its words are walked. That projection is
-hoisted above both text-reading steps — the site rescan below TAKES it rather
-than building a second — so a book is projected at most once per publication
-and is released as soon as it is located. A pair hit reads nothing, so an
+MISS with the lane on, the target's projection is rebuilt from the products it
+already retains and its words are walked. A pair hit reads nothing, so an
 unchanged republication with the lane on still walks no text.
 
-A declared source registered while `source_copy` was OFF kept no word lane
-(`pantry.md`), so it is skipped and counted: `last_wordless_references()` is
-how many target books paired against such a source. Nonzero means "re-send
-those references", never "no run was found".
+A declared source registered while `source_copy` was OFF kept no word lane, so
+it is skipped and counted: `last_wordless_references()` is how many target books
+paired against such a source. Nonzero means "re-send those references", never
+"no run was found".
 
 Every Target pairs with the Reference of the same `BookKey` — the first, if a
 caller registers two files under one key, since `books(Role::Reference)` is
@@ -384,135 +234,117 @@ Three properties follow, and each is a test:
 - **a source change touches no target observation.** Registering, replacing, or
   removing a reference moves no target checksum, so nothing is re-mapped,
   re-folded, or re-located, and every target-only row is byte-identical either
-  side of the swap. The length rows are the only thing that moves. This is the
-  charter's "source choice legitimately changes results without invalidating
-  target-only observations", pinned in `equivalence.rs` and in the Expediter's
-  own tests;
+  side of the swap. This is the charter's "source choice legitimately changes
+  results without invalidating target-only observations", pinned in
+  `equivalence.rs` and in the Expediter's own tests;
 - **the length knobs are the same judging config as every other knob.** They
   ride `JudgingConfig::lengths` and reach the step through
   `ChapterPass::length_config`, so `set_config` moves them and still maps
   nothing and folds nothing;
 - **references ride `SnapshotId`.** Swapping the declared source changes what
-  the publication is OF, not only what it says, so the reference table is
-  hashed beside the target one under its own role byte.
+  the publication is OF, not only what it says, so the reference table is hashed
+  beside the target one under its own role byte.
 
 The facts pairing returns — target-only and source-only keys, ambiguous
 duplicates, partial overlaps — are dropped here. They are alignment structure,
-and the two the presence rule reads it has already turned into rows before this
-point (`rules/presence-shear.md`); a host that wants the facts themselves runs
-the cold `analyze_paired`, which returns them, and `sous-cli` prints them as
-per-book counts. `LengthConfig::enabled`, `presence` and `source_copy` are
-independent, and pairing runs while ANY of them is on.
-
-## The paired cache
-
-Pairing is a pure function of the two books' rows, so it is cached like every
-other product here — keyed by BOTH sides, because either moving is a different
-sample:
-
-```text
-paired[(target RawChecksum, source RawChecksum, words walked)]
-  = PairedBook { ratios, target spans, coalesced presence rows,
-                 maximal source-copy runs of >= 2 words,
-                 the book's knob-free Spread }
-```
-
-`last_paired()` counts the books that missed: all of them on a cold open, one
-after a keystroke, none on a warm republication or a `set_config`. The third
-key member is not a knob but a property of the ENTRY — a pairing made without
-the word walk holds no runs and cannot answer for one that wants them — so
-turning `source_copy` on misses and re-pairs, and turning it off misses back
-onto the entry it already had. `source_copy_min_run` is nowhere in here: the
-runs are cached from a floor of two and the knob filters them at judging time.
-Nothing else is either, because neither the pairing nor a book's order
-statistics read a knob — `Spread` is knob-free and `LengthConfig::min_verses` gates it at
-judging time, which is what makes a length knob a re-judge and never a re-pair.
-
-The project scope is the pooled sample over every paired book, and it too is
-kept: the same key sequence is the same multiset of ratios, whatever order the
-books contribute them in, so a publication that re-paired nothing reuses the
-pooled `Spread` verbatim. A keystroke recomputes it, which is the honest floor
-— one book moving moves the pool.
-
-The sweep is by live keys: an entry no target named has no book on either side
-any more. Removing the last reference, or switching the lane off, drops the
-cache whole, because nothing is left to key it by.
+and the two the presence rule reads it has already turned into rows
+(`rules/presence-shear.md`); a host that wants the facts runs the cold
+`analyze_paired`, and `sous-cli` prints them as per-book counts.
+`LengthConfig::enabled`, `presence` and `source_copy` are independent, and
+pairing runs while ANY of them is on.
 
 What this buys is measured: a warm 66-book republication with the corpus
 declared as its own source goes from 4.9 ms to 0.79 ms and a keystroke from
-6.6 ms to 2.95 ms, so a declared source now costs 53 µs warm and 382 µs on a
-keystroke (evidence.md, 2026-09-07). What it costs is 494 KB for a whole Bible
-— 31k units at 8 B of ratio and 8 B of span — which `resident_bytes` counts.
+6.6 ms to 2.95 ms, so a declared source costs 53 µs warm and 382 µs on a
+keystroke (evidence.md, 2026-09-07).
+
+## Siting, whole book or chapter by chapter
+
+A judged pattern has no coordinates; `pass.locate` gives it some by rescanning
+one book's current text (`sous-chef/core/src/sites.md`). Step 6 replays cached
+rows where it can, and for a hot book replays them per chapter: a keystroke
+walks the chapter it landed in and rebases its neighbours.
+
+Whether that split is real is the pass's own answer.
+`ChapterPass::CHAPTER_SITES` is true only when `locate_book` plus
+`locate_chapters` over every chapter equals `locate` row for row, and a tuple
+says yes only when exactly one member does. In `Brigade` that member is `Words`,
+whose walk restarts at every chapter; `Substrate` places its rows in
+`locate_book` as before. So a keystroke runs the substrate's rescan whole and
+the word walk for one chapter — `last_sited_chapters()` answers 1.
+
+One walk per RUN of missing chapters, not per chapter: reading a firing set is
+per book, and a keystroke leaves exactly one chapter missing anyway. Rows land
+in chapter order, so the sequence is the one a whole-book `locate` would have
+pushed.
+
+## Mark and sweep, N generations deep
+
+Every publication ends by sweeping: a chapter table survives only if some book's
+ring names its checksum, and an observation only if some surviving table names
+its key. A book's ring is its current `RawChecksum` plus the last
+`with_generations(n)` before it, four by default; `remove` drops the ring, so
+the book's tables go at the next publication.
+
+Why keep any previous generation at all: an undo restores byte-identical chapter
+text and therefore the identical `ObservationKey`, so an undo within `n` edits is
+a table hit and maps nothing — unless the pass is book-grain, in which case its
+aggregate does not ride the ring and the undo re-maps and re-folds regardless.
+
+The sweep is skipped outright when no table was added and no ring aged since the
+last one — a republication of an untouched corpus has nothing to free, and pays
+nothing to learn it. With the aggregate cache in front of it, that whole
+republication is 6.9 µs for a 66-book Bible (evidence.md).
 
 ## Why the buffers are equal
 
 `sous_core::for_each_chapter` is the only place a `ChapterInput` is assembled,
 and both `analyze` and the Expediter call it, so neither can build an input the
-other would not. Fold and judge are provenance-blind — neither can tell a
-cached observation or aggregate from a fresh one — `locate` is handed the same
-text and chapter rows either way, and both publishers rebase through the same
+other would not. Fold and judge are provenance-blind — neither can tell a cached
+observation or aggregate from a fresh one — `locate` is handed the same text and
+chapter rows either way, and both publishers rebase through the same
 `rebase_span`, so the two paths differ in what work they skip and in nothing
-else. `galley/tests/equivalence.rs` pins that as bytes, not as a claim: a
-seeded edit churn republishes after every step and compares against a cold
-`analyze` of the same texts, over a synthetic corpus and over a whole Bible.
-
-## Mark and sweep, N generations deep
-
-Every publication ends by sweeping: a chapter table survives only if some
-book's ring names its checksum, and an observation only if some surviving table
-names its key. A book's ring is its current `RawChecksum` plus the last
-`with_generations(n)` before it, four by default; `remove` drops the ring, so
-the book's tables go at the next publication.
-
-Why keep any previous generation at all: an undo restores byte-identical
-chapter text and therefore the identical `ObservationKey`, so an undo within
-`n` edits is a table hit and maps nothing — unless the pass is book-grain, in
-which case its aggregate does not ride the ring (the previous section) and the
-undo re-maps and re-folds regardless.
-
-`resident_bytes` reports what the sweep bounds: the Pantry's own products plus
-one entry per resident observation, chapter row, cached aggregate, and ring
-slot, plus the corpus tally's own rows — which the sweep does not bound,
-because the tally holds one row per word the current corpus has and no
-generation of it. Both sides are real heap and not inline size:
-`ChapterPass::aggregate_bytes` for an aggregate and
-`ChapterPass::observation_bytes` for a chapter row, which is what makes a hot
-book's unshed rows visible where they are held rather than free by omission.
-
-The sweep is skipped outright when no table was added and no ring aged since
-the last one — a republication of an untouched corpus has nothing to free, and
-pays nothing to learn it. With the aggregate cache in front of it, that whole
-republication is 6.9 µs for a 66-book Bible (evidence.md).
+else. `galley/tests/equivalence.rs` pins that as bytes, not as a claim: a seeded
+edit churn republishes after every step and compares against a cold `analyze` of
+the same texts, over a synthetic corpus and over a whole Bible.
 
 ## Parallel map
 
-`--features parallel` maps a book's missing chapters on rayon's global pool,
-and changes nothing a publication says. The missing chapters are queued in
-chapter order, `par_iter` keeps that order, and the observations are inserted
-from it afterwards, so the chapter table and the buffer are the serial ones
-byte for byte. Both settings drop a repeated chapter from the queue the same
-way, so `last_mapped` is the same number too.
+`--features parallel` maps a book's missing chapters on rayon's global pool, and
+changes nothing a publication says. The missing chapters are queued in chapter
+order, `par_iter` keeps that order, and the observations are inserted from it
+afterwards, so the chapter table and the buffer are the serial ones byte for
+byte. Both settings drop a repeated chapter from the queue the same way, so
+`last_mapped` is the same number too.
 
 The map is the only parallel part, and only over the chapters a publication
-actually misses. Galley adds no pool of its own, no scheduler, and no
-background work: `publish` still returns when the last chapter is mapped. The
-queue owns a copy of each missing chapter's projected text and verse rows,
-because `for_each_chapter` lends its `ChapterInput` for the callback only; the
-serial path stays inside that callback and copies nothing, so it pays for none
-of this.
+actually misses. Galley adds no pool of its own, no scheduler, and no background
+work: `publish` still returns when the last chapter is mapped. The queue owns a
+copy of each missing chapter's projected text and verse rows, because
+`for_each_chapter` lends its `ChapterInput` for the callback only; the serial
+path stays inside that callback and copies nothing.
 
 `the_parallel_map_publishes_the_serial_bytes` compares the two publications
 inside one binary, and the equivalence gate runs under both settings.
 
-It is off by default because it is measured, not assumed: for `HygieneBytes`
-the map is about half a millisecond of a 5.6 ms cold whole-Bible publication and
+It is off by default because it is measured, not assumed: for `HygieneBytes` the
+map is about half a millisecond of a 5.6 ms cold whole-Bible publication and
 allocates one `Vec` per chapter, so the parallel path runs 1.7× SLOWER —
 work-stealing and allocator contention cost more than the map saves
-(evidence.md). `Brigade` is that costlier pass, and it does pay for a cold
-open — 33 ms serial against 24 ms parallel — while staying a wash on a
-keystroke, so the feature is still opt-in and a host asks for it. The first
-thing to change then is one `par_iter` over the whole corpus rather than one
-per book.
+(evidence.md). `Brigade` is that costlier pass, and it does pay for a cold open
+— 33 ms serial against 24 ms parallel — while staying a wash on a keystroke, so
+the feature is still opt-in and a host asks for it. The first thing to change
+then is one `par_iter` over the whole corpus rather than one per book.
+
+## The modules
+
+```text
+expediter.rs           the struct, the doors, index_book, publish
+expediter/keys.rs      what makes two cached values interchangeable
+expediter/siting.rs    a judged pattern gets coordinates exactly once
+expediter/pairing.rs   a comparison is a pure function of both sides' rows
+expediter/residency.rs nothing reachable that no live generation names
+```
 
 ## The handle over it
 

@@ -16,6 +16,14 @@
   the Onion→Sous seam entire: `OnionBook` (the `ProjectedBook` over Onion's
   mask and TOC), coordinate rebasing, and findings publication, cold
   (`publish_onion_findings`) or resident (`Expediter`).
+- `galley` has ONE caching layer, `galley::pantry`. Everything kept between
+  calls is there or on a store it defines: chunk products (`pantry/chunks.rs`,
+  the one place a byte ceiling is enforced), per-book products and retained
+  text, and the content-addressed `derived::Store`s the Expediter's caches are
+  instances of. `pantry/budget.rs` attributes every resident byte to pinned,
+  hot, or rebuildable with no residual. `galley/src/pantry.md` is the one
+  caching doc; `galley/src/sous/expediter.md` is publication order and
+  counters.
 - `sous-cli` depends on both only to call them.
 - `sous-chef/donor/` (gitignored) is the v1 spike's source, kept to read and
   port from by hand. Not a crate; nothing builds it. `donor/deps.toml.txt`

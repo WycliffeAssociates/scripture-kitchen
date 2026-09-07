@@ -58,7 +58,7 @@ name = "find"
 harness = false
 
 [[bench]]
-name = "warmer"
+name = "chunks"
 harness = false
 
 [[bench]]

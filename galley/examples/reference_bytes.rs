@@ -4,7 +4,7 @@
 //!
 //! Registers the committed 66-book `testData/exampleCorpora/en_ulb` twice —
 //! once as `Role::Target`, once as `Role::Reference` — and reports what each
-//! role's own products weigh. The Warmer is shared and budget-bound, so it is
+//! role's own products weigh. The chunk cache is shared and budget-bound, so it is
 //! subtracted from both: what is left is exactly the per-book retention the
 //! role chose. Not a test; it prints a row for the ledger.
 
@@ -48,7 +48,7 @@ fn main() {
         ),
     ];
     for (role, lanes, label) in roles {
-        // A fresh Pantry per role, so the shared Warmer cache cannot make the
+        // A fresh Pantry per role, so the shared chunk cache cannot make the
         // second role look cheaper than it is.
         let mut pantry = Pantry::new(64 << 20);
         let retain = match role {
@@ -68,7 +68,7 @@ fn main() {
                     .sum::<usize>();
             }
         }
-        let own = pantry.resident_bytes() - pantry.warmer().resident_bytes();
+        let own = pantry.resident_bytes() - pantry.chunk_stats().resident_bytes;
         println!(
             "{label:<16} own products {:>10} B  ({:>6.2} MB, {:>5.1}% of raw)  text {:>9} B",
             own,

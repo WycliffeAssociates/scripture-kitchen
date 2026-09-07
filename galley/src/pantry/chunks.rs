@@ -1,12 +1,7 @@
-//! The warmer: prepared plates, kept hot.
-//!
-//! **This is a cache.** The name is the kitchen the crate is named for — a
-//! warmer holds food that is already cooked so it does not have to be cooked
-//! again — and the metaphor stops there. What it holds is per-chunk products;
-//! what it saves is re-deriving them.
+//! An unchanged chunk is never re-lexed.
 //!
 //! ```text
-//! warmer.parse(text, opts)  ->  the same bytes onion::wire::parse would plate,
+//! chunks.parse(text, opts)  ->  the same bytes onion::wire::parse would plate,
 //!                               with every unchanged chunk served from memory
 //! ```
 //!
@@ -27,8 +22,8 @@
 //! (a sidebar straddling the seam) is remembered as [`Cached::OpenBoundary`],
 //! so repeat calls widen to the fused unit without re-lexing to rediscover it.
 //!
-//! Keying on CONTENT is what makes the warmer safe to be wrong about: a stale
-//! entry cannot be served, only missed. Nothing here has to be invalidated.
+//! Keying on CONTENT is what makes this safe to be wrong about: a stale entry
+//! cannot be served, only missed. Nothing here has to be invalidated.
 //!
 //! INPUT CONTRACT: same as `onion::wire::parse` — checksums are only stable
 //! against LF-normalized text (CRLF works, but is a different content hash).
@@ -37,10 +32,29 @@ use std::rc::Rc;
 
 use rustc_hash::FxHashMap;
 
+use super::budget::Budget;
 use crate::onion;
 use onion::cst::{self, Cst};
 use onion::lint::{self, Carried, ChunkContext, LintReport, UsfmVersion};
 use xxhash_rust::xxh3::xxh3_128;
+
+/// What the chunk cache holds and what it has done, cumulative — telemetry,
+/// never contract.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ChunkStats {
+    /// Units computed rather than reused — the number a test diffs to prove
+    /// "one edited chapter is one miss".
+    pub misses: u64,
+    /// Units served from the cache rather than recomputed.
+    pub hits: u64,
+    /// Units dropped to stay under the budget; zero until it has bitten.
+    pub evictions: u64,
+    /// Cached units resident now. Zero for a one-chapter book: galley does
+    /// not cache what it cannot reuse.
+    pub len: usize,
+    /// The exact heap of every retained unit plus the map's backing table.
+    pub resident_bytes: usize,
+}
 
 /// One cached unit's products — a chunk, or a fused run of chunks whose
 /// interior boundaries were dirty. Everything chunk-relative.
@@ -101,70 +115,56 @@ struct Key {
 /// that never pay from evicting the large-book units that do.
 const UNCACHED_CHUNKS: usize = 2;
 
-/// The cache itself: a hand-rolled byte-budget LRU.
-///
-/// Hand-rolled per chunk-fold.md's ruling — at dozens-to-hundreds of entries
+/// The rebuildable tier's LRU, hand-rolled: at dozens-to-hundreds of entries
 /// eviction is a linear scan, and a crate such as moka is currently overkill.
 ///
-/// One per open document. Keyed on chapter CONTENT, so reordering chapters,
-/// undoing an edit, or reopening a book all hit; a changed chapter simply
-/// misses. The budget is a declared ceiling on resident products, which is
-/// what makes this safe to keep across a session — wasm linear memory grows
-/// and never shrinks, so a high-water mark is permanent.
-pub struct Warmer {
+/// Keyed on chapter CONTENT, so reordering chapters, undoing an edit, or
+/// reopening a book all hit; a changed chapter simply misses. This is the one
+/// place the [`Budget`] is enforced rather than only counted.
+pub(super) struct ChunkStore {
     map: FxHashMap<Key, Entry>,
     tick: u64,
     bytes: usize,
-    budget: usize,
+    budget: Budget,
     misses: u64,
     hits: u64,
     evictions: u64,
 }
 
-impl Warmer {
-    pub fn new(budget_bytes: usize) -> Self {
+impl ChunkStore {
+    pub(super) fn new(budget_bytes: usize) -> Self {
         Self {
             map: FxHashMap::default(),
             tick: 0,
             bytes: 0,
-            budget: budget_bytes,
+            budget: Budget::new(budget_bytes),
             misses: 0,
             hits: 0,
             evictions: 0,
         }
     }
 
-    /// Units computed rather than reused, cumulative — the number a test
-    /// diffs to prove "one edited chapter is one miss".
-    pub fn misses(&self) -> u64 {
-        self.misses
+    /// The declared ceiling this store's evictions hold it under.
+    pub(super) fn budget(&self) -> Budget {
+        self.budget
     }
 
-    /// Units served from the cache rather than recomputed, cumulative.
-    pub fn hits(&self) -> u64 {
-        self.hits
-    }
-
-    /// Units removed to stay under budget, cumulative — zero until the
-    /// budget has actually bitten. A caller sweeping this after every
-    /// keystroke can name the first one that pushed the cache over budget.
-    pub fn evictions(&self) -> u64 {
-        self.evictions
-    }
-
-    pub fn len(&self) -> usize {
-        self.map.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.map.is_empty()
+    /// The counters and the size, in one read.
+    pub(super) fn stats(&self) -> ChunkStats {
+        ChunkStats {
+            misses: self.misses,
+            hits: self.hits,
+            evictions: self.evictions,
+            len: self.map.len(),
+            resident_bytes: self.resident_bytes(),
+        }
     }
 
     /// Resident bytes: the exact heap of every retained unit's CST, tokens
     /// and lint report (`self.bytes`, also the value the budget bounds) plus
     /// the map's own backing-table bytes (`map_bytes`). Not an estimate —
     /// see [`product_bytes`] for the one named gap.
-    pub fn resident_bytes(&self) -> usize {
+    pub(super) fn resident_bytes(&self) -> usize {
         self.bytes + self.map_bytes()
     }
 
@@ -180,7 +180,7 @@ impl Warmer {
     /// `lint(lex(text), build(…))` pipeline (the fold oracle's law), with
     /// every clean chunk served from the cache: one dirty chunk's walk plus
     /// the reduce.
-    pub fn lint(&mut self, text: &str) -> LintReport {
+    pub(super) fn lint(&mut self, text: &str) -> LintReport {
         let units = self.resolve(text);
         let (byte_bases, token_bases) = bases(&units);
         reduce(&units, &byte_bases, &token_bases)
@@ -193,7 +193,7 @@ impl Warmer {
     /// per-chunk trees into one, the token streams concatenate under their byte
     /// bases, and the folded report is the one `onion` would have computed. The
     /// dish those produce is byte-identical to a cold `onion::wire::parse`.
-    pub fn parse(&mut self, text: &str, opts: onion::wire::ParseOptions) -> Vec<u8> {
+    pub(super) fn parse(&mut self, text: &str, opts: onion::wire::ParseOptions) -> Vec<u8> {
         onion::wire::plate(&self.parsed(text, opts))
     }
 
@@ -203,7 +203,7 @@ impl Warmer {
     ///
     /// One resolve for both halves: the reduce and the assembly read the same
     /// units.
-    pub fn parsed<'a>(
+    pub(super) fn parsed<'a>(
         &mut self,
         text: &'a str,
         opts: onion::wire::ParseOptions,
@@ -221,7 +221,7 @@ impl Warmer {
     /// One recipe's mask over the same assembled ingredients — what a
     /// downstream consumer of verse text reads. Not folded per chunk: the walk
     /// is cheap once the tree it walks is free.
-    pub fn masked(&mut self, text: &str, filter: &onion::mask::Filter) -> onion::mask::Mask {
+    pub(super) fn masked(&mut self, text: &str, filter: &onion::mask::Filter) -> onion::mask::Mask {
         let units = self.resolve(text);
         let (tokens, tree) = assemble(&units);
         onion::mask(text.as_bytes(), &tokens, &tree, filter)
@@ -332,7 +332,7 @@ impl Warmer {
         // small map, microseconds. Never evicts what was just inserted (it
         // holds the newest tick, and going under budget stops the loop
         // before the map is empty in any sane configuration).
-        while self.bytes > self.budget && self.map.len() > 1 {
+        while self.budget.over(self.bytes) && self.map.len() > 1 {
             let Some(oldest) = self
                 .map
                 .iter()
@@ -396,7 +396,7 @@ fn assemble(units: &[(u32, Rc<Products>)]) -> (Vec<onion::Token>, Cst) {
 }
 
 /// Exact heap bytes of one unit's products — the LRU weight and the number
-/// [`Warmer::resident_bytes`] sums. `capacity`, not `len`: what a `Vec`
+/// [`ChunkStore::resident_bytes`] sums. `capacity`, not `len`: what a `Vec`
 /// actually holds on the heap is what it allocated, not what it filled.
 ///
 /// GAP: `Carried`'s own `Vec` fields (`ids`, `usfms`, `families`, `sid_last`,
@@ -444,11 +444,11 @@ mod tests {
 
     #[test]
     fn resident_bytes_equals_the_computed_footprint() {
-        let mut warmer = Warmer::new(usize::MAX);
+        let mut warmer = ChunkStore::new(usize::MAX);
         let text = book();
         let units = warmer.resolve(&text);
         // Distinct chapters, so one map entry per unit — no double count.
-        assert_eq!(units.len(), warmer.len(), "no two units share a key");
+        assert_eq!(units.len(), warmer.map.len(), "no two units share a key");
         let expected: usize =
             units.iter().map(|(_, unit)| unit.bytes).sum::<usize>() + warmer.map_bytes();
         assert_eq!(warmer.resident_bytes(), expected);
@@ -465,7 +465,7 @@ mod tests {
     fn eviction_triggers_at_the_exact_budget() {
         let text = book();
         // First, learn each unit's exact weight with no budget pressure.
-        let mut probe = Warmer::new(usize::MAX);
+        let mut probe = ChunkStore::new(usize::MAX);
         let units = probe.resolve(&text);
         let weights: Vec<usize> = units.iter().map(|(_, unit)| unit.bytes).collect();
         assert!(
@@ -477,7 +477,7 @@ mod tests {
         // back, the retained heap (`bytes`, what eviction actually bounds)
         // never exceeds it, and at least one unit was evicted to stay there.
         let fits_all_but_last: usize = weights[..weights.len() - 1].iter().sum();
-        let mut warmer = Warmer::new(fits_all_but_last);
+        let mut warmer = ChunkStore::new(fits_all_but_last);
         warmer.resolve(&text);
         assert!(
             warmer.bytes <= fits_all_but_last,
@@ -485,17 +485,20 @@ mod tests {
             warmer.bytes,
             fits_all_but_last
         );
-        assert!(warmer.len() < weights.len(), "at least one entry evicted");
+        assert!(
+            warmer.map.len() < weights.len(),
+            "at least one entry evicted"
+        );
 
         // One byte under the single heaviest unit's weight: that unit alone
         // cannot fit, so resolving still stays under budget (the loop only
         // stops evicting when one entry remains) and heap never exceeds it
         // once at least two units have been seen.
         let heaviest = *weights.iter().max().unwrap();
-        let mut tight = Warmer::new(heaviest - 1);
+        let mut tight = ChunkStore::new(heaviest - 1);
         tight.resolve(&text);
         assert!(
-            tight.len() <= 1,
+            tight.map.len() <= 1,
             "the tightest budget keeps at most one unit"
         );
     }

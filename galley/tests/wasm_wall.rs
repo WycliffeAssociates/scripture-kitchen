@@ -105,7 +105,7 @@ fn the_knobs_round_trip_through_js() {
     assert_eq!(defaults.min_verses, 50);
 }
 
-/// The onion door still answers off the Pantry's own Warmer.
+/// The onion door still answers off the Pantry's own chunk cache.
 #[wasm_bindgen_test]
 fn the_onion_products_share_the_corpus_cache() {
     let mut galley = loaded();

@@ -39,8 +39,8 @@ const DEFAULT_BUDGET: usize = 16 << 20;
 /// The corpus, resident: one [`Expediter`], one Pantry, one snapshot out.
 ///
 /// One per project, not per document. Books go in whole by caller id and come
-/// back as one complete publication; the Pantry inside owns the Warmer, so the
-/// onion methods read the same warm chunks the analysis does.
+/// back as one complete publication; the Pantry inside owns the chunk cache,
+/// so the onion methods read the same warm chunks the analysis does.
 #[wasm_bindgen]
 pub struct Galley {
     sous: Expediter<Brigade>,
@@ -131,7 +131,7 @@ impl Galley {
     /// Read it with the same `reader.ts` the stateless door's output uses:
     /// nothing here is a new rendering, only a cheaper route to the same bytes.
     pub fn parse(&mut self, text: &str, diagnostics: bool, toc: bool, utf16: bool) -> Vec<u8> {
-        self.sous.warmer_mut().parse(
+        self.sous.parse(
             text,
             onion::wire::ParseOptions {
                 diagnostics,
@@ -150,20 +150,14 @@ impl Galley {
     /// whatever consumes this cannot get back.
     #[wasm_bindgen(js_name = verseText)]
     pub fn verse_text(&mut self, text: &str) -> String {
-        let mask = self
-            .sous
-            .warmer_mut()
-            .masked(text, &onion::mask::Filter::verse_text());
+        let mask = self.sous.masked(text, &onion::mask::Filter::verse_text());
         mask.text(text.as_bytes())
     }
 
     /// The structure recipe's text, the verse-text mask's sibling.
     #[wasm_bindgen(js_name = structureText)]
     pub fn structure_text(&mut self, text: &str) -> String {
-        let mask = self
-            .sous
-            .warmer_mut()
-            .masked(text, &onion::mask::Filter::structure());
+        let mask = self.sous.masked(text, &onion::mask::Filter::structure());
         mask.text(text.as_bytes())
     }
 
@@ -171,7 +165,7 @@ impl Galley {
 
     /// Chunk units computed rather than reused, cumulative.
     pub fn misses(&self) -> f64 {
-        self.sous.pantry().warmer().misses() as f64
+        self.sous.pantry().chunk_stats().misses as f64
     }
 
     /// Resident bytes across the whole handle: the Pantry's texts and
@@ -185,7 +179,7 @@ impl Galley {
     /// what it cannot reuse.
     #[wasm_bindgen(js_name = entryCount)]
     pub fn entry_count(&self) -> f64 {
-        self.sous.pantry().warmer().len() as f64
+        self.sous.pantry().chunk_stats().len as f64
     }
 
     /// Chapters mapped by the last [`publish`](Self::publish).

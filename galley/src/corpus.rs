@@ -22,17 +22,17 @@
 //! matched to the question. A key that means something to onion would be a key
 //! onion could disagree with the caller about.
 //!
-//! # TODO: `load_corpus` should seed the warmer, and carry checksums
+//! # TODO: `load_corpus` should seed the chunk cache, and carry checksums
 //!
-//! Nothing here is wired to [`crate::Warmer`] yet, and it should be. A cold
+//! Nothing here is wired to the [`crate::Pantry`] yet, and it should be. A cold
 //! load parses every book in the project — which is exactly the work the
-//! warmer would otherwise do lazily, one book at a time, as an editor opens
+//! the Pantry would otherwise do lazily, one book at a time, as an editor opens
 //! them. Throwing it away means paying for it twice.
 //!
 //! A `load_corpus` that owned the read-and-parse would:
 //!
 //! - **checksum while it is there.** Galley already computes a per-chunk
-//!   checksum for the warmer (xxh3-128); the cold load has every chunk in hand
+//!   checksum for the chunk cache (xxh3-128); the cold load has every chunk in hand
 //!   and is the natural place to do it.
 //! - **seed the cache from what it just built,** so the first book an editor
 //!   opens is already warm rather than a full miss.

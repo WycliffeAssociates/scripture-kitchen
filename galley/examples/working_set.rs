@@ -12,11 +12,11 @@
 //! high-water mark — what matters for wasm, whose linear memory never
 //! shrinks), and allocation call counts. Those are then set beside what the
 //! public API itself reports (`Pantry::resident_bytes`, `Pantry::text_bytes`,
-//! `Expediter::resident_bytes`, `Warmer::resident_bytes`) — now exact, not
+//! `Expediter::resident_bytes`, `Pantry::chunk_stats`) — now exact, not
 //! residuals — to see what the host's own bookkeeping does and does not
 //! account for.
 //!
-//! `SOUS_WARMER_MIB` sets the Warmer's byte budget (default 64); the corpus
+//! `SOUS_WARMER_MIB` sets the rebuildable byte budget (default 64); the corpus
 //! runs once per budget so the report below can be compared across sizes.
 //!
 //! Corpus and loading: `en_ulb`, the same 66-book fixture
@@ -24,7 +24,7 @@
 //! recipe as that bench (insert one character into a middle chapter's first
 //! text token), cycled round-robin across all 66 books — not ten — for
 //! `KEYSTROKES` (10,000) steps, so every book is revisited roughly every 66
-//! keystrokes (edit A, edit B, ... back to A) and the Warmer's LRU history is
+//! keystrokes (edit A, edit B, ... back to A) and the chunk LRU's history is
 //! actually exercised rather than grown once and left alone. Each keystroke's
 //! `update` + `publish` is timed with `Instant`; medians and p99s are
 //! reported over the keystrokes seen so far at each of the 1k/5k/10k
@@ -235,7 +235,7 @@ const CHECKPOINTS: [usize; 3] = [1_000, 5_000, 10_000];
 fn main() {
     header();
     let budget = warmer_budget_bytes();
-    println!("Warmer budget: {}\n", fmt_bytes(budget));
+    println!("Rebuildable budget: {}\n", fmt_bytes(budget));
 
     // ---- 1. baseline: 66 raw texts loaded into Strings -------------------
     let corpus = load_corpus();
@@ -323,11 +323,11 @@ fn main() {
     // ---- 5. thousands of keystrokes across all 66 books, round-robin ------
     //
     // Round-robin visits every book once every 66 keystrokes — edit A, edit
-    // B, ..., back to A — so a book evicted from the Warmer between visits
+    // B, ..., back to A — so a book evicted from the chunk cache between visits
     // is forced to re-derive whole, not just re-lex the one edited chunk.
     // Each miss event (a `resolve()` inside this keystroke's `update`) is
     // classified by comparing the misses it added against that book's
-    // resting chunk count: if every chunk of the book missed, the Warmer
+    // resting chunk count: if every chunk of the book missed, the cache
     // held nothing of it and this is a whole-book re-derivation; otherwise
     // it is an ordinary single-chunk re-lex.
     let mut prev_step = 0usize;
@@ -344,13 +344,13 @@ fn main() {
         let at = edit_points[&index].min(text.len());
         text.insert(at, 'x');
 
-        let misses_before = sous.pantry().warmer().misses();
+        let misses_before = sous.pantry().chunk_stats().misses;
         let started = Instant::now();
         sous.update(corpus[index].0.as_str(), Role::Target, text.as_str())
             .unwrap();
         sous.publish().unwrap();
         keystroke_times.push(started.elapsed());
-        let misses_added = sous.pantry().warmer().misses() - misses_before;
+        let misses_added = sous.pantry().chunk_stats().misses - misses_before;
 
         if misses_added > 0 {
             if misses_added as usize >= chunk_counts[&index] {
@@ -361,7 +361,7 @@ fn main() {
                 chunk_relex_events += 1;
             }
         }
-        if first_eviction_step.is_none() && sous.pantry().warmer().evictions() > 0 {
+        if first_eviction_step.is_none() && sous.pantry().chunk_stats().evictions > 0 {
             first_eviction_step = Some(step);
         }
 
@@ -375,9 +375,9 @@ fn main() {
                     "resident_bytes={} avg allocs/(keystroke+publish) over [{prev_step},{step}] = {:.0} warmer hits/misses/evictions={}/{}/{}",
                     fmt_bytes(sous.resident_bytes()),
                     allocs_in_interval as f64 / keystrokes_in_interval as f64,
-                    sous.pantry().warmer().hits(),
-                    sous.pantry().warmer().misses(),
-                    sous.pantry().warmer().evictions(),
+                    sous.pantry().chunk_stats().hits,
+                    sous.pantry().chunk_stats().misses,
+                    sous.pantry().chunk_stats().evictions,
                 ),
             );
             println!(
@@ -400,16 +400,16 @@ fn main() {
     // -------------------------------------------------------- the breakdown
     //
     // Every owner below is now a DIRECT accessor, not a residual:
-    // `Pantry::text_bytes()` is the retained text alone, `Warmer::
+    // `Pantry::text_bytes()` is the retained text alone, `chunk_stats().
     // resident_bytes()` is the exact heap of every retained chunk's CST,
     // tokens and lint report (`Fingerprint::resident_bytes` is public too,
-    // folded into the Warmer/Pantry split below rather than read on its
+    // folded into the chunk/Pantry split below rather than read on its
     // own). What's left of `Pantry::resident_bytes()` once those two are
     // subtracted is the Pantry's own per-book products (`Toc` + `Mask` +
     // `Utf16Table` + struct overhead) — still a subtraction, but of two
     // exact numbers rather than an estimate standing in for one.
     let text_bytes = sous.pantry().text_bytes();
-    let warmer_bytes = sous.pantry().warmer().resident_bytes();
+    let warmer_bytes = sous.pantry().chunk_stats().resident_bytes;
     let pantry_bytes = sous.pantry().resident_bytes();
     let pantry_products = pantry_bytes
         .saturating_sub(warmer_bytes)
@@ -417,8 +417,8 @@ fn main() {
     let expediter_bytes = sous.resident_bytes();
     let sous_cache = expediter_bytes.saturating_sub(pantry_bytes);
     let (warmer_hits, warmer_misses) = (
-        sous.pantry().warmer().hits(),
-        sous.pantry().warmer().misses(),
+        sous.pantry().chunk_stats().hits,
+        sous.pantry().chunk_stats().misses,
     );
     let keystroke_median = median(&keystroke_times);
     let keystroke_p99 = p99(&keystroke_times);
@@ -452,7 +452,7 @@ fn main() {
     );
     println!(
         "{:<58} {:>12}",
-        "Warmer / LRU chunk cache (Pantry::warmer().resident_bytes)",
+        "Rebuildable / LRU chunk cache (Pantry::chunk_stats)",
         fmt_bytes(warmer_bytes)
     );
     println!(
@@ -489,8 +489,8 @@ fn main() {
     );
     println!();
     println!(
-        "Warmer hits={warmer_hits} misses={warmer_misses} evictions={} (of {} lookups)",
-        sous.pantry().warmer().evictions(),
+        "Chunk hits={warmer_hits} misses={warmer_misses} evictions={} (of {} lookups)",
+        sous.pantry().chunk_stats().evictions,
         warmer_hits + warmer_misses
     );
     println!(

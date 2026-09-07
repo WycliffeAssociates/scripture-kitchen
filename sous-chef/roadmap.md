@@ -286,7 +286,7 @@ Work:
    observations plus checksum-keyed detached projection and UTF-16 index data;
    it does not retain a canonical rope or accept splices. The pure Sous
    map/fold/judge functions own no resident cache. **B1 landed as `galley::Pantry`:
-   the id-keyed registry of detached per-book products (Warmer, TOC, mask,
+   the id-keyed registry of detached per-book products (chunks, TOC, mask,
    detached UTF-16 table, published length, `Fingerprint`), canonical `BookKey`
    order, `Target` role only; see
    [../galley/src/pantry.md](../galley/src/pantry.md). Text retention landed
@@ -693,6 +693,12 @@ and the transport contract are stable.
 
 Work:
 
+0. **T2 landed the caching layer it hardens:** `galley::pantry` is one layer —
+   chunk products, book products, retained text, and the Expediter's derived
+   stores — with one declared `Budget`, three accounted tiers (pinned / hot /
+   rebuildable), and every store's key and invalidation written down as law in
+   [../galley/src/pantry.md](../galley/src/pantry.md). The ceiling is enforced
+   on chunk products only; enforcing the other tiers is a later measured slice.
 1. Harden the minimal Galley introduced in Stage 2 into the public resident
    derived-state owner: analyze complete target/optional-source inputs, change
    judging config, query sites/details, and manage suppressions. Keep document

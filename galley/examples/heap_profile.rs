@@ -1,5 +1,5 @@
 //! Allocation-site attribution for the ~58 MiB `working_set` reports as
-//! unattributed at every Warmer budget. Reuses `working_set`'s corpus load
+//! unattributed at every rebuildable budget. Reuses `working_set`'s corpus load
 //! and churn recipe verbatim (see that file's doc comment) but swaps the
 //! counting allocator for `dhat`, whose JSON records bytes-at-global-max per
 //! allocation site (file:line + backtrace), not just a running total.
@@ -110,10 +110,10 @@ fn main() {
 
     println!("wrote {out_path}");
     println!(
-        "Expediter::resident_bytes()={} Pantry::text_bytes()={} Warmer::resident_bytes()={}",
+        "Expediter::resident_bytes()={} Pantry::text_bytes()={} chunk_stats().resident_bytes={}",
         sous.resident_bytes(),
         sous.pantry().text_bytes(),
-        sous.pantry().warmer().resident_bytes(),
+        sous.pantry().chunk_stats().resident_bytes,
     );
     // Keep the harness's own copies alive until here so dhat's global-max
     // snapshot (taken at drop, below) sees them — same reason `working_set`

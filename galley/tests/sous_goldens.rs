@@ -24,7 +24,7 @@ use sous_core::{Brigade, CorpusSnapshot, FindingKind, JudgingConfig};
 use usfm_galley::sous::Expediter;
 use usfm_galley::{Retain, Role};
 
-/// The Warmer LRU ceiling; the whole fixture corpus is 15 KB, so it never bites.
+/// The rebuildable ceiling; the whole fixture corpus is 15 KB, so it never bites.
 const BUDGET: usize = 1 << 20;
 
 pub const GEN: &str = include_str!("fixtures/sous/GEN.usfm");
@@ -199,4 +199,47 @@ fn the_knobs_golden_publishes_no_casing_row() {
     };
     assert_eq!(casing(&cold), 1, "the fixture's one casing pattern");
     assert_eq!(casing(&knobs), 0, "casing is off in the knobs publication");
+}
+
+/// The residency pin: the same three publications, with what the caches hold
+/// after each one written down. A refactor that moves a byte between owners
+/// moves this number, so "nothing observable changed" is a comparison and not
+/// a claim.
+#[test]
+fn resident_bytes_is_pinned_across_the_three_publications() {
+    let mut sous = Expediter::new(Brigade::default(), BUDGET);
+    for (id, text) in [
+        ("books/GEN.usfm", GEN),
+        ("books/RUT.usfm", RUT),
+        ("books/JON.usfm", JON),
+    ] {
+        sous.update(id, Role::Target, text).expect("a target");
+    }
+    for (id, text) in REFERENCES {
+        sous.update_with(id, Role::Reference, Retain::ProductsOnly, text)
+            .expect("a reference");
+    }
+    sous.publish().expect("the cold publication");
+    let cold = sous.resident_bytes();
+
+    sous.update("books/GEN.usfm", Role::Target, GEN_EDITED)
+        .expect("the keystroke");
+    sous.publish().expect("the edit publication");
+    let edit = sous.resident_bytes();
+
+    let moved = moved_knobs();
+    sous.set_config(((), moved, moved));
+    sous.publish().expect("the lane on, the lanes missing");
+    for (id, text) in REFERENCES {
+        sous.update_with(id, Role::Reference, Retain::ProductsOnly, text)
+            .expect("a reference");
+    }
+    sous.publish().expect("the knobs publication");
+    let knobs = sous.resident_bytes();
+
+    assert_eq!(
+        [cold, edit, knobs],
+        [93_104, 100_993, 108_101],
+        "resident bytes moved: cold, edit, knobs"
+    );
 }

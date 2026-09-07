@@ -28,15 +28,13 @@ pub mod corpus;
 pub mod find;
 pub mod pantry;
 pub mod sous;
-pub mod warmer;
 pub use find::{Find, Hit, Hits, SourceSpan};
 pub use mise::utf16::{Utf16Table, utf16_table};
 pub use pantry::{
-    BookId, Entry, Fingerprint, Pantry, PantryError, RawChecksum, Retain, Role, SourceLanes,
-    fingerprint,
+    BookId, Budget, ChunkStats, Entry, Fingerprint, Pantry, PantryError, RawChecksum, Retain, Role,
+    SourceLanes, Tally, Tier, fingerprint,
 };
 pub use sous::{Expediter, ObservationKey};
-pub use warmer::Warmer;
 
 #[cfg(feature = "wasm")]
 pub mod wasm;

@@ -596,13 +596,13 @@ fn two_of(rng: &mut Rng, len: usize) -> (usize, usize) {
 
 // -------------------------------------------------------------- the churn run
 
-/// The Warmer LRU ceiling every harness Expediter declares.
+/// The rebuildable tier's ceiling every harness Expediter declares.
 const BUDGET: usize = 64 << 20;
 
 /// Residency past that budgeted LRU: the chapter cache and the per-book
 /// products, which are what an edit churn could grow without bound.
 fn cache_bytes<P: ChapterPass + Sync>(sous: &Expediter<P>) -> usize {
-    sous.resident_bytes() - sous.pantry().warmer().resident_bytes()
+    sous.resident_bytes() - sous.pantry().chunk_stats().resident_bytes
 }
 
 /// What a churn run varies beyond the target texts.
@@ -887,8 +887,8 @@ fn churn_with<P: ChapterPass + Sync + Copy>(
     }
     fresh.publish().unwrap();
     assert!(
-        sous.pantry().warmer().resident_bytes() <= BUDGET,
-        "{name}: the Warmer is over its declared budget"
+        sous.pantry().chunk_stats().resident_bytes <= BUDGET,
+        "{name}: the chunk cache is over its declared budget"
     );
     assert!(
         cache_bytes(&sous) < 3 * cache_bytes(&fresh),

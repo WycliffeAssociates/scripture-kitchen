@@ -13,7 +13,7 @@
 //! Per book, fresh against folded:
 //!
 //! - `analyze_fresh` — `onion::analyze` with every want. What the editor pays
-//!   per keystroke TODAY: [`Warmer`] folds lint, not analyze, so this one
+//!   per keystroke TODAY: the chunk cache folds lint, not analyze, so this one
 //!   is un-foldable as things stand.
 //! - `lint_fresh` — the un-folded `lint(lex, build)` pipeline. The fold's
 //!   baseline.
@@ -31,7 +31,7 @@
 use std::sync::LazyLock;
 
 use divan::counter::BytesCount;
-use usfm_galley::{Warmer, onion};
+use usfm_galley::{Pantry, onion};
 
 /// See the note in `onion/benches/pipeline.rs`: measured overhead is under the
 /// noise floor, so this is safe to leave on when the counts are wanted.
@@ -121,17 +121,17 @@ fn book(name: &str) -> &'static Book {
 
 /// A cache warm on the unedited book, plus the proof that one keystroke is
 /// exactly one miss. Asserted here rather than inside the timed closure.
-fn warmed(book: &Book, name: &str) -> Warmer {
+fn warmed(book: &Book, name: &str) -> Pantry {
     // A budget, not an allocation — `new` builds an empty map and only compares
     // this against `resident_bytes()` when deciding to evict. Sized so nothing
     // evicts during a run: MEASURED worst case is en_ult PSA at 3.27 MB warm and
     // 4.62 MB after 50 keystrokes, so 16 MB is 3.5x headroom.
-    let mut cache = Warmer::new(24 << 20);
+    let mut cache = Pantry::new(24 << 20);
     cache.lint(&book.text);
-    let before = cache.misses();
+    let before = cache.chunk_stats().misses;
     cache.lint(&book.keystrokes[0]);
-    let dirty = cache.misses() - before;
-    if cache.is_empty() {
+    let dirty = cache.chunk_stats().misses - before;
+    if cache.chunk_stats().len == 0 {
         // Below galley's chunk gate: nothing is cached, so every call recomputes
         // every chunk. The invariant here is that the gate held, not that one
         // chunk went dirty.
