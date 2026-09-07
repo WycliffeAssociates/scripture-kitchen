@@ -318,6 +318,7 @@ The v1 code table and each code's lanes:
 | `0` | `LengthProportionality` | signed Q8.8 book-scope standardized deviation; `i16::MIN` unavailable | signed Q8.8 project/corpus-scope deviation; `i16::MIN` unavailable | a deviation was clamped |
 | `1` | `Hygiene` | `HygieneClass` discriminant | run length in code points, `1..=i16::MAX` | the run exceeds `i16::MAX`; the lane reads exactly `i16::MAX` |
 | `2` | `Convention` | index into the publication's pattern table | `Reasons` bitmask over the ladder rungs this site matched | never set |
+| `4` | `Presence` | `PresenceKind` discriminant: 0 missing, 1 extra, 2 empty | consecutive verse keys the row covers, `1..=i16::MAX` | the run exceeds `i16::MAX`; the lane reads exactly `i16::MAX` |
 
 The 6-bit rule-id proposal does not save a byte in this layout and makes
 decoding and evolution harder, so the charter chooses an explicit `u8`.
@@ -325,7 +326,9 @@ Each wire version has one dense table of active, hand-assigned codes. It has no
 reserved ranges and no retired entries. Removing or renumbering a code requires
 a new wire version rather than leaving tombstones in the current table.
 Codes append within a wire version: `Hygiene` joined as `1` when the first
-deterministic rule landed, and `Convention` as `2` when judging did. A
+deterministic rule landed, `Convention` as `2` when judging did, and `Presence`
+as `4`, which is the one departure from taking the next free `u8` — the
+source-copy rule was already specified against `3` and keeps it. A
 `Convention` row carries no evidence of its own — the corpus's pattern table
 is the evidence, and a site names a row of it, so one convention's argument is
 published once however many sites match it. Each code's lane codec lives in its own

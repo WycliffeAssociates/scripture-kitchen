@@ -10,6 +10,7 @@ pub mod hygiene;
 mod input;
 pub mod judge;
 mod pass;
+pub mod presence;
 pub mod proportionality;
 pub mod sites;
 pub mod substrate;
@@ -20,7 +21,8 @@ pub mod words;
 pub use alignment::{AlignedSide, AlignedUnit, Alignment, AlignmentFact, align};
 pub use codec::{
     CodecError, ConventionDigest, FindingFlags, FindingKind, HygieneClass, HygieneDigest,
-    PackedFinding, ProportionalityDigest, QuantizedDeviation, RECORD_LEN, Reasons, RuleCode,
+    PackedFinding, PresenceDigest, PresenceKind, ProportionalityDigest, QuantizedDeviation,
+    RECORD_LEN, Reasons, RuleCode,
 };
 pub use corpus::{
     CoordinateSpace, CorpusBook, CorpusSnapshot, CorpusWireError, DIRECTORY_ENTRY_BYTES,
@@ -40,6 +42,7 @@ pub use pass::{
     ChapterInput, ChapterKey, ChapterObs, ChapterPass, CorpusTotals, Findings, SchemaStamp,
     analyze, analyze_paired, analyze_with, for_each_chapter,
 };
+pub use presence::PresenceRow;
 pub use proportionality::{
     LengthConfig, Paired, PairedBook, ProjectSpread, SourceLengths, SourceVerse, TargetLengths,
     judge_lengths, judge_paired, source_lengths,

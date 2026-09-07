@@ -2,7 +2,7 @@
 //! table, and `reader.ts` staying generated from these same constants.
 
 use super::*;
-use crate::codec::{CodecError, HygieneClass};
+use crate::codec::{CodecError, HygieneClass, PresenceDigest, PresenceKind};
 use crate::judge::{Channel, PatternKey, Side};
 use crate::substrate::{OuterClass, ScalarKey};
 use crate::unicode::Pool;
@@ -269,6 +269,16 @@ fn mixed_kind_golden_buffer_decodes_in_both_readers() {
             &[0x0100],
         )
         .unwrap(),
+        // A whole absent chapter: one row of thirty keys, zero-length at the
+        // point they would be inserted.
+        PackedFinding::new(
+            0xe0,
+            0xe0,
+            BookIndex::new(0).unwrap(),
+            FindingKind::Presence(PresenceDigest::new(PresenceKind::Missing, 30).unwrap()),
+            &[0x0100],
+        )
+        .unwrap(),
     ];
     let section = PublicationBook::new(BookKey::new(*b"MRK"), "books/mrk.usfm", 0x0100, &findings);
     let encoded = encode_to_corpus_buffer(
@@ -278,6 +288,19 @@ fn mixed_kind_golden_buffer_decodes_in_both_readers() {
         &fixture_patterns(),
     )
     .unwrap();
+    // Regenerating is never a passing test, exactly as `UPDATE_GOLDENS` is.
+    if std::env::var_os("UPDATE_HEX").is_some() {
+        let hex: Vec<String> = encoded.iter().map(|byte| format!("{byte:02x}")).collect();
+        std::fs::write(
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../testdata/corpus_v1_hygiene.hex"
+            ),
+            format!("{}\n", hex.join(" ")),
+        )
+        .unwrap();
+        panic!("UPDATE_HEX rewrote the shared hex fixture; rerun without it to test it");
+    }
     let golden: Vec<u8> = include_str!("../../../testdata/corpus_v1_hygiene.hex")
         .split_whitespace()
         .map(|byte| u8::from_str_radix(byte, 16).unwrap())

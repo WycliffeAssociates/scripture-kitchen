@@ -2,7 +2,9 @@
 \h Ruth
 \toc1 The Book of Ruth
 \mt1 Ruth
-\rem Declared source for RUT.usfm; lengths only.
+\rem Declared source for RUT.usfm; lengths only. Its 2:11 has no target
+\rem counterpart, so the publication carries one Presence row: Missing, one
+\rem key, at the end of the target's 2:10.
 \c 1
 \p
 \v 1 The dye reed linen sandal of the sickle and the light beside the road in the rain.
@@ -27,3 +29,4 @@
 \v 8 The valley pasture road of the net and the wall beside the rain in the clay.
 \v 9 The cloak cedar staff briar of the brick and the salt beside the orchard in the basket.
 \v 10 The road jar olive of the briar and the net beside the dust in the grain.
+\v 11 The wick sand cloak of the beam and the shore beside the fig in the wool.

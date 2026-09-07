@@ -92,6 +92,26 @@ export interface HygieneFinding {
   readonly hygiene: HygieneDigest;
 }
 
+/** Wire lane 12..14 is the kind index into this table. */
+export const PRESENCE_KINDS = ["Missing", "Extra", "Empty"] as const;
+export type PresenceKind = (typeof PRESENCE_KINDS)[number];
+
+export interface PresenceDigest {
+  readonly kind: PresenceKind;
+  /** Consecutive verse keys the row covers; exact unless `saturated`. Which
+   * keys they are is the consumer's own table of contents around the span. */
+  readonly keys: number;
+  readonly saturated: boolean;
+}
+
+export interface PresenceFinding {
+  readonly kind: "Presence";
+  readonly from: number;
+  readonly to: number;
+  readonly bookIdx: number;
+  readonly presence: PresenceDigest;
+}
+
 /** Wire byte 8 of a pattern row is the index into this table. */
 export const CHANNELS = ["ExactNeighbor", "PooledNeighbor", "RunShape", "Placement", "Rarity", "Casing", "WordLength", "Doubled", "LetterRun", "SentenceStart"] as const;
 export type Channel = (typeof CHANNELS)[number];
@@ -162,7 +182,11 @@ export interface ConventionFinding {
   readonly convention: ConventionDigest;
 }
 
-export type Finding = LengthProportionalityFinding | HygieneFinding | ConventionFinding;
+export type Finding =
+  | LengthProportionalityFinding
+  | HygieneFinding
+  | ConventionFinding
+  | PresenceFinding;
 
 export class FindingsSnapshotError extends Error {
   constructor(message: string) {
@@ -424,7 +448,7 @@ export class BookView {
       return fail(`finding row ${row} carries book index ${bookIdx}, expected ${this.#index}`);
     }
     const code = this.#view.getUint8(at + RECORD_CODE_OFFSET);
-    if (code !== 0 && code !== 1 && code !== 2) {
+    if (code !== 0 && code !== 1 && code !== 2 && code !== 4) {
       return fail(`unknown finding rule code ${code}`);
     }
     const flags = this.#view.getUint8(at + RECORD_FLAGS_OFFSET);
@@ -452,6 +476,21 @@ export class BookView {
         return fail("saturated hygiene run must read back as 0x7fff");
       }
       return { kind: "Hygiene", from, to, bookIdx, hygiene: { class: hygieneClass, run, saturated } };
+    }
+    if (code === 4) {
+      const kindIndex = this.#view.getInt16(at + RECORD_BOOK_SCOPE_OFFSET, true);
+      const presenceKind = PRESENCE_KINDS[kindIndex];
+      if (presenceKind === undefined) {
+        return fail(`unknown presence kind ${kindIndex}`);
+      }
+      const keys = this.#view.getInt16(at + RECORD_PROJECT_SCOPE_OFFSET, true);
+      if (keys < 1) {
+        return fail("a presence row covers at least one key");
+      }
+      if (saturated && keys !== 0x7fff) {
+        return fail("saturated presence key count must read back as 0x7fff");
+      }
+      return { kind: "Presence", from, to, bookIdx, presence: { kind: presenceKind, keys, saturated } };
     }
     if (code === 2) {
       if (saturated) {

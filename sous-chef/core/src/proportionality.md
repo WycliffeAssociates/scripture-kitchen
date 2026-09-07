@@ -114,8 +114,9 @@ for the report page.
 
 ## Configuration and recomputation
 
-`LengthConfig { z_long: 3.5, z_short: 3.5, min_verses: 50, enabled: true }`,
-a field of `JudgingConfig`. The defaults are v1's calibrated ones and the
+`LengthConfig { z_long: 3.5, z_short: 3.5, min_verses: 50, enabled: true,
+presence: true }`, a field of `JudgingConfig`. `presence` is the other rule's
+switch and is documented with it. The defaults are v1's calibrated ones and the
 paired survey is their regression gate, not an invitation to retune them
 (`rules/length-proportionality.md`).
 
@@ -130,7 +131,7 @@ the retained lengths, and `judge_lengths` does exactly that. It is also
 separable, which is what a resident host needs: `PairedBook::pair` is a pure
 function of the two books' rows — ratios, the target spans they name, and the
 knob-free `Spread` over them — and `judge_paired` turns pairs a caller already
-holds into rows under a config. A `Spread` carries no knob, so `min_verses`
+holds into rows under a config, both rules' rows at once. A `Spread` carries no knob, so `min_verses`
 gates it at judging time and a knob never invalidates a pair.
 
 The `Expediter` keys one `PairedBook` per (target checksum, source checksum)
@@ -141,9 +142,12 @@ recomputation would produce.
 
 ## What is NOT here
 
-Presence and versification shear. Target-only and source-only keys, ambiguous
-duplicates, and partial overlaps come back in `Paired::facts` as structure a
-host may report; `sous-cli` prints them as per-book counts. They are never
-rows, and a future presence or shear finding needs its own actionable claim and
-rule contract rather than hiding inside this one
+Presence and versification shear. An absent key and an empty unit produce no
+ratio here; they are [`presence.md`](presence.md)'s wire code 4, judged from
+the same `pair_keys` call and cached in the same `PairedBook`, and no
+proportionality row ever fabricates a zero-length ratio to stand in for one.
+Ambiguous duplicates and partial overlaps come back in `Paired::facts` as
+structure a host may report and are rows in neither rule. Versification shear
+stays parked and needs its own actionable claim and rule contract rather than
+hiding inside this one
 ([`../../rules/presence-shear.md`](../../rules/presence-shear.md)).

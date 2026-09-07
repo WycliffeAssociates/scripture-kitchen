@@ -929,9 +929,12 @@ impl<P: ChapterPass + Sync> Expediter<P> {
                 // dropped here — a host that wants them runs the cold path.
                 //
                 // Only a book whose own checksum or whose source's moved is
-                // paired again: the ratios and their order statistics are a
-                // pure function of both sides' rows (`expediter.md`).
-                let lengths = pass.length_config(config).filter(|lengths| lengths.enabled);
+                // paired again: the ratios, their order statistics, and the
+                // presence rows are a pure function of both sides' rows
+                // (`expediter.md`).
+                let lengths = pass
+                    .length_config(config)
+                    .filter(|lengths| lengths.enabled || lengths.presence);
                 // First wins: a caller may present two files under one key, and
                 // the choice has to be its order rather than a hash's.
                 let mut sources: FxHashMap<BookKey, (RawChecksum, &[SourceVerse])> =

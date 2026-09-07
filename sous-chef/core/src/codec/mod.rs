@@ -19,10 +19,12 @@ use crate::BookIndex;
 
 mod convention;
 mod hygiene;
+mod presence;
 mod proportionality;
 
 pub use convention::{ConventionDigest, Reasons};
 pub use hygiene::{HygieneClass, HygieneDigest};
+pub use presence::{PresenceDigest, PresenceKind};
 pub use proportionality::{ProportionalityDigest, QuantizedDeviation};
 
 pub const RECORD_LEN: usize = 16;
@@ -41,6 +43,7 @@ pub enum RuleCode {
     LengthProportionality = 0,
     Hygiene = 1,
     Convention = 2,
+    Presence = 4,
 }
 
 impl TryFrom<u8> for RuleCode {
@@ -51,6 +54,7 @@ impl TryFrom<u8> for RuleCode {
             0 => Ok(Self::LengthProportionality),
             1 => Ok(Self::Hygiene),
             2 => Ok(Self::Convention),
+            4 => Ok(Self::Presence),
             other => Err(CodecError::UnknownRuleCode(other)),
         }
     }
@@ -70,6 +74,9 @@ pub enum FindingKind {
     Hygiene(HygieneDigest),
     /// One site matching a row of the publication's pattern table.
     Convention(ConventionDigest),
+    /// A coalesced run of verse keys one side of the pairing does not hold,
+    /// or holds with no content.
+    Presence(PresenceDigest),
 }
 
 /// A checked semantic representation of one 16-byte wire record.
@@ -121,6 +128,7 @@ impl PackedFinding {
             FindingKind::LengthProportionality(_) => RuleCode::LengthProportionality,
             FindingKind::Hygiene(_) => RuleCode::Hygiene,
             FindingKind::Convention(_) => RuleCode::Convention,
+            FindingKind::Presence(_) => RuleCode::Presence,
         }
     }
 
@@ -130,6 +138,7 @@ impl PackedFinding {
             FindingKind::LengthProportionality(digest) => digest.saturated(),
             FindingKind::Hygiene(digest) => digest.saturated(),
             FindingKind::Convention(digest) => digest.saturated(),
+            FindingKind::Presence(digest) => digest.saturated(),
         };
         if saturated {
             FindingFlags::SATURATED
@@ -151,6 +160,7 @@ impl PackedFinding {
             FindingKind::LengthProportionality(digest) => digest.lanes(),
             FindingKind::Hygiene(digest) => digest.lanes(),
             FindingKind::Convention(digest) => digest.lanes(),
+            FindingKind::Presence(digest) => digest.lanes(),
         };
         bytes[RECORD_BOOK_SCOPE_OFFSET..RECORD_PROJECT_SCOPE_OFFSET]
             .copy_from_slice(&first.to_le_bytes());
@@ -212,6 +222,7 @@ impl PackedFinding {
             RuleCode::Convention => {
                 FindingKind::Convention(ConventionDigest::from_lanes(lanes, flags)?)
             }
+            RuleCode::Presence => FindingKind::Presence(PresenceDigest::from_lanes(lanes, flags)?),
         };
         if from > to {
             return Err(CodecError::ReversedSpan { from, to });
@@ -305,6 +316,8 @@ pub enum CodecError {
     MissingDeviationSentinel,
     UnknownHygieneClass(i16),
     EmptyHygieneRun,
+    UnknownPresenceKind(i16),
+    EmptyPresenceRun,
     UnknownReasons(u16),
     EmptyReasons,
     ReversedSpan { from: u32, to: u32 },
@@ -329,6 +342,8 @@ impl fmt::Display for CodecError {
             }
             Self::UnknownHygieneClass(raw) => write!(f, "unknown hygiene class {raw}"),
             Self::EmptyHygieneRun => f.write_str("hygiene run length must be at least 1"),
+            Self::UnknownPresenceKind(raw) => write!(f, "unknown presence kind {raw}"),
+            Self::EmptyPresenceRun => f.write_str("a presence row covers at least one key"),
             Self::UnknownReasons(bits) => write!(f, "unknown convention reasons 0x{bits:04x}"),
             Self::EmptyReasons => f.write_str("a convention row carries at least one reason"),
             Self::ReversedSpan { from, to } => write!(f, "reversed finding span {from}..{to}"),

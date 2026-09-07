@@ -257,8 +257,9 @@ before `locate`, from the lengths both sides already retain:
 pass.length_config(config)         -> the knobs, from the member that owns the lane
 pass.verse_lengths(aggregate)      -> the target lane, per Target book
 pantry.reference_lengths(id)       -> the source rows, per Reference book
-PairedBook::pair(target, source)   -> one book's ratios; cached, facts dropped
-judge_paired(books, project, ..)   -> rows over target spans
+PairedBook::pair(target, source)   -> one book's ratios AND its presence rows;
+                                      cached together, facts dropped
+judge_paired(books, project, ..)   -> code 0 and code 4 rows over target spans
 ```
 
 Every Target pairs with the Reference of the same `BookKey` — the first, if a
@@ -286,9 +287,11 @@ Three properties follow, and each is a test:
 
 The facts pairing returns — target-only and source-only keys, ambiguous
 duplicates, partial overlaps — are dropped here. They are alignment structure,
-never findings (`rules/presence-shear.md`); a host that wants them runs the
-cold `analyze_paired`, which returns them, and `sous-cli` prints them as
-per-book counts.
+and the two the presence rule reads it has already turned into rows before this
+point (`rules/presence-shear.md`); a host that wants the facts themselves runs
+the cold `analyze_paired`, which returns them, and `sous-cli` prints them as
+per-book counts. `LengthConfig::presence` and `LengthConfig::enabled` are
+independent, and pairing runs while EITHER is on.
 
 ## The paired cache
 
@@ -298,7 +301,8 @@ sample:
 
 ```text
 paired[(target RawChecksum, source RawChecksum)]
-  = PairedBook { ratios, target spans, the book's knob-free Spread }
+  = PairedBook { ratios, target spans, coalesced presence rows,
+                 the book's knob-free Spread }
 ```
 
 `last_paired()` counts the books that missed: all of them on a cold open, one

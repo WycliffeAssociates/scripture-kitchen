@@ -89,11 +89,21 @@ pub struct PairedUnit {
     pub source: String,
 }
 
+/// One presence row as the page shows it: which side holds the verses, the
+/// first key, and how many consecutive keys follow it.
+pub struct PresenceUnit {
+    pub book_idx: u16,
+    pub address: String,
+    pub kind: &'static str,
+    pub keys: u32,
+}
+
 /// The source comparison's contribution to the page; empty when no source
 /// was declared, which is what hides the tab.
 #[derive(Default)]
 pub struct Paired {
     pub units: Vec<PairedUnit>,
+    pub presence: Vec<PresenceUnit>,
 }
 
 /// The self-contained inventory page for the target corpus.
@@ -126,6 +136,23 @@ fn lengths_json(paired: &Paired) -> String {
                 scope(unit.project_z),
                 json_str(unit.target.trim()),
                 json_str(unit.source.trim()),
+            )
+        })
+        .collect();
+    format!("[{}]", rows.join(","))
+}
+
+/// `pres[]`: one record per presence row, in publication order.
+fn presence_json(paired: &Paired) -> String {
+    let rows: Vec<String> = paired
+        .presence
+        .iter()
+        .map(|row| {
+            format!(
+                "{{\"ref\":{},\"kind\":{},\"keys\":{}}}",
+                json_str(&row.address),
+                json_str(row.kind),
+                row.keys,
             )
         })
         .collect();
@@ -280,12 +307,13 @@ fn corpus_json(
         ));
     }
     format!(
-        r#"{{"name":{},"judging":{},"glyphs":[{}],"cap":[{}],"len":{}}}"#,
+        r#"{{"name":{},"judging":{},"glyphs":[{}],"cap":[{}],"len":{},"pres":{}}}"#,
         json_str(name),
         json_str(&judging),
         glyph_json.join(","),
         cap_json(corpus, patterns, findings),
         lengths_json(paired),
+        presence_json(paired),
     )
 }
 

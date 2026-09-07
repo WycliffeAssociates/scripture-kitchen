@@ -22,7 +22,8 @@
 use rustc_hash::FxHashMap;
 
 use crate::alignment::pair_keys;
-use crate::codec::{FindingKind, ProportionalityDigest, QuantizedDeviation};
+use crate::codec::{FindingKind, PresenceDigest, ProportionalityDigest, QuantizedDeviation};
+use crate::presence::{self, PresenceRow};
 use crate::substrate::VerseLength;
 use crate::unicode::atoms::count_atoms;
 use crate::{AlignmentFact, BookIndex, BookKey, Findings, ProjectedBook, TextRange, VerseKey};
@@ -49,6 +50,11 @@ pub struct LengthConfig {
     /// Paired units a scope needs before it judges at all.
     pub min_verses: u32,
     pub enabled: bool,
+    /// Verses one side holds and the other does not, and paired target verses
+    /// with no content. On: the facts already exist in the pairing, they cost
+    /// no text walk, and versification difference alone keeps the volume to a
+    /// handful of coalesced rows per book.
+    pub presence: bool,
 }
 
 impl Default for LengthConfig {
@@ -58,6 +64,7 @@ impl Default for LengthConfig {
             z_short: 3.5,
             min_verses: 50,
             enabled: true,
+            presence: true,
         }
     }
 }
@@ -74,6 +81,7 @@ impl PartialEq for LengthConfig {
             && self.z_short.to_bits() == other.z_short.to_bits()
             && self.min_verses == other.min_verses
             && self.enabled == other.enabled
+            && self.presence == other.presence
     }
 }
 
@@ -135,16 +143,19 @@ pub fn source_lengths(book: &impl ProjectedBook) -> Vec<SourceVerse> {
 
 /// What one paired judgement saw, beside the rows it pushed.
 ///
-/// Both halves are structure, not evidence: a count of ratios is a
+/// `units` and `facts` are structure, not evidence: a count of ratios is a
 /// denominator a host may show, and a fact says why a key did not pair.
-/// Presence and versification shear are separate, parked rules
-/// (`rules/presence-shear.md`), so neither ever becomes a finding.
+/// Versification shear is a separate, parked rule
+/// (`rules/presence-shear.md`) and never becomes a finding.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Paired {
     /// Units that produced a ratio, per target book in slice order.
     pub units: Vec<u32>,
     /// Why a key did not pair.
     pub facts: Vec<AlignmentFact>,
+    /// The presence rows pushed, per target book in slice order, with the keys
+    /// the wire lanes do not carry.
+    pub presence: Vec<Vec<PresenceRow>>,
 }
 
 impl Paired {
@@ -166,6 +177,9 @@ pub struct PairedBook {
     /// book's ratios for the project scope is a memcpy rather than a walk.
     ratios: Box<[f64]>,
     spans: Box<[TextRange]>,
+    /// Coalesced presence rows, in span order. A pure function of the same two
+    /// key lists the ratios come from, so one cache entry holds both.
+    presence: Box<[PresenceRow]>,
     spread: Spread,
 }
 
@@ -182,32 +196,24 @@ impl PairedBook {
         let source_keys: Vec<VerseKey> = source.iter().map(|row| row.key()).collect();
         let mut ratios: Vec<f64> = Vec::with_capacity(target.len());
         let mut spans: Vec<TextRange> = Vec::with_capacity(target.len());
+        let mut empties: Vec<(VerseKey, TextRange)> = Vec::new();
+        // This book's own facts, whatever the caller accumulated before it.
+        let facts_start = facts.len();
         pair_keys(
             book,
             &target_keys,
             &source_keys,
-            &mut |_, left, right| {
+            &mut |key, left, right| {
                 let long: u32 = left.iter().map(|at| target[*at].graphemes()).sum();
                 let short: u32 = right.iter().map(|at| source[*at].graphemes()).sum();
                 if long == 0 || short == 0 {
+                    if long == 0 && short > 0 {
+                        empties.push((key, bounding(target, left)));
+                    }
                     return;
                 }
-                // A bridge is ONE row over the bounding target range: its
-                // constituents may be discontinuous, and the span is a
-                // navigation coordinate, not a claim that the bytes between
-                // belong to it.
-                let from = left
-                    .iter()
-                    .map(|at| target[*at].text().from())
-                    .min()
-                    .expect("a paired unit has a target row");
-                let to = left
-                    .iter()
-                    .map(|at| target[*at].text().to())
-                    .max()
-                    .expect("a paired unit has a target row");
                 ratios.push(f64::from(long) / f64::from(short));
-                spans.push(TextRange::new(from, to).expect("a bounding range keeps its order"));
+                spans.push(bounding(target, left));
             },
             facts,
         );
@@ -216,8 +222,14 @@ impl PairedBook {
         Self {
             ratios: ratios.into(),
             spans: spans.into(),
+            presence: presence::rows(target, &facts[facts_start..], &empties).into(),
             spread,
         }
+    }
+
+    /// The presence rows this pairing found, in span order.
+    pub fn presence(&self) -> &[PresenceRow] {
+        &self.presence
     }
 
     /// Every unit's ratio, in target order.
@@ -230,9 +242,12 @@ impl PairedBook {
         u32::try_from(self.ratios.len()).expect("a book holds under 4G verses")
     }
 
-    /// Inline size plus both lanes: what a resident cache pays for one book.
+    /// Inline size plus every lane: what a resident cache pays for one book.
     pub fn resident_bytes(&self) -> usize {
-        size_of::<Self>() + size_of_val(&*self.ratios) + size_of_val(&*self.spans)
+        size_of::<Self>()
+            + size_of_val(&*self.ratios)
+            + size_of_val(&*self.spans)
+            + size_of_val(&*self.presence)
     }
 }
 
@@ -268,7 +283,7 @@ pub fn judge_paired(
     config: &LengthConfig,
     out: &mut Findings,
 ) -> Vec<u32> {
-    if !config.enabled {
+    if !config.enabled && !config.presence {
         return vec![0; books.len()];
     }
     let project = project.0.gated(config.min_verses);
@@ -279,11 +294,28 @@ pub fn judge_paired(
             continue;
         };
         counts.push(paired.count());
-        if paired.ratios.is_empty() {
+        let book_idx = BookIndex::new(index).expect("a corpus indexes every book");
+        let mut opened = false;
+        if config.presence {
+            for row in &*paired.presence {
+                if !opened {
+                    out.open_book(book_idx);
+                    opened = true;
+                }
+                out.push(
+                    row.span(),
+                    FindingKind::Presence(
+                        PresenceDigest::new(row.kind(), row.keys())
+                            .expect("a coalesced row covers a key"),
+                    ),
+                )
+                .expect("a presence span lies inside its own book");
+            }
+        }
+        if !config.enabled || paired.ratios.is_empty() {
             continue;
         }
         let book = paired.spread.gated(config.min_verses);
-        let mut opened = false;
         for (ratio, span) in paired.ratios.iter().zip(paired.spans.iter()) {
             let book_z = side_z(*ratio, book);
             let project_z = side_z(*ratio, project);
@@ -291,7 +323,7 @@ pub fn judge_paired(
                 continue;
             }
             if !opened {
-                out.open_book(BookIndex::new(index).expect("a corpus indexes every book"));
+                out.open_book(book_idx);
                 opened = true;
             }
             // Both scopes ride every row; a scope that did not judge is the
@@ -326,10 +358,11 @@ pub fn judge_lengths(
     out: &mut Findings,
 ) -> Paired {
     let mut facts = Vec::new();
-    if !config.enabled {
+    if !config.enabled && !config.presence {
         return Paired {
             units: vec![0; target.len()],
             facts,
+            presence: vec![Vec::new(); target.len()],
         };
     }
     // First wins: a caller may present two files under one key, and the
@@ -348,10 +381,35 @@ pub fn judge_lengths(
         .collect();
     let views: Vec<Option<&PairedBook>> = books.iter().map(Option::as_ref).collect();
     let project = ProjectSpread::of(&views);
+    let presence = views
+        .iter()
+        .map(|book| match book.filter(|_| config.presence) {
+            Some(book) => book.presence().to_vec(),
+            None => Vec::new(),
+        })
+        .collect();
     Paired {
         units: judge_paired(&views, &project, config, out),
         facts,
+        presence,
     }
+}
+
+/// A bridge is ONE row over the bounding target range: its constituents may be
+/// discontinuous, and the span is a navigation coordinate, not a claim that
+/// the bytes between belong to it.
+fn bounding(target: &[VerseLength], at: &[usize]) -> TextRange {
+    let from = at
+        .iter()
+        .map(|at| target[*at].text().from())
+        .min()
+        .expect("a paired unit has a target row");
+    let to = at
+        .iter()
+        .map(|at| target[*at].text().to())
+        .max()
+        .expect("a paired unit has a target row");
+    TextRange::new(from, to).expect("a bounding range keeps its order")
 }
 
 /// A median with its two one-sided MADs, their sample sizes, and the pooled

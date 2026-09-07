@@ -597,6 +597,21 @@ function lenRowHTML(r){
       <div><div class="lenlabel">source</div><div class="specimen">${esc(r.s)}</div></div>
     </div></div>`;
 }
+function presRows(){return corpus().pres||[]}
+function presRowHTML(r){
+  return `<tr><td class="mono">${esc(r.ref)}</td><td>${esc(r.kind)}</td><td class="mono">${r.keys}</td></tr>`;
+}
+function presenceHTML(){
+  const rows=presRows();
+  if(!rows.length)return "";
+  return `<div class="qgroup"><h3>Verses present on one side <span class="cnt">${rows.length}</span></h3>
+    <p class="note">Keys only. <em>Missing</em> is a source key with no target verse, <em>extra</em> a
+    target verse the source has no key for, and <em>empty</em> a paired target verse with no content
+    beside a source that has some. Consecutive keys of one chapter are one row, and the count says how
+    many. This is not a claim that anything is untranslated: a different source legitimately keeps a
+    different list of verses.</p>
+    <div class="twrap"><table><tr><th>first key</th><th>side</th><th>keys</th></tr>${rows.map(presRowHTML).join("")}</table></div></div>`;
+}
 function drawLen(){
   const rows=lenRows();
   $("#app").innerHTML=`<main>
@@ -617,6 +632,7 @@ function drawLen(){
       no counterpart, an empty verse, and an ambiguous key pair produce no ratio at all and
       are not here.</p>
       ${rows.map(lenRowHTML).join("")||"<p class='empty'>No source was declared, or nothing was flagged against it.</p>"}</div>
+    ${presenceHTML()}
   </main>`;
 }
 

@@ -7,9 +7,9 @@
 
 use super::*;
 use crate::codec::{
-    HygieneClass, RECORD_BOOK_INDEX_OFFSET, RECORD_BOOK_SCOPE_OFFSET, RECORD_CODE_OFFSET,
-    RECORD_FLAGS_OFFSET, RECORD_FROM_OFFSET, RECORD_LEN, RECORD_PROJECT_SCOPE_OFFSET,
-    RECORD_TO_OFFSET, Reasons,
+    HygieneClass, PresenceKind, RECORD_BOOK_INDEX_OFFSET, RECORD_BOOK_SCOPE_OFFSET,
+    RECORD_CODE_OFFSET, RECORD_FLAGS_OFFSET, RECORD_FROM_OFFSET, RECORD_LEN,
+    RECORD_PROJECT_SCOPE_OFFSET, RECORD_TO_OFFSET, Reasons,
 };
 use crate::judge::{Channel, Staircase};
 use crate::substrate::{OuterClass, RUN_BUCKETS};
@@ -18,7 +18,7 @@ use crate::words::{Form, LETTER_RUN_MAX, LETTER_RUN_MIN};
 
 /// Render the checked-in TypeScript reader from the Rust-owned wire schema.
 pub fn generated_reader_ts() -> String {
-    let substitutions: [(&str, String); 54] = [
+    let substitutions: [(&str, String); 55] = [
         ("@@MAGIC@@", format!("0x{MAGIC:08x}")),
         ("@@FORMAT_VERSION@@", FORMAT_VERSION.to_string()),
         ("@@FLAG_UTF16@@", FLAG_UTF16.to_string()),
@@ -27,6 +27,14 @@ pub fn generated_reader_ts() -> String {
             HygieneClass::ALL
                 .iter()
                 .map(|class| format!("\"{}\"", class.name()))
+                .collect::<Vec<_>>()
+                .join(", "),
+        ),
+        (
+            "@@PRESENCE_KINDS@@",
+            PresenceKind::ALL
+                .iter()
+                .map(|kind| format!("\"{}\"", kind.name()))
                 .collect::<Vec<_>>()
                 .join(", "),
         ),

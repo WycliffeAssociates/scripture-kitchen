@@ -248,6 +248,7 @@ pub struct Knobs {
     pub z_short: f32,
     pub min_verses: u32,
     pub lengths_enabled: bool,
+    pub presence: bool,
 }
 
 impl Knobs {
@@ -286,6 +287,7 @@ impl Knobs {
             z_short: config.lengths.z_short,
             min_verses: config.lengths.min_verses,
             lengths_enabled: config.lengths.enabled,
+            presence: config.lengths.presence,
         }
     }
 
@@ -314,6 +316,7 @@ impl Knobs {
             z_short: self.z_short,
             min_verses: self.min_verses,
             enabled: self.lengths_enabled,
+            presence: self.presence,
         };
     }
 }

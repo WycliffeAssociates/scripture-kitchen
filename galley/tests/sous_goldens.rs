@@ -106,7 +106,7 @@ fn the_three_publications_equal_their_goldens() {
 #[test]
 fn the_cold_golden_holds_a_row_of_every_wire_code() {
     let snapshot = CorpusSnapshot::open(COLD).expect("cold.bin is a corpus buffer");
-    let (mut lengths, mut hygiene, mut conventions) = (0, 0, 0);
+    let (mut lengths, mut hygiene, mut conventions, mut presence) = (0, 0, 0, 0);
     for index in 0..snapshot.len() {
         let book = snapshot
             .book(sous_core::BookIndex::new(index).expect("a listed book"))
@@ -116,6 +116,7 @@ fn the_cold_golden_holds_a_row_of_every_wire_code() {
                 FindingKind::LengthProportionality(_) => lengths += 1,
                 FindingKind::Hygiene(_) => hygiene += 1,
                 FindingKind::Convention(_) => conventions += 1,
+                FindingKind::Presence(_) => presence += 1,
             }
         }
     }
@@ -127,6 +128,10 @@ fn the_cold_golden_holds_a_row_of_every_wire_code() {
     assert!(
         conventions > 0,
         "no convention row: the glyph lanes went quiet"
+    );
+    assert!(
+        presence > 0,
+        "no presence row: ref/RUT 2:11 found a target counterpart"
     );
 }
 

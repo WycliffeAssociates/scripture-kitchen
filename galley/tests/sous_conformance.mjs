@@ -80,7 +80,7 @@ const kinds = (snapshot) => {
   return seen;
 };
 const coldKinds = kinds(cold);
-for (const kind of ["Hygiene", "Convention", "LengthProportionality"]) {
+for (const kind of ["Hygiene", "Convention", "LengthProportionality", "Presence"]) {
   check(coldKinds.has(kind), `cold.bin holds a ${kind} row`);
 }
 

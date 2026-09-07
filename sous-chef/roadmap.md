@@ -608,9 +608,16 @@ Work:
    three-deviation per-side floor. The survey caught no drift.
 5. Resolve presence/shear ownership (open gate 1). Retain the current
    proportionality defaults and use the paired survey as their regression
-   gate. **Still open**, and deliberately: presence and shear stay parked. S1
-   reports unpaired keys as per-book counts in the CLI and as
-   `Paired::facts` in the library, and emits no row for either.
+   gate. **Presence landed (P1), shear still parked.** Wire code 4 `Presence`
+   states three facts about keys — a source key with no target unit, a target
+   key with no source unit, and a paired target unit with no content beside a
+   nonempty source — coalesced so a whole absent chapter is one row. It reads
+   no text, rides the same `pair_keys` call and the same `PairedBook` cache as
+   the ratios, and claims nothing about translation
+   (`rules/presence-shear.md`). `channels`-style switch:
+   `LengthConfig::presence`, default true on 18 and 23 rows per tier corpus
+   against `en_ulb` (evidence.md, 2026-09-07). Ambiguous duplicates and
+   partial overlaps stay `Paired::facts` and rows in neither rule.
 
 Verification gate:
 
@@ -628,7 +635,7 @@ Verification gate:
 - every divergence from v1 receives “fix, accepted model change, or upstream
   ownership” disposition.
 
-**Status after S1:** every gate bullet is met except the shear half of the
+**Status after P1:** every gate bullet is met except the shear half of the
 last-but-one, which has no rule to exclude anything from yet. The dispositions
 are in `planning/RESUME-2026-09-04.md` §8 and the survey rows in
 `evidence.md` (2026-09-07). What Stage 5 has NOT built, and did not promise to:

@@ -130,10 +130,10 @@ test("decodes the galley-published UTF-16 golden with rebased spans", () => {
   });
 });
 
-test("decodes mixed proportionality and hygiene rows, saturation included", () => {
+test("decodes mixed proportionality, hygiene, and presence rows, saturation included", () => {
   const snapshot = FindingsSnapshot.open(hexFixture("corpus_v1_hygiene.hex"));
   const mark = snapshot.book("MRK");
-  assert.equal(mark.count, 6);
+  assert.equal(mark.count, 7);
   assert.deepEqual(mark.at(0), {
     kind: "Hygiene",
     from: 3,
@@ -179,6 +179,23 @@ test("decodes mixed proportionality and hygiene rows, saturation included", () =
     bookIdx: 0,
     convention: { pattern: 9, reasons: ["SentenceStart"] },
   });
+  // A whole absent chapter: one row of thirty keys, zero-length at the point
+  // they would be inserted.
+  assert.deepEqual(mark.at(6), {
+    kind: "Presence",
+    from: 0xe0,
+    to: 0xe0,
+    bookIdx: 0,
+    presence: { kind: "Missing", keys: 30, saturated: false },
+  });
+
+  const PRESENCE_RECORD = FIRST_MIXED_RECORD + 6 * RECORD_LEN;
+  const badKind = hexFixture("corpus_v1_hygiene.hex");
+  badKind[PRESENCE_RECORD + 12] = 3;
+  assert.throws(() => FindingsSnapshot.open(badKind).book(0).at(6), FindingsSnapshotError);
+  const zeroKeys = hexFixture("corpus_v1_hygiene.hex");
+  zeroKeys[PRESENCE_RECORD + 14] = 0;
+  assert.throws(() => FindingsSnapshot.open(zeroKeys).book(0).at(6), FindingsSnapshotError);
 
   const badClass = hexFixture("corpus_v1_hygiene.hex");
   badClass[FIRST_MIXED_RECORD + 12] = 11;

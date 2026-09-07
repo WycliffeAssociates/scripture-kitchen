@@ -39,8 +39,8 @@ use sous_core::unicode::atoms::count_atoms;
 use sous_core::words::LETTER_RUN_MAX;
 use sous_core::{
     AlignedUnit, Alignment, AlignmentFact, Brigade, ChapterPass, Corpus, FindingKind,
-    PackedFinding, Pattern, PatternKey, ProjectedBook, ScalarKey, SnapshotId, SourceLengths,
-    SourceVerse, TextRange, align, analyze_paired, source_lengths,
+    PackedFinding, Paired, Pattern, PatternKey, ProjectedBook, ScalarKey, SnapshotId,
+    SourceLengths, SourceVerse, TextRange, align, analyze_paired, source_lengths,
 };
 use usage::Cli;
 use usfm_galley::sous::{OnionBook, OnionInputBook, publish_onion_findings};
@@ -155,11 +155,12 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             .iter()
             .map(|(key, verses)| SourceLengths { book: *key, verses })
             .collect();
-        let (findings, patterns) = brigade_findings(&target_corpus, &source);
+        let (findings, patterns, paired) = brigade_findings(&target_corpus, &source);
         if args.findings {
             print_findings(&target_corpus, &findings);
             if let (Some(alignment), Some(source_corpus)) = (&alignment, source_corpus.as_ref()) {
                 print_length_findings(&target_corpus, source_corpus, alignment, &findings);
+                print_presence(&target_corpus, &paired);
                 print_unpaired(alignment);
             }
             print_patterns(&target_corpus, &findings, &patterns);
@@ -174,6 +175,7 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                 .zip(source_corpus.as_ref())
                 .map(|(alignment, source)| report::Paired {
                     units: paired_rows(&target_corpus, source, alignment, &findings),
+                    presence: presence_rows(&target_corpus, &paired),
                 })
                 .unwrap_or_default();
             let page = report::render(&name, &target_corpus, &patterns, &findings, &paired);
@@ -317,11 +319,11 @@ fn format_typo_report(groups: &[sous_core::typos::TypoGroup]) -> String {
 fn brigade_findings(
     corpus: &Corpus<'_, OnionBook>,
     source: &[SourceLengths<'_>],
-) -> (Vec<PackedFinding>, Vec<Pattern>) {
+) -> (Vec<PackedFinding>, Vec<Pattern>, Paired) {
     let config = <Brigade as ChapterPass>::Config::default();
-    analyze_paired(corpus, &Brigade::default(), &config, source)
-        .0
-        .into_parts()
+    let (findings, paired) = analyze_paired(corpus, &Brigade::default(), &config, source);
+    let (rows, patterns) = findings.into_parts();
+    (rows, patterns, paired)
 }
 
 /// One fired length row with everything the wire does not carry: the address,
@@ -442,8 +444,37 @@ fn print_length_findings(
     }
 }
 
-/// Alignment facts as counts per book. Presence and versification shear are
-/// parked rules: an unpaired key is structure, and never a finding.
+/// One line per presence row: the first key it covers, which side holds the
+/// verses, and how many consecutive keys. Never a claim that a translation is
+/// missing — only that these keys sit on one side of the pairing.
+fn print_presence(target: &Corpus<'_, OnionBook>, paired: &Paired) {
+    for row in presence_rows(target, paired) {
+        println!(
+            "presence target[{}] {} {} \u{d7}{}",
+            row.book_idx, row.address, row.kind, row.keys
+        );
+    }
+}
+
+/// Every presence row with the book and key the wire lanes do not carry.
+fn presence_rows(target: &Corpus<'_, OnionBook>, paired: &Paired) -> Vec<report::PresenceUnit> {
+    let mut out = Vec::new();
+    for ((index, book), rows) in target.iter().zip(&paired.presence) {
+        for row in rows {
+            out.push(report::PresenceUnit {
+                book_idx: index.get(),
+                address: format!("{} {}", book.key(), address_of(row.key())),
+                kind: row.kind().name(),
+                keys: row.keys(),
+            });
+        }
+    }
+    out
+}
+
+/// Alignment facts as counts per book. An unpaired key is structure; the
+/// presence rows above are the reviewable claim over the same keys, and
+/// versification shear stays a parked rule.
 fn print_unpaired(alignment: &Alignment) {
     let mut counts: FxHashMap<sous_core::BookKey, [u32; 4]> = FxHashMap::default();
     for fact in alignment.facts() {
@@ -1046,7 +1077,7 @@ mod tests {
         fs::write(&path, "\\id MRK\n\\c 1\n\\p\n\\v 1 An 🧅 \\\\ here.\n").unwrap();
         let target = load_input(&path, false).unwrap();
         let corpus = Corpus::try_new(&target.books).unwrap();
-        let (findings, patterns) = brigade_findings(&corpus, &[]);
+        let (findings, patterns, _) = brigade_findings(&corpus, &[]);
         // The one-verse book rosters every glyph it holds, so the pair rides
         // beside a handful of rarity sites.
         let hygiene: Vec<_> = findings
