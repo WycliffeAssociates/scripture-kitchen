@@ -612,6 +612,28 @@ function presenceHTML(){
     different list of verses.</p>
     <div class="twrap"><table><tr><th>first key</th><th>side</th><th>keys</th></tr>${rows.map(presRowHTML).join("")}</table></div></div>`;
 }
+function copyRows(){return corpus().copy||[]}
+function copyRowHTML(r){
+  return `<div class="arow">
+    <div class="top"><span class="grainchip">${esc(r.ref)}</span>
+      <div class="claim">${r.run} of ${r.elig} words</div>
+      <div class="stats mono">${esc(r.w)}</div></div>
+    <div class="lenpair">
+      <div><div class="lenlabel">target</div><div class="specimen">${esc(r.t)}</div></div>
+      <div><div class="lenlabel">source</div><div class="specimen">${esc(r.s)}</div></div>
+    </div></div>`;
+}
+function copyHTML(){
+  const rows=copyRows();
+  if(!rows.length)return "";
+  return `<div class="qgroup"><h3>Shared with the source <span class="cnt">${rows.length}</span></h3>
+    <p class="note">Each row is a run of consecutive target words that all appear, as the same exact
+    characters, in the source verse it paired with. That is the whole claim. It does not say the run
+    is untranslated: shared names, a quotation, and a closely related language are all legitimate
+    reasons, and both texts are shown so you decide which. Matching is exact and case-sensitive; no
+    name list and no stop-word list is used.</p>
+    ${rows.map(copyRowHTML).join("")}</div>`;
+}
 function drawLen(){
   const rows=lenRows();
   $("#app").innerHTML=`<main>
@@ -633,6 +655,7 @@ function drawLen(){
       are not here.</p>
       ${rows.map(lenRowHTML).join("")||"<p class='empty'>No source was declared, or nothing was flagged against it.</p>"}</div>
     ${presenceHTML()}
+    ${copyHTML()}
   </main>`;
 }
 

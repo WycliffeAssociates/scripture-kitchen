@@ -21,11 +21,13 @@ mod convention;
 mod hygiene;
 mod presence;
 mod proportionality;
+mod source_copy;
 
 pub use convention::{ConventionDigest, Reasons};
 pub use hygiene::{HygieneClass, HygieneDigest};
 pub use presence::{PresenceDigest, PresenceKind};
 pub use proportionality::{ProportionalityDigest, QuantizedDeviation};
+pub use source_copy::SourceCopyDigest;
 
 pub const RECORD_LEN: usize = 16;
 pub const RECORD_FROM_OFFSET: usize = 0;
@@ -43,6 +45,8 @@ pub enum RuleCode {
     LengthProportionality = 0,
     Hygiene = 1,
     Convention = 2,
+    /// Consecutive target words all present in the paired source verse.
+    SourceCopy = 3,
     Presence = 4,
 }
 
@@ -54,6 +58,7 @@ impl TryFrom<u8> for RuleCode {
             0 => Ok(Self::LengthProportionality),
             1 => Ok(Self::Hygiene),
             2 => Ok(Self::Convention),
+            3 => Ok(Self::SourceCopy),
             4 => Ok(Self::Presence),
             other => Err(CodecError::UnknownRuleCode(other)),
         }
@@ -74,6 +79,8 @@ pub enum FindingKind {
     Hygiene(HygieneDigest),
     /// One site matching a row of the publication's pattern table.
     Convention(ConventionDigest),
+    /// A run of consecutive target words the paired source verse also holds.
+    SourceCopy(SourceCopyDigest),
     /// A coalesced run of verse keys one side of the pairing does not hold,
     /// or holds with no content.
     Presence(PresenceDigest),
@@ -128,6 +135,7 @@ impl PackedFinding {
             FindingKind::LengthProportionality(_) => RuleCode::LengthProportionality,
             FindingKind::Hygiene(_) => RuleCode::Hygiene,
             FindingKind::Convention(_) => RuleCode::Convention,
+            FindingKind::SourceCopy(_) => RuleCode::SourceCopy,
             FindingKind::Presence(_) => RuleCode::Presence,
         }
     }
@@ -138,6 +146,7 @@ impl PackedFinding {
             FindingKind::LengthProportionality(digest) => digest.saturated(),
             FindingKind::Hygiene(digest) => digest.saturated(),
             FindingKind::Convention(digest) => digest.saturated(),
+            FindingKind::SourceCopy(digest) => digest.saturated(),
             FindingKind::Presence(digest) => digest.saturated(),
         };
         if saturated {
@@ -160,6 +169,7 @@ impl PackedFinding {
             FindingKind::LengthProportionality(digest) => digest.lanes(),
             FindingKind::Hygiene(digest) => digest.lanes(),
             FindingKind::Convention(digest) => digest.lanes(),
+            FindingKind::SourceCopy(digest) => digest.lanes(),
             FindingKind::Presence(digest) => digest.lanes(),
         };
         bytes[RECORD_BOOK_SCOPE_OFFSET..RECORD_PROJECT_SCOPE_OFFSET]
@@ -221,6 +231,9 @@ impl PackedFinding {
             RuleCode::Hygiene => FindingKind::Hygiene(HygieneDigest::from_lanes(lanes, flags)?),
             RuleCode::Convention => {
                 FindingKind::Convention(ConventionDigest::from_lanes(lanes, flags)?)
+            }
+            RuleCode::SourceCopy => {
+                FindingKind::SourceCopy(SourceCopyDigest::from_lanes(lanes, flags)?)
             }
             RuleCode::Presence => FindingKind::Presence(PresenceDigest::from_lanes(lanes, flags)?),
         };
@@ -318,6 +331,7 @@ pub enum CodecError {
     EmptyHygieneRun,
     UnknownPresenceKind(i16),
     EmptyPresenceRun,
+    InvalidSourceCopyRun { run: u32, eligible: u32 },
     UnknownReasons(u16),
     EmptyReasons,
     ReversedSpan { from: u32, to: u32 },
@@ -344,6 +358,12 @@ impl fmt::Display for CodecError {
             Self::EmptyHygieneRun => f.write_str("hygiene run length must be at least 1"),
             Self::UnknownPresenceKind(raw) => write!(f, "unknown presence kind {raw}"),
             Self::EmptyPresenceRun => f.write_str("a presence row covers at least one key"),
+            Self::InvalidSourceCopyRun { run, eligible } => {
+                write!(
+                    f,
+                    "a source-copy run of {run} in a unit of {eligible} eligible words"
+                )
+            }
             Self::UnknownReasons(bits) => write!(f, "unknown convention reasons 0x{bits:04x}"),
             Self::EmptyReasons => f.write_str("a convention row carries at least one reason"),
             Self::ReversedSpan { from, to } => write!(f, "reversed finding span {from}..{to}"),
@@ -503,10 +523,10 @@ mod tests {
     fn malformed_wire_values_fail_closed() {
         let record = finding(0, 0, 0, None, None, false);
         let mut unknown_code = record.encode();
-        unknown_code[10] = 3;
+        unknown_code[10] = 5;
         assert_eq!(
             PackedFinding::decode(&unknown_code, &[0]),
-            Err(CodecError::UnknownRuleCode(3))
+            Err(CodecError::UnknownRuleCode(5))
         );
 
         let mut unknown_flags = record.encode();

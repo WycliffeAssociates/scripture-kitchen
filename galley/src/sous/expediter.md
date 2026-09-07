@@ -248,7 +248,8 @@ current checksum only, not the whole ring — the previous section.
 A `Role::Reference` book is not a target and never becomes one: it is mapped by
 nobody, folded by nobody, holds no chapter table and no aggregate, and
 publishes no section of its own. What it holds is one grapheme count per verse,
-counted once at `update` (`pantry.md`).
+and that verse's word hashes only when the config in force at `update` would
+judge with them (`pantry.md`).
 
 `publish` runs the source comparison immediately after `judge_resident` and
 before `locate`, from the lengths both sides already retain:
@@ -257,10 +258,25 @@ before `locate`, from the lengths both sides already retain:
 pass.length_config(config)         -> the knobs, from the member that owns the lane
 pass.verse_lengths(aggregate)      -> the target lane, per Target book
 pantry.reference_lengths(id)       -> the source rows, per Reference book
-PairedBook::pair(target, source)   -> one book's ratios AND its presence rows;
-                                      cached together, facts dropped
-judge_paired(books, project, ..)   -> code 0 and code 4 rows over target spans
+pantry.reference_words(id)         -> its word sets, if it was asked to keep any
+PairedBook::pair_with(target, ..)  -> one book's ratios, its presence rows AND
+                                      its source-copy runs; cached together,
+                                      facts dropped
+judge_paired(books, project, ..)   -> codes 0, 3 and 4 over target spans
 ```
+
+The source-copy lane is the one part of this step that reads text: on a pair
+MISS with the lane on, the target book's projection is rebuilt from the
+products it already retains and its words are walked. That projection is
+hoisted above both text-reading steps — the site rescan below TAKES it rather
+than building a second — so a book is projected at most once per publication
+and is released as soon as it is located. A pair hit reads nothing, so an
+unchanged republication with the lane on still walks no text.
+
+A declared source registered while `source_copy` was OFF kept no word lane
+(`pantry.md`), so it is skipped and counted: `last_wordless_references()` is
+how many target books paired against such a source. Nonzero means "re-send
+those references", never "no run was found".
 
 Every Target pairs with the Reference of the same `BookKey` — the first, if a
 caller registers two files under one key, since `books(Role::Reference)` is
@@ -290,8 +306,8 @@ duplicates, partial overlaps — are dropped here. They are alignment structure,
 and the two the presence rule reads it has already turned into rows before this
 point (`rules/presence-shear.md`); a host that wants the facts themselves runs
 the cold `analyze_paired`, which returns them, and `sous-cli` prints them as
-per-book counts. `LengthConfig::presence` and `LengthConfig::enabled` are
-independent, and pairing runs while EITHER is on.
+per-book counts. `LengthConfig::enabled`, `presence` and `source_copy` are
+independent, and pairing runs while ANY of them is on.
 
 ## The paired cache
 
@@ -300,15 +316,21 @@ other product here — keyed by BOTH sides, because either moving is a different
 sample:
 
 ```text
-paired[(target RawChecksum, source RawChecksum)]
+paired[(target RawChecksum, source RawChecksum, words walked)]
   = PairedBook { ratios, target spans, coalesced presence rows,
+                 maximal source-copy runs of >= 2 words,
                  the book's knob-free Spread }
 ```
 
 `last_paired()` counts the books that missed: all of them on a cold open, one
-after a keystroke, none on a warm republication or a `set_config`. The config
-is not in the key because neither the pairing nor a book's order statistics
-read one — `Spread` is knob-free and `LengthConfig::min_verses` gates it at
+after a keystroke, none on a warm republication or a `set_config`. The third
+key member is not a knob but a property of the ENTRY — a pairing made without
+the word walk holds no runs and cannot answer for one that wants them — so
+turning `source_copy` on misses and re-pairs, and turning it off misses back
+onto the entry it already had. `source_copy_min_run` is nowhere in here: the
+runs are cached from a floor of two and the knob filters them at judging time.
+Nothing else is either, because neither the pairing nor a book's order
+statistics read a knob — `Spread` is knob-free and `LengthConfig::min_verses` gates it at
 judging time, which is what makes a length knob a re-judge and never a re-pair.
 
 The project scope is the pooled sample over every paired book, and it too is

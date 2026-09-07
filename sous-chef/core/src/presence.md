@@ -69,7 +69,7 @@ in and refused on the way out.
 
 ## Configuration
 
-`LengthConfig::presence`, default true, beside `enabled`. The two are
+`LengthConfig::presence`, default true, beside `enabled`. The three lanes are
 independent: presence with the ratio lane off is a legal configuration and the
-`Expediter` still pairs for it. Both off is the only state that skips pairing
-entirely.
+`Expediter` still pairs for it. All three off is the only state that skips
+pairing entirely ([`source_copy.md`](source_copy.md) is the third).

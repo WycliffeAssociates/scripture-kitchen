@@ -76,27 +76,50 @@ reused with rebased coordinates.
 ## Roles and retention
 
 A book is registered as `Target` — full detached products, publishes findings —
-or as `Reference`: `Toc` plus one projected grapheme length per verse, and
-nothing else, because a reference corpus never publishes a coordinate and
-nothing ever asks it for text. Both roles are live; `books(role)` lists each in
+or as `Reference`: `Toc` plus one projected grapheme length per verse, and —
+only if the caller asks for it — that verse's sorted deduplicated 32-bit word
+hashes. Nothing else, because a reference corpus never publishes a coordinate
+and nothing ever asks it for text. Both roles are live; `books(role)` lists each in
 the same canonical order and neither sees the other.
 
-The asymmetry is the point, and it is measured (evidence.md, 2026-09-07): over
-the committed 66-book `en_ulb`, a target's own products are **7.29 MB** (162%
-of the 4.51 MB raw, of which 4.51 MB is the retained text) and a reference's
-are **1.17 MB** (26%). The verse rows themselves are 12 B each, 31,101 of them,
-0.37 MB; the rest is the `Toc` both roles keep.
+The asymmetry is the point, and it is measured (evidence.md, U1 (a)): over the
+committed 66-book `en_ulb`, a target's own products are **7.29 MB** (162% of
+the 4.51 MB raw, of which 4.51 MB is the retained text) and a reference's are
+**1.17 MB** (26%) for lengths alone, **3.94 MB** (87%) with the word lane. The
+length rows are 12 B each, 31,101 of them, 0.37 MB; the word lane is **2.77 MB**
+(629,890 distinct-word slots, 20.3 per verse); the rest is the `Toc` both roles
+keep.
 
-A reference derives the mask to project its verses and then drops it: the
-lengths are counted once, at `update`, by the same
-`sous_core::proportionality::source_lengths` an Onion or a vref producer uses,
-so the two sides of a ratio cannot disagree about what a grapheme is. A book
+## The word lane is opt-in, and turning it on needs the text again
+
+`Retain` says whether a target keeps its text; `SourceLanes` says which verse
+lanes a reference derives, and the default is `Lengths` — the 1.17 MB shape.
+`Expediter::update` and `update_with` pass `LengthsAndWords` only while the
+CURRENT judging config would judge with it (`LengthConfig::source_copy`), so a
+host that never turns the lane on never pays 2.77 MB per declared Bible.
+
+**A config flip does not reach back into a registered reference.** Turning
+`source_copy` on after the sources are loaded leaves them with lengths only,
+and the honest consequence is stated rather than hidden: **the host re-sends
+those references' text**, which is one `update` per reference with the same
+bytes. The Pantry does not serve that from the cheaper entry — `SourceLanes` is
+part of the idempotence check — and the publication reports how many books were
+in that state through `Expediter::last_wordless_references()` (`lastWordlessReferences()`
+across the wasm wall, `sourcecopy unavailable BOOK` from the CLI), so "no rows"
+never quietly means "no lane".
+
+A reference derives the mask to project its verses and then drops it: both
+lanes are built once, at `update`, by the same
+`sous_core::proportionality::source_lengths` and `sous_core::SourceWords::of`
+an Onion or a vref producer uses, so the two sides of a ratio cannot disagree
+about what a grapheme is and the two sides of a run cannot disagree about what
+a word is. A book
 whose projection is not an analyzable `sous-core` input is refused there rather
 than at publication, as `PantryError::InvalidBook`.
 
 `Entry::mask`, `utf16`, and `published_len` therefore answer
 `Err(PantryError::NoProjection)` on a reference, and `Entry::verse_lengths`
-answers `Err(PantryError::NoLengths)` on a target — the same shape `text()`
+and `Entry::verse_words` answer `Err(PantryError::NoLengths)` on a target — the same shape `text()`
 already had. There is no accessor that quietly returns something empty.
 
 Retained per `Target` book — the text under `Retain::Text`, and roughly 25% of

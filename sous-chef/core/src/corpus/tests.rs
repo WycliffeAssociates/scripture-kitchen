@@ -2,7 +2,7 @@
 //! table, and `reader.ts` staying generated from these same constants.
 
 use super::*;
-use crate::codec::{CodecError, HygieneClass, PresenceDigest, PresenceKind};
+use crate::codec::{CodecError, HygieneClass, PresenceDigest, PresenceKind, SourceCopyDigest};
 use crate::judge::{Channel, PatternKey, Side};
 use crate::substrate::{OuterClass, ScalarKey};
 use crate::unicode::Pool;
@@ -204,7 +204,7 @@ fn writer_matches_shared_golden_buffer_and_reader_view() {
 }
 
 /// Mixed kinds in one book: a proportionality row between an exact and a
-/// saturated hygiene row.
+/// saturated hygiene row, then one row of every remaining code.
 #[test]
 fn mixed_kind_golden_buffer_decodes_in_both_readers() {
     let hygiene = |from, to, class, run| {
@@ -279,6 +279,16 @@ fn mixed_kind_golden_buffer_decodes_in_both_readers() {
             &[0x0100],
         )
         .unwrap(),
+        // Four consecutive words of a fourteen-word verse, all held by the
+        // paired source verse.
+        PackedFinding::new(
+            0xf0,
+            0xfc,
+            BookIndex::new(0).unwrap(),
+            FindingKind::SourceCopy(SourceCopyDigest::new(4, 14).unwrap()),
+            &[0x0100],
+        )
+        .unwrap(),
     ];
     let section = PublicationBook::new(BookKey::new(*b"MRK"), "books/mrk.usfm", 0x0100, &findings);
     let encoded = encode_to_corpus_buffer(
@@ -333,6 +343,11 @@ fn mixed_kind_golden_buffer_decodes_in_both_readers() {
     };
     assert_eq!(digest.pattern().get(), 9);
     assert_eq!(digest.reasons(), Reasons::SENTENCE_START);
+    let FindingKind::SourceCopy(digest) = book.at(7).unwrap().kind() else {
+        panic!("source copy kind")
+    };
+    assert_eq!((digest.run(), digest.eligible()), (4, 14));
+    assert!(!digest.saturated());
 }
 
 #[test]
@@ -664,11 +679,11 @@ fn malformed_directory_and_record_fail_closed() {
     ));
 
     let mut bad_code = encoded;
-    bad_code[FIRST_RECORD + 10] = 3;
+    bad_code[FIRST_RECORD + 10] = 5;
     assert!(matches!(
         CorpusSnapshot::open(&bad_code),
         Err(CorpusWireError::Record {
-            error: CodecError::UnknownRuleCode(3),
+            error: CodecError::UnknownRuleCode(5),
             ..
         })
     ));

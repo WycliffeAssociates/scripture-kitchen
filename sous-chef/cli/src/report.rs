@@ -98,12 +98,24 @@ pub struct PresenceUnit {
     pub keys: u32,
 }
 
+/// One source-copy row as the page shows it: the run against the unit's
+/// eligible words, the shared text, and both verses behind it.
+pub struct CopyUnit {
+    pub address: String,
+    pub run: u32,
+    pub eligible: u32,
+    pub shared: String,
+    pub target: String,
+    pub source: String,
+}
+
 /// The source comparison's contribution to the page; empty when no source
 /// was declared, which is what hides the tab.
 #[derive(Default)]
 pub struct Paired {
     pub units: Vec<PairedUnit>,
     pub presence: Vec<PresenceUnit>,
+    pub copies: Vec<CopyUnit>,
 }
 
 /// The self-contained inventory page for the target corpus.
@@ -153,6 +165,26 @@ fn presence_json(paired: &Paired) -> String {
                 json_str(&row.address),
                 json_str(row.kind),
                 row.keys,
+            )
+        })
+        .collect();
+    format!("[{}]", rows.join(","))
+}
+
+/// `copy[]`: one record per source-copy row, in publication order.
+fn copies_json(paired: &Paired) -> String {
+    let rows: Vec<String> = paired
+        .copies
+        .iter()
+        .map(|row| {
+            format!(
+                "{{\"ref\":{},\"run\":{},\"elig\":{},\"w\":{},\"t\":{},\"s\":{}}}",
+                json_str(&row.address),
+                row.run,
+                row.eligible,
+                json_str(row.shared.trim()),
+                json_str(row.target.trim()),
+                json_str(row.source.trim()),
             )
         })
         .collect();
@@ -307,13 +339,14 @@ fn corpus_json(
         ));
     }
     format!(
-        r#"{{"name":{},"judging":{},"glyphs":[{}],"cap":[{}],"len":{},"pres":{}}}"#,
+        r#"{{"name":{},"judging":{},"glyphs":[{}],"cap":[{}],"len":{},"pres":{},"copy":{}}}"#,
         json_str(name),
         json_str(&judging),
         glyph_json.join(","),
         cap_json(corpus, patterns, findings),
         lengths_json(paired),
         presence_json(paired),
+        copies_json(paired),
     )
 }
 

@@ -618,6 +618,18 @@ Work:
    `LengthConfig::presence`, default true on 18 and 23 rows per tier corpus
    against `en_ulb` (evidence.md, 2026-09-07). Ambiguous duplicates and
    partial overlaps stay `Paired::facts` and rows in neither rule.
+6. Source-copy runs (U1). Wire code 3 `SourceCopy` states one fact about
+   words: N or more consecutive target words of a paired unit each appear, as
+   the same exact scalar sequence, in the source verse. Exact forms, no name
+   recognizer, no stoplist, the run length the only filter. A Reference now
+   retains each verse's sorted deduplicated 32-bit word hashes beside its
+   grapheme count — 2.77 MB per Bible, taking a declared source from 1.17 to
+   3.94 MB — and the judge walks the TARGET's words inside the same
+   `PairedBook` cache, so an unchanged republication reads no text.
+   `LengthConfig::source_copy` ships **false**: the tier fires about two rows
+   per verse against a source in the same language family at floors of 3 and 4
+   alike (evidence.md, U1), which is the rule working and the default being
+   wrong. `rules/source-copy-residue.md` is promoted from parked to landed.
 
 Verification gate:
 
@@ -635,12 +647,12 @@ Verification gate:
 - every divergence from v1 receives “fix, accepted model change, or upstream
   ownership” disposition.
 
-**Status after P1:** every gate bullet is met except the shear half of the
+**Status after U1:** every gate bullet is met except the shear half of the
 last-but-one, which has no rule to exclude anything from yet. The dispositions
 are in `planning/RESUME-2026-09-04.md` §8 and the survey rows in
 `evidence.md` (2026-09-07). What Stage 5 has NOT built, and did not promise to:
-untranslated-word detection, the vref loader's target-side projection, and any
-resident cache for the pairing.
+untranslated-word DETECTION — U1 publishes shared runs and refuses to call
+them untranslated — and the vref loader's target-side projection.
 
 ## Stage 6 — Behavioral bookend and port closure
 

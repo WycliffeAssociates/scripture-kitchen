@@ -32,7 +32,8 @@ pub mod warmer;
 pub use find::{Find, Hit, Hits, SourceSpan};
 pub use mise::utf16::{Utf16Table, utf16_table};
 pub use pantry::{
-    BookId, Entry, Fingerprint, Pantry, PantryError, RawChecksum, Retain, Role, fingerprint,
+    BookId, Entry, Fingerprint, Pantry, PantryError, RawChecksum, Retain, Role, SourceLanes,
+    fingerprint,
 };
 pub use sous::{Expediter, ObservationKey};
 pub use warmer::Warmer;

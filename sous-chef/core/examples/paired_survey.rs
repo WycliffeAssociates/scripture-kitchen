@@ -429,11 +429,16 @@ fn judge(target: &Corpus, source: &Corpus, config: &LengthConfig) -> Judged {
         .map(|(book, verses)| TargetLengths {
             book: book.key,
             verses,
+            text: &book.text,
         })
         .collect();
     let source_rows: Vec<SourceLengths<'_>> = sources
         .iter()
-        .map(|(key, verses)| SourceLengths { book: *key, verses })
+        .map(|(key, verses)| SourceLengths {
+            book: *key,
+            verses,
+            words: None,
+        })
         .collect();
 
     let mut out = Findings::new(

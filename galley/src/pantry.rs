@@ -24,7 +24,7 @@ use mise::utf16::{Utf16Table, utf16_table};
 use rustc_hash::{FxHashMap, FxHashSet};
 use xxhash_rust::xxh3::xxh3_128;
 
-use sous_core::{InputError, SourceVerse, source_lengths};
+use sous_core::{InputError, SourceVerse, SourceWords, source_lengths};
 
 use crate::onion::{self, Filter, Mask, Toc, lint::LintReport};
 use crate::sous::OnionBook;
@@ -101,8 +101,9 @@ impl fmt::Display for RawChecksum {
 pub enum Role {
     /// Full detached products, the text beside them, and it publishes findings.
     Target,
-    /// A declared source: `Toc` and one projected grapheme length per verse,
-    /// and nothing else — no mask, no UTF-16 table, no text.
+    /// A declared source: `Toc`, one projected grapheme length per verse, and
+    /// that verse's word hashes — nothing else. No mask, no UTF-16 table, no
+    /// text.
     ///
     /// A reference publishes no findings and is never a target, so it needs no
     /// coordinate of its own. [`Retain::Text`] is accepted and pointless: no
@@ -119,6 +120,23 @@ impl Role {
             Self::Reference => Retain::ProductsOnly,
         }
     }
+}
+
+/// Which verse lanes a [`Role::Reference`] derives and keeps.
+///
+/// The word lane is the expensive half — 2.77 MB against 0.37 MB of lengths
+/// over a whole Bible — so it is built only for a host that will judge with
+/// it. A reference registered under [`Lengths`](Self::Lengths) and later
+/// judged with the source-copy lane on publishes nothing for that book until
+/// the host re-sends its text; the publication reports how many books that
+/// was rather than going quietly silent.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum SourceLanes {
+    /// One projected grapheme count per verse, and nothing else.
+    #[default]
+    Lengths,
+    /// The grapheme counts plus each verse's sorted deduplicated word hashes.
+    LengthsAndWords,
 }
 
 /// Whether a target keeps its text beside its products.
@@ -223,6 +241,9 @@ struct Book {
     projection: Option<Projection>,
     /// [`Role::Reference`] only: one row per keyed verse, in TOC order.
     lengths: Option<Box<[SourceVerse]>>,
+    /// [`Role::Reference`] only: the same verses' word sets, index-aligned
+    /// with `lengths`.
+    words: Option<Box<SourceWords>>,
     /// The text as last updated; `None` under [`Retain::ProductsOnly`].
     text: Option<String>,
     bytes: usize,
@@ -251,6 +272,16 @@ impl Book {
             Retain::Text
         } else {
             Retain::ProductsOnly
+        }
+    }
+
+    /// Read back off the lanes themselves, so a re-registration under a
+    /// different setting is not served from the cheaper one.
+    fn lanes(&self) -> SourceLanes {
+        if self.words.is_some() {
+            SourceLanes::LengthsAndWords
+        } else {
+            SourceLanes::Lengths
         }
     }
 }
@@ -295,7 +326,7 @@ impl Pantry {
         role: Role,
         text: &str,
     ) -> Result<Entry<'_>, PantryError> {
-        self.update_with(id, role, role.retention(), text)
+        self.update_with(id, role, role.retention(), SourceLanes::Lengths, text)
     }
 
     /// Derive and retain this book's products, keeping or dropping its text.
@@ -308,6 +339,7 @@ impl Pantry {
         id: impl Into<BookId>,
         role: Role,
         retain: Retain,
+        lanes: SourceLanes,
         text: &str,
     ) -> Result<Entry<'_>, PantryError> {
         let id = id.into();
@@ -316,7 +348,10 @@ impl Pantry {
         }
         let checksum = RawChecksum::of(text.as_bytes());
         let served = self.books.get(&id).is_some_and(|book| {
-            book.checksum == checksum && book.role == role && book.retain() == retain
+            book.checksum == checksum
+                && book.role == role
+                && book.retain() == retain
+                && book.lanes() == lanes
         });
         if served {
             return Ok(Entry { pantry: self, id });
@@ -342,16 +377,20 @@ impl Pantry {
         );
         // A reference counts its verses once, here, and then owns neither the
         // mask that projected them nor the text they came from.
-        let lengths =
+        let (lengths, words) =
             match role {
-                Role::Target => None,
+                Role::Target => (None, None),
                 Role::Reference => {
                     let projected = OnionBook::from_parts(text, mask.clone(), toc.clone())
                         .map_err(|error| PantryError::InvalidBook {
                             id: id.clone(),
                             error,
                         })?;
-                    Some(source_lengths(&projected).into_boxed_slice())
+                    (
+                        Some(source_lengths(&projected).into_boxed_slice()),
+                        (lanes == SourceLanes::LengthsAndWords)
+                            .then(|| Box::new(SourceWords::of(&projected))),
+                    )
                 }
             };
         let projection = match role {
@@ -378,6 +417,7 @@ impl Pantry {
                 &toc,
                 projection.as_ref(),
                 lengths.as_deref(),
+                words.as_deref(),
                 &print,
                 &id,
                 kept.as_deref(),
@@ -386,6 +426,7 @@ impl Pantry {
             toc,
             projection,
             lengths,
+            words,
             text: kept,
         };
         self.derivations += 1;
@@ -503,6 +544,12 @@ impl Pantry {
     /// unknown id or a book of another role.
     pub(crate) fn reference_lengths(&self, id: &BookId) -> Option<&[SourceVerse]> {
         self.books.get(id)?.lengths.as_deref()
+    }
+
+    /// One reference book's retained word sets, index-aligned with
+    /// [`reference_lengths`](Self::reference_lengths).
+    pub(crate) fn reference_words(&self, id: &BookId) -> Option<&SourceWords> {
+        self.books.get(id)?.words.as_deref()
     }
 
     /// The Warmer's lint over one book's retained text. Split-borrowed, which
@@ -624,6 +671,17 @@ impl Entry<'_> {
             })
     }
 
+    /// The same verses' word sets, one sorted deduplicated `u32` per distinct
+    /// word — what the source-copy lane reads instead of the source's text.
+    pub fn verse_words(&self) -> Result<&SourceWords, PantryError> {
+        self.book()
+            .words
+            .as_deref()
+            .ok_or_else(|| PantryError::NoLengths {
+                id: self.id.clone(),
+            })
+    }
+
     /// [`Warmer::lint`] over the retained text.
     pub fn lint(&mut self) -> Result<LintReport, PantryError> {
         self.pantry.lint_book(&self.id)
@@ -666,6 +724,7 @@ fn book_bytes(
     toc: &Toc,
     projection: Option<&Projection>,
     lengths: Option<&[SourceVerse]>,
+    words: Option<&SourceWords>,
     print: &Fingerprint,
     id: &BookId,
     text: Option<&str>,
@@ -680,6 +739,7 @@ fn book_bytes(
         + toc.verses.capacity() * size_of::<onion::VerseAnchor>()
         + projected
         + lengths.map_or(0, size_of_val)
+        + words.map_or(0, SourceWords::resident_bytes)
         + print.resident_bytes()
         + id.as_str().len()
         + text.map_or(0, str::len)
@@ -957,7 +1017,13 @@ mod tests {
         let id = mrk();
         assert_eq!(
             pantry
-                .update_with(id.clone(), Role::Target, Retain::ProductsOnly, &mark())
+                .update_with(
+                    id.clone(),
+                    Role::Target,
+                    Retain::ProductsOnly,
+                    SourceLanes::Lengths,
+                    &mark(),
+                )
                 .err(),
             Some(PantryError::TargetNeedsText { id: id.clone() })
         );
@@ -1099,10 +1165,12 @@ mod tests {
         assert_eq!(pantry.text_bytes(), 0, "no text is retained");
     }
 
-    /// The whole point of the role: the same book costs a fraction as a
-    /// reference, because the mask and the UTF-16 table are the weight.
+    /// The whole point of the role: the same book costs less as a reference,
+    /// because the text, the mask, and the UTF-16 table are the weight. The
+    /// margin is not a half — the word lane is comparable in size to the
+    /// projected text it hashes (evidence.md, U1 (a)).
     #[test]
-    fn a_reference_costs_a_fraction_of_a_target() {
+    fn a_reference_costs_less_than_a_target() {
         // A book big enough that the retained text, the mask, and the UTF-16
         // table dominate the per-book struct both roles pay for.
         let chapters: Vec<String> = (0..40)
@@ -1121,10 +1189,52 @@ mod tests {
         let target_own = target.resident_bytes() - warmer(&target);
         let reference_own = reference.resident_bytes() - warmer(&reference);
         assert!(
-            reference_own * 2 < target_own,
+            reference_own < target_own,
             "reference {reference_own} B against target {target_own} B"
         );
         assert!(reference_own > 0);
+        assert_eq!(reference.text_bytes(), 0);
+    }
+
+    /// The expensive lane is opt-in: a reference registered for lengths alone
+    /// weighs less and answers `NoLengths` for its words, and the SAME text
+    /// re-registered for both is not served from the cheaper one.
+    #[test]
+    fn a_reference_keeps_the_word_lane_only_when_it_is_asked_for() {
+        let mut lean = pantry();
+        lean.update(mrk(), Role::Reference, &mark()).unwrap();
+        let mut full = pantry();
+        full.update_with(
+            mrk(),
+            Role::Reference,
+            Retain::ProductsOnly,
+            SourceLanes::LengthsAndWords,
+            &mark(),
+        )
+        .unwrap();
+
+        assert!(lean.book(&mrk()).unwrap().verse_words().is_err());
+        assert!(!full.book(&mrk()).unwrap().verse_words().unwrap().is_empty());
+        let own = |pantry: &Pantry| pantry.resident_bytes() - pantry.warmer().resident_bytes();
+        assert!(
+            own(&lean) < own(&full),
+            "lean {} B against full {} B",
+            own(&lean),
+            own(&full)
+        );
+
+        // The same text under the other setting is a real update, not a hit.
+        let before = lean.derivations();
+        lean.update_with(
+            mrk(),
+            Role::Reference,
+            Retain::ProductsOnly,
+            SourceLanes::LengthsAndWords,
+            &mark(),
+        )
+        .unwrap();
+        assert_eq!(lean.derivations(), before + 1);
+        assert_eq!(own(&lean), own(&full));
     }
 
     /// A target refuses `ProductsOnly` and a reference accepts `Text`; the
@@ -1134,7 +1244,13 @@ mod tests {
     fn a_reference_may_keep_text_it_will_never_be_asked_for() {
         let mut pantry = pantry();
         let entry = pantry
-            .update_with(mrk(), Role::Reference, Retain::Text, &mark())
+            .update_with(
+                mrk(),
+                Role::Reference,
+                Retain::Text,
+                SourceLanes::Lengths,
+                &mark(),
+            )
             .unwrap();
         assert_eq!(entry.text().unwrap(), mark());
         assert_eq!(entry.verse_lengths().unwrap().len(), 6);

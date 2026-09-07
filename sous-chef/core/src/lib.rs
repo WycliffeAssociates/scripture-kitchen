@@ -13,6 +13,7 @@ mod pass;
 pub mod presence;
 pub mod proportionality;
 pub mod sites;
+pub mod source_copy;
 pub mod substrate;
 pub mod typos;
 pub mod unicode;
@@ -22,7 +23,7 @@ pub use alignment::{AlignedSide, AlignedUnit, Alignment, AlignmentFact, align};
 pub use codec::{
     CodecError, ConventionDigest, FindingFlags, FindingKind, HygieneClass, HygieneDigest,
     PackedFinding, PresenceDigest, PresenceKind, ProportionalityDigest, QuantizedDeviation,
-    RECORD_LEN, Reasons, RuleCode,
+    RECORD_LEN, Reasons, RuleCode, SourceCopyDigest,
 };
 pub use corpus::{
     CoordinateSpace, CorpusBook, CorpusSnapshot, CorpusWireError, DIRECTORY_ENTRY_BYTES,
@@ -48,6 +49,7 @@ pub use proportionality::{
     judge_lengths, judge_paired, source_lengths,
 };
 pub use sites::Site;
+pub use source_copy::{SourceCopyRow, SourceWords};
 pub use substrate::{
     BookAggregate, Case, ChapterRow, Edge, FollowCounts, OuterClass, PairKey, RUN_BUCKETS,
     RunLengths, ScalarKey, Substrate, VerseLength,

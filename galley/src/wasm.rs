@@ -211,6 +211,17 @@ impl Galley {
     pub fn last_paired(&self) -> f64 {
         self.sous.last_paired() as f64
     }
+
+    /// Declared sources the source-copy lane would have read and could not,
+    /// because they were registered while `knobs.source_copy` was off and so
+    /// kept no word lane.
+    ///
+    /// Nonzero after turning the lane on means "re-send those references'
+    /// text", not "nothing was found".
+    #[wasm_bindgen(js_name = lastWordlessReferences)]
+    pub fn last_wordless_references(&self) -> f64 {
+        self.sous.last_wordless_references() as f64
+    }
 }
 
 /// The judging knobs that cross the wall: every plain scalar of
@@ -249,6 +260,8 @@ pub struct Knobs {
     pub min_verses: u32,
     pub lengths_enabled: bool,
     pub presence: bool,
+    pub source_copy: bool,
+    pub source_copy_min_run: u32,
 }
 
 impl Knobs {
@@ -288,6 +301,8 @@ impl Knobs {
             min_verses: config.lengths.min_verses,
             lengths_enabled: config.lengths.enabled,
             presence: config.lengths.presence,
+            source_copy: config.lengths.source_copy,
+            source_copy_min_run: config.lengths.source_copy_min_run,
         }
     }
 
@@ -317,6 +332,8 @@ impl Knobs {
             min_verses: self.min_verses,
             enabled: self.lengths_enabled,
             presence: self.presence,
+            source_copy: self.source_copy,
+            source_copy_min_run: self.source_copy_min_run,
         };
     }
 }

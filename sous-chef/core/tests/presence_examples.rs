@@ -129,7 +129,11 @@ fn judge_with(
     let corpus = Corpus::try_new(target).expect("distinct book keys");
     let source: Vec<SourceLengths<'_>> = source
         .iter()
-        .map(|(key, verses)| SourceLengths { book: *key, verses })
+        .map(|(key, verses)| SourceLengths {
+            book: *key,
+            verses,
+            words: None,
+        })
         .collect();
     let judging = sous_core::JudgingConfig {
         lengths: config,

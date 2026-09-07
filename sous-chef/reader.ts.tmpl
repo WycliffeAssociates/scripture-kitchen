@@ -112,6 +112,23 @@ export interface PresenceFinding {
   readonly presence: PresenceDigest;
 }
 
+export interface SourceCopyDigest {
+  /** Consecutive target words the paired source verse also holds. */
+  readonly run: number;
+  /** Eligible words the whole paired unit offered. */
+  readonly eligible: number;
+  /** Either lane clamped at 0x7fff. */
+  readonly saturated: boolean;
+}
+
+export interface SourceCopyFinding {
+  readonly kind: "SourceCopy";
+  readonly from: number;
+  readonly to: number;
+  readonly bookIdx: number;
+  readonly sourceCopy: SourceCopyDigest;
+}
+
 /** Wire byte 8 of a pattern row is the index into this table. */
 export const CHANNELS = [@@CHANNELS@@] as const;
 export type Channel = (typeof CHANNELS)[number];
@@ -186,6 +203,7 @@ export type Finding =
   | LengthProportionalityFinding
   | HygieneFinding
   | ConventionFinding
+  | SourceCopyFinding
   | PresenceFinding;
 
 export class FindingsSnapshotError extends Error {
@@ -448,7 +466,7 @@ export class BookView {
       return fail(`finding row ${row} carries book index ${bookIdx}, expected ${this.#index}`);
     }
     const code = this.#view.getUint8(at + RECORD_CODE_OFFSET);
-    if (code !== 0 && code !== 1 && code !== 2 && code !== 4) {
+    if (code !== 0 && code !== 1 && code !== 2 && code !== 3 && code !== 4) {
       return fail(`unknown finding rule code ${code}`);
     }
     const flags = this.#view.getUint8(at + RECORD_FLAGS_OFFSET);
@@ -491,6 +509,17 @@ export class BookView {
         return fail("saturated presence key count must read back as 0x7fff");
       }
       return { kind: "Presence", from, to, bookIdx, presence: { kind: presenceKind, keys, saturated } };
+    }
+    if (code === 3) {
+      const run = this.#view.getInt16(at + RECORD_BOOK_SCOPE_OFFSET, true);
+      const eligible = this.#view.getInt16(at + RECORD_PROJECT_SCOPE_OFFSET, true);
+      if (run < 1 || eligible < run) {
+        return fail(`a source-copy run of ${run} in a unit of ${eligible} eligible words`);
+      }
+      if (saturated && run !== 0x7fff && eligible !== 0x7fff) {
+        return fail("a saturated source-copy row clamps a lane to 0x7fff");
+      }
+      return { kind: "SourceCopy", from, to, bookIdx, sourceCopy: { run, eligible, saturated } };
     }
     if (code === 2) {
       if (saturated) {

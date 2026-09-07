@@ -22,8 +22,11 @@
 use rustc_hash::FxHashMap;
 
 use crate::alignment::pair_keys;
-use crate::codec::{FindingKind, PresenceDigest, ProportionalityDigest, QuantizedDeviation};
+use crate::codec::{
+    FindingKind, PresenceDigest, ProportionalityDigest, QuantizedDeviation, SourceCopyDigest,
+};
 use crate::presence::{self, PresenceRow};
+use crate::source_copy::{self, SourceCopyRow, SourceWords};
 use crate::substrate::VerseLength;
 use crate::unicode::atoms::count_atoms;
 use crate::{AlignmentFact, BookIndex, BookKey, Findings, ProjectedBook, TextRange, VerseKey};
@@ -55,6 +58,15 @@ pub struct LengthConfig {
     /// no text walk, and versification difference alone keeps the volume to a
     /// handful of coalesced rows per book.
     pub presence: bool,
+    /// Consecutive target words the paired source verse also holds. OFF: the
+    /// run is the rule's only filter, and against a source in the same
+    /// language family the tier fires about two rows per verse at any floor
+    /// measured. A host that knows its source is unrelated turns it on.
+    pub source_copy: bool,
+    /// Consecutive words a run needs before it is a row. Below
+    /// [`source_copy::MIN_RUN`] it reads as that floor: one shared word is
+    /// not a run.
+    pub source_copy_min_run: u32,
 }
 
 impl Default for LengthConfig {
@@ -65,6 +77,8 @@ impl Default for LengthConfig {
             min_verses: 50,
             enabled: true,
             presence: true,
+            source_copy: false,
+            source_copy_min_run: 3,
         }
     }
 }
@@ -82,6 +96,8 @@ impl PartialEq for LengthConfig {
             && self.min_verses == other.min_verses
             && self.enabled == other.enabled
             && self.presence == other.presence
+            && self.source_copy == other.source_copy
+            && self.source_copy_min_run == other.source_copy_min_run
     }
 }
 
@@ -115,6 +131,9 @@ impl SourceVerse {
 pub struct TargetLengths<'a> {
     pub book: BookKey,
     pub verses: &'a [VerseLength],
+    /// The projected text `verses` index into — what the source-copy walk
+    /// reads, and the only text this step ever touches.
+    pub text: &'a str,
 }
 
 /// One source book's rows, in producer order.
@@ -122,6 +141,9 @@ pub struct TargetLengths<'a> {
 pub struct SourceLengths<'a> {
     pub book: BookKey,
     pub verses: &'a [SourceVerse],
+    /// Index-aligned word sets, or `None` from a producer that retained none;
+    /// without them the source-copy lane abstains.
+    pub words: Option<&'a SourceWords>,
 }
 
 /// Every keyed verse of a projected book as a source row.
@@ -156,6 +178,12 @@ pub struct Paired {
     /// The presence rows pushed, per target book in slice order, with the keys
     /// the wire lanes do not carry.
     pub presence: Vec<Vec<PresenceRow>>,
+    /// The source-copy rows pushed, per target book in slice order.
+    pub copies: Vec<Vec<SourceCopyRow>>,
+    /// Target books whose paired source retained no word lane while
+    /// [`LengthConfig::source_copy`] was on: their silence is a missing lane,
+    /// not a clean result, so it is reported rather than published.
+    pub wordless: Vec<BookKey>,
 }
 
 impl Paired {
@@ -180,6 +208,10 @@ pub struct PairedBook {
     /// Coalesced presence rows, in span order. A pure function of the same two
     /// key lists the ratios come from, so one cache entry holds both.
     presence: Box<[PresenceRow]>,
+    /// Maximal source-copy runs of at least [`source_copy::MIN_RUN`] words, in
+    /// unit order. Empty when the caller passed no source word lane; the
+    /// minimum run a ROW needs is a judge-time knob applied over these.
+    copies: Box<[SourceCopyRow]>,
     spread: Spread,
 }
 
@@ -192,11 +224,31 @@ impl PairedBook {
         source: &[SourceVerse],
         facts: &mut Vec<AlignmentFact>,
     ) -> Self {
+        Self::pair_with(book, target, source, None, facts)
+    }
+
+    /// [`pair`](Self::pair) with the source-copy lane: the target's projected
+    /// text and the source's word sets, both or neither.
+    ///
+    /// Walking words is the one thing this step does that reads text, so it
+    /// happens only when a caller hands both over — which is what makes the
+    /// switch, unlike a threshold, worth invalidating a cache for.
+    pub fn pair_with(
+        book: BookKey,
+        target: &[VerseLength],
+        source: &[SourceVerse],
+        copy: Option<(&str, &SourceWords)>,
+        facts: &mut Vec<AlignmentFact>,
+    ) -> Self {
         let target_keys: Vec<VerseKey> = target.iter().map(|row| row.key()).collect();
         let source_keys: Vec<VerseKey> = source.iter().map(|row| row.key()).collect();
         let mut ratios: Vec<f64> = Vec::with_capacity(target.len());
         let mut spans: Vec<TextRange> = Vec::with_capacity(target.len());
         let mut empties: Vec<(VerseKey, TextRange)> = Vec::new();
+        let mut copies: Vec<SourceCopyRow> = Vec::new();
+        // Reused per unit: a bridge's source constituents merge into one set,
+        // a lone verse borrows its own.
+        let mut merged: Vec<u32> = Vec::new();
         // This book's own facts, whatever the caller accumulated before it.
         let facts_start = facts.len();
         pair_keys(
@@ -204,6 +256,21 @@ impl PairedBook {
             &target_keys,
             &source_keys,
             &mut |key, left, right| {
+                if let Some((text, words)) = copy {
+                    let set = match right {
+                        [only] => words.verse(*only),
+                        many => {
+                            merged.clear();
+                            for at in many {
+                                merged.extend_from_slice(words.verse(*at));
+                            }
+                            merged.sort_unstable();
+                            merged.dedup();
+                            &merged
+                        }
+                    };
+                    source_copy::unit_rows(text, target, left, set, &mut copies);
+                }
                 let long: u32 = left.iter().map(|at| target[*at].graphemes()).sum();
                 let short: u32 = right.iter().map(|at| source[*at].graphemes()).sum();
                 if long == 0 || short == 0 {
@@ -219,10 +286,12 @@ impl PairedBook {
         );
         // Pairing walks keys in target order, so units already follow the book.
         let spread = Spread::of(&ratios);
+        copies.sort_by_key(|row| (row.span().from(), row.span().to()));
         Self {
             ratios: ratios.into(),
             spans: spans.into(),
             presence: presence::rows(target, &facts[facts_start..], &empties).into(),
+            copies: copies.into(),
             spread,
         }
     }
@@ -230,6 +299,11 @@ impl PairedBook {
     /// The presence rows this pairing found, in span order.
     pub fn presence(&self) -> &[PresenceRow] {
         &self.presence
+    }
+
+    /// Every maximal source-copy run this pairing found, in span order.
+    pub fn copies(&self) -> &[SourceCopyRow] {
+        &self.copies
     }
 
     /// Every unit's ratio, in target order.
@@ -248,6 +322,7 @@ impl PairedBook {
             + size_of_val(&*self.ratios)
             + size_of_val(&*self.spans)
             + size_of_val(&*self.presence)
+            + size_of_val(&*self.copies)
     }
 }
 
@@ -283,9 +358,10 @@ pub fn judge_paired(
     config: &LengthConfig,
     out: &mut Findings,
 ) -> Vec<u32> {
-    if !config.enabled && !config.presence {
+    if !config.enabled && !config.presence && !config.source_copy {
         return vec![0; books.len()];
     }
+    let min_run = config.source_copy_min_run.max(source_copy::MIN_RUN);
     let project = project.0.gated(config.min_verses);
     let mut counts: Vec<u32> = Vec::with_capacity(books.len());
     for (index, paired) in books.iter().enumerate() {
@@ -310,6 +386,25 @@ pub fn judge_paired(
                     ),
                 )
                 .expect("a presence span lies inside its own book");
+            }
+        }
+        if config.source_copy {
+            for row in &*paired.copies {
+                if row.run() < min_run {
+                    continue;
+                }
+                if !opened {
+                    out.open_book(book_idx);
+                    opened = true;
+                }
+                out.push(
+                    row.span(),
+                    FindingKind::SourceCopy(
+                        SourceCopyDigest::new(row.run(), row.eligible())
+                            .expect("a run is at least one word of its own unit"),
+                    ),
+                )
+                .expect("a source-copy span lies inside its own book");
             }
         }
         if !config.enabled || paired.ratios.is_empty() {
@@ -358,25 +453,41 @@ pub fn judge_lengths(
     out: &mut Findings,
 ) -> Paired {
     let mut facts = Vec::new();
-    if !config.enabled && !config.presence {
+    if !config.enabled && !config.presence && !config.source_copy {
         return Paired {
             units: vec![0; target.len()],
             facts,
             presence: vec![Vec::new(); target.len()],
+            copies: vec![Vec::new(); target.len()],
+            wordless: Vec::new(),
         };
     }
     // First wins: a caller may present two files under one key, and the
     // choice has to be its order rather than a hash's.
-    let mut sources: FxHashMap<BookKey, &[SourceVerse]> = FxHashMap::default();
+    let mut sources: FxHashMap<BookKey, SourceLengths<'_>> = FxHashMap::default();
     for book in source {
-        sources.entry(book.book).or_insert(book.verses);
+        sources.entry(book.book).or_insert(*book);
     }
 
+    let mut wordless: Vec<BookKey> = Vec::new();
     let books: Vec<Option<PairedBook>> = target
         .iter()
         .map(|book| {
             let rows = sources.get(&book.book)?;
-            Some(PairedBook::pair(book.book, book.verses, rows, &mut facts))
+            if config.source_copy && rows.words.is_none() {
+                wordless.push(book.book);
+            }
+            let copy = rows
+                .words
+                .filter(|_| config.source_copy)
+                .map(|words| (book.text, words));
+            Some(PairedBook::pair_with(
+                book.book,
+                book.verses,
+                rows.verses,
+                copy,
+                &mut facts,
+            ))
         })
         .collect();
     let views: Vec<Option<&PairedBook>> = books.iter().map(Option::as_ref).collect();
@@ -388,10 +499,25 @@ pub fn judge_lengths(
             None => Vec::new(),
         })
         .collect();
+    let min_run = config.source_copy_min_run.max(source_copy::MIN_RUN);
+    let copies = views
+        .iter()
+        .map(|book| match book.filter(|_| config.source_copy) {
+            Some(book) => book
+                .copies()
+                .iter()
+                .filter(|row| row.run() >= min_run)
+                .copied()
+                .collect(),
+            None => Vec::new(),
+        })
+        .collect();
     Paired {
         units: judge_paired(&views, &project, config, out),
         facts,
         presence,
+        copies,
+        wordless,
     }
 }
 

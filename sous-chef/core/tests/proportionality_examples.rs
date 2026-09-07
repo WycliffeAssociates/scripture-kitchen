@@ -150,7 +150,11 @@ fn judge_with(
     let corpus = Corpus::try_new(target).expect("distinct book keys");
     let source: Vec<SourceLengths<'_>> = source
         .iter()
-        .map(|(key, verses)| SourceLengths { book: *key, verses })
+        .map(|(key, verses)| SourceLengths {
+            book: *key,
+            verses,
+            words: None,
+        })
         .collect();
     let judging = sous_core::JudgingConfig {
         lengths: config,
@@ -216,6 +220,7 @@ fn the_paired_count_is_the_units_that_produced_a_ratio() {
     let lengths = [SourceLengths {
         book: BookKey::new(*b"MRK"),
         verses: &source,
+        words: None,
     }];
     let (_, paired) = analyze_paired(
         &corpus,

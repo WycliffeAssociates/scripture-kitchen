@@ -37,6 +37,7 @@ a tombstone.
 
 | 1 | `Hygiene` | `HygieneClass` discriminant | run length in code points, `1..=i16::MAX` | the run exceeds `i16::MAX`; the lane reads exactly `i16::MAX` |
 | 2 | `Convention` | pattern-table index, `u16` bits in the signed lane | `Reasons` bitmask over the ladder rungs the site matched, the word rungs included | never set |
+| 3 | `SourceCopy` | consecutive target words the paired source verse also holds, `1..=i16::MAX` | eligible target words in the unit, `1..=i16::MAX` | one of the two lanes clamped; which one is not said |
 | 4 | `Presence` | `PresenceKind` discriminant | consecutive verse keys the row covers, `1..=i16::MAX` | the run exceeds `i16::MAX`; the lane reads exactly `i16::MAX` |
 
 The record is a discriminated union in Rust: `PackedFinding` carries a
@@ -47,8 +48,12 @@ Each code's lane codec lives in its own `codec/<rule>.rs` with a matching
 `lanes()` / `from_lanes()` pair, so `mod.rs` never becomes a dumping ground for
 payload shapes.
 
-Code 3 is unassigned: `Presence` took 4 so the source-copy rule already
-specified against 3 keeps it. All four assigned codes are emitted. Code 0 is
+Every assigned code is emitted. `Presence` took 4 out of order so that
+`SourceCopy`, already specified against 3 before P1 landed, could keep it; U1
+took 3 and the table is dense again. `SourceCopy` is the one code whose lane
+ships OFF by default (`LengthConfig::source_copy`), so a default publication
+carries none — `galley/tests/goldens/sous/knobs.bin` is where the wall and the
+JS reader see one. Code 0 is
 `sous_core::proportionality`, which
 publishes BOTH lanes on every row: a book scope and a project scope, and
 `i16::MIN` where a scope did not judge. That sentinel is also, by construction,
@@ -76,6 +81,8 @@ Decoding refuses rather than guesses:
 | a presence kind discriminant past the table | `UnknownPresenceKind` |
 | a presence key count of zero or negative | `EmptyPresenceRun` |
 | `SATURATED` on a presence row whose lane is not exactly `i16::MAX` | `UnknownFlags` |
+| a source-copy run of zero, negative, or longer than its eligible count | `InvalidSourceCopyRun` |
+| `SATURATED` on a source-copy row with NEITHER lane at exactly `i16::MAX` | `UnknownFlags` |
 | a convention reasons lane of zero | `EmptyReasons` |
 | a convention reasons bit outside the table | `UnknownReasons` |
 | `SATURATED` on a convention row | `UnknownFlags` |
@@ -90,7 +97,8 @@ Decoding refuses rather than guesses:
 | more than 65,535 patterns | `PatternCountOverflow` |
 
 `i16::MIN` cannot be constructed as a `QuantizedDeviation`, and a zero run
-cannot be constructed as a `HygieneDigest` or a `PresenceDigest`, so the
+cannot be constructed as a `HygieneDigest`, a `PresenceDigest`, or a
+`SourceCopyDigest`, so the
 invalid states are unrepresentable on the way in as well as rejected on the way
 out.
 

@@ -130,10 +130,10 @@ test("decodes the galley-published UTF-16 golden with rebased spans", () => {
   });
 });
 
-test("decodes mixed proportionality, hygiene, and presence rows, saturation included", () => {
+test("decodes mixed proportionality, hygiene, presence, and source-copy rows, saturation included", () => {
   const snapshot = FindingsSnapshot.open(hexFixture("corpus_v1_hygiene.hex"));
   const mark = snapshot.book("MRK");
-  assert.equal(mark.count, 7);
+  assert.equal(mark.count, 8);
   assert.deepEqual(mark.at(0), {
     kind: "Hygiene",
     from: 3,
@@ -188,6 +188,26 @@ test("decodes mixed proportionality, hygiene, and presence rows, saturation incl
     bookIdx: 0,
     presence: { kind: "Missing", keys: 30, saturated: false },
   });
+  // Four consecutive words of a fourteen-word verse, all held by the paired
+  // source verse.
+  assert.deepEqual(mark.at(7), {
+    kind: "SourceCopy",
+    from: 0xf0,
+    to: 0xfc,
+    bookIdx: 0,
+    sourceCopy: { run: 4, eligible: 14, saturated: false },
+  });
+
+  const COPY_RECORD = FIRST_MIXED_RECORD + 7 * RECORD_LEN;
+  const zeroRunLength = hexFixture("corpus_v1_hygiene.hex");
+  zeroRunLength[COPY_RECORD + 12] = 0;
+  assert.throws(() => FindingsSnapshot.open(zeroRunLength).book(0).at(7), FindingsSnapshotError);
+  const runPastTheUnit = hexFixture("corpus_v1_hygiene.hex");
+  runPastTheUnit[COPY_RECORD + 14] = 1;
+  assert.throws(() => FindingsSnapshot.open(runPastTheUnit).book(0).at(7), FindingsSnapshotError);
+  const copySaturation = hexFixture("corpus_v1_hygiene.hex");
+  copySaturation[COPY_RECORD + 11] = 1;
+  assert.throws(() => FindingsSnapshot.open(copySaturation).book(0).at(7), FindingsSnapshotError);
 
   const PRESENCE_RECORD = FIRST_MIXED_RECORD + 6 * RECORD_LEN;
   const badKind = hexFixture("corpus_v1_hygiene.hex");

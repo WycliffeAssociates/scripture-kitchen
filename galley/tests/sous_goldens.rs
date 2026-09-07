@@ -34,6 +34,10 @@ pub const JON: &str = include_str!("fixtures/sous/JON.usfm");
 pub const RUT_REF: &str = include_str!("fixtures/sous/ref/RUT.usfm");
 pub const JON_REF: &str = include_str!("fixtures/sous/ref/JON.usfm");
 
+/// The declared sources, registered twice in `publications`: once cold, and
+/// again after the knobs turn the source-copy lane on.
+const REFERENCES: [(&str, &str); 2] = [("ref/RUT.usfm", RUT_REF), ("ref/JON.usfm", JON_REF)];
+
 pub const COLD: &[u8] = include_bytes!("goldens/sous/cold.bin");
 pub const EDIT: &[u8] = include_bytes!("goldens/sous/edit.bin");
 pub const KNOBS: &[u8] = include_bytes!("goldens/sous/knobs.bin");
@@ -45,6 +49,9 @@ pub fn moved_knobs() -> JudgingConfig {
     config.channels.casing = false;
     config.sentence_start_upper_bp = 9_990;
     config.lengths.z_short = 2.0;
+    // The one lane that ships off: the knobs publication is where a code-3
+    // row lives, because the default publication has none by design.
+    config.lengths.source_copy = true;
     config
 }
 
@@ -58,7 +65,7 @@ fn publications() -> [Vec<u8>; 3] {
     ] {
         sous.update(id, Role::Target, text).expect("a target");
     }
-    for (id, text) in [("ref/RUT.usfm", RUT_REF), ("ref/JON.usfm", JON_REF)] {
+    for (id, text) in REFERENCES {
         sous.update_with(id, Role::Reference, Retain::ProductsOnly, text)
             .expect("a reference");
     }
@@ -70,6 +77,20 @@ fn publications() -> [Vec<u8>; 3] {
 
     let moved = moved_knobs();
     sous.set_config(((), moved, moved));
+    // Turning the source-copy lane on does not conjure a word lane onto a
+    // reference registered without one. The publication says so out loud, and
+    // the host re-sends the text — which is what a consumer has to do too
+    // (`galley/src/pantry.md`).
+    sous.publish().expect("the lane on, the lanes missing");
+    assert_eq!(
+        sous.last_wordless_references(),
+        2,
+        "both references were registered before the lane was on"
+    );
+    for (id, text) in REFERENCES {
+        sous.update_with(id, Role::Reference, Retain::ProductsOnly, text)
+            .expect("a reference");
+    }
     let knobs = sous.publish().expect("the knobs publication");
 
     [cold, edit, knobs]
@@ -104,9 +125,9 @@ fn the_three_publications_equal_their_goldens() {
 }
 
 #[test]
-fn the_cold_golden_holds_a_row_of_every_wire_code() {
+fn the_cold_golden_holds_a_row_of_every_wire_code_that_ships_on() {
     let snapshot = CorpusSnapshot::open(COLD).expect("cold.bin is a corpus buffer");
-    let (mut lengths, mut hygiene, mut conventions, mut presence) = (0, 0, 0, 0);
+    let (mut lengths, mut hygiene, mut conventions, mut presence, mut copies) = (0, 0, 0, 0, 0);
     for index in 0..snapshot.len() {
         let book = snapshot
             .book(sous_core::BookIndex::new(index).expect("a listed book"))
@@ -116,6 +137,7 @@ fn the_cold_golden_holds_a_row_of_every_wire_code() {
                 FindingKind::LengthProportionality(_) => lengths += 1,
                 FindingKind::Hygiene(_) => hygiene += 1,
                 FindingKind::Convention(_) => conventions += 1,
+                FindingKind::SourceCopy(_) => copies += 1,
                 FindingKind::Presence(_) => presence += 1,
             }
         }
@@ -132,6 +154,32 @@ fn the_cold_golden_holds_a_row_of_every_wire_code() {
     assert!(
         presence > 0,
         "no presence row: ref/RUT 2:11 found a target counterpart"
+    );
+    assert_eq!(copies, 0, "the source-copy lane ships off");
+}
+
+/// The lane the defaults leave off: the knobs publication turns it on, so
+/// wire code 3 is published somewhere the wall and the JS reader both see.
+#[test]
+fn the_knobs_golden_holds_the_source_copy_rows() {
+    let snapshot = CorpusSnapshot::open(KNOBS).expect("knobs.bin is a corpus buffer");
+    let mut copies = 0;
+    for index in 0..snapshot.len() {
+        let book = snapshot
+            .book(sous_core::BookIndex::new(index).expect("a listed book"))
+            .expect("a listed book");
+        for row in 0..book.len() {
+            if matches!(
+                book.at(row).expect("a readable row").kind(),
+                FindingKind::SourceCopy(_)
+            ) {
+                copies += 1;
+            }
+        }
+    }
+    assert!(
+        copies > 0,
+        "no source-copy row: RUT stopped sharing runs with ref/RUT"
     );
 }
 

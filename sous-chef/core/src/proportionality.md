@@ -115,8 +115,12 @@ for the report page.
 ## Configuration and recomputation
 
 `LengthConfig { z_long: 3.5, z_short: 3.5, min_verses: 50, enabled: true,
-presence: true }`, a field of `JudgingConfig`. `presence` is the other rule's
-switch and is documented with it. The defaults are v1's calibrated ones and the
+presence: true, source_copy: false, source_copy_min_run: 3 }`, a field of
+`JudgingConfig`. `presence` and the two `source_copy` fields belong to the
+other two source-compared rules and are documented with them
+([`presence.md`](presence.md), [`source_copy.md`](source_copy.md)); only
+`source_copy` costs a text walk, which is why it alone is in the pair cache's
+identity. The defaults are v1's calibrated ones and the
 paired survey is their regression gate, not an invitation to retune them
 (`rules/length-proportionality.md`).
 

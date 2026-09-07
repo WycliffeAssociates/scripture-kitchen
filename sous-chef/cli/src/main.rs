@@ -40,7 +40,7 @@ use sous_core::words::LETTER_RUN_MAX;
 use sous_core::{
     AlignedUnit, Alignment, AlignmentFact, Brigade, ChapterPass, Corpus, FindingKind,
     PackedFinding, Paired, Pattern, PatternKey, ProjectedBook, ScalarKey, SnapshotId,
-    SourceLengths, SourceVerse, TextRange, align, analyze_paired, source_lengths,
+    SourceLengths, SourceVerse, SourceWords, TextRange, align, analyze_paired, source_lengths,
 };
 use usage::Cli;
 use usfm_galley::sous::{OnionBook, OnionInputBook, publish_onion_findings};
@@ -65,6 +65,11 @@ struct Args {
     /// addressless `BOOK C:V<TAB>text` vref file.
     #[usage(long)]
     source: Option<PathBuf>,
+
+    /// Consecutive target words a source-copy run needs before it is a row;
+    /// the default is the shipped floor, and below two nothing fires.
+    #[usage(long)]
+    source_copy_min_run: Option<u32>,
 
     /// Print hygiene findings over the target with their raw source location.
     #[usage(long)]
@@ -146,21 +151,36 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         // The declared source enters as lengths alone; the alignment above is
         // the same pairing over the same keys, kept for the facts and for the
         // texts the CLI shows beside a fired row.
-        let lengths: Vec<(sous_core::BookKey, Vec<SourceVerse>)> = source_corpus
+        let lengths: Vec<(sous_core::BookKey, Vec<SourceVerse>, SourceWords)> = source_corpus
             .iter()
             .flat_map(|corpus| corpus.books())
-            .map(|book| (ProjectedBook::key(book), source_lengths(book)))
+            .map(|book| {
+                (
+                    ProjectedBook::key(book),
+                    source_lengths(book),
+                    SourceWords::of(book),
+                )
+            })
             .collect();
         let source: Vec<SourceLengths<'_>> = lengths
             .iter()
-            .map(|(key, verses)| SourceLengths { book: *key, verses })
+            .map(|(key, verses, words)| SourceLengths {
+                book: *key,
+                verses,
+                words: Some(words),
+            })
             .collect();
-        let (findings, patterns, paired) = brigade_findings(&target_corpus, &source);
+        let (findings, patterns, paired) =
+            brigade_findings(&target_corpus, &source, args.source_copy_min_run);
         if args.findings {
             print_findings(&target_corpus, &findings);
             if let (Some(alignment), Some(source_corpus)) = (&alignment, source_corpus.as_ref()) {
                 print_length_findings(&target_corpus, source_corpus, alignment, &findings);
                 print_presence(&target_corpus, &paired);
+                print_source_copy(&target_corpus, &paired);
+                for book in &paired.wordless {
+                    println!("sourcecopy unavailable {book} (the source kept no word lane)");
+                }
                 print_unpaired(alignment);
             }
             print_patterns(&target_corpus, &findings, &patterns);
@@ -176,6 +196,7 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                 .map(|(alignment, source)| report::Paired {
                     units: paired_rows(&target_corpus, source, alignment, &findings),
                     presence: presence_rows(&target_corpus, &paired),
+                    copies: copy_rows(&target_corpus, source, &paired),
                 })
                 .unwrap_or_default();
             let page = report::render(&name, &target_corpus, &patterns, &findings, &paired);
@@ -319,8 +340,13 @@ fn format_typo_report(groups: &[sous_core::typos::TypoGroup]) -> String {
 fn brigade_findings(
     corpus: &Corpus<'_, OnionBook>,
     source: &[SourceLengths<'_>],
+    min_run: Option<u32>,
 ) -> (Vec<PackedFinding>, Vec<Pattern>, Paired) {
-    let config = <Brigade as ChapterPass>::Config::default();
+    let mut config = <Brigade as ChapterPass>::Config::default();
+    if let Some(min_run) = min_run {
+        config.1.lengths.source_copy_min_run = min_run;
+        config.2.lengths.source_copy_min_run = min_run;
+    }
     let (findings, paired) = analyze_paired(corpus, &Brigade::default(), &config, source);
     let (rows, patterns) = findings.into_parts();
     (rows, patterns, paired)
@@ -470,6 +496,81 @@ fn presence_rows(target: &Corpus<'_, OnionBook>, paired: &Paired) -> Vec<report:
         }
     }
     out
+}
+
+/// One line per source-copy row: the address, the run against the unit's
+/// eligible words, and the shared text itself.
+fn print_source_copy(target: &Corpus<'_, OnionBook>, paired: &Paired) {
+    for ((index, book), rows) in target.iter().zip(&paired.copies) {
+        for row in rows {
+            let Some(verse) = verse_at(book, row.span()) else {
+                continue;
+            };
+            println!(
+                "sourcecopy target[{}] {} {} {}/{} \u{201c}{}\u{201d}",
+                index.get(),
+                book.key(),
+                address_of(verse.key()),
+                row.run(),
+                row.eligible(),
+                one_line(slice(book, row.span())),
+            );
+        }
+    }
+}
+
+/// Every source-copy row with what the wire lanes do not carry: the address,
+/// the shared run, the whole target verse, and the source verse behind it.
+fn copy_rows(
+    target: &Corpus<'_, OnionBook>,
+    source: &Corpus<'_, source::SourceBook>,
+    paired: &Paired,
+) -> Vec<report::CopyUnit> {
+    let mut out = Vec::new();
+    for ((_, book), rows) in target.iter().zip(&paired.copies) {
+        let mirror = source
+            .books()
+            .iter()
+            .find(|other| ProjectedBook::key(*other) == book.key());
+        for row in rows {
+            let Some(verse) = verse_at(book, row.span()) else {
+                continue;
+            };
+            let counterpart = mirror
+                .and_then(|mirror| {
+                    mirror
+                        .verses()
+                        .find(|other| other.key() == verse.key())
+                        .map(|other| mirror.slice(other.text()).trim().to_string())
+                })
+                .unwrap_or_default();
+            out.push(report::CopyUnit {
+                address: format!("{} {}", book.key(), address_of(verse.key())),
+                run: row.run(),
+                eligible: row.eligible(),
+                shared: slice(book, row.span()).to_string(),
+                target: slice(book, verse.text()).trim().to_string(),
+                source: counterpart,
+            });
+        }
+    }
+    out
+}
+
+/// The keyed verse whose projected text holds `span`.
+fn verse_at(book: &OnionBook, span: TextRange) -> Option<sous_core::Verse> {
+    book.verses()
+        .find(|verse| verse.text().from() <= span.from() && span.to() <= verse.text().to())
+}
+
+fn slice(book: &OnionBook, span: TextRange) -> &str {
+    &book.text()[span.from() as usize..span.to() as usize]
+}
+
+/// Projected verse text keeps the newlines a paragraph marker left behind; a
+/// debug row is one line.
+fn one_line(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// Alignment facts as counts per book. An unpaired key is structure; the
@@ -1077,7 +1178,7 @@ mod tests {
         fs::write(&path, "\\id MRK\n\\c 1\n\\p\n\\v 1 An 🧅 \\\\ here.\n").unwrap();
         let target = load_input(&path, false).unwrap();
         let corpus = Corpus::try_new(&target.books).unwrap();
-        let (findings, patterns, _) = brigade_findings(&corpus, &[]);
+        let (findings, patterns, _) = brigade_findings(&corpus, &[], None);
         // The one-verse book rosters every glyph it holds, so the pair rides
         // beside a handful of rarity sites.
         let hygiene: Vec<_> = findings

@@ -70,6 +70,23 @@ a copy of the current values; `setConfig` writes them into BOTH judging slots of
 `Brigade`'s `((), JudgingConfig, JudgingConfig)`, as the CLI does, and leaves
 every field that is not a knob at the value it had.
 
+`knobs.source_copy` is the one knob a `setConfig` cannot fully apply on its
+own. It ships **off**, and a `Reference` registered while it was off kept no
+word lane to walk (`pantry.md`), so turning it on and republishing produces no
+code-3 row for those books. The handle says so rather than going quiet:
+
+```js
+knobs.source_copy = true;
+galley.setConfig(knobs);
+galley.publish();
+galley.lastWordlessReferences();          // 2 — re-send those two sources
+galley.updateReference("ref/RUT.usfm", rutText);   // the same bytes is enough
+```
+
+`updateReference` with byte-identical text is a real update here, not a no-op:
+the lane set is part of what the Pantry serves a book from. Turn the knob on
+BEFORE loading the sources and none of this arises.
+
 Not on the wall: `bands` and `word_bands` (a `Staircase` is a validated ladder,
 not a plain field), `letters` and `doubles` (tri-state policies), and the two
 roster bounds that only make sense beside `letters`. None has a plain-field

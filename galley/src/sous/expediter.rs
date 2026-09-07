@@ -16,10 +16,10 @@
 //! publication sweeps what no retained generation names. Why the two hashes
 //! divide the work this way: `expediter.md`.
 
-use std::collections::hash_map::Entry;
-
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
+use std::collections::hash_map::Entry;
+
 use rustc_hash::{FxHashMap, FxHashSet};
 use sous_core::judge::{Channel, PatternKey};
 use sous_core::substrate::ScalarKey;
@@ -27,7 +27,8 @@ use sous_core::{
     AlignmentFact, BookIndex, Chapter, ChapterInput, ChapterObs, ChapterPass, ConventionDigest,
     CoordinateSpace, CorpusTotals, CorpusWireError, FindingKind, Findings, PackedFinding,
     PairedBook, Pattern, PatternIndex, ProjectSpread, ProjectedBook, PublicationBook, Reasons,
-    SnapshotId, SourceVerse, TextRange, encode_to_corpus_buffer, for_each_chapter, judge_paired,
+    SnapshotId, SourceVerse, SourceWords, TextRange, encode_to_corpus_buffer, for_each_chapter,
+    judge_paired,
 };
 #[cfg(feature = "parallel")]
 use sous_core::{ChapterKey, Verse};
@@ -36,7 +37,7 @@ use xxhash_rust::xxh3::Xxh3Default;
 use mise::books::BookKey;
 
 use super::{OnionBook, PublishError, rebase_span};
-use crate::pantry::{BookId, Pantry, RawChecksum, Retain, Role};
+use crate::pantry::{BookId, Pantry, RawChecksum, Retain, Role, SourceLanes};
 
 /// One chapter's cache identity: xxh3-128 over its projected text, its rebased
 /// verse rows, and the pass schema.
@@ -199,10 +200,12 @@ fn key_bytes(key: PatternKey) -> [u8; 10] {
     out
 }
 
-/// What one book's pairing is a function of: its own raw checksum and the raw
-/// checksum of the source book of its [`BookKey`]. Both sides, because either
-/// moving is a different sample.
-type PairKey = (RawChecksum, RawChecksum);
+/// What one book's pairing is a function of: its own raw checksum, the raw
+/// checksum of the source book of its [`BookKey`], and whether the source-copy
+/// words were walked. Both sides, because either moving is a different sample;
+/// the walk, because a pairing made without it holds no runs and a knob that
+/// only filters cached runs is not in here.
+type PairKey = (RawChecksum, RawChecksum, bool);
 
 /// Previous checksums a book keeps beside its current one, so an undo of that
 /// many edits still lands on a retained chapter table.
@@ -245,6 +248,9 @@ pub struct Expediter<P: ChapterPass> {
     /// are the same sample, so a publication that re-paired nothing skips the
     /// project-scope order statistics too.
     project: Option<(Vec<PairKey>, ProjectSpread)>,
+    /// References the last publication would have walked and could not,
+    /// because they were registered while the lane was off.
+    wordless: u64,
     /// The corpus counts judging reads, kept across publications: a book whose
     /// checksum moved is subtracted at its old one and added at its new, and
     /// the rest are never touched.
@@ -324,6 +330,7 @@ impl<P: ChapterPass + Sync> Expediter<P> {
             sites: FxHashMap::default(),
             paired: FxHashMap::default(),
             project: None,
+            wordless: 0,
             totals: CorpusTotals::default(),
             tallied: FxHashMap::default(),
             generations: FxHashMap::default(),
@@ -394,11 +401,11 @@ impl<P: ChapterPass + Sync> Expediter<P> {
         role: Role,
         text: &str,
     ) -> Result<BookKey, PublishError> {
-        Ok(self
-            .pantry
-            .update(id, role, text)
-            .map_err(PublishError::Pantry)?
-            .key())
+        let retain = match role {
+            Role::Target => Retain::Text,
+            Role::Reference => Retain::ProductsOnly,
+        };
+        self.update_with(id, role, retain, text)
     }
 
     /// Derive and retain this book's products, keeping or dropping its text.
@@ -414,9 +421,26 @@ impl<P: ChapterPass + Sync> Expediter<P> {
     ) -> Result<BookKey, PublishError> {
         Ok(self
             .pantry
-            .update_with(id, role, retain, text)
+            .update_with(id, role, retain, self.source_lanes(), text)
             .map_err(PublishError::Pantry)?
             .key())
+    }
+
+    /// Which lanes a Reference registered RIGHT NOW keeps: the word lane only
+    /// while the current config would judge with it.
+    ///
+    /// A host that turns `source_copy` on after its references are loaded has
+    /// to re-send their text; `last_wordless_references` is how a publication
+    /// says so out loud instead of publishing nothing.
+    fn source_lanes(&self) -> SourceLanes {
+        match self
+            .pass
+            .length_config(&self.config)
+            .is_some_and(|lengths| lengths.source_copy)
+        {
+            true => SourceLanes::LengthsAndWords,
+            false => SourceLanes::Lengths,
+        }
     }
 
     /// Drop a book's products, its text, and its retained generations; the
@@ -486,6 +510,16 @@ impl<P: ChapterPass + Sync> Expediter<P> {
     /// rest replayed the rows their cache already held.
     pub fn last_located(&self) -> u64 {
         self.located
+    }
+
+    /// Declared sources the last [`publish`](Self::publish) would have walked
+    /// for source-copy runs and could not, because they were registered while
+    /// `LengthConfig::source_copy` was off and so kept no word lane.
+    ///
+    /// Nonzero means those books published no code-3 row for a reason that is
+    /// not "no run was found": the host re-sends their text to fix it.
+    pub fn last_wordless_references(&self) -> u64 {
+        self.wordless
     }
 
     /// Target books re-paired against their declared source by the last
@@ -798,7 +832,7 @@ impl<P: ChapterPass + Sync> Expediter<P> {
         }
 
         // Scoped so the borrowed observations are released before the sweep.
-        let (mut folds, mut located, mut pairings) = (0, 0, 0);
+        let (mut folds, mut located, mut pairings, mut wordless) = (0, 0, 0, 0);
         let (projected, patterns) = {
             let Self {
                 pantry,
@@ -912,6 +946,12 @@ impl<P: ChapterPass + Sync> Expediter<P> {
                 }
             }
 
+            // One projection per book per publication at most, shared by the
+            // two steps that read text: the source-copy walk fills a slot on a
+            // pair miss and the site rescan takes it. Empty unless the
+            // source-copy lane is on, which is what keeps a cold publication
+            // from holding a whole corpus of projected text at once.
+            let mut views: Vec<Option<OnionBook>> = (0..books.len()).map(|_| None).collect();
             let mut findings = Findings::new(projected_lens);
             {
                 // Judging is corpus-level: every Target book, changed or not.
@@ -937,15 +977,17 @@ impl<P: ChapterPass + Sync> Expediter<P> {
                     .filter(|lengths| lengths.enabled || lengths.presence);
                 // First wins: a caller may present two files under one key, and
                 // the choice has to be its order rather than a hash's.
-                let mut sources: FxHashMap<BookKey, (RawChecksum, &[SourceVerse])> =
-                    FxHashMap::default();
+                type Source<'a> = (RawChecksum, &'a [SourceVerse], Option<&'a SourceWords>);
+                let mut sources: FxHashMap<BookKey, Source<'_>> = FxHashMap::default();
+                let copying = lengths.is_some_and(|lengths| lengths.source_copy);
                 if lengths.is_some() {
                     for (id, key) in &references {
                         let Some(verses) = pantry.reference_lengths(id) else {
                             continue;
                         };
                         let checksum = pantry.checksum(id).expect("the pantry listed this id");
-                        sources.entry(*key).or_insert((checksum, verses));
+                        let words = copying.then(|| pantry.reference_words(id)).flatten();
+                        sources.entry(*key).or_insert((checksum, verses, words));
                     }
                 }
                 match lengths.filter(|_| !sources.is_empty()) {
@@ -953,19 +995,35 @@ impl<P: ChapterPass + Sync> Expediter<P> {
                         let mut facts: Vec<AlignmentFact> = Vec::new();
                         let mut keys: Vec<PairKey> = Vec::with_capacity(books.len());
                         let mut slots: Vec<Option<PairKey>> = Vec::with_capacity(books.len());
-                        for (index, ((_, key), aggregate)) in books.iter().zip(&corpus).enumerate()
+                        for (index, ((id, key), aggregate)) in books.iter().zip(&corpus).enumerate()
                         {
-                            let Some((source, verses)) = sources.get(key) else {
+                            let Some((source, verses, words)) = sources.get(key) else {
                                 slots.push(None);
                                 continue;
                             };
-                            let entry = (checksums[index], *source);
+                            if copying && words.is_none() {
+                                wordless += 1;
+                            }
+                            let walked = copying && words.is_some();
+                            let entry = (checksums[index], *source, walked);
                             if let Entry::Vacant(slot) = paired.entry(entry) {
                                 facts.clear();
-                                slot.insert(PairedBook::pair(
+                                // The one text read on this path, and only for
+                                // a book whose own side or whose source moved:
+                                // the target's projection, rebuilt from the
+                                // products it already retains.
+                                if walked && views[index].is_none() {
+                                    views[index] = Some(projection(pantry, id)?);
+                                }
+                                let copy = walked
+                                    .then(|| views[index].as_ref().zip(*words))
+                                    .flatten()
+                                    .map(|(view, words)| (view.text(), words));
+                                slot.insert(PairedBook::pair_with(
                                     *key,
                                     pass.verse_lengths(aggregate),
                                     verses,
+                                    copy,
                                     &mut facts,
                                 ));
                                 pairings += 1;
@@ -1025,17 +1083,13 @@ impl<P: ChapterPass + Sync> Expediter<P> {
                     replay(book, rows, &resolver, &mut findings);
                     continue;
                 }
-                let products = pantry.products(id).expect("the pantry listed this id");
-                let text = products
-                    .text
-                    .ok_or_else(|| PublishError::NoText { id: id.clone() })?;
-                // One reprojection per relocated book; no second text copy is
-                // retained, exactly as `index_book` does it.
-                let view = OnionBook::from_parts(text, products.mask.clone(), products.toc.clone())
-                    .map_err(|error| PublishError::InvalidBook {
-                        id: id.clone(),
-                        error,
-                    })?;
+                // The pair step's projection where it made one, and one of its
+                // own otherwise; taken, so it is released as this book is
+                // located rather than held to the end of the publication.
+                let view = match views[index].take() {
+                    Some(view) => view,
+                    None => projection(pantry, id)?,
+                };
                 let rows: Vec<Chapter> = view.chapters().collect();
                 let before = findings.len();
                 let verses: Vec<sous_core::Verse> = view.verses().collect();
@@ -1053,6 +1107,7 @@ impl<P: ChapterPass + Sync> Expediter<P> {
         self.folds = folds;
         self.located = located;
         self.pairings = pairings;
+        self.wordless = wordless;
         self.sweep();
 
         let mut per_book: Vec<Vec<PackedFinding>> = (0..books.len()).map(|_| Vec::new()).collect();
@@ -1098,6 +1153,21 @@ impl<P: ChapterPass + Sync> Expediter<P> {
 ///
 /// A row whose pattern the table no longer holds cannot happen: the firing
 /// hash covers exactly the contents that produced these rows.
+/// One registered book's projected view, rebuilt from the products it already
+/// retains. The text is borrowed, never copied.
+fn projection(pantry: &Pantry, id: &BookId) -> Result<OnionBook, PublishError> {
+    let products = pantry.products(id).expect("the pantry listed this id");
+    let text = products
+        .text
+        .ok_or_else(|| PublishError::NoText { id: id.clone() })?;
+    OnionBook::from_parts(text, products.mask.clone(), products.toc.clone()).map_err(|error| {
+        PublishError::InvalidBook {
+            id: id.clone(),
+            error,
+        }
+    })
+}
+
 fn replay(
     book: BookIndex,
     rows: &[SiteRow],
@@ -2175,6 +2245,125 @@ mod tests {
         sous.publish().unwrap();
         assert_eq!(sous.last_paired(), 2, "the first publication pairs both");
         sous
+    }
+
+    /// The one lane of this step that reads text reads it inside the pairing,
+    /// so an unchanged republication walks no words: the runs come back from
+    /// the cache keyed by the two checksums.
+    #[test]
+    fn an_unchanged_publish_walks_no_text_for_source_copy() {
+        let mut sous = with_source_copy();
+        let shared = worded("MRK", "the beginning of the good news");
+        sous.update("t/mrk.usfm", Role::Target, &shared).unwrap();
+        sous.update("s/mrk.usfm", Role::Reference, &shared).unwrap();
+        let before = sous.publish().unwrap();
+        assert_eq!(sous.last_paired(), 1);
+        assert!(
+            !copy_rows(&before).is_empty(),
+            "a source identical to the target shares every run with it"
+        );
+
+        let after = sous.publish().unwrap();
+        assert_eq!(sous.last_paired(), 0, "neither side moved");
+        assert_eq!(sous.last_mapped(), 0);
+        assert_eq!(sous.last_folded(), 0);
+        assert_eq!(sous.last_located(), 0);
+        assert_eq!(after, before, "and the rows came back verbatim");
+    }
+
+    /// A reference registered while the lane was off keeps no word lane, so
+    /// turning the lane on publishes nothing for it — and says so, instead of
+    /// reading as "no run was found". Re-sending the text is the fix.
+    #[test]
+    fn a_reference_registered_before_the_lane_keeps_no_words_and_says_so() {
+        let mut sous = sous();
+        let shared = worded("MRK", "the beginning of the good news");
+        sous.update("t/mrk.usfm", Role::Target, &shared).unwrap();
+        sous.update("s/mrk.usfm", Role::Reference, &shared).unwrap();
+        sous.publish().unwrap();
+        assert_eq!(sous.last_wordless_references(), 0, "the lane is off");
+
+        let config = source_copy_config();
+        sous.set_config(((), config, config));
+        let silent = sous.publish().unwrap();
+        assert!(copy_rows(&silent).is_empty());
+        assert_eq!(
+            sous.last_wordless_references(),
+            1,
+            "the reference has no word lane to walk"
+        );
+
+        sous.update("s/mrk.usfm", Role::Reference, &shared).unwrap();
+        let heard = sous.publish().unwrap();
+        assert_eq!(sous.last_wordless_references(), 0);
+        assert!(
+            !copy_rows(&heard).is_empty(),
+            "the re-sent reference carries the lane"
+        );
+    }
+
+    /// The switch is in the pair cache's identity: turning it off re-pairs
+    /// without the walk, and turning it on re-pairs with it.
+    #[test]
+    fn the_source_copy_switch_re_pairs_and_the_floor_does_not() {
+        let mut sous = with_source_copy();
+        let shared = worded("MRK", "the beginning of the good news");
+        sous.update("t/mrk.usfm", Role::Target, &shared).unwrap();
+        sous.update("s/mrk.usfm", Role::Reference, &shared).unwrap();
+        sous.publish().unwrap();
+
+        let mut config = source_copy_config();
+        config.lengths.source_copy_min_run = 4;
+        sous.set_config(((), config, config));
+        let raised = sous.publish().unwrap();
+        assert_eq!(sous.last_paired(), 0, "a floor is not in the key");
+        assert!(!copy_rows(&raised).is_empty());
+
+        config.lengths.source_copy = false;
+        sous.set_config(((), config, config));
+        let off = sous.publish().unwrap();
+        assert_eq!(sous.last_paired(), 1, "the switch is");
+        assert!(copy_rows(&off).is_empty());
+    }
+
+    /// The lane ships off, so every case that judges it turns it on.
+    fn source_copy_config() -> JudgingConfig {
+        let mut config = JudgingConfig::default();
+        config.lengths.source_copy = true;
+        config
+    }
+
+    fn with_source_copy() -> Expediter<Brigade> {
+        let mut sous = sous();
+        let config = source_copy_config();
+        sous.set_config(((), config, config));
+        sous
+    }
+
+    /// One verse per line, all of them the same words.
+    fn worded(code: &str, body: &str) -> String {
+        let mut text = format!("\\id {code}\n\\h {code}\n\\c 1\n\\p\n");
+        for verse in 1..=62 {
+            text.push_str(&format!("\\v {verse} {body}\n"));
+        }
+        text
+    }
+
+    /// Every source-copy row of a published buffer, as (book index, from, to).
+    fn copy_rows(buffer: &[u8]) -> Vec<(u16, u32, u32)> {
+        let snapshot = CorpusSnapshot::open(buffer).unwrap();
+        (0..snapshot.len())
+            .flat_map(|index| {
+                let book = snapshot
+                    .book(BookIndex::new(index).unwrap())
+                    .expect("directory position");
+                (0..book.len()).filter_map(move |row| {
+                    let finding = book.at(row).unwrap();
+                    matches!(finding.kind(), FindingKind::SourceCopy(_))
+                        .then(|| (finding.book_idx().get(), finding.from(), finding.to()))
+                })
+            })
+            .collect()
     }
 
     /// The ratios are a pure function of both sides' rows, so a republication

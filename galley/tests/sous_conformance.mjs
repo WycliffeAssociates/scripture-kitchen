@@ -61,7 +61,15 @@ check(knobs.casing, "casing ships on");
 knobs.casing = false;
 knobs.sentence_start_upper_bp = 9990;
 knobs.z_short = 2.0;
+check(!knobs.source_copy, "the source-copy lane ships off");
+knobs.source_copy = true;
 galley.setConfig(knobs);
+// A reference registered before the lane was on kept no word lane; the host
+// re-sends its text, and the publication says how many needed it.
+galley.publish();
+eq(galley.lastWordlessReferences(), 2, "both references need re-sending");
+galley.updateReference("ref/RUT.usfm", fixture("ref/RUT.usfm"));
+galley.updateReference("ref/JON.usfm", fixture("ref/JON.usfm"));
 const knobsBytes = galley.publish();
 check(sameBytes(knobsBytes, golden("knobs.bin")), "the knobs publication equals knobs.bin");
 
@@ -92,6 +100,9 @@ check(
 for (const id of ["books/RUT.usfm", "books/JON.usfm"]) {
   eq(rowsOf(cold, id), rowsOf(edit, id), `${id} is untouched by an edit to GEN`);
 }
+
+check(kinds(knobsSnap).has("SourceCopy"), "the knobs publication holds a SourceCopy row");
+check(!coldKinds.has("SourceCopy"), "and the default publication holds none");
 
 const casingRows = (snapshot) =>
   snapshot.patterns().filter((pattern) => pattern.channel === "Casing").length;

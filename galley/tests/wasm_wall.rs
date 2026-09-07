@@ -53,7 +53,17 @@ fn the_three_publications_cross_unchanged() {
     knobs.casing = false;
     knobs.sentence_start_upper_bp = 9_990;
     knobs.z_short = 2.0;
+    // The lane the defaults leave off: the knobs golden is where wire code 3
+    // crosses the wall.
+    assert!(!knobs.source_copy, "the source-copy lane ships off");
+    knobs.source_copy = true;
     galley.set_config(knobs);
+    // A reference registered before the lane was on kept no word lane; the
+    // host re-sends its text, and the publication says how many needed it.
+    galley.publish().unwrap();
+    assert_eq!(galley.last_wordless_references(), 2.0);
+    galley.update_reference("ref/RUT.usfm", RUT_REF).unwrap();
+    galley.update_reference("ref/JON.usfm", JON_REF).unwrap();
     assert_eq!(galley.publish().unwrap(), KNOBS, "the knobs publication");
 }
 

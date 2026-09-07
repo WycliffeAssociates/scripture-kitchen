@@ -27,8 +27,8 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 use sous_core::{
     Brigade, Channel, Channels, ChapterPass, Corpus, CorpusSnapshot, JudgingConfig, ProjectedBook,
-    SnapshotId, SourceLengths, SourceVerse, analyze_paired, analyze_with, for_each_chapter,
-    hygiene::HygieneBytes, source_lengths, substrate::Substrate,
+    SnapshotId, SourceLengths, SourceVerse, SourceWords, analyze_paired, analyze_with,
+    for_each_chapter, hygiene::HygieneBytes, source_lengths, substrate::Substrate,
 };
 use usfm_galley::onion::{Filter, cst, lex, mask};
 use usfm_galley::sous::{Expediter, OnionBook, OnionInputBook, publish_onion_findings};
@@ -60,17 +60,25 @@ fn cold_publish_with<P: ChapterPass + Sync>(
         })
         .collect();
     let corpus = Corpus::try_new(&parsed).expect("the harness registers distinct book keys");
-    let sources: Vec<(sous_core::BookKey, Vec<SourceVerse>)> = references
+    let sources: Vec<(sous_core::BookKey, Vec<SourceVerse>, SourceWords)> = references
         .iter()
         .map(|(id, text)| {
             let book = OnionBook::parse(text)
                 .unwrap_or_else(|error| panic!("{id} is not analyzable: {error}"));
-            (ProjectedBook::key(&book), source_lengths(&book))
+            (
+                ProjectedBook::key(&book),
+                source_lengths(&book),
+                SourceWords::of(&book),
+            )
         })
         .collect();
     let source: Vec<SourceLengths<'_>> = sources
         .iter()
-        .map(|(key, verses)| SourceLengths { book: *key, verses })
+        .map(|(key, verses, words)| SourceLengths {
+            book: *key,
+            verses,
+            words: Some(words),
+        })
         .collect();
     let (findings, patterns) = analyze_paired(&corpus, pass, config, &source)
         .0
@@ -127,9 +135,11 @@ fn assert_paired_publications_agree<P: ChapterPass + Sync + Copy>(
         .unwrap_or_else(|error| panic!("{context}: {error}"));
     let snapshot = CorpusSnapshot::open(&buffer).unwrap().snapshot_id();
     let pass = *sous.pass();
+    // The Expediter's own config, not the default: a case that moves a knob
+    // is still measured against the cold publication under that knob.
     let cold = cold_publish_with(
         &pass,
-        &P::Config::default(),
+        sous.config(),
         &ordered(sous, Role::Target, &texts),
         &ordered(sous, Role::Reference, &texts),
         snapshot,
@@ -819,6 +829,75 @@ fn replacing_the_reference_changes_rows_without_touching_a_target_only_row() {
     );
 }
 
+/// The same gate for wire code 3: a source the target shares whole sentences
+/// with, replaced by one it shares nothing with.
+#[test]
+fn replacing_the_reference_moves_the_source_copy_rows() {
+    let books = worded_books("target", SHARED);
+    let shared: Vec<Book> = books
+        .iter()
+        .map(|(id, text)| (id.replace("target/", "source/"), text.clone()))
+        .collect();
+    let mut sous = Expediter::new(Brigade::default(), BUDGET);
+    // The lane ships off; this gate is about what it publishes when it is on.
+    let mut config = sous_core::JudgingConfig::default();
+    config.lengths.source_copy = true;
+    sous.set_config(((), config, config));
+    for (id, text) in &books {
+        sous.update(id.as_str(), Role::Target, text).unwrap();
+    }
+    for (id, text) in &shared {
+        sous.update(id.as_str(), Role::Reference, text).unwrap();
+    }
+    assert_paired_publications_agree(&mut sous, &books, &shared, "copies: identical source");
+    let against_itself = sous.publish().unwrap();
+    let rows = copies_of(&against_itself);
+    assert!(
+        !rows.is_empty(),
+        "a source identical to the target shares every run with it"
+    );
+
+    let foreign = worded_books("source", FOREIGN);
+    for (id, text) in &foreign {
+        sous.update(id.as_str(), Role::Reference, text).unwrap();
+    }
+    assert_paired_publications_agree(&mut sous, &books, &foreign, "copies: source replaced");
+    assert_eq!(sous.last_mapped(), 0, "no target chapter was re-mapped");
+    assert_eq!(sous.last_folded(), 0, "no target book was re-folded");
+
+    let against_foreign = sous.publish().unwrap();
+    assert!(
+        copies_of(&against_foreign).is_empty(),
+        "a source sharing no word shares no run"
+    );
+    assert_eq!(
+        others_of(&against_foreign),
+        others_of(&against_itself),
+        "every row that is not about the source stands"
+    );
+}
+
+const SHARED: &str = "the beginning of the good news";
+const FOREIGN: &str = "mwanzo wa injili ya yesu kristo";
+
+/// The paired fixture again with words instead of a run of one letter, so the
+/// source-copy lane has something to share.
+fn worded_books(prefix: &str, body: &str) -> Vec<Book> {
+    ["GEN", "MRK"]
+        .iter()
+        .map(|code| {
+            let mut text = format!("\\id {code}\n\\h {code}\n");
+            for chapter in 1..=PAIRED_CHAPTERS {
+                text.push_str(&format!("\\c {chapter}\n\\p\n"));
+                for verse in 1..=PAIRED_VERSES {
+                    text.push_str(&format!("\\v {verse} {body}\n"));
+                }
+            }
+            (format!("{prefix}/{code}.usfm"), text)
+        })
+        .collect()
+}
+
 /// Chapters and verses per paired-fixture book: 80 paired units over the two,
 /// which clears `min_verses` for the project scope and not for either book —
 /// so the fixture exercises the small-book fallback as well as the pairing.
@@ -870,6 +949,30 @@ fn others_of(buffer: &[u8]) -> Vec<(u16, u32, u32)> {
     published(buffer, false)
 }
 
+/// Just the code-3 rows, with the run each carries.
+fn copies_of(buffer: &[u8]) -> Vec<(u16, u32, u32, u32)> {
+    let snapshot = CorpusSnapshot::open(buffer).unwrap();
+    (0..snapshot.len())
+        .flat_map(|index| {
+            let book = snapshot
+                .book(sous_core::BookIndex::new(index).unwrap())
+                .expect("directory position");
+            (0..book.len()).filter_map(move |row| {
+                let finding = book.at(row).unwrap();
+                let sous_core::FindingKind::SourceCopy(digest) = finding.kind() else {
+                    return None;
+                };
+                Some((
+                    finding.book_idx().get(),
+                    finding.from(),
+                    finding.to(),
+                    digest.run(),
+                ))
+            })
+        })
+        .collect()
+}
+
 fn published(buffer: &[u8], lengths: bool) -> Vec<(u16, u32, u32)> {
     let snapshot = CorpusSnapshot::open(buffer).unwrap();
     (0..snapshot.len())
@@ -879,9 +982,11 @@ fn published(buffer: &[u8], lengths: bool) -> Vec<(u16, u32, u32)> {
                 .expect("directory position");
             (0..book.len()).filter_map(move |row| {
                 let finding = book.at(row).unwrap();
+                // Both source-compared codes count as "about the source".
                 let is_length = matches!(
                     finding.kind(),
                     sous_core::FindingKind::LengthProportionality(_)
+                        | sous_core::FindingKind::SourceCopy(_)
                 );
                 (is_length == lengths)
                     .then(|| (finding.book_idx().get(), finding.from(), finding.to()))

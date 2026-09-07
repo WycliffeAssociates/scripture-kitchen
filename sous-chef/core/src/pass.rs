@@ -765,6 +765,7 @@ pub fn analyze_paired<B: ProjectedBook, P: ChapterPass>(
                 .map(|(index, book)| TargetLengths {
                     book: book.key(),
                     verses: pass.verse_lengths(&aggregates[index.get() as usize]),
+                    text: book.text(),
                 })
                 .collect();
             judge_lengths(&target, source, &lengths, &mut out)
