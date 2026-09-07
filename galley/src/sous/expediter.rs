@@ -16,16 +16,18 @@
 //! publication sweeps what no retained generation names. Why the two hashes
 //! divide the work this way: `expediter.md`.
 
+use std::collections::hash_map::Entry;
+
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use sous_core::judge::{Channel, PatternKey};
 use sous_core::substrate::ScalarKey;
 use sous_core::{
-    BookIndex, Chapter, ChapterInput, ChapterObs, ChapterPass, ConventionDigest, CoordinateSpace,
-    CorpusTotals, CorpusWireError, FindingKind, Findings, PackedFinding, Pattern, PatternIndex,
-    ProjectedBook, PublicationBook, Reasons, SnapshotId, SourceLengths, TargetLengths, TextRange,
-    encode_to_corpus_buffer, for_each_chapter, judge_lengths,
+    AlignmentFact, BookIndex, Chapter, ChapterInput, ChapterObs, ChapterPass, ConventionDigest,
+    CoordinateSpace, CorpusTotals, CorpusWireError, FindingKind, Findings, PackedFinding,
+    PairedBook, Pattern, PatternIndex, ProjectSpread, ProjectedBook, PublicationBook, Reasons,
+    SnapshotId, SourceVerse, TextRange, encode_to_corpus_buffer, for_each_chapter, judge_paired,
 };
 #[cfg(feature = "parallel")]
 use sous_core::{ChapterKey, Verse};
@@ -192,6 +194,11 @@ fn key_bytes(key: PatternKey) -> [u8; 10] {
     out
 }
 
+/// What one book's pairing is a function of: its own raw checksum and the raw
+/// checksum of the source book of its [`BookKey`]. Both sides, because either
+/// moving is a different sample.
+type PairKey = (RawChecksum, RawChecksum);
+
 /// Previous checksums a book keeps beside its current one, so an undo of that
 /// many edits still lands on a retained chapter table.
 const DEFAULT_GENERATIONS: usize = 4;
@@ -225,6 +232,14 @@ pub struct Expediter<P: ChapterPass> {
     /// One book's located rows for the last firing set seen, keyed by the same
     /// checksum: unchanged text plus an unchanged firing set is a replay.
     sites: FxHashMap<RawChecksum, (FiringHash, Box<[SiteRow]>)>,
+    /// One target book's ratios against its declared source, keyed by BOTH
+    /// checksums: the pairing is a pure function of the two books' rows, so a
+    /// publication re-pairs only the books whose side moved.
+    paired: FxHashMap<PairKey, PairedBook>,
+    /// The pooled statistics beside the keys that produced them. The same keys
+    /// are the same sample, so a publication that re-paired nothing skips the
+    /// project-scope order statistics too.
+    project: Option<(Vec<PairKey>, ProjectSpread)>,
     /// The corpus counts judging reads, kept across publications: a book whose
     /// checksum moved is subtracted at its old one and added at its new, and
     /// the rest are never touched.
@@ -255,6 +270,7 @@ pub struct Expediter<P: ChapterPass> {
     remaps: u64,
     folds: u64,
     located: u64,
+    pairings: u64,
     /// Whether a book's missing chapters are mapped on rayon; the two
     /// settings publish the same bytes.
     #[cfg(feature = "parallel")]
@@ -301,6 +317,8 @@ impl<P: ChapterPass + Sync> Expediter<P> {
             chapter_tables: FxHashMap::default(),
             aggregates: FxHashMap::default(),
             sites: FxHashMap::default(),
+            paired: FxHashMap::default(),
+            project: None,
             totals: CorpusTotals::default(),
             tallied: FxHashMap::default(),
             generations: FxHashMap::default(),
@@ -315,6 +333,7 @@ impl<P: ChapterPass + Sync> Expediter<P> {
             remaps: 0,
             folds: 0,
             located: 0,
+            pairings: 0,
             #[cfg(feature = "parallel")]
             parallel: true,
         }
@@ -457,6 +476,13 @@ impl<P: ChapterPass + Sync> Expediter<P> {
         self.located
     }
 
+    /// Target books re-paired against their declared source by the last
+    /// [`publish`](Self::publish); the rest judged the ratios their cache
+    /// already held.
+    pub fn last_paired(&self) -> u64 {
+        self.pairings
+    }
+
     /// Observations the cache holds after the last sweep.
     pub fn resident_observations(&self) -> usize {
         self.observations.len()
@@ -498,6 +524,11 @@ impl<P: ChapterPass + Sync> Expediter<P> {
                 size_of::<RawChecksum>() + size_of::<FiringHash>() + size_of_val(&**rows)
             })
             .sum();
+        let pairs: usize = self
+            .paired
+            .values()
+            .map(|book| size_of::<PairKey>() + book.resident_bytes())
+            .sum();
         let rings: usize = self
             .generations
             .values()
@@ -513,6 +544,7 @@ impl<P: ChapterPass + Sync> Expediter<P> {
             + rows
             + cached
             + sites
+            + pairs
             + rings
             + self.totals.resident_bytes()
             + self.tallied.len() * (size_of::<BookId>() + size_of::<RawChecksum>())
@@ -754,7 +786,7 @@ impl<P: ChapterPass + Sync> Expediter<P> {
         }
 
         // Scoped so the borrowed observations are released before the sweep.
-        let (mut folds, mut located) = (0, 0);
+        let (mut folds, mut located, mut pairings) = (0, 0, 0);
         let (projected, patterns) = {
             let Self {
                 pantry,
@@ -764,6 +796,8 @@ impl<P: ChapterPass + Sync> Expediter<P> {
                 chapter_tables,
                 aggregates,
                 sites,
+                paired,
+                project,
                 totals,
                 tallied,
                 generations,
@@ -881,26 +915,77 @@ impl<P: ChapterPass + Sync> Expediter<P> {
                 // which is the contract and not an error. The pairing facts
                 // are alignment structure, never findings, so they are
                 // dropped here — a host that wants them runs the cold path.
-                if let Some(lengths) = pass.length_config(config) {
-                    let source: Vec<SourceLengths<'_>> = references
-                        .iter()
-                        .filter_map(|(id, key)| {
-                            Some(SourceLengths {
-                                book: *key,
-                                verses: pantry.reference_lengths(id)?,
-                            })
-                        })
-                        .collect();
-                    if !source.is_empty() {
-                        let target: Vec<TargetLengths<'_>> = books
+                //
+                // Only a book whose own checksum or whose source's moved is
+                // paired again: the ratios and their order statistics are a
+                // pure function of both sides' rows (`expediter.md`).
+                let lengths = pass.length_config(config).filter(|lengths| lengths.enabled);
+                // First wins: a caller may present two files under one key, and
+                // the choice has to be its order rather than a hash's.
+                let mut sources: FxHashMap<BookKey, (RawChecksum, &[SourceVerse])> =
+                    FxHashMap::default();
+                if lengths.is_some() {
+                    for (id, key) in &references {
+                        let Some(verses) = pantry.reference_lengths(id) else {
+                            continue;
+                        };
+                        let checksum = pantry.checksum(id).expect("the pantry listed this id");
+                        sources.entry(*key).or_insert((checksum, verses));
+                    }
+                }
+                match lengths.filter(|_| !sources.is_empty()) {
+                    Some(lengths) => {
+                        let mut facts: Vec<AlignmentFact> = Vec::new();
+                        let mut keys: Vec<PairKey> = Vec::with_capacity(books.len());
+                        let mut slots: Vec<Option<PairKey>> = Vec::with_capacity(books.len());
+                        for (index, ((_, key), aggregate)) in books.iter().zip(&corpus).enumerate()
+                        {
+                            let Some((source, verses)) = sources.get(key) else {
+                                slots.push(None);
+                                continue;
+                            };
+                            let entry = (checksums[index], *source);
+                            if let Entry::Vacant(slot) = paired.entry(entry) {
+                                facts.clear();
+                                slot.insert(PairedBook::pair(
+                                    *key,
+                                    pass.verse_lengths(aggregate),
+                                    verses,
+                                    &mut facts,
+                                ));
+                                pairings += 1;
+                            }
+                            keys.push(entry);
+                            slots.push(Some(entry));
+                        }
+                        let hit = matches!(&*project, Some((seen, _)) if *seen == keys);
+                        if !hit {
+                            // Sweep by live keys: an entry no target names has
+                            // no book on either side any more.
+                            let live: FxHashSet<PairKey> = keys.iter().copied().collect();
+                            if paired.len() > live.len() {
+                                paired.retain(|key, _| live.contains(key));
+                            }
+                        }
+                        let rows: Vec<Option<&PairedBook>> = slots
                             .iter()
-                            .zip(&corpus)
-                            .map(|((_, key), aggregate)| TargetLengths {
-                                book: *key,
-                                verses: pass.verse_lengths(aggregate),
-                            })
+                            .map(|slot| slot.map(|key| &paired[&key]))
                             .collect();
-                        judge_lengths(&target, &source, &lengths, &mut findings);
+                        let spread = match (hit, &*project) {
+                            (true, Some((_, spread))) => *spread,
+                            _ => {
+                                let spread = ProjectSpread::of(&rows);
+                                *project = Some((keys, spread));
+                                spread
+                            }
+                        };
+                        judge_paired(&rows, &spread, &lengths, &mut findings);
+                    }
+                    // No source, or the lane switched off: the cache is a
+                    // whole corpus of ratios, and nothing is left to key it.
+                    None => {
+                        paired.clear();
+                        *project = None;
                     }
                 }
             }
@@ -952,6 +1037,7 @@ impl<P: ChapterPass + Sync> Expediter<P> {
         };
         self.folds = folds;
         self.located = located;
+        self.pairings = pairings;
         self.sweep();
 
         let mut per_book: Vec<Vec<PackedFinding>> = (0..books.len()).map(|_| Vec::new()).collect();
@@ -2045,6 +2131,122 @@ mod tests {
         };
         sous.set_config(((), off, off));
         assert!(length_rows(&sous.publish().unwrap()).is_empty());
+    }
+
+    /// The varied target and the flat source of [`paired_target`] under any
+    /// book code, so a paired corpus can have more than one book in it.
+    fn varied(code: &str) -> String {
+        sized(code, 62, |verse| match verse {
+            60 => 20,
+            61 => 80,
+            other => 40 + other % 7,
+        })
+    }
+
+    fn flat(code: &str) -> String {
+        sized(code, 62, |_| 40)
+    }
+
+    /// Two targets and their two sources, published once: the pairing cache is
+    /// full and the counter says so.
+    fn two_paired_books() -> Expediter<Brigade> {
+        let mut sous = sous();
+        for code in ["GEN", "MRK"] {
+            sous.update(format!("t/{code}"), Role::Target, &varied(code))
+                .unwrap();
+            sous.update(format!("s/{code}"), Role::Reference, &flat(code))
+                .unwrap();
+        }
+        sous.publish().unwrap();
+        assert_eq!(sous.last_paired(), 2, "the first publication pairs both");
+        sous
+    }
+
+    /// The ratios are a pure function of both sides' rows, so a republication
+    /// that moved neither re-pairs nothing and republishes the same bytes.
+    #[test]
+    fn an_unchanged_source_and_target_re_pair_nothing() {
+        let mut sous = sous();
+        sous.update("t/mrk.usfm", Role::Target, &paired_target())
+            .unwrap();
+        sous.update("s/mrk.usfm", Role::Reference, &paired_source())
+            .unwrap();
+        let before = sous.publish().unwrap();
+        assert_eq!(sous.last_paired(), 1);
+        assert_eq!(length_rows(&before).len(), 2);
+
+        let after = sous.publish().unwrap();
+        assert_eq!(sous.last_paired(), 0, "neither side moved");
+        assert_eq!(after, before, "and the publication is the same bytes");
+    }
+
+    /// A keystroke in one target re-pairs that book and leaves the other's
+    /// ratios where they are.
+    #[test]
+    fn a_target_edit_re_pairs_only_that_book() {
+        let mut sous = two_paired_books();
+        sous.update(
+            "t/MRK",
+            Role::Target,
+            &format!("{}\\v 63 {}\n", varied("MRK"), "a".repeat(41)),
+        )
+        .unwrap();
+        let after = sous.publish().unwrap();
+        assert_eq!(sous.last_paired(), 1, "only the edited book");
+        assert_eq!(length_rows(&after).len(), 4, "two rows a book, still");
+    }
+
+    /// Replacing one declared source re-pairs the target of that key alone —
+    /// the other target's checksum and its source's both stand.
+    #[test]
+    fn a_source_replacement_re_pairs_only_books_whose_source_moved() {
+        let mut sous = two_paired_books();
+        // A source that matches its target verse for verse: every ratio is
+        // one, so that book falls silent and the other's rows stand.
+        sous.update("s/MRK", Role::Reference, &varied("MRK"))
+            .unwrap();
+        let after = sous.publish().unwrap();
+        assert_eq!(sous.last_paired(), 1, "only the book whose source moved");
+        assert_eq!(sous.last_mapped(), 0, "a source moves no target chapter");
+        assert_eq!(sous.last_folded(), 0);
+        assert_eq!(
+            length_rows(&after),
+            length_rows(&sous.publish().unwrap()),
+            "and the next publication, which re-pairs nothing, says it again"
+        );
+        let rows = length_rows(&after);
+        assert_eq!(rows.len(), 2, "GEN keeps its two rows");
+        assert!(
+            rows.iter().all(|(book, _, _)| *book == 0),
+            "and MRK, against itself, has none: {rows:?}"
+        );
+    }
+
+    /// A judging knob is not in the cache key, because neither pairing nor a
+    /// book's order statistics read one: the rows move and nothing re-pairs.
+    #[test]
+    fn set_config_re_judges_lengths_without_re_pairing() {
+        let mut sous = two_paired_books();
+        assert_eq!(length_rows(&sous.publish().unwrap()).len(), 4);
+        assert_eq!(sous.last_paired(), 0);
+
+        let config = JudgingConfig {
+            lengths: sous_core::LengthConfig {
+                z_long: 1_000.0,
+                ..sous_core::LengthConfig::default()
+            },
+            ..JudgingConfig::default()
+        };
+        sous.set_config(((), config, config));
+        let after = sous.publish().unwrap();
+        assert_eq!(sous.last_paired(), 0, "a knob is not in the key");
+        assert_eq!(sous.last_mapped(), 0);
+        assert_eq!(sous.last_folded(), 0);
+        assert_eq!(
+            length_rows(&after).len(),
+            2,
+            "the long side is out of reach in both books"
+        );
     }
 
     /// A reference of another key pairs with nothing, and says nothing.

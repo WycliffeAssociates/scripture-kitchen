@@ -40,7 +40,8 @@ pub use pass::{
     analyze, analyze_paired, analyze_with, for_each_chapter,
 };
 pub use proportionality::{
-    LengthConfig, Paired, SourceLengths, SourceVerse, TargetLengths, judge_lengths, source_lengths,
+    LengthConfig, Paired, PairedBook, ProjectSpread, SourceLengths, SourceVerse, TargetLengths,
+    judge_lengths, judge_paired, source_lengths,
 };
 pub use sites::Site;
 pub use substrate::{

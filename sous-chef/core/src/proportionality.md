@@ -125,12 +125,19 @@ takes its first member that does. That is what lets a resident host move one
 judging config rather than two, and keeps the `Expediter` generic over the
 pass it drives.
 
-Everything here is derived state recomputed per publication from the retained
-lengths — no order-statistic cache, no ratio cache. What that costs is
-measured: about 4 ms of a warm 66-book republication and 4 ms of a keystroke
-(evidence.md, 2026-09-07). The lever, if it ever hurts, is named there: the
-pairing is a pure function of the two books' key sequences and neither moves on
-an unrelated edit.
+Everything here is derived state a caller may recompute per publication from
+the retained lengths, and `judge_lengths` does exactly that. It is also
+separable, which is what a resident host needs: `PairedBook::pair` is a pure
+function of the two books' rows — ratios, the target spans they name, and the
+knob-free `Spread` over them — and `judge_paired` turns pairs a caller already
+holds into rows under a config. A `Spread` carries no knob, so `min_verses`
+gates it at judging time and a knob never invalidates a pair.
+
+The `Expediter` keys one `PairedBook` per (target checksum, source checksum)
+and re-pairs only the books whose side moved, which took a warm paired
+republication from 4.9 ms to 0.79 ms and a keystroke from 6.6 ms to 2.95 ms
+(evidence.md, 2026-09-07). The key is the whole input, so a hit is the value a
+recomputation would produce.
 
 ## What is NOT here
 

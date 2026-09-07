@@ -153,6 +153,165 @@ impl Paired {
     }
 }
 
+/// One target book paired against its declared source: a ratio and the target
+/// span a row would name per unit, plus the knob-free order statistics over
+/// them.
+///
+/// A pure function of the two books' rows and the pairing law, which is what
+/// lets a resident host key one under the two checksums and re-pair only the
+/// books that moved (`galley/src/sous/expediter.md`).
+#[derive(Debug, Clone, Default)]
+pub struct PairedBook {
+    /// Parallel to [`Self::spans`], and held apart from it so pooling every
+    /// book's ratios for the project scope is a memcpy rather than a walk.
+    ratios: Box<[f64]>,
+    spans: Box<[TextRange]>,
+    spread: Spread,
+}
+
+impl PairedBook {
+    /// Pairs one book and turns each unit into a ratio; empty and absent
+    /// counterparts produce no ratio, and a bridge contributes exactly one.
+    pub fn pair(
+        book: BookKey,
+        target: &[VerseLength],
+        source: &[SourceVerse],
+        facts: &mut Vec<AlignmentFact>,
+    ) -> Self {
+        let target_keys: Vec<VerseKey> = target.iter().map(|row| row.key()).collect();
+        let source_keys: Vec<VerseKey> = source.iter().map(|row| row.key()).collect();
+        let mut ratios: Vec<f64> = Vec::with_capacity(target.len());
+        let mut spans: Vec<TextRange> = Vec::with_capacity(target.len());
+        pair_keys(
+            book,
+            &target_keys,
+            &source_keys,
+            &mut |_, left, right| {
+                let long: u32 = left.iter().map(|at| target[*at].graphemes()).sum();
+                let short: u32 = right.iter().map(|at| source[*at].graphemes()).sum();
+                if long == 0 || short == 0 {
+                    return;
+                }
+                // A bridge is ONE row over the bounding target range: its
+                // constituents may be discontinuous, and the span is a
+                // navigation coordinate, not a claim that the bytes between
+                // belong to it.
+                let from = left
+                    .iter()
+                    .map(|at| target[*at].text().from())
+                    .min()
+                    .expect("a paired unit has a target row");
+                let to = left
+                    .iter()
+                    .map(|at| target[*at].text().to())
+                    .max()
+                    .expect("a paired unit has a target row");
+                ratios.push(f64::from(long) / f64::from(short));
+                spans.push(TextRange::new(from, to).expect("a bounding range keeps its order"));
+            },
+            facts,
+        );
+        // Pairing walks keys in target order, so units already follow the book.
+        let spread = Spread::of(&ratios);
+        Self {
+            ratios: ratios.into(),
+            spans: spans.into(),
+            spread,
+        }
+    }
+
+    /// Every unit's ratio, in target order.
+    pub fn ratios(&self) -> &[f64] {
+        &self.ratios
+    }
+
+    /// Units that produced a ratio — the count a [`Paired`] reports.
+    pub fn count(&self) -> u32 {
+        u32::try_from(self.ratios.len()).expect("a book holds under 4G verses")
+    }
+
+    /// Inline size plus both lanes: what a resident cache pays for one book.
+    pub fn resident_bytes(&self) -> usize {
+        size_of::<Self>() + size_of_val(&*self.ratios) + size_of_val(&*self.spans)
+    }
+}
+
+/// The pooled order statistics over every paired book of one publication.
+///
+/// A function of the multiset of ratios alone — the order books contribute
+/// them in cannot move a median — so a host whose books every one hit their
+/// cache reuses one verbatim.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ProjectSpread(Spread);
+
+impl ProjectSpread {
+    pub fn of(books: &[Option<&PairedBook>]) -> Self {
+        let mut pooled: Vec<f64> =
+            Vec::with_capacity(books.iter().flatten().map(|book| book.ratios.len()).sum());
+        for book in books.iter().flatten() {
+            pooled.extend_from_slice(&book.ratios);
+        }
+        Self(Spread::of(&pooled))
+    }
+}
+
+/// Judges pairs a caller already holds against their own book and against the
+/// whole paired project, and pushes a row for every unit either scope calls an
+/// outlier.
+///
+/// Returns the units each book contributed, in slice order. `None` is a target
+/// with no source book of its key: no ratios and no rows, which is the
+/// contract and not an error.
+pub fn judge_paired(
+    books: &[Option<&PairedBook>],
+    project: &ProjectSpread,
+    config: &LengthConfig,
+    out: &mut Findings,
+) -> Vec<u32> {
+    if !config.enabled {
+        return vec![0; books.len()];
+    }
+    let project = project.0.gated(config.min_verses);
+    let mut counts: Vec<u32> = Vec::with_capacity(books.len());
+    for (index, paired) in books.iter().enumerate() {
+        let Some(paired) = paired else {
+            counts.push(0);
+            continue;
+        };
+        counts.push(paired.count());
+        if paired.ratios.is_empty() {
+            continue;
+        }
+        let book = paired.spread.gated(config.min_verses);
+        let mut opened = false;
+        for (ratio, span) in paired.ratios.iter().zip(paired.spans.iter()) {
+            let book_z = side_z(*ratio, book);
+            let project_z = side_z(*ratio, project);
+            if !fires(book_z, config) && !fires(project_z, config) {
+                continue;
+            }
+            if !opened {
+                out.open_book(BookIndex::new(index).expect("a corpus indexes every book"));
+                opened = true;
+            }
+            // Both scopes ride every row; a scope that did not judge is the
+            // wire's `i16::MIN`, which is also the under-`min_verses` flag.
+            let (book_lane, book_clamped) = lane(book_z);
+            let (project_lane, project_clamped) = lane(project_z);
+            out.push(
+                *span,
+                FindingKind::LengthProportionality(ProportionalityDigest::new(
+                    book_lane,
+                    project_lane,
+                    book_clamped || project_clamped,
+                )),
+            )
+            .expect("a paired verse's span lies inside its own book");
+        }
+    }
+    counts
+}
+
 /// Pairs every target book with the source book of the same [`BookKey`],
 /// judges each paired verse's length ratio against its book and against the
 /// whole paired project, and pushes a row for every unit either scope calls an
@@ -180,112 +339,19 @@ pub fn judge_lengths(
         sources.entry(book.book).or_insert(book.verses);
     }
 
-    // One ratio per paired unit, with the target span a row would name.
-    let mut books: Vec<Vec<Unit>> = Vec::with_capacity(target.len());
-    for book in target {
-        let Some(rows) = sources.get(&book.book) else {
-            books.push(Vec::new());
-            continue;
-        };
-        books.push(units(book.book, book.verses, rows, &mut facts));
-    }
-
-    let pooled: Vec<f64> = books
+    let books: Vec<Option<PairedBook>> = target
         .iter()
-        .flat_map(|units| units.iter().map(|unit| unit.ratio))
+        .map(|book| {
+            let rows = sources.get(&book.book)?;
+            Some(PairedBook::pair(book.book, book.verses, rows, &mut facts))
+        })
         .collect();
-    let project = Spread::of(&pooled).gated(config.min_verses);
-
-    for (index, units) in books.iter().enumerate() {
-        if units.is_empty() {
-            continue;
-        }
-        let ratios: Vec<f64> = units.iter().map(|unit| unit.ratio).collect();
-        let book = Spread::of(&ratios).gated(config.min_verses);
-        let mut opened = false;
-        for unit in units {
-            let book_z = side_z(unit.ratio, book);
-            let project_z = side_z(unit.ratio, project);
-            if !fires(book_z, config) && !fires(project_z, config) {
-                continue;
-            }
-            if !opened {
-                out.open_book(BookIndex::new(index).expect("a corpus indexes every book"));
-                opened = true;
-            }
-            // Both scopes ride every row; a scope that did not judge is the
-            // wire's `i16::MIN`, which is also the under-`min_verses` flag.
-            let (book_lane, book_clamped) = lane(book_z);
-            let (project_lane, project_clamped) = lane(project_z);
-            out.push(
-                unit.span,
-                FindingKind::LengthProportionality(ProportionalityDigest::new(
-                    book_lane,
-                    project_lane,
-                    book_clamped || project_clamped,
-                )),
-            )
-            .expect("a paired verse's span lies inside its own book");
-        }
-    }
+    let views: Vec<Option<&PairedBook>> = books.iter().map(Option::as_ref).collect();
+    let project = ProjectSpread::of(&views);
     Paired {
-        units: books
-            .iter()
-            .map(|units| u32::try_from(units.len()).expect("a book holds under 4G verses"))
-            .collect(),
+        units: judge_paired(&views, &project, config, out),
         facts,
     }
-}
-
-/// One paired unit's ratio and the target span a row names.
-struct Unit {
-    ratio: f64,
-    span: TextRange,
-}
-
-/// Pairs one book and turns each unit into a ratio; empty and absent
-/// counterparts produce no ratio, and a bridge contributes exactly one.
-fn units(
-    book: BookKey,
-    target: &[VerseLength],
-    source: &[SourceVerse],
-    facts: &mut Vec<AlignmentFact>,
-) -> Vec<Unit> {
-    let target_keys: Vec<VerseKey> = target.iter().map(|row| row.key()).collect();
-    let source_keys: Vec<VerseKey> = source.iter().map(|row| row.key()).collect();
-    let mut out = Vec::with_capacity(target.len());
-    pair_keys(
-        book,
-        &target_keys,
-        &source_keys,
-        &mut |_, left, right| {
-            let long: u32 = left.iter().map(|at| target[*at].graphemes()).sum();
-            let short: u32 = right.iter().map(|at| source[*at].graphemes()).sum();
-            if long == 0 || short == 0 {
-                return;
-            }
-            // A bridge is ONE row over the bounding target range: its
-            // constituents may be discontinuous, and the span is a navigation
-            // coordinate, not a claim that the bytes between belong to it.
-            let from = left
-                .iter()
-                .map(|at| target[*at].text().from())
-                .min()
-                .expect("a paired unit has a target row");
-            let to = left
-                .iter()
-                .map(|at| target[*at].text().to())
-                .max()
-                .expect("a paired unit has a target row");
-            out.push(Unit {
-                ratio: f64::from(long) / f64::from(short),
-                span: TextRange::new(from, to).expect("a bounding range keeps its order"),
-            });
-        },
-        facts,
-    );
-    // Pairing walks keys in target order, so units already follow the book.
-    out
 }
 
 /// A median with its two one-sided MADs, their sample sizes, and the pooled

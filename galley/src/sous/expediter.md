@@ -257,7 +257,8 @@ before `locate`, from the lengths both sides already retain:
 pass.length_config(config)         -> the knobs, from the member that owns the lane
 pass.verse_lengths(aggregate)      -> the target lane, per Target book
 pantry.reference_lengths(id)       -> the source rows, per Reference book
-judge_lengths(target, source, ..)  -> rows over target spans; facts dropped here
+PairedBook::pair(target, source)   -> one book's ratios; cached, facts dropped
+judge_paired(books, project, ..)   -> rows over target spans
 ```
 
 Every Target pairs with the Reference of the same `BookKey` — the first, if a
@@ -283,17 +284,44 @@ Three properties follow, and each is a test:
   the publication is OF, not only what it says, so the reference table is
   hashed beside the target one under its own role byte.
 
-The facts `judge_lengths` returns — target-only and source-only keys, ambiguous
+The facts pairing returns — target-only and source-only keys, ambiguous
 duplicates, partial overlaps — are dropped here. They are alignment structure,
 never findings (`rules/presence-shear.md`); a host that wants them runs the
 cold `analyze_paired`, which returns them, and `sous-cli` prints them as
 per-book counts.
 
-What it costs is recomputing the whole pairing on every publication, and that
-is measured: a warm 66-book republication goes from 0.77 ms to 4.9 ms and a
-keystroke from 2.6 ms to 6.6 ms with the same corpus declared as its own source
-(evidence.md, 2026-09-07). The lever, unspent: the pairing is a pure function
-of the two books' key sequences, and neither moves on an unrelated edit.
+## The paired cache
+
+Pairing is a pure function of the two books' rows, so it is cached like every
+other product here — keyed by BOTH sides, because either moving is a different
+sample:
+
+```text
+paired[(target RawChecksum, source RawChecksum)]
+  = PairedBook { ratios, target spans, the book's knob-free Spread }
+```
+
+`last_paired()` counts the books that missed: all of them on a cold open, one
+after a keystroke, none on a warm republication or a `set_config`. The config
+is not in the key because neither the pairing nor a book's order statistics
+read one — `Spread` is knob-free and `LengthConfig::min_verses` gates it at
+judging time, which is what makes a length knob a re-judge and never a re-pair.
+
+The project scope is the pooled sample over every paired book, and it too is
+kept: the same key sequence is the same multiset of ratios, whatever order the
+books contribute them in, so a publication that re-paired nothing reuses the
+pooled `Spread` verbatim. A keystroke recomputes it, which is the honest floor
+— one book moving moves the pool.
+
+The sweep is by live keys: an entry no target named has no book on either side
+any more. Removing the last reference, or switching the lane off, drops the
+cache whole, because nothing is left to key it by.
+
+What this buys is measured: a warm 66-book republication with the corpus
+declared as its own source goes from 4.9 ms to 0.79 ms and a keystroke from
+6.6 ms to 2.95 ms, so a declared source now costs 53 µs warm and 382 µs on a
+keystroke (evidence.md, 2026-09-07). What it costs is 494 KB for a whole Bible
+— 31k units at 8 B of ratio and 8 B of span — which `resident_bytes` counts.
 
 ## Why the buffers are equal
 
