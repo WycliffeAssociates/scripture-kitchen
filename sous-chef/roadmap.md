@@ -552,7 +552,7 @@ Verification gate:
 - uncased scripts abstain and avoid expensive case-fold work;
 - `David, david said`, bivariant words, cross-verse doubles, French repeated
   forms, names, and productive case variants have explicit tests — all present
-  as of W2, `core/src/words/tests.rs`;
+  as of W2, `core/src/words/tests/`;
 - word config re-judges retained observations without rewalking text;
 - fleet calibration includes volume tails and representative false/ambiguous
   cases before defaults are accepted.

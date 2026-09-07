@@ -54,6 +54,13 @@ Every rule answers these eight questions before implementation:
 Implementation detail sits beside the code it describes:
 [`../core/src/pass.md`](../core/src/pass.md),
 [`../core/src/hygiene.md`](../core/src/hygiene.md),
+[`../core/src/substrate.md`](../core/src/substrate.md),
+[`../core/src/words.md`](../core/src/words.md),
+[`../core/src/judge.md`](../core/src/judge.md),
+[`../core/src/sites.md`](../core/src/sites.md),
 [`../core/src/unicode/README.md`](../core/src/unicode/README.md),
 [`../core/src/codec/README.md`](../core/src/codec/README.md),
-[`../core/src/proportionality.md`](../core/src/proportionality.md).
+[`../core/src/proportionality.md`](../core/src/proportionality.md),
+[`../core/src/presence.md`](../core/src/presence.md),
+[`../core/src/source_copy.md`](../core/src/source_copy.md),
+[`../core/src/typos.md`](../core/src/typos.md).

@@ -21,7 +21,7 @@
 //!
 //! A site is listed under its HEADLINE pattern — the finest channel it matched
 //! — so a site count under a pattern row is not that row's numerator. The
-//! `--report` page shows each site's reasons beside it; `report.rs` renders it.
+//! `--report` page shows each site's reasons beside it; `report/` renders it.
 
 use std::{
     fs,

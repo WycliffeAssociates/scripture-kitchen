@@ -1,8 +1,9 @@
 //! What the corpus capitalizes after.
 //!
 //! ```text
-//! merged_follows(corpus)  -> [('.', 4_112 upper / 4_190), ('!', 96 / 98)]
-//! table.forcing()         -> ['.', '!', '?']
+//! merged_follows(corpus)  -> [('.', 4_112 upper / 4_190), ('!', 96 / 98),
+//!                             ('?', 512 / 520), (',', 31 / 4_836)]
+//! table.forcing()         -> ['.', '!', '?']      // the comma is no terminal
 //! ```
 //!
 //! A forcing glyph is corpus evidence, not a rule: the table says which

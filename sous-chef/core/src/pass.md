@@ -67,8 +67,9 @@ to rescan a book at all. `galley::sous::Expediter` caches a book's rows under
 `(RawChecksum, FiringHash)` and replays them when neither moved.
 
 The pattern table is the whole corpus's, so each member of a tuple filters it
-down to its own rows: `sites::firing` skips the two word channels, whose key is
-a hash and not a glyph, and `Words::firing` keeps only those. A member that
+down to its own rows: `sites::firing` skips every channel `Channel::judged_by_words`
+names — the three hash-keyed ones and `LetterRun`, whose letter the substrate
+walk never counted — and `Words::firing` keeps only those four. A member that
 claimed a row it cannot place would rescan text for nothing.
 
 ## Retention grain, and resident totals

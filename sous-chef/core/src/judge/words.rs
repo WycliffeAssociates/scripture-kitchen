@@ -1,13 +1,16 @@
 //! The word channels: a corpus's own spellings judged against each other.
 //!
 //! ```text
-//! "colour" 3 / "color" 297     -> Casing / WordLength / Doubled rows
+//! "David" 297 / "DAVID" 3      -> a Casing row on the minority form
 //! free_of(word, terminals)     -> the occurrences a sentence start did not force
 //! ```
 //!
-//! Every row is a minority spelling against the same corpus's majority, with
-//! the occurrences a terminal table forced removed first — a capital after a
-//! full stop is grammar, not a choice.
+//! Every row is a minority form against the same corpus's majority — one
+//! case-folded word's own hash, so two spellings are two keys and never each
+//! other's evidence. Casing and doubling drop the occurrences a terminal table
+//! forced first: a capital after a full stop is grammar, not a choice. Word
+//! length and letter runs read every occurrence, because what stood before a
+//! word decides nothing about how long it is.
 
 use super::*;
 

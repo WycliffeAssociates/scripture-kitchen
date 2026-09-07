@@ -1,8 +1,8 @@
 # The wasm benches
 
-`galley/benches/fold.rs` measures the fold natively; these measure the SAME
-shapes through the JS wall, so a native number and a wasm number are comparable
-rather than two different experiments.
+`galley/benches/chunks.rs` measures the chunk fold natively; these measure the
+SAME shapes through the JS wall, so a native number and a wasm number are
+comparable rather than two different experiments.
 
     wasm-pack build --target nodejs --release --out-dir pkg-node -- --features wasm
 
@@ -15,7 +15,7 @@ onion-wasm's exports through linking, so `analyze` is in both, and pointing them
 at an `onion-wasm` pkg measures the engine without galley in the picture.
 `keystroke.mjs` needs the galley build; `Galley` only exists there.
 
-`keystroke.mjs` mirrors `fold.rs`'s bench exactly: a ring of successive typing
+`keystroke.mjs` mirrors `chunks.rs`'s bench exactly: a ring of successive typing
 states so every measured call is a NEVER-SEEN text, one dirty chapter, the rest
 served from the cache. It also PROVES three things before timing anything and
 exits non-zero if any fails — the folded object JSON-equals the stateless one,

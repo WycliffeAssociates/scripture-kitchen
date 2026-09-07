@@ -26,7 +26,7 @@
 //!
 //! Nothing here is wired to the [`crate::Pantry`] yet, and it should be. A cold
 //! load parses every book in the project — which is exactly the work the
-//! the Pantry would otherwise do lazily, one book at a time, as an editor opens
+//! Pantry would otherwise do lazily, one book at a time, as an editor opens
 //! them. Throwing it away means paying for it twice.
 //!
 //! A `load_corpus` that owned the read-and-parse would:
