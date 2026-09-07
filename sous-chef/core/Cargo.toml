@@ -22,6 +22,9 @@ alloc-counts = []
 
 [dev-dependencies]
 divan = "0.1.21"
+# examples/edit_neighbors.rs only: parallelizes the per-rare-word variant
+# sweep. Not a library dependency — sous-core stays dependency-light.
+rayon.workspace = true
 # Oracle only. `sous-core` ships no segmenter; this pins the atom rule's
 # "never split a cluster" claim against UAX #29 at the same Unicode version
 # as `testdata/ucd/`.
