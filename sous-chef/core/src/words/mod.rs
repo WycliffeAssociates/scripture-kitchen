@@ -333,16 +333,34 @@ impl ChapterPass for Words {
         }
     }
 
+    /// One merge walk over two hash-sorted lists, not one binary search per
+    /// row: the judge emits casing rows in hash order and the aggregate is
+    /// sorted the same way, and a probe per row into a 5k-row table for each
+    /// of 66 books was a cache miss per probe — a quarter of a keystroke.
     fn firing(&self, aggregate: &WordAggregate, patterns: &[Pattern], out: &mut Vec<PatternIndex>) {
         out.clear();
         if !aggregate.cased() {
             return;
         }
+        let words = aggregate.words();
+        let mut at = 0usize;
+        let mut last = 0u64;
         for (index, pattern) in patterns.iter().enumerate() {
             let PatternKey::Casing { hash, form } = pattern.key else {
                 continue;
             };
-            if aggregate.get(hash).is_some_and(|row| row.free_of(form) > 0) {
+            if hash < last {
+                // Rows out of hash order: fall back to the probe for this one.
+                if aggregate.get(hash).is_some_and(|row| row.free_of(form) > 0) {
+                    out.push(PatternIndex::new(index as u16));
+                }
+                continue;
+            }
+            last = hash;
+            while at < words.len() && words[at].hash < hash {
+                at += 1;
+            }
+            if at < words.len() && words[at].hash == hash && words[at].free_of(form) > 0 {
                 out.push(PatternIndex::new(index as u16));
             }
         }
