@@ -140,6 +140,17 @@ pub trait ChapterPass {
     /// judge calls `out.open_book(i)` before pushing that book's rows.
     fn judge(&self, corpus: &[&Self::Aggregate], config: &Self::Config, out: &mut Findings);
 
+    /// Real bytes one resident aggregate holds, inline size included.
+    ///
+    /// Default: `size_of::<Self::Aggregate>()`, right for an aggregate with no
+    /// heap of its own. A pass whose aggregate owns a `Vec` or a `Box<[_]>`
+    /// overrides this with its real size, or a host's resident byte count
+    /// undercounts by whatever heap the pass hangs off it.
+    fn aggregate_bytes(&self, aggregate: &Self::Aggregate) -> usize {
+        let _ = aggregate;
+        size_of::<Self::Aggregate>()
+    }
+
     /// Adds these books to the corpus totals a host keeps resident.
     /// Default: none — the pass merges whatever it judges, every time.
     fn tally(&self, totals: &mut CorpusTotals, books: &[&Self::Aggregate]) {
@@ -246,6 +257,10 @@ impl<A: ChapterPass, B: ChapterPass> ChapterPass for (A, B) {
         let right: Vec<&B::Aggregate> = corpus.iter().map(|book| &book.1).collect();
         self.0.judge(&left, &config.0, out);
         self.1.judge(&right, &config.1, out);
+    }
+
+    fn aggregate_bytes(&self, aggregate: &Self::Aggregate) -> usize {
+        self.0.aggregate_bytes(&aggregate.0) + self.1.aggregate_bytes(&aggregate.1)
     }
 
     fn tally(&self, totals: &mut CorpusTotals, books: &[&Self::Aggregate]) {
@@ -365,6 +380,12 @@ impl<A: ChapterPass, B: ChapterPass, C: ChapterPass> ChapterPass for (A, B, C) {
         self.0.judge(&left, &config.0, out);
         self.1.judge(&middle, &config.1, out);
         self.2.judge(&right, &config.2, out);
+    }
+
+    fn aggregate_bytes(&self, aggregate: &Self::Aggregate) -> usize {
+        self.0.aggregate_bytes(&aggregate.0)
+            + self.1.aggregate_bytes(&aggregate.1)
+            + self.2.aggregate_bytes(&aggregate.2)
     }
 
     fn tally(&self, totals: &mut CorpusTotals, books: &[&Self::Aggregate]) {

@@ -57,6 +57,11 @@ impl ChapterPass for HygieneBytes {
             }
         }
     }
+
+    /// The fat pointer plus the boxed slice's own bytes.
+    fn aggregate_bytes(&self, aggregate: &Self::Aggregate) -> usize {
+        size_of::<Self::Aggregate>() + size_of_val(&**aggregate)
+    }
 }
 
 /// One maximal run in projected-book UTF-8 coordinates.

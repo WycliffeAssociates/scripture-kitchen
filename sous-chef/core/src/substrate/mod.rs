@@ -429,6 +429,10 @@ impl ChapterPass for Substrate {
         crate::judge::judge_corpus(corpus, config, out);
     }
 
+    fn aggregate_bytes(&self, aggregate: &BookAggregate) -> usize {
+        aggregate.resident_bytes()
+    }
+
     /// Rescans this book's text for every pattern its own counts hold, and
     /// pushes one `Convention` row per matching run.
     fn locate(
@@ -537,5 +541,21 @@ impl BookAggregate {
 
     pub const fn chapters(&self) -> u32 {
         self.chapters
+    }
+
+    /// Inline size plus every lane's own allocation, `runs`' boxed slices
+    /// included.
+    pub fn resident_bytes(&self) -> usize {
+        size_of::<Self>()
+            + size_of_val(&*self.scalars)
+            + size_of_val(&*self.pairs)
+            + size_of_val(&*self.runs)
+            + self
+                .runs
+                .iter()
+                .map(|(atoms, _)| size_of_val(&**atoms))
+                .sum::<usize>()
+            + size_of_val(&*self.follows)
+            + size_of_val(&*self.hygiene)
     }
 }

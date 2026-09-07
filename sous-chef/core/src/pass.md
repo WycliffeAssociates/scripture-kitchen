@@ -90,6 +90,17 @@ Latin against the substrate's 0.3, and rewalking one edited book costs ~200 µs
 ([../../evidence.md](../../evidence.md), "W1 grain"). A tuple retains chapters
 only if every member does — one observation carries them all, so a host that
 sheds one member's slot re-maps the whole book, every member with it.
+`RETAIN_CHAPTERS` also says how long a resident host may keep the AGGREGATE
+across publications: a pass that answers `false` gets it back only for a
+book's current checksum, never an older generation
+(`galley/src/sous/expediter.md`).
+
+A third hook, `fn aggregate_bytes(&Aggregate) -> usize`, says what a resident
+aggregate really costs: default `size_of::<Aggregate>()`, right for an
+aggregate with no heap of its own. `Substrate`, `Words`, and `HygieneBytes`
+override it to sum the `Vec`s and boxed slices they hang off theirs, and a
+tuple sums its members' — a `WordAggregate` holding thousands of rows is not
+32 B (evidence.md, 2026-09-04 "the ~58 MiB").
 
 `CorpusTotals` is concrete rather than an associated type: a host holds exactly
 one whatever pass it drives, and a rule that wants resident totals adds its own

@@ -202,6 +202,12 @@ impl WordAggregate {
             .ok()
             .map(|at| &self.words[at])
     }
+
+    /// Inline size plus the words vector's real heap: capacity, not length,
+    /// since `fold_book` reserves `with_capacity` once and never regrows.
+    pub fn resident_bytes(&self) -> usize {
+        size_of::<Self>() + self.words.capacity() * size_of::<WordTotal>()
+    }
 }
 
 // ── The pass ────────────────────────────────────────────────────────────
@@ -240,6 +246,10 @@ impl ChapterPass for Words {
             return;
         }
         crate::judge::judge_casing(corpus, config, out);
+    }
+
+    fn aggregate_bytes(&self, aggregate: &WordAggregate) -> usize {
+        aggregate.resident_bytes()
     }
 
     fn tally(&self, totals: &mut CorpusTotals, books: &[&WordAggregate]) {

@@ -114,6 +114,18 @@ Within one publication a chapter mapped for one book is still a hit for the
 next, because nothing is shed until every fold that publication needed has
 run. That is what keeps two identical books one map, and `last_mapped` honest.
 
+A book-grain pass's aggregate also does not ride the ring: the sweep keeps it
+only for a book's CURRENT checksum, dropping every older generation even
+while the ring and the chapter tables behind it survive for `with_generations`
+more edits. A `WordAggregate` holding thousands of rows costs the same to keep
+five generations deep as it does one, which is exactly the heap
+`aggregate_bytes` below made visible (evidence.md, 2026-09-04 "the ~58 MiB").
+An undo inside the ring therefore still re-maps and re-folds a book-grain
+pass's book — the regrain check in `index_book` already forces that whenever
+the aggregate is missing — while a chapter-grain pass's undo stays free.
+`a_book_grain_pass_keeps_one_aggregate_per_book_through_edits_and_an_undo`
+pins it.
+
 ## The resident corpus totals
 
 Judging words used to re-merge every book's rows into corpus totals on every
@@ -174,9 +186,10 @@ is re-encoded every publication anyway.
 The cache is worth having because `Brigade`'s fold is not free the way
 `HygieneBytes`' was: `fold_book` merges every lane of all 1,189 chapters, which
 measured 697 µs of a warm whole-Bible republication with nothing changed
-(evidence.md). The sweep retains an aggregate exactly as it retains a chapter
-table — while some book's ring names its checksum — and `resident_bytes`
-counts it.
+(evidence.md). `resident_bytes` counts an aggregate's real heap via
+`ChapterPass::aggregate_bytes`, not its inline size; `Brigade` is book-grain
+overall (`Words` alone is), so the sweep keeps its aggregate for a book's
+current checksum only, not the whole ring — the previous section.
 
 ## Why the buffers are equal
 
@@ -200,14 +213,17 @@ the book's tables go at the next publication.
 
 Why keep any previous generation at all: an undo restores byte-identical
 chapter text and therefore the identical `ObservationKey`, so an undo within
-`n` edits is a table hit and maps nothing.
+`n` edits is a table hit and maps nothing — unless the pass is book-grain, in
+which case its aggregate does not ride the ring (the previous section) and the
+undo re-maps and re-folds regardless.
 
 `resident_bytes` reports what the sweep bounds: the Pantry's own products plus
 one entry per resident observation, chapter row, cached aggregate, and ring
 slot, plus the corpus tally's own rows — which the sweep does not bound,
 because the tally holds one row per word the current corpus has and no
-generation of it. Shallow in two places — the heap a pass hangs off an observation or an
-aggregate is not counted, because `ChapterPass` states no size.
+generation of it. Shallow in one place: the heap a pass hangs off an
+observation is not counted, because `ChapterPass` states no size for one. An
+aggregate's real heap IS counted, via `ChapterPass::aggregate_bytes`.
 
 The sweep is skipped outright when no table was added and no ring aged since
 the last one — a republication of an untouched corpus has nothing to free, and

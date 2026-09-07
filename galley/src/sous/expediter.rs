@@ -377,18 +377,29 @@ impl<P: ChapterPass + Sync> Expediter<P> {
         self.chapter_tables.len()
     }
 
+    /// Aggregates the cache holds after the last sweep — one per retained
+    /// generation for a chapter-grain pass, one per book for a pass that
+    /// answers `false` to [`ChapterPass::RETAIN_CHAPTERS`].
+    pub fn resident_aggregates(&self) -> usize {
+        self.aggregates.len()
+    }
+
     /// The Pantry's retained products plus this cache's own rows.
     ///
-    /// Shallow in two places: an observation and an aggregate each count their
-    /// own inline size and not the heap a pass hangs off them, because
-    /// [`ChapterPass`] exposes no size of its own.
+    /// Shallow in one place: an observation counts only its own inline size,
+    /// because [`ChapterPass`] states no size for one. An aggregate is real —
+    /// [`ChapterPass::aggregate_bytes`] sums the heap a pass hangs off it.
     pub fn resident_bytes(&self) -> usize {
         let rows: usize = self
             .chapter_tables
             .values()
             .map(|table| size_of::<RawChecksum>() + table.len() * size_of::<ChapterRow>())
             .sum();
-        let cached = self.aggregates.len() * (size_of::<RawChecksum>() + size_of::<P::Aggregate>());
+        let cached: usize = self
+            .aggregates
+            .values()
+            .map(|aggregate| size_of::<RawChecksum>() + self.pass.aggregate_bytes(aggregate))
+            .sum();
         let sites: usize = self
             .sites
             .values()
@@ -532,6 +543,13 @@ impl<P: ChapterPass + Sync> Expediter<P> {
     /// Drops every chapter table outside a book's retained generations, and
     /// every observation no surviving table names.
     ///
+    /// A pass that does not retain chapters ([`ChapterPass::RETAIN_CHAPTERS`])
+    /// keeps its aggregate only for each book's CURRENT checksum: an older
+    /// generation's chapters are gone already, so its aggregate is the one
+    /// thing an undo cannot cheaply rebuild — and the one thing worth ageing
+    /// out anyway, since re-mapping and re-folding a whole book is the price
+    /// this pass already chose over keeping rows (`expediter.md`).
+    ///
     /// A publication that added no table and aged no ring has nothing to free,
     /// and skips the walk.
     fn sweep(&mut self) {
@@ -541,8 +559,18 @@ impl<P: ChapterPass + Sync> Expediter<P> {
         let live: FxHashSet<RawChecksum> = self.generations.values().flatten().copied().collect();
         self.chapter_tables
             .retain(|checksum, _| live.contains(checksum));
-        self.aggregates
-            .retain(|checksum, _| live.contains(checksum));
+        if P::RETAIN_CHAPTERS {
+            self.aggregates
+                .retain(|checksum, _| live.contains(checksum));
+        } else {
+            let current: FxHashSet<RawChecksum> = self
+                .generations
+                .values()
+                .filter_map(|ring| ring.first().copied())
+                .collect();
+            self.aggregates
+                .retain(|checksum, _| current.contains(checksum));
+        }
         self.sites.retain(|checksum, _| live.contains(checksum));
         let named: FxHashSet<ObservationKey> = self
             .chapter_tables
@@ -1181,9 +1209,13 @@ mod tests {
 
     /// An undo restores byte-identical text, so it restores the checksum: two
     /// edits back is a table hit while the ring is that deep.
+    ///
+    /// A chapter-grain pass, deliberately: `Brigade` carries `Words`, whose
+    /// aggregate is pruned to the current checksum only (see the aggregate
+    /// tests below), so an in-ring undo of a book-grain pass re-maps anyway.
     #[test]
     fn an_undo_inside_the_ring_republishes_without_mapping() {
-        let mut sous = sous().with_generations(2);
+        let mut sous = grain().with_generations(2);
         let versions: Vec<String> = ["one", "two", "three"]
             .iter()
             .map(|word| mark().replace("A withered", word))
@@ -1217,6 +1249,44 @@ mod tests {
             .unwrap();
         assert_eq!(sous.publish().unwrap(), published[0]);
         assert_eq!(sous.last_mapped(), 1, "chapters 1 and 2 still hit");
+    }
+
+    /// A book-grain pass keeps its aggregate for the CURRENT checksum only:
+    /// older generations are dropped at sweep even while the ring and the
+    /// chapter tables behind them survive, so an in-ring undo still re-maps
+    /// and re-folds the book it lands on — and publishes the identical bytes.
+    #[test]
+    fn a_book_grain_pass_keeps_one_aggregate_per_book_through_edits_and_an_undo() {
+        let mut sous = sous().with_generations(4);
+        sous.update("a/gen.usfm", Role::Target, &genesis()).unwrap();
+        let versions: Vec<String> = ["one", "two", "three", "four"]
+            .iter()
+            .map(|word| mark().replace("A withered", word))
+            .collect();
+        let mut published = Vec::new();
+        for text in &versions {
+            sous.update("b/mrk.usfm", Role::Target, text).unwrap();
+            published.push(sous.publish().unwrap());
+        }
+        assert_eq!(
+            sous.resident_aggregates(),
+            2,
+            "one per book, not one per retained generation"
+        );
+
+        sous.update("b/mrk.usfm", Role::Target, &versions[0])
+            .unwrap();
+        let undone = sous.publish().unwrap();
+        assert_eq!(undone, published[0], "byte for byte");
+        assert!(
+            sous.last_mapped() > 0,
+            "the pruned aggregate forced a re-map"
+        );
+        assert_eq!(
+            sous.resident_aggregates(),
+            2,
+            "still one per book after the undo"
+        );
     }
 
     #[test]
