@@ -136,6 +136,18 @@ snapshot. A `FindingHandle` therefore combines snapshot identity with the
 immutable row position; `book_idx`, `from`, `to`, and rule kind remain
 navigation and selector inputs rather than a universal detail key.
 
+`galley::find` is the search half of that, and it belongs to Galley rather
+than to either engine for the same reason this note exists: Onion contributes
+the mask and its two-way offset map, Sous contributes nothing at all, and what
+is left — running a needle over the projection and placing the answer back in
+the document — is workflow. `Find::in_book` reads a Pantry entry's retained
+mask and text; `Find::in_pantry` sweeps a role in canonical book order. A hit
+carries BOTH coordinate spaces, `projected` for a consumer that reads the view
+and `source` for one that edits the document, and a hit crossing a masked gap
+comes back as one source range per contiguous piece rather than one range that
+would swallow the markup between them. No wire row, no `Expediter` involvement,
+and no `sous_core` type in the API — the contract is `galley/src/find.md`.
+
 If a detail or site-search operation needs source text after the analysis call,
 the caller supplies the current complete string again. Galley validates its
 checksum before applying cached coordinate or inventory state. This preserves

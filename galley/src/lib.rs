@@ -25,9 +25,11 @@
 pub use usfm_onion as onion;
 
 pub mod corpus;
+pub mod find;
 pub mod pantry;
 pub mod sous;
 pub mod warmer;
+pub use find::{Find, Hit, Hits, SourceSpan};
 pub use mise::utf16::{Utf16Table, utf16_table};
 pub use pantry::{
     BookId, Entry, Fingerprint, Pantry, PantryError, RawChecksum, Retain, Role, fingerprint,

@@ -12,6 +12,8 @@ workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+# Literal search: `memmem` over a book's projection (galley/src/find.md).
+memchr.workspace = true
 # The leaf both engines share: `BookKey`, canonical order, `Utf16Table`.
 mise = { path = "../mise" }
 usfm_onion = { path = "../onion" }
@@ -47,6 +49,10 @@ wasm = ["dep:wasm-bindgen", "dep:onion-wasm", "dep:js-sys"]
 parallel = ["dep:rayon"]
 # Bench-only: divan's AllocProfiler as the global allocator. See onion's.
 alloc-counts = []
+
+[[bench]]
+name = "find"
+harness = false
 
 [[bench]]
 name = "warmer"

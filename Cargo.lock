@@ -706,6 +706,7 @@ dependencies = [
  "dhat",
  "divan",
  "js-sys",
+ "memchr",
  "mise",
  "onion-wasm",
  "rayon",
