@@ -361,6 +361,18 @@ still emitted there rather than beside that glyph's substrate rows, because
 what produced it is the word walk. `ScalarKey` orders by code point with the pooled digit
 lane last.
 
+## One key at a time
+
+A word channel's verdict reads one tally key and nothing else about the tally:
+casing reads that word's rows plus the terminal table and the config, `Doubled`
+reads its doubles row plus the table, the config and the corpus-wide recusal,
+`LetterRun` reads its own row plus the config. So `judge_words_for` takes a
+list of keys and emits exactly the rows a whole judge would emit for them — the
+pure piece a resident host merges into the verdicts it kept from last time
+(`galley/src/sous/expediter.md`). `WordLength` is the exception and is judged
+whole: its ceiling is the corpus's own length distribution, so one word moving
+moves every verdict.
+
 ## Where the row goes
 
 `Findings::push_pattern` takes it; patterns are corpus-level, so they are

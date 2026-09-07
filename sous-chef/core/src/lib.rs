@@ -55,8 +55,8 @@ pub use substrate::{
     RunLengths, ScalarKey, Substrate, VerseLength,
 };
 pub use words::{
-    Before, DoubleCount, DoubleTally, DoubleTotal, Form, Gap, RunTally, WordAggregate, WordCount,
-    WordRow, WordTally, WordTotal, WordTotals, Words,
+    Before, DoubleCount, DoubleTally, DoubleTotal, Form, Gap, MovedWords, RunTally, WordAggregate,
+    WordCount, WordRow, WordTally, WordTotal, WordTotals, WordVerdicts, Words,
 };
 
 /// The product pass: hygiene's byte sweeps, the substrate walk, and the word

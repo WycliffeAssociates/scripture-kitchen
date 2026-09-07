@@ -36,10 +36,12 @@ pub(crate) mod fold;
 #[cfg(test)]
 mod tests;
 mod totals;
+mod verdicts;
 pub mod walk;
 
 pub use fold::fold_book;
 pub use totals::{DoubleTally, RunTally, WordTally, WordTotals};
+pub use verdicts::{MovedWords, WordVerdicts};
 pub use walk::{Gap, Occurrence, for_each_letter_run, for_each_word, gap_between, word_around};
 
 // ── The letter-run lane ─────────────────────────────────────────────────
@@ -679,6 +681,36 @@ impl ChapterPass for Words {
 
     fn untally(&self, totals: &mut CorpusTotals, books: &[&WordAggregate]) {
         totals.words.remove(books);
+    }
+
+    fn moved_keys(&self, books: &[&WordAggregate], moved: &mut MovedWords) {
+        moved.absorb(books);
+    }
+
+    /// The same channels again, over the tally keys `moved` names alone: the
+    /// rest of the list is the one `kept` already holds.
+    ///
+    /// A corpus with nothing to judge, or one whose terminal table has not
+    /// been published yet, forgets the kept list rather than keeping it beside
+    /// evidence that never arrived.
+    fn judge_kept(
+        &self,
+        corpus: &[&WordAggregate],
+        totals: &CorpusTotals,
+        config: &JudgingConfig,
+        moved: &MovedWords,
+        kept: &mut WordVerdicts,
+        out: &mut Findings,
+    ) {
+        if !judges_anything(corpus, config) {
+            kept.clear();
+            return;
+        }
+        let Some(table) = out.terminals().cloned() else {
+            kept.clear();
+            return;
+        };
+        kept.judge(corpus, &totals.words, &table, config, moved, out);
     }
 
     /// The same channels over a tally a host already holds; the merge is the

@@ -24,7 +24,8 @@ use crate::proportionality::LengthConfig;
 use crate::substrate::{BookAggregate, Case, FollowCounts, OuterClass, RUN_BUCKETS, ScalarKey};
 use crate::unicode::{Pool, class_of, pool_of};
 use crate::words::{
-    Form, LETTER_RUN_MAX, LETTER_RUN_MIN, WordAggregate, WordTotals, letter_run_lane,
+    DoubleTally, Form, LETTER_RUN_MAX, LETTER_RUN_MIN, MovedWords, RunTally, WordAggregate,
+    WordTally, WordTotals, letter_run_lane,
 };
 
 // ── The config ──────────────────────────────────────────────────────────
@@ -1153,6 +1154,18 @@ pub fn merged_follows(corpus: &[&BookAggregate]) -> Vec<(ScalarKey, FollowCounts
 
 // ── The word channels ───────────────────────────────────────────────────
 
+/// The rows of one lane the moved keys name, at or after `at`, or `None` when
+/// the lane holds none of them.
+///
+/// Both sequences ascend, so the cursor only ever moves forward and the walk
+/// is one tandem merge rather than a probe per key.
+fn seek<T, K: Ord>(rows: &[T], at: &mut usize, wanted: &K, key: impl Fn(&T) -> K) -> bool {
+    while rows.get(*at).is_some_and(|row| key(row) < *wanted) {
+        *at += 1;
+    }
+    rows.get(*at).is_some_and(|row| key(row) == *wanted)
+}
+
 /// One row per case-folded word whose minority form in FREE positions falls
 /// under the word staircase, then one per word far longer than the corpus's.
 ///
@@ -1167,17 +1180,58 @@ pub(crate) fn judge_words(
     config: &JudgingConfig,
     out: &mut Findings,
 ) {
+    let mut patterns = Vec::new();
+    judge_words_for(corpus, totals, table, config, None, &mut patterns);
+    for pattern in patterns {
+        out.push_pattern(pattern);
+    }
+}
+
+/// The word channels over the tally keys `moved` names, or over every key when
+/// it is `None`, in the order the wire pins.
+///
+/// The channels are independent per key: a word's casing verdict reads its own
+/// rows, the table and the config; its doubled verdict reads its doubles row,
+/// the table, the config and the corpus-wide recusal; a letter's run verdict
+/// reads its own row and the config. So the rows a moved key produces are the
+/// rows a whole judge would produce for it, whatever else the corpus holds —
+/// which is what lets a host keep the rest.
+///
+/// [`Channel::WordLength`] is the exception and is judged whole: its ceiling is
+/// the corpus's own length distribution, so one word moving moves every verdict.
+pub(crate) fn judge_words_for(
+    corpus: &[&WordAggregate],
+    totals: &WordTotals,
+    table: &TerminalTable,
+    config: &JudgingConfig,
+    moved: Option<&MovedWords>,
+    out: &mut Vec<Pattern>,
+) {
     if config.channels.casing {
-        casing(corpus, totals, table, config, out);
+        casing(corpus, totals, table, config, moved, out);
     }
     if config.channels.word_length {
+        debug_assert!(moved.is_none(), "the length shape is the whole corpus's");
         word_length(corpus, totals, config, out);
     }
     if config.channels.doubled && judges_doubles(totals, table, config) {
-        doubled(corpus, totals, table, config, out);
+        doubled(corpus, totals, table, config, moved, out);
     }
     if config.channels.letter_runs {
-        letter_runs(corpus, totals, config, out);
+        letter_runs(corpus, totals, config, moved, out);
+    }
+}
+
+/// Where a word pattern stands in the emission order above: its channel group,
+/// then its own key. One key's rows are contiguous, so a merge of two lists in
+/// this order is one tandem walk.
+pub(crate) fn word_slot(pattern: &Pattern) -> (u8, u64) {
+    match pattern.key {
+        PatternKey::Casing { hash, .. } => (0, hash),
+        PatternKey::WordLength { hash, .. } => (1, hash),
+        PatternKey::Doubled { hash, .. } => (2, hash),
+        PatternKey::LetterRun { .. } => (3, u64::from(pattern.glyph.raw())),
+        _ => (4, 0),
     }
 }
 
@@ -1200,39 +1254,64 @@ fn letter_runs(
     corpus: &[&WordAggregate],
     totals: &WordTotals,
     config: &JudgingConfig,
-    out: &mut Findings,
+    moved: Option<&MovedWords>,
+    out: &mut Vec<Pattern>,
 ) {
-    for row in totals.letter_runs() {
-        let runs = row.runs();
-        let Some((band, ceiling)) = entitled_words(runs, config) else {
-            continue;
-        };
-        for lane in letter_run_lane(LETTER_RUN_MIN) + 1..row.lengths.len() {
-            let count = u64::from(row.lengths[lane]);
-            let share = share_bp(count, runs);
-            if count == 0 || share >= ceiling {
-                continue;
+    match moved {
+        None => {
+            for row in totals.letter_runs() {
+                letter_run(corpus, row, config, out);
             }
-            if row.lengths[..lane]
-                .iter()
-                .any(|&shorter| u64::from(shorter) < u64::from(config.word_support_floor))
-            {
-                continue;
-            }
-            let key = PatternKey::LetterRun {
-                length: LETTER_RUN_MIN + lane as u8,
-            };
-            out.push_pattern(Pattern {
-                glyph: row.letter,
-                channel: Channel::LetterRun,
-                key,
-                band: Some(band),
-                numerator: saturate(count),
-                denominator: saturate(runs),
-                share_bp: share,
-                books: word_books(corpus, row.letter, &key, &TerminalTable::default()),
-            });
         }
+        Some(moved) => {
+            let rows = totals.letter_runs();
+            let mut at = 0usize;
+            for letter in moved.letters() {
+                if seek(rows, &mut at, letter, |row| row.letter) {
+                    letter_run(corpus, &rows[at], config, out);
+                    at += 1;
+                }
+            }
+        }
+    }
+}
+
+/// One letter's run lengths against its own repeat history.
+fn letter_run(
+    corpus: &[&WordAggregate],
+    row: &RunTally,
+    config: &JudgingConfig,
+    out: &mut Vec<Pattern>,
+) {
+    let runs = row.runs();
+    let Some((band, ceiling)) = entitled_words(runs, config) else {
+        return;
+    };
+    for lane in letter_run_lane(LETTER_RUN_MIN) + 1..row.lengths.len() {
+        let count = u64::from(row.lengths[lane]);
+        let share = share_bp(count, runs);
+        if count == 0 || share >= ceiling {
+            continue;
+        }
+        if row.lengths[..lane]
+            .iter()
+            .any(|&shorter| u64::from(shorter) < u64::from(config.word_support_floor))
+        {
+            continue;
+        }
+        let key = PatternKey::LetterRun {
+            length: LETTER_RUN_MIN + lane as u8,
+        };
+        out.push(Pattern {
+            glyph: row.letter,
+            channel: Channel::LetterRun,
+            key,
+            band: Some(band),
+            numerator: saturate(count),
+            denominator: saturate(runs),
+            share_bp: share,
+            books: word_books(corpus, row.letter, &key, &TerminalTable::default()),
+        });
     }
 }
 
@@ -1244,7 +1323,11 @@ fn letter_runs(
 /// capital is a sentence boundary rather than a doubling, so it does not
 /// count toward the recusal either — a language does not become "productive"
 /// from `go. Go` and `Up! Up`.
-fn judges_doubles(totals: &WordTotals, table: &TerminalTable, config: &JudgingConfig) -> bool {
+pub(crate) fn judges_doubles(
+    totals: &WordTotals,
+    table: &TerminalTable,
+    config: &JudgingConfig,
+) -> bool {
     match config.doubles {
         DoublesPolicy::Always => true,
         DoublesPolicy::Never => false,
@@ -1273,49 +1356,91 @@ fn doubled(
     totals: &WordTotals,
     table: &TerminalTable,
     config: &JudgingConfig,
-    out: &mut Findings,
+    moved: Option<&MovedWords>,
+    out: &mut Vec<Pattern>,
 ) {
-    let mut cased = totals.by_word().peekable();
-    for row in totals.doubles() {
-        let free_separated = row.separated_free(table);
-        if row.bare == 0 && free_separated == 0 {
-            continue;
-        }
-        while cased.peek().is_some_and(|word| word[0].hash < row.hash) {
-            cased.next();
-        }
-        // The two lanes partition a word's occurrences: a cased occurrence is
-        // in the casing lane, an uncased one is counted here.
-        let held: u64 = cased
-            .peek()
-            .filter(|word| word[0].hash == row.hash)
-            .map_or(0, |word| {
-                word.iter().flat_map(|row| row.counts).map(u64::from).sum()
-            });
-        let total = held + u64::from(row.uncased);
-        let Some((band, ceiling)) = entitled_words(total, config) else {
-            continue;
-        };
-        for (separated, count) in [(false, u64::from(row.bare)), (true, free_separated)] {
-            let share = share_bp(count, total);
-            if count == 0 || share >= ceiling {
-                continue;
+    let (doubles, rows) = (totals.doubles(), totals.rows());
+    // One cursor per lane, both ascending: a word's doubling and its casing
+    // rows are read together and neither cursor ever goes back.
+    let mut cased = 0usize;
+    match moved {
+        None => {
+            for row in doubles {
+                let held = held_of(rows, &mut cased, row.hash);
+                doubled_word(corpus, row, held, table, config, out);
             }
-            let key = PatternKey::Doubled {
-                hash: row.hash,
-                separated,
-            };
-            out.push_pattern(Pattern {
-                glyph: ScalarKey::NONE,
-                channel: Channel::Doubled,
-                key,
-                band: Some(band),
-                numerator: saturate(count),
-                denominator: saturate(total),
-                share_bp: share,
-                books: word_books(corpus, ScalarKey::NONE, &key, table),
-            });
         }
+        Some(moved) => {
+            let mut at = 0usize;
+            for hash in moved.words() {
+                if !seek(doubles, &mut at, hash, |row| row.hash) {
+                    continue;
+                }
+                let row = &doubles[at];
+                at += 1;
+                let held = held_of(rows, &mut cased, row.hash);
+                doubled_word(corpus, row, held, table, config, out);
+            }
+        }
+    }
+}
+
+/// The occurrences of one word the casing lane holds, from a cursor that only
+/// moves forward. The two lanes partition a word's occurrences: a cased one is
+/// in the casing lane, an uncased one is in the doubles row itself.
+fn held_of(rows: &[WordTally], at: &mut usize, hash: u64) -> u64 {
+    while rows.get(*at).is_some_and(|row| row.hash < hash) {
+        *at += 1;
+    }
+    let mut held = 0u64;
+    let mut end = *at;
+    while rows.get(end).is_some_and(|row| row.hash == hash) {
+        held += rows[end]
+            .counts
+            .iter()
+            .map(|&count| u64::from(count))
+            .sum::<u64>();
+        end += 1;
+    }
+    held
+}
+
+/// One word's two doubling lanes against its own occurrences.
+fn doubled_word(
+    corpus: &[&WordAggregate],
+    row: &DoubleTally,
+    held: u64,
+    table: &TerminalTable,
+    config: &JudgingConfig,
+    out: &mut Vec<Pattern>,
+) {
+    let free_separated = row.separated_free(table);
+    if row.bare == 0 && free_separated == 0 {
+        return;
+    }
+    let total = held + u64::from(row.uncased);
+    let Some((band, ceiling)) = entitled_words(total, config) else {
+        return;
+    };
+    for (separated, count) in [(false, u64::from(row.bare)), (true, free_separated)] {
+        let share = share_bp(count, total);
+        if count == 0 || share >= ceiling {
+            continue;
+        }
+        let key = PatternKey::Doubled {
+            hash: row.hash,
+            separated,
+        };
+        out.push(Pattern {
+            glyph: ScalarKey::NONE,
+            channel: Channel::Doubled,
+            key,
+            band: Some(band),
+            numerator: saturate(count),
+            denominator: saturate(total),
+            share_bp: share,
+            books: word_books(corpus, ScalarKey::NONE, &key, table),
+        });
     }
 }
 
@@ -1326,43 +1451,75 @@ fn casing(
     totals: &WordTotals,
     table: &TerminalTable,
     config: &JudgingConfig,
-    out: &mut Findings,
+    moved: Option<&MovedWords>,
+    out: &mut Vec<Pattern>,
 ) {
-    for word in totals.by_word() {
-        let mut free = [0u64; 4];
-        for row in word {
-            if !row.before().is_free(table) {
-                continue;
-            }
-            for (lane, count) in free.iter_mut().zip(row.counts) {
-                *lane += u64::from(count);
+    match moved {
+        None => {
+            for word in totals.by_word() {
+                casing_word(corpus, word, table, config, out);
             }
         }
-        let total: u64 = free.iter().sum();
-        let Some((band, ceiling)) = entitled_words(total, config) else {
+        Some(moved) => {
+            let rows = totals.rows();
+            let mut at = 0usize;
+            for hash in moved.words() {
+                if !seek(rows, &mut at, hash, |row| row.hash) {
+                    continue;
+                }
+                let mut end = at;
+                while rows.get(end).is_some_and(|row| row.hash == *hash) {
+                    end += 1;
+                }
+                casing_word(corpus, &rows[at..end], table, config, out);
+                at = end;
+            }
+        }
+    }
+}
+
+/// One word's casing rows, whose lanes this sums over whichever `Before`s the
+/// terminal table left free.
+fn casing_word(
+    corpus: &[&WordAggregate],
+    word: &[WordTally],
+    table: &TerminalTable,
+    config: &JudgingConfig,
+    out: &mut Vec<Pattern>,
+) {
+    let mut free = [0u64; 4];
+    for row in word {
+        if !row.before().is_free(table) {
             continue;
-        };
-        for (lane, form) in Form::JUDGED.iter().enumerate() {
-            let count = free[lane];
-            let share = share_bp(count, total);
-            if count == 0 || share >= ceiling {
-                continue;
-            }
-            let key = PatternKey::Casing {
-                hash: word[0].hash,
-                form: *form,
-            };
-            out.push_pattern(Pattern {
-                glyph: ScalarKey::NONE,
-                channel: Channel::Casing,
-                key,
-                band: Some(band),
-                numerator: saturate(count),
-                denominator: saturate(total),
-                share_bp: share,
-                books: word_books(corpus, ScalarKey::NONE, &key, table),
-            });
         }
+        for (lane, count) in free.iter_mut().zip(row.counts) {
+            *lane += u64::from(count);
+        }
+    }
+    let total: u64 = free.iter().sum();
+    let Some((band, ceiling)) = entitled_words(total, config) else {
+        return;
+    };
+    for (lane, form) in Form::JUDGED.iter().enumerate() {
+        let count = free[lane];
+        let share = share_bp(count, total);
+        if count == 0 || share >= ceiling {
+            continue;
+        }
+        let key = PatternKey::Casing {
+            hash: word[0].hash,
+            form: *form,
+        };
+        out.push(Pattern {
+            glyph: ScalarKey::NONE,
+            channel: Channel::Casing,
+            key,
+            band: Some(band),
+            numerator: saturate(count),
+            denominator: saturate(total),
+            share_bp: share,
+            books: word_books(corpus, ScalarKey::NONE, &key, table),
+        });
     }
 }
 
@@ -1375,7 +1532,7 @@ fn word_length(
     corpus: &[&WordAggregate],
     totals: &WordTotals,
     config: &JudgingConfig,
-    out: &mut Findings,
+    out: &mut Vec<Pattern>,
 ) {
     let Some(shape) = LengthShape::of(corpus) else {
         return;
@@ -1400,7 +1557,7 @@ fn word_length(
             hash: word[0].hash,
             sigma: shape.sigma(len),
         };
-        out.push_pattern(Pattern {
+        out.push(Pattern {
             glyph: ScalarKey::NONE,
             channel: Channel::WordLength,
             key,

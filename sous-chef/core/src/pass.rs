@@ -25,7 +25,7 @@ use crate::{
     judge::{Pattern, PatternIndex, TerminalTable},
     proportionality::{LengthConfig, Paired, SourceLengths, TargetLengths, judge_lengths},
     substrate::VerseLength,
-    words::WordTotals,
+    words::{MovedWords, WordTotals, WordVerdicts},
 };
 
 /// Corpus-level counts a judge reads, kept resident by a host and updated one
@@ -223,6 +223,34 @@ pub trait ChapterPass {
         self.judge(corpus, config, out);
     }
 
+    /// Names every corpus-tally key these books' rows hold — the keys a
+    /// [`tally`](Self::tally) or [`untally`](Self::untally) of them moves.
+    ///
+    /// Default: none, which is what a pass that keeps no totals moves.
+    fn moved_keys(&self, books: &[&Self::Aggregate], moved: &mut MovedWords) {
+        let _ = (books, moved);
+    }
+
+    /// [`judge_resident`](Self::judge_resident) with every verdict `moved`
+    /// does not name answered from `kept`, which it then refills.
+    ///
+    /// Equal to `judge_resident` pattern for pattern whenever `moved` names
+    /// every key whose totals moved since `kept` was filled; a debug build
+    /// asserts that against a whole judge. Default: `judge_resident`, which
+    /// judges everything and keeps nothing.
+    fn judge_kept(
+        &self,
+        corpus: &[&Self::Aggregate],
+        totals: &CorpusTotals,
+        config: &Self::Config,
+        moved: &MovedWords,
+        kept: &mut WordVerdicts,
+        out: &mut Findings,
+    ) {
+        let _ = (moved, kept);
+        self.judge_resident(corpus, totals, config, out);
+    }
+
     /// Rescans one book's current text for the sites of what [`judge`](Self::judge)
     /// emitted, calling `out.open_book(book)` first. Default: none.
     ///
@@ -417,6 +445,30 @@ impl<A: ChapterPass, B: ChapterPass> ChapterPass for (A, B) {
         let right: Vec<&B::Aggregate> = corpus.iter().map(|book| &book.1).collect();
         self.0.judge_resident(&left, totals, &config.0, out);
         self.1.judge_resident(&right, totals, &config.1, out);
+    }
+
+    fn moved_keys(&self, books: &[&Self::Aggregate], moved: &mut MovedWords) {
+        let left: Vec<&A::Aggregate> = books.iter().map(|book| &book.0).collect();
+        let right: Vec<&B::Aggregate> = books.iter().map(|book| &book.1).collect();
+        self.0.moved_keys(&left, moved);
+        self.1.moved_keys(&right, moved);
+    }
+
+    fn judge_kept(
+        &self,
+        corpus: &[&Self::Aggregate],
+        totals: &CorpusTotals,
+        config: &Self::Config,
+        moved: &MovedWords,
+        kept: &mut WordVerdicts,
+        out: &mut Findings,
+    ) {
+        let left: Vec<&A::Aggregate> = corpus.iter().map(|book| &book.0).collect();
+        let right: Vec<&B::Aggregate> = corpus.iter().map(|book| &book.1).collect();
+        self.0
+            .judge_kept(&left, totals, &config.0, moved, kept, out);
+        self.1
+            .judge_kept(&right, totals, &config.1, moved, kept, out);
     }
 
     fn locate(
@@ -638,6 +690,35 @@ impl<A: ChapterPass, B: ChapterPass, C: ChapterPass> ChapterPass for (A, B, C) {
         self.0.judge_resident(&left, totals, &config.0, out);
         self.1.judge_resident(&middle, totals, &config.1, out);
         self.2.judge_resident(&right, totals, &config.2, out);
+    }
+
+    fn moved_keys(&self, books: &[&Self::Aggregate], moved: &mut MovedWords) {
+        let left: Vec<&A::Aggregate> = books.iter().map(|book| &book.0).collect();
+        let middle: Vec<&B::Aggregate> = books.iter().map(|book| &book.1).collect();
+        let right: Vec<&C::Aggregate> = books.iter().map(|book| &book.2).collect();
+        self.0.moved_keys(&left, moved);
+        self.1.moved_keys(&middle, moved);
+        self.2.moved_keys(&right, moved);
+    }
+
+    fn judge_kept(
+        &self,
+        corpus: &[&Self::Aggregate],
+        totals: &CorpusTotals,
+        config: &Self::Config,
+        moved: &MovedWords,
+        kept: &mut WordVerdicts,
+        out: &mut Findings,
+    ) {
+        let left: Vec<&A::Aggregate> = corpus.iter().map(|book| &book.0).collect();
+        let middle: Vec<&B::Aggregate> = corpus.iter().map(|book| &book.1).collect();
+        let right: Vec<&C::Aggregate> = corpus.iter().map(|book| &book.2).collect();
+        self.0
+            .judge_kept(&left, totals, &config.0, moved, kept, out);
+        self.1
+            .judge_kept(&middle, totals, &config.1, moved, kept, out);
+        self.2
+            .judge_kept(&right, totals, &config.2, moved, kept, out);
     }
 
     fn locate(

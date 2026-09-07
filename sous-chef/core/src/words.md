@@ -312,6 +312,10 @@ a tally a host already holds, which is the only difference between the two. A
 corpus whose aggregates are all `cased == false` emits no casing and no length
 row; the doubled and letter-run channels judge it anyway.
 
+`Words::judge_kept` calls them over the keys `moved_keys` named alone, merging
+what it judges into the patterns a host kept — equal to `judge_resident` row for
+row, which a debug build asserts against a whole judge.
+
 All three read the terminal table out of the sink, where `Substrate::judge` put
 it — `Doubled` does not use it, but it abstains with the others rather than make
 `Words` alone into a pass that publishes.

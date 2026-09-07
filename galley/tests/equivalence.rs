@@ -322,6 +322,12 @@ enum Edit {
     /// A NUL run either side of a chapter seam, which the fold must publish
     /// as two findings rather than one.
     ChapterSeam,
+    /// A chapter of `;` handoffs, capital or not by a coin flip: enough of
+    /// them to move that glyph across `terminal_upper_share_bp`, so the
+    /// terminal table a publication learns is not the last one's — and the
+    /// word channels' verdicts are decided from evidence that moved without
+    /// any word's counts moving.
+    TerminalFlip,
     AddBook,
     RemoveBook,
 }
@@ -339,6 +345,8 @@ const MENU: &[Edit] = &[
     Edit::MoveChapter,
     Edit::CopyChapter,
     Edit::ChapterSeam,
+    Edit::TerminalFlip,
+    Edit::TerminalFlip,
     Edit::AddBook,
     Edit::RemoveBook,
 ];
@@ -470,6 +478,16 @@ fn edit_one(rng: &mut Rng, edit: Edit, text: &mut String) -> Option<()> {
         Edit::AppendChapter => {
             let next = chapter_blocks(text).last().map_or(1, |block| block.2 + 1);
             text.push_str(&format!("\\c {next}\n\\p\n\\v 1 {}\n", run_of(rng, 4, 40)));
+        }
+        Edit::TerminalFlip => {
+            let next = chapter_blocks(text).last().map_or(1, |block| block.2 + 1);
+            let after = if rng.next().is_multiple_of(2) {
+                "A"
+            } else {
+                "a"
+            };
+            let handoff = format!("es; {after}et ");
+            text.push_str(&format!("\\c {next}\n\\p\n\\v 1 {}\n", handoff.repeat(6)));
         }
         Edit::DropChapter => {
             let blocks = chapter_blocks(text);

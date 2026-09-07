@@ -206,6 +206,63 @@ paths' bytes are therefore the same claim `galley/tests/equivalence.rs` already
 makes, plus the two words cases it gained: a chapter recased, and the casing
 channel flipped off.
 
+## The kept word verdicts
+
+Judging words used to re-decide every word in the corpus on every publication:
+about a third of a warm republication, though one book's words moved. The
+Expediter keeps the word channels' patterns instead, beside the evidence they
+stand on.
+
+```text
+verdicts = WordVerdicts { terminal table, judging config, doubling recusal,
+                          patterns hash-ascending per channel }
+
+table, config and recusal all stand -> judge only the keys in this
+                                       publication's delta, merge into the kept
+                                       list, one tandem walk
+any of the three moved              -> judge the whole tally as before
+```
+
+The delta is named, not guessed: `ChapterPass::moved_keys` reports the tally
+keys of exactly the aggregates `untally` and `tally` move, so a key whose
+counts did not change cannot be in it. A word's verdict is a function of its own
+tally rows, the table, the config and — for `Doubled` — the corpus-wide
+recusal, so those four are the whole cache identity (`judge.md`). The one
+channel that is not is `WordLength`, whose ceiling is the corpus's own length
+distribution: it is off by default, and judged whole whenever it is on.
+
+Whether a key moved is the only question the merge asks, so a kept pattern is
+dropped exactly when the fresh list holds its replacement, and the result is
+the list a whole `judge_words` produces — `debug_assert_eq!`ed against one on
+every publication a debug build makes, which is the whole test suite and both
+churn oracles.
+
+`last_words_judged()` is the tally keys the last publication judged: 14,093 for
+a cold `en_ulb` — which keeps 57 word patterns — 1,731 after a keystroke into
+MRK, and 14,093 again after a moved knob or a moved terminal table. What this buys is the warm republication, where
+the delta is empty and the word judge does nothing at all; a keystroke pays the
+same walk either way, because the moved keys are scattered through the tally and
+reaching them IS the walk (evidence.md, W6).
+
+## The firing cache
+
+`pass.firing` walks every book's aggregate against the pattern table once per
+publication, 66 times for a Bible, only to hash what it found. What a book
+fires is a function of its own counts and the table's CLAIMS — never of a
+numerator, which every keystroke anywhere in the corpus moves — so the hash is
+kept:
+
+```text
+firing[RawChecksum] = (TableHash, FiringHash)
+```
+
+`TableHash` is xxh3-128 over every row's glyph, channel and key in table order:
+the same bytes `FiringHash` reads, over the whole table rather than one book's
+share of it. A publication whose table says what the last one said replays every
+book's firing hash and walks nobody's; a book whose own text moved walks its
+own. `last_firing_walks()` counts them — all of them on a cold open or after a
+knob that adds a row, one after a keystroke, none on a warm republication.
+
 ## The site cache
 
 A judged pattern has no coordinates; `pass.locate` gives it some by rescanning

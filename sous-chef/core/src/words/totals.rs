@@ -17,7 +17,10 @@
 //! double is a double whatever stood before it — and rides the same two
 //! updates, as does the letter-run lane, keyed by the folded letter.
 
-use super::{Before, DoubleTotal, LETTER_RUN_LANES, WordAggregate, merge_glyph_lane};
+use std::cmp::Reverse;
+use std::collections::BinaryHeap;
+
+use super::{Before, DoubleTotal, LETTER_RUN_LANES, WordAggregate, WordTotal, merge_glyph_lane};
 use crate::judge::TerminalTable;
 use crate::substrate::ScalarKey;
 
@@ -257,7 +260,7 @@ pub struct WordTotals {
 }
 
 impl WordTotals {
-    /// The tally of a whole corpus at once: one sort, then one grouping pass.
+    /// The tally of a whole corpus at once: one merge walk per lane.
     pub fn merge(corpus: &[&WordAggregate]) -> Self {
         Self {
             rows: delta_of(corpus),
@@ -314,6 +317,25 @@ impl WordTotals {
         }
         distinct += cased.count() as u64;
         crate::judge::share_bp(doubling, distinct)
+    }
+
+    /// Distinct keys the word channels judge: one per case-folded word in
+    /// either lane — the two partition a word's occurrences, so a word may
+    /// stand in both — plus one per letter with a repeat history.
+    pub fn keys(&self) -> usize {
+        let mut distinct = 0usize;
+        let mut cased = self.by_word().peekable();
+        for row in &self.doubles {
+            while cased.peek().is_some_and(|word| word[0].hash < row.hash) {
+                cased.next();
+                distinct += 1;
+            }
+            if cased.peek().is_some_and(|word| word[0].hash == row.hash) {
+                cased.next();
+            }
+            distinct += 1;
+        }
+        distinct + cased.count() + self.letter_runs.len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -407,84 +429,97 @@ fn splice<L: Lane>(rows: &mut Vec<L>, delta: &[L], missing: &[usize]) {
     *rows = merged;
 }
 
-/// These books merged into rows of their own: the same shape the tally holds,
-/// so adding and removing are one walk over two sorted sequences.
-fn delta_of(corpus: &[&WordAggregate]) -> Vec<WordTally> {
-    let mut flat: Vec<(u64, u32, u32, [u32; 4])> = corpus
-        .iter()
-        .enumerate()
-        .flat_map(|(book, aggregate)| {
-            aggregate
-                .words()
+/// Walks several key-ascending lanes as one ascending sequence, ties broken by
+/// lane order, without moving a row: one cursor per lane and a heap over their
+/// heads. One lane skips the heap, which is the shape every incremental update
+/// has.
+fn merged<'a, T, K: Ord>(lanes: &[&'a [T]], key: impl Fn(&T) -> K, mut visit: impl FnMut(&'a T)) {
+    match lanes {
+        [] => {}
+        [only] => only.iter().for_each(&mut visit),
+        _ => {
+            let mut at = vec![0usize; lanes.len()];
+            let mut heap: BinaryHeap<Reverse<(K, usize)>> = lanes
                 .iter()
-                .map(move |word| (word.hash, word.before_raw(), book as u32, word.counts))
-        })
-        .collect();
-    flat.sort_unstable();
-    let mut rows: Vec<WordTally> = Vec::with_capacity(flat.len());
-    for (hash, before, _, counts) in flat {
-        match rows.last_mut() {
-            Some(last) if last.key() == (hash, before) => last.absorb_book(counts),
-            _ => {
-                let mut row = WordTally::of(hash, before);
-                row.absorb_book(counts);
-                rows.push(row);
+                .enumerate()
+                .filter_map(|(lane, rows)| Some(Reverse((key(rows.first()?), lane))))
+                .collect();
+            while let Some(Reverse((_, lane))) = heap.pop() {
+                visit(&lanes[lane][at[lane]]);
+                at[lane] += 1;
+                if let Some(next) = lanes[lane].get(at[lane]) {
+                    heap.push(Reverse((key(next), lane)));
+                }
             }
         }
     }
+}
+
+/// The rows every lane holds, so one merge reserves once.
+fn rows_in<T>(lanes: &[&[T]]) -> usize {
+    lanes.iter().map(|lane| lane.len()).sum()
+}
+
+/// These books merged into rows of their own: the same shape the tally holds,
+/// so adding and removing are one walk over two sorted sequences.
+///
+/// Each book's lane is already `(hash, before)` ascending, so this is a copy
+/// for one book and a merge for several — never a sort.
+fn delta_of(corpus: &[&WordAggregate]) -> Vec<WordTally> {
+    let lanes: Vec<&[WordTotal]> = corpus.iter().map(|book| book.words()).collect();
+    let mut rows: Vec<WordTally> = Vec::with_capacity(rows_in(&lanes));
+    merged(
+        &lanes,
+        |word| (word.hash, word.before_raw()),
+        |word| match rows.last_mut() {
+            Some(last) if last.key() == (word.hash, word.before_raw()) => {
+                last.absorb_book(word.counts);
+            }
+            _ => {
+                let mut row = WordTally::of(word.hash, word.before_raw());
+                row.absorb_book(word.counts);
+                rows.push(row);
+            }
+        },
+    );
     rows
 }
 
 /// The same for the letter-run lane, keyed by the folded letter.
 fn runs_of(corpus: &[&WordAggregate]) -> Vec<RunTally> {
-    let mut flat: Vec<(ScalarKey, u32, [u32; LETTER_RUN_LANES])> = corpus
-        .iter()
-        .enumerate()
-        .flat_map(|(book, aggregate)| {
-            aggregate
-                .letter_runs()
-                .iter()
-                .map(move |&(letter, lanes)| (letter, book as u32, lanes))
-        })
-        .collect();
-    flat.sort_unstable_by_key(|(letter, book, _)| (*letter, *book));
-    let mut rows: Vec<RunTally> = Vec::with_capacity(flat.len());
-    for (letter, _, lanes) in flat {
-        match rows.last_mut() {
+    let lanes: Vec<&[(ScalarKey, [u32; LETTER_RUN_LANES])]> =
+        corpus.iter().map(|book| book.letter_runs()).collect();
+    let mut rows: Vec<RunTally> = Vec::with_capacity(rows_in(&lanes));
+    merged(
+        &lanes,
+        |row| row.0,
+        |&(letter, lanes)| match rows.last_mut() {
             Some(last) if last.letter == letter => last.absorb_book(&lanes),
             _ => {
                 let mut held = RunTally::of(letter);
                 held.absorb_book(&lanes);
                 rows.push(held);
             }
-        }
-    }
+        },
+    );
     rows
 }
 
 /// The same for the doubles lane, keyed by hash alone.
 fn doubles_of(corpus: &[&WordAggregate]) -> Vec<DoubleTally> {
-    let mut flat: Vec<(u64, u32, DoubleTotal)> = corpus
-        .iter()
-        .enumerate()
-        .flat_map(|(book, aggregate)| {
-            aggregate
-                .doubles()
-                .iter()
-                .map(move |row| (row.hash, book as u32, row.clone()))
-        })
-        .collect();
-    flat.sort_unstable_by_key(|(hash, book, _)| (*hash, *book));
-    let mut rows: Vec<DoubleTally> = Vec::with_capacity(flat.len());
-    for (hash, _, row) in flat {
-        match rows.last_mut() {
-            Some(last) if last.hash == hash => last.absorb_book(&row),
+    let lanes: Vec<&[DoubleTotal]> = corpus.iter().map(|book| book.doubles()).collect();
+    let mut rows: Vec<DoubleTally> = Vec::with_capacity(rows_in(&lanes));
+    merged(
+        &lanes,
+        |row| row.hash,
+        |row| match rows.last_mut() {
+            Some(last) if last.hash == row.hash => last.absorb_book(row),
             _ => {
-                let mut held = DoubleTally::of(&row);
-                held.absorb_book(&row);
+                let mut held = DoubleTally::of(row);
+                held.absorb_book(row);
                 rows.push(held);
             }
-        }
-    }
+        },
+    );
     rows
 }

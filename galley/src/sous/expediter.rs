@@ -27,10 +27,10 @@ use sous_core::judge::{Channel, PatternKey};
 use sous_core::substrate::ScalarKey;
 use sous_core::{
     AlignmentFact, BookIndex, Chapter, ChapterInput, ChapterObs, ChapterPass, ConventionDigest,
-    CoordinateSpace, CorpusTotals, CorpusWireError, FindingKind, Findings, PackedFinding,
-    PairedBook, Pattern, PatternIndex, ProjectSpread, ProjectedBook, PublicationBook, Reasons,
-    SnapshotId, SourceVerse, SourceWords, TerminalTable, TextRange, Verse, encode_to_corpus_buffer,
-    for_each_chapter, judge_paired,
+    CoordinateSpace, CorpusTotals, CorpusWireError, FindingKind, Findings, MovedWords,
+    PackedFinding, PairedBook, Pattern, PatternIndex, ProjectSpread, ProjectedBook,
+    PublicationBook, Reasons, SnapshotId, SourceVerse, SourceWords, TerminalTable, TextRange,
+    Verse, WordVerdicts, encode_to_corpus_buffer, for_each_chapter, judge_paired,
 };
 use xxhash_rust::xxh3::Xxh3Default;
 
@@ -97,6 +97,28 @@ impl FiringHash {
         let mut hasher = Xxh3Default::new();
         for index in firing {
             let pattern = &table[usize::from(index.get())];
+            hasher.update(&pattern.glyph.raw().to_le_bytes());
+            hasher.update(&[pattern.channel as u8]);
+            hasher.update(&key_bytes(pattern.key));
+        }
+        Self(hasher.digest128().to_be_bytes())
+    }
+}
+
+/// The whole pattern table by CONTENT: xxh3-128 over every row's glyph,
+/// channel, and key, in table order.
+///
+/// What a book fires is a function of its own counts and these identities and
+/// of nothing else — never of a numerator, which every keystroke anywhere in
+/// the corpus moves — so two publications sharing this hash share every book's
+/// firing set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct TableHash([u8; 16]);
+
+impl TableHash {
+    fn of(table: &[Pattern]) -> Self {
+        let mut hasher = Xxh3Default::new();
+        for pattern in table {
             hasher.update(&pattern.glyph.raw().to_le_bytes());
             hasher.update(&[pattern.channel as u8]);
             hasher.update(&key_bytes(pattern.key));
@@ -287,6 +309,10 @@ pub struct Expediter<P: ChapterPass> {
     /// One book's located rows for the last firing set seen, keyed by the same
     /// checksum: unchanged text plus an unchanged firing set is a replay.
     sites: FxHashMap<RawChecksum, (FiringHash, Box<[SiteRow]>)>,
+    /// One book's firing hash for the pattern table it was walked against:
+    /// a table whose rows say the same thing fires the same set, whatever
+    /// this publication's counts and numbering are.
+    firing: FxHashMap<RawChecksum, (TableHash, FiringHash)>,
     /// One HOT book chapter's own rows, in chapter-relative coordinates and
     /// keyed by content: a keystroke walks the chapter it landed in and
     /// replays its neighbours rebased. Held for the hot set alone, and every
@@ -309,6 +335,9 @@ pub struct Expediter<P: ChapterPass> {
     totals: CorpusTotals,
     /// Which checksum each book contributes to [`Self::totals`] right now.
     tallied: FxHashMap<BookId, RawChecksum>,
+    /// The word channels' last verdicts, so a publication that moved one
+    /// book's words re-judges those keys and keeps the rest.
+    verdicts: WordVerdicts,
     /// Per book, its current checksum ahead of the previous ones still kept —
     /// exactly the tables the sweep spares.
     generations: FxHashMap<BookId, Vec<RawChecksum>>,
@@ -333,6 +362,8 @@ pub struct Expediter<P: ChapterPass> {
     remaps: u64,
     folds: u64,
     located: u64,
+    /// Books whose firing set was walked by the last publication.
+    walked: u64,
     sited: u64,
     pairings: u64,
     /// Whether a book's missing chapters are mapped on rayon; the two
@@ -381,12 +412,14 @@ impl<P: ChapterPass + Sync> Expediter<P> {
             chapter_tables: FxHashMap::default(),
             aggregates: FxHashMap::default(),
             sites: FxHashMap::default(),
+            firing: FxHashMap::default(),
             chapter_sites: FxHashMap::default(),
             paired: FxHashMap::default(),
             project: None,
             wordless: 0,
             totals: CorpusTotals::default(),
             tallied: FxHashMap::default(),
+            verdicts: WordVerdicts::default(),
             generations: FxHashMap::default(),
             kept: DEFAULT_GENERATIONS,
             hot: Vec::new(),
@@ -399,6 +432,7 @@ impl<P: ChapterPass + Sync> Expediter<P> {
             remaps: 0,
             folds: 0,
             located: 0,
+            walked: 0,
             sited: 0,
             pairings: 0,
             #[cfg(feature = "parallel")]
@@ -593,6 +627,26 @@ impl<P: ChapterPass + Sync> Expediter<P> {
         self.pairings
     }
 
+    /// Books whose firing set the last [`publish`](Self::publish) walked; the
+    /// rest replayed the hash they were walked under.
+    ///
+    /// All of them whenever the pattern table's rows say something new, none
+    /// when a keystroke moved only counts, one when a book's own text moved.
+    pub fn last_firing_walks(&self) -> u64 {
+        self.walked
+    }
+
+    /// Corpus word-tally keys the last [`publish`](Self::publish) judged: the
+    /// whole tally when it judged everything, the delta's keys when it kept
+    /// the previous publication's verdicts and merged.
+    ///
+    /// A keystroke answers one book's keys; a moved terminal table, a moved
+    /// config, or a corpus-wide doubling recusal that crossed the bar answers
+    /// the whole tally.
+    pub fn last_words_judged(&self) -> usize {
+        self.verdicts.last_judged()
+    }
+
     /// Observations the cache holds after the last sweep.
     pub fn resident_observations(&self) -> usize {
         self.observations.len()
@@ -634,6 +688,8 @@ impl<P: ChapterPass + Sync> Expediter<P> {
                 size_of::<RawChecksum>() + size_of::<FiringHash>() + size_of_val(&**rows)
             })
             .sum();
+        let firing = self.firing.len()
+            * (size_of::<RawChecksum>() + size_of::<TableHash>() + size_of::<FiringHash>());
         let chapter_sites: usize = self
             .chapter_sites
             .values()
@@ -659,10 +715,12 @@ impl<P: ChapterPass + Sync> Expediter<P> {
             + rows
             + cached
             + sites
+            + firing
             + chapter_sites
             + pairs
             + rings
             + self.totals.resident_bytes()
+            + self.verdicts.resident_bytes()
             + self.tallied.len() * (size_of::<BookId>() + size_of::<RawChecksum>())
     }
 
@@ -861,6 +919,7 @@ impl<P: ChapterPass + Sync> Expediter<P> {
                 .retain(|checksum, _| current.contains(checksum));
         }
         self.sites.retain(|checksum, _| live.contains(checksum));
+        self.firing.retain(|checksum, _| live.contains(checksum));
         let named: FxHashSet<ObservationKey> = self
             .chapter_tables
             .values()
@@ -903,6 +962,7 @@ impl<P: ChapterPass + Sync> Expediter<P> {
 
         // Scoped so the borrowed observations are released before the sweep.
         let (mut folds, mut located, mut sited, mut pairings, mut wordless) = (0, 0, 0, 0, 0);
+        let mut walked = 0u64;
         let (projected, patterns) = {
             let Self {
                 pantry,
@@ -912,11 +972,13 @@ impl<P: ChapterPass + Sync> Expediter<P> {
                 chapter_tables,
                 aggregates,
                 sites,
+                firing: firing_sets,
                 chapter_sites,
                 paired,
                 project,
                 totals,
                 tallied,
+                verdicts,
                 generations,
                 hot,
                 cooling,
@@ -1001,10 +1063,15 @@ impl<P: ChapterPass + Sync> Expediter<P> {
                     stale.push(&aggregates[seen]);
                 }
             }
+            // The keys those two moves touch, named before either runs: a
+            // judge re-decides exactly these and keeps every other verdict.
+            let mut moved = MovedWords::default();
             if !stale.is_empty() {
+                pass.moved_keys(&stale, &mut moved);
                 pass.untally(totals, &stale);
             }
             if !added.is_empty() {
+                pass.moved_keys(&added, &mut moved);
                 pass.tally(totals, &added);
             }
             tallied.retain(|id, _| live.contains(id));
@@ -1030,7 +1097,7 @@ impl<P: ChapterPass + Sync> Expediter<P> {
                     .iter()
                     .map(|checksum| &aggregates[checksum])
                     .collect();
-                pass.judge_resident(&corpus, totals, config, &mut findings);
+                pass.judge_kept(&corpus, totals, config, &moved, verdicts, &mut findings);
 
                 // Then the source comparison, from lengths both sides already
                 // retain. Every Target pairs with the Reference of the same
@@ -1142,6 +1209,7 @@ impl<P: ChapterPass + Sync> Expediter<P> {
                 .map(|(at, pattern)| (PatternRef::of(pattern), PatternIndex::new(at as u16)))
                 .collect();
             let terminals = TerminalHash::of(findings.terminals());
+            let identity = TableHash::of(&table);
             let hot_ids: FxHashSet<&BookId> = hot.iter().collect();
             // Every key this publication's hot books name, hit or miss: what
             // the chapter cache keeps once the loop is done, so a book that
@@ -1152,8 +1220,16 @@ impl<P: ChapterPass + Sync> Expediter<P> {
                 let book = BookIndex::new(index).expect("a corpus indexes every book");
                 let checksum = checksums[index];
                 let aggregate = &aggregates[&checksum];
-                pass.firing(aggregate, &table, &mut firing);
-                let hash = FiringHash::of(&firing, &table);
+                let hash = match firing_sets.get(&checksum) {
+                    Some((seen, hash)) if *seen == identity => *hash,
+                    _ => {
+                        pass.firing(aggregate, &table, &mut firing);
+                        let hash = FiringHash::of(&firing, &table);
+                        firing_sets.insert(checksum, (identity, hash));
+                        walked += 1;
+                        hash
+                    }
+                };
                 let keys: Vec<ChapterSiteKey> = match P::CHAPTER_SITES && hot_ids.contains(id) {
                     true => chapter_tables[&checksum]
                         .iter()
@@ -1211,6 +1287,7 @@ impl<P: ChapterPass + Sync> Expediter<P> {
             findings.into_parts()
         };
         self.folds = folds;
+        self.walked = walked;
         self.located = located;
         self.sited = sited;
         self.pairings = pairings;
@@ -1411,8 +1488,8 @@ mod tests {
     use super::*;
     use sous_core::hygiene::HygieneBytes;
     use sous_core::{
-        BookIndex, Brigade, CorpusSnapshot, FindingKind, JudgingConfig, SchemaStamp, Substrate,
-        Words,
+        BandStep, BookIndex, Brigade, Channel, CorpusSnapshot, FindingKind, JudgingConfig,
+        SchemaStamp, Staircase, Substrate, Words,
     };
 
     use crate::pantry::{PantryError, Retain};
@@ -1893,6 +1970,212 @@ mod tests {
             3,
             "a new firing set is a new key for every chapter"
         );
+    }
+
+    // ------------------------------------------------- kept word verdicts
+
+    /// One book of ordinary prose: shared function words, and a noun only this
+    /// book uses, so a keystroke here moves some of the tally's keys and not
+    /// the rest.
+    fn prose(code: &str, own: &str) -> String {
+        let first = format!("The {own} spoke and the people heard the {own} gladly");
+        let second = format!("A {own} came to the city and a {own} left the city");
+        book(code, &[&first, &second])
+    }
+
+    /// Four such books, in canonical order.
+    fn prose_corpus() -> Vec<(&'static str, String)> {
+        vec![
+            ("a/gen.usfm", prose("GEN", "shepherd")),
+            ("b/mrk.usfm", prose("MRK", "fisher")),
+            ("c/luk.usfm", prose("LUK", "tanner")),
+            ("d/rev.usfm", prose("REV", "rider")),
+        ]
+    }
+
+    /// Doubled-channel rows in a publication's pattern table: what a corpus-wide
+    /// recusal turns on and off.
+    fn doubled_rows(buffer: &[u8]) -> usize {
+        CorpusSnapshot::open(buffer)
+            .unwrap()
+            .patterns()
+            .unwrap()
+            .iter()
+            .filter(|pattern| pattern.channel == Channel::Doubled)
+            .count()
+    }
+
+    fn registered(books: &[(&str, String)]) -> Expediter<Brigade> {
+        let mut sous = sous();
+        for (id, text) in books {
+            sous.update(*id, Role::Target, text).unwrap();
+        }
+        sous
+    }
+
+    /// A cold publication of exactly these texts: the bytes a resident one owes
+    /// and the key count "everything" means.
+    fn cold(books: &[(&str, String)]) -> (Vec<u8>, usize) {
+        let mut fresh = registered(books);
+        let buffer = fresh.publish().unwrap();
+        (buffer, fresh.last_words_judged())
+    }
+
+    /// The delta is the whole claim: a keystroke re-judges the words the edited
+    /// book holds and keeps every other verdict, and still publishes the bytes
+    /// a cold run does.
+    #[test]
+    fn a_keystroke_re_judges_only_the_moved_words() {
+        let mut books = prose_corpus();
+        let mut sous = registered(&books);
+        sous.publish().unwrap();
+        let whole = sous.last_words_judged();
+        assert!(whole > 0, "the corpus has words to judge");
+
+        books[1].1 = prose("MRK", "fisher").replace("gladly", "sadly");
+        sous.update(books[1].0, Role::Target, &books[1].1).unwrap();
+        let published = sous.publish().unwrap();
+        let moved = sous.last_words_judged();
+        assert!(moved > 0, "the edited book's own keys moved");
+        assert!(
+            moved < whole,
+            "a keystroke judged {moved} of {whole} keys, which is all of them"
+        );
+        assert_eq!(published, cold(&books).0, "the merged list is the cold one");
+    }
+
+    /// A glyph crossing `terminal_upper_share_bp` re-decides which stored
+    /// positions are free, so every casing verdict is re-judged, moved or not.
+    ///
+    /// The control is the same edit in the same book under a follower that
+    /// leaves `;` where it was: that one keeps the verdicts the delta did not
+    /// name, which is what makes this a claim about the table.
+    fn after_handoffs(follower: &str) -> (usize, usize) {
+        let handoffs = "and; a fig and; a fig and; a fig and; a fig and; a fig and; a fig";
+        let mut books = prose_corpus();
+        books[0].1 = book("GEN", &["In the beginning", handoffs]);
+        let mut sous = registered(&books);
+        sous.publish().unwrap();
+
+        let moved = handoffs.replace("; a", &format!("; {follower}"));
+        books[0].1 = book("GEN", &["In the beginning", &moved]);
+        sous.update(books[0].0, Role::Target, &books[0].1).unwrap();
+        let published = sous.publish().unwrap();
+        let (bytes, whole) = cold(&books);
+        assert_eq!(published, bytes, "the publication is the cold one");
+        (sous.last_words_judged(), whole)
+    }
+
+    #[test]
+    fn a_table_change_re_judges_everything() {
+        let (kept, whole) = after_handoffs("e");
+        assert!(
+            kept < whole,
+            "a follower that moves no table keeps {} verdicts",
+            whole - kept
+        );
+        let (judged, whole) = after_handoffs("A");
+        assert_eq!(
+            judged, whole,
+            "a moved terminal table re-judges the whole tally"
+        );
+    }
+
+    /// A judging knob moves verdicts the delta never names, so it re-judges the
+    /// whole tally even though not one book's counts moved.
+    #[test]
+    fn a_config_flip_re_judges_everything() {
+        let books = prose_corpus();
+        let mut sous = registered(&books);
+        sous.publish().unwrap();
+
+        let config = JudgingConfig {
+            word_support_floor: 1,
+            ..JudgingConfig::default()
+        };
+        sous.set_config(((), config, config));
+        let published = sous.publish().unwrap();
+        let (_, whole) = cold(&books);
+        assert_eq!(sous.last_mapped(), 0, "a knob maps nothing");
+        assert_eq!(
+            sous.last_words_judged(),
+            whole,
+            "a moved knob re-judges the whole tally"
+        );
+        let mut fresh = registered(&books);
+        fresh.set_config(((), config, config));
+        assert_eq!(
+            published,
+            fresh.publish().unwrap(),
+            "and publishes the cold bytes under that knob"
+        );
+    }
+
+    /// The doubled channel recuses itself corpus-wide, so vocabulary arriving
+    /// in one book decides whether a doubling in another is judged at all.
+    #[test]
+    fn a_recusal_flip_re_judges_everything() {
+        let mut books = vec![
+            ("a/gen.usfm", book("GEN", &["the the sky the the"])),
+            ("b/mrk.usfm", book("MRK", &["one two three four five six"])),
+        ];
+        // A vocabulary of eight words, one of which doubles, is 1,250 bp; ten
+        // more words put it under the bar and the channel stops recusing.
+        let config = JudgingConfig {
+            doubles_productive_bp: 1_000,
+            word_support_floor: 1,
+            word_bands: Staircase::new(Staircase::WORD_STEPS.map(|step| BandStep {
+                share_bp: 9_000,
+                ..step
+            }))
+            .expect("the word bounds still ascend"),
+            ..JudgingConfig::default()
+        };
+        let mut sous = registered(&books);
+        sous.set_config(((), config, config));
+        let before = doubled_rows(&sous.publish().unwrap());
+
+        books[1].1 = book("MRK", &["one two three four five six seven eight nine ten"]);
+        sous.update(books[1].0, Role::Target, &books[1].1).unwrap();
+        let published = sous.publish().unwrap();
+        assert_ne!(
+            before,
+            doubled_rows(&published),
+            "the recusal crossed the bar"
+        );
+
+        let mut fresh = registered(&books);
+        fresh.set_config(((), config, config));
+        let bytes = fresh.publish().unwrap();
+        assert_eq!(
+            sous.last_words_judged(),
+            fresh.last_words_judged(),
+            "a crossed recusal re-judges the whole tally"
+        );
+        assert_eq!(published, bytes, "and publishes the cold bytes");
+    }
+
+    /// A firing set is a function of a book's counts and the table's CLAIMS, so
+    /// a publication whose table says the same thing walks nobody's again.
+    #[test]
+    fn firing_is_replayed_for_untouched_books() {
+        let mut books = prose_corpus();
+        let mut sous = registered(&books);
+        sous.publish().unwrap();
+        assert_eq!(sous.last_firing_walks(), 4, "cold: every book");
+
+        sous.publish().unwrap();
+        assert_eq!(sous.last_firing_walks(), 0, "an unchanged republication");
+
+        // A masked footnote moves the book's checksum and not one count, so
+        // the table says exactly what it said and only this book is walked.
+        books[1].1 = books[1]
+            .1
+            .replace("The fisher", "The\\f + \\ft note\\f* fisher");
+        sous.update(books[1].0, Role::Target, &books[1].1).unwrap();
+        let published = sous.publish().unwrap();
+        assert_eq!(sous.last_firing_walks(), 1, "the book whose text moved");
+        assert_eq!(published, cold(&books).0, "and the bytes are the cold ones");
     }
 
     /// And the rows go when the book does: the hot set is what keeps them, so
