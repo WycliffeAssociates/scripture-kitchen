@@ -42,7 +42,10 @@ pub(super) fn pair_and_judge<P: ChapterPass>(
     views: &mut [Option<OnionBook>],
     findings: &mut Findings,
 ) -> Result<(u64, u64), PublishError> {
-    let (mut pairings, mut wordless) = (0, 0);
+    let mut pairings = 0;
+    // The sources that kept no lane, by key: one reference is one line for
+    // the host to act on, however many targets paired against it.
+    let mut wordless: FxHashSet<BookKey> = FxHashSet::default();
     // Then the source comparison, from lengths both sides already
     // retain. Every Target pairs with the Reference of the same
     // `BookKey`; a Target with none gets no ratios and no rows,
@@ -85,7 +88,7 @@ pub(super) fn pair_and_judge<P: ChapterPass>(
                     continue;
                 };
                 if copying && words.is_none() {
-                    wordless += 1;
+                    wordless.insert(*key);
                 }
                 let walked = copying && words.is_some();
                 let entry = (checksums[index], *source, walked);
@@ -144,5 +147,5 @@ pub(super) fn pair_and_judge<P: ChapterPass>(
             *project = None;
         }
     }
-    Ok((pairings, wordless))
+    Ok((pairings, wordless.len() as u64))
 }

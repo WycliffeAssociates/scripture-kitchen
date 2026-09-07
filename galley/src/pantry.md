@@ -31,7 +31,7 @@ pantry.masked(&loose, &filter)              // chunks a registered book warmed
 pantry.chunk_stats()   -> ChunkStats { misses, hits, evictions, len, resident_bytes }
 pantry.budget()        -> Budget { ceiling: 16_777_216 }
 pantry.tally()         -> Tally { pinned, hot, rebuildable }
-pantry.resident_bytes() == pantry.tally().total()          // always
+pantry.resident_bytes() == pantry.tally().total()          // by definition
 ```
 
 `galley/docs/analysis-host.md` states the ownership contract this implements;
@@ -44,15 +44,17 @@ go.
 
 | tier | what is in it | who holds it | evicted |
 | --- | --- | --- | --- |
-| **pinned** | a `Target`'s text, its `Toc`/`Mask`/`Utf16Table`/`Fingerprint`, a `Reference`'s verse lanes, the generation rings that name them | `Pantry::books`, `Expediter::generations` | never, until `remove` |
+| **pinned** | a `Target`'s text, its `Toc`/`Mask`/`Utf16Table`/`Fingerprint`, a `Reference`'s verse lanes, the generation rings that name them, and the id lists — canonical order, the hot set, the tally — that name them a second time | `Pantry::books`, `Pantry::targets`/`references`, `Expediter::generations`/`hot`/`cooling`/`tallied`/`project` | never, until `remove` |
 | **hot** | the hot set's per-chapter site rows | `Expediter::chapter_sites` | with the hot set |
 | **rebuildable** | chunk products, and every content-addressed derived value | `Pantry::chunks`, the Expediter's `derived::Store`s | chunks by the budget; the rest by the sweep |
 
 **In this slice the ceiling is enforced on the rebuildable tier's chunk
 products and nowhere else; the other tiers are counted against it and reported,
-never evicted.** `Tally::total()` equals `resident_bytes()` with no residual, so
-the accounting is a comparison rather than a claim, and enforcement is a later
-measured slice.
+never evicted.** `resident_bytes()` IS `Tally::total()` — one arithmetic, so no
+byte can be reported and attributed to nothing. What makes the total itself a
+comparison rather than a claim is a counting allocator:
+`galley/tests/aggregate_accounting.rs` holds it to a tenth of the bytes actually
+live over a whole Bible. Enforcement is a later measured slice.
 
 Pinned is pinned for a reason that is not sentiment: placing a target's finding
 rescans its current text, so a target that lost its text could be judged and
@@ -240,7 +242,8 @@ and the honest consequence is stated rather than hidden: **the host re-sends
 those references' text**, which is one `update` per reference with the same
 bytes. The Pantry does not serve that from the cheaper entry — `SourceLanes` is
 part of the idempotence check — and the publication reports how many books were
-in that state through `Expediter::last_wordless_references()`
+in that state through `Expediter::last_wordless_references()`, one line per
+SOURCE
 (`lastWordlessReferences()` across the wasm wall, `sourcecopy unavailable BOOK`
 from the CLI), so "no rows" never quietly means "no lane".
 

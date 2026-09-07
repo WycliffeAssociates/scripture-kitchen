@@ -5,12 +5,16 @@
 //! pantry.tally()              -> Tally { pinned: 4_512_003,
 //!                                        hot: 0,
 //!                                        rebuildable: 6_210_944 }
-//! tally.total() == pantry.resident_bytes()      always, with no residual
+//! tally.total() == pantry.resident_bytes()      the same sum, named twice
 //! ```
 //!
 //! THE CEILING BITES IN ONE PLACE: chunk products, the rebuildable tier's
 //! LRU. Every other tier is counted and reported, never evicted; enforcing
 //! them is a later measured slice.
+//!
+//! `resident_bytes` is defined as this total, so what holds the tally honest
+//! is a counting allocator and not that equality:
+//! `galley/tests/aggregate_accounting.rs`.
 
 /// Where a resident byte sits, which is what it costs to lose it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

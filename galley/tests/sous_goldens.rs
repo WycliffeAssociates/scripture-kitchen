@@ -201,6 +201,28 @@ fn the_knobs_golden_publishes_no_casing_row() {
     assert_eq!(casing(&knobs), 0, "casing is off in the knobs publication");
 }
 
+/// The judge names each pattern once. A resident host resolves a cached row's
+/// content — glyph, channel, key — back to a table position, so a table that
+/// held one identity twice would replay one book's rows under another's index
+/// with nothing to notice.
+#[test]
+fn no_published_table_names_one_pattern_twice() {
+    for (name, buffer) in [("cold", COLD), ("edit", EDIT), ("knobs", KNOBS)] {
+        let snapshot = CorpusSnapshot::open(buffer).expect("a corpus buffer");
+        let patterns = snapshot.patterns().expect("a readable pattern table");
+        assert!(!patterns.is_empty(), "{name}.bin publishes a table");
+        let mut seen = rustc_hash::FxHashSet::default();
+        for pattern in &patterns {
+            assert!(
+                seen.insert((pattern.glyph, pattern.channel, pattern.key)),
+                "{name}.bin names {:?} {:?} twice",
+                pattern.channel,
+                pattern.key
+            );
+        }
+    }
+}
+
 /// The residency pin: the same three publications, with what the caches hold
 /// after each one written down. A refactor that moves a byte between owners
 /// moves this number, so "nothing observable changed" is a comparison and not
@@ -239,7 +261,7 @@ fn resident_bytes_is_pinned_across_the_three_publications() {
 
     assert_eq!(
         [cold, edit, knobs],
-        [93_104, 100_993, 108_101],
+        [93_528, 101_417, 108_525],
         "resident bytes moved: cold, edit, knobs"
     );
 }

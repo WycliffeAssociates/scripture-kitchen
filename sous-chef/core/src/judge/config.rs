@@ -1,19 +1,21 @@
 //! The knobs judging reads, and nothing else reads.
 //!
 //! ```text
-//! JudgingConfig::default().staircase   -> four bands, 25 bp to 5,000 bp
+//! JudgingConfig::default().bands       -> five rungs, 2,500 bp down to 30 bp
 //! config.channels.casing = false       -> the casing lane publishes nothing
 //! ```
 //!
 //! Config reaches judging alone: moving a knob re-judges, and never remaps a
 //! chapter or refolds a book.
 
+use xxhash_rust::xxh3::Xxh3Default;
+
 use super::*;
 
 // ── The config ──────────────────────────────────────────────────────────
 
 /// One rung of the fraction staircase.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BandStep {
     /// The largest denominator this rung covers; the last rung is `u32::MAX`.
     pub up_to: u32,
@@ -23,7 +25,7 @@ pub struct BandStep {
 
 /// The fraction bands of `rules/character-inventory.md`, in basis points so
 /// 0.3% is exact.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Staircase {
     /// `(denominator up to, share in basis points)`, ascending; the last
     /// entry's bound is `u32::MAX`.
@@ -118,7 +120,7 @@ impl Default for Staircase {
 }
 
 /// Whether letters join the rarity roster.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum LetterRoster {
     /// Rostered unless the corpus is logographic or too small to judge.
     #[default]
@@ -132,7 +134,7 @@ pub enum LetterRoster {
 /// The same shape as [`LetterRoster`], and for the same reason: `Auto` is a
 /// measurement about the corpus — how much of its vocabulary doubles — and a
 /// host that knows better overrides it either way.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum DoublesPolicy {
     /// Judged unless the corpus doubles productively.
     #[default]
@@ -145,7 +147,7 @@ pub enum DoublesPolicy {
 /// pool's share is never under a member's, so every G2 row rides beside its
 /// G3 rows and adds a coarser sentence, not a finding. A host that wants the
 /// grouped statement turns it on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Channels {
     pub placement: bool,
     pub run_shape: bool,
@@ -189,7 +191,7 @@ impl Default for Channels {
 
 /// Everything judging may vary. Plain fields: this is exported through
 /// wasm-bindgen later and mirrored nowhere by hand.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct JudgingConfig {
     /// A channel whose denominator is below this abstains.
     pub support_floor: u32,
@@ -259,5 +261,57 @@ impl Default for JudgingConfig {
             lengths: LengthConfig::default(),
             channels: Channels::default(),
         }
+    }
+}
+
+/// The whole config as one number, for a publication identity a host hashes.
+///
+/// Every field, never a chosen few: a knob left out of the stamp is two
+/// publications a consumer cannot tell apart.
+pub fn config_stamp(config: &JudgingConfig) -> u64 {
+    let mut hasher = Portable(Xxh3Default::new());
+    core::hash::Hash::hash(config, &mut hasher);
+    core::hash::Hasher::finish(&hasher)
+}
+
+/// xxh3 with every number written at a fixed width, little-endian first.
+///
+/// A derived `Hash` writes an array's length as a `usize` and an integer in
+/// native order — 8 bytes here, 4 in wasm — and a publication's identity may
+/// not depend on which target computed it.
+struct Portable(Xxh3Default);
+
+impl core::hash::Hasher for Portable {
+    fn finish(&self) -> u64 {
+        core::hash::Hasher::finish(&self.0)
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        core::hash::Hasher::write(&mut self.0, bytes);
+    }
+
+    fn write_u8(&mut self, value: u8) {
+        self.write(&[value]);
+    }
+
+    fn write_u16(&mut self, value: u16) {
+        self.write(&value.to_le_bytes());
+    }
+
+    fn write_u32(&mut self, value: u32) {
+        self.write(&value.to_le_bytes());
+    }
+
+    fn write_u64(&mut self, value: u64) {
+        self.write(&value.to_le_bytes());
+    }
+
+    fn write_u128(&mut self, value: u128) {
+        self.write(&value.to_le_bytes());
+    }
+
+    /// The one the derive reaches for on its own, as an array's length prefix.
+    fn write_usize(&mut self, value: usize) {
+        self.write(&(value as u64).to_le_bytes());
     }
 }

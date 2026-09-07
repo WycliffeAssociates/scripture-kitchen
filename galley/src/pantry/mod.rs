@@ -31,7 +31,7 @@ use crate::sous::OnionBook;
 
 pub mod budget;
 mod chunks;
-pub mod derived;
+pub(crate) mod derived;
 
 pub use budget::{Budget, Tally, Tier};
 pub use chunks::ChunkStats;
@@ -493,17 +493,25 @@ impl Pantry {
     /// The chunk cache's resident products plus the Pantry's own — detached
     /// products and retained text alike.
     pub fn resident_bytes(&self) -> usize {
-        self.chunks.resident_bytes() + self.books.values().map(|book| book.bytes).sum::<usize>()
+        self.tally().total()
     }
 
     /// The same bytes, attributed: a book's text and products are
-    /// [`Tier::Pinned`], the chunk products [`Tier::Rebuildable`]. Nothing
-    /// here is hot; the hot tier is the Expediter's chapter rows.
+    /// [`Tier::Pinned`], and so are the canonical order's own rows, which name
+    /// every registered id a second time. The chunk products are
+    /// [`Tier::Rebuildable`]. Nothing here is hot; the hot tier is the
+    /// Expediter's chapter rows.
     pub fn tally(&self) -> Tally {
+        let ordered: usize = self
+            .targets
+            .iter()
+            .chain(&self.references)
+            .map(|(id, _)| size_of::<(BookId, BookKey)>() + id.as_str().len())
+            .sum();
         let mut tally = Tally::default();
         tally.add(
             Tier::Pinned,
-            self.books.values().map(|book| book.bytes).sum::<usize>(),
+            self.books.values().map(|book| book.bytes).sum::<usize>() + ordered,
         );
         tally.add(Tier::Rebuildable, self.chunks.resident_bytes());
         tally
@@ -553,8 +561,9 @@ impl Pantry {
     /// under [`Retain::ProductsOnly`]. The other component of
     /// [`resident_bytes`](Self::resident_bytes) not already reachable through
     /// [`chunk_stats`](Self::chunk_stats): what's left is `resident_bytes() -
-    /// chunk_stats().resident_bytes - text_bytes()`, the Pantry's own
-    /// per-book products (`Toc`, `Mask`, `Utf16Table`, `Fingerprint`).
+    /// chunk_stats().resident_bytes - text_bytes()`, the Pantry's own per-book
+    /// products (`Toc`, `Mask`, `Utf16Table`, `Fingerprint`) and the canonical
+    /// order's id rows.
     pub fn text_bytes(&self) -> usize {
         self.books
             .values()
@@ -588,6 +597,11 @@ impl Pantry {
     /// One registered book's raw checksum, whatever its role.
     pub(crate) fn checksum(&self, id: &BookId) -> Option<RawChecksum> {
         self.books.get(id).map(|book| book.checksum)
+    }
+
+    /// What this id is registered AS right now, or `None` when it is not.
+    pub(crate) fn role(&self, id: &BookId) -> Option<Role> {
+        self.books.get(id).map(|book| book.role)
     }
 
     /// One reference book's retained per-verse lengths, or `None` for an
@@ -767,9 +781,11 @@ fn retained<'b>(books: &'b FxHashMap<BookId, Book>, id: &BookId) -> Result<&'b s
         .ok_or_else(|| PantryError::NoText { id: id.clone() })
 }
 
-/// Resident size of one book's detached products and retained text —
-/// capacity, not length, since capacity is what a `Vec` actually holds on
-/// the heap.
+/// Resident size of one book's detached products and retained text.
+///
+/// A `Vec` is weighed by capacity, which is what it actually holds on the
+/// heap; a `String` the Pantry built by copying the update's text has no slack
+/// to weigh, so the text is its length.
 fn book_bytes(
     toc: &Toc,
     projection: Option<&Projection>,

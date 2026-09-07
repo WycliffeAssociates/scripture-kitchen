@@ -5,10 +5,12 @@
 //! fires at a time.
 
 use super::*;
-use crate::judge::{Channel, Channels, DoublesPolicy, LetterRoster, Staircase, TerminalTable};
+use crate::judge::{
+    Channel, Channels, DoublesPolicy, LetterRoster, PatternKey, Staircase, TerminalTable,
+};
 use crate::pass::analyze_with;
 use crate::substrate::{FollowCounts, ScalarKey, Substrate};
-use crate::{BookKey, Chapter, Corpus, ProjectedBook, VerseKey};
+use crate::{BookKey, Chapter, Corpus, FindingKind, ProjectedBook, Reasons, TextRange, VerseKey};
 
 /// A terminal table built by hand: `(glyph, upper, lower)` handoffs, judged
 /// under the default share.

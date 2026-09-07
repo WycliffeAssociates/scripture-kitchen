@@ -22,7 +22,10 @@ cache is keyed by, and what invalidates it, is one table in
 `pantry()` hands back `&Pantry` only, so no book can be registered behind these
 caches' backs. `update` takes the role's own retention, so
 `update(id, Role::Reference, text)` keeps no text; `update_with` is where a
-`Target` asking for `Retain::ProductsOnly` is refused (`pantry.md`).
+`Target` asking for `Retain::ProductsOnly` is refused (`pantry.md`). Re-sending
+a Target as a Reference is a withdrawal from the target set and is treated as
+one: the ring and the hot slot go at once, the aggregate is untallied by the
+publication that no longer lists it, and the sweep takes the rest.
 
 The four free-text doors — `lint`, `parse`, `parsed`, `masked` — forward to the
 Pantry too. They take loose text the host holds, register nothing, and are how
@@ -94,9 +97,12 @@ a republication with nothing updated.
 `last_mapped` counts a remap as a map of that chapter, because a chapter was
 read and walked. A cold open answers "all of them" to every row above; a knob
 moved through `set_config` answers zero to `last_mapped` and `last_folded` and
-"all of them" to `last_firing_walks` and `last_located`, because moving a band
-can change which patterns fire — measured at 3.2 ms for the 66-book corpus,
-against 206 µs for a republication that changed nothing (evidence.md).
+"all of them" to `last_located`, because moving a band can change which patterns
+fire — measured at 3.2 ms for the 66-book corpus, against 206 µs for a
+republication that changed nothing (evidence.md). `last_firing_walks` answers
+"all of them" only when the knob moved the table's CONTENT: the firing cache is
+keyed by `TableHash`, so a knob that renumbers the table or moves nothing in it
+answers zero.
 
 ## Retention grain: every chapter, or one book's aggregate
 
@@ -219,9 +225,9 @@ already retains and its words are walked. A pair hit reads nothing, so an
 unchanged republication with the lane on still walks no text.
 
 A declared source registered while `source_copy` was OFF kept no word lane, so
-it is skipped and counted: `last_wordless_references()` is how many target books
-paired against such a source. Nonzero means "re-send those references", never
-"no run was found".
+it is skipped and counted: `last_wordless_references()` is how many such SOURCES
+a publication met, each named once however many targets paired against it.
+Nonzero means "re-send those references", never "no run was found".
 
 Every Target pairs with the Reference of the same `BookKey` — the first, if a
 caller registers two files under one key, since `books(Role::Reference)` is
@@ -243,7 +249,9 @@ Three properties follow, and each is a test:
   nothing and folds nothing;
 - **references ride `SnapshotId`.** Swapping the declared source changes what
   the publication is OF, not only what it says, so the reference table is hashed
-  beside the target one under its own role byte.
+  beside the target one under its own role byte. So does the judging config,
+  through `ChapterPass::config_stamp`: a `FindingHandle` is a snapshot plus a
+  row, and two publications under different knobs name different rows.
 
 The facts pairing returns — target-only and source-only keys, ambiguous
 duplicates, partial overlaps — are dropped here. They are alignment structure,
@@ -351,9 +359,3 @@ expediter/residency.rs nothing reachable that no live generation names
 `galley::wasm::Galley` IS an `Expediter<Brigade>` and nothing else, so the
 publication a JS host reads is this one. `galley/src/wasm.md` states the
 equivalence and its three tests.
-
-## What is not here yet
-
-A config stamp joins `SnapshotId` when the judging config carries bands: today
-`P::Config` is `()` for every shipped pass, so two publications under different
-configs cannot exist.

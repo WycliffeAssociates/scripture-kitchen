@@ -16,7 +16,7 @@ use rustc_hash::FxHashSet;
 use sous_core::{ChapterPass, PairedBook};
 
 use super::Expediter;
-use super::keys::{ChapterRow, FiringHash, ObservationKey, TableHash, TerminalHash};
+use super::keys::{ChapterRow, FiringHash, ObservationKey, PairKey, TableHash, TerminalHash};
 use crate::pantry::{BookId, Budget, RawChecksum, Tally, Tier};
 
 /// Previous checksums a book keeps beside its current one, so an undo of that
@@ -98,8 +98,10 @@ impl<P: ChapterPass + Sync> Expediter<P> {
         self.tally().total()
     }
 
-    /// The same bytes, attributed to their tier — with no residual, so
-    /// `tally().total() == resident_bytes()` always.
+    /// The same bytes, attributed to their tier: `resident_bytes()` is this
+    /// total, so nothing can be reported and attributed to no tier. What holds
+    /// the total itself honest is a counting allocator
+    /// (`galley/tests/aggregate_accounting.rs`).
     ///
     /// A book's text and products and the rings that name them are pinned;
     /// the hot set's chapter rows are the hot tier; every content-addressed
@@ -131,10 +133,25 @@ impl<P: ChapterPass + Sync> Expediter<P> {
             + self.totals.resident_bytes()
             + self.verdicts.resident_bytes();
 
+        // The id lists and the pooled pair statistics: small, held for as long
+        // as their books are, and evicted by nothing.
+        let named: usize = self
+            .hot
+            .iter()
+            .chain(&self.cooling)
+            .map(|id| size_of::<BookId>() + id.as_str().len())
+            .sum();
+        let project = self.project.as_ref().map_or(0, |(keys, spread)| {
+            size_of_val(spread) + keys.len() * size_of::<PairKey>()
+        });
+
         let mut tally = self.pantry.tally();
         tally.add(
             Tier::Pinned,
-            rings + self.tallied.len() * (size_of::<BookId>() + size_of::<RawChecksum>()),
+            rings
+                + self.tallied.len() * (size_of::<BookId>() + size_of::<RawChecksum>())
+                + named
+                + project,
         );
         tally.add(
             Tier::Hot,

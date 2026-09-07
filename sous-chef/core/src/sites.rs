@@ -46,7 +46,7 @@ pub struct Site {
 /// sites in it.
 pub fn firing(book: &BookAggregate, patterns: &[Pattern], out: &mut Vec<PatternIndex>) {
     out.clear();
-    for (index, pattern) in patterns.iter().enumerate() {
+    for (index, pattern) in PatternIndex::over(patterns) {
         // The table is the whole corpus's, and a word row names a hash rather
         // than a glyph — and a letter-run row names a letter this walk never
         // counted. Those are `words::Words`'s to place.
@@ -58,7 +58,7 @@ pub fn firing(book: &BookAggregate, patterns: &[Pattern], out: &mut Vec<PatternI
             .binary_search_by_key(&pattern.glyph, |entry| entry.0)
             .is_ok();
         if held {
-            out.push(PatternIndex::at(index));
+            out.push(index);
         }
     }
 }

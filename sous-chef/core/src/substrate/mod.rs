@@ -515,6 +515,10 @@ impl ChapterPass for Substrate {
         Some(config.lengths)
     }
 
+    fn config_stamp(&self, config: &JudgingConfig) -> u64 {
+        crate::judge::config_stamp(config)
+    }
+
     /// Rescans this book's text for every pattern its own counts hold, and
     /// pushes one `Convention` row per matching run.
     fn locate(

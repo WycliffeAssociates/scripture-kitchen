@@ -36,7 +36,9 @@ mod terminals;
 mod tests;
 mod words;
 
-pub use config::{BandStep, Channels, DoublesPolicy, JudgingConfig, LetterRoster, Staircase};
+pub use config::{
+    BandStep, Channels, DoublesPolicy, JudgingConfig, LetterRoster, Staircase, config_stamp,
+};
 pub use pattern::{Channel, Pattern, PatternIndex, PatternKey, Side};
 pub use scalars::books_touched;
 pub(crate) use scalars::{judge_corpus, pool_of_key, share_bp};

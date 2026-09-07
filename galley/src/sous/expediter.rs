@@ -242,6 +242,14 @@ impl<P: ChapterPass + Sync> Expediter<P> {
         retain: Retain,
         text: &str,
     ) -> Result<BookKey, PublishError> {
+        let id = id.into();
+        // A book that stops being a Target stops being cached as one: its ring
+        // and its hot slot go here, and the publication that no longer lists it
+        // untallies the aggregate the ring still named — the path `remove`
+        // already takes.
+        if role != Role::Target && self.pantry.role(&id) == Some(Role::Target) {
+            self.forget_target(&id);
+        }
         Ok(self
             .pantry
             .update_with(id, role, retain, self.source_lanes(), text)
@@ -271,12 +279,20 @@ impl<P: ChapterPass + Sync> Expediter<P> {
     ///
     /// `false` when the id was not registered.
     pub fn remove(&mut self, id: &BookId) -> bool {
+        self.forget_target(id);
+        self.pantry.remove(id)
+    }
+
+    /// Drops this id's ring and its claim on a hot slot.
+    ///
+    /// The tables, observations and rows keyed by its checksums go with the
+    /// ring at the next sweep, and its aggregate is still resident when the
+    /// same publication untallies it — so a book leaving the Target set owes
+    /// nothing back and leaves no slot warm.
+    fn forget_target(&mut self, id: &BookId) {
         self.dirty |= self.generations.remove(id).is_some();
-        // The rows go with the ring at the next sweep, so a removed book owes
-        // nothing back and leaves no slot warm.
         self.hot.retain(|seen| seen != id);
         self.cooling.retain(|seen| seen != id);
-        self.pantry.remove(id)
     }
 
     /// The registry, read-only: books are registered through
@@ -760,6 +776,14 @@ impl<P: ChapterPass + Sync> Expediter<P> {
                 .enumerate()
                 .map(|(at, pattern)| (PatternRef::of(pattern), PatternIndex::at(at)))
                 .collect();
+            // A duplicate `(glyph, channel, key)` would collapse two rows to
+            // one here and replay every cached row for the first under the
+            // second's index, silently.
+            debug_assert_eq!(
+                resolver.len(),
+                table.len(),
+                "the judge names each pattern once"
+            );
             let terminals = TerminalHash::of(findings.terminals());
             let identity = TableHash::of(&table);
             let hot_ids: FxHashSet<&BookId> = hot.iter().collect();
@@ -882,15 +906,22 @@ impl<P: ChapterPass + Sync> Expediter<P> {
                 PublicationBook::new(*key, id.as_str(), published_len, findings)
             })
             .collect();
-        let snapshot = snapshot_id::<P>(&self.pantry, &books, &references);
+        let snapshot = snapshot_id(&self.pass, &self.config, &self.pantry, &books, &references);
         encode_to_corpus_buffer(snapshot, CoordinateSpace::Utf16, &sections, &patterns)
             .map_err(PublishError::Wire)
     }
 }
 
 /// xxh3-128 over the canonical (`BookKey`, id, `RawChecksum`) table plus the
-/// pass schema: what the publication is OF, not what it says.
+/// pass schema and its config stamp: what the publication is OF, not what it
+/// says.
+///
+/// The config is in it because a `FindingHandle` is a snapshot plus a row:
+/// two publications differing only by a knob name different rows, so they may
+/// not share an identity.
 fn snapshot_id<P: ChapterPass>(
+    pass: &P,
+    config: &P::Config,
     pantry: &Pantry,
     books: &[(BookId, BookKey)],
     references: &[(BookId, BookKey)],
@@ -913,5 +944,6 @@ fn snapshot_id<P: ChapterPass>(
         }
     }
     hasher.update(&P::SCHEMA.get().to_le_bytes());
+    hasher.update(&pass.config_stamp(config).to_le_bytes());
     SnapshotId::new(hasher.digest128().to_be_bytes())
 }

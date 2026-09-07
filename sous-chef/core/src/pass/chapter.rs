@@ -10,6 +10,8 @@
 //! that is what makes cold and incremental analysis equal. A tuple of passes
 //! is a pass, so a brigade composes without a dispatch table.
 
+use xxhash_rust::xxh3::xxh3_64;
+
 use super::*;
 
 /// Corpus-level counts a judge reads, kept resident by a host and updated one
@@ -320,6 +322,16 @@ pub trait ChapterPass {
         None
     }
 
+    /// This config as one number, for the identity a host gives a publication.
+    ///
+    /// Two publications that differ only by a knob are two snapshots, so a
+    /// host folds this into its snapshot id beside the corpus and the schema.
+    /// Default: zero, which is the whole of a pass with no knobs.
+    fn config_stamp(&self, config: &Self::Config) -> u64 {
+        let _ = config;
+        0
+    }
+
     /// The table positions [`locate`](Self::locate) would scan this book for.
     ///
     /// A host caches sites under a hash of these rows' content, so a book whose
@@ -543,6 +555,13 @@ impl<A: ChapterPass, B: ChapterPass> ChapterPass for (A, B) {
         self.0
             .length_config(&config.0)
             .or_else(|| self.1.length_config(&config.1))
+    }
+
+    fn config_stamp(&self, config: &Self::Config) -> u64 {
+        compose_stamps(&[
+            self.0.config_stamp(&config.0),
+            self.1.config_stamp(&config.1),
+        ])
     }
 }
 
@@ -815,4 +834,22 @@ impl<A: ChapterPass, B: ChapterPass, C: ChapterPass> ChapterPass for (A, B, C) {
             .or_else(|| self.1.length_config(&config.1))
             .or_else(|| self.2.length_config(&config.2))
     }
+
+    fn config_stamp(&self, config: &Self::Config) -> u64 {
+        compose_stamps(&[
+            self.0.config_stamp(&config.0),
+            self.1.config_stamp(&config.1),
+            self.2.config_stamp(&config.2),
+        ])
+    }
+}
+
+/// A tuple's members' stamps as one, in member order: two arrangements of the
+/// same knobs are two stamps, exactly as they are two schemas.
+fn compose_stamps(stamps: &[u64]) -> u64 {
+    let mut bytes = [0u8; 24];
+    for (at, stamp) in stamps.iter().enumerate() {
+        bytes[at * 8..at * 8 + 8].copy_from_slice(&stamp.to_le_bytes());
+    }
+    xxh3_64(&bytes[..stamps.len() * 8])
 }

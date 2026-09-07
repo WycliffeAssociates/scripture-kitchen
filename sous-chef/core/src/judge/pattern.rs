@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! Pattern { glyph: ',', channel: Placement, key: Placement { .. } }
-//! pattern.share_bp()  -> 12      12 parts in 10,000 of the denominator
+//! pattern.share_bp    -> 12      12 parts in 10,000 of the denominator
 //! PatternIndex::at(3) -> the fourth row of this publication's table
 //! ```
 //!
@@ -259,6 +259,20 @@ impl PatternIndex {
     /// that refusal rather than as a truncated index naming the wrong row.
     pub fn at(index: usize) -> Self {
         Self(u16::try_from(index).unwrap_or(u16::MAX))
+    }
+
+    /// Every row of a table a publication can NAME, each with its index.
+    ///
+    /// The tail past `u16::MAX` rows is left out rather than clamped into the
+    /// last addressable index: a firing set that named it would site the wrong
+    /// row, where a table that long is refused whole at encoding
+    /// (`PatternCountOverflow`).
+    pub fn over(table: &[Pattern]) -> impl Iterator<Item = (Self, &Pattern)> {
+        table
+            .iter()
+            .take(usize::from(u16::MAX))
+            .enumerate()
+            .map(|(at, pattern)| (Self(at as u16), pattern))
     }
 
     pub const fn get(self) -> u16 {

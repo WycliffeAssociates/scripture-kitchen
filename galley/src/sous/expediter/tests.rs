@@ -778,10 +778,16 @@ fn resident_bytes_counts_the_rows_a_hot_book_keeps() {
         .sum();
     assert!(sited > 0, "and their own site rows");
     assert!(cold.chapter_sites.is_empty(), "a cold book keeps none");
+    // The set names its books, and that list is pinned like the rings are.
+    let named: usize = hot
+        .hot_books()
+        .iter()
+        .map(|id| size_of::<BookId>() + id.as_str().len())
+        .sum();
     assert_eq!(
         hot.resident_bytes() - cold.resident_bytes(),
-        kept + sited,
-        "the difference is the rows a hot book keeps and nothing else"
+        kept + sited + named,
+        "the difference is the rows a hot book keeps, and the set that names it"
     );
 }
 
@@ -1588,16 +1594,18 @@ fn published_rows_carry_the_pass_findings_in_raw_utf16() {
     assert_eq!((finding.from(), finding.to()), (27, 29));
 }
 
-/// Every resident byte is attributed to a tier, with no residual — and the
-/// tiers hold what their names claim: a book's text is pinned, the chapter
-/// rows a hot book keeps are hot, and every content-addressed derived value
-/// is rebuildable.
+/// The tiers hold what their names claim: a book's text is pinned, the chapter
+/// rows a hot book keeps are hot, and every content-addressed derived value is
+/// rebuildable.
+///
+/// That the total is the truth is not assertable from in here —
+/// `resident_bytes` IS `tally().total()` — so a counting allocator measures it
+/// instead, in `galley/tests/aggregate_accounting.rs`.
 #[test]
 fn the_tally_accounts_for_every_resident_byte() {
     let mut sous = sous();
     four_books(&mut sous);
     let cold = sous.tally();
-    assert_eq!(cold.total(), sous.resident_bytes(), "no residual");
     assert!(
         cold.pinned >= sous.pantry().text_bytes(),
         "the text is pinned"
@@ -1610,11 +1618,94 @@ fn the_tally_accounts_for_every_resident_byte() {
     sous.update("b/mrk.usfm", Role::Target, &edited).unwrap();
     sous.publish().unwrap();
     let warm = sous.tally();
-    assert_eq!(warm.total(), sous.resident_bytes(), "no residual");
     assert!(warm.hot > 0, "the hot book kept its chapter rows");
+    assert!(
+        warm.pinned > cold.pinned,
+        "the second book's text and ring are pinned too"
+    );
 
     // The ceiling is the rebuildable tier's, and only the chunk products are
     // held under it.
     assert_eq!(sous.budget().ceiling(), 1 << 20);
     assert!(sous.pantry().chunk_stats().resident_bytes <= sous.budget().ceiling());
+}
+
+/// A Target re-sent as a Reference stops being cached as a target: its ring,
+/// its rows, its aggregate and its share of the corpus totals all go, and it
+/// gives back the hot slot it was holding.
+#[test]
+fn a_target_re_sent_as_a_reference_frees_its_rows() {
+    let text = mark();
+    let mut flipped = sous();
+    flipped.update("b/mrk.usfm", Role::Target, &text).unwrap();
+    flipped
+        .update("a/gen.usfm", Role::Target, &genesis())
+        .unwrap();
+    flipped.publish().unwrap();
+    assert!(flipped.hot_books().contains(&BookId::from("b/mrk.usfm")));
+
+    flipped
+        .update_with("b/mrk.usfm", Role::Reference, Retain::ProductsOnly, &text)
+        .unwrap();
+    let after = flipped.publish().unwrap();
+
+    // The same corpus, declared that way from the start.
+    let mut fresh = sous();
+    fresh
+        .update_with("b/mrk.usfm", Role::Reference, Retain::ProductsOnly, &text)
+        .unwrap();
+    fresh
+        .update("a/gen.usfm", Role::Target, &genesis())
+        .unwrap();
+    let published = fresh.publish().unwrap();
+
+    assert_eq!(after, published, "the publication is the fresh one's");
+    assert!(
+        !flipped.hot_books().contains(&BookId::from("b/mrk.usfm")),
+        "the hot slot is free"
+    );
+    assert_eq!(flipped.hot_books(), fresh.hot_books());
+    assert_eq!(
+        (
+            flipped.resident_observations(),
+            flipped.resident_tables(),
+            flipped.resident_aggregates()
+        ),
+        (
+            fresh.resident_observations(),
+            fresh.resident_tables(),
+            fresh.resident_aggregates()
+        ),
+        "no row of the former target survives"
+    );
+    assert_eq!(flipped.resident_bytes(), fresh.resident_bytes());
+}
+
+/// A `FindingHandle` is a snapshot id plus a row, so two publications that
+/// differ only by a knob may not share one.
+#[test]
+fn two_configs_publish_two_snapshot_ids() {
+    let snapshot_of = |config: JudgingConfig| {
+        let mut sous = sous();
+        sous.set_config(((), config, config));
+        sous.update("b/mrk.usfm", Role::Target, &mark()).unwrap();
+        let buffer = sous.publish().unwrap();
+        CorpusSnapshot::open(&buffer).unwrap().snapshot_id()
+    };
+    let mut moved = JudgingConfig::default();
+    moved.channels.casing = false;
+    assert_ne!(snapshot_of(JudgingConfig::default()), snapshot_of(moved));
+
+    // And the same knobs are the same publication, however they were reached.
+    let mut sous = sous();
+    sous.update("b/mrk.usfm", Role::Target, &mark()).unwrap();
+    sous.publish().unwrap();
+    sous.set_config(((), moved, moved));
+    sous.publish().unwrap();
+    sous.set_config(((), JudgingConfig::default(), JudgingConfig::default()));
+    let back = sous.publish().unwrap();
+    assert_eq!(
+        CorpusSnapshot::open(&back).unwrap().snapshot_id(),
+        snapshot_of(JudgingConfig::default()),
+    );
 }

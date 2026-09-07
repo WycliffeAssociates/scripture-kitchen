@@ -10,8 +10,10 @@ and the two arguments behind them.
 `mod.rs` holds `Form`, the rows, the aggregate, and the `Words` pass.
 `walk.rs` is the per-chapter scan; `fold.rs` merges chapter rows into a book;
 `totals.rs` merges books into the corpus tally judging reads, and keeps it
-current one book at a time; `tests.rs` covers all four through the public
-surface. The four channels this walk feeds live beside the other judges in
+current one book at a time; `verdicts.rs` keeps the last judge's rows so a
+publication re-decides only the keys that moved; `sites.rs` is what a book
+fires and where those rows sit in its text; `tests/` covers them all through
+the public surface. The four channels this walk feeds live beside the other judges in
 [`judge.md`](judge.md), and so does the terminal table three of them read.
 
 One walk fills **three lanes**: the casing lane keyed by `(hash, Before)`, the

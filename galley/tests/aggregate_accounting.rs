@@ -1,5 +1,5 @@
-//! What `Expediter::resident_bytes()` claims against what a counting
-//! allocator says is actually live, for the Expediter alone.
+//! What `Expediter::tally()` claims against what a counting allocator says is
+//! actually live, for the Expediter alone.
 //!
 //! Before W1d, an aggregate counted `size_of::<P::Aggregate>()` and nothing
 //! of the heap a pass hangs off it — 32 B for a `WordAggregate` holding
@@ -12,8 +12,8 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use sous_core::Brigade;
-use usfm_galley::Role;
 use usfm_galley::sous::Expediter;
+use usfm_galley::{Role, Tally};
 
 // ------------------------------------------------------------- the allocator
 
@@ -91,28 +91,49 @@ fn en_ulb() -> Vec<(String, String)> {
     books
 }
 
-/// `Expediter::resident_bytes()` is a claim about the Expediter's own state,
-/// so the corpus loader's raw `String`s are freed inside the measured window
-/// once `update` has made the Pantry's own copy — allocated and freed here,
-/// they net to zero and cannot inflate the delta either way.
+/// `Expediter::tally()` is a claim about the Expediter's own state, so the
+/// corpus loader's raw `String`s are freed inside the measured window once
+/// `update` has made the Pantry's own copy — allocated and freed here, they
+/// net to zero and cannot inflate the delta either way.
+///
+/// The allocator is the only independent side there is: `resident_bytes()` is
+/// defined as `tally().total()`, so comparing the two would assert nothing.
+///
+/// A tenth, because the two measure different things at the edges and neither
+/// error is a bug: the tally weighs a hash map by its live rows where the
+/// allocator sees the whole table including its spare capacity, and it counts
+/// a `Vec` the pass owns by capacity where a `Box<[_]>` has none. Anything
+/// larger is a store that is not weighed at all — the failure this catches.
 #[test]
-fn resident_bytes_is_within_a_tenth_of_the_allocators_delta() {
+fn the_tally_is_within_a_tenth_of_the_allocators_delta() {
     let before = LIVE.load(Ordering::Relaxed);
     let mut sous = Expediter::new(Brigade::default(), 64 << 20);
-    {
+    let edited = {
         let books = en_ulb();
         for (id, text) in &books {
             sous.update(id.as_str(), Role::Target, text).unwrap();
         }
-    }
+        (books[0].0.clone(), books[0].1.replace("beginning", "start"))
+    };
     sous.publish().unwrap();
-    let delta = LIVE.load(Ordering::Relaxed) - before;
+    within_a_tenth(&sous.tally(), LIVE.load(Ordering::Relaxed) - before);
 
-    let claimed = sous.resident_bytes();
+    // Again with a book hot, so the tier that only a keystroke fills is
+    // measured too.
+    sous.update(edited.0.as_str(), Role::Target, &edited.1)
+        .unwrap();
+    sous.publish().unwrap();
+    let tally = sous.tally();
+    assert!(tally.hot > 0, "the edited book kept its chapter rows");
+    within_a_tenth(&tally, LIVE.load(Ordering::Relaxed) - before);
+}
+
+fn within_a_tenth(tally: &Tally, delta: usize) {
+    let claimed = tally.total();
     let off_by = claimed.abs_diff(delta);
     assert!(
         off_by * 10 <= delta,
-        "claimed {claimed} B against the allocator's {delta} B live, off by {}%",
+        "claimed {claimed} B ({tally:?}) against the allocator's {delta} B live, off by {}%",
         off_by * 100 / delta
     );
 }

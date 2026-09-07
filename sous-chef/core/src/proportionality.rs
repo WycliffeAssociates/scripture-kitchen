@@ -103,6 +103,20 @@ impl PartialEq for LengthConfig {
 
 impl Eq for LengthConfig {}
 
+/// Bitwise on the two thresholds as well, so two configs that compare equal
+/// stamp alike.
+impl core::hash::Hash for LengthConfig {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        state.write_u32(self.z_long.to_bits());
+        state.write_u32(self.z_short.to_bits());
+        state.write_u32(self.min_verses);
+        state.write_u8(u8::from(self.enabled));
+        state.write_u8(u8::from(self.presence));
+        state.write_u8(u8::from(self.source_copy));
+        state.write_u32(self.source_copy_min_run);
+    }
+}
+
 /// One source verse: its key and its projected grapheme length, and nothing
 /// else — a reference publishes no coordinate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -180,9 +194,10 @@ pub struct Paired {
     pub presence: Vec<Vec<PresenceRow>>,
     /// The source-copy rows pushed, per target book in slice order.
     pub copies: Vec<Vec<SourceCopyRow>>,
-    /// Target books whose paired source retained no word lane while
-    /// [`LengthConfig::source_copy`] was on: their silence is a missing lane,
-    /// not a clean result, so it is reported rather than published.
+    /// Declared sources that retained no word lane while
+    /// [`LengthConfig::source_copy`] was on, each named once: their silence is
+    /// a missing lane, not a clean result, so it is reported rather than
+    /// published.
     pub wordless: Vec<BookKey>,
 }
 
@@ -474,7 +489,9 @@ pub fn judge_lengths(
         .iter()
         .map(|book| {
             let rows = sources.get(&book.book)?;
-            if config.source_copy && rows.words.is_none() {
+            // The SOURCE is what kept no lane, so it is named once however
+            // many targets pair against it.
+            if config.source_copy && rows.words.is_none() && !wordless.contains(&book.book) {
                 wordless.push(book.book);
             }
             let copy = rows

@@ -47,6 +47,9 @@ impl<K: Eq + Hash, V> Store<K, V> {
         self.entries.insert(key, value)
     }
 
+    /// The parallel map's door: it lifts a shed observation out to re-walk it
+    /// off its own pool and puts it back.
+    #[allow(dead_code, reason = "the one caller is behind --features parallel")]
     pub fn remove(&mut self, key: &K) -> Option<V> {
         self.entries.remove(key)
     }
@@ -60,6 +63,7 @@ impl<K: Eq + Hash, V> Store<K, V> {
         self.entries.len()
     }
 
+    #[allow(dead_code, reason = "read by the residency tests")]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
