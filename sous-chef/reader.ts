@@ -93,7 +93,7 @@ export interface HygieneFinding {
 }
 
 /** Wire byte 8 of a pattern row is the index into this table. */
-export const CHANNELS = ["ExactNeighbor", "PooledNeighbor", "RunShape", "Placement", "Rarity", "Casing", "WordLength", "Doubled"] as const;
+export const CHANNELS = ["ExactNeighbor", "PooledNeighbor", "RunShape", "Placement", "Rarity", "Casing", "WordLength", "Doubled", "LetterRun"] as const;
 export type Channel = (typeof CHANNELS)[number];
 
 /** The outer class either side of a glyph. */
@@ -105,13 +105,17 @@ export const POOLS = ["Quote", "Bracket", "Dash", "Terminal", "Separator", "Digi
 export type Pool = (typeof POOLS)[number];
 
 /** Convention lane 14..16 is a bitmask over this table, low bit first. */
-export const CONVENTION_REASONS = ["PlacementBefore", "PlacementAfter", "RunShape", "ExactNeighbor", "Rarity", "PooledNeighbor", "Casing", "WordLength", "DoubledBare", "DoubledSeparated"] as const;
+export const CONVENTION_REASONS = ["PlacementBefore", "PlacementAfter", "RunShape", "ExactNeighbor", "Rarity", "PooledNeighbor", "Casing", "WordLength", "DoubledBare", "DoubledSeparated", "LetterRun"] as const;
 export type ConventionReason = (typeof CONVENTION_REASONS)[number];
 
 /** How a word occurrence is cased; a `Casing` key byte indexes this.
  * `Uncased` is counted nowhere and refused on the wire. */
 export const CASING_FORMS = ["Lower", "Title", "Upper", "Mixed", "Uncased"] as const;
 export type CasingForm = (typeof CASING_FORMS)[number];
+
+/** The run lengths a `LetterRun` key byte may name; the last one saturates. */
+export const LETTER_RUN_MIN = 2;
+export const LETTER_RUN_MAX = 8;
 
 export type PatternKey =
   | { readonly kind: "ExactNeighbor"; readonly neighbor: number }
@@ -121,7 +125,8 @@ export type PatternKey =
   | { readonly kind: "Rarity" }
   | { readonly kind: "Casing"; readonly hash: bigint; readonly form: CasingForm }
   | { readonly kind: "WordLength"; readonly hash: bigint; readonly sigma: number }
-  | { readonly kind: "Doubled"; readonly hash: bigint; readonly separated: boolean };
+  | { readonly kind: "Doubled"; readonly hash: bigint; readonly separated: boolean }
+  | { readonly kind: "LetterRun"; readonly length: number };
 
 /** One corpus-level pattern: a glyph, the channel that convicted it, and the
  * fraction behind the claim. */
@@ -297,6 +302,12 @@ function readPattern(view: DataView, at: number, row: number, bookCount: number)
         return fail(`pattern row ${row} has an invalid key`);
       }
       key = { kind: "Placement", side: high === 1 ? "next" : "prev", class: outer };
+    } else if (channel === "LetterRun") {
+      // A real scalar in the glyph field, and the key byte is the run length.
+      if (raw < LETTER_RUN_MIN || raw > LETTER_RUN_MAX) {
+        return fail(`pattern row ${row} has an invalid key`);
+      }
+      key = { kind: "LetterRun", length: raw };
     } else {
       if (raw !== 0) {
         return fail(`pattern row ${row} has an invalid key`);

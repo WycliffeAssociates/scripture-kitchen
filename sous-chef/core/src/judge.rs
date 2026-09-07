@@ -23,7 +23,9 @@ use crate::pass::Findings;
 use crate::proportionality::LengthConfig;
 use crate::substrate::{BookAggregate, Case, FollowCounts, OuterClass, RUN_BUCKETS, ScalarKey};
 use crate::unicode::{Pool, class_of, pool_of};
-use crate::words::{Form, WordAggregate, WordTotals};
+use crate::words::{
+    Form, LETTER_RUN_MAX, LETTER_RUN_MIN, WordAggregate, WordTotals, letter_run_lane,
+};
 
 // ── The config ──────────────────────────────────────────────────────────
 
@@ -175,6 +177,10 @@ pub struct Channels {
     /// language that doubles productively recuses itself corpus-wide rather
     /// than through the band ([`DoublesPolicy`]).
     pub doubled: bool,
+    /// A letter repeated longer than this corpus ever repeats it. On: a
+    /// handful of rows per corpus, and the denominator is the letter's own
+    /// repeat history, so no script needs a rule of its own.
+    pub letter_runs: bool,
 }
 
 impl Default for Channels {
@@ -188,6 +194,7 @@ impl Default for Channels {
             casing: true,
             word_length: false,
             doubled: true,
+            letter_runs: true,
         }
     }
 }
@@ -284,10 +291,14 @@ pub enum Channel {
     /// One case-folded word written twice in a row, adjacent or separated by
     /// a nonletter run. It judges no scalar either.
     Doubled = 7,
+    /// One letter repeated more times in a row than this corpus repeats it.
+    /// The word walk feeds it, but the key IS a scalar: the glyph field holds
+    /// the folded letter and the key byte the run length.
+    LetterRun = 8,
 }
 
 impl Channel {
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::ExactNeighbor,
         Self::PooledNeighbor,
         Self::RunShape,
@@ -296,12 +307,21 @@ impl Channel {
         Self::Casing,
         Self::WordLength,
         Self::Doubled,
+        Self::LetterRun,
     ];
 
     /// Whether the channel's `glyph` field carries a word hash instead of a
-    /// scalar. The three word channels do; every substrate channel does not.
+    /// scalar. The three hash-keyed word channels do; every other does not,
+    /// `LetterRun` included.
     pub const fn is_word(self) -> bool {
         matches!(self, Self::Casing | Self::WordLength | Self::Doubled)
+    }
+
+    /// Whether [`crate::Words`] owns the channel — judging it, claiming it in
+    /// `firing`, and siting it. `LetterRun` keys a real scalar and still comes
+    /// out of the word walk, so this is wider than [`Self::is_word`].
+    pub const fn judged_by_words(self) -> bool {
+        self.is_word() || matches!(self, Self::LetterRun)
     }
 
     pub const fn name(self) -> &'static str {
@@ -314,6 +334,7 @@ impl Channel {
             Self::Casing => "Casing",
             Self::WordLength => "WordLength",
             Self::Doubled => "Doubled",
+            Self::LetterRun => "LetterRun",
         }
     }
 }
@@ -371,6 +392,11 @@ pub enum PatternKey {
     Doubled {
         hash: u64,
         separated: bool,
+    },
+    /// How long the run of one letter was, `LETTER_RUN_MIN..=LETTER_RUN_MAX`,
+    /// the last saturating. The letter is the row's own glyph.
+    LetterRun {
+        length: u8,
     },
 }
 
@@ -437,12 +463,18 @@ impl Pattern {
             PatternKey::RunShape { .. } => Channel::RunShape,
             PatternKey::Placement { .. } => Channel::Placement,
             PatternKey::Rarity => Channel::Rarity,
+            PatternKey::LetterRun { .. } => Channel::LetterRun,
         };
         if keyed != self.channel {
             return Err("channel");
         }
         if let PatternKey::Casing { form, .. } = self.key
             && form == Form::Uncased
+        {
+            return Err("key");
+        }
+        if let PatternKey::LetterRun { length } = self.key
+            && !(LETTER_RUN_MIN..=LETTER_RUN_MAX).contains(&length)
         {
             return Err("key");
         }
@@ -796,7 +828,10 @@ fn numerator_in(book: &BookAggregate, pattern: &Pattern) -> u64 {
             .map_or(0, |(_, count)| u64::from(*count)),
         // A word row is judged over word aggregates, which these are not;
         // `words::free_in` is its oracle.
-        PatternKey::Casing { .. } | PatternKey::WordLength { .. } | PatternKey::Doubled { .. } => 0,
+        PatternKey::Casing { .. }
+        | PatternKey::WordLength { .. }
+        | PatternKey::Doubled { .. }
+        | PatternKey::LetterRun { .. } => 0,
     }
 }
 
@@ -1038,6 +1073,64 @@ pub(crate) fn judge_words(
     if config.channels.doubled && judges_doubles(totals, table, config) {
         doubled(corpus, totals, table, config, out);
     }
+    if config.channels.letter_runs {
+        letter_runs(corpus, totals, config, out);
+    }
+}
+
+/// One row per run length a letter reaches under its own repeat history's
+/// band, longest-established-first ruled out by the support gate below.
+///
+/// The denominator is every run of THAT letter of two or more — the letter's
+/// own habit — so `theee` is judged against thousands of `ee` and a script
+/// that never doubles a letter judges nothing. Two guards, and they are
+/// different claims:
+///
+/// * the band, which is the ordinary staircase over that denominator, and
+/// * a support gate: every shorter length must itself stand on at least
+///   `word_support_floor` runs, so `eee` speaks only where `ee` is
+///   established and a language with no `ee` and one `eee` says nothing.
+///
+/// Length 2 never fires. It is the whole denominator's floor, and a letter
+/// doubled at all is not evidence of anything.
+fn letter_runs(
+    corpus: &[&WordAggregate],
+    totals: &WordTotals,
+    config: &JudgingConfig,
+    out: &mut Findings,
+) {
+    for row in totals.letter_runs() {
+        let runs = row.runs();
+        let Some((band, ceiling)) = entitled_words(runs, config) else {
+            continue;
+        };
+        for lane in letter_run_lane(LETTER_RUN_MIN) + 1..row.lengths.len() {
+            let count = u64::from(row.lengths[lane]);
+            let share = share_bp(count, runs);
+            if count == 0 || share >= ceiling {
+                continue;
+            }
+            if row.lengths[..lane]
+                .iter()
+                .any(|&shorter| u64::from(shorter) < u64::from(config.word_support_floor))
+            {
+                continue;
+            }
+            let key = PatternKey::LetterRun {
+                length: LETTER_RUN_MIN + lane as u8,
+            };
+            out.push_pattern(Pattern {
+                glyph: row.letter,
+                channel: Channel::LetterRun,
+                key,
+                band: Some(band),
+                numerator: saturate(count),
+                denominator: saturate(runs),
+                share_bp: share,
+                books: word_books(corpus, row.letter, &key, &TerminalTable::default()),
+            });
+        }
+    }
 }
 
 /// Whether doubling is a slip in this corpus or a feature of the language.
@@ -1117,7 +1210,7 @@ fn doubled(
                 numerator: saturate(count),
                 denominator: saturate(total),
                 share_bp: share,
-                books: word_books(corpus, &key, table),
+                books: word_books(corpus, ScalarKey::NONE, &key, table),
             });
         }
     }
@@ -1164,7 +1257,7 @@ fn casing(
                 numerator: saturate(count),
                 denominator: saturate(total),
                 share_bp: share,
-                books: word_books(corpus, &key, table),
+                books: word_books(corpus, ScalarKey::NONE, &key, table),
             });
         }
     }
@@ -1212,7 +1305,7 @@ fn word_length(
             numerator: saturate(count),
             denominator: occurrences,
             share_bp: share_bp(count, u64::from(occurrences)),
-            books: word_books(corpus, &key, &TerminalTable::default()),
+            books: word_books(corpus, ScalarKey::NONE, &key, &TerminalTable::default()),
         });
     }
 }
@@ -1287,16 +1380,28 @@ impl LengthShape {
 /// Recomputed from the aggregates rather than carried through the tally: a
 /// word row's numerator sums the `Before`s the table left free, and which
 /// those are is a judging decision the config may move.
-fn word_books(corpus: &[&WordAggregate], key: &PatternKey, table: &TerminalTable) -> u8 {
+fn word_books(
+    corpus: &[&WordAggregate],
+    glyph: ScalarKey,
+    key: &PatternKey,
+    table: &TerminalTable,
+) -> u8 {
     let touched = corpus
         .iter()
-        .filter(|book| free_of(book, key, table) > 0)
+        .filter(|book| free_of(book, glyph, key, table) > 0)
         .count();
     u8::try_from(touched).unwrap_or(u8::MAX)
 }
 
-/// One book's contribution to a word row's numerator.
-pub(crate) fn free_of(book: &WordAggregate, key: &PatternKey, table: &TerminalTable) -> u64 {
+/// One book's contribution to a word row's numerator. `glyph` is the row's
+/// own, which only [`Channel::LetterRun`] reads: its key carries the length
+/// and the letter stays where a glyph belongs.
+pub(crate) fn free_of(
+    book: &WordAggregate,
+    glyph: ScalarKey,
+    key: &PatternKey,
+    table: &TerminalTable,
+) -> u64 {
     match *key {
         PatternKey::Casing { hash, form } => book
             .rows_for(hash)
@@ -1314,6 +1419,9 @@ pub(crate) fn free_of(book: &WordAggregate, key: &PatternKey, table: &TerminalTa
                 row.count_of(false)
             }
         }),
+        PatternKey::LetterRun { length } => book
+            .letter_runs_for(glyph)
+            .map_or(0, |lanes| u64::from(lanes[letter_run_lane(length)])),
         _ => 0,
     }
 }

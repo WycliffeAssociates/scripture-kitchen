@@ -7,15 +7,16 @@ and the two arguments behind them.
 
 ## Layout
 
-`mod.rs` holds `Form`, the two rows, the aggregate, and the `Words` pass.
+`mod.rs` holds `Form`, the rows, the aggregate, and the `Words` pass.
 `walk.rs` is the per-chapter scan; `fold.rs` merges chapter rows into a book;
 `totals.rs` merges books into the corpus tally judging reads, and keeps it
 current one book at a time; `tests.rs` covers all four through the public
-surface. The three word channels themselves live beside the other judges in
-[`judge.md`](judge.md), and so does the terminal table they read.
+surface. The four channels this walk feeds live beside the other judges in
+[`judge.md`](judge.md), and so does the terminal table three of them read.
 
-One walk fills **two lanes**: the casing lane keyed by `(hash, Before)`, and
-the doubles lane keyed by hash alone. They are described in that order below.
+One walk fills **three lanes**: the casing lane keyed by `(hash, Before)`, the
+doubles lane keyed by hash alone, and the letter-run lane keyed by the folded
+letter. They are described in that order below.
 
 ## What a word is
 
@@ -211,9 +212,43 @@ ends a pair and there is no carry — the same ruling `substrate.md` makes for a
 run. A **verse** seam does not: the scan keeps its state across one, which is
 charter invariant 1 (a verse start is an address, not a sentence boundary).
 
+## The letter-run lane
+
+The third lane, and the only one whose key is a scalar rather than a word: one
+row per **letter this chapter ever repeated inside a word**, sorted by that
+letter, with seven counters for run lengths `2..=8+`.
+
+```text
+"Shout joyfullly to God"    'l' [0, 1, 0, 0, 0, 0, 0]   one run of three
+"the tree stood"            'e' [1, 0, …]  'o' [1, 0, …]
+```
+
+`(ScalarKey, [u16; 7])` is **20 B**, and there is one row per letter, not per
+word: a corpus has at most a few dozen letters it ever doubles, so the lane is
+bounded by the script's alphabet and never by the vocabulary. Measured over the
+tier (evidence.md, W4) a whole Bible's merged lane is **7-33 KB**, against
+1.4-5.3 MB for the other two.
+
+Three rules, each one the walk already applies elsewhere:
+
+- **Glue rides its base** (charter invariant 8), so a combining mark neither
+  breaks a run nor lengthens it: `e\u{301}e` is a run of two.
+- **The fold is the hash's own**, the first scalar of `char::to_lowercase`, so
+  `Ee` is a run of two and the key is the lowercase letter.
+- **Anything else breaks the run** — a digit, and the one nonletter a word
+  rides through — because each of those is a real boundary inside the word.
+
+**Uncased scripts count here.** A word with no cased letter is refused by the
+casing lane and counted whole by this one, so a Hebrew or Devanagari repeat is
+a repeat like any other and no script needs a rule of its own. A script that
+never repeats a letter produces an empty lane and pays nothing.
+
+Lengths saturate into the last lane, so a run of eighty `a`s and a run of eight
+are one key. Nothing in the corpus tier reaches it.
+
 ## The fold
 
-`WordAggregate` is the book's rows merged by hash with `u32` counts — both
+`WordAggregate` is the book's rows merged by hash with `u32` counts — all three
 lanes, each in its own key order — plus `cased: bool`, whether the book holds a
 cased letter at all. **A word never
 crosses a masked `\c`**: the chapter seam is an edge of text for a word exactly
@@ -236,8 +271,9 @@ remove([old MRK])   hash(david) None [2, 38, 0, 0]  holders 1
 add([new MRK])      hash(david) None [2, 39, 0, 0]  holders 2
 ```
 
-The doubles lane rides the same tally and the same two updates, keyed by hash
-alone, and answers one more question there: `WordTotals::doubling_share_bp` is
+The doubles and letter-run lanes ride the same tally and the same two updates,
+keyed by hash and by letter, and the doubles lane answers one more question
+there: `WordTotals::doubling_share_bp` is
 the **recusal statistic** — distinct words doubled twice or more, over the
 union of the two lanes' vocabularies, in basis points. It is a share and never
 a count, so Jonah and a whole Bible answer the same way.
@@ -274,7 +310,7 @@ The seam is `galley/src/sous/expediter.md`.
 ([`judge.md`](judge.md)); `Words::judge_resident` calls the same channels over
 a tally a host already holds, which is the only difference between the two. A
 corpus whose aggregates are all `cased == false` emits no casing and no length
-row; the doubled channel judges it anyway.
+row; the doubled and letter-run channels judge it anyway.
 
 All three read the terminal table out of the sink, where `Substrate::judge` put
 it — `Doubled` does not use it, but it abstains with the others rather than make
@@ -288,7 +324,8 @@ second time inside the word pass would be the same numbers computed twice.
 `Words::firing` names the table positions whose word this book's own counts
 hold, so a book without the word reads no text. It walks each lane with its own
 cursor, because the doubled rows come after the casing rows and restart at the
-lowest hash. On the casing lane it is deliberately **position-blind**: it asks
+lowest hash; a letter-run row is a probe into its own lane, which is dozens of
+rows long and not thousands. On the casing lane it is deliberately **position-blind**: it asks
 whether the book holds the `(hash, form)` at all, not whether it holds it free.
 A superset costs a rescan that finds nothing; reading the terminal table there
 would put a judging decision inside a site cache key. On the doubles lane there
@@ -297,11 +334,18 @@ exactly when it doubled that word that way.
 
 `Words::locate` rewalks the book with the same scan, reads the same table, and
 sites what the counts named — a casing row's free occurrences, a length row's
-every occurrence, a doubled row's every pair — one `Convention` row per span,
-carrying `Reasons::CASING`, `Reasons::WORD_LENGTH`, or both when one word fires
-both. A doubled pair is its own span and its own row, because the span covers
-**both words and the separator** and so is not the word's span at all; it
-carries `Reasons::DOUBLED_BARE` or `Reasons::DOUBLED_SEPARATED`.
+every occurrence, a doubled row's every pair, a letter-run row's every run —
+one `Convention` row per span, carrying `Reasons::CASING`,
+`Reasons::WORD_LENGTH`, or both when one word fires both. A doubled pair is its
+own span and its own row, because the span covers **both words and the
+separator** and so is not the word's span at all; it carries
+`Reasons::DOUBLED_BARE` or `Reasons::DOUBLED_SEPARATED`.
+
+A letter-run row's span **is** the word's, since the run sits inside it, so a
+word this channel and the casing channel both name is ONE row carrying both
+bits and the finer channel's index — the same merge casing and length already
+make. The count is runs and not words, so the rare word holding two firing runs
+emits a row per run, and the first of them is the one the merge absorbs.
 
 The rescan is the same walk over the same table, so it must agree with the
 counts exactly: `tests/casing_agree_with_counts.rs` is that equality over a

@@ -113,6 +113,10 @@ export type ConventionReason = (typeof CONVENTION_REASONS)[number];
 export const CASING_FORMS = [@@CASING_FORMS@@] as const;
 export type CasingForm = (typeof CASING_FORMS)[number];
 
+/** The run lengths a `LetterRun` key byte may name; the last one saturates. */
+export const LETTER_RUN_MIN = @@LETTER_RUN_MIN@@;
+export const LETTER_RUN_MAX = @@LETTER_RUN_MAX@@;
+
 export type PatternKey =
   | { readonly kind: "ExactNeighbor"; readonly neighbor: number }
   | { readonly kind: "PooledNeighbor"; readonly pool: Pool }
@@ -121,7 +125,8 @@ export type PatternKey =
   | { readonly kind: "Rarity" }
   | { readonly kind: "Casing"; readonly hash: bigint; readonly form: CasingForm }
   | { readonly kind: "WordLength"; readonly hash: bigint; readonly sigma: number }
-  | { readonly kind: "Doubled"; readonly hash: bigint; readonly separated: boolean };
+  | { readonly kind: "Doubled"; readonly hash: bigint; readonly separated: boolean }
+  | { readonly kind: "LetterRun"; readonly length: number };
 
 /** One corpus-level pattern: a glyph, the channel that convicted it, and the
  * fraction behind the claim. */
@@ -297,6 +302,12 @@ function readPattern(view: DataView, at: number, row: number, bookCount: number)
         return fail(`pattern row ${row} has an invalid key`);
       }
       key = { kind: "Placement", side: high === 1 ? "next" : "prev", class: outer };
+    } else if (channel === "LetterRun") {
+      // A real scalar in the glyph field, and the key byte is the run length.
+      if (raw < LETTER_RUN_MIN || raw > LETTER_RUN_MAX) {
+        return fail(`pattern row ${row} has an invalid key`);
+      }
+      key = { kind: "LetterRun", length: raw };
     } else {
       if (raw !== 0) {
         return fail(`pattern row ${row} has an invalid key`);

@@ -41,12 +41,13 @@
 //! in this workspace): it repeats `cp` beside the scalar itself.
 //!
 //! The **Capitalization** tab reads one more key, `cap[]`, one entry per
-//! [`PatternKey::Casing`] or [`PatternKey::Doubled`] row: `kind` says which,
-//! `w` is the word (or the pair) its first site landed on, `form` the flagged
-//! minority form or `bare`/`separated`, `n`/`d` the fraction, `books` the
-//! dispersion, and `samples` up to 8 of that row's sites in the tuple shape
-//! the glyph cards use. Amber is the row's own existence — the Rust judge
-//! fired it — never a JS recomputation.
+//! [`PatternKey::Casing`], [`PatternKey::Doubled`] or [`PatternKey::LetterRun`]
+//! row: `kind` says which, `w` is the word (or the pair) its first site landed
+//! on, `form` the flagged minority form, `bare`/`separated`, or the letter and
+//! its run length, `n`/`d` the fraction, `books` the dispersion, and `samples`
+//! up to 8 of that row's sites in the tuple shape the glyph cards use. Amber
+//! is the row's own existence — the Rust judge fired it — never a JS
+//! recomputation.
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -299,7 +300,7 @@ fn shares(bands: &Staircase) -> String {
 /// The word itself is not on the wire — a pattern carries a hash — so it comes
 /// from the text its sites point at, which is that word by construction. A
 /// doubled row's span covers both words and the separator, so its `w` reads
-/// back as the pair.
+/// back as the pair; a letter-run row's span is the word the run sits inside.
 fn cap_json(
     corpus: &Corpus<'_, OnionBook>,
     patterns: &[Pattern],
@@ -320,10 +321,23 @@ fn cap_json(
 
     let mut rows = Vec::new();
     for (index, pattern) in patterns.iter().enumerate() {
+        let length;
         let (kind, form) = match pattern.key {
             PatternKey::Casing { form, .. } => ("casing", form.name()),
             PatternKey::Doubled { separated, .. } => {
                 ("doubled", if separated { "separated" } else { "bare" })
+            }
+            // The letter is the row's own glyph, so the page names it without
+            // reading the word back out of the text.
+            PatternKey::LetterRun { length: run } => {
+                length = format!(
+                    "{}\u{00d7}{run}",
+                    pattern
+                        .glyph
+                        .scalar()
+                        .unwrap_or(char::REPLACEMENT_CHARACTER)
+                );
+                ("letterrun", length.as_str())
             }
             _ => continue,
         };

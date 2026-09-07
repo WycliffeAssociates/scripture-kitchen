@@ -309,6 +309,7 @@ fn describe(pattern: &Pattern) -> String {
             "doubled #{hash:016x} {}",
             if separated { "separated" } else { "bare" }
         ),
+        PatternKey::LetterRun { length } => format!("letter-run {length}"),
     };
     format!(
         "{} {evidence} {}/{} {:.2}%",

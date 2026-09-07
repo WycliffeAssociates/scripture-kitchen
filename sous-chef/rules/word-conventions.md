@@ -6,7 +6,7 @@ classified from the learned terminal table rather than from a hard-coded
 punctuation list. Convention-learned lane.
 
 Status: **casing landed and calibrated (W1, W3); doubled words landed and
-calibrated (W2).**
+calibrated (W2); sticky keys landed as letter run length (W4).**
 Stage 4 in [../roadmap.md](../roadmap.md); the walk, the row, and what stands
 before a word are [../core/src/words.md](../core/src/words.md), the channels
 and the terminal table are [../core/src/judge.md](../core/src/judge.md).
@@ -52,6 +52,21 @@ and the terminal table are [../core/src/judge.md](../core/src/judge.md).
   doubling means something in this language and the channel abstains for the
   whole corpus. A share and never a count, so Jonah and a whole Bible answer the
   same way. `doubles: Auto | Always | Never` is the override.
+- **Sticky keys: landed as letter run length.** A letter repeated more times in
+  a row than that letter is ever repeated with support in this corpus —
+  `theee` against thousands of `ee`. **Landed as `Channel::LetterRun`, on by
+  default.** It is the same shape as the doubled rule one level down: the
+  denominator is that LETTER's own habit of repeating (every run of it of two
+  or more), so a language that doubles its vowels everywhere is judged on its
+  triples, and a script that never repeats a letter is judged on nothing.
+  Length 2 never fires, and a length fires only where every shorter length is
+  itself established on `word_support_floor` runs — so one `eee` in a corpus
+  with no `ee` says nothing, and neither does `xxxx` where no `xxx` was ever
+  written. The site is the word the run sits inside.
+- **A sticky key is a review row, not a verdict.** Emphatic spelling
+  (`aaaah`), a transliteration convention, and a stuck keyboard all reach the
+  same lane, and the counts cannot tell them apart. What the row claims is that
+  this text does not otherwise write that letter that way; a person decides.
 
 ## Calibrated on the fleet
 
@@ -67,6 +82,14 @@ which is the glyph channels' own volume, so:
   identical at that ladder, because its two lowest rungs cannot fire at all;
 - `channels.casing` = **true**, since that volume holds. That was the
   condition, and it is met.
+
+Letter runs needed no fleet sweep. The rule was that the tier decides the
+default unless it shows more than about five rows a corpus, and it shows
+**9 rows across the 8 committed corpora — mean 1.1, max 4, three of them
+silent** (`core/examples/word_volume.rs`, evidence.md W4), so
+`channels.letter_runs` = **true**. Every row the tier fires is a real typo:
+`joyfullly` (en_ulb, PSA 81:1), `d'Asssyrie` (francl), `mmmoja`, `wazeee`,
+`Aliiita` (swhulb), `yaaake`, `chazooona` (nya).
 
 Doubled words are calibrated on the same fleet
 (`core/examples/word_volume.rs`, evidence.md W2):

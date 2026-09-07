@@ -35,7 +35,7 @@ function fixture() {
 // One book under "books/mrk.usfm": the header, one directory row, a 16-byte
 // id table, then the pattern table, then the records.
 const FIRST_RECORD = HEADER_BYTES + DIRECTORY_ENTRY_BYTES + 16;
-const FIRST_MIXED_RECORD = FIRST_RECORD + 8 * PATTERN_ROW_LEN;
+const FIRST_MIXED_RECORD = FIRST_RECORD + 9 * PATTERN_ROW_LEN;
 
 function expectOpenFailure(bytes) {
   assert.throws(() => FindingsSnapshot.open(bytes), FindingsSnapshotError);
@@ -133,7 +133,7 @@ test("decodes the galley-published UTF-16 golden with rebased spans", () => {
 test("decodes mixed proportionality and hygiene rows, saturation included", () => {
   const snapshot = FindingsSnapshot.open(hexFixture("corpus_v1_hygiene.hex"));
   const mark = snapshot.book("MRK");
-  assert.equal(mark.count, 4);
+  assert.equal(mark.count, 5);
   assert.deepEqual(mark.at(0), {
     kind: "Hygiene",
     from: 3,
@@ -163,6 +163,14 @@ test("decodes mixed proportionality and hygiene rows, saturation included", () =
     bookIdx: 0,
     convention: { pattern: 7, reasons: ["DoubledSeparated"] },
   });
+  // Bit 10, the letter-run row: the span is the word the run sits inside.
+  assert.deepEqual(mark.at(4), {
+    kind: "Convention",
+    from: 0xc0,
+    to: 0xc5,
+    bookIdx: 0,
+    convention: { pattern: 8, reasons: ["LetterRun"] },
+  });
 
   const badClass = hexFixture("corpus_v1_hygiene.hex");
   badClass[FIRST_MIXED_RECORD + 12] = 11;
@@ -177,7 +185,7 @@ test("decodes mixed proportionality and hygiene rows, saturation included", () =
 
 test("decodes the pattern table the judge published", () => {
   const snapshot = FindingsSnapshot.open(hexFixture("corpus_v1_hygiene.hex"));
-  assert.equal(snapshot.patternCount, 8);
+  assert.equal(snapshot.patternCount, 9);
   assert.deepEqual(snapshot.patterns(), [
     {
       glyph: 0x60,
@@ -262,15 +270,27 @@ test("decodes the pattern table the judge published", () => {
       shareBp: 1,
       books: 1,
     },
+    {
+      // Not a word channel: the letter rides the glyph field, and the key
+      // byte is the run length.
+      glyph: 0x65,
+      channel: "LetterRun",
+      key: { kind: "LetterRun", length: 3 },
+      band: 3,
+      numerator: 1,
+      denominator: 4000,
+      shareBp: 2,
+      books: 1,
+    },
   ]);
-  assert.throws(() => snapshot.pattern(8), FindingsSnapshotError);
+  assert.throws(() => snapshot.pattern(9), FindingsSnapshotError);
 
   // Every field the reader refuses, one at a time.
   const start = FIRST_RECORD;
   for (const [offset, byte] of [
     [11, 1],   // flags
     [23, 1],   // reserved
-    [8, 8],    // channel: past the table
+    [8, 9],    // channel: past the table
     [10, 0],   // band: a step on a Rarity row
     [9, 1],    // key: a nonzero key on a Rarity row
     [22, 2],   // books: past the snapshot's book count

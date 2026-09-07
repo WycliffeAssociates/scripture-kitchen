@@ -190,6 +190,9 @@ fn key_bytes(key: PatternKey) -> [u8; 10] {
             out[1] = u8::from(separated);
             out[2..10].copy_from_slice(&hash.to_le_bytes());
         }
+        // The letter itself rides `glyph`, which the digest hashes beside
+        // this; only the run length is the key's own.
+        PatternKey::LetterRun { length } => out[..2].copy_from_slice(&[8, length]),
     }
     out
 }

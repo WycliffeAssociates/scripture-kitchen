@@ -1,7 +1,7 @@
-//! The word scan: one pass per chapter, two lanes out of it.
+//! The word scan: one pass per chapter, three lanes out of it.
 //!
 //! ```text
-//! walk("He said. \u{201C}Go,\u{201D} said david. David went. Go, go.", &[])
+//! walk("He said. \u{201C}Go,\u{201D} said david. David went. Go, go. Theee.", &[])
 //!   casing lane
 //!     he     Title  Start        // the chapter's first word
 //!     said   Lower  None
@@ -12,6 +12,8 @@
 //!     went   Lower  None
 //!   doubles lane
 //!     hash(go)   bare 0  separated [(',', 1)]   // `Go, go`: a comma stood between
+//!   letter-run lane
+//!     'e'  [0, 1, 0, 0, 0, 0, 0]                // one run of three, in `Theee`
 //! ```
 //!
 //! The walk decides nothing about capitals. It records what stood before each
@@ -36,7 +38,10 @@
 use rustc_hash::FxHashMap;
 use xxhash_rust::xxh3::xxh3_64;
 
-use super::{Before, DoubleCount, Form, WordCount, WordRow};
+use super::{
+    Before, DoubleCount, Form, LETTER_RUN_LANES, LETTER_RUN_MAX, LETTER_RUN_MIN, WordCount,
+    WordRow, letter_run_lane,
+};
 use crate::Verse;
 use crate::substrate::{ScalarKey, is_run_atom};
 use crate::unicode::{Class, Pool, class_of, pool_of};
@@ -247,6 +252,60 @@ pub fn for_each_word(text: &str, verses: &[Verse], mut visit: impl FnMut(Occurre
     scan.close(to, &mut visit);
 }
 
+/// Calls `visit` with every same-letter run of two or more inside one word.
+///
+/// ```text
+/// for_each_letter_run("theee")   → ('e', 3)
+/// for_each_letter_run("Eel")     → ('e', 2)      // the same simple fold
+/// for_each_letter_run("aaaaaaaaah") → ('a', 8)   // saturating at the lane
+/// ```
+///
+/// Glue rides its base, so a combining mark neither breaks a run nor
+/// lengthens it; a digit, or the one nonletter a word rides through, breaks
+/// one. The letter is the first scalar of `char::to_lowercase`, the same fold
+/// the hash uses, so `Ee` is a run of two and an uncased script counts here
+/// like any other.
+pub fn for_each_letter_run(word: &str, mut visit: impl FnMut(ScalarKey, u8)) {
+    let mut held: Option<(ScalarKey, u32)> = None;
+    for scalar in word.chars() {
+        let class = class_of(scalar);
+        if class.is_glue() {
+            continue;
+        }
+        let letter = class
+            .is_alphabetic()
+            .then(|| ScalarKey::of(scalar.to_lowercase().next().unwrap_or(scalar)));
+        if let Some((key, scalars)) = &mut held
+            && letter == Some(*key)
+        {
+            *scalars += 1;
+            continue;
+        }
+        if let Some((key, scalars)) = held.take()
+            && let Some(length) = run_length(scalars)
+        {
+            visit(key, length);
+        }
+        held = letter.map(|key| (key, 1u32));
+    }
+    if let Some((key, scalars)) = held
+        && let Some(length) = run_length(scalars)
+    {
+        visit(key, length);
+    }
+}
+
+/// A repeat, saturating into the last lane; `None` for a letter standing once.
+const fn run_length(scalars: u32) -> Option<u8> {
+    if scalars < LETTER_RUN_MIN as u32 {
+        None
+    } else if scalars >= LETTER_RUN_MAX as u32 {
+        Some(LETTER_RUN_MAX)
+    } else {
+        Some(scalars as u8)
+    }
+}
+
 /// What stood between two occurrences of one word, when they are a double.
 ///
 /// Two claims, not one: `na na` and `na, na` have different denominators and
@@ -300,6 +359,8 @@ pub(crate) fn walk(text: &str, verses: &[Verse]) -> WordRow {
     let mut slots: FxHashMap<(u64, u32), u32> = FxHashMap::default();
     let mut doubles: Vec<DoubleCount> = Vec::new();
     let mut lanes: FxHashMap<u64, u32> = FxHashMap::default();
+    let mut runs: Vec<(ScalarKey, [u16; LETTER_RUN_LANES])> = Vec::new();
+    let mut run_slots: FxHashMap<ScalarKey, u32> = FxHashMap::default();
     let mut cased = false;
     let mut previous: Option<(u64, u32)> = None;
 
@@ -310,6 +371,18 @@ pub(crate) fn walk(text: &str, verses: &[Verse]) -> WordRow {
                 doubles.len() as u32 - 1
             }) as usize
         };
+        // Before the uncased return: a repeat is a repeat in any script.
+        for_each_letter_run(
+            &text[word.from as usize..word.to as usize],
+            |letter, length| {
+                let slot = *run_slots.entry(letter).or_insert_with(|| {
+                    runs.push((letter, [0; LETTER_RUN_LANES]));
+                    runs.len() as u32 - 1
+                });
+                let lane = &mut runs[slot as usize].1[letter_run_lane(length)];
+                *lane = lane.saturating_add(1);
+            },
+        );
         if let Some((hash, to)) = previous.replace((word.hash, word.to))
             && hash == word.hash
             && let Some(gap) = gap_between(text, to, word.from)
@@ -334,10 +407,12 @@ pub(crate) fn walk(text: &str, verses: &[Verse]) -> WordRow {
 
     rows.sort_unstable_by_key(|row| (row.hash, row.before().raw()));
     doubles.sort_unstable_by_key(|row| row.hash);
+    runs.sort_unstable_by_key(|row| row.0);
     WordRow {
         cased,
         words: rows.into_boxed_slice(),
         doubles: doubles.into_boxed_slice(),
+        letter_runs: runs.into_boxed_slice(),
         released: false,
     }
 }

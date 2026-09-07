@@ -13,6 +13,9 @@
 //!   doubling share bp            p50 62   p90 214  p95 318  max 4,101
 //! ```
 //!
+//! It also counts the letter-run rows the shipped defaults fire per test-tier
+//! corpus, which is the volume rule behind `channels.letter_runs`.
+//!
 //! Reads `corpora/*.txt` (vref: `BOOK C:V<TAB>text`) the way
 //! `examples/pattern_volume.rs` does, but keeps each line's span so a verse
 //! start is forced here exactly as it is under a real projected book, then
@@ -33,7 +36,7 @@ use sous_core::substrate::{Case, Edge, fold_book as fold_glyphs};
 use sous_core::words::{WordAggregate, WordRow, WordTotals, Words, fold_book as fold_words};
 use sous_core::{
     BookAggregate, BookKey, Channel, ChapterInput, ChapterKey, ChapterObs, ChapterPass, ChapterRow,
-    Findings, JudgingConfig, Substrate, TextRange, Verse, VerseKey,
+    Findings, JudgingConfig, PatternKey, Substrate, TextRange, Verse, VerseKey,
 };
 
 const CORPORA: &[&str] = &[
@@ -121,6 +124,23 @@ fn main() {
         let recused = share > JudgingConfig::default().doubles_productive_bp;
         println!("{name:<12}{auto:>10}{always:>10}{share:>12}{:>10}", recused);
     }
+
+    println!("\n### test tier: letter-run rows at the shipped defaults ###\n");
+    println!("{:<12}{:>8}   rows in full", "corpus", "rows");
+    let mut total = 0usize;
+    for name in CORPORA {
+        let path = dir.join(format!("{name}.txt"));
+        let raw = std::fs::read_to_string(&path).expect("read above");
+        let rows = Corpus::of(&raw, &path).letter_run_rows(&JudgingConfig::default());
+        total += rows.len();
+        println!("{name:<12}{:>8}   {}", rows.len(), rows.join("  "));
+    }
+    println!(
+        "{:<12}{:>8}   mean {:.2} rows per corpus",
+        "ALL",
+        total,
+        total as f64 / CORPORA.len() as f64
+    );
 
     println!("\n### terminal tables the test tier learned ###\n");
     for name in CORPORA {
@@ -266,6 +286,27 @@ impl Corpus {
             .iter()
             .filter(|row| row.channel == Channel::Doubled)
             .count()
+    }
+
+    /// The letter-run rows, and the letters they name, so the volume rule can
+    /// be read against what the rows actually are.
+    fn letter_run_rows(&self, config: &JudgingConfig) -> Vec<String> {
+        self.judged(config)
+            .patterns()
+            .iter()
+            .filter(|row| row.channel == Channel::LetterRun)
+            .map(|row| {
+                let PatternKey::LetterRun { length } = row.key else {
+                    unreachable!("a letter-run channel carries a letter-run key")
+                };
+                format!(
+                    "{:?}x{length} {}/{}",
+                    row.glyph.scalar().unwrap_or('?'),
+                    row.numerator,
+                    row.denominator
+                )
+            })
+            .collect()
     }
 
     /// The recusal statistic: distinct words doubled twice or more, over the

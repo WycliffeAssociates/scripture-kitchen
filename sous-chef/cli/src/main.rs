@@ -36,6 +36,7 @@ mod source;
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 use sous_core::unicode::atoms::count_atoms;
+use sous_core::words::LETTER_RUN_MAX;
 use sous_core::{
     AlignedUnit, Alignment, AlignmentFact, Brigade, ChapterPass, Corpus, FindingKind,
     PackedFinding, Pattern, PatternKey, ProjectedBook, ScalarKey, SnapshotId, SourceLengths,
@@ -419,6 +420,10 @@ fn print_patterns(
             PatternKey::PooledNeighbor(pool) => {
                 format!("pooled-neighbor {}", pool.name())
             }
+            PatternKey::LetterRun { length } => format!(
+                "letter-run {length}{}",
+                if length == LETTER_RUN_MAX { "+" } else { "" }
+            ),
             PatternKey::Casing { .. }
             | PatternKey::WordLength { .. }
             | PatternKey::Doubled { .. } => unreachable!("handled above"),

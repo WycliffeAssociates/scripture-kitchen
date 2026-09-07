@@ -1,8 +1,9 @@
-//! Level 2 words: one scan per chapter, two lanes out of it — counts by hash,
-//! case form and preceding glyph, and doubling by hash alone.
+//! Level 2 words: one scan per chapter, three lanes out of it — counts by
+//! hash, case form and preceding glyph; doubling by hash alone; and the runs
+//! of one letter inside a word.
 //!
 //! ```text
-//! map("Then david went. David wept. DAVID sang. Go go.")
+//! map("Then david went. David wept. DAVID sang. Go go. Theee.")
 //!   casing lane
 //!     hash(david)  Glyph('.')  [Lower 0, Title 1, Upper 0, Mixed 0]  len 5
 //!     hash(david)  None        [Lower 1, Title 0, Upper 1, Mixed 0]  len 5
@@ -11,6 +12,8 @@
 //!     …
 //!   doubles lane
 //!     hash(go)     uncased 0  bare 1  separated 0
+//!   letter-run lane
+//!     'e'          [0, 1, 0, 0, 0, 0, 0]   // one run of three, in `Theee`
 //! judge, terminal table forces '.', word_support_floor 2, 25% at this size
 //!   → Casing { hash(david), Upper }   1/2   5,000 bp   band 0
 //! ```
@@ -18,9 +21,9 @@
 //! The walk decides nothing about capitals; the judge splits free from forced
 //! by asking the corpus's own terminal table what each stored glyph does. The
 //! casing lane skips every word with no cased letter — it can hold no casing
-//! convention — and the doubles lane counts those words instead, because
-//! doubling has nothing to do with case. The walk rule, the terminal rule, and
-//! the fold's seam argument: words.md.
+//! convention — and the other two lanes count those words instead, because
+//! neither doubling nor a repeated letter has anything to do with case. The
+//! walk rule, the terminal rule, and the fold's seam argument: words.md.
 
 use rustc_hash::FxHashMap;
 
@@ -36,8 +39,22 @@ mod totals;
 pub mod walk;
 
 pub use fold::fold_book;
-pub use totals::{DoubleTally, WordTally, WordTotals};
-pub use walk::{Gap, Occurrence, for_each_word, gap_between};
+pub use totals::{DoubleTally, RunTally, WordTally, WordTotals};
+pub use walk::{Gap, Occurrence, for_each_letter_run, for_each_word, gap_between};
+
+// ── The letter-run lane ─────────────────────────────────────────────────
+
+/// The shortest run the lane counts; a single letter is not a repeat.
+pub const LETTER_RUN_MIN: u8 = 2;
+/// Lanes per letter, one per length in [`LETTER_RUN_MIN`]`..=`[`LETTER_RUN_MAX`].
+pub const LETTER_RUN_LANES: usize = 7;
+/// The longest length the lane distinguishes; longer runs saturate into it.
+pub const LETTER_RUN_MAX: u8 = LETTER_RUN_MIN + LETTER_RUN_LANES as u8 - 1;
+
+/// The lane a run of `length` is counted in.
+pub(crate) const fn letter_run_lane(length: u8) -> usize {
+    (length - LETTER_RUN_MIN) as usize
+}
 
 // ── What stood before ───────────────────────────────────────────────────
 
@@ -304,6 +321,7 @@ impl DoubleCount {
 pub struct WordRow {
     words: Box<[WordCount]>,
     doubles: Box<[DoubleCount]>,
+    letter_runs: Box<[(ScalarKey, [u16; LETTER_RUN_LANES])]>,
     cased: bool,
     /// Set only by [`ChapterPass::release`]; read by
     /// [`ChapterPass::is_released`] to decide the row must be walked again.
@@ -323,17 +341,24 @@ impl WordRow {
         &self.doubles
     }
 
+    /// Every letter the chapter repeated inside a word, ascending, with one
+    /// counter per run length `2..=8+`.
+    pub fn letter_runs(&self) -> &[(ScalarKey, [u16; LETTER_RUN_LANES])] {
+        &self.letter_runs
+    }
+
     /// Whether the chapter holds a cased letter at all.
     pub const fn cased(&self) -> bool {
         self.cased
     }
 
-    /// Inline size plus every byte both lanes own, the doubles lane's own
+    /// Inline size plus every byte the three lanes own, the doubles lane's own
     /// per-glyph heap included; what a resident cache pays.
     pub fn resident_bytes(&self) -> usize {
         size_of::<Self>()
             + size_of_val(&*self.words)
             + size_of_val(&*self.doubles)
+            + size_of_val(&*self.letter_runs)
             + self
                 .doubles
                 .iter()
@@ -434,16 +459,36 @@ impl DoubleTotal {
 pub struct WordAggregate {
     words: Vec<WordTotal>,
     doubles: Vec<DoubleTotal>,
+    letter_runs: Vec<(ScalarKey, [u32; LETTER_RUN_LANES])>,
     cased: bool,
 }
 
 impl WordAggregate {
-    pub(crate) fn new(words: Vec<WordTotal>, doubles: Vec<DoubleTotal>, cased: bool) -> Self {
+    pub(crate) fn new(
+        words: Vec<WordTotal>,
+        doubles: Vec<DoubleTotal>,
+        letter_runs: Vec<(ScalarKey, [u32; LETTER_RUN_LANES])>,
+        cased: bool,
+    ) -> Self {
         Self {
             words,
             doubles,
+            letter_runs,
             cased,
         }
+    }
+
+    /// The letter-run lane, by letter ascending.
+    pub fn letter_runs(&self) -> &[(ScalarKey, [u32; LETTER_RUN_LANES])] {
+        &self.letter_runs
+    }
+
+    /// This book's run counts for one letter, if it repeated it at all.
+    pub fn letter_runs_for(&self, letter: ScalarKey) -> Option<&[u32; LETTER_RUN_LANES]> {
+        self.letter_runs
+            .binary_search_by_key(&letter, |row| row.0)
+            .ok()
+            .map(|at| &self.letter_runs[at].1)
     }
 
     /// The doubles lane, by hash ascending.
@@ -496,6 +541,7 @@ impl WordAggregate {
         size_of::<Self>()
             + self.words.capacity() * size_of::<WordTotal>()
             + self.doubles.capacity() * size_of::<DoubleTotal>()
+            + self.letter_runs.capacity() * size_of::<(ScalarKey, [u32; LETTER_RUN_LANES])>()
             + self
                 .doubles
                 .iter()
@@ -651,9 +697,11 @@ impl ChapterPass for Words {
 
     /// Rewalks this book's words and sites what the counts named: a casing
     /// row's free occurrences of one `(hash, form)`, a length row's every
-    /// occurrence of one hash, and a doubled row's every pair, whose span
-    /// covers both words and the separator. The rescan reads the same terminal
-    /// table the judge did, or it would place positions the counts never held.
+    /// occurrence of one hash, a doubled row's every pair, whose span covers
+    /// both words and the separator, and a letter-run row's every run, whose
+    /// span is the word the run sits inside. The rescan reads the same
+    /// terminal table the judge did, or it would place positions the counts
+    /// never held.
     fn locate(
         &self,
         book: BookIndex,
@@ -674,8 +722,10 @@ impl ChapterPass for Words {
         let mut cased: FxHashMap<(u64, Form), PatternIndex> = FxHashMap::default();
         let mut long: FxHashMap<u64, PatternIndex> = FxHashMap::default();
         let mut twice: FxHashMap<(u64, bool), PatternIndex> = FxHashMap::default();
+        let mut sticky: FxHashMap<(ScalarKey, u8), PatternIndex> = FxHashMap::default();
         for &index in &set {
-            match out.patterns()[usize::from(index.get())].key {
+            let pattern = out.patterns()[usize::from(index.get())];
+            match pattern.key {
                 PatternKey::Casing { hash, form } => {
                     cased.insert((hash, form), index);
                 }
@@ -685,11 +735,15 @@ impl ChapterPass for Words {
                 PatternKey::Doubled { hash, separated } => {
                     twice.insert((hash, separated), index);
                 }
+                PatternKey::LetterRun { length } => {
+                    sticky.insert((pattern.glyph, length), index);
+                }
                 _ => {}
             }
         }
 
         let mut found: Vec<(TextRange, PatternIndex, Reasons)> = Vec::new();
+        let mut runs: Vec<PatternIndex> = Vec::new();
         let mut rebased: Vec<Verse> = Vec::new();
         let mut cursor = 0usize;
         for chapter in chapters {
@@ -723,26 +777,62 @@ impl ChapterPass for Words {
                     };
                     found.push((at, index, reason));
                 }
-                if word.form == Form::Uncased {
+                // The letter-run rows this word holds, one per RUN: the
+                // channel counts runs, and a word may hold two of one length.
+                runs.clear();
+                if !sticky.is_empty() {
+                    let text = &slice[word.from as usize..word.to as usize];
+                    for_each_letter_run(text, |letter, length| {
+                        if let Some(&index) = sticky.get(&(letter, length)) {
+                            runs.push(index);
+                        }
+                    });
+                }
+                let (casing, length) = if word.form == Form::Uncased {
+                    // An uncased word is in no casing row; its runs still are.
+                    (None, None)
+                } else {
+                    (
+                        word.before
+                            .is_free(&table)
+                            .then(|| cased.get(&(word.hash, word.form)))
+                            .flatten(),
+                        long.get(&word.hash),
+                    )
+                };
+                // One span, one row: a word two channels named carries both
+                // reasons and the finer channel's index, as a run does.
+                let named = match (casing, length) {
+                    (Some(&index), Some(_)) => {
+                        Some((index, Reasons::CASING.union(Reasons::WORD_LENGTH)))
+                    }
+                    (Some(&index), None) => Some((index, Reasons::CASING)),
+                    (None, Some(&index)) => Some((index, Reasons::WORD_LENGTH)),
+                    (None, None) => None,
+                };
+                if named.is_none() && runs.is_empty() {
                     return;
                 }
-                let casing = word
-                    .before
-                    .is_free(&table)
-                    .then(|| cased.get(&(word.hash, word.form)))
-                    .flatten();
-                let length = long.get(&word.hash);
-                // One span, one row: a word both channels named carries both
-                // reasons and the finer channel's index, as a run does.
-                let (index, reasons) = match (casing, length) {
-                    (Some(&index), Some(_)) => (index, Reasons::CASING.union(Reasons::WORD_LENGTH)),
-                    (Some(&index), None) => (index, Reasons::CASING),
-                    (None, Some(&index)) => (index, Reasons::WORD_LENGTH),
-                    (None, None) => return,
-                };
                 let at = TextRange::new(span.from() + word.from, span.from() + word.to)
                     .expect("a word grows forward");
-                found.push((at, index, reasons));
+                // A merged row keeps the finer channel's index, so the first
+                // run's own row is the one the bit rides; any further run of
+                // the same word is a row of its own.
+                let rest = match named {
+                    Some((index, reasons)) => {
+                        let reasons = if runs.is_empty() {
+                            reasons
+                        } else {
+                            reasons.union(Reasons::LETTER_RUN)
+                        };
+                        found.push((at, index, reasons));
+                        1
+                    }
+                    None => 0,
+                };
+                for &index in runs.iter().skip(rest) {
+                    found.push((at, index, Reasons::LETTER_RUN));
+                }
             });
         }
         if found.is_empty() {
@@ -781,6 +871,16 @@ impl ChapterPass for Words {
         let (mut word_at, mut word_last) = (0usize, 0u64);
         let (mut double_at, mut double_last) = (0usize, 0u64);
         for (index, pattern) in patterns.iter().enumerate() {
+            if let PatternKey::LetterRun { length } = pattern.key {
+                // Its own lane and its own key: a letter, not a hash.
+                if aggregate
+                    .letter_runs_for(pattern.glyph)
+                    .is_some_and(|lanes| lanes[letter_run_lane(length)] > 0)
+                {
+                    out.push(PatternIndex::new(index as u16));
+                }
+                continue;
+            }
             let Some(hash) = pattern.word_hash() else {
                 continue;
             };
@@ -840,12 +940,13 @@ fn holds_double(row: Option<&DoubleTotal>, separated: bool) -> bool {
 
 /// Whether any word channel has something to judge here.
 ///
-/// The two casing-lane channels need a cased corpus; `Doubled` does not, so an
-/// uncased script no longer short-circuits the whole pass.
+/// The two casing-lane channels need a cased corpus; `Doubled` and
+/// `LetterRun` do not, so an uncased script no longer short-circuits the whole
+/// pass.
 fn judges_anything(corpus: &[&WordAggregate], config: &JudgingConfig) -> bool {
     let cased = (config.channels.casing || config.channels.word_length)
         && corpus.iter().any(|book| book.cased());
-    cased || config.channels.doubled
+    cased || config.channels.doubled || config.channels.letter_runs
 }
 
 /// One book's contribution to a word pattern's numerator — the oracle
@@ -854,7 +955,7 @@ fn judges_anything(corpus: &[&WordAggregate], config: &JudgingConfig) -> bool {
 /// `table` is the corpus's, because which stored `Before`s are free is a
 /// corpus fact and not a property of this book.
 pub fn free_in(book: &WordAggregate, pattern: &Pattern, table: &TerminalTable) -> u64 {
-    crate::judge::free_of(book, &pattern.key, table)
+    crate::judge::free_of(book, pattern.glyph, &pattern.key, table)
 }
 
 /// This chapter's verse rows, rebased to it, returning where the next chapter

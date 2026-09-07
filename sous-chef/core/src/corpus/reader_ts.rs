@@ -14,11 +14,11 @@ use crate::codec::{
 use crate::judge::{Channel, Staircase};
 use crate::substrate::{OuterClass, RUN_BUCKETS};
 use crate::unicode::Pool;
-use crate::words::Form;
+use crate::words::{Form, LETTER_RUN_MAX, LETTER_RUN_MIN};
 
 /// Render the checked-in TypeScript reader from the Rust-owned wire schema.
 pub fn generated_reader_ts() -> String {
-    let substitutions: [(&str, String); 52] = [
+    let substitutions: [(&str, String); 54] = [
         ("@@MAGIC@@", format!("0x{MAGIC:08x}")),
         ("@@FORMAT_VERSION@@", FORMAT_VERSION.to_string()),
         ("@@FLAG_UTF16@@", FLAG_UTF16.to_string()),
@@ -96,6 +96,8 @@ pub fn generated_reader_ts() -> String {
         ("@@PATTERN_BAND_NONE@@", PATTERN_BAND_NONE.to_string()),
         ("@@PATTERN_DIGIT_GLYPH@@", PATTERN_DIGIT_GLYPH.to_string()),
         ("@@BAND_STEPS@@", Staircase::STEPS.to_string()),
+        ("@@LETTER_RUN_MIN@@", LETTER_RUN_MIN.to_string()),
+        ("@@LETTER_RUN_MAX@@", LETTER_RUN_MAX.to_string()),
         ("@@RUN_BUCKETS@@", RUN_BUCKETS.to_string()),
         (
             "@@CHANNELS@@",

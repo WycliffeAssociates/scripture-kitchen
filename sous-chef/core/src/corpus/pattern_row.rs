@@ -10,7 +10,7 @@ use crate::codec::PackedFinding;
 use crate::judge::{Channel, Pattern, PatternKey, Side, Staircase};
 use crate::substrate::{OuterClass, RUN_BUCKETS, ScalarKey};
 use crate::unicode::Pool;
-use crate::words::Form;
+use crate::words::{Form, LETTER_RUN_MAX, LETTER_RUN_MIN};
 
 /// One pattern-table row: the glyph, the channel and its key, the band, and
 /// the fraction behind the claim. Layout: codec/README.md.
@@ -34,6 +34,8 @@ pub(super) fn encode_pattern(pattern: &Pattern) -> [u8; PATTERN_ROW_LEN] {
         PatternKey::Doubled { hash, separated } => {
             (hash as u32, (hash >> 32) as u32, u8::from(separated))
         }
+        // A real scalar in the glyph field: the letter is what was repeated.
+        PatternKey::LetterRun { length } => (pattern.glyph.raw(), 0, length),
     };
     row[PATTERN_GLYPH_OFFSET..PATTERN_NEIGHBOR_OFFSET].copy_from_slice(&glyph.to_le_bytes());
     row[PATTERN_NEIGHBOR_OFFSET..PATTERN_CHANNEL_OFFSET].copy_from_slice(&neighbor.to_le_bytes());
@@ -135,6 +137,12 @@ pub(super) fn decode_pattern(
                 _ => return Err(bad("key")),
             },
         },
+        Channel::LetterRun => {
+            if !(LETTER_RUN_MIN..=LETTER_RUN_MAX).contains(&raw_key) {
+                return Err(bad("key"));
+            }
+            PatternKey::LetterRun { length: raw_key }
+        }
     };
     if channel != Channel::ExactNeighbor && !channel.is_word() && neighbor_raw != 0 {
         return Err(bad("neighbor"));

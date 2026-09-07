@@ -15,9 +15,9 @@
 //! move, so the tally cannot pre-sum them; [`WordTotals::by_word`] hands the
 //! judge one word's rows at a time. The doubles lane keys by hash alone — a
 //! double is a double whatever stood before it — and rides the same two
-//! updates.
+//! updates, as does the letter-run lane, keyed by the folded letter.
 
-use super::{Before, DoubleTotal, WordAggregate, merge_glyph_lane};
+use super::{Before, DoubleTotal, LETTER_RUN_LANES, WordAggregate, merge_glyph_lane};
 use crate::judge::TerminalTable;
 use crate::substrate::ScalarKey;
 
@@ -166,7 +166,77 @@ impl Lane for DoubleTally {
     }
 }
 
-/// What both lanes have in common, so `add` and `remove` are written once.
+/// One letter's repeat history over the corpus: how many runs of it there
+/// were at each length `2..=8+`, and how many books hold any of them.
+///
+/// The denominator a run length is judged against is this row's own sum — the
+/// letter's whole habit of repeating — so a letter no corpus doubles says
+/// nothing about a letter that is doubled everywhere.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunTally {
+    pub letter: ScalarKey,
+    /// Runs by length, index `length - 2`; the last lane counts 8 or more.
+    pub lengths: [u32; LETTER_RUN_LANES],
+    /// Books holding this letter's runs; the row lives while this does.
+    pub holders: u32,
+}
+
+impl RunTally {
+    fn of(letter: ScalarKey) -> Self {
+        Self {
+            letter,
+            lengths: [0; LETTER_RUN_LANES],
+            holders: 0,
+        }
+    }
+
+    fn absorb_book(&mut self, lanes: &[u32; LETTER_RUN_LANES]) {
+        self.holders += 1;
+        for (slot, count) in self.lengths.iter_mut().zip(lanes) {
+            *slot = slot.saturating_add(*count);
+        }
+    }
+
+    /// Every run of this letter, whatever its length: the channel's
+    /// denominator.
+    pub fn runs(&self) -> u64 {
+        self.lengths.iter().map(|&count| u64::from(count)).sum()
+    }
+}
+
+impl Default for RunTally {
+    fn default() -> Self {
+        Self::of(ScalarKey::NONE)
+    }
+}
+
+impl Lane for RunTally {
+    type Key = ScalarKey;
+
+    fn key(&self) -> ScalarKey {
+        self.letter
+    }
+
+    fn holders(&self) -> u32 {
+        self.holders
+    }
+
+    fn absorb(&mut self, other: &Self) {
+        self.holders += other.holders;
+        for (slot, count) in self.lengths.iter_mut().zip(other.lengths) {
+            *slot = slot.saturating_add(count);
+        }
+    }
+
+    fn release(&mut self, other: &Self) {
+        self.holders = self.holders.saturating_sub(other.holders);
+        for (slot, count) in self.lengths.iter_mut().zip(other.lengths) {
+            *slot = slot.saturating_sub(count);
+        }
+    }
+}
+
+/// What the lanes have in common, so `add` and `remove` are written once.
 trait Lane: Clone + Default {
     type Key: Ord + Copy;
 
@@ -183,6 +253,7 @@ trait Lane: Clone + Default {
 pub struct WordTotals {
     rows: Vec<WordTally>,
     doubles: Vec<DoubleTally>,
+    letter_runs: Vec<RunTally>,
 }
 
 impl WordTotals {
@@ -191,7 +262,13 @@ impl WordTotals {
         Self {
             rows: delta_of(corpus),
             doubles: doubles_of(corpus),
+            letter_runs: runs_of(corpus),
         }
+    }
+
+    /// The letter-run lane, by letter ascending.
+    pub fn letter_runs(&self) -> &[RunTally] {
+        &self.letter_runs
     }
 
     /// Rows by `(hash, before)` ascending.
@@ -240,7 +317,7 @@ impl WordTotals {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.rows.is_empty() && self.doubles.is_empty()
+        self.rows.is_empty() && self.doubles.is_empty() && self.letter_runs.is_empty()
     }
 
     /// Adds these books' counts. The result is [`merge`](Self::merge) over the
@@ -248,6 +325,7 @@ impl WordTotals {
     pub fn add(&mut self, corpus: &[&WordAggregate]) {
         apply(&mut self.rows, &delta_of(corpus), true);
         apply(&mut self.doubles, &doubles_of(corpus), true);
+        apply(&mut self.letter_runs, &runs_of(corpus), true);
     }
 
     /// Removes books previously added, exactly: every word they hold is in the
@@ -255,14 +333,16 @@ impl WordTotals {
     pub fn remove(&mut self, corpus: &[&WordAggregate]) {
         apply(&mut self.rows, &delta_of(corpus), false);
         apply(&mut self.doubles, &doubles_of(corpus), false);
+        apply(&mut self.letter_runs, &runs_of(corpus), false);
     }
 
-    /// Inline size plus both lanes' own allocation, each doubled row's own
+    /// Inline size plus every lane's own allocation, each doubled row's own
     /// per-glyph lane included; what a resident host pays.
     pub fn resident_bytes(&self) -> usize {
         size_of::<Self>()
             + size_of_val(&*self.rows)
             + size_of_val(&*self.doubles)
+            + size_of_val(&*self.letter_runs)
             + self
                 .doubles
                 .iter()
@@ -349,6 +429,33 @@ fn delta_of(corpus: &[&WordAggregate]) -> Vec<WordTally> {
                 let mut row = WordTally::of(hash, before);
                 row.absorb_book(counts);
                 rows.push(row);
+            }
+        }
+    }
+    rows
+}
+
+/// The same for the letter-run lane, keyed by the folded letter.
+fn runs_of(corpus: &[&WordAggregate]) -> Vec<RunTally> {
+    let mut flat: Vec<(ScalarKey, u32, [u32; LETTER_RUN_LANES])> = corpus
+        .iter()
+        .enumerate()
+        .flat_map(|(book, aggregate)| {
+            aggregate
+                .letter_runs()
+                .iter()
+                .map(move |&(letter, lanes)| (letter, book as u32, lanes))
+        })
+        .collect();
+    flat.sort_unstable_by_key(|(letter, book, _)| (*letter, *book));
+    let mut rows: Vec<RunTally> = Vec::with_capacity(flat.len());
+    for (letter, _, lanes) in flat {
+        match rows.last_mut() {
+            Some(last) if last.letter == letter => last.absorb_book(&lanes),
+            _ => {
+                let mut held = RunTally::of(letter);
+                held.absorb_book(&lanes);
+                rows.push(held);
             }
         }
     }

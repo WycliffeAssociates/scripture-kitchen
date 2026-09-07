@@ -117,6 +117,18 @@ fn fixture_patterns() -> Vec<Pattern> {
             share_bp: 1,
             books: 1,
         },
+        // Not a word channel: the letter rides the glyph field and the key
+        // byte is the run length.
+        Pattern {
+            glyph: ScalarKey::of('e'),
+            channel: Channel::LetterRun,
+            key: PatternKey::LetterRun { length: 3 },
+            band: Some(3),
+            numerator: 1,
+            denominator: 4_000,
+            share_bp: 2,
+            books: 1,
+        },
     ]
 }
 
@@ -221,6 +233,18 @@ fn mixed_kind_golden_buffer_decodes_in_both_readers() {
             &[0x0100],
         )
         .unwrap(),
+        // Bit 10, naming the letter-run row: the word the run sits inside.
+        PackedFinding::new(
+            0xc0,
+            0xc5,
+            BookIndex::new(0).unwrap(),
+            FindingKind::Convention(ConventionDigest::new(
+                PatternIndex::new(8),
+                Reasons::LETTER_RUN,
+            )),
+            &[0x0100],
+        )
+        .unwrap(),
     ];
     let section = PublicationBook::new(BookKey::new(*b"MRK"), "books/mrk.usfm", 0x0100, &findings);
     let encoded = encode_to_corpus_buffer(
@@ -252,6 +276,11 @@ fn mixed_kind_golden_buffer_decodes_in_both_readers() {
     };
     assert_eq!(digest.pattern().get(), 7);
     assert_eq!(digest.reasons(), Reasons::DOUBLED_SEPARATED);
+    let FindingKind::Convention(digest) = book.at(4).unwrap().kind() else {
+        panic!("convention kind")
+    };
+    assert_eq!(digest.pattern().get(), 8);
+    assert_eq!(digest.reasons(), Reasons::LETTER_RUN);
 }
 
 #[test]
@@ -290,13 +319,13 @@ fn pattern_table_round_trips() {
     )
     .unwrap();
     let snapshot = CorpusSnapshot::open(&encoded).unwrap();
-    assert_eq!(snapshot.pattern_count(), 8);
+    assert_eq!(snapshot.pattern_count(), 9);
     assert_eq!(snapshot.patterns().unwrap(), patterns);
     assert_eq!(
-        snapshot.pattern(8),
+        snapshot.pattern(9),
         Err(CorpusWireError::PatternIndexPastTable {
-            index: 8,
-            count: 8,
+            index: 9,
+            count: 9,
             at: None
         })
     );
@@ -306,7 +335,7 @@ fn pattern_table_round_trips() {
     for (offset, byte, field) in [
         (PATTERN_FLAGS_OFFSET, 1u8, "flags"),
         (PATTERN_RESERVED_OFFSET, 1, "reserved"),
-        (PATTERN_CHANNEL_OFFSET, 8, "channel"),
+        (PATTERN_CHANNEL_OFFSET, 9, "channel"),
         (PATTERN_BAND_OFFSET, 0, "band"),
         (PATTERN_KEY_OFFSET, 1, "key"),
         (PATTERN_BOOKS_OFFSET, 2, "books"),

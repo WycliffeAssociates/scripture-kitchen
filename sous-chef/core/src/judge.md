@@ -29,6 +29,7 @@ finding.
 | `Casing` | word | free-position occurrences of one case-folded word in one case form | that word's free-position occurrences, all forms |
 | `WordLength` | word | corpus occurrences of one long case-folded word | every word occurrence the corpus counted |
 | `Doubled` | word | one case-folded word immediately repeated, adjacent OR separated | that word's occurrences, cased and uncased |
+| `LetterRun` | word walk | runs of one letter of exactly this length | runs of that letter of ANY length ≥ 2 |
 
 `Placement` is **per side, marginal**: the outer class before `g` and the
 outer class after `g` are two distributions over
@@ -214,16 +215,54 @@ A doubled site's span covers **both words and the separator**, so it is not the
 word's span and never merges with a casing or length row; it carries
 `Reasons::DOUBLED_BARE` or `Reasons::DOUBLED_SEPARATED`.
 
+## `LetterRun` is the fourth, and it ships on
+
+The claim is: **one letter held down longer than this corpus ever holds it** —
+`theee` against thousands of `ee`. It comes out of the word walk like the three
+above, but its key is not a word: the row's glyph is the folded letter and the
+key byte is the run length, so it is the one channel a hash-keyed decoder must
+not treat as a word row.
+
+```text
+en_ulb   'l'  24,317 runs of two, one of three
+   1/24,318 = 0 bp, band 4's ceiling is 3 bp    → FIRES: `joyfullly`, PSA 81:1
+Finnish-like   'aa' x2,000, one `aaa`
+   1/2,001 = 4 bp, band 3's ceiling is 10 bp    → FIRES, and `aa` never does
+a corpus with no `ee` and one `eee`
+   the support gate                             → SILENT
+```
+
+The denominator is **that letter's own repeat history**: every run of it of two
+or more. So a language that doubles its vowels everywhere is judged on its
+triples, a script that never repeats a letter is judged on nothing, and there
+is no rule per script.
+
+Two guards, and they are different claims. The first is the ordinary word
+staircase over that denominator. The second is a **support gate**: every
+shorter length ≥ 2 must itself stand on at least `word_support_floor` runs, so
+`eee` speaks only where `ee` is established, and `xxxx` says nothing in a
+corpus that never wrote `xxx`. **Length 2 never fires** — it is most of the
+denominator, and a letter doubled at all is evidence of nothing.
+
+`channels.letter_runs` ships **true**. Over the committed tier the shipped
+defaults fire 9 rows across 8 corpora — mean 1.1, max 4, and three corpora fire
+none (evidence.md, W4) — so no fleet sweep was needed to set it. Recusal: none.
+The denominator already IS the language's own habit, which is what a recusal
+statistic would have had to measure.
+
+Its sites are the word each run sits inside, one row per run; a word this
+channel and the casing channel both name is one row carrying both bits.
+
 ## Dispersion
 
 `Pattern::books` is how many Target books hold part of that row's numerator,
 saturating at 255. Books-possible is the publication's own `book_count`;
 nothing is stored for it.
 
-On a word channel it is recomputed from the aggregates at judge time rather
-than carried through the tally, because which stored `Before`s count toward a
-numerator is a config-dependent judging decision and a tally that pre-summed
-them could not answer a re-judge.
+On a word-pass channel it is recomputed from the aggregates at judge time
+rather than carried through the tally, because which stored `Before`s count
+toward a numerator is a config-dependent judging decision and a tally that
+pre-summed them could not answer a re-judge.
 
 It is **information, not a judgement**. Genre clusters punctuation
 legitimately and a project's book set is not the engine's business, so no
@@ -269,9 +308,12 @@ Deterministic, because the wire pins it:
 
 `Channel`'s discriminants run finest grain first, so sorting by channel *is*
 sorting finest first, and G2 comes out between G3 and G1 without a sort.
-The word channels are last, in channel order — `Casing`, then `WordLength`,
-then `Doubled`, each hash-ascending within itself — and their rows are a
-separate pass's, so they never compete for a headline with a glyph's. `ScalarKey` orders by code point with the pooled digit
+The word pass's channels are last, in channel order — `Casing`, `WordLength`,
+`Doubled`, then `LetterRun` — each hash-ascending within itself, and
+`LetterRun` letter-ascending. Their rows are a separate pass's, so they never
+compete for a headline with a glyph's; `LetterRun` names a real scalar and is
+still emitted there rather than beside that glyph's substrate rows, because
+what produced it is the word walk. `ScalarKey` orders by code point with the pooled digit
 lane last.
 
 ## Where the row goes

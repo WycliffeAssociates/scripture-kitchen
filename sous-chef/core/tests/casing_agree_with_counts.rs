@@ -10,7 +10,7 @@
 //!
 //! The pass under test is `(Substrate, Words)`: the terminal table is the
 //! substrate's follow lane, and `Words` alone abstains. One channel at a time,
-//! because a span both channels name is one row carrying both reasons.
+//! because a span two channels name is one row carrying both reasons.
 //!
 //! The default sweep is synthetic and fast. The ignored one runs the same
 //! equality over the committed corpus tier, where real glue, apostrophes,
@@ -112,7 +112,7 @@ fn agree(books: &[Book], config: &JudgingConfig) -> (usize, usize, u64) {
     let word: Vec<usize> = patterns
         .iter()
         .enumerate()
-        .filter(|(_, row)| row.channel.is_word())
+        .filter(|(_, row)| row.channel.judged_by_words())
         .map(|(at, _)| at)
         .collect();
 
@@ -160,9 +160,10 @@ fn agree(books: &[Book], config: &JudgingConfig) -> (usize, usize, u64) {
 
 // ── The synthetic sweep ─────────────────────────────────────────────────
 
-/// Words drawn to exercise every form, the joiner rule, digits, glue, and an
-/// uncased script riding beside cased ones.
-const VOCABULARY: [&str; 16] = [
+/// Words drawn to exercise every form, the joiner rule, digits, glue, an
+/// uncased script riding beside cased ones, and a letter this vocabulary
+/// repeats twice often and three times rarely.
+const VOCABULARY: [&str; 19] = [
     "david",
     "David",
     "DAVID",
@@ -179,6 +180,9 @@ const VOCABULARY: [&str; 16] = [
     "the",
     "The",
     "and",
+    "feel",
+    "keen",
+    "feeel",
 ];
 
 /// The gaps between words: spaces, terminals, separators, and quotes, so the
@@ -238,6 +242,7 @@ fn permissive() -> JudgingConfig {
         word_bands: Staircase::new(steps).expect("the default bounds ascend"),
         channels: Channels {
             doubled: false,
+            letter_runs: false,
             ..Channels::default()
         },
         ..JudgingConfig::default()
@@ -251,6 +256,23 @@ fn doubling() -> JudgingConfig {
         channels: Channels {
             casing: false,
             doubled: true,
+            letter_runs: false,
+            ..Channels::default()
+        },
+        ..permissive()
+    }
+}
+
+/// The letter-run channel alone. A word this channel names may also be a
+/// casing row, and then it is ONE row carrying both bits — so, like the
+/// others, it is measured on its own or the merged row would rob the row it
+/// merged into.
+fn sticky() -> JudgingConfig {
+    JudgingConfig {
+        channels: Channels {
+            casing: false,
+            doubled: false,
+            letter_runs: true,
             ..Channels::default()
         },
         ..permissive()
@@ -265,6 +287,7 @@ fn lengthy() -> JudgingConfig {
             casing: false,
             word_length: true,
             doubled: false,
+            letter_runs: false,
             ..Channels::default()
         },
         ..permissive()
@@ -276,6 +299,7 @@ fn the_rescan_agrees_with_the_counts_over_a_synthetic_sweep() {
     let mut fired = 0;
     let mut occurrences = 0;
     let (mut pairs, mut paired) = (0, 0);
+    let (mut sticky_rows, mut sticky_sites) = (0, 0);
     for seed in 1..=12u64 {
         let books = generated(seed, 3, 4, 120);
         let (_, compared, found) = agree(&books, &permissive());
@@ -287,6 +311,9 @@ fn the_rescan_agrees_with_the_counts_over_a_synthetic_sweep() {
         let (_, doubles, sites) = agree(&books, &doubling());
         pairs += doubles;
         paired += sites;
+        let (_, runs, run_sites) = agree(&books, &sticky());
+        sticky_rows += runs;
+        sticky_sites += run_sites;
     }
     assert!(
         fired > 100 && occurrences > 100,
@@ -295,6 +322,10 @@ fn the_rescan_agrees_with_the_counts_over_a_synthetic_sweep() {
     assert!(
         pairs > 10 && paired > 10,
         "the doubled channel must be exercised too: {pairs} rows, {paired} sites"
+    );
+    assert!(
+        sticky_rows > 0 && sticky_sites > 0,
+        "the letter-run channel must be exercised too:          {sticky_rows} rows, {sticky_sites} sites"
     );
 }
 
@@ -368,13 +399,24 @@ fn the_rescan_agrees_with_the_counts_over_the_tier() {
             .map(|(key, chapters)| book(*key, chapters))
             .collect();
         assert!(!books.is_empty(), "{name} holds books");
-        let (count, compared, occurrences) = agree(&books, &JudgingConfig::default());
+        // The shipped defaults minus the letter-run channel, which is
+        // measured on its own below: a word both channels name is one row.
+        let cased = JudgingConfig {
+            channels: Channels {
+                letter_runs: false,
+                ..Channels::default()
+            },
+            ..JudgingConfig::default()
+        };
+        let (count, compared, occurrences) = agree(&books, &cased);
         let (_, long, long_sites) = agree(&books, &lengthy());
         let (_, pairs, paired) = agree(&books, &doubling());
+        let (_, runs, run_sites) = agree(&books, &sticky());
         println!(
             "{name}: {count} books, {compared} casing rows / {occurrences} sites, \
              {long} length rows / {long_sites} sites, \
-             {pairs} doubled rows / {paired} sites"
+             {pairs} doubled rows / {paired} sites, \
+             {runs} letter-run rows / {run_sites} sites"
         );
     }
 }

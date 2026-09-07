@@ -518,7 +518,20 @@ Work:
    tenth of its shares (`Staircase::WORD_STEPS`) and `word_support_floor` is
    20, which puts casing at p50 11 / p90 31 / p95 42; `channels.casing` ships
    on, because that was the condition.
-5. **Added by W3, off by default:** `Channel::WordLength`, one row per
+5. **Added by W4, on by default:** `Channel::LetterRun` (channel 8), one row
+   per `(letter, run length)` a corpus writes more rarely than that letter's
+   own repeat history supports — `theee` against thousands of `ee`. The same
+   word walk fills a third lane, `(ScalarKey, [u16; 7])` per letter for run
+   lengths `2..=8+` (7-33 KB a Bible, evidence.md W4), and the channel is the
+   one out of that walk whose key is a real scalar: the wire row carries the
+   folded letter in `glyph` and the run length in the key byte, plus
+   `Reasons::LETTER_RUN` (bit 10). Length 2 never fires and a length fires only
+   where every shorter one is established on `word_support_floor` runs.
+   Uncased scripts are judged. Over the committed tier the shipped defaults
+   fire 9 rows across 8 corpora — mean 1.1, max 4 — and every one is a real
+   typo, so `channels.letter_runs` ships **on** with no fleet sweep.
+   [rules/word-conventions.md](rules/word-conventions.md) carries the rule.
+6. **Added by W3, off by default:** `Channel::WordLength`, one row per
    case-folded word standing `word_length_sigma` (4) whole standard deviations
    above the corpus's own occurrence-weighted mean word length. Long end only,
    sited on the word's spans, `channels.word_length = false` — names and

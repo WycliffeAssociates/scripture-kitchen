@@ -78,6 +78,7 @@ Decoding refuses rather than guesses:
 | a pattern channel, key, band, or share outside its table | `InvalidPattern` |
 | a `Casing` key byte of `Uncased`, or a `Casing` row carrying a glyph | `InvalidPattern` |
 | a `Doubled` key byte above 1 | `InvalidPattern` |
+| a `LetterRun` key byte outside `2..=8` | `InvalidPattern` |
 | a pattern `books` of zero on a row with a numerator, or past the header's `book_count` | `InvalidPattern` |
 | a `pattern_offset` that is not the running cursor | `PatternSectionOutOfOrder` |
 | more than 65,535 patterns | `PatternCountOverflow` |
@@ -123,7 +124,7 @@ position matched — so ten thousand sites of one convention cost ten thousand
 | 0..4 | `glyph: u32` (`ScalarKey` raw; `u32::MAX` is the pooled digit key) |
 | 4..8 | `neighbor: u32` (the G3 key; 0 on every other channel) |
 | 8 | `channel: u8` (`Channel` discriminant, finest grain first) |
-| 9 | `key: u8` (Placement: `side << 4 \| OuterClass`; RunShape: `pure << 4 \| bucket`; PooledNeighbor: `Pool`; Casing: `Form`; WordLength: whole deviations above the mean; Doubled: 0 adjacent, 1 separated; else 0) |
+| 9 | `key: u8` (Placement: `side << 4 \| OuterClass`; RunShape: `pure << 4 \| bucket`; PooledNeighbor: `Pool`; Casing: `Form`; WordLength: whole deviations above the mean; Doubled: 0 adjacent, 1 separated; LetterRun: run length `2..=8`; else 0) |
 | 10 | `band: u8` (staircase step index; `0xFF` = none, which only `Rarity` carries) |
 | 11 | `flags: u8` (reserved, 0; the decoder refuses nonzero) |
 | 12..16 | `numerator: u32` |
@@ -131,6 +132,13 @@ position matched — so ten thousand sites of one convention cost ten thousand
 | 20..22 | `share_bp: u16`, at most 10,000 |
 | 22 | `books: u8` — books holding part of the numerator; books-possible is the header's `book_count` |
 | 23 | reserved `u8` 0 (the decoder refuses nonzero) |
+
+**Channel 8 `LetterRun` comes out of the same word walk and is NOT one of
+them:** it judges a real scalar, so bytes 0..4 carry the folded letter as an
+ordinary `ScalarKey`, the neighbor field is zero like every other non-`G3`
+channel, and the key byte is the run length `2..=8`, the last saturating.
+`Channel::is_word` is false for it and `Channel::judged_by_words` is true;
+the reader's own `word` predicate names the three, not the four.
 
 **The three word channels, 5 `Casing`, 6 `WordLength`, and 7 `Doubled`, read
 bytes 0..8 as one thing:** the u64 word hash, little-endian, low half where a
@@ -145,11 +153,12 @@ decodes it as a `bigint`. Why a hash and not the bytes: `../words.md`.
 
 `Reasons` **is the full `i16` lane B, not its low byte.** Bit 7,
 `WORD_LENGTH`, was the last one a `u8` could hold; W2 spent bits 8 and 9 on
-`DOUBLED_BARE` and `DOUBLED_SEPARATED`, which cost nothing on the wire because
-the lane was always sixteen bits and both readers always read it as one — Rust
-holds `Reasons` in a `u16` and the generated reader calls `getUint16`. Six bits
-are left, and `KNOWN_BITS` is the whole of what is legal: bit 10 is refused,
-which `convention_refuses_unknown_reason_bits` pins.
+`DOUBLED_BARE` and `DOUBLED_SEPARATED` and W4 bit 10 on `LETTER_RUN`, which
+cost nothing on the wire because the lane was always sixteen bits and both
+readers always read it as one — Rust holds `Reasons` in a `u16` and the
+generated reader calls `getUint16`. Five bits are left, and `KNOWN_BITS` is the
+whole of what is legal: bit 11 is refused, which
+`convention_refuses_unknown_reason_bits` pins.
 
 `books` is dispersion, and dispersion is information: nothing in the engine
 gates on it. A row with a numerator names at least one book, and no row may

@@ -11,16 +11,27 @@
 //! splits was never counted, so there is nothing to carry. Book coordinates
 //! never enter: the row counts.
 
-use super::{ChapterObs, DoubleTotal, WordAggregate, WordRow, WordTotal, merge_glyph_lane};
+use super::{
+    ChapterObs, DoubleTotal, LETTER_RUN_LANES, ScalarKey, WordAggregate, WordRow, WordTotal,
+    merge_glyph_lane,
+};
 
 /// Merges one book's rows in order. Order is irrelevant to the result, which
 /// is what makes a cached row and a fresh one indistinguishable.
 pub fn fold_book(book: &[ChapterObs<&WordRow>]) -> WordAggregate {
     let mut rows: Vec<WordTotal> = Vec::new();
     let mut doubles: Vec<DoubleTotal> = Vec::new();
+    let mut runs: Vec<(ScalarKey, [u32; LETTER_RUN_LANES])> = Vec::new();
     let mut cased = false;
     for chapter in book {
         cased |= chapter.obs.cased();
+        runs.extend(
+            chapter
+                .obs
+                .letter_runs()
+                .iter()
+                .map(|&(letter, lanes)| (letter, lanes.map(u32::from))),
+        );
         rows.extend(chapter.obs.words().iter().map(|word| {
             WordTotal::new(
                 word.hash,
@@ -73,9 +84,23 @@ pub fn fold_book(book: &[ChapterObs<&WordRow>]) -> WordAggregate {
         }
     }
 
+    runs.sort_unstable_by_key(|row| row.0);
+    let mut letters: Vec<(ScalarKey, [u32; LETTER_RUN_LANES])> = Vec::with_capacity(runs.len());
+    for row in runs {
+        match letters.last_mut() {
+            Some(last) if last.0 == row.0 => {
+                for (slot, count) in last.1.iter_mut().zip(row.1) {
+                    *slot = slot.saturating_add(count);
+                }
+            }
+            _ => letters.push(row),
+        }
+    }
+
     // Reserved for every pre-merge row; a book merges to a third of that, and
     // this aggregate is what the resident cache keeps.
     out.shrink_to_fit();
     lane.shrink_to_fit();
-    WordAggregate::new(out, lane, cased)
+    letters.shrink_to_fit();
+    WordAggregate::new(out, lane, letters, cased)
 }

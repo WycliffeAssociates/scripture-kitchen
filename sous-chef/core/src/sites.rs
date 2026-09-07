@@ -47,8 +47,9 @@ pub fn firing(book: &BookAggregate, patterns: &[Pattern], out: &mut Vec<PatternI
     out.clear();
     for (index, pattern) in patterns.iter().enumerate() {
         // The table is the whole corpus's, and a word row names a hash rather
-        // than a glyph. Those are `words::Words`'s to place.
-        if pattern.channel.is_word() {
+        // than a glyph — and a letter-run row names a letter this walk never
+        // counted. Those are `words::Words`'s to place.
+        if pattern.channel.judged_by_words() {
             continue;
         }
         let held = book
@@ -261,7 +262,8 @@ fn rung(pattern: &Pattern) -> Reasons {
             Side::Next => Reasons::PLACEMENT_AFTER,
         },
         PatternKey::Rarity => Reasons::RARITY,
-        // `firing` never lets one through: a word hash is not a glyph.
+        // `firing` never lets one through: the word pass owns them.
+        PatternKey::LetterRun { .. } => Reasons::LETTER_RUN,
         PatternKey::Casing { .. } => Reasons::CASING,
         PatternKey::WordLength { .. } => Reasons::WORD_LENGTH,
         PatternKey::Doubled { separated, .. } => {
@@ -309,7 +311,10 @@ fn occurrences(
             .filter(|pair| pair[0].1 == glyph && pool_of_key(pair[1].1) == pool)
             .count() as u64,
         PatternKey::Rarity => atoms.iter().filter(|atom| atom.1 == glyph).count() as u64,
-        PatternKey::Casing { .. } | PatternKey::WordLength { .. } | PatternKey::Doubled { .. } => 0,
+        PatternKey::Casing { .. }
+        | PatternKey::WordLength { .. }
+        | PatternKey::Doubled { .. }
+        | PatternKey::LetterRun { .. } => 0,
     }
 }
 
