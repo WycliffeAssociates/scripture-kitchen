@@ -30,8 +30,11 @@
 //! | `glyphs[].topo.*.flag` | a [`PatternKey::Placement`] row on the matching side/class, or (in-run) any [`PatternKey::RunShape`] row |
 //! | `glyphs[].pairs[].{p,n,books}` | merged [`BookAggregate::runs`], the atom immediately after the glyph in a run |
 //! | `glyphs[].pairs[].flag` | a [`PatternKey::ExactNeighbor`] row for that partner |
+//! | `glyphs[].pairs[].pool` | [`pool_of`] on the partner — a heading only, groups the table, no new numbers |
 //! | `glyphs[].runlen.pure` / `.mixed` | merged [`BookAggregate::runs`], runs made entirely of the glyph / runs holding it beside other marks, by length (6 = 6+) |
 //! | `glyphs[].runlen.*[].flag` | the [`PatternKey::RunShape`] row with that purity at that bucket |
+//! | `glyphs[].rarity.flag` | a [`PatternKey::Rarity`] row for the glyph |
+//! | `glyphs[].rarity.samples` | every occurrence, capped at 8, so a glyph whose sole claim is [`PatternKey::Rarity`] still shows one — the gap this closes: `sites::locate` headlines a run by its finest matched pattern, so a rare glyph inside a run some commoner glyph's pattern also headlines listed nowhere before |
 //! | `*.samples` | up to 8 per bucket, from one text scan per glyph per book, classified with [`sous_core::sites::Cursor`] |
 //!
 //! `uname` has no Unicode name lookup (no `unicode_names2` dependency exists
@@ -205,7 +208,24 @@ struct AfterRow {
     total: u64,
     books: u8,
     flag: bool,
+    pool: &'static str,
     samples: Vec<Sample>,
+}
+
+/// The pool heading a partner groups under; a display label only, matching
+/// [`Pool`]'s own name for every variant an in-run neighbour can be, save
+/// [`Pool::Digit`] which never occurs there.
+fn pool_name(pool: Pool) -> &'static str {
+    match pool {
+        Pool::Quote => "Quote",
+        Pool::Bracket => "Bracket",
+        Pool::Dash => "Dash",
+        Pool::Terminal => "Terminal",
+        Pool::Separator => "Separator",
+        Pool::Digit => "Digit",
+        Pool::Symbol => "Symbol",
+        Pool::Other => "Other",
+    }
 }
 
 /// One sample tuple: `[ref, snip, idx, len, cprev, ccur, cidx, cnext]`.
@@ -561,6 +581,7 @@ fn glyph_object(
     let mut topo_samples: FxHashMap<&'static str, Vec<Sample>> = FxHashMap::default();
     let mut after_samples: FxHashMap<char, Vec<Sample>> = FxHashMap::default();
     let mut runlen_samples: FxHashMap<(bool, u8), Vec<Sample>> = FxHashMap::default();
+    let mut rarity_samples: Vec<Sample> = Vec::new();
     for (_, book) in corpus.iter() {
         harvest_samples(
             book,
@@ -568,8 +589,13 @@ fn glyph_object(
             &mut topo_samples,
             &mut after_samples,
             &mut runlen_samples,
+            &mut rarity_samples,
         );
     }
+
+    let rarity_fires = patterns
+        .iter()
+        .any(|p| p.glyph == glyph && p.channel == Channel::Rarity && p.key == PatternKey::Rarity);
 
     let mut side_start_json: Vec<String> = side_start
         .iter()
@@ -604,6 +630,7 @@ fn glyph_object(
             total: n,
             books: b,
             flag: exact_neighbor_fires(partner),
+            pool: pool_name(pool_of(partner)),
             samples: after_samples.remove(&partner).unwrap_or_default(),
         })
         .collect();
@@ -612,11 +639,12 @@ fn glyph_object(
         .iter()
         .map(|row| {
             format!(
-                r#"{{"p":{},"n":{},"books":{},"flag":{},"samples":[{}]}}"#,
+                r#"{{"p":{},"n":{},"books":{},"flag":{},"pool":{},"samples":[{}]}}"#,
                 json_str(&row.partner.to_string()),
                 row.total,
                 row.books,
                 row.flag,
+                json_str(row.pool),
                 samples_json(Some(&row.samples)),
             )
         })
@@ -651,7 +679,7 @@ fn glyph_object(
     let (runlen_mixed_json, runlen_mixed_samples) = runlen_half(false);
 
     format!(
-        r#"{{"g":{g_json},"uname":{uname_json},"cp":{cp_json},"total":{total},"books":{books},"side":{{"start":{{{side_start}}},"end":{{{side_end}}}}},"topo":{{{topo}}},"pairs":[{pairs}],"runlen":{{"pure":{{{runlen_pure}}},"mixed":{{{runlen_mixed}}}}},"runlen_samples":{{"pure":{{{runlen_pure_samples}}},"mixed":{{{runlen_mixed_samples}}}}}}}"#,
+        r#"{{"g":{g_json},"uname":{uname_json},"cp":{cp_json},"total":{total},"books":{books},"side":{{"start":{{{side_start}}},"end":{{{side_end}}}}},"topo":{{{topo}}},"pairs":[{pairs}],"runlen":{{"pure":{{{runlen_pure}}},"mixed":{{{runlen_mixed}}}}},"runlen_samples":{{"pure":{{{runlen_pure_samples}}},"mixed":{{{runlen_mixed_samples}}}}},"rarity":{{"flag":{rarity_flag},"samples":[{rarity_samples}]}}}}"#,
         g_json = json_str(&g),
         uname_json = json_str(&uname),
         cp_json = json_str(&cp),
@@ -663,6 +691,8 @@ fn glyph_object(
         runlen_mixed = runlen_mixed_json,
         runlen_pure_samples = runlen_pure_samples,
         runlen_mixed_samples = runlen_mixed_samples,
+        rarity_flag = rarity_fires,
+        rarity_samples = samples_json(Some(&rarity_samples)),
     )
 }
 
@@ -707,6 +737,7 @@ fn harvest_samples(
     topo_samples: &mut FxHashMap<&'static str, Vec<Sample>>,
     after_samples: &mut FxHashMap<char, Vec<Sample>>,
     runlen_samples: &mut FxHashMap<(bool, u8), Vec<Sample>>,
+    rarity_samples: &mut Vec<Sample>,
 ) {
     let text = book.text();
     let chapters: Vec<Chapter> = book.chapters().collect();
@@ -724,6 +755,13 @@ fn harvest_samples(
         }
         let at = at as u32;
         let width = scalar.len_utf8() as u32;
+
+        // rarity: every occurrence, its own claim independent of run headline
+        if rarity_samples.len() < SAMPLE_CAP
+            && let Some(sample) = build_sample(text, at, width, &verses, book.key())
+        {
+            rarity_samples.push(sample);
+        }
 
         // topo bucket
         let prev = cursor.prev_outer(at);

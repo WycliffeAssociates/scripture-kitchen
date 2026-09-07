@@ -89,6 +89,8 @@ td .bar{display:inline-block;vertical-align:middle;height:8px;background:var(--b
 .pairs tr[tabindex]{cursor:pointer}
 .pairs tr[tabindex]:hover td{background:var(--cell)}
 .pairs tr.sel td{background:var(--cell);box-shadow:inset 3px 0 0 var(--accent)}
+.pairs tr.poolhead td{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.03em;
+  color:var(--muted);padding-top:12px;border-top:1px solid var(--line)}
 .hotpc{color:var(--amber);font-weight:600}
 .runs{display:flex;gap:26px;flex-wrap:wrap}
 .runs .mono{font-size:13px}
@@ -277,21 +279,40 @@ function topoCards(g){
       settings, shown at the top. Click a card to see real verses.</p>
     <div class="cells" id="topoCells">${cards}</div></section>`;
 }
+const POOL_ORDER=["Quote","Bracket","Dash","Terminal","Separator","Symbol","Other"];
+function rarityCard(g){
+  if(!g.rarity||!g.rarity.samples.length)return"";
+  const cls=g.rarity.flag?" hot":"";
+  const sel=S.pick&&S.pick.k==="z"?" sel":"";
+  return `<section><h3>On its own</h3>
+    <p class="note">How rare this mark is, corpus-wide — independent of where any one
+      occurrence sits. A run another, commoner mark headlines can still hold this mark's
+      only claim.</p>
+    <div class="cells"><button class="cellcard${cls}${sel}" data-z="1">
+      <div class="t">Absolute rarity</div><div class="n mono">${fmt(g.total)}</div>
+      <div class="pc">${g.books} book${g.books>1?"s":""}</div></button></div></section>`;
+}
 function pairTable(g){
   if(!g.pairs.length)return"";
   const tot=g.pairs.reduce((a,p)=>a+p.n,0);
-  const ps=[...g.pairs].sort((a,b)=>S.pairSort==="desc"?b.n-a.n:a.n-b.n);
-  const rows=ps.slice(0,40).map(p=>{
+  const ps=[...g.pairs].sort((a,b)=>S.pairSort==="desc"?b.n-a.n:a.n-b.n).slice(0,40);
+  const row=p=>{
     const hot=!!p.flag;
     const sel=S.pick&&S.pick.k==="p"&&S.pick.v===p.p;
     return `<tr tabindex="0" data-p="${esc(p.p)}" class="${sel?"sel":""}">
       <td class="mono">${esc(g.g)} then ${esc(p.p)}</td>
       <td class="mono">${fmt(p.n)}</td>
       <td class="mono${hot?" hotpc":""}">${pct(p.n,tot)}</td></tr>`;
+  };
+  const rows=POOL_ORDER.map(pool=>{
+    const own=ps.filter(p=>p.pool===pool);
+    if(!own.length)return"";
+    return `<tr class="poolhead"><td colspan="3">${pool}</td></tr>${own.map(row).join("")}`;
   }).join("");
   return `<section><h3>What comes right after it in a cluster</h3>
     <p class="note">Counted every time another mark follows ${esc(g.g)} with no space between
-      (${fmt(tot)} times in total). Each digit is counted separately in this table.
+      (${fmt(tot)} times in total). Each digit is counted separately in this table, and rows
+      are grouped by what kind of mark follows.
       <button id="pairTog" style="border:1px solid var(--line);background:transparent;color:var(--accent);border-radius:5px;padding:2px 8px;font-size:12px;cursor:pointer">${S.pairSort==="desc"?"most common first":"rarest first"}</button>
       Click a row to see real verses.</p>
     <div class="twrap"><table class="pairs"><tr><th>combination</th><th>count</th><th>share</th></tr>${rows}</table></div></section>`;
@@ -314,6 +335,7 @@ function samplesPanel(g){
   if(!S.pick)return`<div id="samples" class="empty" style="margin-top:20px">Click an attachment card, a combination row, or a cluster size to see real verses from the translation.</div>`;
   let title="",list=[];
   if(S.pick.k==="t"){const c=g.topo[S.pick.v];title=TLABEL[S.pick.v];list=c?c.samples:[]}
+  else if(S.pick.k==="z"){title=`Every occurrence of ${g.g}`;list=g.rarity?g.rarity.samples:[]}
   else if(S.pick.k==="r"){const [key,l]=S.pick.v.split(":");
     title=`Clusters of size ${l} (${key==="pure"?"only this mark":"with other marks"}) that include ${g.g}`;
     list=((g.runlen_samples||{})[key]||{})[l]||[]}
@@ -348,9 +370,11 @@ function drawBrowse(){
     <div class="gh"><div class="specimen">${esc(g.g)}</div>
       <div><h2>${esc(g.uname)}</h2>
       <div class="facts mono">appears ${fmt(g.total)} times · ${share} of all punctuation and symbols · in ${g.books} book${g.books>1?"s":""}</div></div></div>
-    ${sideTable(g)}${topoCards(g)}${samplesPanel(g)}${pairTable(g)}${runStrip(g)}`;
+    ${rarityCard(g)}${sideTable(g)}${topoCards(g)}${samplesPanel(g)}${pairTable(g)}${runStrip(g)}`;
   document.querySelectorAll("#topoCells .cellcard").forEach(b=>
     b.onclick=()=>{S.pick={k:"t",v:b.dataset.t};drawBrowse()});
+  document.querySelectorAll("[data-z]").forEach(b=>
+    b.onclick=()=>{S.pick={k:"z"};drawBrowse()});
   document.querySelectorAll(".pairs tr[tabindex]").forEach(r=>{
     const go=()=>{S.pick={k:"p",v:r.dataset.p};drawBrowse()};
     r.onclick=go;r.onkeydown=e=>{if(e.key==="Enter")go()};

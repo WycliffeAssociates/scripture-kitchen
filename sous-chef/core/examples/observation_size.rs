@@ -14,7 +14,8 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use rustc_hash::{FxHashMap, FxHashSet};
-use sous_core::unicode::{class_of, is_glue};
+use sous_core::substrate::{ChapterRow, Substrate, is_nonletter as is_nonletter_class};
+use sous_core::unicode::class_of;
 use sous_core::words::{DoubleCount, DoubleTotal, WordCount, WordRow, WordTotal, fold_book};
 use sous_core::{
     BookKey, ChapterInput, ChapterKey, ChapterObs, ChapterPass, TextRange, Verse, VerseKey, Words,
@@ -60,39 +61,11 @@ fn main() {
 // --- classification helpers -------------------------------------------
 
 /// Not alphabetic, not glue, not whitespace — the charter's "everything
-/// else" bucket.
+/// else" bucket. Delegates to the real classifier so word-boundary
+/// stripping agrees with the engine's own `is_nonletter`; unlike a run
+/// atom, a word boundary still strips digits.
 fn is_nonletter(c: char) -> bool {
-    let cl = class_of(c);
-    !cl.is_alphabetic() && !is_glue(c) && !cl.is_whitespace()
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-enum NClass {
-    Letter,
-    Space,
-    Digit,
-    Nonletter,
-    Edge,
-}
-
-/// Glue rides with its base letter (charter invariant 8), so it counts as
-/// `Letter` for pair-triple neighbor purposes rather than its own bucket.
-fn neighbor_class(c: Option<char>) -> NClass {
-    match c {
-        None => NClass::Edge,
-        Some(c) => {
-            let cl = class_of(c);
-            if cl.is_whitespace() {
-                NClass::Space
-            } else if cl.is_decimal_digit() {
-                NClass::Digit
-            } else if cl.is_alphabetic() || is_glue(c) {
-                NClass::Letter
-            } else {
-                NClass::Nonletter
-            }
-        }
-    }
+    is_nonletter_class(class_of(c))
 }
 
 /// Strip leading/trailing nonletter scalars; glue, letters, and digits
@@ -134,52 +107,30 @@ struct ChapterMetrics {
     text_bytes: u64,
 }
 
-fn analyze_chapter(text: &str) -> ChapterMetrics {
-    let chars: Vec<char> = text.chars().collect();
-
-    let mut all_scalars: FxHashSet<char> = FxHashSet::default();
-    let mut nonletter_nondigit: FxHashSet<char> = FxHashSet::default();
-    let mut has_digit = false;
-    for &c in &chars {
-        all_scalars.insert(c);
-        if is_nonletter(c) {
-            if class_of(c).is_decimal_digit() {
-                has_digit = true;
-            } else {
-                nonletter_nondigit.insert(c);
-            }
-        }
-    }
-    let distinct_nonletter = nonletter_nondigit.len() as u64 + u64::from(has_digit);
-
-    let mut pairs: FxHashSet<(char, NClass, NClass)> = FxHashSet::default();
-    for i in 0..chars.len() {
-        if is_nonletter(chars[i]) {
-            let prev = neighbor_class(i.checked_sub(1).map(|j| chars[j]));
-            let next = neighbor_class(chars.get(i + 1).copied());
-            pairs.insert((chars[i], prev, next));
-        }
-    }
-
-    let mut run_shapes: FxHashSet<String> = FxHashSet::default();
-    let mut total_runs = 0u64;
-    let mut run = String::new();
-    for &c in &chars {
-        if is_nonletter(c) {
-            run.push(c);
-        } else if !run.is_empty() {
-            total_runs += 1;
-            run_shapes.insert(std::mem::take(&mut run));
-        }
-    }
-    if !run.is_empty() {
-        total_runs += 1;
-        run_shapes.insert(run);
-    }
-    let run_bytes: u64 = run_shapes
+/// Glyph sizing reads the real [`Substrate`] row (`row`), not a local
+/// re-derivation: `runs()` already excludes digits by the engine's own
+/// `is_run_atom`, so a mixed digit/punctuation stretch is not a run here
+/// either. Word sizing (below) is unaffected and stays its own estimate.
+fn analyze_chapter(text: &str, row: &ChapterRow) -> ChapterMetrics {
+    let distinct_scalars = row.scalars().len() as u64;
+    let distinct_nonletter = row
+        .scalars()
         .iter()
-        .map(|s| 4 + 4 * s.chars().count() as u64)
-        .sum();
+        .filter(|(key, _)| key.is_digits() || key.scalar().is_some_and(is_nonletter))
+        .count() as u64;
+    let distinct_pairs = row.pairs().len() as u64;
+
+    let mut distinct_runs = 0u64;
+    let mut total_runs = 0u64;
+    let mut run_atoms = 0u64;
+    for (atoms, count) in row.runs() {
+        distinct_runs += 1;
+        total_runs += u64::from(count);
+        run_atoms += atoms.len() as u64;
+    }
+    // `runs` is `(offset, len, count)` triples (three u32s); `run_atoms`
+    // holds one `ScalarKey` (u32) per atom of each distinct shape, once.
+    let run_bytes = 12 * distinct_runs + 4 * run_atoms;
 
     let mut word_tokens = 0u64;
     let mut words_exact: FxHashSet<String> = FxHashSet::default();
@@ -203,18 +154,18 @@ fn analyze_chapter(text: &str) -> ChapterMetrics {
         (le15 / distinct_folded as f64, le7 / distinct_folded as f64)
     };
 
-    let scalar_lane_bytes = 8 * all_scalars.len() as u64 + 12 * pairs.len() as u64 + 8 + run_bytes;
+    let scalar_lane_bytes = 8 * distinct_scalars + 12 * distinct_pairs + 8 + run_bytes;
     // Distinct folded forms plus a 5% margin for case/inflection variants
     // sharing a folded key, each variant needing its own count+flags entry.
     let lane_a_bytes = distinct_folded as f64 * 1.05 * 24.0;
     let lane_b_bytes = distinct_folded * 12;
 
     ChapterMetrics {
-        scalar_tokens: chars.len() as u64,
-        distinct_scalars: all_scalars.len() as u64,
+        scalar_tokens: u64::from(row.scalar_count()),
+        distinct_scalars,
         distinct_nonletter,
-        distinct_pairs: pairs.len() as u64,
-        distinct_runs: run_shapes.len() as u64,
+        distinct_pairs,
+        distinct_runs,
         total_runs,
         word_tokens,
         distinct_words_exact: words_exact.len() as u64,
@@ -301,6 +252,15 @@ fn word_row(text: &str, verses: &[Verse]) -> WordRow {
     })
 }
 
+/// The real Level 1b row `analyze_chapter`'s glyph sizing reads.
+fn substrate_row(text: &str, verses: &[Verse]) -> ChapterRow {
+    Substrate.map(ChapterInput {
+        text,
+        verses,
+        key: ChapterKey::new(BookKey::new(*b"MRK"), 1),
+    })
+}
+
 fn report(name: &str, path: &Path) {
     let raw = std::fs::read_to_string(path)
         .unwrap_or_else(|error| panic!("{} must be readable: {error}", path.display()));
@@ -376,7 +336,8 @@ fn report(name: &str, path: &Path) {
             word_row_bytes.push(row.resident_bytes() as u64);
             doubles_row_bytes.push(size_of_val(row.doubles()) as u64);
             book_rows.push(row);
-            (key, analyze_chapter(&text))
+            let scalar_row = substrate_row(&text, &verses);
+            (key, analyze_chapter(&text, &scalar_row))
         })
         .collect();
     fold(&mut book_rows, &mut aggregate_bytes, &mut aggregate_rows);

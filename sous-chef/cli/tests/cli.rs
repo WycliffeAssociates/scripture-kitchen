@@ -301,3 +301,51 @@ fn report_writes_a_self_contained_inventory_page() {
             .contains(" inventory (")
     );
 }
+
+/// A glyph rare enough to fire only `PatternKey::Rarity` still lists a
+/// sample on its own card, even though its one occurrence sits in a run a
+/// commoner glyph's pattern would headline (`sites.rs`'s "one row per run,
+/// headlined by the finest match" — the report must not inherit that as "one
+/// glyph's card per run").
+#[test]
+fn rarity_only_glyph_inside_a_headlined_run_still_lists_a_sample() {
+    let temp = TempDir::new();
+    let book = temp.0.join("MRK.usfm");
+    fs::write(
+        &book,
+        concat!(
+            "\\id MRK\n\\c 1\n\\p\n",
+            "\\v 1 One sentence ends here.\n",
+            "\\v 2 Another one ends here.\n",
+            "\\v 3 A third one ends here.\n",
+            "\\v 4 A fourth one ends here.\n",
+            "\\v 5 A fifth one ends here.\n",
+            "\\v 6 A sixth one ends here.]\n",
+        ),
+    )
+    .unwrap();
+    let page = temp.0.join("inventory.html");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_sous"))
+        .arg("--report")
+        .arg(&page)
+        .arg(&book)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    let rendered = fs::read_to_string(&page).unwrap();
+    // `]` occurs once in the whole book, under the default rarity floor of 5;
+    // its run is `.]`, which the far commoner `.` headlines. `]`'s own card
+    // still carries at least one sample.
+    let glyph_at = rendered.find(r#""g":"]""#).expect("the ] glyph has a card");
+    let rarity_at = rendered[glyph_at..]
+        .find(r#""rarity":"#)
+        .map(|offset| glyph_at + offset)
+        .expect("the glyph card carries a rarity field");
+    let field = &rendered[rarity_at..rarity_at + 120];
+    assert!(
+        field.starts_with(r#""rarity":{"flag":true,"samples":[["#),
+        "a rarity-only glyph still lists a sample: {field}"
+    );
+}
