@@ -166,6 +166,19 @@ Hindi USFM in the repo — so its row searches the file under an IDENTITY mask,
 one range over the whole text. It measures scan and placement over a non-Latin
 script; it does not measure masking.
 
+## Crossing to a host
+
+`find::wire::encode` is the same hits as one little-endian `u32` buffer, in
+UTF-16, with the ids and a projected preview per hit — the shape a host outside
+Rust reads. It lives beside Find rather than in `wasm.rs` because BOTH of
+Sefer's doors encode it: the browser through `Galley::find`/`findAll`, the
+desktop through `Expediter::find` linked natively. One encoder, so the two doors
+cannot drift. `wasm.md` states the layout for the reader on the other side.
+
+The preview is in the buffer because the projection is materialized per search
+and dropped with the iterator; `Hits::projection()` is the borrow that lets the
+encoder read the offsets and the snippet off the copy the search already made.
+
 ## Replacement is the caller's
 
 Not in this slice, and it does not need to be: a hit is already source ranges,

@@ -25,9 +25,20 @@ use sous_core::Brigade;
 use sous_core::judge::{Channels, JudgingConfig};
 use sous_core::proportionality::LengthConfig;
 
+use crate::find::Find;
 use crate::onion;
 use crate::pantry::{BookId, Retain, Role};
 use crate::sous::Expediter;
+
+/// The two flags the find doors take, as the query Find prepares once.
+///
+/// `case_sensitive` rather than `case_insensitive` because that is the
+/// checkbox a host draws; the engine's option is the negation of it.
+fn query(needle: &str, case_sensitive: bool, whole_word: bool) -> Find<'_> {
+    Find::literal(needle)
+        .case_insensitive(!case_sensitive)
+        .whole_word(whole_word)
+}
 
 /// Products for roughly three of the largest books in the wild. Measured: the
 /// biggest book in the corpus (en_ult PSA, 5.1 MB) is 3.27 MB warm, 4.62 MB
@@ -103,6 +114,73 @@ impl Galley {
         self.sous
             .publish()
             .map_err(|error| JsError::new(&error.to_string()))
+    }
+
+    // ── Find ────────────────────────────────────────────────────────────
+
+    /// Every hit of `needle` in ONE registered target's verse-text
+    /// projection, as the find buffer ([`crate::find::wire`] and `wasm.md`
+    /// state the layout: little-endian `u32`, UTF-16 offsets, both coordinate
+    /// spaces per hit).
+    ///
+    /// The search runs over the PROJECTION — what a reader sees — so a needle
+    /// inside a footnote is not found, and a needle that spans one comes back
+    /// as one source range per contiguous piece. That is the whole reason the
+    /// buffer carries a piece count per hit.
+    ///
+    /// Literal only: `needle` is never a pattern. `whole_word` is the words
+    /// rule galley restates in `find.md`; case-insensitive is the simple
+    /// lowercase fold, not a collator. `limit` bounds hits across the whole
+    /// call, and `0` means no bound. Errors when `id` is not a registered
+    /// target — a reference retains neither text nor projection, so it cannot
+    /// be searched, and answering "no hits" would say it was clean.
+    pub fn find(
+        &mut self,
+        id: &str,
+        needle: &str,
+        case_sensitive: bool,
+        whole_word: bool,
+        limit: u32,
+    ) -> Result<Vec<u8>, JsError> {
+        let wanted = BookId::from(id);
+        let known = self
+            .sous
+            .pantry()
+            .books(Role::Target)
+            .iter()
+            .any(|(book, _)| *book == wanted);
+        if !known {
+            return Err(JsError::new(&format!("no target is registered as {id}")));
+        }
+        Ok(self
+            .sous
+            .find(&query(needle, case_sensitive, whole_word), &[wanted], limit))
+    }
+
+    /// The same over EVERY registered target, in canonical book order — the
+    /// project-wide find.
+    ///
+    /// The buffer's `bookIndex` indexes its own id table, which names every
+    /// target searched whether or not it matched, so a consumer never has to
+    /// ask a second question to learn which book a hit is in.
+    #[wasm_bindgen(js_name = findAll)]
+    pub fn find_all(
+        &mut self,
+        needle: &str,
+        case_sensitive: bool,
+        whole_word: bool,
+        limit: u32,
+    ) -> Result<Vec<u8>, JsError> {
+        let ids: Vec<BookId> = self
+            .sous
+            .pantry()
+            .books(Role::Target)
+            .iter()
+            .map(|(id, _)| id.clone())
+            .collect();
+        Ok(self
+            .sous
+            .find(&query(needle, case_sensitive, whole_word), &ids, limit))
     }
 
     // ── Judging ─────────────────────────────────────────────────────────

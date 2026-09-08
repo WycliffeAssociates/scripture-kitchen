@@ -328,6 +328,18 @@ impl<P: ChapterPass + Sync> Expediter<P> {
         self.pantry.masked(text, filter)
     }
 
+    /// A literal find over the REGISTERED books' retained projections, as the
+    /// host buffer ([`find::wire`](crate::find::wire) states the layout).
+    ///
+    /// The one door here that reads books rather than loose text, and a
+    /// pass-through for the same reason the others are: the search wants the
+    /// Pantry's retained masks and touches nothing else. `ids` is both what is
+    /// searched and the buffer's `bookIndex` space — take it from
+    /// [`Pantry::books`] for canonical order.
+    pub fn find(&mut self, find: &crate::find::Find<'_>, ids: &[BookId], limit: u32) -> Vec<u8> {
+        crate::find::wire::encode(&mut self.pantry, ids, find, limit)
+    }
+
     /// The pass this coordinator maps, folds, and judges with.
     pub fn pass(&self) -> &P {
         &self.pass
