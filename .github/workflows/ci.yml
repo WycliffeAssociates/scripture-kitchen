@@ -266,7 +266,7 @@ jobs:
             [ "$got" = "$want" ] || { echo "$f is $got, tag says $want"; fail=1; }
           done
           for f in package.json onion-wasm/package.json galley/package.json; do
-            got=$(node -p "require('./$f').version")
+            got=$(node --input-type=commonjs -p "require('./$f').version" < /dev/null)
             [ "$got" = "$want" ] || { echo "$f is $got, tag says $want"; fail=1; }
           done
           exit $fail

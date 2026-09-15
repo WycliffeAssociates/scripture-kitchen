@@ -232,6 +232,71 @@ retains no text; register it with keepText`), because "no hits" would be a lie;
 fold and `whole_word` is the words rule restated in `find.md`; there is no
 regex here and the `regex` crate is not a dependency.
 
+## The overlay doors
+
+Six methods on the handle, because they read the resident Pantry: `skeleton`,
+`overlay`, `overlayText`, `overlayReport`, `targetNodeFor`, `sourceNodeFor`.
+A target's block structure made equal to a declared source's — the shape a
+verse-only Bible needs to be typeset against a source's paragraphing and
+poetry. `galley/src/overlay.md` is the contract; this is the wire.
+
+```js
+galley.update("books/GEN.usfm", target);
+galley.updateReference("ref/GEN.usfm", source, true);   // keepText: a skeleton needs the text
+
+const skeleton = JSON.parse(galley.skeleton("ref/GEN.usfm"));
+//   { verses: [{ sid, from, to, textFrom, textTo }],
+//     blocks: [{ sid, where: "leading" | "inside", ordinal, marker, from, to, empty }] }
+
+const edits = galley.overlay("books/GEN.usfm", "ref/GEN.usfm");
+//   Edits — spans, lens, text: onion-wasm's own class, the shape a fix crosses in
+const report = JSON.parse(galley.overlayReport("books/GEN.usfm", "ref/GEN.usfm"));
+//   { inserted, removed, collapsed, unpaired }
+galley.overlayText("books/GEN.usfm", "ref/GEN.usfm");   // the same edits, applied
+
+const at = { sid: "GEN 2:23", where: "inside", ordinal: 1, marker: "q1" };
+JSON.parse(galley.sourceNodeFor("books/GEN.usfm", "ref/GEN.usfm", at));  // { found: SkeletonRow }
+JSON.parse(galley.targetNodeFor("books/GEN.usfm", "ref/GEN.usfm", at));  // { absent: true, insertAt, where }
+```
+
+An address is `{ sid, where, ordinal, marker }` and every field is required.
+The position is the key; `marker` is the spelling that position held when the
+address was taken, checked against the side the address came from. A position
+that still exists but now spells something else THROWS (`… names q1 but the
+node there is q2 — the address is stale`) instead of answering about a
+different node.
+
+Every door takes the same optional `{ markers?, scope?, utf16? }`; `skeleton`
+and the two `*NodeFor` doors take `utf16` as a trailing boolean as well, the
+way `parse` does. A misspelled key reads as absent, a wrong TYPE throws, and
+an unknown marker name throws rather than filtering nothing.
+
+**Edits, not the string, is the door a host wants.** `overlay` returns
+`onion-wasm`'s own `Edits` — the class `formatEdits` answers with — so an
+editor applies an overlay exactly as it applies a fix: through the document,
+as ONE undo step. Highlighting falls out of the edits for free and scope is
+natural. `overlayText` is for a caller that only needs the string.
+
+**The one difference is the unit.** `formatEdits` and `formatEditsIn` always
+answer in UTF-16; `overlay` answers in BYTES unless `utf16` asks otherwise,
+like every other door on the `Galley` handle. `Edits` itself names no unit —
+its producer does. `spans` AND `lens` carry the unit that was asked for: `lens`
+slices `text` at the offsets `spans` place, so a host that reads `text` as a
+JS string under `utf16: true` gets lengths in code units too. Every insert an
+overlay writes is ASCII today, where the two counts agree; the conversion is
+there so that stays true of a marker that is not.
+
+**JSON for the three read-only doors.** They answer structured rows on a
+cold, modal-open path — the same kind of path onion-wasm already carries serde
+for. `serde` and `serde_json` are galley dependencies behind the `wasm`
+feature ONLY: `galley::overlay` computes plain Rust structs, `galley::wasm::
+overlay` serializes them, and the native crate links no serializer at all.
+`sous-core` and `onion` stay serde-free. JSON now; an array buffer later only
+if a measurement asks for one.
+
+An overlay is a suggestion applied on request, never a finding: nothing here
+is on the publication path.
+
 ## SousSettings
 
 `SousSettings` is every plain scalar of `JudgingConfig`, flat, with `pub` fields so

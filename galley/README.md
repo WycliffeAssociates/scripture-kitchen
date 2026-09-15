@@ -64,3 +64,9 @@ here and regenerate; never both by hand. CI diffs the derived file.
 `galley/src/wasm.md` is the door list, the find buffer's layout, and the
 equivalence claim. In short: `update` is the only door that takes a book's
 text, and the rest run off the retained copy by id.
+
+Match formatting — a target's paragraph and poetry structure made equal to a
+source's, as one edit transaction — is `overlay` and its five companions on
+the handle. `galley/src/overlay.md` is the contract (the skeleton, the block
+address, what crosses and what never does, the round-trip law and its one
+USFM caveat); the "overlay doors" section of `wasm.md` is the wire.

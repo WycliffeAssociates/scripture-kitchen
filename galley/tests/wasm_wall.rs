@@ -18,6 +18,7 @@
 
 use usfm_galley::wasm::onion;
 use usfm_galley::wasm::{Galley, SousSettings};
+use wasm_bindgen::JsValue;
 use wasm_bindgen_test::*;
 
 const GEN: &str = include_str!("fixtures/sous/GEN.usfm");
@@ -26,6 +27,9 @@ const RUT: &str = include_str!("fixtures/sous/RUT.usfm");
 const JON: &str = include_str!("fixtures/sous/JON.usfm");
 const RUT_REF: &str = include_str!("fixtures/sous/ref/RUT.usfm");
 const JON_REF: &str = include_str!("fixtures/sous/ref/JON.usfm");
+
+const OVERLAY_TARGET: &str = include_str!("fixtures/overlay/gen-target.usfm");
+const OVERLAY_SOURCE: &str = include_str!("fixtures/overlay/gen-source.usfm");
 
 const COLD: &[u8] = include_bytes!("goldens/sous/cold.bin");
 const EDIT: &[u8] = include_bytes!("goldens/sous/edit.bin");
@@ -312,4 +316,72 @@ fn the_retained_copy_is_its_own_baseline() {
         None,
         "an unregistered id answers undefined",
     );
+}
+
+/// The overlay, end to end through the module: the skeleton JSON, the edit
+/// transaction, the applied text, and the UTF-16 opt-in.
+#[wasm_bindgen_test]
+fn an_overlay_crosses_the_wall() {
+    let mut galley = Galley::new(None);
+    galley.update("books/GEN.usfm", OVERLAY_TARGET).unwrap();
+    galley
+        .update_reference("ref/GEN.usfm", OVERLAY_SOURCE, Some(true))
+        .unwrap();
+
+    let skeleton = galley
+        .skeleton("ref/GEN.usfm", JsValue::UNDEFINED, None)
+        .expect("the source has a skeleton");
+    assert!(
+        skeleton.contains(r#""sid":"GEN 2:23","where":"inside","ordinal":1,"marker":"q1""#),
+        "{skeleton}"
+    );
+    assert!(
+        skeleton.contains(r#""sid":"GEN 2:24","where":"leading","ordinal":1,"marker":"p""#),
+        "{skeleton}"
+    );
+
+    let report = galley
+        .overlay_report("books/GEN.usfm", "ref/GEN.usfm", JsValue::UNDEFINED)
+        .expect("a report");
+    assert!(report.contains(r#""removed":[]"#), "{report}");
+    assert!(report.contains(r#""unpaired":[]"#), "{report}");
+    assert!(
+        report.contains(r#""empty":true"#),
+        "inside blocks await text"
+    );
+
+    let applied = galley
+        .overlay_text("books/GEN.usfm", "ref/GEN.usfm", JsValue::UNDEFINED)
+        .expect("the overlay applies");
+    assert!(
+        applied.contains("\\q1\n\\q2\n\\q1\n\\q2\n\\p\n\\v 24"),
+        "{applied}"
+    );
+    assert!(!applied.contains("\\f "), "the source's notes stay home");
+
+    // Both coordinate spaces, from one transaction: the UTF-16 spans are the
+    // byte spans through the module's own `toUtf16`.
+    let bytes = galley
+        .overlay("books/GEN.usfm", "ref/GEN.usfm", JsValue::UNDEFINED)
+        .expect("a transaction");
+    let units = galley
+        .overlay("books/GEN.usfm", "ref/GEN.usfm", utf16_opts())
+        .expect("the same, in UTF-16");
+    assert_eq!(bytes.spans().len(), units.spans().len());
+    assert_eq!(bytes.text(), units.text(), "the inserted text is the same");
+    for (byte, unit) in bytes.spans().into_iter().zip(units.spans()) {
+        assert_eq!(unit, onion::to_utf16(OVERLAY_TARGET, byte), "span {byte}");
+    }
+}
+
+/// `{ utf16: true }`, built the way a host would.
+fn utf16_opts() -> JsValue {
+    let opts = js_sys::Object::new();
+    js_sys::Reflect::set(
+        &opts,
+        &JsValue::from_str("utf16"),
+        &JsValue::from_bool(true),
+    )
+    .expect("a plain object takes a property");
+    opts.into()
 }

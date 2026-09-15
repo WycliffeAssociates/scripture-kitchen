@@ -2,11 +2,15 @@
 /* eslint-disable */
 
 /**
- * One transaction of proposed splices: `[from, to]` pairs in UTF-16, one
- * concatenated ASCII insert blob, one byte length per edit.
+ * One transaction of proposed splices: `[from, to]` pairs, one concatenated
+ * ASCII insert blob, one length per edit.
  *
  * The same shape a fix crosses in — an editor session applies both the same
- * way, and `lens[i] == 0` is a pure deletion.
+ * way, and `lens[i] == 0` is a pure deletion. `spans` and `lens` are always
+ * in the SAME unit, because `lens` slices `text` at offsets `spans` place:
+ * the formatter's doors here answer in UTF-16 throughout, and a producer in
+ * another crate names its own unit (`galley`'s overlay answers bytes unless
+ * asked for UTF-16).
  */
 export class Edits {
     private constructor();
@@ -119,10 +123,10 @@ export class Galley {
      */
     entryCount(): number;
     /**
-     * Every hit of `needle` in ONE registered target's verse-text
-     * projection, as the find buffer ([`crate::find::wire`] and `wasm.md`
-     * state the layout: little-endian `u32`, UTF-16 offsets, both coordinate
-     * spaces per hit).
+     * Every hit of `needle` in ONE registered book's verse-text projection,
+     * as the find buffer ([`crate::find::wire`] and `wasm.md` state the
+     * layout: magic and version, then little-endian `u32`, UTF-16 offsets,
+     * both coordinate spaces per hit).
      *
      * The search runs over the PROJECTION — what a reader sees — so a needle
      * inside a footnote is not found, and a needle that spans one comes back
@@ -132,20 +136,26 @@ export class Galley {
      * Literal only: `needle` is never a pattern. `whole_word` is the words
      * rule galley restates in `find.md`; case-insensitive is the simple
      * lowercase fold, not a collator. `limit` bounds hits across the whole
-     * call, and `0` means no bound. Errors when `id` is not a registered
-     * target — a reference retains neither text nor projection, so it cannot
-     * be searched, and answering "no hits" would say it was clean.
+     * call, and `0` means no bound. Any registered book that retains text and
+     * a projection may be searched — a target, or a reference registered with
+     * `keepText`. One that retains neither errors by name, because answering
+     * "no hits" would say it was clean.
      */
     find(id: string, needle: string, case_sensitive: boolean, whole_word: boolean, limit: number): Uint8Array;
     /**
-     * The same over EVERY registered target, in canonical book order — the
-     * project-wide find.
+     * The same over every searchable book in `scope`, in canonical book order
+     * — the project-wide find.
+     *
+     * `scope` is `"targets"` (the default when omitted), `"references"`, or
+     * `"all"`, which searches the targets and then the references. A
+     * reference registered without `keepText` is in no scope: it retains
+     * nothing to search, so it is not listed either.
      *
      * The buffer's `bookIndex` indexes its own id table, which names every
-     * target searched whether or not it matched, so a consumer never has to
-     * ask a second question to learn which book a hit is in.
+     * book searched whether or not it matched, so a consumer never has to ask
+     * a second question to learn which book a hit is in.
      */
-    findAll(needle: string, case_sensitive: boolean, whole_word: boolean, limit: number): Uint8Array;
+    findAll(needle: string, case_sensitive: boolean, whole_word: boolean, limit: number, scope?: string | null): Uint8Array;
     /**
      * Chunk starts plus one checksum each, and no text — the ~1 KB baseline
      * user land keeps beside a file on disk.
@@ -194,6 +204,54 @@ export class Galley {
      */
     constructor(budget_bytes?: number | null);
     /**
+     * The edits that make `targetId`'s skeleton `sourceId`'s, exactly.
+     *
+     * ```ts
+     * interface OverlayOptions {
+     *   markers?: string[];                              // default: onion's paragraph+poetry block set, no titles
+     *   scope?: { chapter: number } | { sid: string };   // default: the whole book
+     *   utf16?: boolean;                                 // default false: byte offsets; true: UTF-16 units, like parse/find
+     * }
+     * ```
+     *
+     * A source block the target lacks is INSERTED — before the verse's `\v`
+     * when it is leading, EMPTY after the verse's text when it is inside,
+     * because where a verse's text splits is unknowable across languages and
+     * the translator pastes each line into place. A target block the source
+     * lacks is REMOVED and its text joins the block before it. Footnotes and
+     * cross-references never cross; their locations are the target's own.
+     *
+     * The transaction is ascending and non-overlapping, so a host applies it
+     * through the document as ONE undo step — it is `onion-wasm`'s own
+     * `Edits`, the class `formatEdits` answers with, so an editor applies an
+     * overlay exactly as it applies a fix. Its spans are BYTES here unless
+     * `utf16` asks otherwise; `formatEdits`'s are always UTF-16.
+     */
+    overlay(target_id: string, source_id: string, opts: any): Edits;
+    /**
+     * What the overlay did, and what it declined to do, as JSON.
+     *
+     * ```ts
+     * interface BlockAddress { sid: string; where: "leading" | "inside"; ordinal: number;
+     *                           marker: string }   // the spelling that position held
+     * interface OverlayReport {
+     *   inserted:  { address: BlockAddress; marker: string; at: number; empty: boolean }[];  // empty = Inside block awaiting text
+     *   removed:   { address: BlockAddress; marker: string; from: number; to: number }[];    // target blocks the source lacks
+     *   collapsed: { sid: string; marker: string; count: number }[];                         // source empty-block runs folded to one
+     *   unpaired:  { sid: string; side: "target" | "source"; reason: "absent" | "bridge" | "ambiguous" }[];
+     * }
+     * ```
+     *
+     * An overlay is a SUGGESTION applied on request, never a finding.
+     */
+    overlayReport(target_id: string, source_id: string, opts: any): string;
+    /**
+     * The same transaction applied — the target's own bytes under the
+     * source's structure. [`overlay`](Self::overlay) is what an editor wants;
+     * this is for a caller that only needs the string.
+     */
+    overlayText(target_id: string, source_id: string, opts: any): string;
+    /**
      * One registered book, plated — the same buffer `onion_wasm::parse`
      * returns for that text, with the lex, the tree and the lint walk reused
      * for every chunk whose bytes did not change.
@@ -236,10 +294,57 @@ export class Galley {
      */
     setConfig(settings: SousSettings): void;
     /**
+     * One registered book's block structure, as JSON — either side, and the
+     * whole truth for drawing.
+     *
+     * ```ts
+     * interface Skeleton {
+     *   verses: { sid: string; from: number; to: number; textFrom: number; textTo: number }[];
+     *                  // the \v marker span, and the verse's own text span
+     *   blocks: SkeletonRow[];
+     * }
+     * interface SkeletonRow {
+     *   sid: string; where: "leading" | "inside"; ordinal: number;   // the address
+     *   marker: string;                                              // "q1"
+     *   from: number; to: number;                                    // the marker node's span
+     *   empty: boolean;                       // onion's empty paragraph; a source folds these away
+     * }
+     * ```
+     *
+     * `opts` is an [`OverlayOptions`](Self::overlay) — only `markers` is read
+     * here — and `utf16` asks for UTF-16 offsets instead of bytes. A block is
+     * LEADING when it sits immediately before its verse's `\v`, INSIDE when
+     * the verse's own text is above it; ordinals count from one per address.
+     */
+    skeleton(id: string, opts: any, utf16?: boolean | null): string;
+    /**
+     * A TARGET block's address, answered in the source — the mirror of
+     * [`targetNodeFor`](Self::target_node_for), and the same three answers.
+     */
+    sourceNodeFor(target_id: string, source_id: string, address: any, opts: any, utf16?: boolean | null): string;
+    /**
      * The structure recipe's text, the verse-text mask's sibling. No book
      * retains a structure projection, so this door takes text only.
      */
     structureTextOf(text: string): string;
+    /**
+     * A SOURCE block's address, answered in the target: where it is, or
+     * where the overlay would put it.
+     *
+     * ```ts
+     * type Equivalent =
+     *   | { found: SkeletonRow }                                            // same address on the other side
+     *   | { absent: true; insertAt: number; where: "leading" | "inside" }   // where overlay would put it
+     *   | { unpaired: true; reason: "absent" | "bridge" | "ambiguous" };    // the verse itself has no pair
+     * ```
+     *
+     * `address.marker` is REQUIRED and is checked against the side the
+     * address was taken from: if that position still exists but now spells
+     * something else, the call THROWS ("… names q2 but the node there is q1
+     * — the address is stale") rather than answering about another node. The
+     * position is still the key; the name is only the check.
+     */
+    targetNodeFor(target_id: string, source_id: string, address: any, opts: any, utf16?: boolean | null): string;
     /**
      * Register or replace one whole book under the caller's `id`, as a
      * target: it keeps its text, and it publishes findings.
@@ -256,14 +361,20 @@ export class Galley {
      *
      * A reference publishes no findings of its own; it is the denominator
      * the length lane compares a target's verses against.
+     *
+     * `keepText` — omitted is `false` — makes it keep the text and the
+     * projection a target keeps too, which is what [`find`](Self::find) and
+     * `findAll`'s `"references"` scope read. It costs what a target costs
+     * minus the resident analysis; a source nobody searches should stay off
+     * it.
      */
-    updateReference(id: string, text: string): string;
+    updateReference(id: string, text: string, keep_text?: boolean | null): string;
     /**
-     * One registered target's verse text, off the projection it already
+     * One registered book's verse text, off the projection it already
      * retains — no mask is cut and no text crosses in.
      *
-     * A reference retains no projection and refuses; so does a target the
-     * host registered without its text.
+     * A reference registered without its text retains no projection and
+     * refuses.
      */
     verseText(id: string): string;
     /**
@@ -370,8 +481,13 @@ export function book(text: string): string;
 /**
  * The diff skeleton as JSON. Spans are UTF-16 offsets into each side's own
  * document.
+ *
+ * `text_mode` is `"none"` | `"words"` | `"chars"`: the intra-verse runs a
+ * `modified` unit is highlighted by, at UAX-29 word or grapheme grain.
+ * `"none"` computes nothing — no CST, no mask — and yields the same JSON the
+ * door returned before runs existed.
  */
-export function diff(baseline: string, current: string): string;
+export function diff(baseline: string, current: string, text_mode: string): string;
 
 /**
  * The formatted document. `format_edits` applied, in one call.

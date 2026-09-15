@@ -21,15 +21,18 @@
 
 use wasm_bindgen::prelude::*;
 
+use mise::utf16::Utf16Table;
 use sous_core::Brigade;
 use sous_core::judge::{Channels, JudgingConfig};
 use sous_core::proportionality::LengthConfig;
 
 use crate::find::Find;
+use crate::overlay::Side;
 use crate::pantry::{BookId, Entry, Retain, Role};
 use crate::sous::Expediter;
 
 pub mod onion;
+pub mod overlay;
 
 /// The two flags the find doors take, as the query Find prepares once.
 ///
@@ -216,6 +219,172 @@ impl Galley {
         Ok(self
             .sous
             .find(&query(needle, case_sensitive, whole_word), &ids, limit))
+    }
+
+    // ── Match formatting: a target's skeleton made the source's ─────────
+
+    /// One registered book's block structure, as JSON — either side, and the
+    /// whole truth for drawing.
+    ///
+    /// ```ts
+    /// interface Skeleton {
+    ///   verses: { sid: string; from: number; to: number; textFrom: number; textTo: number }[];
+    ///                  // the \v marker span, and the verse's own text span
+    ///   blocks: SkeletonRow[];
+    /// }
+    /// interface SkeletonRow {
+    ///   sid: string; where: "leading" | "inside"; ordinal: number;   // the address
+    ///   marker: string;                                              // "q1"
+    ///   from: number; to: number;                                    // the marker node's span
+    ///   empty: boolean;                       // onion's empty paragraph; a source folds these away
+    /// }
+    /// ```
+    ///
+    /// `opts` is an [`OverlayOptions`](Self::overlay) — only `markers` is read
+    /// here — and `utf16` asks for UTF-16 offsets instead of bytes. A block is
+    /// LEADING when it sits immediately before its verse's `\v`, INSIDE when
+    /// the verse's own text is above it; ordinals count from one per address.
+    pub fn skeleton(
+        &mut self,
+        id: &str,
+        opts: JsValue,
+        utf16: Option<bool>,
+    ) -> Result<String, JsError> {
+        let (options, flag) = overlay::options(&opts)?;
+        let wanted = BookId::from(id);
+        let mut skeleton = self.sous.skeleton(&wanted, &options).map_err(door)?;
+        let utf16 = utf16.unwrap_or(flag);
+        let table = self.table(&wanted, utf16)?;
+        overlay::rebase_skeleton(&mut skeleton, table.as_ref());
+        overlay::json(&skeleton)
+    }
+
+    /// The edits that make `targetId`'s skeleton `sourceId`'s, exactly.
+    ///
+    /// ```ts
+    /// interface OverlayOptions {
+    ///   markers?: string[];                              // default: onion's paragraph+poetry block set, no titles
+    ///   scope?: { chapter: number } | { sid: string };   // default: the whole book
+    ///   utf16?: boolean;                                 // default false: byte offsets; true: UTF-16 units, like parse/find
+    /// }
+    /// ```
+    ///
+    /// A source block the target lacks is INSERTED — before the verse's `\v`
+    /// when it is leading, EMPTY after the verse's text when it is inside,
+    /// because where a verse's text splits is unknowable across languages and
+    /// the translator pastes each line into place. A target block the source
+    /// lacks is REMOVED and its text joins the block before it. Footnotes and
+    /// cross-references never cross; their locations are the target's own.
+    ///
+    /// The transaction is ascending and non-overlapping, so a host applies it
+    /// through the document as ONE undo step — it is `onion-wasm`'s own
+    /// `Edits`, the class `formatEdits` answers with, so an editor applies an
+    /// overlay exactly as it applies a fix. Its spans are BYTES here unless
+    /// `utf16` asks otherwise; `formatEdits`'s are always UTF-16.
+    pub fn overlay(
+        &mut self,
+        target_id: &str,
+        source_id: &str,
+        opts: JsValue,
+    ) -> Result<onion_wasm::Edits, JsError> {
+        let (options, utf16) = overlay::options(&opts)?;
+        let target = BookId::from(target_id);
+        let computed = self
+            .sous
+            .overlay(&target, &BookId::from(source_id), &options)
+            .map_err(door)?;
+        let table = self.table(&target, utf16)?;
+        Ok(overlay::edits(&computed, table.as_ref()))
+    }
+
+    /// The same transaction applied — the target's own bytes under the
+    /// source's structure. [`overlay`](Self::overlay) is what an editor wants;
+    /// this is for a caller that only needs the string.
+    #[wasm_bindgen(js_name = overlayText)]
+    pub fn overlay_text(
+        &mut self,
+        target_id: &str,
+        source_id: &str,
+        opts: JsValue,
+    ) -> Result<String, JsError> {
+        let (options, _) = overlay::options(&opts)?;
+        self.sous
+            .overlay_text(&BookId::from(target_id), &BookId::from(source_id), &options)
+            .map_err(door)
+    }
+
+    /// What the overlay did, and what it declined to do, as JSON.
+    ///
+    /// ```ts
+    /// interface BlockAddress { sid: string; where: "leading" | "inside"; ordinal: number;
+    ///                           marker: string }   // the spelling that position held
+    /// interface OverlayReport {
+    ///   inserted:  { address: BlockAddress; marker: string; at: number; empty: boolean }[];  // empty = Inside block awaiting text
+    ///   removed:   { address: BlockAddress; marker: string; from: number; to: number }[];    // target blocks the source lacks
+    ///   collapsed: { sid: string; marker: string; count: number }[];                         // source empty-block runs folded to one
+    ///   unpaired:  { sid: string; side: "target" | "source"; reason: "absent" | "bridge" | "ambiguous" }[];
+    /// }
+    /// ```
+    ///
+    /// An overlay is a SUGGESTION applied on request, never a finding.
+    #[wasm_bindgen(js_name = overlayReport)]
+    pub fn overlay_report(
+        &mut self,
+        target_id: &str,
+        source_id: &str,
+        opts: JsValue,
+    ) -> Result<String, JsError> {
+        let (options, utf16) = overlay::options(&opts)?;
+        let target = BookId::from(target_id);
+        let mut report = self
+            .sous
+            .overlay(&target, &BookId::from(source_id), &options)
+            .map_err(door)?
+            .report;
+        let table = self.table(&target, utf16)?;
+        overlay::rebase_report(&mut report, table.as_ref());
+        overlay::json(&report)
+    }
+
+    /// A SOURCE block's address, answered in the target: where it is, or
+    /// where the overlay would put it.
+    ///
+    /// ```ts
+    /// type Equivalent =
+    ///   | { found: SkeletonRow }                                            // same address on the other side
+    ///   | { absent: true; insertAt: number; where: "leading" | "inside" }   // where overlay would put it
+    ///   | { unpaired: true; reason: "absent" | "bridge" | "ambiguous" };    // the verse itself has no pair
+    /// ```
+    ///
+    /// `address.marker` is REQUIRED and is checked against the side the
+    /// address was taken from: if that position still exists but now spells
+    /// something else, the call THROWS ("… names q2 but the node there is q1
+    /// — the address is stale") rather than answering about another node. The
+    /// position is still the key; the name is only the check.
+    #[wasm_bindgen(js_name = targetNodeFor)]
+    pub fn target_node_for(
+        &mut self,
+        target_id: &str,
+        source_id: &str,
+        address: JsValue,
+        opts: JsValue,
+        utf16: Option<bool>,
+    ) -> Result<String, JsError> {
+        self.node_for(target_id, source_id, address, opts, utf16, Side::Target)
+    }
+
+    /// A TARGET block's address, answered in the source — the mirror of
+    /// [`targetNodeFor`](Self::target_node_for), and the same three answers.
+    #[wasm_bindgen(js_name = sourceNodeFor)]
+    pub fn source_node_for(
+        &mut self,
+        target_id: &str,
+        source_id: &str,
+        address: JsValue,
+        opts: JsValue,
+        utf16: Option<bool>,
+    ) -> Result<String, JsError> {
+        self.node_for(target_id, source_id, address, opts, utf16, Side::Source)
     }
 
     // ── Judging ─────────────────────────────────────────────────────────
@@ -421,6 +590,45 @@ impl Galley {
             .ok_or_else(|| JsError::new(&format!("no book is registered as {id}")))
     }
 
+    /// Shared by the two node doors, which differ only in which side answers.
+    fn node_for(
+        &mut self,
+        target_id: &str,
+        source_id: &str,
+        address: JsValue,
+        opts: JsValue,
+        utf16: Option<bool>,
+        want: Side,
+    ) -> Result<String, JsError> {
+        let (options, flag) = overlay::options(&opts)?;
+        let address = overlay::address(&address)?;
+        let target = BookId::from(target_id);
+        let source = BookId::from(source_id);
+        let mut answer = self
+            .sous
+            .node_for(&target, &source, &address, &options, want)
+            .map_err(door)?;
+        // The answer's offsets are in the side that answered.
+        let named = match want {
+            Side::Target => target,
+            Side::Source => source,
+        };
+        let table = self.table(&named, utf16.unwrap_or(flag))?;
+        overlay::rebase_equivalent(&mut answer, table.as_ref());
+        overlay::json(&answer)
+    }
+
+    /// One book's byte → UTF-16 table, cloned only when a caller asked for
+    /// UTF-16 offsets; `None` is the byte answer the doors default to.
+    fn table(&mut self, id: &BookId, utf16: bool) -> Result<Option<Utf16Table>, JsError> {
+        if !utf16 {
+            return Ok(None);
+        }
+        Ok(Some(
+            self.book(id.as_str())?.utf16().map_err(refusal)?.clone(),
+        ))
+    }
+
     fn book_parse(
         &mut self,
         id: &str,
@@ -428,6 +636,11 @@ impl Galley {
     ) -> Result<Vec<u8>, JsError> {
         self.book(id)?.parse(opts).map_err(refusal)
     }
+}
+
+/// An overlay refusal, as the JS error carrying its text.
+fn door(error: crate::overlay::OverlayError) -> JsError {
+    JsError::new(&error.to_string())
 }
 
 /// A Pantry refusal, as the JS error carrying its text.

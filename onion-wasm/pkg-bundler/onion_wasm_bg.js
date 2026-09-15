@@ -1,9 +1,13 @@
 /**
- * One transaction of proposed splices: `[from, to]` pairs in UTF-16, one
- * concatenated ASCII insert blob, one byte length per edit.
+ * One transaction of proposed splices: `[from, to]` pairs, one concatenated
+ * ASCII insert blob, one length per edit.
  *
  * The same shape a fix crosses in — an editor session applies both the same
- * way, and `lens[i] == 0` is a pure deletion.
+ * way, and `lens[i] == 0` is a pure deletion. `spans` and `lens` are always
+ * in the SAME unit, because `lens` slices `text` at offsets `spans` place:
+ * the formatter's doors here answer in UTF-16 throughout, and a producer in
+ * another crate names its own unit (`galley`'s overlay answers bytes unless
+ * asked for UTF-16).
  */
 export class Edits {
     static __wrap(ptr) {
@@ -386,24 +390,38 @@ export function book(text) {
 /**
  * The diff skeleton as JSON. Spans are UTF-16 offsets into each side's own
  * document.
+ *
+ * `text_mode` is `"none"` | `"words"` | `"chars"`: the intra-verse runs a
+ * `modified` unit is highlighted by, at UAX-29 word or grapheme grain.
+ * `"none"` computes nothing — no CST, no mask — and yields the same JSON the
+ * door returned before runs existed.
  * @param {string} baseline
  * @param {string} current
+ * @param {string} text_mode
  * @returns {string}
  */
-export function diff(baseline, current) {
-    let deferred3_0;
-    let deferred3_1;
+export function diff(baseline, current, text_mode) {
+    let deferred5_0;
+    let deferred5_1;
     try {
         const ptr0 = passStringToWasm0(baseline, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
         const ptr1 = passStringToWasm0(current, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len1 = WASM_VECTOR_LEN;
-        const ret = wasm.diff(ptr0, len0, ptr1, len1);
-        deferred3_0 = ret[0];
-        deferred3_1 = ret[1];
-        return getStringFromWasm0(ret[0], ret[1]);
+        const ptr2 = passStringToWasm0(text_mode, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ret = wasm.diff(ptr0, len0, ptr1, len1, ptr2, len2);
+        var ptr4 = ret[0];
+        var len4 = ret[1];
+        if (ret[3]) {
+            ptr4 = 0; len4 = 0;
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        deferred5_0 = ptr4;
+        deferred5_1 = len4;
+        return getStringFromWasm0(ptr4, len4);
     } finally {
-        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        wasm.__wbindgen_free(deferred5_0, deferred5_1, 1);
     }
 }
 

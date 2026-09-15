@@ -26,10 +26,15 @@ pub use usfm_onion as onion;
 
 pub mod corpus;
 pub mod find;
+pub mod overlay;
 pub mod pantry;
 pub mod sous;
 pub use find::{Find, Hit, Hits, SourceSpan};
 pub use mise::utf16::{Utf16Table, utf16_table};
+pub use overlay::{
+    BlockAddress, Equivalent, Overlay, OverlayError, OverlayOptions, OverlayReport, Placement,
+    Scope, Skeleton, SkeletonRow, SkeletonVerse,
+};
 pub use pantry::{
     BookId, Budget, ChunkStats, Entry, Fingerprint, Pantry, PantryError, RawChecksum, Retain, Role,
     SourceLanes, Tally, Tier, fingerprint,

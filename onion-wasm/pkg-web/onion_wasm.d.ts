@@ -2,11 +2,15 @@
 /* eslint-disable */
 
 /**
- * One transaction of proposed splices: `[from, to]` pairs in UTF-16, one
- * concatenated ASCII insert blob, one byte length per edit.
+ * One transaction of proposed splices: `[from, to]` pairs, one concatenated
+ * ASCII insert blob, one length per edit.
  *
  * The same shape a fix crosses in — an editor session applies both the same
- * way, and `lens[i] == 0` is a pure deletion.
+ * way, and `lens[i] == 0` is a pure deletion. `spans` and `lens` are always
+ * in the SAME unit, because `lens` slices `text` at offsets `spans` place:
+ * the formatter's doors here answer in UTF-16 throughout, and a producer in
+ * another crate names its own unit (`galley`'s overlay answers bytes unless
+ * asked for UTF-16).
  */
 export class Edits {
     private constructor();
@@ -114,8 +118,13 @@ export function book(text: string): string;
 /**
  * The diff skeleton as JSON. Spans are UTF-16 offsets into each side's own
  * document.
+ *
+ * `text_mode` is `"none"` | `"words"` | `"chars"`: the intra-verse runs a
+ * `modified` unit is highlighted by, at UAX-29 word or grapheme grain.
+ * `"none"` computes nothing — no CST, no mask — and yields the same JSON the
+ * door returned before runs existed.
  */
-export function diff(baseline: string, current: string): string;
+export function diff(baseline: string, current: string, text_mode: string): string;
 
 /**
  * The formatted document. `format_edits` applied, in one call.
@@ -245,7 +254,7 @@ export interface InitOutput {
     readonly attrResolve: (a: number, b: number, c: number) => number;
     readonly attrs: (a: number, b: number, c: number, d: number, e: number) => [number, number];
     readonly book: (a: number, b: number) => [number, number];
-    readonly diff: (a: number, b: number, c: number, d: number) => [number, number];
+    readonly diff: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly edits_lens: (a: number) => [number, number];
     readonly edits_spans: (a: number) => [number, number];
     readonly edits_text: (a: number) => [number, number];

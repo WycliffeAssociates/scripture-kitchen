@@ -36,6 +36,11 @@ rayon = { workspace = true, optional = true }
 wasm-bindgen = { version = "0.2", optional = true }
 onion-wasm = { path = "../onion-wasm", optional = true }
 js-sys = { version = "0.3", optional = true }
+# JSON for the overlay's three read-only doors, which answer structured rows
+# no buffer format would earn. Behind `wasm` only: the native crate computes
+# plain Rust structs and links no serializer at all.
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
 
 [dev-dependencies]
 divan = "0.1.21"
@@ -47,7 +52,7 @@ dhat = "0.3.3"
 wasm-bindgen-test = "0.3"
 
 [features]
-wasm = ["dep:wasm-bindgen", "dep:onion-wasm", "dep:js-sys"]
+wasm = ["dep:wasm-bindgen", "dep:onion-wasm", "dep:js-sys", "dep:serde", "dep:serde_json"]
 # Map a book's missing chapters on rayon's global pool. Opt-in, and the
 # published bytes are identical either way — `galley/tests/equivalence.rs`.
 parallel = ["dep:rayon"]
@@ -64,6 +69,10 @@ harness = false
 
 [[bench]]
 name = "expediter"
+harness = false
+
+[[bench]]
+name = "overlay"
 harness = false
 
 # `-O` is wasm-pack's own release default; `--strip-producers` is the addition,

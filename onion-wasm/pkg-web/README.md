@@ -135,7 +135,7 @@ the debounced second call. `toc` is cheap and needs no tree.
 | `formatEdits(text, opts)` | the whole-book transaction — `Edits`, spans in UTF-16 |
 | `formatEditsIn(text, from, to, opts)` | the same transaction, scoped to a UTF-16 window |
 | `format(text, opts)` | the formatted document, in one call |
-| `diff` / `merge` | the review path (see below) |
+| `diff(baseline, current, text_mode)` / `merge` | the review path (see below) |
 
 **Scope it engine-side, never in JS.** `formatEditsIn` runs the SAME whole-book
 analysis — lint needs the book, and which rule owns a contested byte is settled
@@ -165,6 +165,14 @@ from the `chapters` section.
   memory) plus a few strings. JS never holds a token. The one structured export
   is the diff skeleton — a cold, modal-open path where serde JSON buys back the
   old editors' camelCase contract verbatim.
+- **Intra-verse highlighting is opt-in.** `diff`'s `text_mode` is `"none"`,
+  `"words"` (UAX-29) or `"chars"` (graphemes); an unknown name REJECTS rather
+  than defaulting. `"none"` builds no CST and no mask and yields the JSON the
+  door returned before runs existed. The runs ride on a `modified` unit's
+  `text: {baseline, current}` as `{text, kind}`, reader-visible text only (no
+  markers), UTF-8 with no offsets to convert. `unchanged` and `moved` units
+  carry NO `text` key — a pure move must not highlight, and a whole-Bible
+  skeleton is mostly those.
 - **UTF-16 offsets, LF-canonical input.** Every offset out is a CodeMirror
   code-unit offset. That assumes the text is LF-normalized: CodeMirror counts a
   line break as ONE position, a literal `\r\n` is TWO UTF-16 code units, so

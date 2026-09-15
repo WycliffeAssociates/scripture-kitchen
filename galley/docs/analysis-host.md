@@ -148,6 +148,17 @@ comes back as one source range per contiguous piece rather than one range that
 would swallow the markup between them. No wire row, no `Expediter` involvement,
 and no `sous_core` type in the API — the contract is `galley/src/find.md`.
 
+`galley::overlay` is the second workflow of that kind, and it belongs here for
+the same reason: Onion contributes the CST, the marker table and the
+empty-paragraph lint, Sous contributes the verse pairing, and what is left —
+addressing a block by (verse sid, leading or inside, ordinal), diffing two
+skeletons against those addresses, and emitting one ascending, non-overlapping
+transaction of `onion::Edit`s — is workflow. It reads a Pantry entry's retained
+text, mask and `Toc`, which is why a declared source must be registered with
+`keepText`; it writes nothing and it is not on the publication path. An overlay
+is a SUGGESTION applied on request, never a finding, so it produces no wire row
+and no `Expediter` publication state. The contract is `galley/src/overlay.md`.
+
 If a detail or site-search operation needs source text after the analysis call,
 the caller supplies the current complete string again. Galley validates its
 checksum before applying cached coordinate or inventory state. This preserves

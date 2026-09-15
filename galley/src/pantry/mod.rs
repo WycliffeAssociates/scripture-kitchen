@@ -644,6 +644,30 @@ impl Pantry {
         Ok(self.chunks.lint(text))
     }
 
+    /// One book's tokens and lint report off its retained text — the two
+    /// ingredients a skeleton walk reads, from the same warm chunks.
+    ///
+    /// Owned rather than borrowed, so the caller can reopen the book for its
+    /// mask and TOC. Split-borrowed for the same reason as
+    /// [`lint_book`](Self::lint_book).
+    pub(crate) fn skeleton_input(
+        &mut self,
+        id: &BookId,
+    ) -> Result<(Vec<onion::Token>, LintReport), PantryError> {
+        let text = retained(&self.books, id)?;
+        let parsed = self.chunks.parsed(
+            text,
+            onion::wire::ParseOptions {
+                diagnostics: true,
+                ..Default::default()
+            },
+        );
+        Ok((
+            parsed.tokens,
+            parsed.lint.expect("diagnostics were asked for"),
+        ))
+    }
+
     /// The same over one book's retained text. See
     /// [`lint_book`](Self::lint_book).
     fn parse_book(

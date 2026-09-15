@@ -32,6 +32,7 @@ use xxhash_rust::xxh3::Xxh3Default;
 use mise::books::BookKey;
 
 use crate::onion::{self, lint};
+use crate::overlay;
 
 use super::{OnionBook, PublishError, rebase_span};
 use crate::pantry::derived::Store;
@@ -349,6 +350,57 @@ impl<P: ChapterPass + Sync> Expediter<P> {
     /// [`Pantry::books`] for canonical order.
     pub fn find(&mut self, find: &crate::find::Find<'_>, ids: &[BookId], limit: u32) -> Vec<u8> {
         crate::find::wire::encode(&mut self.pantry, ids, find, limit)
+    }
+
+    /// One registered book's block skeleton. See [`find`](Self::find): another
+    /// door that reads the registry's retained products and registers nothing.
+    pub fn skeleton(
+        &mut self,
+        id: &BookId,
+        opts: &overlay::OverlayOptions,
+    ) -> Result<overlay::Skeleton, overlay::OverlayError> {
+        overlay::skeleton_with(&mut self.pantry, id, opts)
+    }
+
+    /// The edits that make a target's skeleton a declared source's.
+    pub fn overlay(
+        &mut self,
+        target: &BookId,
+        source: &BookId,
+        opts: &overlay::OverlayOptions,
+    ) -> Result<overlay::Overlay, overlay::OverlayError> {
+        overlay::overlay(&mut self.pantry, target, source, opts)
+    }
+
+    /// The same, applied.
+    pub fn overlay_text(
+        &mut self,
+        target: &BookId,
+        source: &BookId,
+        opts: &overlay::OverlayOptions,
+    ) -> Result<String, overlay::OverlayError> {
+        overlay::overlay_text(&mut self.pantry, target, source, opts)
+    }
+
+    /// Where one side's block sits on the other. `want` is the side asked
+    /// ABOUT: [`Side::Target`](overlay::Side::Target) answers a source
+    /// address in the target's coordinates.
+    pub fn node_for(
+        &mut self,
+        target: &BookId,
+        source: &BookId,
+        address: &overlay::BlockAddress,
+        opts: &overlay::OverlayOptions,
+        want: overlay::Side,
+    ) -> Result<overlay::Equivalent, overlay::OverlayError> {
+        match want {
+            overlay::Side::Target => {
+                overlay::target_node_for(&mut self.pantry, target, source, address, opts)
+            }
+            overlay::Side::Source => {
+                overlay::source_node_for(&mut self.pantry, target, source, address, opts)
+            }
+        }
     }
 
     /// The pass this coordinator maps, folds, and judges with.

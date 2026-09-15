@@ -57,7 +57,8 @@ use js_sys::{Object, Reflect, Uint32Array};
 use serde::Serialize;
 use usfm_onion::attributes::{self, AttrEvent};
 use usfm_onion::diff::{
-    self, Addr, CoveredSide, Decisions, DiffSkeleton, MergeSide, SlotRole, Status, UnitKind,
+    self, Addr, CoveredSide, Decisions, DiffSkeleton, MergeSide, RunKind, SlotRole, Status,
+    TextDiffMode, TextDiffRun, UnitKind, UnitTextDiff,
 };
 use usfm_onion::format::{CharBreaks, FormatOptions, Newline, VerseBreaks};
 use usfm_onion::lint::Code;
@@ -274,16 +275,30 @@ impl FormatOpts {
     }
 }
 
-/// One transaction of proposed splices: `[from, to]` pairs in UTF-16, one
-/// concatenated ASCII insert blob, one byte length per edit.
+/// One transaction of proposed splices: `[from, to]` pairs, one concatenated
+/// ASCII insert blob, one length per edit.
 ///
 /// The same shape a fix crosses in — an editor session applies both the same
-/// way, and `lens[i] == 0` is a pure deletion.
+/// way, and `lens[i] == 0` is a pure deletion. `spans` and `lens` are always
+/// in the SAME unit, because `lens` slices `text` at offsets `spans` place:
+/// the formatter's doors here answer in UTF-16 throughout, and a producer in
+/// another crate names its own unit (`galley`'s overlay answers bytes unless
+/// asked for UTF-16).
 #[wasm_bindgen]
 pub struct Edits {
     spans: Vec<u32>,
     lens: Vec<u32>,
     text: String,
+}
+
+impl Edits {
+    /// The three parallel arrays, from a producer in another crate. Not a
+    /// `wasm_bindgen` constructor: the class stays read-only from JS, and the
+    /// caller owns the unit its spans are in.
+    pub fn from_parts(spans: Vec<u32>, lens: Vec<u32>, text: String) -> Edits {
+        debug_assert_eq!(spans.len(), lens.len() * 2, "one from/to pair per edit");
+        Edits { spans, lens, text }
+    }
 }
 
 #[wasm_bindgen]
@@ -403,6 +418,32 @@ struct WireUnit {
     covered_by: Option<WireCoveredBy>,
     is_whitespace_change: bool,
     is_usfm_structure_change: bool,
+    /// Present only when `textMode` asked for runs AND this unit has any —
+    /// `unchanged` and `moved` units carry none, and a whole-Bible skeleton is
+    /// mostly those, so the field is ABSENT rather than null.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    text: Option<WireUnitText>,
+}
+
+/// One unit's intra-verse runs. Presentation only: the units, the slots and
+/// every merge are byte-identical whether or not this was asked for.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WireUnitText {
+    /// Kinds: `unchanged` | `removed`. Empty when the unit is one-sided.
+    baseline: Vec<WireTextRun>,
+    /// Kinds: `unchanged` | `added`.
+    current: Vec<WireTextRun>,
+}
+
+/// Reader-visible text only — markers are masked out, so a run's `text` is what
+/// a reader sees and never a `\v`. It crosses as UTF-8 with no offsets, which
+/// is why there is nothing here to convert to UTF-16.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WireTextRun {
+    text: String,
+    kind: &'static str,
 }
 
 #[derive(Serialize)]
@@ -422,6 +463,19 @@ struct WireSlot {
     after_side: Option<&'static str>,
 }
 
+fn runs(runs: &[TextDiffRun]) -> Vec<WireTextRun> {
+    runs.iter()
+        .map(|run| WireTextRun {
+            text: run.text.clone(),
+            kind: match run.kind {
+                RunKind::Unchanged => "unchanged",
+                RunKind::Added => "added",
+                RunKind::Removed => "removed",
+            },
+        })
+        .collect()
+}
+
 fn side_name(side: MergeSide) -> &'static str {
     match side {
         MergeSide::Baseline => "baseline",
@@ -431,6 +485,7 @@ fn side_name(side: MergeSide) -> &'static str {
 
 fn wire(
     skeleton: &DiffSkeleton,
+    texts: &[Option<UnitTextDiff>],
     baseline: &Utf16Index<'_>,
     current: &Utf16Index<'_>,
 ) -> WireSkeleton {
@@ -441,7 +496,8 @@ fn wire(
         units: skeleton
             .units
             .iter()
-            .map(|unit| WireUnit {
+            .zip(texts)
+            .map(|(unit, text)| WireUnit {
                 unit_id: unit.id.clone(),
                 kind: match unit.kind {
                     UnitKind::Shared => "shared",
@@ -481,6 +537,10 @@ fn wire(
                 }),
                 is_whitespace_change: unit.is_whitespace_change,
                 is_usfm_structure_change: unit.is_usfm_structure_change,
+                text: text.as_ref().map(|text| WireUnitText {
+                    baseline: runs(&text.baseline),
+                    current: runs(&text.current),
+                }),
             })
             .collect(),
         slots: skeleton
@@ -504,15 +564,37 @@ fn wire(
 
 /// The diff skeleton as JSON. Spans are UTF-16 offsets into each side's own
 /// document.
+///
+/// `text_mode` is `"none"` | `"words"` | `"chars"`: the intra-verse runs a
+/// `modified` unit is highlighted by, at UAX-29 word or grapheme grain.
+/// `"none"` computes nothing — no CST, no mask — and yields the same JSON the
+/// door returned before runs existed.
 #[wasm_bindgen]
-pub fn diff(baseline: &str, current: &str) -> String {
-    let skeleton = diff::diff(baseline, current);
+pub fn diff(baseline: &str, current: &str, text_mode: &str) -> Result<String, JsError> {
+    diffed(baseline, current, text_mode).map_err(|error| JsError::new(&error))
+}
+
+/// `diff`'s body, split from the door for the same reason [`merged`] is.
+fn diffed(baseline: &str, current: &str, text_mode: &str) -> Result<String, String> {
+    let (skeleton, texts) = diff::diff_with_text(baseline, current, mode(text_mode)?);
     let wire = wire(
         &skeleton,
+        &texts,
         &Utf16Index::new(baseline.as_bytes()),
         &Utf16Index::new(current.as_bytes()),
     );
-    serde_json::to_string(&wire).expect("the wire structs are always serializable")
+    Ok(serde_json::to_string(&wire).expect("the wire structs are always serializable"))
+}
+
+/// An unknown mode is an error rather than a default: a typo silently meaning
+/// `"none"` would drop an editor's highlighting with nothing to see.
+fn mode(name: &str) -> Result<TextDiffMode, String> {
+    match name {
+        "none" => Ok(TextDiffMode::None),
+        "words" => Ok(TextDiffMode::Words),
+        "chars" => Ok(TextDiffMode::Chars),
+        other => Err(format!("unknown text mode {other:?}")),
+    }
 }
 
 /// `{"unitId": "baseline"|"current"}` — the consumer contract, parsed here.
@@ -894,8 +976,9 @@ mod tests {
     fn the_diff_wire_is_camel_case_json_with_utf16_spans() {
         let baseline = "\\id GEN\n\\c 1\n\\v 1 λόγος one\n\\v 2 two\n";
         let current = "\\id GEN\n\\c 1\n\\v 1 λόγος one\n\\v 2 TWO\n";
-        let json = diff(baseline, current);
+        let json = diffed(baseline, current, "none").unwrap();
         assert!(json.contains("\"unitId\""), "{json}");
+        assert!(!json.contains("\"text\""), "none computes no runs: {json}");
         assert!(json.contains("\"isWhitespaceChange\""));
         assert!(json.contains("\"baselineSid\""));
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -913,6 +996,47 @@ mod tests {
             current.rfind("\\v 2").unwrap()
         );
         assert!(from < index.to_byte(from));
+    }
+
+    /// The runs ride beside the units, only where a highlight belongs, and an
+    /// unchanged unit stays absent so a whole-Bible skeleton does not carry a
+    /// null per verse.
+    #[test]
+    fn text_mode_runs_only_where_a_highlight_belongs() {
+        let baseline = "\\id GEN\n\\c 1\n\\v 1 one\n\\v 2 the \\w quick\\w* fox\n";
+        let current = "\\id GEN\n\\c 1\n\\v 1 one\n\\v 2 the \\w slow\\w* fox\n";
+        let parsed: serde_json::Value =
+            serde_json::from_str(&diffed(baseline, current, "words").unwrap()).unwrap();
+        let units = parsed["units"].as_array().unwrap();
+        for unit in units.iter().filter(|unit| unit["status"] == "unchanged") {
+            assert!(unit.get("text").is_none(), "{unit}");
+        }
+        let text = &units
+            .iter()
+            .find(|unit| unit["status"] == "modified")
+            .expect("verse 2 changed")["text"];
+        // Reader text only: the `\w` wrapper is masked out of both sides.
+        let word = |side: &str, kind: &str| {
+            text[side]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|run| run["kind"] == kind)
+                .map(|run| run["text"].as_str().unwrap().to_string())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(word("baseline", "removed"), ["quick"]);
+        assert_eq!(word("current", "added"), ["slow"]);
+        assert!(word("baseline", "unchanged").concat().contains("the"));
+        assert!(!text.to_string().contains("\\\\w"), "{text}");
+    }
+
+    /// A typo must not silently mean `"none"` — the editor would lose its
+    /// highlighting with nothing to see.
+    #[test]
+    fn an_unknown_text_mode_rejects() {
+        assert!(diffed("\\id GEN\n", "\\id GEN\n", "wrods").is_err());
+        assert!(diffed("\\id GEN\n", "\\id GEN\n", "chars").is_ok());
     }
 
     #[test]

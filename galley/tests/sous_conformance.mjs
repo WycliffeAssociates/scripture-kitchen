@@ -213,6 +213,82 @@ try {
 }
 check(badScope.includes("unknown find scope"), `an unknown scope errors: ${badScope}`);
 
+// --- the overlay: six doors, and the JSON they answer with -----------------
+
+// The six read as methods on the handle, like find: they need the resident
+// Pantry, so they are not free functions.
+const OVERLAY_DOORS = [
+  "overlay",
+  "overlayReport",
+  "overlayText",
+  "skeleton",
+  "sourceNodeFor",
+  "targetNodeFor",
+];
+for (const door of OVERLAY_DOORS) {
+  check(typeof galley[door] === "function", `galley.${door} is on the handle`);
+}
+
+const overlayFixture = (name) =>
+  readFileSync(resolve(here, "fixtures/overlay", name), "utf8");
+galley.update("books/OVL.usfm", overlayFixture("gen-target.usfm"));
+galley.updateReference("ref/OVL.usfm", overlayFixture("gen-source.usfm"), true);
+
+// The one JSON parse: the reader is `JSON.parse`, because a skeleton is a
+// modal-open shape and not a keystroke one.
+const skeleton = JSON.parse(galley.skeleton("ref/OVL.usfm"));
+eq(skeleton.verses.length, 4, "the source names four verses");
+eq(
+  skeleton.blocks.map((b) => `${b.sid} ${b.where} ${b.ordinal} ${b.marker}`).join(" | "),
+  "GEN 2:21 leading 1 p | GEN 2:23 inside 1 q1 | GEN 2:23 inside 2 q2 | " +
+    "GEN 2:23 inside 3 q1 | GEN 2:23 inside 4 q2 | GEN 2:24 leading 1 p",
+  "every block, addressed",
+);
+
+const edits = galley.overlay("books/OVL.usfm", "ref/OVL.usfm");
+eq(edits.lens.length, 6, "six blocks cross");
+eq(edits.spans.length, 12, "one from/to pair each");
+check(
+  edits.spans.every((span, at) => at % 2 === 1 || span <= edits.spans[at + 1]),
+  "every span is forward",
+);
+
+const report = JSON.parse(galley.overlayReport("books/OVL.usfm", "ref/OVL.usfm"));
+eq(report.removed.length, 0, "the target has nothing the source lacks");
+eq(report.unpaired.length, 0, "every verse pairs");
+eq(report.inserted.filter((row) => row.empty).length, 4, "four inside blocks await text");
+
+const applied = galley.overlayText("books/OVL.usfm", "ref/OVL.usfm");
+check(applied.includes("\\q1\n\\q2\n\\q1\n\\q2\n\\p\n\\v 24"), "the poetry lands");
+check(!applied.includes("\\f "), "the source's footnotes stay home");
+
+const where = { sid: "GEN 2:23", where: "inside", ordinal: 1, marker: "q1" };
+const inSource = JSON.parse(galley.sourceNodeFor("books/OVL.usfm", "ref/OVL.usfm", where));
+eq(inSource.found.marker, "q1", "the source block the address names");
+const inTarget = JSON.parse(galley.targetNodeFor("books/OVL.usfm", "ref/OVL.usfm", where));
+check(inTarget.absent === true, "the target has no such block yet");
+eq(inTarget.where, "inside", "and the overlay would put it after the verse text");
+
+// The marker is a check, not a key: the same position, misnamed, throws.
+let staleAddress = "";
+try {
+  galley.targetNodeFor("books/OVL.usfm", "ref/OVL.usfm", { ...where, marker: "q2" });
+} catch (error) {
+  staleAddress = String(error.message ?? error);
+}
+check(staleAddress.includes("the address is stale"), `a stale address: ${staleAddress}`);
+
+// UTF-16 is the same opt-in every other door takes.
+const units = galley.overlay("books/OVL.usfm", "ref/OVL.usfm", { utf16: true });
+check(
+  units.spans.every((span, at) => span <= edits.spans[at]),
+  "UTF-16 offsets never exceed their byte offsets",
+);
+check(units.spans.some((span, at) => span < edits.spans[at]), "the fixture is not ASCII");
+
+galley.remove("books/OVL.usfm");
+galley.remove("ref/OVL.usfm");
+
 // --- the onion doors read the retained copy -------------------------------
 
 // GEN is the edited fixture by now: the id door plates what the handle holds.

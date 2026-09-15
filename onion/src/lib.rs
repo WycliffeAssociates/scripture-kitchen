@@ -62,7 +62,7 @@ pub mod utf16 {
 pub mod vref;
 pub mod wire;
 
-pub use diff::{DecisionUnit, DiffSkeleton, MergeSide, Slot, diff, diff_with_text};
+pub use diff::{DecisionUnit, DiffSkeleton, MergeSide, Slot, TextDiffMode, diff, diff_with_text};
 pub use edit::{Edit, SpliceEdit, apply_splices};
 pub use format::{
     CharBreaks, FormatOptions, Newline, VerseBreaks, format, format_edits, format_edits_in,
