@@ -17,9 +17,9 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use mise::unicode::{Class, bits, class_of};
 use sous_core::substrate::Substrate;
 use sous_core::unicode::atoms::widen_to_atoms;
-use sous_core::unicode::{Class, bits, class_of};
 use sous_core::{BookKey, ChapterInput, ChapterKey, ChapterPass, HygieneClass, TextRange};
 
 const CORPORA: &[&str] = &[

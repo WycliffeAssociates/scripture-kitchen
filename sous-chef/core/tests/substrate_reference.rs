@@ -15,10 +15,10 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use mise::unicode::{class_of, is_glue};
 use sous_core::substrate::{
     Case, ChapterRow, Edge, OuterClass, PairKey, RUN_BUCKETS, RunLengths, ScalarKey, Substrate,
 };
-use sous_core::unicode::{class_of, is_glue};
 use sous_core::{BookKey, ChapterInput, ChapterKey, ChapterPass};
 
 const CORPORA: &[&str] = &[

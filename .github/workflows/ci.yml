@@ -86,32 +86,59 @@ jobs:
       - name: reader/writer conformance
         run: node onion-wasm/tests/conformance.mjs onion-wasm/pkg-node testData/exampleCorpora/en_ulb
 
-      # The root package.json is DERIVED from onion-wasm's — an inner export map
-      # edited without regenerating it ships a root map that points nowhere, and
-      # a stale `sideEffects` is worse than that: silent, and it tree-shakes the
-      # wasm glue out of a consumer's bundle.
+      # galley's wall: the same three publications the native goldens pin, but
+      # through the JS handle inside linear memory.
+      - name: galley wall test
+        working-directory: galley
+        run: wasm-pack test --node --features wasm --test wasm_wall
+
+      - name: build a galley node package
+        working-directory: galley
+        run: wasm-pack build --target nodejs --release --out-dir pkg-node -- --features wasm
+
+      # Asserts the EXACT export list, so an onion door that stopped linking
+      # into the galley module fails here rather than going quiet. With the
+      # corpus it also prints the keystroke lifecycle.
+      - name: galley sous conformance
+        run: node galley/tests/sous_conformance.mjs galley/pkg-node testData/exampleCorpora/en_ulb
+
+      # The reader TypeScript ships unbuilt, so its own tests are the only
+      # thing that type-checks and runs it apart from the conformance scripts.
+      - name: sous-chef reader tests
+        working-directory: sous-chef
+        run: npm test
+
+      # The root package.json is DERIVED from galley's and onion-wasm's — an
+      # inner export map edited without regenerating it ships a root map that
+      # points nowhere, and a stale `sideEffects` is worse than that: silent,
+      # and it tree-shakes the wasm glue out of a consumer's bundle.
       - name: root package.json is not stale
         run: |
-          node onion-wasm/package-root.mjs > /tmp/root.json
+          node package-root.mjs > /tmp/root.json
           diff -u package.json /tmp/root.json \
-            || { echo "::error::run: node onion-wasm/package-root.mjs > package.json"; exit 1; }
+            || { echo "::error::run: node package-root.mjs > package.json"; exit 1; }
 
       # A git install clones the repo and then PACKS it through `files`, so what
       # `npm pack` would emit is exactly what a consumer receives. `files` and
-      # `exports` are hand-maintained in onion-wasm/package.json; this catches
-      # an export naming something the pack leaves behind.
+      # `exports` are derived by package-root.mjs from the two inner packages;
+      # this catches an export naming something the pack leaves behind.
+      # `npm pack --json` emits an array (npm 10, 11) or an object keyed by
+      # package name (npm 12); the root package is ESM, so this runs as a module.
       - name: a git install carries every exported path
         run: |
           npm pack --dry-run --json > /tmp/pack.json
-          node -e '
-            const [{ files }] = require("/tmp/pack.json");
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            const read = (p) => JSON.parse(readFileSync(p, "utf8"));
+            const packs = read("/tmp/pack.json");
+            const { files } = Array.isArray(packs) ? packs[0] : Object.values(packs)[0];
             const packed = new Set(files.map((f) => f.path));
             const targets = new Set();
             const walk = (v) =>
               typeof v === "string"
                 ? targets.add(v)
                 : Object.values(v ?? {}).forEach(walk);
-            walk(require("./package.json").exports);
+            walk(read("./package.json").exports);
             const missing = [...targets].filter(
               (p) => !packed.has(p.replace(/^\.\//, "")),
             );
@@ -124,9 +151,9 @@ jobs:
             );
           '
 
-  # onion-wasm/pkg-web and pkg-bundler are COMMITTED — consumers install from a
-  # git tag, so a stale package there ships stale code with no other signal.
-  # Rebuild and compare.
+  # Both packages' pkg-web and pkg-bundler are COMMITTED — consumers install
+  # from a git tag, so a stale package there ships stale code with no other
+  # signal. Rebuild and compare.
   artifacts:
     runs-on: ubuntu-latest
     timeout-minutes: 40
@@ -141,10 +168,15 @@ jobs:
       # make the .wasm host-independent, so it is not optional here: building
       # with the raw wasm-pack lines would produce different bytes.
       - name: rebuild both packages
-        run: ./onion-wasm/build.sh
+        run: |
+          ./onion-wasm/build.sh
+          ./galley/build.sh
 
       - name: what moved
-        run: git diff --stat -- onion-wasm/pkg-web onion-wasm/pkg-bundler
+        run: |
+          git diff --stat -- \
+            onion-wasm/pkg-web onion-wasm/pkg-bundler \
+            galley/pkg-web galley/pkg-bundler
 
       # The glue and the .d.ts are what a consumer's bundler and type-checker
       # bind to, and wasm-bindgen writes them deterministically from the wasm's
@@ -153,8 +185,11 @@ jobs:
         run: |
           git diff --exit-code -- \
             onion-wasm/pkg-web onion-wasm/pkg-bundler \
+            galley/pkg-web galley/pkg-bundler \
             ':!onion-wasm/pkg-web/onion_wasm_bg.wasm' \
-            ':!onion-wasm/pkg-bundler/onion_wasm_bg.wasm'
+            ':!onion-wasm/pkg-bundler/onion_wasm_bg.wasm' \
+            ':!galley/pkg-web/usfm_galley_bg.wasm' \
+            ':!galley/pkg-bundler/usfm_galley_bg.wasm'
 
       # A hard gate, and it has to be: an engine fix that ships with no API
       # change is exactly the stale package the interface check above cannot
@@ -169,6 +204,10 @@ jobs:
             onion-wasm/pkg-web/onion_wasm_bg.wasm \
             onion-wasm/pkg-bundler/onion_wasm_bg.wasm \
             || { echo "::error::committed .wasm is stale — run ./onion-wasm/build.sh"; exit 1; }
+          git diff --exit-code -- \
+            galley/pkg-web/usfm_galley_bg.wasm \
+            galley/pkg-bundler/usfm_galley_bg.wasm \
+            || { echo "::error::committed .wasm is stale — run ./galley/build.sh"; exit 1; }
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -177,10 +216,13 @@ jobs:
           path: |
             onion-wasm/pkg-web
             onion-wasm/pkg-bundler
+            galley/pkg-web
+            galley/pkg-bundler
 
-  # The seven `#[ignore]`d oracles, each naming a claim nothing else makes:
-  # galley's four whole-Bible publication laws, mise's UTF-16 boundary sweep of
-  # the sous tier, and sous-core's two 8-corpus reference walks. Release keeps
+  # The sixteen `#[ignore]`d oracles, each naming a claim nothing else makes:
+  # galley's whole-Bible publication laws, mise's UTF-16 boundary sweep of the
+  # sous tier and onion's of the whole test tier, and sous-core's four
+  # 8-corpus reference walks. Release keeps
   # them out of the local gate's budget; the whole suite here is ~11s warm, so
   # it runs on every event, pull requests included. `test` is still its own job
   # and not redundant: it carries the debug_assert!s release compiles out.
@@ -223,7 +265,7 @@ jobs:
             got=$(sed -n 's/^version = "\(.*\)"/\1/p' "$f" | head -1)
             [ "$got" = "$want" ] || { echo "$f is $got, tag says $want"; fail=1; }
           done
-          for f in package.json onion-wasm/package.json; do
+          for f in package.json onion-wasm/package.json galley/package.json; do
             got=$(node -p "require('./$f').version")
             [ "$got" = "$want" ] || { echo "$f is $got, tag says $want"; fail=1; }
           done

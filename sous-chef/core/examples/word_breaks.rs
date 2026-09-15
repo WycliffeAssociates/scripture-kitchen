@@ -25,8 +25,8 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use mise::unicode::class_of;
 use rustc_hash::{FxHashMap, FxHashSet};
-use sous_core::unicode::class_of;
 use sous_core::words::for_each_word;
 use unicode_segmentation::UnicodeSegmentation;
 

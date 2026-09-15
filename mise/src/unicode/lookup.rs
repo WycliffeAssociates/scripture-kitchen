@@ -7,7 +7,8 @@
 //!
 //! Both read `table::BLOCKS`, so they cannot disagree by construction; the
 //! agreement test pins it anyway. The walk helpers are bench subjects.
-//! Index arithmetic and the rejected shapes: README.md.
+//! Index arithmetic and the rejected shapes:
+//! `sous-chef/core/src/unicode/README.md`.
 
 use super::{Class, table};
 
@@ -46,7 +47,7 @@ fn astral(cp: u32) -> Class {
 /// The class of one ASCII byte, for a caller that already proved the byte is
 /// ASCII — a SWAR chunk test, say.
 #[inline]
-pub(crate) fn ascii_class(byte: u8) -> Class {
+pub fn ascii_class(byte: u8) -> Class {
     debug_assert!(byte < 0x80, "the caller proves the byte is ASCII");
     Class::from_bits(table::ASCII[usize::from(byte & 0x7f)])
 }
@@ -55,7 +56,7 @@ pub(crate) fn ascii_class(byte: u8) -> Class {
 /// encoding without reassembling a scalar. `bytes` must start on a char
 /// boundary of well-formed UTF-8.
 #[inline]
-pub(crate) fn trie_at(bytes: &[u8]) -> (Class, usize) {
+pub fn trie_at(bytes: &[u8]) -> (Class, usize) {
     let lead = bytes[0];
     if lead < 0x80 {
         return (Class::from_bits(table::ASCII[lead as usize]), 1);

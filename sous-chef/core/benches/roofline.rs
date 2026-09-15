@@ -31,10 +31,10 @@ use divan::{
     Bencher,
     counter::{BytesCount, ItemsCount},
 };
+use mise::unicode::lookup::{walk, walk_trie, walk_trie_swar};
 use sous_core::judge::{Pattern, PatternIndex};
 use sous_core::sites;
 use sous_core::substrate::{ChapterRow, Edge, Substrate, fold_book};
-use sous_core::unicode::lookup::{walk, walk_trie, walk_trie_swar};
 use sous_core::{
     BookKey, Chapter, ChapterInput, ChapterKey, ChapterObs, ChapterPass, Corpus, JudgingConfig,
     ProjectedBook, TextRange, Verse, VerseKey, Words, analyze_with,

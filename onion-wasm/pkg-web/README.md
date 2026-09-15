@@ -87,11 +87,13 @@ subpaths: `.` → `pkg-bundler`, `./web` → `pkg-web`, `./web/wasm` → the bin
 
 That map is not what a consumer resolves against, though: npm cannot install a
 subdirectory of a git repo, so the REPO-ROOT `package.json` is the installable
-identity (`@wycliffeassociates/usfm-onion`). It is this file with every path
-pushed down one directory, derived by `node onion-wasm/package-root.mjs >
-package.json` — edit the map here and regenerate, never both by hand. CI diffs
-the derived file, because a stale `sideEffects` is silent: a bundler that does
-not see it tree-shakes the wasm glue out of a consumer's app.
+identity (`@wycliffeassociates/scripture-kitchen`). It is derived from this
+file and `galley/package.json` together, by `node package-root.mjs >
+package.json`: these subpaths land under `./onion`, and `.` / `./web` are
+`usfm-galley`, the superset module. Edit the map here and regenerate, never
+both by hand. CI diffs the derived file, because a stale `sideEffects` is
+silent: a bundler that does not see it tree-shakes the wasm glue out of a
+consumer's app.
 
 **One build per target, full default features** (`usj`/`usx`/`html` on). There
 are no all-vs-lean prebuilt variants: the binary is ~370 KB (~152 KB gzipped)

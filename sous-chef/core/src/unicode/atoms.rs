@@ -19,8 +19,8 @@
 
 use crate::TextRange;
 
-use super::lookup::trie_at;
-use super::{Class, class_of};
+use mise::unicode::lookup::trie_at;
+use mise::unicode::{Class, class_of};
 
 /// Snaps a projected UTF-8 range outward to atom boundaries.
 ///

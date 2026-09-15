@@ -14,11 +14,10 @@ use super::{
 };
 use crate::Verse;
 use crate::hygiene::{NBSP, SUSPECT, ScalarSites};
+use mise::unicode::Class;
+use mise::unicode::lookup::{ascii_class, trie_at};
+
 use crate::unicode::atoms::count_atoms;
-use crate::unicode::{
-    Class,
-    lookup::{ascii_class, trie_at},
-};
 
 /// Consecutive ASCII scalars before the eight-byte lane re-arms; the
 /// hysteresis the Stage 1 classifier bench measured.

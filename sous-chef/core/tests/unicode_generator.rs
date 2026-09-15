@@ -16,9 +16,11 @@ fn a_second_generator_run_reproduces_the_committed_tables() {
         .expect("the generator binary runs");
     assert!(status.success(), "gen-unicode exited with {status}");
 
-    let src = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/unicode");
-    assert_reproduces(&table, &src.join("table.rs"));
-    assert_reproduces(&pools, &src.join("pools.rs"));
+    // The class table's home is `mise`; the pools stay with the rules that
+    // read them.
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    assert_reproduces(&table, &manifest.join("../../mise/src/unicode/table.rs"));
+    assert_reproduces(&pools, &manifest.join("src/unicode/pools.rs"));
 }
 
 fn assert_reproduces(regenerated: &PathBuf, committed: &PathBuf) {

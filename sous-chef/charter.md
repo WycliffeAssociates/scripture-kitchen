@@ -31,7 +31,7 @@ amend the charter deliberately.
 
 ### Onion owns scripture structure
 
-`usfm_onion_2` owns parsing, marker validity, canonical book/chapter order,
+`usfm_onion` owns parsing, marker validity, canonical book/chapter order,
 content masks, verse anchors, and the mapping between raw USFM and addressable
 content. It may reject duplicate or non-increasing chapter structure with a
 typed error. Sous does not grow a second USFM parser or reconciliation engine.

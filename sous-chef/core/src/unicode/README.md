@@ -1,20 +1,31 @@
-# `sous_core::unicode`
+# `sous_core::unicode` and `mise::unicode`
 
-One `u16` of classification bits per scalar, from pinned UCD 17.0.0. The
-public surface is small on purpose:
+One `u16` of classification bits per scalar, from pinned UCD 17.0.0. The bits
+are the leaf both engines read, so they live in `mise`; what only Sous means —
+the G2 pools and the atom rule — stays here. This file documents both halves,
+because the bit layout and the rules over it are one argument.
 
 ```rust
-class_of(c) -> Class      // the bits for one scalar
-pool_of(c)  -> Pool       // G2's neighbour category, judge-time only
-is_glue(c)  -> bool       // charter invariant 8
-atoms::widen_to_atoms(text, range) -> TextRange
-atoms::is_atom_boundary(text, at)  -> bool
-lookup::{walk, walk_trie, walk_trie_swar}   // bench subjects only
+mise::unicode::class_of(c) -> Class        // the bits for one scalar
+mise::unicode::is_glue(c)  -> bool         // Mark plus grapheme extenders
+mise::unicode::lookup::trie_at(bytes)      // the same bits off raw UTF-8
+mise::unicode::lookup::{walk, walk_trie, walk_trie_swar}   // bench subjects
+
+sous_core::unicode::pool_of(c) -> Pool     // G2's neighbour category
+sous_core::unicode::atoms::widen_to_atoms(text, range) -> TextRange
+sous_core::unicode::atoms::is_atom_boundary(text, at)  -> bool
 ```
 
-`lookup::trie_at` is `pub(crate)`: `hygiene` walks raw UTF-8 with it.
-`Class::bits` and `bits::*` are the generator's shared layout, not a caller
-API.
+`sous_core::unicode` re-exports `Class` and `class_of` alone, because
+`substrate::is_nonletter`, `atoms`, and `pool_of` all speak in `Class`. The
+bits, `is_glue`, and the index paths are `mise::unicode` and only there;
+`galley::find` reads them from there too. `Class::bits`/`from_bits` and
+`bits::*` are the generator's shared layout, not a caller API.
+
+| file | crate |
+| --- | --- |
+| `unicode/{mod,lookup,table}.rs` | `mise` |
+| `unicode/{mod,pools,atoms,tests}.rs`, `bin/gen-unicode.rs`, `testdata/ucd/` | `sous-core` |
 
 ## Bit layout
 
@@ -50,6 +61,9 @@ Noncharacters are a spec constant, not a UCD file.
 ```sh
 cargo run -p sous-core --bin gen-unicode      # testdata/ucd/*.txt → table.rs, pools.rs
 ```
+
+The generator needs a hash map and `mise` takes no dependencies, so it stays in
+`sous-core` beside the extracts and writes `table.rs` across into `mise`.
 
 Never a `build.rs`. Both are committed, reviewable artifacts, and a second run
 must leave `git diff --exit-code` clean. Inputs, their checksums,

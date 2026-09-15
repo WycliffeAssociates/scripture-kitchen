@@ -16,7 +16,8 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use usfm_galley::wasm::{Galley, Knobs};
+use usfm_galley::wasm::onion;
+use usfm_galley::wasm::{Galley, SousSettings};
 use wasm_bindgen_test::*;
 
 const GEN: &str = include_str!("fixtures/sous/GEN.usfm");
@@ -36,10 +37,51 @@ fn loaded() -> Galley {
     assert_eq!(galley.update("books/GEN.usfm", GEN).unwrap(), "GEN");
     galley.update("books/RUT.usfm", RUT).unwrap();
     galley.update("books/JON.usfm", JON).unwrap();
-    galley.update_reference("ref/RUT.usfm", RUT_REF).unwrap();
-    galley.update_reference("ref/JON.usfm", JON_REF).unwrap();
+    galley
+        .update_reference("ref/RUT.usfm", RUT_REF, None)
+        .unwrap();
+    galley
+        .update_reference("ref/JON.usfm", JON_REF, None)
+        .unwrap();
     galley
 }
+
+/// The find buffer's head, read the way a host reads it: the two header
+/// words, the hit count, and the id table `bookIndex` indexes.
+struct Found {
+    hits: usize,
+    ids: Vec<String>,
+}
+
+fn decode_find(bytes: &[u8]) -> Found {
+    let word =
+        |at: usize| u32::from_le_bytes(bytes[at * 4..at * 4 + 4].try_into().expect("four bytes"));
+    assert_eq!(word(0), 0x444E_4946, "the buffer leads with FIND");
+    assert_eq!(word(1), 1, "find wire version 1");
+    let hits = word(2) as usize;
+    let books = word(3) as usize;
+    // One record per hit: four words, plus two per source piece.
+    let mut at = 4;
+    for _ in 0..hits {
+        at += 4 + 2 * word(at + 3) as usize;
+    }
+    let id_lens: Vec<usize> = (0..books).map(|i| word(at + i) as usize).collect();
+    // The preview lengths sit between the id lengths and the byte blob.
+    let mut cursor = (at + books + hits) * 4;
+    let ids = id_lens
+        .into_iter()
+        .map(|len| {
+            let id = String::from_utf8(bytes[cursor..cursor + len].to_vec())
+                .expect("the encoder wrote UTF-8");
+            cursor += len;
+            id
+        })
+        .collect();
+    Found { hits, ids }
+}
+
+/// A needle every fixture's verse text carries.
+const NEEDLE: &str = "the";
 
 #[wasm_bindgen_test]
 fn the_three_publications_cross_unchanged() {
@@ -49,22 +91,26 @@ fn the_three_publications_cross_unchanged() {
     galley.update("books/GEN.usfm", GEN_EDITED).unwrap();
     assert_eq!(galley.publish().unwrap(), EDIT, "one word changed");
 
-    let mut knobs = galley.config();
-    knobs.casing = false;
-    knobs.sentence_start_upper_bp = 9_990;
-    knobs.z_short = 2.0;
-    // The lane the defaults leave off: the knobs golden is where wire code 3
+    let mut settings = galley.config();
+    settings.casing = false;
+    settings.sentence_start_upper_bp = 9_990;
+    settings.z_short = 2.0;
+    // The lane the defaults leave off: the settings golden is where wire code 3
     // crosses the wall.
-    assert!(!knobs.source_copy, "the source-copy lane ships off");
-    knobs.source_copy = true;
-    galley.set_config(knobs);
+    assert!(!settings.source_copy, "the source-copy lane ships off");
+    settings.source_copy = true;
+    galley.set_config(settings);
     // A reference registered before the lane was on kept no word lane; the
     // host re-sends its text, and the publication says how many needed it.
     galley.publish().unwrap();
     assert_eq!(galley.last_wordless_references(), 2.0);
-    galley.update_reference("ref/RUT.usfm", RUT_REF).unwrap();
-    galley.update_reference("ref/JON.usfm", JON_REF).unwrap();
-    assert_eq!(galley.publish().unwrap(), KNOBS, "the knobs publication");
+    galley
+        .update_reference("ref/RUT.usfm", RUT_REF, None)
+        .unwrap();
+    galley
+        .update_reference("ref/JON.usfm", JON_REF, None)
+        .unwrap();
+    assert_eq!(galley.publish().unwrap(), KNOBS, "the settings publication");
 }
 
 #[wasm_bindgen_test]
@@ -97,7 +143,7 @@ fn the_handle_reports_what_it_holds() {
 fn the_knobs_round_trip_through_js() {
     let galley = Galley::new(None);
     let defaults = galley.config();
-    assert_eq!(defaults, Knobs::default());
+    assert_eq!(defaults, SousSettings::default());
     assert!(defaults.casing, "casing ships on");
     assert_eq!(defaults.support_floor, 5);
     assert_eq!(defaults.word_support_floor, 20);
@@ -105,15 +151,165 @@ fn the_knobs_round_trip_through_js() {
     assert_eq!(defaults.min_verses, 50);
 }
 
+/// An onion-wasm door, in the galley module: the shims land here because the
+/// cdylib links the object they sit in. `tests/sous_conformance.mjs` pins the
+/// whole export list as JavaScript sees it.
+#[wasm_bindgen_test]
+fn an_onion_door_answers_on_this_module() {
+    let at = GEN.find("\\c 1").expect("the fixture declares a chapter") as u32;
+    assert_eq!(
+        onion::to_utf16(GEN, at),
+        GEN[..at as usize].encode_utf16().count() as u32,
+    );
+}
+
 /// The onion door still answers off the Pantry's own chunk cache.
 #[wasm_bindgen_test]
 fn the_onion_products_share_the_corpus_cache() {
     let mut galley = loaded();
-    let dish = galley.parse(GEN, true, true, true);
+    let dish = galley.parse_text(GEN, true, true, true);
     assert!(!dish.is_empty(), "a parse buffer came back");
     assert!(
-        galley.verse_text(GEN).contains("beside the"),
+        galley.verse_text_of(GEN).contains("beside the"),
         "the verse-text projection reads"
     );
     assert!(galley.entry_count() > 0.0, "chapters were cached");
+}
+
+/// The id doors and the text doors plate the same book.
+#[wasm_bindgen_test]
+fn the_retained_copy_answers_with_the_same_bytes() {
+    let mut galley = loaded();
+    let by_id = galley.parse("books/GEN.usfm", true, true, true).unwrap();
+    assert_eq!(by_id, galley.parse_text(GEN, true, true, true));
+    assert_eq!(
+        galley.verse_text("books/GEN.usfm").unwrap(),
+        galley.verse_text_of(GEN),
+    );
+    assert_eq!(
+        galley.lint("books/GEN.usfm").unwrap(),
+        galley.parse_text(GEN, true, false, false),
+        "lint is the diagnostics section alone",
+    );
+    assert!(galley.parse("books/NUM.usfm", true, true, true).is_err());
+}
+
+/// A reference is searchable exactly when the host asked it to keep its text,
+/// and the refusal names the argument that would fix it.
+#[wasm_bindgen_test]
+fn a_reference_is_findable_only_with_keep_text() {
+    let mut galley = loaded();
+    let refused = galley
+        .find("ref/RUT.usfm", NEEDLE, true, false, 0)
+        .expect_err("a lengths-only reference retains nothing to search");
+    assert!(format!("{refused:?}").contains("keepText"), "{refused:?}");
+    assert!(
+        galley
+            .find("books/NUM.usfm", NEEDLE, true, false, 0)
+            .is_err()
+    );
+
+    galley
+        .update_reference("ref/RUT.usfm", RUT_REF, Some(true))
+        .unwrap();
+    let found = decode_find(&galley.find("ref/RUT.usfm", NEEDLE, true, false, 0).unwrap());
+    assert!(found.hits > 0, "the source's own verse text is searchable");
+    assert_eq!(found.ids, vec!["ref/RUT.usfm".to_string()]);
+    // Keeping the text buys the projection with it.
+    assert!(galley.verse_text("ref/RUT.usfm").is_ok());
+    // And the publication is still the one the goldens pin.
+    assert_eq!(galley.publish().unwrap(), COLD, "the cold publication");
+}
+
+/// The scope decides which books are searched, and the id table names exactly
+/// those.
+#[wasm_bindgen_test]
+fn the_find_scope_chooses_the_id_table() {
+    let mut galley = loaded();
+    galley
+        .update_reference("ref/RUT.usfm", RUT_REF, Some(true))
+        .unwrap();
+
+    let targets = decode_find(&galley.find_all(NEEDLE, true, false, 0, None).unwrap());
+    assert_eq!(targets.ids.len(), 3, "the default scope is the targets");
+    assert!(targets.ids.iter().all(|id| id.starts_with("books/")));
+
+    let references = decode_find(
+        &galley
+            .find_all(NEEDLE, true, false, 0, Some("references".into()))
+            .unwrap(),
+    );
+    // ref/JON kept no text, so it is neither searched nor listed.
+    assert_eq!(references.ids, vec!["ref/RUT.usfm".to_string()]);
+    assert!(references.hits > 0);
+
+    let all = decode_find(
+        &galley
+            .find_all(NEEDLE, true, false, 0, Some("all".into()))
+            .unwrap(),
+    );
+    assert_eq!(all.ids.len(), 4, "three targets and the one kept reference");
+    assert_eq!(all.hits, targets.hits + references.hits);
+
+    assert!(
+        galley
+            .find_all(NEEDLE, true, false, 0, Some("elsewhere".into()))
+            .is_err(),
+        "an unknown scope is an error, not a default"
+    );
+}
+
+/// A reference keeps no text by default, so every door that needs one refuses
+/// with the Pantry's own words rather than answering from nothing.
+#[wasm_bindgen_test]
+fn a_reference_refuses_the_text_doors() {
+    let mut galley = loaded();
+    assert!(galley.lint("ref/RUT.usfm").is_err(), "no text to lint");
+    assert!(galley.parse("ref/RUT.usfm", true, true, true).is_err());
+    assert!(galley.verse_text("ref/RUT.usfm").is_err());
+    assert!(galley.lint("books/RUT.usfm").is_ok(), "the target has text");
+}
+
+/// Dirty is positional; rework is set membership. One edited verse in chapter
+/// 2 makes the file differ and names that chapter alone.
+#[wasm_bindgen_test]
+fn a_fingerprint_separates_dirty_from_rework() {
+    let galley = Galley::new(None);
+    let baseline = galley.fingerprint(GEN);
+    let current = galley.fingerprint(GEN_EDITED);
+
+    assert!(
+        !baseline.differs_from(&baseline),
+        "the same bytes are clean"
+    );
+    assert!(baseline.differs_from(&current), "one word makes it dirty");
+    assert!(baseline.chunk_count() > 1, "the fixture has chapters");
+
+    let changed = baseline.changed_chunks(&current);
+    assert_eq!(changed.len(), 2, "one range, as from and to");
+    let (from, to) = (changed[0] as usize, changed[1] as usize);
+    assert!(
+        GEN_EDITED[from..to].starts_with("\\c 2"),
+        "the edited chapter alone",
+    );
+}
+
+/// The same question against a book the Pantry already holds.
+#[wasm_bindgen_test]
+fn the_retained_copy_is_its_own_baseline() {
+    let galley = loaded();
+    assert_eq!(
+        galley.changed_since_update("books/GEN.usfm", GEN),
+        Some(Vec::new()),
+        "the text as last updated needs no rework",
+    );
+    let changed = galley
+        .changed_since_update("books/GEN.usfm", GEN_EDITED)
+        .expect("a registered id");
+    assert_eq!(changed.len(), 2, "one chapter to re-derive");
+    assert_eq!(
+        galley.changed_since_update("books/NUM.usfm", GEN),
+        None,
+        "an unregistered id answers undefined",
+    );
 }

@@ -1,0 +1,18 @@
+{
+  "name": "usfm_galley",
+  "type": "module",
+  "description": "The workflows crate over the USFM engine and the Sous analysis — the resident handle, and every onion door on one module.",
+  "version": "0.1.0",
+  "files": [
+    "usfm_galley_bg.wasm",
+    "usfm_galley.js",
+    "usfm_galley_bg.js",
+    "usfm_galley.d.ts"
+  ],
+  "main": "usfm_galley.js",
+  "types": "usfm_galley.d.ts",
+  "sideEffects": [
+    "./usfm_galley.js",
+    "./snippets/*"
+  ]
+}

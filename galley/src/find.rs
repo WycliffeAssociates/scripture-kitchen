@@ -28,7 +28,7 @@
 use std::ops::Range;
 
 use memchr::memmem;
-use sous_core::unicode::{Class, class_of};
+use mise::unicode::{Class, class_of};
 
 use crate::onion::Mask;
 use crate::pantry::{BookId, Entry, Pantry, Role};
@@ -167,8 +167,8 @@ impl<'n> Find<'n> {
 
     /// Every hit in one registered book's verse-text projection.
     ///
-    /// A book that retains no text — or no projection, which is a reference —
-    /// has nothing to search and yields nothing.
+    /// A book that retains no text and no projection — a reference registered
+    /// without its text — has nothing to search and yields nothing.
     pub fn in_book<'a>(&'a self, book: &'a Entry<'_>) -> Hits<'a> {
         match (book.text(), book.mask()) {
             (Ok(text), Ok(mask)) => self.in_projection(mask, text.as_bytes()),
@@ -449,6 +449,8 @@ fn is_whole_word(hay: &str, from: usize, to: usize) -> bool {
 /// one encoder, so the two doors cannot drift.
 ///
 /// ```text
+/// u32   magic              0x444E4946 — "FIND", little-endian
+/// u32   version            1
 /// u32   hitCount
 /// u32   bookCount
 /// hit   × hitCount    bookIndex, projectedFrom, projectedTo, pieceCount,
@@ -457,6 +459,10 @@ fn is_whole_word(hay: &str, from: usize, to: usize) -> bool {
 /// u32   × hitCount    previewByteLen
 /// bytes               every id's UTF-8 in order, then every preview's
 /// ```
+///
+/// The two leading words are what the onion and sous buffers both lead with,
+/// and for the same reason: a reader that is a version behind fails on the
+/// header rather than on a field it misread.
 ///
 /// Little-endian `u32` throughout, and every offset is UTF-16 — the unit the
 /// editor's coordinates are already in (`onion::wire`'s `utf16: true`). The
@@ -482,6 +488,12 @@ pub mod wire {
     use super::Find;
     use crate::pantry::{BookId, Pantry};
 
+    /// `FIND` in ASCII, read out of the buffer's first four bytes in order.
+    pub const MAGIC: u32 = 0x444E_4946;
+
+    /// The layout above. A reader that does not know this number stops.
+    pub const VERSION: u32 = 1;
+
     /// Bytes of projected context a preview aims for, either side of the hit
     /// together. Bytes, not characters: it is a display string that gets
     /// trimmed to a char boundary, not a coordinate anything reads back.
@@ -496,10 +508,10 @@ pub mod wire {
     /// the caller took them from [`Pantry::books`].
     ///
     /// `limit` bounds hits ACROSS books, not per book; `0` means no bound. An
-    /// id that is not registered, or a book that retains no text or no
-    /// projection (a reference retains neither), contributes no hits rather
-    /// than an error: the caller asked which of these books match, and the
-    /// answer for that one is "it cannot".
+    /// id that is not registered, or a book that retains neither text nor
+    /// projection, contributes no hits rather than an error: the caller asked
+    /// which of these books match, and the answer for that one is "it
+    /// cannot".
     pub fn encode(pantry: &mut Pantry, ids: &[BookId], find: &Find<'_>, limit: u32) -> Vec<u8> {
         let ceiling = if limit == 0 {
             usize::MAX
@@ -549,7 +561,9 @@ pub mod wire {
         let strings: usize = ids.iter().map(|id| id.as_str().len()).sum::<usize>()
             + previews.iter().map(String::len).sum::<usize>();
         let mut out =
-            Vec::with_capacity(8 + 4 * records.len() + 4 * (ids.len() + previews.len()) + strings);
+            Vec::with_capacity(16 + 4 * records.len() + 4 * (ids.len() + previews.len()) + strings);
+        out.extend_from_slice(&MAGIC.to_le_bytes());
+        out.extend_from_slice(&VERSION.to_le_bytes());
         out.extend_from_slice(&(previews.len() as u32).to_le_bytes());
         out.extend_from_slice(&(ids.len() as u32).to_le_bytes());
         for word in &records {
@@ -617,9 +631,11 @@ pub mod wire {
             let word = |at: usize| {
                 u32::from_le_bytes(bytes[at * 4..at * 4 + 4].try_into().expect("four bytes"))
             };
-            let hit_count = word(0) as usize;
-            let book_count = word(1) as usize;
-            let mut at = 2;
+            assert_eq!(word(0), MAGIC, "the buffer leads with FIND");
+            assert_eq!(word(1), VERSION);
+            let hit_count = word(2) as usize;
+            let book_count = word(3) as usize;
+            let mut at = 4;
             let mut hits = Vec::new();
             for _ in 0..hit_count {
                 let (book, from, to) = (word(at), word(at + 1), word(at + 2));

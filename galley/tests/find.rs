@@ -6,7 +6,8 @@
 //!   for the claims a corpus cannot state cleanly: a needle inside a footnote
 //!   is unreachable, a needle across one is `Split`, `the` is not `then`, and
 //!   a case-insensitive hit lands on the source bytes a naive `str::find`
-//!   over the raw USFM would have found.
+//!   over the raw USFM would have found, and a reference is searched only
+//!   when it kept its text.
 //! - VOLUME — the whole test tier, `testData/exampleCorpora` (160 books,
 //!   12.8 MB): every hit round-trips source → projected → source, every hit's
 //!   source pieces re-read to the needle, and the whole-word rule restated in
@@ -19,6 +20,7 @@ use std::path::PathBuf;
 use sous_core::words::for_each_word;
 use usfm_galley::find::{Find, Hit, SourceSpan};
 use usfm_galley::onion::{Filter, Mask, cst, lex, mask};
+use usfm_galley::{Pantry, Retain, Role, SourceLanes};
 
 // ------------------------------------------------------------------ fixtures
 
@@ -100,6 +102,39 @@ fn a_needle_across_a_footnote_gap_comes_back_split() {
     assert!(
         NOTED[pieces[0].end as usize..pieces[1].start as usize].starts_with("\\f "),
         "the gap between the pieces is the note itself"
+    );
+}
+
+/// A reference is searchable exactly when it kept the text its projection
+/// indexes — `Retain::Text` here, `keepText` at the wasm door.
+#[test]
+fn a_reference_is_searched_only_when_it_keeps_its_text() {
+    let mut pantry = Pantry::new(1 << 20);
+    let register = |pantry: &mut Pantry, id: &str, retain| {
+        pantry
+            .update_with(id, Role::Reference, retain, SourceLanes::Lengths, NOTED)
+            .expect("a well-formed book");
+    };
+    register(&mut pantry, "ref/kept.usfm", Retain::Text);
+    register(&mut pantry, "ref/lengths.usfm", Retain::ProductsOnly);
+
+    let found = Find::literal("Jesus").in_pantry(&mut pantry, Role::Reference);
+    assert_eq!(found.len(), 1, "only the reference that kept its text");
+    assert_eq!(found[0].0.as_str(), "ref/kept.usfm");
+    assert_eq!(reread(NOTED, &found[0].1[0]), "Jesus");
+    // Text and projection travel together, and the verse lanes come anyway.
+    assert!(pantry.searchable(&"ref/kept.usfm".into()));
+    assert!(!pantry.searchable(&"ref/lengths.usfm".into()));
+    for id in ["ref/kept.usfm", "ref/lengths.usfm"] {
+        let entry = pantry.book(&id.into()).expect("a registered id");
+        assert!(entry.verse_lengths().is_ok(), "{id} keeps its verse lanes");
+    }
+    // The projection a search reads is the one a target gets: the footnote is
+    // out of the view here too.
+    assert!(
+        Find::literal("why he wept")
+            .in_pantry(&mut pantry, Role::Reference)
+            .is_empty()
     );
 }
 

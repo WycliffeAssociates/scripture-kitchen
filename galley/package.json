@@ -1,0 +1,30 @@
+{
+  "name": "usfm-galley",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "The JS doorway over the USFM engine and the Sous analysis — the resident handle, and every onion door on one module.",
+  "private": true,
+  "files": [
+    "pkg-bundler",
+    "pkg-web",
+    "sous-reader.ts",
+    "README.md"
+  ],
+  "sideEffects": [
+    "./pkg-bundler/usfm_galley.js",
+    "./pkg-bundler/snippets/*",
+    "./pkg-web/usfm_galley.js"
+  ],
+  "exports": {
+    ".": {
+      "types": "./pkg-bundler/usfm_galley.d.ts",
+      "default": "./pkg-bundler/usfm_galley.js"
+    },
+    "./web": {
+      "types": "./pkg-web/usfm_galley.d.ts",
+      "default": "./pkg-web/usfm_galley.js"
+    },
+    "./web/wasm": "./pkg-web/usfm_galley_bg.wasm",
+    "./sous-reader": "./sous-reader.ts"
+  }
+}

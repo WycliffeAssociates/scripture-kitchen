@@ -7,13 +7,16 @@
 //!
 //! mise::utf16   utf16_index(bytes).to_byte(11)   byte ↔ utf16, string present
 //!               utf16_table(bytes).to_utf16(16)  byte → utf16, string gone
+//!
+//! mise::unicode class_of('\u{0301}').is_glue()   one u16 of bits per scalar
 //! ```
 //!
 //! Zero dependencies, in or out of the workspace: this is the leaf
 //! `usfm_onion` and `sous-core` may both reach for without reaching for each
-//! other. Only two kinds of thing belong — spec-derived data tables and
+//! other. Only two kinds of thing belong — standard-derived data tables and
 //! borrow-free data structures — and only when more than one crate needs them.
 //! The scope rule and what it excludes: `mise/README.md`.
 
 pub mod books;
+pub mod unicode;
 pub mod utf16;

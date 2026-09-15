@@ -1,9 +1,15 @@
 //! The drift gates. These re-derive every scalar's class from the pinned UCD
 //! extracts and from `std`, so the committed table cannot rot quietly.
+//!
+//! They sit here rather than in `mise` because the extracts and the generator
+//! do: `mise` takes no dependencies, and an oracle written against the file
+//! format needs the files.
 
 use std::path::PathBuf;
 
-use super::{Class, Pool, bits, class_of, lookup::trie_at, pool_of};
+use mise::unicode::{Class, bits, class_of, lookup::trie_at};
+
+use super::{Pool, pool_of};
 
 fn ucd(file: &str) -> String {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))

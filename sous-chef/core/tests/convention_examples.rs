@@ -147,7 +147,7 @@ fn letter_roster(rows: &[Pattern]) -> Vec<char> {
     rows.iter()
         .filter(|row| row.channel == Channel::Rarity)
         .filter_map(|row| row.glyph.scalar())
-        .filter(|scalar| sous_core::unicode::class_of(*scalar).is_alphabetic())
+        .filter(|scalar| mise::unicode::class_of(*scalar).is_alphabetic())
         .collect()
 }
 

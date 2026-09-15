@@ -35,7 +35,7 @@ use crate::onion::{self, lint};
 
 use super::{OnionBook, PublishError, rebase_span};
 use crate::pantry::derived::Store;
-use crate::pantry::{BookId, Pantry, RawChecksum, Retain, Role, SourceLanes};
+use crate::pantry::{BookId, Entry, Pantry, RawChecksum, Retain, Role, SourceLanes};
 
 /// The Sous coordinator over one [`ChapterPass`].
 ///
@@ -299,6 +299,17 @@ impl<P: ChapterPass + Sync> Expediter<P> {
     /// [`update`](Self::update) so their chapters cannot go unkeyed.
     pub fn pantry(&self) -> &Pantry {
         &self.pantry
+    }
+
+    /// One registered book's retained products and the doors over them —
+    /// [`Entry::lint`], [`Entry::parse`], [`Entry::mask`]. `None` when the id
+    /// is unknown.
+    ///
+    /// `&mut` because those doors run the chunk cache. An `Entry` neither
+    /// registers nor removes, so the registry is still entered only through
+    /// [`update`](Self::update).
+    pub fn book(&mut self, id: &BookId) -> Option<Entry<'_>> {
+        self.pantry.book(id)
     }
 
     /// The Pantry's whole-book lint over loose text the host holds. One of

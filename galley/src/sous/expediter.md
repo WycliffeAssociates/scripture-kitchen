@@ -22,7 +22,9 @@ cache is keyed by, and what invalidates it, is one table in
 `pantry()` hands back `&Pantry` only, so no book can be registered behind these
 caches' backs. `update` takes the role's own retention, so
 `update(id, Role::Reference, text)` keeps no text; `update_with` is where a
-`Target` asking for `Retain::ProductsOnly` is refused (`pantry.md`). Re-sending
+`Target` asking for `Retain::ProductsOnly` is refused, and where a `Reference`
+asks for `Retain::Text` and gets a searchable projection with it (`pantry.md`);
+neither changes what `publish` walks, which is the Target set alone. Re-sending
 a Target as a Reference is a withdrawal from the target set and is treated as
 one: the ring and the hot slot go at once, the aggregate is untallied by the
 publication that no longer lists it, and the sweep takes the rest.
@@ -209,7 +211,7 @@ them (`pantry.md`).
 Step 5 runs from the lengths both sides already retain:
 
 ```text
-pass.length_config(config)         -> the knobs, from the member that owns the lane
+pass.length_config(config)         -> the settings, from the member that owns the lane
 pass.verse_lengths(aggregate)      -> the target lane, per Target book
 pantry.reference_lengths(id)       -> the source rows, per Reference book
 pantry.reference_words(id)         -> its word sets, if it was asked to keep any
@@ -243,7 +245,7 @@ Three properties follow, and each is a test:
   side of the swap. This is the charter's "source choice legitimately changes
   results without invalidating target-only observations", pinned in
   `equivalence.rs` and in the Expediter's own tests;
-- **the length knobs are the same judging config as every other knob.** They
+- **the length settings are the same judging config as every other knob.** They
   ride `JudgingConfig::lengths` and reach the step through
   `ChapterPass::length_config`, so `set_config` moves them and still maps
   nothing and folds nothing;
@@ -251,7 +253,7 @@ Three properties follow, and each is a test:
   the publication is OF, not only what it says, so the reference table is hashed
   beside the target one under its own role byte. So does the judging config,
   through `ChapterPass::config_stamp`: a `FindingHandle` is a snapshot plus a
-  row, and two publications under different knobs name different rows.
+  row, and two publications under different settings name different rows.
 
 The facts pairing returns — target-only and source-only keys, ambiguous
 duplicates, partial overlaps — are dropped here. They are alignment structure,

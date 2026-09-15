@@ -22,9 +22,12 @@ use rayon::prelude::*;
 use usfm_onion::utf16::{STRIDE, Utf16Index};
 
 fn collect_usfm_paths(root: &Path, paths: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(root) else {
-        return;
-    };
+    let entries = std::fs::read_dir(root).unwrap_or_else(|error| {
+        panic!(
+            "{} is committed and must be readable: {error}",
+            root.display()
+        )
+    });
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
@@ -114,9 +117,12 @@ fn dense_script_and_the_largest_book_match_a_char_walk() {
         env!("CARGO_MANIFEST_DIR"),
         "/../testData/exampleCorpora/en_ulb/19-PSA.usfm"
     ));
-    if psalms.exists() {
-        paths.push(psalms);
-    }
+    assert!(
+        psalms.is_file(),
+        "{} is committed and must be present",
+        psalms.display()
+    );
+    paths.push(psalms);
     assert!(!paths.is_empty(), "no *.usfm mounted");
     let boundaries: u64 = paths.par_iter().map(|path| check_file(path)).sum();
     println!(
@@ -129,6 +135,7 @@ fn dense_script_and_the_largest_book_match_a_char_walk() {
 /// Ignored by default so the inner loop stays fast; it is part of the
 /// pass-end gate: `cargo test -- --include-ignored`.
 #[test]
+#[ignore = "byte↔UTF-16 inverts at EVERY boundary of every mounted book (~107.5M) — the exhaustive form of the fast slice, which sees two files"]
 fn every_corpus_boundary_matches_a_char_walk() {
     let paths = corpus();
     assert!(

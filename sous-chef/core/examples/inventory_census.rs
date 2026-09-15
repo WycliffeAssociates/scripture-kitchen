@@ -25,8 +25,8 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use mise::unicode::class_of;
 use rustc_hash::FxHashMap;
-use sous_core::unicode::class_of;
 use sous_core::{BookKey, ChapterInput, ChapterKey, ChapterPass, ScalarKey, Substrate};
 
 const CORPORA: &[&str] = &[

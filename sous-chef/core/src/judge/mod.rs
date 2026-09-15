@@ -22,7 +22,9 @@ use rustc_hash::FxHashMap;
 use crate::pass::Findings;
 use crate::proportionality::LengthConfig;
 use crate::substrate::{BookAggregate, Case, FollowCounts, OuterClass, RUN_BUCKETS, ScalarKey};
-use crate::unicode::{Pool, class_of, pool_of};
+use mise::unicode::class_of;
+
+use crate::unicode::{Pool, pool_of};
 use crate::words::{
     DoubleTally, Form, LETTER_RUN_MAX, LETTER_RUN_MIN, MovedWords, RunTally, WordAggregate,
     WordTally, WordTotals, letter_run_lane,

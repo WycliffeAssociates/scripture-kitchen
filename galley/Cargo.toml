@@ -2,6 +2,7 @@
 name = "usfm_galley"
 version = "0.1.0"
 edition = "2024"
+description = "The workflows crate over the USFM engine and the Sous analysis — the resident handle, and every onion door on one module."
 
 [lints]
 workspace = true
@@ -29,9 +30,9 @@ rustc-hash.workspace = true
 rayon = { workspace = true, optional = true }
 
 # The JS doorway, feature-gated so a native consumer pays nothing for it.
-# onion-wasm rides in as an rlib: its `#[wasm_bindgen]` exports are
-# export-named shims, so they are linker roots and land in the SAME module —
-# one engine copy, both doors.
+# onion-wasm rides in as an rlib, and `wasm::onion` names one symbol out of it
+# so the linker pulls the object its shims sit in — one engine copy, both
+# doors, one module.
 wasm-bindgen = { version = "0.2", optional = true }
 onion-wasm = { path = "../onion-wasm", optional = true }
 js-sys = { version = "0.3", optional = true }
@@ -64,3 +65,11 @@ harness = false
 [[bench]]
 name = "expediter"
 harness = false
+
+# `-O` is wasm-pack's own release default; `--strip-producers` is the addition,
+# and it rides in the SAME wasm-opt pass so nothing is re-emitted twice. The
+# producers section records which BUILD of wasm-bindgen and walrus processed
+# the module, which differs between CLI builds of the same version — the one
+# thing that kept the .wasm from being byte-identical across hosts.
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ['-O', '--strip-producers']

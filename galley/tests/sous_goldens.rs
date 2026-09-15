@@ -3,7 +3,7 @@
 //! ```text
 //! cold   GEN RUT JON + ref/RUT ref/JON  →  goldens/sous/cold.bin
 //! edit   GEN replaced by GEN-edited     →  goldens/sous/edit.bin
-//! knobs  casing off, the two dials moved →  goldens/sous/knobs.bin
+//! settings  casing off, the two dials moved →  goldens/sous/knobs.bin
 //! ```
 //!
 //! Native is the pin. `galley/tests/wasm_wall.rs` drives the same three steps
@@ -35,21 +35,21 @@ pub const RUT_REF: &str = include_str!("fixtures/sous/ref/RUT.usfm");
 pub const JON_REF: &str = include_str!("fixtures/sous/ref/JON.usfm");
 
 /// The declared sources, registered twice in `publications`: once cold, and
-/// again after the knobs turn the source-copy lane on.
+/// again after the settings turn the source-copy lane on.
 const REFERENCES: [(&str, &str); 2] = [("ref/RUT.usfm", RUT_REF), ("ref/JON.usfm", JON_REF)];
 
 pub const COLD: &[u8] = include_bytes!("goldens/sous/cold.bin");
 pub const EDIT: &[u8] = include_bytes!("goldens/sous/edit.bin");
 pub const KNOBS: &[u8] = include_bytes!("goldens/sous/knobs.bin");
 
-/// The knobs `knobs.bin` is published under, in one place so the wasm wall and
+/// The settings `knobs.bin` is published under, in one place so the wasm wall and
 /// the JS script move with it.
 pub fn moved_knobs() -> JudgingConfig {
     let mut config = JudgingConfig::default();
     config.channels.casing = false;
     config.sentence_start_upper_bp = 9_990;
     config.lengths.z_short = 2.0;
-    // The one lane that ships off: the knobs publication is where a code-3
+    // The one lane that ships off: the settings publication is where a code-3
     // row lives, because the default publication has none by design.
     config.lengths.source_copy = true;
     config
@@ -91,9 +91,9 @@ fn publications() -> [Vec<u8>; 3] {
         sous.update_with(id, Role::Reference, Retain::ProductsOnly, text)
             .expect("a reference");
     }
-    let knobs = sous.publish().expect("the knobs publication");
+    let settings = sous.publish().expect("the settings publication");
 
-    [cold, edit, knobs]
+    [cold, edit, settings]
 }
 
 fn goldens_dir() -> PathBuf {
@@ -103,7 +103,7 @@ fn goldens_dir() -> PathBuf {
 #[test]
 fn the_three_publications_equal_their_goldens() {
     let published = publications();
-    let named: [(&str, &[u8]); 3] = [("cold", COLD), ("edit", EDIT), ("knobs", KNOBS)];
+    let named: [(&str, &[u8]); 3] = [("cold", COLD), ("edit", EDIT), ("settings", KNOBS)];
 
     if std::env::var_os("UPDATE_GOLDENS").is_some() {
         for ((name, _), bytes) in named.iter().zip(&published) {
@@ -158,7 +158,7 @@ fn the_cold_golden_holds_a_row_of_every_wire_code_that_ships_on() {
     assert_eq!(copies, 0, "the source-copy lane ships off");
 }
 
-/// The lane the defaults leave off: the knobs publication turns it on, so
+/// The lane the defaults leave off: the settings publication turns it on, so
 /// wire code 3 is published somewhere the wall and the JS reader both see.
 #[test]
 fn the_knobs_golden_holds_the_source_copy_rows() {
@@ -183,12 +183,12 @@ fn the_knobs_golden_holds_the_source_copy_rows() {
     );
 }
 
-/// The knobs golden earns its name: the casing channel is off in it, so no row
+/// The settings golden earns its name: the casing channel is off in it, so no row
 /// may resolve to a `Casing` pattern.
 #[test]
 fn the_knobs_golden_publishes_no_casing_row() {
     let cold = CorpusSnapshot::open(COLD).expect("cold.bin is a corpus buffer");
-    let knobs = CorpusSnapshot::open(KNOBS).expect("knobs.bin is a corpus buffer");
+    let settings = CorpusSnapshot::open(KNOBS).expect("knobs.bin is a corpus buffer");
     let casing = |snapshot: &CorpusSnapshot<'_>| {
         snapshot
             .patterns()
@@ -198,7 +198,11 @@ fn the_knobs_golden_publishes_no_casing_row() {
             .count()
     };
     assert_eq!(casing(&cold), 1, "the fixture's one casing pattern");
-    assert_eq!(casing(&knobs), 0, "casing is off in the knobs publication");
+    assert_eq!(
+        casing(&settings),
+        0,
+        "casing is off in the settings publication"
+    );
 }
 
 /// The judge names each pattern once. A resident host resolves a cached row's
@@ -207,7 +211,7 @@ fn the_knobs_golden_publishes_no_casing_row() {
 /// with nothing to notice.
 #[test]
 fn no_published_table_names_one_pattern_twice() {
-    for (name, buffer) in [("cold", COLD), ("edit", EDIT), ("knobs", KNOBS)] {
+    for (name, buffer) in [("cold", COLD), ("edit", EDIT), ("settings", KNOBS)] {
         let snapshot = CorpusSnapshot::open(buffer).expect("a corpus buffer");
         let patterns = snapshot.patterns().expect("a readable pattern table");
         assert!(!patterns.is_empty(), "{name}.bin publishes a table");
@@ -221,6 +225,25 @@ fn no_published_table_names_one_pattern_twice() {
             );
         }
     }
+}
+
+/// A reference that keeps its text keeps the projection with it, and the
+/// pinned tier counts both — which is what the pin below stays still for.
+#[test]
+fn a_reference_with_text_costs_more_than_a_lengths_only_one() {
+    let resident = |retain| {
+        let mut sous = Expediter::new(Brigade::default(), BUDGET);
+        sous.update_with("ref/RUT.usfm", Role::Reference, retain, RUT_REF)
+            .expect("a reference");
+        sous.resident_bytes()
+    };
+    let lengths = resident(Retain::ProductsOnly);
+    let kept = resident(Retain::Text);
+    assert!(
+        kept > lengths + RUT_REF.len(),
+        "the text is {} bytes and the projection rides with it: {kept} vs {lengths}",
+        RUT_REF.len()
+    );
 }
 
 /// The residency pin: the same three publications, with what the caches hold
@@ -256,12 +279,12 @@ fn resident_bytes_is_pinned_across_the_three_publications() {
         sous.update_with(id, Role::Reference, Retain::ProductsOnly, text)
             .expect("a reference");
     }
-    sous.publish().expect("the knobs publication");
-    let knobs = sous.resident_bytes();
+    sous.publish().expect("the settings publication");
+    let settings = sous.resident_bytes();
 
     assert_eq!(
-        [cold, edit, knobs],
+        [cold, edit, settings],
         [93_528, 101_417, 108_525],
-        "resident bytes moved: cold, edit, knobs"
+        "resident bytes moved: cold, edit, settings"
     );
 }

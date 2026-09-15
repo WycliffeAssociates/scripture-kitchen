@@ -13,6 +13,8 @@ use crate::{
 };
 
 const GENERATED: &str = include_str!("../../../reader.ts");
+/// The same reader, as the `usfm-galley` package exports it.
+const PACKAGED: &str = include_str!("../../../../galley/sous-reader.ts");
 /// One book under `books/mrk.usfm`: header, one directory row, a padded
 /// 16-byte id table, then the records.
 const FIRST_RECORD: usize = HEADER_BYTES + DIRECTORY_ENTRY_BYTES + 16;
@@ -168,7 +170,9 @@ fn fixture_finding() -> PackedFinding {
 
 #[test]
 fn checked_in_reader_is_fresh() {
-    assert_eq!(generated_reader_ts(), GENERATED);
+    let generated = generated_reader_ts();
+    assert_eq!(generated, GENERATED);
+    assert_eq!(generated, PACKAGED, "galley/sous-reader.ts");
 }
 
 #[test]

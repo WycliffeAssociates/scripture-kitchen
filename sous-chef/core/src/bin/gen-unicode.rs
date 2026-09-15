@@ -1,9 +1,12 @@
-//! `cargo run -p sous-core --bin gen-unicode` — regenerate the committed
-//! `src/unicode/table.rs` from the pinned UCD 17.0.0 extracts in
-//! `testdata/ucd/`.
+//! `cargo run -p sous-core --bin gen-unicode` — regenerate the two committed
+//! Unicode tables from the pinned UCD 17.0.0 extracts in `testdata/ucd/`.
+//!
+//! The class table's home is `mise`, which takes no dependencies and so cannot
+//! host a generator that wants a hash map; the generator stays here, beside the
+//! extracts, and writes across.
 //!
 //! ```text
-//! testdata/ucd/*.txt  →  src/unicode/table.rs
+//! testdata/ucd/*.txt  →  ../../mise/src/unicode/table.rs
 //!                        CLASS_RANGES  coalesced (lo, hi, u16) runs, all planes
 //!                        ASCII         flat u16[128]
 //!                        BLOCK_INDEX   u16[1024], one entry per BMP cp>>6
@@ -23,8 +26,8 @@
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
+use mise::unicode::bits;
 use rustc_hash::FxHashMap;
-use sous_core::unicode::bits;
 
 const MAX_CP: u32 = 0x10_FFFF;
 /// Scalars per second-level block. Also the UTF-8 continuation-byte fanout,
@@ -38,9 +41,10 @@ fn main() -> std::io::Result<()> {
     let rendered = render(&classes);
 
     let mut args = std::env::args().skip(1);
-    let table = args
-        .next()
-        .map_or_else(|| manifest.join("src/unicode/table.rs"), PathBuf::from);
+    let table = args.next().map_or_else(
+        || manifest.join("../../mise/src/unicode/table.rs"),
+        PathBuf::from,
+    );
     let pools_out = args
         .next()
         .map_or_else(|| manifest.join("src/unicode/pools.rs"), PathBuf::from);

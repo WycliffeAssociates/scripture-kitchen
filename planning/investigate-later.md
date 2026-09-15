@@ -41,15 +41,6 @@ low-level primitive.
 **Why:** lint must stay ParseHeader-free (it's a consumer-side index), so
 this only pays off if unification stays a primitive, not a dependency.
 
-## Pinned-count tests lean on gitignored corpora (Will, 2026-08-20)
-
-**What:** lint_corpus.rs, attr_corpus.rs, cst_oracle.rs etc. pin exact counts
-against example-corpora/, which is gitignored — a fresh clone silently skips
-them and proves less than it looks like it proves.
-**Why:** Fine short-term (the numbers are derived and reconciled), but
-eventually bundle a small stable subset or retarget a tier at committed
-fixtures so a bare clone still exercises real-data pins.
-
 ## The k/v attribute rules read 31 MB byte-at-a-time (Will, 2026-08-20)
 
 **What:** `Flat::read_attributes` walks every attribute list byte-at-a-time;
@@ -59,13 +50,6 @@ en_ult's 792,414 `\w` lists cost ~31 MB at ~0.85 GB/s (+5.7 ns/token on
 interior walk in `attributes.rs` (attr_corpus.rs is a ready-made oracle); a
 whole-list pre-filter was tried and rejected — same byte-at-a-time cost.
 
-## Chapter navigation grid (2026-08-21, from the Toc pass)
-
-**What:** A tappable chapter grid needs `ChapterRow`'s `\c` token (already
-carried) for raw/capped labels, plus a plural `chapter_spans(n)` for
-duplicated chapter numbers.
-**Why:** Pure client concern once a UI pulls it — build none of it before
-then.
 
 ## Mask `text()` newline-as-space render option (2026-08-21)
 

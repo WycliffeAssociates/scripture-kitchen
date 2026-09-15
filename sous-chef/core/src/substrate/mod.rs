@@ -28,8 +28,8 @@ use crate::judge::{JudgingConfig, PatternIndex};
 use crate::pass::{ChapterInput, ChapterObs, ChapterPass, Findings, SchemaStamp};
 use crate::proportionality::LengthConfig;
 use crate::sites;
-use crate::unicode::Class;
 use crate::{BookIndex, ConventionDigest, FindingKind, TextRange, VerseKey};
+use mise::unicode::Class;
 
 pub(crate) mod fold;
 #[cfg(test)]

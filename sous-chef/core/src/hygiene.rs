@@ -18,7 +18,9 @@
 //! Scan shape, throughput, and the lone-backslash caveat: hygiene.md.
 
 use crate::pass::{ChapterInput, ChapterObs, ChapterPass, Findings, SchemaStamp};
-use crate::unicode::{Class, atoms::widen_to_atoms, bits};
+use mise::unicode::{Class, bits};
+
+use crate::unicode::atoms::widen_to_atoms;
 use crate::{
     BookIndex, CodecError, FindingKind, HygieneClass, HygieneDigest, PackedFinding, TextRange,
 };

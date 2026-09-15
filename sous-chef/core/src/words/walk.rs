@@ -44,7 +44,9 @@ use super::{
 };
 use crate::Verse;
 use crate::substrate::{ScalarKey, is_run_atom};
-use crate::unicode::{Class, Pool, class_of, pool_of};
+use mise::unicode::{Class, class_of};
+
+use crate::unicode::{Pool, pool_of};
 
 /// One word as the walk saw it, in the coordinates of the text scanned.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

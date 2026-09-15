@@ -4,6 +4,8 @@
   `cargo test` ~9s). Run it, not a filtered subset; there is nothing to save.
 - The wall, by hand: `cd galley && wasm-pack test --node --features wasm
   --test wasm_wall` publishes the goldens `tests/sous_goldens.rs` pins.
+  `tests/sous_conformance.mjs` over a `--target nodejs` build is the JS half,
+  and the one place the module's exported names are pinned as a list.
 - Finish line for a pass: that plus `cargo clippy --all-targets` clean.
   `cargo test --release -- --include-ignored` (~11s) is what CI runs anyway;
   `.github/workflows/ci.yml` runs debug for the `debug_assert!`s and release
@@ -13,12 +15,13 @@
 
 ## The ignore rule
 
-- Fifteen tests are `#[ignore]`d, ten of them in `galley/tests/equivalence.rs`
+- Sixteen tests are `#[ignore]`d, ten of them in `galley/tests/equivalence.rs`
   — eight whole-Bible churns, two seeds per variant. Each reason string names
   the claim nothing else makes (whole-Bible publication equality under churn,
   under a config that moves every step, under a source replaced and withdrawn
-  mid-run, and under the smallest hot set and generation ring; the UTF-16
-  boundary sweep of the 8-corpus tier; sous-core's four reference walks).
+  mid-run, and under the smallest hot set and generation ring; mise's UTF-16
+  boundary sweep of the 8-corpus tier and onion's of the whole test tier;
+  sous-core's four reference walks).
 - Adding an `#[ignore]` means writing that sentence. A reason that says WHEN
   to run instead of WHAT it proves is the smell. A bulk rerun of a law
   already proven synthetically is not a test; delete it.

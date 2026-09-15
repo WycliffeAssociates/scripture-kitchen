@@ -7,9 +7,11 @@
 - `onion` / `onion-wasm` / `galley` are the engine. `sous-core` / `sous-cli`
   (under `sous-chef/`) are the other product. `planning/` and `GLOSSARY.md`
   are onion's only; everything about tests and conventions applies to both.
-- `mise/` is the zero-dependency leaf both share: spec-derived tables and
-  borrow-free data structures only (`BookKey`, book order, UTF-16 offset
-  types). Scope rule and exclusions: `mise/README.md`.
+- `mise/` is the zero-dependency leaf both share: standard-derived tables and
+  borrow-free data structures only (`BookKey`, book order, UTF-16 offset types,
+  the per-scalar Unicode `Class`). A generated table may live there while its
+  generator does not — `bin/gen-unicode` stays in `sous-core` with the pinned
+  UCD extracts and writes across. Scope rule and exclusions: `mise/README.md`.
 - `sous-core` never depends on onion. It takes a neutral borrowed view of the
   analysis. Do not add the dependency; see the charter's ownership boundaries.
 - `galley` is the one adapter allowed to depend on both. `galley::sous` owns

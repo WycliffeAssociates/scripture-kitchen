@@ -114,8 +114,8 @@ pub enum Role {
     /// text.
     ///
     /// A reference publishes no findings and is never a target, so it needs no
-    /// coordinate of its own. [`Retain::Text`] is accepted and pointless: no
-    /// operation on a reference reads text.
+    /// coordinate of its own. [`Retain::Text`] buys it one anyway: the text
+    /// AND the projection a target gets, so a search can read it.
     Reference,
 }
 
@@ -245,7 +245,8 @@ struct Book {
     checksum: RawChecksum,
     fingerprint: Fingerprint,
     toc: Toc,
-    /// [`Role::Target`] only: what publication needs to place a finding.
+    /// What publication needs to place a finding, and what a search reads.
+    /// A [`Role::Reference`] has one only under [`Retain::Text`].
     projection: Option<Projection>,
     /// [`Role::Reference`] only: one row per keyed verse, in TOC order.
     lengths: Option<Box<[SourceVerse]>>,
@@ -257,7 +258,7 @@ struct Book {
     bytes: usize,
 }
 
-/// A target's coordinate products: the verse-text projection and the table
+/// A book's coordinate products: the verse-text projection and the table
 /// that turns its bytes into the units a host publishes.
 struct Projection {
     /// Source ranges plus their mask starts.
@@ -402,17 +403,16 @@ impl Pantry {
                     )
                 }
             };
-        let projection = match role {
-            Role::Target => {
-                let utf16 = utf16_table(text.as_bytes());
-                Some(Projection {
-                    len_utf16: utf16.len_utf16(),
-                    mask,
-                    utf16,
-                })
+        // A target always projects; a reference does when it keeps the text
+        // the projection indexes, so Find has both halves or neither.
+        let projection = (retain == Retain::Text).then(|| {
+            let utf16 = utf16_table(text.as_bytes());
+            Projection {
+                len_utf16: utf16.len_utf16(),
+                mask,
+                utf16,
             }
-            Role::Reference => None,
-        };
+        });
         let print = fingerprint(text);
         let kept = match retain {
             Retain::Text => Some(text.to_string()),
@@ -488,6 +488,27 @@ impl Pantry {
             Role::Target => &self.targets,
             Role::Reference => &self.references,
         }
+    }
+
+    /// Registered books of one role that retain BOTH text and a projection —
+    /// what a search can actually read — in the same canonical order.
+    ///
+    /// Every target qualifies; a reference does only when the host registered
+    /// it under [`Retain::Text`].
+    pub fn books_with_text(&self, role: Role) -> Vec<BookId> {
+        self.books(role)
+            .iter()
+            .filter(|(id, _)| self.searchable(id))
+            .map(|(id, _)| id.clone())
+            .collect()
+    }
+
+    /// Whether this book retains what a search reads: its text, and the
+    /// projection the hits are placed in. `false` for an unknown id.
+    pub fn searchable(&self, id: &BookId) -> bool {
+        self.books
+            .get(id)
+            .is_some_and(|book| book.text.is_some() && book.projection.is_some())
     }
 
     /// The chunk cache's resident products plus the Pantry's own — detached
@@ -600,7 +621,7 @@ impl Pantry {
     }
 
     /// What this id is registered AS right now, or `None` when it is not.
-    pub(crate) fn role(&self, id: &BookId) -> Option<Role> {
+    pub fn role(&self, id: &BookId) -> Option<Role> {
         self.books.get(id).map(|book| book.role)
     }
 
@@ -704,7 +725,7 @@ impl Entry<'_> {
     }
 
     /// The retained verse-text projection: source ranges and their mask
-    /// starts, or the refusal a reference answers with — it keeps none.
+    /// starts, or the refusal a book keeping no text answers with.
     pub fn mask(&self) -> Result<&Mask, PantryError> {
         self.projection().map(|projection| &projection.mask)
     }
@@ -714,7 +735,7 @@ impl Entry<'_> {
     }
 
     /// The retained byte → UTF-16 table, valid against the exact text of the
-    /// last update. A reference keeps none.
+    /// last update. A book keeping no text keeps none.
     pub fn utf16(&self) -> Result<&Utf16Table, PantryError> {
         self.projection().map(|projection| &projection.utf16)
     }
@@ -823,8 +844,8 @@ pub enum PantryError {
     /// A target publishes findings, and placing them rescans its text, so it
     /// keeps it. [`Retain::ProductsOnly`] is for a reference.
     TargetNeedsText { id: BookId },
-    /// The book is a [`Role::Reference`], which retains no verse-text
-    /// projection and no UTF-16 table, and this operation needs one.
+    /// The book retains no verse-text projection and no UTF-16 table — a
+    /// reference registered without its text — and this operation needs one.
     NoProjection { id: BookId },
     /// The book is a [`Role::Target`], which retains a projection rather than
     /// per-verse lengths.
@@ -842,7 +863,7 @@ impl fmt::Display for PantryError {
                 write!(f, "target {id} must retain its text to be sited")
             }
             Self::NoProjection { id } => {
-                write!(f, "reference {id} retains no verse-text projection")
+                write!(f, "book {id} retains no verse-text projection")
             }
             Self::NoLengths { id } => write!(f, "target {id} retains no verse lengths"),
             Self::InvalidBook { id, error } => {

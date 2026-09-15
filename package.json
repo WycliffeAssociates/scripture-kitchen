@@ -1,11 +1,15 @@
 {
   "name": "@wycliffeassociates/scripture-kitchen",
   "version": "0.1.0",
-  "description": "The JS doorway over the USFM engine — piece 2 of the five-crate layout.",
+  "description": "The JS doorway over the USFM engine and the Sous analysis — the resident handle, and every onion door on one module.",
   "type": "module",
   "private": true,
   "license": "UNLICENSED",
   "files": [
+    "galley/pkg-bundler",
+    "galley/pkg-web",
+    "galley/sous-reader.ts",
+    "galley/README.md",
     "onion-wasm/pkg-bundler",
     "onion-wasm/pkg-web",
     "onion-wasm/reader.ts",
@@ -14,20 +18,33 @@
     "onion-wasm/README.md"
   ],
   "sideEffects": [
+    "./galley/pkg-bundler/usfm_galley.js",
+    "./galley/pkg-bundler/snippets/*",
+    "./galley/pkg-web/usfm_galley.js",
     "./onion-wasm/pkg-bundler/onion_wasm.js",
     "./onion-wasm/pkg-bundler/snippets/*",
     "./onion-wasm/pkg-web/onion_wasm.js"
   ],
   "exports": {
     ".": {
+      "types": "./galley/pkg-bundler/usfm_galley.d.ts",
+      "default": "./galley/pkg-bundler/usfm_galley.js"
+    },
+    "./web": {
+      "types": "./galley/pkg-web/usfm_galley.d.ts",
+      "default": "./galley/pkg-web/usfm_galley.js"
+    },
+    "./web/wasm": "./galley/pkg-web/usfm_galley_bg.wasm",
+    "./sous-reader": "./galley/sous-reader.ts",
+    "./onion": {
       "types": "./onion-wasm/pkg-bundler/onion_wasm.d.ts",
       "default": "./onion-wasm/pkg-bundler/onion_wasm.js"
     },
-    "./web": {
+    "./onion/web": {
       "types": "./onion-wasm/pkg-web/onion_wasm.d.ts",
       "default": "./onion-wasm/pkg-web/onion_wasm.js"
     },
-    "./web/wasm": "./onion-wasm/pkg-web/onion_wasm_bg.wasm",
+    "./onion/web/wasm": "./onion-wasm/pkg-web/onion_wasm_bg.wasm",
     "./schema": "./onion-wasm/reader.ts",
     "./diagnostics.json": "./onion-wasm/diagnostics.json",
     "./reader": "./onion-wasm/reader.ts"

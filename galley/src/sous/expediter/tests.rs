@@ -1280,7 +1280,7 @@ fn removing_the_reference_removes_the_length_rows() {
     assert_eq!(rows(&after), rows(&alone));
 }
 
-/// The length knobs live on the same judging config as every other knob,
+/// The length settings live on the same judging config as every other knob,
 /// so moving them maps nothing and folds nothing.
 #[test]
 fn a_length_knob_re_judges_without_mapping_or_folding() {
@@ -1696,7 +1696,7 @@ fn two_configs_publish_two_snapshot_ids() {
     moved.channels.casing = false;
     assert_ne!(snapshot_of(JudgingConfig::default()), snapshot_of(moved));
 
-    // And the same knobs are the same publication, however they were reached.
+    // And the same settings are the same publication, however they were reached.
     let mut sous = sous();
     sous.update("b/mrk.usfm", Role::Target, &mark()).unwrap();
     sous.publish().unwrap();

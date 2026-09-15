@@ -44,7 +44,7 @@ go.
 
 | tier | what is in it | who holds it | evicted |
 | --- | --- | --- | --- |
-| **pinned** | a `Target`'s text, its `Toc`/`Mask`/`Utf16Table`/`Fingerprint`, a `Reference`'s verse lanes, the generation rings that name them, and the id lists — canonical order, the hot set, the tally — that name them a second time | `Pantry::books`, `Pantry::targets`/`references`, `Expediter::generations`/`hot`/`cooling`/`tallied`/`project` | never, until `remove` |
+| **pinned** | a `Target`'s text, its `Toc`/`Mask`/`Utf16Table`/`Fingerprint`, a `Reference`'s verse lanes (and the same three products when it keeps its text), the generation rings that name them, and the id lists — canonical order, the hot set, the tally — that name them a second time | `Pantry::books`, `Pantry::targets`/`references`, `Expediter::generations`/`hot`/`cooling`/`tallied`/`project` | never, until `remove` |
 | **hot** | the hot set's per-chapter site rows | `Expediter::chapter_sites` | with the hot set |
 | **rebuildable** | chunk products, and every content-addressed derived value | `Pantry::chunks`, the Expediter's `derived::Store`s | chunks by the budget; the rest by the sweep |
 
@@ -161,8 +161,17 @@ publication would later fail on. `Retain::ProductsOnly` is what
 `Role::Reference` takes by default, and `PantryError::NoText { id }` is the
 refusal a text-needing method answers with. `update` picks the ROLE's own
 retention — a target keeps its text, a reference keeps none — and `update_with`
-is how a host overrides that; `Retain::Text` on a reference is accepted and
-pointless, since no operation on one reads text.
+is how a host overrides that.
+
+**`Retain::Text` on a reference MEANS something: the text, and the projection
+that indexes it.** A reference asked to keep its text builds the same `Mask`
+and `Utf16Table` a target builds, so `Entry::{text, mask, utf16,
+published_len}` all answer and `Find` can search it — the wall's
+`updateReference(id, text, keepText)`. Text and projection travel together;
+`Pantry::searchable(&id)` is the one question that names both, and
+`books_with_text(role)` lists the books of a role that pass it. It costs what a
+target costs minus the resident analysis, and the pinned tier counts every byte
+of it. Its verse lanes are derived exactly as before.
 
 There is no splice API and never will be: the only mutation is whole-book
 replacement under a caller-chosen opaque id, which is idempotent and cannot
@@ -183,9 +192,10 @@ book cannot be registered behind its caches' backs —
 A book is registered as `Target` — full detached products, publishes findings —
 or as `Reference`: `Toc` plus one projected grapheme length per verse, and —
 only if the caller asks for it — that verse's sorted deduplicated 32-bit word
-hashes. Nothing else, because a reference corpus never publishes a coordinate
-and nothing ever asks it for text. Both roles are live; `books(role)` lists each
-in the same canonical order and neither sees the other.
+hashes. Nothing else by default, because a reference corpus never publishes a
+coordinate; a host that means to SEARCH one asks for `Retain::Text` and pays a
+target's price for that book. Both roles are live; `books(role)` lists each in
+the same canonical order and neither sees the other.
 
 The asymmetry is the point, and it is measured (evidence.md, U1 (a)): over the
 committed 66-book `en_ulb`, a target's own products are **7.29 MB** (162% of
@@ -217,6 +227,7 @@ And per `Reference` book, which is the whole list:
 | verse lengths | `sous_core::source_lengths` over the transient mask | 12 B per verse; the source half of a length ratio |
 | verse words | `sous_core::SourceWords::of`, opt-in | the source half of a copy run |
 | `Fingerprint` | `galley::pantry::fingerprint` | the baseline for the next update |
+| the text, `Mask`, `Utf16Table` | `Retain::Text`, opt-in | what a search reads; a target's three, at a target's price |
 
 `Pantry::text_bytes()` sums the retained text alone and
 `Fingerprint::resident_bytes` is public, so a host can read `resident_bytes() -
@@ -247,8 +258,9 @@ SOURCE
 (`lastWordlessReferences()` across the wasm wall, `sourcecopy unavailable BOOK`
 from the CLI), so "no rows" never quietly means "no lane".
 
-A reference derives the mask to project its verses and then drops it: both
-lanes are built once, at `update`, by the same
+A reference derives the mask to project its verses and then drops it — unless
+`Retain::Text` keeps it. Both lanes are built once either way, at `update`, by
+the same
 `sous_core::proportionality::source_lengths` and `sous_core::SourceWords::of` an
 Onion or a vref producer uses, so the two sides of a ratio cannot disagree about
 what a grapheme is and the two sides of a run cannot disagree about what a word
@@ -256,7 +268,8 @@ is. A book whose projection is not an analyzable `sous-core` input is refused
 there rather than at publication, as `PantryError::InvalidBook`.
 
 `Entry::mask`, `utf16`, and `published_len` therefore answer
-`Err(PantryError::NoProjection)` on a reference, and `Entry::verse_lengths` and
+`Err(PantryError::NoProjection)` on a reference that kept no text, and
+`Entry::verse_lengths` and
 `Entry::verse_words` answer `Err(PantryError::NoLengths)` on a target — the same
 shape `text()` already had. There is no accessor that quietly returns something
 empty.

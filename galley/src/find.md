@@ -51,6 +51,13 @@ it over every registered book in canonical order, leaving out books with no
 hit. The projection is materialized per search and dropped with the iterator —
 the Pantry retains the mask, not the projected text.
 
+**Either role is searchable, on one condition: it kept its text.** A target
+always does. A reference does only under `Retain::Text` (`keepText` at the wasm
+door), which buys it the same mask and UTF-16 table a target gets — text and
+projection travel together, so a book has both halves or neither
+(`pantry.md`). A reference registered lengths-only has nothing to search and
+is left out rather than reported clean.
+
 Literal only. The `regex` crate becomes a galley dependency the day a consumer
 asks for one, and not before; `aho-corasick` waits for a genuine many-patterns
 consumer (termlist highlighting).
@@ -78,11 +85,11 @@ agreement can be asserted rather than asserted about.
 
 **Where the classifier comes from.** The rule needs Unicode bits — Alphabetic,
 the Mark/Extender pair the charter calls *glue*, and Nd. Onion has no
-classifier of any kind, so the bits come from `sous_core::unicode::class_of`
-(pinned UCD 17.0.0), the workspace's only one. No dependency was added — galley
-already depends on sous-core for `galley::sous` — and no Sous type appears in
-Find's API; but the seam is real, and the honest home for that table is `mise`,
-the leaf both engines already share. `char::is_alphabetic` alone would not do:
+classifier of any kind, so the bits come from `mise::unicode::class_of` (pinned
+UCD 17.0.0), the workspace's only one, in the leaf both engines share. Find
+reaches for no Sous type at all: sous-core keeps the pools and the atom rule
+that only judging means, and the bits sit below both. `char::is_alphabetic`
+alone would not do:
 it says nothing about combining marks, so a doubly-pointed Hebrew word or a
 multi-virama Devanagari one would break where Sous joins, and the tier test is
 what would catch it.
@@ -174,6 +181,25 @@ Rust reads. It lives beside Find rather than in `wasm.rs` because BOTH of
 Sefer's doors encode it: the browser through `Galley::find`/`findAll`, the
 desktop through `Expediter::find` linked natively. One encoder, so the two doors
 cannot drift. `wasm.md` states the layout for the reader on the other side.
+
+The buffer leads with two words, as the onion and sous buffers do:
+
+```text
+u32   magic     0x444E4946 — "FIND", the four bytes in order
+u32   version   1
+u32   hitCount
+u32   bookCount
+…
+```
+
+`find::wire::MAGIC` and `VERSION` are the constants. A reader a version behind
+fails on the header rather than on a field it misread, which is the whole
+reason the two words cost eight bytes per answer.
+
+Which books are searched is the CALLER's list: `Expediter::find` takes ids, and
+the buffer's id table names exactly those, in that order. The wasm door turns a
+scope string into that list (`wasm.md`); nothing inside Find knows what a scope
+is.
 
 The preview is in the buffer because the projection is materialized per search
 and dropped with the iterator; `Hits::projection()` is the borrow that lets the

@@ -20,7 +20,8 @@
 //! different positions there, which is exactly the drift a wrong chain hides.
 //!
 //! Instrument: VOLUME — the whole test tier, `testData/exampleCorpora` (12.8 MB,
-//! 160 books). Absent bytes are a loud failure, never a silent skip.
+//! 160 books). Absent bytes are a loud failure, never a silent skip: all three
+//! files are committed, so a missing one is a broken checkout.
 
 use std::path::Path;
 
@@ -97,10 +98,10 @@ fn every_hop_inverts_on_real_bytes() {
 
     for file in FILES {
         let path = Path::new(file);
-        if !path.exists() {
-            eprintln!("chain oracle: skipping {file} — not mounted");
-            continue;
-        }
+        assert!(
+            path.is_file(),
+            "{file} is committed and must be present: a missing one is a broken checkout, not a smaller run"
+        );
         files += 1;
         let source = std::fs::read_to_string(path).expect("readable book");
         let bytes = source.as_bytes();
@@ -193,7 +194,7 @@ fn every_hop_inverts_on_real_bytes() {
     }
 
     eprintln!("chain oracle: {files} files × {checked} sampled bytes × 5 hops");
-    assert!(files > 0, "no chain-oracle file is mounted");
+    assert_eq!(files as usize, FILES.len(), "every file is walked");
 }
 
 /// The one thing a sample cannot see: a byte the mask DROPPED has no home in

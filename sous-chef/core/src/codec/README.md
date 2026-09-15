@@ -245,8 +245,14 @@ path.
 Rust owns the schema. `reader.ts` is generated and committed:
 
 ```sh
-cargo run -p sous-core --bin codegen     # reader.ts.tmpl → ../reader.ts
+cargo run -p sous-core --bin codegen     # reader.ts.tmpl → two identical outputs
 ```
+
+ONE generator, TWO outputs: `sous-chef/reader.ts` is the reader's home, and
+`galley/sous-reader.ts` is the copy the `usfm-galley` package exports as
+`./sous-reader` — a package cannot export a path above its own directory.
+`checked_in_reader_is_fresh` pins both. `sous-chef/reader.test.mjs` tests the
+sous-chef copy; `galley/tests/sous_conformance.mjs` imports the galley one.
 
 `corpus::generated_reader_ts()` substitutes `@@NAME@@` placeholders in
 `sous-chef/reader.ts.tmpl` with the Rust constants — every offset, the magic,

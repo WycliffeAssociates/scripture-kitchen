@@ -22,7 +22,9 @@ use memchr::memmem::Finder;
 
 use crate::judge::{Channel, Pattern, PatternIndex, PatternKey, Side, pool_of_key};
 use crate::substrate::{BookAggregate, OuterClass, RUN_BUCKETS, ScalarKey, is_run_atom};
-use crate::unicode::{atoms::widen_to_atoms, class_of};
+use mise::unicode::class_of;
+
+use crate::unicode::atoms::widen_to_atoms;
 use crate::words::word_around;
 use crate::{Chapter, Reasons, TextRange};
 
