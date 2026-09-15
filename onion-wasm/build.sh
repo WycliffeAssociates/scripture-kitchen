@@ -14,9 +14,22 @@
 set -eu
 cd "$(dirname "$0")"
 
+# The committed .wasm is an x86_64-Linux build (see ../wasm-build.sh: LLVM's
+# layout of tied items depends on the build host's architecture). Off that
+# platform this script hands itself to the container and stops.
+if [ -z "${WASM_BUILD_NATIVE:-}" ] && [ "$(uname -s)-$(uname -m)" != "Linux-x86_64" ]; then
+  exec ../wasm-build.sh "$(basename "$(pwd)")"
+fi
+
 sysroot=$(rustc --print sysroot)
 cargo_home=${CARGO_HOME:-$HOME/.cargo}
-RUSTFLAGS="--remap-path-prefix=$cargo_home=/cargo --remap-path-prefix=$sysroot=/rust${RUSTFLAGS:+ $RUSTFLAGS}"
+# Generic std code instantiated in this crate carries std's source paths. With
+# the rust-src component installed rustc resolves them to the local copy under
+# the sysroot; without it they stay in std's own virtual form, /rustc/<commit>.
+# CI has no rust-src, so the local copy is mapped onto that form and both hosts
+# spell every std path the same way.
+commit=$(rustc -vV | sed -n 's/^commit-hash: //p')
+RUSTFLAGS="--remap-path-prefix=$cargo_home=/cargo --remap-path-prefix=$sysroot=/rust --remap-path-prefix=$sysroot/lib/rustlib/src/rust=/rustc/$commit${RUSTFLAGS:+ $RUSTFLAGS}"
 export RUSTFLAGS
 
 # wasm-opt is an input to the bytes too: CI pins binaryen version_131

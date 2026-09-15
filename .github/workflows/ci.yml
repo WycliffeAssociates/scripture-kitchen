@@ -194,10 +194,12 @@ jobs:
       # A hard gate, and it has to be: an engine fix that ships with no API
       # change is exactly the stale package the interface check above cannot
       # see. It is only safe to fail on because the build is byte-reproducible
-      # across hosts —  once build.sh remapped the paths and
-      # wasm-opt stripped the producers section. If this ever starts failing on
-      # an untouched tree, suspect a version drift in rustc, wasm-bindgen (via
-      # Cargo.lock) or wasm-opt before you suspect the check.
+      # across hosts — once build.sh remapped the paths, pinned wasm-opt, and
+      # built on x86_64 Linux (LLVM lays out a few tied items by build-host
+      # architecture; an arm64 build differs by a few hundred bytes, so
+      # build.sh hands an off-platform host to a container: ../wasm-build.sh).
+      # If this ever starts failing on an untouched tree, suspect a version
+      # drift in rustc, wasm-bindgen (via Cargo.lock) or wasm-opt first.
       - name: binary is fresh
         run: |
           git diff --exit-code -- \
