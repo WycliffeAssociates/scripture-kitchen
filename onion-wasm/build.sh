@@ -19,6 +19,17 @@ cargo_home=${CARGO_HOME:-$HOME/.cargo}
 RUSTFLAGS="--remap-path-prefix=$cargo_home=/cargo --remap-path-prefix=$sysroot=/rust${RUSTFLAGS:+ $RUSTFLAGS}"
 export RUSTFLAGS
 
+# wasm-opt is an input to the bytes too: CI pins binaryen version_131
+# (.github/actions/wasm-tools), so this build refuses any other version rather
+# than commit a .wasm the byte gate will reject.
+want=131
+have=$(wasm-opt --version 2>/dev/null | sed -n 's/.*version \([0-9][0-9]*\).*/\1/p')
+if [ "$have" != "$want" ]; then
+  echo "wasm-opt version_$want required (CI pins it); found ${have:-none}." >&2
+  echo "Download binaryen-version_$want for this host from github.com/WebAssembly/binaryen/releases and put its bin/ first on PATH." >&2
+  exit 1
+fi
+
 wasm-pack build --target web     --release --weak-refs --out-dir pkg-web
 wasm-pack build --target bundler --release --weak-refs --out-dir pkg-bundler
 
