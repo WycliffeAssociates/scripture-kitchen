@@ -87,7 +87,10 @@ pub(super) fn options(value: &JsValue) -> Result<(OverlayOptions, bool), JsError
 }
 
 /// One property, or `None` for absent, `undefined` and `null` alike.
-fn get(value: &JsValue, key: &str) -> Option<JsValue> {
+///
+/// `pub(super)`: the find doors' own options parser (`wasm/find.rs`) shares
+/// it rather than reimplementing the same `Reflect::get` dance.
+pub(super) fn get(value: &JsValue, key: &str) -> Option<JsValue> {
     Reflect::get(value, &JsValue::from_str(key))
         .ok()
         .filter(|found| !found.is_undefined() && !found.is_null())

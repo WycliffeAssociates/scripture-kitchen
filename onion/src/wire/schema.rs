@@ -1,6 +1,8 @@
-//! THE ONE DECLARATION. Both ends of the wire are generated from this file:
+//! THE DISH'S DECLARATION. Both ends of this wire are generated from this file:
 //! the Rust writer (`wire/generated.rs`) and the TypeScript reader
 //! (`onion-wasm/reader.ts`). Neither is typed by hand, so they cannot disagree.
+//! The vocabulary it is written in, and the emitters that read it, are
+//! `ticket`'s — shared with every other declaration in the workspace.
 //!
 //! ```text
 //! schema::RECORDS  ->  emit::wire_generated_rs()  ->  onion/src/wire/generated.rs
@@ -13,94 +15,11 @@
 //! describes layout beyond field order — the wire is little-endian by
 //! construction, never a cast of a Rust struct.
 
-/// How many bytes a field occupies on the wire.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Width {
-    U8,
-    U16,
-    U32,
-}
-
-impl Width {
-    pub const fn bytes(self) -> usize {
-        match self {
-            Width::U8 => 1,
-            Width::U16 => 2,
-            Width::U32 => 4,
-        }
-    }
-
-    /// The TypeScript `DataView` reader for this width.
-    pub const fn getter(self) -> &'static str {
-        match self {
-            Width::U8 => "getUint8",
-            Width::U16 => "getUint16",
-            Width::U32 => "getUint32",
-        }
-    }
-}
-
-/// Whether a field's value is a position in the source text.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Space {
-    /// A byte offset into the source. Converts under `utf16: true`.
-    Offset,
-    /// An index into another section, a code, a count, a flag. Never converts.
-    Plain,
-}
-
-pub struct Field {
-    pub name: &'static str,
-    pub width: Width,
-    pub space: Space,
-    /// The writer's expression, with the record's binding in scope. Written as
-    /// it reads on the engine type; the emitter casts it to `width`.
-    pub rust: &'static str,
-    pub doc: &'static str,
-}
-
-pub struct Record {
-    /// The wire name. Also the reader's class name.
-    pub name: &'static str,
-    /// The generated writer's suffix — `write_<plural>`. Stated rather than
-    /// guessed: "Fix" pluralises to "fixes", which no rule derives.
-    pub plural: &'static str,
-    /// The Rust type the writer iterates, and the binding its fields use.
-    pub rust_ty: &'static str,
-    pub binding: &'static str,
-    /// Extra `(name, type)` parameters the writer takes, ahead of `out`. A
-    /// field whose value is not on the row alone declares what it needs here,
-    /// so the schema still states the whole writer signature.
-    pub context: &'static [(&'static str, &'static str)],
-    pub fields: &'static [Field],
-    pub doc: &'static str,
-}
-
-impl Record {
-    /// Bytes per row: the fields, in order, with no padding — nothing casts, so
-    /// nothing pads.
-    pub const fn stride(&self) -> usize {
-        let mut total = 0;
-        let mut at = 0;
-        while at < self.fields.len() {
-            total += self.fields[at].width.bytes();
-            at += 1;
-        }
-        total
-    }
-
-    /// A field's byte offset within its row.
-    pub fn offset_of(&self, name: &str) -> usize {
-        let mut at = 0;
-        for field in self.fields {
-            if field.name == name {
-                return at;
-            }
-            at += field.width.bytes();
-        }
-        panic!("no such wire field: {}::{}", self.name, name)
-    }
-}
+/// The vocabulary every declaration in the workspace is built from. Moved to
+/// `ticket` so onion, galley and a future sous declaration share one answer to
+/// "how does a `u16` reach the buffer"; re-exported here so every path that
+/// named `wire::schema::Record` still resolves.
+pub use ticket::schema::{Field, Record, Space, Width};
 
 use Space::{Offset, Plain};
 use Width::{U8, U16, U32};
@@ -119,6 +38,7 @@ pub const TOKEN: Record = Record {
     binding: "t",
     context: &[("source", "&[u8]")],
     doc: "One lexical token: the leaves of the tree.",
+    tail: None,
     fields: &[
         Field {
             name: "start",
@@ -177,6 +97,7 @@ pub const NODE: Record = Record {
     binding: "n",
     context: &[],
     doc: "One structural node. `token` and the child range are indices, not offsets.",
+    tail: None,
     fields: &[
         Field {
             name: "token",
@@ -228,6 +149,7 @@ pub const DIAGNOSTIC: Record = Record {
     binding: "d",
     context: &[],
     doc: "One finding, with its anchor resolved from a token index to a span.",
+    tail: None,
     fields: &[
         Field {
             name: "code",
@@ -296,6 +218,7 @@ pub const FIX: Record = Record {
     binding: "f",
     context: &[],
     doc: "One offered repair: the edits it owns.",
+    tail: None,
     fields: &[
         Field {
             name: "editFrom",
@@ -324,6 +247,7 @@ pub const EDIT: Record = Record {
     binding: "e",
     context: &[],
     doc: "One edit of a repair: replace [from, to) with the named text.",
+    tail: None,
     fields: &[
         Field {
             name: "from",
@@ -364,6 +288,7 @@ pub const CHAPTER: Record = Record {
     binding: "c",
     context: &[],
     doc: "One chapter's extent and number. The rows tile the document.",
+    tail: None,
     fields: &[
         Field {
             name: "start",
@@ -412,6 +337,7 @@ pub const VERSE: Record = Record {
     binding: "v",
     context: &[],
     doc: "One verse anchor and the range of verse numbers it names.",
+    tail: None,
     fields: &[
         Field {
             name: "at",

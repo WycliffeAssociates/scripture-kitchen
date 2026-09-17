@@ -1,6 +1,6 @@
 [package]
 name = "usfm_galley"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "The workflows crate over the USFM engine and the Sous analysis — the resident handle, and every onion door on one module."
 
@@ -13,6 +13,9 @@ workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+# The wire vocabulary and the per-record emitters this crate's schema module
+# declares against. Generator-only: nothing on a runtime path calls it.
+ticket = { path = "../ticket" }
 # Literal search: `memmem` over a book's projection (galley/src/find.md).
 memchr.workspace = true
 # The leaf both engines share: `BookKey`, canonical order, `Utf16Table`.
@@ -43,6 +46,9 @@ serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
 
 [dev-dependencies]
+# The shared staleness reporter, for the gates below. A regular dependency too;
+# an integration test sees only dev-dependencies.
+ticket = { path = "../ticket" }
 divan = "0.1.21"
 # Example-only heap profiler (galley/examples/heap_profile.rs): attributes
 # live bytes at global max to allocation sites, not just totals.

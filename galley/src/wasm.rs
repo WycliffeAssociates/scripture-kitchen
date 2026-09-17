@@ -31,6 +31,7 @@ use crate::overlay::Side;
 use crate::pantry::{BookId, Entry, Retain, Role};
 use crate::sous::Expediter;
 
+mod find;
 pub mod onion;
 pub mod overlay;
 
@@ -48,13 +49,13 @@ fn query(needle: &str, case_sensitive: bool, whole_word: bool) -> Find<'_> {
 ///
 /// A string rather than a number, so the JS call reads as what it does; an
 /// unknown one is an error rather than a silent fall back to the default.
-fn scope_roles(scope: Option<String>) -> Result<&'static [Role], JsError> {
+fn scope_roles(scope: Option<String>, door: &str) -> Result<&'static [Role], JsError> {
     match scope.as_deref().unwrap_or("targets") {
         "targets" => Ok(&[Role::Target]),
         "references" => Ok(&[Role::Reference]),
         "all" => Ok(&[Role::Target, Role::Reference]),
         other => Err(JsError::new(&format!(
-            "unknown find scope {other:?}; expected \"targets\", \"references\" or \"all\""
+            "unknown {door} scope {other:?}; expected \"targets\", \"references\" or \"all\""
         ))),
     }
 }
@@ -157,26 +158,35 @@ impl Galley {
     /// layout: magic and version, then little-endian `u32`, UTF-16 offsets,
     /// both coordinate spaces per hit).
     ///
+    /// ```ts
+    /// interface FindOptions {
+    ///   caseSensitive?: boolean;                        // default false
+    ///   wholeWord?: boolean;                            // default false
+    ///   limit?: number;                                 // default 0: no bound
+    ///   scope?: "targets" | "references" | "all";       // findAll only; default "targets"
+    /// }
+    /// find(id: string, needle: string, opts?: FindOptions): Uint8Array;
+    /// findAll(needle: string, opts?: FindOptions): Uint8Array;
+    /// ```
+    ///
     /// The search runs over the PROJECTION — what a reader sees — so a needle
     /// inside a footnote is not found, and a needle that spans one comes back
     /// as one source range per contiguous piece. That is the whole reason the
     /// buffer carries a piece count per hit.
     ///
-    /// Literal only: `needle` is never a pattern. `whole_word` is the words
-    /// rule galley restates in `find.md`; case-insensitive is the simple
+    /// Literal only: `needle` is never a pattern. `wholeWord` is the words
+    /// rule galley restates in `find.md`; `caseSensitive` off is the simple
     /// lowercase fold, not a collator. `limit` bounds hits across the whole
-    /// call, and `0` means no bound. Any registered book that retains text and
-    /// a projection may be searched — a target, or a reference registered with
-    /// `keepText`. One that retains neither errors by name, because answering
-    /// "no hits" would say it was clean.
-    pub fn find(
-        &mut self,
-        id: &str,
-        needle: &str,
-        case_sensitive: bool,
-        whole_word: bool,
-        limit: u32,
-    ) -> Result<Vec<u8>, JsError> {
+    /// call, and `0` (the default) means no bound. `scope` names ONE book, so
+    /// it belongs to `findAll` only — present here it throws. Any registered
+    /// book that retains text and a projection may be searched — a target, or
+    /// a reference registered with `keepText`. One that retains neither errors
+    /// by name, because answering "no hits" would say it was clean.
+    pub fn find(&mut self, id: &str, needle: &str, opts: JsValue) -> Result<Vec<u8>, JsError> {
+        let opts = find::options(&opts)?;
+        if opts.scope.is_some() {
+            return Err(JsError::new("scope applies to findAll, not find"));
+        }
         let wanted = BookId::from(id);
         if !self.sous.pantry().searchable(&wanted) {
             return Err(JsError::new(&match self.sous.pantry().role(&wanted) {
@@ -187,13 +197,16 @@ impl Galley {
                 Some(Role::Target) => format!("target {id} retains no verse-text projection"),
             }));
         }
-        Ok(self
-            .sous
-            .find(&query(needle, case_sensitive, whole_word), &[wanted], limit))
+        Ok(self.sous.find(
+            &query(needle, opts.case_sensitive, opts.whole_word),
+            &[wanted],
+            opts.limit,
+        ))
     }
 
-    /// The same over every searchable book in `scope`, in canonical book order
-    /// — the project-wide find.
+    /// The same over every searchable book in `opts.scope`, in canonical book
+    /// order — the project-wide find. See [`find`](Self::find) for
+    /// `FindOptions`.
     ///
     /// `scope` is `"targets"` (the default when omitted), `"references"`, or
     /// `"all"`, which searches the targets and then the references. A
@@ -204,21 +217,55 @@ impl Galley {
     /// book searched whether or not it matched, so a consumer never has to ask
     /// a second question to learn which book a hit is in.
     #[wasm_bindgen(js_name = findAll)]
-    pub fn find_all(
-        &mut self,
-        needle: &str,
-        case_sensitive: bool,
-        whole_word: bool,
-        limit: u32,
-        scope: Option<String>,
-    ) -> Result<Vec<u8>, JsError> {
-        let ids: Vec<BookId> = scope_roles(scope)?
+    pub fn find_all(&mut self, needle: &str, opts: JsValue) -> Result<Vec<u8>, JsError> {
+        let opts = find::options(&opts)?;
+        let ids: Vec<BookId> = scope_roles(opts.scope, "find")?
             .iter()
             .flat_map(|role| self.sous.pantry().books_with_text(*role))
             .collect();
-        Ok(self
-            .sous
-            .find(&query(needle, case_sensitive, whole_word), &ids, limit))
+        Ok(self.sous.find(
+            &query(needle, opts.case_sensitive, opts.whole_word),
+            &ids,
+            opts.limit,
+        ))
+    }
+
+    // ── The census: what the project holds, without a parse ─────────────
+
+    /// One registered book's census — its chapter rows and verse anchors, off
+    /// the `Toc` that `update` built and the Pantry pins.
+    ///
+    /// Nothing is derived here: no chunk is resolved, no text is read, no wire
+    /// is plated. `utf16` rebases every offset through the book's own retained
+    /// table; the default is bytes.
+    ///
+    /// Read it with `usfm-galley/toc-reader`. The layout is generated from the
+    /// same declaration the writer is, so no consumer learns one.
+    pub fn toc(&self, id: &str, utf16: Option<bool>) -> Result<Vec<u8>, JsError> {
+        let wanted = BookId::from(id);
+        if self.sous.pantry().role(&wanted).is_none() {
+            return Err(JsError::new(&format!("no book is registered as {id}")));
+        }
+        crate::toc::encode(self.sous.pantry(), &[wanted], utf16.unwrap_or(false))
+            .map_err(census_refusal)
+    }
+
+    /// The same over every registered book in `scope`, in canonical book order
+    /// — the project-wide census, and the call that takes one parse per book
+    /// off a project's open.
+    ///
+    /// The scope is wider than `findAll`'s on purpose: a reference that kept no
+    /// text still kept its `Toc`, so it is listed. The one thing it cannot
+    /// answer is `utf16`, because the table that rebases offsets travels with
+    /// the text.
+    #[wasm_bindgen(js_name = tocAll)]
+    pub fn toc_all(&self, scope: Option<String>, utf16: Option<bool>) -> Result<Vec<u8>, JsError> {
+        let ids: Vec<BookId> = scope_roles(scope, "census")?
+            .iter()
+            .flat_map(|role| self.sous.pantry().books(*role))
+            .map(|(id, _)| id.clone())
+            .collect();
+        crate::toc::encode(self.sous.pantry(), &ids, utf16.unwrap_or(false)).map_err(census_refusal)
     }
 
     // ── Match formatting: a target's skeleton made the source's ─────────
@@ -641,6 +688,18 @@ impl Galley {
 /// An overlay refusal, as the JS error carrying its text.
 fn door(error: crate::overlay::OverlayError) -> JsError {
     JsError::new(&error.to_string())
+}
+
+/// The census's one refusal, naming the argument that fixes it rather than
+/// the state that caused it — the shape `find` set for a book that retains
+/// too little to answer.
+fn census_refusal(error: crate::pantry::PantryError) -> JsError {
+    match error {
+        crate::pantry::PantryError::NoProjection { id } => JsError::new(&format!(
+            "{id} retains no UTF-16 table; register it with keepText, or ask for byte offsets"
+        )),
+        other => refusal(other),
+    }
 }
 
 /// A Pantry refusal, as the JS error carrying its text.

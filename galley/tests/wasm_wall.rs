@@ -204,19 +204,23 @@ fn the_retained_copy_answers_with_the_same_bytes() {
 fn a_reference_is_findable_only_with_keep_text() {
     let mut galley = loaded();
     let refused = galley
-        .find("ref/RUT.usfm", NEEDLE, true, false, 0)
+        .find("ref/RUT.usfm", NEEDLE, case_sensitive_opts())
         .expect_err("a lengths-only reference retains nothing to search");
     assert!(format!("{refused:?}").contains("keepText"), "{refused:?}");
     assert!(
         galley
-            .find("books/NUM.usfm", NEEDLE, true, false, 0)
+            .find("books/NUM.usfm", NEEDLE, case_sensitive_opts())
             .is_err()
     );
 
     galley
         .update_reference("ref/RUT.usfm", RUT_REF, Some(true))
         .unwrap();
-    let found = decode_find(&galley.find("ref/RUT.usfm", NEEDLE, true, false, 0).unwrap());
+    let found = decode_find(
+        &galley
+            .find("ref/RUT.usfm", NEEDLE, case_sensitive_opts())
+            .unwrap(),
+    );
     assert!(found.hits > 0, "the source's own verse text is searchable");
     assert_eq!(found.ids, vec!["ref/RUT.usfm".to_string()]);
     // Keeping the text buys the projection with it.
@@ -234,30 +238,26 @@ fn the_find_scope_chooses_the_id_table() {
         .update_reference("ref/RUT.usfm", RUT_REF, Some(true))
         .unwrap();
 
-    let targets = decode_find(&galley.find_all(NEEDLE, true, false, 0, None).unwrap());
+    let targets = decode_find(&galley.find_all(NEEDLE, scoped_opts(None)).unwrap());
     assert_eq!(targets.ids.len(), 3, "the default scope is the targets");
     assert!(targets.ids.iter().all(|id| id.starts_with("books/")));
 
     let references = decode_find(
         &galley
-            .find_all(NEEDLE, true, false, 0, Some("references".into()))
+            .find_all(NEEDLE, scoped_opts(Some("references")))
             .unwrap(),
     );
     // ref/JON kept no text, so it is neither searched nor listed.
     assert_eq!(references.ids, vec!["ref/RUT.usfm".to_string()]);
     assert!(references.hits > 0);
 
-    let all = decode_find(
-        &galley
-            .find_all(NEEDLE, true, false, 0, Some("all".into()))
-            .unwrap(),
-    );
+    let all = decode_find(&galley.find_all(NEEDLE, scoped_opts(Some("all"))).unwrap());
     assert_eq!(all.ids.len(), 4, "three targets and the one kept reference");
     assert_eq!(all.hits, targets.hits + references.hits);
 
     assert!(
         galley
-            .find_all(NEEDLE, true, false, 0, Some("elsewhere".into()))
+            .find_all(NEEDLE, scoped_opts(Some("elsewhere")))
             .is_err(),
         "an unknown scope is an error, not a default"
     );
@@ -383,5 +383,31 @@ fn utf16_opts() -> JsValue {
         &JsValue::from_bool(true),
     )
     .expect("a plain object takes a property");
+    opts.into()
+}
+
+/// `{ caseSensitive: true }`, `find`'s options built the way a host would.
+fn case_sensitive_opts() -> JsValue {
+    scoped_opts(None)
+}
+
+/// `{ caseSensitive: true, scope? }`, `findAll`'s options built the way a
+/// host would; `None` omits `scope` for the default.
+fn scoped_opts(scope: Option<&str>) -> JsValue {
+    let opts = js_sys::Object::new();
+    js_sys::Reflect::set(
+        &opts,
+        &JsValue::from_str("caseSensitive"),
+        &JsValue::from_bool(true),
+    )
+    .expect("a plain object takes a property");
+    if let Some(scope) = scope {
+        js_sys::Reflect::set(
+            &opts,
+            &JsValue::from_str("scope"),
+            &JsValue::from_str(scope),
+        )
+        .expect("a plain object takes a property");
+    }
     opts.into()
 }

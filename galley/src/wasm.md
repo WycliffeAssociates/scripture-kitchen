@@ -3,6 +3,7 @@
 ```js
 import { Galley } from "usfm-galley";
 import { FindingsSnapshot } from "usfm-galley/sous-reader";
+import { Census } from "usfm-galley/toc-reader";
 
 const galley = new Galley();                            // one opaque handle
 
@@ -10,6 +11,7 @@ galley.update("books/MRK.usfm", text);                  // whole book → "MRK"
 galley.updateReference("ref/en_ult/GEN.usfm", ult);     // lengths only, no text
 galley.updateReference("ref/en_ult/RUT.usfm", ult, true);  // …and searchable
 
+const census = Census.open(galley.tocAll());            // every book's chapters and verses
 const snap = FindingsSnapshot.open(galley.publish());   // one complete snapshot
 snap.findingsFor("books/MRK.usfm");                     // by id, via the string table
 snap.patterns();                                        // what each row means
@@ -25,9 +27,9 @@ galley.residentBytes();                                 // Pantry + caches
 Find runs over the retained projection, and answers in one buffer:
 
 ```js
-galley.find("books/MRK.usfm", "wept. Then", true, false, 0);  // one book
-galley.findAll("God", false, true, 200);                      // every target
-galley.findAll("God", false, true, 200, "all");               // and the sources
+galley.find("books/MRK.usfm", "wept. Then", { caseSensitive: true });  // one book
+galley.findAll("God", { wholeWord: true, limit: 200 });                // every target
+galley.findAll("God", { wholeWord: true, limit: 200, scope: "all" });  // and the sources
 ```
 
 ## Two doors, one engine: by id, or by text
@@ -77,7 +79,7 @@ host's call per source, not a default:
 
 ```js
 galley.updateReference("ref/RUT.usfm", ult, true);
-galley.find("ref/RUT.usfm", "Naomi", true, false, 0);   // the source, searched
+galley.find("ref/RUT.usfm", "Naomi", { caseSensitive: true });   // the source, searched
 galley.verseText("ref/RUT.usfm");                       // and its projection
 ```
 
@@ -174,30 +176,37 @@ threads, and `rayon` is behind `parallel`, which a wasm build never asks for.
 
 ## The find buffer
 
-`find` and `findAll` answer with one little-endian `u32` buffer and its
-strings. Both doors encode the same layout (`galley::find::wire`), which is also
-what the native `Expediter::find` returns, so a host that reads one reads both:
+`find` and `findAll` answer with one buffer and its strings. Both doors encode
+the same layout (`galley::find::wire`), which is also what the native
+`Expediter::find` returns, so a host that reads one reads both:
 
-```text
-u32   magic              0x444E4946 — "FIND", the four bytes in order
-u32   version            1
-u32   hitCount
-u32   bookCount
-hit   × hitCount    bookIndex, projectedFrom, projectedTo, pieceCount,
-                    pieceCount × (sourceFrom, sourceTo)
-u32   × bookCount   idByteLen
-u32   × hitCount    previewByteLen
-bytes               every id's UTF-8 in order, then every preview's
+```js
+import { Hits } from "usfm-galley/find-reader";
+
+const hits = Hits.open(galley.findAll("God", { wholeWord: true, limit: 200 }));
+for (let n = 0; n < hits.hitCount; n++) {
+  const hit = hits.hit(n);
+  hits.id(hit.bookIndex);                  // which book
+  hit.projectedFrom, hit.projectedTo;      // what to highlight
+  const pieces = hit.pieces();             // where an edit lands, one per piece
+  hits.preview(n);                         // the result card's line
+}
 ```
 
-The two leading words are what the onion and sous buffers lead with too: a
-reader a version behind fails on the header rather than on a field it misread.
-Check both before reading anything else.
+**Read it through the reader, never by hand.** `find-reader.ts` is GENERATED
+from the same declaration the writer is (`galley/src/find/wire/schema.rs`), so
+the two ends cannot disagree and no consumer learns a layout. `Hits.open`
+validates the magic and the version and throws naming both — a consumer a
+version behind fails at its first call instead of misreading a field. The
+layout itself is in `galley/src/find/wire/mod.rs`; it is written down to be
+reviewed, not to be implemented twice.
+
+The reader is lazy where laziness pays: the hit rows are walked once at open,
+because a hit's length is a value it carries, and the id and preview strings
+are located only when something asks for one.
 
 Every offset is **UTF-16** — the unit the editor's coordinates are already in,
-the same choice `parse(text, …, utf16: true)` makes. The two length arrays sit
-before the byte blob so every `u32` in the buffer stays four-byte aligned and a
-reader can take one `Uint32Array` view over the head of it.
+the same choice `parse(text, …, utf16: true)` makes.
 
 Two coordinate spaces per hit, because they are not the same interval
 (`find.md`): `projectedFrom..projectedTo` is in the projection — what a reader
@@ -211,7 +220,7 @@ is the caller's decision to make, never Find's.
 whether or not it matched — so `findAll`'s answer needs no second call, and a
 hit's book cannot be misattributed by a corpus that changed in between.
 
-Which books those are is `findAll`'s fifth argument, a scope string:
+Which books those are is `findAll`'s `scope` option:
 `"targets"` (the default when omitted), `"references"`, or `"all"`, which
 searches the targets and then the references. A reference registered without
 `keepText` is in no scope — it retains nothing to search, so it is neither
@@ -223,14 +232,60 @@ the search and dropped with it: a host that wanted the same string afterwards
 would have to mask the whole book again. Display text only — never read an
 offset back out of it.
 
-`limit` bounds hits across the whole call rather than per book; `0` means no
-bound. `find` searches any registered book that retains text and a projection —
-a target, or a reference registered with `keepText` — and errors on one that
-retains neither, naming the argument that would fix it (`reference ref/RUT.usfm
-retains no text; register it with keepText`), because "no hits" would be a lie;
-`findAll` over an empty scope is an empty buffer, not an error. The needle is a LITERAL — `case_sensitive` off is the simple lowercase
-fold and `whole_word` is the words rule restated in `find.md`; there is no
+`limit` bounds hits across the whole call rather than per book; `0` (the
+default) means no bound. `find` searches any registered book that retains text
+and a projection — a target, or a reference registered with `keepText` — and
+errors on one that retains neither, naming the argument that would fix it
+(`reference ref/RUT.usfm retains no text; register it with keepText`), because
+"no hits" would be a lie; `findAll` over an empty scope is an empty buffer, not
+an error. The needle is a LITERAL — `caseSensitive` off is the simple lowercase
+fold and `wholeWord` is the words rule restated in `find.md`; there is no
 regex here and the `regex` crate is not a dependency.
+
+## The census buffer
+
+What a project HOLDS, without a parse per book: `toc(id, utf16?)` for one
+registered book, `tocAll(scope?, utf16?)` for every book of a scope in one
+crossing — which is the call that belongs on a project's open.
+
+```js
+import { Census } from "usfm-galley/toc-reader";
+
+const census = Census.open(galley.tocAll());       // "targets" by default
+for (const book of census) {
+  book.code;          // "GEN"
+  book.id;            // the id it was registered under
+  book.chapters;      // `\c` markers; `chapterCount` counts the front-matter row too
+  book.verseCount;    // `\v` markers — NOT a verse count; see galley/src/toc.md
+  const rows = book.chapterRows;
+  rows.seek(1).number;    // 1
+  rows.seek(1).anchors;   // 31
+  rows.seek(1).lastVerse; // 31
+}
+```
+
+**Read it through the reader, never by hand.** `toc-reader.ts` is GENERATED
+from the same declaration the writer is (`galley/src/toc/schema.rs`), so the
+two ends cannot disagree and no consumer learns a layout. `Census.open`
+validates the magic, the version and both row strides, and throws naming the
+mismatch — a consumer a version behind fails at its first call instead of
+misreading a field. The layout itself is in `galley/src/toc.md`; it is
+documented to be reviewed, not to be implemented twice.
+
+Nothing is derived by either door: a registered book's `Toc` is built by
+`update` and pinned, so this reads resident state. Offsets are bytes unless
+`utf16` asks otherwise, and a reference registered without `keepText` kept no
+table to rebase through — it answers by name rather than handing back bytes
+labelled as code units:
+
+```js
+galley.tocAll("all", true);   // throws: ref/RUT.usfm retains no UTF-16 table;
+                              //         register it with keepText, or ask for byte offsets
+```
+
+The scope reaches further than `findAll`'s on purpose: every registered book
+has a `Toc`, including a reference that kept no text, so every one of them is
+listed.
 
 ## The overlay doors
 

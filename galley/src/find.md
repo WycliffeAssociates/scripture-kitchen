@@ -225,3 +225,21 @@ A `Split` hit is a decision the caller has to make and Find must not make for
 it: the markup between the pieces either survives (delete each piece, insert
 beside one of them) or does not (one edit over `start()..end()`). Find's job is
 to have told the truth about where the gap was.
+
+## The wire is declared, not typed
+
+The buffer `find` and `findAll` answer with is declared once, in
+`galley/src/find/wire/schema.rs`: its Rust writer (`find/wire/generated.rs`)
+and its TypeScript reader (`galley/find-reader.ts`) are both generated from
+that file, and `galley/tests/codegen_output_matches_input.rs` fails the build
+if either is stale. The rows come from `ticket`, the vocabulary and emitters
+every declaration in the workspace shares; the envelope — four header words,
+two length arrays and two blobs — stays hand-written in `find/wire/mod.rs`,
+because that framing is what this format IS.
+
+A hit is the one record in the workspace with a TAIL: its source pieces are a
+run whose length the row itself carries (`pieceCount`), which is the shape a
+hit crossing a masked gap needs. The migration onto the generated writer moved
+no byte — `VERSION` is still 1, and `the_generated_writer_reproduces_v1_byte_for_byte`
+is what says so, over a split hit, a limited two-book search, an unregistered
+id beside a book with no hits, and no books at all.

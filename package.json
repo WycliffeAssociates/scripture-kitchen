@@ -1,6 +1,6 @@
 {
   "name": "@wycliffeassociates/scripture-kitchen",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "The JS doorway over the USFM engine and the Sous analysis — the resident handle, and every onion door on one module.",
   "type": "module",
   "private": true,
@@ -9,6 +9,8 @@
     "galley/pkg-bundler",
     "galley/pkg-web",
     "galley/sous-reader.ts",
+    "galley/toc-reader.ts",
+    "galley/find-reader.ts",
     "galley/README.md",
     "onion-wasm/pkg-bundler",
     "onion-wasm/pkg-web",
@@ -36,6 +38,8 @@
     },
     "./web/wasm": "./galley/pkg-web/usfm_galley_bg.wasm",
     "./sous-reader": "./galley/sous-reader.ts",
+    "./toc-reader": "./galley/toc-reader.ts",
+    "./find-reader": "./galley/find-reader.ts",
     "./onion": {
       "types": "./onion-wasm/pkg-bundler/onion_wasm.d.ts",
       "default": "./onion-wasm/pkg-bundler/onion_wasm.js"

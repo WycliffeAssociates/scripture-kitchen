@@ -1,4 +1,4 @@
-//! The generator: [`schema`] in, both ends of the wire out.
+//! The dish's generator: [`schema`] in, both ends of the wire out.
 //!
 //! ```text
 //! schema::RECORDS  ->  wire_generated_rs()  ->  onion/src/wire/generated.rs
@@ -8,8 +8,13 @@
 //! Both artifacts are CHECKED IN and both have a staleness test, so a schema
 //! edit that was not regenerated fails the build rather than shipping a reader
 //! that disagrees with its writer.
+//!
+//! The row emitters are `ticket`'s. What stays here is the dish's own: its
+//! sections, its marker table, its enums, its lint catalog.
 
-use super::schema::{self, Record, SectionKind, Space, Width};
+use ticket::emit as shared;
+
+use super::schema::{self, SectionKind};
 use crate::attributes::{AttrResolution, MalformedAttr};
 
 const RS_TEMPLATE: &str = include_str!("generated.rs.tmpl");
@@ -17,78 +22,10 @@ const TS_TEMPLATE: &str = include_str!("../../../onion-wasm/reader.ts.tmpl");
 
 /// One writer per record: fields in order, little-endian, offsets recorded.
 pub fn wire_generated_rs() -> String {
-    let mut writers = String::new();
-    for record in schema::RECORDS {
-        writers.push_str(&writer(record));
-    }
-    RS_TEMPLATE.replace("@@WRITERS@@", writers.trim_end())
-}
-
-fn writer(record: &Record) -> String {
-    let mut out = String::new();
-    let converts = record.fields.iter().any(|f| f.space == Space::Offset);
-    out.push_str(&format!(
-        "/// {}\n///\n/// {} bytes per row.{}\n",
-        record.doc,
-        record.stride(),
-        if converts {
-            " `offsets` collects the position of every\n/// source offset written, for the UTF-16 pass."
-        } else {
-            " Every field is an index or a code, so nothing\n/// here is ever converted."
-        },
-    ));
-    out.push_str(&signature(record, converts));
-    out.push_str(&format!(
-        "    out.reserve(rows.len() * {});\n    for {} in rows {{\n",
-        record.stride(),
-        record.binding
-    ));
-    for field in record.fields {
-        if field.space == Space::Offset {
-            out.push_str("        offsets.push(out.len());\n");
-        }
-        let value = format!("(({}) as {})", field.rust, rust_ty(field.width));
-        out.push_str(&format!(
-            "        // {}\n        out.extend_from_slice(&{}.to_le_bytes());\n",
-            field.doc, value
-        ));
-    }
-    out.push_str("    }\n}\n\n");
-    out
-}
-
-/// The writer's `fn` line, wrapped the way rustfmt would wrap it. The emitted
-/// file is checked in and `cargo fmt` must leave it alone — a generator whose
-/// output the formatter rewrites reports itself stale on every run.
-fn signature(record: &Record, converts: bool) -> String {
-    const MAX: usize = 100;
-    let mut params = vec![format!("rows: &[{}]", record.rust_ty)];
-    params.extend(record.context.iter().map(|(n, ty)| format!("{n}: {ty}")));
-    params.push("out: &mut Vec<u8>".to_string());
-    params.push(format!(
-        "{}offsets: &mut Offsets",
-        if converts { "" } else { "_" }
-    ));
-
-    let head = format!("pub fn write_{}(", record.plural);
-    let line = format!("{head}{}) {{", params.join(", "));
-    if line.len() <= MAX {
-        return line + "\n";
-    }
-    let mut out = format!("{head}\n");
-    for param in &params {
-        out.push_str(&format!("    {param},\n"));
-    }
-    out.push_str(") {\n");
-    out
-}
-
-const fn rust_ty(width: Width) -> &'static str {
-    match width {
-        Width::U8 => "u8",
-        Width::U16 => "u16",
-        Width::U32 => "u32",
-    }
+    RS_TEMPLATE.replace(
+        "@@WRITERS@@",
+        shared::writers_rs(schema::RECORDS).trim_end(),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -130,45 +67,7 @@ fn rows_ts() -> String {
         let SectionKind::Rows(record) = &section.kind else {
             continue;
         };
-        out.push_str(&format!(
-            "/**\n * {}\n *\n * {} bytes per row. A CURSOR: `seek` moves it, the getters read\n\
-             * the row it is on, and nothing is allocated per row.\n */\nexport class {}Row {{\n",
-            record.doc,
-            record.stride(),
-            record.name
-        ));
-        // NATIVE private fields. A wire field is free to be called `at` or
-        // `view` — `VerseRow.at` is — and an ordinary member of that name would
-        // be shadowed by the cursor's own, so the getter would return a row
-        // offset instead of reading the wire. `#` cannot collide with a getter
-        // name, so the hazard does not exist rather than being avoided.
-        out.push_str(
-            "  readonly #view: DataView;\n  #row = 0;\n\n  \
-             constructor(view: DataView) {\n    this.#view = view;\n  }\n\n  \
-             /** Rows in the section. */\n  get length(): number {\n    return \
-             (this.#view.byteLength / this.stride) | 0;\n  }\n\n",
-        );
-        out.push_str(&format!(
-            "  readonly stride = {};\n\n  /** Move to row `n`; returns `this` so reads chain. */\n  \
-             seek(n: number): this {{\n    this.#row = n * {};\n    return this;\n  }}\n\n",
-            record.stride(),
-            record.stride()
-        ));
-        let mut at = 0usize;
-        for field in record.fields {
-            if field.name != "pad" && field.name != "reserved" {
-                out.push_str(&format!(
-                    "  /** {} */\n  get {}(): number {{\n    return this.#view.{}(this.#row + {}{});\n  }}\n\n",
-                    field.doc,
-                    field.name,
-                    field.width.getter(),
-                    at,
-                    if field.width == Width::U8 { "" } else { ", true" },
-                ));
-            }
-            at += field.width.bytes();
-        }
-        out.push_str("}\n\n");
+        out.push_str(&shared::row_class_ts(record));
     }
     out
 }

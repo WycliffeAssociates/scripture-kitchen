@@ -32,6 +32,13 @@ const { Galley } = doors;
 // The package's own copy of the reader — `usfm-galley/sous-reader`, which
 // codegen writes beside `sous-chef/reader.ts` from the one schema.
 const { FindingsSnapshot } = await import(resolve(here, "../sous-reader.ts"));
+// The census reader, likewise generated and likewise shipped —
+// `usfm-galley/toc-reader`.
+const { Census, FORMAT_VERSION, HEADER_VERSION_OFFSET } = await import(
+  resolve(here, "../toc-reader.ts")
+);
+// And find's, likewise generated — `usfm-galley/find-reader`.
+const { Hits, HitRow } = await import(resolve(here, "../find-reader.ts"));
 
 const fixture = (name) => readFileSync(resolve(here, "fixtures/sous", name), "utf8");
 const golden = (name) => new Uint8Array(readFileSync(resolve(here, "goldens/sous", name)));
@@ -179,7 +186,7 @@ const decodeFind = (bytes) => {
   return { hits, ids, spans };
 };
 
-const targets = decodeFind(galley.findAll("the", true, false, 0));
+const targets = decodeFind(galley.findAll("the", { caseSensitive: true }));
 check(targets.hits > 0, "findAll hits the fixtures' verse text");
 eq(targets.ids.join(" "), "books/GEN.usfm books/RUT.usfm books/JON.usfm", "the id table");
 check(
@@ -190,7 +197,7 @@ check(
 // A lengths-only reference cannot be searched, and says which argument fixes it.
 let unsearchable = "";
 try {
-  galley.find("ref/JON.usfm", "the", true, false, 0);
+  galley.find("ref/JON.usfm", "the", { caseSensitive: true });
 } catch (error) {
   unsearchable = String(error.message ?? error);
 }
@@ -198,20 +205,176 @@ check(unsearchable.includes("keepText"), `a lengths-only reference: ${unsearchab
 
 // Re-sent with the text, it joins the "references" and "all" scopes.
 galley.updateReference("ref/JON.usfm", fixture("ref/JON.usfm"), true);
-eq(decodeFind(galley.find("ref/JON.usfm", "the", true, false, 0)).ids.length, 1, "one book");
-const references = decodeFind(galley.findAll("the", true, false, 0, "references"));
+eq(decodeFind(galley.find("ref/JON.usfm", "the", { caseSensitive: true })).ids.length, 1, "one book");
+const references = decodeFind(galley.findAll("the", { caseSensitive: true, scope: "references" }));
 eq(references.ids.join(" "), "ref/JON.usfm", "only the reference that kept its text");
-const all = decodeFind(galley.findAll("the", true, false, 0, "all"));
+const all = decodeFind(galley.findAll("the", { caseSensitive: true, scope: "all" }));
 eq(all.ids.length, 4, "three targets and the one kept reference");
 eq(all.hits, targets.hits + references.hits, "the scopes partition the hits");
 
 let badScope = "";
 try {
-  galley.findAll("the", true, false, 0, "elsewhere");
+  galley.findAll("the", { caseSensitive: true, scope: "elsewhere" });
 } catch (error) {
   badScope = String(error.message ?? error);
 }
 check(badScope.includes("unknown find scope"), `an unknown scope errors: ${badScope}`);
+
+// A wrong-typed option errors by NAME, not by silently coercing.
+let badType = "";
+try {
+  galley.findAll("the", { caseSensitive: "yes" });
+} catch (error) {
+  badType = String(error.message ?? error);
+}
+check(badType.includes("caseSensitive"), `a wrong-typed option names itself: ${badType}`);
+
+// `scope` names more than one book, so `find` refuses it rather than reading
+// and discarding it.
+let scopeOnFind = "";
+try {
+  galley.find("ref/JON.usfm", "the", { scope: "all" });
+} catch (error) {
+  scopeOnFind = String(error.message ?? error);
+}
+check(scopeOnFind.includes("scope"), `scope on find is refused: ${scopeOnFind}`);
+
+// The SHIPPED reader over the same bytes. `decodeFind` above is hand-written
+// against the documented layout, which makes it the independent oracle for the
+// generated one: if the reader and the writer agreed with each other but not
+// with the format, this is what notices.
+const findBuffer = galley.findAll("the", { caseSensitive: true, scope: "all" });
+const shipped = Hits.open(findBuffer);
+const byHand = decodeFind(findBuffer);
+eq(shipped.hitCount, byHand.hits, "the reader counts the hits the decoder does");
+eq(shipped.bookCount, byHand.ids.length, "and the books");
+eq(shipped.ids().join(" "), byHand.ids.join(" "), "and names them in the same order");
+for (let n = 0; n < shipped.hitCount; n++) {
+  const hit = shipped.hit(n);
+  const span = byHand.spans[n];
+  check(
+    hit.bookIndex === span.book && hit.projectedFrom === span.from && hit.projectedTo === span.to,
+    `hit ${n} reads the same through both`,
+  );
+  check(hit.pieces().length === hit.pieceCount, `hit ${n}'s pieces match its count`);
+  check(typeof shipped.preview(n) === "string", `hit ${n} has a preview`);
+}
+
+// A tailed cursor has no arithmetic to fall back on: a row past the end would
+// read offset 0 silently, so it throws. `HitRow` is exported, so this is not
+// covered by `Hits.hit`'s own range check.
+let pastTheEnd = "";
+try {
+  new HitRow(new DataView(new ArrayBuffer(0))).seek(0);
+} catch (error) {
+  pastTheEnd = String(error.message ?? error);
+}
+check(pastTheEnd.includes("row 0 of 0"), `seeking past the end throws: ${pastTheEnd}`);
+
+// The same promise the census reader keeps: a buffer this reader does not know
+// fails at `open`, naming both versions.
+const shiftedFind = new Uint8Array(findBuffer);
+new DataView(shiftedFind.buffer).setUint32(4, FIND_VERSION + 1, true);
+let staleFind = "";
+try {
+  Hits.open(shiftedFind);
+} catch (error) {
+  staleFind = String(error.message ?? error);
+}
+check(
+  staleFind.includes(`v${FIND_VERSION + 1}`) && staleFind.includes("update usfm-galley"),
+  `a newer find buffer is refused, not misread: ${staleFind}`,
+);
+
+// --- the census: what the project holds, read through its own reader -------
+
+// The oracle is the fixture TEXT, counted in JavaScript: if the buffer and the
+// reader agreed with each other but not with the file, this is what notices.
+const marks = (text, pattern) => (text.match(pattern) ?? []).length;
+// The text each id currently holds — GEN was re-sent with the edit above.
+const REGISTERED = {
+  "books/GEN.usfm": "GEN-edited.usfm",
+  "books/RUT.usfm": "RUT.usfm",
+  "books/JON.usfm": "JON.usfm",
+};
+
+const targetCensus = Census.open(galley.tocAll());
+eq(targetCensus.bookCount, 3, "every target is in the census");
+check(!targetCensus.utf16, "offsets are bytes unless asked otherwise");
+for (const book of targetCensus) {
+  const text = fixture(REGISTERED[book.id]);
+  eq(book.chapters, marks(text, /^\\c /gm), `${book.id}: \\c markers`);
+  eq(book.verseCount, marks(text, /\\v /g), `${book.id}: \\v markers`);
+  eq(book.chapterCount, book.chapters + 1, `${book.id}: the front-matter row`);
+  // The rows a sidebar actually draws, off the cursor rather than a count.
+  const rows = book.chapterRows;
+  eq(rows.length, book.chapterCount, `${book.id}: the cursor sees every row`);
+  eq(rows.seek(0).number, 0, `${book.id}: row 0 is the front matter`);
+  let anchors = 0;
+  for (let row = 0; row < rows.length; row++) anchors += rows.seek(row).anchors;
+  eq(anchors, book.verseCount, `${book.id}: the rows account for every anchor`);
+}
+
+// One book by id says exactly what the project-wide call said about it.
+const alone = Census.open(galley.toc("books/GEN.usfm"));
+eq(alone.bookCount, 1, "one book, asked for by id");
+eq(alone.book(0).code, targetCensus.find("books/GEN.usfm").code, "the same book");
+eq(
+  alone.book(0).chapterRows.seek(1).lastVerse,
+  targetCensus.find("books/GEN.usfm").chapterRows.seek(1).lastVerse,
+  "and the same rows",
+);
+
+// A reference keeps its Toc whatever else it drops, so the census reaches
+// further than find: ref/RUT.usfm kept no text and is still listed.
+eq(Census.open(galley.tocAll("all")).bookCount, 5, "three targets and both references");
+eq(Census.open(galley.tocAll("references")).bookCount, 2, "both references");
+check(Census.open(galley.tocAll("targets", true)).utf16, "the targets answer in UTF-16");
+
+let noTable = "";
+try {
+  galley.tocAll("all", true);
+} catch (error) {
+  noTable = String(error.message ?? error);
+}
+check(
+  noTable.includes("ref/RUT.usfm") && noTable.includes("keepText"),
+  `a textless reference cannot answer utf16: ${noTable}`,
+);
+
+let unknownBook = "";
+try {
+  galley.toc("books/NOPE.usfm");
+} catch (error) {
+  unknownBook = String(error.message ?? error);
+}
+check(unknownBook.includes("no book is registered"), `an unknown id: ${unknownBook}`);
+
+let badCensusScope = "";
+try {
+  galley.tocAll("elsewhere");
+} catch (error) {
+  badCensusScope = String(error.message ?? error);
+}
+check(
+  badCensusScope.includes("unknown census scope"),
+  `an unknown scope errors: ${badCensusScope}`,
+);
+
+// The promise the generated reader exists to keep: a buffer this reader does
+// not know fails at `open`, naming both versions — never one field misread.
+const shifted = new Uint8Array(galley.tocAll());
+new DataView(shifted.buffer).setUint32(HEADER_VERSION_OFFSET, FORMAT_VERSION + 1, true);
+let stale = "";
+try {
+  Census.open(shifted);
+} catch (error) {
+  stale = String(error.message ?? error);
+}
+check(
+  stale.includes(`v${FORMAT_VERSION + 1}`) && stale.includes("update usfm-galley"),
+  `a newer buffer is refused, not misread: ${stale}`,
+);
 
 // --- the overlay: six doors, and the JSON they answer with -----------------
 

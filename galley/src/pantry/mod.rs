@@ -615,6 +615,18 @@ impl Pantry {
         })
     }
 
+    /// One registered book's retained `Toc`, and the table that rebases its
+    /// offsets when the book kept one — the pinned tier, read through `&self`
+    /// where an [`Entry`] borrows the whole Pantry mutably. `None` for an
+    /// unknown id; `None` in the second slot is a book that kept no text.
+    pub(crate) fn census(&self, id: &BookId) -> Option<(&Toc, Option<&Utf16Table>)> {
+        let book = self.books.get(id)?;
+        Some((
+            &book.toc,
+            book.projection.as_ref().map(|projection| &projection.utf16),
+        ))
+    }
+
     /// One registered book's raw checksum, whatever its role.
     pub(crate) fn checksum(&self, id: &BookId) -> Option<RawChecksum> {
         self.books.get(id).map(|book| book.checksum)

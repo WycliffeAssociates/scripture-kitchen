@@ -400,31 +400,41 @@ export class Galley {
      * layout: magic and version, then little-endian `u32`, UTF-16 offsets,
      * both coordinate spaces per hit).
      *
+     * ```ts
+     * interface FindOptions {
+     *   caseSensitive?: boolean;                        // default false
+     *   wholeWord?: boolean;                            // default false
+     *   limit?: number;                                 // default 0: no bound
+     *   scope?: "targets" | "references" | "all";       // findAll only; default "targets"
+     * }
+     * find(id: string, needle: string, opts?: FindOptions): Uint8Array;
+     * findAll(needle: string, opts?: FindOptions): Uint8Array;
+     * ```
+     *
      * The search runs over the PROJECTION — what a reader sees — so a needle
      * inside a footnote is not found, and a needle that spans one comes back
      * as one source range per contiguous piece. That is the whole reason the
      * buffer carries a piece count per hit.
      *
-     * Literal only: `needle` is never a pattern. `whole_word` is the words
-     * rule galley restates in `find.md`; case-insensitive is the simple
+     * Literal only: `needle` is never a pattern. `wholeWord` is the words
+     * rule galley restates in `find.md`; `caseSensitive` off is the simple
      * lowercase fold, not a collator. `limit` bounds hits across the whole
-     * call, and `0` means no bound. Any registered book that retains text and
-     * a projection may be searched — a target, or a reference registered with
-     * `keepText`. One that retains neither errors by name, because answering
-     * "no hits" would say it was clean.
+     * call, and `0` (the default) means no bound. `scope` names ONE book, so
+     * it belongs to `findAll` only — present here it throws. Any registered
+     * book that retains text and a projection may be searched — a target, or
+     * a reference registered with `keepText`. One that retains neither errors
+     * by name, because answering "no hits" would say it was clean.
      * @param {string} id
      * @param {string} needle
-     * @param {boolean} case_sensitive
-     * @param {boolean} whole_word
-     * @param {number} limit
+     * @param {any} opts
      * @returns {Uint8Array}
      */
-    find(id, needle, case_sensitive, whole_word, limit) {
+    find(id, needle, opts) {
         const ptr0 = passStringToWasm0(id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
         const ptr1 = passStringToWasm0(needle, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len1 = WASM_VECTOR_LEN;
-        const ret = wasm.galley_find(this.__wbg_ptr, ptr0, len0, ptr1, len1, case_sensitive, whole_word, limit);
+        const ret = wasm.galley_find(this.__wbg_ptr, ptr0, len0, ptr1, len1, opts);
         if (ret[3]) {
             throw takeFromExternrefTable0(ret[2]);
         }
@@ -433,8 +443,9 @@ export class Galley {
         return v3;
     }
     /**
-     * The same over every searchable book in `scope`, in canonical book order
-     * — the project-wide find.
+     * The same over every searchable book in `opts.scope`, in canonical book
+     * order — the project-wide find. See [`find`](Self::find) for
+     * `FindOptions`.
      *
      * `scope` is `"targets"` (the default when omitted), `"references"`, or
      * `"all"`, which searches the targets and then the references. A
@@ -445,24 +456,19 @@ export class Galley {
      * book searched whether or not it matched, so a consumer never has to ask
      * a second question to learn which book a hit is in.
      * @param {string} needle
-     * @param {boolean} case_sensitive
-     * @param {boolean} whole_word
-     * @param {number} limit
-     * @param {string | null} [scope]
+     * @param {any} opts
      * @returns {Uint8Array}
      */
-    findAll(needle, case_sensitive, whole_word, limit, scope) {
+    findAll(needle, opts) {
         const ptr0 = passStringToWasm0(needle, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
-        var ptr1 = isLikeNone(scope) ? 0 : passStringToWasm0(scope, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        var len1 = WASM_VECTOR_LEN;
-        const ret = wasm.galley_findAll(this.__wbg_ptr, ptr0, len0, case_sensitive, whole_word, limit, ptr1, len1);
+        const ret = wasm.galley_findAll(this.__wbg_ptr, ptr0, len0, opts);
         if (ret[3]) {
             throw takeFromExternrefTable0(ret[2]);
         }
-        var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
         wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
-        return v3;
+        return v2;
     }
     /**
      * Chunk starts plus one checksum each, and no text — the ~1 KB baseline
@@ -909,6 +915,55 @@ export class Galley {
         } finally {
             wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
         }
+    }
+    /**
+     * One registered book's census — its chapter rows and verse anchors, off
+     * the `Toc` that `update` built and the Pantry pins.
+     *
+     * Nothing is derived here: no chunk is resolved, no text is read, no wire
+     * is plated. `utf16` rebases every offset through the book's own retained
+     * table; the default is bytes.
+     *
+     * Read it with `usfm-galley/toc-reader`. The layout is generated from the
+     * same declaration the writer is, so no consumer learns one.
+     * @param {string} id
+     * @param {boolean | null} [utf16]
+     * @returns {Uint8Array}
+     */
+    toc(id, utf16) {
+        const ptr0 = passStringToWasm0(id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.galley_toc(this.__wbg_ptr, ptr0, len0, isLikeNone(utf16) ? 0xFFFFFF : utf16 ? 1 : 0);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v2;
+    }
+    /**
+     * The same over every registered book in `scope`, in canonical book order
+     * — the project-wide census, and the call that takes one parse per book
+     * off a project's open.
+     *
+     * The scope is wider than `findAll`'s on purpose: a reference that kept no
+     * text still kept its `Toc`, so it is listed. The one thing it cannot
+     * answer is `utf16`, because the table that rebases offsets travels with
+     * the text.
+     * @param {string | null} [scope]
+     * @param {boolean | null} [utf16]
+     * @returns {Uint8Array}
+     */
+    tocAll(scope, utf16) {
+        var ptr0 = isLikeNone(scope) ? 0 : passStringToWasm0(scope, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        var len0 = WASM_VECTOR_LEN;
+        const ret = wasm.galley_tocAll(this.__wbg_ptr, ptr0, len0, isLikeNone(utf16) ? 0xFFFFFF : utf16 ? 1 : 0);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v2;
     }
     /**
      * Register or replace one whole book under the caller's `id`, as a

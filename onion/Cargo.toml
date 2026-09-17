@@ -1,12 +1,15 @@
 [package]
 name = "usfm_onion"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 
 [lints]
 workspace = true
 
 [dependencies]
+# The wire vocabulary and the per-record emitters this crate's schema module
+# declares against. Generator-only: nothing on a runtime path calls it.
+ticket = { path = "../ticket" }
 memchr.workspace = true
 # The zero-dependency leaf: the spec's book table and the UTF-16 offset types,
 # shared with sous-core without either engine seeing the other.
@@ -33,6 +36,9 @@ alloc-counts = []
 html = []
 
 [dev-dependencies]
+# The shared staleness reporter, for the gates below. A regular dependency too;
+# an integration test sees only dev-dependencies.
+ticket = { path = "../ticket" }
 divan = "0.1.21"
 # ORACLE-SIDE ONLY. The library writes JSON by hand (no serde in src/); the
 # corpus test needs to PARSE testData's fixtures to compare as `Value`.

@@ -20,8 +20,16 @@
 #   mise ◄── onion ◄── onion-wasm            mise ◄── sous-core
 #      ▲        ▲                                        ▲
 #      ╰────────┴──────────── galley ◄──────────────────╯
+#
+# `ticket` is the second leaf: the wire vocabulary and the per-record emitters
+# that onion's dish, galley's census and galley's find buffer all declare
+# against, so no two formats can disagree about how a field reaches the buffer.
+# Generator-only — dead in a release build. See ticket/README.md.
+#
+#   ticket ◄── onion, galley
 members = [
     "mise",
+    "ticket",
     "onion",
     "onion-wasm",
     "galley",
@@ -31,7 +39,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 
 # Pinned here rather than per-crate so one version is stated once. These are

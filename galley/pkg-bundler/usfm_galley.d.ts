@@ -128,23 +128,36 @@ export class Galley {
      * layout: magic and version, then little-endian `u32`, UTF-16 offsets,
      * both coordinate spaces per hit).
      *
+     * ```ts
+     * interface FindOptions {
+     *   caseSensitive?: boolean;                        // default false
+     *   wholeWord?: boolean;                            // default false
+     *   limit?: number;                                 // default 0: no bound
+     *   scope?: "targets" | "references" | "all";       // findAll only; default "targets"
+     * }
+     * find(id: string, needle: string, opts?: FindOptions): Uint8Array;
+     * findAll(needle: string, opts?: FindOptions): Uint8Array;
+     * ```
+     *
      * The search runs over the PROJECTION — what a reader sees — so a needle
      * inside a footnote is not found, and a needle that spans one comes back
      * as one source range per contiguous piece. That is the whole reason the
      * buffer carries a piece count per hit.
      *
-     * Literal only: `needle` is never a pattern. `whole_word` is the words
-     * rule galley restates in `find.md`; case-insensitive is the simple
+     * Literal only: `needle` is never a pattern. `wholeWord` is the words
+     * rule galley restates in `find.md`; `caseSensitive` off is the simple
      * lowercase fold, not a collator. `limit` bounds hits across the whole
-     * call, and `0` means no bound. Any registered book that retains text and
-     * a projection may be searched — a target, or a reference registered with
-     * `keepText`. One that retains neither errors by name, because answering
-     * "no hits" would say it was clean.
+     * call, and `0` (the default) means no bound. `scope` names ONE book, so
+     * it belongs to `findAll` only — present here it throws. Any registered
+     * book that retains text and a projection may be searched — a target, or
+     * a reference registered with `keepText`. One that retains neither errors
+     * by name, because answering "no hits" would say it was clean.
      */
-    find(id: string, needle: string, case_sensitive: boolean, whole_word: boolean, limit: number): Uint8Array;
+    find(id: string, needle: string, opts: any): Uint8Array;
     /**
-     * The same over every searchable book in `scope`, in canonical book order
-     * — the project-wide find.
+     * The same over every searchable book in `opts.scope`, in canonical book
+     * order — the project-wide find. See [`find`](Self::find) for
+     * `FindOptions`.
      *
      * `scope` is `"targets"` (the default when omitted), `"references"`, or
      * `"all"`, which searches the targets and then the references. A
@@ -155,7 +168,7 @@ export class Galley {
      * book searched whether or not it matched, so a consumer never has to ask
      * a second question to learn which book a hit is in.
      */
-    findAll(needle: string, case_sensitive: boolean, whole_word: boolean, limit: number, scope?: string | null): Uint8Array;
+    findAll(needle: string, opts: any): Uint8Array;
     /**
      * Chunk starts plus one checksum each, and no text — the ~1 KB baseline
      * user land keeps beside a file on disk.
@@ -345,6 +358,29 @@ export class Galley {
      * position is still the key; the name is only the check.
      */
     targetNodeFor(target_id: string, source_id: string, address: any, opts: any, utf16?: boolean | null): string;
+    /**
+     * One registered book's census — its chapter rows and verse anchors, off
+     * the `Toc` that `update` built and the Pantry pins.
+     *
+     * Nothing is derived here: no chunk is resolved, no text is read, no wire
+     * is plated. `utf16` rebases every offset through the book's own retained
+     * table; the default is bytes.
+     *
+     * Read it with `usfm-galley/toc-reader`. The layout is generated from the
+     * same declaration the writer is, so no consumer learns one.
+     */
+    toc(id: string, utf16?: boolean | null): Uint8Array;
+    /**
+     * The same over every registered book in `scope`, in canonical book order
+     * — the project-wide census, and the call that takes one parse per book
+     * off a project's open.
+     *
+     * The scope is wider than `findAll`'s on purpose: a reference that kept no
+     * text still kept its `Toc`, so it is listed. The one thing it cannot
+     * answer is `utf16`, because the table that rebases offsets travels with
+     * the text.
+     */
+    tocAll(scope?: string | null, utf16?: boolean | null): Uint8Array;
     /**
      * Register or replace one whole book under the caller's `id`, as a
      * target: it keeps its text, and it publishes findings.

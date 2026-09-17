@@ -1,0 +1,12 @@
+[package]
+name = "ticket"
+version = "0.1.1"
+edition = "2024"
+description = "The wire vocabulary and the per-record emitters every declaration in the workspace shares."
+
+[lints]
+workspace = true
+
+# None, ever. A generator that reached for a dependency would be a generator
+# whose output depended on something the declaration does not state.
+[dependencies]
