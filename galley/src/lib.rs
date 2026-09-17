@@ -26,6 +26,7 @@ pub use usfm_onion as onion;
 
 pub mod corpus;
 pub mod find;
+pub mod mask;
 pub mod overlay;
 pub mod pantry;
 pub mod sous;

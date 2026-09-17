@@ -209,6 +209,34 @@ export class Galley {
      */
     lint(id: string): Uint8Array;
     /**
+     * One registered book's mask map — which source spans its projection is
+     * made of, in order. The projection is a pure concatenation of those
+     * spans, so a host holding the source rebuilds it from the map alone.
+     *
+     * ```ts
+     * interface MaskOptions {
+     *   recipe?: "verseText" | "structure";   // default "verseText"
+     *   utf16?: boolean;                      // default false
+     * }
+     * mask(id: string, opts?: MaskOptions): Uint8Array;
+     * maskOf(text: string, opts?: MaskOptions): Uint8Array;
+     * ```
+     *
+     * `"verseText"` is read off the retained projection; `"structure"` cuts
+     * the retained text. Same scope as `find`: a book that retains no text
+     * errors by name.
+     *
+     * Read it with `usfm-galley/mask-reader`. The layout is generated from the
+     * same declaration the writer is, so no consumer learns one.
+     */
+    mask(id: string, opts: any): Uint8Array;
+    /**
+     * [`mask`](Self::mask) over text the host holds and has not registered,
+     * with the same options. Over a registered book's exact text the two
+     * doors answer the same buffer.
+     */
+    maskOf(text: string, opts: any): Uint8Array;
+    /**
      * Chunk units computed rather than reused, cumulative.
      */
     misses(): number;
@@ -416,10 +444,8 @@ export class Galley {
     /**
      * The verse text of loose text. See [`parse_text`](Self::parse_text).
      *
-     * TODO: this DISCARDS the mask. `Mask` carries `ranges`/`starts` — the map
-     * from a masked offset back to the source — and sous needs it to report a
-     * finding against the unmasked document. Returning the text alone means
-     * whatever consumes this cannot get back.
+     * The string alone: a consumer that needs to get back to the source asks
+     * [`mask_of`](Self::mask_of) for the same cut's map.
      */
     verseTextOf(text: string): string;
 }
@@ -687,6 +713,8 @@ export interface InitOutput {
     readonly galley_lastRemapped: (a: number) => number;
     readonly galley_lastWordlessReferences: (a: number) => number;
     readonly galley_lint: (a: number, b: number, c: number) => [number, number, number, number];
+    readonly galley_mask: (a: number, b: number, c: number, d: any) => [number, number, number, number];
+    readonly galley_maskOf: (a: number, b: number, c: number, d: any) => [number, number, number, number];
     readonly galley_misses: (a: number) => number;
     readonly galley_new: (a: number, b: number) => number;
     readonly galley_overlay: (a: number, b: number, c: number, d: number, e: number, f: any) => [number, number, number];

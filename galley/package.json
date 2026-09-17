@@ -1,6 +1,6 @@
 {
   "name": "usfm-galley",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "description": "The JS doorway over the USFM engine and the Sous analysis — the resident handle, and every onion door on one module.",
   "private": true,
@@ -10,6 +10,7 @@
     "sous-reader.ts",
     "toc-reader.ts",
     "find-reader.ts",
+    "mask-reader.ts",
     "README.md"
   ],
   "sideEffects": [
@@ -29,6 +30,7 @@
     "./web/wasm": "./pkg-web/usfm_galley_bg.wasm",
     "./sous-reader": "./sous-reader.ts",
     "./toc-reader": "./toc-reader.ts",
-    "./find-reader": "./find-reader.ts"
+    "./find-reader": "./find-reader.ts",
+    "./mask-reader": "./mask-reader.ts"
   }
 }

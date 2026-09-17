@@ -12,11 +12,11 @@
 //! make impossible. The ENVELOPE below — header and directory — is this
 //! format's alone, because the dish frames sections and a census frames books.
 
-use crate::onion::wire::schema::{Field, Record};
+use ticket::schema::{Field, Record};
 
-pub use crate::onion::wire::schema::{Space, Width};
 use Space::{Offset, Plain};
 use Width::{U16, U32};
+pub use ticket::schema::{Space, Width};
 
 /// `TOCS`, little-endian — read out of the buffer's first four bytes in order.
 pub const MAGIC: u32 = u32::from_le_bytes(*b"TOCS");

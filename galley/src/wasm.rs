@@ -27,11 +27,13 @@ use sous_core::judge::{Channels, JudgingConfig};
 use sous_core::proportionality::LengthConfig;
 
 use crate::find::Find;
+use crate::mask::Recipe;
 use crate::overlay::Side;
 use crate::pantry::{BookId, Entry, Retain, Role};
 use crate::sous::Expediter;
 
 mod find;
+mod mask;
 pub mod onion;
 pub mod overlay;
 
@@ -187,16 +189,7 @@ impl Galley {
         if opts.scope.is_some() {
             return Err(JsError::new("scope applies to findAll, not find"));
         }
-        let wanted = BookId::from(id);
-        if !self.sous.pantry().searchable(&wanted) {
-            return Err(JsError::new(&match self.sous.pantry().role(&wanted) {
-                None => format!("no book is registered as {id}"),
-                Some(Role::Reference) => {
-                    format!("reference {id} retains no text; register it with keepText")
-                }
-                Some(Role::Target) => format!("target {id} retains no verse-text projection"),
-            }));
-        }
+        let wanted = self.projected(id)?;
         Ok(self.sous.find(
             &query(needle, opts.case_sensitive, opts.whole_word),
             &[wanted],
@@ -506,6 +499,63 @@ impl Galley {
         Ok(mask.text(text.as_bytes()))
     }
 
+    /// One registered book's mask map — which source spans its projection is
+    /// made of, in order. The projection is a pure concatenation of those
+    /// spans, so a host holding the source rebuilds it from the map alone.
+    ///
+    /// ```ts
+    /// interface MaskOptions {
+    ///   recipe?: "verseText" | "structure";   // default "verseText"
+    ///   utf16?: boolean;                      // default false
+    /// }
+    /// mask(id: string, opts?: MaskOptions): Uint8Array;
+    /// maskOf(text: string, opts?: MaskOptions): Uint8Array;
+    /// ```
+    ///
+    /// `"verseText"` is read off the retained projection; `"structure"` cuts
+    /// the retained text. Same scope as `find`: a book that retains no text
+    /// errors by name.
+    ///
+    /// Read it with `usfm-galley/mask-reader`. The layout is generated from the
+    /// same declaration the writer is, so no consumer learns one.
+    pub fn mask(&mut self, id: &str, opts: JsValue) -> Result<Vec<u8>, JsError> {
+        let opts = mask::options(&opts)?;
+        let wanted = self.projected(id)?;
+        match opts.recipe {
+            Recipe::VerseText => {
+                let book = self.book(id)?;
+                let cut = book.mask().map_err(refusal)?;
+                let (table, source_len) = match opts.utf16 {
+                    true => (
+                        Some(book.utf16().map_err(refusal)?),
+                        book.published_len().map_err(refusal)?,
+                    ),
+                    false => (None, book.text().map_err(refusal)?.len() as u32),
+                };
+                Ok(crate::mask::encode(cut, opts.recipe, table, source_len))
+            }
+            Recipe::Structure => {
+                let (text, source_len) = {
+                    let book = self.book(id)?;
+                    let text = book.text().map_err(refusal)?.to_owned();
+                    let len = match opts.utf16 {
+                        true => book.published_len().map_err(refusal)?,
+                        false => text.len() as u32,
+                    };
+                    (text, len)
+                };
+                let table = self.table(&wanted, opts.utf16)?;
+                let cut = self.sous.masked(&text, &opts.recipe.filter());
+                Ok(crate::mask::encode(
+                    &cut,
+                    opts.recipe,
+                    table.as_ref(),
+                    source_len,
+                ))
+            }
+        }
+    }
+
     // ── The same products over loose text ───────────────────────────────
 
     /// [`parse`](Self::parse) over text the host holds and has not registered
@@ -528,16 +578,36 @@ impl Galley {
 
     /// The verse text of loose text. See [`parse_text`](Self::parse_text).
     ///
-    /// TODO: this DISCARDS the mask. `Mask` carries `ranges`/`starts` — the map
-    /// from a masked offset back to the source — and sous needs it to report a
-    /// finding against the unmasked document. Returning the text alone means
-    /// whatever consumes this cannot get back.
+    /// The string alone: a consumer that needs to get back to the source asks
+    /// [`mask_of`](Self::mask_of) for the same cut's map.
     #[wasm_bindgen(js_name = verseTextOf)]
     pub fn verse_text_of(&mut self, text: &str) -> String {
         let mask = self
             .sous
             .masked(text, &crate::onion::mask::Filter::verse_text());
         mask.text(text.as_bytes())
+    }
+
+    /// [`mask`](Self::mask) over text the host holds and has not registered,
+    /// with the same options. Over a registered book's exact text the two
+    /// doors answer the same buffer.
+    #[wasm_bindgen(js_name = maskOf)]
+    pub fn mask_of(&mut self, text: &str, opts: JsValue) -> Result<Vec<u8>, JsError> {
+        let opts = mask::options(&opts)?;
+        let cut = self.sous.masked(text, &opts.recipe.filter());
+        let table = opts
+            .utf16
+            .then(|| mise::utf16::utf16_table(text.as_bytes()));
+        let source_len = match opts.utf16 {
+            true => mise::utf16::utf16_len(text.as_bytes()),
+            false => text.len() as u32,
+        };
+        Ok(crate::mask::encode(
+            &cut,
+            opts.recipe,
+            table.as_ref(),
+            source_len,
+        ))
     }
 
     /// The structure recipe's text, the verse-text mask's sibling. No book
@@ -630,6 +700,26 @@ impl Galley {
 }
 
 impl Galley {
+    /// One registered book that retains a verse-text projection, or the
+    /// refusal naming the argument that would fix it.
+    ///
+    /// Shared by the doors that read the projection — find and the mask map —
+    /// because answering "nothing here" for a book that retains nothing would
+    /// say it was clean.
+    fn projected(&self, id: &str) -> Result<BookId, JsError> {
+        let wanted = BookId::from(id);
+        if self.sous.pantry().searchable(&wanted) {
+            return Ok(wanted);
+        }
+        Err(JsError::new(&match self.sous.pantry().role(&wanted) {
+            None => format!("no book is registered as {id}"),
+            Some(Role::Reference) => {
+                format!("reference {id} retains no text; register it with keepText")
+            }
+            Some(Role::Target) => format!("target {id} retains no verse-text projection"),
+        }))
+    }
+
     /// One registered book, or the refusal an unknown id earns.
     fn book(&mut self, id: &str) -> Result<Entry<'_>, JsError> {
         self.sous

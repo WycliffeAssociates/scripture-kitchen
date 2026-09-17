@@ -549,6 +549,60 @@ export class Galley {
         return v2;
     }
     /**
+     * One registered book's mask map — which source spans its projection is
+     * made of, in order. The projection is a pure concatenation of those
+     * spans, so a host holding the source rebuilds it from the map alone.
+     *
+     * ```ts
+     * interface MaskOptions {
+     *   recipe?: "verseText" | "structure";   // default "verseText"
+     *   utf16?: boolean;                      // default false
+     * }
+     * mask(id: string, opts?: MaskOptions): Uint8Array;
+     * maskOf(text: string, opts?: MaskOptions): Uint8Array;
+     * ```
+     *
+     * `"verseText"` is read off the retained projection; `"structure"` cuts
+     * the retained text. Same scope as `find`: a book that retains no text
+     * errors by name.
+     *
+     * Read it with `usfm-galley/mask-reader`. The layout is generated from the
+     * same declaration the writer is, so no consumer learns one.
+     * @param {string} id
+     * @param {any} opts
+     * @returns {Uint8Array}
+     */
+    mask(id, opts) {
+        const ptr0 = passStringToWasm0(id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.galley_mask(this.__wbg_ptr, ptr0, len0, opts);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v2;
+    }
+    /**
+     * [`mask`](Self::mask) over text the host holds and has not registered,
+     * with the same options. Over a registered book's exact text the two
+     * doors answer the same buffer.
+     * @param {string} text
+     * @param {any} opts
+     * @returns {Uint8Array}
+     */
+    maskOf(text, opts) {
+        const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.galley_maskOf(this.__wbg_ptr, ptr0, len0, opts);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v2;
+    }
+    /**
      * Chunk units computed rather than reused, cumulative.
      * @returns {number}
      */
@@ -1070,10 +1124,8 @@ export class Galley {
     /**
      * The verse text of loose text. See [`parse_text`](Self::parse_text).
      *
-     * TODO: this DISCARDS the mask. `Mask` carries `ranges`/`starts` — the map
-     * from a masked offset back to the source — and sous needs it to report a
-     * finding against the unmasked document. Returning the text alone means
-     * whatever consumes this cannot get back.
+     * The string alone: a consumer that needs to get back to the source asks
+     * [`mask_of`](Self::mask_of) for the same cut's map.
      * @param {string} text
      * @returns {string}
      */

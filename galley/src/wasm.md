@@ -50,6 +50,7 @@ file not yet in the project:
 deserialize(galley.parseText(text, true, true, true));
 galley.verseTextOf(text);
 galley.structureTextOf(text);                 // no book retains a structure mask
+galley.maskOf(text, { recipe: "structure" }); // and the map of the same cut
 ```
 
 The chunk cache keys on CONTENT, so a text door over a registered book's own
@@ -242,6 +243,59 @@ an error. The needle is a LITERAL — `caseSensitive` off is the simple lowercas
 fold and `wholeWord` is the words rule restated in `find.md`; there is no
 regex here and the `regex` crate is not a dependency.
 
+## The mask map
+
+`mask(id, opts?)` and `maskOf(text, opts?)` answer with the map the projection
+is made of — which source spans it concatenates, in order:
+
+```js
+import { MaskMap } from "usfm-galley/mask-reader";
+
+const map = MaskMap.open(galley.mask("books/MRK.usfm", { utf16: true }));
+let reading = "";
+for (let n = 0; n < map.rangeCount; n++) {
+  const r = map.range(n);
+  reading += source.slice(r.sourceFrom, r.sourceTo);   // === galley.verseText(id)
+}
+map.pieces(from, to);                    // a projected span, as source spans
+```
+
+```ts
+interface MaskOptions {
+  recipe?: "verseText" | "structure";   // default "verseText"
+  utf16?: boolean;                      // default false
+}
+```
+
+**The projection is a pure concatenation** — nothing is inserted between two
+ranges — so a host holding the source rebuilds the reading from the map alone
+and maps a projected offset back to the byte an edit lands on. `\add
+one\add*two` reads `onetwo`, and that is correct: `\add*` is a delimiter and
+the space is the author's to write (`mask.md`).
+
+`mask(id)` with every default is served off the retained projection with no cut
+at all. `recipe: "structure"` cuts the retained text, since no book retains a
+structure projection; `maskOf` cuts the text handed in, and under `utf16`
+builds a table over it. Over a registered book's own bytes the two doors write
+the same buffer.
+
+**Read it through the reader, never by hand.** `mask-reader.ts` is GENERATED
+from the same declaration the writer is (`galley/src/mask/schema.rs`);
+`MaskMap.open` validates the magic, the version, and that the row block fits
+the count, and throws naming both versions. `starts` is not on the wire — the
+reader builds the prefix sum in one pass at open — and `toSource` and `pieces`
+ride along, `pieces` answering exactly what a find hit's `pieces()` carries.
+
+`sourceLen` says which text the map was cut from, so a consumer whose copy has
+moved on learns it before joining slices out of the wrong string;
+`projectedLen` is its checksum after the join.
+
+The scope is find's: a target, or a reference registered with `keepText`. One
+that retains neither errors by name, naming the argument that would fix it
+(`reference ref/RUT.usfm retains no text; register it with keepText`), and an
+unknown id errors as `no book is registered as X`. An unknown recipe throws
+naming the two that exist rather than falling back to either.
+
 ## The census buffer
 
 What a project HOLDS, without a parse per book: `toc(id, utf16?)` for one
@@ -386,6 +440,7 @@ touches only the settings, adding them later changes nothing that already works.
 ## What the handle does not do yet
 
 `detail(handle)` and `suppress(rule, anchor)` are in
-`sous-chef/planning/plans/consumer-api-sketch.md` and are not here. Neither is
-a structure projection off the retained copy: a book retains the verse-text
-mask alone, so `structureTextOf` takes text.
+`sous-chef/planning/plans/consumer-api-sketch.md` and are not here. A structure
+projection is still cut rather than retained — a book retains the verse-text
+mask alone — so `structureTextOf` takes text and `mask(id, { recipe:
+"structure" })` cuts the retained copy on the way past.

@@ -39,6 +39,9 @@ const { Census, FORMAT_VERSION, HEADER_VERSION_OFFSET } = await import(
 );
 // And find's, likewise generated — `usfm-galley/find-reader`.
 const { Hits, HitRow } = await import(resolve(here, "../find-reader.ts"));
+// And the mask map's — `usfm-galley/mask-reader`.
+const { MaskMap, HEADER_VERSION_OFFSET: MASK_VERSION_AT, FORMAT_VERSION: MASK_VERSION } =
+  await import(resolve(here, "../mask-reader.ts"));
 
 const fixture = (name) => readFileSync(resolve(here, "fixtures/sous", name), "utf8");
 const golden = (name) => new Uint8Array(readFileSync(resolve(here, "goldens/sous", name)));
@@ -284,6 +287,168 @@ try {
 check(
   staleFind.includes(`v${FIND_VERSION + 1}`) && staleFind.includes("update usfm-galley"),
   `a newer find buffer is refused, not misread: ${staleFind}`,
+);
+
+// --- the mask map: where the projection came from -------------------------
+
+// The text behind each id at this point in the script — GEN was re-sent with
+// the edit, and ref/JON.usfm was re-sent with its text.
+const TEXT_OF = {
+  "books/GEN.usfm": "GEN-edited.usfm",
+  "books/RUT.usfm": "RUT.usfm",
+  "books/JON.usfm": "JON.usfm",
+  "ref/JON.usfm": "ref/JON.usfm",
+};
+
+/** Laws 1, 2, 3 and 5, by hand, over one opened map. */
+const maskLaws = (map, what) => {
+  let at = 0;
+  let previous = -1;
+  let ok = true;
+  for (let n = 0; n < map.rangeCount; n++) {
+    const r = map.range(n);
+    if (!(r.sourceFrom < r.sourceTo)) ok = false;
+    if (!(previous < r.sourceFrom)) ok = false;
+    if (map.starts[n] !== at) ok = false;
+    if (r.sourceTo > map.sourceLen) ok = false;
+    previous = r.sourceTo;
+    at += r.sourceTo - r.sourceFrom;
+  }
+  check(ok, `${what}: the ranges are sorted, disjoint, non-empty and prefix-summed`);
+  eq(at, map.projectedLen, `${what}: the prefix sum is the projection`);
+};
+
+/** The ranges joined out of `source`, which law 4 says IS the projection. */
+const joinMask = (map, source) => {
+  let out = "";
+  for (let n = 0; n < map.rangeCount; n++) {
+    const r = map.range(n);
+    out += source.slice(r.sourceFrom, r.sourceTo);
+  }
+  return out;
+};
+
+const genText = fixture(TEXT_OF["books/GEN.usfm"]);
+const genVerseText = galley.verseText("books/GEN.usfm");
+
+const byteMap = MaskMap.open(galley.mask("books/GEN.usfm"));
+maskLaws(byteMap, "mask(id)");
+check(!byteMap.utf16, "mask(id) answers in bytes unless asked otherwise");
+eq(byteMap.recipe, "verseText", "and in the default recipe");
+check(byteMap.rangeCount > 1, `the projection is made of ${byteMap.rangeCount} spans`);
+
+// The UTF-16 buffer is the one a JavaScript host can slice with, because a JS
+// string is counted in exactly those units.
+const wideMap = MaskMap.open(galley.mask("books/GEN.usfm", { utf16: true }));
+maskLaws(wideMap, "mask(id, { utf16: true })");
+check(wideMap.utf16, "the UTF-16 buffer says so in its flags");
+eq(wideMap.rangeCount, byteMap.rangeCount, "one map, two units");
+eq(wideMap.sourceLen, genText.length, "sourceLen is the text the map was cut from");
+eq(wideMap.projectedLen, genVerseText.length, "projectedLen is the reading's length");
+eq(joinMask(wideMap, genText), genVerseText, "the joined slices ARE verseText(id)");
+
+// A structure map is a different map of the same text, and says which it is.
+const structureMap = MaskMap.open(
+  galley.mask("books/GEN.usfm", { recipe: "structure", utf16: true }),
+);
+maskLaws(structureMap, 'mask(id, { recipe: "structure" })');
+eq(structureMap.recipe, "structure", "the buffer names its recipe");
+eq(
+  joinMask(structureMap, genText),
+  galley.structureTextOf(genText),
+  "and joins to the structure text",
+);
+
+// The loose door over the same bytes writes the same buffer.
+const looseBytes = galley.maskOf(genText);
+check(
+  sameBytes(looseBytes, galley.mask("books/GEN.usfm")),
+  "maskOf(text) equals mask(id) byte for byte",
+);
+check(
+  sameBytes(
+    galley.maskOf(genText, { utf16: true }),
+    galley.mask("books/GEN.usfm", { utf16: true }),
+  ),
+  "and in UTF-16",
+);
+maskLaws(MaskMap.open(looseBytes), "maskOf(text)");
+
+// THE cross-check: the map answers what a find hit already carries. Both are
+// UTF-16, both name source spans, and they are computed by different code.
+const maps = new Map();
+let compared = 0;
+for (let n = 0; n < shipped.hitCount; n++) {
+  const hit = shipped.hit(n);
+  const id = shipped.id(hit.bookIndex);
+  if (!maps.has(id)) maps.set(id, MaskMap.open(galley.mask(id, { utf16: true })));
+  const map = maps.get(id);
+  const mine = map.pieces(hit.projectedFrom, hit.projectedTo);
+  const theirs = hit.pieces();
+  let same = mine.length === theirs.length;
+  for (let p = 0; same && p < mine.length; p++) {
+    const piece = theirs.seek(p);
+    same = mine[p][0] === piece.sourceFrom && mine[p][1] === piece.sourceTo;
+  }
+  check(same, `hit ${n} in ${id}: the map's pieces are the hit's`);
+  compared++;
+}
+check(compared > 0, `${compared} hits cross-checked against their book's map`);
+
+// And every id the map was built for joins back to its own verse text.
+for (const [id, map] of maps) {
+  eq(joinMask(map, fixture(TEXT_OF[id])), galley.verseText(id), `${id}: the map rebuilds it`);
+}
+
+// A lengths-only reference has no projection to map, and says which argument
+// fixes it — the same sentence find uses.
+let unmappable = "";
+try {
+  galley.mask("ref/RUT.usfm");
+} catch (error) {
+  unmappable = String(error.message ?? error);
+}
+check(unmappable.includes("keepText"), `a lengths-only reference: ${unmappable}`);
+
+let unknownMaskBook = "";
+try {
+  galley.mask("books/NOPE.usfm");
+} catch (error) {
+  unknownMaskBook = String(error.message ?? error);
+}
+check(unknownMaskBook.includes("no book is registered"), `an unknown id: ${unknownMaskBook}`);
+
+let badRecipe = "";
+try {
+  galley.mask("books/GEN.usfm", { recipe: "prose" });
+} catch (error) {
+  badRecipe = String(error.message ?? error);
+}
+check(
+  badRecipe.includes("prose") && badRecipe.includes("verseText") && badRecipe.includes("structure"),
+  `an unknown recipe names the two that exist: ${badRecipe}`,
+);
+
+let badMaskType = "";
+try {
+  galley.mask("books/GEN.usfm", { utf16: "yes" });
+} catch (error) {
+  badMaskType = String(error.message ?? error);
+}
+check(badMaskType.includes("utf16"), `a wrong-typed option names itself: ${badMaskType}`);
+
+// The same promise every generated reader keeps.
+const shiftedMask = new Uint8Array(galley.mask("books/GEN.usfm"));
+new DataView(shiftedMask.buffer).setUint32(MASK_VERSION_AT, MASK_VERSION + 1, true);
+let staleMask = "";
+try {
+  MaskMap.open(shiftedMask);
+} catch (error) {
+  staleMask = String(error.message ?? error);
+}
+check(
+  staleMask.includes(`v${MASK_VERSION + 1}`) && staleMask.includes("update usfm-galley"),
+  `a newer mask buffer is refused, not misread: ${staleMask}`,
 );
 
 // --- the census: what the project holds, read through its own reader -------
