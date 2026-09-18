@@ -10,6 +10,8 @@
 
 #![allow(dead_code)]
 
+use mise::extensions::ExtensionCategory;
+
 use crate::tables::schema::{
     AttrStatus, Category, ClosingBehavior, HtmlElement, MarkerKind, Numbering, Payload, ScopeKind,
     SpecContext, SpellingShape, StructuralWhitespaceRequirement as Ws,
@@ -66,7 +68,7 @@ pub const BITS_USED: u32 = 82;
 
 /// The packed table. Index IS the marker index.
 #[rustfmt::skip]
-static PACKED: [u128; 153] = [
+static PACKED: [u128; 170] = [
     0x0000000000000100000000, //   0 <unresolved>
     0x000000006f070108280292, //   1 add
     0x000000006f070128280292, //   2 addpn
@@ -220,12 +222,29 @@ static PACKED: [u128; 153] = [
     0x0000000060000110280312, // 150 xq
     0x000402406f070350280312, // 151 xt
     0x0000000060000110280312, // 152 xta
+    0x0000000600008900180411, // 153 zheader
+    0x00000018000508c0180431, // 154 ztitle
+    0x0000000a00120880180221, // 155 zintro
+    0x00000018001008c0180231, // 156 zsect
+    0x0000001a00500880180241, // 157 zpara
+    0x0000001c04100980180261, // 158 zlist
+    0x0000001a00120880180241, // 159 zother
+    0x000000220f570908204323, // 160 zfoot
+    0x000000240f570908204333, // 161 zxref
+    0x000000006f070908280292, // 162 zchar
+    0x00000000600209082802c2, // 163 zichar
+    0x00000000640009082802e2, // 164 zlchar
+    0x0000000060000910280302, // 165 zfchar
+    0x000402406f070b50280312, // 166 zxchar
+    0x004c03800f071158300766, // 167 zms
+    0x000803000e100158300776, // 168 zmsbare
+    0x0000001e08000a804782fc, // 169 zcell
 ];
 
 /// idx → canonical name. This array is what makes the table double as the
 /// MARKER CATALOG: iterate it and you have every marker USFM 3.2 defines.
 #[rustfmt::skip]
-static NAMES: [&str; 153] = [
+static NAMES: [&str; 170] = [
     "",
     "add",
     "addpn",
@@ -379,6 +398,23 @@ static NAMES: [&str; 153] = [
     "xq",
     "xt",
     "xta",
+    "zheader",
+    "ztitle",
+    "zintro",
+    "zsect",
+    "zpara",
+    "zlist",
+    "zother",
+    "zfoot",
+    "zxref",
+    "zchar",
+    "zichar",
+    "zlchar",
+    "zfchar",
+    "zxchar",
+    "zms",
+    "zmsbare",
+    "zcell",
 ];
 
 /// Every row's `defined_attributes`, concatenated; a row's slice is
@@ -413,6 +449,50 @@ static ATTRS: [(&str, AttrStatus); 25] = [
 ];
 /// Number of rows — the marker catalog's size.
 pub const ROW_COUNT: usize = NAMES.len();
+
+/// The first extension TEMPLATE row. Every index below this one is a
+/// marker USFM 3.2 defines; every index at or above it is a template a
+/// registered `\z` extension resolves to.
+pub const FIRST_EXTENSION_ROW: MarkerIdx = 153;
+
+/// Is this row a template — and so a row whose `name` is NOT the marker's?
+///
+/// The ONE `is this an extension` predicate in the engine, and it exists
+/// for one purpose: a template cannot carry the spelling a document used,
+/// so anything showing a name to a human or writing one to an export reads
+/// it off the token span instead. Nothing branches on it to decide what a
+/// marker DOES — that is the row's, which is the point of templates.
+#[inline]
+pub fn is_extension(idx: MarkerIdx) -> bool {
+    idx >= FIRST_EXTENSION_ROW
+}
+/// The template row a spec `\category` word behaves as. TOTAL: the two
+/// USX-internal words answer [`UNRESOLVED`], which is what "registers
+/// nothing" means at a call site.
+#[rustfmt::skip]
+pub fn template_for(category: ExtensionCategory) -> MarkerIdx {
+    match category {
+        ExtensionCategory::Header => 153, // zheader
+        ExtensionCategory::Title => 154, // ztitle
+        ExtensionCategory::Introduction => 155, // zintro
+        ExtensionCategory::SectionPara => 156, // zsect
+        ExtensionCategory::VersePara => 157, // zpara
+        ExtensionCategory::List => 158, // zlist
+        ExtensionCategory::OtherPara => 159, // zother
+        ExtensionCategory::CrossReference => 161, // zxref
+        ExtensionCategory::Footnote => 160, // zfoot
+        ExtensionCategory::Char => 162, // zchar
+        ExtensionCategory::IntroChar => 163, // zichar
+        ExtensionCategory::ListChar => 164, // zlchar
+        ExtensionCategory::FootnoteChar => 165, // zfchar
+        ExtensionCategory::CrossReferenceChar => 166, // zxchar
+        ExtensionCategory::Milestone => 167, // zms
+        ExtensionCategory::Attribute => UNRESOLVED,
+        ExtensionCategory::Cell => 169, // zcell
+        ExtensionCategory::Standalone => 168, // zmsbare
+        ExtensionCategory::Internal => UNRESOLVED,
+    }
+}
 
 #[inline]
 fn field(idx: MarkerIdx, shift: u32, mask: u128) -> u32 {
@@ -733,12 +813,19 @@ pub const fn context_bit(ctx: SpecContext) -> u32 {
 /// column span (`tables::emit` asserts this, so a digit-bearing canonical
 /// name panics the generator rather than silently resolving to its stem).
 ///
-/// Anything that does not resolve — a `\z` extension, an unknown name,
-/// `\s5` — returns [`UNRESOLVED`], which is a real inert row and not an
-/// error path.
+/// Anything that does not resolve — an unknown name, `\s5` — returns
+/// [`UNRESOLVED`], which is a real inert row and not an error path.
+///
+/// This is the SPEC table's lookup and knows nothing about extensions: every
+/// `z` lexeme leaves here as [`UNRESOLVED`]. A registered one resolves through
+/// [`crate::extensions::marker_idx`], which is the door the scanner calls and
+/// the only place a template row is reachable.
 #[inline]
 pub fn marker_idx(lexeme: &[u8], shape: SpellingShape) -> MarkerIdx {
-    // An unconfigured `\z` extension never needs a name match at all [F].
+    // A belt, not the door: the scanner routes every `z` lexeme to the
+    // registry and never sends one here [F]. It stays because this lookup is
+    // TOTAL on its own terms — no `z` name is a spec row — and because it is
+    // what makes the template rows unreachable by name.
     if lexeme.first().is_none_or(|b| *b == b'z') {
         return UNRESOLVED;
     }

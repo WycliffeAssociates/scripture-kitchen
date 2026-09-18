@@ -71,6 +71,7 @@ const EXPORTS = [
   "attrs",
   "book",
   "diff",
+  "extensionsFromMarkersExt",
   "format",
   "formatEdits",
   "formatEditsIn",
@@ -79,6 +80,7 @@ const EXPORTS = [
   "merge",
   "mergeSplices",
   "parse",
+  "setExtensions",
   "toByte",
   "toUtf16",
 ];
@@ -88,6 +90,58 @@ eq(exported.join(" "), EXPORTS.join(" "), "the module exports exactly the door l
 
 // One onion door, answered through this module.
 eq(doors.toUtf16("\\v 1 a\u{1F600}b", 10), 8, "toUtf16 counts the surrogate pair");
+
+// --- user `\z` markers, through the superset module -----------------------
+//
+// The reason the export list above is pinned: a door reachable only from
+// `onion-wasm` is unreachable from the build a host vendors. Both halves are
+// exercised HERE, through galley's own module, not only in onion's
+// conformance.
+{
+  const read = JSON.parse(
+    doors.extensionsFromMarkersExt(
+      "\\marker zmyf\n\\category footnote\n\\description A note.\n" +
+        "\\marker bad\n\\category char\n",
+    ),
+  );
+  eq(read.markers.length, 1, "one marker kept");
+  eq(read.markers[0].name, "zmyf", "…named as the file spells it");
+  eq(read.markers[0].category, "footnote", "…with the spec's own category word");
+  eq(read.malformed.length, 1, "and one entry refused");
+  eq(read.malformed[0].line, 4, "a file report carries its line");
+  eq(read.malformed[0].reason, "name does not start with z", "…and why");
+
+  // Read through a second galley door, so the effect is a reading a host
+  // would actually render. Unregistered, `\zmyf` is row 0: the walker's
+  // pop-all recovery means no note subtree forms and the note's prose rides
+  // into verse text. Registered, the subtree drops the way `\f`'s does.
+  const book = "\\id GEN\n\\c 1\n\\p \\v 1 Jesus wept\\zmyf + \\ft why\\zmyf*.\n";
+  const reading = () => doors.mask(book, "verseText").text.trim();
+  check(reading().includes("why"), "reading a file installs nothing");
+
+  eq(doors.setExtensions(JSON.stringify(read.markers)), "[]", "a clean list reports nothing");
+  eq(reading(), "Jesus wept.", "…and the same bytes now read as a footnote");
+
+  // A bad ENTRY is a report, not a failure; malformed JSON throws.
+  const reports = JSON.parse(
+    doors.setExtensions('[{"name":"znope","category":"bogus"},{"name":"nope","category":"char"}]'),
+  );
+  eq(reports.length, 2, "both entries refused");
+  eq(reports[0].reason, "unknown category word", "the category is judged at the door");
+  eq(reports[1].reason, "name does not start with z", "the name is judged by the registry");
+  check(reports[0].line === undefined, "a list report carries no line, rather than a zero");
+  let threw = false;
+  try {
+    doors.setExtensions("{");
+  } catch {
+    threw = true;
+  }
+  check(threw, "malformed JSON throws");
+
+  // Clear, so nothing below this block sees a registry it did not install.
+  eq(doors.setExtensions("[]"), "[]", "an empty list clears");
+  check(reading().includes("why"), "cleared");
+}
 
 // --- the three publications cross unchanged -------------------------------
 

@@ -14,6 +14,8 @@
 //! `priority` counts are MEASURED.
 //!
 
+use mise::extensions::ExtensionCategory;
+
 use super::schema::{
     AttrStatus, Category, ClosingBehavior, HtmlElement, MarkerKind, MarkerRow, Numbering, Payload,
     ScopeKind, SpecContext, SpellingShape, StructuralWhitespaceRequirement as Ws,
@@ -3675,6 +3677,454 @@ pub static ROWS: &[MarkerRow] = &[
         html_element: Some(HtmlElement::Span),
         priority: None,
     },
+    // ---- Extension templates: `\z` markers, behaving as their category ----
+    //
+    // One row per behaviour-bearing `\category` word the spec defines,
+    // appended AFTER every spec row so no existing index moves. Each COPIES a
+    // spec row — the row IS the behaviour, so a registered `\zfoot` is a
+    // footnote with a different name — and owns exactly four columns:
+    //
+    //   marker         a template name, never a marker a document can spell
+    //   shape          which spelling the category admits — PlainOnly for
+    //                  everything but `milestone` (MilestoneOnly) and
+    //                  `standalone` (Any, as `\ts`), because the token KIND
+    //                  is decided by the spelling before any row is consulted
+    //   numbered_max   Unnumbered everywhere but `cell`; the spec shows no
+    //                  other numbered extension
+    //   priority       None: the hot-marker ranks are MEASURED, and no
+    //                  document byte reaches a template by name
+    //
+    // `every_template_copies_its_source_row` diffs each template against its
+    // source, so curating `\p` reaches `zpara` or the build fails.
+    //
+    // The leading `z` is load-bearing: every `z` lexeme short-circuits before
+    // `by_name`, and `emit::by_name_arms` skips these rows, so a template is
+    // UNREACHABLE from source text. `\zpara` in a document resolves through
+    // the registry like any other extension, or to row 0.
+
+    // `header` — every column of `\h` but the four the template owns.
+    MarkerRow {
+        marker: "zheader",
+        shape: SpellingShape::PlainOnly,
+        kind: MarkerKind::Paragraph,
+        category: Category::ParaIdentification,
+        ws_after_name: Ws::AtLeastOneHorizontalWhitespace,
+        payload: Payload::None,
+        numbered_max: Numbering::Unnumbered,
+        allowed_contexts: &[SpecContext::BookHeaders],
+        opens_scope: Some(ScopeKind::Para),
+        closes_scope: None,
+        defined_attributes: &[],
+        default_attribute: None,
+        closing: ClosingBehavior::None,
+        deprecated: false,
+        html_element: Some(HtmlElement::Span),
+        priority: None,
+    },
+    // `title` — every column of `\mt` but the four the template owns.
+    MarkerRow {
+        marker: "ztitle",
+        shape: SpellingShape::PlainOnly,
+        kind: MarkerKind::Paragraph,
+        category: Category::ParaTitlesSections,
+        ws_after_name: Ws::AtLeastOneHorizontalWhitespace,
+        payload: Payload::None,
+        numbered_max: Numbering::Unnumbered,
+        allowed_contexts: &[
+            SpecContext::BookTitles,
+            SpecContext::BookIntroductionEndTitles,
+        ],
+        opens_scope: Some(ScopeKind::Para),
+        closes_scope: None,
+        defined_attributes: &[],
+        default_attribute: None,
+        closing: ClosingBehavior::None,
+        deprecated: false,
+        html_element: Some(HtmlElement::Heading),
+        priority: None,
+    },
+    // `introduction` — every column of `\ip` but the four the template owns.
+    MarkerRow {
+        marker: "zintro",
+        shape: SpellingShape::PlainOnly,
+        kind: MarkerKind::Paragraph,
+        category: Category::ParaIntroductions,
+        ws_after_name: Ws::TagEndDelimiter,
+        payload: Payload::None,
+        numbered_max: Numbering::Unnumbered,
+        allowed_contexts: &[SpecContext::BookIntroduction, SpecContext::ChapterContent],
+        opens_scope: Some(ScopeKind::Para),
+        closes_scope: None,
+        defined_attributes: &[],
+        default_attribute: None,
+        closing: ClosingBehavior::None,
+        deprecated: false,
+        html_element: Some(HtmlElement::Para),
+        priority: None,
+    },
+    // `sectionpara` — every column of `\s` but the four the template owns.
+    MarkerRow {
+        marker: "zsect",
+        shape: SpellingShape::PlainOnly,
+        kind: MarkerKind::Paragraph,
+        category: Category::ParaTitlesSections,
+        ws_after_name: Ws::TagEndDelimiter,
+        payload: Payload::None,
+        numbered_max: Numbering::Unnumbered,
+        allowed_contexts: &[SpecContext::ChapterContent],
+        opens_scope: Some(ScopeKind::Para),
+        closes_scope: None,
+        defined_attributes: &[],
+        default_attribute: None,
+        closing: ClosingBehavior::None,
+        deprecated: false,
+        html_element: Some(HtmlElement::Heading),
+        priority: None,
+    },
+    // `versepara` — every column of `\p` but the four the template owns.
+    MarkerRow {
+        marker: "zpara",
+        shape: SpellingShape::PlainOnly,
+        kind: MarkerKind::Paragraph,
+        category: Category::ParaBody,
+        ws_after_name: Ws::TagEndDelimiter,
+        payload: Payload::None,
+        numbered_max: Numbering::Unnumbered,
+        allowed_contexts: &[SpecContext::ChapterContent, SpecContext::PeripheralContent],
+        opens_scope: Some(ScopeKind::Para),
+        closes_scope: None,
+        defined_attributes: &[],
+        default_attribute: None,
+        closing: ClosingBehavior::None,
+        deprecated: false,
+        html_element: Some(HtmlElement::Para),
+        priority: None,
+    },
+    // `list` — every column of `\li` but the four the template owns.
+    MarkerRow {
+        marker: "zlist",
+        shape: SpellingShape::PlainOnly,
+        kind: MarkerKind::Paragraph,
+        category: Category::ParaLists,
+        ws_after_name: Ws::TagEndDelimiter,
+        payload: Payload::None,
+        numbered_max: Numbering::Unnumbered,
+        allowed_contexts: &[SpecContext::ChapterContent, SpecContext::List],
+        opens_scope: Some(ScopeKind::Para),
+        closes_scope: None,
+        defined_attributes: &[],
+        default_attribute: None,
+        closing: ClosingBehavior::None,
+        deprecated: false,
+        html_element: Some(HtmlElement::ListItem),
+        priority: None,
+    },
+    // `otherpara` — every column of `\lit` but the four the template owns.
+    MarkerRow {
+        marker: "zother",
+        shape: SpellingShape::PlainOnly,
+        kind: MarkerKind::Paragraph,
+        category: Category::ParaBody,
+        ws_after_name: Ws::TagEndDelimiter,
+        payload: Payload::None,
+        numbered_max: Numbering::Unnumbered,
+        allowed_contexts: &[SpecContext::BookIntroduction, SpecContext::ChapterContent],
+        opens_scope: Some(ScopeKind::Para),
+        closes_scope: None,
+        defined_attributes: &[],
+        default_attribute: None,
+        closing: ClosingBehavior::None,
+        deprecated: false,
+        html_element: Some(HtmlElement::Para),
+        priority: None,
+    },
+    // `footnote` — every column of `\f` but the four the template owns.
+    MarkerRow {
+        marker: "zfoot",
+        shape: SpellingShape::PlainOnly,
+        kind: MarkerKind::Note,
+        category: Category::NoteFootnote,
+        ws_after_name: Ws::TagEndDelimiter,
+        payload: Payload::NoteCaller,
+        numbered_max: Numbering::Unnumbered,
+        allowed_contexts: &[
+            SpecContext::BookTitles,
+            SpecContext::BookIntroduction,
+            SpecContext::BookIntroductionEndTitles,
+            SpecContext::ChapterContent,
+            SpecContext::PeripheralContent,
+            SpecContext::Para,
+            SpecContext::List,
+            SpecContext::Table,
+            SpecContext::Section,
+        ],
+        opens_scope: Some(ScopeKind::Note),
+        closes_scope: None,
+        defined_attributes: &[],
+        default_attribute: None,
+        closing: ClosingBehavior::RequiredExplicit,
+        deprecated: false,
+        html_element: Some(HtmlElement::Span),
+        priority: None,
+    },
+    // `crossreference` — every column of `\x` but the four the template owns.
+    MarkerRow {
+        marker: "zxref",
+        shape: SpellingShape::PlainOnly,
+        kind: MarkerKind::Note,
+        category: Category::NoteCrossReference,
+        ws_after_name: Ws::TagEndDelimiter,
+        payload: Payload::NoteCaller,
+        numbered_max: Numbering::Unnumbered,
+        allowed_contexts: &[
+            SpecContext::BookTitles,
+            SpecContext::BookIntroduction,
+            SpecContext::BookIntroductionEndTitles,
+            SpecContext::ChapterContent,
+            SpecContext::PeripheralContent,
+            SpecContext::Para,
+            SpecContext::List,
+            SpecContext::Table,
+            SpecContext::Section,
+        ],
+        opens_scope: Some(ScopeKind::Note),
+        closes_scope: None,
+        defined_attributes: &[],
+        default_attribute: None,
+        closing: ClosingBehavior::RequiredExplicit,
+        deprecated: false,
+        html_element: Some(HtmlElement::Span),
+        priority: None,
+    },
+    // `char` — every column of `\add` but the four the template owns.
+    MarkerRow {
+        marker: "zchar",
+        shape: SpellingShape::PlainOnly,
+        kind: MarkerKind::Character,
+        category: Category::CharTextFeatures,
+        ws_after_name: Ws::TagEndDelimiter,
+        payload: Payload::None,
+        numbered_max: Numbering::Unnumbered,
+        allowed_contexts: &[
+            SpecContext::BookTitles,
+            SpecContext::BookIntroduction,
+            SpecContext::BookIntroductionEndTitles,
+            SpecContext::Section,
+            SpecContext::Para,
+            SpecContext::List,
+            SpecContext::Table,
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
+        ],
+        opens_scope: Some(ScopeKind::Character),
+        closes_scope: None,
+        defined_attributes: &[],
+        default_attribute: None,
+        closing: ClosingBehavior::RequiredExplicit,
+        deprecated: false,
+        html_element: Some(HtmlElement::Span),
+        priority: None,
+    },
+    // `introchar` — every column of `\ior` but the four the template owns.
+    MarkerRow {
+        marker: "zichar",
+        shape: SpellingShape::PlainOnly,
+        kind: MarkerKind::Character,
+        category: Category::CharIntroductions,
+        ws_after_name: Ws::TagEndDelimiter,
+        payload: Payload::None,
+        numbered_max: Numbering::Unnumbered,
+        allowed_contexts: &[
+            SpecContext::BookIntroduction,
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
+        ],
+        opens_scope: Some(ScopeKind::Character),
+        closes_scope: None,
+        defined_attributes: &[],
+        default_attribute: None,
+        closing: ClosingBehavior::RequiredExplicit,
+        deprecated: false,
+        html_element: Some(HtmlElement::Span),
+        priority: None,
+    },
+    // `listchar` — every column of `\lik` but the four the template owns.
+    MarkerRow {
+        marker: "zlchar",
+        shape: SpellingShape::PlainOnly,
+        kind: MarkerKind::Character,
+        category: Category::CharLists,
+        ws_after_name: Ws::TagEndDelimiter,
+        payload: Payload::None,
+        numbered_max: Numbering::Unnumbered,
+        allowed_contexts: &[
+            SpecContext::List,
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
+        ],
+        opens_scope: Some(ScopeKind::Character),
+        closes_scope: None,
+        defined_attributes: &[],
+        default_attribute: None,
+        closing: ClosingBehavior::RequiredExplicit,
+        deprecated: false,
+        html_element: Some(HtmlElement::Span),
+        priority: None,
+    },
+    // `footnotechar` — every column of `\ft` but the four the template owns.
+    MarkerRow {
+        marker: "zfchar",
+        shape: SpellingShape::PlainOnly,
+        kind: MarkerKind::Character,
+        category: Category::CharNotesFootnote,
+        ws_after_name: Ws::TagEndDelimiter,
+        payload: Payload::None,
+        numbered_max: Numbering::Unnumbered,
+        allowed_contexts: &[SpecContext::Footnote, SpecContext::CrossReference],
+        opens_scope: Some(ScopeKind::Character),
+        closes_scope: None,
+        defined_attributes: &[],
+        default_attribute: None,
+        closing: ClosingBehavior::OptionalExplicitUntilNoteEnd,
+        deprecated: false,
+        html_element: Some(HtmlElement::Span),
+        priority: None,
+    },
+    // `crossreferencechar` — every column of `\xt` but the four the template owns.
+    MarkerRow {
+        marker: "zxchar",
+        shape: SpellingShape::PlainOnly,
+        kind: MarkerKind::Character,
+        category: Category::CharNotesCrossReference,
+        ws_after_name: Ws::TagEndDelimiter,
+        payload: Payload::None,
+        numbered_max: Numbering::Unnumbered,
+        allowed_contexts: &[
+            SpecContext::BookTitles,
+            SpecContext::BookIntroduction,
+            SpecContext::BookIntroductionEndTitles,
+            SpecContext::Section,
+            SpecContext::Para,
+            SpecContext::List,
+            SpecContext::Table,
+            SpecContext::Footnote,
+            SpecContext::CrossReference,
+        ],
+        opens_scope: Some(ScopeKind::Character),
+        closes_scope: None,
+        defined_attributes: &[("link-href", AttrStatus::Deprecated)],
+        default_attribute: None,
+        closing: ClosingBehavior::OptionalExplicitUntilNoteEnd,
+        deprecated: false,
+        html_element: Some(HtmlElement::Anchor),
+        priority: None,
+    },
+    // `milestone` — every column of `\qt-s` but the four the template owns.
+    MarkerRow {
+        marker: "zms",
+        shape: SpellingShape::MilestoneOnly,
+        kind: MarkerKind::Milestone,
+        category: Category::MilestoneQt,
+        ws_after_name: Ws::OptionalHorizontalWhitespace,
+        payload: Payload::None,
+        numbered_max: Numbering::Unnumbered,
+        allowed_contexts: &[
+            SpecContext::BookTitles,
+            SpecContext::BookIntroduction,
+            SpecContext::BookIntroductionEndTitles,
+            SpecContext::Section,
+            SpecContext::Para,
+            SpecContext::List,
+            SpecContext::Table,
+        ],
+        opens_scope: Some(ScopeKind::Milestone),
+        closes_scope: None,
+        defined_attributes: &[
+            ("who", AttrStatus::Optional),
+            ("sid", AttrStatus::Optional),
+            ("eid", AttrStatus::Optional),
+        ],
+        default_attribute: Some("who"),
+        closing: ClosingBehavior::SelfClosingMilestone,
+        deprecated: false,
+        html_element: Some(HtmlElement::SelfClosingSpan),
+        priority: None,
+    },
+    // `standalone` — every column of `\ts` but the four the template owns.
+    MarkerRow {
+        marker: "zmsbare",
+        shape: SpellingShape::Any,
+        kind: MarkerKind::Milestone,
+        category: Category::MilestoneTs,
+        ws_after_name: Ws::OptionalHorizontalWhitespace,
+        payload: Payload::None,
+        numbered_max: Numbering::Unnumbered,
+        allowed_contexts: &[
+            SpecContext::ChapterContent,
+            SpecContext::Para,
+            SpecContext::List,
+            SpecContext::Table,
+        ],
+        opens_scope: Some(ScopeKind::Milestone),
+        closes_scope: None,
+        defined_attributes: &[("sid", AttrStatus::Optional), ("eid", AttrStatus::Optional)],
+        default_attribute: None,
+        closing: ClosingBehavior::SelfClosingMilestone,
+        deprecated: false,
+        html_element: Some(HtmlElement::SelfClosingSpan),
+        priority: None,
+    },
+    // `cell` — every column of `\tc` but the four the template owns.
+    MarkerRow {
+        marker: "zcell",
+        shape: SpellingShape::PlainOnly,
+        kind: MarkerKind::TableCell,
+        category: Category::CharTables,
+        ws_after_name: Ws::TagEndDelimiter,
+        payload: Payload::None,
+        numbered_max: Numbering::TableColumns,
+        allowed_contexts: &[SpecContext::Table],
+        opens_scope: Some(ScopeKind::TableCell),
+        closes_scope: None,
+        defined_attributes: &[],
+        default_attribute: None,
+        closing: ClosingBehavior::None,
+        deprecated: false,
+        html_element: Some(HtmlElement::TableCell),
+        priority: None,
+    },
+];
+
+/// Which template row each spec `\category` word BEHAVES AS — the whole
+/// mapping from the spec's vocabulary to this table's.
+///
+/// `None` is the two USX-internal words. `attribute` names `cp`/`vp`/`ca`/`va`
+/// and `internal` names `usfm`/`cat`: neither describes a marker a USFM
+/// document writes, so an extension declaring one parses (a valid
+/// `markers.ext` must never error) and registers nothing, leaving the name at
+/// row 0 exactly as today.
+///
+/// Codegen turns the names into indices — `generated::template_for`.
+pub static EXTENSION_TEMPLATES: &[(ExtensionCategory, Option<&str>)] = &[
+    (ExtensionCategory::Header, Some("zheader")),
+    (ExtensionCategory::Title, Some("ztitle")),
+    (ExtensionCategory::Introduction, Some("zintro")),
+    (ExtensionCategory::SectionPara, Some("zsect")),
+    (ExtensionCategory::VersePara, Some("zpara")),
+    (ExtensionCategory::List, Some("zlist")),
+    (ExtensionCategory::OtherPara, Some("zother")),
+    (ExtensionCategory::CrossReference, Some("zxref")),
+    (ExtensionCategory::Footnote, Some("zfoot")),
+    (ExtensionCategory::Char, Some("zchar")),
+    (ExtensionCategory::IntroChar, Some("zichar")),
+    (ExtensionCategory::ListChar, Some("zlchar")),
+    (ExtensionCategory::FootnoteChar, Some("zfchar")),
+    (ExtensionCategory::CrossReferenceChar, Some("zxchar")),
+    (ExtensionCategory::Milestone, Some("zms")),
+    (ExtensionCategory::Attribute, None),
+    (ExtensionCategory::Cell, Some("zcell")),
+    (ExtensionCategory::Standalone, Some("zmsbare")),
+    (ExtensionCategory::Internal, None),
 ];
 
 /// How many numbered/paired families collapse into one row. Reported by
@@ -3905,6 +4355,155 @@ mod tests {
                     name
                 );
             }
+        }
+    }
+    // ---- Extension templates --------------------------------------------
+
+    /// Every template names a row, every category is mapped exactly once, and
+    /// the two USX-internal words map to nothing.
+    #[test]
+    fn the_category_map_is_total_and_one_to_one() {
+        for category in ExtensionCategory::ALL {
+            let hits: Vec<_> = EXTENSION_TEMPLATES
+                .iter()
+                .filter(|(c, _)| *c == category)
+                .collect();
+            assert_eq!(hits.len(), 1, "{category} is mapped {} times", hits.len());
+        }
+        assert_eq!(EXTENSION_TEMPLATES.len(), ExtensionCategory::ALL.len());
+        for (category, name) in EXTENSION_TEMPLATES {
+            let Some(name) = name else {
+                assert!(
+                    matches!(
+                        category,
+                        ExtensionCategory::Attribute | ExtensionCategory::Internal
+                    ),
+                    "{category} has no template"
+                );
+                continue;
+            };
+            assert!(
+                ROWS.iter().any(|row| row.marker == *name),
+                "{category} names `{name}`, which is not a row"
+            );
+        }
+    }
+
+    /// Every template copies its source row. THE test the templates rest on:
+    /// curating `\p` has to reach `zpara`, and a column that silently stopped
+    /// matching would give a registered extension behaviour the spec marker no
+    /// longer has.
+    ///
+    /// The four columns a template owns are excluded by name; everything else
+    /// is compared field for field.
+    #[test]
+    fn every_template_copies_its_source_row() {
+        // (template, source name, source shape) — the source is the row §1 of
+        // the plan says the category behaves as.
+        const SOURCES: &[(&str, &str, SpellingShape)] = &[
+            ("zheader", "h", SpellingShape::Any),
+            ("ztitle", "mt", SpellingShape::Any),
+            ("zintro", "ip", SpellingShape::Any),
+            ("zsect", "s", SpellingShape::Any),
+            ("zpara", "p", SpellingShape::Any),
+            ("zlist", "li", SpellingShape::Any),
+            ("zother", "lit", SpellingShape::Any),
+            ("zfoot", "f", SpellingShape::Any),
+            ("zxref", "x", SpellingShape::Any),
+            ("zchar", "add", SpellingShape::Any),
+            ("zichar", "ior", SpellingShape::Any),
+            ("zlchar", "lik", SpellingShape::Any),
+            ("zfchar", "ft", SpellingShape::Any),
+            ("zxchar", "xt", SpellingShape::Any),
+            ("zms", "qt", SpellingShape::MilestoneOnly),
+            ("zmsbare", "ts", SpellingShape::Any),
+            ("zcell", "tc", SpellingShape::Any),
+        ];
+        let row = |name: &str, shape: SpellingShape| {
+            ROWS.iter()
+                .find(|row| row.marker == name && row.shape == shape)
+                .unwrap_or_else(|| panic!("no row `{name}` with shape {shape:?}"))
+        };
+        assert_eq!(SOURCES.len(), 17, "one source per behavioural category");
+        for (template, source, shape) in SOURCES {
+            let s = row(source, *shape);
+            let t = ROWS
+                .iter()
+                .find(|row| row.marker == *template)
+                .unwrap_or_else(|| panic!("no template `{template}`"));
+            assert_eq!(t.kind, s.kind, "{template}: kind");
+            assert_eq!(t.category, s.category, "{template}: category");
+            assert_eq!(
+                t.ws_after_name, s.ws_after_name,
+                "{template}: ws_after_name"
+            );
+            assert_eq!(t.payload, s.payload, "{template}: payload");
+            assert_eq!(
+                t.allowed_contexts, s.allowed_contexts,
+                "{template}: allowed_contexts"
+            );
+            assert_eq!(t.opens_scope, s.opens_scope, "{template}: opens_scope");
+            assert_eq!(t.closes_scope, s.closes_scope, "{template}: closes_scope");
+            assert_eq!(
+                t.defined_attributes, s.defined_attributes,
+                "{template}: defined_attributes"
+            );
+            assert_eq!(
+                t.default_attribute, s.default_attribute,
+                "{template}: default_attribute"
+            );
+            assert_eq!(t.closing, s.closing, "{template}: closing");
+            assert_eq!(t.deprecated, s.deprecated, "{template}: deprecated");
+            assert_eq!(t.html_element, s.html_element, "{template}: html_element");
+            // The four the template owns.
+            assert!(t.marker.starts_with('z'), "{template}: name starts with z");
+            assert!(t.marker.len() <= 8, "{template}: name fits the u64 key");
+            assert!(t.priority.is_none(), "{template}: a template is never hot");
+        }
+    }
+
+    /// A template is unreachable from source text: `marker_idx` bails on the
+    /// leading `z` before any name match, so no document byte lands on one.
+    #[test]
+    fn no_template_name_resolves_through_the_table() {
+        for (_, name) in EXTENSION_TEMPLATES {
+            let Some(name) = name else { continue };
+            for shape in [
+                SpellingShape::Any,
+                SpellingShape::PlainOnly,
+                SpellingShape::MilestoneOnly,
+            ] {
+                assert_eq!(
+                    crate::tables::generated::marker_idx(name.as_bytes(), shape),
+                    crate::tables::generated::UNRESOLVED,
+                    "`{name}` resolved by name"
+                );
+            }
+        }
+    }
+
+    /// The templates are contiguous at the END of the table, which is what
+    /// makes `is_extension` a comparison and what keeps every spec index put.
+    #[test]
+    fn templates_sit_after_every_spec_row() {
+        use crate::tables::generated::{FIRST_EXTENSION_ROW, ROW_COUNT, is_extension};
+        let first = FIRST_EXTENSION_ROW as usize;
+        assert_eq!(ROW_COUNT - first, 17, "17 templates, all at the end");
+        for (i, row) in ROWS.iter().enumerate() {
+            assert_eq!(
+                is_extension(i as u8),
+                i >= first,
+                "row {i} (`{}`)",
+                row.marker
+            );
+            assert_eq!(
+                i >= first,
+                EXTENSION_TEMPLATES
+                    .iter()
+                    .any(|(_, name)| *name == Some(row.marker)),
+                "row {i} (`{}`) is on the wrong side of the line",
+                row.marker
+            );
         }
     }
 }

@@ -526,3 +526,83 @@ fn a_book_with_no_id_line_is_refused() {
     );
     assert!(pantry.books(Role::Target).is_empty());
 }
+
+/// Installing a marker registry invalidates every product derived under the
+/// old one: the same bytes are a different document, and both caches key on
+/// content alone.
+///
+/// Serialized against the other registry-touching tests through
+/// `onion::extensions`'s process-wide value; the guard restores it.
+#[test]
+fn a_new_marker_registry_flushes_every_derived_product() {
+    use onion::extensions::{CustomMarker, ExtensionCategory, set_extensions};
+
+    /// Clears the registry however this test ends, so no other test in the
+    /// process sees a marker it did not install.
+    struct Restore;
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            set_extensions(&[]);
+        }
+    }
+    let _restore = Restore;
+
+    set_extensions(&[]);
+    let text = "\\id MRK\n\\h MRK\n\\c 1\n\\p\n\\v 1 Jesus wept\\zmyf + \\ft why\\zmyf*.\n";
+    let mut pantry = Pantry::new(1 << 20);
+    pantry
+        .update("books/MRK.usfm", Role::Target, text)
+        .expect("registers");
+    let cold = pantry.chunk_stats().misses;
+    assert!(cold > 0, "the first derivation missed");
+
+    // Idempotent while nothing moves: same bytes, same registry, no work.
+    pantry
+        .update("books/MRK.usfm", Role::Target, text)
+        .expect("registers");
+    assert_eq!(
+        pantry.chunk_stats().misses,
+        cold,
+        "a served update derives nothing"
+    );
+    let unregistered = pantry
+        .masked(text, &Filter::verse_text())
+        .text(text.as_bytes());
+    assert!(
+        unregistered.contains("why"),
+        "row 0 is not a Note, so the note's prose rides into verse text"
+    );
+
+    // …and then the registry moves.
+    let reports = set_extensions(&[CustomMarker {
+        name: "zmyf".to_owned(),
+        category: ExtensionCategory::Footnote,
+        description: String::new(),
+        attributes: Vec::new(),
+    }]);
+    assert!(reports.is_empty(), "{reports:?}");
+
+    pantry
+        .update("books/MRK.usfm", Role::Target, text)
+        .expect("registers");
+    assert!(
+        pantry.chunk_stats().misses > cold,
+        "identical text must MISS after the registry moved"
+    );
+    let registered = pantry
+        .masked(text, &Filter::verse_text())
+        .text(text.as_bytes());
+    assert_ne!(
+        registered, unregistered,
+        "the same bytes now read as a footnote"
+    );
+    assert_eq!(registered.trim(), "Jesus wept.", "the note subtree drops");
+
+    // The book is still registered, and its dish reflects the new rows.
+    let dish = pantry
+        .book(&BookId::from("books/MRK.usfm"))
+        .expect("still registered")
+        .parse(onion::wire::ParseOptions::default())
+        .expect("a target parses");
+    assert!(!dish.is_empty());
+}

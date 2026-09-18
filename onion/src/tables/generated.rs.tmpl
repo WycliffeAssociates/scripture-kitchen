@@ -10,6 +10,8 @@
 
 #![allow(dead_code)]
 
+use mise::extensions::ExtensionCategory;
+
 use crate::tables::schema::{
     AttrStatus, Category, ClosingBehavior, HtmlElement, MarkerKind, Numbering, Payload, ScopeKind,
     SpecContext, SpellingShape, StructuralWhitespaceRequirement as Ws,
@@ -33,6 +35,8 @@ pub const UNRESOLVED: MarkerIdx = 0;
 @@ATTRS@@
 /// Number of rows — the marker catalog's size.
 pub const ROW_COUNT: usize = NAMES.len();
+
+@@EXTENSION_TEMPLATES@@
 
 #[inline]
 fn field(idx: MarkerIdx, shift: u32, mask: u128) -> u32 {
@@ -121,12 +125,19 @@ pub const fn context_bit(ctx: SpecContext) -> u32 {
 /// column span (`tables::emit` asserts this, so a digit-bearing canonical
 /// name panics the generator rather than silently resolving to its stem).
 ///
-/// Anything that does not resolve — a `\z` extension, an unknown name,
-/// `\s5` — returns [`UNRESOLVED`], which is a real inert row and not an
-/// error path.
+/// Anything that does not resolve — an unknown name, `\s5` — returns
+/// [`UNRESOLVED`], which is a real inert row and not an error path.
+///
+/// This is the SPEC table's lookup and knows nothing about extensions: every
+/// `z` lexeme leaves here as [`UNRESOLVED`]. A registered one resolves through
+/// [`crate::extensions::marker_idx`], which is the door the scanner calls and
+/// the only place a template row is reachable.
 #[inline]
 pub fn marker_idx(lexeme: &[u8], shape: SpellingShape) -> MarkerIdx {
-    // An unconfigured `\z` extension never needs a name match at all [F].
+    // A belt, not the door: the scanner routes every `z` lexeme to the
+    // registry and never sends one here [F]. It stays because this lookup is
+    // TOTAL on its own terms — no `z` name is a spec row — and because it is
+    // what makes the template rows unreachable by name.
     if lexeme.first().is_none_or(|b| *b == b'z') {
         return UNRESOLVED;
     }

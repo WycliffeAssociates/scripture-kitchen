@@ -643,18 +643,25 @@ export class VerseRow {
 
 
 /**
- * The marker table — 153 rows, generated from `tables::rows::ROWS`.
-*
+ * The marker table — 170 rows, generated from `tables::rows::ROWS`.
+ *
  * Indexed by a token's `marker` field. Row 0 is UNRESOLVED: an unknown
-* name, a `\z` extension, an illegal spelling. It has no name, so the
-* spelling is only in the document.
-*
+ * name, an unregistered `\z` extension, an illegal spelling. It has no
+ * name, so the spelling is only in the document.
+ *
+ * Rows from `FIRST_EXTENSION_ROW` up are extension TEMPLATES: a registered
+ * `\z` marker resolves to the template its `\category` behaves as, so
+ * `kind`, `category` and `closing` are the spec marker's. Their `name` is
+ * the TEMPLATE's, never the marker's, so `Marker.name()` answers `null`
+ * there the way it does on row 0 — read the spelling off the document
+ * with `TokenView.spelling(text)`.
+ *
  * `numbering` is a packed code: 0 unnumbered, 1..=13 the cap, 14 unbounded,
-* 15 table columns.
-*
+ * 15 table columns.
+ *
  * `ws` is a `StructuralWhitespaceRequirement`: what must follow the marker's
-* name. `SingleNewline` is the rule for a marker that takes no content on
-* its own line.
+ * name. `SingleNewline` is the rule for a marker that takes no content on
+ * its own line.
  */
 export const MARKERS: readonly {
   readonly name: string;
@@ -818,7 +825,40 @@ export const MARKERS: readonly {
   { name: "xq", kind: 2, category: 17, closing: 2, shape: 0, numbering: 0, ws: 6 },
   { name: "xt", kind: 2, category: 17, closing: 2, shape: 0, numbering: 0, ws: 6 },
   { name: "xta", kind: 2, category: 17, closing: 2, shape: 0, numbering: 0, ws: 6 },
+  { name: "zheader", kind: 1, category: 1, closing: 0, shape: 1, numbering: 0, ws: 0 },
+  { name: "ztitle", kind: 1, category: 3, closing: 0, shape: 1, numbering: 0, ws: 0 },
+  { name: "zintro", kind: 1, category: 2, closing: 0, shape: 1, numbering: 0, ws: 6 },
+  { name: "zsect", kind: 1, category: 3, closing: 0, shape: 1, numbering: 0, ws: 6 },
+  { name: "zpara", kind: 1, category: 4, closing: 0, shape: 1, numbering: 0, ws: 6 },
+  { name: "zlist", kind: 1, category: 6, closing: 0, shape: 1, numbering: 0, ws: 6 },
+  { name: "zother", kind: 1, category: 4, closing: 0, shape: 1, numbering: 0, ws: 6 },
+  { name: "zfoot", kind: 3, category: 18, closing: 1, shape: 1, numbering: 0, ws: 6 },
+  { name: "zxref", kind: 3, category: 19, closing: 1, shape: 1, numbering: 0, ws: 6 },
+  { name: "zchar", kind: 2, category: 9, closing: 1, shape: 1, numbering: 0, ws: 6 },
+  { name: "zichar", kind: 2, category: 12, closing: 1, shape: 1, numbering: 0, ws: 6 },
+  { name: "zlchar", kind: 2, category: 14, closing: 1, shape: 1, numbering: 0, ws: 6 },
+  { name: "zfchar", kind: 2, category: 16, closing: 2, shape: 1, numbering: 0, ws: 6 },
+  { name: "zxchar", kind: 2, category: 17, closing: 2, shape: 1, numbering: 0, ws: 6 },
+  { name: "zms", kind: 6, category: 22, closing: 3, shape: 2, numbering: 0, ws: 1 },
+  { name: "zmsbare", kind: 6, category: 23, closing: 3, shape: 0, numbering: 0, ws: 1 },
+  { name: "zcell", kind: 12, category: 15, closing: 0, shape: 1, numbering: 15, ws: 6 },
 ];
+
+/**
+ * The first extension TEMPLATE row: every index below it is a marker USFM
+ * 3.2 defines, every index at or above it a template a registered `\z`
+ * marker resolves to.
+ */
+export const FIRST_EXTENSION_ROW = 153;
+
+/**
+ * Is this row a template — and so a row whose `name` is NOT the marker's?
+ *
+ * The one place a consumer asks. Everything else reads `kind` and
+ * `category`, which are the spec marker's either way — that is what makes
+ * a registered extension behave, and this the only thing it cannot carry.
+ */
+export const isExtension = (idx: number): boolean => idx >= FIRST_EXTENSION_ROW;
 
 /**
  * The lint catalog — one row per code, from `lint::LINT_ROWS`.
@@ -914,9 +954,19 @@ export class Marker {
     this.idx = idx;
   }
 
-  /** The table's canonical name — `null` on row 0, which has none. */
+  /**
+   * The table's canonical name — `null` on row 0 and on every EXTENSION
+   * template, neither of which has one.
+   *
+   * A template's `MARKERS` entry is named for the template (`zpara`), not for
+   * the marker a document spelled (`zmyp`), so answering it here would be a
+   * lie a consumer cannot see through. `null` is the same answer row 0 gives,
+   * and for the same reason: the spelling is only in the document, where
+   * `TokenView.spelling(text)` reads it.
+   */
   name(): string | null {
-    return this.idx === 0 ? null : (MARKERS[this.idx]?.name ?? null);
+    if (this.idx === 0 || isExtension(this.idx)) return null;
+    return MARKERS[this.idx]?.name ?? null;
   }
 
   /** One of `MarkerKind`. */

@@ -311,6 +311,8 @@ pub struct Pantry {
     /// The same order over the declared sources.
     references: Vec<(BookId, BookKey)>,
     derivations: u64,
+    /// The marker-registry generation every product here was derived under.
+    registry: u64,
 }
 
 impl Pantry {
@@ -323,7 +325,58 @@ impl Pantry {
             targets: Vec::new(),
             references: Vec::new(),
             derivations: 0,
+            registry: onion::extensions::generation(),
         }
+    }
+
+    /// Flushes what a changed marker registry made stale.
+    ///
+    /// Both caches key on CONTENT — the chunk store on a chunk's bytes, a Book
+    /// on its raw checksum — which is right only while the same bytes parse
+    /// the same way. `set_extensions` makes them a different document, so
+    /// every derived product is stale at once. Runs at the head of every door
+    /// that reads or derives one; a comparison against a `u64`, so the
+    /// overwhelmingly common no-change case costs a load.
+    ///
+    /// A book keeps its TEXT, which is the host's and was never derived: it is
+    /// re-derived from it here, once. A book retaining no text cannot be
+    /// rebuilt and keeps the products it has — dropping it would make `books`
+    /// lie about what the host registered, where stale source counts only
+    /// misreport a reference until the host re-registers it.
+    fn check_registry(&mut self) {
+        let now = onion::extensions::generation();
+        if now == self.registry {
+            return;
+        }
+        // Before re-deriving: the nested `update_with` calls below must see a
+        // Pantry already at the new generation, or each would recurse.
+        self.registry = now;
+        self.chunks.clear();
+        let stale: Vec<(BookId, Role, Retain, SourceLanes, String)> = self
+            .books
+            .iter()
+            .filter_map(|(id, book)| {
+                book.text.as_ref().map(|text| {
+                    (
+                        id.clone(),
+                        book.role,
+                        book.retain(),
+                        book.lanes(),
+                        text.clone(),
+                    )
+                })
+            })
+            .collect();
+        for (id, ..) in &stale {
+            self.books.remove(id);
+        }
+        for (id, role, retain, lanes, text) in stale {
+            // A book that derived once derives again; a book whose bytes have
+            // become invalid under the new rows is dropped, which is the same
+            // answer `update` would give the host for them now.
+            let _ = self.update_with(id, role, retain, lanes, &text);
+        }
+        self.reorder();
     }
 
     /// Derive and retain this book's products under the role's own retention:
@@ -352,6 +405,7 @@ impl Pantry {
         lanes: SourceLanes,
         text: &str,
     ) -> Result<Entry<'_>, PantryError> {
+        self.check_registry();
         let id = id.into();
         if role == Role::Target && retain == Retain::ProductsOnly {
             return Err(PantryError::TargetNeedsText { id });
@@ -453,6 +507,7 @@ impl Pantry {
     ///
     /// `&mut` because [`Entry::lint`] and [`Entry::parse`] run the cache.
     pub fn book(&mut self, id: &BookId) -> Option<Entry<'_>> {
+        self.check_registry();
         if !self.books.contains_key(id) {
             return None;
         }
@@ -553,12 +608,14 @@ impl Pantry {
     /// fresh `lint(lex(text), build(…))` with every unchanged chunk served
     /// from the cache.
     pub fn lint(&mut self, text: &str) -> LintReport {
+        self.check_registry();
         self.chunks.lint(text)
     }
 
     /// The book, plated — byte-identical to a cold `onion::wire::parse`, with
     /// the lex, the tree, and the lint walk reused per unchanged chunk.
     pub fn parse(&mut self, text: &str, opts: onion::wire::ParseOptions) -> Vec<u8> {
+        self.check_registry();
         self.chunks.parse(text, opts)
     }
 
@@ -569,12 +626,14 @@ impl Pantry {
         text: &'a str,
         opts: onion::wire::ParseOptions,
     ) -> onion::wire::Parsed<'a> {
+        self.check_registry();
         self.chunks.parsed(text, opts)
     }
 
     /// One recipe's mask over the same assembled ingredients — what a
     /// downstream consumer of verse text reads.
     pub fn masked(&mut self, text: &str, filter: &onion::mask::Filter) -> Mask {
+        self.check_registry();
         self.chunks.masked(text, filter)
     }
 

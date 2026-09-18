@@ -144,6 +144,16 @@ impl ChunkStore {
         }
     }
 
+    /// Drops every cached chunk, keeping the counters.
+    ///
+    /// The key is CONTENT, which is right only while the same bytes parse the
+    /// same way. A marker registry that has moved makes them a different
+    /// document, so every product here is stale — see `Pantry::check_registry`.
+    pub(super) fn clear(&mut self) {
+        self.map.clear();
+        self.bytes = 0;
+    }
+
     /// The declared ceiling this store's evictions hold it under.
     pub(super) fn budget(&self) -> Budget {
         self.budget

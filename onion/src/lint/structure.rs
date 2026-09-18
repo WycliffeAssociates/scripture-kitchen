@@ -353,6 +353,11 @@ fn container_end_text(
     marker_idx: generated::MarkerIdx,
     buf: &mut [u8; CLOSER_CAP],
 ) -> Option<&[u8]> {
+    debug_assert!(
+        !generated::is_extension(marker_idx),
+        "no template copies a U25003 container row, and a template's name is \
+         not the marker's"
+    );
     let name = generated::name(marker_idx).as_bytes();
     let end = name.len() + b"\\-e\\*".len();
     if name.is_empty() || end > buf.len() {

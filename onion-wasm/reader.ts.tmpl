@@ -90,9 +90,19 @@ export class Marker {
     this.idx = idx;
   }
 
-  /** The table's canonical name — `null` on row 0, which has none. */
+  /**
+   * The table's canonical name — `null` on row 0 and on every EXTENSION
+   * template, neither of which has one.
+   *
+   * A template's `MARKERS` entry is named for the template (`zpara`), not for
+   * the marker a document spelled (`zmyp`), so answering it here would be a
+   * lie a consumer cannot see through. `null` is the same answer row 0 gives,
+   * and for the same reason: the spelling is only in the document, where
+   * `TokenView.spelling(text)` reads it.
+   */
   name(): string | null {
-    return this.idx === 0 ? null : (MARKERS[this.idx]?.name ?? null);
+    if (this.idx === 0 || isExtension(this.idx)) return null;
+    return MARKERS[this.idx]?.name ?? null;
   }
 
   /** One of `MarkerKind`. */

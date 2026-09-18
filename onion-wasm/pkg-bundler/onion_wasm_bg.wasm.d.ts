@@ -35,6 +35,7 @@ export const diff: (a: number, b: number, c: number, d: number, e: number, f: nu
 export const edits_lens: (a: number) => [number, number];
 export const edits_spans: (a: number) => [number, number];
 export const edits_text: (a: number) => [number, number];
+export const extensionsFromMarkersExt: (a: number, b: number) => [number, number];
 export const format: (a: number, b: number, c: number) => [number, number];
 export const formatEdits: (a: number, b: number, c: number) => number;
 export const formatEditsIn: (a: number, b: number, c: number, d: number, e: number) => number;
@@ -46,6 +47,7 @@ export const mask: (a: number, b: number, c: number, d: number) => any;
 export const merge: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number, number];
 export const mergeSplices: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number];
 export const parse: (a: number, b: number, c: number, d: number, e: number) => [number, number];
+export const setExtensions: (a: number, b: number) => [number, number, number, number];
 export const splices_inserts: (a: number) => [number, number];
 export const splices_spans: (a: number) => [number, number];
 export const toByte: (a: number, b: number, c: number) => number;

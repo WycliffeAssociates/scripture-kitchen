@@ -37,5 +37,6 @@ and the pinned UCD extracts; both stay in `sous-core`, and the regeneration gate
 | Module | What it holds |
 | --- | --- |
 | `books` | `BOOK_CODES` in spec order, its membership predicates, `BookKey`, `canonical_rank` |
+| `extensions` | `ExtensionCategory` (the spec's `\category` words), `CustomMarker`, and `parse_markers_ext` — the `markers.ext` file read into the list a marker registry takes |
 | `unicode` | `Class`, its bits, `class_of`/`is_glue`, and the two index paths in `lookup` |
 | `utf16` | `Utf16Index` (borrows its source, both directions) and `Utf16Table` (detached, byte → UTF-16) |

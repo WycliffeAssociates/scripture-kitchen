@@ -143,7 +143,9 @@ fn next_number(source: &[u8], tokens: &[Token], from: u32, verse: bool) -> Optio
 /// its own is in reach: a repair is a mechanical splice or nothing.
 pub(super) fn rename(doc: &Doc, out: &mut Emit, observation: Observation, replacement: &str) {
     let opener = &doc.tokens[observation.anchor as usize];
-    let name = generated::name(opener.marker_idx).len() as u32;
+    // The SPELLED length, not the row's: a template row's name is not the
+    // marker's, and a spelling's own bytes are right for every row either way.
+    let name = spelled_len(doc, opener);
     let closer = match generated::closing(opener.marker_idx) {
         ClosingBehavior::RequiredExplicit => closer_of(doc.tokens, observation.anchor),
         // A paragraph row (`\ph`) has no closer to rewrite, and a milestone's
@@ -166,6 +168,27 @@ pub(super) fn rename(doc: &Doc, out: &mut Emit, observation: Observation, replac
         }
         None => out.push_fixed(observation, at, at + name, text),
     }
+}
+
+/// How many bytes the marker's NAME occupies, as spelled and WITHOUT its
+/// trailing digits — which is exactly the splice a rename replaces, since the
+/// digits are a level or a column index the new name carries along
+/// (`\ph2` → `\li2`).
+///
+/// Read off the spelling rather than the row: no canonical name ends in a
+/// digit (`tables::emit` asserts it), so this is the row's own length for every
+/// spec marker, and it is still right for a template row, whose name is not
+/// the marker's.
+fn spelled_len(doc: &Doc, token: &Token) -> u32 {
+    let payload = token.start + token.trimmed_len(doc.source);
+    let end = match token.kind() {
+        TokenKind::ClosingMarker { .. } => payload.saturating_sub(1),
+        _ => payload,
+    };
+    let from = name_at(token);
+    let name = &doc.source[from as usize..end.max(from) as usize];
+    let digits = name.iter().rev().take_while(|b| b.is_ascii_digit()).count();
+    (name.len() - digits) as u32
 }
 
 /// Where a marker token's NAME begins: past the backslash, and past the `+` of a

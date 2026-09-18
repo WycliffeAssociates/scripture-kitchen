@@ -122,3 +122,25 @@ survive that, which is why several are aggregated rather than per-occurrence.
 
 No `sid=` and no `\ta` appear anywhere in example-corpora (226 books), so lint's
 `attr-required-if` milestone-pairing rule has never met real input.
+
+## Every unresolved marker in en_ult is `\zaln`
+
+Measured 2026-09-18 over `testData/stressCorpora/en_ult` (67 books, 98.4 MiB):
+
+    registry              markers    row 0     lex
+    unregistered        2,582,292  922,704   852 MiB/s
+    zaln=milestone      2,582,292        0   855 MiB/s
+
+One registration takes the corpus from 922,704 unresolved marker tokens to
+zero, and costs nothing measurable: the `z` branch is reached only for a `z`
+lexeme, and a hit is one hash lookup against a map of under twenty names.
+
+**The `unknown-marker` count does not move — it was already 0.** That rule
+fires for `TokenKind::Marker` openers only (`lint/flat.rs`), and every one of
+those 922,704 tokens is a MILESTONE. An unknown milestone has never raised a
+finding; registering it does not change that, and neither does this pass. The
+gap is real and older than extensions.
+
+Likewise `--cst-stats` is not a discriminating metric here: a row-0 milestone
+and a `zms` milestone both produce one node, so the node counts are equal
+either way. The row-0 token count is the number to watch.

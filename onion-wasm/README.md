@@ -128,6 +128,23 @@ regenerates both; `codegen_output_matches_input` fails if either is stale.
 `diagnostics` is the one expensive optional (it runs the lint walk), so it is
 the debounced second call. `toc` is cheap and needs no tree.
 
+## User `\z` markers
+
+| export | what it gives back |
+|---|---|
+| `extensionsFromMarkersExt(text)` | `{ markers, malformed }` as JSON — a `markers.ext` file, read. Installs nothing |
+| `setExtensions(json)` | installs the LIST (not the file) process-wide; returns the entries it could not keep, as JSON |
+
+A registered `\z` marker behaves as its `\category`: the engine resolves it to
+the spec row that category behaves as, so a `footnote` extension takes a caller
+and a note scope, a `milestone` pairs `-s`/`-e` and takes attributes. An
+unregistered one is row 0, exactly as before. Reports are values — one bad
+entry costs one entry — and only malformed JSON throws.
+
+**Installing invalidates every product derived under the old rows**, so it
+belongs at composition rather than between edits. Both doors stand on
+`usfm-galley` too, which is the package a host vendoring one module gets.
+
 ## The write path
 
 | export | what it gives back |

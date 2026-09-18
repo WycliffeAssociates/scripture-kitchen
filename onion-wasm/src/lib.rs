@@ -54,12 +54,13 @@
 //! "is this the parse of that text" and nothing wider.
 
 use js_sys::{Object, Reflect, Uint32Array};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use usfm_onion::attributes::{self, AttrEvent};
 use usfm_onion::diff::{
     self, Addr, CoveredSide, Decisions, DiffSkeleton, MergeSide, RunKind, RunWhat, SlotRole,
     Status, TextDiffMode, TextDiffRun, UnitKind, UnitTextDiff,
 };
+use usfm_onion::extensions::{CustomMarker, ExtensionCategory};
 use usfm_onion::format::{CharBreaks, FormatOptions, Newline, VerseBreaks};
 use usfm_onion::lint::Code;
 use usfm_onion::mask as mask_recipe;
@@ -858,6 +859,148 @@ pub fn book(text: &str) -> String {
     String::from_utf8_lossy(&code[..end]).into_owned()
 }
 
+// ---------------------------------------------------------------------------
+// user `\z` markers
+// ---------------------------------------------------------------------------
+
+/// One user marker, as it crosses. `category` is the spec's own `\category`
+/// word; everything else is the file's, verbatim.
+#[derive(Serialize, Deserialize)]
+struct WireExtension {
+    name: String,
+    category: String,
+    #[serde(default)]
+    description: String,
+    #[serde(default)]
+    attributes: Vec<String>,
+}
+
+/// One thing that could not be kept. `line` is present only where there IS a
+/// line — reading a file — and absent for a list a host assembled itself,
+/// rather than a zero standing in for "no line".
+#[derive(Serialize)]
+struct WireMalformed {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    line: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+    reason: &'static str,
+}
+
+#[derive(Serialize)]
+struct WireMarkersExt {
+    markers: Vec<WireExtension>,
+    malformed: Vec<WireMalformed>,
+}
+
+/// A `markers.ext` file, read into the list [`set_extensions`] takes.
+///
+/// ```js
+/// const { markers, malformed } = JSON.parse(extensionsFromMarkersExt(text));
+/// for (const { name, reason, line } of malformed) show(line, name, reason);
+/// setExtensions(JSON.stringify(markers));
+/// ```
+///
+/// READS ONLY — nothing is installed here, because a host may want to show
+/// what it found before acting on it, and because the file is one of several
+/// ways a list arrives (a `custom.sty`, a UI that lets a user add a marker).
+/// A bad entry costs only itself and lands in `malformed`; the file never
+/// fails as a whole.
+#[wasm_bindgen(js_name = extensionsFromMarkersExt)]
+pub fn extensions_from_markers_ext(text: &str) -> String {
+    let read = mise::extensions::parse_markers_ext(text);
+    let wire = WireMarkersExt {
+        markers: read
+            .markers
+            .into_iter()
+            .map(|marker| WireExtension {
+                name: marker.name,
+                category: marker.category.as_str().to_owned(),
+                description: marker.description,
+                attributes: marker.attributes,
+            })
+            .collect(),
+        malformed: read
+            .malformed
+            .into_iter()
+            .map(|report| WireMalformed {
+                line: Some(report.line),
+                name: report.name,
+                reason: report.reason,
+            })
+            .collect(),
+    };
+    serde_json::to_string(&wire).expect("the wire structs are always serializable")
+}
+
+/// Installs a list of user markers process-wide, and returns what it could not
+/// keep.
+///
+/// ```js
+/// setExtensions('[{"name":"zaln","category":"milestone"}]');  // → "[]"
+/// setExtensions("[]");                                        // clears
+/// ```
+///
+/// Takes the LIST, never a file: a host with a `custom.sty`, or a UI that lets
+/// a user add a marker, feeds this directly.
+///
+/// Every registered marker then behaves as its `\category` — a `footnote`
+/// takes a caller and a note scope, a `milestone` pairs `-s`/`-e` and takes
+/// attributes — because the engine resolves it to the spec row that category
+/// behaves as. An unregistered `\z` marker stays what it has always been.
+///
+/// **This invalidates every derived product**, here and in a resident
+/// `Galley`: the same bytes are a different document once the rows change, and
+/// both caches key on content. Call it at composition, before the first
+/// parse, rather than between edits.
+///
+/// Throws only on malformed JSON. A bad ENTRY — no name, a name that is not
+/// `z`-initial, an unknown category word, a duplicate — is a report, not a
+/// failure, so one bad line never costs a host the rest of its list.
+#[wasm_bindgen(js_name = setExtensions)]
+pub fn set_extensions(list: &str) -> Result<String, JsError> {
+    installed(list).map_err(|error| JsError::new(&error))
+}
+
+/// `set_extensions`'s body, split from the door for the same reason
+/// [`diffed`] is: `JsError` cannot be constructed off a wasm target, so a
+/// native test would have nothing to call.
+fn installed(list: &str) -> Result<String, String> {
+    let parsed: Vec<WireExtension> =
+        serde_json::from_str(list).map_err(|error| format!("setExtensions: {error}"))?;
+
+    let mut reports = Vec::new();
+    let mut markers = Vec::new();
+    for entry in parsed {
+        // The category is the one field this layer judges: every other reason
+        // is the registry's, which sees the same names it would from a file.
+        let Some(category) = ExtensionCategory::parse(&entry.category) else {
+            reports.push(WireMalformed {
+                line: None,
+                name: Some(entry.name),
+                reason: "unknown category word",
+            });
+            continue;
+        };
+        markers.push(CustomMarker {
+            name: entry.name,
+            category,
+            description: entry.description,
+            attributes: entry.attributes,
+        });
+    }
+    reports.extend(
+        usfm_onion::set_extensions(&markers)
+            .into_iter()
+            .map(|report| WireMalformed {
+                line: None,
+                name: report.name,
+                reason: report.reason,
+            }),
+    );
+    Ok(serde_json::to_string(&reports).expect("the wire structs are always serializable"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1154,5 +1297,71 @@ mod tests {
         assert!(len("tokens") > 0);
         assert!(len("nodes") > 0);
         assert!(len("childIds") > 0);
+    }
+    /// The `markers.ext` door reads and installs NOTHING, and its reports
+    /// carry the line the file gave them.
+    #[test]
+    fn markers_ext_reads_without_installing() {
+        let read: serde_json::Value = serde_json::from_str(&extensions_from_markers_ext(
+            "\\marker zmyf\n\\category footnote\n\\attribute x-a\n\\marker bad\n\\category char\n",
+        ))
+        .unwrap();
+        assert_eq!(read["markers"].as_array().unwrap().len(), 1);
+        assert_eq!(read["markers"][0]["name"], "zmyf");
+        assert_eq!(read["markers"][0]["category"], "footnote");
+        assert_eq!(read["markers"][0]["attributes"][0], "x-a");
+        assert_eq!(read["malformed"][0]["line"], 4);
+        assert_eq!(read["malformed"][0]["reason"], "name does not start with z");
+        // Nothing installed: the marker is still row 0.
+        assert_eq!(usfm_onion::lex("\\zmyf x")[0].marker_idx, 0);
+    }
+
+    /// Installing changes what the same bytes mean; a bad entry is a report,
+    /// not a failure; malformed JSON is the one thing that throws.
+    #[test]
+    fn set_extensions_installs_and_reports() {
+        struct Restore;
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                let _ = installed("[]");
+            }
+        }
+        let _restore = Restore;
+
+        assert_eq!(
+            installed(r#"[{"name":"zaln","category":"milestone"}]"#).unwrap(),
+            "[]"
+        );
+        let idx = usfm_onion::lex("\\zaln-s |x=\"1\"\\*")[0].marker_idx;
+        assert!(
+            usfm_onion::tables::generated::is_extension(idx),
+            "`\\zaln-s` resolves to the milestone template"
+        );
+
+        // One bad category and one bad name — two reports, no line on either,
+        // and the good entry in the same list still installs.
+        let reports: serde_json::Value = serde_json::from_str(
+            &installed(
+                r#"[{"name":"znope","category":"bogus"},{"name":"nope","category":"char"},
+                    {"name":"zok","category":"versepara"}]"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let reports = reports.as_array().unwrap();
+        assert_eq!(reports.len(), 2, "{reports:?}");
+        assert_eq!(reports[0]["reason"], "unknown category word");
+        assert_eq!(reports[1]["reason"], "name does not start with z");
+        assert!(
+            reports[0].get("line").is_none(),
+            "a list report has no line"
+        );
+        assert!(usfm_onion::tables::generated::is_extension(
+            usfm_onion::lex("\\zok x")[0].marker_idx
+        ));
+
+        assert!(installed("{").is_err(), "malformed JSON throws");
+        assert_eq!(installed("[]").unwrap(), "[]");
+        assert_eq!(usfm_onion::lex("\\zok x")[0].marker_idx, 0, "cleared");
     }
 }

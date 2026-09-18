@@ -22,8 +22,19 @@ planning/; the definition records the current soft direction.
 ## Lexing
 
 - **Marker** — a USFM control word (`\v`, `\p`, `\w`, `\zaln-s`). Spec
-  markers resolve to an entry in the marker table; custom (`\z...`) markers
-  don't, and fall back to their span.
+  markers resolve to an entry in the marker table. A custom (`\z…`) marker
+  resolves too once it is REGISTERED — to the template row its `\category`
+  behaves as, so a registered `\zfoot` is a footnote with a different name and
+  gets every behaviour `\f` has. Unregistered, it lands on row 0 and falls
+  back to its span.
+- **Extension** — a user `\z` marker the spec's `\category` field classifies.
+  A registration is a name plus a category; the engine maps it to a template
+  row and then knows nothing else about it. `onion::set_extensions` installs a
+  list; `mise::extensions::parse_markers_ext` reads one out of a `markers.ext`.
+- **Template row** — one marker-table row per behaviour-bearing `\category`
+  word, copied from the spec row that category behaves as. Appended after
+  every spec row, unreachable by name from a document, and the ONE thing it
+  cannot carry is the name the author spelled (`generated::is_extension`).
 - **Marker table** — THE single registry mapping marker → semantics:
   structural role (paragraph/character/note/milestone), nesting behavior,
   payload grammar, render class. Defined once in Rust, generated for JS —

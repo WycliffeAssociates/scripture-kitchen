@@ -9,6 +9,8 @@
 //!               utf16_table(bytes).to_utf16(16)  byte → utf16, string gone
 //!
 //! mise::unicode class_of('\u{0301}').is_glue()   one u16 of bits per scalar
+//!
+//! mise::extensions parse_markers_ext(text)     markers.ext → CustomMarker list
 //! ```
 //!
 //! Zero dependencies, in or out of the workspace: this is the leaf
@@ -18,5 +20,6 @@
 //! The scope rule and what it excludes: `mise/README.md`.
 
 pub mod books;
+pub mod extensions;
 pub mod unicode;
 pub mod utf16;

@@ -1635,6 +1635,38 @@ export function diff(baseline, current, text_mode) {
 }
 
 /**
+ * A `markers.ext` file, read into the list [`set_extensions`] takes.
+ *
+ * ```js
+ * const { markers, malformed } = JSON.parse(extensionsFromMarkersExt(text));
+ * for (const { name, reason, line } of malformed) show(line, name, reason);
+ * setExtensions(JSON.stringify(markers));
+ * ```
+ *
+ * READS ONLY — nothing is installed here, because a host may want to show
+ * what it found before acting on it, and because the file is one of several
+ * ways a list arrives (a `custom.sty`, a UI that lets a user add a marker).
+ * A bad entry costs only itself and lands in `malformed`; the file never
+ * fails as a whole.
+ * @param {string} text
+ * @returns {string}
+ */
+export function extensionsFromMarkersExt(text) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.extensionsFromMarkersExt(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+
+/**
  * The formatted document. `format_edits` applied, in one call.
  * @param {string} text
  * @param {FormatOpts} opts
@@ -1840,6 +1872,55 @@ export function parse(text, diagnostics, toc, utf16) {
     var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
     return v2;
+}
+
+/**
+ * Installs a list of user markers process-wide, and returns what it could not
+ * keep.
+ *
+ * ```js
+ * setExtensions('[{"name":"zaln","category":"milestone"}]');  // → "[]"
+ * setExtensions("[]");                                        // clears
+ * ```
+ *
+ * Takes the LIST, never a file: a host with a `custom.sty`, or a UI that lets
+ * a user add a marker, feeds this directly.
+ *
+ * Every registered marker then behaves as its `\category` — a `footnote`
+ * takes a caller and a note scope, a `milestone` pairs `-s`/`-e` and takes
+ * attributes — because the engine resolves it to the spec row that category
+ * behaves as. An unregistered `\z` marker stays what it has always been.
+ *
+ * **This invalidates every derived product**, here and in a resident
+ * `Galley`: the same bytes are a different document once the rows change, and
+ * both caches key on content. Call it at composition, before the first
+ * parse, rather than between edits.
+ *
+ * Throws only on malformed JSON. A bad ENTRY — no name, a name that is not
+ * `z`-initial, an unknown category word, a duplicate — is a report, not a
+ * failure, so one bad line never costs a host the rest of its list.
+ * @param {string} list
+ * @returns {string}
+ */
+export function setExtensions(list) {
+    let deferred3_0;
+    let deferred3_1;
+    try {
+        const ptr0 = passStringToWasm0(list, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.setExtensions(ptr0, len0);
+        var ptr2 = ret[0];
+        var len2 = ret[1];
+        if (ret[3]) {
+            ptr2 = 0; len2 = 0;
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        deferred3_0 = ptr2;
+        deferred3_1 = len2;
+        return getStringFromWasm0(ptr2, len2);
+    } finally {
+        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+    }
 }
 
 /**

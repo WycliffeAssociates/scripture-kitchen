@@ -32,6 +32,9 @@ const {
   deserializeCorpus,
   declaredVersion,
   MARKERS,
+  Marker,
+  FIRST_EXTENSION_ROW,
+  isExtension,
   CODES,
   TokenKind,
   StructuralWhitespaceRequirement,
@@ -132,8 +135,34 @@ const BOOK = `\\id GEN
       `the table resolved \\${want} without slicing the document`,
     );
   }
-  eq(MARKERS.length, 153, "the whole marker table shipped");
+  eq(MARKERS.length, 170, "the whole marker table shipped");
+  eq(FIRST_EXTENSION_ROW, 153, "153 spec rows, then the extension templates");
   check(MARKERS[0].name === "", "row 0 has no name");
+
+  // The templates sit at the END, so every spec index is where it always was
+  // and `isExtension` is a comparison. A template's `name` is the TEMPLATE's,
+  // never a marker's — which is the whole of what the predicate is for.
+  for (let i = 0; i < MARKERS.length; i++) {
+    eq(isExtension(i), i >= FIRST_EXTENSION_ROW, `isExtension(${i})`);
+  }
+  for (let i = FIRST_EXTENSION_ROW; i < MARKERS.length; i++) {
+    check(MARKERS[i].name.startsWith("z"), `template ${i} is a z name`);
+    // It carries the spec marker's behaviour: no template is the inert row.
+    check(MARKERS[i].kind !== MARKERS[0].kind, `template ${i} has a real kind`);
+    // …and it answers no name, the way row 0 does: the table's entry is named
+    // for the TEMPLATE, and the marker's own spelling is only in the document.
+    check(new Marker(i).name() === null, `template ${i} must not answer a name`);
+  }
+  check(new Marker(0).name() === null, "row 0 answers no name either");
+  check(new Marker(1).name() !== null, "a spec row still does");
+  // …and no template is reachable by name from a document, so none of their
+  // names collides with a spec marker's.
+  for (let i = FIRST_EXTENSION_ROW; i < MARKERS.length; i++) {
+    check(
+      !MARKERS.slice(0, FIRST_EXTENSION_ROW).some((row) => row.name === MARKERS[i].name),
+      `template ${MARKERS[i].name} shadows a spec row`,
+    );
+  }
 
   // `\b` is the one marker taking no content on its own line.
   const blankLine = MARKERS.findIndex((row) => row.name === "b");

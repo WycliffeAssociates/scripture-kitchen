@@ -116,6 +116,33 @@ pub(crate) fn span<'a>(source: &'a [u8], token: &Token) -> &'a str {
     text_at(source, token.start..token.end())
 }
 
+/// Which alignment a table cell's SPELLING names — `start`, `center` or `end`.
+///
+/// ```text
+/// tc  tc1   start      the digits are a column index, never the name
+/// tcr tcr2  end
+/// tcc thc   center     HTML only; USJ and USX have two values
+/// ztcr2     start      an extension cell has no alignment to spell
+/// ```
+///
+/// Read off the spelling rather than the row, because a registered `cell`
+/// extension sits on the `cell` TEMPLATE and the template carries no name of
+/// its own. Trimming the digits first is what keeps `\tcr1` an `end` cell —
+/// the spelled name ends in its column index, not in the `r`.
+///
+/// Only the spec's own `tc`/`th` stems are read. The spec's `cell` category
+/// carries no alignment, so an extension has none to spell and aligns start;
+/// reading one out of an arbitrary `z` name would invent a convention the
+/// spec does not have, and silently align a `\zaligner` cell.
+pub(crate) fn cell_align(spelled: &str) -> &'static str {
+    let stem = spelled.trim_end_matches(|c: char| c.is_ascii_digit());
+    match stem.strip_prefix("tc").or_else(|| stem.strip_prefix("th")) {
+        Some("r") => "end",
+        Some("c") => "center",
+        _ => "start",
+    }
+}
+
 /// The marker as the AUTHOR spelled it: `q1`, `qt-s`, `zaln-e` — read off the
 /// token's own bytes, not off the row (numbered markers share one row, and
 /// milestones share one row with both halves of the pair).

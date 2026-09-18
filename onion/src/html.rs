@@ -284,17 +284,11 @@ fn element(
     }
 }
 
-/// Which cell alignment the cell marker's own name spells. THREE-way here, where
-/// USJ and USX have only `start`/`end`: `tcc`/`thc` are CENTERED and HTML has a
-/// class to put that in. Read off the suffix AFTER the `tc`/`th` stem, never off
-/// the last byte the way USJ's `ends_with('r')` can — `tc` itself ends in `c`.
-fn align(marker_idx: MarkerIdx) -> &'static str {
-    let name = generated::name(marker_idx);
-    match name.strip_prefix("tc").or_else(|| name.strip_prefix("th")) {
-        Some("r") => "end",
-        Some("c") => "center",
-        _ => "start",
-    }
+/// Which cell alignment the cell marker's spelling names. THREE-way here,
+/// where USJ and USX have only `start`/`end`: `tcc`/`thc` are CENTERED and HTML
+/// has a class to put that in.
+fn align(spelled: &str) -> &'static str {
+    crate::export::cell_align(spelled)
 }
 
 // ---------------------------------------------------------------------------
@@ -794,7 +788,7 @@ impl<'a> Export<'a> {
         if kind == MarkerKind::Meta || marker == "usfm" {
             extra.push(LIFTED);
         }
-        let align_class = (kind == MarkerKind::TableCell).then(|| match align(marker_idx) {
+        let align_class = (kind == MarkerKind::TableCell).then(|| match align(&marker) {
             "end" => "align-end",
             "center" => "align-center",
             _ => "align-start",

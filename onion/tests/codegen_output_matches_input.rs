@@ -69,6 +69,12 @@ fn every_row_resolves_to_itself() {
         if row.marker.is_empty() {
             continue; // index 0 has no name by design
         }
+        if generated::is_extension(idx as generated::MarkerIdx) {
+            // A template is reached through the registry, never by name — the
+            // claim `rows::tests::no_template_name_resolves_through_the_table`
+            // makes from the other side.
+            continue;
+        }
         let shape = match row.shape {
             SpellingShape::MilestoneOnly => SpellingShape::MilestoneOnly,
             _ => SpellingShape::PlainOnly,

@@ -655,12 +655,11 @@ impl<'a> Export<'a> {
             }
         }
         if kind == MarkerKind::TableCell {
-            // `tcr`/`thr` vs `tc`/`th`: the `r` in the ROW NAME is the whole
-            // of the alignment fact.
-            let align = if generated::name(marker_idx).ends_with('r') {
-                "end"
-            } else {
-                "start"
+            // Two-valued here, where HTML has three: `center` is not a USJ or
+            // USX value, so a centred cell writes `start` as it always has.
+            let align = match crate::export::cell_align(&marker) {
+                "end" => "end",
+                _ => "start",
             };
             self.json.field("align", align);
         }

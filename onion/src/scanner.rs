@@ -59,6 +59,7 @@ use memchr::memchr;
 use memchr::memchr3;
 use memchr::memmem;
 
+use crate::extensions::Extensions;
 use crate::tables::generated;
 use crate::tables::schema::{
     MarkerKind, Numbering, Payload, SpellingShape, StructuralWhitespaceRequirement as Ws,
@@ -140,13 +141,23 @@ struct Scanner<'a> {
     opt_break_finder: memmem::Finder<'static>,
     /// Resolved once per lex so no fast arm ever pays a name match.
     hot: HotIdx,
+    /// The user-marker registry, read ONCE per lex — every `z` lexeme resolves
+    /// through it, and no lexeme takes a lock.
+    ext: &'a Extensions,
 }
 
 /// Lexes a whole source into compact token rows. The loop dispatches on the
 /// first byte of the next region; each arm calls a boundary finder (which
 /// alone moves the cursor), then classifies the slice.
 pub fn lex(source: &str) -> Vec<Token> {
-    lex_impl::<true>(source)
+    lex_with(source, &crate::extensions::current())
+}
+
+/// [`lex`] against a registry the caller holds — the pure form, and what two
+/// projects in one process would thread. [`lex`] is this with the installed
+/// one.
+pub fn lex_with(source: &str, ext: &Extensions) -> Vec<Token> {
+    lex_impl::<true>(source, ext)
 }
 
 /// The general path alone, fast checks compiled out. Exists ONLY as the oracle
@@ -154,18 +165,19 @@ pub fn lex(source: &str) -> Vec<Token> {
 /// produce a token stream identical to this.
 #[doc(hidden)]
 pub fn lex_general_path_only(source: &str) -> Vec<Token> {
-    lex_impl::<false>(source)
+    lex_impl::<false>(source, &crate::extensions::current())
 }
 
-fn lex_impl<const FAST: bool>(source: &str) -> Vec<Token> {
-    let mut scanner = Scanner::new(source);
+fn lex_impl<const FAST: bool>(source: &str, ext: &Extensions) -> Vec<Token> {
+    let mut scanner = Scanner::new(source, ext);
     scanner.run::<FAST>();
     scanner.tokens
 }
 
 impl<'a> Scanner<'a> {
-    fn new(source: &'a str) -> Self {
+    fn new(source: &'a str, ext: &'a Extensions) -> Self {
         Scanner {
+            ext,
             bytes: source.as_bytes(),
             // The measured density floor across the corpus is ~6.5 bytes per
             // lexeme, so `/6` sits just under it and never reallocs.
@@ -706,14 +718,18 @@ pub(crate) fn marker_level(slice: &[u8], idx: generated::MarkerIdx) -> u8 {
 
 /// Resolves an already-classified marker slice to its table row. `qt` is the
 /// one name where the plain and milestone rows differ, hence the `kind` arg.
-pub(crate) fn resolve_marker_idx(slice: &[u8], kind: TokenKind) -> generated::MarkerIdx {
+pub(crate) fn resolve_marker_idx(
+    slice: &[u8],
+    kind: TokenKind,
+    ext: &Extensions,
+) -> generated::MarkerIdx {
     let shape = match kind {
         TokenKind::Milestone { .. } | TokenKind::MilestoneTerminator => {
             SpellingShape::MilestoneOnly
         }
         _ => SpellingShape::PlainOnly,
     };
-    generated::marker_idx(spelled_name(slice), shape)
+    crate::extensions::marker_idx(spelled_name(slice), shape, ext)
 }
 
 impl Scanner<'_> {
@@ -725,7 +741,7 @@ impl Scanner<'_> {
         let kind = classify_marker(slice);
         self.push_token(kind, index, end);
         // A marker slice is far below the u16 split threshold, so `last` IS it.
-        let idx = resolve_marker_idx(slice, kind);
+        let idx = resolve_marker_idx(slice, kind, self.ext);
         let level = marker_level(slice, idx);
         if let Some(last) = self.tokens.last_mut() {
             last.marker_idx = idx;

@@ -557,6 +557,23 @@ export function book(text: string): string;
 export function diff(baseline: string, current: string, text_mode: string): string;
 
 /**
+ * A `markers.ext` file, read into the list [`set_extensions`] takes.
+ *
+ * ```js
+ * const { markers, malformed } = JSON.parse(extensionsFromMarkersExt(text));
+ * for (const { name, reason, line } of malformed) show(line, name, reason);
+ * setExtensions(JSON.stringify(markers));
+ * ```
+ *
+ * READS ONLY — nothing is installed here, because a host may want to show
+ * what it found before acting on it, and because the file is one of several
+ * ways a list arrives (a `custom.sty`, a UI that lets a user add a marker).
+ * A bad entry costs only itself and lands in `malformed`; the file never
+ * fails as a whole.
+ */
+export function extensionsFromMarkersExt(text: string): string;
+
+/**
  * The formatted document. `format_edits` applied, in one call.
  */
 export function format(text: string, opts: FormatOpts): string;
@@ -637,6 +654,34 @@ export function mergeSplices(baseline: string, current: string, decisions_json: 
  * `text` must be LF-normalized (see the module doc); a debug build asserts it.
  */
 export function parse(text: string, diagnostics: boolean, toc: boolean, utf16: boolean): Uint8Array;
+
+/**
+ * Installs a list of user markers process-wide, and returns what it could not
+ * keep.
+ *
+ * ```js
+ * setExtensions('[{"name":"zaln","category":"milestone"}]');  // → "[]"
+ * setExtensions("[]");                                        // clears
+ * ```
+ *
+ * Takes the LIST, never a file: a host with a `custom.sty`, or a UI that lets
+ * a user add a marker, feeds this directly.
+ *
+ * Every registered marker then behaves as its `\category` — a `footnote`
+ * takes a caller and a note scope, a `milestone` pairs `-s`/`-e` and takes
+ * attributes — because the engine resolves it to the spec row that category
+ * behaves as. An unregistered `\z` marker stays what it has always been.
+ *
+ * **This invalidates every derived product**, here and in a resident
+ * `Galley`: the same bytes are a different document once the rows change, and
+ * both caches key on content. Call it at composition, before the first
+ * parse, rather than between edits.
+ *
+ * Throws only on malformed JSON. A bad ENTRY — no name, a name that is not
+ * `z`-initial, an unknown category word, a duplicate — is a report, not a
+ * failure, so one bad line never costs a host the rest of its list.
+ */
+export function setExtensions(list: string): string;
 
 /**
  * A CodeMirror offset as a source byte offset. Rebuilds the 1.6% stride index
@@ -775,6 +820,7 @@ export interface InitOutput {
     readonly edits_lens: (a: number) => [number, number];
     readonly edits_spans: (a: number) => [number, number];
     readonly edits_text: (a: number) => [number, number];
+    readonly extensionsFromMarkersExt: (a: number, b: number) => [number, number];
     readonly format: (a: number, b: number, c: number) => [number, number];
     readonly formatEdits: (a: number, b: number, c: number) => number;
     readonly formatEditsIn: (a: number, b: number, c: number, d: number, e: number) => number;
@@ -786,6 +832,7 @@ export interface InitOutput {
     readonly merge: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number, number];
     readonly mergeSplices: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number];
     readonly parse: (a: number, b: number, c: number, d: number, e: number) => [number, number];
+    readonly setExtensions: (a: number, b: number) => [number, number, number, number];
     readonly splices_inserts: (a: number) => [number, number];
     readonly splices_spans: (a: number) => [number, number];
     readonly toByte: (a: number, b: number, c: number) => number;

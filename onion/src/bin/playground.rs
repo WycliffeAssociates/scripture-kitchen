@@ -17,6 +17,8 @@
 //   cargo run --release --bin playground -- --lint-stats       // per-code finding counts (and fix counts)
 //   cargo run --release --bin playground -- --codes            // the diagnostics side-table, browsable
 //   cargo run --release --bin playground -- --fix-preview unclosed-note  // …plus before/after windows for one code
+//   cargo run --release --bin playground -- --extensions zaln=milestone,zmyp=versepara --lint-stats
+//                                                              // …with user `\z` markers registered first
 //
 // A bare path (file, or dir of *.usfm) picks the corpus; the default is
 // en_ulb. The trace modes name their own file instead.
@@ -24,6 +26,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use usfm_onion::extensions::{CustomMarker, ExtensionCategory};
 use usfm_onion::mask::{Filter, Mask};
 
 const DEFAULT_CORPUS: &str = "../testData/exampleCorpora/en_ulb";
@@ -44,6 +47,7 @@ fn main() {
     let mut format_chapter: Option<u16> = None;
     let mut format_variant: Option<String> = None;
     let mut diff_trace: Option<(PathBuf, PathBuf)> = None;
+    let mut extensions: Option<String> = None;
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -80,6 +84,10 @@ fn main() {
                 let current = args.next().expect("--diff-trace takes two paths");
                 diff_trace = Some((PathBuf::from(baseline), PathBuf::from(current)));
             }
+            // `name=category,…` — the registry in code, so every mode below
+            // lexes against it. The file reader is a later pass; this is the
+            // seam it plugs into.
+            "--extensions" => extensions = args.next(),
             "--cst-stats" => cst_stats = true,
             "--lint-stats" => lint_stats = true,
             // The side-table, made browsable — the `{anchor}` conventions are
@@ -92,6 +100,16 @@ fn main() {
                 fix_preview = args.next();
             }
             other => path = Some(PathBuf::from(other)),
+        }
+    }
+    // Before anything lexes: every mode below reads the process registry.
+    if let Some(spec) = &extensions {
+        for report in usfm_onion::set_extensions(&parse_extensions(spec)) {
+            eprintln!(
+                "  extension {}: {}",
+                report.name.as_deref().unwrap_or("?"),
+                report.reason
+            );
         }
     }
     // Before the corpus load: --vref and --mask-trace name their own one file.
@@ -249,6 +267,34 @@ fn diff_listing(baseline: &str, current: &str) -> String {
         ));
     }
     out
+}
+
+/// `--extensions zaln=milestone,zmyp=versepara` — the spec's own category
+/// words, one `name=category` pair each. An unknown word names the nineteen
+/// and exits: a typo that silently registered nothing would look like the
+/// feature not working.
+fn parse_extensions(spec: &str) -> Vec<CustomMarker> {
+    spec.split(',')
+        .filter(|entry| !entry.trim().is_empty())
+        .map(|entry| {
+            let (name, word) = entry
+                .split_once('=')
+                .unwrap_or_else(|| panic!("--extensions takes name=category, got {entry:?}"));
+            let category = ExtensionCategory::parse(word.trim()).unwrap_or_else(|| {
+                let words: Vec<&str> = ExtensionCategory::ALL.iter().map(|c| c.as_str()).collect();
+                panic!(
+                    "unknown category {word:?}; expected one of {}",
+                    words.join(", ")
+                )
+            });
+            CustomMarker {
+                name: name.trim().to_owned(),
+                category,
+                description: String::new(),
+                attributes: Vec::new(),
+            }
+        })
+        .collect()
 }
 
 fn read_source(path: &Path) -> String {

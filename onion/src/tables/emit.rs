@@ -30,7 +30,7 @@
 
 use std::fmt::Write as _;
 
-use super::rows::ROWS;
+use super::rows::{EXTENSION_TEMPLATES, ROWS};
 use super::schema::{
     self, AttrStatus, Category, ClosingBehavior, HtmlElement, MarkerKind, MarkerRow, Numbering,
     Payload, ScopeKind, SpecContext, SpellingShape, StructuralWhitespaceRequirement as Ws,
@@ -386,6 +386,7 @@ pub fn generated_rs() -> String {
             ("PACKED_ROWS", packed_rows(&attrs)),
             ("NAMES", names_array()),
             ("ATTRS", attrs_array(&attrs)),
+            ("EXTENSION_TEMPLATES", extension_templates()),
             ("DECODERS", decoders()),
             ("CONTEXT_BIT_ARMS", context_bit_arms()),
             ("BY_NAME_ARMS", by_name_arms()),
@@ -703,11 +704,90 @@ fn context_bit_arms() -> String {
     out
 }
 
+/// The lowest index of any extension template. Templates are appended after
+/// every spec row, so they are contiguous from here to the end — asserted
+/// rather than assumed, since `is_extension` is a comparison against it.
+fn first_extension_row() -> usize {
+    let named: Vec<&str> = EXTENSION_TEMPLATES
+        .iter()
+        .filter_map(|(_, name)| *name)
+        .collect();
+    let first = ROWS
+        .iter()
+        .position(|row| named.contains(&row.marker))
+        .expect("every template names a row");
+    for (i, row) in ROWS.iter().enumerate().skip(first) {
+        assert!(
+            named.contains(&row.marker),
+            "row {i} (`{}`) sits after the first template but is not one — \
+             templates must be appended last so no spec index moves",
+            row.marker
+        );
+    }
+    first
+}
+
+/// `FIRST_EXTENSION_ROW`, `is_extension` and `template_for`: the whole of what
+/// the engine knows about extensions, projected from the authored mapping.
+fn extension_templates() -> String {
+    let first = first_extension_row();
+    let idx_of = |name: &str| {
+        ROWS.iter()
+            .position(|row| row.marker == name)
+            .unwrap_or_else(|| panic!("EXTENSION_TEMPLATES names `{name}`, which is not a row"))
+    };
+
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "/// The first extension TEMPLATE row. Every index below this one is a\n\
+         /// marker USFM 3.2 defines; every index at or above it is a template a\n\
+         /// registered `\\z` extension resolves to.\n\
+         pub const FIRST_EXTENSION_ROW: MarkerIdx = {first};"
+    );
+    out.push_str(
+        "\n/// Is this row a template — and so a row whose `name` is NOT the marker's?\n\
+         ///\n\
+         /// The ONE `is this an extension` predicate in the engine, and it exists\n\
+         /// for one purpose: a template cannot carry the spelling a document used,\n\
+         /// so anything showing a name to a human or writing one to an export reads\n\
+         /// it off the token span instead. Nothing branches on it to decide what a\n\
+         /// marker DOES — that is the row's, which is the point of templates.\n\
+         #[inline]\n\
+         pub fn is_extension(idx: MarkerIdx) -> bool {\n    \
+             idx >= FIRST_EXTENSION_ROW\n\
+         }\n",
+    );
+    out.push_str(
+        "/// The template row a spec `\\category` word behaves as. TOTAL: the two\n\
+         /// USX-internal words answer [`UNRESOLVED`], which is what \"registers\n\
+         /// nothing\" means at a call site.\n\
+         #[rustfmt::skip]\n\
+         pub fn template_for(category: ExtensionCategory) -> MarkerIdx {\n    \
+             match category {\n",
+    );
+    for (category, name) in EXTENSION_TEMPLATES {
+        let idx = match name {
+            Some(name) => format!("{}", idx_of(name)),
+            None => "UNRESOLVED".to_string(),
+        };
+        let _ = writeln!(
+            out,
+            "        ExtensionCategory::{category:?} => {idx},{}",
+            name.map_or(String::new(), |name| format!(" // {name}"))
+        );
+    }
+    out.push_str("    }\n}\n");
+    out
+}
+
 fn by_name_arms() -> String {
-    // Group rows by canonical name, skipping the nameless index-0 row.
+    // Group rows by canonical name, skipping the nameless index-0 row and the
+    // extension templates: a template is reached through the registry, never by
+    // name, so the generated match does not carry it at all.
     let mut by_name: Vec<(&str, Vec<usize>)> = Vec::new();
     for (i, row) in ROWS.iter().enumerate() {
-        if row.marker.is_empty() {
+        if row.marker.is_empty() || i >= first_extension_row() {
             continue;
         }
         match by_name.iter_mut().find(|(name, _)| *name == row.marker) {

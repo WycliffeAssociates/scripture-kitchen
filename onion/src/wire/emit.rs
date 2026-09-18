@@ -243,16 +243,32 @@ pub fn enums_ts() -> String {
 /// The marker table, as the reader's lookup. One row per `MarkerIdx`, in row
 /// order, so `MARKERS[idx]` is the row a token names.
 pub fn marker_table_ts() -> String {
-    let mut out = String::from(
-        "/**\n * The marker table — 153 rows, generated from `tables::rows::ROWS`.\n\
-         *\n * Indexed by a token's `marker` field. Row 0 is UNRESOLVED: an unknown\n\
-         * name, a `\\z` extension, an illegal spelling. It has no name, so the\n\
-         * spelling is only in the document.\n\
-         *\n * `numbering` is a packed code: 0 unnumbered, 1..=13 the cap, 14 unbounded,\n\
-         * 15 table columns.\n\
-         *\n * `ws` is a `StructuralWhitespaceRequirement`: what must follow the marker's\n\
-         * name. `SingleNewline` is the rule for a marker that takes no content on\n\
-         * its own line.\n */\nexport const MARKERS: readonly {\n  \
+    let mut out = doc_ts(&[
+        &format!(
+            "The marker table — {} rows, generated from `tables::rows::ROWS`.",
+            rows::ROWS.len()
+        ),
+        "",
+        "Indexed by a token's `marker` field. Row 0 is UNRESOLVED: an unknown",
+        "name, an unregistered `\\z` extension, an illegal spelling. It has no",
+        "name, so the spelling is only in the document.",
+        "",
+        "Rows from `FIRST_EXTENSION_ROW` up are extension TEMPLATES: a registered",
+        "`\\z` marker resolves to the template its `\\category` behaves as, so",
+        "`kind`, `category` and `closing` are the spec marker's. Their `name` is",
+        "the TEMPLATE's, never the marker's, so `Marker.name()` answers `null`",
+        "there the way it does on row 0 — read the spelling off the document",
+        "with `TokenView.spelling(text)`.",
+        "",
+        "`numbering` is a packed code: 0 unnumbered, 1..=13 the cap, 14 unbounded,",
+        "15 table columns.",
+        "",
+        "`ws` is a `StructuralWhitespaceRequirement`: what must follow the marker's",
+        "name. `SingleNewline` is the rule for a marker that takes no content on",
+        "its own line.",
+    ]);
+    out.push_str(
+        "export const MARKERS: readonly {\n  \
          readonly name: string;\n  readonly kind: number;\n  readonly category: number;\n  \
          readonly closing: number;\n  readonly shape: number;\n  readonly numbering: number;\n  \
          readonly ws: number;\n\
@@ -272,7 +288,44 @@ pub fn marker_table_ts() -> String {
             generated::ws_after_name(i) as u32,
         ));
     }
-    out.push_str("];\n");
+    out.push_str("];\n\n");
+
+    out.push_str(&doc_ts(&[
+        "The first extension TEMPLATE row: every index below it is a marker USFM",
+        "3.2 defines, every index at or above it a template a registered `\\z`",
+        "marker resolves to.",
+    ]));
+    out.push_str(&format!(
+        "export const FIRST_EXTENSION_ROW = {};\n\n",
+        generated::FIRST_EXTENSION_ROW
+    ));
+    out.push_str(&doc_ts(&[
+        "Is this row a template — and so a row whose `name` is NOT the marker's?",
+        "",
+        "The one place a consumer asks. Everything else reads `kind` and",
+        "`category`, which are the spec marker's either way — that is what makes",
+        "a registered extension behave, and this the only thing it cannot carry.",
+    ]));
+    out.push_str(
+        "export const isExtension = (idx: number): boolean => idx >= FIRST_EXTENSION_ROW;\n",
+    );
+    out
+}
+
+/// A JSDoc block whose every line keeps its leading ` * ` — which a `\`
+/// string continuation in this file would eat.
+fn doc_ts(lines: &[impl AsRef<str>]) -> String {
+    let mut out = String::from("/**\n");
+    for line in lines {
+        let line = line.as_ref();
+        out.push_str(" *");
+        if !line.is_empty() {
+            out.push(' ');
+            out.push_str(line);
+        }
+        out.push('\n');
+    }
+    out.push_str(" */\n");
     out
 }
 

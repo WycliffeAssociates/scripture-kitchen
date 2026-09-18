@@ -41,6 +41,7 @@ pub mod diff;
 pub mod edit;
 #[cfg(any(feature = "usj", feature = "usx", feature = "html"))]
 mod export;
+pub mod extensions;
 pub mod format;
 #[cfg(feature = "html")]
 pub mod html;
@@ -64,11 +65,12 @@ pub mod wire;
 
 pub use diff::{DecisionUnit, DiffSkeleton, MergeSide, Slot, TextDiffMode, diff, diff_with_text};
 pub use edit::{Edit, SpliceEdit, apply_splices};
+pub use extensions::{Extensions, set_extensions};
 pub use format::{
     CharBreaks, FormatOptions, Newline, VerseBreaks, format, format_edits, format_edits_in,
 };
 pub use mask::{Action, Filter, Mask, TextRule, mask};
-pub use scanner::{lex, lex_general_path_only};
+pub use scanner::{lex, lex_general_path_only, lex_with};
 pub use toc::{ChapterRow, Sid, Toc, VerseAnchor, toc};
 pub use token::{Token, TokenKind};
 pub use utf16::{Utf16Index, utf16_index};

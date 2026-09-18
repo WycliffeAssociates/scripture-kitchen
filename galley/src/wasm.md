@@ -118,7 +118,8 @@ names and signatures — the same shims its package ships, not wrappers:
 ```js
 import { parse, mask, format, formatEdits, formatEditsIn, FormatOpts, Edits,
          diff, merge, mergeSplices, Splices, toByte, toUtf16, locate, attrs,
-         attrResolve, book } from "usfm-galley";
+         attrResolve, book, setExtensions,
+         extensionsFromMarkersExt } from "usfm-galley";
 ```
 
 `galley`'s cdylib links the object those shims sit in — `galley::wasm::onion`
@@ -129,9 +130,9 @@ where something wants them. `tests/sous_conformance.mjs` therefore asserts the
 EXACT export list, not a subset, and prints it:
 
 ```text
-exports (20): Edits Fingerprint FormatOpts Galley SousSettings Splices attrResolve attrs
-              book diff format formatEdits formatEditsIn locate mask merge
-              mergeSplices parse toByte toUtf16
+exports (22): Edits Fingerprint FormatOpts Galley SousSettings Splices attrResolve attrs
+              book diff extensionsFromMarkersExt format formatEdits formatEditsIn
+              locate mask merge mergeSplices parse setExtensions toByte toUtf16
 ```
 
 The doors cost 202 KB of `.wasm` (744,333 → 946,665 bytes, release, wasm-opt
@@ -140,6 +141,43 @@ attribute interpreter — none of which the analysis path pulls in on its own.
 
 A Rust caller across the wall reaches the same doors as
 `usfm_galley::wasm::onion::to_utf16`, which is what `tests/wasm_wall.rs` runs.
+
+**Anything onion can do at the wall, galley does too.** A door that lands only
+on `onion-wasm` is unreachable from this module, which is the only build a host
+vendoring one package gets. The pinned export list above is where that is
+enforced.
+
+## User `\z` markers: `setExtensions` and `extensionsFromMarkersExt`
+
+```js
+const { markers, malformed } = JSON.parse(extensionsFromMarkersExt(fileText));
+for (const { line, name, reason } of malformed) show(line, name, reason);
+setExtensions(JSON.stringify(markers));          // → "[]" when all installed
+setExtensions("[]");                             // clears
+```
+
+A user marker is a spec marker the table has not met, and the spec says which
+one in one field. A registered `\zmyf` with `category: "footnote"` gets every
+behaviour `\f` has — the caller payload, the note scope, the closing rule, the
+lint contexts, the mask treatment, the export shape — because the engine
+resolves it to the row that category behaves as. Unregistered, a `\z` marker
+is what it has always been: row 0, and `unknown-marker`.
+
+Two doors, not one. Reading a file INSTALLS NOTHING, so a host can show what it
+found first, and a host whose markers come from a `custom.sty` or from its own
+UI feeds `setExtensions` the list directly. The list's shape is
+`{ name, category, attributes?, description? }`; `category` is one of the
+spec's nineteen words.
+
+Reports are VALUES, never failures: one bad entry costs one entry. A file
+report carries the `line` it came from; a list report has no `line` key at all,
+rather than a zero standing in for one. Only malformed JSON throws.
+
+**Installing invalidates every derived product**, a resident `Galley`'s
+included — the same bytes are a different document once the rows change, and
+both caches key on content. Call it at composition, before the first parse,
+not between edits. The Pantry re-derives each registered book from its retained
+text on the next door it is asked through.
 
 ## The claim
 
