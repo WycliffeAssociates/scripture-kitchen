@@ -44,6 +44,7 @@ pub const FLAG_UTF16: u32 = 1 << 0;
 /// cannot confuse them.
 pub const RECIPE_VERSE_TEXT: u32 = 0;
 pub const RECIPE_STRUCTURE: u32 = 1;
+pub const RECIPE_TEXT: u32 = 2;
 
 /// The header, then the rows. Nothing else.
 pub const HEADER_BYTES: usize = 28;

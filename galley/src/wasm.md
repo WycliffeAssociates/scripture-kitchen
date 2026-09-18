@@ -262,10 +262,15 @@ map.pieces(from, to);                    // a projected span, as source spans
 
 ```ts
 interface MaskOptions {
-  recipe?: "verseText" | "structure";   // default "verseText"
-  utf16?: boolean;                      // default false
+  recipe?: "verseText" | "structure" | "text";   // default "verseText"
+  utf16?: boolean;                               // default false
 }
 ```
+
+Each recipe is named for what SURVIVES it: `verseText` text inside verse
+extents only, `structure` the paragraph/chapter/verse skeleton, `text` every
+text byte anywhere with nothing removed — the cut a diff run's non-markup bytes
+are in. `galley/src/mask.md` has the table.
 
 **The projection is a pure concatenation** — nothing is inserted between two
 ranges — so a host holding the source rebuilds the reading from the map alone
@@ -274,8 +279,8 @@ one\add*two` reads `onetwo`, and that is correct: `\add*` is a delimiter and
 the space is the author's to write (`mask.md`).
 
 `mask(id)` with every default is served off the retained projection with no cut
-at all. `recipe: "structure"` cuts the retained text, since no book retains a
-structure projection; `maskOf` cuts the text handed in, and under `utf16`
+at all. `recipe: "structure"` and `recipe: "text"` cut the retained text, since
+no book retains either projection; `maskOf` cuts the text handed in, and under `utf16`
 builds a table over it. Over a registered book's own bytes the two doors write
 the same buffer.
 
@@ -294,7 +299,7 @@ The scope is find's: a target, or a reference registered with `keepText`. One
 that retains neither errors by name, naming the argument that would fix it
 (`reference ref/RUT.usfm retains no text; register it with keepText`), and an
 unknown id errors as `no book is registered as X`. An unknown recipe throws
-naming the two that exist rather than falling back to either.
+naming the three that exist rather than falling back to any of them.
 
 ## The census buffer
 

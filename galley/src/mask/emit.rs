@@ -36,6 +36,7 @@ pub fn reader_ts() -> String {
                 schema::RECIPE_VERSE_TEXT.to_string(),
             ),
             ("@@RECIPE_STRUCTURE@@", schema::RECIPE_STRUCTURE.to_string()),
+            ("@@RECIPE_TEXT@@", schema::RECIPE_TEXT.to_string()),
             ("@@HEADER_BYTES@@", word(schema::HEADER_BYTES)),
             ("@@HEADER_MAGIC_OFFSET@@", word(schema::HEADER_MAGIC_OFFSET)),
             (

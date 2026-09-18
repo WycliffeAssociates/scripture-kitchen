@@ -29,6 +29,28 @@
 //! crate's first two-input API, and it runs lex + toc per side (the CST only
 //! when a text diff is asked for).
 //!
+//! # A modified unit, three ways
+//!
+//! ```text
+//! source   \v 1 Jesus \add wept\add*.
+//!
+//! runs     [\v 1 ]Markup [Jesus]Text [ ]Whitespace [\add ]Markup
+//!          [wept]Text [\add*]Markup [.]Text
+//!
+//! reading  drop what == Markup, concatenate:  "Jesus wept."
+//! ```
+//!
+//! Runs TILE their side's unit span: sorted, gapless, non-overlapping, opening
+//! on `unit.baseline.start` and closing on its end. Two passes make them — the
+//! word differ over the [`Filter::text`] cut, and a token-grain alignment over
+//! what that cut drops — and the two partition the tokens, so the tiling holds
+//! by construction rather than by a merge rule.
+//!
+//! Markup never enters the word differ. `\add` is not a word, and a marker
+//! changing must not shift the words around it in the alignment; a consumer
+//! that wants the reading drops the markup runs, and one that wants to show
+//! the markup decorates the source slice by `kind`.
+//!
 //! Ported from `usfm_onion`'s `src/diff/` — the algorithm is trusted and
 //! carried over intact; what changed is the boundary, from cloned token vectors
 //! to byte ranges of the caller's own two sources.
@@ -38,7 +60,7 @@ use std::collections::BTreeMap;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::ops::Range;
 
-use similar::{Algorithm, ChangeTag, TextDiff, capture_diff_slices};
+use similar::{Algorithm, ChangeTag, DiffTag, TextDiff, capture_diff_slices};
 
 use crate::edit::SpliceEdit;
 use crate::mask::{Filter, Mask, mask};
@@ -1080,6 +1102,7 @@ pub enum TextDiffMode {
     Chars,
 }
 
+/// Whether a run's bytes were added, removed, or stand in both sides.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunKind {
     Unchanged,
@@ -1087,10 +1110,39 @@ pub enum RunKind {
     Removed,
 }
 
+/// What a run's bytes ARE, which is the axis `kind` is not.
+///
+/// ```text
+/// \v 1 Jesus \add wept\add*.
+///      ^^^^^^ Text  ^^^^ Text
+///           ^ Whitespace
+///            ^^^^^ Markup  ^^^^^ Markup
+/// ```
+///
+/// `Markup` is exactly the complement of the [`Filter::text`] cut, so a
+/// renderer hiding markup drops those runs and concatenates the rest to get
+/// the reading the word differ ran on. `Whitespace` is spacing INSIDE that
+/// reading — a newline, a blank text token — never a delimiter, which is
+/// markup.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunWhat {
+    Markup,
+    Text,
+    Whitespace,
+}
+
+/// One run: WHERE it is in its own side's document, and what it is made of.
+///
+/// The runs of one side TILE that side's unit span — sorted, gapless,
+/// non-overlapping — so a consumer renders the source slice and decorates it,
+/// instead of searching for a run's text and guessing which "the" it found.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TextDiffRun {
-    pub text: String,
+    /// Source bytes, this side's document.
+    pub from: u32,
+    pub to: u32,
     pub kind: RunKind,
+    pub what: RunWhat,
 }
 
 /// Per-unit presentation metadata, riding BESIDE the unit — the skeleton, the
@@ -1103,53 +1155,73 @@ pub struct UnitTextDiff {
     pub current: Vec<TextDiffRun>,
 }
 
-/// One side's reader-visible bytes: the [`Filter::reader_text`] mask over a
-/// source, sliceable by a unit's byte range.
-pub struct ReaderText<'a> {
+/// One side's TOTAL text: the [`Filter::text`] mask over a source, sliceable by
+/// a unit's byte range, plus the tokens that cut it.
+///
+/// Nothing is removed from this cut, so no byte is unreachable — which is why
+/// the diff runs on it, and why its complement is exactly the markup the
+/// [`RunWhat::Markup`] runs carry.
+pub struct TotalText<'a> {
     pub source: &'a [u8],
+    pub tokens: &'a [Token],
     pub mask: Mask,
 }
 
-impl<'a> ReaderText<'a> {
+impl<'a> TotalText<'a> {
     /// Builds the CST and the mask. This is the ONLY place the diff needs a
     /// tree — alignment is a token-grain fact.
-    pub fn new(source: &'a [u8], tokens: &[Token]) -> Self {
+    pub fn new(source: &'a [u8], tokens: &'a [Token]) -> Self {
         let cst = crate::cst::build(tokens);
         Self {
             source,
-            mask: mask(source, tokens, &cst, &Filter::reader_text()),
+            tokens,
+            mask: mask(source, tokens, &cst, &Filter::text()),
         }
     }
 
-    /// The reader-visible text inside a byte range, in one allocation.
-    pub fn slice(&self, range: &Range<u32>) -> String {
+    /// The kept spans inside a byte range, each with its offset into what
+    /// [`Self::slice`] would return. One loop, and both callers use it.
+    pub fn pieces(&self, range: &Range<u32>) -> impl Iterator<Item = (Range<u32>, u32)> + '_ {
         let first = self
             .mask
             .ranges
             .partition_point(|kept| kept.end <= range.start);
+        let (start, end) = (range.start, range.end);
+        let mut at = 0u32;
+        self.mask.ranges[first..]
+            .iter()
+            .take_while(move |kept| kept.start < end)
+            .map(move |kept| {
+                let piece = kept.start.max(start)..kept.end.min(end);
+                let head = at;
+                at += piece.end - piece.start;
+                (piece, head)
+            })
+    }
+
+    /// The reader-visible text inside a byte range, in one allocation.
+    pub fn slice(&self, range: &Range<u32>) -> String {
         let mut out = String::new();
-        for kept in &self.mask.ranges[first..] {
-            if kept.start >= range.end {
-                break;
-            }
-            let start = kept.start.max(range.start) as usize;
-            let end = kept.end.min(range.end) as usize;
-            out.push_str(
-                core::str::from_utf8(&self.source[start..end])
-                    .expect("mask ranges are token spans, so they fall on character boundaries"),
-            );
+        for (piece, _) in self.pieces(range) {
+            out.push_str(self.str(piece.start, piece.end));
         }
         out
+    }
+
+    fn str(&self, from: u32, to: u32) -> &str {
+        core::str::from_utf8(&self.source[from as usize..to as usize])
+            .expect("run spans are token spans, so they fall on character boundaries")
     }
 }
 
 /// Word/grapheme runs inside one unit. Pure, deterministic, and status-gated:
 /// `Unchanged`/`Moved` yield `None` (a pure move must not highlight),
-/// `Added`/`Deleted` one unbroken run, only `Modified` split runs.
+/// `Added`/`Deleted` a tiling of the one side present, only `Modified` a
+/// two-sided split.
 pub fn unit_text_diff(
     unit: &DecisionUnit,
-    baseline: &ReaderText<'_>,
-    current: &ReaderText<'_>,
+    baseline: &TotalText<'_>,
+    current: &TotalText<'_>,
     mode: TextDiffMode,
 ) -> Option<UnitTextDiff> {
     if mode == TextDiffMode::None {
@@ -1159,15 +1231,17 @@ pub fn unit_text_diff(
         Status::Unchanged | Status::Moved => None,
         Status::Added => Some(UnitTextDiff {
             baseline: Vec::new(),
-            current: single_run(current.slice(&unit.current), RunKind::Added),
+            current: one_sided(current, &unit.current, RunKind::Added),
         }),
         Status::Deleted => Some(UnitTextDiff {
-            baseline: single_run(baseline.slice(&unit.baseline), RunKind::Removed),
+            baseline: one_sided(baseline, &unit.baseline, RunKind::Removed),
             current: Vec::new(),
         }),
         Status::Modified => Some(split_runs(
-            &baseline.slice(&unit.baseline),
-            &current.slice(&unit.current),
+            baseline,
+            &unit.baseline,
+            current,
+            &unit.current,
             mode,
         )),
     }
@@ -1192,8 +1266,8 @@ pub fn diff_with_text(
         let texts = vec![None; skeleton.units.len()];
         return (skeleton, texts);
     }
-    let baseline_text = ReaderText::new(baseline.as_bytes(), &baseline_tokens);
-    let current_text = ReaderText::new(current.as_bytes(), &current_tokens);
+    let baseline_text = TotalText::new(baseline.as_bytes(), &baseline_tokens);
+    let current_text = TotalText::new(current.as_bytes(), &current_tokens);
     let texts = skeleton
         .units
         .iter()
@@ -1202,51 +1276,264 @@ pub fn diff_with_text(
     (skeleton, texts)
 }
 
-fn single_run(text: String, kind: RunKind) -> Vec<TextDiffRun> {
-    if text.is_empty() {
-        Vec::new()
+/// A token the [`Filter::text`] cut DROPS. Its complement — `Text`, `Newline`,
+/// `OptBreak` — is what the word differ sees, so the two passes tile without
+/// either knowing about the other.
+fn is_markup(kind: TokenKind) -> bool {
+    !matches!(
+        kind,
+        TokenKind::Text | TokenKind::Newline | TokenKind::OptBreak
+    )
+}
+
+/// A run of nothing but ASCII whitespace is spacing, not a word.
+fn what_of(bytes: &[u8]) -> RunWhat {
+    if bytes.iter().all(u8::is_ascii_whitespace) {
+        RunWhat::Whitespace
     } else {
-        vec![TextDiffRun { text, kind }]
+        RunWhat::Text
     }
 }
 
-fn split_runs(baseline: &str, current: &str, mode: TextDiffMode) -> UnitTextDiff {
+/// One unit of one side, every run the same kind: the two passes with no
+/// alignment to do.
+fn one_sided(side: &TotalText<'_>, span: &Range<u32>, kind: RunKind) -> Vec<TextDiffRun> {
+    let mut runs = Vec::new();
+    for (piece, _) in side.pieces(span) {
+        push_text(&mut runs, side, piece.start, piece.end, kind);
+    }
+    for token in markup_tokens(side, span) {
+        push_run(&mut runs, token.start, token.end(), kind, RunWhat::Markup);
+    }
+    settle(runs, span)
+}
+
+/// The tokens inside a span that the text cut drops — the markup pass's input.
+fn markup_tokens<'a>(
+    side: &'a TotalText<'_>,
+    span: &Range<u32>,
+) -> impl Iterator<Item = &'a Token> {
+    token_slice(side.tokens, span)
+        .iter()
+        .filter(|token| is_markup(token.kind()))
+}
+
+/// A token's spelling key: the shape, the row, and the bytes. `\p` equals `\p`
+/// while a designator `12` differs from `13` and a changed attribute list is a
+/// change.
+fn spelling<'a>(side: &'a TotalText<'_>, token: &Token) -> (u8, u8, &'a [u8]) {
+    (
+        token.kind_bits,
+        token.marker_idx,
+        &side.source[token.start as usize..token.end() as usize],
+    )
+}
+
+/// Both passes over one modified unit, merged into one tiling per side.
+fn split_runs(
+    baseline: &TotalText<'_>,
+    baseline_span: &Range<u32>,
+    current: &TotalText<'_>,
+    current_span: &Range<u32>,
+    mode: TextDiffMode,
+) -> UnitTextDiff {
+    let (baseline_slice, current_slice) =
+        (baseline.slice(baseline_span), current.slice(current_span));
+    let baseline_pieces: Vec<(Range<u32>, u32)> = baseline.pieces(baseline_span).collect();
+    let current_pieces: Vec<(Range<u32>, u32)> = current.pieces(current_span).collect();
+
     let diff = match mode {
-        TextDiffMode::Words => TextDiff::from_unicode_words(baseline, current),
-        TextDiffMode::Chars => TextDiff::from_graphemes(baseline, current),
+        TextDiffMode::Words => TextDiff::from_unicode_words(&baseline_slice, &current_slice),
+        TextDiffMode::Chars => TextDiff::from_graphemes(&baseline_slice, &current_slice),
         TextDiffMode::None => unreachable!("the caller returns early for None"),
     };
 
     let mut baseline_runs = Vec::new();
     let mut current_runs = Vec::new();
+    // Every change carries its own bytes and nothing else, so the two cursors
+    // walk each slice exactly once: an `Equal` advances both, a one-sided
+    // change only its own.
+    let (mut baseline_at, mut current_at) = (0u32, 0u32);
     for change in diff.iter_all_changes() {
-        let text = change.as_str().unwrap_or_default();
-        if text.is_empty() {
+        let len = change.as_str().unwrap_or_default().len() as u32;
+        if len == 0 {
             continue;
         }
         match change.tag() {
             ChangeTag::Equal => {
-                push_run(&mut baseline_runs, text, RunKind::Unchanged);
-                push_run(&mut current_runs, text, RunKind::Unchanged);
+                map_text(
+                    &mut baseline_runs,
+                    baseline,
+                    &baseline_pieces,
+                    baseline_at,
+                    len,
+                    RunKind::Unchanged,
+                );
+                map_text(
+                    &mut current_runs,
+                    current,
+                    &current_pieces,
+                    current_at,
+                    len,
+                    RunKind::Unchanged,
+                );
+                baseline_at += len;
+                current_at += len;
             }
-            ChangeTag::Delete => push_run(&mut baseline_runs, text, RunKind::Removed),
-            ChangeTag::Insert => push_run(&mut current_runs, text, RunKind::Added),
+            ChangeTag::Delete => {
+                map_text(
+                    &mut baseline_runs,
+                    baseline,
+                    &baseline_pieces,
+                    baseline_at,
+                    len,
+                    RunKind::Removed,
+                );
+                baseline_at += len;
+            }
+            ChangeTag::Insert => {
+                map_text(
+                    &mut current_runs,
+                    current,
+                    &current_pieces,
+                    current_at,
+                    len,
+                    RunKind::Added,
+                );
+                current_at += len;
+            }
         }
     }
+
+    markup_runs(
+        &mut baseline_runs,
+        &mut current_runs,
+        baseline,
+        baseline_span,
+        current,
+        current_span,
+    );
     UnitTextDiff {
-        baseline: baseline_runs,
-        current: current_runs,
+        baseline: settle(baseline_runs, baseline_span),
+        current: settle(current_runs, current_span),
     }
 }
 
-fn push_run(runs: &mut Vec<TextDiffRun>, text: &str, kind: RunKind) {
+/// The markup pass: the two sides' dropped tokens aligned at token grain, one
+/// run per token.
+fn markup_runs(
+    baseline_runs: &mut Vec<TextDiffRun>,
+    current_runs: &mut Vec<TextDiffRun>,
+    baseline: &TotalText<'_>,
+    baseline_span: &Range<u32>,
+    current: &TotalText<'_>,
+    current_span: &Range<u32>,
+) {
+    let baseline_tokens: Vec<&Token> = markup_tokens(baseline, baseline_span).collect();
+    let current_tokens: Vec<&Token> = markup_tokens(current, current_span).collect();
+    let baseline_keys: Vec<_> = baseline_tokens
+        .iter()
+        .map(|token| spelling(baseline, token))
+        .collect();
+    let current_keys: Vec<_> = current_tokens
+        .iter()
+        .map(|token| spelling(current, token))
+        .collect();
+
+    let emit = |runs: &mut Vec<TextDiffRun>, tokens: &[&Token], at: Range<usize>, kind: RunKind| {
+        for token in &tokens[at] {
+            push_run(runs, token.start, token.end(), kind, RunWhat::Markup);
+        }
+    };
+    for op in capture_diff_slices(Algorithm::Myers, &baseline_keys, &current_keys) {
+        let (tag, old, new) = op.as_tag_tuple();
+        match tag {
+            DiffTag::Equal => {
+                emit(baseline_runs, &baseline_tokens, old, RunKind::Unchanged);
+                emit(current_runs, &current_tokens, new, RunKind::Unchanged);
+            }
+            DiffTag::Delete => {
+                emit(baseline_runs, &baseline_tokens, old, RunKind::Removed);
+            }
+            DiffTag::Insert => {
+                emit(current_runs, &current_tokens, new, RunKind::Added);
+            }
+            DiffTag::Replace => {
+                emit(baseline_runs, &baseline_tokens, old, RunKind::Removed);
+                emit(current_runs, &current_tokens, new, RunKind::Added);
+            }
+        }
+    }
+}
+
+/// One change's `[at, at + len)` in slice space, as source runs. A change that
+/// straddled a dropped token becomes two runs of the same kind; the markup pass
+/// fills what is between them.
+fn map_text(
+    runs: &mut Vec<TextDiffRun>,
+    side: &TotalText<'_>,
+    pieces: &[(Range<u32>, u32)],
+    at: u32,
+    len: u32,
+    kind: RunKind,
+) {
+    let end = at + len;
+    for (piece, head) in pieces {
+        let tail = head + (piece.end - piece.start);
+        if *head >= end {
+            break;
+        }
+        if tail <= at {
+            continue;
+        }
+        let from = piece.start + (at.max(*head) - head);
+        let to = piece.start + (end.min(tail) - head);
+        push_text(runs, side, from, to, kind);
+    }
+}
+
+/// A text-pass run, classified by its own bytes.
+fn push_text(runs: &mut Vec<TextDiffRun>, side: &TotalText<'_>, from: u32, to: u32, kind: RunKind) {
+    let what = what_of(&side.source[from as usize..to as usize]);
+    push_run(runs, from, to, kind, what);
+}
+
+/// Appends a run, growing the last one instead when the two are contiguous and
+/// agree on both axes.
+fn push_run(runs: &mut Vec<TextDiffRun>, from: u32, to: u32, kind: RunKind, what: RunWhat) {
+    if from >= to {
+        return;
+    }
     match runs.last_mut() {
-        Some(last) if last.kind == kind => last.text.push_str(text),
+        Some(last) if last.to == from && last.kind == kind && last.what == what => {
+            last.to = to;
+        }
         _ => runs.push(TextDiffRun {
-            text: text.to_string(),
+            from,
+            to,
             kind,
+            what,
         }),
     }
+}
+
+/// Sorts the two passes into one list and checks it tiles the span. Tiling
+/// holds by construction — tokens partition the source, and the two passes
+/// partition the tokens — so this is a debug check, not a runtime branch.
+fn settle(mut runs: Vec<TextDiffRun>, span: &Range<u32>) -> Vec<TextDiffRun> {
+    runs.sort_by_key(|run| run.from);
+    let mut merged: Vec<TextDiffRun> = Vec::with_capacity(runs.len());
+    for run in runs {
+        push_run(&mut merged, run.from, run.to, run.kind, run.what);
+    }
+    debug_assert!(
+        merged.is_empty()
+            || (merged[0].from == span.start
+                && merged[merged.len() - 1].to == span.end
+                && merged.windows(2).all(|pair| pair[0].to == pair[1].from)),
+        "runs must tile {span:?}"
+    );
+    merged
 }
 
 #[cfg(test)]
@@ -1422,10 +1709,10 @@ mod tests {
     }
 
     #[test]
-    fn a_reader_text_slice_is_the_masked_bytes_of_that_block_alone() {
+    fn a_total_text_slice_is_the_masked_bytes_of_that_block_alone() {
         let source = "\\id GEN\n\\c 1\n\\v 1 Jesus wept.\\f + \\ft why\\f*\n\\v 2 Then he rose.\n";
         let tokens = lex(source);
-        let text = ReaderText::new(source.as_bytes(), &tokens);
+        let text = TotalText::new(source.as_bytes(), &tokens);
         let table = toc(source.as_bytes(), &tokens);
         let blocks = blocks(source.len() as u32, &table);
         // Note prose rides in undifferentiated (onion's v1 choice, kept), and

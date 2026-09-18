@@ -57,8 +57,8 @@ use js_sys::{Object, Reflect, Uint32Array};
 use serde::Serialize;
 use usfm_onion::attributes::{self, AttrEvent};
 use usfm_onion::diff::{
-    self, Addr, CoveredSide, Decisions, DiffSkeleton, MergeSide, RunKind, SlotRole, Status,
-    TextDiffMode, TextDiffRun, UnitKind, UnitTextDiff,
+    self, Addr, CoveredSide, Decisions, DiffSkeleton, MergeSide, RunKind, RunWhat, SlotRole,
+    Status, TextDiffMode, TextDiffRun, UnitKind, UnitTextDiff,
 };
 use usfm_onion::format::{CharBreaks, FormatOptions, Newline, VerseBreaks};
 use usfm_onion::lint::Code;
@@ -119,8 +119,10 @@ pub fn mask(text: &str, recipe: &str) -> Object {
     let filter = match recipe {
         "verseText" => mask_recipe::Filter::verse_text(),
         "structure" => mask_recipe::Filter::structure(),
+        "text" => mask_recipe::Filter::text(),
         other => wasm_bindgen::throw_str(&format!(
-            "onion_wasm::mask: no such recipe {other:?} — expected \"verseText\" or \"structure\""
+            "onion_wasm::mask: no such recipe {other:?} — \
+             expected \"verseText\", \"structure\" or \"text\""
         )),
     };
     let tokens = usfm_onion::lex(text);
@@ -436,14 +438,18 @@ struct WireUnitText {
     current: Vec<WireTextRun>,
 }
 
-/// Reader-visible text only — markers are masked out, so a run's `text` is what
-/// a reader sees and never a `\v`. It crosses as UTF-8 with no offsets, which
-/// is why there is nothing here to convert to UTF-16.
+/// One run, spanned in its own side's document. `from`/`to` are UTF-16 offsets
+/// like every other span here; `what` says which of the three the bytes are, so
+/// a renderer hiding markup drops `"markup"` and concatenates the rest. Its
+/// bytes are `source.slice(from, to)` on the same side — the run carries no
+/// text of its own.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct WireTextRun {
-    text: String,
+    from: u32,
+    to: u32,
     kind: &'static str,
+    what: &'static str,
 }
 
 #[derive(Serialize)]
@@ -463,14 +469,20 @@ struct WireSlot {
     after_side: Option<&'static str>,
 }
 
-fn runs(runs: &[TextDiffRun]) -> Vec<WireTextRun> {
+fn runs(runs: &[TextDiffRun], index: &Utf16Index<'_>) -> Vec<WireTextRun> {
     runs.iter()
         .map(|run| WireTextRun {
-            text: run.text.clone(),
+            from: index.to_utf16(run.from),
+            to: index.to_utf16(run.to),
             kind: match run.kind {
                 RunKind::Unchanged => "unchanged",
                 RunKind::Added => "added",
                 RunKind::Removed => "removed",
+            },
+            what: match run.what {
+                RunWhat::Markup => "markup",
+                RunWhat::Text => "text",
+                RunWhat::Whitespace => "whitespace",
             },
         })
         .collect()
@@ -538,8 +550,8 @@ fn wire(
                 is_whitespace_change: unit.is_whitespace_change,
                 is_usfm_structure_change: unit.is_usfm_structure_change,
                 text: text.as_ref().map(|text| WireUnitText {
-                    baseline: runs(&text.baseline),
-                    current: runs(&text.current),
+                    baseline: runs(&text.baseline, baseline),
+                    current: runs(&text.current, current),
                 }),
             })
             .collect(),
@@ -1015,20 +1027,45 @@ mod tests {
             .iter()
             .find(|unit| unit["status"] == "modified")
             .expect("verse 2 changed")["text"];
-        // Reader text only: the `\w` wrapper is masked out of both sides.
-        let word = |side: &str, kind: &str| {
+        // Spans are UTF-16 offsets; these test strings are pure ASCII, so byte
+        // slicing the source lines up with them.
+        let runs = |side: &str, key: &str, value: &str| {
+            let source = if side == "baseline" {
+                baseline
+            } else {
+                current
+            };
             text[side]
                 .as_array()
                 .unwrap()
                 .iter()
-                .filter(|run| run["kind"] == kind)
-                .map(|run| run["text"].as_str().unwrap().to_string())
+                .filter(|run| run[key] == value)
+                .map(|run| {
+                    let (from, to) = (
+                        run["from"].as_u64().unwrap() as usize,
+                        run["to"].as_u64().unwrap() as usize,
+                    );
+                    source[from..to].to_string()
+                })
                 .collect::<Vec<_>>()
         };
-        assert_eq!(word("baseline", "removed"), ["quick"]);
-        assert_eq!(word("current", "added"), ["slow"]);
-        assert!(word("baseline", "unchanged").concat().contains("the"));
-        assert!(!text.to_string().contains("\\\\w"), "{text}");
+        assert_eq!(runs("baseline", "kind", "removed"), ["quick"]);
+        assert_eq!(runs("current", "kind", "added"), ["slow"]);
+        assert!(
+            runs("baseline", "kind", "unchanged")
+                .concat()
+                .contains("the")
+        );
+        // The `\w` wrapper is not in the reading, but it is not lost either:
+        // it is markup, spanned, and unchanged on both sides.
+        assert_eq!(
+            runs("baseline", "what", "markup"),
+            ["\\v 2 ", "\\w ", "\\w*"]
+        );
+        assert_eq!(
+            runs("baseline", "what", "markup"),
+            runs("current", "what", "markup")
+        );
     }
 
     /// A typo must not silently mean `"none"` — the editor would lose its

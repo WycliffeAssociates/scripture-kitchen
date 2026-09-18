@@ -555,14 +555,19 @@ export class Galley {
      *
      * ```ts
      * interface MaskOptions {
-     *   recipe?: "verseText" | "structure";   // default "verseText"
-     *   utf16?: boolean;                      // default false
+     *   recipe?: "verseText" | "structure" | "text";   // default "verseText"
+     *   utf16?: boolean;                               // default false
      * }
      * mask(id: string, opts?: MaskOptions): Uint8Array;
      * maskOf(text: string, opts?: MaskOptions): Uint8Array;
      * ```
      *
-     * `"verseText"` is read off the retained projection; `"structure"` cuts
+     * Each recipe is named for what SURVIVES it: `"verseText"` text inside
+     * verse extents only, `"structure"` the paragraph/chapter/verse skeleton,
+     * `"text"` every text byte anywhere with nothing removed — the cut a diff
+     * run's non-markup bytes are in.
+     *
+     * `"verseText"` is read off the retained projection; the other two cut
      * the retained text. Same scope as `find`: a book that retains no text
      * errors by name.
      *

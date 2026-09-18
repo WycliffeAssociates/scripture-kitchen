@@ -314,12 +314,12 @@ fn a_loose_cut_answers_what_the_resident_one_does() {
             .published_len()
             .expect("a target");
 
-        for recipe in [Recipe::VerseText, Recipe::Structure] {
+        for recipe in [Recipe::VerseText, Recipe::Structure, Recipe::Text] {
             // The resident door serves verseText off the retained projection
             // and cuts anything else; the loose door always cuts.
             let resident = match recipe {
                 Recipe::VerseText => resident_mask.clone(),
-                Recipe::Structure => project(&text, recipe),
+                Recipe::Structure | Recipe::Text => project(&text, recipe),
             };
             let loose = project(&text, recipe);
             assert_eq!(

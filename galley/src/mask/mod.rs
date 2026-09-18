@@ -30,9 +30,15 @@ use crate::onion::mask::{Filter, Mask};
 /// both cannot confuse them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Recipe {
+    /// Text inside verse extents only; notes, headings and front matter drop.
     #[default]
     VerseText,
+    /// Paragraph, chapter, verse, table and periph markers with their
+    /// designators, newlines, attribute lists. Character markers drop, which is
+    /// what makes overlaying a skeleton onto a target possible at all.
     Structure,
+    /// Every text byte anywhere, notes included; nothing removed.
+    Text,
 }
 
 impl Recipe {
@@ -41,6 +47,7 @@ impl Recipe {
         match self {
             Self::VerseText => schema::RECIPE_VERSE_TEXT,
             Self::Structure => schema::RECIPE_STRUCTURE,
+            Self::Text => schema::RECIPE_TEXT,
         }
     }
 
@@ -50,6 +57,7 @@ impl Recipe {
         match self {
             Self::VerseText => Filter::verse_text(),
             Self::Structure => Filter::structure(),
+            Self::Text => Filter::text(),
         }
     }
 }

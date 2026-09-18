@@ -23,6 +23,8 @@ const {
   parse: rawParse,
   attrs: rawAttrs,
   attrResolve,
+  diff: rawDiff,
+  mask: rawMask,
 } = await import(join(pkg, "onion_wasm.js"));
 const {
   reader,
@@ -522,6 +524,110 @@ if (corpus && existsSync(corpus)) {
       break;
     }
   }
+}
+
+// --- the range questions, against Rust's own answers ----------------------
+//
+// `onion/tests/dish_queries.rs` computes every entry through `Cst::extent`
+// and `Cst::owners` and writes it out. The reader has the same parts and does
+// the same walk; if the two ever disagree, one of them is wrong here rather
+// than in a consumer.
+{
+  const dir = resolve(here, "../../testData/goldens/dish-queries");
+  if (!existsSync(dir)) {
+    throw new Error(`${dir} is absent — run \`cargo test -p usfm_onion --test dish_queries\``);
+  }
+  let entries = 0;
+  for (const name of readdirSync(dir).sort()) {
+    if (!name.endsWith(".json")) continue;
+    const golden = JSON.parse(readFileSync(join(dir, name), "utf8"));
+    const path =
+      golden.source === "(inline: SHAPES)"
+        ? join(dir, "shapes.usfm")
+        : resolve(here, "../..", golden.source);
+    const text = readFileSync(path, "utf8").replace(/\r\n/g, "\n");
+    // Byte offsets, because that is the space the goldens are in.
+    const { tree, tokens, sourceLength } = parse(text, false, false, false);
+    for (const want of golden.entries) {
+      const got = tree.enclosing(want.from, want.to);
+      check(
+        got.from === want.enclosing.from &&
+          got.to === want.enclosing.to &&
+          got.marker === want.enclosing.marker,
+        `${name} ${want.from}..${want.to}: enclosing ${got.from}..${got.to}/${got.marker} ` +
+          `!== ${want.enclosing.from}..${want.enclosing.to}/${want.enclosing.marker}`,
+      );
+      eq(tree.inMarkup(want.from, want.to), want.inMarkup, `${name} ${want.from}..${want.to}: inMarkup`);
+      entries++;
+    }
+
+    // `tokenAt` is total inside the document and refuses outside it, and
+    // `spansIn` over a whole token is that token.
+    for (let i = 0; i < tokens.length; i += Math.max(1, Math.floor(tokens.length / 200))) {
+      const { from, to } = tokens.at(i).span();
+      eq(tree.tokenAt(from), i, `${name}: tokenAt(start of ${i})`);
+      eq(tree.tokenAt(to - 1), i, `${name}: tokenAt(last byte of ${i})`);
+      const spans = tree.spansIn(from, to);
+      eq(spans.length, 1, `${name}: spansIn over token ${i} is one span`);
+      eq(spans[0].from, from, `${name}: …starting where it does`);
+      eq(spans[0].to, to, `${name}: …and ending there`);
+      eq(spans[0].kind, tokens.at(i).kind(), `${name}: …with its kind`);
+    }
+    let threw = false;
+    try {
+      // `sourceLength`, not `text.length`: the dish is in bytes here and a JS
+      // string counts UTF-16, so a non-ASCII book would still be inside.
+      tree.tokenAt(sourceLength);
+    } catch {
+      threw = true;
+    }
+    check(threw, `${name}: tokenAt past the document throws`);
+  }
+  console.log(`dish queries: ${entries} golden entries reproduced`);
+}
+
+// --- diff runs tile their unit and rebuild the text cut -------------------
+//
+// L1 and L2 over the JSON, in the UTF-16 offsets the door speaks. A run
+// carries no bytes of its own — `source.slice(from, to)` is its text.
+{
+  const baseline = BOOK;
+  const current = BOOK.replace("God created.", "God \\add truly\\add* made.").replace(
+    "\\q1 \\v 2-3",
+    "\\q2 \\v 2-3",
+  );
+  const skeleton = JSON.parse(rawDiff(baseline, current, "words"));
+  let runs = 0;
+  let markupSeen = false;
+  for (const unit of skeleton.units) {
+    if (!unit.text) continue;
+    for (const [side, source] of [
+      ["baseline", baseline],
+      ["current", current],
+    ]) {
+      const list = unit.text[side];
+      if (list.length === 0) continue;
+      const span = unit[side];
+      eq(list[0].from, span[0], `${unit.unitId} ${side}: runs open the unit`);
+      eq(list[list.length - 1].to, span[1], `${unit.unitId} ${side}: …and close it`);
+      let reading = "";
+      for (let i = 0; i < list.length; i++) {
+        const run = list[i];
+        if (i > 0) eq(list[i - 1].to, run.from, `${unit.unitId} ${side}: run ${i} is gapless`);
+        if (run.what === "markup") markupSeen = true;
+        else reading += source.slice(run.from, run.to);
+        runs++;
+      }
+      // L2: what is not markup IS the `text` cut of the same span.
+      eq(
+        reading,
+        rawMask(source.slice(span[0], span[1]), "text").text,
+        `${unit.unitId} ${side}: the non-markup runs rebuild the text cut`,
+      );
+    }
+  }
+  check(runs > 0, "the diff produced runs");
+  check(markupSeen, "a `\\add` the words moved around shows as a markup run");
 }
 
 console.log(failures === 0 ? "conformance: OK" : `conformance: ${failures} FAILURES`);

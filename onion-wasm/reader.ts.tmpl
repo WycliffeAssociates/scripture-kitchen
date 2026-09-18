@@ -506,6 +506,107 @@ export class Tree {
       node = next;
     }
   }
+
+  /**
+   * The index of the token whose `[start, end)` contains `offset`.
+   *
+   * Tokens partition the source, so this is TOTAL for `0 <= offset <
+   * sourceLength`; an offset outside the document is a `RangeError` rather
+   * than a clamp, because a clamped answer names the wrong marker.
+   */
+  tokenAt(offset: number): number {
+    const n = this.tokens.length;
+    const end = n === 0 ? 0 : this.tokens.seek(n - 1).end;
+    if (offset < 0 || offset >= end) {
+      throw new RangeError(`offset ${offset} is outside 0..${end}`);
+    }
+    let lo = 0;
+    let hi = n - 1;
+    let found = 0;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (this.tokens.seek(mid).start <= offset) {
+        found = mid;
+        lo = mid + 1;
+      } else hi = mid - 1;
+    }
+    return found;
+  }
+
+  /**
+   * The smallest node whose extent covers `[from, to)` — what WRAPS a range.
+   *
+   *   \v 1 Jesus \add wept\add*.
+   *              enclosing(hit of "wept") → the `\add` node, `marker` its row
+   *
+   * The walk is the owner of `tokenAt(from)`, then up while the extent falls
+   * short of `to`. The root covers everything, so this is total; `marker` is
+   * the opening token's row, `0` on the root. An empty range asks about the
+   * point at `from`.
+   */
+  enclosing(
+    from: number,
+    to: number,
+  ): { node: number; token: number; marker: number; from: number; to: number } {
+    const token = this.tokenAt(from);
+    const end = Math.max(to, from + 1);
+    let node = this.owners()[token];
+    for (;;) {
+      const span = this.extent(node);
+      if (span.from <= from && end <= span.to) break;
+      const up = this.parent(node);
+      if (up === NONE) break;
+      node = up;
+    }
+    const span = this.extent(node);
+    const opener = this.nodes.seek(node).token;
+    return {
+      node,
+      token,
+      marker: opener === NONE ? 0 : this.tokens.seek(opener).marker,
+      from: span.from,
+      to: span.to,
+    };
+  }
+
+  /**
+   * Every token overlapping `[from, to)`, clipped to it, in document order.
+   * `kind` carries no spelling bit; `marker` is the row, or 0.
+   *
+   * What a range is MADE of, where `enclosing` is what it sits in.
+   */
+  spansIn(from: number, to: number): { from: number; to: number; kind: number; marker: number }[] {
+    const out: { from: number; to: number; kind: number; marker: number }[] = [];
+    const n = this.tokens.length;
+    if (to <= from || n === 0) return out;
+    let lo = 0;
+    let hi = n - 1;
+    let i = 0;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (this.tokens.seek(mid).start <= from) {
+        i = mid;
+        lo = mid + 1;
+      } else hi = mid - 1;
+    }
+    for (; i < n; i++) {
+      // Every field is read before the cursor moves again.
+      const r = this.tokens.seek(i);
+      const start = r.start;
+      const stop = r.end;
+      const kind = r.kind & ~TOKEN_SPELLING_BIT;
+      const marker = r.marker;
+      if (start >= to) break;
+      if (stop <= from) continue;
+      out.push({ from: Math.max(start, from), to: Math.min(stop, to), kind, marker });
+    }
+    return out;
+  }
+
+  /** True when no `Text` bytes lie in `[from, to)` — the range is all markup. */
+  inMarkup(from: number, to: number): boolean {
+    return this.spansIn(from, to).every((span) => span.kind !== TokenKind.Text);
+  }
 }
 
 /** Every token, as a sequence. */

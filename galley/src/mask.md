@@ -30,8 +30,28 @@ Two doors write it, the same buffer either way:
 ```js
 galley.mask(id, opts?)      // a registered book — verseText off the retained projection
 galley.maskOf(text, opts?)  // text the host holds
-// opts = { recipe?: "verseText" | "structure", utf16?: boolean }
+// opts = { recipe?: "verseText" | "structure" | "text", utf16?: boolean }
 ```
+
+## Three cuts, named for what survives
+
+| recipe | word | what survives |
+| --- | --- | --- |
+| `verseText` | 0 | text inside verse extents only; notes, headings and front matter drop |
+| `structure` | 1 | paragraph, chapter, verse, table and periph markers with designators, newlines, attribute lists |
+| `text` | 2 | every text byte anywhere, notes included; nothing removed |
+
+The mask's axis is text versus markup, and the names say which side of it a cut
+keeps. `structure` is not all markup — character markers drop, which is what
+makes overlaying a skeleton onto a target possible at all.
+
+`text` is the cut a diff run is written in: nothing is removed, so no byte is
+unreachable, and a run whose `what` is not `"markup"` is bytes from this cut. A
+host rendering a diff page cuts its UNCHANGED units through the same recipe, so
+a footnote is inline everywhere or nowhere — its choice, made once.
+
+A reader that does not know a recipe number throws at `open` naming it, rather
+than labelling the buffer as whichever cut sorts first.
 
 ## The layout
 
@@ -42,7 +62,7 @@ Sequential-counted, like the find buffer: one book per buffer, no directory.
 | 0 | `magic` | `MASK`, little-endian |
 | 4 | `version` | 1 |
 | 8 | `flags` | bit 0: every offset is a UTF-16 unit |
-| 12 | `recipe` | 0 `verseText`, 1 `structure` |
+| 12 | `recipe` | 0 `verseText`, 1 `structure`, 2 `text` |
 | 16 | `rangeCount` | |
 | 20 | `sourceLen` | the text's length, in the flags' unit |
 | 24 | `projectedLen` | the projection's length, same unit |

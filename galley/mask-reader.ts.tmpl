@@ -33,9 +33,23 @@ export const FORMAT_VERSION = @@FORMAT_VERSION@@;
 /** Header flag: every offset in the buffer is UTF-16 rather than a byte. */
 export const FLAG_UTF16 = @@FLAG_UTF16@@;
 
-/** Which cut the ranges came from. */
+/**
+ * Which cut the ranges came from, by what SURVIVES it:
+ *
+ *   verseText   text inside verse extents only; notes and headings drop
+ *   structure   paragraph, chapter, verse, table and periph markers
+ *   text        every text byte anywhere, notes included; nothing removed
+ */
 export const RECIPE_VERSE_TEXT = @@RECIPE_VERSE_TEXT@@;
 export const RECIPE_STRUCTURE = @@RECIPE_STRUCTURE@@;
+export const RECIPE_TEXT = @@RECIPE_TEXT@@;
+
+/** The word each recipe number is named by. A number absent here throws. */
+export const RECIPE_NAMES: Record<number, string> = {
+  [RECIPE_VERSE_TEXT]: "verseText",
+  [RECIPE_STRUCTURE]: "structure",
+  [RECIPE_TEXT]: "text",
+};
 
 export const HEADER_BYTES = @@HEADER_BYTES@@;
 export const HEADER_MAGIC_OFFSET = @@HEADER_MAGIC_OFFSET@@;
@@ -61,7 +75,7 @@ export class MaskMap {
   readonly rangeCount: number;
   /** The header's raw flag word; read [`utf16`](#utf16) rather than this. */
   readonly flags: number;
-  /** `"verseText"` or `"structure"` — which cut these ranges came from. */
+  /** `"verseText"`, `"structure"` or `"text"` — which cut these ranges are. */
   readonly recipe: string;
   /** The length of the text the ranges were cut from, in this buffer's unit. */
   readonly sourceLen: number;
@@ -79,8 +93,13 @@ export class MaskMap {
     this.rangeCount = view.getUint32(HEADER_RANGE_COUNT_OFFSET, true);
     this.sourceLen = view.getUint32(HEADER_SOURCE_LEN_OFFSET, true);
     this.projectedLen = view.getUint32(HEADER_PROJECTED_LEN_OFFSET, true);
-    this.recipe =
-      view.getUint32(HEADER_RECIPE_OFFSET, true) === RECIPE_STRUCTURE ? "structure" : "verseText";
+    const recipe = view.getUint32(HEADER_RECIPE_OFFSET, true);
+    // A recipe this reader has no name for is a buffer from a newer galley.
+    // Naming it beats labelling it as whichever cut happens to sort first.
+    if (!(recipe in RECIPE_NAMES)) {
+      throw new Error(`mask buffer names recipe ${recipe}; this reader knows 0-${RECIPE_TEXT}`);
+    }
+    this.recipe = RECIPE_NAMES[recipe];
     this.#rows = new RangeRow(
       new DataView(bytes.buffer, bytes.byteOffset + HEADER_BYTES, this.rangeCount * RANGE_STRIDE),
     );

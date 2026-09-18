@@ -8,8 +8,8 @@
 //!
 //! One parser for both doors ([`Galley::mask`](super::Galley::mask) and
 //! [`Galley::mask_of`](super::Galley::mask_of)): an absent key reads as its
-//! default, a wrong TYPE names the key, and an unknown recipe names the two
-//! that exist rather than falling back to either.
+//! default, a wrong TYPE names the key, and an unknown recipe names the three
+//! that exist rather than falling back to any of them.
 
 use wasm_bindgen::prelude::*;
 
@@ -40,9 +40,11 @@ pub(super) fn options(value: &JsValue) -> Result<MaskOptions, JsError> {
             match name.as_str() {
                 "verseText" => Recipe::VerseText,
                 "structure" => Recipe::Structure,
+                "text" => Recipe::Text,
                 other => {
                     return Err(JsError::new(&format!(
-                        "unknown mask recipe {other:?}; expected \"verseText\" or \"structure\""
+                        "unknown mask recipe {other:?}; \
+                         expected \"verseText\", \"structure\" or \"text\""
                     )));
                 }
             }

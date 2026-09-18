@@ -10,8 +10,8 @@
 use std::collections::BTreeMap;
 
 use usfm_onion::diff::{
-    CoveredSide, Decisions, DiffSkeleton, MergeError, MergeSide, SlotRole, Status, TextDiffMode,
-    UnitKind, diff, diff_with_text, merge, revert, to_edits,
+    CoveredSide, Decisions, DiffSkeleton, MergeError, MergeSide, RunWhat, SlotRole, Status,
+    TextDiffMode, UnitKind, diff, diff_with_text, merge, revert, to_edits,
 };
 use usfm_onion::edit::apply_splices;
 
@@ -899,20 +899,18 @@ fn requesting_a_text_diff_never_perturbs_the_skeleton() {
 }
 
 #[test]
-fn a_modified_unit_splits_into_word_runs_that_rebuild_the_reader_text() {
-    let (skeleton, texts) = diff_with_text(
-        &wrap(1, CASES[0].baseline),
-        &wrap(1, CASES[0].current),
-        TextDiffMode::Words,
-    );
+fn a_modified_unit_splits_into_word_runs_that_rebuild_the_total_text() {
+    let baseline_source = wrap(1, CASES[0].baseline);
+    let current_source = wrap(1, CASES[0].current);
+    let (skeleton, texts) = diff_with_text(&baseline_source, &current_source, TextDiffMode::Words);
     let index = skeleton
         .units
         .iter()
         .position(|unit| unit.status == Status::Modified)
         .expect("case 1 modifies one verse");
     let diff = texts[index].as_ref().unwrap();
-    let baseline: String = diff.baseline.iter().map(|run| run.text.as_str()).collect();
-    let current: String = diff.current.iter().map(|run| run.text.as_str()).collect();
+    let baseline = reading(&diff.baseline, baseline_source.as_bytes());
+    let current = reading(&diff.current, current_source.as_bytes());
     assert_eq!(
         baseline,
         "In the beginning God created the heaven and the earth.\n"
@@ -926,13 +924,13 @@ fn a_modified_unit_splits_into_word_runs_that_rebuild_the_reader_text() {
         .baseline
         .iter()
         .filter(|run| run.kind == usfm_onion::diff::RunKind::Removed)
-        .map(|run| run.text.as_str())
+        .map(|run| run_text(baseline_source.as_bytes(), run))
         .collect();
     let added: Vec<&str> = diff
         .current
         .iter()
         .filter(|run| run.kind == usfm_onion::diff::RunKind::Added)
-        .map(|run| run.text.as_str())
+        .map(|run| run_text(current_source.as_bytes(), run))
         .collect();
     assert_eq!(removed, vec!["heaven"]);
     assert_eq!(added, vec!["heavens"]);
@@ -951,11 +949,37 @@ fn a_char_marker_wrap_is_not_glued_with_a_synthetic_space() {
         .position(|unit| unit.status == Status::Modified)
         .expect("one modified verse");
     let diff = texts[index].as_ref().unwrap();
-    let baseline_text: String = diff.baseline.iter().map(|run| run.text.as_str()).collect();
+    let baseline_text = reading(&diff.baseline, baseline.as_bytes());
     assert!(baseline_text.contains("worded"), "got {baseline_text:?}");
     assert!(!baseline_text.contains("word ed"));
-    // The note prose the mask keeps is the reader's text; markup is not in it.
+    // The note prose the mask keeps is the reading; markup is not in it.
     assert!(!baseline_text.contains("add"));
+    // It is not gone, though — it is a markup run, spanned in the source.
+    let markers: Vec<&str> = diff
+        .baseline
+        .iter()
+        .filter(|run| run.what == RunWhat::Markup)
+        .map(|run| run_text(baseline.as_bytes(), run))
+        .collect();
+    // `\v` and its designator are contiguous markup of one kind, so they are
+    // one run.
+    assert_eq!(markers, vec!["\\v 1 ", "\\add ", "\\add*"]);
+}
+
+/// A run's bytes: `source[from..to]` on its own side, never carried on the
+/// run itself.
+fn run_text<'a>(source: &'a [u8], run: &usfm_onion::diff::TextDiffRun) -> &'a str {
+    std::str::from_utf8(&source[run.from as usize..run.to as usize])
+        .expect("run spans fall on character boundaries")
+}
+
+/// The reading a consumer that hides markup renders: everything but the markup
+/// runs, which is [`Filter::text`]'s cut of the same span (law L2).
+fn reading(runs: &[usfm_onion::diff::TextDiffRun], source: &[u8]) -> String {
+    runs.iter()
+        .filter(|run| run.what != RunWhat::Markup)
+        .map(|run| run_text(source, run))
+        .collect()
 }
 
 #[test]

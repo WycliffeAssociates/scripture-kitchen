@@ -88,6 +88,16 @@ impl std::error::Error for UnknownMarker {}
 /// What survives a mask. Config only — no predicate, no callback: one API for
 /// Rust and for a wasm caller that can only hand over data.
 ///
+/// Three recipes, each named for what SURVIVES it:
+///
+/// ```text
+/// structure    paragraph, chapter, verse, table and periph markers with their
+///              designators, newlines, attribute lists — character markers drop
+/// text         every text byte anywhere, notes included; nothing removed
+/// verse_text   that restricted to verse extents: notes, headings and front
+///              matter drop
+/// ```
+///
 /// Build from a recipe and mutate what you disagree with; there are no merge
 /// semantics beyond the one precedence rule, **marker beats kind**:
 ///
@@ -151,16 +161,16 @@ impl Filter {
         }
     }
 
-    /// The diff's reader text: every byte a reader would read, wherever it
-    /// sits.
+    /// The TOTAL text: every text byte anywhere, nothing removed.
     ///
     /// [`Self::verse_text`] with two differences, both because a diff UNIT is
     /// not a verse: text outside a verse extent (front matter, `\h`, a heading)
     /// belongs to some block and has to be diffable, and note prose rides in
     /// undifferentiated rather than dropping with its subtree. Nothing is
-    /// [`Action::Remove`]d, so no text is unreachable; `//` survives, so a
-    /// break is a run of its own instead of gluing two words.
-    pub fn reader_text() -> Self {
+    /// [`Action::Remove`]d, so no text is unreachable — the merge-safety
+    /// property, and why the diff runs on this cut; `//` survives, so a break
+    /// is a run of its own instead of gluing two words.
+    pub fn text() -> Self {
         Self {
             kinds: [Action::Unwrap; MarkerKind::COUNT],
             markers: Vec::new(),

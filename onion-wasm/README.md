@@ -169,10 +169,13 @@ from the `chapters` section.
   `"words"` (UAX-29) or `"chars"` (graphemes); an unknown name REJECTS rather
   than defaulting. `"none"` builds no CST and no mask and yields the JSON the
   door returned before runs existed. The runs ride on a `modified` unit's
-  `text: {baseline, current}` as `{text, kind}`, reader-visible text only (no
-  markers), UTF-8 with no offsets to convert. `unchanged` and `moved` units
-  carry NO `text` key — a pure move must not highlight, and a whole-Bible
-  skeleton is mostly those.
+  `text: {baseline, current}` as `{from, to, kind, what}`: UTF-16 spans into
+  that side's own document, `what` one of `"markup"` | `"text"` |
+  `"whitespace"`. They TILE the unit's span, so a consumer decorates
+  `source.slice(from, to)` instead of searching for a run's text; dropping
+  `what == "markup"` and concatenating the rest gives the `"text"` mask cut of
+  the same span. `unchanged` and `moved` units carry NO `text` key — a pure
+  move must not highlight, and a whole-Bible skeleton is mostly those.
 - **UTF-16 offsets, LF-canonical input.** Every offset out is a CodeMirror
   code-unit offset. That assumes the text is LF-normalized: CodeMirror counts a
   line break as ONE position, a literal `\r\n` is TWO UTF-16 code units, so
