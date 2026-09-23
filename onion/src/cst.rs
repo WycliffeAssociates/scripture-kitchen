@@ -442,8 +442,13 @@ impl Builder {
         // the row already says so. Otherwise every uW chunk marker opens a plain
         // frame only displacement can kill (thousands of `\ts` Recovery stamps
         // across en_ult).
+        // A `standalone` extension is bare by definition: a leaf, no frame.
         if generated::kind(marker_idx) == MarkerKind::Milestone {
-            self.milestone_point(token_idx, marker_idx, false);
+            if generated::closing(marker_idx) == ClosingBehavior::None {
+                self.scratch.push(token_idx);
+            } else {
+                self.milestone_point(token_idx, marker_idx, false);
+            }
             return;
         }
 

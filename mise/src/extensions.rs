@@ -127,10 +127,19 @@ impl fmt::Display for ExtensionCategory {
 /// missing-category rules belong to whoever is assembling a list and stay
 /// there.
 pub fn check_name(name: &str) -> Option<&'static str> {
+    if !name.is_empty() && !name.starts_with('z') {
+        Some("name does not start with z")
+    } else {
+        check_legacy_name(name)
+    }
+}
+
+/// [`check_name`] without the `z` rule, for a host that opted into a legacy
+/// name like `s5`. Whether the spec already defines the name is the engine's
+/// question, not this crate's.
+pub fn check_legacy_name(name: &str) -> Option<&'static str> {
     if name.is_empty() {
         Some("\\marker with no name")
-    } else if !name.starts_with('z') {
-        Some("name does not start with z")
     } else if !name.bytes().all(|b| b.is_ascii_alphanumeric()) {
         Some("name is not ASCII alphanumeric")
     } else {

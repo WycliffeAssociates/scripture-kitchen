@@ -8,11 +8,11 @@ verse GEN 1:1 13..18 text 18..73
 verse GEN 1:2 80..85 text 85..122
 verse GEN 1:3 129..134 text 134..194
 verse GEN 1:4 198..203 text 203..239
-block GEN 1:1 inside 1 m 74..76 empty=true
-block GEN 1:2 leading 1 p 77..79 empty=false
-block GEN 1:2 inside 1 p 123..125 empty=true
-block GEN 1:3 leading 1 p 126..128 empty=false
-block GEN 1:4 leading 1 b 195..197 empty=false
+block GEN 1:1 inside 1 m 74..76 end 77 empty=true
+block GEN 1:2 leading 1 p 77..79 end 123 empty=false
+block GEN 1:2 inside 1 p 123..125 end 126 empty=true
+block GEN 1:3 leading 1 p 126..128 end 195 empty=false
+block GEN 1:4 leading 1 b 195..197 end 240 empty=false
 collapsed GEN 1:2 p 2
 collapsed GEN 1:3 p 2
 # gen target
@@ -25,9 +25,9 @@ verse GEN 2:21 16..22 text 22..184
 verse GEN 2:22 185..191 text 191..296
 verse GEN 2:23 297..303 text 303..457
 verse GEN 2:24 461..467 text 467..586
-block GEN 2:21 leading 1 p 13..15 empty=false
-block GEN 2:23 inside 1 q1 321..325 empty=false
-block GEN 2:23 inside 2 q2 357..361 empty=false
-block GEN 2:23 inside 3 q1 384..388 empty=false
-block GEN 2:23 inside 4 q2 421..425 empty=false
-block GEN 2:24 leading 1 p 458..460 empty=false
+block GEN 2:21 leading 1 p 13..15 end 321 empty=false
+block GEN 2:23 inside 1 q1 321..325 end 357 empty=false
+block GEN 2:23 inside 2 q2 357..361 end 384 empty=false
+block GEN 2:23 inside 3 q1 384..388 end 421 empty=false
+block GEN 2:23 inside 4 q2 421..425 end 458 empty=false
+block GEN 2:24 leading 1 p 458..460 end 620 empty=false

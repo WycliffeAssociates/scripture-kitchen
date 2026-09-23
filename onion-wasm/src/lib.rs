@@ -60,7 +60,7 @@ use usfm_onion::diff::{
     self, Addr, CoveredSide, Decisions, DiffSkeleton, MergeSide, RunKind, RunWhat, SlotRole,
     Status, TextDiffMode, TextDiffRun, UnitKind, UnitTextDiff,
 };
-use usfm_onion::extensions::{CustomMarker, ExtensionCategory};
+use usfm_onion::extensions::{CustomMarker, ExtensionCategory, ExtensionOptions};
 use usfm_onion::format::{CharBreaks, FormatOptions, Newline, VerseBreaks};
 use usfm_onion::lint::Code;
 use usfm_onion::mask as mask_recipe;
@@ -441,7 +441,8 @@ struct WireUnitText {
 
 /// One run, spanned in its own side's document. `from`/`to` are UTF-16 offsets
 /// like every other span here; `what` says which of the three the bytes are, so
-/// a renderer hiding markup drops `"markup"` and concatenates the rest. Its
+/// a renderer hiding markup drops `"markup"` and concatenates the rest — with
+/// `note: true` runs kept apart, because a footnote is its own reading. Its
 /// bytes are `source.slice(from, to)` on the same side — the run carries no
 /// text of its own.
 #[derive(Serialize)]
@@ -451,6 +452,7 @@ struct WireTextRun {
     to: u32,
     kind: &'static str,
     what: &'static str,
+    note: bool,
 }
 
 #[derive(Serialize)]
@@ -485,6 +487,7 @@ fn runs(runs: &[TextDiffRun], index: &Utf16Index<'_>) -> Vec<WireTextRun> {
                 RunWhat::Text => "text",
                 RunWhat::Whitespace => "whitespace",
             },
+            note: run.note,
         })
         .collect()
 }
@@ -753,6 +756,31 @@ pub fn to_utf16(text: &str, byte: u32) -> u32 {
 }
 
 // ---------------------------------------------------------------------------
+// The engine's hash, for a host's own bytes
+// ---------------------------------------------------------------------------
+
+/// XXH3-64, seed 0, over the bytes — the hash every dish header stamps as
+/// `sourceHash`, for whatever a host wants to key: a file fetched over the
+/// network, a chapter slice cut at a TOC row.
+///
+/// ```js
+/// xxh3(bytes)                          // → 0x…n, a bigint (u64)
+/// xxh3Text(text) === xxh3(new TextEncoder().encode(text))
+/// xxh3Text(text) === parse(text, …).sourceHash
+/// ```
+#[wasm_bindgen]
+pub fn xxh3(bytes: &[u8]) -> u64 {
+    xxhash_rust::xxh3::xxh3_64(bytes)
+}
+
+/// [`xxh3`] over a string's UTF-8, without a `TextEncoder` round trip on the
+/// JS side.
+#[wasm_bindgen(js_name = xxh3Text)]
+pub fn xxh3_text(text: &str) -> u64 {
+    xxh3(text.as_bytes())
+}
+
+// ---------------------------------------------------------------------------
 // The two named readouts
 // ---------------------------------------------------------------------------
 
@@ -939,6 +967,10 @@ pub fn extensions_from_markers_ext(text: &str) -> String {
 /// ```js
 /// setExtensions('[{"name":"zaln","category":"milestone"}]');  // → "[]"
 /// setExtensions("[]");                                        // clears
+///
+/// // Legacy markup a host cannot change: en_ulb's chunk marker, as a bare
+/// // point that leaves its paragraph open.
+/// setExtensions('[{"name":"s5","category":"standalone"}]', { relaxZPrefix: true });
 /// ```
 ///
 /// Takes the LIST, never a file: a host with a `custom.sty`, or a UI that lets
@@ -954,18 +986,47 @@ pub fn extensions_from_markers_ext(text: &str) -> String {
 /// both caches key on content. Call it at composition, before the first
 /// parse, rather than between edits.
 ///
-/// Throws only on malformed JSON. A bad ENTRY — no name, a name that is not
+/// `relaxZPrefix` admits a name without the `z` that the spec does not
+/// define; a name the spec does define (`s1`, `p`) is still a report.
+///
+/// Throws on malformed JSON and on an `opts` that is not an object or whose
+/// `relaxZPrefix` is not a boolean. A bad ENTRY — no name, a name that is not
 /// `z`-initial, an unknown category word, a duplicate — is a report, not a
 /// failure, so one bad line never costs a host the rest of its list.
 #[wasm_bindgen(js_name = setExtensions)]
-pub fn set_extensions(list: &str) -> Result<String, JsError> {
-    installed(list).map_err(|error| JsError::new(&error))
+pub fn set_extensions(
+    list: &str,
+    #[wasm_bindgen(unchecked_optional_param_type = "{ relaxZPrefix?: boolean }")] opts: Option<
+        JsValue,
+    >,
+) -> Result<String, JsError> {
+    let opts = opts.unwrap_or(JsValue::UNDEFINED);
+    let relax_z_prefix = relax_z_prefix(&opts).map_err(JsError::new)?;
+    installed(list, relax_z_prefix).map_err(|error| JsError::new(&error))
+}
+
+/// `{ relaxZPrefix? }`, absent reading as `false`.
+fn relax_z_prefix(opts: &JsValue) -> Result<bool, &'static str> {
+    if opts.is_undefined() || opts.is_null() {
+        return Ok(false);
+    }
+    if !opts.is_object() {
+        return Err("setExtensions: options must be an object");
+    }
+    let value =
+        Reflect::get(opts, &JsValue::from_str("relaxZPrefix")).unwrap_or(JsValue::UNDEFINED);
+    if value.is_undefined() {
+        return Ok(false);
+    }
+    value
+        .as_bool()
+        .ok_or("setExtensions: relaxZPrefix must be a boolean")
 }
 
 /// `set_extensions`'s body, split from the door for the same reason
 /// [`diffed`] is: `JsError` cannot be constructed off a wasm target, so a
 /// native test would have nothing to call.
-fn installed(list: &str) -> Result<String, String> {
+fn installed(list: &str, relax_z_prefix: bool) -> Result<String, String> {
     let parsed: Vec<WireExtension> =
         serde_json::from_str(list).map_err(|error| format!("setExtensions: {error}"))?;
 
@@ -990,7 +1051,7 @@ fn installed(list: &str) -> Result<String, String> {
         });
     }
     reports.extend(
-        usfm_onion::set_extensions(&markers)
+        usfm_onion::set_extensions_with(&markers, &ExtensionOptions { relax_z_prefix })
             .into_iter()
             .map(|report| WireMalformed {
                 line: None,
@@ -1316,6 +1377,18 @@ mod tests {
         assert_eq!(usfm_onion::lex("\\zmyf x")[0].marker_idx, 0);
     }
 
+    /// The free hash is the header's: same function, same seed, same bytes.
+    #[test]
+    fn xxh3_is_the_dish_source_hash() {
+        let text = "\\id GEN\n\\c 1\n\\p\n\\v 1 In the beginning\n";
+        let dish = wire::plate(&wire::parse(text, wire::ParseOptions::default()));
+        let stamped = u64::from_le_bytes(dish[24..32].try_into().unwrap());
+        assert_eq!(xxh3_text(text), stamped);
+        assert_eq!(xxh3(text.as_bytes()), stamped);
+        // Pinned, so a dependency bump that changed the function is loud.
+        assert_eq!(xxh3(b""), 0x2d06_8005_38d3_94c2);
+    }
+
     /// Installing changes what the same bytes mean; a bad entry is a report,
     /// not a failure; malformed JSON is the one thing that throws.
     #[test]
@@ -1323,13 +1396,13 @@ mod tests {
         struct Restore;
         impl Drop for Restore {
             fn drop(&mut self) {
-                let _ = installed("[]");
+                let _ = installed("[]", false);
             }
         }
         let _restore = Restore;
 
         assert_eq!(
-            installed(r#"[{"name":"zaln","category":"milestone"}]"#).unwrap(),
+            installed(r#"[{"name":"zaln","category":"milestone"}]"#, false).unwrap(),
             "[]"
         );
         let idx = usfm_onion::lex("\\zaln-s |x=\"1\"\\*")[0].marker_idx;
@@ -1344,6 +1417,7 @@ mod tests {
             &installed(
                 r#"[{"name":"znope","category":"bogus"},{"name":"nope","category":"char"},
                     {"name":"zok","category":"versepara"}]"#,
+                false,
             )
             .unwrap(),
         )
@@ -1360,8 +1434,25 @@ mod tests {
             usfm_onion::lex("\\zok x")[0].marker_idx
         ));
 
-        assert!(installed("{").is_err(), "malformed JSON throws");
-        assert_eq!(installed("[]").unwrap(), "[]");
+        assert!(installed("{", false).is_err(), "malformed JSON throws");
+        assert_eq!(installed("[]", false).unwrap(), "[]");
         assert_eq!(usfm_onion::lex("\\zok x")[0].marker_idx, 0, "cleared");
+
+        // A legacy name installs only under the option, and never over a spec
+        // marker.
+        let legacy =
+            r#"[{"name":"s5","category":"standalone"},{"name":"s1","category":"standalone"}]"#;
+        let strict: serde_json::Value =
+            serde_json::from_str(&installed(legacy, false).unwrap()).unwrap();
+        assert_eq!(strict[0]["reason"], "name does not start with z");
+        let relaxed: serde_json::Value =
+            serde_json::from_str(&installed(legacy, true).unwrap()).unwrap();
+        let relaxed = relaxed.as_array().unwrap();
+        assert_eq!(relaxed.len(), 1, "{relaxed:?}");
+        assert_eq!(relaxed[0]["name"], "s1");
+        assert!(usfm_onion::tables::generated::is_extension(
+            usfm_onion::lex("\\s5\n")[0].marker_idx
+        ));
+        assert_eq!(installed("[]", false).unwrap(), "[]");
     }
 }

@@ -521,14 +521,17 @@ impl<'a> Export<'a> {
     /// unknown marker, the bare-`\*` milestone spelling.
     fn marker_leaf(&mut self, idx: u32, token: &Token, list: usize) {
         let marker = self.marker_name(token);
-        if token.marker_idx == generated::UNRESOLVED {
+        // A `standalone` extension is a milestone by its row, bare.
+        let bare = generated::kind(token.marker_idx) == MarkerKind::Milestone;
+        if token.marker_idx == generated::UNRESOLVED || bare {
             // `\zms\*`: the `\*` SPELLING says milestone even though the row
             // knows nothing. An unknown marker in PARAGRAPH position is a block
             // instead — it stands where a `\p` stands, as in USJ/USX.
-            let milestone = matches!(
-                self.tokens.get(idx as usize + 1).map(Token::kind),
-                Some(TokenKind::MilestoneTerminator)
-            );
+            let milestone = bare
+                || matches!(
+                    self.tokens.get(idx as usize + 1).map(Token::kind),
+                    Some(TokenKind::MilestoneTerminator)
+                );
             self.flush_pending(list);
             self.seal_run(list, !milestone);
             self.begin_item(list, Wrap::None);

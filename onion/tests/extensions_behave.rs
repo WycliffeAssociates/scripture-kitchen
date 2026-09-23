@@ -20,7 +20,7 @@
 use mise::extensions::{CustomMarker, ExtensionCategory};
 
 use usfm_onion::cst::{self, Cst};
-use usfm_onion::extensions::Extensions;
+use usfm_onion::extensions::{ExtensionOptions, Extensions};
 use usfm_onion::lint::Code;
 use usfm_onion::tables::generated;
 use usfm_onion::tables::schema::{MarkerKind, SpecContext};
@@ -159,24 +159,32 @@ fn character_extensions_pair_and_note_peers_stay_siblings() {
     );
 }
 
-/// `standalone` is a POINT — it owns no content — and `milestone` pairs
-/// `-s`/`-e`, taking attributes as `\qt-s` does.
+/// `standalone` is bare — a leaf that opens nothing and leaves its paragraph
+/// open — and `milestone` pairs `-s`/`-e`, taking attributes as `\qt-s` does.
 #[test]
-fn standalone_is_a_point_and_milestone_pairs() {
+fn standalone_is_bare_and_milestone_pairs() {
     let ext = registry(&[
         ("zms", ExtensionCategory::Standalone),
         ("zaln", ExtensionCategory::Milestone),
     ]);
     let source =
-        "\\id GEN\n\\c 1\n\\p \\v 1 a \\zms \\*b \\zaln-s |x-strong=\"H1\"\\*word\\zaln-e\\* c\n";
+        "\\id GEN\n\\c 1\n\\p \\v 1 a \\zms b \\zaln-s |x-strong=\"H1\"\\*word\\zaln-e\\* c\n";
     let doc = parse(source, &ext);
 
-    let point = doc.node_of(source, "zms");
-    let extent = doc.extent(point);
-    assert_eq!(
-        &source[extent.start as usize..extent.end as usize],
-        "\\zms \\*",
-        "a standalone owns its terminator and nothing else"
+    let template = generated::template_for(ExtensionCategory::Standalone);
+    let bare = doc
+        .tokens
+        .iter()
+        .position(|token| token.marker_idx == template)
+        .expect("the standalone resolved") as u32;
+    assert!(
+        doc.cst.nodes.iter().all(|node| node.token != bare),
+        "a standalone opens no node"
+    );
+    let para = doc.node_of(source, "p");
+    assert!(
+        doc.extent(para).end as usize >= source.trim_end().len(),
+        "the paragraph runs past it"
     );
 
     let milestone = doc.node_of(source, "zaln-s");
@@ -194,6 +202,61 @@ fn standalone_is_a_point_and_milestone_pairs() {
         .filter(|token| token.marker_idx == template)
         .count();
     assert_eq!(sides, 2, "`-s` and `-e` share the row");
+}
+
+/// en_ulb's `\s5`, registered as a legacy standalone: the paragraph it sits
+/// in stays one paragraph, nothing lints, and every export keeps `s5`.
+#[test]
+fn a_legacy_chunk_marker_passes_through() {
+    let list = [CustomMarker {
+        name: "s5".to_owned(),
+        category: ExtensionCategory::Standalone,
+        description: String::new(),
+        attributes: Vec::new(),
+    }];
+    let (ext, reports) = Extensions::new_with(
+        &list,
+        &ExtensionOptions {
+            relax_z_prefix: true,
+        },
+    );
+    assert!(reports.is_empty(), "{reports:?}");
+    let source =
+        "\\id GEN\n\\usfm 3.0\n\\c 1\n\\s5\n\\p\n\\v 1 a\n\\s5\n\\v 2 b\n\\q1 c\n\\s5\n\\v 3 d\n";
+
+    let para = parse(source, &ext).node_of(source, "p");
+    let doc = parse(source, &ext);
+    let extent = doc.extent(para);
+    assert_eq!(
+        &source[extent.start as usize..extent.end as usize],
+        "\\p\n\\v 1 a\n\\s5\n\\v 2 b\n",
+        "one paragraph, closed by the \\q1 and not by the \\s5"
+    );
+    let poetry = doc.extent(doc.node_of(source, "q1"));
+    assert!(
+        poetry.end as usize >= source.trim_end().len(),
+        "and inside poetry too"
+    );
+
+    assert_eq!(
+        codes(source, &ext),
+        [],
+        "no unknown-marker, no missing-paragraph"
+    );
+    let strict = codes(source, &registry(&[]));
+    assert!(strict.contains(&Code::UnknownMarker), "{strict:?}");
+    assert!(strict.contains(&Code::MissingParagraph), "{strict:?}");
+
+    let usj = usfm_onion::usj::usj(source.as_bytes(), &doc.tokens, &doc.cst);
+    let usx = usfm_onion::usx::usx(source.as_bytes(), &doc.tokens, &doc.cst);
+    let html = usfm_onion::html::html(source.as_bytes(), &doc.tokens, &doc.cst);
+    for out in [&usj, &usx, &html] {
+        assert!(out.contains("s5"), "an export lost `s5`:\n{out}");
+        assert!(
+            !out.contains("zmsbare"),
+            "a template name reached an export"
+        );
+    }
 }
 
 // ------------------------------------------------------------------- lint

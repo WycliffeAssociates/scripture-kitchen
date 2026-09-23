@@ -138,6 +138,7 @@ pub(super) fn rebase_skeleton(skeleton: &mut Skeleton, table: Option<&Utf16Table
     for block in &mut skeleton.blocks {
         block.from = table.to_utf16(block.from);
         block.to = table.to_utf16(block.to);
+        block.end = table.to_utf16(block.end);
     }
 }
 
@@ -158,6 +159,7 @@ pub(super) fn rebase_equivalent(answer: &mut Equivalent, table: Option<&Utf16Tab
         Equivalent::Found { found } => {
             found.from = table.to_utf16(found.from);
             found.to = table.to_utf16(found.to);
+            found.end = table.to_utf16(found.end);
         }
         Equivalent::Absent { insert_at, .. } => *insert_at = table.to_utf16(*insert_at),
         Equivalent::Unpaired { .. } => {}

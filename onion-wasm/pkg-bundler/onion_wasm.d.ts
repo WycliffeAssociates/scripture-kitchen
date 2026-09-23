@@ -232,6 +232,10 @@ export function parse(text: string, diagnostics: boolean, toc: boolean, utf16: b
  * ```js
  * setExtensions('[{"name":"zaln","category":"milestone"}]');  // → "[]"
  * setExtensions("[]");                                        // clears
+ *
+ * // Legacy markup a host cannot change: en_ulb's chunk marker, as a bare
+ * // point that leaves its paragraph open.
+ * setExtensions('[{"name":"s5","category":"standalone"}]', { relaxZPrefix: true });
  * ```
  *
  * Takes the LIST, never a file: a host with a `custom.sty`, or a UI that lets
@@ -247,11 +251,15 @@ export function parse(text: string, diagnostics: boolean, toc: boolean, utf16: b
  * both caches key on content. Call it at composition, before the first
  * parse, rather than between edits.
  *
- * Throws only on malformed JSON. A bad ENTRY — no name, a name that is not
+ * `relaxZPrefix` admits a name without the `z` that the spec does not
+ * define; a name the spec does define (`s1`, `p`) is still a report.
+ *
+ * Throws on malformed JSON and on an `opts` that is not an object or whose
+ * `relaxZPrefix` is not a boolean. A bad ENTRY — no name, a name that is not
  * `z`-initial, an unknown category word, a duplicate — is a report, not a
  * failure, so one bad line never costs a host the rest of its list.
  */
-export function setExtensions(list: string): string;
+export function setExtensions(list: string, opts?: { relaxZPrefix?: boolean }): string;
 
 /**
  * A CodeMirror offset as a source byte offset. Rebuilds the 1.6% stride index
@@ -264,3 +272,22 @@ export function toByte(text: string, utf16: number): number;
  * A source byte offset as a CodeMirror offset. Same deal.
  */
 export function toUtf16(text: string, byte: number): number;
+
+/**
+ * XXH3-64, seed 0, over the bytes — the hash every dish header stamps as
+ * `sourceHash`, for whatever a host wants to key: a file fetched over the
+ * network, a chapter slice cut at a TOC row.
+ *
+ * ```js
+ * xxh3(bytes)                          // → 0x…n, a bigint (u64)
+ * xxh3Text(text) === xxh3(new TextEncoder().encode(text))
+ * xxh3Text(text) === parse(text, …).sourceHash
+ * ```
+ */
+export function xxh3(bytes: Uint8Array): bigint;
+
+/**
+ * [`xxh3`] over a string's UTF-8, without a `TextEncoder` round trip on the
+ * JS side.
+ */
+export function xxh3Text(text: string): bigint;

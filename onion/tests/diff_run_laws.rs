@@ -9,7 +9,8 @@
 //!
 //! L1 tiling, L2 the text view, L3 the two unit flags agree with the runs,
 //! L4 unchanged means equal, L5 no regression against the pre-position
-//! builder. L6 is the wire's and lives in `onion-wasm/tests/conformance.mjs`.
+//! builder, with a note as its own reading. L6 is the wire's and lives in
+//! `onion-wasm/tests/conformance.mjs`.
 //!
 //! Instrument: VOLUME — the whole test tier, `testData/exampleCorpora`, each
 //! book against five scripted edits of itself. Absent bytes are a loud
@@ -18,6 +19,10 @@
 use std::path::{Path, PathBuf};
 
 use similar::{ChangeTag, TextDiff};
+use unicode_segmentation::UnicodeSegmentation;
+
+use usfm_onion::tables::generated;
+use usfm_onion::tables::schema::MarkerKind;
 
 use usfm_onion::diff::{
     DecisionUnit, RunKind, RunWhat, Status, TextDiffMode, TextDiffRun, TotalText, UnitTextDiff,
@@ -151,18 +156,65 @@ fn unchanged_means_equal(
     );
 }
 
-/// L5: the pre-position builder, kept as the oracle for this release.
+/// L5: the pre-position builder, kept as the oracle.
 ///
 /// Its output is what the door shipped before runs carried a span: the `text`
-/// cut of each side, word-diffed, same-kind neighbours coalesced.
+/// cut of each side, word-diffed, same-kind neighbours coalesced — segmented
+/// where the reading enters or leaves a note, so `Jesus\f + why\f*` is
+/// `Jesus` and `why`, never `Jesuswhy`. The note edges come from the tree
+/// here, not from the builder.
 type Reduced = Vec<(String, RunKind)>;
 
-fn old_runs(baseline: &str, current: &str, mode: TextDiffMode) -> (Reduced, Reduced) {
-    let diff = match mode {
-        TextDiffMode::Words => TextDiff::from_unicode_words(baseline, current),
-        TextDiffMode::Chars => TextDiff::from_graphemes(baseline, current),
-        TextDiffMode::None => unreachable!("the caller never asks"),
+/// Every note's byte extent, off the tree, ascending.
+fn notes(tokens: &[usfm_onion::Token]) -> Vec<std::ops::Range<u32>> {
+    let cst = usfm_onion::cst::build(tokens);
+    let mut notes: Vec<_> = (1..cst.nodes.len() as u32)
+        .filter(|&node| {
+            let opener = cst.nodes[node as usize].token as usize;
+            generated::kind(tokens[opener].marker_idx) == MarkerKind::Note
+        })
+        .map(|node| cst.extent(node, tokens))
+        .collect();
+    notes.sort_by_key(|note| note.start);
+    notes
+}
+
+/// One side's slice cut into the differ's units at note edges.
+fn units<'s>(
+    notes: &[std::ops::Range<u32>],
+    side: &TotalText<'_>,
+    span: &std::ops::Range<u32>,
+    slice: &'s str,
+    mode: TextDiffMode,
+) -> Vec<&'s str> {
+    let note_of = |at: u32| {
+        let after = notes.partition_point(|note| note.start <= at);
+        after
+            .checked_sub(1)
+            .filter(|&note| notes[note].contains(&at))
     };
+    let mut cuts = vec![0usize];
+    let pieces: Vec<_> = side.pieces(span).collect();
+    for pair in pieces.windows(2) {
+        if note_of(pair[0].0.start) != note_of(pair[1].0.start) {
+            cuts.push(pair[1].1 as usize);
+        }
+    }
+    cuts.push(slice.len());
+    cuts.windows(2)
+        .flat_map(|cut| {
+            let segment = &slice[cut[0]..cut[1]];
+            match mode {
+                TextDiffMode::Words => segment.split_word_bounds().collect::<Vec<_>>(),
+                TextDiffMode::Chars => segment.graphemes(true).collect(),
+                TextDiffMode::None => unreachable!("the caller never asks"),
+            }
+        })
+        .collect()
+}
+
+fn old_runs(baseline: &[&str], current: &[&str]) -> (Reduced, Reduced) {
+    let diff = TextDiff::configure().diff_slices(baseline, current);
     let (mut old_baseline, mut old_current) = (Vec::new(), Vec::new());
     let push = |runs: &mut Reduced, text: &str, kind: RunKind| match runs.last_mut() {
         Some(last) if last.1 == kind => last.0.push_str(text),
@@ -209,6 +261,7 @@ fn check_pair(label: &str, baseline: &str, current: &str) -> usize {
     let current_tokens = usfm_onion::lex(current);
     let baseline_total = TotalText::new(baseline.as_bytes(), &baseline_tokens);
     let current_total = TotalText::new(current.as_bytes(), &current_tokens);
+    let (baseline_notes, current_notes) = (notes(&baseline_tokens), notes(&current_tokens));
     for mode in [TextDiffMode::Words, TextDiffMode::Chars] {
         let (skeleton, texts) = diff_with_text(baseline, current, mode);
         for (unit, text) in skeleton.units.iter().zip(&texts) {
@@ -236,10 +289,25 @@ fn check_pair(label: &str, baseline: &str, current: &str) -> usize {
             unchanged_means_equal(text, &baseline_total, &current_total, &at);
 
             if unit.status == Status::Modified {
+                let (baseline_slice, current_slice) = (
+                    baseline_total.slice(&unit.baseline),
+                    current_total.slice(&unit.current),
+                );
                 let (old_baseline, old_current) = old_runs(
-                    &baseline_total.slice(&unit.baseline),
-                    &current_total.slice(&unit.current),
-                    mode,
+                    &units(
+                        &baseline_notes,
+                        &baseline_total,
+                        &unit.baseline,
+                        &baseline_slice,
+                        mode,
+                    ),
+                    &units(
+                        &current_notes,
+                        &current_total,
+                        &unit.current,
+                        &current_slice,
+                        mode,
+                    ),
                 );
                 assert_eq!(
                     reduced(&text.baseline, baseline_total.source),
@@ -431,5 +499,57 @@ fn the_laws_hold_over_the_whole_test_tier() {
     assert!(
         units > 1000,
         "expected real coverage, saw {units} run lists"
+    );
+}
+
+/// A footnote inserted after a word leaves the word unchanged, and every run
+/// inside the note says so.
+#[test]
+fn a_note_is_its_own_reading() {
+    let baseline = "\\id PHM\n\\c 1\n\\p\n\\v 1 Paul a servant of Christ\n";
+    let current =
+        "\\id PHM\n\\c 1\n\\p\n\\v 1 Paul a servant\\f + \\fr 1:1 \\ft Or slave\\f* of Christ\n";
+    let (skeleton, texts) = diff_with_text(baseline, current, TextDiffMode::Words);
+    let at = skeleton
+        .units
+        .iter()
+        .position(|unit| unit.status == Status::Modified)
+        .expect("the verse changed");
+    let text = texts[at].as_ref().expect("a modified unit has runs");
+
+    assert!(
+        text.baseline
+            .iter()
+            .all(|run| run.kind == RunKind::Unchanged),
+        "nothing was removed: {:?}",
+        text.baseline
+    );
+    let added: Vec<(&str, bool)> = text
+        .current
+        .iter()
+        .filter(|run| run.kind == RunKind::Added)
+        .map(|run| (run_text(current.as_bytes(), run), run.note))
+        .collect();
+    assert!(
+        added.iter().all(|(_, note)| *note),
+        "only the note is new: {added:?}"
+    );
+
+    let reading = |note: bool| -> String {
+        text.current
+            .iter()
+            .filter(|run| run.what != RunWhat::Markup && run.note == note)
+            .map(|run| run_text(current.as_bytes(), run))
+            .collect()
+    };
+    assert_eq!(
+        reading(false),
+        "Paul a servant of Christ\n",
+        "the verse reads past it"
+    );
+    assert_eq!(
+        reading(true),
+        "1:1 Or slave",
+        "and the note reads on its own"
     );
 }

@@ -65,7 +65,7 @@ pub mod wire;
 
 pub use diff::{DecisionUnit, DiffSkeleton, MergeSide, Slot, TextDiffMode, diff, diff_with_text};
 pub use edit::{Edit, SpliceEdit, apply_splices};
-pub use extensions::{Extensions, set_extensions};
+pub use extensions::{ExtensionOptions, Extensions, set_extensions, set_extensions_with};
 pub use format::{
     CharBreaks, FormatOptions, Newline, VerseBreaks, format, format_edits, format_edits_in,
 };

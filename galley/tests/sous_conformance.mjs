@@ -83,6 +83,8 @@ const EXPORTS = [
   "setExtensions",
   "toByte",
   "toUtf16",
+  "xxh3",
+  "xxh3Text",
 ];
 const exported = Object.keys(doors).sort();
 console.log(`exports (${exported.length}): ${exported.join(" ")}`);
@@ -138,9 +140,36 @@ eq(doors.toUtf16("\\v 1 a\u{1F600}b", 10), 8, "toUtf16 counts the surrogate pair
   }
   check(threw, "malformed JSON throws");
 
+  // A legacy name needs the named option, and never lands on a spec marker.
+  const legacy = '[{"name":"s5","category":"standalone"},{"name":"s1","category":"standalone"}]';
+  eq(JSON.parse(doors.setExtensions(legacy))[0].reason, "name does not start with z", "strict by default");
+  const relaxed = JSON.parse(doors.setExtensions(legacy, { relaxZPrefix: true }));
+  eq(relaxed.length, 1, "only the spec name is refused");
+  eq(relaxed[0].name, "s1", "…and it is s1");
+  threw = false;
+  try {
+    doors.setExtensions("[]", { relaxZPrefix: "yes" });
+  } catch {
+    threw = true;
+  }
+  check(threw, "a non-boolean relaxZPrefix throws");
+
   // Clear, so nothing below this block sees a registry it did not install.
   eq(doors.setExtensions("[]"), "[]", "an empty list clears");
   check(reading().includes("why"), "cleared");
+}
+
+// --- the engine's hash, for a host's own bytes -----------------------------
+
+{
+  const text = "\\id GEN\n\\c 1\n\\p\n\\v 1 In the beginning\n";
+  const hash = doors.xxh3Text(text);
+  eq(typeof hash, "bigint", "a u64 crosses as a bigint");
+  eq(doors.xxh3(new TextEncoder().encode(text)), hash, "text and bytes agree");
+  const dish = doors.parse(text, false, false, false);
+  const stamped = new DataView(dish.buffer, dish.byteOffset).getBigUint64(24, true);
+  eq(hash, stamped, "the same value the dish header stamps");
+  eq(doors.xxh3(new Uint8Array()), 0x2d06800538d394c2n, "XXH3-64 seed 0, pinned");
 }
 
 // --- the three publications cross unchanged -------------------------------

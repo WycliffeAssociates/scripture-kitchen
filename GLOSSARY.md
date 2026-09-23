@@ -31,10 +31,15 @@ planning/; the definition records the current soft direction.
   A registration is a name plus a category; the engine maps it to a template
   row and then knows nothing else about it. `onion::set_extensions` installs a
   list; `mise::extensions::parse_markers_ext` reads one out of a `markers.ext`.
+  Under `relax_z_prefix` a list may also name a LEGACY marker the spec does
+  not define (en_ulb's `\s5`); a spec name is refused.
 - **Template row** — one marker-table row per behaviour-bearing `\category`
   word, copied from the spec row that category behaves as. Appended after
   every spec row, unreachable by name from a document, and the ONE thing it
   cannot carry is the name the author spelled (`generated::is_extension`).
+  `standalone`'s is the exception to "copied": no spec row is a bare
+  milestone, so it takes `\ts`'s kind and contexts and owns no scope, no
+  closer and no attributes itself.
 - **Marker table** — THE single registry mapping marker → semantics:
   structural role (paragraph/character/note/milestone), nesting behavior,
   payload grammar, render class. Defined once in Rust, generated for JS —

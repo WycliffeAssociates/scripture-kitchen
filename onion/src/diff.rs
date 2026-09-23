@@ -61,10 +61,13 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::ops::Range;
 
 use similar::{Algorithm, ChangeTag, DiffTag, TextDiff, capture_diff_slices};
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::edit::SpliceEdit;
 use crate::mask::{Filter, Mask, mask};
 use crate::scanner::lex;
+use crate::tables::generated;
+use crate::tables::schema::MarkerKind;
 use crate::toc::{Toc, toc};
 use crate::token::{Token, TokenKind};
 
@@ -1119,11 +1122,11 @@ pub enum RunKind {
 ///            ^^^^^ Markup  ^^^^^ Markup
 /// ```
 ///
-/// `Markup` is exactly the complement of the [`Filter::text`] cut, so a
-/// renderer hiding markup drops those runs and concatenates the rest to get
-/// the reading the word differ ran on. `Whitespace` is spacing INSIDE that
-/// reading — a newline, a blank text token — never a delimiter, which is
-/// markup.
+/// `Markup` is exactly the complement of the [`Filter::text`] cut. A
+/// renderer hiding markup drops those runs and concatenates the rest, keeping
+/// [`TextDiffRun::note`] runs apart: a note is its own reading, and the verse's
+/// reading runs straight past it. `Whitespace` is spacing INSIDE a reading — a
+/// newline, a blank text token — never a delimiter, which is markup.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunWhat {
     Markup,
@@ -1143,6 +1146,14 @@ pub struct TextDiffRun {
     pub to: u32,
     pub kind: RunKind,
     pub what: RunWhat,
+    /// Inside a footnote or cross-reference, its markup included.
+    ///
+    /// ```text
+    /// servant\f + \fr 1:1 \ft Or slave\f* of
+    /// ^^^^^^^                           ^^^ note: false — "servant of"
+    ///        ^^^^^^^^^^^^^^^^^^^^^^^^^^^     note: true  — "1:1 Or slave"
+    /// ```
+    pub note: bool,
 }
 
 /// Per-unit presentation metadata, riding BESIDE the unit — the skeleton, the
@@ -1165,6 +1176,8 @@ pub struct TotalText<'a> {
     pub source: &'a [u8],
     pub tokens: &'a [Token],
     pub mask: Mask,
+    /// Every note's byte extent, ascending: what [`Self::note_at`] searches.
+    notes: Vec<Range<u32>>,
 }
 
 impl<'a> TotalText<'a> {
@@ -1172,11 +1185,28 @@ impl<'a> TotalText<'a> {
     /// tree — alignment is a token-grain fact.
     pub fn new(source: &'a [u8], tokens: &'a [Token]) -> Self {
         let cst = crate::cst::build(tokens);
+        let mut notes: Vec<Range<u32>> = (1..cst.nodes.len() as u32)
+            .filter(|&node| {
+                let opener = cst.nodes[node as usize].token as usize;
+                generated::kind(tokens[opener].marker_idx) == MarkerKind::Note
+            })
+            .map(|node| cst.extent(node, tokens))
+            .collect();
+        notes.sort_by_key(|note| note.start);
         Self {
             source,
             tokens,
             mask: mask(source, tokens, &cst, &Filter::text()),
+            notes,
         }
+    }
+
+    /// The note a byte sits in, by index, or `None` outside every note.
+    fn note_at(&self, at: u32) -> Option<usize> {
+        let after = self.notes.partition_point(|note| note.start <= at);
+        after
+            .checked_sub(1)
+            .filter(|&note| at < self.notes[note].end)
     }
 
     /// The kept spans inside a byte range, each with its offset into what
@@ -1303,7 +1333,15 @@ fn one_sided(side: &TotalText<'_>, span: &Range<u32>, kind: RunKind) -> Vec<Text
         push_text(&mut runs, side, piece.start, piece.end, kind);
     }
     for token in markup_tokens(side, span) {
-        push_run(&mut runs, token.start, token.end(), kind, RunWhat::Markup);
+        let note = side.note_at(token.start).is_some();
+        push_run(
+            &mut runs,
+            token.start,
+            token.end(),
+            kind,
+            RunWhat::Markup,
+            note,
+        );
     }
     settle(runs, span)
 }
@@ -1342,11 +1380,9 @@ fn split_runs(
     let baseline_pieces: Vec<(Range<u32>, u32)> = baseline.pieces(baseline_span).collect();
     let current_pieces: Vec<(Range<u32>, u32)> = current.pieces(current_span).collect();
 
-    let diff = match mode {
-        TextDiffMode::Words => TextDiff::from_unicode_words(&baseline_slice, &current_slice),
-        TextDiffMode::Chars => TextDiff::from_graphemes(&baseline_slice, &current_slice),
-        TextDiffMode::None => unreachable!("the caller returns early for None"),
-    };
+    let baseline_units = segmented(baseline, &baseline_slice, &baseline_pieces, mode);
+    let current_units = segmented(current, &current_slice, &current_pieces, mode);
+    let diff = TextDiff::configure().diff_slices(&baseline_units, &current_units);
 
     let mut baseline_runs = Vec::new();
     let mut current_runs = Vec::new();
@@ -1440,27 +1476,56 @@ fn markup_runs(
         .map(|token| spelling(current, token))
         .collect();
 
-    let emit = |runs: &mut Vec<TextDiffRun>, tokens: &[&Token], at: Range<usize>, kind: RunKind| {
+    let emit = |runs: &mut Vec<TextDiffRun>,
+                side: &TotalText<'_>,
+                tokens: &[&Token],
+                at: Range<usize>,
+                kind: RunKind| {
         for token in &tokens[at] {
-            push_run(runs, token.start, token.end(), kind, RunWhat::Markup);
+            let note = side.note_at(token.start).is_some();
+            push_run(runs, token.start, token.end(), kind, RunWhat::Markup, note);
         }
     };
     for op in capture_diff_slices(Algorithm::Myers, &baseline_keys, &current_keys) {
         let (tag, old, new) = op.as_tag_tuple();
         match tag {
             DiffTag::Equal => {
-                emit(baseline_runs, &baseline_tokens, old, RunKind::Unchanged);
-                emit(current_runs, &current_tokens, new, RunKind::Unchanged);
+                emit(
+                    baseline_runs,
+                    baseline,
+                    &baseline_tokens,
+                    old,
+                    RunKind::Unchanged,
+                );
+                emit(
+                    current_runs,
+                    current,
+                    &current_tokens,
+                    new,
+                    RunKind::Unchanged,
+                );
             }
             DiffTag::Delete => {
-                emit(baseline_runs, &baseline_tokens, old, RunKind::Removed);
+                emit(
+                    baseline_runs,
+                    baseline,
+                    &baseline_tokens,
+                    old,
+                    RunKind::Removed,
+                );
             }
             DiffTag::Insert => {
-                emit(current_runs, &current_tokens, new, RunKind::Added);
+                emit(current_runs, current, &current_tokens, new, RunKind::Added);
             }
             DiffTag::Replace => {
-                emit(baseline_runs, &baseline_tokens, old, RunKind::Removed);
-                emit(current_runs, &current_tokens, new, RunKind::Added);
+                emit(
+                    baseline_runs,
+                    baseline,
+                    &baseline_tokens,
+                    old,
+                    RunKind::Removed,
+                );
+                emit(current_runs, current, &current_tokens, new, RunKind::Added);
             }
         }
     }
@@ -1495,17 +1560,27 @@ fn map_text(
 /// A text-pass run, classified by its own bytes.
 fn push_text(runs: &mut Vec<TextDiffRun>, side: &TotalText<'_>, from: u32, to: u32, kind: RunKind) {
     let what = what_of(&side.source[from as usize..to as usize]);
-    push_run(runs, from, to, kind, what);
+    let note = side.note_at(from).is_some();
+    push_run(runs, from, to, kind, what, note);
 }
 
 /// Appends a run, growing the last one instead when the two are contiguous and
-/// agree on both axes.
-fn push_run(runs: &mut Vec<TextDiffRun>, from: u32, to: u32, kind: RunKind, what: RunWhat) {
+/// agree on every axis — so no run crosses a note's edge.
+fn push_run(
+    runs: &mut Vec<TextDiffRun>,
+    from: u32,
+    to: u32,
+    kind: RunKind,
+    what: RunWhat,
+    note: bool,
+) {
     if from >= to {
         return;
     }
     match runs.last_mut() {
-        Some(last) if last.to == from && last.kind == kind && last.what == what => {
+        Some(last)
+            if last.to == from && last.kind == kind && last.what == what && last.note == note =>
+        {
             last.to = to;
         }
         _ => runs.push(TextDiffRun {
@@ -1513,8 +1588,42 @@ fn push_run(runs: &mut Vec<TextDiffRun>, from: u32, to: u32, kind: RunKind, what
             to,
             kind,
             what,
+            note,
         }),
     }
+}
+
+/// One side's reading as the differ's units: words or graphemes, segmented
+/// per stretch of pieces that share a note. A note's text is its own reading,
+/// so `servant` + `1:1` never fuse into `servant1:1`, while the verse's text
+/// on either side of a note is one reading and segments as if the note were
+/// not there. The units concatenate back to `slice` exactly, which is what
+/// keeps the cursor arithmetic in [`split_runs`] valid.
+fn segmented<'s>(
+    side: &TotalText<'_>,
+    slice: &'s str,
+    pieces: &[(Range<u32>, u32)],
+    mode: TextDiffMode,
+) -> Vec<&'s str> {
+    let mut units = Vec::new();
+    let mut from = 0usize;
+    let cut = |units: &mut Vec<&'s str>, from: usize, to: usize| {
+        let segment = &slice[from..to];
+        match mode {
+            TextDiffMode::Words => units.extend(segment.split_word_bounds()),
+            TextDiffMode::Chars => units.extend(segment.graphemes(true)),
+            TextDiffMode::None => unreachable!("the caller returns early for None"),
+        }
+    };
+    for pair in pieces.windows(2) {
+        let ((left, _), (right, head)) = (&pair[0], &pair[1]);
+        if side.note_at(left.start) != side.note_at(right.start) {
+            cut(&mut units, from, *head as usize);
+            from = *head as usize;
+        }
+    }
+    cut(&mut units, from, slice.len());
+    units
 }
 
 /// Sorts the two passes into one list and checks it tiles the span. Tiling
@@ -1524,7 +1633,7 @@ fn settle(mut runs: Vec<TextDiffRun>, span: &Range<u32>) -> Vec<TextDiffRun> {
     runs.sort_by_key(|run| run.from);
     let mut merged: Vec<TextDiffRun> = Vec::with_capacity(runs.len());
     for run in runs {
-        push_run(&mut merged, run.from, run.to, run.kind, run.what);
+        push_run(&mut merged, run.from, run.to, run.kind, run.what, run.note);
     }
     debug_assert!(
         merged.is_empty()

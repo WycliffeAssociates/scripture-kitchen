@@ -1,6 +1,6 @@
 [package]
 name = "onion-wasm"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2024"
 description = "The JS doorway over the USFM engine — piece 2 of the five-crate layout (bindgen, .d.ts, UTF-16 walls)."
 
@@ -18,6 +18,8 @@ usfm_onion = { path = "../onion" }
 # The `markers.ext` reader and the spec's `\category` vocabulary. Read here so
 # the engine never learns a file format; the registry it feeds is onion's.
 mise = { path = "../mise" }
+# `xxh3`/`xxh3Text`: the hash the dish header stamps, for a host's own bytes.
+xxhash-rust.workspace = true
 wasm-bindgen = "0.2"
 # The plain-object `mask` return. `Object`/`Reflect`/`Uint32Array` only —
 # lighter than serde-wasm-bindgen, which would pull serde's derive machinery

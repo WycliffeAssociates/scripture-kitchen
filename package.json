@@ -1,6 +1,6 @@
 {
   "name": "@wycliffeassociates/scripture-kitchen",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "The JS doorway over the USFM engine and the Sous analysis — the resident handle, and every onion door on one module.",
   "type": "module",
   "private": true,

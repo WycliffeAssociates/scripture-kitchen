@@ -133,17 +133,32 @@ the debounced second call. `toc` is cheap and needs no tree.
 | export | what it gives back |
 |---|---|
 | `extensionsFromMarkersExt(text)` | `{ markers, malformed }` as JSON — a `markers.ext` file, read. Installs nothing |
-| `setExtensions(json)` | installs the LIST (not the file) process-wide; returns the entries it could not keep, as JSON |
+| `setExtensions(json, { relaxZPrefix? })` | installs the LIST (not the file) process-wide; returns the entries it could not keep, as JSON. `relaxZPrefix` admits a legacy name the spec does not define (`s5`) |
 
 A registered `\z` marker behaves as its `\category`: the engine resolves it to
 the spec row that category behaves as, so a `footnote` extension takes a caller
-and a note scope, a `milestone` pairs `-s`/`-e` and takes attributes. An
+and a note scope, a `milestone` pairs `-s`/`-e` and takes attributes, a
+`standalone` is a bare point that leaves its paragraph open. An
 unregistered one is row 0, exactly as before. Reports are values — one bad
 entry costs one entry — and only malformed JSON throws.
 
 **Installing invalidates every product derived under the old rows**, so it
 belongs at composition rather than between edits. Both doors stand on
 `usfm-galley` too, which is the package a host vendoring one module gets.
+
+## The engine's hash: `xxh3` and `xxh3Text`
+
+```js
+xxh3(bytes)        // Uint8Array → bigint: XXH3-64, seed 0
+xxh3Text(text)     // the same over the string's UTF-8, no TextEncoder round trip
+xxh3Text(text) === parse(text, …).sourceHash   // the value every dish header stamps
+```
+
+For a host's own keys: a file fetched over the network, or a chapter cut at a
+TOC row and handed to `diff` only when its hash moved. It hashes exactly the
+bytes given, so a CRLF file does not match its LF-normalized `sourceHash`;
+hash the form you key on. It detects change and is not cryptographic, so it is
+no defence against a file altered on purpose.
 
 ## The write path
 
@@ -186,12 +201,15 @@ from the `chapters` section.
   `"words"` (UAX-29) or `"chars"` (graphemes); an unknown name REJECTS rather
   than defaulting. `"none"` builds no CST and no mask and yields the JSON the
   door returned before runs existed. The runs ride on a `modified` unit's
-  `text: {baseline, current}` as `{from, to, kind, what}`: UTF-16 spans into
-  that side's own document, `what` one of `"markup"` | `"text"` |
-  `"whitespace"`. They TILE the unit's span, so a consumer decorates
-  `source.slice(from, to)` instead of searching for a run's text; dropping
-  `what == "markup"` and concatenating the rest gives the `"text"` mask cut of
-  the same span. `unchanged` and `moved` units carry NO `text` key — a pure
+  `text: {baseline, current}` as `{from, to, kind, what, note}`: UTF-16 spans
+  into that side's own document, `what` one of `"markup"` | `"text"` |
+  `"whitespace"`, and `note` true inside a footnote or cross-reference. They
+  TILE the unit's span, so a consumer decorates `source.slice(from, to)`
+  instead of searching for a run's text; dropping `what == "markup"` and
+  concatenating the rest gives the `"text"` mask cut of the same span. A note
+  is its own reading: words never span its edge (`servant\f + \fr 1:1 …\f*`
+  leaves `servant` unchanged), and a renderer keeps `note` runs apart from the
+  verse's rather than joining `servant` to `1:1`. `unchanged` and `moved` units carry NO `text` key — a pure
   move must not highlight, and a whole-Bible skeleton is mostly those.
 - **UTF-16 offsets, LF-canonical input.** Every offset out is a CodeMirror
   code-unit offset. That assumes the text is LF-normalized: CodeMirror counts a

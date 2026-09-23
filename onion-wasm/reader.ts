@@ -840,7 +840,7 @@ export const MARKERS: readonly {
   { name: "zfchar", kind: 2, category: 16, closing: 2, shape: 1, numbering: 0, ws: 6 },
   { name: "zxchar", kind: 2, category: 17, closing: 2, shape: 1, numbering: 0, ws: 6 },
   { name: "zms", kind: 6, category: 22, closing: 3, shape: 2, numbering: 0, ws: 1 },
-  { name: "zmsbare", kind: 6, category: 23, closing: 3, shape: 0, numbering: 0, ws: 1 },
+  { name: "zmsbare", kind: 6, category: 23, closing: 0, shape: 1, numbering: 0, ws: 1 },
   { name: "zcell", kind: 12, category: 15, closing: 0, shape: 1, numbering: 15, ws: 6 },
 ];
 

@@ -275,7 +275,8 @@ impl Galley {
     /// interface SkeletonRow {
     ///   sid: string; where: "leading" | "inside"; ordinal: number;   // the address
     ///   marker: string;                                              // "q1"
-    ///   from: number; to: number;                                    // the marker node's span
+    ///   from: number; to: number;                                    // the marker token's span
+    ///   end: number;                          // from..end is the whole block, as onion's tree closes it
     ///   empty: boolean;                       // onion's empty paragraph; a source folds these away
     /// }
     /// ```
@@ -284,6 +285,9 @@ impl Galley {
     /// here — and `utf16` asks for UTF-16 offsets instead of bytes. A block is
     /// LEADING when it sits immediately before its verse's `\v`, INSIDE when
     /// the verse's own text is above it; ordinals count from one per address.
+    /// Both lists are in document order. A block ends where its paragraph
+    /// closes — a heading or `\c` the marker set leaves out still ends it — so
+    /// the next row's `from` is not its end.
     pub fn skeleton(
         &mut self,
         id: &str,

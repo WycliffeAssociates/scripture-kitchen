@@ -119,7 +119,7 @@ names and signatures — the same shims its package ships, not wrappers:
 import { parse, mask, format, formatEdits, formatEditsIn, FormatOpts, Edits,
          diff, merge, mergeSplices, Splices, toByte, toUtf16, locate, attrs,
          attrResolve, book, setExtensions,
-         extensionsFromMarkersExt } from "usfm-galley";
+         extensionsFromMarkersExt, xxh3, xxh3Text } from "usfm-galley";
 ```
 
 `galley`'s cdylib links the object those shims sit in — `galley::wasm::onion`
@@ -130,9 +130,10 @@ where something wants them. `tests/sous_conformance.mjs` therefore asserts the
 EXACT export list, not a subset, and prints it:
 
 ```text
-exports (22): Edits Fingerprint FormatOpts Galley SousSettings Splices attrResolve attrs
+exports (24): Edits Fingerprint FormatOpts Galley SousSettings Splices attrResolve attrs
               book diff extensionsFromMarkersExt format formatEdits formatEditsIn
               locate mask merge mergeSplices parse setExtensions toByte toUtf16
+              xxh3 xxh3Text
 ```
 
 The doors cost 202 KB of `.wasm` (744,333 → 946,665 bytes, release, wasm-opt
@@ -147,6 +148,20 @@ on `onion-wasm` is unreachable from this module, which is the only build a host
 vendoring one package gets. The pinned export list above is where that is
 enforced.
 
+## The engine's hash: `xxh3` and `xxh3Text`
+
+```js
+xxh3(bytes)        // Uint8Array → bigint: XXH3-64, seed 0
+xxh3Text(text)     // the same over the string's UTF-8, no TextEncoder round trip
+xxh3Text(text) === parse(text, …).sourceHash   // the value every dish header stamps
+```
+
+For a host's own keys: a file fetched over the network, or a chapter cut at a
+TOC row and handed to `diff` only when its hash moved. It hashes exactly the
+bytes given, so a CRLF file does not match its LF-normalized `sourceHash`;
+hash the form you key on. It detects change and is not cryptographic, so it is
+no defence against a file altered on purpose.
+
 ## User `\z` markers: `setExtensions` and `extensionsFromMarkersExt`
 
 ```js
@@ -154,6 +169,10 @@ const { markers, malformed } = JSON.parse(extensionsFromMarkersExt(fileText));
 for (const { line, name, reason } of malformed) show(line, name, reason);
 setExtensions(JSON.stringify(markers));          // → "[]" when all installed
 setExtensions("[]");                             // clears
+
+// Legacy markup a host cannot change: en_ulb's chunk marker as a bare point.
+setExtensions('[{"name":"s5","category":"standalone"}]', { relaxZPrefix: true });
+//   \p \v 1 a \s5 \v 3 b   → one paragraph; no unknown-marker, no missing-paragraph
 ```
 
 A user marker is a spec marker the table has not met, and the spec says which
@@ -169,9 +188,21 @@ UI feeds `setExtensions` the list directly. The list's shape is
 `{ name, category, attributes?, description? }`; `category` is one of the
 spec's nineteen words.
 
+**`standalone` is the spec's "bare milestone with no attributes or
+delimiter"**: it opens nothing, closes nothing, carries no text and is never
+closed, so the paragraph around it stays open. Exports write it as a
+milestone under its own name (`<ms style="s5" />`, `{"type":"ms","marker":"s5"}`).
+
+**`relaxZPrefix` admits legacy names** without the `z`, for markup a host
+cannot change. Only a name onion's table resolves to nothing qualifies: `s5`
+does (`\s` stops at level 4); `s1` or `p` comes back as a report, because a
+legacy name can add a marker and never redefine one. A `markers.ext` file is
+still `z`-only.
+
 Reports are VALUES, never failures: one bad entry costs one entry. A file
 report carries the `line` it came from; a list report has no `line` key at all,
-rather than a zero standing in for one. Only malformed JSON throws.
+rather than a zero standing in for one. Only malformed JSON, or an options
+value that is not `{ relaxZPrefix?: boolean }`, throws.
 
 **Installing invalidates every derived product**, a resident `Galley`'s
 included — the same bytes are a different document once the rows change, and
@@ -398,7 +429,8 @@ galley.updateReference("ref/GEN.usfm", source, true);   // keepText: a skeleton 
 
 const skeleton = JSON.parse(galley.skeleton("ref/GEN.usfm"));
 //   { verses: [{ sid, from, to, textFrom, textTo }],
-//     blocks: [{ sid, where: "leading" | "inside", ordinal, marker, from, to, empty }] }
+//     blocks: [{ sid, where: "leading" | "inside", ordinal, marker, from, to, end, empty }] }
+//   from..to is a marker; a block's from..end is its paragraph (overlay.md, "A row's spans")
 
 const edits = galley.overlay("books/GEN.usfm", "ref/GEN.usfm");
 //   Edits — spans, lens, text: onion-wasm's own class, the shape a fix crosses in

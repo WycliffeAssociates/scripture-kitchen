@@ -64,6 +64,30 @@ node there is q2 — the address is stale`) rather than answering about a
 different node. A position that is simply gone is not stale; it is absent, and
 answers as such.
 
+## A row's spans
+
+```text
+\p                          block p    from..to  = "\p\n"            the marker
+\v 1 In the beginning …                from..end = "\p\n\v 1 … \n"    the paragraph
+\s1 The creation           (no row, and in no block's from..end)
+\p                          block p    …
+```
+
+- **`from..to` is the marker**, delimiter included — what the overlay inserts,
+  removes and respells. A verse's `from..to` is its `\v` in the same way;
+  `textFrom..textTo` is the verse's retained text.
+- **`from..end` is the block**: the paragraph node as onion's tree closes it —
+  at the next paragraph-kind marker of ANY category, listed or not, a `\c`, an
+  unknown marker, or the end of the book. So the next row's `from` is not the
+  block's end: a `\s1`, `\d` or `\c` between them belongs to no block, and a
+  caret there is in no block. A host that wants "the nearest block" takes the
+  last row whose `from` is at or before the caret, and says so.
+- **`empty` is about the block**, not the marker: onion's
+  `Code::EmptyParagraph`, nothing in `from..end` but the marker and line
+  endings.
+- **Rows are in document order**, ascending and disjoint, for `verses` and
+  `blocks` alike.
+
 ## The rules
 
 - **Markers, not classes.** The default set is onion's paragraph and poetry

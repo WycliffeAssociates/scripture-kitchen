@@ -3686,9 +3686,9 @@ pub static ROWS: &[MarkerRow] = &[
     //
     //   marker         a template name, never a marker a document can spell
     //   shape          which spelling the category admits — PlainOnly for
-    //                  everything but `milestone` (MilestoneOnly) and
-    //                  `standalone` (Any, as `\ts`), because the token KIND
-    //                  is decided by the spelling before any row is consulted
+    //                  everything but `milestone` (MilestoneOnly), because
+    //                  the token KIND is decided by the spelling before any
+    //                  row is consulted
     //   numbered_max   Unnumbered everywhere but `cell`; the spec shows no
     //                  other numbered extension
     //   priority       None: the hot-marker ranks are MEASURED, and no
@@ -4050,10 +4050,14 @@ pub static ROWS: &[MarkerRow] = &[
         html_element: Some(HtmlElement::SelfClosingSpan),
         priority: None,
     },
-    // `standalone` — every column of `\ts` but the four the template owns.
+    // `standalone` — "a bare milestone with no attributes or delimiter"
+    // (docs.usfm.bible/usfm/3.2/extensions.html). `\ts`'s kind, category and
+    // contexts, but no spec row is bare, so it also owns three more columns:
+    // no scope, no closer, no attributes. It opens nothing, closes nothing,
+    // carries no text and is never closed.
     MarkerRow {
         marker: "zmsbare",
-        shape: SpellingShape::Any,
+        shape: SpellingShape::PlainOnly,
         kind: MarkerKind::Milestone,
         category: Category::MilestoneTs,
         ws_after_name: Ws::OptionalHorizontalWhitespace,
@@ -4065,11 +4069,11 @@ pub static ROWS: &[MarkerRow] = &[
             SpecContext::List,
             SpecContext::Table,
         ],
-        opens_scope: Some(ScopeKind::Milestone),
+        opens_scope: None,
         closes_scope: None,
-        defined_attributes: &[("sid", AttrStatus::Optional), ("eid", AttrStatus::Optional)],
+        defined_attributes: &[],
         default_attribute: None,
-        closing: ClosingBehavior::SelfClosingMilestone,
+        closing: ClosingBehavior::None,
         deprecated: false,
         html_element: Some(HtmlElement::SelfClosingSpan),
         priority: None,
@@ -4419,6 +4423,8 @@ mod tests {
             ("zmsbare", "ts", SpellingShape::Any),
             ("zcell", "tc", SpellingShape::Any),
         ];
+        // `standalone` is bare where its source is a delimited milestone.
+        let bare = |template: &str| template == "zmsbare";
         let row = |name: &str, shape: SpellingShape| {
             ROWS.iter()
                 .find(|row| row.marker == name && row.shape == shape)
@@ -4442,17 +4448,23 @@ mod tests {
                 t.allowed_contexts, s.allowed_contexts,
                 "{template}: allowed_contexts"
             );
-            assert_eq!(t.opens_scope, s.opens_scope, "{template}: opens_scope");
+            if bare(template) {
+                assert_eq!(t.opens_scope, None, "{template}: opens nothing");
+                assert_eq!(t.closing, ClosingBehavior::None, "{template}: never closed");
+                assert!(t.defined_attributes.is_empty(), "{template}: no attributes");
+            } else {
+                assert_eq!(t.opens_scope, s.opens_scope, "{template}: opens_scope");
+                assert_eq!(
+                    t.defined_attributes, s.defined_attributes,
+                    "{template}: defined_attributes"
+                );
+                assert_eq!(t.closing, s.closing, "{template}: closing");
+            }
             assert_eq!(t.closes_scope, s.closes_scope, "{template}: closes_scope");
-            assert_eq!(
-                t.defined_attributes, s.defined_attributes,
-                "{template}: defined_attributes"
-            );
             assert_eq!(
                 t.default_attribute, s.default_attribute,
                 "{template}: default_attribute"
             );
-            assert_eq!(t.closing, s.closing, "{template}: closing");
             assert_eq!(t.deprecated, s.deprecated, "{template}: deprecated");
             assert_eq!(t.html_element, s.html_element, "{template}: html_element");
             // The four the template owns.

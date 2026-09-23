@@ -715,7 +715,7 @@ impl Pantry {
         Ok(self.chunks.lint(text))
     }
 
-    /// One book's tokens and lint report off its retained text — the two
+    /// One book's tokens, tree and lint report off its retained text — the
     /// ingredients a skeleton walk reads, from the same warm chunks.
     ///
     /// Owned rather than borrowed, so the caller can reopen the book for its
@@ -724,7 +724,7 @@ impl Pantry {
     pub(crate) fn skeleton_input(
         &mut self,
         id: &BookId,
-    ) -> Result<(Vec<onion::Token>, LintReport), PantryError> {
+    ) -> Result<(Vec<onion::Token>, onion::cst::Cst, LintReport), PantryError> {
         let text = retained(&self.books, id)?;
         let parsed = self.chunks.parsed(
             text,
@@ -735,6 +735,7 @@ impl Pantry {
         );
         Ok((
             parsed.tokens,
+            parsed.cst,
             parsed.lint.expect("diagnostics were asked for"),
         ))
     }

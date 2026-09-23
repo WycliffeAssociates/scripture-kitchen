@@ -111,6 +111,11 @@ pub struct SkeletonRow {
     /// block's text to the block before.
     pub from: u32,
     pub to: u32,
+    /// Where the block itself ends: `from..end` is the whole paragraph node,
+    /// closed by onion's grammar — the next paragraph-kind marker of ANY
+    /// category (a `\s1` or `\r` the marker set leaves out still closes it),
+    /// a `\c`, or the end of the book. Never the next row's `from` by rule.
+    pub end: u32,
     /// What onion lints as an empty paragraph — a block marker with nothing
     /// under it but line endings. `\b` is empty by design and is never one.
     /// An empty row shares the ordinal of the row it folds into.
@@ -440,7 +445,8 @@ fn extract(pantry: &mut Pantry, id: &BookId, set: &MarkerSet) -> Result<Skeleton
     if pantry.role(id).is_none() {
         return Err(OverlayError::UnknownBook { id: id.clone() });
     }
-    let (tokens, lint) = pantry.skeleton_input(id)?;
+    let (tokens, cst, lint) = pantry.skeleton_input(id)?;
+    let owners = cst.owners(tokens.len());
     // Onion's own empty-paragraph rule, not a second copy of it: the anchors
     // are the opening markers' token indices.
     let empties: FxHashSet<u32> = lint
@@ -571,6 +577,9 @@ fn extract(pantry: &mut Pantry, id: &BookId, set: &MarkerSet) -> Result<Skeleton
         let marker = spelling(source, token);
         pending.push(Pending {
             span: token.start..token.end(),
+            // The opening marker is its own node's first child, so its owner
+            // is the paragraph it opens.
+            end: cst.extent(owners[index], &tokens).end,
             delimiter: *source
                 .get(token.start as usize + marker.len() + 1)
                 .unwrap_or(&0),
@@ -598,6 +607,7 @@ fn extract(pantry: &mut Pantry, id: &BookId, set: &MarkerSet) -> Result<Skeleton
 /// A block marker the walk has seen and the document has not yet placed.
 struct Pending {
     span: Range<u32>,
+    end: u32,
     marker: String,
     delimiter: u8,
     empty: bool,
@@ -612,6 +622,7 @@ impl Pending {
             marker: self.marker,
             from: self.span.start,
             to: self.span.end,
+            end: self.end,
             empty: self.empty,
             delimiter: self.delimiter,
         }

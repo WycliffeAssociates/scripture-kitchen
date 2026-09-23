@@ -672,6 +672,10 @@ export function parse(text, diagnostics, toc, utf16) {
  * ```js
  * setExtensions('[{"name":"zaln","category":"milestone"}]');  // → "[]"
  * setExtensions("[]");                                        // clears
+ *
+ * // Legacy markup a host cannot change: en_ulb's chunk marker, as a bare
+ * // point that leaves its paragraph open.
+ * setExtensions('[{"name":"s5","category":"standalone"}]', { relaxZPrefix: true });
  * ```
  *
  * Takes the LIST, never a file: a host with a `custom.sty`, or a UI that lets
@@ -687,19 +691,24 @@ export function parse(text, diagnostics, toc, utf16) {
  * both caches key on content. Call it at composition, before the first
  * parse, rather than between edits.
  *
- * Throws only on malformed JSON. A bad ENTRY — no name, a name that is not
+ * `relaxZPrefix` admits a name without the `z` that the spec does not
+ * define; a name the spec does define (`s1`, `p`) is still a report.
+ *
+ * Throws on malformed JSON and on an `opts` that is not an object or whose
+ * `relaxZPrefix` is not a boolean. A bad ENTRY — no name, a name that is not
  * `z`-initial, an unknown category word, a duplicate — is a report, not a
  * failure, so one bad line never costs a host the rest of its list.
  * @param {string} list
+ * @param {{ relaxZPrefix?: boolean }} [opts]
  * @returns {string}
  */
-export function setExtensions(list) {
+export function setExtensions(list, opts) {
     let deferred3_0;
     let deferred3_1;
     try {
         const ptr0 = passStringToWasm0(list, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.setExtensions(ptr0, len0);
+        const ret = wasm.setExtensions(ptr0, len0, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
         var ptr2 = ret[0];
         var len2 = ret[1];
         if (ret[3]) {
@@ -741,9 +750,47 @@ export function toUtf16(text, byte) {
     const ret = wasm.toUtf16(ptr0, len0, byte);
     return ret >>> 0;
 }
+
+/**
+ * XXH3-64, seed 0, over the bytes — the hash every dish header stamps as
+ * `sourceHash`, for whatever a host wants to key: a file fetched over the
+ * network, a chapter slice cut at a TOC row.
+ *
+ * ```js
+ * xxh3(bytes)                          // → 0x…n, a bigint (u64)
+ * xxh3Text(text) === xxh3(new TextEncoder().encode(text))
+ * xxh3Text(text) === parse(text, …).sourceHash
+ * ```
+ * @param {Uint8Array} bytes
+ * @returns {bigint}
+ */
+export function xxh3(bytes) {
+    const ptr0 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.xxh3(ptr0, len0);
+    return BigInt.asUintN(64, ret);
+}
+
+/**
+ * [`xxh3`] over a string's UTF-8, without a `TextEncoder` round trip on the
+ * JS side.
+ * @param {string} text
+ * @returns {bigint}
+ */
+export function xxh3Text(text) {
+    const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.xxh3Text(ptr0, len0);
+    return BigInt.asUintN(64, ret);
+}
 export function __wbg_Error_408e67f47ca7b58b(arg0, arg1) {
     const ret = Error(getStringFromWasm0(arg0, arg1));
     return ret;
+}
+export function __wbg___wbindgen_boolean_get_c9c83ebd41b34df3(arg0) {
+    const v = arg0;
+    const ret = typeof(v) === 'boolean' ? v : undefined;
+    return isLikeNone(ret) ? 0xFFFFFF : ret ? 1 : 0;
 }
 export function __wbg___wbindgen_debug_string_a57024b9c6e4a48b(arg0, arg1) {
     const ret = debugString(arg1);
@@ -752,9 +799,26 @@ export function __wbg___wbindgen_debug_string_a57024b9c6e4a48b(arg0, arg1) {
     getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
     getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
 }
+export function __wbg___wbindgen_is_null_7d13f41e1a2d5140(arg0) {
+    const ret = arg0 === null;
+    return ret;
+}
+export function __wbg___wbindgen_is_object_a2790eb24c211ea0(arg0) {
+    const val = arg0;
+    const ret = typeof(val) === 'object' && val !== null;
+    return ret;
+}
+export function __wbg___wbindgen_is_undefined_6cff064c44e0d823(arg0) {
+    const ret = arg0 === undefined;
+    return ret;
+}
 export function __wbg___wbindgen_throw_bb96b2010945f0bc(arg0, arg1) {
     throw new Error(getStringFromWasm0(arg0, arg1));
 }
+export function __wbg_get_971a0c45d172643f() { return handleError(function (arg0, arg1) {
+    const ret = Reflect.get(arg0, arg1);
+    return ret;
+}, arguments); }
 export function __wbg_new_ebe3e0f6837f0879() {
     const ret = new Object();
     return ret;
@@ -915,9 +979,20 @@ function handleError(f, args) {
     }
 }
 
+function isLikeNone(x) {
+    return x === undefined || x === null;
+}
+
 function passArray32ToWasm0(arg, malloc) {
     const ptr = malloc(arg.length * 4, 4) >>> 0;
     getUint32ArrayMemory0().set(arg, ptr / 4);
+    WASM_VECTOR_LEN = arg.length;
+    return ptr;
+}
+
+function passArray8ToWasm0(arg, malloc) {
+    const ptr = malloc(arg.length * 1, 1) >>> 0;
+    getUint8ArrayMemory0().set(arg, ptr / 1);
     WASM_VECTOR_LEN = arg.length;
     return ptr;
 }

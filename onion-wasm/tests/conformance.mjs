@@ -628,6 +628,7 @@ if (corpus && existsSync(corpus)) {
   const skeleton = JSON.parse(rawDiff(baseline, current, "words"));
   let runs = 0;
   let markupSeen = false;
+  let noteReading = "";
   for (const unit of skeleton.units) {
     if (!unit.text) continue;
     for (const [side, source] of [
@@ -643,8 +644,12 @@ if (corpus && existsSync(corpus)) {
       for (let i = 0; i < list.length; i++) {
         const run = list[i];
         if (i > 0) eq(list[i - 1].to, run.from, `${unit.unitId} ${side}: run ${i} is gapless`);
+        check(typeof run.note === "boolean", `${unit.unitId} ${side}: run ${i} says whether it is in a note`);
         if (run.what === "markup") markupSeen = true;
         else reading += source.slice(run.from, run.to);
+        if (side === "current" && run.note && run.what !== "markup") {
+          noteReading += source.slice(run.from, run.to);
+        }
         runs++;
       }
       // L2: what is not markup IS the `text` cut of the same span.
@@ -657,6 +662,7 @@ if (corpus && existsSync(corpus)) {
   }
   check(runs > 0, "the diff produced runs");
   check(markupSeen, "a `\\add` the words moved around shows as a markup run");
+  eq(noteReading, "a note", "a footnote's runs are its own reading");
 }
 
 console.log(failures === 0 ? "conformance: OK" : `conformance: ${failures} FAILURES`);

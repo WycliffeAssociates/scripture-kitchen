@@ -215,6 +215,90 @@ fn the_source_skeleton_is_addressed_by_verse() {
     assert!(skeleton.blocks.iter().all(|block| block.marker != "f"));
 }
 
+/// SHAPES: a block's `from..end` is its paragraph as onion's grammar closes
+/// it. Headings and `\c` are not rows, and still end the block before them.
+#[test]
+fn a_block_ends_where_its_paragraph_closes() {
+    let text = "\\id GEN\n\\c 1\n\\p\n\\v 1 a \\f + \\ft n\\f* b\n\\s1 Heading\n\\p\n\\v 2 c\n\\q1 d\n\\q2 e\n\\c 2\n\\p\n\\v 1 f\n";
+    let mut pantry = loaded(text, text);
+    let skeleton = overlay::skeleton(&mut pantry, &id(SOURCE)).expect("a skeleton");
+    let blocks: Vec<(&str, &str)> = skeleton
+        .blocks
+        .iter()
+        .map(|block| {
+            assert_eq!(
+                text[block.from as usize..block.to as usize].trim_end(),
+                format!("\\{}", block.marker)
+            );
+            (
+                block.marker.as_str(),
+                &text[block.from as usize..block.end as usize],
+            )
+        })
+        .collect();
+    assert_eq!(
+        blocks,
+        [
+            ("p", "\\p\n\\v 1 a \\f + \\ft n\\f* b\n"),
+            ("p", "\\p\n\\v 2 c\n"),
+            ("q1", "\\q1 d\n"),
+            ("q2", "\\q2 e\n"),
+            ("p", "\\p\n\\v 1 f\n"),
+        ]
+    );
+    // The heading's own bytes are in no block.
+    let heading = text.find("\\s1").expect("a heading") as u32;
+    assert!(
+        skeleton
+            .blocks
+            .iter()
+            .all(|block| !(block.from..block.end).contains(&heading))
+    );
+}
+
+/// SHAPES: en_ulb's `\\s5`, registered as a legacy standalone, stops closing
+/// the paragraph it sits in — so the block runs past it to the heading.
+#[test]
+fn a_registered_legacy_marker_does_not_end_a_block() {
+    use usfm_galley::onion::extensions::{
+        CustomMarker, ExtensionCategory, ExtensionOptions, set_extensions, set_extensions_with,
+    };
+    struct Restore;
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            set_extensions(&[]);
+        }
+    }
+    let _restore = Restore;
+
+    let text = "\\id GEN\n\\c 1\n\\p\n\\v 1 a\n\\s5\n\\v 2 b\n\\s1 Heading\n\\p\n\\v 3 c\n";
+    let first_block = || {
+        let mut pantry = loaded(text, text);
+        let skeleton = overlay::skeleton(&mut pantry, &id(SOURCE)).expect("a skeleton");
+        let block = &skeleton.blocks[0];
+        text[block.from as usize..block.end as usize].to_owned()
+    };
+    assert_eq!(
+        first_block(),
+        "\\p\n\\v 1 a\n",
+        "unregistered, `\\s5` is unknown and closes it"
+    );
+
+    let reports = set_extensions_with(
+        &[CustomMarker {
+            name: "s5".to_owned(),
+            category: ExtensionCategory::Standalone,
+            description: String::new(),
+            attributes: Vec::new(),
+        }],
+        &ExtensionOptions {
+            relax_z_prefix: true,
+        },
+    );
+    assert!(reports.is_empty(), "{reports:?}");
+    assert_eq!(first_block(), "\\p\n\\v 1 a\n\\s5\n\\v 2 b\n");
+}
+
 /// SHAPES: a verse-only target gets the paragraph before v21, four EMPTY
 /// poetry lines after v23's text, and the paragraph before v24.
 #[test]
@@ -545,7 +629,7 @@ fn render(skeleton: &Skeleton) -> String {
     }
     for block in &skeleton.blocks {
         out.push_str(&format!(
-            "block {} {} {} {} {}..{} empty={}\n",
+            "block {} {} {} {} {}..{} end {} empty={}\n",
             block.sid,
             match block.placement {
                 Placement::Leading => "leading",
@@ -555,6 +639,7 @@ fn render(skeleton: &Skeleton) -> String {
             block.marker,
             block.from,
             block.to,
+            block.end,
             block.empty
         ));
     }

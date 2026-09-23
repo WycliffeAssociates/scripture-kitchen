@@ -842,7 +842,8 @@ export class Galley {
      * interface SkeletonRow {
      *   sid: string; where: "leading" | "inside"; ordinal: number;   // the address
      *   marker: string;                                              // "q1"
-     *   from: number; to: number;                                    // the marker node's span
+     *   from: number; to: number;                                    // the marker token's span
+     *   end: number;                          // from..end is the whole block, as onion's tree closes it
      *   empty: boolean;                       // onion's empty paragraph; a source folds these away
      * }
      * ```
@@ -851,6 +852,9 @@ export class Galley {
      * here — and `utf16` asks for UTF-16 offsets instead of bytes. A block is
      * LEADING when it sits immediately before its verse's `\v`, INSIDE when
      * the verse's own text is above it; ordinals count from one per address.
+     * Both lists are in document order. A block ends where its paragraph
+     * closes — a heading or `\c` the marker set leaves out still ends it — so
+     * the next row's `from` is not its end.
      * @param {string} id
      * @param {any} opts
      * @param {boolean | null} [utf16]
@@ -1879,6 +1883,10 @@ export function parse(text, diagnostics, toc, utf16) {
  * ```js
  * setExtensions('[{"name":"zaln","category":"milestone"}]');  // → "[]"
  * setExtensions("[]");                                        // clears
+ *
+ * // Legacy markup a host cannot change: en_ulb's chunk marker, as a bare
+ * // point that leaves its paragraph open.
+ * setExtensions('[{"name":"s5","category":"standalone"}]', { relaxZPrefix: true });
  * ```
  *
  * Takes the LIST, never a file: a host with a `custom.sty`, or a UI that lets
@@ -1894,19 +1902,24 @@ export function parse(text, diagnostics, toc, utf16) {
  * both caches key on content. Call it at composition, before the first
  * parse, rather than between edits.
  *
- * Throws only on malformed JSON. A bad ENTRY — no name, a name that is not
+ * `relaxZPrefix` admits a name without the `z` that the spec does not
+ * define; a name the spec does define (`s1`, `p`) is still a report.
+ *
+ * Throws on malformed JSON and on an `opts` that is not an object or whose
+ * `relaxZPrefix` is not a boolean. A bad ENTRY — no name, a name that is not
  * `z`-initial, an unknown category word, a duplicate — is a report, not a
  * failure, so one bad line never costs a host the rest of its list.
  * @param {string} list
+ * @param {{ relaxZPrefix?: boolean }} [opts]
  * @returns {string}
  */
-export function setExtensions(list) {
+export function setExtensions(list, opts) {
     let deferred3_0;
     let deferred3_1;
     try {
         const ptr0 = passStringToWasm0(list, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.setExtensions(ptr0, len0);
+        const ret = wasm.setExtensions(ptr0, len0, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
         var ptr2 = ret[0];
         var len2 = ret[1];
         if (ret[3]) {
@@ -1947,6 +1960,39 @@ export function toUtf16(text, byte) {
     const len0 = WASM_VECTOR_LEN;
     const ret = wasm.toUtf16(ptr0, len0, byte);
     return ret >>> 0;
+}
+
+/**
+ * XXH3-64, seed 0, over the bytes — the hash every dish header stamps as
+ * `sourceHash`, for whatever a host wants to key: a file fetched over the
+ * network, a chapter slice cut at a TOC row.
+ *
+ * ```js
+ * xxh3(bytes)                          // → 0x…n, a bigint (u64)
+ * xxh3Text(text) === xxh3(new TextEncoder().encode(text))
+ * xxh3Text(text) === parse(text, …).sourceHash
+ * ```
+ * @param {Uint8Array} bytes
+ * @returns {bigint}
+ */
+export function xxh3(bytes) {
+    const ptr0 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.xxh3(ptr0, len0);
+    return BigInt.asUintN(64, ret);
+}
+
+/**
+ * [`xxh3`] over a string's UTF-8, without a `TextEncoder` round trip on the
+ * JS side.
+ * @param {string} text
+ * @returns {bigint}
+ */
+export function xxh3Text(text) {
+    const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.xxh3Text(ptr0, len0);
+    return BigInt.asUintN(64, ret);
 }
 export function __wbg_Error_408e67f47ca7b58b(arg0, arg1) {
     const ret = Error(getStringFromWasm0(arg0, arg1));
@@ -2186,6 +2232,13 @@ function isLikeNone(x) {
 function passArray32ToWasm0(arg, malloc) {
     const ptr = malloc(arg.length * 4, 4) >>> 0;
     getUint32ArrayMemory0().set(arg, ptr / 4);
+    WASM_VECTOR_LEN = arg.length;
+    return ptr;
+}
+
+function passArray8ToWasm0(arg, malloc) {
+    const ptr = malloc(arg.length * 1, 1) >>> 0;
+    getUint8ArrayMemory0().set(arg, ptr / 1);
     WASM_VECTOR_LEN = arg.length;
     return ptr;
 }

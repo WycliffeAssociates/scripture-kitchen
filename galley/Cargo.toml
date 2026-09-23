@@ -1,6 +1,6 @@
 [package]
 name = "usfm_galley"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2024"
 description = "The workflows crate over the USFM engine and the Sous analysis — the resident handle, and every onion door on one module."
 

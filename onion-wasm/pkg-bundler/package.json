@@ -2,7 +2,7 @@
   "name": "onion-wasm",
   "type": "module",
   "description": "The JS doorway over the USFM engine — piece 2 of the five-crate layout (bindgen, .d.ts, UTF-16 walls).",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "files": [
     "onion_wasm_bg.wasm",
     "onion_wasm.js",

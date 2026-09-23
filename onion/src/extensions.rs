@@ -10,7 +10,20 @@
 //!
 //! lex("\\zaln word")           // plain spelling of a milestone name
 //!     -> Marker marker_idx = 0                  ← the spelling disagrees
+//!
+//! set_extensions_with(&[CustomMarker { name: "s5", category: Standalone, .. }],
+//!                     &ExtensionOptions { relax_z_prefix: true })
+//!
+//! lex("\\p \\v 1 a \\s5 \\v 3 b")
+//!     -> \s5 is a bare point                     ← the \p stays open past it
 //! ```
+//!
+//! **Legacy names.** `relax_z_prefix` admits a name without the `z`, for a
+//! host that has to read markup it cannot change — en_ulb's `\s5` chunk
+//! marker. The name must be one the spec table resolves to nothing in every
+//! spelling, so `s5` passes (`\s` stops at level 4) and `s1` or `p` is a
+//! report: a legacy name can add a marker, never redefine one. A
+//! `markers.ext` file stays `z`-only.
 //!
 //! A user marker is a spec marker the table has not met, and the spec says
 //! which one in one field. So this module maps a NAME to a template row and
@@ -29,7 +42,9 @@ use std::sync::{Arc, OnceLock, PoisonError, RwLock};
 
 use rustc_hash::FxHashMap;
 
-pub use mise::extensions::{CustomMarker, ExtensionCategory, Malformed, check_name};
+pub use mise::extensions::{
+    CustomMarker, ExtensionCategory, Malformed, check_legacy_name, check_name,
+};
 
 use crate::tables::generated::{self, MarkerIdx, UNRESOLVED};
 use crate::tables::schema::{Numbering, SpellingShape};
@@ -40,6 +55,15 @@ use crate::tables::schema::{Numbering, SpellingShape};
 pub struct Extensions {
     by_name: FxHashMap<Box<[u8]>, MarkerIdx>,
     declared: Vec<CustomMarker>,
+    /// Some registered name lacks the `z`, so a spec miss asks the registry.
+    legacy: bool,
+}
+
+/// How a list is judged.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ExtensionOptions {
+    /// Admit names without the `z` that the spec does not define.
+    pub relax_z_prefix: bool,
 }
 
 impl Extensions {
@@ -49,10 +73,21 @@ impl Extensions {
     /// report's `line` is 0 — these faults are the list's, not a file's, and
     /// the file reader fills the real line when it is the one reporting.
     pub fn new(list: &[CustomMarker]) -> (Self, Vec<Malformed>) {
+        Self::new_with(list, &ExtensionOptions::default())
+    }
+
+    /// The same under `opts`.
+    pub fn new_with(list: &[CustomMarker], opts: &ExtensionOptions) -> (Self, Vec<Malformed>) {
         let mut out = Self::default();
         let mut reports = Vec::new();
         for marker in list {
-            let reason = if let Some(reason) = check_name(&marker.name) {
+            let legacy = opts.relax_z_prefix && !marker.name.starts_with('z');
+            let reason = if legacy {
+                check_legacy_name(&marker.name).or_else(|| spec_defines(&marker.name))
+            } else {
+                check_name(&marker.name)
+            };
+            let reason = if let Some(reason) = reason {
                 Some(reason)
             } else if out.by_name.contains_key(marker.name.as_bytes()) {
                 Some("duplicate name; the first definition stands")
@@ -73,6 +108,7 @@ impl Extensions {
             let template = generated::template_for(marker.category);
             if template != UNRESOLVED {
                 out.by_name.insert(marker.name.as_bytes().into(), template);
+                out.legacy |= legacy;
             }
             out.declared.push(marker.clone());
         }
@@ -147,8 +183,19 @@ impl Extensions {
     }
 }
 
+/// Why a legacy name cannot be registered: the spec table already resolves
+/// it in some spelling.
+fn spec_defines(name: &str) -> Option<&'static str> {
+    let bytes = name.as_bytes();
+    [SpellingShape::PlainOnly, SpellingShape::MilestoneOnly]
+        .into_iter()
+        .any(|shape| generated::marker_idx(bytes, shape) != UNRESOLVED)
+        .then_some("names a spec marker; a legacy name can only add one")
+}
+
 /// THE resolution door: a `z` name through the registry, everything else
-/// through the spec table.
+/// through the spec table — and a spec miss through the registry too when it
+/// holds a legacy name. The registry never sees a name the spec resolves.
 ///
 /// [`generated::marker_idx`] is a projection of the authored rows and knows
 /// nothing about a runtime registry — which is the invariant that keeps the
@@ -158,7 +205,11 @@ pub fn marker_idx(lexeme: &[u8], shape: SpellingShape, ext: &Extensions) -> Mark
     if lexeme.first() == Some(&b'z') {
         return ext.resolve(lexeme, shape);
     }
-    generated::marker_idx(lexeme, shape)
+    let idx = generated::marker_idx(lexeme, shape);
+    if idx == UNRESOLVED && ext.legacy {
+        return ext.resolve(lexeme, shape);
+    }
+    idx
 }
 
 // ------------------------------------------------------- the process registry
@@ -188,7 +239,12 @@ pub fn current() -> Arc<Extensions> {
 /// Bumps [`generation`], which is how a cache keyed on content alone learns
 /// that the same bytes now parse differently.
 pub fn set_extensions(list: &[CustomMarker]) -> Vec<Malformed> {
-    let (extensions, reports) = Extensions::new(list);
+    set_extensions_with(list, &ExtensionOptions::default())
+}
+
+/// The same under `opts`.
+pub fn set_extensions_with(list: &[CustomMarker], opts: &ExtensionOptions) -> Vec<Malformed> {
+    let (extensions, reports) = Extensions::new_with(list, opts);
     *REGISTRY.write().unwrap_or_else(PoisonError::into_inner) = Some(Arc::new(extensions));
     GENERATION.fetch_add(1, Ordering::Release);
     reports
@@ -307,7 +363,7 @@ mod tests {
             ),
             (
                 ExtensionCategory::Standalone,
-                "\\zmy \\*",
+                "\\zmy x",
                 MarkerKind::Milestone,
             ),
             (ExtensionCategory::Cell, "\\zmy1 x", MarkerKind::TableCell),
@@ -355,11 +411,11 @@ mod tests {
         );
         assert_eq!(row("\\zfoo-s x", &character), UNRESOLVED);
 
-        // `standalone` copies `\ts`, whose row claims either spelling.
+        // `standalone` is bare: the milestone spelling is someone else's.
         let standalone = registry(&[("zms", ExtensionCategory::Standalone)]);
         let template = generated::template_for(ExtensionCategory::Standalone);
-        assert_eq!(row("\\zms \\*", &standalone), template);
-        assert_eq!(row("\\zms-s \\*", &standalone), template);
+        assert_eq!(row("\\zms x", &standalone), template);
+        assert_eq!(row("\\zms-s \\*", &standalone), UNRESOLVED);
     }
 
     /// `cell` is the one numbered category: its digits are a column index,
@@ -437,6 +493,53 @@ mod tests {
             generated::template_for(ExtensionCategory::Char),
             "the first definition stands, as a char"
         );
+    }
+
+    /// A legacy name registers only when asked for, and only where the spec
+    /// has nothing: it adds a marker, never redefines one.
+    #[test]
+    fn a_legacy_name_needs_the_relaxed_prefix_and_a_spec_miss() {
+        let list = |name: &str| {
+            vec![CustomMarker {
+                name: name.to_owned(),
+                category: ExtensionCategory::Standalone,
+                description: String::new(),
+                attributes: Vec::new(),
+            }]
+        };
+        let relaxed = ExtensionOptions {
+            relax_z_prefix: true,
+        };
+        let template = generated::template_for(ExtensionCategory::Standalone);
+
+        let (strict, reports) = Extensions::new(&list("s5"));
+        assert_eq!(reports[0].reason, "name does not start with z");
+        assert_eq!(row("\\s5 x", &strict), UNRESOLVED);
+
+        let (ext, reports) = Extensions::new_with(&list("s5"), &relaxed);
+        assert!(reports.is_empty(), "{reports:?}");
+        assert_eq!(row("\\s5 x", &ext), template);
+        assert_eq!(row("\\s5-s \\*", &ext), UNRESOLVED, "bare only");
+        assert_eq!(
+            row("\\s1 x", &ext),
+            generated::marker_idx(b"s1", SpellingShape::PlainOnly),
+            "spec names still resolve through the spec"
+        );
+
+        for spec in ["s1", "p", "qt", "ts"] {
+            let (ext, reports) = Extensions::new_with(&list(spec), &relaxed);
+            assert_eq!(
+                reports[0].reason, "names a spec marker; a legacy name can only add one",
+                "{spec}"
+            );
+            assert!(ext.resolves_nothing(), "{spec}");
+        }
+        let (_, reports) = Extensions::new_with(&list("s-5"), &relaxed);
+        assert_eq!(reports[0].reason, "name is not ASCII alphanumeric");
+        // `z` names are judged exactly as without the option.
+        let (ext, reports) = Extensions::new_with(&list("zbare"), &relaxed);
+        assert!(reports.is_empty());
+        assert_eq!(row("\\zbare x", &ext), template);
     }
 
     /// Installing bumps the generation, which is what a content-keyed cache
