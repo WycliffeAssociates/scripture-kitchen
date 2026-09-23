@@ -287,6 +287,17 @@ impl FormatOpts {
 /// the formatter's doors here answer in UTF-16 throughout, and a producer in
 /// another crate names its own unit (`galley`'s overlay answers bytes unless
 /// asked for UTF-16).
+///
+/// **At most one edit per position.** A pure insert landing where the edit
+/// before it ends is folded into that edit, so an applier's order among
+/// same-position edits can never matter:
+///
+/// ```text
+/// engine    [66,66) "\n\q2"  [66,66) "\n\q3"  [66,66) "\n\q4"
+/// crosses   [66,66) "\n\q2\n\q3\n\q4"
+/// ```
+///
+/// Applied either way the text is the same; only the entry count differs.
 #[wasm_bindgen]
 pub struct Edits {
     spans: Vec<u32>,
@@ -300,7 +311,29 @@ impl Edits {
     /// caller owns the unit its spans are in.
     pub fn from_parts(spans: Vec<u32>, lens: Vec<u32>, text: String) -> Edits {
         debug_assert_eq!(spans.len(), lens.len() * 2, "one from/to pair per edit");
-        Edits { spans, lens, text }
+        let mut out = Edits {
+            spans: Vec::with_capacity(spans.len()),
+            lens: Vec::with_capacity(lens.len()),
+            text,
+        };
+        for (span, len) in spans.chunks_exact(2).zip(lens) {
+            out.push(span[0], span[1], len);
+        }
+        out
+    }
+
+    /// Appends one edit whose insert is already on `text`, folding a pure
+    /// insert at the previous edit's end into it.
+    fn push(&mut self, from: u32, to: u32, len: u32) {
+        if from == to
+            && let (Some(&end), Some(last)) = (self.spans.last(), self.lens.last_mut())
+            && end == from
+        {
+            *last += len;
+            return;
+        }
+        self.spans.extend_from_slice(&[from, to]);
+        self.lens.push(len);
     }
 }
 
@@ -365,10 +398,12 @@ fn wire_edits(index: &Utf16Index, edits: &[usfm_onion::Edit]) -> Edits {
         text: String::new(),
     };
     for edit in edits {
-        out.spans
-            .extend_from_slice(&[index.to_utf16(edit.from), index.to_utf16(edit.to)]);
-        out.lens.push(edit.insert.as_bytes().len() as u32);
         out.text.push_str(edit.insert.as_str());
+        out.push(
+            index.to_utf16(edit.from),
+            index.to_utf16(edit.to),
+            edit.insert.as_bytes().len() as u32,
+        );
     }
     out
 }
@@ -1375,6 +1410,34 @@ mod tests {
         assert_eq!(read["malformed"][0]["reason"], "name does not start with z");
         // Nothing installed: the marker is still row 0.
         assert_eq!(usfm_onion::lex("\\zmyf x")[0].marker_idx, 0);
+    }
+
+    /// Same-position edits cross as one, and the text is the same either way.
+    #[test]
+    fn edits_fold_to_one_per_position() {
+        let edits = Edits::from_parts(
+            vec![2, 4, 4, 4, 4, 4, 9, 9],
+            vec![1, 2, 3, 1],
+            "abbcccd".to_owned(),
+        );
+        assert_eq!(edits.spans, [2, 4, 9, 9]);
+        assert_eq!(edits.lens, [6, 1]);
+        assert_eq!(edits.text, "abbcccd");
+
+        // A fix longer than one `FixStr` arrives split and crosses whole.
+        let long = usfm_onion::Edit {
+            from: 0,
+            to: 0,
+            insert: usfm_onion::edit::FixStr::new(b"0123456789abcde"),
+        };
+        let tail = usfm_onion::Edit {
+            from: 0,
+            to: 0,
+            insert: usfm_onion::edit::FixStr::new(b"XYZ"),
+        };
+        let crossed = wire_edits(&Utf16Index::new(b"text"), &[long, tail]);
+        assert_eq!(crossed.spans, [0, 0]);
+        assert_eq!(crossed.lens, [18]);
     }
 
     /// The free hash is the header's: same function, same seed, same bytes.

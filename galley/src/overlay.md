@@ -149,7 +149,9 @@ because a lengths-only reference has no skeleton to copy.
 The transaction crosses as `onion-wasm`'s `Edits`, built through
 `Edits::from_parts` — the same class `formatEdits` answers with, so a host
 applies an overlay exactly as it applies a fix. Its spans are bytes unless the
-caller asked for `utf16`.
+caller asked for `utf16`. Inserts that share a position — four empty poetry
+lines after one verse's text — cross as ONE edit, so an applier that splices
+last-first still lands them in source order.
 
 An overlay is a SUGGESTION applied on request, never a finding. It is not on
 the publication path and nothing about it reaches a snapshot.

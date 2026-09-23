@@ -372,6 +372,34 @@ fn an_overlay_crosses_the_wall() {
     for (byte, unit) in bytes.spans().into_iter().zip(units.spans()) {
         assert_eq!(unit, onion::to_utf16(OVERLAY_TARGET, byte), "span {byte}");
     }
+
+    // One edit per position, so an applier that splices last-first — the
+    // usual way to keep offsets valid — lands the source's order, not its
+    // reverse.
+    let (spans, lens, text) = (bytes.spans(), bytes.lens(), bytes.text());
+    assert!(
+        spans
+            .chunks_exact(2)
+            .map(|span| span[0])
+            .collect::<Vec<_>>()
+            .windows(2)
+            .all(|at| at[0] < at[1]),
+        "no two edits share a position: {spans:?}"
+    );
+    let mut starts = Vec::with_capacity(lens.len());
+    lens.iter().fold(0usize, |at, len| {
+        starts.push(at);
+        at + *len as usize
+    });
+    let mut last_first = OVERLAY_TARGET.to_owned();
+    for (i, span) in spans.chunks_exact(2).enumerate().rev() {
+        let insert = &text[starts[i]..starts[i] + lens[i] as usize];
+        last_first.replace_range(span[0] as usize..span[1] as usize, insert);
+    }
+    assert_eq!(
+        last_first, applied,
+        "applied last-first, the text is overlayText's"
+    );
 }
 
 /// `{ utf16: true }`, built the way a host would.

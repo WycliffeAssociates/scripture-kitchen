@@ -657,8 +657,11 @@ eq(
 );
 
 const edits = galley.overlay("books/OVL.usfm", "ref/OVL.usfm");
-eq(edits.lens.length, 6, "six blocks cross");
-eq(edits.spans.length, 12, "one from/to pair each");
+// Six blocks, three positions: the four poetry lines after v23's text share
+// one, and cross as one edit, so no applier can reverse them.
+eq(edits.lens.length, 3, "one edit per position");
+eq(edits.spans.length, 6, "one from/to pair each");
+eq(edits.text, "\\p\n\n\\q1\n\\q2\n\\q1\n\\q2\\p\n", "the six blocks, in source order");
 check(
   edits.spans.every((span, at) => at % 2 === 1 || span <= edits.spans[at + 1]),
   "every span is forward",

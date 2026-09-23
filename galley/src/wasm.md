@@ -461,6 +461,11 @@ editor applies an overlay exactly as it applies a fix: through the document,
 as ONE undo step. Highlighting falls out of the edits for free and scope is
 natural. `overlayText` is for a caller that only needs the string.
 
+`Edits` carries at most one edit per position: a pure insert landing where the
+previous edit ends is folded into it. So whatever order an applier splices in,
+first-to-last or last-to-first, `\q2 \q3 \q4` inserted after one verse lands
+as `\q2 \q3 \q4`.
+
 **The one difference is the unit.** `formatEdits` and `formatEditsIn` always
 answer in UTF-16; `overlay` answers in BYTES unless `utf16` asks otherwise,
 like every other door on the `Galley` handle. `Edits` itself names no unit —

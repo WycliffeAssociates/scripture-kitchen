@@ -11,6 +11,17 @@
  * the formatter's doors here answer in UTF-16 throughout, and a producer in
  * another crate names its own unit (`galley`'s overlay answers bytes unless
  * asked for UTF-16).
+ *
+ * **At most one edit per position.** A pure insert landing where the edit
+ * before it ends is folded into that edit, so an applier's order among
+ * same-position edits can never matter:
+ *
+ * ```text
+ * engine    [66,66) "\n\q2"  [66,66) "\n\q3"  [66,66) "\n\q4"
+ * crosses   [66,66) "\n\q2\n\q3\n\q4"
+ * ```
+ *
+ * Applied either way the text is the same; only the entry count differs.
  */
 export class Edits {
     private constructor();

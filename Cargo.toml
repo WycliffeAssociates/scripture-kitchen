@@ -39,7 +39,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.1.5"
+version = "0.1.6"
 edition = "2024"
 
 # Pinned here rather than per-crate so one version is stated once. These are
