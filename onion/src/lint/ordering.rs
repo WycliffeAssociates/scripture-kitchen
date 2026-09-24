@@ -70,10 +70,15 @@ pub(crate) struct Ordering {
     /// list is open — every chapter without a `,` designator — so a book with
     /// no lists allocates nothing here.
     covered: Vec<(u32, u32)>,
-    /// The previous verse's LAST point when it carries a segment: its number
-    /// and the segment's absolute byte span, so `\v 2b` after `\v 2a` reads as
-    /// the next place in verse 2 rather than as verse 2 again.
-    prev_segment: Option<(u32, u32, u32)>,
+    /// The verse number the sequence is currently inside BY SEGMENT, and the
+    /// absolute byte span of every segment of it written so far — so `\v 2b`
+    /// after `\v 2a` reads as the next place in verse 2, and a later `\v 2a`
+    /// as that place again. Every segment, not only the previous one:
+    /// `2a 2b 2a` repeats `2a`. `None` once a verse ends on no segment.
+    /// Reused rather than reallocated, so a book with no segments allocates
+    /// nothing here.
+    segments: Option<u32>,
+    seen_segments: Vec<(u32, u32)>,
     /// True until this chapter's first verse has been read (well-formed or not):
     /// the window in which `missing-verse-one` can fire. Starts FALSE, because
     /// the rule is about a CHAPTER's first verse and a verse ahead of any `\c`
@@ -105,7 +110,8 @@ impl Ordering {
             prev_chapter: None,
             prev_verse: None,
             covered: Vec::new(),
-            prev_segment: None,
+            segments: None,
+            seen_segments: Vec::new(),
             first_verse_slot: false,
             seen_chapter: false,
             first_verse_token: None,
@@ -307,7 +313,8 @@ impl Ordering {
     fn forget_verse(&mut self) {
         self.prev_verse = None;
         self.covered.clear();
-        self.prev_segment = None;
+        self.segments = None;
+        self.seen_segments.clear();
     }
 
     /// Whether every member of this designator sits in an open list's holes:
@@ -337,18 +344,25 @@ impl Ordering {
         self.covered.iter().any(|&(a, b)| from <= b && a <= to)
     }
 
-    /// Whether this designator opens on the previous verse's number with a
-    /// DIFFERENT segment (`\v 2b` after `\v 2a`): the next place in one verse.
+    /// Whether this designator opens on the current segmented verse's number
+    /// with a segment NOT yet written for it (`\v 2b` after `\v 2a`): the next
+    /// place in one verse. A segment already written (`2a` after `2a 2b`) is
+    /// that place again, and so a duplicate.
     fn next_segment(&self, source: &[u8], span: &[u8], first: u32) -> bool {
-        let Some((number, start, end)) = self.prev_segment else {
+        let Some(number) = self.segments else {
             return false;
         };
         let Some(Member { from, .. }) = designator::members(span).next() else {
             return false;
         };
-        let before = &source[start as usize..end as usize];
+        if number != first || from.number != first || !from.has_segment() {
+            return false;
+        }
         let now = &span[from.segment_start as usize..from.segment_end as usize];
-        number == first && from.number == first && from.has_segment() && before != now
+        !self
+            .seen_segments
+            .iter()
+            .any(|&(start, end)| &source[start as usize..end as usize] == now)
     }
 
     /// After a well-formed verse: what an open list covers now, and the
@@ -367,17 +381,24 @@ impl Ordering {
                     .extend(designator::members(span).map(|m| m.numbers()));
             }
         }
-        self.prev_segment = designator::members(span)
+        match designator::members(span)
             .last()
             .map(|member| member.to)
             .filter(|point| point.has_segment())
-            .map(|point| {
-                (
-                    point.number,
-                    at + point.segment_start,
-                    at + point.segment_end,
-                )
-            });
+        {
+            Some(point) => {
+                if self.segments != Some(point.number) {
+                    self.seen_segments.clear();
+                    self.segments = Some(point.number);
+                }
+                self.seen_segments
+                    .push((at + point.segment_start, at + point.segment_end));
+            }
+            None => {
+                self.segments = None;
+                self.seen_segments.clear();
+            }
+        }
     }
 
     /// The pending `\c`/`\v` never got a `Designator` token: its line ended, or
@@ -721,6 +742,17 @@ mod tests {
         assert_eq!(codes(&obs), vec![Code::VerseDuplicate]);
         let (_, obs) = findings("\\c 1\n\\p \\v 1 a \\v 2a b \\v 2 c");
         assert_eq!(codes(&obs), vec![Code::VerseDuplicate]);
+        // Every segment written counts, not only the one just before: a
+        // third `2a` after `2a 2b` is `2a` again.
+        let (_, obs) = findings("\\c 1\n\\p \\v 1 a \\v 2a b \\v 2b c \\v 2a d");
+        assert_eq!(codes(&obs), vec![Code::VerseDuplicate]);
+        // Three distinct segments stay three places.
+        let (_, obs) = findings("\\c 1\n\\p \\v 1 a \\v 2a b \\v 2b c \\v 2c d \\v 3 e");
+        assert_eq!(obs, vec![]);
+        // A new verse number starts its own segments: `3a` after `2a 2b` is
+        // not a repeat of anything.
+        let (_, obs) = findings("\\c 1\n\\p \\v 1 a \\v 2a b \\v 2b c \\v 3a d \\v 3b e");
+        assert_eq!(obs, vec![]);
     }
 
     #[test]
