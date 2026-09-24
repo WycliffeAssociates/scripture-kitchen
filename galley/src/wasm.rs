@@ -7,8 +7,8 @@
 //! const g = new Galley();                       // one handle, kept across edits
 //! g.update("books/MRK.usfm", text);             // → "MRK"
 //! FindingsSnapshot.open(g.publish());           // every finding in the corpus
-//! deserialize(g.parse("books/MRK.usfm", 1, 1, 1));  // off the retained copy
-//! deserialize(parse(text, true, true, true));   // the stateless door, same module
+//! deserialize(g.parse("books/MRK.usfm", { toc: true }));  // off the retained copy
+//! deserialize(parse(text, { toc: true }));              // the stateless door, same module
 //! ```
 //!
 //! Every `onion-wasm` door stands on this module too, linked by [`onion`], so
@@ -47,6 +47,73 @@ fn query(needle: &str, case_sensitive: bool, whole_word: bool) -> Find<'_> {
         .whole_word(whole_word)
 }
 
+/// Every options bag the handle's doors take, declared once so the `.d.ts`
+/// names them. `ParseOptions` is `onion-wasm`'s, shared with the free `parse`.
+#[wasm_bindgen(typescript_custom_section)]
+const OPTIONS_TS: &str = r#"
+/** Which registered books a project-wide door reads. Default `"targets"`. */
+export type Scope = "targets" | "references" | "all";
+
+/** `new Galley(opts)`. */
+export interface GalleyOptions {
+  /** Bounds resident products, in bytes; default 16 MB. */
+  budgetBytes?: number;
+}
+
+/** `updateReference(id, text, opts)`. */
+export interface ReferenceOptions {
+  /** Keep the text and projection a target keeps, so `find` and `mask` can read it. */
+  keepText?: boolean;
+}
+
+/** `find` and `findAll`. */
+export interface FindOptions {
+  caseSensitive?: boolean;
+  wholeWord?: boolean;
+  /** Bounds hits across the whole call; 0, the default, means no bound. */
+  limit?: number;
+  /** `findAll` only; present on `find` it throws. */
+  scope?: Scope;
+}
+
+/** `mask` and `maskOf`. */
+export interface MaskOptions {
+  recipe?: "verseText" | "structure" | "text";
+  utf16?: boolean;
+}
+
+/** `toc(id, opts)`. */
+export interface TocOptions {
+  /** Rebase every offset through the book's own UTF-16 table; default bytes. */
+  utf16?: boolean;
+}
+
+/** `tocAll(opts)`. */
+export interface CensusOptions {
+  scope?: Scope;
+  utf16?: boolean;
+}
+
+/** `overlay`, `overlayText`, `overlayReport`, `skeleton`, and the node doors. */
+export interface OverlayOptions {
+  /** Default: onion's paragraph and poetry block set, no titles. */
+  markers?: string[];
+  /** Default: the whole book. */
+  scope?: { chapter: number } | { sid: string };
+  /** Offsets as UTF-16 code units; default bytes. */
+  utf16?: boolean;
+}
+
+/** One block's address on one side — a skeleton row names its own. */
+export interface BlockAddress {
+  sid: string;
+  where: "leading" | "inside";
+  ordinal: number;
+  /** The spelling the position held; checked, so a stale address throws. */
+  marker: string;
+}
+"#;
+
 /// Which roles `findAll`'s scope names, in the order their books are searched.
 ///
 /// A string rather than a number, so the JS call reads as what it does; an
@@ -81,15 +148,22 @@ pub struct Galley {
 
 #[wasm_bindgen]
 impl Galley {
-    /// `budgetBytes` bounds resident products; omit it for 16 MB.
+    /// `{ budgetBytes? }` bounds resident products; omit it for 16 MB.
     #[wasm_bindgen(constructor)]
-    pub fn new(budget_bytes: Option<f64>) -> Galley {
-        let budget = budget_bytes
-            .filter(|b| b.is_finite() && *b >= 0.0)
-            .map_or(DEFAULT_BUDGET, |b| b as usize);
-        Galley {
-            sous: Expediter::new(Brigade::default(), budget),
-        }
+    pub fn new(
+        #[wasm_bindgen(unchecked_optional_param_type = "GalleyOptions")] opts: Option<JsValue>,
+    ) -> Result<Galley, JsError> {
+        let bag = onion_wasm::options::bag(opts.as_ref(), "Galley", &["budgetBytes"])
+            .map_err(|e| JsError::new(&e))?;
+        let budget = match onion_wasm::options::get(bag.as_ref(), "budgetBytes") {
+            None => DEFAULT_BUDGET,
+            Some(value) => value
+                .as_f64()
+                .filter(|b| b.is_finite() && *b >= 0.0)
+                .ok_or_else(|| JsError::new("Galley: budgetBytes must be a non-negative number"))?
+                as usize,
+        };
+        Ok(Galley::with_budget(budget))
     }
 
     // ── The corpus ──────────────────────────────────────────────────────
@@ -114,7 +188,7 @@ impl Galley {
     /// A reference publishes no findings of its own; it is the denominator
     /// the length lane compares a target's verses against.
     ///
-    /// `keepText` — omitted is `false` — makes it keep the text and the
+    /// `{ keepText }` — omitted is `false` — makes it keep the text and the
     /// projection a target keeps too, which is what [`find`](Self::find) and
     /// `findAll`'s `"references"` scope read. It costs what a target costs
     /// minus the resident analysis; a source nobody searches should stay off
@@ -124,16 +198,13 @@ impl Galley {
         &mut self,
         id: &str,
         text: &str,
-        keep_text: Option<bool>,
+        #[wasm_bindgen(unchecked_optional_param_type = "ReferenceOptions")] opts: Option<JsValue>,
     ) -> Result<String, JsError> {
-        let retain = match keep_text.unwrap_or(false) {
-            true => Retain::Text,
-            false => Retain::ProductsOnly,
-        };
-        self.sous
-            .update_with(id, Role::Reference, retain, text)
-            .map(|key| key.to_string())
-            .map_err(|error| JsError::new(&error.to_string()))
+        let bag = onion_wasm::options::bag(opts.as_ref(), "updateReference", &["keepText"])
+            .map_err(|e| JsError::new(&e))?;
+        let keep_text = onion_wasm::options::flag(bag.as_ref(), "updateReference", "keepText")
+            .map_err(|e| JsError::new(&e))?;
+        self.update_reference_with(id, text, keep_text)
     }
 
     /// Drop a book, its text, and its cached rows. `false` when the id was
@@ -184,8 +255,13 @@ impl Galley {
     /// book that retains text and a projection may be searched — a target, or
     /// a reference registered with `keepText`. One that retains neither errors
     /// by name, because answering "no hits" would say it was clean.
-    pub fn find(&mut self, id: &str, needle: &str, opts: JsValue) -> Result<Vec<u8>, JsError> {
-        let opts = find::options(&opts)?;
+    pub fn find(
+        &mut self,
+        id: &str,
+        needle: &str,
+        #[wasm_bindgen(unchecked_optional_param_type = "FindOptions")] opts: Option<JsValue>,
+    ) -> Result<Vec<u8>, JsError> {
+        let opts = find::options(opts.as_ref(), "find")?;
         if opts.scope.is_some() {
             return Err(JsError::new("scope applies to findAll, not find"));
         }
@@ -210,8 +286,12 @@ impl Galley {
     /// book searched whether or not it matched, so a consumer never has to ask
     /// a second question to learn which book a hit is in.
     #[wasm_bindgen(js_name = findAll)]
-    pub fn find_all(&mut self, needle: &str, opts: JsValue) -> Result<Vec<u8>, JsError> {
-        let opts = find::options(&opts)?;
+    pub fn find_all(
+        &mut self,
+        needle: &str,
+        #[wasm_bindgen(unchecked_optional_param_type = "FindOptions")] opts: Option<JsValue>,
+    ) -> Result<Vec<u8>, JsError> {
+        let opts = find::options(opts.as_ref(), "findAll")?;
         let ids: Vec<BookId> = scope_roles(opts.scope, "find")?
             .iter()
             .flat_map(|role| self.sous.pantry().books_with_text(*role))
@@ -229,18 +309,23 @@ impl Galley {
     /// the `Toc` that `update` built and the Pantry pins.
     ///
     /// Nothing is derived here: no chunk is resolved, no text is read, no wire
-    /// is plated. `utf16` rebases every offset through the book's own retained
-    /// table; the default is bytes.
+    /// is plated. `{ utf16 }` rebases every offset through the book's own
+    /// retained table; the default is bytes.
     ///
     /// Read it with `usfm-galley/toc-reader`. The layout is generated from the
     /// same declaration the writer is, so no consumer learns one.
-    pub fn toc(&self, id: &str, utf16: Option<bool>) -> Result<Vec<u8>, JsError> {
+    pub fn toc(
+        &self,
+        id: &str,
+        #[wasm_bindgen(unchecked_optional_param_type = "TocOptions")] opts: Option<JsValue>,
+    ) -> Result<Vec<u8>, JsError> {
+        let utf16 =
+            onion_wasm::options::utf16_only(opts.as_ref(), "toc").map_err(|e| JsError::new(&e))?;
         let wanted = BookId::from(id);
         if self.sous.pantry().role(&wanted).is_none() {
             return Err(JsError::new(&format!("no book is registered as {id}")));
         }
-        crate::toc::encode(self.sous.pantry(), &[wanted], utf16.unwrap_or(false))
-            .map_err(census_refusal)
+        crate::toc::encode(self.sous.pantry(), &[wanted], utf16).map_err(census_refusal)
     }
 
     /// The same over every registered book in `scope`, in canonical book order
@@ -252,13 +337,28 @@ impl Galley {
     /// answer is `utf16`, because the table that rebases offsets travels with
     /// the text.
     #[wasm_bindgen(js_name = tocAll)]
-    pub fn toc_all(&self, scope: Option<String>, utf16: Option<bool>) -> Result<Vec<u8>, JsError> {
+    pub fn toc_all(
+        &self,
+        #[wasm_bindgen(unchecked_optional_param_type = "CensusOptions")] opts: Option<JsValue>,
+    ) -> Result<Vec<u8>, JsError> {
+        let bag = onion_wasm::options::bag(opts.as_ref(), "tocAll", &["scope", "utf16"])
+            .map_err(|e| JsError::new(&e))?;
+        let scope = match onion_wasm::options::get(bag.as_ref(), "scope") {
+            None => None,
+            Some(scope) => Some(
+                scope
+                    .as_string()
+                    .ok_or_else(|| JsError::new("tocAll: scope must be a string"))?,
+            ),
+        };
+        let utf16 = onion_wasm::options::flag(bag.as_ref(), "tocAll", "utf16")
+            .map_err(|e| JsError::new(&e))?;
         let ids: Vec<BookId> = scope_roles(scope, "census")?
             .iter()
             .flat_map(|role| self.sous.pantry().books(*role))
             .map(|(id, _)| id.clone())
             .collect();
-        crate::toc::encode(self.sous.pantry(), &ids, utf16.unwrap_or(false)).map_err(census_refusal)
+        crate::toc::encode(self.sous.pantry(), &ids, utf16).map_err(census_refusal)
     }
 
     // ── Match formatting: a target's skeleton made the source's ─────────
@@ -281,8 +381,8 @@ impl Galley {
     /// }
     /// ```
     ///
-    /// `opts` is an [`OverlayOptions`](Self::overlay) — only `markers` is read
-    /// here — and `utf16` asks for UTF-16 offsets instead of bytes. A block is
+    /// `opts` is an [`OverlayOptions`](Self::overlay) — only `markers` and
+    /// `utf16` are read here. A block is
     /// LEADING when it sits immediately before its verse's `\v`, INSIDE when
     /// the verse's own text is above it; ordinals count from one per address.
     /// Both lists are in document order. A block ends where its paragraph
@@ -291,13 +391,11 @@ impl Galley {
     pub fn skeleton(
         &mut self,
         id: &str,
-        opts: JsValue,
-        utf16: Option<bool>,
+        #[wasm_bindgen(unchecked_optional_param_type = "OverlayOptions")] opts: Option<JsValue>,
     ) -> Result<String, JsError> {
-        let (options, flag) = overlay::options(&opts)?;
+        let (options, utf16) = overlay::options(opts.as_ref(), "skeleton")?;
         let wanted = BookId::from(id);
         let mut skeleton = self.sous.skeleton(&wanted, &options).map_err(door)?;
-        let utf16 = utf16.unwrap_or(flag);
         let table = self.table(&wanted, utf16)?;
         overlay::rebase_skeleton(&mut skeleton, table.as_ref());
         overlay::json(&skeleton)
@@ -329,9 +427,9 @@ impl Galley {
         &mut self,
         target_id: &str,
         source_id: &str,
-        opts: JsValue,
+        #[wasm_bindgen(unchecked_optional_param_type = "OverlayOptions")] opts: Option<JsValue>,
     ) -> Result<onion_wasm::Edits, JsError> {
-        let (options, utf16) = overlay::options(&opts)?;
+        let (options, utf16) = overlay::options(opts.as_ref(), "overlay")?;
         let target = BookId::from(target_id);
         let computed = self
             .sous
@@ -349,9 +447,9 @@ impl Galley {
         &mut self,
         target_id: &str,
         source_id: &str,
-        opts: JsValue,
+        #[wasm_bindgen(unchecked_optional_param_type = "OverlayOptions")] opts: Option<JsValue>,
     ) -> Result<String, JsError> {
-        let (options, _) = overlay::options(&opts)?;
+        let (options, _) = overlay::options(opts.as_ref(), "overlayText")?;
         self.sous
             .overlay_text(&BookId::from(target_id), &BookId::from(source_id), &options)
             .map_err(door)
@@ -376,9 +474,9 @@ impl Galley {
         &mut self,
         target_id: &str,
         source_id: &str,
-        opts: JsValue,
+        #[wasm_bindgen(unchecked_optional_param_type = "OverlayOptions")] opts: Option<JsValue>,
     ) -> Result<String, JsError> {
-        let (options, utf16) = overlay::options(&opts)?;
+        let (options, utf16) = overlay::options(opts.as_ref(), "overlayReport")?;
         let target = BookId::from(target_id);
         let mut report = self
             .sous
@@ -410,11 +508,10 @@ impl Galley {
         &mut self,
         target_id: &str,
         source_id: &str,
-        address: JsValue,
-        opts: JsValue,
-        utf16: Option<bool>,
+        #[wasm_bindgen(unchecked_param_type = "BlockAddress")] address: JsValue,
+        #[wasm_bindgen(unchecked_optional_param_type = "OverlayOptions")] opts: Option<JsValue>,
     ) -> Result<String, JsError> {
-        self.node_for(target_id, source_id, address, opts, utf16, Side::Target)
+        self.node_for(target_id, source_id, address, opts, Side::Target)
     }
 
     /// A TARGET block's address, answered in the source — the mirror of
@@ -424,11 +521,10 @@ impl Galley {
         &mut self,
         target_id: &str,
         source_id: &str,
-        address: JsValue,
-        opts: JsValue,
-        utf16: Option<bool>,
+        #[wasm_bindgen(unchecked_param_type = "BlockAddress")] address: JsValue,
+        #[wasm_bindgen(unchecked_optional_param_type = "OverlayOptions")] opts: Option<JsValue>,
     ) -> Result<String, JsError> {
-        self.node_for(target_id, source_id, address, opts, utf16, Side::Source)
+        self.node_for(target_id, source_id, address, opts, Side::Source)
     }
 
     // ── Judging ─────────────────────────────────────────────────────────
@@ -476,18 +572,11 @@ impl Galley {
     pub fn parse(
         &mut self,
         id: &str,
-        diagnostics: bool,
-        toc: bool,
-        utf16: bool,
+        #[wasm_bindgen(unchecked_optional_param_type = "ParseOptions")] opts: Option<JsValue>,
     ) -> Result<Vec<u8>, JsError> {
-        self.book_parse(
-            id,
-            crate::onion::wire::ParseOptions {
-                diagnostics,
-                toc,
-                utf16,
-            },
-        )
+        let opts = onion_wasm::options::parse_options(opts.as_ref(), "parse")
+            .map_err(|e| JsError::new(&e))?;
+        self.book_parse(id, opts)
     }
 
     /// One registered book's verse text, off the projection it already
@@ -527,8 +616,12 @@ impl Galley {
     ///
     /// Read it with `usfm-galley/mask-reader`. The layout is generated from the
     /// same declaration the writer is, so no consumer learns one.
-    pub fn mask(&mut self, id: &str, opts: JsValue) -> Result<Vec<u8>, JsError> {
-        let opts = mask::options(&opts)?;
+    pub fn mask(
+        &mut self,
+        id: &str,
+        #[wasm_bindgen(unchecked_optional_param_type = "MaskOptions")] opts: Option<JsValue>,
+    ) -> Result<Vec<u8>, JsError> {
+        let opts = mask::options(opts.as_ref(), "mask")?;
         let wanted = self.projected(id)?;
         match opts.recipe {
             Recipe::VerseText => {
@@ -574,15 +667,14 @@ impl Galley {
     /// registered book still hits; what it costs over the id door is the
     /// string crossing the wall.
     #[wasm_bindgen(js_name = parseText)]
-    pub fn parse_text(&mut self, text: &str, diagnostics: bool, toc: bool, utf16: bool) -> Vec<u8> {
-        self.sous.parse(
-            text,
-            crate::onion::wire::ParseOptions {
-                diagnostics,
-                toc,
-                utf16,
-            },
-        )
+    pub fn parse_text(
+        &mut self,
+        text: &str,
+        #[wasm_bindgen(unchecked_optional_param_type = "ParseOptions")] opts: Option<JsValue>,
+    ) -> Result<Vec<u8>, JsError> {
+        let opts = onion_wasm::options::parse_options(opts.as_ref(), "parseText")
+            .map_err(|e| JsError::new(&e))?;
+        Ok(self.parse_text_with(text, opts))
     }
 
     /// The verse text of loose text. See [`parse_text`](Self::parse_text).
@@ -601,8 +693,12 @@ impl Galley {
     /// with the same options. Over a registered book's exact text the two
     /// doors answer the same buffer.
     #[wasm_bindgen(js_name = maskOf)]
-    pub fn mask_of(&mut self, text: &str, opts: JsValue) -> Result<Vec<u8>, JsError> {
-        let opts = mask::options(&opts)?;
+    pub fn mask_of(
+        &mut self,
+        text: &str,
+        #[wasm_bindgen(unchecked_optional_param_type = "MaskOptions")] opts: Option<JsValue>,
+    ) -> Result<Vec<u8>, JsError> {
+        let opts = mask::options(opts.as_ref(), "maskOf")?;
         let cut = self.sous.masked(text, &opts.recipe.filter());
         let table = opts
             .utf16
@@ -709,6 +805,50 @@ impl Galley {
 }
 
 impl Galley {
+    /// A handle bounded at `budget` bytes — [`new`](Self::new) without the
+    /// options object, for a Rust caller.
+    pub fn with_budget(budget: usize) -> Galley {
+        Galley {
+            sous: Expediter::new(Brigade::default(), budget),
+        }
+    }
+
+    /// [`updateReference`](Self::update_reference) with `keepText` as a Rust
+    /// argument.
+    pub fn update_reference_with(
+        &mut self,
+        id: &str,
+        text: &str,
+        keep_text: bool,
+    ) -> Result<String, JsError> {
+        let retain = match keep_text {
+            true => Retain::Text,
+            false => Retain::ProductsOnly,
+        };
+        self.sous
+            .update_with(id, Role::Reference, retain, text)
+            .map(|key| key.to_string())
+            .map_err(|error| JsError::new(&error.to_string()))
+    }
+
+    /// [`parse`](Self::parse) over engine options, for a Rust caller.
+    pub fn parse_with(
+        &mut self,
+        id: &str,
+        opts: crate::onion::wire::ParseOptions,
+    ) -> Result<Vec<u8>, JsError> {
+        self.book_parse(id, opts)
+    }
+
+    /// [`parseText`](Self::parse_text) over engine options, for a Rust caller.
+    pub fn parse_text_with(
+        &mut self,
+        text: &str,
+        opts: crate::onion::wire::ParseOptions,
+    ) -> Vec<u8> {
+        self.sous.parse(text, opts)
+    }
+
     /// One registered book that retains a verse-text projection, or the
     /// refusal naming the argument that would fix it.
     ///
@@ -742,11 +882,14 @@ impl Galley {
         target_id: &str,
         source_id: &str,
         address: JsValue,
-        opts: JsValue,
-        utf16: Option<bool>,
+        opts: Option<JsValue>,
         want: Side,
     ) -> Result<String, JsError> {
-        let (options, flag) = overlay::options(&opts)?;
+        let name = match want {
+            Side::Target => "targetNodeFor",
+            Side::Source => "sourceNodeFor",
+        };
+        let (options, utf16) = overlay::options(opts.as_ref(), name)?;
         let address = overlay::address(&address)?;
         let target = BookId::from(target_id);
         let source = BookId::from(source_id);
@@ -759,7 +902,7 @@ impl Galley {
             Side::Target => target,
             Side::Source => source,
         };
-        let table = self.table(&named, utf16.unwrap_or(flag))?;
+        let table = self.table(&named, utf16)?;
         overlay::rebase_equivalent(&mut answer, table.as_ref());
         overlay::json(&answer)
     }

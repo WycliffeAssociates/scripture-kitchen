@@ -14,13 +14,13 @@
 //! let dish   = plate(&parsed);
 //!
 //! dish[0..4]    "ONWR"          magic
-//! dish[4..8]    4               format version
-//! dish[8..12]   9               section count
+//! dish[4..8]    5               format version
+//! dish[8..12]   10              section count
 //! dish[12..16]  0               flags (bit 0 = offsets are UTF-16)
 //! dish[16..20]  MAX             the declared `\usfm` version, or NONE
 //! dish[20..24]  39              source length, in the dish's offset space
 //! dish[24..32]  0x…             xxh3-64 of the source BYTES
-//! dish[32..]    [off, len] x 9  the directory, then the sections
+//! dish[32..]    [off, len] x 10 the directory, then the sections
 //! ```
 //!
 //! Nothing here casts a Rust struct: every field is written little-endian by
@@ -155,6 +155,8 @@ pub struct Chapter {
     pub end: u32,
     pub token: u32,
     pub designator: u32,
+    pub label_start: u32,
+    pub label_end: u32,
     pub number: u32,
 }
 
@@ -163,10 +165,17 @@ pub struct Verse {
     pub at: u32,
     pub token: u32,
     pub designator: u32,
+    pub label_start: u32,
+    pub label_end: u32,
+    pub members_from: u32,
+    pub members_len: u32,
     pub chapter: u32,
     pub first: u32,
     pub last: u32,
 }
+
+/// One verse designator's member as it crosses — the Toc's own row.
+pub type Member = crate::toc::VerseMember;
 
 /// One repair's range in the edit arena.
 pub struct Fix {
@@ -282,6 +291,7 @@ pub fn plate(parsed: &Parsed<'_>) -> Vec<u8> {
         Some(report) => Findings::build(source, &parsed.tokens, report),
         None => Findings::empty(),
     };
+    let members: &[Member] = parsed.toc.as_ref().map_or(&[], |toc| &toc.members);
     let (chapters, verses) = match &parsed.toc {
         Some(toc) => (
             toc.chapters
@@ -291,6 +301,8 @@ pub fn plate(parsed: &Parsed<'_>) -> Vec<u8> {
                     end: c.end,
                     token: c.token,
                     designator: designator_of(&parsed.tokens, c.token),
+                    label_start: c.label_start,
+                    label_end: c.label_end,
                     number: u32::from(c.number),
                 })
                 .collect(),
@@ -300,6 +312,10 @@ pub fn plate(parsed: &Parsed<'_>) -> Vec<u8> {
                     at: v.at,
                     token: v.token,
                     designator: designator_of(&parsed.tokens, v.token),
+                    label_start: v.label_start,
+                    label_end: v.label_end,
+                    members_from: v.members_from,
+                    members_len: u32::from(v.members_len),
                     chapter: u32::from(v.chapter),
                     first: u32::from(v.first),
                     last: u32::from(v.last),
@@ -350,6 +366,7 @@ pub fn plate(parsed: &Parsed<'_>) -> Vec<u8> {
     sections.push(findings.text.into_bytes());
     rows!(schema::CHAPTER, &chapters, generated::write_chapters);
     rows!(schema::VERSE, &verses, generated::write_verses);
+    rows!(schema::MEMBER, members, generated::write_members);
 
     debug_assert_eq!(sections.len(), schema::SECTIONS.len());
 

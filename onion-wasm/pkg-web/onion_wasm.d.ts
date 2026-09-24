@@ -1,6 +1,30 @@
 /* tslint:disable */
 /* eslint-disable */
 
+/** `parse`'s options, and `Galley.parse`/`parseText`'s. Every key defaults to false. */
+export interface ParseOptions {
+    /** Run the lint walk. The one expensive optional. */
+    diagnostics?: boolean;
+    /** Build the chapter and verse index. Cheap, and needs no tree. */
+    toc?: boolean;
+    /** Emit every offset as a UTF-16 code unit instead of a byte. */
+    utf16?: boolean;
+}
+
+/** `attrs`'s options. */
+export interface AttrsOptions {
+    /** `from`/`to` and every word returned are UTF-16 code units; default bytes. */
+    utf16?: boolean;
+}
+
+/** `setExtensions`'s options. */
+export interface ExtensionOptions {
+    /** Admit a legacy name without the `z` that the spec does not define. */
+    relaxZPrefix?: boolean;
+}
+
+
+
 /**
  * One transaction of proposed splices: `[from, to]` pairs, one concatenated
  * ASCII insert blob, one length per edit.
@@ -103,9 +127,9 @@ export function attrResolve(name: string, marker: number): number;
 /**
  * The k/v view of one `AttrList` token, flat.
  *
- * `[from, to)` is the list token's span in the CALLER's space — UTF-16 when
- * `utf16` is non-zero, bytes otherwise, as `locate` reads it — and every word
- * comes back in that same space.
+ * `[from, to)` is the list token's span in the CALLER's space — UTF-16 under
+ * `{ utf16: true }`, bytes otherwise — and every word comes back in that same
+ * space.
  *
  * ```text
  * |lemma="grace" x-y="z"   ->  [nameFrom nameTo valueFrom valueTo] x 2, NONE, NONE
@@ -117,7 +141,7 @@ export function attrResolve(name: string, marker: number): number;
  * offset, both `NONE` when the list parsed clean. A malformed tail is always
  * the last event, so it can only be the last pair of words.
  */
-export function attrs(text: string, from: number, to: number, utf16: number): Uint32Array;
+export function attrs(text: string, from: number, to: number, opts?: AttrsOptions): Uint32Array;
 
 /**
  * The first `\id`'s book code — `"GEN"`. EMPTY when the document declares
@@ -222,19 +246,27 @@ export function mergeSplices(baseline: string, current: string, decisions_json: 
 /**
  * THE read call. One document in, one buffer out.
  *
+ * ```ts
+ * interface ParseOptions {
+ *   diagnostics?: boolean;   // run the lint walk; default false
+ *   toc?: boolean;           // build the chapter and verse index; default false
+ *   utf16?: boolean;         // every offset as a UTF-16 code unit; default bytes
+ * }
+ * parse(text: string, opts?: ParseOptions): Uint8Array;
+ * ```
+ *
  * The buffer is a plated parse — tokens, the tree, and whatever `opts` asked
  * for besides — read by `reader.ts`, which is generated from the same schema
  * as the writer. Nothing is retained wasm-side: the `Uint8Array` is JS's, the
  * collector reclaims it, and there is no `free`.
  *
- * The three booleans are positional because an object crossing the wall would
- * be `Reflect::get` per key with a misspelling silently reading as `false`.
- * `reader.ts` wraps this as `parse(text, { diagnostics, toc, utf16 })`, where
- * a misspelled key is a compile error instead.
+ * A misspelled key is a compile error through the declared `ParseOptions`,
+ * and a THROW at the wall for a caller the compiler never saw: an unknown key
+ * is refused by name rather than read as `false` ([`options`]).
  *
  * `text` must be LF-normalized (see the module doc); a debug build asserts it.
  */
-export function parse(text: string, diagnostics: boolean, toc: boolean, utf16: boolean): Uint8Array;
+export function parse(text: string, opts?: ParseOptions): Uint8Array;
 
 /**
  * Installs a list of user markers process-wide, and returns what it could not
@@ -270,7 +302,7 @@ export function parse(text: string, diagnostics: boolean, toc: boolean, utf16: b
  * `z`-initial, an unknown category word, a duplicate — is a report, not a
  * failure, so one bad line never costs a host the rest of its list.
  */
-export function setExtensions(list: string, opts?: { relaxZPrefix?: boolean }): string;
+export function setExtensions(list: string, opts?: ExtensionOptions): string;
 
 /**
  * A CodeMirror offset as a source byte offset. Rebuilds the 1.6% stride index
@@ -335,7 +367,7 @@ export interface InitOutput {
     readonly __wbg_set_formatopts_verse_breaks: (a: number, b: number) => void;
     readonly __wbg_splices_free: (a: number, b: number) => void;
     readonly attrResolve: (a: number, b: number, c: number) => number;
-    readonly attrs: (a: number, b: number, c: number, d: number, e: number) => [number, number];
+    readonly attrs: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
     readonly book: (a: number, b: number) => [number, number];
     readonly diff: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly edits_lens: (a: number) => [number, number];
@@ -352,7 +384,7 @@ export interface InitOutput {
     readonly mask: (a: number, b: number, c: number, d: number) => any;
     readonly merge: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number, number];
     readonly mergeSplices: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number];
-    readonly parse: (a: number, b: number, c: number, d: number, e: number) => [number, number];
+    readonly parse: (a: number, b: number, c: number) => [number, number, number, number];
     readonly setExtensions: (a: number, b: number, c: number) => [number, number, number, number];
     readonly splices_inserts: (a: number) => [number, number];
     readonly splices_spans: (a: number) => [number, number];
@@ -365,8 +397,8 @@ export interface InitOutput {
     readonly __wbindgen_exn_store: (a: number) => void;
     readonly __externref_table_alloc: () => number;
     readonly __wbindgen_externrefs: WebAssembly.Table;
-    readonly __wbindgen_free: (a: number, b: number, c: number) => void;
     readonly __externref_table_dealloc: (a: number) => void;
+    readonly __wbindgen_free: (a: number, b: number, c: number) => void;
     readonly __wbindgen_start: () => void;
 }
 

@@ -8,8 +8,8 @@
 //!
 //! One parser for both doors ([`Galley::mask`](super::Galley::mask) and
 //! [`Galley::mask_of`](super::Galley::mask_of)): an absent key reads as its
-//! default, a wrong TYPE names the key, and an unknown recipe names the three
-//! that exist rather than falling back to any of them.
+//! default, a wrong TYPE or an unknown key names the key, and an unknown
+//! recipe names the three that exist rather than falling back to any of them.
 
 use wasm_bindgen::prelude::*;
 
@@ -23,14 +23,13 @@ pub(super) struct MaskOptions {
     pub utf16: bool,
 }
 
-/// `{ recipe?, utf16? }` off a JS object.
-pub(super) fn options(value: &JsValue) -> Result<MaskOptions, JsError> {
-    if value.is_undefined() || value.is_null() {
+/// `{ recipe?, utf16? }` off a JS object; an unknown key is an error naming it.
+pub(super) fn options(value: Option<&JsValue>, door: &str) -> Result<MaskOptions, JsError> {
+    let bag = onion_wasm::options::bag(value, door, &["recipe", "utf16"])
+        .map_err(|e| JsError::new(&e))?;
+    let Some(value) = bag.as_ref() else {
         return Ok(MaskOptions::default());
-    }
-    if !value.is_object() {
-        return Err(JsError::new("options must be an object"));
-    }
+    };
     let recipe = match get(value, "recipe") {
         None => Recipe::default(),
         Some(name) => {

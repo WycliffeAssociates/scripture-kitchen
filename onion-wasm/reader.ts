@@ -41,7 +41,7 @@
 export const MAGIC = 0x52574e4f;
 
 /** Bumped whenever the schema changes shape. */
-export const FORMAT_VERSION = 4;
+export const FORMAT_VERSION = 5;
 
 /** Set when every offset in the dish is a UTF-16 code unit. */
 export const FLAG_UTF16 = 1 << 0;
@@ -81,6 +81,8 @@ export const SECTION = {
   chapters: 7,
   /** The verse anchors. Empty unless asked for. */
   verses: 8,
+  /** What every verse designator covers, run after run; a verse's `membersFrom`/`membersLen` name its run. Empty unless asked for. */
+  members: 9,
 } as const;
 
 export const SECTION_NAMES = [
@@ -93,6 +95,7 @@ export const SECTION_NAMES = [
   "fixText",
   "chapters",
   "verses",
+  "members",
 ] as const;
 
 
@@ -530,7 +533,7 @@ export class EditRow {
 /**
  * One chapter's extent and number. The rows tile the document.
  *
- * 18 bytes per row. A CURSOR: `seek` moves it, the getters read
+ * 26 bytes per row. A CURSOR: `seek` moves it, the getters read
 * the row it is on, and nothing is allocated per row.
  */
 export class ChapterRow {
@@ -546,11 +549,11 @@ export class ChapterRow {
     return (this.#view.byteLength / this.stride) | 0;
   }
 
-  readonly stride = 18;
+  readonly stride = 26;
 
   /** Move to row `n`; returns `this` so reads chain. */
   seek(n: number): this {
-    this.#row = n * 18;
+    this.#row = n * 26;
     return this;
   }
 
@@ -574,9 +577,19 @@ export class ChapterRow {
     return this.#view.getUint32(this.#row + 12, true);
   }
 
+  /** The designator as written (`12b`), minus its folded delimiter. Empty at the marker's end when there is none; 0..0 on row 0. */
+  get labelStart(): number {
+    return this.#view.getUint32(this.#row + 16, true);
+  }
+
+  /** Where the label ends. */
+  get labelEnd(): number {
+    return this.#view.getUint32(this.#row + 20, true);
+  }
+
   /** The number read, or 0 for absent or malformed. */
   get number(): number {
-    return this.#view.getUint16(this.#row + 16, true);
+    return this.#view.getUint16(this.#row + 24, true);
   }
 
 }
@@ -584,7 +597,7 @@ export class ChapterRow {
 /**
  * One verse anchor and the range of verse numbers it names.
  *
- * 18 bytes per row. A CURSOR: `seek` moves it, the getters read
+ * 32 bytes per row. A CURSOR: `seek` moves it, the getters read
 * the row it is on, and nothing is allocated per row.
  */
 export class VerseRow {
@@ -600,11 +613,11 @@ export class VerseRow {
     return (this.#view.byteLength / this.stride) | 0;
   }
 
-  readonly stride = 18;
+  readonly stride = 32;
 
   /** Move to row `n`; returns `this` so reads chain. */
   seek(n: number): this {
-    this.#row = n * 18;
+    this.#row = n * 32;
     return this;
   }
 
@@ -623,19 +636,98 @@ export class VerseRow {
     return this.#view.getUint32(this.#row + 8, true);
   }
 
+  /** The designator as written (`6a`, `1,3,5`), minus its folded delimiter. Empty at the marker's end when there is none. */
+  get labelStart(): number {
+    return this.#view.getUint32(this.#row + 12, true);
+  }
+
+  /** Where the label ends. */
+  get labelEnd(): number {
+    return this.#view.getUint32(this.#row + 16, true);
+  }
+
+  /** This verse's first row in the member arena. */
+  get membersFrom(): number {
+    return this.#view.getUint32(this.#row + 20, true);
+  }
+
+  /** How many members it covers; 0 when the designator is absent or malformed. */
+  get membersLen(): number {
+    return this.#view.getUint16(this.#row + 24, true);
+  }
+
   /** The enclosing chapter's number. */
   get chapter(): number {
-    return this.#view.getUint16(this.#row + 12, true);
+    return this.#view.getUint16(this.#row + 26, true);
   }
 
   /** First verse named; 0 when the designator is absent or malformed. */
   get first(): number {
-    return this.#view.getUint16(this.#row + 14, true);
+    return this.#view.getUint16(this.#row + 28, true);
   }
 
   /** Last verse named — a bridge `\v 5-7` names 5 through 7. */
   get last(): number {
-    return this.#view.getUint16(this.#row + 16, true);
+    return this.#view.getUint16(this.#row + 30, true);
+  }
+
+}
+
+/**
+ * One member of a verse designator: a place, or a range joined by `-`. `first..last` on the verse is only the hull; these are what it covers.
+ *
+ * 20 bytes per row. A CURSOR: `seek` moves it, the getters read
+* the row it is on, and nothing is allocated per row.
+ */
+export class MemberRow {
+  readonly #view: DataView;
+  #row = 0;
+
+  constructor(view: DataView) {
+    this.#view = view;
+  }
+
+  /** Rows in the section. */
+  get length(): number {
+    return (this.#view.byteLength / this.stride) | 0;
+  }
+
+  readonly stride = 20;
+
+  /** Move to row `n`; returns `this` so reads chain. */
+  seek(n: number): this {
+    this.#row = n * 20;
+    return this;
+  }
+
+  /** The member's first number. */
+  get from(): number {
+    return this.#view.getUint16(this.#row + 0, true);
+  }
+
+  /** The segment written after it (`a` in `12a`); empty when none. */
+  get fromSegmentStart(): number {
+    return this.#view.getUint32(this.#row + 2, true);
+  }
+
+  /** Where that segment ends. */
+  get fromSegmentEnd(): number {
+    return this.#view.getUint32(this.#row + 6, true);
+  }
+
+  /** Its last number; equal to `from` for a single place. Kept as written. */
+  get to(): number {
+    return this.#view.getUint16(this.#row + 10, true);
+  }
+
+  /** The segment after the last number; empty when none. */
+  get toSegmentStart(): number {
+    return this.#view.getUint32(this.#row + 12, true);
+  }
+
+  /** Where that segment ends. */
+  get toSegmentEnd(): number {
+    return this.#view.getUint32(this.#row + 16, true);
   }
 
 }
@@ -1639,21 +1731,40 @@ export class Diagnostics {
 }
 
 /** The chapter and verse index. Over the TOKEN stream, not the tree. */
+/**
+ * One thing a verse designator covers: `\\v 1,3,5` is three, `\\v 12a-14b`
+ * one. A segment is a place INSIDE its number, so `12a` and `12b` are two
+ * places; its span is empty when none is written.
+ */
+export interface VerseMember {
+  from: number;
+  fromSegment: Span;
+  to: number;
+  toSegment: Span;
+}
+
 export class Toc {
   readonly chapterRows: ChapterRow;
   readonly verseRows: VerseRow;
+  readonly memberRows: MemberRow;
 
-  constructor(chapterRows: ChapterRow, verseRows: VerseRow) {
+  constructor(chapterRows: ChapterRow, verseRows: VerseRow, memberRows: MemberRow) {
     this.chapterRows = chapterRows;
     this.verseRows = verseRows;
+    this.memberRows = memberRows;
   }
 
+  /**
+   * Every chapter. `label` is the designator as written (`12b`), a span into
+   * the source — empty when the `\\c` has none, and on row 0.
+   */
   chapters(): {
     number: number;
     token: number;
     designator: number;
     from: number;
     to: number;
+    label: Span;
   }[] {
     const out = [];
     for (let i = 0, n = this.chapterRows.length; i < n; i++) {
@@ -1664,11 +1775,17 @@ export class Toc {
         designator: r.designator,
         from: r.start,
         to: r.end,
+        label: { from: r.labelStart, to: r.labelEnd },
       });
     }
     return out;
   }
 
+  /**
+   * Every verse anchor. `first..last` is the HULL — a bridge `\\v 5-7` and a
+   * list `\\v 5,7` both span 5 to 7 — and `members` is what it COVERS, so a
+   * list's holes are visible. `label` is the designator as written.
+   */
   verses(): {
     chapter: number;
     first: number;
@@ -1676,6 +1793,8 @@ export class Toc {
     at: number;
     token: number;
     designator: number;
+    label: Span;
+    members: VerseMember[];
   }[] {
     const out = [];
     for (let i = 0, n = this.verseRows.length; i < n; i++) {
@@ -1687,6 +1806,24 @@ export class Toc {
         at: r.at,
         token: r.token,
         designator: r.designator,
+        label: { from: r.labelStart, to: r.labelEnd },
+        members: this.membersOf(i),
+      });
+    }
+    return out;
+  }
+
+  /** What verse row `n`'s designator covers, in written order. */
+  membersOf(n: number): VerseMember[] {
+    const r = this.verseRows.seek(n);
+    const out: VerseMember[] = [];
+    for (let i = r.membersFrom, end = r.membersFrom + r.membersLen; i < end; i++) {
+      const m = this.memberRows.seek(i);
+      out.push({
+        from: m.from,
+        fromSegment: { from: m.fromSegmentStart, to: m.fromSegmentEnd },
+        to: m.to,
+        toSegment: { from: m.toSegmentStart, to: m.toSegmentEnd },
       });
     }
     return out;
@@ -1776,9 +1913,9 @@ export interface AttrList {
 }
 
 /**
- * What the wasm `attrs(text, from, to, utf16)` export returns, as objects.
+ * What the wasm `attrs(text, from, to, opts?)` export returns, as objects.
  *
- *   const list = attrList(rawAttrs(text, from, to, 1));
+ *   const list = attrList(rawAttrs(text, from, to, { utf16: true }));
  *   for (const { name, value } of list.attrs) …
  *
  * Four words per attribute and two at the tail, in whatever space the call
@@ -1807,24 +1944,17 @@ export interface ParseOptions {
   utf16?: boolean;
 }
 
-/** The wasm export's own shape: positional, because an object cannot cross. */
-export type RawParse = (
-  text: string,
-  diagnostics: boolean,
-  toc: boolean,
-  utf16: boolean,
-) => Uint8Array;
+/** The wasm export's own shape — `parse`, or a `Galley`'s `parseText` bound to it. */
+export type RawParse = (text: string, opts?: ParseOptions) => Uint8Array;
 
 /**
- * The typed door over a wasm build.
+ * The typed door over a wasm build: the buffer, deserialized.
  *
- *   const onion = reader(rawParse);
+ *   const onion = reader(parse);
  *   const dish = onion.parse(text, { diagnostics: true });
  *
- * The options object stops HERE and never crosses: through bindgen it would be
- * `Reflect::get` per key, where `{ diagnostcs: true }` reads as `false` and the
- * read comes back empty. As a TypeScript object literal the same typo is a
- * compile error, because `ParseOptions` declares no such property.
+ * The same `ParseOptions` cross the wall: a typo is a compile error here and,
+ * for a caller the compiler never saw, a throw naming the key at the wall.
  *
  * Takes the raw export rather than importing one, so this file is agnostic
  * about which build it sits beside — bundler, web or node.
@@ -1832,7 +1962,7 @@ export type RawParse = (
 export function reader(rawParse: RawParse): { parse(text: string, opts?: ParseOptions): Dish } {
   return {
     parse(text: string, opts: ParseOptions = {}): Dish {
-      return deserialize(rawParse(text, !!opts.diagnostics, !!opts.toc, !!opts.utf16));
+      return deserialize(rawParse(text, opts));
     },
   };
 }
@@ -1974,7 +2104,11 @@ export function deserialize(dish: Uint8Array): Dish {
       new EditRow(view(SECTION.edits)),
       fixText,
     ),
-    toc: new Toc(new ChapterRow(view(SECTION.chapters)), new VerseRow(view(SECTION.verses))),
+    toc: new Toc(
+      new ChapterRow(view(SECTION.chapters)),
+      new VerseRow(view(SECTION.verses)),
+      new MemberRow(view(SECTION.members)),
+    ),
     utf16,
     usfmVersion,
     sourceLength,

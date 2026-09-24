@@ -36,6 +36,7 @@ export const HEADER_FLAGS_OFFSET = @@HEADER_FLAGS_OFFSET@@;
 export const HEADER_BOOK_COUNT_OFFSET = @@HEADER_BOOK_COUNT_OFFSET@@;
 export const HEADER_CHAPTER_STRIDE_OFFSET = @@HEADER_CHAPTER_STRIDE_OFFSET@@;
 export const HEADER_VERSE_STRIDE_OFFSET = @@HEADER_VERSE_STRIDE_OFFSET@@;
+export const HEADER_MEMBER_STRIDE_OFFSET = @@HEADER_MEMBER_STRIDE_OFFSET@@;
 export const HEADER_DIRECTORY_AT_OFFSET = @@HEADER_DIRECTORY_AT_OFFSET@@;
 
 export const DIRECTORY_ENTRY_BYTES = @@DIRECTORY_ENTRY_BYTES@@;
@@ -46,16 +47,37 @@ export const DIRECTORY_VERSES_AT_OFFSET = @@DIRECTORY_VERSES_AT_OFFSET@@;
 export const DIRECTORY_VERSE_ROWS_OFFSET = @@DIRECTORY_VERSE_ROWS_OFFSET@@;
 export const DIRECTORY_ID_AT_OFFSET = @@DIRECTORY_ID_AT_OFFSET@@;
 export const DIRECTORY_ID_LEN_OFFSET = @@DIRECTORY_ID_LEN_OFFSET@@;
+export const DIRECTORY_MEMBERS_AT_OFFSET = @@DIRECTORY_MEMBERS_AT_OFFSET@@;
+export const DIRECTORY_MEMBER_ROWS_OFFSET = @@DIRECTORY_MEMBER_ROWS_OFFSET@@;
 
 /** Bytes per row, from the same declaration the row classes below come from. */
 export const CHAPTER_STRIDE = @@CHAPTER_STRIDE@@;
 export const VERSE_STRIDE = @@VERSE_STRIDE@@;
+export const MEMBER_STRIDE = @@MEMBER_STRIDE@@;
 
 @@ROWS@@
 
 const UTF8 = new TextDecoder();
 
-/** One book's entry in the directory, and cursors over its two row blocks. */
+/** A span in the book's text, in whatever space the buffer's offsets are. */
+export interface Span {
+  from: number;
+  to: number;
+}
+
+/**
+ * One thing a verse designator covers: `\\v 1,3,5` is three, `\\v 12a-14b`
+ * one. A segment is a place INSIDE its number, so `12a` and `12b` are two
+ * places; its span is empty when none is written.
+ */
+export interface VerseMember {
+  from: number;
+  fromSegment: Span;
+  to: number;
+  toSegment: Span;
+}
+
+/** One book's entry in the directory, and cursors over its three row blocks. */
 export class BookCensus {
   readonly #bytes: Uint8Array;
   readonly #view: DataView;
@@ -115,6 +137,37 @@ export class BookCensus {
     return new VerseRow(this.#block(DIRECTORY_VERSES_AT_OFFSET, this.verseCount, VERSE_STRIDE));
   }
 
+  /** Members across every verse of the book, run after run in verse order. */
+  get memberCount(): number {
+    return this.#view.getUint32(this.#at + DIRECTORY_MEMBER_ROWS_OFFSET, true);
+  }
+
+  /** A cursor over this book's member block; a verse row's `membersFrom` indexes it. */
+  get memberRows(): MemberRow {
+    return new MemberRow(this.#block(DIRECTORY_MEMBERS_AT_OFFSET, this.memberCount, MEMBER_STRIDE));
+  }
+
+  /**
+   * What verse row `n`'s designator COVERS, in written order. A verse row's
+   * `first..last` is only the hull: `\\v 1,3,5` spans 1 to 5 and covers 1, 3
+   * and 5.
+   */
+  membersOf(n: number): VerseMember[] {
+    const verse = this.verseRows.seek(n);
+    const rows = this.memberRows;
+    const out: VerseMember[] = [];
+    for (let i = verse.membersFrom, end = verse.membersFrom + verse.membersLen; i < end; i++) {
+      const m = rows.seek(i);
+      out.push({
+        from: m.from,
+        fromSegment: { from: m.fromSegmentStart, to: m.fromSegmentEnd },
+        to: m.to,
+        toSegment: { from: m.toSegmentStart, to: m.toSegmentEnd },
+      });
+    }
+    return out;
+  }
+
   #block(offset: number, rows: number, stride: number): DataView {
     const at = this.#view.getUint32(this.#at + offset, true);
     return new DataView(this.#bytes.buffer, this.#bytes.byteOffset + at, rows * stride);
@@ -162,6 +215,7 @@ export class Census {
     const strides: [string, number, number][] = [
       ["Chapter", HEADER_CHAPTER_STRIDE_OFFSET, CHAPTER_STRIDE],
       ["Verse", HEADER_VERSE_STRIDE_OFFSET, VERSE_STRIDE],
+      ["Member", HEADER_MEMBER_STRIDE_OFFSET, MEMBER_STRIDE],
     ];
     for (const [name, at, known] of strides) {
       const stride = view.getUint32(at, true);

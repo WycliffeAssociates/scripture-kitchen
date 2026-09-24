@@ -24,15 +24,18 @@ pub(super) struct FindOptions {
 }
 
 /// `{ caseSensitive?, wholeWord?, limit?, scope? }` off a JS object, with an
-/// absent key reading as its default and a wrong TYPE reading as an error
-/// naming the key.
-pub(super) fn options(value: &JsValue) -> Result<FindOptions, JsError> {
-    if value.is_undefined() || value.is_null() {
+/// absent key reading as its default and a wrong TYPE or an unknown key
+/// reading as an error naming the key.
+pub(super) fn options(value: Option<&JsValue>, door: &str) -> Result<FindOptions, JsError> {
+    let bag = onion_wasm::options::bag(
+        value,
+        door,
+        &["caseSensitive", "wholeWord", "limit", "scope"],
+    )
+    .map_err(|e| JsError::new(&e))?;
+    let Some(value) = bag.as_ref() else {
         return Ok(FindOptions::default());
-    }
-    if !value.is_object() {
-        return Err(JsError::new("options must be an object"));
-    }
+    };
     let case_sensitive = match get(value, "caseSensitive") {
         None => false,
         Some(flag) => flag

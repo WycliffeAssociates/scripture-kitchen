@@ -103,21 +103,24 @@ need; prebuilt lean variants are a later decision if one ever asks.
 
 ## The read path
 
-One call, one buffer, one tree. `parse(text, diagnostics, toc, utf16)` returns
-the dish — nine little-endian sections behind an `ONWR` header — and `reader.ts`
-is the typed door over it:
+One call, one buffer, one tree. `parse(text, { diagnostics?, toc?, utf16? })`
+returns the dish — ten little-endian sections behind an `ONWR` header — and
+`reader.ts` is the typed door over it:
 
 ```ts
-import { reader } from "onion-wasm/schema";
-const onion = reader(rawParse);
-const { tree, tokens, diagnostics, toc } = onion.parse(text, { diagnostics: true });
+import { parse } from "onion-wasm";
+import { deserialize } from "onion-wasm/schema";
+const { tree, tokens, diagnostics, toc } = deserialize(parse(text, { diagnostics: true }));
 ```
+
+Every option bag at the wall is a declared TypeScript interface, and an
+unknown key throws by name rather than reading as `false`.
 
 | section | carries |
 |---|---|
 | `tokens`, `nodes`, `childIds` | the tree — every token, and the CST over it |
 | `diagnostics`, `fixes`, `edits`, `fixText` | squiggles, the panel, and each fix's transaction |
-| `chapters`, `verses` | the chapter/verse index (`toc`) |
+| `chapters`, `verses`, `members` | the chapter/verse index (`toc`): each row's designator label, and what each verse covers |
 
 **No strides are written down here, on purpose.** `reader.ts` and
 `onion/src/wire/generated.rs` are both emitted from `onion/src/wire/schema.rs`,

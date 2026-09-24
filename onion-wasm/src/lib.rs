@@ -70,37 +70,77 @@ use usfm_onion::wire;
 use usfm_onion::{Token, TokenKind};
 use wasm_bindgen::prelude::*;
 
+pub mod options;
+
 // ---------------------------------------------------------------------------
 // parse
 // ---------------------------------------------------------------------------
 
 /// THE read call. One document in, one buffer out.
 ///
+/// ```ts
+/// interface ParseOptions {
+///   diagnostics?: boolean;   // run the lint walk; default false
+///   toc?: boolean;           // build the chapter and verse index; default false
+///   utf16?: boolean;         // every offset as a UTF-16 code unit; default bytes
+/// }
+/// parse(text: string, opts?: ParseOptions): Uint8Array;
+/// ```
+///
 /// The buffer is a plated parse — tokens, the tree, and whatever `opts` asked
 /// for besides — read by `reader.ts`, which is generated from the same schema
 /// as the writer. Nothing is retained wasm-side: the `Uint8Array` is JS's, the
 /// collector reclaims it, and there is no `free`.
 ///
-/// The three booleans are positional because an object crossing the wall would
-/// be `Reflect::get` per key with a misspelling silently reading as `false`.
-/// `reader.ts` wraps this as `parse(text, { diagnostics, toc, utf16 })`, where
-/// a misspelled key is a compile error instead.
+/// A misspelled key is a compile error through the declared `ParseOptions`,
+/// and a THROW at the wall for a caller the compiler never saw: an unknown key
+/// is refused by name rather than read as `false` ([`options`]).
 ///
 /// `text` must be LF-normalized (see the module doc); a debug build asserts it.
 #[wasm_bindgen]
-pub fn parse(text: &str, diagnostics: bool, toc: bool, utf16: bool) -> Vec<u8> {
+pub fn parse(
+    text: &str,
+    #[wasm_bindgen(unchecked_optional_param_type = "ParseOptions")] opts: Option<JsValue>,
+) -> Result<Vec<u8>, JsError> {
+    let opts = options::parse_options(opts.as_ref(), "parse").map_err(|e| JsError::new(&e))?;
+    Ok(plated(text, opts))
+}
+
+/// [`parse`]'s body over engine options, for a caller on this side of the
+/// wall — `galley`, and the native tests, where no `JsValue` exists.
+pub fn plated(text: &str, opts: wire::ParseOptions) -> Vec<u8> {
     debug_assert!(
         !text.as_bytes().contains(&b'\r'),
         "onion_wasm::parse: the text must be LF-normalized — a CR makes every \
          emitted offset disagree with CodeMirror's"
     );
-    let opts = wire::ParseOptions {
-        diagnostics,
-        toc,
-        utf16,
-    };
     wire::plate(&wire::parse(text, opts))
 }
+
+#[wasm_bindgen(typescript_custom_section)]
+const OPTIONS_TS: &str = r#"
+/** `parse`'s options, and `Galley.parse`/`parseText`'s. Every key defaults to false. */
+export interface ParseOptions {
+  /** Run the lint walk. The one expensive optional. */
+  diagnostics?: boolean;
+  /** Build the chapter and verse index. Cheap, and needs no tree. */
+  toc?: boolean;
+  /** Emit every offset as a UTF-16 code unit instead of a byte. */
+  utf16?: boolean;
+}
+
+/** `attrs`'s options. */
+export interface AttrsOptions {
+  /** `from`/`to` and every word returned are UTF-16 code units; default bytes. */
+  utf16?: boolean;
+}
+
+/** `setExtensions`'s options. */
+export interface ExtensionOptions {
+  /** Admit a legacy name without the `z` that the spec does not define. */
+  relaxZPrefix?: boolean;
+}
+"#;
 
 /// One mask recipe's text, and the map back to the source it was cut from.
 ///
@@ -846,9 +886,9 @@ pub fn locate(text: &str, utf16: u32) -> String {
 
 /// The k/v view of one `AttrList` token, flat.
 ///
-/// `[from, to)` is the list token's span in the CALLER's space — UTF-16 when
-/// `utf16` is non-zero, bytes otherwise, as `locate` reads it — and every word
-/// comes back in that same space.
+/// `[from, to)` is the list token's span in the CALLER's space — UTF-16 under
+/// `{ utf16: true }`, bytes otherwise — and every word comes back in that same
+/// space.
 ///
 /// ```text
 /// |lemma="grace" x-y="z"   ->  [nameFrom nameTo valueFrom valueTo] x 2, NONE, NONE
@@ -860,10 +900,21 @@ pub fn locate(text: &str, utf16: u32) -> String {
 /// offset, both `NONE` when the list parsed clean. A malformed tail is always
 /// the last event, so it can only be the last pair of words.
 #[wasm_bindgen]
-pub fn attrs(text: &str, from: u32, to: u32, utf16: u32) -> Vec<u32> {
+pub fn attrs(
+    text: &str,
+    from: u32,
+    to: u32,
+    #[wasm_bindgen(unchecked_optional_param_type = "AttrsOptions")] opts: Option<JsValue>,
+) -> Result<Vec<u32>, JsError> {
+    let utf16 = options::utf16_only(opts.as_ref(), "attrs").map_err(|e| JsError::new(&e))?;
+    Ok(attr_words(text, from, to, utf16))
+}
+
+/// [`attrs`]'s body, for a caller with no `JsValue` to hand.
+pub fn attr_words(text: &str, from: u32, to: u32, utf16: bool) -> Vec<u32> {
     let source = text.as_bytes();
     // A byte caller pays for no index.
-    let index = (utf16 != 0).then(|| Utf16Index::new(source));
+    let index = utf16.then(|| Utf16Index::new(source));
     let (start, end) = match &index {
         Some(index) => (index.to_byte(from), index.to_byte(to)),
         None => (from, to),
@@ -1031,31 +1082,12 @@ pub fn extensions_from_markers_ext(text: &str) -> String {
 #[wasm_bindgen(js_name = setExtensions)]
 pub fn set_extensions(
     list: &str,
-    #[wasm_bindgen(unchecked_optional_param_type = "{ relaxZPrefix?: boolean }")] opts: Option<
-        JsValue,
-    >,
+    #[wasm_bindgen(unchecked_optional_param_type = "ExtensionOptions")] opts: Option<JsValue>,
 ) -> Result<String, JsError> {
-    let opts = opts.unwrap_or(JsValue::UNDEFINED);
-    let relax_z_prefix = relax_z_prefix(&opts).map_err(JsError::new)?;
+    let relax_z_prefix = options::bag(opts.as_ref(), "setExtensions", &["relaxZPrefix"])
+        .and_then(|bag| options::flag(bag.as_ref(), "setExtensions", "relaxZPrefix"))
+        .map_err(|e| JsError::new(&e))?;
     installed(list, relax_z_prefix).map_err(|error| JsError::new(&error))
-}
-
-/// `{ relaxZPrefix? }`, absent reading as `false`.
-fn relax_z_prefix(opts: &JsValue) -> Result<bool, &'static str> {
-    if opts.is_undefined() || opts.is_null() {
-        return Ok(false);
-    }
-    if !opts.is_object() {
-        return Err("setExtensions: options must be an object");
-    }
-    let value =
-        Reflect::get(opts, &JsValue::from_str("relaxZPrefix")).unwrap_or(JsValue::UNDEFINED);
-    if value.is_undefined() {
-        return Ok(false);
-    }
-    value
-        .as_bool()
-        .ok_or("setExtensions: relaxZPrefix must be a boolean")
 }
 
 /// `set_extensions`'s body, split from the door for the same reason
@@ -1118,12 +1150,20 @@ mod tests {
 
     const BOOK: &str = "\\id GEN\n\\c 1\n\\p \\v 1 In the beginning\\f + \\ft note\\f* .\n\\c 2\n\\p \\v 1 λόγος\n";
 
+    fn opts(diagnostics: bool, toc: bool, utf16: bool) -> wire::ParseOptions {
+        wire::ParseOptions {
+            diagnostics,
+            toc,
+            utf16,
+        }
+    }
+
     /// The wall's own job: a string in, a readable dish out. What the dish
     /// SAYS is `onion`'s test (`tests/wire_roundtrip.rs`); this checks only
     /// that the boundary hands one over intact.
     #[test]
     fn parse_returns_a_readable_dish() {
-        let dish = parse(BOOK, true, true, false);
+        let dish = plated(BOOK, opts(true, true, false));
         let word = |at: usize| u32::from_le_bytes(dish[at..at + 4].try_into().unwrap());
         assert_eq!(word(0), wire::MAGIC);
         assert_eq!(word(4), wire::FORMAT_VERSION);
@@ -1134,8 +1174,8 @@ mod tests {
     /// The one flag that changes every offset in the buffer.
     #[test]
     fn utf16_is_opt_in_at_the_call() {
-        let bytes = parse(BOOK, false, false, false);
-        let units = parse(BOOK, false, false, true);
+        let bytes = plated(BOOK, opts(false, false, false));
+        let units = plated(BOOK, opts(false, false, true));
         let flag = |d: &[u8]| u32::from_le_bytes(d[12..16].try_into().unwrap()) & wire::FLAG_UTF16;
         assert_eq!(flag(&bytes), 0);
         assert_ne!(flag(&units), 0);
@@ -1148,7 +1188,7 @@ mod tests {
     /// and the tree is there either way because the tree is the product.
     #[test]
     fn the_optionals_are_off_by_default() {
-        let dish = parse(BOOK, false, false, false);
+        let dish = plated(BOOK, opts(false, false, false));
         let len = |name: &str| section_len(&dish, section_index(name));
         assert_eq!(len("diagnostics"), 0, "no lint walk was asked for");
         assert_eq!(len("chapters"), 0, "no toc was asked for");
@@ -1388,7 +1428,7 @@ mod tests {
     /// where it was always used.
     #[test]
     fn the_tree_is_there_without_asking() {
-        let dish = parse(BOOK, false, false, false);
+        let dish = plated(BOOK, opts(false, false, false));
         let len = |name: &str| section_len(&dish, section_index(name));
         assert!(len("tokens") > 0);
         assert!(len("nodes") > 0);

@@ -13,7 +13,7 @@ use super::carried::{Carried, ChapterEdge, ChapterEvent, ChapterExit};
 use super::fix::renumber;
 use super::walk::{is_structural_ws, span_of};
 use super::{Code, Doc, Emit, NO_TOKEN, Observation};
-use crate::designator::{self, Designator};
+use crate::designator::{self, Designator, Member};
 use crate::tables::generated;
 use crate::tables::schema::MarkerKind;
 use crate::{Token, TokenKind};
@@ -39,6 +39,14 @@ use crate::{Token, TokenKind};
 ///   the deletion fix change no verdict.
 /// - Verse state resets at every `\c`; chapter state runs for the whole book.
 /// - Ranges count as their span: after `\v 12-14` the sequence expects 15.
+/// - A LIST covers its members and leaves its holes open: after `\v 1,3,5`
+///   a `\v 2` or `\v 4` fills a hole and is no finding, a `\v 3` repeats a
+///   member and is a duplicate, and the sequence still expects 6. A hole never
+///   filled is not reported — `\v 1,3,5` alone may be exactly what the
+///   translation means, and flagging it would be a new rule on every corpus.
+/// - A SEGMENT is a place inside its number: `\v 2a` then `\v 2b` is one
+///   verse in two places and no finding. The same segment twice, or a bare
+///   `\v 2` beside a segmented one, still repeats verse 2.
 ///
 /// Two of the four anomaly codes offer a renumber fix, both through `renumber`.
 ///
@@ -57,6 +65,15 @@ pub(crate) struct Ordering {
     /// (number, the designator token that carried it) — `second` on a finding.
     prev_chapter: Option<(u32, u32)>,
     prev_verse: Option<(u32, u32)>,
+    /// The members of an open LIST (`\v 1,3,5`), and of every verse that has
+    /// filled one of its holes since, as `(low, high)` numbers. Empty when no
+    /// list is open — every chapter without a `,` designator — so a book with
+    /// no lists allocates nothing here.
+    covered: Vec<(u32, u32)>,
+    /// The previous verse's LAST point when it carries a segment: its number
+    /// and the segment's absolute byte span, so `\v 2b` after `\v 2a` reads as
+    /// the next place in verse 2 rather than as verse 2 again.
+    prev_segment: Option<(u32, u32, u32)>,
     /// True until this chapter's first verse has been read (well-formed or not):
     /// the window in which `missing-verse-one` can fire. Starts FALSE, because
     /// the rule is about a CHAPTER's first verse and a verse ahead of any `\c`
@@ -87,6 +104,8 @@ impl Ordering {
             awaiting: Awaiting::None,
             prev_chapter: None,
             prev_verse: None,
+            covered: Vec::new(),
+            prev_segment: None,
             first_verse_slot: false,
             seen_chapter: false,
             first_verse_token: None,
@@ -196,13 +215,19 @@ impl Ordering {
                             // the malformed token is not enough — en_ulb ZEC
                             // 12:7 writes `\v 7"`, and keeping `prev_verse` at
                             // 6 makes the good `\v 8` look like a gap.
-                            self.prev_verse = None;
+                            self.forget_verse();
                             self.first_verse_slot = false;
                         }
                         Designator::Wellformed { first, last } => {
+                            let span = span_of(source, token);
+                            let list_open = !self.covered.is_empty();
+                            let fills = self.fills_hole(span);
+                            let repeats = list_open && self.repeats_member(span);
                             if let Some((previous_last, previous_token)) = self.prev_verse {
                                 let expected = previous_last.saturating_add(1);
-                                let code = if first == previous_last {
+                                let code = if fills || self.next_segment(source, span, first) {
+                                    None
+                                } else if repeats || first == previous_last {
                                     Some(Code::VerseDuplicate)
                                 } else if first < previous_last {
                                     Some(Code::VerseOutOfOrder)
@@ -234,7 +259,17 @@ impl Ordering {
                                 });
                             }
                             self.first_verse_slot = false;
-                            self.prev_verse = Some((last, idx));
+                            // Inside an open list the high-water mark is the
+                            // list's: filling or repeating one of its places
+                            // must not make the verse after the list a gap.
+                            let reached = match self.prev_verse {
+                                Some((previous_last, _)) if fills || repeats => {
+                                    previous_last.max(last)
+                                }
+                                _ => last,
+                            };
+                            self.prev_verse = Some((reached, idx));
+                            self.track_members(span, token.start, fills || repeats);
                         }
                     }
                 }
@@ -245,7 +280,7 @@ impl Ordering {
                 self.awaiting = match generated::kind(token.marker_idx) {
                     MarkerKind::Chapter => {
                         self.seen_chapter = true;
-                        self.prev_verse = None;
+                        self.forget_verse();
                         self.first_verse_slot = true;
                         Awaiting::Chapter(idx)
                     }
@@ -266,6 +301,83 @@ impl Ordering {
             _ if self.awaiting != Awaiting::None => self.abandon(doc, out),
             _ => {}
         }
+    }
+
+    /// Drop every fact about the previous verse: a `\c`, or a resync.
+    fn forget_verse(&mut self) {
+        self.prev_verse = None;
+        self.covered.clear();
+        self.prev_segment = None;
+    }
+
+    /// Whether every member of this designator sits in an open list's holes:
+    /// above the list's first number, below the sequence's high-water mark,
+    /// and covered by nothing yet.
+    fn fills_hole(&self, span: &[u8]) -> bool {
+        let Some(low) = self.covered.iter().map(|&(low, _)| low).min() else {
+            return false;
+        };
+        let reach = self.prev_verse.map_or(0, |(last, _)| last);
+        designator::members(span).all(|member| {
+            let (from, to) = member.numbers();
+            from > low && to < reach && !self.overlaps(from, to)
+        })
+    }
+
+    /// Whether any member of this designator names a number the open list, or
+    /// a verse that filled one of its holes, already covers.
+    fn repeats_member(&self, span: &[u8]) -> bool {
+        designator::members(span).any(|member| {
+            let (from, to) = member.numbers();
+            self.overlaps(from, to)
+        })
+    }
+
+    fn overlaps(&self, from: u32, to: u32) -> bool {
+        self.covered.iter().any(|&(a, b)| from <= b && a <= to)
+    }
+
+    /// Whether this designator opens on the previous verse's number with a
+    /// DIFFERENT segment (`\v 2b` after `\v 2a`): the next place in one verse.
+    fn next_segment(&self, source: &[u8], span: &[u8], first: u32) -> bool {
+        let Some((number, start, end)) = self.prev_segment else {
+            return false;
+        };
+        let Some(Member { from, .. }) = designator::members(span).next() else {
+            return false;
+        };
+        let before = &source[start as usize..end as usize];
+        let now = &span[from.segment_start as usize..from.segment_end as usize];
+        number == first && from.number == first && from.has_segment() && before != now
+    }
+
+    /// After a well-formed verse: what an open list covers now, and the
+    /// segment the verse's last point ends on.
+    ///
+    /// A verse inside the list's holes or repeating one of its members keeps
+    /// the list open; a new list replaces it; anything else closes it.
+    fn track_members(&mut self, span: &[u8], at: u32, inside_list: bool) {
+        if inside_list {
+            self.covered
+                .extend(designator::members(span).map(|m| m.numbers()));
+        } else {
+            self.covered.clear();
+            if span.contains(&b',') {
+                self.covered
+                    .extend(designator::members(span).map(|m| m.numbers()));
+            }
+        }
+        self.prev_segment = designator::members(span)
+            .last()
+            .map(|member| member.to)
+            .filter(|point| point.has_segment())
+            .map(|point| {
+                (
+                    point.number,
+                    at + point.segment_start,
+                    at + point.segment_end,
+                )
+            });
     }
 
     /// The pending `\c`/`\v` never got a `Designator` token: its line ended, or
@@ -292,7 +404,7 @@ impl Ordering {
                     // verse must compare against nothing or one typo reads as
                     // a gap too.
                     None => {
-                        self.prev_verse = None;
+                        self.forget_verse();
                         self.first_verse_slot = false;
                     }
                 }
@@ -551,6 +663,64 @@ mod tests {
         // U+200F before the separator, as RTL scripts write it.
         let (_, obs) = findings("\\c 1\n\\p \\v 1 a \\v 2\u{200F}-3 b \\v 4 c");
         assert_eq!(obs, vec![]);
+    }
+
+    /// U23003's own example: a list, then the verses that fill its holes.
+    #[test]
+    fn a_list_leaves_holes_that_later_verses_fill() {
+        let (_, obs) = findings("\\c 1\n\\p \\v 1,3,5 Some text \\v 2 With this \\v 4 and this.");
+        assert_eq!(obs, vec![]);
+        // The sequence resumes after the list's highest member.
+        let (_, obs) = findings("\\c 1\n\\p \\v 1,3,5 a \\v 2 b \\v 4 c \\v 6 d");
+        assert_eq!(obs, vec![]);
+        // Holes left open are not reported: the list may mean exactly that.
+        let (_, obs) = findings("\\c 1\n\\p \\v 1,3,5 a \\v 6 b");
+        assert_eq!(obs, vec![]);
+        // A range member leaves a hole too.
+        let (_, obs) = findings("\\c 1\n\\p \\v 1-2,5 a \\v 3-4 b \\v 6 c");
+        assert_eq!(obs, vec![]);
+    }
+
+    #[test]
+    fn a_number_a_list_already_covers_is_a_duplicate() {
+        let (tokens, obs) = findings("\\c 1\n\\p \\v 1,3,5 a \\v 3 b \\v 6 c");
+        assert_eq!(codes(&obs), vec![Code::VerseDuplicate]);
+        assert_eq!(obs[0].anchor, designator_at(&tokens, 2));
+        // So is a hole filled twice.
+        let (_, obs) = findings("\\c 1\n\\p \\v 1,3,5 a \\v 2 b \\v 2 c \\v 6 d");
+        assert_eq!(codes(&obs), vec![Code::VerseDuplicate]);
+    }
+
+    #[test]
+    fn outside_a_list_the_sequence_reads_as_it_always_has() {
+        // Below the list, and past it with a gap: the ordinary verdicts.
+        let (_, obs) = findings("\\c 1\n\\p \\v 2,4 a \\v 1 b");
+        assert_eq!(
+            codes(&obs),
+            vec![Code::MissingVerseOne, Code::VerseOutOfOrder]
+        );
+        let (_, obs) = findings("\\c 1\n\\p \\v 1,3 a \\v 5 b");
+        assert_eq!(codes(&obs), vec![Code::VerseGap]);
+        // A bridge is not a list: `\\v 2` after `\\v 1-3` still goes backwards.
+        let (_, obs) = findings("\\c 1\n\\p \\v 1-3 a \\v 2 b");
+        assert_eq!(codes(&obs), vec![Code::VerseOutOfOrder]);
+        // A chapter closes a list.
+        let (_, obs) = findings("\\c 1\n\\p \\v 1,3 a\n\\c 2\n\\p \\v 1 b \\v 2 c");
+        assert_eq!(obs, vec![]);
+    }
+
+    #[test]
+    fn two_segments_of_one_verse_are_two_places() {
+        let (_, obs) = findings("\\c 1\n\\p \\v 1 a \\v 2a b \\v 2b c \\v 3 d");
+        assert_eq!(obs, vec![]);
+        // The same segment twice repeats the place.
+        let (_, obs) = findings("\\c 1\n\\p \\v 1 a \\v 2a b \\v 2a c");
+        assert_eq!(codes(&obs), vec![Code::VerseDuplicate]);
+        // A bare number already covers all of its segments.
+        let (_, obs) = findings("\\c 1\n\\p \\v 1 a \\v 2 b \\v 2a c");
+        assert_eq!(codes(&obs), vec![Code::VerseDuplicate]);
+        let (_, obs) = findings("\\c 1\n\\p \\v 1 a \\v 2a b \\v 2 c");
+        assert_eq!(codes(&obs), vec![Code::VerseDuplicate]);
     }
 
     #[test]

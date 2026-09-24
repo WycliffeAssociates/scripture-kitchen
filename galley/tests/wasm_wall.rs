@@ -16,6 +16,7 @@
 
 #![cfg(target_arch = "wasm32")]
 
+use usfm_galley::onion::wire::ParseOptions;
 use usfm_galley::wasm::onion;
 use usfm_galley::wasm::{Galley, SousSettings};
 use wasm_bindgen::JsValue;
@@ -37,15 +38,15 @@ const KNOBS: &[u8] = include_bytes!("goldens/sous/knobs.bin");
 
 /// The corpus registered, and nothing published yet.
 fn loaded() -> Galley {
-    let mut galley = Galley::new(None);
+    let mut galley = Galley::with_budget(16 << 20);
     assert_eq!(galley.update("books/GEN.usfm", GEN).unwrap(), "GEN");
     galley.update("books/RUT.usfm", RUT).unwrap();
     galley.update("books/JON.usfm", JON).unwrap();
     galley
-        .update_reference("ref/RUT.usfm", RUT_REF, None)
+        .update_reference_with("ref/RUT.usfm", RUT_REF, false)
         .unwrap();
     galley
-        .update_reference("ref/JON.usfm", JON_REF, None)
+        .update_reference_with("ref/JON.usfm", JON_REF, false)
         .unwrap();
     galley
 }
@@ -109,10 +110,10 @@ fn the_three_publications_cross_unchanged() {
     galley.publish().unwrap();
     assert_eq!(galley.last_wordless_references(), 2.0);
     galley
-        .update_reference("ref/RUT.usfm", RUT_REF, None)
+        .update_reference_with("ref/RUT.usfm", RUT_REF, false)
         .unwrap();
     galley
-        .update_reference("ref/JON.usfm", JON_REF, None)
+        .update_reference_with("ref/JON.usfm", JON_REF, false)
         .unwrap();
     assert_eq!(galley.publish().unwrap(), KNOBS, "the settings publication");
 }
@@ -145,7 +146,7 @@ fn the_handle_reports_what_it_holds() {
 
 #[wasm_bindgen_test]
 fn the_knobs_round_trip_through_js() {
-    let galley = Galley::new(None);
+    let galley = Galley::with_budget(16 << 20);
     let defaults = galley.config();
     assert_eq!(defaults, SousSettings::default());
     assert!(defaults.casing, "casing ships on");
@@ -171,7 +172,14 @@ fn an_onion_door_answers_on_this_module() {
 #[wasm_bindgen_test]
 fn the_onion_products_share_the_corpus_cache() {
     let mut galley = loaded();
-    let dish = galley.parse_text(GEN, true, true, true);
+    let dish = galley.parse_text_with(
+        GEN,
+        ParseOptions {
+            diagnostics: true,
+            toc: true,
+            utf16: true,
+        },
+    );
     assert!(!dish.is_empty(), "a parse buffer came back");
     assert!(
         galley.verse_text_of(GEN).contains("beside the"),
@@ -184,18 +192,55 @@ fn the_onion_products_share_the_corpus_cache() {
 #[wasm_bindgen_test]
 fn the_retained_copy_answers_with_the_same_bytes() {
     let mut galley = loaded();
-    let by_id = galley.parse("books/GEN.usfm", true, true, true).unwrap();
-    assert_eq!(by_id, galley.parse_text(GEN, true, true, true));
+    let by_id = galley
+        .parse_with(
+            "books/GEN.usfm",
+            ParseOptions {
+                diagnostics: true,
+                toc: true,
+                utf16: true,
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        by_id,
+        galley.parse_text_with(
+            GEN,
+            ParseOptions {
+                diagnostics: true,
+                toc: true,
+                utf16: true
+            }
+        )
+    );
     assert_eq!(
         galley.verse_text("books/GEN.usfm").unwrap(),
         galley.verse_text_of(GEN),
     );
     assert_eq!(
         galley.lint("books/GEN.usfm").unwrap(),
-        galley.parse_text(GEN, true, false, false),
+        galley.parse_text_with(
+            GEN,
+            ParseOptions {
+                diagnostics: true,
+                toc: false,
+                utf16: false
+            }
+        ),
         "lint is the diagnostics section alone",
     );
-    assert!(galley.parse("books/NUM.usfm", true, true, true).is_err());
+    assert!(
+        galley
+            .parse_with(
+                "books/NUM.usfm",
+                ParseOptions {
+                    diagnostics: true,
+                    toc: true,
+                    utf16: true
+                }
+            )
+            .is_err()
+    );
 }
 
 /// A reference is searchable exactly when the host asked it to keep its text,
@@ -204,21 +249,21 @@ fn the_retained_copy_answers_with_the_same_bytes() {
 fn a_reference_is_findable_only_with_keep_text() {
     let mut galley = loaded();
     let refused = galley
-        .find("ref/RUT.usfm", NEEDLE, case_sensitive_opts())
+        .find("ref/RUT.usfm", NEEDLE, Some(case_sensitive_opts()))
         .expect_err("a lengths-only reference retains nothing to search");
     assert!(format!("{refused:?}").contains("keepText"), "{refused:?}");
     assert!(
         galley
-            .find("books/NUM.usfm", NEEDLE, case_sensitive_opts())
+            .find("books/NUM.usfm", NEEDLE, Some(case_sensitive_opts()))
             .is_err()
     );
 
     galley
-        .update_reference("ref/RUT.usfm", RUT_REF, Some(true))
+        .update_reference_with("ref/RUT.usfm", RUT_REF, true)
         .unwrap();
     let found = decode_find(
         &galley
-            .find("ref/RUT.usfm", NEEDLE, case_sensitive_opts())
+            .find("ref/RUT.usfm", NEEDLE, Some(case_sensitive_opts()))
             .unwrap(),
     );
     assert!(found.hits > 0, "the source's own verse text is searchable");
@@ -235,29 +280,33 @@ fn a_reference_is_findable_only_with_keep_text() {
 fn the_find_scope_chooses_the_id_table() {
     let mut galley = loaded();
     galley
-        .update_reference("ref/RUT.usfm", RUT_REF, Some(true))
+        .update_reference_with("ref/RUT.usfm", RUT_REF, true)
         .unwrap();
 
-    let targets = decode_find(&galley.find_all(NEEDLE, scoped_opts(None)).unwrap());
+    let targets = decode_find(&galley.find_all(NEEDLE, Some(scoped_opts(None))).unwrap());
     assert_eq!(targets.ids.len(), 3, "the default scope is the targets");
     assert!(targets.ids.iter().all(|id| id.starts_with("books/")));
 
     let references = decode_find(
         &galley
-            .find_all(NEEDLE, scoped_opts(Some("references")))
+            .find_all(NEEDLE, Some(scoped_opts(Some("references"))))
             .unwrap(),
     );
     // ref/JON kept no text, so it is neither searched nor listed.
     assert_eq!(references.ids, vec!["ref/RUT.usfm".to_string()]);
     assert!(references.hits > 0);
 
-    let all = decode_find(&galley.find_all(NEEDLE, scoped_opts(Some("all"))).unwrap());
+    let all = decode_find(
+        &galley
+            .find_all(NEEDLE, Some(scoped_opts(Some("all"))))
+            .unwrap(),
+    );
     assert_eq!(all.ids.len(), 4, "three targets and the one kept reference");
     assert_eq!(all.hits, targets.hits + references.hits);
 
     assert!(
         galley
-            .find_all(NEEDLE, scoped_opts(Some("elsewhere")))
+            .find_all(NEEDLE, Some(scoped_opts(Some("elsewhere"))))
             .is_err(),
         "an unknown scope is an error, not a default"
     );
@@ -269,7 +318,18 @@ fn the_find_scope_chooses_the_id_table() {
 fn a_reference_refuses_the_text_doors() {
     let mut galley = loaded();
     assert!(galley.lint("ref/RUT.usfm").is_err(), "no text to lint");
-    assert!(galley.parse("ref/RUT.usfm", true, true, true).is_err());
+    assert!(
+        galley
+            .parse_with(
+                "ref/RUT.usfm",
+                ParseOptions {
+                    diagnostics: true,
+                    toc: true,
+                    utf16: true
+                }
+            )
+            .is_err()
+    );
     assert!(galley.verse_text("ref/RUT.usfm").is_err());
     assert!(galley.lint("books/RUT.usfm").is_ok(), "the target has text");
 }
@@ -278,7 +338,7 @@ fn a_reference_refuses_the_text_doors() {
 /// 2 makes the file differ and names that chapter alone.
 #[wasm_bindgen_test]
 fn a_fingerprint_separates_dirty_from_rework() {
-    let galley = Galley::new(None);
+    let galley = Galley::with_budget(16 << 20);
     let baseline = galley.fingerprint(GEN);
     let current = galley.fingerprint(GEN_EDITED);
 
@@ -322,14 +382,14 @@ fn the_retained_copy_is_its_own_baseline() {
 /// transaction, the applied text, and the UTF-16 opt-in.
 #[wasm_bindgen_test]
 fn an_overlay_crosses_the_wall() {
-    let mut galley = Galley::new(None);
+    let mut galley = Galley::with_budget(16 << 20);
     galley.update("books/GEN.usfm", OVERLAY_TARGET).unwrap();
     galley
-        .update_reference("ref/GEN.usfm", OVERLAY_SOURCE, Some(true))
+        .update_reference_with("ref/GEN.usfm", OVERLAY_SOURCE, true)
         .unwrap();
 
     let skeleton = galley
-        .skeleton("ref/GEN.usfm", JsValue::UNDEFINED, None)
+        .skeleton("ref/GEN.usfm", None)
         .expect("the source has a skeleton");
     assert!(
         skeleton.contains(r#""sid":"GEN 2:23","where":"inside","ordinal":1,"marker":"q1""#),
@@ -341,7 +401,7 @@ fn an_overlay_crosses_the_wall() {
     );
 
     let report = galley
-        .overlay_report("books/GEN.usfm", "ref/GEN.usfm", JsValue::UNDEFINED)
+        .overlay_report("books/GEN.usfm", "ref/GEN.usfm", None)
         .expect("a report");
     assert!(report.contains(r#""removed":[]"#), "{report}");
     assert!(report.contains(r#""unpaired":[]"#), "{report}");
@@ -351,7 +411,7 @@ fn an_overlay_crosses_the_wall() {
     );
 
     let applied = galley
-        .overlay_text("books/GEN.usfm", "ref/GEN.usfm", JsValue::UNDEFINED)
+        .overlay_text("books/GEN.usfm", "ref/GEN.usfm", None)
         .expect("the overlay applies");
     assert!(
         applied.contains("\\q1\n\\q2\n\\q1\n\\q2\n\\p\n\\v 24"),
@@ -362,10 +422,10 @@ fn an_overlay_crosses_the_wall() {
     // Both coordinate spaces, from one transaction: the UTF-16 spans are the
     // byte spans through the module's own `toUtf16`.
     let bytes = galley
-        .overlay("books/GEN.usfm", "ref/GEN.usfm", JsValue::UNDEFINED)
+        .overlay("books/GEN.usfm", "ref/GEN.usfm", None)
         .expect("a transaction");
     let units = galley
-        .overlay("books/GEN.usfm", "ref/GEN.usfm", utf16_opts())
+        .overlay("books/GEN.usfm", "ref/GEN.usfm", Some(utf16_opts()))
         .expect("the same, in UTF-16");
     assert_eq!(bytes.spans().len(), units.spans().len());
     assert_eq!(bytes.text(), units.text(), "the inserted text is the same");

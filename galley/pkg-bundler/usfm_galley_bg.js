@@ -435,7 +435,7 @@ export class Galley {
      * by name, because answering "no hits" would say it was clean.
      * @param {string} id
      * @param {string} needle
-     * @param {any} opts
+     * @param {FindOptions} [opts]
      * @returns {Uint8Array}
      */
     find(id, needle, opts) {
@@ -443,7 +443,7 @@ export class Galley {
         const len0 = WASM_VECTOR_LEN;
         const ptr1 = passStringToWasm0(needle, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len1 = WASM_VECTOR_LEN;
-        const ret = wasm.galley_find(this.__wbg_ptr, ptr0, len0, ptr1, len1, opts);
+        const ret = wasm.galley_find(this.__wbg_ptr, ptr0, len0, ptr1, len1, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
         if (ret[3]) {
             throw takeFromExternrefTable0(ret[2]);
         }
@@ -465,13 +465,13 @@ export class Galley {
      * book searched whether or not it matched, so a consumer never has to ask
      * a second question to learn which book a hit is in.
      * @param {string} needle
-     * @param {any} opts
+     * @param {FindOptions} [opts]
      * @returns {Uint8Array}
      */
     findAll(needle, opts) {
         const ptr0 = passStringToWasm0(needle, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.galley_findAll(this.__wbg_ptr, ptr0, len0, opts);
+        const ret = wasm.galley_findAll(this.__wbg_ptr, ptr0, len0, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
         if (ret[3]) {
             throw takeFromExternrefTable0(ret[2]);
         }
@@ -583,13 +583,13 @@ export class Galley {
      * Read it with `usfm-galley/mask-reader`. The layout is generated from the
      * same declaration the writer is, so no consumer learns one.
      * @param {string} id
-     * @param {any} opts
+     * @param {MaskOptions} [opts]
      * @returns {Uint8Array}
      */
     mask(id, opts) {
         const ptr0 = passStringToWasm0(id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.galley_mask(this.__wbg_ptr, ptr0, len0, opts);
+        const ret = wasm.galley_mask(this.__wbg_ptr, ptr0, len0, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
         if (ret[3]) {
             throw takeFromExternrefTable0(ret[2]);
         }
@@ -602,13 +602,13 @@ export class Galley {
      * with the same options. Over a registered book's exact text the two
      * doors answer the same buffer.
      * @param {string} text
-     * @param {any} opts
+     * @param {MaskOptions} [opts]
      * @returns {Uint8Array}
      */
     maskOf(text, opts) {
         const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.galley_maskOf(this.__wbg_ptr, ptr0, len0, opts);
+        const ret = wasm.galley_maskOf(this.__wbg_ptr, ptr0, len0, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
         if (ret[3]) {
             throw takeFromExternrefTable0(ret[2]);
         }
@@ -625,12 +625,15 @@ export class Galley {
         return ret;
     }
     /**
-     * `budgetBytes` bounds resident products; omit it for 16 MB.
-     * @param {number | null} [budget_bytes]
+     * `{ budgetBytes? }` bounds resident products; omit it for 16 MB.
+     * @param {GalleyOptions} [opts]
      */
-    constructor(budget_bytes) {
-        const ret = wasm.galley_new(!isLikeNone(budget_bytes), isLikeNone(budget_bytes) ? 0 : budget_bytes);
-        this.__wbg_ptr = ret;
+    constructor(opts) {
+        const ret = wasm.galley_new(isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        this.__wbg_ptr = ret[0];
         GalleyFinalization.register(this, this.__wbg_ptr, this);
         return this;
     }
@@ -659,7 +662,7 @@ export class Galley {
      * `utf16` asks otherwise; `formatEdits`'s are always UTF-16.
      * @param {string} target_id
      * @param {string} source_id
-     * @param {any} opts
+     * @param {OverlayOptions} [opts]
      * @returns {Edits}
      */
     overlay(target_id, source_id, opts) {
@@ -667,7 +670,7 @@ export class Galley {
         const len0 = WASM_VECTOR_LEN;
         const ptr1 = passStringToWasm0(source_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len1 = WASM_VECTOR_LEN;
-        const ret = wasm.galley_overlay(this.__wbg_ptr, ptr0, len0, ptr1, len1, opts);
+        const ret = wasm.galley_overlay(this.__wbg_ptr, ptr0, len0, ptr1, len1, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
         if (ret[2]) {
             throw takeFromExternrefTable0(ret[1]);
         }
@@ -690,7 +693,7 @@ export class Galley {
      * An overlay is a SUGGESTION applied on request, never a finding.
      * @param {string} target_id
      * @param {string} source_id
-     * @param {any} opts
+     * @param {OverlayOptions} [opts]
      * @returns {string}
      */
     overlayReport(target_id, source_id, opts) {
@@ -701,7 +704,7 @@ export class Galley {
             const len0 = WASM_VECTOR_LEN;
             const ptr1 = passStringToWasm0(source_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
             const len1 = WASM_VECTOR_LEN;
-            const ret = wasm.galley_overlayReport(this.__wbg_ptr, ptr0, len0, ptr1, len1, opts);
+            const ret = wasm.galley_overlayReport(this.__wbg_ptr, ptr0, len0, ptr1, len1, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
             var ptr3 = ret[0];
             var len3 = ret[1];
             if (ret[3]) {
@@ -721,7 +724,7 @@ export class Galley {
      * this is for a caller that only needs the string.
      * @param {string} target_id
      * @param {string} source_id
-     * @param {any} opts
+     * @param {OverlayOptions} [opts]
      * @returns {string}
      */
     overlayText(target_id, source_id, opts) {
@@ -732,7 +735,7 @@ export class Galley {
             const len0 = WASM_VECTOR_LEN;
             const ptr1 = passStringToWasm0(source_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
             const len1 = WASM_VECTOR_LEN;
-            const ret = wasm.galley_overlayText(this.__wbg_ptr, ptr0, len0, ptr1, len1, opts);
+            const ret = wasm.galley_overlayText(this.__wbg_ptr, ptr0, len0, ptr1, len1, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
             var ptr3 = ret[0];
             var len3 = ret[1];
             if (ret[3]) {
@@ -755,15 +758,13 @@ export class Galley {
      * nothing here is a new rendering, only a cheaper route to the same
      * bytes. A book that retains no text refuses.
      * @param {string} id
-     * @param {boolean} diagnostics
-     * @param {boolean} toc
-     * @param {boolean} utf16
+     * @param {ParseOptions} [opts]
      * @returns {Uint8Array}
      */
-    parse(id, diagnostics, toc, utf16) {
+    parse(id, opts) {
         const ptr0 = passStringToWasm0(id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.galley_parse(this.__wbg_ptr, ptr0, len0, diagnostics, toc, utf16);
+        const ret = wasm.galley_parse(this.__wbg_ptr, ptr0, len0, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
         if (ret[3]) {
             throw takeFromExternrefTable0(ret[2]);
         }
@@ -779,15 +780,16 @@ export class Galley {
      * registered book still hits; what it costs over the id door is the
      * string crossing the wall.
      * @param {string} text
-     * @param {boolean} diagnostics
-     * @param {boolean} toc
-     * @param {boolean} utf16
+     * @param {ParseOptions} [opts]
      * @returns {Uint8Array}
      */
-    parseText(text, diagnostics, toc, utf16) {
+    parseText(text, opts) {
         const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.galley_parseText(this.__wbg_ptr, ptr0, len0, diagnostics, toc, utf16);
+        const ret = wasm.galley_parseText(this.__wbg_ptr, ptr0, len0, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
         var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
         wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
         return v2;
@@ -859,25 +861,24 @@ export class Galley {
      * }
      * ```
      *
-     * `opts` is an [`OverlayOptions`](Self::overlay) — only `markers` is read
-     * here — and `utf16` asks for UTF-16 offsets instead of bytes. A block is
+     * `opts` is an [`OverlayOptions`](Self::overlay) — only `markers` and
+     * `utf16` are read here. A block is
      * LEADING when it sits immediately before its verse's `\v`, INSIDE when
      * the verse's own text is above it; ordinals count from one per address.
      * Both lists are in document order. A block ends where its paragraph
      * closes — a heading or `\c` the marker set leaves out still ends it — so
      * the next row's `from` is not its end.
      * @param {string} id
-     * @param {any} opts
-     * @param {boolean | null} [utf16]
+     * @param {OverlayOptions} [opts]
      * @returns {string}
      */
-    skeleton(id, opts, utf16) {
+    skeleton(id, opts) {
         let deferred3_0;
         let deferred3_1;
         try {
             const ptr0 = passStringToWasm0(id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
             const len0 = WASM_VECTOR_LEN;
-            const ret = wasm.galley_skeleton(this.__wbg_ptr, ptr0, len0, opts, isLikeNone(utf16) ? 0xFFFFFF : utf16 ? 1 : 0);
+            const ret = wasm.galley_skeleton(this.__wbg_ptr, ptr0, len0, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
             var ptr2 = ret[0];
             var len2 = ret[1];
             if (ret[3]) {
@@ -896,12 +897,11 @@ export class Galley {
      * [`targetNodeFor`](Self::target_node_for), and the same three answers.
      * @param {string} target_id
      * @param {string} source_id
-     * @param {any} address
-     * @param {any} opts
-     * @param {boolean | null} [utf16]
+     * @param {BlockAddress} address
+     * @param {OverlayOptions} [opts]
      * @returns {string}
      */
-    sourceNodeFor(target_id, source_id, address, opts, utf16) {
+    sourceNodeFor(target_id, source_id, address, opts) {
         let deferred4_0;
         let deferred4_1;
         try {
@@ -909,7 +909,7 @@ export class Galley {
             const len0 = WASM_VECTOR_LEN;
             const ptr1 = passStringToWasm0(source_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
             const len1 = WASM_VECTOR_LEN;
-            const ret = wasm.galley_sourceNodeFor(this.__wbg_ptr, ptr0, len0, ptr1, len1, address, opts, isLikeNone(utf16) ? 0xFFFFFF : utf16 ? 1 : 0);
+            const ret = wasm.galley_sourceNodeFor(this.__wbg_ptr, ptr0, len0, ptr1, len1, address, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
             var ptr3 = ret[0];
             var len3 = ret[1];
             if (ret[3]) {
@@ -961,12 +961,11 @@ export class Galley {
      * position is still the key; the name is only the check.
      * @param {string} target_id
      * @param {string} source_id
-     * @param {any} address
-     * @param {any} opts
-     * @param {boolean | null} [utf16]
+     * @param {BlockAddress} address
+     * @param {OverlayOptions} [opts]
      * @returns {string}
      */
-    targetNodeFor(target_id, source_id, address, opts, utf16) {
+    targetNodeFor(target_id, source_id, address, opts) {
         let deferred4_0;
         let deferred4_1;
         try {
@@ -974,7 +973,7 @@ export class Galley {
             const len0 = WASM_VECTOR_LEN;
             const ptr1 = passStringToWasm0(source_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
             const len1 = WASM_VECTOR_LEN;
-            const ret = wasm.galley_targetNodeFor(this.__wbg_ptr, ptr0, len0, ptr1, len1, address, opts, isLikeNone(utf16) ? 0xFFFFFF : utf16 ? 1 : 0);
+            const ret = wasm.galley_targetNodeFor(this.__wbg_ptr, ptr0, len0, ptr1, len1, address, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
             var ptr3 = ret[0];
             var len3 = ret[1];
             if (ret[3]) {
@@ -993,19 +992,19 @@ export class Galley {
      * the `Toc` that `update` built and the Pantry pins.
      *
      * Nothing is derived here: no chunk is resolved, no text is read, no wire
-     * is plated. `utf16` rebases every offset through the book's own retained
-     * table; the default is bytes.
+     * is plated. `{ utf16 }` rebases every offset through the book's own
+     * retained table; the default is bytes.
      *
      * Read it with `usfm-galley/toc-reader`. The layout is generated from the
      * same declaration the writer is, so no consumer learns one.
      * @param {string} id
-     * @param {boolean | null} [utf16]
+     * @param {TocOptions} [opts]
      * @returns {Uint8Array}
      */
-    toc(id, utf16) {
+    toc(id, opts) {
         const ptr0 = passStringToWasm0(id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.galley_toc(this.__wbg_ptr, ptr0, len0, isLikeNone(utf16) ? 0xFFFFFF : utf16 ? 1 : 0);
+        const ret = wasm.galley_toc(this.__wbg_ptr, ptr0, len0, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
         if (ret[3]) {
             throw takeFromExternrefTable0(ret[2]);
         }
@@ -1022,20 +1021,17 @@ export class Galley {
      * text still kept its `Toc`, so it is listed. The one thing it cannot
      * answer is `utf16`, because the table that rebases offsets travels with
      * the text.
-     * @param {string | null} [scope]
-     * @param {boolean | null} [utf16]
+     * @param {CensusOptions} [opts]
      * @returns {Uint8Array}
      */
-    tocAll(scope, utf16) {
-        var ptr0 = isLikeNone(scope) ? 0 : passStringToWasm0(scope, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        var len0 = WASM_VECTOR_LEN;
-        const ret = wasm.galley_tocAll(this.__wbg_ptr, ptr0, len0, isLikeNone(utf16) ? 0xFFFFFF : utf16 ? 1 : 0);
+    tocAll(opts) {
+        const ret = wasm.galley_tocAll(this.__wbg_ptr, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
         if (ret[3]) {
             throw takeFromExternrefTable0(ret[2]);
         }
-        var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
         wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
-        return v2;
+        return v1;
     }
     /**
      * Register or replace one whole book under the caller's `id`, as a
@@ -1078,17 +1074,17 @@ export class Galley {
      * A reference publishes no findings of its own; it is the denominator
      * the length lane compares a target's verses against.
      *
-     * `keepText` — omitted is `false` — makes it keep the text and the
+     * `{ keepText }` — omitted is `false` — makes it keep the text and the
      * projection a target keeps too, which is what [`find`](Self::find) and
      * `findAll`'s `"references"` scope read. It costs what a target costs
      * minus the resident analysis; a source nobody searches should stay off
      * it.
      * @param {string} id
      * @param {string} text
-     * @param {boolean | null} [keep_text]
+     * @param {ReferenceOptions} [opts]
      * @returns {string}
      */
-    updateReference(id, text, keep_text) {
+    updateReference(id, text, opts) {
         let deferred4_0;
         let deferred4_1;
         try {
@@ -1096,7 +1092,7 @@ export class Galley {
             const len0 = WASM_VECTOR_LEN;
             const ptr1 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
             const len1 = WASM_VECTOR_LEN;
-            const ret = wasm.galley_updateReference(this.__wbg_ptr, ptr0, len0, ptr1, len1, isLikeNone(keep_text) ? 0xFFFFFF : keep_text ? 1 : 0);
+            const ret = wasm.galley_updateReference(this.__wbg_ptr, ptr0, len0, ptr1, len1, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
             var ptr3 = ret[0];
             var len3 = ret[1];
             if (ret[3]) {
@@ -1559,9 +1555,9 @@ export function attrResolve(name, marker) {
 /**
  * The k/v view of one `AttrList` token, flat.
  *
- * `[from, to)` is the list token's span in the CALLER's space — UTF-16 when
- * `utf16` is non-zero, bytes otherwise, as `locate` reads it — and every word
- * comes back in that same space.
+ * `[from, to)` is the list token's span in the CALLER's space — UTF-16 under
+ * `{ utf16: true }`, bytes otherwise — and every word comes back in that same
+ * space.
  *
  * ```text
  * |lemma="grace" x-y="z"   ->  [nameFrom nameTo valueFrom valueTo] x 2, NONE, NONE
@@ -1575,13 +1571,16 @@ export function attrResolve(name, marker) {
  * @param {string} text
  * @param {number} from
  * @param {number} to
- * @param {number} utf16
+ * @param {AttrsOptions} [opts]
  * @returns {Uint32Array}
  */
-export function attrs(text, from, to, utf16) {
+export function attrs(text, from, to, opts) {
     const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.attrs(ptr0, len0, from, to, utf16);
+    const ret = wasm.attrs(ptr0, len0, from, to, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
     var v2 = getArrayU32FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
     return v2;
@@ -1861,27 +1860,36 @@ export function mergeSplices(baseline, current, decisions_json, _default) {
 /**
  * THE read call. One document in, one buffer out.
  *
+ * ```ts
+ * interface ParseOptions {
+ *   diagnostics?: boolean;   // run the lint walk; default false
+ *   toc?: boolean;           // build the chapter and verse index; default false
+ *   utf16?: boolean;         // every offset as a UTF-16 code unit; default bytes
+ * }
+ * parse(text: string, opts?: ParseOptions): Uint8Array;
+ * ```
+ *
  * The buffer is a plated parse — tokens, the tree, and whatever `opts` asked
  * for besides — read by `reader.ts`, which is generated from the same schema
  * as the writer. Nothing is retained wasm-side: the `Uint8Array` is JS's, the
  * collector reclaims it, and there is no `free`.
  *
- * The three booleans are positional because an object crossing the wall would
- * be `Reflect::get` per key with a misspelling silently reading as `false`.
- * `reader.ts` wraps this as `parse(text, { diagnostics, toc, utf16 })`, where
- * a misspelled key is a compile error instead.
+ * A misspelled key is a compile error through the declared `ParseOptions`,
+ * and a THROW at the wall for a caller the compiler never saw: an unknown key
+ * is refused by name rather than read as `false` ([`options`]).
  *
  * `text` must be LF-normalized (see the module doc); a debug build asserts it.
  * @param {string} text
- * @param {boolean} diagnostics
- * @param {boolean} toc
- * @param {boolean} utf16
+ * @param {ParseOptions} [opts]
  * @returns {Uint8Array}
  */
-export function parse(text, diagnostics, toc, utf16) {
+export function parse(text, opts) {
     const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.parse(ptr0, len0, diagnostics, toc, utf16);
+    const ret = wasm.parse(ptr0, len0, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
     var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
     return v2;
@@ -1921,7 +1929,7 @@ export function parse(text, diagnostics, toc, utf16) {
  * `z`-initial, an unknown category word, a duplicate — is a report, not a
  * failure, so one bad line never costs a host the rest of its list.
  * @param {string} list
- * @param {{ relaxZPrefix?: boolean }} [opts]
+ * @param {ExtensionOptions} [opts]
  * @returns {string}
  */
 export function setExtensions(list, opts) {
@@ -2061,6 +2069,10 @@ export function __wbg_get_971a0c45d172643f() { return handleError(function (arg0
 }, arguments); }
 export function __wbg_get_unchecked_e20b893aeafc3fca(arg0, arg1) {
     const ret = arg0[arg1 >>> 0];
+    return ret;
+}
+export function __wbg_keys_ec7f8c0c2370d91d(arg0) {
+    const ret = Object.keys(arg0);
     return ret;
 }
 export function __wbg_length_ecfa2c63d3d0d82c(arg0) {

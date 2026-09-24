@@ -209,6 +209,17 @@ planning/; the definition records the current soft direction.
   (pending Q2: the interpretation rules — numeric fields where parseable +
   an exactness flag where not. Exactness is domain-real, not an
   implementation artifact.)
+- **Hull** and **members** — the two readings of one verse designator
+  (`designator.rs`). The HULL is the lowest and highest number named, what a
+  sequence sorts by and a bridge renders as. The MEMBERS are what it covers:
+  `-` joins two points into one member, `,` starts the next, so `\v 1,3,5`
+  has hull 1–5 and covers 1, 3 and 5, not 2 or 4.
+- **Segment** — the letters after a verse number (`12a`). A place INSIDE its
+  number: `12a` and `12b` are two places, and `12` covers both. The hull
+  ignores segments; the members carry them.
+- **Label** — a designator as written, minus the delimiter the scanner folded
+  onto it: the spelling (`12b`, `1,3,5`, `7"`) the numbers cannot carry.
+  Every Toc row keeps its label as a span into the source.
 - **Chapter designator** — the text after `\c`, same character as verse
   designator (numeric interpretation + exactness), plus the reopened-chapter
   reality.

@@ -175,6 +175,8 @@ fn the_directory_entry_tiles_its_stride() {
         (schema::DIRECTORY_VERSE_ROWS_OFFSET, 4),
         (schema::DIRECTORY_ID_AT_OFFSET, 4),
         (schema::DIRECTORY_ID_LEN_OFFSET, 4),
+        (schema::DIRECTORY_MEMBERS_AT_OFFSET, 4),
+        (schema::DIRECTORY_MEMBER_ROWS_OFFSET, 4),
     ];
     offsets.sort_unstable();
     let mut at = 0;

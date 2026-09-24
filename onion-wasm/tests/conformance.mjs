@@ -467,7 +467,7 @@ const levelIsSpelled = (doc, tokens, where) => {
     throw new Error("no attribute list");
   };
   const span = listOf(doc, tokens);
-  const list = attrList(rawAttrs(doc, span.from, span.to, 1));
+  const list = attrList(rawAttrs(doc, span.from, span.to, { utf16: true }));
   eq(list.attrs.length, 2, "two attributes came back");
   eq(doc.slice(list.attrs[0].name.from, list.attrs[0].name.to), "lemma", "the name span");
   eq(doc.slice(list.attrs[0].value.from, list.attrs[0].value.to), "grace", "the value span");
@@ -476,14 +476,14 @@ const levelIsSpelled = (doc, tokens, where) => {
 
   // A bare value: an empty name span at the value's start.
   const bare = "\\w In|in\\w*";
-  const bareList = attrList(rawAttrs(bare, listOf(bare, onion.parse(bare, {}).tokens).from, bare.length, 0));
+  const bareList = attrList(rawAttrs(bare, listOf(bare, onion.parse(bare, {}).tokens).from, bare.length));
   eq(bareList.attrs.length, 1, "one bare value");
   eq(bareList.attrs[0].name.from, bareList.attrs[0].name.to, "…with an empty name");
 
   // An unterminated quote ends the walk with one finding.
   const broken = '\\w x|lemma="grace\\w*';
   const brokenSpan = listOf(broken, onion.parse(broken, {}).tokens);
-  const brokenList = attrList(rawAttrs(broken, brokenSpan.from, brokenSpan.to, 0));
+  const brokenList = attrList(rawAttrs(broken, brokenSpan.from, brokenSpan.to));
   eq(brokenList.attrs.length, 0, "nothing parsed before the break");
   eq(brokenList.malformed.code, MalformedAttr.UnterminatedQuote, "the code names the break");
   eq(broken[brokenList.malformed.at], '"', "…at the opening quote");
@@ -525,9 +525,35 @@ if (corpus && existsSync(corpus)) {
 
 // The raw door, once: `deserialize` over bytes the wrapper did not unpack.
 {
-  const dish = deserialize(rawParse(BOOK, false, true, false));
+  const dish = deserialize(rawParse(BOOK, { toc: true }));
   eq(dish.toc.chapters().length, 3, "deserialize reads a raw dish too");
   check(!dish.utf16, "and reports its addressing");
+}
+
+// A verse's label and members, and a chapter's label, are spans into the
+// text: a JS slice of the string sent in reads them as written, in UTF-16.
+{
+  const text = "\\c 1\n\\p Ἐν \\v 1,3 α \\v 2α β \\v 2β γ\n\\c 12b\n";
+  const { toc } = onion.parse(text, { toc: true, utf16: true });
+  const verses = toc.verses();
+  eq(verses.map((v) => text.slice(v.label.from, v.label.to)).join(" | "), "1,3 | 2α | 2β", "labels");
+  eq(verses[0].members.map((m) => `${m.from}-${m.to}`).join(" "), "1-1 3-3", "a list's members, not its hole");
+  eq(verses[0].first + "-" + verses[0].last, "1-3", "the hull still spans it");
+  const segment = verses[1].members[0].fromSegment;
+  eq(text.slice(segment.from, segment.to), "α", "a segment is a place inside its number");
+  const chapter = toc.chapters()[2];
+  eq(text.slice(chapter.label.from, chapter.label.to), "12b", "a chapter label as written");
+}
+
+// The wall refuses a misspelled option by name rather than reading false.
+{
+  let refused = "";
+  try {
+    rawParse(BOOK, { tco: true });
+  } catch (error) {
+    refused = String(error.message ?? error);
+  }
+  check(refused.includes('unknown option "tco"'), `parse refuses a misspelled key: ${refused}`);
 }
 
 // --- the corpus envelope frames, it does not re-encode -------------------

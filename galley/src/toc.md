@@ -16,7 +16,7 @@ for (const book of census) {
 
 ```rust
 galley::toc::encode(&pantry, &ids, utf16)   -> Vec<u8>   // the buffer
-galley::toc::rows_of(&toc)                  -> (Vec<Chapter>, Vec<Verse>)
+galley::toc::rows_of(&toc)                  -> (Vec<Chapter>, Vec<Verse>)   // members cross as toc.members
 ```
 
 `galley/src/pantry.md` says what the Pantry retains and why the `Toc` is
@@ -45,18 +45,32 @@ that one.
 
 ## What the rows carry, and what they refuse to
 
-| | chapter row | verse row |
-| --- | --- | --- |
-| where | `start`, `end` — the rows TILE the book | `at` |
-| which | `number` | `chapter`, `first`, `last` |
-| how many | `anchors`, `lastVerse` | — |
+| | chapter row | verse row | member row |
+| --- | --- | --- | --- |
+| where | `start`, `end` — the rows TILE the book | `at` | — |
+| which | `number` | `chapter`, `first`, `last` (the hull) | `from`, `to` |
+| as written | `labelStart`, `labelEnd` | `labelStart`, `labelEnd` | each end's segment span |
+| how many | `anchors`, `lastVerse` | `membersFrom`, `membersLen` | — |
 
-**No `token`, no `designator`.** The dish's own chapter and verse rows carry
-both; they index the TOKEN STREAM, which is the rebuildable tier and not
-resident. A consumer that needs a chapter's raw label — `\c 12b`, which
-`number` cannot carry — needs the tokens, and that means a parse. The door
-serves the pinned tier, so its rows are the pinned tier's rows, and the
-boundary is stated rather than half-met.
+```text
+\c 12b         chapter  number 0 (malformed as a NUMBER), label "12b"
+\v 1,3,5 …     verse    first 1, last 5, label "1,3,5", members [1] [3] [5]
+\v 12a …       verse    first 12, last 12, label "12a", members [12a]
+```
+
+**The label and the members are spans, not tokens.** The dish's own rows also
+carry a `token` and a `designator` index; those index the TOKEN STREAM, which
+is the rebuildable tier and not resident, so the census does not. What the
+census carries instead is where the designator's LABEL sits in the book's
+text — the spelling `number` cannot carry, `\c 12b` or `\v 6a` — and what a
+verse designator COVERS, as a run of member rows. The retained `Toc` keeps
+both as positions when it is built, so no parse and no token is needed to
+read them, and the host already holds the text they slice.
+
+**First and last are the hull; the members are the truth.** `\v 1,3,5` spans
+1–5 and covers 1, 3 and 5 — not 2 or 4. A segment is a place INSIDE its
+number: `\v 12a` covers `12a`, not `12b`. `membersOf(n)` on the reader
+decodes one verse's run. A malformed designator has a label and no members.
 
 **Row 0 is always the front matter.** It carries the bytes before the first
 `\c` and its `number` is 0, which is what makes the rows tile. The reader
@@ -107,14 +121,15 @@ ENVELOPE — header, directory, ids — is this format's own, because a census
 frames books where a dish frames sections.
 
 ```text
-header      magic "TOCS", version, flags, bookCount, both strides, directoryAt
-directory   per book: code, chaptersAt, chapterRows, versesAt, verseRows, idAt, idLen
-rows        per book: chapter rows, then verse anchors, each block 4-aligned
+header      magic "TOCS", version, flags, bookCount, the three strides, directoryAt
+directory   per book: code, chaptersAt, chapterRows, versesAt, verseRows, idAt, idLen,
+            membersAt, memberRows
+rows        per book: chapter rows, verse anchors, then members, each block 4-aligned
 ids         every id's UTF-8, in directory order
 ```
 
 **Read it with the generated reader, not by hand.** `Census.open` validates
-magic, version and both strides and throws naming the mismatch, so a consumer
+magic, version and all three strides and throws naming the mismatch, so a consumer
 that is a version behind fails at its first call rather than misreading a
 field. Nothing in a consumer should know a byte offset in this table; it is
 written here because the format has to be reviewable, not because anyone is

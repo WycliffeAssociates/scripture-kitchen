@@ -18,12 +18,33 @@
 //! `include_str!`d: the corpus trees are gitignored, and a missing file is a
 //! COMPILE error where a missing corpus should be a skip.
 
+use js_sys::{Object, Reflect};
 use onion_wasm::{FormatOpts, attr_resolve, attrs, format_edits, format_edits_in, parse, to_utf16};
 use usfm_onion::wire;
+use wasm_bindgen::JsValue;
 use wasm_bindgen_test::*;
 
 /// MAT 1:1-2 and a synthetic chapter 2 carrying a footnote, verbatim Hindi.
 const BOOK: &str = "\\id MAT\n\\ide UTF-8\n\\rem Copyright Information: Creative Commons Attribution-ShareAlike 4.0 License\n\\h मत्ती\n\\toc1 मत्ती\n\\toc2 मत्ती\n\\mt1 Matthew\n\\mt1 मत्ती\n\\c 1\n\\s यीशु मसीह की वंशावली\n\\p\n\\v 1 अब्राहम की सन्तान, दाऊद की सन्तान, यीशु मसीह* की वंशावली*।\n\\v 2 अब्राहम से इसहाक उत्‍पन्‍न हुआ, इसहाक से याकूब उत्‍पन्‍न हुआ, और याकूब से यहूदा और उसके भाई उत्‍पन्‍न हुए।\n\\c 2\n\\s चरवाहों\n\\p\n\\v 1 दूसरा अध्याय।\n\\v 2 \\f + \\ft एक टिप्पणी\\f* अन्तिम।\n";
+
+/// An options object as a JS caller writes one.
+fn opts(pairs: &[(&str, bool)]) -> Option<JsValue> {
+    let bag = Object::new();
+    for (key, value) in pairs {
+        Reflect::set(&bag, &JsValue::from_str(key), &JsValue::from_bool(*value))
+            .expect("a plain object");
+    }
+    Some(bag.into())
+}
+
+/// `parse` with the three flags spelled as a caller spells them.
+fn parsed(text: &str, diagnostics: bool, toc: bool, utf16: bool) -> Vec<u8> {
+    parse(
+        text,
+        opts(&[("diagnostics", diagnostics), ("toc", toc), ("utf16", utf16)]),
+    )
+    .expect("known options")
+}
 
 fn word(dish: &[u8], at: usize) -> u32 {
     u32::from_le_bytes(dish[at..at + 4].try_into().expect("four bytes"))
@@ -51,7 +72,7 @@ fn rows(dish: &[u8], name: &str, record: &wire::schema::Record) -> usize {
 
 #[wasm_bindgen_test]
 fn the_wall_hands_over_an_intact_dish() {
-    let dish = parse(BOOK, true, true, true);
+    let dish = parsed(BOOK, true, true, true);
     assert_eq!(word(&dish, 0), wire::MAGIC, "magic survived the crossing");
     assert_eq!(word(&dish, 4), wire::FORMAT_VERSION);
     assert_eq!(word(&dish, 8) as usize, wire::schema::SECTIONS.len());
@@ -70,8 +91,8 @@ fn the_wall_hands_over_an_intact_dish() {
 /// space, and its hash over the bytes whichever space that is.
 #[wasm_bindgen_test]
 fn the_header_names_the_source_it_came_from() {
-    let bytes = parse(BOOK, false, false, false);
-    let units = parse(BOOK, false, false, true);
+    let bytes = parsed(BOOK, false, false, false);
+    let units = parsed(BOOK, false, false, true);
     let hash = |d: &[u8]| u64::from_le_bytes(d[24..32].try_into().expect("eight bytes"));
 
     assert_eq!(word(&bytes, 20) as usize, BOOK.len());
@@ -86,7 +107,7 @@ fn the_header_names_the_source_it_came_from() {
 
 #[wasm_bindgen_test]
 fn the_hand_count_holds() {
-    let dish = parse(BOOK, false, true, false);
+    let dish = parsed(BOOK, false, true, false);
     // Front matter, `\c 1`, `\c 2`.
     assert_eq!(rows(&dish, "chapters", &wire::schema::CHAPTER), 3);
     // Four `\v` across the two chapters.
@@ -100,8 +121,8 @@ fn the_hand_count_holds() {
 /// makes this book the right one to ask the question with.
 #[wasm_bindgen_test]
 fn utf16_is_opt_in_and_actually_converts() {
-    let bytes = parse(BOOK, false, false, false);
-    let units = parse(BOOK, false, false, true);
+    let bytes = parsed(BOOK, false, false, false);
+    let units = parsed(BOOK, false, false, true);
     assert_eq!(word(&bytes, 12) & wire::FLAG_UTF16, 0);
     assert_ne!(word(&units, 12) & wire::FLAG_UTF16, 0);
 
@@ -138,7 +159,7 @@ fn the_attribute_view_crosses() {
         } else {
             (list.start, list.end())
         };
-        attrs(text, from, to, u32::from(utf16))
+        attrs(text, from, to, opts(&[("utf16", utf16)])).expect("known options")
     };
     fn slice(text: &str, from: u32, to: u32) -> &str {
         &text[from as usize..to as usize]
@@ -214,4 +235,18 @@ fn the_write_path_still_crosses() {
     assert_eq!(edits.lens().len() * 2, edits.spans().len());
     let scoped = format_edits_in(BOOK, 0, u32::MAX, &opts);
     assert_eq!(scoped.spans(), edits.spans(), "the full range is the book");
+}
+
+/// An options object is checked at the wall: an unknown key is refused by
+/// name, never read as `false`, and absent is every default.
+#[wasm_bindgen_test]
+fn an_unknown_option_is_refused_by_name() {
+    assert!(parse(BOOK, None).is_ok(), "no options is every default");
+    assert!(parse(BOOK, Some(JsValue::NULL)).is_ok());
+    let misspelled = onion_wasm::options::parse_options(opts(&[("tco", true)]).as_ref(), "parse")
+        .expect_err("a misspelling");
+    assert!(misspelled.contains("\"tco\""), "{misspelled}");
+    let wrong_type = onion_wasm::options::parse_options(Some(&JsValue::from_f64(1.0)), "parse")
+        .expect_err("not an object");
+    assert!(wrong_type.contains("must be an object"), "{wrong_type}");
 }

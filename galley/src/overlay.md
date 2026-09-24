@@ -143,7 +143,7 @@ without pasting.
 An overlay reads the Pantry's retained products: one `parsed` off the warm
 chunk cache per side for tokens and the lint report, the retained mask for
 "is there verse text here", the retained `Toc` for the verses. A source must
-therefore be registered with its text — `updateReference(id, text, true)` —
+therefore be registered with its text — `updateReference(id, text, { keepText: true })` —
 because a lengths-only reference has no skeleton to copy.
 
 The transaction crosses as `onion-wasm`'s `Edits`, built through

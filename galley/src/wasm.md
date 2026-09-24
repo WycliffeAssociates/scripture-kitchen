@@ -9,7 +9,7 @@ const galley = new Galley();                            // one opaque handle
 
 galley.update("books/MRK.usfm", text);                  // whole book → "MRK"
 galley.updateReference("ref/en_ult/GEN.usfm", ult);     // lengths only, no text
-galley.updateReference("ref/en_ult/RUT.usfm", ult, true);  // …and searchable
+galley.updateReference("ref/en_ult/RUT.usfm", ult, { keepText: true });  // …and searchable
 
 const census = Census.open(galley.tocAll());            // every book's chapters and verses
 const snap = FindingsSnapshot.open(galley.publish());   // one complete snapshot
@@ -32,13 +32,29 @@ galley.findAll("God", { wholeWord: true, limit: 200 });                // every 
 galley.findAll("God", { wholeWord: true, limit: 200, scope: "all" });  // and the sources
 ```
 
+## Options are objects, and they are checked
+
+Every door that takes options takes ONE object, last, and every such object is
+a declared TypeScript interface in the `.d.ts` — `ParseOptions`, `TocOptions`,
+`CensusOptions`, `FindOptions`, `MaskOptions`, `OverlayOptions`,
+`ReferenceOptions`, `GalleyOptions`. No door takes a positional boolean or a
+trailing optional flag. A typed caller's misspelling is a compile error; an
+untyped caller's is a throw at the wall naming the key, because an unknown key
+is refused rather than read as `false`:
+
+```js
+galley.parseText(text, { tco: true });   // throws: parseText: unknown option "tco"; expected diagnostics, toc or utf16
+galley.toc(id, { utf16: 1 });            // throws: toc: utf16 must be a boolean
+galley.parseText(text);                  // every option its default
+```
+
 ## Two doors, one engine: by id, or by text
 
 The onion products are on the same handle and read the same warm chunks. The
 ID doors run off the RETAINED copy — nothing crosses the wall but the id:
 
 ```js
-deserialize(galley.parse("books/MRK.usfm", true, true, true));  // the plated book
+deserialize(galley.parse("books/MRK.usfm", { diagnostics: true, toc: true }));  // the plated book
 deserialize(galley.lint("books/MRK.usfm"));                     // diagnostics alone
 galley.verseText("books/MRK.usfm");                             // off the retained mask
 ```
@@ -47,7 +63,7 @@ Use the TEXT doors for text the host has not registered — a preview pane, a
 file not yet in the project:
 
 ```js
-deserialize(galley.parseText(text, true, true, true));
+deserialize(galley.parseText(text, { diagnostics: true, toc: true, utf16: true }));
 galley.verseTextOf(text);
 galley.structureTextOf(text);                 // no book retains a structure mask
 galley.maskOf(text, { recipe: "structure" }); // and the map of the same cut
@@ -57,8 +73,8 @@ The chunk cache keys on CONTENT, so a text door over a registered book's own
 bytes hits the same products; what it costs is the string crossing the wall.
 
 `lint` is not a door onion itself has: a lint report crosses as the
-`diagnostics` section of a parse buffer, so `lint(id)` is `parse(id, true,
-false, false)` and `reader.ts` reads it the same way.
+`diagnostics` section of a parse buffer, so `lint(id)` is `parse(id,
+{ diagnostics: true })` and `reader.ts` reads it the same way.
 
 A book that retains no text refuses the text-needing doors by name rather than
 answering from nothing — `updateReference` registers `ProductsOnly` unless the
@@ -70,16 +86,16 @@ galley.verseText("ref/RUT.usfm");   // throws: retains no verse-text projection
 galley.parse("books/NUM.usfm", …);  // throws: no book is registered as books/NUM.usfm
 ```
 
-## A searchable source: `updateReference(id, text, keepText)`
+## A searchable source: `updateReference(id, text, { keepText })`
 
-The third argument — omitted is `false` — makes a reference keep its text AND
+`keepText` — omitted is `false` — makes a reference keep its text AND
 build the projection a target builds, so every door above answers on it and
 `find` can search it. It costs what a target costs minus the resident analysis
 (`pantry.md`: 7.29 MB per Bible against 1.17 MB of lengths alone), so it is the
 host's call per source, not a default:
 
 ```js
-galley.updateReference("ref/RUT.usfm", ult, true);
+galley.updateReference("ref/RUT.usfm", ult, { keepText: true });
 galley.find("ref/RUT.usfm", "Naomi", { caseSensitive: true });   // the source, searched
 galley.verseText("ref/RUT.usfm");                       // and its projection
 ```
@@ -276,7 +292,7 @@ because a hit's length is a value it carries, and the id and preview strings
 are located only when something asks for one.
 
 Every offset is **UTF-16** — the unit the editor's coordinates are already in,
-the same choice `parse(text, …, utf16: true)` makes.
+the same choice `parse(text, { utf16: true })` makes.
 
 Two coordinate spaces per hit, because they are not the same interval
 (`find.md`): `projectedFrom..projectedTo` is in the projection — what a reader
@@ -372,8 +388,8 @@ naming the three that exist rather than falling back to any of them.
 
 ## The census buffer
 
-What a project HOLDS, without a parse per book: `toc(id, utf16?)` for one
-registered book, `tocAll(scope?, utf16?)` for every book of a scope in one
+What a project HOLDS, without a parse per book: `toc(id, { utf16? })` for one
+registered book, `tocAll({ scope?, utf16? })` for every book of a scope in one
 crossing — which is the call that belongs on a project's open.
 
 ```js
@@ -389,8 +405,16 @@ for (const book of census) {
   rows.seek(1).number;    // 1
   rows.seek(1).anchors;   // 31
   rows.seek(1).lastVerse; // 31
+  const verse = book.verseRows.seek(0);
+  text.slice(verse.labelStart, verse.labelEnd);  // "1", "12a", "1,3,5" — as written
+  book.membersOf(0);      // what it COVERS: [{ from, fromSegment, to, toSegment }]
 }
 ```
+
+A verse row's `first..last` is its HULL, and `membersOf(n)` is what it covers:
+`\v 1,3,5` spans 1–5 and covers 1, 3 and 5; `\v 12a` covers the place `12a`
+and not `12b`. Every label and segment is a SPAN into the book's text, never
+copied text, in the buffer's offset space.
 
 **Read it through the reader, never by hand.** `toc-reader.ts` is GENERATED
 from the same declaration the writer is (`galley/src/toc/schema.rs`), so the
@@ -407,8 +431,8 @@ table to rebase through — it answers by name rather than handing back bytes
 labelled as code units:
 
 ```js
-galley.tocAll("all", true);   // throws: ref/RUT.usfm retains no UTF-16 table;
-                              //         register it with keepText, or ask for byte offsets
+galley.tocAll({ scope: "all", utf16: true });   // throws: ref/RUT.usfm retains no UTF-16 table;
+                                                //         register it with keepText, or ask for byte offsets
 ```
 
 The scope reaches further than `findAll`'s on purpose: every registered book
@@ -425,7 +449,7 @@ poetry. `galley/src/overlay.md` is the contract; this is the wire.
 
 ```js
 galley.update("books/GEN.usfm", target);
-galley.updateReference("ref/GEN.usfm", source, true);   // keepText: a skeleton needs the text
+galley.updateReference("ref/GEN.usfm", source, { keepText: true });   // a skeleton needs the text
 
 const skeleton = JSON.parse(galley.skeleton("ref/GEN.usfm"));
 //   { verses: [{ sid, from, to, textFrom, textTo }],
@@ -450,10 +474,9 @@ that still exists but now spells something else THROWS (`… names q1 but the
 node there is q2 — the address is stale`) instead of answering about a
 different node.
 
-Every door takes the same optional `{ markers?, scope?, utf16? }`; `skeleton`
-and the two `*NodeFor` doors take `utf16` as a trailing boolean as well, the
-way `parse` does. A misspelled key reads as absent, a wrong TYPE throws, and
-an unknown marker name throws rather than filtering nothing.
+Every door takes the same optional `OverlayOptions`, `{ markers?, scope?,
+utf16? }`. An unknown key throws naming it, a wrong TYPE throws, and an
+unknown marker name throws rather than filtering nothing.
 
 **Edits, not the string, is the door a host wants.** `overlay` returns
 `onion-wasm`'s own `Edits` — the class `formatEdits` answers with — so an

@@ -38,15 +38,17 @@ pub(super) fn edits(overlay: &Overlay, table: Option<&Utf16Table>) -> Edits {
     Edits::from_parts(spans, lens, text)
 }
 
-/// `{ markers?, scope?, utf16? }` off a JS object, with a misspelled key
-/// reading as absent and a wrong TYPE reading as an error.
-pub(super) fn options(value: &JsValue) -> Result<(OverlayOptions, bool), JsError> {
-    if value.is_undefined() || value.is_null() {
+/// `{ markers?, scope?, utf16? }` off a JS object: an absent key reads as its
+/// default, a wrong TYPE and an unknown key as an error naming it.
+pub(super) fn options(
+    value: Option<&JsValue>,
+    door: &str,
+) -> Result<(OverlayOptions, bool), JsError> {
+    let bag = onion_wasm::options::bag(value, door, &["markers", "scope", "utf16"])
+        .map_err(|e| JsError::new(&e))?;
+    let Some(value) = bag.as_ref() else {
         return Ok((OverlayOptions::default(), false));
-    }
-    if !value.is_object() {
-        return Err(JsError::new("options must be an object"));
-    }
+    };
     let markers = match get(value, "markers") {
         Some(list) => {
             let list = Array::from(&list);
@@ -80,9 +82,8 @@ pub(super) fn options(value: &JsValue) -> Result<(OverlayOptions, bool), JsError
             }
         },
     };
-    let utf16 = get(value, "utf16")
-        .and_then(|flag| flag.as_bool())
-        .is_some_and(|flag| flag);
+    let utf16 =
+        onion_wasm::options::flag(Some(value), door, "utf16").map_err(|e| JsError::new(&e))?;
     Ok((OverlayOptions { markers, scope }, utf16))
 }
 

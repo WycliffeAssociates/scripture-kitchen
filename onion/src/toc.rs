@@ -4,10 +4,19 @@
 //! ```text
 //! \id GEN            book     = "GEN"
 //! \mt1 Genesis       chapters = [ 0: 0..24,  ← front matter is chapter 0
-//! \c 1                            1: 24..46 ]
-//! \p                 verses   = [ at 33, chapter 1, 1..1 ]
+//! \c 1                            1: 24..46, label "1" ]
+//! \p                 verses   = [ at 33, chapter 1, 1..1, label "1", members [1] ]
 //! \v 1 In the…       locate(40) = "GEN 1:1"   locate(10) = "GEN"
+//!
+//! \v 1,3,5 …         verse 1..5, label "1,3,5", members [1] [3] [5]   ← holes at 2 and 4
+//! \v 12a …           verse 12..12, label "12a", members [12a]          ← a place inside 12
 //! ```
+//!
+//! Every row carries its designator's LABEL as a span into the source — the
+//! spelling as written, `12b` or `1,3,5`, which the numbers cannot carry — and
+//! every verse row its MEMBERS ([`designator::members`]) as a run in
+//! [`Toc::members`]. Both are positions, never copied text: whoever holds the
+//! Toc holds, or can reach, the text it indexes.
 //!
 //! A pure pass over TOKENS, no CST: `\c` and `\v` plus their designators are
 //! flat facts, so an editor can hold a Toc without ever building a tree. It
@@ -27,16 +36,17 @@ use crate::token::{Token, TokenKind};
 
 /// One chapter's number and the source bytes it covers.
 ///
-/// Byte layout — `#[repr(C)]`, 16 bytes, stride 16 (a JS `DataView` over a
-/// `Vec<ChapterRow>` reads these offsets):
+/// Byte layout — `#[repr(C)]`, 24 bytes, stride 24:
 ///
 /// ```text
-/// 0  u32  start     first byte of the `\c` marker (0 for chapter 0)
-/// 4  u32  end       one past the last byte, exclusive
-/// 8  u32  token     that marker's token index (the raw label's way home);
-///                   u32::MAX for the synthetic front-matter row
-/// 12 u16  number    the designator's number; 0 = absent or malformed
-/// 14      —         2 bytes of trailing padding (14 bytes of content, align 4)
+/// 0  u32  start        first byte of the `\c` marker (0 for chapter 0)
+/// 4  u32  end          one past the last byte, exclusive
+/// 8  u32  token        that marker's token index; u32::MAX for the
+///                      synthetic front-matter row
+/// 12 u32  label_start  the designator as written, minus its folded delimiter
+/// 16 u32  label_end
+/// 20 u16  number       the designator's number; 0 = absent or malformed
+/// 22      —            2 bytes of trailing padding (22 bytes of content, align 4)
 /// ```
 ///
 /// The u32s come first so the only padding is at the END: an interior hole
@@ -47,9 +57,13 @@ pub struct ChapterRow {
     pub start: u32,
     pub end: u32,
     /// The `\c` marker's token index — `u32::MAX` for the front-matter row,
-    /// which no marker opens. What a navigation UI walks to for the raw
-    /// chapter label (`12b`) the `number` cannot carry.
+    /// which no marker opens.
     pub token: u32,
+    /// The designator's LABEL, `label_start..label_end` in the source: the
+    /// spelling (`12b`) the `number` cannot carry. Empty at the marker's end
+    /// when the `\c` owns no designator, and `0..0` on the front-matter row.
+    pub label_start: u32,
+    pub label_end: u32,
     /// The number [`designator::chapter`] read, saturated into u16. `0` for a
     /// `\c` with no designator or a malformed one (`\c 12b`) — degrade, never
     /// repair. Chapter 0 is also the synthetic front-matter row, told apart by
@@ -59,34 +73,73 @@ pub struct ChapterRow {
 
 /// Where one `\v` sits, and which verses it names.
 ///
-/// Byte layout — `#[repr(C)]`, 16 bytes, stride 16:
+/// Byte layout — `#[repr(C)]`, 28 bytes, stride 28:
 ///
 /// ```text
-/// 0  u32  at        first byte of the `\v` marker — where the verse starts
-/// 4  u32  token     that marker's token index (the raw designator's way home)
-/// 8  u16  chapter   the enclosing chapter row's `number`
-/// 10 u16  first     lowest verse the designator names
-/// 12 u16  last      highest — `first == last` unless this is a bridge
-/// 14      —         2 bytes of trailing padding (14 bytes of content, align 4)
+/// 0  u32  at            first byte of the `\v` marker — where the verse starts
+/// 4  u32  token         that marker's token index
+/// 8  u32  label_start   the designator as written, minus its folded delimiter
+/// 12 u32  label_end
+/// 16 u32  members_from  this verse's run in `Toc::members`
+/// 20 u16  chapter       the enclosing chapter row's `number`
+/// 22 u16  first         lowest verse the designator names
+/// 24 u16  last          highest — `first == last` unless this is a bridge
+/// 26 u16  members_len   how many members the run holds; 0 when malformed
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(C)]
 pub struct VerseAnchor {
     pub at: u32,
     pub token: u32,
+    /// The designator's LABEL in the source, as [`ChapterRow::label_start`]:
+    /// `6a`, `1,3,5`, or the malformed `7"`. Empty at the marker's end when
+    /// the `\v` owns no designator.
+    pub label_start: u32,
+    pub label_end: u32,
+    /// `members_from..members_from + members_len` in [`Toc::members`]: what
+    /// the designator COVERS, where `first..=last` is only its hull.
+    pub members_from: u32,
     pub chapter: u16,
     /// `first`/`last` are 0 when the designator is absent or malformed, and the
     /// row still exists: dropping it would let the PREVIOUS verse's extent
     /// silently swallow this verse's text.
     pub first: u16,
     pub last: u16,
+    pub members_len: u16,
+}
+
+/// One thing a `\v` designator covers ([`designator::Member`]), with its
+/// segments placed in the source.
+///
+/// Byte layout — `#[repr(C)]`, 20 bytes, stride 20:
+///
+/// ```text
+/// 0  u32  from_segment_start   the segment after `from` (`a` in `12a`);
+/// 4  u32  from_segment_end     equal to the start when none is written
+/// 8  u32  to_segment_start
+/// 12 u32  to_segment_end
+/// 16 u16  from                 the member's first number
+/// 18 u16  to                   its last; equal to `from` for a single place
+/// ```
+///
+/// A backwards member (`3-1`) is kept as written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(C)]
+pub struct VerseMember {
+    pub from_segment_start: u32,
+    pub from_segment_end: u32,
+    pub to_segment_start: u32,
+    pub to_segment_end: u32,
+    pub from: u16,
+    pub to: u16,
 }
 
 // The layout is internal hygiene, not a versioned wire format — but it is the
 // shape a wasm consumer would read, so the widths are pinned here rather than
 // rediscovered there.
-const _: () = assert!(size_of::<ChapterRow>() == 16);
-const _: () = assert!(size_of::<VerseAnchor>() == 16);
+const _: () = assert!(size_of::<ChapterRow>() == 24);
+const _: () = assert!(size_of::<VerseAnchor>() == 28);
+const _: () = assert!(size_of::<VerseMember>() == 20);
 
 impl ChapterRow {
     pub fn span(&self) -> core::ops::Range<u32> {
@@ -173,6 +226,9 @@ pub struct Toc {
     pub chapters: Vec<ChapterRow>,
     /// One row per `\v`, in source order, therefore sorted by `at`.
     pub verses: Vec<VerseAnchor>,
+    /// Every verse's members, run after run in `verses` order; a row's
+    /// `members_from`/`members_len` name its run.
+    pub members: Vec<VerseMember>,
 }
 
 /// Indexes an already-lexed book: the book code, the chapter table, the verse
@@ -192,9 +248,12 @@ pub fn toc(source: &[u8], tokens: &[Token]) -> Toc {
             start: 0,
             end,
             token: u32::MAX,
+            label_start: 0,
+            label_end: 0,
             number: 0,
         }],
         verses: Vec::new(),
+        members: Vec::new(),
     };
 
     for (row, token) in tokens.iter().enumerate() {
@@ -216,6 +275,7 @@ pub fn toc(source: &[u8], tokens: &[Token]) -> Toc {
                 MarkerKind::Chapter => {
                     let number = number_after(source, tokens, row, designator::chapter)
                         .map_or(0, |(first, _)| first);
+                    let (label_start, label_end) = label_after(source, tokens, row);
                     if let Some(open) = out.chapters.last_mut() {
                         open.end = token.start;
                     }
@@ -223,18 +283,38 @@ pub fn toc(source: &[u8], tokens: &[Token]) -> Toc {
                         start: token.start,
                         end,
                         token: row as u32,
+                        label_start,
+                        label_end,
                         number,
                     });
                 }
                 MarkerKind::Verse => {
                     let (first, last) =
                         number_after(source, tokens, row, designator::verse).unwrap_or((0, 0));
+                    let (label_start, label_end) = label_after(source, tokens, row);
+                    let members_from = out.members.len() as u32;
+                    let label = &source[label_start as usize..label_end as usize];
+                    let place = |at: u32| label_start + at;
+                    out.members
+                        .extend(designator::members(label).map(|m| VerseMember {
+                            from_segment_start: place(m.from.segment_start),
+                            from_segment_end: place(m.from.segment_end),
+                            to_segment_start: place(m.to.segment_start),
+                            to_segment_end: place(m.to.segment_end),
+                            from: narrow(m.from.number),
+                            to: narrow(m.to.number),
+                        }));
                     out.verses.push(VerseAnchor {
                         at: token.start,
                         token: row as u32,
+                        label_start,
+                        label_end,
+                        members_from,
                         chapter: out.chapters.last().map_or(0, |c| c.number),
                         first,
                         last,
+                        members_len: (out.members.len() as u32 - members_from)
+                            .min(u32::from(u16::MAX)) as u16,
                     });
                 }
                 _ => {}
@@ -286,6 +366,12 @@ impl Toc {
         (anchor.at >= chapter.start).then_some(anchor)
     }
 
+    /// What a verse row's designator covers, in written order.
+    pub fn members_of(&self, verse: &VerseAnchor) -> &[VerseMember] {
+        let from = verse.members_from as usize;
+        &self.members[from..from + usize::from(verse.members_len)]
+    }
+
     /// Index into `chapters` of the row covering `src_byte`. Row 0 starts at
     /// byte 0, so the search always lands on a row.
     fn chapter_row(&self, src_byte: u32) -> usize {
@@ -327,6 +413,23 @@ fn label_span(source: &[u8], tokens: &[Token], marker_row: usize) -> Option<(u32
     Some((token.start, designator::label(span).len() as u16))
 }
 
+/// [`label_span`] as the row stores it: `start..end`, or an empty span at the
+/// marker's end when the marker owns no designator.
+fn label_after(source: &[u8], tokens: &[Token], marker_row: usize) -> (u32, u32) {
+    match label_span(source, tokens, marker_row) {
+        Some((start, len)) => (start, start + u32::from(len)),
+        None => {
+            let end = tokens[marker_row].end();
+            (end, end)
+        }
+    }
+}
+
+/// Numbers SATURATE into u16, as the rows' own do.
+fn narrow(n: u32) -> u16 {
+    n.min(u32::from(u16::MAX)) as u16
+}
+
 /// `read`'s verdict on the designator after `marker_row`, as u16s. `None` for
 /// no designator or a malformed one — the caller degrades both to 0.
 ///
@@ -341,7 +444,6 @@ fn number_after(
     let token = tokens[designator_row(tokens, marker_row)?];
     let span = &source[token.start as usize..token.end() as usize];
     let (first, last) = read(span).range()?;
-    let narrow = |n: u32| n.min(u16::MAX as u32) as u16;
     Some((narrow(first), narrow(last)))
 }
 
@@ -569,7 +671,104 @@ mod tests {
 
     #[test]
     fn rows_are_fixed_width() {
-        assert_eq!(size_of::<ChapterRow>(), 16);
-        assert_eq!(size_of::<VerseAnchor>(), 16);
+        assert_eq!(size_of::<ChapterRow>(), 24);
+        assert_eq!(size_of::<VerseAnchor>(), 28);
+        assert_eq!(size_of::<VerseMember>(), 20);
+    }
+
+    fn text(source: &str, start: u32, end: u32) -> &str {
+        &source[start as usize..end as usize]
+    }
+
+    /// Each verse as `(label, members)`, a member drawn `from-to` with its
+    /// segments, the way a reader would render the row.
+    fn verses_as_written(source: &str) -> Vec<(String, Vec<String>)> {
+        let toc = built(source);
+        toc.verses
+            .iter()
+            .map(|v| {
+                let members = toc
+                    .members_of(v)
+                    .iter()
+                    .map(|m| {
+                        let from = format!(
+                            "{}{}",
+                            m.from,
+                            text(source, m.from_segment_start, m.from_segment_end)
+                        );
+                        let to = format!(
+                            "{}{}",
+                            m.to,
+                            text(source, m.to_segment_start, m.to_segment_end)
+                        );
+                        if from == to {
+                            from
+                        } else {
+                            format!("{from}-{to}")
+                        }
+                    })
+                    .collect();
+                (
+                    text(source, v.label_start, v.label_end).to_string(),
+                    members,
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_verse_row_carries_its_label_and_what_it_covers() {
+        let source = "\\c 1\n\\p \\v 1,3,5 a \\v 2 b \\v 12a-14b c \\v 7\" d \\v e\n";
+        let owned = |label: &str, members: &[&str]| {
+            (
+                label.to_string(),
+                members.iter().map(|m| m.to_string()).collect::<Vec<_>>(),
+            )
+        };
+        assert_eq!(
+            verses_as_written(source),
+            vec![
+                owned("1,3,5", &["1", "3", "5"]),
+                owned("2", &["2"]),
+                owned("12a-14b", &["12a-14b"]),
+                // Malformed: the spelling survives, it covers nothing.
+                owned("7\"", &[]),
+                // No designator: an empty label, no members.
+                owned("", &[]),
+            ]
+        );
+        // The hull is unchanged: a list still spans its holes.
+        let toc = built(source);
+        assert_eq!((toc.verses[0].first, toc.verses[0].last), (1, 5));
+    }
+
+    #[test]
+    fn a_chapter_row_carries_its_label_even_when_the_number_is_malformed() {
+        let source = "\\c 12b\n\\p a\n\\c 3\n";
+        let toc = built(source);
+        let labels: Vec<_> = toc
+            .chapters
+            .iter()
+            .map(|c| (c.number, text(source, c.label_start, c.label_end)))
+            .collect();
+        assert_eq!(labels, vec![(0, ""), (0, "12b"), (3, "3")]);
+    }
+
+    #[test]
+    fn lists_and_segments_leave_the_chapter_rows_tiling() {
+        let source = "\\id GEN\n\\c 1\n\\p \\v 1,3 a \\v 2a b \\v 2b c\n\\c 2\n\\p \\v 1-2,4 d\n";
+        let toc = built(source);
+        assert_eq!(toc.chapters.first().unwrap().start, 0);
+        assert_eq!(toc.chapters.last().unwrap().end, source.len() as u32);
+        for pair in toc.chapters.windows(2) {
+            assert_eq!(pair[0].end, pair[1].start);
+        }
+        // Every member run is inside the arena and in verse order.
+        let mut next = 0;
+        for verse in &toc.verses {
+            assert_eq!(verse.members_from, next);
+            next += u32::from(verse.members_len);
+        }
+        assert_eq!(next as usize, toc.members.len());
     }
 }

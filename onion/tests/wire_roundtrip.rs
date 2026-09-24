@@ -403,3 +403,41 @@ fn the_designator_crosses() {
         );
     }
 }
+
+/// A verse row names its run in the member section, and the label and every
+/// segment are spans a UTF-16 slice of the source reads back as written.
+#[test]
+fn labels_and_members_cross_in_utf16() {
+    const TEXT: &str = "\\c 1\n\\p Ἐν \\v 1,3 α \\v 2α β \\v 2β γ\n";
+    let d = dish(
+        TEXT,
+        ParseOptions {
+            toc: true,
+            utf16: true,
+            ..Default::default()
+        },
+    );
+    let (verses, members) = (8, 9);
+    let units: Vec<u16> = TEXT.encode_utf16().collect();
+    let slice =
+        |from: u32, to: u32| String::from_utf16(&units[from as usize..to as usize]).unwrap();
+
+    let mut labels = Vec::new();
+    let mut covered = Vec::new();
+    for row in 0..d.rows(verses, &schema::VERSE) {
+        let field = |name| d.field(verses, &schema::VERSE, row, name);
+        labels.push(slice(field("labelStart"), field("labelEnd")));
+        let from = field("membersFrom");
+        for m in from..from + field("membersLen") {
+            let member = |name| d.field(members, &schema::MEMBER, m as usize, name);
+            covered.push(format!(
+                "{}{}",
+                member("from"),
+                slice(member("fromSegmentStart"), member("fromSegmentEnd"))
+            ));
+        }
+    }
+    assert_eq!(labels, ["1,3", "2α", "2β"]);
+    // `1,3` is two places, not three: the hole at 2 is filled by `2α` and `2β`.
+    assert_eq!(covered, ["1", "3", "2α", "2β"]);
+}

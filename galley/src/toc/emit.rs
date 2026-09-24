@@ -55,6 +55,10 @@ pub fn reader_ts() -> String {
                 word(schema::HEADER_VERSE_STRIDE_OFFSET),
             ),
             (
+                "@@HEADER_MEMBER_STRIDE_OFFSET@@",
+                word(schema::HEADER_MEMBER_STRIDE_OFFSET),
+            ),
+            (
                 "@@HEADER_DIRECTORY_AT_OFFSET@@",
                 word(schema::HEADER_DIRECTORY_AT_OFFSET),
             ),
@@ -90,8 +94,17 @@ pub fn reader_ts() -> String {
                 "@@DIRECTORY_ID_LEN_OFFSET@@",
                 word(schema::DIRECTORY_ID_LEN_OFFSET),
             ),
+            (
+                "@@DIRECTORY_MEMBERS_AT_OFFSET@@",
+                word(schema::DIRECTORY_MEMBERS_AT_OFFSET),
+            ),
+            (
+                "@@DIRECTORY_MEMBER_ROWS_OFFSET@@",
+                word(schema::DIRECTORY_MEMBER_ROWS_OFFSET),
+            ),
             ("@@CHAPTER_STRIDE@@", word(schema::CHAPTER.stride())),
             ("@@VERSE_STRIDE@@", word(schema::VERSE.stride())),
+            ("@@MEMBER_STRIDE@@", word(schema::MEMBER.stride())),
             (
                 "@@ROWS@@",
                 row_classes_ts(schema::RECORDS).trim_end().to_string(),

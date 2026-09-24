@@ -1,6 +1,94 @@
 /* tslint:disable */
 /* eslint-disable */
 
+/** Which registered books a project-wide door reads. Default `"targets"`. */
+export type Scope = "targets" | "references" | "all";
+
+/** `new Galley(opts)`. */
+export interface GalleyOptions {
+    /** Bounds resident products, in bytes; default 16 MB. */
+    budgetBytes?: number;
+}
+
+/** `updateReference(id, text, opts)`. */
+export interface ReferenceOptions {
+    /** Keep the text and projection a target keeps, so `find` and `mask` can read it. */
+    keepText?: boolean;
+}
+
+/** `find` and `findAll`. */
+export interface FindOptions {
+    caseSensitive?: boolean;
+    wholeWord?: boolean;
+    /** Bounds hits across the whole call; 0, the default, means no bound. */
+    limit?: number;
+    /** `findAll` only; present on `find` it throws. */
+    scope?: Scope;
+}
+
+/** `mask` and `maskOf`. */
+export interface MaskOptions {
+    recipe?: "verseText" | "structure" | "text";
+    utf16?: boolean;
+}
+
+/** `toc(id, opts)`. */
+export interface TocOptions {
+    /** Rebase every offset through the book's own UTF-16 table; default bytes. */
+    utf16?: boolean;
+}
+
+/** `tocAll(opts)`. */
+export interface CensusOptions {
+    scope?: Scope;
+    utf16?: boolean;
+}
+
+/** `overlay`, `overlayText`, `overlayReport`, `skeleton`, and the node doors. */
+export interface OverlayOptions {
+    /** Default: onion's paragraph and poetry block set, no titles. */
+    markers?: string[];
+    /** Default: the whole book. */
+    scope?: { chapter: number } | { sid: string };
+    /** Offsets as UTF-16 code units; default bytes. */
+    utf16?: boolean;
+}
+
+/** One block's address on one side — a skeleton row names its own. */
+export interface BlockAddress {
+    sid: string;
+    where: "leading" | "inside";
+    ordinal: number;
+    /** The spelling the position held; checked, so a stale address throws. */
+    marker: string;
+}
+
+
+
+/** `parse`'s options, and `Galley.parse`/`parseText`'s. Every key defaults to false. */
+export interface ParseOptions {
+    /** Run the lint walk. The one expensive optional. */
+    diagnostics?: boolean;
+    /** Build the chapter and verse index. Cheap, and needs no tree. */
+    toc?: boolean;
+    /** Emit every offset as a UTF-16 code unit instead of a byte. */
+    utf16?: boolean;
+}
+
+/** `attrs`'s options. */
+export interface AttrsOptions {
+    /** `from`/`to` and every word returned are UTF-16 code units; default bytes. */
+    utf16?: boolean;
+}
+
+/** `setExtensions`'s options. */
+export interface ExtensionOptions {
+    /** Admit a legacy name without the `z` that the spec does not define. */
+    relaxZPrefix?: boolean;
+}
+
+
+
 /**
  * One transaction of proposed splices: `[from, to]` pairs, one concatenated
  * ASCII insert blob, one length per edit.
@@ -164,7 +252,7 @@ export class Galley {
      * a reference registered with `keepText`. One that retains neither errors
      * by name, because answering "no hits" would say it was clean.
      */
-    find(id: string, needle: string, opts: any): Uint8Array;
+    find(id: string, needle: string, opts?: FindOptions): Uint8Array;
     /**
      * The same over every searchable book in `opts.scope`, in canonical book
      * order — the project-wide find. See [`find`](Self::find) for
@@ -179,7 +267,7 @@ export class Galley {
      * book searched whether or not it matched, so a consumer never has to ask
      * a second question to learn which book a hit is in.
      */
-    findAll(needle: string, opts: any): Uint8Array;
+    findAll(needle: string, opts?: FindOptions): Uint8Array;
     /**
      * Chunk starts plus one checksum each, and no text — the ~1 KB baseline
      * user land keeps beside a file on disk.
@@ -245,21 +333,21 @@ export class Galley {
      * Read it with `usfm-galley/mask-reader`. The layout is generated from the
      * same declaration the writer is, so no consumer learns one.
      */
-    mask(id: string, opts: any): Uint8Array;
+    mask(id: string, opts?: MaskOptions): Uint8Array;
     /**
      * [`mask`](Self::mask) over text the host holds and has not registered,
      * with the same options. Over a registered book's exact text the two
      * doors answer the same buffer.
      */
-    maskOf(text: string, opts: any): Uint8Array;
+    maskOf(text: string, opts?: MaskOptions): Uint8Array;
     /**
      * Chunk units computed rather than reused, cumulative.
      */
     misses(): number;
     /**
-     * `budgetBytes` bounds resident products; omit it for 16 MB.
+     * `{ budgetBytes? }` bounds resident products; omit it for 16 MB.
      */
-    constructor(budget_bytes?: number | null);
+    constructor(opts?: GalleyOptions);
     /**
      * The edits that make `targetId`'s skeleton `sourceId`'s, exactly.
      *
@@ -284,7 +372,7 @@ export class Galley {
      * overlay exactly as it applies a fix. Its spans are BYTES here unless
      * `utf16` asks otherwise; `formatEdits`'s are always UTF-16.
      */
-    overlay(target_id: string, source_id: string, opts: any): Edits;
+    overlay(target_id: string, source_id: string, opts?: OverlayOptions): Edits;
     /**
      * What the overlay did, and what it declined to do, as JSON.
      *
@@ -301,13 +389,13 @@ export class Galley {
      *
      * An overlay is a SUGGESTION applied on request, never a finding.
      */
-    overlayReport(target_id: string, source_id: string, opts: any): string;
+    overlayReport(target_id: string, source_id: string, opts?: OverlayOptions): string;
     /**
      * The same transaction applied — the target's own bytes under the
      * source's structure. [`overlay`](Self::overlay) is what an editor wants;
      * this is for a caller that only needs the string.
      */
-    overlayText(target_id: string, source_id: string, opts: any): string;
+    overlayText(target_id: string, source_id: string, opts?: OverlayOptions): string;
     /**
      * One registered book, plated — the same buffer `onion_wasm::parse`
      * returns for that text, with the lex, the tree and the lint walk reused
@@ -317,7 +405,7 @@ export class Galley {
      * nothing here is a new rendering, only a cheaper route to the same
      * bytes. A book that retains no text refuses.
      */
-    parse(id: string, diagnostics: boolean, toc: boolean, utf16: boolean): Uint8Array;
+    parse(id: string, opts?: ParseOptions): Uint8Array;
     /**
      * [`parse`](Self::parse) over text the host holds and has not registered
      * — a preview pane, a file not yet in the project.
@@ -326,7 +414,7 @@ export class Galley {
      * registered book still hits; what it costs over the id door is the
      * string crossing the wall.
      */
-    parseText(text: string, diagnostics: boolean, toc: boolean, utf16: boolean): Uint8Array;
+    parseText(text: string, opts?: ParseOptions): Uint8Array;
     /**
      * One complete corpus publication over every target, in canonical book
      * order, in raw-book UTF-16 — the buffer `FindingsSnapshot.open` reads.
@@ -369,20 +457,20 @@ export class Galley {
      * }
      * ```
      *
-     * `opts` is an [`OverlayOptions`](Self::overlay) — only `markers` is read
-     * here — and `utf16` asks for UTF-16 offsets instead of bytes. A block is
+     * `opts` is an [`OverlayOptions`](Self::overlay) — only `markers` and
+     * `utf16` are read here. A block is
      * LEADING when it sits immediately before its verse's `\v`, INSIDE when
      * the verse's own text is above it; ordinals count from one per address.
      * Both lists are in document order. A block ends where its paragraph
      * closes — a heading or `\c` the marker set leaves out still ends it — so
      * the next row's `from` is not its end.
      */
-    skeleton(id: string, opts: any, utf16?: boolean | null): string;
+    skeleton(id: string, opts?: OverlayOptions): string;
     /**
      * A TARGET block's address, answered in the source — the mirror of
      * [`targetNodeFor`](Self::target_node_for), and the same three answers.
      */
-    sourceNodeFor(target_id: string, source_id: string, address: any, opts: any, utf16?: boolean | null): string;
+    sourceNodeFor(target_id: string, source_id: string, address: BlockAddress, opts?: OverlayOptions): string;
     /**
      * The structure recipe's text, the verse-text mask's sibling. No book
      * retains a structure projection, so this door takes text only.
@@ -405,19 +493,19 @@ export class Galley {
      * — the address is stale") rather than answering about another node. The
      * position is still the key; the name is only the check.
      */
-    targetNodeFor(target_id: string, source_id: string, address: any, opts: any, utf16?: boolean | null): string;
+    targetNodeFor(target_id: string, source_id: string, address: BlockAddress, opts?: OverlayOptions): string;
     /**
      * One registered book's census — its chapter rows and verse anchors, off
      * the `Toc` that `update` built and the Pantry pins.
      *
      * Nothing is derived here: no chunk is resolved, no text is read, no wire
-     * is plated. `utf16` rebases every offset through the book's own retained
-     * table; the default is bytes.
+     * is plated. `{ utf16 }` rebases every offset through the book's own
+     * retained table; the default is bytes.
      *
      * Read it with `usfm-galley/toc-reader`. The layout is generated from the
      * same declaration the writer is, so no consumer learns one.
      */
-    toc(id: string, utf16?: boolean | null): Uint8Array;
+    toc(id: string, opts?: TocOptions): Uint8Array;
     /**
      * The same over every registered book in `scope`, in canonical book order
      * — the project-wide census, and the call that takes one parse per book
@@ -428,7 +516,7 @@ export class Galley {
      * answer is `utf16`, because the table that rebases offsets travels with
      * the text.
      */
-    tocAll(scope?: string | null, utf16?: boolean | null): Uint8Array;
+    tocAll(opts?: CensusOptions): Uint8Array;
     /**
      * Register or replace one whole book under the caller's `id`, as a
      * target: it keeps its text, and it publishes findings.
@@ -446,13 +534,13 @@ export class Galley {
      * A reference publishes no findings of its own; it is the denominator
      * the length lane compares a target's verses against.
      *
-     * `keepText` — omitted is `false` — makes it keep the text and the
+     * `{ keepText }` — omitted is `false` — makes it keep the text and the
      * projection a target keeps too, which is what [`find`](Self::find) and
      * `findAll`'s `"references"` scope read. It costs what a target costs
      * minus the resident analysis; a source nobody searches should stay off
      * it.
      */
-    updateReference(id: string, text: string, keep_text?: boolean | null): string;
+    updateReference(id: string, text: string, opts?: ReferenceOptions): string;
     /**
      * One registered book's verse text, off the projection it already
      * retains — no mask is cut and no text crosses in.
@@ -537,9 +625,9 @@ export function attrResolve(name: string, marker: number): number;
 /**
  * The k/v view of one `AttrList` token, flat.
  *
- * `[from, to)` is the list token's span in the CALLER's space — UTF-16 when
- * `utf16` is non-zero, bytes otherwise, as `locate` reads it — and every word
- * comes back in that same space.
+ * `[from, to)` is the list token's span in the CALLER's space — UTF-16 under
+ * `{ utf16: true }`, bytes otherwise — and every word comes back in that same
+ * space.
  *
  * ```text
  * |lemma="grace" x-y="z"   ->  [nameFrom nameTo valueFrom valueTo] x 2, NONE, NONE
@@ -551,7 +639,7 @@ export function attrResolve(name: string, marker: number): number;
  * offset, both `NONE` when the list parsed clean. A malformed tail is always
  * the last event, so it can only be the last pair of words.
  */
-export function attrs(text: string, from: number, to: number, utf16: number): Uint32Array;
+export function attrs(text: string, from: number, to: number, opts?: AttrsOptions): Uint32Array;
 
 /**
  * The first `\id`'s book code — `"GEN"`. EMPTY when the document declares
@@ -656,19 +744,27 @@ export function mergeSplices(baseline: string, current: string, decisions_json: 
 /**
  * THE read call. One document in, one buffer out.
  *
+ * ```ts
+ * interface ParseOptions {
+ *   diagnostics?: boolean;   // run the lint walk; default false
+ *   toc?: boolean;           // build the chapter and verse index; default false
+ *   utf16?: boolean;         // every offset as a UTF-16 code unit; default bytes
+ * }
+ * parse(text: string, opts?: ParseOptions): Uint8Array;
+ * ```
+ *
  * The buffer is a plated parse — tokens, the tree, and whatever `opts` asked
  * for besides — read by `reader.ts`, which is generated from the same schema
  * as the writer. Nothing is retained wasm-side: the `Uint8Array` is JS's, the
  * collector reclaims it, and there is no `free`.
  *
- * The three booleans are positional because an object crossing the wall would
- * be `Reflect::get` per key with a misspelling silently reading as `false`.
- * `reader.ts` wraps this as `parse(text, { diagnostics, toc, utf16 })`, where
- * a misspelled key is a compile error instead.
+ * A misspelled key is a compile error through the declared `ParseOptions`,
+ * and a THROW at the wall for a caller the compiler never saw: an unknown key
+ * is refused by name rather than read as `false` ([`options`]).
  *
  * `text` must be LF-normalized (see the module doc); a debug build asserts it.
  */
-export function parse(text: string, diagnostics: boolean, toc: boolean, utf16: boolean): Uint8Array;
+export function parse(text: string, opts?: ParseOptions): Uint8Array;
 
 /**
  * Installs a list of user markers process-wide, and returns what it could not
@@ -704,7 +800,7 @@ export function parse(text: string, diagnostics: boolean, toc: boolean, utf16: b
  * `z`-initial, an unknown category word, a duplicate — is a report, not a
  * failure, so one bad line never costs a host the rest of its list.
  */
-export function setExtensions(list: string, opts?: { relaxZPrefix?: boolean }): string;
+export function setExtensions(list: string, opts?: ExtensionOptions): string;
 
 /**
  * A CodeMirror offset as a source byte offset. Rebuilds the 1.6% stride index
@@ -796,8 +892,8 @@ export interface InitOutput {
     readonly galley_changedSinceUpdate: (a: number, b: number, c: number, d: number, e: number) => [number, number];
     readonly galley_config: (a: number) => number;
     readonly galley_entryCount: (a: number) => number;
-    readonly galley_find: (a: number, b: number, c: number, d: number, e: number, f: any) => [number, number, number, number];
-    readonly galley_findAll: (a: number, b: number, c: number, d: any) => [number, number, number, number];
+    readonly galley_find: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+    readonly galley_findAll: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly galley_fingerprint: (a: number, b: number, c: number) => number;
     readonly galley_lastLocated: (a: number) => number;
     readonly galley_lastMapped: (a: number) => number;
@@ -805,25 +901,25 @@ export interface InitOutput {
     readonly galley_lastRemapped: (a: number) => number;
     readonly galley_lastWordlessReferences: (a: number) => number;
     readonly galley_lint: (a: number, b: number, c: number) => [number, number, number, number];
-    readonly galley_mask: (a: number, b: number, c: number, d: any) => [number, number, number, number];
-    readonly galley_maskOf: (a: number, b: number, c: number, d: any) => [number, number, number, number];
+    readonly galley_mask: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+    readonly galley_maskOf: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly galley_misses: (a: number) => number;
-    readonly galley_new: (a: number, b: number) => number;
-    readonly galley_overlay: (a: number, b: number, c: number, d: number, e: number, f: any) => [number, number, number];
-    readonly galley_overlayReport: (a: number, b: number, c: number, d: number, e: number, f: any) => [number, number, number, number];
-    readonly galley_overlayText: (a: number, b: number, c: number, d: number, e: number, f: any) => [number, number, number, number];
-    readonly galley_parse: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
-    readonly galley_parseText: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
+    readonly galley_new: (a: number) => [number, number, number];
+    readonly galley_overlay: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
+    readonly galley_overlayReport: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+    readonly galley_overlayText: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+    readonly galley_parse: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+    readonly galley_parseText: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly galley_publish: (a: number) => [number, number, number, number];
     readonly galley_remove: (a: number, b: number, c: number) => number;
     readonly galley_residentBytes: (a: number) => number;
     readonly galley_setConfig: (a: number, b: number) => void;
-    readonly galley_skeleton: (a: number, b: number, c: number, d: any, e: number) => [number, number, number, number];
-    readonly galley_sourceNodeFor: (a: number, b: number, c: number, d: number, e: number, f: any, g: any, h: number) => [number, number, number, number];
+    readonly galley_skeleton: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+    readonly galley_sourceNodeFor: (a: number, b: number, c: number, d: number, e: number, f: any, g: number) => [number, number, number, number];
     readonly galley_structureTextOf: (a: number, b: number, c: number) => [number, number];
-    readonly galley_targetNodeFor: (a: number, b: number, c: number, d: number, e: number, f: any, g: any, h: number) => [number, number, number, number];
+    readonly galley_targetNodeFor: (a: number, b: number, c: number, d: number, e: number, f: any, g: number) => [number, number, number, number];
     readonly galley_toc: (a: number, b: number, c: number, d: number) => [number, number, number, number];
-    readonly galley_tocAll: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+    readonly galley_tocAll: (a: number, b: number) => [number, number, number, number];
     readonly galley_update: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
     readonly galley_updateReference: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly galley_verseText: (a: number, b: number, c: number) => [number, number, number, number];
@@ -856,7 +952,7 @@ export interface InitOutput {
     readonly __wbg_set_formatopts_verse_breaks: (a: number, b: number) => void;
     readonly __wbg_splices_free: (a: number, b: number) => void;
     readonly attrResolve: (a: number, b: number, c: number) => number;
-    readonly attrs: (a: number, b: number, c: number, d: number, e: number) => [number, number];
+    readonly attrs: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
     readonly book: (a: number, b: number) => [number, number];
     readonly diff: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly edits_lens: (a: number) => [number, number];
@@ -873,7 +969,7 @@ export interface InitOutput {
     readonly mask: (a: number, b: number, c: number, d: number) => any;
     readonly merge: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number, number];
     readonly mergeSplices: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number];
-    readonly parse: (a: number, b: number, c: number, d: number, e: number) => [number, number];
+    readonly parse: (a: number, b: number, c: number) => [number, number, number, number];
     readonly setExtensions: (a: number, b: number, c: number) => [number, number, number, number];
     readonly splices_inserts: (a: number) => [number, number];
     readonly splices_spans: (a: number) => [number, number];
@@ -886,8 +982,8 @@ export interface InitOutput {
     readonly __wbindgen_exn_store: (a: number) => void;
     readonly __externref_table_alloc: () => number;
     readonly __wbindgen_externrefs: WebAssembly.Table;
-    readonly __wbindgen_free: (a: number, b: number, c: number) => void;
     readonly __externref_table_dealloc: (a: number) => void;
+    readonly __wbindgen_free: (a: number, b: number, c: number) => void;
     readonly __wbindgen_start: () => void;
 }
 

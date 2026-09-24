@@ -320,6 +320,21 @@ pub const CHAPTER: Record = Record {
                   this is the only route from a chapter to its designator.",
         },
         Field {
+            name: "labelStart",
+            width: U32,
+            space: Offset,
+            rust: "c.label_start",
+            doc: "The designator as written (`12b`), minus its folded delimiter. \
+                  Empty at the marker's end when there is none; 0..0 on row 0.",
+        },
+        Field {
+            name: "labelEnd",
+            width: U32,
+            space: Offset,
+            rust: "c.label_end",
+            doc: "Where the label ends.",
+        },
+        Field {
             name: "number",
             width: U16,
             space: Plain,
@@ -362,6 +377,35 @@ pub const VERSE: Record = Record {
                   this is the only route from a verse to its designator.",
         },
         Field {
+            name: "labelStart",
+            width: U32,
+            space: Offset,
+            rust: "v.label_start",
+            doc: "The designator as written (`6a`, `1,3,5`), minus its folded \
+                  delimiter. Empty at the marker's end when there is none.",
+        },
+        Field {
+            name: "labelEnd",
+            width: U32,
+            space: Offset,
+            rust: "v.label_end",
+            doc: "Where the label ends.",
+        },
+        Field {
+            name: "membersFrom",
+            width: U32,
+            space: Plain,
+            rust: "v.members_from",
+            doc: "This verse's first row in the member arena.",
+        },
+        Field {
+            name: "membersLen",
+            width: U16,
+            space: Plain,
+            rust: "v.members_len",
+            doc: "How many members it covers; 0 when the designator is absent or malformed.",
+        },
+        Field {
             name: "chapter",
             width: U16,
             space: Plain,
@@ -385,8 +429,73 @@ pub const VERSE: Record = Record {
     ],
 };
 
+/// One thing a `\v` designator covers: `\v 1,3,5` is three, `\v 12a-14b` one.
+pub const MEMBER: Record = Record {
+    name: "Member",
+    plural: "members",
+    rust_ty: "Member",
+    binding: "m",
+    context: &[],
+    doc: "One member of a verse designator: a place, or a range joined by `-`. \
+          `first..last` on the verse is only the hull; these are what it covers.",
+    tail: None,
+    fields: &[
+        Field {
+            name: "from",
+            width: U16,
+            space: Plain,
+            rust: "m.from",
+            doc: "The member's first number.",
+        },
+        Field {
+            name: "fromSegmentStart",
+            width: U32,
+            space: Offset,
+            rust: "m.from_segment_start",
+            doc: "The segment written after it (`a` in `12a`); empty when none.",
+        },
+        Field {
+            name: "fromSegmentEnd",
+            width: U32,
+            space: Offset,
+            rust: "m.from_segment_end",
+            doc: "Where that segment ends.",
+        },
+        Field {
+            name: "to",
+            width: U16,
+            space: Plain,
+            rust: "m.to",
+            doc: "Its last number; equal to `from` for a single place. Kept as written.",
+        },
+        Field {
+            name: "toSegmentStart",
+            width: U32,
+            space: Offset,
+            rust: "m.to_segment_start",
+            doc: "The segment after the last number; empty when none.",
+        },
+        Field {
+            name: "toSegmentEnd",
+            width: U32,
+            space: Offset,
+            rust: "m.to_segment_end",
+            doc: "Where that segment ends.",
+        },
+    ],
+};
+
 /// Every ROW record, for codegen. Section order is [`SECTIONS`], not this.
-pub const RECORDS: &[&Record] = &[&TOKEN, &NODE, &DIAGNOSTIC, &FIX, &EDIT, &CHAPTER, &VERSE];
+pub const RECORDS: &[&Record] = &[
+    &TOKEN,
+    &NODE,
+    &DIAGNOSTIC,
+    &FIX,
+    &EDIT,
+    &CHAPTER,
+    &VERSE,
+    &MEMBER,
+];
 
 /// What backs a section.
 pub enum SectionKind {
@@ -453,11 +562,17 @@ pub const SECTIONS: &[Section] = &[
         kind: SectionKind::Rows(&VERSE),
         doc: "The verse anchors. Empty unless asked for.",
     },
+    Section {
+        name: "members",
+        kind: SectionKind::Rows(&MEMBER),
+        doc: "What every verse designator covers, run after run; a verse's \
+              `membersFrom`/`membersLen` name its run. Empty unless asked for.",
+    },
 ];
 
 /// Bumped whenever [`SECTIONS`] or any [`Record`] changes shape. A reader
 /// refuses a dish it does not recognise rather than misreading one.
-pub const FORMAT_VERSION: u32 = 4;
+pub const FORMAT_VERSION: u32 = 5;
 
 /// `"ONWR"`, little-endian — the dish's first four bytes.
 pub const MAGIC: u32 = u32::from_le_bytes(*b"ONWR");

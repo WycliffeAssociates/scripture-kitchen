@@ -920,6 +920,7 @@ fn book_bytes(
     });
     toc.chapters.capacity() * size_of::<onion::ChapterRow>()
         + toc.verses.capacity() * size_of::<onion::VerseAnchor>()
+        + toc.members.capacity() * size_of::<onion::VerseMember>()
         + projected
         + lengths.map_or(0, size_of_val)
         + words.map_or(0, SourceWords::resident_bytes)

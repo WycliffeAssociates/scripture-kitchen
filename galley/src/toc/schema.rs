@@ -23,25 +23,26 @@ pub const MAGIC: u32 = u32::from_le_bytes(*b"TOCS");
 
 /// Bumped when this envelope's or either record's shape changes. A reader that
 /// does not know this number stops rather than misreading a field.
-pub const FORMAT_VERSION: u32 = 1;
+pub const FORMAT_VERSION: u32 = 2;
 
 /// Header `flags`: every offset in the buffer is UTF-16 rather than a byte.
 pub const FLAG_UTF16: u32 = 1 << 0;
 
 /// The header, then the directory, then each book's rows, then the ids.
-pub const HEADER_BYTES: usize = 28;
+pub const HEADER_BYTES: usize = 32;
 pub const HEADER_MAGIC_OFFSET: usize = 0;
 pub const HEADER_VERSION_OFFSET: usize = 4;
 pub const HEADER_FLAGS_OFFSET: usize = 8;
 pub const HEADER_BOOK_COUNT_OFFSET: usize = 12;
 pub const HEADER_CHAPTER_STRIDE_OFFSET: usize = 16;
 pub const HEADER_VERSE_STRIDE_OFFSET: usize = 20;
+pub const HEADER_MEMBER_STRIDE_OFFSET: usize = 24;
 /// Where the directory starts. Written rather than assumed, so a later header
 /// may grow without moving the one read every consumer begins with.
-pub const HEADER_DIRECTORY_AT_OFFSET: usize = 24;
+pub const HEADER_DIRECTORY_AT_OFFSET: usize = 28;
 
-/// One book's entry: where its two row blocks are, and how many rows each has.
-pub const DIRECTORY_ENTRY_BYTES: usize = 28;
+/// One book's entry: where its three row blocks are, and how many rows each has.
+pub const DIRECTORY_ENTRY_BYTES: usize = 36;
 /// The book code's three bytes, then a NUL — the same shape the Sous
 /// directory uses, so a reader reads a code the one way it already knows.
 pub const DIRECTORY_CODE_OFFSET: usize = 0;
@@ -52,6 +53,8 @@ pub const DIRECTORY_VERSES_AT_OFFSET: usize = 12;
 pub const DIRECTORY_VERSE_ROWS_OFFSET: usize = 16;
 pub const DIRECTORY_ID_AT_OFFSET: usize = 20;
 pub const DIRECTORY_ID_LEN_OFFSET: usize = 24;
+pub const DIRECTORY_MEMBERS_AT_OFFSET: usize = 28;
+pub const DIRECTORY_MEMBER_ROWS_OFFSET: usize = 32;
 
 /// Every block starts on a 4-byte boundary, so a reader may take a typed-array
 /// view over one book's rows without copying them out first.
@@ -60,9 +63,10 @@ pub const SECTION_ALIGNMENT: usize = 4;
 /// What the retained `Toc` knows about one chapter, and nothing else.
 ///
 /// No `token` and no `designator`: those index the TOKEN STREAM, which is the
-/// rebuildable tier and not resident. A consumer that needs a chapter's raw
-/// label (`\c 12b`, which `number` cannot carry) needs the tokens, and that
-/// means a parse — see `galley/src/toc.md`.
+/// rebuildable tier and not resident. The designator's LABEL is here instead,
+/// as a span into the book's text — the Toc keeps the position, not the
+/// tokens — so `\c 12b` reads as written without a parse. See
+/// `galley/src/toc.md`.
 pub const CHAPTER: Record = Record {
     name: "Chapter",
     plural: "chapters",
@@ -92,6 +96,21 @@ pub const CHAPTER: Record = Record {
             space: Plain,
             rust: "c.number",
             doc: "The number read, or 0 — absent, malformed, or row 0's front matter.",
+        },
+        Field {
+            name: "labelStart",
+            width: U32,
+            space: Offset,
+            rust: "c.label_start",
+            doc: "The designator as written (`12b`). Empty at the marker's end \
+                  when there is none; 0..0 on the front-matter row.",
+        },
+        Field {
+            name: "labelEnd",
+            width: U32,
+            space: Offset,
+            rust: "c.label_end",
+            doc: "Where the label ends.",
         },
         Field {
             name: "anchors",
@@ -149,10 +168,95 @@ pub const VERSE: Record = Record {
             width: U16,
             space: Plain,
             rust: "v.last",
-            doc: "Highest named — equal to `first` unless this is a bridge.",
+            doc: "Highest named — equal to `first` unless this is a bridge or a list. \
+                  `first..last` is the HULL; the members are what it covers.",
+        },
+        Field {
+            name: "labelStart",
+            width: U32,
+            space: Offset,
+            rust: "v.label_start",
+            doc: "The designator as written (`6a`, `1,3,5`). Empty at the marker's \
+                  end when there is none.",
+        },
+        Field {
+            name: "labelEnd",
+            width: U32,
+            space: Offset,
+            rust: "v.label_end",
+            doc: "Where the label ends.",
+        },
+        Field {
+            name: "membersFrom",
+            width: U32,
+            space: Plain,
+            rust: "v.members_from",
+            doc: "This verse's first row in the book's member block.",
+        },
+        Field {
+            name: "membersLen",
+            width: U16,
+            space: Plain,
+            rust: "v.members_len",
+            doc: "How many members it covers; 0 when the designator is absent or malformed.",
+        },
+    ],
+};
+
+/// One thing a verse designator covers: `\v 1,3,5` is three, `\v 12a-14b` one.
+pub const MEMBER: Record = Record {
+    name: "Member",
+    plural: "members",
+    rust_ty: "Member",
+    binding: "m",
+    context: &[],
+    doc: "One member of a verse designator: a place, or a range joined by `-`.",
+    tail: None,
+    fields: &[
+        Field {
+            name: "from",
+            width: U16,
+            space: Plain,
+            rust: "m.from",
+            doc: "The member's first number.",
+        },
+        Field {
+            name: "fromSegmentStart",
+            width: U32,
+            space: Offset,
+            rust: "m.from_segment_start",
+            doc: "The segment written after it (`a` in `12a`); empty when none.",
+        },
+        Field {
+            name: "fromSegmentEnd",
+            width: U32,
+            space: Offset,
+            rust: "m.from_segment_end",
+            doc: "Where that segment ends.",
+        },
+        Field {
+            name: "to",
+            width: U16,
+            space: Plain,
+            rust: "m.to",
+            doc: "Its last number; equal to `from` for a single place. Kept as written.",
+        },
+        Field {
+            name: "toSegmentStart",
+            width: U32,
+            space: Offset,
+            rust: "m.to_segment_start",
+            doc: "The segment after the last number; empty when none.",
+        },
+        Field {
+            name: "toSegmentEnd",
+            width: U32,
+            space: Offset,
+            rust: "m.to_segment_end",
+            doc: "Where that segment ends.",
         },
     ],
 };
 
 /// Every row record, in the order a book's blocks are written.
-pub const RECORDS: &[&Record] = &[&CHAPTER, &VERSE];
+pub const RECORDS: &[&Record] = &[&CHAPTER, &VERSE, &MEMBER];

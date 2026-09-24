@@ -1,6 +1,6 @@
 {
   "name": "usfm-galley",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "type": "module",
   "description": "The JS doorway over the USFM engine and the Sous analysis — the resident handle, and every onion door on one module.",
   "private": true,

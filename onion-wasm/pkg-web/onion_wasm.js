@@ -350,9 +350,9 @@ export function attrResolve(name, marker) {
 /**
  * The k/v view of one `AttrList` token, flat.
  *
- * `[from, to)` is the list token's span in the CALLER's space — UTF-16 when
- * `utf16` is non-zero, bytes otherwise, as `locate` reads it — and every word
- * comes back in that same space.
+ * `[from, to)` is the list token's span in the CALLER's space — UTF-16 under
+ * `{ utf16: true }`, bytes otherwise — and every word comes back in that same
+ * space.
  *
  * ```text
  * |lemma="grace" x-y="z"   ->  [nameFrom nameTo valueFrom valueTo] x 2, NONE, NONE
@@ -366,13 +366,16 @@ export function attrResolve(name, marker) {
  * @param {string} text
  * @param {number} from
  * @param {number} to
- * @param {number} utf16
+ * @param {AttrsOptions} [opts]
  * @returns {Uint32Array}
  */
-export function attrs(text, from, to, utf16) {
+export function attrs(text, from, to, opts) {
     const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.attrs(ptr0, len0, from, to, utf16);
+    const ret = wasm.attrs(ptr0, len0, from, to, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
     var v2 = getArrayU32FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
     return v2;
@@ -652,27 +655,36 @@ export function mergeSplices(baseline, current, decisions_json, _default) {
 /**
  * THE read call. One document in, one buffer out.
  *
+ * ```ts
+ * interface ParseOptions {
+ *   diagnostics?: boolean;   // run the lint walk; default false
+ *   toc?: boolean;           // build the chapter and verse index; default false
+ *   utf16?: boolean;         // every offset as a UTF-16 code unit; default bytes
+ * }
+ * parse(text: string, opts?: ParseOptions): Uint8Array;
+ * ```
+ *
  * The buffer is a plated parse — tokens, the tree, and whatever `opts` asked
  * for besides — read by `reader.ts`, which is generated from the same schema
  * as the writer. Nothing is retained wasm-side: the `Uint8Array` is JS's, the
  * collector reclaims it, and there is no `free`.
  *
- * The three booleans are positional because an object crossing the wall would
- * be `Reflect::get` per key with a misspelling silently reading as `false`.
- * `reader.ts` wraps this as `parse(text, { diagnostics, toc, utf16 })`, where
- * a misspelled key is a compile error instead.
+ * A misspelled key is a compile error through the declared `ParseOptions`,
+ * and a THROW at the wall for a caller the compiler never saw: an unknown key
+ * is refused by name rather than read as `false` ([`options`]).
  *
  * `text` must be LF-normalized (see the module doc); a debug build asserts it.
  * @param {string} text
- * @param {boolean} diagnostics
- * @param {boolean} toc
- * @param {boolean} utf16
+ * @param {ParseOptions} [opts]
  * @returns {Uint8Array}
  */
-export function parse(text, diagnostics, toc, utf16) {
+export function parse(text, opts) {
     const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.parse(ptr0, len0, diagnostics, toc, utf16);
+    const ret = wasm.parse(ptr0, len0, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
     var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
     return v2;
@@ -712,7 +724,7 @@ export function parse(text, diagnostics, toc, utf16) {
  * `z`-initial, an unknown category word, a duplicate — is a report, not a
  * failure, so one bad line never costs a host the rest of its list.
  * @param {string} list
- * @param {{ relaxZPrefix?: boolean }} [opts]
+ * @param {ExtensionOptions} [opts]
  * @returns {string}
  */
 export function setExtensions(list, opts) {
@@ -828,6 +840,14 @@ function __wbg_get_imports() {
             const ret = arg0 === undefined;
             return ret;
         },
+        __wbg___wbindgen_string_get_d154f1e671052120: function(arg0, arg1) {
+            const obj = arg1;
+            const ret = typeof(obj) === 'string' ? obj : undefined;
+            var ptr1 = isLikeNone(ret) ? 0 : passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            var len1 = WASM_VECTOR_LEN;
+            getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
+            getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
+        },
         __wbg___wbindgen_throw_bb96b2010945f0bc: function(arg0, arg1) {
             throw new Error(getStringFromWasm0(arg0, arg1));
         },
@@ -835,6 +855,18 @@ function __wbg_get_imports() {
             const ret = Reflect.get(arg0, arg1);
             return ret;
         }, arguments); },
+        __wbg_get_unchecked_e20b893aeafc3fca: function(arg0, arg1) {
+            const ret = arg0[arg1 >>> 0];
+            return ret;
+        },
+        __wbg_keys_ec7f8c0c2370d91d: function(arg0) {
+            const ret = Object.keys(arg0);
+            return ret;
+        },
+        __wbg_length_ecfa2c63d3d0d82c: function(arg0) {
+            const ret = arg0.length;
+            return ret;
+        },
         __wbg_new_ebe3e0f6837f0879: function() {
             const ret = new Object();
             return ret;

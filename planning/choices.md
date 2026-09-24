@@ -2,6 +2,44 @@
 
 Per-pass decision ledger. Newest section first.
 
+## Designator members, labels on the Toc, and options objects at the wall
+
+**A segment is a coordinate and a list has holes** (Will). `designator::verse`
+keeps its HULL — every existing consumer sorts, bridges and renumbers by it
+unchanged — and `designator::members` is the second reading: what the span
+covers, member by member, allocation-free over the label it borrows. The
+alternative, changing `Designator` itself, would have moved every hull
+consumer at once for a fact only two of them want.
+
+**Lint reads holes only inside a list, and never reports one left open.**
+`\v 1,3,5` then `\v 2` fills a hole (no finding); a number a list already
+covers is a duplicate; outside an open list every verdict is the old one, which
+the corpus and oracle tests pin. An unfilled hole is NOT a gap: a list may be
+exactly what the translation means, and flagging it would be a new rule over
+every corpus. Two segments of one verse (`\v 2a` … `\v 2b`) are no longer a
+duplicate; the same segment twice, or a bare number beside a segmented one,
+still is. The example tier has no segmented designators, so no verdict there
+moved.
+
+**The label and the members are SPANS on the Toc, not a string table.** A row
+carries `labelStart..labelEnd` into the source, and a verse row names a run in
+`Toc::members`; both wires (the dish and the census) carry them as offsets, so
+UTF-16 conversion is the rule every other offset already follows and nothing
+is copied. The census's old "no token, no designator" boundary still holds for
+TOKEN indices; what changed is that the retained Toc now keeps the label's
+position when it is built. Chapter rows still tile. Dish v5, census v2.
+
+**Options are objects, and an unknown key throws.** Every door that took a
+positional boolean or a trailing optional flag takes one options object, last,
+typed in the `.d.ts` by a `typescript_custom_section` interface
+(`unchecked_optional_param_type` on a `JsValue`): the machinery the crate
+already used for `setExtensions`, and no serde on the wall. The positional form
+existed because `Reflect::get` reads a misspelled key as `false`; that is now
+answered twice — a compile error for a typed caller, and a refusal naming the
+key (`onion_wasm::options::bag`) for anyone else. The existing option bags
+(`find`, `mask`, the overlay doors) got the same check, and `skeleton`/
+`*NodeFor` lost their redundant trailing `utf16`.
+
 ## The extensions doors — on galley, mirrored by linkage
 
 **A door that lands only on `onion-wasm` does not exist.** `usfm-galley` is the

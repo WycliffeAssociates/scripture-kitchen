@@ -36,6 +36,8 @@ pub struct Chapter {
     pub start: u32,
     pub end: u32,
     pub number: u16,
+    pub label_start: u32,
+    pub label_end: u32,
     /// `\v` markers inside this chapter's span.
     pub anchors: u16,
     /// The highest verse number any of those anchors names. A bridge
@@ -50,7 +52,16 @@ pub struct Verse {
     pub chapter: u16,
     pub first: u16,
     pub last: u16,
+    pub label_start: u32,
+    pub label_end: u32,
+    /// Where this verse's run starts in the book's member block — the retained
+    /// Toc's own arena, which crosses whole.
+    pub members_from: u32,
+    pub members_len: u16,
 }
+
+/// One verse designator's member as it crosses — the retained row itself.
+pub type Member = crate::onion::toc::VerseMember;
 
 /// The two row sets for one retained `Toc`.
 ///
@@ -71,6 +82,10 @@ pub fn rows_of(toc: &Toc) -> (Vec<Chapter>, Vec<Verse>) {
                 chapter: row.number,
                 first: anchor.first,
                 last: anchor.last,
+                label_start: anchor.label_start,
+                label_end: anchor.label_end,
+                members_from: anchor.members_from,
+                members_len: anchor.members_len,
             });
             next += 1;
         }
@@ -78,6 +93,8 @@ pub fn rows_of(toc: &Toc) -> (Vec<Chapter>, Vec<Verse>) {
             start: row.start,
             end: row.end,
             number: row.number,
+            label_start: row.label_start,
+            label_end: row.label_end,
             anchors,
             last_verse,
         });
@@ -104,8 +121,10 @@ pub fn encode(pantry: &Pantry, ids: &[BookId], utf16: bool) -> Result<Vec<u8>, P
         code: [u8; 3],
         chapters: Vec<u8>,
         verses: Vec<u8>,
+        members: Vec<u8>,
         chapter_rows: u32,
         verse_rows: u32,
+        member_rows: u32,
     }
 
     let mut blocks: Vec<Block<'_>> = Vec::with_capacity(ids.len());
@@ -119,40 +138,48 @@ pub fn encode(pantry: &Pantry, ids: &[BookId], utf16: bool) -> Result<Vec<u8>, P
         let (chapter_rows, verse_rows) = rows_of(toc);
         let mut chapters = Vec::new();
         let mut verses = Vec::new();
+        let mut members = Vec::new();
         let mut chapter_offsets = generated::Offsets::new();
         let mut verse_offsets = generated::Offsets::new();
+        let mut member_offsets = generated::Offsets::new();
         generated::write_chapters(&chapter_rows, &mut chapters, &mut chapter_offsets);
         generated::write_verses(&verse_rows, &mut verses, &mut verse_offsets);
+        generated::write_members(&toc.members, &mut members, &mut member_offsets);
         if let Some(table) = table.filter(|_| utf16) {
             rebase(&mut chapters, &chapter_offsets, table);
             rebase(&mut verses, &verse_offsets, table);
+            rebase(&mut members, &member_offsets, table);
         }
         blocks.push(Block {
             id,
             code: toc.book,
             chapters,
             verses,
+            members,
             chapter_rows: chapter_rows.len() as u32,
             verse_rows: verse_rows.len() as u32,
+            member_rows: toc.members.len() as u32,
         });
     }
 
     // Lay the buffer out before writing it, so every directory entry names a
-    // position that is already decided: header, directory, each book's two
+    // position that is already decided: header, directory, each book's three
     // blocks, then every id's bytes.
     let directory_at = schema::HEADER_BYTES;
     let mut at = directory_at + blocks.len() * schema::DIRECTORY_ENTRY_BYTES;
-    let mut places: Vec<[u32; 3]> = Vec::with_capacity(blocks.len());
+    let mut places: Vec<[u32; 4]> = Vec::with_capacity(blocks.len());
     for block in &blocks {
         at = aligned(at);
         let chapters_at = at;
         at = aligned(at + block.chapters.len());
         let verses_at = at;
-        at += block.verses.len();
-        places.push([chapters_at as u32, verses_at as u32, 0]);
+        at = aligned(at + block.verses.len());
+        let members_at = at;
+        at += block.members.len();
+        places.push([chapters_at as u32, verses_at as u32, members_at as u32, 0]);
     }
     for (block, place) in blocks.iter().zip(&mut places) {
-        place[2] = at as u32;
+        place[3] = at as u32;
         at += block.id.as_str().len();
     }
 
@@ -163,10 +190,11 @@ pub fn encode(pantry: &Pantry, ids: &[BookId], utf16: bool) -> Result<Vec<u8>, P
     out.extend_from_slice(&(blocks.len() as u32).to_le_bytes());
     out.extend_from_slice(&(schema::CHAPTER.stride() as u32).to_le_bytes());
     out.extend_from_slice(&(schema::VERSE.stride() as u32).to_le_bytes());
+    out.extend_from_slice(&(schema::MEMBER.stride() as u32).to_le_bytes());
     out.extend_from_slice(&(directory_at as u32).to_le_bytes());
     debug_assert_eq!(out.len(), schema::HEADER_BYTES);
 
-    for (block, [chapters_at, verses_at, id_at]) in blocks.iter().zip(&places) {
+    for (block, [chapters_at, verses_at, members_at, id_at]) in blocks.iter().zip(&places) {
         out.extend_from_slice(&block.code);
         out.push(0);
         out.extend_from_slice(&chapters_at.to_le_bytes());
@@ -175,6 +203,8 @@ pub fn encode(pantry: &Pantry, ids: &[BookId], utf16: bool) -> Result<Vec<u8>, P
         out.extend_from_slice(&block.verse_rows.to_le_bytes());
         out.extend_from_slice(&id_at.to_le_bytes());
         out.extend_from_slice(&(block.id.as_str().len() as u32).to_le_bytes());
+        out.extend_from_slice(&members_at.to_le_bytes());
+        out.extend_from_slice(&block.member_rows.to_le_bytes());
     }
 
     for block in &blocks {
@@ -182,6 +212,8 @@ pub fn encode(pantry: &Pantry, ids: &[BookId], utf16: bool) -> Result<Vec<u8>, P
         out.extend_from_slice(&block.chapters);
         out.resize(aligned(out.len()), 0);
         out.extend_from_slice(&block.verses);
+        out.resize(aligned(out.len()), 0);
+        out.extend_from_slice(&block.members);
     }
     for block in &blocks {
         out.extend_from_slice(block.id.as_str().as_bytes());

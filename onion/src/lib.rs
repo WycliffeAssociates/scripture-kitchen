@@ -71,7 +71,7 @@ pub use format::{
 };
 pub use mask::{Action, Filter, Mask, TextRule, mask};
 pub use scanner::{lex, lex_general_path_only, lex_with};
-pub use toc::{ChapterRow, Sid, Toc, VerseAnchor, toc};
+pub use toc::{ChapterRow, Sid, Toc, VerseAnchor, VerseMember, toc};
 pub use token::{Token, TokenKind};
 pub use utf16::{Utf16Index, utf16_index};
 // Only the iterator: `keys`/`lines`/`joined` are names a crate root should not

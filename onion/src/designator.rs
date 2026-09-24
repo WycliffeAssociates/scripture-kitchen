@@ -3,21 +3,25 @@
 //!
 //! The scanner carves the region after `\c`/`\v` as ONE token and never looks
 //! at its bytes (scanner.rs `payload_end`); this module is the judgement half:
-//! span in, [`Designator`] out. Ordering lint is only the first consumer — the
-//! vref/reference exports inherit the same reading and the rules below.
+//! span in, [`Designator`] and [`members`] out. Ordering lint is only the first
+//! consumer — the Toc, vref and the reference exports inherit the same reading
+//! and the rules below.
 //!
 //! # By example (span in → what it IS)
 //!
 //! ```text
-//! 12       →  first 12, last 12
-//! 12a      →  first 12, last 12    a SEGMENT is a label, not a coordinate
-//! 12-14    →  first 12, last 14
-//! 1,3      →  first 1,  last 3     the endpoints; the hole is not modelled
-//! 3-1      →  first 3,  last 3     `last` is the LARGEST number, so first <= last
-//! 1<RLM>-3 →  first 1,  last 3     U+200F belongs to the SEPARATOR, not the segment
-//! 12␠      →  first 12, last 12    the folded delimiter is not part of it
-//! 01       →  Malformed            no leading zero (but a continuation `1-03` is fine)
-//! 1-       →  Malformed            separator with nothing after it
+//!                hull (Designator)     members (written order)
+//! 12       →     first 12, last 12     12
+//! 12a      →     first 12, last 12     12a                 a SEGMENT is a place inside 12
+//! 12-14    →     first 12, last 14     12–14
+//! 12a-14b  →     first 12, last 14     12a–14b
+//! 1,3      →     first 1,  last 3      1  3                the hole (2) is not covered
+//! 1-2,4-6  →     first 1,  last 6      1–2  4–6
+//! 3-1      →     first 3,  last 3      3–1                 kept as written; the hull is ordered
+//! 1<RLM>-3 →     first 1,  last 3      1–3                 U+200F belongs to the SEPARATOR
+//! 12␠      →     first 12, last 12     12                  the folded delimiter is not part of it
+//! 01       →     Malformed             (none)              no leading zero (a continuation `1-03` is fine)
+//! 1-       →     Malformed             (none)              separator with nothing after it
 //! ```
 //!
 //! VERSE follows the spec's own pattern, `[1-9][0-9]*[\p{L}\p{Mn}]*` then any
@@ -26,14 +30,24 @@
 //! only — so a bare integer it is, and `\c 12b` is MALFORMED. That assumption
 //! is the module's only one, and [`chapter`] the one place to revisit it.
 //!
+//! # Two readings of one span
+//!
+//! - The HULL ([`Designator`]) is the lowest and highest number named. It is
+//!   what a sequence sorts by and what a bridge renders as (`MRK 6:1-3`).
+//! - The MEMBERS ([`members`]) are what the designator actually covers: `-`
+//!   joins two points into one member, `,` starts the next. `\v 1,3,5` covers
+//!   1, 3 and 5 and not 2 or 4; `\v 12a` covers the place `12a` and not `12b`.
+//!   A backwards member (`3-1`) is kept as written — judging it is lint's job.
+//!
 //! # Comparison rules (these become vref's)
 //!
 //! - `first` is what a reference sorts by, `last` what the next verse must
 //!   exceed; two designators OVERLAP when neither's `last` is below the other's
 //!   `first`. Lint reads an equal first (or one landing exactly on the previous
-//!   `last`) as a DUPLICATE, a lower one as OUT OF ORDER.
-//! - The SEGMENT suffix takes part in no comparison: two segments of one verse
-//!   are the same verse. Callers needing segment identity read the span.
+//!   `last`) as a DUPLICATE, a lower one as OUT OF ORDER — except inside a
+//!   LIST's holes, which a later verse may fill (see `lint/ordering.rs`).
+//! - The HULL ignores segments: `12a` and `12b` have one hull, and are still
+//!   two places. A caller needing segment identity reads [`members`].
 //! - Numbers SATURATE at [`u32::MAX`]: junk either way, but it must be ORDERED
 //!   junk rather than wrap into a false "out of order".
 //!
@@ -45,11 +59,12 @@
 //! `designator-malformed` crying wolf on a legitimate Arabic or Devanagari
 //! segment would be worse than missing a nicety.
 
-/// What one designator span IS.
+/// What one designator span's HULL is.
 ///
-/// Two states and no borrowed bytes: consumers need the covered range and
+/// Two states and no borrowed bytes: a sequence needs the covered range and
 /// nothing else, and a `Malformed` designator is flagged and excluded from the
-/// sequence, never reinterpreted or repaired.
+/// sequence, never reinterpreted or repaired. What it covers inside that range
+/// is [`members`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Designator {
     /// Matches the pattern. `first <= last`, both saturating.
@@ -135,6 +150,107 @@ pub fn chapter(span: &[u8]) -> Designator {
     }
 }
 
+/// One endpoint of a [`Member`]: a number and the segment written after it.
+///
+/// `segment_start..segment_end` are byte offsets into the LABEL (the span
+/// [`label`] returns, which starts where the span does); equal when no segment
+/// is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Point {
+    pub number: u32,
+    pub segment_start: u32,
+    pub segment_end: u32,
+}
+
+impl Point {
+    /// Whether a segment is written after the number (`12a`).
+    pub fn has_segment(&self) -> bool {
+        self.segment_end > self.segment_start
+    }
+}
+
+/// One thing a designator covers: a single place (`from == to`) or a range
+/// joined by `-`. Members are separated by `,`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Member {
+    pub from: Point,
+    pub to: Point,
+}
+
+impl Member {
+    /// The numbers this member covers, low to high. A segment covers part of
+    /// its number, so it counts as that number here.
+    pub fn numbers(&self) -> (u32, u32) {
+        let (a, b) = (self.from.number, self.to.number);
+        (a.min(b), a.max(b))
+    }
+}
+
+/// What a `\v` designator span covers, member by member, in written order.
+///
+/// Empty for a malformed span: a designator [`verse`] refuses covers nothing.
+/// Allocation-free — the iterator walks the label it borrows.
+pub fn members(span: &[u8]) -> Members<'_> {
+    let label = label(span);
+    let wellformed = matches!(verse(span), Designator::Wellformed { .. });
+    Members {
+        label,
+        at: if wellformed { 0 } else { label.len() },
+    }
+}
+
+/// The iterator [`members`] returns.
+#[derive(Debug, Clone)]
+pub struct Members<'a> {
+    label: &'a [u8],
+    at: usize,
+}
+
+impl Iterator for Members<'_> {
+    type Item = Member;
+
+    fn next(&mut self) -> Option<Member> {
+        if self.at >= self.label.len() {
+            return None;
+        }
+        // The span was checked well-formed, so every read here succeeds; only
+        // the first number of the whole designator refuses a leading zero, and
+        // that was checked too.
+        let from = self.point()?;
+        let mut to = from;
+        loop {
+            if self.label[self.at..].starts_with(&RLM) {
+                self.at += RLM.len();
+            }
+            match self.label.get(self.at) {
+                Some(b'-') => {
+                    self.at += 1;
+                    to = self.point()?;
+                }
+                Some(b',') => {
+                    self.at += 1;
+                    break;
+                }
+                _ => break,
+            }
+        }
+        Some(Member { from, to })
+    }
+}
+
+impl Members<'_> {
+    fn point(&mut self) -> Option<Point> {
+        let number = take_number(self.label, &mut self.at, true)?;
+        let segment_start = self.at as u32;
+        take_segment(self.label, &mut self.at);
+        Some(Point {
+            number,
+            segment_start,
+            segment_end: self.at as u32,
+        })
+    }
+}
+
 /// `[1-9][0-9]*` (or `[0-9]+` when `leading_zero_ok`), saturating. Advances
 /// `at` only on success.
 fn take_number(span: &[u8], at: &mut usize, leading_zero_ok: bool) -> Option<u32> {
@@ -204,8 +320,8 @@ mod tests {
     }
 
     #[test]
-    fn segments_do_not_change_the_range() {
-        // `12a` and `12b` are the same verse.
+    fn segments_do_not_change_the_hull() {
+        // `12a` and `12b` share a hull; `members` tells them apart.
         assert_eq!(v("12a"), well(12, 12));
         assert_eq!(v("12b"), well(12, 12));
         assert_eq!(v("7ab"), well(7, 7));
@@ -282,6 +398,76 @@ mod tests {
         assert_eq!(c("1-2"), Designator::Malformed);
         assert_eq!(c("01"), Designator::Malformed);
         assert_eq!(c(""), Designator::Malformed);
+    }
+
+    /// Each member as `(from, to)`, a point rendered with its segment.
+    fn covers(text: &str) -> Vec<(String, String)> {
+        let label = label(text.as_bytes());
+        let show = |p: Point| {
+            let segment = &label[p.segment_start as usize..p.segment_end as usize];
+            format!("{}{}", p.number, String::from_utf8_lossy(segment))
+        };
+        members(text.as_bytes())
+            .map(|m| (show(m.from), show(m.to)))
+            .collect()
+    }
+
+    fn pairs(list: &[(&str, &str)]) -> Vec<(String, String)> {
+        list.iter()
+            .map(|(a, b)| (a.to_string(), b.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn a_plain_number_is_one_point() {
+        assert_eq!(covers("12"), pairs(&[("12", "12")]));
+        assert_eq!(covers("12 "), pairs(&[("12", "12")]));
+    }
+
+    #[test]
+    fn a_segment_is_part_of_the_place_it_names() {
+        assert_eq!(covers("12a"), pairs(&[("12a", "12a")]));
+        assert_eq!(covers("12b"), pairs(&[("12b", "12b")]));
+        assert_ne!(covers("12a"), covers("12b"));
+        assert_eq!(covers("12a-14b"), pairs(&[("12a", "14b")]));
+        assert_eq!(covers("7ب"), pairs(&[("7ب", "7ب")]));
+        let bare = members(b"12").next().unwrap();
+        let lettered = members(b"12a").next().unwrap();
+        assert!(!bare.from.has_segment());
+        assert!(lettered.from.has_segment());
+        assert_eq!(lettered.numbers(), (12, 12));
+    }
+
+    #[test]
+    fn a_list_covers_its_members_and_not_its_holes() {
+        assert_eq!(
+            covers("1,3,5"),
+            pairs(&[("1", "1"), ("3", "3"), ("5", "5")])
+        );
+        assert_eq!(covers("1-2,4-6"), pairs(&[("1", "2"), ("4", "6")]));
+        let numbers: Vec<_> = members(b"1,3,5").map(|m| m.numbers()).collect();
+        assert!(!numbers.iter().any(|&(lo, hi)| (lo..=hi).contains(&2)));
+        // The hull still spans the holes: it is what the sequence sorts by.
+        assert_eq!(v("1,3,5"), well(1, 5));
+    }
+
+    #[test]
+    fn the_rtl_mark_separates_members_too() {
+        assert_eq!(covers("1\u{200F}-3"), pairs(&[("1", "3")]));
+        assert_eq!(covers("1\u{200F},3"), pairs(&[("1", "1"), ("3", "3")]));
+    }
+
+    #[test]
+    fn a_backwards_member_is_kept_as_written() {
+        assert_eq!(covers("3-1"), pairs(&[("3", "1")]));
+        assert_eq!(members(b"3-1").next().unwrap().numbers(), (1, 3));
+    }
+
+    #[test]
+    fn a_malformed_designator_covers_nothing() {
+        for junk in ["", "?", "01", "1-", "1,", "1a2", "1 2"] {
+            assert_eq!(members(junk.as_bytes()).count(), 0, "{junk:?}");
+        }
     }
 
     #[test]

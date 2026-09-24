@@ -5,7 +5,7 @@ a store this defines: chunk products, per-book products, retained text, and
 every derived value the Expediter reuses.
 
 ```js
-const g = new Galley(16 << 20);        // the ceiling, in bytes
+const g = new Galley({ budgetBytes: 16 << 20 });   // the ceiling, in bytes
 g.update("books/MRK.usfm", text);      // → "MRK"
 g.publish();                           // one complete corpus publication
 g.misses();                            // chunk units computed, cumulative
@@ -167,7 +167,7 @@ is how a host overrides that.
 that indexes it.** A reference asked to keep its text builds the same `Mask`
 and `Utf16Table` a target builds, so `Entry::{text, mask, utf16,
 published_len}` all answer and `Find` can search it — the wall's
-`updateReference(id, text, keepText)`. Text and projection travel together;
+`updateReference(id, text, { keepText })`. Text and projection travel together;
 `Pantry::searchable(&id)` is the one question that names both, and
 `books_with_text(role)` lists the books of a role that pass it. It costs what a
 target costs minus the resident analysis, and the pinned tier counts every byte

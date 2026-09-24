@@ -166,7 +166,7 @@ eq(doors.toUtf16("\\v 1 a\u{1F600}b", 10), 8, "toUtf16 counts the surrogate pair
   const hash = doors.xxh3Text(text);
   eq(typeof hash, "bigint", "a u64 crosses as a bigint");
   eq(doors.xxh3(new TextEncoder().encode(text)), hash, "text and bytes agree");
-  const dish = doors.parse(text, false, false, false);
+  const dish = doors.parse(text);
   const stamped = new DataView(dish.buffer, dish.byteOffset).getBigUint64(24, true);
   eq(hash, stamped, "the same value the dish header stamps");
   eq(doors.xxh3(new Uint8Array()), 0x2d06800538d394c2n, "XXH3-64 seed 0, pinned");
@@ -290,7 +290,7 @@ try {
 check(unsearchable.includes("keepText"), `a lengths-only reference: ${unsearchable}`);
 
 // Re-sent with the text, it joins the "references" and "all" scopes.
-galley.updateReference("ref/JON.usfm", fixture("ref/JON.usfm"), true);
+galley.updateReference("ref/JON.usfm", fixture("ref/JON.usfm"), { keepText: true });
 eq(decodeFind(galley.find("ref/JON.usfm", "the", { caseSensitive: true })).ids.length, 1, "one book");
 const references = decodeFind(galley.findAll("the", { caseSensitive: true, scope: "references" }));
 eq(references.ids.join(" "), "ref/JON.usfm", "only the reference that kept its text");
@@ -575,13 +575,13 @@ eq(
 
 // A reference keeps its Toc whatever else it drops, so the census reaches
 // further than find: ref/RUT.usfm kept no text and is still listed.
-eq(Census.open(galley.tocAll("all")).bookCount, 5, "three targets and both references");
-eq(Census.open(galley.tocAll("references")).bookCount, 2, "both references");
-check(Census.open(galley.tocAll("targets", true)).utf16, "the targets answer in UTF-16");
+eq(Census.open(galley.tocAll({ scope: "all" })).bookCount, 5, "three targets and both references");
+eq(Census.open(galley.tocAll({ scope: "references" })).bookCount, 2, "both references");
+check(Census.open(galley.tocAll({ scope: "targets", utf16: true })).utf16, "the targets answer in UTF-16");
 
 let noTable = "";
 try {
-  galley.tocAll("all", true);
+  galley.tocAll({ scope: "all", utf16: true });
 } catch (error) {
   noTable = String(error.message ?? error);
 }
@@ -600,7 +600,7 @@ check(unknownBook.includes("no book is registered"), `an unknown id: ${unknownBo
 
 let badCensusScope = "";
 try {
-  galley.tocAll("elsewhere");
+  galley.tocAll({ scope: "elsewhere" });
 } catch (error) {
   badCensusScope = String(error.message ?? error);
 }
@@ -624,6 +624,50 @@ check(
   `a newer buffer is refused, not misread: ${stale}`,
 );
 
+// A row's label and a verse's members are spans into the text, so a JS slice
+// of the string the host sent reads them back as written — under UTF-16, with
+// non-ASCII before and inside them.
+{
+  const text = "\\id GEN\n\\c 1\n\\p Ἐν ἀρχῇ \\v 1,3 α \\v 2α β \\v 2β γ\n\\c 12b\n";
+  const lists = new Galley();
+  lists.update("books/LST.usfm", text);
+  const book = Census.open(lists.toc("books/LST.usfm", { utf16: true })).book(0);
+  const slice = (from, to) => text.slice(from, to);
+  const verses = book.verseRows;
+  const labels = [];
+  for (let n = 0; n < verses.length; n++) {
+    const row = verses.seek(n);
+    labels.push(slice(row.labelStart, row.labelEnd));
+  }
+  eq(labels.join(" | "), "1,3 | 2α | 2β", "verse labels, as written");
+  const covered = book.membersOf(0).map((m) => `${m.from}-${m.to}`);
+  eq(covered.join(" "), "1-1 3-3", "a list covers its members, not its hole");
+  const segment = book.membersOf(1)[0].fromSegment;
+  eq(slice(segment.from, segment.to), "α", "a segment is a span too");
+  const chapter = book.chapterRows.seek(2);
+  eq(slice(chapter.labelStart, chapter.labelEnd), "12b", "a chapter label the number cannot carry");
+  eq(chapter.number, 0, "and the number stays malformed");
+  lists.free();
+}
+
+// An options object is checked at the wall: a key the door does not know is
+// refused by name, never read as false.
+for (const [door, call] of [
+  ["parseText", () => galley.parseText("\\id GEN\n", { tco: true })],
+  ["toc", () => galley.toc("books/GEN.usfm", { utf6: true })],
+  ["updateReference", () => galley.updateReference("ref/RUT.usfm", fixture("ref/RUT.usfm"), { keeptext: true })],
+  ["find", () => galley.find("books/GEN.usfm", "the", { casesensitive: true })],
+  ["Galley", () => new Galley({ budget: 1 })],
+]) {
+  let refused = "";
+  try {
+    call();
+  } catch (error) {
+    refused = String(error.message ?? error);
+  }
+  check(refused.includes("unknown option"), `${door} refuses a misspelled key: ${refused}`);
+}
+
 // --- the overlay: six doors, and the JSON they answer with -----------------
 
 // The six read as methods on the handle, like find: they need the resident
@@ -643,7 +687,7 @@ for (const door of OVERLAY_DOORS) {
 const overlayFixture = (name) =>
   readFileSync(resolve(here, "fixtures/overlay", name), "utf8");
 galley.update("books/OVL.usfm", overlayFixture("gen-target.usfm"));
-galley.updateReference("ref/OVL.usfm", overlayFixture("gen-source.usfm"), true);
+galley.updateReference("ref/OVL.usfm", overlayFixture("gen-source.usfm"), { keepText: true });
 
 // The one JSON parse: the reader is `JSON.parse`, because a skeleton is a
 // modal-open shape and not a keystroke one.
@@ -706,8 +750,8 @@ galley.remove("ref/OVL.usfm");
 // --- the onion doors read the retained copy -------------------------------
 
 // GEN is the edited fixture by now: the id door plates what the handle holds.
-const byId = galley.parse("books/GEN.usfm", true, true, true);
-const byText = galley.parseText(fixture("GEN-edited.usfm"), true, true, true);
+const byId = galley.parse("books/GEN.usfm", { diagnostics: true, toc: true, utf16: true });
+const byText = galley.parseText(fixture("GEN-edited.usfm"), { diagnostics: true, toc: true, utf16: true });
 check(sameBytes(byId, byText), "parse(id) equals parse(text) byte for byte");
 eq(
   galley.verseText("books/GEN.usfm"),
@@ -765,7 +809,7 @@ if (corpusDir && existsSync(corpusDir)) {
     const edited = `${original.slice(0, at)}\\p ${"aeiou"[n % 5]}${n}\n${original.slice(at)}`;
 
     let start = now();
-    host.parseText(edited, true, true, true);
+    host.parseText(edited, { diagnostics: true, toc: true, utf16: true });
     steps.marshal.push(us(start));
 
     start = now();

@@ -26,6 +26,7 @@ struct Chapter {
     number: u16,
     anchors: u16,
     last_verse: u16,
+    label: (u32, u32),
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -34,6 +35,17 @@ struct Verse {
     chapter: u16,
     first: u16,
     last: u16,
+    label: (u32, u32),
+    members: (u32, u16),
+}
+
+/// `(from, from segment, to, to segment)`.
+#[derive(Debug, PartialEq, Eq)]
+struct Member {
+    from: u16,
+    from_segment: (u32, u32),
+    to: u16,
+    to_segment: (u32, u32),
 }
 
 #[derive(Debug)]
@@ -42,6 +54,7 @@ struct Book {
     id: String,
     chapters: Vec<Chapter>,
     verses: Vec<Verse>,
+    members: Vec<Member>,
 }
 
 #[derive(Debug)]
@@ -65,6 +78,10 @@ fn decode(bytes: &[u8]) -> Census {
     assert_eq!(
         word(schema::HEADER_VERSE_STRIDE_OFFSET) as usize,
         schema::VERSE.stride()
+    );
+    assert_eq!(
+        word(schema::HEADER_MEMBER_STRIDE_OFFSET) as usize,
+        schema::MEMBER.stride()
     );
     let flags = word(schema::HEADER_FLAGS_OFFSET);
     let count = word(schema::HEADER_BOOK_COUNT_OFFSET) as usize;
@@ -103,6 +120,10 @@ fn decode(bytes: &[u8]) -> Census {
                     number: half(at + schema::CHAPTER.offset_of("number")),
                     anchors: half(at + schema::CHAPTER.offset_of("anchors")),
                     last_verse: half(at + schema::CHAPTER.offset_of("lastVerse")),
+                    label: (
+                        word(at + schema::CHAPTER.offset_of("labelStart")),
+                        word(at + schema::CHAPTER.offset_of("labelEnd")),
+                    ),
                 }
             })
             .collect();
@@ -117,6 +138,32 @@ fn decode(bytes: &[u8]) -> Census {
                     chapter: half(at + schema::VERSE.offset_of("chapter")),
                     first: half(at + schema::VERSE.offset_of("first")),
                     last: half(at + schema::VERSE.offset_of("last")),
+                    label: (
+                        word(at + schema::VERSE.offset_of("labelStart")),
+                        word(at + schema::VERSE.offset_of("labelEnd")),
+                    ),
+                    members: (
+                        word(at + schema::VERSE.offset_of("membersFrom")),
+                        half(at + schema::VERSE.offset_of("membersLen")),
+                    ),
+                }
+            })
+            .collect();
+
+        let members_at = word(entry + schema::DIRECTORY_MEMBERS_AT_OFFSET) as usize;
+        let member_rows = word(entry + schema::DIRECTORY_MEMBER_ROWS_OFFSET) as usize;
+        let members = (0..member_rows)
+            .map(|row| {
+                let at = members_at + row * schema::MEMBER.stride();
+                let field = |name: &str| at + schema::MEMBER.offset_of(name);
+                Member {
+                    from: half(field("from")),
+                    from_segment: (
+                        word(field("fromSegmentStart")),
+                        word(field("fromSegmentEnd")),
+                    ),
+                    to: half(field("to")),
+                    to_segment: (word(field("toSegmentStart")), word(field("toSegmentEnd"))),
                 }
             })
             .collect();
@@ -126,6 +173,7 @@ fn decode(bytes: &[u8]) -> Census {
             id,
             chapters,
             verses,
+            members,
         });
     }
     Census {
@@ -204,16 +252,27 @@ fn the_census_says_what_a_parse_says() {
 
         for (row, source) in book.chapters.iter().zip(&toc.chapters) {
             assert_eq!(
-                (row.start, row.end, row.number),
-                (source.start, source.end, source.number),
+                (row.start, row.end, row.number, row.label),
+                (
+                    source.start,
+                    source.end,
+                    source.number,
+                    (source.label_start, source.label_end)
+                ),
                 "{id}: chapter row {}",
                 source.number
             );
         }
         for (row, source) in book.verses.iter().zip(&toc.verses) {
             assert_eq!(
-                (row.at, row.first, row.last),
-                (source.at, source.first, source.last),
+                (row.at, row.first, row.last, row.label, row.members),
+                (
+                    source.at,
+                    source.first,
+                    source.last,
+                    (source.label_start, source.label_end),
+                    (source.members_from, source.members_len)
+                ),
                 "{id}: verse anchor at {}",
                 source.at
             );
@@ -222,7 +281,56 @@ fn the_census_says_what_a_parse_says() {
             // one of them is reading a different book than it thinks.
             assert_eq!(row.chapter, source.chapter, "{id}: anchor at {}", source.at);
         }
+        let parsed_members: Vec<Member> = toc
+            .members
+            .iter()
+            .map(|m| Member {
+                from: m.from,
+                from_segment: (m.from_segment_start, m.from_segment_end),
+                to: m.to,
+                to_segment: (m.to_segment_start, m.to_segment_end),
+            })
+            .collect();
+        assert_eq!(book.members, parsed_members, "{id}: members");
     }
+}
+
+/// A label and a segment are spans into the text, so under `utf16` they land
+/// on the same characters a JS string slice would — non-ASCII before them and
+/// inside them included.
+#[test]
+fn labels_and_segments_cross_as_utf16_spans() {
+    const TEXT: &str = "\\id GEN\n\\c 1\n\\p Ἐν ἀρχῇ \\v 1,3 α \\v 2α β \\v 2β γ\n\\c 12b\n";
+    let mut pantry = Pantry::new(BUDGET);
+    pantry
+        .update("books/GEN.usfm", Role::Target, TEXT)
+        .expect("a target");
+    let census = decode(
+        &usfm_galley::toc::encode(&pantry, &[BookId::from("books/GEN.usfm")], true).expect("bytes"),
+    );
+    let book = &census.books[0];
+    let units: Vec<u16> = TEXT.encode_utf16().collect();
+    let slice =
+        |(from, to): (u32, u32)| String::from_utf16(&units[from as usize..to as usize]).unwrap();
+
+    let labels: Vec<String> = book.verses.iter().map(|v| slice(v.label)).collect();
+    assert_eq!(labels, ["1,3", "2α", "2β"]);
+    assert_eq!(slice(book.chapters[2].label), "12b");
+    assert_eq!(book.chapters[2].number, 0, "the NUMBER is still malformed");
+
+    // `1,3` covers two places and leaves 2 open; `2α` and `2β` are two places
+    // inside verse 2.
+    let run = |v: &Verse| &book.members[v.members.0 as usize..][..usize::from(v.members.1)];
+    let covered: Vec<(u16, u16)> = run(&book.verses[0])
+        .iter()
+        .map(|m| (m.from, m.to))
+        .collect();
+    assert_eq!(covered, [(1, 1), (3, 3)]);
+    let segments: Vec<String> = book.verses[1..]
+        .iter()
+        .map(|v| slice(run(v)[0].from_segment))
+        .collect();
+    assert_eq!(segments, ["α", "β"]);
 }
 
 /// The three laws the rows carry: chapters tile the book, verses ascend, and

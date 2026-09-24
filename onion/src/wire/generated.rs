@@ -13,7 +13,7 @@
 // be a generator with a special case in it; the redundant ones cost nothing.
 #![allow(clippy::unnecessary_cast)]
 
-use super::{Chapter, Diagnostic, Edit, Fix, Verse};
+use super::{Chapter, Diagnostic, Edit, Fix, Member, Verse};
 
 /// Where every source offset landed in a section's bytes, so `wire::plate` can
 /// convert them all in one sorted sweep.
@@ -139,10 +139,10 @@ pub fn write_edits(rows: &[Edit], out: &mut Vec<u8>, offsets: &mut Offsets) {
 
 /// One chapter's extent and number. The rows tile the document.
 ///
-/// 18 bytes per row. `offsets` collects the position of every
+/// 26 bytes per row. `offsets` collects the position of every
 /// source offset written, for the UTF-16 pass.
 pub fn write_chapters(rows: &[Chapter], out: &mut Vec<u8>, offsets: &mut Offsets) {
-    out.reserve(rows.len() * 18);
+    out.reserve(rows.len() * 26);
     for c in rows {
         offsets.push(out.len());
         // Where the chapter begins.
@@ -154,6 +154,12 @@ pub fn write_chapters(rows: &[Chapter], out: &mut Vec<u8>, offsets: &mut Offsets
         out.extend_from_slice(&((c.token) as u32).to_le_bytes());
         // The number's own token index, or NONE. `\c` opens no node, so this is the only route from a chapter to its designator.
         out.extend_from_slice(&((c.designator) as u32).to_le_bytes());
+        offsets.push(out.len());
+        // The designator as written (`12b`), minus its folded delimiter. Empty at the marker's end when there is none; 0..0 on row 0.
+        out.extend_from_slice(&((c.label_start) as u32).to_le_bytes());
+        offsets.push(out.len());
+        // Where the label ends.
+        out.extend_from_slice(&((c.label_end) as u32).to_le_bytes());
         // The number read, or 0 for absent or malformed.
         out.extend_from_slice(&((c.number) as u16).to_le_bytes());
     }
@@ -161,10 +167,10 @@ pub fn write_chapters(rows: &[Chapter], out: &mut Vec<u8>, offsets: &mut Offsets
 
 /// One verse anchor and the range of verse numbers it names.
 ///
-/// 18 bytes per row. `offsets` collects the position of every
+/// 32 bytes per row. `offsets` collects the position of every
 /// source offset written, for the UTF-16 pass.
 pub fn write_verses(rows: &[Verse], out: &mut Vec<u8>, offsets: &mut Offsets) {
-    out.reserve(rows.len() * 18);
+    out.reserve(rows.len() * 32);
     for v in rows {
         offsets.push(out.len());
         // Where the anchor sits.
@@ -173,11 +179,47 @@ pub fn write_verses(rows: &[Verse], out: &mut Vec<u8>, offsets: &mut Offsets) {
         out.extend_from_slice(&((v.token) as u32).to_le_bytes());
         // The number's own token index, or NONE. `\v` opens no node, so this is the only route from a verse to its designator.
         out.extend_from_slice(&((v.designator) as u32).to_le_bytes());
+        offsets.push(out.len());
+        // The designator as written (`6a`, `1,3,5`), minus its folded delimiter. Empty at the marker's end when there is none.
+        out.extend_from_slice(&((v.label_start) as u32).to_le_bytes());
+        offsets.push(out.len());
+        // Where the label ends.
+        out.extend_from_slice(&((v.label_end) as u32).to_le_bytes());
+        // This verse's first row in the member arena.
+        out.extend_from_slice(&((v.members_from) as u32).to_le_bytes());
+        // How many members it covers; 0 when the designator is absent or malformed.
+        out.extend_from_slice(&((v.members_len) as u16).to_le_bytes());
         // The enclosing chapter's number.
         out.extend_from_slice(&((v.chapter) as u16).to_le_bytes());
         // First verse named; 0 when the designator is absent or malformed.
         out.extend_from_slice(&((v.first) as u16).to_le_bytes());
         // Last verse named — a bridge `\v 5-7` names 5 through 7.
         out.extend_from_slice(&((v.last) as u16).to_le_bytes());
+    }
+}
+
+/// One member of a verse designator: a place, or a range joined by `-`. `first..last` on the verse is only the hull; these are what it covers.
+///
+/// 20 bytes per row. `offsets` collects the position of every
+/// source offset written, for the UTF-16 pass.
+pub fn write_members(rows: &[Member], out: &mut Vec<u8>, offsets: &mut Offsets) {
+    out.reserve(rows.len() * 20);
+    for m in rows {
+        // The member's first number.
+        out.extend_from_slice(&((m.from) as u16).to_le_bytes());
+        offsets.push(out.len());
+        // The segment written after it (`a` in `12a`); empty when none.
+        out.extend_from_slice(&((m.from_segment_start) as u32).to_le_bytes());
+        offsets.push(out.len());
+        // Where that segment ends.
+        out.extend_from_slice(&((m.from_segment_end) as u32).to_le_bytes());
+        // Its last number; equal to `from` for a single place. Kept as written.
+        out.extend_from_slice(&((m.to) as u16).to_le_bytes());
+        offsets.push(out.len());
+        // The segment after the last number; empty when none.
+        out.extend_from_slice(&((m.to_segment_start) as u32).to_le_bytes());
+        offsets.push(out.len());
+        // Where that segment ends.
+        out.extend_from_slice(&((m.to_segment_end) as u32).to_le_bytes());
     }
 }

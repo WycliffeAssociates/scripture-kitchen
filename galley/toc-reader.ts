@@ -25,20 +25,21 @@
 /** `TOCS`, the four bytes in order. */
 export const MAGIC = 0x53434f54;
 /** The layout this reader knows. A buffer naming another one throws. */
-export const FORMAT_VERSION = 1;
+export const FORMAT_VERSION = 2;
 /** Header flag: every offset in the buffer is UTF-16 rather than a byte. */
 export const FLAG_UTF16 = 1;
 
-export const HEADER_BYTES = 28;
+export const HEADER_BYTES = 32;
 export const HEADER_MAGIC_OFFSET = 0;
 export const HEADER_VERSION_OFFSET = 4;
 export const HEADER_FLAGS_OFFSET = 8;
 export const HEADER_BOOK_COUNT_OFFSET = 12;
 export const HEADER_CHAPTER_STRIDE_OFFSET = 16;
 export const HEADER_VERSE_STRIDE_OFFSET = 20;
-export const HEADER_DIRECTORY_AT_OFFSET = 24;
+export const HEADER_MEMBER_STRIDE_OFFSET = 24;
+export const HEADER_DIRECTORY_AT_OFFSET = 28;
 
-export const DIRECTORY_ENTRY_BYTES = 28;
+export const DIRECTORY_ENTRY_BYTES = 36;
 export const DIRECTORY_CODE_OFFSET = 0;
 export const DIRECTORY_CHAPTERS_AT_OFFSET = 4;
 export const DIRECTORY_CHAPTER_ROWS_OFFSET = 8;
@@ -46,15 +47,18 @@ export const DIRECTORY_VERSES_AT_OFFSET = 12;
 export const DIRECTORY_VERSE_ROWS_OFFSET = 16;
 export const DIRECTORY_ID_AT_OFFSET = 20;
 export const DIRECTORY_ID_LEN_OFFSET = 24;
+export const DIRECTORY_MEMBERS_AT_OFFSET = 28;
+export const DIRECTORY_MEMBER_ROWS_OFFSET = 32;
 
 /** Bytes per row, from the same declaration the row classes below come from. */
-export const CHAPTER_STRIDE = 14;
-export const VERSE_STRIDE = 10;
+export const CHAPTER_STRIDE = 22;
+export const VERSE_STRIDE = 24;
+export const MEMBER_STRIDE = 20;
 
 /**
  * One chapter's extent, its number, and what its verses count to.
  *
- * 14 bytes per row. A CURSOR: `seek` moves it, the getters read
+ * 22 bytes per row. A CURSOR: `seek` moves it, the getters read
 * the row it is on, and nothing is allocated per row.
  */
 export class ChapterRow {
@@ -70,11 +74,11 @@ export class ChapterRow {
     return (this.#view.byteLength / this.stride) | 0;
   }
 
-  readonly stride = 14;
+  readonly stride = 22;
 
   /** Move to row `n`; returns `this` so reads chain. */
   seek(n: number): this {
-    this.#row = n * 14;
+    this.#row = n * 22;
     return this;
   }
 
@@ -93,14 +97,24 @@ export class ChapterRow {
     return this.#view.getUint16(this.#row + 8, true);
   }
 
+  /** The designator as written (`12b`). Empty at the marker's end when there is none; 0..0 on the front-matter row. */
+  get labelStart(): number {
+    return this.#view.getUint32(this.#row + 10, true);
+  }
+
+  /** Where the label ends. */
+  get labelEnd(): number {
+    return this.#view.getUint32(this.#row + 14, true);
+  }
+
   /** How many `\v` markers sit inside this chapter's span, saturating. */
   get anchors(): number {
-    return this.#view.getUint16(this.#row + 10, true);
+    return this.#view.getUint16(this.#row + 18, true);
   }
 
   /** The highest verse number those anchors name; 0 when none does. A bridge `\v 5-7` is one anchor reaching 7 — so this is the count that keys by NUMBER where `anchors` counts MARKERS. */
   get lastVerse(): number {
-    return this.#view.getUint16(this.#row + 12, true);
+    return this.#view.getUint16(this.#row + 20, true);
   }
 
 }
@@ -108,7 +122,7 @@ export class ChapterRow {
 /**
  * One verse anchor and the range of verse numbers it names.
  *
- * 10 bytes per row. A CURSOR: `seek` moves it, the getters read
+ * 24 bytes per row. A CURSOR: `seek` moves it, the getters read
 * the row it is on, and nothing is allocated per row.
  */
 export class VerseRow {
@@ -124,11 +138,11 @@ export class VerseRow {
     return (this.#view.byteLength / this.stride) | 0;
   }
 
-  readonly stride = 10;
+  readonly stride = 24;
 
   /** Move to row `n`; returns `this` so reads chain. */
   seek(n: number): this {
-    this.#row = n * 10;
+    this.#row = n * 24;
     return this;
   }
 
@@ -147,16 +161,113 @@ export class VerseRow {
     return this.#view.getUint16(this.#row + 6, true);
   }
 
-  /** Highest named — equal to `first` unless this is a bridge. */
+  /** Highest named — equal to `first` unless this is a bridge or a list. `first..last` is the HULL; the members are what it covers. */
   get last(): number {
     return this.#view.getUint16(this.#row + 8, true);
+  }
+
+  /** The designator as written (`6a`, `1,3,5`). Empty at the marker's end when there is none. */
+  get labelStart(): number {
+    return this.#view.getUint32(this.#row + 10, true);
+  }
+
+  /** Where the label ends. */
+  get labelEnd(): number {
+    return this.#view.getUint32(this.#row + 14, true);
+  }
+
+  /** This verse's first row in the book's member block. */
+  get membersFrom(): number {
+    return this.#view.getUint32(this.#row + 18, true);
+  }
+
+  /** How many members it covers; 0 when the designator is absent or malformed. */
+  get membersLen(): number {
+    return this.#view.getUint16(this.#row + 22, true);
+  }
+
+}
+
+/**
+ * One member of a verse designator: a place, or a range joined by `-`.
+ *
+ * 20 bytes per row. A CURSOR: `seek` moves it, the getters read
+* the row it is on, and nothing is allocated per row.
+ */
+export class MemberRow {
+  readonly #view: DataView;
+  #row = 0;
+
+  constructor(view: DataView) {
+    this.#view = view;
+  }
+
+  /** Rows in the section. */
+  get length(): number {
+    return (this.#view.byteLength / this.stride) | 0;
+  }
+
+  readonly stride = 20;
+
+  /** Move to row `n`; returns `this` so reads chain. */
+  seek(n: number): this {
+    this.#row = n * 20;
+    return this;
+  }
+
+  /** The member's first number. */
+  get from(): number {
+    return this.#view.getUint16(this.#row + 0, true);
+  }
+
+  /** The segment written after it (`a` in `12a`); empty when none. */
+  get fromSegmentStart(): number {
+    return this.#view.getUint32(this.#row + 2, true);
+  }
+
+  /** Where that segment ends. */
+  get fromSegmentEnd(): number {
+    return this.#view.getUint32(this.#row + 6, true);
+  }
+
+  /** Its last number; equal to `from` for a single place. Kept as written. */
+  get to(): number {
+    return this.#view.getUint16(this.#row + 10, true);
+  }
+
+  /** The segment after the last number; empty when none. */
+  get toSegmentStart(): number {
+    return this.#view.getUint32(this.#row + 12, true);
+  }
+
+  /** Where that segment ends. */
+  get toSegmentEnd(): number {
+    return this.#view.getUint32(this.#row + 16, true);
   }
 
 }
 
 const UTF8 = new TextDecoder();
 
-/** One book's entry in the directory, and cursors over its two row blocks. */
+/** A span in the book's text, in whatever space the buffer's offsets are. */
+export interface Span {
+  from: number;
+  to: number;
+}
+
+/**
+ * One thing a verse designator covers: `\\v 1,3,5` is three, `\\v 12a-14b`
+ * one. A segment is a place INSIDE its number, so `12a` and `12b` are two
+ * places; its span is empty when none is written.
+ */
+export interface VerseMember {
+  from: number;
+  fromSegment: Span;
+  to: number;
+  toSegment: Span;
+}
+
+/** One book's entry in the directory, and cursors over its three row blocks. */
 export class BookCensus {
   readonly #bytes: Uint8Array;
   readonly #view: DataView;
@@ -216,6 +327,37 @@ export class BookCensus {
     return new VerseRow(this.#block(DIRECTORY_VERSES_AT_OFFSET, this.verseCount, VERSE_STRIDE));
   }
 
+  /** Members across every verse of the book, run after run in verse order. */
+  get memberCount(): number {
+    return this.#view.getUint32(this.#at + DIRECTORY_MEMBER_ROWS_OFFSET, true);
+  }
+
+  /** A cursor over this book's member block; a verse row's `membersFrom` indexes it. */
+  get memberRows(): MemberRow {
+    return new MemberRow(this.#block(DIRECTORY_MEMBERS_AT_OFFSET, this.memberCount, MEMBER_STRIDE));
+  }
+
+  /**
+   * What verse row `n`'s designator COVERS, in written order. A verse row's
+   * `first..last` is only the hull: `\\v 1,3,5` spans 1 to 5 and covers 1, 3
+   * and 5.
+   */
+  membersOf(n: number): VerseMember[] {
+    const verse = this.verseRows.seek(n);
+    const rows = this.memberRows;
+    const out: VerseMember[] = [];
+    for (let i = verse.membersFrom, end = verse.membersFrom + verse.membersLen; i < end; i++) {
+      const m = rows.seek(i);
+      out.push({
+        from: m.from,
+        fromSegment: { from: m.fromSegmentStart, to: m.fromSegmentEnd },
+        to: m.to,
+        toSegment: { from: m.toSegmentStart, to: m.toSegmentEnd },
+      });
+    }
+    return out;
+  }
+
   #block(offset: number, rows: number, stride: number): DataView {
     const at = this.#view.getUint32(this.#at + offset, true);
     return new DataView(this.#bytes.buffer, this.#bytes.byteOffset + at, rows * stride);
@@ -263,6 +405,7 @@ export class Census {
     const strides: [string, number, number][] = [
       ["Chapter", HEADER_CHAPTER_STRIDE_OFFSET, CHAPTER_STRIDE],
       ["Verse", HEADER_VERSE_STRIDE_OFFSET, VERSE_STRIDE],
+      ["Member", HEADER_MEMBER_STRIDE_OFFSET, MEMBER_STRIDE],
     ];
     for (const [name, at, known] of strides) {
       const stride = view.getUint32(at, true);
