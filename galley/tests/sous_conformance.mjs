@@ -658,6 +658,7 @@ for (const [door, call] of [
   ["updateReference", () => galley.updateReference("ref/RUT.usfm", fixture("ref/RUT.usfm"), { keeptext: true })],
   ["find", () => galley.find("books/GEN.usfm", "the", { casesensitive: true })],
   ["Galley", () => new Galley({ budget: 1 })],
+  ["diff", () => doors.diff("\\id GEN\n", "\\id GEN\n", { text: "none", unchnaged: true })],
 ]) {
   let refused = "";
   try {
@@ -666,6 +667,40 @@ for (const [door, call] of [
     refused = String(error.message ?? error);
   }
   check(refused.includes("unknown option"), `${door} refuses a misspelled key: ${refused}`);
+}
+
+// --- diff: what changed, in document order ---------------------------------
+
+// `text` is required and named; the default wire is changed units only.
+{
+  const baseline = "\\id GEN\n\\c 1\n\\v 1 one\n\\v 2 two\n\\v 3 three\n";
+  const current = "\\id GEN\n\\c 1\n\\v 1 one\n\\v 3 three\n\\v 2 two\n";
+  let refused = "";
+  try {
+    doors.diff(baseline, current, {});
+  } catch (error) {
+    refused = String(error.message ?? error);
+  }
+  check(refused.includes("text is required"), `diff asks for text: ${refused}`);
+
+  const changed = JSON.parse(doors.diff(baseline, current, { text: "words" }));
+  eq(changed.slots, undefined, "no slots on the wire");
+  eq(
+    changed.units.map((unit) => `${unit.unitId} ${unit.status}`).join(" | "),
+    "GEN 1:3@1 added | GEN 1:3 deleted",
+    "a verse out of order is an addition where it is and a deletion where it was",
+  );
+  const full = JSON.parse(doors.diff(baseline, current, { text: "words", unchanged: true }));
+  eq(full.units.length, changed.units.length + changed.unchangedCount, "full = changed + unchanged");
+  eq(
+    JSON.stringify(full.units.filter((unit) => unit.status !== "unchanged")),
+    JSON.stringify(changed.units),
+    "a changed unit is the same in both modes",
+  );
+  // The deleted verse's current side is the point where it goes back.
+  const deleted = changed.units.find((unit) => unit.status === "deleted");
+  eq(deleted.current[0], deleted.current[1], "an absent side is a point");
+  eq(current.slice(deleted.current[0]), "", "the deleted v3 goes back at the end");
 }
 
 // --- the overlay: six doors, and the JSON they answer with -----------------

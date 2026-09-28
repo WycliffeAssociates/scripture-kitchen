@@ -291,7 +291,7 @@ fn law_3_an_unknown_decision_id_produces_nothing_at_all() {
 }
 
 #[test]
-fn a_renumbered_verse_never_coalesces_and_a_swap_always_does() {
+fn a_renumbered_verse_never_coalesces_and_a_swap_never_does() {
     // The two directed shapes the generator leans on, pinned on their own.
     let baseline = "\\id GEN\n\\c 1\n\\v 1 alpha\n\\v 2 beta\n";
     let renumbered = "\\id GEN\n\\c 1\n\\v 1 alpha\n\\v 9 beta\n";
@@ -307,17 +307,23 @@ fn a_renumbered_verse_never_coalesces_and_a_swap_always_does() {
 
     let swapped = "\\id GEN\n\\c 1\n\\v 2 beta\n\\v 1 alpha\n";
     let skeleton = diff(baseline, swapped);
-    let moved: Vec<_> = skeleton
+    let one_sided: Vec<_> = skeleton
         .units
         .iter()
-        .filter(|unit| unit.status == usfm_onion::diff::Status::Moved)
+        .filter(|unit| {
+            matches!(
+                unit.status,
+                usfm_onion::diff::Status::Deleted | usfm_onion::diff::Status::Added
+            )
+        })
         .collect();
-    assert_eq!(moved.len(), 1);
-    assert!(moved[0].displaced);
+    assert_eq!(one_sided.len(), 2, "a swap is a deletion and an addition");
 
-    // Reverting the move restores the baseline byte-for-byte.
-    let mut decisions = Decisions::new();
-    decisions.insert(moved[0].id.clone(), MergeSide::Baseline);
+    // Taking the baseline side of both restores the baseline byte-for-byte.
+    let decisions: Decisions = one_sided
+        .iter()
+        .map(|unit| (unit.id.clone(), MergeSide::Baseline))
+        .collect();
     let reverted = merge(
         &skeleton,
         baseline.as_bytes(),

@@ -170,7 +170,7 @@ no defence against a file altered on purpose.
 | `formatEdits(text, opts)` | the whole-book transaction — `Edits`, spans in UTF-16 |
 | `formatEditsIn(text, from, to, opts)` | the same transaction, scoped to a UTF-16 window |
 | `format(text, opts)` | the formatted document, in one call |
-| `diff(baseline, current, text_mode)` / `merge` | the review path (see below) |
+| `diff(baseline, current, { text, unchanged? })` / `merge` | the review path (see below) |
 
 **Scope it engine-side, never in JS.** `formatEditsIn` runs the SAME whole-book
 analysis — lint needs the book, and which rule owns a contested byte is settled
@@ -200,10 +200,17 @@ from the `chapters` section.
   memory) plus a few strings. JS never holds a token. The one structured export
   is the diff skeleton — a cold, modal-open path where serde JSON buys back the
   old editors' camelCase contract verbatim.
-- **Intra-verse highlighting is opt-in.** `diff`'s `text_mode` is `"none"`,
-  `"words"` (UAX-29) or `"chars"` (graphemes); an unknown name REJECTS rather
-  than defaulting. `"none"` builds no CST and no mask and yields the JSON the
-  door returned before runs existed. The runs ride on a `modified` unit's
+- **`diff` sends what changed.** `units` holds the changed units in the
+  current document's order (a baseline view sorts by `baseline[0]`), and `unchangedCount` counts the rest; `unchanged: true` adds the
+  unchanged units in their places and changes nothing else. A unit is
+  `modified`, `added` or `deleted`: a verse out of order is a deletion where it
+  was and an addition where it is. Nothing refers to a unit by index. A
+  one-sided unit's absent side is an empty span at the point where the unit
+  would go in that document, which is where a merge that takes it puts it.
+- **Intra-verse highlighting is asked for by name.** `diff`'s `text` is
+  `"none"`, `"words"` (UAX-29) or `"chars"` (graphemes), and required; an
+  unknown name REJECTS rather than defaulting. `"none"` builds no CST and no
+  mask. The runs ride on a changed unit's
   `text: {baseline, current}` as `{from, to, kind, what, note}`: UTF-16 spans
   into that side's own document, `what` one of `"markup"` | `"text"` |
   `"whitespace"`, and `note` true inside a footnote or cross-reference. They
@@ -212,8 +219,8 @@ from the `chapters` section.
   concatenating the rest gives the `"text"` mask cut of the same span. A note
   is its own reading: words never span its edge (`servant\f + \fr 1:1 …\f*`
   leaves `servant` unchanged), and a renderer keeps `note` runs apart from the
-  verse's rather than joining `servant` to `1:1`. `unchanged` and `moved` units carry NO `text` key — a pure
-  move must not highlight, and a whole-Bible skeleton is mostly those.
+  verse's rather than joining `servant` to `1:1`. An `unchanged` unit carries
+  NO `text` key.
 - **UTF-16 offsets, LF-canonical input.** Every offset out is a CodeMirror
   code-unit offset. That assumes the text is LF-normalized: CodeMirror counts a
   line break as ONE position, a literal `\r\n` is TWO UTF-16 code units, so

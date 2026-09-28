@@ -402,40 +402,51 @@ export function book(text) {
 }
 
 /**
- * The diff skeleton as JSON. Spans are UTF-16 offsets into each side's own
- * document.
+ * The diff skeleton as JSON: the changed units of two documents, in the
+ * current document's order. Spans are UTF-16 offsets into each side's own document.
  *
- * `text_mode` is `"none"` | `"words"` | `"chars"`: the intra-verse runs a
- * `modified` unit is highlighted by, at UAX-29 word or grapheme grain.
- * `"none"` computes nothing — no CST, no mask — and yields the same JSON the
- * door returned before runs existed.
+ * ```ts
+ * interface DiffOptions {
+ *   text: "none" | "words" | "chars";   // required
+ *   unchanged?: boolean;                // send unchanged units too; default false
+ * }
+ * diff(baseline: string, current: string, opts: DiffOptions): string;
+ * ```
+ *
+ * `text` is the intra-verse runs a `modified`, `added` or `deleted` unit is
+ * highlighted by, at UAX-29 word or grapheme grain; `"none"` computes nothing
+ * — no CST, no mask. It is required: which of the three a screen draws is the
+ * caller's to say. An unknown key, a wrong type or an unknown mode throws by
+ * name.
+ *
+ * `unchanged: true` adds every unchanged unit in its place, for a view that
+ * draws the whole book from the skeleton. Nothing else changes: the ids, the
+ * spans and the runs are the same in both.
  * @param {string} baseline
  * @param {string} current
- * @param {string} text_mode
+ * @param {DiffOptions} opts
  * @returns {string}
  */
-export function diff(baseline, current, text_mode) {
-    let deferred5_0;
-    let deferred5_1;
+export function diff(baseline, current, opts) {
+    let deferred4_0;
+    let deferred4_1;
     try {
         const ptr0 = passStringToWasm0(baseline, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
         const ptr1 = passStringToWasm0(current, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len1 = WASM_VECTOR_LEN;
-        const ptr2 = passStringToWasm0(text_mode, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len2 = WASM_VECTOR_LEN;
-        const ret = wasm.diff(ptr0, len0, ptr1, len1, ptr2, len2);
-        var ptr4 = ret[0];
-        var len4 = ret[1];
+        const ret = wasm.diff(ptr0, len0, ptr1, len1, opts);
+        var ptr3 = ret[0];
+        var len3 = ret[1];
         if (ret[3]) {
-            ptr4 = 0; len4 = 0;
+            ptr3 = 0; len3 = 0;
             throw takeFromExternrefTable0(ret[2]);
         }
-        deferred5_0 = ptr4;
-        deferred5_1 = len4;
-        return getStringFromWasm0(ptr4, len4);
+        deferred4_0 = ptr3;
+        deferred4_1 = len3;
+        return getStringFromWasm0(ptr3, len3);
     } finally {
-        wasm.__wbindgen_free(deferred5_0, deferred5_1, 1);
+        wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
     }
 }
 

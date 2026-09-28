@@ -217,7 +217,7 @@ fn diff_listing(baseline: &str, current: &str) -> String {
 
     let mut out = format!(
         "=== diff {} bytes vs {} bytes\n\
-         === {} slots, {} units: {} unchanged, {} modified, {} added, {} deleted, {} moved\n\
+         === {} slots, {} units: {} unchanged, {} modified, {} added, {} deleted\n\
          === {} replay splices\n\n",
         baseline.len(),
         current.len(),
@@ -227,7 +227,6 @@ fn diff_listing(baseline: &str, current: &str) -> String {
         census(Status::Modified),
         census(Status::Added),
         census(Status::Deleted),
-        census(Status::Moved),
         edits.len(),
     );
 
@@ -244,9 +243,6 @@ fn diff_listing(baseline: &str, current: &str) -> String {
         }
         if unit.is_usfm_structure_change {
             flags.push("usfm");
-        }
-        if unit.displaced {
-            flags.push("displaced");
         }
         if unit.relabeled {
             flags.push("relabeled");

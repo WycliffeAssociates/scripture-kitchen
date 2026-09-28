@@ -75,6 +75,14 @@ export interface ParseOptions {
     utf16?: boolean;
 }
 
+/** `diff`'s options. */
+export interface DiffOptions {
+    /** The runs a changed unit is highlighted by: UAX-29 words, graphemes, or none. */
+    text: "none" | "words" | "chars";
+    /** Send unchanged units too, in their places; default false. */
+    unchanged?: boolean;
+}
+
 /** `attrs`'s options. */
 export interface AttrsOptions {
     /** `from`/`to` and every word returned are UTF-16 code units; default bytes. */
@@ -649,15 +657,28 @@ export function attrs(text: string, from: number, to: number, opts?: AttrsOption
 export function book(text: string): string;
 
 /**
- * The diff skeleton as JSON. Spans are UTF-16 offsets into each side's own
- * document.
+ * The diff skeleton as JSON: the changed units of two documents, in the
+ * current document's order. Spans are UTF-16 offsets into each side's own document.
  *
- * `text_mode` is `"none"` | `"words"` | `"chars"`: the intra-verse runs a
- * `modified` unit is highlighted by, at UAX-29 word or grapheme grain.
- * `"none"` computes nothing — no CST, no mask — and yields the same JSON the
- * door returned before runs existed.
+ * ```ts
+ * interface DiffOptions {
+ *   text: "none" | "words" | "chars";   // required
+ *   unchanged?: boolean;                // send unchanged units too; default false
+ * }
+ * diff(baseline: string, current: string, opts: DiffOptions): string;
+ * ```
+ *
+ * `text` is the intra-verse runs a `modified`, `added` or `deleted` unit is
+ * highlighted by, at UAX-29 word or grapheme grain; `"none"` computes nothing
+ * — no CST, no mask. It is required: which of the three a screen draws is the
+ * caller's to say. An unknown key, a wrong type or an unknown mode throws by
+ * name.
+ *
+ * `unchanged: true` adds every unchanged unit in its place, for a view that
+ * draws the whole book from the skeleton. Nothing else changes: the ids, the
+ * spans and the runs are the same in both.
  */
-export function diff(baseline: string, current: string, text_mode: string): string;
+export function diff(baseline: string, current: string, opts: DiffOptions): string;
 
 /**
  * A `markers.ext` file, read into the list [`set_extensions`] takes.
@@ -954,7 +975,7 @@ export interface InitOutput {
     readonly attrResolve: (a: number, b: number, c: number) => number;
     readonly attrs: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
     readonly book: (a: number, b: number) => [number, number];
-    readonly diff: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+    readonly diff: (a: number, b: number, c: number, d: number, e: any) => [number, number, number, number];
     readonly edits_lens: (a: number) => [number, number];
     readonly edits_spans: (a: number) => [number, number];
     readonly edits_text: (a: number) => [number, number];

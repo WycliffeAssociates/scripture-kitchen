@@ -2,6 +2,38 @@
 
 Per-pass decision ledger. Newest section first.
 
+## 0.1.8 — `diff` sends what changed; no moves
+
+**A verse out of order is a deletion and an addition** (Will). `Moved` was a
+third branch no diff view has a picture for, and it cost two slots per unit,
+a displacement pass and a ghost position on the wire. A pair the coalescer
+finds is kept only in relational order (current slot after baseline slot, no
+shared slot between); out of order, the two halves stay one-sided. The price
+is atomicity: a reviewer can take one half of a swap and not the other, which
+leaves the verse twice or not at all, and lint reports both.
+
+**Changed-only is the default, and `text` is required** (Will, from Sefer's
+review). Every production caller wants words and changed units; the dev
+playground passes `unchanged: true`. On en_ulb Psalms the unchanged units were
+799 KB of a 1,364 KB answer.
+
+**A one-sided unit's absent side is a point, not an anchor index.** It is an
+empty range at that side's cursor over the slots, which is where a merge that
+takes the unit emits it; the law is tested on all 23 cases and on the corpus
+sweep. Sefer asked for a position on both sides so no view has to walk the
+units to place a hunk. The first proposal (`afterSide` + `afterAt`, the nearest
+aligned slot) left that walk in whenever the anchor was on the other side.
+The empty range replaced `0..0`, so the shape did not change.
+
+**Nothing on the wire refers to a unit by index.** Units come in the CURRENT
+document's order, `slots` is gone, and `coveredBy` keeps its sid and loses its
+unit. A dropped unchanged unit therefore leaves nothing dangling, and one wire
+shape serves both modes.
+
+**`unchanged` + `relabeled` is dropped with the rest.** It is byte-equal and in
+place, so either side merges to the same bytes; it arises only from the dup
+counters (case 13), and its deleted sibling is sent.
+
 ## Designator members, labels on the Toc, and options objects at the wall
 
 **A segment is a coordinate and a list has holes** (Will). `designator::verse`

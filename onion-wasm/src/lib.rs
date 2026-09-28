@@ -129,6 +129,14 @@ export interface ParseOptions {
   utf16?: boolean;
 }
 
+/** `diff`'s options. */
+export interface DiffOptions {
+  /** The runs a changed unit is highlighted by: UAX-29 words, graphemes, or none. */
+  text: "none" | "words" | "chars";
+  /** Send unchanged units too, in their places; default false. */
+  unchanged?: boolean;
+}
+
 /** `attrs`'s options. */
 export interface AttrsOptions {
   /** `from`/`to` and every word returned are UTF-16 code units; default bytes. */
@@ -461,17 +469,33 @@ pub fn format(text: &str, opts: &FormatOpts) -> String {
 // diff — the one rich structure
 // ---------------------------------------------------------------------------
 
-/// The skeleton crosses as serde
-/// JSON. Cold path (a modal opens), zero drift, and the old editors' camelCase
-/// contract back nearly verbatim. The unit ids are rendered in RUST — a JS-side
-/// id renderer is the one place identity could drift, and it is rejected.
+/// The skeleton crosses as serde JSON. Cold path (a review opens), zero drift,
+/// camelCase. The unit ids are rendered in RUST — a JS-side id renderer is the
+/// one place identity could drift, and it is rejected.
+///
+/// ```text
+/// baseline  \id GEN ␊ \c 1 ␊ \v 1 one ␊ \v 2 two ␊ \v 3 three ␊
+/// current   \id GEN ␊ \c 1 ␊ \v 1 one ␊ \v 3 three ␊
+///
+/// units           [ { unitId: "GEN 1:2", status: "deleted",
+///                     baseline: [22, 31],   ← its bytes
+///                     current:  [22, 22] }] ← where it goes back
+/// unchangedCount  4   (GEN 0:0, 1:0, 1:1 and 1:3, not sent)
+/// ```
+///
+/// Units come in the CURRENT document's order: every `current` span, points
+/// included, starts at or after the one before. The baseline spans are not
+/// always in order (a rebridged pair can sit on either side of a verse added
+/// beside it), so a baseline view sorts by `baseline[0]`. Nothing refers to a
+/// unit by index, so a dropped unchanged unit leaves nothing dangling.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct WireSkeleton {
     baseline_len: u32,
     current_len: u32,
+    /// Every unchanged unit, sent or not.
+    unchanged_count: u32,
     units: Vec<WireUnit>,
-    slots: Vec<WireSlot>,
 }
 
 #[derive(Serialize)]
@@ -484,11 +508,11 @@ struct WireUnit {
     /// The rendered address of each side, `null` when the unit is one-sided.
     baseline_sid: Option<String>,
     current_sid: Option<String>,
-    /// UTF-16 spans of each side's own document. Empty (`from == to`) is the
-    /// absent side.
+    /// UTF-16 spans of each side's own document. The absent side of a
+    /// one-sided unit is EMPTY (`from == to`) at the point where the unit
+    /// would go in that document; its sid is `null`.
     baseline: [u32; 2],
     current: [u32; 2],
-    displaced: bool,
     relabeled: bool,
     baseline_count: u32,
     current_count: u32,
@@ -496,9 +520,8 @@ struct WireUnit {
     covered_by: Option<WireCoveredBy>,
     is_whitespace_change: bool,
     is_usfm_structure_change: bool,
-    /// Present only when `textMode` asked for runs AND this unit has any —
-    /// `unchanged` and `moved` units carry none, and a whole-Bible skeleton is
-    /// mostly those, so the field is ABSENT rather than null.
+    /// Present only when `text` asked for runs AND this unit has any — an
+    /// `unchanged` unit carries none, so the field is ABSENT rather than null.
     #[serde(skip_serializing_if = "Option::is_none")]
     text: Option<WireUnitText>,
 }
@@ -533,18 +556,8 @@ struct WireTextRun {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct WireCoveredBy {
-    unit: u32,
     sid: String,
     side: &'static str,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct WireSlot {
-    unit: u32,
-    role: &'static str,
-    after_unit: Option<u32>,
-    after_side: Option<&'static str>,
 }
 
 fn runs(runs: &[TextDiffRun], index: &Utf16Index<'_>) -> Vec<WireTextRun> {
@@ -567,27 +580,33 @@ fn runs(runs: &[TextDiffRun], index: &Utf16Index<'_>) -> Vec<WireTextRun> {
         .collect()
 }
 
-fn side_name(side: MergeSide) -> &'static str {
-    match side {
-        MergeSide::Baseline => "baseline",
-        MergeSide::Current => "current",
-    }
-}
-
 fn wire(
     skeleton: &DiffSkeleton,
     texts: &[Option<UnitTextDiff>],
     baseline: &Utf16Index<'_>,
     current: &Utf16Index<'_>,
+    unchanged: bool,
 ) -> WireSkeleton {
     let sid = |addr: &Option<Addr>| addr.map(|addr| addr.to_string());
+    // The current document's order: each unit at the slot that places it in
+    // the current, which is every slot but a pair's baseline half. A deleted
+    // unit sits at its own slot, where its point is.
+    let order = skeleton
+        .slots
+        .iter()
+        .filter(|slot| slot.role != SlotRole::PairBaseline)
+        .map(|slot| slot.unit as usize);
     WireSkeleton {
         baseline_len: baseline.len_utf16(),
         current_len: current.len_utf16(),
-        units: skeleton
+        unchanged_count: skeleton
             .units
             .iter()
-            .zip(texts)
+            .filter(|unit| unit.status == Status::Unchanged)
+            .count() as u32,
+        units: order
+            .map(|index| (&skeleton.units[index], &texts[index]))
+            .filter(|(unit, _)| unchanged || unit.status != Status::Unchanged)
             .map(|(unit, text)| WireUnit {
                 unit_id: unit.id.clone(),
                 kind: match unit.kind {
@@ -601,7 +620,6 @@ fn wire(
                     Status::Modified => "modified",
                     Status::Added => "added",
                     Status::Deleted => "deleted",
-                    Status::Moved => "moved",
                 },
                 baseline_sid: sid(&unit.baseline_addr),
                 current_sid: sid(&unit.current_addr),
@@ -613,13 +631,11 @@ fn wire(
                     current.to_utf16(unit.current.start),
                     current.to_utf16(unit.current.end),
                 ],
-                displaced: unit.displaced,
                 relabeled: unit.relabeled,
                 baseline_count: unit.dup_context.baseline_count,
                 current_count: unit.dup_context.current_count,
                 is_dup: unit.dup_context.is_dup(),
                 covered_by: unit.covered_by.map(|covered| WireCoveredBy {
-                    unit: covered.unit,
                     sid: covered.addr.to_string(),
                     side: match covered.side {
                         CoveredSide::Baseline => "baseline",
@@ -634,45 +650,67 @@ fn wire(
                 }),
             })
             .collect(),
-        slots: skeleton
-            .slots
-            .iter()
-            .map(|slot| WireSlot {
-                unit: slot.unit,
-                role: match slot.role {
-                    SlotRole::Shared => "shared",
-                    SlotRole::BaselineOnly => "baselineOnly",
-                    SlotRole::CurrentOnly => "currentOnly",
-                    SlotRole::PairBaseline => "pairBaseline",
-                    SlotRole::PairCurrent => "pairCurrent",
-                },
-                after_unit: slot.after.map(|anchor| anchor.unit),
-                after_side: slot.after.map(|anchor| side_name(anchor.side)),
-            })
-            .collect(),
     }
 }
 
-/// The diff skeleton as JSON. Spans are UTF-16 offsets into each side's own
-/// document.
+/// The diff skeleton as JSON: the changed units of two documents, in the
+/// current document's order. Spans are UTF-16 offsets into each side's own document.
 ///
-/// `text_mode` is `"none"` | `"words"` | `"chars"`: the intra-verse runs a
-/// `modified` unit is highlighted by, at UAX-29 word or grapheme grain.
-/// `"none"` computes nothing — no CST, no mask — and yields the same JSON the
-/// door returned before runs existed.
+/// ```ts
+/// interface DiffOptions {
+///   text: "none" | "words" | "chars";   // required
+///   unchanged?: boolean;                // send unchanged units too; default false
+/// }
+/// diff(baseline: string, current: string, opts: DiffOptions): string;
+/// ```
+///
+/// `text` is the intra-verse runs a `modified`, `added` or `deleted` unit is
+/// highlighted by, at UAX-29 word or grapheme grain; `"none"` computes nothing
+/// — no CST, no mask. It is required: which of the three a screen draws is the
+/// caller's to say. An unknown key, a wrong type or an unknown mode throws by
+/// name.
+///
+/// `unchanged: true` adds every unchanged unit in its place, for a view that
+/// draws the whole book from the skeleton. Nothing else changes: the ids, the
+/// spans and the runs are the same in both.
 #[wasm_bindgen]
-pub fn diff(baseline: &str, current: &str, text_mode: &str) -> Result<String, JsError> {
-    diffed(baseline, current, text_mode).map_err(|error| JsError::new(&error))
+pub fn diff(
+    baseline: &str,
+    current: &str,
+    #[wasm_bindgen(unchecked_param_type = "DiffOptions")] opts: JsValue,
+) -> Result<String, JsError> {
+    let opts = diff_options(Some(&opts)).map_err(|error| JsError::new(&error))?;
+    diffed(baseline, current, opts).map_err(|error| JsError::new(&error))
+}
+
+/// [`diff`]'s options, read.
+#[derive(Debug, Clone, Copy)]
+struct DiffOptions {
+    text: TextDiffMode,
+    unchanged: bool,
+}
+
+fn diff_options(value: Option<&JsValue>) -> Result<DiffOptions, String> {
+    let bag = options::bag(value, "diff", &["text", "unchanged"])?;
+    let text = options::get(bag.as_ref(), "text")
+        .ok_or("diff: text is required; expected \"none\", \"words\" or \"chars\"")?
+        .as_string()
+        .ok_or("diff: text must be a string")?;
+    Ok(DiffOptions {
+        text: mode(&text)?,
+        unchanged: options::flag(bag.as_ref(), "diff", "unchanged")?,
+    })
 }
 
 /// `diff`'s body, split from the door for the same reason [`merged`] is.
-fn diffed(baseline: &str, current: &str, text_mode: &str) -> Result<String, String> {
-    let (skeleton, texts) = diff::diff_with_text(baseline, current, mode(text_mode)?);
+fn diffed(baseline: &str, current: &str, opts: DiffOptions) -> Result<String, String> {
+    let (skeleton, texts) = diff::diff_with_text(baseline, current, opts.text);
     let wire = wire(
         &skeleton,
         &texts,
         &Utf16Index::new(baseline.as_bytes()),
         &Utf16Index::new(current.as_bytes()),
+        opts.unchanged,
     );
     Ok(serde_json::to_string(&wire).expect("the wire structs are always serializable"))
 }
@@ -684,7 +722,9 @@ fn mode(name: &str) -> Result<TextDiffMode, String> {
         "none" => Ok(TextDiffMode::None),
         "words" => Ok(TextDiffMode::Words),
         "chars" => Ok(TextDiffMode::Chars),
-        other => Err(format!("unknown text mode {other:?}")),
+        other => Err(format!(
+            "diff: unknown text mode {other:?}; expected \"none\", \"words\" or \"chars\""
+        )),
     }
 }
 
@@ -1267,7 +1307,7 @@ mod tests {
     fn the_diff_wire_is_camel_case_json_with_utf16_spans() {
         let baseline = "\\id GEN\n\\c 1\n\\v 1 λόγος one\n\\v 2 two\n";
         let current = "\\id GEN\n\\c 1\n\\v 1 λόγος one\n\\v 2 TWO\n";
-        let json = diffed(baseline, current, "none").unwrap();
+        let json = diffed(baseline, current, diff_opts(TextDiffMode::None, false)).unwrap();
         assert!(json.contains("\"unitId\""), "{json}");
         assert!(!json.contains("\"text\""), "none computes no runs: {json}");
         assert!(json.contains("\"isWhitespaceChange\""));
@@ -1296,8 +1336,10 @@ mod tests {
     fn text_mode_runs_only_where_a_highlight_belongs() {
         let baseline = "\\id GEN\n\\c 1\n\\v 1 one\n\\v 2 the \\w quick\\w* fox\n";
         let current = "\\id GEN\n\\c 1\n\\v 1 one\n\\v 2 the \\w slow\\w* fox\n";
-        let parsed: serde_json::Value =
-            serde_json::from_str(&diffed(baseline, current, "words").unwrap()).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(
+            &diffed(baseline, current, diff_opts(TextDiffMode::Words, true)).unwrap(),
+        )
+        .unwrap();
         let units = parsed["units"].as_array().unwrap();
         for unit in units.iter().filter(|unit| unit["status"] == "unchanged") {
             assert!(unit.get("text").is_none(), "{unit}");
@@ -1351,8 +1393,98 @@ mod tests {
     /// highlighting with nothing to see.
     #[test]
     fn an_unknown_text_mode_rejects() {
-        assert!(diffed("\\id GEN\n", "\\id GEN\n", "wrods").is_err());
-        assert!(diffed("\\id GEN\n", "\\id GEN\n", "chars").is_ok());
+        assert!(mode("wrods").unwrap_err().contains("\"wrods\""));
+        assert_eq!(mode("chars"), Ok(TextDiffMode::Chars));
+    }
+
+    fn diff_opts(text: TextDiffMode, unchanged: bool) -> DiffOptions {
+        DiffOptions { text, unchanged }
+    }
+
+    /// The example on [`WireSkeleton`], held.
+    #[test]
+    fn a_changed_only_diff_sends_the_changed_units_and_counts_the_rest() {
+        let baseline = "\\id GEN\n\\c 1\n\\v 1 one\n\\v 2 two\n\\v 3 three\n";
+        let current = "\\id GEN\n\\c 1\n\\v 1 one\n\\v 3 three\n";
+        let parsed: serde_json::Value = serde_json::from_str(
+            &diffed(baseline, current, diff_opts(TextDiffMode::None, false)).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(parsed["unchangedCount"], 4);
+        assert!(parsed.get("slots").is_none());
+        let units = parsed["units"].as_array().unwrap();
+        assert_eq!(units.len(), 1);
+        let deleted = &units[0];
+        assert_eq!(deleted["unitId"], "GEN 1:2");
+        assert_eq!(deleted["status"], "deleted");
+        assert_eq!(deleted["baseline"], serde_json::json!([22, 31]));
+        assert_eq!(&baseline[22..31], "\\v 2 two\n");
+        assert_eq!(deleted["current"], serde_json::json!([22, 22]));
+        assert!(deleted["currentSid"].is_null());
+        assert!(current[22..].starts_with("\\v 3"));
+    }
+
+    /// A rebridged pair whose current half follows an added verse: the pair's
+    /// FIRST slot is its baseline half, ahead of the addition, but in the
+    /// current the addition comes first, and so it does on the wire.
+    #[test]
+    fn units_follow_the_current_document_past_a_rebridged_pair() {
+        let baseline = "\\id GEN\n\\c 1\n\\v 2-3 two three\n";
+        let current = "\\id GEN\n\\c 1\n\\v 1 one\n\\v 2 two three\n";
+        let json = diffed(baseline, current, diff_opts(TextDiffMode::None, false)).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let units: Vec<String> = parsed["units"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|unit| {
+                format!(
+                    "{} {}",
+                    unit["unitId"].as_str().unwrap(),
+                    unit["status"].as_str().unwrap()
+                )
+            })
+            .collect();
+        assert_eq!(units, ["GEN 1:1 added", "GEN 1:2 modified"]);
+    }
+
+    /// `unchanged: true` is the same units, with the unchanged ones in their
+    /// places: nothing sent in changed-only differs from its full-mode twin.
+    #[test]
+    fn the_full_diff_is_the_changed_one_with_the_unchanged_units_in_place() {
+        let baseline = "\\id GEN\n\\c 1\n\\v 1 one\n\\v 2 two\n\\v 3 three\n\\v 4 four\n";
+        let current =
+            "\\id GEN\n\\c 1\n\\v 1 ONE\n\\v 3 three\n\\v 2 two\n\\v 4 four\n\\v 5 five\n";
+        let units = |unchanged: bool| {
+            let json =
+                diffed(baseline, current, diff_opts(TextDiffMode::Words, unchanged)).unwrap();
+            let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+            parsed["units"].as_array().unwrap().clone()
+        };
+        let (full, changed) = (units(true), units(false));
+        let kept: Vec<_> = full
+            .iter()
+            .filter(|unit| unit["status"] != "unchanged")
+            .cloned()
+            .collect();
+        assert_eq!(kept, changed);
+        // The current document's order: every span, points included, starts
+        // at or after the last one.
+        let starts: Vec<u64> = full
+            .iter()
+            .map(|unit| unit["current"][0].as_u64().unwrap())
+            .collect();
+        assert!(starts.is_sorted(), "{starts:?}");
+        // The swap is a deletion and an addition, never a third kind.
+        let statuses: Vec<&str> = changed
+            .iter()
+            .map(|unit| unit["status"].as_str().unwrap())
+            .collect();
+        assert!(
+            statuses
+                .iter()
+                .all(|s| ["modified", "added", "deleted"].contains(s))
+        );
     }
 
     #[test]

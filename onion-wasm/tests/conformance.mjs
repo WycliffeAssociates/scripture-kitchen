@@ -651,7 +651,16 @@ if (corpus && existsSync(corpus)) {
     "\\q1 \\v 2-3",
     "\\q2 \\v 2-3",
   );
-  const skeleton = JSON.parse(rawDiff(baseline, current, "words"));
+  const skeleton = JSON.parse(rawDiff(baseline, current, { text: "words" }));
+  // Changed units only, in the current document's order: each current span,
+  // points included, opens at or after the one before closed, so the gaps are
+  // the unchanged text.
+  let at = 0;
+  for (const unit of skeleton.units) {
+    check(unit.status !== "unchanged", `${unit.unitId}: changed-only by default`);
+    check(unit.current[0] >= at, `${unit.unitId}: in the current document's order`);
+    at = unit.current[1];
+  }
   let runs = 0;
   let markupSeen = false;
   let noteReading = "";

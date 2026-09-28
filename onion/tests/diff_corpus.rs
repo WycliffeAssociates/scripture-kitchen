@@ -68,6 +68,48 @@ fn check_pair(label: &str, baseline: &str, current: &str) -> DiffSkeleton {
         baseline.as_bytes(),
         "{label}: all-baseline merge"
     );
+
+    // A one-sided unit's absent side is the point where taking it lands.
+    for unit in skeleton
+        .units
+        .iter()
+        .filter(|unit| matches!(unit.kind, UnitKind::Deleted | UnitKind::Added))
+        .take(32)
+    {
+        let (take, over, host, block, at) = match unit.kind {
+            UnitKind::Deleted => (
+                MergeSide::Baseline,
+                MergeSide::Current,
+                current,
+                &baseline[unit.baseline.start as usize..unit.baseline.end as usize],
+                &unit.current,
+            ),
+            _ => (
+                MergeSide::Current,
+                MergeSide::Baseline,
+                baseline,
+                &current[unit.current.start as usize..unit.current.end as usize],
+                &unit.baseline,
+            ),
+        };
+        assert!(at.is_empty(), "{label}: {} absent side is a point", unit.id);
+        let decisions: Decisions = [(unit.id.clone(), take)].into();
+        let merged = merge(
+            &skeleton,
+            baseline.as_bytes(),
+            current.as_bytes(),
+            &decisions,
+            over,
+        )
+        .unwrap();
+        let at = at.start as usize;
+        let want = format!("{}{block}{}", &host[..at], &host[at..]);
+        assert!(
+            merged == want.as_bytes(),
+            "{label}: {} lands at its point",
+            unit.id
+        );
+    }
     skeleton
 }
 
@@ -220,15 +262,18 @@ fn a_deleted_a_duplicated_and_a_reordered_verse_all_round_trip() {
 
     let reordered = reorder_two_verses(&source);
     let skeleton = check_pair("MRK verses reordered", &source, &reordered);
-    let moved: Vec<_> = skeleton
+    // A swap is one verse deleted where it was and added where it is; taking
+    // the baseline side of both restores the baseline byte-for-byte.
+    let one_sided: Vec<_> = skeleton
         .units
         .iter()
-        .filter(|unit| unit.status == Status::Moved)
+        .filter(|unit| matches!(unit.status, Status::Deleted | Status::Added))
         .collect();
-    assert_eq!(moved.len(), 1, "a swap is one moved unit");
-    // Reverting the one move restores the baseline byte-for-byte.
-    let mut decisions = Decisions::new();
-    decisions.insert(moved[0].id.clone(), MergeSide::Baseline);
+    assert_eq!(one_sided.len(), 2, "a swap is a deletion and an addition");
+    let decisions: Decisions = one_sided
+        .iter()
+        .map(|unit| (unit.id.clone(), MergeSide::Baseline))
+        .collect();
     assert_eq!(
         merge(
             &skeleton,

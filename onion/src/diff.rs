@@ -6,8 +6,8 @@
 //!
 //! let d = diff(baseline, current);
 //! d.units  == [ GEN 0:0 Shared/Unchanged, GEN 1:0 Shared/Unchanged,
-//!               GEN 1:2 Coalesced/Moved ]      ← one decision, two slots
-//! d.slots  == [ Shared, Shared, PairCurrent, Shared, PairBaseline ]
+//!               GEN 1:1 Shared/Unchanged, GEN 1:2 Deleted, GEN 1:2@1 Added ]
+//! d.slots  == [ Shared, Shared, CurrentOnly, Shared, BaselineOnly ]
 //!
 //! to_edits(&d, &decisions, MergeSide::Current)      // the replay
 //! apply_splices(baseline, current, &edits) == current
@@ -20,8 +20,9 @@
 //!    computed that fact, so nothing is re-derived per token and nothing owns
 //!    text: a block is a [`Range<u32>`] plus a `Copy` [`Addr`].
 //! 2. **Alignment** — Myers (via `similar`) over the block addresses, then the
-//!    two-tier coalescing that turns a moved verse into ONE decision holding
-//!    two slots.
+//!    two-tier coalescing that pairs a rebridged or relabeled verse into ONE
+//!    decision holding two slots, when the two sit in relational order. A
+//!    verse out of order stays a deletion and an addition.
 //! 3. **Projection** — a merge is a walk of the slots emitting each unit's
 //!    chosen side, as bytes ([`merge`]) or as replay splices ([`to_edits`]).
 //!
@@ -277,29 +278,20 @@ pub enum UnitKind {
     Coalesced,
 }
 
+/// There is no `Moved`: a verse out of relational order is a deletion where it
+/// was and an addition where it is, the two branches every diff view draws.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Status {
     Unchanged,
     Modified,
     Added,
     Deleted,
-    Moved,
-}
-
-/// The nearest preceding aligned slot — what a UI hangs a floating hunk on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Anchor {
-    pub unit: u32,
-    /// Which side's address the anchor speaks: a `PairBaseline` slot anchors by
-    /// the baseline sid, everything else by the current one.
-    pub side: MergeSide,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Slot {
     pub unit: u32,
     pub role: SlotRole,
-    pub after: Option<Anchor>,
 }
 
 /// How many blocks on each side share a unit's pairing key — the CROSS-document
@@ -341,15 +333,16 @@ pub struct DecisionUnit {
     pub id: String,
     pub kind: UnitKind,
     pub status: Status,
-    /// Bytes of the BASELINE source. Empty (and `baseline_addr` `None`) for an
-    /// Added unit — presence is the address, never the range.
+    /// Bytes of the BASELINE source. For an Added unit, an EMPTY range at the
+    /// point in the baseline where the unit would go, which is where a merge
+    /// emits it (and `baseline_addr` is `None`: presence is the address, never
+    /// the range).
     pub baseline: Range<u32>,
-    /// Bytes of the CURRENT source. Empty for a Deleted unit.
+    /// Bytes of the CURRENT source. For a Deleted unit, an empty range at its
+    /// point in the current.
     pub current: Range<u32>,
     pub baseline_addr: Option<Addr>,
     pub current_addr: Option<Addr>,
-    /// A coalesced pair whose two slots are out of relational order.
-    pub displaced: bool,
     /// A coalesced pair that is byte-equal but differently addressed — the
     /// verse did not change, its NUMBER did.
     pub relabeled: bool,
@@ -516,7 +509,12 @@ fn build_skeleton(baseline: Side<'_>, current: Side<'_>) -> DiffSkeleton {
         .filter(|index| !shared_current.contains(index))
         .collect();
 
-    let ordered_pairs = coalesce(&baseline, &baseline_only, &current, &current_only);
+    let in_order = relational_order(&steps);
+    let ordered_pairs: Vec<(usize, usize)> =
+        coalesce(&baseline, &baseline_only, &current, &current_only)
+            .into_iter()
+            .filter(|&(b, c)| in_order(b, c))
+            .collect();
     let paired_baseline: FxHashSet<usize> = ordered_pairs.iter().map(|&(b, _)| b).collect();
     let paired_current: FxHashSet<usize> = ordered_pairs.iter().map(|&(_, c)| c).collect();
 
@@ -566,10 +564,7 @@ fn build_skeleton(baseline: Side<'_>, current: Side<'_>) -> DiffSkeleton {
             UnitKind::Shared => Status::Modified,
             UnitKind::Deleted => Status::Deleted,
             UnitKind::Added => Status::Added,
-            // Finalized once slot positions are known: Unchanged (same
-            // relational position) or Moved (displaced). Moved is the safe
-            // interim value.
-            UnitKind::Coalesced if byte_equal => Status::Moved,
+            UnitKind::Coalesced if byte_equal => Status::Unchanged,
             UnitKind::Coalesced => Status::Modified,
         };
         let both = baseline_block.is_some() && current_block.is_some();
@@ -591,7 +586,6 @@ fn build_skeleton(baseline: Side<'_>, current: Side<'_>) -> DiffSkeleton {
             current: current_range,
             baseline_addr: baseline_block.map(|b| b.addr),
             current_addr: current_block.map(|b| b.addr),
-            displaced: false,
             relabeled: matches!(kind, UnitKind::Coalesced)
                 && byte_equal
                 && baseline_block.map(|b| b.addr) != current_block.map(|b| b.addr),
@@ -652,16 +646,11 @@ fn build_skeleton(baseline: Side<'_>, current: Side<'_>) -> DiffSkeleton {
                 (unit, role)
             }
         };
-        slots.push(Slot {
-            unit,
-            role,
-            after: None,
-        });
+        slots.push(Slot { unit, role });
     }
 
-    finalize_displacement(&mut units, &slots);
     finalize_covered_by(&mut units);
-    finalize_anchors(&mut slots, &units);
+    finalize_points(&mut units, &slots);
 
     DiffSkeleton {
         slots,
@@ -747,46 +736,30 @@ fn unique_id(taken: &mut FxHashSet<String>, want: String) -> String {
     unreachable!("the suffix range is unbounded")
 }
 
-/// A coalesced pair is displaced iff its current slot precedes its baseline
-/// slot, or a Shared slot sits strictly between them. One-sided Added/Deleted
-/// slots between the two do not count.
-fn finalize_displacement(units: &mut [DecisionUnit], slots: &[Slot]) {
-    let mut baseline_slot: FxHashMap<u32, usize> = FxHashMap::default();
-    let mut current_slot: FxHashMap<u32, usize> = FxHashMap::default();
-    for (index, slot) in slots.iter().enumerate() {
-        match slot.role {
-            SlotRole::PairBaseline => {
-                baseline_slot.insert(slot.unit, index);
+/// Whether a coalesced pair sits in relational order: its current slot follows
+/// its baseline slot with no Shared slot between. One-sided slots between the
+/// two do not count. A pair that fails this is not a pair.
+fn relational_order(steps: &[Step]) -> impl Fn(usize, usize) -> bool {
+    let mut baseline_at: FxHashMap<usize, usize> = FxHashMap::default();
+    let mut current_at: FxHashMap<usize, usize> = FxHashMap::default();
+    // `shared_before[i]`: how many Shared steps come before step `i`.
+    let mut shared_before = Vec::with_capacity(steps.len());
+    let mut shared = 0u32;
+    for (index, step) in steps.iter().enumerate() {
+        shared_before.push(shared);
+        match *step {
+            Step::Shared(_) => shared += 1,
+            Step::BaselineOnly(b) => {
+                baseline_at.insert(b, index);
             }
-            SlotRole::PairCurrent => {
-                current_slot.insert(slot.unit, index);
+            Step::CurrentOnly(c) => {
+                current_at.insert(c, index);
             }
-            _ => {}
         }
     }
-
-    for (index, unit) in units.iter_mut().enumerate() {
-        if !matches!(unit.kind, UnitKind::Coalesced) {
-            continue;
-        }
-        let index = index as u32;
-        let (Some(&base), Some(&cur)) = (baseline_slot.get(&index), current_slot.get(&index))
-        else {
-            continue;
-        };
-        let between = slots[base.min(cur) + 1..base.max(cur)]
-            .iter()
-            .any(|slot| matches!(slot.role, SlotRole::Shared));
-        unit.displaced = cur < base || between;
-        // A byte-different pair stays Modified however far it moved;
-        // displacement is still narrated on the flag.
-        if !matches!(unit.status, Status::Modified) {
-            unit.status = if unit.displaced {
-                Status::Moved
-            } else {
-                Status::Unchanged
-            };
-        }
+    move |b, c| {
+        let (base, cur) = (baseline_at[&b], current_at[&c]);
+        cur > base && shared_before[cur] == shared_before[base]
     }
 }
 
@@ -837,27 +810,29 @@ fn finalize_covered_by(units: &mut [DecisionUnit]) {
     }
 }
 
-/// Every slot's `after` is the nearest preceding aligned slot. A one-sided
-/// Added/Deleted slot never becomes an anchor — it is the thing that needs one.
-fn finalize_anchors(slots: &mut [Slot], units: &[DecisionUnit]) {
-    let mut last: Option<Anchor> = None;
-    for slot in slots.iter_mut() {
-        slot.after = last;
-        let side = match slot.role {
-            SlotRole::PairBaseline => MergeSide::Baseline,
-            SlotRole::Shared | SlotRole::PairCurrent => MergeSide::Current,
-            _ => continue,
-        };
-        let unit = &units[slot.unit as usize];
-        let addr = match side {
-            MergeSide::Baseline => unit.baseline_addr,
-            MergeSide::Current => unit.current_addr,
-        };
-        if addr.is_some() {
-            last = Some(Anchor {
-                unit: slot.unit,
-                side,
-            });
+/// Gives each one-sided unit's absent side an empty range at its insertion
+/// point: where that side's text stands at the unit's slot. Each side's blocks
+/// run forward through the slots, so this is the end of the last block that
+/// side bore before it, and it is where a merge emits the unit.
+fn finalize_points(units: &mut [DecisionUnit], slots: &[Slot]) {
+    let (mut baseline_end, mut current_end) = (0u32, 0u32);
+    for slot in slots {
+        let unit = &mut units[slot.unit as usize];
+        match slot.role {
+            SlotRole::Shared => {
+                baseline_end = unit.baseline.end;
+                current_end = unit.current.end;
+            }
+            SlotRole::BaselineOnly => {
+                unit.current = current_end..current_end;
+                baseline_end = unit.baseline.end;
+            }
+            SlotRole::CurrentOnly => {
+                unit.baseline = baseline_end..baseline_end;
+                current_end = unit.current.end;
+            }
+            SlotRole::PairBaseline => baseline_end = unit.baseline.end,
+            SlotRole::PairCurrent => current_end = unit.current.end,
         }
     }
 }
@@ -1245,9 +1220,8 @@ impl<'a> TotalText<'a> {
 }
 
 /// Word/grapheme runs inside one unit. Pure, deterministic, and status-gated:
-/// `Unchanged`/`Moved` yield `None` (a pure move must not highlight),
-/// `Added`/`Deleted` a tiling of the one side present, only `Modified` a
-/// two-sided split.
+/// `Unchanged` yields `None`, `Added`/`Deleted` a tiling of the one side
+/// present, only `Modified` a two-sided split.
 pub fn unit_text_diff(
     unit: &DecisionUnit,
     baseline: &TotalText<'_>,
@@ -1258,7 +1232,7 @@ pub fn unit_text_diff(
         return None;
     }
     match unit.status {
-        Status::Unchanged | Status::Moved => None,
+        Status::Unchanged => None,
         Status::Added => Some(UnitTextDiff {
             baseline: Vec::new(),
             current: one_sided(current, &unit.current, RunKind::Added),
@@ -1665,6 +1639,40 @@ mod tests {
             .iter()
             .map(|block| block.range.clone())
             .collect()
+    }
+
+    #[test]
+    fn the_module_example_holds() {
+        let baseline = "\\id GEN\n\\c 1\n\\v 1 one\n\\v 2 two\n";
+        let current = "\\id GEN\n\\c 1\n\\v 2 two\n\\v 1 one\n";
+        let d = diff(baseline, current);
+        let units: Vec<(String, UnitKind, Status)> = d
+            .units
+            .iter()
+            .map(|unit| (unit.id.clone(), unit.kind, unit.status))
+            .collect();
+        assert_eq!(
+            units,
+            [
+                ("GEN 0:0", UnitKind::Shared, Status::Unchanged),
+                ("GEN 1:0", UnitKind::Shared, Status::Unchanged),
+                ("GEN 1:1", UnitKind::Shared, Status::Unchanged),
+                ("GEN 1:2", UnitKind::Deleted, Status::Deleted),
+                ("GEN 1:2@1", UnitKind::Added, Status::Added),
+            ]
+            .map(|(id, kind, status)| (id.to_string(), kind, status))
+        );
+        let roles: Vec<SlotRole> = d.slots.iter().map(|slot| slot.role).collect();
+        assert_eq!(
+            roles,
+            [
+                SlotRole::Shared,
+                SlotRole::Shared,
+                SlotRole::CurrentOnly,
+                SlotRole::Shared,
+                SlotRole::BaselineOnly,
+            ]
+        );
     }
 
     #[test]

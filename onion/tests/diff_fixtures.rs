@@ -163,12 +163,14 @@ fn text<'a>(source: &'a str, range: &std::ops::Range<u32>) -> &'a str {
     &source[range.start as usize..range.end as usize]
 }
 
-fn baseline_addr(skeleton: &DiffSkeleton, unit: usize) -> Option<String> {
-    skeleton.units[unit].baseline_addr.map(|a| a.to_string())
-}
-
-fn current_addr(skeleton: &DiffSkeleton, unit: usize) -> Option<String> {
-    skeleton.units[unit].current_addr.map(|a| a.to_string())
+/// The empty range at the end of the unit whose current sid is `sid`.
+fn end_of(skeleton: &DiffSkeleton, sid: &str) -> std::ops::Range<u32> {
+    let unit = skeleton
+        .units
+        .iter()
+        .find(|unit| unit.current_addr.map(|a| a.to_string()).as_deref() == Some(sid))
+        .unwrap_or_else(|| panic!("no unit at {sid}"));
+    unit.current.end..unit.current.end
 }
 
 fn only(skeleton: &DiffSkeleton, kind: UnitKind) -> &usfm_onion::diff::DecisionUnit {
@@ -227,6 +229,45 @@ fn all_23_cases_partition_and_reassemble() {
         let (baseline, current) = sources(case);
         let skeleton = diff(&baseline, &current);
         assert_partition_reproduces_sources(&skeleton, &baseline, &current);
+        assert_points_are_where_a_take_lands(&skeleton, &baseline, &current);
+    }
+}
+
+/// A one-sided unit's absent side is an empty range at the point where taking
+/// it lands: a Deleted unit taken over an all-current merge is the current
+/// with the verse spliced in there, and an Added unit likewise in the baseline.
+fn assert_points_are_where_a_take_lands(skeleton: &DiffSkeleton, baseline: &str, current: &str) {
+    for unit in &skeleton.units {
+        let (take, over, host, block, at) = match unit.kind {
+            UnitKind::Deleted => (
+                MergeSide::Baseline,
+                MergeSide::Current,
+                current,
+                text(baseline, &unit.baseline),
+                &unit.current,
+            ),
+            UnitKind::Added => (
+                MergeSide::Current,
+                MergeSide::Baseline,
+                baseline,
+                text(current, &unit.current),
+                &unit.baseline,
+            ),
+            _ => continue,
+        };
+        assert!(at.is_empty(), "{}: the absent side is a point", unit.id);
+        let decisions: Decisions = [(unit.id.clone(), take)].into();
+        let merged = merge(
+            skeleton,
+            baseline.as_bytes(),
+            current.as_bytes(),
+            &decisions,
+            over,
+        )
+        .unwrap();
+        let at = at.start as usize;
+        let want = format!("{}{block}{}", &host[..at], &host[at..]);
+        assert_eq!(String::from_utf8(merged).unwrap(), want, "{}", unit.id);
     }
 }
 
@@ -264,45 +305,35 @@ fn case_8_paragraph_marker_change_is_usfm_structure_only() {
 }
 
 #[test]
-fn case_10_moved_unit_spans_exactly_two_linked_slots_in_document_order() {
-    let (skeleton, ..) = skeleton_for(10);
-    let moved = only(&skeleton, UnitKind::Coalesced);
-    assert_eq!(moved.status, Status::Moved);
-    let moved_id = moved.id.clone();
-
-    let baseline_order: Vec<Option<String>> = skeleton
-        .slots
-        .iter()
-        .filter(|slot| matches!(slot.role, SlotRole::Shared | SlotRole::PairBaseline))
-        .map(|slot| baseline_addr(&skeleton, slot.unit as usize))
-        .collect();
+fn case_10_a_swap_is_a_deletion_and_an_addition() {
+    let (skeleton, baseline, current) = skeleton_for(10);
+    assert_eq!(count(&skeleton, UnitKind::Coalesced), 0);
+    let deleted = only(&skeleton, UnitKind::Deleted);
+    let added = only(&skeleton, UnitKind::Added);
     assert_eq!(
-        baseline_order,
-        ["GEN 0:0", "GEN 1:0", "GEN 1:1", "GEN 1:2"]
-            .map(|s| Some(s.to_string()))
-            .to_vec()
+        deleted.baseline_addr.map(|a| a.to_string()),
+        added.current_addr.map(|a| a.to_string())
+    );
+    assert_eq!(
+        text(&baseline, &deleted.baseline),
+        text(&current, &added.current)
     );
 
-    let current_order: Vec<Option<String>> = skeleton
-        .slots
-        .iter()
-        .filter(|slot| matches!(slot.role, SlotRole::Shared | SlotRole::PairCurrent))
-        .map(|slot| current_addr(&skeleton, slot.unit as usize))
-        .collect();
-    assert_eq!(
-        current_order,
-        ["GEN 0:0", "GEN 1:0", "GEN 1:2", "GEN 1:1"]
-            .map(|s| Some(s.to_string()))
-            .to_vec()
-    );
-
-    // One decision, two ghosts.
-    let slots = skeleton
-        .slots
-        .iter()
-        .filter(|slot| skeleton.units[slot.unit as usize].id == moved_id)
-        .count();
-    assert_eq!(slots, 2);
+    // Two decisions: taking the baseline side of both puts the verse back.
+    let decisions: Decisions = [
+        (deleted.id.clone(), MergeSide::Baseline),
+        (added.id.clone(), MergeSide::Baseline),
+    ]
+    .into();
+    let merged = merge(
+        &skeleton,
+        baseline.as_bytes(),
+        current.as_bytes(),
+        &decisions,
+        MergeSide::Current,
+    )
+    .unwrap();
+    assert_eq!(merged, baseline.as_bytes());
 }
 
 #[test]
@@ -333,42 +364,8 @@ fn case_13_full_narration() {
     assert_eq!(deleted.dup_context.current_count, 1);
     assert!(deleted.dup_context.is_dup());
 
-    // 13.3: the deleted 'a' is anchored after GEN 1:0.
-    let deleted_id = deleted.id.clone();
-    let slot = skeleton
-        .slots
-        .iter()
-        .find(|slot| skeleton.units[slot.unit as usize].id == deleted_id)
-        .expect("the deleted unit owns a slot");
-    let anchor = slot.after.expect("the deleted unit has an anchor");
-    assert_eq!(
-        current_addr(&skeleton, anchor.unit as usize).as_deref(),
-        Some("GEN 1:0")
-    );
-
-    // 13.4: no two anchored hunks fight over one anchor.
-    let mut seen = Vec::new();
-    let mut anchored = Vec::new();
-    for slot in &skeleton.slots {
-        if seen.contains(&slot.unit) {
-            continue;
-        }
-        seen.push(slot.unit);
-        let unit = &skeleton.units[slot.unit as usize];
-        let needs_anchor =
-            unit.status == Status::Deleted || (unit.kind == UnitKind::Coalesced && unit.displaced);
-        if let (true, Some(anchor)) = (needs_anchor, slot.after) {
-            let sid = match anchor.side {
-                MergeSide::Baseline => baseline_addr(&skeleton, anchor.unit as usize),
-                MergeSide::Current => current_addr(&skeleton, anchor.unit as usize),
-            };
-            assert!(
-                !anchored.contains(&sid),
-                "two anchored hunks share an anchor"
-            );
-            anchored.push(sid);
-        }
-    }
+    // 13.3: the deleted 'a' goes back right after GEN 1:0.
+    assert_eq!(deleted.current, end_of(&skeleton, "GEN 1:0"));
 }
 
 #[test]
@@ -392,33 +389,11 @@ fn case_15_verses_merged_into_a_bridge() {
         Some("GEN 1:2")
     );
 
-    // 15.2 + 15.3: the deleted v2 is anchored after the PAIR's baseline sid,
-    // not after the shared chapter open.
+    // 15.2 + 15.3: in the current, the deleted v2 goes back where the pair's
+    // slots are, after the shared chapter open and before the bridge.
+    assert_eq!(deleted.current, end_of(&skeleton, "GEN 1:0"));
+    assert_eq!(deleted.current.start, pair.current.start);
     let pair_id = pair.id.clone();
-    let deleted_id = deleted.id.clone();
-    let deleted_slot = skeleton
-        .slots
-        .iter()
-        .position(|slot| skeleton.units[slot.unit as usize].id == deleted_id)
-        .unwrap();
-    let anchor = skeleton.slots[deleted_slot]
-        .after
-        .expect("the deleted v2 has an anchor");
-    assert_eq!(anchor.side, MergeSide::Baseline);
-    assert_eq!(
-        baseline_addr(&skeleton, anchor.unit as usize).as_deref(),
-        Some("GEN 1:1")
-    );
-    assert_eq!(skeleton.units[anchor.unit as usize].id, pair_id);
-
-    let pair_slot = skeleton
-        .slots
-        .iter()
-        .position(|slot| {
-            skeleton.units[slot.unit as usize].id == pair_id && slot.role == SlotRole::PairBaseline
-        })
-        .expect("the pair has a baseline slot");
-    assert!(pair_slot < deleted_slot);
 
     // 15.4 (pin 20): the deleted GEN 1:2 is covered by the pair's 1-2 bridge.
     let covered = deleted.covered_by.expect("the deleted v2 is covered");
@@ -505,10 +480,15 @@ fn case_23_renumber_typo_never_coalesces_across_keys() {
 }
 
 #[test]
-fn case_11_three_verses_one_displaced_has_exactly_one_moved_unit() {
+fn case_11_one_verse_out_of_order_is_a_deletion_and_an_addition() {
     let (skeleton, ..) = skeleton_for(11);
-    assert_eq!(count(&skeleton, UnitKind::Coalesced), 1);
-    assert_eq!(only(&skeleton, UnitKind::Coalesced).status, Status::Moved);
+    assert_eq!(count(&skeleton, UnitKind::Coalesced), 0);
+    let deleted = only(&skeleton, UnitKind::Deleted);
+    let added = only(&skeleton, UnitKind::Added);
+    assert_eq!(
+        deleted.baseline_addr.map(|a| a.to_string()),
+        added.current_addr.map(|a| a.to_string())
+    );
 }
 
 #[test]
@@ -860,12 +840,8 @@ fn text_diff_is_status_gated_and_reconstructs_each_side() {
 
         for (unit, diff) in skeleton.units.iter().zip(&texts) {
             match unit.status {
-                Status::Unchanged | Status::Moved => {
-                    assert!(
-                        diff.is_none(),
-                        "case {}: a pure move must not highlight",
-                        case.n
-                    )
+                Status::Unchanged => {
+                    assert!(diff.is_none(), "case {}: unchanged highlights", case.n)
                 }
                 _ => {
                     let diff = diff.as_ref().expect("a changed unit has runs");
