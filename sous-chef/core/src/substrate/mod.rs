@@ -360,8 +360,8 @@ pub type RunLengths = [u32; RUN_BUCKETS];
 /// What one end of a chapter owes its neighbor, and nothing more.
 ///
 /// A leading edge fills `outer`, `open_pair`, `edge_case`, and `edge_quoted`;
-/// a trailing edge fills `outer`, `open_pair`, `open_follow`, and `blank`. The slot the
-/// other side does not use stays `None`.
+/// a trailing edge fills `outer`, `open_pair`, `open_follow`, and `blank`.
+/// The slot the other side does not use stays empty.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Edge {
     /// The edge scalar's own class, which is what the neighbor chapter sees.
