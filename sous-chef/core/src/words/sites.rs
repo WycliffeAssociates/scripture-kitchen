@@ -17,7 +17,9 @@ use rustc_hash::FxHashMap;
 use crate::judge::{Pattern, PatternIndex, PatternKey, TerminalTable};
 use crate::pass::{Findings, collect_verses};
 use crate::substrate::ScalarKey;
-use crate::{BookIndex, Chapter, ConventionDigest, FindingKind, Reasons, TextRange, Verse};
+use crate::{
+    BookIndex, Chapter, ConventionDigest, FindingKind, Reasons, TextRange, Verse, VerseKey,
+};
 
 use super::{
     DoubleTotal, Form, Gap, WordAggregate, WordTotal, for_each_letter_run, for_each_word,
@@ -218,10 +220,12 @@ impl WordSites {
         let mut runs: Vec<PatternIndex> = Vec::new();
         // The pair, not the word: a chapter seam ends it, which is what a
         // fresh scan per chapter already says.
-        let mut previous: Option<(u64, u32, u32)> = None;
+        let mut previous: Option<(u64, u32, u32, Option<VerseKey>)> = None;
         for_each_word(slice, verses, |word| {
-            if let Some((hash, from, to)) = previous.replace((word.hash, word.from, word.to))
+            if let Some((hash, from, to, verse)) =
+                previous.replace((word.hash, word.from, word.to, word.verse))
                 && hash == word.hash
+                && verse == word.verse
                 && let Some(gap) = gap_between(slice, to, word.from)
                 // A separator whose last glyph forces a capital in this
                 // corpus's own table is a sentence terminal, not a

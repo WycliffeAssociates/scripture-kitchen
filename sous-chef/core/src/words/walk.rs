@@ -42,8 +42,8 @@ use super::{
     Before, DoubleCount, Form, LETTER_RUN_LANES, LETTER_RUN_MAX, LETTER_RUN_MIN, WordCount,
     WordRow, letter_run_lane,
 };
-use crate::Verse;
 use crate::substrate::{ScalarKey, is_run_atom};
+use crate::{Verse, VerseKey};
 use mise::unicode::{Class, class_of};
 
 use crate::unicode::{Pool, pool_of};
@@ -62,6 +62,9 @@ pub struct Occurrence {
     pub before: Before,
     /// Scalar count, saturating.
     pub len: u8,
+    /// The verse the word starts in; `None` before the first verse or when
+    /// the walk was handed none.
+    pub verse: Option<VerseKey>,
 }
 
 /// Whether an atom is transparent to what stands behind it.
@@ -90,6 +93,7 @@ const fn is_letterish(class: Class) -> bool {
 struct Building {
     from: u32,
     before: Before,
+    verse: Option<VerseKey>,
     scalars: u32,
     letters: bool,
     upper: u32,
@@ -99,10 +103,11 @@ struct Building {
 }
 
 impl Building {
-    const fn new(from: u32, before: Before) -> Self {
+    const fn new(from: u32, before: Before, verse: Option<VerseKey>) -> Self {
         Self {
             from,
             before,
+            verse,
             scalars: 0,
             letters: false,
             upper: 0,
@@ -151,6 +156,7 @@ struct Scan<'a> {
     chain: Before,
     /// A chapter or verse started and no word has claimed it yet.
     opened: bool,
+    verse: Option<VerseKey>,
     word: Option<Building>,
     /// A run atom with a letter before it that may yet get one after.
     joiner: Option<u32>,
@@ -164,6 +170,7 @@ impl<'a> Scan<'a> {
             scratch: String::new(),
             chain: Before::None,
             opened: true,
+            verse: None,
             word: None,
             joiner: None,
             prev_letterish: false,
@@ -190,7 +197,7 @@ impl<'a> Scan<'a> {
                 } else {
                     self.chain
                 };
-                self.word = Some(Building::new(at, before));
+                self.word = Some(Building::new(at, before, self.verse));
                 self.opened = false;
                 self.chain = Before::None;
             }
@@ -231,6 +238,7 @@ impl<'a> Scan<'a> {
             form,
             before: built.before,
             len: u8::try_from(built.scalars).unwrap_or(u8::MAX),
+            verse: built.verse,
         });
     }
 }
@@ -238,7 +246,8 @@ impl<'a> Scan<'a> {
 /// Calls `visit` with every word of `text`, in order.
 ///
 /// `verses` are rebased to `text`, as [`crate::ChapterInput`] hands them over;
-/// an empty slice leaves verse starts out of the forced rule and nothing else.
+/// an empty slice leaves verse starts out of the forced rule and every
+/// `verse` `None`.
 pub fn for_each_word(text: &str, verses: &[Verse], mut visit: impl FnMut(Occurrence)) {
     let mut scan = Scan::new(text);
     let mut verse = 0usize;
@@ -248,6 +257,7 @@ pub fn for_each_word(text: &str, verses: &[Verse], mut visit: impl FnMut(Occurre
             // Only when no word is standing: a verse that starts inside one
             // does not make the NEXT word a verse-start capital.
             scan.opened = scan.word.is_none();
+            scan.verse = Some(verses[verse].key());
             verse += 1;
         }
         scan.step(at, scalar, &mut visit);
@@ -400,7 +410,9 @@ pub enum Gap {
 }
 
 /// How two adjacent word occurrences are separated, or `None` when something
-/// stood between them that a double may not ride through.
+/// stood between them that a double may not ride through. A line break is
+/// whitespace; a verse boundary is the caller's to refuse
+/// ([`Occurrence::verse`]).
 ///
 /// Only a letter, glue, or digit disqualifies — and each of those means the
 /// walk dropped a token between the two words (a digit run holds no letter, so
@@ -438,7 +450,7 @@ pub(crate) fn walk(text: &str, verses: &[Verse]) -> WordRow {
     let mut runs: Vec<(ScalarKey, [u16; LETTER_RUN_LANES])> = Vec::new();
     let mut run_slots: FxHashMap<ScalarKey, u32> = FxHashMap::default();
     let mut cased = false;
-    let mut previous: Option<(u64, u32)> = None;
+    let mut previous: Option<(u64, u32, Option<VerseKey>)> = None;
 
     for_each_word(text, verses, |word| {
         let mut lane_of = |hash: u64, doubles: &mut Vec<DoubleCount>| {
@@ -459,8 +471,9 @@ pub(crate) fn walk(text: &str, verses: &[Verse]) -> WordRow {
                 *lane = lane.saturating_add(1);
             },
         );
-        if let Some((hash, to)) = previous.replace((word.hash, word.to))
+        if let Some((hash, to, verse)) = previous.replace((word.hash, word.to, word.verse))
             && hash == word.hash
+            && verse == word.verse
             && let Some(gap) = gap_between(text, to, word.from)
         {
             let slot = lane_of(hash, &mut doubles);

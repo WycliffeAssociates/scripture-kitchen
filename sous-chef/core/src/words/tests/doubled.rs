@@ -113,7 +113,11 @@ fn a_word_doubled_five_times_is_excused() {
             .collect()
     };
     assert_eq!(keys(&fixture(4)), [false, true]);
-    assert_eq!(keys(&fixture(5)), [true], "bare is a habit, separated is not");
+    assert_eq!(
+        keys(&fixture(5)),
+        [true],
+        "bare is a habit, separated is not"
+    );
 }
 
 /// `na, na` is a second key with its own denominator, never pooled with the
@@ -228,22 +232,42 @@ fn a_pair_across_a_sentence_terminal_is_not_a_double() {
     );
 }
 
-/// Charter invariant 1: a verse start is an address, not a sentence boundary,
-/// so word state crosses it and a pair straddling the seam is a real pair.
+/// A pair whose two words lie in different verses is not a doubling: JOB
+/// 20:7-8 ends one verse on `he` and starts the next on `He`.
 #[test]
-fn a_double_across_a_verse_seam_counts() {
+fn a_double_across_a_verse_boundary_does_not_count() {
     let lead = "and na now ".repeat(2_000) + "and na";
     let books = [versed(b"MRK", &[&lead, "na now"])];
-    let findings = analyzed(&books, &JudgingConfig::default());
-    let rows: Vec<Pattern> = findings
-        .patterns()
-        .iter()
-        .filter(|row| row.channel == Channel::Doubled)
-        .copied()
-        .collect();
-    assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].numerator, 1);
-    assert_eq!(sited(&books, &findings, Reasons::DOUBLED_BARE), ["na na"]);
+    assert!(doubled_rows(&books, &always(&JudgingConfig::default())).is_empty());
+}
+
+/// Within one verse a line break is whitespace, and two segments of one verse
+/// are still one verse: both pairs count, bare.
+#[test]
+fn a_line_break_inside_a_verse_still_counts() {
+    let text = "and na now ".repeat(200) + "and na\nna now so so";
+    let books = [book(b"PSA", text.clone())];
+    let findings = analyzed(&books, &always(&JudgingConfig::default()));
+    assert_eq!(
+        sited(&books, &findings, Reasons::DOUBLED_BARE),
+        ["na\nna", "so so"]
+    );
+
+    let seam = text.len() as u32 - 2;
+    let key = VerseKey::new(1, 1, 1).unwrap();
+    let segmented = Book {
+        verses: vec![
+            Verse::new(key, TextRange::new(0, seam).unwrap()),
+            Verse::new(key, TextRange::new(seam, text.len() as u32).unwrap()),
+        ],
+        ..book(b"PSA", text)
+    };
+    let books = [segmented];
+    let findings = analyzed(&books, &always(&JudgingConfig::default()));
+    assert_eq!(
+        sited(&books, &findings, Reasons::DOUBLED_BARE),
+        ["na\nna", "so so"]
+    );
 }
 
 /// A chapter seam is an edge of text for a word, which the fold's own rule
