@@ -227,7 +227,7 @@ impl WordSites {
                 && hash == word.hash
                 && verse == word.verse
                 && let Some(gap) = gap_between(slice, to, word.from)
-                // A separator whose last glyph forces a capital in this
+                // A separator whose context forces a capital in this
                 // corpus's own table is a sentence terminal, not a
                 // doubling: `go. Go` is two sentences.
                 && let Some(separated) = match gap {

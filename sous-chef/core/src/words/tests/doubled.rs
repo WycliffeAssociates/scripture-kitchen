@@ -186,7 +186,7 @@ fn the_bare_and_separated_switches_are_independent() {
     assert!(!JudgingConfig::default().doubled_separated);
 }
 
-/// A separated pair whose separator's LAST glyph forces a capital in this
+/// A separated pair whose separator's context forces a capital in this
 /// corpus's own terminal table is a sentence terminal, not a doubled word:
 /// `go. Go` is two sentences. Learned, not listed — the same corpus with the
 /// same pair but without the forcing evidence keeps the row.

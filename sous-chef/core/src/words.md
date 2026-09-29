@@ -26,8 +26,8 @@ letter. They are described in that order below.
 "He said. \u{201C}Go,\u{201D} said don't-3rd \u{5d0}\u{5d1}\u{5d2} a--b 12,345"
    He        Title    Start        the chapter's first word
    said      Lower    None
-   Go        Title    Glyph('.')   the quote is transparent; the stop is not
-   said      Lower    Glyph(',')
+   Go        Title    Glyph('.' quoted)   the quote rides and marks the context
+   said      Lower    Glyph(',' quoted)
    don't-3rd Lower    None         two joiners, and a digit riding a letter
    \u{5d0}\u{5d1}\u{5d2}       Uncased  \u{2014}            dropped: no cased letter, no convention
    a, b      Lower    None, Glyph(',')   `--` is two atoms, so it joins nothing
@@ -71,14 +71,23 @@ walk does not decide that. It records what stood in front of each occurrence —
 ```text
 Before::None        a word, or space and then a word
 Before::Start       the first word of the chapter, or of a verse
-Before::Glyph(g)    the last atom of the nonletter run in front of it
+Before::Glyph(k)    the handoff context in front of it: the last glyph that is
+                    not a quote or bracket, and whether a quote stood between
 ```
 
-— and the judge asks the corpus's own **terminal table** what each glyph does.
-Quotes and brackets are transparent in the chain, so `He said. \u{201C}Go` records
-`Glyph('.')` and `he said, \u{201C}Stop` records `Glyph(',')`: what the capital
-answers to is the mark behind the quote. Whitespace is transparent too, and a
-word closes the chain behind it.
+— and the judge asks the corpus's own **terminal table** what each context
+does. `k` is the substrate's own `FollowKey`, so the table is learned on
+exactly what is read here:
+
+```text
+He said. \u{201C}Go        Glyph('.' quoted)
+he said, \u{201C}Name      Glyph(',' quoted)
+he said, name        Glyph(',' bare)
+one. (Two            Glyph('.' bare)      a bracket rides and marks nothing
+said \u{201C}Go            None                 a word closes the chain
+```
+
+Whitespace rides too.
 
 The table is `TerminalTable`, learned in [`judge.md`](judge.md) from the
 substrate's `follows` lane: for each glyph, `upper / (upper + lower)` of the
@@ -88,27 +97,23 @@ reaches `JudgingConfig::terminal_upper_share_bp` (8,000 = 80%) on at least
 everything else is the corpus's answer.
 
 This is why there is no punctuation allow-list and no rule per script. Over
-the committed tier the tables learned are:
+the committed tier the tables learned are (`q` = through a quote):
 
 ```text
-WA-en-ulb   '!' '"' '.' ':' '?'
-francl      '!' '*' '.' '?' '«' '»' '“' '”'
+WA-en-ulb   '!' '!'q ','q '.' '.'q ':' ':'q '?' '?'q
+francl      '!' '!'q '*' '.' '.'q ':'q '?' '?'q '—'q '…'q
 grcsr       '.' ';'                      // the Greek question mark
+nya         '!'q '.' '.'q ':'q '?' '?'q  // ','q is 7,653 bp: speech is not always capitalized
 spaRV1909   '.' '?' '¡'                  // the inverted opener, not '¿'
-swhulb      '!' '.' '?' '‘' '“' '”'
+swhulb      '!' '!'q ','q '.' '.'q ':'q '?' '?'q '`'q
 amh, hin2017  (nothing forces — the script is uncased)
 ```
 
-and the `he said, \u{201C}Stop` case answers itself: **en_ulb's comma is not in
-that table** — it hands off a capital 4,836 times in 47,291, which is 1,022 bp
-against an 8,000 bp bar. So `Stop` is a free position there and stays reviewable,
-and a corpus that does report speech after a comma 80% of the time gets the
-abstention instead. The v1 comma dial and the "an opening quote opens the
-chain" proposal are both replaced by that one measurement.
-
-The table's own key is the run's LAST atom, so a quote can appear in it (`"`
-in en_ulb, after `."`). No `Before` ever names one, because the chain rides
-through quotes; those rows are learned and never read.
+and the `he said, \u{201C}Name` case answers itself: **en_ulb's bare comma is
+not in that table** — 4,841 capitals in 47,299, 1,023 bp — **and its comma
+through a quote is**, at 6,748 in 7,156, 9,429 bp. So `Name` after `, "` is the
+punctuation's capital there, `name` after a bare comma stays free, and nya,
+whose `, "` capitalizes three times in four, keeps judging both.
 
 The verse clause is an **abstention, not a discourse claim**. Charter invariant
 1 says a verse start is an address rather than a sentence boundary and that
@@ -165,14 +170,14 @@ whatever stood before it, so `Before` has no business here.
 | `hash: u64` | 8 | the key, the same xxh3-64 the casing lane uses |
 | `uncased: u16` | 2 | occurrences the casing lane refused |
 | `bare: u16` | 2 | followed by itself, whitespace only between |
-| `separated: Box<[(ScalarKey, u16)]>` | 16 | followed by itself, a nonletter run between, one entry per distinct last glyph of that run |
+| `separated: Box<[(FollowKey, u16)]>` | 16 | followed by itself, nonletters between, one entry per distinct separator context |
 
 `bare` and `separated` are two claims and never one: `na na` and `na, na` have
 different denominators and different reasons to be a slip
 ([`../../rules/word-conventions.md`](../../rules/word-conventions.md)). The
 comparison is by the case-folded hash, so `The the` is a double.
 
-**`separated` is keyed by the separator's own last glyph, not by a bare
+**`separated` is keyed by the separator's handoff context, not by a bare
 count, because a comma-separated pair and a period-separated one are not the
 same claim.** A real Bible's separated rows are half sentence-boundary
 coincidence — `go. Go home.` is the end of one sentence and the start of the

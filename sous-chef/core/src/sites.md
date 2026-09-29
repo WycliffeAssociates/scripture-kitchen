@@ -133,22 +133,24 @@ its own. `Doubled` is the other channel whose span is not what matched it, and
 the reason is the same: a different span cannot merge into one row.
 
 **The rule is the `follows` lane's, atom for atom, because the count oracle
-compares the two.** The lane credits a run's TERMINAL — its last atom — so
-`?\u{201d}` credits the quote and never the question mark, and the walk's own
-`close_run` is where that is decided ([`substrate.md`](substrate.md)). From
-there it rides whitespace and nothing else: a nonletter opens a new run, a
-digit breaks one, and a mark clears the wait, each of which drops the handoff.
-`Cursor::handoff` is that scan, and it crosses a chapter seam the way
-`prev_outer`/`next_outer` do, because the fold pairs a chapter's `open_follow`
-with the next one's `edge_case` and passes it through a blank chapter
-untouched.
+compares the two.**
 
-This is where the site rule and the WORD walk part company. `words::walk` rides
-through quotes and brackets to find the glyph a capital answers to, so it reads
-`.\u{201d} Go` as the period's. The follows lane does not, and the row is the
-quote's. Matching the walk here would make the sites disagree with the counts,
-so the lane wins and the difference is a documented one, pinned by
-`a_quote_between_is_transparent`.
+```text
+?\u{201d} he said      '?' credited, a quote ridden    → not this channel's
+one. (two          '.' credited, bracket ridden   → a site at `two`
+one. 42 two        the digit clears the chain     → nothing
+```
+
+The lane credits a run's last atom that is not a quote or bracket
+([`substrate.md`](substrate.md)); `Cursor::handoff` rides whitespace, quotes,
+and brackets from there, reports whether it rode a quote, and stops at
+anything else. A sentence-start row judges bare handoffs only, so a ridden
+quote drops the site as it drops the count. The scan crosses a chapter seam the
+way `prev_outer`/`next_outer` do, because the fold pairs a chapter's
+`open_follow` with the next one's `edge_case` and passes it through a blank
+chapter. The word walk rides the same atoms, so the two lanes agree on which
+glyph a capital answers to; `a_quote_between_takes_the_handoff_out_of_the_channel`
+pins it.
 
 The span itself is `words::word_around` — the same word rule the word lane
 draws, joiner and all, so `don't` is one span — widened to atom edges inside

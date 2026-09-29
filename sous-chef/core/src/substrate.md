@@ -22,7 +22,7 @@ Nothing borrows, nothing hashes, nothing carries a coordinate.
 | `scalars` | `ScalarKey` (a scalar, or the pooled `DIGITS`) | count | 8 | absolute rarity, the dense census, every denominator |
 | `pairs` | `(ScalarKey, prev outer, next outer)` | count | 12 | G0 placement, and G1 once conditioned by `runs` |
 | `runs` | the run's scalar sequence, digits excluded | count | 12 + 4/atom | run composition, G2/G3 neighbours inside a run |
-| `follows` | `ScalarKey` of a run terminal | upper/lower/uncased | 16 | the terminal table the word channels read, and `Channel::SentenceStart` reading it the other way |
+| `follows` | `FollowKey`: the last glyph that does not ride, and whether a quote stood between | upper/lower/uncased | 16 | the terminal table the word channels read, and `Channel::SentenceStart` reading it the other way |
 | `hygiene` | — | one `HygieneFinding` per site | 16/site | hygiene's four scalar classes, with exact spans |
 | `verses` | `VerseKey` | grapheme count + the projected span | 20/verse | the target half of the source comparison ([`proportionality.md`](proportionality.md)) |
 | `lead`, `trail` | — | one open edge each | 20 each | the seam (below) |
@@ -30,8 +30,8 @@ Nothing borrows, nothing hashes, nothing carries a coordinate.
 
 `size_of::<ChapterRow>()` is 160 B; the rest is what the seven lanes own.
 Measured over the committed tier (the ignored oracle in
-`tests/substrate_reference.rs` prints it): median **980 B**, p90 **1,340 B**,
-per-corpus medians 844 B (Spanish) to 1,768 B (Greek). The budget is 1.5 KB
+`tests/substrate_reference.rs` prints it): median **980 B**, p90 **1,288 B**,
+per-corpus medians 860 B (Spanish) to 1,652 B (Greek). The budget is 1.5 KB
 median, 2 KB p90. D1b's `hygiene` lane moved those by the 16 inline bytes and
 nothing else: the tier holds 11 sites in 7,607 chapters.
 
@@ -40,11 +40,19 @@ Four shapes are deliberate:
 - **Letters are counted.** A Hawaiian `z` has to be able to reach the rarity
   roster, so the census is dense. It is also the single biggest lane —
   Greek's 107 distinct scalars per chapter are 856 of its 1,768 bytes.
-- **A run's LAST atom is the one credited a handoff.** `close_run` leaves the
-  run's terminal `awaiting` a letter, so `.\u{201d} he` credits `\u{201d}` and
-  not `.`, and a digit or a mark between clears the wait as a new run would.
-  That is the claim [`sites.md`](sites.md)'s sentence-start rule has to
-  reproduce exactly, since the count oracle compares the two.
+- **A handoff is credited to the last glyph that does not ride.**
+
+  ```text
+  a, B         (',', bare)   upper 1
+  c, \u{201C}D        (',', quoted) upper 1    the quote rides and marks it
+  D, (e        (',', bare)   lower 1    a bracket rides and marks nothing
+  e \u{201C}f g\u{2019}h    nothing                 a letter closes the chain
+  ```
+
+  Each slot decides once whether it rides, off `unicode::Pool`; a digit or a
+  mark clears the chain. That is the claim [`sites.md`](sites.md)'s
+  sentence-start rule has to reproduce exactly, since the count oracle
+  compares the two.
 - **`run_lengths` is derived, not stored.** The rule wants each glyph's own
   run history; the run *sequences* already carry it exactly, so
   `ChapterRow::run_lengths()` decomposes them on read rather than the row
@@ -134,7 +142,7 @@ facts genuinely straddle a `\c`:
 chapter k  "… good."          chapter k+1  "Then he …"
                     └── trail ──┴── lead ──┘
   pair    ('.', Letter, Edge)      →  ('.', Letter, Letter)
-  follow  '.' awaiting a letter    →  '.' → upper 1
+  follow  ('.', bare) open         →  ('.', bare) upper 1
   word    "good" ended             →  no join; two words
 ```
 
@@ -144,13 +152,16 @@ So the row records two open edges and the fold resolves them:
 - `open_pair` — the edge scalar when it is a nonletter, with the one neighbour
   class it already knows. The fold decrements the triple that names `Edge`
   and increments the resolved one.
-- `open_follow` (trailing) — a run terminal with only whitespace between it
-  and the chapter end.
-- `edge_case` (leading) — the casing of the first non-whitespace scalar, when
-  it is a letter. Paired with the previous chapter's `open_follow`, that is
-  the follow the seam swallowed.
-- `blank` (trailing) — the chapter held whitespace and nothing else, so the
-  previous chapter's `open_follow` survives it.
+- `open_follow` (trailing) — the handoff context still waiting for a letter
+  at the chapter end.
+- `edge_case` (leading) — the casing of the first scalar that is neither
+  whitespace, quote, nor bracket, when it is a letter. Paired with the
+  previous chapter's `open_follow`, that is the follow the seam swallowed.
+- `edge_quoted` (leading) — a quote stood before that letter, so the follow
+  arrives quoted: `one, | \u{201C}Two` is `(',', quoted)` either way.
+- `blank` (trailing) — the chapter held only whitespace, quotes, and brackets,
+  so the previous chapter's `open_follow` survives it, quoted if it held a
+  quote.
 
 The fold carries that trailing edge, `Default` at every book — seam state is
 the fold's own and nothing crosses a book. Two cases need saying: an **empty**

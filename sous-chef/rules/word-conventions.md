@@ -23,10 +23,10 @@ and the terminal table are [../core/src/judge.md](../core/src/judge.md).
   stood before each word and the judge asks a `TerminalTable` built from the
   substrate's own follow lane. A glyph forces at
   `terminal_upper_share_bp` (8,000 = 80%) of its cased handoffs. Quotes and
-  brackets are transparent, so `he said, "Stop` records the comma and the
-  comma's own share decides — 1,022 bp in en_ulb, so `Stop` stays reviewable
-  there, and a corpus that reports speech after a comma everywhere abstains
-  instead (evidence.md, W3).
+  brackets ride, and a quote marks the context: `he said, "Name` is the comma
+  through a quote, which forces in en_ulb (9,429 bp) while the bare comma does
+  not (1,023 bp), and stays free in a corpus that opens speech in lowercase
+  (evidence.md, W3 and the quote-context row).
 - **Doubled words:** keep adjacent and punctuation-separated counters distinct.
   **Landed as `Channel::Doubled`, on by default: guilty until innocent.** Every
   doubling fires unless that key is doubled at least `support_floor` (5) times
@@ -35,7 +35,7 @@ and the terminal table are [../core/src/judge.md](../core/src/judge.md).
   not apply. `doubled_bare` (on) and `doubled_separated` (off by default) switch each key. A pair
   never spans a verse boundary (JOB 20:7-8 `…'Where is he?'` / `He will fly`);
   a line break inside a verse is whitespace. A separated pair whose separator's
-  last glyph forces a capital in the same learned `TerminalTable` the casing
+  context forces a capital in the same learned `TerminalTable` the casing
   channel reads is a sentence boundary, not a doubling — `go. Go` is two
   sentences.
 - **Doubling has nothing to do with case, so uncased scripts are judged too.**

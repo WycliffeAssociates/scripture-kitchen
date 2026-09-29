@@ -31,7 +31,7 @@ again by a coarser row** ([Both sides](#both-sides)).
 | `WordLength` | word | corpus occurrences of one long case-folded word | every word occurrence the corpus counted |
 | `Doubled` | word | one case-folded word immediately repeated, adjacent OR separated | that word's occurrences, cased and uncased |
 | `LetterRun` | word walk | runs of one letter of exactly this length | runs of that letter of ANY length ≥ 2 |
-| `SentenceStart` | run terminal | lowercase letters this glyph handed off to | cased letters it handed off to |
+| `SentenceStart` | handoff glyph | lowercase letters this glyph handed off to bare | cased letters it handed off to bare |
 
 `Placement` is **per side, marginal**: the outer class before `g` and the
 outer class after `g` are two distributions over
@@ -166,29 +166,39 @@ rows skip and the recurring clusters the firing `RunShape` rows skip.
 ## The terminal table
 
 Before either word channel judges, `Substrate::judge` learns one thing from
-its own `follows` lane and publishes it into the sink: **which glyphs this
-corpus puts a capital after.**
+its own `follows` lane and publishes it into the sink: **which handoff
+contexts this corpus puts a capital after.**
+
+```text
+he said, Go          (',', bare)      the last glyph that is not a quote or bracket
+he said, "Go         (',', quoted)    a quote stood between it and the letter
+"Go," he said        (',', quoted)    position tells no opening quote from a closing one
+one. (Two            ('.', bare)      a bracket rides and marks nothing
+said "Go             none             a word closes the chain
+```
 
 ```text
 WA-en-ulb (the vref tier), follows merged over the corpus
-   '.'  upper 33,332 of 33,338 cased handoffs
-   ','  upper  4,836 of 47,291
+   ('.', bare)    upper 33,386 of 33,413 cased handoffs   9,991 bp → forces
+   (',', bare)    upper  4,841 of 47,299                  1,023 bp → does not
+   (',', quoted)  upper  6,748 of  7,156                  9,429 bp → forces
 terminal_upper_share_bp 8,000, support_floor 5
-   '.' 9,998 bp → forces        ',' 1,022 bp → does not
 ```
 
-A glyph forces when `upper / (upper + lower)` of the letters it hands off to
+A context forces when `upper / (upper + lower)` of the letters it hands off to
 reaches `terminal_upper_share_bp` on at least `support_floor` cased handoffs.
-The denominator is the cased handoffs, so a glyph followed only by uncased
+The denominator is the cased handoffs, so a context followed only by uncased
 letters decides nothing and an uncased corpus learns an empty table.
 
 That single number replaces every hard-coded punctuation rule the casing
-channel used to need. `he said, \u{201C}Stop\u{201D}` is the case it settles: the quote
-is transparent, so `Stop` records the comma, and the comma's own share decides.
-In en_ulb it is nowhere near 80%, so `Stop` is free evidence; in a corpus that
-reports speech after a comma everywhere it forces, and `Stop` abstains. The
-per-corpus tables the committed tier learns are in
-[`words.md`](words.md).
+channel used to need. `he said, \u{201C}Name your wages` is the case it
+settles: the comma alone capitalizes a tenth of the time, diluted by every
+comma not in front of speech, but the comma through a quote is its own
+context with its own counts. In en_ulb it forces, so `Name` there is the
+punctuation's capital and abstains; in a corpus that opens speech in lowercase
+`, "` never reaches the bar and the capital is judged. Which marks are quotes is
+`unicode::Pool::Quote`, never a list. The per-corpus tables the committed tier
+learns are in [`words.md`](words.md).
 
 `Findings` carries the table beside the pattern table, because three readers
 need the same one: the casing judge, `Words::locate`'s rescan, and any host
@@ -274,7 +284,7 @@ go. Go     `.` forces a capital here      → not a doubling: two sentences
 
 A pair never spans a verse boundary: its two words carry the same `VerseKey`
 or it is not counted, so two segments of one verse still pair. A line break is
-whitespace. A separator whose last glyph the corpus's `TerminalTable` forces is
+whitespace. A separator whose handoff context the corpus's `TerminalTable` forces is
 a sentence boundary and folds out of the separated numerator.
 
 ```text
@@ -352,15 +362,18 @@ punctuation not get the capital it almost always gets*, so a lowercase letter
 after a near-certain glyph is one row for review.
 
 ```text
-testData/exampleCorpora/en_ulb (onion-projected), follows merged
-   '.'  upper 33,333 of 33,339 cased handoffs   9,998 bp >= 9,800  -> FIRES 6/33,339
-   ','  upper  4,836 of 47,291                  1,022 bp           -> silent
-   '!'  upper  1,212 of 1,221                   9,926 bp           -> FIRES 9/1,221
+WA-en-ulb, follows merged, BARE handoffs only
+   ('.', bare)    upper 33,386 of 33,413   9,991 bp >= 9,800  -> FIRES 27/33,413
+   (',', bare)    upper  4,841 of 47,299   1,023 bp           -> silent
+   ('!', bare)    upper  1,213 of  1,222   9,926 bp           -> FIRES 9/1,222
+   ('?', quoted)  upper  1,030 of  1,069   not judged: `?" he said` is no exception
 ```
 
-The two blocks are two COPIES of the same translation — the vref tier's
-`WA-en-ulb` above, the onion-projected 66-book corpus here — so the `.`
-denominators differ by one and no arithmetic connects them.
+**The row judges a glyph's bare handoffs and nothing else.** Its pattern names
+a glyph, not a context, and the quoted context mixes openings with closings:
+folded in, `?" he said` would make `?` fire 42 times in en_ulb for ordinary
+English. `Cursor::handoff` reports whether it rode a quote, and the site rule
+drops those handoffs exactly as the counts do.
 
 Per glyph with at least `support_floor` cased handoffs: `upper / (upper +
 lower)` decides whether the glyph speaks, and the row then reports `lower /
