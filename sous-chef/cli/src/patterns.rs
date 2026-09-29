@@ -3,6 +3,8 @@
 //! ```text
 //! pattern[0] U+002C ',' placement next=Digit 12/9812 0.12% band 4 · 3/66 books 11 sites usual=Letter 54,620
 //!   site MRK 118..119
+//! pattern[1] U+0022 '"' run-shape mixed len 4 4/12014 0.03% band 4 · 3/66 books 3 sites usual=pure len 1 6,157
+//!   clusters: ."'"×27 R, ?"'"×2, .'?"×1, "...×1
 //! ```
 
 use crate::*;
@@ -12,6 +14,7 @@ pub(crate) fn print_patterns(
     corpus: &Corpus<'_, OnionBook>,
     findings: &[PackedFinding],
     patterns: &[Pattern],
+    clusters: &[Cluster],
 ) {
     /// Sites printed per pattern before the tail line.
     const SHOWN: usize = 20;
@@ -99,6 +102,26 @@ pub(crate) fn print_patterns(
             sites[index].len(),
             usual(pattern),
         );
+        let listed: Vec<String> = clusters
+            .iter()
+            .filter(|cluster| usize::from(cluster.pattern.get()) == index)
+            .map(|cluster| {
+                let text: String = cluster
+                    .atoms
+                    .iter()
+                    .filter_map(|atom| atom.scalar())
+                    .collect();
+                format!(
+                    "{text}{}\u{d7}{}{}",
+                    if cluster.truncated { "\u{2026}" } else { "" },
+                    grouped(cluster.count),
+                    if cluster.recurring { " R" } else { "" }
+                )
+            })
+            .collect();
+        if !listed.is_empty() {
+            println!("  clusters: {}", listed.join(", "));
+        }
         print_sites(corpus, &sites[index], SHOWN);
     }
 }

@@ -3,7 +3,7 @@
 pub const MAGIC: u32 = 0x5355_4f53; // ASCII "SOUS", little endian.
 pub const FORMAT_VERSION: u32 = 2;
 pub const FLAG_UTF16: u32 = 1 << 0;
-pub const HEADER_BYTES: usize = 48;
+pub const HEADER_BYTES: usize = 56;
 pub const DIRECTORY_ENTRY_BYTES: usize = 20;
 pub const HEADER_MAGIC_OFFSET: usize = 0;
 pub const HEADER_VERSION_OFFSET: usize = 4;
@@ -14,6 +14,8 @@ pub const HEADER_TOTAL_FINDINGS_OFFSET: usize = 20;
 pub const HEADER_PATTERN_COUNT_OFFSET: usize = 24;
 pub const HEADER_PATTERN_OFFSET_OFFSET: usize = 28;
 pub const HEADER_SNAPSHOT_ID_OFFSET: usize = 32;
+pub const HEADER_CLUSTER_COUNT_OFFSET: usize = 48;
+pub const HEADER_CLUSTER_OFFSET_OFFSET: usize = 52;
 pub const DIRECTORY_KEY_OFFSET: usize = 0;
 pub const DIRECTORY_KEY_TERMINATOR_OFFSET: usize = 3;
 pub const DIRECTORY_LENGTH_OFFSET: usize = 4;
@@ -49,3 +51,11 @@ pub const PATTERN_OTHER_COUNT_OFFSET: usize = 32;
 pub const PATTERN_BAND_NONE: u8 = 0xFF;
 /// The pooled digit lane's glyph value, [`ScalarKey::DIGITS`] on the wire.
 pub const PATTERN_DIGIT_GLYPH: u32 = u32::MAX;
+/// One cluster entry before its atoms; each atom is a `u32` behind it.
+pub const CLUSTER_ENTRY_BYTES: usize = 8;
+pub const CLUSTER_PATTERN_OFFSET: usize = 0;
+pub const CLUSTER_ATOM_COUNT_OFFSET: usize = 2;
+pub const CLUSTER_FLAGS_OFFSET: usize = 3;
+pub const CLUSTER_COUNT_OFFSET: usize = 4;
+pub const CLUSTER_RECURRING: u8 = 1 << 0;
+pub const CLUSTER_TRUNCATED: u8 = 1 << 1;

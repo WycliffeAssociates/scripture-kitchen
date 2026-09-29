@@ -6,7 +6,7 @@
 //!   finding target[0] MRK 1:1-1:1 StrandedBackslash 17..19 run 2 raw [52..54]
 //!   length target[0] MRK 1:9 ratio 0.14 z_book -8.72 z_project -6.05
 //!   unpaired MRK target-only 2 source-only 0 ambiguous 0 partial-overlap 1
-//!   pattern[0] U+002C ',' placement next=Digit 12/9812 0.12% band 4 · 3/66 books 11 sites
+//!   pattern[0] U+002C ',' placement next=Digit 12/9812 0.12% band 4 · 3/66 books 11 sites usual=Letter 9,700
 //!     site MRK 118..119
 //!   published 2 findings for 1 books (SOUS v2, UTF-16) to out.sous
 //!   wrote 1 patterns and 11 sites to sites.html
@@ -35,7 +35,7 @@ use rustc_hash::FxHashMap;
 use sous_core::unicode::atoms::count_atoms;
 use sous_core::words::LETTER_RUN_MAX;
 use sous_core::{
-    AlignedUnit, Alignment, AlignmentFact, Brigade, ChapterPass, Corpus, FORMAT_VERSION,
+    AlignedUnit, Alignment, AlignmentFact, Brigade, ChapterPass, Cluster, Corpus, FORMAT_VERSION,
     FindingKind, PackedFinding, Paired, Pattern, PatternKey, ProjectedBook, ScalarKey, SnapshotId,
     SourceLengths, SourceVerse, SourceWords, TextRange, Usual, align, analyze_paired,
     source_lengths,
@@ -146,7 +146,7 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                 words: words.as_ref(),
             })
             .collect();
-        let (findings, patterns, paired) = brigade_findings(
+        let (findings, patterns, clusters, paired) = brigade_findings(
             &target_corpus,
             &source,
             args.source_copy,
@@ -163,7 +163,7 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                 }
                 print_unpaired(alignment);
             }
-            print_patterns(&target_corpus, &findings, &patterns);
+            print_patterns(&target_corpus, &findings, &patterns, &clusters);
         }
         if let Some(path) = &args.report {
             let name = args.target.file_name().map_or_else(
@@ -189,7 +189,13 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             );
         }
         if let Some(path) = &args.publish {
-            let buffer = publish(&target.paths, target.sources, &findings, &patterns)?;
+            let buffer = publish(
+                &target.paths,
+                target.sources,
+                &findings,
+                &patterns,
+                &clusters,
+            )?;
             fs::write(path, &buffer)
                 .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
             eprintln!(

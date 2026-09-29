@@ -9,7 +9,7 @@
 export const MAGIC = 0x53554f53;
 export const FORMAT_VERSION = 2;
 export const FLAG_UTF16 = 1;
-export const HEADER_BYTES = 48;
+export const HEADER_BYTES = 56;
 export const DIRECTORY_ENTRY_BYTES = 20;
 export const RECORD_LEN = 16;
 export const HEADER_MAGIC_OFFSET = 0;
@@ -21,6 +21,8 @@ export const HEADER_TOTAL_FINDINGS_OFFSET = 20;
 export const HEADER_PATTERN_COUNT_OFFSET = 24;
 export const HEADER_PATTERN_OFFSET_OFFSET = 28;
 export const HEADER_SNAPSHOT_ID_OFFSET = 32;
+export const HEADER_CLUSTER_COUNT_OFFSET = 48;
+export const HEADER_CLUSTER_OFFSET_OFFSET = 52;
 export const DIRECTORY_KEY_OFFSET = 0;
 export const DIRECTORY_KEY_TERMINATOR_OFFSET = 3;
 export const DIRECTORY_LENGTH_OFFSET = 4;
@@ -59,6 +61,17 @@ export const PATTERN_BAND_NONE = 255;
 export const PATTERN_DIGIT_GLYPH = 4294967295;
 export const BAND_STEPS = 5;
 export const RUN_BUCKETS = 6;
+/** One cluster entry before its atoms; each atom is a `u32` behind it. */
+export const CLUSTER_ENTRY_BYTES = 8;
+export const CLUSTER_PATTERN_OFFSET = 0;
+export const CLUSTER_ATOM_COUNT_OFFSET = 2;
+export const CLUSTER_FLAGS_OFFSET = 3;
+export const CLUSTER_COUNT_OFFSET = 4;
+export const CLUSTER_RECURRING = 1;
+export const CLUSTER_TRUNCATED = 2;
+/** Atoms one cluster keeps, and clusters one `RunShape` row lists. */
+export const CLUSTER_ATOMS = 16;
+export const CLUSTERS_PER_ROW = 8;
 
 export type CoordinateSpace = "utf8" | "utf16";
 export type ByteSource = ArrayBuffer | ArrayBufferView;
@@ -191,6 +204,17 @@ export type Usual =
   /** The word's most common form in free positions. */
   | { readonly kind: "Casing"; readonly form: CasingForm; readonly count: number };
 
+/** One exact run a `RunShape` row lists. */
+export interface Cluster {
+  /** The run's atoms, the first `CLUSTER_ATOMS` of them when `truncated`. */
+  readonly text: string;
+  /** Corpus occurrences of exactly this run. */
+  readonly count: number;
+  /** It occurs often enough to be a convention, so the row does not count it. */
+  readonly recurring: boolean;
+  readonly truncated: boolean;
+}
+
 /** One corpus-level pattern: a glyph, the channel that convicted it, the
  * fraction behind the claim, and what is usual instead. */
 export interface Pattern {
@@ -208,6 +232,8 @@ export interface Pattern {
    * Information only: nothing in the engine gates on dispersion. */
   readonly books: number;
   readonly usual: Usual;
+  /** On a `RunShape` row only: its exact runs, most frequent first. */
+  readonly clusters?: readonly Cluster[];
 }
 
 export interface ConventionDigest {
@@ -486,6 +512,99 @@ function readPattern(view: DataView, at: number, row: number, bookCount: number)
   };
 }
 
+/** Where one cluster entry's fields are, and the offset just past it. */
+interface ClusterEntry {
+  readonly at: number;
+  readonly end: number;
+}
+
+/** Walks the cluster section, refusing every entry the encoder cannot write,
+ * and returns each pattern's entries. */
+function readClusterSection(
+  view: DataView,
+  start: number,
+  count: number,
+  patternStart: number,
+  patternCount: number,
+): [Map<number, ClusterEntry[]>, number] {
+  const byPattern = new Map<number, ClusterEntry[]>();
+  let at = start;
+  let last: [number, number] | null = null;
+  for (let entry = 0; entry < count; entry += 1) {
+    const bad = (field: string): never => fail(`cluster entry ${entry} has an invalid ${field}`);
+    if (at + CLUSTER_ENTRY_BYTES > view.byteLength) {
+      return bad("length");
+    }
+    const pattern = view.getUint16(at + CLUSTER_PATTERN_OFFSET, true);
+    const atoms = view.getUint8(at + CLUSTER_ATOM_COUNT_OFFSET);
+    const flags = view.getUint8(at + CLUSTER_FLAGS_OFFSET);
+    const occurrences = u32(view, at + CLUSTER_COUNT_OFFSET);
+    const end = at + CLUSTER_ENTRY_BYTES + 4 * atoms;
+    if (end > view.byteLength) {
+      return bad("length");
+    }
+    if ((flags & ~(CLUSTER_RECURRING | CLUSTER_TRUNCATED)) !== 0) {
+      return bad("flags");
+    }
+    const scalars: number[] = [];
+    for (let atom = 0; atom < atoms; atom += 1) {
+      const raw = u32(view, at + CLUSTER_ENTRY_BYTES + 4 * atom);
+      if (!isScalar(raw)) {
+        return bad("atoms");
+      }
+      scalars.push(raw);
+    }
+    if (pattern >= patternCount) {
+      return bad("pattern");
+    }
+    const row = patternStart + pattern * PATTERN_ROW_LEN;
+    if (CHANNELS[view.getUint8(row + PATTERN_CHANNEL_OFFSET)] !== "RunShape") {
+      return bad("pattern");
+    }
+    const glyph = u32(view, row + PATTERN_GLYPH_OFFSET);
+    const key = view.getUint8(row + PATTERN_KEY_OFFSET);
+    const [pure, bucket] = [key >> 4 === 1, key & 0x0f];
+    const stored =
+      atoms > 0 && atoms <= CLUSTER_ATOMS && occurrences > 0 && scalars.every((atom) => atom !== PATTERN_DIGIT_GLYPH);
+    const shaped =
+      (flags & CLUSTER_TRUNCATED) !== 0
+        ? atoms === CLUSTER_ATOMS && bucket === RUN_BUCKETS
+        : scalars.includes(glyph) &&
+          scalars.every((atom) => atom === glyph) === pure &&
+          Math.min(atoms, RUN_BUCKETS) === bucket;
+    if (!stored || !shaped) {
+      return bad("atoms");
+    }
+    if (last !== null) {
+      const [held, heldCount] = last;
+      const run = byPattern.get(pattern)?.length ?? 0;
+      if (pattern < held || (pattern === held && (occurrences > heldCount || run === CLUSTERS_PER_ROW))) {
+        return bad("order");
+      }
+    }
+    last = [pattern, occurrences];
+    const entries = byPattern.get(pattern) ?? [];
+    entries.push({ at, end });
+    byPattern.set(pattern, entries);
+    at = end;
+  }
+  return [byPattern, at];
+}
+
+function readCluster(view: DataView, entry: ClusterEntry): Cluster {
+  const atoms = view.getUint8(entry.at + CLUSTER_ATOM_COUNT_OFFSET);
+  const flags = view.getUint8(entry.at + CLUSTER_FLAGS_OFFSET);
+  const scalars = Array.from({ length: atoms }, (_, atom) =>
+    u32(view, entry.at + CLUSTER_ENTRY_BYTES + 4 * atom),
+  );
+  return {
+    text: String.fromCodePoint(...scalars),
+    count: u32(view, entry.at + CLUSTER_COUNT_OFFSET),
+    recurring: (flags & CLUSTER_RECURRING) !== 0,
+    truncated: (flags & CLUSTER_TRUNCATED) !== 0,
+  };
+}
+
 function readReasons(bits: number): readonly ConventionReason[] {
   if (bits === 0) {
     return fail("a convention row carries at least one reason");
@@ -640,6 +759,7 @@ export class FindingsSnapshot {
   readonly #byId: ReadonlyMap<string, number>;
   readonly #patternStart: number;
   readonly #patternCount: number;
+  readonly #clusters: ReadonlyMap<number, readonly ClusterEntry[]>;
   readonly snapshotId: Uint8Array;
   readonly coordinateSpace: CoordinateSpace;
 
@@ -650,11 +770,13 @@ export class FindingsSnapshot {
     coordinateSpace: CoordinateSpace,
     patternStart: number,
     patternCount: number,
+    clusters: ReadonlyMap<number, readonly ClusterEntry[]>,
   ) {
     this.#view = view;
     this.#entries = entries;
     this.#patternStart = patternStart;
     this.#patternCount = patternCount;
+    this.#clusters = clusters;
     // First position wins: two ids may publish the same `\id`.
     this.#byKey = new Map([...entries].reverse().map((entry, at) => [entry.key, entries.length - 1 - at]));
     this.#byId = new Map(entries.map((entry, index) => [entry.id, index]));
@@ -732,9 +854,21 @@ export class FindingsSnapshot {
     for (let row = 0; row < patternCount; row += 1) {
       readPattern(view, patternStart + row * PATTERN_ROW_LEN, row, bookCount);
     }
+    if (u32(view, HEADER_CLUSTER_OFFSET_OFFSET) !== patternEnd) {
+      return fail(
+        `cluster section starts at ${u32(view, HEADER_CLUSTER_OFFSET_OFFSET)}, expected ${patternEnd}`,
+      );
+    }
+    const [clusters, clusterEnd] = readClusterSection(
+      view,
+      patternEnd,
+      u32(view, HEADER_CLUSTER_COUNT_OFFSET),
+      patternStart,
+      patternCount,
+    );
 
     const entries: BookEntry[] = [];
-    let cursor = patternEnd;
+    let cursor = clusterEnd;
     let totalSeen = 0;
     for (let index = 0; index < bookCount; index += 1) {
       const at = HEADER_BYTES + index * DIRECTORY_ENTRY_BYTES;
@@ -759,7 +893,7 @@ export class FindingsSnapshot {
     if (totalSeen !== totalFindings) {
       return fail(`header declares ${totalFindings} findings, directory contains ${totalSeen}`);
     }
-    return new FindingsSnapshot(view, entries, snapshotId, coordinateSpace, patternStart, patternCount);
+    return new FindingsSnapshot(view, entries, snapshotId, coordinateSpace, patternStart, patternCount, clusters);
   }
 
   get length(): number {
@@ -771,17 +905,22 @@ export class FindingsSnapshot {
     return this.#patternCount;
   }
 
-  /** One pattern row, decoded. */
+  /** One pattern row, decoded; a `RunShape` row brings its clusters. */
   pattern(index: number): Pattern {
     if (!Number.isSafeInteger(index) || index < 0 || index >= this.#patternCount) {
       return fail(`pattern ${index} is outside a table of ${this.#patternCount}`);
     }
-    return readPattern(
+    const row = readPattern(
       this.#view,
       this.#patternStart + index * PATTERN_ROW_LEN,
       index,
       this.#entries.length,
     );
+    if (row.channel !== "RunShape") {
+      return row;
+    }
+    const clusters = (this.#clusters.get(index) ?? []).map((entry) => readCluster(this.#view, entry));
+    return { ...row, clusters };
   }
 
   /** The whole table, in emission order. */

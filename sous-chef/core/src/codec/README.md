@@ -95,6 +95,8 @@ Decoding refuses rather than guesses:
 | a usual lane a channel does not use holding anything, or a usual outside its channel's domain | `InvalidPattern` |
 | a pattern `books` of zero on a row with a numerator, or past the header's `book_count` | `InvalidPattern` |
 | a `pattern_offset` that is not the running cursor | `PatternSectionOutOfOrder` |
+| a `cluster_offset` that is not the running cursor after the pattern table | `ClusterSectionOutOfOrder` |
+| a cluster naming a row past the table or not `RunShape`, atoms that cannot be its shape, flags outside `RECURRING \| TRUNCATED`, a zero count, or an entry out of order or the ninth of a row | `InvalidCluster` |
 | more than 65,535 patterns | `PatternCountOverflow` |
 
 `i16::MIN` cannot be constructed as a `QuantizedDeviation`, and a zero run
@@ -111,10 +113,11 @@ chapter may move a project denominator and thereby add or remove findings in an
 untouched book.
 
 ```text
-  header  48 bytes   SOUS magic · format version · coordinate flags ·
+  header  56 bytes   SOUS magic · format version · coordinate flags ·
                      book count · record stride (16) · total findings ·
                      pattern count · absolute pattern offset ·
-                     opaque 16-byte SnapshotId
+                     opaque 16-byte SnapshotId · cluster count ·
+                     absolute cluster offset
   directory          one 20-byte row per book, in caller order:
                      3 BookKey bytes + zero terminator · published length ·
                      absolute section offset · finding count ·
@@ -125,6 +128,8 @@ untouched book.
   pattern table      contiguous 36-byte rows in emission order, corpus-level
                      and not per book; a row is 4-byte aligned, so the
                      sections behind it stay aligned however many fired
+  cluster section    the exact runs each RunShape row lists, one entry of
+                     8 bytes plus 4 per atom, so it stays aligned too
   sections           contiguous 16-byte records, no incidental padding
 ```
 
@@ -237,6 +242,35 @@ mark.at(0);
 snapshot.findingsFor("books/mrk.usfm");
 ```
 
+### The cluster section
+
+A `RunShape` row says "`;` rarely sits in a cluster of two"; its clusters say
+which: `);`×8, `';`×7 and `";`×6 recur and are conventions, and `;'`×3 and
+`;"`×2 are what the row counts. The swap is `;'` beside `';`.
+
+| bytes | field |
+| --- | --- |
+| 0..2 | `pattern: u16` — the `RunShape` row this run is of |
+| 2 | `atom_count: u8` — atoms stored, `1..=16` |
+| 3 | `flags: u8` — bit 0 `RECURRING` (the run occurs at least `support_floor` times), bit 1 `TRUNCATED` (the run was longer than 16 atoms) |
+| 4..8 | `count: u32` — corpus occurrences of exactly this run |
+| 8.. | `atom_count` scalars, `u32` each |
+
+Entries are sorted by pattern index, then count descending, then atoms
+ascending. A row lists at most 8: its novel runs most frequent first, then its
+recurring ones, with 3 slots kept for recurring runs while more novel ones
+wait, and either side lending the other what it leaves unused. The header's
+`cluster_offset` is the running cursor after the pattern table and
+`cluster_count` the number of entries. Rust reads them as
+`CorpusSnapshot::clusters`, the generated reader as `pattern.clusters` on a
+`RunShape` row only.
+
+The section is a discriminated union the format enforces: an entry naming a
+row that is not `RunShape`, or naming one past the table, or out of order, is
+refused. So is one whose atoms cannot be that row's shape: an untruncated run
+must hold the glyph at that purity and length bucket; a truncated one holds
+exactly 16 atoms on a bucket-6 row, since its tail is gone.
+
 ### The id string table
 
 The host's opaque `BookId` — a file path in practice — travels in the wire so a
@@ -251,7 +285,8 @@ reorder, or hide bytes. The length prefix means an id needs no forbidden byte
 and no scan. The 4-byte padding after the section keeps every record section
 aligned for a typed-array view.
 
-Version 2 grew the pattern row from 24 bytes to 36 for the usual lanes. Sefer,
+Version 2 grew the pattern row from 24 bytes to 36 for the usual lanes and the
+header from 48 bytes to 56 for the cluster section. Sefer,
 the one consumer, reads only through the generated reader, so a version 1
 buffer is refused at `open` rather than migrated. The charter's rule stands: a
 layout change means a new wire version.

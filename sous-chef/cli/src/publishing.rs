@@ -13,6 +13,7 @@ pub(crate) fn publish(
     sources: Vec<String>,
     findings: &[PackedFinding],
     patterns: &[Pattern],
+    clusters: &[Cluster],
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     let books = paths
         .iter()
@@ -23,6 +24,7 @@ pub(crate) fn publish(
         books,
         findings,
         patterns,
+        clusters,
         SnapshotId::new([0; 16]),
     )?)
 }

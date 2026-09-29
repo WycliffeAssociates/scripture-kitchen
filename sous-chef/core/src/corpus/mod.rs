@@ -1,8 +1,8 @@
 //! Complete-corpus findings publication.
 //!
 //! ```text
-//! encode_to_corpus_buffer(id, Utf16, [PublicationBook("MRK", "books/mrk.usfm", 50, [finding])])
-//!   → 48-byte header · one 20-byte directory row · "books/mrk.usfm" in the id
+//! encode_to_corpus_buffer(id, Utf16, [PublicationBook("MRK", "books/mrk.usfm", 50, [finding])], [], [])
+//!   → 56-byte header · one 20-byte directory row · "books/mrk.usfm" in the id
 //!     string table · one 16-byte record
 //! ```
 //!
@@ -13,9 +13,10 @@
 use rustc_hash::FxHashSet;
 
 use crate::codec::{PackedFinding, RECORD_LEN};
-use crate::judge::Pattern;
+use crate::judge::{Cluster, Pattern};
 use crate::{BookIndex, BookKey};
 
+mod cluster_row;
 mod error;
 mod layout;
 mod pattern_row;
@@ -118,12 +119,13 @@ impl<'a> PublicationBook<'a> {
 }
 
 /// Encode one complete corpus publication: the pattern table the judge
-/// produced, then every book's records.
+/// produced, the clusters its `RunShape` rows list, then every book's records.
 pub fn encode_to_corpus_buffer(
     snapshot_id: SnapshotId,
     coordinate_space: CoordinateSpace,
     sections: &[PublicationBook<'_>],
     patterns: &[Pattern],
+    clusters: &[Cluster],
 ) -> Result<Vec<u8>, CorpusWireError> {
     if patterns.len() > usize::from(u16::MAX) {
         return Err(CorpusWireError::PatternCountOverflow {
@@ -184,7 +186,7 @@ pub fn encode_to_corpus_buffer(
     let pattern_start = id_start
         .checked_add(padded(id_bytes).ok_or(CorpusWireError::SizeOverflow)?)
         .ok_or(CorpusWireError::SizeOverflow)?;
-    let data_start = pattern_start
+    let cluster_start = pattern_start
         .checked_add(
             patterns
                 .len()
@@ -192,6 +194,15 @@ pub fn encode_to_corpus_buffer(
                 .ok_or(CorpusWireError::SizeOverflow)?,
         )
         .ok_or(CorpusWireError::SizeOverflow)?;
+    let cluster_count = u32::try_from(clusters.len()).map_err(|_| CorpusWireError::SizeOverflow)?;
+    let mut order = cluster_row::Order::default();
+    let mut data_start = cluster_start;
+    for (entry, cluster) in clusters.iter().enumerate() {
+        order.admit(cluster, entry, |at| patterns.get(at).copied())?;
+        data_start = data_start
+            .checked_add(cluster_row::entry_len(cluster))
+            .ok_or(CorpusWireError::SizeOverflow)?;
+    }
     let total_bytes = data_start
         .checked_add(
             usize::try_from(total_findings)
@@ -216,6 +227,12 @@ pub fn encode_to_corpus_buffer(
             .to_le_bytes(),
     );
     out.extend_from_slice(&snapshot_id.as_bytes());
+    out.extend_from_slice(&cluster_count.to_le_bytes());
+    out.extend_from_slice(
+        &u32::try_from(cluster_start)
+            .map_err(|_| CorpusWireError::SizeOverflow)?
+            .to_le_bytes(),
+    );
 
     let mut section_offset = data_start;
     let mut id_offset = id_start;
@@ -273,6 +290,10 @@ pub fn encode_to_corpus_buffer(
         }
         out.extend_from_slice(&pattern_row::encode_pattern(pattern));
     }
+    debug_assert_eq!(out.len(), cluster_start);
+    for cluster in clusters {
+        cluster_row::encode_cluster(cluster, &mut out);
+    }
     debug_assert_eq!(out.len(), data_start);
 
     for section in sections {
@@ -295,6 +316,8 @@ pub struct CorpusSnapshot<'a> {
     books: Vec<BookMeta<'a>>,
     pattern_start: usize,
     pattern_count: usize,
+    cluster_start: usize,
+    cluster_count: usize,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -353,10 +376,12 @@ impl<'a> CorpusSnapshot<'a> {
             });
         }
         let snapshot_id = SnapshotId::new(
-            bytes[HEADER_SNAPSHOT_ID_OFFSET..HEADER_BYTES]
+            bytes[HEADER_SNAPSHOT_ID_OFFSET..HEADER_CLUSTER_COUNT_OFFSET]
                 .try_into()
                 .expect("header checked"),
         );
+        let cluster_count = usize::try_from(read_u32(bytes, HEADER_CLUSTER_COUNT_OFFSET))
+            .map_err(|_| CorpusWireError::SizeOverflow)?;
         let directory_bytes = book_count
             .checked_mul(DIRECTORY_ENTRY_BYTES)
             .ok_or(CorpusWireError::SizeOverflow)?;
@@ -381,21 +406,39 @@ impl<'a> CorpusSnapshot<'a> {
                     .unwrap_or(usize::MAX),
             });
         }
-        let data_start = pattern_start
+        let cluster_start = pattern_start
             .checked_add(
                 pattern_count
                     .checked_mul(PATTERN_ROW_LEN)
                     .ok_or(CorpusWireError::SizeOverflow)?,
             )
             .ok_or(CorpusWireError::SizeOverflow)?;
-        if data_start > bytes.len() {
+        if cluster_start > bytes.len() {
             return Err(CorpusWireError::InvalidLength {
                 actual: bytes.len(),
             });
         }
-        for row in 0..pattern_count {
-            let at = pattern_start + row * PATTERN_ROW_LEN;
-            pattern_row::decode_pattern(&bytes[at..at + PATTERN_ROW_LEN], row, book_count)?;
+        let patterns = (0..pattern_count)
+            .map(|row| {
+                let at = pattern_start + row * PATTERN_ROW_LEN;
+                pattern_row::decode_pattern(&bytes[at..at + PATTERN_ROW_LEN], row, book_count)
+            })
+            .collect::<Result<Vec<Pattern>, _>>()?;
+        if read_u32(bytes, HEADER_CLUSTER_OFFSET_OFFSET)
+            != u32::try_from(cluster_start).unwrap_or(u32::MAX)
+        {
+            return Err(CorpusWireError::ClusterSectionOutOfOrder {
+                expected: cluster_start,
+                actual: usize::try_from(read_u32(bytes, HEADER_CLUSTER_OFFSET_OFFSET))
+                    .unwrap_or(usize::MAX),
+            });
+        }
+        let mut order = cluster_row::Order::default();
+        let mut data_start = cluster_start;
+        for entry in 0..cluster_count {
+            let (cluster, end) = cluster_row::decode_cluster(bytes, data_start, entry)?;
+            order.admit(&cluster, entry, |at| patterns.get(at).copied())?;
+            data_start = end;
         }
 
         let mut books = Vec::with_capacity(book_count);
@@ -479,7 +522,21 @@ impl<'a> CorpusSnapshot<'a> {
             books,
             pattern_start,
             pattern_count,
+            cluster_start,
+            cluster_count,
         })
+    }
+
+    /// Every listed cluster, in section order.
+    pub fn clusters(&self) -> Result<Vec<Cluster>, CorpusWireError> {
+        let mut at = self.cluster_start;
+        (0..self.cluster_count)
+            .map(|entry| {
+                let (cluster, end) = cluster_row::decode_cluster(self.bytes, at, entry)?;
+                at = end;
+                Ok(cluster)
+            })
+            .collect()
     }
 
     /// Rows in the publication's pattern table.

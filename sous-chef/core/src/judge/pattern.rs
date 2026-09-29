@@ -311,6 +311,55 @@ impl Pattern {
     }
 }
 
+/// One exact run a `RunShape` row lists beside its claim.
+///
+/// ```text
+/// '"' mixed len 4    ."'"  x27  recurring     ?"'"  x2     .'?"  x1
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Cluster {
+    /// The `RunShape` row this run is of.
+    pub pattern: PatternIndex,
+    /// The run's first [`Cluster::ATOMS`] atoms at most.
+    pub atoms: Box<[ScalarKey]>,
+    /// Corpus occurrences of this exact run, saturating.
+    pub count: u32,
+    /// The run occurs at least `support_floor` times: a convention, outside
+    /// the row's numerator.
+    pub recurring: bool,
+    /// The run was longer than [`Cluster::ATOMS`] atoms.
+    pub truncated: bool,
+}
+
+impl Cluster {
+    /// Atoms a cluster keeps.
+    pub const ATOMS: usize = 16;
+    /// Clusters one row lists.
+    pub const PER_ROW: usize = 8;
+    /// Of those, the slots recurring clusters get when there are more novel
+    /// ones than fit; either side lends the other what it leaves unused.
+    pub const RECURRING_SLOTS: usize = 3;
+
+    /// Whether this cluster can belong to `row`: a `RunShape` row whose glyph
+    /// and shape the atoms show, as far as a truncated run can show them.
+    pub fn fits(&self, row: &Pattern) -> bool {
+        let PatternKey::RunShape { pure, bucket } = row.key else {
+            return false;
+        };
+        let stored = !self.atoms.is_empty()
+            && self.atoms.len() <= Self::ATOMS
+            && self.count > 0
+            && self.atoms.iter().all(|atom| !atom.is_digits());
+        if !stored {
+            return false;
+        }
+        if self.truncated {
+            return self.atoms.len() == Self::ATOMS && usize::from(bucket) == RUN_BUCKETS;
+        }
+        shape_of(&self.atoms, row.glyph) == Some((pure, bucket))
+    }
+}
+
 /// A pattern's position in the publication's pattern table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PatternIndex(u16);

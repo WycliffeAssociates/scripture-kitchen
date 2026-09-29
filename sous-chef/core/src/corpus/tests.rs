@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::codec::{CodecError, HygieneClass, PresenceDigest, PresenceKind, SourceCopyDigest};
-use crate::judge::{Channel, PatternKey, Side, Usual};
+use crate::judge::{Channel, Cluster, PatternKey, Side, Usual};
 use crate::substrate::{OuterClass, ScalarKey};
 use crate::unicode::Pool;
 use crate::words::Form;
@@ -173,6 +173,32 @@ fn fixture_patterns() -> Vec<Pattern> {
     ]
 }
 
+/// The clusters the fixture's `RunShape` row lists: a convention, then the
+/// novel run the row counts.
+fn fixture_clusters() -> Vec<Cluster> {
+    let atoms = |text: &str| {
+        text.chars()
+            .map(ScalarKey::of)
+            .collect::<Box<[ScalarKey]>>()
+    };
+    vec![
+        Cluster {
+            pattern: PatternIndex::new(3),
+            atoms: atoms(",'\"'"),
+            count: 7,
+            recurring: true,
+            truncated: false,
+        },
+        Cluster {
+            pattern: PatternIndex::new(3),
+            atoms: atoms(",..,"),
+            count: 1,
+            recurring: false,
+            truncated: false,
+        },
+    ]
+}
+
 fn parse_hex(text: &str) -> Vec<u8> {
     text.split_whitespace()
         .map(|byte| u8::from_str_radix(byte, 16).unwrap())
@@ -223,6 +249,7 @@ fn writer_matches_shared_golden_buffer_and_reader_view() {
         SnapshotId::new(core::array::from_fn(|index| index as u8)),
         CoordinateSpace::Utf8,
         &[section],
+        &[],
         &[],
     )
     .unwrap();
@@ -343,6 +370,7 @@ fn mixed_kind_golden_buffer_decodes_in_both_readers() {
         CoordinateSpace::Utf8,
         &[section],
         &fixture_patterns(),
+        &fixture_clusters(),
     )
     .unwrap();
     assert_hex(
@@ -353,6 +381,7 @@ fn mixed_kind_golden_buffer_decodes_in_both_readers() {
 
     let snapshot = CorpusSnapshot::open(&encoded).unwrap();
     assert_eq!(snapshot.patterns().unwrap(), fixture_patterns());
+    assert_eq!(snapshot.clusters().unwrap(), fixture_clusters());
     let book = snapshot.book_by_key(BookKey::new(*b"MRK")).unwrap();
     assert_eq!(book.at(0).unwrap(), findings[0]);
     assert_eq!(book.at(1).unwrap(), findings[1]);
@@ -385,25 +414,144 @@ fn mixed_kind_golden_buffer_decodes_in_both_readers() {
 }
 
 #[test]
-fn header_is_48_bytes() {
-    assert_eq!(HEADER_BYTES, 48);
+fn header_is_56_bytes() {
+    assert_eq!(HEADER_BYTES, 56);
     assert_eq!(HEADER_PATTERN_COUNT_OFFSET, 24);
     assert_eq!(HEADER_PATTERN_OFFSET_OFFSET, 28);
     assert_eq!(HEADER_SNAPSHOT_ID_OFFSET, 32);
+    assert_eq!(HEADER_CLUSTER_COUNT_OFFSET, 48);
+    assert_eq!(HEADER_CLUSTER_OFFSET_OFFSET, 52);
     assert_eq!(PATTERN_ROW_LEN, 36);
     assert_eq!(PATTERN_BOOKS_OFFSET, 22);
     assert_eq!(PATTERN_RESERVED_OFFSET, 23);
     assert_eq!(PATTERN_USUAL_OFFSET, 24);
     assert_eq!(PATTERN_USUAL_COUNT_OFFSET, 28);
     assert_eq!(PATTERN_OTHER_COUNT_OFFSET, 32);
-    let empty =
-        encode_to_corpus_buffer(SnapshotId::new([0; 16]), CoordinateSpace::Utf8, &[], &[]).unwrap();
+    let empty = encode_to_corpus_buffer(
+        SnapshotId::new([0; 16]),
+        CoordinateSpace::Utf8,
+        &[],
+        &[],
+        &[],
+    )
+    .unwrap();
     assert_eq!(empty.len(), HEADER_BYTES);
     assert_eq!(read_u32(&empty, HEADER_PATTERN_COUNT_OFFSET), 0);
     assert_eq!(
         read_u32(&empty, HEADER_PATTERN_OFFSET_OFFSET),
         HEADER_BYTES as u32
     );
+    assert_eq!(read_u32(&empty, HEADER_CLUSTER_COUNT_OFFSET), 0);
+    assert_eq!(
+        read_u32(&empty, HEADER_CLUSTER_OFFSET_OFFSET),
+        HEADER_BYTES as u32
+    );
+}
+
+/// The one-book table with its clusters, and where the cluster section starts.
+fn clustered() -> (Vec<u8>, usize) {
+    let books = [PublicationBook::new(BookKey::new(*b"MRK"), "m", 0, &[])];
+    let encoded = encode_to_corpus_buffer(
+        SnapshotId::new([0; 16]),
+        CoordinateSpace::Utf8,
+        &books,
+        &fixture_patterns(),
+        &fixture_clusters(),
+    )
+    .unwrap();
+    let start =
+        HEADER_BYTES + DIRECTORY_ENTRY_BYTES + 4 + fixture_patterns().len() * PATTERN_ROW_LEN;
+    assert_eq!(
+        read_u32(&encoded, HEADER_CLUSTER_OFFSET_OFFSET) as usize,
+        start
+    );
+    (encoded, start)
+}
+
+#[test]
+fn clusters_round_trip_behind_the_pattern_table() {
+    let (encoded, _) = clustered();
+    let snapshot = CorpusSnapshot::open(&encoded).unwrap();
+    assert_eq!(snapshot.clusters().unwrap(), fixture_clusters());
+    assert_eq!(read_u32(&encoded, HEADER_CLUSTER_COUNT_OFFSET), 2);
+}
+
+/// The section is a discriminated union the format enforces: an entry names a
+/// `RunShape` row inside the table, shows that row's shape, and keeps order.
+#[test]
+fn a_cluster_the_encoder_cannot_write_is_refused() {
+    let books = [PublicationBook::new(BookKey::new(*b"MRK"), "m", 0, &[])];
+    let encode = |clusters: &[Cluster]| {
+        encode_to_corpus_buffer(
+            SnapshotId::new([0; 16]),
+            CoordinateSpace::Utf8,
+            &books,
+            &fixture_patterns(),
+            clusters,
+        )
+        .err()
+    };
+    let refused = |entry, field| Some(CorpusWireError::InvalidCluster { entry, field });
+    let shaped = fixture_clusters()[1].clone();
+    for (clusters, expected) in [
+        (
+            vec![Cluster {
+                pattern: PatternIndex::new(4),
+                ..shaped.clone()
+            }],
+            refused(0, "pattern"),
+        ),
+        (
+            vec![Cluster {
+                pattern: PatternIndex::new(10),
+                ..shaped.clone()
+            }],
+            refused(0, "pattern"),
+        ),
+        (
+            vec![Cluster {
+                atoms: [ScalarKey::of(','), ScalarKey::of('"')].into(),
+                ..shaped.clone()
+            }],
+            refused(0, "atoms"),
+        ),
+        (
+            fixture_clusters().into_iter().rev().collect(),
+            refused(1, "order"),
+        ),
+        (vec![shaped.clone(); 9], refused(8, "order")),
+    ] {
+        assert_eq!(encode(&clusters), expected, "{clusters:?}");
+    }
+
+    let (encoded, start) = clustered();
+    let entry = CLUSTER_ENTRY_BYTES + 4 * fixture_clusters()[0].atoms.len();
+    let torn = |at: usize, byte: u8| {
+        let mut torn = encoded.clone();
+        torn[at] = byte;
+        CorpusSnapshot::open(&torn).err()
+    };
+    assert_eq!(
+        torn(start + CLUSTER_PATTERN_OFFSET, 4),
+        refused(0, "pattern")
+    );
+    assert_eq!(torn(start + CLUSTER_FLAGS_OFFSET, 4), refused(0, "flags"));
+    assert_eq!(
+        torn(
+            start + CLUSTER_FLAGS_OFFSET,
+            CLUSTER_RECURRING | CLUSTER_TRUNCATED
+        ),
+        refused(0, "atoms"),
+        "a truncated cluster holds sixteen atoms"
+    );
+    assert_eq!(
+        torn(start + entry + CLUSTER_COUNT_OFFSET, 0xff),
+        refused(1, "order")
+    );
+    assert!(matches!(
+        torn(HEADER_CLUSTER_OFFSET_OFFSET, 0xff),
+        Some(CorpusWireError::ClusterSectionOutOfOrder { .. })
+    ));
 }
 
 #[test]
@@ -420,6 +568,7 @@ fn pattern_table_round_trips() {
         CoordinateSpace::Utf8,
         &books,
         &patterns,
+        &[],
     )
     .unwrap();
     let snapshot = CorpusSnapshot::open(&encoded).unwrap();
@@ -487,6 +636,7 @@ fn fixture_table() -> (Vec<u8>, usize) {
         CoordinateSpace::Utf8,
         &books,
         &fixture_patterns(),
+        &[],
     )
     .unwrap();
     (encoded, HEADER_BYTES + DIRECTORY_ENTRY_BYTES + 16)
@@ -519,6 +669,7 @@ fn usual_lanes_round_trip_per_channel() {
         CoordinateSpace::Utf8,
         &books,
         &alone,
+        &[],
     )
     .unwrap();
     assert_eq!(
@@ -600,6 +751,7 @@ fn an_inconsistent_share_is_refused_on_the_way_in_and_out() {
             CoordinateSpace::Utf8,
             &books,
             &patterns,
+            &[],
         ),
         Err(CorpusWireError::InvalidPattern {
             row: 1,
@@ -613,6 +765,7 @@ fn an_inconsistent_share_is_refused_on_the_way_in_and_out() {
         CoordinateSpace::Utf8,
         &books,
         &valid,
+        &[],
     )
     .unwrap();
     let start = HEADER_BYTES + DIRECTORY_ENTRY_BYTES + 16 + PATTERN_ROW_LEN;
@@ -658,6 +811,7 @@ fn pattern_index_past_count_is_refused() {
         CoordinateSpace::Utf8,
         &books,
         &patterns,
+        &[],
     )
     .unwrap();
     assert_eq!(
@@ -682,6 +836,7 @@ fn pattern_index_past_count_is_refused() {
         CoordinateSpace::Utf8,
         &books,
         &patterns,
+        &[],
     )
     .unwrap();
     assert_eq!(
@@ -702,7 +857,8 @@ fn a_pattern_table_over_sixty_five_thousand_rows_is_refused() {
             SnapshotId::new([0; 16]),
             CoordinateSpace::Utf8,
             &[],
-            &patterns
+            &patterns,
+            &[]
         ),
         Err(CorpusWireError::PatternCountOverflow { count: 65_536 })
     );
@@ -710,8 +866,14 @@ fn a_pattern_table_over_sixty_five_thousand_rows_is_refused() {
 
 #[test]
 fn empty_corpus_and_empty_books_are_valid() {
-    let empty = encode_to_corpus_buffer(SnapshotId::new([0; 16]), CoordinateSpace::Utf16, &[], &[])
-        .unwrap();
+    let empty = encode_to_corpus_buffer(
+        SnapshotId::new([0; 16]),
+        CoordinateSpace::Utf16,
+        &[],
+        &[],
+        &[],
+    )
+    .unwrap();
     assert_eq!(empty.len(), HEADER_BYTES);
     assert!(CorpusSnapshot::open(&empty).unwrap().is_empty());
 
@@ -723,6 +885,7 @@ fn empty_corpus_and_empty_books_are_valid() {
         SnapshotId::new([1; 16]),
         CoordinateSpace::Utf16,
         &books,
+        &[],
         &[],
     )
     .unwrap();
@@ -745,9 +908,14 @@ fn duplicate_book_keys_are_legal_and_the_ids_tell_them_apart() {
         PublicationBook::new(BookKey::new(*b"GEN"), "a/gen-copy.usfm", 4, &[]),
         PublicationBook::new(BookKey::new(*b"GEN"), "a/gen.usfm", 8, &[]),
     ];
-    let encoded =
-        encode_to_corpus_buffer(SnapshotId::new([2; 16]), CoordinateSpace::Utf8, &books, &[])
-            .unwrap();
+    let encoded = encode_to_corpus_buffer(
+        SnapshotId::new([2; 16]),
+        CoordinateSpace::Utf8,
+        &books,
+        &[],
+        &[],
+    )
+    .unwrap();
     let snapshot = CorpusSnapshot::open(&encoded).unwrap();
 
     assert_eq!(snapshot.len(), 2);
@@ -770,7 +938,13 @@ fn a_repeated_id_is_refused_on_the_way_in_and_out() {
         PublicationBook::new(BookKey::new(*b"MRK"), "same.usfm", 0, &[]),
     ];
     assert_eq!(
-        encode_to_corpus_buffer(SnapshotId::new([0; 16]), CoordinateSpace::Utf8, &books, &[]),
+        encode_to_corpus_buffer(
+            SnapshotId::new([0; 16]),
+            CoordinateSpace::Utf8,
+            &books,
+            &[],
+            &[]
+        ),
         Err(CorpusWireError::DuplicateBookId { book: 1 })
     );
 }
@@ -783,9 +957,14 @@ fn a_moved_or_malformed_id_offset_fails_closed() {
         0,
         &[],
     )];
-    let encoded =
-        encode_to_corpus_buffer(SnapshotId::new([0; 16]), CoordinateSpace::Utf8, &books, &[])
-            .unwrap();
+    let encoded = encode_to_corpus_buffer(
+        SnapshotId::new([0; 16]),
+        CoordinateSpace::Utf8,
+        &books,
+        &[],
+        &[],
+    )
+    .unwrap();
 
     let mut moved = encoded.clone();
     moved[HEADER_BYTES + DIRECTORY_ID_OFFSET] = 0xff;
@@ -812,6 +991,7 @@ fn malformed_directory_and_record_fail_closed() {
         SnapshotId::new([0; 16]),
         CoordinateSpace::Utf8,
         &[section],
+        &[],
         &[],
     )
     .unwrap();

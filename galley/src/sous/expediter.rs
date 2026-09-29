@@ -693,7 +693,7 @@ impl<P: ChapterPass + Sync> Expediter<P> {
         let (mut folds, mut located, mut sited) = (0, 0, 0);
         let (pairings, wordless);
         let mut walked = 0u64;
-        let (projected, patterns) = {
+        let (projected, patterns, clusters) = {
             let Self {
                 pantry,
                 pass,
@@ -982,8 +982,14 @@ impl<P: ChapterPass + Sync> Expediter<P> {
             })
             .collect();
         let snapshot = snapshot_id(&self.pass, &self.config, &self.pantry, &books, &references);
-        encode_to_corpus_buffer(snapshot, CoordinateSpace::Utf16, &sections, &patterns)
-            .map_err(PublishError::Wire)
+        encode_to_corpus_buffer(
+            snapshot,
+            CoordinateSpace::Utf16,
+            &sections,
+            &patterns,
+            &clusters,
+        )
+        .map_err(PublishError::Wire)
     }
 }
 

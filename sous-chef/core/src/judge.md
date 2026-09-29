@@ -155,6 +155,10 @@ en_ulb   '"' mixed len 4       31/12,015
   fires, and a wrong cluster repeated five times passes.
 - The denominator never moves, the glyph's side decides first, and a row left
   with no runs is silent, as for `Placement`.
+- A firing row lists its clusters, recurring ones marked, into
+  `Findings::clusters` right after it is pushed: at most 8, novel first, with
+  3 slots kept for the conventions (`judge::Cluster`, and the wire section in
+  [`codec/README.md`](codec/README.md)).
 
 The rescan must site exactly what is left, and a firing set cannot say which
 occurrences that is, so `Substrate::judge` publishes [`Explained`] into the

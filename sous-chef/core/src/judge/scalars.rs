@@ -24,6 +24,11 @@ pub(crate) fn judge_corpus(corpus: &[&BookAggregate], config: &JudgingConfig, ou
     }
 
     let explained = Explained::learn(corpus, config);
+    let runs = if config.channels.run_shape {
+        merged_runs(corpus)
+    } else {
+        Vec::new()
+    };
     let placements = placement_evidence(corpus, &explained);
     let shapes = run_evidence(corpus, &explained);
     let handoffs = follow_evidence(corpus);
@@ -48,7 +53,7 @@ pub(crate) fn judge_corpus(corpus: &[&BookAggregate], config: &JudgingConfig, ou
         if config.channels.run_shape
             && let Some(evidence) = evidence
         {
-            run_shapes(*glyph, evidence, &explained, config, &mut cited, out);
+            run_shapes(*glyph, evidence, &runs, &explained, config, &mut cited, out);
         }
         if config.channels.placement {
             placement(*glyph, marginals, &other, config, &mut cited, out);
@@ -368,10 +373,12 @@ pub(super) fn ordinary(numerator: u64, denominator: u64, config: &JudgingConfig)
 /// G1: the shape of the runs one glyph appears in, against every run that
 /// holds it.
 ///
-/// A row unusual by shape keeps only its runs that do not recur exactly.
+/// A row unusual by shape keeps only its runs that do not recur exactly, and
+/// lists its clusters beside it.
 pub(super) fn run_shapes(
     glyph: ScalarKey,
     evidence: &RunEvidence,
+    runs: &[(&[ScalarKey], u64)],
     explained: &Explained,
     config: &JudgingConfig,
     cited: &mut Explained,
@@ -406,7 +413,7 @@ pub(super) fn run_shapes(
                 .filter(|atoms| shape_of(atoms, glyph) == Some((pure, bucket)))
                 .cloned(),
         );
-        out.push_pattern(Pattern {
+        let index = out.push_pattern(Pattern {
             glyph,
             channel: Channel::RunShape,
             key: PatternKey::RunShape { pure, bucket },
@@ -421,7 +428,66 @@ pub(super) fn run_shapes(
                 count: saturate(usual_count),
             },
         });
+        for cluster in clusters(glyph, (pure, bucket), runs, config) {
+            out.push_cluster(Cluster {
+                pattern: index,
+                ..cluster
+            });
+        }
     }
+}
+
+/// The exact runs of one shape holding `glyph`, most frequent first: the
+/// novel ones the row counts, then the recurring ones it does not, at most
+/// [`Cluster::PER_ROW`] and never fewer recurring than
+/// [`Cluster::RECURRING_SLOTS`] while any are left.
+fn clusters(
+    glyph: ScalarKey,
+    shape: (bool, u8),
+    runs: &[(&[ScalarKey], u64)],
+    config: &JudgingConfig,
+) -> Vec<Cluster> {
+    let (mut recurring, mut novel): (Vec<_>, Vec<_>) = runs
+        .iter()
+        .filter(|(atoms, _)| shape_of(atoms, glyph) == Some(shape))
+        .partition(|(_, count)| *count >= u64::from(config.support_floor));
+    let order = |a: &&(&[ScalarKey], u64), b: &&(&[ScalarKey], u64)| {
+        b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0))
+    };
+    recurring.sort_by(order);
+    novel.sort_by(order);
+    let kept = Cluster::PER_ROW - recurring.len().min(Cluster::RECURRING_SLOTS);
+    let novel_taken = novel.len().min(kept);
+    let recurring_taken = recurring.len().min(Cluster::PER_ROW - novel_taken);
+    let mut chosen: Vec<&(&[ScalarKey], u64)> = novel[..novel_taken]
+        .iter()
+        .chain(&recurring[..recurring_taken])
+        .copied()
+        .collect();
+    chosen.sort_by(order);
+    chosen
+        .into_iter()
+        .map(|&(atoms, count)| Cluster {
+            pattern: PatternIndex::new(0),
+            atoms: atoms[..atoms.len().min(Cluster::ATOMS)].into(),
+            count: saturate(count),
+            recurring: count >= u64::from(config.support_floor),
+            truncated: atoms.len() > Cluster::ATOMS,
+        })
+        .collect()
+}
+
+/// Every exact run's corpus count, ascending by atoms.
+pub(super) fn merged_runs<'a>(corpus: &[&'a BookAggregate]) -> Vec<(&'a [ScalarKey], u64)> {
+    let mut counts: FxHashMap<&[ScalarKey], u64> = FxHashMap::default();
+    for book in corpus {
+        for (atoms, count) in book.runs() {
+            *counts.entry(atoms).or_default() += u64::from(count);
+        }
+    }
+    let mut out: Vec<_> = counts.into_iter().collect();
+    out.sort_unstable();
+    out
 }
 
 /// G3: what follows the glyph inside a run, against every position where

@@ -11,14 +11,14 @@ use crate::codec::{
     RECORD_CODE_OFFSET, RECORD_FLAGS_OFFSET, RECORD_FROM_OFFSET, RECORD_LEN,
     RECORD_PROJECT_SCOPE_OFFSET, RECORD_TO_OFFSET, Reasons,
 };
-use crate::judge::{Channel, Staircase};
+use crate::judge::{Channel, Cluster, Staircase};
 use crate::substrate::{OuterClass, RUN_BUCKETS};
 use crate::unicode::Pool;
 use crate::words::{Form, LETTER_RUN_MAX, LETTER_RUN_MIN};
 
 /// Render the checked-in TypeScript reader from the Rust-owned wire schema.
 pub fn generated_reader_ts() -> String {
-    let substitutions: [(&str, String); 58] = [
+    let substitutions: [(&str, String); 69] = [
         ("@@MAGIC@@", format!("0x{MAGIC:08x}")),
         ("@@FORMAT_VERSION@@", FORMAT_VERSION.to_string()),
         ("@@FLAG_UTF16@@", FLAG_UTF16.to_string()),
@@ -74,6 +74,29 @@ pub fn generated_reader_ts() -> String {
             "@@HEADER_SNAPSHOT_ID_OFFSET@@",
             HEADER_SNAPSHOT_ID_OFFSET.to_string(),
         ),
+        (
+            "@@HEADER_CLUSTER_COUNT_OFFSET@@",
+            HEADER_CLUSTER_COUNT_OFFSET.to_string(),
+        ),
+        (
+            "@@HEADER_CLUSTER_OFFSET_OFFSET@@",
+            HEADER_CLUSTER_OFFSET_OFFSET.to_string(),
+        ),
+        ("@@CLUSTER_ENTRY_BYTES@@", CLUSTER_ENTRY_BYTES.to_string()),
+        (
+            "@@CLUSTER_PATTERN_OFFSET@@",
+            CLUSTER_PATTERN_OFFSET.to_string(),
+        ),
+        (
+            "@@CLUSTER_ATOM_COUNT_OFFSET@@",
+            CLUSTER_ATOM_COUNT_OFFSET.to_string(),
+        ),
+        ("@@CLUSTER_FLAGS_OFFSET@@", CLUSTER_FLAGS_OFFSET.to_string()),
+        ("@@CLUSTER_COUNT_OFFSET@@", CLUSTER_COUNT_OFFSET.to_string()),
+        ("@@CLUSTER_RECURRING@@", CLUSTER_RECURRING.to_string()),
+        ("@@CLUSTER_TRUNCATED@@", CLUSTER_TRUNCATED.to_string()),
+        ("@@CLUSTER_ATOMS@@", Cluster::ATOMS.to_string()),
+        ("@@CLUSTERS_PER_ROW@@", Cluster::PER_ROW.to_string()),
         ("@@PATTERN_ROW_LEN@@", PATTERN_ROW_LEN.to_string()),
         ("@@PATTERN_GLYPH_OFFSET@@", PATTERN_GLYPH_OFFSET.to_string()),
         (

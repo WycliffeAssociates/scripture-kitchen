@@ -93,6 +93,17 @@ pub enum CorpusWireError {
         count: usize,
         at: Option<(usize, usize)>,
     },
+    ClusterSectionOutOfOrder {
+        expected: usize,
+        actual: usize,
+    },
+    /// The cluster entry's named field is not a value the encoder can write:
+    /// a pattern past the table or not `RunShape`, atoms that do not show its
+    /// shape, or an entry out of order.
+    InvalidCluster {
+        entry: usize,
+        field: &'static str,
+    },
 }
 
 impl fmt::Display for CorpusWireError {
@@ -160,6 +171,12 @@ impl fmt::Display for CorpusWireError {
             }
             Self::InvalidPattern { row, field } => {
                 write!(f, "pattern row {row} has an invalid {field}")
+            }
+            Self::ClusterSectionOutOfOrder { expected, actual } => {
+                write!(f, "cluster section starts at {actual}, expected {expected}")
+            }
+            Self::InvalidCluster { entry, field } => {
+                write!(f, "cluster entry {entry} has an invalid {field}")
             }
             Self::PatternIndexPastTable { index, count, at } => match at {
                 Some((book, row)) => write!(

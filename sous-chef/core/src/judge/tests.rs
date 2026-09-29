@@ -215,6 +215,48 @@ fn a_run_that_recurs_exactly_leaves_the_run_shape_numerator() {
     assert_eq!(row(&findings), None, "every mixed pair recurs");
 }
 
+/// A row lists its clusters: the swap it counts beside the order that recurs.
+#[test]
+fn a_run_shape_row_lists_its_clusters() {
+    let texts = [
+        "a; b ".repeat(3_000),
+        format!("{}{}", "c'; d ".repeat(7), "e;' f ".repeat(3)),
+    ];
+    let findings = judged(&texts, &JudgingConfig::default());
+    let listed: Vec<(String, u32, bool)> = findings
+        .clusters()
+        .iter()
+        .map(|cluster| {
+            let row = &findings.patterns()[usize::from(cluster.pattern.get())];
+            assert_eq!(row.glyph, ScalarKey::of(';'));
+            let text = cluster
+                .atoms
+                .iter()
+                .filter_map(|atom| atom.scalar())
+                .collect();
+            (text, cluster.count, cluster.recurring)
+        })
+        .collect();
+    assert_eq!(
+        listed,
+        vec![("';".to_string(), 7, true), (";'".to_string(), 3, false)]
+    );
+}
+
+/// A run past the atoms a cluster keeps is cut there and says so.
+#[test]
+fn a_long_run_is_listed_truncated() {
+    let texts = [format!("{}x{} y", "a. b ".repeat(3_000), ".".repeat(20))];
+    let findings = judged(&texts, &JudgingConfig::default());
+    let long = findings
+        .clusters()
+        .iter()
+        .find(|cluster| cluster.truncated)
+        .expect("the twenty-period run is listed");
+    assert_eq!(long.atoms.len(), Cluster::ATOMS);
+    assert_eq!(long.count, 1);
+}
+
 // ── What is usual instead ───────────────────────────────────────────────
 
 /// Each row names the corpus's own majority beside its minority.

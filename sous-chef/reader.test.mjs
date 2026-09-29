@@ -7,7 +7,12 @@ import {
   FindingsSnapshot,
   FindingsSnapshotError,
   HEADER_BOOK_COUNT_OFFSET,
+  CLUSTER_COUNT_OFFSET,
+  CLUSTER_ENTRY_BYTES,
+  CLUSTER_FLAGS_OFFSET,
+  CLUSTER_PATTERN_OFFSET,
   HEADER_BYTES,
+  HEADER_CLUSTER_OFFSET_OFFSET,
   HEADER_MAGIC_OFFSET,
   HEADER_PATTERN_OFFSET_OFFSET,
   HEADER_RECORD_LEN_OFFSET,
@@ -37,7 +42,9 @@ function fixture() {
 // One book under "books/mrk.usfm": the header, one directory row, a 16-byte
 // id table, then the pattern table, then the records.
 const FIRST_RECORD = HEADER_BYTES + DIRECTORY_ENTRY_BYTES + 16;
-const FIRST_MIXED_RECORD = FIRST_RECORD + 10 * PATTERN_ROW_LEN;
+// Two four-atom clusters sit between the pattern table and the records.
+const FIRST_CLUSTER = FIRST_RECORD + 10 * PATTERN_ROW_LEN;
+const FIRST_MIXED_RECORD = FIRST_CLUSTER + 2 * (CLUSTER_ENTRY_BYTES + 4 * 4);
 
 function expectOpenFailure(bytes) {
   assert.throws(() => FindingsSnapshot.open(bytes), FindingsSnapshotError);
@@ -277,6 +284,10 @@ test("decodes the pattern table the judge published", () => {
       shareBp: 16,
       books: 1,
       usual: { kind: "RunShape", pure: true, bucket: 1, count: 598 },
+      clusters: [
+        { text: ",'\"'", count: 7, recurring: true, truncated: false },
+        { text: ",..,", count: 1, recurring: false, truncated: false },
+      ],
     },
     {
       glyph: 0xffffffff,
@@ -396,6 +407,26 @@ test("decodes the pattern table the judge published", () => {
   expectOpenFailure(moved);
 });
 
+test("lists a RunShape row's clusters and refuses one the encoder cannot write", () => {
+  const snapshot = FindingsSnapshot.open(hexFixture("corpus_v2_hygiene.hex"));
+  assert.equal(snapshot.pattern(3).clusters.length, 2);
+  assert.equal(snapshot.pattern(4).clusters, undefined, "clusters ride RunShape rows only");
+
+  const second = FIRST_CLUSTER + CLUSTER_ENTRY_BYTES + 4 * 4;
+  for (const [at, byte] of [
+    [FIRST_CLUSTER + CLUSTER_PATTERN_OFFSET, 4],    // a Placement row
+    [FIRST_CLUSTER + CLUSTER_PATTERN_OFFSET, 10],   // past the table
+    [FIRST_CLUSTER + CLUSTER_FLAGS_OFFSET, 4],      // an unknown flag
+    [FIRST_CLUSTER + CLUSTER_FLAGS_OFFSET, 3],      // truncated, with four atoms
+    [second + CLUSTER_COUNT_OFFSET, 0xff],          // counts must descend
+    [HEADER_CLUSTER_OFFSET_OFFSET, 0xff],           // the section moved
+  ]) {
+    const torn = hexFixture("corpus_v2_hygiene.hex");
+    torn[at] = byte;
+    expectOpenFailure(torn);
+  }
+});
+
 test("accepts a view without copying its surrounding bytes", () => {
   const bytes = fixture();
   const padded = new Uint8Array(bytes.length + 8);
@@ -410,6 +441,7 @@ test("supports empty corpus and caller-ordered empty books", () => {
   emptyView.setUint32(HEADER_VERSION_OFFSET, FORMAT_VERSION, true);
   emptyView.setUint32(HEADER_RECORD_LEN_OFFSET, RECORD_LEN, true);
   emptyView.setUint32(HEADER_PATTERN_OFFSET_OFFSET, HEADER_BYTES, true);
+  emptyView.setUint32(HEADER_CLUSTER_OFFSET_OFFSET, HEADER_BYTES, true);
   assert.equal(FindingsSnapshot.open(empty).length, 0);
 
   // Two empty books: header, two directory rows, then "g" and "m" as their
@@ -424,6 +456,7 @@ test("supports empty corpus and caller-ordered empty books", () => {
   view.setUint32(HEADER_BOOK_COUNT_OFFSET, 2, true);
   view.setUint32(HEADER_RECORD_LEN_OFFSET, RECORD_LEN, true);
   view.setUint32(HEADER_PATTERN_OFFSET_OFFSET, books.length, true);
+  view.setUint32(HEADER_CLUSTER_OFFSET_OFFSET, books.length, true);
   books.set([71, 69, 78], first);
   books.set([77, 82, 75], second);
   view.setUint32(first + 8, books.length, true);

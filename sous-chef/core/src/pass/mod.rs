@@ -22,7 +22,7 @@ use core::ops::Range;
 use crate::{
     BookIndex, BookKey, Chapter, CodecError, Corpus, FindingKind, PackedFinding, ProjectedBook,
     TextRange, Verse,
-    judge::{Explained, Pattern, PatternIndex, TerminalTable},
+    judge::{Cluster, Explained, Pattern, PatternIndex, TerminalTable},
     proportionality::{LengthConfig, Paired, SourceLengths, TargetLengths, judge_lengths},
     substrate::VerseLength,
     words::{MovedWords, WordTotals, WordVerdicts},

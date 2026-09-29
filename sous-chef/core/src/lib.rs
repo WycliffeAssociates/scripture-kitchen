@@ -36,8 +36,9 @@ pub use input::{
     validate,
 };
 pub use judge::{
-    BandStep, Channel, Channels, DoublesPolicy, Explained, JudgingConfig, LetterRoster, Pattern,
-    PatternIndex, PatternKey, Side, Staircase, TerminalTable, Usual, books_touched, merged_follows,
+    BandStep, Channel, Channels, Cluster, DoublesPolicy, Explained, JudgingConfig, LetterRoster,
+    Pattern, PatternIndex, PatternKey, Side, Staircase, TerminalTable, Usual, books_touched,
+    merged_follows,
 };
 pub use pass::{
     ChapterInput, ChapterKey, ChapterObs, ChapterPass, CorpusTotals, Findings, SchemaStamp,

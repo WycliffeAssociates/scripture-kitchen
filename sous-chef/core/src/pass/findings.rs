@@ -21,6 +21,7 @@ pub struct Findings {
     book: Option<BookIndex>,
     rows: Vec<PackedFinding>,
     patterns: Vec<Pattern>,
+    clusters: Vec<Cluster>,
     terminals: Option<TerminalTable>,
     explained: Explained,
 }
@@ -33,6 +34,7 @@ impl Findings {
             book: None,
             rows: Vec::new(),
             patterns: Vec::new(),
+            clusters: Vec::new(),
             terminals: None,
             explained: Explained::default(),
         }
@@ -64,12 +66,22 @@ impl Findings {
         index
     }
 
+    /// Records one cluster a `RunShape` row lists, after that row.
+    pub fn push_cluster(&mut self, cluster: Cluster) {
+        self.clusters.push(cluster);
+    }
+
     pub fn rows(&self) -> &[PackedFinding] {
         &self.rows
     }
 
     pub fn patterns(&self) -> &[Pattern] {
         &self.patterns
+    }
+
+    /// Every listed cluster, in pattern order.
+    pub fn clusters(&self) -> &[Cluster] {
+        &self.clusters
     }
 
     /// The corpus's terminal table, once a judge has learned it.
@@ -105,8 +117,8 @@ impl Findings {
             .sort_by_key(|row| (row.book_idx().get(), row.from(), row.to()));
     }
 
-    pub fn into_parts(self) -> (Vec<PackedFinding>, Vec<Pattern>) {
-        (self.rows, self.patterns)
+    pub fn into_parts(self) -> (Vec<PackedFinding>, Vec<Pattern>, Vec<Cluster>) {
+        (self.rows, self.patterns, self.clusters)
     }
 
     pub fn len(&self) -> usize {
