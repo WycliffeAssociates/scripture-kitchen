@@ -175,42 +175,62 @@ is **one** site row carrying `CASING | WORD_LENGTH`.
 
 ## `Doubled` is the third, and it ships on
 
-The claim is: **one case-folded word written twice in a row, judged against
-that word's own count.** Two keys, never pooled — `bare` (whitespace only
-between) and `separated` (a nonletter run between, `na, na`) — because they
-have different denominators and different reasons to be a slip.
+The claim is: **one case-folded word written twice in a row, guilty until
+innocent.** Every doubling fires unless the word doubles habitually. Two keys,
+never pooled — `bare` (whitespace only between) and `separated` (a nonletter
+run between, `na, na`) — each with its own habit count and its own switch.
 
 ```text
-vous  x9,000 in the corpus, 300 of them `vous vous`
-   300/9,000 = 3,333 bp, band 3's ceiling is 10 bp   → SILENT, it is a
-                                                       construction
-the   x60,000, one `the the`
-   1/60,000 = 0 bp                                   → FIRES
-na    x2,000, one `na, na`                            → a SEPARATE key
+surface  x47, one `surface surface`           → FIRES
+the      x60,000, one `the the`               → FIRES
+vous     x9,000, 148 `vous vous`              → SILENT: doubled >= support_floor (5)
+na       x2,000, one `na, na`                 → FIRES, a SEPARATE key
+na       4 `na na` and 5 `na, na`             → bare FIRES, separated SILENT
 ```
 
-The denominator is every occurrence the corpus counted of that word, forced or
-free, cased or not — the two lanes of `words.md` partition it, so the sum needs
-no special case per script and **an uncased script is judged here** although it
-pays nothing for `Casing`. A word doubled every time it appears owns its whole
-denominator and never fires, which is why the band alone excuses `vous vous`
-without an allow-list.
+The habit is an absolute count, `JudgingConfig::support_floor`, per key: the
+word ladder and `word_support_floor` do not apply here, because a word used
+under a hundred times could never fire on one doubling under them, and that is
+most of the vocabulary. The row still carries the doubled count over every
+occurrence the corpus counted of that word, forced or free, cased or not — the
+two lanes of `words.md` partition it, so **an uncased script is judged here**
+although it pays nothing for `Casing`. The row's band is the word ladder's rung
+for that denominator: context for a reader, not a gate.
 
-**The recusal is corpus-level, not a band.** `WordTotals::doubling_share_bp` is
-the share of the corpus's distinct words that appear doubled twice or more, in
-basis points; above `JudgingConfig::doubles_productive_bp` (300 = 3%) the
-channel abstains for the whole corpus, because doubling is productive in that
-language and no per-word fraction can say so. `JudgingConfig::doubles`
-(`DoublesPolicy::{Auto, Always, Never}`) is the host's override, the same shape
-`LetterRoster` has. A share and never a count: Jonah and a whole Bible must
-answer the same way.
+```text
+JOB 20:7   …'Where is he?'
+JOB 20:8   He will fly away…              → not a doubling: two verses
+PSA        na\nna, one verse, two lines   → a doubling, bare
+go. Go     `.` forces a capital here      → not a doubling: two sentences
+```
 
-Both numbers are the fleet's (evidence.md, W2). Volume at the shipped ladder is
-p50 10 / p90 29 / p95 35 / max 81 rows per corpus over 1,504 corpora — the
-glyph channels' own volume — so `channels.doubled` ships **true**. The share
-distribution has **no knee**: p50 20 / p90 91 / p95 132 bp with a maximum of
-511, so 300 bp recuses the 8 most reduplicating corpora (0.5%) and 500 would
-have recused one.
+A pair never spans a verse boundary: its two words carry the same `VerseKey`
+or it is not counted, so two segments of one verse still pair. A line break is
+whitespace. A separator whose last glyph the corpus's `TerminalTable` forces is
+a sentence boundary and folds out of the separated numerator.
+
+```text
+JudgingConfig::doubled_bare = false        → no bare row
+JudgingConfig::doubled_separated = false   → no separated row
+DoublesPolicy::Never or channels.doubled = false → no row
+```
+
+**The recusal is corpus-level.** `WordTotals::doubling_share_bp` is the share
+of the corpus's distinct words that appear doubled twice or more, in basis
+points; above `JudgingConfig::doubles_productive_bp` (300 = 3%) the channel
+abstains for the whole corpus, because doubling is productive in that language.
+`JudgingConfig::doubles` (`DoublesPolicy::{Auto, Always, Never}`) is the host's
+override, the same shape `LetterRoster` has. A share and never a count: Jonah
+and a whole Bible must answer the same way. The recusal reads both keys
+whatever the two switches say.
+
+Both numbers are the fleet's (evidence.md, W2 and D1). Volume is p50 55 / p90
+142 / p95 180 / max 518 rows per corpus over 1,504 corpora, p50 14 / p90 80
+with the separated key off. The share distribution has **no knee**: p50 14 /
+p90 68 / p95 99 bp with a maximum of 477, so 300 bp recuses the 4 most
+reduplicating corpora (0.3%). Bantu reduplication (`bwino bwino`, one to four
+times a word) stays under both the habit count and the recusal; a project it
+floods turns the channel off.
 
 A doubled site's span covers **both words and the separator**, so it is not the
 word's span and never merges with a casing or length row; it carries

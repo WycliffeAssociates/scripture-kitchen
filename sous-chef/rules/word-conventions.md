@@ -28,19 +28,16 @@ and the terminal table are [../core/src/judge.md](../core/src/judge.md).
   there, and a corpus that reports speech after a comma everywhere abstains
   instead (evidence.md, W3).
 - **Doubled words:** keep adjacent and punctuation-separated counters distinct.
-  A recurring French `vous vous` convention can excuse itself; a lone residue
-  remains reviewable. State crosses verse seams within a book.
-  **Landed as `Channel::Doubled`, on by default.** Two keys, never pooled, each
-  judged against the word's own occurrences: `vous vous` x300 against `vous`
-  x9,000 is 3.3% against band 3's 0.1% and stays silent, while one `the the`
-  against 60,000 `the`s fires. A word doubled every time it appears owns its
-  whole denominator and never fires, so there is no allow-list. State crosses a
-  verse seam and stops at a chapter one, which is the same rule the fold
-  already runs for a word. A separated pair whose separator's last glyph
-  forces a capital in the same learned `TerminalTable` the casing channel
-  reads is a sentence boundary, not a doubling — `go. Go` is two sentences —
-  so the separated numerator sums only the non-forcing glyphs (evidence.md,
-  W2: 33 rows fall to 28 on `en_ulb`).
+  **Landed as `Channel::Doubled`, on by default: guilty until innocent.** Every
+  doubling fires unless that key is doubled at least `support_floor` (5) times
+  in the corpus, so `vous vous` x148 is the language and one `surface surface`
+  in a word used 47 times is a slip; the word band and `word_support_floor` do
+  not apply. `doubled_bare` and `doubled_separated` switch each key off. A pair
+  never spans a verse boundary (JOB 20:7-8 `…'Where is he?'` / `He will fly`);
+  a line break inside a verse is whitespace. A separated pair whose separator's
+  last glyph forces a capital in the same learned `TerminalTable` the casing
+  channel reads is a sentence boundary, not a doubling — `go. Go` is two
+  sentences.
 - **Doubling has nothing to do with case, so uncased scripts are judged too.**
   That is the one place they stop paying nothing: the walk now hashes every
   word and an uncased chapter keeps one doubles row per distinct word. Measured
@@ -92,19 +89,17 @@ silent** (`core/examples/word_volume.rs`, evidence.md W4), so
 `Aliiita` (swhulb), `yaaake`, `chazooona` (nya).
 
 Doubled words are calibrated on the same fleet
-(`core/examples/word_volume.rs`, evidence.md W2):
+(`core/examples/word_volume.rs`, evidence.md W2 and D1):
 
-- volume at the shipped word ladder is **p50 10 / p90 29 / p95 35 / max 81**
-  rows per corpus, which is the glyph channels' own volume, so
-  `channels.doubled` = **true**;
-- the vocabulary share that doubles has **no knee**: p50 20 / p90 91 / p95 132
-  basis points over 1,504 corpora, maximum 511. `doubles_productive_bp` = **300**
-  recuses the 8 most reduplicating corpora (0.5% of the fleet — kms, djkNT,
-  kmh-m, urim, nii, urbNT, urt, yss-yawu, all Papuan or creole); 500 would have
-  recused exactly one, and 100 would have recused 8.5%, well inside the ordinary
-  body of the distribution. The recusal is a correctness guard and not a volume
-  control: even those corpora fire only 13-51 rows, because the band already
-  excuses a word that doubles often.
+- volume is **p50 55 / p90 142 / p95 180 / max 518** rows per corpus, p50 14 /
+  p90 80 with the separated key off; the separated lane is mostly vocatives
+  and genealogy chains (`Moses, Moses`, `Abiud, Abiud`), which is what
+  `doubled_separated` is for;
+- the vocabulary share that doubles has **no knee**: p50 14 / p90 68 / p95 99
+  basis points over 1,504 corpora, maximum 477. `doubles_productive_bp` =
+  **300** recuses the 4 most reduplicating corpora (kms, djkNT, kmh-m, urim).
+  Bantu reduplication (nya 14 bp, swhulb 18 bp) stays judged; a project it
+  floods turns the channel off.
 
 The word rule itself is measured: over the 1,504-corpus fleet it agrees with
 UAX #29 on 98%+ of words in every spaced script, and on almost none in Thai,

@@ -71,6 +71,14 @@ fn ladder(divisor: u16) -> Staircase {
     .expect("the default bounds ascend whatever the shares are")
 }
 
+/// The shipped defaults with the separated key switched off.
+fn bare_only() -> JudgingConfig {
+    JudgingConfig {
+        doubled_separated: false,
+        ..JudgingConfig::default()
+    }
+}
+
 fn config(floor: u32, divisor: u16) -> JudgingConfig {
     JudgingConfig {
         word_support_floor: floor,
@@ -111,8 +119,8 @@ fn main() {
 
     println!("\n### test tier: doubled rows at the shipped defaults ###\n");
     println!(
-        "{:<12}{:>10}{:>10}{:>12}{:>10}",
-        "corpus", "auto", "always", "share bp", "recused"
+        "{:<12}{:>10}{:>10}{:>8}{:>12}{:>10}",
+        "corpus", "auto", "always", "bare", "share bp", "recused"
     );
     for name in CORPORA {
         let path = dir.join(format!("{name}.txt"));
@@ -124,8 +132,12 @@ fn main() {
             doubles: DoublesPolicy::Always,
             ..JudgingConfig::default()
         });
+        let bare = corpus.doubled_rows(&bare_only());
         let recused = share > JudgingConfig::default().doubles_productive_bp;
-        println!("{name:<12}{auto:>10}{always:>10}{share:>12}{:>10}", recused);
+        println!(
+            "{name:<12}{auto:>10}{always:>10}{bare:>8}{share:>12}{:>10}",
+            recused
+        );
     }
 
     println!("\n### test tier: letter-run rows at the shipped defaults ###\n");
@@ -458,6 +470,7 @@ fn sweep(dir: &Path) {
     let mut by_corpus: Vec<(usize, String)> = Vec::new();
     let mut doubled_auto: Vec<usize> = Vec::new();
     let mut doubled_always: Vec<usize> = Vec::new();
+    let mut doubled_bare: Vec<usize> = Vec::new();
     let forced = JudgingConfig {
         doubles: DoublesPolicy::Always,
         ..JudgingConfig::default()
@@ -493,6 +506,7 @@ fn sweep(dir: &Path) {
         ));
         doubled_auto.push(corpus.doubled_rows(&JudgingConfig::default()));
         doubled_always.push(corpus.doubled_rows(&forced));
+        doubled_bare.push(corpus.doubled_rows(&bare_only()));
     }
 
     println!(
@@ -520,6 +534,7 @@ fn sweep(dir: &Path) {
         ("doubling share bp", &mut shares),
         ("rows, Always", &mut doubled_always),
         ("rows, Auto (shipped)", &mut doubled_auto),
+        ("rows, Auto, bare only", &mut doubled_bare),
     ] {
         let silent = values.iter().filter(|count| **count == 0).count();
         let (p50, p90, p95, max) = spread(values);

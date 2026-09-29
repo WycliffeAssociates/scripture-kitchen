@@ -117,6 +117,10 @@ keeps its chain, its open word, and its joiner across the seam. All the clause
 does is drop evidence at a position where nearly every translation capitalizes
 regardless, which removes a numerator rather than adding a claim.
 
+The doubles lane is the one place a verse seam ends something: each word
+carries the `VerseKey` it starts in, and two words with different keys are
+never a pair. Two segments of one verse share a key and still pair.
+
 ## The casing row
 
 One `WordRow` per chapter, one `WordCount` per distinct

@@ -158,9 +158,8 @@ pub struct Channels {
     /// Long words against the corpus's own length distribution. Off: names
     /// and loanwords are the long tail, and they are not slips.
     pub word_length: bool,
-    /// A word written twice in a row. On: a low-volume, cheap claim, and a
-    /// language that doubles productively recuses itself corpus-wide rather
-    /// than through the band ([`DoublesPolicy`]).
+    /// A word written twice in a row. On: a language that doubles
+    /// productively recuses itself corpus-wide ([`DoublesPolicy`]).
     pub doubled: bool,
     /// A letter repeated longer than this corpus ever repeats it. On: a
     /// handful of rows per corpus, and the denominator is the letter's own
@@ -206,7 +205,8 @@ pub struct JudgingConfig {
     /// not by convention. Nonletters have no such floor.
     pub letter_roster_min_letters: u32,
     pub letters: LetterRoster,
-    /// A word judged on fewer free positions than this abstains.
+    /// A word judged on fewer free positions than this abstains. Doubled
+    /// reads `support_floor` instead, as a habit count.
     pub word_support_floor: u32,
     /// The minority share that flags a word's case form:
     /// [`Staircase::WORD_STEPS`], the glyph ladder at a tenth. Word casing
