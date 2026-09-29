@@ -32,7 +32,7 @@ and the terminal table are [../core/src/judge.md](../core/src/judge.md).
   doubling fires unless that key is doubled at least `support_floor` (5) times
   in the corpus, so `vous vous` x148 is the language and one `surface surface`
   in a word used 47 times is a slip; the word band and `word_support_floor` do
-  not apply. `doubled_bare` and `doubled_separated` switch each key off. A pair
+  not apply. `doubled_bare` (on) and `doubled_separated` (off by default) switch each key. A pair
   never spans a verse boundary (JOB 20:7-8 `…'Where is he?'` / `He will fly`);
   a line break inside a verse is whitespace. A separated pair whose separator's
   last glyph forces a capital in the same learned `TerminalTable` the casing
@@ -94,7 +94,7 @@ Doubled words are calibrated on the same fleet
 - volume is **p50 55 / p90 142 / p95 180 / max 518** rows per corpus, p50 14 /
   p90 80 with the separated key off; the separated lane is mostly vocatives
   and genealogy chains (`Moses, Moses`, `Abiud, Abiud`), which is what
-  `doubled_separated` is for;
+  `doubled_separated` is for, and why it ships off;
 - the vocabulary share that doubles has **no knee**: p50 14 / p90 68 / p95 99
   basis points over 1,504 corpora, maximum 477. `doubles_productive_bp` =
   **300** recuses the 4 most reduplicating corpora (kms, djkNT, kmh-m, urim).

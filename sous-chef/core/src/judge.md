@@ -211,7 +211,7 @@ a sentence boundary and folds out of the separated numerator.
 
 ```text
 JudgingConfig::doubled_bare = false        → no bare row
-JudgingConfig::doubled_separated = false   → no separated row
+JudgingConfig::doubled_separated = false   → no separated row (the default)
 DoublesPolicy::Never or channels.doubled = false → no row
 ```
 
@@ -224,9 +224,10 @@ override, the same shape `LetterRoster` has. A share and never a count: Jonah
 and a whole Bible must answer the same way. The recusal reads both keys
 whatever the two switches say.
 
-Both numbers are the fleet's (evidence.md, W2 and D1). Volume is p50 55 / p90
-142 / p95 180 / max 518 rows per corpus over 1,504 corpora, p50 14 / p90 80
-with the separated key off. The share distribution has **no knee**: p50 14 /
+Both numbers are the fleet's (evidence.md, W2 and D1). Volume at the shipped
+defaults (separated off) is p50 14 / p90 80 / p95 112 / max 391 rows per
+corpus over 1,504 corpora, and p50 55 / p90 142 with the separated key on,
+which is mostly vocatives and genealogy chains. The share distribution has **no knee**: p50 14 /
 p90 68 / p95 99 bp with a maximum of 477, so 300 bp recuses the 4 most
 reduplicating corpora (0.3%). Bantu reduplication (`bwino bwino`, one to four
 times a word) stays under both the habit count and the recusal; a project it

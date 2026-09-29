@@ -517,11 +517,12 @@ a copy of the current values; `setConfig` writes them into BOTH judging slots of
 `Brigade`'s `((), JudgingConfig, JudgingConfig)`, as the CLI does, and leaves
 every field that is not a knob at the value it had.
 
-The doubled channel has one switch per kind of gap, both on:
+The doubled channel has one switch per kind of gap; bare is on and separated
+is off by default:
 
 ```js
 settings.doubled_bare = false;       // `the the` no longer judged
-settings.doubled_separated = false;  // `Moses, Moses` no longer judged
+settings.doubled_separated = true;   // `Moses, Moses` judged too
 settings.doubled = false;            // the whole channel off
 ```
 

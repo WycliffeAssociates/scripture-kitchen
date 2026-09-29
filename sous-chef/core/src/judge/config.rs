@@ -236,7 +236,8 @@ pub struct JudgingConfig {
     pub doubles: DoublesPolicy,
     /// Judges `the the`: a doubling with only whitespace between.
     pub doubled_bare: bool,
-    /// Judges `Moses, Moses`: a doubling with punctuation between.
+    /// Judges `Moses, Moses`: a doubling with punctuation between. Off by
+    /// default: vocatives and genealogy chains are most of its volume.
     pub doubled_separated: bool,
     /// The source-compared lane's own knobs. Judged by
     /// [`crate::proportionality::judge_lengths`], which is a corpus-level step
@@ -263,7 +264,7 @@ impl Default for JudgingConfig {
             doubles_productive_bp: 300,
             doubles: DoublesPolicy::default(),
             doubled_bare: true,
-            doubled_separated: true,
+            doubled_separated: false,
             lengths: LengthConfig::default(),
             channels: Channels::default(),
         }

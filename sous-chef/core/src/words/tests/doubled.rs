@@ -4,9 +4,11 @@ use super::*;
 
 /// The recusal off, so a fixture whose point is one word's verdict is not
 /// answered by the corpus statistic instead.
+/// Judged whatever the recusal says, with both keys on.
 fn always(config: &JudgingConfig) -> JudgingConfig {
     JudgingConfig {
         doubles: DoublesPolicy::Always,
+        doubled_separated: true,
         ..*config
     }
 }
@@ -127,7 +129,11 @@ fn na_comma_na_is_a_separate_claim() {
     let mut text = "and na now ".repeat(2_000);
     text.push_str("and na, na now");
     let books = [book(b"MRK", text)];
-    let findings = analyzed(&books, &JudgingConfig::default());
+    let config = JudgingConfig {
+        doubled_separated: true,
+        ..JudgingConfig::default()
+    };
+    let findings = analyzed(&books, &config);
     let rows: Vec<Pattern> = findings
         .patterns()
         .iter()
@@ -177,7 +183,7 @@ fn the_bare_and_separated_switches_are_independent() {
     assert_eq!(keys(false, true), [true]);
     assert!(keys(false, false).is_empty());
     assert!(JudgingConfig::default().doubled_bare);
-    assert!(JudgingConfig::default().doubled_separated);
+    assert!(!JudgingConfig::default().doubled_separated);
 }
 
 /// A separated pair whose separator's LAST glyph forces a capital in this
