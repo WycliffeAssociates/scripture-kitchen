@@ -340,8 +340,8 @@ pub(super) fn placement(
 /// One book whose rate of a placement key breaks from the other books'.
 ///
 /// ```text
-/// nya ',' prev=Space   1SA 1,183/1,526 = 7,752 bp   the other 42 books' median 30 bp
-///   7,752 >= book_rate_min_bp 1,000 and >= 10 x 30   -> FIRES for 1SA
+/// nya ',' prev=Space   1SA 1,183/1,526 = 7,752 bp   the other 61 books' median 31 bp
+///   7,752 >= book_rate_min_bp 1,000 and >= 10 x 31   -> FIRES for 1SA
 /// ```
 ///
 /// Judged books hold the glyph at least `support_floor` times, and the channel
@@ -527,10 +527,9 @@ pub(super) fn run_shapes(
     }
 }
 
-/// The exact runs of one shape holding `glyph`, most frequent first: the
-/// novel ones the row counts, then the recurring ones it does not, at most
-/// [`Cluster::PER_ROW`] and never fewer recurring than
-/// [`Cluster::RECURRING_SLOTS`] while any are left.
+/// The exact runs of one shape holding `glyph`, most frequent first: at most
+/// [`Cluster::PER_ROW`], the novel ones the row counts first, with
+/// [`Cluster::RECURRING_SLOTS`] kept for the recurring ones it does not.
 fn clusters(
     glyph: ScalarKey,
     shape: (bool, u8),

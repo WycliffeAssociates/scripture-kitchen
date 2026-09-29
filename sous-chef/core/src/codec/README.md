@@ -295,10 +295,10 @@ and no scan. The 4-byte padding after the section keeps every record section
 aligned for a typed-array view.
 
 Version 2 grew the pattern row from 24 bytes to 36 for the usual lanes and the
-header from 48 bytes to 56 for the cluster section. Sefer,
-the one consumer, reads only through the generated reader, so a version 1
-buffer is refused at `open` rather than migrated. The charter's rule stands: a
-layout change means a new wire version.
+header from 48 bytes to 56 for the cluster section. Sefer, the one consumer,
+reads only through the generated reader, so a version 1 buffer is refused at
+`open` rather than migrated. The charter's rule stands: a layout change means a
+new wire version.
 
 Sous analysis emits projected-book UTF-8 ranges; `galley::sous` composes the
 producer locator with UTF-8-to-UTF-16 conversion and publishes raw-book UTF-16
