@@ -23,6 +23,8 @@ pub struct OnionBook {
     text: String,
     mask: Mask,
     toc: Toc,
+    /// Ascending indices into `toc.verses` that abstain for ordering.
+    unordered: Vec<usize>,
 }
 
 impl OnionBook {
@@ -42,6 +44,7 @@ impl OnionBook {
     pub fn from_parts(text: &str, mask: Mask, toc: Toc) -> Result<Self, InputError> {
         let book = Self {
             text: mask.text(text.as_bytes()),
+            unordered: unordered_anchors(&toc),
             mask,
             toc,
         };
@@ -60,6 +63,11 @@ impl OnionBook {
             .iter()
             .filter(|anchor| VerseKey::new(anchor.chapter, anchor.first, anchor.last).is_err())
             .count()
+    }
+
+    /// Keyed verse anchors that abstain because they break ascending order.
+    pub fn unordered_anchor_count(&self) -> usize {
+        self.unordered.len()
     }
 
     /// The scripture address of a projected range, and its raw source runs.
@@ -106,6 +114,7 @@ impl ProjectedBook for OnionBook {
             .verses
             .iter()
             .enumerate()
+            .filter(|(at, _)| self.unordered.binary_search(at).is_err())
             .filter_map(|(at, anchor)| {
                 // Onion retains malformed anchors for its own lint. Sous
                 // cannot align one without a numeric key, so that unit
@@ -125,6 +134,59 @@ impl ProjectedBook for OnionBook {
                 Some(Verse::new(key, projected(&self.mask, anchor.at..end)))
             })
     }
+}
+
+/// Sous needs ascending verses, so in a chapter that breaks order only its
+/// longest ascending run stays; Onion's lint reports the rest.
+///
+/// ```text
+/// \v 22 \v 23 \v 24 \v 23 \v 25   →  the second 23 abstains
+/// \v 22 \v 23 \v 42 \v 25 \v 26   →  42 abstains, not 25 and 26
+/// ```
+fn unordered_anchors(toc: &Toc) -> Vec<usize> {
+    let keyed: Vec<(usize, VerseKey)> = toc
+        .verses
+        .iter()
+        .enumerate()
+        .filter_map(|(at, anchor)| {
+            let key = VerseKey::new(anchor.chapter, anchor.first, anchor.last).ok()?;
+            Some((at, key))
+        })
+        .collect();
+    let mut unordered = Vec::new();
+    for chapter in keyed.chunk_by(|a, b| a.1.chapter() == b.1.chapter()) {
+        if !chapter.is_sorted_by(|a, b| a.1 <= b.1) {
+            unordered.extend(outside_longest_run(chapter));
+        }
+    }
+    unordered
+}
+
+/// Patience sort: `tails[n]` ends the best strictly ascending run of length
+/// `n + 1`, and `previous` links each entry back through its run.
+fn outside_longest_run(chapter: &[(usize, VerseKey)]) -> impl Iterator<Item = usize> + '_ {
+    let mut tails: Vec<usize> = Vec::new();
+    let mut previous = vec![None; chapter.len()];
+    for (i, &(_, key)) in chapter.iter().enumerate() {
+        let len = tails.partition_point(|&tail| chapter[tail].1 < key);
+        previous[i] = len.checked_sub(1).map(|below| tails[below]);
+        if len == tails.len() {
+            tails.push(i);
+        } else {
+            tails[len] = i;
+        }
+    }
+    let mut kept = vec![false; chapter.len()];
+    let mut at = tails.last().copied();
+    while let Some(i) = at {
+        kept[i] = true;
+        at = previous[i];
+    }
+    chapter
+        .iter()
+        .zip(kept)
+        .filter(|(_, kept)| !kept)
+        .map(|(&(at, _), _)| at)
 }
 
 fn projected(mask: &Mask, source: Range<u32>) -> TextRange {
@@ -259,6 +321,67 @@ mod tests {
             "two\n"
         );
         assert!(book.text().contains("unkeyed"));
+    }
+
+    fn keys_and_texts(book: &OnionBook) -> Vec<(u16, u16, &str)> {
+        book.verses()
+            .map(|verse| {
+                let text = verse.text();
+                (
+                    verse.key().chapter(),
+                    verse.key().first(),
+                    &book.text()[text.from() as usize..text.to() as usize],
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_repeated_verse_number_abstains_and_the_book_survives() {
+        let source = concat!(
+            "\\id ACT\n",
+            "\\c 27\n\\p\n",
+            "\\v 22 a\n\\v 23 b\n\\v 24 c\n\\v 23 d\n\\v 25 e\n",
+            "\\c 28\n\\p\n",
+            "\\v 1 f\n",
+        );
+        let book = OnionBook::parse(source).unwrap();
+
+        assert_eq!(book.unordered_anchor_count(), 1);
+        assert_eq!(
+            keys_and_texts(&book),
+            vec![
+                (27, 22, "a\n"),
+                (27, 23, "b\n"),
+                (27, 24, "c\n"),
+                (27, 25, "e\n"),
+                (28, 1, "f\n"),
+            ]
+        );
+        assert!(book.text().contains('d'), "the text stays in its chapter");
+    }
+
+    #[test]
+    fn a_typo_too_high_costs_one_verse_not_the_rest_of_the_chapter() {
+        let source = concat!(
+            "\\id ACT\n",
+            "\\c 27\n\\p\n",
+            "\\v 22 a\n\\v 23 b\n\\v 42 c\n\\v 25 d\n\\v 26 e\n",
+        );
+        let book = OnionBook::parse(source).unwrap();
+        let keys: Vec<_> = keys_and_texts(&book).into_iter().map(|row| row.1).collect();
+
+        assert_eq!(book.unordered_anchor_count(), 1);
+        assert_eq!(keys, vec![22, 23, 25, 26]);
+    }
+
+    #[test]
+    fn an_ordered_chapter_keeps_its_duplicates() {
+        let source = concat!("\\id ACT\n", "\\c 1\n\\p\n", "\\v 1 a\n\\v 1 b\n\\v 2 c\n");
+        let book = OnionBook::parse(source).unwrap();
+
+        assert_eq!(book.unordered_anchor_count(), 0);
+        assert_eq!(book.verses().count(), 3);
     }
 
     #[test]
