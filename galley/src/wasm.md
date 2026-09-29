@@ -517,6 +517,14 @@ a copy of the current values; `setConfig` writes them into BOTH judging slots of
 `Brigade`'s `((), JudgingConfig, JudgingConfig)`, as the CLI does, and leaves
 every field that is not a knob at the value it had.
 
+The doubled channel has one switch per kind of gap, both on:
+
+```js
+settings.doubled_bare = false;       // `the the` no longer judged
+settings.doubled_separated = false;  // `Moses, Moses` no longer judged
+settings.doubled = false;            // the whole channel off
+```
+
 `settings.source_copy` is the one knob a `setConfig` cannot fully apply on its
 own. It ships **off**, and a `Reference` registered while it was off kept no
 word lane to walk (`pantry.md`), so turning it on and republishing produces no

@@ -234,6 +234,10 @@ pub struct JudgingConfig {
     /// [`Channel::Doubled`] abstains for the whole corpus, in basis points.
     pub doubles_productive_bp: u16,
     pub doubles: DoublesPolicy,
+    /// Judges `the the`: a doubling with only whitespace between.
+    pub doubled_bare: bool,
+    /// Judges `Moses, Moses`: a doubling with punctuation between.
+    pub doubled_separated: bool,
     /// The source-compared lane's own knobs. Judged by
     /// [`crate::proportionality::judge_lengths`], which is a corpus-level step
     /// beside the chapter passes rather than one of them; a resident host
@@ -258,6 +262,8 @@ impl Default for JudgingConfig {
             word_length_sigma: 4,
             doubles_productive_bp: 300,
             doubles: DoublesPolicy::default(),
+            doubled_bare: true,
+            doubled_separated: true,
             lengths: LengthConfig::default(),
             channels: Channels::default(),
         }

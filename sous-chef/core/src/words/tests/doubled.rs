@@ -147,6 +147,35 @@ fn na_comma_na_is_a_separate_claim() {
     assert!(sited(&books, &findings, Reasons::DOUBLED_BARE).is_empty());
 }
 
+/// Each kind of gap has its own switch, and a switch that is off emits
+/// nothing for its key.
+#[test]
+fn the_bare_and_separated_switches_are_independent() {
+    let mut text = "and na now ".repeat(100);
+    text.push_str("and na na now and na, na now");
+    let books = [book(b"MRK", text)];
+    let keys = |bare: bool, separated: bool| -> Vec<bool> {
+        let config = JudgingConfig {
+            doubled_bare: bare,
+            doubled_separated: separated,
+            ..always(&JudgingConfig::default())
+        };
+        doubled_rows(&books, &config)
+            .iter()
+            .map(|row| match row.key {
+                PatternKey::Doubled { separated, .. } => separated,
+                _ => unreachable!("a doubled row"),
+            })
+            .collect()
+    };
+    assert_eq!(keys(true, true), [false, true]);
+    assert_eq!(keys(true, false), [false]);
+    assert_eq!(keys(false, true), [true]);
+    assert!(keys(false, false).is_empty());
+    assert!(JudgingConfig::default().doubled_bare);
+    assert!(JudgingConfig::default().doubled_separated);
+}
+
 /// A separated pair whose separator's LAST glyph forces a capital in this
 /// corpus's own terminal table is a sentence terminal, not a doubled word:
 /// `go. Go` is two sentences. Learned, not listed — the same corpus with the

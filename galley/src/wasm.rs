@@ -1020,6 +1020,9 @@ pub struct SousSettings {
     pub sentence_start_upper_bp: u16,
     pub word_length_sigma: u8,
     pub doubles_productive_bp: u16,
+    // Which doublings the doubled channel judges.
+    pub doubled_bare: bool,
+    pub doubled_separated: bool,
     // The source-compared lane.
     pub z_long: f32,
     pub z_short: f32,
@@ -1062,6 +1065,8 @@ impl SousSettings {
             sentence_start_upper_bp: config.sentence_start_upper_bp,
             word_length_sigma: config.word_length_sigma,
             doubles_productive_bp: config.doubles_productive_bp,
+            doubled_bare: config.doubled_bare,
+            doubled_separated: config.doubled_separated,
             z_long: config.lengths.z_long,
             z_short: config.lengths.z_short,
             min_verses: config.lengths.min_verses,
@@ -1092,6 +1097,8 @@ impl SousSettings {
         config.sentence_start_upper_bp = self.sentence_start_upper_bp;
         config.word_length_sigma = self.word_length_sigma;
         config.doubles_productive_bp = self.doubles_productive_bp;
+        config.doubled_bare = self.doubled_bare;
+        config.doubled_separated = self.doubled_separated;
         config.lengths = LengthConfig {
             z_long: self.z_long,
             z_short: self.z_short,

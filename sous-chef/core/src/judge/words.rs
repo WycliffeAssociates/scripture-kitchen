@@ -269,8 +269,12 @@ pub(super) fn doubled_word(
     let Some((band, _)) = config.word_bands.band_for(saturate(total)) else {
         return;
     };
-    for (separated, count) in [(false, u64::from(row.bare)), (true, free_separated)] {
-        if count == 0 || count >= u64::from(config.support_floor) {
+    let lanes = [
+        (false, config.doubled_bare, u64::from(row.bare)),
+        (true, config.doubled_separated, free_separated),
+    ];
+    for (separated, judged, count) in lanes {
+        if !judged || count == 0 || count >= u64::from(config.support_floor) {
             continue;
         }
         let key = PatternKey::Doubled {

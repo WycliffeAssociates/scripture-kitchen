@@ -154,6 +154,7 @@ fn the_knobs_round_trip_through_js() {
     assert_eq!(defaults.word_support_floor, 20);
     assert_eq!(defaults.terminal_upper_share_bp, 8_000);
     assert_eq!(defaults.min_verses, 50);
+    assert!(defaults.doubled_bare && defaults.doubled_separated);
 }
 
 /// An onion-wasm door, in the galley module: the shims land here because the
