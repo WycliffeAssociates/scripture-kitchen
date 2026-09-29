@@ -63,6 +63,56 @@ fn a_glyph_this_corpus_does_not_capitalize_after_leaves_its_words_free() {
     assert!(judged(&[book(b"MRK", text)], &loose()).is_empty());
 }
 
+/// `he said, "Name it."` in a corpus that opens speech with a capital: `, "`
+/// forces on its own counts while the bare comma does not, so the two
+/// `Name`s are the punctuation's and not the word's.
+#[test]
+fn a_capital_after_a_comma_and_a_quote_is_forced_where_speech_opens_with_one() {
+    let text = "and name it, and go. ".repeat(40)
+        + &"he said, \"Go now.\" ".repeat(10)
+        + "he said, \"Name it.\" he said, \"Name it.\"";
+    let findings = analyzed(&[book(b"MRK", text)], &loose());
+    let table = findings.terminals().expect("the substrate published one");
+    assert!(table.forces(quoted(',')));
+    assert!(!table.forces(bare(',')));
+    assert!(
+        !findings
+            .patterns()
+            .iter()
+            .any(|row| row.word_hash() == Some(hash_of("name"))),
+        "{:?}",
+        findings.patterns()
+    );
+}
+
+/// The same `Name`s where speech opens in lowercase: `, "` hands off a capital
+/// 2 times in 12, forces nothing, and the capitals are judged.
+#[test]
+fn a_capital_after_a_comma_and_a_quote_stays_free_where_speech_opens_lowercase() {
+    let text = "and name it, and go. ".repeat(40)
+        + &"he said, \"go now.\" ".repeat(10)
+        + "he said, \"Name it.\" he said, \"Name it.\"";
+    let findings = analyzed(&[book(b"MRK", text)], &loose());
+    assert!(!findings.terminals().unwrap().forces(quoted(',')));
+    let name: Vec<_> = findings
+        .patterns()
+        .iter()
+        .filter(|row| row.word_hash() == Some(hash_of("name")))
+        .map(|row| (row.key, row.numerator, row.denominator))
+        .collect();
+    assert_eq!(
+        name,
+        vec![(
+            PatternKey::Casing {
+                hash: hash_of("name"),
+                form: Form::Title
+            },
+            2,
+            42
+        )]
+    );
+}
+
 #[test]
 fn a_word_under_the_support_floor_abstains() {
     let quiet = JudgingConfig {
@@ -141,7 +191,7 @@ fn locate_sites_every_free_occurrence_the_numerator_counted() {
         vec!["David", "David"]
     );
     let table = findings.terminals().expect("the substrate published one");
-    assert!(table.forces(ScalarKey::of('.')));
+    assert!(table.forces(bare('.')));
     assert_eq!(free_in(&fold(&[&books[0].text]), &pattern, table), 2);
 }
 

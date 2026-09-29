@@ -51,8 +51,8 @@ pub use proportionality::{
 pub use sites::Site;
 pub use source_copy::{SourceCopyRow, SourceWords};
 pub use substrate::{
-    BookAggregate, Case, ChapterRow, Edge, FollowCounts, OuterClass, PairKey, RUN_BUCKETS,
-    RunLengths, ScalarKey, Substrate, VerseLength,
+    BookAggregate, Case, ChapterRow, Edge, FollowCounts, FollowKey, OuterClass, PairKey,
+    RUN_BUCKETS, RunLengths, ScalarKey, Substrate, VerseLength,
 };
 pub use words::{
     Before, DoubleCount, DoubleTally, DoubleTotal, Form, Gap, MovedWords, RunTally, WordAggregate,

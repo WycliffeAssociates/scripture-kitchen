@@ -6,7 +6,7 @@
 //!   pairs    (',', Letter, Space)  ('.', Letter, Nonletter)  (D, Digit, Edge)
 //!            ('\u{201C}', Space, Letter)  ('\u{201D}', Nonletter, Space)  (',', Digit, Digit)
 //!   runs     [',']×2  ['.', '\u{201D}']  ['\u{201C}']   // a digit breaks a run
-//!   follows  '\u{201C}' → upper 1                    // its run ends before `G`
+//!   follows  (',', quoted) → upper 1              // `G`; the quote rides
 //!   lead     Letter, upper                        trail  Digit, D open both ways
 //!   counts   21 scalars, 5 words
 //! ```
@@ -28,6 +28,7 @@ use crate::judge::{JudgingConfig, PatternIndex};
 use crate::pass::{ChapterInput, ChapterObs, ChapterPass, Findings, SchemaStamp};
 use crate::proportionality::LengthConfig;
 use crate::sites;
+use crate::unicode::{Pool, pool_of};
 use crate::{BookIndex, ConventionDigest, FindingKind, TextRange, VerseKey};
 use mise::unicode::Class;
 
@@ -166,6 +167,12 @@ pub const fn is_run_atom(class: Class) -> bool {
     is_nonletter(class) && !class.is_decimal_digit()
 }
 
+/// Whether a run atom leaves the handoff to the glyph behind it: a quote or a
+/// bracket never becomes a [`FollowKey`]'s glyph.
+pub fn rides(scalar: char) -> bool {
+    matches!(pool_of(scalar), Pool::Quote | Pool::Bracket)
+}
+
 /// One G0 pair triple: a nonletter and the outer class either side of it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PairKey {
@@ -215,7 +222,8 @@ impl Case {
     }
 }
 
-/// How often a run terminal was followed by an upper, lower, or uncased letter.
+/// How often one handoff context was followed by an upper, lower, or uncased
+/// letter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct FollowCounts([u32; Case::COUNT]);
 
@@ -237,6 +245,62 @@ impl FollowCounts {
         for (slot, count) in self.0.iter_mut().zip(other.0) {
             *slot += count;
         }
+    }
+}
+
+/// The context a letter is handed off from: the last glyph before it that does
+/// not [`ride`](rides), and whether a quote stood between them.
+///
+/// ```text
+/// he said, Go       (',', bare)
+/// he said, "Go      (',', quoted)
+/// "Go," he said     (',', quoted)    // position tells no opening quote from a closing one
+/// one. (Two         ('.', bare)      // a bracket rides and marks nothing
+/// said "Go          (none)           // a word closes the chain
+/// ```
+///
+/// Ordered by glyph, then bare before quoted.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct FollowKey(u32);
+
+impl FollowKey {
+    /// `glyph` is a scalar; the pooled digit key is never a run atom.
+    pub const fn new(glyph: ScalarKey, quoted: bool) -> Self {
+        debug_assert!(!glyph.is_digits(), "a digit hands nothing off");
+        Self((glyph.raw() << 1) | quoted as u32)
+    }
+
+    pub const fn glyph(self) -> ScalarKey {
+        ScalarKey(self.0 >> 1)
+    }
+
+    pub const fn quoted(self) -> bool {
+        self.0 & 1 == 1
+    }
+
+    /// The same glyph with a quote between it and the letter.
+    pub const fn through_quote(self) -> Self {
+        Self(self.0 | 1)
+    }
+
+    pub const fn raw(self) -> u32 {
+        self.0
+    }
+
+    /// `None` for a value whose glyph half is not a scalar.
+    pub const fn from_raw(raw: u32) -> Option<Self> {
+        match char::from_u32(raw >> 1) {
+            Some(_) => Some(Self(raw)),
+            None => None,
+        }
+    }
+}
+
+impl core::fmt::Debug for FollowKey {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let glyph = char::from_u32(self.0 >> 1).unwrap_or(char::REPLACEMENT_CHARACTER);
+        let context = if self.quoted() { "quoted" } else { "bare" };
+        write!(f, "FollowKey({glyph:?}, {context})")
     }
 }
 
@@ -295,8 +359,8 @@ pub type RunLengths = [u32; RUN_BUCKETS];
 
 /// What one end of a chapter owes its neighbor, and nothing more.
 ///
-/// A leading edge fills `outer`, `open_pair`, and `edge_case`; a trailing
-/// edge fills `outer`, `open_pair`, `open_follow`, and `blank`. The slot the
+/// A leading edge fills `outer`, `open_pair`, `edge_case`, and `edge_quoted`;
+/// a trailing edge fills `outer`, `open_pair`, `open_follow`, and `blank`. The slot the
 /// other side does not use stays `None`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Edge {
@@ -305,12 +369,16 @@ pub struct Edge {
     /// The edge scalar when it is a nonletter, with the one neighbor class it
     /// already knows: `next` on a leading edge, `prev` on a trailing one.
     open_pair: Option<(ScalarKey, OuterClass)>,
-    /// A nonletter run terminal with only whitespace between it and this end.
-    open_follow: Option<ScalarKey>,
-    /// This end's nearest letter, when only whitespace separates them.
+    /// The handoff context still waiting for a letter at this end.
+    open_follow: Option<FollowKey>,
+    /// This end's nearest letter, when only whitespace, quotes, and brackets
+    /// stand before it.
     edge_case: Option<Case>,
-    /// The chapter held whitespace and nothing else, so a neighbor's open
-    /// follow survives it.
+    /// A quote stands among those, so the neighbor's open follow arrives
+    /// quoted.
+    edge_quoted: bool,
+    /// The chapter held only whitespace, quotes, and brackets, so a
+    /// neighbor's open follow survives it.
     blank: bool,
 }
 
@@ -323,12 +391,16 @@ impl Edge {
         self.open_pair
     }
 
-    pub const fn open_follow(self) -> Option<ScalarKey> {
+    pub const fn open_follow(self) -> Option<FollowKey> {
         self.open_follow
     }
 
     pub const fn edge_case(self) -> Option<Case> {
         self.edge_case
+    }
+
+    pub const fn edge_quoted(self) -> bool {
+        self.edge_quoted
     }
 
     pub const fn blank(self) -> bool {
@@ -346,7 +418,7 @@ pub struct ChapterRow {
     /// `(offset into run_atoms, length, count)`, sorted by the sequence.
     runs: Box<[(u32, u32, u32)]>,
     run_atoms: Box<[ScalarKey]>,
-    follows: Box<[(ScalarKey, FollowCounts)]>,
+    follows: Box<[(FollowKey, FollowCounts)]>,
     hygiene: Box<[HygieneFinding]>,
     /// One row per verse the chapter declared, in producer order.
     verses: Box<[VerseLength]>,
@@ -386,8 +458,8 @@ impl ChapterRow {
         out
     }
 
-    /// Terminal follow table, sorted by key.
-    pub fn follows(&self) -> &[(ScalarKey, FollowCounts)] {
+    /// Handoffs by context, sorted by key.
+    pub fn follows(&self) -> &[(FollowKey, FollowCounts)] {
         &self.follows
     }
 
@@ -465,7 +537,7 @@ impl ChapterPass for Substrate {
     type Observation = ChapterRow;
     type Aggregate = BookAggregate;
     type Config = JudgingConfig;
-    const SCHEMA: SchemaStamp = SchemaStamp::new(3);
+    const SCHEMA: SchemaStamp = SchemaStamp::new(4);
 
     fn map(&self, chapter: ChapterInput<'_>) -> ChapterRow {
         walk::walk(chapter.text, chapter.verses)
@@ -578,7 +650,7 @@ pub struct BookAggregate {
     scalars: Vec<(ScalarKey, u32)>,
     pairs: Vec<(PairKey, u32)>,
     runs: Vec<(Box<[ScalarKey]>, u32)>,
-    follows: Vec<(ScalarKey, FollowCounts)>,
+    follows: Vec<(FollowKey, FollowCounts)>,
     hygiene: Vec<HygieneFinding>,
     /// Every chapter's verse rows in order, rebased into book coordinates.
     verses: Vec<VerseLength>,
@@ -610,7 +682,7 @@ impl BookAggregate {
         out
     }
 
-    pub fn follows(&self) -> &[(ScalarKey, FollowCounts)] {
+    pub fn follows(&self) -> &[(FollowKey, FollowCounts)] {
         &self.follows
     }
 

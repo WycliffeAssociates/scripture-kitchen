@@ -142,7 +142,7 @@ fn a_terminal_records_the_casing_of_the_letter_it_hands_off_to() {
     let follows = row.follows();
     let dot = follows
         .iter()
-        .find(|entry| entry.0 == ScalarKey::of('.'))
+        .find(|entry| entry.0 == FollowKey::new(ScalarKey::of('.'), false))
         .expect("the terminal");
     assert_eq!(dot.1.get(Case::Upper), 1);
     assert_eq!(dot.1.get(Case::Lower), 1);
@@ -210,6 +210,30 @@ fn a_seam_resolves_to_the_counts_of_the_unsplit_text() {
     // A chapter ending in a digit: the pair reads across, the follow does not.
     assert_seam_agrees("one 12,345 two", &["one 12", ",345 two"]);
     assert_seam_agrees("one. 42 Two", &["one. 42", " Two"]);
+    // A quote at a chapter's lead, or a chapter of nothing but one, still
+    // marks the follow it passes on.
+    assert_seam_agrees("one, \u{201C}Two", &["one,", " \u{201C}Two"]);
+    assert_seam_agrees("one, \u{201C}Two", &["one, ", "\u{201C}", "Two"]);
+    assert_seam_agrees("one, (Two", &["one, ", "(", "Two"]);
+    assert_seam_agrees("one,\u{201D} two", &["one,\u{201D}", " two"]);
+}
+
+/// A handoff is keyed by the last glyph that does not ride and by whether a
+/// quote stood between: `,` and `, "` count apart, a bracket marks nothing,
+/// and a word closes the chain.
+#[test]
+fn a_quote_between_glyph_and_letter_is_its_own_context() {
+    let row = row("a, B, c, \u{201C}D, (e \u{201C}f g\u{2019}h");
+    let key = |glyph: char, quoted: bool| FollowKey::new(ScalarKey::of(glyph), quoted);
+    let upper_lower = |key: FollowKey| {
+        row.follows()
+            .iter()
+            .find(|entry| entry.0 == key)
+            .map(|entry| (entry.1.get(Case::Upper), entry.1.get(Case::Lower)))
+    };
+    assert_eq!(upper_lower(key(',', false)), Some((1, 2)));
+    assert_eq!(upper_lower(key(',', true)), Some((1, 0)));
+    assert_eq!(row.follows().len(), 2, "{:?}", row.follows());
 }
 
 /// The hygiene ruling, kept: a run abutting a masked `\c` is two runs.

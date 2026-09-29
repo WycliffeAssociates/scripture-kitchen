@@ -22,7 +22,7 @@ use std::collections::BinaryHeap;
 
 use super::{Before, DoubleTotal, LETTER_RUN_LANES, WordAggregate, WordTotal, merge_glyph_lane};
 use crate::judge::TerminalTable;
-use crate::substrate::ScalarKey;
+use crate::substrate::{FollowKey, ScalarKey};
 
 /// One case-folded word's corpus totals under one [`Before`], by [`super::Form`]
 /// lane.
@@ -101,7 +101,7 @@ pub struct DoubleTally {
     /// One entry per distinct separator glyph, ascending. A pair whose glyph
     /// forces a capital in the corpus's own [`TerminalTable`] is a sentence
     /// boundary, not a doubling — [`Self::separated_free`] is the judged sum.
-    pub separated: Box<[(ScalarKey, u32)]>,
+    pub separated: Box<[(FollowKey, u32)]>,
     /// Books holding this hash; the row lives while this does.
     pub holders: u32,
 }
@@ -124,7 +124,7 @@ impl DoubleTally {
         self.separated = merge_glyph_lane(&self.separated, &row.separated, true);
     }
 
-    /// The separated lane's occurrences whose last glyph does NOT force a
+    /// The separated lane's occurrences whose context does NOT force a
     /// capital in `table`.
     pub fn separated_free(&self, table: &TerminalTable) -> u64 {
         self.separated

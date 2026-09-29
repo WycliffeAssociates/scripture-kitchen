@@ -645,27 +645,22 @@ fn the_bar_is_configurable() {
     assert!(expects_capital(findings_of(&books, &off).patterns()).is_empty());
 }
 
-/// A quote is NOT transparent here, and that is the ruling: the `follows` lane
-/// credits a run's TERMINAL, so `.\u{201d} then` is the quote's handoff and not
-/// the period's. The word walk rides through a quote to find the glyph a
-/// capital answers to; this lane does not, and the site rule matches the lane
-/// rather than the walk — otherwise the count oracle would not hold.
+/// A quote rides, and a handoff through one is the glyph's quoted context,
+/// which this channel does not judge: its row names a glyph, and the quoted
+/// context mixes openings with closings (`?" he said`). So `.\u{201d} then` is
+/// no exception, and the bare periods beside it decide alone.
 #[test]
-fn a_quote_between_is_transparent() {
+fn a_quote_between_takes_the_handoff_out_of_the_channel() {
     let books = [book_of(
         b"MRK",
-        &[&("Go.\u{201d} Then. ".repeat(250) + "Go.\u{201d} then.")],
+        &[&("Go.\u{201d} Then. ".repeat(250) + "Go.\u{201d} then. Go. now.")],
     )];
     let findings = findings_of(&books, &JudgingConfig::default());
-    let rows = findings.patterns().to_vec();
-    assert_eq!(expects_capital(&rows), vec![(Some('\u{201d}'), 1, 251)]);
-    assert!(
-        !rows
-            .iter()
-            .any(|row| row.channel == Channel::SentenceStart && row.glyph == ScalarKey::of('.')),
-        "the period is inside the run, so it hands nothing off"
+    assert_eq!(
+        expects_capital(findings.patterns()),
+        vec![(Some('.'), 1, 252)]
     );
-    assert_eq!(sited(&books, &findings, Reasons::SENTENCE_START), ["then"]);
+    assert_eq!(sited(&books, &findings, Reasons::SENTENCE_START), ["now"]);
 }
 
 /// A word with no glyph in front of it is in no row: the book's own first word

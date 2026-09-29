@@ -9,17 +9,35 @@ use crate::judge::{
     Channel, Channels, DoublesPolicy, LetterRoster, PatternKey, Staircase, TerminalTable,
 };
 use crate::pass::analyze_with;
-use crate::substrate::{FollowCounts, ScalarKey, Substrate};
+use crate::substrate::{FollowCounts, FollowKey, ScalarKey, Substrate};
 use crate::{BookKey, Chapter, Corpus, FindingKind, ProjectedBook, Reasons, TextRange, VerseKey};
 
-/// A terminal table built by hand: `(glyph, upper, lower)` handoffs, judged
-/// under the default share.
+/// A terminal table built by hand: `(glyph, upper, lower)` bare handoffs,
+/// judged under the default share.
 fn table(rows: &[(char, u32, u32)]) -> TerminalTable {
-    let follows: Vec<(ScalarKey, FollowCounts)> = rows
+    let keyed: Vec<(FollowKey, u32, u32)> = rows
         .iter()
-        .map(|&(glyph, upper, lower)| (ScalarKey::of(glyph), FollowCounts::new([upper, lower, 0])))
+        .map(|&(glyph, upper, lower)| (bare(glyph), upper, lower))
         .collect();
+    table_of(&keyed)
+}
+
+/// [`table`] over any contexts.
+fn table_of(rows: &[(FollowKey, u32, u32)]) -> TerminalTable {
+    let mut follows: Vec<(FollowKey, FollowCounts)> = rows
+        .iter()
+        .map(|&(key, upper, lower)| (key, FollowCounts::new([upper, lower, 0])))
+        .collect();
+    follows.sort_unstable_by_key(|entry| entry.0);
     TerminalTable::learn(&follows, &JudgingConfig::default())
+}
+
+const fn bare(glyph: char) -> FollowKey {
+    FollowKey::new(ScalarKey::of(glyph), false)
+}
+
+const fn quoted(glyph: char) -> FollowKey {
+    FollowKey::new(ScalarKey::of(glyph), true)
 }
 
 mod channel;
@@ -42,7 +60,11 @@ fn words(text: &str) -> Vec<(&str, Form, Before)> {
 }
 
 const fn glyph(scalar: char) -> Before {
-    Before::Glyph(ScalarKey::of(scalar))
+    Before::Glyph(bare(scalar))
+}
+
+const fn through_quote(scalar: char) -> Before {
+    Before::Glyph(quoted(scalar))
 }
 
 fn spans(text: &str) -> Vec<&str> {

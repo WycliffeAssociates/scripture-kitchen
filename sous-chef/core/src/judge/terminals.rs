@@ -1,41 +1,40 @@
 //! What the corpus capitalizes after.
 //!
 //! ```text
-//! merged_follows(corpus)  -> [('.', 4_112 upper / 4_190), ('!', 96 / 98),
-//!                             ('?', 512 / 520), (',', 31 / 4_836)]
-//! table.forcing()         -> ['.', '!', '?']      // the comma is no terminal
+//! merged_follows(corpus)  -> [(('.', bare), 4_112 upper / 4_190),
+//!                             ((',', bare), 31 / 4_836),
+//!                             ((',', quoted), 1_204 / 1_210)]
+//! table.forcing()         -> [('.', bare), (',', quoted)]   // a bare comma is no terminal
 //! ```
-//!
-//! A forcing glyph is corpus evidence, not a rule: the table says which
-//! scalars this corpus treats as sentence enders, and the word channels read
-//! it to decide which occurrences of a word are free to vary.
 
 use super::*;
 
 // ── The terminal table ──────────────────────────────────────────────────
 
-/// Which glyphs this corpus puts a capital after, learned from the substrate's
-/// `follows` lane rather than listed.
+/// Which handoff contexts this corpus puts a capital after, learned from the
+/// substrate's `follows` lane rather than listed.
 ///
 /// ```text
-/// learn(en_ulb: '.' upper 33,332 of 33,338 cased, ',' upper 4,836 of 47,291)
-///   at 8,000 bp   '.' forces (9,998 bp), ',' does not (1,022 bp)
+/// learn(WA-en-ulb: ('.', bare) 33,386 of 33,413, (',', bare) 4,841 of 47,299,
+///                  (',', quoted) 6,748 of 7,156)
+///   at 8,000 bp   ('.', bare) 9,991 bp forces, (',', quoted) 9,429 bp forces,
+///                 (',', bare) 1,023 bp does not
 /// ```
 ///
-/// A glyph forces when the share of the cased letters it hands off to that are
-/// uppercase reaches [`JudgingConfig::terminal_upper_share_bp`], on at least
-/// `support_floor` handoffs. So the danda and `።` force wherever a corpus
-/// writes them that way, and a comma forces in a corpus that reports speech
-/// after one — no ASCII allow-list, and no rule per script.
+/// A context forces when the share of the cased letters it hands off to that
+/// are uppercase reaches [`JudgingConfig::terminal_upper_share_bp`], on at
+/// least `support_floor` handoffs. Each [`FollowKey`] is judged on its own
+/// counts, so `, "` can force where `,` does not, and does not where a corpus
+/// writes speech in lowercase.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TerminalTable {
-    forcing: Box<[ScalarKey]>,
+    forcing: Box<[FollowKey]>,
 }
 
 impl TerminalTable {
-    /// The forcing glyphs of a corpus-merged follow lane.
-    pub fn learn(follows: &[(ScalarKey, FollowCounts)], config: &JudgingConfig) -> Self {
-        let mut forcing: Vec<ScalarKey> = follows
+    /// The forcing contexts of a corpus-merged follow lane.
+    pub fn learn(follows: &[(FollowKey, FollowCounts)], config: &JudgingConfig) -> Self {
+        let mut forcing: Vec<FollowKey> = follows
             .iter()
             .filter(|(_, counts)| forces_a_capital(*counts, config))
             .map(|(key, _)| *key)
@@ -47,13 +46,13 @@ impl TerminalTable {
         }
     }
 
-    /// Every forcing glyph, ascending.
-    pub fn forcing(&self) -> &[ScalarKey] {
+    /// Every forcing context, ascending.
+    pub fn forcing(&self) -> &[FollowKey] {
         &self.forcing
     }
 
-    pub fn forces(&self, glyph: ScalarKey) -> bool {
-        self.forcing.binary_search(&glyph).is_ok()
+    pub fn forces(&self, key: FollowKey) -> bool {
+        self.forcing.binary_search(&key).is_ok()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -62,7 +61,7 @@ impl TerminalTable {
 }
 
 /// Entitlement and the share, in one place: the denominator is the cased
-/// handoffs, so a glyph followed only by uncased letters decides nothing.
+/// handoffs, so a context followed only by uncased letters decides nothing.
 pub(super) fn forces_a_capital(counts: FollowCounts, config: &JudgingConfig) -> bool {
     let upper = u64::from(counts.get(Case::Upper));
     let cased = upper + u64::from(counts.get(Case::Lower));
@@ -71,8 +70,8 @@ pub(super) fn forces_a_capital(counts: FollowCounts, config: &JudgingConfig) -> 
 }
 
 /// Every book's follow lane merged into one, by key ascending.
-pub fn merged_follows(corpus: &[&BookAggregate]) -> Vec<(ScalarKey, FollowCounts)> {
-    let mut out: Vec<(ScalarKey, FollowCounts)> = Vec::new();
+pub fn merged_follows(corpus: &[&BookAggregate]) -> Vec<(FollowKey, FollowCounts)> {
+    let mut out: Vec<(FollowKey, FollowCounts)> = Vec::new();
     for book in corpus {
         for (key, counts) in book.follows() {
             match out.binary_search_by_key(key, |entry| entry.0) {

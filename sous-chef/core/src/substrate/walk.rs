@@ -9,11 +9,12 @@
 use rustc_hash::FxHashMap;
 
 use super::{
-    Case, ChapterRow, Edge, FollowCounts, OuterClass, PairKey, ScalarKey, VerseLength,
+    Case, ChapterRow, Edge, FollowCounts, FollowKey, OuterClass, PairKey, ScalarKey, VerseLength,
     is_nonletter, is_run_atom,
 };
 use crate::Verse;
 use crate::hygiene::{NBSP, SUSPECT, ScalarSites};
+use crate::unicode::{Pool, pool_of};
 use mise::unicode::Class;
 use mise::unicode::lookup::{ascii_class, trie_at};
 
@@ -35,7 +36,18 @@ const PROBE: usize = 512;
 struct Slot {
     key: ScalarKey,
     pairs: [u32; OuterClass::COUNT * OuterClass::COUNT],
-    follows: FollowCounts,
+    /// Bare, then quoted.
+    follows: [FollowCounts; 2],
+    ride: Ride,
+}
+
+/// What a run atom does to the handoff chain, decided once per slot.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Ride {
+    /// Becomes the chain's glyph.
+    Leads,
+    Bracket,
+    Quote,
 }
 
 /// The per-scalar state, kept in a local the counters cannot alias.
@@ -55,13 +67,15 @@ struct Hot {
     pending: u32,
     pending_prev: OuterClass,
     pending_first: bool,
-    /// A run terminal still looking for the letter it hands off to.
-    awaiting: u32,
+    /// The last leading glyph since a letter, still looking for the letter it
+    /// hands off to.
+    chain: u32,
+    chain_quoted: bool,
+    /// Nothing but whitespace, quotes, and brackets so far.
+    leading: bool,
     /// Where the open run started in the atom arena.
     run_open: u32,
     in_word: bool,
-    seen_nonspace: bool,
-    all_space: bool,
     scalar_count: u32,
     word_count: u32,
 }
@@ -75,11 +89,11 @@ impl Hot {
             pending: NO_ID,
             pending_prev: OuterClass::Edge,
             pending_first: false,
-            awaiting: NO_ID,
+            chain: NO_ID,
+            chain_quoted: false,
+            leading: true,
             run_open: NO_ID,
             in_word: false,
-            seen_nonspace: false,
-            all_space: true,
             scalar_count: 0,
             word_count: 0,
         }
@@ -204,14 +218,6 @@ impl Counters {
         if hot.scalar_count == 0 {
             self.lead.outer = outer;
         }
-        if !class.is_whitespace() && !hot.seen_nonspace {
-            hot.seen_nonspace = true;
-            hot.all_space = false;
-            if class.is_alphabetic() {
-                self.lead.edge_case = Some(Case::of(class));
-            }
-        }
-
         if !class.is_glue() {
             if class.is_decimal_digit() {
                 self.digits += 1;
@@ -238,23 +244,43 @@ impl Counters {
                     hot.run_open = self.run_atoms.len() as u32;
                 }
                 self.run_atoms.push(id);
+                match self.slots[id as usize].ride {
+                    Ride::Leads => {
+                        hot.chain = id;
+                        hot.chain_quoted = false;
+                        hot.leading = false;
+                    }
+                    Ride::Quote => {
+                        hot.chain_quoted = true;
+                        self.lead.edge_quoted |= hot.leading;
+                    }
+                    Ride::Bracket => {}
+                }
             } else {
                 // A digit breaks the run it interrupts and opens none.
                 self.close_run(hot);
+                hot.chain = NO_ID;
+                hot.leading = false;
             }
-            hot.awaiting = NO_ID;
             hot.pending = id;
             hot.pending_prev = hot.prev;
             hot.pending_first = hot.scalar_count == 0;
         } else {
             self.close_run(hot);
             if class.is_alphabetic() {
-                if hot.awaiting != NO_ID {
-                    self.slots[hot.awaiting as usize].follows.0[Case::of(class) as usize] += 1;
-                    hot.awaiting = NO_ID;
+                let case = Case::of(class);
+                if hot.chain != NO_ID {
+                    self.slots[hot.chain as usize].follows[usize::from(hot.chain_quoted)].0
+                        [case as usize] += 1;
+                    hot.chain = NO_ID;
+                }
+                if hot.leading {
+                    self.lead.edge_case = Some(case);
+                    hot.leading = false;
                 }
             } else if !class.is_whitespace() {
-                hot.awaiting = NO_ID;
+                hot.chain = NO_ID;
+                hot.leading = false;
             }
         }
 
@@ -283,14 +309,13 @@ impl Counters {
         hot.scalar_count += 1;
     }
 
-    /// Ends the open run, if any, and leaves its terminal awaiting a letter.
+    /// Ends the open run, if any.
     #[inline(always)]
     fn close_run(&mut self, hot: &mut Hot) {
         if hot.run_open != NO_ID {
             let len = self.run_atoms.len() as u32 - hot.run_open;
             self.run_spans.push((hot.run_open, len));
             hot.run_open = NO_ID;
-            hot.awaiting = *self.run_atoms.last().expect("a closed run has atoms");
         }
     }
 
@@ -325,7 +350,7 @@ impl Counters {
     fn intern(&mut self, cp: u32, class: Class) -> u32 {
         if class.is_decimal_digit() {
             if self.nonletter_digits == NO_ID {
-                self.nonletter_digits = self.push_slot(ScalarKey::DIGITS);
+                self.nonletter_digits = self.push_slot(ScalarKey::DIGITS, Ride::Leads);
             }
             return self.nonletter_digits;
         }
@@ -334,24 +359,25 @@ impl Counters {
             if seen != NO_ID {
                 return seen;
             }
-            let id = self.push_slot(ScalarKey(cp));
+            let id = self.push_slot(ScalarKey(cp), ride_of(cp));
             self.nonletter_ascii[cp as usize] = id;
             return id;
         }
         if let Some(&seen) = self.nonletter_other.get(&cp) {
             return seen;
         }
-        let id = self.push_slot(ScalarKey(cp));
+        let id = self.push_slot(ScalarKey(cp), ride_of(cp));
         self.nonletter_other.insert(cp, id);
         id
     }
 
-    fn push_slot(&mut self, key: ScalarKey) -> u32 {
+    fn push_slot(&mut self, key: ScalarKey, ride: Ride) -> u32 {
         let id = self.slots.len() as u32;
         self.slots.push(Slot {
             key,
             pairs: [0; OuterClass::COUNT * OuterClass::COUNT],
-            follows: FollowCounts::default(),
+            follows: [FollowCounts::default(); 2],
+            ride,
         });
         id
     }
@@ -372,9 +398,11 @@ impl Counters {
         let trail = Edge {
             outer: hot.prev,
             open_pair: self.trail_pair,
-            open_follow: (hot.awaiting != NO_ID).then(|| self.slots[hot.awaiting as usize].key),
+            open_follow: (hot.chain != NO_ID)
+                .then(|| FollowKey::new(self.slots[hot.chain as usize].key, hot.chain_quoted)),
             edge_case: None,
-            blank: hot.all_space && hot.scalar_count > 0,
+            edge_quoted: false,
+            blank: hot.leading && hot.scalar_count > 0,
         };
 
         let mut scalars: Vec<(ScalarKey, u32)> =
@@ -400,7 +428,7 @@ impl Counters {
         scalars.sort_unstable_by_key(|entry| entry.0);
 
         let mut pairs: Vec<(PairKey, u32)> = Vec::with_capacity(self.slots.len() * 3);
-        let mut follows: Vec<(ScalarKey, FollowCounts)> = Vec::with_capacity(self.slots.len());
+        let mut follows: Vec<(FollowKey, FollowCounts)> = Vec::with_capacity(self.slots.len());
         for slot in &self.slots {
             for (index, count) in slot.pairs.iter().enumerate() {
                 if *count > 0 {
@@ -414,8 +442,10 @@ impl Counters {
                     ));
                 }
             }
-            if slot.follows.total() > 0 {
-                follows.push((slot.key, slot.follows));
+            for (quoted, counts) in [false, true].into_iter().zip(slot.follows) {
+                if counts.total() > 0 {
+                    follows.push((FollowKey::new(slot.key, quoted), counts));
+                }
             }
         }
         pairs.sort_unstable_by_key(|entry| entry.0);
@@ -479,6 +509,18 @@ impl Counters {
             scalar_count: hot.scalar_count,
             word_count: hot.word_count,
         }
+    }
+}
+
+/// The same split as [`super::rides`], with the quote kept apart.
+fn ride_of(cp: u32) -> Ride {
+    let Some(scalar) = char::from_u32(cp) else {
+        return Ride::Leads;
+    };
+    match pool_of(scalar) {
+        Pool::Quote => Ride::Quote,
+        Pool::Bracket => Ride::Bracket,
+        _ => Ride::Leads,
     }
 }
 

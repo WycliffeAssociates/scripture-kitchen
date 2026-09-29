@@ -27,7 +27,7 @@
 
 use crate::judge::{JudgingConfig, Pattern, PatternIndex, TerminalTable};
 use crate::pass::{ChapterInput, ChapterObs, ChapterPass, CorpusTotals, Findings, SchemaStamp};
-use crate::substrate::ScalarKey;
+use crate::substrate::{FollowKey, ScalarKey};
 use crate::{BookIndex, Chapter, Verse};
 
 pub(crate) mod fold;
@@ -63,24 +63,24 @@ pub(crate) const fn letter_run_lane(length: u8) -> usize {
 ///
 /// The row stores this and nothing more; whether a `Glyph` *forces* a capital
 /// is a corpus fact the judge reads off [`TerminalTable`], so the same walk
-/// serves a corpus that capitalizes after a comma and one that does not.
-/// Quotes and brackets are transparent, so an opening quote records the
-/// terminal behind it.
+/// serves a corpus that capitalizes after a comma and one that does not. The
+/// key is the substrate's own handoff context, so the table is learned on
+/// exactly what is read here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Before {
     /// A word, or space and then a word.
     None,
     /// The first word of a chapter or of a verse.
     Start,
-    /// The last atom of the nonletter run in front of it.
-    Glyph(ScalarKey),
+    /// The glyph in front of it, quotes and brackets ridden through.
+    Glyph(FollowKey),
 }
 
 impl Before {
-    /// One past the last scalar, so a packed `Before` sorts glyphs first and
+    /// Past every [`FollowKey`], so a packed `Before` sorts glyphs first and
     /// never collides with one.
-    const NONE_RAW: u32 = 0x0011_0000;
-    const START_RAW: u32 = 0x0011_0001;
+    const NONE_RAW: u32 = u32::MAX - 1;
+    const START_RAW: u32 = u32::MAX;
 
     /// The four bytes the row stores this in, beside the length.
     pub const fn raw(self) -> u32 {
@@ -96,7 +96,7 @@ impl Before {
         match raw {
             Self::NONE_RAW => Some(Self::None),
             Self::START_RAW => Some(Self::Start),
-            _ => match ScalarKey::from_raw(raw) {
+            _ => match FollowKey::from_raw(raw) {
                 Some(key) => Some(Self::Glyph(key)),
                 None => None,
             },
@@ -247,8 +247,8 @@ impl WordCount {
 /// the doubled channel's denominator is their sum — which is what lets an
 /// uncased script be judged for doubling at all.
 ///
-/// `separated` is a lane of its own, keyed by the separator's last glyph and
-/// sorted by it: a pair split by a glyph that forces a capital in this
+/// `separated` is a lane of its own, keyed by the separator's handoff context
+/// and sorted by it: a pair split by a glyph that forces a capital in this
 /// corpus's own [`TerminalTable`] is two sentences, not a double, and the walk
 /// cannot know the table. Rows exist only for a word that actually doubled, so
 /// the extra heap word this lane costs is spent on rows that are already rare
@@ -263,8 +263,8 @@ pub struct DoubleCount {
     /// between. Saturating.
     pub bare: u16,
     /// The same with a nonletter run between (`na, na`), one entry per
-    /// distinct last glyph of the run, ascending, each count saturating.
-    pub separated: Box<[(ScalarKey, u16)]>,
+    /// distinct separator context, ascending, each count saturating.
+    pub separated: Box<[(FollowKey, u16)]>,
 }
 
 impl DoubleCount {
@@ -284,7 +284,7 @@ impl DoubleCount {
         }
     }
 
-    fn add_separated(&mut self, glyph: ScalarKey) {
+    fn add_separated(&mut self, glyph: FollowKey) {
         match self.separated.binary_search_by_key(&glyph, |&(g, _)| g) {
             Ok(at) => {
                 let count = &mut self.separated[at].1;
@@ -424,8 +424,8 @@ pub struct DoubleTotal {
     pub hash: u64,
     pub uncased: u32,
     pub bare: u32,
-    /// One entry per distinct separator glyph, ascending.
-    pub separated: Box<[(ScalarKey, u32)]>,
+    /// One entry per distinct separator context, ascending.
+    pub separated: Box<[(FollowKey, u32)]>,
 }
 
 impl DoubleTotal {
@@ -443,7 +443,7 @@ impl DoubleTotal {
         }
     }
 
-    /// The separated lane's occurrences whose last glyph does NOT force a
+    /// The separated lane's occurrences whose context does NOT force a
     /// capital in `table` — a pair whose separator forces one is a sentence
     /// boundary, not a doubling.
     pub fn free_separated(&self, table: &TerminalTable) -> u64 {
@@ -557,10 +557,10 @@ impl WordAggregate {
 /// holding that separator glyph leaves. Shared by the book fold and the corpus
 /// tally, since both merge the same shape.
 pub(crate) fn merge_glyph_lane(
-    a: &[(ScalarKey, u32)],
-    b: &[(ScalarKey, u32)],
+    a: &[(FollowKey, u32)],
+    b: &[(FollowKey, u32)],
     add: bool,
-) -> Box<[(ScalarKey, u32)]> {
+) -> Box<[(FollowKey, u32)]> {
     let mut out = Vec::with_capacity(a.len() + b.len());
     let (mut i, mut j) = (0usize, 0usize);
     loop {
@@ -618,7 +618,7 @@ impl ChapterPass for Words {
     /// The same type `Substrate` judges under: the word knobs live in the one
     /// config struct, and a host sets the same value in both tuple slots.
     type Config = JudgingConfig;
-    const SCHEMA: SchemaStamp = SchemaStamp::new(3);
+    const SCHEMA: SchemaStamp = SchemaStamp::new(4);
     /// Book grain: a chapter's word rows are 5 KB of cased Latin against the
     /// substrate's 0.3, and the whole book is rewalked for the ~200 µs a phone
     /// never notices. `rules/word-conventions.md` carries the ruling.

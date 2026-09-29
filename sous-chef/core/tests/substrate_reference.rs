@@ -17,8 +17,10 @@ use std::path::{Path, PathBuf};
 
 use mise::unicode::{class_of, is_glue};
 use sous_core::substrate::{
-    Case, ChapterRow, Edge, OuterClass, PairKey, RUN_BUCKETS, RunLengths, ScalarKey, Substrate,
+    Case, ChapterRow, Edge, FollowKey, OuterClass, PairKey, RUN_BUCKETS, RunLengths, ScalarKey,
+    Substrate,
 };
+use sous_core::unicode::{Pool, pool_of};
 use sous_core::{BookKey, ChapterInput, ChapterKey, ChapterPass};
 
 const CORPORA: &[&str] = &[
@@ -40,7 +42,7 @@ struct Reference {
     pairs: BTreeMap<PairKey, u32>,
     runs: BTreeMap<Vec<ScalarKey>, u32>,
     run_lengths: BTreeMap<ScalarKey, RunLengths>,
-    follows: BTreeMap<ScalarKey, [u32; 3]>,
+    follows: BTreeMap<FollowKey, [u32; 3]>,
     lead: RefEdge,
     trail: RefEdge,
     scalar_count: u32,
@@ -53,8 +55,9 @@ struct Reference {
 struct RefEdge {
     outer: OuterClass,
     open_pair: Option<(ScalarKey, OuterClass)>,
-    open_follow: Option<ScalarKey>,
+    open_follow: Option<FollowKey>,
     edge_case: Option<Case>,
+    edge_quoted: bool,
     blank: bool,
 }
 
@@ -65,6 +68,7 @@ impl RefEdge {
             open_pair: edge.open_pair(),
             open_follow: edge.open_follow(),
             edge_case: edge.edge_case(),
+            edge_quoted: edge.edge_quoted(),
             blank: edge.blank(),
         }
     }
@@ -87,6 +91,38 @@ fn is_nonletter(c: char) -> bool {
 /// the nonletter inventory the pairs lane counts.
 fn is_run_atom(c: char) -> bool {
     is_nonletter(c) && !class_of(c).is_decimal_digit()
+}
+
+/// A quote or bracket: whitespace-like to a handoff.
+fn rides(c: char) -> bool {
+    is_run_atom(c) && matches!(pool_of(c), Pool::Quote | Pool::Bracket)
+}
+
+/// Walking back from just before `end` through whitespace and riding atoms:
+/// the handoff context standing there, if a run atom that does not ride ends
+/// the walk.
+fn context_before(chars: &[char], end: usize) -> Option<FollowKey> {
+    let mut quoted = false;
+    for &c in chars[..end].iter().rev() {
+        if class_of(c).is_whitespace() {
+            continue;
+        }
+        if rides(c) {
+            quoted |= pool_of(c) == Pool::Quote;
+            continue;
+        }
+        return is_run_atom(c).then(|| FollowKey::new(key_of(c), quoted));
+    }
+    None
+}
+
+/// The scalars before the first one that is neither whitespace nor riding.
+fn transparent_prefix(chars: &[char]) -> &[char] {
+    let end = chars
+        .iter()
+        .position(|c| !class_of(*c).is_whitespace() && !rides(*c))
+        .unwrap_or(chars.len());
+    &chars[..end]
 }
 
 fn outer(c: Option<char>) -> OuterClass {
@@ -182,17 +218,12 @@ fn reference(text: &str) -> Reference {
         }
     }
 
-    // A run terminal follows into the first non-whitespace scalar past it,
-    // when that scalar is a letter.
-    for (start, run) in &runs {
-        let after = start + run.len();
-        let next = chars[after..]
-            .iter()
-            .find(|c| !class_of(**c).is_whitespace());
-        if let Some(&letter) = next
-            && class_of(letter).is_alphabetic()
+    // Every letter is handed off from whatever context stands behind it.
+    for (index, &c) in chars.iter().enumerate() {
+        if class_of(c).is_alphabetic()
+            && let Some(key) = context_before(&chars, index)
         {
-            out.follows.entry(run[run.len() - 1]).or_default()[case_of(letter) as usize] += 1;
+            out.follows.entry(key).or_default()[case_of(c) as usize] += 1;
         }
     }
     let mut in_word = false;
@@ -208,7 +239,7 @@ fn reference(text: &str) -> Reference {
     }
 
     out.lead = lead_edge(&chars);
-    out.trail = trail_edge(&chars, &runs);
+    out.trail = trail_edge(&chars);
     out
 }
 
@@ -221,15 +252,17 @@ fn lead_edge(chars: &[char]) -> RefEdge {
         open_pair: is_nonletter(first).then(|| (key_of(first), outer(chars.get(1).copied()))),
         open_follow: None,
         edge_case: chars
-            .iter()
-            .find(|c| !class_of(**c).is_whitespace())
+            .get(transparent_prefix(chars).len())
             .filter(|c| class_of(**c).is_alphabetic())
             .map(|c| case_of(*c)),
+        edge_quoted: transparent_prefix(chars)
+            .iter()
+            .any(|c| rides(*c) && pool_of(*c) == Pool::Quote),
         blank: false,
     }
 }
 
-fn trail_edge(chars: &[char], runs: &[(usize, Vec<ScalarKey>)]) -> RefEdge {
+fn trail_edge(chars: &[char]) -> RefEdge {
     let Some(&last) = chars.last() else {
         return RefEdge::default();
     };
@@ -241,16 +274,11 @@ fn trail_edge(chars: &[char], runs: &[(usize, Vec<ScalarKey>)]) -> RefEdge {
                 outer(chars.len().checked_sub(2).map(|at| chars[at])),
             )
         }),
-        // Only whitespace between the last run and the end: the letter that
-        // resolves this follow is the next chapter's business.
-        open_follow: runs.last().and_then(|(start, run)| {
-            chars[start + run.len()..]
-                .iter()
-                .all(|c| class_of(*c).is_whitespace())
-                .then(|| run[run.len() - 1])
-        }),
+        // The letter that resolves this follow is the next chapter's business.
+        open_follow: context_before(chars, chars.len()),
         edge_case: None,
-        blank: chars.iter().all(|c| class_of(*c).is_whitespace()),
+        edge_quoted: false,
+        blank: transparent_prefix(chars).len() == chars.len(),
     }
 }
 
@@ -339,6 +367,9 @@ const SAMPLE: &[&str] = &[
     "trailing run ...   ",
     "\u{1F9C5}\u{1F9C5}! ok",
     "\u{ab} guillemets \u{bb} \u{202f}!",
+    " \u{201C}(Lead, \u{201C} (b",
+    "\u{201D} \u{29}",
+    "a, \u{201C}B.\u{201D} c",
 ];
 
 #[test]

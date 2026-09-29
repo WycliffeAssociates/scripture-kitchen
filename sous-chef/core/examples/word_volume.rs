@@ -393,26 +393,24 @@ impl Corpus {
         });
         rows.iter()
             .take(6)
-            .filter_map(|(key, counts)| {
+            .map(|(key, counts)| {
                 let upper = u64::from(counts.get(Case::Upper));
                 let cased = upper + u64::from(counts.get(Case::Lower));
-                let scalar = key.scalar()?;
                 let share = (upper * 10_000).checked_div(cased).unwrap_or(0);
-                Some(format!("{scalar:?} {upper}/{cased} {share}bp"))
+                format!("{key:?} {upper}/{cased} {share}bp")
             })
             .collect::<Vec<_>>()
             .join("  ")
     }
 
-    /// The glyphs this corpus puts a capital after, as the table learned them.
+    /// The contexts this corpus puts a capital after, as the table learned them.
     fn forcing(&self) -> String {
         let findings = self.judged(&JudgingConfig::default());
         let table = findings.terminals().expect("the substrate published one");
         let names: Vec<String> = table
             .forcing()
             .iter()
-            .filter_map(|key| key.scalar())
-            .map(|scalar| format!("{scalar:?}"))
+            .map(|key| format!("{key:?}"))
             .collect();
         if names.is_empty() {
             "(nothing forces)".to_string()

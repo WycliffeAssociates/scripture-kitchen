@@ -22,7 +22,7 @@ use rustc_hash::FxHashMap;
 use crate::pass::Findings;
 use crate::proportionality::LengthConfig;
 use crate::substrate::{
-    BookAggregate, Case, FollowCounts, OuterClass, PairKey, RUN_BUCKETS, ScalarKey,
+    BookAggregate, Case, FollowCounts, FollowKey, OuterClass, PairKey, RUN_BUCKETS, ScalarKey,
 };
 use mise::unicode::class_of;
 

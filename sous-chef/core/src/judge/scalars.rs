@@ -154,6 +154,9 @@ pub(super) struct OtherSide<'a> {
 /// The mirror of the terminal table, on the same counts: a glyph this corpus
 /// almost always capitalizes after, and the handoffs where it did not.
 ///
+/// Only a glyph's bare handoffs: the row names a glyph and not a context, and
+/// the quoted context mixes openings with closings (`?" he said`).
+///
 /// `upper / (upper + lower)` decides whether the glyph speaks at all; the row
 /// then reports the lowercase handoffs against the cased ones, so the fraction
 /// a reviewer reads is the exception's own. A glyph followed only by uncased
@@ -588,7 +591,7 @@ pub(super) fn numerator_in(book: &BookAggregate, pattern: &Pattern, explained: &
         PatternKey::SentenceStart => book
             .follows()
             .iter()
-            .find(|(key, _)| *key == pattern.glyph)
+            .find(|(key, _)| *key == FollowKey::new(pattern.glyph, false))
             .map_or(0, |(_, counts)| u64::from(counts.get(Case::Lower))),
         // A word row is judged over word aggregates, which these are not;
         // `words::free_in` is its oracle.
@@ -643,7 +646,7 @@ pub(super) struct FollowEvidence {
     lower: Tally,
 }
 
-/// Every book's follow lane into one glyph-keyed table.
+/// Every book's bare handoffs into one glyph-keyed table.
 ///
 /// [`merged_follows`] answers the same question without dispersion, and the
 /// terminal table is all it needs; this one carries the `Tally` a row does.
@@ -651,8 +654,8 @@ pub(super) fn follow_evidence(corpus: &[&BookAggregate]) -> FxHashMap<ScalarKey,
     let mut out: FxHashMap<ScalarKey, FollowEvidence> = FxHashMap::default();
     for (book, aggregate) in corpus.iter().enumerate() {
         let book = book as u32;
-        for &(key, counts) in aggregate.follows() {
-            let evidence = out.entry(key).or_default();
+        for &(key, counts) in aggregate.follows().iter().filter(|(key, _)| !key.quoted()) {
+            let evidence = out.entry(key.glyph()).or_default();
             evidence.counts.absorb(counts);
             let lower = u64::from(counts.get(Case::Lower));
             if lower > 0 {

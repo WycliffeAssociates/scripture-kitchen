@@ -9,8 +9,8 @@ fn module_doc_example_is_exact() {
         vec![
             ("He", Form::Title, Before::Start),
             ("said", Form::Lower, Before::None),
-            ("Go", Form::Title, glyph('.')),
-            ("said", Form::Lower, glyph(',')),
+            ("Go", Form::Title, through_quote('.')),
+            ("said", Form::Lower, through_quote(',')),
             ("david", Form::Lower, Before::None),
             ("David", Form::Title, glyph('.')),
             ("went", Form::Lower, Before::None),
@@ -76,23 +76,38 @@ fn the_walk_records_what_stood_before_each_word() {
         ]
     );
     // A dash is a glyph like any other: the corpus decides what it does. The
-    // closing quote is transparent too, so `c` reads the word behind it.
+    // closing quote rides too, so `c` reads the word behind it.
     assert_eq!(
         before("a. \u{201C}b\u{201D} c. \u{2014}d"),
-        vec![Before::Start, glyph('.'), Before::None, glyph('\u{2014}')]
+        vec![
+            Before::Start,
+            through_quote('.'),
+            Before::None,
+            glyph('\u{2014}')
+        ]
     );
 }
 
-/// A quote hides the terminal in front of it, and it is the terminal the
-/// capital answers to.
+/// A quote rides to the glyph in front of it and marks the context quoted; a
+/// bracket rides and marks nothing.
 #[test]
 fn an_opening_quote_takes_the_glyph_behind_it() {
     let before = |text: &str| -> Vec<Before> { words(text).into_iter().map(|w| w.2).collect() };
-    assert_eq!(before("a. \u{201C}b"), vec![Before::Start, glyph('.')]);
+    assert_eq!(
+        before("a. \u{201C}b"),
+        vec![Before::Start, through_quote('.')]
+    );
     assert_eq!(before("a. (b"), vec![Before::Start, glyph('.')]);
-    // And behind a comma it is the comma, which is the whole `he said, "Stop`
-    // question: the corpus's own commas answer it.
-    assert_eq!(before("a, \u{201C}b"), vec![Before::Start, glyph(',')]);
+    // Behind a comma it is the comma through a quote, which the corpus's own
+    // `, "` handoffs answer, apart from its bare commas.
+    assert_eq!(
+        before("a, \u{201C}b"),
+        vec![Before::Start, through_quote(',')]
+    );
+    assert_eq!(
+        before("a, (\u{201C}b"),
+        vec![Before::Start, through_quote(',')]
+    );
     // A quote with a word behind it hides nothing.
     assert_eq!(before("a \u{201C}b"), vec![Before::Start, Before::None]);
 }
@@ -102,7 +117,7 @@ fn an_opening_quote_takes_the_glyph_behind_it() {
 #[test]
 fn a_glyph_that_precedes_capitals_forces() {
     let learned = table(&[('.', 95, 5)]);
-    assert!(learned.forces(ScalarKey::of('.')));
+    assert!(learned.forces(bare('.')));
     assert!(!glyph('.').is_free(&learned));
     assert!(!Before::Start.is_free(&learned), "a start always forces");
     assert!(Before::None.is_free(&learned));
@@ -112,11 +127,23 @@ fn a_glyph_that_precedes_capitals_forces() {
 #[test]
 fn a_glyph_that_rarely_precedes_capitals_is_free() {
     let learned = table(&[('.', 95, 5), (',', 5, 95)]);
-    assert!(!learned.forces(ScalarKey::of(',')));
+    assert!(!learned.forces(bare(',')));
     assert!(glyph(',').is_free(&learned));
     // And under the support floor a glyph decides nothing either way.
-    assert!(!table(&[('!', 4, 0)]).forces(ScalarKey::of('!')));
-    assert!(table(&[('!', 5, 0)]).forces(ScalarKey::of('!')));
+    assert!(!table(&[('!', 4, 0)]).forces(bare('!')));
+    assert!(table(&[('!', 5, 0)]).forces(bare('!')));
+}
+
+/// `,` and `, "` are two contexts with their own counts: the quoted one can
+/// force while the bare one stays free, and the reverse.
+#[test]
+fn a_glyph_through_a_quote_decides_apart_from_the_bare_glyph() {
+    let speech = table_of(&[(bare(','), 10, 90), (quoted(','), 99, 1)]);
+    assert!(glyph(',').is_free(&speech));
+    assert!(!through_quote(',').is_free(&speech));
+    let reported = table_of(&[(bare(','), 90, 10), (quoted(','), 10, 90)]);
+    assert!(!glyph(',').is_free(&reported));
+    assert!(through_quote(',').is_free(&reported));
 }
 
 /// The same glyph, two corpora: a corpus that reports speech after a comma

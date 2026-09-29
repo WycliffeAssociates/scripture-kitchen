@@ -5,13 +5,13 @@
 //!   casing lane
 //!     he     Title  Start        // the chapter's first word
 //!     said   Lower  None
-//!     go     Title  Glyph('.')   // the quote is transparent; the terminal is not
-//!     said   Lower  Glyph(',')
+//!     go     Title  Glyph('.' quoted)   // the quote rides; the terminal leads
+//!     said   Lower  Glyph(',' quoted)
 //!     david  Lower  None
-//!     david  Title  Glyph('.')
+//!     david  Title  Glyph('.' bare)
 //!     went   Lower  None
 //!   doubles lane
-//!     hash(go)   bare 0  separated [(',', 1)]   // `Go, go`: a comma stood between
+//!     hash(go)   bare 0  separated [((',', bare), 1)]   // `Go, go`: a comma stood between
 //!   letter-run lane
 //!     'e'  [0, 1, 0, 0, 0, 0, 0]                // one run of three, in `Theee`
 //! ```
@@ -19,10 +19,10 @@
 //! The walk decides nothing about capitals. It records what stood before each
 //! word and leaves forced or free to the judge, which reads the corpus's own
 //! terminal table ([`crate::judge::TerminalTable`]) — and the doubles lane
-//! leans on the same table: `separated` is keyed by the separator's own last
-//! glyph rather than a bare count, because a pair a comma splits and a pair a
+//! leans on the same table: `separated` is keyed by the separator's handoff
+//! context rather than a bare count, because a pair a comma splits and a pair a
 //! period-then-capital splits are different claims. The judge folds only the
-//! glyphs that do not force a capital into the doubling numerator, so
+//! contexts that do not force a capital into the doubling numerator, so
 //! `go. Go` is two sentences and never a doubled word.
 //!
 //! A word is a maximal run of letters and glue, extended through ONE nonletter
@@ -42,7 +42,7 @@ use super::{
     Before, DoubleCount, Form, LETTER_RUN_LANES, LETTER_RUN_MAX, LETTER_RUN_MIN, WordCount,
     WordRow, letter_run_lane,
 };
-use crate::substrate::{ScalarKey, is_run_atom};
+use crate::substrate::{FollowKey, ScalarKey, is_run_atom};
 use crate::{Verse, VerseKey};
 use mise::unicode::{Class, class_of};
 
@@ -67,12 +67,14 @@ pub struct Occurrence {
     pub verse: Option<VerseKey>,
 }
 
-/// Whether an atom is transparent to what stands behind it.
-///
-/// The one thing the walk still reads a pool for. An opening quote hides the
-/// terminal in front of it, and it is the terminal the capital answers to.
-fn rides(scalar: char) -> bool {
-    matches!(pool_of(scalar), Pool::Quote | Pool::Bracket)
+/// The chain past one run atom: a leading glyph replaces it, a quote marks it,
+/// a bracket leaves it as it was.
+fn chained(chain: Before, scalar: char) -> Before {
+    match (pool_of(scalar), chain) {
+        (Pool::Quote, Before::Glyph(key)) => Before::Glyph(key.through_quote()),
+        (Pool::Quote | Pool::Bracket, _) => chain,
+        _ => Before::Glyph(FollowKey::new(ScalarKey::of(scalar), false)),
+    }
 }
 
 /// What a word is built from before the joiner rule extends it.
@@ -213,9 +215,7 @@ impl<'a> Scan<'a> {
                 None if self.word.is_some() && self.prev_letterish => self.joiner = Some(at),
                 None => self.close(at, visit),
             }
-            if !rides(scalar) {
-                self.chain = Before::Glyph(ScalarKey::of(scalar));
-            }
+            self.chain = chained(self.chain, scalar);
         }
         self.prev_letterish = letterish;
     }
@@ -396,17 +396,15 @@ const fn run_length(scalars: u32) -> Option<u8> {
 ///
 /// Two claims, not one: `na na` and `na, na` have different denominators and
 /// different reasons to be a slip, so they never share a key. `Separated`
-/// carries the run's LAST scalar as a [`ScalarKey`] — the same key
-/// [`Before::Glyph`](super::Before::Glyph) stores — because that is the atom
-/// the judge's terminal table reads to decide whether this is a sentence
-/// boundary rather than a doubled word.
+/// carries the same context [`Before::Glyph`](super::Before::Glyph) would give
+/// the second word, because the terminal table reads it to decide whether this
+/// is a sentence boundary rather than a doubled word.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Gap {
     /// Whitespace only.
     Bare,
-    /// A nonletter run, with or without whitespace around it. The last glyph
-    /// of the run.
-    Separated(ScalarKey),
+    /// Nonletters, with or without whitespace around them.
+    Separated(FollowKey),
 }
 
 /// How two adjacent word occurrences are separated, or `None` when something
@@ -418,19 +416,24 @@ pub enum Gap {
 /// walk dropped a token between the two words (a digit run holds no letter, so
 /// it is no word at all), which is exactly the case a double must not claim.
 pub fn gap_between(text: &str, from: u32, to: u32) -> Option<Gap> {
-    let mut last_glyph: Option<ScalarKey> = None;
+    let mut chain = Before::None;
+    let mut last: Option<char> = None;
     for scalar in text[from as usize..to as usize].chars() {
         let class = class_of(scalar);
         if is_core(class) {
             return None;
         }
         if !class.is_whitespace() {
-            last_glyph = Some(ScalarKey::of(scalar));
+            chain = chained(chain, scalar);
+            last = Some(scalar);
         }
     }
-    Some(match last_glyph {
-        None => Gap::Bare,
-        Some(glyph) => Gap::Separated(glyph),
+    Some(match (chain, last) {
+        (Before::Glyph(key), _) => Gap::Separated(key),
+        // Only quotes and brackets: keyed by the last, which no table learns,
+        // so the pair stays free as `Before::None` would.
+        (_, Some(atom)) => Gap::Separated(FollowKey::new(ScalarKey::of(atom), false)),
+        (_, None) => Gap::Bare,
     })
 }
 

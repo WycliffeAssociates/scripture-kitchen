@@ -6,7 +6,8 @@
 //! ```
 
 use super::{
-    BookAggregate, ChapterObs, ChapterRow, Edge, FollowCounts, OuterClass, PairKey, ScalarKey,
+    BookAggregate, ChapterObs, ChapterRow, Edge, FollowCounts, FollowKey, OuterClass, PairKey,
+    ScalarKey,
 };
 
 /// Merges one book's rows in order, resolving each chapter seam against the
@@ -52,7 +53,7 @@ pub fn fold_book(book: &[ChapterObs<&ChapterRow>], carry: &mut Edge) -> BookAggr
             next.open_pair = Some((key, carry.outer));
         }
         if next.blank {
-            next.open_follow = carry.open_follow;
+            next.open_follow = carry.open_follow.map(|key| quoted_by(key, row.lead));
         }
         *carry = next;
     }
@@ -79,6 +80,7 @@ fn resolve_seam(out: &mut BookAggregate, trail: Edge, lead: Edge) {
         bump(&mut out.pairs, PairKey::new(key, trail.outer, next), 1);
     }
     if let (Some(key), Some(case)) = (trail.open_follow, lead.edge_case) {
+        let key = quoted_by(key, lead);
         let mut counts = FollowCounts::default();
         counts.0[case as usize] = 1;
         match out.follows.binary_search_by_key(&key, |entry| entry.0) {
@@ -89,6 +91,14 @@ fn resolve_seam(out: &mut BookAggregate, trail: Edge, lead: Edge) {
     let joins = |class: OuterClass| matches!(class, OuterClass::Letter | OuterClass::Digit);
     if joins(trail.outer) && joins(lead.outer) {
         out.word_count -= 1;
+    }
+}
+
+fn quoted_by(key: FollowKey, lead: Edge) -> FollowKey {
+    if lead.edge_quoted {
+        key.through_quote()
+    } else {
+        key
     }
 }
 
@@ -156,9 +166,9 @@ fn merge_counts<K: Ord + Copy>(
 }
 
 fn merge_follows(
-    dst: &mut Vec<(ScalarKey, FollowCounts)>,
-    src: &[(ScalarKey, FollowCounts)],
-    scratch: &mut Vec<(ScalarKey, FollowCounts)>,
+    dst: &mut Vec<(FollowKey, FollowCounts)>,
+    src: &[(FollowKey, FollowCounts)],
+    scratch: &mut Vec<(FollowKey, FollowCounts)>,
 ) {
     if src.is_empty() {
         return;
