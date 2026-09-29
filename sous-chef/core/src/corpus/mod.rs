@@ -288,6 +288,14 @@ pub fn encode_to_corpus_buffer(
                 field: "books",
             });
         }
+        if let crate::judge::PatternKey::BookRate { book, .. } = pattern.key
+            && usize::from(book.get()) >= sections.len()
+        {
+            return Err(CorpusWireError::InvalidPattern {
+                row,
+                field: "other_count",
+            });
+        }
         out.extend_from_slice(&pattern_row::encode_pattern(pattern));
     }
     debug_assert_eq!(out.len(), cluster_start);

@@ -606,7 +606,7 @@ impl ChapterPass for Substrate {
         // row decides nothing here.
         let _ = verses;
         let mut set = Vec::new();
-        sites::firing(aggregate, out.patterns(), &mut set);
+        sites::firing(book, aggregate, out.patterns(), &mut set);
         if set.is_empty() {
             return;
         }
@@ -630,11 +630,12 @@ impl ChapterPass for Substrate {
 
     fn firing(
         &self,
+        book: BookIndex,
         aggregate: &BookAggregate,
         patterns: &[crate::judge::Pattern],
         out: &mut Vec<PatternIndex>,
     ) {
-        sites::firing(aggregate, patterns, out);
+        sites::firing(book, aggregate, patterns, out);
     }
 }
 

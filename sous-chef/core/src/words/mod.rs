@@ -787,7 +787,14 @@ impl ChapterPass for Words {
         sites::locate_chapters(book, text, chapters, verses, range, aggregate, counts, out);
     }
 
-    fn firing(&self, aggregate: &WordAggregate, patterns: &[Pattern], out: &mut Vec<PatternIndex>) {
+    fn firing(
+        &self,
+        book: BookIndex,
+        aggregate: &WordAggregate,
+        patterns: &[Pattern],
+        out: &mut Vec<PatternIndex>,
+    ) {
+        let _ = book;
         sites::firing(aggregate, patterns, out);
     }
 

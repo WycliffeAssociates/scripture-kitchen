@@ -208,6 +208,10 @@ pub(super) fn key_bytes(key: PatternKey) -> [u8; 10] {
         PatternKey::LetterRun { length } => out[..2].copy_from_slice(&[8, length]),
         // The glyph is the whole key; the digest hashes it beside this.
         PatternKey::SentenceStart => out[0] = 9,
+        PatternKey::BookRate { side, class, book } => {
+            out[..3].copy_from_slice(&[10, side as u8, class as u8]);
+            out[3..5].copy_from_slice(&book.get().to_le_bytes());
+        }
     }
     out
 }

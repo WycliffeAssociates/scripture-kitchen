@@ -170,11 +170,12 @@ impl<P: ChapterPass> ChapterPass for Counting<P> {
 
     fn firing(
         &self,
+        book: BookIndex,
         aggregate: &Self::Aggregate,
         patterns: &[Pattern],
         out: &mut Vec<PatternIndex>,
     ) {
-        self.inner.firing(aggregate, patterns, out);
+        self.inner.firing(book, aggregate, patterns, out);
     }
 }
 

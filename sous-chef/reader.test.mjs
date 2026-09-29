@@ -21,6 +21,7 @@ import {
   FORMAT_VERSION,
   PATTERN_OTHER_COUNT_OFFSET,
   PATTERN_ROW_LEN,
+  PATTERN_USUAL_COUNT_OFFSET,
   PATTERN_USUAL_OFFSET,
   POOLS,
   RECORD_LEN,
@@ -43,7 +44,7 @@ function fixture() {
 // id table, then the pattern table, then the records.
 const FIRST_RECORD = HEADER_BYTES + DIRECTORY_ENTRY_BYTES + 16;
 // Two four-atom clusters sit between the pattern table and the records.
-const FIRST_CLUSTER = FIRST_RECORD + 10 * PATTERN_ROW_LEN;
+const FIRST_CLUSTER = FIRST_RECORD + 11 * PATTERN_ROW_LEN;
 const FIRST_MIXED_RECORD = FIRST_CLUSTER + 2 * (CLUSTER_ENTRY_BYTES + 4 * 4);
 
 function expectOpenFailure(bytes) {
@@ -239,7 +240,7 @@ test("decodes mixed proportionality, hygiene, presence, and source-copy rows, sa
 
 test("decodes the pattern table the judge published", () => {
   const snapshot = FindingsSnapshot.open(hexFixture("corpus_v2_hygiene.hex"));
-  assert.equal(snapshot.patternCount, 10);
+  assert.equal(snapshot.patternCount, 11);
   assert.deepEqual(snapshot.patterns(), [
     {
       glyph: 0x60,
@@ -362,15 +363,26 @@ test("decodes the pattern table the judge published", () => {
       books: 1,
       usual: { kind: "None" },
     },
+    {
+      glyph: 0x2c,
+      channel: "BookRate",
+      key: { kind: "BookRate", side: "prev", class: "Space", book: 0 },
+      band: null,
+      numerator: 1183,
+      denominator: 1526,
+      shareBp: 7752,
+      books: 1,
+      usual: { kind: "BookRate", baselineBp: 30, otherBooks: 42 },
+    },
   ]);
-  assert.throws(() => snapshot.pattern(10), FindingsSnapshotError);
+  assert.throws(() => snapshot.pattern(11), FindingsSnapshotError);
 
   // Every field the reader refuses, one at a time.
   const start = FIRST_RECORD;
   for (const [offset, byte] of [
     [11, 1],   // flags
     [23, 1],   // reserved
-    [8, 10],   // channel: past the table
+    [8, 11],   // channel: past the table
     [10, 0],   // band: a step on a Rarity row
     [9, 1],    // key: a nonzero key on a Rarity row
     [22, 2],   // books: past the snapshot's book count
@@ -396,6 +408,9 @@ test("decodes the pattern table the judge published", () => {
     [0, PATTERN_USUAL_OFFSET, 0x60],      // a rarity usual as itself
     [0, PATTERN_USUAL_OFFSET, 0],         // "none", with a count
     [5, PATTERN_USUAL_OFFSET, 4],         // Uncased
+    [10, PATTERN_OTHER_COUNT_OFFSET, 1],  // a BookRate book past the snapshot
+    [10, PATTERN_USUAL_OFFSET, 10001],    // a baseline over 100%
+    [10, PATTERN_USUAL_COUNT_OFFSET, 2],  // under three other books
   ]) {
     const torn = hexFixture("corpus_v2_hygiene.hex");
     new DataView(torn.buffer).setUint32(start + row * PATTERN_ROW_LEN + offset, value, true);
@@ -415,7 +430,7 @@ test("lists a RunShape row's clusters and refuses one the encoder cannot write",
   const second = FIRST_CLUSTER + CLUSTER_ENTRY_BYTES + 4 * 4;
   for (const [at, byte] of [
     [FIRST_CLUSTER + CLUSTER_PATTERN_OFFSET, 4],    // a Placement row
-    [FIRST_CLUSTER + CLUSTER_PATTERN_OFFSET, 10],   // past the table
+    [FIRST_CLUSTER + CLUSTER_PATTERN_OFFSET, 11],   // past the table
     [FIRST_CLUSTER + CLUSTER_FLAGS_OFFSET, 4],      // an unknown flag
     [FIRST_CLUSTER + CLUSTER_FLAGS_OFFSET, 3],      // truncated, with four atoms
     [second + CLUSTER_COUNT_OFFSET, 0xff],          // counts must descend

@@ -1013,6 +1013,7 @@ pub struct SousSettings {
     pub doubled: bool,
     pub letter_runs: bool,
     pub sentence_start: bool,
+    pub book_rate: bool,
     // Thresholds.
     pub support_floor: u32,
     pub word_support_floor: u32,
@@ -1023,6 +1024,9 @@ pub struct SousSettings {
     // Which doublings the doubled channel judges.
     pub doubled_bare: bool,
     pub doubled_separated: bool,
+    // When one book's rate breaks from the rest.
+    pub book_rate_ratio: u16,
+    pub book_rate_min_bp: u16,
     // The source-compared lane.
     pub z_long: f32,
     pub z_short: f32,
@@ -1047,6 +1051,7 @@ impl SousSettings {
             doubled,
             letter_runs,
             sentence_start,
+            book_rate,
         } = config.channels;
         Self {
             placement,
@@ -1059,6 +1064,7 @@ impl SousSettings {
             doubled,
             letter_runs,
             sentence_start,
+            book_rate,
             support_floor: config.support_floor,
             word_support_floor: config.word_support_floor,
             terminal_upper_share_bp: config.terminal_upper_share_bp,
@@ -1067,6 +1073,8 @@ impl SousSettings {
             doubles_productive_bp: config.doubles_productive_bp,
             doubled_bare: config.doubled_bare,
             doubled_separated: config.doubled_separated,
+            book_rate_ratio: config.book_rate_ratio,
+            book_rate_min_bp: config.book_rate_min_bp,
             z_long: config.lengths.z_long,
             z_short: config.lengths.z_short,
             min_verses: config.lengths.min_verses,
@@ -1090,6 +1098,7 @@ impl SousSettings {
             doubled: self.doubled,
             letter_runs: self.letter_runs,
             sentence_start: self.sentence_start,
+            book_rate: self.book_rate,
         };
         config.support_floor = self.support_floor;
         config.word_support_floor = self.word_support_floor;
@@ -1099,6 +1108,8 @@ impl SousSettings {
         config.doubles_productive_bp = self.doubles_productive_bp;
         config.doubled_bare = self.doubled_bare;
         config.doubled_separated = self.doubled_separated;
+        config.book_rate_ratio = self.book_rate_ratio;
+        config.book_rate_min_bp = self.book_rate_min_bp;
         config.lengths = LengthConfig {
             z_long: self.z_long,
             z_short: self.z_short,

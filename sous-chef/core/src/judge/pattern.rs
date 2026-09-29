@@ -48,10 +48,13 @@ pub enum Channel {
     /// asks what form a WORD wears in a free position, this what case a GLYPH
     /// hands off to.
     SentenceStart = 9,
+    /// One book whose rate of a `Placement` key breaks from the median rate
+    /// of the other books. The one channel that gates on dispersion.
+    BookRate = 10,
 }
 
 impl Channel {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 11] = [
         Self::ExactNeighbor,
         Self::PooledNeighbor,
         Self::RunShape,
@@ -62,6 +65,7 @@ impl Channel {
         Self::Doubled,
         Self::LetterRun,
         Self::SentenceStart,
+        Self::BookRate,
     ];
 
     /// Whether the channel's `glyph` field carries a word hash instead of a
@@ -90,6 +94,7 @@ impl Channel {
             Self::Doubled => "Doubled",
             Self::LetterRun => "LetterRun",
             Self::SentenceStart => "SentenceStart",
+            Self::BookRate => "BookRate",
         }
     }
 }
@@ -156,7 +161,18 @@ pub enum PatternKey {
     /// The glyph is the row's own; the claim needs nothing else, so the key is
     /// a unit and the wire's key byte is zero.
     SentenceStart,
+    /// A `Placement` key in one book: the book is part of the claim, so two
+    /// books breaking the same way are two rows.
+    BookRate {
+        side: Side,
+        class: OuterClass,
+        book: BookIndex,
+    },
 }
+
+/// Judged books [`Channel::BookRate`] needs: one under test and three to take
+/// a median of.
+pub const BOOK_RATE_MIN_BOOKS: u32 = 4;
 
 /// What the corpus does instead of the row's claim, one variant per channel
 /// that names it.
@@ -183,6 +199,9 @@ pub enum Usual {
     },
     /// The word's most common form in free positions and its count.
     Casing { form: Form, count: u32 },
+    /// The median rate of the other judged books in basis points, and how
+    /// many of them there are.
+    BookRate { baseline_bp: u16, books: u32 },
 }
 
 /// One firing pattern: a glyph, the channel that convicted it, the fraction
@@ -192,7 +211,8 @@ pub struct Pattern {
     pub glyph: ScalarKey,
     pub channel: Channel,
     pub key: PatternKey,
-    /// Staircase step index; `None` for `Rarity`, which has no band.
+    /// Staircase step index; `None` for `Rarity` and `BookRate`, which have
+    /// no band.
     pub band: Option<u8>,
     pub numerator: u32,
     pub denominator: u32,
@@ -200,9 +220,10 @@ pub struct Pattern {
     pub share_bp: u16,
     /// Books whose own counts hold part of the numerator, saturating at 255.
     ///
-    /// Dispersion is information, never a judgement: genre clusters
-    /// punctuation legitimately, so nothing gates on it. Books-possible is the
-    /// publication's own `book_count`. [`books_touched`] recomputes it.
+    /// Dispersion is information: genre clusters punctuation legitimately, so
+    /// only [`Channel::BookRate`] gates on it, and its rows name one book
+    /// each. Books-possible is the publication's own `book_count`.
+    /// [`books_touched`] recomputes it.
     pub books: u8,
     pub usual: Usual,
 }
@@ -223,7 +244,7 @@ impl Pattern {
     /// reserved, key nibbles) stay in `decode_pattern`; this is what a typed
     /// `Pattern` can express and a corrupted round trip cannot fake.
     pub(crate) fn validate(&self) -> Result<(), &'static str> {
-        if self.band.is_none() != (self.channel == Channel::Rarity) {
+        if self.band.is_none() != matches!(self.channel, Channel::Rarity | Channel::BookRate) {
             return Err("band");
         }
         if self.numerator > self.denominator {
@@ -251,6 +272,7 @@ impl Pattern {
             PatternKey::Rarity => Channel::Rarity,
             PatternKey::LetterRun { .. } => Channel::LetterRun,
             PatternKey::SentenceStart => Channel::SentenceStart,
+            PatternKey::BookRate { .. } => Channel::BookRate,
         };
         if keyed != self.channel {
             return Err("channel");
@@ -297,6 +319,15 @@ impl Pattern {
             },
             (Channel::Casing, Usual::Casing { form, count }) => {
                 form != Form::Uncased && within(count)
+            }
+            (Channel::BookRate, Usual::BookRate { baseline_bp, books }) => {
+                let PatternKey::BookRate { class, .. } = self.key else {
+                    return false;
+                };
+                class != OuterClass::Edge
+                    && baseline_bp <= 10_000
+                    && books >= BOOK_RATE_MIN_BOOKS - 1
+                    && self.books == 1
             }
             (
                 Channel::PooledNeighbor

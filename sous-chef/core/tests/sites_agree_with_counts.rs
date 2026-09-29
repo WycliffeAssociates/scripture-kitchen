@@ -18,8 +18,8 @@ use sous_core::substrate::{
 };
 use sous_core::unicode::pool_of;
 use sous_core::{
-    BookKey, Chapter, ChapterObs, ChapterPass, Corpus, Findings, JudgingConfig, ProjectedBook,
-    Substrate, TextRange, Verse, VerseKey, analyze_with, for_each_chapter,
+    BookIndex, BookKey, Chapter, ChapterObs, ChapterPass, Corpus, Findings, JudgingConfig,
+    ProjectedBook, Substrate, TextRange, Verse, VerseKey, analyze_with, for_each_chapter,
 };
 
 const TIER: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../corpora/");
@@ -101,7 +101,7 @@ fn aggregate(book: &Book) -> BookAggregate {
 /// What the walk counted for one pattern's key in one book, less what
 /// `explained` leaves to a finer row — the same unit `sites::locate_counted`
 /// reports.
-fn counted(book: &BookAggregate, pattern: &Pattern, explained: &Explained) -> u64 {
+fn counted(at: BookIndex, book: &BookAggregate, pattern: &Pattern, explained: &Explained) -> u64 {
     let glyph = pattern.glyph;
     match pattern.key {
         PatternKey::Placement { side, class } => {
@@ -178,6 +178,21 @@ fn counted(book: &BookAggregate, pattern: &Pattern, explained: &Explained) -> u6
             .iter()
             .find(|(key, _)| *key == glyph)
             .map_or(0, |(_, count)| u64::from(*count)),
+        // Raw, in the one book the row names and nowhere else.
+        PatternKey::BookRate { book: named, .. } if named != at => 0,
+        PatternKey::BookRate { side, class, .. } => book
+            .pairs()
+            .iter()
+            .filter(|(key, _)| key.scalar() == glyph)
+            .filter(|(key, _)| {
+                class
+                    == match side {
+                        Side::Prev => key.prev(),
+                        Side::Next => key.next(),
+                    }
+            })
+            .map(|(_, count)| u64::from(*count))
+            .sum(),
         // The bare lowercase handoffs of this glyph, the one context a
         // sentence-start row judges.
         PatternKey::SentenceStart => book
@@ -208,7 +223,7 @@ fn agree(books: &[Book], config: &JudgingConfig) -> (usize, usize, u64) {
     for (index, projected) in corpus.iter() {
         let counts = aggregate(&books[index.get() as usize]);
         let mut set = Vec::new();
-        sites::firing(&counts, &patterns, &mut set);
+        sites::firing(index, &counts, &patterns, &mut set);
         let table: Vec<(PatternIndex, Pattern)> = set
             .iter()
             .map(|&at| (at, patterns[usize::from(at.get())]))
@@ -226,7 +241,7 @@ fn agree(books: &[Book], config: &JudgingConfig) -> (usize, usize, u64) {
 
         for ((at, pattern), rescanned) in table.iter().zip(&tally) {
             sited[usize::from(at.get())] += rescanned;
-            let walked = counted(&counts, pattern, explained);
+            let walked = counted(index, &counts, pattern, explained);
             assert_eq!(
                 *rescanned,
                 walked,
@@ -244,7 +259,7 @@ fn agree(books: &[Book], config: &JudgingConfig) -> (usize, usize, u64) {
         for pattern in &patterns {
             if !table.iter().any(|(_, held)| held == pattern) {
                 assert_eq!(
-                    counted(&counts, pattern, explained),
+                    counted(index, &counts, pattern, explained),
                     0,
                     "an absent glyph counts zero"
                 );
@@ -395,6 +410,35 @@ fn the_synthetic_sweep_reaches_every_channel_and_both_placement_sides() {
             "no placement on {side:?}"
         );
     }
+}
+
+/// A book-rate row sites its own book's occurrences and no other's, so its
+/// sites summed over books are its numerator.
+#[test]
+fn a_book_rate_row_is_sited_in_its_own_book_only() {
+    let mut books: Vec<Book> = (0..5)
+        .map(|at| {
+            let key = BookKey::new([b'A', b'A' + at as u8, b'A']);
+            book(key, &[format!("{}a ,b", "a, b ".repeat(199))])
+        })
+        .collect();
+    books[2] = book(
+        BookKey::new(*b"ACA"),
+        &[format!("{}{}", "a, b ".repeat(80), "a ,b ".repeat(120))],
+    );
+    let corpus = Corpus::try_new(&books).expect("a synthetic corpus is valid");
+    let findings = analyze_with(&corpus, &Substrate, &JudgingConfig::default());
+    // `, prev=Space` and `, next=Letter`, both in the third book.
+    let named: Vec<u16> = findings
+        .patterns()
+        .iter()
+        .filter_map(|row| match row.key {
+            PatternKey::BookRate { book, .. } => Some(book.get()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(named, vec![2, 2]);
+    agree(&books, &JudgingConfig::default());
 }
 
 /// The pooled digit lane is judged and sited too. A digit breaks a run and

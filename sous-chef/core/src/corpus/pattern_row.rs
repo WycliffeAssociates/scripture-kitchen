@@ -38,6 +38,9 @@ pub(super) fn encode_pattern(pattern: &Pattern) -> [u8; PATTERN_ROW_LEN] {
         // A real scalar in the glyph field: the letter is what was repeated.
         PatternKey::LetterRun { length } => (pattern.glyph.raw(), 0, length),
         PatternKey::SentenceStart => (pattern.glyph.raw(), 0, 0),
+        PatternKey::BookRate { side, class, .. } => {
+            (pattern.glyph.raw(), 0, ((side as u8) << 4) | class as u8)
+        }
     };
     row[PATTERN_GLYPH_OFFSET..PATTERN_NEIGHBOR_OFFSET].copy_from_slice(&glyph.to_le_bytes());
     row[PATTERN_NEIGHBOR_OFFSET..PATTERN_CHANNEL_OFFSET].copy_from_slice(&neighbor.to_le_bytes());
@@ -76,6 +79,13 @@ fn usual_lanes(pattern: &Pattern) -> (u32, u32, u32) {
         } => ((u32::from(pure) << 4) | u32::from(bucket), count, 0),
         Usual::Rarity { glyph, count } => (glyph.map_or(0, ScalarKey::raw), count, 0),
         Usual::Casing { form, count } => (form as u32, count, 0),
+        Usual::BookRate { baseline_bp, books } => {
+            let book = match pattern.key {
+                PatternKey::BookRate { book, .. } => u32::from(book.get()),
+                _ => 0,
+            };
+            (u32::from(baseline_bp), books, book)
+        }
     }
 }
 
@@ -132,6 +142,11 @@ fn read_usual(channel: Channel, usual: u32, count: u32, other: u32) -> Result<Us
             unused(other, "other_count")?;
             Usual::None
         }
+        // `other` is the book, which the key already read.
+        Channel::BookRate => Usual::BookRate {
+            baseline_bp: u16::try_from(usual).map_err(|_| "usual")?,
+            books: count,
+        },
     })
 }
 
@@ -232,13 +247,31 @@ pub(super) fn decode_pattern(
             }
             PatternKey::SentenceStart
         }
+        Channel::BookRate => {
+            let book = usize::try_from(read_u32(bytes, PATTERN_OTHER_COUNT_OFFSET))
+                .ok()
+                .filter(|book| *book < book_count)
+                .ok_or(bad("other_count"))?;
+            PatternKey::BookRate {
+                side: match high {
+                    0 => Side::Prev,
+                    1 => Side::Next,
+                    _ => return Err(bad("key")),
+                },
+                class: OuterClass::from_raw(low).ok_or(bad("key"))?,
+                book: BookIndex::new(book).expect("under the book count"),
+            }
+        }
     };
     if channel != Channel::ExactNeighbor && !channel.is_word() && neighbor_raw != 0 {
         return Err(bad("neighbor"));
     }
     let band = match (bytes[PATTERN_BAND_OFFSET], channel) {
-        (PATTERN_BAND_NONE, Channel::Rarity) => None,
-        (step, channel) if channel != Channel::Rarity && usize::from(step) < Staircase::STEPS => {
+        (PATTERN_BAND_NONE, Channel::Rarity | Channel::BookRate) => None,
+        (step, channel)
+            if !matches!(channel, Channel::Rarity | Channel::BookRate)
+                && usize::from(step) < Staircase::STEPS =>
+        {
             Some(step)
         }
         _ => return Err(bad("band")),

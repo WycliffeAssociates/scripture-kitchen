@@ -406,7 +406,8 @@ static SITES: LazyLock<Vec<(&'static str, Prepared)>> = LazyLock::new(|| {
 
             let mut prepared = Vec::new();
             let (mut needles, mut hits, mut found) = (Vec::new(), Vec::new(), Vec::new());
-            for book in &inputs {
+            for (at, book) in inputs.iter().enumerate() {
+                let at = sous_core::BookIndex::new(at).expect("a tier corpus indexes every book");
                 let counts = fold_book(
                     &mapped(book)
                         .iter()
@@ -415,7 +416,7 @@ static SITES: LazyLock<Vec<(&'static str, Prepared)>> = LazyLock::new(|| {
                     &mut Edge::default(),
                 );
                 let mut set = Vec::new();
-                sites::firing(&counts, &patterns, &mut set);
+                sites::firing(at, &counts, &patterns, &mut set);
                 let table: Vec<(PatternIndex, Pattern)> = set
                     .iter()
                     .map(|&at| (at, patterns[usize::from(at.get())]))

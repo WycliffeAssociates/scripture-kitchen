@@ -526,6 +526,15 @@ settings.doubled_separated = true;   // `Moses, Moses` judged too
 settings.doubled = false;            // the whole channel off
 ```
 
+One book whose rate of a placement key breaks from the other books' median is
+its own channel, with two dials:
+
+```js
+settings.book_rate_ratio = 5;        // five times the other books' median, not ten
+settings.book_rate_min_bp = 500;     // and at least 5% of the glyph's uses in that book
+settings.book_rate = false;          // the whole channel off
+```
+
 `settings.source_copy` is the one knob a `setConfig` cannot fully apply on its
 own. It ships **off**, and a `Reference` registered while it was off kept no
 word lane to walk (`pantry.md`), so turning it on and republishing produces no

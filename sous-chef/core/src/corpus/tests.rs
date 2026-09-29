@@ -170,6 +170,26 @@ fn fixture_patterns() -> Vec<Pattern> {
             books: 1,
             usual: Usual::None,
         },
+        // One book's rate of a placement key: no band, one book, and the book
+        // rides the other-count lane.
+        Pattern {
+            glyph: ScalarKey::of(','),
+            channel: Channel::BookRate,
+            key: PatternKey::BookRate {
+                side: Side::Prev,
+                class: OuterClass::Space,
+                book: BookIndex::new(0).unwrap(),
+            },
+            band: None,
+            numerator: 1_183,
+            denominator: 1_526,
+            share_bp: 7_752,
+            books: 1,
+            usual: Usual::BookRate {
+                baseline_bp: 30,
+                books: 42,
+            },
+        },
     ]
 }
 
@@ -503,7 +523,7 @@ fn a_cluster_the_encoder_cannot_write_is_refused() {
         ),
         (
             vec![Cluster {
-                pattern: PatternIndex::new(10),
+                pattern: PatternIndex::new(11),
                 ..shaped.clone()
             }],
             refused(0, "pattern"),
@@ -572,13 +592,13 @@ fn pattern_table_round_trips() {
     )
     .unwrap();
     let snapshot = CorpusSnapshot::open(&encoded).unwrap();
-    assert_eq!(snapshot.pattern_count(), 10);
+    assert_eq!(snapshot.pattern_count(), 11);
     assert_eq!(snapshot.patterns().unwrap(), patterns);
     assert_eq!(
-        snapshot.pattern(10),
+        snapshot.pattern(11),
         Err(CorpusWireError::PatternIndexPastTable {
-            index: 10,
-            count: 10,
+            index: 11,
+            count: 11,
             at: None
         })
     );
@@ -588,7 +608,7 @@ fn pattern_table_round_trips() {
     for (offset, byte, field) in [
         (PATTERN_FLAGS_OFFSET, 1u8, "flags"),
         (PATTERN_RESERVED_OFFSET, 1, "reserved"),
-        (PATTERN_CHANNEL_OFFSET, 10, "channel"),
+        (PATTERN_CHANNEL_OFFSET, 11, "channel"),
         (PATTERN_BAND_OFFSET, 0, "band"),
         (PATTERN_KEY_OFFSET, 1, "key"),
         (PATTERN_BOOKS_OFFSET, 2, "books"),
@@ -692,6 +712,7 @@ fn usual_lanes_refuse_what_the_channel_cannot_mean() {
     const SHAPE: usize = 3;
     const PLACEMENT: usize = 4;
     const CASING: usize = 5;
+    const BOOK_RATE: usize = 10;
     let (encoded, start) = fixture_table();
     let lane = |row: usize, offset: usize, value: u32| {
         let mut torn = encoded.clone();
@@ -723,6 +744,9 @@ fn usual_lanes_refuse_what_the_channel_cannot_mean() {
         (RARITY, PATTERN_USUAL_OFFSET, '.' as u32, "usual"),
         (RARITY, PATTERN_USUAL_OFFSET, 0, "usual"),
         (CASING, PATTERN_USUAL_OFFSET, Form::Uncased as u32, "usual"),
+        (BOOK_RATE, PATTERN_OTHER_COUNT_OFFSET, 1, "other_count"),
+        (BOOK_RATE, PATTERN_USUAL_OFFSET, 10_001, "usual"),
+        (BOOK_RATE, PATTERN_USUAL_COUNT_OFFSET, 2, "usual"),
     ] {
         assert_eq!(
             lane(row, offset, value),

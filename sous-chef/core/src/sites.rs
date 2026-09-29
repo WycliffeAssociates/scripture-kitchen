@@ -27,7 +27,7 @@ use mise::unicode::class_of;
 use crate::unicode::atoms::widen_to_atoms;
 use crate::unicode::{Pool, pool_of};
 use crate::words::word_around;
-use crate::{Chapter, Reasons, TextRange};
+use crate::{BookIndex, Chapter, Reasons, TextRange};
 
 /// One matching run in projected-book coordinates.
 ///
@@ -42,18 +42,29 @@ pub struct Site {
     pub reasons: Reasons,
 }
 
-/// The table positions whose glyph this book's own counts hold.
+/// The table positions whose glyph this book's own counts hold, a
+/// `BookRate` row only in the book it names.
 ///
 /// What [`locate`] scans for, and what a resident host keys a site cache on:
 /// two publications whose firing set is the same for a book have the same
 /// sites in it.
-pub fn firing(book: &BookAggregate, patterns: &[Pattern], out: &mut Vec<PatternIndex>) {
+pub fn firing(
+    at: BookIndex,
+    book: &BookAggregate,
+    patterns: &[Pattern],
+    out: &mut Vec<PatternIndex>,
+) {
     out.clear();
     for (index, pattern) in PatternIndex::over(patterns) {
         // The table is the whole corpus's, and a word row names a hash rather
         // than a glyph — and a letter-run row names a letter this walk never
         // counted. Those are `words::Words`'s to place.
         if pattern.channel.judged_by_words() {
+            continue;
+        }
+        if let PatternKey::BookRate { book: named, .. } = pattern.key
+            && named != at
+        {
             continue;
         }
         let held = book
@@ -269,7 +280,7 @@ fn lone(
         .filter(|&&slot| {
             matches!(
                 patterns[slot].1.channel,
-                Channel::Rarity | Channel::Placement
+                Channel::Rarity | Channel::Placement | Channel::BookRate
             )
         })
         .filter_map(|&slot| {
@@ -324,6 +335,7 @@ fn rung(pattern: &Pattern) -> Reasons {
         },
         PatternKey::Rarity => Reasons::RARITY,
         PatternKey::SentenceStart => Reasons::SENTENCE_START,
+        PatternKey::BookRate { .. } => Reasons::BOOK_RATE,
         // `firing` never lets one through: the word pass owns them.
         PatternKey::LetterRun { .. } => Reasons::LETTER_RUN,
         PatternKey::Casing { .. } => Reasons::CASING,
@@ -383,6 +395,16 @@ fn occurrences(
             .filter(|pair| pair[0].1 == glyph && pool_of_key(pair[1].1) == pool)
             .count() as u64,
         PatternKey::Rarity => atoms.iter().filter(|atom| atom.1 == glyph).count() as u64,
+        // Every occurrence with that class on that side: the channel counts
+        // them raw, and `firing` lets the row into its own book only.
+        PatternKey::BookRate { side, class, .. } => atoms
+            .iter()
+            .filter(|atom| atom.1 == glyph)
+            .filter(|atom| match side {
+                Side::Prev => cursor.prev_outer(atom.0) == class,
+                Side::Next => cursor.next_outer(atom.0) == class,
+            })
+            .count() as u64,
         // Its site is the word after the run, never the run: `sentence_start`.
         PatternKey::SentenceStart => 0,
         PatternKey::Casing { .. }
@@ -955,6 +977,7 @@ mod tests {
             &mut crate::substrate::Edge::default(),
         );
         firing(
+            BookIndex::new(0).unwrap(),
             &counts,
             &[placement(',', Side::Prev, OuterClass::Letter)],
             &mut set,

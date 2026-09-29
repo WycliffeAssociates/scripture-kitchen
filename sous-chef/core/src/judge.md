@@ -32,6 +32,7 @@ again by a coarser row** ([Both sides](#both-sides)).
 | `Doubled` | word | one case-folded word immediately repeated, adjacent OR separated | that word's occurrences, cased and uncased |
 | `LetterRun` | word walk | runs of one letter of exactly this length | runs of that letter of ANY length ≥ 2 |
 | `SentenceStart` | handoff glyph | lowercase letters this glyph handed off to bare | cased letters it handed off to bare |
+| `BookRate` | G0, one book | occurrences of `g` in one book with this outer class, one side | that book's occurrences of `g` |
 
 `Placement` is **per side, marginal**: the outer class before `g` and the
 outer class after `g` are two distributions over
@@ -430,6 +431,38 @@ Ties go to the smallest value. A word row's usual form is judged per key like
 the row itself, so a kept verdict keeps it too. The wire lanes:
 [`codec/README.md`](codec/README.md).
 
+## `BookRate`: one book breaks from the rest
+
+Placement pools every book, so a habit concentrated in one book hides under the
+rest. The same keys, judged per book:
+
+```text
+nya   ',' prev=Space   pooled 1,417/46,382 = 3.1%            -> no Placement row
+      1SA 1,183/1,526 = 77.5%    the other 61 books' median 0.31%   -> FIRES
+en    '—' prev=Space   JER 86/371 = 23.2%    the other 50 books' median 0.00% -> FIRES
+```
+
+For every glyph, side and outer class (`Edge` excluded):
+
+- **Judged books** hold the glyph at least `support_floor` times. The channel
+  needs at least four (`BOOK_RATE_MIN_BOOKS`), else it says nothing.
+- A book's **rate** is its count of that class on that side over its own
+  occurrences of the glyph.
+- The **baseline** is the median of the OTHER judged books' rates, the mean of
+  the two middle ones for an even count. Leaving the tested book out keeps a
+  dominant book from pulling the baseline toward itself.
+- A book **fires** when its count reaches `support_floor`, its rate reaches
+  `book_rate_min_bp` (1,000 = 10%), and its rate is at least
+  `book_rate_ratio` (10) times `max(baseline, 1 bp)`.
+
+The row is the book's own fraction: `numerator` its count, `denominator` its
+occurrences, `books` 1, no band. `Usual::BookRate` carries the baseline and the
+number of other judged books, and the key names the book, so two books breaking
+the same way are two rows. The counts are raw: no leader subtraction, because
+the other books are the comparison. Its sites are that book's occurrences, the
+Placement rescan kept to the book the row names (`sites::firing` takes the
+book's index). `channels.book_rate` turns it off.
+
 ## Dispersion
 
 `Pattern::books` is how many Target books hold part of that row's numerator,
@@ -441,10 +474,12 @@ rather than carried through the tally, because which stored `Before`s count
 toward a numerator is a config-dependent judging decision and a tally that
 pre-summed them could not answer a re-judge.
 
-It is **information, not a judgement**. Genre clusters punctuation
-legitimately and a project's book set is not the engine's business, so no
-threshold, flag, or squiggle reads it — a front end can say "818 letter-attached
-commas, in 3 of 40 books" and leave the ruling to a person.
+On every channel but one it is **information, not a judgement**. Genre
+clusters punctuation legitimately and a project's book set is not the engine's
+business, so no threshold, flag, or squiggle reads it — a front end can say
+"818 letter-attached commas, in 3 of 40 books" and leave the ruling to a
+person. `BookRate` is the one channel that gates on dispersion: it compares
+books against each other, so its rows always name one book.
 
 The count is taken during the same merge that builds the numerator: books
 arrive in `BookIndex` order, so a `Tally` needs only the last contributor to
@@ -485,9 +520,10 @@ Deterministic, because the wire pins it:
 
 `Channel`'s discriminants run finest grain first, so sorting by channel *is*
 sorting finest first, and G2 comes out between G3 and G1 without a sort.
-`SentenceStart` is channel 9 and comes last of a glyph's own rows, which is
-where appending it put it: it is not on the grain ladder at all, so no order
-claim was disturbed.
+`SentenceStart` is channel 9 and `BookRate` channel 10, the last of a glyph's
+own rows, which is where appending them put them: neither is on the grain
+ladder, so no order claim was disturbed. `BookRate` rows sort by side, class,
+then book.
 The word pass's channels are last, in channel order — `Casing`, `WordLength`,
 `Doubled`, then `LetterRun` — each hash-ascending within itself, and
 `LetterRun` letter-ascending. Their rows are a separate pass's, so they never

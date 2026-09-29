@@ -61,6 +61,8 @@ export const PATTERN_BAND_NONE = 255;
 export const PATTERN_DIGIT_GLYPH = 4294967295;
 export const BAND_STEPS = 5;
 export const RUN_BUCKETS = 6;
+/** Judged books a `BookRate` row needs: the one under test and three more. */
+export const BOOK_RATE_MIN_BOOKS = 4;
 /** One cluster entry before its atoms; each atom is a `u32` behind it. */
 export const CLUSTER_ENTRY_BYTES = 8;
 export const CLUSTER_PATTERN_OFFSET = 0;
@@ -147,7 +149,7 @@ export interface SourceCopyFinding {
 }
 
 /** Wire byte 8 of a pattern row is the index into this table. */
-export const CHANNELS = ["ExactNeighbor", "PooledNeighbor", "RunShape", "Placement", "Rarity", "Casing", "WordLength", "Doubled", "LetterRun", "SentenceStart"] as const;
+export const CHANNELS = ["ExactNeighbor", "PooledNeighbor", "RunShape", "Placement", "Rarity", "Casing", "WordLength", "Doubled", "LetterRun", "SentenceStart", "BookRate"] as const;
 export type Channel = (typeof CHANNELS)[number];
 
 /** The outer class either side of a glyph. */
@@ -159,7 +161,7 @@ export const POOLS = ["Quote", "Bracket", "Dash", "Terminal", "Separator", "Digi
 export type Pool = (typeof POOLS)[number];
 
 /** Convention lane 14..16 is a bitmask over this table, low bit first. */
-export const CONVENTION_REASONS = ["PlacementBefore", "PlacementAfter", "RunShape", "ExactNeighbor", "Rarity", "PooledNeighbor", "Casing", "WordLength", "DoubledBare", "DoubledSeparated", "LetterRun", "SentenceStart"] as const;
+export const CONVENTION_REASONS = ["PlacementBefore", "PlacementAfter", "RunShape", "ExactNeighbor", "Rarity", "PooledNeighbor", "Casing", "WordLength", "DoubledBare", "DoubledSeparated", "LetterRun", "SentenceStart", "BookRate"] as const;
 export type ConventionReason = (typeof CONVENTION_REASONS)[number];
 
 /** How a word occurrence is cased; a `Casing` key byte indexes this.
@@ -181,7 +183,9 @@ export type PatternKey =
   | { readonly kind: "WordLength"; readonly hash: bigint; readonly sigma: number }
   | { readonly kind: "Doubled"; readonly hash: bigint; readonly separated: boolean }
   | { readonly kind: "LetterRun"; readonly length: number }
-  | { readonly kind: "SentenceStart" };
+  | { readonly kind: "SentenceStart" }
+  /** A `Placement` key in one book, by its position in this snapshot. */
+  | { readonly kind: "BookRate"; readonly side: "prev" | "next"; readonly class: OuterClass; readonly book: number };
 
 /** What the corpus does instead of the row's claim. `None` on a channel whose
  * row already says it. */
@@ -202,7 +206,9 @@ export type Usual =
   /** The most common other scalar in the glyph's pool; `null` when there is none. */
   | { readonly kind: "Rarity"; readonly glyph: number | null; readonly count: number }
   /** The word's most common form in free positions. */
-  | { readonly kind: "Casing"; readonly form: CasingForm; readonly count: number };
+  | { readonly kind: "Casing"; readonly form: CasingForm; readonly count: number }
+  /** The median rate of the other judged books, and how many there are. */
+  | { readonly kind: "BookRate"; readonly baselineBp: number; readonly otherBooks: number };
 
 /** One exact run a `RunShape` row lists. */
 export interface Cluster {
@@ -223,7 +229,7 @@ export interface Pattern {
   readonly glyph: number;
   readonly channel: Channel;
   readonly key: PatternKey;
-  /** Staircase step index; `null` for `Rarity`. */
+  /** Staircase step index; `null` for `Rarity` and `BookRate`. */
   readonly band: number | null;
   readonly numerator: number;
   readonly denominator: number;
@@ -339,6 +345,12 @@ function readUsual(channel: Channel, glyph: number, denominator: number, usual: 
   if (channel === "ExactNeighbor") {
     return isScalar(usual) && count <= denominator ? { kind: "ExactNeighbor", neighbor: usual, count, reversed: other } : null;
   }
+  // `other` is the book, which the key already read.
+  if (channel === "BookRate") {
+    return usual <= 10000 && count >= BOOK_RATE_MIN_BOOKS - 1
+      ? { kind: "BookRate", baselineBp: usual, otherBooks: count }
+      : null;
+  }
   if (other !== 0 || count > denominator) {
     return null;
   }
@@ -429,12 +441,21 @@ function readPattern(view: DataView, at: number, row: number, bookCount: number)
         return fail(`pattern row ${row} has an invalid key`);
       }
       key = { kind: "RunShape", pure: high === 1, bucket: low };
-    } else if (channel === "Placement") {
+    } else if (channel === "Placement" || channel === "BookRate") {
       const outer = OUTER_CLASSES[low];
-      if (high > 1 || outer === undefined) {
+      if (high > 1 || outer === undefined || (channel === "BookRate" && outer === "Edge")) {
         return fail(`pattern row ${row} has an invalid key`);
       }
-      key = { kind: "Placement", side: high === 1 ? "next" : "prev", class: outer };
+      const side = high === 1 ? "next" : "prev";
+      if (channel === "Placement") {
+        key = { kind: "Placement", side, class: outer };
+      } else {
+        const book = u32(view, at + PATTERN_OTHER_COUNT_OFFSET);
+        if (book >= bookCount) {
+          return fail(`pattern row ${row} has an invalid other_count`);
+        }
+        key = { kind: "BookRate", side, class: outer, book };
+      }
     } else if (channel === "LetterRun") {
       // A real scalar in the glyph field, and the key byte is the run length.
       if (raw < LETTER_RUN_MIN || raw > LETTER_RUN_MAX) {
@@ -457,7 +478,7 @@ function readPattern(view: DataView, at: number, row: number, bookCount: number)
   }
   const rawBand = view.getUint8(at + PATTERN_BAND_OFFSET);
   let band: number | null;
-  if (channel === "Rarity") {
+  if (channel === "Rarity" || channel === "BookRate") {
     if (rawBand !== PATTERN_BAND_NONE) {
       return fail(`pattern row ${row} has an invalid band`);
     }
@@ -485,7 +506,7 @@ function readPattern(view: DataView, at: number, row: number, bookCount: number)
     return fail(`pattern row ${row} has an invalid share`);
   }
   const books = view.getUint8(at + PATTERN_BOOKS_OFFSET);
-  if (books > bookCount || (books === 0 && numerator > 0)) {
+  if (books > bookCount || (books === 0 && numerator > 0) || (channel === "BookRate" && books !== 1)) {
     return fail(`pattern row ${row} has an invalid books`);
   }
   const usual = readUsual(

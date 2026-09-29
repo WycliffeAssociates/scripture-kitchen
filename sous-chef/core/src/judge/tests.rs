@@ -313,3 +313,106 @@ fn every_row_names_what_is_usual_instead() {
         "the most common other Quote"
     );
 }
+
+// ── One book breaks from the rest ───────────────────────────────────────
+
+/// A book of `commas` commas, `spaced` of them after a space.
+fn comma_book(commas: usize, spaced: usize) -> String {
+    format!(
+        "{}{}",
+        "a, b ".repeat(commas - spaced),
+        "a ,b ".repeat(spaced)
+    )
+}
+
+/// `(book, numerator, denominator, usual)` of every `, prev=Space` book row.
+fn book_rows(findings: &Findings) -> Vec<(u16, u32, u32, Usual)> {
+    findings
+        .patterns()
+        .iter()
+        .filter_map(|row| match row.key {
+            PatternKey::BookRate {
+                side: Side::Prev,
+                class: OuterClass::Space,
+                book,
+            } if row.glyph == ScalarKey::of(',') => {
+                Some((book.get(), row.numerator, row.denominator, row.usual))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// nya 1SA's shape: one book writes most of its commas after a space.
+#[test]
+fn a_book_whose_rate_breaks_from_the_rest_fires() {
+    let mut texts: Vec<String> = (0..5).map(|_| comma_book(200, 1)).collect();
+    texts.insert(2, comma_book(1_526, 1_183));
+    let findings = judged(&texts, &JudgingConfig::default());
+    assert_eq!(
+        book_rows(&findings),
+        vec![(
+            2,
+            1_183,
+            1_526,
+            Usual::BookRate {
+                baseline_bp: 50,
+                books: 5,
+            }
+        )]
+    );
+    let row = findings
+        .patterns()
+        .iter()
+        .find(|row| row.channel == Channel::BookRate)
+        .unwrap();
+    assert_eq!((row.band, row.books, row.share_bp), (None, 1, 7_752));
+}
+
+/// Three judged books are one under test and two to compare: too few.
+#[test]
+fn under_four_judged_books_nothing_fires() {
+    let texts = [
+        comma_book(1_526, 1_183),
+        comma_book(200, 1),
+        comma_book(200, 1),
+        // Four books, but this one holds too few commas to be judged.
+        comma_book(4, 0),
+    ];
+    assert!(book_rows(&judged(&texts, &JudgingConfig::default())).is_empty());
+}
+
+/// 5% against 0.1% is fifty times the baseline, and still under 10%.
+#[test]
+fn a_rate_under_the_minimum_is_silent() {
+    let mut texts: Vec<String> = (0..4).map(|_| comma_book(1_000, 1)).collect();
+    texts.push(comma_book(100, 5));
+    assert!(book_rows(&judged(&texts, &JudgingConfig::default())).is_empty());
+    let config = JudgingConfig {
+        book_rate_min_bp: 400,
+        ..JudgingConfig::default()
+    };
+    assert_eq!(book_rows(&judged(&texts, &config)).len(), 1);
+}
+
+/// With the tested book in its own baseline the median of 1%, 1%, 20% and 50%
+/// is 10.5%, and 50% is not ten times that. Left out, the median is 1%.
+#[test]
+fn the_baseline_leaves_the_tested_book_out() {
+    let texts = [
+        comma_book(100, 50),
+        comma_book(100, 1),
+        comma_book(100, 1),
+        comma_book(100, 20),
+    ];
+    let rows = book_rows(&judged(&texts, &JudgingConfig::default()));
+    assert!(rows.contains(&(
+        0,
+        50,
+        100,
+        Usual::BookRate {
+            baseline_bp: 100,
+            books: 3,
+        }
+    )));
+}

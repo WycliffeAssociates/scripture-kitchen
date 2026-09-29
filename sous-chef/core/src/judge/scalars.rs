@@ -32,6 +32,11 @@ pub(crate) fn judge_corpus(corpus: &[&BookAggregate], config: &JudgingConfig, ou
     let placements = placement_evidence(corpus, &explained);
     let shapes = run_evidence(corpus, &explained);
     let handoffs = follow_evidence(corpus);
+    let per_book = if config.channels.book_rate {
+        book_evidence(corpus)
+    } else {
+        FxHashMap::default()
+    };
     let other = OtherSide {
         explained: &explained,
         shapes: &shapes,
@@ -62,6 +67,9 @@ pub(crate) fn judge_corpus(corpus: &[&BookAggregate], config: &JudgingConfig, ou
             && let Some(handoffs) = handoffs.get(glyph)
         {
             sentence_start(*glyph, handoffs, config, out);
+        }
+        if let Some(books) = per_book.get(glyph) {
+            book_rates(*glyph, books, config, out);
         }
     }
     cited.seal();
@@ -326,6 +334,88 @@ pub(super) fn placement(
                 },
             });
         }
+    }
+}
+
+/// One book whose rate of a placement key breaks from the other books'.
+///
+/// ```text
+/// nya ',' prev=Space   1SA 1,183/1,526 = 7,752 bp   the other 42 books' median 30 bp
+///   7,752 >= book_rate_min_bp 1,000 and >= 10 x 30   -> FIRES for 1SA
+/// ```
+///
+/// Judged books hold the glyph at least `support_floor` times, and the channel
+/// needs [`BOOK_RATE_MIN_BOOKS`] of them. The baseline leaves the book under
+/// test out, so a dominant book cannot pull it toward itself.
+pub(super) fn book_rates(
+    glyph: ScalarKey,
+    books: &[BookCounts],
+    config: &JudgingConfig,
+    out: &mut Findings,
+) {
+    let floor = u64::from(config.support_floor);
+    let judged: Vec<&BookCounts> = books
+        .iter()
+        .filter(|book| book.occurrences >= floor)
+        .collect();
+    if judged.len() < BOOK_RATE_MIN_BOOKS as usize {
+        return;
+    }
+    let mut others: Vec<u16> = Vec::with_capacity(judged.len() - 1);
+    for side in Side::ALL {
+        for class in OuterClass::ALL {
+            if class == OuterClass::Edge {
+                continue;
+            }
+            let count = |book: &BookCounts| book.sides[side as usize][class as usize];
+            let rates: Vec<u16> = judged
+                .iter()
+                .map(|book| share_bp(count(book), book.occurrences))
+                .collect();
+            for (at, book) in judged.iter().enumerate() {
+                let rate = rates[at];
+                if count(book) < floor || rate < config.book_rate_min_bp {
+                    continue;
+                }
+                others.clear();
+                others.extend(rates[..at].iter().chain(&rates[at + 1..]));
+                let baseline = median(&mut others);
+                if u32::from(rate) < u32::from(config.book_rate_ratio) * u32::from(baseline.max(1))
+                {
+                    continue;
+                }
+                out.push_pattern(Pattern {
+                    glyph,
+                    channel: Channel::BookRate,
+                    key: PatternKey::BookRate {
+                        side,
+                        class,
+                        book: BookIndex::new(book.book as usize)
+                            .expect("a corpus indexes every book"),
+                    },
+                    band: None,
+                    numerator: saturate(count(book)),
+                    denominator: saturate(book.occurrences),
+                    share_bp: reported_share(count(book), book.occurrences),
+                    books: 1,
+                    usual: Usual::BookRate {
+                        baseline_bp: baseline,
+                        books: others.len() as u32,
+                    },
+                });
+            }
+        }
+    }
+}
+
+/// The middle rate, the mean of the two middle ones for an even count.
+fn median(rates: &mut [u16]) -> u16 {
+    rates.sort_unstable();
+    let half = rates.len() / 2;
+    if rates.len() % 2 == 1 {
+        rates[half]
+    } else {
+        ((u32::from(rates[half - 1]) + u32::from(rates[half])) / 2) as u16
     }
 }
 
@@ -660,7 +750,12 @@ pub fn books_touched(corpus: &[&BookAggregate], pattern: &Pattern, config: &Judg
     let explained = Explained::learn(corpus, config);
     let touched = corpus
         .iter()
-        .filter(|book| numerator_in(book, pattern, &explained) > 0)
+        .enumerate()
+        .filter(|(index, _)| match pattern.key {
+            PatternKey::BookRate { book, .. } => usize::from(book.get()) == *index,
+            _ => true,
+        })
+        .filter(|(_, book)| numerator_in(book, pattern, &explained) > 0)
         .count();
     u8::try_from(touched).unwrap_or(u8::MAX)
 }
@@ -730,6 +825,13 @@ pub(super) fn numerator_in(book: &BookAggregate, pattern: &Pattern, explained: &
             .iter()
             .find(|(key, _)| *key == pattern.glyph)
             .map_or(0, |(_, count)| u64::from(*count)),
+        // The row's own book only; [`books_touched`] reads the index.
+        PatternKey::BookRate { side, class, .. } => book
+            .pairs()
+            .iter()
+            .filter(|(key, _)| key.scalar() == pattern.glyph && class == class_on(*key, side))
+            .map(|(_, count)| u64::from(*count))
+            .sum(),
         PatternKey::SentenceStart => book
             .follows()
             .iter()
@@ -778,6 +880,37 @@ pub(super) struct RunEvidence {
     runs: u64,
     /// Positions where the glyph is followed by another atom.
     positions: u64,
+}
+
+/// One glyph's placement counts in one book, what [`book_rates`] compares.
+pub(super) struct BookCounts {
+    book: u32,
+    occurrences: u64,
+    sides: [[u64; OuterClass::ALL.len()]; Side::ALL.len()],
+}
+
+/// Every glyph's per-book placement counts, books ascending.
+pub(super) fn book_evidence(corpus: &[&BookAggregate]) -> FxHashMap<ScalarKey, Vec<BookCounts>> {
+    let mut out: FxHashMap<ScalarKey, Vec<BookCounts>> = FxHashMap::default();
+    for (book, aggregate) in corpus.iter().enumerate() {
+        let book = book as u32;
+        for &(key, count) in aggregate.pairs() {
+            let books = out.entry(key.scalar()).or_default();
+            if books.last().is_none_or(|last| last.book != book) {
+                books.push(BookCounts {
+                    book,
+                    occurrences: 0,
+                    sides: Default::default(),
+                });
+            }
+            let counts = books.last_mut().expect("just pushed");
+            counts.occurrences += u64::from(count);
+            for side in Side::ALL {
+                counts.sides[side as usize][class_on(key, side) as usize] += u64::from(count);
+            }
+        }
+    }
+    out
 }
 
 /// One glyph's handoffs: the merged counts, and the books holding part of the

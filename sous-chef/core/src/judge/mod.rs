@@ -11,6 +11,8 @@
 //!     → RunShape { pure: false, bucket: 4 }        1/601     16 bp   band 2
 //!   '`' occurs once in 48,213 scalars
 //!     → Rarity                                     1/48,213
+//!   ',' after a space: 1,183 of 1SA's 1,526, the other books' median 0.31%
+//!     → BookRate { side: Prev, class: Space, book: 1SA }   1,183/1,526
 //! ```
 //!
 //! Config reaches judging and nothing else, so a host re-judges without
@@ -19,6 +21,7 @@
 
 use rustc_hash::FxHashMap;
 
+use crate::BookIndex;
 use crate::pass::Findings;
 use crate::proportionality::LengthConfig;
 use crate::substrate::{
@@ -43,7 +46,9 @@ mod words;
 pub use config::{
     BandStep, Channels, DoublesPolicy, JudgingConfig, LetterRoster, Staircase, config_stamp,
 };
-pub use pattern::{Channel, Cluster, Pattern, PatternIndex, PatternKey, Side, Usual};
+pub use pattern::{
+    BOOK_RATE_MIN_BOOKS, Channel, Cluster, Pattern, PatternIndex, PatternKey, Side, Usual,
+};
 pub use scalars::{Explained, books_touched};
 pub(crate) use scalars::{judge_corpus, pool_of_key, share_bp};
 use scalars::{most, reported_share, saturate, shape_of};

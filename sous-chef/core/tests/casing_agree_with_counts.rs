@@ -133,7 +133,7 @@ fn agree(books: &[Book], config: &JudgingConfig) -> (usize, usize, u64) {
         }
 
         let mut set = Vec::new();
-        Words.firing(&counts, &patterns, &mut set);
+        Words.firing(index, &counts, &patterns, &mut set);
         for &at in &word {
             let pattern = &patterns[at];
             let walked = free_in(&counts, pattern, &table);

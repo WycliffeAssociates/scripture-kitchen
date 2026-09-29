@@ -339,11 +339,12 @@ pub trait ChapterPass {
     /// matching the default `locate`.
     fn firing(
         &self,
+        book: BookIndex,
         aggregate: &Self::Aggregate,
         patterns: &[Pattern],
         out: &mut Vec<PatternIndex>,
     ) {
-        let _ = (aggregate, patterns);
+        let _ = (book, aggregate, patterns);
         out.clear();
     }
 }
@@ -532,13 +533,14 @@ impl<A: ChapterPass, B: ChapterPass> ChapterPass for (A, B) {
 
     fn firing(
         &self,
+        book: BookIndex,
         aggregate: &Self::Aggregate,
         patterns: &[Pattern],
         out: &mut Vec<PatternIndex>,
     ) {
         let mut second = Vec::new();
-        self.0.firing(&aggregate.0, patterns, out);
-        self.1.firing(&aggregate.1, patterns, &mut second);
+        self.0.firing(book, &aggregate.0, patterns, out);
+        self.1.firing(book, &aggregate.1, patterns, &mut second);
         out.append(&mut second);
     }
 
@@ -803,15 +805,16 @@ impl<A: ChapterPass, B: ChapterPass, C: ChapterPass> ChapterPass for (A, B, C) {
 
     fn firing(
         &self,
+        book: BookIndex,
         aggregate: &Self::Aggregate,
         patterns: &[Pattern],
         out: &mut Vec<PatternIndex>,
     ) {
         let mut rest = Vec::new();
-        self.0.firing(&aggregate.0, patterns, out);
-        self.1.firing(&aggregate.1, patterns, &mut rest);
+        self.0.firing(book, &aggregate.0, patterns, out);
+        self.1.firing(book, &aggregate.1, patterns, &mut rest);
         out.append(&mut rest);
-        self.2.firing(&aggregate.2, patterns, &mut rest);
+        self.2.firing(book, &aggregate.2, patterns, &mut rest);
         out.append(&mut rest);
     }
 

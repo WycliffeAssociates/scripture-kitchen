@@ -321,6 +321,12 @@ fn describe(pattern: &Pattern) -> String {
         ),
         PatternKey::LetterRun { length } => format!("letter-run {length}"),
         PatternKey::SentenceStart => "sentence-start".to_string(),
+        PatternKey::BookRate { side, class, book } => format!(
+            "book-rate {}={} book {}",
+            side.name(),
+            class.name(),
+            book.get()
+        ),
     };
     format!(
         "{} {evidence} {}/{} {:.2}%",

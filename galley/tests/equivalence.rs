@@ -656,11 +656,14 @@ fn brigade_configs(rng: &mut Rng) -> <Brigade as ChapterPass>::Config {
                 doubled: false,
                 letter_runs: false,
                 sentence_start: false,
+                book_rate: false,
             };
         }
         2 => {
             config.terminal_upper_share_bp = 9_000;
             config.sentence_start_upper_bp = 9_000;
+            config.book_rate_ratio = 2;
+            config.book_rate_min_bp = 100;
         }
         3 => {
             config.terminal_upper_share_bp = 8_000;
@@ -1272,6 +1275,68 @@ fn moving_the_terminal_table_re_sites_a_book_whose_own_text_stood_still() {
         under_forcing, under_free,
         "the knob is what the fixture is for"
     );
+}
+
+/// One book of commas, `spaced` of `commas` written after a space.
+fn comma_book(code: &str, commas: usize, spaced: usize) -> Book {
+    let body = format!(
+        "{}{}",
+        "a, b ".repeat(commas - spaced),
+        "a ,b ".repeat(spaced)
+    );
+    (
+        format!("target/{code}.usfm"),
+        format!("\\id {code}\n\\h {code}\n\\c 1\n\\p\n\\v 1 {body}\n"),
+    )
+}
+
+/// A `BookRate` row fires in the book it names alone, so a cached firing set
+/// or site list is only good for the book index it was walked under: a book
+/// inserted ahead of the habit, and the habit moving to the newcomer, both
+/// publish what a cold publication does.
+#[test]
+fn a_book_rate_row_follows_its_book_through_renumbering() {
+    let mut sous = Expediter::new(Brigade::default(), BUDGET).with_hot_books(0);
+    let mut books: Vec<Book> = vec![
+        comma_book("GEN", 200, 1),
+        comma_book("EXO", 300, 200),
+        comma_book("NUM", 200, 1),
+        comma_book("DEU", 200, 1),
+        comma_book("JOS", 200, 1),
+    ];
+    for (id, text) in &books {
+        sous.update(id.as_str(), Role::Target, text).unwrap();
+    }
+    assert_publications_agree(&mut sous, &books, "book rate: EXO");
+    let rated = |sous: &mut Expediter<Brigade>| {
+        let buffer = sous.publish().unwrap();
+        let snapshot = CorpusSnapshot::open(&buffer).unwrap();
+        snapshot
+            .patterns()
+            .unwrap()
+            .iter()
+            .filter_map(|row| match row.key {
+                sous_core::PatternKey::BookRate { book, .. } => Some(book.get()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    assert!(rated(&mut sous).contains(&1), "EXO is the second book");
+
+    let leviticus = comma_book("LEV", 200, 1);
+    sous.update(leviticus.0.as_str(), Role::Target, &leviticus.1)
+        .unwrap();
+    books.push(leviticus);
+    assert_publications_agree(&mut sous, &books, "book rate: LEV inserted");
+
+    let (quiet, loud) = (comma_book("EXO", 300, 1), comma_book("LEV", 300, 200));
+    for (id, text) in [&quiet, &loud] {
+        sous.update(id.as_str(), Role::Target, text).unwrap();
+    }
+    books.retain(|(id, _)| id != &quiet.0 && id != &loud.0);
+    books.extend([quiet, loud]);
+    assert_publications_agree(&mut sous, &books, "book rate: moved to LEV");
+    assert!(rated(&mut sous).contains(&2), "LEV is the third book");
 }
 
 /// The judging config redrawn per step: every channel switch, both casing

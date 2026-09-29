@@ -20,10 +20,10 @@
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use sous_core::{
-    BookIndex, Chapter, ChapterObs, ChapterPass, CoordinateSpace, CorpusTotals, CorpusWireError,
-    Findings, MovedWords, PackedFinding, PairedBook, Pattern, PatternIndex, ProjectSpread,
-    ProjectedBook, PublicationBook, SnapshotId, Verse, WordVerdicts, encode_to_corpus_buffer,
-    for_each_chapter,
+    BookIndex, Channel, Chapter, ChapterObs, ChapterPass, CoordinateSpace, CorpusTotals,
+    CorpusWireError, Findings, MovedWords, PackedFinding, PairedBook, Pattern, PatternIndex,
+    ProjectSpread, ProjectedBook, PublicationBook, SnapshotId, Verse, WordVerdicts,
+    encode_to_corpus_buffer, for_each_chapter,
 };
 #[cfg(feature = "parallel")]
 use sous_core::{ChapterInput, ChapterKey};
@@ -64,8 +64,10 @@ pub struct Expediter<P: ChapterPass> {
     sites: Store<RawChecksum, (FiringHash, EvidenceHash, Box<[SiteRow]>)>,
     /// One book's firing hash for the pattern table it was walked against:
     /// a table whose rows say the same thing fires the same set, whatever
-    /// this publication's counts and numbering are.
-    firing: Store<RawChecksum, (TableHash, FiringHash)>,
+    /// this publication's counts and numbering are. The book's index rides
+    /// beside it while the table holds a `BookRate` row, which fires in the
+    /// book it names alone.
+    firing: Store<RawChecksum, (TableHash, Option<BookIndex>, FiringHash)>,
     /// One HOT book chapter's own rows, in chapter-relative coordinates and
     /// keyed by content: a keystroke walks the chapter it landed in and
     /// replays its neighbours rebased. Held for the hot set alone, and every
@@ -861,6 +863,9 @@ impl<P: ChapterPass + Sync> Expediter<P> {
             );
             let evidence = EvidenceHash::of(findings.terminals(), findings.explained());
             let identity = TableHash::of(&table);
+            let rated = table
+                .iter()
+                .any(|pattern| pattern.channel == Channel::BookRate);
             let hot_ids: FxHashSet<&BookId> = hot.iter().collect();
             // Every key this publication's hot books name, hit or miss: what
             // the chapter cache keeps once the loop is done, so a book that
@@ -871,12 +876,13 @@ impl<P: ChapterPass + Sync> Expediter<P> {
                 let book = BookIndex::new(index).expect("a corpus indexes every book");
                 let checksum = checksums[index];
                 let aggregate = &aggregates[&checksum];
+                let at = rated.then_some(book);
                 let hash = match firing_sets.get(&checksum) {
-                    Some((seen, hash)) if *seen == identity => *hash,
+                    Some((seen, held, hash)) if *seen == identity && *held == at => *hash,
                     _ => {
-                        pass.firing(aggregate, &table, &mut firing);
+                        pass.firing(book, aggregate, &table, &mut firing);
                         let hash = FiringHash::of(&firing, &table);
-                        firing_sets.insert(checksum, (identity, hash));
+                        firing_sets.insert(checksum, (identity, at, hash));
                         walked += 1;
                         hash
                     }

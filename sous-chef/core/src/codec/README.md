@@ -91,6 +91,7 @@ Decoding refuses rather than guesses:
 | a pattern channel, key, band, or share outside its table | `InvalidPattern` |
 | a `Casing` key byte of `Uncased` | `InvalidPattern` |
 | a `Doubled` key byte above 1 | `InvalidPattern` |
+| a `BookRate` row with a band, `books` other than 1, an `Edge` class, or a book past `book_count` | `InvalidPattern` |
 | a `LetterRun` key byte outside `2..=8` | `InvalidPattern` |
 | a usual lane a channel does not use holding anything, or a usual outside its channel's domain | `InvalidPattern` |
 | a pattern `books` of zero on a row with a numerator, or past the header's `book_count` | `InvalidPattern` |
@@ -145,8 +146,8 @@ position matched — so ten thousand sites of one convention cost ten thousand
 | 0..4 | `glyph: u32` (`ScalarKey` raw; `u32::MAX` is the pooled digit key) |
 | 4..8 | `neighbor: u32` (the G3 key; 0 on every other channel) |
 | 8 | `channel: u8` (`Channel` discriminant, finest grain first) |
-| 9 | `key: u8` (Placement: `side << 4 \| OuterClass`; RunShape: `pure << 4 \| bucket`; PooledNeighbor: `Pool`; Casing: `Form`; WordLength: whole deviations above the mean; Doubled: 0 adjacent, 1 separated; LetterRun: run length `2..=8`; SentenceStart: 0; else 0) |
-| 10 | `band: u8` (staircase step index; `0xFF` = none, which only `Rarity` carries) |
+| 9 | `key: u8` (Placement and BookRate: `side << 4 \| OuterClass`; RunShape: `pure << 4 \| bucket`; PooledNeighbor: `Pool`; Casing: `Form`; WordLength: whole deviations above the mean; Doubled: 0 adjacent, 1 separated; LetterRun: run length `2..=8`; SentenceStart: 0; else 0) |
+| 10 | `band: u8` (staircase step index; `0xFF` = none, which only `Rarity` and `BookRate` carry) |
 | 11 | `flags: u8` (reserved, 0; the decoder refuses nonzero) |
 | 12..16 | `numerator: u32` |
 | 16..20 | `denominator: u32` |
@@ -172,6 +173,7 @@ the channel's domain is `InvalidPattern`. Rust reads them as `Pattern::usual`
 | `RunShape` | the glyph's most common shape as a key byte, `(pure << 4) \| bucket` | its runs, at most the denominator | 0 |
 | `Rarity` | the most common other scalar in the glyph's `Pool`, never U+0000 or the digit key; 0 when there is none | its corpus count; 0 with a `usual` of 0 | 0 |
 | `Casing` | the word's most common `Form` in free positions, never `Uncased` | its count, at most the denominator | 0 |
+| `BookRate` | the median rate of the other judged books, basis points, at most 10,000 | how many other judged books, at least 3 | the book, a directory position under `book_count` |
 | every other channel | 0 | 0 | 0 |
 
 Ties go to the smallest value. `ExactNeighbor`'s `other_count` is the swap
@@ -207,12 +209,19 @@ decodes it as a `bigint`. Why a hash and not the bytes: `../words.md`.
 
 `Reasons` **is the full `i16` lane B, not its low byte.** Bit 7,
 `WORD_LENGTH`, was the last one a `u8` could hold; W2 spent bits 8 and 9 on
-`DOUBLED_BARE` and `DOUBLED_SEPARATED`, W4 bit 10 on `LETTER_RUN`, and W5 bit
-11 on `SENTENCE_START`, which cost nothing on the wire because the lane was
-always sixteen bits and both readers always read it as one — Rust holds
-`Reasons` in a `u16` and the generated reader calls `getUint16`. Four bits are
-left, and `KNOWN_BITS` is the whole of what is legal: bit 12 is refused, which
-`convention_refuses_unknown_reason_bits` pins.
+`DOUBLED_BARE` and `DOUBLED_SEPARATED`, W4 bit 10 on `LETTER_RUN`, W5 bit
+11 on `SENTENCE_START`, and version 2 bit 12 on `BOOK_RATE`, which cost nothing
+on the wire because the lane was always sixteen bits and both readers always
+read it as one — Rust holds `Reasons` in a `u16` and the generated reader calls
+`getUint16`. Three bits are left, and `KNOWN_BITS` is the whole of what is
+legal: bit 13 is refused, which `convention_refuses_unknown_reason_bits` pins.
+
+**Channel 10 `BookRate` is a `Placement` key in one book.** The key byte is
+Placement's, the band byte is `0xFF`, `books` is exactly 1, and the book the
+row names rides `other_count`, where the decoder refuses a position past the
+header's `book_count`. Rust carries the book in `PatternKey::BookRate`, because
+two books breaking the same way are two rows and a row's identity has to tell
+them apart.
 
 A word channel's glyph field carries the low half of the word hash, so "a
 `Casing` row with a glyph" is not a state the wire can express: the decoder
@@ -220,8 +229,8 @@ hands back `ScalarKey::NONE` for it and reads those bytes as the hash. The
 typed check that a word-channel `Pattern` carries no scalar lives in
 `Pattern::validate`, on the way in.
 
-`books` is dispersion, and dispersion is information: nothing in the engine
-gates on it. A row with a numerator names at least one book, and no row may
+`books` is dispersion, and dispersion is information: only `BookRate` gates on
+it. A row with a numerator names at least one book, and no row may
 name more books than the publication has. It is a `u8` that **saturates**: a
 publication of more than 255 books reports 255 for a pattern every book holds,
 and no reader may read the lane as an exact count past that.
@@ -336,9 +345,7 @@ set of bytes.
    re-run the codegen bin.
 6. Add the row to the code table above and to `charter.md`.
 
-A code, a reason bit, and a channel added inside `FORMAT_VERSION` 1 are all
-**fail-closed for an old reader**: `KNOWN_BITS` grew 10 → 12 for `LETTER_RUN`
-and `SENTENCE_START`, and a reader built before them refuses those rows rather
-than mis-reading one. That is the right failure and it is still a compatibility
-break, so it is free only while v1 is unreleased. From the first release the
-charter's rule applies: a new code, bit, or channel means a new wire version.
+A new code, reason bit, or channel is **fail-closed for an old reader**: a
+reader built before `BOOK_RATE` refuses that bit and channel 10 rather than
+misreading them. That is the right failure and still a compatibility break, so
+each one means a new wire version; `BookRate` arrived with version 2.

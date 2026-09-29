@@ -35,9 +35,11 @@ impl Reasons {
     /// A lowercase word after a glyph the corpus almost always capitalizes
     /// after; the span is that word.
     pub const SENTENCE_START: Self = Self(1 << 11);
-    const KNOWN_BITS: u16 = 0b1111_1111_1111;
+    /// One book's rate of a placement key, against the other books' median.
+    pub const BOOK_RATE: Self = Self(1 << 12);
+    const KNOWN_BITS: u16 = 0b1_1111_1111_1111;
     /// Bit order on the wire, low bit first.
-    pub const NAMES: [&'static str; 12] = [
+    pub const NAMES: [&'static str; 13] = [
         "PlacementBefore",
         "PlacementAfter",
         "RunShape",
@@ -50,6 +52,7 @@ impl Reasons {
         "DoubledSeparated",
         "LetterRun",
         "SentenceStart",
+        "BookRate",
     ];
 
     pub const fn bits(self) -> u16 {
@@ -183,16 +186,17 @@ mod tests {
         assert_eq!(Reasons::from_bits(1 << 9), Ok(Reasons::DOUBLED_SEPARATED));
         assert_eq!(Reasons::from_bits(1 << 10), Ok(Reasons::LETTER_RUN));
         assert_eq!(Reasons::from_bits(1 << 11), Ok(Reasons::SENTENCE_START));
+        assert_eq!(Reasons::from_bits(1 << 12), Ok(Reasons::BOOK_RATE));
         assert_eq!(
-            Reasons::from_bits(1 << 12),
-            Err(CodecError::UnknownReasons(4_096))
+            Reasons::from_bits(1 << 13),
+            Err(CodecError::UnknownReasons(8_192))
         );
         let record = convention(0, 1, 0, Reasons::RUN_SHAPE);
         let mut unknown = record.encode();
-        unknown[14..16].copy_from_slice(&0x1000i16.to_le_bytes());
+        unknown[14..16].copy_from_slice(&0x2000i16.to_le_bytes());
         assert_eq!(
             PackedFinding::decode(&unknown, &[1]),
-            Err(CodecError::UnknownReasons(0x1000))
+            Err(CodecError::UnknownReasons(0x2000))
         );
         let mut negative = record.encode();
         negative[14..16].copy_from_slice(&(-1i16).to_le_bytes());

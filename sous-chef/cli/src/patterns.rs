@@ -83,6 +83,14 @@ pub(crate) fn print_patterns(
             PatternKey::SentenceStart => {
                 format!("sentence-start{}", first_site_text(corpus, &sites[index]))
             }
+            PatternKey::BookRate { side, class, book } => format!(
+                "book-rate {}={} in {}",
+                side.name(),
+                class.name(),
+                corpus
+                    .get(book)
+                    .map_or_else(|| "?".to_string(), |book| book.key().to_string())
+            ),
             PatternKey::Casing { .. }
             | PatternKey::WordLength { .. }
             | PatternKey::Doubled { .. } => unreachable!("handled above"),
@@ -158,6 +166,10 @@ fn usual(pattern: &Pattern) -> String {
             count,
         } => format!(" usual={} {}", glyph(other), grouped(count)),
         Usual::Casing { form, count } => format!(" usual={} {}", form.name(), grouped(count)),
+        Usual::BookRate { baseline_bp, books } => format!(
+            " usual={:.2}% median of {books} other books",
+            f64::from(baseline_bp) / 100.0
+        ),
     }
 }
 

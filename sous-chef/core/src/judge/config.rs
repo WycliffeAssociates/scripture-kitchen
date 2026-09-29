@@ -169,6 +169,10 @@ pub struct Channels {
     /// after. On: the bar is high enough that every exception is worth a look,
     /// and the tier fires at the glyph channels' own volume.
     pub sentence_start: bool,
+    /// One book whose rate of a placement key breaks from the other books'
+    /// median. On: it is silent until four books each hold the glyph at
+    /// least `support_floor` times.
+    pub book_rate: bool,
 }
 
 impl Default for Channels {
@@ -184,6 +188,7 @@ impl Default for Channels {
             doubled: true,
             letter_runs: true,
             sentence_start: true,
+            book_rate: true,
         }
     }
 }
@@ -239,6 +244,12 @@ pub struct JudgingConfig {
     /// Judges `Moses, Moses`: a doubling with punctuation between. Off by
     /// default: vocatives and genealogy chains are most of its volume.
     pub doubled_separated: bool,
+    /// How many times the other judged books' median rate a book's rate must
+    /// reach before [`Channel::BookRate`] names it.
+    pub book_rate_ratio: u16,
+    /// The least rate, in basis points, a book must reach before
+    /// [`Channel::BookRate`] names it.
+    pub book_rate_min_bp: u16,
     /// The source-compared lane's own knobs. Judged by
     /// [`crate::proportionality::judge_lengths`], which is a corpus-level step
     /// beside the chapter passes rather than one of them; a resident host
@@ -265,6 +276,8 @@ impl Default for JudgingConfig {
             doubles: DoublesPolicy::default(),
             doubled_bare: true,
             doubled_separated: false,
+            book_rate_ratio: 10,
+            book_rate_min_bp: 1_000,
             lengths: LengthConfig::default(),
             channels: Channels::default(),
         }
