@@ -51,7 +51,7 @@ fn books_touched_is_the_oracle_for_the_merge_time_count() {
         .collect();
     let views: Vec<&BookAggregate> = aggregates.iter().collect();
     let config = JudgingConfig {
-        support_floor: 1,
+        support_floor: 2,
         letters: LetterRoster::Always,
         ..JudgingConfig::default()
     };
@@ -185,4 +185,32 @@ fn a_digit_row_ordinary_among_number_ends_is_silent() {
         placement_row(&findings, '.', Side::Prev, OuterClass::Digit),
         Some((20, 5_020, 1))
     );
+}
+
+/// `);` eight times is a convention; the three `;'` are what is left.
+#[test]
+fn a_run_that_recurs_exactly_leaves_the_run_shape_numerator() {
+    let shape = PatternKey::RunShape {
+        pure: false,
+        bucket: 2,
+    };
+    let row = |findings: &Findings| {
+        findings
+            .patterns()
+            .iter()
+            .find(|row| row.glyph == ScalarKey::of(';') && row.key == shape)
+            .map(|row| (row.numerator, row.denominator, row.books))
+    };
+    let texts = [
+        "a; b ".repeat(3_000),
+        format!("{}{}", "(x); ".repeat(8), "c;' d ".repeat(3)),
+    ];
+    let findings = judged(&texts, &JudgingConfig::default());
+    assert_eq!(row(&findings), Some((3, 3_011, 1)));
+    let cluster: Box<[ScalarKey]> = [ScalarKey::of(')'), ScalarKey::of(';')].into();
+    assert_eq!(findings.explained().clusters(), &[cluster]);
+
+    let texts = ["a; b ".repeat(3_000), "(x); ".repeat(8)];
+    let findings = judged(&texts, &JudgingConfig::default());
+    assert_eq!(row(&findings), None, "every mixed pair recurs");
 }

@@ -25,7 +25,7 @@ pub(crate) fn judge_corpus(corpus: &[&BookAggregate], config: &JudgingConfig, ou
 
     let explained = Explained::learn(corpus, config);
     let placements = placement_evidence(corpus, &explained);
-    let shapes = run_evidence(corpus);
+    let shapes = run_evidence(corpus, &explained);
     let handoffs = follow_evidence(corpus);
     let other = OtherSide {
         explained: &explained,
@@ -48,7 +48,7 @@ pub(crate) fn judge_corpus(corpus: &[&BookAggregate], config: &JudgingConfig, ou
         if config.channels.run_shape
             && let Some(evidence) = evidence
         {
-            run_shapes(*glyph, evidence, config, out);
+            run_shapes(*glyph, evidence, &explained, config, &mut cited, out);
         }
         if config.channels.placement {
             placement(*glyph, marginals, &other, config, &mut cited, out);
@@ -70,11 +70,15 @@ pub(crate) fn judge_corpus(corpus: &[&BookAggregate], config: &JudgingConfig, ou
 /// ')' opens 900 in-run pairs, 30 of them before ','
 ///   ')' leads: its ExactNeighbor is entitled
 ///   ', prev=Nonletter' drops the 30 `),` from its numerator and its sites
+/// '."\'"' occurs 27 times, at least support_floor
+///   it recurs: '" mixed len 4' drops those 27 runs
 /// ```
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Explained {
     /// Glyphs whose ExactNeighbor is entitled, ascending.
     leaders: Vec<ScalarKey>,
+    /// Exact runs occurring at least `support_floor` times, ascending.
+    clusters: Vec<Box<[ScalarKey]>>,
 }
 
 impl Explained {
@@ -96,6 +100,17 @@ impl Explained {
                 .map(|(glyph, _)| glyph)
                 .collect();
         }
+        let mut runs: FxHashMap<&[ScalarKey], u64> = FxHashMap::default();
+        for book in corpus {
+            for (atoms, count) in book.runs() {
+                *runs.entry(atoms).or_default() += u64::from(count);
+            }
+        }
+        out.clusters = runs
+            .into_iter()
+            .filter(|&(_, count)| count >= u64::from(config.support_floor))
+            .map(|(atoms, _)| atoms.into())
+            .collect();
         out.seal();
         out
     }
@@ -105,13 +120,26 @@ impl Explained {
         self.leaders.binary_search(&glyph).is_ok()
     }
 
+    /// Whether this exact run is a convention by recurrence.
+    pub fn recurs(&self, atoms: impl Iterator<Item = ScalarKey> + Clone) -> bool {
+        self.clusters
+            .binary_search_by(|cluster| cluster.iter().copied().cmp(atoms.clone()))
+            .is_ok()
+    }
+
     pub fn leaders(&self) -> &[ScalarKey] {
         &self.leaders
+    }
+
+    pub fn clusters(&self) -> &[Box<[ScalarKey]>] {
+        &self.clusters
     }
 
     fn seal(&mut self) {
         self.leaders.sort_unstable();
         self.leaders.dedup();
+        self.clusters.sort_unstable();
+        self.clusters.dedup();
     }
 }
 
@@ -269,6 +297,16 @@ pub(super) fn placement(
     }
 }
 
+/// `(pure, length bucket)` of a run holding `glyph`, or `None` without it.
+pub(crate) fn shape_of(atoms: &[ScalarKey], glyph: ScalarKey) -> Option<(bool, u8)> {
+    atoms.contains(&glyph).then(|| {
+        (
+            atoms.iter().all(|atom| *atom == glyph),
+            atoms.len().min(RUN_BUCKETS) as u8,
+        )
+    })
+}
+
 /// Records the leaders a firing `Nonletter` row's sites skip.
 fn cite_leaders(glyph: ScalarKey, side: Side, other: &OtherSide<'_>, cited: &mut Explained) {
     match side {
@@ -302,10 +340,14 @@ pub(super) fn ordinary(numerator: u64, denominator: u64, config: &JudgingConfig)
 
 /// G1: the shape of the runs one glyph appears in, against every run that
 /// holds it.
+///
+/// A row unusual by shape keeps only its runs that do not recur exactly.
 pub(super) fn run_shapes(
     glyph: ScalarKey,
     evidence: &RunEvidence,
+    explained: &Explained,
     config: &JudgingConfig,
+    cited: &mut Explained,
     out: &mut Findings,
 ) {
     let Some((band, ceiling)) = entitled(evidence.runs, config) else {
@@ -316,6 +358,20 @@ pub(super) fn run_shapes(
         if share >= ceiling {
             continue;
         }
+        let Some(&(_, tally)) = evidence
+            .novel
+            .iter()
+            .find(|entry| entry.0 == (pure, bucket))
+        else {
+            continue;
+        };
+        cited.clusters.extend(
+            explained
+                .clusters
+                .iter()
+                .filter(|atoms| shape_of(atoms, glyph) == Some((pure, bucket)))
+                .cloned(),
+        );
         out.push_pattern(Pattern {
             glyph,
             channel: Channel::RunShape,
@@ -500,13 +556,8 @@ pub(super) fn numerator_in(book: &BookAggregate, pattern: &Pattern, explained: &
         }
         PatternKey::RunShape { pure, bucket } => book
             .runs()
-            .filter(|(atoms, _)| atoms.contains(&pattern.glyph))
-            .filter(|(atoms, _)| {
-                (
-                    atoms.iter().all(|atom| *atom == pattern.glyph),
-                    atoms.len().min(RUN_BUCKETS) as u8,
-                ) == (pure, bucket)
-            })
+            .filter(|(atoms, _)| shape_of(atoms, pattern.glyph) == Some((pure, bucket)))
+            .filter(|(atoms, _)| !explained.recurs(atoms.iter().copied()))
             .map(|(_, count)| u64::from(count))
             .sum(),
         PatternKey::ExactNeighbor(neighbor) => book
@@ -574,6 +625,8 @@ pub(super) struct PlacementTable {
 pub(super) struct RunEvidence {
     /// `((pure, length bucket), tally)`.
     shapes: Vec<((bool, u8), Tally)>,
+    /// The same, over runs whose exact sequence does not recur.
+    novel: Vec<((bool, u8), Tally)>,
     neighbors: Vec<(ScalarKey, Tally)>,
     pools: Vec<(Pool, Tally)>,
     /// Runs holding the glyph at all.
@@ -671,13 +724,17 @@ pub(super) fn placement_evidence(
 
 /// Every run's contribution to every glyph it holds, book by book so the
 /// numerators carry their dispersion.
-pub(super) fn run_evidence(corpus: &[&BookAggregate]) -> FxHashMap<ScalarKey, RunEvidence> {
+pub(super) fn run_evidence(
+    corpus: &[&BookAggregate],
+    explained: &Explained,
+) -> FxHashMap<ScalarKey, RunEvidence> {
     let mut out: FxHashMap<ScalarKey, RunEvidence> = FxHashMap::default();
     let mut seen: Vec<ScalarKey> = Vec::new();
     for (book, aggregate) in corpus.iter().enumerate() {
         let book = book as u32;
         for (atoms, count) in aggregate.runs() {
             let count = u64::from(count);
+            let recurs = explained.recurs(atoms.iter().copied());
             seen.clear();
             for atom in atoms {
                 if seen.contains(atom) {
@@ -689,6 +746,9 @@ pub(super) fn run_evidence(corpus: &[&BookAggregate]) -> FxHashMap<ScalarKey, Ru
                 let evidence = out.entry(*atom).or_default();
                 evidence.runs += count;
                 bump(&mut evidence.shapes, (pure, bucket), count, book);
+                if !recurs {
+                    bump(&mut evidence.novel, (pure, bucket), count, book);
+                }
             }
             for pair in atoms.windows(2) {
                 let evidence = out.entry(pair[0]).or_default();

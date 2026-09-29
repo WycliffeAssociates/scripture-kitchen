@@ -100,7 +100,8 @@ the opportunity set, not a verdict.
 
 A `Placement` row asks one side: of every `.`, how many follow a digit. A row
 unusual from the glyph's side is then asked from the class it touches, and
-fires only if it is unusual there too.
+fires only if it is unusual there too. `RunShape` gets the same treatment
+below.
 
 ```text
 en_ulb   ',' prev=Nonletter    103/54,723 = 18 bp, band 4's ceiling is 30
@@ -135,11 +136,32 @@ en_ulb   '.' prev=Digit        116/38,776 = 29 bp, under 30
   A row whose numerator reaches 0 is silent; one that fires reports what is
   left, and `books` counts the books holding what is left.
 
+`RunShape` is one-sided the same way: "`;` rarely sits in a cluster of two"
+fires on `);`, which is ordinary. Its other side is whether the exact cluster
+recurs.
+
+```text
+en_ulb   ';' mixed len 2       26/4,904
+   );×8  ';×7  ";×6   each occurs >= support_floor 5: a convention
+   ;'×3  ;"×2         left                                -> FIRES 5/4,904
+en_ulb   '"' mixed len 4       31/12,015
+   ."'"×27 recurs; ?"'"×2  .'?"×1  "...×1 left            -> FIRES 4/12,015
+```
+
+- **Exact sequences, not pools.** Pooling folds `;'` into `';` and clears the
+  swap that is the real signal.
+- **`support_floor` is the recurrence count.** It already means "enough
+  evidence to call it a habit". A correct but rare variant (`?"'"`×2) still
+  fires, and a wrong cluster repeated five times passes.
+- The denominator never moves, the glyph's side decides first, and a row left
+  with no runs is silent, as for `Placement`.
+
 The rescan must site exactly what is left, and a firing set cannot say which
 occurrences that is, so `Substrate::judge` publishes [`Explained`] into the
 sink beside the pattern table: the entitled leaders the firing `Nonletter`
-rows skip. `sites::locate` reads it, and a host keys its site caches on it
-(`galley`'s `EvidenceHash`).
+rows skip and the recurring clusters the firing `RunShape` rows skip.
+`sites::locate` reads it, and a host keys its site caches on it (`galley`'s
+`EvidenceHash`).
 
 ## The terminal table
 

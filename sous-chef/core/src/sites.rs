@@ -367,7 +367,7 @@ fn occurrences(
                 atoms.iter().all(|atom| atom.1 == glyph),
                 atoms.len().min(RUN_BUCKETS) as u8,
             );
-            u64::from(shape == (pure, bucket))
+            u64::from(shape == (pure, bucket) && !explained.recurs(atoms.iter().map(|atom| atom.1)))
         }
         PatternKey::ExactNeighbor(neighbor) => atoms
             .windows(2)
@@ -769,6 +769,16 @@ mod tests {
                 &[placement(']', Side::Next, OuterClass::Nonletter)],
                 &explained
             ),
+            (vec![(9, 11)], vec![1])
+        );
+    }
+
+    /// `);` occurs twice and recurs at a floor of two; `;'` once does not.
+    #[test]
+    fn a_run_shape_row_skips_runs_that_recur_exactly() {
+        let text = "a); b); c;' d";
+        assert_eq!(
+            found_with(text, &[run_shape(';', false, 2)], &explained_by(text, 2)),
             (vec![(9, 11)], vec![1])
         );
     }

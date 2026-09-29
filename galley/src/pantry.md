@@ -75,7 +75,7 @@ correctness bug, not a performance one.
 | `chapter_tables` | `RawChecksum` | the book's `(ObservationKey, start)` rows | any edit at all, markup included | rebuildable |
 | `aggregates` | `RawChecksum` | the book's `P::Aggregate`, book-index free | the same | rebuildable |
 | `firing` | `RawChecksum` | `(TableHash, FiringHash)` | the book's text, or the pattern table's CLAIMS | rebuildable |
-| `sites` | `RawChecksum` | `(FiringHash, EvidenceHash, [SiteRow])` | the book's text, its firing set, or the corpus's terminal table or explained leaders | rebuildable |
+| `sites` | `RawChecksum` | `(FiringHash, EvidenceHash, [SiteRow])` | the book's text, its firing set, or the corpus's terminal table or `Explained` | rebuildable |
 | `chapter_sites` | `(ObservationKey, FiringHash, EvidenceHash)` | that chapter's rows, chapter-relative | any of those three | hot |
 | `paired` | (target `RawChecksum`, source `RawChecksum`, words walked) | the book's ratios, presence rows, source-copy runs | either side's text, or the word walk switching on | rebuildable |
 | `verdicts` | (terminal table, judging config, doubling recusal) | the word channels' patterns | any of the three; otherwise only the delta's keys are re-judged | rebuildable |

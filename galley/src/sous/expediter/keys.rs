@@ -106,8 +106,8 @@ impl TableHash {
 }
 
 /// The corpus evidence a chapter's sites read beside its own text: xxh3-128
-/// over this publication's forcing glyphs and its explained leaders, each
-/// ascending.
+/// over this publication's forcing glyphs, explained leaders, and recurring
+/// clusters, each ascending.
 ///
 /// Its own hash rather than a share of [`FiringHash`], because a firing set is
 /// position-blind: the same rows fire while the corpus decides differently
@@ -132,6 +132,13 @@ impl EvidenceHash {
         hasher.update(&(explained.leaders().len() as u64).to_le_bytes());
         for glyph in explained.leaders() {
             hasher.update(&glyph.raw().to_le_bytes());
+        }
+        hasher.update(&(explained.clusters().len() as u64).to_le_bytes());
+        for cluster in explained.clusters() {
+            hasher.update(&(cluster.len() as u64).to_le_bytes());
+            for atom in cluster {
+                hasher.update(&atom.raw().to_le_bytes());
+            }
         }
         Self(hasher.digest128().to_be_bytes())
     }

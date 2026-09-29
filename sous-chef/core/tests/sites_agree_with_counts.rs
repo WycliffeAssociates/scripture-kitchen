@@ -147,6 +147,7 @@ fn counted(book: &BookAggregate, pattern: &Pattern, explained: &Explained) -> u6
                     atoms.len().min(RUN_BUCKETS) as u8,
                 ) == (pure, bucket)
             })
+            .filter(|(atoms, _)| !explained.recurs(atoms.iter().copied()))
             .map(|(_, count)| u64::from(count))
             .sum(),
         PatternKey::ExactNeighbor(neighbor) => book
@@ -317,10 +318,12 @@ fn generated(seed: u64, books: usize, chapters: usize, chapter_len: usize) -> Ve
 }
 
 /// A low support floor so a channel is entitled on a small input and the sweep
-/// exercises every rung rather than abstaining through most of them.
+/// exercises every rung rather than abstaining through most of them. Two, not
+/// one: at one every run recurs and every leader is entitled, so `RunShape`
+/// and in-run `Placement` could never fire.
 fn permissive() -> JudgingConfig {
     JudgingConfig {
-        support_floor: 1,
+        support_floor: 2,
         rarity_floor: 5,
         letters: sous_core::LetterRoster::Always,
         channels: sous_core::Channels {
