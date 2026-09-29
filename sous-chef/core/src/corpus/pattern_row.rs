@@ -1,4 +1,4 @@
-//! Encodes and decodes one pattern-table row (24 bytes). Layout:
+//! Encodes and decodes one pattern-table row (36 bytes). Layout:
 //! codec/README.md.
 //!
 //! ```text
@@ -7,13 +7,14 @@
 
 use super::*;
 use crate::codec::PackedFinding;
-use crate::judge::{Channel, Pattern, PatternKey, Side, Staircase};
+use crate::judge::{Channel, Pattern, PatternKey, Side, Staircase, Usual};
 use crate::substrate::{OuterClass, RUN_BUCKETS, ScalarKey};
 use crate::unicode::Pool;
 use crate::words::{Form, LETTER_RUN_MAX, LETTER_RUN_MIN};
 
-/// One pattern-table row: the glyph, the channel and its key, the band, and
-/// the fraction behind the claim. Layout: codec/README.md.
+/// One pattern-table row: the glyph, the channel and its key, the band, the
+/// fraction behind the claim, and what is usual instead. Layout:
+/// codec/README.md.
 pub(super) fn encode_pattern(pattern: &Pattern) -> [u8; PATTERN_ROW_LEN] {
     let mut row = [0u8; PATTERN_ROW_LEN];
     // On a word channel the first eight bytes are the u64 word hash,
@@ -50,7 +51,88 @@ pub(super) fn encode_pattern(pattern: &Pattern) -> [u8; PATTERN_ROW_LEN] {
     row[PATTERN_SHARE_OFFSET..PATTERN_BOOKS_OFFSET]
         .copy_from_slice(&pattern.share_bp.to_le_bytes());
     row[PATTERN_BOOKS_OFFSET] = pattern.books;
+    let (usual, usual_count, other_count) = usual_lanes(pattern);
+    row[PATTERN_USUAL_OFFSET..PATTERN_USUAL_COUNT_OFFSET].copy_from_slice(&usual.to_le_bytes());
+    row[PATTERN_USUAL_COUNT_OFFSET..PATTERN_OTHER_COUNT_OFFSET]
+        .copy_from_slice(&usual_count.to_le_bytes());
+    row[PATTERN_OTHER_COUNT_OFFSET..PATTERN_ROW_LEN].copy_from_slice(&other_count.to_le_bytes());
     row
+}
+
+/// `(usual, usual_count, other_count)`, each channel's own meaning.
+fn usual_lanes(pattern: &Pattern) -> (u32, u32, u32) {
+    match pattern.usual {
+        Usual::None => (0, 0, 0),
+        Usual::Placement { class, count } => (class as u32, count, 0),
+        Usual::ExactNeighbor {
+            neighbor,
+            count,
+            reversed,
+        } => (neighbor.raw(), count, reversed),
+        Usual::RunShape {
+            pure,
+            bucket,
+            count,
+        } => ((u32::from(pure) << 4) | u32::from(bucket), count, 0),
+        Usual::Rarity { glyph, count } => (glyph.map_or(0, ScalarKey::raw), count, 0),
+        Usual::Casing { form, count } => (form as u32, count, 0),
+    }
+}
+
+/// The inverse of [`usual_lanes`]: a value outside the channel's domain is
+/// `Err(field)`, and so is a lane the channel does not use holding anything.
+fn read_usual(channel: Channel, usual: u32, count: u32, other: u32) -> Result<Usual, &'static str> {
+    let unused = |lane: u32, field| if lane == 0 { Ok(()) } else { Err(field) };
+    let byte = u8::try_from(usual).map_err(|_| "usual");
+    Ok(match channel {
+        Channel::Placement => {
+            unused(other, "other_count")?;
+            let class = OuterClass::from_raw(byte?).ok_or("usual")?;
+            Usual::Placement { class, count }
+        }
+        Channel::ExactNeighbor => Usual::ExactNeighbor {
+            neighbor: ScalarKey::from_raw(usual).ok_or("usual")?,
+            count,
+            reversed: other,
+        },
+        Channel::RunShape => {
+            unused(other, "other_count")?;
+            let byte = byte?;
+            if byte >> 4 > 1 {
+                return Err("usual");
+            }
+            Usual::RunShape {
+                pure: byte >> 4 == 1,
+                bucket: byte & 0x0f,
+                count,
+            }
+        }
+        Channel::Rarity => {
+            unused(other, "other_count")?;
+            let glyph = match usual {
+                0 => None,
+                raw => Some(ScalarKey::from_raw(raw).ok_or("usual")?),
+            };
+            Usual::Rarity { glyph, count }
+        }
+        Channel::Casing => {
+            unused(other, "other_count")?;
+            Usual::Casing {
+                form: Form::from_raw(byte?).ok_or("usual")?,
+                count,
+            }
+        }
+        Channel::PooledNeighbor
+        | Channel::WordLength
+        | Channel::Doubled
+        | Channel::LetterRun
+        | Channel::SentenceStart => {
+            unused(usual, "usual")?;
+            unused(count, "usual_count")?;
+            unused(other, "other_count")?;
+            Usual::None
+        }
+    })
 }
 
 /// Refuses every row the encoder cannot have written: a reserved byte set, a
@@ -65,7 +147,7 @@ pub(super) fn decode_pattern(
     if bytes[PATTERN_FLAGS_OFFSET] != 0 {
         return Err(bad("flags"));
     }
-    if bytes[PATTERN_RESERVED_OFFSET..PATTERN_ROW_LEN] != [0] {
+    if bytes[PATTERN_RESERVED_OFFSET] != 0 {
         return Err(bad("reserved"));
     }
     let glyph_raw = read_u32(bytes, PATTERN_GLYPH_OFFSET);
@@ -173,6 +255,13 @@ pub(super) fn decode_pattern(
     if usize::from(books) > book_count {
         return Err(bad("books"));
     }
+    let usual = read_usual(
+        channel,
+        read_u32(bytes, PATTERN_USUAL_OFFSET),
+        read_u32(bytes, PATTERN_USUAL_COUNT_OFFSET),
+        read_u32(bytes, PATTERN_OTHER_COUNT_OFFSET),
+    )
+    .map_err(bad)?;
     let pattern = Pattern {
         glyph,
         channel,
@@ -182,6 +271,7 @@ pub(super) fn decode_pattern(
         denominator: read_u32(bytes, PATTERN_DENOMINATOR_OFFSET),
         share_bp,
         books,
+        usual,
     };
     pattern.validate().map_err(bad)?;
     Ok(pattern)

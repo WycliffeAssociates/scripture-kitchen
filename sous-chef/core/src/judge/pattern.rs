@@ -158,8 +158,35 @@ pub enum PatternKey {
     SentenceStart,
 }
 
-/// One firing pattern: a glyph, the channel that convicted it, and the
-/// fraction behind the claim.
+/// What the corpus does instead of the row's claim, one variant per channel
+/// that names it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Usual {
+    /// The row carries its own explanation.
+    None,
+    /// The class most common on this side, `Edge` excluded, and its count.
+    Placement { class: OuterClass, count: u32 },
+    /// The scalar that most often follows the glyph in a run, its count, and
+    /// how often the row's pair occurs reversed.
+    ExactNeighbor {
+        neighbor: ScalarKey,
+        count: u32,
+        reversed: u32,
+    },
+    /// The glyph's most common run shape and its runs.
+    RunShape { pure: bool, bucket: u8, count: u32 },
+    /// The most common other scalar in the glyph's pool and its count;
+    /// `None` when the pool holds nothing else.
+    Rarity {
+        glyph: Option<ScalarKey>,
+        count: u32,
+    },
+    /// The word's most common form in free positions and its count.
+    Casing { form: Form, count: u32 },
+}
+
+/// One firing pattern: a glyph, the channel that convicted it, the fraction
+/// behind the claim, and what is usual instead.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Pattern {
     pub glyph: ScalarKey,
@@ -177,6 +204,7 @@ pub struct Pattern {
     /// punctuation legitimately, so nothing gates on it. Books-possible is the
     /// publication's own `book_count`. [`books_touched`] recomputes it.
     pub books: u8,
+    pub usual: Usual,
 }
 
 impl Pattern {
@@ -241,7 +269,45 @@ impl Pattern {
         if self.channel.is_word() && self.glyph != ScalarKey::NONE {
             return Err("glyph");
         }
-        Ok(())
+        self.usual_fits().then_some(()).ok_or("usual")
+    }
+
+    /// The variant belongs to the channel, and every count fits the row.
+    fn usual_fits(&self) -> bool {
+        let within = |count: u32| count <= self.denominator;
+        match (self.channel, self.usual) {
+            (Channel::Placement, Usual::Placement { class, count }) => {
+                class != OuterClass::Edge && within(count)
+            }
+            (Channel::ExactNeighbor, Usual::ExactNeighbor { count, .. }) => within(count),
+            (Channel::RunShape, Usual::RunShape { bucket, count, .. }) => {
+                (1..=RUN_BUCKETS as u8).contains(&bucket) && within(count)
+            }
+            (Channel::Rarity, Usual::Rarity { glyph, count }) => match glyph {
+                None => count == 0,
+                // U+0000 is the wire's "none", so it cannot be the answer.
+                Some(glyph) => {
+                    glyph != self.glyph
+                        && glyph != ScalarKey::NONE
+                        && !glyph.is_digits()
+                        && pool_of_key(glyph) == pool_of_key(self.glyph)
+                        && count > 0
+                        && within(count)
+                }
+            },
+            (Channel::Casing, Usual::Casing { form, count }) => {
+                form != Form::Uncased && within(count)
+            }
+            (
+                Channel::PooledNeighbor
+                | Channel::WordLength
+                | Channel::Doubled
+                | Channel::LetterRun
+                | Channel::SentenceStart,
+                Usual::None,
+            ) => true,
+            _ => false,
+        }
     }
 }
 

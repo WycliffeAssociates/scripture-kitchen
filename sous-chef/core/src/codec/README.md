@@ -15,7 +15,7 @@ space.
 | 0..4 | `from: u32` | start in the book coordinate space the container declares |
 | 4..8 | `to: u32` | end in that space, exclusive |
 | 8..10 | `book_idx: u16` | index into the snapshot's ordered book table |
-| 10 | `code: u8` | union tag into the v1 code table |
+| 10 | `code: u8` | union tag into the code table |
 | 11 | `flags: u8` | representation flags; only `SATURATED` is valid |
 | 12..14 | `i16` lane | meaning owned by the rule code |
 | 14..16 | `i16` lane | meaning owned by the rule code |
@@ -25,7 +25,7 @@ id: a USFM file and a vref corpus may both supply the book, and the caller
 owns the addressing space. `u16` is ample without spending four bytes per
 finding.
 
-## The v1 code table
+## The code table
 
 Dense, hand-assigned, append-only. No reserved ranges, no retired entries.
 Removing or renumbering a code requires a new wire version rather than leaving
@@ -92,6 +92,7 @@ Decoding refuses rather than guesses:
 | a `Casing` key byte of `Uncased` | `InvalidPattern` |
 | a `Doubled` key byte above 1 | `InvalidPattern` |
 | a `LetterRun` key byte outside `2..=8` | `InvalidPattern` |
+| a usual lane a channel does not use holding anything, or a usual outside its channel's domain | `InvalidPattern` |
 | a pattern `books` of zero on a row with a numerator, or past the header's `book_count` | `InvalidPattern` |
 | a `pattern_offset` that is not the running cursor | `PatternSectionOutOfOrder` |
 | more than 65,535 patterns | `PatternCountOverflow` |
@@ -121,7 +122,7 @@ untouched book.
   id strings         one per book, directory order, each a u16 little-endian
                      byte length followed by that many UTF-8 bytes; the
                      section is zero-padded to a 4-byte boundary
-  pattern table      contiguous 24-byte rows in emission order, corpus-level
+  pattern table      contiguous 36-byte rows in emission order, corpus-level
                      and not per book; a row is 4-byte aligned, so the
                      sections behind it stay aligned however many fired
   sections           contiguous 16-byte records, no incidental padding
@@ -132,7 +133,7 @@ untouched book.
 The judge's output, one row per firing pattern. It is the corpus's evidence,
 and a `Convention` record carries only a position in it plus the reasons that
 position matched — so ten thousand sites of one convention cost ten thousand
-16-byte records and *one* 24-byte row of argument.
+16-byte records and *one* 36-byte row of argument.
 
 | bytes | field |
 | --- | --- |
@@ -147,6 +148,31 @@ position matched — so ten thousand sites of one convention cost ten thousand
 | 20..22 | `share_bp: u16`, at most 10,000 |
 | 22 | `books: u8` — books holding part of the numerator; books-possible is the header's `book_count` |
 | 23 | reserved `u8` 0 (the decoder refuses nonzero) |
+| 24..28 | `usual: u32` — what is usual instead, per channel (below) |
+| 28..32 | `usual_count: u32` |
+| 32..36 | `other_count: u32` |
+
+### What is usual instead
+
+The three lanes at 24..36 answer "what does this corpus do instead", and each
+channel owns their meaning exactly as it owns the key byte. A lane a channel
+does not use is 0 and the decoder refuses anything else there; a value outside
+the channel's domain is `InvalidPattern`. Rust reads them as `Pattern::usual`
+(`judge::Usual`), the generated reader as `pattern.usual`, a union on `kind`.
+
+| channel | `usual` | `usual_count` | `other_count` |
+| --- | --- | --- | --- |
+| `Placement` | the `OuterClass` most common on that side, `Edge` excluded | its count, at most the denominator | 0 |
+| `ExactNeighbor` | the scalar that most often follows the glyph in a run | its in-run positions, at most the denominator | the row's pair reversed (neighbour then glyph) in runs |
+| `RunShape` | the glyph's most common shape as a key byte, `(pure << 4) \| bucket` | its runs, at most the denominator | 0 |
+| `Rarity` | the most common other scalar in the glyph's `Pool`, never U+0000 or the digit key; 0 when there is none | its corpus count; 0 with a `usual` of 0 | 0 |
+| `Casing` | the word's most common `Form` in free positions, never `Uncased` | its count, at most the denominator | 0 |
+| every other channel | 0 | 0 | 0 |
+
+Ties go to the smallest value. `ExactNeighbor`'s `other_count` is the swap
+signal: `'.` against `.'` ×975 says the period usually goes inside the quote.
+The generated reader checks every rule here but one: whether a `Rarity` usual
+shares the glyph's pool, which needs the pool table only Rust carries.
 
 **Channel 9 `SentenceStart` is an ordinary glyph row with an empty key:** the
 glyph field carries the run terminal as a `ScalarKey`, the neighbor field is
@@ -225,12 +251,10 @@ reorder, or hide bytes. The length prefix means an id needs no forbidden byte
 and no scan. The 4-byte padding after the section keeps every record section
 aligned for a typed-array view.
 
-This is a **v1 layout edit**, made while nothing is released: the directory row
-grew from 16 bytes to 20, then the header grew from 40 bytes to 48 for the
-pattern table, and the hex goldens were re-pinned each time. It is the last
-one that gets to be free. The charter's rule — a layout change means a new wire
-version — applies from the first release, and from then on this table's shape
-is frozen inside version 1.
+Version 2 grew the pattern row from 24 bytes to 36 for the usual lanes. Sefer,
+the one consumer, reads only through the generated reader, so a version 1
+buffer is refused at `open` rather than migrated. The charter's rule stands: a
+layout change means a new wire version.
 
 Sous analysis emits projected-book UTF-8 ranges; `galley::sous` composes the
 producer locator with UTF-8-to-UTF-16 conversion and publishes raw-book UTF-16

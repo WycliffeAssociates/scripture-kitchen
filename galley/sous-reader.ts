@@ -7,7 +7,7 @@
  */
 
 export const MAGIC = 0x53554f53;
-export const FORMAT_VERSION = 1;
+export const FORMAT_VERSION = 2;
 export const FLAG_UTF16 = 1;
 export const HEADER_BYTES = 48;
 export const DIRECTORY_ENTRY_BYTES = 20;
@@ -36,7 +36,7 @@ export const RECORD_CODE_OFFSET = 10;
 export const RECORD_FLAGS_OFFSET = 11;
 export const RECORD_BOOK_SCOPE_OFFSET = 12;
 export const RECORD_PROJECT_SCOPE_OFFSET = 14;
-export const PATTERN_ROW_LEN = 24;
+export const PATTERN_ROW_LEN = 36;
 export const PATTERN_GLYPH_OFFSET = 0;
 export const PATTERN_NEIGHBOR_OFFSET = 4;
 export const PATTERN_CHANNEL_OFFSET = 8;
@@ -49,6 +49,10 @@ export const PATTERN_SHARE_OFFSET = 20;
 /** Books whose counts hold part of the numerator; books-possible is `bookCount`. */
 export const PATTERN_BOOKS_OFFSET = 22;
 export const PATTERN_RESERVED_OFFSET = 23;
+/** What is usual instead: three lanes whose meaning each channel owns. */
+export const PATTERN_USUAL_OFFSET = 24;
+export const PATTERN_USUAL_COUNT_OFFSET = 28;
+export const PATTERN_OTHER_COUNT_OFFSET = 32;
 /** The band byte a `Rarity` row carries: no staircase step. */
 export const PATTERN_BAND_NONE = 255;
 /** The pooled decimal-digit lane, which is not a scalar. */
@@ -166,8 +170,29 @@ export type PatternKey =
   | { readonly kind: "LetterRun"; readonly length: number }
   | { readonly kind: "SentenceStart" };
 
-/** One corpus-level pattern: a glyph, the channel that convicted it, and the
- * fraction behind the claim. */
+/** What the corpus does instead of the row's claim. `None` on a channel whose
+ * row already says it. */
+export type Usual =
+  | { readonly kind: "None" }
+  /** The class most common on this side, `Edge` excluded. */
+  | { readonly kind: "Placement"; readonly class: OuterClass; readonly count: number }
+  /** The scalar that most often follows the glyph in a run, and how often the
+   * row's own pair occurs the other way round. */
+  | {
+      readonly kind: "ExactNeighbor";
+      readonly neighbor: number;
+      readonly count: number;
+      readonly reversed: number;
+    }
+  /** The glyph's most common run shape. */
+  | { readonly kind: "RunShape"; readonly pure: boolean; readonly bucket: number; readonly count: number }
+  /** The most common other scalar in the glyph's pool; `null` when there is none. */
+  | { readonly kind: "Rarity"; readonly glyph: number | null; readonly count: number }
+  /** The word's most common form in free positions. */
+  | { readonly kind: "Casing"; readonly form: CasingForm; readonly count: number };
+
+/** One corpus-level pattern: a glyph, the channel that convicted it, the
+ * fraction behind the claim, and what is usual instead. */
 export interface Pattern {
   /** A code point, or `PATTERN_DIGIT_GLYPH` for the pooled digit lane. Zero on
    * a word channel, which judges no scalar: bytes 0..8 carry the word hash. */
@@ -182,6 +207,7 @@ export interface Pattern {
   /** Books holding part of the numerator, out of the snapshot's `bookCount`.
    * Information only: nothing in the engine gates on dispersion. */
   readonly books: number;
+  readonly usual: Usual;
 }
 
 export interface ConventionDigest {
@@ -275,7 +301,45 @@ function readId(view: DataView, offset: number, book: number): [string, number] 
   }
 }
 
-/** One 24-byte pattern row, refusing every value the encoder cannot write. */
+function isScalar(raw: number): boolean {
+  return raw === PATTERN_DIGIT_GLYPH || (raw <= 0x10ffff && (raw < 0xd800 || raw > 0xdfff));
+}
+
+/** A row's usual lanes as its channel reads them; `null` for a value outside
+ * the channel's domain or a lane it does not use holding anything. Whether a
+ * rarity's usual shares the glyph's pool is the Rust decoder's check alone:
+ * the pool table is not in this reader. */
+function readUsual(channel: Channel, glyph: number, denominator: number, usual: number, count: number, other: number): Usual | null {
+  if (channel === "ExactNeighbor") {
+    return isScalar(usual) && count <= denominator ? { kind: "ExactNeighbor", neighbor: usual, count, reversed: other } : null;
+  }
+  if (other !== 0 || count > denominator) {
+    return null;
+  }
+  if (channel === "Placement") {
+    const outer = OUTER_CLASSES[usual];
+    return outer === undefined || outer === "Edge" ? null : { kind: "Placement", class: outer, count };
+  }
+  if (channel === "RunShape") {
+    const high = usual >> 4;
+    const low = usual & 0x0f;
+    return usual > 0xff || high > 1 || low === 0 || low > RUN_BUCKETS ? null : { kind: "RunShape", pure: high === 1, bucket: low, count };
+  }
+  if (channel === "Rarity") {
+    if (usual === 0) {
+      return count === 0 ? { kind: "Rarity", glyph: null, count } : null;
+    }
+    const valid = isScalar(usual) && usual !== PATTERN_DIGIT_GLYPH && usual !== glyph && count > 0;
+    return valid ? { kind: "Rarity", glyph: usual, count } : null;
+  }
+  if (channel === "Casing") {
+    const form = CASING_FORMS[usual];
+    return form === undefined || form === "Uncased" ? null : { kind: "Casing", form, count };
+  }
+  return usual === 0 && count === 0 ? { kind: "None" } : null;
+}
+
+/** One 36-byte pattern row, refusing every value the encoder cannot write. */
 function readPattern(view: DataView, at: number, row: number, bookCount: number): Pattern {
   if (view.getUint8(at + PATTERN_FLAGS_OFFSET) !== 0) {
     return fail(`pattern row ${row} has an invalid flags`);
@@ -293,7 +357,7 @@ function readPattern(view: DataView, at: number, row: number, bookCount: number)
   // applies there.
   const word = channel === "Casing" || channel === "WordLength" || channel === "Doubled";
   const glyph = word ? 0 : rawGlyph;
-  if (!word && glyph !== PATTERN_DIGIT_GLYPH && (glyph > 0x10ffff || (glyph >= 0xd800 && glyph <= 0xdfff))) {
+  if (!word && !isScalar(glyph)) {
     return fail(`pattern row ${row} has an invalid glyph`);
   }
   const raw = view.getUint8(at + PATTERN_KEY_OFFSET);
@@ -320,7 +384,7 @@ function readPattern(view: DataView, at: number, row: number, bookCount: number)
     if (raw !== 0) {
       return fail(`pattern row ${row} has an invalid key`);
     }
-    if (neighbor !== PATTERN_DIGIT_GLYPH && (neighbor > 0x10ffff || (neighbor >= 0xd800 && neighbor <= 0xdfff))) {
+    if (!isScalar(neighbor)) {
       return fail(`pattern row ${row} has an invalid neighbor`);
     }
     key = { kind: "ExactNeighbor", neighbor };
@@ -398,6 +462,17 @@ function readPattern(view: DataView, at: number, row: number, bookCount: number)
   if (books > bookCount || (books === 0 && numerator > 0)) {
     return fail(`pattern row ${row} has an invalid books`);
   }
+  const usual = readUsual(
+    channel,
+    glyph,
+    denominator,
+    u32(view, at + PATTERN_USUAL_OFFSET),
+    u32(view, at + PATTERN_USUAL_COUNT_OFFSET),
+    u32(view, at + PATTERN_OTHER_COUNT_OFFSET),
+  );
+  if (usual === null) {
+    return fail(`pattern row ${row} has an invalid usual`);
+  }
   return {
     glyph,
     channel,
@@ -407,6 +482,7 @@ function readPattern(view: DataView, at: number, row: number, bookCount: number)
     denominator,
     shareBp,
     books,
+    usual,
   };
 }
 

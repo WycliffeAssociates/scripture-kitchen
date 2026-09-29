@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::codec::{CodecError, HygieneClass, PresenceDigest, PresenceKind, SourceCopyDigest};
-use crate::judge::{Channel, PatternKey, Side};
+use crate::judge::{Channel, PatternKey, Side, Usual};
 use crate::substrate::{OuterClass, ScalarKey};
 use crate::unicode::Pool;
 use crate::words::Form;
@@ -30,6 +30,10 @@ fn fixture_patterns() -> Vec<Pattern> {
             denominator: 48_213,
             share_bp: 0,
             books: 1,
+            usual: Usual::Rarity {
+                glyph: Some(ScalarKey::of('~')),
+                count: 12,
+            },
         },
         Pattern {
             glyph: ScalarKey::of('?'),
@@ -40,6 +44,11 @@ fn fixture_patterns() -> Vec<Pattern> {
             denominator: 403,
             share_bp: 74,
             books: 1,
+            usual: Usual::ExactNeighbor {
+                neighbor: ScalarKey::of('"'),
+                count: 380,
+                reversed: 2,
+            },
         },
         Pattern {
             glyph: ScalarKey::of('?'),
@@ -50,6 +59,7 @@ fn fixture_patterns() -> Vec<Pattern> {
             denominator: 403,
             share_bp: 124,
             books: 1,
+            usual: Usual::None,
         },
         Pattern {
             glyph: ScalarKey::of(','),
@@ -63,6 +73,11 @@ fn fixture_patterns() -> Vec<Pattern> {
             denominator: 601,
             share_bp: 16,
             books: 1,
+            usual: Usual::RunShape {
+                pure: true,
+                bucket: 1,
+                count: 598,
+            },
         },
         Pattern {
             glyph: ScalarKey::DIGITS,
@@ -76,6 +91,10 @@ fn fixture_patterns() -> Vec<Pattern> {
             denominator: 9_812,
             share_bp: 12,
             books: 1,
+            usual: Usual::Placement {
+                class: OuterClass::Space,
+                count: 9_700,
+            },
         },
         // A word hash rides bytes 0..8, so this row carries no glyph.
         Pattern {
@@ -90,6 +109,10 @@ fn fixture_patterns() -> Vec<Pattern> {
             denominator: 40,
             share_bp: 500,
             books: 1,
+            usual: Usual::Casing {
+                form: Form::Lower,
+                count: 38,
+            },
         },
         // The other word channel: the same hash lanes, a sigma key byte.
         Pattern {
@@ -104,6 +127,7 @@ fn fixture_patterns() -> Vec<Pattern> {
             denominator: 128_000,
             share_bp: 0,
             books: 1,
+            usual: Usual::None,
         },
         // The third word channel: the same hash lanes, a key byte of 0 or 1.
         Pattern {
@@ -118,6 +142,7 @@ fn fixture_patterns() -> Vec<Pattern> {
             denominator: 9_000,
             share_bp: 1,
             books: 1,
+            usual: Usual::None,
         },
         // Not a word channel: the letter rides the glyph field and the key
         // byte is the run length.
@@ -130,6 +155,7 @@ fn fixture_patterns() -> Vec<Pattern> {
             denominator: 4_000,
             share_bp: 2,
             books: 1,
+            usual: Usual::None,
         },
         // The glyph is the whole key, so the key byte is zero like Rarity's —
         // and unlike Rarity's the row carries a band.
@@ -142,15 +168,28 @@ fn fixture_patterns() -> Vec<Pattern> {
             denominator: 33_338,
             share_bp: 1,
             books: 1,
+            usual: Usual::None,
         },
     ]
 }
 
-fn fixture_bytes() -> Vec<u8> {
-    include_str!("../../../testdata/corpus_v1.hex")
-        .split_whitespace()
+fn parse_hex(text: &str) -> Vec<u8> {
+    text.split_whitespace()
         .map(|byte| u8::from_str_radix(byte, 16).unwrap())
         .collect()
+}
+
+/// `encoded` against a shared hex fixture the JS reader also reads. Under
+/// `UPDATE_HEX` it rewrites the file and fails: regenerating is never a
+/// passing test, exactly as `UPDATE_GOLDENS` is.
+fn assert_hex(encoded: &[u8], golden: &str, name: &str) {
+    if std::env::var_os("UPDATE_HEX").is_some() {
+        let hex: Vec<String> = encoded.iter().map(|byte| format!("{byte:02x}")).collect();
+        let path = format!("{}/../testdata/{name}", env!("CARGO_MANIFEST_DIR"));
+        std::fs::write(path, format!("{}\n", hex.join(" "))).unwrap();
+        panic!("UPDATE_HEX rewrote {name}; rerun without it to test it");
+    }
+    assert_eq!(encoded, parse_hex(golden), "{name}");
 }
 
 fn fixture_finding() -> PackedFinding {
@@ -187,7 +226,11 @@ fn writer_matches_shared_golden_buffer_and_reader_view() {
         &[],
     )
     .unwrap();
-    assert_eq!(encoded, fixture_bytes());
+    assert_hex(
+        &encoded,
+        include_str!("../../../testdata/corpus_v2.hex"),
+        "corpus_v2.hex",
+    );
 
     let snapshot = CorpusSnapshot::open(&encoded).unwrap();
     assert_eq!(
@@ -302,24 +345,11 @@ fn mixed_kind_golden_buffer_decodes_in_both_readers() {
         &fixture_patterns(),
     )
     .unwrap();
-    // Regenerating is never a passing test, exactly as `UPDATE_GOLDENS` is.
-    if std::env::var_os("UPDATE_HEX").is_some() {
-        let hex: Vec<String> = encoded.iter().map(|byte| format!("{byte:02x}")).collect();
-        std::fs::write(
-            concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/../testdata/corpus_v1_hygiene.hex"
-            ),
-            format!("{}\n", hex.join(" ")),
-        )
-        .unwrap();
-        panic!("UPDATE_HEX rewrote the shared hex fixture; rerun without it to test it");
-    }
-    let golden: Vec<u8> = include_str!("../../../testdata/corpus_v1_hygiene.hex")
-        .split_whitespace()
-        .map(|byte| u8::from_str_radix(byte, 16).unwrap())
-        .collect();
-    assert_eq!(encoded, golden);
+    assert_hex(
+        &encoded,
+        include_str!("../../../testdata/corpus_v2_hygiene.hex"),
+        "corpus_v2_hygiene.hex",
+    );
 
     let snapshot = CorpusSnapshot::open(&encoded).unwrap();
     assert_eq!(snapshot.patterns().unwrap(), fixture_patterns());
@@ -360,9 +390,12 @@ fn header_is_48_bytes() {
     assert_eq!(HEADER_PATTERN_COUNT_OFFSET, 24);
     assert_eq!(HEADER_PATTERN_OFFSET_OFFSET, 28);
     assert_eq!(HEADER_SNAPSHOT_ID_OFFSET, 32);
-    assert_eq!(PATTERN_ROW_LEN, 24);
+    assert_eq!(PATTERN_ROW_LEN, 36);
     assert_eq!(PATTERN_BOOKS_OFFSET, 22);
     assert_eq!(PATTERN_RESERVED_OFFSET, 23);
+    assert_eq!(PATTERN_USUAL_OFFSET, 24);
+    assert_eq!(PATTERN_USUAL_COUNT_OFFSET, 28);
+    assert_eq!(PATTERN_OTHER_COUNT_OFFSET, 32);
     let empty =
         encode_to_corpus_buffer(SnapshotId::new([0; 16]), CoordinateSpace::Utf8, &[], &[]).unwrap();
     assert_eq!(empty.len(), HEADER_BYTES);
@@ -438,6 +471,114 @@ fn pattern_table_round_trips() {
         CorpusSnapshot::open(&moved),
         Err(CorpusWireError::PatternSectionOutOfOrder { .. })
     ));
+}
+
+/// The one-book table `pattern_table_round_trips` publishes, and where its
+/// pattern rows start.
+fn fixture_table() -> (Vec<u8>, usize) {
+    let books = [PublicationBook::new(
+        BookKey::new(*b"MRK"),
+        "books/mrk.usfm",
+        0,
+        &[],
+    )];
+    let encoded = encode_to_corpus_buffer(
+        SnapshotId::new([7; 16]),
+        CoordinateSpace::Utf8,
+        &books,
+        &fixture_patterns(),
+    )
+    .unwrap();
+    (encoded, HEADER_BYTES + DIRECTORY_ENTRY_BYTES + 16)
+}
+
+/// Every channel's usual lanes come back as the variant they left as, and a
+/// rarity whose pool holds nothing else says so with zeros.
+#[test]
+fn usual_lanes_round_trip_per_channel() {
+    let (encoded, _) = fixture_table();
+    let decoded = CorpusSnapshot::open(&encoded).unwrap().patterns().unwrap();
+    let usual: Vec<Usual> = decoded.iter().map(|pattern| pattern.usual).collect();
+    assert_eq!(
+        usual,
+        fixture_patterns()
+            .iter()
+            .map(|pattern| pattern.usual)
+            .collect::<Vec<_>>()
+    );
+    assert!(matches!(usual[0], Usual::Rarity { glyph: Some(_), .. }));
+
+    let mut alone = fixture_patterns();
+    alone[0].usual = Usual::Rarity {
+        glyph: None,
+        count: 0,
+    };
+    let books = [PublicationBook::new(BookKey::new(*b"MRK"), "m", 0, &[])];
+    let encoded = encode_to_corpus_buffer(
+        SnapshotId::new([0; 16]),
+        CoordinateSpace::Utf8,
+        &books,
+        &alone,
+    )
+    .unwrap();
+    assert_eq!(
+        CorpusSnapshot::open(&encoded)
+            .unwrap()
+            .pattern(0)
+            .unwrap()
+            .usual,
+        alone[0].usual
+    );
+}
+
+/// A value outside its channel's domain, or a lane the channel does not use
+/// holding anything, is refused rather than read.
+#[test]
+fn usual_lanes_refuse_what_the_channel_cannot_mean() {
+    const RARITY: usize = 0;
+    const EXACT: usize = 1;
+    const POOLED: usize = 2;
+    const SHAPE: usize = 3;
+    const PLACEMENT: usize = 4;
+    const CASING: usize = 5;
+    let (encoded, start) = fixture_table();
+    let lane = |row: usize, offset: usize, value: u32| {
+        let mut torn = encoded.clone();
+        let at = start + row * PATTERN_ROW_LEN + offset;
+        torn[at..at + 4].copy_from_slice(&value.to_le_bytes());
+        CorpusSnapshot::open(&torn).err()
+    };
+    let refused = |row, field| Some(CorpusWireError::InvalidPattern { row, field });
+    for (row, offset, value, field) in [
+        // Unused lanes.
+        (POOLED, PATTERN_USUAL_OFFSET, 1, "usual"),
+        (POOLED, PATTERN_USUAL_COUNT_OFFSET, 1, "usual_count"),
+        (POOLED, PATTERN_OTHER_COUNT_OFFSET, 1, "other_count"),
+        (PLACEMENT, PATTERN_OTHER_COUNT_OFFSET, 1, "other_count"),
+        (RARITY, PATTERN_OTHER_COUNT_OFFSET, 1, "other_count"),
+        // Out of domain.
+        (
+            PLACEMENT,
+            PATTERN_USUAL_OFFSET,
+            OuterClass::Edge as u32,
+            "usual",
+        ),
+        (PLACEMENT, PATTERN_USUAL_OFFSET, 5, "usual"),
+        (PLACEMENT, PATTERN_USUAL_COUNT_OFFSET, 9_813, "usual"),
+        (EXACT, PATTERN_USUAL_OFFSET, 0xd800, "usual"),
+        (SHAPE, PATTERN_USUAL_OFFSET, 0x10, "usual"),
+        (SHAPE, PATTERN_USUAL_OFFSET, 0x21, "usual"),
+        (RARITY, PATTERN_USUAL_OFFSET, '`' as u32, "usual"),
+        (RARITY, PATTERN_USUAL_OFFSET, '.' as u32, "usual"),
+        (RARITY, PATTERN_USUAL_OFFSET, 0, "usual"),
+        (CASING, PATTERN_USUAL_OFFSET, Form::Uncased as u32, "usual"),
+    ] {
+        assert_eq!(
+            lane(row, offset, value),
+            refused(row, field),
+            "row {row} lane {offset} = {value:#x}"
+        );
+    }
 }
 
 /// `Pattern::validate` is symmetric: a share that disagrees with its own

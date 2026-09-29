@@ -43,10 +43,10 @@ mod words;
 pub use config::{
     BandStep, Channels, DoublesPolicy, JudgingConfig, LetterRoster, Staircase, config_stamp,
 };
-pub use pattern::{Channel, Pattern, PatternIndex, PatternKey, Side};
+pub use pattern::{Channel, Pattern, PatternIndex, PatternKey, Side, Usual};
 pub use scalars::{Explained, books_touched};
 pub(crate) use scalars::{judge_corpus, pool_of_key, share_bp};
-use scalars::{reported_share, saturate};
+use scalars::{most, reported_share, saturate};
 use terminals::seek;
 pub use terminals::{TerminalTable, merged_follows};
 pub(crate) use words::{free_of, judge_words, judge_words_for, judges_doubles, word_slot};

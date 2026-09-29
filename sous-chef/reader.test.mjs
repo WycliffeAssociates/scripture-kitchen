@@ -14,7 +14,9 @@ import {
   HEADER_VERSION_OFFSET,
   MAGIC,
   FORMAT_VERSION,
+  PATTERN_OTHER_COUNT_OFFSET,
   PATTERN_ROW_LEN,
+  PATTERN_USUAL_OFFSET,
   POOLS,
   RECORD_LEN,
 } from "./reader.ts";
@@ -29,7 +31,7 @@ function hexFixture(name) {
 }
 
 function fixture() {
-  return hexFixture("corpus_v1.hex");
+  return hexFixture("corpus_v2.hex");
 }
 
 // One book under "books/mrk.usfm": the header, one directory row, a 16-byte
@@ -70,7 +72,7 @@ test("opens the shared golden buffer and lazily decodes a typed row", () => {
 });
 
 test("seeks by host id through the string table", () => {
-  const snapshot = FindingsSnapshot.open(hexFixture("corpus_v1_utf16.hex"));
+  const snapshot = FindingsSnapshot.open(hexFixture("corpus_v2_utf16.hex"));
   assert.deepEqual(
     [snapshot.book(0).id, snapshot.book(1).id],
     ["books/mrk.usfm", "books/gen.usfm"],
@@ -94,7 +96,7 @@ test("seeks by host id through the string table", () => {
 test("decodes the galley-published UTF-16 golden with rebased spans", () => {
   // Produced by galley::sous::publish_onion_findings: caller order MRK before
   // GEN, a split-mask bounding span, an astral span, and a plain ASCII span.
-  const snapshot = FindingsSnapshot.open(hexFixture("corpus_v1_utf16.hex"));
+  const snapshot = FindingsSnapshot.open(hexFixture("corpus_v2_utf16.hex"));
   assert.equal(snapshot.coordinateSpace, "utf16");
   assert.deepEqual([...snapshot.snapshotId], [...Array(16).keys()]);
   assert.equal(snapshot.length, 2);
@@ -131,7 +133,7 @@ test("decodes the galley-published UTF-16 golden with rebased spans", () => {
 });
 
 test("decodes mixed proportionality, hygiene, presence, and source-copy rows, saturation included", () => {
-  const snapshot = FindingsSnapshot.open(hexFixture("corpus_v1_hygiene.hex"));
+  const snapshot = FindingsSnapshot.open(hexFixture("corpus_v2_hygiene.hex"));
   const mark = snapshot.book("MRK");
   assert.equal(mark.count, 8);
   assert.deepEqual(mark.at(0), {
@@ -199,37 +201,37 @@ test("decodes mixed proportionality, hygiene, presence, and source-copy rows, sa
   });
 
   const COPY_RECORD = FIRST_MIXED_RECORD + 7 * RECORD_LEN;
-  const zeroRunLength = hexFixture("corpus_v1_hygiene.hex");
+  const zeroRunLength = hexFixture("corpus_v2_hygiene.hex");
   zeroRunLength[COPY_RECORD + 12] = 0;
   assert.throws(() => FindingsSnapshot.open(zeroRunLength).book(0).at(7), FindingsSnapshotError);
-  const runPastTheUnit = hexFixture("corpus_v1_hygiene.hex");
+  const runPastTheUnit = hexFixture("corpus_v2_hygiene.hex");
   runPastTheUnit[COPY_RECORD + 14] = 1;
   assert.throws(() => FindingsSnapshot.open(runPastTheUnit).book(0).at(7), FindingsSnapshotError);
-  const copySaturation = hexFixture("corpus_v1_hygiene.hex");
+  const copySaturation = hexFixture("corpus_v2_hygiene.hex");
   copySaturation[COPY_RECORD + 11] = 1;
   assert.throws(() => FindingsSnapshot.open(copySaturation).book(0).at(7), FindingsSnapshotError);
 
   const PRESENCE_RECORD = FIRST_MIXED_RECORD + 6 * RECORD_LEN;
-  const badKind = hexFixture("corpus_v1_hygiene.hex");
+  const badKind = hexFixture("corpus_v2_hygiene.hex");
   badKind[PRESENCE_RECORD + 12] = 3;
   assert.throws(() => FindingsSnapshot.open(badKind).book(0).at(6), FindingsSnapshotError);
-  const zeroKeys = hexFixture("corpus_v1_hygiene.hex");
+  const zeroKeys = hexFixture("corpus_v2_hygiene.hex");
   zeroKeys[PRESENCE_RECORD + 14] = 0;
   assert.throws(() => FindingsSnapshot.open(zeroKeys).book(0).at(6), FindingsSnapshotError);
 
-  const badClass = hexFixture("corpus_v1_hygiene.hex");
+  const badClass = hexFixture("corpus_v2_hygiene.hex");
   badClass[FIRST_MIXED_RECORD + 12] = 11;
   assert.throws(() => FindingsSnapshot.open(badClass).book(0).at(0), FindingsSnapshotError);
-  const zeroRun = hexFixture("corpus_v1_hygiene.hex");
+  const zeroRun = hexFixture("corpus_v2_hygiene.hex");
   zeroRun[FIRST_MIXED_RECORD + 14] = 0;
   assert.throws(() => FindingsSnapshot.open(zeroRun).book(0).at(0), FindingsSnapshotError);
-  const falseSaturation = hexFixture("corpus_v1_hygiene.hex");
+  const falseSaturation = hexFixture("corpus_v2_hygiene.hex");
   falseSaturation[FIRST_MIXED_RECORD + 11] = 1;
   assert.throws(() => FindingsSnapshot.open(falseSaturation).book(0).at(0), FindingsSnapshotError);
 });
 
 test("decodes the pattern table the judge published", () => {
-  const snapshot = FindingsSnapshot.open(hexFixture("corpus_v1_hygiene.hex"));
+  const snapshot = FindingsSnapshot.open(hexFixture("corpus_v2_hygiene.hex"));
   assert.equal(snapshot.patternCount, 10);
   assert.deepEqual(snapshot.patterns(), [
     {
@@ -241,6 +243,7 @@ test("decodes the pattern table the judge published", () => {
       denominator: 48213,
       shareBp: 0,
       books: 1,
+      usual: { kind: "Rarity", glyph: 0x7e, count: 12 },
     },
     {
       glyph: 0x3f,
@@ -251,6 +254,7 @@ test("decodes the pattern table the judge published", () => {
       denominator: 403,
       shareBp: 74,
       books: 1,
+      usual: { kind: "ExactNeighbor", neighbor: 0x22, count: 380, reversed: 2 },
     },
     {
       glyph: 0x3f,
@@ -261,6 +265,7 @@ test("decodes the pattern table the judge published", () => {
       denominator: 403,
       shareBp: 124,
       books: 1,
+      usual: { kind: "None" },
     },
     {
       glyph: 0x2c,
@@ -271,6 +276,7 @@ test("decodes the pattern table the judge published", () => {
       denominator: 601,
       shareBp: 16,
       books: 1,
+      usual: { kind: "RunShape", pure: true, bucket: 1, count: 598 },
     },
     {
       glyph: 0xffffffff,
@@ -281,6 +287,7 @@ test("decodes the pattern table the judge published", () => {
       denominator: 9812,
       shareBp: 12,
       books: 1,
+      usual: { kind: "Placement", class: "Space", count: 9700 },
     },
     {
       // Bytes 0..8 are the word hash, so this row names no glyph.
@@ -292,6 +299,7 @@ test("decodes the pattern table the judge published", () => {
       denominator: 40,
       shareBp: 500,
       books: 1,
+      usual: { kind: "Casing", form: "Lower", count: 38 },
     },
     {
       // The other word channel: the same hash lanes, a sigma key byte.
@@ -303,6 +311,7 @@ test("decodes the pattern table the judge published", () => {
       denominator: 128000,
       shareBp: 0,
       books: 1,
+      usual: { kind: "None" },
     },
     {
       // The third word channel: the same hash lanes, a key byte of 0 or 1.
@@ -314,6 +323,7 @@ test("decodes the pattern table the judge published", () => {
       denominator: 9000,
       shareBp: 1,
       books: 1,
+      usual: { kind: "None" },
     },
     {
       // Not a word channel: the letter rides the glyph field, and the key
@@ -326,6 +336,7 @@ test("decodes the pattern table the judge published", () => {
       denominator: 4000,
       shareBp: 2,
       books: 1,
+      usual: { kind: "None" },
     },
     {
       // The glyph is the whole key, so the key byte is zero like Rarity's —
@@ -338,6 +349,7 @@ test("decodes the pattern table the judge published", () => {
       denominator: 33338,
       shareBp: 1,
       books: 1,
+      usual: { kind: "None" },
     },
   ]);
   assert.throws(() => snapshot.pattern(10), FindingsSnapshotError);
@@ -353,16 +365,33 @@ test("decodes the pattern table the judge published", () => {
     [22, 2],   // books: past the snapshot's book count
     [22, 0],   // books: none, on a row with a numerator
   ]) {
-    const torn = hexFixture("corpus_v1_hygiene.hex");
+    const torn = hexFixture("corpus_v2_hygiene.hex");
     torn[start + offset] = byte;
     expectOpenFailure(torn);
   }
   // Channel 1 is a live channel; its key byte is a POOLS index.
-  const badPool = hexFixture("corpus_v1_hygiene.hex");
+  const badPool = hexFixture("corpus_v2_hygiene.hex");
   badPool[start + 2 * PATTERN_ROW_LEN + 9] = POOLS.length;
   expectOpenFailure(badPool);
 
-  const moved = hexFixture("corpus_v1_hygiene.hex");
+  // The usual lanes: a lane the channel does not use, then a value outside
+  // its channel's domain.
+  for (const [row, offset, value] of [
+    [2, PATTERN_USUAL_OFFSET, 1],         // PooledNeighbor uses no lane
+    [2, PATTERN_OTHER_COUNT_OFFSET, 1],
+    [4, PATTERN_OTHER_COUNT_OFFSET, 1],   // Placement's reversed lane
+    [4, PATTERN_USUAL_OFFSET, 4],         // Edge is never usual
+    [3, PATTERN_USUAL_OFFSET, 0x10],      // a run shape of length 0
+    [0, PATTERN_USUAL_OFFSET, 0x60],      // a rarity usual as itself
+    [0, PATTERN_USUAL_OFFSET, 0],         // "none", with a count
+    [5, PATTERN_USUAL_OFFSET, 4],         // Uncased
+  ]) {
+    const torn = hexFixture("corpus_v2_hygiene.hex");
+    new DataView(torn.buffer).setUint32(start + row * PATTERN_ROW_LEN + offset, value, true);
+    expectOpenFailure(torn);
+  }
+
+  const moved = hexFixture("corpus_v2_hygiene.hex");
   moved[HEADER_PATTERN_OFFSET_OFFSET] = 0xff;
   expectOpenFailure(moved);
 });

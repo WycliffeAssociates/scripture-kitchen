@@ -38,7 +38,7 @@ pub(crate) fn judge_corpus(corpus: &[&BookAggregate], config: &JudgingConfig, ou
         if config.channels.exact_neighbor
             && let Some(evidence) = evidence
         {
-            neighbors(*glyph, evidence, config, out);
+            neighbors(*glyph, evidence, &shapes, config, out);
         }
         if config.channels.pooled_neighbor
             && let Some(evidence) = evidence
@@ -188,6 +188,7 @@ pub(super) fn sentence_start(
         denominator: saturate(cased),
         share_bp: reported_share(lower, cased),
         books: handoffs.lower.books(),
+        usual: Usual::None,
     });
 }
 
@@ -207,6 +208,14 @@ pub(super) fn roster(
         if is_letter(glyph) && !letters {
             continue;
         }
+        let pool = pool_of_key(glyph);
+        let usual = most(
+            scalars
+                .iter()
+                .filter(|(other, _)| ![glyph, ScalarKey::NONE, ScalarKey::DIGITS].contains(other))
+                .filter(|(other, _)| pool_of_key(*other) == pool)
+                .map(|(other, tally)| (*other, tally.count)),
+        );
         out.push_pattern(Pattern {
             glyph,
             channel: Channel::Rarity,
@@ -216,6 +225,10 @@ pub(super) fn roster(
             denominator: saturate(total_scalars),
             share_bp: reported_share(tally.count, total_scalars),
             books: tally.books(),
+            usual: Usual::Rarity {
+                glyph: usual.map(|(other, _)| other),
+                count: usual.map_or(0, |(_, count)| saturate(count)),
+            },
         });
     }
 }
@@ -262,6 +275,13 @@ pub(super) fn placement(
         return;
     };
     for side in Side::ALL {
+        let (usual, usual_count) = most(
+            OuterClass::ALL
+                .into_iter()
+                .filter(|class| *class != OuterClass::Edge)
+                .map(|class| (class, marginals.sides[side as usize][class as usize].count)),
+        )
+        .expect("four classes are not Edge");
         for class in OuterClass::ALL {
             if class == OuterClass::Edge {
                 continue;
@@ -295,6 +315,10 @@ pub(super) fn placement(
                 denominator: saturate(marginals.denominator),
                 share_bp: reported_share(tally.count, marginals.denominator),
                 books: tally.books(),
+                usual: Usual::Placement {
+                    class: usual,
+                    count: saturate(usual_count),
+                },
             });
         }
     }
@@ -356,6 +380,13 @@ pub(super) fn run_shapes(
     let Some((band, ceiling)) = entitled(evidence.runs, config) else {
         return;
     };
+    let ((usual_pure, usual_bucket), usual_count) = most(
+        evidence
+            .shapes
+            .iter()
+            .map(|&(shape, tally)| (shape, tally.count)),
+    )
+    .expect("an entitled glyph sits in a run");
     for &((pure, bucket), tally) in &evidence.shapes {
         let share = share_bp(tally.count, evidence.runs);
         if share >= ceiling {
@@ -384,6 +415,11 @@ pub(super) fn run_shapes(
             denominator: saturate(evidence.runs),
             share_bp: reported_share(tally.count, evidence.runs),
             books: tally.books(),
+            usual: Usual::RunShape {
+                pure: usual_pure,
+                bucket: usual_bucket,
+                count: saturate(usual_count),
+            },
         });
     }
 }
@@ -393,12 +429,20 @@ pub(super) fn run_shapes(
 pub(super) fn neighbors(
     glyph: ScalarKey,
     evidence: &RunEvidence,
+    shapes: &FxHashMap<ScalarKey, RunEvidence>,
     config: &JudgingConfig,
     out: &mut Findings,
 ) {
     let Some((band, ceiling)) = entitled(evidence.positions, config) else {
         return;
     };
+    let (usual, usual_count) = most(
+        evidence
+            .neighbors
+            .iter()
+            .map(|&(neighbor, tally)| (neighbor, tally.count)),
+    )
+    .expect("an entitled glyph is followed in a run");
     for &(neighbor, tally) in &evidence.neighbors {
         let share = share_bp(tally.count, evidence.positions);
         if share >= ceiling {
@@ -413,8 +457,39 @@ pub(super) fn neighbors(
             denominator: saturate(evidence.positions),
             share_bp: reported_share(tally.count, evidence.positions),
             books: tally.books(),
+            usual: Usual::ExactNeighbor {
+                neighbor: usual,
+                count: saturate(usual_count),
+                reversed: saturate(followed(shapes, neighbor, glyph)),
+            },
         });
     }
+}
+
+/// In-run positions where `glyph` is followed by `neighbor`.
+fn followed(
+    shapes: &FxHashMap<ScalarKey, RunEvidence>,
+    glyph: ScalarKey,
+    neighbor: ScalarKey,
+) -> u64 {
+    shapes
+        .get(&glyph)
+        .and_then(|evidence| {
+            evidence
+                .neighbors
+                .binary_search_by_key(&neighbor, |entry| entry.0)
+                .ok()
+                .map(|at| evidence.neighbors[at].1.count)
+        })
+        .unwrap_or(0)
+}
+
+/// The key with the largest count, the smallest key on a tie.
+pub(super) fn most<K: Copy + Ord>(counts: impl Iterator<Item = (K, u64)>) -> Option<(K, u64)> {
+    counts.fold(None, |best, (key, count)| match best {
+        Some((held, most)) if most > count || (most == count && held < key) => best,
+        _ => Some((key, count)),
+    })
 }
 
 /// G2: which pool follows the glyph inside a run, against the same positions
@@ -442,6 +517,7 @@ pub(super) fn pooled_neighbors(
             denominator: saturate(evidence.positions),
             share_bp: reported_share(tally.count, evidence.positions),
             books: tally.books(),
+            usual: Usual::None,
         });
     }
 }

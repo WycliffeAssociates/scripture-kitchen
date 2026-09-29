@@ -623,6 +623,7 @@ mod tests {
             denominator: 1,
             share_bp: 10_000,
             books: 1,
+            usual: crate::judge::Usual::None,
         }
     }
 

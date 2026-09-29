@@ -401,7 +401,20 @@ mod tests {
 
     #[test]
     fn publication_matches_the_shared_golden_buffer() {
-        let golden: Vec<u8> = include_str!("../../../sous-chef/testdata/corpus_v1_utf16.hex")
+        // Regenerating is never a passing test, exactly as `UPDATE_GOLDENS` is.
+        if std::env::var_os("UPDATE_HEX").is_some() {
+            let hex: Vec<String> = fixture_publication()
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect();
+            let path = concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../sous-chef/testdata/corpus_v2_utf16.hex"
+            );
+            std::fs::write(path, format!("{}\n", hex.join(" "))).unwrap();
+            panic!("UPDATE_HEX rewrote corpus_v2_utf16.hex; rerun without it to test it");
+        }
+        let golden: Vec<u8> = include_str!("../../../sous-chef/testdata/corpus_v2_utf16.hex")
             .split_whitespace()
             .map(|byte| u8::from_str_radix(byte, 16).unwrap())
             .collect();

@@ -37,7 +37,7 @@ pub use input::{
 };
 pub use judge::{
     BandStep, Channel, Channels, DoublesPolicy, Explained, JudgingConfig, LetterRoster, Pattern,
-    PatternIndex, PatternKey, Side, Staircase, TerminalTable, books_touched, merged_follows,
+    PatternIndex, PatternKey, Side, Staircase, TerminalTable, Usual, books_touched, merged_follows,
 };
 pub use pass::{
     ChapterInput, ChapterKey, ChapterObs, ChapterPass, CorpusTotals, Findings, SchemaStamp,

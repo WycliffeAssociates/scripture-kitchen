@@ -401,6 +401,31 @@ channel whose span is not what matched it is `Doubled`, and for the same
 reason. Which atom the lane credits, and why the site rule must match it
 exactly, is [`sites.md`](sites.md).
 
+## What is usual instead
+
+A row says what is rare; `Pattern::usual` says what the corpus does instead,
+read from the same counts the row was judged on.
+
+```text
+en_ulb   ',' prev=Space            1/54,723    usual=Letter 54,427
+en_ulb   ''' then '.'              3/496       usual='"' 416, reversed 974  (`.'`)
+en_ulb   '"' mixed len 4           4/12,014    usual=pure len 1 6,157
+en_ulb   '’' rarity                2/4,112,852 usual='"' 12,046  (the Quote pool)
+```
+
+| channel | usual |
+| --- | --- |
+| `Placement` | the class most common on that side, `Edge` excluded |
+| `ExactNeighbor` | the most common in-run follower, and the row's pair reversed |
+| `RunShape` | the glyph's most common shape |
+| `Rarity` | the most common other scalar in the glyph's `Pool`, or none |
+| `Casing` | the word's most common form in the same free positions the row counts |
+| the rest | nothing: the row already says it |
+
+Ties go to the smallest value. A word row's usual form is judged per key like
+the row itself, so a kept verdict keeps it too. The wire lanes:
+[`codec/README.md`](codec/README.md).
+
 ## Dispersion
 
 `Pattern::books` is how many Target books hold part of that row's numerator,
@@ -482,7 +507,7 @@ moves every verdict.
 ## Where the row goes
 
 `Findings::push_pattern` takes it; patterns are corpus-level, so they are
-pushed either side of any `open_book`. The 24-byte wire row, the header's
+pushed either side of any `open_book`. The 36-byte wire row, the header's
 `pattern_count`/`pattern_offset`, and wire code 2 (`Convention`, which names a
 pattern from a site) are
 [`codec/README.md`](codec/README.md).

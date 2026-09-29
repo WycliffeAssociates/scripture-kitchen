@@ -214,3 +214,60 @@ fn a_run_that_recurs_exactly_leaves_the_run_shape_numerator() {
     let findings = judged(&texts, &JudgingConfig::default());
     assert_eq!(row(&findings), None, "every mixed pair recurs");
 }
+
+// ── What is usual instead ───────────────────────────────────────────────
+
+/// Each row names the corpus's own majority beside its minority.
+#[test]
+fn every_row_names_what_is_usual_instead() {
+    let texts = [format!(
+        "{}{}{}{}{} \u{2019}",
+        "a, b ".repeat(2_000),
+        "c ,d ".repeat(3),
+        "e.' ".repeat(975),
+        "f'. ".repeat(3),
+        "g'\" ".repeat(400),
+    )];
+    let config = JudgingConfig {
+        letters: LetterRoster::Never,
+        ..JudgingConfig::default()
+    };
+    let findings = judged(&texts, &config);
+    let usual = |glyph: char, key: PatternKey| {
+        findings
+            .patterns()
+            .iter()
+            .find(|row| row.glyph == ScalarKey::of(glyph) && row.key == key)
+            .map(|row| row.usual)
+    };
+    assert_eq!(
+        usual(
+            ',',
+            PatternKey::Placement {
+                side: Side::Prev,
+                class: OuterClass::Space
+            }
+        ),
+        Some(Usual::Placement {
+            class: OuterClass::Letter,
+            count: 2_000,
+        })
+    );
+    assert_eq!(
+        usual('\'', PatternKey::ExactNeighbor(ScalarKey::of('.'))),
+        Some(Usual::ExactNeighbor {
+            neighbor: ScalarKey::of('"'),
+            count: 400,
+            reversed: 975,
+        }),
+        "`'` is usually followed by `\"`, and `.'` is the swap of `'.`"
+    );
+    assert_eq!(
+        usual('\u{2019}', PatternKey::Rarity),
+        Some(Usual::Rarity {
+            glyph: Some(ScalarKey::of('\'')),
+            count: 1_378,
+        }),
+        "the most common other Quote"
+    );
+}

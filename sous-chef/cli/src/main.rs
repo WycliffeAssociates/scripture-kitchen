@@ -8,7 +8,7 @@
 //!   unpaired MRK target-only 2 source-only 0 ambiguous 0 partial-overlap 1
 //!   pattern[0] U+002C ',' placement next=Digit 12/9812 0.12% band 4 · 3/66 books 11 sites
 //!     site MRK 118..119
-//!   published 2 findings for 1 books (SOUS v1, UTF-16) to out.sous
+//!   published 2 findings for 1 books (SOUS v2, UTF-16) to out.sous
 //!   wrote 1 patterns and 11 sites to sites.html
 //! ```
 //!
@@ -35,9 +35,10 @@ use rustc_hash::FxHashMap;
 use sous_core::unicode::atoms::count_atoms;
 use sous_core::words::LETTER_RUN_MAX;
 use sous_core::{
-    AlignedUnit, Alignment, AlignmentFact, Brigade, ChapterPass, Corpus, FindingKind,
-    PackedFinding, Paired, Pattern, PatternKey, ProjectedBook, ScalarKey, SnapshotId,
-    SourceLengths, SourceVerse, SourceWords, TextRange, align, analyze_paired, source_lengths,
+    AlignedUnit, Alignment, AlignmentFact, Brigade, ChapterPass, Corpus, FORMAT_VERSION,
+    FindingKind, PackedFinding, Paired, Pattern, PatternKey, ProjectedBook, ScalarKey, SnapshotId,
+    SourceLengths, SourceVerse, SourceWords, TextRange, Usual, align, analyze_paired,
+    source_lengths,
 };
 use usage::Cli;
 use usfm_galley::sous::{OnionBook, OnionInputBook, publish_onion_findings};
@@ -192,7 +193,7 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             fs::write(path, &buffer)
                 .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
             eprintln!(
-                "published {} findings for {} books (SOUS v1, UTF-16) to {}",
+                "published {} findings for {} books (SOUS v{FORMAT_VERSION}, UTF-16) to {}",
                 findings.len(),
                 target_corpus.len(),
                 path.display()

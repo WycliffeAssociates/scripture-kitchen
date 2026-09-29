@@ -1,7 +1,7 @@
 //! The pattern table printed, each row with the sites it headlines.
 //!
 //! ```text
-//! pattern[0] U+002C ',' placement next=Digit 12/9812 0.12% band 4
+//! pattern[0] U+002C ',' placement next=Digit 12/9812 0.12% band 4 · 3/66 books 11 sites usual=Letter 54,620
 //!   site MRK 118..119
 //! ```
 
@@ -42,7 +42,7 @@ pub(crate) fn print_patterns(
             };
             let word = first_site_text(corpus, &sites[index]);
             println!(
-                "pattern[{index}] word #{hash:016x} {claim}{word} {}/{} {:.2}% band {} \u{b7} {}/{} books {} sites",
+                "pattern[{index}] word #{hash:016x} {claim}{word} {}/{} {:.2}% band {} \u{b7} {}/{} books {} sites{}",
                 pattern.numerator,
                 pattern.denominator,
                 f64::from(pattern.share_bp) / 100.0,
@@ -50,6 +50,7 @@ pub(crate) fn print_patterns(
                 pattern.books,
                 corpus.len(),
                 sites[index].len(),
+                usual(pattern),
             );
             print_sites(corpus, &sites[index], SHOWN);
             continue;
@@ -88,7 +89,7 @@ pub(crate) fn print_patterns(
             None => String::new(),
         };
         println!(
-            "pattern[{index}] {} {evidence} {}/{} {:.2}%{band} · {}/{} books {} sites",
+            "pattern[{index}] {} {evidence} {}/{} {:.2}%{band} · {}/{} books {} sites{}",
             glyph(pattern.glyph),
             pattern.numerator,
             pattern.denominator,
@@ -96,9 +97,58 @@ pub(crate) fn print_patterns(
             pattern.books,
             corpus.len(),
             sites[index].len(),
+            usual(pattern),
         );
         print_sites(corpus, &sites[index], SHOWN);
     }
+}
+
+/// What the row says is usual instead, or nothing when it carries none.
+fn usual(pattern: &Pattern) -> String {
+    match pattern.usual {
+        Usual::None => String::new(),
+        Usual::Placement { class, count } => {
+            format!(" usual={} {}", class.name(), grouped(count))
+        }
+        Usual::ExactNeighbor {
+            neighbor,
+            count,
+            reversed,
+        } => format!(
+            " usual={} {} reversed={}",
+            glyph(neighbor),
+            grouped(count),
+            grouped(reversed)
+        ),
+        Usual::RunShape {
+            pure,
+            bucket,
+            count,
+        } => format!(
+            " usual={} len {bucket} {}",
+            if pure { "pure" } else { "mixed" },
+            grouped(count)
+        ),
+        Usual::Rarity { glyph: None, .. } => " usual=none".to_string(),
+        Usual::Rarity {
+            glyph: Some(other),
+            count,
+        } => format!(" usual={} {}", glyph(other), grouped(count)),
+        Usual::Casing { form, count } => format!(" usual={} {}", form.name(), grouped(count)),
+    }
+}
+
+/// `54620` as `54,620`.
+pub(crate) fn grouped(count: u32) -> String {
+    let digits = count.to_string();
+    let mut out = String::new();
+    for (at, digit) in digits.chars().enumerate() {
+        if at > 0 && (digits.len() - at).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(digit);
+    }
+    out
 }
 
 /// A pattern's sites, capped, with a tail line for the rest.

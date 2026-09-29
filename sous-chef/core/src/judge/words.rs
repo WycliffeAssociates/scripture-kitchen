@@ -159,6 +159,7 @@ pub(super) fn letter_run(
             denominator: saturate(runs),
             share_bp: reported_share(count, runs),
             books: word_books(corpus, row.letter, &key, &TerminalTable::default()),
+            usual: Usual::None,
         });
     }
 }
@@ -290,6 +291,7 @@ pub(super) fn doubled_word(
             denominator: saturate(total),
             share_bp: reported_share(count, total),
             books: word_books(corpus, ScalarKey::NONE, &key, table),
+            usual: Usual::None,
         });
     }
 }
@@ -350,6 +352,13 @@ pub(super) fn casing_word(
     let Some((band, ceiling)) = entitled_words(total, config) else {
         return;
     };
+    let (usual, usual_count) = most(
+        Form::JUDGED
+            .iter()
+            .zip(free)
+            .map(|(form, count)| (*form, count)),
+    )
+    .expect("a word has judged forms");
     for (lane, form) in Form::JUDGED.iter().enumerate() {
         let count = free[lane];
         let share = share_bp(count, total);
@@ -369,6 +378,10 @@ pub(super) fn casing_word(
             denominator: saturate(total),
             share_bp: reported_share(count, total),
             books: word_books(corpus, ScalarKey::NONE, &key, table),
+            usual: Usual::Casing {
+                form: usual,
+                count: saturate(usual_count),
+            },
         });
     }
 }
@@ -416,6 +429,7 @@ pub(super) fn word_length(
             denominator: occurrences,
             share_bp: share_bp(count, u64::from(occurrences)),
             books: word_books(corpus, ScalarKey::NONE, &key, &TerminalTable::default()),
+            usual: Usual::None,
         });
     }
 }

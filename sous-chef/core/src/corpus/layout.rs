@@ -1,7 +1,7 @@
 //! The wire's byte offsets and magic numbers. Envelope layout: codec/README.md.
 
 pub const MAGIC: u32 = 0x5355_4f53; // ASCII "SOUS", little endian.
-pub const FORMAT_VERSION: u32 = 1;
+pub const FORMAT_VERSION: u32 = 2;
 pub const FLAG_UTF16: u32 = 1 << 0;
 pub const HEADER_BYTES: usize = 48;
 pub const DIRECTORY_ENTRY_BYTES: usize = 20;
@@ -27,7 +27,7 @@ pub const ID_PREFIX_BYTES: usize = 2;
 pub const SECTION_ALIGNMENT: usize = 4;
 /// One pattern-table row. A multiple of [`SECTION_ALIGNMENT`], so the record
 /// sections behind it stay aligned however many patterns fired.
-pub const PATTERN_ROW_LEN: usize = 24;
+pub const PATTERN_ROW_LEN: usize = 36;
 pub const PATTERN_GLYPH_OFFSET: usize = 0;
 pub const PATTERN_NEIGHBOR_OFFSET: usize = 4;
 pub const PATTERN_CHANNEL_OFFSET: usize = 8;
@@ -41,6 +41,10 @@ pub const PATTERN_SHARE_OFFSET: usize = 20;
 /// header's `book_count`.
 pub const PATTERN_BOOKS_OFFSET: usize = 22;
 pub const PATTERN_RESERVED_OFFSET: usize = 23;
+/// What is usual instead, per channel: codec/README.md.
+pub const PATTERN_USUAL_OFFSET: usize = 24;
+pub const PATTERN_USUAL_COUNT_OFFSET: usize = 28;
+pub const PATTERN_OTHER_COUNT_OFFSET: usize = 32;
 /// A band byte naming no staircase step, which is what `Rarity` carries.
 pub const PATTERN_BAND_NONE: u8 = 0xFF;
 /// The pooled digit lane's glyph value, [`ScalarKey::DIGITS`] on the wire.

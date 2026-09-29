@@ -1,7 +1,7 @@
 //! The publication and the corpus listings beside it.
 //!
 //! ```text
-//! published 2 findings for 1 books (SOUS v1, UTF-16) to out.sous
+//! published 2 findings for 1 books (SOUS v2, UTF-16) to out.sous
 //! ```
 
 use crate::*;
