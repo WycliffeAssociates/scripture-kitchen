@@ -183,14 +183,8 @@ pub(crate) fn judges_doubles(
     }
 }
 
-/// One row per case-folded word doubled under the word staircase, adjacent and
-/// punctuation-separated kept apart.
-///
-/// The denominator is the word's own occurrences — every one the corpus
-/// counted, forced or free, cased or not — so `vous vous` x300 against `vous`
-/// x9,000 is 3.3% and silent, while `the the` once against `the` x60,000 is
-/// 0.17 bp and fires. A word doubled every time it appears owns its whole
-/// denominator and never fires.
+/// One row per case-folded word doubled at all, adjacent and
+/// punctuation-separated kept apart, unless the word doubles habitually.
 ///
 /// The separated numerator sums only the glyphs `table` does NOT force: a
 /// separator that forces a capital ends one sentence and starts the next, so
@@ -253,7 +247,12 @@ pub(super) fn held_of(rows: &[WordTally], at: &mut usize, hash: u64) -> u64 {
     held
 }
 
-/// One word's two doubling lanes against its own occurrences.
+/// One word's two doubling lanes. Every doubling fires unless that key
+/// doubles at least `support_floor` times: `vous vous` x148 is the language,
+/// one `surface surface` is a slip whatever the word's frequency.
+///
+/// The denominator is the word's own occurrences, and the band is the word
+/// ladder's rung for it: context for a reader, not a gate.
 pub(super) fn doubled_word(
     corpus: &[&WordAggregate],
     row: &DoubleTally,
@@ -267,12 +266,11 @@ pub(super) fn doubled_word(
         return;
     }
     let total = held + u64::from(row.uncased);
-    let Some((band, ceiling)) = entitled_words(total, config) else {
+    let Some((band, _)) = config.word_bands.band_for(saturate(total)) else {
         return;
     };
     for (separated, count) in [(false, u64::from(row.bare)), (true, free_separated)] {
-        let share = share_bp(count, total);
-        if count == 0 || share >= ceiling {
+        if count == 0 || count >= u64::from(config.support_floor) {
             continue;
         }
         let key = PatternKey::Doubled {

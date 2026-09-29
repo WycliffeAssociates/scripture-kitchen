@@ -2,8 +2,8 @@
 
 use super::*;
 
-/// The recusal off, so a fixture whose point is the band is not answered by
-/// the corpus statistic instead.
+/// The recusal off, so a fixture whose point is one word's verdict is not
+/// answered by the corpus statistic instead.
 fn always(config: &JudgingConfig) -> JudgingConfig {
     JudgingConfig {
         doubles: DoublesPolicy::Always,
@@ -18,9 +18,8 @@ fn doubled_rows(books: &[Book], config: &JudgingConfig) -> Vec<Pattern> {
         .collect()
 }
 
-/// French `vous vous` is a construction, not a slip: 300 doublings against
-/// 9,000 uses is 3.3%, far above band 3's 10 basis points, so the word
-/// excuses itself against its own count and no allow-list is needed.
+/// French `vous vous` is a construction, not a slip: a word doubled
+/// `support_floor` times or more excuses itself, so no allow-list is needed.
 #[test]
 fn vous_vous_three_hundred_times_is_convention_and_silent() {
     let mut text = String::new();
@@ -37,8 +36,7 @@ fn vous_vous_three_hundred_times_is_convention_and_silent() {
     assert!(doubled_rows(&books, &always(&JudgingConfig::default())).is_empty());
 }
 
-/// The other half of the same rule: one `the the` against two thousand
-/// ordinary `the`s is 4 basis points and stays reviewable.
+/// The other half of the same rule: one `the the` stays reviewable.
 #[test]
 fn the_the_once_is_flagged_bare() {
     let mut text = "and the word ".repeat(2_000);
@@ -63,6 +61,59 @@ fn the_the_once_is_flagged_bare() {
     assert_eq!(rows[0].books, 1);
     // The span covers both words and nothing else.
     assert_eq!(sited(&books, &findings, Reasons::DOUBLED_BARE), ["the the"]);
+}
+
+/// A single doubling fires whatever the word's frequency: `surface` used 47
+/// times sits under `word_support_floor` and in a band a 2% share never
+/// reaches, and neither applies here.
+#[test]
+fn one_doubling_of_a_word_used_47_times_fires() {
+    let mut text = "and the surface ".repeat(45);
+    text.push_str("and the surface surface word");
+    let books = [book(b"GEN", text)];
+    let findings = analyzed(&books, &JudgingConfig::default());
+    let rows: Vec<Pattern> = findings
+        .patterns()
+        .iter()
+        .filter(|row| row.channel == Channel::Doubled)
+        .copied()
+        .collect();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        rows[0].key,
+        PatternKey::Doubled {
+            hash: hash_of("surface"),
+            separated: false,
+        }
+    );
+    assert_eq!((rows[0].numerator, rows[0].denominator), (1, 47));
+    assert_eq!(
+        sited(&books, &findings, Reasons::DOUBLED_BARE),
+        ["surface surface"]
+    );
+}
+
+/// The habit is an absolute count per key: four doublings fire, five are the
+/// language. The separated key keeps its own count.
+#[test]
+fn a_word_doubled_five_times_is_excused() {
+    let fixture = |bare: usize| {
+        let mut text = "w0 w1 w2 w3 ".repeat(100);
+        text.push_str(&"na na w1 ".repeat(bare));
+        text.push_str("na, na w1 ");
+        [book(b"MRK", text)]
+    };
+    let keys = |books: &[Book]| -> Vec<bool> {
+        doubled_rows(books, &always(&JudgingConfig::default()))
+            .iter()
+            .map(|row| match row.key {
+                PatternKey::Doubled { separated, .. } => separated,
+                _ => unreachable!("a doubled row"),
+            })
+            .collect()
+    };
+    assert_eq!(keys(&fixture(4)), [false, true]);
+    assert_eq!(keys(&fixture(5)), [true], "bare is a habit, separated is not");
 }
 
 /// `na, na` is a second key with its own denominator, never pooled with the

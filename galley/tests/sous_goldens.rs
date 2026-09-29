@@ -103,7 +103,7 @@ fn goldens_dir() -> PathBuf {
 #[test]
 fn the_three_publications_equal_their_goldens() {
     let published = publications();
-    let named: [(&str, &[u8]); 3] = [("cold", COLD), ("edit", EDIT), ("settings", KNOBS)];
+    let named: [(&str, &[u8]); 3] = [("cold", COLD), ("edit", EDIT), ("knobs", KNOBS)];
 
     if std::env::var_os("UPDATE_GOLDENS").is_some() {
         for ((name, _), bytes) in named.iter().zip(&published) {
@@ -211,7 +211,7 @@ fn the_knobs_golden_publishes_no_casing_row() {
 /// with nothing to notice.
 #[test]
 fn no_published_table_names_one_pattern_twice() {
-    for (name, buffer) in [("cold", COLD), ("edit", EDIT), ("settings", KNOBS)] {
+    for (name, buffer) in [("cold", COLD), ("edit", EDIT), ("knobs", KNOBS)] {
         let snapshot = CorpusSnapshot::open(buffer).expect("a corpus buffer");
         let patterns = snapshot.patterns().expect("a readable pattern table");
         assert!(!patterns.is_empty(), "{name}.bin publishes a table");
@@ -284,7 +284,7 @@ fn resident_bytes_is_pinned_across_the_three_publications() {
 
     assert_eq!(
         [cold, edit, settings],
-        [102_000, 109_889, 116_997],
+        [102_120, 110_009, 117_117],
         "resident bytes moved: cold, edit, settings"
     );
 }
