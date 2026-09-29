@@ -70,8 +70,8 @@ pub(crate) fn judge_corpus(corpus: &[&BookAggregate], config: &JudgingConfig, ou
 /// ')' opens 900 in-run pairs, 30 of them before ','
 ///   ')' leads: its ExactNeighbor is entitled
 ///   ', prev=Nonletter' drops the 30 `),` from its numerator and its sites
-/// '."\'"' occurs 27 times, at least support_floor
-///   it recurs: '" mixed len 4' drops those 27 runs
+/// `."'"` occurs 27 times, at least support_floor
+///   it recurs: '" mixed len 4' drops those 27 runs and their sites
 /// ```
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Explained {
