@@ -61,7 +61,7 @@ pub struct Expediter<P: ChapterPass> {
     /// word walk reads the terminal table to PLACE its rows and a table that
     /// moved elsewhere in the corpus decides this book's occurrences
     /// differently while its own text and firing set stand still.
-    sites: Store<RawChecksum, (FiringHash, TerminalHash, Box<[SiteRow]>)>,
+    sites: Store<RawChecksum, (FiringHash, EvidenceHash, Box<[SiteRow]>)>,
     /// One book's firing hash for the pattern table it was walked against:
     /// a table whose rows say the same thing fires the same set, whatever
     /// this publication's counts and numbering are.
@@ -162,7 +162,7 @@ mod tests;
 
 pub use keys::ObservationKey;
 
-use keys::{ChapterRow, ChapterSiteKey, FiringHash, PairKey, PatternRef, TableHash, TerminalHash};
+use keys::{ChapterRow, ChapterSiteKey, EvidenceHash, FiringHash, PairKey, PatternRef, TableHash};
 use pairing::pair_and_judge;
 use residency::{DEFAULT_GENERATIONS, DEFAULT_HOT_BOOKS};
 use siting::{SiteRow, projection, replay, site_by_chapter};
@@ -859,7 +859,7 @@ impl<P: ChapterPass + Sync> Expediter<P> {
                 table.len(),
                 "the judge names each pattern once"
             );
-            let terminals = TerminalHash::of(findings.terminals());
+            let evidence = EvidenceHash::of(findings.terminals(), findings.explained());
             let identity = TableHash::of(&table);
             let hot_ids: FxHashSet<&BookId> = hot.iter().collect();
             // Every key this publication's hot books name, hit or miss: what
@@ -887,7 +887,7 @@ impl<P: ChapterPass + Sync> Expediter<P> {
                         .map(|row| ChapterSiteKey {
                             chapter: row.observation,
                             firing: hash,
-                            terminals,
+                            evidence,
                         })
                         .collect(),
                     false => Vec::new(),
@@ -895,7 +895,7 @@ impl<P: ChapterPass + Sync> Expediter<P> {
                 named.extend(keys.iter().copied());
                 if let Some((seen, table, rows)) = sites.get(&checksum)
                     && *seen == hash
-                    && *table == terminals
+                    && *table == evidence
                 {
                     replay(book, rows, 0, &resolver, &mut findings);
                     // The pair step's projection, if it made one: this book is
@@ -934,7 +934,7 @@ impl<P: ChapterPass + Sync> Expediter<P> {
                     .iter()
                     .map(|row| SiteRow::of(row, &table))
                     .collect();
-                sites.insert(checksum, (hash, terminals, cached));
+                sites.insert(checksum, (hash, evidence, cached));
                 located += 1;
             }
             chapter_sites.keep_live(|key| named.contains(key));

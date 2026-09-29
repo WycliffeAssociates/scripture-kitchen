@@ -32,7 +32,7 @@ use divan::{
     counter::{BytesCount, ItemsCount},
 };
 use mise::unicode::lookup::{walk, walk_trie, walk_trie_swar};
-use sous_core::judge::{Pattern, PatternIndex};
+use sous_core::judge::{Explained, Pattern, PatternIndex};
 use sous_core::sites;
 use sous_core::substrate::{ChapterRow, Edge, Substrate, fold_book};
 use sous_core::{
@@ -332,7 +332,10 @@ fn substrate_reduce(bencher: Bencher, name: &str) {
 
 /// One book prepared for the rescan: its joined projected text, chapter rows,
 /// and its own firing set out of the corpus's judged table.
-type Prepared = Vec<(String, Vec<Chapter>, Vec<(PatternIndex, Pattern)>)>;
+type Prepared = (
+    Explained,
+    Vec<(String, Vec<Chapter>, Vec<(PatternIndex, Pattern)>)>,
+);
 
 /// A corpus's books as `sous-core` inputs; the bench owns the text.
 struct BenchBook {
@@ -399,8 +402,9 @@ static SITES: LazyLock<Vec<(&'static str, Prepared)>> = LazyLock::new(|| {
             let corpus = Corpus::try_new(&inputs).expect("a tier corpus is a valid input");
             let judged = analyze_with(&corpus, &Substrate, &JudgingConfig::default());
             let patterns = judged.patterns().to_vec();
+            let explained = judged.explained().clone();
 
-            let mut prepared: Prepared = Vec::new();
+            let mut prepared = Vec::new();
             let (mut needles, mut hits, mut found) = (Vec::new(), Vec::new(), Vec::new());
             for book in &inputs {
                 let counts = fold_book(
@@ -434,7 +438,7 @@ static SITES: LazyLock<Vec<(&'static str, Prepared)>> = LazyLock::new(|| {
                         .sum::<u64>(),
                 );
                 let mut out = Vec::new();
-                sites::locate(&book.text, &book.chapters, &table, &mut out);
+                sites::locate(&book.text, &book.chapters, &table, &explained, &mut out);
                 found.push(out.len());
                 prepared.push((book.text.clone(), book.chapters.clone(), table));
             }
@@ -446,7 +450,7 @@ static SITES: LazyLock<Vec<(&'static str, Prepared)>> = LazyLock::new(|| {
                 spread64(&mut hits),
                 spread(&mut found),
             );
-            (*name, prepared)
+            (*name, (explained, prepared))
         })
         .collect()
 });
@@ -484,7 +488,7 @@ fn prepared(name: &str) -> &'static Prepared {
 /// Counted per book, since what a keystroke pays is one book's locate.
 #[divan::bench(args = FILES)]
 fn sites_locate(bencher: Bencher, name: &str) {
-    let books = prepared(name);
+    let (explained, books) = prepared(name);
     let bytes: usize = books.iter().map(|(text, _, _)| text.len()).sum();
     bencher
         .counter(BytesCount::new(bytes))
@@ -494,7 +498,7 @@ fn sites_locate(bencher: Bencher, name: &str) {
             let mut total = 0;
             for (text, chapters, table) in books {
                 out.clear();
-                sites::locate(text, chapters, table, &mut out);
+                sites::locate(text, chapters, table, explained, &mut out);
                 total += out.len();
             }
             total

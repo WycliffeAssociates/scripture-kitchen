@@ -75,8 +75,8 @@ correctness bug, not a performance one.
 | `chapter_tables` | `RawChecksum` | the book's `(ObservationKey, start)` rows | any edit at all, markup included | rebuildable |
 | `aggregates` | `RawChecksum` | the book's `P::Aggregate`, book-index free | the same | rebuildable |
 | `firing` | `RawChecksum` | `(TableHash, FiringHash)` | the book's text, or the pattern table's CLAIMS | rebuildable |
-| `sites` | `RawChecksum` | `(FiringHash, TerminalHash, [SiteRow])` | the book's text, its firing set, or the corpus's terminal table | rebuildable |
-| `chapter_sites` | `(ObservationKey, FiringHash, TerminalHash)` | that chapter's rows, chapter-relative | any of those three | hot |
+| `sites` | `RawChecksum` | `(FiringHash, EvidenceHash, [SiteRow])` | the book's text, its firing set, or the corpus's terminal table or explained leaders | rebuildable |
+| `chapter_sites` | `(ObservationKey, FiringHash, EvidenceHash)` | that chapter's rows, chapter-relative | any of those three | hot |
 | `paired` | (target `RawChecksum`, source `RawChecksum`, words walked) | the book's ratios, presence rows, source-copy runs | either side's text, or the word walk switching on | rebuildable |
 | `verdicts` | (terminal table, judging config, doubling recusal) | the word channels' patterns | any of the three; otherwise only the delta's keys are re-judged | rebuildable |
 
@@ -90,11 +90,12 @@ Four rules generate that table, and each is one an earlier pass got wrong:
   publication's `PatternIndex` at replay.
 - **Both sides of a comparison.** `paired` keys on both raw checksums, because
   either side moving is a different sample.
-- **The evidence a walk reads, not only the text it walks.** `TerminalHash` is
+- **The evidence a walk reads, not only the text it walks.** `EvidenceHash` is
   in the site keys and NOT folded into `FiringHash`: the word walk reads the
-  corpus's terminal table to split free occurrences from forced, and a firing
-  set is position-blind about exactly that. The same rows fire while the table
-  decides differently which of their occurrences are free.
+  corpus's terminal table to split free occurrences from forced, the substrate
+  rescan reads `Findings::explained` to skip what a finer row already judges,
+  and a firing set is position-blind about both. The same rows fire while the
+  corpus decides differently which of their occurrences to site.
 - **A property of the entry, not a knob.** `paired`'s third key member is
   whether the source-copy words were WALKED — a pairing made without the walk
   holds no runs and cannot answer for one that wants them. `source_copy_min_run`

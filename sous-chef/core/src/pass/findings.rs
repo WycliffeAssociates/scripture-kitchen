@@ -22,6 +22,7 @@ pub struct Findings {
     rows: Vec<PackedFinding>,
     patterns: Vec<Pattern>,
     terminals: Option<TerminalTable>,
+    explained: Explained,
 }
 
 impl Findings {
@@ -33,6 +34,7 @@ impl Findings {
             rows: Vec::new(),
             patterns: Vec::new(),
             terminals: None,
+            explained: Explained::default(),
         }
     }
 
@@ -83,6 +85,16 @@ impl Findings {
 
     pub fn set_terminals(&mut self, table: TerminalTable) {
         self.terminals = Some(table);
+    }
+
+    /// What the firing rows leave to a finer judgment: corpus evidence the
+    /// substrate rescan reads so its sites agree with each row's numerator.
+    pub const fn explained(&self) -> &Explained {
+        &self.explained
+    }
+
+    pub fn set_explained(&mut self, explained: Explained) {
+        self.explained = explained;
     }
 
     /// Puts every row in publication order: stable by `(book_idx, from, to)`,

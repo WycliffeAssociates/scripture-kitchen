@@ -23,10 +23,17 @@ pub(crate) fn judge_corpus(corpus: &[&BookAggregate], config: &JudgingConfig, ou
         roster(&scalars, total_scalars, config, out);
     }
 
-    let placements = placement_evidence(corpus);
+    let explained = Explained::learn(corpus, config);
+    let placements = placement_evidence(corpus, &explained);
     let shapes = run_evidence(corpus);
     let handoffs = follow_evidence(corpus);
-    for (glyph, marginals) in &placements {
+    let other = OtherSide {
+        explained: &explained,
+        shapes: &shapes,
+        numbers: placements.numbers,
+    };
+    let mut cited = Explained::default();
+    for (glyph, marginals) in &placements.rows {
         let evidence = shapes.get(glyph);
         if config.channels.exact_neighbor
             && let Some(evidence) = evidence
@@ -44,7 +51,7 @@ pub(crate) fn judge_corpus(corpus: &[&BookAggregate], config: &JudgingConfig, ou
             run_shapes(*glyph, evidence, config, out);
         }
         if config.channels.placement {
-            placement(*glyph, marginals, config, out);
+            placement(*glyph, marginals, &other, config, &mut cited, out);
         }
         if config.channels.sentence_start
             && let Some(handoffs) = handoffs.get(glyph)
@@ -52,6 +59,68 @@ pub(crate) fn judge_corpus(corpus: &[&BookAggregate], config: &JudgingConfig, ou
             sentence_start(*glyph, handoffs, config, out);
         }
     }
+    cited.seal();
+    out.set_explained(cited);
+}
+
+/// Occurrences a finer judgment already accounts for, so a coarser row
+/// neither counts nor sites them.
+///
+/// ```text
+/// ')' opens 900 in-run pairs, 30 of them before ','
+///   ')' leads: its ExactNeighbor is entitled
+///   ', prev=Nonletter' drops the 30 `),` from its numerator and its sites
+/// ```
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Explained {
+    /// Glyphs whose ExactNeighbor is entitled, ascending.
+    leaders: Vec<ScalarKey>,
+}
+
+impl Explained {
+    /// Everything the corpus's counts explain, before any row is judged.
+    pub fn learn(corpus: &[&BookAggregate], config: &JudgingConfig) -> Self {
+        let mut out = Self::default();
+        if config.channels.exact_neighbor {
+            let mut positions: FxHashMap<ScalarKey, u64> = FxHashMap::default();
+            for book in corpus {
+                for (atoms, count) in book.runs() {
+                    for pair in atoms.windows(2) {
+                        *positions.entry(pair[0]).or_default() += u64::from(count);
+                    }
+                }
+            }
+            out.leaders = positions
+                .into_iter()
+                .filter(|&(_, positions)| entitled(positions, config).is_some())
+                .map(|(glyph, _)| glyph)
+                .collect();
+        }
+        out.seal();
+        out
+    }
+
+    /// Whether the in-run pairs `glyph` leads are ExactNeighbor's to judge.
+    pub fn leads(&self, glyph: ScalarKey) -> bool {
+        self.leaders.binary_search(&glyph).is_ok()
+    }
+
+    pub fn leaders(&self) -> &[ScalarKey] {
+        &self.leaders
+    }
+
+    fn seal(&mut self) {
+        self.leaders.sort_unstable();
+        self.leaders.dedup();
+    }
+}
+
+/// What a Placement row is judged against from the class it touches.
+pub(super) struct OtherSide<'a> {
+    explained: &'a Explained,
+    shapes: &'a FxHashMap<ScalarKey, RunEvidence>,
+    /// Digit occurrences that end a number, then that start one, by side.
+    numbers: [u64; 2],
 }
 
 /// The mirror of the terminal table, on the same counts: a glyph this corpus
@@ -146,10 +215,16 @@ pub(super) fn letters_are_rostered(scalars: &[(ScalarKey, Tally)], config: &Judg
 ///
 /// `Edge` counts in the denominator and fires nothing: a book boundary is a
 /// fact about the file, and the glyph is judged by its other side.
+///
+/// A row unusual from the glyph's side is then judged from the class's:
+/// a `Nonletter` row keeps only the occurrences no entitled leader judges,
+/// and a `Digit` row ordinary among number ends (or starts) is silent.
 pub(super) fn placement(
     glyph: ScalarKey,
     marginals: &PlacementEvidence,
+    other: &OtherSide<'_>,
     config: &JudgingConfig,
+    cited: &mut Explained,
     out: &mut Findings,
 ) {
     let Some((band, ceiling)) = entitled(marginals.denominator, config) else {
@@ -165,6 +240,21 @@ pub(super) fn placement(
             if tally.count == 0 || share >= ceiling {
                 continue;
             }
+            let tally = match class {
+                OuterClass::Nonletter => marginals.unexplained[side as usize],
+                OuterClass::Digit
+                    if ordinary(tally.count, other.numbers[side as usize], config) =>
+                {
+                    continue;
+                }
+                _ => tally,
+            };
+            if tally.count == 0 {
+                continue;
+            }
+            if class == OuterClass::Nonletter {
+                cite_leaders(glyph, side, other, cited);
+            }
             out.push_pattern(Pattern {
                 glyph,
                 channel: Channel::Placement,
@@ -177,6 +267,37 @@ pub(super) fn placement(
             });
         }
     }
+}
+
+/// Records the leaders a firing `Nonletter` row's sites skip.
+fn cite_leaders(glyph: ScalarKey, side: Side, other: &OtherSide<'_>, cited: &mut Explained) {
+    match side {
+        Side::Prev => cited.leaders.extend(
+            other
+                .shapes
+                .iter()
+                .filter(|(leader, _)| other.explained.leads(**leader))
+                .filter(|(_, evidence)| {
+                    evidence
+                        .neighbors
+                        .binary_search_by_key(&glyph, |entry| entry.0)
+                        .is_ok()
+                })
+                .map(|(leader, _)| *leader),
+        ),
+        Side::Next => {
+            if other.explained.leads(glyph) {
+                cited.leaders.push(glyph);
+            }
+        }
+    }
+}
+
+/// Whether `numerator / denominator` is at or over the band ceiling, on a
+/// denominator entitled to say so.
+pub(super) fn ordinary(numerator: u64, denominator: u64, config: &JudgingConfig) -> bool {
+    entitled(denominator, config)
+        .is_some_and(|(_, ceiling)| share_bp(numerator, denominator) >= ceiling)
 }
 
 /// G1: the shape of the runs one glyph appears in, against every run that
@@ -320,37 +441,63 @@ pub(crate) fn pool_of_key(key: ScalarKey) -> Pool {
     }
 }
 
+/// The outer class a pair records on one side of its glyph.
+pub(super) const fn class_on(key: PairKey, side: Side) -> OuterClass {
+    match side {
+        Side::Prev => key.prev(),
+        Side::Next => key.next(),
+    }
+}
+
 /// Books whose own counts hold part of `pattern`'s numerator, saturating at
 /// 255 — the dispersion on the row, recomputed from the retained aggregates.
 ///
 /// The judge counts this during the merge that produces the numerator; this
 /// is the same number for any pattern a host holds, and the oracle that merge
 /// is tested against. Books-possible is the publication's `book_count`.
-pub fn books_touched(corpus: &[&BookAggregate], pattern: &Pattern) -> u8 {
+pub fn books_touched(corpus: &[&BookAggregate], pattern: &Pattern, config: &JudgingConfig) -> u8 {
+    let explained = Explained::learn(corpus, config);
     let touched = corpus
         .iter()
-        .filter(|book| numerator_in(book, pattern) > 0)
+        .filter(|book| numerator_in(book, pattern, &explained) > 0)
         .count();
     u8::try_from(touched).unwrap_or(u8::MAX)
 }
 
 /// One book's own contribution to a pattern's numerator, in the unit that
 /// channel counts.
-pub(super) fn numerator_in(book: &BookAggregate, pattern: &Pattern) -> u64 {
+pub(super) fn numerator_in(book: &BookAggregate, pattern: &Pattern, explained: &Explained) -> u64 {
     match pattern.key {
-        PatternKey::Placement { side, class } => book
-            .pairs()
-            .iter()
-            .filter(|(key, _)| key.scalar() == pattern.glyph)
-            .filter(|(key, _)| {
-                class
-                    == match side {
-                        Side::Prev => key.prev(),
-                        Side::Next => key.next(),
-                    }
-            })
-            .map(|(_, count)| u64::from(*count))
-            .sum(),
+        PatternKey::Placement { side, class } => {
+            let occurrences: u64 = book
+                .pairs()
+                .iter()
+                .filter(|(key, _)| key.scalar() == pattern.glyph)
+                .filter(|(key, _)| class == class_on(*key, side))
+                .map(|(_, count)| u64::from(*count))
+                .sum();
+            if class != OuterClass::Nonletter {
+                return occurrences;
+            }
+            let judged: u64 = book
+                .runs()
+                .map(|(atoms, count)| {
+                    let pairs = atoms
+                        .windows(2)
+                        .filter(|pair| explained.leads(pair[0]))
+                        .filter(|pair| {
+                            pattern.glyph
+                                == match side {
+                                    Side::Prev => pair[1],
+                                    Side::Next => pair[0],
+                                }
+                        })
+                        .count() as u64;
+                    pairs * u64::from(count)
+                })
+                .sum();
+            occurrences - judged
+        }
         PatternKey::RunShape { pure, bucket } => book
             .runs()
             .filter(|(atoms, _)| atoms.contains(&pattern.glyph))
@@ -409,6 +556,16 @@ pub(super) fn numerator_in(book: &BookAggregate, pattern: &Pattern) -> u64 {
 pub(super) struct PlacementEvidence {
     denominator: u64,
     sides: [[Tally; OuterClass::ALL.len()]; Side::ALL.len()],
+    /// The `Nonletter` tally per side, less the pairs an entitled leader judges.
+    unexplained: [Tally; Side::ALL.len()],
+}
+
+/// Every glyph's marginals, and the digit edges a `Digit` row is judged against.
+pub(super) struct PlacementTable {
+    /// Ascending by glyph.
+    rows: Vec<(ScalarKey, PlacementEvidence)>,
+    /// Digit occurrences that end a number, then that start one, by side.
+    numbers: [u64; Side::ALL.len()],
 }
 
 /// One glyph's run history: which shapes hold it, and what follows it inside
@@ -454,21 +611,62 @@ pub(super) fn follow_evidence(corpus: &[&BookAggregate]) -> FxHashMap<ScalarKey,
 }
 
 /// Every book's pairs into one glyph-keyed table, ascending by glyph.
-pub(super) fn placement_evidence(corpus: &[&BookAggregate]) -> Vec<(ScalarKey, PlacementEvidence)> {
+///
+/// An in-run pair is a `Nonletter` pair on both members, so the subtraction
+/// never goes below zero.
+pub(super) fn placement_evidence(
+    corpus: &[&BookAggregate],
+    explained: &Explained,
+) -> PlacementTable {
     let mut out: FxHashMap<ScalarKey, PlacementEvidence> = FxHashMap::default();
+    let mut numbers = [0u64; Side::ALL.len()];
+    let mut nonletter: FxHashMap<ScalarKey, [u64; Side::ALL.len()]> = FxHashMap::default();
     for (book, aggregate) in corpus.iter().enumerate() {
         let book = book as u32;
+        nonletter.clear();
         for &(key, count) in aggregate.pairs() {
             let count = u64::from(count);
             let evidence = out.entry(key.scalar()).or_default();
             evidence.denominator += count;
-            evidence.sides[Side::Prev as usize][key.prev() as usize].add(count, book);
-            evidence.sides[Side::Next as usize][key.next() as usize].add(count, book);
+            for side in Side::ALL {
+                let class = class_on(key, side);
+                evidence.sides[side as usize][class as usize].add(count, book);
+                if class == OuterClass::Nonletter {
+                    nonletter.entry(key.scalar()).or_default()[side as usize] += count;
+                }
+            }
+            if key.scalar().is_digits() {
+                if key.next() != OuterClass::Digit {
+                    numbers[Side::Prev as usize] += count;
+                }
+                if key.prev() != OuterClass::Digit {
+                    numbers[Side::Next as usize] += count;
+                }
+            }
+        }
+        for (atoms, count) in aggregate.runs() {
+            let count = u64::from(count);
+            for pair in atoms.windows(2).filter(|pair| explained.leads(pair[0])) {
+                for (glyph, side) in [(pair[1], Side::Prev), (pair[0], Side::Next)] {
+                    let left = &mut nonletter.get_mut(&glyph).expect("a run atom has pairs")
+                        [side as usize];
+                    debug_assert!(*left >= count, "an in-run pair is a Nonletter pair");
+                    *left -= count;
+                }
+            }
+        }
+        for (glyph, counts) in &nonletter {
+            let evidence = out.get_mut(glyph).expect("counted above");
+            for side in Side::ALL {
+                if counts[side as usize] > 0 {
+                    evidence.unexplained[side as usize].add(counts[side as usize], book);
+                }
+            }
         }
     }
     let mut rows: Vec<(ScalarKey, PlacementEvidence)> = out.into_iter().collect();
     rows.sort_unstable_by_key(|row| row.0);
-    rows
+    PlacementTable { rows, numbers }
 }
 
 /// Every run's contribution to every glyph it holds, book by book so the

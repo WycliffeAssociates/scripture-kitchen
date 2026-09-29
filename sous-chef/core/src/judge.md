@@ -15,9 +15,10 @@ Judging reads the `BookAggregate`s and keeps nothing.
 ## The channels
 
 A pattern is `(channel, glyph, key)`. Each channel judges on its own
-denominator, and the channels are independent — a glyph may fire on three of
-them at once, and D2b unions the patterns one run matches into a single
-finding.
+denominator, and a glyph may fire on three of them at once; D2b unions the
+patterns one run matches into a single finding. What the channels do not do
+is count one occurrence twice: **an entitled finer judgment is not counted
+again by a coarser row** ([Both sides](#both-sides)).
 
 | channel | grain | numerator | denominator |
 | --- | --- | --- | --- |
@@ -71,9 +72,9 @@ that nothing is wrong.
 The ladder is **finest-entitled-first**, G3 → G2 → G1 → G0, and what it rules is
 that *abstention is not silence*. A glyph whose finest channel abstains is
 still judged at the next coarser grain, so the corpus's answer falls back to a
-coarser comparison rather than disappearing. Because the channels are
-independent, a glyph whose G3 *was* entitled still gets G1 and G0 judged too;
-the ladder decides only that an abstention does not end the question.
+coarser comparison rather than disappearing. A glyph whose G3 *was* entitled
+still gets G1 and G0 judged too, less the occurrences G3 already owns; the
+ladder decides only that an abstention does not end the question.
 
 Worked example — a strange `` ,` `` pair against five thousand ordinary
 commas:
@@ -94,6 +95,51 @@ Rarity '`'   corpus count 1 < rarity_floor 5             → rostered
 The pair is reviewable through the rare member and through the run shape. The
 comma's own exact-pair evidence was never entitled, and that is a fact about
 the opportunity set, not a verdict.
+
+## Both sides
+
+A `Placement` row asks one side: of every `.`, how many follow a digit. A row
+unusual from the glyph's side is then asked from the class it touches, and
+fires only if it is unusual there too.
+
+```text
+en_ulb   ',' prev=Nonletter    103/54,723 = 18 bp, band 4's ceiling is 30
+   the mark before: ')' 97, ''' 4, '"' 1, '?' 1, each an entitled leader
+   103 - 103 judged by ExactNeighbor = 0                  -> SILENT
+en_ulb   '.' prev=Digit        116/38,776 = 29 bp, under 30
+   number ends: 116 of 566 digits followed by a non-digit = 2,049 bp
+   band 2's ceiling is 300 bp; ordinary among numbers     -> SILENT
+'(1'     digits prev=Nonletter
+   a digit is not a run atom, so no ExactNeighbor saw it  -> stays with Placement
+```
+
+| class it touches | the other side |
+| --- | --- |
+| `Nonletter` | the in-run pair's leader: `g`'s neighbour for `prev`, `g` itself for `next` |
+| `Digit` | `ScalarKey::DIGITS` occurrences whose `next` (for `prev`) or `prev` (for `next`) is not a digit |
+| `Letter`, `Space` | none: the fleet shows the check never clears one |
+
+- **`Nonletter` subtracts.** An in-run pair whose leader's ExactNeighbor is
+  entitled (its in-run positions reach `support_floor`) leaves the numerator,
+  whether or not that row fired: a fired row already reports the pair, and an
+  unfired one found it ordinary. An unentitled leader leaves the pair with
+  Placement, so abstention still falls back. With `channels.exact_neighbor`
+  off nothing judges the pair and nothing is subtracted.
+- **`Digit` silences.** The whole row is ordinary when its numerator over the
+  number ends (or starts) is at or over that denominator's band ceiling, on an
+  entitled denominator.
+- **The denominator never moves.** An explained occurrence is still an
+  occurrence of `g`.
+- **The glyph's side decides first.** The other side only removes: a row
+  ordinary from `g`'s side never fires because a subtraction made it small.
+  A row whose numerator reaches 0 is silent; one that fires reports what is
+  left, and `books` counts the books holding what is left.
+
+The rescan must site exactly what is left, and a firing set cannot say which
+occurrences that is, so `Substrate::judge` publishes [`Explained`] into the
+sink beside the pattern table: the entitled leaders the firing `Nonletter`
+rows skip. `sites::locate` reads it, and a host keys its site caches on it
+(`galley`'s `EvidenceHash`).
 
 ## The terminal table
 

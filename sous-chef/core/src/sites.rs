@@ -4,15 +4,15 @@
 //! ```text
 //! firing(MRK's counts, table, &mut set)     → [0, 1]    // both glyphs are in MRK
 //! locate("He said ,go. Yes`", [0..17], [(0, ',' placement prev=Space),
-//!                                       (1, '`' rarity)], &mut out)
+//!                                       (1, '`' rarity)], explained, &mut out)
 //!   → Site { span:  8..9,  headline: 0, reasons: PlacementBefore }
 //!     Site { span: 16..17, headline: 1, reasons: Rarity }
 //! ```
 //!
 //! A judged pattern is a corpus fact with no coordinates; this is the one step
 //! that reads text to place it. The counts already decided *what* is anomalous,
-//! so a rescan may only agree with them — every occurrence the walk counted for
-//! a pattern's key is one this module finds, which is what
+//! so a rescan may only agree with them — every occurrence a row's numerator
+//! counts is one this module finds, which is what
 //! `tests/sites_agree_with_counts.rs` pins.
 //!
 //! The engine, the cursor's seam semantics, and the one-row-per-run rule:
@@ -20,7 +20,7 @@
 
 use memchr::memmem::Finder;
 
-use crate::judge::{Channel, Pattern, PatternIndex, PatternKey, Side, pool_of_key};
+use crate::judge::{Channel, Explained, Pattern, PatternIndex, PatternKey, Side, pool_of_key};
 use crate::substrate::{BookAggregate, OuterClass, RUN_BUCKETS, ScalarKey, is_run_atom};
 use mise::unicode::class_of;
 
@@ -69,27 +69,30 @@ pub fn firing(book: &BookAggregate, patterns: &[Pattern], out: &mut Vec<PatternI
 /// coordinates, ordered by chapter and then by offset.
 ///
 /// `patterns` is the book's own firing set from [`firing`], each row paired
-/// with its position in the publication's table.
+/// with its position in the publication's table; `explained` is the
+/// publication's [`Findings::explained`](crate::Findings::explained).
 pub fn locate(
     text: &str,
     chapters: &[Chapter],
     patterns: &[(PatternIndex, Pattern)],
+    explained: &Explained,
     out: &mut Vec<Site>,
 ) {
     let mut tally = Vec::new();
-    locate_counted(text, chapters, patterns, out, &mut tally);
+    locate_counted(text, chapters, patterns, explained, out, &mut tally);
 }
 
 /// [`locate`], plus the matching occurrences behind each pattern,
 /// index-aligned with `patterns`.
 ///
 /// The oracle behind "sites agree with counts": an occurrence here is what the
-/// walk counted for that pattern's key — a run for `RunShape`, an in-run
-/// position for `ExactNeighbor`, an occurrence of the glyph otherwise.
+/// row's numerator counted — a run for `RunShape`, an in-run position for
+/// `ExactNeighbor`, an occurrence of the glyph otherwise.
 pub fn locate_counted(
     text: &str,
     chapters: &[Chapter],
     patterns: &[(PatternIndex, Pattern)],
+    explained: &Explained,
     out: &mut Vec<Site>,
     tally: &mut Vec<u64>,
 ) {
@@ -153,6 +156,7 @@ pub fn locate_counted(
                     own,
                     index,
                     &cursor,
+                    explained,
                     out,
                     tally,
                 );
@@ -178,7 +182,7 @@ pub fn locate_counted(
                     continue;
                 };
                 for &slot in &needle.patterns {
-                    let count = occurrences(&patterns[slot].1, key, &atoms, &cursor);
+                    let count = occurrences(&patterns[slot].1, key, &atoms, &cursor, explained);
                     if count > 0 {
                         matched.push((slot, count));
                     }
@@ -249,6 +253,7 @@ fn lone(
     own: TextRange,
     chapter: usize,
     cursor: &Cursor<'_>,
+    explained: &Explained,
     out: &mut Vec<Site>,
     tally: &mut [u64],
 ) {
@@ -263,7 +268,7 @@ fn lone(
             )
         })
         .filter_map(|&slot| {
-            let count = occurrences(&patterns[slot].1, needle.glyph, &atoms, cursor);
+            let count = occurrences(&patterns[slot].1, needle.glyph, &atoms, cursor, explained);
             (count > 0).then_some((slot, count))
         })
         .collect();
@@ -328,23 +333,33 @@ fn rung(pattern: &Pattern) -> Reasons {
     }
 }
 
-/// How many of this pattern's key the run holds — the same unit the walk
-/// counted, so the two numbers may be compared directly.
+/// How many of this pattern's key the run holds — the same unit the judge
+/// counted into the row's numerator, so the two numbers may be compared.
 fn occurrences(
     pattern: &Pattern,
     glyph: ScalarKey,
     atoms: &[(u32, ScalarKey)],
     cursor: &Cursor<'_>,
+    explained: &Explained,
 ) -> u64 {
     match pattern.key {
         // A glyph's neighbours inside a run are `Nonletter`; only the run's
         // first and last members can see anything else.
         PatternKey::Placement { side, class } => atoms
             .iter()
-            .filter(|atom| atom.1 == glyph)
-            .filter(|atom| match side {
+            .enumerate()
+            .filter(|(_, atom)| atom.1 == glyph)
+            .filter(|(_, atom)| match side {
                 Side::Prev => cursor.prev_outer(atom.0) == class,
                 Side::Next => cursor.next_outer(atom.0) == class,
+            })
+            .filter(|&(at, _)| {
+                // An in-run pair whose leader is entitled is ExactNeighbor's.
+                let leader = match side {
+                    Side::Prev => at.checked_sub(1),
+                    Side::Next => (at + 1 < atoms.len()).then_some(at),
+                };
+                !leader.is_some_and(|leader| explained.leads(atoms[leader].1))
             })
             .count() as u64,
         PatternKey::RunShape { pure, bucket } => {
@@ -636,7 +651,7 @@ mod tests {
             .map(|(at, row)| (PatternIndex::new(at as u16), *row))
             .collect();
         let mut out = Vec::new();
-        locate(text, chapters, &table, &mut out);
+        locate(text, chapters, &table, &Explained::default(), &mut out);
         out.iter()
             .map(|site| {
                 (
@@ -685,6 +700,76 @@ mod tests {
                 &[placement(',', Side::Prev, OuterClass::Letter)]
             ),
             vec![(1, 2, 0, Reasons::PLACEMENT_BEFORE.bits())]
+        );
+    }
+
+    /// What `text`'s own counts explain at `support_floor`.
+    fn explained_by(text: &str, support_floor: u32) -> Explained {
+        let counts = crate::substrate::fold_book(
+            &[crate::ChapterObs {
+                start: 0,
+                obs: &crate::substrate::walk::walk(text, &[]),
+            }],
+            &mut crate::substrate::Edge::default(),
+        );
+        let config = crate::JudgingConfig {
+            support_floor,
+            ..crate::JudgingConfig::default()
+        };
+        Explained::learn(&[&counts], &config)
+    }
+
+    fn found_with(
+        text: &str,
+        rows: &[Pattern],
+        explained: &Explained,
+    ) -> (Vec<(u32, u32)>, Vec<u64>) {
+        let table: Vec<(PatternIndex, Pattern)> = rows
+            .iter()
+            .enumerate()
+            .map(|(at, row)| (PatternIndex::new(at as u16), *row))
+            .collect();
+        let (mut out, mut tally) = (Vec::new(), Vec::new());
+        locate_counted(text, &whole(text), &table, explained, &mut out, &mut tally);
+        let spans = out
+            .iter()
+            .map(|site| (site.span.from(), site.span.to()))
+            .collect();
+        (spans, tally)
+    }
+
+    /// `)` leads two in-run pairs and `]` one, so at a floor of two only the
+    /// `],` is Placement's to site.
+    #[test]
+    fn a_placement_row_skips_pairs_an_entitled_leader_judges() {
+        let text = "a), x), b], c";
+        let explained = explained_by(text, 2);
+        assert!(explained.leads(ScalarKey::of(')')));
+        assert!(!explained.leads(ScalarKey::of(']')));
+        assert_eq!(
+            found_with(
+                text,
+                &[placement(',', Side::Prev, OuterClass::Nonletter)],
+                &explained
+            ),
+            (vec![(9, 11)], vec![1])
+        );
+        assert_eq!(
+            found_with(
+                text,
+                &[placement(')', Side::Next, OuterClass::Nonletter)],
+                &explained
+            ),
+            (Vec::new(), vec![0]),
+            "every mark after `)` is `)`'s own ExactNeighbor"
+        );
+        assert_eq!(
+            found_with(
+                text,
+                &[placement(']', Side::Next, OuterClass::Nonletter)],
+                &explained
+            ),
+            (vec![(9, 11)], vec![1])
         );
     }
 

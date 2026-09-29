@@ -5,17 +5,18 @@ with no coordinates ([`judge.md`](judge.md)); this module rescans each Target
 book's current text for the patterns that fired *and* occur in it, and turns
 each matching run into one `Convention` row.
 
-It may only agree with the counts. Every occurrence the substrate walk counted
-for a pattern's key is one this module finds, and
-`tests/sites_agree_with_counts.rs` is that equality over a synthetic sweep and,
-ignored, over every chapter of the 8-corpus tier.
+It may only agree with the counts. Every occurrence the judge counted into a
+row's numerator is one this module finds, and
+`tests/sites_agree_with_counts.rs` is that equality, per book and summed
+against each row's numerator, over a synthetic sweep and, ignored, over every
+chapter of the 8-corpus tier.
 
 ## Two calls, and why they are separate
 
 ```text
 firing(book counts, the corpus's pattern table, &mut set)
   → the table positions whose glyph THIS book holds
-locate(text, chapters, set as (index, pattern) rows, &mut sites)
+locate(text, chapters, set as (index, pattern) rows, explained, &mut sites)
   → one Site per matching run, in chapter then offset order
 ```
 
@@ -27,11 +28,12 @@ some other book's counts moved rescans nothing. It is also the shape of "a book
 without the glyph reads no text" — the counts answer, and the text is never
 opened.
 
-Those two parts are the whole key for the SUBSTRATE's rows, which are a
-function of the book's own text and nothing else. The word channels read a
-third thing to place a row — the corpus's terminal table decides which
-occurrences of a firing pattern are free — so the Expediter's key carries that
-table's hash beside these two (`galley/src/sous/expediter.md`).
+Those two parts are not the whole key. Both passes read corpus evidence to
+place a row: the word channels read the terminal table, which decides which
+occurrences of a firing pattern are free, and the substrate reads
+`Findings::explained`, which names the occurrences a finer row already judges
+(judge.md, "Both sides"). The Expediter's key carries both in one hash beside
+these two (`galley/src/sous/expediter.md`).
 
 ## The engine
 
@@ -91,7 +93,7 @@ every firing glyph the run contains is tested:
 
 | channel | matches when | occurrences counted |
 | --- | --- | --- |
-| `Placement{side, class}` | an occurrence of `g` in the run sees `class` on `side` | those occurrences |
+| `Placement{side, class}` | an occurrence of `g` in the run sees `class` on `side` | those occurrences, less in-run pairs an `Explained` leader leads |
 | `RunShape{pure, bucket}` | the run's own shape is that | one, the run |
 | `ExactNeighbor(n)` | some occurrence of `g` is immediately followed by `n` | those positions |
 | `PooledNeighbor(p)` | some occurrence of `g` is immediately followed by an atom of pool `p` | those positions |

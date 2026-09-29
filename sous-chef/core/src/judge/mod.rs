@@ -21,7 +21,9 @@ use rustc_hash::FxHashMap;
 
 use crate::pass::Findings;
 use crate::proportionality::LengthConfig;
-use crate::substrate::{BookAggregate, Case, FollowCounts, OuterClass, RUN_BUCKETS, ScalarKey};
+use crate::substrate::{
+    BookAggregate, Case, FollowCounts, OuterClass, PairKey, RUN_BUCKETS, ScalarKey,
+};
 use mise::unicode::class_of;
 
 use crate::unicode::{Pool, pool_of};
@@ -42,7 +44,7 @@ pub use config::{
     BandStep, Channels, DoublesPolicy, JudgingConfig, LetterRoster, Staircase, config_stamp,
 };
 pub use pattern::{Channel, Pattern, PatternIndex, PatternKey, Side};
-pub use scalars::books_touched;
+pub use scalars::{Explained, books_touched};
 pub(crate) use scalars::{judge_corpus, pool_of_key, share_bp};
 use scalars::{reported_share, saturate};
 use terminals::seek;

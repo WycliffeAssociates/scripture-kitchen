@@ -11,7 +11,7 @@
 //! equality over the committed corpus tier, where real glue, combining
 //! sequences, and chapter seams are.
 
-use sous_core::judge::{Channel, Pattern, PatternIndex, PatternKey, Side};
+use sous_core::judge::{Channel, Explained, Pattern, PatternIndex, PatternKey, Side};
 use sous_core::sites;
 use sous_core::substrate::{
     BookAggregate, Case, Edge, OuterClass, RUN_BUCKETS, ScalarKey, fold_book,
@@ -98,24 +98,46 @@ fn aggregate(book: &Book) -> BookAggregate {
     fold_book(&view, &mut Edge::default())
 }
 
-/// What the walk counted for one pattern's key in one book — the same unit
-/// `sites::locate_counted` reports.
-fn counted(book: &BookAggregate, pattern: &Pattern) -> u64 {
+/// What the walk counted for one pattern's key in one book, less what
+/// `explained` leaves to a finer row — the same unit `sites::locate_counted`
+/// reports.
+fn counted(book: &BookAggregate, pattern: &Pattern, explained: &Explained) -> u64 {
     let glyph = pattern.glyph;
     match pattern.key {
-        PatternKey::Placement { side, class } => book
-            .pairs()
-            .iter()
-            .filter(|(key, _)| key.scalar() == glyph)
-            .filter(|(key, _)| {
-                class
-                    == match side {
-                        Side::Prev => key.prev(),
-                        Side::Next => key.next(),
-                    }
-            })
-            .map(|(_, count)| u64::from(*count))
-            .sum(),
+        PatternKey::Placement { side, class } => {
+            let occurrences: u64 = book
+                .pairs()
+                .iter()
+                .filter(|(key, _)| key.scalar() == glyph)
+                .filter(|(key, _)| {
+                    class
+                        == match side {
+                            Side::Prev => key.prev(),
+                            Side::Next => key.next(),
+                        }
+                })
+                .map(|(_, count)| u64::from(*count))
+                .sum();
+            let judged: u64 = book
+                .runs()
+                .map(|(atoms, count)| {
+                    let pairs = atoms
+                        .windows(2)
+                        .filter(|pair| explained.leads(pair[0]))
+                        .filter(|pair| match side {
+                            Side::Prev => pair[1] == glyph,
+                            Side::Next => pair[0] == glyph,
+                        })
+                        .count() as u64;
+                    pairs * u64::from(count)
+                })
+                .sum();
+            if class == OuterClass::Nonletter {
+                occurrences - judged
+            } else {
+                occurrences
+            }
+        }
         PatternKey::RunShape { pure, bucket } => book
             .runs()
             .filter(|(atoms, _)| atoms.contains(&glyph))
@@ -171,13 +193,16 @@ fn counted(book: &BookAggregate, pattern: &Pattern) -> u64 {
 }
 
 /// Judges the corpus, then compares every book's rescan against its own
-/// counts. Returns `(books, patterns compared, occurrences compared)`.
+/// counts, and every row's numerator against its sites summed over books.
+/// Returns `(books, patterns compared, occurrences compared)`.
 fn agree(books: &[Book], config: &JudgingConfig) -> (usize, usize, u64) {
     let corpus = Corpus::try_new(books).expect("a synthetic corpus is valid");
     let findings = analyze_with(&corpus, &Substrate, config);
     let patterns = findings.patterns().to_vec();
+    let explained = findings.explained();
     let mut compared = 0;
     let mut occurrences = 0;
+    let mut sited = vec![0u64; patterns.len()];
 
     for (index, projected) in corpus.iter() {
         let counts = aggregate(&books[index.get() as usize]);
@@ -189,10 +214,18 @@ fn agree(books: &[Book], config: &JudgingConfig) -> (usize, usize, u64) {
             .collect();
         let chapters: Vec<Chapter> = projected.chapters().collect();
         let (mut found, mut tally) = (Vec::new(), Vec::new());
-        sites::locate_counted(projected.text(), &chapters, &table, &mut found, &mut tally);
+        sites::locate_counted(
+            projected.text(),
+            &chapters,
+            &table,
+            explained,
+            &mut found,
+            &mut tally,
+        );
 
         for ((at, pattern), rescanned) in table.iter().zip(&tally) {
-            let walked = counted(&counts, pattern);
+            sited[usize::from(at.get())] += rescanned;
+            let walked = counted(&counts, pattern, explained);
             assert_eq!(
                 *rescanned,
                 walked,
@@ -209,8 +242,17 @@ fn agree(books: &[Book], config: &JudgingConfig) -> (usize, usize, u64) {
         // A pattern the book's counts do not hold has nothing to find.
         for pattern in &patterns {
             if !table.iter().any(|(_, held)| held == pattern) {
-                assert_eq!(counted(&counts, pattern), 0, "an absent glyph counts zero");
+                assert_eq!(
+                    counted(&counts, pattern, explained),
+                    0,
+                    "an absent glyph counts zero"
+                );
             }
+        }
+    }
+    for (pattern, sited) in patterns.iter().zip(&sited) {
+        if !pattern.channel.judged_by_words() {
+            assert_eq!(*sited, u64::from(pattern.numerator), "{pattern:?}");
         }
     }
     (books.len(), compared, occurrences)

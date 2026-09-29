@@ -64,7 +64,11 @@ fn books_touched_is_the_oracle_for_the_merge_time_count() {
     );
     let mut dispersed = 0;
     for pattern in findings.patterns() {
-        assert_eq!(books_touched(&views, pattern), pattern.books, "{pattern:?}");
+        assert_eq!(
+            books_touched(&views, pattern, &config),
+            pattern.books,
+            "{pattern:?}"
+        );
         dispersed += usize::from(pattern.books > 1);
     }
     assert!(dispersed > 0, "no pattern reached two books");
@@ -79,4 +83,106 @@ fn a_ten_million_count_corpus_does_not_wrap() {
     assert_eq!(share_bp(u64::MAX, 1), 10_000);
     assert_eq!(saturate(u64::from(u32::MAX) + 1), u32::MAX);
     assert_eq!(saturate(10_000_000), 10_000_000);
+}
+
+// ── Both sides ──────────────────────────────────────────────────────────
+
+/// Judges one book per text under `config`.
+fn judged(texts: &[String], config: &JudgingConfig) -> Findings {
+    use crate::pass::ChapterObs;
+    use crate::substrate::{Edge, fold_book, walk};
+
+    let rows: Vec<_> = texts.iter().map(|text| walk::walk(text, &[])).collect();
+    let aggregates: Vec<BookAggregate> = rows
+        .iter()
+        .map(|obs| fold_book(&[ChapterObs { start: 0, obs }], &mut Edge::default()))
+        .collect();
+    let views: Vec<&BookAggregate> = aggregates.iter().collect();
+    let mut findings = Findings::new(texts.iter().map(|text| text.len() as u32).collect());
+    judge_corpus(&views, config, &mut findings);
+    findings
+}
+
+fn placement_row(
+    findings: &Findings,
+    glyph: char,
+    side: Side,
+    class: OuterClass,
+) -> Option<(u32, u32, u8)> {
+    findings
+        .patterns()
+        .iter()
+        .find(|row| {
+            row.glyph == ScalarKey::of(glyph) && row.key == PatternKey::Placement { side, class }
+        })
+        .map(|row| (row.numerator, row.denominator, row.books))
+}
+
+/// `),` ten times is `)`'s to judge; the one `],` has an unentitled leader.
+#[test]
+fn a_pair_an_entitled_leader_judges_leaves_the_placement_numerator() {
+    let texts = [
+        "a, b ".repeat(2_000),
+        format!("{}c], d", "(x), ".repeat(10)),
+    ];
+    let findings = judged(&texts, &JudgingConfig::default());
+    assert_eq!(
+        placement_row(&findings, ',', Side::Prev, OuterClass::Nonletter),
+        Some((1, 2_011, 1)),
+        "only the `],` is left, against every comma"
+    );
+    assert_eq!(findings.explained().leaders(), &[ScalarKey::of(')')]);
+
+    let without = judged(
+        &texts[..1]
+            .iter()
+            .cloned()
+            .chain([format!("{}c, d", "(x), ".repeat(10))])
+            .collect::<Vec<_>>(),
+        &JudgingConfig::default(),
+    );
+    assert_eq!(
+        placement_row(&without, ',', Side::Prev, OuterClass::Nonletter),
+        None,
+        "every comma after a mark is explained, so the row is silent"
+    );
+}
+
+/// With ExactNeighbor off, nothing judges the pair, so Placement keeps it.
+#[test]
+fn a_leader_whose_channel_is_off_explains_nothing() {
+    let texts = ["a, b ".repeat(2_000), "(x), ".repeat(10)];
+    let mut config = JudgingConfig::default();
+    config.channels.exact_neighbor = false;
+    let findings = judged(&texts, &config);
+    assert_eq!(
+        placement_row(&findings, ',', Side::Prev, OuterClass::Nonletter),
+        Some((10, 2_010, 1))
+    );
+    assert!(findings.explained().leaders().is_empty());
+}
+
+/// `7.` is 20 of 5,020 periods but 20 of 30 number ends: ordinary there.
+#[test]
+fn a_digit_row_ordinary_among_number_ends_is_silent() {
+    let texts = [
+        format!("{}{}", "a. ".repeat(5_000), "7. ".repeat(20)),
+        "7 ".repeat(10),
+    ];
+    let findings = judged(&texts, &JudgingConfig::default());
+    assert_eq!(
+        placement_row(&findings, '.', Side::Prev, OuterClass::Digit),
+        None
+    );
+
+    // Against 10,020 number ends the same 20 are 19 bp, under band 4's 30.
+    let texts = [
+        format!("{}{}", "a. ".repeat(5_000), "7. ".repeat(20)),
+        "7 ".repeat(10_000),
+    ];
+    let findings = judged(&texts, &JudgingConfig::default());
+    assert_eq!(
+        placement_row(&findings, '.', Side::Prev, OuterClass::Digit),
+        Some((20, 5_020, 1))
+    );
 }

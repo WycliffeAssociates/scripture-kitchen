@@ -545,7 +545,7 @@ impl ChapterPass for Substrate {
             .map(|&index| (index, out.patterns()[usize::from(index.get())]))
             .collect();
         let mut found = Vec::new();
-        sites::locate(text, chapters, &table, &mut found);
+        sites::locate(text, chapters, &table, out.explained(), &mut found);
         out.open_book(book);
         for site in found {
             out.push(

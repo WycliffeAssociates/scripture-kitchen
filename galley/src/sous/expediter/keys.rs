@@ -12,7 +12,7 @@
 
 use sous_core::judge::{Channel, PatternKey};
 use sous_core::substrate::ScalarKey;
-use sous_core::{ChapterInput, ChapterPass, Pattern, PatternIndex, TerminalTable};
+use sous_core::{ChapterInput, ChapterPass, Explained, Pattern, PatternIndex, TerminalTable};
 use xxhash_rust::xxh3::Xxh3Default;
 
 use crate::pantry::RawChecksum;
@@ -105,17 +105,18 @@ impl TableHash {
     }
 }
 
-/// The corpus evidence a chapter's word sites read beside its own text:
-/// xxh3-128 over this publication's forcing glyphs, ascending.
+/// The corpus evidence a chapter's sites read beside its own text: xxh3-128
+/// over this publication's forcing glyphs and its explained leaders, each
+/// ascending.
 ///
 /// Its own hash rather than a share of [`FiringHash`], because a firing set is
-/// position-blind: the same rows fire while the terminal table decides
-/// differently which of their occurrences are free.
+/// position-blind: the same rows fire while the corpus decides differently
+/// which of their occurrences are free or already judged.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(super) struct TerminalHash([u8; 16]);
+pub(super) struct EvidenceHash([u8; 16]);
 
-impl TerminalHash {
-    pub(super) fn of(table: Option<&TerminalTable>) -> Self {
+impl EvidenceHash {
+    pub(super) fn of(table: Option<&TerminalTable>, explained: &Explained) -> Self {
         let mut hasher = Xxh3Default::new();
         // An absent table is not an empty one: a corpus may genuinely
         // capitalize after nothing.
@@ -128,17 +129,21 @@ impl TerminalHash {
                 }
             }
         }
+        hasher.update(&(explained.leaders().len() as u64).to_le_bytes());
+        for glyph in explained.leaders() {
+            hasher.update(&glyph.raw().to_le_bytes());
+        }
         Self(hasher.digest128().to_be_bytes())
     }
 }
 
 /// One chapter's site identity: what it says, what its book fires, and what
-/// the corpus's terminal table makes of that.
+/// the corpus's evidence makes of that.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) struct ChapterSiteKey {
     pub(super) chapter: ObservationKey,
     pub(super) firing: FiringHash,
-    pub(super) terminals: TerminalHash,
+    pub(super) evidence: EvidenceHash,
 }
 
 /// A pattern's identity across publications, which its table position is not.
