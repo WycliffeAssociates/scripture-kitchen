@@ -299,6 +299,17 @@ fn validate_range(text: &str, text_len: u32, range: TextRange) -> Result<(), Inp
     Ok(())
 }
 
+/// `27:23`, or `27:23-24` for a bridge.
+impl fmt::Display for VerseKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}:{}", self.chapter, self.first)?;
+        if self.last != self.first {
+            write!(f, "-{}", self.last)?;
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputError {
     BookCountOverflow { count: usize },
@@ -352,13 +363,13 @@ impl fmt::Display for InputError {
                 last,
             } => write!(f, "malformed verse key {chapter}:{first}-{last}"),
             Self::VerseOrder { previous, next } => {
-                write!(f, "verse {next:?} sorts before {previous:?}")
+                write!(f, "verse {next} comes after verse {previous}")
             }
             Self::VerseWithoutChapter { key } => {
-                write!(f, "verse {key:?} has no chapter row")
+                write!(f, "verse {key} has no chapter row")
             }
             Self::VerseOutsideChapter { key } => {
-                write!(f, "verse {key:?} lies outside its chapter range")
+                write!(f, "verse {key} lies outside its chapter range")
             }
         }
     }
