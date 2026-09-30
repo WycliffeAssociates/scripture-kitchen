@@ -37,6 +37,7 @@ import type {
   TerminalContext,
 } from "./sous-reader.ts";
 import { kindOf, type MarkKind } from "./sous-unicode.ts";
+import { codePointOf, nameOf } from "./sous-unicode-names.ts";
 
 /** `PATTERN_DIGIT_GLYPH`, `LETTER_RUN_MAX` and `RUN_BUCKETS` in the reader. */
 const DIGIT_GLYPH = 0xffffffff;
@@ -76,9 +77,10 @@ export type MessageParams = Record<string, string | number | boolean>;
  * to name, else 0. */
 type Spread = { count: number; total: number; books: number; bookTotal: number; namedBooks: number; book1: string; book2: string };
 
-/** One mark, beside a `…Kind` parameter naming what it is. The catalog shows
- * every mark inside a `<g>` tag and never in quotation marks, since the mark
- * may be one. */
+/** One mark, beside `…Kind`, `…Name` and `…Code` parameters: what it is, its
+ * lowercased Unicode name (empty for a letter or a digit), and its code point
+ * (`U+2013`). The catalog shows every mark inside a `<g>` tag and never in
+ * quotation marks, since the mark may be one. */
 export type Glyph = string;
 
 /** A pair or a group of marks, shown inside `<g>` like a `Glyph`; the kinds of
@@ -97,21 +99,21 @@ export interface ParamsById {
   "sourceCopy": { run: number; eligible: number };
   "length.long": { deviation: number; inBook: boolean };
   "length.short": { deviation: number; inBook: boolean };
-  "convention.exactNeighbor": { glyph: Glyph; glyphKind: MarkKind; neighbor: Glyph; neighborKind: MarkKind; pair: Glyphs; reversedPair: Glyphs; usual: Glyph; usualKind: MarkKind; usualCount: number; reversed: number } & Spread;
-  "convention.exactNeighbor.swapped": { glyph: Glyph; glyphKind: MarkKind; neighbor: Glyph; neighborKind: MarkKind; pair: Glyphs; reversedPair: Glyphs; usual: Glyph; usualKind: MarkKind; usualCount: number; reversed: number } & Spread;
-  "convention.pooledNeighbor": { glyph: Glyph; glyphKind: MarkKind; pool: PoolName } & Spread;
-  "convention.runShape": { glyph: Glyph; glyphKind: MarkKind; cluster: Glyphs; clusterCount: number; hasUsualCluster: boolean; reordered: boolean; swap: boolean; usualCluster: Glyphs; usualClusterCount: number; usualSize: number; usualAtLeast: boolean; usualSameMark: boolean; usualShapeCount: number } & Spread;
-  "convention.placement.follows": { glyph: Glyph; glyphKind: MarkKind; digit: boolean; neighbor: TouchClass; usual: TouchClass; usualCount: number } & Spread;
-  "convention.placement.precedes": { glyph: Glyph; glyphKind: MarkKind; digit: boolean; neighbor: TouchClass; usual: TouchClass; usualCount: number } & Spread;
-  "convention.rarity": { glyph: Glyph; glyphKind: MarkKind; hasUsual: boolean; usual: Glyph; usualKind: MarkKind; usualCount: number; lookalike: boolean } & Spread;
-  "convention.casing": { word: string; form: FormName; usualForm: FormName; usualWord: string; usualCount: number; hasBefore: boolean; before: Glyph; beforeKind: MarkKind; beforeContext: BeforeContext; beforeLower: number; beforeCased: number } & Spread;
+  "convention.exactNeighbor": { glyph: Glyph; glyphKind: MarkKind; glyphName: string; glyphCode: string; neighbor: Glyph; neighborKind: MarkKind; neighborName: string; neighborCode: string; pair: Glyphs; reversedPair: Glyphs; usual: Glyph; usualKind: MarkKind; usualName: string; usualCode: string; usualCount: number; reversed: number } & Spread;
+  "convention.exactNeighbor.swapped": { glyph: Glyph; glyphKind: MarkKind; glyphName: string; glyphCode: string; neighbor: Glyph; neighborKind: MarkKind; neighborName: string; neighborCode: string; pair: Glyphs; reversedPair: Glyphs; usual: Glyph; usualKind: MarkKind; usualName: string; usualCode: string; usualCount: number; reversed: number } & Spread;
+  "convention.pooledNeighbor": { glyph: Glyph; glyphKind: MarkKind; glyphName: string; glyphCode: string; pool: PoolName } & Spread;
+  "convention.runShape": { glyph: Glyph; glyphKind: MarkKind; glyphName: string; glyphCode: string; cluster: Glyphs; clusterCount: number; hasUsualCluster: boolean; reordered: boolean; swap: boolean; usualCluster: Glyphs; usualClusterCount: number; usualSize: number; usualAtLeast: boolean; usualSameMark: boolean; usualShapeCount: number } & Spread;
+  "convention.placement.follows": { glyph: Glyph; glyphKind: MarkKind; glyphName: string; glyphCode: string; digit: boolean; neighbor: TouchClass; usual: TouchClass; usualCount: number } & Spread;
+  "convention.placement.precedes": { glyph: Glyph; glyphKind: MarkKind; glyphName: string; glyphCode: string; digit: boolean; neighbor: TouchClass; usual: TouchClass; usualCount: number } & Spread;
+  "convention.rarity": { glyph: Glyph; glyphKind: MarkKind; glyphName: string; glyphCode: string; hasUsual: boolean; usual: Glyph; usualKind: MarkKind; usualName: string; usualCode: string; usualCount: number; lookalike: boolean; named: boolean } & Spread;
+  "convention.casing": { word: string; form: FormName; usualForm: FormName; usualWord: string; usualCount: number; hasBefore: boolean; before: Glyph; beforeKind: MarkKind; beforeName: string; beforeCode: string; beforeContext: BeforeContext; beforeLower: number; beforeCased: number } & Spread;
   "convention.wordLength": { word: string; count: number };
   "convention.doubled.bare": { word: string; text: string } & Spread;
   "convention.doubled.separated": { word: string; text: string } & Spread;
-  "convention.letterRun": { letter: Glyph; letterKind: MarkKind; length: number; atLeast: boolean; run: Glyphs; word: string; count: number; total: number };
-  "convention.sentenceStart": { glyph: Glyph; glyphKind: MarkKind; word: string; usualWord: string; upper: number } & Spread;
-  "convention.bookRate.follows": { glyph: Glyph; glyphKind: MarkKind; digit: boolean; neighbor: TouchClass; count: number; total: number; rate: number; book: string; baseline: number; otherBooks: number };
-  "convention.bookRate.precedes": { glyph: Glyph; glyphKind: MarkKind; digit: boolean; neighbor: TouchClass; count: number; total: number; rate: number; book: string; baseline: number; otherBooks: number };
+  "convention.letterRun": { letter: Glyph; letterKind: MarkKind; letterName: string; letterCode: string; length: number; atLeast: boolean; run: Glyphs; word: string; count: number; total: number };
+  "convention.sentenceStart": { glyph: Glyph; glyphKind: MarkKind; glyphName: string; glyphCode: string; word: string; usualWord: string; upper: number } & Spread;
+  "convention.bookRate.follows": { glyph: Glyph; glyphKind: MarkKind; glyphName: string; glyphCode: string; digit: boolean; neighbor: TouchClass; count: number; total: number; rate: number; book: string; baseline: number; otherBooks: number };
+  "convention.bookRate.precedes": { glyph: Glyph; glyphKind: MarkKind; glyphName: string; glyphCode: string; digit: boolean; neighbor: TouchClass; count: number; total: number; rate: number; book: string; baseline: number; otherBooks: number };
 }
 
 // `MessageId` and `ParamsById` name the same ids.
@@ -326,10 +328,15 @@ function glyphText(glyph: number): string {
   return glyph === DIGIT_GLYPH ? "0–9" : String.fromCodePoint(glyph);
 }
 
-/** What a mark is: its first scalar's kind, `other` for none. */
-function kind(text: string): MarkKind {
+type About<P extends string> = { [K in `${P}Kind`]: MarkKind } & { [K in `${P}Name` | `${P}Code`]: string };
+
+/** A `Glyph` parameter's kind, name and code point, from its first scalar;
+ * `other` and empty strings for no mark. */
+function about<P extends string>(prefix: P, text: string): About<P> {
   const scalar = text.codePointAt(0);
-  return scalar === undefined ? "other" : kindOf(scalar);
+  const [kind, name, code] =
+    scalar === undefined ? ["other", "", ""] : [kindOf(scalar), nameOf(scalar) ?? "", codePointOf(scalar)];
+  return { [`${prefix}Kind`]: kind, [`${prefix}Name`]: name, [`${prefix}Code`]: code } as About<P>;
 }
 
 /** The first word of a site: letters and marks, through inner apostrophes. */
@@ -442,7 +449,9 @@ function convention(finding: ConventionFinding, pattern: Pattern, site: string, 
         id: key.side === "prev" ? "convention.placement.follows" : "convention.placement.precedes",
         params: {
           glyph,
-          glyphKind: digit ? "digit" : kind(glyph),
+          // The pooled lane's glyph is every digit when no site names one.
+          ...about("glyph", digit && site === "" ? "" : glyph),
+          ...(digit ? { glyphKind: "digit" as const } : {}),
           digit,
           neighbor: touch(key.class),
           ...spread,
@@ -457,7 +466,9 @@ function convention(finding: ConventionFinding, pattern: Pattern, site: string, 
         id: key.side === "prev" ? "convention.bookRate.follows" : "convention.bookRate.precedes",
         params: {
           glyph,
-          glyphKind: digit ? "digit" : kind(glyph),
+          // The pooled lane's glyph is every digit when no site names one.
+          ...about("glyph", digit && site === "" ? "" : glyph),
+          ...(digit ? { glyphKind: "digit" as const } : {}),
           digit,
           neighbor: touch(key.class),
           count: pattern.numerator,
@@ -485,14 +496,14 @@ function convention(finding: ConventionFinding, pattern: Pattern, site: string, 
         id: swapped ? "convention.exactNeighbor.swapped" : "convention.exactNeighbor",
         params: {
           glyph,
-          glyphKind: kind(glyph),
+          ...about("glyph", glyph),
           neighbor,
-          neighborKind: kind(neighbor),
+          ...about("neighbor", neighbor),
           pair,
           reversedPair,
           ...spread,
           usual: follower,
-          usualKind: kind(follower),
+          ...about("usual", follower),
           usualCount: usual.kind === "ExactNeighbor" ? usual.count : 0,
           reversed,
         },
@@ -504,7 +515,7 @@ function convention(finding: ConventionFinding, pattern: Pattern, site: string, 
       };
     }
     case "PooledNeighbor":
-      return { id: "convention.pooledNeighbor", params: { glyph, glyphKind: kind(glyph), pool: POOL[key.pool], ...spread }, queries: query("this", site) };
+      return { id: "convention.pooledNeighbor", params: { glyph, ...about("glyph", glyph), pool: POOL[key.pool], ...spread }, queries: query("this", site) };
     case "RunShape": {
       const exact = pattern.clusters?.find((cluster) => cluster.text === site);
       const [common, reordered] = usualCluster(pattern.clusters, site);
@@ -516,7 +527,7 @@ function convention(finding: ConventionFinding, pattern: Pattern, site: string, 
         id: "convention.runShape",
         params: {
           glyph,
-          glyphKind: kind(glyph),
+          ...about("glyph", glyph),
           cluster: site,
           clusterCount: exact?.count ?? 0,
           ...spread,
@@ -544,13 +555,14 @@ function convention(finding: ConventionFinding, pattern: Pattern, site: string, 
         id: "convention.rarity",
         params: {
           glyph,
-          glyphKind: kind(glyph),
+          ...about("glyph", glyph),
           ...spread,
           hasUsual: other !== null,
           usual: usualText,
-          usualKind: kind(usualText),
+          ...about("usual", usualText),
           usualCount: usual.kind === "Rarity" ? usual.count : 0,
           lookalike,
+          named: nameOf(pattern.glyph) !== undefined && other !== null && nameOf(other) !== undefined,
         },
         queries: [...query("this", glyph), ...query(lookalike ? "alternative" : "others", usualText)],
       };
@@ -570,7 +582,7 @@ function convention(finding: ConventionFinding, pattern: Pattern, site: string, 
           usualCount: usual.kind === "Casing" ? usual.count : 0,
           hasBefore: after !== undefined,
           before: before === undefined ? "" : String.fromCodePoint(before.glyph),
-          beforeKind: before === undefined ? "other" : kindOf(before.glyph),
+          ...about("before", before === undefined ? "" : String.fromCodePoint(before.glyph)),
           beforeContext: before === undefined ? "bare" : beforeContext(before),
           beforeLower: after === undefined ? 0 : after.cased - after.upper,
           beforeCased: after?.cased ?? 0,
@@ -598,7 +610,7 @@ function convention(finding: ConventionFinding, pattern: Pattern, site: string, 
         id: "convention.letterRun",
         params: {
           letter,
-          letterKind: kind(letter),
+          ...about("letter", letter),
           length: key.length,
           atLeast: key.length === LETTER_RUN_MAX,
           run,
@@ -615,7 +627,7 @@ function convention(finding: ConventionFinding, pattern: Pattern, site: string, 
         id: "convention.sentenceStart",
         params: {
           glyph,
-          glyphKind: kind(glyph),
+          ...about("glyph", glyph),
           word: site,
           usualWord,
           ...spread,

@@ -122,6 +122,31 @@ The first five are the engine's own neighbour pools, first match wins, so
 Kinds are `select` keys, so a translator words every one; a catalog `select`
 over a kind names all ten (`sous_messages.rs` checks), `other` included.
 
+## Unicode names and code points
+
+Beside every `…Kind` a `Glyph` parameter also carries `…Name`, its Unicode
+name lowercased for prose, and `…Code`, its code point. A lookalike rarity
+names both marks, since the two are hard to tell apart on screen:
+
+```text
+params    { glyph: "–", glyphName: "en dash", glyphCode: "U+2013",
+            usual: "-", usualName: "hyphen-minus", usualCode: "U+002D", named: true, … }
+en        [–] en dash (U+2013) and [-] hyphen-minus (U+002D) look alike.
+```
+
+- Names come from `UnicodeData.txt` (UCD 17.0.0, pinned beside the other
+  extracts) for every punctuation mark and symbol, general category `P*` or
+  `S*`, which holds every pooled mark. A letter or a digit has no name here,
+  so its `…Name` is empty; `named` says both of a rarity's marks have one.
+- [`sous-unicode-names.ts`](sous-unicode-names.ts) is generated with the
+  kinds and staleness-tested the same way: `nameOf(scalar)`,
+  `codePointOf(scalar)` (`U+` and at least four uppercase hex digits).
+- **Names are English only.** Unicode names are English by definition, and
+  the catalog shows them untranslated. A consumer that wants localized names
+  needs CLDR's character annotations (`common/annotations/*.xml`), which
+  kitchen does not ship; such a catalog should leave `…Name` out and keep
+  `…Code`.
+
 ## What en_ulb renders
 
 `cargo run --release -p sous-cli -- --publish x.sous testData/exampleCorpora/en_ulb`,

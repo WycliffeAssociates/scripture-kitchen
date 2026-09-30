@@ -2,7 +2,8 @@
 //! entry is a headline and details, every argument either tier reads is a
 //! parameter `describe` declares for that id in `ParamsById`, a `Glyph` or
 //! `Glyphs` parameter is shown inside `<g>` and nowhere else, every `Glyph`
-//! has a `…Kind` beside it, and a `select` over an enum names every value.
+//! has a `…Kind`, `…Name` and `…Code` beside it, and a `select` over a kind
+//! names every kind.
 //!
 //! ```text
 //! ts    "convention.sentenceStart": { glyph: Glyph; word: string; usualWord: string; upper: number } & Spread;
@@ -10,7 +11,7 @@
 //!                                     "details": "After <g>{glyph}</g>, … {upper, number} of {total, number} …" }
 //!       arguments of each tier ⊆ declared                   → ok
 //!       inside <g> {glyph} = the Glyph params read          → ok
-//!       glyph: Glyph beside glyphKind: MarkKind             → ok
+//!       glyph: Glyph beside glyphKind glyphName glyphCode   → ok
 //!       {glyphKind, select, quote {…} … other {…}}          → every MarkKind
 //! ```
 //!
@@ -457,17 +458,20 @@ fn every_glyph_is_shown_inside_a_glyph_tag_and_nothing_else_is() {
     }
 }
 
-/// A reader asks "what is a mark?", so every single mark carries its kind.
+/// A reader asks "what is a mark?", so every single mark carries its kind,
+/// its Unicode name and its code point.
 #[test]
-fn every_glyph_has_a_kind_beside_it() {
+fn every_glyph_has_a_kind_a_name_and_a_code_point_beside_it() {
     for (id, params) in declared_params() {
         for (name, ty) in &params {
-            if ty == "Glyph" {
-                let kind = params.get(&format!("{name}Kind"));
+            if ty != "Glyph" {
+                continue;
+            }
+            for (suffix, want) in [("Kind", "MarkKind"), ("Name", "string"), ("Code", "string")] {
                 assert_eq!(
-                    kind.map(String::as_str),
-                    Some("MarkKind"),
-                    "{id}'s {name} has no {name}Kind: MarkKind"
+                    params.get(&format!("{name}{suffix}")).map(String::as_str),
+                    Some(want),
+                    "{id}'s {name} has no {name}{suffix}: {want}"
                 );
             }
         }

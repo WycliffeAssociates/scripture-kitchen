@@ -1,14 +1,15 @@
 # Unicode Character Database extracts (UCD 17.0.0)
 
-The pinned inputs behind `src/unicode/table.rs`, `src/unicode/pools.rs`, and
-the grapheme-atom conformance gate, with UTS #39's `confusables.txt` of the
-same version. They are committed reference data, read only by
+The pinned inputs behind `src/unicode/table.rs`, `src/unicode/pools.rs`,
+galley's `sous-unicode.ts` and `sous-unicode-names.ts`, and the grapheme-atom
+conformance gate, with UTS #39's `confusables.txt` of the same version. They are committed reference data, read only by
 `bin/gen-unicode.rs` and by tests — `sous-core` opens no file at runtime.
 
 Each extract keeps the file's pristine eight-line header (title, date,
 copyright, licence pointer) so its provenance travels with it, followed by
 only the lines the generator reads. `GraphemeBreakTest.txt` and
-`GraphemeBreakProperty.txt` are pristine.
+`GraphemeBreakProperty.txt` are pristine. `UnicodeData.txt` has no header;
+its extract is the pristine lines of every `P*` and `S*` scalar.
 
 ## Files
 
@@ -21,6 +22,7 @@ only the lines the generator reads. `GraphemeBreakTest.txt` and
 | `emoji-data.txt` | `emoji/emoji-data.txt` | Extended_Pictographic | complex |
 | `GraphemeBreakTest.txt` | `auxiliary/GraphemeBreakTest.txt` | pristine | `tests/atom_conformance.rs` only |
 | `confusables.txt` | `https://www.unicode.org/Public/17.0.0/security/confusables.txt` (not under `ucd/`) | the 11-line header, then lines whose source is GC `P*` or `S*` | `LOOKALIKES` in `src/unicode/pools.rs` |
+| `UnicodeData.txt` | `UnicodeData.txt` | lines whose general category (field 3) is `P*` or `S*`, which covers every pooled mark | `NAMES` in `galley/sous-unicode-names.ts`, lowercased |
 
 Noncharacters (`U+FDD0..=U+FDEF`, every `U+xxFFFE`/`U+xxFFFF`) are a spec
 constant, not a file.
@@ -38,10 +40,11 @@ xxh3-64 of each committed file, so a silent edit is visible:
 | `PropList.txt` | `86cd819867f34195` | 21783 |
 | `emoji-data.txt` | `dba1f22ec5cbd739` | 39444 |
 | `confusables.txt` | `3ed75ae6793dff71` | 118538 |
+| `UnicodeData.txt` | `9c5f608b2f3b55c8` | 525432 |
 
 ## Reproducing the extracts
 
-From a directory holding the six pristine downloads:
+From a directory holding the seven pristine `ucd/` downloads and `confusables.txt`:
 
 ```sh
 { sed -n '1,8p' DerivedGeneralCategory.txt
@@ -59,6 +62,7 @@ From a directory holding the six pristine downloads:
 } > out/PropList.txt
 { sed -n '1,8p' emoji-data.txt; grep -E '; Extended_Pictographic' emoji-data.txt; } > out/emoji-data.txt
 cp GraphemeBreakProperty.txt GraphemeBreakTest.txt out/
+awk -F';' '$3 ~ /^[PS]/' UnicodeData.txt > out/UnicodeData.txt
 
 # confusables.txt keeps its 11 header lines and every mapping from a mark.
 python3 - out/DerivedGeneralCategory.txt confusables.txt out/confusables.txt <<'EOF'
@@ -91,7 +95,7 @@ The pin must match two other things or the gates disagree with each other:
 
 ## Refreshing to a new Unicode version
 
-1. Re-download the six files from
+1. Re-download the seven files from
    `https://www.unicode.org/Public/<VERSION>/ucd/` and `confusables.txt` from
    `https://www.unicode.org/Public/<VERSION>/security/`, and re-run the trim
    commands above; update the checksum table.
