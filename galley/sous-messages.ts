@@ -61,10 +61,42 @@ export type MessageId =
 
 export type MessageParams = Record<string, string | number | boolean>;
 
-export interface Message {
-  readonly id: MessageId;
-  readonly params: MessageParams;
+type Spread = { count: number; total: number; books: number; bookTotal: number };
+
+/** Every parameter each id carries, one id per line; a catalog string may use
+ * only these (`tests/sous_messages.rs` reads this block). */
+export interface ParamsById {
+  "hygiene": { class: HygieneName; run: number; atLeast: boolean };
+  "presence.missing": { keys: number; atLeast: boolean };
+  "presence.extra": { keys: number; atLeast: boolean };
+  "presence.empty": { keys: number; atLeast: boolean };
+  "sourceCopy": { run: number; eligible: number };
+  "length.long": { deviation: number; inBook: boolean };
+  "length.short": { deviation: number; inBook: boolean };
+  "convention.exactNeighbor": { glyph: string; neighbor: string; pair: string; reversedPair: string; usual: string; usualCount: number; reversed: number } & Spread;
+  "convention.exactNeighbor.swapped": { glyph: string; neighbor: string; pair: string; reversedPair: string; usual: string; usualCount: number; reversed: number } & Spread;
+  "convention.pooledNeighbor": { glyph: string; pool: PoolName } & Spread;
+  "convention.runShape": { glyph: string; cluster: string; size: number; sameMark: boolean; clusterCount: number; hasUsualCluster: boolean; usualCluster: string; usualClusterCount: number; usualSize: number; usualSameMark: boolean; usualShapeCount: number } & Spread;
+  "convention.placement.follows": { glyph: string; digit: boolean; neighbor: TouchClass; usual: TouchClass; usualCount: number } & Spread;
+  "convention.placement.precedes": { glyph: string; digit: boolean; neighbor: TouchClass; usual: TouchClass; usualCount: number } & Spread;
+  "convention.rarity": { glyph: string; count: number; books: number; bookTotal: number; hasUsual: boolean; usual: string; usualCount: number };
+  "convention.casing": { word: string; form: FormName; usualForm: FormName; usualWord: string; usualCount: number } & Spread;
+  "convention.wordLength": { word: string; count: number };
+  "convention.doubled.bare": { word: string; text: string } & Spread;
+  "convention.doubled.separated": { word: string; text: string } & Spread;
+  "convention.letterRun": { letter: string; length: number; atLeast: boolean; run: string; word: string; count: number; total: number };
+  "convention.sentenceStart": { glyph: string; word: string; upper: number } & Spread;
+  "convention.bookRate.follows": { glyph: string; digit: boolean; neighbor: TouchClass; count: number; total: number; rate: number; book: string; baseline: number; otherBooks: number };
+  "convention.bookRate.precedes": { glyph: string; digit: boolean; neighbor: TouchClass; count: number; total: number; rate: number; book: string; baseline: number; otherBooks: number };
 }
+
+// `MessageId` and `ParamsById` name the same ids.
+const sameIds: [MessageId] extends [keyof ParamsById] ? ([keyof ParamsById] extends [MessageId] ? true : never) : never = true;
+void sameIds;
+
+/** One id with exactly its parameters; every one is a plain
+ * `{ id: MessageId; params: MessageParams }`. */
+export type Message = { [K in MessageId]: { readonly id: K; readonly params: ParamsById[K] } }[MessageId];
 
 export interface MessageContext {
   /** The finding's own text, sliced by the consumer from its span. */
@@ -81,6 +113,20 @@ export type TouchClass = "letter" | "space" | "digit" | "punctuation";
 /** A case form, as a `select` key. `Uncased` is never on the wire. */
 export type FormName = "lowercase" | "capitalized" | "allCaps" | "mixed";
 
+export type HygieneName =
+  | "control"
+  | "delete"
+  | "replacement"
+  | "carriageReturn"
+  | "backslash"
+  | "conflict"
+  | "combiningMark"
+  | "format"
+  | "noBreakSpace"
+  | "noncharacter";
+
+export type PoolName = "quote" | "bracket" | "dash" | "terminal" | "separator" | "digit" | "symbol" | "other";
+
 const TOUCH: Record<Exclude<OuterClass, "Edge">, TouchClass> = {
   Letter: "letter",
   Space: "space",
@@ -95,7 +141,7 @@ const FORM: Record<Exclude<CasingForm, "Uncased">, FormName> = {
   Mixed: "mixed",
 };
 
-const HYGIENE: Record<HygieneClass, string> = {
+const HYGIENE: Record<HygieneClass, HygieneName> = {
   C0Control: "control",
   Delete: "delete",
   C1Control: "control",
@@ -109,13 +155,13 @@ const HYGIENE: Record<HygieneClass, string> = {
   Noncharacter: "noncharacter",
 };
 
-const PRESENCE: Record<PresenceKind, MessageId> = {
+const PRESENCE: Record<PresenceKind, "presence.missing" | "presence.extra" | "presence.empty"> = {
   Missing: "presence.missing",
   Extra: "presence.extra",
   Empty: "presence.empty",
 };
 
-const POOL: Record<Pool, string> = {
+const POOL: Record<Pool, PoolName> = {
   Quote: "quote",
   Bracket: "bracket",
   Dash: "dash",
