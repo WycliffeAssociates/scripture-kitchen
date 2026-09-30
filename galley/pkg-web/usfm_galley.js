@@ -1191,10 +1191,45 @@ export class SousSettings {
         wasm.__wbg_soussettings_free(ptr, 0);
     }
     /**
+     * @returns {number}
+     */
+    get book_rate_min_bp() {
+        const ret = wasm.__wbg_get_soussettings_book_rate_min_bp(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    get book_rate_ratio() {
+        const ret = wasm.__wbg_get_soussettings_book_rate_ratio(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {boolean}
+     */
+    get book_rate() {
+        const ret = wasm.__wbg_get_soussettings_book_rate(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
      * @returns {boolean}
      */
     get casing() {
         const ret = wasm.__wbg_get_soussettings_casing(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * @returns {boolean}
+     */
+    get doubled_bare() {
+        const ret = wasm.__wbg_get_soussettings_doubled_bare(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * @returns {boolean}
+     */
+    get doubled_separated() {
+        const ret = wasm.__wbg_get_soussettings_doubled_separated(this.__wbg_ptr);
         return ret !== 0;
     }
     /**
@@ -1352,10 +1387,40 @@ export class SousSettings {
         return ret;
     }
     /**
+     * @param {number} arg0
+     */
+    set book_rate_min_bp(arg0) {
+        wasm.__wbg_set_soussettings_book_rate_min_bp(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @param {number} arg0
+     */
+    set book_rate_ratio(arg0) {
+        wasm.__wbg_set_soussettings_book_rate_ratio(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @param {boolean} arg0
+     */
+    set book_rate(arg0) {
+        wasm.__wbg_set_soussettings_book_rate(this.__wbg_ptr, arg0);
+    }
+    /**
      * @param {boolean} arg0
      */
     set casing(arg0) {
         wasm.__wbg_set_soussettings_casing(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @param {boolean} arg0
+     */
+    set doubled_bare(arg0) {
+        wasm.__wbg_set_soussettings_doubled_bare(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @param {boolean} arg0
+     */
+    set doubled_separated(arg0) {
+        wasm.__wbg_set_soussettings_doubled_separated(this.__wbg_ptr, arg0);
     }
     /**
      * @param {boolean} arg0

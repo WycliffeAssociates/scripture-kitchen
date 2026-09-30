@@ -581,7 +581,12 @@ export class SousSettings {
     private constructor();
     free(): void;
     [Symbol.dispose](): void;
+    book_rate_min_bp: number;
+    book_rate_ratio: number;
+    book_rate: boolean;
     casing: boolean;
+    doubled_bare: boolean;
+    doubled_separated: boolean;
     doubled: boolean;
     doubles_productive_bp: number;
     exact_neighbor: boolean;
