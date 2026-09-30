@@ -198,7 +198,15 @@ const fn doc(
     label: &'static str,
     description: &'static str,
 ) -> SettingDoc {
-    SettingDoc { key, kind, group, label, description, min: None, max: None }
+    SettingDoc {
+        key,
+        kind,
+        group,
+        label,
+        description,
+        min: None,
+        max: None,
+    }
 }
 
 const fn at_least(mut doc: SettingDoc, min: f64) -> SettingDoc {
@@ -212,62 +220,223 @@ pub const SETTING_DOCS: &[SettingDoc] = {
     use Group::{Reference, Rules, Thresholds};
     use Kind::{Count, Decimal, ShareBp, Switch};
     &[
-        doc("placement", Switch, Rules, "What a mark touches",
-            "Flags a punctuation mark or digit right next to something it is rarely next to in this project, like a comma touching the next word, by counting every use of that mark across the whole project."),
-        doc("run_shape", Switch, Rules, "Groups of marks",
-            "Flags a group of marks written together, like “;'”, when this project rarely groups that mark that way and does not write that exact group often."),
-        doc("exact_neighbor", Switch, Rules, "Pairs of marks",
-            "Flags two marks side by side, like “?,”, when this project almost never puts the second one right after the first."),
-        doc("pooled_neighbor", Switch, Rules, "A mark and the kind of mark after it",
-            "Flags a mark followed directly by a kind of mark, such as a quotation mark or a dash, that rarely follows it in this project; off by default because the pairs check already covers it."),
-        doc("rarity", Switch, Rules, "Rare characters",
-            "Lists characters this project uses only a handful of times in all its books, like a curly apostrophe in a project that otherwise uses straight ones."),
-        doc("casing", Switch, Rules, "Capital letters",
-            "Flags a word capitalized, or not, in a way this project rarely writes that word in the middle of a sentence, like “On” where the project writes “on”."),
-        doc("word_length", Switch, Rules, "Very long words",
-            "Flags words far longer than the words this project usually uses, which can mean two words ran together; off by default because long names are common."),
-        doc("doubled", Switch, Rules, "Doubled words",
-            "Turns every check for a word written twice in a row on or off."),
-        doc("letter_runs", Switch, Rules, "Repeated letters",
-            "Flags a letter written more times in a row than this project ever writes it, like “joyfullly”."),
-        doc("sentence_start", Switch, Rules, "Lowercase after a sentence end",
-            "Flags a lowercase word right after a mark, like “?” or “!”, that this project almost always follows with a capital."),
-        doc("book_rate", Switch, Rules, "One book differs",
-            "Flags one book that puts a mark next to something far more often than the project's other books do, like a dash after a space in one book only."),
-        at_least(doc("support_floor", Count, Thresholds, "Habit count",
-            "How many times something must occur before the checks treat it as a habit of this project rather than a one-off."), 1.0),
-        at_least(doc("word_support_floor", Count, Thresholds, "Word habit count",
-            "How many times a word must appear in the middle of a sentence before the capital-letter check compares its spellings."), 1.0),
-        doc("terminal_upper_share_bp", ShareBp, Thresholds, "Capital after a mark",
-            "How often, out of 10,000, this project must follow a mark with a capital before a capital there counts as the mark's doing and not the word's."),
-        doc("sentence_start_upper_bp", ShareBp, Thresholds, "Capital expected after a mark",
-            "How often, out of 10,000, this project must follow a mark with a capital before a lowercase word after that mark is flagged."),
-        at_least(doc("word_length_sigma", Count, Thresholds, "How long a very long word is",
-            "How far past this project's usual word length a word must be, counted in steps of how much word lengths usually vary, before the long-word check flags it."), 1.0),
-        doc("doubles_productive_bp", ShareBp, Thresholds, "Repeating language",
-            "When more than this many out of 10,000 different words in the project are written twice in a row more than once, the project is taken to repeat words on purpose and the doubled-word checks stay silent."),
-        doc("doubled_bare", Switch, Rules, "Doubled with a space",
-            "Flags a word written twice in a row with only a space between, like “the the”, unless this project does that with the word often."),
-        doc("doubled_separated", Switch, Rules, "Doubled with punctuation",
-            "Flags a word written twice with punctuation between, like “Moses, Moses”, unless this project does that with the word often; off by default because calling someone by name twice is common."),
-        at_least(doc("book_rate_ratio", Count, Thresholds, "One book: how many times more",
-            "How many times more often than the other books typically do one book must put a mark next to something before the one-book check flags it."), 1.0),
-        doc("book_rate_min_bp", ShareBp, Thresholds, "One book: least share",
-            "The least share, out of 10,000 uses of a mark in one book, that must be next to the same thing before the one-book check flags that book."),
-        at_least(doc("z_long", Decimal, Reference, "Long verse distance",
-            "How far past this project's usual length compared with the source a verse must be, on the long side, before it is flagged as much longer."), 0.0),
-        at_least(doc("z_short", Decimal, Reference, "Short verse distance",
-            "How far short of this project's usual length compared with the source a verse must be before it is flagged as much shorter."), 0.0),
-        doc("min_verses", Count, Reference, "Verses to compare a book",
-            "How many verses a book must share with the source before its verse lengths are compared within that book as well as across the project."),
-        doc("lengths_enabled", Switch, Reference, "Verse lengths",
-            "Compares each verse's length with the same verse in the source text and flags verses much longer or shorter than this project usually is."),
-        doc("presence", Switch, Reference, "Missing and extra verses",
-            "Flags verses the source text has and this book lacks, verses this book has and the source lacks, and verses left empty."),
-        doc("source_copy", Switch, Reference, "Copied source words",
-            "Flags words in a row spelled exactly as in the same verse of the source text, which can mean source text was pasted in; off by default."),
-        at_least(doc("source_copy_min_run", Count, Reference, "Copied words in a row",
-            "How many words in a row must match the source verse before the copied-words check flags them."), 2.0),
+        doc(
+            "placement",
+            Switch,
+            Rules,
+            "What a mark touches",
+            "Flags a punctuation mark or digit right next to something it is rarely next to in this project, like a comma touching the next word, by counting every use of that mark across the whole project.",
+        ),
+        doc(
+            "run_shape",
+            Switch,
+            Rules,
+            "Groups of marks",
+            "Flags a group of marks written together, like “;'”, when this project rarely groups that mark that way and does not write that exact group often.",
+        ),
+        doc(
+            "exact_neighbor",
+            Switch,
+            Rules,
+            "Pairs of marks",
+            "Flags two marks side by side, like “?,”, when this project almost never puts the second one right after the first.",
+        ),
+        doc(
+            "pooled_neighbor",
+            Switch,
+            Rules,
+            "A mark and the kind of mark after it",
+            "Flags a mark followed directly by a kind of mark, such as a quotation mark or a dash, that rarely follows it in this project; off by default because the pairs check already covers it.",
+        ),
+        doc(
+            "rarity",
+            Switch,
+            Rules,
+            "Rare characters",
+            "Lists characters this project uses only a handful of times in all its books, like a curly apostrophe in a project that otherwise uses straight ones.",
+        ),
+        doc(
+            "casing",
+            Switch,
+            Rules,
+            "Capital letters",
+            "Flags a word capitalized, or not, in a way this project rarely writes that word in the middle of a sentence, like “On” where the project writes “on”.",
+        ),
+        doc(
+            "word_length",
+            Switch,
+            Rules,
+            "Very long words",
+            "Flags words far longer than the words this project usually uses, which can mean two words ran together; off by default because long names are common.",
+        ),
+        doc(
+            "doubled",
+            Switch,
+            Rules,
+            "Doubled words",
+            "Turns every check for a word written twice in a row on or off.",
+        ),
+        doc(
+            "letter_runs",
+            Switch,
+            Rules,
+            "Repeated letters",
+            "Flags a letter written more times in a row than this project ever writes it, like “joyfullly”.",
+        ),
+        doc(
+            "sentence_start",
+            Switch,
+            Rules,
+            "Lowercase after a sentence end",
+            "Flags a lowercase word right after a mark, like “?” or “!”, that this project almost always follows with a capital.",
+        ),
+        doc(
+            "book_rate",
+            Switch,
+            Rules,
+            "One book differs",
+            "Flags one book that puts a mark next to something far more often than the project's other books do, like a dash after a space in one book only.",
+        ),
+        at_least(
+            doc(
+                "support_floor",
+                Count,
+                Thresholds,
+                "Habit count",
+                "How many times something must occur before the checks treat it as a habit of this project rather than a one-off.",
+            ),
+            1.0,
+        ),
+        at_least(
+            doc(
+                "word_support_floor",
+                Count,
+                Thresholds,
+                "Word habit count",
+                "How many times a word must appear in the middle of a sentence before the capital-letter check compares its spellings.",
+            ),
+            1.0,
+        ),
+        doc(
+            "terminal_upper_share_bp",
+            ShareBp,
+            Thresholds,
+            "Capital after a mark",
+            "How often, out of 10,000, this project must follow a mark with a capital before a capital there counts as the mark's doing and not the word's.",
+        ),
+        doc(
+            "sentence_start_upper_bp",
+            ShareBp,
+            Thresholds,
+            "Capital expected after a mark",
+            "How often, out of 10,000, this project must follow a mark with a capital before a lowercase word after that mark is flagged.",
+        ),
+        at_least(
+            doc(
+                "word_length_sigma",
+                Count,
+                Thresholds,
+                "How long a very long word is",
+                "How far past this project's usual word length a word must be, counted in steps of how much word lengths usually vary, before the long-word check flags it.",
+            ),
+            1.0,
+        ),
+        doc(
+            "doubles_productive_bp",
+            ShareBp,
+            Thresholds,
+            "Repeating language",
+            "When more than this many out of 10,000 different words in the project are written twice in a row more than once, the project is taken to repeat words on purpose and the doubled-word checks stay silent.",
+        ),
+        doc(
+            "doubled_bare",
+            Switch,
+            Rules,
+            "Doubled with a space",
+            "Flags a word written twice in a row with only a space between, like “the the”, unless this project does that with the word often.",
+        ),
+        doc(
+            "doubled_separated",
+            Switch,
+            Rules,
+            "Doubled with punctuation",
+            "Flags a word written twice with punctuation between, like “Moses, Moses”, unless this project does that with the word often; off by default because calling someone by name twice is common.",
+        ),
+        at_least(
+            doc(
+                "book_rate_ratio",
+                Count,
+                Thresholds,
+                "One book: how many times more",
+                "How many times more often than the other books typically do one book must put a mark next to something before the one-book check flags it.",
+            ),
+            1.0,
+        ),
+        doc(
+            "book_rate_min_bp",
+            ShareBp,
+            Thresholds,
+            "One book: least share",
+            "The least share, out of 10,000 uses of a mark in one book, that must be next to the same thing before the one-book check flags that book.",
+        ),
+        at_least(
+            doc(
+                "z_long",
+                Decimal,
+                Reference,
+                "Long verse distance",
+                "How far past this project's usual length compared with the source a verse must be, on the long side, before it is flagged as much longer.",
+            ),
+            0.0,
+        ),
+        at_least(
+            doc(
+                "z_short",
+                Decimal,
+                Reference,
+                "Short verse distance",
+                "How far short of this project's usual length compared with the source a verse must be before it is flagged as much shorter.",
+            ),
+            0.0,
+        ),
+        doc(
+            "min_verses",
+            Count,
+            Reference,
+            "Verses to compare a book",
+            "How many verses a book must share with the source before its verse lengths are compared within that book as well as across the project.",
+        ),
+        doc(
+            "lengths_enabled",
+            Switch,
+            Reference,
+            "Verse lengths",
+            "Compares each verse's length with the same verse in the source text and flags verses much longer or shorter than this project usually is.",
+        ),
+        doc(
+            "presence",
+            Switch,
+            Reference,
+            "Missing and extra verses",
+            "Flags verses the source text has and this book lacks, verses this book has and the source lacks, and verses left empty.",
+        ),
+        doc(
+            "source_copy",
+            Switch,
+            Reference,
+            "Copied source words",
+            "Flags words in a row spelled exactly as in the same verse of the source text, which can mean source text was pasted in; off by default.",
+        ),
+        at_least(
+            doc(
+                "source_copy_min_run",
+                Count,
+                Reference,
+                "Copied words in a row",
+                "How many words in a row must match the source verse before the copied-words check flags them.",
+            ),
+            2.0,
+        ),
     ]
 };
 
@@ -423,7 +592,11 @@ pub fn settings_ts() -> String {
                 .iter()
                 .find(|entry| entry.key == key)
                 .unwrap_or_else(|| panic!("`{key}` has no entry in SETTING_DOCS"));
-            assert!(value.fits(entry.kind), "`{key}` cannot be a {:?}", entry.kind);
+            assert!(
+                value.fits(entry.kind),
+                "`{key}` cannot be a {:?}",
+                entry.kind
+            );
             let sentence = entry.description.trim_end_matches('.');
             assert!(
                 entry.description.ends_with('.') && !sentence.contains(". "),
@@ -435,7 +608,11 @@ pub fn settings_ts() -> String {
 
     let mut ts = String::from(HEADER);
     let keys: Vec<String> = rows.iter().map(|(key, ..)| quote(key)).collect();
-    let _ = writeln!(ts, "export type SettingKey =\n  | {};\n", keys.join("\n  | "));
+    let _ = writeln!(
+        ts,
+        "export type SettingKey =\n  | {};\n",
+        keys.join("\n  | ")
+    );
     ts.push_str("/** Every setting, as the wasm `SousSettings` class types it. */\n");
     ts.push_str("export interface SousSettingsValues {\n");
     for (key, value, _) in &rows {
@@ -443,7 +620,11 @@ pub fn settings_ts() -> String {
     }
     ts.push_str("}\n\n");
     ts.push_str(SPEC);
-    let _ = writeln!(ts, "export const SETTING_KEYS: readonly SettingKey[] = [\n  {},\n];\n", keys.join(",\n  "));
+    let _ = writeln!(
+        ts,
+        "export const SETTING_KEYS: readonly SettingKey[] = [\n  {},\n];\n",
+        keys.join(",\n  ")
+    );
     ts.push_str("export const SOUS_SETTINGS: { readonly [K in SettingKey]: SettingSpec<K> } = {\n");
     for (key, value, entry) in &rows {
         let kind = match entry.kind {
@@ -488,7 +669,9 @@ pub fn settings_ts() -> String {
     }
     ts.push_str("    };\n  } finally {\n    handle.free();\n  }\n}\n\n");
     ts.push_str("/** Replaces every setting; the next publication judges with them. */\n");
-    ts.push_str("export function toSettings(galley: SettingsHost, values: SousSettingsValues): void {\n");
+    ts.push_str(
+        "export function toSettings(galley: SettingsHost, values: SousSettingsValues): void {\n",
+    );
     ts.push_str("  const handle = galley.config();\n  try {\n");
     for (key, ..) in &rows {
         let _ = writeln!(ts, "    handle.{key} = values.{key};");

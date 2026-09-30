@@ -19,7 +19,9 @@ const CATALOG: &str = include_str!("../sous-messages.en.json");
 
 /// The block from `start` to the first line that is exactly `end`.
 fn block<'a>(source: &'a str, start: &str, end: &str) -> &'a str {
-    let at = source.find(start).unwrap_or_else(|| panic!("no `{start}` in sous-messages.ts"));
+    let at = source
+        .find(start)
+        .unwrap_or_else(|| panic!("no `{start}` in sous-messages.ts"));
     let rest = &source[at + start.len()..];
     let body = &rest[rest.find('\n').map_or(rest.len(), |n| n + 1)..];
     let stop = body
@@ -41,7 +43,11 @@ fn message_ids() -> BTreeSet<String> {
     union
         .lines()
         .filter_map(|line| line.trim().strip_prefix('|'))
-        .map(|member| quoted(member).expect("a MessageId member is a string").to_owned())
+        .map(|member| {
+            quoted(member)
+                .expect("a MessageId member is a string")
+                .to_owned()
+        })
         .collect()
 }
 
@@ -71,10 +77,18 @@ fn declared_params() -> BTreeMap<String, BTreeSet<String>> {
         .filter(|line| line.trim_start().starts_with('"'))
         .map(|line| {
             let id = quoted(line).expect("an id").to_owned();
-            let ty = line.split_once(": ").expect("`id: type`").1.trim_end_matches(';');
+            let ty = line
+                .split_once(": ")
+                .expect("`id: type`")
+                .1
+                .trim_end_matches(';');
             let close = ty.rfind('}').expect("an object type");
             let mut names = fields(&ty[..=close]);
-            for extra in ty[close + 1..].split('&').map(str::trim).filter(|s| !s.is_empty()) {
+            for extra in ty[close + 1..]
+                .split('&')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
                 names.extend(alias(extra));
             }
             (id, names)
@@ -87,7 +101,11 @@ fn catalog() -> BTreeMap<String, String> {
     let mut chars = CATALOG.trim().chars().peekable();
     let mut out = BTreeMap::new();
     let string = |chars: &mut std::iter::Peekable<std::str::Chars<'_>>| -> String {
-        assert_eq!(chars.next(), Some('"'), "a catalog key or value is a string");
+        assert_eq!(
+            chars.next(),
+            Some('"'),
+            "a catalog key or value is a string"
+        );
         let mut s = String::new();
         loop {
             match chars.next().expect("an unterminated catalog string") {
@@ -107,7 +125,10 @@ fn catalog() -> BTreeMap<String, String> {
         }
     };
     let skip = |chars: &mut std::iter::Peekable<std::str::Chars<'_>>| {
-        while chars.next_if(|c| c.is_whitespace() || *c == ',' || *c == ':').is_some() {}
+        while chars
+            .next_if(|c| c.is_whitespace() || *c == ',' || *c == ':')
+            .is_some()
+        {}
     };
     assert_eq!(chars.next(), Some('{'), "the catalog is one object");
     loop {
@@ -118,7 +139,10 @@ fn catalog() -> BTreeMap<String, String> {
         let key = string(&mut chars);
         skip(&mut chars);
         let value = string(&mut chars);
-        assert!(out.insert(key.clone(), value).is_none(), "{key} is in the catalog twice");
+        assert!(
+            out.insert(key.clone(), value).is_none(),
+            "{key} is in the catalog twice"
+        );
     }
 }
 
@@ -132,7 +156,11 @@ struct Icu<'a> {
 
 impl Icu<'_> {
     fn parse(text: &str) -> Result<BTreeSet<String>, String> {
-        let mut icu = Icu { text: text.as_bytes(), at: 0, names: BTreeSet::new() };
+        let mut icu = Icu {
+            text: text.as_bytes(),
+            at: 0,
+            names: BTreeSet::new(),
+        };
         icu.message()?;
         if icu.at != icu.text.len() {
             return Err(format!("a stray `}}` at byte {}", icu.at));
@@ -164,7 +192,11 @@ impl Icu<'_> {
             self.at += 1;
         }
         let start = self.at;
-        while self.text.get(self.at).is_some_and(|b| !b",{}".contains(b) && !b.is_ascii_whitespace()) {
+        while self
+            .text
+            .get(self.at)
+            .is_some_and(|b| !b",{}".contains(b) && !b.is_ascii_whitespace())
+        {
             self.at += 1;
         }
         let word = String::from_utf8_lossy(&self.text[start..self.at]).into_owned();
@@ -255,17 +287,30 @@ fn every_catalog_argument_is_a_declared_parameter() {
     let declared = declared_params();
     for (id, text) in catalog() {
         let used = Icu::parse(&text).unwrap_or_else(|why| panic!("{id}: {why}"));
-        let params = declared.get(&id).unwrap_or_else(|| panic!("{id} declares no parameters"));
+        let params = declared
+            .get(&id)
+            .unwrap_or_else(|| panic!("{id} declares no parameters"));
         let unknown: Vec<_> = used.difference(params).collect();
-        assert!(unknown.is_empty(), "{id} reads {unknown:?}, which describe never provides");
+        assert!(
+            unknown.is_empty(),
+            "{id} reads {unknown:?}, which describe never provides"
+        );
     }
 }
 
 #[test]
 fn the_catalog_never_says_what_the_guide_forbids() {
     const FORBIDDEN: [&str; 10] = [
-        "error", "wrong", "unconventional", "channel", "run shape", "placement", "nonletter",
-        "band", "basis point", "site",
+        "error",
+        "wrong",
+        "unconventional",
+        "channel",
+        "run shape",
+        "placement",
+        "nonletter",
+        "band",
+        "basis point",
+        "site",
     ];
     for (id, text) in catalog() {
         let lower = text.to_lowercase();
@@ -274,7 +319,9 @@ fn the_catalog_never_says_what_the_guide_forbids() {
             let said = if word.contains(' ') {
                 lower.contains(word)
             } else {
-                words.iter().any(|w| w.strip_suffix('s').unwrap_or(w) == word || *w == word)
+                words
+                    .iter()
+                    .any(|w| w.strip_suffix('s').unwrap_or(w) == word || *w == word)
             };
             assert!(!said, "{id} says “{word}”");
         }
@@ -284,7 +331,9 @@ fn the_catalog_never_says_what_the_guide_forbids() {
 /// The parser itself: a nested branch, a styled number, and the refusals.
 #[test]
 fn the_icu_reader_finds_names_and_refuses_bad_shapes() {
-    let names = Icu::parse("{a} {n, plural, one {only {b}} other {# of {c, number, ::percent .#}}}").unwrap();
+    let names =
+        Icu::parse("{a} {n, plural, one {only {b}} other {# of {c, number, ::percent .#}}}")
+            .unwrap();
     assert_eq!(names, ["a", "b", "c", "n"].map(String::from).into());
     assert!(Icu::parse("{s, select, x {y}}").is_err(), "no other");
     assert!(Icu::parse("{a").is_err(), "unclosed");
