@@ -597,7 +597,7 @@ function readClusterSection(
       return bad("atoms");
     }
     if (last !== null) {
-      const [held, heldCount] = last;
+      const [held, heldCount]: [number, number] = last;
       const run = byPattern.get(pattern)?.length ?? 0;
       if (pattern < held || (pattern === held && (occurrences > heldCount || run === CLUSTERS_PER_ROW))) {
         return bad("order");
