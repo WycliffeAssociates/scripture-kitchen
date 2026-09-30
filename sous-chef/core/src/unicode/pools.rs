@@ -195,3 +195,10 @@ pub(super) static CLOSERS: &[u32] = &[
     0x0FE3E, 0x0FE40, 0x0FE48, 0x0FE5A, 0x0FE5C, 0x0FE5E,
     0x0FF09, 0x0FF3D, 0x0FF5D, 0x0FF60,
 ];
+
+/// The 4 `Po` scalars among the quotes, sorted: a quote that does not say
+/// whether it opens or closes. `is_directionless_quote` binary searches it.
+#[rustfmt::skip]
+pub(super) static DIRECTIONLESS: &[u32] = &[
+    0x00022, 0x00027, 0x0FF02, 0x0FF07,
+];

@@ -16,6 +16,8 @@
 //!                                      categories, no row a Class bit fixes
 //!                        CLOSERS       sorted `Pe` scalars that pool as a
 //!                                      bracket
+//!                        DIRECTIONLESS sorted `Po` scalars that pool as a
+//!                                      quote: `"`, `'`, and their fullwidths
 //! ```
 //!
 //! Never a `build.rs`: both tables are committed, reviewable artifacts, and a
@@ -52,8 +54,9 @@ fn main() -> std::io::Result<()> {
         .map_or_else(|| manifest.join("src/unicode/pools.rs"), PathBuf::from);
     std::fs::write(&table, rendered)?;
     let pools = pools(&ucd);
-    let closers = closers(&ucd, &pools);
-    std::fs::write(&pools_out, render_pools(&pools, &closers))?;
+    let closers = in_pool(&ucd, &pools, "Pe", 1);
+    let directionless = in_pool(&ucd, &pools, "Po", 0);
+    std::fs::write(&pools_out, render_pools(&pools, &closers, &directionless))?;
     Ok(())
 }
 
@@ -202,17 +205,19 @@ fn pools(ucd: &Path) -> Vec<(u32, u8)> {
         .collect()
 }
 
-/// Every `Pe` scalar the pool table calls a bracket: the brackets that close.
-fn closers(ucd: &Path, pools: &[(u32, u8)]) -> Vec<u32> {
+/// Every scalar of general category `category` the pool table puts in pool
+/// `pool`: `Pe` brackets are the brackets that close, `Po` quotes the quotes
+/// that neither open nor close.
+fn in_pool(ucd: &Path, pools: &[(u32, u8)], category: &str, pool: u8) -> Vec<u32> {
     let mut out = Vec::new();
     for_each_range(
         &ucd.join("DerivedGeneralCategory.txt"),
         |property, lo, hi| {
-            if property == "Pe" {
+            if property == category {
                 out.extend((lo..=hi.min(MAX_CP)).filter(|cp| {
                     pools
                         .binary_search_by_key(cp, |row| row.0)
-                        .is_ok_and(|at| pools[at].1 == 1)
+                        .is_ok_and(|at| pools[at].1 == pool)
                 }));
             }
         },
@@ -231,7 +236,7 @@ fn paint(ucd: &Path, file: &str, wanted: &[&str], value: u8, pool: &mut [u8]) {
     });
 }
 
-fn render_pools(rows: &[(u32, u8)], closers: &[u32]) -> String {
+fn render_pools(rows: &[(u32, u8)], closers: &[u32], directionless: &[u32]) -> String {
     let mut out = String::with_capacity(1 << 16);
     let _ = write!(
         out,
@@ -263,7 +268,21 @@ fn render_pools(rows: &[(u32, u8)], closers: &[u32]) -> String {
          pub(super) static CLOSERS: &[u32] = &[\n",
         closers.len(),
     );
-    for chunk in closers.chunks(6) {
+    emit_scalars(&mut out, closers);
+    let _ = write!(
+        out,
+        "\n/// The {} `Po` scalars among the quotes, sorted: a quote that does not say\n\
+         /// whether it opens or closes. `is_directionless_quote` binary searches it.\n\
+         #[rustfmt::skip]\n\
+         pub(super) static DIRECTIONLESS: &[u32] = &[\n",
+        directionless.len(),
+    );
+    emit_scalars(&mut out, directionless);
+    out
+}
+
+fn emit_scalars(out: &mut String, scalars: &[u32]) {
+    for chunk in scalars.chunks(6) {
         out.push_str("   ");
         for cp in chunk {
             let _ = write!(out, " 0x{cp:05X},");
@@ -271,7 +290,6 @@ fn render_pools(rows: &[(u32, u8)], closers: &[u32]) -> String {
         out.push('\n');
     }
     out.push_str("];\n");
-    out
 }
 
 // ── Emission ─────────────────────────────────────────────────────────────

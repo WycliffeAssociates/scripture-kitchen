@@ -256,7 +256,7 @@ test("decodes the pattern table the judge published", () => {
     {
       glyph: 0x3f,
       channel: "ExactNeighbor",
-      key: { kind: "ExactNeighbor", neighbor: 0x2e },
+      key: { kind: "ExactNeighbor", neighbor: 0x2e, directionless: false },
       band: 2,
       numerator: 3,
       denominator: 403,
@@ -286,8 +286,8 @@ test("decodes the pattern table the judge published", () => {
       books: 1,
       usual: { kind: "RunShape", pure: true, bucket: 1, count: 598 },
       clusters: [
-        { text: ",'\"'", count: 7, recurring: true, truncated: false },
-        { text: ",..,", count: 1, recurring: false, truncated: false },
+        { text: ",'\"'", count: 7, recurring: true, truncated: false, directionless: true },
+        { text: ",..,", count: 1, recurring: false, truncated: false, directionless: false },
       ],
     },
     {

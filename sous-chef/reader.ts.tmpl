@@ -169,12 +169,23 @@ export type ConventionReason = (typeof CONVENTION_REASONS)[number];
 export const CASING_FORMS = [@@CASING_FORMS@@] as const;
 export type CasingForm = (typeof CASING_FORMS)[number];
 
+/** The quotation marks that do not say whether they open or close: general
+ * category `Po` in the `Quote` pool (`"`, `'`, and their fullwidth forms). No
+ * order of marks around one is a swap of another, since the same `"` may open
+ * one quotation and close the next. */
+export const DIRECTIONLESS_QUOTES: readonly number[] = [@@DIRECTIONLESS_QUOTES@@];
+
+export function isDirectionlessQuote(scalar: number): boolean {
+  return DIRECTIONLESS_QUOTES.includes(scalar);
+}
+
 /** The run lengths a `LetterRun` key byte may name; the last one saturates. */
 export const LETTER_RUN_MIN = @@LETTER_RUN_MIN@@;
 export const LETTER_RUN_MAX = @@LETTER_RUN_MAX@@;
 
 export type PatternKey =
-  | { readonly kind: "ExactNeighbor"; readonly neighbor: number }
+  /** `directionless`: the glyph or the neighbour is a directionless quote. */
+  | { readonly kind: "ExactNeighbor"; readonly neighbor: number; readonly directionless: boolean }
   | { readonly kind: "PooledNeighbor"; readonly pool: Pool }
   | { readonly kind: "RunShape"; readonly pure: boolean; readonly bucket: number }
   | { readonly kind: "Placement"; readonly side: "prev" | "next"; readonly class: OuterClass }
@@ -220,6 +231,8 @@ export interface Cluster {
   /** It occurs often enough to be a convention, so the row does not count it. */
   readonly recurring: boolean;
   readonly truncated: boolean;
+  /** It holds a directionless quote. */
+  readonly directionless: boolean;
 }
 
 /** One corpus-level pattern: a glyph, the channel that convicted it, the
@@ -432,7 +445,11 @@ function readPattern(view: DataView, at: number, row: number, bookCount: number)
     if (!isScalar(neighbor)) {
       return fail(`pattern row ${row} has an invalid neighbor`);
     }
-    key = { kind: "ExactNeighbor", neighbor };
+    key = {
+      kind: "ExactNeighbor",
+      neighbor,
+      directionless: isDirectionlessQuote(glyph) || isDirectionlessQuote(neighbor),
+    };
   } else {
     if (neighbor !== 0) {
       return fail(`pattern row ${row} has an invalid neighbor`);
@@ -630,6 +647,7 @@ function readCluster(view: DataView, entry: ClusterEntry): Cluster {
     count: u32(view, entry.at + CLUSTER_COUNT_OFFSET),
     recurring: (flags & CLUSTER_RECURRING) !== 0,
     truncated: (flags & CLUSTER_TRUNCATED) !== 0,
+    directionless: scalars.some(isDirectionlessQuote),
   };
 }
 

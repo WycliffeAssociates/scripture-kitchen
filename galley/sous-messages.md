@@ -61,8 +61,9 @@ DEU 7:17   …how can I dispossess them?'— \v 18 do not be afraid…
            ['] is followed directly by [—] here (['—]). When another mark follows ['],
            it is usually ["] (416 of 496 times). ['—] appears 6 times, in 5 of 66 books.
 GEN 48:20  …like Ephraim and like Manasseh'." \m In this way…
-           ['] comes right before [.] here (['.]). This project writes them the other way
-           round, [.'], 974 times; ['.] appears 3 times.
+           ['] is followed directly by [.] here (['.]). When another mark follows ['],
+           it is usually ["] (416 of 496 times). ['.] appears 3 times, in 3 of 66 books.
+           (No swap claim: a straight quote does not say whether it opens or closes.)
 EXO 38:26  …those twenty years old and older—603,550 men in all.
            [—] comes right before a digit here, with nothing between. Usually [—] is followed
            right away by a letter (1,341 of 1,795 times). This happens 2 times, in 2 of 66 books.
@@ -150,7 +151,7 @@ Questions below: **1** seen, **2** how often, **3** normal instead,
 | `convention.bookRate.follows` | one book puts the glyph after a class far more often than the others | `glyph` `digit` `neighbor` (1); `count` `total` `rate` `book` (2); `baseline` `otherBooks` (3, 4) | [—] comes right after a space here, with nothing between. In JER this happens 86 of 371 times (23%); in most of the other 50 books that use [—], it never happens. |
 | `convention.bookRate.precedes` | the same on its right | as above | [,] comes right before a punctuation mark here, with nothing between. In MAL this happens 23 of 138 times (17%); in the other 65 books that use [,], it typically happens 0.5% of the time. |
 | `convention.exactNeighbor` | the glyph is directly followed by a mark it rarely precedes | `glyph` `neighbor` `pair` (1); `count` `total` (2); `usual` `usualCount` (3); `books` `bookTotal` (4); `reversed` `reversedPair` unused | [?] is followed directly by [,] here ([?,]). When another mark follows [?], it is usually ["] (895 of 1,073 times). [?,] appears only here. |
-| `convention.exactNeighbor.swapped` | the same pair, which the project writes the other way round at least as often and at least 5 times | `glyph` `neighbor` `pair` (1); `count` (2); `reversedPair` `reversed` (3) | ['] comes right before [.] here (['.]). This project writes them the other way round, [.'], 974 times; ['.] appears 3 times. |
+| `convention.exactNeighbor.swapped` | the same pair, which the project writes the other way round at least as often and at least 5 times; never when either mark is a directionless quote (`"`, `'`), which cannot say whether it opens or closes | `glyph` `neighbor` `pair` (1); `count` (2); `reversedPair` `reversed` (3) | (curly quotes) [”] comes right before [.] here ([”.]). This project writes them the other way round, [.”], 974 times; [”.] appears 3 times. |
 | `convention.pooledNeighbor` | the glyph is directly followed by a kind of mark it rarely precedes (off by default) | `glyph` `pool` (1); `count` `total` (2); `books` `bookTotal` (4) | ['] is followed directly by a dash here. Of the 496 times another mark follows ['], this kind of mark follows it 6 times, in 5 of 66 books. |
 | `convention.runShape` | the glyph sits in a group of marks the project rarely writes | `cluster` `size` `atLeast` `sameMark` `glyph` `clusterCount` (1); `count` `total` (2); `usualCluster` `usualClusterCount` `hasUsualCluster` `usualSize` `usualAtLeast` `usualSameMark` `usualShapeCount` `usually` (3); `books` `bookTotal` (4) | [;'] is a group of 2 marks, [;] among them, and this exact group appears 3 times. This project usually writes [';] (7 times). [;] usually stands alone (4,878 of 4,904 times). Unusual groups of this size holding [;] appear 5 times, in 1 of 66 books. |
 | `convention.rarity` | a character the project almost never uses | `glyph` (1); `count` (2); `hasUsual` `usual` `usualCount` (3); `books` `bookTotal` (4) | [–] appears only once in this whole project. The most common mark of the same kind is [—] (1,795 times). |

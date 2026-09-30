@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 use mise::unicode::{Class, bits, class_of, lookup::trie_at};
 
-use super::{Pool, closes, pool_of};
+use super::{Pool, closes, is_directionless_quote, pool_of};
 
 fn ucd(file: &str) -> String {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -242,27 +242,48 @@ fn the_pool_table_matches_a_fresh_ucd_parse_for_every_scalar() {
     );
 }
 
-/// The closers, re-derived: every `Pe` line of the extract, kept where the
-/// pool is a bracket.
-#[test]
-fn the_closers_are_the_pe_brackets_for_every_scalar() {
+/// Every scalar of one general category, re-read from the extract.
+fn category(wanted: &str) -> Vec<bool> {
     let text = ucd("DerivedGeneralCategory.txt");
-    let mut pe = vec![false; 0x11_0000];
+    let mut out = vec![false; 0x11_0000];
     for line in text.lines() {
         let body = line.split('#').next().unwrap_or("");
         let mut fields = body.split(';').map(str::trim);
-        let (Some(scalars), Some("Pe")) = (fields.next(), fields.next()) else {
+        let (Some(scalars), Some(category)) = (fields.next(), fields.next()) else {
             continue;
         };
+        if category != wanted {
+            continue;
+        }
         let mut ends = scalars.split("..");
         let lo = u32::from_str_radix(ends.next().expect("a low scalar"), 16).unwrap();
         let hi = ends
             .next()
             .map_or(lo, |hi| u32::from_str_radix(hi, 16).unwrap());
         for cp in lo..=hi {
-            pe[cp as usize] = true;
+            out[cp as usize] = true;
         }
     }
+    out
+}
+
+/// The directionless quotes, re-derived: `Po` where the pool is a quote.
+#[test]
+fn the_directionless_quotes_are_the_po_quotes_for_every_scalar() {
+    let po = category("Po");
+    for c in scalars() {
+        let want = po[c as usize] && pool_of(c) == Pool::Quote;
+        assert_eq!(is_directionless_quote(c), want, "U+{:04X}", c as u32);
+    }
+    assert!(is_directionless_quote('"') && is_directionless_quote('\''));
+    assert!(!is_directionless_quote('\u{201D}') && !is_directionless_quote('\u{AB}'));
+}
+
+/// The closers, re-derived: every `Pe` line of the extract, kept where the
+/// pool is a bracket.
+#[test]
+fn the_closers_are_the_pe_brackets_for_every_scalar() {
+    let pe = category("Pe");
     for c in scalars() {
         let want = pe[c as usize] && pool_of(c) == Pool::Bracket;
         assert_eq!(closes(c), want, "U+{:04X}", c as u32);

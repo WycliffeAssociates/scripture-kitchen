@@ -122,3 +122,22 @@ pub fn pool_of(c: char) -> Pool {
 pub fn closes(c: char) -> bool {
     pools::CLOSERS.binary_search(&(c as u32)).is_ok()
 }
+
+/// Whether a scalar is a quotation mark that does not say whether it opens or
+/// closes: general category `Po` within [`Pool::Quote`], where the curly and
+/// angle quotes are `Pi`, `Pf`, `Ps` or `Pe`.
+///
+/// ```text
+/// is_directionless_quote('"')        → true
+/// is_directionless_quote('\u{FF07}') → true    // fullwidth apostrophe
+/// is_directionless_quote('\u{201D}') → false   // ” is Pf
+/// ```
+pub fn is_directionless_quote(c: char) -> bool {
+    pools::DIRECTIONLESS.binary_search(&(c as u32)).is_ok()
+}
+
+/// Every directionless quote, ascending; the generated reader carries the same
+/// list.
+pub fn directionless_quotes() -> &'static [u32] {
+    pools::DIRECTIONLESS
+}

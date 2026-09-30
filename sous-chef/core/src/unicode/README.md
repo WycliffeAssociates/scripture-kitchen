@@ -141,6 +141,16 @@ closes('(')         → false
 closes('\u{300D}')  → false
 ```
 
+And `DIRECTIONLESS`, the 4 `Po` scalars among the quotes (`"`, `'`, `＂`,
+`＇`), for `is_directionless_quote`: a quote that does not say whether it
+opens or closes, so no order of marks around it is a swap of another.
+`codegen` copies the list into the generated reader as `DIRECTIONLESS_QUOTES`.
+
+```text
+is_directionless_quote('"')        → true
+is_directionless_quote('\u{201D}') → false   // ” is Pf
+```
+
 ## The atom rule
 
 An *atom* is a base scalar plus everything that cannot stand without it.
@@ -175,6 +185,7 @@ the dev-dependency oracle.
 | `tests::the_bit_list_is_the_one_the_charter_authorizes` | one named scalar per bit |
 | `tests::the_pool_table_matches_a_fresh_ucd_parse_for_every_scalar` | `pool_of` equals an independent re-parse of the extracts, for all 0x110000 scalars, and no `Nd` is claimed by a punctuation pool |
 | `tests::the_closers_are_the_pe_brackets_for_every_scalar` | `closes` equals `Pe` within `Pool::Bracket`, re-parsed from the extract |
+| `tests::the_directionless_quotes_are_the_po_quotes_for_every_scalar` | `is_directionless_quote` equals `Po` within `Pool::Quote`, re-parsed from the extract |
 | `tests::pool_precedence_is_first_match_wins` | one named scalar per pool, and `Pool::from_raw` round trips |
 | `tests/unicode_generator.rs` | a second generator run reproduces `table.rs` and `pools.rs` byte for byte |
 | `tests/atom_conformance.rs` | no atom boundary falls inside a `GraphemeBreakTest.txt` cluster; widening any sub-range of a cluster returns the whole cluster; the test tier holds no cluster the rule would split |

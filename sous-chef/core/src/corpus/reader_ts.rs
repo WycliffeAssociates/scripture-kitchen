@@ -18,7 +18,7 @@ use crate::words::{Form, LETTER_RUN_MAX, LETTER_RUN_MIN};
 
 /// Render the checked-in TypeScript reader from the Rust-owned wire schema.
 pub fn generated_reader_ts() -> String {
-    let substitutions: [(&str, String); 70] = [
+    let substitutions: [(&str, String); 71] = [
         ("@@MAGIC@@", format!("0x{MAGIC:08x}")),
         ("@@FORMAT_VERSION@@", FORMAT_VERSION.to_string()),
         ("@@FLAG_UTF16@@", FLAG_UTF16.to_string()),
@@ -139,6 +139,14 @@ pub fn generated_reader_ts() -> String {
         ("@@LETTER_RUN_MIN@@", LETTER_RUN_MIN.to_string()),
         ("@@LETTER_RUN_MAX@@", LETTER_RUN_MAX.to_string()),
         ("@@RUN_BUCKETS@@", RUN_BUCKETS.to_string()),
+        (
+            "@@DIRECTIONLESS_QUOTES@@",
+            crate::unicode::directionless_quotes()
+                .iter()
+                .map(|scalar| format!("0x{scalar:x}"))
+                .collect::<Vec<_>>()
+                .join(", "),
+        ),
         ("@@BOOK_RATE_MIN_BOOKS@@", BOOK_RATE_MIN_BOOKS.to_string()),
         (
             "@@CHANNELS@@",

@@ -207,11 +207,17 @@ function spelled(word: string, casing: CasingForm): string {
 }
 
 /** The recurring cluster to compare a site with: the same marks in another
- * order when the row lists one (`';` beside `;'`), else the most common. */
+ * order when the row lists one (`';` beside `;'`), else the most common other
+ * group. A directionless quote makes no order a swap, so a reordering of one
+ * is never picked. */
 function usualCluster(clusters: readonly Cluster[] | undefined, site: string): Cluster | undefined {
   const recurring = clusters?.filter((cluster) => cluster.recurring && cluster.text !== site) ?? [];
   const marks = (text: string) => [...text].sort().join("");
-  return recurring.find((cluster) => marks(cluster.text) === marks(site)) ?? recurring[0];
+  const reordered = (cluster: Cluster) => marks(cluster.text) === marks(site);
+  return (
+    recurring.find((cluster) => reordered(cluster) && !cluster.directionless) ??
+    recurring.find((cluster) => !reordered(cluster))
+  );
 }
 
 export function describe(finding: Finding, pattern: Pattern | undefined, context: MessageContext): Message {
@@ -289,7 +295,10 @@ function convention(pattern: Pattern, site: string, context: MessageContext): Me
     case "ExactNeighbor": {
       const neighbor = String.fromCodePoint(key.neighbor);
       const reversed = usual.kind === "ExactNeighbor" ? usual.reversed : 0;
-      const swapped = key.neighbor !== pattern.glyph && reversed >= pattern.numerator && reversed >= 5;
+      // `"...` opening a quotation, reversed, is `."` closing one: a
+      // directionless quote cannot be swapped.
+      const swapped =
+        !key.directionless && key.neighbor !== pattern.glyph && reversed >= pattern.numerator && reversed >= 5;
       return {
         id: swapped ? "convention.exactNeighbor.swapped" : "convention.exactNeighbor",
         params: {

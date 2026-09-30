@@ -177,7 +177,13 @@ the channel's domain is `InvalidPattern`. Rust reads them as `Pattern::usual`
 | every other channel | 0 | 0 | 0 |
 
 Ties go to the smallest value. `ExactNeighbor`'s `other_count` is the swap
-signal: `'.` against `.'` ×975 says the period usually goes inside the quote.
+signal: `.»` against `».` says the period usually goes inside the quote. It is
+no signal when either mark is a directionless quote (`"`, `'`, general
+category `Po`): NUM 21:14's `"...` opens a quotation, and `."` ×4,038 closes
+one. The generated reader carries that list as `DIRECTIONLESS_QUOTES`, from
+`unicode::is_directionless_quote`, and derives `directionless` on an
+`ExactNeighbor` key (glyph or neighbour) and on a cluster (any atom); no byte
+carries it.
 The generated reader checks every rule here but one: whether a `Rarity` usual
 shares the glyph's pool, which needs the pool table only Rust carries. It
 checks the letter, space and digit rule with `\p{Alphabetic}`, `\p{White_Space}`
