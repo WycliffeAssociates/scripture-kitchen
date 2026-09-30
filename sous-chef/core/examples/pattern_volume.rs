@@ -38,13 +38,14 @@ const CORPORA: &[&str] = &[
 const VREF: &str = "/Users/willkelly/Documents/Work/Code/scripture-sous-chef/corpora/vref";
 
 /// The channels a volume row splits by, in emission order.
-const CHANNELS: [Channel; 6] = [
+const CHANNELS: [Channel; 7] = [
     Channel::ExactNeighbor,
     Channel::PooledNeighbor,
     Channel::RunShape,
     Channel::Placement,
     Channel::Rarity,
     Channel::SentenceStart,
+    Channel::BookRate,
 ];
 
 fn corpora_dir() -> PathBuf {
@@ -57,7 +58,7 @@ fn main() {
 
     println!("### test tier (corpora/*.txt) ###\n");
     println!(
-        "{:<12}{:>8}{:>8}{:>8}{:>10}{:>8}{:>10}{:>8}{:>10}",
+        "{:<12}{:>8}{:>8}{:>8}{:>10}{:>8}{:>10}{:>8}{:>10}{:>10}",
         "corpus",
         "total",
         "exact",
@@ -66,7 +67,8 @@ fn main() {
         "mixed",
         "placement",
         "rarity",
-        "sentence"
+        "sentence",
+        "bookrate"
     );
     for name in CORPORA {
         let path = dir.join(format!("{name}.txt"));
@@ -195,7 +197,7 @@ fn mixed_run_shapes(patterns: &[Pattern]) -> usize {
 fn print_row(name: &str, patterns: &[Pattern]) {
     let counts = by_channel(patterns);
     println!(
-        "{:<12}{:>8}{:>8}{:>8}{:>10}{:>8}{:>10}{:>8}{:>10}",
+        "{:<12}{:>8}{:>8}{:>8}{:>10}{:>8}{:>10}{:>8}{:>10}{:>10}",
         name,
         patterns.len(),
         counts[0],
@@ -204,7 +206,8 @@ fn print_row(name: &str, patterns: &[Pattern]) {
         mixed_run_shapes(patterns),
         counts[3],
         counts[4],
-        counts[5]
+        counts[5],
+        counts[6]
     );
 }
 
