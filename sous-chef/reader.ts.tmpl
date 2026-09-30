@@ -545,9 +545,9 @@ function readPattern(view: DataView, at: number, row: number, bookCount: number)
       if ((high > 1 && !inside) || outer === undefined || (channel === "BookRate" && outer === "Edge")) {
         return fail(`pattern row ${row} has an invalid key`);
       }
-      const side = inside ? "both" : high === 1 ? "next" : "prev";
+      const side = high === 1 ? "next" : "prev";
       if (channel === "Placement") {
-        key = { kind: "Placement", side, class: outer };
+        key = { kind: "Placement", side: inside ? "both" : side, class: outer };
       } else {
         const book = u32(view, at + PATTERN_OTHER_COUNT_OFFSET);
         if (book >= bookCount) {
