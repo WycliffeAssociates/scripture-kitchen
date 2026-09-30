@@ -1,11 +1,13 @@
-//! `sous-messages.ts` and `sous-messages.en.json` name the same ids, and every
+//! `sous-messages.ts` and `sous-messages.en.json` name the same ids, every
 //! argument a catalog string reads is a parameter `describe` declares for
-//! that id in `ParamsById`.
+//! that id in `ParamsById`, and a `Glyph` parameter is shown inside `<g>` and
+//! nowhere else.
 //!
 //! ```text
-//! ts    "convention.wordLength": { word: string; count: number };
-//! json  "convention.wordLength": "“{word}” … {count, plural, one {…} other {# times}}."
-//!       arguments {word, count} ⊆ declared {word, count}   → ok
+//! ts    "convention.sentenceStart": { glyph: Glyph; word: string; upper: number } & Spread;
+//! json  "convention.sentenceStart": "After <g>{glyph}</g>, … Here “{word}” is lowercase."
+//!       arguments {glyph, word, upper, total} ⊆ declared   → ok
+//!       inside <g> {glyph} = the Glyph params read         → ok
 //! ```
 //!
 //! Both files are read as text: the TypeScript by its one-id-per-line blocks,
@@ -51,18 +53,18 @@ fn message_ids() -> BTreeSet<String> {
         .collect()
 }
 
-/// `{ a: T; b: U }` → `{a, b}`.
-fn fields(object: &str) -> BTreeSet<String> {
+/// `{ a: T; b: U }` → `{a: T, b: U}`.
+fn fields(object: &str) -> BTreeMap<String, String> {
     let inner = object.trim().trim_start_matches('{').trim_end_matches('}');
     inner
         .split(';')
         .filter_map(|field| field.split_once(':'))
-        .map(|(name, _)| name.trim().to_owned())
+        .map(|(name, ty)| (name.trim().to_owned(), ty.trim().to_owned()))
         .collect()
 }
 
 /// The fields of `type Name = { … };`.
-fn alias(name: &str) -> BTreeSet<String> {
+fn alias(name: &str) -> BTreeMap<String, String> {
     let start = format!("type {name} = ");
     let line = TS
         .lines()
@@ -71,7 +73,7 @@ fn alias(name: &str) -> BTreeSet<String> {
     fields(line.trim_end_matches(';'))
 }
 
-fn declared_params() -> BTreeMap<String, BTreeSet<String>> {
+fn declared_params() -> BTreeMap<String, BTreeMap<String, String>> {
     let body = block(TS, "export interface ParamsById {", "}");
     body.lines()
         .filter(|line| line.trim_start().starts_with('"'))
@@ -146,43 +148,78 @@ fn catalog() -> BTreeMap<String, String> {
     }
 }
 
-/// Every argument name an ICU message reads, refusing unbalanced braces and a
-/// `select` or `plural` with no `other`.
+/// The argument names an ICU message reads, split by whether a `<g>` tag
+/// holds them.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct Read {
+    names: BTreeSet<String>,
+    in_glyph: BTreeSet<String>,
+    outside: BTreeSet<String>,
+}
+
+/// Every argument name an ICU message reads, refusing unbalanced braces or
+/// tags, a tag other than `<g>`, and a `select` or `plural` with no `other`.
 struct Icu<'a> {
     text: &'a [u8],
     at: usize,
-    names: BTreeSet<String>,
+    tags: usize,
+    read: Read,
 }
 
 impl Icu<'_> {
-    fn parse(text: &str) -> Result<BTreeSet<String>, String> {
+    fn parse(text: &str) -> Result<Read, String> {
         let mut icu = Icu {
             text: text.as_bytes(),
             at: 0,
-            names: BTreeSet::new(),
+            tags: 0,
+            read: Read::default(),
         };
         icu.message()?;
         if icu.at != icu.text.len() {
             return Err(format!("a stray `}}` at byte {}", icu.at));
         }
-        Ok(icu.names)
+        Ok(icu.read)
     }
 
-    /// Text and arguments up to an unmatched `}` or the end.
+    /// Text, tags and arguments up to an unmatched `}` or the end. A tag
+    /// opened here closes here, as `intl-messageformat` requires.
     fn message(&mut self) -> Result<(), String> {
+        let open = self.tags;
         while let Some(&byte) = self.text.get(self.at) {
             match byte {
                 b'{' => {
                     self.at += 1;
                     self.argument()?;
                 }
-                b'}' => return Ok(()),
-                // `'{` quotes a brace; the catalog never needs one.
-                b'\'' if matches!(self.text.get(self.at + 1), Some(b'{' | b'}')) => {
-                    return Err("a quoted brace".into());
+                b'}' => break,
+                b'<' => self.tag(open)?,
+                // `'{` quotes a brace and `'<` a tag; the catalog needs neither.
+                b'\'' if matches!(self.text.get(self.at + 1), Some(b'{' | b'}' | b'<')) => {
+                    return Err("a quoted brace or tag".into());
                 }
                 _ => self.at += 1,
             }
+        }
+        if self.tags != open {
+            return Err(format!("a `<g>` never closed before byte {}", self.at));
+        }
+        Ok(())
+    }
+
+    /// `<g>` or `</g>`; `open` is the depth the enclosing message began at.
+    fn tag(&mut self, open: usize) -> Result<(), String> {
+        let rest = &self.text[self.at..];
+        if rest.starts_with(b"<g>") {
+            self.tags += 1;
+            self.at += 3;
+        } else if rest.starts_with(b"</g>") {
+            if self.tags == open {
+                return Err(format!("a `</g>` with no `<g>` at byte {}", self.at));
+            }
+            self.tags -= 1;
+            self.at += 4;
+        } else {
+            return Err(format!("a tag other than `<g>` at byte {}", self.at));
         }
         Ok(())
     }
@@ -222,7 +259,12 @@ impl Icu<'_> {
         if name.is_empty() {
             return Err(format!("an argument with no name at byte {}", self.at));
         }
-        self.names.insert(name.clone());
+        self.read.names.insert(name.clone());
+        if self.tags > 0 {
+            self.read.in_glyph.insert(name.clone());
+        } else {
+            self.read.outside.insert(name.clone());
+        }
         if self.text.get(self.at) == Some(&b'}') {
             self.at += 1;
             return Ok(());
@@ -290,11 +332,30 @@ fn every_catalog_argument_is_a_declared_parameter() {
         let params = declared
             .get(&id)
             .unwrap_or_else(|| panic!("{id} declares no parameters"));
-        let unknown: Vec<_> = used.difference(params).collect();
+        let unknown: Vec<_> = used
+            .names
+            .iter()
+            .filter(|name| !params.contains_key(*name))
+            .collect();
         assert!(
             unknown.is_empty(),
             "{id} reads {unknown:?}, which describe never provides"
         );
+    }
+}
+
+/// A mark in quotation marks cannot be read when the mark is one (`“"”`), so
+/// every `Glyph` is shown inside `<g>`, and `<g>` holds nothing else.
+#[test]
+fn every_glyph_is_shown_inside_a_glyph_tag_and_nothing_else_is() {
+    let declared = declared_params();
+    for (id, text) in catalog() {
+        let used = Icu::parse(&text).unwrap_or_else(|why| panic!("{id}: {why}"));
+        let glyph = |name: &String| declared[&id].get(name).is_some_and(|ty| ty == "Glyph");
+        let bare: Vec<_> = used.outside.iter().filter(|name| glyph(name)).collect();
+        assert!(bare.is_empty(), "{id} shows {bare:?} outside <g>");
+        let tagged: Vec<_> = used.in_glyph.iter().filter(|name| !glyph(name)).collect();
+        assert!(tagged.is_empty(), "{id} tags {tagged:?}, which is no Glyph");
     }
 }
 
@@ -328,14 +389,23 @@ fn the_catalog_never_says_what_the_guide_forbids() {
     }
 }
 
-/// The parser itself: a nested branch, a styled number, and the refusals.
+/// The parser itself: a nested branch, a styled number, tags, and the
+/// refusals.
 #[test]
 fn the_icu_reader_finds_names_and_refuses_bad_shapes() {
-    let names =
-        Icu::parse("{a} {n, plural, one {only {b}} other {# of {c, number, ::percent .#}}}")
-            .unwrap();
-    assert_eq!(names, ["a", "b", "c", "n"].map(String::from).into());
+    let read = Icu::parse(
+        "<g>{a}</g> {n, plural, one {only <g>{b}</g>} other {# of {c, number, ::percent .#}}}",
+    )
+    .unwrap();
+    let set = |names: &[&str]| names.iter().copied().map(String::from).collect();
+    assert_eq!(read.names, set(&["a", "b", "c", "n"]));
+    assert_eq!(read.in_glyph, set(&["a", "b"]));
+    assert_eq!(read.outside, set(&["c", "n"]));
     assert!(Icu::parse("{s, select, x {y}}").is_err(), "no other");
     assert!(Icu::parse("{a").is_err(), "unclosed");
     assert!(Icu::parse("a}").is_err(), "stray");
+    assert!(Icu::parse("<g>{a}").is_err(), "unclosed tag");
+    assert!(Icu::parse("{a}</g>").is_err(), "stray tag");
+    assert!(Icu::parse("<g>{n, plural, other {x</g>}}").is_err(), "a tag across a branch");
+    assert!(Icu::parse("<b>{a}</b>").is_err(), "a tag other than g");
 }

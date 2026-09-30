@@ -64,6 +64,10 @@ export type MessageParams = Record<string, string | number | boolean>;
 
 type Spread = { count: number; total: number; books: number; bookTotal: number };
 
+/** A mark, a cluster or a pair of marks. The catalog shows every one inside a
+ * `<g>` tag and never in quotation marks, since the mark may be one. */
+export type Glyph = string;
+
 /** Every parameter each id carries, one id per line; a catalog string may use
  * only these (`tests/sous_messages.rs` reads this block). */
 export interface ParamsById {
@@ -74,21 +78,21 @@ export interface ParamsById {
   "sourceCopy": { run: number; eligible: number };
   "length.long": { deviation: number; inBook: boolean };
   "length.short": { deviation: number; inBook: boolean };
-  "convention.exactNeighbor": { glyph: string; neighbor: string; pair: string; reversedPair: string; usual: string; usualCount: number; reversed: number } & Spread;
-  "convention.exactNeighbor.swapped": { glyph: string; neighbor: string; pair: string; reversedPair: string; usual: string; usualCount: number; reversed: number } & Spread;
-  "convention.pooledNeighbor": { glyph: string; pool: PoolName } & Spread;
-  "convention.runShape": { glyph: string; cluster: string; size: number; atLeast: boolean; sameMark: boolean; clusterCount: number; hasUsualCluster: boolean; usualCluster: string; usualClusterCount: number; usualSize: number; usualAtLeast: boolean; usualSameMark: boolean; usualShapeCount: number; usually: boolean } & Spread;
-  "convention.placement.follows": { glyph: string; digit: boolean; neighbor: TouchClass; usual: TouchClass; usualCount: number } & Spread;
-  "convention.placement.precedes": { glyph: string; digit: boolean; neighbor: TouchClass; usual: TouchClass; usualCount: number } & Spread;
-  "convention.rarity": { glyph: string; count: number; books: number; bookTotal: number; hasUsual: boolean; usual: string; usualCount: number };
+  "convention.exactNeighbor": { glyph: Glyph; neighbor: Glyph; pair: Glyph; reversedPair: Glyph; usual: Glyph; usualCount: number; reversed: number } & Spread;
+  "convention.exactNeighbor.swapped": { glyph: Glyph; neighbor: Glyph; pair: Glyph; reversedPair: Glyph; usual: Glyph; usualCount: number; reversed: number } & Spread;
+  "convention.pooledNeighbor": { glyph: Glyph; pool: PoolName } & Spread;
+  "convention.runShape": { glyph: Glyph; cluster: Glyph; size: number; atLeast: boolean; sameMark: boolean; clusterCount: number; hasUsualCluster: boolean; usualCluster: Glyph; usualClusterCount: number; usualSize: number; usualAtLeast: boolean; usualSameMark: boolean; usualShapeCount: number; usually: boolean } & Spread;
+  "convention.placement.follows": { glyph: Glyph; digit: boolean; neighbor: TouchClass; usual: TouchClass; usualCount: number } & Spread;
+  "convention.placement.precedes": { glyph: Glyph; digit: boolean; neighbor: TouchClass; usual: TouchClass; usualCount: number } & Spread;
+  "convention.rarity": { glyph: Glyph; count: number; books: number; bookTotal: number; hasUsual: boolean; usual: Glyph; usualCount: number };
   "convention.casing": { word: string; form: FormName; usualForm: FormName; usualWord: string; usualCount: number } & Spread;
   "convention.wordLength": { word: string; count: number };
   "convention.doubled.bare": { word: string; text: string } & Spread;
   "convention.doubled.separated": { word: string; text: string } & Spread;
-  "convention.letterRun": { letter: string; length: number; atLeast: boolean; run: string; word: string; count: number; total: number };
-  "convention.sentenceStart": { glyph: string; word: string; upper: number } & Spread;
-  "convention.bookRate.follows": { glyph: string; digit: boolean; neighbor: TouchClass; count: number; total: number; rate: number; book: string; baseline: number; otherBooks: number };
-  "convention.bookRate.precedes": { glyph: string; digit: boolean; neighbor: TouchClass; count: number; total: number; rate: number; book: string; baseline: number; otherBooks: number };
+  "convention.letterRun": { letter: Glyph; length: number; atLeast: boolean; run: Glyph; word: string; count: number; total: number };
+  "convention.sentenceStart": { glyph: Glyph; word: string; upper: number } & Spread;
+  "convention.bookRate.follows": { glyph: Glyph; digit: boolean; neighbor: TouchClass; count: number; total: number; rate: number; book: string; baseline: number; otherBooks: number };
+  "convention.bookRate.precedes": { glyph: Glyph; digit: boolean; neighbor: TouchClass; count: number; total: number; rate: number; book: string; baseline: number; otherBooks: number };
 }
 
 // `MessageId` and `ParamsById` name the same ids.
