@@ -115,23 +115,19 @@ EXO 38:26  …those twenty years old and older—603,550 men in all.
            [—] right before a digit appears only 2 times in this project.
            Usually [—] is followed right away by a letter (1,341 of 1,795 times). This happens
            in EXO and JDG.
-JER 22:16  …what it means to know me? \q2 —this is Yahweh's declaration.
-           [—] right after a space is far more common in JER than in the other books.
-           In JER this happens 86 of 371 times (23%); in most of the other 50 books that use
-           [—], it never happens.
 JOS 21:5   The rest of Kohath’s descendants…
            [’] appears only 2 times in this project; it writes ['] elsewhere (6,292 times).
            It is used in LEV and JOS. [’] and ['] look alike.
 JOB 3:8    Those who curse the day–may they curse it…
-           [–] appears only here in this project; it writes [-] elsewhere (847 times).
+           [–] appears only here in this project; it writes [-] elsewhere (843 times).
            It is used nowhere else. [–] and [-] look alike.
 JOB 12:23  …and he also destroys them; \q2 He enlarges nations…
            “He” is capitalized here; this project writes “he” (6,889 times).
-           Of its 6,894 uses in the middle of a sentence, this form appears 5 times, in 4 of 66
+           Of its 6,893 uses in the middle of a sentence, this form appears 4 times, in 3 of 66
            books. After [;], the next word is lowercase 4,367 of 4,891 times.
 EXO 3:14   God said to Moses, "I AM THAT I AM."
-           “THAT” is written in all capitals here; this project writes “that” (8,594 times).
-           Of its 8,595 uses in the middle of a sentence, this form appears only here.
+           “THAT” is written in all capitals here; this project writes “that” (8,593 times).
+           Of its 8,594 uses in the middle of a sentence, this form appears only here.
 JOB 41:15  …which are a terror? \q \v 15 his back is made up of rows of shields
            “his” is lowercase after [?] here; this project usually writes “His” there.
            After [?], this project capitalizes the next word 2,162 of 2,165 times. A lowercase

@@ -281,7 +281,7 @@ which: `);`×8, `';`×7 and `";`×6 recur and are conventions, and `;'`×3 and
 | --- | --- |
 | 0..2 | `pattern: u16` — the `RunShape` row this run is of |
 | 2 | `atom_count: u8` — atoms stored, `1..=16` |
-| 3 | `flags: u8` — bit 0 `RECURRING` (the run occurs at least `support_floor` times), bit 1 `TRUNCATED` (the run was longer than 16 atoms) |
+| 3 | `flags: u8` — bit 0 `RECURRING` (the run occurs at least `support_floor` times, or its sequence with the sentence-ending marks read as one does), bit 1 `TRUNCATED` (the run was longer than 16 atoms) |
 | 4..8 | `count: u32` — corpus occurrences of exactly this run |
 | 8.. | `atom_count` scalars, `u32` each |
 
