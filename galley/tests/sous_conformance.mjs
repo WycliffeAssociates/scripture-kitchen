@@ -241,6 +241,31 @@ const casingRows = (snapshot) =>
 eq(casingRows(cold), 1, "cold.bin holds the fixture's casing pattern");
 eq(casingRows(knobsSnap), 0, "the settings publication publishes none");
 
+// --- every finding has a message the catalog can render --------------------
+
+{
+  const { describe } = await import(resolve(here, "../sous-messages.ts"));
+  const catalog = JSON.parse(readFileSync(resolve(here, "../sous-messages.en.json"), "utf8"));
+  const texts = (edited) => (id) => fixture(edited && id === "books/GEN.usfm" ? "GEN-edited.usfm" : id.replace("books/", ""));
+  const ids = new Set();
+  for (const [snapshot, text] of [[cold, texts(false)], [edit, texts(true)], [knobsSnap, texts(false)]]) {
+    for (let index = 0; index < snapshot.length; index++) {
+      const book = snapshot.book(index);
+      const source = text(book.id);
+      for (let row = 0; row < book.count; row++) {
+        const finding = book.at(row);
+        const pattern = finding.kind === "Convention" ? snapshot.pattern(finding.convention.pattern) : undefined;
+        const siteText = source.slice(finding.from, finding.to);
+        const { id, params } = describe(finding, pattern, { siteText, bookCount: snapshot.length });
+        ids.add(id);
+        check(id in catalog, `${id} has a catalog entry`);
+        check(Object.values(params).every((v) => ["string", "number", "boolean"].includes(typeof v)), `${id}'s params are plain`);
+      }
+    }
+  }
+  console.log(`messages (${ids.size} ids): ${[...ids].sort().join(" ")}`);
+}
+
 // --- the find buffer, header first ----------------------------------------
 
 // `FIND` little-endian, then the layout version; a stale reader has to fail

@@ -8,6 +8,9 @@
     "pkg-bundler",
     "pkg-web",
     "sous-reader.ts",
+    "sous-messages.ts",
+    "sous-messages.en.json",
+    "sous-messages.md",
     "toc-reader.ts",
     "find-reader.ts",
     "mask-reader.ts",
@@ -29,6 +32,8 @@
     },
     "./web/wasm": "./pkg-web/usfm_galley_bg.wasm",
     "./sous-reader": "./sous-reader.ts",
+    "./sous-messages": "./sous-messages.ts",
+    "./sous-messages.en.json": "./sous-messages.en.json",
     "./toc-reader": "./toc-reader.ts",
     "./find-reader": "./find-reader.ts",
     "./mask-reader": "./mask-reader.ts"
