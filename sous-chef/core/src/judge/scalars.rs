@@ -29,13 +29,8 @@ pub(crate) fn judge_corpus(corpus: &[&BookAggregate], config: &JudgingConfig, ou
     } else {
         RunIndex::default()
     };
-    let placements = placement_evidence(corpus, &explained);
+    let placements = placement_evidence(corpus, &explained, config.channels.book_rate);
     let handoffs = follow_evidence(corpus);
-    let per_book = if config.channels.book_rate {
-        book_evidence(corpus)
-    } else {
-        FxHashMap::default()
-    };
     let other = OtherSide {
         explained: &explained,
         shapes: &shapes,
@@ -67,8 +62,8 @@ pub(crate) fn judge_corpus(corpus: &[&BookAggregate], config: &JudgingConfig, ou
         {
             sentence_start(*glyph, handoffs, config, out);
         }
-        if let Some(books) = per_book.get(glyph) {
-            book_rates(*glyph, books, config, out);
+        if config.channels.book_rate {
+            book_rates(*glyph, &marginals.books, config, out);
         }
     }
     cited.seal();
@@ -1088,6 +1083,9 @@ pub(super) struct PlacementEvidence {
     unexplained: [Tally; Side::ALL.len()],
     /// Occurrences with a letter on both sides.
     inside: Tally,
+    /// The same counts per book, books ascending, what [`book_rates`] compares;
+    /// empty when that channel is off.
+    books: Vec<BookCounts>,
 }
 
 /// Every glyph's marginals, and the digit edges a `Digit` row is judged against.
@@ -1136,30 +1134,6 @@ pub(super) struct BookCounts {
     sides: [[u64; OuterClass::ALL.len()]; Side::ALL.len()],
 }
 
-/// Every glyph's per-book placement counts, books ascending.
-pub(super) fn book_evidence(corpus: &[&BookAggregate]) -> FxHashMap<ScalarKey, Vec<BookCounts>> {
-    let mut out: FxHashMap<ScalarKey, Vec<BookCounts>> = FxHashMap::default();
-    for (book, aggregate) in corpus.iter().enumerate() {
-        let book = book as u32;
-        for &(key, count) in aggregate.pairs() {
-            let books = out.entry(key.scalar()).or_default();
-            if books.last().is_none_or(|last| last.book != book) {
-                books.push(BookCounts {
-                    book,
-                    occurrences: 0,
-                    sides: Default::default(),
-                });
-            }
-            let counts = books.last_mut().expect("just pushed");
-            counts.occurrences += u64::from(count);
-            for side in Side::ALL {
-                counts.sides[side as usize][class_on(key, side) as usize] += u64::from(count);
-            }
-        }
-    }
-    out
-}
-
 /// One glyph's handoffs: the merged counts, and the books holding part of the
 /// lowercase lane, which is the numerator [`Channel::SentenceStart`] reports.
 #[derive(Default)]
@@ -1188,13 +1162,15 @@ pub(super) fn follow_evidence(corpus: &[&BookAggregate]) -> FxHashMap<ScalarKey,
     out
 }
 
-/// Every book's pairs into one glyph-keyed table, ascending by glyph.
+/// Every book's pairs into one glyph-keyed table, ascending by glyph, with
+/// each glyph's per-book counts beside when `per_book`.
 ///
 /// An in-run pair is a `Nonletter` pair on both members, so the subtraction
 /// never goes below zero.
 pub(super) fn placement_evidence(
     corpus: &[&BookAggregate],
     explained: &Explained,
+    per_book: bool,
 ) -> PlacementTable {
     let mut out: FxHashMap<ScalarKey, PlacementEvidence> = FxHashMap::default();
     let mut numbers = [0u64; Side::ALL.len()];
@@ -1208,6 +1184,20 @@ pub(super) fn placement_evidence(
             evidence.denominator += count;
             if Side::Both.sees(key, OuterClass::Letter) {
                 evidence.inside.add(count, book);
+            }
+            if per_book {
+                if evidence.books.last().is_none_or(|last| last.book != book) {
+                    evidence.books.push(BookCounts {
+                        book,
+                        occurrences: 0,
+                        sides: Default::default(),
+                    });
+                }
+                let counts = evidence.books.last_mut().expect("just pushed");
+                counts.occurrences += count;
+                for side in Side::ALL {
+                    counts.sides[side as usize][class_on(key, side) as usize] += count;
+                }
             }
             for side in Side::ALL {
                 let class = class_on(key, side);
