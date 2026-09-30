@@ -152,6 +152,9 @@ chapter k  "… good."          chapter k+1  "Then he …"
 So the row records two open edges and the fold resolves them:
 
 - `outer` — the edge scalar's own class, which is all the neighbour needs.
+  A line break reads `Edge` ([`OuterClass::of`](mod.rs)), so a side whose
+  neighbour is one already holds its answer and the seam moves no pair
+  there; the follow still crosses, `one.\n | Two` hands `.` a capital.
 - `open_pair` — the edge scalar when it is a nonletter, with the one neighbour
   class it already knows. The fold decrements the triple that names `Edge`
   and increments the resolved one.

@@ -40,9 +40,7 @@ pub fn fold_book(book: &[ChapterObs<&ChapterRow>], carry: &mut Edge) -> BookAggr
             // An empty chapter is not a neighbor; the carry passes through it.
             continue;
         }
-        if carry.outer != OuterClass::Edge {
-            resolve_seam(&mut out, *carry, row.lead);
-        }
+        resolve_seam(&mut out, *carry, row.lead);
 
         let mut next = row.trail;
         if row.scalar_count == 1
@@ -62,8 +60,14 @@ pub fn fold_book(book: &[ChapterObs<&ChapterRow>], carry: &mut Edge) -> BookAggr
 
 /// One seam: the pair either side of it, the follow across it, and the word
 /// the masked `\c` split in two.
+///
+/// A side whose neighbour is itself `Edge` — the book's start, or a line
+/// break — already holds its answer. The follow still crosses: `one.\n` then
+/// `Two` hands `.` a capital.
 fn resolve_seam(out: &mut BookAggregate, trail: Edge, lead: Edge) {
-    if let Some((key, prev)) = trail.open_pair {
+    if lead.outer != OuterClass::Edge
+        && let Some((key, prev)) = trail.open_pair
+    {
         bump(
             &mut out.pairs,
             PairKey::new(key, prev, OuterClass::Edge),
@@ -71,7 +75,9 @@ fn resolve_seam(out: &mut BookAggregate, trail: Edge, lead: Edge) {
         );
         bump(&mut out.pairs, PairKey::new(key, prev, lead.outer), 1);
     }
-    if let Some((key, next)) = lead.open_pair {
+    if trail.outer != OuterClass::Edge
+        && let Some((key, next)) = lead.open_pair
+    {
         bump(
             &mut out.pairs,
             PairKey::new(key, OuterClass::Edge, next),

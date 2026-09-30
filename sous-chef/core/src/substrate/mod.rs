@@ -135,11 +135,23 @@ impl OuterClass {
     /// The order matters: whitespace first, then the pooled digit lane, then
     /// anything a word is built from.
     ///
+    /// ```text
+    /// "a ,b"      ',' prev=Space
+    /// "a\n—b"     '—' prev=Edge    a line break is structure, not a space
+    /// ```
+    ///
+    /// The projection writes paragraph and poetry markup as a newline, so a
+    /// mark after a line break starts a line the way one starts a book.
+    ///
     /// Glue answers `Letter` rather than its base's class, so a neighbour asks
     /// its immediate neighbour and never walks back over a mark.
-    pub const fn of(class: Class) -> Self {
+    pub const fn of(scalar: u32, class: Class) -> Self {
         if class.is_whitespace() {
-            Self::Space
+            if is_line_break(scalar) {
+                Self::Edge
+            } else {
+                Self::Space
+            }
         } else if class.is_decimal_digit() {
             Self::Digit
         } else if class.is_alphabetic() || class.is_glue() {
@@ -148,6 +160,13 @@ impl OuterClass {
             Self::Nonletter
         }
     }
+}
+
+/// LF, VT, FF, CR, NEL, and the line and paragraph separators: the
+/// whitespace that ends a line.
+#[inline]
+pub const fn is_line_break(scalar: u32) -> bool {
+    matches!(scalar, 0x0A..=0x0D | 0x85 | 0x2028 | 0x2029)
 }
 
 /// Not a letter, not glue, not whitespace: what the nonletter inventory
@@ -617,7 +636,7 @@ impl ChapterPass for Substrate {
     type Observation = ChapterRow;
     type Aggregate = BookAggregate;
     type Config = JudgingConfig;
-    const SCHEMA: SchemaStamp = SchemaStamp::new(5);
+    const SCHEMA: SchemaStamp = SchemaStamp::new(6);
 
     fn map(&self, chapter: ChapterInput<'_>) -> ChapterRow {
         walk::walk(chapter.text, chapter.verses)

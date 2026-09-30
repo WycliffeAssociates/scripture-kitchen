@@ -482,13 +482,13 @@ impl<'a> Cursor<'a> {
             .chars()
             .next_back()
         {
-            return OuterClass::of(class_of(scalar));
+            return OuterClass::of(scalar as u32, class_of(scalar));
         }
         // An empty chapter is not a neighbour; the fold passes the seam
         // through it untouched.
         for earlier in self.chapters[..chapter].iter().rev() {
             if let Some(scalar) = self.slice(earlier).chars().next_back() {
-                return OuterClass::of(class_of(scalar));
+                return OuterClass::of(scalar as u32, class_of(scalar));
             }
         }
         OuterClass::Edge
@@ -504,11 +504,11 @@ impl<'a> Cursor<'a> {
         let mut rest = self.text[at as usize..span.to() as usize].chars();
         rest.next();
         if let Some(scalar) = rest.next() {
-            return OuterClass::of(class_of(scalar));
+            return OuterClass::of(scalar as u32, class_of(scalar));
         }
         for later in &self.chapters[chapter + 1..] {
             if let Some(scalar) = self.slice(later).chars().next() {
-                return OuterClass::of(class_of(scalar));
+                return OuterClass::of(scalar as u32, class_of(scalar));
             }
         }
         OuterClass::Edge
@@ -1002,5 +1002,16 @@ mod tests {
         assert_eq!(cursor.next_outer(2), OuterClass::Letter);
         assert_eq!(cursor.run_around(1), TextRange::new(1, 2).unwrap());
         assert_eq!(cursor.run_around(0), TextRange::new(0, 0).unwrap());
+    }
+
+    /// A line break reads `Edge`, as the walk counts it, and a space `Space`.
+    #[test]
+    fn the_cursor_reads_a_line_break_as_an_edge() {
+        let text = "a\n\u{2014}b \u{2014}c";
+        let spans = whole(text);
+        let cursor = Cursor::new(text, &spans);
+        assert_eq!(cursor.prev_outer(2), OuterClass::Edge);
+        assert_eq!(cursor.next_outer(0), OuterClass::Edge);
+        assert_eq!(cursor.prev_outer(7), OuterClass::Space);
     }
 }

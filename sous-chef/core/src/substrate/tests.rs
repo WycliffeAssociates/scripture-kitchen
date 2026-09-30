@@ -221,6 +221,30 @@ fn a_seam_resolves_to_the_counts_of_the_unsplit_text() {
     assert_seam_agrees("one.) two", &["one.", ") two"]);
     assert_seam_agrees("one. ) two", &["one. ", ")", " two"]);
     assert_seam_agrees("one.\u{201D}) two", &["one.\u{201D}", ") two"]);
+    // A line break is an edge on either side of a seam, and the follow
+    // still crosses it.
+    assert_seam_agrees("one.\nTwo", &["one.\n", "Two"]);
+    assert_seam_agrees("one.\nTwo", &["one.", "\nTwo"]);
+    assert_seam_agrees("a ,\n,b", &["a ,", "\n", ",b"]);
+    assert_seam_agrees("a\n,\nb", &["a\n", ",", "\nb"]);
+}
+
+/// A line break is structure: the projection writes `\q2` as a newline, so
+/// the dash that opens JER's poetry line is not "after a space".
+#[test]
+fn a_line_break_neighbour_is_an_edge_and_a_space_is_a_space() {
+    let row = row("a\n\u{2014}b c \u{2014}d e\u{2014}\r\nf\u{2028},");
+    assert_eq!(pair(&row, '\u{2014}', OuterClass::Edge, OuterClass::Letter), 1);
+    assert_eq!(pair(&row, '\u{2014}', OuterClass::Space, OuterClass::Letter), 1);
+    assert_eq!(pair(&row, '\u{2014}', OuterClass::Letter, OuterClass::Edge), 1);
+    assert_eq!(pair(&row, ',', OuterClass::Edge, OuterClass::Edge), 1);
+    let one = aggregate(&["one.\n", "Two"]);
+    let dot = one
+        .follows()
+        .iter()
+        .find(|entry| entry.0 == FollowKey::new(ScalarKey::of('.'), false))
+        .expect("the follow crosses the seam");
+    assert_eq!(dot.1.get(Case::Upper), 1);
 }
 
 /// A handoff is keyed by the last glyph that does not ride and by whether a

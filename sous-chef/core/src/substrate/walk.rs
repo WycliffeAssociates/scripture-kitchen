@@ -206,7 +206,7 @@ impl Counters {
         at: usize,
         width: usize,
     ) {
-        let outer = OuterClass::of(class);
+        let outer = OuterClass::of(cp, class);
         if hot.scalar_count == 0 {
             self.lead.outer = outer;
         }

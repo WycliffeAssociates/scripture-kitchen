@@ -43,7 +43,14 @@ A side fires on a class whose share is under the band.
 or end of a book has a neighbour that is a fact about the file, not about the
 language, so the edge side emits nothing and the glyph is judged by its other
 side — while the occurrence stays in the denominator both sides share, because
-it is still an occurrence. The rows stay per side; the collapse a reviewer
+it is still an occurrence. A line break is the same kind of fact: the
+projection writes paragraph and poetry markup as `\n`, so a mark beside one
+touches structure, not a space.
+
+```text
+JER   \q2 —this is Yahweh's declaration    '—' prev=Edge   counted, never fires
+ZEC   of hosts— and I will return          '—' next=Space  judged
+``` The rows stay per side; the collapse a reviewer
 wants happens at the site, where `Reasons::PLACEMENT_BEFORE | PLACEMENT_AFTER`
 ride one span.
 
