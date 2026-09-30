@@ -1,0 +1,104 @@
+cold.bin v1:f:hygiene:NoBreakSpace:GEN 1%3A3: :0
+cold.bin v1:s:GEN 1%3A3: :0
+cold.bin v1:f:p:Rarity:a0:GEN 1%3A3: :0
+cold.bin v1:s:GEN 1%3A3: :0
+cold.bin v1:f:p:Rarity:27:GEN 1%3A5:':0
+cold.bin v1:s:GEN 1%3A5:':0
+cold.bin v1:f:p:Doubled:cb1283631cf33d7d:bare:GEN 2%3A4:the the:0
+cold.bin v1:s:GEN 2%3A4:the the:0
+cold.bin v1:f:p:Casing:cb1283631cf33d7d:Title:GEN 2%3A11:The:1
+cold.bin v1:s:GEN 2%3A11:The:1
+cold.bin v1:f:p:Rarity:27:GEN 3%3A2:':0
+cold.bin v1:s:GEN 3%3A2:':0
+cold.bin v1:f:p:SentenceStart:2e:GEN 3%3A7:the:0
+cold.bin v1:s:GEN 3%3A7:the:0
+cold.bin v1:f:length:RUT 1%3A3:The seed of the field.%0A:0
+cold.bin v1:s:RUT 1%3A3:The seed of the field.%0A:0
+cold.bin v1:f:presence:Missing:RUT 2%3A10::0
+cold.bin v1:s:RUT 2%3A10::0
+cold.bin v1:f:p:Doubled:4fed9ffac6154f43:bare:JON 2%3A12:staff staff:0
+cold.bin v1:s:JON 2%3A12:staff staff:0
+edit.bin v1:f:hygiene:NoBreakSpace:GEN 1%3A3: :0
+edit.bin v1:s:GEN 1%3A3: :0
+edit.bin v1:f:p:Rarity:a0:GEN 1%3A3: :0
+edit.bin v1:s:GEN 1%3A3: :0
+edit.bin v1:f:p:Rarity:27:GEN 1%3A5:':0
+edit.bin v1:s:GEN 1%3A5:':0
+edit.bin v1:f:p:Doubled:cb1283631cf33d7d:bare:GEN 2%3A4:the the:0
+edit.bin v1:s:GEN 2%3A4:the the:0
+edit.bin v1:f:p:Casing:cb1283631cf33d7d:Title:GEN 2%3A11:The:1
+edit.bin v1:s:GEN 2%3A11:The:1
+edit.bin v1:f:p:Rarity:27:GEN 3%3A2:':0
+edit.bin v1:s:GEN 3%3A2:':0
+edit.bin v1:f:p:SentenceStart:2e:GEN 3%3A7:the:0
+edit.bin v1:s:GEN 3%3A7:the:0
+edit.bin v1:f:length:RUT 1%3A3:The seed of the field.%0A:0
+edit.bin v1:s:RUT 1%3A3:The seed of the field.%0A:0
+edit.bin v1:f:presence:Missing:RUT 2%3A10::0
+edit.bin v1:s:RUT 2%3A10::0
+edit.bin v1:f:p:Doubled:4fed9ffac6154f43:bare:JON 2%3A12:staff staff:0
+edit.bin v1:s:JON 2%3A12:staff staff:0
+knobs.bin v1:f:hygiene:NoBreakSpace:GEN 1%3A3: :0
+knobs.bin v1:s:GEN 1%3A3: :0
+knobs.bin v1:f:p:Rarity:a0:GEN 1%3A3: :0
+knobs.bin v1:s:GEN 1%3A3: :0
+knobs.bin v1:f:p:Rarity:27:GEN 1%3A5:':0
+knobs.bin v1:s:GEN 1%3A5:':0
+knobs.bin v1:f:p:Doubled:cb1283631cf33d7d:bare:GEN 2%3A4:the the:0
+knobs.bin v1:s:GEN 2%3A4:the the:0
+knobs.bin v1:f:p:Rarity:27:GEN 3%3A2:r:0
+knobs.bin v1:s:GEN 3%3A2:r:0
+knobs.bin v1:f:sourceCopy:RUT 1%3A1:of the sickle and the sickle beside the:0
+knobs.bin v1:s:RUT 1%3A1:of the sickle and the sickle beside the:0
+knobs.bin v1:f:sourceCopy:RUT 1%3A3:The seed of the field:0
+knobs.bin v1:s:RUT 1%3A3:The seed of the field:0
+knobs.bin v1:f:length:RUT 1%3A3:The seed of the field.%0A:0
+knobs.bin v1:s:RUT 1%3A3:The seed of the field.%0A:0
+knobs.bin v1:f:sourceCopy:RUT 1%3A4:of the spring and the:0
+knobs.bin v1:s:RUT 1%3A4:of the spring and the:0
+knobs.bin v1:f:sourceCopy:RUT 1%3A5:and the thorn beside the:0
+knobs.bin v1:s:RUT 1%3A5:and the thorn beside the:0
+knobs.bin v1:f:sourceCopy:RUT 1%3A6:of the thorn and the:0
+knobs.bin v1:s:RUT 1%3A6:of the thorn and the:0
+knobs.bin v1:f:sourceCopy:RUT 1%3A8:and the yoke beside the:0
+knobs.bin v1:s:RUT 1%3A8:and the yoke beside the:0
+knobs.bin v1:f:sourceCopy:RUT 1%3A10:tower of the:0
+knobs.bin v1:s:RUT 1%3A10:tower of the:0
+knobs.bin v1:f:sourceCopy:RUT 1%3A10:and the net beside the:0
+knobs.bin v1:s:RUT 1%3A10:and the net beside the:0
+knobs.bin v1:f:sourceCopy:RUT 2%3A3:and the thread beside the:0
+knobs.bin v1:s:RUT 2%3A3:and the thread beside the:0
+knobs.bin v1:f:sourceCopy:RUT 2%3A6:thorn of the:0
+knobs.bin v1:s:RUT 2%3A6:thorn of the:0
+knobs.bin v1:f:sourceCopy:RUT 2%3A9:staff of the:0
+knobs.bin v1:s:RUT 2%3A9:staff of the:0
+knobs.bin v1:f:presence:Missing:RUT 2%3A10::0
+knobs.bin v1:s:RUT 2%3A10::0
+knobs.bin v1:f:sourceCopy:JON 1%3A5:in the basket:0
+knobs.bin v1:s:JON 1%3A5:in the basket:0
+knobs.bin v1:f:sourceCopy:JON 1%3A6:beside the gate in the:0
+knobs.bin v1:s:JON 1%3A6:beside the gate in the:0
+knobs.bin v1:f:sourceCopy:JON 1%3A20:and the river beside the yoke in the:0
+knobs.bin v1:s:JON 1%3A20:and the river beside the yoke in the:0
+knobs.bin v1:f:sourceCopy:JON 2%3A4:of the dye and the:0
+knobs.bin v1:s:JON 2%3A4:of the dye and the:0
+knobs.bin v1:f:sourceCopy:JON 2%3A6:of the beam and the:0
+knobs.bin v1:s:JON 2%3A6:of the beam and the:0
+knobs.bin v1:f:sourceCopy:JON 2%3A6:beside the wick in the:0
+knobs.bin v1:s:JON 2%3A6:beside the wick in the:0
+knobs.bin v1:f:sourceCopy:JON 2%3A7:in the sandal:0
+knobs.bin v1:s:JON 2%3A7:in the sandal:0
+knobs.bin v1:f:sourceCopy:JON 2%3A9:and the ember beside the:0
+knobs.bin v1:s:JON 2%3A9:and the ember beside the:0
+knobs.bin v1:f:sourceCopy:JON 2%3A10:and the valley beside the:0
+knobs.bin v1:s:JON 2%3A10:and the valley beside the:0
+knobs.bin v1:f:sourceCopy:JON 2%3A11:and the briar beside the:0
+knobs.bin v1:s:JON 2%3A11:and the briar beside the:0
+knobs.bin v1:f:p:Doubled:4fed9ffac6154f43:bare:JON 2%3A12:staff staff:0
+knobs.bin v1:s:JON 2%3A12:staff staff:0
+knobs.bin v1:f:sourceCopy:JON 2%3A13:and the dawn beside the:0
+knobs.bin v1:s:JON 2%3A13:and the dawn beside the:0
+knobs.bin v1:f:sourceCopy:JON 2%3A17:road of the flint and the wick beside the:0
+knobs.bin v1:s:JON 2%3A17:road of the flint and the wick beside the:0
+knobs.bin v1:f:sourceCopy:JON 2%3A20:and the cloud beside the:0
+knobs.bin v1:s:JON 2%3A20:and the cloud beside the:0

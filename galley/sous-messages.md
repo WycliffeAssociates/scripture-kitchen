@@ -109,10 +109,10 @@ en        A quotation mark right before a mark that ends a sentence (['.]) appea
 | `sentenceEnd` | `Sentence_Terminal` | `.` `?` `!` `।` `。` |
 | `separator` | `Terminal_Punctuation`, not a sentence end | `,` `;` `:` `،` |
 | `digit` | `Nd` (checked first) | `0` `٣` |
-| `symbol` | `S*` | `§` `+` `$` `^` |
+| `symbol` | `S*` | `©` `+` `$` `^` |
 | `space` | `White_Space` | |
 | `letter` | `Alphabetic` | `a` `ñ` |
-| `other` | anything else | `*` `/` `&` `#` |
+| `other` | anything else | `*` `/` `&` `#` `§` |
 
 The first five are the engine's own neighbour pools, first match wins, so
 `«` is a quote and `−` a dash; the engine pools a letter or a space as
@@ -230,6 +230,58 @@ interface Query {
 - A placement or book-rate site that holds only its glyph has no `this`: the
   class it touches is no literal, and the glyph alone would find every use.
 - Hygiene, presence, source-copy and length messages carry none.
+
+## Stable identity
+
+**A persisted contract.** A consumer saves suppressions ("this is fine") to
+disk, so it needs a name for a finding that survives reloads, republishes,
+edits elsewhere in the project, and settings changes.
+[`sous-identity.ts`](sous-identity.ts) builds three, as pure functions over a
+decoded row and context only the consumer holds:
+
+```ts
+import { identityOf, ordinalOf, patternIdentity, siteIdentityOf } from "@wycliffeassociates/scripture-kitchen/sous-identity";
+
+const siteText = text.slice(finding.from, finding.to);
+const ordinal = ordinalOf(verseText, siteText, siteInVerse);   // earlier identical starts in the verse
+const site = { verseRef: "EXO 38:26", siteText, ordinal };
+const bookKey = (index) => snapshot.book(index)!.key;          // BookRate only
+patternIdentity(pattern, { bookKey })      // v1:p:Placement:2014:next:Digit
+identityOf(finding, pattern, { ...site, bookKey })
+                                           // v1:f:p:Placement:2014:next:Digit:EXO 38%3A26:—:0
+siteIdentityOf(site)                       // v1:s:EXO 38%3A26:—:0
+```
+
+| identity | means | fields after `v1` |
+| --- | --- | --- |
+| `v1:p:…` | this claim, anywhere | `p`, the channel, the glyph as hex (`digit` for the pooled digit lane) or a word's 16-hex hash, then the key: ExactNeighbor the neighbour's hex; PooledNeighbor the pool; RunShape `pure`/`mixed` and the size bucket; Placement the side and class; LetterRun the length; Casing the form; Doubled `bare`/`separated`; BookRate the side, class and book key; Rarity, SentenceStart, WordLength nothing more |
+| `v1:f:…` | this finding here | `f`, the pattern's fields from `p` on (or `hygiene` and its class, `presence` and its kind, `sourceCopy`, `length`), then the verse, the site's text and the ordinal |
+| `v1:s:…` | this text here, whatever flags it | `s`, the verse, the site's text and the ordinal |
+
+- **Never in it:** the pattern's index, its band, counts, shares, a
+  WordLength's deviation, a book's position, or anything else a setting or an
+  edit elsewhere moves. The pattern index and the book position change with
+  every republish; the numbers change with every edit.
+- **Why a site identity too:** a settings change can move which rule
+  headlines a site (a Placement row fires where a RunShape row did), which
+  changes `v1:f`. Save `v1:s` for "this text is fine, whatever flags it", and
+  `v1:f` for "this rule is wrong here".
+- **Consumer context.** `verseRef` is the verse as the consumer names it
+  (`GEN 1:2`), `siteText` the finding's span sliced from the book's text (the
+  same string `describe` takes), and `ordinal` how many identical `siteText`s
+  start earlier in that verse, 0-based. `ordinalOf(verseText, siteText, at)`
+  counts them, overlapping starts included. Whatever text the consumer counts
+  in, it must count the same way every time: the ordinal is saved.
+- **Escaping.** Fields are `:`-separated; `%`, `:`, and the C0 controls and
+  DEL inside a field become `%XX` (`GEN 1%3A2`). The verse, site text and
+  ordinal are always the last three fields.
+- **Changing it requires a migration.** The `v1` prefix names the format.
+  Any change to what goes in, its order, its spelling or its escaping is a new
+  version, and every saved identity needs migrating. A word's hash is the
+  engine's wire hash, so an engine change to that hash is a format change
+  too. `sous-chef/messages.test.mjs` pins the identities of every finding of
+  the committed golden publications in `galley/tests/fixtures/sous/identities.txt`
+  and fails loudly when they move.
 
 ## Naming the books
 

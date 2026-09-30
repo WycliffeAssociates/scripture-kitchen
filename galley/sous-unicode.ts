@@ -7,7 +7,7 @@
  *
  * ```text
  * kindOf(0x27)   → "quote"         kindOf(0x2c)  → "separator"
- * kindOf(0x29)   → "bracket"       kindOf(0xa7)  → "symbol"   // §
+ * kindOf(0x29)   → "bracket"       kindOf(0xa9)  → "symbol"   // ©
  * kindOf(0x2014) → "dash"          kindOf(0x61)  → "letter"
  * kindOf(0x3f)   → "sentenceEnd"   kindOf(0x2a)  → "other"    // *
  * ```

@@ -415,3 +415,11 @@ A new code, reason bit, or channel is **fail-closed for an old reader**: a
 reader built before `BOOK_RATE` refuses that bit and channel 10 rather than
 misreading them. That is the right failure and still a compatibility break, so
 each one means a new wire version; `BookRate` arrived with version 2.
+
+## Stable identities
+
+A consumer that saves a finding (a suppression, a note) names it by the
+identities `galley/sous-identity.ts` builds from a decoded row, never by a
+record's position or a pattern's index, which move with every republish. The
+format is a persisted contract, versioned `v1`; what it holds and why is
+`galley/sous-messages.md`, "Stable identity".
