@@ -171,7 +171,7 @@ the channel's domain is `InvalidPattern`. Rust reads them as `Pattern::usual`
 | `Placement` | the `OuterClass` most common on that side, `Edge` excluded | its count, at most the denominator | 0 |
 | `ExactNeighbor` | the scalar that most often follows the glyph in a run | its in-run positions, at most the denominator | the row's pair reversed (neighbour then glyph) in runs |
 | `RunShape` | the glyph's most common shape as a key byte, `(pure << 4) \| bucket` | its runs, at most the denominator | 0 |
-| `Rarity` | the most common other scalar in the glyph's `Pool`, never U+0000 or the digit key; 0 when there is none | its corpus count; 0 with a `usual` of 0 | 0 |
+| `Rarity` | the most common other mark in the glyph's `Pool`: never a letter, space, digit, or U+0000; 0 for a letter, for `Pool::Other` (letters, spaces and unlisted marks), or when the pool holds nothing else | its corpus count; 0 with a `usual` of 0 | 0 |
 | `Casing` | the word's most common `Form` in free positions, never `Uncased` | its count, at most the denominator | 0 |
 | `BookRate` | the median rate of the other judged books, basis points, at most 10,000 | how many other judged books, at least 3 | the book, a directory position under `book_count` |
 | every other channel | 0 | 0 | 0 |
@@ -179,7 +179,9 @@ the channel's domain is `InvalidPattern`. Rust reads them as `Pattern::usual`
 Ties go to the smallest value. `ExactNeighbor`'s `other_count` is the swap
 signal: `'.` against `.'` ×975 says the period usually goes inside the quote.
 The generated reader checks every rule here but one: whether a `Rarity` usual
-shares the glyph's pool, which needs the pool table only Rust carries.
+shares the glyph's pool, which needs the pool table only Rust carries. It
+checks the letter, space and digit rule with `\p{Alphabetic}`, `\p{White_Space}`
+and `\p{Nd}`.
 
 **Channel 9 `SentenceStart` is an ordinary glyph row with an empty key:** the
 glyph field carries the run terminal as a `ScalarKey`, the neighbor field is

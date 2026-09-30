@@ -203,7 +203,8 @@ export type Usual =
     }
   /** The glyph's most common run shape. */
   | { readonly kind: "RunShape"; readonly pure: boolean; readonly bucket: number; readonly count: number }
-  /** The most common other scalar in the glyph's pool; `null` when there is none. */
+  /** The most common other mark in the glyph's pool; `null` for a letter, a
+   * space, an unpooled mark, or a pool holding nothing else. */
   | { readonly kind: "Rarity"; readonly glyph: number | null; readonly count: number }
   /** The word's most common form in free positions. */
   | { readonly kind: "Casing"; readonly form: CasingForm; readonly count: number }
@@ -337,6 +338,11 @@ function isScalar(raw: number): boolean {
   return raw === PATTERN_DIGIT_GLYPH || (raw <= 0x10ffff && (raw < 0xd800 || raw > 0xdfff));
 }
 
+/** A letter, a space, or a digit: no rarity usual names one, or is given for one. */
+function isUnmarked(raw: number): boolean {
+  return raw === PATTERN_DIGIT_GLYPH || /[\p{Alphabetic}\p{White_Space}\p{Nd}]/u.test(String.fromCodePoint(raw));
+}
+
 /** A row's usual lanes as its channel reads them; `null` for a value outside
  * the channel's domain or a lane it does not use holding anything. Whether a
  * rarity's usual shares the glyph's pool is the Rust decoder's check alone:
@@ -367,7 +373,7 @@ function readUsual(channel: Channel, glyph: number, denominator: number, usual: 
     if (usual === 0) {
       return count === 0 ? { kind: "Rarity", glyph: null, count } : null;
     }
-    const valid = isScalar(usual) && usual !== PATTERN_DIGIT_GLYPH && usual !== glyph && count > 0;
+    const valid = isScalar(usual) && usual !== glyph && !isUnmarked(usual) && !isUnmarked(glyph) && count > 0;
     return valid ? { kind: "Rarity", glyph: usual, count } : null;
   }
   if (channel === "Casing") {

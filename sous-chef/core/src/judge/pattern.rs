@@ -307,15 +307,7 @@ impl Pattern {
             }
             (Channel::Rarity, Usual::Rarity { glyph, count }) => match glyph {
                 None => count == 0,
-                // U+0000 is the wire's "none", so it cannot be the answer.
-                Some(glyph) => {
-                    glyph != self.glyph
-                        && glyph != ScalarKey::NONE
-                        && !glyph.is_digits()
-                        && pool_of_key(glyph) == pool_of_key(self.glyph)
-                        && count > 0
-                        && within(count)
-                }
+                Some(glyph) => rarity_kin(self.glyph, glyph) && count > 0 && within(count),
             },
             (Channel::Casing, Usual::Casing { form, count }) => {
                 form != Form::Uncased && within(count)

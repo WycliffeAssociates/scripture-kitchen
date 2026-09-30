@@ -221,12 +221,10 @@ pub(super) fn roster(
         if is_letter(glyph) && !letters {
             continue;
         }
-        let pool = pool_of_key(glyph);
         let usual = most(
             scalars
                 .iter()
-                .filter(|(other, _)| ![glyph, ScalarKey::NONE, ScalarKey::DIGITS].contains(other))
-                .filter(|(other, _)| pool_of_key(*other) == pool)
+                .filter(|(other, _)| rarity_kin(glyph, *other))
                 .map(|(other, tally)| (*other, tally.count)),
         );
         out.push_pattern(Pattern {
@@ -729,6 +727,27 @@ pub(crate) fn pool_of_key(key: ScalarKey) -> Pool {
         Some(scalar) => pool_of(scalar),
         None => Pool::Digit,
     }
+}
+
+/// Whether `other` may stand as a rare `glyph`'s usual: another mark of the
+/// same named pool. [`Pool::Other`] holds letters, spaces and unlisted marks
+/// alike, so neither it nor a letter has a kin to name.
+pub(crate) fn rarity_kin(glyph: ScalarKey, other: ScalarKey) -> bool {
+    let pool = pool_of_key(glyph);
+    other != glyph
+        && !matches!(pool, Pool::Other | Pool::Digit)
+        && pool_of_key(other) == pool
+        && is_mark(glyph)
+        && is_mark(other)
+}
+
+/// Neither a letter, a space, a digit, nor the wire's U+0000.
+fn is_mark(key: ScalarKey) -> bool {
+    key != ScalarKey::NONE
+        && key.scalar().is_some_and(|scalar| {
+            let class = class_of(scalar);
+            !class.is_alphabetic() && !class.is_whitespace() && !class.is_decimal_digit()
+        })
 }
 
 /// The outer class a pair records on one side of its glyph.

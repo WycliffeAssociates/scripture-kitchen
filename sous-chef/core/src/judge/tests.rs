@@ -314,6 +314,31 @@ fn every_row_names_what_is_usual_instead() {
     );
 }
 
+/// A rare letter, or a rare mark no named pool holds, has no kin to name: the
+/// space and the letters that share `Pool::Other` with it are not usual marks.
+#[test]
+fn a_rarity_usual_is_never_a_letter_or_a_space() {
+    let texts = [format!("{} Q \u{a7}", "ab cd. ".repeat(2_000))];
+    let config = JudgingConfig {
+        letters: LetterRoster::Always,
+        ..JudgingConfig::default()
+    };
+    let findings = judged(&texts, &config);
+    let usual = |glyph: char| {
+        findings
+            .patterns()
+            .iter()
+            .find(|row| row.glyph == ScalarKey::of(glyph) && row.channel == Channel::Rarity)
+            .map(|row| row.usual)
+    };
+    let none = Some(Usual::Rarity {
+        glyph: None,
+        count: 0,
+    });
+    assert_eq!(usual('Q'), none, "a letter");
+    assert_eq!(usual('\u{a7}'), none, "`§` pools as Other");
+}
+
 // ── One book breaks from the rest ───────────────────────────────────────
 
 /// A book of `commas` commas, `spaced` of them after a space.

@@ -429,7 +429,7 @@ en_ulb   '’' rarity                2/4,112,852 usual='"' 12,046  (the Quote po
 | `Placement` | the class most common on that side, `Edge` excluded |
 | `ExactNeighbor` | the most common in-run follower, and the row's pair reversed |
 | `RunShape` | the glyph's most common shape |
-| `Rarity` | the most common other scalar in the glyph's `Pool`, or none |
+| `Rarity` | the most common other mark in the glyph's `Pool`; none for a letter, for `Pool::Other` (letters, spaces, unlisted marks), or an empty pool |
 | `Casing` | the word's most common form in the same free positions the row counts |
 | the rest | nothing: the row already says it |
 

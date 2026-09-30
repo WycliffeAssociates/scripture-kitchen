@@ -50,7 +50,7 @@ pub use pattern::{
     BOOK_RATE_MIN_BOOKS, Channel, Cluster, Pattern, PatternIndex, PatternKey, Side, Usual,
 };
 pub use scalars::{Explained, books_touched};
-pub(crate) use scalars::{judge_corpus, pool_of_key, share_bp};
+pub(crate) use scalars::{judge_corpus, pool_of_key, rarity_kin, share_bp};
 use scalars::{most, reported_share, saturate, shape_of};
 use terminals::seek;
 pub use terminals::{TerminalTable, merged_follows};
