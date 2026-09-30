@@ -15,17 +15,18 @@ use super::*;
 /// substrate's `follows` lane rather than listed.
 ///
 /// ```text
-/// learn(WA-en-ulb: ('.', bare) 33,386 of 33,413, (',', bare) 4,841 of 47,299,
-///                  (',', quoted) 6,748 of 7,156)
-///   at 8,000 bp   ('.', bare) 9,991 bp forces, (',', quoted) 9,429 bp forces,
-///                 (',', bare) 1,023 bp does not
+/// learn(WA-en-ulb: ('.', bare) 33,353 of 33,359, (',', bare) 4,841 of 47,299,
+///                  (',', quoted) 6,748 of 7,156, ('.', bracketed) 33 of 54)
+///   at 8,000 bp   ('.', bare) 9,998 bp forces, (',', quoted) 9,429 bp forces,
+///                 (',', bare) 1,023 bp and ('.', bracketed) 6,111 bp do not
 /// ```
 ///
 /// A context forces when the share of the cased letters it hands off to that
 /// are uppercase reaches [`JudgingConfig::terminal_upper_share_bp`], on at
 /// least `support_floor` handoffs. Each [`FollowKey`] is judged on its own
 /// counts, so `, "` can force where `,` does not, and does not where a corpus
-/// writes speech in lowercase.
+/// writes speech in lowercase; `.)` likewise, where a parenthetical ends
+/// mid-sentence.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TerminalTable {
     forcing: Box<[FollowKey]>,

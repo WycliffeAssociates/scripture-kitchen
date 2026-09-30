@@ -618,7 +618,7 @@ impl ChapterPass for Words {
     /// The same type `Substrate` judges under: the word knobs live in the one
     /// config struct, and a host sets the same value in both tuple slots.
     type Config = JudgingConfig;
-    const SCHEMA: SchemaStamp = SchemaStamp::new(4);
+    const SCHEMA: SchemaStamp = SchemaStamp::new(5);
     /// Book grain: a chapter's word rows are 5 KB of cased Latin against the
     /// substrate's 0.3, and the whole book is rewalked for the ~200 µs a phone
     /// never notices. `rules/word-conventions.md` carries the ruling.

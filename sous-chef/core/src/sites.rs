@@ -25,7 +25,7 @@ use crate::substrate::{BookAggregate, OuterClass, RUN_BUCKETS, ScalarKey, is_run
 use mise::unicode::class_of;
 
 use crate::unicode::atoms::widen_to_atoms;
-use crate::unicode::{Pool, pool_of};
+use crate::unicode::{Pool, closes, pool_of};
 use crate::words::word_around;
 use crate::{BookIndex, Chapter, Reasons, TextRange};
 
@@ -225,8 +225,9 @@ pub fn locate_counted(
 /// off to, so the span is that word and the row carries it alone.
 ///
 /// One row per bare lowercase handoff, which is exactly what the `follows`
-/// lane counted — whitespace and brackets ridden through, a quote taking the
-/// handoff out of this channel, across a chapter seam as the fold's carry is.
+/// lane counted — whitespace and opening brackets ridden through, a quote or
+/// a closing bracket taking the handoff out of this channel, across a chapter
+/// seam as the fold's carry is.
 fn sentence_start(
     patterns: &[(PatternIndex, Pattern)],
     needle: &Needle,
@@ -242,10 +243,10 @@ fn sentence_start(
     else {
         return;
     };
-    let Some((chapter, at, letter, quoted)) = cursor.handoff(terminal) else {
+    let Some((chapter, at, letter, marked)) = cursor.handoff(terminal) else {
         return;
     };
-    if quoted || !class_of(letter).is_lowercase() {
+    if marked || !class_of(letter).is_lowercase() {
         return;
     }
     tally[slot] += 1;
@@ -516,7 +517,8 @@ impl<'a> Cursor<'a> {
 
     /// The letter a leading glyph at `at` hands off to: the first scalar after
     /// it that is neither whitespace nor [`rides`], with the chapter and offset
-    /// holding it, and whether a quote was ridden on the way.
+    /// holding it, and whether a quote or a closing bracket was ridden on the
+    /// way.
     ///
     /// Any other nonletter takes the chain over and a mark clears it, which is
     /// what the walk does to its `chain`. Across a seam the fold pairs a
@@ -528,21 +530,21 @@ impl<'a> Cursor<'a> {
         let span = self.chapters[chapter].text();
         let mut rest = self.text[at as usize..span.to() as usize].char_indices();
         rest.next();
-        let mut quoted = false;
+        let mut marked = false;
         let mut ridden = |scalar: char| {
-            quoted |= pool_of(scalar) == Pool::Quote;
+            marked |= pool_of(scalar) == Pool::Quote || closes(scalar);
             class_of(scalar).is_whitespace() || rides(scalar)
         };
         for (offset, scalar) in rest {
             if !ridden(scalar) {
-                return Some((chapter, at + offset as u32, scalar, quoted));
+                return Some((chapter, at + offset as u32, scalar, marked));
             }
         }
         for (later, held) in self.chapters.iter().enumerate().skip(chapter + 1) {
             let start = held.text().from();
             for (offset, scalar) in self.slice(held).char_indices() {
                 if !ridden(scalar) {
-                    return Some((later, start + offset as u32, scalar, quoted));
+                    return Some((later, start + offset as u32, scalar, marked));
                 }
             }
         }

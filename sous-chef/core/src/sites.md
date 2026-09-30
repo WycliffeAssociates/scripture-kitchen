@@ -137,15 +137,16 @@ compares the two.**
 
 ```text
 ?\u{201d} he said      '?' credited, a quote ridden    → not this channel's
-one. (two          '.' credited, bracket ridden   → a site at `two`
+forever.) to him   '.' credited, a closer ridden   → not this channel's
+one. (two          '.' credited, opener ridden    → a site at `two`
 one. 42 two        the digit clears the chain     → nothing
 ```
 
 The lane credits a run's last atom that is not a quote or bracket
 ([`substrate.md`](substrate.md)); `Cursor::handoff` rides whitespace, quotes,
-and brackets from there, reports whether it rode a quote, and stops at
-anything else. A sentence-start row judges bare handoffs only, so a ridden
-quote drops the site as it drops the count. The scan crosses a chapter seam the
+and brackets from there, reports whether it rode a quote or a closing
+bracket, and stops at anything else. A sentence-start row judges bare handoffs
+only, so either mark drops the site as it drops the count. The scan crosses a chapter seam the
 way `prev_outer`/`next_outer` do, because the fold pairs a chapter's
 `open_follow` with the next one's `edge_case` and passes it through a blank
 chapter. The word walk rides the same atoms, so the two lanes agree on which

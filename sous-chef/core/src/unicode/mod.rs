@@ -110,3 +110,15 @@ pub fn pool_of(c: char) -> Pool {
         Err(_) => Pool::Other,
     }
 }
+
+/// Whether a scalar is a bracket that closes: general category `Pe` within
+/// [`Pool::Bracket`].
+///
+/// ```text
+/// closes(')')         → true
+/// closes('(')         → false
+/// closes('\u{300D}')  → false   // 」 is Pe, but pools as a quote
+/// ```
+pub fn closes(c: char) -> bool {
+    pools::CLOSERS.binary_search(&(c as u32)).is_ok()
+}

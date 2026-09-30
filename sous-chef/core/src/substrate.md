@@ -22,7 +22,7 @@ Nothing borrows, nothing hashes, nothing carries a coordinate.
 | `scalars` | `ScalarKey` (a scalar, or the pooled `DIGITS`) | count | 8 | absolute rarity, the dense census, every denominator |
 | `pairs` | `(ScalarKey, prev outer, next outer)` | count | 12 | G0 placement, and G1 once conditioned by `runs` |
 | `runs` | the run's scalar sequence, digits excluded | count | 12 + 4/atom | run composition, G2/G3 neighbours inside a run |
-| `follows` | `FollowKey`: the last glyph that does not ride, and whether a quote stood between | upper/lower/uncased | 16 | the terminal table the word channels read, and `Channel::SentenceStart` reading it the other way |
+| `follows` | `FollowKey`: the last glyph that does not ride, and whether a quote or a closing bracket stood between | upper/lower/uncased | 16 | the terminal table the word channels read, and `Channel::SentenceStart` reading it the other way |
 | `hygiene` | — | one `HygieneFinding` per site | 16/site | hygiene's four scalar classes, with exact spans |
 | `verses` | `VerseKey` | grapheme count + the projected span | 20/verse | the target half of the source comparison ([`proportionality.md`](proportionality.md)) |
 | `lead`, `trail` | — | one open edge each | 20 each | the seam (below) |
@@ -43,14 +43,17 @@ Four shapes are deliberate:
 - **A handoff is credited to the last glyph that does not ride.**
 
   ```text
-  a, B         (',', bare)   upper 1
-  c, \u{201C}D        (',', quoted) upper 1    the quote rides and marks it
-  D, (e        (',', bare)   lower 1    a bracket rides and marks nothing
-  e \u{201C}f g\u{2019}h    nothing                 a letter closes the chain
+  a, B         (',', bare)       upper 1
+  c, \u{201C}D        (',', quoted)     upper 1    the quote rides and marks it
+  D, (e        (',', bare)       lower 1    an opening bracket rides and marks nothing
+  e.) f        ('.', bracketed)  lower 1    a closing bracket rides and marks it
+  e \u{201C}f g\u{2019}h    nothing                     a letter closes the chain
   ```
 
-  Each slot decides once whether it rides, off `unicode::Pool`; a digit or a
-  mark clears the chain. That is the claim [`sites.md`](sites.md)'s
+  Each slot decides once whether it rides, off `unicode::Pool` and
+  `unicode::closes`; a digit or a mark clears the chain. The key packs
+  `glyph << 2 | bracketed << 1 | quoted`, so a lane sorted by key is sorted by
+  glyph first. That is the claim [`sites.md`](sites.md)'s
   sentence-start rule has to reproduce exactly, since the count oracle
   compares the two.
 - **`run_lengths` is derived, not stored.** The rule wants each glyph's own
@@ -157,11 +160,12 @@ So the row records two open edges and the fold resolves them:
 - `edge_case` (leading) — the casing of the first scalar that is neither
   whitespace, quote, nor bracket, when it is a letter. Paired with the
   previous chapter's `open_follow`, that is the follow the seam swallowed.
-- `edge_quoted` (leading) — a quote stood before that letter, so the follow
-  arrives quoted: `one, | \u{201C}Two` is `(',', quoted)` either way.
+- `edge_marks` (leading) — whether a quote or a closing bracket stood before
+  that letter, so the follow arrives marked: `one, | \u{201C}Two` is
+  `(',', quoted)` and `one. | ) two` is `('.', bracketed)`, as unsplit.
 - `blank` (trailing) — the chapter held only whitespace, quotes, and brackets,
-  so the previous chapter's `open_follow` survives it, quoted if it held a
-  quote.
+  so the previous chapter's `open_follow` survives it, marked by whatever
+  quote or closing bracket it held.
 
 The fold carries that trailing edge, `Default` at every book — seam state is
 the fold's own and nothing crosses a book. Two cases need saying: an **empty**

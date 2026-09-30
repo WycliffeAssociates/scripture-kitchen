@@ -928,7 +928,7 @@ pub(super) fn follow_evidence(corpus: &[&BookAggregate]) -> FxHashMap<ScalarKey,
     let mut out: FxHashMap<ScalarKey, FollowEvidence> = FxHashMap::default();
     for (book, aggregate) in corpus.iter().enumerate() {
         let book = book as u32;
-        for &(key, counts) in aggregate.follows().iter().filter(|(key, _)| !key.quoted()) {
+        for &(key, counts) in aggregate.follows().iter().filter(|(key, _)| key.is_bare()) {
             let evidence = out.entry(key.glyph()).or_default();
             evidence.counts.absorb(counts);
             let lower = u64::from(counts.get(Case::Lower));

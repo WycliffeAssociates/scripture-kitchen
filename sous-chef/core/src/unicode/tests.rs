@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 use mise::unicode::{Class, bits, class_of, lookup::trie_at};
 
-use super::{Pool, pool_of};
+use super::{Pool, closes, pool_of};
 
 fn ucd(file: &str) -> String {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -240,6 +240,34 @@ fn the_pool_table_matches_a_fresh_ucd_parse_for_every_scalar() {
         scalars().all(|c| !class_of(c).is_decimal_digit() || pool_of(c) == Pool::Digit),
         "an Nd scalar was claimed by a punctuation pool"
     );
+}
+
+/// The closers, re-derived: every `Pe` line of the extract, kept where the
+/// pool is a bracket.
+#[test]
+fn the_closers_are_the_pe_brackets_for_every_scalar() {
+    let text = ucd("DerivedGeneralCategory.txt");
+    let mut pe = vec![false; 0x11_0000];
+    for line in text.lines() {
+        let body = line.split('#').next().unwrap_or("");
+        let mut fields = body.split(';').map(str::trim);
+        let (Some(scalars), Some("Pe")) = (fields.next(), fields.next()) else {
+            continue;
+        };
+        let mut ends = scalars.split("..");
+        let lo = u32::from_str_radix(ends.next().expect("a low scalar"), 16).unwrap();
+        let hi = ends
+            .next()
+            .map_or(lo, |hi| u32::from_str_radix(hi, 16).unwrap());
+        for cp in lo..=hi {
+            pe[cp as usize] = true;
+        }
+    }
+    for c in scalars() {
+        let want = pe[c as usize] && pool_of(c) == Pool::Bracket;
+        assert_eq!(closes(c), want, "U+{:04X}", c as u32);
+    }
+    assert!(closes(')') && !closes('(') && !closes('\u{300D}'));
 }
 
 /// First match wins, and the two pairs the charter kept apart stay apart.

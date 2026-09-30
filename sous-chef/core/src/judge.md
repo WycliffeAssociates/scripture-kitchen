@@ -175,16 +175,17 @@ its own `follows` lane and publishes it into the sink: **which handoff
 contexts this corpus puts a capital after.**
 
 ```text
-he said, Go          (',', bare)      the last glyph that is not a quote or bracket
-he said, "Go         (',', quoted)    a quote stood between it and the letter
-"Go," he said        (',', quoted)    position tells no opening quote from a closing one
-one. (Two            ('.', bare)      a bracket rides and marks nothing
-said "Go             none             a word closes the chain
+he said, Go          (',', bare)       the last glyph that is not a quote or bracket
+he said, "Go         (',', quoted)     a quote stood between it and the letter
+"Go," he said        (',', quoted)     position tells no opening quote from a closing one
+one. (Two            ('.', bare)       an opening bracket rides and marks nothing
+forever.) to him     ('.', bracketed)  a closing bracket stood between
+said "Go             none              a word closes the chain
 ```
 
 ```text
 WA-en-ulb (the vref tier), follows merged over the corpus
-   ('.', bare)    upper 33,386 of 33,413 cased handoffs   9,991 bp → forces
+   ('.', bare)    upper 33,353 of 33,359 cased handoffs   9,998 bp → forces
    (',', bare)    upper  4,841 of 47,299                  1,023 bp → does not
    (',', quoted)  upper  6,748 of  7,156                  9,429 bp → forces
 terminal_upper_share_bp 8,000, support_floor 5
@@ -202,7 +203,8 @@ comma not in front of speech, but the comma through a quote is its own
 context with its own counts. In en_ulb it forces, so `Name` there is the
 punctuation's capital and abstains; in a corpus that opens speech in lowercase
 `, "` never reaches the bar and the capital is judged. Which marks are quotes is
-`unicode::Pool::Quote`, never a list. The per-corpus tables the committed tier
+`unicode::Pool::Quote`, and which brackets close is `unicode::closes` (general
+category `Pe`), never a list. The per-corpus tables the committed tier
 learns are in [`words.md`](words.md).
 
 `Findings` carries the table beside the pattern table, because three readers
@@ -368,7 +370,7 @@ after a near-certain glyph is one row for review.
 
 ```text
 WA-en-ulb, follows merged, BARE handoffs only
-   ('.', bare)    upper 33,386 of 33,413   9,991 bp >= 9,800  -> FIRES 27/33,413
+   ('.', bare)    upper 33,353 of 33,359   9,998 bp >= 9,800  -> FIRES 6/33,359
    (',', bare)    upper  4,841 of 47,299   1,023 bp           -> silent
    ('!', bare)    upper  1,213 of  1,222   9,926 bp           -> FIRES 9/1,222
    ('?', quoted)  upper  1,030 of  1,069   not judged: `?" he said` is no exception
@@ -377,8 +379,12 @@ WA-en-ulb, follows merged, BARE handoffs only
 **The row judges a glyph's bare handoffs and nothing else.** Its pattern names
 a glyph, not a context, and the quoted context mixes openings with closings:
 folded in, `?" he said` would make `?` fire 42 times in en_ulb for ordinary
-English. `Cursor::handoff` reports whether it rode a quote, and the site rule
-drops those handoffs exactly as the counts do.
+English. The bracketed context is the same kind of claim: in en_ulb PSA 136
+every verse ends `(His covenant faithfulness endures forever.)` and the next
+verse runs on in lowercase, `to him who by wisdom made the heavens`, and the
+period there closed the parenthetical, not the sentence. `Cursor::handoff`
+reports whether it rode a quote or a closing bracket, and the site rule drops
+those handoffs exactly as the counts do.
 
 Per glyph with at least `support_floor` cased handoffs: `upper / (upper +
 lower)` decides whether the glyph speaks, and the row then reports `lower /

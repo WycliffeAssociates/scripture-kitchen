@@ -106,7 +106,7 @@ impl TableHash {
 }
 
 /// The corpus evidence a chapter's sites read beside its own text: xxh3-128
-/// over this publication's forcing glyphs, explained leaders, and recurring
+/// over this publication's forcing contexts (whole `FollowKey`s), explained leaders, and recurring
 /// clusters, each ascending.
 ///
 /// Its own hash rather than a share of [`FiringHash`], because a firing set is

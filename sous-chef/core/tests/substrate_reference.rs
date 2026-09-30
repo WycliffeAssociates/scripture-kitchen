@@ -20,7 +20,7 @@ use sous_core::substrate::{
     Case, ChapterRow, Edge, FollowKey, OuterClass, PairKey, RUN_BUCKETS, RunLengths, ScalarKey,
     Substrate,
 };
-use sous_core::unicode::{Pool, pool_of};
+use sous_core::unicode::{Pool, closes, pool_of};
 use sous_core::{BookKey, ChapterInput, ChapterKey, ChapterPass};
 
 const CORPORA: &[&str] = &[
@@ -58,6 +58,7 @@ struct RefEdge {
     open_follow: Option<FollowKey>,
     edge_case: Option<Case>,
     edge_quoted: bool,
+    edge_bracketed: bool,
     blank: bool,
 }
 
@@ -69,6 +70,7 @@ impl RefEdge {
             open_follow: edge.open_follow(),
             edge_case: edge.edge_case(),
             edge_quoted: edge.edge_quoted(),
+            edge_bracketed: edge.edge_bracketed(),
             blank: edge.blank(),
         }
     }
@@ -102,16 +104,24 @@ fn rides(c: char) -> bool {
 /// the handoff context standing there, if a run atom that does not ride ends
 /// the walk.
 fn context_before(chars: &[char], end: usize) -> Option<FollowKey> {
-    let mut quoted = false;
+    let (mut quoted, mut bracketed) = (false, false);
     for &c in chars[..end].iter().rev() {
         if class_of(c).is_whitespace() {
             continue;
         }
         if rides(c) {
             quoted |= pool_of(c) == Pool::Quote;
+            bracketed |= closes(c);
             continue;
         }
-        return is_run_atom(c).then(|| FollowKey::new(key_of(c), quoted));
+        return is_run_atom(c).then(|| {
+            let key = FollowKey::new(key_of(c), quoted);
+            if bracketed {
+                key.through_bracket()
+            } else {
+                key
+            }
+        });
     }
     None
 }
@@ -258,6 +268,7 @@ fn lead_edge(chars: &[char]) -> RefEdge {
         edge_quoted: transparent_prefix(chars)
             .iter()
             .any(|c| rides(*c) && pool_of(*c) == Pool::Quote),
+        edge_bracketed: transparent_prefix(chars).iter().any(|c| closes(*c)),
         blank: false,
     }
 }
@@ -278,6 +289,7 @@ fn trail_edge(chars: &[char]) -> RefEdge {
         open_follow: context_before(chars, chars.len()),
         edge_case: None,
         edge_quoted: false,
+        edge_bracketed: false,
         blank: transparent_prefix(chars).len() == chars.len(),
     }
 }

@@ -131,6 +131,16 @@ judge time over run atoms, never in the walk.
 `Pool::Digit` cannot occur as an in-run neighbour, because a digit is not a run
 atom. It exists so `pool_of` is total over every scalar.
 
+`pools.rs` also carries `CLOSERS`, the 70 `Pe` scalars among the brackets, for
+`closes`: a handoff that rides a closing bracket is its own terminal-table
+context. `」` and `』` are `Pe` but pool as quotes, so they are not in it.
+
+```text
+closes(')')         → true
+closes('(')         → false
+closes('\u{300D}')  → false
+```
+
 ## The atom rule
 
 An *atom* is a base scalar plus everything that cannot stand without it.
@@ -164,6 +174,7 @@ the dev-dependency oracle.
 | `tests::the_two_index_paths_agree_over_every_scalar` | `class_of(c)` equals `trie_at(c)` and its width, for every scalar |
 | `tests::the_bit_list_is_the_one_the_charter_authorizes` | one named scalar per bit |
 | `tests::the_pool_table_matches_a_fresh_ucd_parse_for_every_scalar` | `pool_of` equals an independent re-parse of the extracts, for all 0x110000 scalars, and no `Nd` is claimed by a punctuation pool |
+| `tests::the_closers_are_the_pe_brackets_for_every_scalar` | `closes` equals `Pe` within `Pool::Bracket`, re-parsed from the extract |
 | `tests::pool_precedence_is_first_match_wins` | one named scalar per pool, and `Pool::from_raw` round trips |
 | `tests/unicode_generator.rs` | a second generator run reproduces `table.rs` and `pools.rs` byte for byte |
 | `tests/atom_conformance.rs` | no atom boundary falls inside a `GraphemeBreakTest.txt` cluster; widening any sub-range of a cluster returns the whole cluster; the test tier holds no cluster the rule would split |

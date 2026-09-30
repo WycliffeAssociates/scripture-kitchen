@@ -46,7 +46,7 @@ use crate::substrate::{FollowKey, ScalarKey, is_run_atom};
 use crate::{Verse, VerseKey};
 use mise::unicode::{Class, class_of};
 
-use crate::unicode::{Pool, pool_of};
+use crate::unicode::{Pool, closes, pool_of};
 
 /// One word as the walk saw it, in the coordinates of the text scanned.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,11 +67,14 @@ pub struct Occurrence {
     pub verse: Option<VerseKey>,
 }
 
-/// The chain past one run atom: a leading glyph replaces it, a quote marks it,
-/// a bracket leaves it as it was.
+/// The chain past one run atom: a leading glyph replaces it, a quote or a
+/// closing bracket marks it, an opening bracket leaves it as it was.
 fn chained(chain: Before, scalar: char) -> Before {
     match (pool_of(scalar), chain) {
         (Pool::Quote, Before::Glyph(key)) => Before::Glyph(key.through_quote()),
+        (Pool::Bracket, Before::Glyph(key)) if closes(scalar) => {
+            Before::Glyph(key.through_bracket())
+        }
         (Pool::Quote | Pool::Bracket, _) => chain,
         _ => Before::Glyph(FollowKey::new(ScalarKey::of(scalar), false)),
     }

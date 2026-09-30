@@ -663,6 +663,28 @@ fn a_quote_between_takes_the_handoff_out_of_the_channel() {
     assert_eq!(sited(&books, &findings, Reasons::SENTENCE_START), ["now"]);
 }
 
+/// A closing bracket between is the glyph's bracketed context, which this
+/// channel does not judge either: in `(forever.) to him` the period closed the
+/// parenthetical, not the sentence. Across a seam the fold carries the mark.
+/// An opening bracket marks nothing, so `. (now` is still a bare handoff.
+#[test]
+fn a_closing_bracket_between_takes_the_handoff_out_of_the_channel() {
+    let books = [book_of(
+        b"PSA",
+        &[
+            &("Go. Then. ".repeat(250) + "(Go.) then. Go. (now. (Selah.)"),
+            " to him. (Go.",
+            ") so it is.",
+        ],
+    )];
+    let findings = findings_of(&books, &JudgingConfig::default());
+    assert_eq!(
+        expects_capital(findings.patterns()),
+        vec![(Some('.'), 1, 504)]
+    );
+    assert_eq!(sited(&books, &findings, Reasons::SENTENCE_START), ["now"]);
+}
+
 /// A word with no glyph in front of it is in no row: the book's own first word
 /// answers to nothing. A chapter seam is different — the fold pairs one
 /// chapter's open follow with the next one's first letter — so the lowercase

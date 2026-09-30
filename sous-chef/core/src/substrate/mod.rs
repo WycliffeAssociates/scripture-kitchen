@@ -168,7 +168,8 @@ pub const fn is_run_atom(class: Class) -> bool {
 }
 
 /// Whether a run atom leaves the handoff to the glyph behind it: a quote or a
-/// bracket never becomes a [`FollowKey`]'s glyph.
+/// bracket never becomes a [`FollowKey`]'s glyph. A quote or a closing
+/// bracket still marks the key it rides ([`crate::unicode::closes`]).
 pub fn rides(scalar: char) -> bool {
     matches!(pool_of(scalar), Pool::Quote | Pool::Bracket)
 }
@@ -249,38 +250,76 @@ impl FollowCounts {
 }
 
 /// The context a letter is handed off from: the last glyph before it that does
-/// not [`ride`](rides), and whether a quote stood between them.
+/// not [`ride`](rides), whether a quote stood between them, and whether a
+/// closing bracket did.
 ///
 /// ```text
 /// he said, Go       (',', bare)
 /// he said, "Go      (',', quoted)
-/// "Go," he said     (',', quoted)    // position tells no opening quote from a closing one
-/// one. (Two         ('.', bare)      // a bracket rides and marks nothing
-/// said "Go          (none)           // a word closes the chain
+/// "Go," he said     (',', quoted)      // position tells no opening quote from a closing one
+/// one. (Two         ('.', bare)        // an opening bracket rides and marks nothing
+/// forever.) to him  ('.', bracketed)   // the period closed the parenthetical
+/// said "Go          (none)             // a word closes the chain
 /// ```
 ///
-/// Ordered by glyph, then bare before quoted.
+/// Packed `glyph << 2 | bracketed << 1 | quoted`, so ordered by glyph, then
+/// bare, quoted, bracketed, both.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FollowKey(u32);
 
 impl FollowKey {
+    /// The contexts one glyph can hand off from, indexed by [`Self::context`].
+    pub const CONTEXTS: usize = 4;
+    pub(crate) const QUOTED: u8 = 1;
+    pub(crate) const BRACKETED: u8 = 2;
+
     /// `glyph` is a scalar; the pooled digit key is never a run atom.
     pub const fn new(glyph: ScalarKey, quoted: bool) -> Self {
+        Self::in_context(glyph, quoted as usize)
+    }
+
+    /// The glyph in one of [`Self::CONTEXTS`].
+    pub const fn in_context(glyph: ScalarKey, context: usize) -> Self {
         debug_assert!(!glyph.is_digits(), "a digit hands nothing off");
-        Self((glyph.raw() << 1) | quoted as u32)
+        debug_assert!(context < Self::CONTEXTS);
+        Self((glyph.raw() << 2) | context as u32)
     }
 
     pub const fn glyph(self) -> ScalarKey {
-        ScalarKey(self.0 >> 1)
+        ScalarKey(self.0 >> 2)
+    }
+
+    /// The two marks as an index below [`Self::CONTEXTS`]; zero is bare.
+    pub const fn context(self) -> usize {
+        (self.0 & 3) as usize
     }
 
     pub const fn quoted(self) -> bool {
-        self.0 & 1 == 1
+        self.0 & Self::QUOTED as u32 != 0
+    }
+
+    pub const fn bracketed(self) -> bool {
+        self.0 & Self::BRACKETED as u32 != 0
+    }
+
+    /// Neither a quote nor a closing bracket between glyph and letter.
+    pub const fn is_bare(self) -> bool {
+        self.context() == 0
     }
 
     /// The same glyph with a quote between it and the letter.
     pub const fn through_quote(self) -> Self {
-        Self(self.0 | 1)
+        self.marked(Self::QUOTED)
+    }
+
+    /// The same glyph with a closing bracket between it and the letter.
+    pub const fn through_bracket(self) -> Self {
+        self.marked(Self::BRACKETED)
+    }
+
+    /// The same glyph with `marks`, a [`Self::context`], added to its own.
+    pub(crate) const fn marked(self, marks: u8) -> Self {
+        Self(self.0 | (marks & 3) as u32)
     }
 
     pub const fn raw(self) -> u32 {
@@ -289,7 +328,7 @@ impl FollowKey {
 
     /// `None` for a value whose glyph half is not a scalar.
     pub const fn from_raw(raw: u32) -> Option<Self> {
-        match char::from_u32(raw >> 1) {
+        match char::from_u32(raw >> 2) {
             Some(_) => Some(Self(raw)),
             None => None,
         }
@@ -298,8 +337,13 @@ impl FollowKey {
 
 impl core::fmt::Debug for FollowKey {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let glyph = char::from_u32(self.0 >> 1).unwrap_or(char::REPLACEMENT_CHARACTER);
-        let context = if self.quoted() { "quoted" } else { "bare" };
+        let glyph = char::from_u32(self.0 >> 2).unwrap_or(char::REPLACEMENT_CHARACTER);
+        let context = match (self.quoted(), self.bracketed()) {
+            (false, false) => "bare",
+            (true, false) => "quoted",
+            (false, true) => "bracketed",
+            (true, true) => "quoted, bracketed",
+        };
         write!(f, "FollowKey({glyph:?}, {context})")
     }
 }
@@ -359,7 +403,7 @@ pub type RunLengths = [u32; RUN_BUCKETS];
 
 /// What one end of a chapter owes its neighbor, and nothing more.
 ///
-/// A leading edge fills `outer`, `open_pair`, `edge_case`, and `edge_quoted`;
+/// A leading edge fills `outer`, `open_pair`, `edge_case`, and `edge_marks`;
 /// a trailing edge fills `outer`, `open_pair`, `open_follow`, and `blank`.
 /// The slot the other side does not use stays empty.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -374,9 +418,9 @@ pub struct Edge {
     /// This end's nearest letter, when only whitespace, quotes, and brackets
     /// stand before it.
     edge_case: Option<Case>,
-    /// A quote stands among those, so the neighbor's open follow arrives
-    /// quoted.
-    edge_quoted: bool,
+    /// Whether a quote or a closing bracket stands among those, packed as
+    /// [`FollowKey::context`], so the neighbor's open follow arrives marked.
+    edge_marks: u8,
     /// The chapter held only whitespace, quotes, and brackets, so a
     /// neighbor's open follow survives it.
     blank: bool,
@@ -400,7 +444,11 @@ impl Edge {
     }
 
     pub const fn edge_quoted(self) -> bool {
-        self.edge_quoted
+        self.edge_marks & FollowKey::QUOTED != 0
+    }
+
+    pub const fn edge_bracketed(self) -> bool {
+        self.edge_marks & FollowKey::BRACKETED != 0
     }
 
     pub const fn blank(self) -> bool {
@@ -537,7 +585,7 @@ impl ChapterPass for Substrate {
     type Observation = ChapterRow;
     type Aggregate = BookAggregate;
     type Config = JudgingConfig;
-    const SCHEMA: SchemaStamp = SchemaStamp::new(4);
+    const SCHEMA: SchemaStamp = SchemaStamp::new(5);
 
     fn map(&self, chapter: ChapterInput<'_>) -> ChapterRow {
         walk::walk(chapter.text, chapter.verses)

@@ -53,7 +53,7 @@ pub fn fold_book(book: &[ChapterObs<&ChapterRow>], carry: &mut Edge) -> BookAggr
             next.open_pair = Some((key, carry.outer));
         }
         if next.blank {
-            next.open_follow = carry.open_follow.map(|key| quoted_by(key, row.lead));
+            next.open_follow = carry.open_follow.map(|key| marked_by(key, row.lead));
         }
         *carry = next;
     }
@@ -80,7 +80,7 @@ fn resolve_seam(out: &mut BookAggregate, trail: Edge, lead: Edge) {
         bump(&mut out.pairs, PairKey::new(key, trail.outer, next), 1);
     }
     if let (Some(key), Some(case)) = (trail.open_follow, lead.edge_case) {
-        let key = quoted_by(key, lead);
+        let key = marked_by(key, lead);
         let mut counts = FollowCounts::default();
         counts.0[case as usize] = 1;
         match out.follows.binary_search_by_key(&key, |entry| entry.0) {
@@ -94,12 +94,9 @@ fn resolve_seam(out: &mut BookAggregate, trail: Edge, lead: Edge) {
     }
 }
 
-fn quoted_by(key: FollowKey, lead: Edge) -> FollowKey {
-    if lead.edge_quoted {
-        key.through_quote()
-    } else {
-        key
-    }
+/// The marks a chapter's lead puts on the follow arriving from before it.
+fn marked_by(key: FollowKey, lead: Edge) -> FollowKey {
+    key.marked(lead.edge_marks)
 }
 
 /// Adds `delta` to one sorted count, inserting or deleting the row as needed.

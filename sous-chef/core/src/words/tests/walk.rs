@@ -98,6 +98,14 @@ fn an_opening_quote_takes_the_glyph_behind_it() {
         vec![Before::Start, through_quote('.')]
     );
     assert_eq!(before("a. (b"), vec![Before::Start, glyph('.')]);
+    // A closing bracket marks the context it rides.
+    assert_eq!(
+        before("a.) b"),
+        vec![
+            Before::Start,
+            Before::Glyph(FollowKey::new(ScalarKey::of('.'), false).through_bracket())
+        ]
+    );
     // Behind a comma it is the comma through a quote, which the corpus's own
     // `, "` handoffs answer, apart from its bare commas.
     assert_eq!(

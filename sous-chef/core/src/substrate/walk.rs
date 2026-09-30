@@ -14,7 +14,7 @@ use super::{
 };
 use crate::Verse;
 use crate::hygiene::{NBSP, SUSPECT, ScalarSites};
-use crate::unicode::{Pool, pool_of};
+use crate::unicode::{Pool, closes, pool_of};
 use mise::unicode::Class;
 use mise::unicode::lookup::{ascii_class, trie_at};
 
@@ -36,8 +36,8 @@ const PROBE: usize = 512;
 struct Slot {
     key: ScalarKey,
     pairs: [u32; OuterClass::COUNT * OuterClass::COUNT],
-    /// Bare, then quoted.
-    follows: [FollowCounts; 2],
+    /// One per [`FollowKey::context`].
+    follows: [FollowCounts; FollowKey::CONTEXTS],
     ride: Ride,
 }
 
@@ -46,7 +46,11 @@ struct Slot {
 enum Ride {
     /// Becomes the chain's glyph.
     Leads,
+    /// An opening bracket: rides and marks nothing.
     Bracket,
+    /// Rides and marks the chain bracketed.
+    Closer,
+    /// Rides and marks the chain quoted.
     Quote,
 }
 
@@ -70,7 +74,8 @@ struct Hot {
     /// The last leading glyph since a letter, still looking for the letter it
     /// hands off to.
     chain: u32,
-    chain_quoted: bool,
+    /// The marks ridden since `chain`, as a [`FollowKey::context`].
+    chain_context: u8,
     /// Nothing but whitespace, quotes, and brackets so far.
     leading: bool,
     /// Where the open run started in the atom arena.
@@ -90,7 +95,7 @@ impl Hot {
             pending_prev: OuterClass::Edge,
             pending_first: false,
             chain: NO_ID,
-            chain_quoted: false,
+            chain_context: 0,
             leading: true,
             run_open: NO_ID,
             in_word: false,
@@ -247,12 +252,16 @@ impl Counters {
                 match self.slots[id as usize].ride {
                     Ride::Leads => {
                         hot.chain = id;
-                        hot.chain_quoted = false;
+                        hot.chain_context = 0;
                         hot.leading = false;
                     }
                     Ride::Quote => {
-                        hot.chain_quoted = true;
-                        self.lead.edge_quoted |= hot.leading;
+                        hot.chain_context |= FollowKey::QUOTED;
+                        self.lead.edge_marks |= FollowKey::QUOTED * u8::from(hot.leading);
+                    }
+                    Ride::Closer => {
+                        hot.chain_context |= FollowKey::BRACKETED;
+                        self.lead.edge_marks |= FollowKey::BRACKETED * u8::from(hot.leading);
                     }
                     Ride::Bracket => {}
                 }
@@ -270,7 +279,7 @@ impl Counters {
             if class.is_alphabetic() {
                 let case = Case::of(class);
                 if hot.chain != NO_ID {
-                    self.slots[hot.chain as usize].follows[usize::from(hot.chain_quoted)].0
+                    self.slots[hot.chain as usize].follows[usize::from(hot.chain_context)].0
                         [case as usize] += 1;
                     hot.chain = NO_ID;
                 }
@@ -376,7 +385,7 @@ impl Counters {
         self.slots.push(Slot {
             key,
             pairs: [0; OuterClass::COUNT * OuterClass::COUNT],
-            follows: [FollowCounts::default(); 2],
+            follows: [FollowCounts::default(); FollowKey::CONTEXTS],
             ride,
         });
         id
@@ -398,10 +407,14 @@ impl Counters {
         let trail = Edge {
             outer: hot.prev,
             open_pair: self.trail_pair,
-            open_follow: (hot.chain != NO_ID)
-                .then(|| FollowKey::new(self.slots[hot.chain as usize].key, hot.chain_quoted)),
+            open_follow: (hot.chain != NO_ID).then(|| {
+                FollowKey::in_context(
+                    self.slots[hot.chain as usize].key,
+                    usize::from(hot.chain_context),
+                )
+            }),
             edge_case: None,
-            edge_quoted: false,
+            edge_marks: 0,
             blank: hot.leading && hot.scalar_count > 0,
         };
 
@@ -442,9 +455,9 @@ impl Counters {
                     ));
                 }
             }
-            for (quoted, counts) in [false, true].into_iter().zip(slot.follows) {
+            for (context, counts) in slot.follows.into_iter().enumerate() {
                 if counts.total() > 0 {
-                    follows.push((FollowKey::new(slot.key, quoted), counts));
+                    follows.push((FollowKey::in_context(slot.key, context), counts));
                 }
             }
         }
@@ -512,13 +525,15 @@ impl Counters {
     }
 }
 
-/// The same split as [`super::rides`], with the quote kept apart.
+/// The same split as [`super::rides`], with the quote and the closing bracket
+/// kept apart.
 fn ride_of(cp: u32) -> Ride {
     let Some(scalar) = char::from_u32(cp) else {
         return Ride::Leads;
     };
     match pool_of(scalar) {
         Pool::Quote => Ride::Quote,
+        Pool::Bracket if closes(scalar) => Ride::Closer,
         Pool::Bracket => Ride::Bracket,
         _ => Ride::Leads,
     }

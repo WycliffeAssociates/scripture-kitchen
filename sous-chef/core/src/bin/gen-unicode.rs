@@ -14,6 +14,8 @@
 //!                     →  src/unicode/pools.rs
 //!                        POOLS         sorted (scalar, Pool), G2's neighbour
 //!                                      categories, no row a Class bit fixes
+//!                        CLOSERS       sorted `Pe` scalars that pool as a
+//!                                      bracket
 //! ```
 //!
 //! Never a `build.rs`: both tables are committed, reviewable artifacts, and a
@@ -49,7 +51,9 @@ fn main() -> std::io::Result<()> {
         .next()
         .map_or_else(|| manifest.join("src/unicode/pools.rs"), PathBuf::from);
     std::fs::write(&table, rendered)?;
-    std::fs::write(&pools_out, render_pools(&pools(&ucd)))?;
+    let pools = pools(&ucd);
+    let closers = closers(&ucd, &pools);
+    std::fs::write(&pools_out, render_pools(&pools, &closers))?;
     Ok(())
 }
 
@@ -198,6 +202,25 @@ fn pools(ucd: &Path) -> Vec<(u32, u8)> {
         .collect()
 }
 
+/// Every `Pe` scalar the pool table calls a bracket: the brackets that close.
+fn closers(ucd: &Path, pools: &[(u32, u8)]) -> Vec<u32> {
+    let mut out = Vec::new();
+    for_each_range(
+        &ucd.join("DerivedGeneralCategory.txt"),
+        |property, lo, hi| {
+            if property == "Pe" {
+                out.extend((lo..=hi.min(MAX_CP)).filter(|cp| {
+                    pools
+                        .binary_search_by_key(cp, |row| row.0)
+                        .is_ok_and(|at| pools[at].1 == 1)
+                }));
+            }
+        },
+    );
+    out.sort_unstable();
+    out
+}
+
 fn paint(ucd: &Path, file: &str, wanted: &[&str], value: u8, pool: &mut [u8]) {
     for_each_range(&ucd.join(file), |property, lo, hi| {
         if wanted.contains(&property) {
@@ -208,7 +231,7 @@ fn paint(ucd: &Path, file: &str, wanted: &[&str], value: u8, pool: &mut [u8]) {
     });
 }
 
-fn render_pools(rows: &[(u32, u8)]) -> String {
+fn render_pools(rows: &[(u32, u8)], closers: &[u32]) -> String {
     let mut out = String::with_capacity(1 << 16);
     let _ = write!(
         out,
@@ -229,6 +252,21 @@ fn render_pools(rows: &[(u32, u8)]) -> String {
         out.push_str("   ");
         for &(cp, value) in chunk {
             let _ = write!(out, " (0x{cp:05X}, Pool::{}),", POOL_NAMES[value as usize]);
+        }
+        out.push('\n');
+    }
+    out.push_str("];\n");
+    let _ = write!(
+        out,
+        "\n/// The {} `Pe` scalars among the brackets, sorted; `closes` binary searches it.\n\
+         #[rustfmt::skip]\n\
+         pub(super) static CLOSERS: &[u32] = &[\n",
+        closers.len(),
+    );
+    for chunk in closers.chunks(6) {
+        out.push_str("   ");
+        for cp in chunk {
+            let _ = write!(out, " 0x{cp:05X},");
         }
         out.push('\n');
     }

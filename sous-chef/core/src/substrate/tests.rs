@@ -216,11 +216,16 @@ fn a_seam_resolves_to_the_counts_of_the_unsplit_text() {
     assert_seam_agrees("one, \u{201C}Two", &["one, ", "\u{201C}", "Two"]);
     assert_seam_agrees("one, (Two", &["one, ", "(", "Two"]);
     assert_seam_agrees("one,\u{201D} two", &["one,\u{201D}", " two"]);
+    // So does a closing bracket, on either side of the seam or alone.
+    assert_seam_agrees("one.) two", &["one.)", " two"]);
+    assert_seam_agrees("one.) two", &["one.", ") two"]);
+    assert_seam_agrees("one. ) two", &["one. ", ")", " two"]);
+    assert_seam_agrees("one.\u{201D}) two", &["one.\u{201D}", ") two"]);
 }
 
 /// A handoff is keyed by the last glyph that does not ride and by whether a
-/// quote stood between: `,` and `, "` count apart, a bracket marks nothing,
-/// and a word closes the chain.
+/// quote stood between: `,` and `, "` count apart, an opening bracket marks
+/// nothing, and a word closes the chain.
 #[test]
 fn a_quote_between_glyph_and_letter_is_its_own_context() {
     let row = row("a, B, c, \u{201C}D, (e \u{201C}f g\u{2019}h");
@@ -234,6 +239,31 @@ fn a_quote_between_glyph_and_letter_is_its_own_context() {
     assert_eq!(upper_lower(key(',', false)), Some((1, 2)));
     assert_eq!(upper_lower(key(',', true)), Some((1, 0)));
     assert_eq!(row.follows().len(), 2, "{:?}", row.follows());
+}
+
+/// A closing bracket marks the handoff it rides, so `forever.) to him` is the
+/// period's bracketed context and not its bare one.
+#[test]
+fn a_closing_bracket_between_glyph_and_letter_is_its_own_context() {
+    let row = row("a.) b. (C.) \u{201C}d, (e");
+    let dot = FollowKey::new(ScalarKey::of('.'), false);
+    let context = |key: FollowKey| {
+        row.follows()
+            .iter()
+            .find(|entry| entry.0 == key)
+            .map(|entry| (entry.1.get(Case::Upper), entry.1.get(Case::Lower)))
+    };
+    assert_eq!(context(dot.through_bracket()), Some((0, 1)));
+    assert_eq!(context(dot), Some((1, 0)), "`. (C`: an opening bracket");
+    assert_eq!(context(dot.through_quote().through_bracket()), Some((0, 1)));
+    assert_eq!(
+        context(FollowKey::new(ScalarKey::of(','), false)),
+        Some((0, 1))
+    );
+    assert_eq!(row.follows().len(), 4, "{:?}", row.follows());
+    assert!(dot < dot.through_quote() && dot.through_quote() < dot.through_bracket());
+    assert_eq!(dot.through_bracket().glyph(), ScalarKey::of('.'));
+    assert!(dot.is_bare() && !dot.through_bracket().is_bare());
 }
 
 /// The hygiene ruling, kept: a run abutting a masked `\c` is two runs.

@@ -72,7 +72,8 @@ walk does not decide that. It records what stood in front of each occurrence —
 Before::None        a word, or space and then a word
 Before::Start       the first word of the chapter, or of a verse
 Before::Glyph(k)    the handoff context in front of it: the last glyph that is
-                    not a quote or bracket, and whether a quote stood between
+                    not a quote or bracket, and whether a quote or a closing
+                    bracket stood between
 ```
 
 — and the judge asks the corpus's own **terminal table** what each context
@@ -83,7 +84,8 @@ exactly what is read here:
 He said. \u{201C}Go        Glyph('.' quoted)
 he said, \u{201C}Name      Glyph(',' quoted)
 he said, name        Glyph(',' bare)
-one. (Two            Glyph('.' bare)      a bracket rides and marks nothing
+one. (Two            Glyph('.' bare)      an opening bracket rides and marks nothing
+forever.) To him     Glyph('.' bracketed) the period closed the parenthetical
 said \u{201C}Go            None                 a word closes the chain
 ```
 
@@ -97,15 +99,16 @@ reaches `JudgingConfig::terminal_upper_share_bp` (8,000 = 80%) on at least
 everything else is the corpus's answer.
 
 This is why there is no punctuation allow-list and no rule per script. Over
-the committed tier the tables learned are (`q` = through a quote):
+the committed tier the tables learned are (`q` = through a quote, `b` =
+through a closing bracket):
 
 ```text
-WA-en-ulb   '!' '!'q ','q '.' '.'q ':' ':'q '?' '?'q
-francl      '!' '!'q '*' '.' '.'q ':'q '?' '?'q '—'q '…'q
+WA-en-ulb   '!' '!'q ','q '.' '.'q '.'qb ':' ':'q '?' '?'q   // '.'b is 33 of 54: PSA 136's refrain
+francl      '!' '!'q '*' '.' '.'q '.'b '.'qb ':'q '?' '?'q '—'q '…'q
 grcsr       '.' ';'                      // the Greek question mark
-nya         '!'q '.' '.'q ':'q '?' '?'q  // ','q is 7,653 bp: speech is not always capitalized
-spaRV1909   '.' '?' '¡'                  // the inverted opener, not '¿'
-swhulb      '!' '!'q ','q '.' '.'q ':'q '?' '?'q '`'q
+nya         '!'q '.' '.'q '.'b '.'qb ':'q '?' '?'q  // ','q is 7,653 bp: speech is not always capitalized
+spaRV1909   '.' '.'b ':'b '?' '¡'        // the inverted opener, not '¿'
+swhulb      '!' '!'q ','q '.' '.'q '.'b '.'qb ':'q '?' '?'q '`'q
 amh, hin2017  (nothing forces — the script is uncased)
 ```
 
