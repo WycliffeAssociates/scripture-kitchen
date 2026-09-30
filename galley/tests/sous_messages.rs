@@ -1,7 +1,8 @@
 //! `sous-messages.ts` and `sous-messages.en.json` name the same ids, every
 //! entry is a headline and details, every argument either tier reads is a
-//! parameter `describe` declares for that id in `ParamsById`, and a `Glyph`
-//! parameter is shown inside `<g>` and nowhere else.
+//! parameter `describe` declares for that id in `ParamsById`, a `Glyph` or
+//! `Glyphs` parameter is shown inside `<g>` and nowhere else, every `Glyph`
+//! has a `…Kind` beside it, and a `select` over an enum names every value.
 //!
 //! ```text
 //! ts    "convention.sentenceStart": { glyph: Glyph; word: string; usualWord: string; upper: number } & Spread;
@@ -9,6 +10,8 @@
 //!                                     "details": "After <g>{glyph}</g>, … {upper, number} of {total, number} …" }
 //!       arguments of each tier ⊆ declared                   → ok
 //!       inside <g> {glyph} = the Glyph params read          → ok
+//!       glyph: Glyph beside glyphKind: MarkKind             → ok
+//!       {glyphKind, select, quote {…} … other {…}}          → every MarkKind
 //! ```
 //!
 //! Both files are read as text: the TypeScript by its one-id-per-line blocks,
@@ -19,6 +22,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 const TS: &str = include_str!("../sous-messages.ts");
 const CATALOG: &str = include_str!("../sous-messages.en.json");
+const UNICODE: &str = include_str!("../sous-unicode.ts");
 
 /// The block from `start` to the first line that is exactly `end`.
 fn block<'a>(source: &'a str, start: &str, end: &str) -> &'a str {
@@ -192,13 +196,52 @@ fn tiers() -> Vec<(String, &'static str, String)> {
         .collect()
 }
 
+/// Every quoted string in `text`.
+fn strings(text: &str) -> BTreeSet<String> {
+    text.split('"')
+        .skip(1)
+        .step_by(2)
+        .map(str::to_owned)
+        .collect()
+}
+
+/// The values of every enum a parameter may be typed by: each
+/// `export type Name = "a" | "b";` in sous-messages.ts, `MarkKind` from
+/// sous-unicode.ts, and `Exclude<MarkKind, …>`.
+fn enums() -> BTreeMap<String, BTreeSet<String>> {
+    let kinds_line = UNICODE
+        .lines()
+        .find_map(|line| line.strip_prefix("export const MARK_KINDS = "))
+        .expect("sous-unicode.ts lists MARK_KINDS");
+    let kinds = strings(kinds_line);
+    let mut out = BTreeMap::from([("MarkKind".to_owned(), kinds.clone())]);
+    let mut rest = TS;
+    while let Some(at) = rest.find("export type ") {
+        rest = &rest[at + "export type ".len()..];
+        let Some((name, body)) = rest.split_once(" =") else {
+            break;
+        };
+        let body = &body[..body.find(';').expect("a type alias ends")];
+        let values = if let Some(excluded) = body.trim().strip_prefix("Exclude<MarkKind,") {
+            kinds.difference(&strings(excluded)).cloned().collect()
+        } else if body.trim_start().starts_with(['"', '|']) {
+            strings(body)
+        } else {
+            continue;
+        };
+        out.insert(name.trim().to_owned(), values);
+    }
+    out
+}
+
 /// The argument names an ICU message reads, split by whether a `<g>` tag
-/// holds them.
+/// holds them, and the selectors of every `select`.
 #[derive(Debug, Default, PartialEq, Eq)]
 struct Read {
     names: BTreeSet<String>,
     in_glyph: BTreeSet<String>,
     outside: BTreeSet<String>,
+    selects: Vec<(String, BTreeSet<String>)>,
 }
 
 /// Every argument name an ICU message reads, refusing unbalanced braces or
@@ -318,7 +361,7 @@ impl Icu<'_> {
         match kind.as_str() {
             "select" | "plural" | "selectordinal" => {
                 self.eat(b',')?;
-                let mut other = false;
+                let mut selectors = BTreeSet::new();
                 loop {
                     let selector = self.word();
                     if selector.is_empty() {
@@ -327,13 +370,16 @@ impl Icu<'_> {
                     if selector.starts_with("offset:") {
                         continue;
                     }
-                    other |= selector == "other";
+                    selectors.insert(selector);
                     self.eat(b'{')?;
                     self.message()?;
                     self.eat(b'}')?;
                 }
-                if !other {
+                if !selectors.contains("other") {
                     return Err(format!("`{name}` has no `other` branch"));
+                }
+                if kind == "select" {
+                    self.read.selects.push((name, selectors));
                 }
                 self.eat(b'}')
             }
@@ -389,13 +435,18 @@ fn every_catalog_argument_is_a_declared_parameter() {
 }
 
 /// A mark in quotation marks cannot be read when the mark is one (`“"”`), so
-/// every `Glyph` is shown inside `<g>`, and `<g>` holds nothing else.
+/// every `Glyph` or `Glyphs` is shown inside `<g>`, and `<g>` holds nothing
+/// else.
 #[test]
 fn every_glyph_is_shown_inside_a_glyph_tag_and_nothing_else_is() {
     let declared = declared_params();
     for (id, tier, text) in tiers() {
         let used = Icu::parse(&text).unwrap_or_else(|why| panic!("{id} {tier}: {why}"));
-        let glyph = |name: &String| declared[&id].get(name).is_some_and(|ty| ty == "Glyph");
+        let glyph = |name: &String| {
+            declared[&id]
+                .get(name)
+                .is_some_and(|ty| ty == "Glyph" || ty == "Glyphs")
+        };
         let bare: Vec<_> = used.outside.iter().filter(|name| glyph(name)).collect();
         assert!(bare.is_empty(), "{id} {tier} shows {bare:?} outside <g>");
         let tagged: Vec<_> = used.in_glyph.iter().filter(|name| !glyph(name)).collect();
@@ -403,6 +454,61 @@ fn every_glyph_is_shown_inside_a_glyph_tag_and_nothing_else_is() {
             tagged.is_empty(),
             "{id} {tier} tags {tagged:?}, which is no Glyph"
         );
+    }
+}
+
+/// A reader asks "what is a mark?", so every single mark carries its kind.
+#[test]
+fn every_glyph_has_a_kind_beside_it() {
+    for (id, params) in declared_params() {
+        for (name, ty) in &params {
+            if ty == "Glyph" {
+                let kind = params.get(&format!("{name}Kind"));
+                assert_eq!(
+                    kind.map(String::as_str),
+                    Some("MarkKind"),
+                    "{id}'s {name} has no {name}Kind: MarkKind"
+                );
+            }
+        }
+    }
+}
+
+/// A `select` names only values of its parameter's enum, and one over a kind
+/// names every kind, so no kind reads as "a punctuation mark" by omission;
+/// `other` there stands for the kind `other`.
+#[test]
+fn every_select_over_an_enum_names_only_its_values_and_every_kind() {
+    let declared = declared_params();
+    let enums = enums();
+    assert!(enums["MarkKind"].contains("sentenceEnd"), "MarkKind was read");
+    assert!(!enums["PoolName"].contains("letter"), "PoolName excludes letter");
+    assert!(enums["HygieneName"].contains("noncharacter"), "a multi-line enum was read");
+    for (id, tier, text) in tiers() {
+        let used = Icu::parse(&text).unwrap_or_else(|why| panic!("{id} {tier}: {why}"));
+        for (name, selectors) in &used.selects {
+            let Some(ty) = declared[&id].get(name) else {
+                continue;
+            };
+            let Some(values) = enums.get(ty) else {
+                continue;
+            };
+            let stray: Vec<_> = selectors
+                .iter()
+                .filter(|selector| *selector != "other" && !values.contains(*selector))
+                .collect();
+            assert!(
+                stray.is_empty(),
+                "{id} {tier}: {{{name}, select}} names {stray:?}, which is no {ty}"
+            );
+            if ty == "MarkKind" || ty == "PoolName" {
+                let missing: Vec<_> = values.difference(selectors).collect();
+                assert!(
+                    missing.is_empty(),
+                    "{id} {tier}: {{{name}, select}} never names {missing:?}"
+                );
+            }
+        }
     }
 }
 

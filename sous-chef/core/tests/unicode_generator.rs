@@ -9,18 +9,21 @@ fn a_second_generator_run_reproduces_the_committed_tables() {
     let scratch = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
     let table = scratch.join("regenerated-table.rs");
     let pools = scratch.join("regenerated-pools.rs");
+    let kinds = scratch.join("regenerated-sous-unicode.ts");
     let status = Command::new(env!("CARGO_BIN_EXE_gen-unicode"))
         .arg(&table)
         .arg(&pools)
+        .arg(&kinds)
         .status()
         .expect("the generator binary runs");
     assert!(status.success(), "gen-unicode exited with {status}");
 
     // The class table's home is `mise`; the pools stay with the rules that
-    // read them.
+    // read them; the message kinds ship in galley's package.
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     assert_reproduces(&table, &manifest.join("../../mise/src/unicode/table.rs"));
     assert_reproduces(&pools, &manifest.join("src/unicode/pools.rs"));
+    assert_reproduces(&kinds, &manifest.join("../../galley/sous-unicode.ts"));
 }
 
 fn assert_reproduces(regenerated: &PathBuf, committed: &PathBuf) {

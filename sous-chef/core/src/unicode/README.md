@@ -146,6 +146,12 @@ And `DIRECTIONLESS`, the 4 `Po` scalars among the quotes (`"`, `'`, `＂`,
 opens or closes, so no order of marks around it is a swap of another.
 `codegen` copies the list into the generated reader as `DIRECTIONLESS_QUOTES`.
 
+`gen-unicode` also writes `galley/sous-unicode.ts`: the pools again as a
+message's kinds of mark (`quote`, `bracket`, `dash`, `sentenceEnd`,
+`separator`, then `digit`, `symbol`, `space`, `letter`, `other`) over
+every scalar, and `CLOSERS`, so the JavaScript side names and rides marks by
+the same tables.
+
 And `LOOKALIKES`, 586 punctuation and symbol scalars in 199 UTS #39
 `confusables.txt` skeletons, for `lookalike_of` and `look_alike`: Rarity names
 the mark a reader probably meant (`'` for `’`) before the pool's most common

@@ -78,12 +78,49 @@ plain     g: (chunks) => chunks.join("")
   React callers return an element (`<kbd key=…>`) and get an array back.
 - A plain-text context should keep a delimiter the mark cannot be; every
   example in this file renders `<g>` as `[…]`.
-- Only marks take the tag: every parameter typed `Glyph` in `ParamsById`
-  (`glyph`, `neighbor`, `pair`, `reversedPair`, a mark's `usual`, `cluster`,
-  `usualCluster`, `letter`, `run`, `before`) and the literal `�` of a hygiene
-  message. A letter repeated by `convention.letterRun` is a glyph too.
+- Only marks take the tag: every parameter typed `Glyph` (one mark: `glyph`,
+  `neighbor`, a mark's `usual`, `letter`, `before`) or `Glyphs` (a pair or a
+  group: `pair`, `reversedPair`, `cluster`, `usualCluster`, `run`) in
+  `ParamsById`, and the literal `�` of a hygiene message. A letter repeated by
+  `convention.letterRun` is a glyph too.
 - Words keep typographic quotes, since a word is never one: “Moses”,
   “Kohath's”. There is no word tag.
+
+## Kinds of mark
+
+Readers ask "what's a mark?", so every `Glyph` parameter has a `…Kind`
+beside it (`glyphKind`, `neighborKind`, `usualKind`, `letterKind`,
+`beforeKind`) naming what it is. A `Glyphs` pair or group takes its marks'
+kinds from those.
+
+```text
+params    { pair: "'.", glyphKind: "quote", neighborKind: "sentenceEnd", count: 3, … }
+catalog   {glyphKind, select, quote {A quotation mark} …} right before
+          {neighborKind, select, … sentenceEnd {a mark that ends a sentence} …}
+          (<g>{pair}</g>) appears only # times in this project.
+en        A quotation mark right before a mark that ends a sentence (['.]) appears only 3 times in this project.
+```
+
+| kind | what it is, from UCD 17.0.0 | e.g. |
+| --- | --- | --- |
+| `quote` | `Quotation_Mark` | `"` `'` `“` `’` `«` `「` |
+| `bracket` | general category `Ps Pe Pi Pf`, not a quote | `(` `)` `[` `⁅` |
+| `dash` | `Dash` | `-` `–` `—` `−` |
+| `sentenceEnd` | `Sentence_Terminal` | `.` `?` `!` `।` `。` |
+| `separator` | `Terminal_Punctuation`, not a sentence end | `,` `;` `:` `،` |
+| `digit` | `Nd` (checked first) | `0` `٣` |
+| `symbol` | `S*` | `§` `+` `$` `^` |
+| `space` | `White_Space` | |
+| `letter` | `Alphabetic` | `a` `ñ` |
+| `other` | anything else | `*` `/` `&` `#` |
+
+The first five are the engine's own neighbour pools, first match wins, so
+`«` is a quote and `−` a dash; the engine pools a letter or a space as
+`other`. The table is generated into [`sous-unicode.ts`](sous-unicode.ts)
+(`kindOf(scalar)`, `rangesOf(kind)`, `CLOSERS`) by
+`cargo run -p sous-core --bin gen-unicode`, and a test fails when it is stale.
+Kinds are `select` keys, so a translator words every one; a catalog `select`
+over a kind names all ten (`sous_messages.rs` checks), `other` included.
 
 ## What en_ulb renders
 
@@ -281,8 +318,9 @@ Questions below: **1** seen, **2** how often, **3** normal instead,
 Enum values: `beforeContext` `bare | quoted | bracketed | both`; `neighbor`
 and `usual` on placement and book rate `letter | space | digit | punctuation`;
 `form` and `usualForm` `lowercase | capitalized | allCaps | mixed`
-(`usualWord` is empty for `mixed`); `pool`
-`quote | bracket | dash | terminal | separator | digit | symbol | other`;
+(`usualWord` is empty for `mixed`); every `…Kind`
+`quote | bracket | dash | sentenceEnd | separator | digit | symbol | letter |
+space | other`; `pool` the same without `letter` and `space`;
 `class` `control | delete | replacement | carriageReturn | backslash | conflict |
 combiningMark | format | noBreakSpace | noncharacter`. `digit` is true on the
 pooled digit row, whose `glyph` is the site's own digit.
