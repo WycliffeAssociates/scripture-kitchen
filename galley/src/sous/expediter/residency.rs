@@ -16,7 +16,7 @@ use rustc_hash::FxHashSet;
 use sous_core::{ChapterPass, PairedBook};
 
 use super::Expediter;
-use super::keys::{ChapterRow, EvidenceHash, FiringHash, ObservationKey, PairKey, TableHash};
+use super::keys::{ChapterRow, ObservationKey, PairKey};
 use crate::pantry::{BookId, Budget, RawChecksum, Tally, Tier};
 
 /// Previous checksums a book keeps beside its current one, so an undo of that
@@ -123,12 +123,10 @@ impl<P: ChapterPass + Sync> Expediter<P> {
             + self
                 .aggregates
                 .resident_bytes(|aggregate| self.pass.aggregate_bytes(aggregate))
-            + self.sites.resident_bytes(|(_, _, rows)| {
-                size_of::<FiringHash>() + size_of::<EvidenceHash>() + size_of_val(&**rows)
-            })
             + self
-                .firing
-                .resident_bytes(|_| size_of::<TableHash>() + size_of::<FiringHash>())
+                .sites
+                .resident_bytes(|entry| size_of_val(entry) + size_of_val(&*entry.2))
+            + self.firing.resident_bytes(size_of_val)
             + self.paired.resident_bytes(PairedBook::resident_bytes)
             + self.totals.resident_bytes()
             + self.verdicts.resident_bytes();
