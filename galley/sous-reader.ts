@@ -236,7 +236,8 @@ export interface Pattern {
   readonly denominator: number;
   readonly shareBp: number;
   /** Books holding part of the numerator, out of the snapshot's `bookCount`.
-   * Information only: nothing in the engine gates on dispersion. */
+   * Dispersion is information everywhere but `BookRate`, the one channel
+   * that gates on it; its rows carry 1, the book they name. */
   readonly books: number;
   readonly usual: Usual;
   /** On a `RunShape` row only: its exact runs, most frequent first. */
