@@ -162,7 +162,10 @@ test("every query is well formed, every regex compiles, and each regex finds its
   const purposes = new Set(["this", "alternative", "others"]);
   for (const { name, snapshot, book, finding, pattern, siteText } of sites()) {
     const usfm = fixture(name === "edit.bin" && book.id === "books/GEN.usfm" ? "GEN-edited.usfm" : book.id.replace("books/", ""));
-    const { queries } = describe(finding, pattern, { siteText, bookCount: snapshot.length });
+    // As a consumer does: the mark before the site in verse text.
+    const { text, at } = verseText(usfm);
+    const before = markBefore(text, at.findIndex((offset) => offset >= finding.from));
+    const { queries } = describe(finding, pattern, { siteText, bookCount: snapshot.length, before });
     for (const query of queries) {
       assert.ok(purposes.has(query.purpose));
       if (query.kind === "literal") {
@@ -179,14 +182,23 @@ test("every query is well formed, every regex compiles, and each regex finds its
   assert.ok(regexes > 0, "the goldens hold a finding with a regex query");
 });
 
+const casing = {
+  kind: "Convention", from: 0, to: 0, bookIdx: 0, convention: { pattern: 0 },
+};
+const casingPattern = {
+  glyph: 0, channel: "Casing", key: { kind: "Casing", hash: 1n, form: "Title" }, usual: { kind: "Casing", form: "Lower", count: 9 },
+  numerator: 1, denominator: 10, books: 1, shareBp: 1000,
+};
+/** A Casing finding's regexes by purpose, the mark read before the site. */
+function casingQueries(text, siteText) {
+  const before = markBefore(text, text.lastIndexOf(siteText));
+  const { queries } = describe(casing, casingPattern, { siteText, bookCount: 1, before });
+  const regexes = queries.filter((query) => query.kind === "regex");
+  assert.equal(regexes.length, queries.length, "a word's queries are all regexes");
+  return Object.fromEntries(regexes.map((query) => [query.purpose, new RegExp(query.source, query.flags)]));
+}
+
 test("a regex after a mark rides quotes and brackets as the engine does", () => {
-  const casing = {
-    kind: "Convention", from: 0, to: 0, bookIdx: 0, convention: { pattern: 0 },
-  };
-  const pattern = {
-    glyph: 0, channel: "Casing", key: { kind: "Casing", hash: 1n, form: "Title" }, usual: { kind: "Casing", form: "Lower", count: 9 },
-    numerator: 1, denominator: 10, books: 1, shareBp: 1000,
-  };
   const cases = [
     ['them; He', "bare"],
     ['said, "He', "quoted"],
@@ -195,16 +207,48 @@ test("a regex after a mark rides quotes and brackets as the engine does", () => 
     ['them; (He', "bare"],
   ];
   for (const [text, context] of cases) {
-    const before = markBefore(text, text.length - 2);
-    assert.ok(before !== undefined, text);
-    const { queries } = describe(casing, pattern, { siteText: "He", bookCount: 1, before });
-    const [capital, lower] = queries.filter((query) => query.kind === "regex");
-    assert.equal(capital.purpose, "this", context);
-    assert.match(text, new RegExp(capital.source, capital.flags), `${context}: ${capital.source}`);
-    assert.doesNotMatch(text, new RegExp(lower.source, lower.flags), context);
-    assert.doesNotMatch(text.replace("He", "he"), new RegExp(capital.source, capital.flags), context);
+    const { this: own, alternative, others } = casingQueries(text, "He");
+    assert.match(text, own, `${context}: ${own.source}`);
+    assert.doesNotMatch(text.replace("He", "Hear"), own, `${context}: the whole word`);
+    assert.doesNotMatch(text.replace("He", "She"), own, `${context}: this word only`);
+    assert.doesNotMatch(text, alternative, context);
+    assert.match(text.replace("He", "he"), alternative, context);
+    assert.doesNotMatch(text.replace("He", "he"), own, context);
+    assert.match(text.replace("He", "we"), others, `${context}: any word of the other case`);
+    assert.doesNotMatch(text, others, context);
   }
   // A quoted handoff is no bare one, so a bare query never reaches across it.
-  const bare = describe(casing, pattern, { siteText: "He", bookCount: 1, before: markBefore("them; He", 6) });
-  assert.doesNotMatch('them;" He', new RegExp(bare.queries.find((query) => query.kind === "regex").source, "u"));
+  assert.doesNotMatch('them;" He', casingQueries("them; He", "He").this);
+});
+
+test("a word's regex is the word escaped, whole by Unicode, with or without a mark", () => {
+  // Every syntax character in the word matches only itself.
+  const word = "a.b*(c)?[d]{2}|e+$^\\/";
+  const after = casingQueries(`them; ${word}`, word);
+  assert.match(`them; ${word}`, after.this);
+  assert.doesNotMatch("them; aXb", after.this);
+  // No mark: the word after a word, never glued to one; `\b` would split `é`.
+  const { this: own, alternative } = casingQueries("priest of On, as", "On");
+  assert.match("priest of On, as", own);
+  assert.match("priest of on, as", alternative);
+  assert.doesNotMatch("priest of Oné", own);
+  assert.doesNotMatch("priest of éOn", own);
+  assert.doesNotMatch("them. On", own);
+});
+
+test("a SentenceStart regex is the mark, bare riders, and this word", () => {
+  const finding = { kind: "Convention", from: 0, to: 0, bookIdx: 0, convention: { pattern: 0 } };
+  const pattern = {
+    glyph: 0x3f, channel: "SentenceStart", key: { kind: "SentenceStart" }, usual: { kind: "None" },
+    numerator: 3, denominator: 2165, books: 3, shareBp: 13,
+  };
+  const { queries } = describe(finding, pattern, { siteText: "his", bookCount: 66 });
+  assert.deepEqual(
+    queries.map((query) => [query.purpose, query.source]),
+    [
+      ["this", String.raw`\?[\s\p{Ps}]*his(?![\p{L}\p{M}\p{N}])`],
+      ["alternative", String.raw`\?[\s\p{Ps}]*His(?![\p{L}\p{M}\p{N}])`],
+      ["others", String.raw`\?[\s\p{Ps}]*[\p{Uppercase}\p{Lt}]`],
+    ],
+  );
 });

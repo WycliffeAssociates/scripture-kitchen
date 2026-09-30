@@ -968,8 +968,10 @@ if (corpusDir && existsSync(corpusDir)) {
   line("sum", median(idle.publish) + median(idle.read));
 
   // Every regex query over the corpus compiles, and the ones the guide shows
-  // (EXO 38:26's em dash before a digit, JOB 41:15's lowercase after `?`)
-  // find their own site in the book's verse text.
+  // (EXO 38:26's em dash before a digit, JOB 41:15's `his` after `?`) find
+  // their own site in the book's verse text. JOB 41:15's is its own case
+  // only: the corpus's other lowercase words after `?` (JER 49:4's `you`,
+  // ACT 7:49's `says`) are other words.
   const { describe } = await import(resolve(here, "../sous-messages.ts"));
   const snapshot = FindingsSnapshot.open(coldBuffer);
   const texts = new Map(books);
@@ -997,6 +999,11 @@ if (corpusDir && existsSync(corpusDir)) {
         );
         check(own, `${book.key} ${id}: ${query.source} finds its own site`);
         shown.add(id);
+        if (book.key === "JOB" && id === "convention.sentenceStart") {
+          const rx = new RegExp(query.source, `${query.flags}g`);
+          const sites = books.reduce((sum, [, usfm]) => sum + [...verseText(usfm).text.matchAll(rx)].length, 0);
+          check(sites === 1, `JOB 41:15's ${query.source} finds 1 site in en_ulb, found ${sites}`);
+        }
       }
     }
   }

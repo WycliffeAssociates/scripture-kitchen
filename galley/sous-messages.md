@@ -225,11 +225,29 @@ type Query =
 // purpose: "this" | "alternative" | "others"
 ```
 
+```text
+JOB 41:15  …which are a terror? \q \v 15 his back…          (SentenceStart, after `?`)
+  this         \?[\s\p{Ps}]*his(?![\p{L}\p{M}\p{N}])          1 in en_ulb: this site
+  alternative  \?[\s\p{Ps}]*His(?![\p{L}\p{M}\p{N}])          4
+  others       \?[\s\p{Ps}]*[\p{Uppercase}\p{Lt}]             2,143
+JOB 12:23  …destroys them; \q2 He enlarges nations…          (Casing, `before` is `;`, bare)
+  this         ;[\s\p{Ps}]*He(?![\p{L}\p{M}\p{N}])            2
+  alternative  ;[\s\p{Ps}]*he(?![\p{L}\p{M}\p{N}])            543
+  others       ;[\s\p{Ps}]*\p{Lowercase}                      4,373
+GEN 41:45  …priest of On, as a wife.                         (Casing, no mark before)
+  this         (?<=(?:^|[\p{L}\p{M}\p{N}])[\s\p{Ps}\p{Pe}\p{Pi}\p{Pf}"'＂＇]*)(?<![\p{L}\p{M}\p{N}])On(?![\p{L}\p{M}\p{N}])
+                                                               4
+  alternative  the same with on                                4,016
+```
+
+JOB 41:15's `this` finds only itself: the corpus's other two lowercase words
+after `?` are `you` (JER 49:4) and `says` (ACT 7:49), other words.
+
 | purpose | means | literal | regex |
 | --- | --- | --- | --- |
-| `this` | the finding's own form, wherever else the project writes it | `;"`, `’`, `On` (case-sensitive, whole word), `a a` (whole word) | `—\p{Nd}` (an em dash right before a digit), `\?[\s…]*\p{Lowercase}` (lowercase after `?`) |
-| `alternative` | what the reader might write instead | `";` (also across a straight quote), `'` for `’`, `on`, `His` | |
-| `others` | the comparison the details name | `'"` (the usual follower), `."'"` (the most common group), `"` (the pool's most common mark) | `—\p{Alphabetic}` (the usual class), `\?[\s…]*[\p{Uppercase}\p{Lt}]` (a capital after `?`) |
+| `this` | the finding's own form, wherever else the project writes it | `;"`, `’`, `a a` (whole word) | `—\p{Nd}` (an em dash right before a digit), the site's word after its mark as written |
+| `alternative` | what the reader might write instead | `";` (also across a straight quote), `'` for `’` | the same word after the same mark in the usual form (`His`, `he`) |
+| `others` | the comparison the details name | `'"` (the usual follower), `."'"` (the most common group), `"` (the pool's most common mark) | `—\p{Alphabetic}` (the usual class), any word of the other case after the mark (the habit) |
 
 - A literal goes to galley's find, `findAll(needle, { caseSensitive,
   wholeWord, scope })`, which searches the projection, the verse text a
@@ -239,24 +257,35 @@ type Query =
   JavaScript, `new RegExp(source, flags)` (add `g` to iterate), over **verse
   text with markers removed**, a book's or a chapter's at a time: a handoff
   can cross a verse boundary (JOB 41:15's `?` ends verse 14). Sources are
-  trusted kitchen output: built only from escaped marks and fixed Unicode
-  classes, never from scripture text.
+  trusted kitchen output: built only from escaped marks, the site's own word
+  with every syntax character escaped, and fixed Unicode classes. Every regex
+  is case-sensitive, and a word ends at a Unicode lookahead,
+  `(?![\p{L}\p{M}\p{N}])`, since `\b` is ASCII-only even with `u`.
 - Where regexes appear:
   - **Placement and book rate**: the glyph beside the class it touches, and
     beside its usual class as `others`: `—\p{Nd}`, `\s—`, `,\p{Alphabetic}`,
     `)[^\p{Alphabetic}\p{Nd}\s]`. The pooled digit lane's glyph is `\p{Nd}`.
     A site that holds its neighbour as well keeps its literal `this` (`),`).
-  - **SentenceStart**: a lowercase word after the mark as `this`, a capital
-    as `others`. The row counts bare handoffs only, so between the mark and
-    the word stand only white space and opening brackets; a quote or a closing
-    bracket there is another context the row never counts (`?" he said`).
+  - **SentenceStart**: the mark, bare riders, then the site's word as
+    `this`, capitalized as `alternative`, and any capital as `others`. The row
+    counts bare handoffs only, so between the mark and the word stand only
+    white space and opening brackets; a quote or a closing bracket there is
+    another context the row never counts (`?" he said`).
   - **Casing** with `context.before`: the mark, the riders of its context
-    (`bare`, `quoted`, `bracketed`, `both`), then the word's own case as
-    `this` and the other as `others`.
-- The riders follow the engine's ride rule over the generated tables in
-  `sous-unicode.ts`: a quote is any `quote` kind, a closing bracket is in
-  `CLOSERS`, an opening bracket is any other `bracket`. No class is written
-  by hand.
+    (`bare`, `quoted`, `bracketed`, `both`), then the site's word as `this`,
+    the usual form's spelling as `alternative` (none for `mixed`), and any
+    word of the other case as `others`. Without a mark (`markBefore` found a
+    word first) the word must follow a word through riders, or open the text,
+    as `this` and `alternative`; there is no `others`. Pass `before` whenever
+    the site follows a mark, or `this` will not find its own site.
+  - A bare word as a literal is never a query: `his` alone finds every `his`
+    in the project, not the finding's case.
+- The riders are Unicode classes close to the engine's ride rule: an opening
+  bracket is `\p{Ps}`, a quote `\p{Pi}\p{Pf}` or a directionless `"'＂＇`, a
+  closing bracket `\p{Pe}`. A regex is a lookup aid over verse text, and may
+  differ slightly from the engine's pool-based classes in `sous-unicode.ts`:
+  `「` and `„` are `Ps` but pool as quotes, and `⸂` is `Pi` but pools as a
+  bracket.
 - A placement or book-rate site that holds only its glyph has no literal
   `this`: the class it touches is no literal, and the glyph alone would find
   every use. Its regex says it.

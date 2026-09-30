@@ -36,7 +36,7 @@ import type {
   PresenceKind,
   TerminalContext,
 } from "./sous-reader.ts";
-import { CLOSERS, kindOf, rangesOf, type MarkKind } from "./sous-unicode.ts";
+import { CLOSERS, kindOf, type MarkKind } from "./sous-unicode.ts";
 import { codePointOf, nameOf } from "./sous-unicode-names.ts";
 
 /** `PATTERN_DIGIT_GLYPH`, `LETTER_RUN_MAX` and `RUN_BUCKETS` in the reader. */
@@ -129,7 +129,7 @@ void sameIds;
  *   another order, a lookalike, or the same word in another case.
  * - `others`: the usual comparison the details name (the mark that usually
  *   follows, the most common group, the pool's most common mark, the usual
- *   class beside the glyph, a capital after the mark).
+ *   class beside the glyph, any word of the other case after the mark).
  */
 export type Query = LiteralQuery | RegexQuery;
 
@@ -145,10 +145,10 @@ export interface LiteralQuery {
   readonly wholeWord: boolean;
 }
 
-/** What a literal cannot say: a class beside a mark, or a case after one.
+/** What a literal cannot say: a class beside a mark, or a word after one.
  * `new RegExp(source, flags)` over verse text with markers removed; add `g`
- * to iterate. Built only from escaped marks and fixed Unicode classes, never
- * from scripture text, so a source is trusted kitchen output. */
+ * to iterate. Built only from escaped marks, the site's own word escaped, and
+ * fixed Unicode classes, so a source is trusted kitchen output. */
 export interface RegexQuery {
   readonly kind: "regex";
   readonly purpose: QueryPurpose;
@@ -391,8 +391,8 @@ function regex(purpose: QueryPurpose, source: string): RegexQuery {
   return { kind: "regex", purpose, source, flags: "u" };
 }
 
-/** A mark as regex source: a syntax character escaped, an invisible one as
- * `\u{…}`. */
+/** Text as regex source: every syntax character escaped, an invisible one
+ * as `\u{…}`, so it matches only itself. */
 function escaped(text: string): string {
   return [...text]
     .map((char) => {
@@ -403,36 +403,18 @@ function escaped(text: string): string {
     .join("");
 }
 
-/** Ranges as character-class contents: `\u{28}\u{5b}\u{2045}-\u{2046}`. */
-function members(ranges: readonly (readonly [number, number])[]): string {
-  const hex = (scalar: number) => `\\u{${scalar.toString(16)}}`;
-  return ranges.map(([lo, hi]) => (lo === hi ? hex(lo) : `${hex(lo)}-${hex(hi)}`)).join("");
-}
-
-/** The riders between a mark and the word it hands off to, by the ride rule:
- * white space and an opening bracket mark nothing, a quote marks the handoff
- * quoted, a closing bracket marks it bracketed. */
-const RIDERS = (() => {
-  const brackets = rangesOf("bracket").flatMap(([lo, hi]) => Array.from({ length: hi - lo + 1 }, (_, at) => lo + at));
-  const runs = (scalars: number[]) => {
-    const out: [number, number][] = [];
-    for (const scalar of scalars) {
-      const last = out.at(-1);
-      if (last !== undefined && last[1] + 1 === scalar) last[1] = scalar;
-      else out.push([scalar, scalar]);
-    }
-    return out;
-  };
-  return {
-    quote: members(rangesOf("quote")),
-    open: members(runs(brackets.filter((scalar) => !CLOSERS.includes(scalar)))),
-    close: members(runs(brackets.filter((scalar) => CLOSERS.includes(scalar)))),
-  };
-})();
+/** The riders between a mark and the word it hands off to, as Unicode classes
+ * close to the engine's ride rule: white space and an opening bracket mark
+ * nothing, a quote marks the handoff quoted, a closing bracket marks it
+ * bracketed. The engine's pools differ at the edges (`「` is `Ps` but pools as
+ * a quote). */
+const OPEN = "\\p{Ps}";
+const QUOTE = "\\p{Pi}\\p{Pf}\"'＂＇";
+const CLOSE = "\\p{Pe}";
 
 /** What stands between a mark and the next word in each handoff context. */
 function ride(context: BeforeContext): string {
-  const { quote: q, open: o, close: c } = RIDERS;
+  const [q, o, c] = [QUOTE, OPEN, CLOSE];
   const bare = `[\\s${o}]*`;
   switch (context) {
     case "bare":
@@ -448,6 +430,13 @@ function ride(context: BeforeContext): string {
 
 const LOWER = "\\p{Lowercase}";
 const CAPITAL = "[\\p{Uppercase}\\p{Lt}]";
+const WORD_CHAR = "[\\p{L}\\p{M}\\p{N}]";
+
+/** A word as regex source, whole and in exactly this spelling: `\b` is
+ * ASCII-only, so the end is a Unicode lookahead. */
+function wordSource(word: string): string {
+  return `${escaped(word)}(?!${WORD_CHAR})`;
+}
 
 /** An outer class as regex source; `Edge` has none. */
 function classSource(outer: OuterClass): string | undefined {
@@ -697,11 +686,10 @@ function convention(finding: ConventionFinding, pattern: Pattern, site: string, 
           beforeCased: after?.cased ?? 0,
           ...spread,
         },
-        queries: [
-          ...query("this", site, true, true),
-          ...query("alternative", usualWord, true, true),
-          ...(before === undefined ? [] : afterMark(escaped(String.fromCodePoint(before.glyph)), beforeContext(before), key.form === "Lower")),
-        ],
+        queries:
+          before === undefined
+            ? afterWord(site, usualWord)
+            : afterMark(escaped(String.fromCodePoint(before.glyph)), beforeContext(before), site, usualWord, key.form === "Lower"),
       };
     }
     case "WordLength":
@@ -746,19 +734,30 @@ function convention(finding: ConventionFinding, pattern: Pattern, site: string, 
           ...spread,
           upper: pattern.denominator - pattern.numerator,
         },
-        queries: [
-          ...query("this", site, true, true),
-          ...query("alternative", usualWord, true, true),
-          ...afterMark(glyphSource, "bare", true),
-        ],
+        queries: afterMark(glyphSource, "bare", site, usualWord, true),
       };
     }
   }
 }
 
-/** A word after the mark in one handoff context: `this` in the site's case,
- * `others` in the other one. */
-function afterMark(mark: string, context: BeforeContext, lower: boolean): Query[] {
-  const head = ride(context);
-  return [regex("this", `${mark}${head}${lower ? LOWER : CAPITAL}`), regex("others", `${mark}${head}${lower ? CAPITAL : LOWER}`)];
+/** A word after the mark in one handoff context: `this` the site's word as
+ * written, `alternative` the same word in the usual form, `others` any word
+ * in the other case. */
+function afterMark(mark: string, context: BeforeContext, word: string, usualWord: string, lower: boolean): Query[] {
+  const head = `${mark}${ride(context)}`;
+  return [
+    ...(word === "" ? [] : [regex("this", `${head}${wordSource(word)}`)]),
+    ...(usualWord === "" ? [] : [regex("alternative", `${head}${wordSource(usualWord)}`)]),
+    regex("others", `${head}${lower ? CAPITAL : LOWER}`),
+  ];
+}
+
+/** A word with no mark before it, only a word and riders (or the start of
+ * the text): the site's word as written, then in the usual form. */
+function afterWord(word: string, usualWord: string): Query[] {
+  const head = `(?<=(?:^|${WORD_CHAR})[\\s${OPEN}${CLOSE}${QUOTE}]*)(?<!${WORD_CHAR})`;
+  return [
+    ...(word === "" ? [] : [regex("this", `${head}${wordSource(word)}`)]),
+    ...(usualWord === "" ? [] : [regex("alternative", `${head}${wordSource(usualWord)}`)]),
+  ];
 }
