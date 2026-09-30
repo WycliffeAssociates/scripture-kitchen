@@ -661,12 +661,15 @@ fn brigade_configs(rng: &mut Rng) -> <Brigade as ChapterPass>::Config {
         }
         2 => {
             config.terminal_upper_share_bp = 9_000;
+            config.terminal_lower_share_bp = 500;
             config.sentence_start_upper_bp = 9_000;
             config.book_rate_ratio = 2;
             config.book_rate_min_bp = 100;
+            config.book_rate_min_uses = 5;
         }
         3 => {
             config.terminal_upper_share_bp = 8_000;
+            config.terminal_lower_share_bp = 8_000;
             config.doubles_productive_bp = 0;
         }
         4 => {

@@ -30,6 +30,7 @@ export type SettingKey =
   | "support_floor"
   | "word_support_floor"
   | "terminal_upper_share_bp"
+  | "terminal_lower_share_bp"
   | "sentence_start_upper_bp"
   | "word_length_sigma"
   | "doubles_productive_bp"
@@ -62,6 +63,7 @@ export interface SousSettingsValues {
   readonly support_floor: number;
   readonly word_support_floor: number;
   readonly terminal_upper_share_bp: number;
+  readonly terminal_lower_share_bp: number;
   readonly sentence_start_upper_bp: number;
   readonly word_length_sigma: number;
   readonly doubles_productive_bp: number;
@@ -110,6 +112,7 @@ export const SETTING_KEYS: readonly SettingKey[] = [
   "support_floor",
   "word_support_floor",
   "terminal_upper_share_bp",
+  "terminal_lower_share_bp",
   "sentence_start_upper_bp",
   "word_length_sigma",
   "doubles_productive_bp",
@@ -259,6 +262,17 @@ export const SOUS_SETTINGS: { readonly [K in SettingKey]: SettingSpec<K> } = {
     label: "Capital after a mark",
     description:
       "How often this project must follow a mark with a capital before a capital there counts as the mark's doing and not the word's.",
+  },
+  terminal_lower_share_bp: {
+    key: "terminal_lower_share_bp",
+    kind: "share-bp",
+    default: 2000,
+    min: 0,
+    max: 10000,
+    group: "thresholds",
+    label: "Capital left to the word",
+    description:
+      "How rarely this project may follow a mark with a capital for the capital-letter check to still judge the word after it; a mark followed by capitals more often than this, but not often enough to count as the mark's doing, is skipped.",
   },
   sentence_start_upper_bp: {
     key: "sentence_start_upper_bp",
@@ -452,6 +466,7 @@ export function fromSettings(galley: SettingsHost): SousSettingsValues {
       support_floor: handle.support_floor,
       word_support_floor: handle.word_support_floor,
       terminal_upper_share_bp: handle.terminal_upper_share_bp,
+      terminal_lower_share_bp: handle.terminal_lower_share_bp,
       sentence_start_upper_bp: handle.sentence_start_upper_bp,
       word_length_sigma: handle.word_length_sigma,
       doubles_productive_bp: handle.doubles_productive_bp,
@@ -491,6 +506,7 @@ export function toSettings(galley: SettingsHost, values: SousSettingsValues): vo
     handle.support_floor = values.support_floor;
     handle.word_support_floor = values.word_support_floor;
     handle.terminal_upper_share_bp = values.terminal_upper_share_bp;
+    handle.terminal_lower_share_bp = values.terminal_lower_share_bp;
     handle.sentence_start_upper_bp = values.sentence_start_upper_bp;
     handle.word_length_sigma = values.word_length_sigma;
     handle.doubles_productive_bp = values.doubles_productive_bp;

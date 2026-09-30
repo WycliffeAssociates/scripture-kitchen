@@ -232,7 +232,9 @@ impl WordVerdicts {
     pub fn resident_bytes(&self) -> usize {
         size_of::<Self>()
             + self.seen.as_ref().map_or(0, |seen| {
-                size_of_val(&*seen.patterns) + size_of_val(seen.table.forcing())
+                size_of_val(&*seen.patterns)
+                    + size_of_val(seen.table.forcing())
+                    + size_of_val(seen.table.mixed())
             })
     }
 }

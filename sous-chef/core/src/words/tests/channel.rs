@@ -54,13 +54,48 @@ fn a_forced_position_is_not_evidence() {
     assert_eq!((patterns[0].numerator, patterns[0].denominator), (1, 41));
 }
 
-/// The same words, and a corpus whose `.` does not predict a capital: nothing
-/// is forced there, so the forty `The`s and the forty `the`s are one
-/// bivariant word.
+/// A corpus whose `.` capitalizes one time in six: at or under
+/// `terminal_lower_share_bp` nothing is forced there, so the `The`s after it
+/// and the forty `the`s are one bivariant word.
 #[test]
 fn a_glyph_this_corpus_does_not_capitalize_after_leaves_its_words_free() {
-    let text = "The word. ".repeat(40) + &"and the word. ".repeat(40) + "and The word";
-    assert!(judged(&[book(b"MRK", text)], &loose()).is_empty());
+    let text = "The word. ".repeat(8) + &"and the word. ".repeat(40) + "and The word";
+    let findings = analyzed(&[book(b"MRK", text)], &loose());
+    let table = findings.terminals().expect("the substrate published one");
+    assert!(table.frees(bare('.')));
+    assert!(
+        !findings.patterns().iter().any(|row| row.channel.is_word()),
+        "{:?}",
+        findings.patterns()
+    );
+}
+
+/// `.` capitalizes half the time: mixed, so neither its forty `The`s nor its
+/// forty `the`s are evidence. Free, the forty-one Titles would be ordinary;
+/// left out, the one stray `The` stands against two hundred free `the`s.
+#[test]
+fn a_mixed_glyph_leaves_the_words_after_it_unjudged() {
+    let text = "The word. ".repeat(40)
+        + &"the word. ".repeat(40)
+        + &"and the word ".repeat(200)
+        + "and The word";
+    let findings = analyzed(&[book(b"MRK", text)], &loose());
+    let table = findings.terminals().expect("the substrate published one");
+    assert!(table.is_mixed(bare('.')) && !table.forces(bare('.')));
+    let rows: Vec<(u32, u32)> = findings
+        .patterns()
+        .iter()
+        .filter(|row| row.word_hash() == Some(hash_of("the")))
+        .map(|row| (row.numerator, row.denominator))
+        .collect();
+    assert_eq!(rows, vec![(1, 201)]);
+    assert!(
+        !findings
+            .patterns()
+            .iter()
+            .any(|row| row.channel == Channel::SentenceStart),
+        "a mixed glyph is far under sentence_start_upper_bp"
+    );
 }
 
 /// `he said, "Name it."` in a corpus that opens speech with a capital: `, "`

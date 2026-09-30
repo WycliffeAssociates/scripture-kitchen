@@ -104,12 +104,13 @@ impl Before {
     }
 
     /// Whether the WORD chose the capital here, which is the only evidence a
-    /// casing claim may use. A chapter or verse start never does.
+    /// casing claim may use. A chapter or verse start never does, nor does a
+    /// context the table holds forced or mixed.
     pub fn is_free(self, table: &TerminalTable) -> bool {
         match self {
             Self::None => true,
             Self::Start => false,
-            Self::Glyph(key) => !table.forces(key),
+            Self::Glyph(key) => table.frees(key),
         }
     }
 }

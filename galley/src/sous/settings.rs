@@ -47,6 +47,7 @@ pub struct SousSettings {
     pub support_floor: u32,
     pub word_support_floor: u32,
     pub terminal_upper_share_bp: u16,
+    pub terminal_lower_share_bp: u16,
     pub sentence_start_upper_bp: u16,
     pub word_length_sigma: u8,
     pub doubles_productive_bp: u16,
@@ -98,6 +99,7 @@ impl SousSettings {
             support_floor: config.support_floor,
             word_support_floor: config.word_support_floor,
             terminal_upper_share_bp: config.terminal_upper_share_bp,
+            terminal_lower_share_bp: config.terminal_lower_share_bp,
             sentence_start_upper_bp: config.sentence_start_upper_bp,
             word_length_sigma: config.word_length_sigma,
             doubles_productive_bp: config.doubles_productive_bp,
@@ -134,6 +136,7 @@ impl SousSettings {
         config.support_floor = self.support_floor;
         config.word_support_floor = self.word_support_floor;
         config.terminal_upper_share_bp = self.terminal_upper_share_bp;
+        config.terminal_lower_share_bp = self.terminal_lower_share_bp;
         config.sentence_start_upper_bp = self.sentence_start_upper_bp;
         config.word_length_sigma = self.word_length_sigma;
         config.doubles_productive_bp = self.doubles_productive_bp;
@@ -329,6 +332,13 @@ pub const SETTING_DOCS: &[SettingDoc] = {
             "How often this project must follow a mark with a capital before a capital there counts as the mark's doing and not the word's.",
         ),
         doc(
+            "terminal_lower_share_bp",
+            ShareBp,
+            Thresholds,
+            "Capital left to the word",
+            "How rarely this project may follow a mark with a capital for the capital-letter check to still judge the word after it; a mark followed by capitals more often than this, but not often enough to count as the mark's doing, is skipped.",
+        ),
+        doc(
             "sentence_start_upper_bp",
             ShareBp,
             Thresholds,
@@ -521,6 +531,7 @@ fn fields() -> Vec<(&'static str, Value)> {
         support_floor,
         word_support_floor,
         terminal_upper_share_bp,
+        terminal_lower_share_bp,
         sentence_start_upper_bp,
         word_length_sigma,
         doubles_productive_bp,
@@ -553,6 +564,7 @@ fn fields() -> Vec<(&'static str, Value)> {
         ("support_floor", U32(support_floor)),
         ("word_support_floor", U32(word_support_floor)),
         ("terminal_upper_share_bp", U16(terminal_upper_share_bp)),
+        ("terminal_lower_share_bp", U16(terminal_lower_share_bp)),
         ("sentence_start_upper_bp", U16(sentence_start_upper_bp)),
         ("word_length_sigma", U8(word_length_sigma)),
         ("doubles_productive_bp", U16(doubles_productive_bp)),

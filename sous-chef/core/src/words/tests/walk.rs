@@ -158,6 +158,20 @@ fn a_glyph_that_rarely_precedes_capitals_is_free() {
     assert!(table(&[('!', 5, 0)]).forces(bare('!')));
 }
 
+/// Between the two shares a context is mixed: not forced, and not free. At
+/// the lower share exactly it is still free, and under the support floor it
+/// decides nothing and stays free.
+#[test]
+fn a_glyph_between_the_two_shares_is_mixed() {
+    let learned = table(&[('.', 50, 50), (',', 20, 80), (';', 21, 79), ('!', 3, 1)]);
+    assert!(learned.is_mixed(bare('.')) && !learned.forces(bare('.')));
+    assert!(!glyph('.').is_free(&learned));
+    assert!(glyph(',').is_free(&learned), "2,000 bp is at the lower share");
+    assert!(!glyph(';').is_free(&learned), "2,100 bp is over it");
+    assert!(glyph('!').is_free(&learned), "four cased handoffs are under the floor");
+    assert_eq!(learned.mixed(), [bare('.'), bare(';')]);
+}
+
 /// `,` and `, "` are two contexts with their own counts: the quoted one can
 /// force while the bare one stays free, and the reverse.
 #[test]

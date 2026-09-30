@@ -5,6 +5,7 @@
 //!                             ((',', bare), 31 / 4_836),
 //!                             ((',', quoted), 1_204 / 1_210)]
 //! table.forcing()         -> [('.', bare), (',', quoted)]   // a bare comma is no terminal
+//! table.mixed()           -> []
 //! ```
 
 use super::*;
@@ -27,23 +28,45 @@ use super::*;
 /// counts, so `, "` can force where `,` does not, and does not where a corpus
 /// writes speech in lowercase; `.)` likewise, where a parenthetical ends
 /// mid-sentence.
+///
+/// A context whose share lies strictly between
+/// [`JudgingConfig::terminal_lower_share_bp`] and the upper share is MIXED:
+/// the punctuation neither chose the capital nor left the word to choose, so
+/// a word after it is not casing evidence either way.
+///
+/// ```text
+/// ('.', bare)       9,998 bp   forces
+/// ('.', bracketed)  6,111 bp   mixed    `Anakim.) Then the land` judges nothing
+/// (',', bare)       1,023 bp   free     at or under 2,000
+/// ```
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TerminalTable {
     forcing: Box<[FollowKey]>,
+    mixed: Box<[FollowKey]>,
 }
 
 impl TerminalTable {
     /// The forcing contexts of a corpus-merged follow lane.
     pub fn learn(follows: &[(FollowKey, FollowCounts)], config: &JudgingConfig) -> Self {
-        let mut forcing: Vec<FollowKey> = follows
-            .iter()
-            .filter(|(_, counts)| forces_a_capital(*counts, config))
-            .map(|(key, _)| *key)
-            .collect();
-        forcing.sort_unstable();
-        forcing.dedup();
+        let mut forcing: Vec<FollowKey> = Vec::new();
+        let mut mixed: Vec<FollowKey> = Vec::new();
+        for (key, counts) in follows {
+            let Some(share) = upper_share(*counts, config) else {
+                continue;
+            };
+            if share >= config.terminal_upper_share_bp {
+                forcing.push(*key);
+            } else if share > config.terminal_lower_share_bp {
+                mixed.push(*key);
+            }
+        }
+        for keys in [&mut forcing, &mut mixed] {
+            keys.sort_unstable();
+            keys.dedup();
+        }
         Self {
             forcing: forcing.into_boxed_slice(),
+            mixed: mixed.into_boxed_slice(),
         }
     }
 
@@ -52,22 +75,37 @@ impl TerminalTable {
         &self.forcing
     }
 
+    /// Every mixed context, ascending.
+    pub fn mixed(&self) -> &[FollowKey] {
+        &self.mixed
+    }
+
     pub fn forces(&self, key: FollowKey) -> bool {
         self.forcing.binary_search(&key).is_ok()
     }
 
+    pub fn is_mixed(&self, key: FollowKey) -> bool {
+        self.mixed.binary_search(&key).is_ok()
+    }
+
+    /// Whether the word after this context chose its own case: neither forced
+    /// nor mixed.
+    pub fn frees(&self, key: FollowKey) -> bool {
+        !self.forces(key) && !self.is_mixed(key)
+    }
+
     pub fn is_empty(&self) -> bool {
-        self.forcing.is_empty()
+        self.forcing.is_empty() && self.mixed.is_empty()
     }
 }
 
 /// Entitlement and the share, in one place: the denominator is the cased
-/// handoffs, so a context followed only by uncased letters decides nothing.
-pub(super) fn forces_a_capital(counts: FollowCounts, config: &JudgingConfig) -> bool {
+/// handoffs, so a context followed only by uncased letters decides nothing,
+/// and one under `support_floor` of them is `None` and stays free.
+fn upper_share(counts: FollowCounts, config: &JudgingConfig) -> Option<u16> {
     let upper = u64::from(counts.get(Case::Upper));
     let cased = upper + u64::from(counts.get(Case::Lower));
-    cased >= u64::from(config.support_floor)
-        && share_bp(upper, cased) >= config.terminal_upper_share_bp
+    (cased >= u64::from(config.support_floor)).then(|| share_bp(upper, cased))
 }
 
 /// Every book's follow lane merged into one, by key ascending.

@@ -192,27 +192,43 @@ said "Go             none              a word closes the chain
 
 ```text
 WA-en-ulb (the vref tier), follows merged over the corpus
-   ('.', bare)    upper 33,353 of 33,359 cased handoffs   9,998 bp → forces
-   (',', bare)    upper  4,841 of 47,299                  1,023 bp → does not
-   (',', quoted)  upper  6,748 of  7,156                  9,429 bp → forces
-terminal_upper_share_bp 8,000, support_floor 5
+   ('.', bare)       upper 33,353 of 33,359 cased handoffs   9,998 bp → forces
+   (',', quoted)     upper  6,748 of  7,156                  9,429 bp → forces
+   ('.', bracketed)  upper     33 of     54                  6,111 bp → mixed
+   (',', bare)       upper  4,841 of 47,299                  1,023 bp → free
+terminal_upper_share_bp 8,000, terminal_lower_share_bp 2,000, support_floor 5
 ```
 
-A context forces when `upper / (upper + lower)` of the letters it hands off to
-reaches `terminal_upper_share_bp` on at least `support_floor` cased handoffs.
-The denominator is the cased handoffs, so a context followed only by uncased
-letters decides nothing and an uncased corpus learns an empty table.
+A context **forces** when `upper / (upper + lower)` of the letters it hands off
+to reaches `terminal_upper_share_bp` on at least `support_floor` cased
+handoffs, and is **free** at or under `terminal_lower_share_bp`. Between the
+two it is **mixed**: the punctuation neither chose the capital nor left the
+word to choose, so the word after it is no casing evidence either way.
 
-That single number replaces every hard-coded punctuation rule the casing
+```text
+JOS 14:15   …greatest man among the Anakim.) Then the land had rest
+            ('.', bracketed) is mixed               → `Then` is not judged
+spaRV1909   dirán: Su mujer es                     (':', bare) 7,922 of 14,345
+            5,522 bp is mixed                       → `Su` is not judged
+```
+
+A context under `support_floor` cased handoffs has no share to read and stays
+free. The denominator is the cased handoffs, so a context followed only by
+uncased letters decides nothing and an uncased corpus learns an empty table.
+
+Those two numbers replace every hard-coded punctuation rule the casing
 channel used to need. `he said, \u{201C}Name your wages` is the case it
 settles: the comma alone capitalizes a tenth of the time, diluted by every
 comma not in front of speech, but the comma through a quote is its own
 context with its own counts. In en_ulb it forces, so `Name` there is the
 punctuation's capital and abstains; in a corpus that opens speech in lowercase
-`, "` never reaches the bar and the capital is judged. Which marks are quotes is
+`, "` stays at or under the lower share and the capital is judged. Which marks are quotes is
 `unicode::Pool::Quote`, and which brackets close is `unicode::closes` (general
 category `Pe`), never a list. The per-corpus tables the committed tier
 learns are in [`words.md`](words.md).
+
+`Doubled` reads only the forcing half: a separator that forces is a sentence
+boundary, and a mixed one is not.
 
 `Findings` carries the table beside the pattern table, because three readers
 need the same one: the casing judge, `Words::locate`'s rescan, and any host
@@ -227,7 +243,7 @@ and it is one of three channels whose key is not a scalar. Its `glyph` field is
 ([`codec/README.md`](codec/README.md)); `Pattern::word_hash` reads it back.
 
 The claim is: **for one case-folded word, a case form whose share of that
-word's FREE positions is under the word band.** `David` \u{d7}40 against `david`
+word's FREE positions is under the word band** — neither forced nor mixed. `David` \u{d7}40 against `david`
 \u{d7}2 flags the two; a word common in both forms fires nothing, so bivariance
 needs no rule of its own. Forced positions are out of both numerator and
 denominator, because there the punctuation chose the capital and not the word;
@@ -402,8 +418,9 @@ threshold is the whole firing rule, which is why a band of 4 sits beside a
 share far under its rung.
 
 **Two knobs, and they are not the same number.** `terminal_upper_share_bp`
-(8,000) decides forced from free for a WORD: above it the punctuation chose the
-capital, so the word's own habit is unobservable there. `sentence_start_upper_bp`
+(8,000) decides forced for a WORD: above it the punctuation chose the
+capital, so the word's own habit is unobservable there, and a mixed context
+under it is no evidence either. `sentence_start_upper_bp`
 (9,800) decides whether every exception is worth a look. A glyph can force at
 80% and say nothing here, and the reverse cannot happen, because 98% is inside
 80%. Sharing one number would mean either flagging every lowercase word after a

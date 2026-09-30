@@ -221,6 +221,10 @@ pub struct JudgingConfig {
     /// The share of a glyph's handoffs that must be uppercase before the
     /// corpus is held to capitalize after it, in basis points.
     pub terminal_upper_share_bp: u16,
+    /// The share at or under which a glyph's handoffs leave the capital to
+    /// the word, in basis points. Between this and `terminal_upper_share_bp`
+    /// a context is mixed and Casing judges nothing after it.
+    pub terminal_lower_share_bp: u16,
     /// The share of a glyph's cased handoffs that must be uppercase before
     /// every lowercase one is reviewable, in basis points.
     ///
@@ -274,6 +278,7 @@ impl Default for JudgingConfig {
             word_support_floor: 20,
             word_bands: Staircase::new(Staircase::WORD_STEPS).expect("the word bounds ascend"),
             terminal_upper_share_bp: 8_000,
+            terminal_lower_share_bp: 2_000,
             sentence_start_upper_bp: 9_800,
             word_length_sigma: 4,
             doubles_productive_bp: 300,

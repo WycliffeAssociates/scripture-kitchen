@@ -106,8 +106,8 @@ impl TableHash {
 }
 
 /// The corpus evidence a chapter's sites read beside its own text: xxh3-128
-/// over this publication's forcing contexts (whole `FollowKey`s), explained leaders, and recurring
-/// clusters, each ascending.
+/// over this publication's forcing and mixed contexts (whole `FollowKey`s),
+/// explained leaders, and recurring clusters, each ascending.
 ///
 /// Its own hash rather than a share of [`FiringHash`], because a firing set is
 /// position-blind: the same rows fire while the corpus decides differently
@@ -124,8 +124,11 @@ impl EvidenceHash {
             None => hasher.update(&[0]),
             Some(table) => {
                 hasher.update(&[1]);
-                for glyph in table.forcing() {
-                    hasher.update(&glyph.raw().to_le_bytes());
+                for keys in [table.forcing(), table.mixed()] {
+                    hasher.update(&(keys.len() as u64).to_le_bytes());
+                    for glyph in keys {
+                        hasher.update(&glyph.raw().to_le_bytes());
+                    }
                 }
             }
         }
