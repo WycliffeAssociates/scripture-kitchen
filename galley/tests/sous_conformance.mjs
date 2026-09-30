@@ -265,6 +265,42 @@ check(cold.terminals().every((entry) => cold.terminal(entry.glyph, entry) === en
 
 // --- every finding has a message the catalog can render --------------------
 
+/** A literal has a needle; a regex compiles with its own flags. */
+const wellFormed = (query) => {
+  if (query.kind === "literal") return query.needle !== "";
+  if (query.kind !== "regex" || query.flags !== "u") return false;
+  try {
+    new RegExp(query.source, query.flags);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/** Verse text with markers and notes removed, and each character's offset in
+ * the USFM, so a regex match maps back onto a finding's span. */
+const verseText = (usfm) => {
+  let text = "";
+  const at = [];
+  const keep = (from, to) => {
+    for (let index = from; index < to; index++) {
+      text += usfm[index];
+      at.push(index);
+    }
+  };
+  let last = 0;
+  for (const match of usfm.matchAll(/\\(?:f|x) .*?\\(?:f|x)\*|\\(?:c|v) \d+ ?|\\\+?[a-z]+\d*\*? ?|\n/gs)) {
+    keep(last, match.index);
+    if (!/^\\(?:c|v|f|x)/.test(match[0])) {
+      text += " ";
+      at.push(match.index);
+    }
+    last = match.index + match[0].length;
+  }
+  keep(last, usfm.length);
+  return { text, at };
+};
+
 {
   const { describe } = await import(resolve(here, "../sous-messages.ts"));
   const catalog = JSON.parse(readFileSync(resolve(here, "../sous-messages.en.json"), "utf8"));
@@ -281,7 +317,7 @@ check(cold.terminals().every((entry) => cold.terminal(entry.glyph, entry) === en
         const { id, params, queries } = describe(finding, pattern, { siteText, bookCount: snapshot.length });
         ids.add(id);
         check(typeof catalog[id]?.headline === "string" && typeof catalog[id]?.details === "string", `${id} has a headline and details`);
-        check(queries.every((q) => ["this", "alternative", "others"].includes(q.purpose) && q.needle !== ""), `${id}'s queries are well formed`);
+        check(queries.every((q) => ["this", "alternative", "others"].includes(q.purpose) && wellFormed(q)), `${id}'s queries are well formed`);
         check(Object.values(params).every((v) => ["string", "number", "boolean"].includes(typeof v)), `${id}'s params are plain`);
       }
     }
@@ -930,6 +966,42 @@ if (corpusDir && existsSync(corpusDir)) {
   line("3 publish", median(idle.publish));
   line("4 open + findingsFor", median(idle.read));
   line("sum", median(idle.publish) + median(idle.read));
+
+  // Every regex query over the corpus compiles, and the ones the guide shows
+  // (EXO 38:26's em dash before a digit, JOB 41:15's lowercase after `?`)
+  // find their own site in the book's verse text.
+  const { describe } = await import(resolve(here, "../sous-messages.ts"));
+  const snapshot = FindingsSnapshot.open(coldBuffer);
+  const texts = new Map(books);
+  let regexes = 0;
+  const shown = new Set();
+  for (let index = 0; index < snapshot.length; index++) {
+    const book = snapshot.book(index);
+    const usfm = texts.get(book.id);
+    for (let row = 0; row < book.count; row++) {
+      const finding = book.at(row);
+      if (finding.kind !== "Convention") continue;
+      const pattern = snapshot.pattern(finding.convention.pattern);
+      const siteText = usfm.slice(finding.from, finding.to);
+      const { id, queries } = describe(finding, pattern, { siteText, bookCount: snapshot.length });
+      for (const query of queries.filter((q) => q.kind === "regex")) {
+        check(wellFormed(query), `${book.key} ${id}: ${query.source} compiles`);
+        regexes++;
+      }
+      const shows = (book.key === "EXO" && id === "convention.placement.precedes") || (book.key === "JOB" && id === "convention.sentenceStart");
+      if (!shows) continue;
+      const { text, at } = verseText(usfm);
+      for (const query of queries.filter((q) => q.kind === "regex" && q.purpose === "this")) {
+        const own = [...text.matchAll(new RegExp(query.source, `${query.flags}g`))].some(
+          (match) => at[match.index] < finding.to && at[match.index + match[0].length - 1] + 1 > finding.from,
+        );
+        check(own, `${book.key} ${id}: ${query.source} finds its own site`);
+        shown.add(id);
+      }
+    }
+  }
+  check(shown.size === 2, "en_ulb shows both of the guide's regex examples");
+  console.log(`regex queries: ${regexes} over the corpus`);
 } else if (corpusDir) {
   console.log(`corpus: ${corpusDir} is absent — timing skipped`);
 }

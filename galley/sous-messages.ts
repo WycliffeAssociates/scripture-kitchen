@@ -1,6 +1,6 @@
 /**
- * Why a finding fired, as data: one message id, its parameters, and literal
- * find queries, for the consumer to render through its own catalog
+ * Why a finding fired, as data: one message id, its parameters, and find
+ * queries, for the consumer to render through its own catalog
  * (`sous-messages.en.json` is the English reference, a headline and details
  * per id) and its own `Intl`.
  *
@@ -11,7 +11,7 @@
  *   → { id: "convention.doubled.separated",
  *       params: { word: "Moses", text: "Moses, Moses", count: 1, total: 895,
  *                 books: 1, bookTotal: 66, namedBooks: 1, book1: "GEN", … },
- *       queries: [{ purpose: "this", needle: "Moses, Moses",
+ *       queries: [{ kind: "literal", purpose: "this", needle: "Moses, Moses",
  *                   caseSensitive: false, wholeWord: true }] }
  * en headline  “Moses” is written twice with only punctuation between here (“Moses, Moses”).
  *    details   The project does this nowhere else; “Moses” appears 895 times.
@@ -36,7 +36,7 @@ import type {
   PresenceKind,
   TerminalContext,
 } from "./sous-reader.ts";
-import { kindOf, type MarkKind } from "./sous-unicode.ts";
+import { CLOSERS, kindOf, rangesOf, type MarkKind } from "./sous-unicode.ts";
 import { codePointOf, nameOf } from "./sous-unicode-names.ts";
 
 /** `PATTERN_DIGIT_GLYPH`, `LETTER_RUN_MAX` and `RUN_BUCKETS` in the reader. */
@@ -121,21 +121,39 @@ const sameIds: [MessageId] extends [keyof ParamsById] ? ([keyof ParamsById] exte
 void sameIds;
 
 /**
- * One literal search a consumer may run on demand, through galley's
- * `findAll(needle, { caseSensitive, wholeWord, scope })`, to show every
- * occurrence behind a message.
+ * One search a consumer may run on demand to show every occurrence behind a
+ * message.
  *
  * - `this`: the finding's own form, wherever else the project writes it.
  * - `alternative`: what the reader might write instead: the same marks in
  *   another order, a lookalike, or the same word in another case.
  * - `others`: the usual comparison the details name (the mark that usually
- *   follows, the most common group, the pool's most common mark).
+ *   follows, the most common group, the pool's most common mark, the usual
+ *   class beside the glyph, a capital after the mark).
  */
-export interface Query {
-  readonly purpose: "this" | "alternative" | "others";
+export type Query = LiteralQuery | RegexQuery;
+
+export type QueryPurpose = "this" | "alternative" | "others";
+
+/** A literal needle for galley's `findAll(needle, { caseSensitive, wholeWord,
+ * scope })`. */
+export interface LiteralQuery {
+  readonly kind: "literal";
+  readonly purpose: QueryPurpose;
   readonly needle: string;
   readonly caseSensitive: boolean;
   readonly wholeWord: boolean;
+}
+
+/** What a literal cannot say: a class beside a mark, or a case after one.
+ * `new RegExp(source, flags)` over verse text with markers removed; add `g`
+ * to iterate. Built only from escaped marks and fixed Unicode classes, never
+ * from scripture text, so a source is trusted kitchen output. */
+export interface RegexQuery {
+  readonly kind: "regex";
+  readonly purpose: QueryPurpose;
+  readonly source: string;
+  readonly flags: "u";
 }
 
 /** One id with exactly its parameters, and its queries; every one is a plain
@@ -191,8 +209,8 @@ export type BeforeContext = "bare" | "quoted" | "bracketed" | "both";
  * ```
  *
  * `text` is the verse text the engine read, with markers removed; `at` is a
- * UTF-16 offset into it. Quotation marks are Unicode `Quotation_Mark`, and a
- * bracket is general category `Ps`, `Pe`, `Pi` or `Pf` outside them.
+ * UTF-16 offset into it. Quotes, brackets and closers are `sous-unicode.ts`'s,
+ * the engine's own pools.
  */
 export function markBefore(text: string, at: number): MarkBefore | undefined {
   let quoted = false;
@@ -204,17 +222,17 @@ export function markBefore(text: string, at: number): MarkBefore | undefined {
     const glyph = text.codePointAt(index - width) ?? low;
     const char = String.fromCodePoint(glyph);
     index -= width;
-    if (/\s/u.test(char)) continue;
-    if (/\p{Quotation_Mark}/u.test(char)) {
+    const kind = kindOf(glyph);
+    if (kind === "space") continue;
+    if (kind === "quote") {
       quoted = true;
       continue;
     }
-    if (/\p{Pe}/u.test(char)) {
-      bracketed = true;
+    if (kind === "bracket") {
+      bracketed ||= CLOSERS.includes(glyph);
       continue;
     }
-    if (/[\p{Ps}\p{Pi}\p{Pf}]/u.test(char)) continue;
-    if (/[\p{Alphabetic}\p{M}\p{Nd}]/u.test(char)) return undefined;
+    if (kind === "letter" || kind === "digit" || /\p{M}/u.test(char)) return undefined;
     return { glyph, quoted, bracketed };
   }
   return undefined;
@@ -365,8 +383,97 @@ function usualCluster(clusters: readonly Cluster[] | undefined, site: string): [
   return reordered === undefined ? [recurring[0], false] : [reordered, true];
 }
 
-function query(purpose: Query["purpose"], needle: string, caseSensitive = true, wholeWord = false): Query[] {
-  return needle === "" ? [] : [{ purpose, needle, caseSensitive, wholeWord }];
+function query(purpose: QueryPurpose, needle: string, caseSensitive = true, wholeWord = false): Query[] {
+  return needle === "" ? [] : [{ kind: "literal", purpose, needle, caseSensitive, wholeWord }];
+}
+
+function regex(purpose: QueryPurpose, source: string): RegexQuery {
+  return { kind: "regex", purpose, source, flags: "u" };
+}
+
+/** A mark as regex source: a syntax character escaped, an invisible one as
+ * `\u{…}`. */
+function escaped(text: string): string {
+  return [...text]
+    .map((char) => {
+      if (/[\^$\\.*+?()[\]{}|\/]/u.test(char)) return `\\${char}`;
+      if (/[\p{L}\p{M}\p{N}\p{P}\p{S}]/u.test(char)) return char;
+      return `\\u{${char.codePointAt(0)!.toString(16)}}`;
+    })
+    .join("");
+}
+
+/** Ranges as character-class contents: `\u{28}\u{5b}\u{2045}-\u{2046}`. */
+function members(ranges: readonly (readonly [number, number])[]): string {
+  const hex = (scalar: number) => `\\u{${scalar.toString(16)}}`;
+  return ranges.map(([lo, hi]) => (lo === hi ? hex(lo) : `${hex(lo)}-${hex(hi)}`)).join("");
+}
+
+/** The riders between a mark and the word it hands off to, by the ride rule:
+ * white space and an opening bracket mark nothing, a quote marks the handoff
+ * quoted, a closing bracket marks it bracketed. */
+const RIDERS = (() => {
+  const brackets = rangesOf("bracket").flatMap(([lo, hi]) => Array.from({ length: hi - lo + 1 }, (_, at) => lo + at));
+  const runs = (scalars: number[]) => {
+    const out: [number, number][] = [];
+    for (const scalar of scalars) {
+      const last = out.at(-1);
+      if (last !== undefined && last[1] + 1 === scalar) last[1] = scalar;
+      else out.push([scalar, scalar]);
+    }
+    return out;
+  };
+  return {
+    quote: members(rangesOf("quote")),
+    open: members(runs(brackets.filter((scalar) => !CLOSERS.includes(scalar)))),
+    close: members(runs(brackets.filter((scalar) => CLOSERS.includes(scalar)))),
+  };
+})();
+
+/** What stands between a mark and the next word in each handoff context. */
+function ride(context: BeforeContext): string {
+  const { quote: q, open: o, close: c } = RIDERS;
+  const bare = `[\\s${o}]*`;
+  switch (context) {
+    case "bare":
+      return bare;
+    case "quoted":
+      return `${bare}[${q}][\\s${o}${q}]*`;
+    case "bracketed":
+      return `${bare}[${c}][\\s${o}${c}]*`;
+    case "both":
+      return `${bare}(?:[${q}][\\s${o}${q}]*[${c}]|[${c}][\\s${o}${c}]*[${q}])[\\s${o}${q}${c}]*`;
+  }
+}
+
+const LOWER = "\\p{Lowercase}";
+const CAPITAL = "[\\p{Uppercase}\\p{Lt}]";
+
+/** An outer class as regex source; `Edge` has none. */
+function classSource(outer: OuterClass): string | undefined {
+  switch (outer) {
+    case "Letter":
+      return "\\p{Alphabetic}";
+    case "Digit":
+      return "\\p{Nd}";
+    case "Space":
+      return "\\s";
+    case "Nonletter":
+      return "[^\\p{Alphabetic}\\p{Nd}\\s]";
+    case "Edge":
+      return undefined;
+  }
+}
+
+/** The glyph beside a class, as the row names it and as usual: `—\p{Nd}`,
+ * then `—\p{Alphabetic}`. */
+function beside(glyph: string, side: "prev" | "next", outer: OuterClass, usual: OuterClass | undefined): Query[] {
+  const touching = (purpose: QueryPurpose, touched: OuterClass | undefined): Query[] => {
+    const other = touched === undefined ? undefined : classSource(touched);
+    if (other === undefined) return [];
+    return [regex(purpose, side === "prev" ? `${other}${glyph}` : `${glyph}${other}`)];
+  };
+  return [...touching("this", outer), ...(usual === outer ? [] : touching("others", usual))];
 }
 
 /** A class is no literal, so a placement row searches only a site that holds
@@ -442,6 +549,8 @@ function convention(finding: ConventionFinding, pattern: Pattern, site: string, 
   const digit = pattern.glyph === DIGIT_GLYPH;
   const glyph = digit && site !== "" ? site : glyphText(pattern.glyph);
   const spread = spreadOf(finding, pattern, context);
+  // The pooled digit lane searches every digit.
+  const glyphSource = digit ? "\\p{Nd}" : escaped(glyph);
   const { key, usual } = pattern;
   switch (key.kind) {
     case "Placement":
@@ -458,7 +567,7 @@ function convention(finding: ConventionFinding, pattern: Pattern, site: string, 
           usual: usual.kind === "Placement" ? touch(usual.class) : touch(key.class),
           usualCount: usual.kind === "Placement" ? usual.count : 0,
         },
-        queries: placed(site),
+        queries: [...placed(site), ...beside(glyphSource, key.side, key.class, usual.kind === "Placement" ? usual.class : undefined)],
       };
     case "BookRate": {
       const baselineBp = usual.kind === "BookRate" ? usual.baselineBp : 0;
@@ -478,7 +587,7 @@ function convention(finding: ConventionFinding, pattern: Pattern, site: string, 
           baseline: baselineBp / 10000,
           otherBooks: usual.kind === "BookRate" ? usual.otherBooks : 0,
         },
-        queries: placed(site),
+        queries: [...placed(site), ...beside(glyphSource, key.side, key.class, undefined)],
       };
     }
     case "ExactNeighbor": {
@@ -588,7 +697,11 @@ function convention(finding: ConventionFinding, pattern: Pattern, site: string, 
           beforeCased: after?.cased ?? 0,
           ...spread,
         },
-        queries: [...query("this", site, true, true), ...query("alternative", usualWord, true, true)],
+        queries: [
+          ...query("this", site, true, true),
+          ...query("alternative", usualWord, true, true),
+          ...(before === undefined ? [] : afterMark(escaped(String.fromCodePoint(before.glyph)), beforeContext(before), key.form === "Lower")),
+        ],
       };
     }
     case "WordLength":
@@ -633,8 +746,19 @@ function convention(finding: ConventionFinding, pattern: Pattern, site: string, 
           ...spread,
           upper: pattern.denominator - pattern.numerator,
         },
-        queries: [...query("this", site, true, true), ...query("alternative", usualWord, true, true)],
+        queries: [
+          ...query("this", site, true, true),
+          ...query("alternative", usualWord, true, true),
+          ...afterMark(glyphSource, "bare", true),
+        ],
       };
     }
   }
+}
+
+/** A word after the mark in one handoff context: `this` in the site's case,
+ * `others` in the other one. */
+function afterMark(mark: string, context: BeforeContext, lower: boolean): Query[] {
+  const head = ride(context);
+  return [regex("this", `${mark}${head}${lower ? LOWER : CAPITAL}`), regex("others", `${mark}${head}${lower ? CAPITAL : LOWER}`)];
 }

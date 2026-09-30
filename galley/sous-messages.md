@@ -2,7 +2,7 @@
 
 Why every squiggle fired, as data. `describe` in
 [`sous-messages.ts`](sous-messages.ts) turns a finding into one message id,
-its parameters, and the literal searches behind it;
+its parameters, and the searches behind it;
 [`sous-messages.en.json`](sous-messages.en.json) is the English reference
 catalog in ICU MessageFormat, a headline and details per id. The consumer owns
 the final strings, adds languages, and formats every number with its own
@@ -48,7 +48,12 @@ write instead:
 | --- | --- | --- |
 | the same marks in another order | `convention.exactNeighbor.swapped`, `convention.runShape` (`swap`) | `;'` beside `';`, never across a directionless quote |
 | a lookalike | `convention.rarity` (`lookalike`) | `’` beside `'`, from Unicode's `confusables.txt` |
-| the same word in another form | `convention.casing`, `convention.sentenceStart` | `On` beside `on`, `his` beside `His` |
+| the same word in another form | `convention.casing` | `On` beside `on` |
+
+A SentenceStart row counts what follows the mark, never the word, so its
+headline names the mark's habit and claims nothing about the word: “his” is
+lowercase after `?` here; this project almost always capitalizes the word
+after `?`. Its `usualWord` stays a parameter and an `alternative` query.
 
 Otherwise the headline says only how rare it is, and the usual follower, the
 usual class, or the most common group moves to the details. A reordering
@@ -66,12 +71,12 @@ one in a `<g>` rich-text tag, and `intl-messageformat` hands the tag's
 contents to a function the consumer supplies:
 
 ```text
-catalog   <g>{pair}</g>: this pair of marks appears only here in this project.
-params    { pair: "\":" }
+catalog   <g>{cluster}</g> appears only here.
+params    { cluster: "\":" }
 html      g: (chunks) => `<kbd>${chunks.join("")}</kbd>`
-          <kbd>":</kbd>: this pair of marks appears only here in this project.
+          <kbd>":</kbd> appears only here.
 plain     g: (chunks) => chunks.join("")
-          ":: this pair of marks appears only here in this project.
+          ": appears only here.
 ```
 
 - `g` is required: `intl-messageformat` throws when a tag has no function.
@@ -154,19 +159,22 @@ headline then details, `<g>` as `[…]`:
 
 ```text
 NUM 21:14  …the Wars of Yahweh, \q "... Zahab…
-           [".]: this pair of marks appears only 2 times in this project.
+           A quotation mark right before a mark that ends a sentence ([".]) appears only 2 times in
+           this project.
            ["] is followed directly by another mark 129 times in this project, most often [']
            (77). This project also writes [."], 4,038 times. [".] appears in NUM and JER.
 GEN 48:20  …like Ephraim and like Manasseh'." \m In this way…
-           ['.]: this pair of marks appears only 3 times in this project.
+           A quotation mark right before a mark that ends a sentence (['.]) appears only 3 times in
+           this project.
            ['] is followed directly by another mark 496 times in this project, most often ["]
            (416). This project also writes [.'], 974 times. ['.] appears in 3 of 66 books.
 PRO 30:15  …four that never say, "Enough": \q1 \v 16 Sheol…
-           [":]: this pair of marks appears only here in this project.
+           A quotation mark right before a comma or similar mark ([":]) appears only here in this
+           project.
            ["] is followed directly by another mark 129 times in this project, most often [']
            (77).
 DEU 7:17   …how can I dispossess them?'— \v 18 do not be afraid…
-           ['—]: this pair of marks appears only 6 times in this project.
+           A quotation mark right before a dash (['—]) appears only 6 times in this project.
            ['] is followed directly by another mark 496 times in this project, most often ["]
            (416). This project also writes [—'], once. ['—] appears in 5 of 66 books.
 ISA 30:10  …They say to the seers, "Do not see;" \q2 and to the prophets…
@@ -174,15 +182,16 @@ ISA 30:10  …They say to the seers, "Do not see;" \q2 and to the prophets…
            [;] stands alone 4,878 of 4,904 times. Unusual groups like this appear 5 times, all
            in ISA. This project also writes [";], 6 times.
 EXO 38:26  …those twenty years old and older—603,550 men in all.
-           [—] right before a digit appears only 2 times in this project.
+           A dash ([—]) right before a digit appears only 2 times in this project.
            Usually [—] is followed right away by a letter (1,341 of 1,795 times). This happens
            in EXO and JDG.
 JOS 21:5   The rest of Kohath’s descendants…
            [’] appears only 2 times in this project; it writes ['] elsewhere (6,292 times).
-           It is used in LEV and JOS. [’] and ['] look alike.
+           It is used in LEV and JOS. [’] right single quotation mark (U+2019) and ['] apostrophe
+           (U+0027) look alike.
 JOB 3:8    Those who curse the day–may they curse it…
            [–] appears only here in this project; it writes [-] elsewhere (843 times).
-           It is used nowhere else. [–] and [-] look alike.
+           It is used nowhere else. [–] en dash (U+2013) and [-] hyphen-minus (U+002D) look alike.
 JOB 12:23  …and he also destroys them; \q2 He enlarges nations…
            “He” is capitalized here; this project writes “he” (6,889 times).
            Of its 6,893 uses in the middle of a sentence, this form appears 4 times, in 3 of 66
@@ -191,7 +200,8 @@ EXO 3:14   God said to Moses, "I AM THAT I AM."
            “THAT” is written in all capitals here; this project writes “that” (8,593 times).
            Of its 8,594 uses in the middle of a sentence, this form appears only here.
 JOB 41:15  …which are a terror? \q \v 15 his back is made up of rows of shields
-           “his” is lowercase after [?] here; this project usually writes “His” there.
+           “his” is lowercase after [?] here; this project almost always capitalizes the word after
+           [?].
            After [?], this project capitalizes the next word 2,162 of 2,165 times. A lowercase
            word follows it 3 times, in 3 of 66 books.
 DEU 27:15  'May the man be cursed who makes a a carved image…
@@ -204,31 +214,52 @@ PSA 81:1   Shout joyfullly to God our strength
 
 ## Queries
 
-`describe` also returns `queries`: exact literal needles a consumer may run on
-demand through galley's find, `findAll(needle, { caseSensitive, wholeWord,
-scope })`, to show every occurrence behind a message. They are rich data;
-consumers choose what to show their audience, and none is run for them.
+`describe` also returns `queries`: searches a consumer may run on demand to
+show every occurrence behind a message. They are rich data; consumers choose
+what to show their audience, and none is run for them.
 
 ```ts
-interface Query {
-  purpose: "this" | "alternative" | "others";
-  needle: string;
-  caseSensitive: boolean;
-  wholeWord: boolean;
-}
+type Query =
+  | { kind: "literal"; purpose; needle: string; caseSensitive: boolean; wholeWord: boolean }
+  | { kind: "regex"; purpose; source: string; flags: "u" };
+// purpose: "this" | "alternative" | "others"
 ```
 
-| purpose | means | examples |
-| --- | --- | --- |
-| `this` | the finding's own form, wherever else the project writes it | `;"`, `’`, `On` (case-sensitive, whole word), `a a` (whole word) |
-| `alternative` | what the reader might write instead | `";` (also across a straight quote), `'` for `’`, `on`, `His` |
-| `others` | the comparison the details name | `'"` (the usual follower), `."'"` (the most common group), `"` (the pool's most common mark) |
+| purpose | means | literal | regex |
+| --- | --- | --- | --- |
+| `this` | the finding's own form, wherever else the project writes it | `;"`, `’`, `On` (case-sensitive, whole word), `a a` (whole word) | `—\p{Nd}` (an em dash right before a digit), `\?[\s…]*\p{Lowercase}` (lowercase after `?`) |
+| `alternative` | what the reader might write instead | `";` (also across a straight quote), `'` for `’`, `on`, `His` | |
+| `others` | the comparison the details name | `'"` (the usual follower), `."'"` (the most common group), `"` (the pool's most common mark) | `—\p{Alphabetic}` (the usual class), `\?[\s…]*[\p{Uppercase}\p{Lt}]` (a capital after `?`) |
 
-- Find searches the projection, the verse text a reader sees, so a needle of
-  marks alone (`;"`) is found like any other; `caseSensitive: false` is the
-  simple lowercase fold.
-- A placement or book-rate site that holds only its glyph has no `this`: the
-  class it touches is no literal, and the glyph alone would find every use.
+- A literal goes to galley's find, `findAll(needle, { caseSensitive,
+  wholeWord, scope })`, which searches the projection, the verse text a
+  reader sees, so a needle of marks alone (`;"`) is found like any other;
+  `caseSensitive: false` is the simple lowercase fold.
+- A regex is for what a literal cannot say. The consumer runs it in
+  JavaScript, `new RegExp(source, flags)` (add `g` to iterate), over **verse
+  text with markers removed**, a book's or a chapter's at a time: a handoff
+  can cross a verse boundary (JOB 41:15's `?` ends verse 14). Sources are
+  trusted kitchen output: built only from escaped marks and fixed Unicode
+  classes, never from scripture text.
+- Where regexes appear:
+  - **Placement and book rate**: the glyph beside the class it touches, and
+    beside its usual class as `others`: `—\p{Nd}`, `\s—`, `,\p{Alphabetic}`,
+    `)[^\p{Alphabetic}\p{Nd}\s]`. The pooled digit lane's glyph is `\p{Nd}`.
+    A site that holds its neighbour as well keeps its literal `this` (`),`).
+  - **SentenceStart**: a lowercase word after the mark as `this`, a capital
+    as `others`. The row counts bare handoffs only, so between the mark and
+    the word stand only white space and opening brackets; a quote or a closing
+    bracket there is another context the row never counts (`?" he said`).
+  - **Casing** with `context.before`: the mark, the riders of its context
+    (`bare`, `quoted`, `bracketed`, `both`), then the word's own case as
+    `this` and the other as `others`.
+- The riders follow the engine's ride rule over the generated tables in
+  `sous-unicode.ts`: a quote is any `quote` kind, a closing bracket is in
+  `CLOSERS`, an opening bracket is any other `bracket`. No class is written
+  by hand.
+- A placement or book-rate site that holds only its glyph has no literal
+  `this`: the class it touches is no literal, and the glyph alone would find
+  every use. Its regex says it.
 - Hygiene, presence, source-copy and length messages carry none.
 
 ## Stable identity

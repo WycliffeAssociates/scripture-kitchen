@@ -76,7 +76,7 @@
     "details": "Of the {total, number} places this project repeats <g>{letter}</g>, {count, plural, one {this is the only one with {atLeast, select, true {{length, number} or more} other {{length, number}}}} other {# have {atLeast, select, true {{length, number} or more} other {{length, number}}}}}."
   },
   "convention.sentenceStart": {
-    "headline": "“{word}” is lowercase after <g>{glyph}</g> here; this project usually writes “{usualWord}” there.",
+    "headline": "“{word}” is lowercase after <g>{glyph}</g> here; this project almost always capitalizes the word after <g>{glyph}</g>.",
     "details": "After <g>{glyph}</g>, this project capitalizes the next word {upper, number} of {total, number} times.{count, plural, one {} other { A lowercase word follows it # times, {namedBooks, select, 1 {all in {book1}} 2 {in {book1} and {book2}} other {in {books, number} of {bookTotal, number} books}}.}}"
   },
   "convention.bookRate.follows": {

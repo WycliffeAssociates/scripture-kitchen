@@ -564,6 +564,18 @@ fn no_headline_explains_the_rule() {
     }
 }
 
+/// A SentenceStart row counts the mark's handoffs, never the word, so its
+/// headline may not say what the project writes instead of the word.
+#[test]
+fn a_sentence_start_headline_claims_nothing_about_the_word() {
+    let [headline, _] = &catalog()["convention.sentenceStart"];
+    let used = Icu::parse(headline).expect("the headline parses");
+    assert!(
+        !used.names.contains("usualWord"),
+        "the headline reads usualWord: {headline}"
+    );
+}
+
 /// The parser itself: a nested branch, a styled number, tags, and the
 /// refusals.
 #[test]

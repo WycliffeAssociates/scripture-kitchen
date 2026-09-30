@@ -9,7 +9,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { test } from "node:test";
 
 import { FindingsSnapshot } from "../galley/sous-reader.ts";
-import { describe } from "../galley/sous-messages.ts";
+import { describe, markBefore } from "../galley/sous-messages.ts";
 import { identityOf, ordinalOf, patternIdentity, siteIdentityOf } from "../galley/sous-identity.ts";
 import { kindOf } from "../galley/sous-unicode.ts";
 import { codePointOf, nameOf } from "../galley/sous-unicode-names.ts";
@@ -120,4 +120,91 @@ test("every golden finding describes with plain params", () => {
     const { params } = describe(finding, pattern, { siteText, bookCount: snapshot.length });
     for (const value of Object.values(params)) assert.ok(["string", "number", "boolean"].includes(typeof value));
   }
+});
+
+/** Verse text as a consumer reads it, markers and notes removed, with each
+ * character's offset in the USFM. */
+function verseText(usfm) {
+  let text = "";
+  const at = [];
+  const keep = (from, to) => {
+    for (let index = from; index < to; index++) {
+      text += usfm[index];
+      at.push(index);
+    }
+  };
+  let last = 0;
+  for (const match of usfm.matchAll(/\\(?:f|x) .*?\\(?:f|x)\*|\\(?:c|v) \d+ ?|\\\+?[a-z]+\d*\*? ?|\n/gs)) {
+    keep(last, match.index);
+    if (!/^\\(?:c|v|f|x)/.test(match[0])) {
+      text += " ";
+      at.push(match.index);
+    }
+    last = match.index + match[0].length;
+  }
+  keep(last, usfm.length);
+  return { text, at };
+}
+
+/** Whether `query` matches somewhere overlapping the finding's own span. */
+function matchesSite(query, usfm, finding) {
+  const { text, at } = verseText(usfm);
+  for (const match of text.matchAll(new RegExp(query.source, `${query.flags}g`))) {
+    const from = at[match.index];
+    const to = at[match.index + match[0].length - 1] + 1;
+    if (from < finding.to && to > finding.from) return true;
+  }
+  return false;
+}
+
+test("every query is well formed, every regex compiles, and each regex finds its own site", () => {
+  let regexes = 0;
+  const purposes = new Set(["this", "alternative", "others"]);
+  for (const { name, snapshot, book, finding, pattern, siteText } of sites()) {
+    const usfm = fixture(name === "edit.bin" && book.id === "books/GEN.usfm" ? "GEN-edited.usfm" : book.id.replace("books/", ""));
+    const { queries } = describe(finding, pattern, { siteText, bookCount: snapshot.length });
+    for (const query of queries) {
+      assert.ok(purposes.has(query.purpose));
+      if (query.kind === "literal") {
+        assert.ok(query.needle !== "" && typeof query.caseSensitive === "boolean" && typeof query.wholeWord === "boolean");
+        continue;
+      }
+      assert.equal(query.kind, "regex");
+      assert.equal(query.flags, "u");
+      assert.doesNotThrow(() => new RegExp(query.source, query.flags), query.source);
+      regexes += 1;
+      if (query.purpose === "this") assert.ok(matchesSite(query, usfm, finding), `${pattern.channel} ${query.source}`);
+    }
+  }
+  assert.ok(regexes > 0, "the goldens hold a finding with a regex query");
+});
+
+test("a regex after a mark rides quotes and brackets as the engine does", () => {
+  const casing = {
+    kind: "Convention", from: 0, to: 0, bookIdx: 0, convention: { pattern: 0 },
+  };
+  const pattern = {
+    glyph: 0, channel: "Casing", key: { kind: "Casing", hash: 1n, form: "Title" }, usual: { kind: "Casing", form: "Lower", count: 9 },
+    numerator: 1, denominator: 10, books: 1, shareBp: 1000,
+  };
+  const cases = [
+    ['them; He', "bare"],
+    ['said, "He', "quoted"],
+    ['forever.) He', "bracketed"],
+    ['it?") He', "both"],
+    ['them; (He', "bare"],
+  ];
+  for (const [text, context] of cases) {
+    const before = markBefore(text, text.length - 2);
+    assert.ok(before !== undefined, text);
+    const { queries } = describe(casing, pattern, { siteText: "He", bookCount: 1, before });
+    const [capital, lower] = queries.filter((query) => query.kind === "regex");
+    assert.equal(capital.purpose, "this", context);
+    assert.match(text, new RegExp(capital.source, capital.flags), `${context}: ${capital.source}`);
+    assert.doesNotMatch(text, new RegExp(lower.source, lower.flags), context);
+    assert.doesNotMatch(text.replace("He", "he"), new RegExp(capital.source, capital.flags), context);
+  }
+  // A quoted handoff is no bare one, so a bare query never reaches across it.
+  const bare = describe(casing, pattern, { siteText: "He", bookCount: 1, before: markBefore("them; He", 6) });
+  assert.doesNotMatch('them;" He', new RegExp(bare.queries.find((query) => query.kind === "regex").source, "u"));
 });
