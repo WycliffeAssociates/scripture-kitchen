@@ -31,9 +31,10 @@ import type {
   PresenceKind,
 } from "./sous-reader.ts";
 
-/** `PATTERN_DIGIT_GLYPH` and `LETTER_RUN_MAX` in the reader. */
+/** `PATTERN_DIGIT_GLYPH`, `LETTER_RUN_MAX` and `RUN_BUCKETS` in the reader. */
 const DIGIT_GLYPH = 0xffffffff;
 const LETTER_RUN_MAX = 8;
+const RUN_BUCKETS = 6;
 
 export type MessageId =
   | "hygiene"
@@ -76,7 +77,7 @@ export interface ParamsById {
   "convention.exactNeighbor": { glyph: string; neighbor: string; pair: string; reversedPair: string; usual: string; usualCount: number; reversed: number } & Spread;
   "convention.exactNeighbor.swapped": { glyph: string; neighbor: string; pair: string; reversedPair: string; usual: string; usualCount: number; reversed: number } & Spread;
   "convention.pooledNeighbor": { glyph: string; pool: PoolName } & Spread;
-  "convention.runShape": { glyph: string; cluster: string; size: number; sameMark: boolean; clusterCount: number; hasUsualCluster: boolean; usualCluster: string; usualClusterCount: number; usualSize: number; usualSameMark: boolean; usualShapeCount: number } & Spread;
+  "convention.runShape": { glyph: string; cluster: string; size: number; atLeast: boolean; sameMark: boolean; clusterCount: number; hasUsualCluster: boolean; usualCluster: string; usualClusterCount: number; usualSize: number; usualAtLeast: boolean; usualSameMark: boolean; usualShapeCount: number; usually: boolean } & Spread;
   "convention.placement.follows": { glyph: string; digit: boolean; neighbor: TouchClass; usual: TouchClass; usualCount: number } & Spread;
   "convention.placement.precedes": { glyph: string; digit: boolean; neighbor: TouchClass; usual: TouchClass; usualCount: number } & Spread;
   "convention.rarity": { glyph: string; count: number; books: number; bookTotal: number; hasUsual: boolean; usual: string; usualCount: number };
@@ -305,12 +306,15 @@ function convention(pattern: Pattern, site: string, context: MessageContext): Me
       const exact = pattern.clusters?.find((cluster) => cluster.text === site);
       const common = usualCluster(pattern.clusters, site);
       const shape = usual.kind === "RunShape" ? usual : undefined;
+      const usualShapeCount = shape?.count ?? 0;
       return {
         id: "convention.runShape",
         params: {
           glyph,
           cluster: site,
+          // The last length bucket holds every longer run.
           size: site === "" ? key.bucket : [...site].length,
+          atLeast: site === "" && key.bucket === RUN_BUCKETS,
           sameMark: key.pure,
           clusterCount: exact?.count ?? 0,
           ...spread,
@@ -318,8 +322,10 @@ function convention(pattern: Pattern, site: string, context: MessageContext): Me
           usualCluster: common?.text ?? "",
           usualClusterCount: common?.count ?? 0,
           usualSize: shape?.bucket ?? 1,
+          usualAtLeast: shape?.bucket === RUN_BUCKETS,
           usualSameMark: shape?.pure ?? true,
-          usualShapeCount: shape?.count ?? 0,
+          usualShapeCount,
+          usually: usualShapeCount * 3 >= pattern.denominator * 2,
         },
       };
     }
