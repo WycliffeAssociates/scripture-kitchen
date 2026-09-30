@@ -12,7 +12,8 @@
  * a host that restates it fails to compile rather than missing it.
  */
 
-import type { SousSettings } from "./pkg-bundler/usfm_galley.js";
+import type { SousSettings as BundlerSettings } from "./pkg-bundler/usfm_galley.js";
+import type { SousSettings as WebSettings } from "./pkg-web/usfm_galley.js";
 
 export type SettingKey =
   | "placement"
@@ -254,7 +255,7 @@ export const SOUS_SETTINGS: { readonly [K in SettingKey]: SettingSpec<K> } = {
     group: "thresholds",
     label: "Capital after a mark",
     description:
-      "How often, out of 10,000, this project must follow a mark with a capital before a capital there counts as the mark's doing and not the word's.",
+      "How often this project must follow a mark with a capital before a capital there counts as the mark's doing and not the word's.",
   },
   sentence_start_upper_bp: {
     key: "sentence_start_upper_bp",
@@ -265,7 +266,7 @@ export const SOUS_SETTINGS: { readonly [K in SettingKey]: SettingSpec<K> } = {
     group: "thresholds",
     label: "Capital expected after a mark",
     description:
-      "How often, out of 10,000, this project must follow a mark with a capital before a lowercase word after that mark is flagged.",
+      "How often this project must follow a mark with a capital before a lowercase word after that mark is flagged.",
   },
   word_length_sigma: {
     key: "word_length_sigma",
@@ -287,7 +288,7 @@ export const SOUS_SETTINGS: { readonly [K in SettingKey]: SettingSpec<K> } = {
     group: "thresholds",
     label: "Repeating language",
     description:
-      "When more than this many out of 10,000 different words in the project are written twice in a row more than once, the project is taken to repeat words on purpose and the doubled-word checks stay silent.",
+      "When more than this share of the different words in the project are written twice in a row more than once, the project is taken to repeat words on purpose and the doubled-word checks stay silent.",
   },
   doubled_bare: {
     key: "doubled_bare",
@@ -327,7 +328,7 @@ export const SOUS_SETTINGS: { readonly [K in SettingKey]: SettingSpec<K> } = {
     group: "thresholds",
     label: "One book: least share",
     description:
-      "The least share, out of 10,000 uses of a mark in one book, that must be next to the same thing before the one-book check flags that book.",
+      "The least share of a mark's uses in one book that must be next to the same thing before the one-book check flags that book.",
   },
   z_long: {
     key: "z_long",
@@ -402,17 +403,20 @@ export const SOUS_SETTINGS: { readonly [K in SettingKey]: SettingSpec<K> } = {
 
 type DataKey<T> = { [K in keyof T]: T[K] extends (...args: never[]) => unknown ? never : K }[keyof T];
 type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
-type Field<K> = K extends keyof SousSettings ? SousSettings[K] : never;
-type Retyped = { [K in SettingKey]: Same<SousSettingsValues[K], Field<K>> extends true ? never : K }[SettingKey];
-type ExactlyTheClass = Same<SettingKey, DataKey<SousSettings>> extends true ? ([Retyped] extends [never] ? true : false) : false;
-// Fails to compile when this file and the wasm `SousSettings` disagree.
-const exactlyTheClass: ExactlyTheClass = true;
+type Field<C, K> = K extends keyof C ? C[K] : never;
+type Retyped<C> = { [K in SettingKey]: Same<SousSettingsValues[K], Field<C, K>> extends true ? never : K }[SettingKey];
+type ExactlyTheClass<C> = Same<SettingKey, DataKey<C>> extends true ? ([Retyped<C>] extends [never] ? true : false) : false;
+// Fails to compile when this file and either build's `SousSettings` disagree.
+const exactlyTheClass: [ExactlyTheClass<BundlerSettings>, ExactlyTheClass<WebSettings>] = [true, true];
 void exactlyTheClass;
 
-/** What `toSettings` and `fromSettings` need of a `Galley`. */
+/** The settings handle `Galley.config()` hands out, in either build. */
+export type SettingsHandle = { -readonly [K in SettingKey]: SousSettingsValues[K] } & { free(): void };
+
+/** What `toSettings` and `fromSettings` need of a `Galley`, from either build. */
 export interface SettingsHost {
-  config(): SousSettings;
-  setConfig(settings: SousSettings): void;
+  config(): SettingsHandle;
+  setConfig(settings: SettingsHandle): void;
 }
 
 /** A copy of the settings the next publication judges with. */

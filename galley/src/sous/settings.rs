@@ -179,7 +179,8 @@ pub enum Group {
 }
 
 /// One setting's page entry. The description is one plain sentence for a
-/// translator who is neither a linguist nor a programmer.
+/// translator who is neither a linguist nor a programmer, and names no unit:
+/// the kind carries it, and a page may show a share as a percent.
 pub struct SettingDoc {
     pub key: &'static str,
     pub kind: Kind,
@@ -322,14 +323,14 @@ pub const SETTING_DOCS: &[SettingDoc] = {
             ShareBp,
             Thresholds,
             "Capital after a mark",
-            "How often, out of 10,000, this project must follow a mark with a capital before a capital there counts as the mark's doing and not the word's.",
+            "How often this project must follow a mark with a capital before a capital there counts as the mark's doing and not the word's.",
         ),
         doc(
             "sentence_start_upper_bp",
             ShareBp,
             Thresholds,
             "Capital expected after a mark",
-            "How often, out of 10,000, this project must follow a mark with a capital before a lowercase word after that mark is flagged.",
+            "How often this project must follow a mark with a capital before a lowercase word after that mark is flagged.",
         ),
         at_least(
             doc(
@@ -346,7 +347,7 @@ pub const SETTING_DOCS: &[SettingDoc] = {
             ShareBp,
             Thresholds,
             "Repeating language",
-            "When more than this many out of 10,000 different words in the project are written twice in a row more than once, the project is taken to repeat words on purpose and the doubled-word checks stay silent.",
+            "When more than this share of the different words in the project are written twice in a row more than once, the project is taken to repeat words on purpose and the doubled-word checks stay silent.",
         ),
         doc(
             "doubled_bare",
@@ -377,7 +378,7 @@ pub const SETTING_DOCS: &[SettingDoc] = {
             ShareBp,
             Thresholds,
             "One book: least share",
-            "The least share, out of 10,000 uses of a mark in one book, that must be next to the same thing before the one-book check flags that book.",
+            "The least share of a mark's uses in one book that must be next to the same thing before the one-book check flags that book.",
         ),
         at_least(
             doc(
@@ -574,7 +575,7 @@ fn quote(text: &str) -> String {
 /// # Panics
 ///
 /// On a field with no entry, an entry with no field, a kind the field's type
-/// cannot hold, or a description that is not one sentence.
+/// cannot hold, or a description that is not one sentence or names a unit.
 #[must_use]
 pub fn settings_ts() -> String {
     let fields = fields();
@@ -601,6 +602,12 @@ pub fn settings_ts() -> String {
             assert!(
                 entry.description.ends_with('.') && !sentence.contains(". "),
                 "`{key}`'s description is not one sentence"
+            );
+            assert!(
+                !["10,000", "percent", "%"]
+                    .iter()
+                    .any(|unit| entry.description.contains(unit)),
+                "`{key}`'s description names a unit its kind already carries"
             );
             (key, value, entry)
         })
@@ -696,7 +703,8 @@ const HEADER: &str = r#"/**
  * a host that restates it fails to compile rather than missing it.
  */
 
-import type { SousSettings } from "./pkg-bundler/usfm_galley.js";
+import type { SousSettings as BundlerSettings } from "./pkg-bundler/usfm_galley.js";
+import type { SousSettings as WebSettings } from "./pkg-web/usfm_galley.js";
 
 "#;
 
@@ -720,17 +728,20 @@ export interface SettingSpec<K extends SettingKey> {
 
 const EXACT: &str = r#"type DataKey<T> = { [K in keyof T]: T[K] extends (...args: never[]) => unknown ? never : K }[keyof T];
 type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
-type Field<K> = K extends keyof SousSettings ? SousSettings[K] : never;
-type Retyped = { [K in SettingKey]: Same<SousSettingsValues[K], Field<K>> extends true ? never : K }[SettingKey];
-type ExactlyTheClass = Same<SettingKey, DataKey<SousSettings>> extends true ? ([Retyped] extends [never] ? true : false) : false;
-// Fails to compile when this file and the wasm `SousSettings` disagree.
-const exactlyTheClass: ExactlyTheClass = true;
+type Field<C, K> = K extends keyof C ? C[K] : never;
+type Retyped<C> = { [K in SettingKey]: Same<SousSettingsValues[K], Field<C, K>> extends true ? never : K }[SettingKey];
+type ExactlyTheClass<C> = Same<SettingKey, DataKey<C>> extends true ? ([Retyped<C>] extends [never] ? true : false) : false;
+// Fails to compile when this file and either build's `SousSettings` disagree.
+const exactlyTheClass: [ExactlyTheClass<BundlerSettings>, ExactlyTheClass<WebSettings>] = [true, true];
 void exactlyTheClass;
 
-/** What `toSettings` and `fromSettings` need of a `Galley`. */
+/** The settings handle `Galley.config()` hands out, in either build. */
+export type SettingsHandle = { -readonly [K in SettingKey]: SousSettingsValues[K] } & { free(): void };
+
+/** What `toSettings` and `fromSettings` need of a `Galley`, from either build. */
 export interface SettingsHost {
-  config(): SousSettings;
-  setConfig(settings: SousSettings): void;
+  config(): SettingsHandle;
+  setConfig(settings: SettingsHandle): void;
 }
 
 "#;
