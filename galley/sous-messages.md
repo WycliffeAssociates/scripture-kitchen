@@ -250,8 +250,17 @@ what to show their audience, and none is run for them.
 ```ts
 type Query =
   | { kind: "literal"; purpose; needle: string; caseSensitive: boolean; wholeWord: boolean }
-  | { kind: "regex"; purpose; source: string; flags: "u" };
+  | { kind: "regex"; purpose; source: string; flags: "u"; shape: QueryPart[] };
 // purpose: "this" | "alternative" | "others"
+// QueryPart: { text } | { class: "letter" | "digit" | "space" | "punctuation" | "capital" | "lowercase" }
+```
+
+A regex's `source` is for the search; its `shape` is for people. Show the
+shape, never the source:
+
+```text
+source  \?[\s\p{Ps}]*[\p{Uppercase}\p{Lt}]      shape  [{ text: "?" }, { class: "capital" }]
+source  \p{L}’\p{L}                           shape  [{ class: "letter" }, { text: "’" }, { class: "letter" }]
 ```
 
 ```text

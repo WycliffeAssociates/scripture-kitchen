@@ -157,7 +157,18 @@ export interface RegexQuery {
   readonly purpose: QueryPurpose;
   readonly source: string;
   readonly flags: "u";
+  /** What the regex finds, for people: `—` then a digit is
+   * `[{ text: "—" }, { class: "digit" }]`. Riders between a mark and a word
+   * (spaces, quotes, brackets) are not shown. */
+  readonly shape: readonly QueryPart[];
 }
+
+/** One piece of a regex's shape: exact text, or any character of a class. */
+export type QueryPart = { readonly text: string } | { readonly class: QueryClass };
+
+/** A class a regex matches, as a `TouchClass` or a case: `capital` is any
+ * capital or titlecase letter, `lowercase` any lowercase one. */
+export type QueryClass = TouchClass | "capital" | "lowercase";
 
 /** One id with exactly its parameters, and its queries; every one is a plain
  * `{ id: MessageId; params: MessageParams; queries: Query[] }`. */
@@ -407,8 +418,8 @@ function query(purpose: QueryPurpose, needle: string, caseSensitive = true, whol
   return needle === "" ? [] : [{ kind: "literal", purpose, needle, caseSensitive, wholeWord }];
 }
 
-function regex(purpose: QueryPurpose, source: string): RegexQuery {
-  return { kind: "regex", purpose, source, flags: "u" };
+function regex(purpose: QueryPurpose, source: string, shape: readonly QueryPart[]): RegexQuery {
+  return { kind: "regex", purpose, source, flags: "u", shape };
 }
 
 /** Text as regex source: every syntax character escaped, an invisible one
@@ -476,11 +487,16 @@ function classSource(outer: OuterClass): string | undefined {
 
 /** The glyph beside a class, as the row names it and as usual: `—\p{Nd}`,
  * then `—\p{Alphabetic}`. */
-function beside(glyph: string, side: "prev" | "next", outer: OuterClass, usual: OuterClass | undefined): Query[] {
+function beside(glyph: string, mark: QueryPart, side: "prev" | "next", outer: OuterClass, usual: OuterClass | undefined): Query[] {
   const touching = (purpose: QueryPurpose, touched: OuterClass | undefined): Query[] => {
     const other = touched === undefined ? undefined : classSource(touched);
-    if (other === undefined) return [];
-    return [regex(purpose, side === "prev" ? `${other}${glyph}` : `${glyph}${other}`)];
+    if (touched === undefined || other === undefined) return [];
+    const part = { class: touch(touched) };
+    return [
+      side === "prev"
+        ? regex(purpose, `${other}${glyph}`, [part, mark])
+        : regex(purpose, `${glyph}${other}`, [mark, part]),
+    ];
   };
   return [...touching("this", outer), ...(usual === outer ? [] : touching("others", usual))];
 }
@@ -560,6 +576,7 @@ function convention(finding: ConventionFinding, pattern: Pattern, site: string, 
   const spread = spreadOf(finding, pattern, context);
   // The pooled digit lane searches every digit.
   const glyphSource = digit ? "\\p{Nd}" : escaped(glyph);
+  const glyphPart: QueryPart = digit ? { class: "digit" } : { text: glyph };
   const { key, usual } = pattern;
   switch (key.kind) {
     case "Placement":
@@ -573,7 +590,7 @@ function convention(finding: ConventionFinding, pattern: Pattern, site: string, 
             digit,
             ...spread,
           },
-          queries: [regex("this", `\\p{L}${glyphSource}\\p{L}`)],
+          queries: [regex("this", `\\p{L}${glyphSource}\\p{L}`, [{ class: "letter" }, glyphPart, { class: "letter" }])],
         };
       }
       return {
@@ -589,7 +606,7 @@ function convention(finding: ConventionFinding, pattern: Pattern, site: string, 
           usual: usual.kind === "Placement" ? touch(usual.class) : touch(key.class),
           usualCount: usual.kind === "Placement" ? usual.count : 0,
         },
-        queries: [...placed(site), ...beside(glyphSource, key.side, key.class, usual.kind === "Placement" ? usual.class : undefined)],
+        queries: [...placed(site), ...beside(glyphSource, glyphPart, key.side, key.class, usual.kind === "Placement" ? usual.class : undefined)],
       };
     case "BookRate": {
       const baselineBp = usual.kind === "BookRate" ? usual.baselineBp : 0;
@@ -609,7 +626,7 @@ function convention(finding: ConventionFinding, pattern: Pattern, site: string, 
           baseline: baselineBp / 10000,
           otherBooks: usual.kind === "BookRate" ? usual.otherBooks : 0,
         },
-        queries: [...placed(site), ...beside(glyphSource, key.side, key.class, undefined)],
+        queries: [...placed(site), ...beside(glyphSource, glyphPart, key.side, key.class, undefined)],
       };
     }
     case "ExactNeighbor": {
@@ -729,7 +746,7 @@ function convention(finding: ConventionFinding, pattern: Pattern, site: string, 
         queries:
           before === undefined
             ? afterWord(site, usualWord)
-            : afterMark(escaped(String.fromCodePoint(before.glyph)), beforeContext(before), site, usualWord, key.form === "Lower"),
+            : afterMark({ text: String.fromCodePoint(before.glyph) }, beforeContext(before), site, usualWord, key.form === "Lower"),
       };
     }
     case "WordLength":
@@ -774,7 +791,7 @@ function convention(finding: ConventionFinding, pattern: Pattern, site: string, 
           ...spread,
           upper: pattern.denominator - pattern.numerator,
         },
-        queries: afterMark(glyphSource, "bare", site, usualWord, true),
+        queries: afterMark(glyphPart, "bare", site, usualWord, true),
       };
     }
   }
@@ -783,12 +800,12 @@ function convention(finding: ConventionFinding, pattern: Pattern, site: string, 
 /** A word after the mark in one handoff context: `this` the site's word as
  * written, `alternative` the same word in the usual form, `others` any word
  * in the other case. */
-function afterMark(mark: string, context: BeforeContext, word: string, usualWord: string, lower: boolean): Query[] {
-  const head = `${mark}${ride(context)}`;
+function afterMark(mark: QueryPart, context: BeforeContext, word: string, usualWord: string, lower: boolean): Query[] {
+  const head = `${"text" in mark ? escaped(mark.text) : "\\p{Nd}"}${ride(context)}`;
   return [
-    ...(word === "" ? [] : [regex("this", `${head}${wordSource(word)}`)]),
-    ...(usualWord === "" ? [] : [regex("alternative", `${head}${wordSource(usualWord)}`)]),
-    regex("others", `${head}${lower ? CAPITAL : LOWER}`),
+    ...(word === "" ? [] : [regex("this", `${head}${wordSource(word)}`, [mark, { text: word }])]),
+    ...(usualWord === "" ? [] : [regex("alternative", `${head}${wordSource(usualWord)}`, [mark, { text: usualWord }])]),
+    regex("others", `${head}${lower ? CAPITAL : LOWER}`, [mark, { class: lower ? "capital" : "lowercase" }]),
   ];
 }
 
@@ -797,7 +814,7 @@ function afterMark(mark: string, context: BeforeContext, word: string, usualWord
 function afterWord(word: string, usualWord: string): Query[] {
   const head = `(?<=(?:^|${WORD_CHAR})[\\s${OPEN}${CLOSE}${QUOTE}]*)(?<!${WORD_CHAR})`;
   return [
-    ...(word === "" ? [] : [regex("this", `${head}${wordSource(word)}`)]),
-    ...(usualWord === "" ? [] : [regex("alternative", `${head}${wordSource(usualWord)}`)]),
+    ...(word === "" ? [] : [regex("this", `${head}${wordSource(word)}`, [{ text: word }])]),
+    ...(usualWord === "" ? [] : [regex("alternative", `${head}${wordSource(usualWord)}`, [{ text: usualWord }])]),
   ];
 }
