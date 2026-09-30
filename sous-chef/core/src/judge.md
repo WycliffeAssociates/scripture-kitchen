@@ -25,7 +25,7 @@ again by a coarser row** ([Both sides](#both-sides)).
 | `ExactNeighbor` | G3 | in-run positions where `g` is followed by `n` | in-run positions where `g` is followed by anything |
 | `PooledNeighbor` | G2 | in-run positions where `g` is followed by an atom of that pool | the same positions G3 counts |
 | `RunShape` | G1 | runs of `g` with this `(pure, length bucket)` | runs containing `g` |
-| `Placement` | G0 | occurrences of `g` with this outer class, one side | every occurrence of `g` |
+| `Placement` | G0 | occurrences of `g` with this outer class, one side; or with a letter on both | every occurrence of `g` |
 | `Rarity` | — | corpus count of the glyph | every scalar counted |
 | `Casing` | word | free-position occurrences of one case-folded word in one case form | that word's free-position occurrences, all forms |
 | `WordLength` | word | corpus occurrences of one long case-folded word | every word occurrence the corpus counted |
@@ -50,9 +50,32 @@ touches structure, not a space.
 ```text
 JER   \q2 —this is Yahweh's declaration    '—' prev=Edge   counted, never fires
 ZEC   of hosts— and I will return          '—' next=Space  judged
-``` The rows stay per side; the collapse a reviewer
-wants happens at the site, where `Reasons::PLACEMENT_BEFORE | PLACEMENT_AFTER`
-ride one span.
+```
+
+The rows stay per side; the collapse a reviewer wants happens at the site,
+where `Reasons::PLACEMENT_BEFORE | PLACEMENT_AFTER` ride one span.
+
+One key is **joint**: `side = Both`, class `Letter`, a mark inside a word.
+Each side alone can be common where the pair is not, so no marginal sees it:
+
+```text
+nya      '"'  both=Letter   13/6,805    Magazi"mpaka, nati"Tamupeze, m"neneri   FIRES
+swhulb   '('  both=Letter    8/274      Bela(pia, Arabah(ambayo                 FIRES
+en_ulb   '''  inside 2,933/6,292        don't, brother's                        silent
+tier     '-'  inside 36%-100%           long-suffering                          silent
+```
+
+- **Same denominator, band, and entitlement** as the sides: every occurrence
+  of `g`. A joiner that lives inside words owns the majority and never fires.
+- **Not pushed where a side's `Letter` row fired.** Every occurrence inside
+  a word has a letter on each side, so that row already names all of them
+  (`ff,gg` is `, next=Letter`'s).
+- **No subtraction.** A mark with letters on both sides is a run of one, so
+  no in-run pair and no ExactNeighbor ever holds it.
+- **No usual.** What is usual instead is the rest of the denominator, which
+  the row already carries.
+- Its site is the mark, carrying both placement bits. `BookRate` stays per
+  side.
 
 `PooledNeighbor` names a **kind** of neighbour rather than a scalar, so a
 convention that a script spells three ways — `”`, `"`, `’` — is one row
@@ -454,7 +477,7 @@ en_ulb   '’' rarity                2/4,112,852 usual='"' 12,046  (the Quote po
 
 | channel | usual |
 | --- | --- |
-| `Placement` | the class most common on that side, `Edge` excluded |
+| `Placement` | the class most common on that side, `Edge` excluded; nothing for a mark inside a word |
 | `ExactNeighbor` | the most common in-run follower, and the row's pair reversed, facing the same way |
 | `RunShape` | the glyph's most common shape |
 | `Rarity` | the most common other mark in the glyph's `Pool`; none for a letter, for `Pool::Other` (letters, spaces, unlisted marks), or an empty pool |

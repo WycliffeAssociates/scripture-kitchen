@@ -109,6 +109,7 @@ fn read_usual(
     other: u32,
     lookalike: bool,
     facing: u8,
+    inside: bool,
 ) -> Result<Usual, &'static str> {
     let unused = |lane: u32, field| if lane == 0 { Ok(()) } else { Err(field) };
     if lookalike && channel != Channel::Rarity {
@@ -119,6 +120,12 @@ fn read_usual(
     }
     let byte = u8::try_from(usual).map_err(|_| "usual");
     Ok(match channel {
+        Channel::Placement if inside => {
+            unused(usual, "usual")?;
+            unused(count, "usual_count")?;
+            unused(other, "other_count")?;
+            Usual::None
+        }
         Channel::Placement => {
             unused(other, "other_count")?;
             let class = OuterClass::from_raw(byte?).ok_or("usual")?;
@@ -227,6 +234,7 @@ pub(super) fn decode_pattern(
             side: match high {
                 0 => Side::Prev,
                 1 => Side::Next,
+                2 => Side::Both,
                 _ => return Err(bad("key")),
             },
             class: OuterClass::from_raw(low).ok_or(bad("key"))?,
@@ -322,6 +330,13 @@ pub(super) fn decode_pattern(
         read_u32(bytes, PATTERN_OTHER_COUNT_OFFSET),
         flags & PATTERN_LOOKALIKE != 0,
         bytes[PATTERN_FACING_OFFSET],
+        matches!(
+            key,
+            PatternKey::Placement {
+                side: Side::Both,
+                ..
+            }
+        ),
     )
     .map_err(bad)?;
     let pattern = Pattern {

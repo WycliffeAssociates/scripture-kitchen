@@ -17,10 +17,11 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use sous_core::judge::Side;
 use sous_core::substrate::{Edge, fold_book};
 use sous_core::{
     BookAggregate, BookKey, Channel, ChapterInput, ChapterKey, ChapterObs, ChapterPass, ChapterRow,
-    Findings, JudgingConfig, Pattern, PatternKey, ScalarKey, Substrate,
+    Findings, JudgingConfig, OuterClass, Pattern, PatternKey, ScalarKey, Substrate,
 };
 
 const CORPORA: &[&str] = &[
@@ -58,7 +59,7 @@ fn main() {
 
     println!("### test tier (corpora/*.txt) ###\n");
     println!(
-        "{:<12}{:>8}{:>8}{:>8}{:>10}{:>8}{:>10}{:>8}{:>10}{:>10}",
+        "{:<12}{:>8}{:>8}{:>8}{:>10}{:>8}{:>10}{:>8}{:>8}{:>10}{:>10}",
         "corpus",
         "total",
         "exact",
@@ -66,15 +67,28 @@ fn main() {
         "runshape",
         "mixed",
         "placement",
+        "inside",
         "rarity",
         "sentence",
         "bookrate"
     );
+    let mut inside_rows: Vec<String> = Vec::new();
     for name in CORPORA {
         let path = dir.join(format!("{name}.txt"));
         let raw = std::fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("{} must be readable: {error}", path.display()));
-        print_row(name, &patterns_of(&raw, &path, &config));
+        let patterns = patterns_of(&raw, &path, &config);
+        print_row(name, &patterns);
+        inside_rows.extend(
+            patterns
+                .iter()
+                .filter(|row| inside(row))
+                .map(|row| format!("  {name:<12}{}", describe(row))),
+        );
+    }
+    println!("\nmark-inside-a-word rows (placement both=Letter):");
+    for row in &inside_rows {
+        println!("{row}");
     }
 
     let candidates = [dir.join("calibration-corpora"), PathBuf::from(VREF)];
@@ -185,6 +199,15 @@ fn by_channel(patterns: &[Pattern]) -> [usize; CHANNELS.len()] {
     counts
 }
 
+/// Placement rows on a mark with a letter on both sides.
+fn inside(row: &Pattern) -> bool {
+    row.key
+        == PatternKey::Placement {
+            side: Side::Both,
+            class: OuterClass::Letter,
+        }
+}
+
 /// Run-shape rows whose key is a mixed run. A digit is not a run atom, so a
 /// number never lands here.
 fn mixed_run_shapes(patterns: &[Pattern]) -> usize {
@@ -197,7 +220,7 @@ fn mixed_run_shapes(patterns: &[Pattern]) -> usize {
 fn print_row(name: &str, patterns: &[Pattern]) {
     let counts = by_channel(patterns);
     println!(
-        "{:<12}{:>8}{:>8}{:>8}{:>10}{:>8}{:>10}{:>8}{:>10}{:>10}",
+        "{:<12}{:>8}{:>8}{:>8}{:>10}{:>8}{:>10}{:>8}{:>8}{:>10}{:>10}",
         name,
         patterns.len(),
         counts[0],
@@ -205,6 +228,7 @@ fn print_row(name: &str, patterns: &[Pattern]) {
         counts[2],
         mixed_run_shapes(patterns),
         counts[3],
+        patterns.iter().filter(|row| inside(row)).count(),
         counts[4],
         counts[5],
         counts[6]
@@ -246,6 +270,7 @@ fn sweep(dir: &Path, config: &JudgingConfig) {
 
     let mut totals: Vec<usize> = Vec::new();
     let mut per_channel: [Vec<usize>; CHANNELS.len()] = Default::default();
+    let mut insides: Vec<usize> = Vec::new();
     let mut largest: Vec<(usize, String, Vec<Pattern>)> = Vec::new();
     let mut skipped = 0usize;
 
@@ -262,6 +287,7 @@ fn sweep(dir: &Path, config: &JudgingConfig) {
         };
         let counts = by_channel(&patterns);
         totals.push(patterns.len());
+        insides.push(patterns.iter().filter(|row| inside(row)).count());
         for (lane, count) in per_channel.iter_mut().zip(counts) {
             lane.push(count);
         }
@@ -289,6 +315,8 @@ fn sweep(dir: &Path, config: &JudgingConfig) {
             channel.name().to_lowercase()
         );
     }
+    let (p50, p90, p95, max) = spread(&mut insides);
+    println!("{:<12}{p50:>8}{p90:>8}{p95:>8}{max:>8}", "  inside");
     println!("\ncomparator (v1 band sweep): p50 10 / p90 36 / p95 44 rows per corpus");
 
     largest.sort_by_key(|row| std::cmp::Reverse(row.0));

@@ -121,6 +121,8 @@ impl Explained {
         let leader = match side {
             Side::Prev => at.checked_sub(1),
             Side::Next => (at + 1 < run.len()).then_some(at),
+            // Letters on both sides make a run of one: no in-run pair.
+            Side::Both => None,
         };
         leader.is_some_and(|leader| self.leads(key(&run[leader])))
     }
@@ -371,6 +373,19 @@ pub(super) fn letters_are_rostered(scalars: &[(ScalarKey, Tally)], config: &Judg
 /// A row unusual from the glyph's side is then judged from the class's:
 /// a `Nonletter` row keeps only the occurrences no entitled leader judges,
 /// and a `Digit` row ordinary among number ends (or starts) is silent.
+///
+/// Then both sides at once: the occurrences with a letter on each side, a
+/// mark inside a word, against the same denominator. Each side alone can be
+/// common where the pair is not; where a side's `Letter` row fired, that row
+/// already holds every occurrence inside a word, and the joint row is not
+/// pushed.
+///
+/// ```text
+/// '"' prev=Letter, next=Letter   each common
+/// '"' both=Letter      1/12,014   blasp"heming               -> FIRES
+/// ''' both=Letter  2,904/6,289   don't, brother's            -> silent
+/// ',' next=Letter fired           ff,gg is already its site  -> not pushed
+/// ```
 pub(super) fn placement(
     glyph: ScalarKey,
     marginals: &PlacementEvidence,
@@ -429,6 +444,32 @@ pub(super) fn placement(
                 },
             });
         }
+    }
+    // Every occurrence inside a word also has a letter on each side, so a
+    // side whose `Letter` row fired already names all of them.
+    let rare = |count: u64| share_bp(count, marginals.denominator) < ceiling;
+    let letter = OuterClass::Letter as usize;
+    let inside = marginals.inside;
+    if inside.count > 0
+        && rare(inside.count)
+        && Side::ALL
+            .iter()
+            .all(|side| !rare(marginals.sides[*side as usize][letter].count))
+    {
+        out.push_pattern(Pattern {
+            glyph,
+            channel: Channel::Placement,
+            key: PatternKey::Placement {
+                side: Side::Both,
+                class: OuterClass::Letter,
+            },
+            band: Some(band),
+            numerator: saturate(inside.count),
+            denominator: saturate(marginals.denominator),
+            share_bp: reported_share(inside.count, marginals.denominator),
+            books: inside.books(),
+            usual: Usual::None,
+        });
     }
 }
 
@@ -548,6 +589,7 @@ pub(crate) fn shape_of(atoms: &[ScalarKey], glyph: ScalarKey) -> Option<(bool, u
 /// Records the leaders a firing `Nonletter` row's sites skip.
 fn cite_leaders(glyph: ScalarKey, side: Side, other: &OtherSide<'_>, cited: &mut Explained) {
     match side {
+        Side::Both => {}
         Side::Prev => cited.leaders.extend(
             other
                 .shapes
@@ -927,11 +969,12 @@ fn is_mark(key: ScalarKey) -> bool {
         })
 }
 
-/// The outer class a pair records on one side of its glyph.
+/// The outer class a pair records on one side of its glyph; `side` is one
+/// of [`Side::ALL`].
 pub(super) const fn class_on(key: PairKey, side: Side) -> OuterClass {
     match side {
         Side::Prev => key.prev(),
-        Side::Next => key.next(),
+        Side::Next | Side::Both => key.next(),
     }
 }
 
@@ -1028,7 +1071,7 @@ pub(super) fn numerator_in(book: &BookAggregate, pattern: &Pattern, explained: &
 fn placed_in(book: &BookAggregate, glyph: ScalarKey, side: Side, class: OuterClass) -> u64 {
     book.pairs()
         .iter()
-        .filter(|(key, _)| key.scalar() == glyph && class_on(*key, side) == class)
+        .filter(|(key, _)| key.scalar() == glyph && side.sees(*key, class))
         .map(|(_, count)| u64::from(*count))
         .sum()
 }
@@ -1043,6 +1086,8 @@ pub(super) struct PlacementEvidence {
     sides: [[Tally; OuterClass::ALL.len()]; Side::ALL.len()],
     /// The `Nonletter` tally per side, less the pairs an entitled leader judges.
     unexplained: [Tally; Side::ALL.len()],
+    /// Occurrences with a letter on both sides.
+    inside: Tally,
 }
 
 /// Every glyph's marginals, and the digit edges a `Digit` row is judged against.
@@ -1161,6 +1206,9 @@ pub(super) fn placement_evidence(
             let count = u64::from(count);
             let evidence = out.entry(key.scalar()).or_default();
             evidence.denominator += count;
+            if Side::Both.sees(key, OuterClass::Letter) {
+                evidence.inside.add(count, book);
+            }
             for side in Side::ALL {
                 let class = class_on(key, side);
                 evidence.sides[side as usize][class as usize].add(count, book);

@@ -93,7 +93,7 @@ every firing glyph the run contains is tested:
 
 | channel | matches when | occurrences counted |
 | --- | --- | --- |
-| `Placement{side, class}` | an occurrence of `g` in the run sees `class` on `side` | those occurrences, less in-run pairs an `Explained` leader leads |
+| `Placement{side, class}` | an occurrence of `g` in the run sees `class` on `side`, or a letter on each side for `Both` (a run of one) | those occurrences, less in-run pairs an `Explained` leader leads |
 | `RunShape{pure, bucket}` | the run's own shape is that | one, the run, unless `Explained` holds it as a recurring cluster |
 | `ExactNeighbor(n)` | some occurrence of `g` is immediately followed by `n` | those positions |
 | `PooledNeighbor(p)` | some occurrence of `g` is immediately followed by an atom of pool `p` | those positions |
@@ -110,7 +110,8 @@ widened to atom edges inside its chapter, lane A is the *headline* pattern —
 finest channel first (`ExactNeighbor` > `PooledNeighbor` > `RunShape` >
 `Placement` > `Rarity`),
 ties by lowest table position — and lane B is the union of every rung any
-matched pattern belongs to, placement split before/after. So one span is drawn
+matched pattern belongs to, placement split before/after, and a mark inside a
+word carrying both. So one span is drawn
 once with every way it is anomalous, and the wire needs no `MULTI` flag.
 
 A consequence worth knowing when reading `--findings` or `--report`: a site is

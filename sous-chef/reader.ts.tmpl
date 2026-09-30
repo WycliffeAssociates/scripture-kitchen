@@ -216,7 +216,9 @@ export type PatternKey =
   | { readonly kind: "ExactNeighbor"; readonly neighbor: number; readonly directionless: boolean }
   | { readonly kind: "PooledNeighbor"; readonly pool: Pool }
   | { readonly kind: "RunShape"; readonly pure: boolean; readonly bucket: number }
-  | { readonly kind: "Placement"; readonly side: "prev" | "next"; readonly class: OuterClass }
+  /** `side` "both" is a mark with a letter on each side, inside a word; its
+   * class is always `Letter` and its usual is `None`. */
+  | { readonly kind: "Placement"; readonly side: "prev" | "next" | "both"; readonly class: OuterClass }
   | { readonly kind: "Rarity" }
   | { readonly kind: "Casing"; readonly hash: bigint; readonly form: CasingForm }
   | { readonly kind: "WordLength"; readonly hash: bigint; readonly sigma: number }
@@ -423,6 +425,7 @@ function readUsual(
   lookalike: boolean,
   facing: number,
   directionless: boolean,
+  inside: boolean,
 ): Usual | null {
   if (lookalike && channel !== "Rarity") {
     return null;
@@ -443,6 +446,9 @@ function readUsual(
   }
   if (other !== 0 || count > denominator) {
     return null;
+  }
+  if (channel === "Placement" && inside) {
+    return usual === 0 && count === 0 ? { kind: "None" } : null;
   }
   if (channel === "Placement") {
     const outer = OUTER_CLASSES[usual];
@@ -535,10 +541,11 @@ function readPattern(view: DataView, at: number, row: number, bookCount: number)
       key = { kind: "RunShape", pure: high === 1, bucket: low };
     } else if (channel === "Placement" || channel === "BookRate") {
       const outer = OUTER_CLASSES[low];
-      if (high > 1 || outer === undefined || (channel === "BookRate" && outer === "Edge")) {
+      const inside = channel === "Placement" && high === 2 && outer === "Letter";
+      if ((high > 1 && !inside) || outer === undefined || (channel === "BookRate" && outer === "Edge")) {
         return fail(`pattern row ${row} has an invalid key`);
       }
-      const side = high === 1 ? "next" : "prev";
+      const side = inside ? "both" : high === 1 ? "next" : "prev";
       if (channel === "Placement") {
         key = { kind: "Placement", side, class: outer };
       } else {
@@ -611,6 +618,7 @@ function readPattern(view: DataView, at: number, row: number, bookCount: number)
     (flags & PATTERN_LOOKALIKE) !== 0,
     view.getUint8(at + PATTERN_FACING_OFFSET),
     key.kind === "ExactNeighbor" && key.directionless,
+    key.kind === "Placement" && key.side === "both",
   );
   if (usual === null) {
     return fail(`pattern row ${row} has an invalid usual`);

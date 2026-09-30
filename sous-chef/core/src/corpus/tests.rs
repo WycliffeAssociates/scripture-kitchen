@@ -192,6 +192,22 @@ fn fixture_patterns() -> Vec<Pattern> {
                 books: 42,
             },
         },
+        // A mark inside a word: both sides at once, class `Letter` only, and
+        // no usual lane, since the rest of the denominator is the usual.
+        Pattern {
+            glyph: ScalarKey::of('"'),
+            channel: Channel::Placement,
+            key: PatternKey::Placement {
+                side: Side::Both,
+                class: OuterClass::Letter,
+            },
+            band: Some(3),
+            numerator: 13,
+            denominator: 6_805,
+            share_bp: 19,
+            books: 1,
+            usual: Usual::None,
+        },
     ]
 }
 
@@ -686,7 +702,7 @@ fn a_cluster_the_encoder_cannot_write_is_refused() {
         ),
         (
             vec![Cluster {
-                pattern: PatternIndex::new(11),
+                pattern: PatternIndex::new(12),
                 ..shaped.clone()
             }],
             refused(0, "pattern"),
@@ -774,13 +790,13 @@ fn pattern_table_round_trips() {
     )
     .unwrap();
     let snapshot = CorpusSnapshot::open(&encoded).unwrap();
-    assert_eq!(snapshot.pattern_count(), 11);
+    assert_eq!(snapshot.pattern_count(), 12);
     assert_eq!(snapshot.patterns().unwrap(), patterns);
     assert_eq!(
-        snapshot.pattern(11),
+        snapshot.pattern(12),
         Err(CorpusWireError::PatternIndexPastTable {
-            index: 11,
-            count: 11,
+            index: 12,
+            count: 12,
             at: None
         })
     );
@@ -804,6 +820,33 @@ fn pattern_table_round_trips() {
             "pattern {field} {byte} decoded"
         );
     }
+    // Both sides at once is a Placement key with the class `Letter` only, and
+    // never a BookRate key.
+    const INSIDE_ROW: usize = 11;
+    const BOOK_RATE_ROW: usize = 10;
+    for (row, byte, field) in [
+        (INSIDE_ROW, 0x21, "key"),
+        (INSIDE_ROW, 0x30, "key"),
+        (BOOK_RATE_ROW, 0x20, "key"),
+    ] {
+        let mut torn = encoded.clone();
+        torn[start + row * PATTERN_ROW_LEN + PATTERN_KEY_OFFSET] = byte;
+        assert_eq!(
+            CorpusSnapshot::open(&torn).err(),
+            Some(CorpusWireError::InvalidPattern { row, field }),
+            "row {row} key {byte:#x} decoded"
+        );
+    }
+    let mut usual_inside = encoded.clone();
+    usual_inside[start + INSIDE_ROW * PATTERN_ROW_LEN + PATTERN_USUAL_COUNT_OFFSET] = 1;
+    assert_eq!(
+        CorpusSnapshot::open(&usual_inside).err(),
+        Some(CorpusWireError::InvalidPattern {
+            row: INSIDE_ROW,
+            field: "usual_count"
+        }),
+        "a mark inside a word names no usual"
+    );
     // Channel 1 is a live channel; its key byte is a `Pool` discriminant.
     const POOLED_ROW: usize = 2;
     let mut bad_pool = encoded.clone();

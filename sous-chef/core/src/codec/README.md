@@ -91,6 +91,7 @@ Decoding refuses rather than guesses:
 | a facing byte on a row that is not `ExactNeighbor`, past `4`, or disagreeing with whether the pair holds a directionless quote | `InvalidPattern` |
 | a pattern channel, key, band, or share outside its table | `InvalidPattern` |
 | a `Casing` key byte of `Uncased` | `InvalidPattern` |
+| a Placement side 2 with a class other than `Letter`, or naming a usual; a BookRate side 2 | `InvalidPattern` |
 | a `Doubled` key byte above 1 | `InvalidPattern` |
 | a `BookRate` row with a band, `books` other than 1, an `Edge` class, or a book past `book_count` | `InvalidPattern` |
 | a `LetterRun` key byte outside `2..=8` | `InvalidPattern` |
@@ -152,7 +153,7 @@ position matched — so ten thousand sites of one convention cost ten thousand
 | 0..4 | `glyph: u32` (`ScalarKey` raw; `u32::MAX` is the pooled digit key) |
 | 4..8 | `neighbor: u32` (the G3 key; 0 on every other channel) |
 | 8 | `channel: u8` (`Channel` discriminant, finest grain first) |
-| 9 | `key: u8` (Placement and BookRate: `side << 4 \| OuterClass`; RunShape: `pure << 4 \| bucket`; PooledNeighbor: `Pool`; Casing: `Form`; WordLength: whole deviations above the mean; Doubled: 0 adjacent, 1 separated; LetterRun: run length `2..=8`; SentenceStart: 0; else 0) |
+| 9 | `key: u8` (Placement and BookRate: `side << 4 \| OuterClass`, side 0 prev, 1 next, and on Placement only 2 both with `Letter`, a mark inside a word; RunShape: `pure << 4 \| bucket`; PooledNeighbor: `Pool`; Casing: `Form`; WordLength: whole deviations above the mean; Doubled: 0 adjacent, 1 separated; LetterRun: run length `2..=8`; SentenceStart: 0; else 0) |
 | 10 | `band: u8` (staircase step index; `0xFF` = none, which only `Rarity` and `BookRate` carry) |
 | 11 | `flags: u8` — bit 0 `LOOKALIKE`, on a `Rarity` row only: its usual is the glyph's lookalike; every other bit refused |
 | 12..16 | `numerator: u32` |
@@ -174,7 +175,7 @@ the channel's domain is `InvalidPattern`. Rust reads them as `Pattern::usual`
 
 | channel | `usual` | `usual_count` | `other_count` |
 | --- | --- | --- | --- |
-| `Placement` | the `OuterClass` most common on that side, `Edge` excluded | its count, at most the denominator | 0 |
+| `Placement` | the `OuterClass` most common on that side, `Edge` excluded; 0 for side 2, whose usual is the rest of the denominator | its count, at most the denominator; 0 for side 2 | 0 |
 | `ExactNeighbor` | the scalar that most often follows the glyph in a run | its in-run positions, at most the denominator | the row's pair reversed (neighbour then glyph) in runs, only runs facing the row's way when byte 23 names one |
 | `RunShape` | the glyph's most common shape as a key byte, `(pure << 4) \| bucket` | its runs, at most the denominator | 0 |
 | `Rarity` | with `LOOKALIKE`, the most common mark sharing the glyph's `confusables.txt` skeleton (`'` for `’`); else the most common other mark in the glyph's `Pool`. Never a letter, space, digit, or U+0000; 0 for a letter, for a mark with no lookalike in `Pool::Other` (letters, spaces and unlisted marks), or when neither holds anything else | its corpus count; 0 with a `usual` of 0 | 0 |

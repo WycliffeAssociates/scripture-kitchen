@@ -506,6 +506,72 @@ fn a_listed_cluster_carries_its_dominant_facing() {
     );
 }
 
+// ── A mark inside a word ────────────────────────────────────────────────
+
+/// `(numerator, denominator)` of a glyph's inside-a-word row.
+fn inside_row(findings: &Findings, glyph: char) -> Option<(u32, u32)> {
+    placement_row(findings, glyph, Side::Both, OuterClass::Letter).map(|(n, d, _)| (n, d))
+}
+
+/// Each side of `"` touches a letter half the time, so neither side's row
+/// sees `blasp"heming`; both sides at once do.
+#[test]
+fn a_quote_with_a_letter_on_each_side_fires_the_joint_key() {
+    let texts = [format!(
+        "{}{}",
+        "said \"go\" now ".repeat(3_000),
+        "blasp\"heming "
+    )];
+    let findings = judged(&texts, &JudgingConfig::default());
+    assert_eq!(
+        placement_row(&findings, '"', Side::Prev, OuterClass::Letter),
+        None
+    );
+    assert_eq!(
+        placement_row(&findings, '"', Side::Next, OuterClass::Letter),
+        None
+    );
+    assert_eq!(inside_row(&findings, '"'), Some((1, 6_001)));
+    let row = findings
+        .patterns()
+        .iter()
+        .find(|row| row.channel == Channel::Placement && row.glyph == ScalarKey::of('"'))
+        .expect("the joint row");
+    assert_eq!(
+        row.usual,
+        Usual::None,
+        "the rest of the denominator is usual"
+    );
+}
+
+/// A joiner lives inside words, so the joint key is its majority and never
+/// fires: the apostrophe of `don't`, the hyphen of `long-suffering`.
+#[test]
+fn a_joiner_inside_words_never_fires_the_joint_key() {
+    let texts = [format!(
+        "{}{}{}",
+        "don't go ".repeat(2_000),
+        "the people' s ".repeat(3),
+        "long-suffering ".repeat(500),
+    )];
+    let findings = judged(&texts, &JudgingConfig::default());
+    assert_eq!(inside_row(&findings, '\''), None);
+    assert_eq!(inside_row(&findings, '-'), None);
+}
+
+/// Where a side's `Letter` row fired it already holds every occurrence inside
+/// a word, so the joint row would say the same thing twice.
+#[test]
+fn a_fired_letter_side_leaves_no_joint_row() {
+    let texts = [format!("{}{}", "a, b ".repeat(3_000), "c,d ")];
+    let findings = judged(&texts, &JudgingConfig::default());
+    assert_eq!(
+        placement_row(&findings, ',', Side::Next, OuterClass::Letter),
+        Some((1, 3_001, 1))
+    );
+    assert_eq!(inside_row(&findings, ','), None);
+}
+
 /// A rare letter, or a rare mark no named pool holds, has no kin to name: the
 /// space and the letters that share `Pool::Other` with it are not usual marks.
 #[test]

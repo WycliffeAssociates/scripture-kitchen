@@ -332,6 +332,7 @@ fn rung(pattern: &Pattern) -> Reasons {
         PatternKey::Placement { side, .. } => match side {
             Side::Prev => Reasons::PLACEMENT_BEFORE,
             Side::Next => Reasons::PLACEMENT_AFTER,
+            Side::Both => Reasons::PLACEMENT_BEFORE.union(Reasons::PLACEMENT_AFTER),
         },
         PatternKey::Rarity => Reasons::RARITY,
         PatternKey::SentenceStart => Reasons::SENTENCE_START,
@@ -408,9 +409,12 @@ fn placed<'r>(
         let (offset, key) = atoms[at];
         key == glyph
             && match side {
-                Side::Prev => cursor.prev_outer(offset),
-                Side::Next => cursor.next_outer(offset),
-            } == class
+                Side::Prev => cursor.prev_outer(offset) == class,
+                Side::Next => cursor.next_outer(offset) == class,
+                Side::Both => {
+                    cursor.prev_outer(offset) == class && cursor.next_outer(offset) == class
+                }
+            }
     })
 }
 
@@ -853,6 +857,28 @@ mod tests {
                 Reasons::RUN_SHAPE.union(Reasons::EXACT_NEIGHBOR).bits()
             )],
             "one row, headlined by the finer channel"
+        );
+    }
+
+    /// A mark inside a word sites the mark, with both placement bits, and
+    /// only where a letter stands on each side of it.
+    #[test]
+    fn a_mark_inside_a_word_sites_the_mark() {
+        let text = "blasp\"heming, \"go\" x\" y";
+        assert_eq!(
+            found(
+                text,
+                &whole(text),
+                &[placement('"', Side::Both, OuterClass::Letter)]
+            ),
+            vec![(
+                5,
+                6,
+                0,
+                Reasons::PLACEMENT_BEFORE
+                    .union(Reasons::PLACEMENT_AFTER)
+                    .bits()
+            )]
         );
     }
 

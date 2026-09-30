@@ -105,15 +105,30 @@ impl Channel {
 pub enum Side {
     Prev = 0,
     Next = 1,
+    /// Both at once, with the class `Letter` only: a mark inside a word.
+    Both = 2,
 }
 
 impl Side {
+    /// The two single sides, each its own marginal distribution.
     pub const ALL: [Self; 2] = [Self::Prev, Self::Next];
 
     pub const fn name(self) -> &'static str {
         match self {
             Self::Prev => "prev",
             Self::Next => "next",
+            Self::Both => "both",
+        }
+    }
+
+    /// Whether a pair sees `class` on this side, or on both for [`Self::Both`].
+    pub const fn sees(self, key: PairKey, class: OuterClass) -> bool {
+        let prev = key.prev() as u8 == class as u8;
+        let next = key.next() as u8 == class as u8;
+        match self {
+            Self::Prev => prev,
+            Self::Next => next,
+            Self::Both => prev && next,
         }
     }
 }
@@ -130,6 +145,7 @@ pub enum PatternKey {
         pure: bool,
         bucket: u8,
     },
+    /// `side` is `Both` only with `class` `Letter`: the glyph inside a word.
     Placement {
         side: Side,
         class: OuterClass,
@@ -292,6 +308,16 @@ impl Pattern {
         {
             return Err("key");
         }
+        match self.key {
+            PatternKey::Placement {
+                side: Side::Both,
+                class,
+            } if class != OuterClass::Letter => return Err("key"),
+            PatternKey::BookRate {
+                side: Side::Both, ..
+            } => return Err("key"),
+            _ => {}
+        }
         // A word channel judges no scalar, so the glyph field carries its hash.
         if self.channel.is_word() && self.glyph != ScalarKey::NONE {
             return Err("glyph");
@@ -299,13 +325,26 @@ impl Pattern {
         self.usual_fits().then_some(()).ok_or("usual")
     }
 
+    fn inside_a_word(&self) -> bool {
+        matches!(
+            self.key,
+            PatternKey::Placement {
+                side: Side::Both,
+                ..
+            }
+        )
+    }
+
     /// The variant belongs to the channel, and every count fits the row.
     fn usual_fits(&self) -> bool {
         let within = |count: u32| count <= self.denominator;
         match (self.channel, self.usual) {
             (Channel::Placement, Usual::Placement { class, count }) => {
-                class != OuterClass::Edge && within(count)
+                !self.inside_a_word() && class != OuterClass::Edge && within(count)
             }
+            // What is usual instead of "inside a word" is the rest of the
+            // denominator, which the row already carries.
+            (Channel::Placement, Usual::None) => self.inside_a_word(),
             (Channel::ExactNeighbor, Usual::ExactNeighbor { count, facing, .. }) => {
                 let PatternKey::ExactNeighbor(neighbor) = self.key else {
                     return false;

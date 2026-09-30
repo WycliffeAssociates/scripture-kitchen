@@ -51,7 +51,7 @@ function fixture() {
 // id table, then the pattern table, then the records.
 const FIRST_RECORD = HEADER_BYTES + DIRECTORY_ENTRY_BYTES + 16;
 // Two four-atom clusters sit between the pattern table and the records.
-const FIRST_CLUSTER = FIRST_RECORD + 11 * PATTERN_ROW_LEN;
+const FIRST_CLUSTER = FIRST_RECORD + 12 * PATTERN_ROW_LEN;
 // Then three terminal entries.
 const FIRST_TERMINAL = FIRST_CLUSTER + 2 * (CLUSTER_ENTRY_BYTES + 4 * 4);
 const FIRST_MIXED_RECORD = FIRST_TERMINAL + 3 * TERMINAL_ENTRY_BYTES;
@@ -249,7 +249,7 @@ test("decodes mixed proportionality, hygiene, presence, and source-copy rows, sa
 
 test("decodes the pattern table the judge published", () => {
   const snapshot = FindingsSnapshot.open(hexFixture("corpus_v2_hygiene.hex"));
-  assert.equal(snapshot.patternCount, 11);
+  assert.equal(snapshot.patternCount, 12);
   assert.deepEqual(snapshot.patterns(), [
     {
       glyph: 0x60,
@@ -383,8 +383,19 @@ test("decodes the pattern table the judge published", () => {
       books: 1,
       usual: { kind: "BookRate", baselineBp: 30, otherBooks: 42 },
     },
+    {
+      glyph: 0x22,
+      channel: "Placement",
+      key: { kind: "Placement", side: "both", class: "Letter" },
+      band: 3,
+      numerator: 13,
+      denominator: 6805,
+      shareBp: 19,
+      books: 1,
+      usual: { kind: "None" },
+    },
   ]);
-  assert.throws(() => snapshot.pattern(11), FindingsSnapshotError);
+  assert.throws(() => snapshot.pattern(12), FindingsSnapshotError);
 
   // Every field the reader refuses, one at a time.
   const start = FIRST_RECORD;
@@ -416,6 +427,16 @@ test("decodes the pattern table the judge published", () => {
     faced[start + PATTERN_ROW_LEN + 23] = byte;
     expectOpenFailure(faced);
   }
+  // Both sides at once is a Placement key of class Letter with no usual, and
+  // never a BookRate key.
+  for (const [row, byte] of [[11, 0x21], [11, 0x30], [10, 0x20]]) {
+    const torn = hexFixture("corpus_v2_hygiene.hex");
+    torn[start + row * PATTERN_ROW_LEN + 9] = byte;
+    expectOpenFailure(torn);
+  }
+  const usualInside = hexFixture("corpus_v2_hygiene.hex");
+  new DataView(usualInside.buffer).setUint32(start + 11 * PATTERN_ROW_LEN + PATTERN_USUAL_COUNT_OFFSET, 1, true);
+  expectOpenFailure(usualInside);
   // Channel 1 is a live channel; its key byte is a POOLS index.
   const badPool = hexFixture("corpus_v2_hygiene.hex");
   badPool[start + 2 * PATTERN_ROW_LEN + 9] = POOLS.length;
@@ -454,7 +475,7 @@ test("lists a RunShape row's clusters and refuses one the encoder cannot write",
   const second = FIRST_CLUSTER + CLUSTER_ENTRY_BYTES + 4 * 4;
   for (const [at, byte] of [
     [FIRST_CLUSTER + CLUSTER_PATTERN_OFFSET, 4],    // a Placement row
-    [FIRST_CLUSTER + CLUSTER_PATTERN_OFFSET, 11],   // past the table
+    [FIRST_CLUSTER + CLUSTER_PATTERN_OFFSET, 12],   // past the table
     [FIRST_CLUSTER + CLUSTER_FLAGS_OFFSET, 4],      // an unknown flag
     [FIRST_CLUSTER + CLUSTER_FLAGS_OFFSET, 3],      // truncated, with four atoms
     [FIRST_CLUSTER + CLUSTER_FLAGS_OFFSET, 0x51],   // a facing past the table

@@ -109,12 +109,10 @@ fn counted(at: BookIndex, book: &BookAggregate, pattern: &Pattern, explained: &E
                 .pairs()
                 .iter()
                 .filter(|(key, _)| key.scalar() == glyph)
-                .filter(|(key, _)| {
-                    class
-                        == match side {
-                            Side::Prev => key.prev(),
-                            Side::Next => key.next(),
-                        }
+                .filter(|(key, _)| match side {
+                    Side::Prev => key.prev() == class,
+                    Side::Next => key.next() == class,
+                    Side::Both => key.prev() == class && key.next() == class,
                 })
                 .map(|(_, count)| u64::from(*count))
                 .sum();
@@ -127,6 +125,8 @@ fn counted(at: BookIndex, book: &BookAggregate, pattern: &Pattern, explained: &E
                         .filter(|pair| match side {
                             Side::Prev => pair[1] == glyph,
                             Side::Next => pair[0] == glyph,
+                            // A mark with a letter on each side is a run of one.
+                            Side::Both => false,
                         })
                         .count() as u64;
                     pairs * u64::from(count)
@@ -184,12 +184,10 @@ fn counted(at: BookIndex, book: &BookAggregate, pattern: &Pattern, explained: &E
             .pairs()
             .iter()
             .filter(|(key, _)| key.scalar() == glyph)
-            .filter(|(key, _)| {
-                class
-                    == match side {
-                        Side::Prev => key.prev(),
-                        Side::Next => key.next(),
-                    }
+            .filter(|(key, _)| match side {
+                Side::Prev => key.prev() == class,
+                Side::Next => key.next() == class,
+                Side::Both => unreachable!("a BookRate row names one side"),
             })
             .map(|(_, count)| u64::from(*count))
             .sum(),
@@ -404,7 +402,7 @@ fn the_synthetic_sweep_reaches_every_channel_and_both_placement_sides() {
             "no {channel:?} pattern fired"
         );
     }
-    for side in [Side::Prev, Side::Next] {
+    for side in [Side::Prev, Side::Next, Side::Both] {
         assert!(
             seen.contains(&(Channel::Placement, Some(side))),
             "no placement on {side:?}"
