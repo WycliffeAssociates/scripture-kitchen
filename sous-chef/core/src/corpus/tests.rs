@@ -4,7 +4,7 @@
 use super::*;
 use crate::codec::{CodecError, HygieneClass, PresenceDigest, PresenceKind, SourceCopyDigest};
 use crate::judge::{Channel, Cluster, PatternKey, Side, TerminalCount, Usual};
-use crate::substrate::{FollowKey, OuterClass, ScalarKey};
+use crate::substrate::{Facing, FollowKey, OuterClass, ScalarKey};
 use crate::unicode::Pool;
 use crate::words::Form;
 use crate::{
@@ -49,6 +49,7 @@ fn fixture_patterns() -> Vec<Pattern> {
                 neighbor: ScalarKey::of('"'),
                 count: 380,
                 reversed: 2,
+                facing: None,
             },
         },
         Pattern {
@@ -209,6 +210,7 @@ fn fixture_clusters() -> Vec<Cluster> {
             count: 7,
             recurring: true,
             truncated: false,
+            facing: Some(Facing::Closing),
         },
         Cluster {
             pattern: PatternIndex::new(3),
@@ -216,6 +218,7 @@ fn fixture_clusters() -> Vec<Cluster> {
             count: 1,
             recurring: false,
             truncated: false,
+            facing: None,
         },
     ]
 }
@@ -472,7 +475,7 @@ fn header_is_64_bytes() {
     assert_eq!(HEADER_CLUSTER_OFFSET_OFFSET, 52);
     assert_eq!(PATTERN_ROW_LEN, 36);
     assert_eq!(PATTERN_BOOKS_OFFSET, 22);
-    assert_eq!(PATTERN_RESERVED_OFFSET, 23);
+    assert_eq!(PATTERN_FACING_OFFSET, 23);
     assert_eq!(PATTERN_USUAL_OFFSET, 24);
     assert_eq!(PATTERN_USUAL_COUNT_OFFSET, 28);
     assert_eq!(PATTERN_OTHER_COUNT_OFFSET, 32);
@@ -717,6 +720,24 @@ fn a_cluster_the_encoder_cannot_write_is_refused() {
     );
     assert_eq!(torn(start + CLUSTER_FLAGS_OFFSET, 4), refused(0, "flags"));
     assert_eq!(
+        torn(start + CLUSTER_FLAGS_OFFSET, 5 << CLUSTER_FACING_SHIFT),
+        refused(0, "facing"),
+        "a facing past the table"
+    );
+    assert_eq!(
+        torn(start + CLUSTER_FLAGS_OFFSET, CLUSTER_RECURRING),
+        refused(0, "atoms"),
+        "a run holding a directionless quote carries a facing"
+    );
+    assert_eq!(
+        torn(
+            start + entry + CLUSTER_FLAGS_OFFSET,
+            1 << CLUSTER_FACING_SHIFT
+        ),
+        refused(1, "atoms"),
+        "a run holding none carries no facing"
+    );
+    assert_eq!(
         torn(
             start + CLUSTER_FLAGS_OFFSET,
             CLUSTER_RECURRING | CLUSTER_TRUNCATED
@@ -768,7 +789,7 @@ fn pattern_table_round_trips() {
     let start = HEADER_BYTES + DIRECTORY_ENTRY_BYTES + 16;
     for (offset, byte, field) in [
         (PATTERN_FLAGS_OFFSET, 2u8, "flags"),
-        (PATTERN_RESERVED_OFFSET, 1, "reserved"),
+        (PATTERN_FACING_OFFSET, 1, "facing"),
         (PATTERN_CHANNEL_OFFSET, 11, "channel"),
         (PATTERN_BAND_OFFSET, 0, "band"),
         (PATTERN_KEY_OFFSET, 1, "key"),

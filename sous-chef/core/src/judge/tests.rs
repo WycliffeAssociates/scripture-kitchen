@@ -351,6 +351,7 @@ fn every_row_names_what_is_usual_instead() {
             neighbor: ScalarKey::of('"'),
             count: 400,
             reversed: 975,
+            facing: Some(Facing::Closing),
         }),
         "`'` is usually followed by `\"`, and `.'` is the swap of `'.`"
     );
@@ -362,6 +363,146 @@ fn every_row_names_what_is_usual_instead() {
             lookalike: true,
         }),
         "`'` is drawn like `’`"
+    );
+}
+
+/// The reversed pair counts only occurrences facing the way the row's pair
+/// faces, so `'.` closing is compared with `.'` closing and never with a
+/// `.'` that opens.
+#[test]
+fn a_reversal_across_a_directionless_quote_compares_the_same_facing() {
+    let texts = [format!(
+        "{}{}{}{}{}",
+        "a, b ".repeat(2_000),
+        "e.' ".repeat(900),
+        " .'e".repeat(300),
+        "f'. ".repeat(3),
+        "g'\" ".repeat(400),
+    )];
+    let findings = judged(&texts, &JudgingConfig::default());
+    let exact = |glyph: char, neighbor: char| {
+        findings
+            .patterns()
+            .iter()
+            .find(|row| {
+                row.glyph == ScalarKey::of(glyph)
+                    && row.key == PatternKey::ExactNeighbor(ScalarKey::of(neighbor))
+            })
+            .map(|row| row.usual)
+    };
+    let Some(Usual::ExactNeighbor {
+        reversed, facing, ..
+    }) = exact('\'', '.')
+    else {
+        panic!("`'.` fires");
+    };
+    assert_eq!(facing, Some(Facing::Closing));
+    assert_eq!(reversed, 900, "the 300 opening `.'` are another claim");
+
+    // NUM 21:14's shape: `"...` opens a line, and `."` closes thousands.
+    let texts = [format!(
+        "{}{}{}{}",
+        "a, b ".repeat(2_000),
+        "c.\" ".repeat(4_000),
+        "g\"' ".repeat(400),
+        " \"...d".repeat(2),
+    )];
+    let findings = judged(&texts, &JudgingConfig::default());
+    let row = findings
+        .patterns()
+        .iter()
+        .find(|row| {
+            row.glyph == ScalarKey::of('"')
+                && row.key == PatternKey::ExactNeighbor(ScalarKey::of('.'))
+        })
+        .expect("`\".` fires");
+    assert!(matches!(
+        row.usual,
+        Usual::ExactNeighbor {
+            reversed: 0,
+            facing: Some(Facing::Opening),
+            ..
+        }
+    ));
+}
+
+/// A pair split evenly between two facings names no direction, and a pair
+/// with no directionless quote names none at all.
+#[test]
+fn a_tied_facing_is_unknown_and_a_curly_pair_has_none() {
+    let texts = [format!(
+        "{}{}{}{}{}",
+        "a, b ".repeat(2_000),
+        "c.\" ".repeat(4_000),
+        "g\"' ".repeat(400),
+        "d\". ".repeat(2),
+        " \".e".repeat(2),
+    )];
+    let findings = judged(&texts, &JudgingConfig::default());
+    let facing = |glyph: char, neighbor: char| {
+        findings.patterns().iter().find_map(|row| match row.usual {
+            Usual::ExactNeighbor { facing, .. }
+                if row.glyph == ScalarKey::of(glyph)
+                    && row.key == PatternKey::ExactNeighbor(ScalarKey::of(neighbor)) =>
+            {
+                Some(facing)
+            }
+            _ => None,
+        })
+    };
+    assert_eq!(facing('"', '.'), Some(Some(Facing::Unknown)));
+
+    let texts = [format!(
+        "{}{}{}{}",
+        "a, b ".repeat(2_000),
+        "c.\u{201D} ".repeat(4_000),
+        "g\u{201D}, ".repeat(400),
+        "d\u{201D}. ".repeat(2),
+    )];
+    let findings = judged(&texts, &JudgingConfig::default());
+    let row = findings
+        .patterns()
+        .iter()
+        .find(|row| row.glyph == ScalarKey::of('\u{201D}') && row.channel == Channel::ExactNeighbor)
+        .expect("`”.` fires");
+    assert!(matches!(
+        row.usual,
+        Usual::ExactNeighbor {
+            reversed: 4_000,
+            facing: None,
+            ..
+        }
+    ));
+}
+
+/// A listed cluster carries the facing most of its occurrences have.
+#[test]
+fn a_listed_cluster_carries_its_dominant_facing() {
+    let texts = [
+        "a; b ".repeat(3_000),
+        format!("{}{}{}", "c'; d ".repeat(7), "e;' f ".repeat(2), " ;'g"),
+    ];
+    let findings = judged(&texts, &JudgingConfig::default());
+    let listed: Vec<(String, Option<Facing>)> = findings
+        .clusters()
+        .iter()
+        .map(|cluster| {
+            (
+                cluster
+                    .atoms
+                    .iter()
+                    .filter_map(|atom| atom.scalar())
+                    .collect(),
+                cluster.facing,
+            )
+        })
+        .collect();
+    assert_eq!(
+        listed,
+        vec![
+            ("';".to_string(), Some(Facing::Closing)),
+            (";'".to_string(), Some(Facing::Closing)),
+        ]
     );
 }
 

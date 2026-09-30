@@ -160,7 +160,7 @@ fn learned<'a>(
     let runs = merged_runs(corpus);
     let floor = u64::from(config.support_floor);
     let mut pooled: FxHashMap<Box<[ScalarKey]>, u64> = FxHashMap::default();
-    for &(atoms, count) in &runs {
+    for &(atoms, count) in &runs.runs {
         if let Some(key) = terminals_pooled(atoms) {
             *pooled.entry(key).or_default() += count;
         }
@@ -168,6 +168,7 @@ fn learned<'a>(
     let mut explained = Explained {
         leaders: Vec::new(),
         clusters: runs
+            .runs
             .iter()
             .filter(|&&(atoms, count)| {
                 count >= floor
@@ -219,7 +220,7 @@ pub(super) struct RunIndex<'a> {
 impl<'a> RunIndex<'a> {
     fn new(runs: MergedRuns<'a>) -> Self {
         let mut holding: FxHashMap<ScalarKey, Vec<u32>> = FxHashMap::default();
-        for (at, (atoms, _)) in runs.iter().enumerate() {
+        for (at, (atoms, _)) in runs.runs.iter().enumerate() {
             for (position, atom) in atoms.iter().enumerate() {
                 if !atoms[..position].contains(atom) {
                     holding.entry(*atom).or_default().push(at as u32);
@@ -235,7 +236,13 @@ impl<'a> RunIndex<'a> {
             .get(&glyph)
             .into_iter()
             .flatten()
-            .map(|&at| self.runs[at as usize])
+            .map(|&at| self.runs.runs[at as usize])
+    }
+
+    /// The facing most occurrences of this exact run have, `None` for a run
+    /// holding no directionless quote.
+    fn facing(&self, atoms: &[ScalarKey]) -> Option<Facing> {
+        dominant(self.runs.facings.get(atoms)?)
     }
 }
 
@@ -672,24 +679,56 @@ fn clusters(
             count: saturate(count),
             recurring: recurs(atoms),
             truncated: atoms.len() > Cluster::ATOMS,
+            facing: runs.facing(atoms),
         })
         .collect()
 }
 
-/// Every exact run's corpus count, ascending by atoms.
-pub(super) type MergedRuns<'a> = Vec<(&'a [ScalarKey], u64)>;
+/// Every exact run's corpus count, whatever its facing.
+#[derive(Default)]
+pub(super) struct MergedRuns<'a> {
+    /// Ascending by atoms.
+    runs: Vec<(&'a [ScalarKey], u64)>,
+    /// A run holding a directionless quote, counted per [`Facing::index`].
+    facings: FxHashMap<&'a [ScalarKey], [u64; Facing::COUNT]>,
+}
 
 /// [`MergedRuns`], summed over the corpus.
 pub(super) fn merged_runs<'a>(corpus: &[&'a BookAggregate]) -> MergedRuns<'a> {
     let mut counts: FxHashMap<&[ScalarKey], u64> = FxHashMap::default();
+    let mut facings: FxHashMap<&[ScalarKey], [u64; Facing::COUNT]> = FxHashMap::default();
     for book in corpus {
-        for (atoms, count) in book.runs() {
+        for (atoms, facing, count) in book.faced_runs() {
             *counts.entry(atoms).or_default() += u64::from(count);
+            if let Some(facing) = facing {
+                facings.entry(atoms).or_default()[facing.index()] += u64::from(count);
+            }
         }
     }
-    let mut out: Vec<_> = counts.into_iter().collect();
-    out.sort_unstable();
-    out
+    let mut runs: Vec<_> = counts.into_iter().collect();
+    runs.sort_unstable();
+    MergedRuns { runs, facings }
+}
+
+/// The facing with the most occurrences; `Unknown` when two facings tie for
+/// it, since split evidence names no direction; `None` when nothing was
+/// counted.
+///
+/// ```text
+/// Closing 3                 -> Closing
+/// Closing 1, Unknown 1      -> Unknown     JER 3:19 `".'` beside NUM 21:14 `"...`
+/// ```
+fn dominant(counts: &[u64; Facing::COUNT]) -> Option<Facing> {
+    let (facing, count) = most(
+        Facing::ALL
+            .into_iter()
+            .map(|facing| (facing, counts[facing.index()])),
+    )?;
+    if count == 0 {
+        return None;
+    }
+    let tied = counts.iter().filter(|&&other| other == count).count() > 1;
+    Some(if tied { Facing::Unknown } else { facing })
 }
 
 /// G3: what follows the glyph inside a run, against every position where
@@ -716,6 +755,7 @@ pub(super) fn neighbors(
         if share >= ceiling {
             continue;
         }
+        let facing = evidence.facing(neighbor);
         out.push_pattern(Pattern {
             glyph,
             channel: Channel::ExactNeighbor,
@@ -728,28 +768,41 @@ pub(super) fn neighbors(
             usual: Usual::ExactNeighbor {
                 neighbor: usual,
                 count: saturate(usual_count),
-                reversed: saturate(followed(shapes, neighbor, glyph)),
+                reversed: saturate(followed(shapes, neighbor, glyph, facing)),
+                facing,
             },
         });
     }
 }
 
-/// In-run positions where `glyph` is followed by `neighbor`.
+/// In-run positions where `glyph` is followed by `neighbor`, and only in runs
+/// facing `facing` when the pair holds a directionless quote.
+///
+/// ```text
+/// ''' then '.'    3, all Closing      facing Closing
+///   '.' then '''  974 Closing         reversed 974
+/// '"' then '.'    NUM 21:14 `"...`    facing Opening
+///   '.' then '"'  4,038, all Closing  reversed 0
+/// ```
 fn followed(
     shapes: &FxHashMap<ScalarKey, RunEvidence>,
     glyph: ScalarKey,
     neighbor: ScalarKey,
+    facing: Option<Facing>,
 ) -> u64 {
-    shapes
-        .get(&glyph)
-        .and_then(|evidence| {
-            evidence
-                .neighbors
-                .binary_search_by_key(&neighbor, |entry| entry.0)
-                .ok()
-                .map(|at| evidence.neighbors[at].1.count)
-        })
-        .unwrap_or(0)
+    let Some(evidence) = shapes.get(&glyph) else {
+        return 0;
+    };
+    match facing {
+        Some(facing) => evidence
+            .faced
+            .binary_search_by_key(&neighbor, |entry| entry.0)
+            .map_or(0, |at| evidence.faced[at].1[facing.index()]),
+        None => evidence
+            .neighbors
+            .binary_search_by_key(&neighbor, |entry| entry.0)
+            .map_or(0, |at| evidence.neighbors[at].1.count),
+    }
 }
 
 /// The key with the largest count, the smallest key on a tie.
@@ -1009,11 +1062,26 @@ pub(super) struct RunEvidence {
     /// The same, over runs whose exact sequence does not recur.
     novel: Vec<((bool, u8), Tally)>,
     neighbors: Vec<(ScalarKey, Tally)>,
+    /// The followers whose pair with the glyph holds a directionless quote,
+    /// counted per [`Facing::index`] of the runs holding the pair.
+    faced: Vec<(ScalarKey, [u64; Facing::COUNT])>,
     pools: Vec<(Pool, Tally)>,
     /// Runs holding the glyph at all.
     runs: u64,
     /// Positions where the glyph is followed by another atom.
     positions: u64,
+}
+
+impl RunEvidence {
+    /// The facing most of the glyph's pairs with `neighbor` have, `None` when
+    /// neither is a directionless quote.
+    fn facing(&self, neighbor: ScalarKey) -> Option<Facing> {
+        let at = self
+            .faced
+            .binary_search_by_key(&neighbor, |entry| entry.0)
+            .ok()?;
+        dominant(&self.faced[at].1)
+    }
 }
 
 /// One glyph's placement counts in one book, what [`book_rates`] compares.
@@ -1147,7 +1215,7 @@ pub(super) fn run_evidence(
     let mut seen: Vec<ScalarKey> = Vec::new();
     for (book, aggregate) in corpus.iter().enumerate() {
         let book = book as u32;
-        for (atoms, count) in aggregate.runs() {
+        for (atoms, facing, count) in aggregate.faced_runs() {
             let count = u64::from(count);
             let recurs = explained.recurs(atoms.iter().copied());
             seen.clear();
@@ -1170,12 +1238,25 @@ pub(super) fn run_evidence(
                 evidence.positions += count;
                 bump(&mut evidence.neighbors, pair[1], count, book);
                 bump(&mut evidence.pools, pool_of_key(pair[1]), count, book);
+                if let Some(facing) = facing
+                    && (is_directionless(pair[0]) || is_directionless(pair[1]))
+                {
+                    let at = match evidence.faced.iter().position(|entry| entry.0 == pair[1]) {
+                        Some(at) => at,
+                        None => {
+                            evidence.faced.push((pair[1], [0; Facing::COUNT]));
+                            evidence.faced.len() - 1
+                        }
+                    };
+                    evidence.faced[at].1[facing.index()] += count;
+                }
             }
         }
     }
     for evidence in out.values_mut() {
         evidence.shapes.sort_unstable_by_key(|entry| entry.0);
         evidence.neighbors.sort_unstable_by_key(|entry| entry.0);
+        evidence.faced.sort_unstable_by_key(|entry| entry.0);
         evidence.pools.sort_unstable_by_key(|entry| entry.0);
     }
     out

@@ -8,7 +8,7 @@
 use super::*;
 use crate::codec::PackedFinding;
 use crate::judge::{Channel, Pattern, PatternKey, Side, Staircase, Usual};
-use crate::substrate::{OuterClass, RUN_BUCKETS, ScalarKey};
+use crate::substrate::{Facing, OuterClass, RUN_BUCKETS, ScalarKey};
 use crate::unicode::Pool;
 use crate::words::{Form, LETTER_RUN_MAX, LETTER_RUN_MIN};
 
@@ -60,6 +60,9 @@ pub(super) fn encode_pattern(pattern: &Pattern) -> [u8; PATTERN_ROW_LEN] {
     row[PATTERN_SHARE_OFFSET..PATTERN_BOOKS_OFFSET]
         .copy_from_slice(&pattern.share_bp.to_le_bytes());
     row[PATTERN_BOOKS_OFFSET] = pattern.books;
+    if let Usual::ExactNeighbor { facing, .. } = pattern.usual {
+        row[PATTERN_FACING_OFFSET] = Facing::byte(facing);
+    }
     let (usual, usual_count, other_count) = usual_lanes(pattern);
     row[PATTERN_USUAL_OFFSET..PATTERN_USUAL_COUNT_OFFSET].copy_from_slice(&usual.to_le_bytes());
     row[PATTERN_USUAL_COUNT_OFFSET..PATTERN_OTHER_COUNT_OFFSET]
@@ -77,6 +80,7 @@ fn usual_lanes(pattern: &Pattern) -> (u32, u32, u32) {
             neighbor,
             count,
             reversed,
+            ..
         } => (neighbor.raw(), count, reversed),
         Usual::RunShape {
             pure,
@@ -104,10 +108,14 @@ fn read_usual(
     count: u32,
     other: u32,
     lookalike: bool,
+    facing: u8,
 ) -> Result<Usual, &'static str> {
     let unused = |lane: u32, field| if lane == 0 { Ok(()) } else { Err(field) };
     if lookalike && channel != Channel::Rarity {
         return Err("flags");
+    }
+    if facing != 0 && channel != Channel::ExactNeighbor {
+        return Err("facing");
     }
     let byte = u8::try_from(usual).map_err(|_| "usual");
     Ok(match channel {
@@ -120,6 +128,7 @@ fn read_usual(
             neighbor: ScalarKey::from_raw(usual).ok_or("usual")?,
             count,
             reversed: other,
+            facing: Facing::from_byte(facing).map_err(|_| "facing")?,
         },
         Channel::RunShape => {
             unused(other, "other_count")?;
@@ -170,8 +179,8 @@ fn read_usual(
     })
 }
 
-/// Refuses every row the encoder cannot have written: a reserved byte set, a
-/// channel or key outside its table, a band past the staircase, a share over
+/// Refuses every row the encoder cannot have written: a facing off
+/// `ExactNeighbor` or past its table, a channel or key outside its table, a band past the staircase, a share over
 /// 10,000 basis points, a dispersion outside `1..=book_count`.
 pub(super) fn decode_pattern(
     bytes: &[u8],
@@ -182,9 +191,6 @@ pub(super) fn decode_pattern(
     let flags = bytes[PATTERN_FLAGS_OFFSET];
     if flags & !PATTERN_LOOKALIKE != 0 {
         return Err(bad("flags"));
-    }
-    if bytes[PATTERN_RESERVED_OFFSET] != 0 {
-        return Err(bad("reserved"));
     }
     let glyph_raw = read_u32(bytes, PATTERN_GLYPH_OFFSET);
     let neighbor_raw = read_u32(bytes, PATTERN_NEIGHBOR_OFFSET);
@@ -315,6 +321,7 @@ pub(super) fn decode_pattern(
         read_u32(bytes, PATTERN_USUAL_COUNT_OFFSET),
         read_u32(bytes, PATTERN_OTHER_COUNT_OFFSET),
         flags & PATTERN_LOOKALIKE != 0,
+        bytes[PATTERN_FACING_OFFSET],
     )
     .map_err(bad)?;
     let pattern = Pattern {

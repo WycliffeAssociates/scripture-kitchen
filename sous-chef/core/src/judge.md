@@ -447,7 +447,7 @@ read from the same counts the row was judged on.
 
 ```text
 en_ulb   ',' prev=Space            1/54,723    usual=Letter 54,427
-en_ulb   ''' then '.'              3/496       usual='"' 416, reversed 974  (`.'`)
+en_ulb   ''' then '.'              3/496       usual='"' 416, reversed 974  (`.'`, Closing)
 en_ulb   '"' mixed len 4           4/12,014    usual=pure len 1 6,157
 en_ulb   '’' rarity                2/4,112,852 usual='"' 12,046  (the Quote pool)
 ```
@@ -455,7 +455,7 @@ en_ulb   '’' rarity                2/4,112,852 usual='"' 12,046  (the Quote po
 | channel | usual |
 | --- | --- |
 | `Placement` | the class most common on that side, `Edge` excluded |
-| `ExactNeighbor` | the most common in-run follower, and the row's pair reversed |
+| `ExactNeighbor` | the most common in-run follower, and the row's pair reversed, facing the same way |
 | `RunShape` | the glyph's most common shape |
 | `Rarity` | the most common other mark in the glyph's `Pool`; none for a letter, for `Pool::Other` (letters, spaces, unlisted marks), or an empty pool |
 | `Casing` | the word's most common form in the same free positions the row counts |
@@ -464,6 +464,39 @@ en_ulb   '’' rarity                2/4,112,852 usual='"' 12,046  (the Quote po
 Ties go to the smallest value. A word row's usual form is judged per key like
 the row itself, so a kept verdict keeps it too. The wire lanes:
 [`codec/README.md`](codec/README.md).
+
+### Facing: a straight quote's direction, from where it sits
+
+`"` and `'` (general category `Po` in `Pool::Quote`) do not say whether they
+open or close, so a reversed count across one mixes openings with closings.
+The run holding one records which way it faces (substrate.md), and the
+reversal compares like with like:
+
+```text
+en_ulb GEN 48:20   Manasseh'."⏎    Letter before, Edge after     Closing
+   ''' then '.'    3/496, all Closing                 facing Closing
+   '.' then '''    974 Closing                        reversed 974
+en_ulb NUM 21:14   \q "... Zahab   Edge before, Space after      Unknown
+en_ulb JER 3:19    "my Father".'⏎  Letter before, Edge after     Closing
+   '"' then '.'    2/129: 1 Unknown, 1 Closing        facing Unknown (a tie)
+   '.' then '"'    4,036 Closing, 1 Unknown           reversed 1
+```
+
+| before the run | after the run | facing |
+| --- | --- | --- |
+| letter or digit | space or edge | `Closing` |
+| space or edge | letter or digit | `Opening` |
+| letter | letter | `Inside` |
+| anything else | | `Unknown` |
+
+- **The row's facing is its pair's majority**, counted over the runs holding
+  the row's numerator. A tie is `Unknown`: split evidence names no direction.
+- **`reversed` counts only runs facing that way.** A pair with no
+  directionless quote has no facing and counts every reversal, as before.
+- **A listed cluster carries its own majority facing**, `None` when it holds
+  no directionless quote. RunShape recurrence still reads the atoms alone.
+- **The numerator does not move.** Facing says which reversal is comparable;
+  it is not a second key, so no row fires or goes silent because of it.
 
 ## `BookRate`: one book breaks from the rest
 

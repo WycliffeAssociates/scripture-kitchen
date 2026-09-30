@@ -183,11 +183,14 @@ pub enum Usual {
     /// The class most common on this side, `Edge` excluded, and its count.
     Placement { class: OuterClass, count: u32 },
     /// The scalar that most often follows the glyph in a run, its count, and
-    /// how often the row's pair occurs reversed.
+    /// how often the row's pair occurs reversed. A pair holding a directionless
+    /// quote carries the facing most of its occurrences have, and `reversed`
+    /// counts only runs facing the same way: `'.` closing against `.'` closing.
     ExactNeighbor {
         neighbor: ScalarKey,
         count: u32,
         reversed: u32,
+        facing: Option<Facing>,
     },
     /// The glyph's most common run shape and its runs.
     RunShape { pure: bool, bucket: u8, count: u32 },
@@ -303,7 +306,14 @@ impl Pattern {
             (Channel::Placement, Usual::Placement { class, count }) => {
                 class != OuterClass::Edge && within(count)
             }
-            (Channel::ExactNeighbor, Usual::ExactNeighbor { count, .. }) => within(count),
+            (Channel::ExactNeighbor, Usual::ExactNeighbor { count, facing, .. }) => {
+                let PatternKey::ExactNeighbor(neighbor) = self.key else {
+                    return false;
+                };
+                within(count)
+                    && facing.is_some()
+                        == (is_directionless(self.glyph) || is_directionless(neighbor))
+            }
             (Channel::RunShape, Usual::RunShape { bucket, count, .. }) => {
                 (1..=RUN_BUCKETS as u8).contains(&bucket) && within(count)
             }
@@ -365,6 +375,9 @@ pub struct Cluster {
     pub recurring: bool,
     /// The run was longer than [`Cluster::ATOMS`] atoms.
     pub truncated: bool,
+    /// The facing most of its occurrences have; `None` for a run holding no
+    /// directionless quote.
+    pub facing: Option<Facing>,
 }
 
 impl Cluster {
@@ -389,10 +402,14 @@ impl Cluster {
         if !stored {
             return false;
         }
+        let quoted = self.atoms.iter().any(|atom| is_directionless(*atom));
         if self.truncated {
-            return self.atoms.len() == Self::ATOMS && usize::from(bucket) == RUN_BUCKETS;
+            // The tail it lost may hold the quote a facing is about.
+            return self.atoms.len() == Self::ATOMS
+                && usize::from(bucket) == RUN_BUCKETS
+                && (self.facing.is_some() || !quoted);
         }
-        shape_of(&self.atoms, row.glyph) == Some((pure, bucket))
+        shape_of(&self.atoms, row.glyph) == Some((pure, bucket)) && self.facing.is_some() == quoted
     }
 }
 

@@ -87,7 +87,8 @@ Decoding refuses rather than guesses:
 | a convention reasons bit outside the table | `UnknownReasons` |
 | `SATURATED` on a convention row | `UnknownFlags` |
 | a convention `pattern_idx` at or past `pattern_count`, or a direct `pattern(index)` call past the table | `PatternIndexPastTable` |
-| a pattern row's reserved byte set, a `flags` bit other than `LOOKALIKE`, or `LOOKALIKE` on a row that is not `Rarity` or names no usual | `InvalidPattern` |
+| a `flags` bit other than `LOOKALIKE`, or `LOOKALIKE` on a row that is not `Rarity` or names no usual | `InvalidPattern` |
+| a facing byte on a row that is not `ExactNeighbor`, past `4`, or disagreeing with whether the pair holds a directionless quote | `InvalidPattern` |
 | a pattern channel, key, band, or share outside its table | `InvalidPattern` |
 | a `Casing` key byte of `Uncased` | `InvalidPattern` |
 | a `Doubled` key byte above 1 | `InvalidPattern` |
@@ -97,7 +98,7 @@ Decoding refuses rather than guesses:
 | a pattern `books` of zero on a row with a numerator, or past the header's `book_count` | `InvalidPattern` |
 | a `pattern_offset` that is not the running cursor | `PatternSectionOutOfOrder` |
 | a `cluster_offset` that is not the running cursor after the pattern table | `ClusterSectionOutOfOrder` |
-| a cluster naming a row past the table or not `RunShape`, atoms that cannot be its shape, flags outside `RECURRING \| TRUNCATED`, a zero count, or an entry out of order or the ninth of a row | `InvalidCluster` |
+| a cluster naming a row past the table or not `RunShape`, atoms that cannot be its shape, low flag bits outside `RECURRING \| TRUNCATED`, a facing past `4` or disagreeing with whether its atoms hold a directionless quote, a zero count, or an entry out of order or the ninth of a row | `InvalidCluster` |
 | a `terminal_offset` that is not the running cursor after the cluster section | `TerminalSectionOutOfOrder` |
 | a terminal entry whose glyph is no scalar, whose context or pad bits are set, whose `cased` is zero or below `upper`, or whose `(glyph, context)` is not strictly after the last | `InvalidTerminal` |
 | more than 65,535 patterns | `PatternCountOverflow` |
@@ -158,7 +159,7 @@ position matched — so ten thousand sites of one convention cost ten thousand
 | 16..20 | `denominator: u32` |
 | 20..22 | `share_bp: u16`, at most 10,000 |
 | 22 | `books: u8` — books holding part of the numerator; books-possible is the header's `book_count` |
-| 23 | reserved `u8` 0 (the decoder refuses nonzero) |
+| 23 | `facing: u8` — `ExactNeighbor` only: the pair's `Facing`, 0 when neither mark is a directionless quote, else 1 `Opening`, 2 `Closing`, 3 `Inside`, 4 `Unknown`; 0 on every other channel |
 | 24..28 | `usual: u32` — what is usual instead, per channel (below) |
 | 28..32 | `usual_count: u32` |
 | 32..36 | `other_count: u32` |
@@ -174,7 +175,7 @@ the channel's domain is `InvalidPattern`. Rust reads them as `Pattern::usual`
 | channel | `usual` | `usual_count` | `other_count` |
 | --- | --- | --- | --- |
 | `Placement` | the `OuterClass` most common on that side, `Edge` excluded | its count, at most the denominator | 0 |
-| `ExactNeighbor` | the scalar that most often follows the glyph in a run | its in-run positions, at most the denominator | the row's pair reversed (neighbour then glyph) in runs |
+| `ExactNeighbor` | the scalar that most often follows the glyph in a run | its in-run positions, at most the denominator | the row's pair reversed (neighbour then glyph) in runs, only runs facing the row's way when byte 23 names one |
 | `RunShape` | the glyph's most common shape as a key byte, `(pure << 4) \| bucket` | its runs, at most the denominator | 0 |
 | `Rarity` | with `LOOKALIKE`, the most common mark sharing the glyph's `confusables.txt` skeleton (`'` for `’`); else the most common other mark in the glyph's `Pool`. Never a letter, space, digit, or U+0000; 0 for a letter, for a mark with no lookalike in `Pool::Other` (letters, spaces and unlisted marks), or when neither holds anything else | its corpus count; 0 with a `usual` of 0 | 0 |
 | `Casing` | the word's most common `Form` in free positions, never `Uncased` | its count, at most the denominator | 0 |
@@ -182,13 +183,23 @@ the channel's domain is `InvalidPattern`. Rust reads them as `Pattern::usual`
 | every other channel | 0 | 0 | 0 |
 
 Ties go to the smallest value. `ExactNeighbor`'s `other_count` is the swap
-signal: `.»` against `».` says the period usually goes inside the quote. It is
-no signal when either mark is a directionless quote (`"`, `'`, general
-category `Po`): NUM 21:14's `"...` opens a quotation, and `."` ×4,038 closes
-one. The generated reader carries that list as `DIRECTIONLESS_QUOTES`, from
-`unicode::is_directionless_quote`, and derives `directionless` on an
-`ExactNeighbor` key (glyph or neighbour) and on a cluster (any atom); no byte
-carries it.
+signal: `.»` against `».` says the period usually goes inside the quote. A
+directionless quote (`"`, `'`, general category `Po`) cannot say which way it
+faces, so its position does, and byte 23 carries the answer
+(`../judge.md`, "Facing"):
+
+```text
+GEN 48:20  Manasseh'."   ''' then '.'  facing 2 Closing   other_count 974   `.'` Closing
+NUM 21:14  "... Zahab    '"' then '.'  facing 4 Unknown   other_count 1     one Closing, one Unknown: a tie
+```
+
+`other_count` counts only runs facing the way byte 23 says, so a Closing
+`'.` is compared with Closing `.'` and never with an opening one. The
+generated reader carries the list as `DIRECTIONLESS_QUOTES`, from
+`unicode::is_directionless_quote`, derives `directionless` on an
+`ExactNeighbor` key (glyph or neighbour) and on a cluster (any atom), and
+reads byte 23 as `usual.facing`, `null` exactly when `directionless` is
+false.
 
 A lookalike beats the pool: a reader who wrote `’` once meant `'`, not the
 project's most common quote, `"`. The skeletons are UTS #39 `confusables.txt`
@@ -281,7 +292,7 @@ which: `);`×8, `';`×7 and `";`×6 recur and are conventions, and `;'`×3 and
 | --- | --- |
 | 0..2 | `pattern: u16` — the `RunShape` row this run is of |
 | 2 | `atom_count: u8` — atoms stored, `1..=16` |
-| 3 | `flags: u8` — bit 0 `RECURRING` (the run occurs at least `support_floor` times, or its sequence with the sentence-ending marks read as one does), bit 1 `TRUNCATED` (the run was longer than 16 atoms) |
+| 3 | `flags: u8` — bit 0 `RECURRING` (the run occurs at least `support_floor` times, or its sequence with the sentence-ending marks read as one does), bit 1 `TRUNCATED` (the run was longer than 16 atoms), bits 4..8 the run's majority `Facing` byte (0 when it holds no directionless quote; a tie is 4 `Unknown`) |
 | 4..8 | `count: u32` — corpus occurrences of exactly this run |
 | 8.. | `atom_count` scalars, `u32` each |
 
@@ -292,7 +303,8 @@ wait, and either side lending the other what it leaves unused. The header's
 `cluster_offset` is the running cursor after the pattern table and
 `cluster_count` the number of entries. Rust reads them as
 `CorpusSnapshot::clusters`, the generated reader as `pattern.clusters` on a
-`RunShape` row only.
+`RunShape` row only, each with `facing` (`null` for a run holding no
+directionless quote).
 
 The section is a discriminated union the format enforces: an entry naming a
 row that is not `RunShape`, or naming one past the table, or out of order, is

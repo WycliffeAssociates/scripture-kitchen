@@ -21,7 +21,7 @@ Nothing borrows, nothing hashes, nothing carries a coordinate.
 | --- | --- | --- | --- | --- |
 | `scalars` | `ScalarKey` (a scalar, or the pooled `DIGITS`) | count | 8 | absolute rarity, the dense census, every denominator |
 | `pairs` | `(ScalarKey, prev outer, next outer)` | count | 12 | G0 placement, and G1 once conditioned by `runs` |
-| `runs` | the run's scalar sequence, digits excluded | count | 12 + 4/atom | run composition, G2/G3 neighbours inside a run |
+| `runs` | the run's scalar sequence, digits excluded, and its `Facing` when it holds a directionless quote | count | 16 + 4/atom | run composition, G2/G3 neighbours inside a run, which reversal is comparable |
 | `follows` | `FollowKey`: the last glyph that does not ride, and whether a quote or a closing bracket stood between | upper/lower/uncased | 16 | the terminal table the word channels read, and `Channel::SentenceStart` reading it the other way |
 | `hygiene` | — | one `HygieneFinding` per site | 16/site | hygiene's four scalar classes, with exact spans |
 | `verses` | `VerseKey` | grapheme count + the projected span | 20/verse | the target half of the source comparison ([`proportionality.md`](proportionality.md)) |
@@ -30,12 +30,12 @@ Nothing borrows, nothing hashes, nothing carries a coordinate.
 
 `size_of::<ChapterRow>()` is 160 B; the rest is what the seven lanes own.
 Measured over the committed tier (the ignored oracle in
-`tests/substrate_reference.rs` prints it): median **980 B**, p90 **1,288 B**,
-per-corpus medians 860 B (Spanish) to 1,652 B (Greek). The budget is 1.5 KB
-median, 2 KB p90. D1b's `hygiene` lane moved those by the 16 inline bytes and
-nothing else: the tier holds 11 sites in 7,607 chapters.
+`tests/substrate_reference.rs` prints it): median **1,020 B**, p90 **1,348 B**,
+per-corpus medians 884 B (Spanish) to 1,720 B (Greek). The budget is 1.5 KB
+median, 2 KB p90. The facing byte is most of the last 40 B of median: a run
+entry is 16 B, not 12, and a quoted sequence seen two ways is two entries.
 
-Four shapes are deliberate:
+Seven shapes are deliberate:
 
 - **Letters are counted.** A Hawaiian `z` has to be able to reach the rarity
   roster, so the census is dense. It is also the single biggest lane —
@@ -56,6 +56,19 @@ Four shapes are deliberate:
   glyph first. That is the claim [`sites.md`](sites.md)'s
   sentence-start rule has to reproduce exactly, since the count oracle
   compares the two.
+- **A run holding `"` or `'` records which way it faces.** The run's outer
+  context decides, so no language is named:
+
+  ```text
+  Manasseh'."⏎    Letter · Edge      Closing
+  "...Zahab       Space · Letter     Opening
+  don't           Letter · Letter    Inside
+  \q "... Zahab   Edge · Space       Unknown
+  ```
+
+  One sequence seen with two facings is two entries that share their atoms.
+  A chapter edge reads `Edge`, the way a run never straddles a seam, so the
+  fold merges runs by sequence and facing and resolves nothing.
 - **`run_lengths` is derived, not stored.** The rule wants each glyph's own
   run history; the run *sequences* already carry it exactly, so
   `ChapterRow::run_lengths()` decomposes them on read rather than the row

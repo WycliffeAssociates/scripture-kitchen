@@ -225,6 +225,86 @@ pub fn ride_of(scalar: char) -> Ride {
     }
 }
 
+/// Which way a run holding a directionless quote faces, read off the run's
+/// outer context.
+///
+/// ```text
+/// Manasseh'."⏎      Letter before, Edge after     → Closing
+/// said, "...Waheb   Space before, Letter after    → Opening
+/// don't             Letter both sides             → Inside
+/// 5". or ".(        anything else                 → Unknown
+/// ```
+///
+/// A `"` or `'` cannot say whether it opens or closes, so its position does.
+/// A run holding no directionless quote has no facing. The walk reads a
+/// chapter edge as `Edge`, the way a run never straddles a seam.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(u8)]
+pub enum Facing {
+    Opening = 1,
+    Closing = 2,
+    Inside = 3,
+    Unknown = 4,
+}
+
+impl Facing {
+    pub const COUNT: usize = 4;
+
+    pub const ALL: [Self; Self::COUNT] =
+        [Self::Opening, Self::Closing, Self::Inside, Self::Unknown];
+
+    pub const fn of(prev: OuterClass, next: OuterClass) -> Self {
+        use OuterClass::{Digit, Edge, Letter, Space};
+        match (prev, next) {
+            (Letter, Letter) => Self::Inside,
+            (Letter | Digit, Space | Edge) => Self::Closing,
+            (Space | Edge, Letter | Digit) => Self::Opening,
+            _ => Self::Unknown,
+        }
+    }
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Opening => "Opening",
+            Self::Closing => "Closing",
+            Self::Inside => "Inside",
+            Self::Unknown => "Unknown",
+        }
+    }
+
+    /// The wire byte: 0 for no facing, else the discriminant.
+    pub const fn byte(facing: Option<Self>) -> u8 {
+        match facing {
+            Some(facing) => facing as u8,
+            None => 0,
+        }
+    }
+
+    /// The inverse of [`Self::byte`]; the byte back as `Err` past the table.
+    pub const fn from_byte(byte: u8) -> Result<Option<Self>, u8> {
+        match byte {
+            0 => Ok(None),
+            1 => Ok(Some(Self::Opening)),
+            2 => Ok(Some(Self::Closing)),
+            3 => Ok(Some(Self::Inside)),
+            4 => Ok(Some(Self::Unknown)),
+            _ => Err(byte),
+        }
+    }
+
+    /// Position in [`Self::ALL`].
+    pub const fn index(self) -> usize {
+        self as usize - 1
+    }
+}
+
+/// Whether a run atom is a directionless quote, the atoms a run's facing is
+/// asked about.
+pub fn is_directionless(key: ScalarKey) -> bool {
+    key.scalar()
+        .is_some_and(crate::unicode::is_directionless_quote)
+}
+
 /// One G0 pair triple: a nonletter and the outer class either side of it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PairKey {
@@ -514,8 +594,8 @@ impl Edge {
 pub struct ChapterRow {
     scalars: Box<[(ScalarKey, u32)]>,
     pairs: Box<[(PairKey, u32)]>,
-    /// `(offset into run_atoms, length, count)`, sorted by the sequence.
-    runs: Box<[(u32, u32, u32)]>,
+    /// Sorted by the sequence, then facing.
+    runs: Box<[RunSpan]>,
     run_atoms: Box<[ScalarKey]>,
     follows: Box<[(FollowKey, FollowCounts)]>,
     hygiene: Box<[HygieneFinding]>,
@@ -539,11 +619,22 @@ impl ChapterRow {
         &self.pairs
     }
 
-    /// Maximal nonletter runs by scalar sequence, sorted by that sequence.
+    /// Maximal nonletter runs by scalar sequence, sorted by that sequence. A
+    /// sequence holding a directionless quote comes once per facing it was
+    /// seen with ([`Self::faced_runs`]).
     pub fn runs(&self) -> impl ExactSizeIterator<Item = (&[ScalarKey], u32)> {
-        self.runs
-            .iter()
-            .map(|&(at, len, count)| (&self.run_atoms[at as usize..][..len as usize], count))
+        self.faced_runs().map(|(atoms, _, count)| (atoms, count))
+    }
+
+    /// [`Self::runs`] with each entry's facing, sorted by sequence then facing.
+    pub fn faced_runs(&self) -> impl ExactSizeIterator<Item = (&[ScalarKey], Option<Facing>, u32)> {
+        self.runs.iter().map(|run| {
+            (
+                &self.run_atoms[run.at as usize..][..run.len as usize],
+                run.facing,
+                run.count,
+            )
+        })
     }
 
     /// Same-glyph continuation lengths, derived from [`Self::runs`] — the run
@@ -604,6 +695,16 @@ impl ChapterRow {
     }
 }
 
+/// One distinct `(sequence, facing)` in a chapter: where its atoms sit in
+/// `run_atoms`, and how often it occurs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RunSpan {
+    pub(crate) at: u32,
+    pub(crate) len: u32,
+    pub(crate) count: u32,
+    pub(crate) facing: Option<Facing>,
+}
+
 /// Adds one run's same-glyph continuations into an unsorted tally.
 fn tally_run_lengths(atoms: &[ScalarKey], count: u32, out: &mut Vec<(ScalarKey, RunLengths)>) {
     let mut at = 0;
@@ -636,7 +737,7 @@ impl ChapterPass for Substrate {
     type Observation = ChapterRow;
     type Aggregate = BookAggregate;
     type Config = JudgingConfig;
-    const SCHEMA: SchemaStamp = SchemaStamp::new(6);
+    const SCHEMA: SchemaStamp = SchemaStamp::new(7);
 
     fn map(&self, chapter: ChapterInput<'_>) -> ChapterRow {
         walk::walk(chapter.text, chapter.verses)
@@ -748,7 +849,7 @@ impl ChapterPass for Substrate {
 pub struct BookAggregate {
     scalars: Vec<(ScalarKey, u32)>,
     pairs: Vec<(PairKey, u32)>,
-    runs: Vec<(Box<[ScalarKey]>, u32)>,
+    runs: Vec<(Box<[ScalarKey]>, Option<Facing>, u32)>,
     follows: Vec<(FollowKey, FollowCounts)>,
     hygiene: Vec<HygieneFinding>,
     /// Every chapter's verse rows in order, rebased into book coordinates.
@@ -767,8 +868,15 @@ impl BookAggregate {
         &self.pairs
     }
 
+    /// One entry per `(sequence, facing)`, as [`ChapterRow::runs`].
     pub fn runs(&self) -> impl ExactSizeIterator<Item = (&[ScalarKey], u32)> {
-        self.runs.iter().map(|(atoms, count)| (&**atoms, *count))
+        self.runs.iter().map(|(atoms, _, count)| (&**atoms, *count))
+    }
+
+    pub fn faced_runs(&self) -> impl ExactSizeIterator<Item = (&[ScalarKey], Option<Facing>, u32)> {
+        self.runs
+            .iter()
+            .map(|(atoms, facing, count)| (&**atoms, *facing, *count))
     }
 
     /// Same-glyph continuation lengths over the book, derived from the runs.
@@ -818,7 +926,7 @@ impl BookAggregate {
             + self
                 .runs
                 .iter()
-                .map(|(atoms, _)| size_of_val(&**atoms))
+                .map(|(atoms, _, _)| size_of_val(&**atoms))
                 .sum::<usize>()
             + size_of_val(&*self.follows)
             + size_of_val(&*self.hygiene)

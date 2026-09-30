@@ -6,8 +6,8 @@
 //! ```
 
 use super::{
-    BookAggregate, ChapterObs, ChapterRow, Edge, FollowCounts, FollowKey, OuterClass, PairKey,
-    ScalarKey,
+    BookAggregate, ChapterObs, ChapterRow, Edge, Facing, FollowCounts, FollowKey, OuterClass,
+    PairKey, ScalarKey,
 };
 
 /// Merges one book's rows in order, resolving each chapter seam against the
@@ -206,32 +206,32 @@ fn merge_follows(
     std::mem::swap(dst, scratch);
 }
 
-fn merge_runs(
-    dst: &mut Vec<(Box<[ScalarKey]>, u32)>,
-    row: &ChapterRow,
-    scratch: &mut Vec<(Box<[ScalarKey]>, u32)>,
-) {
+type BookRun = (Box<[ScalarKey]>, Option<Facing>, u32);
+
+fn merge_runs(dst: &mut Vec<BookRun>, row: &ChapterRow, scratch: &mut Vec<BookRun>) {
     if row.runs.is_empty() {
         return;
     }
     scratch.clear();
     let mut left = 0;
-    let mut src = row.runs();
+    let mut src = row.faced_runs();
     let mut next = src.next();
     while left < dst.len() {
-        let Some((atoms, count)) = next else { break };
-        match dst[left].0.as_ref().cmp(atoms) {
+        let Some((atoms, facing, count)) = next else {
+            break;
+        };
+        match (dst[left].0.as_ref(), dst[left].1).cmp(&(atoms, facing)) {
             std::cmp::Ordering::Less => {
                 scratch.push(std::mem::take(&mut dst[left]));
                 left += 1;
             }
             std::cmp::Ordering::Greater => {
-                scratch.push((atoms.into(), count));
+                scratch.push((atoms.into(), facing, count));
                 next = src.next();
             }
             std::cmp::Ordering::Equal => {
                 let mut held = std::mem::take(&mut dst[left]);
-                held.1 += count;
+                held.2 += count;
                 scratch.push(held);
                 left += 1;
                 next = src.next();
@@ -241,8 +241,8 @@ fn merge_runs(
     for entry in &mut dst[left..] {
         scratch.push(std::mem::take(entry));
     }
-    while let Some((atoms, count)) = next {
-        scratch.push((atoms.into(), count));
+    while let Some((atoms, facing, count)) = next {
+        scratch.push((atoms.into(), facing, count));
         next = src.next();
     }
     std::mem::swap(dst, scratch);

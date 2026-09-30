@@ -47,7 +47,9 @@ pub const PATTERN_SHARE_OFFSET: usize = 20;
 /// Books whose counts hold part of the numerator; books-possible is the
 /// header's `book_count`.
 pub const PATTERN_BOOKS_OFFSET: usize = 22;
-pub const PATTERN_RESERVED_OFFSET: usize = 23;
+/// `ExactNeighbor` only: the pair's [`Facing`](crate::Facing) byte, 0 when
+/// it holds no directionless quote. Every other channel writes 0.
+pub const PATTERN_FACING_OFFSET: usize = 23;
 /// What is usual instead, per channel: codec/README.md.
 pub const PATTERN_USUAL_OFFSET: usize = 24;
 pub const PATTERN_USUAL_COUNT_OFFSET: usize = 28;
@@ -64,6 +66,8 @@ pub const CLUSTER_FLAGS_OFFSET: usize = 3;
 pub const CLUSTER_COUNT_OFFSET: usize = 4;
 pub const CLUSTER_RECURRING: u8 = 1 << 0;
 pub const CLUSTER_TRUNCATED: u8 = 1 << 1;
+/// The flags byte's high nibble is the run's [`Facing`](crate::Facing) byte.
+pub const CLUSTER_FACING_SHIFT: u8 = 4;
 /// One terminal entry: what the corpus hands off to after one mark in one
 /// context.
 pub const TERMINAL_ENTRY_BYTES: usize = 16;

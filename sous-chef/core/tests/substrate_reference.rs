@@ -17,10 +17,10 @@ use std::path::{Path, PathBuf};
 
 use mise::unicode::{class_of, is_glue};
 use sous_core::substrate::{
-    Case, ChapterRow, Edge, FollowKey, OuterClass, PairKey, RUN_BUCKETS, RunLengths, ScalarKey,
-    Substrate,
+    Case, ChapterRow, Edge, Facing, FollowKey, OuterClass, PairKey, RUN_BUCKETS, RunLengths,
+    ScalarKey, Substrate,
 };
-use sous_core::unicode::{Pool, closes, pool_of};
+use sous_core::unicode::{Pool, closes, is_directionless_quote, pool_of};
 use sous_core::{BookKey, ChapterInput, ChapterKey, ChapterPass};
 
 const CORPORA: &[&str] = &[
@@ -40,7 +40,7 @@ const CORPORA: &[&str] = &[
 struct Reference {
     scalars: BTreeMap<ScalarKey, u32>,
     pairs: BTreeMap<PairKey, u32>,
-    runs: BTreeMap<Vec<ScalarKey>, u32>,
+    runs: BTreeMap<(Vec<ScalarKey>, Option<Facing>), u32>,
     run_lengths: BTreeMap<ScalarKey, RunLengths>,
     follows: BTreeMap<FollowKey, [u32; 3]>,
     lead: RefEdge,
@@ -171,6 +171,28 @@ fn word_member(c: char) -> bool {
     class.is_alphabetic() || is_glue(c) || class.is_decimal_digit()
 }
 
+/// Which way a run holding `"` or `'` faces, from what stands either side.
+fn facing(chars: &[char], start: usize, end: usize) -> Option<Facing> {
+    if !chars[start..end].iter().any(|c| is_directionless_quote(*c)) {
+        return None;
+    }
+    let before = outer(start.checked_sub(1).map(|at| chars[at]));
+    let after = outer(chars.get(end).copied());
+    let word = |class| matches!(class, OuterClass::Letter | OuterClass::Digit);
+    let gap = |class| matches!(class, OuterClass::Space | OuterClass::Edge);
+    Some(
+        if before == OuterClass::Letter && after == OuterClass::Letter {
+            Facing::Inside
+        } else if word(before) && gap(after) {
+            Facing::Closing
+        } else if gap(before) && word(after) {
+            Facing::Opening
+        } else {
+            Facing::Unknown
+        },
+    )
+}
+
 /// Every maximal run of run atoms as `(start index, scalars)`.
 fn runs_of(chars: &[char]) -> Vec<(usize, Vec<ScalarKey>)> {
     let mut out = Vec::new();
@@ -217,8 +239,9 @@ fn reference(text: &str) -> Reference {
     }
 
     let runs = runs_of(&chars);
-    for (_, run) in &runs {
-        *out.runs.entry(run.clone()).or_default() += 1;
+    for (start, run) in &runs {
+        let facing = facing(&chars, *start, start + run.len());
+        *out.runs.entry((run.clone(), facing)).or_default() += 1;
         let mut at = 0;
         while at < run.len() {
             let mut end = at + 1;
@@ -301,8 +324,8 @@ fn observed(row: &ChapterRow) -> Reference {
         scalars: row.scalars().iter().copied().collect(),
         pairs: row.pairs().iter().copied().collect(),
         runs: row
-            .runs()
-            .map(|(atoms, count)| (atoms.to_vec(), count))
+            .faced_runs()
+            .map(|(atoms, facing, count)| ((atoms.to_vec(), facing), count))
             .collect(),
         run_lengths: row.run_lengths().into_iter().collect(),
         follows: row
@@ -384,6 +407,7 @@ const SAMPLE: &[&str] = &[
     " \u{201C}(Lead, \u{201C} (b",
     "\u{201D} \u{29}",
     "a, \u{201C}B.\u{201D} c",
+    "said, \"go.\" who'. \"...x don't 5\".\n.' 'a' \u{ff02}b\u{ff02}",
 ];
 
 #[test]

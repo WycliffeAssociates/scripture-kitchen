@@ -271,7 +271,7 @@ test("decodes the pattern table the judge published", () => {
       denominator: 403,
       shareBp: 74,
       books: 1,
-      usual: { kind: "ExactNeighbor", neighbor: 0x22, count: 380, reversed: 2 },
+      usual: { kind: "ExactNeighbor", neighbor: 0x22, count: 380, reversed: 2, facing: null },
     },
     {
       glyph: 0x3f,
@@ -295,8 +295,8 @@ test("decodes the pattern table the judge published", () => {
       books: 1,
       usual: { kind: "RunShape", pure: true, bucket: 1, count: 598 },
       clusters: [
-        { text: ",'\"'", count: 7, recurring: true, truncated: false, directionless: true },
-        { text: ",..,", count: 1, recurring: false, truncated: false, directionless: false },
+        { text: ",'\"'", count: 7, recurring: true, truncated: false, directionless: true, facing: "Closing" },
+        { text: ",..,", count: 1, recurring: false, truncated: false, directionless: false, facing: null },
       ],
     },
     {
@@ -390,7 +390,7 @@ test("decodes the pattern table the judge published", () => {
   const start = FIRST_RECORD;
   for (const [offset, byte] of [
     [11, 2],   // flags: past the lookalike bit
-    [23, 1],   // reserved
+    [23, 1],   // facing: on a Rarity row
     [8, 11],   // channel: past the table
     [10, 0],   // band: a step on a Rarity row
     [9, 1],    // key: a nonzero key on a Rarity row
@@ -409,6 +409,13 @@ test("decodes the pattern table the judge published", () => {
   new DataView(flaggedNone.buffer).setUint32(start + PATTERN_USUAL_OFFSET, 0, true);
   new DataView(flaggedNone.buffer).setUint32(start + PATTERN_USUAL_COUNT_OFFSET, 0, true);
   expectOpenFailure(flaggedNone);
+  // A facing belongs to a pair holding a directionless quote, and stays in
+  // its table.
+  for (const byte of [1, 5]) {
+    const faced = hexFixture("corpus_v2_hygiene.hex");
+    faced[start + PATTERN_ROW_LEN + 23] = byte;
+    expectOpenFailure(faced);
+  }
   // Channel 1 is a live channel; its key byte is a POOLS index.
   const badPool = hexFixture("corpus_v2_hygiene.hex");
   badPool[start + 2 * PATTERN_ROW_LEN + 9] = POOLS.length;
@@ -450,6 +457,9 @@ test("lists a RunShape row's clusters and refuses one the encoder cannot write",
     [FIRST_CLUSTER + CLUSTER_PATTERN_OFFSET, 11],   // past the table
     [FIRST_CLUSTER + CLUSTER_FLAGS_OFFSET, 4],      // an unknown flag
     [FIRST_CLUSTER + CLUSTER_FLAGS_OFFSET, 3],      // truncated, with four atoms
+    [FIRST_CLUSTER + CLUSTER_FLAGS_OFFSET, 0x51],   // a facing past the table
+    [FIRST_CLUSTER + CLUSTER_FLAGS_OFFSET, 1],      // a quoted run with no facing
+    [second + CLUSTER_FLAGS_OFFSET, 0x10],          // an unquoted run with one
     [second + CLUSTER_COUNT_OFFSET, 0xff],          // counts must descend
     [HEADER_CLUSTER_OFFSET_OFFSET, 0xff],           // the section moved
   ]) {

@@ -52,7 +52,7 @@ pub use proportionality::{
 pub use sites::Site;
 pub use source_copy::{SourceCopyRow, SourceWords};
 pub use substrate::{
-    BookAggregate, Case, ChapterRow, Edge, FollowCounts, FollowKey, OuterClass, PairKey,
+    BookAggregate, Case, ChapterRow, Edge, Facing, FollowCounts, FollowKey, OuterClass, PairKey,
     RUN_BUCKETS, RunLengths, ScalarKey, Substrate, VerseLength,
 };
 pub use words::{

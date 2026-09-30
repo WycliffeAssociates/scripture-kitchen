@@ -54,7 +54,7 @@ export const PATTERN_DENOMINATOR_OFFSET = @@PATTERN_DENOMINATOR_OFFSET@@;
 export const PATTERN_SHARE_OFFSET = @@PATTERN_SHARE_OFFSET@@;
 /** Books whose counts hold part of the numerator; books-possible is `bookCount`. */
 export const PATTERN_BOOKS_OFFSET = @@PATTERN_BOOKS_OFFSET@@;
-export const PATTERN_RESERVED_OFFSET = @@PATTERN_RESERVED_OFFSET@@;
+export const PATTERN_FACING_OFFSET = @@PATTERN_FACING_OFFSET@@;
 /** What is usual instead: three lanes whose meaning each channel owns. */
 export const PATTERN_USUAL_OFFSET = @@PATTERN_USUAL_OFFSET@@;
 export const PATTERN_USUAL_COUNT_OFFSET = @@PATTERN_USUAL_COUNT_OFFSET@@;
@@ -75,6 +75,7 @@ export const CLUSTER_FLAGS_OFFSET = @@CLUSTER_FLAGS_OFFSET@@;
 export const CLUSTER_COUNT_OFFSET = @@CLUSTER_COUNT_OFFSET@@;
 export const CLUSTER_RECURRING = @@CLUSTER_RECURRING@@;
 export const CLUSTER_TRUNCATED = @@CLUSTER_TRUNCATED@@;
+export const CLUSTER_FACING_SHIFT = @@CLUSTER_FACING_SHIFT@@;
 /** Atoms one cluster keeps, and clusters one `RunShape` row lists. */
 export const CLUSTER_ATOMS = @@CLUSTER_ATOMS@@;
 export const CLUSTERS_PER_ROW = @@CLUSTERS_PER_ROW@@;
@@ -192,6 +193,20 @@ export function isDirectionlessQuote(scalar: number): boolean {
   return DIRECTIONLESS_QUOTES.includes(scalar);
 }
 
+/** Which way a run holding a directionless quote faces, read off what stands
+ * either side of the run: a letter or digit before it and a space or line
+ * edge after is `Closing` (`Manasseh'."`), the reverse is `Opening`
+ * (`"...Waheb`), letters on both sides is `Inside` (`don't`), and anything
+ * else is `Unknown`. A facing byte of 0 means no directionless quote; byte
+ * `k` names `FACINGS[k - 1]`. */
+export const FACINGS = [@@FACINGS@@] as const;
+export type Facing = (typeof FACINGS)[number];
+
+/** A facing byte, `null` for 0, `undefined` past the table. */
+function readFacing(byte: number): Facing | null | undefined {
+  return byte === 0 ? null : FACINGS[byte - 1];
+}
+
 /** The run lengths a `LetterRun` key byte may name; the last one saturates. */
 export const LETTER_RUN_MIN = @@LETTER_RUN_MIN@@;
 export const LETTER_RUN_MAX = @@LETTER_RUN_MAX@@;
@@ -218,12 +233,16 @@ export type Usual =
   /** The class most common on this side, `Edge` excluded. */
   | { readonly kind: "Placement"; readonly class: OuterClass; readonly count: number }
   /** The scalar that most often follows the glyph in a run, and how often the
-   * row's own pair occurs the other way round. */
+   * row's own pair occurs the other way round. A pair holding a directionless
+   * quote carries the facing most of its occurrences have, and `reversed`
+   * counts only runs facing the same way (`'.` Closing against `.'` Closing);
+   * `facing` is `null` exactly when neither mark is a directionless quote. */
   | {
       readonly kind: "ExactNeighbor";
       readonly neighbor: number;
       readonly count: number;
       readonly reversed: number;
+      readonly facing: Facing | null;
     }
   /** The glyph's most common run shape. */
   | { readonly kind: "RunShape"; readonly pure: boolean; readonly bucket: number; readonly count: number }
@@ -247,6 +266,9 @@ export interface Cluster {
   readonly truncated: boolean;
   /** It holds a directionless quote. */
   readonly directionless: boolean;
+  /** The facing most of its occurrences have; `null` exactly when it holds
+   * no directionless quote. */
+  readonly facing: Facing | null;
 }
 
 /** Where a word stands after a mark: whether a quote, or a closing bracket,
@@ -399,12 +421,19 @@ function readUsual(
   count: number,
   other: number,
   lookalike: boolean,
+  facing: number,
+  directionless: boolean,
 ): Usual | null {
   if (lookalike && channel !== "Rarity") {
     return null;
   }
   if (channel === "ExactNeighbor") {
-    return isScalar(usual) && count <= denominator ? { kind: "ExactNeighbor", neighbor: usual, count, reversed: other } : null;
+    const faced = readFacing(facing);
+    const valid = isScalar(usual) && count <= denominator && faced !== undefined && (faced !== null) === directionless;
+    return valid ? { kind: "ExactNeighbor", neighbor: usual, count, reversed: other, facing: faced } : null;
+  }
+  if (facing !== 0) {
+    return null;
   }
   // `other` is the book, which the key already read.
   if (channel === "BookRate") {
@@ -443,9 +472,6 @@ function readPattern(view: DataView, at: number, row: number, bookCount: number)
   const flags = view.getUint8(at + PATTERN_FLAGS_OFFSET);
   if ((flags & ~PATTERN_LOOKALIKE) !== 0) {
     return fail(`pattern row ${row} has an invalid flags`);
-  }
-  if (view.getUint8(at + PATTERN_RESERVED_OFFSET) !== 0) {
-    return fail(`pattern row ${row} has an invalid reserved`);
   }
   const rawGlyph = u32(view, at + PATTERN_GLYPH_OFFSET);
   const neighbor = u32(view, at + PATTERN_NEIGHBOR_OFFSET);
@@ -583,6 +609,8 @@ function readPattern(view: DataView, at: number, row: number, bookCount: number)
     u32(view, at + PATTERN_USUAL_COUNT_OFFSET),
     u32(view, at + PATTERN_OTHER_COUNT_OFFSET),
     (flags & PATTERN_LOOKALIKE) !== 0,
+    view.getUint8(at + PATTERN_FACING_OFFSET),
+    key.kind === "ExactNeighbor" && key.directionless,
   );
   if (usual === null) {
     return fail(`pattern row ${row} has an invalid usual`);
@@ -631,8 +659,12 @@ function readClusterSection(
     if (end > view.byteLength) {
       return bad("length");
     }
-    if ((flags & ~(CLUSTER_RECURRING | CLUSTER_TRUNCATED)) !== 0) {
+    if ((flags & ((1 << CLUSTER_FACING_SHIFT) - 1) & ~(CLUSTER_RECURRING | CLUSTER_TRUNCATED)) !== 0) {
       return bad("flags");
+    }
+    const facing = readFacing(flags >> CLUSTER_FACING_SHIFT);
+    if (facing === undefined) {
+      return bad("facing");
     }
     const scalars: number[] = [];
     for (let atom = 0; atom < atoms; atom += 1) {
@@ -654,12 +686,14 @@ function readClusterSection(
     const [pure, bucket] = [key >> 4 === 1, key & 0x0f];
     const stored =
       atoms > 0 && atoms <= CLUSTER_ATOMS && occurrences > 0 && scalars.every((atom) => atom !== PATTERN_DIGIT_GLYPH);
+    const quoted = scalars.some(isDirectionlessQuote);
     const shaped =
       (flags & CLUSTER_TRUNCATED) !== 0
-        ? atoms === CLUSTER_ATOMS && bucket === RUN_BUCKETS
+        ? atoms === CLUSTER_ATOMS && bucket === RUN_BUCKETS && (facing !== null || !quoted)
         : scalars.includes(glyph) &&
           scalars.every((atom) => atom === glyph) === pure &&
-          Math.min(atoms, RUN_BUCKETS) === bucket;
+          Math.min(atoms, RUN_BUCKETS) === bucket &&
+          (facing !== null) === quoted;
     if (!stored || !shaped) {
       return bad("atoms");
     }
@@ -691,6 +725,7 @@ function readCluster(view: DataView, entry: ClusterEntry): Cluster {
     recurring: (flags & CLUSTER_RECURRING) !== 0,
     truncated: (flags & CLUSTER_TRUNCATED) !== 0,
     directionless: scalars.some(isDirectionlessQuote),
+    facing: readFacing(flags >> CLUSTER_FACING_SHIFT) ?? null,
   };
 }
 

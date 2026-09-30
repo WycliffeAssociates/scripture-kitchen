@@ -18,7 +18,7 @@ use crate::words::{Form, LETTER_RUN_MAX, LETTER_RUN_MIN};
 
 /// Render the checked-in TypeScript reader from the Rust-owned wire schema.
 pub fn generated_reader_ts() -> String {
-    let substitutions: [(&str, String); 81] = [
+    let substitutions: [(&str, String); 83] = [
         ("@@MAGIC@@", format!("0x{MAGIC:08x}")),
         ("@@FORMAT_VERSION@@", FORMAT_VERSION.to_string()),
         ("@@FLAG_UTF16@@", FLAG_UTF16.to_string()),
@@ -122,6 +122,7 @@ pub fn generated_reader_ts() -> String {
         ("@@CLUSTER_COUNT_OFFSET@@", CLUSTER_COUNT_OFFSET.to_string()),
         ("@@CLUSTER_RECURRING@@", CLUSTER_RECURRING.to_string()),
         ("@@CLUSTER_TRUNCATED@@", CLUSTER_TRUNCATED.to_string()),
+        ("@@CLUSTER_FACING_SHIFT@@", CLUSTER_FACING_SHIFT.to_string()),
         ("@@CLUSTER_ATOMS@@", Cluster::ATOMS.to_string()),
         ("@@CLUSTERS_PER_ROW@@", Cluster::PER_ROW.to_string()),
         ("@@PATTERN_ROW_LEN@@", PATTERN_ROW_LEN.to_string()),
@@ -149,8 +150,8 @@ pub fn generated_reader_ts() -> String {
         ("@@PATTERN_SHARE_OFFSET@@", PATTERN_SHARE_OFFSET.to_string()),
         ("@@PATTERN_BOOKS_OFFSET@@", PATTERN_BOOKS_OFFSET.to_string()),
         (
-            "@@PATTERN_RESERVED_OFFSET@@",
-            PATTERN_RESERVED_OFFSET.to_string(),
+            "@@PATTERN_FACING_OFFSET@@",
+            PATTERN_FACING_OFFSET.to_string(),
         ),
         ("@@PATTERN_USUAL_OFFSET@@", PATTERN_USUAL_OFFSET.to_string()),
         (
@@ -197,6 +198,14 @@ pub fn generated_reader_ts() -> String {
             OuterClass::ALL
                 .iter()
                 .map(|class| format!("\"{}\"", class.name()))
+                .collect::<Vec<_>>()
+                .join(", "),
+        ),
+        (
+            "@@FACINGS@@",
+            crate::substrate::Facing::ALL
+                .iter()
+                .map(|facing| format!("\"{}\"", facing.name()))
                 .collect::<Vec<_>>()
                 .join(", "),
         ),

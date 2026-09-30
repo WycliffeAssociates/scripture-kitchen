@@ -2,13 +2,13 @@
 //! codec/README.md.
 //!
 //! ```text
-//! Cluster { pattern: 3, atoms: ."'", count: 27, recurring: true }
-//!   → 03 00 · 03 · 01 · 1b 00 00 00 · 2e 00 00 00 · 22 00 00 00 · 27 00 00 00
+//! Cluster { pattern: 3, atoms: ."'", count: 27, recurring: true, facing: Closing }
+//!   → 03 00 · 03 · 21 · 1b 00 00 00 · 2e 00 00 00 · 22 00 00 00 · 27 00 00 00
 //! ```
 
 use super::*;
 use crate::judge::{Cluster, Pattern, PatternIndex};
-use crate::substrate::ScalarKey;
+use crate::substrate::{Facing, ScalarKey};
 
 /// Bytes one entry takes on the wire.
 pub(super) fn entry_len(cluster: &Cluster) -> usize {
@@ -25,6 +25,7 @@ pub(super) fn encode_cluster(cluster: &Cluster, out: &mut Vec<u8>) {
     if cluster.truncated {
         flags |= CLUSTER_TRUNCATED;
     }
+    flags |= Facing::byte(cluster.facing) << CLUSTER_FACING_SHIFT;
     out.push(flags);
     out.extend_from_slice(&cluster.count.to_le_bytes());
     for atom in &cluster.atoms {
@@ -48,9 +49,11 @@ pub(super) fn decode_cluster(
         return Err(bad("length"));
     }
     let flags = bytes[at + CLUSTER_FLAGS_OFFSET];
-    if flags & !(CLUSTER_RECURRING | CLUSTER_TRUNCATED) != 0 {
+    let low = flags & ((1 << CLUSTER_FACING_SHIFT) - 1);
+    if low & !(CLUSTER_RECURRING | CLUSTER_TRUNCATED) != 0 {
         return Err(bad("flags"));
     }
+    let facing = Facing::from_byte(flags >> CLUSTER_FACING_SHIFT).map_err(|_| bad("facing"))?;
     let atoms = (0..atoms)
         .map(|index| {
             ScalarKey::from_raw(read_u32(bytes, at + CLUSTER_ENTRY_BYTES + 4 * index))
@@ -66,6 +69,7 @@ pub(super) fn decode_cluster(
         count: read_u32(bytes, at + CLUSTER_COUNT_OFFSET),
         recurring: flags & CLUSTER_RECURRING != 0,
         truncated: flags & CLUSTER_TRUNCATED != 0,
+        facing,
     };
     Ok((cluster, end))
 }

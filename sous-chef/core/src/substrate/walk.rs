@@ -9,8 +9,8 @@
 use rustc_hash::FxHashMap;
 
 use super::{
-    Case, ChapterRow, Edge, FollowCounts, FollowKey, OuterClass, PairKey, Ride, ScalarKey,
-    VerseLength, is_nonletter, is_run_atom, ride_of,
+    Case, ChapterRow, Edge, Facing, FollowCounts, FollowKey, OuterClass, PairKey, Ride, RunSpan,
+    ScalarKey, VerseLength, is_directionless, is_nonletter, is_run_atom, ride_of,
 };
 use crate::Verse;
 use crate::hygiene::{NBSP, SUSPECT, ScalarSites};
@@ -39,6 +39,8 @@ struct Slot {
     follows: [FollowCounts; FollowKey::CONTEXTS],
     /// What the atom does to the handoff chain.
     ride: Ride,
+    /// A `"` or `'`, so the run holding it records a facing.
+    directionless: bool,
 }
 
 /// The per-scalar state, kept in a local the counters cannot alias.
@@ -107,7 +109,12 @@ struct Counters {
     nonletter_digits: u32,
     slots: Vec<Slot>,
     run_atoms: Vec<u32>,
-    run_spans: Vec<(u32, u32)>,
+    /// `(start, length, facing)` per run, in text order.
+    run_spans: Vec<(u32, u32, Option<Facing>)>,
+    /// The outer class before the open run.
+    run_prev: OuterClass,
+    /// The open run holds a directionless quote.
+    run_directionless: bool,
     lead: Edge,
     trail_pair: Option<(ScalarKey, OuterClass)>,
     sites: ScalarSites,
@@ -188,6 +195,8 @@ impl Counters {
             slots: Vec::new(),
             run_atoms: Vec::with_capacity(hint / 8),
             run_spans: Vec::with_capacity(hint / 32),
+            run_prev: OuterClass::Edge,
+            run_directionless: false,
             lead: Edge::default(),
             trail_pair: None,
             sites: ScalarSites::new(),
@@ -234,15 +243,18 @@ impl Counters {
             if is_run_atom(class) {
                 if hot.run_open == NO_ID {
                     hot.run_open = self.run_atoms.len() as u32;
+                    self.run_prev = hot.prev;
                 }
                 self.run_atoms.push(id);
-                match self.slots[id as usize].ride {
+                let slot = &self.slots[id as usize];
+                match slot.ride {
                     Ride::Leads => {
                         hot.chain = id;
                         hot.chain_context = 0;
                         hot.leading = false;
                     }
                     Ride::Quote => {
+                        self.run_directionless |= slot.directionless;
                         hot.chain_context |= FollowKey::QUOTED;
                         self.lead.edge_marks |= FollowKey::QUOTED * u8::from(hot.leading);
                     }
@@ -254,7 +266,7 @@ impl Counters {
                 }
             } else {
                 // A digit breaks the run it interrupts and opens none.
-                self.close_run(hot);
+                self.close_run(hot, outer);
                 hot.chain = NO_ID;
                 hot.leading = false;
             }
@@ -262,7 +274,7 @@ impl Counters {
             hot.pending_prev = hot.prev;
             hot.pending_first = hot.scalar_count == 0;
         } else {
-            self.close_run(hot);
+            self.close_run(hot, outer);
             if class.is_alphabetic() {
                 let case = Case::of(class);
                 if hot.chain != NO_ID {
@@ -305,12 +317,16 @@ impl Counters {
         hot.scalar_count += 1;
     }
 
-    /// Ends the open run, if any.
+    /// Ends the open run, if any; `next` is the class that ended it.
     #[inline(always)]
-    fn close_run(&mut self, hot: &mut Hot) {
+    fn close_run(&mut self, hot: &mut Hot, next: OuterClass) {
         if hot.run_open != NO_ID {
             let len = self.run_atoms.len() as u32 - hot.run_open;
-            self.run_spans.push((hot.run_open, len));
+            let facing = self
+                .run_directionless
+                .then(|| Facing::of(self.run_prev, next));
+            self.run_spans.push((hot.run_open, len, facing));
+            self.run_directionless = false;
             hot.run_open = NO_ID;
         }
     }
@@ -374,6 +390,7 @@ impl Counters {
             pairs: [0; OuterClass::COUNT * OuterClass::COUNT],
             follows: [FollowCounts::default(); FollowKey::CONTEXTS],
             ride,
+            directionless: is_directionless(key),
         });
         id
     }
@@ -388,7 +405,7 @@ impl Counters {
             }
             self.trail_pair = Some((key, hot.pending_prev));
         }
-        self.close_run(&mut hot);
+        self.close_run(&mut hot, OuterClass::Edge);
         let hygiene = self.sites.finish(text);
 
         let trail = Edge {
@@ -460,26 +477,39 @@ impl Counters {
             a.iter()
                 .map(|id| keys[*id as usize])
                 .cmp(b.iter().map(|id| keys[*id as usize]))
+                .then(left.2.cmp(&right.2))
         });
 
-        let mut runs: Vec<(u32, u32, u32)> = Vec::with_capacity(spans.len() / 4 + 4);
+        let mut runs: Vec<RunSpan> = Vec::with_capacity(spans.len() / 4 + 4);
         let mut run_atoms: Vec<ScalarKey> = Vec::with_capacity(spans.len() / 2 + 4);
-        for (start, len) in spans {
+        for (start, len, facing) in spans {
             let sequence = &atoms[start as usize..][..len as usize];
-            let same = runs.last().is_some_and(|&(at, held, _)| {
-                held == len
-                    && run_atoms[at as usize..][..held as usize]
+            // A sequence seen with a second facing shares the first's atoms.
+            let held = runs.last().copied().filter(|held| {
+                held.len == len
+                    && run_atoms[held.at as usize..][..len as usize]
                         .iter()
                         .zip(sequence)
                         .all(|(key, id)| *key == keys[*id as usize])
             });
-            if same {
-                runs.last_mut().expect("just checked").2 += 1;
-                continue;
-            }
-            let at = run_atoms.len() as u32;
-            run_atoms.extend(sequence.iter().map(|id| keys[*id as usize]));
-            runs.push((at, len, 1));
+            let at = match held {
+                Some(held) if held.facing == facing => {
+                    runs.last_mut().expect("just read").count += 1;
+                    continue;
+                }
+                Some(held) => held.at,
+                None => {
+                    let at = run_atoms.len() as u32;
+                    run_atoms.extend(sequence.iter().map(|id| keys[*id as usize]));
+                    at
+                }
+            };
+            runs.push(RunSpan {
+                at,
+                len,
+                count: 1,
+                facing,
+            });
         }
 
         // The one second read of this chapter's text, over the verse spans

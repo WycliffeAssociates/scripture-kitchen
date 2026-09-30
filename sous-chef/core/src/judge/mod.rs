@@ -25,7 +25,8 @@ use crate::BookIndex;
 use crate::pass::Findings;
 use crate::proportionality::LengthConfig;
 use crate::substrate::{
-    BookAggregate, Case, FollowCounts, FollowKey, OuterClass, PairKey, RUN_BUCKETS, ScalarKey,
+    BookAggregate, Case, Facing, FollowCounts, FollowKey, OuterClass, PairKey, RUN_BUCKETS,
+    ScalarKey, is_directionless,
 };
 use mise::unicode::class_of;
 

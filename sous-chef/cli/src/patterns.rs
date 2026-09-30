@@ -120,10 +120,13 @@ pub(crate) fn print_patterns(
                     .filter_map(|atom| atom.scalar())
                     .collect();
                 format!(
-                    "{text}{}\u{d7}{}{}",
+                    "{text}{}\u{d7}{}{}{}",
                     if cluster.truncated { "\u{2026}" } else { "" },
                     grouped(cluster.count),
-                    if cluster.recurring { " R" } else { "" }
+                    if cluster.recurring { " R" } else { "" },
+                    cluster
+                        .facing
+                        .map_or(String::new(), |facing| format!(" {}", facing.name()))
                 )
             })
             .collect();
@@ -145,11 +148,13 @@ fn usual(pattern: &Pattern) -> String {
             neighbor,
             count,
             reversed,
+            facing,
         } => format!(
-            " usual={} {} reversed={}",
+            " usual={} {} reversed={}{}",
             glyph(neighbor),
             grouped(count),
-            grouped(reversed)
+            grouped(reversed),
+            facing.map_or(String::new(), |facing| format!(" facing={}", facing.name()))
         ),
         Usual::RunShape {
             pure,

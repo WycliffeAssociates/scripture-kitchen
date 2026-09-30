@@ -42,8 +42,93 @@ fn every_lane_is_sorted_by_key() {
     assert!(row.scalars().windows(2).all(|w| w[0].0 < w[1].0));
     assert!(row.pairs().windows(2).all(|w| w[0].0 < w[1].0));
     assert!(row.follows().windows(2).all(|w| w[0].0 < w[1].0));
-    let runs: Vec<Vec<ScalarKey>> = row.runs().map(|(atoms, _)| atoms.to_vec()).collect();
+    let runs: Vec<(Vec<ScalarKey>, Option<Facing>)> = row
+        .faced_runs()
+        .map(|(atoms, facing, _)| (atoms.to_vec(), facing))
+        .collect();
     assert!(runs.windows(2).all(|w| w[0] < w[1]));
+}
+
+/// The run's outer context decides which way a directionless quote faces.
+#[test]
+fn facing_is_read_off_the_classes_either_side_of_the_run() {
+    use OuterClass::{Digit, Edge, Letter, Nonletter, Space};
+    for (prev, next, facing) in [
+        (Letter, Space, Facing::Closing),
+        (Letter, Edge, Facing::Closing),
+        (Digit, Space, Facing::Closing),
+        (Space, Letter, Facing::Opening),
+        (Edge, Digit, Facing::Opening),
+        (Letter, Letter, Facing::Inside),
+        (Edge, Space, Facing::Unknown),
+        (Space, Space, Facing::Unknown),
+        (Digit, Letter, Facing::Unknown),
+        (Letter, Digit, Facing::Unknown),
+        (Nonletter, Letter, Facing::Unknown),
+    ] {
+        assert_eq!(Facing::of(prev, next), facing, "{prev:?} {next:?}");
+    }
+}
+
+/// A run holding `"` or `'` records its facing, one entry per facing; a run
+/// holding neither records none.
+#[test]
+fn a_run_holding_a_directionless_quote_records_its_facing() {
+    let one = row("said, \"go.\" who'. \"...x don't a \u{201C}b.\u{201D} 5\".\n.'");
+    let faced: Vec<(String, Option<Facing>, u32)> = one
+        .faced_runs()
+        .map(|(atoms, facing, count)| {
+            (
+                atoms.iter().filter_map(|atom| atom.scalar()).collect(),
+                facing,
+                count,
+            )
+        })
+        .collect();
+    let has = |text: &str, facing| {
+        faced
+            .iter()
+            .any(|(atoms, held, _)| atoms == text && *held == facing)
+    };
+    assert!(has("\"", Some(Facing::Opening)), "{faced:?}");
+    assert!(has(".\"", Some(Facing::Closing)), "{faced:?}");
+    assert!(has("'.", Some(Facing::Closing)), "{faced:?}");
+    assert!(has("\"...", Some(Facing::Opening)), "{faced:?}");
+    assert!(has("'", Some(Facing::Inside)), "{faced:?}");
+    assert!(
+        has("\".", Some(Facing::Closing)),
+        "a digit before is Closing: {faced:?}"
+    );
+    assert!(
+        has(".'", Some(Facing::Unknown)),
+        "an edge both sides: {faced:?}"
+    );
+    assert!(has(",", None), "no quote, no facing: {faced:?}");
+    assert!(
+        has(".\u{201D}", None),
+        "a curly quote says its own direction: {faced:?}"
+    );
+
+    let two = row("a.' b .'c");
+    let entries: Vec<(Option<Facing>, u32)> = two
+        .faced_runs()
+        .map(|(_, facing, count)| (facing, count))
+        .collect();
+    assert_eq!(
+        entries,
+        vec![(Some(Facing::Opening), 1), (Some(Facing::Closing), 1)],
+        "one sequence, two facings, two entries"
+    );
+    let folded = aggregate(&["a.' b", " c.' d .'e"]);
+    let entries: Vec<(Option<Facing>, u32)> = folded
+        .faced_runs()
+        .map(|(_, facing, count)| (facing, count))
+        .collect();
+    assert_eq!(
+        entries,
+        vec![(Some(Facing::Opening), 1), (Some(Facing::Closing), 2)],
+        "the fold merges by sequence and facing"
+    );
 }
 
 /// Charter invariant 7: one lane, whatever the number system.
