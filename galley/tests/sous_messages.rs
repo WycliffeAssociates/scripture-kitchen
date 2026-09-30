@@ -1,13 +1,14 @@
 //! `sous-messages.ts` and `sous-messages.en.json` name the same ids, every
-//! argument a catalog string reads is a parameter `describe` declares for
-//! that id in `ParamsById`, and a `Glyph` parameter is shown inside `<g>` and
-//! nowhere else.
+//! entry is a headline and details, every argument either tier reads is a
+//! parameter `describe` declares for that id in `ParamsById`, and a `Glyph`
+//! parameter is shown inside `<g>` and nowhere else.
 //!
 //! ```text
-//! ts    "convention.sentenceStart": { glyph: Glyph; word: string; upper: number } & Spread;
-//! json  "convention.sentenceStart": "After <g>{glyph}</g>, … Here “{word}” is lowercase."
-//!       arguments {glyph, word, upper, total} ⊆ declared   → ok
-//!       inside <g> {glyph} = the Glyph params read         → ok
+//! ts    "convention.sentenceStart": { glyph: Glyph; word: string; usualWord: string; upper: number } & Spread;
+//! json  "convention.sentenceStart": { "headline": "“{word}” is lowercase after <g>{glyph}</g> here; …",
+//!                                     "details": "After <g>{glyph}</g>, … {upper, number} of {total, number} …" }
+//!       arguments of each tier ⊆ declared                   → ok
+//!       inside <g> {glyph} = the Glyph params read          → ok
 //! ```
 //!
 //! Both files are read as text: the TypeScript by its one-id-per-line blocks,
@@ -98,54 +99,97 @@ fn declared_params() -> BTreeMap<String, BTreeMap<String, String>> {
         .collect()
 }
 
-/// A flat JSON object of strings, as `json.dumps` or any formatter writes one.
-fn catalog() -> BTreeMap<String, String> {
-    let mut chars = CATALOG.trim().chars().peekable();
-    let mut out = BTreeMap::new();
-    let string = |chars: &mut std::iter::Peekable<std::str::Chars<'_>>| -> String {
-        assert_eq!(
-            chars.next(),
-            Some('"'),
-            "a catalog key or value is a string"
-        );
-        let mut s = String::new();
-        loop {
-            match chars.next().expect("an unterminated catalog string") {
-                '"' => return s,
-                '\\' => match chars.next().expect("an escape") {
-                    'n' => s.push('\n'),
-                    't' => s.push('\t'),
-                    'u' => {
-                        let hex: String = chars.by_ref().take(4).collect();
-                        let unit = u32::from_str_radix(&hex, 16).expect("a \\u escape");
-                        s.push(char::from_u32(unit).expect("a BMP scalar"));
-                    }
-                    other => s.push(other),
-                },
-                c => s.push(c),
-            }
-        }
-    };
-    let skip = |chars: &mut std::iter::Peekable<std::str::Chars<'_>>| {
-        while chars
-            .next_if(|c| c.is_whitespace() || *c == ',' || *c == ':')
-            .is_some()
-        {}
-    };
-    assert_eq!(chars.next(), Some('{'), "the catalog is one object");
+/// A JSON value as the catalog uses them: a string, or an object of values.
+enum Json {
+    Str(String),
+    Obj(BTreeMap<String, Json>),
+}
+
+type Chars<'a> = std::iter::Peekable<std::str::Chars<'a>>;
+
+fn skip(chars: &mut Chars<'_>) {
+    while chars
+        .next_if(|c| c.is_whitespace() || *c == ',' || *c == ':')
+        .is_some()
+    {}
+}
+
+fn string(chars: &mut Chars<'_>) -> String {
+    assert_eq!(chars.next(), Some('"'), "a catalog key is a string");
+    let mut s = String::new();
     loop {
-        skip(&mut chars);
-        if chars.next_if_eq(&'}').is_some() {
-            return out;
+        match chars.next().expect("an unterminated catalog string") {
+            '"' => return s,
+            '\\' => match chars.next().expect("an escape") {
+                'n' => s.push('\n'),
+                't' => s.push('\t'),
+                'u' => {
+                    let hex: String = chars.by_ref().take(4).collect();
+                    let unit = u32::from_str_radix(&hex, 16).expect("a \\u escape");
+                    s.push(char::from_u32(unit).expect("a BMP scalar"));
+                }
+                other => s.push(other),
+            },
+            c => s.push(c),
         }
-        let key = string(&mut chars);
-        skip(&mut chars);
-        let value = string(&mut chars);
+    }
+}
+
+fn value(chars: &mut Chars<'_>) -> Json {
+    if chars.next_if_eq(&'{').is_none() {
+        return Json::Str(string(chars));
+    }
+    let mut out = BTreeMap::new();
+    loop {
+        skip(chars);
+        if chars.next_if_eq(&'}').is_some() {
+            return Json::Obj(out);
+        }
+        let key = string(chars);
+        skip(chars);
+        let inner = value(chars);
         assert!(
-            out.insert(key.clone(), value).is_none(),
-            "{key} is in the catalog twice"
+            out.insert(key.clone(), inner).is_none(),
+            "{key} appears twice"
         );
     }
+}
+
+/// The catalog: one `{ headline, details }` object per id, as `json.dumps` or
+/// any formatter writes it. Anything else in an entry fails here.
+fn catalog() -> BTreeMap<String, [String; 2]> {
+    let mut chars = CATALOG.trim().chars().peekable();
+    let Json::Obj(entries) = value(&mut chars) else {
+        panic!("the catalog is one object")
+    };
+    entries
+        .into_iter()
+        .map(|(id, entry)| {
+            let Json::Obj(mut tiers) = entry else {
+                panic!("{id} is not a {{ headline, details }} object")
+            };
+            let mut take = |tier: &str| match tiers.remove(tier) {
+                Some(Json::Str(text)) => text,
+                _ => panic!("{id} has no {tier} string"),
+            };
+            let pair = [take("headline"), take("details")];
+            assert!(
+                tiers.is_empty(),
+                "{id} has keys beside headline and details"
+            );
+            (id, pair)
+        })
+        .collect()
+}
+
+/// Every tier of every entry: `(id, "headline" | "details", text)`.
+fn tiers() -> Vec<(String, &'static str, String)> {
+    catalog()
+        .into_iter()
+        .flat_map(|(id, [headline, details])| {
+            [(id.clone(), "headline", headline), (id, "details", details)]
+        })
+        .collect()
 }
 
 /// The argument names an ICU message reads, split by whether a `<g>` tag
@@ -327,8 +371,8 @@ fn every_message_id_has_a_catalog_entry_and_nothing_else_does() {
 #[test]
 fn every_catalog_argument_is_a_declared_parameter() {
     let declared = declared_params();
-    for (id, text) in catalog() {
-        let used = Icu::parse(&text).unwrap_or_else(|why| panic!("{id}: {why}"));
+    for (id, tier, text) in tiers() {
+        let used = Icu::parse(&text).unwrap_or_else(|why| panic!("{id} {tier}: {why}"));
         let params = declared
             .get(&id)
             .unwrap_or_else(|| panic!("{id} declares no parameters"));
@@ -339,7 +383,7 @@ fn every_catalog_argument_is_a_declared_parameter() {
             .collect();
         assert!(
             unknown.is_empty(),
-            "{id} reads {unknown:?}, which describe never provides"
+            "{id} {tier} reads {unknown:?}, which describe never provides"
         );
     }
 }
@@ -349,13 +393,16 @@ fn every_catalog_argument_is_a_declared_parameter() {
 #[test]
 fn every_glyph_is_shown_inside_a_glyph_tag_and_nothing_else_is() {
     let declared = declared_params();
-    for (id, text) in catalog() {
-        let used = Icu::parse(&text).unwrap_or_else(|why| panic!("{id}: {why}"));
+    for (id, tier, text) in tiers() {
+        let used = Icu::parse(&text).unwrap_or_else(|why| panic!("{id} {tier}: {why}"));
         let glyph = |name: &String| declared[&id].get(name).is_some_and(|ty| ty == "Glyph");
         let bare: Vec<_> = used.outside.iter().filter(|name| glyph(name)).collect();
-        assert!(bare.is_empty(), "{id} shows {bare:?} outside <g>");
+        assert!(bare.is_empty(), "{id} {tier} shows {bare:?} outside <g>");
         let tagged: Vec<_> = used.in_glyph.iter().filter(|name| !glyph(name)).collect();
-        assert!(tagged.is_empty(), "{id} tags {tagged:?}, which is no Glyph");
+        assert!(
+            tagged.is_empty(),
+            "{id} {tier} tags {tagged:?}, which is no Glyph"
+        );
     }
 }
 
@@ -373,7 +420,7 @@ fn the_catalog_never_says_what_the_guide_forbids() {
         "basis point",
         "site",
     ];
-    for (id, text) in catalog() {
+    for (id, tier, text) in tiers() {
         let lower = text.to_lowercase();
         let words: Vec<&str> = lower.split(|c: char| !c.is_alphabetic()).collect();
         for word in FORBIDDEN {
@@ -384,7 +431,25 @@ fn the_catalog_never_says_what_the_guide_forbids() {
                     .iter()
                     .any(|w| w.strip_suffix('s').unwrap_or(w) == word || *w == word)
             };
-            assert!(!said, "{id} says “{word}”");
+            assert!(!said, "{id} {tier} says “{word}”");
+        }
+    }
+}
+
+/// A headline says one fact and at most one alternative; how the check
+/// reached it belongs in the details.
+#[test]
+fn no_headline_explains_the_rule() {
+    const INTERNALS: [&str; 5] = [
+        "group of this size",
+        "stands alone",
+        "when another mark follows",
+        "of the same kind",
+        "usually followed",
+    ];
+    for (id, [headline, _]) in catalog() {
+        for phrase in INTERNALS {
+            assert!(!headline.contains(phrase), "{id} headline says “{phrase}”");
         }
     }
 }

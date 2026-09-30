@@ -278,9 +278,10 @@ check(cold.terminals().every((entry) => cold.terminal(entry.glyph, entry) === en
         const finding = book.at(row);
         const pattern = finding.kind === "Convention" ? snapshot.pattern(finding.convention.pattern) : undefined;
         const siteText = source.slice(finding.from, finding.to);
-        const { id, params } = describe(finding, pattern, { siteText, bookCount: snapshot.length });
+        const { id, params, queries } = describe(finding, pattern, { siteText, bookCount: snapshot.length });
         ids.add(id);
-        check(id in catalog, `${id} has a catalog entry`);
+        check(typeof catalog[id]?.headline === "string" && typeof catalog[id]?.details === "string", `${id} has a headline and details`);
+        check(queries.every((q) => ["this", "alternative", "others"].includes(q.purpose) && q.needle !== ""), `${id}'s queries are well formed`);
         check(Object.values(params).every((v) => ["string", "number", "boolean"].includes(typeof v)), `${id}'s params are plain`);
       }
     }

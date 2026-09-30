@@ -105,6 +105,22 @@ fn a_needle_across_a_footnote_gap_comes_back_split() {
     );
 }
 
+/// The needles a message's queries hand a consumer: marks alone, which no
+/// word rule touches, and a word whose case is the point.
+#[test]
+fn a_needle_of_marks_alone_and_a_case_sensitive_word_are_found() {
+    const SOURCE: &str = "\\id ISA\n\\c 1\n\\v 1 'Hand them over;' On the way, on it; ';\n";
+    let mask = project(SOURCE);
+    let count = |find: Find<'_>| find.in_projection(&mask, SOURCE.as_bytes()).count();
+    assert_eq!(count(Find::literal(";'")), 1);
+    assert_eq!(count(Find::literal("';")), 1);
+    assert_eq!(count(Find::literal("On").whole_word(true)), 1);
+    assert_eq!(
+        count(Find::literal("On").whole_word(true).case_insensitive(true)),
+        2
+    );
+}
+
 /// A reference is searchable exactly when it kept the text its projection
 /// indexes — `Retain::Text` here, `keepText` at the wasm door.
 #[test]

@@ -1,24 +1,90 @@
 {
-  "hygiene": "{class, select, control {An invisible control character is here} delete {An invisible delete character is here} replacement {<g>�</g> is here: a character was lost when the text was converted from another format} carriageReturn {A stray line-ending character is here} backslash {A backslash is here, inside the text itself} conflict {This line is left over from merging two versions of the file} combiningMark {An accent or other mark is here with no letter to sit on} format {An invisible formatting character is here with nothing to join} noBreakSpace {A no-break space is here, beside another space or at the edge of the text} noncharacter {A character that never belongs in text is here} other {Something that does not belong in text is here}}{run, plural, one {.} other { ({atLeast, select, true {at least } other {}}# in a row).}}",
-  "presence.missing": "The source text has {keys, plural, one {a verse} other {{atLeast, select, true {at least } other {}}# verses in a row}} here that this book does not have.",
-  "presence.extra": "This book has {keys, plural, one {a verse} other {{atLeast, select, true {at least } other {}}# verses in a row}} here that the source text does not have.",
-  "presence.empty": "{keys, plural, one {This verse is} other {These {atLeast, select, true {at least } other {}}# verses are}} empty here, but the source text has words in {keys, plural, one {it} other {them}}.",
-  "sourceCopy": "{run, number} words in a row here are spelled exactly as in the source text of this verse, out of {eligible, number} words that could be compared.",
-  "length.long": "Compared with the source text, this verse is much longer than the other verses {inBook, select, true {in this book} other {in this project}}.",
-  "length.short": "Compared with the source text, this verse is much shorter than the other verses {inBook, select, true {in this book} other {in this project}}.",
-  "convention.exactNeighbor": "<g>{glyph}</g> is followed directly by <g>{neighbor}</g> here (<g>{pair}</g>). When another mark follows <g>{glyph}</g>, it is usually <g>{usual}</g> ({usualCount, number} of {total, number} times). <g>{pair}</g> appears {count, plural, one {only here} other {# times, in {books, number} of {bookTotal, number} books}}.",
-  "convention.exactNeighbor.swapped": "<g>{glyph}</g> comes right before <g>{neighbor}</g> here (<g>{pair}</g>). This project writes them the other way round, <g>{reversedPair}</g>, {reversed, number} times; <g>{pair}</g> appears {count, plural, one {only here} other {# times}}.",
-  "convention.pooledNeighbor": "<g>{glyph}</g> is followed directly by {pool, select, quote {a quotation mark} bracket {a bracket} dash {a dash} terminal {a mark that ends a sentence} separator {a comma or similar mark} digit {a digit} symbol {a symbol} other {another mark}} here. Of the {total, number} times another mark follows <g>{glyph}</g>, this kind of mark follows it {count, plural, one {only here} other {# times, in {books, number} of {bookTotal, number} books}}.",
-  "convention.runShape": "<g>{cluster}</g> is a group of {size, number}{atLeast, select, true { or more} other {}} {sameMark, select, true {<g>{glyph}</g> in a row} other {marks, <g>{glyph}</g> among them}}{clusterCount, plural, =0 {} one {, and this exact group appears only here} other {, and this exact group appears # times}}. {hasUsualCluster, select, true {This project usually writes <g>{usualCluster}</g> ({usualClusterCount, number} times). } other {}}<g>{glyph}</g> {usually, select, true {usually } other {}}{usualSize, plural, one {stands alone} other {sits in a group of #{usualAtLeast, select, true { or more} other {}} {usualSameMark, select, true {<g>{glyph}</g> in a row} other {marks}}}} ({usualShapeCount, number} of {total, number} times). Unusual groups of this size {sameMark, select, true {} other {holding <g>{glyph}</g> }}appear {count, plural, one {only here} other {# times, in {books, number} of {bookTotal, number} books}}.",
-  "convention.placement.follows": "{digit, select, true {A digit} other {<g>{glyph}</g>}} comes right after {neighbor, select, letter {a letter} space {a space} digit {a digit} other {a punctuation mark}} here, with nothing between. Usually {usual, select, letter {a letter} space {a space} digit {a digit} other {a punctuation mark}} comes right before {digit, select, true {a digit} other {<g>{glyph}</g>}} ({usualCount, number} of {total, number} times). This happens {count, plural, one {only here} other {# times, in {books, number} of {bookTotal, number} books}}.",
-  "convention.placement.precedes": "{digit, select, true {A digit} other {<g>{glyph}</g>}} comes right before {neighbor, select, letter {a letter} space {a space} digit {a digit} other {a punctuation mark}} here, with nothing between. Usually {digit, select, true {a digit} other {<g>{glyph}</g>}} is followed right away by {usual, select, letter {a letter} space {a space} digit {a digit} other {a punctuation mark}} ({usualCount, number} of {total, number} times). This happens {count, plural, one {only here} other {# times, in {books, number} of {bookTotal, number} books}}.",
-  "convention.rarity": "<g>{glyph}</g> appears {count, plural, one {only once} other {only # times, in {books, number} of {bookTotal, number} books,}} in this whole project.{hasUsual, select, true {{lookalike, select, true { This project writes <g>{usual}</g> elsewhere ({usualCount, number} times).} other { The most common mark of the same kind is <g>{usual}</g> ({usualCount, number} times).}}} other {}}",
-  "convention.casing": "“{word}” is {form, select, lowercase {written in lowercase} capitalized {capitalized} allCaps {written in all capitals} other {written in mixed case}} here. In the middle of a sentence this project writes it {usualForm, select, mixed {in mixed case} other {“{usualWord}”}} {usualCount, number} of {total, number} times; this form appears {count, plural, one {only here} other {# times, in {books, number} of {bookTotal, number} books}}.{hasBefore, select, true { After <g>{before}</g>{beforeContext, select, quoted { and a quotation mark} bracketed { and a closing bracket} both { and a closing bracket and a quotation mark} other {}}, the next word is lowercase {beforeLower, number} of {beforeCased, number} times.} other {}}",
-  "convention.wordLength": "“{word}” is much longer than most words in this project. It appears {count, plural, one {only here} other {# times}}.",
-  "convention.doubled.bare": "“{word}” is written twice in a row here (“{text}”). {count, plural, one {The project does this nowhere else} other {The project does this # times}}; “{word}” appears {total, number} times.",
-  "convention.doubled.separated": "“{word}” is written twice with only punctuation between here (“{text}”). {count, plural, one {The project does this nowhere else} other {The project does this # times}}; “{word}” appears {total, number} times.",
-  "convention.letterRun": "<g>{letter}</g> is written {atLeast, select, true {{length, number} or more} other {{length, number}}} times in a row here (“{word}”). Of the {total, number} places this project repeats <g>{letter}</g>, {count, plural, one {this is the only one with {atLeast, select, true {{length, number} or more} other {{length, number}}}} other {# have {atLeast, select, true {{length, number} or more} other {{length, number}}}}}.",
-  "convention.sentenceStart": "After <g>{glyph}</g>, this project capitalizes the next word {upper, number} of {total, number} times. Here “{word}” is lowercase.",
-  "convention.bookRate.follows": "{digit, select, true {A digit} other {<g>{glyph}</g>}} comes right after {neighbor, select, letter {a letter} space {a space} digit {a digit} other {a punctuation mark}} here, with nothing between. In {book} this happens {count, number} of {total, number} times ({rate, number, percent}); {baseline, plural, =0 {in most of the other {otherBooks, number} books that use {digit, select, true {digits} other {<g>{glyph}</g>}}, it never happens.} other {in the other {otherBooks, number} books that use {digit, select, true {digits} other {<g>{glyph}</g>}}, it typically happens {baseline, number, ::percent .#} of the time.}}",
-  "convention.bookRate.precedes": "{digit, select, true {A digit} other {<g>{glyph}</g>}} comes right before {neighbor, select, letter {a letter} space {a space} digit {a digit} other {a punctuation mark}} here, with nothing between. In {book} this happens {count, number} of {total, number} times ({rate, number, percent}); {baseline, plural, =0 {in most of the other {otherBooks, number} books that use {digit, select, true {digits} other {<g>{glyph}</g>}}, it never happens.} other {in the other {otherBooks, number} books that use {digit, select, true {digits} other {<g>{glyph}</g>}}, it typically happens {baseline, number, ::percent .#} of the time.}}"
+  "hygiene": {
+    "headline": "{class, select, control {An invisible control character is here} delete {An invisible delete character is here} replacement {<g>�</g> is here: a character was lost when the text was converted from another format} carriageReturn {A stray line-ending character is here} backslash {A backslash is here, inside the text itself} conflict {This line is left over from merging two versions of the file} combiningMark {An accent or other mark is here with no letter to sit on} format {An invisible formatting character is here with nothing to join} noBreakSpace {A no-break space is here, beside another space or at the edge of the text} noncharacter {A character that never belongs in text is here} other {Something that does not belong in text is here}}.",
+    "details": "{run, plural, one {One character of this kind is here.} other {{atLeast, select, true {At least } other {}}# characters of this kind are here in a row.}} It shows nothing, or something unexpected, on the page."
+  },
+  "presence.missing": {
+    "headline": "The source text has {keys, plural, one {a verse} other {{atLeast, select, true {at least } other {}}# verses in a row}} here that this book does not have.",
+    "details": "The book and its source text are compared verse by verse; {keys, plural, one {this verse is} other {these verses are}} only in the source."
+  },
+  "presence.extra": {
+    "headline": "This book has {keys, plural, one {a verse} other {{atLeast, select, true {at least } other {}}# verses in a row}} here that the source text does not have.",
+    "details": "The book and its source text are compared verse by verse; {keys, plural, one {this verse is} other {these verses are}} only in this book."
+  },
+  "presence.empty": {
+    "headline": "{keys, plural, one {This verse is} other {These {atLeast, select, true {at least } other {}}# verses are}} empty here, but the source text has words in {keys, plural, one {it} other {them}}.",
+    "details": "The book and its source text are compared verse by verse; the source has words where this book has none."
+  },
+  "sourceCopy": {
+    "headline": "{run, number} words in a row here are spelled exactly as in the source text.",
+    "details": "Out of {eligible, number} words in this verse that could be compared with the source text."
+  },
+  "length.long": {
+    "headline": "This verse is much longer than usual, compared with its source text.",
+    "details": "Against the source, its length is {deviation, number, ::.#} times the usual spread away from the other verses {inBook, select, true {in this book} other {in this project}}."
+  },
+  "length.short": {
+    "headline": "This verse is much shorter than usual, compared with its source text.",
+    "details": "Against the source, its length is {deviation, number, ::.#} times the usual spread away from the other verses {inBook, select, true {in this book} other {in this project}}."
+  },
+  "convention.exactNeighbor": {
+    "headline": "<g>{pair}</g>: this pair of marks appears {count, plural, one {only here} other {only # times}} in this project.",
+    "details": "<g>{glyph}</g> is followed directly by another mark {total, number} times in this project, most often <g>{usual}</g> ({usualCount, number}).{reversed, plural, =0 {} one { This project also writes <g>{reversedPair}</g>, once.} other { This project also writes <g>{reversedPair}</g>, # times.}}{count, plural, one {} other { <g>{pair}</g> appears {namedBooks, select, 1 {all in {book1}} 2 {in {book1} and {book2}} other {in {books, number} of {bookTotal, number} books}}.}}"
+  },
+  "convention.exactNeighbor.swapped": {
+    "headline": "<g>{pair}</g> appears {count, plural, one {only here} other {# times}}; this project usually writes <g>{reversedPair}</g> ({reversed, number} times).",
+    "details": "<g>{glyph}</g> is followed directly by another mark {total, number} times in this project, most often <g>{usual}</g> ({usualCount, number}).{count, plural, one {} other { <g>{pair}</g> appears {namedBooks, select, 1 {all in {book1}} 2 {in {book1} and {book2}} other {in {books, number} of {bookTotal, number} books}}.}}"
+  },
+  "convention.pooledNeighbor": {
+    "headline": "<g>{glyph}</g> followed directly by {pool, select, quote {a quotation mark} bracket {a bracket} dash {a dash} terminal {a mark that ends a sentence} separator {a comma or similar mark} digit {a digit} symbol {a symbol} other {another mark}} appears {count, plural, one {only here} other {only # times}}.",
+    "details": "<g>{glyph}</g> is followed directly by another mark {total, number} times in this project.{count, plural, one {} other { This kind of mark follows it # times, {namedBooks, select, 1 {all in {book1}} 2 {in {book1} and {book2}} other {in {books, number} of {bookTotal, number} books}}.}}"
+  },
+  "convention.runShape": {
+    "headline": "<g>{cluster}</g> {clusterCount, plural, =0 {is an unusual group of marks here} one {appears only here} other {appears only # times}}{swap, select, true {; this project usually writes <g>{usualCluster}</g> ({usualClusterCount, number} times)} other {}}.",
+    "details": "<g>{glyph}</g> {usualSize, plural, one {stands alone} other {sits in a group of #{usualAtLeast, select, true { or more} other {}} {usualSameMark, select, true {<g>{glyph}</g> in a row} other {marks}}}} {usualShapeCount, number} of {total, number} times. Unusual groups like this appear {count, plural, one {only here} other {# times, {namedBooks, select, 1 {all in {book1}} 2 {in {book1} and {book2}} other {in {books, number} of {bookTotal, number} books}}}}.{hasUsualCluster, select, true {{swap, select, true {} other {{reordered, select, true { This project also writes <g>{usualCluster}</g>, {usualClusterCount, number} times.} other { The most common group holding <g>{glyph}</g> is <g>{usualCluster}</g> ({usualClusterCount, number} times).}}}}} other {}}"
+  },
+  "convention.placement.follows": {
+    "headline": "{digit, select, true {A digit} other {<g>{glyph}</g>}} right after {neighbor, select, letter {a letter} space {a space} digit {a digit} other {a punctuation mark}} appears {count, plural, one {only here} other {only # times}} in this project.",
+    "details": "Usually {usual, select, letter {a letter} space {a space} digit {a digit} other {a punctuation mark}} comes right before {digit, select, true {a digit} other {<g>{glyph}</g>}} ({usualCount, number} of {total, number} times).{count, plural, one {} other { This happens {namedBooks, select, 1 {all in {book1}} 2 {in {book1} and {book2}} other {in {books, number} of {bookTotal, number} books}}.}}"
+  },
+  "convention.placement.precedes": {
+    "headline": "{digit, select, true {A digit} other {<g>{glyph}</g>}} right before {neighbor, select, letter {a letter} space {a space} digit {a digit} other {a punctuation mark}} appears {count, plural, one {only here} other {only # times}} in this project.",
+    "details": "Usually {digit, select, true {a digit} other {<g>{glyph}</g>}} is followed right away by {usual, select, letter {a letter} space {a space} digit {a digit} other {a punctuation mark}} ({usualCount, number} of {total, number} times).{count, plural, one {} other { This happens {namedBooks, select, 1 {all in {book1}} 2 {in {book1} and {book2}} other {in {books, number} of {bookTotal, number} books}}.}}"
+  },
+  "convention.rarity": {
+    "headline": "<g>{glyph}</g> appears {count, plural, one {only here} other {only # times}} in this project{lookalike, select, true {; it writes <g>{usual}</g> elsewhere ({usualCount, number} times)} other {}}.",
+    "details": "{count, plural, one {It is used nowhere else.} other {It is used {namedBooks, select, 1 {all in {book1}} 2 {in {book1} and {book2}} other {in {books, number} of {bookTotal, number} books}}.}}{hasUsual, select, true {{lookalike, select, true { <g>{glyph}</g> and <g>{usual}</g> look alike.} other { The most common mark of the same kind is <g>{usual}</g> ({usualCount, number} times).}}} other {}}"
+  },
+  "convention.casing": {
+    "headline": "“{word}” is {form, select, lowercase {written in lowercase} capitalized {capitalized} allCaps {written in all capitals} other {written in mixed case}} here{usualForm, select, mixed {, which this project rarely does} other {; this project writes “{usualWord}” ({usualCount, number} times)}}.",
+    "details": "Of its {total, number} uses in the middle of a sentence, this form appears {count, plural, one {only here} other {# times, {namedBooks, select, 1 {all in {book1}} 2 {in {book1} and {book2}} other {in {books, number} of {bookTotal, number} books}}}}.{hasBefore, select, true { After <g>{before}</g>{beforeContext, select, quoted { and a quotation mark} bracketed { and a closing bracket} both { and a closing bracket and a quotation mark} other {}}, the next word is lowercase {beforeLower, number} of {beforeCased, number} times.} other {}}"
+  },
+  "convention.wordLength": {
+    "headline": "“{word}” is much longer than most words in this project.",
+    "details": "It appears {count, plural, one {only here} other {# times}}."
+  },
+  "convention.doubled.bare": {
+    "headline": "“{word}” is written twice in a row here (“{text}”).",
+    "details": "{count, plural, one {The project does this nowhere else} other {The project does this # times, {namedBooks, select, 1 {all in {book1}} 2 {in {book1} and {book2}} other {in {books, number} of {bookTotal, number} books}}}}; “{word}” appears {total, number} times."
+  },
+  "convention.doubled.separated": {
+    "headline": "“{word}” is written twice with only punctuation between here (“{text}”).",
+    "details": "{count, plural, one {The project does this nowhere else} other {The project does this # times, {namedBooks, select, 1 {all in {book1}} 2 {in {book1} and {book2}} other {in {books, number} of {bookTotal, number} books}}}}; “{word}” appears {total, number} times."
+  },
+  "convention.letterRun": {
+    "headline": "<g>{letter}</g> is written {atLeast, select, true {{length, number} or more} other {{length, number}}} times in a row here (“{word}”).",
+    "details": "Of the {total, number} places this project repeats <g>{letter}</g>, {count, plural, one {this is the only one with {atLeast, select, true {{length, number} or more} other {{length, number}}}} other {# have {atLeast, select, true {{length, number} or more} other {{length, number}}}}}."
+  },
+  "convention.sentenceStart": {
+    "headline": "“{word}” is lowercase after <g>{glyph}</g> here; this project usually writes “{usualWord}” there.",
+    "details": "After <g>{glyph}</g>, this project capitalizes the next word {upper, number} of {total, number} times.{count, plural, one {} other { A lowercase word follows it # times, {namedBooks, select, 1 {all in {book1}} 2 {in {book1} and {book2}} other {in {books, number} of {bookTotal, number} books}}.}}"
+  },
+  "convention.bookRate.follows": {
+    "headline": "{digit, select, true {A digit} other {<g>{glyph}</g>}} right after {neighbor, select, letter {a letter} space {a space} digit {a digit} other {a punctuation mark}} is far more common in {book} than in the other books.",
+    "details": "In {book} this happens {count, number} of {total, number} times ({rate, number, percent}); {baseline, plural, =0 {in most of the other {otherBooks, number} books that use {digit, select, true {digits} other {<g>{glyph}</g>}}, it never happens.} other {in the other {otherBooks, number} books that use {digit, select, true {digits} other {<g>{glyph}</g>}}, it typically happens {baseline, number, ::percent .#} of the time.}}"
+  },
+  "convention.bookRate.precedes": {
+    "headline": "{digit, select, true {A digit} other {<g>{glyph}</g>}} right before {neighbor, select, letter {a letter} space {a space} digit {a digit} other {a punctuation mark}} is far more common in {book} than in the other books.",
+    "details": "In {book} this happens {count, number} of {total, number} times ({rate, number, percent}); {baseline, plural, =0 {in most of the other {otherBooks, number} books that use {digit, select, true {digits} other {<g>{glyph}</g>}}, it never happens.} other {in the other {otherBooks, number} books that use {digit, select, true {digits} other {<g>{glyph}</g>}}, it typically happens {baseline, number, ::percent .#} of the time.}}"
+  }
 }
