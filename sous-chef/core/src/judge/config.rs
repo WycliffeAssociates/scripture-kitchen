@@ -250,6 +250,10 @@ pub struct JudgingConfig {
     /// The least rate, in basis points, a book must reach before
     /// [`Channel::BookRate`] names it.
     pub book_rate_min_bp: u16,
+    /// The least number of times a book must hold the glyph before
+    /// [`Channel::BookRate`] may name it. The median still reads every book
+    /// holding it `support_floor` times.
+    pub book_rate_min_uses: u32,
     /// The source-compared lane's own knobs. Judged by
     /// [`crate::proportionality::judge_lengths`], which is a corpus-level step
     /// beside the chapter passes rather than one of them; a resident host
@@ -277,7 +281,8 @@ impl Default for JudgingConfig {
             doubled_bare: true,
             doubled_separated: false,
             book_rate_ratio: 10,
-            book_rate_min_bp: 1_000,
+            book_rate_min_bp: 4_000,
+            book_rate_min_uses: 100,
             lengths: LengthConfig::default(),
             channels: Channels::default(),
         }

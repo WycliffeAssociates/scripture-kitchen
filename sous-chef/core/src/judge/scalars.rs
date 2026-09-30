@@ -389,11 +389,13 @@ pub(super) fn placement(
 ///
 /// ```text
 /// nya ',' prev=Space   1SA 1,183/1,526 = 7,752 bp   the other 61 books' median 31 bp
-///   7,752 >= book_rate_min_bp 1,000 and >= 10 x 31   -> FIRES for 1SA
+///   1,526 >= book_rate_min_uses 100, 7,752 >= book_rate_min_bp 4,000,
+///   and >= 10 x 31                                    -> FIRES for 1SA
 /// ```
 ///
 /// Judged books hold the glyph at least `support_floor` times, and the channel
-/// needs [`BOOK_RATE_MIN_BOOKS`] of them. The baseline leaves the book under
+/// needs [`BOOK_RATE_MIN_BOOKS`] of them. Only a book holding it
+/// `book_rate_min_uses` times may fire. The baseline leaves the book under
 /// test out, so a dominant book cannot pull it toward itself.
 pub(super) fn book_rates(
     glyph: ScalarKey,
@@ -422,7 +424,10 @@ pub(super) fn book_rates(
                 .collect();
             for (at, book) in judged.iter().enumerate() {
                 let rate = rates[at];
-                if count(book) < floor || rate < config.book_rate_min_bp {
+                if book.occurrences < u64::from(config.book_rate_min_uses)
+                    || count(book) < floor
+                    || rate < config.book_rate_min_bp
+                {
                     continue;
                 }
                 others.clear();

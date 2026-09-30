@@ -157,8 +157,12 @@ fn the_knobs_round_trip_through_js() {
     assert!(defaults.doubled_bare && !defaults.doubled_separated);
     assert!(defaults.book_rate);
     assert_eq!(
-        (defaults.book_rate_ratio, defaults.book_rate_min_bp),
-        (10, 1_000)
+        (
+            defaults.book_rate_ratio,
+            defaults.book_rate_min_bp,
+            defaults.book_rate_min_uses
+        ),
+        (10, 4_000, 100)
     );
 }
 

@@ -37,6 +37,7 @@ export type SettingKey =
   | "doubled_separated"
   | "book_rate_ratio"
   | "book_rate_min_bp"
+  | "book_rate_min_uses"
   | "z_long"
   | "z_short"
   | "min_verses"
@@ -68,6 +69,7 @@ export interface SousSettingsValues {
   readonly doubled_separated: boolean;
   readonly book_rate_ratio: number;
   readonly book_rate_min_bp: number;
+  readonly book_rate_min_uses: number;
   readonly z_long: number;
   readonly z_short: number;
   readonly min_verses: number;
@@ -115,6 +117,7 @@ export const SETTING_KEYS: readonly SettingKey[] = [
   "doubled_separated",
   "book_rate_ratio",
   "book_rate_min_bp",
+  "book_rate_min_uses",
   "z_long",
   "z_short",
   "min_verses",
@@ -322,13 +325,24 @@ export const SOUS_SETTINGS: { readonly [K in SettingKey]: SettingSpec<K> } = {
   book_rate_min_bp: {
     key: "book_rate_min_bp",
     kind: "share-bp",
-    default: 1000,
+    default: 4000,
     min: 0,
     max: 10000,
     group: "thresholds",
     label: "One book: least share",
     description:
       "The least share of a mark's uses in one book that must be next to the same thing before the one-book check flags that book.",
+  },
+  book_rate_min_uses: {
+    key: "book_rate_min_uses",
+    kind: "count",
+    default: 100,
+    min: 1,
+    max: 4294967295,
+    group: "thresholds",
+    label: "One book: least uses",
+    description:
+      "How many times a book must use a mark before the one-book check may flag that book for it.",
   },
   z_long: {
     key: "z_long",
@@ -445,6 +459,7 @@ export function fromSettings(galley: SettingsHost): SousSettingsValues {
       doubled_separated: handle.doubled_separated,
       book_rate_ratio: handle.book_rate_ratio,
       book_rate_min_bp: handle.book_rate_min_bp,
+      book_rate_min_uses: handle.book_rate_min_uses,
       z_long: handle.z_long,
       z_short: handle.z_short,
       min_verses: handle.min_verses,
@@ -483,6 +498,7 @@ export function toSettings(galley: SettingsHost, values: SousSettingsValues): vo
     handle.doubled_separated = values.doubled_separated;
     handle.book_rate_ratio = values.book_rate_ratio;
     handle.book_rate_min_bp = values.book_rate_min_bp;
+    handle.book_rate_min_uses = values.book_rate_min_uses;
     handle.z_long = values.z_long;
     handle.z_short = values.z_short;
     handle.min_verses = values.min_verses;

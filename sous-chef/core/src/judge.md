@@ -445,21 +445,31 @@ rest. The same keys, judged per book:
 ```text
 nya   ',' prev=Space   pooled 1,417/46,382 = 3.1%            -> no Placement row
       1SA 1,183/1,526 = 77.5%    the other 61 books' median 0.31%   -> FIRES
-en    '—' prev=Space   JER 86/371 = 23.2%    the other 50 books' median 0.00% -> FIRES
+nya   ',' next=Letter  PHP 115/124 = 92.7%                         -> FIRES
+en    '—' prev=Space   JER 86/371 = 23.2%    under 40%: poetry     -> silent
+en    '"' prev=Letter  2CO 6/46 = 13.0%      46 uses, under 100    -> silent
 ```
 
 For every glyph, side and outer class (`Edge` excluded):
 
 - **Judged books** hold the glyph at least `support_floor` times. The channel
-  needs at least four (`BOOK_RATE_MIN_BOOKS`), else it says nothing.
+  needs at least four (`BOOK_RATE_MIN_BOOKS`), else it says nothing. Every
+  judged book sits in the others' median.
 - A book's **rate** is its count of that class on that side over its own
   occurrences of the glyph.
 - The **baseline** is the median of the OTHER judged books' rates, the mean of
   the two middle ones for an even count. Leaving the tested book out keeps a
   dominant book from pulling the baseline toward itself.
-- A book **fires** when its count reaches `support_floor`, its rate reaches
-  `book_rate_min_bp` (1,000 = 10%), and its rate is at least
+- A book **fires** when it holds the glyph at least `book_rate_min_uses`
+  (100) times, its count reaches `support_floor`, its rate reaches
+  `book_rate_min_bp` (4,000 = 40%), and its rate is at least
   `book_rate_ratio` (10) times `max(baseline, 1 bp)`.
+
+A genre moves a book's rate by a few tens of percent — Jeremiah's poetry
+dashes, Ezra's census numbers, Malachi's `," says` — and a habit moves most of
+it. Over the committed tier the defaults fire nya 8 (1SA's space before `,`
+`;` `?`, PHP's `,` straight into a letter), hin2017 1, and every other corpus
+none (evidence.md).
 
 The row is the book's own fraction: `numerator` its count, `denominator` its
 occurrences, `books` 1, no band. `Usual::BookRate` carries the baseline and the

@@ -407,7 +407,7 @@ fn under_four_judged_books_nothing_fires() {
     assert!(book_rows(&judged(&texts, &JudgingConfig::default())).is_empty());
 }
 
-/// 5% against 0.1% is fifty times the baseline, and still under 10%.
+/// 5% against 0.1% is fifty times the baseline, and still under 40%.
 #[test]
 fn a_rate_under_the_minimum_is_silent() {
     let mut texts: Vec<String> = (0..4).map(|_| comma_book(1_000, 1)).collect();
@@ -418,6 +418,29 @@ fn a_rate_under_the_minimum_is_silent() {
         ..JudgingConfig::default()
     };
     assert_eq!(book_rows(&judged(&texts, &config)).len(), 1);
+}
+
+/// 80% of 99 commas is a book too small to fire, and the same book at 100
+/// fires. A book under `book_rate_min_uses` still sits in the others' median.
+#[test]
+fn a_book_under_the_minimum_uses_is_silent_but_still_compared() {
+    let mut texts: Vec<String> = (0..4).map(|_| comma_book(200, 1)).collect();
+    texts.push(comma_book(99, 80));
+    assert!(book_rows(&judged(&texts, &JudgingConfig::default())).is_empty());
+    texts.push(comma_book(100, 80));
+    assert_eq!(
+        book_rows(&judged(&texts, &JudgingConfig::default())),
+        vec![(
+            5,
+            80,
+            100,
+            Usual::BookRate {
+                baseline_bp: 50,
+                books: 5,
+            }
+        )],
+        "the 99-comma book is one of the five it is compared against"
+    );
 }
 
 /// With the tested book in its own baseline the median of 1%, 1%, 20% and 50%

@@ -56,6 +56,7 @@ pub struct SousSettings {
     // When one book's rate breaks from the rest.
     pub book_rate_ratio: u16,
     pub book_rate_min_bp: u16,
+    pub book_rate_min_uses: u32,
     // The source-compared lane.
     pub z_long: f32,
     pub z_short: f32,
@@ -104,6 +105,7 @@ impl SousSettings {
             doubled_separated: config.doubled_separated,
             book_rate_ratio: config.book_rate_ratio,
             book_rate_min_bp: config.book_rate_min_bp,
+            book_rate_min_uses: config.book_rate_min_uses,
             z_long: config.lengths.z_long,
             z_short: config.lengths.z_short,
             min_verses: config.lengths.min_verses,
@@ -139,6 +141,7 @@ impl SousSettings {
         config.doubled_separated = self.doubled_separated;
         config.book_rate_ratio = self.book_rate_ratio;
         config.book_rate_min_bp = self.book_rate_min_bp;
+        config.book_rate_min_uses = self.book_rate_min_uses;
         config.lengths = LengthConfig {
             z_long: self.z_long,
             z_short: self.z_short,
@@ -382,6 +385,16 @@ pub const SETTING_DOCS: &[SettingDoc] = {
         ),
         at_least(
             doc(
+                "book_rate_min_uses",
+                Count,
+                Thresholds,
+                "One book: least uses",
+                "How many times a book must use a mark before the one-book check may flag that book for it.",
+            ),
+            1.0,
+        ),
+        at_least(
+            doc(
                 "z_long",
                 Decimal,
                 Reference,
@@ -515,6 +528,7 @@ fn fields() -> Vec<(&'static str, Value)> {
         doubled_separated,
         book_rate_ratio,
         book_rate_min_bp,
+        book_rate_min_uses,
         z_long,
         z_short,
         min_verses,
@@ -546,6 +560,7 @@ fn fields() -> Vec<(&'static str, Value)> {
         ("doubled_separated", Bool(doubled_separated)),
         ("book_rate_ratio", U16(book_rate_ratio)),
         ("book_rate_min_bp", U16(book_rate_min_bp)),
+        ("book_rate_min_uses", U32(book_rate_min_uses)),
         ("z_long", F32(z_long)),
         ("z_short", F32(z_short)),
         ("min_verses", U32(min_verses)),
