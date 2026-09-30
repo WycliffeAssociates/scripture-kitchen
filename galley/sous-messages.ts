@@ -455,12 +455,13 @@ function convention(finding: ConventionFinding, pattern: Pattern, site: string, 
     }
     case "ExactNeighbor": {
       const neighbor = String.fromCodePoint(key.neighbor);
-      const reversed = usual.kind === "ExactNeighbor" ? usual.reversed : 0;
+      // A pair of one mark twice (`..`) is its own reversal.
+      const reversed = usual.kind === "ExactNeighbor" && key.neighbor !== pattern.glyph ? usual.reversed : 0;
       const follower = usual.kind === "ExactNeighbor" ? String.fromCodePoint(usual.neighbor) : "";
       // `"...` opening a quotation, reversed, is `."` closing one: a
       // directionless quote cannot be swapped.
       const swapped =
-        !key.directionless && key.neighbor !== pattern.glyph && reversed >= pattern.numerator && reversed >= 5;
+        !key.directionless && reversed >= pattern.numerator && reversed >= 5;
       const pair = glyph + neighbor;
       const reversedPair = neighbor + glyph;
       return {
@@ -477,7 +478,7 @@ function convention(finding: ConventionFinding, pattern: Pattern, site: string, 
         },
         queries: [
           ...query("this", pair),
-          ...(reversed > 0 && key.neighbor !== pattern.glyph ? query("alternative", reversedPair) : []),
+          ...(reversed > 0 ? query("alternative", reversedPair) : []),
           ...query("others", follower === "" ? "" : glyph + follower),
         ],
       };

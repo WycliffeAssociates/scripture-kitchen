@@ -270,9 +270,9 @@ export const SOUS_SETTINGS: { readonly [K in SettingKey]: SettingSpec<K> } = {
     min: 0,
     max: 10000,
     group: "thresholds",
-    label: "Capital left to the word",
+    label: "Lowercase after a mark",
     description:
-      "How rarely this project may follow a mark with a capital for the capital-letter check to still judge the word after it; a mark followed by capitals more often than this, but not often enough to count as the mark's doing, is skipped.",
+      "How rarely a mark may be followed by a capital for a capital after it to be checked; marks between this and the capital setting are left alone.",
   },
   sentence_start_upper_bp: {
     key: "sentence_start_upper_bp",

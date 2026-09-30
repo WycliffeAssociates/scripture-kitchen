@@ -335,8 +335,8 @@ pub const SETTING_DOCS: &[SettingDoc] = {
             "terminal_lower_share_bp",
             ShareBp,
             Thresholds,
-            "Capital left to the word",
-            "How rarely this project may follow a mark with a capital for the capital-letter check to still judge the word after it; a mark followed by capitals more often than this, but not often enough to count as the mark's doing, is skipped.",
+            "Lowercase after a mark",
+            "How rarely a mark may be followed by a capital for a capital after it to be checked; marks between this and the capital setting are left alone.",
         ),
         doc(
             "sentence_start_upper_bp",
