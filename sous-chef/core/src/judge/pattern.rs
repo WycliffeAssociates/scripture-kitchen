@@ -337,7 +337,7 @@ impl Pattern {
 /// One exact run a `RunShape` row lists beside its claim.
 ///
 /// ```text
-/// '"' mixed len 4    ."'"  x27  recurring     ?"'"  x2     .'?"  x1
+/// '"' mixed len 4    ."'"  x27  recurring     ?"'"  x2  recurring     .'?"  x1
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Cluster {
@@ -347,8 +347,9 @@ pub struct Cluster {
     pub atoms: Box<[ScalarKey]>,
     /// Corpus occurrences of this exact run, saturating.
     pub count: u32,
-    /// The run occurs at least `support_floor` times: a convention, outside
-    /// the row's numerator.
+    /// The run, or the run with its sentence-ending marks read as one,
+    /// occurs at least `support_floor` times: a convention, outside the row's
+    /// numerator.
     pub recurring: bool,
     /// The run was longer than [`Cluster::ATOMS`] atoms.
     pub truncated: bool,

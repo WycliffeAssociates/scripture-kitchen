@@ -153,17 +153,21 @@ en_ulb   ';' mixed len 2       26/4,904
    );×8  ';×7  ";×6   each occurs >= support_floor 5: a convention
    ;'×3  ;"×2         left                                -> FIRES 5/4,904
 en_ulb   '"' mixed len 4       31/12,015
-   ."'"×27 recurs; ?"'"×2  .'?"×1  "...×1 left            -> FIRES 4/12,015
+   ."'"×27 recurs; ?"'"×2 recurs as T"'"×29               sentence ends read as one
+   .'?"×1  "...×1 left                                    -> FIRES 2/12,015
 ```
 
-- **Exact sequences, not pools.** Pooling folds `;'` into `';` and clears the
-  swap that is the real signal.
+- **Exact sequences, save one kind.** A run recurs when it, or it with every
+  `Pool::Terminal` mark read as one placeholder, occurs `support_floor`
+  times. The order stays: `.'?"` is `T'T"`, not `T"'"`. Pooling any other
+  kind folds `;'` into `';` and clears the swap that is the real signal, so
+  `;'` still fires.
 - **`support_floor` is the recurrence count.** It already means "enough
   evidence to call it a habit". A correct but rare variant (`?"'"`×2) still
   fires, and a wrong cluster repeated five times passes.
 - The denominator never moves, the glyph's side decides first, and a row left
   with no runs is silent, as for `Placement`.
-- A firing row lists its clusters, recurring ones marked, into
+- A firing row lists its clusters, recurring ones marked by either route, into
   `Findings::clusters` right after it is pushed: at most 8, novel first, with
   3 slots kept for the conventions (`judge::Cluster`, and the wire section in
   [`codec/README.md`](codec/README.md)).

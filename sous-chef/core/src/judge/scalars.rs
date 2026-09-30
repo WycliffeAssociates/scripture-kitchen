@@ -57,7 +57,7 @@ pub(crate) fn judge_corpus(corpus: &[&BookAggregate], config: &JudgingConfig, ou
         if config.channels.run_shape
             && let Some(evidence) = evidence
         {
-            run_shapes(*glyph, evidence, &runs, config, &mut cited, out);
+            run_shapes(*glyph, evidence, &runs, &explained, config, &mut cited, out);
         }
         if config.channels.placement {
             placement(*glyph, marginals, &other, config, &mut cited, out);
@@ -84,12 +84,16 @@ pub(crate) fn judge_corpus(corpus: &[&BookAggregate], config: &JudgingConfig, ou
 ///   ', prev=Nonletter' drops the 30 `),` from its numerator and its sites
 /// `."'"` occurs 27 times, at least support_floor
 ///   it recurs: '" mixed len 4' drops those 27 runs and their sites
+/// `?"'"` x2 and `!"'"` x1 pool with it as `T"'"` x30, sentence ends as one
+///   they recur too; `.'?"` x1 is another order and does not
 /// ```
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Explained {
     /// Glyphs whose ExactNeighbor is entitled, ascending.
     leaders: Vec<ScalarKey>,
-    /// Exact runs occurring at least `support_floor` times, ascending.
+    /// Exact runs that recur, ascending: the run itself, or the run with
+    /// every sentence-ending mark read as one, occurs at least
+    /// `support_floor` times.
     clusters: Vec<Box<[ScalarKey]>>,
 }
 
@@ -154,11 +158,21 @@ fn learned<'a>(
     config: &JudgingConfig,
 ) -> (Explained, MergedRuns<'a>, FxHashMap<ScalarKey, RunEvidence>) {
     let runs = merged_runs(corpus);
+    let floor = u64::from(config.support_floor);
+    let mut pooled: FxHashMap<Box<[ScalarKey]>, u64> = FxHashMap::default();
+    for &(atoms, count) in &runs {
+        if let Some(key) = terminals_pooled(atoms) {
+            *pooled.entry(key).or_default() += count;
+        }
+    }
     let mut explained = Explained {
         leaders: Vec::new(),
         clusters: runs
             .iter()
-            .filter(|&&(_, count)| count >= u64::from(config.support_floor))
+            .filter(|&&(atoms, count)| {
+                count >= floor
+                    || terminals_pooled(atoms).is_some_and(|key| pooled[&key] >= floor)
+            })
             .map(|&(atoms, _)| atoms.into())
             .collect(),
     };
@@ -172,6 +186,25 @@ fn learned<'a>(
     }
     explained.seal();
     (explained, runs, shapes)
+}
+
+/// The run with every `Pool::Terminal` atom read as one placeholder, order
+/// kept, or `None` for a run holding no terminal, which pools with nothing.
+///
+/// ```text
+/// ."'"  ?"'"  !"'"   -> T"'"      one convention
+/// .'?"               -> T'T"      its own
+/// ;'                 -> None      `;` is a separator
+/// ```
+fn terminals_pooled(atoms: &[ScalarKey]) -> Option<Box<[ScalarKey]>> {
+    let terminal =
+        |atom: &ScalarKey| atom.scalar().is_some_and(|c| pool_of(c) == Pool::Terminal);
+    atoms.iter().any(terminal).then(|| {
+        atoms
+            .iter()
+            .map(|atom| if terminal(atom) { ScalarKey::NONE } else { *atom })
+            .collect()
+    })
 }
 
 /// Every exact run's corpus count, and the runs holding each atom, so a
@@ -522,6 +555,7 @@ pub(super) fn run_shapes(
     glyph: ScalarKey,
     evidence: &RunEvidence,
     runs: &RunIndex<'_>,
+    explained: &Explained,
     config: &JudgingConfig,
     cited: &mut Explained,
     out: &mut Findings,
@@ -550,8 +584,8 @@ pub(super) fn run_shapes(
         };
         cited.clusters.extend(
             runs.holding(glyph)
-                .filter(|&(atoms, count)| {
-                    count >= u64::from(config.support_floor)
+                .filter(|&(atoms, _)| {
+                    explained.recurs(atoms.iter().copied())
                         && shape_of(atoms, glyph) == Some((pure, bucket))
                 })
                 .map(|(atoms, _)| Box::<[ScalarKey]>::from(atoms)),
@@ -571,7 +605,7 @@ pub(super) fn run_shapes(
                 count: saturate(usual_count),
             },
         });
-        for cluster in clusters(glyph, (pure, bucket), runs, config) {
+        for cluster in clusters(glyph, (pure, bucket), runs, explained) {
             out.push_cluster(Cluster {
                 pattern: index,
                 ..cluster
@@ -587,12 +621,13 @@ fn clusters(
     glyph: ScalarKey,
     shape: (bool, u8),
     runs: &RunIndex<'_>,
-    config: &JudgingConfig,
+    explained: &Explained,
 ) -> Vec<Cluster> {
+    let recurs = |atoms: &[ScalarKey]| explained.recurs(atoms.iter().copied());
     let (mut recurring, mut novel): (Vec<_>, Vec<_>) = runs
         .holding(glyph)
         .filter(|(atoms, _)| shape_of(atoms, glyph) == Some(shape))
-        .partition(|(_, count)| *count >= u64::from(config.support_floor));
+        .partition(|(atoms, _)| recurs(atoms));
     let order =
         |a: &(&[ScalarKey], u64), b: &(&[ScalarKey], u64)| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0));
     recurring.sort_by(order);
@@ -612,7 +647,7 @@ fn clusters(
             pattern: PatternIndex::new(0),
             atoms: atoms[..atoms.len().min(Cluster::ATOMS)].into(),
             count: saturate(count),
-            recurring: count >= u64::from(config.support_floor),
+            recurring: recurs(atoms),
             truncated: atoms.len() > Cluster::ATOMS,
         })
         .collect()

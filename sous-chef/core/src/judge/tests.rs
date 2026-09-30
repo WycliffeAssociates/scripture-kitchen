@@ -215,6 +215,56 @@ fn a_run_that_recurs_exactly_leaves_the_run_shape_numerator() {
     assert_eq!(row(&findings), None, "every mixed pair recurs");
 }
 
+/// `."'"` x3, `?"'"` and `!"'"` are `T"'"` x5 with the sentence ends read as
+/// one, so all three recur; `.'?"` keeps another order and is what is left.
+/// `;` is a separator, not a terminal, so `;'` pools with nothing and fires.
+#[test]
+fn a_run_recurs_when_its_sentence_ends_pooled_recur() {
+    let texts = [
+        "a\" b; c ".repeat(3_000),
+        format!(
+            "{}{}{}",
+            "go.\"'\" x ".repeat(3),
+            "go?\"'\" y go!\"'\" z go.'?\" w ",
+            "(x); ".repeat(8) + &"c;' d ".repeat(3)
+        ),
+    ];
+    let findings = judged(&texts, &JudgingConfig::default());
+    let row = |glyph: char, bucket: u8| {
+        findings.patterns().iter().position(|row| {
+            row.glyph == ScalarKey::of(glyph)
+                && row.key
+                    == PatternKey::RunShape {
+                        pure: false,
+                        bucket,
+                    }
+        })
+    };
+    let quote = row('"', 4).expect("`.'?\"` is left");
+    let pattern = &findings.patterns()[quote];
+    assert_eq!((pattern.numerator, pattern.denominator), (1, 3_006));
+    let listed: Vec<(String, u32, bool)> = findings
+        .clusters()
+        .iter()
+        .filter(|cluster| usize::from(cluster.pattern.get()) == quote)
+        .map(|cluster| {
+            let text = cluster.atoms.iter().filter_map(|atom| atom.scalar()).collect();
+            (text, cluster.count, cluster.recurring)
+        })
+        .collect();
+    assert_eq!(
+        listed,
+        vec![
+            (".\"'\"".to_string(), 3, true),
+            ("!\"'\"".to_string(), 1, true),
+            (".'?\"".to_string(), 1, false),
+            ("?\"'\"".to_string(), 1, true),
+        ]
+    );
+    let semicolon = &findings.patterns()[row(';', 2).expect("`;'` still fires")];
+    assert_eq!(semicolon.numerator, 3);
+}
+
 /// A row lists its clusters: the swap it counts beside the order that recurs.
 #[test]
 fn a_run_shape_row_lists_its_clusters() {
