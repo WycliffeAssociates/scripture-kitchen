@@ -260,7 +260,7 @@ test("decodes the pattern table the judge published", () => {
       denominator: 48213,
       shareBp: 0,
       books: 1,
-      usual: { kind: "Rarity", glyph: 0x7e, count: 12 },
+      usual: { kind: "Rarity", glyph: 0x27, count: 1378, lookalike: true },
     },
     {
       glyph: 0x3f,
@@ -389,7 +389,7 @@ test("decodes the pattern table the judge published", () => {
   // Every field the reader refuses, one at a time.
   const start = FIRST_RECORD;
   for (const [offset, byte] of [
-    [11, 1],   // flags
+    [11, 2],   // flags: past the lookalike bit
     [23, 1],   // reserved
     [8, 11],   // channel: past the table
     [10, 0],   // band: a step on a Rarity row
@@ -401,6 +401,14 @@ test("decodes the pattern table the judge published", () => {
     torn[start + offset] = byte;
     expectOpenFailure(torn);
   }
+  // The lookalike flag belongs to a Rarity row, and to one that names a usual.
+  const flaggedNeighbor = hexFixture("corpus_v2_hygiene.hex");
+  flaggedNeighbor[start + PATTERN_ROW_LEN + 11] = 1;
+  expectOpenFailure(flaggedNeighbor);
+  const flaggedNone = hexFixture("corpus_v2_hygiene.hex");
+  new DataView(flaggedNone.buffer).setUint32(start + PATTERN_USUAL_OFFSET, 0, true);
+  new DataView(flaggedNone.buffer).setUint32(start + PATTERN_USUAL_COUNT_OFFSET, 0, true);
+  expectOpenFailure(flaggedNone);
   // Channel 1 is a live channel; its key byte is a POOLS index.
   const badPool = hexFixture("corpus_v2_hygiene.hex");
   badPool[start + 2 * PATTERN_ROW_LEN + 9] = POOLS.length;

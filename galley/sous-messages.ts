@@ -86,7 +86,7 @@ export interface ParamsById {
   "convention.runShape": { glyph: Glyph; cluster: Glyph; size: number; atLeast: boolean; sameMark: boolean; clusterCount: number; hasUsualCluster: boolean; usualCluster: Glyph; usualClusterCount: number; usualSize: number; usualAtLeast: boolean; usualSameMark: boolean; usualShapeCount: number; usually: boolean } & Spread;
   "convention.placement.follows": { glyph: Glyph; digit: boolean; neighbor: TouchClass; usual: TouchClass; usualCount: number } & Spread;
   "convention.placement.precedes": { glyph: Glyph; digit: boolean; neighbor: TouchClass; usual: TouchClass; usualCount: number } & Spread;
-  "convention.rarity": { glyph: Glyph; count: number; books: number; bookTotal: number; hasUsual: boolean; usual: Glyph; usualCount: number };
+  "convention.rarity": { glyph: Glyph; count: number; books: number; bookTotal: number; hasUsual: boolean; usual: Glyph; usualCount: number; lookalike: boolean };
   "convention.casing": { word: string; form: FormName; usualForm: FormName; usualWord: string; usualCount: number; hasBefore: boolean; before: Glyph; beforeContext: BeforeContext; beforeLower: number; beforeCased: number } & Spread;
   "convention.wordLength": { word: string; count: number };
   "convention.doubled.bare": { word: string; text: string } & Spread;
@@ -418,6 +418,7 @@ function convention(pattern: Pattern, site: string, context: MessageContext): Me
           hasUsual: other !== null,
           usual: other === null ? "" : glyphText(other),
           usualCount: usual.kind === "Rarity" ? usual.count : 0,
+          lookalike: usual.kind === "Rarity" && usual.lookalike,
         },
       };
     }

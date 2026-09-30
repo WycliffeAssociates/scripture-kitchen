@@ -1,5 +1,6 @@
 //! `cargo run -p sous-core --bin gen-unicode` — regenerate the two committed
-//! Unicode tables from the pinned UCD 17.0.0 extracts in `testdata/ucd/`.
+//! Unicode tables from the pinned UCD 17.0.0 extracts in `testdata/ucd/`, the
+//! UTS #39 `confusables.txt` of the same version among them.
 //!
 //! The class table's home is `mise`, which takes no dependencies and so cannot
 //! host a generator that wants a hash map; the generator stays here, beside the
@@ -18,6 +19,8 @@
 //!                                      bracket
 //!                        DIRECTIONLESS sorted `Po` scalars that pool as a
 //!                                      quote: `"`, `'`, and their fullwidths
+//!                        LOOKALIKES    sorted (scalar, skeleton), the marks
+//!                                      `confusables.txt` draws alike
 //! ```
 //!
 //! Never a `build.rs`: both tables are committed, reviewable artifacts, and a
@@ -56,7 +59,11 @@ fn main() -> std::io::Result<()> {
     let pools = pools(&ucd);
     let closers = in_pool(&ucd, &pools, "Pe", 1);
     let directionless = in_pool(&ucd, &pools, "Po", 0);
-    std::fs::write(&pools_out, render_pools(&pools, &closers, &directionless))?;
+    let lookalikes = lookalikes(&ucd, &classes);
+    std::fs::write(
+        &pools_out,
+        render_pools(&pools, &closers, &directionless, &lookalikes),
+    )?;
     Ok(())
 }
 
@@ -226,6 +233,70 @@ fn in_pool(ucd: &Path, pools: &[(u32, u8)], category: &str, pool: u8) -> Vec<u32
     out
 }
 
+// ── The lookalikes ───────────────────────────────────────────────────────
+
+/// Every punctuation or symbol scalar that shares a `confusables.txt`
+/// skeleton with another, beside its skeleton's id.
+///
+/// ```text
+/// 2019 ; 0027        ’ → '     one skeleton: ' ’ ‘ ` ´ ＇ …
+/// 201C ; 0027 0027   “ → ''    another:      " “ ” ＂ ״ …
+/// 2014 ; 30FC        — → ー    a third, without its letter prototype
+/// ```
+///
+/// A scalar's skeleton is its mapping, or itself when it maps nowhere. Only
+/// `P*` and `S*` scalars are members, so a letter prototype such as `ー`
+/// names a skeleton without joining it; a skeleton with one member draws
+/// nothing alike and is dropped. Ids number the skeletons in sorted order.
+fn lookalikes(ucd: &Path, class: &[u16]) -> Vec<(u32, u16)> {
+    let path = ucd.join("confusables.txt");
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|error| {
+        panic!(
+            "pinned confusables extract {} must be present: {error}",
+            path.display()
+        )
+    });
+    let mark = |cp: u32| class[cp as usize] & (bits::PUNCTUATION | bits::SYMBOL) != 0;
+    let mut skeletons: std::collections::BTreeMap<Vec<u32>, Vec<u32>> = Default::default();
+    for line in text.lines() {
+        let body = line.split('#').next().unwrap_or("").trim();
+        if body.is_empty() {
+            continue;
+        }
+        let mut fields = body.split(';').map(str::trim);
+        let source = hex(fields.next().expect("a source scalar"));
+        let target: Vec<u32> = fields
+            .next()
+            .expect("a target sequence")
+            .split_whitespace()
+            .map(hex)
+            .collect();
+        if mark(source) {
+            skeletons.entry(target).or_default().push(source);
+        }
+    }
+    let mut rows = Vec::new();
+    let mut id = 0u16;
+    for (target, mut members) in skeletons {
+        if let [prototype] = target[..]
+            && mark(prototype)
+        {
+            members.push(prototype);
+        }
+        if members.len() < 2 {
+            continue;
+        }
+        rows.extend(members.into_iter().map(|cp| (cp, id)));
+        id = id.checked_add(1).expect("skeletons fit a u16");
+    }
+    rows.sort_unstable();
+    assert!(
+        rows.windows(2).all(|pair| pair[0].0 != pair[1].0),
+        "a scalar has one skeleton"
+    );
+    rows
+}
+
 fn paint(ucd: &Path, file: &str, wanted: &[&str], value: u8, pool: &mut [u8]) {
     for_each_range(&ucd.join(file), |property, lo, hi| {
         if wanted.contains(&property) {
@@ -236,7 +307,12 @@ fn paint(ucd: &Path, file: &str, wanted: &[&str], value: u8, pool: &mut [u8]) {
     });
 }
 
-fn render_pools(rows: &[(u32, u8)], closers: &[u32], directionless: &[u32]) -> String {
+fn render_pools(
+    rows: &[(u32, u8)],
+    closers: &[u32],
+    directionless: &[u32],
+    lookalikes: &[(u32, u16)],
+) -> String {
     let mut out = String::with_capacity(1 << 16);
     let _ = write!(
         out,
@@ -278,6 +354,28 @@ fn render_pools(rows: &[(u32, u8)], closers: &[u32], directionless: &[u32]) -> S
         directionless.len(),
     );
     emit_scalars(&mut out, directionless);
+    let skeletons = lookalikes
+        .iter()
+        .map(|row| row.1)
+        .max()
+        .map_or(0, |id| id + 1);
+    let _ = write!(
+        out,
+        "\n/// {} punctuation and symbol scalars in {skeletons} `confusables.txt` skeletons,\n\
+         /// sorted by scalar; two scalars look alike when their ids are equal.\n\
+         /// `lookalike_of` binary searches it.\n\
+         #[rustfmt::skip]\n\
+         pub(super) static LOOKALIKES: &[(u32, u16)] = &[\n",
+        lookalikes.len(),
+    );
+    for chunk in lookalikes.chunks(4) {
+        out.push_str("   ");
+        for &(cp, id) in chunk {
+            let _ = write!(out, " (0x{cp:05X}, {id}),");
+        }
+        out.push('\n');
+    }
+    out.push_str("];\n");
     out
 }
 

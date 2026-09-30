@@ -29,7 +29,7 @@ use crate::substrate::{
 };
 use mise::unicode::class_of;
 
-use crate::unicode::{Pool, pool_of};
+use crate::unicode::{Pool, look_alike, pool_of};
 use crate::words::{
     DoubleTally, Form, LETTER_RUN_MAX, LETTER_RUN_MIN, MovedWords, RunTally, WordAggregate,
     WordTally, WordTotals, letter_run_lane,
@@ -50,7 +50,7 @@ pub use pattern::{
     BOOK_RATE_MIN_BOOKS, Channel, Cluster, Pattern, PatternIndex, PatternKey, Side, Usual,
 };
 pub use scalars::{Explained, books_touched};
-pub(crate) use scalars::{judge_corpus, pool_of_key, rarity_kin, share_bp};
+pub(crate) use scalars::{judge_corpus, pool_of_key, rarity_kin, rarity_lookalike, share_bp};
 use scalars::{most, reported_share, saturate, shape_of};
 use terminals::seek;
 pub use terminals::{TerminalCount, TerminalTable, merged_follows};

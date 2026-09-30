@@ -191,11 +191,13 @@ pub enum Usual {
     },
     /// The glyph's most common run shape and its runs.
     RunShape { pure: bool, bucket: u8, count: u32 },
-    /// The most common other scalar in the glyph's pool and its count;
-    /// `None` when the pool holds nothing else.
+    /// The most common mark `confusables.txt` draws like the glyph (`'` for
+    /// `’`) and its count, with `lookalike` set; else the most common other
+    /// mark of the glyph's pool. `None` when neither exists.
     Rarity {
         glyph: Option<ScalarKey>,
         count: u32,
+        lookalike: bool,
     },
     /// The word's most common form in free positions and its count.
     Casing { form: Form, count: u32 },
@@ -305,8 +307,18 @@ impl Pattern {
             (Channel::RunShape, Usual::RunShape { bucket, count, .. }) => {
                 (1..=RUN_BUCKETS as u8).contains(&bucket) && within(count)
             }
-            (Channel::Rarity, Usual::Rarity { glyph, count }) => match glyph {
-                None => count == 0,
+            (
+                Channel::Rarity,
+                Usual::Rarity {
+                    glyph,
+                    count,
+                    lookalike,
+                },
+            ) => match glyph {
+                None => count == 0 && !lookalike,
+                Some(glyph) if lookalike => {
+                    rarity_lookalike(self.glyph, glyph) && count > 0 && within(count)
+                }
                 Some(glyph) => rarity_kin(self.glyph, glyph) && count > 0 && within(count),
             },
             (Channel::Casing, Usual::Casing { form, count }) => {

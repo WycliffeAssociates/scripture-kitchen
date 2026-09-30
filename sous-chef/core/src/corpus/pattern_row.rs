@@ -47,6 +47,12 @@ pub(super) fn encode_pattern(pattern: &Pattern) -> [u8; PATTERN_ROW_LEN] {
     row[PATTERN_CHANNEL_OFFSET] = pattern.channel as u8;
     row[PATTERN_KEY_OFFSET] = key;
     row[PATTERN_BAND_OFFSET] = pattern.band.unwrap_or(PATTERN_BAND_NONE);
+    if let Usual::Rarity {
+        lookalike: true, ..
+    } = pattern.usual
+    {
+        row[PATTERN_FLAGS_OFFSET] = PATTERN_LOOKALIKE;
+    }
     row[PATTERN_NUMERATOR_OFFSET..PATTERN_DENOMINATOR_OFFSET]
         .copy_from_slice(&pattern.numerator.to_le_bytes());
     row[PATTERN_DENOMINATOR_OFFSET..PATTERN_SHARE_OFFSET]
@@ -77,7 +83,7 @@ fn usual_lanes(pattern: &Pattern) -> (u32, u32, u32) {
             bucket,
             count,
         } => ((u32::from(pure) << 4) | u32::from(bucket), count, 0),
-        Usual::Rarity { glyph, count } => (glyph.map_or(0, ScalarKey::raw), count, 0),
+        Usual::Rarity { glyph, count, .. } => (glyph.map_or(0, ScalarKey::raw), count, 0),
         Usual::Casing { form, count } => (form as u32, count, 0),
         Usual::BookRate { baseline_bp, books } => {
             let book = match pattern.key {
@@ -90,9 +96,19 @@ fn usual_lanes(pattern: &Pattern) -> (u32, u32, u32) {
 }
 
 /// The inverse of [`usual_lanes`]: a value outside the channel's domain is
-/// `Err(field)`, and so is a lane the channel does not use holding anything.
-fn read_usual(channel: Channel, usual: u32, count: u32, other: u32) -> Result<Usual, &'static str> {
+/// `Err(field)`, and so is a lane the channel does not use holding anything,
+/// or the lookalike flag on any channel but `Rarity`.
+fn read_usual(
+    channel: Channel,
+    usual: u32,
+    count: u32,
+    other: u32,
+    lookalike: bool,
+) -> Result<Usual, &'static str> {
     let unused = |lane: u32, field| if lane == 0 { Ok(()) } else { Err(field) };
+    if lookalike && channel != Channel::Rarity {
+        return Err("flags");
+    }
     let byte = u8::try_from(usual).map_err(|_| "usual");
     Ok(match channel {
         Channel::Placement => {
@@ -123,7 +139,11 @@ fn read_usual(channel: Channel, usual: u32, count: u32, other: u32) -> Result<Us
                 0 => None,
                 raw => Some(ScalarKey::from_raw(raw).ok_or("usual")?),
             };
-            Usual::Rarity { glyph, count }
+            Usual::Rarity {
+                glyph,
+                count,
+                lookalike,
+            }
         }
         Channel::Casing => {
             unused(other, "other_count")?;
@@ -159,7 +179,8 @@ pub(super) fn decode_pattern(
     book_count: usize,
 ) -> Result<Pattern, CorpusWireError> {
     let bad = |field: &'static str| CorpusWireError::InvalidPattern { row, field };
-    if bytes[PATTERN_FLAGS_OFFSET] != 0 {
+    let flags = bytes[PATTERN_FLAGS_OFFSET];
+    if flags & !PATTERN_LOOKALIKE != 0 {
         return Err(bad("flags"));
     }
     if bytes[PATTERN_RESERVED_OFFSET] != 0 {
@@ -293,6 +314,7 @@ pub(super) fn decode_pattern(
         read_u32(bytes, PATTERN_USUAL_OFFSET),
         read_u32(bytes, PATTERN_USUAL_COUNT_OFFSET),
         read_u32(bytes, PATTERN_OTHER_COUNT_OFFSET),
+        flags & PATTERN_LOOKALIKE != 0,
     )
     .map_err(bad)?;
     let pattern = Pattern {

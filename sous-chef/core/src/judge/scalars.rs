@@ -304,12 +304,18 @@ pub(super) fn roster(
         if is_letter(glyph) && !letters {
             continue;
         }
-        let usual = most(
-            scalars
-                .iter()
-                .filter(|(other, _)| rarity_kin(glyph, *other))
-                .map(|(other, tally)| (*other, tally.count)),
-        );
+        let among = |kin: fn(ScalarKey, ScalarKey) -> bool| {
+            most(
+                scalars
+                    .iter()
+                    .filter(|(other, _)| kin(glyph, *other))
+                    .map(|(other, tally)| (*other, tally.count)),
+            )
+        };
+        let (usual, lookalike) = match among(rarity_lookalike) {
+            Some(found) => (Some(found), true),
+            None => (among(rarity_kin), false),
+        };
         out.push_pattern(Pattern {
             glyph,
             channel: Channel::Rarity,
@@ -322,6 +328,7 @@ pub(super) fn roster(
             usual: Usual::Rarity {
                 glyph: usual.map(|(other, _)| other),
                 count: usual.map_or(0, |(_, count)| saturate(count)),
+                lookalike,
             },
         });
     }
@@ -831,6 +838,15 @@ pub(crate) fn rarity_kin(glyph: ScalarKey, other: ScalarKey) -> bool {
         && pool_of_key(other) == pool
         && is_mark(glyph)
         && is_mark(other)
+}
+
+/// Whether `other` may stand as a rare `glyph`'s lookalike usual: another
+/// mark `confusables.txt` draws like it, whatever its pool (`'` for `’`).
+pub(crate) fn rarity_lookalike(glyph: ScalarKey, other: ScalarKey) -> bool {
+    match (glyph.scalar(), other.scalar()) {
+        (Some(a), Some(b)) => is_mark(glyph) && is_mark(other) && look_alike(a, b),
+        _ => false,
+    }
 }
 
 /// Neither a letter, a space, a digit, nor the wire's U+0000.

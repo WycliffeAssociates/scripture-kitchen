@@ -85,8 +85,8 @@ JOB 41:15  …which are a terror? \q \v 15 his back is made up of rows of shield
            After [?], this project capitalizes the next word 2,162 of 2,165 times. Here “his”
            is lowercase.
 JOS 21:5   The rest of Kohath’s descendants…
-           [’] appears only 2 times, in 2 of 66 books, in this whole project. The most common
-           mark of the same kind is ["] (12,046 times).
+           [’] appears only 2 times, in 2 of 66 books, in this whole project. This project
+           writes ['] elsewhere (6,292 times).
 PSA 81:1   Shout joyfullly to God our strength
            [l] is written 3 times in a row here (“joyfullly”). Of the 24,318 places this
            project repeats [l], this is the only one with 3.
@@ -186,7 +186,7 @@ Questions below: **1** seen, **2** how often, **3** normal instead,
 | `convention.exactNeighbor.swapped` | the same pair, which the project writes the other way round at least as often and at least 5 times; never when either mark is a directionless quote (`"`, `'`), which cannot say whether it opens or closes | `glyph` `neighbor` `pair` (1); `count` (2); `reversedPair` `reversed` (3) | (curly quotes) [”] comes right before [.] here ([”.]). This project writes them the other way round, [.”], 974 times; [”.] appears 3 times. |
 | `convention.pooledNeighbor` | the glyph is directly followed by a kind of mark it rarely precedes (off by default) | `glyph` `pool` (1); `count` `total` (2); `books` `bookTotal` (4) | ['] is followed directly by a dash here. Of the 496 times another mark follows ['], this kind of mark follows it 6 times, in 5 of 66 books. |
 | `convention.runShape` | the glyph sits in a group of marks the project rarely writes | `cluster` `size` `atLeast` `sameMark` `glyph` `clusterCount` (1); `count` `total` (2); `usualCluster` `usualClusterCount` `hasUsualCluster` `usualSize` `usualAtLeast` `usualSameMark` `usualShapeCount` `usually` (3); `books` `bookTotal` (4) | [;'] is a group of 2 marks, [;] among them, and this exact group appears 3 times. This project usually writes [';] (7 times). [;] usually stands alone (4,878 of 4,904 times). Unusual groups of this size holding [;] appear 5 times, in 1 of 66 books. |
-| `convention.rarity` | a character the project almost never uses | `glyph` (1); `count` (2); `hasUsual` `usual` `usualCount` (3); `books` `bookTotal` (4) | [–] appears only once in this whole project. The most common mark of the same kind is [—] (1,795 times). |
+| `convention.rarity` | a character the project almost never uses | `glyph` (1); `count` (2); `hasUsual` `usual` `usualCount` `lookalike` (3); `books` `bookTotal` (4) | [–] appears only once in this whole project. This project writes [-] elsewhere (847 times). With `lookalike` false the usual is only the pool's most common mark: “The most common mark of the same kind is …”. `lookalike` is true when Unicode's `confusables.txt` draws the two alike (`’`/`'`, `“`/`"`, `–`/`-`; not `—`/`–`). |
 | `convention.casing` | a word in a case form the project rarely gives it mid-sentence | `word` `form` (1); `count` `total` (2); `usualForm` `usualWord` `usualCount`, and `hasBefore` `before` `beforeContext` `beforeLower` `beforeCased` from `context.before` (3); `books` `bookTotal` (4) | “On” is capitalized here. In the middle of a sentence this project writes it “on” 4,197 of 4,201 times; this form appears 4 times, in 2 of 66 books. |
 | `convention.wordLength` | a word far longer than the project's usual word (off by default) | `word` (1); `count` (2) | “uncircumcised” is much longer than most words in this project. It appears 40 times. |
 | `convention.doubled.bare` | a word written twice with only a space between | `word` `text` (1); `count` `total` (2) | “a” is written twice in a row here (“a a”). The project does this nowhere else; “a” appears 9,280 times. |

@@ -359,8 +359,9 @@ fn every_row_names_what_is_usual_instead() {
         Some(Usual::Rarity {
             glyph: Some(ScalarKey::of('\'')),
             count: 1_378,
+            lookalike: true,
         }),
-        "the most common other Quote"
+        "`'` is drawn like `’`"
     );
 }
 
@@ -384,6 +385,7 @@ fn a_rarity_usual_is_never_a_letter_or_a_space() {
     let none = Some(Usual::Rarity {
         glyph: None,
         count: 0,
+        lookalike: false,
     });
     assert_eq!(usual('Q'), none, "a letter");
     assert_eq!(usual('\u{a7}'), none, "`§` pools as Other");

@@ -87,7 +87,7 @@ Decoding refuses rather than guesses:
 | a convention reasons bit outside the table | `UnknownReasons` |
 | `SATURATED` on a convention row | `UnknownFlags` |
 | a convention `pattern_idx` at or past `pattern_count`, or a direct `pattern(index)` call past the table | `PatternIndexPastTable` |
-| a pattern row's reserved byte or `flags` set | `InvalidPattern` |
+| a pattern row's reserved byte set, a `flags` bit other than `LOOKALIKE`, or `LOOKALIKE` on a row that is not `Rarity` or names no usual | `InvalidPattern` |
 | a pattern channel, key, band, or share outside its table | `InvalidPattern` |
 | a `Casing` key byte of `Uncased` | `InvalidPattern` |
 | a `Doubled` key byte above 1 | `InvalidPattern` |
@@ -153,7 +153,7 @@ position matched — so ten thousand sites of one convention cost ten thousand
 | 8 | `channel: u8` (`Channel` discriminant, finest grain first) |
 | 9 | `key: u8` (Placement and BookRate: `side << 4 \| OuterClass`; RunShape: `pure << 4 \| bucket`; PooledNeighbor: `Pool`; Casing: `Form`; WordLength: whole deviations above the mean; Doubled: 0 adjacent, 1 separated; LetterRun: run length `2..=8`; SentenceStart: 0; else 0) |
 | 10 | `band: u8` (staircase step index; `0xFF` = none, which only `Rarity` and `BookRate` carry) |
-| 11 | `flags: u8` (reserved, 0; the decoder refuses nonzero) |
+| 11 | `flags: u8` — bit 0 `LOOKALIKE`, on a `Rarity` row only: its usual is the glyph's lookalike; every other bit refused |
 | 12..16 | `numerator: u32` |
 | 16..20 | `denominator: u32` |
 | 20..22 | `share_bp: u16`, at most 10,000 |
@@ -176,7 +176,7 @@ the channel's domain is `InvalidPattern`. Rust reads them as `Pattern::usual`
 | `Placement` | the `OuterClass` most common on that side, `Edge` excluded | its count, at most the denominator | 0 |
 | `ExactNeighbor` | the scalar that most often follows the glyph in a run | its in-run positions, at most the denominator | the row's pair reversed (neighbour then glyph) in runs |
 | `RunShape` | the glyph's most common shape as a key byte, `(pure << 4) \| bucket` | its runs, at most the denominator | 0 |
-| `Rarity` | the most common other mark in the glyph's `Pool`: never a letter, space, digit, or U+0000; 0 for a letter, for `Pool::Other` (letters, spaces and unlisted marks), or when the pool holds nothing else | its corpus count; 0 with a `usual` of 0 | 0 |
+| `Rarity` | with `LOOKALIKE`, the most common mark sharing the glyph's `confusables.txt` skeleton (`'` for `’`); else the most common other mark in the glyph's `Pool`. Never a letter, space, digit, or U+0000; 0 for a letter, for a mark with no lookalike in `Pool::Other` (letters, spaces and unlisted marks), or when neither holds anything else | its corpus count; 0 with a `usual` of 0 | 0 |
 | `Casing` | the word's most common `Form` in free positions, never `Uncased` | its count, at most the denominator | 0 |
 | `BookRate` | the median rate of the other judged books, basis points, at most 10,000 | how many other judged books, at least 3 | the book, a directory position under `book_count` |
 | every other channel | 0 | 0 | 0 |
@@ -189,8 +189,15 @@ one. The generated reader carries that list as `DIRECTIONLESS_QUOTES`, from
 `unicode::is_directionless_quote`, and derives `directionless` on an
 `ExactNeighbor` key (glyph or neighbour) and on a cluster (any atom); no byte
 carries it.
+
+A lookalike beats the pool: a reader who wrote `’` once meant `'`, not the
+project's most common quote, `"`. The skeletons are UTS #39 `confusables.txt`
+at the pinned UCD version, restricted to punctuation and symbols
+(`unicode::lookalike_of`, a binary search over 586 rows run for `Rarity` rows
+only). `–` is drawn like `-`, not like `—`, which Unicode draws like `―`.
+
 The generated reader checks every rule here but one: whether a `Rarity` usual
-shares the glyph's pool, which needs the pool table only Rust carries. It
+shares the glyph's pool or skeleton, which needs tables only Rust carries. It
 checks the letter, space and digit rule with `\p{Alphabetic}`, `\p{White_Space}`
 and `\p{Nd}`.
 

@@ -31,8 +31,9 @@ fn fixture_patterns() -> Vec<Pattern> {
             share_bp: 0,
             books: 1,
             usual: Usual::Rarity {
-                glyph: Some(ScalarKey::of('~')),
-                count: 12,
+                glyph: Some(ScalarKey::of('\'')),
+                count: 1_378,
+                lookalike: true,
             },
         },
         Pattern {
@@ -766,7 +767,7 @@ fn pattern_table_round_trips() {
     // Every field the decoder refuses, one at a time.
     let start = HEADER_BYTES + DIRECTORY_ENTRY_BYTES + 16;
     for (offset, byte, field) in [
-        (PATTERN_FLAGS_OFFSET, 1u8, "flags"),
+        (PATTERN_FLAGS_OFFSET, 2u8, "flags"),
         (PATTERN_RESERVED_OFFSET, 1, "reserved"),
         (PATTERN_CHANNEL_OFFSET, 11, "channel"),
         (PATTERN_BAND_OFFSET, 0, "band"),
@@ -843,6 +844,7 @@ fn usual_lanes_round_trip_per_channel() {
     alone[0].usual = Usual::Rarity {
         glyph: None,
         count: 0,
+        lookalike: false,
     };
     let books = [PublicationBook::new(BookKey::new(*b"MRK"), "m", 0, &[])];
     let encoded = encode_to_corpus_buffer(
@@ -916,6 +918,25 @@ fn usual_lanes_refuse_what_the_channel_cannot_mean() {
             "row {row} lane {offset} = {value:#x}"
         );
     }
+
+    // The lookalike flag: only on a rarity row, and only over a lookalike.
+    let flagged = |row: usize, flags: u8| {
+        let mut torn = encoded.clone();
+        torn[start + row * PATTERN_ROW_LEN + PATTERN_FLAGS_OFFSET] = flags;
+        CorpusSnapshot::open(&torn).err()
+    };
+    assert_eq!(flagged(EXACT, PATTERN_LOOKALIKE), refused(EXACT, "flags"));
+    assert_eq!(flagged(RARITY, 2), refused(RARITY, "flags"));
+    assert_eq!(
+        flagged(RARITY, 0),
+        refused(RARITY, "usual"),
+        "' is no mark of ` 's pool"
+    );
+    assert_eq!(
+        lane(RARITY, PATTERN_USUAL_OFFSET, '~' as u32),
+        refused(RARITY, "usual"),
+        "~ is not drawn like `"
+    );
 }
 
 /// `Pattern::validate` is symmetric: a share that disagrees with its own

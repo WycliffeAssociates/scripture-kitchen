@@ -164,7 +164,13 @@ fn usual(pattern: &Pattern) -> String {
         Usual::Rarity {
             glyph: Some(other),
             count,
-        } => format!(" usual={} {}", glyph(other), grouped(count)),
+            lookalike,
+        } => format!(
+            " usual={}{} {}",
+            if lookalike { "lookalike " } else { "" },
+            glyph(other),
+            grouped(count)
+        ),
         Usual::Casing { form, count } => format!(" usual={} {}", form.name(), grouped(count)),
         Usual::BookRate { baseline_bp, books } => format!(
             " usual={:.2}% median of {books} other books",

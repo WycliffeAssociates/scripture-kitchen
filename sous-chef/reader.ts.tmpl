@@ -47,6 +47,8 @@ export const PATTERN_CHANNEL_OFFSET = @@PATTERN_CHANNEL_OFFSET@@;
 export const PATTERN_KEY_OFFSET = @@PATTERN_KEY_OFFSET@@;
 export const PATTERN_BAND_OFFSET = @@PATTERN_BAND_OFFSET@@;
 export const PATTERN_FLAGS_OFFSET = @@PATTERN_FLAGS_OFFSET@@;
+/** The one pattern flag: a `Rarity` row's usual is the glyph's lookalike. */
+export const PATTERN_LOOKALIKE = @@PATTERN_LOOKALIKE@@;
 export const PATTERN_NUMERATOR_OFFSET = @@PATTERN_NUMERATOR_OFFSET@@;
 export const PATTERN_DENOMINATOR_OFFSET = @@PATTERN_DENOMINATOR_OFFSET@@;
 export const PATTERN_SHARE_OFFSET = @@PATTERN_SHARE_OFFSET@@;
@@ -225,9 +227,10 @@ export type Usual =
     }
   /** The glyph's most common run shape. */
   | { readonly kind: "RunShape"; readonly pure: boolean; readonly bucket: number; readonly count: number }
-  /** The most common other mark in the glyph's pool; `null` for a letter, a
-   * space, an unpooled mark, or a pool holding nothing else. */
-  | { readonly kind: "Rarity"; readonly glyph: number | null; readonly count: number }
+  /** With `lookalike`, the most common mark Unicode's `confusables.txt` draws
+   * like the glyph (`'` for `’`); else the most common other mark in its
+   * pool. `null` for a letter, a space, or a mark with neither. */
+  | { readonly kind: "Rarity"; readonly glyph: number | null; readonly count: number; readonly lookalike: boolean }
   /** The word's most common form in free positions. */
   | { readonly kind: "Casing"; readonly form: CasingForm; readonly count: number }
   /** The median rate of the other judged books, and how many there are. */
@@ -386,9 +389,20 @@ function isUnmarked(raw: number): boolean {
 
 /** A row's usual lanes as its channel reads them; `null` for a value outside
  * the channel's domain or a lane it does not use holding anything. Whether a
- * rarity's usual shares the glyph's pool is the Rust decoder's check alone:
- * the pool table is not in this reader. */
-function readUsual(channel: Channel, glyph: number, denominator: number, usual: number, count: number, other: number): Usual | null {
+ * rarity's usual shares the glyph's pool or skeleton is the Rust decoder's
+ * check alone: neither table is in this reader. */
+function readUsual(
+  channel: Channel,
+  glyph: number,
+  denominator: number,
+  usual: number,
+  count: number,
+  other: number,
+  lookalike: boolean,
+): Usual | null {
+  if (lookalike && channel !== "Rarity") {
+    return null;
+  }
   if (channel === "ExactNeighbor") {
     return isScalar(usual) && count <= denominator ? { kind: "ExactNeighbor", neighbor: usual, count, reversed: other } : null;
   }
@@ -412,10 +426,10 @@ function readUsual(channel: Channel, glyph: number, denominator: number, usual: 
   }
   if (channel === "Rarity") {
     if (usual === 0) {
-      return count === 0 ? { kind: "Rarity", glyph: null, count } : null;
+      return count === 0 && !lookalike ? { kind: "Rarity", glyph: null, count, lookalike } : null;
     }
     const valid = isScalar(usual) && usual !== glyph && !isUnmarked(usual) && !isUnmarked(glyph) && count > 0;
-    return valid ? { kind: "Rarity", glyph: usual, count } : null;
+    return valid ? { kind: "Rarity", glyph: usual, count, lookalike } : null;
   }
   if (channel === "Casing") {
     const form = CASING_FORMS[usual];
@@ -426,7 +440,8 @@ function readUsual(channel: Channel, glyph: number, denominator: number, usual: 
 
 /** One 36-byte pattern row, refusing every value the encoder cannot write. */
 function readPattern(view: DataView, at: number, row: number, bookCount: number): Pattern {
-  if (view.getUint8(at + PATTERN_FLAGS_OFFSET) !== 0) {
+  const flags = view.getUint8(at + PATTERN_FLAGS_OFFSET);
+  if ((flags & ~PATTERN_LOOKALIKE) !== 0) {
     return fail(`pattern row ${row} has an invalid flags`);
   }
   if (view.getUint8(at + PATTERN_RESERVED_OFFSET) !== 0) {
@@ -567,6 +582,7 @@ function readPattern(view: DataView, at: number, row: number, bookCount: number)
     u32(view, at + PATTERN_USUAL_OFFSET),
     u32(view, at + PATTERN_USUAL_COUNT_OFFSET),
     u32(view, at + PATTERN_OTHER_COUNT_OFFSET),
+    (flags & PATTERN_LOOKALIKE) !== 0,
   );
   if (usual === null) {
     return fail(`pattern row ${row} has an invalid usual`);

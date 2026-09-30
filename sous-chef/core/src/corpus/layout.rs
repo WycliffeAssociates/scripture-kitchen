@@ -38,6 +38,9 @@ pub const PATTERN_CHANNEL_OFFSET: usize = 8;
 pub const PATTERN_KEY_OFFSET: usize = 9;
 pub const PATTERN_BAND_OFFSET: usize = 10;
 pub const PATTERN_FLAGS_OFFSET: usize = 11;
+/// The one pattern flag: a `Rarity` row's usual is the glyph's lookalike
+/// rather than the most common mark of its pool.
+pub const PATTERN_LOOKALIKE: u8 = 1 << 0;
 pub const PATTERN_NUMERATOR_OFFSET: usize = 12;
 pub const PATTERN_DENOMINATOR_OFFSET: usize = 16;
 pub const PATTERN_SHARE_OFFSET: usize = 20;

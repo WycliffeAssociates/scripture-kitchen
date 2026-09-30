@@ -401,3 +401,33 @@ fn the_bit_list_is_the_one_the_charter_authorizes() {
     assert_eq!(class_of('\u{378}'), Class::default());
     assert!(class_of('\u{378}').is_empty());
 }
+
+/// The skeletons a reader would recognise, and the pairs Unicode does not
+/// draw alike: `—` maps to the letter `ー`, `–` to `-`.
+#[test]
+fn lookalikes_follow_the_confusable_skeletons() {
+    use super::{look_alike, lookalike_of};
+    assert!(look_alike('\u{2019}', '\''));
+    assert!(look_alike('\u{2018}', '\u{2019}'));
+    assert!(look_alike('\u{201C}', '"'));
+    assert!(look_alike('\u{2013}', '-'));
+    assert!(look_alike('\u{2014}', '\u{2015}'));
+    assert!(!look_alike('\u{2014}', '\u{2013}'));
+    assert!(!look_alike('"', '\''), "'' is not '");
+    assert!(!look_alike('\'', '\''), "a scalar is not its own lookalike");
+    assert_eq!(lookalike_of('a'), None);
+    assert_eq!(
+        lookalike_of('\u{30FC}'),
+        None,
+        "a letter prototype joins nothing"
+    );
+    for c in scalars() {
+        if lookalike_of(c).is_some() {
+            assert!(
+                class_of(c).is_punctuation() || class_of(c).is_symbol(),
+                "U+{:04X} is a lookalike but no mark",
+                c as u32
+            );
+        }
+    }
+}

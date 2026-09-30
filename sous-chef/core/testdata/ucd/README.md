@@ -1,7 +1,8 @@
 # Unicode Character Database extracts (UCD 17.0.0)
 
 The pinned inputs behind `src/unicode/table.rs`, `src/unicode/pools.rs`, and
-the grapheme-atom conformance gate. They are committed reference data, read only by
+the grapheme-atom conformance gate, with UTS #39's `confusables.txt` of the
+same version. They are committed reference data, read only by
 `bin/gen-unicode.rs` and by tests — `sous-core` opens no file at runtime.
 
 Each extract keeps the file's pristine eight-line header (title, date,
@@ -19,6 +20,7 @@ only the lines the generator reads. `GraphemeBreakTest.txt` and
 | `GraphemeBreakProperty.txt` | `auxiliary/GraphemeBreakProperty.txt` | pristine | extender, complex, gcb-control, prepend |
 | `emoji-data.txt` | `emoji/emoji-data.txt` | Extended_Pictographic | complex |
 | `GraphemeBreakTest.txt` | `auxiliary/GraphemeBreakTest.txt` | pristine | `tests/atom_conformance.rs` only |
+| `confusables.txt` | `https://www.unicode.org/Public/17.0.0/security/confusables.txt` (not under `ucd/`) | the 11-line header, then lines whose source is GC `P*` or `S*` | `LOOKALIKES` in `src/unicode/pools.rs` |
 
 Noncharacters (`U+FDD0..=U+FDEF`, every `U+xxFFFE`/`U+xxFFFF`) are a spec
 constant, not a file.
@@ -35,6 +37,7 @@ xxh3-64 of each committed file, so a silent edit is visible:
 | `GraphemeBreakTest.txt` | `38c0549730f9c575` | 126570 |
 | `PropList.txt` | `86cd819867f34195` | 21783 |
 | `emoji-data.txt` | `dba1f22ec5cbd739` | 39444 |
+| `confusables.txt` | `3ed75ae6793dff71` | 118538 |
 
 ## Reproducing the extracts
 
@@ -56,6 +59,22 @@ From a directory holding the six pristine downloads:
 } > out/PropList.txt
 { sed -n '1,8p' emoji-data.txt; grep -E '; Extended_Pictographic' emoji-data.txt; } > out/emoji-data.txt
 cp GraphemeBreakProperty.txt GraphemeBreakTest.txt out/
+
+# confusables.txt keeps its 11 header lines and every mapping from a mark.
+python3 - out/DerivedGeneralCategory.txt confusables.txt out/confusables.txt <<'EOF'
+import sys
+gc, src, dst = sys.argv[1:4]
+marks = set()
+for line in open(gc, encoding="utf-8"):
+    body = line.split("#")[0].strip()
+    if body and body.split(";")[1].strip()[0] in "PS":
+        lo, _, hi = body.split(";")[0].strip().partition("..")
+        marks.update(range(int(lo, 16), int(hi or lo, 16) + 1))
+lines = open(src, encoding="utf-8").read().split("\n")
+kept = [l for l in lines[11:] if l.split("#")[0].strip()
+        and int(l.split(";")[0], 16) in marks]
+open(dst, "w", encoding="utf-8").write("\n".join(lines[:11] + kept) + "\n")
+EOF
 ```
 
 ## Version discipline
@@ -73,7 +92,8 @@ The pin must match two other things or the gates disagree with each other:
 ## Refreshing to a new Unicode version
 
 1. Re-download the six files from
-   `https://www.unicode.org/Public/<VERSION>/ucd/` and re-run the trim
+   `https://www.unicode.org/Public/<VERSION>/ucd/` and `confusables.txt` from
+   `https://www.unicode.org/Public/<VERSION>/security/`, and re-run the trim
    commands above; update the checksum table.
 2. Bump `unicode-segmentation` to the release targeting that version.
 3. `cargo run -p sous-core --bin gen-unicode`.

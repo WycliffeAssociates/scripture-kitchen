@@ -141,3 +141,25 @@ pub fn is_directionless_quote(c: char) -> bool {
 pub fn directionless_quotes() -> &'static [u32] {
     pools::DIRECTIONLESS
 }
+
+/// The `confusables.txt` skeleton a punctuation or symbol scalar shares with
+/// another, as an id; `None` for a letter, a digit, or a mark nothing else is
+/// drawn like.
+///
+/// ```text
+/// lookalike_of('\u{2019}') == lookalike_of('\'')      // ’ and '
+/// lookalike_of('\u{201C}') == lookalike_of('"')       // “ and ", both ''
+/// lookalike_of('\u{2013}') == lookalike_of('-')       // – and -
+/// lookalike_of('\u{2014}') != lookalike_of('\u{2013}')  // — is not –
+/// ```
+pub fn lookalike_of(c: char) -> Option<u16> {
+    let at = pools::LOOKALIKES
+        .binary_search_by_key(&(c as u32), |row| row.0)
+        .ok()?;
+    Some(pools::LOOKALIKES[at].1)
+}
+
+/// Two different scalars `confusables.txt` draws alike.
+pub fn look_alike(a: char, b: char) -> bool {
+    a != b && lookalike_of(a).is_some_and(|skeleton| lookalike_of(b) == Some(skeleton))
+}
