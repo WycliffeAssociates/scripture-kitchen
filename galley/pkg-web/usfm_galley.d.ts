@@ -582,6 +582,7 @@ export class SousSettings {
     free(): void;
     [Symbol.dispose](): void;
     book_rate_min_bp: number;
+    book_rate_min_uses: number;
     book_rate_ratio: number;
     book_rate: boolean;
     casing: boolean;
@@ -603,6 +604,7 @@ export class SousSettings {
     source_copy_min_run: number;
     source_copy: boolean;
     support_floor: number;
+    terminal_lower_share_bp: number;
     terminal_upper_share_bp: number;
     word_length_sigma: number;
     word_length: boolean;
@@ -867,6 +869,7 @@ export interface InitOutput {
     readonly __wbg_galley_free: (a: number, b: number) => void;
     readonly __wbg_get_soussettings_book_rate: (a: number) => number;
     readonly __wbg_get_soussettings_book_rate_min_bp: (a: number) => number;
+    readonly __wbg_get_soussettings_book_rate_min_uses: (a: number) => number;
     readonly __wbg_get_soussettings_book_rate_ratio: (a: number) => number;
     readonly __wbg_get_soussettings_casing: (a: number) => number;
     readonly __wbg_get_soussettings_doubled: (a: number) => number;
@@ -887,6 +890,7 @@ export interface InitOutput {
     readonly __wbg_get_soussettings_source_copy: (a: number) => number;
     readonly __wbg_get_soussettings_source_copy_min_run: (a: number) => number;
     readonly __wbg_get_soussettings_support_floor: (a: number) => number;
+    readonly __wbg_get_soussettings_terminal_lower_share_bp: (a: number) => number;
     readonly __wbg_get_soussettings_terminal_upper_share_bp: (a: number) => number;
     readonly __wbg_get_soussettings_word_length: (a: number) => number;
     readonly __wbg_get_soussettings_word_length_sigma: (a: number) => number;
@@ -895,6 +899,7 @@ export interface InitOutput {
     readonly __wbg_get_soussettings_z_short: (a: number) => number;
     readonly __wbg_set_soussettings_book_rate: (a: number, b: number) => void;
     readonly __wbg_set_soussettings_book_rate_min_bp: (a: number, b: number) => void;
+    readonly __wbg_set_soussettings_book_rate_min_uses: (a: number, b: number) => void;
     readonly __wbg_set_soussettings_book_rate_ratio: (a: number, b: number) => void;
     readonly __wbg_set_soussettings_casing: (a: number, b: number) => void;
     readonly __wbg_set_soussettings_doubled: (a: number, b: number) => void;
@@ -915,6 +920,7 @@ export interface InitOutput {
     readonly __wbg_set_soussettings_source_copy: (a: number, b: number) => void;
     readonly __wbg_set_soussettings_source_copy_min_run: (a: number, b: number) => void;
     readonly __wbg_set_soussettings_support_floor: (a: number, b: number) => void;
+    readonly __wbg_set_soussettings_terminal_lower_share_bp: (a: number, b: number) => void;
     readonly __wbg_set_soussettings_terminal_upper_share_bp: (a: number, b: number) => void;
     readonly __wbg_set_soussettings_word_length: (a: number, b: number) => void;
     readonly __wbg_set_soussettings_word_length_sigma: (a: number, b: number) => void;

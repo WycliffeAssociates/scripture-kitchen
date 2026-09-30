@@ -1200,6 +1200,13 @@ export class SousSettings {
     /**
      * @returns {number}
      */
+    get book_rate_min_uses() {
+        const ret = wasm.__wbg_get_soussettings_book_rate_min_uses(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * @returns {number}
+     */
     get book_rate_ratio() {
         const ret = wasm.__wbg_get_soussettings_book_rate_ratio(this.__wbg_ptr);
         return ret;
@@ -1347,6 +1354,13 @@ export class SousSettings {
     /**
      * @returns {number}
      */
+    get terminal_lower_share_bp() {
+        const ret = wasm.__wbg_get_soussettings_terminal_lower_share_bp(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
     get terminal_upper_share_bp() {
         const ret = wasm.__wbg_get_soussettings_terminal_upper_share_bp(this.__wbg_ptr);
         return ret;
@@ -1391,6 +1405,12 @@ export class SousSettings {
      */
     set book_rate_min_bp(arg0) {
         wasm.__wbg_set_soussettings_book_rate_min_bp(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @param {number} arg0
+     */
+    set book_rate_min_uses(arg0) {
+        wasm.__wbg_set_soussettings_book_rate_min_uses(this.__wbg_ptr, arg0);
     }
     /**
      * @param {number} arg0
@@ -1517,6 +1537,12 @@ export class SousSettings {
      */
     set support_floor(arg0) {
         wasm.__wbg_set_soussettings_support_floor(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @param {number} arg0
+     */
+    set terminal_lower_share_bp(arg0) {
+        wasm.__wbg_set_soussettings_terminal_lower_share_bp(this.__wbg_ptr, arg0);
     }
     /**
      * @param {number} arg0

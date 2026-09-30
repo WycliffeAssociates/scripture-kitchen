@@ -582,6 +582,7 @@ export class SousSettings {
     free(): void;
     [Symbol.dispose](): void;
     book_rate_min_bp: number;
+    book_rate_min_uses: number;
     book_rate_ratio: number;
     book_rate: boolean;
     casing: boolean;
@@ -603,6 +604,7 @@ export class SousSettings {
     source_copy_min_run: number;
     source_copy: boolean;
     support_floor: number;
+    terminal_lower_share_bp: number;
     terminal_upper_share_bp: number;
     word_length_sigma: number;
     word_length: boolean;
