@@ -23,14 +23,13 @@ use wasm_bindgen::prelude::*;
 
 use mise::utf16::Utf16Table;
 use sous_core::Brigade;
-use sous_core::judge::{Channels, JudgingConfig};
-use sous_core::proportionality::LengthConfig;
 
 use crate::find::Find;
 use crate::mask::Recipe;
 use crate::overlay::Side;
 use crate::pantry::{BookId, Entry, Retain, Role};
 use crate::sous::Expediter;
+pub use crate::sous::SousSettings;
 
 mod find;
 mod mask;
@@ -987,143 +986,5 @@ impl Fingerprint {
     #[wasm_bindgen(js_name = chunkCount)]
     pub fn chunk_count(&self) -> u32 {
         self.0.chunk_count() as u32
-    }
-}
-
-/// The judging settings that cross the wall: every plain scalar of
-/// [`JudgingConfig`], flat, so bindgen writes the getters and setters and JS
-/// assigns `settings.casing = false`.
-///
-/// Not on the wall: `bands` and `word_bands` (a `Staircase` is a validated
-/// ladder, not a plain field), `letters` and `doubles` (tri-state policies),
-/// and the roster bounds. They have no plain-field shape and no consumer has
-/// asked for them; everything not a knob keeps the current config's value
-/// through [`apply`](SousSettings::apply), so widening this later breaks nothing.
-#[wasm_bindgen]
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct SousSettings {
-    // Channels.
-    pub placement: bool,
-    pub run_shape: bool,
-    pub exact_neighbor: bool,
-    pub pooled_neighbor: bool,
-    pub rarity: bool,
-    pub casing: bool,
-    pub word_length: bool,
-    pub doubled: bool,
-    pub letter_runs: bool,
-    pub sentence_start: bool,
-    pub book_rate: bool,
-    // Thresholds.
-    pub support_floor: u32,
-    pub word_support_floor: u32,
-    pub terminal_upper_share_bp: u16,
-    pub sentence_start_upper_bp: u16,
-    pub word_length_sigma: u8,
-    pub doubles_productive_bp: u16,
-    // Which doublings the doubled channel judges.
-    pub doubled_bare: bool,
-    pub doubled_separated: bool,
-    // When one book's rate breaks from the rest.
-    pub book_rate_ratio: u16,
-    pub book_rate_min_bp: u16,
-    // The source-compared lane.
-    pub z_long: f32,
-    pub z_short: f32,
-    pub min_verses: u32,
-    pub lengths_enabled: bool,
-    pub presence: bool,
-    pub source_copy: bool,
-    pub source_copy_min_run: u32,
-}
-
-impl SousSettings {
-    /// Every knob as this config holds it.
-    pub fn from(config: &JudgingConfig) -> Self {
-        let Channels {
-            placement,
-            run_shape,
-            exact_neighbor,
-            pooled_neighbor,
-            rarity,
-            casing,
-            word_length,
-            doubled,
-            letter_runs,
-            sentence_start,
-            book_rate,
-        } = config.channels;
-        Self {
-            placement,
-            run_shape,
-            exact_neighbor,
-            pooled_neighbor,
-            rarity,
-            casing,
-            word_length,
-            doubled,
-            letter_runs,
-            sentence_start,
-            book_rate,
-            support_floor: config.support_floor,
-            word_support_floor: config.word_support_floor,
-            terminal_upper_share_bp: config.terminal_upper_share_bp,
-            sentence_start_upper_bp: config.sentence_start_upper_bp,
-            word_length_sigma: config.word_length_sigma,
-            doubles_productive_bp: config.doubles_productive_bp,
-            doubled_bare: config.doubled_bare,
-            doubled_separated: config.doubled_separated,
-            book_rate_ratio: config.book_rate_ratio,
-            book_rate_min_bp: config.book_rate_min_bp,
-            z_long: config.lengths.z_long,
-            z_short: config.lengths.z_short,
-            min_verses: config.lengths.min_verses,
-            lengths_enabled: config.lengths.enabled,
-            presence: config.lengths.presence,
-            source_copy: config.lengths.source_copy,
-            source_copy_min_run: config.lengths.source_copy_min_run,
-        }
-    }
-
-    /// Writes them back, leaving every field that is not a knob alone.
-    pub fn apply(self, config: &mut JudgingConfig) {
-        config.channels = Channels {
-            placement: self.placement,
-            run_shape: self.run_shape,
-            exact_neighbor: self.exact_neighbor,
-            pooled_neighbor: self.pooled_neighbor,
-            rarity: self.rarity,
-            casing: self.casing,
-            word_length: self.word_length,
-            doubled: self.doubled,
-            letter_runs: self.letter_runs,
-            sentence_start: self.sentence_start,
-            book_rate: self.book_rate,
-        };
-        config.support_floor = self.support_floor;
-        config.word_support_floor = self.word_support_floor;
-        config.terminal_upper_share_bp = self.terminal_upper_share_bp;
-        config.sentence_start_upper_bp = self.sentence_start_upper_bp;
-        config.word_length_sigma = self.word_length_sigma;
-        config.doubles_productive_bp = self.doubles_productive_bp;
-        config.doubled_bare = self.doubled_bare;
-        config.doubled_separated = self.doubled_separated;
-        config.book_rate_ratio = self.book_rate_ratio;
-        config.book_rate_min_bp = self.book_rate_min_bp;
-        config.lengths = LengthConfig {
-            z_long: self.z_long,
-            z_short: self.z_short,
-            min_verses: self.min_verses,
-            enabled: self.lengths_enabled,
-            presence: self.presence,
-            source_copy: self.source_copy,
-            source_copy_min_run: self.source_copy_min_run,
-        };
-    }
-}
-
-impl Default for SousSettings {
-    fn default() -> Self {
-        Self::from(&JudgingConfig::default())
     }
 }

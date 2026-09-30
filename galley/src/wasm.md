@@ -517,6 +517,18 @@ a copy of the current values; `setConfig` writes them into BOTH judging slots of
 `Brigade`'s `((), JudgingConfig, JudgingConfig)`, as the CLI does, and leaves
 every field that is not a knob at the value it had.
 
+A host should not restate the fields. `sous-settings.ts`, generated from the
+struct and its `SETTING_DOCS` in `galley/src/sous/settings.rs`, is the typed
+list: `SettingKey`, `SousSettingsValues`, `SOUS_SETTINGS` (kind, default,
+bounds, group, label, one plain sentence each), and `fromSettings` /
+`toSettings`, which copy through the handle and free it. The struct is native
+so the generator reads it; `wasm` only adds the bindings.
+
+```js
+const values = fromSettings(galley);
+toSettings(galley, { ...values, doubled_separated: true });
+```
+
 The doubled channel has one switch per kind of gap; bare is on and separated
 is off by default:
 

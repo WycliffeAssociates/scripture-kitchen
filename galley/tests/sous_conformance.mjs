@@ -241,6 +241,25 @@ const casingRows = (snapshot) =>
 eq(casingRows(cold), 1, "cold.bin holds the fixture's casing pattern");
 eq(casingRows(knobsSnap), 0, "the settings publication publishes none");
 
+// --- the typed settings are the wasm class's, field for field --------------
+
+{
+  const { SOUS_SETTINGS, SETTING_KEYS, fromSettings, toSettings } = await import(resolve(here, "../sous-settings.ts"));
+  const accessors = Object.getOwnPropertyNames(doors.SousSettings.prototype).filter(
+    (name) => typeof Object.getOwnPropertyDescriptor(doors.SousSettings.prototype, name).get === "function",
+  );
+  eq([...accessors].sort().join(" "), [...SETTING_KEYS].sort().join(" "), "sous-settings.ts names every SousSettings field");
+  const fresh = new Galley();
+  const values = fromSettings(fresh);
+  for (const key of SETTING_KEYS) eq(values[key], SOUS_SETTINGS[key].default, `${key}'s default`);
+  toSettings(fresh, { ...values, doubled_separated: !values.doubled_separated, support_floor: 7 });
+  const back = fromSettings(fresh);
+  eq(back.doubled_separated, !values.doubled_separated, "toSettings writes a switch");
+  eq(back.support_floor, 7, "and a count");
+  eq(back.z_long, values.z_long, "and leaves the rest as they were");
+  fresh.free();
+}
+
 // --- every finding has a message the catalog can render --------------------
 
 {

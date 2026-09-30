@@ -22,6 +22,7 @@
 
 mod expediter;
 mod onion_book;
+pub mod settings;
 
 use core::fmt;
 use core::ops::Range;
@@ -37,6 +38,7 @@ use crate::pantry::{BookId, PantryError};
 
 pub use expediter::{Expediter, ObservationKey};
 pub use onion_book::{LocatedRange, OnionBook, SourceSpans};
+pub use settings::SousSettings;
 
 /// One complete raw USFM book under its host id, owned for the duration of the
 /// invocation.

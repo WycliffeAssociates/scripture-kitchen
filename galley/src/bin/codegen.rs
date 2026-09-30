@@ -1,9 +1,10 @@
-//! Generator: galley's three wire schemas → both ends of each. Run with
+//! Generator: galley's three wire schemas → both ends of each, and the typed
+//! settings module. Run with
 //! `cargo run -p usfm_galley --bin codegen`; the output is CHECKED IN
 //! (reviewable diffs; consumers never run this).
 //!
 //! A thin main: each generator is in the library — `toc::emit`,
-//! `find::wire::emit` and `mask::emit` — so
+//! `find::wire::emit`, `mask::emit` and `sous::settings` — so
 //! `tests/codegen_output_matches_input.rs` can regenerate to a buffer and fail
 //! the build when a checked-in file is stale.
 
@@ -11,9 +12,10 @@ use std::path::Path;
 
 use usfm_galley::find::wire::emit as find_emit;
 use usfm_galley::mask::emit as mask_emit;
+use usfm_galley::sous::settings::settings_ts;
 use usfm_galley::toc::emit as toc_emit;
 
-// Anchored to the crate, not the shell: the same six files are written from
+// Anchored to the crate, not the shell: the same seven files are written from
 // the workspace root, from galley/, or from anywhere else.
 const CRATE: &str = env!("CARGO_MANIFEST_DIR");
 const CENSUS_WRITER: &str = "src/toc/generated.rs";
@@ -22,6 +24,7 @@ const FIND_WRITER: &str = "src/find/wire/generated.rs";
 const FIND_READER: &str = "find-reader.ts";
 const MASK_WRITER: &str = "src/mask/generated.rs";
 const MASK_READER: &str = "mask-reader.ts";
+const SETTINGS: &str = "sous-settings.ts";
 
 fn main() -> std::io::Result<()> {
     for (path, fresh) in [
@@ -31,6 +34,7 @@ fn main() -> std::io::Result<()> {
         (FIND_READER, find_emit::reader_ts()),
         (MASK_WRITER, mask_emit::generated_rs()),
         (MASK_READER, mask_emit::reader_ts()),
+        (SETTINGS, settings_ts()),
     ] {
         let path = Path::new(CRATE).join(path);
         let previous = std::fs::read_to_string(&path).unwrap_or_default();
