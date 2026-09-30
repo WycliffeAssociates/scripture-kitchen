@@ -576,6 +576,46 @@ fn a_sentence_start_headline_claims_nothing_about_the_word() {
     );
 }
 
+/// A straight quote's pair reversed is a swap only under a known facing, so
+/// the swapped headline says which way the quote faces; a mark inside a word
+/// names no usual class, since the row has none.
+#[test]
+fn a_straight_quote_swap_names_its_facing_and_inside_names_no_usual() {
+    let catalog = catalog();
+    let declared = declared_params();
+    let [swapped, _] = &catalog["convention.exactNeighbor.swapped"];
+    let used = Icu::parse(swapped).expect("the swapped headline parses");
+    assert!(
+        used.names.contains("facing"),
+        "the swapped headline never reads facing"
+    );
+    assert!(swapped.contains("{facing, select, opening {opening} other {closing}} quote"));
+    for id in [
+        "convention.exactNeighbor",
+        "convention.exactNeighbor.swapped",
+        "convention.runShape",
+    ] {
+        assert_eq!(
+            declared[id].get("facing").map(String::as_str),
+            Some("QuoteFacing"),
+            "{id}"
+        );
+    }
+    let inside = &declared["convention.placement.inside"];
+    assert!(
+        inside.contains_key("glyph")
+            && inside.contains_key("count")
+            && inside.contains_key("book1")
+    );
+    assert!(
+        !inside.contains_key("usual"),
+        "a mark inside a word has no usual class"
+    );
+    for tier in &catalog["convention.placement.inside"] {
+        assert!(tier.contains("letter"), "{tier}");
+    }
+}
+
 /// The parser itself: a nested branch, a styled number, tags, and the
 /// refusals.
 #[test]

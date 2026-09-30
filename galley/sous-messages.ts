@@ -27,6 +27,7 @@ import type {
   CasingForm,
   Cluster,
   ConventionFinding,
+  Facing,
   Finding,
   FindingsSnapshot,
   HygieneClass,
@@ -60,6 +61,7 @@ export type MessageId =
   | "convention.runShape"
   | "convention.placement.follows"
   | "convention.placement.precedes"
+  | "convention.placement.inside"
   | "convention.rarity"
   | "convention.casing"
   | "convention.wordLength"
@@ -99,12 +101,13 @@ export interface ParamsById {
   "sourceCopy": { run: number; eligible: number };
   "length.long": { deviation: number; inBook: boolean };
   "length.short": { deviation: number; inBook: boolean };
-  "convention.exactNeighbor": { glyph: Glyph; glyphKind: MarkKind; glyphName: string; glyphCode: string; neighbor: Glyph; neighborKind: MarkKind; neighborName: string; neighborCode: string; pair: Glyphs; reversedPair: Glyphs; usual: Glyph; usualKind: MarkKind; usualName: string; usualCode: string; usualCount: number; reversed: number } & Spread;
-  "convention.exactNeighbor.swapped": { glyph: Glyph; glyphKind: MarkKind; glyphName: string; glyphCode: string; neighbor: Glyph; neighborKind: MarkKind; neighborName: string; neighborCode: string; pair: Glyphs; reversedPair: Glyphs; usual: Glyph; usualKind: MarkKind; usualName: string; usualCode: string; usualCount: number; reversed: number } & Spread;
+  "convention.exactNeighbor": { glyph: Glyph; glyphKind: MarkKind; glyphName: string; glyphCode: string; neighbor: Glyph; neighborKind: MarkKind; neighborName: string; neighborCode: string; pair: Glyphs; reversedPair: Glyphs; usual: Glyph; usualKind: MarkKind; usualName: string; usualCode: string; usualCount: number; reversed: number; facing: QuoteFacing } & Spread;
+  "convention.exactNeighbor.swapped": { glyph: Glyph; glyphKind: MarkKind; glyphName: string; glyphCode: string; neighbor: Glyph; neighborKind: MarkKind; neighborName: string; neighborCode: string; pair: Glyphs; reversedPair: Glyphs; usual: Glyph; usualKind: MarkKind; usualName: string; usualCode: string; usualCount: number; reversed: number; facing: QuoteFacing } & Spread;
   "convention.pooledNeighbor": { glyph: Glyph; glyphKind: MarkKind; glyphName: string; glyphCode: string; pool: PoolName } & Spread;
-  "convention.runShape": { glyph: Glyph; glyphKind: MarkKind; glyphName: string; glyphCode: string; cluster: Glyphs; clusterCount: number; hasUsualCluster: boolean; reordered: boolean; swap: boolean; usualCluster: Glyphs; usualClusterCount: number; usualSize: number; usualAtLeast: boolean; usualSameMark: boolean; usualShapeCount: number } & Spread;
+  "convention.runShape": { glyph: Glyph; glyphKind: MarkKind; glyphName: string; glyphCode: string; cluster: Glyphs; clusterCount: number; hasUsualCluster: boolean; reordered: boolean; swap: boolean; usualCluster: Glyphs; usualClusterCount: number; usualSize: number; usualAtLeast: boolean; usualSameMark: boolean; usualShapeCount: number; facing: QuoteFacing } & Spread;
   "convention.placement.follows": { glyph: Glyph; glyphKind: MarkKind; glyphName: string; glyphCode: string; digit: boolean; neighbor: TouchClass; usual: TouchClass; usualCount: number } & Spread;
   "convention.placement.precedes": { glyph: Glyph; glyphKind: MarkKind; glyphName: string; glyphCode: string; digit: boolean; neighbor: TouchClass; usual: TouchClass; usualCount: number } & Spread;
+  "convention.placement.inside": { glyph: Glyph; glyphKind: MarkKind; glyphName: string; glyphCode: string; digit: boolean } & Spread;
   "convention.rarity": { glyph: Glyph; glyphKind: MarkKind; glyphName: string; glyphCode: string; hasUsual: boolean; usual: Glyph; usualKind: MarkKind; usualName: string; usualCode: string; usualCount: number; lookalike: boolean; named: boolean } & Spread;
   "convention.casing": { word: string; form: FormName; usualForm: FormName; usualWord: string; usualCount: number; hasBefore: boolean; before: Glyph; beforeKind: MarkKind; beforeName: string; beforeCode: string; beforeContext: BeforeContext; beforeLower: number; beforeCased: number } & Spread;
   "convention.wordLength": { word: string; count: number };
@@ -270,6 +273,10 @@ function beforeContext(before: TerminalContext): BeforeContext {
 /** What touches a glyph, as a `select` key. `Edge` never fires. */
 export type TouchClass = "letter" | "space" | "digit" | "punctuation";
 
+/** Which way a straight quote in a pair or group faces, as a `select` key:
+ * `none` when it holds no straight quote. */
+export type QuoteFacing = "opening" | "closing" | "inside" | "unknown" | "none";
+
 /** A case form, as a `select` key. `Uncased` is never on the wire. */
 export type FormName = "lowercase" | "capitalized" | "allCaps" | "mixed";
 
@@ -294,6 +301,19 @@ const TOUCH: Record<Exclude<OuterClass, "Edge">, TouchClass> = {
   Digit: "digit",
   Nonletter: "punctuation",
 };
+
+const FACING: Record<Facing, QuoteFacing> = {
+  Opening: "opening",
+  Closing: "closing",
+  Inside: "inside",
+  Unknown: "unknown",
+};
+
+/** A facing that says whether a straight quote opens or closes, the only
+ * kind under which its pair reversed is a swap. */
+function known(facing: Facing | null | undefined): boolean {
+  return facing === "Opening" || facing === "Closing";
+}
 
 const FORM: Record<Exclude<CasingForm, "Uncased">, FormName> = {
   Lower: "lowercase",
@@ -543,6 +563,19 @@ function convention(finding: ConventionFinding, pattern: Pattern, site: string, 
   const { key, usual } = pattern;
   switch (key.kind) {
     case "Placement":
+      if (key.side === "both") {
+        return {
+          id: "convention.placement.inside",
+          params: {
+            glyph,
+            ...about("glyph", digit && site === "" ? "" : glyph),
+            ...(digit ? { glyphKind: "digit" as const } : {}),
+            digit,
+            ...spread,
+          },
+          queries: [regex("this", `\\p{L}${glyphSource}\\p{L}`)],
+        };
+      }
       return {
         id: key.side === "prev" ? "convention.placement.follows" : "convention.placement.precedes",
         params: {
@@ -584,10 +617,11 @@ function convention(finding: ConventionFinding, pattern: Pattern, site: string, 
       // A pair of one mark twice (`..`) is its own reversal.
       const reversed = usual.kind === "ExactNeighbor" && key.neighbor !== pattern.glyph ? usual.reversed : 0;
       const follower = usual.kind === "ExactNeighbor" ? String.fromCodePoint(usual.neighbor) : "";
-      // `"...` opening a quotation, reversed, is `."` closing one: a
-      // directionless quote cannot be swapped.
+      // A straight quote swaps only under a known facing: `reversed` then
+      // counts runs facing the same way (`'.` Closing against `.'` Closing).
+      const facing = usual.kind === "ExactNeighbor" ? usual.facing : null;
       const swapped =
-        !key.directionless && reversed >= pattern.numerator && reversed >= 5;
+        (!key.directionless || known(facing)) && reversed >= pattern.numerator && reversed >= 5;
       const pair = glyph + neighbor;
       const reversedPair = neighbor + glyph;
       return {
@@ -604,6 +638,7 @@ function convention(finding: ConventionFinding, pattern: Pattern, site: string, 
           ...about("usual", follower),
           usualCount: usual.kind === "ExactNeighbor" ? usual.count : 0,
           reversed,
+          facing: facing === null ? "none" : FACING[facing],
         },
         queries: [
           ...query("this", pair),
@@ -618,9 +653,13 @@ function convention(finding: ConventionFinding, pattern: Pattern, site: string, 
       const exact = pattern.clusters?.find((cluster) => cluster.text === site);
       const [common, reordered] = usualCluster(pattern.clusters, site);
       const shape = usual.kind === "RunShape" ? usual : undefined;
-      // A reordering is a headline alternative unless a directionless quote
-      // makes it no swap; then it is a plain fact in the details.
-      const swap = reordered && common !== undefined && !common.directionless;
+      // A reordering is a headline alternative unless a straight quote faces
+      // no known way the two groups share; then it is a plain fact in the
+      // details.
+      const swap =
+        reordered &&
+        common !== undefined &&
+        (!common.directionless || (known(common.facing) && exact?.facing === common.facing));
       return {
         id: "convention.runShape",
         params: {
@@ -638,6 +677,7 @@ function convention(finding: ConventionFinding, pattern: Pattern, site: string, 
           usualAtLeast: shape?.bucket === RUN_BUCKETS,
           usualSameMark: shape?.pure ?? true,
           usualShapeCount: shape?.count ?? 0,
+          facing: common?.facing == null ? "none" : FACING[common.facing],
         },
         queries: [
           ...query("this", site),

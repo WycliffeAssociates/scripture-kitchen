@@ -252,3 +252,71 @@ test("a SentenceStart regex is the mark, bare riders, and this word", () => {
     ],
   );
 });
+
+/** A convention finding over one hand-built pattern. */
+const one = { kind: "Convention", from: 0, to: 0, bookIdx: 0, convention: { pattern: 0 } };
+
+/** GEN 48:20's `'.`: the reversed `.'` counts only runs facing the same way. */
+function pair(facing, reversed) {
+  return {
+    glyph: 0x27, channel: "ExactNeighbor", key: { kind: "ExactNeighbor", neighbor: 0x2e, directionless: true },
+    usual: { kind: "ExactNeighbor", neighbor: 0x22, count: 416, reversed, facing },
+    numerator: 3, denominator: 496, books: 3, shareBp: 60,
+  };
+}
+
+test("a straight quote's pair reversed is a swap only under a known facing", () => {
+  const closing = describe(one, pair("Closing", 974), { siteText: "'.", bookCount: 66 });
+  assert.equal(closing.id, "convention.exactNeighbor.swapped");
+  assert.equal(closing.params.facing, "closing");
+  assert.equal(closing.params.reversedPair, ".'");
+  assert.equal(closing.params.reversed, 974);
+  assert.deepEqual(closing.queries.map((query) => [query.purpose, query.needle]), [["this", "'."], ["alternative", ".'"], ["others", "'\""]]);
+  for (const facing of ["Unknown", "Inside"]) {
+    const { id, params } = describe(one, pair(facing, 974), { siteText: "'.", bookCount: 66 });
+    assert.equal(id, "convention.exactNeighbor", facing);
+    assert.equal(params.facing, facing.toLowerCase());
+  }
+  // No straight quote: the facing is `none` and the old rule stands.
+  const plain = { ...pair(null, 9), glyph: 0x3b, key: { kind: "ExactNeighbor", neighbor: 0x2019, directionless: false } };
+  assert.equal(describe(one, plain, { siteText: ";’", bookCount: 66 }).params.facing, "none");
+  assert.equal(describe(one, plain, { siteText: ";’", bookCount: 66 }).id, "convention.exactNeighbor.swapped");
+});
+
+test("a group reordered across a straight quote is a swap when both groups face the same known way", () => {
+  const cluster = (text, count, recurring, facing) => ({ text, count, recurring, truncated: false, directionless: true, facing });
+  const shape = (site, usual) => ({
+    glyph: 0x3b, channel: "RunShape", key: { kind: "RunShape", pure: false, bucket: 2 },
+    usual: { kind: "RunShape", pure: true, bucket: 1, count: 4878 },
+    numerator: 5, denominator: 4904, books: 1, shareBp: 10, clusters: [site, usual],
+  });
+  const closing = describe(one, shape(cluster(';"', 2, false, "Closing"), cluster('";', 6, true, "Closing")), { siteText: ';"', bookCount: 66 });
+  assert.equal(closing.params.swap, true);
+  assert.equal(closing.params.facing, "closing");
+  const unknown = describe(one, shape(cluster(';"', 2, false, "Unknown"), cluster('";', 6, true, "Unknown")), { siteText: ';"', bookCount: 66 });
+  assert.equal(unknown.params.swap, false);
+  assert.equal(unknown.params.reordered, true);
+  const crossed = describe(one, shape(cluster(';"', 2, false, "Opening"), cluster('";', 6, true, "Closing")), { siteText: ';"', bookCount: 66 });
+  assert.equal(crossed.params.swap, false);
+});
+
+test("a mark inside a word describes, searches letters on both sides, and keeps its identity", () => {
+  const pattern = {
+    glyph: 0x22, channel: "Placement", key: { kind: "Placement", side: "both", class: "Letter" }, usual: { kind: "None" },
+    numerator: 13, denominator: 6805, books: 6, shareBp: 19,
+  };
+  const { id, params, queries } = describe(one, pattern, { siteText: '"', bookCount: 62 });
+  assert.equal(id, "convention.placement.inside");
+  assert.deepEqual(
+    [params.glyph, params.glyphKind, params.digit, params.count, params.total, params.books],
+    ['"', "quote", false, 13, 6805, 6],
+  );
+  assert.deepEqual(queries.map((query) => [query.kind, query.purpose]), [["regex", "this"]]);
+  const inside = new RegExp(queries[0].source, queries[0].flags);
+  assert.equal(queries[0].source, String.raw`\p{L}"\p{L}`);
+  assert.match('akuti m"neneri', inside);
+  assert.match('ñ"é', inside);
+  assert.doesNotMatch('anati "neneri', inside);
+  assert.doesNotMatch('neneri" anati', inside);
+  assert.equal(patternIdentity(pattern), "v1:p:Placement:22:both:Letter");
+});

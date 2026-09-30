@@ -46,7 +46,7 @@ write instead:
 
 | alternative | ids | when |
 | --- | --- | --- |
-| the same marks in another order | `convention.exactNeighbor.swapped`, `convention.runShape` (`swap`) | `;'` beside `';`, never across a directionless quote |
+| the same marks in another order | `convention.exactNeighbor.swapped`, `convention.runShape` (`swap`) | `;'` beside `';`; across a straight quote only when it faces a known way (`'.` closing beside `.'` closing) |
 | a lookalike | `convention.rarity` (`lookalike`) | `’` beside `'`, from Unicode's `confusables.txt` |
 | the same word in another form | `convention.casing` | `On` beside `on` |
 
@@ -56,11 +56,23 @@ lowercase after `?` here; this project almost always capitalizes the word
 after `?`. Its `usualWord` stays a parameter and an `alternative` query.
 
 Otherwise the headline says only how rare it is, and the usual follower, the
-usual class, or the most common group moves to the details. A reordering
-across a straight `"` or `'` is still a fact, and the details say it plainly
-("This project also writes `";`, 6 times"): a straight quote does not say
-whether it opens or closes, so `".` opening a quotation is no swap of `."`
-closing one.
+usual class, or the most common group moves to the details.
+
+A straight `"` or `'` does not say whether it opens or closes, so the engine
+reads its facing from what stands either side of the run and counts a pair
+reversed only among runs facing the same way. Under `opening` or `closing`
+the reordering reaches the headline, and the headline names the facing:
+
+```text
+params    { pair: "'.", reversedPair: ".'", reversed: 974, facing: "closing",
+            glyphKind: "quote", neighborKind: "sentenceEnd", neighborName: "full stop", … }
+en        Here the full stop comes after the closing quote (['.]); this project puts it
+          before the closing quote ([.']) 974 times.
+```
+
+Under `inside` or `unknown` it stays a plain fact in the details ("This
+project also writes `."`, once"). A group reorders in the headline only when
+the site's group and the usual one share a known facing.
 
 ## Glyph tags
 
@@ -158,16 +170,21 @@ en        [–] en dash (U+2013) and [-] hyphen-minus (U+002D) look alike.
 headline then details, `<g>` as `[…]`:
 
 ```text
-NUM 21:14  …the Wars of Yahweh, \q "... Zahab…
+NUM 21:14  …the Wars of Yahweh, \q "... Zahab…                 (facing unknown)
            A quotation mark right before a mark that ends a sentence ([".]) appears only 2 times in
            this project.
            ["] is followed directly by another mark 129 times in this project, most often [']
-           (77). This project also writes [."], 4,038 times. [".] appears in NUM and JER.
-GEN 48:20  …like Ephraim and like Manasseh'." \m In this way…
-           A quotation mark right before a mark that ends a sentence (['.]) appears only 3 times in
-           this project.
+           (77). This project also writes [."], once. [".] appears in NUM and JER.
+GEN 48:20  …like Ephraim and like Manasseh'." \m In this way…    (facing closing)
+           Here the full stop comes after the closing quote (['.]); this project puts it before
+           the closing quote ([.']) 974 times.
            ['] is followed directly by another mark 496 times in this project, most often ["]
-           (416). This project also writes [.'], 974 times. ['.] appears in 3 of 66 books.
+           (416). ['.] appears 3 times, in 3 of 66 books.
+2KI 13:17  …Then Elisha said, "Shoot!", and he shot…            (facing closing)
+           Here the comma comes after the closing quote ([",]); this project puts it before the
+           closing quote ([,"]) 226 times.
+           ["] is followed directly by another mark 129 times in this project, most often [']
+           (77). [",] appears nowhere else.
 PRO 30:15  …four that never say, "Enough": \q1 \v 16 Sheol…
            A quotation mark right before a comma or similar mark ([":]) appears only here in this
            project.
@@ -178,9 +195,10 @@ DEU 7:17   …how can I dispossess them?'— \v 18 do not be afraid…
            ['] is followed directly by another mark 496 times in this project, most often ["]
            (416). This project also writes [—'], once. ['—] appears in 5 of 66 books.
 ISA 30:10  …They say to the seers, "Do not see;" \q2 and to the prophets…
-           [;"] appears only 2 times.
+           [;"] appears only 2 times; with a closing quote, this project usually writes [";] (6
+           times).
            [;] stands alone 4,878 of 4,904 times. Unusual groups like this appear 5 times, all
-           in ISA. This project also writes [";], 6 times.
+           in ISA.
 EXO 38:26  …those twenty years old and older—603,550 men in all.
            A dash ([—]) right before a digit appears only 2 times in this project.
            Usually [—] is followed right away by a letter (1,341 of 1,795 times). This happens
@@ -210,6 +228,17 @@ DEU 27:15  'May the man be cursed who makes a a carved image…
 PSA 81:1   Shout joyfullly to God our strength
            [l] is written 3 times in a row here (“joyfullly”).
            Of the 24,318 places this project repeats [l], this is the only one with 3.
+```
+
+A mark with a letter on both sides is judged as one joint key, inside a word,
+with no usual class; from `corpora/nya.txt`:
+
+```text
+ISA 29:16  …Sibanani bumbe ine"pa vintu…
+           A quotation mark (["]) inside a word, with letters on both sides, appears only 13
+           times in this project.
+           Of the 6,805 times this project uses ["], 13 have a letter on both sides. This happens
+           in 6 of 62 books.
 ```
 
 ## Queries
@@ -266,6 +295,8 @@ after `?` are `you` (JER 49:4) and `says` (ACT 7:49), other words.
     beside its usual class as `others`: `—\p{Nd}`, `\s—`, `,\p{Alphabetic}`,
     `)[^\p{Alphabetic}\p{Nd}\s]`. The pooled digit lane's glyph is `\p{Nd}`.
     A site that holds its neighbour as well keeps its literal `this` (`),`).
+    A mark inside a word has only `this`, the glyph between two letters:
+    `\p{L}"\p{L}`.
   - **SentenceStart**: the mark, bare riders, then the site's word as
     `this`, capitalized as `alternative`, and any capital as `others`. The row
     counts bare handoffs only, so between the mark and the word stand only
@@ -314,7 +345,7 @@ siteIdentityOf(site)                       // v1:s:EXO 38%3A26:—:0
 
 | identity | means | fields after `v1` |
 | --- | --- | --- |
-| `v1:p:…` | this claim, anywhere | `p`, the channel, the glyph as hex (`digit` for the pooled digit lane) or a word's 16-hex hash, then the key: ExactNeighbor the neighbour's hex; PooledNeighbor the pool; RunShape `pure`/`mixed` and the size bucket; Placement the side and class; LetterRun the length; Casing the form; Doubled `bare`/`separated`; BookRate the side, class and book key; Rarity, SentenceStart, WordLength nothing more |
+| `v1:p:…` | this claim, anywhere | `p`, the channel, the glyph as hex (`digit` for the pooled digit lane) or a word's 16-hex hash, then the key: ExactNeighbor the neighbour's hex; PooledNeighbor the pool; RunShape `pure`/`mixed` and the size bucket; Placement the side (`prev`, `next`, or `both` inside a word) and class; LetterRun the length; Casing the form; Doubled `bare`/`separated`; BookRate the side, class and book key; Rarity, SentenceStart, WordLength nothing more |
 | `v1:f:…` | this finding here | `f`, the pattern's fields from `p` on (or `hygiene` and its class, `presence` and its kind, `sourceCopy`, `length`), then the verse, the site's text and the ordinal |
 | `v1:s:…` | this text here, whatever flags it | `s`, the verse, the site's text and the ordinal |
 
@@ -431,12 +462,13 @@ Questions below: **1** seen, **2** how often, **3** normal instead,
 | --- | --- | --- |
 | `convention.placement.follows` | the glyph touches a class on its left that it rarely touches | `glyph` `digit` `neighbor` (1); `count` `total` (2); `usual` `usualCount` (3); spread (4) |
 | `convention.placement.precedes` | the same on its right | as above |
+| `convention.placement.inside` | the glyph has a letter on both sides, inside a word, which the project rarely writes | `glyph` `digit` (1); `count` `total` (2); spread (4); no usual: the rest of `total` is it |
 | `convention.bookRate.follows` | one book puts the glyph after a class far more often than the others | `glyph` `digit` `neighbor` (1); `count` `total` `rate` `book` (2); `baseline` `otherBooks` (3, 4) |
 | `convention.bookRate.precedes` | the same on its right | as above |
-| `convention.exactNeighbor` | the glyph is directly followed by a mark it rarely precedes | `glyph` `neighbor` `pair` (1); `count` `total` (2); `usual` `usualCount`, `reversed` `reversedPair` (3); spread (4) |
-| `convention.exactNeighbor.swapped` | the same pair, which the project writes the other way round at least as often and at least 5 times; never when either mark is a directionless quote (`"`, `'`), which cannot say whether it opens or closes | as above; `reversedPair` `reversed` are the headline's alternative |
+| `convention.exactNeighbor` | the glyph is directly followed by a mark it rarely precedes | `glyph` `neighbor` `pair` `facing` (1); `count` `total` (2); `usual` `usualCount`, `reversed` `reversedPair` (3); spread (4). `facing`: which way a straight quote in the pair faces, `none` without one; `reversed` then counts only runs facing the same way |
+| `convention.exactNeighbor.swapped` | the same pair, which the project writes the other way round at least as often and at least 5 times; with a straight quote (`"`, `'`) only when it faces `opening` or `closing`, and the headline names the facing | as above; `reversedPair` `reversed` are the headline's alternative |
 | `convention.pooledNeighbor` | the glyph is directly followed by a kind of mark it rarely precedes (off by default) | `glyph` `pool` (1); `count` `total` (2); spread (4) |
-| `convention.runShape` | the glyph sits in a group of marks the project rarely writes | `cluster` `glyph` `clusterCount` (1); `count` `total` (2); `hasUsualCluster` `usualCluster` `usualClusterCount` `reordered` `swap` `usualSize` `usualAtLeast` `usualSameMark` `usualShapeCount` (3); spread (4). `reordered`: the usual cluster holds the same marks; `swap`: and no directionless quote, so the headline names it |
+| `convention.runShape` | the glyph sits in a group of marks the project rarely writes | `cluster` `glyph` `clusterCount` (1); `count` `total` (2); `hasUsualCluster` `usualCluster` `usualClusterCount` `reordered` `swap` `usualSize` `usualAtLeast` `usualSameMark` `usualShapeCount` `facing` (3); spread (4). `reordered`: the usual cluster holds the same marks; `swap`: and no straight quote, or the two groups share a known facing, so the headline names it; `facing` is the usual cluster's |
 | `convention.rarity` | a character the project almost never uses | `glyph` (1); `count` (2); `hasUsual` `usual` `usualCount` `lookalike` (3); spread (4). `lookalike` is true when Unicode's `confusables.txt` draws the two alike (`’`/`'`, `“`/`"`, `–`/`-`; not `—`/`–`), and the headline names it; else the details name the pool's most common mark |
 | `convention.casing` | a word in a case form the project rarely gives it mid-sentence | `word` `form` (1); `count` `total` (2); `usualForm` `usualWord` `usualCount`, and `hasBefore` `before` `beforeContext` `beforeLower` `beforeCased` from `context.before` (3); spread (4) |
 | `convention.wordLength` | a word far longer than the project's usual word (off by default) | `word` (1); `count` (2) |
@@ -452,7 +484,8 @@ Questions below: **1** seen, **2** how often, **3** normal instead,
 | `length.long` | a verse much longer than usual against its source | `deviation` (2); `inBook` (4) |
 | `length.short` | a verse much shorter than usual against its source | as above |
 
-Enum values: `beforeContext` `bare | quoted | bracketed | both`; `neighbor`
+Enum values: `beforeContext` `bare | quoted | bracketed | both`; `facing`
+`opening | closing | inside | unknown | none`; `neighbor`
 and `usual` on placement and book rate `letter | space | digit | punctuation`;
 `form` and `usualForm` `lowercase | capitalized | allCaps | mixed`
 (`usualWord` is empty for `mixed`); every `…Kind`
