@@ -120,6 +120,22 @@ fn an_opening_quote_takes_the_glyph_behind_it() {
     assert_eq!(before("a \u{201C}b"), vec![Before::Start, Before::None]);
 }
 
+/// A joiner inside a word hands off to the letter after it, in both walks,
+/// so nothing it set reaches the next word.
+#[test]
+fn an_inner_joiner_hands_off_inside_its_word() {
+    let text = "x-y\u{2019}s word";
+    let before = words(text).into_iter().map(|w| w.2).collect::<Vec<_>>();
+    assert_eq!(before, vec![Before::Start, Before::None]);
+    let row = crate::substrate::walk::walk(text, &[]);
+    let keys: Vec<FollowKey> = row.follows().iter().map(|entry| entry.0).collect();
+    assert_eq!(
+        keys,
+        vec![bare('-')],
+        "the dash hands off to `y` and to nothing else"
+    );
+}
+
 /// 95% of the letters after `.` are capitals, so the corpus capitalizes there
 /// and a word in that position is evidence of nothing.
 #[test]

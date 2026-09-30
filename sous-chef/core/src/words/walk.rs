@@ -42,11 +42,9 @@ use super::{
     Before, DoubleCount, Form, LETTER_RUN_LANES, LETTER_RUN_MAX, LETTER_RUN_MIN, WordCount,
     WordRow, letter_run_lane,
 };
-use crate::substrate::{FollowKey, ScalarKey, is_run_atom};
+use crate::substrate::{FollowKey, Ride, ScalarKey, is_run_atom, ride_of};
 use crate::{Verse, VerseKey};
 use mise::unicode::{Class, class_of};
-
-use crate::unicode::{Pool, closes, pool_of};
 
 /// One word as the walk saw it, in the coordinates of the text scanned.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,13 +68,11 @@ pub struct Occurrence {
 /// The chain past one run atom: a leading glyph replaces it, a quote or a
 /// closing bracket marks it, an opening bracket leaves it as it was.
 fn chained(chain: Before, scalar: char) -> Before {
-    match (pool_of(scalar), chain) {
-        (Pool::Quote, Before::Glyph(key)) => Before::Glyph(key.through_quote()),
-        (Pool::Bracket, Before::Glyph(key)) if closes(scalar) => {
-            Before::Glyph(key.through_bracket())
-        }
-        (Pool::Quote | Pool::Bracket, _) => chain,
-        _ => Before::Glyph(FollowKey::new(ScalarKey::of(scalar), false)),
+    match (ride_of(scalar), chain) {
+        (Ride::Leads, _) => Before::Glyph(FollowKey::new(ScalarKey::of(scalar), false)),
+        (Ride::Quote, Before::Glyph(key)) => Before::Glyph(key.through_quote()),
+        (Ride::Closer, Before::Glyph(key)) => Before::Glyph(key.through_bracket()),
+        _ => chain,
     }
 }
 
@@ -204,8 +200,11 @@ impl<'a> Scan<'a> {
                 };
                 self.word = Some(Building::new(at, before, self.verse));
                 self.opened = false;
-                self.chain = Before::None;
             }
+            // Every core scalar ends the chain, as it does the substrate's:
+            // the letter after an inner joiner (`long-suffering`) is where
+            // that joiner hands off.
+            self.chain = Before::None;
             self.word.as_mut().expect("just opened").add(class);
         } else if class.is_whitespace() {
             let to = self.joiner.take().unwrap_or(at);

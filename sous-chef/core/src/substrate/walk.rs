@@ -9,12 +9,11 @@
 use rustc_hash::FxHashMap;
 
 use super::{
-    Case, ChapterRow, Edge, FollowCounts, FollowKey, OuterClass, PairKey, ScalarKey, VerseLength,
-    is_nonletter, is_run_atom,
+    Case, ChapterRow, Edge, FollowCounts, FollowKey, OuterClass, PairKey, Ride, ScalarKey,
+    VerseLength, is_nonletter, is_run_atom, ride_of,
 };
 use crate::Verse;
 use crate::hygiene::{NBSP, SUSPECT, ScalarSites};
-use crate::unicode::{Pool, closes, pool_of};
 use mise::unicode::Class;
 use mise::unicode::lookup::{ascii_class, trie_at};
 
@@ -38,20 +37,8 @@ struct Slot {
     pairs: [u32; OuterClass::COUNT * OuterClass::COUNT],
     /// One per [`FollowKey::context`].
     follows: [FollowCounts; FollowKey::CONTEXTS],
+    /// What the atom does to the handoff chain.
     ride: Ride,
-}
-
-/// What a run atom does to the handoff chain, decided once per slot.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Ride {
-    /// Becomes the chain's glyph.
-    Leads,
-    /// An opening bracket: rides and marks nothing.
-    Bracket,
-    /// Rides and marks the chain bracketed.
-    Closer,
-    /// Rides and marks the chain quoted.
-    Quote,
 }
 
 /// The per-scalar state, kept in a local the counters cannot alias.
@@ -368,14 +355,14 @@ impl Counters {
             if seen != NO_ID {
                 return seen;
             }
-            let id = self.push_slot(ScalarKey(cp), ride_of(cp));
+            let id = self.push_slot(ScalarKey(cp), ride_at(cp));
             self.nonletter_ascii[cp as usize] = id;
             return id;
         }
         if let Some(&seen) = self.nonletter_other.get(&cp) {
             return seen;
         }
-        let id = self.push_slot(ScalarKey(cp), ride_of(cp));
+        let id = self.push_slot(ScalarKey(cp), ride_at(cp));
         self.nonletter_other.insert(cp, id);
         id
     }
@@ -525,18 +512,9 @@ impl Counters {
     }
 }
 
-/// The same split as [`super::rides`], with the quote and the closing bracket
-/// kept apart.
-fn ride_of(cp: u32) -> Ride {
-    let Some(scalar) = char::from_u32(cp) else {
-        return Ride::Leads;
-    };
-    match pool_of(scalar) {
-        Pool::Quote => Ride::Quote,
-        Pool::Bracket if closes(scalar) => Ride::Closer,
-        Pool::Bracket => Ride::Bracket,
-        _ => Ride::Leads,
-    }
+/// A slot's ride, decided once when it is interned.
+fn ride_at(cp: u32) -> Ride {
+    char::from_u32(cp).map_or(Ride::Leads, ride_of)
 }
 
 #[inline]

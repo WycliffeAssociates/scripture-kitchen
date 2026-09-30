@@ -21,11 +21,10 @@
 use memchr::memmem::Finder;
 
 use crate::judge::{Channel, Explained, Pattern, PatternIndex, PatternKey, Side, pool_of_key};
-use crate::substrate::{BookAggregate, OuterClass, RUN_BUCKETS, ScalarKey, is_run_atom, rides};
+use crate::substrate::{BookAggregate, OuterClass, RUN_BUCKETS, ScalarKey, is_run_atom, ride_of};
 use mise::unicode::class_of;
 
 use crate::unicode::atoms::widen_to_atoms;
-use crate::unicode::{Pool, closes, pool_of};
 use crate::words::word_around;
 use crate::{BookIndex, Chapter, Reasons, TextRange};
 
@@ -208,7 +207,7 @@ pub fn locate_counted(
             if let Some(&(terminal, key)) = atoms
                 .iter()
                 .rev()
-                .find(|(_, key)| !key.scalar().is_some_and(rides))
+                .find(|(_, key)| !key.scalar().is_some_and(|scalar| ride_of(scalar).rides()))
                 && let Some(needle) = needles.iter().find(|needle| needle.glyph == key)
             {
                 sentence_start(patterns, needle, terminal, &cursor, out, tally);
@@ -516,7 +515,7 @@ impl<'a> Cursor<'a> {
     }
 
     /// The letter a leading glyph at `at` hands off to: the first scalar after
-    /// it that is neither whitespace nor [`rides`], with the chapter and offset
+    /// it that neither is whitespace nor rides ([`ride_of`]), with the chapter and offset
     /// holding it, and whether a quote or a closing bracket was ridden on the
     /// way.
     ///
@@ -532,8 +531,9 @@ impl<'a> Cursor<'a> {
         rest.next();
         let mut marked = false;
         let mut ridden = |scalar: char| {
-            marked |= pool_of(scalar) == Pool::Quote || closes(scalar);
-            class_of(scalar).is_whitespace() || rides(scalar)
+            let ride = ride_of(scalar);
+            marked |= ride.marks();
+            class_of(scalar).is_whitespace() || ride.rides()
         };
         for (offset, scalar) in rest {
             if !ridden(scalar) {

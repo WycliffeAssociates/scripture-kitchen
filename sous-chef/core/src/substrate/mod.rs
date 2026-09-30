@@ -167,11 +167,43 @@ pub const fn is_run_atom(class: Class) -> bool {
     is_nonletter(class) && !class.is_decimal_digit()
 }
 
-/// Whether a run atom leaves the handoff to the glyph behind it: a quote or a
-/// bracket never becomes a [`FollowKey`]'s glyph. A quote or a closing
-/// bracket still marks the key it rides ([`crate::unicode::closes`]).
-pub fn rides(scalar: char) -> bool {
-    matches!(pool_of(scalar), Pool::Quote | Pool::Bracket)
+/// What a run atom does to the handoff chain: a quote or a bracket never
+/// becomes a [`FollowKey`]'s glyph.
+///
+/// ```text
+/// ride_of('.')         → Leads     // the chain's glyph from here
+/// ride_of('\u{201D}')  → Quote     // rides, and marks the key quoted
+/// ride_of(')')         → Closer    // rides, and marks the key bracketed
+/// ride_of('(')         → Bracket   // rides, and marks nothing
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ride {
+    Leads,
+    Bracket,
+    Closer,
+    Quote,
+}
+
+impl Ride {
+    /// Leaves the handoff to the glyph behind it.
+    pub const fn rides(self) -> bool {
+        !matches!(self, Self::Leads)
+    }
+
+    /// Marks the key it rides.
+    pub const fn marks(self) -> bool {
+        matches!(self, Self::Closer | Self::Quote)
+    }
+}
+
+/// The one ride rule, which every handoff walk reads.
+pub fn ride_of(scalar: char) -> Ride {
+    match pool_of(scalar) {
+        Pool::Quote => Ride::Quote,
+        Pool::Bracket if crate::unicode::closes(scalar) => Ride::Closer,
+        Pool::Bracket => Ride::Bracket,
+        _ => Ride::Leads,
+    }
 }
 
 /// One G0 pair triple: a nonletter and the outer class either side of it.
@@ -250,7 +282,7 @@ impl FollowCounts {
 }
 
 /// The context a letter is handed off from: the last glyph before it that does
-/// not [`ride`](rides), whether a quote stood between them, and whether a
+/// not [`ride`](Ride::rides), whether a quote stood between them, and whether a
 /// closing bracket did.
 ///
 /// ```text
