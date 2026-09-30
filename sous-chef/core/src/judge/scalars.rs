@@ -156,9 +156,14 @@ fn learned<'a>(
 ) -> (Explained, MergedRuns<'a>, FxHashMap<ScalarKey, RunEvidence>) {
     let runs = merged_runs(corpus);
     let floor = u64::from(config.support_floor);
-    let mut pooled: FxHashMap<Box<[ScalarKey]>, u64> = FxHashMap::default();
-    for &(atoms, count) in &runs.runs {
-        if let Some(key) = terminals_pooled(atoms) {
+    let keys: Vec<Option<Box<[ScalarKey]>>> = runs
+        .runs
+        .iter()
+        .map(|&(atoms, _)| terminals_pooled(atoms))
+        .collect();
+    let mut pooled: FxHashMap<&[ScalarKey], u64> = FxHashMap::default();
+    for (key, &(_, count)) in keys.iter().zip(&runs.runs) {
+        if let Some(key) = key {
             *pooled.entry(key).or_default() += count;
         }
     }
@@ -167,11 +172,11 @@ fn learned<'a>(
         clusters: runs
             .runs
             .iter()
-            .filter(|&&(atoms, count)| {
-                count >= floor
-                    || terminals_pooled(atoms).is_some_and(|key| pooled[&key] >= floor)
+            .zip(&keys)
+            .filter(|&(&(_, count), key)| {
+                count >= floor || key.as_ref().is_some_and(|key| pooled[&**key] >= floor)
             })
-            .map(|&(atoms, _)| atoms.into())
+            .map(|(&(atoms, _), _)| atoms.into())
             .collect(),
     };
     let shapes = run_evidence(corpus, &explained);
