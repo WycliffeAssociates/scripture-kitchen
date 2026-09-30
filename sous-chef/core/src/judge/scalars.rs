@@ -451,17 +451,22 @@ pub(super) fn book_rates(
     if judged.len() < BOOK_RATE_MIN_BOOKS as usize {
         return;
     }
-    let mut others: Vec<u16> = Vec::with_capacity(judged.len() - 1);
+    let others = judged.len() - 1;
+    let mut rates: Vec<u16> = Vec::with_capacity(judged.len());
+    let mut sorted: Vec<u16> = Vec::with_capacity(judged.len());
     for side in Side::ALL {
         for class in OuterClass::ALL {
             if class == OuterClass::Edge {
                 continue;
             }
             let count = |book: &BookCounts| book.sides[side as usize][class as usize];
-            let rates: Vec<u16> = judged
-                .iter()
-                .map(|book| share_bp(count(book), book.occurrences))
-                .collect();
+            rates.clear();
+            rates.extend(
+                judged
+                    .iter()
+                    .map(|book| share_bp(count(book), book.occurrences)),
+            );
+            sorted.clear();
             for (at, book) in judged.iter().enumerate() {
                 let rate = rates[at];
                 if book.occurrences < u64::from(config.book_rate_min_uses)
@@ -470,9 +475,11 @@ pub(super) fn book_rates(
                 {
                     continue;
                 }
-                others.clear();
-                others.extend(rates[..at].iter().chain(&rates[at + 1..]));
-                let baseline = median(&mut others);
+                if sorted.is_empty() {
+                    sorted.extend_from_slice(&rates);
+                    sorted.sort_unstable();
+                }
+                let baseline = median_without(&sorted, rate);
                 if u32::from(rate) < u32::from(config.book_rate_ratio) * u32::from(baseline.max(1))
                 {
                     continue;
@@ -493,7 +500,7 @@ pub(super) fn book_rates(
                     books: 1,
                     usual: Usual::BookRate {
                         baseline_bp: baseline,
-                        books: others.len() as u32,
+                        books: others as u32,
                     },
                 });
             }
@@ -501,14 +508,23 @@ pub(super) fn book_rates(
     }
 }
 
-/// The middle rate, the mean of the two middle ones for an even count.
-fn median(rates: &mut [u16]) -> u16 {
-    rates.sort_unstable();
-    let half = rates.len() / 2;
-    if rates.len() % 2 == 1 {
-        rates[half]
+/// The middle rate of `sorted` with one `rate` left out, the mean of the two
+/// middle ones for an even count. Which equal rate leaves makes no difference,
+/// so one sort serves every book under test.
+///
+/// ```text
+/// sorted [10, 20, 30, 40, 50], without 30 -> [10, 20, 40, 50] -> 30
+/// ```
+fn median_without(sorted: &[u16], rate: u16) -> u16 {
+    let gap = sorted.partition_point(|&other| other < rate);
+    debug_assert_eq!(sorted.get(gap), Some(&rate), "the rate is one of them");
+    let at = |index: usize| sorted[if index < gap { index } else { index + 1 }];
+    let len = sorted.len() - 1;
+    let half = len / 2;
+    if len % 2 == 1 {
+        at(half)
     } else {
-        ((u32::from(rates[half - 1]) + u32::from(rates[half])) / 2) as u16
+        ((u32::from(at(half - 1)) + u32::from(at(half))) / 2) as u16
     }
 }
 
@@ -1237,4 +1253,43 @@ pub(super) fn reported_share(numerator: u64, denominator: u64) -> u16 {
         u64::from(saturate(numerator)),
         u64::from(saturate(denominator)),
     )
+}
+
+#[cfg(test)]
+mod median_tests {
+    use super::median_without;
+
+    /// The brute force it replaces: copy the others, sort, take the middle.
+    fn leave_one_out(rates: &[u16], at: usize) -> u16 {
+        let mut others: Vec<u16> = rates[..at].iter().chain(&rates[at + 1..]).copied().collect();
+        others.sort_unstable();
+        let half = others.len() / 2;
+        if others.len() % 2 == 1 {
+            others[half]
+        } else {
+            ((u32::from(others[half - 1]) + u32::from(others[half])) / 2) as u16
+        }
+    }
+
+    #[test]
+    fn one_sort_gives_every_leave_one_out_median() {
+        let mut state = 0x9e37_79b9_u32;
+        for len in 2..40 {
+            for _ in 0..50 {
+                let rates: Vec<u16> = (0..len)
+                    .map(|_| {
+                        state ^= state << 13;
+                        state ^= state >> 17;
+                        state ^= state << 5;
+                        (state % 12) as u16 * 900
+                    })
+                    .collect();
+                let mut sorted = rates.clone();
+                sorted.sort_unstable();
+                for (at, &rate) in rates.iter().enumerate() {
+                    assert_eq!(median_without(&sorted, rate), leave_one_out(&rates, at));
+                }
+            }
+        }
+    }
 }
