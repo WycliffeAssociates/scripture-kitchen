@@ -65,10 +65,10 @@ Copy means every column of the source row EXCEPT `marker`, `shape` and
 Notes on individual rows:
 
 - **`otherpara`.** The spec means "non verse text paragraph". The engine
-  draws the verse-text line at the verse extent (`TextRule::VerseExtent`), not
-  at the paragraph category, so today there is no engine difference between
-  `versepara` and `otherpara`. `lit` is the closest spec row that is body-ish
-  and not a heading. It is a distinct template anyway so the difference has a
+  draws the verse-text line at the verse extent (`TextRule::VerseExtent`) and
+  drops only heading paragraphs inside it (`sectionpara`, `title`), so today
+  there is no engine difference between `versepara` and `otherpara`. `lit` is
+  the closest spec row that is body-ish and not a heading. It is a distinct template anyway so the difference has a
   place to live if the mask ever grows one.
 - **`standalone`.** The walker already treats a KNOWN milestone row in its
   bare spelling (`\ts \*`) as a point: no attributes, no pairing. That is

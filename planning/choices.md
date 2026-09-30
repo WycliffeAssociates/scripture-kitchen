@@ -2,6 +2,30 @@
 
 Per-pass decision ledger. Newest section first.
 
+## Headings are not verse text
+
+**A heading is the spec's Titles and Sections group.** `Filter::verse_text()`
+drops the text of every `Category::ParaTitlesSections` paragraph (`\s#`,
+`\ms#`, `\mr`, `\sr`, `\r`, `\d`, `\sp`, `\sd#`, `\mt#`, `\mte#`, `\cl`,
+`\cd`, and the `title`/`sectionpara` extension templates), mid-verse too. The
+category already exists and is the core of usx.rs's `is_heading`; no list is
+written by hand. `\qa`, `\qd` (Poetry) and `\rem` (Identification) are not in
+it and stay as they were.
+
+**It is a text rule, not a `Remove`.** en_ulb writes `\s5` chunk breaks with
+the next `\v` on the following line and no paragraph marker, so the verse sits
+INSIDE the heading paragraph (208 times in 2CH alone); BSB does the same with
+`\d` and `\r`. Removing the subtree would drop those verses. Instead a heading
+paragraph's text is out until a `\v` inside it opens its verse, and the rest of
+that paragraph is the verse's. The heading's own newline stays, as every
+dropped text's does, so two verses never glue.
+
+**en_ulb:** PSA's projection loses 95 bytes (`Book Two`, `(Psalms 42-72)` and
+the other three book dividers, which sat inside the last verse of 41, 72, 89
+and 106); every other book is byte-identical. sous findings go from 106
+patterns to 103: `-` prev/next=Digit (4 sites) and `Title "Two"` are gone, and
+`)` prev=Digit drops from 5 sites to EZR's 1.
+
 ## 0.1.8 — `diff` sends what changed; no moves
 
 **A verse out of order is a deletion and an addition** (Will). `Moved` was a

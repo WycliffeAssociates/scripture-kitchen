@@ -32,7 +32,7 @@ use std::ops::Range;
 
 use crate::cst::{Cst, NODE_ID_BIT};
 use crate::tables::generated::{self, MarkerIdx};
-use crate::tables::schema::{MarkerKind, SpellingShape};
+use crate::tables::schema::{Category, MarkerKind, SpellingShape};
 use crate::{Token, TokenKind};
 
 /// What a filter does with one marker.
@@ -67,8 +67,21 @@ pub enum TextRule {
     All,
     /// Text survives only inside an open verse — a verse running from its `\v`
     /// to the next `\v`/`\c`/EOF, with a sidebar its own scope (usx.rs's `vid`
-    /// definition, reused). Without it a kept-all-text filter also keeps intro
-    /// text, front matter, and everything before `\v 1`.
+    /// definition, reused) — and outside every heading. Without it a
+    /// kept-all-text filter also keeps intro text, front matter, and everything
+    /// before `\v 1`.
+    ///
+    /// A heading is a paragraph of the spec's Titles and Sections group
+    /// ([`Category::ParaTitlesSections`]: `\s#`, `\ms#`, `\mr`, `\r`, `\d`, …),
+    /// and its text is not verse text even mid-verse. A `\v` INSIDE one opens its
+    /// verse as usual, and the rest of that paragraph is the verse's words:
+    ///
+    /// ```text
+    /// \p \v 1 one\n\s1 mid\n\p \v 2 two\n   →  "one\n\ntwo\n"
+    /// \s5\n\v 2 Solomon spoke\n             →  "\nSolomon spoke\n"
+    /// ```
+    ///
+    /// The heading's line break stays, as every dropped text's does.
     VerseExtent,
     None,
 }
@@ -139,8 +152,9 @@ impl Filter {
     ///
     /// Markers, designators, attribute lists and note/milestone/sidebar
     /// SUBTREES all drop; `\add`'s text survives while its markers do not; text
-    /// outside a verse (front matter, intro, a heading, everything before
-    /// `\v 1`) is not verse text and dies too.
+    /// outside a verse (front matter, intro, everything before `\v 1`) and
+    /// every heading's text, mid-verse too, is not verse text and dies too
+    /// (see [`TextRule::VerseExtent`]).
     pub fn verse_text() -> Self {
         use Action::{Remove, Unwrap};
         let mut kinds = [Remove; MarkerKind::COUNT];
@@ -309,6 +323,7 @@ pub fn mask(source: &[u8], tokens: &[Token], cst: &Cst, filter: &Filter) -> Mask
         own_token: u32::MAX,
         keep_own: false,
         sidebar: false,
+        heading: false,
     };
     let mut stack: Vec<Cursor> = Vec::new();
     let mut state = Extent::default();
@@ -321,6 +336,9 @@ pub fn mask(source: &[u8], tokens: &[Token], cst: &Cst, filter: &Filter) -> Mask
             let Some(parent) = stack.pop() else { break };
             if cur.sidebar {
                 state.sidebar_depth -= 1;
+            }
+            if cur.heading {
+                state.heading = false;
             }
             cur = parent;
             continue;
@@ -355,6 +373,11 @@ pub fn mask(source: &[u8], tokens: &[Token], cst: &Cst, filter: &Filter) -> Mask
             if sidebar {
                 state.sidebar_depth += 1;
             }
+            let heading = !transparent
+                && generated::category(opener.marker_idx) == Category::ParaTitlesSections;
+            if heading {
+                state.heading = true;
+            }
             stack.push(cur);
             cur = Cursor {
                 next: node.children.start,
@@ -362,6 +385,7 @@ pub fn mask(source: &[u8], tokens: &[Token], cst: &Cst, filter: &Filter) -> Mask
                 own_token: if transparent { u32::MAX } else { node.token },
                 keep_own: action == Action::Keep,
                 sidebar,
+                heading,
             };
             continue;
         }
@@ -449,6 +473,8 @@ struct Cursor {
     keep_own: bool,
     /// This frame is a sidebar, so its close decrements the depth.
     sidebar: bool,
+    /// This frame is a heading paragraph, so its close ends the heading.
+    heading: bool,
 }
 
 /// The verse-extent state [`TextRule::VerseExtent`] reads — usx.rs's `vid`
@@ -461,6 +487,9 @@ struct Extent {
     /// outside RESUMES after `\esbe` — so the extent looks away while one is
     /// open rather than closing anything.
     sidebar_depth: u32,
+    /// Inside a heading paragraph and ahead of any `\v` in it. Paragraphs do
+    /// not nest, so one flag is the whole state.
+    heading: bool,
 }
 
 impl Extent {
@@ -474,14 +503,17 @@ impl Extent {
             // A `\v` whose designator is missing or malformed still opens an
             // extent — otherwise the previous verse silently swallows this
             // verse's text, the same reason Toc keeps its row.
-            MarkerKind::Verse => self.open = true,
+            MarkerKind::Verse => {
+                self.open = true;
+                self.heading = false;
+            }
             MarkerKind::Chapter => self.open = false,
             _ => {}
         }
     }
 
     fn in_verse_text(&self) -> bool {
-        self.open && self.sidebar_depth == 0
+        self.open && !self.heading && self.sidebar_depth == 0
     }
 }
 
@@ -760,21 +792,38 @@ mod tests {
         let source =
             "\\id GEN\n\\mt1 Genesis\n\\ip An intro.\n\\c 1\n\\s1 A heading\n\\p \\v 1 real text\n";
         assert_eq!(verse_text(source), "\n\n\n\nreal text\n");
-        // A heading in the MIDDLE of a verse dies by KIND (Titles is a
-        // Paragraph, so the marker unwraps) and by extent both — text after the
-        // next `\v` returns.
+        // A heading in the MIDDLE of a verse is not verse text either, though
+        // the extent is open across it; its line break stays.
         assert_eq!(
             verse_text("\\p \\v 1 one\n\\s1 mid\n\\p \\v 2 two\n"),
-            "one\nmid\ntwo\n"
+            "one\n\ntwo\n"
         );
-        // …which is why `\s1`'s text needs the kind table to die, not the
-        // extent: the extent is still open across it.
+        // Removing the marker instead takes its line break with it.
         let mut f = Filter::verse_text();
         f.markers.push(("s".into(), Action::Remove));
         assert_eq!(
             masked("\\p \\v 1 one\n\\s1 mid\n\\p \\v 2 two\n", &f),
             "one\ntwo\n"
         );
+    }
+
+    #[test]
+    fn no_heading_is_verse_text() {
+        let source = "\\id PSA\n\\c 41\n\\q\n\\v 13 Blessed be Yahweh.\n\\s5\n\\ms Book Two\n\\mr (Psalms 42-72)\n\\s A heading\n\\c 42\n\\d For the director\n\\q\n\\v 1 As the deer pants.\n\\s Mid heading\n\\q\n\\v 2 My soul.\n";
+        assert_eq!(
+            verse_text(source),
+            "\n\nBlessed be Yahweh.\n\n\n\n\n\n\n\nAs the deer pants.\n\n\nMy soul.\n"
+        );
+        // A `\v` inside a heading paragraph opens its verse, and the words after
+        // it are that verse's.
+        assert_eq!(
+            verse_text("\\c 1\n\\s5\n\\v 2 Solomon spoke\n\\s1 title \\v 3 then\n"),
+            "\n\nSolomon spoke\nthen\n"
+        );
+        // The rule is the text rule's, so `TextRule::All` keeps headings.
+        let mut f = Filter::verse_text();
+        f.text = TextRule::All;
+        assert_eq!(masked("\\p \\v 1 one\n\\s1 mid\n", &f), "one\nmid\n");
     }
 
     #[test]

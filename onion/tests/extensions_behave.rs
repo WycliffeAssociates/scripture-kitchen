@@ -431,6 +431,19 @@ fn the_mask_reads_the_row() {
         verse.text(source.as_bytes()).contains("why"),
         "row 0 keeps the note prose, which is the behaviour a registration fixes"
     );
+
+    // A `sectionpara` extension is a heading, so its text is not verse text
+    // even mid-verse.
+    let ext = registry(&[("zmys", ExtensionCategory::SectionPara)]);
+    let source = "\\id GEN\n\\c 1\n\\p \\v 1 one\n\\zmys mid\n\\p two\n";
+    let doc = parse(source, &ext);
+    let verse = mask(
+        source.as_bytes(),
+        &doc.tokens,
+        &doc.cst,
+        &Filter::verse_text(),
+    );
+    assert_eq!(verse.text(source.as_bytes()), "\none\n\ntwo\n");
 }
 
 /// A `versepara` extension cuts a decision unit the way `\p` does — which is
