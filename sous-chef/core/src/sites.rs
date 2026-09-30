@@ -362,22 +362,8 @@ fn occurrences(
     match pattern.key {
         // A glyph's neighbours inside a run are `Nonletter`; only the run's
         // first and last members can see anything else.
-        PatternKey::Placement { side, class } => atoms
-            .iter()
-            .enumerate()
-            .filter(|(_, atom)| atom.1 == glyph)
-            .filter(|(_, atom)| match side {
-                Side::Prev => cursor.prev_outer(atom.0) == class,
-                Side::Next => cursor.next_outer(atom.0) == class,
-            })
-            .filter(|&(at, _)| {
-                // An in-run pair whose leader is entitled is ExactNeighbor's.
-                let leader = match side {
-                    Side::Prev => at.checked_sub(1),
-                    Side::Next => (at + 1 < atoms.len()).then_some(at),
-                };
-                !leader.is_some_and(|leader| explained.leads(atoms[leader].1))
-            })
+        PatternKey::Placement { side, class } => placed(atoms, glyph, side, class, cursor)
+            .filter(|&at| !explained.claimed(atoms, at, side, |atom| atom.1))
             .count() as u64,
         PatternKey::RunShape { pure, bucket } => {
             let shape = (
@@ -397,14 +383,9 @@ fn occurrences(
         PatternKey::Rarity => atoms.iter().filter(|atom| atom.1 == glyph).count() as u64,
         // Every occurrence with that class on that side: the channel counts
         // them raw, and `firing` lets the row into its own book only.
-        PatternKey::BookRate { side, class, .. } => atoms
-            .iter()
-            .filter(|atom| atom.1 == glyph)
-            .filter(|atom| match side {
-                Side::Prev => cursor.prev_outer(atom.0) == class,
-                Side::Next => cursor.next_outer(atom.0) == class,
-            })
-            .count() as u64,
+        PatternKey::BookRate { side, class, .. } => {
+            placed(atoms, glyph, side, class, cursor).count() as u64
+        }
         // Its site is the word after the run, never the run: `sentence_start`.
         PatternKey::SentenceStart => 0,
         PatternKey::Casing { .. }
@@ -412,6 +393,25 @@ fn occurrences(
         | PatternKey::Doubled { .. }
         | PatternKey::LetterRun { .. } => 0,
     }
+}
+
+/// Positions in the run where `glyph` has `class` on `side`, what Placement
+/// and BookRate both site before Placement leaves ExactNeighbor its pairs.
+fn placed<'r>(
+    atoms: &'r [(u32, ScalarKey)],
+    glyph: ScalarKey,
+    side: Side,
+    class: OuterClass,
+    cursor: &'r Cursor<'_>,
+) -> impl Iterator<Item = usize> + 'r {
+    (0..atoms.len()).filter(move |&at| {
+        let (offset, key) = atoms[at];
+        key == glyph
+            && match side {
+                Side::Prev => cursor.prev_outer(offset),
+                Side::Next => cursor.next_outer(offset),
+            } == class
+    })
 }
 
 /// One distinct glyph to search for, and every pattern judged on it.

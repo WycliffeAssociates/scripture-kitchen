@@ -23,14 +23,13 @@ pub(crate) fn judge_corpus(corpus: &[&BookAggregate], config: &JudgingConfig, ou
         roster(&scalars, total_scalars, config, out);
     }
 
-    let explained = Explained::learn(corpus, config);
+    let (explained, runs, shapes) = learned(corpus, config);
     let runs = if config.channels.run_shape {
-        merged_runs(corpus)
+        RunIndex::new(runs)
     } else {
-        Vec::new()
+        RunIndex::default()
     };
     let placements = placement_evidence(corpus, &explained);
-    let shapes = run_evidence(corpus, &explained);
     let handoffs = follow_evidence(corpus);
     let per_book = if config.channels.book_rate {
         book_evidence(corpus)
@@ -58,7 +57,7 @@ pub(crate) fn judge_corpus(corpus: &[&BookAggregate], config: &JudgingConfig, ou
         if config.channels.run_shape
             && let Some(evidence) = evidence
         {
-            run_shapes(*glyph, evidence, &runs, &explained, config, &mut cited, out);
+            run_shapes(*glyph, evidence, &runs, config, &mut cited, out);
         }
         if config.channels.placement {
             placement(*glyph, marginals, &other, config, &mut cited, out);
@@ -97,40 +96,29 @@ pub struct Explained {
 impl Explained {
     /// Everything the corpus's counts explain, before any row is judged.
     pub fn learn(corpus: &[&BookAggregate], config: &JudgingConfig) -> Self {
-        let mut out = Self::default();
-        if config.channels.exact_neighbor {
-            let mut positions: FxHashMap<ScalarKey, u64> = FxHashMap::default();
-            for book in corpus {
-                for (atoms, count) in book.runs() {
-                    for pair in atoms.windows(2) {
-                        *positions.entry(pair[0]).or_default() += u64::from(count);
-                    }
-                }
-            }
-            out.leaders = positions
-                .into_iter()
-                .filter(|&(_, positions)| entitled(positions, config).is_some())
-                .map(|(glyph, _)| glyph)
-                .collect();
-        }
-        let mut runs: FxHashMap<&[ScalarKey], u64> = FxHashMap::default();
-        for book in corpus {
-            for (atoms, count) in book.runs() {
-                *runs.entry(atoms).or_default() += u64::from(count);
-            }
-        }
-        out.clusters = runs
-            .into_iter()
-            .filter(|&(_, count)| count >= u64::from(config.support_floor))
-            .map(|(atoms, _)| atoms.into())
-            .collect();
-        out.seal();
-        out
+        learned(corpus, config).0
     }
 
     /// Whether the in-run pairs `glyph` leads are ExactNeighbor's to judge.
     pub fn leads(&self, glyph: ScalarKey) -> bool {
         self.leaders.binary_search(&glyph).is_ok()
+    }
+
+    /// Whether the occurrence at `at` in one run meets its `side` neighbour
+    /// in an in-run pair whose leader's ExactNeighbor is entitled: that pair
+    /// is ExactNeighbor's, so no coarser row counts or sites it.
+    pub fn claimed<T>(
+        &self,
+        run: &[T],
+        at: usize,
+        side: Side,
+        key: impl Fn(&T) -> ScalarKey,
+    ) -> bool {
+        let leader = match side {
+            Side::Prev => at.checked_sub(1),
+            Side::Next => (at + 1 < run.len()).then_some(at),
+        };
+        leader.is_some_and(|leader| self.leads(key(&run[leader])))
     }
 
     /// Whether this exact run is a convention by recurrence.
@@ -153,6 +141,68 @@ impl Explained {
         self.leaders.dedup();
         self.clusters.sort_unstable();
         self.clusters.dedup();
+    }
+}
+
+/// [`Explained`], with the merged runs and the run evidence it is learned
+/// from, which the judge reads next.
+///
+/// Recurrence comes from the merged runs first, since each run's `novel` tally
+/// needs it; the leaders then come from the evidence's own position counts.
+fn learned<'a>(
+    corpus: &[&'a BookAggregate],
+    config: &JudgingConfig,
+) -> (Explained, MergedRuns<'a>, FxHashMap<ScalarKey, RunEvidence>) {
+    let runs = merged_runs(corpus);
+    let mut explained = Explained {
+        leaders: Vec::new(),
+        clusters: runs
+            .iter()
+            .filter(|&&(_, count)| count >= u64::from(config.support_floor))
+            .map(|&(atoms, _)| atoms.into())
+            .collect(),
+    };
+    let shapes = run_evidence(corpus, &explained);
+    if config.channels.exact_neighbor {
+        explained.leaders = shapes
+            .iter()
+            .filter(|(_, evidence)| entitled(evidence.positions, config).is_some())
+            .map(|(glyph, _)| *glyph)
+            .collect();
+    }
+    explained.seal();
+    (explained, runs, shapes)
+}
+
+/// Every exact run's corpus count, and the runs holding each atom, so a
+/// RunShape row reads its own runs and not the corpus's.
+#[derive(Default)]
+pub(super) struct RunIndex<'a> {
+    runs: MergedRuns<'a>,
+    /// Positions into `runs`, ascending.
+    holding: FxHashMap<ScalarKey, Vec<u32>>,
+}
+
+impl<'a> RunIndex<'a> {
+    fn new(runs: MergedRuns<'a>) -> Self {
+        let mut holding: FxHashMap<ScalarKey, Vec<u32>> = FxHashMap::default();
+        for (at, (atoms, _)) in runs.iter().enumerate() {
+            for (position, atom) in atoms.iter().enumerate() {
+                if !atoms[..position].contains(atom) {
+                    holding.entry(*atom).or_default().push(at as u32);
+                }
+            }
+        }
+        Self { runs, holding }
+    }
+
+    /// The runs holding `glyph`, ascending by atoms.
+    fn holding(&self, glyph: ScalarKey) -> impl Iterator<Item = (&'a [ScalarKey], u64)> + '_ {
+        self.holding
+            .get(&glyph)
+            .into_iter()
+            .flatten()
+            .map(|&at| self.runs[at as usize])
     }
 }
 
@@ -466,8 +516,7 @@ pub(super) fn ordinary(numerator: u64, denominator: u64, config: &JudgingConfig)
 pub(super) fn run_shapes(
     glyph: ScalarKey,
     evidence: &RunEvidence,
-    runs: &[(&[ScalarKey], u64)],
-    explained: &Explained,
+    runs: &RunIndex<'_>,
     config: &JudgingConfig,
     cited: &mut Explained,
     out: &mut Findings,
@@ -495,11 +544,12 @@ pub(super) fn run_shapes(
             continue;
         };
         cited.clusters.extend(
-            explained
-                .clusters
-                .iter()
-                .filter(|atoms| shape_of(atoms, glyph) == Some((pure, bucket)))
-                .cloned(),
+            runs.holding(glyph)
+                .filter(|&(atoms, count)| {
+                    count >= u64::from(config.support_floor)
+                        && shape_of(atoms, glyph) == Some((pure, bucket))
+                })
+                .map(|(atoms, _)| Box::<[ScalarKey]>::from(atoms)),
         );
         let index = out.push_pattern(Pattern {
             glyph,
@@ -531,22 +581,21 @@ pub(super) fn run_shapes(
 fn clusters(
     glyph: ScalarKey,
     shape: (bool, u8),
-    runs: &[(&[ScalarKey], u64)],
+    runs: &RunIndex<'_>,
     config: &JudgingConfig,
 ) -> Vec<Cluster> {
     let (mut recurring, mut novel): (Vec<_>, Vec<_>) = runs
-        .iter()
+        .holding(glyph)
         .filter(|(atoms, _)| shape_of(atoms, glyph) == Some(shape))
         .partition(|(_, count)| *count >= u64::from(config.support_floor));
-    let order = |a: &&(&[ScalarKey], u64), b: &&(&[ScalarKey], u64)| {
-        b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0))
-    };
+    let order =
+        |a: &(&[ScalarKey], u64), b: &(&[ScalarKey], u64)| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0));
     recurring.sort_by(order);
     novel.sort_by(order);
     let kept = Cluster::PER_ROW - recurring.len().min(Cluster::RECURRING_SLOTS);
     let novel_taken = novel.len().min(kept);
     let recurring_taken = recurring.len().min(Cluster::PER_ROW - novel_taken);
-    let mut chosen: Vec<&(&[ScalarKey], u64)> = novel[..novel_taken]
+    let mut chosen: Vec<(&[ScalarKey], u64)> = novel[..novel_taken]
         .iter()
         .chain(&recurring[..recurring_taken])
         .copied()
@@ -554,7 +603,7 @@ fn clusters(
     chosen.sort_by(order);
     chosen
         .into_iter()
-        .map(|&(atoms, count)| Cluster {
+        .map(|(atoms, count)| Cluster {
             pattern: PatternIndex::new(0),
             atoms: atoms[..atoms.len().min(Cluster::ATOMS)].into(),
             count: saturate(count),
@@ -565,7 +614,10 @@ fn clusters(
 }
 
 /// Every exact run's corpus count, ascending by atoms.
-pub(super) fn merged_runs<'a>(corpus: &[&'a BookAggregate]) -> Vec<(&'a [ScalarKey], u64)> {
+pub(super) type MergedRuns<'a> = Vec<(&'a [ScalarKey], u64)>;
+
+/// [`MergedRuns`], summed over the corpus.
+pub(super) fn merged_runs<'a>(corpus: &[&'a BookAggregate]) -> MergedRuns<'a> {
     let mut counts: FxHashMap<&[ScalarKey], u64> = FxHashMap::default();
     for book in corpus {
         for (atoms, count) in book.runs() {
@@ -783,31 +835,18 @@ pub fn books_touched(corpus: &[&BookAggregate], pattern: &Pattern, config: &Judg
 pub(super) fn numerator_in(book: &BookAggregate, pattern: &Pattern, explained: &Explained) -> u64 {
     match pattern.key {
         PatternKey::Placement { side, class } => {
-            let occurrences: u64 = book
-                .pairs()
-                .iter()
-                .filter(|(key, _)| key.scalar() == pattern.glyph)
-                .filter(|(key, _)| class == class_on(*key, side))
-                .map(|(_, count)| u64::from(*count))
-                .sum();
+            let occurrences = placed_in(book, pattern.glyph, side, class);
             if class != OuterClass::Nonletter {
                 return occurrences;
             }
             let judged: u64 = book
                 .runs()
                 .map(|(atoms, count)| {
-                    let pairs = atoms
-                        .windows(2)
-                        .filter(|pair| explained.leads(pair[0]))
-                        .filter(|pair| {
-                            pattern.glyph
-                                == match side {
-                                    Side::Prev => pair[1],
-                                    Side::Next => pair[0],
-                                }
-                        })
+                    let claimed = (0..atoms.len())
+                        .filter(|&at| atoms[at] == pattern.glyph)
+                        .filter(|&at| explained.claimed(atoms, at, side, |atom| *atom))
                         .count() as u64;
-                    pairs * u64::from(count)
+                    claimed * u64::from(count)
                 })
                 .sum();
             occurrences - judged
@@ -844,12 +883,7 @@ pub(super) fn numerator_in(book: &BookAggregate, pattern: &Pattern, explained: &
             .find(|(key, _)| *key == pattern.glyph)
             .map_or(0, |(_, count)| u64::from(*count)),
         // The row's own book only; [`books_touched`] reads the index.
-        PatternKey::BookRate { side, class, .. } => book
-            .pairs()
-            .iter()
-            .filter(|(key, _)| key.scalar() == pattern.glyph && class == class_on(*key, side))
-            .map(|(_, count)| u64::from(*count))
-            .sum(),
+        PatternKey::BookRate { side, class, .. } => placed_in(book, pattern.glyph, side, class),
         PatternKey::SentenceStart => book
             .follows()
             .iter()
@@ -862,6 +896,16 @@ pub(super) fn numerator_in(book: &BookAggregate, pattern: &Pattern, explained: &
         | PatternKey::Doubled { .. }
         | PatternKey::LetterRun { .. } => 0,
     }
+}
+
+/// One book's occurrences of `glyph` with `class` on `side`, what Placement
+/// and BookRate both count before Placement's in-run subtraction.
+fn placed_in(book: &BookAggregate, glyph: ScalarKey, side: Side, class: OuterClass) -> u64 {
+    book.pairs()
+        .iter()
+        .filter(|(key, _)| key.scalar() == glyph && class_on(*key, side) == class)
+        .map(|(_, count)| u64::from(*count))
+        .sum()
 }
 
 // ── Corpus totals ───────────────────────────────────────────────────────
@@ -995,10 +1039,13 @@ pub(super) fn placement_evidence(
         }
         for (atoms, count) in aggregate.runs() {
             let count = u64::from(count);
-            for pair in atoms.windows(2).filter(|pair| explained.leads(pair[0])) {
-                for (glyph, side) in [(pair[1], Side::Prev), (pair[0], Side::Next)] {
-                    let left = &mut nonletter.get_mut(&glyph).expect("a run atom has pairs")
-                        [side as usize];
+            for (at, glyph) in atoms.iter().enumerate() {
+                for side in Side::ALL {
+                    if !explained.claimed(atoms, at, side, |atom| *atom) {
+                        continue;
+                    }
+                    let left =
+                        &mut nonletter.get_mut(glyph).expect("a run atom has pairs")[side as usize];
                     debug_assert!(*left >= count, "an in-run pair is a Nonletter pair");
                     *left -= count;
                 }
