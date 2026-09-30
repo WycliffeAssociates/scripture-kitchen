@@ -469,6 +469,10 @@ function wordSource(word: string): string {
   return `${escaped(word)}(?!${WORD_CHAR})`;
 }
 
+/** White space that does not end a line: the engine counts a line break
+ * (`is_line_break`) as an edge, not a space. */
+const SPACE = "[^\\S\\n\\v\\f\\r\\u{85}\\u{2028}\\u{2029}]";
+
 /** An outer class as regex source; `Edge` has none. */
 function classSource(outer: OuterClass): string | undefined {
   switch (outer) {
@@ -477,7 +481,7 @@ function classSource(outer: OuterClass): string | undefined {
     case "Digit":
       return "\\p{Nd}";
     case "Space":
-      return "\\s";
+      return SPACE;
     case "Nonletter":
       return "[^\\p{Alphabetic}\\p{Nd}\\s]";
     case "Edge":
