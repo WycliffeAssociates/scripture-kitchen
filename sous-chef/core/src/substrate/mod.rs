@@ -655,10 +655,9 @@ impl ChapterPass for Substrate {
     ///
     /// A site run abutting a masked `\c` is two findings, one per chapter.
     fn judge(&self, corpus: &[&BookAggregate], config: &JudgingConfig, out: &mut Findings) {
-        out.set_terminals(crate::judge::TerminalTable::learn(
-            &crate::judge::merged_follows(corpus),
-            config,
-        ));
+        let follows = crate::judge::merged_follows(corpus);
+        out.set_terminals(crate::judge::TerminalTable::learn(&follows, config));
+        out.set_terminal_counts(crate::judge::TerminalCount::of(&follows));
         for (index, book) in corpus.iter().enumerate() {
             out.open_book(BookIndex::new(index).expect("a corpus indexes every book"));
             for finding in &book.hygiene {

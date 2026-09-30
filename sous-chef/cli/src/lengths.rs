@@ -10,13 +10,19 @@ use crate::*;
 
 /// The product pass over every target book, plus the source comparison: rows
 /// in projected UTF-8, ordered by book then offset, and the corpus-level
-/// pattern table and its clusters beside them.
+/// pattern table, its clusters and the terminal counts beside them.
 pub(crate) fn brigade_findings(
     corpus: &Corpus<'_, OnionBook>,
     source: &[SourceLengths<'_>],
     source_copy: bool,
     min_run: Option<u32>,
-) -> (Vec<PackedFinding>, Vec<Pattern>, Vec<Cluster>, Paired) {
+) -> (
+    Vec<PackedFinding>,
+    Vec<Pattern>,
+    Vec<Cluster>,
+    Vec<TerminalCount>,
+    Paired,
+) {
     let mut config = <Brigade as ChapterPass>::Config::default();
     config.1.lengths.source_copy = source_copy;
     config.2.lengths.source_copy = source_copy;
@@ -25,8 +31,8 @@ pub(crate) fn brigade_findings(
         config.2.lengths.source_copy_min_run = min_run;
     }
     let (findings, paired) = analyze_paired(corpus, &Brigade::default(), &config, source);
-    let (rows, patterns, clusters) = findings.into_parts();
-    (rows, patterns, clusters, paired)
+    let (rows, patterns, clusters, terminals) = findings.into_parts();
+    (rows, patterns, clusters, terminals, paired)
 }
 
 /// One fired length row with everything the wire does not carry: the address,

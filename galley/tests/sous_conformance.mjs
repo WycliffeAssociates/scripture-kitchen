@@ -240,6 +240,9 @@ const casingRows = (snapshot) =>
   snapshot.patterns().filter((pattern) => pattern.channel === "Casing").length;
 eq(casingRows(cold), 1, "cold.bin holds the fixture's casing pattern");
 eq(casingRows(knobsSnap), 0, "the settings publication publishes none");
+// The terminal section rides every publication, whatever the knobs say.
+check(cold.terminals().length > 0 && knobsSnap.terminals().length === cold.terminals().length, "the terminal counts ride both publications");
+check(cold.terminals().every((entry) => cold.terminal(entry.glyph, entry) === entry), "terminal() finds every entry");
 
 // --- the typed settings are the wasm class's, field for field --------------
 

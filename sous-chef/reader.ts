@@ -9,7 +9,7 @@
 export const MAGIC = 0x53554f53;
 export const FORMAT_VERSION = 2;
 export const FLAG_UTF16 = 1;
-export const HEADER_BYTES = 56;
+export const HEADER_BYTES = 64;
 export const DIRECTORY_ENTRY_BYTES = 20;
 export const RECORD_LEN = 16;
 export const HEADER_MAGIC_OFFSET = 0;
@@ -23,6 +23,8 @@ export const HEADER_PATTERN_OFFSET_OFFSET = 28;
 export const HEADER_SNAPSHOT_ID_OFFSET = 32;
 export const HEADER_CLUSTER_COUNT_OFFSET = 48;
 export const HEADER_CLUSTER_OFFSET_OFFSET = 52;
+export const HEADER_TERMINAL_COUNT_OFFSET = 56;
+export const HEADER_TERMINAL_OFFSET_OFFSET = 60;
 export const DIRECTORY_KEY_OFFSET = 0;
 export const DIRECTORY_KEY_TERMINATOR_OFFSET = 3;
 export const DIRECTORY_LENGTH_OFFSET = 4;
@@ -74,6 +76,15 @@ export const CLUSTER_TRUNCATED = 2;
 /** Atoms one cluster keeps, and clusters one `RunShape` row lists. */
 export const CLUSTER_ATOMS = 16;
 export const CLUSTERS_PER_ROW = 8;
+/** One terminal entry: what the corpus hands off to after one mark in one
+ * context. */
+export const TERMINAL_ENTRY_BYTES = 16;
+export const TERMINAL_GLYPH_OFFSET = 0;
+export const TERMINAL_CONTEXT_OFFSET = 4;
+export const TERMINAL_UPPER_OFFSET = 8;
+export const TERMINAL_CASED_OFFSET = 12;
+export const TERMINAL_QUOTED = 1;
+export const TERMINAL_BRACKETED = 2;
 
 export type CoordinateSpace = "utf8" | "utf16";
 export type ByteSource = ArrayBuffer | ArrayBufferView;
@@ -233,6 +244,22 @@ export interface Cluster {
   readonly truncated: boolean;
   /** It holds a directionless quote. */
   readonly directionless: boolean;
+}
+
+/** Where a word stands after a mark: whether a quote, or a closing bracket,
+ * stood between them. */
+export interface TerminalContext {
+  readonly quoted: boolean;
+  readonly bracketed: boolean;
+}
+
+/** What the corpus hands off to after one mark in one context: raw counts, no
+ * verdict. `upper` of `cased` handoffs went to an uppercase letter; the rest
+ * went to a lowercase one. */
+export interface Terminal extends TerminalContext {
+  readonly glyph: number;
+  readonly upper: number;
+  readonly cased: number;
 }
 
 /** One corpus-level pattern: a glyph, the channel that convicted it, the
@@ -651,6 +678,55 @@ function readCluster(view: DataView, entry: ClusterEntry): Cluster {
   };
 }
 
+/** The terminal section, refusing every entry the encoder cannot write:
+ * strictly ascending by glyph then context, `upper` at most `cased`, and
+ * `cased` never zero. */
+function readTerminalSection(view: DataView, start: number, count: number): [Terminal[], number] {
+  const terminals: Terminal[] = [];
+  let last = -1;
+  for (let entry = 0; entry < count; entry += 1) {
+    const at = start + entry * TERMINAL_ENTRY_BYTES;
+    const bad = (field: string): never => fail(`terminal entry ${entry} has an invalid ${field}`);
+    if (at + TERMINAL_ENTRY_BYTES > view.byteLength) {
+      return bad("length");
+    }
+    const glyph = u32(view, at + TERMINAL_GLYPH_OFFSET);
+    const context = view.getUint8(at + TERMINAL_CONTEXT_OFFSET);
+    const upper = u32(view, at + TERMINAL_UPPER_OFFSET);
+    const cased = u32(view, at + TERMINAL_CASED_OFFSET);
+    if (glyph === PATTERN_DIGIT_GLYPH || !isScalar(glyph)) {
+      return bad("glyph");
+    }
+    if ((context & ~(TERMINAL_QUOTED | TERMINAL_BRACKETED)) !== 0) {
+      return bad("context");
+    }
+    for (let pad = TERMINAL_CONTEXT_OFFSET + 1; pad < TERMINAL_UPPER_OFFSET; pad += 1) {
+      if (view.getUint8(at + pad) !== 0) {
+        return bad("pad");
+      }
+    }
+    if (cased === 0) {
+      return bad("cased");
+    }
+    if (upper > cased) {
+      return bad("upper");
+    }
+    const order = glyph * 4 + context;
+    if (order <= last) {
+      return bad("order");
+    }
+    last = order;
+    terminals.push({
+      glyph,
+      quoted: (context & TERMINAL_QUOTED) !== 0,
+      bracketed: (context & TERMINAL_BRACKETED) !== 0,
+      upper,
+      cased,
+    });
+  }
+  return [terminals, start + count * TERMINAL_ENTRY_BYTES];
+}
+
 function readReasons(bits: number): readonly ConventionReason[] {
   if (bits === 0) {
     return fail("a convention row carries at least one reason");
@@ -806,6 +882,7 @@ export class FindingsSnapshot {
   readonly #patternStart: number;
   readonly #patternCount: number;
   readonly #clusters: ReadonlyMap<number, readonly ClusterEntry[]>;
+  readonly #terminals: readonly Terminal[];
   readonly snapshotId: Uint8Array;
   readonly coordinateSpace: CoordinateSpace;
 
@@ -817,12 +894,14 @@ export class FindingsSnapshot {
     patternStart: number,
     patternCount: number,
     clusters: ReadonlyMap<number, readonly ClusterEntry[]>,
+    terminals: readonly Terminal[],
   ) {
     this.#view = view;
     this.#entries = entries;
     this.#patternStart = patternStart;
     this.#patternCount = patternCount;
     this.#clusters = clusters;
+    this.#terminals = terminals;
     // First position wins: two ids may publish the same `\id`.
     this.#byKey = new Map([...entries].reverse().map((entry, at) => [entry.key, entries.length - 1 - at]));
     this.#byId = new Map(entries.map((entry, index) => [entry.id, index]));
@@ -913,8 +992,19 @@ export class FindingsSnapshot {
       patternCount,
     );
 
+    if (u32(view, HEADER_TERMINAL_OFFSET_OFFSET) !== clusterEnd) {
+      return fail(
+        `terminal section starts at ${u32(view, HEADER_TERMINAL_OFFSET_OFFSET)}, expected ${clusterEnd}`,
+      );
+    }
+    const [terminals, terminalEnd] = readTerminalSection(
+      view,
+      clusterEnd,
+      u32(view, HEADER_TERMINAL_COUNT_OFFSET),
+    );
+
     const entries: BookEntry[] = [];
-    let cursor = clusterEnd;
+    let cursor = terminalEnd;
     let totalSeen = 0;
     for (let index = 0; index < bookCount; index += 1) {
       const at = HEADER_BYTES + index * DIRECTORY_ENTRY_BYTES;
@@ -939,7 +1029,7 @@ export class FindingsSnapshot {
     if (totalSeen !== totalFindings) {
       return fail(`header declares ${totalFindings} findings, directory contains ${totalSeen}`);
     }
-    return new FindingsSnapshot(view, entries, snapshotId, coordinateSpace, patternStart, patternCount, clusters);
+    return new FindingsSnapshot(view, entries, snapshotId, coordinateSpace, patternStart, patternCount, clusters, terminals);
   }
 
   get length(): number {
@@ -972,6 +1062,34 @@ export class FindingsSnapshot {
   /** The whole table, in emission order. */
   patterns(): Pattern[] {
     return Array.from({ length: this.#patternCount }, (_, row) => this.pattern(row));
+  }
+
+  /** Every mark and context the corpus handed a cased letter off from,
+   * ascending by glyph then context. */
+  terminals(): readonly Terminal[] {
+    return this.#terminals;
+  }
+
+  /** What follows `glyph` in one context: after `;` bare, 482 of 4,677 cased
+   * handoffs are uppercase. `undefined` when the corpus never handed a cased
+   * letter off from it. */
+  terminal(glyph: number, context: TerminalContext): Terminal | undefined {
+    const wanted = glyph * 4 + (context.quoted ? TERMINAL_QUOTED : 0) + (context.bracketed ? TERMINAL_BRACKETED : 0);
+    let [low, high] = [0, this.#terminals.length];
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      const entry = this.#terminals[middle];
+      const order = entry.glyph * 4 + (entry.quoted ? TERMINAL_QUOTED : 0) + (entry.bracketed ? TERMINAL_BRACKETED : 0);
+      if (order === wanted) {
+        return entry;
+      }
+      if (order < wanted) {
+        low = middle + 1;
+      } else {
+        high = middle;
+      }
+    }
+    return undefined;
   }
 
   /** By directory position, or the first book carrying that `BookKey`. */

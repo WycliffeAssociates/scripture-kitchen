@@ -53,5 +53,5 @@ pub use scalars::{Explained, books_touched};
 pub(crate) use scalars::{judge_corpus, pool_of_key, rarity_kin, share_bp};
 use scalars::{most, reported_share, saturate, shape_of};
 use terminals::seek;
-pub use terminals::{TerminalTable, merged_follows};
+pub use terminals::{TerminalCount, TerminalTable, merged_follows};
 pub(crate) use words::{free_of, judge_words, judge_words_for, judges_doubles, word_slot};

@@ -99,6 +99,39 @@ impl TerminalTable {
     }
 }
 
+/// One handoff context's raw counts, as a publication carries them: what a
+/// reader needs to say "after `;` this project continues in lowercase 4,195
+/// of 4,677 times" without knowing any threshold.
+///
+/// ```text
+/// merged ((';', bare), Upper 482, Lower 4,195, Uncased 9)
+///   → TerminalCount { key: (';', bare), upper: 482, cased: 4,677 }
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TerminalCount {
+    pub key: FollowKey,
+    /// Handoffs to an uppercase letter.
+    pub upper: u32,
+    /// Handoffs to a cased letter, upper or lower; never zero, and at least
+    /// `upper`.
+    pub cased: u32,
+}
+
+impl TerminalCount {
+    /// Every context of a merged follow lane that handed off to a cased
+    /// letter, in key order.
+    pub fn of(follows: &[(FollowKey, FollowCounts)]) -> Vec<Self> {
+        follows
+            .iter()
+            .filter_map(|&(key, counts)| {
+                let upper = counts.get(Case::Upper);
+                let cased = upper.saturating_add(counts.get(Case::Lower));
+                (cased > 0).then_some(Self { key, upper, cased })
+            })
+            .collect()
+    }
+}
+
 /// Entitlement and the share, in one place: the denominator is the cased
 /// handoffs, so a context followed only by uncased letters decides nothing,
 /// and one under `support_floor` of them is `None` and stays free.

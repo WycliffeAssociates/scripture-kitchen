@@ -37,8 +37,8 @@ use sous_core::words::LETTER_RUN_MAX;
 use sous_core::{
     AlignedUnit, Alignment, AlignmentFact, Brigade, ChapterPass, Cluster, Corpus, FORMAT_VERSION,
     FindingKind, PackedFinding, Paired, Pattern, PatternKey, ProjectedBook, ScalarKey, SnapshotId,
-    SourceLengths, SourceVerse, SourceWords, TextRange, Usual, align, analyze_paired,
-    source_lengths,
+    SourceLengths, SourceVerse, SourceWords, TerminalCount, TextRange, Usual, align,
+    analyze_paired, source_lengths,
 };
 use usage::Cli;
 use usfm_galley::sous::{OnionBook, OnionInputBook, publish_onion_findings};
@@ -146,7 +146,7 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                 words: words.as_ref(),
             })
             .collect();
-        let (findings, patterns, clusters, paired) = brigade_findings(
+        let (findings, patterns, clusters, terminals, paired) = brigade_findings(
             &target_corpus,
             &source,
             args.source_copy,
@@ -195,6 +195,7 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                 &findings,
                 &patterns,
                 &clusters,
+                &terminals,
             )?;
             fs::write(path, &buffer)
                 .map_err(|error| format!("cannot write {}: {error}", path.display()))?;

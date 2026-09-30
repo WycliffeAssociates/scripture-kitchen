@@ -23,6 +23,7 @@ pub struct Findings {
     patterns: Vec<Pattern>,
     clusters: Vec<Cluster>,
     terminals: Option<TerminalTable>,
+    terminal_counts: Vec<TerminalCount>,
     explained: Explained,
 }
 
@@ -36,6 +37,7 @@ impl Findings {
             patterns: Vec::new(),
             clusters: Vec::new(),
             terminals: None,
+            terminal_counts: Vec::new(),
             explained: Explained::default(),
         }
     }
@@ -99,6 +101,16 @@ impl Findings {
         self.terminals = Some(table);
     }
 
+    /// The raw counts behind the terminal table, which a publication carries
+    /// so a reader can say what follows a mark; no threshold touches them.
+    pub fn terminal_counts(&self) -> &[TerminalCount] {
+        &self.terminal_counts
+    }
+
+    pub fn set_terminal_counts(&mut self, counts: Vec<TerminalCount>) {
+        self.terminal_counts = counts;
+    }
+
     /// What the firing rows leave to a finer judgment: corpus evidence the
     /// substrate rescan reads so its sites agree with each row's numerator.
     pub const fn explained(&self) -> &Explained {
@@ -117,8 +129,22 @@ impl Findings {
             .sort_by_key(|row| (row.book_idx().get(), row.from(), row.to()));
     }
 
-    pub fn into_parts(self) -> (Vec<PackedFinding>, Vec<Pattern>, Vec<Cluster>) {
-        (self.rows, self.patterns, self.clusters)
+    /// Rows, patterns, clusters and terminal counts: everything a
+    /// publication encodes.
+    pub fn into_parts(
+        self,
+    ) -> (
+        Vec<PackedFinding>,
+        Vec<Pattern>,
+        Vec<Cluster>,
+        Vec<TerminalCount>,
+    ) {
+        (
+            self.rows,
+            self.patterns,
+            self.clusters,
+            self.terminal_counts,
+        )
     }
 
     pub fn len(&self) -> usize {

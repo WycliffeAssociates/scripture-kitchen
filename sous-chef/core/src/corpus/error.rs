@@ -104,6 +104,17 @@ pub enum CorpusWireError {
         entry: usize,
         field: &'static str,
     },
+    TerminalSectionOutOfOrder {
+        expected: usize,
+        actual: usize,
+    },
+    /// The terminal entry's named field is not a value the encoder can write:
+    /// a glyph that is no scalar, a context or pad bit set, `upper` over
+    /// `cased`, a zero `cased`, or an entry not strictly after the last.
+    InvalidTerminal {
+        entry: usize,
+        field: &'static str,
+    },
 }
 
 impl fmt::Display for CorpusWireError {
@@ -177,6 +188,15 @@ impl fmt::Display for CorpusWireError {
             }
             Self::InvalidCluster { entry, field } => {
                 write!(f, "cluster entry {entry} has an invalid {field}")
+            }
+            Self::TerminalSectionOutOfOrder { expected, actual } => {
+                write!(
+                    f,
+                    "terminal section starts at {actual}, expected {expected}"
+                )
+            }
+            Self::InvalidTerminal { entry, field } => {
+                write!(f, "terminal entry {entry} has an invalid {field}")
             }
             Self::PatternIndexPastTable { index, count, at } => match at {
                 Some((book, row)) => write!(

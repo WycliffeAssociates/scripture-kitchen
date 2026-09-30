@@ -24,11 +24,13 @@ import type {
   CasingForm,
   Cluster,
   Finding,
+  FindingsSnapshot,
   HygieneClass,
   OuterClass,
   Pattern,
   Pool,
   PresenceKind,
+  TerminalContext,
 } from "./sous-reader.ts";
 
 /** `PATTERN_DIGIT_GLYPH`, `LETTER_RUN_MAX` and `RUN_BUCKETS` in the reader. */
@@ -85,7 +87,7 @@ export interface ParamsById {
   "convention.placement.follows": { glyph: Glyph; digit: boolean; neighbor: TouchClass; usual: TouchClass; usualCount: number } & Spread;
   "convention.placement.precedes": { glyph: Glyph; digit: boolean; neighbor: TouchClass; usual: TouchClass; usualCount: number } & Spread;
   "convention.rarity": { glyph: Glyph; count: number; books: number; bookTotal: number; hasUsual: boolean; usual: Glyph; usualCount: number };
-  "convention.casing": { word: string; form: FormName; usualForm: FormName; usualWord: string; usualCount: number } & Spread;
+  "convention.casing": { word: string; form: FormName; usualForm: FormName; usualWord: string; usualCount: number; hasBefore: boolean; before: Glyph; beforeContext: BeforeContext; beforeLower: number; beforeCased: number } & Spread;
   "convention.wordLength": { word: string; count: number };
   "convention.doubled.bare": { word: string; text: string } & Spread;
   "convention.doubled.separated": { word: string; text: string } & Spread;
@@ -110,6 +112,68 @@ export interface MessageContext {
   readonly bookCount: number;
   /** A book's display name by its position in the publication. */
   readonly bookName?: (index: number) => string;
+  /** The mark before the site and what stands between them, from the
+   * consumer's own verse text: `markBefore(text, finding.from)`. */
+  readonly before?: MarkBefore;
+  /** Where `before` is looked up: the snapshot the finding came from. */
+  readonly snapshot?: Pick<FindingsSnapshot, "terminal">;
+}
+
+/** The mark a word is handed off from, as the engine reads it. */
+export interface MarkBefore extends TerminalContext {
+  readonly glyph: number;
+}
+
+/** What stands between the mark and the word, as a `select` key. */
+export type BeforeContext = "bare" | "quoted" | "bracketed" | "both";
+
+/**
+ * The mark before `at` in verse text, by the engine's ride rule
+ * (`substrate::ride_of`): walking back, white space is skipped, a quotation
+ * mark rides and sets `quoted`, a closing bracket rides and sets `bracketed`,
+ * an opening bracket rides and marks nothing, and the first other mark is the
+ * glyph. A letter, a digit or the start of the text first means no mark.
+ *
+ * ```text
+ * markBefore('them; He', 6)        → { glyph: ';', quoted: false, bracketed: false }
+ * markBefore('said, "Name', 7)     → { glyph: ',', quoted: true,  bracketed: false }
+ * markBefore('forever.) to', 10)   → { glyph: '.', quoted: false, bracketed: true }
+ * markBefore('said "Go', 6)        → undefined
+ * ```
+ *
+ * `text` is the verse text the engine read, with markers removed; `at` is a
+ * UTF-16 offset into it. Quotation marks are Unicode `Quotation_Mark`, and a
+ * bracket is general category `Ps`, `Pe`, `Pi` or `Pf` outside them.
+ */
+export function markBefore(text: string, at: number): MarkBefore | undefined {
+  let quoted = false;
+  let bracketed = false;
+  let index = at;
+  while (index > 0) {
+    const low = text.charCodeAt(index - 1);
+    const width = low >= 0xdc00 && low <= 0xdfff && index > 1 ? 2 : 1;
+    const glyph = text.codePointAt(index - width) ?? low;
+    const char = String.fromCodePoint(glyph);
+    index -= width;
+    if (/\s/u.test(char)) continue;
+    if (/\p{Quotation_Mark}/u.test(char)) {
+      quoted = true;
+      continue;
+    }
+    if (/\p{Pe}/u.test(char)) {
+      bracketed = true;
+      continue;
+    }
+    if (/[\p{Ps}\p{Pi}\p{Pf}]/u.test(char)) continue;
+    if (/[\p{Alphabetic}\p{M}\p{Nd}]/u.test(char)) return undefined;
+    return { glyph, quoted, bracketed };
+  }
+  return undefined;
+}
+
+function beforeContext(before: TerminalContext): BeforeContext {
+  if (before.quoted) return before.bracketed ? "both" : "quoted";
+  return before.bracketed ? "bracketed" : "bare";
 }
 
 /** What touches a glyph, as a `select` key. `Edge` never fires. */
@@ -359,6 +423,8 @@ function convention(pattern: Pattern, site: string, context: MessageContext): Me
     }
     case "Casing": {
       const usualForm = usual.kind === "Casing" ? usual.form : "Lower";
+      const { before } = context;
+      const after = before === undefined ? undefined : context.snapshot?.terminal(before.glyph, before);
       return {
         id: "convention.casing",
         params: {
@@ -367,6 +433,11 @@ function convention(pattern: Pattern, site: string, context: MessageContext): Me
           usualForm: form(usualForm),
           usualWord: site === "" ? "" : spelled(site, usualForm),
           usualCount: usual.kind === "Casing" ? usual.count : 0,
+          hasBefore: after !== undefined,
+          before: before === undefined ? "" : String.fromCodePoint(before.glyph),
+          beforeContext: before === undefined ? "bare" : beforeContext(before),
+          beforeLower: after === undefined ? 0 : after.cased - after.upper,
+          beforeCased: after?.cased ?? 0,
           ...spread,
         },
       };

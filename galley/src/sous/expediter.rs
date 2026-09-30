@@ -695,7 +695,7 @@ impl<P: ChapterPass + Sync> Expediter<P> {
         let (mut folds, mut located, mut sited) = (0, 0, 0);
         let (pairings, wordless);
         let mut walked = 0u64;
-        let (projected, patterns, clusters) = {
+        let (projected, patterns, clusters, terminals) = {
             let Self {
                 pantry,
                 pass,
@@ -994,6 +994,7 @@ impl<P: ChapterPass + Sync> Expediter<P> {
             &sections,
             &patterns,
             &clusters,
+            &terminals,
         )
         .map_err(PublishError::Wire)
     }

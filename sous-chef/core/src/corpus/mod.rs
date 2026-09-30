@@ -1,8 +1,8 @@
 //! Complete-corpus findings publication.
 //!
 //! ```text
-//! encode_to_corpus_buffer(id, Utf16, [PublicationBook("MRK", "books/mrk.usfm", 50, [finding])], [], [])
-//!   → 56-byte header · one 20-byte directory row · "books/mrk.usfm" in the id
+//! encode_to_corpus_buffer(id, Utf16, [PublicationBook("MRK", "books/mrk.usfm", 50, [finding])], [], [], [])
+//!   → 64-byte header · one 20-byte directory row · "books/mrk.usfm" in the id
 //!     string table · one 16-byte record
 //! ```
 //!
@@ -13,7 +13,7 @@
 use rustc_hash::FxHashSet;
 
 use crate::codec::{PackedFinding, RECORD_LEN};
-use crate::judge::{Cluster, Pattern};
+use crate::judge::{Cluster, Pattern, TerminalCount};
 use crate::{BookIndex, BookKey};
 
 mod cluster_row;
@@ -21,6 +21,7 @@ mod error;
 mod layout;
 mod pattern_row;
 mod reader_ts;
+mod terminal_row;
 #[cfg(test)]
 mod tests;
 
@@ -119,13 +120,15 @@ impl<'a> PublicationBook<'a> {
 }
 
 /// Encode one complete corpus publication: the pattern table the judge
-/// produced, the clusters its `RunShape` rows list, then every book's records.
+/// produced, the clusters its `RunShape` rows list, the terminal counts, then
+/// every book's records.
 pub fn encode_to_corpus_buffer(
     snapshot_id: SnapshotId,
     coordinate_space: CoordinateSpace,
     sections: &[PublicationBook<'_>],
     patterns: &[Pattern],
     clusters: &[Cluster],
+    terminals: &[TerminalCount],
 ) -> Result<Vec<u8>, CorpusWireError> {
     if patterns.len() > usize::from(u16::MAX) {
         return Err(CorpusWireError::PatternCountOverflow {
@@ -196,13 +199,26 @@ pub fn encode_to_corpus_buffer(
         .ok_or(CorpusWireError::SizeOverflow)?;
     let cluster_count = u32::try_from(clusters.len()).map_err(|_| CorpusWireError::SizeOverflow)?;
     let mut order = cluster_row::Order::default();
-    let mut data_start = cluster_start;
+    let mut terminal_start = cluster_start;
     for (entry, cluster) in clusters.iter().enumerate() {
         order.admit(cluster, entry, |at| patterns.get(at).copied())?;
-        data_start = data_start
+        terminal_start = terminal_start
             .checked_add(cluster_row::entry_len(cluster))
             .ok_or(CorpusWireError::SizeOverflow)?;
     }
+    let terminal_count =
+        u32::try_from(terminals.len()).map_err(|_| CorpusWireError::SizeOverflow)?;
+    let mut last = None;
+    for (entry, terminal) in terminals.iter().enumerate() {
+        terminal_row::validate(terminal, entry)?;
+        terminal_row::in_order(last, terminal, entry)?;
+        last = Some(terminal.key);
+    }
+    let data_start = terminals
+        .len()
+        .checked_mul(TERMINAL_ENTRY_BYTES)
+        .and_then(|bytes| terminal_start.checked_add(bytes))
+        .ok_or(CorpusWireError::SizeOverflow)?;
     let total_bytes = data_start
         .checked_add(
             usize::try_from(total_findings)
@@ -233,6 +249,13 @@ pub fn encode_to_corpus_buffer(
             .map_err(|_| CorpusWireError::SizeOverflow)?
             .to_le_bytes(),
     );
+    out.extend_from_slice(&terminal_count.to_le_bytes());
+    out.extend_from_slice(
+        &u32::try_from(terminal_start)
+            .map_err(|_| CorpusWireError::SizeOverflow)?
+            .to_le_bytes(),
+    );
+    debug_assert_eq!(out.len(), HEADER_BYTES);
 
     let mut section_offset = data_start;
     let mut id_offset = id_start;
@@ -302,6 +325,10 @@ pub fn encode_to_corpus_buffer(
     for cluster in clusters {
         cluster_row::encode_cluster(cluster, &mut out);
     }
+    debug_assert_eq!(out.len(), terminal_start);
+    for terminal in terminals {
+        terminal_row::encode_terminal(terminal, &mut out);
+    }
     debug_assert_eq!(out.len(), data_start);
 
     for section in sections {
@@ -326,6 +353,8 @@ pub struct CorpusSnapshot<'a> {
     pattern_count: usize,
     cluster_start: usize,
     cluster_count: usize,
+    terminal_start: usize,
+    terminal_count: usize,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -442,11 +471,36 @@ impl<'a> CorpusSnapshot<'a> {
             });
         }
         let mut order = cluster_row::Order::default();
-        let mut data_start = cluster_start;
+        let mut terminal_start = cluster_start;
         for entry in 0..cluster_count {
-            let (cluster, end) = cluster_row::decode_cluster(bytes, data_start, entry)?;
+            let (cluster, end) = cluster_row::decode_cluster(bytes, terminal_start, entry)?;
             order.admit(&cluster, entry, |at| patterns.get(at).copied())?;
-            data_start = end;
+            terminal_start = end;
+        }
+        if read_u32(bytes, HEADER_TERMINAL_OFFSET_OFFSET)
+            != u32::try_from(terminal_start).unwrap_or(u32::MAX)
+        {
+            return Err(CorpusWireError::TerminalSectionOutOfOrder {
+                expected: terminal_start,
+                actual: usize::try_from(read_u32(bytes, HEADER_TERMINAL_OFFSET_OFFSET))
+                    .unwrap_or(usize::MAX),
+            });
+        }
+        let terminal_count = usize::try_from(read_u32(bytes, HEADER_TERMINAL_COUNT_OFFSET))
+            .map_err(|_| CorpusWireError::SizeOverflow)?;
+        let data_start = terminal_count
+            .checked_mul(TERMINAL_ENTRY_BYTES)
+            .and_then(|len| terminal_start.checked_add(len))
+            .filter(|end| *end <= bytes.len())
+            .ok_or(CorpusWireError::InvalidLength {
+                actual: bytes.len(),
+            })?;
+        let mut last = None;
+        for entry in 0..terminal_count {
+            let at = terminal_start + entry * TERMINAL_ENTRY_BYTES;
+            let terminal = terminal_row::decode_terminal(bytes, at, entry)?;
+            terminal_row::in_order(last, &terminal, entry)?;
+            last = Some(terminal.key);
         }
 
         let mut books = Vec::with_capacity(book_count);
@@ -532,7 +586,20 @@ impl<'a> CorpusSnapshot<'a> {
             pattern_count,
             cluster_start,
             cluster_count,
+            terminal_start,
+            terminal_count,
         })
+    }
+
+    /// What the corpus hands off to after each mark in each context, in
+    /// `(glyph, context)` order.
+    pub fn terminals(&self) -> Result<Vec<TerminalCount>, CorpusWireError> {
+        (0..self.terminal_count)
+            .map(|entry| {
+                let at = self.terminal_start + entry * TERMINAL_ENTRY_BYTES;
+                terminal_row::decode_terminal(self.bytes, at, entry)
+            })
+            .collect()
     }
 
     /// Every listed cluster, in section order.

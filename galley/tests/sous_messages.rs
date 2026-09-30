@@ -406,6 +406,9 @@ fn the_icu_reader_finds_names_and_refuses_bad_shapes() {
     assert!(Icu::parse("a}").is_err(), "stray");
     assert!(Icu::parse("<g>{a}").is_err(), "unclosed tag");
     assert!(Icu::parse("{a}</g>").is_err(), "stray tag");
-    assert!(Icu::parse("<g>{n, plural, other {x</g>}}").is_err(), "a tag across a branch");
+    assert!(
+        Icu::parse("<g>{n, plural, other {x</g>}}").is_err(),
+        "a tag across a branch"
+    );
     assert!(Icu::parse("<b>{a}</b>").is_err(), "a tag other than g");
 }

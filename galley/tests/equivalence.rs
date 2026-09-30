@@ -80,15 +80,17 @@ fn cold_publish_with<P: ChapterPass + Sync>(
             words: Some(words),
         })
         .collect();
-    let (findings, patterns, clusters) = analyze_paired(&corpus, pass, config, &source)
+    let (findings, patterns, clusters, terminals) = analyze_paired(&corpus, pass, config, &source)
         .0
         .into_parts();
     let inputs = books
         .iter()
         .map(|(id, text)| OnionInputBook::new(id.as_str(), text.clone()))
         .collect();
-    publish_onion_findings(inputs, &findings, &patterns, &clusters, snapshot)
-        .expect("cold publication")
+    publish_onion_findings(
+        inputs, &findings, &patterns, &clusters, &terminals, snapshot,
+    )
+    .expect("cold publication")
 }
 
 /// The Expediter's own books of one role, in the canonical order it reads

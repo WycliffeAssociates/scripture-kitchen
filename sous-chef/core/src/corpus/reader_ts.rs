@@ -18,7 +18,7 @@ use crate::words::{Form, LETTER_RUN_MAX, LETTER_RUN_MIN};
 
 /// Render the checked-in TypeScript reader from the Rust-owned wire schema.
 pub fn generated_reader_ts() -> String {
-    let substitutions: [(&str, String); 71] = [
+    let substitutions: [(&str, String); 80] = [
         ("@@MAGIC@@", format!("0x{MAGIC:08x}")),
         ("@@FORMAT_VERSION@@", FORMAT_VERSION.to_string()),
         ("@@FLAG_UTF16@@", FLAG_UTF16.to_string()),
@@ -83,6 +83,24 @@ pub fn generated_reader_ts() -> String {
             HEADER_CLUSTER_OFFSET_OFFSET.to_string(),
         ),
         ("@@CLUSTER_ENTRY_BYTES@@", CLUSTER_ENTRY_BYTES.to_string()),
+        (
+            "@@HEADER_TERMINAL_COUNT_OFFSET@@",
+            HEADER_TERMINAL_COUNT_OFFSET.to_string(),
+        ),
+        (
+            "@@HEADER_TERMINAL_OFFSET_OFFSET@@",
+            HEADER_TERMINAL_OFFSET_OFFSET.to_string(),
+        ),
+        ("@@TERMINAL_ENTRY_BYTES@@", TERMINAL_ENTRY_BYTES.to_string()),
+        ("@@TERMINAL_GLYPH_OFFSET@@", TERMINAL_GLYPH_OFFSET.to_string()),
+        (
+            "@@TERMINAL_CONTEXT_OFFSET@@",
+            TERMINAL_CONTEXT_OFFSET.to_string(),
+        ),
+        ("@@TERMINAL_UPPER_OFFSET@@", TERMINAL_UPPER_OFFSET.to_string()),
+        ("@@TERMINAL_CASED_OFFSET@@", TERMINAL_CASED_OFFSET.to_string()),
+        ("@@TERMINAL_QUOTED@@", TERMINAL_QUOTED.to_string()),
+        ("@@TERMINAL_BRACKETED@@", TERMINAL_BRACKETED.to_string()),
         (
             "@@CLUSTER_PATTERN_OFFSET@@",
             CLUSTER_PATTERN_OFFSET.to_string(),

@@ -136,7 +136,7 @@ fn hygiene_findings_publish_through_galley_in_raw_utf16() {
     fs::write(&path, "\\id MRK\n\\c 1\n\\p\n\\v 1 An 🧅 \\\\ here.\n").unwrap();
     let target = load_input(&path, false).unwrap();
     let corpus = Corpus::try_new(&target.books).unwrap();
-    let (findings, patterns, clusters, _) = brigade_findings(&corpus, &[], false, None);
+    let (findings, patterns, clusters, terminals, _) = brigade_findings(&corpus, &[], false, None);
     // The one-verse book rosters every glyph it holds, so the pair rides
     // beside a handful of rarity sites.
     let hygiene: Vec<_> = findings
@@ -157,6 +157,7 @@ fn hygiene_findings_publish_through_galley_in_raw_utf16() {
         &findings,
         &patterns,
         &clusters,
+        &terminals,
     )
     .unwrap();
     let snapshot = CorpusSnapshot::open(&buffer).unwrap();

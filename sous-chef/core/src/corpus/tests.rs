@@ -3,8 +3,8 @@
 
 use super::*;
 use crate::codec::{CodecError, HygieneClass, PresenceDigest, PresenceKind, SourceCopyDigest};
-use crate::judge::{Channel, Cluster, PatternKey, Side, Usual};
-use crate::substrate::{OuterClass, ScalarKey};
+use crate::judge::{Channel, Cluster, PatternKey, Side, TerminalCount, Usual};
+use crate::substrate::{FollowKey, OuterClass, ScalarKey};
 use crate::unicode::Pool;
 use crate::words::Form;
 use crate::{
@@ -219,6 +219,28 @@ fn fixture_clusters() -> Vec<Cluster> {
     ]
 }
 
+/// A bare `;`, `,` after a quote, and `.` behind a closing bracket.
+fn fixture_terminals() -> Vec<TerminalCount> {
+    let key = |glyph, context| FollowKey::in_context(ScalarKey::of(glyph), context);
+    vec![
+        TerminalCount {
+            key: key(',', 1),
+            upper: 6_748,
+            cased: 7_156,
+        },
+        TerminalCount {
+            key: key('.', 2),
+            upper: 33,
+            cased: 54,
+        },
+        TerminalCount {
+            key: key(';', 0),
+            upper: 482,
+            cased: 4_677,
+        },
+    ]
+}
+
 fn parse_hex(text: &str) -> Vec<u8> {
     text.split_whitespace()
         .map(|byte| u8::from_str_radix(byte, 16).unwrap())
@@ -269,6 +291,7 @@ fn writer_matches_shared_golden_buffer_and_reader_view() {
         SnapshotId::new(core::array::from_fn(|index| index as u8)),
         CoordinateSpace::Utf8,
         &[section],
+        &[],
         &[],
         &[],
     )
@@ -391,6 +414,7 @@ fn mixed_kind_golden_buffer_decodes_in_both_readers() {
         &[section],
         &fixture_patterns(),
         &fixture_clusters(),
+        &fixture_terminals(),
     )
     .unwrap();
     assert_hex(
@@ -402,6 +426,7 @@ fn mixed_kind_golden_buffer_decodes_in_both_readers() {
     let snapshot = CorpusSnapshot::open(&encoded).unwrap();
     assert_eq!(snapshot.patterns().unwrap(), fixture_patterns());
     assert_eq!(snapshot.clusters().unwrap(), fixture_clusters());
+    assert_eq!(snapshot.terminals().unwrap(), fixture_terminals());
     let book = snapshot.book_by_key(BookKey::new(*b"MRK")).unwrap();
     assert_eq!(book.at(0).unwrap(), findings[0]);
     assert_eq!(book.at(1).unwrap(), findings[1]);
@@ -434,8 +459,11 @@ fn mixed_kind_golden_buffer_decodes_in_both_readers() {
 }
 
 #[test]
-fn header_is_56_bytes() {
-    assert_eq!(HEADER_BYTES, 56);
+fn header_is_64_bytes() {
+    assert_eq!(HEADER_BYTES, 64);
+    assert_eq!(HEADER_TERMINAL_COUNT_OFFSET, 56);
+    assert_eq!(HEADER_TERMINAL_OFFSET_OFFSET, 60);
+    assert_eq!(TERMINAL_ENTRY_BYTES, 16);
     assert_eq!(HEADER_PATTERN_COUNT_OFFSET, 24);
     assert_eq!(HEADER_PATTERN_OFFSET_OFFSET, 28);
     assert_eq!(HEADER_SNAPSHOT_ID_OFFSET, 32);
@@ -453,6 +481,7 @@ fn header_is_56_bytes() {
         &[],
         &[],
         &[],
+        &[],
     )
     .unwrap();
     assert_eq!(empty.len(), HEADER_BYTES);
@@ -466,6 +495,134 @@ fn header_is_56_bytes() {
         read_u32(&empty, HEADER_CLUSTER_OFFSET_OFFSET),
         HEADER_BYTES as u32
     );
+    assert_eq!(read_u32(&empty, HEADER_TERMINAL_COUNT_OFFSET), 0);
+    assert_eq!(
+        read_u32(&empty, HEADER_TERMINAL_OFFSET_OFFSET),
+        HEADER_BYTES as u32
+    );
+}
+
+/// The one-book table with its clusters and terminal counts, and where the
+/// terminal section starts: the running cursor after the clusters.
+fn with_terminals() -> (Vec<u8>, usize) {
+    let books = [PublicationBook::new(BookKey::new(*b"MRK"), "m", 0, &[])];
+    let encoded = encode_to_corpus_buffer(
+        SnapshotId::new([0; 16]),
+        CoordinateSpace::Utf8,
+        &books,
+        &fixture_patterns(),
+        &fixture_clusters(),
+        &fixture_terminals(),
+    )
+    .unwrap();
+    let (_, cluster_start) = clustered();
+    let start = cluster_start
+        + fixture_clusters()
+            .iter()
+            .map(|cluster| CLUSTER_ENTRY_BYTES + 4 * cluster.atoms.len())
+            .sum::<usize>();
+    assert_eq!(
+        read_u32(&encoded, HEADER_TERMINAL_OFFSET_OFFSET) as usize,
+        start
+    );
+    (encoded, start)
+}
+
+#[test]
+fn terminal_counts_round_trip_behind_the_clusters() {
+    let (encoded, start) = with_terminals();
+    let snapshot = CorpusSnapshot::open(&encoded).unwrap();
+    assert_eq!(snapshot.terminals().unwrap(), fixture_terminals());
+    assert_eq!(read_u32(&encoded, HEADER_TERMINAL_COUNT_OFFSET), 3);
+    let last = start + 2 * TERMINAL_ENTRY_BYTES;
+    assert_eq!(
+        &encoded[last..last + TERMINAL_ENTRY_BYTES],
+        [
+            0x3b, 0, 0, 0, 0, 0, 0, 0, 0xe2, 0x01, 0, 0, 0x45, 0x12, 0, 0
+        ]
+    );
+}
+
+/// Counts that do not nest, a context or pad bit, and a key out of order are
+/// refused on the way in and on the way out.
+#[test]
+fn a_terminal_count_the_encoder_cannot_write_is_refused() {
+    let books = [PublicationBook::new(BookKey::new(*b"MRK"), "m", 0, &[])];
+    let encode = |terminals: &[TerminalCount]| {
+        encode_to_corpus_buffer(
+            SnapshotId::new([0; 16]),
+            CoordinateSpace::Utf8,
+            &books,
+            &[],
+            &[],
+            terminals,
+        )
+        .err()
+    };
+    let refused = |entry, field| Some(CorpusWireError::InvalidTerminal { entry, field });
+    let good = fixture_terminals()[0];
+    for (terminals, expected) in [
+        (
+            vec![TerminalCount {
+                cased: 0,
+                upper: 0,
+                ..good
+            }],
+            refused(0, "cased"),
+        ),
+        (
+            vec![TerminalCount {
+                upper: good.cased + 1,
+                ..good
+            }],
+            refused(0, "upper"),
+        ),
+        (vec![good, good], refused(1, "order")),
+        (
+            fixture_terminals().into_iter().rev().collect(),
+            refused(1, "order"),
+        ),
+    ] {
+        assert_eq!(encode(&terminals), expected, "{terminals:?}");
+    }
+
+    let (encoded, start) = with_terminals();
+    let torn = |at: usize, byte: u8| {
+        let mut torn = encoded.clone();
+        torn[at] = byte;
+        CorpusSnapshot::open(&torn).err()
+    };
+    assert_eq!(
+        torn(start + TERMINAL_CONTEXT_OFFSET, 4),
+        refused(0, "context")
+    );
+    assert_eq!(
+        torn(start + TERMINAL_CONTEXT_OFFSET + 1, 1),
+        refused(0, "pad")
+    );
+    assert_eq!(
+        torn(start + TERMINAL_GLYPH_OFFSET + 2, 0xd8),
+        refused(0, "glyph")
+    );
+    assert_eq!(
+        torn(start + TERMINAL_UPPER_OFFSET + 3, 0xff),
+        refused(0, "upper")
+    );
+    assert_eq!(
+        torn(
+            start + 2 * TERMINAL_ENTRY_BYTES + TERMINAL_GLYPH_OFFSET,
+            b','
+        ),
+        refused(2, "order")
+    );
+    assert!(matches!(
+        torn(HEADER_TERMINAL_OFFSET_OFFSET, 0xff),
+        Some(CorpusWireError::TerminalSectionOutOfOrder { .. })
+    ));
+    assert!(matches!(
+        torn(HEADER_TERMINAL_COUNT_OFFSET, 4),
+        Some(CorpusWireError::InvalidLength { .. } | CorpusWireError::SectionOutOfOrder { .. })
+    ));
 }
 
 /// The one-book table with its clusters, and where the cluster section starts.
@@ -477,6 +634,7 @@ fn clustered() -> (Vec<u8>, usize) {
         &books,
         &fixture_patterns(),
         &fixture_clusters(),
+        &[],
     )
     .unwrap();
     let start =
@@ -508,6 +666,7 @@ fn a_cluster_the_encoder_cannot_write_is_refused() {
             &books,
             &fixture_patterns(),
             clusters,
+            &[],
         )
         .err()
     };
@@ -589,6 +748,7 @@ fn pattern_table_round_trips() {
         &books,
         &patterns,
         &[],
+        &[],
     )
     .unwrap();
     let snapshot = CorpusSnapshot::open(&encoded).unwrap();
@@ -657,6 +817,7 @@ fn fixture_table() -> (Vec<u8>, usize) {
         &books,
         &fixture_patterns(),
         &[],
+        &[],
     )
     .unwrap();
     (encoded, HEADER_BYTES + DIRECTORY_ENTRY_BYTES + 16)
@@ -689,6 +850,7 @@ fn usual_lanes_round_trip_per_channel() {
         CoordinateSpace::Utf8,
         &books,
         &alone,
+        &[],
         &[],
     )
     .unwrap();
@@ -776,6 +938,7 @@ fn an_inconsistent_share_is_refused_on_the_way_in_and_out() {
             &books,
             &patterns,
             &[],
+            &[],
         ),
         Err(CorpusWireError::InvalidPattern {
             row: 1,
@@ -789,6 +952,7 @@ fn an_inconsistent_share_is_refused_on_the_way_in_and_out() {
         CoordinateSpace::Utf8,
         &books,
         &valid,
+        &[],
         &[],
     )
     .unwrap();
@@ -836,6 +1000,7 @@ fn pattern_index_past_count_is_refused() {
         &books,
         &patterns,
         &[],
+        &[],
     )
     .unwrap();
     assert_eq!(
@@ -861,6 +1026,7 @@ fn pattern_index_past_count_is_refused() {
         &books,
         &patterns,
         &[],
+        &[],
     )
     .unwrap();
     assert_eq!(
@@ -882,6 +1048,7 @@ fn a_pattern_table_over_sixty_five_thousand_rows_is_refused() {
             CoordinateSpace::Utf8,
             &[],
             &patterns,
+            &[],
             &[]
         ),
         Err(CorpusWireError::PatternCountOverflow { count: 65_536 })
@@ -893,6 +1060,7 @@ fn empty_corpus_and_empty_books_are_valid() {
     let empty = encode_to_corpus_buffer(
         SnapshotId::new([0; 16]),
         CoordinateSpace::Utf16,
+        &[],
         &[],
         &[],
         &[],
@@ -909,6 +1077,7 @@ fn empty_corpus_and_empty_books_are_valid() {
         SnapshotId::new([1; 16]),
         CoordinateSpace::Utf16,
         &books,
+        &[],
         &[],
         &[],
     )
@@ -936,6 +1105,7 @@ fn duplicate_book_keys_are_legal_and_the_ids_tell_them_apart() {
         SnapshotId::new([2; 16]),
         CoordinateSpace::Utf8,
         &books,
+        &[],
         &[],
         &[],
     )
@@ -967,6 +1137,7 @@ fn a_repeated_id_is_refused_on_the_way_in_and_out() {
             CoordinateSpace::Utf8,
             &books,
             &[],
+            &[],
             &[]
         ),
         Err(CorpusWireError::DuplicateBookId { book: 1 })
@@ -985,6 +1156,7 @@ fn a_moved_or_malformed_id_offset_fails_closed() {
         SnapshotId::new([0; 16]),
         CoordinateSpace::Utf8,
         &books,
+        &[],
         &[],
         &[],
     )
@@ -1015,6 +1187,7 @@ fn malformed_directory_and_record_fail_closed() {
         SnapshotId::new([0; 16]),
         CoordinateSpace::Utf8,
         &[section],
+        &[],
         &[],
         &[],
     )

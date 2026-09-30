@@ -6,6 +6,7 @@
 //!     &[finding],            // projected-book UTF-8: 0..13 over "Jesus  wept.\n"
 //!     &[],                   // no pattern fired
 //!     &[],                   // so no cluster is listed
+//!     &[],                   // and no terminal counts
 //!     snapshot,
 //! )
 //!   → SOUS corpus buffer, CoordinateSpace::Utf16
@@ -30,7 +31,7 @@ use core::ops::Range;
 use rustc_hash::FxHashSet;
 use sous_core::{
     BookKey, Cluster, CodecError, CoordinateSpace, CorpusWireError, InputError, PackedFinding,
-    Pattern, PublicationBook, SnapshotId, encode_to_corpus_buffer,
+    Pattern, PublicationBook, SnapshotId, TerminalCount, encode_to_corpus_buffer,
 };
 
 use crate::onion::{Filter, Mask, Utf16Index, cst, lex, mask, toc, utf16_index};
@@ -103,6 +104,7 @@ pub fn publish_onion_findings(
     findings: &[PackedFinding],
     patterns: &[Pattern],
     clusters: &[Cluster],
+    terminals: &[TerminalCount],
     snapshot: SnapshotId,
 ) -> Result<Vec<u8>, PublishError> {
     struct Derived<'s> {
@@ -179,6 +181,7 @@ pub fn publish_onion_findings(
         &sections,
         patterns,
         clusters,
+        terminals,
     )
     .map_err(PublishError::Wire)
 }
@@ -365,6 +368,7 @@ mod tests {
             &findings,
             &[],
             &[],
+            &[],
             SnapshotId::new(core::array::from_fn(|index| index as u8)),
         )
         .unwrap()
@@ -441,6 +445,7 @@ mod tests {
             &[finding(at, at, 0, kind(None, None, false))],
             &[],
             &[],
+            &[],
             SnapshotId::new([0; 16]),
         )
         .unwrap();
@@ -464,6 +469,7 @@ mod tests {
             &[],
             &[],
             &[],
+            &[],
             SnapshotId::new([0; 16]),
         )
         .unwrap();
@@ -483,7 +489,7 @@ mod tests {
     #[test]
     fn empty_findings_still_publish_every_book_directory_row() {
         let buffer =
-            publish_onion_findings(books(), &[], &[], &[], SnapshotId::new([7; 16])).unwrap();
+            publish_onion_findings(books(), &[], &[], &[], &[], SnapshotId::new([7; 16])).unwrap();
         let snapshot = CorpusSnapshot::open(&buffer).unwrap();
         assert_eq!(snapshot.len(), 2);
         assert_eq!(snapshot.book(BookIndex::new(0).unwrap()).unwrap().len(), 0);
@@ -497,6 +503,7 @@ mod tests {
                     "scratch.usfm",
                     "\\c 1\n\\p\n\\v 1 keyless\n".to_string()
                 )],
+                &[],
                 &[],
                 &[],
                 &[],
@@ -514,6 +521,7 @@ mod tests {
                 &[],
                 &[],
                 &[],
+                &[],
                 SnapshotId::new([0; 16]),
             ),
             Err(PublishError::DuplicateBookId {
@@ -525,6 +533,7 @@ mod tests {
             publish_onion_findings(
                 books(),
                 &[finding(0, 0, 3, kind(None, None, false))],
+                &[],
                 &[],
                 &[],
                 SnapshotId::new([0; 16]),
@@ -541,6 +550,7 @@ mod tests {
             publish_onion_findings(
                 books(),
                 &[finding(0, projected_len + 1, 1, kind(None, None, false))],
+                &[],
                 &[],
                 &[],
                 SnapshotId::new([0; 16]),
@@ -564,6 +574,7 @@ mod tests {
                     0,
                     kind(None, None, false)
                 )],
+                &[],
                 &[],
                 &[],
                 SnapshotId::new([0; 16]),

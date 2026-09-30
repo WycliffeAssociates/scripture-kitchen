@@ -14,6 +14,8 @@ import {
   HEADER_BYTES,
   HEADER_CLUSTER_OFFSET_OFFSET,
   HEADER_MAGIC_OFFSET,
+  HEADER_TERMINAL_COUNT_OFFSET,
+  HEADER_TERMINAL_OFFSET_OFFSET,
   HEADER_PATTERN_OFFSET_OFFSET,
   HEADER_RECORD_LEN_OFFSET,
   HEADER_VERSION_OFFSET,
@@ -25,6 +27,11 @@ import {
   PATTERN_USUAL_OFFSET,
   POOLS,
   RECORD_LEN,
+  TERMINAL_CASED_OFFSET,
+  TERMINAL_CONTEXT_OFFSET,
+  TERMINAL_ENTRY_BYTES,
+  TERMINAL_GLYPH_OFFSET,
+  TERMINAL_UPPER_OFFSET,
 } from "./reader.ts";
 
 function hexFixture(name) {
@@ -45,7 +52,9 @@ function fixture() {
 const FIRST_RECORD = HEADER_BYTES + DIRECTORY_ENTRY_BYTES + 16;
 // Two four-atom clusters sit between the pattern table and the records.
 const FIRST_CLUSTER = FIRST_RECORD + 11 * PATTERN_ROW_LEN;
-const FIRST_MIXED_RECORD = FIRST_CLUSTER + 2 * (CLUSTER_ENTRY_BYTES + 4 * 4);
+// Then three terminal entries.
+const FIRST_TERMINAL = FIRST_CLUSTER + 2 * (CLUSTER_ENTRY_BYTES + 4 * 4);
+const FIRST_MIXED_RECORD = FIRST_TERMINAL + 3 * TERMINAL_ENTRY_BYTES;
 
 function expectOpenFailure(bytes) {
   assert.throws(() => FindingsSnapshot.open(bytes), FindingsSnapshotError);
@@ -442,6 +451,37 @@ test("lists a RunShape row's clusters and refuses one the encoder cannot write",
   }
 });
 
+test("reads the terminal counts and refuses one the encoder cannot write", () => {
+  const snapshot = FindingsSnapshot.open(hexFixture("corpus_v2_hygiene.hex"));
+  assert.deepEqual(snapshot.terminals(), [
+    { glyph: 0x2c, quoted: true, bracketed: false, upper: 6748, cased: 7156 },
+    { glyph: 0x2e, quoted: false, bracketed: true, upper: 33, cased: 54 },
+    { glyph: 0x3b, quoted: false, bracketed: false, upper: 482, cased: 4677 },
+  ]);
+  assert.equal(snapshot.terminal(0x3b, { quoted: false, bracketed: false }).cased, 4677);
+  assert.equal(snapshot.terminal(0x2e, { quoted: false, bracketed: true }).upper, 33);
+  assert.equal(snapshot.terminal(0x2c, { quoted: false, bracketed: false }), undefined);
+  assert.equal(snapshot.terminal(0x21, { quoted: false, bracketed: false }), undefined);
+
+  const third = FIRST_TERMINAL + 2 * TERMINAL_ENTRY_BYTES;
+  for (const [at, byte] of [
+    [FIRST_TERMINAL + TERMINAL_CONTEXT_OFFSET, 4],        // an unknown context bit
+    [FIRST_TERMINAL + TERMINAL_CONTEXT_OFFSET + 1, 1],    // a pad byte
+    [FIRST_TERMINAL + TERMINAL_GLYPH_OFFSET + 2, 0xd8],   // no scalar
+    [FIRST_TERMINAL + TERMINAL_UPPER_OFFSET + 3, 0xff],   // upper over cased
+    [third + TERMINAL_GLYPH_OFFSET, 0x2c],                // out of order
+    [HEADER_TERMINAL_OFFSET_OFFSET, 0xff],                // the section moved
+    [HEADER_TERMINAL_COUNT_OFFSET, 4],                    // runs into the records
+  ]) {
+    const torn = hexFixture("corpus_v2_hygiene.hex");
+    torn[at] = byte;
+    expectOpenFailure(torn);
+  }
+  const empty = hexFixture("corpus_v2_hygiene.hex");
+  new DataView(empty.buffer).setUint32(FIRST_TERMINAL + TERMINAL_CASED_OFFSET, 0, true);
+  expectOpenFailure(empty);
+});
+
 test("accepts a view without copying its surrounding bytes", () => {
   const bytes = fixture();
   const padded = new Uint8Array(bytes.length + 8);
@@ -457,6 +497,7 @@ test("supports empty corpus and caller-ordered empty books", () => {
   emptyView.setUint32(HEADER_RECORD_LEN_OFFSET, RECORD_LEN, true);
   emptyView.setUint32(HEADER_PATTERN_OFFSET_OFFSET, HEADER_BYTES, true);
   emptyView.setUint32(HEADER_CLUSTER_OFFSET_OFFSET, HEADER_BYTES, true);
+  emptyView.setUint32(HEADER_TERMINAL_OFFSET_OFFSET, HEADER_BYTES, true);
   assert.equal(FindingsSnapshot.open(empty).length, 0);
 
   // Two empty books: header, two directory rows, then "g" and "m" as their
@@ -472,6 +513,7 @@ test("supports empty corpus and caller-ordered empty books", () => {
   view.setUint32(HEADER_RECORD_LEN_OFFSET, RECORD_LEN, true);
   view.setUint32(HEADER_PATTERN_OFFSET_OFFSET, books.length, true);
   view.setUint32(HEADER_CLUSTER_OFFSET_OFFSET, books.length, true);
+  view.setUint32(HEADER_TERMINAL_OFFSET_OFFSET, books.length, true);
   books.set([71, 69, 78], first);
   books.set([77, 82, 75], second);
   view.setUint32(first + 8, books.length, true);

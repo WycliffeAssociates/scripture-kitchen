@@ -98,6 +98,8 @@ Decoding refuses rather than guesses:
 | a `pattern_offset` that is not the running cursor | `PatternSectionOutOfOrder` |
 | a `cluster_offset` that is not the running cursor after the pattern table | `ClusterSectionOutOfOrder` |
 | a cluster naming a row past the table or not `RunShape`, atoms that cannot be its shape, flags outside `RECURRING \| TRUNCATED`, a zero count, or an entry out of order or the ninth of a row | `InvalidCluster` |
+| a `terminal_offset` that is not the running cursor after the cluster section | `TerminalSectionOutOfOrder` |
+| a terminal entry whose glyph is no scalar, whose context or pad bits are set, whose `cased` is zero or below `upper`, or whose `(glyph, context)` is not strictly after the last | `InvalidTerminal` |
 | more than 65,535 patterns | `PatternCountOverflow` |
 
 `i16::MIN` cannot be constructed as a `QuantizedDeviation`, and a zero run
@@ -114,11 +116,12 @@ chapter may move a project denominator and thereby add or remove findings in an
 untouched book.
 
 ```text
-  header  56 bytes   SOUS magic · format version · coordinate flags ·
+  header  64 bytes   SOUS magic · format version · coordinate flags ·
                      book count · record stride (16) · total findings ·
                      pattern count · absolute pattern offset ·
                      opaque 16-byte SnapshotId · cluster count ·
-                     absolute cluster offset
+                     absolute cluster offset · terminal count ·
+                     absolute terminal offset
   directory          one 20-byte row per book, in caller order:
                      3 BookKey bytes + zero terminator · published length ·
                      absolute section offset · finding count ·
@@ -131,6 +134,8 @@ untouched book.
                      sections behind it stay aligned however many fired
   cluster section    the exact runs each RunShape row lists, one entry of
                      8 bytes plus 4 per atom, so it stays aligned too
+  terminal section   what the corpus hands off to after each mark, one
+                     16-byte entry per mark and context
   sections           contiguous 16-byte records, no incidental padding
 ```
 
@@ -288,6 +293,52 @@ refused. So is one whose atoms cannot be that row's shape: an untruncated run
 must hold the glyph at that purity and length bucket; a truncated one holds
 exactly 16 atoms on a bucket-6 row, since its tail is gone.
 
+### The terminal section
+
+The word channels split capitals a mark forces from free ones with a terminal
+table the judge learns from the corpus (`judge::TerminalTable`). The section
+publishes the counts behind it, so a Casing message can say what this project
+does after the mark in front of the word:
+
+```text
+JOB 12:23  …and he also destroys them; He enlarges nations…
+           (';', bare)   upper 524 · cased 4,891
+           → After ;, the next word is lowercase 4,367 of 4,891 times.
+```
+
+| bytes | field |
+| --- | --- |
+| 0..4 | `glyph: u32` — the mark, a scalar; never the pooled digit key |
+| 4 | `context: u8` — bit 0 `QUOTED` (a quote stood between mark and word), bit 1 `BRACKETED` (a closing bracket did) |
+| 5..8 | pad, 0 |
+| 8..12 | `upper: u32` — handoffs to an uppercase letter |
+| 12..16 | `cased: u32` — handoffs to a cased letter, never 0, at least `upper` |
+
+One entry per `substrate::FollowKey` the corpus handed a cased letter off
+from, ascending by glyph then context, which is `FollowKey` order. The counts
+are raw: no threshold decides which entries exist or what they say, so the
+section reads the same whatever `terminal_upper_share_bp` or any other knob is
+set to. The header's `terminal_offset` is the running cursor after the cluster
+section and `terminal_count` the number of entries. Rust reads them as
+`CorpusSnapshot::terminals` (`judge::TerminalCount`), the generated reader as
+`snapshot.terminals()` and `snapshot.terminal(glyph, { quoted, bracketed })`,
+a binary search.
+
+A consumer finds the mark before a word in its own verse text (markers
+removed) with the engine's ride rule, `substrate::ride_of`: walking back from
+the word, white space is skipped, a quotation mark rides and sets `quoted`, a
+closing bracket rides and sets `bracketed`, an opening bracket rides and
+marks nothing, and the first other mark is the glyph; a letter or a digit
+first means there is none. `markBefore` in `galley/sous-messages.ts` is that
+walk.
+
+```text
+them; He        (';', bare)
+said, "Name     (',', quoted)
+forever.) to    ('.', bracketed)
+said "Go        none
+```
+
 ### The id string table
 
 The host's opaque `BookId` — a file path in practice — travels in the wire so a
@@ -303,7 +354,7 @@ and no scan. The 4-byte padding after the section keeps every record section
 aligned for a typed-array view.
 
 Version 2 grew the pattern row from 24 bytes to 36 for the usual lanes and the
-header from 48 bytes to 56 for the cluster section. Sefer, the one consumer,
+header from 48 bytes to 64 for the cluster and terminal sections. Sefer, the one consumer,
 reads only through the generated reader, so a version 1 buffer is refused at
 `open` rather than migrated. The charter's rule stands: a layout change means a
 new wire version.
