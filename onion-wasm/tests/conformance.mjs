@@ -392,6 +392,15 @@ const levelIsSpelled = (doc, tokens, where) => {
   check(d.message(slice).length > 0, "the message renders from the document");
   check(d.severity(null) !== undefined, "the severity ladder resolves");
   eq(CODES.length, 59, "the whole catalog shipped");
+
+  const gap = "\\id GEN\n\\c 1\n\\p \\v 1 a \\v 3 b\n";
+  const skipped = parse(gap, true, false, false).diagnostics;
+  const verseGap = [...skipped].find((f) => f.code().name === "verse-gap");
+  eq(verseGap?.message((from, to) => gap.slice(from, to)), "verse 3 skips ahead; expected 2", "{aux} renders the expected number");
+
+  const old = "\\id GEN\n\\usfm 3.0\n\\p \\pro x\\pro*\n";
+  const deprecated = [...parse(old, true, false, false).diagnostics].find((f) => f.code().name === "deprecated-marker");
+  check(deprecated?.message((from, to) => old.slice(from, to)).endsWith("deprecated since USFM 3.0"), "{aux} renders a version aux as its USFM version");
 }
 
 // --- utf16 is opt-in and moves the right things ---------------------------

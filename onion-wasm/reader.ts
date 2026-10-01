@@ -1687,14 +1687,21 @@ export class DiagnosticView {
   /**
    * The message, rendered from the template and the document's own bytes.
    * `slice` is the editor's `doc.sliceString`; no text crosses the wall to
-   * make this.
+   * make this. `{aux}` is the number, or for a `version` aux its
+   * `USFM_VERSIONS` entry: "verse 4 skips ahead; expected 3", "deprecated
+   * since USFM 3.0".
    */
   message(slice: (from: number, to: number) => string): string {
     const span = this.span();
     const second = this.second();
-    return this.code()
-      .template.replace("{anchor}", slice(span.from, span.to))
-      .replace("{second}", second ? slice(second.from, second.to) : "");
+    const row = this.code();
+    const aux = this.aux();
+    const auxText = row.aux === "version" ? (USFM_VERSIONS[aux] ?? String(aux)) : String(aux);
+    // Function replacements, so a `$` in the document is never a pattern.
+    return row.template
+      .replace("{anchor}", () => slice(span.from, span.to))
+      .replace("{second}", () => (second ? slice(second.from, second.to) : ""))
+      .replace("{aux}", () => auxText);
   }
 
   /** Where to go look: the chapter and verse containing this finding. */
