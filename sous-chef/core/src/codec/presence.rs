@@ -32,6 +32,16 @@ impl PresenceKind {
             Self::Empty => "Empty",
         }
     }
+
+    /// What the kind finds, in one plain sentence: the generated `SousCode`
+    /// docs, for agents. Hosts word their own labels.
+    pub const fn rule(self) -> &'static str {
+        match self {
+            Self::Missing => "A verse the source text has and this book lacks.",
+            Self::Extra => "A verse this book has and the source text lacks.",
+            Self::Empty => "A verse left empty where the source has text.",
+        }
+    }
 }
 
 impl TryFrom<i16> for PresenceKind {

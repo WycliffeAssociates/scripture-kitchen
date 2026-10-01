@@ -72,6 +72,17 @@ export const USFM_VERSIONS = ["3.0", "3.2", "4.0"] as const;
 
 @@LINT_CATALOG@@
 
+/**
+ * Every lint code by its durable name, to switch on exhaustively: a host keys
+ * its own labels `satisfies Record<FindingName, string>`, so a code added or
+ * dropped here is a compile error there. `FindingName` is what can reach a
+ * reader as a finding; `FormName` is the formatting repairs (severity
+ * `"form"`), which `format_edits` applies and never reports.
+ */
+export type DiagnosticName = (typeof CODES)[number]["name"];
+export type FormName = Extract<(typeof CODES)[number], { severity: "form" }>["name"];
+export type FindingName = Exclude<DiagnosticName, FormName>;
+
 // ---------------------------------------------------------------------------
 // Views over one parse — hand-written, and stating no engine fact
 // ---------------------------------------------------------------------------

@@ -333,6 +333,42 @@ export type Finding =
   | SourceCopyFinding
   | PresenceFinding;
 
+/** A finding's own kind, the union's tag. */
+export type FindingKind = Finding["kind"];
+
+/**
+ * Every finding code, to switch on exhaustively: a host keys its own labels
+ * `satisfies Record<SousCode, string>`, so a code added or dropped here is a
+ * compile error there. Spelled as the wire's tables (and `sous-identity.ts`)
+ * spell them; a host adds its own producer prefix. The doc on each member is
+ * the rule in plain English, for agents; kitchen ships no label.
+ */
+export type SousCode =
+@@SOUS_CODE_UNION@@;
+
+/** Every `SousCode`, in the union's order. */
+export const SOUS_CODES: readonly SousCode[] = [
+@@SOUS_CODES@@
+];
+
+/** A finding's code; a convention finding's channel is on its pattern, so
+ * pass the snapshot's `patterns()`. Total: the reader refuses a class, kind,
+ * channel or pattern index outside its tables. */
+export function codeOf(finding: Finding, patterns: readonly Pattern[]): SousCode {
+  switch (finding.kind) {
+    case "Hygiene":
+      return `hygiene.${finding.hygiene.class}`;
+    case "Presence":
+      return `presence.${finding.presence.kind}`;
+    case "Convention":
+      return `convention.${patterns[finding.convention.pattern]!.channel}`;
+    case "SourceCopy":
+      return "sourceCopy";
+    case "LengthProportionality":
+      return "lengthProportionality";
+  }
+}
+
 export class FindingsSnapshotError extends Error {
   constructor(message: string) {
     super(message);

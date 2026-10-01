@@ -333,6 +333,121 @@ export type Finding =
   | SourceCopyFinding
   | PresenceFinding;
 
+/** A finding's own kind, the union's tag. */
+export type FindingKind = Finding["kind"];
+
+/**
+ * Every finding code, to switch on exhaustively: a host keys its own labels
+ * `satisfies Record<SousCode, string>`, so a code added or dropped here is a
+ * compile error there. Spelled as the wire's tables (and `sous-identity.ts`)
+ * spell them; a host adds its own producer prefix. The doc on each member is
+ * the rule in plain English, for agents; kitchen ships no label.
+ */
+export type SousCode =
+  /** An invisible control character (U+0000..U+001F other than tab and line ends). */
+  | "hygiene.C0Control"
+  /** The DELETE control character, U+007F. */
+  | "hygiene.Delete"
+  /** An invisible control character in U+0080..U+009F. */
+  | "hygiene.C1Control"
+  /** The replacement character U+FFFD, left where text failed to decode. */
+  | "hygiene.ReplacementChar"
+  /** A carriage return not followed by a line feed. */
+  | "hygiene.StrayCarriageReturn"
+  /** A backslash in the text that starts no marker. */
+  | "hygiene.StrandedBackslash"
+  /** A merge-conflict line (`<<<<<<<`, `=======`, `>>>>>>>`). */
+  | "hygiene.ConflictMarker"
+  /** A combining accent with no letter to sit on. */
+  | "hygiene.FreeCombiningMark"
+  /** An invisible formatting character outside any place it joins letters. */
+  | "hygiene.MisplacedFormat"
+  /** A no-break space beside other white space or at the edge of the text. */
+  | "hygiene.NoBreakSpace"
+  /** A Unicode noncharacter, which no text should contain. */
+  | "hygiene.Noncharacter"
+  /** A verse the source text has and this book lacks. */
+  | "presence.Missing"
+  /** A verse this book has and the source text lacks. */
+  | "presence.Extra"
+  /** A verse left empty where the source has text. */
+  | "presence.Empty"
+  /** A mark directly followed by a mark this project almost never puts after it, like `?,`. */
+  | "convention.ExactNeighbor"
+  /** A mark directly followed by a kind of mark (a quote, a dash) that rarely follows it in this project. */
+  | "convention.PooledNeighbor"
+  /** A group of marks written together that this project rarely writes, like `;'`. */
+  | "convention.RunShape"
+  /** A mark or digit next to something it is rarely next to in this project, like a comma touching the next word. */
+  | "convention.Placement"
+  /** A character this project uses only a handful of times. */
+  | "convention.Rarity"
+  /** A word capitalized, or not, the way this project rarely writes that word mid-sentence. */
+  | "convention.Casing"
+  /** A word far longer than this project's words, often two words run together. */
+  | "convention.WordLength"
+  /** A word written twice in a row, like `the the`, that this project does not double by habit. */
+  | "convention.Doubled"
+  /** A letter repeated more times in a row than this project ever repeats it. */
+  | "convention.LetterRun"
+  /** A lowercase word after a mark this project almost always follows with a capital. */
+  | "convention.SentenceStart"
+  /** One book that puts a mark next to something far more often than the other books do. */
+  | "convention.BookRate"
+  /** Words in a row spelled exactly as in the same verse of the source text, as if pasted in. */
+  | "sourceCopy"
+  /** A verse far longer or shorter, against its source verse, than this project usually is. */
+  | "lengthProportionality";
+
+/** Every `SousCode`, in the union's order. */
+export const SOUS_CODES: readonly SousCode[] = [
+  "hygiene.C0Control",
+  "hygiene.Delete",
+  "hygiene.C1Control",
+  "hygiene.ReplacementChar",
+  "hygiene.StrayCarriageReturn",
+  "hygiene.StrandedBackslash",
+  "hygiene.ConflictMarker",
+  "hygiene.FreeCombiningMark",
+  "hygiene.MisplacedFormat",
+  "hygiene.NoBreakSpace",
+  "hygiene.Noncharacter",
+  "presence.Missing",
+  "presence.Extra",
+  "presence.Empty",
+  "convention.ExactNeighbor",
+  "convention.PooledNeighbor",
+  "convention.RunShape",
+  "convention.Placement",
+  "convention.Rarity",
+  "convention.Casing",
+  "convention.WordLength",
+  "convention.Doubled",
+  "convention.LetterRun",
+  "convention.SentenceStart",
+  "convention.BookRate",
+  "sourceCopy",
+  "lengthProportionality",
+];
+
+/** A finding's code; a convention finding's channel is on its pattern, so
+ * pass the snapshot's `patterns()`. Total: the reader refuses a class, kind,
+ * channel or pattern index outside its tables. */
+export function codeOf(finding: Finding, patterns: readonly Pattern[]): SousCode {
+  switch (finding.kind) {
+    case "Hygiene":
+      return `hygiene.${finding.hygiene.class}`;
+    case "Presence":
+      return `presence.${finding.presence.kind}`;
+    case "Convention":
+      return `convention.${patterns[finding.convention.pattern]!.channel}`;
+    case "SourceCopy":
+      return "sourceCopy";
+    case "LengthProportionality":
+      return "lengthProportionality";
+  }
+}
+
 export class FindingsSnapshotError extends Error {
   constructor(message: string) {
     super(message);

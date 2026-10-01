@@ -16,9 +16,39 @@ use crate::substrate::{OuterClass, RUN_BUCKETS};
 use crate::unicode::Pool;
 use crate::words::{Form, LETTER_RUN_MAX, LETTER_RUN_MIN};
 
+/// Every finding code with its rule, in wire order: hygiene classes, presence
+/// kinds, convention channels, then the two lanes with no table.
+fn sous_codes(line: impl Fn(&str, &str) -> String) -> Vec<String> {
+    let hygiene = HygieneClass::ALL
+        .iter()
+        .map(|class| (format!("hygiene.{}", class.name()), class.rule()));
+    let presence = PresenceKind::ALL
+        .iter()
+        .map(|kind| (format!("presence.{}", kind.name()), kind.rule()));
+    let convention = Channel::ALL
+        .iter()
+        .map(|channel| (format!("convention.{}", channel.name()), channel.rule()));
+    let lanes = [
+        (
+            "sourceCopy".to_string(),
+            "Words in a row spelled exactly as in the same verse of the source text, as if pasted in.",
+        ),
+        (
+            "lengthProportionality".to_string(),
+            "A verse far longer or shorter, against its source verse, than this project usually is.",
+        ),
+    ];
+    hygiene
+        .chain(presence)
+        .chain(convention)
+        .chain(lanes)
+        .map(|(code, rule)| line(&code, rule))
+        .collect()
+}
+
 /// Render the checked-in TypeScript reader from the Rust-owned wire schema.
 pub fn generated_reader_ts() -> String {
-    let substitutions: [(&str, String); 83] = [
+    let substitutions: [(&str, String); 85] = [
         ("@@MAGIC@@", format!("0x{MAGIC:08x}")),
         ("@@FORMAT_VERSION@@", FORMAT_VERSION.to_string()),
         ("@@FLAG_UTF16@@", FLAG_UTF16.to_string()),
@@ -37,6 +67,14 @@ pub fn generated_reader_ts() -> String {
                 .map(|kind| format!("\"{}\"", kind.name()))
                 .collect::<Vec<_>>()
                 .join(", "),
+        ),
+        (
+            "@@SOUS_CODE_UNION@@",
+            sous_codes(|code, rule| format!("  /** {rule} */\n  | \"{code}\"")).join("\n"),
+        ),
+        (
+            "@@SOUS_CODES@@",
+            sous_codes(|code, _| format!("  \"{code}\",")).join("\n"),
         ),
         ("@@HEADER_BYTES@@", HEADER_BYTES.to_string()),
         (

@@ -66,6 +66,32 @@ impl HygieneClass {
             Self::Noncharacter => "Noncharacter",
         }
     }
+
+    /// What the class finds, in one plain sentence: the generated `SousCode`
+    /// docs, for agents. Hosts word their own labels.
+    pub const fn rule(self) -> &'static str {
+        match self {
+            Self::C0Control => {
+                "An invisible control character (U+0000..U+001F other than tab and line ends)."
+            }
+            Self::Delete => "The DELETE control character, U+007F.",
+            Self::C1Control => "An invisible control character in U+0080..U+009F.",
+            Self::ReplacementChar => {
+                "The replacement character U+FFFD, left where text failed to decode."
+            }
+            Self::StrayCarriageReturn => "A carriage return not followed by a line feed.",
+            Self::StrandedBackslash => "A backslash in the text that starts no marker.",
+            Self::ConflictMarker => "A merge-conflict line (`<<<<<<<`, `=======`, `>>>>>>>`).",
+            Self::FreeCombiningMark => "A combining accent with no letter to sit on.",
+            Self::MisplacedFormat => {
+                "An invisible formatting character outside any place it joins letters."
+            }
+            Self::NoBreakSpace => {
+                "A no-break space beside other white space or at the edge of the text."
+            }
+            Self::Noncharacter => "A Unicode noncharacter, which no text should contain.",
+        }
+    }
 }
 
 impl TryFrom<i16> for HygieneClass {

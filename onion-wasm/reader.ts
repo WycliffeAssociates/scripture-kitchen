@@ -1028,6 +1028,17 @@ export const CATALOG = {
 /** The rows, by code. A diagnostic's `code` field indexes this. */
 export const CODES = CATALOG.codes;
 
+/**
+ * Every lint code by its durable name, to switch on exhaustively: a host keys
+ * its own labels `satisfies Record<FindingName, string>`, so a code added or
+ * dropped here is a compile error there. `FindingName` is what can reach a
+ * reader as a finding; `FormName` is the formatting repairs (severity
+ * `"form"`), which `format_edits` applies and never reports.
+ */
+export type DiagnosticName = (typeof CODES)[number]["name"];
+export type FormName = Extract<(typeof CODES)[number], { severity: "form" }>["name"];
+export type FindingName = Exclude<DiagnosticName, FormName>;
+
 // ---------------------------------------------------------------------------
 // Views over one parse — hand-written, and stating no engine fact
 // ---------------------------------------------------------------------------

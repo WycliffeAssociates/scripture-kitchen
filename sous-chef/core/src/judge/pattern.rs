@@ -97,6 +97,44 @@ impl Channel {
             Self::BookRate => "BookRate",
         }
     }
+
+    /// What the rule finds, in one plain sentence: the generated `SousCode`
+    /// docs, for agents. Hosts word their own labels.
+    pub const fn rule(self) -> &'static str {
+        match self {
+            Self::ExactNeighbor => {
+                "A mark directly followed by a mark this project almost never puts after it, like `?,`."
+            }
+            Self::PooledNeighbor => {
+                "A mark directly followed by a kind of mark (a quote, a dash) that rarely follows it in this project."
+            }
+            Self::RunShape => {
+                "A group of marks written together that this project rarely writes, like `;'`."
+            }
+            Self::Placement => {
+                "A mark or digit next to something it is rarely next to in this project, like a comma touching the next word."
+            }
+            Self::Rarity => "A character this project uses only a handful of times.",
+            Self::Casing => {
+                "A word capitalized, or not, the way this project rarely writes that word mid-sentence."
+            }
+            Self::WordLength => {
+                "A word far longer than this project's words, often two words run together."
+            }
+            Self::Doubled => {
+                "A word written twice in a row, like `the the`, that this project does not double by habit."
+            }
+            Self::LetterRun => {
+                "A letter repeated more times in a row than this project ever repeats it."
+            }
+            Self::SentenceStart => {
+                "A lowercase word after a mark this project almost always follows with a capital."
+            }
+            Self::BookRate => {
+                "One book that puts a mark next to something far more often than the other books do."
+            }
+        }
+    }
 }
 
 /// Which side of a glyph a placement distribution describes.
