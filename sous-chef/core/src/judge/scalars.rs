@@ -200,12 +200,17 @@ fn learned<'a>(
 /// ;'                 -> None      `;` is a separator
 /// ```
 fn terminals_pooled(atoms: &[ScalarKey]) -> Option<Box<[ScalarKey]>> {
-    let terminal =
-        |atom: &ScalarKey| atom.scalar().is_some_and(|c| pool_of(c) == Pool::Terminal);
+    let terminal = |atom: &ScalarKey| atom.scalar().is_some_and(|c| pool_of(c) == Pool::Terminal);
     atoms.iter().any(terminal).then(|| {
         atoms
             .iter()
-            .map(|atom| if terminal(atom) { ScalarKey::NONE } else { *atom })
+            .map(|atom| {
+                if terminal(atom) {
+                    ScalarKey::NONE
+                } else {
+                    *atom
+                }
+            })
             .collect()
     })
 }
@@ -1385,7 +1390,11 @@ mod median_tests {
 
     /// The brute force it replaces: copy the others, sort, take the middle.
     fn leave_one_out(rates: &[u16], at: usize) -> u16 {
-        let mut others: Vec<u16> = rates[..at].iter().chain(&rates[at + 1..]).copied().collect();
+        let mut others: Vec<u16> = rates[..at]
+            .iter()
+            .chain(&rates[at + 1..])
+            .copied()
+            .collect();
         others.sort_unstable();
         let half = others.len() / 2;
         if others.len() % 2 == 1 {

@@ -485,9 +485,18 @@ fn every_glyph_has_a_kind_a_name_and_a_code_point_beside_it() {
 fn every_select_over_an_enum_names_only_its_values_and_every_kind() {
     let declared = declared_params();
     let enums = enums();
-    assert!(enums["MarkKind"].contains("sentenceEnd"), "MarkKind was read");
-    assert!(!enums["PoolName"].contains("letter"), "PoolName excludes letter");
-    assert!(enums["HygieneName"].contains("noncharacter"), "a multi-line enum was read");
+    assert!(
+        enums["MarkKind"].contains("sentenceEnd"),
+        "MarkKind was read"
+    );
+    assert!(
+        !enums["PoolName"].contains("letter"),
+        "PoolName excludes letter"
+    );
+    assert!(
+        enums["HygieneName"].contains("noncharacter"),
+        "a multi-line enum was read"
+    );
     for (id, tier, text) in tiers() {
         let used = Icu::parse(&text).unwrap_or_else(|why| panic!("{id} {tier}: {why}"));
         for (name, selectors) in &used.selects {

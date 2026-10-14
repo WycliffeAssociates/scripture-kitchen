@@ -319,9 +319,18 @@ fn a_seam_resolves_to_the_counts_of_the_unsplit_text() {
 #[test]
 fn a_line_break_neighbour_is_an_edge_and_a_space_is_a_space() {
     let row = row("a\n\u{2014}b c \u{2014}d e\u{2014}\r\nf\u{2028},");
-    assert_eq!(pair(&row, '\u{2014}', OuterClass::Edge, OuterClass::Letter), 1);
-    assert_eq!(pair(&row, '\u{2014}', OuterClass::Space, OuterClass::Letter), 1);
-    assert_eq!(pair(&row, '\u{2014}', OuterClass::Letter, OuterClass::Edge), 1);
+    assert_eq!(
+        pair(&row, '\u{2014}', OuterClass::Edge, OuterClass::Letter),
+        1
+    );
+    assert_eq!(
+        pair(&row, '\u{2014}', OuterClass::Space, OuterClass::Letter),
+        1
+    );
+    assert_eq!(
+        pair(&row, '\u{2014}', OuterClass::Letter, OuterClass::Edge),
+        1
+    );
     assert_eq!(pair(&row, ',', OuterClass::Edge, OuterClass::Edge), 1);
     let one = aggregate(&["one.\n", "Two"]);
     let dot = one

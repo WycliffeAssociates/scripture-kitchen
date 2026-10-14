@@ -248,7 +248,11 @@ fn a_run_recurs_when_its_sentence_ends_pooled_recur() {
         .iter()
         .filter(|cluster| usize::from(cluster.pattern.get()) == quote)
         .map(|cluster| {
-            let text = cluster.atoms.iter().filter_map(|atom| atom.scalar()).collect();
+            let text = cluster
+                .atoms
+                .iter()
+                .filter_map(|atom| atom.scalar())
+                .collect();
             (text, cluster.count, cluster.recurring)
         })
         .collect();

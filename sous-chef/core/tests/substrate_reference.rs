@@ -140,7 +140,10 @@ fn outer(c: Option<char>) -> OuterClass {
         None => OuterClass::Edge,
         Some(c) => {
             let class = class_of(c);
-            if matches!(c, '\n' | '\u{b}' | '\u{c}' | '\r' | '\u{85}' | '\u{2028}' | '\u{2029}') {
+            if matches!(
+                c,
+                '\n' | '\u{b}' | '\u{c}' | '\r' | '\u{85}' | '\u{2028}' | '\u{2029}'
+            ) {
                 OuterClass::Edge
             } else if class.is_whitespace() {
                 OuterClass::Space
