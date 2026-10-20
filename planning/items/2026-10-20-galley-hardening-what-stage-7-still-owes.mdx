@@ -1,0 +1,37 @@
+---
+id: 71e3eca5-07bf-4e25-99e6-327746912ce5
+title: "Galley: one budget over every cache tier"
+kind: plan
+status: discussing
+created: 2026-10-20
+updated: 2026-10-20
+sha: b2b76e7
+tags: [sous]
+source: planning/items/2026-09-01-sous-chef-roadmap.mdx (retired 2026-10-20)
+---
+
+`galley/src/pantry.md` declares one `Budget` over three tiers (pinned, hot,
+rebuildable) but enforces the ceiling on chunk products only. The other tiers
+are counted against it and reported by `resident_bytes()`, never evicted. Each
+store writes its own way; the point of this item is one write path that every
+cache goes through, so the ceiling bites everywhere it can.
+
+What to settle:
+
+- Which stores are evictable at all. Pinned is pinned for a reason: placing a
+  target's finding rescans its current text. Hot site rows and the
+  Expediter's `derived::Store`s are the candidates.
+- One insert/evict path that every store goes through, with eviction by the
+  same last-touched LRU the chunk cache uses, or a per-tier order.
+- A measurement first: resident bytes per tier over a whole Bible, with and
+  without a reference, so the ceiling's default is a number and not a guess
+  (`galley/tests/aggregate_accounting.rs` already holds the count to the real
+  heap).
+
+Not here, because they belong to the host: suppressions (the UI, keyed by
+`sous-identity.ts`), edit/undo, document versions, reusing JS objects across
+snapshots, and smoke tests in Sefer. Galley's own lifecycle is covered by the
+churns in `galley/tests/equivalence.rs`: target edits, a moving reference, and
+a drifting config.
+
+<Question id="tiers">Should the hot site rows be evictable (rebuilt on the next locate), or stay outside the ceiling like pinned text?</Question>

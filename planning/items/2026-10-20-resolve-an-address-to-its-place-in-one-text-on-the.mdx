@@ -1,0 +1,70 @@
+---
+id: 7485a140-9d43-4604-8a2a-f78a10f67f05
+title: "resolve: an address to its place in one text, on the galley handle (Sefer asks 12, 14)"
+kind: plan
+status: planned
+created: 2026-10-20
+updated: 2026-10-20
+sha: b2b76e7
+tags: [sefer]
+source: ../Sefer/planning/items/2026-09-14-scripture-kitchen-asks.mdx
+---
+
+"Where is JHN 3:16 in this text": found, missing or ambiguous, never a silent
+nearest. Today it lives only in Sefer (`packages/text/src/location/locate.ts`,
+489 lines, no tests). It moves to the engine beside the TOC it reads, per the
+shared-libraries vision; the citation parser does not (that is the
+`reference` package, native per language).
+
+## The door
+
+A method on the galley handle, which already holds each book's text and TOC
+by id:
+
+```text
+galley.resolve(id, address)
+  → { found, from, to, opening, covers, coarser }
+  | { missing: "intro" | "chapter" | "verse", within? }
+  | { ambiguous: [{ from, to, opening }, …] }
+```
+
+- `address` is structured, never a string: `book`, `intro`, `chapters`
+  (from, to) or `verses` (two points: chapter, verse, optional segment).
+  Sefer's `Address` shape. The Rust type lives in `mise`.
+- `opening` is where the run of openers (`\p`, `\q*`, `\m`, `\s*` with its
+  text, `\b`) before the first `\v` starts; it equals `from` mid-paragraph.
+  A multibuffer clips `opening..to`, a check uses `from..to`. This is ask 12,
+  without re-tiling the TOC.
+- Offsets in the same unit as the other galley doors.
+
+## The semantics
+
+Taken from Sefer's rules, which become the spec:
+
+- `GEN` is the whole book, `0..len`.
+- `GEN intro` is the front matter, chapter row 0; missing when it is empty.
+- `GEN 2-4` spans the chapter rows; two `\c 3` is ambiguous.
+- A verse a bridge covers is found, and `covers` says what was found:
+  `LUK 1:2` in `\v 1-2` covers `LUK 1:1-2`, not coarser.
+- A verse a list skips is missing: `\v 1,3` has no verse 2.
+- A segment the text does not divide (`3a` against `\v 3`) is found coarser.
+  A whole verse the text divides (`3` against `3a`, `3b`) spans first
+  segment to last.
+- A missing verse names the chapter it would be in (`within`).
+- Two units covering one place is ambiguous, with every candidate.
+- The address's book is the caller's to match; resolve answers for one text.
+
+The kitchen's `Sid` keeps its book-only form for front matter on the reverse
+path (`Toc::locate`); the codec maps it to `intro`.
+
+## Recording it
+
+- The rules above, with one example each, in a doc beside the module, not in
+  code comments.
+- The cases as data: `testData/resolve/cases.json`, each a USFM snippet, an
+  address and the expected answer, derived from `locate.ts`'s rules. The Rust
+  tests read it; any other language can.
+
+Sefer side: call the door; `locate.ts` keeps its types or goes.
+
+<Question id="gen" answer="Yes (Will, 2026-10-20): whole book, intro its own address.">GEN is the whole book and the intro is its own address, as Sefer has it. Agreed?</Question>

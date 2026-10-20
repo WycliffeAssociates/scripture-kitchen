@@ -1,0 +1,30 @@
+---
+id: f29fa60b-9c1f-4de8-85cd-e698f3856777
+title: "OnionBook::locate walks only the ranges it returns (Sefer ask 11)"
+kind: plan
+status: planned
+created: 2026-10-20
+updated: 2026-10-20
+sha: b2b76e7
+tags: [sefer]
+source: ../Sefer/planning/items/2026-09-14-scripture-kitchen-asks.mdx
+---
+
+`OnionBook::locate` (`galley/src/sous/onion_book.rs:74`) starts its
+`SourceSpans` at mask range 0, and `next()` scans to the end of `mask.ranges`
+after the last overlap. Draining one locate is O(ranges); locating every
+finding is O(findings × ranges). On the hub's `hbo_uhb` proofread that was 90%
+of 4 s (163,284 findings).
+
+Change:
+
+- Start at `mask.starts.partition_point(|&s| s <= from) - 1`, the way
+  `galley/src/find.rs:275` already does, and return `None` once a projected
+  start reaches `range.to()`.
+- `pub fn mask(&self) -> &Mask`, so the hub drops its copy.
+
+Check: a book of thousands of short verses; locate a range near the end and
+drain it. Same runs as today, and `next()` touches only the ranges it returns
+plus one.
+
+Sefer side: none. The hub drops its mask copy.

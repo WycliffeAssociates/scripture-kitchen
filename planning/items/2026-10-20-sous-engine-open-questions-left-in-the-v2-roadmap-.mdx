@@ -1,0 +1,20 @@
+---
+id: 68189bb8-fa06-4df9-90df-a3a442184cd8
+title: "Sous engine: open questions left in the v2 roadmap ledger"
+kind: note
+status: discussing
+created: 2026-10-20
+updated: 2026-10-20
+sha: b2b76e7
+tags: [sous]
+source: planning/items/2026-09-01-sous-chef-roadmap.mdx (retired 2026-10-20)
+---
+
+Questions the old roadmap's implementation ledger left in its "next work"
+column. Each waits on evidence, not on a decision today.
+
+<Question id="pools">Is Terminal vs Separator the pool split that matters, and should Quote and Bracket merge? Open until fleet evidence says.</Question>
+<Question id="needles">Aho-Corasick or a one-pass byte-class sweep for sites: measured and not taken (evidence.md, 2026-09-04). Revisit only if a corpus shows many rare needles per book.</Question>
+<Question id="nbsp">Hygiene: NBSP's verse-edge case, once the walk is verse-grained.</Question>
+<Question id="snapshot">The CLI publishes with a zero snapshot id. Does it need a real one, or is the wasm handle's identity enough?</Question>
+<Question id="onion">Move the CLI adapter's Onion conveniences (chapter/verse views, numeric locate) into Onion when a second host needs them. Is galley that second host already?</Question>

@@ -1,0 +1,47 @@
+---
+id: 9b2e8565-cffb-4a76-a87d-7e1b0345f6c6
+title: "LetterRun fires on any run longer than the letter's habit (Sefer ask 13)"
+kind: plan
+status: planned
+created: 2026-10-20
+updated: 2026-10-20
+sha: b2b76e7
+tags: [sefer]
+source: ../Sefer/planning/items/2026-09-14-scripture-kitchen-asks.mdx
+---
+
+> it's a clear bug that this run of letters is longer than any other run of
+> same letters in the project.
+>
+> I think we just want to catch the typo of tyyypo.
+
+Today `sssssssssssssssssssssssere` is silent and only a run of exactly three
+fires. Two causes in `sous-chef/core/src/judge/words.rs`:
+
+- The support gate needs **every** shorter length to stand on
+  `word_support_floor` (20) runs, so length 4+ needs 20 runs each of 3, 4, …,
+  which no language has.
+- The denominator is runs of two or more, so a letter that rarely doubles
+  (`y` in English) is never entitled at all, and `tyyypo` says nothing.
+
+**The rule after**, in Will's words: does this project ever repeat this letter
+more than n times? n is the longest run length the letter is established at
+(at least `word_support_floor` runs of it; 1 for a letter that never doubles
+as a habit). Every run longer than n fires, and never a run under 3. Nothing
+is asked of each shorter length. The denominator becomes the letter's
+occurrences, so the row reads "1 run of 3+ `y` against 12,000 `y`".
+
+Work:
+
+- `RunTally` gains a length-1 lane (or reads the letter's count from the
+  substrate tally), so the denominator is every occurrence.
+- Replace the shorter-lengths gate with the longest-established-length rule;
+  keep the entitlement floor on the letter's occurrences.
+- Message: LetterRun's catalog entry and params follow the new denominator.
+- Re-run `core/examples/word_volume.rs` over the tier; record rows per corpus
+  before and after in `evidence.md`, with the new rows' text.
+- `rules/word-conventions.md`: the sticky-keys paragraph states the new rule.
+
+Check: one verse with runs of 3, 4 and 26 of one letter in a corpus that
+writes that letter often: three rows, or one row per length lane. A letter
+the corpus doubles as a habit (`ee`) still never fires at length 2.

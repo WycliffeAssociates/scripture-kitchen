@@ -572,8 +572,8 @@ touches only the settings, adding them later changes nothing that already works.
 
 ## What the handle does not do yet
 
-`detail(handle)` and `suppress(rule, anchor)` are in
-`sous-chef/planning/plans/consumer-api-sketch.md` and are not here. A structure
+`detail(handle)` is in `sous-chef/planning/plans/consumer-api-sketch.md` and is
+not here. Suppression is the host's, keyed by `sous-identity.ts`. A structure
 projection is still cut rather than retained — a book retains the verse-text
 mask alone — so `structureTextOf` takes text and `mask(id, { recipe:
 "structure" })` cuts the retained copy on the way past.

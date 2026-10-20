@@ -6,9 +6,10 @@ what a translation normally does, reports the evidence in plain counts, and
 leaves the linguistic decision to a person.
 
 This file is the durable authority for purpose, ownership, and cross-boundary
-contracts. [rules/](rules/) defines the checks and their examples.
-[the roadmap](../planning/items/2026-09-01-sous-chef-roadmap.mdx) says how to build and verify them, and
-[evidence.md](evidence.md) is the ledger of measurements they rest on. If an
+contracts. [rules/](rules/) defines the checks and their examples,
+[planning/items/](../planning/items/) holds what is still open, and
+[evidence.md](evidence.md) is the ledger of measurements they rest on.
+Implementation detail lives in a README beside its code. If an
 implementation choice conflicts with this charter, stop and change the plan or
 amend the charter deliberately.
 
@@ -69,8 +70,8 @@ localization.
 ### Hosts own lifecycle and presentation
 
 CLI, WASM, and editor adapters provide I/O and presentation. The workspace's
-Galley is resident in its derived caches, judging config, and suppression
-workflow, not in the editor's canonical text. The caller registers each book
+Galley is resident in its derived caches and judging config, not in the
+editor's canonical text. The caller registers each book
 under an opaque id it keeps consistent (a file path in practice) and replaces
 a book only whole: `update(id, text)`. Galley retains a copy of that text as
 last updated, plus the products derived from it; every other operation —
@@ -272,14 +273,17 @@ derived state recomputed from the current invocation after any corpus change.
 - A configurable rule names its primary signal and its support floor
   separately. Weak support causes abstention or a visibly thin claim; another
   signal may not compensate for it invisibly.
+- Judging is explicit fractions against support bands: a numerator, a
+  denominator and a floor. No Wilson-style score, and no global depth knob
+  until fixed bands and their vocabulary are proven.
 - Global defaults come from reproducible fleet measurement. Per-project
   evidence determines a finding, but does not refit the meaning of a global
   sensitivity control.
-- Typed rule enablement and judging knobs belong to Sous config. Additional
-  suppressions are Galley workflow state: they anchor to rule plus relevant
-  content/context, survive unrelated edits, expire when reviewed text changes,
-  and filter publication without rewriting the corpus's observations or
-  denominators.
+- Typed rule enablement and judging knobs belong to Sous config.
+  Suppression ("not this one") is the host UI's job: it names a finding by the
+  stable identities in `galley/sous-identity.ts` and filters what it shows.
+  Galley keeps no suppression state, and observations and denominators never
+  change because of one.
 - Script mixing is not a rule of its own. A stray script's letters are rare in
   a corpus that does not mix them, so letter rarity already carries it.
 - Normalization is a project-level fact — "uses mixed normalization" — not a
@@ -447,20 +451,35 @@ reconciliation preserves object identity where useful.
 - Reuse the old repository's generator logic and tests selectively; do not
   import its full `u32` classification layout or dependency graph without a
   current consumer proving each bit.
+- The binary schema is the WASM/TypeScript boundary. Declarations are
+  generated from the Rust wire source; no mirrored per-finding structs, and
+  hand-written adapters stay thin.
+- The CLI is the walking consumer, declared with `usage-rs`. It gains a stable
+  machine-readable output only when an oracle or a host contract needs one.
 - Corpora and oracle blobs are not committed and require no Git LFS. A small
   manifest pins downloadable inputs by size and checksum.
 
+## Testing posture
+
+Feature work is **alpha**: test load-bearing behavior without freezing
+incidental interfaces. Three areas are hardened from their first commit,
+because a later correction is expensive:
+
+1. source-coordinate and chapter/book seam invariants;
+2. finding wire layout, generated schema, and rejection behavior;
+3. cold, rebuilt, and reordered reduction equivalence.
+
+Synthetic tests and generated vectors are committed. Fleet runs stay local or
+are explicitly invoked gates.
+
 ## Evidence and compatibility policy
 
+- “Port” from the old repository means preserve a proven behavior after
+  restating its v2 contract, never copy a module wholesale.
 - Synthetic examples and invariant/property tests live in the repository.
 - Corpora calibrate and compare behavior; they are not ordinary test fixtures.
-- The old repository is a donor and a behavioral comparator, not the v2
-  architecture. Exact output parity is required for deliberately unchanged
-  deterministic behavior. Redesigned statistical rules require a documented
-  divergence adjudication, not a broad re-pin.
-- Keep a small, script-diverse iteration tier and a full-fleet bookend. Port
-  only the dump/compare machinery necessary to reproduce those gates; do not
-  port the old blob/oracle subsystem wholesale.
+- The old repository is retired. No output comparison against it is owed.
+- Keep a small, script-diverse iteration tier and a full-fleet run.
 
 ## Non-goals until a measured gate promotes them
 
@@ -468,6 +487,8 @@ reconciliation preserves object identity where useful.
 - a materialized scalar tape;
 - retained site lists or corpus rollup caches;
 - binary diffs/tombstones between finding snapshots;
+- persistent observation caches;
+- aligned-unit implementations for documents other than scripture;
 - a general versification-repair engine;
 - a compatibility layer for v1 public APIs;
 - trained language models or shipped per-language artifacts.

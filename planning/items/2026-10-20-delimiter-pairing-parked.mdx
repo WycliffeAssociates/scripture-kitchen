@@ -1,0 +1,27 @@
+---
+id: da636331-8c78-4833-89ec-ef8d9712ed65
+title: "Delimiter pairing (parked)"
+kind: plan
+status: parked
+created: 2026-10-20
+updated: 2026-10-20
+sha: b2b76e7
+tags: [sous]
+source: planning/items/2026-09-01-sous-chef-roadmap.mdx (retired 2026-10-20)
+---
+
+Bracket and quote pairing is stack-shaped and does not fit the counter model.
+The rule, its provisional direction and the bounded-carry shape are in
+[rules/delimiter-pairing.md](sous-chef/rules/delimiter-pairing.md); the charter
+calls it undecided.
+
+What is open:
+
+- A bounded-carry probe: balanced pairs inside one chapter at a fixed depth,
+  with an overflow state that discards every conclusion it would have needed.
+- Whether a cross-chapter summary of unmatched opens and closes composes
+  exactly, or the claim stays chapter-local.
+- Opt-out per glyph or family is the UI's suppression, so the engine needs
+  nothing for it.
+
+<Question id="when">Is this worth a probe at all, or does RunShape and ExactNeighbor already catch the stray brackets reviewers care about?</Question>

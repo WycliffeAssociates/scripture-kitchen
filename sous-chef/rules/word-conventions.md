@@ -7,7 +7,7 @@ punctuation list. Convention-learned lane.
 
 Status: **casing landed and calibrated (W1, W3); doubled words landed and
 calibrated (W2); sticky keys landed as letter run length (W4).**
-Stage 4 in [the roadmap](../../planning/items/2026-09-01-sous-chef-roadmap.mdx); the walk, the row, and what stands
+The walk, the row, and what stands
 before a word are [../core/src/words.md](../core/src/words.md), the channels
 and the terminal table are [../core/src/judge.md](../core/src/judge.md).
 

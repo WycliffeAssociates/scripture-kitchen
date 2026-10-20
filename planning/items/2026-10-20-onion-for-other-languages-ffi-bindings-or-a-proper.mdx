@@ -1,0 +1,37 @@
+---
+id: c09f426c-edbd-4f9c-9a76-c140936c91aa
+title: "Onion for other languages: FFI bindings or a proper CLI"
+kind: idea
+status: idea
+created: 2026-10-20
+updated: 2026-10-20
+sha: b2b76e7
+tags: [onion]
+source: "https://claude.ai/artifact/A4M8WqXsVZSJNxtadkrz5d (Shared Scripture Domain Libraries)"
+---
+
+> We should figure out ffi bindings OR create a proper cli for at least the
+> onion/parsing/linting html parts I think perhaps so other languages could
+> call into.
+
+The shared-libraries vision keeps USFM in one Rust engine and ships it to
+every language: "Large parsers keep one implementation in Rust, shipped as
+WASM or FFI". Today the only doorway is wasm, which Sefer and the hub use.
+The JVM apps (Orature, BTT-Writer, Recorder) are on USFMToolsJava, C# is on
+USFMToolsSharp, Python on usfm-tools.
+
+Two shapes, not exclusive:
+
+- **FFI bindings.** UniFFI over a small onion surface (parse, lint, HTML,
+  USJ/USX export, toc), generating Kotlin, Swift and Python; C# through a C
+  ABI or csbindgen. In-process, typed, fast; one build per target platform.
+- **A proper CLI.** `onion parse|lint|html|usj|usx|toc <file>` with stable
+  JSON or binary output on stdout. Any language shells out; one binary per
+  platform, no binding layer, but a process per call and a wire format to
+  keep stable.
+
+The CLI is cheaper and also serves the fixtures-first rule (a conformance run
+is a CLI run). Bindings earn their place when an app calls per keystroke.
+
+<Question id="first">Which consumer comes first, and does it call per document (CLI is enough) or per edit (needs bindings)?</Question>
+<Question id="surface">Which doors: parse and lint only, or HTML and the exports too?</Question>

@@ -1,0 +1,22 @@
+---
+id: 4aef5c8a-8b8a-4b57-9f5a-6a6a6f6aaa21
+title: "vref loader as a target projection (parked)"
+kind: idea
+status: parked
+created: 2026-10-20
+updated: 2026-10-20
+sha: b2b76e7
+tags: [sous]
+source: planning/items/2026-09-01-sous-chef-roadmap.mdx (retired 2026-10-20)
+---
+
+The vref loader (`BOOK C:V<TAB>text`) is a source producer today: `sous-cli
+--source` takes it, with `<range>` placeholders fused into one interval unit.
+
+Not built: the same loader as an addressable **target** projection, for fleet
+work over vref corpora, whose offsets locate back to the vref line and typed
+designator rather than pretending to be raw-USFM offsets. The fleet harnesses
+(`examples/pattern_volume.rs`, `word_volume.rs`) build their own corpora
+instead.
+
+<Question id="need">Is there a consumer for this, or do the scratch harnesses cover fleet runs well enough?</Question>

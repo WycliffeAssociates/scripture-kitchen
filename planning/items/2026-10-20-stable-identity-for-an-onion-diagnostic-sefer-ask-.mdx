@@ -1,0 +1,30 @@
+---
+id: 8e3e0aca-165c-4477-8a55-6781d7d3f3fa
+title: "Stable identity for an onion diagnostic (Sefer ask 15)"
+kind: plan
+status: planned
+created: 2026-10-20
+updated: 2026-10-20
+sha: b2b76e7
+tags: [sefer]
+source: ../Sefer/planning/items/2026-09-14-scripture-kitchen-asks.mdx
+---
+
+`galley/sous-identity.ts` names a Sous finding so a saved suppression
+survives edits and settings changes. Onion's lint diagnostics have nothing
+like it, so Sefer cannot save "this is fine" for one.
+
+Change, in the same module and contract:
+
+- a site identity, `v1:o:<DiagnosticName>:<verse>:<flagged text>:<ordinal>`,
+  escaped and ordinaled as the Sous ones are;
+- a subject identity where a diagnostic has a subject: an unknown marker by
+  its name ("always allow `\zqq`"). Which diagnostics have one is a small
+  table, decided per name.
+
+Pinned on the golden fixtures like the Sous identities; documented beside the
+Sous ones in `galley/sous-messages.md`, "Stable identity".
+
+Sefer side: `.sefer/onion-suppressions.json` keyed by it.
+
+<Question id="subjects">Which diagnostics get a subject identity besides unknown marker?</Question>
