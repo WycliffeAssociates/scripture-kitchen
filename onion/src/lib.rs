@@ -47,6 +47,7 @@ pub mod format;
 pub mod html;
 pub mod lint;
 pub mod mask;
+pub mod resolve;
 mod scanner;
 pub mod tables;
 pub mod toc;

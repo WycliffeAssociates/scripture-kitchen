@@ -1,6 +1,8 @@
 //! mise — the prep both engines share, and nothing else.
 //!
 //! ```text
+//! mise::address Address::Verses { from, to }      a place no text owns
+//!
 //! mise::books   BOOK_CODES[0] == b"GEN"          the spec's 116 identifiers
 //!               BookKey::new(*b"MRK")            three bytes of book identity
 //!               canonical_rank(key) == 40        its place in spec order
@@ -19,6 +21,7 @@
 //! borrow-free data structures — and only when more than one crate needs them.
 //! The scope rule and what it excludes: `mise/README.md`.
 
+pub mod address;
 pub mod books;
 pub mod extensions;
 pub mod unicode;
