@@ -87,6 +87,61 @@ fn a_letter_with_no_repeat_history_says_nothing() {
     );
 }
 
+/// A letter the corpus never repeats is never repeated with support, so its
+/// first run of three is the row: `tyyypo` where `y` never doubles.
+#[test]
+fn a_letter_that_never_doubles_fires_on_its_first_triple() {
+    let text = "they say ".repeat(2_000) + "a tyyypo";
+    let books = [book(b"MRK", text)];
+    let findings = analyzed(&books, &JudgingConfig::default());
+    let rows = sticky_rows(&books, &JudgingConfig::default());
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].glyph, ScalarKey::of('y'));
+    assert_eq!(rows[0].key, PatternKey::LetterRun { length: 3 });
+    assert_eq!((rows[0].numerator, rows[0].denominator), (1, 1));
+    assert_eq!(sited(&books, &findings, Reasons::LETTER_RUN), ["tyyypo"]);
+}
+
+/// A habitual double with nothing between it and a long run: the run lands in
+/// the saturating lane and fires there, with no length 3..7 asked to stand.
+#[test]
+fn a_long_run_past_a_habitual_double_fires_in_the_last_lane() {
+    let text = "a class ".repeat(2_000) + &"s".repeat(23) + "ere";
+    let books = [book(b"MRK", text)];
+    let rows = sticky_rows(&books, &JudgingConfig::default());
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].glyph, ScalarKey::of('s'));
+    assert_eq!(
+        rows[0].key,
+        PatternKey::LetterRun {
+            length: LETTER_RUN_MAX
+        }
+    );
+    assert_eq!((rows[0].numerator, rows[0].denominator), (1, 2_001));
+}
+
+/// Length 2 never fires, whether the double is a habit or written once.
+#[test]
+fn a_double_never_fires() {
+    let habit = "the tree ".repeat(2_000);
+    assert!(sticky_rows(&[book(b"MRK", habit)], &JudgingConfig::default()).is_empty());
+    let once = "the day ".repeat(2_000) + "a tree";
+    assert!(sticky_rows(&[book(b"MRK", once)], &JudgingConfig::default()).is_empty());
+}
+
+/// Where runs of three are themselves established, three is the letter's
+/// supported longest and only four speaks.
+#[test]
+fn an_established_triple_is_silent_and_four_fires() {
+    let text = "the tree ".repeat(2_000) + &"theee ".repeat(25) + "theeee";
+    let books = [book(b"MRK", text)];
+    let rows = sticky_rows(&books, &JudgingConfig::default());
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].glyph, ScalarKey::of('e'));
+    assert_eq!(rows[0].key, PatternKey::LetterRun { length: 4 });
+    assert_eq!((rows[0].numerator, rows[0].denominator), (1, 2_026));
+}
+
 /// The doc example, and the disposition it claims: an emphatic spelling FIRES
 /// — it is a row for review, not a verdict — where the corpus has established
 /// both shorter runs of that letter.
