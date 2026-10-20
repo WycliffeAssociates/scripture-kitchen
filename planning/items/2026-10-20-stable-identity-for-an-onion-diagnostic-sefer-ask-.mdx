@@ -2,7 +2,7 @@
 id: 8e3e0aca-165c-4477-8a55-6781d7d3f3fa
 title: "Stable identity for an onion diagnostic (Sefer ask 15)"
 kind: plan
-status: planned
+status: done
 created: 2026-10-20
 updated: 2026-10-20
 sha: b2b76e7
@@ -27,4 +27,10 @@ Sous ones in `galley/sous-messages.md`, "Stable identity".
 
 Sefer side: `.sefer/onion-suppressions.json` keyed by it.
 
-<Question id="subjects">Which diagnostics get a subject identity besides unknown marker?</Question>
+<Question id="subjects" answer="unknown-marker, deprecated-marker (the marker name, without \ or +) and attr-unknown-name (marker:attribute). Chosen to unblock; Will may widen it.">Which diagnostics get a subject identity besides unknown marker?</Question>
+
+Built (`galley/sous-identity.ts`, pinned in `galley/tests/fixtures/onion/identities.txt`). Known limits:
+
+- An attribute list with two or more candidate names has no subject: the text alone cannot say which one is unknown.
+- The ordinal counts every earlier start of the flagged text, so a closer `\zqq*` counts toward `\zqq`'s ordinal, as the Sous identities already do.
+- Two unknown names in one list give two diagnostics with one site identity.
