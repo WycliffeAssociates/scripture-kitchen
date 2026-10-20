@@ -628,3 +628,41 @@ test("fails closed on malformed envelope and lazily malformed rows", () => {
   badSpan[FIRST_RECORD] = 0x20;
   assert.throws(() => FindingsSnapshot.open(badSpan).book(0).at(0), FindingsSnapshotError);
 });
+
+function hygieneCase(name) {
+  return Uint8Array.from(
+    readFileSync(new URL(`../testData/hygiene/${name}.hex`, import.meta.url), "utf8")
+      .trim()
+      .split(/\s+/)
+      .map((value) => Number.parseInt(value, 16)),
+  );
+}
+
+test("groups and fixes every case in testData/hygiene/groups.json as the Rust test does", () => {
+  const cases = JSON.parse(readFileSync(new URL("../testData/hygiene/groups.json", import.meta.url), "utf8"));
+  assert.equal(cases.length, 2);
+  for (const { name, groups } of cases) {
+    const snapshot = FindingsSnapshot.open(hygieneCase(name));
+    for (const scope of ["book", "project"]) {
+      const got = snapshot.hygieneGroups({ scope }).map((group) => ({
+        book: group.key.book,
+        class: group.key.class,
+        placement: group.key.placement,
+        count: group.count,
+        rows: group.rows(),
+        fix: group.fix()?.map(({ bookIdx, from, to }) => [bookIdx, from, to]) ?? null,
+      }));
+      assert.deepEqual(got, groups[scope], `${name} ${scope}`);
+    }
+  }
+});
+
+test("a group member decodes as its row does", () => {
+  const snapshot = FindingsSnapshot.open(hygieneCase("utf16"));
+  const zwnj = snapshot
+    .hygieneGroups({ scope: "book" })
+    .find((group) => group.key.book === 0 && group.key.class === "MisplacedFormat" && group.key.placement === "BesideSpace");
+  assert.deepEqual(zwnj.at(1), snapshot.book(0).at(10));
+  assert.equal(zwnj.at(1).hygiene.anchor, "AtEnd");
+  assert.throws(() => zwnj.at(3), FindingsSnapshotError);
+});

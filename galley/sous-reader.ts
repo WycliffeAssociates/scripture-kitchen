@@ -928,6 +928,30 @@ function readReasons(bits: number): readonly ConventionReason[] {
   return CONVENTION_REASONS.filter((_, bit) => (bits & (1 << bit)) !== 0);
 }
 
+/** Lane A of the hygiene row at `at`: the class byte and the site byte. */
+function readHygieneLaneA(
+  view: DataView,
+  at: number,
+): Pick<HygieneDigest, "class" | "placement" | "anchor" | "oneUnit" | "loneIsSilent"> {
+  const classIndex = view.getUint8(at + RECORD_BOOK_SCOPE_OFFSET);
+  const hygieneClass = HYGIENE_CLASSES[classIndex];
+  if (hygieneClass === undefined) {
+    return fail(`unknown hygiene class ${classIndex}`);
+  }
+  const site = view.getUint8(at + RECORD_BOOK_SCOPE_OFFSET + 1);
+  const placement = HYGIENE_PLACEMENTS[site & 0b111];
+  if (placement === undefined || (site & 0x80) !== 0) {
+    return fail(`unknown hygiene site byte 0x${site.toString(16).padStart(2, "0")}`);
+  }
+  return {
+    class: hygieneClass,
+    placement,
+    anchor: HYGIENE_ANCHORS[(site >> HYGIENE_SITE_ANCHOR_SHIFT) & 0b11],
+    oneUnit: (site & HYGIENE_SITE_ONE_UNIT) !== 0,
+    loneIsSilent: (site & HYGIENE_SITE_LONE_IS_SILENT) !== 0,
+  };
+}
+
 function signedDeviation(view: DataView, at: number): number | null {
   const raw = view.getInt16(at, true);
   return raw === -0x8000 ? null : raw / 256;
@@ -1000,19 +1024,7 @@ export class BookView {
     }
     const saturated = (flags & 1) !== 0;
     if (code === 1) {
-      const classIndex = this.#view.getUint8(at + RECORD_BOOK_SCOPE_OFFSET);
-      const hygieneClass = HYGIENE_CLASSES[classIndex];
-      if (hygieneClass === undefined) {
-        return fail(`unknown hygiene class ${classIndex}`);
-      }
-      const site = this.#view.getUint8(at + RECORD_BOOK_SCOPE_OFFSET + 1);
-      const placement = HYGIENE_PLACEMENTS[site & 0b111];
-      if (placement === undefined || (site & 0x80) !== 0) {
-        return fail(`unknown hygiene site byte 0x${site.toString(16).padStart(2, "0")}`);
-      }
-      const anchor = HYGIENE_ANCHORS[(site >> HYGIENE_SITE_ANCHOR_SHIFT) & 0b11];
-      const oneUnit = (site & HYGIENE_SITE_ONE_UNIT) !== 0;
-      const loneIsSilent = (site & HYGIENE_SITE_LONE_IS_SILENT) !== 0;
+      const laneA = readHygieneLaneA(this.#view, at);
       const run = this.#view.getInt16(at + RECORD_PROJECT_SCOPE_OFFSET, true);
       if (run < 1) {
         return fail("hygiene run length must be at least 1");
@@ -1025,7 +1037,7 @@ export class BookView {
         from,
         to,
         bookIdx,
-        hygiene: { class: hygieneClass, placement, anchor, oneUnit, loneIsSilent, run, saturated },
+        hygiene: { ...laneA, run, saturated },
       };
     }
     if (code === 4) {
@@ -1076,6 +1088,118 @@ export class BookView {
         saturated,
       },
     };
+  }
+}
+
+export type HygieneScope = "book" | "project";
+
+/** `book` is `null` in project scope. */
+export interface HygieneGroupKey {
+  readonly book: number | null;
+  readonly class: HygieneClass;
+  readonly placement: HygienePlacement;
+}
+
+/** onion's edit shape with an empty insert, in the publication's coordinates. */
+export interface HygieneDeletion {
+  readonly bookIdx: number;
+  readonly from: number;
+  readonly to: number;
+}
+
+const REMOVED_BESIDE: Readonly<Record<string, readonly HygienePlacement[]>> = {
+  NoBreakSpace: ["BesideSpace", "AtEdge", "Alone"],
+  MisplacedFormat: ["BesideSpace", "BesidePunctuation", "AtEdge", "Alone"],
+};
+
+/** The fix table: `galley/sous-messages.md`, "Hygiene fixes". */
+function hygieneAction(digest: HygieneDigest): "remove" | "keepOne" | null {
+  if (digest.class === "C0Control" || digest.class === "Delete" || digest.class === "Noncharacter") {
+    return "remove";
+  }
+  const removable = REMOVED_BESIDE[digest.class];
+  if (removable === undefined) {
+    return null;
+  }
+  if (digest.loneIsSilent) {
+    return "keepOne";
+  }
+  return removable.includes(digest.placement) ? "remove" : null;
+}
+
+/** The one deletion that fixes this row, or `null` when none is certain:
+ * a class the table does not fix, a run that is not one piece of its span,
+ * or a run whose UTF-16 length the row cannot say. */
+export function hygieneFix(finding: HygieneFinding, coordinateSpace: CoordinateSpace): HygieneDeletion | null {
+  const digest = finding.hygiene;
+  const action = hygieneAction(digest);
+  if (action === null || digest.anchor === "Neither") {
+    return null;
+  }
+  const { bookIdx, from, to } = finding;
+  if (action === "remove" && digest.anchor === "Exact") {
+    return { bookIdx, from, to };
+  }
+  if (coordinateSpace !== "utf16" || !digest.oneUnit || digest.saturated) {
+    return null;
+  }
+  const run = digest.run;
+  const atEnd = digest.anchor === "AtEnd";
+  const [start, end] = atEnd ? [to - run, to] : [from, from + run];
+  const kept = action === "keepOne" ? start + 1 : start;
+  return kept < end ? { bookIdx, from: kept, to: end } : null;
+}
+
+/** One habit: every hygiene row of one (book or project, class, placement).
+ * Holds row positions only; rows decode when asked for. */
+export class HygieneGroup {
+  readonly key: HygieneGroupKey;
+  readonly #rows: Uint32Array;
+  readonly #book: (index: number) => BookView;
+  readonly #coordinateSpace: CoordinateSpace;
+
+  constructor(
+    key: HygieneGroupKey,
+    rows: Uint32Array,
+    book: (index: number) => BookView,
+    coordinateSpace: CoordinateSpace,
+  ) {
+    this.key = key;
+    this.#rows = rows;
+    this.#book = book;
+    this.#coordinateSpace = coordinateSpace;
+  }
+
+  get count(): number {
+    return this.#rows.length / 2;
+  }
+
+  /** `[bookIdx, row]` per member, in publication order. */
+  rows(): Array<[number, number]> {
+    return Array.from({ length: this.count }, (_, index) => [this.#rows[2 * index], this.#rows[2 * index + 1]]);
+  }
+
+  at(index: number): HygieneFinding {
+    if (!Number.isSafeInteger(index) || index < 0 || index >= this.count) {
+      return fail(`group member ${index} is outside a group of ${this.count}`);
+    }
+    return this.#book(this.#rows[2 * index]).at(this.#rows[2 * index + 1]) as HygieneFinding;
+  }
+
+  /** Every member's deletion, last first within a book, so they apply in
+   * order. `null` when no member has one. */
+  fix(): HygieneDeletion[] | null {
+    const out: HygieneDeletion[] = [];
+    for (let index = 0; index < this.count; index++) {
+      const deletion = hygieneFix(this.at(index), this.#coordinateSpace);
+      if (deletion !== null) {
+        out.push(deletion);
+      }
+    }
+    if (out.length === 0) {
+      return null;
+    }
+    return out.sort((a, b) => a.bookIdx - b.bookIdx || b.from - a.from);
   }
 }
 
@@ -1310,6 +1434,51 @@ export class FindingsSnapshot {
   bookById(id: string): BookView | undefined {
     const index = this.#byId.get(id);
     return index === undefined ? undefined : this.book(index);
+  }
+
+  /** Hygiene rows grouped by (book or project, class, placement), in that
+   * order. One pass over two bytes of each row; nothing else decodes. */
+  hygieneGroups({ scope }: { scope: HygieneScope }): HygieneGroup[] {
+    const members = new Map<number, number[]>();
+    for (let book = 0; book < this.#entries.length; book++) {
+      const entry = this.#entries[book];
+      for (let row = 0; row < entry.count; row++) {
+        const at = entry.offset + row * RECORD_LEN;
+        if (this.#view.getUint8(at + RECORD_CODE_OFFSET) !== 1) {
+          continue;
+        }
+        const lane = readHygieneLaneA(this.#view, at);
+        const scoped = scope === "book" ? book + 1 : 0;
+        const key =
+          (scoped * HYGIENE_CLASSES.length + HYGIENE_CLASSES.indexOf(lane.class)) * HYGIENE_PLACEMENTS.length +
+          HYGIENE_PLACEMENTS.indexOf(lane.placement);
+        const list = members.get(key);
+        if (list === undefined) {
+          members.set(key, [book, row]);
+        } else {
+          list.push(book, row);
+        }
+      }
+    }
+    const book = (index: number) => this.book(index) as BookView;
+    return [...members.keys()]
+      .sort((a, b) => a - b)
+      .map((key) => {
+        const placement = key % HYGIENE_PLACEMENTS.length;
+        const rest = (key - placement) / HYGIENE_PLACEMENTS.length;
+        const hygieneClass = rest % HYGIENE_CLASSES.length;
+        const scoped = (rest - hygieneClass) / HYGIENE_CLASSES.length;
+        return new HygieneGroup(
+          {
+            book: scope === "book" ? scoped - 1 : null,
+            class: HYGIENE_CLASSES[hygieneClass],
+            placement: HYGIENE_PLACEMENTS[placement],
+          },
+          Uint32Array.from(members.get(key) as number[]),
+          book,
+          this.coordinateSpace,
+        );
+      });
   }
 
   /** Every finding published under one host id, decoded eagerly. */
