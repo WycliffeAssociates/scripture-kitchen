@@ -392,8 +392,9 @@ impl Galley {
     /// `onion/src/resolve.md`; the answer is a [`Resolution`] in bytes unless
     /// `utf16` asks otherwise.
     ///
-    /// A verse needs the text (segment letters, the opening walk), so a
-    /// reference registered without `keepText` is refused by name.
+    /// A reference registered without `keepText` answers a book, an intro or
+    /// chapters from its `Toc`, in bytes; a verse needs the text (segment
+    /// letters, the opening walk) and is refused by name.
     pub fn resolve(
         &mut self,
         id: &str,
@@ -403,12 +404,17 @@ impl Galley {
         let utf16 = onion_wasm::options::utf16_only(opts.as_ref(), "resolve")
             .map_err(|e| JsError::new(&e))?;
         let address = resolve::address(&address)?;
-        let wanted = self.projected(id)?;
-        let entry = self.book(wanted.as_str())?;
-        let text = entry.text().map_err(refusal)?;
-        let answer = entry.toc().resolve(text, &address);
+        let entry = self.book(id)?;
+        let answer = match entry.text() {
+            Ok(text) => entry.toc().resolve(text, &address),
+            Err(_) => entry.toc().resolve_rows(&address).ok_or_else(|| {
+                JsError::new(&format!(
+                    "reference {id} retains no text to resolve a verse in; register it with keepText"
+                ))
+            })?,
+        };
         let table = if utf16 {
-            Some(entry.utf16().map_err(refusal)?)
+            Some(entry.utf16().map_err(census_refusal)?)
         } else {
             None
         };

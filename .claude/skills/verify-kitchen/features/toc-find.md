@@ -29,7 +29,8 @@ JSON.parse(g.resolve("books/LUK.usfm", { kind: "verses", from: p(1, 2), to: p(1,
 // { found: { from: 25, to: 36, opening: 13, covers: 1:1-1:2, coarser: false } }
 ```
 
-A book needs an `\id` line to register; a reference needs `keepText`.
+A book needs an `\id` line to register. A reference without `keepText`
+answers book, intro and chapters in bytes, and refuses verses.
 
 ## Gotchas
 

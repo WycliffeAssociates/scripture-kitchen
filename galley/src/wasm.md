@@ -531,9 +531,10 @@ naming the key, as does an unknown `kind` or an empty segment.
 
 JSON, like `targetNodeFor`: one small answer per call, on no bulk path, so it
 needs no buffer or generated reader. Offsets are bytes unless `utf16` asks
-otherwise. A verse needs the text (its segment letters and the opening walk),
-so a reference registered without `keepText` is refused by name, as `find`
-refuses it.
+otherwise. A reference registered without `keepText` still answers a book, an
+intro or chapters from its `Toc`, in bytes (it kept no UTF-16 table, so
+`utf16` throws as `toc` does). A verse needs the text, its segment letters and
+the opening walk, so a verse address to such a reference is refused by name.
 
 ## SousSettings
 

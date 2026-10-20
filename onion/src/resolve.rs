@@ -54,8 +54,23 @@ pub struct Candidate {
 impl Toc {
     /// `source` is the text this `Toc` was built from.
     pub fn resolve(&self, source: &str, address: &Address) -> Resolution {
+        match address {
+            Address::Verses { from, to } => self
+                .verses_span(source, from, to)
+                .unwrap_or_else(|refusal| refusal),
+            _ => self.resolve_rows(address).expect("not a verse address"),
+        }
+    }
+
+    /// The answer the chapter rows alone give, for a holder of the `Toc`
+    /// without its text: a book, an intro or chapters. `None` for verses,
+    /// which need the text's segment letters and opening walk.
+    pub fn resolve_rows(&self, address: &Address) -> Option<Resolution> {
         let answer = match address {
-            Address::Book => Ok(found(0..source.len() as u32, address.clone(), false)),
+            Address::Book => {
+                let end = self.chapters.last().map_or(0, |row| row.end);
+                Ok(found(0..end, Address::Book, false))
+            }
             Address::Intro => {
                 let front = &self.chapters[0];
                 if front.end <= front.start {
@@ -65,9 +80,9 @@ impl Toc {
                 }
             }
             Address::Chapters { from, to } => self.chapters_span(*from, *to, address),
-            Address::Verses { from, to } => self.verses_span(source, from, to),
+            Address::Verses { .. } => return None,
         };
-        answer.unwrap_or_else(|refusal| refusal)
+        Some(answer.unwrap_or_else(|refusal| refusal))
     }
 
     fn chapters_span(&self, from: u16, to: u16, address: &Address) -> Answer {
@@ -175,28 +190,45 @@ impl Toc {
             (1, 0) => Ok((whole.remove(0), coarser)),
             (0, 0) => Err(missing(Missing::Verse, Some(chapter.span()))),
             (0, _) => {
-                let named: Vec<Address> = parts
-                    .iter()
-                    .map(|(verse, _)| self.unit_address(source.as_bytes(), chapter, verse))
-                    .collect();
-                let repeats = named
-                    .iter()
-                    .enumerate()
-                    .any(|(at, one)| named[..at].contains(one));
-                let spans: Vec<Range<u32>> = parts.into_iter().map(|(_, span)| span).collect();
-                if repeats {
-                    return Err(ambiguous(spans));
+                if self.parts_overlap(source.as_bytes(), &parts, point) {
+                    return Err(ambiguous(parts.into_iter().map(|(_, span)| span).collect()));
                 }
-                let from = spans.iter().map(|span| span.start).min();
-                let to = spans.iter().map(|span| span.end).max();
+                let from = parts.iter().map(|(_, span)| span.start).min();
+                let to = parts.iter().map(|(_, span)| span.end).max();
                 Ok((from.unwrap_or(0)..to.unwrap_or(0), false))
             }
             _ => {
                 let mut spans = whole;
                 spans.extend(parts.into_iter().map(|(_, span)| span));
+                spans.sort_by_key(|span| span.start);
                 Err(ambiguous(spans))
             }
         }
+    }
+
+    /// Whether two units' parts of one whole verse share a place: `\v 3a` and
+    /// `\v 3a-3b` both hold 3a.
+    fn parts_overlap(
+        &self,
+        source: &[u8],
+        parts: &[(&VerseAnchor, Range<u32>)],
+        point: &Point,
+    ) -> bool {
+        let pieces: Vec<(usize, Piece)> = parts
+            .iter()
+            .enumerate()
+            .flat_map(|(unit, (verse, _))| {
+                self.members_of(verse)
+                    .iter()
+                    .filter(move |member| meet(source, member, point) == Meet::Part)
+                    .map(move |member| (unit, piece(source, member, point.verse)))
+            })
+            .collect();
+        pieces.iter().enumerate().any(|(at, (unit, one))| {
+            pieces[..at]
+                .iter()
+                .any(|(other_unit, other)| other_unit != unit && one.overlaps(other))
+        })
     }
 
     /// Each verse of one chapter row with its extent, to the next `\v` or the
@@ -330,21 +362,30 @@ impl Toc {
         let mut pending_text = false;
         for token in lex(window).iter().rev() {
             let bytes = &window.as_bytes()[token.start as usize..token.end() as usize];
-            match token.kind() {
-                TokenKind::Newline | TokenKind::Pad => {}
-                TokenKind::Text if bytes.iter().all(u8::is_ascii_whitespace) => {}
-                TokenKind::Marker { nested: false }
-                    if generated::kind(token.marker_idx) == MarkerKind::Paragraph =>
-                {
-                    match opener(token.marker_idx) {
-                        Some(Opener::Heading) => {}
-                        Some(Opener::Line) if !pending_text => {}
-                        _ => break,
-                    }
+            let role = match token.kind() {
+                TokenKind::Marker { nested: false } => opener(token.marker_idx),
+                _ => None,
+            };
+            match (token.kind(), role) {
+                (_, Some(Opener::Heading)) => {
                     opening = low + token.start;
                     pending_text = false;
                 }
-                TokenKind::Marker { .. }
+                (_, Some(Opener::Line)) if !pending_text => opening = low + token.start,
+                (_, Some(Opener::Line)) => break,
+                (_, Some(Opener::ChapterHead)) => pending_text = false,
+                (
+                    TokenKind::Newline
+                    | TokenKind::Pad
+                    | TokenKind::Milestone { .. }
+                    | TokenKind::MilestoneTerminator
+                    | TokenKind::AttrList,
+                    None,
+                ) => {}
+                (TokenKind::Text, None) if bytes.iter().all(u8::is_ascii_whitespace) => {}
+                (TokenKind::Marker { .. }, None)
+                    if generated::kind(token.marker_idx) == MarkerKind::Milestone => {}
+                (TokenKind::Marker { .. }, None)
                     if matches!(
                         generated::kind(token.marker_idx),
                         MarkerKind::Character | MarkerKind::Note
@@ -352,11 +393,14 @@ impl Toc {
                 {
                     pending_text = true;
                 }
-                TokenKind::Text
-                | TokenKind::ClosingMarker { .. }
-                | TokenKind::AttrList
-                | TokenKind::NoteCaller
-                | TokenKind::OptBreak => pending_text = true,
+                (
+                    TokenKind::Text
+                    | TokenKind::ClosingMarker { .. }
+                    | TokenKind::NoteCaller
+                    | TokenKind::OptBreak
+                    | TokenKind::Designator,
+                    None,
+                ) => pending_text = true,
                 _ => break,
             }
         }
@@ -410,6 +454,32 @@ fn meet(source: &[u8], member: &VerseMember, point: &Point) -> Meet {
     if cut { Meet::Whole } else { Meet::Coarser }
 }
 
+/// What one member holds of a whole verse it cuts, as segment bounds; `None`
+/// is the verse's open end on that side.
+struct Piece<'s> {
+    low: Option<&'s [u8]>,
+    high: Option<&'s [u8]>,
+}
+
+impl Piece<'_> {
+    fn overlaps(&self, other: &Piece<'_>) -> bool {
+        let at_most = |low: Option<&[u8]>, high: Option<&[u8]>| match (low, high) {
+            (Some(low), Some(high)) => low <= high,
+            _ => true,
+        };
+        at_most(self.low, other.high) && at_most(other.low, self.high)
+    }
+}
+
+fn piece<'s>(source: &'s [u8], member: &VerseMember, verse: u16) -> Piece<'s> {
+    Piece {
+        low: segment(source, member.from_segment_start, member.from_segment_end)
+            .filter(|_| verse == member.from),
+        high: segment(source, member.to_segment_start, member.to_segment_end)
+            .filter(|_| verse == member.to),
+    }
+}
+
 /// A member's segment letters, `None` when none is written.
 fn segment(source: &[u8], start: u32, end: u32) -> Option<&[u8]> {
     (end > start).then(|| &source[start as usize..end as usize])
@@ -420,12 +490,15 @@ enum Opener {
     Line,
     /// Joins the run with its text.
     Heading,
+    /// Its text is its own; the run passes over it without starting there.
+    ChapterHead,
 }
 
 fn opener(marker: MarkerIdx) -> Option<Opener> {
     match (generated::category(marker), generated::name(marker)) {
+        (_, "cl" | "cp" | "ca" | "cd") => Some(Opener::ChapterHead),
         (_, "qa") => Some(Opener::Heading),
-        (Category::ParaTitlesSections, "mt" | "mte" | "cl" | "cd") => None,
+        (Category::ParaTitlesSections, "mt" | "mte") => None,
         (Category::ParaTitlesSections, _) => Some(Opener::Heading),
         (Category::ParaBody | Category::ParaPoetry | Category::ParaLists, _) => Some(Opener::Line),
         _ => None,

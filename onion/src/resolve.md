@@ -88,14 +88,38 @@ the text divides is exact"
 ```
 
 **Two units covering one place** is malformed text, and ambiguous with every
-candidate, in source order. Two segments naming the same part are too. "two
-anchors for one verse are ambiguous"
+candidate, in source order. So is a whole verse asked of units that overlap
+inside it, though together they would span it: `\v 3a` and `\v 3a-3b` both
+hold 3a. "two anchors for one verse are ambiguous", "a part and a whole for one
+verse are ambiguous, in source order", "overlapping segments for a whole verse
+are ambiguous", "a bridge into a segment overlaps that segment", "a verse in a
+repeated chapter is an ambiguous chapter"
+
+```text
+\v 3a a\n\v 3 b\n\v 4 c             LUK 1:3 → ambiguous [\v 3a, \v 3]
+\v 2-3a a\n\v 3a b\n\v 3b c         LUK 1:3 → ambiguous [\v 2-3a, \v 3a, \v 3b]
+```
 
 **A missing verse** names the chapter it would be in (`within`), so a caller
 can choose to stop there. A range with either end missing is missing that end.
 A verse in a chapter the text lacks is a missing chapter. "a missing verse
-names its chapter", "a range with a missing end is missing", "a verse in a
-missing chapter is a missing chapter"
+names its chapter", "a range with a missing end is missing", "a range ending
+in a list gap is missing", "a verse in a missing chapter is a missing chapter"
+
+**A range checks only its two ends**, as `locate.ts` does: a gap between them
+is not looked for, and `covers` is the earliest start and latest end of every
+unit the span touches. A reversed range spans the same verses. "a range checks
+only its ends", "a reversed range spans the same verses", "lists that
+interleave cover their joint hull"
+
+```text
+\v 1,3 a\n\v 4 b                 LUK 1:1-4 → found, though 2 is in no unit
+\v 1,3,5 a\n\v 2,4 b             LUK 1:1-2 → found, covers LUK 1:1-5
+```
+
+**A reference without its text** answers a book, an intro and chapters from
+its `Toc` alone (`Toc::resolve_rows`): the chapter rows tile the source, so the
+book is `0..` the last row's end. A verse needs the text.
 
 ## Opening
 
@@ -112,6 +136,9 @@ equals `from` mid-paragraph, and for every answer that is not a verse.
 \c 1\n\p\n\v 1 a                 opening at \p, never \c
 \c 1\n\cl Psalm 1\n\p\n\v 1 a    opening at \p
 \c 3\n\d A psalm of David.\n\q1 \v 1   opening at \d
+\d \zaln-s |…\*\w A\w*\zaln-e\* psalm.\n\q1 \v 1   opening at \d; a milestone is transparent
+\s1 Head\n\ts\*\n\p\n\v 2        opening at \s1
+\c 1\n\ms Book One\n\cl Psalm\n\q1 \v 1   opening at \ms; \cl is passed over
 \s1 Title\n\p\n\v 1 a\n\p\n\v 2  GEN 1:1-2 opens at \s1, where its first verse does
 ```
 
@@ -125,12 +152,19 @@ Walking back from the `\v`, never past the previous `\v` or the chapter's `\c`:
   `\r`, `\d`, `\sp`, `\sr`, `\sd#`, and `\z` markers registered as titles or
   sections), joins the run WITH its text, notes and character markup. So does
   `\qa`, the acrostic heading the table files under poetry.
-- Not openers: `\mt#` and `\mte#` (a book's titles, not a verse's), `\cl` and
-  `\cd` (they label the chapter), and everything else. The walk stops at the
-  first one, and at a milestone.
+- TRANSPARENT: milestones (`\ts\*`, `\zaln-s |…\*`, `\zaln-e\*`, `\qt-s`, …)
+  and attribute lists, inside a heading's text or between openers; and the
+  chapter-head markers `\cl`, `\cp`, `\ca`, `\cd` with their text. The walk
+  passes over them without starting there.
+- Not openers: `\mt#` and `\mte#` (a book's titles, not a verse's), and
+  everything else. The walk stops at the first one.
 
 A verse range opens where its first verse does. A whole verse the text divides
 opens where its first segment does. An ambiguous candidate carries its own.
+
+To clip consecutive verses without repeating a heading, end each one at the
+next verse's `opening` rather than its `to`: `opening(1:1)..opening(1:2)`,
+then `opening(1:2)..`. The heading before verse 2 sits inside verse 1's `to`.
 
 ## Where this departs from Sefer's `locate.ts`
 
@@ -139,6 +173,9 @@ opens where its first segment does. An ambiguous candidate carries its own.
 - Segments order by their bytes (Rust `str` order). `locate.ts` orders them by
   `localeCompare(…, "en")`. The two agree on lower-case `a`-`z`, which is every
   segment the cases and the corpora hold; they differ on mixed case.
+- A whole verse asked of units that overlap inside it (`\v 3a` and `\v 3a-3b`)
+  is ambiguous. `locate.ts` joins the parts into one found span unless two of
+  them name the same address; joining overlapping parts is a silent nearest.
 - `Ambiguous` carries `{ span, opening }` per candidate, where `locate.ts`
   carries bare spans.
 - Offsets are UTF-8 bytes here, UTF-16 in `locate.ts`. The galley door converts

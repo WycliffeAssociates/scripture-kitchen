@@ -797,10 +797,11 @@ for (const [door, call] of [
     ["chapter 0", () => resolver.resolve("resolve/0.usfm", { kind: "chapters", from: 0, to: 1 }), "from"],
     ["an empty segment", () => resolver.resolve("resolve/0.usfm", { kind: "verses", from: { chapter: 1, verse: 1, segment: "" }, to: { chapter: 1, verse: 1 } }), "segment"],
     ["an unknown id", () => resolver.resolve("resolve/none.usfm", { kind: "book" }), "no book is registered"],
-    ["a reference without text", () => {
+    ["a verse in a reference without text", () => {
       resolver.updateReference("ref/RUT.usfm", fixture("ref/RUT.usfm"));
-      return resolver.resolve("ref/RUT.usfm", { kind: "book" });
+      return resolver.resolve("ref/RUT.usfm", { kind: "verses", from: { chapter: 1, verse: 1 }, to: { chapter: 1, verse: 1 } });
     }, "keepText"],
+    ["UTF-16 from a reference without text", () => resolver.resolve("ref/RUT.usfm", { kind: "book" }, { utf16: true }), "UTF-16"],
   ]) {
     let refused = "";
     try {
@@ -810,6 +811,15 @@ for (const [door, call] of [
     }
     check(refused.includes(says), `resolve refuses ${what}: ${refused}`);
   }
+  // Its rows still tile its source, so the places they name answer in bytes.
+  const rut = fixture("ref/RUT.usfm");
+  const rutBytes = Buffer.byteLength(rut, "utf8");
+  eq(canonical(JSON.parse(resolver.resolve("ref/RUT.usfm", { kind: "book" }))),
+     canonical({ found: { from: 0, to: rutBytes, opening: 0, covers: { kind: "book" }, coarser: false } }),
+     "a reference without text answers its book from its Toc");
+  const chapter2 = Buffer.from(rut, "utf8").indexOf("\\c 2");
+  eq(JSON.parse(resolver.resolve("ref/RUT.usfm", { kind: "chapters", from: 2, to: 2 })).found?.from, chapter2,
+     "a reference without text answers a chapter from its Toc");
   resolver.free();
 }
 
