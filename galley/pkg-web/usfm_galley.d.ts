@@ -54,6 +54,32 @@ export interface OverlayOptions {
     utf16?: boolean;
 }
 
+/** `resolve(id, address, opts)`. */
+export interface ResolveOptions {
+    /** Offsets as UTF-16 code units; default bytes. */
+    utf16?: boolean;
+}
+
+/** A place in scripture, Sefer's `Address`. A `book` key is read past: the book is the caller's to match. */
+export type Address =
+| { kind: "book" }
+| { kind: "intro" }
+| { kind: "chapters"; from: number; to: number }
+| { kind: "verses"; from: AddressPoint; to: AddressPoint };
+
+export interface AddressPoint {
+    chapter: number;
+    verse: number;
+    /** `a` in `3a`; absent for the whole verse. */
+    segment?: string;
+}
+
+/** What `resolve` answers, JSON-encoded. Offsets are half-open. */
+export type Resolution =
+| { found: { from: number; to: number; opening: number; covers: Address; coarser: boolean } }
+| { missing: "intro" | "chapter" | "verse"; within?: { from: number; to: number } }
+| { ambiguous: { from: number; to: number; opening: number }[] };
+
 /** One block's address on one side — a skeleton row names its own. */
 export interface BlockAddress {
     sid: string;
@@ -441,6 +467,17 @@ export class Galley {
      * products, and the Expediter's own cached rows.
      */
     residentBytes(): number;
+    /**
+     * Where an address is in one registered book's text, as JSON: found,
+     * missing or ambiguous, never a silent nearest. The rules are
+     * `onion/src/resolve.md`; the answer is a [`Resolution`] in bytes unless
+     * `utf16` asks otherwise.
+     *
+     * A reference registered without `keepText` answers a book, an intro or
+     * chapters from its `Toc`, in bytes; a verse needs the text (segment
+     * letters, the opening walk) and is refused by name.
+     */
+    resolve(id: string, address: Address, opts?: ResolveOptions): string;
     /**
      * Replaces them. No chapter is remapped and no book refolded — judging
      * reads the config, mapping does not — so a knob flip costs a re-judge.
@@ -955,6 +992,7 @@ export interface InitOutput {
     readonly galley_publish: (a: number) => [number, number, number, number];
     readonly galley_remove: (a: number, b: number, c: number) => number;
     readonly galley_residentBytes: (a: number) => number;
+    readonly galley_resolve: (a: number, b: number, c: number, d: any, e: number) => [number, number, number, number];
     readonly galley_setConfig: (a: number, b: number) => void;
     readonly galley_skeleton: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly galley_sourceNodeFor: (a: number, b: number, c: number, d: number, e: number, f: any, g: number) => [number, number, number, number];

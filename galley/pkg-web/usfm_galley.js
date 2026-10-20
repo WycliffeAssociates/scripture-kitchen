@@ -835,6 +835,40 @@ export class Galley {
         return ret;
     }
     /**
+     * Where an address is in one registered book's text, as JSON: found,
+     * missing or ambiguous, never a silent nearest. The rules are
+     * `onion/src/resolve.md`; the answer is a [`Resolution`] in bytes unless
+     * `utf16` asks otherwise.
+     *
+     * A reference registered without `keepText` answers a book, an intro or
+     * chapters from its `Toc`, in bytes; a verse needs the text (segment
+     * letters, the opening walk) and is refused by name.
+     * @param {string} id
+     * @param {Address} address
+     * @param {ResolveOptions} [opts]
+     * @returns {string}
+     */
+    resolve(id, address, opts) {
+        let deferred3_0;
+        let deferred3_1;
+        try {
+            const ptr0 = passStringToWasm0(id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.galley_resolve(this.__wbg_ptr, ptr0, len0, address, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
+            var ptr2 = ret[0];
+            var len2 = ret[1];
+            if (ret[3]) {
+                ptr2 = 0; len2 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred3_0 = ptr2;
+            deferred3_1 = len2;
+            return getStringFromWasm0(ptr2, len2);
+        } finally {
+            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        }
+    }
+    /**
      * Replaces them. No chapter is remapped and no book refolded — judging
      * reads the config, mapping does not — so a knob flip costs a re-judge.
      * @param {SousSettings} settings
