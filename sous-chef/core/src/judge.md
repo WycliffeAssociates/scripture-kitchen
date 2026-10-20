@@ -382,30 +382,26 @@ not treat as a word row.
 
 ```text
 en_ulb   'l'  24,317 runs of two, one of three
-   1/24,318 = 0 bp, band 4's ceiling is 3 bp    → FIRES: `joyfullly`, PSA 81:1
-Finnish-like   'aa' x2,000, one `aaa`
-   1/2,001 = 4 bp, band 3's ceiling is 10 bp    → FIRES, and `aa` never does
-a corpus with no `ee` and one `eee`
-   the support gate                             → SILENT
+   supported longest 2                          → FIRES at 3: `joyfullly`, PSA 81:1
+nya      'w'  10 runs of two, one of three
+   under the floor, supported longest 1         → FIRES at 3: `cifukwwwa`, GEN 31:35
+Finnish-like   'aa' x2,000, one `aaa`           → FIRES at 3, and `aa` never does
+25 `eee` on 2,000 `ee`, one `eeee`              → SILENT at 3, FIRES at 4
+hin2017  `मत्तित्याह`: त्, ति, त् are three atoms   → no run
 ```
 
-The denominator is **that letter's own repeat history**: every run of it of two
-or more. So a language that doubles its vowels everywhere is judged on its
-triples, a script that never repeats a letter is judged on nothing, and there
-is no rule per script.
-
-Two guards, and they are different claims. The first is the ordinary word
-staircase over that denominator. The second is a **support gate**: every
-shorter length ≥ 2 must itself stand on at least `word_support_floor` runs, so
-`eee` speaks only where `ee` is established, and `xxxx` says nothing in a
-corpus that never wrote `xxx`. **Length 2 never fires** — it is most of the
-denominator, and a letter doubled at all is evidence of nothing.
+The question is **does this letter ever repeat more than n times?** n is the
+longest length whose lane holds `word_support_floor` runs, or 1 where none
+does, and every longer length the letter reaches is a row. **Length 2 never
+fires.** The denominator is that letter's own repeat history, every run of it
+of two or more, so a language that doubles its vowels everywhere is judged on
+its triples. A run is identical atoms, a base and the glue riding it.
 
 `channels.letter_runs` ships **true**. Over the committed tier the shipped
-defaults fire 9 rows across 8 corpora — mean 1.1, max 4, and three corpora fire
-none (evidence.md, W4) — so no fleet sweep was needed to set it. Recusal: none.
-The denominator already IS the language's own habit, which is what a recusal
-statistic would have had to measure.
+defaults fire 22 rows across 8 corpora — mean 2.75, max 11 (nya), three corpora
+silent (evidence.md, 2026-10-20). Recusal: none. The denominator already IS the
+language's own habit, which is what a recusal statistic would have had to
+measure.
 
 Its sites are the word each run sits inside, one row per run; a word this
 channel and the casing channel both name is one row carrying both bits.

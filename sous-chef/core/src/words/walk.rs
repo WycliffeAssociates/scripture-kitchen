@@ -348,35 +348,46 @@ fn word_start(text: &str, at: u32) -> u32 {
 /// for_each_letter_run("aaaaaaaaah") → ('a', 8)   // saturating at the lane
 /// ```
 ///
-/// Glue rides its base, so a combining mark neither breaks a run nor
-/// lengthens it; a digit, or the one nonletter a word rides through, breaks
-/// one. The letter is the first scalar of `char::to_lowercase`, the same fold
+/// A run is identical atoms, a base and the glue riding it, so `त्त` and
+/// `तित` are not runs of `त`; a digit, or the one nonletter a word rides
+/// through, breaks one. The letter is the first scalar of `char::to_lowercase`, the same fold
 /// the hash uses, so `Ee` is a run of two and an uncased script counts here
 /// like any other.
 pub fn for_each_letter_run(word: &str, mut visit: impl FnMut(ScalarKey, u8)) {
-    let mut held: Option<(ScalarKey, u32)> = None;
-    for scalar in word.chars() {
+    let mut held: Option<(ScalarKey, &str, u32)> = None;
+    let mut scalars = word.char_indices().peekable();
+    while let Some((at, scalar)) = scalars.next() {
         let class = class_of(scalar);
         if class.is_glue() {
             continue;
         }
+        let start = at + scalar.len_utf8();
+        let mut end = start;
+        while let Some(&(next_at, next)) = scalars.peek()
+            && class_of(next).is_glue()
+        {
+            end = next_at + next.len_utf8();
+            scalars.next();
+        }
+        let glue = &word[start..end];
         let letter = class
             .is_alphabetic()
             .then(|| ScalarKey::of(scalar.to_lowercase().next().unwrap_or(scalar)));
-        if let Some((key, scalars)) = &mut held
+        if let Some((key, held_glue, scalars)) = &mut held
             && letter == Some(*key)
+            && glue == *held_glue
         {
             *scalars += 1;
             continue;
         }
-        if let Some((key, scalars)) = held.take()
+        if let Some((key, _, scalars)) = held.take()
             && let Some(length) = run_length(scalars)
         {
             visit(key, length);
         }
-        held = letter.map(|key| (key, 1u32));
+        held = letter.map(|key| (key, glue, 1u32));
     }
-    if let Some((key, scalars)) = held
+    if let Some((key, _, scalars)) = held
         && let Some(length) = run_length(scalars)
     {
         visit(key, length);

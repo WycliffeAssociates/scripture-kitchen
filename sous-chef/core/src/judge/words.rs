@@ -83,21 +83,9 @@ pub(crate) fn word_slot(pattern: &Pattern) -> (u8, u64) {
     }
 }
 
-/// One row per run length a letter reaches under its own repeat history's
-/// band, longest-established-first ruled out by the support gate below.
-///
-/// The denominator is every run of THAT letter of two or more — the letter's
-/// own habit — so `theee` is judged against thousands of `ee` and a script
-/// that never doubles a letter judges nothing. Two guards, and they are
-/// different claims:
-///
-/// * the band, which is the ordinary staircase over that denominator, and
-/// * a support gate: every shorter length must itself stand on at least
-///   `word_support_floor` runs, so `eee` speaks only where `ee` is
-///   established and a language with no `ee` and one `eee` says nothing.
-///
-/// Length 2 never fires. It is the whole denominator's floor, and a letter
-/// doubled at all is not evidence of anything.
+/// One row per run length longer than the longest a letter repeats on
+/// `word_support_floor` runs, against every run of that letter of two or more.
+/// Length 2 never fires.
 pub(super) fn letter_runs(
     corpus: &[&WordAggregate],
     totals: &WordTotals,
@@ -132,19 +120,18 @@ pub(super) fn letter_run(
     out: &mut Vec<Pattern>,
 ) {
     let runs = row.runs();
-    let Some((band, ceiling)) = entitled_words(runs, config) else {
+    let Some((band, _)) = config.word_bands.band_for(saturate(runs)) else {
         return;
     };
-    for lane in letter_run_lane(LETTER_RUN_MIN) + 1..row.lengths.len() {
+    let supported = row
+        .lengths
+        .iter()
+        .rposition(|&count| u64::from(count) >= u64::from(config.word_support_floor))
+        .map_or(0, |lane| lane + 1);
+    let first = supported.max(letter_run_lane(LETTER_RUN_MIN) + 1);
+    for lane in first..row.lengths.len() {
         let count = u64::from(row.lengths[lane]);
-        let share = share_bp(count, runs);
-        if count == 0 || share >= ceiling {
-            continue;
-        }
-        if row.lengths[..lane]
-            .iter()
-            .any(|&shorter| u64::from(shorter) < u64::from(config.word_support_floor))
-        {
+        if count == 0 {
             continue;
         }
         let key = PatternKey::LetterRun {

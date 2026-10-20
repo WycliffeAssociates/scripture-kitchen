@@ -56,10 +56,11 @@ and the terminal table are [../core/src/judge.md](../core/src/judge.md).
   denominator is that LETTER's own habit of repeating (every run of it of two
   or more), so a language that doubles its vowels everywhere is judged on its
   triples, and a script that never repeats a letter is judged on nothing.
-  Length 2 never fires, and a length fires only where every shorter length is
-  itself established on `word_support_floor` runs — so one `eee` in a corpus
-  with no `ee` says nothing, and neither does `xxxx` where no `xxx` was ever
-  written. The site is the word the run sits inside.
+  The letter's supported longest is the longest length it repeats on
+  `word_support_floor` runs, or 1 where none does; every longer length it
+  reaches is a row, and length 2 never fires. So `tyyypo` fires where `y`
+  never doubles, and `eee` is silent where `eee` is itself established. The
+  site is the word the run sits inside.
 - **A sticky key is a review row, not a verdict.** Emphatic spelling
   (`aaaah`), a transliteration convention, and a stuck keyboard all reach the
   same lane, and the counts cannot tell them apart. What the row claims is that

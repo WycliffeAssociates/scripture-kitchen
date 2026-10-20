@@ -63,30 +63,6 @@ fn a_language_that_doubles_vowels_is_silent() {
     assert!(!rows.iter().any(|row| row.glyph == ScalarKey::of('e')));
 }
 
-/// A letter the corpus barely repeats carries no history to be judged
-/// against, and a length whose shorter runs are unattested is not evidence
-/// either: `xxxx` where no `xxx` was ever written says nothing about `xxxx`.
-#[test]
-fn a_letter_with_no_repeat_history_says_nothing() {
-    let base = "the tree stood ".repeat(2_000);
-    let thin = base.clone() + "a boxx and a boxxx";
-    let books = [book(b"MRK", thin)];
-    assert!(
-        sticky_rows(&books, &JudgingConfig::default()).is_empty(),
-        "two runs of `x` are under the word support floor"
-    );
-
-    // The support gate on its own: two thousand `xx`, so the denominator and
-    // the band would both pass, but the corpus never wrote `xxx`.
-    let gapped = base + &"a boxx ".repeat(2_000) + "a boxxxx";
-    let books = [book(b"MRK", gapped)];
-    let rows = sticky_rows(&books, &JudgingConfig::default());
-    assert!(
-        rows.is_empty(),
-        "no `xxx` stands between `xx` and `xxxx`: {rows:?}"
-    );
-}
-
 /// A letter the corpus never repeats is never repeated with support, so its
 /// first run of three is the row: `tyyypo` where `y` never doubles.
 #[test]
@@ -164,12 +140,13 @@ fn emphasis_aaaah_is_reviewable_not_convicted() {
     assert_eq!(sited(&books, &findings, Reasons::LETTER_RUN), ["haaaah"]);
 }
 
-/// Glue rides its base (charter invariant 8), so a combining mark neither
-/// breaks a run nor lengthens it. A digit and the one nonletter a word rides
-/// through do break one.
+/// Glue rides its base (charter invariant 8), so a run is identical atoms: a
+/// marked letter breaks a run of bare ones. A digit and the one nonletter a
+/// word rides through break one too.
 #[test]
 fn glue_inside_a_repeat_does_not_break_it() {
-    assert_eq!(runs_in("the\u{301}ee"), vec![('e', 3)]);
+    assert_eq!(runs_in("the\u{301}ee"), vec![('e', 2)]);
+    assert_eq!(runs_in("e\u{301}e\u{301}e\u{301}"), vec![('e', 3)]);
     assert_eq!(runs_in("thee"), vec![('e', 2)]);
     assert_eq!(runs_in("Eel"), vec![('e', 2)], "the same simple fold");
     assert_eq!(runs_in("the"), vec![]);

@@ -266,9 +266,11 @@ fn doubling() -> JudgingConfig {
 /// The letter-run channel alone. A word this channel names may also be a
 /// casing row, and then it is ONE row carrying both bits — so, like the
 /// others, it is measured on its own or the merged row would rob the row it
-/// merged into.
+/// merged into. Its floor is above any lane the sweep fills, so every run of
+/// three fires.
 fn sticky() -> JudgingConfig {
     JudgingConfig {
+        word_support_floor: 1_000,
         channels: Channels {
             casing: false,
             doubled: false,
