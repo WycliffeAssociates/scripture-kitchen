@@ -31,9 +31,9 @@
   },
   {
     "name": "two chapter 3s are ambiguous",
-    "usfm": "\\c 3\n\\p a\n\\c 3\n\\p b\n",
+    "usfm": "\\id GEN\n\\c 3\n\\p a\n\\c 3\n\\p b\n",
     "address": {"kind": "chapters", "from": 3, "to": 3},
-    "expect": {"ambiguous": [{"from": 0, "to": 10, "opening": 0}, {"from": 10, "to": 20, "opening": 10}]}
+    "expect": {"ambiguous": [{"from": 8, "to": 18, "opening": 8}, {"from": 18, "to": 28, "opening": 18}]}
   },
   {
     "name": "a chapter the text lacks is missing",
@@ -61,45 +61,45 @@
   },
   {
     "name": "a verse in a bridge covers the bridge",
-    "usfm": "\\c 1\n\\p\n\\v 1-2 a b\n\\v 3 c\n",
+    "usfm": "\\id GEN\n\\c 1\n\\p\n\\v 1-2 a b\n\\v 3 c\n",
     "address": {"kind": "verses", "from": {"chapter": 1, "verse": 2}, "to": {"chapter": 1, "verse": 2}},
-    "expect": {"found": {"from": 8, "to": 19, "opening": 5, "covers": {"kind": "verses", "from": {"chapter": 1, "verse": 1}, "to": {"chapter": 1, "verse": 2}}, "coarser": false}}
+    "expect": {"found": {"from": 16, "to": 27, "opening": 13, "covers": {"kind": "verses", "from": {"chapter": 1, "verse": 1}, "to": {"chapter": 1, "verse": 2}}, "coarser": false}}
   },
   {
     "name": "a verse a list skips is missing",
-    "usfm": "\\c 1\n\\p\n\\v 1,3 a\n\\v 4 b\n",
+    "usfm": "\\id GEN\n\\c 1\n\\p\n\\v 1,3 a\n\\v 4 b\n",
     "address": {"kind": "verses", "from": {"chapter": 1, "verse": 2}, "to": {"chapter": 1, "verse": 2}},
-    "expect": {"missing": "verse", "within": {"from": 0, "to": 24}}
+    "expect": {"missing": "verse", "within": {"from": 8, "to": 32}}
   },
   {
     "name": "a verse a list names covers its hull",
-    "usfm": "\\c 1\n\\p\n\\v 1,3 a\n\\v 4 b\n",
+    "usfm": "\\id GEN\n\\c 1\n\\p\n\\v 1,3 a\n\\v 4 b\n",
     "address": {"kind": "verses", "from": {"chapter": 1, "verse": 3}, "to": {"chapter": 1, "verse": 3}},
-    "expect": {"found": {"from": 8, "to": 17, "opening": 5, "covers": {"kind": "verses", "from": {"chapter": 1, "verse": 1}, "to": {"chapter": 1, "verse": 3}}, "coarser": false}}
+    "expect": {"found": {"from": 16, "to": 25, "opening": 13, "covers": {"kind": "verses", "from": {"chapter": 1, "verse": 1}, "to": {"chapter": 1, "verse": 3}}, "coarser": false}}
   },
   {
     "name": "a segment the text does not divide is found coarser",
-    "usfm": "\\c 1\n\\p\n\\v 3 a\n",
+    "usfm": "\\id GEN\n\\c 1\n\\p\n\\v 3 a\n",
     "address": {"kind": "verses", "from": {"chapter": 1, "verse": 3, "segment": "a"}, "to": {"chapter": 1, "verse": 3, "segment": "a"}},
-    "expect": {"found": {"from": 8, "to": 15, "opening": 5, "covers": {"kind": "verses", "from": {"chapter": 1, "verse": 3}, "to": {"chapter": 1, "verse": 3}}, "coarser": true}}
+    "expect": {"found": {"from": 16, "to": 23, "opening": 13, "covers": {"kind": "verses", "from": {"chapter": 1, "verse": 3}, "to": {"chapter": 1, "verse": 3}}, "coarser": true}}
   },
   {
     "name": "a whole verse the text divides spans its segments",
-    "usfm": "\\c 1\n\\p\n\\v 3a a\n\\v 3b b\n\\v 4 c\n",
+    "usfm": "\\id GEN\n\\c 1\n\\p\n\\v 3a a\n\\v 3b b\n\\v 4 c\n",
     "address": {"kind": "verses", "from": {"chapter": 1, "verse": 3}, "to": {"chapter": 1, "verse": 3}},
-    "expect": {"found": {"from": 8, "to": 24, "opening": 5, "covers": {"kind": "verses", "from": {"chapter": 1, "verse": 3, "segment": "a"}, "to": {"chapter": 1, "verse": 3, "segment": "b"}}, "coarser": false}}
+    "expect": {"found": {"from": 16, "to": 32, "opening": 13, "covers": {"kind": "verses", "from": {"chapter": 1, "verse": 3, "segment": "a"}, "to": {"chapter": 1, "verse": 3, "segment": "b"}}, "coarser": false}}
   },
   {
     "name": "a segment the text divides is exact",
-    "usfm": "\\c 1\n\\p\n\\v 3a a\n\\v 3b b\n\\v 4 c\n",
+    "usfm": "\\id GEN\n\\c 1\n\\p\n\\v 3a a\n\\v 3b b\n\\v 4 c\n",
     "address": {"kind": "verses", "from": {"chapter": 1, "verse": 3, "segment": "b"}, "to": {"chapter": 1, "verse": 3, "segment": "b"}},
-    "expect": {"found": {"from": 16, "to": 24, "opening": 16, "covers": {"kind": "verses", "from": {"chapter": 1, "verse": 3, "segment": "b"}, "to": {"chapter": 1, "verse": 3, "segment": "b"}}, "coarser": false}}
+    "expect": {"found": {"from": 24, "to": 32, "opening": 24, "covers": {"kind": "verses", "from": {"chapter": 1, "verse": 3, "segment": "b"}, "to": {"chapter": 1, "verse": 3, "segment": "b"}}, "coarser": false}}
   },
   {
     "name": "two anchors for one verse are ambiguous",
-    "usfm": "\\c 1\n\\p\n\\v 3 a\n\\v 3 b\n",
+    "usfm": "\\id GEN\n\\c 1\n\\p\n\\v 3 a\n\\v 3 b\n",
     "address": {"kind": "verses", "from": {"chapter": 1, "verse": 3}, "to": {"chapter": 1, "verse": 3}},
-    "expect": {"ambiguous": [{"from": 8, "to": 15, "opening": 5}, {"from": 15, "to": 22, "opening": 15}]}
+    "expect": {"ambiguous": [{"from": 16, "to": 23, "opening": 13}, {"from": 23, "to": 30, "opening": 23}]}
   },
   {
     "name": "a missing verse names its chapter",
@@ -121,33 +121,33 @@
   },
   {
     "name": "opening: a verse after a paragraph opens at the paragraph",
-    "usfm": "\\c 1\n\\p\n\\v 1 a\n\\p\n\\v 2 b\n",
+    "usfm": "\\id GEN\n\\c 1\n\\p\n\\v 1 a\n\\p\n\\v 2 b\n",
     "address": {"kind": "verses", "from": {"chapter": 1, "verse": 2}, "to": {"chapter": 1, "verse": 2}},
-    "expect": {"found": {"from": 18, "to": 25, "opening": 15, "covers": {"kind": "verses", "from": {"chapter": 1, "verse": 2}, "to": {"chapter": 1, "verse": 2}}, "coarser": false}}
+    "expect": {"found": {"from": 26, "to": 33, "opening": 23, "covers": {"kind": "verses", "from": {"chapter": 1, "verse": 2}, "to": {"chapter": 1, "verse": 2}}, "coarser": false}}
   },
   {
     "name": "opening: a heading and its text open the verse",
-    "usfm": "\\c 1\n\\p\n\\v 1 a\n\\s1 A heading\n\\p\n\\v 2 b\n",
+    "usfm": "\\id GEN\n\\c 1\n\\p\n\\v 1 a\n\\s1 A heading\n\\p\n\\v 2 b\n",
     "address": {"kind": "verses", "from": {"chapter": 1, "verse": 2}, "to": {"chapter": 1, "verse": 2}},
-    "expect": {"found": {"from": 32, "to": 39, "opening": 15, "covers": {"kind": "verses", "from": {"chapter": 1, "verse": 2}, "to": {"chapter": 1, "verse": 2}}, "coarser": false}}
+    "expect": {"found": {"from": 40, "to": 47, "opening": 23, "covers": {"kind": "verses", "from": {"chapter": 1, "verse": 2}, "to": {"chapter": 1, "verse": 2}}, "coarser": false}}
   },
   {
     "name": "opening: a poetry line opens the verse it starts",
-    "usfm": "\\c 1\n\\q1 \\v 1 line one\n\\q2 line two\n\\q1 \\v 2 line three\n",
+    "usfm": "\\id GEN\n\\c 1\n\\q1 \\v 1 line one\n\\q2 line two\n\\q1 \\v 2 line three\n",
     "address": {"kind": "verses", "from": {"chapter": 1, "verse": 2}, "to": {"chapter": 1, "verse": 2}},
-    "expect": {"found": {"from": 40, "to": 56, "opening": 36, "covers": {"kind": "verses", "from": {"chapter": 1, "verse": 2}, "to": {"chapter": 1, "verse": 2}}, "coarser": false}}
+    "expect": {"found": {"from": 48, "to": 64, "opening": 44, "covers": {"kind": "verses", "from": {"chapter": 1, "verse": 2}, "to": {"chapter": 1, "verse": 2}}, "coarser": false}}
   },
   {
     "name": "opening: a blank line joins the run",
-    "usfm": "\\c 1\n\\q1 \\v 1 a\n\\b\n\\q1 \\v 2 b\n",
+    "usfm": "\\id GEN\n\\c 1\n\\q1 \\v 1 a\n\\b\n\\q1 \\v 2 b\n",
     "address": {"kind": "verses", "from": {"chapter": 1, "verse": 2}, "to": {"chapter": 1, "verse": 2}},
-    "expect": {"found": {"from": 23, "to": 30, "opening": 16, "covers": {"kind": "verses", "from": {"chapter": 1, "verse": 2}, "to": {"chapter": 1, "verse": 2}}, "coarser": false}}
+    "expect": {"found": {"from": 31, "to": 38, "opening": 24, "covers": {"kind": "verses", "from": {"chapter": 1, "verse": 2}, "to": {"chapter": 1, "verse": 2}}, "coarser": false}}
   },
   {
     "name": "opening: mid-paragraph the opening is the verse",
-    "usfm": "\\c 1\n\\p \\v 1 a \\v 2 b\n",
+    "usfm": "\\id GEN\n\\c 1\n\\p \\v 1 a \\v 2 b\n",
     "address": {"kind": "verses", "from": {"chapter": 1, "verse": 2}, "to": {"chapter": 1, "verse": 2}},
-    "expect": {"found": {"from": 15, "to": 22, "opening": 15, "covers": {"kind": "verses", "from": {"chapter": 1, "verse": 2}, "to": {"chapter": 1, "verse": 2}}, "coarser": false}}
+    "expect": {"found": {"from": 23, "to": 30, "opening": 23, "covers": {"kind": "verses", "from": {"chapter": 1, "verse": 2}, "to": {"chapter": 1, "verse": 2}}, "coarser": false}}
   },
   {
     "name": "opening: the first verse opens after its chapter marker",
@@ -157,32 +157,32 @@
   },
   {
     "name": "opening: a chapter label is not an opener",
-    "usfm": "\\c 1\n\\cl Psalm 1\n\\p\n\\v 1 a\n",
+    "usfm": "\\id GEN\n\\c 1\n\\cl Psalm 1\n\\p\n\\v 1 a\n",
     "address": {"kind": "verses", "from": {"chapter": 1, "verse": 1}, "to": {"chapter": 1, "verse": 1}},
-    "expect": {"found": {"from": 20, "to": 27, "opening": 17, "covers": {"kind": "verses", "from": {"chapter": 1, "verse": 1}, "to": {"chapter": 1, "verse": 1}}, "coarser": false}}
+    "expect": {"found": {"from": 28, "to": 35, "opening": 25, "covers": {"kind": "verses", "from": {"chapter": 1, "verse": 1}, "to": {"chapter": 1, "verse": 1}}, "coarser": false}}
   },
   {
     "name": "opening: a psalm title is an opener",
-    "usfm": "\\c 3\n\\d A psalm of David.\n\\q1 \\v 1 a\n",
+    "usfm": "\\id GEN\n\\c 3\n\\d A psalm of David.\n\\q1 \\v 1 a\n",
     "address": {"kind": "verses", "from": {"chapter": 3, "verse": 1}, "to": {"chapter": 3, "verse": 1}},
-    "expect": {"found": {"from": 30, "to": 37, "opening": 5, "covers": {"kind": "verses", "from": {"chapter": 3, "verse": 1}, "to": {"chapter": 3, "verse": 1}}, "coarser": false}}
+    "expect": {"found": {"from": 38, "to": 45, "opening": 13, "covers": {"kind": "verses", "from": {"chapter": 3, "verse": 1}, "to": {"chapter": 3, "verse": 1}}, "coarser": false}}
   },
   {
     "name": "opening: a range opens where its first verse does",
-    "usfm": "\\c 1\n\\s1 Title\n\\p\n\\v 1 a\n\\p\n\\v 2 b\n",
+    "usfm": "\\id GEN\n\\c 1\n\\s1 Title\n\\p\n\\v 1 a\n\\p\n\\v 2 b\n",
     "address": {"kind": "verses", "from": {"chapter": 1, "verse": 1}, "to": {"chapter": 1, "verse": 2}},
-    "expect": {"found": {"from": 18, "to": 35, "opening": 5, "covers": {"kind": "verses", "from": {"chapter": 1, "verse": 1}, "to": {"chapter": 1, "verse": 2}}, "coarser": false}}
+    "expect": {"found": {"from": 26, "to": 43, "opening": 13, "covers": {"kind": "verses", "from": {"chapter": 1, "verse": 1}, "to": {"chapter": 1, "verse": 2}}, "coarser": false}}
   },
   {
     "name": "non-ASCII text: offsets are bytes",
-    "usfm": "\\c 1\n\\s1 Ἐν ἀρχῇ\n\\p\n\\v 1 ἦν ὁ λόγος\n\\v 2 οὗτος\n",
+    "usfm": "\\id GEN\n\\c 1\n\\s1 Ἐν ἀρχῇ\n\\p\n\\v 1 ἦν ὁ λόγος\n\\v 2 οὗτος\n",
     "address": {"kind": "verses", "from": {"chapter": 1, "verse": 2}, "to": {"chapter": 1, "verse": 2}},
-    "expect": {"found": {"from": 55, "to": 72, "opening": 55, "covers": {"kind": "verses", "from": {"chapter": 1, "verse": 2}, "to": {"chapter": 1, "verse": 2}}, "coarser": false}}
+    "expect": {"found": {"from": 63, "to": 80, "opening": 63, "covers": {"kind": "verses", "from": {"chapter": 1, "verse": 2}, "to": {"chapter": 1, "verse": 2}}, "coarser": false}}
   },
   {
     "name": "non-ASCII text: a heading opening",
-    "usfm": "\\c 1\n\\s1 Ἐν ἀρχῇ\n\\p\n\\v 1 ἦν ὁ λόγος\n\\v 2 οὗτος\n",
+    "usfm": "\\id GEN\n\\c 1\n\\s1 Ἐν ἀρχῇ\n\\p\n\\v 1 ἦν ὁ λόγος\n\\v 2 οὗτος\n",
     "address": {"kind": "verses", "from": {"chapter": 1, "verse": 1}, "to": {"chapter": 1, "verse": 1}},
-    "expect": {"found": {"from": 29, "to": 55, "opening": 5, "covers": {"kind": "verses", "from": {"chapter": 1, "verse": 1}, "to": {"chapter": 1, "verse": 1}}, "coarser": false}}
+    "expect": {"found": {"from": 37, "to": 63, "opening": 13, "covers": {"kind": "verses", "from": {"chapter": 1, "verse": 1}, "to": {"chapter": 1, "verse": 1}}, "coarser": false}}
   }
 ]

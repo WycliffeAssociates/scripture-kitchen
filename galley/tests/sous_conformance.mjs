@@ -753,6 +753,66 @@ for (const [door, call] of [
   check(refused.includes("unknown option"), `${door} refuses a misspelled key: ${refused}`);
 }
 
+// --- resolve: an address to its place in one text ----------------------------
+
+// The cases onion's own test runs, through the wall: bytes as recorded, and
+// UTF-16 as the same offsets counted in JavaScript's own string units. A
+// registered book needs an `\id`, so the one case without (an empty intro) is
+// onion's alone.
+{
+  const all = JSON.parse(readFileSync(resolve(here, "../../testData/resolve/cases.json"), "utf8"));
+  const cases = all.filter(({ usfm }) => usfm.startsWith("\\id "));
+  eq(all.length - cases.length, 1, "every resolve case but the empty intro runs through the wall");
+  const canonical = (value) =>
+    JSON.stringify(value, (_, v) =>
+      v && typeof v === "object" && !Array.isArray(v)
+        ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, v[k]]))
+        : v,
+    );
+  const rebase = (value, usfm) => {
+    const bytes = Buffer.from(usfm, "utf8");
+    const unit = (n) => bytes.subarray(0, n).toString("utf8").length;
+    const span = (s) => ({ ...s, from: unit(s.from), to: unit(s.to), ...("opening" in s ? { opening: unit(s.opening) } : {}) });
+    if (value.found) return { found: span(value.found) };
+    if (value.ambiguous) return { ambiguous: value.ambiguous.map(span) };
+    return value.within ? { ...value, within: span(value.within) } : value;
+  };
+  const resolver = new Galley();
+  let wide = 0;
+  cases.forEach(({ name, usfm, address, expect }, n) => {
+    const id = `resolve/${n}.usfm`;
+    resolver.update(id, usfm);
+    const bytes = JSON.parse(resolver.resolve(id, { ...address, book: "GEN" }));
+    eq(canonical(bytes), canonical(expect), `resolve bytes: ${name}`);
+    const units = JSON.parse(resolver.resolve(id, address, { utf16: true }));
+    eq(canonical(units), canonical(rebase(expect, usfm)), `resolve utf16: ${name}`);
+    if (canonical(units) !== canonical(bytes)) wide++;
+  });
+  check(wide > 0, "a non-ASCII case answers differently in UTF-16 than in bytes");
+  console.log(`resolve: ${cases.length} cases, ${wide} differ in UTF-16`);
+
+  for (const [what, call, says] of [
+    ["a misspelled option", () => resolver.resolve("resolve/0.usfm", { kind: "book" }, { utf61: true }), "unknown option"],
+    ["an unknown kind", () => resolver.resolve("resolve/0.usfm", { kind: "verse" }), "kind"],
+    ["chapter 0", () => resolver.resolve("resolve/0.usfm", { kind: "chapters", from: 0, to: 1 }), "from"],
+    ["an empty segment", () => resolver.resolve("resolve/0.usfm", { kind: "verses", from: { chapter: 1, verse: 1, segment: "" }, to: { chapter: 1, verse: 1 } }), "segment"],
+    ["an unknown id", () => resolver.resolve("resolve/none.usfm", { kind: "book" }), "no book is registered"],
+    ["a reference without text", () => {
+      resolver.updateReference("ref/RUT.usfm", fixture("ref/RUT.usfm"));
+      return resolver.resolve("ref/RUT.usfm", { kind: "book" });
+    }, "keepText"],
+  ]) {
+    let refused = "";
+    try {
+      call();
+    } catch (error) {
+      refused = String(error.message ?? error);
+    }
+    check(refused.includes(says), `resolve refuses ${what}: ${refused}`);
+  }
+  resolver.free();
+}
+
 // --- diff: what changed, in document order ---------------------------------
 
 // `text` is required and named; the default wire is changed units only.

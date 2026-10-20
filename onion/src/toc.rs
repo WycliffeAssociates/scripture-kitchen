@@ -374,7 +374,7 @@ impl Toc {
 
     /// Index into `chapters` of the row covering `src_byte`. Row 0 starts at
     /// byte 0, so the search always lands on a row.
-    fn chapter_row(&self, src_byte: u32) -> usize {
+    pub(crate) fn chapter_row(&self, src_byte: u32) -> usize {
         self.chapters
             .partition_point(|row| row.start <= src_byte)
             .saturating_sub(1)

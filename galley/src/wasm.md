@@ -32,15 +32,25 @@ galley.findAll("God", { wholeWord: true, limit: 200 });                // every 
 galley.findAll("God", { wholeWord: true, limit: 200, scope: "all" });  // and the sources
 ```
 
+Resolve answers where an address is in one book's text, as JSON:
+
+```js
+const verse = { kind: "verses", from: { chapter: 1, verse: 2 }, to: { chapter: 1, verse: 2 } };
+JSON.parse(galley.resolve("books/LUK.usfm", verse, { utf16: true }));
+//   { found: { from, to, opening, covers, coarser } }     opening..to is what a multibuffer clips
+//   { missing: "intro" | "chapter" | "verse", within? }   within: the chapter a missing verse would be in
+//   { ambiguous: [{ from, to, opening }, …] }             two `\c 3`, or two anchors for one verse
+```
+
 ## Options are objects, and they are checked
 
 Every door that takes options takes ONE object, last, and every such object is
 a declared TypeScript interface in the `.d.ts` — `ParseOptions`, `TocOptions`,
 `CensusOptions`, `FindOptions`, `MaskOptions`, `OverlayOptions`,
-`ReferenceOptions`, `GalleyOptions`. No door takes a positional boolean or a
-trailing optional flag. A typed caller's misspelling is a compile error; an
-untyped caller's is a throw at the wall naming the key, because an unknown key
-is refused rather than read as `false`:
+`ReferenceOptions`, `ResolveOptions`, `GalleyOptions`. No door takes a
+positional boolean or a trailing optional flag. A typed caller's misspelling
+is a compile error; an untyped caller's is a throw at the wall naming the key,
+because an unknown key is refused rather than read as `false`:
 
 ```js
 galley.parseText(text, { tco: true });   // throws: parseText: unknown option "tco"; expected diagnostics, toc or utf16
@@ -508,6 +518,22 @@ if a measurement asks for one.
 
 An overlay is a suggestion applied on request, never a finding: nothing here
 is on the publication path.
+
+## The resolve door
+
+`resolve(id, address, { utf16? })` is `onion::Toc::resolve` over the book's
+retained text and pinned `Toc`; `onion/src/resolve.md` is the contract and
+`testData/resolve/cases.json` the cases, whose `expect` is this door's JSON in
+bytes. `address` is Sefer's `Address` (`book`, `intro`, `chapters`, `verses`);
+a `book` key on it is read past, because the book is the caller's to match.
+Chapter and verse numbers are whole numbers from 1, and anything else throws
+naming the key, as does an unknown `kind` or an empty segment.
+
+JSON, like `targetNodeFor`: one small answer per call, on no bulk path, so it
+needs no buffer or generated reader. Offsets are bytes unless `utf16` asks
+otherwise. A verse needs the text (its segment letters and the opening walk),
+so a reference registered without `keepText` is refused by name, as `find`
+refuses it.
 
 ## SousSettings
 
