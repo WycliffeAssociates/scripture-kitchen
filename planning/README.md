@@ -48,9 +48,9 @@ of named places (`data-ref`), and the heading it sits under. Change the shortcut
 
 **Components** for richer plans: proposed file trees, diffs against the real code (split or
 unified), state machines you can step through (XState-shaped), import graphs scanned from
-the repo, call stacks, code with highlighted lines, sandboxed UI mocks, Mermaid. Everything
-renders at build time to HTML and SVG: ELK lays out graphs and Shiki colours code; the only
-browser libraries are d3-zoom (pan and zoom on graphs) and Mermaid.
+the repo, call stacks, code with highlighted lines, sandboxed UI mocks, and any Mermaid-syntax diagram. Everything
+renders at build time to HTML and SVG: ELK lays out graphs, Shiki colours code and Ondine draws
+the Mermaid diagrams; the only browser library is d3-zoom (pan and zoom on graphs).
 
 - `skill/SKILL.md` — the item format, components, CLI and workflow (for agents and people).
 - `examples/components.mdx` — every component, written against this repo's own files.

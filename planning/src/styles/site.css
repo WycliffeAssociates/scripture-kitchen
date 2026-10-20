@@ -116,6 +116,21 @@
   }
 
   /* <Machine> and <Modules>: SVG in the same tokens, so dark mode is free. */
+  /* Ondine's diagrams (Mermaid syntax, rendered at build) take the site's tokens. */
+  .plans-diagram .ondine {
+    --ondine-bg: var(--surface-primary);
+    --ondine-fg: var(--on-surface-primary);
+    --ondine-muted: var(--on-surface-secondary);
+    --ondine-line: var(--on-surface-tertiary);
+    --ondine-border: var(--on-surface-tertiary);
+    --ondine-surface-alt: var(--surface-secondary);
+    --ondine-accent: var(--brand-base);
+    --ondine-critical: var(--on-surface-error);
+    --ondine-font: var(--font-sans);
+    --ondine-stroke: 1.25px;
+    --ondine-radius: 4px;
+    margin-inline: auto;
+  }
   .graph svg { font-family: var(--font-sans); cursor: grab; }
   .graph svg:active { cursor: grabbing; }
   .graph .glabel { font-size: 13px; fill: var(--on-surface-primary); }

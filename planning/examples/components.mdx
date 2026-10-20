@@ -132,3 +132,44 @@ Written by hand, for modules that do not exist yet:
   ~ app/workspace -> + packages/editor : ref API
   - app/ui/BookEditor -> app/workspace
 `} />
+
+## Any other diagram
+
+Mermaid syntax, rendered to SVG at build time by Ondine: cheap enough to use freely. A sequence
+of calls, a flow with a decision, a timeline, a small chart: if a paragraph is explaining a
+shape, draw it.
+
+<Mermaid id="flow" caption="A flowchart with a decision">
+```mermaid
+flowchart LR
+  edit[Typing] --> journal[(Backup journal)]
+  journal --> record{Record a version?}
+  record -- yes --> file[Book file + commit]
+  record -- no --> journal
+```
+</Mermaid>
+
+<Mermaid id="sequence" caption="Who calls whom">
+```mermaid
+sequenceDiagram
+  participant Card
+  participant Book
+  participant Engine
+  Card->>Book: an edit, under the card's policy
+  Book->>Engine: analyze
+  Engine-->>Book: findings
+  Book-->>Card: the canonical text
+```
+</Mermaid>
+
+<Mermaid id="states" caption="A lifecycle (use Machine for one you can step)">
+```mermaid
+stateDiagram-v2
+  [*] --> idea
+  idea --> discussing
+  discussing --> planned
+  planned --> in_progress
+  in_progress --> done
+  discussing --> parked
+```
+</Mermaid>

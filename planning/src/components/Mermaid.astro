@@ -1,25 +1,38 @@
 ---
 /**
- * A Mermaid diagram, rendered in the browser. State machines: `stateDiagram-v2`.
- *   <Mermaid id="lifecycle" code={`stateDiagram-v2
+ * A diagram in Mermaid syntax, rendered to SVG at build time by Ondine
+ * (https://ondine.sh): no diagram library ships to the page. Colours come from
+ * the site's tokens (`.ondine` in site.css), so dark mode is the token swap.
+ * State machines: `stateDiagram-v2`, or `<Machine>` for one you can step.
+ *   <Mermaid id="lifecycle">
+ *   ```mermaid
+ *   stateDiagram-v2
  *     idea --> discussing
- *   `} />
+ *   ```
+ *   </Mermaid>
+ * A diagram that does not parse shows its source and the parser's message
+ * instead of failing the build.
  */
+import { render } from "ondine/compiler";
+
 interface Props { id?: string; code: string; caption?: string; "data-loc"?: string; "data-body"?: string }
 const { id, code, caption, "data-loc": loc } = Astro.props;
+
+let svg: string | undefined;
+let error: string | undefined;
+try {
+  svg = render(code.trim()).svg;
+} catch (cause) {
+  error = cause instanceof Error ? cause.message : String(cause);
+}
 ---
-<figure data-ref={`diagram:${id ?? "?"}`} data-loc={loc} class="my-4 rounded-md border border-surface-border bg-surface-primary p-4">
-  <pre class="plans-mermaid m-0 border-0 p-0" style="background:none">{code}</pre>
+<figure data-ref={`diagram:${id ?? "?"}`} data-loc={loc} class="plans-diagram my-4 overflow-x-auto rounded-md border border-surface-border bg-surface-primary p-4">
+  {svg !== undefined && <Fragment set:html={svg} />}
+  {error !== undefined && (
+    <div>
+      <p class="m-0 text-small text-on-surface-error">This diagram does not parse: {error}</p>
+      <pre class="mt-2 mb-0 text-small">{code}</pre>
+    </div>
+  )}
   {caption && <figcaption class="mt-2 text-small text-on-surface-secondary">{caption}</figcaption>}
 </figure>
-<script>
-  const blocks = document.querySelectorAll<HTMLElement>(".plans-mermaid:not([data-done])");
-  if (blocks.length > 0) {
-    const { default: mermaid } = await import("mermaid");
-    const root = document.documentElement;
-    const dark = root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
-    mermaid.initialize({ startOnLoad: false, theme: dark ? "dark" : "neutral" });
-    for (const block of blocks) block.dataset.done = "";
-    await mermaid.run({ nodes: [...blocks] });
-  }
-</script>

@@ -54,7 +54,7 @@ Prose. Quote the user's words with `>`; do not reword them.
 | `<Calls id title>` + fence | A call stack: 2 spaces per level, `@ path:line`, `-- note`. |
 | `<Machine id machine={{…}} />` | A state machine in XState's shape, drawn and steppable. Per state also `note`, `screen` (HTML), `tone`. |
 | `<Modules id scan="src/core" />` | The import graph, scanned at build. `by="folder" depth={2}`, `mark={{ "src/a.ts": "changed" }}`, `alias={{ "@/": "src/" }}`; a fence of `a -> b : label` lines adds proposed modules (`+`/`~`/`-` before a name). |
-| `<Mermaid id>` + fence | Any other diagram. |
+| `<Mermaid id caption>` + fence | Any other diagram, in Mermaid syntax: flowchart, sequence, state, class, ER, gantt, timeline, pie, and more. Rendered to SVG at build by [Ondine](https://ondine.sh), so it costs the page nothing; one that does not parse shows its source and the error. |
 | `<Mock id height={120}>…html…</Mock>` | A small piece of UI in a sandboxed frame; design tokens work in it. |
 
 Rules that matter:
@@ -152,9 +152,12 @@ anything risky with the user first.
 `source:` to the transcript, quote the speaker's words, and put what is unresolved in
 `<Question>`s. Show the user the list of new items; do not invent priorities.
 
+**Draw liberally.** Diagrams are free at build time: when a paragraph is describing a shape (a
+flow, who calls whom, a lifecycle, an order of events), put a `<Mermaid>` beside or instead of it.
+
 **A plan for a change**: lead with what changes for a user, then how. Use `<Files>` for the
 footprint, `<Diff>` against real files for the key changes, `<Machine>` for anything with a
-lifecycle, `<Modules>` when dependencies move, `<Calls>` for a flow. Put each decision the
+lifecycle, `<Modules>` when dependencies move, `<Calls>` for a call stack, `<Mermaid>` for any other flow or sequence. Put each decision the
 user must make as a `<Question>` next to the part it changes.
 
 ## The site

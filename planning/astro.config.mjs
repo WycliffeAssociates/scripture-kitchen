@@ -15,7 +15,5 @@ export default defineConfig({
   },
   vite: {
     plugins: [tailwindcss()],
-    // Mermaid is imported lazily, so Vite would find it late and re-bundle mid-page.
-    optimizeDeps: { include: ["mermaid"] },
   },
 });
