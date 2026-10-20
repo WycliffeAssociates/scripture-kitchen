@@ -1,0 +1,37 @@
+---
+/** One level of a <Files> tree; renders itself for each folder. */
+import type { Row, Tone } from "../lib/files.ts";
+interface Props { rows: Row[] }
+const { rows } = Astro.props;
+
+const touched = (row: Row): boolean => row.tone !== "same" || row.children.some(touched);
+const SIGN: Readonly<Record<Tone, string>> = { new: "+", changed: "~", deleted: "−", moved: "→", same: "" };
+const COLOUR: Readonly<Record<Tone, string>> = {
+  new: "text-on-surface-success",
+  changed: "text-on-surface-warning",
+  deleted: "text-on-surface-error line-through",
+  moved: "text-brand",
+  same: "text-on-surface-secondary",
+};
+---
+<ul class="m-0 list-none p-0">
+  {rows.map((row) =>
+    row.folder ? (
+      <li data-ref={`folder:${row.path}`} data-loc={row.line}>
+        <details open={touched(row)}>
+          <summary class="cursor-pointer rounded-sm px-1 py-0.5 hover:bg-sidebar-surface-hover">
+            <span class={COLOUR[row.tone]}>{row.name}</span>
+            {row.note && <span class="ms-3 font-sans text-on-surface-secondary">{row.note}</span>}
+          </summary>
+          <div class="ms-2 border-s border-surface-border ps-2"><Astro.self rows={row.children} /></div>
+        </details>
+      </li>
+    ) : (
+      <li data-ref={`file:${row.path}`} data-loc={row.line} class="flex items-baseline gap-2 rounded-sm px-1 py-0.5">
+        <span class:list={["w-3 shrink-0 text-center", COLOUR[row.tone]]}>{SIGN[row.tone]}</span>
+        <span class={COLOUR[row.tone]}>{row.name}</span>
+        {row.note && <span class="font-sans text-on-surface-secondary">{row.note}</span>}
+      </li>
+    ),
+  )}
+</ul>

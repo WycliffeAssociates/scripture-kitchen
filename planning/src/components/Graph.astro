@@ -1,0 +1,78 @@
+---
+/**
+ * Draws a laid-out graph (src/lib/graph.ts) as SVG in the site's tokens.
+ * Used by <Machine> and <Modules>; not meant to be written in an item directly.
+ *
+ * Drag to pan, ⌘/Ctrl + scroll to zoom (plain scroll still scrolls the page),
+ * double-click to reset. Every node and edge carries a `data-ref`, so the
+ * annotator can point at "state:saving" rather than "a rect".
+ */
+import { pathOf, type Laid } from "../lib/graph.ts";
+
+interface Props { laid: Laid; label: string; maxHeight?: number }
+const { laid, label, maxHeight = 560 } = Astro.props;
+const pad = 8;
+const marker = `arrow-${Math.random().toString(36).slice(2, 8)}`;
+---
+<div class="graph relative overflow-hidden" data-graph style={`max-height:${maxHeight}px`}>
+  <svg
+    role="img"
+    aria-label={label}
+    viewBox={`${-pad} ${-pad} ${laid.width + pad * 2} ${laid.height + pad * 2}`}
+    width={laid.width + pad * 2}
+    style={`max-width:100%;height:auto;max-height:${maxHeight}px`}
+    class="mx-auto block"
+  >
+    <defs>
+      <marker id={marker} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" class="arrowhead" />
+      </marker>
+    </defs>
+    <g data-viewport>
+      {laid.nodes.filter((n) => n.group).map((n) => (
+        <g class="ggroup" data-ref={n.ref} data-tone={n.tone ?? "same"}>
+          <rect x={n.x} y={n.y} width={n.w} height={n.h} rx="8" />
+          <text x={n.x + 12} y={n.y + 21} class="glabel">{n.label}</text>
+          {n.sub && <text x={n.x + 12 + n.label.length * 7.4 + 8} y={n.y + 21} class="gsub">{n.sub}</text>}
+        </g>
+      ))}
+      {laid.edges.map((e) => (
+        <g class="gedge" data-ref={e.ref ?? `edge:${e.from}->${e.to}`} data-from={e.from} data-to={e.to} data-event={e.label}>
+          <path d={pathOf(e.points)} marker-end={`url(#${marker})`} />
+          {e.labelBox && e.label && (
+            <>
+              <rect x={e.labelBox.x - 2} y={e.labelBox.y} width={e.labelBox.w + 4} height={e.labelBox.h} rx="3" class="gedge-label-bg" />
+              <text x={e.labelBox.x + e.labelBox.w / 2} y={e.labelBox.y + 12} text-anchor="middle" class="gedge-label">{e.label}</text>
+            </>
+          )}
+        </g>
+      ))}
+      {laid.nodes.filter((n) => !n.group).map((n) => (
+        <g class="gnode" data-ref={n.ref} data-id={n.id} data-tone={n.tone ?? "same"}>
+          <rect class="box" x={n.x} y={n.y} width={n.w} height={n.h} rx="7" />
+          {n.final && <rect class="inner" x={n.x + 3} y={n.y + 3} width={n.w - 6} height={n.h - 6} rx="5" />}
+          {n.initial && <circle class="dot" cx={n.x + 13} cy={n.y + n.h / 2} r="4" />}
+          <text x={n.x + (n.initial ? 24 : 12)} y={n.y + (n.sub ? 19 : 20)} class="glabel">{n.label}</text>
+          {n.sub && <text x={n.x + (n.initial ? 24 : 12)} y={n.y + 35} class="gsub">{n.sub}</text>}
+        </g>
+      ))}
+    </g>
+  </svg>
+</div>
+
+<script>
+  import { select } from "d3-selection";
+  import { zoom, zoomIdentity } from "d3-zoom";
+
+  for (const host of document.querySelectorAll<HTMLElement>("[data-graph]:not([data-zoom])")) {
+    host.dataset.zoom = "";
+    const svg = select(host.querySelector("svg")!);
+    const viewport = svg.select<SVGGElement>("[data-viewport]");
+    const behaviour = zoom<SVGSVGElement, unknown>()
+      .scaleExtent([0.4, 4])
+      // Plain wheel scrolls the page; a modifier zooms. Drags always pan.
+      .filter((event: Event) => event.type !== "wheel" || (event as WheelEvent).ctrlKey || (event as WheelEvent).metaKey)
+      .on("zoom", (event) => viewport.attr("transform", String(event.transform)));
+    svg.call(behaviour).on("dblclick.zoom", () => svg.call(behaviour.transform, zoomIdentity));
+  }
+</script>

@@ -1,0 +1,23 @@
+---
+id: c193c9b5-1c43-4fae-9d02-4ee29c245f79
+title: "header_scan / ParseHeader / the TOC slab — one shape?"
+kind: idea
+status: idea
+created: 2026-08-19
+updated: 2026-08-19
+sha: 32bf2df
+tags: [investigate-later, onion]
+related: []
+source: planning/investigate-later.md
+---
+
+Simplification leads that look real but haven't been checked. Each one's
+GOAL IS NET DELETION — if the investigation ends with more code than it
+started, the answer was no. Nothing here is committed to; nothing here
+blocks anything.
+
+**What:** lint's `header_scan`, `ParseHeader`, and the sous TOC slab all read
+the same book-header neighborhood; check whether they want a shared
+low-level primitive.
+**Why:** lint must stay ParseHeader-free (it's a consumer-side index), so
+this only pays off if unification stays a primitive, not a dependency.

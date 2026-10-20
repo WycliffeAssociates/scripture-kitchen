@@ -7,7 +7,7 @@ leaves the linguistic decision to a person.
 
 This file is the durable authority for purpose, ownership, and cross-boundary
 contracts. [rules/](rules/) defines the checks and their examples.
-[roadmap.md](roadmap.md) says how to build and verify them, and
+[the roadmap](../planning/items/2026-09-01-sous-chef-roadmap.mdx) says how to build and verify them, and
 [evidence.md](evidence.md) is the ledger of measurements they rest on. If an
 implementation choice conflicts with this charter, stop and change the plan or
 amend the charter deliberately.

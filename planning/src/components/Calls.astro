@@ -1,0 +1,47 @@
+---
+/**
+ * A call stack, html-plan style. Indentation is depth; `@ path:line` is where;
+ * `-- note` is a note.
+ *
+ *   <Calls id="respond" stack={`
+ *   copyBatch()                 @ src/annotate/index.ts:420
+ *     renderMarkdown(comments)  @ src/annotate/batch.ts:140  -- one counter for the whole batch
+ *     copyText(text)            @ src/annotate/batch.ts:190
+ *   `} />
+ */
+interface Props { id?: string; title?: string; stack: string; "data-loc"?: string; "data-body"?: string }
+const { id, title, stack, "data-loc": loc, "data-body": body } = Astro.props;
+
+// Each row keeps its offset in the source, so its data-loc is its own line:
+// the stack starts right after `stack={\`` on the component's first line.
+const [file, at] = (loc ?? "").split(/:(?=\d+$)/u);
+// A fenced body starts on `data-body` (its first line is offset 0); a
+// template literal starts with a newline on the component's own line.
+const start = body ?? at;
+const lines = stack
+  .split("\n")
+  .map((line, offset) => ({ line, offset }))
+  .filter(({ line }) => line.trim() !== "");
+const indent = Math.min(...lines.map(({ line }) => line.length - line.trimStart().length));
+const rows = lines.map(({ line, offset }) => {
+  const depth = Math.floor((line.length - line.trimStart().length - indent) / 2);
+  const [head = "", note] = line.trim().split(/\s+--\s+/u);
+  const [call = "", at] = head.split(/\s+@\s+/u);
+  const rowLoc = file && start ? `${file}:${String(Number(start) + offset)}` : undefined;
+  return { depth, call: call.trim(), at: at?.trim(), note: note?.trim(), loc: rowLoc };
+});
+---
+<figure data-ref={`calls:${id ?? title ?? "?"}`} data-loc={loc} class="my-4 overflow-x-auto rounded-md border border-surface-border bg-surface-primary">
+  {title && <figcaption class="border-b border-surface-border px-4 py-2 text-small font-medium">{title}</figcaption>}
+  <ol class="m-0 list-none p-0 font-mono text-small">
+    {rows.map((row) => (
+      <li data-ref={`row:${row.call}`} data-loc={row.loc} class="flex items-baseline gap-4 border-b border-surface-border px-4 py-1.5 last:border-0">
+        <span style={`padding-inline-start: ${row.depth * 1.25}rem`} class="whitespace-nowrap">
+          {row.depth > 0 && <span class="text-on-surface-tertiary">└ </span>}{row.call}
+        </span>
+        {row.note && <span class="font-sans text-on-surface-secondary">{row.note}</span>}
+        {row.at && <span class="ms-auto whitespace-nowrap text-on-surface-tertiary">{row.at}</span>}
+      </li>
+    ))}
+  </ol>
+</figure>

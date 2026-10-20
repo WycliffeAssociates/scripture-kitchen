@@ -1,0 +1,216 @@
+---
+/**
+ * A state machine, drawn and steppable. The config is XState's shape, so a
+ * real machine can be pasted in (actions and guards are shown, not run):
+ *
+ *   <Machine id="save" machine={{
+ *     initial: "idle",
+ *     states: {
+ *       idle:   { on: { EDIT: "dirty" }, note: "Nothing to save." },
+ *       dirty:  { on: { SAVE: "saving", REVERT: "idle" }, tone: "new",
+ *                 screen: `<button>Save</button>` },
+ *       saving: { on: { OK: "idle", FAIL: { target: "dirty", guard: "retryable" } } },
+ *     },
+ *   }} />
+ *
+ * Per state, besides XState's own keys: `note` (shown under the graph while
+ * in that state), `screen` (HTML shown in a frame while in that state), and
+ * `tone` (new | changed | deleted, to mark what the plan adds).
+ *
+ * Nested `states` become a group. Targets resolve as XState does: a sibling
+ * key, `.child`, or `#id`; failing that, any state with that key.
+ */
+import Graph from "./Graph.astro";
+import { frameDocument } from "../lib/frame.ts";
+import { layout, type Direction, type GraphEdge, type GraphNode, type Tone } from "../lib/graph.ts";
+
+type Target = string | { target?: string; guard?: string; cond?: string; description?: string };
+interface StateDef {
+  id?: string;
+  type?: "final" | "parallel" | "atomic" | "compound" | "history";
+  initial?: string;
+  states?: Record<string, StateDef>;
+  on?: Record<string, Target | Target[]>;
+  always?: Target | Target[];
+  note?: string;
+  description?: string;
+  screen?: string;
+  tone?: Tone;
+}
+interface MachineDef { id?: string; initial?: string; states: Record<string, StateDef> }
+
+interface Props {
+  id?: string;
+  machine: MachineDef;
+  title?: string;
+  direction?: Direction;
+  /** Height of the per-state screen frame, when any state has a `screen`. */
+  screenHeight?: number;
+  "data-loc"?: string;
+}
+const { id, machine, title, direction = "DOWN", screenHeight = 180, "data-loc": loc } = Astro.props;
+
+interface Flat { path: string; key: string; def: StateDef; parent?: string }
+const flat: Flat[] = [];
+const visit = (states: Record<string, StateDef>, parent?: string): void => {
+  for (const [key, def] of Object.entries(states)) {
+    const path = parent ? `${parent}.${key}` : key;
+    flat.push({ path, key, def, ...(parent ? { parent } : {}) });
+    if (def.states) visit(def.states, path);
+  }
+};
+visit(machine.states);
+
+const resolve = (from: Flat, target: string): string | undefined => {
+  if (target.startsWith("#")) {
+    const want = target.slice(1);
+    return flat.find((s) => s.def.id === want || s.path === want || s.key === want)?.path;
+  }
+  if (target.startsWith(".")) return `${from.path}${target}`;
+  const sibling = from.parent ? `${from.parent}.${target}` : target;
+  return flat.find((s) => s.path === sibling)?.path ?? flat.find((s) => s.key === target)?.path;
+};
+
+/** The leaf a state settles into: follow `initial` down. */
+const settle = (path: string): string => {
+  const state = flat.find((s) => s.path === path);
+  const initial = state?.def.initial ?? (state?.def.states ? Object.keys(state.def.states)[0] : undefined);
+  return initial ? settle(`${path}.${initial}`) : path;
+};
+
+const transitions: { from: string; event: string; to: string; label: string }[] = [];
+for (const state of flat) {
+  const add = (event: string, raw: Target | Target[]): void => {
+    for (const one of Array.isArray(raw) ? raw : [raw]) {
+      const target = typeof one === "string" ? one : one.target;
+      const guard = typeof one === "string" ? undefined : (one.guard ?? one.cond);
+      const to = target === undefined ? state.path : resolve(state, target);
+      if (to === undefined) continue;
+      transitions.push({ from: state.path, event, to, label: guard ? `${event} [${guard}]` : event });
+    }
+  };
+  for (const [event, raw] of Object.entries(state.def.on ?? {})) add(event, raw);
+  if (state.def.always) add("always", state.def.always);
+}
+
+const initials = new Set<string>();
+const top = machine.initial ?? Object.keys(machine.states)[0];
+if (top) initials.add(top);
+for (const state of flat) {
+  const first = state.def.initial ?? (state.def.states ? Object.keys(state.def.states)[0] : undefined);
+  if (first) initials.add(`${state.path}.${first}`);
+}
+
+const nodes: GraphNode[] = flat.map((state) => ({
+  id: state.path,
+  label: state.key,
+  sub: state.def.states ? undefined : (state.def.description ?? undefined),
+  tone: state.def.tone,
+  initial: initials.has(state.path),
+  final: state.def.type === "final",
+  parent: state.parent,
+  ref: `state:${state.path}`,
+}));
+const edges: GraphEdge[] = transitions.map((t) => ({
+  from: t.from,
+  to: t.to,
+  label: t.label,
+  ref: `transition:${t.from}--${t.event}->${t.to}`,
+}));
+const laid = await layout(nodes, edges, direction);
+
+const hasScreens = flat.some((s) => s.def.screen !== undefined);
+const sim = {
+  start: top ? settle(top) : "",
+  transitions: transitions.map((t) => ({ ...t, to: settle(t.to) })),
+  notes: Object.fromEntries(flat.filter((s) => s.def.note).map((s) => [s.path, s.def.note])),
+  screens: Object.fromEntries(
+    flat.filter((s) => s.def.screen !== undefined).map((s) => [s.path, frameDocument(s.def.screen ?? "")]),
+  ),
+  parents: Object.fromEntries(flat.filter((s) => s.parent).map((s) => [s.path, s.parent])),
+};
+---
+<figure data-ref={`machine:${id ?? machine.id ?? "?"}`} data-loc={loc} data-machine class="my-4 overflow-hidden rounded-md border border-surface-border bg-surface-primary">
+  {title && <figcaption class="border-b border-surface-border px-4 py-2 text-small font-medium">{title}</figcaption>}
+  <div class="px-2 py-3"><Graph laid={laid} label={title ?? `State machine ${id ?? ""}`} /></div>
+  <div data-ref="step" class="flex flex-wrap items-center gap-2 border-t border-surface-border px-4 py-2 text-small">
+    <span class="text-on-surface-secondary">In</span>
+    <strong data-current class="font-mono"></strong>
+    <span data-events class="flex flex-wrap gap-1.5"></span>
+    <button type="button" data-reset class="ms-auto text-smallest text-brand">Reset</button>
+  </div>
+  <p data-note hidden class="m-0 border-t border-surface-border px-4 py-2 text-small text-on-surface-secondary"></p>
+  {hasScreens && (
+    <iframe data-screen sandbox="allow-scripts allow-same-origin" style={`height:${screenHeight}px`} class="block w-full border-0 border-t border-surface-border" title="Screen for the current state"></iframe>
+  )}
+  <script type="application/json" data-sim set:html={JSON.stringify(sim).replace(/</gu, "\\u003c")} />
+</figure>
+
+<script>
+  interface Sim {
+    start: string;
+    transitions: { from: string; event: string; to: string; label: string }[];
+    notes: Record<string, string>;
+    screens: Record<string, string>;
+    parents: Record<string, string>;
+  }
+
+  for (const figure of document.querySelectorAll<HTMLElement>("[data-machine]:not([data-ready])")) {
+    figure.dataset.ready = "";
+    const sim = JSON.parse(figure.querySelector("[data-sim]")?.textContent ?? "{}") as Sim;
+    const current = figure.querySelector<HTMLElement>("[data-current]")!;
+    const events = figure.querySelector<HTMLElement>("[data-events]")!;
+    const note = figure.querySelector<HTMLElement>("[data-note]")!;
+    const screen = figure.querySelector<HTMLIFrameElement>("[data-screen]");
+
+    /** The state and every state containing it: events on a parent apply inside it. */
+    const lineage = (path: string): string[] => {
+      const out = [path];
+      for (let at = sim.parents[path]; at; at = sim.parents[at]) out.push(at);
+      return out;
+    };
+
+    const go = (path: string, via?: { from: string; to: string; event: string }): void => {
+      const active = new Set(lineage(path));
+      for (const node of figure.querySelectorAll<SVGGElement>(".gnode, .ggroup")) {
+        const ref = node.dataset.ref?.replace(/^state:/u, "") ?? "";
+        node.toggleAttribute("data-active", active.has(ref));
+      }
+      for (const edge of figure.querySelectorAll<SVGGElement>(".gedge")) {
+        edge.toggleAttribute(
+          "data-taken",
+          via !== undefined && edge.dataset.from === via.from && edge.dataset.event?.split(" ")[0] === via.event,
+        );
+      }
+      current.textContent = path;
+      events.replaceChildren();
+      const seen = new Set<string>();
+      for (const t of sim.transitions) {
+        if (!active.has(t.from) || seen.has(t.event)) continue;
+        seen.add(t.event);
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = t.label;
+        button.className = "rounded-full border border-surface-border px-2 py-0.5 font-mono text-smallest hover:border-brand";
+        button.addEventListener("click", () => go(t.to, t));
+        events.append(button);
+      }
+      if (seen.size === 0) events.textContent = "final";
+      const text = lineage(path).map((p) => sim.notes[p]).find(Boolean);
+      note.hidden = !text;
+      note.textContent = text ?? "";
+      if (screen) {
+        const doc = lineage(path).map((p) => sim.screens[p]).find(Boolean);
+        screen.srcdoc = doc ?? "<!doctype html><p style='font:13px system-ui;color:#888;padding:12px'>No screen for this state.</p>";
+      }
+    };
+
+    figure.querySelector("[data-reset]")!.addEventListener("click", () => go(sim.start));
+    // Clicking a state jumps to it, for looking rather than for proving a path.
+    for (const node of figure.querySelectorAll<SVGGElement>(".gnode")) {
+      node.style.cursor = "pointer";
+      node.addEventListener("click", () => go(node.dataset.id ?? sim.start));
+    }
+    go(sim.start);
+  }
+</script>

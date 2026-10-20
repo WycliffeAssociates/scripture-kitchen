@@ -1,0 +1,24 @@
+---
+id: 06734563-717e-41d7-a9e3-7fd62c111bd8
+title: "A `\\w` fused arm"
+kind: idea
+status: idea
+created: 2026-08-13
+updated: 2026-08-13
+sha: 32bf2df
+tags: [investigate-later, onion]
+related: []
+source: planning/investigate-later.md
+---
+
+Simplification leads that look real but haven't been checked. Each one's
+GOAL IS NET DELETION — if the investigation ends with more code than it
+started, the answer was no. Nothing here is committed to; nothing here
+blocks anything.
+
+**What:** Aligned corpora (en_ult) are dominated by `\w`/`\zaln-s`, neither
+with a fused arm, so the hottest path runs fully general-case. A dedicated
+arm could fuse marker + delimiter + back-position for the whole word shape.
+**Why:** 5B measured en_ult at 1017 MiB/s vs prose's ~1700, concentrated on
+exactly this shape — but re-measure frequencies on an aligned corpus and run
+the "one-load marker path" spike first, since that helps every marker.

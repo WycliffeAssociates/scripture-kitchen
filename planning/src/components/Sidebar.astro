@@ -1,0 +1,274 @@
+---
+/**
+ * Every item, on every page: filter by stage, sort, open a group. The page
+ * body changes as you click; the sidebar's filters, sort, open groups and
+ * scroll are remembered (per browser), so flicking between items keeps place.
+ */
+import { loadItems, day } from "../lib/items.ts";
+import { CLOSED, STATUSES } from "../lib/schema.ts";
+
+const items = await loadItems();
+const current = Astro.url.pathname.replace(/\/$/u, "");
+const groups = STATUSES.map((status) => ({
+  status,
+  closed: CLOSED.includes(status),
+  items: items.filter((item) => item.entry.data.status === status),
+}));
+---
+<!-- Pinned to the viewport at the sidebar's edge, so it does not scroll away with the list. -->
+<div
+  id="sidebar-resize"
+  role="separator"
+  aria-orientation="vertical"
+  aria-label="Resize the sidebar"
+  tabindex="0"
+  style="left: calc(var(--sidebar-width, 18rem) - 3px)"
+  class="fixed inset-y-0 z-20 hidden w-1.5 cursor-col-resize hover:bg-brand-light focus-visible:bg-brand-light md:block"
+></div>
+<aside id="sidebar" data-ref="sidebar" class="border-surface-border bg-surface-primary md:sticky md:top-0 md:h-screen md:overflow-y-auto md:border-e">
+  <div class="flex items-center gap-3 px-4 pt-4 pb-3">
+    <a href="/" class="font-semibold text-on-surface-primary no-underline">Plans</a>
+    <a href="/" class:list={["text-small no-underline", current === "" ? "text-on-surface-primary font-medium" : "text-on-surface-secondary"]}>Inbox</a>
+    <a href="/roadmap" class:list={["text-small no-underline", current === "/roadmap" ? "text-on-surface-primary font-medium" : "text-on-surface-secondary"]}>Roadmap</a>
+    <button id="theme" type="button" class="ms-auto text-on-surface-secondary" title="Toggle theme">◐</button>
+  </div>
+
+  <div class="space-y-2 border-b border-surface-border px-4 pb-3" data-ref="sidebar-controls">
+    <input id="filter-text" type="search" placeholder="Filter by title or #tag" class="w-full rounded-sm border border-surface-border bg-surface-secondary px-2 py-1 text-small" />
+    <div class="relative" id="stages">
+      <button
+        type="button"
+        id="stages-trigger"
+        aria-haspopup="listbox"
+        aria-expanded="false"
+        aria-controls="stages-list"
+        class="flex w-full items-center gap-2 rounded-sm border border-surface-border bg-surface-secondary px-2 py-1 text-small data-[narrowed]:border-brand"
+      >
+        <span>Stages</span>
+        <span id="stages-summary" class="text-on-surface-tertiary"></span>
+        <span class="ms-auto text-on-surface-tertiary" aria-hidden="true">▾</span>
+      </button>
+      <div
+        id="stages-panel"
+        hidden
+        class="absolute inset-x-0 z-10 mt-1 rounded-md border border-surface-border bg-surface-primary p-1 shadow-[var(--shadow-medium)]"
+      >
+        <ul id="stages-list" role="listbox" aria-multiselectable="true" aria-label="Stages" tabindex="-1" class="m-0 list-none p-0 outline-none">
+          {groups.map((group) => (
+            <li
+              role="option"
+              data-stage={group.status}
+              aria-selected={group.closed ? "false" : "true"}
+              class="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1 text-small data-[active]:bg-sidebar-surface-hover"
+            >
+              <span class="w-3 text-brand [[aria-selected=false]>&]:invisible" aria-hidden="true">✓</span>
+              <span class="flex-1">{group.status}</span>
+              <span class="text-smallest text-on-surface-tertiary">{group.items.length}</span>
+            </li>
+          ))}
+        </ul>
+        <div class="mt-1 flex gap-3 border-t border-surface-border px-2 pt-1.5 pb-0.5 text-smallest">
+          <button type="button" data-preset="open" class="text-brand">Open only</button>
+          <button type="button" data-preset="all" class="text-brand">All</button>
+        </div>
+      </div>
+    </div>
+    <label class="flex items-center gap-2 text-smallest text-on-surface-secondary">
+      Sort
+      <select id="sort" class="rounded-sm border border-surface-border bg-surface-secondary px-1 py-0.5 text-smallest text-on-surface-primary">
+        <option value="priority">priority</option>
+        <option value="updated">updated</option>
+        <option value="created">created</option>
+        <option value="title">title</option>
+      </select>
+    </label>
+  </div>
+
+  <nav class="px-2 py-2">
+    {groups.map((group) => (
+      <details data-group={group.status} open={!group.closed} hidden={group.closed} class="mb-1">
+        <summary class="cursor-pointer rounded-sm px-2 py-1 text-smallest font-semibold uppercase tracking-wide text-on-surface-secondary">
+          {group.status} · <span data-count>{group.items.length}</span>
+        </summary>
+        <ul class="m-0 list-none p-0">
+          {group.items.map((item) => {
+            const { data } = item.entry;
+            const open = item.lifted.filter((l) => l.open && l.kind === "Question").length;
+            const active = current === `/items/${item.slug}`;
+            return (
+              <li
+                data-item
+                data-title={data.title.toLowerCase()}
+                data-tags={data.tags.map((t) => `#${t.toLowerCase()}`).join(" ")}
+                data-priority={data.priority ?? ""}
+                data-updated={day(data.updated)}
+                data-created={day(data.created)}
+              >
+                <a
+                  href={`/items/${item.slug}`}
+                  aria-current={active ? "page" : undefined}
+                  class="flex items-baseline gap-2 rounded-sm px-2 py-1 text-small text-on-surface-primary no-underline hover:bg-sidebar-surface-hover aria-[current=page]:bg-sidebar-surface-active"
+                >
+                  {data.priority !== undefined && <span class="font-mono text-smallest text-on-surface-secondary">P{data.priority}</span>}
+                  <span class="flex-1 leading-snug">{data.title}</span>
+                  {open > 0 && <span class="text-smallest text-on-surface-warning" title={`${open} open question${open === 1 ? "" : "s"}`}>?{open}</span>}
+                </a>
+              </li>
+            );
+          })}
+        </ul>
+      </details>
+    ))}
+  </nav>
+</aside>
+
+<script>
+  const KEY = "plans.sidebar";
+  type Saved = { stages?: string[]; sort?: string; text?: string; shut?: string[]; scroll?: number; width?: number };
+  const read = (): Saved => {
+    try { return JSON.parse(localStorage.getItem(KEY) ?? "{}") as Saved; } catch { return {}; }
+  };
+  const write = (next: Saved): void => {
+    try { localStorage.setItem(KEY, JSON.stringify({ ...read(), ...next })); } catch { /* forgetting is fine */ }
+  };
+
+  const sidebar = document.getElementById("sidebar")!;
+  const options = [...sidebar.querySelectorAll<HTMLElement>("[data-stage]")];
+  const trigger = sidebar.querySelector<HTMLButtonElement>("#stages-trigger")!;
+  const panel = sidebar.querySelector<HTMLElement>("#stages-panel")!;
+  const listbox = sidebar.querySelector<HTMLElement>("#stages-list")!;
+  const summary = sidebar.querySelector<HTMLElement>("#stages-summary")!;
+  const CLOSED_STAGES = ["done", "parked", "dropped"];
+  const isOn = (o: HTMLElement): boolean => o.getAttribute("aria-selected") === "true";
+  const setOn = (o: HTMLElement, on: boolean): void => o.setAttribute("aria-selected", String(on));
+  const groups = [...sidebar.querySelectorAll<HTMLDetailsElement>("[data-group]")];
+  const sort = sidebar.querySelector<HTMLSelectElement>("#sort")!;
+  const text = sidebar.querySelector<HTMLInputElement>("#filter-text")!;
+
+  const saved = read();
+  if (saved.stages) for (const o of options) setOn(o, saved.stages.includes(o.dataset.stage!));
+  if (saved.sort) sort.value = saved.sort;
+  if (saved.text) text.value = saved.text;
+  if (saved.shut) for (const group of groups) if (saved.shut.includes(group.dataset.group!)) group.open = false;
+
+  const compare = (by: string) => (a: HTMLElement, b: HTMLElement): number => {
+    if (by === "title") return (a.dataset.title ?? "").localeCompare(b.dataset.title ?? "");
+    if (by === "priority") {
+      const pa = a.dataset.priority === "" ? Infinity : Number(a.dataset.priority);
+      const pb = b.dataset.priority === "" ? Infinity : Number(b.dataset.priority);
+      if (pa !== pb) return pa - pb;
+    }
+    const field = by === "created" ? "created" : "updated";
+    return (b.dataset[field] ?? "").localeCompare(a.dataset[field] ?? "");
+  };
+
+  const apply = (): void => {
+    const stages = options.filter(isOn).map((o) => o.dataset.stage!);
+    // Says it is filtering, so a folded list is never mistaken for everything.
+    const narrowed = stages.length < options.length;
+    summary.textContent = narrowed ? `${stages.length} of ${options.length}` : "all";
+    trigger.toggleAttribute("data-narrowed", narrowed);
+    const query = text.value.trim().toLowerCase();
+    for (const group of groups) {
+      const list = group.querySelector("ul")!;
+      const rows = [...list.querySelectorAll<HTMLElement>("[data-item]")];
+      rows.sort(compare(sort.value)).forEach((row) => list.append(row));
+      let shown = 0;
+      for (const row of rows) {
+        const hit = query === "" || (row.dataset.title ?? "").includes(query) || (row.dataset.tags ?? "").includes(query);
+        row.hidden = !hit;
+        if (hit) shown += 1;
+      }
+      group.querySelector("[data-count]")!.textContent = String(shown);
+      group.hidden = !stages.includes(group.dataset.group!) || (query !== "" && shown === 0);
+    }
+    write({ stages, sort: sort.value, text: text.value });
+  };
+
+  // The stage picker: rows toggle without closing; arrows, Enter/Space, Esc.
+  let active = 0;
+  const highlight = (index: number): void => {
+    active = (index + options.length) % options.length;
+    options.forEach((o, i) => o.toggleAttribute("data-active", i === active));
+    listbox.setAttribute("aria-activedescendant", `stage-${options[active]!.dataset.stage}`);
+  };
+  options.forEach((o) => (o.id = `stage-${o.dataset.stage}`));
+  const openPanel = (open: boolean): void => {
+    panel.hidden = !open;
+    trigger.setAttribute("aria-expanded", String(open));
+    if (open) {
+      highlight(active);
+      listbox.focus();
+    }
+  };
+  const toggle = (o: HTMLElement): void => {
+    setOn(o, !isOn(o));
+    apply();
+  };
+  trigger.addEventListener("click", () => openPanel(panel.hidden === true));
+  options.forEach((o, i) =>
+    o.addEventListener("click", () => {
+      highlight(i);
+      toggle(o);
+    }),
+  );
+  listbox.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowDown") highlight(active + 1);
+    else if (event.key === "ArrowUp") highlight(active - 1);
+    else if (event.key === "Enter" || event.key === " ") toggle(options[active]!);
+    else if (event.key === "Escape") {
+      openPanel(false);
+      trigger.focus();
+    } else return;
+    event.preventDefault();
+  });
+  panel.querySelector("[data-preset=open]")!.addEventListener("click", () => {
+    for (const o of options) setOn(o, !CLOSED_STAGES.includes(o.dataset.stage!));
+    apply();
+  });
+  panel.querySelector("[data-preset=all]")!.addEventListener("click", () => {
+    for (const o of options) setOn(o, true);
+    apply();
+  });
+  document.addEventListener("click", (event) => {
+    if (!panel.hidden && !sidebar.querySelector("#stages")!.contains(event.target as Node)) openPanel(false);
+  });
+  sort.addEventListener("change", apply);
+  text.addEventListener("input", apply);
+  for (const group of groups) group.addEventListener("toggle", () => {
+    write({ shut: groups.filter((g) => !g.open).map((g) => g.dataset.group!) });
+  });
+  apply();
+
+  // Drag (or arrow keys on) the edge to resize; the width is remembered.
+  const MIN = 200;
+  const MAX = 560;
+  const handle = document.getElementById("sidebar-resize")!;
+  const setWidth = (px: number): number => {
+    const width = Math.round(Math.min(MAX, Math.max(MIN, px)));
+    document.body.style.setProperty("--sidebar-width", `${width}px`);
+    handle.setAttribute("aria-valuenow", String(width));
+    return width;
+  };
+  if (saved.width) setWidth(saved.width);
+  handle.addEventListener("pointerdown", (event) => {
+    handle.setPointerCapture(event.pointerId);
+    const move = (e: PointerEvent): void => void setWidth(e.clientX);
+    const up = (e: PointerEvent): void => {
+      handle.removeEventListener("pointermove", move);
+      write({ width: setWidth(e.clientX) });
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", up, { once: true });
+  });
+  handle.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    const now = sidebar.getBoundingClientRect().width;
+    write({ width: setWidth(now + (event.key === "ArrowRight" ? 16 : -16)) });
+  });
+
+  // Keep the list where it was across page loads.
+  sidebar.scrollTop = saved.scroll ?? 0;
+  addEventListener("pagehide", () => write({ scroll: sidebar.scrollTop }));
+</script>

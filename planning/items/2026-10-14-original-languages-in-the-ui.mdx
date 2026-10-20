@@ -1,0 +1,38 @@
+---
+id: 33ef334a-d8b2-4f2d-8c5a-8bbd3eddafc1
+title: "Original languages in the UI"
+kind: idea
+status: idea
+created: 2026-10-14
+updated: 2026-10-14
+sha: 32bf2df
+tags: [pairing, ui]
+related: [b31879f4-024c-404e-a38f-919ef8d55a5c]
+source: comment on the pairing plan, 2026-10-14
+---
+
+Deferred out of the pairing plan. Will:
+
+> I like the thought of leaning into the original langues, but honestly, I probably should
+> defer it or make it secondary, CAUSE I can't point at anything in the ui generally speaking,
+> so prob should get its own ideation layer.
+
+Pairing v1 uses Greek and Hebrew as a **hidden key**: lemma and sense ids that make the checks
+work, with every label in the gateway language. This item is for when the originals become
+something a user sees.
+
+Things it would need, none started:
+
+- **Surface words.** The lemma packs hold lemma, sense and Strong's, but not the inflected word
+  as written. A Greek or Hebrew pane needs surface forms (a bigger pack) or the host's own
+  original-language text, indexed word for word against MACULA's word ids.
+- **Highlighting in a third pane.** The alignment buffer already carries the lemma and sense
+  per source word, so linking a target word to its Greek word is a read, not new engine work.
+- **Glosses and definitions** from the UBS dictionaries (SDGNT, SDBH; English, French, Spanish
+  and Chinese), CC BY-SA 4.0.
+- **Syntax trees.** MACULA ships them. They fit the same packs scheme, keyed by the same word
+  ids.
+- The plan's old rule still stands: messages observe and don't explain Greek. A lexicon in the
+  UI is a product decision, not a check.
+
+<Question id="who-wants-it">Which users would see this: consultants and checkers, translators, or both? That decides whether it's a panel or a mode.</Question>

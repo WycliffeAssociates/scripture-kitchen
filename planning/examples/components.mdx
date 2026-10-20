@@ -1,0 +1,134 @@
+---
+id: 0e0b6ae6-78fe-4767-97c7-f04e817abec5
+title: Components, by example
+kind: note
+status: planned
+created: 2026-10-14
+updated: 2026-10-14
+tags: [reference]
+---
+
+Every component an item can use, written against this template's own files. It is a
+reference for syntax, not an item: it lives outside `items/`, so the site does not build it,
+and its paths only resolve in the template repo itself. To see it rendered there, copy it
+into `items/` and run `pnpm dev`.
+
+Components whose body is code or indented text take it as a fenced block inside them: MDX
+strips up to two leading spaces from every line of a `{`…`}` attribute.
+
+## Files a plan touches
+
+<Files id="rich" title="Rich planning components">
+```text
+src/
+  components/
+    + Diff.astro        -- proposed change, diffed against the real file at build
+    + Files.astro       -- this tree
+    + FileRows.astro
+    + Graph.astro       -- SVG from an ELK layout; d3 pan and zoom
+    + Machine.astro     -- XState-shaped, steppable
+    + Modules.astro     -- import graph, scanned or written
+    ~ Source.astro      -- line highlights, shared highlighter
+    ~ Mock.astro
+  lib/
+    + graph.ts
+    + highlight.ts
+    + modules.ts
+    + frame.ts
+  styles/
+    ~ site.css
+  pages/
+    - board.astro
+    - archive.astro
+```
+</Files>
+
+## A proposed change, against the real file
+
+<Diff id="owner" path="src/lib/schema.ts" lines="35-37">
+```ts
+  /** Lower is sooner: 0 is "now". Any whole number; unset sorts last. */
+  priority: z.number().int().min(0).optional(),
+  /** Who is carrying it, when it is not obvious. */
+  owner: z.string().optional(),
+  tags: z.array(z.string()).default([]),
+```
+</Diff>
+
+## A change as `git diff` prints it
+
+<Diff id="patch" title="From a pasted patch">
+```diff
+--- a/src/annotate/index.ts
++++ b/src/annotate/index.ts
+@@ -96,2 +96,2 @@
+ /** ⇧⌘C: copy the whole batch. */
+-const COPY_ALL: Hotkey = { code: "KeyC", key: "c", alt: false, ctrl: false, meta: true, shift: true };
++const COPY_ALL: Hotkey = { code: "KeyC", key: "c", alt: true, ctrl: false, meta: true, shift: false };
+```
+</Diff>
+
+## Code as it is, with the lines that matter
+
+<Source path="src/annotate/index.ts" lines="94-98" highlight="97" title="The copy-all chord" />
+
+## A state machine you can step through
+
+Press the events under the graph, or click a state. The frame shows that state's screen.
+
+<Machine id="annotator" title="The annotator, by mode" machine={{
+  initial: "interact",
+  states: {
+    interact: {
+      description: "the page works",
+      on: { C: "comment", SELECT_TEXT: "comment.composing" },
+      note: "Clicks reach the page. Highlighting text shows the Comment chip.",
+      screen: `<p style="margin:0">Highlight <mark>some words</mark> <span style="background:var(--surface-invert);color:var(--on-surface-invert);border-radius:999px;padding:2px 10px;font-size:13px">Comment</span></p>`,
+    },
+    comment: {
+      initial: "pointing",
+      on: { ESC: "interact" },
+      states: {
+        pointing: {
+          description: "crosshair",
+          on: { CLICK: "composing", SHIFT_CLICK: "collecting" },
+          note: "Every click is taken. The hovered element gets an outline.",
+        },
+        collecting: {
+          on: { SHIFT_CLICK: "collecting", CLICK: "composing" },
+          note: "Shift-clicked places are numbered and wait for one sentence about all of them.",
+        },
+        composing: {
+          tone: "changed",
+          on: { ENTER: "pointing", COPY_NOW: "#copied" },
+          note: "Enter adds to the batch (this was copy-on-Enter in Sefer).",
+          screen: `<div style="background:#1c1c20;color:#eee;border-radius:10px;padding:10px;font:12px system-ui;max-width:280px"><div style="opacity:.6;margin-bottom:6px">[1] items/plan.mdx:54</div><div style="border:1px solid #3d6be0;border-radius:6px;padding:6px;margin-bottom:8px">rename to headingOf?</div><span style="background:#3d6be0;border-radius:6px;padding:3px 8px">Add ⏎</span> <span style="opacity:.7;margin-left:6px">Copy now</span></div>`,
+        },
+      },
+    },
+    copied: {
+      id: "copied",
+      tone: "new",
+      description: "toast",
+      on: { AFTER_2S: "interact" },
+      note: "The batch is on the clipboard; a toast says how many.",
+    },
+  },
+}} />
+
+## What depends on what
+
+Scanned from the code at build time. Marked nodes are what the plan changes.
+
+<Modules id="annotate" title="src/annotate, as it is" scan="src/annotate" direction="RIGHT" mark={{ "src/annotate/selection.ts": "new", "src/annotate/index.ts": "changed" }} />
+
+<Modules id="by-folder" title="src, by folder" scan="src" by="folder" direction="RIGHT" />
+
+Written by hand, for modules that do not exist yet:
+
+<Modules id="proposed" title="Proposed: an editor package" edges={`
+  app/ui -> + packages/editor : mount()
+  + packages/editor -> + packages/editor/parser
+  ~ app/workspace -> + packages/editor : ref API
+  - app/ui/BookEditor -> app/workspace
+`} />

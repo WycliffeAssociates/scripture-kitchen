@@ -1,0 +1,6 @@
+---
+/** Steps that run side by side within a phase. */
+interface Props { "data-loc"?: string }
+const { "data-loc": loc } = Astro.props;
+---
+<div class="roadmap-together" data-loc={loc}><slot /></div>

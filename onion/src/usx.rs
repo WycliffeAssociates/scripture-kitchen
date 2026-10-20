@@ -764,7 +764,7 @@ impl<'a> Export<'a> {
 
     /// Does the note's next child GRAFT into `open`, the note-text element that
     /// just ran out of children? The rule is shared by all three exports — see
-    /// planning/quirks.md.
+    /// planning/items/2026-08-21-quirks.mdx.
     fn grafts(&self, parent: &Frame, open: &Frame) -> bool {
         let Some(peers) = parent.peers else {
             return false;

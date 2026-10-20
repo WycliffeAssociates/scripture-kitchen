@@ -1,0 +1,41 @@
+---
+/**
+ * One step of the roadmap. With `item` (an id, a filename, or a filename
+ * without its date) it shows that item's live title, status, priority and
+ * open questions; the text inside, if any, says what this step does with it.
+ * Without `item`, it is a plain step described by its text.
+ *   <Step item="2026-10-14-planning-site" with="tests">Ship the sidebar first.</Step>
+ */
+import { findItem, loadItems } from "../lib/items.ts";
+
+interface Props { item?: string; with?: string; "data-loc"?: string }
+const { item: ref, with: extras, "data-loc": loc } = Astro.props;
+const items = ref ? await loadItems() : [];
+const item = ref ? findItem(items, ref) : undefined;
+const data = item?.entry.data;
+const open = item?.lifted.filter((l) => l.open && l.kind === "Question").length ?? 0;
+const note = Astro.slots.has("default") ? await Astro.slots.render("default") : "";
+const tags = (extras ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+---
+<article
+  class="roadmap-step"
+  data-ref={`step:${item?.slug ?? ref ?? "text"}`}
+  data-loc={loc}
+  data-status={data?.status ?? (ref ? "missing" : "text")}
+>
+  <div class="flex items-baseline gap-2">
+    <span class="roadmap-n" aria-hidden="true"></span>
+    {item
+      ? <a href={`/items/${item.slug}`} class="font-medium leading-snug text-on-surface-primary no-underline hover:underline">{data!.title}</a>
+      : ref
+        ? <span class="font-mono text-small text-on-surface-error">No item “{ref}”</span>
+        : <span class="font-medium leading-snug [&>p]:m-0" set:html={note} />}
+  </div>
+  {item && note && <div class="mt-1 text-small text-on-surface-secondary [&>p]:m-0" set:html={note} />}
+  <div class="mt-2 flex flex-wrap gap-1.5 text-smallest">
+    {data && <span class="roadmap-status">{data.status}</span>}
+    {data?.priority !== undefined && <span class="font-mono text-on-surface-secondary">P{data.priority}</span>}
+    {open > 0 && <span class="text-on-surface-warning">?{open} open</span>}
+    {tags.map((tag) => <span class="rounded-full border border-surface-border px-1.5 text-on-surface-secondary">+ {tag}</span>)}
+  </div>
+</article>

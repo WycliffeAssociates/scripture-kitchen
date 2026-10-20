@@ -12,7 +12,6 @@ debug/
 /galley/pkg
 /galley/pkg-node
 tcdocs/
-planning/scratch.md
 
 # The root package.json makes this repo installable by npm from a git tag;
 # these are what working in it locally leaves behind.

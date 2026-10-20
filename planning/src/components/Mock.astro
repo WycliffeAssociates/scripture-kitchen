@@ -1,0 +1,17 @@
+---
+/**
+ * A tiny piece of UI to look at or poke: HTML (and a <script>) in a sandboxed
+ * frame. The page's tokens are passed in, so `var(--surface-primary)` works.
+ *   <Mock id="chip" height={120}>
+ *     <button style="background:var(--button-primary-surface)">Save</button>
+ *   </Mock>
+ */
+import { frameDocument } from "../lib/frame.ts";
+interface Props { id?: string; height?: number; caption?: string; "data-loc"?: string }
+const { id, height = 200, caption, "data-loc": loc } = Astro.props;
+const doc = frameDocument(await Astro.slots.render("default"));
+---
+<figure data-ref={`mock:${id ?? "?"}`} data-loc={loc} class="my-4 overflow-hidden rounded-md border border-surface-border">
+  <iframe srcdoc={doc} sandbox="allow-scripts allow-same-origin" style={`height:${height}px`} class="block w-full border-0" title={caption ?? id ?? "mock"}></iframe>
+  {caption && <figcaption class="border-t border-surface-border bg-surface-primary px-4 py-1.5 text-small text-on-surface-secondary">{caption}</figcaption>}
+</figure>

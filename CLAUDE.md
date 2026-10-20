@@ -7,7 +7,10 @@ that finds reviewable inconsistencies in scripture from counts alone.
 - Gate for any pass: `cargo nextest run` green (~5s; `cargo test` also works,
   ~9s) plus `cargo clippy --all-targets` clean. Run the whole workspace.
 - Design authority: onion's is `planning/` and `GLOSSARY.md`; sous-chef's is
-  `sous-chef/charter.md`, `rules/`, `roadmap.md`, `evidence.md`.
+  `sous-chef/charter.md`, `rules/`, `evidence.md`, and its roadmap item.
+- Plans, open questions, follow-ups and the decision ledger for the whole
+  workspace live in `planning/items/`; see the `plans` skill
+  (`planning/skill/SKILL.md`). Order of work: `planning/roadmap.mdx`.
 
 Read when relevant:
 

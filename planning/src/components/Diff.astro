@@ -1,0 +1,215 @@
+---
+/**
+ * A proposed change, coloured and numbered.
+ *
+ * Against the real file, diffed at build time (the usual way):
+ *   <Diff path="src/lib/schema.ts" lines="35-37" after={`  priority: z.number().optional(),`} />
+ * Without `lines`, `after` is the whole new file. A path that does not exist
+ * yet is a new file. `before` replaces the file's text when you want to show a
+ * change against something else.
+ *
+ * Or a unified diff, as `git diff` prints it (several files are fine):
+ *   <Diff patch={`--- a/x.ts\n+++ b/x.ts\n@@ -1,2 +1,2 @@\n…`} />
+ *
+ * The real-file form goes stale honestly: once the change lands, the diff is
+ * empty and says so.
+ *
+ * Side by side when the box is wide enough, one column when it is not (a
+ * container query); `view="split"` or `view="unified"` fixes it. Long lines
+ * wrap rather than scroll, and the two sides stay level row by row.
+ */
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { parsePatch, structuredPatch, type StructuredPatch } from "diff";
+import { highlightLines, langOf } from "../lib/highlight.ts";
+import { repoRoot } from "../lib/root.ts";
+
+interface Props {
+  id?: string;
+  path?: string;
+  lines?: string;
+  before?: string;
+  after?: string;
+  patch?: string;
+  title?: string;
+  /** Unchanged lines kept around each change. */
+  context?: number;
+  view?: "auto" | "split" | "unified";
+  "data-loc"?: string;
+  "data-body"?: string;
+}
+const { id, path, lines, before, after, patch, title, context = 3, view = "auto", "data-loc": loc } = Astro.props;
+
+const trimEdges = (text: string): string => text.replace(/^\n/u, "").replace(/\n\s*$/u, "") + "\n";
+
+let patches: StructuredPatch[] = [];
+let offset = 0;
+let status = "";
+/**
+ * Forgiving of hand-written patches. Inside a hunk, a line with no ` `, `+`,
+ * `-` or `\` prefix is context whose leading space was lost (MDX can drop
+ * it). And each `@@` header's counts are recomputed from its lines, since
+ * those are what people get wrong.
+ */
+const normalise = (text: string): string => {
+  const out: string[] = [];
+  let header = -1;
+  let start = { old: 1, new: 1 };
+  let counts = { old: 0, new: 0 };
+  const close = (): void => {
+    if (header < 0) return;
+    out[header] = `@@ -${start.old},${counts.old} +${start.new},${counts.new} @@`;
+    header = -1;
+  };
+  for (const raw of text.replace(/\n+$/u, "").split("\n")) {
+    const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/u.exec(raw);
+    if (hunk) {
+      close();
+      header = out.length;
+      start = { old: Number(hunk[1]), new: Number(hunk[2]) };
+      counts = { old: 0, new: 0 };
+      out.push(raw);
+      continue;
+    }
+    if (raw.startsWith("--- ") || raw.startsWith("diff ") || raw.startsWith("+++ ") || header < 0) {
+      if (!raw.startsWith("+++ ")) close();
+      out.push(raw);
+      continue;
+    }
+    const line = /^[ +\-\\]/u.test(raw) ? raw : ` ${raw}`;
+    if (line[0] !== "+" && line[0] !== "\\") counts.old += 1;
+    if (line[0] !== "-" && line[0] !== "\\") counts.new += 1;
+    out.push(line);
+  }
+  close();
+  return `${out.join("\n")}\n`;
+};
+
+if (patch !== undefined) {
+  patches = parsePatch(normalise(trimEdges(patch)));
+} else if (path !== undefined && after !== undefined) {
+  const file = resolve(repoRoot, path);
+  const exists = existsSync(file);
+  let old = before !== undefined ? trimEdges(before) : "";
+  if (before === undefined && exists) {
+    const all = readFileSync(file, "utf8").split("\n");
+    const [a, b] = (lines ?? "").split("-").map(Number);
+    if (a) {
+      const to = b && b >= a ? b : a;
+      old = all.slice(a - 1, to).join("\n") + "\n";
+      offset = a - 1;
+    } else old = all.join("\n");
+  }
+  if (!exists && before === undefined) status = "new file";
+  patches = [structuredPatch(path, path, old, trimEdges(after), "", "", { context })];
+}
+
+const strip = (name: string | undefined): string => (name ?? "").replace(/^[ab]\//u, "");
+
+interface Row { sign: " " | "+" | "-"; old: string; new: string; html: string }
+interface Pair { left: Row | null; right: Row | null }
+
+/** Unified rows paired for two columns: a run of removals sits beside the additions after it. */
+const pairUp = (rows: readonly Row[]): Pair[] => {
+  const out: Pair[] = [];
+  for (let i = 0; i < rows.length; ) {
+    const row = rows[i]!;
+    if (row.sign === " ") {
+      out.push({ left: row, right: row });
+      i += 1;
+      continue;
+    }
+    const removed: Row[] = [];
+    const added: Row[] = [];
+    while (rows[i]?.sign === "-") removed.push(rows[i++]!);
+    while (rows[i]?.sign === "+") added.push(rows[i++]!);
+    for (let k = 0; k < Math.max(removed.length, added.length); k += 1) {
+      out.push({ left: removed[k] ?? null, right: added[k] ?? null });
+    }
+  }
+  return out;
+};
+
+const files = await Promise.all(
+  patches.map(async (one) => {
+    const name = strip(one.newFileName === "/dev/null" ? one.oldFileName : one.newFileName) || path || "";
+    const lang = langOf(name);
+    let added = 0;
+    let removed = 0;
+    const hunks = await Promise.all(
+      one.hunks.map(async (hunk) => {
+        const lines = hunk.lines.filter((line) => !line.startsWith("\\"));
+        // Each side coloured as its own text, so tokens read as they would in the file.
+        const oldSide = lines.filter((l) => !l.startsWith("+")).map((l) => l.slice(1));
+        const newSide = lines.filter((l) => !l.startsWith("-")).map((l) => l.slice(1));
+        const [oldHtml, newHtml] = await Promise.all([
+          highlightLines(oldSide.join("\n"), lang),
+          highlightLines(newSide.join("\n"), lang),
+        ]);
+        let oldNo = hunk.oldStart + offset;
+        let newNo = hunk.newStart + offset;
+        let o = 0;
+        let n = 0;
+        const rows: Row[] = lines.map((line) => {
+          const sign = (line[0] === "+" || line[0] === "-" ? line[0] : " ") as Row["sign"];
+          const row: Row = {
+            sign,
+            old: sign === "+" ? "" : String(oldNo),
+            new: sign === "-" ? "" : String(newNo),
+            html: sign === "+" ? (newHtml[n] ?? "") : (oldHtml[o] ?? ""),
+          };
+          if (sign !== "+") { oldNo += 1; o += 1; }
+          if (sign !== "-") { newNo += 1; n += 1; }
+          if (sign === "+") added += 1;
+          if (sign === "-") removed += 1;
+          return row;
+        });
+        return { header: `@@ -${hunk.oldStart + offset} +${hunk.newStart + offset} @@`, rows, pairs: pairUp(rows) };
+      }),
+    );
+    return { name, hunks, added, removed };
+  }),
+);
+const SIGN = { " ": "", "+": "add", "-": "del" } as const;
+---
+<figure data-ref={`diff:${id ?? path ?? "patch"}`} data-loc={loc} data-view={view} class="code diff my-4 overflow-hidden rounded-md border border-surface-border">
+  {title && <figcaption class="border-b border-surface-border bg-surface-primary px-4 py-2 text-small font-medium">{title}</figcaption>}
+  {files.length === 0 && <p class="m-0 px-4 py-3 text-small text-on-surface-secondary">No diff given.</p>}
+  {files.map((file) => (
+    <section data-ref={`file:${file.name}`}>
+      <div class="flex gap-3 border-b border-surface-border bg-surface-primary px-4 py-1.5 font-mono text-small">
+        <span>{file.name}</span>
+        {status && <span class="text-on-surface-success">{status}</span>}
+        <span class="ms-auto text-on-surface-success">+{file.added}</span>
+        <span class="text-on-surface-error">−{file.removed}</span>
+      </div>
+      {file.hunks.length === 0 && (
+        <p class="m-0 px-4 py-3 text-small text-on-surface-secondary">No difference: the file already matches. The change has landed, or `after` is wrong.</p>
+      )}
+      {file.hunks.map((hunk) => (
+        <>
+          <div class="hunk">{hunk.header}</div>
+          <div class="diff-unified shiki">
+            {hunk.rows.map((row) => (
+              <div class="diff-row" data-sign={SIGN[row.sign] || undefined}>
+                <span class="no">{row.old}</span><span class="no">{row.new}</span>
+                <span class="sign">{row.sign === "-" ? "−" : row.sign === "+" ? "+" : ""}</span>
+                <code set:html={row.html} />
+              </div>
+            ))}
+          </div>
+          <div class="diff-split shiki">
+            {hunk.pairs.map((pair) => (
+              <div class="diff-row">
+                <span class="no" data-sign={pair.left && SIGN[pair.left.sign] || undefined}>{pair.left?.old}</span>
+                <code data-sign={pair.left ? SIGN[pair.left.sign] || undefined : "none"} set:html={pair.left?.html ?? ""} />
+                <span class="no" data-sign={pair.right && SIGN[pair.right.sign] || undefined}>{pair.right?.new}</span>
+                <code data-sign={pair.right ? SIGN[pair.right.sign] || undefined : "none"} set:html={pair.right?.html ?? ""} />
+              </div>
+            ))}
+          </div>
+        </>
+      ))}
+    </section>
+  ))}
+</figure>

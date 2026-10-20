@@ -1,0 +1,64 @@
+---
+import "../styles/site.css";
+import Sidebar from "../components/Sidebar.astro";
+
+interface Props {
+  title: string;
+  /**
+   * Extra header line for a copied batch. Not the item: a batch can span
+   * several pages, and each comment already carries its own file and line.
+   */
+  context?: Record<string, string>;
+}
+const { title, context = {} } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title} · Plans</title>
+    <script is:inline>
+      try {
+        const saved = localStorage.getItem("plans.theme");
+        if (saved) document.documentElement.dataset.theme = saved;
+      } catch {}
+    </script>
+  </head>
+  <body class="md:grid md:grid-cols-[var(--sidebar-width,18rem)_minmax(0,1fr)]">
+    <Sidebar />
+    <main class="min-w-0 px-4 py-8 md:px-10">
+      <div class="mx-auto max-w-[110rem]"><slot /></div>
+    </main>
+    <script is:inline type="application/json" id="plans-context" set:html={JSON.stringify(context).replace(/</gu, "\\u003c")} />
+    <script>
+      import { mountAnnotator } from "../annotate/index.ts";
+      import { mountSelection } from "../annotate/selection.ts";
+
+      const context = JSON.parse(document.getElementById("plans-context")?.textContent ?? "{}");
+      const values: Record<string, string> = {};
+      const annotator = mountAnnotator({
+        namespace: "plans",
+        state: { read: () => values, write: (next) => Object.assign(values, next) },
+        context: () => context,
+        verbosity: "brief",
+        minimised: true,
+        // Plans are answered in a sweep: Enter adds, ⇧⌘C (or the pill) copies them all.
+        enter: "batch",
+      });
+      mountSelection(annotator, document.querySelector("main") ?? document.body);
+
+      document.getElementById("theme")?.addEventListener("click", () => {
+        const root = document.documentElement;
+        const dark = root.dataset.theme
+          ? root.dataset.theme === "dark"
+          : matchMedia("(prefers-color-scheme: dark)").matches;
+        root.dataset.theme = dark ? "light" : "dark";
+        try {
+          localStorage.setItem("plans.theme", root.dataset.theme);
+        } catch {}
+      });
+    </script>
+  </body>
+</html>

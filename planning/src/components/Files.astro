@@ -1,0 +1,78 @@
+---
+/**
+ * The files a plan touches, as a tree. Indent 2 spaces per level; a name
+ * ending in `/` is a folder. Mark a file with `+` new, `~` changed, `-`
+ * deleted, `>` moved or renamed (`> old.ts => new.ts`). `-- note` explains.
+ *
+ *   <Files id="touch" tree={`
+ *   src/
+ *     annotate/
+ *       + selection.ts      -- comments on highlighted text
+ *       ~ index.ts          -- compose(), copy-all
+ *   - scripts/old.mjs
+ *   `} />
+ *
+ * Folders with nothing marked inside start closed. Each row is its own line
+ * for comments.
+ */
+import FileRows from "./FileRows.astro";
+import type { Row, Tone } from "../lib/files.ts";
+
+interface Props { id?: string; title?: string; tree: string; "data-loc"?: string; "data-body"?: string }
+const { id, title, tree, "data-loc": loc, "data-body": body } = Astro.props;
+
+
+const TONES: Readonly<Record<string, Tone>> = { "+": "new", "~": "changed", "-": "deleted", ">": "moved" };
+const [file, at] = (loc ?? "").split(/:(?=\d+$)/u);
+// A fenced body starts on `data-body` (its first line is offset 0); a
+// template literal starts with a newline on the component's own line.
+const start = body ?? at;
+const lines = tree.split("\n").map((text, offset) => ({ text, offset })).filter(({ text }) => text.trim() !== "");
+const indent = Math.min(...lines.map(({ text }) => text.length - text.trimStart().length));
+
+const roots: Row[] = [];
+const stack: { depth: number; row: Row }[] = [];
+for (const { text, offset } of lines) {
+  const depth = Math.floor((text.length - text.trimStart().length - indent) / 2);
+  const [head = "", note] = text.trim().split(/\s+--\s+/u);
+  const mark = /^([+~>-])\s+/u.exec(head);
+  const name = mark ? head.slice(mark[0].length).trim() : head.trim();
+  while (stack.length > 0 && stack[stack.length - 1]!.depth >= depth) stack.pop();
+  const parent = stack[stack.length - 1]?.row;
+  const folder = name.endsWith("/");
+  const row: Row = {
+    name,
+    path: `${parent?.path ?? ""}${name.split(" => ").pop() ?? name}`,
+    tone: mark ? TONES[mark[1]!]! : "same",
+    note: note?.trim(),
+    line: file && start ? `${file}:${String(Number(start) + offset)}` : undefined,
+    children: [],
+    folder,
+  };
+  (parent?.children ?? roots).push(row);
+  if (folder) stack.push({ depth, row });
+}
+
+const count = (rows: Row[], tone: Tone): number =>
+  rows.reduce((n, row) => n + (row.folder ? 0 : row.tone === tone ? 1 : 0) + count(row.children, tone), 0);
+const totals = (["new", "changed", "deleted", "moved"] as const)
+  .map((tone) => ({ tone, n: count(roots, tone) }))
+  .filter(({ n }) => n > 0);
+const SIGN: Readonly<Record<Tone, string>> = { new: "+", changed: "~", deleted: "−", moved: "→", same: "" };
+const COLOUR: Readonly<Record<Tone, string>> = {
+  new: "text-on-surface-success",
+  changed: "text-on-surface-warning",
+  deleted: "text-on-surface-error",
+  moved: "text-brand",
+  same: "",
+};
+---
+<figure data-ref={`files:${id ?? title ?? "?"}`} data-loc={loc} class="files my-4 overflow-hidden rounded-md border border-surface-border bg-surface-primary">
+  <figcaption class="flex flex-wrap gap-x-3 border-b border-surface-border px-4 py-2 text-small">
+    <span class="font-medium">{title ?? "Files"}</span>
+    {totals.map(({ tone, n }) => <span class={COLOUR[tone]}>{SIGN[tone]}{n} {tone}</span>)}
+  </figcaption>
+  <div class="px-2 py-1.5 font-mono text-small">
+    <FileRows rows={roots} />
+  </div>
+</figure>

@@ -1,0 +1,49 @@
+---
+id: dbe7dbed-9eed-4a79-8d80-28085fcb30f3
+title: "A versification layer for everything that pairs verses"
+kind: idea
+status: idea
+created: 2026-10-14
+updated: 2026-10-14
+sha: 32bf2df
+tags: [versification, galley, sous, pairing]
+related: [b31879f4-024c-404e-a38f-919ef8d55a5c]
+source: comment on the pairing plan, 2026-10-14
+---
+
+Will, on the pairing plan's versification question:
+
+> Probably should have this layer of versification in the call stack for this. Probably should
+> in sous/gallye too for anything that gets paired tbh.
+
+Today a target and its source pair by their own book, chapter and verse numbers.
+`sous_core::alignment::align` matches keys as written, and unpaired rows become alignment
+facts, never findings. That is right when both sides share a versification, and it fails
+quietly when they don't: a Psalm title counted as verse 1 on one side shifts the whole psalm,
+and every unit after it pairs with its neighbour.
+
+## Where it sits
+
+<Calls id="where" title="one mapping step before any pairing">
+```text
+galley: a target book and a source book are both registered
+  versification::to_org(book, chapter, verse) -> org key    -- the new layer, once per side @ mise (or galley)
+  align(target rows, source rows)                           -- pairs org keys, unchanged @ sous-chef/core/src/alignment.rs:101
+    sous: proportionality, source copy, …                   -- every paired sous rule
+    pairing: Tables::build / update                         -- the alignment engine
+  coordinates back to each side's own keys for display      -- a finding never shows an org number
+```
+</Calls>
+
+- Each side declares its versification once (a `.vrs` name or a custom mapping) at
+  registration. No sniffing.
+- `org` is the pivot: BHS for the OT, UBS/NA for the NT. MACULA is keyed in `org` already, and
+  WLC matches it in all 929 chapters. SBLGNT differs in one (ROM 16 ends at 24).
+- Mapping happens once per side, at ingest. Every pairing consumer (sous and pairing alike)
+  reads org keys, and only the display maps back.
+
+<Question id="data-license">The Copenhagen Alliance versification data is CC BY-SA 4.0 (built on STEPBible TVTMS, CC BY). Does share-alike fit `mise`, which every package ships? If not, the tables are a separate asset like pairing's data packs, and the mapping code stays in the workspace.</Question>
+
+<Question id="home">`mise` (beside `BookKey` and book order, if the tables count as standard-derived data) or galley (since only pairing consumers need it)? The `mise` scope rule allows standard-derived tables, but not their generator.</Question>
+
+<Question id="who-first">Is this a prerequisite for pairing v1, or does pairing ship first with "both sides already share a versification" as a stated precondition, the way sous runs today?</Question>

@@ -1,0 +1,79 @@
+---
+/**
+ * The inbox: every open question and follow-up across items that are still
+ * live. This is the page to open first.
+ */
+import Base from "../layouts/Base.astro";
+import { existsSync } from "node:fs";
+import { relative } from "node:path";
+import { loadItems } from "../lib/items.ts";
+import { parseFile } from "../lib/lift.ts";
+import { roadmapPath } from "../lib/roadmap.ts";
+import { repoRoot } from "../lib/root.ts";
+
+const items = (await loadItems()).filter((item) => !item.closed);
+// Most pressing item first (priority, then most recently touched); within an item, file order.
+const rank = (p: number | undefined): number => p ?? Number.POSITIVE_INFINITY;
+const rows = items
+  .toSorted((a, b) => rank(a.entry.data.priority) - rank(b.entry.data.priority))
+  .flatMap((item) => item.lifted.filter((l) => l.open).map((lifted) => ({ item, lifted })));
+// The roadmap's own questions ("is this the order?") belong in the inbox too.
+const roadmap = roadmapPath();
+const roadmapRows = existsSync(roadmap)
+  ? parseFile(roadmap).lifted.filter((l) => l.open).map((lifted) => ({
+      item: { slug: "", path: relative(repoRoot, roadmap), href: "/roadmap", title: "Roadmap", priority: undefined as number | undefined },
+      lifted,
+    }))
+  : [];
+const view = (row: (typeof rows)[number]) => ({
+  item: { slug: row.item.slug, path: row.item.path, href: `/items/${row.item.slug}`, title: row.item.entry.data.title, priority: row.item.entry.data.priority },
+  lifted: row.lifted,
+});
+const all = [...roadmapRows, ...rows.map(view)];
+const questions = all.filter((row) => row.lifted.kind === "Question");
+const followups = all
+  .filter((row) => row.lifted.kind === "Followup")
+  .sort((a, b) => String(a.lifted.attrs["due"] ?? "9").localeCompare(String(b.lifted.attrs["due"] ?? "9")));
+const groups = [
+  { id: "questions", label: "Open questions", rows: questions },
+  { id: "followups", label: "Follow-ups", rows: followups },
+];
+---
+<Base title="Inbox">
+  <h1 class="text-h4 font-semibold">Inbox</h1>
+  <p class="mt-1 text-small text-on-surface-secondary">
+    Point at a row (press <kbd>c</kbd>) or highlight its text and write an answer; Enter adds it to the batch. Copy them all with <kbd>⇧⌘C</kbd>. Each comment carries the file and line.
+  </p>
+  {items.length === 0 && (
+    <p class="mt-8 rounded-md border border-surface-border bg-surface-primary px-4 py-3">
+      No items yet. Create one with <code>pnpm plans new "Title" --kind idea</code>, or ask the agent
+      (see <code>skill/SKILL.md</code>).
+    </p>
+  )}
+  {items.length > 0 && groups.map((group) => (
+    <section data-ref={`inbox:${group.id}`} class="mt-8">
+      <h2 class="mb-3 text-small font-semibold uppercase tracking-wide text-on-surface-secondary">
+        {group.label} · {group.rows.length}
+      </h2>
+      {group.rows.length === 0 && <p class="text-on-surface-tertiary">Nothing open.</p>}
+      <ul class="space-y-2">
+        {group.rows.map(({ item, lifted }) => (
+          <li
+            data-ref={`${lifted.kind.toLowerCase()}:${item.slug || "roadmap"}#${lifted.id ?? lifted.line}`}
+            data-loc={`${item.path}:${lifted.line}`}
+            class="rounded-md border border-surface-border bg-surface-primary px-4 py-3"
+          >
+            <div>{lifted.text}</div>
+            <div class="mt-1 flex flex-wrap gap-x-3 text-smallest text-on-surface-secondary">
+              {item.priority !== undefined && <span class="font-mono">P{item.priority}</span>}
+              <a href={item.href}>{item.title}</a>
+              {lifted.id && <span class="font-mono">{lifted.id}</span>}
+              {lifted.attrs["due"] && <span>due {lifted.attrs["due"]}</span>}
+              <span class="font-mono">{item.path}:{lifted.line}</span>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
+  ))}
+</Base>

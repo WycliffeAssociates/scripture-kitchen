@@ -1,0 +1,36 @@
+---
+/**
+ * A stage of the roadmap: "Now", "Next", a milestone. Its steps run left to
+ * right in order; a <Together> inside runs side by side.
+ *   <Phase id="now" title="Now" goal="Comments land in the editor">…</Phase>
+ */
+import { findItem, loadItems } from "../lib/items.ts";
+import { readRoadmap } from "../lib/roadmap.ts";
+
+interface Props { id?: string; title?: string; goal?: string; "data-loc"?: string }
+const { id, title, goal, "data-loc": loc } = Astro.props;
+
+// Counts from the file itself, so the header knows what its steps are.
+const line = Number((loc ?? "").split(":").pop());
+const phase = (readRoadmap() ?? []).find((p) => (id !== undefined && p.id === id) || p.line === line);
+const items = await loadItems();
+const steps = (phase?.steps ?? []).filter((s) => s.kind === "Step" && s.item !== null);
+const done = steps.filter((s) => {
+  const item = findItem(items, s.item!);
+  return item !== undefined && item.entry.data.status === "done";
+}).length;
+const gates = (phase?.steps ?? []).filter((s) => s.kind === "Gate").length;
+---
+<section data-ref={`phase:${id ?? title ?? "?"}`} data-loc={loc} class="roadmap-phase my-6">
+  <header class="mb-3 flex flex-wrap items-baseline gap-x-3">
+    <h2 class="m-0 text-h4 font-semibold">{title ?? id}</h2>
+    {steps.length > 0 && (
+      <span class:list={["text-small", done === steps.length ? "text-on-surface-success" : "text-on-surface-secondary"]}>
+        {done} of {steps.length} done
+      </span>
+    )}
+    {gates > 0 && <span class="text-small text-on-surface-secondary">· {gates} checkpoint{gates === 1 ? "" : "s"}</span>}
+    {goal && <p class="m-0 basis-full text-on-surface-secondary">{goal}</p>}
+  </header>
+  <div class="roadmap-flow"><slot /></div>
+</section>

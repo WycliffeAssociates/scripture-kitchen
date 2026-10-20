@@ -1,0 +1,19 @@
+---
+/**
+ * A known trade-off: what we chose and what it costs.
+ *   <Tradeoff id="files" chose="MDX files" cost="no relational queries">…</Tradeoff>
+ */
+interface Props { id?: string; chose?: string; cost?: string; "data-loc"?: string }
+const { id, chose, cost, "data-loc": loc } = Astro.props;
+---
+<aside data-ref={`tradeoff:${id ?? "?"}`} data-loc={loc} class="my-4 rounded-md border border-surface-border bg-surface-primary px-4 py-3">
+  <div class="mb-1 text-smallest font-semibold uppercase tracking-wide text-on-surface-secondary">Trade-off{id && <span class="ms-2 font-mono normal-case">{id}</span>}</div>
+  {(chose || cost) && (
+    <p class="m-0 mb-1 text-small">
+      {chose && <span><span class="text-on-surface-secondary">chose</span> <strong>{chose}</strong></span>}
+      {chose && cost && " · "}
+      {cost && <span><span class="text-on-surface-secondary">costs</span> {cost}</span>}
+    </p>
+  )}
+  <div class="[&>p]:m-0"><slot /></div>
+</aside>

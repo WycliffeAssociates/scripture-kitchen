@@ -1,0 +1,127 @@
+---
+/**
+ * Which modules depend on which. Scanned from the repo at build time, written
+ * by hand, or both (the scan as it is, plus what the plan proposes):
+ *
+ *   <Modules id="annotate" scan="src/annotate" />
+ *   <Modules id="tiers" scan="src" by="folder" depth={2} />
+ *   <Modules id="proposed" scan="src/annotate" edges={`
+ *     + src/annotate/selection.ts -> src/annotate/dom.ts
+ *     ~ src/annotate/index.ts -> src/annotate/selection.ts : compose()
+ *   `} />
+ *
+ * `edges`: one `a -> b` per line, `: label` optional. Mark a node with
+ * `+` new, `~` changed or `-` deleted before it (on either side of the arrow).
+ * `mark={{ "src/x.ts": "changed" }}` marks scanned nodes. `by="folder"`
+ * collapses files into folders `depth` levels below the scanned folder.
+ * `alias={{ "@/": "src/" }}` resolves aliased imports.
+ */
+import Graph from "./Graph.astro";
+import { layout, type Direction, type GraphEdge, type GraphNode, type Tone } from "../lib/graph.ts";
+import { scanModules } from "../lib/modules.ts";
+import { repoRoot } from "../lib/root.ts";
+
+interface Props {
+  id?: string;
+  title?: string;
+  scan?: string | string[];
+  by?: "file" | "folder";
+  depth?: number;
+  alias?: Record<string, string>;
+  exclude?: string;
+  edges?: string;
+  mark?: Record<string, Tone>;
+  direction?: Direction;
+  "data-loc"?: string;
+  "data-body"?: string;
+}
+const {
+  id, title, scan, by = "file", depth = 1, alias = {}, exclude, edges: written, mark = {},
+  direction = "DOWN", "data-loc": loc,
+} = Astro.props;
+
+const folders = scan === undefined ? [] : Array.isArray(scan) ? scan : [scan];
+const scanned = folders.length > 0 ? scanModules(repoRoot, folders, alias, exclude) : { files: [], imports: [] };
+
+/** A file's node: itself, or its folder `depth` levels under the scanned root. */
+const nodeOf = (path: string): string => {
+  if (by === "file") return path;
+  const base = folders.find((f) => path.startsWith(`${f.replace(/\/$/u, "")}/`));
+  if (base === undefined) return path.split("/").slice(0, -1).join("/") || path;
+  const rest = path.slice(base.replace(/\/$/u, "").length + 1).split("/");
+  const folder = rest.slice(0, Math.min(depth, rest.length - 1));
+  return [base.replace(/\/$/u, ""), ...folder].join("/");
+};
+
+const tones = new Map<string, Tone>();
+const files = new Map<string, number>();
+for (const file of scanned.files) {
+  const node = nodeOf(file);
+  files.set(node, (files.get(node) ?? 0) + 1);
+}
+const counted = new Map<string, { from: string; to: string; n: number; label?: string }>();
+const addEdge = (from: string, to: string, label?: string): void => {
+  if (from === to) return;
+  const key = `${from}\u0000${to}`;
+  const held = counted.get(key);
+  if (held) held.n += 1;
+  else counted.set(key, { from, to, n: 1, ...(label ? { label } : {}) });
+};
+for (const edge of scanned.imports) addEdge(nodeOf(edge.from), nodeOf(edge.to));
+
+const SIGNS: Readonly<Record<string, Tone>> = { "+": "new", "~": "changed", "-": "deleted" };
+const named = (raw: string): string => {
+  const match = /^([+~-])\s*(.+)$/u.exec(raw.trim());
+  if (!match) return raw.trim();
+  const name = match[2]!.trim();
+  tones.set(name, SIGNS[match[1]!]!);
+  return name;
+};
+for (const line of (written ?? "").split("\n")) {
+  if (line.trim() === "") continue;
+  const [pair = "", label] = line.split(/\s+:\s+/u);
+  const [a, b] = pair.split(/\s*->\s*/u);
+  if (a === undefined) continue;
+  const from = named(a);
+  if (!files.has(from)) files.set(from, 0);
+  if (b === undefined) continue;
+  const to = named(b);
+  if (!files.has(to)) files.set(to, 0);
+  addEdge(from, to, label?.trim());
+}
+for (const [path, tone] of Object.entries(mark)) tones.set(nodeOf(path), tone);
+
+// Files sit in a group per folder; folders (by="folder") stand alone. Group
+// ids are prefixed: `packages/editor` can be a module and a folder at once.
+const groups = new Set<string>();
+const nodes: GraphNode[] = [...files.keys()].map((path) => {
+  const slash = path.lastIndexOf("/");
+  const folder = by === "file" && slash > 0 ? path.slice(0, slash) : undefined;
+  if (folder) groups.add(folder);
+  const parent = folder === undefined ? undefined : `dir:${folder}`;
+  const n = files.get(path) ?? 0;
+  return {
+    id: path,
+    label: by === "file" ? path.slice(slash + 1) : path,
+    sub: by === "folder" && n > 0 ? `${n} file${n === 1 ? "" : "s"}` : undefined,
+    tone: tones.get(path),
+    parent,
+    ref: `module:${path}`,
+  };
+});
+for (const group of groups) nodes.push({ id: `dir:${group}`, label: `${group}/`, ref: `folder:${group}` });
+
+const edges: GraphEdge[] = [...counted.values()].map((e) => ({
+  from: e.from,
+  to: e.to,
+  label: e.label ?? (e.n > 1 ? `×${e.n}` : undefined),
+  ref: `import:${e.from}->${e.to}`,
+}));
+const laid = nodes.length > 0 ? await layout(nodes, edges, direction) : null;
+---
+<figure data-ref={`modules:${id ?? title ?? "?"}`} data-loc={loc} class="my-4 overflow-hidden rounded-md border border-surface-border bg-surface-primary">
+  {title && <figcaption class="border-b border-surface-border px-4 py-2 text-small font-medium">{title}</figcaption>}
+  {laid === null
+    ? <p class="m-0 bg-surface-warning px-4 py-3 text-small text-on-surface-warning">Nothing to draw: <code>{folders.join(", ") || "no scan"}</code> under <code>{repoRoot}</code> has no modules, and no edges were written.</p>
+    : <div class="px-2 py-3"><Graph laid={laid} label={title ?? `Modules ${id ?? ""}`} maxHeight={720} /></div>}
+</figure>

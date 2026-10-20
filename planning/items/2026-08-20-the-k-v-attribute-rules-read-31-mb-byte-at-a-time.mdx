@@ -1,0 +1,24 @@
+---
+id: 9221f5b3-e287-4edc-8877-ac10daf22a57
+title: "The k/v attribute rules read 31 MB byte-at-a-time"
+kind: idea
+status: idea
+created: 2026-08-20
+updated: 2026-08-20
+sha: 32bf2df
+tags: [investigate-later, onion]
+related: []
+source: planning/investigate-later.md
+---
+
+Simplification leads that look real but haven't been checked. Each one's
+GOAL IS NET DELETION — if the investigation ends with more code than it
+started, the answer was no. Nothing here is committed to; nothing here
+blocks anything.
+
+**What:** `Flat::read_attributes` walks every attribute list byte-at-a-time;
+en_ult's 792,414 `\w` lists cost ~31 MB at ~0.85 GB/s (+5.7 ns/token on
+`--lint-only`).
+**Why:** Measured and accepted, not solved. Best lever: vectorize the
+interior walk in `attributes.rs` (attr_corpus.rs is a ready-made oracle); a
+whole-list pre-filter was tried and rejected — same byte-at-a-time cost.

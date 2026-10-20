@@ -1,0 +1,57 @@
+---
+import { render } from "astro:content";
+import Base from "../../layouts/Base.astro";
+import { components } from "../../components/index.ts";
+import { day, findItem, loadItems } from "../../lib/items.ts";
+import { readRoadmap } from "../../lib/roadmap.ts";
+
+export const getStaticPaths = async () => {
+  const items = await loadItems();
+  return items.map((item) => ({ params: { slug: item.slug }, props: { item, all: items } }));
+};
+
+const { item, all } = Astro.props;
+const { data } = item.entry;
+const { Content } = await render(item.entry);
+const related = data.related
+  .map((id) => all.find((other) => other.entry.data.id === id))
+  .filter((other) => other !== undefined);
+const open = item.lifted.filter((l) => l.open);
+const placed = (readRoadmap() ?? []).flatMap((phase) =>
+  phase.steps
+    .filter((s) => s.item !== null && findItem(all, s.item)?.entry.data.id === data.id)
+    .map((s) => `step ${s.n} in ${phase.title}`),
+);
+---
+<Base title={data.title}>
+  <article data-ref={`item:${item.slug}`}>
+    <header class="mb-8 border-b border-surface-border pb-5">
+      <div class="text-smallest font-semibold uppercase tracking-wide text-on-surface-secondary">{data.kind} · {data.status}{data.priority !== undefined && ` · P${data.priority}`}</div>
+      <h1 class="mt-1 text-h3 font-semibold leading-tight">{data.title}</h1>
+      <dl class="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-small text-on-surface-secondary">
+        <div><dt class="inline">created </dt><dd class="inline">{day(data.created)}</dd></div>
+        <div><dt class="inline">updated </dt><dd class="inline">{day(data.updated)}</dd></div>
+        {data.sha && <div><dt class="inline">at </dt><dd class="inline font-mono">{data.sha}</dd></div>}
+        <div><dd class="inline font-mono">{item.path}</dd></div>
+        {data.tags.length > 0 && <div>{data.tags.map((tag) => `#${tag}`).join(" ")}</div>}
+      </dl>
+      {placed.length > 0 && (
+        <p class="mt-3 text-small"><a href="/roadmap">On the roadmap</a>: {placed.join(", ")}</p>
+      )}
+      {open.length > 0 && (
+        <p class="mt-3 text-small text-on-surface-warning">
+          {open.length} open: {open.map((l) => l.id ?? `${l.kind.toLowerCase()} at line ${l.line}`).join(", ")}
+        </p>
+      )}
+    </header>
+    <div class="prose">
+      <Content components={components} />
+    </div>
+    {related.length > 0 && (
+      <footer data-ref="related" class="mt-12 border-t border-surface-border pt-4 text-small">
+        <span class="text-on-surface-secondary">Related: </span>
+        {related.map((other, i) => <>{i > 0 && " · "}<a href={`/items/${other.slug}`}>{other.entry.data.title}</a></>)}
+      </footer>
+    )}
+  </article>
+</Base>

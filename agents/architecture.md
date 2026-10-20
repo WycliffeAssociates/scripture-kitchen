@@ -6,8 +6,9 @@
     ticket ◄── onion, galley
 
 - `onion` / `onion-wasm` / `galley` are the engine. `sous-core` / `sous-cli`
-  (under `sous-chef/`) are the other product. `planning/` and `GLOSSARY.md`
-  are onion's only; everything about tests and conventions applies to both.
+  (under `sous-chef/`) are the other product. `GLOSSARY.md` is onion's only;
+  `planning/` holds every crate's plans, by tag; everything about tests and
+  conventions applies to both.
 - `mise/` is the zero-dependency leaf both share: standard-derived tables and
   borrow-free data structures only (`BookKey`, book order, UTF-16 offset types,
   the per-scalar Unicode `Class`). A generated table may live there while its

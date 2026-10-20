@@ -1,0 +1,119 @@
+---
+id: f9e18399-7a79-4b39-928a-25eb0e633afc
+title: "Sous settings grouped by the check they tune (idea, NOT DECIDED)"
+kind: idea
+status: discussing
+created: 2026-10-01
+updated: 2026-10-01
+sha: 32bf2df
+tags: [sous, sefer]
+related: [e474b57f-2c29-4117-b299-e137d44f61c9]
+source: planning/ideas/candidates/sous-settings-grouping.md
+---
+
+Asked by Sefer 2026-10-01. Will is choosing between the two shapes below;
+nothing is built.
+
+## The ask
+
+Every `SOUS_SETTINGS` entry has a `group`, but it says what KIND of setting it
+is (rules, thresholds, reference), not which check it is about. So a page
+built from it splits a check across sections:
+
+- "Doubled words", "Doubled with a space", "Doubled with punctuation" sit in
+  Rules; "Repeating language" (`doubles_productive_bp`) sits in Thresholds.
+- "One book differs" and its three "One book: …" thresholds, likewise.
+- "Capital letters" and its capital-share numbers, likewise.
+
+Sefer could hard-code the pairing, but it would drift from kitchen, and some
+settings feed several checks (`support_floor`, "Habit count"). Sefer asks for
+one field per setting: `affects`, the checks it tunes. It then builds each
+check with its sub-switches and thresholds underneath, and the shared ones in
+a "General" section.
+
+## What every shape ships
+
+```ts
+readonly affects: readonly SousCheck[];   // on each SOUS_SETTINGS entry, generated
+export type SousCheck = Channel | "Presence" | "SourceCopy" | "LengthProportionality";
+export function checkOf(code: SousCode): SousCheck | null;   // hygiene → null: it has no settings
+```
+
+A check is one level coarser than a `SousCode` (finding-code-unions work): one
+per convention channel, one per other lane, so the three `presence.*` codes are
+one check. `checkOf` also lets a finding in the panel link to its settings.
+
+Ordering, promised in the generated docs: `SOUS_SETTINGS` lists check by check;
+within a check its on/off switch first, then sub-switches, then thresholds;
+General last. `group` stays and only says what kind of setting it is.
+
+## The mapping, from what the judge reads today
+
+| Check | Settings |
+|---|---|
+| Doubled | `doubled`, `doubled_bare`, `doubled_separated`, `doubles_productive_bp` |
+| BookRate | `book_rate`, `book_rate_ratio`, `book_rate_min_bp`, `book_rate_min_uses` |
+| Casing | `casing`, `word_support_floor`, `terminal_upper_share_bp`, `terminal_lower_share_bp` |
+| SentenceStart | `sentence_start`, `sentence_start_upper_bp` |
+| WordLength | `word_length`, `word_length_sigma` |
+| LengthProportionality | `lengths_enabled`, `z_long`, `z_short`, `min_verses` |
+| SourceCopy | `source_copy`, `source_copy_min_run` |
+| Presence, Placement, RunShape, ExactNeighbor, PooledNeighbor, Rarity, LetterRun | the check's own switch |
+| General | `support_floor` (read in `judge/scalars.rs`, `terminals.rs`, `words.rs`) |
+
+To confirm before filing: the capital-after-mark table (`TerminalTable`, the
+two `terminal_*` shares) is also passed into the doubled-word code
+(`judge/words.rs:200`), not only Casing.
+
+## Shape A: the check in the key's name (lightest)
+
+Rename `SousSettings` keys so each starts with its check; the generator reads
+`affects` from the longest known prefix. A check's switch is the bare check
+name.
+
+| today | becomes |
+|---|---|
+| `support_floor` | `general_support_floor` |
+| `word_support_floor` | `casing_word_support_floor` |
+| `terminal_upper_share_bp` / `terminal_lower_share_bp` | `casing_capital_share_bp` / `casing_lowercase_share_bp` |
+| `doubles_productive_bp` | `doubled_productive_bp` |
+| `letter_runs` | `letter_run` |
+| `z_long` / `z_short` / `min_verses` | `lengths_z_long` / `lengths_z_short` / `lengths_min_verses` |
+
+- 9 of 32 keys move; the rest already fit. Only `SousSettings` (the public
+  surface) renames; `JudgingConfig` keeps its names.
+- The one hand list is prefix → check: the 11 channels plus `lengths`,
+  `presence`, `source_copy`, `general`. A key with no known prefix fails
+  codegen; codegen also checks each prefix's keys sit together, switch first.
+- Still a human assigning the check, but in the name, so a mismatch shows at
+  every read site (`config.casing_…` in Doubled code). Enforces nothing.
+- Breaks callers: Sefer's persisted `sous.settings` loses tweaks to the nine
+  (back to defaults); code naming an old key fails to compile. Sefer is
+  alpha, no migration.
+- Under an hour, TS generator and settings docs only, no engine change.
+
+## Shape B: nest the config by check (enforced)
+
+1. `JudgingConfig` gets one sub-struct per check, shared settings at the top:
+   `{ support_floor, bands, channels, casing: {…}, sentence_start: {…},
+   doubled: {…}, book_rate: {…}, word_length: {…}, rarity: {…},
+   letter_run: {…} }`; galley's reference settings nest the same way.
+2. Each check's judge takes only `(&Shared, &ItsConfig)`, so reading another
+   check's threshold needs a visible signature change. Functions that judge
+   several checks at once (`words.rs`: Casing, Doubled, WordLength) split, or
+   take only the sub-structs they use.
+3. One `settings!` table defines every setting AND is the flat
+   `SousSettings` → `JudgingConfig` conversion (`doubled_bare: Switch =>
+   doubled.bare`); the generator reads `affects` from the path.
+
+- No TS key changes, no wire change.
+- General stays coarse ("shared", not which checks).
+- Half a day to a day, mostly mechanical; gates: goldens and incremental bytes
+  identical, timings flat.
+
+## Also parked
+
+Galley's abstention reasons ("verse 27:23 sorts before 27:24") are English
+`Display` strings from Rust. If Sefer owns all wording they want an
+`AbstainReason` union with typed fields, like the finding codes. Follow-up
+once we see whether Sefer shows them at all.

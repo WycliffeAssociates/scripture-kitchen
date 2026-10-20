@@ -1,0 +1,40 @@
+---
+/**
+ * A real file section, read at build time from the repo the plans sit in.
+ *   <Source path="src/annotate/batch.ts" lines="120-150" highlight="128-131" />
+ *
+ * `highlight` takes absolute line numbers. A missing file or range renders a
+ * notice instead of failing the build: plans outlive the code they point at.
+ */
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { highlight as colour, langOf, lineSet } from "../lib/highlight.ts";
+import { repoRoot as root } from "../lib/root.ts";
+
+interface Props { path: string; lines?: string; highlight?: string; title?: string; "data-loc"?: string }
+const { path, lines, highlight, title, "data-loc": loc } = Astro.props;
+
+const file = resolve(root, path);
+let html: string | null = null;
+if (existsSync(file)) {
+  const all = readFileSync(file, "utf8").split("\n");
+  const [a, b] = (lines ?? "").split("-").map(Number);
+  const from = a && a > 0 ? a : 1;
+  const to = b && b >= from ? b : a ? from : all.length;
+  if (from <= all.length) {
+    const marked = lineSet(highlight);
+    html = await colour(all.slice(from - 1, to).join("\n"), langOf(path), (i) => {
+      const n = from + i - 1;
+      return { gutter: String(n).padStart(String(to).length), "data-hl": marked(n) ? "" : undefined };
+    });
+  }
+}
+---
+<figure data-ref={`source:${path}${lines ? `:${lines}` : ""}`} data-loc={loc} class="code my-4 overflow-hidden rounded-md border border-surface-border">
+  <figcaption class="flex justify-between gap-4 border-b border-surface-border bg-surface-primary px-4 py-1.5 font-mono text-small">
+    <span>{title ?? path}</span><span class="text-on-surface-tertiary">{lines ? `${path}:${lines}` : ""}</span>
+  </figcaption>
+  {html === null
+    ? <p class="m-0 bg-surface-warning px-4 py-3 text-small text-on-surface-warning">Not found: <code>{path}{lines && `:${lines}`}</code> under <code>{root}</code>. The code moved, or the plan is older than it.</p>
+    : <Fragment set:html={html} />}
+</figure>

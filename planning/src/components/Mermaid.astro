@@ -1,0 +1,25 @@
+---
+/**
+ * A Mermaid diagram, rendered in the browser. State machines: `stateDiagram-v2`.
+ *   <Mermaid id="lifecycle" code={`stateDiagram-v2
+ *     idea --> discussing
+ *   `} />
+ */
+interface Props { id?: string; code: string; caption?: string; "data-loc"?: string; "data-body"?: string }
+const { id, code, caption, "data-loc": loc } = Astro.props;
+---
+<figure data-ref={`diagram:${id ?? "?"}`} data-loc={loc} class="my-4 rounded-md border border-surface-border bg-surface-primary p-4">
+  <pre class="plans-mermaid m-0 border-0 p-0" style="background:none">{code}</pre>
+  {caption && <figcaption class="mt-2 text-small text-on-surface-secondary">{caption}</figcaption>}
+</figure>
+<script>
+  const blocks = document.querySelectorAll<HTMLElement>(".plans-mermaid:not([data-done])");
+  if (blocks.length > 0) {
+    const { default: mermaid } = await import("mermaid");
+    const root = document.documentElement;
+    const dark = root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+    mermaid.initialize({ startOnLoad: false, theme: dark ? "dark" : "neutral" });
+    for (const block of blocks) block.dataset.done = "";
+    await mermaid.run({ nodes: [...blocks] });
+  }
+</script>

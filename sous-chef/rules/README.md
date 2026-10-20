@@ -5,7 +5,7 @@ the contract every lane answers and the index of where each lane lives.
 
 Cross-cutting ownership and data contracts are in
 [../charter.md](../charter.md); sequencing and gates are in
-[../roadmap.md](../roadmap.md); measured numbers are in
+[the roadmap](../../planning/items/2026-09-01-sous-chef-roadmap.mdx); measured numbers are in
 [../evidence.md](../evidence.md).
 
 ## The shared rule contract

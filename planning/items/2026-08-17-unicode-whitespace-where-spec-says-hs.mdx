@@ -1,0 +1,24 @@
+---
+id: a902eaec-58fb-42e0-a0fe-5bd6ba0b8267
+title: "Unicode whitespace where spec says `hs`"
+kind: idea
+status: parked
+created: 2026-08-17
+updated: 2026-08-17
+sha: 32bf2df
+tags: [investigate-later, onion]
+related: []
+source: planning/investigate-later.md
+---
+
+Simplification leads that look real but haven't been checked. Each one's
+GOAL IS NET DELETION — if the investigation ends with more code than it
+started, the answer was no. Nothing here is committed to; nothing here
+blocks anything.
+
+**What:** NBSP/NNBSP/ideographic-space/ZWSP after a marker name stay content
+and never fold — matches spec (`hs` = space/tab only), and lint already has
+what it needs from span-vs-name-length.
+**Why:** Zero occurrences across all 226 corpus books, so nothing to weigh
+against the spec reading. Closed until a real book shows a non-`hs`
+whitespace in delimiter position.

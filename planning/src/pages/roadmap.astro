@@ -1,0 +1,49 @@
+---
+/**
+ * The order of work at a glance, from `roadmap.mdx` beside `items/`. Items are
+ * for drilling in; this is the sequence: phases, numbered steps, and the
+ * checkpoints where a person has to look before work goes on.
+ */
+import Base from "../layouts/Base.astro";
+import { components } from "../components/index.ts";
+import { findItem, loadItems } from "../lib/items.ts";
+import { readRoadmap } from "../lib/roadmap.ts";
+
+const found = import.meta.glob<{ default: (props: { components: unknown }) => unknown }>("/roadmap.mdx", { eager: true });
+const Roadmap = Object.values(found)[0]?.default;
+
+const items = await loadItems();
+const phases = readRoadmap() ?? [];
+const onRoadmap = new Set(
+  phases.flatMap((p) => p.steps).flatMap((s) => (s.item ? [findItem(items, s.item)?.entry.data.id] : [])),
+);
+// Active work the roadmap does not mention, so nothing falls off it silently.
+const missing = items.filter(
+  (item) => !item.closed && item.entry.data.kind !== "note" && item.entry.data.status !== "idea" && !onRoadmap.has(item.entry.data.id),
+);
+---
+<Base title="Roadmap">
+  <article data-ref="roadmap" class="roadmap">
+    {Roadmap
+      ? <div class="prose roadmap-body"><Roadmap components={components} /></div>
+      : (
+        <div class="rounded-md border border-surface-border bg-surface-primary px-4 py-3">
+          <h1 class="m-0 text-h4 font-semibold">Roadmap</h1>
+          <p class="mt-2 mb-0">No <code>roadmap.mdx</code> yet. Create one beside <code>items/</code>: phases of numbered steps that point at items, and gates where a person reviews. See the <code>plans</code> skill.</p>
+        </div>
+      )}
+    {missing.length > 0 && (
+      <section data-ref="not-on-roadmap" class="mt-12 border-t border-surface-border pt-4">
+        <h2 class="m-0 mb-2 text-small font-semibold uppercase tracking-wide text-on-surface-secondary">Not on the roadmap · {missing.length}</h2>
+        <ul class="m-0 list-none space-y-1 p-0 text-small">
+          {missing.map((item) => (
+            <li data-ref={`unplaced:${item.slug}`} data-loc={item.path}>
+              <a href={`/items/${item.slug}`}>{item.entry.data.title}</a>
+              <span class="ms-2 text-on-surface-secondary">{item.entry.data.status}{item.entry.data.priority !== undefined && ` · P${item.entry.data.priority}`}</span>
+            </li>
+          ))}
+        </ul>
+      </section>
+    )}
+  </article>
+</Base>

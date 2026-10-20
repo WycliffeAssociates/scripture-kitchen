@@ -12,7 +12,7 @@ Status: substrate walk landed (`sous_core::substrate`); judging landed
 (`sous_core::sites`, D2b), so each pattern's matching runs are on the wire
 beside it as `Convention` rows. D3 completed the ladder with G2's pooled
 neighbours and put books-touched on every row. Stage 3 in
-[../roadmap.md](../roadmap.md).
+[the roadmap](../../planning/items/2026-09-01-sous-chef-roadmap.mdx).
 
 ## Evidence questions
 

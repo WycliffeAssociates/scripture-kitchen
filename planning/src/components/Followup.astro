@@ -1,0 +1,19 @@
+---
+/**
+ * Something to do or chase later.
+ *   <Followup due="2026-10-20">Ask the PO about chunk numbering.</Followup>
+ *   <Followup done>…</Followup>
+ */
+interface Props { id?: string; due?: string; done?: boolean; "data-loc"?: string }
+const { id, due, done = false, "data-loc": loc } = Astro.props;
+---
+<div
+  data-ref={`followup:${id ?? due ?? "?"}`}
+  data-loc={loc}
+  data-state={done ? "done" : "open"}
+  class="my-3 flex gap-3 rounded-md border border-surface-border bg-surface-primary px-4 py-2.5"
+>
+  <span class="font-mono text-on-surface-secondary">{done ? "☑" : "☐"}</span>
+  <div class:list={["flex-1 [&>p]:m-0", done && "text-on-surface-tertiary line-through"]}><slot /></div>
+  {due && <span class="text-small text-on-surface-secondary">due {due}</span>}
+</div>

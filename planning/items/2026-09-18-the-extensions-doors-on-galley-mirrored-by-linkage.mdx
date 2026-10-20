@@ -1,0 +1,47 @@
+---
+id: 4a5f1131-1cb6-42aa-a932-3fb94e64b366
+title: "The extensions doors — on galley, mirrored by linkage"
+kind: note
+status: done
+created: 2026-09-18
+updated: 2026-09-18
+sha: 32bf2df
+tags: [choices, onion]
+related: []
+source: planning/choices.md
+---
+
+**A door that lands only on `onion-wasm` does not exist.** `usfm-galley` is the
+superset module and the only build a host vendoring one package gets, so
+anything onion can do at the wall galley must do too. The rule is now in
+`galley/src/wasm.md` beside the door list, and it is enforced where it can
+fail loudly: `tests/sous_conformance.mjs` pins the EXACT export list.
+
+**Both doors are DEFINED in `onion-wasm` and re-exported by
+`galley::wasm::onion`, because that is the only shape that links.** Galley
+defines no free `#[wasm_bindgen]` function of its own and cannot: its cdylib
+links `onion-wasm`'s shims, so a second definition under the same `js_name`
+would collide symbol for symbol — which `wasm/onion.rs`'s own doc already
+says about wrappers. The re-export is the surface; the pinned list is the
+check. Adding the two names cost 0 new machinery and 2 lines there.
+
+**Two doors, not one, and reading installs nothing.** A host shows what a
+`markers.ext` gave it before acting on it, and a host whose markers come from
+a `custom.sty` or its own UI feeds `setExtensions` the list directly.
+
+**A file report carries its `line`; a list report has no `line` key.** The
+review flagged `Malformed.line == 0` as a sentinel. The shared mise type keeps
+it — the file reader is the common case and owns a real line — and the WIRE
+drops the field instead of crossing a zero, which is the boundary where the
+honest shape is free.
+
+**The category is judged at the door, every other reason at the registry.** An
+unknown `\category` word cannot reach `Extensions::new`, which takes a typed
+`ExtensionCategory`; everything else (no name, not `z`-initial, not
+alphanumeric, duplicate) is the registry's and answers the same reasons a file
+would get. Only malformed JSON throws — a bad ENTRY never costs a host the
+rest of its list.
+
+**`set_extensions`'s body is split from the door** the way `diffed` is:
+`JsError` cannot be constructed off a wasm target, so `installed()` is what
+the native tests call.

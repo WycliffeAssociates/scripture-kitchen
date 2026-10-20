@@ -1,0 +1,25 @@
+---
+id: d7b354bf-be3f-43cc-b042-34bac93a3d5a
+title: "`ws_after_name` — does the scanner need it?"
+kind: idea
+status: idea
+created: 2026-08-13
+updated: 2026-08-13
+sha: 32bf2df
+tags: [investigate-later, onion]
+related: []
+source: planning/investigate-later.md
+---
+
+Simplification leads that look real but haven't been checked. Each one's
+GOAL IS NET DELETION — if the investigation ends with more code than it
+started, the answer was no. Nothing here is committed to; nothing here
+blocks anything.
+
+**What:** Check whether `\b` is the only marker where the delimiter-fold
+column changes the scanner's answer (everything else is pure open/milestones-
+fold shape); if lint can own that one report, delete `folds_delimiter`'s row
+read, `Hot.folds`, and its `fused_plain` branch — the column itself stays,
+lint still needs it.
+**Why:** 151 rows, one counterexample, and `\b` takes no content anyway — a
+likely real net deletion. Do after 5B, before further `HotIdx` surgery.

@@ -1,0 +1,608 @@
+/*
+ * The design system, as plain custom properties — and the bridge that turns
+ * them into Tailwind utilities.
+ *
+ * Ported from the v1 editor's vanilla-extract contract
+ * (scripture-editor-proto-2 (via Sefer `src/app/ui/tokens.css`) `src/app/ui/styles/designSystem.css.ts` and
+ * `reset.css.ts`) so the two editors read as one product. The port is
+ * deliberately literal: the primitive ramps and the semantic names are the v1
+ * values, only the mechanism changed.
+ *
+ * Three rules for anything that consumes this file:
+ *
+ *  - Components reference SEMANTIC names (`--surface-primary`, or the
+ *    `bg-surface-primary` utility the `@theme` block below mints from it),
+ *    never the ramps (`--brand-40`). The ramps exist so the semantic layer has
+ *    one source; a component reaching past it re-decides the theme by hand.
+ *    Tailwind's own colour palette is switched off (`--color-*: initial`), so
+ *    `bg-slate-50` is a build error rather than a token that ignores the theme.
+ *  - Dark is a token swap, not a second stylesheet and NOT Tailwind's `dark:`
+ *    variant. `[data-theme="dark"]` (explicit choice) and
+ *    `prefers-color-scheme: dark` under `:not([data-theme="light"])` (system
+ *    default) redefine the same names, and every utility resolves through
+ *    them. The `dark` variant is redefined below to match those two selectors
+ *    only so that a stray `dark:` cannot disagree with the swap.
+ *  - The `@theme` block maps semantic names into Tailwind's namespaces. Colours
+ *    go through `@theme inline`, so a utility compiles to
+ *    `var(--surface-primary)` itself and the swap is the only indirection.
+ *
+ * Fonts are referenced by family name with a system fallback stack. Nothing is
+ * vendored: a host that has Charis SIL installed gets scripture in it, and a
+ * host that does not gets a serif, which is the honest degradation for a
+ * local-first app that must not block first paint on a webfont.
+ */
+
+/* `source(none)` because the automatic scan is rooted at this file's own
+   directory, which is three levels below the components that use utilities.
+   One explicit glob over `src/` is both wider and easier to audit. */
+@import "tailwindcss" source(none);
+@source "../**/*.{astro,ts,tsx,mdx}";
+@source "../../items/**/*.mdx";
+
+/* The only `dark:` that can exist here is one that agrees with the swap. */
+@custom-variant dark {
+  &:where([data-theme="dark"], [data-theme="dark"] *) {
+    @slot;
+  }
+  @media (prefers-color-scheme: dark) {
+    &:where(:root:not([data-theme="light"]), :root:not([data-theme="light"]) *) {
+      @slot;
+    }
+  }
+}
+
+:root {
+  /* Primitives — the ramps. Do not use these directly in a component. */
+  --brand-5: #00102e;
+  --brand-10: #001847;
+  --brand-20: #002c72;
+  --brand-30: #0040a0;
+  --brand-40: #0056d1;
+  --brand-50: #3070ef;
+  --brand-70: #88a9ff;
+  --brand-80: #b2c5ff;
+  --brand-90: #dae2ff;
+  --brand-95: #eef0ff;
+
+  --neutral-0: #000000;
+  --neutral-5: #0e0e0e;
+  --neutral-10: #1f1f1f;
+  --neutral-20: #343434;
+  --neutral-30: #4d4d4d;
+  --neutral-50: #808080;
+  --neutral-60: #999999;
+  --neutral-80: #cccccc;
+  --neutral-90: #e6e6e6;
+  --neutral-95: #f2f2f2;
+  --neutral-100: #ffffff;
+
+  /* Slate: the blue-grey of the projects page, from the
+     designer's mockups. A ramp like the others, so the semantic layer below
+     names a step and never a hex. */
+  --slate-20: #0f2f4c;
+  --slate-45: #516b86;
+  --slate-97: #f4f8fb;
+
+  --error-20: #611a16;
+  --error-30: #922821;
+  --error-40: #c33620;
+  --error-80: #e6aaa9;
+  --error-95: #f9edeb;
+
+  --warning-20: #5c4200;
+  --warning-25: #5c4a15;
+  --warning-30: #8a5e00;
+  --warning-80: #fadf9e;
+  --warning-90: #fbeaa8;
+  --warning-95: #fdf7e8;
+
+  --success-20: #386336;
+  --success-40: #61c76c;
+  --success-80: #b9e8c4;
+  --success-95: #e2f7e7;
+
+  /* Spacing and strokes — theme-independent, and not a Tailwind namespace, so
+     they stay ordinary properties for hand-written CSS. The type scale, the
+     radii, the shadows and the families live in the @theme block below, which
+     emits them onto :root as well. */
+  --font-ui: var(--font-sans);
+
+  --space-none: 0;
+  --space-xs: 0.25rem;
+  --space-sm: 0.5rem;
+  --space-md: 1rem;
+  --space-lg: 3rem;
+  --space-xl: 5rem;
+
+  --border-thin: 1px;
+  --border-thick: 2px;
+
+  /* Semantic contract — light. */
+  --brand-base: var(--brand-40);
+  --brand-dark: var(--brand-30);
+  --brand-light: var(--brand-95);
+
+  --surface-primary: var(--neutral-100);
+  --surface-secondary: var(--neutral-95);
+  --surface-tertiary: var(--neutral-90);
+  /* The app background, behind every screen (the shell root in _app.tsx). */
+  --surface-canvas: var(--slate-97);
+  --surface-border: var(--neutral-90);
+  --surface-overlay: rgba(15, 47, 76, 0.8);
+  --on-surface-primary: var(--neutral-5);
+  --on-surface-secondary: var(--slate-45);
+  --on-surface-tertiary: var(--neutral-60);
+
+  --surface-error: var(--error-95);
+  --on-surface-error: var(--error-40);
+  --surface-warning: var(--warning-95);
+  --on-surface-warning: var(--warning-30);
+
+  /* A found match, wherever it is shown: the excerpt cards, the satellite
+     inside one, and the editor's own hit. It is NOT `surface-warning` — a
+     warning is a judgement about the text and a highlight is a place in it,
+     and the two had drifted into the same yellow. */
+  --surface-highlight: var(--warning-90);
+  --on-surface-highlight: var(--warning-20);
+  --surface-success: var(--success-95);
+  --on-surface-success: var(--success-40);
+
+  /* The sidebar is a white panel, not a dark rail
+     (documentation/architecture/design-direction.md). The sidebar names stay
+     so nothing downstream re-decides the theme; they point at the ordinary
+     surface contract, which is why dark needs no sidebar block of its own. */
+  --sidebar-surface: var(--surface-primary);
+  --sidebar-surface-hover: var(--surface-secondary);
+  --sidebar-surface-active: var(--brand-light);
+  --sidebar-border: var(--surface-border);
+  --sidebar-on-surface: var(--on-surface-primary);
+  --sidebar-on-surface-muted: var(--on-surface-tertiary);
+
+  /* The inverted surface: near-black whatever the theme, with white on it —
+     for an overlay that must read the same over any screen (the project
+     panel's drag-to-close hint). Set here only, never overridden in the dark
+     blocks. `muted` is its secondary text. */
+  --surface-invert: var(--neutral-10);
+  --on-surface-invert: var(--neutral-100);
+  --on-surface-invert-muted: var(--neutral-60);
+
+  --button-primary-surface: var(--brand-40);
+  --button-primary-surface-hover: var(--brand-30);
+  --button-primary-on-surface: var(--neutral-100);
+  /* The primary button's gradient (lighter at the top), its pressed fill and
+     text, and its shadow colour. */
+  --button-primary-top: var(--brand-50);
+  --button-primary-bottom: var(--brand-40);
+  --button-primary-pressed: var(--brand-20);
+  --button-primary-pressed-on: var(--neutral-100);
+  --button-primary-shadow: var(--brand-20);
+  --button-secondary-surface: transparent;
+  --button-secondary-surface-hover: var(--neutral-95);
+  --button-secondary-on-surface: var(--neutral-5);
+  --button-secondary-border: var(--neutral-90);
+  --button-tertiary-surface-hover: var(--neutral-95);
+  --button-tertiary-on-surface: var(--neutral-20);
+
+  --kbd-surface: var(--slate-97);
+  --kbd-on-surface: rgba(15, 47, 76, 0.8);
+  --kbd-border: var(--neutral-90);
+
+  --shadow-small: 0 1px 2px 0 rgba(31, 31, 31, 0.12);
+  --shadow-medium: 0 2px 4px 0 rgba(31, 31, 31, 0.16), 0 1px 3px 0 rgba(31, 31, 31, 0.1);
+  --shadow-large: 0 4px 8px 0 rgba(31, 31, 31, 0.2), 0 2px 4px 0 rgba(31, 31, 31, 0.12);
+}
+
+/* Dark, as the token swap. Both selectors carry the same block: the explicit
+   choice must win over the system preference in both directions. */
+:root[data-theme="dark"] {
+  --brand-base: var(--brand-70);
+  --brand-dark: var(--brand-70);
+  --brand-light: var(--brand-5);
+
+  --surface-primary: var(--neutral-20);
+  --surface-secondary: var(--neutral-10);
+  --surface-tertiary: var(--neutral-5);
+  --surface-canvas: color-mix(in srgb, var(--brand-40) 6%, var(--neutral-10));
+  --surface-border: var(--neutral-5);
+  --surface-overlay: rgba(15, 47, 76, 0.8);
+  --on-surface-primary: var(--neutral-90);
+  --on-surface-secondary: var(--neutral-80);
+  --on-surface-tertiary: var(--neutral-50);
+
+  --surface-error: var(--error-20);
+  --on-surface-error: var(--error-80);
+  --surface-warning: var(--warning-20);
+  --on-surface-warning: var(--warning-80);
+  --surface-highlight: var(--warning-25);
+  --on-surface-highlight: var(--warning-80);
+  --surface-success: var(--success-20);
+  --on-surface-success: var(--success-80);
+
+  --button-primary-surface: var(--brand-70);
+  --button-primary-surface-hover: var(--brand-80);
+  --button-primary-on-surface: var(--neutral-10);
+  --button-primary-top: var(--brand-80);
+  --button-primary-bottom: var(--brand-70);
+  --button-primary-pressed: var(--brand-50);
+  --button-primary-pressed-on: var(--neutral-100);
+  --button-primary-shadow: var(--neutral-0);
+  --button-secondary-surface-hover: var(--neutral-10);
+  --button-secondary-on-surface: var(--neutral-90);
+  --button-secondary-border: var(--neutral-5);
+  --button-tertiary-surface-hover: var(--neutral-10);
+  --button-tertiary-on-surface: var(--neutral-80);
+
+  --kbd-surface: var(--neutral-10);
+  --kbd-on-surface: var(--neutral-80);
+  --kbd-border: var(--neutral-5);
+
+  --shadow-small: 0 1px 2px 0 rgba(0, 0, 0, 0.4);
+  --shadow-medium: 0 2px 4px 0 rgba(0, 0, 0, 0.5);
+  --shadow-large: 0 4px 8px 0 rgba(0, 0, 0, 0.6);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --brand-base: var(--brand-70);
+    --brand-dark: var(--brand-70);
+    --brand-light: var(--brand-5);
+
+    --surface-primary: var(--neutral-20);
+    --surface-secondary: var(--neutral-10);
+    --surface-tertiary: var(--neutral-5);
+    --surface-canvas: color-mix(in srgb, var(--brand-40) 6%, var(--neutral-10));
+    --surface-border: var(--neutral-5);
+    --surface-overlay: rgba(15, 47, 76, 0.8);
+    --on-surface-primary: var(--neutral-90);
+    --on-surface-secondary: var(--neutral-80);
+    --on-surface-tertiary: var(--neutral-50);
+
+    --surface-error: var(--error-20);
+    --on-surface-error: var(--error-80);
+    --surface-warning: var(--warning-20);
+    --on-surface-warning: var(--warning-80);
+    --surface-highlight: var(--warning-25);
+    --on-surface-highlight: var(--warning-80);
+    --surface-success: var(--success-20);
+    --on-surface-success: var(--success-80);
+
+    --button-primary-surface: var(--brand-70);
+    --button-primary-surface-hover: var(--brand-80);
+    --button-primary-on-surface: var(--neutral-10);
+    --button-primary-top: var(--brand-80);
+    --button-primary-bottom: var(--brand-70);
+    --button-primary-pressed: var(--brand-50);
+    --button-primary-pressed-on: var(--neutral-100);
+    --button-primary-shadow: var(--neutral-0);
+    --button-secondary-surface-hover: var(--neutral-10);
+    --button-secondary-on-surface: var(--neutral-90);
+    --button-secondary-border: var(--neutral-5);
+    --button-tertiary-surface-hover: var(--neutral-10);
+    --button-tertiary-on-surface: var(--neutral-80);
+
+    --kbd-surface: var(--neutral-10);
+    --kbd-on-surface: var(--neutral-80);
+    --kbd-border: var(--neutral-5);
+
+    --shadow-small: 0 1px 2px 0 rgba(0, 0, 0, 0.4);
+    --shadow-medium: 0 2px 4px 0 rgba(0, 0, 0, 0.5);
+    --shadow-large: 0 4px 8px 0 rgba(0, 0, 0, 0.6);
+  }
+}
+
+/*
+ * The bridge into Tailwind.
+ *
+ * Colours are `inline` so a utility compiles straight to `var(--surface-primary)`
+ * — one hop, and the dark swap above is the only place a colour is decided.
+ * Everything else is a plain `@theme`, which both mints the utility and emits
+ * the variable onto `:root`, so hand-written CSS (`src/editor/editor.css`) can
+ * keep saying `var(--radius-lg)`.
+ */
+@theme inline {
+  /* Tailwind's own palette is off: a colour that is not in the semantic
+     contract is not a colour this product has. `white`/`black` stay because
+     scrims and overlays are composed from them, never themed. */
+  --color-*: initial;
+  --color-transparent: transparent;
+  --color-current: currentColor;
+  --color-inherit: inherit;
+  --color-white: #ffffff;
+  --color-black: #000000;
+
+  --color-brand: var(--brand-base);
+  --color-brand-strong: var(--brand-dark);
+  --color-brand-light: var(--brand-light);
+
+  --color-surface-primary: var(--surface-primary);
+  --color-surface-secondary: var(--surface-secondary);
+  --color-surface-tertiary: var(--surface-tertiary);
+  --color-surface-canvas: var(--surface-canvas);
+  --color-surface-border: var(--surface-border);
+  --color-surface-overlay: var(--surface-overlay);
+  --color-surface-error: var(--surface-error);
+  --color-surface-warning: var(--surface-warning);
+  --color-surface-highlight: var(--surface-highlight);
+  --color-surface-success: var(--surface-success);
+
+  --color-on-surface-primary: var(--on-surface-primary);
+  --color-on-surface-secondary: var(--on-surface-secondary);
+  --color-on-surface-tertiary: var(--on-surface-tertiary);
+  --color-on-surface-error: var(--on-surface-error);
+  --color-on-surface-warning: var(--on-surface-warning);
+  --color-on-surface-highlight: var(--on-surface-highlight);
+  --color-on-surface-success: var(--on-surface-success);
+  --color-surface-invert: var(--surface-invert);
+  --color-on-surface-invert: var(--on-surface-invert);
+  --color-on-surface-invert-muted: var(--on-surface-invert-muted);
+
+  --color-sidebar-surface: var(--sidebar-surface);
+  --color-sidebar-surface-hover: var(--sidebar-surface-hover);
+  --color-sidebar-surface-active: var(--sidebar-surface-active);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-on-surface: var(--sidebar-on-surface);
+  --color-sidebar-on-surface-muted: var(--sidebar-on-surface-muted);
+
+  --color-button-primary-surface: var(--button-primary-surface);
+  --color-button-primary-surface-hover: var(--button-primary-surface-hover);
+  --color-button-primary-on-surface: var(--button-primary-on-surface);
+  --color-button-secondary-surface: var(--button-secondary-surface);
+  --color-button-secondary-surface-hover: var(--button-secondary-surface-hover);
+  --color-button-secondary-on-surface: var(--button-secondary-on-surface);
+  --color-button-secondary-border: var(--button-secondary-border);
+  --color-button-tertiary-surface-hover: var(--button-tertiary-surface-hover);
+  --color-button-tertiary-on-surface: var(--button-tertiary-on-surface);
+
+  --color-kbd-surface: var(--kbd-surface);
+  --color-kbd-on-surface: var(--kbd-on-surface);
+  --color-kbd-border: var(--kbd-border);
+}
+
+@theme {
+  --font-sans: Inter, "Inter var", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-scripture: "Charis SIL", Charis, Cambria, Georgia, serif;
+  --font-mono: "Atkinson Hyperlegible Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* The v1 type scale, added to Tailwind's own: `text-h3`, `text-small`. */
+  --text-h1: 3rem;
+  --text-h2: 2.25rem;
+  --text-h3: 1.5rem;
+  --text-h4: 1.25rem;
+  --text-body: 1rem;
+  --text-small: 0.875rem;
+  --text-smallest: 0.75rem;
+
+  /* The gap between neighbouring controls — buttons side by side, a
+     dialog's footer, a header's actions: `gap-controls`. One name, so the
+     designer's 12px is one value to change, not a `gap-3` on every screen. */
+  --spacing-controls: 0.75rem;
+
+  /* Our radii REPLACE Tailwind's, so `rounded-lg` is the product's 12px and
+     not the framework's 8px. The card radius the mockups use is lg/xl. */
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-full: 9999px;
+}
+
+/*
+ * The shadows are hand-written utilities, not `@theme` entries, and that is
+ * deliberate: Tailwind parses a themed shadow so it can offer `shadow-<color>`,
+ * which bakes the LIGHT colour into the class and leaves the dark override
+ * below unread. A one-line `@utility` keeps the swap.
+ */
+@utility shadow-small {
+  box-shadow: var(--shadow-small);
+}
+@utility shadow-medium {
+  box-shadow: var(--shadow-medium);
+}
+@utility shadow-large {
+  box-shadow: var(--shadow-large);
+}
+
+/* A scrollbar that stays out of the way: no track, a thin light-gray thumb.
+   Tokens, so the dark swap reaches it. */
+@utility scrollbar-subtle {
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface-tertiary) transparent;
+}
+
+/* A scrollbar that IS the container's right padding: a 16px track, always
+   reserved, with a 6px thumb centred in it — clear of the panel edge beside
+   it, which is a resize handle. No `scrollbar-width` here: Chrome ignores the
+   `::-webkit-scrollbar` rules on an element that sets it, so the standard
+   properties are only the fallback for engines without them (Firefox). */
+@utility scrollbar-padded {
+  scrollbar-gutter: stable;
+  &::-webkit-scrollbar {
+    width: 16px;
+    background: transparent;
+  }
+  &::-webkit-scrollbar-track {
+    background: transparent;
+    border: 0;
+  }
+  &::-webkit-scrollbar-thumb {
+    background-color: var(--surface-tertiary);
+    background-clip: padding-box;
+    border: 5px solid transparent;
+    border-radius: 9999px;
+  }
+  &::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in srgb, var(--surface-tertiary), var(--on-surface-primary) 25%);
+  }
+  @supports not selector(::-webkit-scrollbar) {
+    scrollbar-width: thin;
+    scrollbar-color: var(--surface-tertiary) transparent;
+  }
+}
+
+/* The reset essentials, in Tailwind's own `base` layer so every utility
+   outranks them. Preflight already ships most of this; what stays is the part
+   that is ours — the focus ring, the UI family, the tabular table figures. */
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+    background-repeat: no-repeat;
+  }
+
+  * {
+    margin: 0;
+    padding: 0;
+  }
+
+  html {
+    text-size-adjust: none;
+    -webkit-font-smoothing: antialiased;
+    line-height: 1.5;
+    block-size: 100%;
+    color-scheme: light dark;
+  }
+  /* An explicit theme must win for the browser's own chrome too — scrollbars,
+     form controls. Left at "light dark", a Light theme on an OS in dark mode
+     drew dark native scrollbars in the book list and the editor. */
+  :root[data-theme="light"] {
+    color-scheme: light;
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+  }
+
+  body {
+    min-block-size: 100%;
+    font-family: var(--font-ui);
+  }
+
+  img,
+  svg,
+  video,
+  canvas {
+    display: block;
+    max-inline-size: 100%;
+    block-size: auto;
+  }
+
+  input,
+  button,
+  textarea,
+  select {
+    font: inherit;
+    color: inherit;
+  }
+
+  textarea {
+    resize: vertical;
+  }
+
+  fieldset {
+    border: none;
+  }
+
+  p,
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    overflow-wrap: break-word;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  input,
+  label,
+  button,
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    /* 150% everywhere, controls and headings included — the same as body. */
+    line-height: 1.5;
+  }
+
+  table {
+    border-collapse: collapse;
+    font-variant-numeric: tabular-nums lining-nums slashed-zero;
+  }
+
+  :disabled {
+    opacity: 0.8;
+    cursor: not-allowed;
+  }
+
+  :focus-visible {
+    outline: var(--border-thick) solid var(--brand-base);
+    outline-offset: 2px;
+  }
+}
+
+/* The primary button, every one: a light-to-dark brand gradient, a 1px edge
+   that is white fading from 20% at the top to nothing, and a soft brand drop
+   shadow. Hovered, both ends the darker blue and no shadow. Pressed (a
+   toggle that is on — Spiritual terms' Approved), recessed: both ends the
+   dark pressed blue, an inner shadow instead of a drop. Disabled, flat.
+
+   Unlayered on purpose: Tailwind's utilities live in layers, and a rule
+   outside every layer outranks them all, so the base `aria-pressed:` and
+   `disabled:` fills on `Button` cannot paint over these three states. */
+/* The two ends of the primary button's fill, registered as colours so the
+   browser can ease between them: hover and pressed change the ends, never the
+   gradient itself, so there is always a fill and no frame without one. */
+@property --button-primary-from {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: transparent;
+}
+@property --button-primary-to {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: transparent;
+}
+.button-primary {
+  --button-primary-from: var(--button-primary-top);
+  --button-primary-to: var(--button-primary-bottom);
+  border: 1px solid transparent;
+  background-image:
+    linear-gradient(to bottom, var(--button-primary-from), var(--button-primary-to)),
+    linear-gradient(to bottom, rgb(255 255 255 / 20%), rgb(255 255 255 / 0%)),
+    linear-gradient(to bottom, var(--button-primary-from), var(--button-primary-to));
+  /* The top gradient fills inside the edge; under it, the white fade over the
+     same gradient shows only in the 1px edge. */
+  background-clip: padding-box, border-box, border-box;
+  background-origin: border-box;
+  color: var(--button-primary-on-surface);
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--button-primary-shadow) 30%, transparent);
+  transition:
+    --button-primary-from 150ms ease-in-out,
+    --button-primary-to 150ms ease-in-out,
+    box-shadow 150ms ease-in-out;
+}
+/* Hovered: both ends the darker blue, no shadow. */
+.button-primary:hover:not(:disabled):not([aria-pressed="true"]) {
+  --button-primary-from: var(--button-primary-bottom);
+  box-shadow: none;
+}
+/* Pressed: both ends the dark pressed blue, recessed. */
+.button-primary[aria-pressed="true"] {
+  --button-primary-from: var(--button-primary-pressed);
+  --button-primary-to: var(--button-primary-pressed);
+  color: var(--button-primary-pressed-on);
+  box-shadow: inset 0 2px 4px rgb(0 0 0 / 35%);
+}
+.button-primary:disabled,
+.button-primary[aria-disabled="true"] {
+  --button-primary-from: var(--surface-secondary);
+  --button-primary-to: var(--surface-secondary);
+  color: var(--on-surface-tertiary);
+  box-shadow: none;
+}

@@ -1,0 +1,25 @@
+---
+/**
+ * An open question. Answered when it has an `answer`.
+ *   <Question id="storage">SQLite or files?</Question>
+ *   <Question id="storage" answer="MDX files">SQLite or files?</Question>
+ */
+interface Props { id?: string; answer?: string; "data-loc"?: string }
+const { id, answer, "data-loc": loc } = Astro.props;
+const open = answer === undefined;
+---
+<aside
+  data-ref={`question:${id ?? "?"}`}
+  data-loc={loc}
+  data-state={open ? "open" : "answered"}
+  class:list={[
+    "my-4 rounded-md border px-4 py-3",
+    open ? "border-on-surface-warning bg-surface-warning" : "border-surface-border bg-surface-primary",
+  ]}
+>
+  <div class="mb-1 text-smallest font-semibold uppercase tracking-wide text-on-surface-secondary">
+    {open ? "Open question" : "Answered"}{id && <span class="ms-2 font-mono normal-case">{id}</span>}
+  </div>
+  <div class="[&>p]:m-0"><slot /></div>
+  {!open && <p class="mt-2 mb-0"><span class="text-on-surface-secondary">→</span> <strong>{answer}</strong></p>}
+</aside>

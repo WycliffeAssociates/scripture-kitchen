@@ -1,0 +1,13 @@
+---
+/**
+ * A checkpoint that is not a plan: a review, a feedback loop, a decision.
+ * Drawn apart from steps so hand-offs stand out.
+ *   <Gate who="you">Try it on a real project; iterate on feedback.</Gate>
+ */
+interface Props { who?: string; "data-loc"?: string }
+const { who = "you", "data-loc": loc } = Astro.props;
+---
+<article class="roadmap-gate" data-ref={`gate:${who}`} data-loc={loc}>
+  <div class="text-smallest font-semibold uppercase tracking-wide text-brand">◆ {who}</div>
+  <div class="mt-1 text-small [&>p]:m-0"><slot /></div>
+</article>

@@ -1,0 +1,187 @@
+/*
+ * The planning site's own rules on top of the shared tokens. Same contract as
+ * Sefer's app.css: semantic names only, dark is the token swap.
+ */
+@import "./tokens.css";
+
+@layer base {
+  body {
+    background: var(--surface-canvas);
+    color: var(--on-surface-primary);
+    font-family: var(--font-sans);
+    font-size: var(--text-body);
+    line-height: 1.55;
+  }
+  a { color: var(--brand-base); }
+  code, pre, kbd { font-family: var(--font-mono); }
+}
+
+@layer components {
+  /* An item's MDX body. Prose keeps a reading measure; figures (code, diffs,
+     graphs, trees) take the whole width. */
+  .prose > :where(p, ul, ol, blockquote, h2, h3, h4, aside, [data-ref^="followup:"]) { max-inline-size: 75ch; }
+  .prose > * + * { margin-block-start: 0.9em; }
+  .prose h1 { font-size: var(--text-h3); font-weight: 650; line-height: 1.2; }
+  .prose h2 { font-size: var(--text-h4); font-weight: 650; margin-block-start: 2em; }
+  .prose h3 { font-size: 1.1rem; font-weight: 650; margin-block-start: 1.6em; }
+  .prose ul { list-style: disc; padding-inline-start: 1.4em; }
+  .prose ol { list-style: decimal; padding-inline-start: 1.4em; }
+  .prose li + li { margin-block-start: 0.25em; }
+  .prose blockquote {
+    border-inline-start: var(--border-thick) solid var(--surface-border);
+    padding-inline-start: 1em;
+    color: var(--on-surface-secondary);
+  }
+  .prose :not(pre) > code {
+    background: var(--surface-tertiary);
+    border-radius: var(--radius-xs);
+    padding: 0.05em 0.3em;
+    font-size: 0.9em;
+  }
+  .prose pre {
+    border: var(--border-thin) solid var(--surface-border);
+    border-radius: var(--radius-md);
+    padding: 0.8em 1em;
+    overflow-x: auto;
+    font-size: var(--text-small);
+  }
+  .prose table { border-collapse: collapse; font-size: var(--text-small); }
+  .prose th, .prose td {
+    border: var(--border-thin) solid var(--surface-border);
+    padding: 0.35em 0.6em;
+    text-align: start;
+  }
+
+  /* Shiki's dual themes: light by default, dark under the same swap as tokens. */
+  [data-theme="dark"] :is(.astro-code, .shiki),
+  [data-theme="dark"] :is(.astro-code, .shiki) span {
+    color: var(--shiki-dark) !important;
+    background-color: var(--shiki-dark-bg) !important;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) :is(.astro-code, .shiki),
+    :root:not([data-theme="light"]) :is(.astro-code, .shiki) span {
+      color: var(--shiki-dark) !important;
+      background-color: var(--shiki-dark-bg) !important;
+    }
+  }
+
+  /* <Source> and <Diff>: one line per row, a gutter, and line states. */
+  .code pre { margin: 0; border: 0; border-radius: 0; padding: 0.5em 0; overflow-x: auto; font-size: var(--text-small); }
+  .prose .code pre { border: 0; border-radius: 0; padding: 0.5em 0; }
+  .code pre code { display: flex; flex-direction: column; min-inline-size: max-content; }
+  .code .line { padding-inline: 1em; min-block-size: 1.5em; }
+  .code .gutter {
+    display: inline-block; margin-inline-end: 1.25em; white-space: pre;
+    color: var(--on-surface-tertiary) !important; user-select: none;
+  }
+  /* `.shiki` in the selector: the dark-theme rule above is 0,3,1 and would win. */
+  .code .shiki .line[data-hl] { background: color-mix(in srgb, var(--surface-highlight) 70%, transparent) !important; }
+  .code .shiki .line[data-hl] span { background-color: transparent !important; }
+
+  /* <Diff>: rows in a grid, so long lines wrap and both sides stay level. */
+  .diff { container-type: inline-size; }
+  .diff :is(.diff-unified, .diff-split) { font-family: var(--font-mono); font-size: var(--text-small); padding-block: 0.4em; }
+  .diff .diff-row { display: grid; line-height: 1.5; }
+  .diff .diff-unified .diff-row { grid-template-columns: 4.5ch 4.5ch 2.5ch minmax(0, 1fr); }
+  .diff .diff-split .diff-row { grid-template-columns: 4.5ch minmax(0, 1fr) 4.5ch minmax(0, 1fr); }
+  .prose .diff .diff-row > code, .diff .diff-row > code {
+    display: block; margin: 0; padding: 0 1em 0 0.5em; background: none; border-radius: 0;
+    font-size: inherit; white-space: pre-wrap; overflow-wrap: anywhere;
+  }
+  .diff .no, .diff .sign { color: var(--on-surface-tertiary); text-align: end; padding-inline: 0.25em; user-select: none; }
+  .diff .diff-split .no:nth-of-type(2) { border-inline-start: var(--border-thin) solid var(--surface-border); }
+  /* Specific enough to beat the cell reset above (`.prose .diff .diff-row > code`). */
+  .diff .diff-unified .diff-row[data-sign="add"],
+  .diff .diff-split .diff-row > [data-sign="add"] { background: color-mix(in srgb, var(--surface-success) 85%, transparent); }
+  .diff .diff-unified .diff-row[data-sign="del"],
+  .diff .diff-split .diff-row > [data-sign="del"] { background: color-mix(in srgb, var(--surface-error) 85%, transparent); }
+  .diff .diff-split .diff-row > code[data-sign="none"] {
+    background: repeating-linear-gradient(-45deg, transparent 0 6px, var(--surface-secondary) 6px 12px);
+  }
+  .diff [data-sign] .sign { color: inherit; }
+
+  /* Unified by default; side by side once the box is wide, or when asked. */
+  .diff .diff-split { display: none; }
+  .diff[data-view="split"] .diff-unified { display: none; }
+  .diff[data-view="split"] .diff-split { display: block; }
+  @container (min-width: 60rem) {
+    .diff[data-view="auto"] .diff-unified { display: none; }
+    .diff[data-view="auto"] .diff-split { display: block; }
+  }
+  .diff .hunk {
+    padding: 0.2em 1em; font-family: var(--font-mono); font-size: var(--text-smallest);
+    color: var(--on-surface-secondary); background: var(--surface-secondary);
+    border-block: var(--border-thin) solid var(--surface-border);
+  }
+
+  /* <Machine> and <Modules>: SVG in the same tokens, so dark mode is free. */
+  .graph svg { font-family: var(--font-sans); cursor: grab; }
+  .graph svg:active { cursor: grabbing; }
+  .graph .glabel { font-size: 13px; fill: var(--on-surface-primary); }
+  .graph .gsub { font-size: 11px; fill: var(--on-surface-secondary); }
+  .graph .gnode .box { fill: var(--surface-primary); stroke: var(--on-surface-tertiary); stroke-width: 1; }
+  .graph .gnode .inner { fill: none; stroke: var(--on-surface-tertiary); }
+  .graph .gnode .dot { fill: var(--on-surface-primary); }
+  .graph .ggroup rect { fill: var(--surface-secondary); stroke: var(--surface-border); }
+  .graph .ggroup .glabel { font-size: 12px; font-weight: 600; fill: var(--on-surface-secondary); }
+  .graph .gedge path { fill: none; stroke: var(--on-surface-tertiary); stroke-width: 1.25; }
+  .graph .arrowhead { fill: var(--on-surface-tertiary); }
+  .graph .gedge-label { font-size: 11px; font-family: var(--font-mono); fill: var(--on-surface-secondary); }
+  .graph .gedge-label-bg { fill: var(--surface-primary); }
+
+  .graph [data-tone="new"] :is(.box, rect) { fill: var(--surface-success); stroke: var(--on-surface-success); }
+  .graph [data-tone="changed"] :is(.box, rect) { fill: var(--surface-warning); stroke: var(--on-surface-warning); }
+  .graph [data-tone="deleted"] :is(.box, rect) { fill: var(--surface-error); stroke: var(--on-surface-error); stroke-dasharray: 4 3; }
+  .graph [data-tone="moved"] :is(.box, rect) { fill: var(--brand-light); stroke: var(--brand-base); }
+
+  /* Stepping through a <Machine>. */
+  .graph .gnode[data-active] .box { fill: var(--brand-light); stroke: var(--brand-base); stroke-width: 2; }
+  .graph .ggroup[data-active] rect { stroke: var(--brand-base); }
+  .graph .gedge[data-taken] path { stroke: var(--brand-base); stroke-width: 2; }
+  .graph .gedge[data-taken] .gedge-label { fill: var(--brand-base); }
+
+  /* The roadmap: phases of numbered steps, left to right, arrows between. */
+  .roadmap-body { counter-reset: step; }
+  .roadmap-body > .roadmap-phase { max-inline-size: none; }
+  /* Centred, so a short gate does not stretch to a tall neighbour and the arrows sit mid-card. */
+  .roadmap-flow { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem 2rem; }
+  .roadmap-flow > :is(.roadmap-step, .roadmap-gate, .roadmap-together) { position: relative; }
+  .roadmap-flow > * + *::before {
+    content: "→"; position: absolute; inset-inline-start: -1.45rem; top: 50%;
+    transform: translateY(-50%); color: var(--on-surface-tertiary);
+  }
+  .roadmap-together {
+    display: flex; flex-direction: column; gap: 0.5rem; padding: 0.5rem;
+    border: var(--border-thin) dashed var(--surface-border); border-radius: var(--radius-lg);
+  }
+  .roadmap-step, .roadmap-gate {
+    inline-size: 16rem; padding: 0.6rem 0.8rem; border-radius: var(--radius-md);
+    border: var(--border-thin) solid var(--surface-border); background: var(--surface-primary);
+  }
+  .roadmap-step { counter-increment: step; border-inline-start-width: 4px; }
+  .roadmap-n::before { content: counter(step); font-family: var(--font-mono); font-size: var(--text-small); color: var(--on-surface-tertiary); }
+  .roadmap-gate { background: var(--brand-light); border-color: var(--brand-base); border-style: dashed; }
+  .roadmap-status { border-radius: var(--radius-full); padding: 0 0.45rem; background: var(--surface-tertiary); color: var(--on-surface-secondary); }
+
+  .roadmap-step[data-status="discussing"] { border-inline-start-color: var(--on-surface-warning); }
+  .roadmap-step[data-status="planned"] { border-inline-start-color: var(--brand-base); }
+  .roadmap-step[data-status="in-progress"] { border-inline-start-color: var(--brand-base); background: var(--brand-light); }
+  .roadmap-step[data-status="in-progress"] .roadmap-status { background: var(--brand-base); color: var(--on-surface-invert); }
+  .roadmap-step[data-status="done"] { border-inline-start-color: var(--on-surface-success); opacity: 0.75; }
+  .roadmap-step[data-status="done"] .roadmap-status { background: var(--surface-success); color: var(--on-surface-success); }
+  .roadmap-step:is([data-status="parked"], [data-status="dropped"]) { opacity: 0.55; }
+  .roadmap-step[data-status="missing"] { border-color: var(--on-surface-error); border-style: dashed; }
+
+  .plans-select-chip {
+    position: absolute;
+    z-index: 2147482000;
+    background: var(--surface-invert);
+    color: var(--on-surface-invert);
+    border-radius: var(--radius-full);
+    padding: 0.15rem 0.7rem;
+    font-size: var(--text-small);
+    box-shadow: var(--shadow-md, 0 2px 4px rgba(0, 0, 0, 0.2));
+    cursor: pointer;
+  }
+}
