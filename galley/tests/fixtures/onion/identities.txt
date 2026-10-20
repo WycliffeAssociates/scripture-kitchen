@@ -1,0 +1,28 @@
+v1:o:unknown-marker:GEN 1%3A1:\zqq:0
+  v1:os:unknown-marker:zqq
+v1:o:orphan-closer:GEN 1%3A1:\zqq*:0
+  no subject
+v1:o:unknown-marker:GEN 1%3A1:\zqq:2
+  v1:os:unknown-marker:zqq
+v1:o:orphan-closer:GEN 1%3A1:\zqq*:1
+  no subject
+v1:o:missing-paragraph:GEN 1%3A2:\v:0
+  no subject
+v1:o:deprecated-marker:GEN 1%3A2:\pro:0
+  v1:os:deprecated-marker:pro
+v1:o:attr-unknown-name:GEN 1%3A2:|nope="a%3Ab":0
+  v1:os:attr-unknown-name:w:nope
+v1:o:attr-unknown-name:GEN 1%3A2:|nope="a%3Ab":1
+  v1:os:attr-unknown-name:w:nope
+v1:o:attr-unknown-name:GEN 1%3A3:|lemma="x" gloss="be":0
+  no subject
+v1:o:unknown-marker:GEN 1%3A3:\+zqq:0
+  v1:os:unknown-marker:zqq
+v1:o:orphan-closer:GEN 1%3A3:\+zqq*:0
+  no subject
+v1:o:missing-paragraph:GEN 1%3A5:\v:0
+  no subject
+v1:o:verse-gap:GEN 1%3A5:5:0
+  no subject
+v1:o:attr-unknown-name:GEN 1%3A6:| bare:0
+  no subject

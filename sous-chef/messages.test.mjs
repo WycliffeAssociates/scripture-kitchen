@@ -10,7 +10,14 @@ import { test } from "node:test";
 
 import { FindingsSnapshot } from "../galley/sous-reader.ts";
 import { describe, markBefore } from "../galley/sous-messages.ts";
-import { identityOf, ordinalOf, patternIdentity, siteIdentityOf } from "../galley/sous-identity.ts";
+import {
+  diagnosticIdentityOf,
+  diagnosticSubjectIdentity,
+  identityOf,
+  ordinalOf,
+  patternIdentity,
+  siteIdentityOf,
+} from "../galley/sous-identity.ts";
 import { kindOf } from "../galley/sous-unicode.ts";
 import { codePointOf, nameOf } from "../galley/sous-unicode-names.ts";
 
@@ -102,6 +109,28 @@ test("fields escape their separator and ordinals count earlier starts", () => {
   assert.equal(ordinalOf("a a, a", "a", 5), 2);
   assert.equal(ordinalOf("aaa", "aa", 1), 1);
   assert.throws(() => siteIdentityOf({ ...site, ordinal: -1 }));
+});
+
+test("an onion diagnostic is named by its code and place, and by its subject where it has one", () => {
+  const site = { verseRef: "GEN 1:2", siteText: '|nope="a:b%"', ordinal: 1 };
+  assert.equal(diagnosticIdentityOf("attr-unknown-name", site), 'v1:o:attr-unknown-name:GEN 1%3A2:|nope="a%3Ab%25":1');
+  assert.throws(() => diagnosticIdentityOf("verse-gap", { ...site, ordinal: 0.5 }));
+  const subjects = [
+    ["unknown-marker", "\\zqq", null, "v1:os:unknown-marker:zqq"],
+    ["unknown-marker", "\\+zqq", null, "v1:os:unknown-marker:zqq"],
+    ["deprecated-marker", "\\pro", null, "v1:os:deprecated-marker:pro"],
+    ["attr-unknown-name", '|nope="x"', "\\w", "v1:os:attr-unknown-name:w:nope"],
+    ["attr-unknown-name", '|x-occurrence="1" nope = "x:y"', "\\w", "v1:os:attr-unknown-name:w:nope"],
+    ["attr-unknown-name", '|lemma="x" gloss="y"', "\\w", undefined],
+    ["attr-unknown-name", "| bare", "\\add", undefined],
+    ["attr-unknown-name", '|nope="x"', null, undefined],
+    ["unknown-marker", "zqq", null, undefined],
+    ["verse-gap", "5", "3", undefined],
+    ["missing-paragraph", "\\v", null, undefined],
+  ];
+  for (const [name, siteText, secondText, subject] of subjects) {
+    assert.equal(diagnosticSubjectIdentity(name, siteText, secondText), subject, `${name} on ${siteText}`);
+  }
 });
 
 test("the kinds and names tables answer from UCD 17.0.0", () => {

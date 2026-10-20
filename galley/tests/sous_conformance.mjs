@@ -18,7 +18,7 @@
  * and prints the four steps a host actually pays for. Timing is a report, not
  * an assertion.
  */
-import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 const pkg = resolve(process.argv[2] ?? "pkg-node");
@@ -896,6 +896,55 @@ eq(galley.changedSinceUpdate("books/JON.usfm", fixture("JON.usfm")).length, 0, "
 eq(galley.changedSinceUpdate("books/NUM.usfm", fixture("JON.usfm")), undefined, "unregistered");
 baseline.free();
 current.free();
+
+// --- an onion diagnostic's identities, pinned on real lint output -----------
+//
+//   UPDATE_IDENTITIES=1 node tests/sous_conformance.mjs pkg-node   rewrites
+//   fixtures/onion/identities.txt; a change to it is a change to a persisted
+//   contract and needs a migration (sous-messages.md, Stable identity).
+
+{
+  const { deserialize } = await import(resolve(here, "../../onion-wasm/reader.ts"));
+  const { diagnosticIdentityOf, diagnosticSubjectIdentity, ordinalOf } = await import(resolve(here, "../sous-identity.ts"));
+  const held = resolve(here, "fixtures/onion/identities.txt");
+  const text = readFileSync(resolve(here, "fixtures/onion/lint.usfm"), "utf8");
+  const linted = new Galley();
+  linted.update("books/GEN.usfm", text);
+  const dish = deserialize(linted.parse("books/GEN.usfm", { diagnostics: true, utf16: true }));
+  const verseOf = (at) => {
+    let [chapter, verse, start] = [0, 0, 0];
+    for (const match of text.matchAll(/\\(c|v) (\d+)/g)) {
+      if (match.index > at) break;
+      if (match[1] === "c") [chapter, verse] = [Number(match[2]), 0];
+      else verse = Number(match[2]);
+      start = match.index;
+    }
+    return { verseRef: `GEN ${chapter}:${verse}`, start };
+  };
+  const lines = [];
+  for (const diagnostic of dish.diagnostics) {
+    const { from, to } = diagnostic.span();
+    const second = diagnostic.second();
+    const name = diagnostic.code().name;
+    const siteText = text.slice(from, to);
+    const { verseRef, start } = verseOf(from);
+    const ordinal = ordinalOf(text.slice(start, to), siteText, from - start);
+    lines.push(diagnosticIdentityOf(name, { verseRef, siteText, ordinal }));
+    lines.push(`  ${diagnosticSubjectIdentity(name, siteText, second && text.slice(second.from, second.to)) ?? "no subject"}`);
+  }
+  linted.free();
+  const fresh = `${lines.join("\n")}\n`;
+  if (process.env.UPDATE_IDENTITIES === "1") writeFileSync(held, fresh);
+  const names = new Set([...dish.diagnostics].map((d) => d.code().name));
+  for (const name of ["unknown-marker", "deprecated-marker", "attr-unknown-name", "verse-gap"]) {
+    check(names.has(name), `the lint fixture raises ${name}`);
+  }
+  check(lines.some((line) => line.endsWith(":1")), "the lint fixture repeats a flagged text in one verse");
+  check(
+    fresh === readFileSync(held, "utf8"),
+    "the onion identity format changed: identities are saved by consumers, so this needs a migration (sous-messages.md, Stable identity)",
+  );
+}
 
 // --- the keystroke lifecycle, if a corpus is here -------------------------
 
