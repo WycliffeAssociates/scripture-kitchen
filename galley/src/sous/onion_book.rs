@@ -87,7 +87,11 @@ impl OnionBook {
             spans: SourceSpans {
                 mask: &self.mask,
                 projected: range,
-                at: 0,
+                at: self
+                    .mask
+                    .starts
+                    .partition_point(|&start| start <= range.from())
+                    .saturating_sub(1),
             },
         })
     }
@@ -223,6 +227,9 @@ impl Iterator for SourceSpans<'_> {
     fn next(&mut self) -> Option<Self::Item> {
         while let Some(source) = self.mask.ranges.get(self.at) {
             let projected_start = self.mask.starts[self.at];
+            if projected_start >= self.projected.to() {
+                return None;
+            }
             let projected_end = projected_start + source.end - source.start;
             self.at += 1;
 
