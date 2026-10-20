@@ -15,7 +15,7 @@ use super::{CodecError, FindingFlags};
 /// One deterministic hygiene class. The discriminant rides the first payload
 /// lane, so values are fixed and append-only like rule codes.
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum HygieneClass {
     /// C0 control other than tab, LF, or the CR of a CRLF pair.
     C0Control = 0,

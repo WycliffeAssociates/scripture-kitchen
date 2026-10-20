@@ -26,6 +26,8 @@
 //! What each class claims and when it stays silent: `rules/hygiene.md`.
 //! Scan shape, throughput, and the lone-backslash caveat: hygiene.md.
 
+pub mod groups;
+
 use crate::pass::{ChapterInput, ChapterObs, ChapterPass, Findings, SchemaStamp};
 use mise::unicode::{Class, bits, class_of};
 
