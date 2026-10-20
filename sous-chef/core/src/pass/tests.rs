@@ -3,8 +3,8 @@
 
 use super::*;
 use crate::{
-    Brigade, HygieneClass, HygieneDigest, Reasons, VerseKey, hygiene::HygieneBytes,
-    substrate::Substrate, validate, words::Words,
+    Anchor, Brigade, HygieneClass, HygieneDigest, HygieneSite, Placement, Reasons, VerseKey,
+    hygiene::HygieneBytes, substrate::Substrate, validate, words::Words,
 };
 
 struct Book {
@@ -481,7 +481,12 @@ impl ChapterPass for LastByte {
                 out.push(
                     TextRange::new(start, start).unwrap(),
                     FindingKind::Hygiene(
-                        HygieneDigest::new(HygieneClass::C0Control, u32::from(seen) + 1).unwrap(),
+                        HygieneDigest::new(
+                            HygieneClass::C0Control,
+                            u32::from(seen) + 1,
+                            HygieneSite::new(Placement::AtEdge, Anchor::Exact, true, false),
+                        )
+                        .unwrap(),
                     ),
                 )
                 .expect("a chapter start lies inside its book");

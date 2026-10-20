@@ -1,9 +1,11 @@
-//! Lanes for `RuleCode::Hygiene`: the class discriminant, then the run
-//! length. The scan is `crate::hygiene`; this is only its wire shape.
+//! Lanes for `RuleCode::Hygiene`: the class discriminant in lane A's low
+//! byte and the run's site in its high byte, then the run length. The scan is
+//! `crate::hygiene`; this is only its wire shape.
 //!
 //! ```text
-//! lanes  [0, 223]              →  C0Control, a 223-code-point run
-//! lanes  [1, i16::MAX] + SATURATED  →  Delete, a run longer than 32767
+//! lanes  [0x2000, 223]                →  C0Control, BesideSpace, Exact, one unit, a 223-code-point run
+//! lanes  [0x6c01, i16::MAX] + SATURATED  →  Delete, Alone, AtStart, one unit, lone silent, a run past 32767
+//! lanes  [0x3008, 1]                  →  MisplacedFormat, BesideSpace, AtEnd, one unit
 //! ```
 
 use mise::unicode::Class;
@@ -213,9 +215,9 @@ impl Anchor {
 pub struct HygieneSite(u8);
 
 impl HygieneSite {
-    const ANCHOR_SHIFT: u8 = 3;
-    const ONE_UNIT: u8 = 1 << 5;
-    const LONE_IS_SILENT: u8 = 1 << 6;
+    pub const ANCHOR_SHIFT: u8 = 3;
+    pub const ONE_UNIT: u8 = 1 << 5;
+    pub const LONE_IS_SILENT: u8 = 1 << 6;
 
     /// `one_unit`: every scalar of the run is one UTF-16 unit, so `run` is
     /// its UTF-16 length. `lone_is_silent`: the run repeats one scalar, and
@@ -286,19 +288,32 @@ impl HygieneSite {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HygieneDigest {
     class: HygieneClass,
+    site: HygieneSite,
     run: u32,
 }
 
 impl HygieneDigest {
-    pub fn new(class: HygieneClass, run: u32) -> Result<Self, CodecError> {
+    pub fn new(class: HygieneClass, run: u32, site: HygieneSite) -> Result<Self, CodecError> {
         if run == 0 {
             return Err(CodecError::EmptyHygieneRun);
         }
-        Ok(Self { class, run })
+        Ok(Self { class, site, run })
     }
 
     pub const fn class(self) -> HygieneClass {
         self.class
+    }
+
+    pub const fn site(self) -> HygieneSite {
+        self.site
+    }
+
+    /// The same row for a published span its run is not one piece of.
+    pub const fn unanchored(self) -> Self {
+        Self {
+            site: self.site.unanchored(),
+            ..self
+        }
     }
 
     /// The run length as it will be read back: exact below `i16::MAX`.
@@ -317,18 +332,21 @@ impl HygieneDigest {
 
 impl HygieneDigest {
     pub(super) fn lanes(self) -> [i16; 2] {
-        [self.class as i16, self.run() as i16]
+        let lane = u16::from(self.site.bits()) << 8 | self.class as u16;
+        [lane as i16, self.run() as i16]
     }
 
     pub(super) fn from_lanes(lanes: [i16; 2], flags: FindingFlags) -> Result<Self, CodecError> {
-        let class = HygieneClass::try_from(lanes[0])?;
+        let [class, site] = (lanes[0] as u16).to_le_bytes();
+        let class = HygieneClass::try_from(i16::from(class))?;
+        let site = HygieneSite::from_bits(site)?;
         let run = u32::try_from(lanes[1]).map_err(|_| CodecError::EmptyHygieneRun)?;
         // A saturated row reads back exactly i16::MAX.
         let saturated = flags.contains(FindingFlags::SATURATED);
         if saturated && run != i16::MAX as u32 {
             return Err(CodecError::UnknownFlags(flags.bits()));
         }
-        Self::new(class, if saturated { run + 1 } else { run })
+        Self::new(class, if saturated { run + 1 } else { run }, site)
     }
 }
 
@@ -339,12 +357,25 @@ mod tests {
 
     static BOOK_LENGTHS: [u32; 1] = [u32::MAX];
 
+    const BESIDE_SPACE: HygieneSite =
+        HygieneSite::new(Placement::BesideSpace, Anchor::Exact, true, false);
+
     fn hygiene(from: u32, to: u32, class: HygieneClass, run: u32) -> PackedFinding {
+        sited(from, to, class, run, BESIDE_SPACE)
+    }
+
+    fn sited(
+        from: u32,
+        to: u32,
+        class: HygieneClass,
+        run: u32,
+        site: HygieneSite,
+    ) -> PackedFinding {
         PackedFinding::new(
             from,
             to,
             BookIndex::new(0).unwrap(),
-            FindingKind::Hygiene(HygieneDigest::new(class, run).unwrap()),
+            FindingKind::Hygiene(HygieneDigest::new(class, run, site).unwrap()),
             &BOOK_LENGTHS,
         )
         .unwrap()
@@ -356,7 +387,7 @@ mod tests {
         assert_eq!(
             record.encode(),
             [
-                0x07, 0x00, 0x00, 0x00, 0xe6, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
+                0x07, 0x00, 0x00, 0x00, 0xe6, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x20,
                 0xdf, 0x00,
             ]
         );
@@ -365,6 +396,7 @@ mod tests {
             panic!("hygiene kind")
         };
         assert_eq!(digest.class(), HygieneClass::C0Control);
+        assert_eq!(digest.site(), BESIDE_SPACE);
         assert_eq!(digest.run(), 223);
         assert!(!digest.saturated());
     }
@@ -384,6 +416,63 @@ mod tests {
     }
 
     #[test]
+    fn every_site_round_trips_in_lane_a_high_byte() {
+        for placement in Placement::ALL {
+            for anchor in Anchor::ALL {
+                for (one_unit, lone_is_silent) in
+                    [(false, false), (true, false), (false, true), (true, true)]
+                {
+                    let site = HygieneSite::new(placement, anchor, one_unit, lone_is_silent);
+                    let record = sited(0, 3, HygieneClass::MisplacedFormat, 1, site);
+                    assert_eq!(record.encode()[12], HygieneClass::MisplacedFormat as u8);
+                    assert_eq!(record.encode()[13], site.bits());
+                    let FindingKind::Hygiene(digest) =
+                        PackedFinding::decode(&record.encode(), &[3])
+                            .unwrap()
+                            .kind()
+                    else {
+                        panic!("hygiene kind")
+                    };
+                    assert_eq!(
+                        (digest.site().placement(), digest.site().anchor()),
+                        (placement, anchor)
+                    );
+                    assert_eq!(digest.site().one_unit(), one_unit);
+                    assert_eq!(digest.site().lone_is_silent(), lone_is_silent);
+                }
+            }
+        }
+        let doc = sited(
+            0,
+            5,
+            HygieneClass::MisplacedFormat,
+            1,
+            HygieneSite::new(Placement::BesideSpace, Anchor::AtEnd, true, false),
+        );
+        assert_eq!(&doc.encode()[12..14], &0x3008u16.to_le_bytes());
+        let saturated = sited(
+            0,
+            40_000,
+            HygieneClass::Delete,
+            40_000,
+            HygieneSite::new(Placement::Alone, Anchor::AtStart, true, true),
+        );
+        assert_eq!(&saturated.encode()[12..14], &0x6c01u16.to_le_bytes());
+    }
+
+    #[test]
+    fn unanchoring_keeps_everything_but_the_anchor() {
+        let site = HygieneSite::new(Placement::BetweenLetters, Anchor::AtEnd, true, true);
+        let digest = HygieneDigest::new(HygieneClass::NoBreakSpace, 2, site)
+            .unwrap()
+            .unanchored();
+        assert_eq!(
+            digest.site(),
+            HygieneSite::new(Placement::BetweenLetters, Anchor::Neither, true, true)
+        );
+    }
+
+    #[test]
     fn hygiene_wire_fails_closed_on_class_run_and_flag_misuse() {
         let record = hygiene(0, 1, HygieneClass::ConflictMarker, 1);
         let mut bad_class = record.encode();
@@ -391,6 +480,18 @@ mod tests {
         assert_eq!(
             PackedFinding::decode(&bad_class, &[1]),
             Err(CodecError::UnknownHygieneClass(11))
+        );
+        let mut no_placement = record.encode();
+        no_placement[13] = 6;
+        assert_eq!(
+            PackedFinding::decode(&no_placement, &[1]),
+            Err(CodecError::UnknownHygieneSite(6))
+        );
+        let mut top_bit = record.encode();
+        top_bit[13] = 0x80;
+        assert_eq!(
+            PackedFinding::decode(&top_bit, &[1]),
+            Err(CodecError::UnknownHygieneSite(0x80))
         );
         let mut zero_run = record.encode();
         zero_run[14..16].copy_from_slice(&0i16.to_le_bytes());
@@ -411,7 +512,7 @@ mod tests {
             Err(CodecError::UnknownFlags(1))
         );
         assert_eq!(
-            HygieneDigest::new(HygieneClass::Delete, 0),
+            HygieneDigest::new(HygieneClass::Delete, 0, BESIDE_SPACE),
             Err(CodecError::EmptyHygieneRun)
         );
     }

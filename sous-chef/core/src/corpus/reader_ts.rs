@@ -7,9 +7,9 @@
 
 use super::*;
 use crate::codec::{
-    HygieneClass, PresenceKind, RECORD_BOOK_INDEX_OFFSET, RECORD_BOOK_SCOPE_OFFSET,
-    RECORD_CODE_OFFSET, RECORD_FLAGS_OFFSET, RECORD_FROM_OFFSET, RECORD_LEN,
-    RECORD_PROJECT_SCOPE_OFFSET, RECORD_TO_OFFSET, Reasons,
+    Anchor, HygieneClass, HygieneSite, Placement, PresenceKind, RECORD_BOOK_INDEX_OFFSET,
+    RECORD_BOOK_SCOPE_OFFSET, RECORD_CODE_OFFSET, RECORD_FLAGS_OFFSET, RECORD_FROM_OFFSET,
+    RECORD_LEN, RECORD_PROJECT_SCOPE_OFFSET, RECORD_TO_OFFSET, Reasons,
 };
 use crate::judge::{BOOK_RATE_MIN_BOOKS, Channel, Cluster, Staircase};
 use crate::substrate::{OuterClass, RUN_BUCKETS};
@@ -48,7 +48,7 @@ fn sous_codes(line: impl Fn(&str, &str) -> String) -> Vec<String> {
 
 /// Render the checked-in TypeScript reader from the Rust-owned wire schema.
 pub fn generated_reader_ts() -> String {
-    let substitutions: [(&str, String); 85] = [
+    let substitutions: [(&str, String); 90] = [
         ("@@MAGIC@@", format!("0x{MAGIC:08x}")),
         ("@@FORMAT_VERSION@@", FORMAT_VERSION.to_string()),
         ("@@FLAG_UTF16@@", FLAG_UTF16.to_string()),
@@ -59,6 +59,34 @@ pub fn generated_reader_ts() -> String {
                 .map(|class| format!("\"{}\"", class.name()))
                 .collect::<Vec<_>>()
                 .join(", "),
+        ),
+        (
+            "@@HYGIENE_PLACEMENTS@@",
+            Placement::ALL
+                .iter()
+                .map(|placement| format!("\"{}\"", placement.name()))
+                .collect::<Vec<_>>()
+                .join(", "),
+        ),
+        (
+            "@@HYGIENE_ANCHORS@@",
+            Anchor::ALL
+                .iter()
+                .map(|anchor| format!("\"{}\"", anchor.name()))
+                .collect::<Vec<_>>()
+                .join(", "),
+        ),
+        (
+            "@@HYGIENE_SITE_ANCHOR_SHIFT@@",
+            HygieneSite::ANCHOR_SHIFT.to_string(),
+        ),
+        (
+            "@@HYGIENE_SITE_ONE_UNIT@@",
+            format!("0x{:02x}", HygieneSite::ONE_UNIT),
+        ),
+        (
+            "@@HYGIENE_SITE_LONE_IS_SILENT@@",
+            format!("0x{:02x}", HygieneSite::LONE_IS_SILENT),
         ),
         (
             "@@PRESENCE_KINDS@@",

@@ -21,8 +21,9 @@ Wire lanes: [`../core/src/codec/README.md`](../core/src/codec/README.md).
    is maximal within its chapter and a run abutting a masked `\c` marker is
    two findings by design. Judging is unconditional.
 6. **Config:** none changes observations; enablement only filters.
-7. **Wire:** class and run length ride the two payload lanes; the span is the
-   run, snapped out to grapheme-atom edges.
+7. **Wire:** class and site ride lane A, run length lane B; the span is the
+   run, snapped out to grapheme-atom edges, and the site says where in it the
+   run sits (`../core/src/codec/README.md`, "The hygiene site").
 8. **Pinned:** the tests named in each row below.
 
 ## Checks

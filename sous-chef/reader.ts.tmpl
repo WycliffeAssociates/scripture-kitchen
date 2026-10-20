@@ -106,12 +106,29 @@ export interface LengthProportionalityFinding {
   readonly digest: ProportionalityDigest;
 }
 
-/** Wire lane 12..14 is the class index into this table. */
+/** Byte 12 is the class index into this table. */
 export const HYGIENE_CLASSES = [@@HYGIENE_CLASSES@@] as const;
 export type HygieneClass = (typeof HYGIENE_CLASSES)[number];
+/** Byte 13 is the site: placement in bits 0..2, anchor in bits 3..4, then
+ * the one-unit and lone-is-silent bits; bit 7 is refused. */
+export const HYGIENE_PLACEMENTS = [@@HYGIENE_PLACEMENTS@@] as const;
+export type HygienePlacement = (typeof HYGIENE_PLACEMENTS)[number];
+export const HYGIENE_ANCHORS = [@@HYGIENE_ANCHORS@@] as const;
+export type HygieneAnchor = (typeof HYGIENE_ANCHORS)[number];
+export const HYGIENE_SITE_ANCHOR_SHIFT = @@HYGIENE_SITE_ANCHOR_SHIFT@@;
+export const HYGIENE_SITE_ONE_UNIT = @@HYGIENE_SITE_ONE_UNIT@@;
+export const HYGIENE_SITE_LONE_IS_SILENT = @@HYGIENE_SITE_LONE_IS_SILENT@@;
 
 export interface HygieneDigest {
   readonly class: HygieneClass;
+  /** Where the run sits, judged on the scalars just outside it. */
+  readonly placement: HygienePlacement;
+  /** Where the run sits in `from..to`, which atom widening may have grown. */
+  readonly anchor: HygieneAnchor;
+  /** Every scalar of the run is one UTF-16 unit, so `run` is its UTF-16 length. */
+  readonly oneUnit: boolean;
+  /** The run repeats one scalar, and that scalar alone would be no finding. */
+  readonly loneIsSilent: boolean;
   /** Code points in the run; exact unless `saturated`. */
   readonly run: number;
   readonly saturated: boolean;
@@ -904,11 +921,19 @@ export class BookView {
     }
     const saturated = (flags & 1) !== 0;
     if (code === 1) {
-      const classIndex = this.#view.getInt16(at + RECORD_BOOK_SCOPE_OFFSET, true);
+      const classIndex = this.#view.getUint8(at + RECORD_BOOK_SCOPE_OFFSET);
       const hygieneClass = HYGIENE_CLASSES[classIndex];
       if (hygieneClass === undefined) {
         return fail(`unknown hygiene class ${classIndex}`);
       }
+      const site = this.#view.getUint8(at + RECORD_BOOK_SCOPE_OFFSET + 1);
+      const placement = HYGIENE_PLACEMENTS[site & 0b111];
+      if (placement === undefined || (site & 0x80) !== 0) {
+        return fail(`unknown hygiene site byte 0x${site.toString(16).padStart(2, "0")}`);
+      }
+      const anchor = HYGIENE_ANCHORS[(site >> HYGIENE_SITE_ANCHOR_SHIFT) & 0b11];
+      const oneUnit = (site & HYGIENE_SITE_ONE_UNIT) !== 0;
+      const loneIsSilent = (site & HYGIENE_SITE_LONE_IS_SILENT) !== 0;
       const run = this.#view.getInt16(at + RECORD_PROJECT_SCOPE_OFFSET, true);
       if (run < 1) {
         return fail("hygiene run length must be at least 1");
@@ -916,7 +941,13 @@ export class BookView {
       if (saturated && run !== 0x7fff) {
         return fail("saturated hygiene run must read back as 0x7fff");
       }
-      return { kind: "Hygiene", from, to, bookIdx, hygiene: { class: hygieneClass, run, saturated } };
+      return {
+        kind: "Hygiene",
+        from,
+        to,
+        bookIdx,
+        hygiene: { class: hygieneClass, placement, anchor, oneUnit, loneIsSilent, run, saturated },
+      };
     }
     if (code === 4) {
       const kindIndex = this.#view.getInt16(at + RECORD_BOOK_SCOPE_OFFSET, true);

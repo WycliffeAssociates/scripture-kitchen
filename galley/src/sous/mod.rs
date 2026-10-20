@@ -30,8 +30,8 @@ use core::ops::Range;
 
 use rustc_hash::FxHashSet;
 use sous_core::{
-    BookKey, Cluster, CodecError, CoordinateSpace, CorpusWireError, InputError, PackedFinding,
-    Pattern, PublicationBook, SnapshotId, TerminalCount, encode_to_corpus_buffer,
+    BookKey, Cluster, CodecError, CoordinateSpace, CorpusWireError, FindingKind, InputError,
+    PackedFinding, Pattern, PublicationBook, SnapshotId, TerminalCount, encode_to_corpus_buffer,
 };
 
 use crate::onion::{Filter, Mask, Utf16Index, cst, lex, mask, toc, utf16_index};
@@ -72,6 +72,22 @@ fn rebase_span(mask: &Mask, to_published: impl Fn(u32) -> u32, span: Range<u32>)
         to_published(mask.to_source(span.start)),
         to_published(mask.to_source(span.end - 1) + 1),
     )
+}
+
+/// The kind as the published span can honestly carry it. A hygiene anchor
+/// says where the run sits in one contiguous piece of text, so across removed
+/// markup it becomes `Neither` and no fix reads a marker as part of the run.
+fn restate(mask: &Mask, span: Range<u32>, kind: FindingKind) -> FindingKind {
+    match kind {
+        FindingKind::Hygiene(digest)
+            if span.start < span.end
+                && mask.to_source(span.end - 1) + 1 - mask.to_source(span.start)
+                    != span.end - span.start =>
+        {
+            FindingKind::Hygiene(digest.unanchored())
+        }
+        kind => kind,
+    }
 }
 
 /// Refuses a span [`rebase_span`] cannot carry: past the projection, or
@@ -159,7 +175,7 @@ pub fn publish_onion_findings(
             published_from,
             published_to,
             finding.book_idx(),
-            finding.kind(),
+            restate(&book.mask, from..to, finding.kind()),
             &published_lens,
         )
         .map_err(|error| PublishError::Rebase { row, error })?;
@@ -424,12 +440,12 @@ mod tests {
                 .collect();
             let path = concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/../sous-chef/testdata/corpus_v2_utf16.hex"
+                "/../sous-chef/testdata/corpus_v3_utf16.hex"
             );
             std::fs::write(path, format!("{}\n", hex.join(" "))).unwrap();
-            panic!("UPDATE_HEX rewrote corpus_v2_utf16.hex; rerun without it to test it");
+            panic!("UPDATE_HEX rewrote corpus_v3_utf16.hex; rerun without it to test it");
         }
-        let golden: Vec<u8> = include_str!("../../../sous-chef/testdata/corpus_v2_utf16.hex")
+        let golden: Vec<u8> = include_str!("../../../sous-chef/testdata/corpus_v3_utf16.hex")
             .split_whitespace()
             .map(|byte| u8::from_str_radix(byte, 16).unwrap())
             .collect();
@@ -584,5 +600,101 @@ mod tests {
                 offset: onion_at + 2,
             })
         );
+    }
+}
+
+#[cfg(test)]
+mod split_runs {
+    use super::*;
+    use crate::Role;
+    use sous_core::{Anchor, Brigade, CorpusSnapshot, HygieneClass, Placement};
+
+    /// Two NBSPs with a footnote between them are one run in the projection
+    /// and two pieces of the raw text; a ZWNJ after a letter is one piece.
+    const SPLIT: &str = concat!(
+        "\\id MRK\n\\c 1\n\\p\n",
+        "\\v 1 word\u{a0}\\f + \\ft note\\f*\u{a0} next \u{62a}\u{200c} \u{62a}.\n",
+    );
+
+    fn hygiene_rows(buffer: &[u8]) -> Vec<(HygieneClass, Placement, Anchor, u32, u32)> {
+        let snapshot = CorpusSnapshot::open(buffer).unwrap();
+        let book = snapshot.book_by_key(BookKey::new(*b"MRK")).unwrap();
+        (0..book.len())
+            .filter_map(|row| {
+                let row = book.at(row).unwrap();
+                let FindingKind::Hygiene(digest) = row.kind() else {
+                    return None;
+                };
+                let site = digest.site();
+                Some((
+                    digest.class(),
+                    site.placement(),
+                    site.anchor(),
+                    row.from(),
+                    row.to(),
+                ))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_run_split_by_removed_markup_publishes_no_anchor() {
+        let mut sous = Expediter::new(Brigade::default(), 1 << 20);
+        sous.update("mrk.usfm", Role::Target, SPLIT).unwrap();
+        let resident = sous.publish().unwrap();
+        let utf16 = |c: char| SPLIT[..SPLIT.find(c).unwrap()].encode_utf16().count() as u32;
+        let (nbsp, letter) = (utf16('\u{a0}'), utf16('\u{62a}'));
+        assert_eq!(
+            hygiene_rows(&resident),
+            [
+                (
+                    HygieneClass::NoBreakSpace,
+                    Placement::BesideSpace,
+                    Anchor::Neither,
+                    nbsp,
+                    nbsp + 1 + "\\f + \\ft note\\f*".len() as u32 + 1,
+                ),
+                (
+                    HygieneClass::MisplacedFormat,
+                    Placement::BesideSpace,
+                    Anchor::AtEnd,
+                    letter,
+                    letter + 2,
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn the_cold_path_restates_the_same_anchor() {
+        let mut sous = Expediter::new(Brigade::default(), 1 << 20);
+        sous.update("mrk.usfm", Role::Target, SPLIT).unwrap();
+        let resident = sous.publish().unwrap();
+        let projected = {
+            let tokens = lex(SPLIT);
+            let tree = cst::build(&tokens);
+            mask(SPLIT.as_bytes(), &tokens, &tree, &Filter::verse_text()).text(SPLIT.as_bytes())
+        };
+        let from = projected.find('\u{a0}').unwrap() as u32;
+        let site = sous_core::HygieneSite::new(Placement::BesideSpace, Anchor::Exact, true, false);
+        let digest = sous_core::HygieneDigest::new(HygieneClass::NoBreakSpace, 2, site).unwrap();
+        let finding = PackedFinding::new(
+            from,
+            from + 4,
+            sous_core::BookIndex::new(0).unwrap(),
+            FindingKind::Hygiene(digest),
+            &[u32::MAX],
+        )
+        .unwrap();
+        let cold = publish_onion_findings(
+            vec![OnionInputBook::new("mrk.usfm", SPLIT.to_string())],
+            &[finding],
+            &[],
+            &[],
+            &[],
+            SnapshotId::new([0; 16]),
+        )
+        .unwrap();
+        assert_eq!(hygiene_rows(&cold)[0], hygiene_rows(&resident)[0]);
     }
 }

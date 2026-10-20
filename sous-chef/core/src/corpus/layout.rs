@@ -1,7 +1,7 @@
 //! The wire's byte offsets and magic numbers. Envelope layout: codec/README.md.
 
 pub const MAGIC: u32 = 0x5355_4f53; // ASCII "SOUS", little endian.
-pub const FORMAT_VERSION: u32 = 2;
+pub const FORMAT_VERSION: u32 = 3;
 pub const FLAG_UTF16: u32 = 1 << 0;
 pub const HEADER_BYTES: usize = 64;
 pub const DIRECTORY_ENTRY_BYTES: usize = 20;

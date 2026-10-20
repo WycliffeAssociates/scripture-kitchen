@@ -35,10 +35,34 @@ a tombstone.
 | --- | --- | --- | --- | --- |
 | 0 | `LengthProportionality` | signed Q8.8 book-scope deviation; `i16::MIN` unavailable | signed Q8.8 project-scope deviation; `i16::MIN` unavailable | a deviation was clamped |
 
-| 1 | `Hygiene` | `HygieneClass` discriminant | run length in code points, `1..=i16::MAX` | the run exceeds `i16::MAX`; the lane reads exactly `i16::MAX` |
+| 1 | `Hygiene` | low byte the `HygieneClass` discriminant, high byte the `HygieneSite` | run length in code points, `1..=i16::MAX` | the run exceeds `i16::MAX`; the lane reads exactly `i16::MAX` |
 | 2 | `Convention` | pattern-table index, `u16` bits in the signed lane | `Reasons` bitmask over the ladder rungs the site matched, the word rungs included | never set |
 | 3 | `SourceCopy` | consecutive target words the paired source verse also holds, `1..=i16::MAX` | eligible target words in the unit, `1..=i16::MAX` | one of the two lanes clamped; which one is not said |
 | 4 | `Presence` | `PresenceKind` discriminant | consecutive verse keys the row covers, `1..=i16::MAX` | the run exceeds `i16::MAX`; the lane reads exactly `i16::MAX` |
+
+### The hygiene site
+
+A hygiene span is the run widened to atom edges, so it may hold more than the
+run: a stray ZWNJ's span takes the letter before it. Lane A's high byte says
+where the run is, so a fix deletes the run and nothing else.
+
+| bits | field |
+| --- | --- |
+| 0..3 | `Placement`, judged on the scalars just outside the exact run, first that holds: 4 `Alone` (none either side), 1 `AtEdge` (none on one side), 0 `BesideSpace`, 3 `BesidePunctuation` (no white space), 2 `BetweenLetters` (letter or mark both sides), 5 `Other`; 6 and 7 refused |
+| 3..5 | `Anchor` of the run in `from..to`: 0 `Exact`, 1 `AtStart`, 2 `AtEnd`, 3 `Neither` |
+| 5 | `ONE_UNIT`: every scalar of the run is one UTF-16 unit, so `run` is its UTF-16 length |
+| 6 | `LONE_IS_SILENT`: the run repeats one scalar, and that scalar alone between the same neighbours is no finding |
+| 7 | refused; it is lane A's sign bit |
+
+```text
+"\u{62a}\u{200c} \u{62a}"   lane A 0x3008   MisplacedFormat · BesideSpace · AtEnd · one unit
+"a\u{a0}\u{a0}b"           lane A 0x6209   NoBreakSpace · BetweenLetters · Exact · one unit · lone silent
+"\u{915}\u{94d}\u{200c} x"  lane A 0x3808   MisplacedFormat · BesideSpace · Neither   // the virama seals both edges
+```
+
+An anchor is stated in the published coordinate space. Galley publishes a
+span crossing removed markup as its bounding raw range, and there it restates
+the anchor as `Neither`: the run may not be one piece of the raw text.
 
 The record is a discriminated union in Rust: `PackedFinding` carries a
 `FindingKind`, and `code`, `flags`, and both lanes are *derived* from it. A
@@ -76,6 +100,7 @@ Decoding refuses rather than guesses:
 | a record whose `book_idx` is not its section's book | `BookIndexMismatch` |
 | `i16::MIN` read as a proportionality value | `MissingDeviationSentinel` |
 | a hygiene class discriminant past the table | `UnknownHygieneClass` |
+| a hygiene site byte naming placement 6 or 7, or setting bit 7 | `UnknownHygieneSite` |
 | a hygiene run of zero or negative | `EmptyHygieneRun` |
 | `SATURATED` on a hygiene row whose lane is not exactly `i16::MAX` | `UnknownFlags` |
 | a presence kind discriminant past the table | `UnknownPresenceKind` |
@@ -372,6 +397,10 @@ and must be exactly the running cursor, so the strings cannot overlap,
 reorder, or hide bytes. The length prefix means an id needs no forbidden byte
 and no scan. The 4-byte padding after the section keeps every record section
 aligned for a typed-array view.
+
+Version 3 put the hygiene site in lane A's high byte. The row layout did not
+move, but a version 2 reader would read the whole lane as the class and
+refuse or misname every hygiene row, so the version is what it checks.
 
 Version 2 grew the pattern row from 24 bytes to 36 for the usual lanes and the
 header from 48 bytes to 64 for the cluster and terminal sections. Sefer, the one consumer,

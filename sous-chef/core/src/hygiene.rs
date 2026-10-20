@@ -123,7 +123,8 @@ impl HygieneFinding {
         out.push(
             self.span,
             FindingKind::Hygiene(
-                HygieneDigest::new(self.class, self.run).expect("a scanned run is never empty"),
+                HygieneDigest::new(self.class, self.run, self.site)
+                    .expect("a scanned run is never empty"),
             ),
         )
         .expect("a folded span lies inside the book it came from");
@@ -138,7 +139,7 @@ impl HygieneFinding {
             self.span.from(),
             self.span.to(),
             book,
-            FindingKind::Hygiene(HygieneDigest::new(self.class, self.run)?),
+            FindingKind::Hygiene(HygieneDigest::new(self.class, self.run, self.site)?),
             book_lengths,
         )
     }

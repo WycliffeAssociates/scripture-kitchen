@@ -8,8 +8,8 @@ use crate::substrate::{Facing, FollowKey, OuterClass, ScalarKey};
 use crate::unicode::Pool;
 use crate::words::Form;
 use crate::{
-    ConventionDigest, FindingKind, HygieneDigest, PatternIndex, ProportionalityDigest,
-    QuantizedDeviation, Reasons,
+    Anchor, ConventionDigest, FindingKind, HygieneDigest, HygieneSite, PatternIndex, Placement,
+    ProportionalityDigest, QuantizedDeviation, Reasons,
 };
 
 const GENERATED: &str = include_str!("../../../reader.ts");
@@ -318,8 +318,8 @@ fn writer_matches_shared_golden_buffer_and_reader_view() {
     .unwrap();
     assert_hex(
         &encoded,
-        include_str!("../../../testdata/corpus_v2.hex"),
-        "corpus_v2.hex",
+        include_str!("../../../testdata/corpus_v3.hex"),
+        "corpus_v3.hex",
     );
 
     let snapshot = CorpusSnapshot::open(&encoded).unwrap();
@@ -344,18 +344,24 @@ fn writer_matches_shared_golden_buffer_and_reader_view() {
 /// saturated hygiene row, then one row of every remaining code.
 #[test]
 fn mixed_kind_golden_buffer_decodes_in_both_readers() {
-    let hygiene = |from, to, class, run| {
+    let hygiene = |from, to, class, run, site| {
         PackedFinding::new(
             from,
             to,
             BookIndex::new(0).unwrap(),
-            FindingKind::Hygiene(HygieneDigest::new(class, run).unwrap()),
+            FindingKind::Hygiene(HygieneDigest::new(class, run, site).unwrap()),
             &[0x0100],
         )
         .unwrap()
     };
     let findings = [
-        hygiene(3, 6, HygieneClass::C0Control, 3),
+        hygiene(
+            3,
+            6,
+            HygieneClass::C0Control,
+            3,
+            HygieneSite::new(Placement::BetweenLetters, Anchor::Exact, true, false),
+        ),
         PackedFinding::new(
             0x10,
             0x12,
@@ -368,7 +374,13 @@ fn mixed_kind_golden_buffer_decodes_in_both_readers() {
             &[0x0100],
         )
         .unwrap(),
-        hygiene(0x40, 0xa0, HygieneClass::Delete, 40_000),
+        hygiene(
+            0x40,
+            0xa0,
+            HygieneClass::Delete,
+            40_000,
+            HygieneSite::new(Placement::Alone, Anchor::AtEnd, false, true),
+        ),
         // The widened reasons lane: bit 9 rides the i16 the u8 half could not
         // hold, and it names the doubled row above.
         PackedFinding::new(
@@ -439,8 +451,8 @@ fn mixed_kind_golden_buffer_decodes_in_both_readers() {
     .unwrap();
     assert_hex(
         &encoded,
-        include_str!("../../../testdata/corpus_v2_hygiene.hex"),
-        "corpus_v2_hygiene.hex",
+        include_str!("../../../testdata/corpus_v3_hygiene.hex"),
+        "corpus_v3_hygiene.hex",
     );
 
     let snapshot = CorpusSnapshot::open(&encoded).unwrap();

@@ -321,7 +321,7 @@ The v1 code table and each code's lanes:
 | code | kind | lane 12..14 | lane 14..16 | `SATURATED` means |
 | --- | --- | --- | --- | --- |
 | `0` | `LengthProportionality` | signed Q8.8 book-scope standardized deviation; `i16::MIN` unavailable | signed Q8.8 project/corpus-scope deviation; `i16::MIN` unavailable | a deviation was clamped |
-| `1` | `Hygiene` | `HygieneClass` discriminant | run length in code points, `1..=i16::MAX` | the run exceeds `i16::MAX`; the lane reads exactly `i16::MAX` |
+| `1` | `Hygiene` | low byte the `HygieneClass` discriminant, high byte the `HygieneSite` | run length in code points, `1..=i16::MAX` | the run exceeds `i16::MAX`; the lane reads exactly `i16::MAX` |
 | `2` | `Convention` | index into the publication's pattern table | `Reasons` bitmask over the ladder rungs this site matched | never set |
 | `3` | `SourceCopy` | consecutive target words the paired source verse also holds, `1..=i16::MAX` | eligible target words in the paired unit, `1..=i16::MAX` | one of the two lanes clamped; which one is not said |
 | `4` | `Presence` | `PresenceKind` discriminant: 0 missing, 1 extra, 2 empty | consecutive verse keys the row covers, `1..=i16::MAX` | the run exceeds `i16::MAX`; the lane reads exactly `i16::MAX` |

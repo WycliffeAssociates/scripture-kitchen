@@ -34,7 +34,7 @@ use mise::books::BookKey;
 use crate::onion::{self, lint};
 use crate::overlay;
 
-use super::{OnionBook, PublishError, rebase_span};
+use super::{OnionBook, PublishError, rebase_span, restate};
 use crate::pantry::derived::Store;
 use crate::pantry::{BookId, Entry, Pantry, RawChecksum, Retain, Role, SourceLanes};
 
@@ -972,7 +972,7 @@ impl<P: ChapterPass + Sync> Expediter<P> {
                     from,
                     to,
                     finding.book_idx(),
-                    finding.kind(),
+                    restate(products.mask, finding.from()..finding.to(), finding.kind()),
                     &published_lens,
                 )
                 .map_err(|error| PublishError::Rebase { row, error })?,
