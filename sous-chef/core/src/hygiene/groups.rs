@@ -151,12 +151,10 @@ fn action(digest: HygieneDigest) -> Option<Action> {
 
 fn deletion(row: &HygieneRow, space: CoordinateSpace) -> Option<Deletion> {
     let digest = row.digest;
-    if digest.saturated() {
-        return None;
-    }
     let action = action(digest)?;
     let site = digest.site();
-    let units = (space == CoordinateSpace::Utf16 && site.one_unit()).then_some(digest.run());
+    let units = (space == CoordinateSpace::Utf16 && site.one_unit() && !digest.saturated())
+        .then_some(digest.run());
     let (from, to) = match (action, site.anchor()) {
         (_, Anchor::Neither) => return None,
         (Action::Remove, Anchor::Exact) => (row.from, row.to),

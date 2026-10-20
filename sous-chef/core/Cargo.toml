@@ -21,6 +21,8 @@ xxhash-rust.workspace = true
 alloc-counts = []
 
 [dev-dependencies]
+# Oracle only: tests/hygiene_groups.rs parses testData/hygiene/groups.json.
+serde_json = "1.0"
 divan = "0.1.21"
 # examples/edit_neighbors.rs only: parallelizes the per-rare-word variant
 # sweep. Not a library dependency — sous-core stays dependency-light.

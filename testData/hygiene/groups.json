@@ -1,0 +1,109 @@
+[
+  {
+    "name": "utf16",
+    "coordinates": "utf16",
+    "books": [
+      { "key": "GEN", "id": "gen.usfm", "length": 500 },
+      { "key": "EXO", "id": "exo.usfm", "length": 100 }
+    ],
+    "rows": [
+      { "book": 0, "from": 0, "to": 3, "class": "C0Control", "placement": "BetweenLetters", "anchor": "Exact", "oneUnit": true, "loneIsSilent": false, "run": 3, "note": "a NUL run: remove" },
+      { "book": 0, "from": 10, "to": 11, "class": "Delete", "placement": "BesidePunctuation", "anchor": "Exact", "oneUnit": true, "loneIsSilent": false, "run": 1, "note": "DEL: remove" },
+      { "book": 0, "from": 20, "to": 23, "class": "Noncharacter", "placement": "BetweenLetters", "anchor": "AtStart", "oneUnit": false, "loneIsSilent": false, "run": 1, "note": "an astral noncharacter a mark widened: run is no UTF-16 length, no fix" },
+      { "book": 0, "from": 30, "to": 32, "class": "MisplacedFormat", "placement": "BesideSpace", "anchor": "Exact", "oneUnit": false, "loneIsSilent": false, "run": 1, "note": "an astral format alone in its span: the span is the run" },
+      { "book": 0, "from": 40, "to": 41, "class": "NoBreakSpace", "placement": "BesideSpace", "anchor": "Exact", "oneUnit": true, "loneIsSilent": false, "run": 1, "note": "NBSP beside a space: remove" },
+      { "book": 0, "from": 50, "to": 51, "class": "NoBreakSpace", "placement": "AtEdge", "anchor": "Exact", "oneUnit": true, "loneIsSilent": false, "run": 1, "note": "NBSP at an edge: remove" },
+      { "book": 0, "from": 60, "to": 62, "class": "NoBreakSpace", "placement": "BetweenLetters", "anchor": "Exact", "oneUnit": true, "loneIsSilent": true, "run": 2, "note": "two NBSPs between letters: keep one" },
+      { "book": 0, "from": 70, "to": 72, "class": "NoBreakSpace", "placement": "BesideSpace", "anchor": "AtStart", "oneUnit": true, "loneIsSilent": false, "run": 1, "note": "NBSP before a mark: the mark widens the span, the run starts it" },
+      { "book": 0, "from": 80, "to": 98, "class": "NoBreakSpace", "placement": "BesideSpace", "anchor": "Neither", "oneUnit": true, "loneIsSilent": false, "run": 2, "note": "two NBSPs a footnote splits in the raw text: no fix" },
+      { "book": 0, "from": 99, "to": 99, "kind": "Presence", "note": "not hygiene: skipped, but it holds a row index" },
+      { "book": 0, "from": 100, "to": 102, "class": "MisplacedFormat", "placement": "BesideSpace", "anchor": "AtEnd", "oneUnit": true, "loneIsSilent": false, "run": 1, "note": "a ZWNJ after a letter: delete the ZWNJ, never the letter" },
+      { "book": 0, "from": 110, "to": 114, "class": "MisplacedFormat", "placement": "BesideSpace", "anchor": "Neither", "oneUnit": true, "loneIsSilent": false, "run": 1, "note": "a ZWNJ after a conjunct: the virama seals both edges, no fix" },
+      { "book": 0, "from": 120, "to": 121, "class": "MisplacedFormat", "placement": "BesidePunctuation", "anchor": "Exact", "oneUnit": true, "loneIsSilent": false, "run": 1, "note": "a format beside punctuation: remove" },
+      { "book": 0, "from": 130, "to": 131, "class": "MisplacedFormat", "placement": "AtEdge", "anchor": "Exact", "oneUnit": true, "loneIsSilent": false, "run": 1, "note": "a format at an edge: remove" },
+      { "book": 0, "from": 140, "to": 142, "class": "MisplacedFormat", "placement": "BetweenLetters", "anchor": "Exact", "oneUnit": true, "loneIsSilent": true, "run": 2, "note": "two ZWSPs between letters: keep one" },
+      { "book": 0, "from": 150, "to": 153, "class": "MisplacedFormat", "placement": "BetweenLetters", "anchor": "AtEnd", "oneUnit": true, "loneIsSilent": true, "run": 2, "note": "two ZWNJs after a letter: keep the run's first, not the span's" },
+      { "book": 0, "from": 160, "to": 161, "class": "MisplacedFormat", "placement": "BetweenLetters", "anchor": "Exact", "oneUnit": true, "loneIsSilent": false, "run": 1, "note": "a BOM between letters: no row of the table" },
+      { "book": 0, "from": 170, "to": 171, "class": "MisplacedFormat", "placement": "Other", "anchor": "Exact", "oneUnit": true, "loneIsSilent": false, "run": 1, "note": "a BOM between digits: no row of the table" },
+      { "book": 0, "from": 180, "to": 181, "class": "ReplacementChar", "placement": "Other", "anchor": "Exact", "oneUnit": true, "loneIsSilent": false, "run": 1, "note": "U+FFFD: a character is already lost" },
+      { "book": 0, "from": 190, "to": 191, "class": "C1Control", "placement": "BetweenLetters", "anchor": "Exact", "oneUnit": true, "loneIsSilent": false, "run": 1, "note": "C1: mis-decoded text" },
+      { "book": 0, "from": 200, "to": 201, "class": "StrayCarriageReturn", "placement": "BesideSpace", "anchor": "Exact", "oneUnit": true, "loneIsSilent": false, "run": 1, "note": "a judgment" },
+      { "book": 0, "from": 210, "to": 211, "class": "StrandedBackslash", "placement": "BesideSpace", "anchor": "Exact", "oneUnit": true, "loneIsSilent": false, "run": 1, "note": "a judgment" },
+      { "book": 0, "from": 220, "to": 227, "class": "ConflictMarker", "placement": "AtEdge", "anchor": "Exact", "oneUnit": false, "loneIsSilent": false, "run": 1, "note": "a judgment" },
+      { "book": 0, "from": 230, "to": 232, "class": "FreeCombiningMark", "placement": "BesideSpace", "anchor": "AtEnd", "oneUnit": true, "loneIsSilent": false, "run": 1, "note": "a judgment" },
+      { "book": 0, "from": 240, "to": 243, "class": "NoBreakSpace", "placement": "BetweenLetters", "anchor": "AtStart", "oneUnit": true, "loneIsSilent": true, "run": 2, "note": "two NBSPs then a mark: keep the first" },
+      { "book": 0, "from": 300, "to": 400, "class": "Delete", "placement": "Alone", "anchor": "Exact", "oneUnit": true, "loneIsSilent": false, "run": 40000, "note": "a saturated run: the span is still the run" },
+      { "book": 0, "from": 410, "to": 411, "class": "MisplacedFormat", "placement": "Alone", "anchor": "Exact", "oneUnit": true, "loneIsSilent": false, "run": 1, "note": "a format that is the whole text: remove" },
+      { "book": 1, "from": 5, "to": 7, "class": "MisplacedFormat", "placement": "BesideSpace", "anchor": "AtEnd", "oneUnit": true, "loneIsSilent": false, "run": 1, "note": "the same habit in a second book" },
+      { "book": 1, "from": 10, "to": 11, "class": "NoBreakSpace", "placement": "BesideSpace", "anchor": "Exact", "oneUnit": true, "loneIsSilent": false, "run": 1, "note": "the same habit in a second book" }
+    ],
+    "groups": {
+      "book": [
+        { "book": 0, "class": "C0Control", "placement": "BetweenLetters", "count": 1, "rows": [[0, 0]], "fix": [[0, 0, 3]] },
+        { "book": 0, "class": "Delete", "placement": "BesidePunctuation", "count": 1, "rows": [[0, 1]], "fix": [[0, 10, 11]] },
+        { "book": 0, "class": "Delete", "placement": "Alone", "count": 1, "rows": [[0, 25]], "fix": [[0, 300, 400]] },
+        { "book": 0, "class": "C1Control", "placement": "BetweenLetters", "count": 1, "rows": [[0, 19]], "fix": null },
+        { "book": 0, "class": "ReplacementChar", "placement": "Other", "count": 1, "rows": [[0, 18]], "fix": null },
+        { "book": 0, "class": "StrayCarriageReturn", "placement": "BesideSpace", "count": 1, "rows": [[0, 20]], "fix": null },
+        { "book": 0, "class": "StrandedBackslash", "placement": "BesideSpace", "count": 1, "rows": [[0, 21]], "fix": null },
+        { "book": 0, "class": "ConflictMarker", "placement": "AtEdge", "count": 1, "rows": [[0, 22]], "fix": null },
+        { "book": 0, "class": "FreeCombiningMark", "placement": "BesideSpace", "count": 1, "rows": [[0, 23]], "fix": null },
+        { "book": 0, "class": "MisplacedFormat", "placement": "BesideSpace", "count": 3, "rows": [[0, 3], [0, 10], [0, 11]], "fix": [[0, 101, 102], [0, 30, 32]] },
+        { "book": 0, "class": "MisplacedFormat", "placement": "AtEdge", "count": 1, "rows": [[0, 13]], "fix": [[0, 130, 131]] },
+        { "book": 0, "class": "MisplacedFormat", "placement": "BetweenLetters", "count": 3, "rows": [[0, 14], [0, 15], [0, 16]], "fix": [[0, 152, 153], [0, 141, 142]] },
+        { "book": 0, "class": "MisplacedFormat", "placement": "BesidePunctuation", "count": 1, "rows": [[0, 12]], "fix": [[0, 120, 121]] },
+        { "book": 0, "class": "MisplacedFormat", "placement": "Alone", "count": 1, "rows": [[0, 26]], "fix": [[0, 410, 411]] },
+        { "book": 0, "class": "MisplacedFormat", "placement": "Other", "count": 1, "rows": [[0, 17]], "fix": null },
+        { "book": 0, "class": "NoBreakSpace", "placement": "BesideSpace", "count": 3, "rows": [[0, 4], [0, 7], [0, 8]], "fix": [[0, 70, 71], [0, 40, 41]] },
+        { "book": 0, "class": "NoBreakSpace", "placement": "AtEdge", "count": 1, "rows": [[0, 5]], "fix": [[0, 50, 51]] },
+        { "book": 0, "class": "NoBreakSpace", "placement": "BetweenLetters", "count": 2, "rows": [[0, 6], [0, 24]], "fix": [[0, 241, 242], [0, 61, 62]] },
+        { "book": 0, "class": "Noncharacter", "placement": "BetweenLetters", "count": 1, "rows": [[0, 2]], "fix": null },
+        { "book": 1, "class": "MisplacedFormat", "placement": "BesideSpace", "count": 1, "rows": [[1, 0]], "fix": [[1, 6, 7]] },
+        { "book": 1, "class": "NoBreakSpace", "placement": "BesideSpace", "count": 1, "rows": [[1, 1]], "fix": [[1, 10, 11]] }
+      ],
+      "project": [
+        { "book": null, "class": "C0Control", "placement": "BetweenLetters", "count": 1, "rows": [[0, 0]], "fix": [[0, 0, 3]] },
+        { "book": null, "class": "Delete", "placement": "BesidePunctuation", "count": 1, "rows": [[0, 1]], "fix": [[0, 10, 11]] },
+        { "book": null, "class": "Delete", "placement": "Alone", "count": 1, "rows": [[0, 25]], "fix": [[0, 300, 400]] },
+        { "book": null, "class": "C1Control", "placement": "BetweenLetters", "count": 1, "rows": [[0, 19]], "fix": null },
+        { "book": null, "class": "ReplacementChar", "placement": "Other", "count": 1, "rows": [[0, 18]], "fix": null },
+        { "book": null, "class": "StrayCarriageReturn", "placement": "BesideSpace", "count": 1, "rows": [[0, 20]], "fix": null },
+        { "book": null, "class": "StrandedBackslash", "placement": "BesideSpace", "count": 1, "rows": [[0, 21]], "fix": null },
+        { "book": null, "class": "ConflictMarker", "placement": "AtEdge", "count": 1, "rows": [[0, 22]], "fix": null },
+        { "book": null, "class": "FreeCombiningMark", "placement": "BesideSpace", "count": 1, "rows": [[0, 23]], "fix": null },
+        { "book": null, "class": "MisplacedFormat", "placement": "BesideSpace", "count": 4, "rows": [[0, 3], [0, 10], [0, 11], [1, 0]], "fix": [[0, 101, 102], [0, 30, 32], [1, 6, 7]] },
+        { "book": null, "class": "MisplacedFormat", "placement": "AtEdge", "count": 1, "rows": [[0, 13]], "fix": [[0, 130, 131]] },
+        { "book": null, "class": "MisplacedFormat", "placement": "BetweenLetters", "count": 3, "rows": [[0, 14], [0, 15], [0, 16]], "fix": [[0, 152, 153], [0, 141, 142]] },
+        { "book": null, "class": "MisplacedFormat", "placement": "BesidePunctuation", "count": 1, "rows": [[0, 12]], "fix": [[0, 120, 121]] },
+        { "book": null, "class": "MisplacedFormat", "placement": "Alone", "count": 1, "rows": [[0, 26]], "fix": [[0, 410, 411]] },
+        { "book": null, "class": "MisplacedFormat", "placement": "Other", "count": 1, "rows": [[0, 17]], "fix": null },
+        { "book": null, "class": "NoBreakSpace", "placement": "BesideSpace", "count": 4, "rows": [[0, 4], [0, 7], [0, 8], [1, 1]], "fix": [[0, 70, 71], [0, 40, 41], [1, 10, 11]] },
+        { "book": null, "class": "NoBreakSpace", "placement": "AtEdge", "count": 1, "rows": [[0, 5]], "fix": [[0, 50, 51]] },
+        { "book": null, "class": "NoBreakSpace", "placement": "BetweenLetters", "count": 2, "rows": [[0, 6], [0, 24]], "fix": [[0, 241, 242], [0, 61, 62]] },
+        { "book": null, "class": "Noncharacter", "placement": "BetweenLetters", "count": 1, "rows": [[0, 2]], "fix": null }
+      ]
+    }
+  },
+  {
+    "name": "utf8",
+    "coordinates": "utf8",
+    "books": [{ "key": "GEN", "id": "gen.usfm", "length": 100 }],
+    "rows": [
+      { "book": 0, "from": 3, "to": 8, "class": "MisplacedFormat", "placement": "BesideSpace", "anchor": "AtEnd", "oneUnit": true, "loneIsSilent": false, "run": 1, "note": "UTF-8 coordinates: run is no byte length, no fix" },
+      { "book": 0, "from": 10, "to": 12, "class": "NoBreakSpace", "placement": "BesideSpace", "anchor": "Exact", "oneUnit": true, "loneIsSilent": false, "run": 1, "note": "the span is the run in any coordinates" },
+      { "book": 0, "from": 20, "to": 24, "class": "NoBreakSpace", "placement": "BetweenLetters", "anchor": "Exact", "oneUnit": true, "loneIsSilent": true, "run": 2, "note": "keeping one needs a scalar's width: no fix" }
+    ],
+    "groups": {
+      "book": [
+        { "book": 0, "class": "MisplacedFormat", "placement": "BesideSpace", "count": 1, "rows": [[0, 0]], "fix": null },
+        { "book": 0, "class": "NoBreakSpace", "placement": "BesideSpace", "count": 1, "rows": [[0, 1]], "fix": [[0, 10, 12]] },
+        { "book": 0, "class": "NoBreakSpace", "placement": "BetweenLetters", "count": 1, "rows": [[0, 2]], "fix": null }
+      ],
+      "project": [
+        { "book": null, "class": "MisplacedFormat", "placement": "BesideSpace", "count": 1, "rows": [[0, 0]], "fix": null },
+        { "book": null, "class": "NoBreakSpace", "placement": "BesideSpace", "count": 1, "rows": [[0, 1]], "fix": [[0, 10, 12]] },
+        { "book": null, "class": "NoBreakSpace", "placement": "BetweenLetters", "count": 1, "rows": [[0, 2]], "fix": null }
+      ]
+    }
+  }
+]
