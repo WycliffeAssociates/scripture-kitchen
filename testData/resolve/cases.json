@@ -184,5 +184,89 @@
     "usfm": "\\id GEN\n\\c 1\n\\s1 Ἐν ἀρχῇ\n\\p\n\\v 1 ἦν ὁ λόγος\n\\v 2 οὗτος\n",
     "address": {"kind": "verses", "from": {"chapter": 1, "verse": 1}, "to": {"chapter": 1, "verse": 1}},
     "expect": {"found": {"from": 37, "to": 63, "opening": 13, "covers": {"kind": "verses", "from": {"chapter": 1, "verse": 1}, "to": {"chapter": 1, "verse": 1}}, "coarser": false}}
+  },
+  {
+    "name": "opening: a milestone inside a heading is transparent",
+    "usfm": "\\id PSA\n\\c 3\n\\cl Psalm\n\\d \\zaln-s |x-strong=\"H4210\"\\*\\w A|x-occurrence=\"1\"\\w*\\zaln-e\\* psalm.\n\\q1 \\v 1 a\n",
+    "address": {"kind": "verses", "from": {"chapter": 3, "verse": 1}, "to": {"chapter": 3, "verse": 1}},
+    "expect": {"found": {"from": 98, "to": 105, "opening": 23, "covers": {"kind": "verses", "from": {"chapter": 3, "verse": 1}, "to": {"chapter": 3, "verse": 1}}, "coarser": false}}
+  },
+  {
+    "name": "opening: a milestone between heading and paragraph is transparent",
+    "usfm": "\\id GEN\n\\c 1\n\\p\n\\v 1 a\n\\s1 Head\n\\ts\\*\n\\p\n\\v 2 b\n",
+    "address": {"kind": "verses", "from": {"chapter": 1, "verse": 2}, "to": {"chapter": 1, "verse": 2}},
+    "expect": {"found": {"from": 41, "to": 48, "opening": 23, "covers": {"kind": "verses", "from": {"chapter": 1, "verse": 2}, "to": {"chapter": 1, "verse": 2}}, "coarser": false}}
+  },
+  {
+    "name": "opening: a milestone after a psalm title is transparent",
+    "usfm": "\\id PSA\n\\c 5\n\\cl Psalm\n\\d For the director.\n\n\\ts\\*\n\\q1 \\v 1 a\n",
+    "address": {"kind": "verses", "from": {"chapter": 5, "verse": 1}, "to": {"chapter": 5, "verse": 1}},
+    "expect": {"found": {"from": 55, "to": 62, "opening": 23, "covers": {"kind": "verses", "from": {"chapter": 5, "verse": 1}, "to": {"chapter": 5, "verse": 1}}, "coarser": false}}
+  },
+  {
+    "name": "opening: a chapter label between openers is transparent",
+    "usfm": "\\id PSA\n\\c 1\n\\ms Book One\n\\cl Psalm\n\\q1 \\v 1 a\n",
+    "address": {"kind": "verses", "from": {"chapter": 1, "verse": 1}, "to": {"chapter": 1, "verse": 1}},
+    "expect": {"found": {"from": 40, "to": 47, "opening": 13, "covers": {"kind": "verses", "from": {"chapter": 1, "verse": 1}, "to": {"chapter": 1, "verse": 1}}, "coarser": false}}
+  },
+  {
+    "name": "astral text: UTF-16 counts two units per scalar",
+    "usfm": "\\id GEN\n\\c 1\n\\s1 😀 Head\n\\p\n\\v 1 a 𝔄\n\\v 2 b\n",
+    "address": {"kind": "verses", "from": {"chapter": 1, "verse": 1}, "to": {"chapter": 1, "verse": 2}},
+    "expect": {"found": {"from": 30, "to": 49, "opening": 13, "covers": {"kind": "verses", "from": {"chapter": 1, "verse": 1}, "to": {"chapter": 1, "verse": 2}}, "coarser": false}}
+  },
+  {
+    "name": "a reversed range spans the same verses",
+    "usfm": "\\id GEN\n\\c 1\n\\p\n\\v 1 a\n\\v 2 b\n\\v 3 c\n",
+    "address": {"kind": "verses", "from": {"chapter": 1, "verse": 2}, "to": {"chapter": 1, "verse": 1}},
+    "expect": {"found": {"from": 16, "to": 30, "opening": 13, "covers": {"kind": "verses", "from": {"chapter": 1, "verse": 1}, "to": {"chapter": 1, "verse": 2}}, "coarser": false}}
+  },
+  {
+    "name": "a verse in a repeated chapter is an ambiguous chapter",
+    "usfm": "\\id GEN\n\\c 3\n\\p\n\\v 1 a\n\\c 3\n\\p\n\\v 1 b\n",
+    "address": {"kind": "verses", "from": {"chapter": 3, "verse": 1}, "to": {"chapter": 3, "verse": 1}},
+    "expect": {"ambiguous": [{"from": 8, "to": 23, "opening": 8}, {"from": 23, "to": 38, "opening": 23}]}
+  },
+  {
+    "name": "a range ending in a list gap is missing",
+    "usfm": "\\id GEN\n\\c 1\n\\p\n\\v 1,3 a\n\\v 4 b\n",
+    "address": {"kind": "verses", "from": {"chapter": 1, "verse": 1}, "to": {"chapter": 1, "verse": 2}},
+    "expect": {"missing": "verse", "within": {"from": 8, "to": 32}}
+  },
+  {
+    "name": "a range checks only its ends",
+    "usfm": "\\id GEN\n\\c 1\n\\p\n\\v 1,3 a\n\\v 4 b\n",
+    "address": {"kind": "verses", "from": {"chapter": 1, "verse": 1}, "to": {"chapter": 1, "verse": 4}},
+    "expect": {"found": {"from": 16, "to": 32, "opening": 13, "covers": {"kind": "verses", "from": {"chapter": 1, "verse": 1}, "to": {"chapter": 1, "verse": 4}}, "coarser": false}}
+  },
+  {
+    "name": "a part and a whole for one verse are ambiguous, in source order",
+    "usfm": "\\id GEN\n\\c 1\n\\p\n\\v 3a a\n\\v 3 b\n\\v 4 c\n",
+    "address": {"kind": "verses", "from": {"chapter": 1, "verse": 3}, "to": {"chapter": 1, "verse": 3}},
+    "expect": {"ambiguous": [{"from": 16, "to": 24, "opening": 13}, {"from": 24, "to": 31, "opening": 24}]}
+  },
+  {
+    "name": "lists that interleave cover their joint hull",
+    "usfm": "\\id GEN\n\\c 1\n\\p\n\\v 1,3,5 a\n\\v 2,4 b\n",
+    "address": {"kind": "verses", "from": {"chapter": 1, "verse": 1}, "to": {"chapter": 1, "verse": 2}},
+    "expect": {"found": {"from": 16, "to": 36, "opening": 13, "covers": {"kind": "verses", "from": {"chapter": 1, "verse": 1}, "to": {"chapter": 1, "verse": 5}}, "coarser": false}}
+  },
+  {
+    "name": "overlapping segments for a whole verse are ambiguous",
+    "usfm": "\\id GEN\n\\c 1\n\\p\n\\v 3a a\n\\v 3a-3b b\n\\v 4 c\n",
+    "address": {"kind": "verses", "from": {"chapter": 1, "verse": 3}, "to": {"chapter": 1, "verse": 3}},
+    "expect": {"ambiguous": [{"from": 16, "to": 24, "opening": 13}, {"from": 24, "to": 35, "opening": 24}]}
+  },
+  {
+    "name": "a bridge into a segment overlaps that segment",
+    "usfm": "\\id GEN\n\\c 1\n\\p\n\\v 2-3a a\n\\v 3a b\n\\v 3b c\n",
+    "address": {"kind": "verses", "from": {"chapter": 1, "verse": 3}, "to": {"chapter": 1, "verse": 3}},
+    "expect": {"ambiguous": [{"from": 16, "to": 26, "opening": 13}, {"from": 26, "to": 34, "opening": 26}, {"from": 34, "to": 42, "opening": 34}]}
+  },
+  {
+    "name": "a range ending on an overlapped verse is ambiguous",
+    "usfm": "\\id GEN\n\\c 1\n\\p\n\\v 2-3a a\n\\v 3a b\n\\v 3b c\n",
+    "address": {"kind": "verses", "from": {"chapter": 1, "verse": 2}, "to": {"chapter": 1, "verse": 3}},
+    "expect": {"ambiguous": [{"from": 16, "to": 26, "opening": 13}, {"from": 26, "to": 34, "opening": 26}, {"from": 34, "to": 42, "opening": 34}]}
   }
 ]
