@@ -179,6 +179,22 @@ fn glue_inside_a_repeat_does_not_break_it() {
     assert_eq!(runs_in("aabbaa"), vec![('a', 2), ('b', 2), ('a', 2)]);
 }
 
+/// A run is identical atoms, a base and the glue riding it: a virama between
+/// two consonants makes a conjunct and a vowel sign a syllable, never a repeat.
+#[test]
+fn a_conjunct_or_a_vowel_sign_is_not_a_run() {
+    assert_eq!(
+        runs_in("\u{909}\u{924}\u{94d}\u{924}\u{930}"),
+        vec![],
+        "उत्तर"
+    );
+    assert_eq!(runs_in("\u{92e}\u{924}\u{93f}\u{924}"), vec![], "मतित");
+    let name = "\u{92e}\u{924}\u{94d}\u{924}\u{93f}\u{924}\u{94d}\u{92f}\u{93e}\u{939}";
+    assert_eq!(runs_in(name), vec![], "मत्तित्याह");
+    let text = "the tree stood ".repeat(2_000) + name;
+    assert!(sticky_rows(&[book(b"MRK", text)], &JudgingConfig::default()).is_empty());
+}
+
 /// An uncased script is in no casing row at all, and repeats there are
 /// letters like any other: the lane counts them and the rescan sites them.
 #[test]
