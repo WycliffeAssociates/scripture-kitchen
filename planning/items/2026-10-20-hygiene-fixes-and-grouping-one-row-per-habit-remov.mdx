@@ -38,13 +38,22 @@ flowchart LR
 
 - **Placement on the wire.** Lane A carries the class as a `u8` in an `i16`;
   its high byte becomes an append-only placement enum: `BesideSpace`,
-  `AtEdge`, `BetweenLetters`, `BesidePunctuation`, `Alone` (and whatever
-  the scan needs). The row layout is unchanged, but a reader built before
+  `AtEdge`, `BetweenLetters`, `BesidePunctuation`, `Alone`, `Other`, judged
+  on the scalars just outside the exact run. The row layout is unchanged, but a reader built before
   misreads lane A, so this is one `FORMAT_VERSION` bump.
+- **Where the run sits in its span.** A hygiene row's span is widened to atom
+  edges (charter invariant 6), so a stray ZWNJ's span takes the letter before
+  it: in fa_opv 235,436 of 235,437 rows end with the run but do not start
+  with it. Deleting the span would delete the letter. The scan therefore
+  also records the run's anchor in the span (`Exact`, `AtStart`, `AtEnd`,
+  `Neither`) and whether every scalar of the run is one UTF-16 unit; both
+  ride lane A's high byte beside placement. A `Neither` or mixed-width run,
+  or a run whose raw mapping crosses a masked marker, has no fix.
 - **Every fix is a deletion.** No inserted text, so no strings: in Rust an
   `onion::Edit { from, to, insert: FixStr::EMPTY }`, in TS `{ from, to }`.
-  "Keep one" is "delete all but the first", computed from the row (class
-  gives the scalar width).
+  "Keep one" is "delete all but the first". Both are computed from the row:
+  the anchor says which end of the span the run is at, and the width bit
+  makes `run` a UTF-16 length.
 - **Grouping is a reader method over the buffer**, lazy and copy-free like the
   rest of the reader: `snapshot.hygieneGroups({ scope: "book" | "project" })`
   → groups with `.key`, `.count`, the row indices, and `.fix()`. Same in Rust
