@@ -70,6 +70,10 @@ impl OnionBook {
         self.unordered.len()
     }
 
+    pub fn mask(&self) -> &Mask {
+        &self.mask
+    }
+
     /// The scripture address of a projected range, and its raw source runs.
     pub fn locate(&self, range: TextRange) -> Option<LocatedRange<'_>> {
         if range.is_empty() || range.to() > self.text.len() as u32 {
@@ -290,6 +294,78 @@ mod tests {
                 .collect::<String>(),
             "Jesus  wept.\n"
         );
+    }
+
+    fn footnoted_book(verses: u32) -> String {
+        let mut source = String::from("\\id PSA\n\\c 1\n\\p\n");
+        for v in 1..=verses {
+            source.push_str(&format!("\\v {v} a{v} \\f + \\ft n{v}\\f* b{v}.\n"));
+        }
+        source
+    }
+
+    fn every_range_scan(mask: &Mask, range: TextRange) -> Vec<Range<u32>> {
+        mask.ranges
+            .iter()
+            .zip(&mask.starts)
+            .filter_map(|(source, &start)| {
+                let end = start + source.end - source.start;
+                let from = start.max(range.from());
+                let to = end.min(range.to());
+                (from < to).then(|| source.start + from - start..source.start + to - start)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn locate_visits_only_the_ranges_it_returns_plus_one() {
+        let book = OnionBook::parse(&footnoted_book(3000)).unwrap();
+        assert!(book.mask.ranges.len() > 6000);
+        let verse = book.verses().nth(2990).unwrap();
+        let mut spans = book.locate(verse.text()).unwrap().spans;
+        let first_row = book
+            .mask
+            .ranges
+            .iter()
+            .position(|source| {
+                every_range_scan(&book.mask, verse.text())
+                    .first()
+                    .is_some_and(|span| source.contains(&span.start))
+            })
+            .unwrap();
+        assert_eq!(spans.at, first_row);
+
+        let returned = spans.by_ref().count();
+        assert_eq!(returned, 2, "the footnote splits the verse");
+        assert_eq!(spans.at, first_row + returned);
+    }
+
+    #[test]
+    fn locate_returns_the_runs_a_scan_of_every_range_returns() {
+        let small = OnionBook::parse(&footnoted_book(12)).unwrap();
+        let len = small.text().len() as u32;
+        for from in 0..len {
+            for to in from + 1..=len {
+                let range = TextRange::new(from, to).unwrap();
+                let spans: Vec<_> = small.locate(range).unwrap().spans.collect();
+                assert_eq!(spans, every_range_scan(&small.mask, range), "{from}..{to}");
+            }
+        }
+
+        let large = OnionBook::parse(&footnoted_book(3000)).unwrap();
+        let len = large.text().len() as u32;
+        let whole = TextRange::new(0, len).unwrap();
+        let mut ranges = vec![whole];
+        ranges.extend(large.verses().map(|verse| verse.text()));
+        ranges.extend((0..len).step_by(997).flat_map(|from| {
+            [1, 7, 40, 500]
+                .into_iter()
+                .filter_map(move |width| TextRange::new(from, (from + width).min(len)).ok())
+        }));
+        for range in ranges {
+            let spans: Vec<_> = large.locate(range).unwrap().spans.collect();
+            assert_eq!(spans, every_range_scan(&large.mask, range), "{range:?}");
+        }
     }
 
     #[test]
