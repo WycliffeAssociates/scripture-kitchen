@@ -153,8 +153,13 @@ en        [–] en dash (U+2013) and [-] hyphen-minus (U+002D) look alike.
 
 - Names come from `UnicodeData.txt` (UCD 17.0.0, pinned beside the other
   extracts) for every punctuation mark and symbol, general category `P*` or
-  `S*`, which holds every pooled mark. A letter or a digit has no name here,
-  so its `…Name` is empty; `named` says both of a rarity's marks have one.
+  `S*`, which holds every pooled mark, and for every format character (`Cf`)
+  and separator (`Z*`) a hygiene message names. A control (`Cc`) is
+  `<control>` there, so it takes its first `NameAliases.txt` alias (`null`,
+  `delete`, `next line`). A letter, a digit, a combining mark or a
+  noncharacter has no name here, so its `…Name` is empty; `named` says both
+  of a rarity's marks have one, or that a hygiene message's character has
+  one.
 - [`sous-unicode-names.ts`](sous-unicode-names.ts) is generated with the
   kinds and staleness-tested the same way: `nameOf(scalar)`,
   `codePointOf(scalar)` (`U+` and at least four uppercase hex digits).
@@ -240,6 +245,72 @@ ISA 29:16  …Sibanani bumbe ine"pa vintu…
            Of the 6,805 times this project uses ["], 13 have a letter on both sides. This happens
            in 6 of 62 books.
 ```
+
+## Hygiene fixes
+
+A hygiene message names the character and where it is. The row's site
+(`codec/README.md`, "The hygiene site") gives `where`; the site text gives
+the character, the run's first scalar, found at the end of the span the
+anchor names:
+
+```text
+row       MisplacedFormat · BesideSpace · AtEnd · run 1     siteText "ت‌" (the letter, then U+200C)
+params    { class: "format", where: "space", charName: "zero width non-joiner", charCode: "U+200C", fix: "remove", … }
+en        An invisible formatting character is here beside a space: zero width non-joiner (U+200C).
+          One character of this kind is here. It shows nothing, or something unexpected, on the
+          page. It joins or breaks nothing here, so removing it changes nothing on the page, and a
+          search for the word then finds it.
+```
+
+One habit is thousands of rows, so a consumer may show one row per
+(book or project, class, placement) and offer one fix for all of it:
+
+```ts
+for (const group of snapshot.hygieneGroups({ scope: "book" })) {
+  group.key;      // { book: 42, class: "NoBreakSpace", placement: "BesideSpace" }
+  group.count;    // 8157
+  group.at(0);    // the first row, decoded
+  group.fix();    // [{ bookIdx: 42, from: 90311, to: 90312 }, …] last first, or null
+}
+```
+
+Every fix is a deletion, applied in the order given. `hygieneFix(row,
+snapshot.coordinateSpace)` is one row's. `sous_core::hygiene::groups` is
+the same in Rust, and `testData/hygiene/groups.json` holds the two equal.
+
+| class | placement | fix | `fix` |
+| --- | --- | --- | --- |
+| control, delete, noncharacter, a NUL run | any | remove | `remove` |
+| no-break space | beside a space, at an edge, alone | remove | `remove` |
+| no-break space run | between two non-spaces | keep one | `keepOne` |
+| format (BOM, ZWNJ, ZWSP, …) | beside a space or punctuation, at an edge, alone | remove | `remove` |
+| format run of one scalar a lone copy of which joins or breaks the letters around it (ZWSP, ZWNJ, ZWJ) | between two letters | keep one | `keepOne` |
+| any other format, such as a BOM between letters | | none | `none` |
+| U+FFFD | | none: a character is already lost | `none` |
+| C1 control | | none: mis-decoded text | `none` |
+| stray CR, backslash, conflict line, free combining mark | | none: removing or keeping is a judgment | `none` |
+
+"Keep one" is the row's `loneIsSilent`: the run repeats one scalar, and
+that scalar alone between the same neighbours is no finding. It keeps the
+run's first scalar, not the span's.
+
+`fix` is the table's answer for the class and placement. A row whose own
+deletion is not certain is left out of `group.fix()`, though its message
+still says what removing it does:
+
+- `anchor` `Neither`: the span is wider than the run on both sides, as a
+  ZWNJ after a conjunct is, or crosses removed markup, so the run's
+  position in it is unknown.
+- Not `oneUnit`, or saturated, and not an `Exact` removal: `run` is no
+  UTF-16 length. An astral format alone in its span is still removed whole.
+- A UTF-8 publication: only an `Exact` removal, since a scalar's byte
+  width is not on the row.
+
+So a group's `fix()` may cover fewer rows than `count`; the rows it leaves
+are the ones to review by hand. Why a ZWNJ before a space is worth removing
+though the page shows nothing: an exact search for `word ` misses `word‌ `,
+and anything keyed on a word's exact text (word counts, pairing, a
+concordance) sees two spellings of one word.
 
 ## Queries
 
@@ -503,7 +574,7 @@ Questions below: **1** seen, **2** how often, **3** normal instead,
 | `convention.doubled.separated` | a word written twice with punctuation between | as above |
 | `convention.letterRun` | one letter repeated more times than the project ever repeats it | `letter` `length` `atLeast` `run` `word` (1); `count` `total` (2) |
 | `convention.sentenceStart` | a lowercase word after a mark the project almost always capitalizes after | `glyph` `word` (1); `count` `total` (2); `usualWord` `upper` (3); spread (4) |
-| `hygiene` | a character that does not belong in text | `class` (1); `run` `atLeast` (2) |
+| `hygiene` | a character that does not belong in text | `class` `where` `charName` `charCode` `named` `coded` (1); `run` `atLeast` (2); `fix`, what removing it does ("Hygiene fixes") |
 | `presence.missing` | source verses this book lacks | `keys` `atLeast` (1, 2) |
 | `presence.extra` | verses the source lacks | as above |
 | `presence.empty` | verses empty here but not in the source | as above |
@@ -519,7 +590,9 @@ and `usual` on placement and book rate `letter | space | digit | punctuation`;
 `quote | bracket | dash | sentenceEnd | separator | digit | symbol | letter |
 space | other`; `pool` the same without `letter` and `space`;
 `class` `control | delete | replacement | carriageReturn | backslash | conflict |
-combiningMark | format | noBreakSpace | noncharacter`. `digit` is true on the
+combiningMark | format | noBreakSpace | noncharacter`; `where`
+`space | edge | letters | punctuation | alone | other`; `fix`
+`remove | keepOne | none`. `digit` is true on the
 pooled digit row, whose `glyph` is the site's own digit.
 
 `galley/tests/sous_conformance.mjs` describes every finding of the golden

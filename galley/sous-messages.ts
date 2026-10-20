@@ -31,6 +31,8 @@ import type {
   Finding,
   FindingsSnapshot,
   HygieneClass,
+  HygieneFinding,
+  HygienePlacement,
   OuterClass,
   Pattern,
   Pool,
@@ -94,7 +96,7 @@ export type { MarkKind };
 /** Every parameter each id carries, one id per line; both tiers of a catalog
  * entry may use only these (`tests/sous_messages.rs` reads this block). */
 export interface ParamsById {
-  "hygiene": { class: HygieneName; run: number; atLeast: boolean };
+  "hygiene": { class: HygieneName; run: number; atLeast: boolean; where: HygieneWhere; named: boolean; coded: boolean; charName: string; charCode: string; fix: HygieneFix };
   "presence.missing": { keys: number; atLeast: boolean };
   "presence.extra": { keys: number; atLeast: boolean };
   "presence.empty": { keys: number; atLeast: boolean };
@@ -303,6 +305,12 @@ export type HygieneName =
   | "noBreakSpace"
   | "noncharacter";
 
+/** Where a hygiene run sits, from the scalars just outside it. */
+export type HygieneWhere = "space" | "edge" | "letters" | "punctuation" | "alone" | "other";
+
+/** What the fix table does with the row's class and placement. */
+export type HygieneFix = "remove" | "keepOne" | "none";
+
 /** A pool, named as a `MarkKind`: a run neighbour is never a letter or a space. */
 export type PoolName = Exclude<MarkKind, "letter" | "space">;
 
@@ -346,6 +354,62 @@ const HYGIENE: Record<HygieneClass, HygieneName> = {
   NoBreakSpace: "noBreakSpace",
   Noncharacter: "noncharacter",
 };
+
+const WHERE: Record<HygienePlacement, HygieneWhere> = {
+  BesideSpace: "space",
+  AtEdge: "edge",
+  BetweenLetters: "letters",
+  BesidePunctuation: "punctuation",
+  Alone: "alone",
+  Other: "other",
+};
+
+/** A scalar of each class, for a run whose span is wider on both sides. */
+const MEMBER: Record<HygieneClass, (scalar: number) => boolean> = {
+  C0Control: (c) => c < 0x20,
+  Delete: (c) => c === 0x7f,
+  C1Control: (c) => c >= 0x80 && c <= 0x9f,
+  ReplacementChar: (c) => c === 0xfffd,
+  StrayCarriageReturn: (c) => c === 0x0d,
+  StrandedBackslash: (c) => c === 0x5c,
+  ConflictMarker: () => false,
+  FreeCombiningMark: (c) => /\p{M}/u.test(String.fromCodePoint(c)),
+  MisplacedFormat: (c) => /\p{Cf}/u.test(String.fromCodePoint(c)),
+  NoBreakSpace: (c) => c === 0xa0,
+  Noncharacter: (c) => (c >= 0xfdd0 && c <= 0xfdef) || (c & 0xfffe) === 0xfffe,
+};
+
+/** The run's first scalar in the site's text. The anchor says which end of
+ * the span the run is at; a span wider on both sides is searched. A marker
+ * line names no one scalar. */
+function hygieneScalar(finding: HygieneFinding, site: string): number | undefined {
+  const scalars = Array.from(site, (c) => c.codePointAt(0) as number);
+  const { anchor, run, class: hygieneClass } = finding.hygiene;
+  if (hygieneClass === "ConflictMarker") return undefined;
+  if (anchor === "AtEnd") return scalars[Math.max(0, scalars.length - run)];
+  if (anchor === "Neither") return scalars.find(MEMBER[hygieneClass]);
+  return scalars[0];
+}
+
+function hygiene(finding: HygieneFinding, site: string): Message {
+  const scalar = hygieneScalar(finding, site);
+  const name = scalar === undefined ? undefined : nameOf(scalar);
+  return {
+    id: "hygiene",
+    params: {
+      class: HYGIENE[finding.hygiene.class],
+      run: finding.hygiene.run,
+      atLeast: finding.hygiene.saturated,
+      where: WHERE[finding.hygiene.placement],
+      named: name !== undefined,
+      coded: scalar !== undefined,
+      charName: name ?? "",
+      charCode: scalar === undefined ? "" : codePointOf(scalar),
+      fix: finding.hygiene.action ?? "none",
+    },
+    queries: [],
+  };
+}
 
 const PRESENCE: Record<PresenceKind, "presence.missing" | "presence.extra" | "presence.empty"> = {
   Missing: "presence.missing",
@@ -516,11 +580,7 @@ export function describe(finding: Finding, pattern: Pattern | undefined, context
   const site = context.siteText ?? "";
   switch (finding.kind) {
     case "Hygiene":
-      return {
-        id: "hygiene",
-        params: { class: HYGIENE[finding.hygiene.class], run: finding.hygiene.run, atLeast: finding.hygiene.saturated },
-        queries: [],
-      };
+      return hygiene(finding, site);
     case "Presence":
       return {
         id: PRESENCE[finding.presence.kind],

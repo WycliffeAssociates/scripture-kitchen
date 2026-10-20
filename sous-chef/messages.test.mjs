@@ -349,3 +349,47 @@ test("a mark inside a word describes, searches letters on both sides, and keeps 
   assert.doesNotMatch('neneri" anati', inside);
   assert.equal(patternIdentity(pattern), "v1:p:Placement:22:both:Letter");
 });
+
+test("a hygiene message names the run's first scalar and where it sits", () => {
+  const row = (hygiene) => ({
+    kind: "Hygiene",
+    from: 0,
+    to: 0,
+    bookIdx: 0,
+    hygiene: { oneUnit: true, loneIsSilent: false, saturated: false, ...hygiene },
+  });
+  const zwnj = describe(
+    row({ class: "MisplacedFormat", placement: "BesideSpace", anchor: "AtEnd", run: 1, action: "remove" }),
+    undefined,
+    { siteText: "ت‌" },
+  );
+  assert.deepEqual(zwnj.params, {
+    class: "format",
+    run: 1,
+    atLeast: false,
+    where: "space",
+    named: true,
+    coded: true,
+    charName: "zero width non-joiner",
+    charCode: "U+200C",
+    fix: "remove",
+  });
+  const conjunct = describe(
+    row({ class: "MisplacedFormat", placement: "BesideSpace", anchor: "Neither", run: 1, action: "remove" }),
+    undefined,
+    { siteText: "क्‌ " },
+  );
+  assert.equal(conjunct.params.charCode, "U+200C");
+  const pair = describe(
+    row({ class: "NoBreakSpace", placement: "BetweenLetters", anchor: "Exact", run: 2, loneIsSilent: true, action: "keepOne" }),
+    undefined,
+    { siteText: "  " },
+  );
+  assert.deepEqual([pair.params.charName, pair.params.where, pair.params.fix], ["no-break space", "letters", "keepOne"]);
+  const lost = describe(
+    row({ class: "ReplacementChar", placement: "Other", anchor: "Exact", run: 1, action: null }),
+    undefined,
+    {},
+  );
+  assert.deepEqual([lost.params.coded, lost.params.fix], [false, "none"]);
+});

@@ -119,6 +119,8 @@ export const HYGIENE_SITE_ANCHOR_SHIFT = @@HYGIENE_SITE_ANCHOR_SHIFT@@;
 export const HYGIENE_SITE_ONE_UNIT = @@HYGIENE_SITE_ONE_UNIT@@;
 export const HYGIENE_SITE_LONE_IS_SILENT = @@HYGIENE_SITE_LONE_IS_SILENT@@;
 
+export type HygieneAction = "remove" | "keepOne";
+
 export interface HygieneDigest {
   readonly class: HygieneClass;
   /** Where the run sits, judged on the scalars just outside it. */
@@ -129,6 +131,9 @@ export interface HygieneDigest {
   readonly oneUnit: boolean;
   /** The run repeats one scalar, and that scalar alone would be no finding. */
   readonly loneIsSilent: boolean;
+  /** What the fix table does with this class and placement, whether or not
+   * this row's own fix is certain (`hygieneFix` says that). */
+  readonly action: HygieneAction | null;
   /** Code points in the run; exact unless `saturated`. */
   readonly run: number;
   readonly saturated: boolean;
@@ -958,7 +963,7 @@ export class BookView {
         from,
         to,
         bookIdx,
-        hygiene: { ...laneA, run, saturated },
+        hygiene: { ...laneA, action: hygieneAction(laneA), run, saturated },
       };
     }
     if (code === 4) {
@@ -1034,7 +1039,7 @@ const REMOVED_BESIDE: Readonly<Record<string, readonly HygienePlacement[]>> = {
 };
 
 /** The fix table: `galley/sous-messages.md`, "Hygiene fixes". */
-function hygieneAction(digest: HygieneDigest): "remove" | "keepOne" | null {
+function hygieneAction(digest: Pick<HygieneDigest, "class" | "placement" | "loneIsSilent">): HygieneAction | null {
   if (digest.class === "C0Control" || digest.class === "Delete" || digest.class === "Noncharacter") {
     return "remove";
   }
@@ -1053,7 +1058,7 @@ function hygieneAction(digest: HygieneDigest): "remove" | "keepOne" | null {
  * or a run whose UTF-16 length the row cannot say. */
 export function hygieneFix(finding: HygieneFinding, coordinateSpace: CoordinateSpace): HygieneDeletion | null {
   const digest = finding.hygiene;
-  const action = hygieneAction(digest);
+  const action = digest.action;
   if (action === null || digest.anchor === "Neither") {
     return null;
   }
