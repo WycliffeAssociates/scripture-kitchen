@@ -572,6 +572,17 @@ mod hygiene_sites {
     }
 
     #[test]
+    fn a_zero_width_space_between_letters_is_a_word_break() {
+        assert!(rows("\u{1780}\u{17b6}\u{200b}\u{1793}").is_empty());
+        assert!(rows("\u{e01}\u{200b}\u{e02}").is_empty());
+        assert!(rows("a\u{200b}b").is_empty());
+        assert_eq!(
+            rows("a\u{200b} b"),
+            vec![(HygieneClass::MisplacedFormat, 1, 4, 1)]
+        );
+    }
+
+    #[test]
     fn a_stray_byte_order_mark_mid_text_is_reported() {
         assert_eq!(
             rows("in the\u{feff} beginning"),
