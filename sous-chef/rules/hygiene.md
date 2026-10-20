@@ -55,7 +55,7 @@ it in `core/src/substrate.rs`.
 | --- | --- | --- | --- |
 | `Noncharacter` | `U+FDD0..=U+FDEF`, every `U+xxFFFE`/`U+xxFFFF` | — | `noncharacters_are_reported_as_runs` |
 | `FreeCombiningMark` | a `Mark` whose preceding scalar is absent, whitespace, a control, or a non-glue format character | the mark has a base — a decomposed grapheme is ordinary text | `a_decomposed_graphemes_combining_mark_is_not_a_free_mark`, `a_bare_combining_mark_after_a_space_or_at_the_start_is_reported` |
-| `MisplacedFormat` | a `Cf` scalar outside any glue position | ZWJ/ZWNJ between letters, or a Prepend introducing what follows it — both are doing their defined job | `zwj_and_zwnj_between_letters_are_silent`, `a_stray_byte_order_mark_mid_text_is_reported` |
+| `MisplacedFormat` | a `Cf` scalar outside any glue position | ZWJ/ZWNJ or ZWSP between letters, or a Prepend introducing what follows it — each is doing its defined job (ZWSP is the word space of scripts written without spaces) | `zwj_and_zwnj_between_letters_are_silent`, `a_zero_width_space_between_letters_is_a_word_break`, `a_stray_byte_order_mark_mid_text_is_reported` |
 | `NoBreakSpace` | U+00A0 beside other whitespace, or at an edge of the analyzed text | NBSP inside a phrase, which is convention rather than damage | `nbsp_speaks_only_where_the_claim_is_deterministic` |
 
 Cross-cutting: `clean_multilingual_text_is_silent` and

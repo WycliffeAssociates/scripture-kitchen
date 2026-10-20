@@ -288,6 +288,7 @@ fn scan_conflict_markers(text: &str, out: &mut Vec<HygieneFinding>) {
 pub(crate) const SUSPECT: u16 = bits::MARK | bits::FORMAT | bits::NONCHARACTER;
 /// U+00A0, the one suspect scalar no bit names.
 pub(crate) const NBSP: u32 = 0xA0;
+const ZWSP: u32 = 0x200B;
 
 /// A suspect whose verdict needs the scalar after it.
 struct Pending {
@@ -412,7 +413,7 @@ impl ScalarSites {
             }
             return;
         }
-        if format_is_placed(held.class, held.prev, next) {
+        if format_is_placed(held.cp, held.class, held.prev, next) {
             self.close();
             return;
         }
@@ -472,10 +473,12 @@ fn mark_is_free(prev: Option<Class>) -> bool {
 }
 
 /// A `Cf` scalar is placed when it does the one job its class defines: joins
-/// two letters (ZWJ/ZWNJ), or introduces the scalar after it (GCB Prepend).
-fn format_is_placed(class: Class, prev: Option<Class>, next: Option<Class>) -> bool {
+/// two letters (ZWJ/ZWNJ), breaks a word between two letters (ZWSP, the word
+/// space of Khmer, Lao, Thai and Burmese), or introduces the scalar after it
+/// (GCB Prepend).
+fn format_is_placed(cp: u32, class: Class, prev: Option<Class>, next: Option<Class>) -> bool {
     let joinable = |class: Class| class.is_alphabetic() || class.is_mark();
-    if class.is_extender() {
+    if class.is_extender() || cp == ZWSP {
         return prev.is_some_and(joinable) && next.is_some_and(joinable);
     }
     if class.is_prepend() {
