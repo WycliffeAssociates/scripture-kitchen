@@ -654,6 +654,260 @@ mod hygiene_sites {
         }
     }
 
+    type Site = (HygieneClass, u32, u32, u32, Placement, Anchor, bool, bool);
+
+    /// Each row with its placement, anchor, one-unit bit, and lone-is-silent bit.
+    fn sites(text: &str) -> Vec<Site> {
+        super::row(text)
+            .hygiene()
+            .iter()
+            .map(|f| {
+                let site = f.site();
+                (
+                    f.class(),
+                    f.span().from(),
+                    f.span().to(),
+                    f.run(),
+                    site.placement(),
+                    site.anchor(),
+                    site.one_unit(),
+                    site.lone_is_silent(),
+                )
+            })
+            .collect()
+    }
+
+    use crate::{Anchor, Placement};
+    use HygieneClass::{FreeCombiningMark, MisplacedFormat, NoBreakSpace, Noncharacter};
+    use Placement::{Alone, AtEdge, BesideSpace, BetweenLetters, Other};
+
+    #[test]
+    fn a_no_break_space_is_placed_beside_a_space_at_an_edge_or_between_letters() {
+        assert_eq!(
+            sites("word \u{a0}next"),
+            [(
+                NoBreakSpace,
+                5,
+                7,
+                1,
+                BesideSpace,
+                Anchor::Exact,
+                true,
+                false
+            )]
+        );
+        assert_eq!(
+            sites("\u{a0}word"),
+            [(NoBreakSpace, 0, 2, 1, AtEdge, Anchor::Exact, true, false)]
+        );
+        assert_eq!(
+            sites("word\u{a0}"),
+            [(NoBreakSpace, 4, 6, 1, AtEdge, Anchor::Exact, true, false)]
+        );
+        // One NBSP between the letters would be silent, so keeping one fixes it.
+        assert_eq!(
+            sites("a\u{a0}\u{a0}b"),
+            [(
+                NoBreakSpace,
+                1,
+                5,
+                2,
+                BetweenLetters,
+                Anchor::Exact,
+                true,
+                true
+            )]
+        );
+    }
+
+    #[test]
+    fn a_no_break_space_before_a_mark_starts_a_span_the_mark_widens() {
+        assert_eq!(
+            sites(" \u{a0}\u{301}x"),
+            [
+                (
+                    NoBreakSpace,
+                    1,
+                    5,
+                    1,
+                    BesideSpace,
+                    Anchor::AtStart,
+                    true,
+                    false
+                ),
+                (
+                    FreeCombiningMark,
+                    1,
+                    5,
+                    1,
+                    BesideSpace,
+                    Anchor::AtEnd,
+                    true,
+                    false
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_zero_width_non_joiner_before_a_space_ends_a_span_its_letter_starts() {
+        assert_eq!(
+            sites("\u{62a}\u{200c} \u{62a}"),
+            [(
+                MisplacedFormat,
+                0,
+                5,
+                1,
+                BesideSpace,
+                Anchor::AtEnd,
+                true,
+                false
+            )]
+        );
+        // The virama behind it seals the edge after it too, so the span takes
+        // the conjunct on the left and the space on the right.
+        assert_eq!(
+            sites("\u{915}\u{94d}\u{200c} x"),
+            [(
+                MisplacedFormat,
+                0,
+                10,
+                1,
+                BesideSpace,
+                Anchor::Neither,
+                true,
+                false
+            )]
+        );
+        // Two between letters: one is the joiner's job.
+        assert_eq!(
+            sites("\u{62a}\u{200c}\u{200c}\u{62a}"),
+            [(
+                MisplacedFormat,
+                0,
+                8,
+                2,
+                BetweenLetters,
+                Anchor::AtEnd,
+                true,
+                true
+            )]
+        );
+    }
+
+    #[test]
+    fn zero_width_spaces_beside_a_space_or_doubled_between_letters() {
+        assert_eq!(
+            sites("\u{1780}\u{200b} \u{1781}"),
+            [(
+                MisplacedFormat,
+                3,
+                6,
+                1,
+                BesideSpace,
+                Anchor::Exact,
+                true,
+                false
+            )]
+        );
+        assert_eq!(
+            sites("a\u{200b}\u{200b}b"),
+            [(
+                MisplacedFormat,
+                1,
+                7,
+                2,
+                BetweenLetters,
+                Anchor::Exact,
+                true,
+                true
+            )]
+        );
+        // A mixed run is not one scalar repeated, so no single one is kept.
+        assert_eq!(
+            sites("a\u{200b}\u{feff}b"),
+            [(
+                MisplacedFormat,
+                1,
+                7,
+                2,
+                BetweenLetters,
+                Anchor::Exact,
+                true,
+                false
+            )]
+        );
+    }
+
+    #[test]
+    fn a_byte_order_mark_mid_text_or_alone() {
+        assert_eq!(
+            sites("in the\u{feff} beginning"),
+            [(
+                MisplacedFormat,
+                6,
+                9,
+                1,
+                BesideSpace,
+                Anchor::Exact,
+                true,
+                false
+            )]
+        );
+        // A BOM between letters does no job a lone one would do either.
+        assert_eq!(
+            sites("a\u{feff}b"),
+            [(
+                MisplacedFormat,
+                1,
+                4,
+                1,
+                BetweenLetters,
+                Anchor::Exact,
+                true,
+                false
+            )]
+        );
+        assert_eq!(
+            sites("\u{feff}"),
+            [(MisplacedFormat, 0, 3, 1, Alone, Anchor::Exact, true, false)]
+        );
+        assert_eq!(
+            sites("7\u{feff}8"),
+            [(MisplacedFormat, 1, 4, 1, Other, Anchor::Exact, true, false)]
+        );
+    }
+
+    #[test]
+    fn an_astral_format_or_noncharacter_is_two_units() {
+        assert_eq!(
+            sites("a \u{e0001} b"),
+            [(
+                MisplacedFormat,
+                2,
+                6,
+                1,
+                BesideSpace,
+                Anchor::Exact,
+                false,
+                false
+            )]
+        );
+        assert_eq!(
+            sites("a\u{1fffe}b"),
+            [(
+                Noncharacter,
+                1,
+                5,
+                1,
+                BetweenLetters,
+                Anchor::Exact,
+                false,
+                false
+            )]
+        );
+    }
+
     /// A chapter end is an edge of text, so a run abutting a masked `\c`
     /// is one finding per chapter — the hygiene ruling, kept.
     #[test]

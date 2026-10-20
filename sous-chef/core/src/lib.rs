@@ -21,9 +21,9 @@ pub mod words;
 
 pub use alignment::{AlignedSide, AlignedUnit, Alignment, AlignmentFact, align};
 pub use codec::{
-    CodecError, ConventionDigest, FindingFlags, FindingKind, HygieneClass, HygieneDigest,
-    PackedFinding, PresenceDigest, PresenceKind, ProportionalityDigest, QuantizedDeviation,
-    RECORD_LEN, Reasons, RuleCode, SourceCopyDigest,
+    Anchor, CodecError, ConventionDigest, FindingFlags, FindingKind, HygieneClass, HygieneDigest,
+    HygieneSite, PackedFinding, Placement, PresenceDigest, PresenceKind, ProportionalityDigest,
+    QuantizedDeviation, RECORD_LEN, Reasons, RuleCode, SourceCopyDigest,
 };
 pub use corpus::{
     CoordinateSpace, CorpusBook, CorpusSnapshot, CorpusWireError, DIRECTORY_ENTRY_BYTES,

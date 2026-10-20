@@ -24,7 +24,7 @@ mod proportionality;
 mod source_copy;
 
 pub use convention::{ConventionDigest, Reasons};
-pub use hygiene::{HygieneClass, HygieneDigest};
+pub use hygiene::{Anchor, HygieneClass, HygieneDigest, HygieneSite, Placement};
 pub use presence::{PresenceDigest, PresenceKind};
 pub use proportionality::{ProportionalityDigest, QuantizedDeviation};
 pub use source_copy::SourceCopyDigest;
@@ -323,21 +323,40 @@ fn validate_context(
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CodecError {
-    InvalidLength { actual: usize },
+    InvalidLength {
+        actual: usize,
+    },
     UnknownRuleCode(u8),
     UnknownFlags(u8),
     MissingDeviationSentinel,
     UnknownHygieneClass(i16),
     EmptyHygieneRun,
+    /// Lane A's high byte names no placement, or sets its top bit.
+    UnknownHygieneSite(u8),
     UnknownPresenceKind(i16),
     EmptyPresenceRun,
-    InvalidSourceCopyRun { run: u32, eligible: u32 },
+    InvalidSourceCopyRun {
+        run: u32,
+        eligible: u32,
+    },
     UnknownReasons(u16),
     EmptyReasons,
-    ReversedSpan { from: u32, to: u32 },
-    InvalidBookIndex { index: u16 },
-    SpanOutOfBounds { from: u32, to: u32, book_len: u32 },
-    BookIndexMismatch { expected: u16, actual: u16 },
+    ReversedSpan {
+        from: u32,
+        to: u32,
+    },
+    InvalidBookIndex {
+        index: u16,
+    },
+    SpanOutOfBounds {
+        from: u32,
+        to: u32,
+        book_len: u32,
+    },
+    BookIndexMismatch {
+        expected: u16,
+        actual: u16,
+    },
 }
 
 impl fmt::Display for CodecError {
@@ -356,6 +375,7 @@ impl fmt::Display for CodecError {
             }
             Self::UnknownHygieneClass(raw) => write!(f, "unknown hygiene class {raw}"),
             Self::EmptyHygieneRun => f.write_str("hygiene run length must be at least 1"),
+            Self::UnknownHygieneSite(bits) => write!(f, "unknown hygiene site byte {bits:#04x}"),
             Self::UnknownPresenceKind(raw) => write!(f, "unknown presence kind {raw}"),
             Self::EmptyPresenceRun => f.write_str("a presence row covers at least one key"),
             Self::InvalidSourceCopyRun { run, eligible } => {

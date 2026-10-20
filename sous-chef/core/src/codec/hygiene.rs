@@ -6,6 +6,8 @@
 //! lanes  [1, i16::MAX] + SATURATED  →  Delete, a run longer than 32767
 //! ```
 
+use mise::unicode::Class;
+
 use super::{CodecError, FindingFlags};
 
 /// One deterministic hygiene class. The discriminant rides the first payload
@@ -102,6 +104,177 @@ impl TryFrom<i16> for HygieneClass {
             .ok()
             .and_then(|index| Self::ALL.get(index).copied())
             .ok_or(CodecError::UnknownHygieneClass(raw))
+    }
+}
+
+/// Where a run sits, judged on the scalars just outside it in the order
+/// `judge` asks: Alone, AtEdge, BesideSpace, BesidePunctuation,
+/// BetweenLetters, Other. Discriminants are append-only.
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Placement {
+    /// White space on at least one side.
+    BesideSpace = 0,
+    /// No scalar on exactly one side: the run opens or closes its chapter.
+    AtEdge = 1,
+    /// A letter or a mark on both sides.
+    BetweenLetters = 2,
+    /// Punctuation on at least one side, white space on neither.
+    BesidePunctuation = 3,
+    /// No scalar on either side: the run is its chapter's whole text.
+    Alone = 4,
+    /// None of the above: a digit, a symbol, or a control beside it.
+    Other = 5,
+}
+
+impl Placement {
+    pub const ALL: [Self; 6] = [
+        Self::BesideSpace,
+        Self::AtEdge,
+        Self::BetweenLetters,
+        Self::BesidePunctuation,
+        Self::Alone,
+        Self::Other,
+    ];
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::BesideSpace => "BesideSpace",
+            Self::AtEdge => "AtEdge",
+            Self::BetweenLetters => "BetweenLetters",
+            Self::BesidePunctuation => "BesidePunctuation",
+            Self::Alone => "Alone",
+            Self::Other => "Other",
+        }
+    }
+
+    /// `prev` and `next` are the classes just outside the run, `None` at a
+    /// chapter edge.
+    pub fn judge(prev: Option<Class>, next: Option<Class>) -> Self {
+        let either = |test: fn(Class) -> bool| prev.is_some_and(test) || next.is_some_and(test);
+        let letter = |class: Option<Class>| class.is_some_and(|c| c.is_alphabetic() || c.is_mark());
+        match (prev, next) {
+            (None, None) => Self::Alone,
+            (None, _) | (_, None) => Self::AtEdge,
+            _ if either(Class::is_whitespace) => Self::BesideSpace,
+            _ if either(Class::is_punctuation) => Self::BesidePunctuation,
+            _ if letter(prev) && letter(next) => Self::BetweenLetters,
+            _ => Self::Other,
+        }
+    }
+}
+
+/// Where the run sits in its published span, which atom widening may have
+/// grown on either side.
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Anchor {
+    /// The span is the run.
+    Exact = 0,
+    /// The run starts the span; the span runs on past it.
+    AtStart = 1,
+    /// The run ends the span; the span starts before it.
+    AtEnd = 2,
+    /// The span is wider on both sides, or its run is not one contiguous
+    /// piece of the published text.
+    Neither = 3,
+}
+
+impl Anchor {
+    pub const ALL: [Self; 4] = [Self::Exact, Self::AtStart, Self::AtEnd, Self::Neither];
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Exact => "Exact",
+            Self::AtStart => "AtStart",
+            Self::AtEnd => "AtEnd",
+            Self::Neither => "Neither",
+        }
+    }
+
+    pub fn of(run: (u32, u32), span: (u32, u32)) -> Self {
+        match (run.0 == span.0, run.1 == span.1) {
+            (true, true) => Self::Exact,
+            (true, false) => Self::AtStart,
+            (false, true) => Self::AtEnd,
+            (false, false) => Self::Neither,
+        }
+    }
+}
+
+/// What a fix needs to know about one run beyond its class and length, packed
+/// as the byte lane A carries above the class:
+///
+/// ```text
+/// bit  7    6               5         4..3    2..0
+///      0    lone_is_silent  one_unit  anchor  placement
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct HygieneSite(u8);
+
+impl HygieneSite {
+    const ANCHOR_SHIFT: u8 = 3;
+    const ONE_UNIT: u8 = 1 << 5;
+    const LONE_IS_SILENT: u8 = 1 << 6;
+
+    /// `one_unit`: every scalar of the run is one UTF-16 unit, so `run` is
+    /// its UTF-16 length. `lone_is_silent`: the run repeats one scalar, and
+    /// that scalar alone between the same neighbours is no finding, so keeping
+    /// the first is a whole fix.
+    pub const fn new(
+        placement: Placement,
+        anchor: Anchor,
+        one_unit: bool,
+        lone_is_silent: bool,
+    ) -> Self {
+        Self(
+            placement as u8
+                | (anchor as u8) << Self::ANCHOR_SHIFT
+                | if one_unit { Self::ONE_UNIT } else { 0 }
+                | if lone_is_silent {
+                    Self::LONE_IS_SILENT
+                } else {
+                    0
+                },
+        )
+    }
+
+    pub const fn placement(self) -> Placement {
+        Placement::ALL[(self.0 & 0b111) as usize]
+    }
+
+    pub const fn anchor(self) -> Anchor {
+        Anchor::ALL[((self.0 >> Self::ANCHOR_SHIFT) & 0b11) as usize]
+    }
+
+    pub const fn one_unit(self) -> bool {
+        self.0 & Self::ONE_UNIT != 0
+    }
+
+    pub const fn lone_is_silent(self) -> bool {
+        self.0 & Self::LONE_IS_SILENT != 0
+    }
+
+    /// The same site restated for a published span its run does not sit in
+    /// as one piece.
+    pub const fn unanchored(self) -> Self {
+        Self::new(
+            self.placement(),
+            Anchor::Neither,
+            self.one_unit(),
+            self.lone_is_silent(),
+        )
+    }
+
+    pub const fn bits(self) -> u8 {
+        self.0
+    }
+
+    pub fn from_bits(bits: u8) -> Result<Self, CodecError> {
+        if bits & 0x80 != 0 || usize::from(bits & 0b111) >= Placement::ALL.len() {
+            return Err(CodecError::UnknownHygieneSite(bits));
+        }
+        Ok(Self(bits))
     }
 }
 

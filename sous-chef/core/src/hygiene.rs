@@ -14,15 +14,25 @@
 //! instead: `ScalarSites` is the machine it drives, and `substrate.rs`
 //! publishes the lane.
 //!
+//! Each row carries its site: the placement, judged on the scalars just
+//! outside the exact run, and where that run sits in its widened span.
+//!
+//! ```text
+//! "\u{62a}\u{200c} \u{62a}"   MisplacedFormat 0..5  run 1  BesideSpace     AtEnd   // the letter widens the span
+//! "a\u{a0}\u{a0}b"           NoBreakSpace    1..5  run 2  BetweenLetters  Exact   // one alone would be silent
+//! "7\u{feff}8"               MisplacedFormat 1..4  run 1  Other           Exact
+//! ```
+//!
 //! What each class claims and when it stays silent: `rules/hygiene.md`.
 //! Scan shape, throughput, and the lone-backslash caveat: hygiene.md.
 
 use crate::pass::{ChapterInput, ChapterObs, ChapterPass, Findings, SchemaStamp};
-use mise::unicode::{Class, bits};
+use mise::unicode::{Class, bits, class_of};
 
 use crate::unicode::atoms::widen_to_atoms;
 use crate::{
-    BookIndex, CodecError, FindingKind, HygieneClass, HygieneDigest, PackedFinding, TextRange,
+    Anchor, BookIndex, CodecError, FindingKind, HygieneClass, HygieneDigest, HygieneSite,
+    PackedFinding, Placement, TextRange,
 };
 
 /// The Level 1a byte sweeps: one scan per chapter, no seam state.
@@ -77,6 +87,7 @@ pub struct HygieneFinding {
     class: HygieneClass,
     span: TextRange,
     run: u32,
+    site: HygieneSite,
 }
 
 impl HygieneFinding {
@@ -92,6 +103,10 @@ impl HygieneFinding {
     /// span may be one atom wider after grapheme snapping.
     pub const fn run(self) -> u32 {
         self.run
+    }
+
+    pub const fn site(self) -> HygieneSite {
+        self.site
     }
 
     /// The same finding in book coordinates, given its chapter's start.
@@ -360,10 +375,12 @@ impl ScalarSites {
             .iter()
             .map(|&(class, from, to, run)| {
                 let exact = TextRange::new(from as u32, to as u32).expect("runs advance forward");
+                let span = widen_to_atoms(text, exact);
                 HygieneFinding {
                     class,
-                    span: widen_to_atoms(text, exact),
+                    span,
                     run,
+                    site: site(text, class, exact, span),
                 }
             })
             .collect()
@@ -523,7 +540,37 @@ fn push(
         span.from(),
         span.to()
     );
-    out.push(HygieneFinding { class, span, run });
+    out.push(HygieneFinding {
+        class,
+        span,
+        run,
+        site: site(text, class, exact, span),
+    });
+}
+
+/// Placement, anchor, and the two facts a fix reads, for the exact run
+/// `exact` that `span` widened.
+fn site(text: &str, class: HygieneClass, exact: TextRange, span: TextRange) -> HygieneSite {
+    let (from, to) = (exact.from() as usize, exact.to() as usize);
+    let prev = text[..from].chars().next_back().map(class_of);
+    let next = text[to..].chars().next().map(class_of);
+    let run = &text[from..to];
+    let lone = run
+        .chars()
+        .next()
+        .filter(|&first| run.chars().all(|c| c == first));
+    let lone_is_silent = lone.is_some_and(|c| match class {
+        HygieneClass::NoBreakSpace => !nbsp_is_suspect(prev, next),
+        HygieneClass::MisplacedFormat => format_is_placed(c as u32, class_of(c), prev, next),
+        _ => false,
+    });
+    HygieneSite::new(
+        Placement::judge(prev, next),
+        Anchor::of((exact.from(), exact.to()), (span.from(), span.to())),
+        // A marker line counts one per line, not per scalar.
+        class != HygieneClass::ConflictMarker && run.chars().all(|c| c.len_utf16() == 1),
+        lone_is_silent,
+    )
 }
 
 #[cfg(test)]
@@ -639,6 +686,71 @@ mod tests {
         assert_eq!(
             rows(">>>>>>> end"),
             vec![(HygieneClass::ConflictMarker, 0, 11, 1)]
+        );
+    }
+
+    fn placed(text: &str) -> Vec<(HygieneClass, Placement, Anchor, bool)> {
+        scan(text)
+            .into_iter()
+            .map(|f| {
+                (
+                    f.class,
+                    f.site.placement(),
+                    f.site.anchor(),
+                    f.site.one_unit(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn byte_classes_are_placed_on_the_scalars_outside_the_run() {
+        assert_eq!(
+            placed("a\0b"),
+            [(
+                HygieneClass::C0Control,
+                Placement::BetweenLetters,
+                Anchor::Exact,
+                true
+            )]
+        );
+        assert_eq!(
+            placed("\0\0 b"),
+            [(
+                HygieneClass::C0Control,
+                Placement::AtEdge,
+                Anchor::Exact,
+                true
+            )]
+        );
+        assert_eq!(
+            placed("7\x7f."),
+            [(
+                HygieneClass::Delete,
+                Placement::BesidePunctuation,
+                Anchor::Exact,
+                true
+            )]
+        );
+        // A marker line counts one per line, so its run is no UTF-16 length.
+        assert_eq!(
+            placed("a\n=======\nb"),
+            [(
+                HygieneClass::ConflictMarker,
+                Placement::BesideSpace,
+                Anchor::Exact,
+                false
+            )]
+        );
+        // U+FFFD is a base, so the mark after it widens the span past the run.
+        assert_eq!(
+            placed("x\u{fffd}\u{301}y"),
+            [(
+                HygieneClass::ReplacementChar,
+                Placement::BetweenLetters,
+                Anchor::AtStart,
+                true
+            )]
         );
     }
 
