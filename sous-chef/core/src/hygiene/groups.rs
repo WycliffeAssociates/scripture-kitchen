@@ -76,7 +76,7 @@ impl HygieneGroup {
         let mut out: Vec<Deletion> = self
             .rows
             .iter()
-            .filter_map(|row| deletion(row, self.space))
+            .filter_map(|row| fix_row(row, self.space))
             .collect();
         if out.is_empty() {
             return None;
@@ -149,7 +149,10 @@ fn action(digest: HygieneDigest) -> Option<Action> {
     }
 }
 
-fn deletion(row: &HygieneRow, space: CoordinateSpace) -> Option<Deletion> {
+/// One row's deletion, or `None` when none is certain: a class or placement
+/// the table does not fix, a run that is not one piece of its span, or a run
+/// whose length in `space` the row cannot say.
+pub fn fix_row(row: &HygieneRow, space: CoordinateSpace) -> Option<Deletion> {
     let digest = row.digest;
     let action = action(digest)?;
     let site = digest.site();

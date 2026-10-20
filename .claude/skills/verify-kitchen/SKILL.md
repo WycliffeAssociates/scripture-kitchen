@@ -51,6 +51,16 @@ so it holds the case, and drive both before and after the change. A finding
 should appear or disappear on the edited text and nothing else should move:
 compare the two `findings.jsonl` with `diff`.
 
+Hygiene groups and their fixes, as Sefer's "Remove all" would apply them:
+
+```sh
+node .claude/skills/verify-kitchen/fix-safety.mjs [--write <dir>] <file.usfm | dir>...
+```
+
+Prints rows → groups and the counts before and after, and fails unless every
+fixed row is gone, no group gains a row, and every deleted scalar is of its
+row's class. `--write` saves the fixed books, to drive `findings.mjs` on.
+
 Other doors (lint, toc, find, mask, settings) have no helper yet;
 `galley/tests/sous_conformance.mjs` shows each one called from node and read
 back. Per feature: [features/README.md](features/README.md).
