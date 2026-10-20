@@ -357,7 +357,25 @@ siteIdentityOf(site)                       // v1:s:EXO 38%3A26:—:0
 | `v1:p:…` | this claim, anywhere | `p`, the channel, the glyph as hex (`digit` for the pooled digit lane) or a word's 16-hex hash, then the key: ExactNeighbor the neighbour's hex; PooledNeighbor the pool; RunShape `pure`/`mixed` and the size bucket; Placement the side (`prev`, `next`, or `both` inside a word) and class; LetterRun the length; Casing the form; Doubled `bare`/`separated`; BookRate the side, class and book key; Rarity, SentenceStart, WordLength nothing more |
 | `v1:f:…` | this finding here | `f`, the pattern's fields from `p` on (or `hygiene` and its class, `presence` and its kind, `sourceCopy`, `length`), then the verse, the site's text and the ordinal |
 | `v1:s:…` | this text here, whatever flags it | `s`, the verse, the site's text and the ordinal |
+| `v1:o:…` | this onion diagnostic here | `o`, the diagnostic's name, then the verse, its span's text and the ordinal |
+| `v1:os:…` | this onion diagnostic's subject, anywhere | `os`, the name, then the marker (`unknown-marker`, `deprecated-marker`) or the marker and attribute (`attr-unknown-name`); no other diagnostic has one |
 
+- **Onion diagnostics.** The same contract over a lint report, with the
+  name from `code().name` and the text sliced from `span()` and `second()`:
+
+  ```ts
+  diagnosticIdentityOf("unknown-marker", { verseRef: "GEN 1:1", siteText: "\\zqq", ordinal: 0 })
+                                             // v1:o:unknown-marker:GEN 1%3A1:\zqq:0
+  diagnosticSubjectIdentity("attr-unknown-name", '|nope="x"', "\\w")
+                                             // v1:os:attr-unknown-name:w:nope
+  ```
+
+  A subject is the marker as written without `\` or `+`. An
+  `attr-unknown-name` list with a bare value, or with more than one name
+  outside `x-`/`z-`, does not say which name is unknown and has no subject. Ordinals count
+  starts as `ordinalOf` does, so a closer counts: `\zqq*` holds a `\zqq`.
+  `galley/tests/sous_conformance.mjs` pins real lint output in
+  `galley/tests/fixtures/onion/identities.txt`.
 - **Never in it:** the pattern's index, its band, counts, shares, a
   WordLength's deviation, a book's position, or anything else a setting or an
   edit elsewhere moves. The pattern index and the book position change with

@@ -11,6 +11,10 @@
  * siteIdentityOf({ verseRef: "EXO 38:26", siteText: "—", ordinal: 0 })
  *                                             → "v1:s:EXO 38%3A26:—:0"
  * ordinalOf("a a, a", "a", 5)                 → 2     // two earlier "a"s in the verse
+ * diagnosticIdentityOf("unknown-marker", { verseRef: "GEN 1:1", siteText: "\\zqq", ordinal: 1 })
+ *                                             → "v1:o:unknown-marker:GEN 1%3A1:\\zqq:1"
+ * diagnosticSubjectIdentity("unknown-marker", "\\zqq")
+ *                                             → "v1:os:unknown-marker:zqq"
  * ```
  *
  * Fields are `:`-separated, and every field is escaped: `%`, `:` and the C0
@@ -18,7 +22,8 @@
  * "Stable identity".
  */
 
-// The reader's types only, so this module loads beside it without importing it.
+// The readers' types only, so this module loads beside them without importing them.
+import type { DiagnosticName } from "../onion-wasm/reader.ts";
 import type { Finding, Pattern } from "./sous-reader.ts";
 
 /** The format's version, the first field of every identity. */
@@ -181,4 +186,71 @@ export function ordinalOf(verseText: string, siteText: string, at: number): numb
     count += 1;
   }
   return count;
+}
+
+/**
+ * This onion diagnostic here: its name and its place, `siteText` being the
+ * diagnostic's span sliced from the book's text.
+ *
+ * ```text
+ * v1:o:attr-unknown-name:GEN 1%3A2:|nope="a%3Ab":0
+ * ```
+ */
+export function diagnosticIdentityOf(name: DiagnosticName, site: SiteContext): string {
+  return [IDENTITY_VERSION, "o", escape(name), ...siteFields(site)].join(":");
+}
+
+/** `\zqq`, `\+zqq` → `zqq`. */
+function markerName(text: string): string | undefined {
+  return /^\\\+?([^\s\\*|]+)/.exec(text)?.[1];
+}
+
+/** The one attribute a list names outside the user namespace, which onion
+ * never flags: `|nope="x"` → `nope`; a bare value or two candidates name none. */
+function unknownAttribute(list: string): string | undefined {
+  const names = [...list.replace(/"[^"]*"/g, "").matchAll(/([^\s|=]+)\s*=/g)]
+    .map((match) => match[1])
+    .filter((name) => !name.startsWith("x-") && !name.startsWith("z-"));
+  return names.length === 1 ? names[0] : undefined;
+}
+
+function subjectFields(name: DiagnosticName, siteText: string, secondText: string | null): string[] | undefined {
+  switch (name) {
+    case "unknown-marker":
+    case "deprecated-marker": {
+      const marker = markerName(siteText);
+      return marker === undefined ? undefined : [marker];
+    }
+    case "attr-unknown-name": {
+      const marker = secondText === null ? undefined : markerName(secondText);
+      const attribute = unknownAttribute(siteText);
+      return marker === undefined || attribute === undefined ? undefined : [marker, attribute];
+    }
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * What an onion diagnostic is about, anywhere: an unknown or deprecated
+ * marker by its name, an unknown attribute by its marker and name. Every
+ * other diagnostic, and a shape whose subject the text does not say, has
+ * none. `siteText` is the diagnostic's span sliced from the book's text,
+ * `secondText` its second span's, or `null`.
+ *
+ * ```text
+ * unknown-marker     \zqq, \+zqq                → v1:os:unknown-marker:zqq
+ * deprecated-marker  \pro                      → v1:os:deprecated-marker:pro
+ * attr-unknown-name  |nope="x" on \w            → v1:os:attr-unknown-name:w:nope
+ * attr-unknown-name  |lemma="x" gloss="y" on \w → undefined   // which one?
+ * attr-unknown-name  | bare on \add             → undefined   // no name
+ * ```
+ */
+export function diagnosticSubjectIdentity(
+  name: DiagnosticName,
+  siteText: string,
+  secondText: string | null = null,
+): string | undefined {
+  const fields = subjectFields(name, siteText, secondText);
+  return fields === undefined ? undefined : [IDENTITY_VERSION, "os", ...[name, ...fields].map(escape)].join(":");
 }
