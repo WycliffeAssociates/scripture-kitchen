@@ -30,16 +30,26 @@ letter. They are described in that order below.
    said      Lower    Glyph(',' quoted)
    don't-3rd Lower    None         two joiners, and a digit riding a letter
    \u{5d0}\u{5d1}\u{5d2}       Uncased  \u{2014}            dropped: no cased letter, no convention
-   a, b      Lower    None, Glyph(',')   `--` is two atoms, so it joins nothing
+   a, b      Lower    None, Glyph('-')   `--` is two atoms, so it joins nothing
    (nothing)                      a digit run holding no letter is not a word
+
+"word,word a\u{2013}b"
+   word, word                     a comma is no joiner
+   a, b                           nor an en dash, nor `/` `;` `:` `.` `\u{1361}`
 ```
 
-A word is a **maximal run of letters and glue, extended through ONE nonletter
-that has a letter immediately on both sides**. `ng'ombe`, `don't`, and
-`mother-in-law` are one word each; `a--b` is two, because the second atom
-confirms nothing. **A digit beside a letter joins the word** — `3rd`, `1Ki` —
-since splitting there would invent a word that is in no text; **a run of digits
-with no letter is not a word at all**, so `12,345` contributes nothing.
+The rule is `mise::words`, named and versioned `words/1`, so whatever else
+splits scripture — alignment first — sees the words sous counts. A word is a
+**maximal run of letters and glue, extended through ONE joiner that has a
+letter immediately on both sides**, and a joiner is one of nine scalars
+(`mise::words::is_joiner`): the apostrophes `'` and `\u{2019}`, the hyphens `-`,
+`\u{2010}` and `\u{2011}`, the Hebrew maqaf, the Armenian and Canadian syllabics
+hyphens, and the middle dot. `ng'ombe`, `don't`, `mother-in-law` and
+`col\u{b7}lecci\u{f3}` are one word each; `a--b` is two, because the second
+atom confirms nothing; every other nonletter closes the word. **A digit beside
+a letter joins the word** — `3rd`, `1Ki` — since splitting there would invent a
+word that is in no text; **a run of digits with no letter is not a word at
+all**, so `12,345` contributes nothing.
 
 There is no dictionary and no UAX #29 at runtime. Eight corpora cannot justify
 that, so `examples/word_breaks.rs` compares this rule against
@@ -262,8 +272,8 @@ Three rules, each one the walk already applies elsewhere:
   breaks a run nor lengthens it: `e\u{301}e` is a run of two.
 - **The fold is the hash's own**, the first scalar of `char::to_lowercase`, so
   `Ee` is a run of two and the key is the lowercase letter.
-- **Anything else breaks the run** — a digit, and the one nonletter a word
-  rides through — because each of those is a real boundary inside the word.
+- **Anything else breaks the run** — a digit, and the joiner a word rides
+  through — because each of those is a real boundary inside the word.
 
 **Uncased scripts count here.** A word with no cased letter is refused by the
 casing lane and counted whole by this one, so a Hebrew or Devanagari repeat is

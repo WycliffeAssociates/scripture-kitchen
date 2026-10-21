@@ -319,7 +319,7 @@ fn every_hit_round_trips_source_to_projected_to_source() {
 /// The one place the two rules are both in scope, so the one place their
 /// agreement can be asserted rather than asserted about.
 #[test]
-fn the_restated_word_rule_agrees_with_sous_core_words() {
+fn whole_word_agrees_with_sous_core_words() {
     let mut checked = 0u64;
     for (path, source) in tier() {
         let mask = project(&source);

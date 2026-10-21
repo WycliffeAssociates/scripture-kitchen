@@ -65,7 +65,7 @@ Will, 2026-10-21:
 - Joined words are unions of UAX #29 words, so the lab's gold and the trained aligner convert by
   uniting links; the aligner itself works on subwords and does not care which splitter is used.
 
-<Followup id="fleet-rerun">A comparison metric, not a gate (Will, 2026-10-21). After narrowing: rerun `cargo run -p sous-core --release --example word_breaks` on the 1,504-corpus fleet (laptop-local) and record in `sous-chef/evidence.md` whether the Tamil outliers drop and which nonletters the fleet still joins on.</Followup>
+<Followup id="fleet-rerun" done>A comparison metric, not a gate (Will, 2026-10-21). After narrowing: rerun `cargo run -p sous-core --release --example word_breaks` on the 1,504-corpus fleet (laptop-local) and record in `sous-chef/evidence.md` whether the Tamil outliers drop and which nonletters the fleet still joins on. Done 2026-10-21 (evidence.md row of that date): Tamil 2.95% → 0.004%, p90 40.9% → 0.03% (the outliers were superscript tone digits, not commas); Latin rises 1.63% → 1.92% where UAX 29 joins across U+00AD, U+A789, `:` and `.`, the fleet's `words/2` candidates.</Followup>
 
 <Followup id="lab-rescore">Re-score the pairing lab's head and gold with `words/1` (AER and findings v2 should not move).</Followup>
 

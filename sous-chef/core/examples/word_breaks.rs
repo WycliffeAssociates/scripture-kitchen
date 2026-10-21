@@ -6,8 +6,8 @@
 //!   WA-en-ulb     Latin     789,012      1,234   0.16   don't, Lord's, …
 //! ```
 //!
-//! Eight corpora are not enough to trust "a run of letters and glue, extended
-//! through one nonletter with a letter on both sides". So this counts, over
+//! Eight corpora are not enough to trust `mise::words`, "a run of letters and
+//! glue, extended through one joiner with a letter on both sides". So this counts, over
 //! the whole fleet, the words that rule finds which
 //! `unicode_segmentation::split_word_bound_indices` cuts somewhere else. A
 //! word agrees when UAX 29 has a boundary at each of its ends and none inside

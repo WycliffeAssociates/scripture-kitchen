@@ -139,7 +139,6 @@ impl Splitter {
     /// `at` is the scalar's byte offset; `class` is `class_of(scalar)`.
     #[inline]
     pub fn step(&mut self, at: u32, scalar: char, class: Class) -> Step {
-        let _ = scalar;
         let letter = is_letter(class);
         let step = if letter || class.is_decimal_digit() {
             let step = match self.state {
@@ -160,7 +159,7 @@ impl Splitter {
             };
             self.letter |= class.is_alphabetic();
             step
-        } else if self.state == State::Word && self.after_letter && !class.is_whitespace() {
+        } else if self.state == State::Word && self.after_letter && is_joiner(scalar) {
             self.state = State::Held;
             self.joiner = at;
             Step::Hold
@@ -374,6 +373,7 @@ mod tests {
         assert_eq!(word_around("a--b", 0), (0, 1));
         assert_eq!(word_around("a--b", 3), (3, 4));
         assert_eq!(word_around("x father-in-law", 9), (2, 15));
+        assert_eq!(word_around("word,word", 6), (5, 9));
         let text = "He said, don't-3rd \u{5d0}\u{5d1}\u{5d2} a--b 12,345 col\u{b7}lecci\u{f3}";
         for_each_word(text, |from, to| {
             for (offset, _) in text[from as usize..to as usize].char_indices() {
@@ -383,6 +383,48 @@ mod tests {
                 }
             }
         });
+    }
+
+    #[test]
+    fn only_the_joiners_join() {
+        for text in [
+            "don't",
+            "ng'ombe",
+            "l\u{2019}homme",
+            "father-in-law",
+            "a\u{2010}b",
+            "a\u{2011}b",
+            "col\u{b7}lecci\u{f3}",
+            "\u{5d1}\u{5bc}\u{5b6}\u{5df}\u{5be}\u{5d4}\u{5b2}\u{5d3}\u{5b7}\u{5d3}",
+            "\u{561}\u{58a}\u{562}",
+            "\u{1401}\u{1400}\u{1402}",
+        ] {
+            assert_eq!(words(text), [text], "{text:?} is one word");
+        }
+        assert_eq!(words("word,word"), ["word", "word"]);
+        assert_eq!(words("a\u{2013}b"), ["a", "b"], "an en dash");
+        assert_eq!(words("a\u{2014}b"), ["a", "b"], "an em dash");
+        assert_eq!(
+            words("a/b a;b a:b a.b"),
+            ["a", "b", "a", "b", "a", "b", "a", "b"]
+        );
+        assert_eq!(
+            words("\u{1230}\u{1361}\u{1208}"),
+            ["\u{1230}", "\u{1208}"],
+            "Ethiopic wordspace"
+        );
+        assert_eq!(words("a\u{2018}b a`b"), ["a", "b", "a", "b"]);
+        assert_eq!(
+            words("\u{5d0}\u{5f3}\u{5d1}"),
+            ["\u{5d0}", "\u{5d1}"],
+            "geresh"
+        );
+        assert_eq!(
+            words("\u{3b1}\u{387}\u{3b2}"),
+            ["\u{3b1}", "\u{3b2}"],
+            "ano teleia"
+        );
+        assert_eq!(words("a,-b a-,b"), ["a", "b", "a", "b"]);
     }
 
     #[test]

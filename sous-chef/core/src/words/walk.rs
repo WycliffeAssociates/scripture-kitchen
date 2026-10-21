@@ -25,13 +25,18 @@
 //! contexts that do not force a capital into the doubling numerator, so
 //! `go. Go` is two sentences and never a doubled word.
 //!
-//! A word is a maximal run of letters and glue, extended through ONE nonletter
-//! with a letter immediately on both sides (`ng'ombe`, `don't`,
-//! `mother-in-law`; `a--b` is two words). A digit beside a letter joins the
-//! word (`3rd`, `1Ki`) — splitting there would invent a word — and a run of
-//! digits holding no letter is not a word at all.
+//! The boundaries are `mise::words` (`words/1`), asked one scalar at a time
+//! through its `Splitter`, so the walk keeps only its own state — the chain,
+//! the verse, the word's capitals:
 //!
-//! The case fold is simple: the first scalar of `char::to_lowercase`. `\u{df}`
+//! ```text
+//! ng'ombe  don't  mother-in-law       one word each: an apostrophe or hyphen joins
+//! word,word  a\u{2013}b  a--b              two each: a comma, an en dash, a second atom
+//! 3rd  1Ki                            a digit rides a letter
+//! 12,345                              no letter, no word
+//! ```
+//!
+//! The case fold is `mise::words::fold`, the first scalar of `char::to_lowercase`. `\u{df}`
 //! folds to itself and `\u{130}` loses its dot, so `STRASSE` and `Stra\u{df}e`
 //! stay two words here. This is a convention check, not a collator.
 
@@ -255,9 +260,8 @@ pub fn for_each_word(text: &str, verses: &[Verse], mut visit: impl FnMut(Occurre
 /// ```
 ///
 /// A run is identical atoms, a base and the glue riding it, so `त्त` and
-/// `तित` are not runs of `त`; a digit, or the one nonletter a word rides
-/// through, breaks one. The letter is the first scalar of `char::to_lowercase`, the same fold
-/// the hash uses, so `Ee` is a run of two and an uncased script counts here
+/// `तित` are not runs of `त`; a digit, or a joiner, breaks one. The letter is
+/// `mise::words::fold`, the same fold the hash uses, so `Ee` is a run of two and an uncased script counts here
 /// like any other.
 pub fn for_each_letter_run(word: &str, mut visit: impl FnMut(ScalarKey, u8)) {
     let mut held: Option<(ScalarKey, &str, u32)> = None;

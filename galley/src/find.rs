@@ -22,13 +22,14 @@
 //! ```
 //!
 //! `find.md` beside this file is the contract: what `Split` means, why the
-//! whole-word rule is a restatement rather than a call, and what the fold
+//! whole-word rule is `mise::words` rather than `sous_core`, and what the fold
 //! costs.
 
 use std::ops::Range;
 
 use memchr::memmem;
-use mise::unicode::{Class, class_of};
+use mise::unicode::class_of;
+use mise::words::{is_core, is_joiner, is_letter};
 
 use crate::onion::Mask;
 use crate::pantry::{BookId, Entry, Pantry, Role};
@@ -137,9 +138,8 @@ impl<'n> Find<'n> {
         self
     }
 
-    /// Require a word boundary on both sides, under the words rule restated in
-    /// this module — letters plus glue, extended through one medial nonletter
-    /// with a letter either side. `find.md` says why it is a restatement.
+    /// Require a word boundary on both sides under `mise::words`: letters plus
+    /// glue, extended through one joiner with a letter either side.
     pub fn whole_word(mut self, on: bool) -> Self {
         self.whole_word = on;
         self
@@ -360,7 +360,7 @@ fn simple_fold(scalar: char) -> char {
     if scalar.is_ascii() {
         scalar.to_ascii_lowercase()
     } else {
-        scalar.to_lowercase().next().unwrap_or(scalar)
+        mise::words::fold(scalar)
     }
 }
 
@@ -371,29 +371,9 @@ fn fold(text: &str) -> String {
 
 // ------------------------------------------------------------- the word rule
 
-/// A word's own scalars: letters, and the glue that rides them.
-const fn is_letterish(class: Class) -> bool {
-    class.is_alphabetic() || class.is_glue()
-}
-
-/// What a word is built from before the joiner rule extends it — a digit
-/// beside a letter joins the word (`3rd`, `1Ki`).
-const fn is_core(class: Class) -> bool {
-    is_letterish(class) || class.is_decimal_digit()
-}
-
-/// A nonletter that can act as the one medial joiner: not a word scalar, not
-/// whitespace, and not a digit (a digit confirms nothing).
-const fn is_run_atom(class: Class) -> bool {
-    !is_core(class) && !class.is_whitespace()
-}
-
-/// Whether `hay[from..to]` is a whole word under the words rule.
-///
-/// The rule is a maximal run of letters and glue, extended through ONE
-/// nonletter that has a letter immediately on both sides — so the only
-/// question at each edge is whether the scalar outside it continues the run,
-/// and whether an outside nonletter is a confirmed joiner rather than a break.
+/// Whether `hay[from..to]` is a whole word under `mise::words`: at each edge,
+/// whether the scalar outside continues the run, or is a joiner with a letter
+/// on both sides.
 fn is_whole_word(hay: &str, from: usize, to: usize) -> bool {
     let first = hay[from..to].chars().next();
     let last = hay[from..to].chars().next_back();
@@ -405,13 +385,11 @@ fn is_whole_word(hay: &str, from: usize, to: usize) -> bool {
             let class = class_of(prev);
             if is_core(class) {
                 false
-            } else if !is_run_atom(class) {
+            } else if !is_joiner(prev) {
                 true
             } else {
-                // A joiner needs a letter on BOTH sides; the inner side is the
-                // hit's own first scalar.
-                let outer = back.next().is_some_and(|c| is_letterish(class_of(c)));
-                !(outer && first.is_some_and(|c| is_letterish(class_of(c))))
+                let outer = back.next().is_some_and(|c| is_letter(class_of(c)));
+                !(outer && first.is_some_and(|c| is_letter(class_of(c))))
             }
         }
     };
@@ -426,11 +404,11 @@ fn is_whole_word(hay: &str, from: usize, to: usize) -> bool {
             let class = class_of(next);
             if is_core(class) {
                 false
-            } else if !is_run_atom(class) {
+            } else if !is_joiner(next) {
                 true
             } else {
-                let outer = ahead.next().is_some_and(|c| is_letterish(class_of(c)));
-                !(outer && last.is_some_and(|c| is_letterish(class_of(c))))
+                let outer = ahead.next().is_some_and(|c| is_letter(class_of(c)));
+                !(outer && last.is_some_and(|c| is_letter(class_of(c))))
             }
         }
     }

@@ -141,8 +141,8 @@ fn emphasis_aaaah_is_reviewable_not_convicted() {
 }
 
 /// Glue rides its base (charter invariant 8), so a run is identical atoms: a
-/// marked letter breaks a run of bare ones. A digit and the one nonletter a
-/// word rides through break one too.
+/// marked letter breaks a run of bare ones. A digit and the joiner a word rides
+/// through break one too.
 #[test]
 fn glue_inside_a_repeat_does_not_break_it() {
     assert_eq!(runs_in("the\u{301}ee"), vec![('e', 2)]);

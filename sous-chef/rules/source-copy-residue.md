@@ -14,8 +14,9 @@ which of the legitimate readings applies.
   exact key plus occurrence ordinal, or a bridge against the exact contiguous
   constituent run. A partial overlap or a one-sided key abstains and stays an
   `AlignmentFact`.
-- Word boundaries as `sous_core::words::walk` draws them: a maximal run of
-  letters and glue, extended through one medial nonletter. A run of digits
+- Word boundaries as `mise::words` (`words/1`) draws them: a maximal run of
+  letters and glue, extended through one joiner (an apostrophe, hyphen, maqaf
+  or middle dot) with a letter on both sides. A run of digits
   holding no letter is not a word, so a verse number or a year neither extends
   a run nor breaks one and is not eligible.
 - **Exact surface forms.** Matching is over raw UTF-8 bytes, case included.

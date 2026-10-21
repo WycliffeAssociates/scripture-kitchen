@@ -10,8 +10,9 @@
   `planning/` holds every crate's plans, by tag; everything about tests and
   conventions applies to both.
 - `mise/` is the zero-dependency leaf both share: standard-derived tables and
-  borrow-free data structures only (`BookKey`, book order, UTF-16 offset types,
-  the per-scalar Unicode `Class`). A generated table may live there while its
+  borrow-free data structures (`BookKey`, book order, UTF-16 offset types,
+  the per-scalar Unicode `Class`), plus `words/1`, the word boundary sous,
+  galley's whole-word find and alignment all split by. A generated table may live there while its
   generator does not — `bin/gen-unicode` stays in `sous-core` with the pinned
   UCD extracts and writes across. Scope rule and exclusions: `mise/README.md`.
 - `ticket/` is the second zero-dependency leaf: the WIRE vocabulary (`Width`,

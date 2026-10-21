@@ -62,19 +62,19 @@ Literal only. The `regex` crate becomes a galley dependency the day a consumer
 asks for one, and not before; `aho-corasick` waits for a genuine many-patterns
 consumer (termlist highlighting).
 
-## Whole word: a restatement, meant to agree
+## Whole word: `words/1`
 
-`whole_word(true)` uses the same rule as `sous_core::words` — **a maximal run
-of letters and glue, extended through ONE nonletter that has a letter
-immediately on both sides**. `mother-in-law` and `don't` are one word each;
-`a--b` is two. A digit beside a letter joins the word (`3rd`), and a run of
-digits holding no letter is no word at all.
+`whole_word(true)` uses `mise::words`, the rule `sous_core::words` counts by —
+**a maximal run of letters and glue, extended through ONE joiner
+(`mise::words::is_joiner`: apostrophes, hyphens, the maqaf, the middle dot)
+that has a letter immediately on both sides**. `mother-in-law` and `don't` are
+one word each; `a--b` and `word,word` are two. A digit beside a letter joins
+the word (`3rd`), and a run of digits holding no letter is no word at all.
 
-The rule is RESTATED here, not called: Find is an Onion-side galley feature and
-must not become a Sous one. Only the boundary question is asked, so the
-restatement is a dozen lines — for each edge, whether the scalar outside it
-continues the run, and whether an outside nonletter is a confirmed joiner
-rather than a break.
+Find is an Onion-side galley feature and must not become a Sous one, so it
+calls the leaf, not `sous_core`, and asks only the boundary question: for each
+edge, whether the scalar outside it continues the run, or is a joiner with a
+letter on both sides.
 
 The two are **meant to agree**, and `galley/tests/find.rs` asserts they do:
 over the whole test tier it compares every whole-word, case-insensitive hit of
