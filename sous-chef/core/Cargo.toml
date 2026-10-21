@@ -35,3 +35,7 @@ unicode-segmentation = "1.13.3"
 [[bench]]
 name = "roofline"
 harness = false
+
+[[bench]]
+name = "words_vs_uax"
+harness = false
