@@ -142,10 +142,10 @@ fn compare(raw: &str) -> Report {
         for (at, window) in scalars.windows(3).enumerate() {
             let [before, scalar, after] = [window[0], window[1], window[2]];
             let class = class_of(scalar);
-            if is_core(class)
+            if is_core(scalar, class)
                 || class.is_whitespace()
-                || !is_letter(class_of(before))
-                || !is_letter(class_of(after))
+                || !is_letter(before, class_of(before))
+                || !is_letter(after, class_of(after))
             {
                 continue;
             }

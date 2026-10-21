@@ -14,12 +14,15 @@
 //! word,word  → word | word        a comma is no joiner
 //! a–b        → a | b              nor an en dash
 //! ng'ombe  l'homme  father-in-law  col·lecció  בֶּן־הֲדַד   → one word each
+//! s\u{e1}a\u{b3}o  mo\u{a789}mo\u{a789}  longo\u{ad}kabu   → one word each: word glue rides
 //! ```
 //!
-//! A word is a maximal run of letters, glue and digits holding at least one
-//! letter, extended through ONE [`is_joiner`] scalar with a letter or glue
-//! immediately on both sides. [`fold`] is the simple case fold. Changing the
-//! joiner set, the digit rule, the fold, or the Unicode version of
+//! A word is a maximal run of letters, [`is_glue`] and digits holding at least
+//! one letter, extended through ONE [`is_joiner`] scalar with a letter or glue
+//! immediately on both sides. Glue is the UCD's marks and extenders plus
+//! [`is_word_glue`], which the class table does not know. [`fold`] is the
+//! simple case fold. Changing the joiner set, the glue set, the digit rule,
+//! the fold, or the Unicode version of
 //! [`crate::unicode`] is `words/2`: a consumer that hashes words sees
 //! different hashes.
 //!
@@ -55,16 +58,38 @@ pub const fn is_joiner(scalar: char) -> bool {
     )
 }
 
-/// What a word is built from: letters, glue and digits.
+/// The scalars `words/1` rides as glue beyond the UCD's marks and extenders:
+/// they sit inside or at the end of a word and never split it.
+///
+/// ```text
+/// \u{ad}             soft hyphen             longo\u{ad}kabu\u{ad}rungi
+/// \u{a789}           modifier letter colon   mo\u{a789}mo\u{a789}dakiyo\u{a789}
+/// \u{b9} \u{b2} \u{b3} \u{2074} \u{2075}       superscript tone digits  s\u{e1}a\u{b3}  coon\u{b2}\u{b9}  \u{baa}\u{2074}\u{bb5}\u{ba4}\u{bbf}
+/// ```
 #[inline]
-pub const fn is_core(class: Class) -> bool {
-    class.is_alphabetic() || class.is_glue() || class.is_decimal_digit()
+pub const fn is_word_glue(scalar: char) -> bool {
+    matches!(
+        scalar,
+        '\u{AD}' | '\u{A789}' | '\u{B9}' | '\u{B2}' | '\u{B3}' | '\u{2074}' | '\u{2075}'
+    )
+}
+
+/// Glue as `words/1` reads it: [`Class::is_glue`] or [`is_word_glue`].
+#[inline]
+pub const fn is_glue(scalar: char, class: Class) -> bool {
+    class.is_glue() || is_word_glue(scalar)
 }
 
 /// What may stand on either side of a joiner: a letter, or glue riding one.
 #[inline]
-pub const fn is_letter(class: Class) -> bool {
-    class.is_alphabetic() || class.is_glue()
+pub const fn is_letter(scalar: char, class: Class) -> bool {
+    class.is_alphabetic() || is_glue(scalar, class)
+}
+
+/// What a word is built from: letters, glue and digits.
+#[inline]
+pub const fn is_core(scalar: char, class: Class) -> bool {
+    is_letter(scalar, class) || class.is_decimal_digit()
 }
 
 /// The simple case fold: the first scalar of `char::to_lowercase`, so `ß`
@@ -139,7 +164,7 @@ impl Splitter {
     /// `at` is the scalar's byte offset; `class` is `class_of(scalar)`.
     #[inline]
     pub fn step(&mut self, at: u32, scalar: char, class: Class) -> Step {
-        let letter = is_letter(class);
+        let letter = is_letter(scalar, class);
         let step = if letter || class.is_decimal_digit() {
             let step = match self.state {
                 State::Outside => {
@@ -378,7 +403,8 @@ mod tests {
         for_each_word(text, |from, to| {
             for (offset, _) in text[from as usize..to as usize].char_indices() {
                 let at = from + offset as u32;
-                if is_core(class_of(text[at as usize..].chars().next().unwrap())) {
+                let scalar = text[at as usize..].chars().next().unwrap();
+                if is_core(scalar, class_of(scalar)) {
                     assert_eq!(word_around(text, at), (from, to), "at {at}");
                 }
             }
@@ -425,6 +451,46 @@ mod tests {
             "ano teleia"
         );
         assert_eq!(words("a,-b a-,b"), ["a", "b", "a", "b"]);
+    }
+
+    #[test]
+    fn word_glue_rides_and_can_end_a_word() {
+        assert_eq!(
+            words("longo\u{ad}kabu\u{ad}rungi"),
+            ["longo\u{ad}kabu\u{ad}rungi"]
+        );
+        assert_eq!(
+            words("mo\u{a789}mo\u{a789}dakiyo\u{a789}, o\u{a789}lia\u{a789}"),
+            ["mo\u{a789}mo\u{a789}dakiyo\u{a789}", "o\u{a789}lia\u{a789}"]
+        );
+        assert_eq!(
+            words("s\u{e1}a\u{b3}o coon\u{b2}\u{b9} ba\u{2074}\u{2075}"),
+            ["s\u{e1}a\u{b3}o", "coon\u{b2}\u{b9}", "ba\u{2074}\u{2075}"]
+        );
+        assert_eq!(
+            words("\u{baa}\u{2074}\u{bb5}\u{ba4}\u{bbf}"),
+            ["\u{baa}\u{2074}\u{bb5}\u{ba4}\u{bbf}"]
+        );
+        assert_eq!(
+            words("na\u{b3}-ka"),
+            ["na\u{b3}-ka"],
+            "glue confirms a joiner"
+        );
+        assert_eq!(
+            words("\u{b3} \u{ad}"),
+            Vec::<&str>::new(),
+            "glue alone holds no letter"
+        );
+        assert_eq!(
+            words("a\u{2076}b a\u{2070}b"),
+            ["a", "b", "a", "b"],
+            "no fleet text tones with these"
+        );
+        assert_eq!(
+            words("a\u{2060}b"),
+            ["a", "b"],
+            "the word joiner is neither"
+        );
     }
 
     #[test]

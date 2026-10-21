@@ -82,9 +82,27 @@ joiner that has a letter immediately on both sides (`a--b` stays two words). Wha
 | script hyphens | U+05BE Hebrew maqaf, U+058A Armenian hyphen, U+1400 Canadian syllabics hyphen | the same job in those scripts |
 | middle dot | U+00B7 `·` | Catalan *col·lecció*; it only joins between two letters, so a list separator with spaces is untouched |
 
-Glue, not joiners (already inside words, unchanged): combining marks, ZWJ and ZWNJ, U+00AD soft
-hyphen, U+2060 word joiner, and letter-class apostrophes such as U+02BC `ʼ` and U+02BB `ʻ`
-(Lm in the UCD, so they are letters already).
+Glue, not joiners: glue rides anything inside a word and may end one, where a joiner needs a
+letter on both sides.
+
+- Already glue in `mise::unicode` (marks and grapheme extenders): combining marks, ZWJ and ZWNJ.
+- Letters already: letter-class apostrophes such as U+02BC `ʼ` and U+02BB `ʻ` (Lm in the UCD).
+- Added as `words/1` glue in `mise::words::is_word_glue` (Will, 2026-10-21), because the fleet
+  writes them inside real words and each can end one (word-final counts from the fleet probe,
+  `debug/words1/probe-riders.txt`):
+
+| glue | code points | fleet use |
+|---|---|---|
+| soft hyphen | U+00AD | 29 corpora, 488k after a letter, 10.8k word-final (Lao); Cf with grapheme break Control, so the class table does not call it glue |
+| modifier letter colon | U+A789 | 8 corpora, a length mark: `mo꞉mo꞉dakiyo꞉`, 298k word-final |
+| superscript tone digits | U+00B9 `¹`, U+00B2 `²`, U+00B3 `³`, U+2074 `⁴`, U+2075 `⁵` | Mesoamerican tone (`sáa³o`, `coon²¹`) and Tamil Grantha aspiration (`ப⁴வதி`); ⁵ in one corpus |
+
+They live in `mise::words`, not the generated class table: the table states the UCD, and the
+hygiene and atom lanes read its glue bit as the UCD's.
+
+Not glue and not joiners: U+2070 `⁰` and U+2076..U+2079 `⁶⁷⁸⁹` (no fleet text tones with them; one
+use each), and U+2060 word joiner, which the fleet only ever writes word-initially (383 times, one
+corpus, never between letters), where gluing it on would change that word.
 
 Deliberately **not** joiners:
 

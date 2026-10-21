@@ -50,7 +50,7 @@ use super::{
 use crate::substrate::{FollowKey, Ride, ScalarKey, ride_of};
 use crate::{Verse, VerseKey};
 use mise::unicode::{Class, class_of};
-use mise::words::{Run, Splitter, Step, fold, is_core};
+use mise::words::{Run, Splitter, Step, fold, is_core, is_glue};
 
 pub use mise::words::word_around;
 
@@ -183,7 +183,7 @@ impl<'a> Scan<'a> {
                 self.open(class);
             }
         }
-        if is_core(class) {
+        if is_core(scalar, class) {
             // Every core scalar ends the chain, as it does the substrate's:
             // the letter after an inner joiner (`long-suffering`) is where
             // that joiner hands off.
@@ -268,13 +268,13 @@ pub fn for_each_letter_run(word: &str, mut visit: impl FnMut(ScalarKey, u8)) {
     let mut scalars = word.char_indices().peekable();
     while let Some((at, scalar)) = scalars.next() {
         let class = class_of(scalar);
-        if class.is_glue() {
+        if is_glue(scalar, class) {
             continue;
         }
         let start = at + scalar.len_utf8();
         let mut end = start;
         while let Some(&(next_at, next)) = scalars.peek()
-            && class_of(next).is_glue()
+            && is_glue(next, class_of(next))
         {
             end = next_at + next.len_utf8();
             scalars.next();
@@ -341,7 +341,7 @@ pub fn gap_between(text: &str, from: u32, to: u32) -> Option<Gap> {
     let mut last: Option<char> = None;
     for scalar in text[from as usize..to as usize].chars() {
         let class = class_of(scalar);
-        if is_core(class) {
+        if is_core(scalar, class) {
             return None;
         }
         if !class.is_whitespace() {
