@@ -791,12 +791,25 @@ for (const [door, call] of [
   check(wide > 0, "a non-ASCII case answers differently in UTF-16 than in bytes");
   console.log(`resolve: ${cases.length} cases, ${wide} differ in UTF-16`);
 
+  // resolveOf needs no registration, so it runs every case, the empty intro
+  // too, and answers what resolve(id) does over the same text.
+  for (const { name, usfm, address, expect } of all) {
+    eq(canonical(JSON.parse(resolver.resolveOf(usfm, address))), canonical(expect), `resolveOf bytes: ${name}`);
+    eq(canonical(JSON.parse(resolver.resolveOf(usfm, address, { utf16: true }))), canonical(rebase(expect, usfm)), `resolveOf utf16: ${name}`);
+  }
+  cases.forEach(({ name, usfm, address }, n) => {
+    eq(resolver.resolveOf(usfm, address), resolver.resolve(`resolve/${n}.usfm`, address), `resolveOf equals resolve(id): ${name}`);
+  });
+  console.log(`resolveOf: ${all.length} cases`);
+
   for (const [what, call, says] of [
     ["a misspelled option", () => resolver.resolve("resolve/0.usfm", { kind: "book" }, { utf61: true }), "unknown option"],
     ["an unknown kind", () => resolver.resolve("resolve/0.usfm", { kind: "verse" }), "kind"],
     ["chapter 0", () => resolver.resolve("resolve/0.usfm", { kind: "chapters", from: 0, to: 1 }), "from"],
     ["an empty segment", () => resolver.resolve("resolve/0.usfm", { kind: "verses", from: { chapter: 1, verse: 1, segment: "" }, to: { chapter: 1, verse: 1 } }), "segment"],
     ["an unknown id", () => resolver.resolve("resolve/none.usfm", { kind: "book" }), "no book is registered"],
+    ["resolveOf with a misspelled option", () => resolver.resolveOf("\\id GEN\n", { kind: "book" }, { utf61: true }), "unknown option"],
+    ["resolveOf with an unknown kind", () => resolver.resolveOf("\\id GEN\n", { kind: "verse" }), "kind"],
     ["a verse in a reference without text", () => {
       resolver.updateReference("ref/RUT.usfm", fixture("ref/RUT.usfm"));
       return resolver.resolve("ref/RUT.usfm", { kind: "verses", from: { chapter: 1, verse: 1 }, to: { chapter: 1, verse: 1 } });

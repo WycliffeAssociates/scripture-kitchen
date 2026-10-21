@@ -479,6 +479,13 @@ export class Galley {
      */
     resolve(id: string, address: Address, opts?: ResolveOptions): string;
     /**
+     * [`resolve`](Self::resolve) over text the host holds and has not
+     * registered, with the same options. Over a registered book's exact text
+     * the two doors answer the same JSON, and every address kind answers,
+     * since the text is here.
+     */
+    resolveOf(text: string, address: Address, opts?: ResolveOptions): string;
+    /**
      * Replaces them. No chapter is remapped and no book refolded — judging
      * reads the config, mapping does not — so a knob flip costs a re-judge.
      */
@@ -993,6 +1000,7 @@ export interface InitOutput {
     readonly galley_remove: (a: number, b: number, c: number) => number;
     readonly galley_residentBytes: (a: number) => number;
     readonly galley_resolve: (a: number, b: number, c: number, d: any, e: number) => [number, number, number, number];
+    readonly galley_resolveOf: (a: number, b: number, c: number, d: any, e: number) => [number, number, number, number];
     readonly galley_setConfig: (a: number, b: number) => void;
     readonly galley_skeleton: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly galley_sourceNodeFor: (a: number, b: number, c: number, d: number, e: number, f: any, g: number) => [number, number, number, number];

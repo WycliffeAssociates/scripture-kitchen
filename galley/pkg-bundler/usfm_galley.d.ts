@@ -479,6 +479,13 @@ export class Galley {
      */
     resolve(id: string, address: Address, opts?: ResolveOptions): string;
     /**
+     * [`resolve`](Self::resolve) over text the host holds and has not
+     * registered, with the same options. Over a registered book's exact text
+     * the two doors answer the same JSON, and every address kind answers,
+     * since the text is here.
+     */
+    resolveOf(text: string, address: Address, opts?: ResolveOptions): string;
+    /**
      * Replaces them. No chapter is remapped and no book refolded — judging
      * reads the config, mapping does not — so a knob flip costs a re-judge.
      */

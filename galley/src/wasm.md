@@ -77,6 +77,7 @@ deserialize(galley.parseText(text, { diagnostics: true, toc: true, utf16: true }
 galley.verseTextOf(text);
 galley.structureTextOf(text);                 // no book retains a structure mask
 galley.maskOf(text, { recipe: "structure" }); // and the map of the same cut
+galley.resolveOf(text, verse, { utf16: true }); // where an address is, every kind
 ```
 
 The chunk cache keys on CONTENT, so a text door over a registered book's own
@@ -535,6 +536,10 @@ otherwise. A reference registered without `keepText` still answers a book, an
 intro or chapters from its `Toc`, in bytes (it kept no UTF-16 table, so
 `utf16` throws as `toc` does). A verse needs the text, its segment letters and
 the opening walk, so a verse address to such a reference is refused by name.
+
+`resolveOf(text, address, { utf16? })` is the same door over text the host
+holds, so it needs no registration and answers every kind, verses included.
+Over a registered book's exact text it answers what `resolve(id)` does.
 
 ## SousSettings
 

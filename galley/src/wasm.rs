@@ -421,6 +421,36 @@ impl Galley {
         Ok(resolve::json(&answer, table))
     }
 
+    /// [`resolve`](Self::resolve) over text the host holds and has not
+    /// registered, with the same options. Over a registered book's exact text
+    /// the two doors answer the same JSON, and every address kind answers,
+    /// since the text is here.
+    #[wasm_bindgen(js_name = resolveOf)]
+    pub fn resolve_of(
+        &mut self,
+        text: &str,
+        #[wasm_bindgen(unchecked_param_type = "Address")] address: JsValue,
+        #[wasm_bindgen(unchecked_optional_param_type = "ResolveOptions")] opts: Option<JsValue>,
+    ) -> Result<String, JsError> {
+        let utf16 = onion_wasm::options::utf16_only(opts.as_ref(), "resolveOf")
+            .map_err(|e| JsError::new(&e))?;
+        let address = resolve::address(&address)?;
+        let parsed = self.sous.parsed(
+            text,
+            crate::onion::wire::ParseOptions {
+                toc: true,
+                ..Default::default()
+            },
+        );
+        let answer = parsed
+            .toc
+            .as_ref()
+            .expect("asked for a toc")
+            .resolve(text, &address);
+        let table = utf16.then(|| mise::utf16::utf16_table(text.as_bytes()));
+        Ok(resolve::json(&answer, table.as_ref()))
+    }
+
     // ── Match formatting: a target's skeleton made the source's ─────────
 
     /// One registered book's block structure, as JSON — either side, and the

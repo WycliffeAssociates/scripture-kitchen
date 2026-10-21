@@ -869,6 +869,36 @@ export class Galley {
         }
     }
     /**
+     * [`resolve`](Self::resolve) over text the host holds and has not
+     * registered, with the same options. Over a registered book's exact text
+     * the two doors answer the same JSON, and every address kind answers,
+     * since the text is here.
+     * @param {string} text
+     * @param {Address} address
+     * @param {ResolveOptions} [opts]
+     * @returns {string}
+     */
+    resolveOf(text, address, opts) {
+        let deferred3_0;
+        let deferred3_1;
+        try {
+            const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.galley_resolveOf(this.__wbg_ptr, ptr0, len0, address, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
+            var ptr2 = ret[0];
+            var len2 = ret[1];
+            if (ret[3]) {
+                ptr2 = 0; len2 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred3_0 = ptr2;
+            deferred3_1 = len2;
+            return getStringFromWasm0(ptr2, len2);
+        } finally {
+            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        }
+    }
+    /**
      * Replaces them. No chapter is remapped and no book refolded — judging
      * reads the config, mapping does not — so a knob flip costs a re-judge.
      * @param {SousSettings} settings

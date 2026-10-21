@@ -92,6 +92,7 @@ export const galley_publish: (a: number) => [number, number, number, number];
 export const galley_remove: (a: number, b: number, c: number) => number;
 export const galley_residentBytes: (a: number) => number;
 export const galley_resolve: (a: number, b: number, c: number, d: any, e: number) => [number, number, number, number];
+export const galley_resolveOf: (a: number, b: number, c: number, d: any, e: number) => [number, number, number, number];
 export const galley_setConfig: (a: number, b: number) => void;
 export const galley_skeleton: (a: number, b: number, c: number, d: number) => [number, number, number, number];
 export const galley_sourceNodeFor: (a: number, b: number, c: number, d: number, e: number, f: any, g: number) => [number, number, number, number];
