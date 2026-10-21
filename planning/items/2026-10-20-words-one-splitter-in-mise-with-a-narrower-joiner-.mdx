@@ -1,0 +1,118 @@
+---
+id: 2a150927-67cd-47fc-8138-ed6e5e2a1a8b
+title: "words: one splitter in mise, with a narrower joiner set"
+kind: plan
+status: planned
+created: 2026-10-20
+updated: 2026-10-21
+sha: b2b76e7
+priority: 1
+tags: [words, mise, sous-chef, pairing]
+related: [7a6073fc-21b5-4f86-aa7b-c5c320b71692]
+---
+
+Will, 2026-10-20:
+
+> I agree for now just add it to the plan items that we need to pull out "words" into mise and then we need adjust that defintion I think.
+
+## Why
+
+Three word splitters exist and they disagree:
+
+- `sous_core::words` (`sous-chef/core/src/words.md`): a maximal run of letters and glue, extended
+  through ONE nonletter that has a letter immediately on both sides; digits riding letters; simple
+  fold; no UAX #29 at runtime, so no segmentation tables in the wasm.
+- the pairing crate's `tokens.rs` (`scripture-kitchen-pairing/pairing/src/tokens.rs`): runs of
+  letters, marks and digits joined across an internal apostrophe or hyphen.
+- the pairing lab: UAX #29 word boundaries from `unicode-segmentation`.
+
+The alignment pack hashes each verse's word list, so the splitter is part of that format
+([pairing, from the lab](/items/2026-10-20-pairing-from-the-lab-a-trained-aligner-cold-pass-m)).
+One rule, named and versioned `words/1`, serves sous-chef's counts, pairing's check, the pack and
+the editor. The sous rule wins on speed and wasm size, and its fleet differential against UAX #29
+is already in `sous-chef/evidence.md` (2026-09-04: every spaced script agrees on 98%+ of words).
+
+Will, 2026-10-21:
+
+> This just needs to be a reusable primitive. Alignment will want words to align. Sous to proof read for now. Ideally they point at same words yes.
+
+<Question id="home" answer="mise (Will, 2026-10-21). In pairing, sous would depend on pairing to proofread; mise is the leaf every crate may use.">`mise` or the pairing crate?</Question>
+
+<Tradeoff id="no-hash" chose="mise gives spans and the fold only; each consumer hashes" cost="sous's xxh3 and the pack's SHA-256 stay separate code paths">Will, 2026-10-21: "don't worry about hashing in mise." mise stays zero-dependency.</Tradeoff>
+
+## What changes
+
+1. **Move the word rule into `mise`.** It is needed by more than one crate (sous-chef, pairing,
+   and onion if the verse-text mask exposes words), which is `mise`'s scope rule. The character
+   classes it uses (`mise::unicode::class_of`) are already there. sous-chef's walk and pairing
+   call the one function; `tokens.rs` goes.
+2. **Narrow the joiner set.** Today any single nonletter between two letters joins them, so a
+   comma, semicolon or slash with no space after it (`word,word`) makes one word. Joining should
+   happen only across word-internal glue: apostrophes (`'`, `’`, `ʼ`), hyphens, the Hebrew maqaf,
+   and any others the fleet justifies.
+3. **Name and version it** `words/1`: the joiner set, the digit rule, the simple fold, and the
+   Unicode version of `mise`'s class tables. Changing any of them is `words/2`, because verse
+   hashes change.
+
+## Evidence
+
+- 2026-10-20, Tamil (the one spaced script with an unexplained fleet disagreement: 2.95% overall,
+  p90 40.9%): on the Tamil texts on the lab machine (Door43 IRV, eBible tam2017 and tamtcv) the rule
+  disagrees with UAX #29 on 0–0.0006% of words, all hyphenated names. `mise` classes every Tamil
+  joiner correctly (vowel signs, virama, anusvara, ZWJ/ZWNJ as glue; aytham and Grantha as
+  letters). Probes showed hyphen, en dash, comma, semicolon and slash between letters all join. The
+  40.9% texts were not on that machine; a text with no space after commas is the likely cause.
+- Joined words are unions of UAX #29 words, so the lab's gold and the trained aligner convert by
+  uniting links; the aligner itself works on subwords and does not care which splitter is used.
+
+<Followup id="fleet-rerun">A comparison metric, not a gate (Will, 2026-10-21). After narrowing: rerun `cargo run -p sous-core --release --example word_breaks` on the 1,504-corpus fleet (laptop-local) and record in `sous-chef/evidence.md` whether the Tamil outliers drop and which nonletters the fleet still joins on.</Followup>
+
+<Followup id="lab-rescore">Re-score the pairing lab's head and gold with `words/1` (AER and findings v2 should not move).</Followup>
+
+## Proposal: the joiner set for `words/1`
+
+A word is still a maximal run of letters and glue, digits riding letters, extended through ONE
+joiner that has a letter immediately on both sides (`a--b` stays two words). What changes is that
+"joiner" becomes this list instead of any nonletter:
+
+| joiner | code points | why |
+|---|---|---|
+| apostrophes | U+0027 `'`, U+2019 `’` | elisions and glottal stops: *don't*, *ng'ombe*, *l'homme* |
+| hyphens | U+002D `-`, U+2010 `‐`, U+2011 non-breaking hyphen | compounds and names: *father-in-law*, *zo-ona*, *Ben-Hadad* |
+| script hyphens | U+05BE Hebrew maqaf, U+058A Armenian hyphen, U+1400 Canadian syllabics hyphen | the same job in those scripts |
+| middle dot | U+00B7 `·` | Catalan *col·lecció*; it only joins between two letters, so a list separator with spaces is untouched |
+
+Glue, not joiners (already inside words, unchanged): combining marks, ZWJ and ZWNJ, U+00AD soft
+hyphen, U+2060 word joiner, and letter-class apostrophes such as U+02BC `ʼ` and U+02BB `ʻ`
+(Lm in the UCD, so they are letters already).
+
+Deliberately **not** joiners:
+
+- comma, semicolon, colon, slash, period: `word,word` with no space is a typing slip between two
+  words, not one word; this is the Tamil finding.
+- en dash U+2013 and em dash U+2014: ranges and parenthetical dashes, often set without spaces.
+- U+1361 Ethiopic wordspace `፡` and the other Ethiopic punctuation: `፡` separates words, so it must
+  never join them (there is no Ethiopic hyphen to add).
+- U+0387 Greek ano teleia: a semicolon.
+- U+2018 `‘` and U+0060 `` ` ``: sometimes typed as apostrophes, but more often quotes; left out
+  until the fleet shows a script that needs them.
+- U+05F3 geresh and U+05F4 gershayim: Hebrew abbreviation marks; left out with the rest of Hebrew
+  punctuation until a Hebrew-script target text needs them.
+
+The fleet rerun records, per script, how often each candidate stands between two letters and a
+sample of each, so an addition to this list is a measured change (`words/2`).
+
+<Question id="joiners" answer="Accepted as proposed; the fleet rerun compares, it does not gate (Will, 2026-10-21).">Accept the proposed joiner set above for `words/1`?</Question>
+
+<Question id="sous-counts" answer="Ship the narrower joiners with the move to mise (Will, 2026-10-20).">Narrowing the joiners changes sous-chef's word counts slightly. Ship it with the move to `mise`, or as its own change with a before/after fleet table?</Question>
+
+## Onion, maybe
+
+Onion's only UAX #29 use is `diff` (`onion/src/diff.rs`, `split_word_bounds` and `graphemes`), behind its feature flag. Moving it to `words/1` would drop the segmentation tables from builds that ship diff, but:
+
+- in Han and Kana UAX #29 makes each ideograph a unit; `words/1` makes a run one word, a coarser diff;
+- diff also needs the gaps (spaces, punctuation) as units, which `words/1` would have to yield.
+
+Fleet agreement on spaced scripts is already 98%+ (`sous-chef/evidence.md`, 2026-09-04), so the question is the spaceless scripts, not the spaced ones.
+
+<Followup id="onion-diff">Parked: move onion's diff to `words/1` only if a fleet diff comparison shows no loss on the spaceless scripts. Value uncertain (Will, 2026-10-21).</Followup>

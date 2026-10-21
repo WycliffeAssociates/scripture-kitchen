@@ -1,0 +1,326 @@
+---
+id: 7a6073fc-21b5-4f86-aa7b-c5c320b71692
+title: "pairing, from the lab: a trained aligner cold pass, Model 2 as the fast loop, and a check tuned on real drafts"
+kind: plan
+status: discussing
+created: 2026-10-20
+updated: 2026-10-20
+sha: b2b76e7
+priority: 1
+tags: [pairing, evidence]
+related: [436ebbe2-d1dc-4f97-b307-f366aa9cbe0b, b31879f4-024c-404e-a38f-919ef8d55a5c, dbe7dbed-9eed-4a79-8d80-28085fcb30f3, 2a150927-67cd-47fc-8138-ed6e5e2a1a8b]
+source: ~/projects/pairing-lab/RESULTS.md (findings 1–57); report https://claude.ai/artifact/K5QtoikUXEMDpEn6fizGd1
+---
+
+The stage-0 harness that [pairing, rebuilt](/items/2026-10-15-pairing-rebuilt-measure-against-human-alignments-f)
+asked for was built in `~/projects/pairing-lab` and run from 15 to 20 October. Its results overturn
+one assumption of [the 2026-10-14 plan](/items/2026-10-14-pairing-alignment-consistency-checks-ready-to-migrate-2026-1),
+that IBM Model 2 is the cold pass. This item is what the evidence says to build instead. The lab
+is uncommitted; findings are numbered in its `RESULTS.md`.
+
+## What a user gets
+
+- **Gateway-language projects** get an alignment made once, offline, by a trained neural aligner:
+  11.4 AER on the English ULB against eflomal's 26 and Model 2's ~32 (findings 2, 14). Links it is
+  99% sure of are 97.6% right (finding 31).
+- **Heart-language projects** get the same aligner cold, even untrained on the language, and a
+  better one after their first vetted chapter (finding 57: 32 verses recover 76–93% of the gain
+  2,000 give, for four GPU minutes).
+- **The check finds what teams actually fix.** On six real heart-language drafts with full
+  BTT-Writer history, a possible-typo flag on the first complete draft was later corrected by the
+  team 17–42% of the time, against 8–10% for a random rare word, with no language model
+  (finding 56). Missing renderings flagged with the trained aligner were later filled 2.6–4.9×
+  chance.
+- Two lists per book: **likely typos and names** (short: 20–160 per NT), and **possible missing
+  renderings** (longer, lower priority). The terms view with approved renderings stays the product.
+
+> Wait, so you're saying multiple models though instead of one? But that's a lot of models to keep around is the thing?
+
+One shared model plus a small adapter per language; see "Models" below.
+
+## Three layers
+
+| layer | where | what | when |
+|---|---|---|---|
+| cold pass | server, GPU | the shared aligner (+ the language's adapter) aligns every unvetted verse | on import, and after each retrain |
+| fast loop | device, CPU | Model 2 or the lab's HMM fills only the words an edit changed; vetted and untouched cold links stay verbatim | every chapter save |
+| retrain | server, GPU | train the language's adapter on its vetted links; re-run the cold pass on unvetted verses | every N vetted verses or nightly |
+
+The lab measured the fast-loop rule: re-deriving a strong cold pass through the HMM loses 4–11
+points (finding 33), and a chapter update costs milliseconds (finding 36). The HMM is only as good
+as its start (finding 51), so it never replaces cold links; it fills gaps.
+
+<Question id="retrain-trigger" answer="Ops policy (Will, 2026-10-20). Recommended default: retrain a language's adapter when 30+ verses were vetted since the last one, checked nightly; raise to ~200 once a language has 500+; a retrain-now button; the shared base every few months.">What triggers a retrain: every N newly vetted verses (N = 30 is where the curve pays), a nightly job over commits to main, or a button?</Question>
+
+<Question id="cold-pass-host" answer="The lab's A6000 first, as a stateless queued job (text + vetted links in, adapter + pack out) that can move to a rented on-demand GPU later; no standing service (Will, 2026-10-20).">Where the GPU lives: the A6000 in the lab (an NT in ~4 min in f16), rented per run (an H100, estimated ~1 min, a few dollars an hour), or a standing service?</Question>
+
+**The trained aligner is not always the right cold pass.** On Piaroa (Venezuela, Sáliban,
+translated from the Spanish ULB; lab finding 61) the shared model zero-shot left most content words
+unlinked, and its missing-rendering flags were far worse than eflomal's (6% against 35% later
+filled). The NT heart drafts (finding 56) were the opposite. Rule for the server: per language,
+measure how much of the text the trained aligner links; below a threshold, feed the check from
+eflomal-style statistics or the composition through the gateway until the team has confirmed a
+chapter and an adapter exists.
+
+<Question id="coverage-rule">The coverage threshold that switches a language from the trained aligner to the statistical cold pass, and whether that statistical pass must be our own deterministic HMM (eflomal is GPL and nondeterministic).</Question>
+
+## Models
+
+- **The aligner is ours.** BinaryAlign's method (Latouche et al., ACL 2024) on Microsoft's MIT
+  mDeBERTa-v3 base; inference and training in Rust on candle, written from
+  `docs/word-aligner-spec.md` only (findings 46, 49). GPU f32 matches the PyTorch reference link
+  for link; our trainer reproduces it (11.7 against 11.4).
+- **One shared base:** currently `d43multi`, Clear's gold in seven languages, Hebrew, and Door43's
+  aligned texts in 16 more (finding 50). Precision near 90 everywhere; Door43 gold roughly halved
+  error on most new languages, and the IRVs it never saw improved too.
+- **A small adapter per language** (LoRA): the base stays frozen and an adapter is 2–11 MB instead of
+  a full copy. It matches or beats a full per-language copy (finding 58), and a stronger shared base
+  starts it about a point better.
+- Retraining the shared base: every few months, with all gold, a few GPU-hours.
+
+<Tradeoff id="cc-by-sa" chose="train on Door43's CC BY-SA aligned texts" cost="if the organisation later says no, retrain without them">Will, 2026-10-19: "I think they'd be fine on training. It doesn't mean we have to adopt their wording … If I later find out no then we throw it out."</Tradeoff>
+
+## The alignment pack
+
+The same shape as the [one-file-per-helps-resource proposal](https://claude.ai/artifact/8eUJzps7raMMR6Qjcmqorg):
+one sorted file per text and model version, one row per verse in BCV order, and a small index built
+at release (book → chapter → byte range, plus the file's checksum). A reader in Rust (native and
+wasm) and one in TS fetch a verse, a chapter or scattered verses by HTTP Range or from OPFS, without
+reading the rest. The cold pass is an immutable release file; the device's vetted links and
+fast-loop links are a small overlay keyed by verse hash, so a chapter save never rewrites the pack.
+
+> Mostly the idea of indexing with and codegen to resolve in BCV addressing space I think
+
+So the alignment pack is not its own format: it is one resource kind in a shared BCV-indexed layer
+that helps, glosses, alignments and cached findings all use.
+
+- **One address space.** A key is book · chapter · verse in a named versification, optionally
+  narrowed to a word: `MAT 1:3 w4` is the fourth word of the verse under `words/1`. Mapping between
+  versifications is the [versification layer](/items/2026-10-14-a-versification-layer-for-everything-that-pairs-ve)'s job, not each resource's.
+- **One file shape.** Rows sorted by key, plus a release-built index (book → chapter → byte range,
+  checksum, schema version).
+- **A schema per resource kind,** from which the readers are generated: Rust types and a reader
+  (native and wasm) and TS types and a reader, all answering the same queries (a verse, a chapter,
+  a range, scattered keys) against a shared conformance folder. Adding a kind is a schema, not new
+  reader code.
+- For alignments, a row is a verse key, the two word hashes, and the links as word-number pairs
+  with status and confidence; word-level lookups ("what is MAT 1:3 w4 linked to") resolve inside
+  the verse row.
+
+<Question id="bcv-layer-home" answer="A crate in this workspace, independently consumable from day one, with the schema and validator in the crate and TS generated from it as the workspace already does; see the section below (Will, 2026-10-20).">Where the BCV index layer and its codegen live: a crate in this workspace beside onion, or the shared scripture domain libraries the helps proposal points to?</Question>
+
+- **Index:** book → chapter → byte range; file checksum; model version; splitter version.
+- **Per verse:** the verse ref; a 16-hex hash of the source words and of the target words (the
+  lab's `pairing-align/0` rule: words joined by U+001F, SHA-256); links as source index, target
+  index, status (`v` vetted, `p` proposed, `x` vetted none), optional confidence.
+- **Word positions, not byte offsets.** Words come from one shared deterministic splitter (UAX #29,
+  case-folded, as the lab uses), re-derived from onion's verse text, so offsets are never stored.
+- Size: a whole-NT alignment with confidences is 2.3 MB as text (193k links); about 0.8 MB packed
+  before compression.
+
+Two splitters exist today and they disagree:
+
+- the lab: UAX #29 word boundaries (`unicode-segmentation`), keeping segments with a letter or
+  digit, lowercased (`~/projects/pairing-lab/lab/src/words.rs`). *mwana-wa* is two words.
+- the pairing crate: its own runs of letters, marks and digits, joined across an internal
+  apostrophe or hyphen, as byte ranges (`scripture-kitchen-pairing/pairing/src/tokens.rs`).
+  *mwana-wa* is one word.
+
+The word list feeds the verse hashes, so the splitter is part of the format: name it and version
+it (`words/1`: UAX #29 at a pinned Unicode version, the keep rule, Unicode case folding, and any
+joiner tailoring). Neither does dictionary segmentation for Thai, Lao, Khmer or Burmese; the
+aligner works on subwords underneath, so this limits only the check's word counts there.
+
+A third exists in sous-chef: `sous_core::words` (`sous-chef/core/src/words.md`), "a maximal run
+of letters and glue, extended through ONE nonletter that has a letter immediately on both sides",
+digits riding letters, a simple fold, no UAX #29 at runtime and so no segmentation tables in the
+wasm. It is measured against UAX #29 over the 1,504-corpus fleet (`sous-chef/evidence.md`,
+2026-09-04): every spaced script agrees on 98%+ of words, and the disagreements are the hyphen and
+apostrophe joins it was written for (*father-in-law*, *Jésus-Christ*, *zo-ona*), Hebrew's maqaf, and
+Tamil (2.95% overall, p90 40.9%, not yet explained).
+
+> My only concern on uax 29 is just that's not work kitchen is counting things unfortunately, and I did that cause of speed. uax 29 is slower than what kitchen is doing … As a wasm dep, it pulls in a lot of data tables of cours.
+
+Proposal: the sous rule is `words/1`, moved to `mise` (the workspace's zero-dependency leaf crate,
+whose scope rule is "only if more than one crate needs it") so onion, sous-chef and pairing all
+call one function. The aligner does not care which splitter is used: it works on subwords and
+links whatever words it is given. Joined words are unions of UAX #29 words, so the lab's gold
+converts by uniting links. Before adopting it: re-score the lab's head and gold with the sous rule
+(AER and findings should not move), and look at the Tamil outliers.
+
+Tamil, checked 2026-10-20 on the Tamil texts on the lab machine (Door43 IRV, eBible tam2017 and
+tamtcv): 0–0.0006% disagreement, all hyphens between Tamil runs. `mise` classes every Tamil
+joiner correctly (vowel signs, virama, anusvara, ZWJ/ZWNJ as glue; aytham and Grantha as letters).
+The fleet's high-disagreement Tamil texts are not on that machine, so p90 40.9% is unreproduced.
+What the probes did show: the "ONE nonletter with a letter on both sides" rule also joins through a
+**comma, semicolon or slash** (`word,word`), not only hyphens and apostrophes. A text typed without
+a space after commas would merge words at a high rate, which is the likely explanation for the
+40.9% texts, and would hurt alignment and counting alike. Findings:
+`scratchpad/tamil/FINDINGS.md` in the 2026-10-19 session.
+
+<Followup id="joiner-set" done>Before `words/1` is fixed: limit the joining nonletters to word-internal glue (apostrophes, hyphens, maqaf, and any others the fleet justifies) rather than any nonletter, and rerun `word_breaks` on the fleet (laptop-local) to confirm the Tamil outliers drop.</Followup>
+
+<Question id="one-splitter" answer="Yes (Will, 2026-10-20): move the sous rule into mise as words/1 and narrow its joiner set; tracked in words: one splitter in mise.">Adopt the sous-chef word rule as the one splitter (`words/1`, in `mise`) for the pack, the check, sous-chef and the editor, in place of UAX #29 and the pairing crate's `tokens.rs`?</Question>
+
+Tracked in [words: one splitter in mise](/items/2026-10-20-words-one-splitter-in-mise-with-a-narrower-joiner-).
+
+## The crate: consumable from day one, with or without an editor
+
+> So not only Sefer, but anyone that can show words … So you don't have to have an editor. You can have the same tokenzier + the alignment files.
+
+One crate owns the alignment file format, its schema and validator, and the readers; TS types and
+bindings are generated from it, as the workspace already generates onion's. It depends on `mise`
+for `words/1` and book keys, and on nothing kitchen-specific, so a reader, a website or another
+editor can use it without Sefer.
+
+The surface, roughly:
+
+```text
+tokenize(text)            -> word spans of a verse or chapter under words/1
+align(text_a, text_b)     -> links, from the fast statistical model (the cold pass arrives as a file)
+open(pack, index)         -> a lazy reader over a pack: nothing read until asked
+read(address)             -> links for MAT 1:3, MAT 1, or MAT 1:3 w4, by BCV address
+validate(pack)            -> schema, index checksum, words version, hashes
+```
+
+**Spans for the DOM.** `tokenize` returns where to slice, not strings: per verse, a flat
+`Uint16Array` of pairs (gap since the previous word's end, word length) in **UTF-16 code units**,
+so a page lays out words as spans with `text.slice()` and never re-implements the splitter. Rust
+works in bytes; the conversion is `mise`'s `Utf16Table`. Per verse, u16 is ample (a verse is far
+under 65,535 code units); a chapter-level call returns one array per verse.
+
+**Binary on disk.** It is nearly all small numbers, so the pack is binary: per verse, the two
+16-hex word hashes, then links as varint word indices with a status nibble and a confidence byte
+(quantised, 0–255); a release-built index (book, chapter, byte range, checksum, words version,
+model version) in front. About 0.8 MB for an NT before compression, against 2.3 MB as text. A
+JSON or TSV dump of any range is a debug and interchange view, not the format.
+
+<Followup id="crate-spike" done>Spike the crate: `tokenize` with UTF-16 spans, the binary pack with its index, a lazy reader by BCV address, the validator, and generated TS; round-trip the lab's ULB alignment through it.</Followup>
+
+**Spike result (lab finding 59, `~/projects/pairing-lab/alignpack/`).** The ULB head alignment
+packs to 724 KB (423 KB gzipped) against 2.3 MB of text; all 193,349 links round-trip, confidence
+within one quantisation step. A remote reader opens with a 1.3 KB head and reads a chapter in about
+2–3 KB (`viewer/pack.html` over HTTP Range: 3.3 KB for MAT 1). Reads take microseconds. wasm is
+110 KB (47 KB gzipped), of which UAX #29 and `to_lowercase` are 37 KB (15.5 KB gzipped): the size
+argument for `words/1`. Decisions the spike made, to keep:
+
+- a fixed 64-byte header carries the index length, so a remote open is exactly two fetches; the
+  index and the body each carry a checksum;
+- two words-version tags, source and target (the source hash is over the original-language
+  surface words, not the target splitter);
+- confidence is one byte, `round(p × 255)`, so thresholds are stated as codes (0.99 → `q ≥ 253`);
+  absence is a flag bit;
+- the chapter is the smallest fetch (no per-verse offsets in the index: they would add ~16 KB to
+  save a few KB per read);
+- `wN` in an address is the target word, counted from 1; links are stored 0-based;
+- vetted-none (`x`) is a link with no target, in the same sorted list;
+- rows do not repeat book or chapter; the index supplies them;
+- async sources plan → fetch → decode; the Rust reader stays synchronous with no network code.
+
+### Writing back
+
+> we will need a way to write back and regen the index somehow … That viewer will need to become a real boy, but really it should be composable from the primitives in that lab you wrote.
+
+The pack is immutable; edits live in an **overlay** keyed by verse and by the verse's word hashes,
+and a **compaction** step turns pack + overlay into a new pack with a regenerated index.
+
+- **Overlay:** per verse, the edited links (vetted, vetted-none, removed) and the hashes of the
+  words they were made against. It is what the editor saves (today's `pairing-align/0` export
+  maps onto it) and what a device syncs.
+- **Reading:** pack + overlay, overlay winning for a verse whose hashes still match; a verse whose
+  words changed shows its overlay links as stale.
+- **Compaction:** merge, rewrite rows in BCV order, regenerate the index and checksums, and record
+  the parent pack's checksum in the header. A whole NT rewrites in milliseconds, so the index is
+  always regenerated, never patched.
+- **Chapter-granular update:** `replace_chapter(pack, chapter, rows)`, because Sefer saves whole
+  chapters; every other chapter's bytes are unchanged apart from offsets.
+- **Where each runs:** the device keeps pack + overlay and may compact locally; the server compacts
+  vetted links into the next cold-pass pack, so a retrain never forgets them.
+
+The editor becomes a thin UI over these primitives (`tokenize`, `open`/`read`, overlay, `compact`,
+`validate`), so Sefer, a reader app or the lab viewer compose the same pieces.
+
+<Followup id="write-path" done>Build the write path in the lab's `alignpack`: overlay, read-with-overlay and stale detection, `compact`, `replace_chapter`, wasm/TS, and a demo in `viewer/pack.html` that edits, compacts and reloads in memory.</Followup>
+
+**Write-path result (lab finding 62).** Overlay `ALOV`: append-only, last record per verse wins,
+an entry replaces that word's links (`v`, `p`, `x`, and `-` for cleared); vetting all of Matthew is
+75 KB (3 B a link) against 362 KB as `pairing-align/0`, which round-trips exactly. `compact` keeps
+untouched chapters byte-identical, regenerates index and checksums, and records lineage (generation
+in header bytes 6–7, parent pack id in the index; a pack's id is the first 16 bytes of the SHA-256
+of its header): 13 ms for Matthew. `replace_chapter` 8–12 ms. In the browser the wasm grows to
+206 KB (86 KB gzipped) with the writer. Stale is judged against the pack row's hashes; the caller
+still checks the row against its live text.
+
+<Followup id="editor-from-primitives">Rebuild the lab editor on the `alignpack` primitives instead of its own parsing and storage, as the reference for what Sefer would embed.</Followup>
+
+### Durability
+
+- A link is applied only while both verse hashes match; an edited verse drops its stale links and
+  the fast loop refills its changed words.
+- Vetted links are never replaced by a retrain.
+- "Fetched equals computed" holds **per model version**: the same model and text give the same
+  links (exactly in f32, near-exactly in f16). A retrain is a new version and may move unvetted
+  links; the UI says so ("aligner updated: 214 links changed in Luke").
+
+## Feedback
+
+| user action | meaning | goes to |
+|---|---|---|
+| ✓, ✕ or add a link (editor) | this word goes with that one | the language's adapter training set |
+| approve renderings of a term | a team standard (*neema* and *rehema* are both fine for χάρις) | the check: approved renderings never flag |
+| dismiss a finding | this verse is fine | a suppression keyed by verse hash + lemma: it returns if the verse changes |
+| mark a spelling pair fine | *massih* / *messih* is a variant | a pair-level suppression for near misses and names |
+
+**Heart-language labels are against the gateway, not Greek.** Teams read the gateway; they confirm
+"my word matches that ULB word", and the system composes through the gateway's own aligner links
+to key the check on Greek and to train the adapter. Composition through a related gateway beat
+eflomal by 5–9 points (finding 52) and was confirmed on real drafts (finding 56); through an
+unrelated one it loses, so the trained aligner is the default and the composition the CPU-only
+fallback.
+
+> Yeah, I have to get a labelling surface. this is harder, but we built one here as an example. Ideally Sefer could maybe ship it, but not sure.
+
+The lab's editor (`~/projects/pairing-lab/viewer/align.html`: chapter view, popover with the other column's verse, shift-click linking, confidence slider) is the working example. Recommended: gateway text beside theirs for heart-language teams, Greek with glosses for gateway-language teams, one editor with a switch.
+
+<Question id="label-surface">Does the editor let heart-language teams confirm links against the gateway text (a heart ↔ ULB view), or against Greek with glosses, or both?</Question>
+
+## The check: changes from the lab's findings v2
+
+Measured on six finished Bibles (findings 53–55) and six real drafts (finding 56):
+
+1. **Near miss gated on frequency:** the candidate occurs at most twice, the usual form at least 3×
+   as often. False possible typos 19 → 1.4 per 1,000 verses; *will*/*kill*, *nombre*/*hombre* gone.
+2. **Near miss tested before the stem match**, so *jerubalen* no longer hides behind *jeru*:
+   misspellings caught 44% → 67%.
+3. **Gateway prior:** drop a missing rendering where the gateway also lacks its rendering in that
+   verse; halves findings for 1–5 points of deletions. A multi-translation prior trims more.
+4. **Names lane:** every spelling aligned to one proper-name lemma; minority spellings flagged.
+5. **Drift by book:** a lemma rendered one way in some books and another elsewhere; teams evened
+   these out a third of the time in the histories.
+6. **On drafts, no affix gate.** The gate that ignores pairs differing only by a common affix was
+   tuned on finished Bibles; on drafts the misspellings themselves create such alternations and
+   it hid half the reachable typos. Without it, twice as many at the same precision.
+7. **Read external links without their probabilities** for rendering counts (finding 53).
+
+Not worth it: Damerau or weighted edit distances, Jaro-Winkler, whole words in place of stems,
+Greek senses as the key (they removed variation but made new terms checkable that were also
+variation).
+
+<Question id="affix-gate" answer="Drop it everywhere for now; reintroduce later as alternations learned from approved renderings and vetted text (Will, 2026-10-20).">Drop the affix gate everywhere, or keep it for finished text and learn the project's real alternations from a vetted book?</Question>
+
+Will, 2026-10-20: "Maybe, leave open."
+
+<Question id="haiku-gl">For gateway languages only, run Haiku as a second look at possible typos? On 150 English and Spanish findings it accepted all five real typos and rejected all twelve false ones (finding 55). Heart languages get no LLM step.</Question>
+
+## Carried
+
+- Greek and Hebrew lemmas are the hidden key; labels come from the gateway's words.
+- One `Tables` per testament.
+- Determinism is a requirement for the fast loop (eflomal stays out of it; finding 51 measured our
+  HMM in its place under the many-translations vote: 0.4–3.3 points short).
+
+<Followup id="lora" done>Adapters: a shared base plus a 2.4–10.6 MB LoRA adapter matches or beats a full 1.1 GB per-language copy on Odia and Hausa at 32 and 200 verses, same training minutes and inference speed (lab finding 58). Recipe: rank 16, attention + FFN, lr 5e-4.</Followup>
+
+<Followup id="malagasy">Run the real-error benchmark on the five Malagasy-variety histories (translated from standard Malagasy), the Swahili three, Yakut, and the two Spanish-sourced OT histories (the first Hebrew-keyed test).</Followup>
+
+<Followup id="ulb-gold">Rebuild the lab's ULB gold with the fixed `\zaln` parser (167 more verses).</Followup>
