@@ -20,7 +20,8 @@
 //! A word is a maximal run of letters, [`is_glue`] and digits holding at least
 //! one letter, extended through ONE [`is_joiner`] scalar with a letter or glue
 //! immediately on both sides. Glue is the UCD's marks and extenders plus
-//! [`is_word_glue`], which the class table does not know. [`fold`] is the
+//! [`is_word_glue`], which the UCD's table does not call glue; [`class_of`]
+//! is that table with them marked. [`fold`] is the
 //! simple case fold. Changing the joiner set, the glue set, the digit rule,
 //! the fold, or the Unicode version of
 //! [`crate::unicode`] is `words/2`: a consumer that hashes words sees
@@ -30,7 +31,7 @@
 //! time, so a walk that keeps its own state per word asks it every boundary
 //! question without a second pass.
 
-use crate::unicode::{Class, class_of};
+use crate::unicode::{self, Class, bits};
 
 pub const VERSION: &str = "words/1";
 
@@ -74,22 +75,47 @@ pub const fn is_word_glue(scalar: char) -> bool {
     )
 }
 
-/// Glue as `words/1` reads it: [`Class::is_glue`] or [`is_word_glue`].
+/// The class `words/1` reads: [`crate::unicode::class_of`], with
+/// [`is_word_glue`] marked as glue. Every predicate here and [`Splitter::step`]
+/// take this class, so a caller asks the table once per scalar.
 #[inline]
-pub const fn is_glue(scalar: char, class: Class) -> bool {
-    class.is_glue() || is_word_glue(scalar)
+pub fn class_of(scalar: char) -> Class {
+    let class = unicode::class_of(scalar);
+    if scalar.is_ascii() {
+        return class;
+    }
+    if class.bits() & NEVER_WORD_GLUE == 0 && word_glue(scalar) {
+        Class::from_bits(class.bits() | bits::EXTENDER)
+    } else {
+        class
+    }
+}
+
+/// No word glue carries one of these, so a letter, space, digit or
+/// punctuation mark never reaches the scalar test.
+const NEVER_WORD_GLUE: u16 = bits::ALPHABETIC
+    | bits::WHITESPACE
+    | bits::DECIMAL_DIGIT
+    | bits::PUNCTUATION
+    | bits::MARK
+    | bits::EXTENDER;
+
+#[cold]
+#[inline(never)]
+fn word_glue(scalar: char) -> bool {
+    is_word_glue(scalar)
 }
 
 /// What may stand on either side of a joiner: a letter, or glue riding one.
 #[inline]
-pub const fn is_letter(scalar: char, class: Class) -> bool {
-    class.is_alphabetic() || is_glue(scalar, class)
+pub const fn is_letter(class: Class) -> bool {
+    class.is_alphabetic() || class.is_glue()
 }
 
 /// What a word is built from: letters, glue and digits.
 #[inline]
-pub const fn is_core(scalar: char, class: Class) -> bool {
-    is_letter(scalar, class) || class.is_decimal_digit()
+pub const fn is_core(class: Class) -> bool {
+    is_letter(class) || class.is_decimal_digit()
 }
 
 /// The simple case fold: the first scalar of `char::to_lowercase`, so `ß`
@@ -161,10 +187,10 @@ pub struct Splitter {
 }
 
 impl Splitter {
-    /// `at` is the scalar's byte offset; `class` is `class_of(scalar)`.
+    /// `at` is the scalar's byte offset; `class` is [`class_of`]`(scalar)`.
     #[inline]
     pub fn step(&mut self, at: u32, scalar: char, class: Class) -> Step {
-        let letter = is_letter(scalar, class);
+        let letter = is_letter(class);
         let step = if letter || class.is_decimal_digit() {
             let step = match self.state {
                 State::Outside => {
@@ -403,8 +429,7 @@ mod tests {
         for_each_word(text, |from, to| {
             for (offset, _) in text[from as usize..to as usize].char_indices() {
                 let at = from + offset as u32;
-                let scalar = text[at as usize..].chars().next().unwrap();
-                if is_core(scalar, class_of(scalar)) {
+                if is_core(class_of(text[at as usize..].chars().next().unwrap())) {
                     assert_eq!(word_around(text, at), (from, to), "at {at}");
                 }
             }

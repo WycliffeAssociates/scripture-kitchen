@@ -49,8 +49,8 @@ use super::{
 };
 use crate::substrate::{FollowKey, Ride, ScalarKey, ride_of};
 use crate::{Verse, VerseKey};
-use mise::unicode::{Class, class_of};
-use mise::words::{Run, Splitter, Step, fold, is_core, is_glue};
+use mise::unicode::Class;
+use mise::words::{Run, Splitter, Step, class_of, fold, is_core};
 
 pub use mise::words::word_around;
 
@@ -168,25 +168,36 @@ impl<'a> Scan<'a> {
     #[inline]
     fn step(&mut self, at: u32, scalar: char, visit: &mut impl FnMut(Occurrence)) {
         let class = class_of(scalar);
-        match self.split.step(at, scalar, class) {
-            Step::Outside | Step::Hold => {}
-            Step::Start => self.open(class),
-            Step::Extend => self.word.as_mut().expect("a word stands").add(class),
+        // Every core scalar ends the chain, as it does the substrate's: the
+        // letter after an inner joiner (`long-suffering`) is where that joiner
+        // hands off.
+        let core = match self.split.step(at, scalar, class) {
+            Step::Outside | Step::Hold => false,
+            Step::Start => {
+                self.open(class);
+                true
+            }
+            Step::Extend => {
+                self.word.as_mut().expect("a word stands").add(class);
+                true
+            }
             Step::Join => {
                 let word = self.word.as_mut().expect("a joiner needs a word");
                 word.scalars += 1;
                 word.add(class);
+                true
             }
-            Step::Close(run) => self.close(run, visit),
+            Step::Close(run) => {
+                self.close(run, visit);
+                false
+            }
             Step::Restart(run) => {
                 self.close(run, visit);
                 self.open(class);
+                true
             }
-        }
-        if is_core(scalar, class) {
-            // Every core scalar ends the chain, as it does the substrate's:
-            // the letter after an inner joiner (`long-suffering`) is where
-            // that joiner hands off.
+        };
+        if core {
             self.chain = Before::None;
         } else if !class.is_whitespace() {
             self.chain = chained(self.chain, scalar);
@@ -268,13 +279,13 @@ pub fn for_each_letter_run(word: &str, mut visit: impl FnMut(ScalarKey, u8)) {
     let mut scalars = word.char_indices().peekable();
     while let Some((at, scalar)) = scalars.next() {
         let class = class_of(scalar);
-        if is_glue(scalar, class) {
+        if class.is_glue() {
             continue;
         }
         let start = at + scalar.len_utf8();
         let mut end = start;
         while let Some(&(next_at, next)) = scalars.peek()
-            && is_glue(next, class_of(next))
+            && class_of(next).is_glue()
         {
             end = next_at + next.len_utf8();
             scalars.next();
@@ -341,7 +352,7 @@ pub fn gap_between(text: &str, from: u32, to: u32) -> Option<Gap> {
     let mut last: Option<char> = None;
     for scalar in text[from as usize..to as usize].chars() {
         let class = class_of(scalar);
-        if is_core(scalar, class) {
+        if is_core(class) {
             return None;
         }
         if !class.is_whitespace() {

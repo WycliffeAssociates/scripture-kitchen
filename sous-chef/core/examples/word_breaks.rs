@@ -35,8 +35,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use mise::unicode::class_of;
-use mise::words::{is_core, is_joiner, is_letter};
+use mise::words::{class_of, is_core, is_joiner, is_letter};
 use rustc_hash::{FxHashMap, FxHashSet};
 use sous_core::words::for_each_word;
 use unicode_segmentation::UnicodeSegmentation;
@@ -142,10 +141,10 @@ fn compare(raw: &str) -> Report {
         for (at, window) in scalars.windows(3).enumerate() {
             let [before, scalar, after] = [window[0], window[1], window[2]];
             let class = class_of(scalar);
-            if is_core(scalar, class)
+            if is_core(class)
                 || class.is_whitespace()
-                || !is_letter(before, class_of(before))
-                || !is_letter(after, class_of(after))
+                || !is_letter(class_of(before))
+                || !is_letter(class_of(after))
             {
                 continue;
             }

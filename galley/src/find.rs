@@ -28,8 +28,7 @@
 use std::ops::Range;
 
 use memchr::memmem;
-use mise::unicode::class_of;
-use mise::words::{is_core, is_joiner, is_letter};
+use mise::words::{class_of, is_core, is_joiner, is_letter};
 
 use crate::onion::Mask;
 use crate::pantry::{BookId, Entry, Pantry, Role};
@@ -383,13 +382,13 @@ fn is_whole_word(hay: &str, from: usize, to: usize) -> bool {
         None => true,
         Some(prev) => {
             let class = class_of(prev);
-            if is_core(prev, class) {
+            if is_core(class) {
                 false
             } else if !is_joiner(prev) {
                 true
             } else {
-                let outer = back.next().is_some_and(|c| is_letter(c, class_of(c)));
-                !(outer && first.is_some_and(|c| is_letter(c, class_of(c))))
+                let outer = back.next().is_some_and(|c| is_letter(class_of(c)));
+                !(outer && first.is_some_and(|c| is_letter(class_of(c))))
             }
         }
     };
@@ -402,13 +401,13 @@ fn is_whole_word(hay: &str, from: usize, to: usize) -> bool {
         None => true,
         Some(next) => {
             let class = class_of(next);
-            if is_core(next, class) {
+            if is_core(class) {
                 false
             } else if !is_joiner(next) {
                 true
             } else {
-                let outer = ahead.next().is_some_and(|c| is_letter(c, class_of(c)));
-                !(outer && last.is_some_and(|c| is_letter(c, class_of(c))))
+                let outer = ahead.next().is_some_and(|c| is_letter(class_of(c)));
+                !(outer && last.is_some_and(|c| is_letter(class_of(c))))
             }
         }
     }
