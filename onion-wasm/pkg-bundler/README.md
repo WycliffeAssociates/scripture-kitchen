@@ -131,6 +131,23 @@ regenerates both; `codegen_output_matches_input` fails if either is stale.
 `diagnostics` is the one expensive optional (it runs the lint walk), so it is
 the debounced second call. `toc` is cheap and needs no tree.
 
+## Where an address is: `resolve`
+
+`resolve(text, address, { utf16? })` answers where Sefer's `Address` is in one
+text, as JSON, in bytes unless `utf16` asks otherwise. The rules are
+`onion/src/resolve.md`; `testData/resolve/cases.json`'s `expect` is the answer.
+
+```js
+const verse = { kind: "verses", from: { chapter: 1, verse: 2 }, to: { chapter: 1, verse: 2 } };
+JSON.parse(resolve(text, verse));
+//   { found: { from, to, opening, covers, coarser } }
+//   { missing: "intro" | "chapter" | "verse", within? }
+//   { ambiguous: [{ from, to, opening }, …] }
+```
+
+The address parser and JSON writer live in `onion_wasm::resolution`, and
+galley's `Galley.resolve` and `resolveOf` answer through them.
+
 ## User `\z` markers
 
 | export | what it gives back |

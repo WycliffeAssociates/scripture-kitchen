@@ -2064,6 +2064,47 @@ export function parse(text, opts) {
 }
 
 /**
+ * Where an address is in one text, as JSON: found, missing or ambiguous,
+ * never a silent nearest. The rules are `onion/src/resolve.md`, the cases
+ * `testData/resolve/cases.json`, whose `expect` is this door's answer.
+ *
+ * ```js
+ * resolve(text, { kind: "verses", from: { chapter: 1, verse: 2 }, to: { chapter: 1, verse: 2 } })
+ *   // → '{"found":{"from":8,"to":19,"opening":5,"covers":{…},"coarser":false}}'
+ * resolve(text, { kind: "chapters", from: 3, to: 3 }, { utf16: true })
+ *   // → '{"missing":"chapter"}'
+ * ```
+ *
+ * Offsets are bytes unless `utf16` asks otherwise. galley's
+ * `Galley.resolveOf` answers the same over text, and `Galley.resolve` over a
+ * registered book.
+ * @param {string} text
+ * @param {Address} address
+ * @param {ResolveOptions} [opts]
+ * @returns {string}
+ */
+export function resolve(text, address, opts) {
+    let deferred3_0;
+    let deferred3_1;
+    try {
+        const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.resolve(ptr0, len0, address, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
+        var ptr2 = ret[0];
+        var len2 = ret[1];
+        if (ret[3]) {
+            ptr2 = 0; len2 = 0;
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        deferred3_0 = ptr2;
+        deferred3_1 = len2;
+        return getStringFromWasm0(ptr2, len2);
+    } finally {
+        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+    }
+}
+
+/**
  * Installs a list of user markers process-wide, and returns what it could not
  * keep.
  *

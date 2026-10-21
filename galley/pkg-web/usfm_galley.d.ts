@@ -54,32 +54,6 @@ export interface OverlayOptions {
     utf16?: boolean;
 }
 
-/** `resolve(id, address, opts)`. */
-export interface ResolveOptions {
-    /** Offsets as UTF-16 code units; default bytes. */
-    utf16?: boolean;
-}
-
-/** A place in scripture, Sefer's `Address`. A `book` key is read past: the book is the caller's to match. */
-export type Address =
-| { kind: "book" }
-| { kind: "intro" }
-| { kind: "chapters"; from: number; to: number }
-| { kind: "verses"; from: AddressPoint; to: AddressPoint };
-
-export interface AddressPoint {
-    chapter: number;
-    verse: number;
-    /** `a` in `3a`; absent for the whole verse. */
-    segment?: string;
-}
-
-/** What `resolve` answers, JSON-encoded. Offsets are half-open. */
-export type Resolution =
-| { found: { from: number; to: number; opening: number; covers: Address; coarser: boolean } }
-| { missing: "intro" | "chapter" | "verse"; within?: { from: number; to: number } }
-| { ambiguous: { from: number; to: number; opening: number }[] };
-
 /** One block's address on one side — a skeleton row names its own. */
 export interface BlockAddress {
     sid: string;
@@ -114,6 +88,32 @@ export interface AttrsOptions {
     /** `from`/`to` and every word returned are UTF-16 code units; default bytes. */
     utf16?: boolean;
 }
+
+/** `resolve(text, address, opts)`, and galley's `resolve`/`resolveOf`. */
+export interface ResolveOptions {
+    /** Offsets as UTF-16 code units; default bytes. */
+    utf16?: boolean;
+}
+
+/** A place in scripture, Sefer's `Address`. A `book` key is read past: the book is the caller's to match. */
+export type Address =
+| { kind: "book" }
+| { kind: "intro" }
+| { kind: "chapters"; from: number; to: number }
+| { kind: "verses"; from: AddressPoint; to: AddressPoint };
+
+export interface AddressPoint {
+    chapter: number;
+    verse: number;
+    /** `a` in `3a`; absent for the whole verse. */
+    segment?: string;
+}
+
+/** What `resolve` answers, JSON-encoded. Offsets are half-open. */
+export type Resolution =
+| { found: { from: number; to: number; opening: number; covers: Address; coarser: boolean } }
+| { missing: "intro" | "chapter" | "verse"; within?: { from: number; to: number } }
+| { ambiguous: { from: number; to: number; opening: number }[] };
 
 /** `setExtensions`'s options. */
 export interface ExtensionOptions {
@@ -839,6 +839,24 @@ export function mergeSplices(baseline: string, current: string, decisions_json: 
 export function parse(text: string, opts?: ParseOptions): Uint8Array;
 
 /**
+ * Where an address is in one text, as JSON: found, missing or ambiguous,
+ * never a silent nearest. The rules are `onion/src/resolve.md`, the cases
+ * `testData/resolve/cases.json`, whose `expect` is this door's answer.
+ *
+ * ```js
+ * resolve(text, { kind: "verses", from: { chapter: 1, verse: 2 }, to: { chapter: 1, verse: 2 } })
+ *   // → '{"found":{"from":8,"to":19,"opening":5,"covers":{…},"coarser":false}}'
+ * resolve(text, { kind: "chapters", from: 3, to: 3 }, { utf16: true })
+ *   // → '{"missing":"chapter"}'
+ * ```
+ *
+ * Offsets are bytes unless `utf16` asks otherwise. galley's
+ * `Galley.resolveOf` answers the same over text, and `Galley.resolve` over a
+ * registered book.
+ */
+export function resolve(text: string, address: Address, opts?: ResolveOptions): string;
+
+/**
  * Installs a list of user markers process-wide, and returns what it could not
  * keep.
  *
@@ -1058,6 +1076,7 @@ export interface InitOutput {
     readonly merge: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number, number];
     readonly mergeSplices: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number];
     readonly parse: (a: number, b: number, c: number) => [number, number, number, number];
+    readonly resolve: (a: number, b: number, c: any, d: number) => [number, number, number, number];
     readonly setExtensions: (a: number, b: number, c: number) => [number, number, number, number];
     readonly splices_inserts: (a: number) => [number, number];
     readonly splices_spans: (a: number) => [number, number];

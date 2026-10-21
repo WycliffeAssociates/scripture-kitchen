@@ -150,6 +150,7 @@ export const mask: (a: number, b: number, c: number, d: number) => any;
 export const merge: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number, number];
 export const mergeSplices: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number];
 export const parse: (a: number, b: number, c: number) => [number, number, number, number];
+export const resolve: (a: number, b: number, c: any, d: number) => [number, number, number, number];
 export const setExtensions: (a: number, b: number, c: number) => [number, number, number, number];
 export const splices_inserts: (a: number) => [number, number];
 export const splices_spans: (a: number) => [number, number];
