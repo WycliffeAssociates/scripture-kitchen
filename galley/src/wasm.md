@@ -540,6 +540,8 @@ the opening walk, so a verse address to such a reference is refused by name.
 `resolveOf(text, address, { utf16? })` is the same door over text the host
 holds, so it needs no registration and answers every kind, verses included.
 Over a registered book's exact text it answers what `resolve(id)` does.
+The free `resolve(text, address, { utf16? })`, onion-wasm's door, answers
+the same JSON with no `Galley` at all.
 
 ## SousSettings
 

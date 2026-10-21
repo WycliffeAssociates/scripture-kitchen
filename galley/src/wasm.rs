@@ -35,7 +35,6 @@ mod find;
 mod mask;
 pub mod onion;
 pub mod overlay;
-mod resolve;
 
 /// The two flags the find doors take, as the query Find prepares once.
 ///
@@ -103,32 +102,6 @@ export interface OverlayOptions {
   /** Offsets as UTF-16 code units; default bytes. */
   utf16?: boolean;
 }
-
-/** `resolve(id, address, opts)`. */
-export interface ResolveOptions {
-  /** Offsets as UTF-16 code units; default bytes. */
-  utf16?: boolean;
-}
-
-/** A place in scripture, Sefer's `Address`. A `book` key is read past: the book is the caller's to match. */
-export type Address =
-  | { kind: "book" }
-  | { kind: "intro" }
-  | { kind: "chapters"; from: number; to: number }
-  | { kind: "verses"; from: AddressPoint; to: AddressPoint };
-
-export interface AddressPoint {
-  chapter: number;
-  verse: number;
-  /** `a` in `3a`; absent for the whole verse. */
-  segment?: string;
-}
-
-/** What `resolve` answers, JSON-encoded. Offsets are half-open. */
-export type Resolution =
-  | { found: { from: number; to: number; opening: number; covers: Address; coarser: boolean } }
-  | { missing: "intro" | "chapter" | "verse"; within?: { from: number; to: number } }
-  | { ambiguous: { from: number; to: number; opening: number }[] };
 
 /** One block's address on one side — a skeleton row names its own. */
 export interface BlockAddress {
@@ -403,7 +376,7 @@ impl Galley {
     ) -> Result<String, JsError> {
         let utf16 = onion_wasm::options::utf16_only(opts.as_ref(), "resolve")
             .map_err(|e| JsError::new(&e))?;
-        let address = resolve::address(&address)?;
+        let address = onion_wasm::resolution::address(&address).map_err(|e| JsError::new(&e))?;
         let entry = self.book(id)?;
         let answer = match entry.text() {
             Ok(text) => entry.toc().resolve(text, &address),
@@ -418,7 +391,7 @@ impl Galley {
         } else {
             None
         };
-        Ok(resolve::json(&answer, table))
+        Ok(onion_wasm::resolution::json(&answer, table))
     }
 
     /// [`resolve`](Self::resolve) over text the host holds and has not
@@ -434,7 +407,7 @@ impl Galley {
     ) -> Result<String, JsError> {
         let utf16 = onion_wasm::options::utf16_only(opts.as_ref(), "resolveOf")
             .map_err(|e| JsError::new(&e))?;
-        let address = resolve::address(&address)?;
+        let address = onion_wasm::resolution::address(&address).map_err(|e| JsError::new(&e))?;
         let parsed = self.sous.parsed(
             text,
             crate::onion::wire::ParseOptions {
@@ -448,7 +421,7 @@ impl Galley {
             .expect("asked for a toc")
             .resolve(text, &address);
         let table = utf16.then(|| mise::utf16::utf16_table(text.as_bytes()));
-        Ok(resolve::json(&answer, table.as_ref()))
+        Ok(onion_wasm::resolution::json(&answer, table.as_ref()))
     }
 
     // ── Match formatting: a target's skeleton made the source's ─────────

@@ -80,6 +80,7 @@ const EXPORTS = [
   "merge",
   "mergeSplices",
   "parse",
+  "resolve",
   "setExtensions",
   "toByte",
   "toUtf16",

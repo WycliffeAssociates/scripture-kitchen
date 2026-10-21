@@ -19,13 +19,15 @@ const pkg = resolve(process.argv[2] ?? "pkg-node");
 const corpus = process.argv[3];
 const here = import.meta.dirname;
 
+const doors = await import(join(pkg, "onion_wasm.js"));
 const {
   parse: rawParse,
   attrs: rawAttrs,
   attrResolve,
   diff: rawDiff,
   mask: rawMask,
-} = await import(join(pkg, "onion_wasm.js"));
+  resolve: resolveIn,
+} = doors;
 const {
   reader,
   deserialize,
@@ -707,6 +709,86 @@ if (corpus && existsSync(corpus)) {
   check(runs > 0, "the diff produced runs");
   check(markupSeen, "a `\\add` the words moved around shows as a markup run");
   eq(noteReading, "a note", "a footnote's runs are its own reading");
+}
+
+// --- every door is on the module ------------------------------------------
+
+{
+  const EXPORTS = [
+    "Edits",
+    "FormatOpts",
+    "Splices",
+    "attrResolve",
+    "attrs",
+    "book",
+    "diff",
+    "extensionsFromMarkersExt",
+    "format",
+    "formatEdits",
+    "formatEditsIn",
+    "locate",
+    "mask",
+    "merge",
+    "mergeSplices",
+    "parse",
+    "resolve",
+    "setExtensions",
+    "toByte",
+    "toUtf16",
+    "xxh3",
+    "xxh3Text",
+  ];
+  // A CommonJS build's `module.exports` arrives as `default`.
+  const exported = Object.keys(doors.default ?? doors).filter((name) => name !== "default").sort();
+  eq(exported.join(" "), EXPORTS.join(" "), "the module exports exactly the door list");
+}
+
+// --- resolve: an address to its place in one text ----------------------------
+
+// Every case onion's own test runs, through the free door: bytes as recorded,
+// and UTF-16 as the same offsets counted in JavaScript's own string units.
+{
+  const all = JSON.parse(readFileSync(resolve(here, "../../testData/resolve/cases.json"), "utf8"));
+  const canonical = (value) =>
+    JSON.stringify(value, (_, v) =>
+      v && typeof v === "object" && !Array.isArray(v)
+        ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, v[k]]))
+        : v,
+    );
+  const rebase = (value, usfm) => {
+    const bytes = Buffer.from(usfm, "utf8");
+    const unit = (n) => bytes.subarray(0, n).toString("utf8").length;
+    const span = (s) => ({ ...s, from: unit(s.from), to: unit(s.to), ...("opening" in s ? { opening: unit(s.opening) } : {}) });
+    if (value.found) return { found: span(value.found) };
+    if (value.ambiguous) return { ambiguous: value.ambiguous.map(span) };
+    return value.within ? { ...value, within: span(value.within) } : value;
+  };
+  let wide = 0;
+  for (const { name, usfm, address, expect } of all) {
+    const bytes = JSON.parse(resolveIn(usfm, { ...address, book: "GEN" }));
+    eq(canonical(bytes), canonical(expect), `resolve bytes: ${name}`);
+    const units = JSON.parse(resolveIn(usfm, address, { utf16: true }));
+    eq(canonical(units), canonical(rebase(expect, usfm)), `resolve utf16: ${name}`);
+    if (canonical(units) !== canonical(bytes)) wide++;
+  }
+  check(all.length > 0, "the resolve cases are read");
+  check(wide > 0, "a non-ASCII case answers differently in UTF-16 than in bytes");
+  console.log(`resolve: ${all.length} cases, ${wide} differ in UTF-16`);
+
+  for (const [what, call, says] of [
+    ["a misspelled option", () => resolveIn("\\id GEN\n", { kind: "book" }, { utf61: true }), "unknown option"],
+    ["an unknown kind", () => resolveIn("\\id GEN\n", { kind: "verse" }), "kind"],
+    ["chapter 0", () => resolveIn("\\id GEN\n", { kind: "chapters", from: 0, to: 1 }), "from"],
+    ["an empty segment", () => resolveIn("\\id GEN\n", { kind: "verses", from: { chapter: 1, verse: 1, segment: "" }, to: { chapter: 1, verse: 1 } }), "segment"],
+  ]) {
+    let refused = "";
+    try {
+      call();
+    } catch (error) {
+      refused = String(error.message ?? error);
+    }
+    check(refused.includes(says), `resolve refuses ${what}: ${refused}`);
+  }
 }
 
 console.log(failures === 0 ? "conformance: OK" : `conformance: ${failures} FAILURES`);

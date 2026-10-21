@@ -31,6 +31,6 @@ static DOOR: fn(&str, u32) -> u32 = onion_wasm::to_utf16;
 /// consumer that wants the JS-shaped call without naming the second crate.
 pub use onion_wasm::{
     Edits, FormatOpts, Splices, attr_resolve, attrs, book, diff, extensions_from_markers_ext,
-    format, format_edits, format_edits_in, locate, mask, merge, merge_splices, parse,
+    format, format_edits, format_edits_in, locate, mask, merge, merge_splices, parse, resolve,
     set_extensions, to_byte, to_utf16, xxh3, xxh3_text,
 };

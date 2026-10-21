@@ -71,6 +71,7 @@ use usfm_onion::{Token, TokenKind};
 use wasm_bindgen::prelude::*;
 
 pub mod options;
+pub mod resolution;
 
 // ---------------------------------------------------------------------------
 // parse
@@ -142,6 +143,32 @@ export interface AttrsOptions {
   /** `from`/`to` and every word returned are UTF-16 code units; default bytes. */
   utf16?: boolean;
 }
+
+/** `resolve(text, address, opts)`, and galley's `resolve`/`resolveOf`. */
+export interface ResolveOptions {
+  /** Offsets as UTF-16 code units; default bytes. */
+  utf16?: boolean;
+}
+
+/** A place in scripture, Sefer's `Address`. A `book` key is read past: the book is the caller's to match. */
+export type Address =
+  | { kind: "book" }
+  | { kind: "intro" }
+  | { kind: "chapters"; from: number; to: number }
+  | { kind: "verses"; from: AddressPoint; to: AddressPoint };
+
+export interface AddressPoint {
+  chapter: number;
+  verse: number;
+  /** `a` in `3a`; absent for the whole verse. */
+  segment?: string;
+}
+
+/** What `resolve` answers, JSON-encoded. Offsets are half-open. */
+export type Resolution =
+  | { found: { from: number; to: number; opening: number; covers: Address; coarser: boolean } }
+  | { missing: "intro" | "chapter" | "verse"; within?: { from: number; to: number } }
+  | { ambiguous: { from: number; to: number; opening: number }[] };
 
 /** `setExtensions`'s options. */
 export interface ExtensionOptions {
@@ -918,6 +945,39 @@ pub fn locate(text: &str, utf16: u32) -> String {
     usfm_onion::toc::toc(source, &tokens)
         .locate(byte)
         .to_string()
+}
+
+/// Where an address is in one text, as JSON: found, missing or ambiguous,
+/// never a silent nearest. The rules are `onion/src/resolve.md`, the cases
+/// `testData/resolve/cases.json`, whose `expect` is this door's answer.
+///
+/// ```js
+/// resolve(text, { kind: "verses", from: { chapter: 1, verse: 2 }, to: { chapter: 1, verse: 2 } })
+///   // → '{"found":{"from":8,"to":19,"opening":5,"covers":{…},"coarser":false}}'
+/// resolve(text, { kind: "chapters", from: 3, to: 3 }, { utf16: true })
+///   // → '{"missing":"chapter"}'
+/// ```
+///
+/// Offsets are bytes unless `utf16` asks otherwise. galley's
+/// `Galley.resolveOf` answers the same over text, and `Galley.resolve` over a
+/// registered book.
+#[wasm_bindgen]
+pub fn resolve(
+    text: &str,
+    #[wasm_bindgen(unchecked_param_type = "Address")] address: JsValue,
+    #[wasm_bindgen(unchecked_optional_param_type = "ResolveOptions")] opts: Option<JsValue>,
+) -> Result<String, JsError> {
+    let utf16 = options::utf16_only(opts.as_ref(), "resolve").map_err(|e| JsError::new(&e))?;
+    let address = resolution::address(&address).map_err(|e| JsError::new(&e))?;
+    Ok(resolved(text, &address, utf16))
+}
+
+/// [`resolve`]'s body over a parsed address, for a caller with no `JsValue`.
+pub fn resolved(text: &str, address: &usfm_onion::resolve::Address, utf16: bool) -> String {
+    let tokens = usfm_onion::lex(text);
+    let answer = usfm_onion::toc::toc(text.as_bytes(), &tokens).resolve(text, address);
+    let table = utf16.then(|| mise::utf16::utf16_table(text.as_bytes()));
+    resolution::json(&answer, table.as_ref())
 }
 
 // ---------------------------------------------------------------------------

@@ -1,24 +1,25 @@
-//! The resolve door: an address in as a JS object, the answer out as JSON.
+//! An address in as a JS object, the answer out as JSON: the two halves of
+//! [`crate::resolve`], and of galley's `Galley.resolve` and `resolveOf`.
 //!
 //! ```text
-//! galley.resolve("books/LUK.usfm", { kind: "verses", from: { chapter: 1, verse: 2 }, to: { chapter: 1, verse: 2 } })
+//! resolve(text, { kind: "verses", from: { chapter: 1, verse: 2 }, to: { chapter: 1, verse: 2 } })
 //!   → {"found":{"from":8,"to":19,"opening":5,"covers":{…},"coarser":false}}
 //! ```
 //!
 //! The JSON is `testData/resolve/cases.json`'s `expect`, in bytes unless the
-//! caller asks for `utf16`.
+//! caller asks for `utf16`. Errors are `String`s, as in [`crate::options`].
 
-use crate::onion::resolve::{Address, Missing, Point, Resolution};
 use mise::utf16::Utf16Table;
 use serde_json::{Value, json};
-use wasm_bindgen::prelude::*;
+use usfm_onion::resolve::{Address, Missing, Point, Resolution};
+use wasm_bindgen::JsValue;
 
-use super::overlay::get;
+use crate::options::get;
 
 /// Sefer's `Address` off a JS object. A `book` key is ignored: the book is the
 /// caller's to match.
-pub(super) fn address(value: &JsValue) -> Result<Address, JsError> {
-    let kind = get(value, "kind").and_then(|kind| kind.as_string());
+pub fn address(value: &JsValue) -> Result<Address, String> {
+    let kind = get(Some(value), "kind").and_then(|kind| kind.as_string());
     match kind.as_deref() {
         Some("book") => Ok(Address::Book),
         Some("intro") => Ok(Address::Intro),
@@ -30,22 +31,23 @@ pub(super) fn address(value: &JsValue) -> Result<Address, JsError> {
             from: point(value, "from")?,
             to: point(value, "to")?,
         }),
-        _ => Err(JsError::new(
-            "resolve: an address's kind is \"book\", \"intro\", \"chapters\" or \"verses\"",
-        )),
+        _ => Err(
+            "resolve: an address's kind is \"book\", \"intro\", \"chapters\" or \"verses\""
+                .to_string(),
+        ),
     }
 }
 
-fn point(value: &JsValue, end: &str) -> Result<Point, JsError> {
-    let point = get(value, end)
-        .ok_or_else(|| JsError::new(&format!("resolve: a verses address needs {end}")))?;
-    let segment = match get(&point, "segment") {
+fn point(value: &JsValue, end: &str) -> Result<Point, String> {
+    let point =
+        get(Some(value), end).ok_or_else(|| format!("resolve: a verses address needs {end}"))?;
+    let segment = match get(Some(&point), "segment") {
         None => None,
         Some(segment) => Some(
             segment
                 .as_string()
                 .filter(|segment| !segment.is_empty())
-                .ok_or_else(|| JsError::new("resolve: a segment is a non-empty string"))?,
+                .ok_or_else(|| "resolve: a segment is a non-empty string".to_string())?,
         ),
     };
     Ok(Point {
@@ -56,15 +58,16 @@ fn point(value: &JsValue, end: &str) -> Result<Point, JsError> {
 }
 
 /// A chapter or verse number: a whole number from 1, as the `Toc`'s u16 holds.
-fn number(value: &JsValue, key: &str, what: &str) -> Result<u16, JsError> {
-    get(value, key)
+fn number(value: &JsValue, key: &str, what: &str) -> Result<u16, String> {
+    get(Some(value), key)
         .and_then(|n| n.as_f64())
         .filter(|n| n.fract() == 0.0 && *n >= 1.0 && *n <= f64::from(u16::MAX))
         .map(|n| n as u16)
-        .ok_or_else(|| JsError::new(&format!("resolve: {key} must be a {what} number from 1")))
+        .ok_or_else(|| format!("resolve: {key} must be a {what} number from 1"))
 }
 
-pub(super) fn json(answer: &Resolution, table: Option<&Utf16Table>) -> String {
+/// The answer as JSON, in UTF-16 code units when a `table` is given.
+pub fn json(answer: &Resolution, table: Option<&Utf16Table>) -> String {
     let at = |byte: u32| table.map_or(byte, |table| table.to_utf16(byte));
     let value = match answer {
         Resolution::Found {
