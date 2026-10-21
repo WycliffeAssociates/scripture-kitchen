@@ -1,0 +1,45 @@
+---
+id: 1ab377e7-8044-426e-8462-2e19e8a0ee99
+title: "marker extensions per book, not per process"
+kind: plan
+status: planned
+created: 2026-10-21
+updated: 2026-10-21
+sha: 0bc36b0
+priority: 1
+tags: [onion]
+---
+
+Sefer reported, 2026-10-21:
+
+> The engine's marker registry is process-wide (onion/src/extensions.rs, static REGISTRY), so two editors on one page with different marker configs interfere. The package documents one config per page; a per-call or per-handle registry would be a kitchen ask.
+
+Will, 2026-10-21: Sefer puts reference texts next to main texts. Kept separate from 0.1.12.
+
+## What a user gets
+
+A main text and its reference texts, from projects with different `markers.ext`, on one page and one `Galley`, each parsing its `\z` markers by its own project's list, and no registration flushing another book's caches.
+
+```js
+const mine = galley.extensions(myMarkersExt);    // parsed once
+const theirs = galley.extensions(refMarkersExt);
+
+galley.update("books/MRK.usfm", text, { extensions: mine });
+galley.updateReference("ref/MRK.usfm", refText, { extensions: theirs });
+// no extensions option: the global setExtensions list, so today's callers do not change
+```
+
+## Why it is small
+
+The engine already takes the list explicitly: `lex_with(source, &Extensions)` (`onion/src/scanner.rs`); `lex()` is `lex_with(source, &current())`. The tree, lint and toc never read the registry: a custom marker resolves at lex time to the row of the category it behaves as. The global appears only at the `lex()` calls in galley (`pantry/chunks.rs`, `sous/mod.rs`, `sous/onion_book.rs`, `mask/mod.rs`) and onion-wasm's free doors.
+
+## What changes
+
+- An `Extensions` value a host makes once per project and passes at registration; a book keeps the one it was registered with and lexes through `lex_with`.
+- The chunk store keys on content and the book's extensions, so the same bytes under two lists never share a parse.
+- Re-registering a book with another list re-derives that book alone. The caller holds no generation; the global generation stays only for books on the global list.
+- onion-wasm's free doors keep the global list.
+
+<Question id="free-doors">Do onion-wasm's free doors (`parse`, `mask`, `resolve`, …) also take an `extensions` option, or stay on the global list until someone asks?</Question>
+
+<Followup id="conformance">Conformance: two books on one Galley with different `\z` lists parse differently, and registering one does not flush the other.</Followup>
