@@ -13,12 +13,15 @@
 //! mise::unicode class_of('\u{0301}').is_glue()   one u16 of bits per scalar
 //!
 //! mise::extensions parse_markers_ext(text)     markers.ext → CustomMarker list
+//!
+//! mise::words   for_each_word("don't, go", f)  f(0, 5), f(7, 9): words/1
 //! ```
 //!
 //! Zero dependencies, in or out of the workspace: this is the leaf
 //! `usfm_onion` and `sous-core` may both reach for without reaching for each
-//! other. Only two kinds of thing belong — standard-derived data tables and
-//! borrow-free data structures — and only when more than one crate needs them.
+//! other. Only three kinds of thing belong — standard-derived data tables,
+//! borrow-free data structures, and a versioned text rule crates must agree on
+//! bit for bit — and only when more than one crate needs them.
 //! The scope rule and what it excludes: `mise/README.md`.
 
 pub mod address;
@@ -26,3 +29,4 @@ pub mod books;
 pub mod extensions;
 pub mod unicode;
 pub mod utf16;
+pub mod words;

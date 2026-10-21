@@ -9,7 +9,7 @@ without either depending on the other — which is the boundary
 
 ## The scope rule
 
-Two things belong here, and only if MORE THAN ONE crate needs them:
+Three things belong here, and only if MORE THAN ONE crate needs them:
 
 1. **Standard-derived data tables.** Facts a published specification states,
    authored or generated once — `BOOK_CODES` and its order from USFM, the
@@ -17,6 +17,10 @@ Two things belong here, and only if MORE THAN ONE crate needs them:
 2. **Borrow-free data structures.** Types whose whole job is to be passed
    between crates or retained after their source is gone — `BookKey`,
    `Utf16Table`.
+3. **Shared, versioned text rules.** A primitive more than one crate must
+   agree on bit for bit, named with its version so a consumer that hashes its
+   output knows when it moved — `words/1`, the word boundary sous-chef counts
+   by and alignment will align by.
 
 Nothing else. In particular, no I/O, no policy, no checksums, no engine logic,
 no dependencies. A candidate that would make `mise` need a crate does not
@@ -41,3 +45,4 @@ and the pinned UCD extracts; both stay in `sous-core`, and the regeneration gate
 | `extensions` | `ExtensionCategory` (the spec's `\category` words), `CustomMarker`, and `parse_markers_ext` — the `markers.ext` file read into the list a marker registry takes |
 | `unicode` | `Class`, its bits, `class_of`/`is_glue`, and the two index paths in `lookup` |
 | `utf16` | `Utf16Index` (borrows its source, both directions) and `Utf16Table` (detached, byte → UTF-16) |
+| `words` | `words/1`: `is_joiner`, the `Splitter` state machine, `for_each_word`, `word_around`, `fold` |

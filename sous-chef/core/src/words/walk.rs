@@ -42,9 +42,12 @@ use super::{
     Before, DoubleCount, Form, LETTER_RUN_LANES, LETTER_RUN_MAX, LETTER_RUN_MIN, WordCount,
     WordRow, letter_run_lane,
 };
-use crate::substrate::{FollowKey, Ride, ScalarKey, is_run_atom, ride_of};
+use crate::substrate::{FollowKey, Ride, ScalarKey, ride_of};
 use crate::{Verse, VerseKey};
 use mise::unicode::{Class, class_of};
+use mise::words::{Run, Splitter, Step, fold, is_core};
+
+pub use mise::words::word_around;
 
 /// One word as the walk saw it, in the coordinates of the text scanned.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -76,27 +79,12 @@ fn chained(chain: Before, scalar: char) -> Before {
     }
 }
 
-/// What a word is built from before the joiner rule extends it.
-#[inline]
-const fn is_core(class: Class) -> bool {
-    class.is_alphabetic() || class.is_glue() || class.is_decimal_digit()
-}
-
-/// Glue rides its base, so it answers `Letter` when the joiner rule asks —
-/// the reading `OuterClass::of` already gives a neighbour.
-#[inline]
-const fn is_letterish(class: Class) -> bool {
-    class.is_alphabetic() || class.is_glue()
-}
-
 /// One word under construction.
 #[derive(Clone, Copy)]
 struct Building {
-    from: u32,
     before: Before,
     verse: Option<VerseKey>,
     scalars: u32,
-    letters: bool,
     upper: u32,
     cased: u32,
     /// Whether the word's FIRST alphabetic scalar is uppercase.
@@ -104,13 +92,11 @@ struct Building {
 }
 
 impl Building {
-    const fn new(from: u32, before: Before, verse: Option<VerseKey>) -> Self {
+    const fn new(before: Before, verse: Option<VerseKey>) -> Self {
         Self {
-            from,
             before,
             verse,
             scalars: 0,
-            letters: false,
             upper: 0,
             cased: 0,
             first_upper: None,
@@ -122,7 +108,6 @@ impl Building {
         if !class.is_alphabetic() {
             return;
         }
-        self.letters = true;
         let upper = class.is_uppercase();
         if upper || class.is_lowercase() {
             self.cased += 1;
@@ -159,9 +144,7 @@ struct Scan<'a> {
     opened: bool,
     verse: Option<VerseKey>,
     word: Option<Building>,
-    /// A run atom with a letter before it that may yet get one after.
-    joiner: Option<u32>,
-    prev_letterish: bool,
+    split: Splitter,
 }
 
 impl<'a> Scan<'a> {
@@ -173,71 +156,65 @@ impl<'a> Scan<'a> {
             opened: true,
             verse: None,
             word: None,
-            joiner: None,
-            prev_letterish: false,
+            split: Splitter::default(),
         }
     }
 
+    #[inline]
     fn step(&mut self, at: u32, scalar: char, visit: &mut impl FnMut(Occurrence)) {
         let class = class_of(scalar);
-        let letterish = is_letterish(class);
-
+        match self.split.step(at, scalar, class) {
+            Step::Outside | Step::Hold => {}
+            Step::Start => self.open(class),
+            Step::Extend => self.word.as_mut().expect("a word stands").add(class),
+            Step::Join => {
+                let word = self.word.as_mut().expect("a joiner needs a word");
+                word.scalars += 1;
+                word.add(class);
+            }
+            Step::Close(run) => self.close(run, visit),
+            Step::Restart(run) => {
+                self.close(run, visit);
+                self.open(class);
+            }
+        }
         if is_core(class) {
-            if let Some(gap) = self.joiner.take() {
-                if letterish {
-                    // Confirmed: a letter on both sides, so the word keeps it.
-                    self.word.as_mut().expect("a joiner needs a word").scalars += 1;
-                } else {
-                    // `a-3`: a digit does not confirm a joiner.
-                    self.close(gap, visit);
-                }
-            }
-            if self.word.is_none() {
-                let before = if self.opened {
-                    Before::Start
-                } else {
-                    self.chain
-                };
-                self.word = Some(Building::new(at, before, self.verse));
-                self.opened = false;
-            }
             // Every core scalar ends the chain, as it does the substrate's:
             // the letter after an inner joiner (`long-suffering`) is where
             // that joiner hands off.
             self.chain = Before::None;
-            self.word.as_mut().expect("just opened").add(class);
-        } else if class.is_whitespace() {
-            let to = self.joiner.take().unwrap_or(at);
-            self.close(to, visit);
-        } else {
-            debug_assert!(is_run_atom(class), "the remaining scalars are run atoms");
-            match self.joiner.take() {
-                // `a--b`: the first atom ended the word after all.
-                Some(gap) => self.close(gap, visit),
-                None if self.word.is_some() && self.prev_letterish => self.joiner = Some(at),
-                None => self.close(at, visit),
-            }
+        } else if !class.is_whitespace() {
             self.chain = chained(self.chain, scalar);
         }
-        self.prev_letterish = letterish;
     }
 
-    fn close(&mut self, to: u32, visit: &mut impl FnMut(Occurrence)) {
+    #[inline]
+    fn open(&mut self, class: Class) {
+        let before = if self.opened {
+            Before::Start
+        } else {
+            self.chain
+        };
+        let mut word = Building::new(before, self.verse);
+        word.add(class);
+        self.word = Some(word);
+        self.opened = false;
+    }
+
+    fn close(&mut self, run: Run, visit: &mut impl FnMut(Occurrence)) {
         let Some(built) = self.word.take() else {
             return;
         };
-        if !built.letters {
+        if !run.word {
             return;
         }
-        let source: &'a str = self.text;
-        let word = &source[built.from as usize..to as usize];
-        let form = built.form();
+        let word = &self.text[run.from as usize..run.to as usize];
         let hash = fold_hash(word, &mut self.scratch);
         visit(Occurrence {
-            from: built.from,
-            to,
+            from: run.from,
+            to: run.to,
             hash,
-            form,
+            form: built.form(),
             before: built.before,
             len: u8::try_from(built.scalars).unwrap_or(u8::MAX),
             verse: built.verse,
@@ -264,80 +241,9 @@ pub fn for_each_word(text: &str, verses: &[Verse], mut visit: impl FnMut(Occurre
         }
         scan.step(at, scalar, &mut visit);
     }
-    let to = scan.joiner.take().unwrap_or(text.len() as u32);
-    scan.close(to, &mut visit);
-}
-
-/// The word span holding the scalar at `at`, by the same rule
-/// [`for_each_word`] builds one.
-///
-/// ```text
-/// word_around("he said, don\u{2019}t go", 13)   → 9..15     // the joiner is inside
-/// word_around("go. he went", 4)               → 4..6      // `he`
-/// ```
-///
-/// `at` is the byte offset of a scalar the word rule counts as core, and the
-/// span is clipped to `text` — one chapter's slice in practice, which is what
-/// the walk itself scans. It exists so a site that names a word can draw the
-/// same span the word lane would, without a second pass over the chapter.
-pub fn word_around(text: &str, at: u32) -> (u32, u32) {
-    (word_start(text, at), word_end(text, at))
-}
-
-/// Forward from `at` through core scalars, riding at most one nonletter that
-/// has a letter on both sides.
-fn word_end(text: &str, at: u32) -> u32 {
-    let mut to = at;
-    let mut joiner = false;
-    let mut letterish = false;
-    for (offset, scalar) in text[at as usize..].char_indices() {
-        let class = class_of(scalar);
-        if is_core(class) {
-            // `a-3`: a digit does not confirm a joiner, so the word ended.
-            if joiner && !is_letterish(class) {
-                break;
-            }
-            joiner = false;
-            to = at + offset as u32 + scalar.len_utf8() as u32;
-            letterish = is_letterish(class);
-        } else if is_run_atom(class) && !joiner && letterish {
-            joiner = true;
-            letterish = false;
-        } else {
-            break;
-        }
+    if let Some(run) = scan.split.finish(text.len() as u32) {
+        scan.close(run, &mut visit);
     }
-    to
-}
-
-/// The same walk backwards; `a--b` ends at the first atom either way.
-fn word_start(text: &str, at: u32) -> u32 {
-    let mut from = at;
-    let mut joiner = false;
-    let mut letterish = text[at as usize..]
-        .chars()
-        .next()
-        .is_some_and(|scalar| is_letterish(class_of(scalar)));
-    let mut cursor = at;
-    for scalar in text[..at as usize].chars().rev() {
-        let class = class_of(scalar);
-        let start = cursor - scalar.len_utf8() as u32;
-        if is_core(class) {
-            if joiner && !is_letterish(class) {
-                break;
-            }
-            joiner = false;
-            from = start;
-            letterish = is_letterish(class);
-        } else if is_run_atom(class) && !joiner && letterish {
-            joiner = true;
-            letterish = false;
-        } else {
-            break;
-        }
-        cursor = start;
-    }
-    from
 }
 
 /// Calls `visit` with every same-letter run of two or more inside one word.
@@ -370,9 +276,7 @@ pub fn for_each_letter_run(word: &str, mut visit: impl FnMut(ScalarKey, u8)) {
             scalars.next();
         }
         let glue = &word[start..end];
-        let letter = class
-            .is_alphabetic()
-            .then(|| ScalarKey::of(scalar.to_lowercase().next().unwrap_or(scalar)));
+        let letter = class.is_alphabetic().then(|| ScalarKey::of(fold(scalar)));
         if let Some((key, held_glue, scalars)) = &mut held
             && letter == Some(*key)
             && glue == *held_glue
@@ -526,7 +430,7 @@ pub(crate) fn walk(text: &str, verses: &[Verse]) -> WordRow {
 fn fold_hash(word: &str, scratch: &mut String) -> u64 {
     scratch.clear();
     for scalar in word.chars() {
-        scratch.push(scalar.to_lowercase().next().unwrap_or(scalar));
+        scratch.push(fold(scalar));
     }
     xxh3_64(scratch.as_bytes())
 }

@@ -18,6 +18,16 @@
 //! rules without a dictionary; the word lanes abstain there, and the table
 //! says so rather than pretending the disagreement is a bug.
 //!
+//! Beside the disagreement it counts, per script, every nonletter (not a
+//! letter, glue, digit or whitespace) that stands between two letters, flags
+//! the `mise::words::is_joiner` ones with `*`, and samples the top scalars
+//! that join nothing, so a change to the joiner set is a measured one:
+//!
+//! ```text
+//!       between: '-'* U+002D ×41,203  ','  U+002C ×1,877  …
+//!       ','  U+002C  "word,word" "said,and"
+//! ```
+//!
 //! Not a test: it prints tables for the ledger rather than asserting on them.
 //! Reads `corpora/*.txt` and then the 1,504-corpus vref tier, which is
 //! local-only and not committed — it panics rather than skip silently.
@@ -26,6 +36,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use mise::unicode::class_of;
+use mise::words::{is_core, is_joiner, is_letter};
 use rustc_hash::{FxHashMap, FxHashSet};
 use sous_core::words::for_each_word;
 use unicode_segmentation::UnicodeSegmentation;
@@ -49,6 +60,12 @@ const VREF: &str = "/Users/willkelly/Documents/Work/Code/scripture-sous-chef/cor
 /// tail is a long one and the top ten is what the ledger row carries.
 const ROSTER_CAP: usize = 20_000;
 
+/// Samples kept per scalar between letters, and how many such scalars the
+/// table prints.
+const SAMPLES: usize = 2;
+const BETWEEN_TOP: usize = 12;
+const SAMPLED: usize = 5;
+
 fn corpora_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../corpora")
 }
@@ -65,6 +82,7 @@ fn main() {
         let report = compare(&raw);
         row(name, &report);
         println!("      top: {}", top_ten(&report));
+        print_between(&report.between);
     }
 
     let candidates = [dir.join("calibration-corpora"), PathBuf::from(VREF)];
@@ -84,7 +102,12 @@ struct Report {
     words: u64,
     disagree: u64,
     roster: FxHashMap<String, u32>,
+    between: Between,
 }
+
+/// Per nonletter that stood between two letters: how often, and a few of the
+/// tokens it stood in.
+type Between = FxHashMap<char, (u64, Vec<String>)>;
 
 impl Report {
     fn share(&self) -> f64 {
@@ -112,6 +135,24 @@ fn compare(raw: &str) -> Report {
         for scalar in text.chars() {
             if class_of(scalar).is_alphabetic() {
                 *scripts.entry(script_of(scalar)).or_insert(0) += 1;
+            }
+        }
+
+        let scalars: Vec<char> = text.chars().collect();
+        for (at, window) in scalars.windows(3).enumerate() {
+            let [before, scalar, after] = [window[0], window[1], window[2]];
+            let class = class_of(scalar);
+            if is_core(class)
+                || class.is_whitespace()
+                || !is_letter(class_of(before))
+                || !is_letter(class_of(after))
+            {
+                continue;
+            }
+            let entry = out.between.entry(scalar).or_insert((0, Vec::new()));
+            entry.0 += 1;
+            if entry.1.len() < SAMPLES {
+                entry.1.push(token_at(&scalars, at + 1));
             }
         }
 
@@ -143,6 +184,53 @@ fn compare(raw: &str) -> Report {
         .max_by_key(|entry| entry.1)
         .map_or("None", |entry| entry.0);
     out
+}
+
+/// The whitespace-delimited token around `scalars[at]`, at most 24 scalars.
+fn token_at(scalars: &[char], at: usize) -> String {
+    let from = scalars[..at]
+        .iter()
+        .rposition(|scalar| class_of(*scalar).is_whitespace())
+        .map_or(0, |space| space + 1)
+        .max(at.saturating_sub(12));
+    let to = scalars[at..]
+        .iter()
+        .position(|scalar| class_of(*scalar).is_whitespace())
+        .map_or(scalars.len(), |space| at + space)
+        .min(at + 12);
+    scalars[from..to].iter().collect()
+}
+
+fn merge_between(into: &mut Between, from: Between) {
+    for (scalar, (count, samples)) in from {
+        let entry = into.entry(scalar).or_insert((0, Vec::new()));
+        entry.0 += count;
+        for sample in samples {
+            if entry.1.len() < SAMPLES {
+                entry.1.push(sample);
+            }
+        }
+    }
+}
+
+fn print_between(between: &Between) {
+    let mut rows: Vec<(&char, &(u64, Vec<String>))> = between.iter().collect();
+    rows.sort_by(|a, b| b.1.0.cmp(&a.1.0).then(a.0.cmp(b.0)));
+    let top: Vec<String> = rows
+        .iter()
+        .take(BETWEEN_TOP)
+        .map(|(scalar, (count, _))| {
+            let flag = if is_joiner(**scalar) { "*" } else { "" };
+            format!("{scalar:?}{flag} U+{:04X} \u{d7}{count}", **scalar as u32)
+        })
+        .collect();
+    println!("      between: {}", top.join("  "));
+    for (scalar, (count, samples)) in rows.iter().filter(|row| !is_joiner(*row.0)).take(SAMPLED) {
+        println!(
+            "        {scalar:?} U+{:04X} \u{d7}{count}  {samples:?}",
+            **scalar as u32
+        );
+    }
 }
 
 fn header() {
@@ -191,6 +279,7 @@ struct Lane {
     words: u64,
     disagree: u64,
     roster: FxHashMap<String, u32>,
+    between: Between,
 }
 
 fn sweep(dir: &Path) {
@@ -225,6 +314,7 @@ fn sweep(dir: &Path) {
         for (word, count) in report.roster {
             *lane.roster.entry(word).or_insert(0) += count;
         }
+        merge_between(&mut lane.between, report.between);
     }
 
     println!(
@@ -241,6 +331,7 @@ fn sweep(dir: &Path) {
             words,
             disagree,
             roster,
+            between,
         } = lane;
         shares.sort_by(|a, b| a.partial_cmp(b).expect("a share is finite"));
         println!(
@@ -261,6 +352,7 @@ fn sweep(dir: &Path) {
             .map(|(word, count)| format!("{word:?}\u{d7}{count}"))
             .collect();
         println!("      top: {}", top.join("  "));
+        print_between(between);
     }
 }
 
