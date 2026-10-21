@@ -44,11 +44,12 @@ splits scripture — alignment first — sees the words sous counts. A word is a
 letter immediately on both sides**, and a joiner is one of nine scalars
 (`mise::words::is_joiner`): the apostrophes `'` and `\u{2019}`, the hyphens `-`,
 `\u{2010}` and `\u{2011}`, the Hebrew maqaf, the Armenian and Canadian syllabics
-hyphens, and the middle dot. Glue is the UCD's marks and extenders plus five
+hyphens, and the middle dot. Glue is the UCD's marks and extenders plus the
 scalars the fleet writes inside words (`mise::words::is_word_glue`): the soft
 hyphen, U+A789 modifier letter colon (a length mark, `mo\u{a789}mo\u{a789}dakiyo\u{a789}`),
-and the superscript tone digits `\u{b9}` `\u{b2}` `\u{b3}` `\u{2074}` `\u{2075}` (`s\u{e1}a\u{b3}o`,
-`coon\u{b2}\u{b9}`) — glue, not joiners, because each can end a word. `ng'ombe`, `don't`, `mother-in-law` and
+the superscript tone digits `\u{b9}` `\u{b2}` `\u{b3}` `\u{2074}` `\u{2075}` (`s\u{e1}a\u{b3}o`,
+`coon\u{b2}\u{b9}`) and the subscript ones `\u{2081}`..`\u{2085}` (`A\u{2082}la\u{2082}`,
+`ja\u{2081}le\u{2081}ton\u{2085}`) — glue, not joiners, because each can end a word. `ng'ombe`, `don't`, `mother-in-law` and
 `col\u{b7}lecci\u{f3}` are one word each; `a--b` is two, because the second
 atom confirms nothing; every other nonletter closes the word. **A digit beside
 a letter joins the word** — `3rd`, `1Ki` — since splitting there would invent a

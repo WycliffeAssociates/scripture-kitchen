@@ -96,12 +96,13 @@ letter on both sides.
 | soft hyphen | U+00AD | 29 corpora, 488k after a letter, 10.8k word-final (Lao); Cf with grapheme break Control, so the class table does not call it glue |
 | modifier letter colon | U+A789 | 8 corpora, a length mark: `mo꞉mo꞉dakiyo꞉`, 298k word-final |
 | superscript tone digits | U+00B9 `¹`, U+00B2 `²`, U+00B3 `³`, U+2074 `⁴`, U+2075 `⁵` | Mesoamerican tone (`sáa³o`, `coon²¹`) and Tamil Grantha aspiration (`ப⁴வதி`); ⁵ in one corpus |
+| subscript tone digits | U+2081 `₁` through U+2085 `₅` | one corpus, cntNT (Chinantec): the same tone job (`A₂la₂`, `ja₁le₁ton₅`, contours `can'₅₄`), 122k uses of ₂, 27-42k of each other, 11-52k word-final each |
 
 They live in `mise::words`, not the generated class table: the table states the UCD, and the
 hygiene and atom lanes read its glue bit as the UCD's.
 
 Not glue and not joiners: U+2070 `⁰` and U+2076..U+2079 `⁶⁷⁸⁹` (no fleet text tones with them; one
-use each), and U+2060 word joiner, which the fleet only ever writes word-initially (383 times, one
+use each), U+2080 `₀` and U+2086..U+2089 `₆₇₈₉` (no use at all), and U+2060 word joiner, which the fleet only ever writes word-initially (383 times, one
 corpus, never between letters), where gluing it on would change that word.
 
 Deliberately **not** joiners:
@@ -139,7 +140,7 @@ Fleet agreement on spaced scripts is already 98%+ (`sous-chef/evidence.md`, 2026
 
 The fleet rerun after the glue change (`sous-chef/evidence.md`, 2026-10-21) names what still stands between two letters. None is decided; each is a measured candidate.
 
-<Followup id="subscript-tone">Subscript tone digits ₂ U+2082 (44.6k) and ₁ U+2081 (15.5k) in Latin texts (`A₂la₂`) do the job the superscripts do: glue them as `words/2`?</Followup>
+<Followup id="subscript-tone" done>Subscript tone digits ₂ U+2082 (44.6k) and ₁ U+2081 (15.5k) in Latin texts (`A₂la₂`) do the job the superscripts do: glue them as `words/2`? Done 2026-10-21: ₁..₅ are glue (all cntNT's five tones; ₀ ₆..₉ unused); Latin disagreement 1.844% → 1.894%, `word_map` cost noise (evidence.md row of that date).</Followup>
 
 <Followup id="footnote-superscript">The known cost of superscript glue: a footnote marker typed as a superscript digit rides into its word (`niet¹` in WA-nl-ulb). Measure how often across the fleet before `words/2`.</Followup>
 

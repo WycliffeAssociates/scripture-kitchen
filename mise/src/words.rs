@@ -14,7 +14,7 @@
 //! word,word  → word | word        a comma is no joiner
 //! a–b        → a | b              nor an en dash
 //! ng'ombe  l'homme  father-in-law  col·lecció  בֶּן־הֲדַד   → one word each
-//! s\u{e1}a\u{b3}o  mo\u{a789}mo\u{a789}  longo\u{ad}kabu   → one word each: word glue rides
+//! s\u{e1}a\u{b3}o  A\u{2082}la\u{2082}  mo\u{a789}mo\u{a789}  longo\u{ad}kabu   → one word each: word glue rides
 //! ```
 //!
 //! A word is a maximal run of letters, [`is_glue`] and digits holding at least
@@ -66,12 +66,20 @@ pub const fn is_joiner(scalar: char) -> bool {
 /// \u{ad}             soft hyphen             longo\u{ad}kabu\u{ad}rungi
 /// \u{a789}           modifier letter colon   mo\u{a789}mo\u{a789}dakiyo\u{a789}
 /// \u{b9} \u{b2} \u{b3} \u{2074} \u{2075}       superscript tone digits  s\u{e1}a\u{b3}  coon\u{b2}\u{b9}  \u{baa}\u{2074}\u{bb5}\u{ba4}\u{bbf}
+/// \u{2081} \u{2082} \u{2083} \u{2084} \u{2085}  subscript tone digits    A\u{2082}la\u{2082}  ja\u{2081}le\u{2081}ton\u{2085}  can'\u{2085}\u{2084}
 /// ```
 #[inline]
 pub const fn is_word_glue(scalar: char) -> bool {
     matches!(
         scalar,
-        '\u{AD}' | '\u{A789}' | '\u{B9}' | '\u{B2}' | '\u{B3}' | '\u{2074}' | '\u{2075}'
+        '\u{AD}'
+            | '\u{A789}'
+            | '\u{B9}'
+            | '\u{B2}'
+            | '\u{B3}'
+            | '\u{2074}'
+            | '\u{2075}'
+            | '\u{2081}'..='\u{2085}'
     )
 }
 
@@ -493,6 +501,20 @@ mod tests {
             ["s\u{e1}a\u{b3}o", "coon\u{b2}\u{b9}", "ba\u{2074}\u{2075}"]
         );
         assert_eq!(
+            words("A\u{2082}la\u{2082} ja\u{2081}le\u{2081}ton\u{2085} na\u{2083} b\u{e1}\u{2084}"),
+            [
+                "A\u{2082}la\u{2082}",
+                "ja\u{2081}le\u{2081}ton\u{2085}",
+                "na\u{2083}",
+                "b\u{e1}\u{2084}"
+            ]
+        );
+        assert_eq!(
+            words("can'\u{2085}\u{2084} quian'\u{2085}\u{2084}"),
+            ["can'\u{2085}\u{2084}", "quian'\u{2085}\u{2084}"],
+            "glue confirms the apostrophe it follows"
+        );
+        assert_eq!(
             words("\u{baa}\u{2074}\u{bb5}\u{ba4}\u{bbf}"),
             ["\u{baa}\u{2074}\u{bb5}\u{ba4}\u{bbf}"]
         );
@@ -507,8 +529,8 @@ mod tests {
             "glue alone holds no letter"
         );
         assert_eq!(
-            words("a\u{2076}b a\u{2070}b"),
-            ["a", "b", "a", "b"],
+            words("a\u{2076}b a\u{2070}b a\u{2080}b a\u{2086}b"),
+            ["a", "b", "a", "b", "a", "b", "a", "b"],
             "no fleet text tones with these"
         );
         assert_eq!(
