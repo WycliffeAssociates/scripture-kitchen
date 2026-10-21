@@ -4,7 +4,7 @@ title: "resolve: an address to its place in one text, on the galley handle (Sefe
 kind: plan
 status: done
 created: 2026-10-20
-updated: 2026-10-20
+updated: 2026-10-21
 sha: b2b76e7
 tags: [sefer]
 source: ../Sefer/planning/items/2026-09-14-scripture-kitchen-asks.mdx
@@ -68,3 +68,10 @@ path (`Toc::locate`); the codec maps it to `intro`.
 Sefer side: call the door; `locate.ts` keeps its types or goes.
 
 <Question id="gen" answer="Yes (Will, 2026-10-20): whole book, intro its own address.">GEN is the whole book and the intro is its own address, as Sefer has it. Agreed?</Question>
+
+## Shipped
+
+- 0.1.11: `Galley.resolve(id, address, { utf16 })` over a registered book. A reference registered without `keepText` answers a book, an intro or chapters from its `Toc` and refuses a verse.
+- 0.1.12: `Galley.resolveOf(text, address, opts)` over text the host holds, every kind, the same JSON as `resolve(id)` over the same text; and a free `resolve(text, address, opts)` on onion-wasm, re-exported by galley. The address parser, the JSON and the `Address` types live once, in `onion_wasm::resolution`.
+
+Sefer asked, 2026-10-21, for a resolve over a table of contents alone, for the callers that hold only one (excerpts, align, search expectations). A `Toc` alone cannot answer a verse, for the same reason a reference without `keepText` cannot, so those callers pass the text to `resolveOf`.
