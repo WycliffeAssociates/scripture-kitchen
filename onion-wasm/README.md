@@ -103,7 +103,7 @@ need; prebuilt lean variants are a later decision if one ever asks.
 
 ## The read path
 
-One call, one buffer, one tree. `parse(text, { diagnostics?, toc?, utf16? })`
+One call, one buffer, one tree. `parse(text, { diagnostics?, toc?, utf16?, customMarkers? })`
 returns the dish — ten little-endian sections behind an `ONWR` header — and
 `reader.ts` is the typed door over it:
 
@@ -133,7 +133,7 @@ the debounced second call. `toc` is cheap and needs no tree.
 
 ## Where an address is: `resolve`
 
-`resolve(text, address, { utf16? })` answers where Sefer's `Address` is in one
+`resolve(text, address, { utf16?, customMarkers? })` answers where Sefer's `Address` is in one
 text, as JSON, in bytes unless `utf16` asks otherwise. The rules are
 `onion/src/resolve.md`; `testData/resolve/cases.json`'s `expect` is the answer.
 
@@ -152,8 +152,9 @@ galley's `Galley.resolve` and `resolveOf` answer through them.
 
 | export | what it gives back |
 |---|---|
-| `extensionsFromMarkersExt(text)` | `{ markers, malformed }` as JSON — a `markers.ext` file, read. Installs nothing |
-| `setExtensions(json, { relaxZPrefix? })` | installs the LIST (not the file) process-wide; returns the entries it could not keep, as JSON. `relaxZPrefix` admits a legacy name the spec does not define (`s5`) |
+| `customMarkersFromMarkersExt(text)` | `{ markers, malformed }` as JSON — a `markers.ext` file, read. Installs nothing |
+| `setCustomMarkers(json, { relaxZPrefix? })` | installs the LIST (not the file) process-wide; returns the entries it could not keep, as JSON. `relaxZPrefix` admits a legacy name the spec does not define (`s5`) |
+| `new CustomMarkers(json, { relaxZPrefix? })` | the same list parsed into a handle, installed nowhere; `.malformed` is what `setCustomMarkers` would have returned |
 
 A registered `\z` marker behaves as its `\category`: the engine resolves it to
 the spec row that category behaves as, so a `footnote` extension takes a caller
@@ -162,8 +163,22 @@ and a note scope, a `milestone` pairs `-s`/`-e` and takes attributes, a
 unregistered one is row 0, exactly as before. Reports are values — one bad
 entry costs one entry — and only malformed JSON throws.
 
+Every door that reads text lexes by the installed list unless it is handed a
+`CustomMarkers`, which is how two projects with different `markers.ext` share
+one page:
+
+```js
+const theirs = new CustomMarkers(JSON.stringify(refMarkers));
+parse(refText, { customMarkers: theirs });
+resolve(refText, address, { customMarkers: theirs });
+mask(refText, "verseText", { customMarkers: theirs });
+locate(refText, at, { customMarkers: theirs });       // and book, diff, merge, mergeSplices
+opts.setCustomMarkers(theirs);                         // FormatOpts: format, formatEdits, formatEditsIn
+theirs.free();                                         // a FormatOpts keeps its own reference
+```
+
 **Installing invalidates every product derived under the old rows**, so it
-belongs at composition rather than between edits. Both doors stand on
+belongs at composition rather than between edits. All three stand on
 `usfm-galley` too, which is the package a host vendoring one module gets.
 
 ## The engine's hash: `xxh3` and `xxh3Text`
@@ -187,7 +202,7 @@ no defence against a file altered on purpose.
 | `formatEdits(text, opts)` | the whole-book transaction — `Edits`, spans in UTF-16 |
 | `formatEditsIn(text, from, to, opts)` | the same transaction, scoped to a UTF-16 window |
 | `format(text, opts)` | the formatted document, in one call |
-| `diff(baseline, current, { text, unchanged? })` / `merge` | the review path (see below) |
+| `diff(baseline, current, { text, unchanged?, customMarkers? })` / `merge` | the review path (see below) |
 
 **Scope it engine-side, never in JS.** `formatEditsIn` runs the SAME whole-book
 analysis — lint needs the book, and which rule owns a contested byte is settled

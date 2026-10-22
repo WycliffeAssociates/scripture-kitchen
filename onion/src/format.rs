@@ -37,11 +37,12 @@
 use crate::cst::Cst;
 use crate::designator::{self, Designator};
 use crate::edit::{Edit, FixStr, apply};
+use crate::extensions::Extensions;
 use crate::lint::{Code, lint};
 use crate::scanner::payload_label;
 use crate::tables::generated;
 use crate::tables::schema::MarkerKind;
-use crate::{Token, TokenKind, lex};
+use crate::{Token, TokenKind, lex, lex_with};
 
 // ---------------------------------------------------------------------------
 // Options
@@ -125,6 +126,8 @@ pub struct FormatOptions<'a> {
     pub dedupe_verse_number: bool,
     /// `\v 1\v 2\v 3 asdf` → `\v 1-3 asdf`. Off by default.
     pub bridge_empty_verses: bool,
+    /// The list the source lexes by; `None` is the installed one.
+    pub custom_markers: Option<&'a Extensions>,
 }
 
 impl Default for FormatOptions<'_> {
@@ -144,6 +147,7 @@ impl Default for FormatOptions<'_> {
             marker_ws_at_line_start: true,
             dedupe_verse_number: false,
             bridge_empty_verses: false,
+            custom_markers: None,
         }
     }
 }
@@ -263,7 +267,10 @@ fn settle(source: &[u8], opts: &FormatOptions) -> Vec<(Code, u32, Edit)> {
     let Ok(text) = core::str::from_utf8(source) else {
         return Vec::new();
     };
-    let tokens = lex(text);
+    let tokens = match opts.custom_markers {
+        Some(ext) => lex_with(text, ext),
+        None => lex(text),
+    };
     let cst = crate::cst::build(&tokens);
     let mut claims = Claims::default();
     let paragraphs = harvest(source, &tokens, &cst, opts, &mut claims);

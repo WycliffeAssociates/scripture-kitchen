@@ -53,6 +53,8 @@
 //! header carries an xxh3-64 of the source it was plated from, which answers
 //! "is this the parse of that text" and nothing wider.
 
+use std::sync::Arc;
+
 use js_sys::{Object, Reflect, Uint32Array};
 use serde::{Deserialize, Serialize};
 use usfm_onion::attributes::{self, AttrEvent};
@@ -60,7 +62,7 @@ use usfm_onion::diff::{
     self, Addr, CoveredSide, Decisions, DiffSkeleton, MergeSide, RunKind, RunWhat, SlotRole,
     Status, TextDiffMode, TextDiffRun, UnitKind, UnitTextDiff,
 };
-use usfm_onion::extensions::{CustomMarker, ExtensionCategory, ExtensionOptions};
+use usfm_onion::extensions::{CustomMarker, ExtensionCategory, ExtensionOptions, Extensions};
 use usfm_onion::format::{CharBreaks, FormatOptions, Newline, VerseBreaks};
 use usfm_onion::lint::Code;
 use usfm_onion::mask as mask_recipe;
@@ -80,12 +82,13 @@ pub mod resolution;
 /// THE read call. One document in, one buffer out.
 ///
 /// ```ts
-/// interface ParseOptions {
-///   diagnostics?: boolean;   // run the lint walk; default false
-///   toc?: boolean;           // build the chapter and verse index; default false
-///   utf16?: boolean;         // every offset as a UTF-16 code unit; default bytes
+/// interface ParseTextOptions {
+///   diagnostics?: boolean;          // run the lint walk; default false
+///   toc?: boolean;                  // build the chapter and verse index; default false
+///   utf16?: boolean;                // every offset as a UTF-16 code unit; default bytes
+///   customMarkers?: CustomMarkers;  // the `\z` list to lex by; default the installed one
 /// }
-/// parse(text: string, opts?: ParseOptions): Uint8Array;
+/// parse(text: string, opts?: ParseTextOptions): Uint8Array;
 /// ```
 ///
 /// The buffer is a plated parse — tokens, the tree, and whatever `opts` asked
@@ -101,21 +104,22 @@ pub mod resolution;
 #[wasm_bindgen]
 pub fn parse(
     text: &str,
-    #[wasm_bindgen(unchecked_optional_param_type = "ParseOptions")] opts: Option<JsValue>,
+    #[wasm_bindgen(unchecked_optional_param_type = "ParseTextOptions")] opts: Option<JsValue>,
 ) -> Result<Vec<u8>, JsError> {
-    let opts = options::parse_options(opts.as_ref(), "parse").map_err(|e| JsError::new(&e))?;
-    Ok(plated(text, opts))
+    let (opts, markers) =
+        options::parse_text_options(opts.as_ref(), "parse").map_err(|e| JsError::new(&e))?;
+    Ok(plated(text, opts, &options::or_installed(markers)))
 }
 
 /// [`parse`]'s body over engine options, for a caller on this side of the
 /// wall — `galley`, and the native tests, where no `JsValue` exists.
-pub fn plated(text: &str, opts: wire::ParseOptions) -> Vec<u8> {
+pub fn plated(text: &str, opts: wire::ParseOptions, markers: &Extensions) -> Vec<u8> {
     debug_assert!(
         !text.as_bytes().contains(&b'\r'),
         "onion_wasm::parse: the text must be LF-normalized — a CR makes every \
          emitted offset disagree with CodeMirror's"
     );
-    wire::plate(&wire::parse(text, opts))
+    wire::plate(&wire::parse_with(text, opts, markers))
 }
 
 #[wasm_bindgen(typescript_custom_section)]
@@ -130,8 +134,17 @@ export interface ParseOptions {
   utf16?: boolean;
 }
 
+/** The list a door that takes text lexes `\\z` markers by. */
+export interface LexOptions {
+  /** Default: the list `setCustomMarkers` installed. */
+  customMarkers?: CustomMarkers;
+}
+
+/** `parse(text, opts)`, and galley's `parseText`. */
+export interface ParseTextOptions extends ParseOptions, LexOptions {}
+
 /** `diff`'s options. */
-export interface DiffOptions {
+export interface DiffOptions extends LexOptions {
   /** The runs a changed unit is highlighted by: UAX-29 words, graphemes, or none. */
   text: "none" | "words" | "chars";
   /** Send unchanged units too, in their places; default false. */
@@ -144,11 +157,14 @@ export interface AttrsOptions {
   utf16?: boolean;
 }
 
-/** `resolve(text, address, opts)`, and galley's `resolve`/`resolveOf`. */
+/** galley's `resolve(id, address, opts)`. */
 export interface ResolveOptions {
   /** Offsets as UTF-16 code units; default bytes. */
   utf16?: boolean;
 }
+
+/** `resolve(text, address, opts)`, and galley's `resolveOf`. */
+export interface ResolveTextOptions extends ResolveOptions, LexOptions {}
 
 /** A place in scripture, Sefer's `Address`. A `book` key is read past: the book is the caller's to match. */
 export type Address =
@@ -170,8 +186,8 @@ export type Resolution =
   | { missing: "intro" | "chapter" | "verse"; within?: { from: number; to: number } }
   | { ambiguous: { from: number; to: number; opening: number }[] };
 
-/** `setExtensions`'s options. */
-export interface ExtensionOptions {
+/** `setCustomMarkers`'s options, and `new CustomMarkers`'s. */
+export interface CustomMarkerOptions {
   /** Admit a legacy name without the `z` that the spec does not define. */
   relaxZPrefix?: boolean;
 }
@@ -191,7 +207,12 @@ export interface ExtensionOptions {
 /// Offsets stay in UTF-8 bytes. The mask is onion-to-sous and never reaches an
 /// editor, which is the only consumer that counts in UTF-16.
 #[wasm_bindgen(js_name = mask)]
-pub fn mask(text: &str, recipe: &str) -> Object {
+pub fn mask(
+    text: &str,
+    recipe: &str,
+    #[wasm_bindgen(unchecked_optional_param_type = "LexOptions")] opts: Option<JsValue>,
+) -> Result<Object, JsError> {
+    let markers = options::lex_options(opts.as_ref(), "mask").map_err(|e| JsError::new(&e))?;
     let filter = match recipe {
         "verseText" => mask_recipe::Filter::verse_text(),
         "structure" => mask_recipe::Filter::structure(),
@@ -201,7 +222,7 @@ pub fn mask(text: &str, recipe: &str) -> Object {
              expected \"verseText\", \"structure\" or \"text\""
         )),
     };
-    let tokens = usfm_onion::lex(text);
+    let tokens = usfm_onion::lex_with(text, &options::or_installed(markers));
     let cst = usfm_onion::cst::build(&tokens);
     let masked = usfm_onion::mask(text.as_bytes(), &tokens, &cst, &filter);
 
@@ -221,7 +242,7 @@ pub fn mask(text: &str, recipe: &str) -> Object {
         "starts",
         JsValue::from(Uint32Array::from(&masked.starts[..])),
     );
-    out
+    Ok(out)
 }
 
 // ---------------------------------------------------------------------------
@@ -252,6 +273,7 @@ pub struct FormatOpts {
     pub bridge_empty_verses: bool,
     remove_markers: Vec<String>,
     repairs: Vec<u32>,
+    custom_markers: Option<Arc<Extensions>>,
 }
 
 impl Default for FormatOpts {
@@ -272,6 +294,7 @@ impl Default for FormatOpts {
             bridge_empty_verses: d.bridge_empty_verses,
             remove_markers: Vec::new(),
             repairs: Vec::new(),
+            custom_markers: None,
         }
     }
 }
@@ -300,6 +323,13 @@ impl FormatOpts {
     #[wasm_bindgen(js_name = setRepairs)]
     pub fn set_repairs(&mut self, codes: &[u32]) {
         self.repairs = codes.to_vec();
+    }
+
+    /// The list the text lexes `\z` markers by, instead of the one
+    /// `setCustomMarkers` installed. The handle stays the caller's to free.
+    #[wasm_bindgen(js_name = setCustomMarkers)]
+    pub fn set_custom_markers(&mut self, markers: &CustomMarkers) {
+        self.custom_markers = Some(Arc::clone(&markers.list));
     }
 }
 
@@ -334,6 +364,7 @@ impl FormatOpts {
             marker_ws_at_line_start: self.marker_ws_at_line_start,
             dedupe_verse_number: self.dedupe_verse_number,
             bridge_empty_verses: self.bridge_empty_verses,
+            custom_markers: self.custom_markers.as_deref(),
         }
     }
 
@@ -711,14 +742,14 @@ pub fn diff(
 }
 
 /// [`diff`]'s options, read.
-#[derive(Debug, Clone, Copy)]
 struct DiffOptions {
     text: TextDiffMode,
     unchanged: bool,
+    markers: Arc<Extensions>,
 }
 
 fn diff_options(value: Option<&JsValue>) -> Result<DiffOptions, String> {
-    let bag = options::bag(value, "diff", &["text", "unchanged"])?;
+    let bag = options::bag(value, "diff", &["text", "unchanged", "customMarkers"])?;
     let text = options::get(bag.as_ref(), "text")
         .ok_or("diff: text is required; expected \"none\", \"words\" or \"chars\"")?
         .as_string()
@@ -726,12 +757,13 @@ fn diff_options(value: Option<&JsValue>) -> Result<DiffOptions, String> {
     Ok(DiffOptions {
         text: mode(&text)?,
         unchanged: options::flag(bag.as_ref(), "diff", "unchanged")?,
+        markers: options::or_installed(options::custom_markers(bag.as_ref(), "diff")?),
     })
 }
 
 /// `diff`'s body, split from the door for the same reason [`merged`] is.
 fn diffed(baseline: &str, current: &str, opts: DiffOptions) -> Result<String, String> {
-    let (skeleton, texts) = diff::diff_with_text(baseline, current, opts.text);
+    let (skeleton, texts) = diff::diff_with_text_under(baseline, current, opts.text, &opts.markers);
     let wire = wire(
         &skeleton,
         &texts,
@@ -787,8 +819,17 @@ pub fn merge(
     current: &str,
     decisions_json: &str,
     default: &str,
+    #[wasm_bindgen(unchecked_optional_param_type = "LexOptions")] opts: Option<JsValue>,
 ) -> Result<String, JsError> {
-    merged(baseline, current, decisions_json, default).map_err(|error| JsError::new(&error))
+    let markers = options::lex_options(opts.as_ref(), "merge").map_err(|e| JsError::new(&e))?;
+    merged(
+        baseline,
+        current,
+        decisions_json,
+        default,
+        &options::or_installed(markers),
+    )
+    .map_err(|error| JsError::new(&error))
 }
 
 /// `merge`'s body. Separate because `JsError` cannot be CONSTRUCTED off wasm,
@@ -799,8 +840,9 @@ fn merged(
     current: &str,
     decisions_json: &str,
     default: &str,
+    markers: &Extensions,
 ) -> Result<String, String> {
-    let skeleton = diff::diff(baseline, current);
+    let skeleton = diff::diff_under(baseline, current, markers);
     let merged = diff::merge(
         &skeleton,
         baseline.as_bytes(),
@@ -843,8 +885,18 @@ pub fn merge_splices(
     current: &str,
     decisions_json: &str,
     default: &str,
+    #[wasm_bindgen(unchecked_optional_param_type = "LexOptions")] opts: Option<JsValue>,
 ) -> Result<Splices, JsError> {
-    splices(baseline, current, decisions_json, default).map_err(|error| JsError::new(&error))
+    let markers =
+        options::lex_options(opts.as_ref(), "mergeSplices").map_err(|e| JsError::new(&e))?;
+    splices(
+        baseline,
+        current,
+        decisions_json,
+        default,
+        &options::or_installed(markers),
+    )
+    .map_err(|error| JsError::new(&error))
 }
 
 /// `merge_splices`' body — same reason as [`merged`].
@@ -853,8 +905,9 @@ fn splices(
     current: &str,
     decisions_json: &str,
     default: &str,
+    markers: &Extensions,
 ) -> Result<Splices, String> {
-    let skeleton = diff::diff(baseline, current);
+    let skeleton = diff::diff_under(baseline, current, markers);
     let edits = diff::to_edits(
         &skeleton,
         &decisions(decisions_json)?,
@@ -938,9 +991,19 @@ pub fn xxh3_text(text: &str) -> u64 {
 /// chapters, an unknown book), and a JS re-implementation of it in every
 /// consumer is the drift the no-strings-cross rule exists to prevent.
 #[wasm_bindgen]
-pub fn locate(text: &str, utf16: u32) -> String {
+pub fn locate(
+    text: &str,
+    utf16: u32,
+    #[wasm_bindgen(unchecked_optional_param_type = "LexOptions")] opts: Option<JsValue>,
+) -> Result<String, JsError> {
+    let markers = options::lex_options(opts.as_ref(), "locate").map_err(|e| JsError::new(&e))?;
+    Ok(located(text, utf16, &options::or_installed(markers)))
+}
+
+/// [`locate`]'s body, for a caller with no `JsValue`.
+pub fn located(text: &str, utf16: u32, markers: &Extensions) -> String {
     let source = text.as_bytes();
-    let tokens = usfm_onion::lex(text);
+    let tokens = usfm_onion::lex_with(text, markers);
     let byte = Utf16Index::new(source).to_byte(utf16);
     usfm_onion::toc::toc(source, &tokens)
         .locate(byte)
@@ -965,17 +1028,29 @@ pub fn locate(text: &str, utf16: u32) -> String {
 pub fn resolve(
     text: &str,
     #[wasm_bindgen(unchecked_param_type = "Address")] address: JsValue,
-    #[wasm_bindgen(unchecked_optional_param_type = "ResolveOptions")] opts: Option<JsValue>,
+    #[wasm_bindgen(unchecked_optional_param_type = "ResolveTextOptions")] opts: Option<JsValue>,
 ) -> Result<String, JsError> {
-    let utf16 = options::utf16_only(opts.as_ref(), "resolve").map_err(|e| JsError::new(&e))?;
+    let (utf16, markers) =
+        options::resolve_text_options(opts.as_ref(), "resolve").map_err(|e| JsError::new(&e))?;
     let address = resolution::address(&address).map_err(|e| JsError::new(&e))?;
-    Ok(resolved(text, &address, utf16))
+    Ok(resolved(
+        text,
+        &address,
+        utf16,
+        &options::or_installed(markers),
+    ))
 }
 
 /// [`resolve`]'s body over a parsed address, for a caller with no `JsValue`.
-pub fn resolved(text: &str, address: &usfm_onion::resolve::Address, utf16: bool) -> String {
-    let tokens = usfm_onion::lex(text);
-    let answer = usfm_onion::toc::toc(text.as_bytes(), &tokens).resolve(text, address);
+pub fn resolved(
+    text: &str,
+    address: &usfm_onion::resolve::Address,
+    utf16: bool,
+    markers: &Extensions,
+) -> String {
+    let tokens = usfm_onion::lex_with(text, markers);
+    let answer =
+        usfm_onion::toc::toc(text.as_bytes(), &tokens).resolve_with(text, address, markers);
     let table = utf16.then(|| mise::utf16::utf16_table(text.as_bytes()));
     resolution::json(&answer, table.as_ref())
 }
@@ -1065,9 +1140,18 @@ pub fn attr_resolve(name: &str, marker: u32) -> u32 {
 /// none (real in the wild: BSB Ecclesiastes); the `missing-id` diagnostic is
 /// where that becomes a finding, not here.
 #[wasm_bindgen]
-pub fn book(text: &str) -> String {
+pub fn book(
+    text: &str,
+    #[wasm_bindgen(unchecked_optional_param_type = "LexOptions")] opts: Option<JsValue>,
+) -> Result<String, JsError> {
+    let markers = options::lex_options(opts.as_ref(), "book").map_err(|e| JsError::new(&e))?;
+    Ok(book_of(text, &options::or_installed(markers)))
+}
+
+/// [`book`]'s body, for a caller with no `JsValue`.
+pub fn book_of(text: &str, markers: &Extensions) -> String {
     let source = text.as_bytes();
-    let tokens = usfm_onion::lex(text);
+    let tokens = usfm_onion::lex_with(text, markers);
     let code = usfm_onion::toc::toc(source, &tokens).book;
     let end = code.iter().position(|b| *b == 0).unwrap_or(code.len());
     String::from_utf8_lossy(&code[..end]).into_owned()
@@ -1107,12 +1191,13 @@ struct WireMarkersExt {
     malformed: Vec<WireMalformed>,
 }
 
-/// A `markers.ext` file, read into the list [`set_extensions`] takes.
+/// A `markers.ext` file, read into the list [`set_custom_markers`] and
+/// [`CustomMarkers::new`] take.
 ///
 /// ```js
-/// const { markers, malformed } = JSON.parse(extensionsFromMarkersExt(text));
+/// const { markers, malformed } = JSON.parse(customMarkersFromMarkersExt(text));
 /// for (const { name, reason, line } of malformed) show(line, name, reason);
-/// setExtensions(JSON.stringify(markers));
+/// setCustomMarkers(JSON.stringify(markers));
 /// ```
 ///
 /// READS ONLY — nothing is installed here, because a host may want to show
@@ -1120,8 +1205,8 @@ struct WireMarkersExt {
 /// ways a list arrives (a `custom.sty`, a UI that lets a user add a marker).
 /// A bad entry costs only itself and lands in `malformed`; the file never
 /// fails as a whole.
-#[wasm_bindgen(js_name = extensionsFromMarkersExt)]
-pub fn extensions_from_markers_ext(text: &str) -> String {
+#[wasm_bindgen(js_name = customMarkersFromMarkersExt)]
+pub fn custom_markers_from_markers_ext(text: &str) -> String {
     let read = mise::extensions::parse_markers_ext(text);
     let wire = WireMarkersExt {
         markers: read
@@ -1151,12 +1236,12 @@ pub fn extensions_from_markers_ext(text: &str) -> String {
 /// keep.
 ///
 /// ```js
-/// setExtensions('[{"name":"zaln","category":"milestone"}]');  // → "[]"
-/// setExtensions("[]");                                        // clears
+/// setCustomMarkers('[{"name":"zaln","category":"milestone"}]');  // → "[]"
+/// setCustomMarkers("[]");                                        // clears
 ///
 /// // Legacy markup a host cannot change: en_ulb's chunk marker, as a bare
 /// // point that leaves its paragraph open.
-/// setExtensions('[{"name":"s5","category":"standalone"}]', { relaxZPrefix: true });
+/// setCustomMarkers('[{"name":"s5","category":"standalone"}]', { relaxZPrefix: true });
 /// ```
 ///
 /// Takes the LIST, never a file: a host with a `custom.sty`, or a UI that lets
@@ -1167,10 +1252,9 @@ pub fn extensions_from_markers_ext(text: &str) -> String {
 /// attributes — because the engine resolves it to the spec row that category
 /// behaves as. An unregistered `\z` marker stays what it has always been.
 ///
-/// **This invalidates every derived product**, here and in a resident
-/// `Galley`: the same bytes are a different document once the rows change, and
-/// both caches key on content. Call it at composition, before the first
-/// parse, rather than between edits.
+/// This is the list every door lexes by when it is given no
+/// [`CustomMarkers`]. A resident `Galley` re-derives the books registered
+/// without one; a book registered with one keeps its own list.
 ///
 /// `relaxZPrefix` admits a name without the `z` that the spec does not
 /// define; a name the spec does define (`s1`, `p`) is still a report.
@@ -1179,29 +1263,111 @@ pub fn extensions_from_markers_ext(text: &str) -> String {
 /// `relaxZPrefix` is not a boolean. A bad ENTRY — no name, a name that is not
 /// `z`-initial, an unknown category word, a duplicate — is a report, not a
 /// failure, so one bad line never costs a host the rest of its list.
-#[wasm_bindgen(js_name = setExtensions)]
-pub fn set_extensions(
+#[wasm_bindgen(js_name = setCustomMarkers)]
+pub fn set_custom_markers(
     list: &str,
-    #[wasm_bindgen(unchecked_optional_param_type = "ExtensionOptions")] opts: Option<JsValue>,
+    #[wasm_bindgen(unchecked_optional_param_type = "CustomMarkerOptions")] opts: Option<JsValue>,
 ) -> Result<String, JsError> {
-    let relax_z_prefix = options::bag(opts.as_ref(), "setExtensions", &["relaxZPrefix"])
-        .and_then(|bag| options::flag(bag.as_ref(), "setExtensions", "relaxZPrefix"))
+    let options = options::custom_marker_options(opts.as_ref(), "setCustomMarkers")
         .map_err(|e| JsError::new(&e))?;
-    installed(list, relax_z_prefix).map_err(|error| JsError::new(&error))
+    installed(list, options.relax_z_prefix).map_err(|error| JsError::new(&error))
 }
 
-/// `set_extensions`'s body, split from the door for the same reason
+/// `set_custom_markers`'s body, split from the door for the same reason
 /// [`diffed`] is: `JsError` cannot be constructed off a wasm target, so a
 /// native test would have nothing to call.
 fn installed(list: &str, relax_z_prefix: bool) -> Result<String, String> {
-    let parsed: Vec<WireExtension> =
-        serde_json::from_str(list).map_err(|error| format!("setExtensions: {error}"))?;
+    let (markers, mut reports) = read_list(list, "setCustomMarkers")?;
+    reports.extend(
+        usfm_onion::set_extensions_with(&markers, &ExtensionOptions { relax_z_prefix })
+            .into_iter()
+            .map(list_report),
+    );
+    Ok(reports_json(&reports))
+}
 
+/// One project's user `\z` markers, parsed once and handed to the doors that
+/// lex: a registered book keeps the list, a loose-text door lexes by it.
+///
+/// ```js
+/// const mine = new CustomMarkers(JSON.stringify(markers));
+/// JSON.parse(mine.malformed);                               // → [] when all kept
+/// galley.update("books/MRK.usfm", text, { customMarkers: mine });
+/// parse(refText, { customMarkers: mine });
+/// mine.free();                                              // the book keeps its list
+/// ```
+///
+/// Takes what [`set_custom_markers`] takes and judges it the same way, but
+/// installs nothing: the process-wide list stays what it was. A book or a
+/// `FormatOpts` given a handle holds its own reference to the list, so
+/// `free()` drops only the handle.
+#[wasm_bindgen]
+#[derive(Clone)]
+pub struct CustomMarkers {
+    list: Arc<Extensions>,
+    malformed: String,
+}
+
+#[wasm_bindgen]
+impl CustomMarkers {
+    /// Throws where [`set_custom_markers`] throws; a bad entry is a report in
+    /// [`malformed`](Self::malformed).
+    #[wasm_bindgen(constructor)]
+    pub fn new(
+        list: &str,
+        #[wasm_bindgen(unchecked_optional_param_type = "CustomMarkerOptions")] opts: Option<
+            JsValue,
+        >,
+    ) -> Result<CustomMarkers, JsError> {
+        let options = options::custom_marker_options(opts.as_ref(), "CustomMarkers")
+            .map_err(|e| JsError::new(&e))?;
+        CustomMarkers::from_list(list, options.relax_z_prefix).map_err(|error| JsError::new(&error))
+    }
+
+    /// What the list could not keep, as JSON: the array `setCustomMarkers`
+    /// returns for the same list.
+    #[wasm_bindgen(getter)]
+    pub fn malformed(&self) -> String {
+        self.malformed.clone()
+    }
+
+    /// A second handle on the same list. An options bag cannot lend Rust a
+    /// borrow of the handle in it, and taking the handle itself would free the
+    /// caller's; [`options::custom_markers`] reads this instead.
+    #[wasm_bindgen(getter, js_name = __handoff, skip_typescript)]
+    pub fn handoff(&self) -> CustomMarkers {
+        self.clone()
+    }
+}
+
+impl CustomMarkers {
+    /// [`new`](Self::new) for a caller with no `JsValue`.
+    pub fn from_list(list: &str, relax_z_prefix: bool) -> Result<Self, String> {
+        let (markers, mut reports) = read_list(list, "CustomMarkers")?;
+        let (extensions, malformed) =
+            Extensions::new_with(&markers, &ExtensionOptions { relax_z_prefix });
+        reports.extend(malformed.into_iter().map(list_report));
+        Ok(Self {
+            list: Arc::new(extensions),
+            malformed: reports_json(&reports),
+        })
+    }
+
+    /// The parsed list, shared with whatever else holds it.
+    pub fn list(&self) -> &Arc<Extensions> {
+        &self.list
+    }
+}
+
+/// A JSON list into engine markers, with the entries whose category word is
+/// unknown already reported: the category is the one field this layer judges,
+/// and every other reason is the registry's.
+fn read_list(list: &str, door: &str) -> Result<(Vec<CustomMarker>, Vec<WireMalformed>), String> {
+    let parsed: Vec<WireExtension> =
+        serde_json::from_str(list).map_err(|error| format!("{door}: {error}"))?;
     let mut reports = Vec::new();
     let mut markers = Vec::new();
     for entry in parsed {
-        // The category is the one field this layer judges: every other reason
-        // is the registry's, which sees the same names it would from a file.
         let Some(category) = ExtensionCategory::parse(&entry.category) else {
             reports.push(WireMalformed {
                 line: None,
@@ -1217,16 +1383,19 @@ fn installed(list: &str, relax_z_prefix: bool) -> Result<String, String> {
             attributes: entry.attributes,
         });
     }
-    reports.extend(
-        usfm_onion::set_extensions_with(&markers, &ExtensionOptions { relax_z_prefix })
-            .into_iter()
-            .map(|report| WireMalformed {
-                line: None,
-                name: report.name,
-                reason: report.reason,
-            }),
-    );
-    Ok(serde_json::to_string(&reports).expect("the wire structs are always serializable"))
+    Ok((markers, reports))
+}
+
+fn list_report(report: usfm_onion::extensions::Malformed) -> WireMalformed {
+    WireMalformed {
+        line: None,
+        name: report.name,
+        reason: report.reason,
+    }
+}
+
+fn reports_json(reports: &[WireMalformed]) -> String {
+    serde_json::to_string(reports).expect("the wire structs are always serializable")
 }
 
 #[cfg(test)]
@@ -1248,6 +1417,8 @@ mod tests {
         u32::from_le_bytes(dish[at..at + 4].try_into().expect("four bytes"))
     }
 
+    static NONE: std::sync::LazyLock<Extensions> = std::sync::LazyLock::new(Extensions::default);
+
     const BOOK: &str = "\\id GEN\n\\c 1\n\\p \\v 1 In the beginning\\f + \\ft note\\f* .\n\\c 2\n\\p \\v 1 λόγος\n";
 
     fn opts(diagnostics: bool, toc: bool, utf16: bool) -> wire::ParseOptions {
@@ -1263,7 +1434,7 @@ mod tests {
     /// that the boundary hands one over intact.
     #[test]
     fn parse_returns_a_readable_dish() {
-        let dish = plated(BOOK, opts(true, true, false));
+        let dish = plated(BOOK, opts(true, true, false), &NONE);
         let word = |at: usize| u32::from_le_bytes(dish[at..at + 4].try_into().unwrap());
         assert_eq!(word(0), wire::MAGIC);
         assert_eq!(word(4), wire::FORMAT_VERSION);
@@ -1274,8 +1445,8 @@ mod tests {
     /// The one flag that changes every offset in the buffer.
     #[test]
     fn utf16_is_opt_in_at_the_call() {
-        let bytes = plated(BOOK, opts(false, false, false));
-        let units = plated(BOOK, opts(false, false, true));
+        let bytes = plated(BOOK, opts(false, false, false), &NONE);
+        let units = plated(BOOK, opts(false, false, true), &NONE);
         let flag = |d: &[u8]| u32::from_le_bytes(d[12..16].try_into().unwrap()) & wire::FLAG_UTF16;
         assert_eq!(flag(&bytes), 0);
         assert_ne!(flag(&units), 0);
@@ -1288,7 +1459,7 @@ mod tests {
     /// and the tree is there either way because the tree is the product.
     #[test]
     fn the_optionals_are_off_by_default() {
-        let dish = plated(BOOK, opts(false, false, false));
+        let dish = plated(BOOK, opts(false, false, false), &NONE);
         let len = |name: &str| section_len(&dish, section_index(name));
         assert_eq!(len("diagnostics"), 0, "no lint walk was asked for");
         assert_eq!(len("chapters"), 0, "no toc was asked for");
@@ -1458,7 +1629,11 @@ mod tests {
     }
 
     fn diff_opts(text: TextDiffMode, unchanged: bool) -> DiffOptions {
-        DiffOptions { text, unchanged }
+        DiffOptions {
+            text,
+            unchanged,
+            markers: Arc::new(Extensions::default()),
+        }
     }
 
     /// The example on [`WireSkeleton`], held.
@@ -1551,22 +1726,34 @@ mod tests {
     fn a_merge_decision_is_honoured_and_a_stale_id_rejected() {
         let baseline = "\\id GEN\n\\c 1\n\\v 1 one\n";
         let current = "\\id GEN\n\\c 1\n\\v 1 ONE\n";
-        assert_eq!(merged(baseline, current, "{}", "current").unwrap(), current);
         assert_eq!(
-            merged(baseline, current, "{}", "baseline").unwrap(),
+            merged(baseline, current, "{}", "current", &NONE).unwrap(),
+            current
+        );
+        assert_eq!(
+            merged(baseline, current, "{}", "baseline", &NONE).unwrap(),
             baseline
         );
-        assert!(merged(baseline, current, "{\"GEN 9:9\":\"baseline\"}", "current").is_err());
-        assert!(merged(baseline, current, "{\"x\":\"sideways\"}", "current").is_err());
-        assert!(merged(baseline, current, "not json", "current").is_err());
-        assert!(merged(baseline, current, "{}", "middle").is_err());
+        assert!(
+            merged(
+                baseline,
+                current,
+                "{\"GEN 9:9\":\"baseline\"}",
+                "current",
+                &NONE
+            )
+            .is_err()
+        );
+        assert!(merged(baseline, current, "{\"x\":\"sideways\"}", "current", &NONE).is_err());
+        assert!(merged(baseline, current, "not json", "current", &NONE).is_err());
+        assert!(merged(baseline, current, "{}", "middle", &NONE).is_err());
     }
 
     #[test]
     fn splices_replay_the_merge() {
         let baseline = "\\id GEN\n\\c 1\n\\v 1 λόγος\n\\v 2 two\n";
         let current = "\\id GEN\n\\c 1\n\\v 1 λόγος\n\\v 2 TWO\n";
-        let splices = super::splices(baseline, current, "{}", "current").unwrap();
+        let splices = super::splices(baseline, current, "{}", "current", &NONE).unwrap();
         assert_eq!(splices.spans().len(), splices.inserts().len());
         assert!(!splices.spans().is_empty(), "one verse changed");
         // Replayed by hand, in UTF-16 space, exactly as the editor would.
@@ -1598,21 +1785,21 @@ mod tests {
     fn locate_and_book_answer_in_editor_offsets() {
         // Greek ahead of the verse, so a byte offset would land elsewhere.
         let text = "\\id MRK\n\\c 6\n\\p \\v 1 λόγος\n\\v 2-4 bridged\n";
-        assert_eq!(book(text), "MRK");
-        assert_eq!(locate(text, 0), "MRK");
-        assert_eq!(locate(text, 8), "MRK 6");
+        assert_eq!(book_of(text, &NONE), "MRK");
+        assert_eq!(located(text, 0, &NONE), "MRK");
+        assert_eq!(located(text, 8, &NONE), "MRK 6");
         let inside = text.find("λόγος").unwrap() + "λόγος".len();
         let utf16 = to_utf16(text, inside as u32);
         assert!(utf16 < inside as u32, "the offsets have drifted apart");
-        assert_eq!(locate(text, utf16), "MRK 6:1");
+        assert_eq!(located(text, utf16, &NONE), "MRK 6:1");
         assert_eq!(
-            locate(text, to_utf16(text, text.len() as u32 - 2)),
+            located(text, to_utf16(text, text.len() as u32 - 2), &NONE),
             "MRK 6:2-4"
         );
         // Total past the end, and honest about a book with no `\id`.
-        assert_eq!(locate(text, u32::MAX), "MRK 6:2-4");
-        assert_eq!(book("\\c 1\n"), "");
-        assert_eq!(locate("\\c 1\n\\v 1 a\n", 8), "### 1:1");
+        assert_eq!(located(text, u32::MAX, &NONE), "MRK 6:2-4");
+        assert_eq!(book_of("\\c 1\n", &NONE), "");
+        assert_eq!(located("\\c 1\n\\v 1 a\n", 8, &NONE), "### 1:1");
     }
 
     /// The `\usfm` version is a lint fact now, not a header field on a read:
@@ -1620,7 +1807,7 @@ mod tests {
     /// where it was always used.
     #[test]
     fn the_tree_is_there_without_asking() {
-        let dish = plated(BOOK, opts(false, false, false));
+        let dish = plated(BOOK, opts(false, false, false), &NONE);
         let len = |name: &str| section_len(&dish, section_index(name));
         assert!(len("tokens") > 0);
         assert!(len("nodes") > 0);
@@ -1630,7 +1817,7 @@ mod tests {
     /// carry the line the file gave them.
     #[test]
     fn markers_ext_reads_without_installing() {
-        let read: serde_json::Value = serde_json::from_str(&extensions_from_markers_ext(
+        let read: serde_json::Value = serde_json::from_str(&custom_markers_from_markers_ext(
             "\\marker zmyf\n\\category footnote\n\\attribute x-a\n\\marker bad\n\\category char\n",
         ))
         .unwrap();
@@ -1642,6 +1829,53 @@ mod tests {
         assert_eq!(read["malformed"][0]["reason"], "name does not start with z");
         // Nothing installed: the marker is still row 0.
         assert_eq!(usfm_onion::lex("\\zmyf x")[0].marker_idx, 0);
+    }
+
+    /// A handle lexes by its own list and installs nothing; its reports are
+    /// the ones `setCustomMarkers` gives for the same list.
+    #[test]
+    fn a_handle_lexes_by_its_list_and_installs_nothing() {
+        let list = r#"[{"name":"zmyf","category":"footnote"},{"name":"nope","category":"char"}]"#;
+        let mine = CustomMarkers::from_list(list, false).unwrap();
+        let reports: serde_json::Value = serde_json::from_str(&mine.malformed()).unwrap();
+        assert_eq!(reports[0]["reason"], "name does not start with z");
+        assert_eq!(
+            usfm_onion::lex("\\zmyf x")[0].marker_idx,
+            0,
+            "nothing installed"
+        );
+
+        let text = "\\id GEN\n\\c 1\n\\p \\v 1 Jesus wept\\zmyf + \\ft why\\zmyf*.\n";
+        let verse_text = |markers: &Extensions| {
+            let tokens = usfm_onion::lex_with(text, markers);
+            let cst = usfm_onion::cst::build(&tokens);
+            usfm_onion::mask(
+                text.as_bytes(),
+                &tokens,
+                &cst,
+                &mask_recipe::Filter::verse_text(),
+            )
+            .text(text.as_bytes())
+        };
+        assert!(verse_text(&NONE).contains("why"));
+        assert!(
+            !verse_text(mine.list()).contains("why"),
+            "the note drops out"
+        );
+        assert_ne!(
+            plated(text, opts(false, false, false), mine.list()),
+            plated(text, opts(false, false, false), &NONE)
+        );
+        let chapter = usfm_onion::resolve::Address::Chapters { from: 1, to: 1 };
+        assert_eq!(
+            resolved(text, &chapter, false, mine.list()),
+            resolved(text, &chapter, false, &NONE),
+            "a chapter's place does not move"
+        );
+        assert!(
+            CustomMarkers::from_list("{", false).is_err(),
+            "malformed JSON throws"
+        );
     }
 
     /// Same-position edits cross as one, and the text is the same either way.
@@ -1687,7 +1921,7 @@ mod tests {
     /// Installing changes what the same bytes mean; a bad entry is a report,
     /// not a failure; malformed JSON is the one thing that throws.
     #[test]
-    fn set_extensions_installs_and_reports() {
+    fn set_custom_markers_installs_and_reports() {
         struct Restore;
         impl Drop for Restore {
             fn drop(&mut self) {

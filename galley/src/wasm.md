@@ -145,8 +145,8 @@ names and signatures — the same shims its package ships, not wrappers:
 ```js
 import { parse, mask, format, formatEdits, formatEditsIn, FormatOpts, Edits,
          diff, merge, mergeSplices, Splices, toByte, toUtf16, locate, attrs,
-         attrResolve, book, setExtensions,
-         extensionsFromMarkersExt, xxh3, xxh3Text } from "usfm-galley";
+         attrResolve, book, setCustomMarkers, CustomMarkers,
+         customMarkersFromMarkersExt, xxh3, xxh3Text } from "usfm-galley";
 ```
 
 `galley`'s cdylib links the object those shims sit in — `galley::wasm::onion`
@@ -157,10 +157,10 @@ where something wants them. `tests/sous_conformance.mjs` therefore asserts the
 EXACT export list, not a subset, and prints it:
 
 ```text
-exports (24): Edits Fingerprint FormatOpts Galley SousSettings Splices attrResolve attrs
-              book diff extensionsFromMarkersExt format formatEdits formatEditsIn
-              locate mask merge mergeSplices parse setExtensions toByte toUtf16
-              xxh3 xxh3Text
+exports (26): CustomMarkers Edits Fingerprint FormatOpts Galley SousSettings Splices
+              attrResolve attrs book customMarkersFromMarkersExt diff format
+              formatEdits formatEditsIn locate mask merge mergeSplices parse resolve
+              setCustomMarkers toByte toUtf16 xxh3 xxh3Text
 ```
 
 The doors cost 202 KB of `.wasm` (744,333 → 946,665 bytes, release, wasm-opt
@@ -189,16 +189,16 @@ bytes given, so a CRLF file does not match its LF-normalized `sourceHash`;
 hash the form you key on. It detects change and is not cryptographic, so it is
 no defence against a file altered on purpose.
 
-## User `\z` markers: `setExtensions` and `extensionsFromMarkersExt`
+## User `\z` markers: `setCustomMarkers` and `customMarkersFromMarkersExt`
 
 ```js
-const { markers, malformed } = JSON.parse(extensionsFromMarkersExt(fileText));
+const { markers, malformed } = JSON.parse(customMarkersFromMarkersExt(fileText));
 for (const { line, name, reason } of malformed) show(line, name, reason);
-setExtensions(JSON.stringify(markers));          // → "[]" when all installed
-setExtensions("[]");                             // clears
+setCustomMarkers(JSON.stringify(markers));       // → "[]" when all installed
+setCustomMarkers("[]");                          // clears
 
 // Legacy markup a host cannot change: en_ulb's chunk marker as a bare point.
-setExtensions('[{"name":"s5","category":"standalone"}]', { relaxZPrefix: true });
+setCustomMarkers('[{"name":"s5","category":"standalone"}]', { relaxZPrefix: true });
 //   \p \v 1 a \s5 \v 3 b   → one paragraph; no unknown-marker, no missing-paragraph
 ```
 
@@ -211,7 +211,7 @@ is what it has always been: row 0, and `unknown-marker`.
 
 Two doors, not one. Reading a file INSTALLS NOTHING, so a host can show what it
 found first, and a host whose markers come from a `custom.sty` or from its own
-UI feeds `setExtensions` the list directly. The list's shape is
+UI feeds `setCustomMarkers` the list directly. The list's shape is
 `{ name, category, attributes?, description? }`; `category` is one of the
 spec's nineteen words.
 

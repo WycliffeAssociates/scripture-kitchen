@@ -65,8 +65,9 @@ use similar::{Algorithm, ChangeTag, DiffTag, TextDiff, capture_diff_slices};
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::edit::SpliceEdit;
+use crate::extensions::Extensions;
 use crate::mask::{Filter, Mask, mask};
-use crate::scanner::lex;
+use crate::scanner::lex_with;
 use crate::tables::generated;
 use crate::tables::schema::MarkerKind;
 use crate::toc::{Toc, toc};
@@ -389,8 +390,13 @@ pub type Decisions = BTreeMap<String, MergeSide>;
 /// Diffs two whole USFM sources. Lexes and indexes each side independently; no
 /// state is shared between them.
 pub fn diff(baseline: &str, current: &str) -> DiffSkeleton {
-    let baseline_tokens = lex(baseline);
-    let current_tokens = lex(current);
+    diff_under(baseline, current, &crate::extensions::current())
+}
+
+/// [`diff`] lexing both sides by `ext` rather than the installed list.
+pub fn diff_under(baseline: &str, current: &str, ext: &Extensions) -> DiffSkeleton {
+    let baseline_tokens = lex_with(baseline, ext);
+    let current_tokens = lex_with(current, ext);
     diff_lexed(
         baseline.as_bytes(),
         &baseline_tokens,
@@ -1258,8 +1264,19 @@ pub fn diff_with_text(
     current: &str,
     mode: TextDiffMode,
 ) -> (DiffSkeleton, Vec<Option<UnitTextDiff>>) {
-    let baseline_tokens = lex(baseline);
-    let current_tokens = lex(current);
+    diff_with_text_under(baseline, current, mode, &crate::extensions::current())
+}
+
+/// [`diff_with_text`] lexing both sides by `ext` rather than the installed
+/// list.
+pub fn diff_with_text_under(
+    baseline: &str,
+    current: &str,
+    mode: TextDiffMode,
+    ext: &Extensions,
+) -> (DiffSkeleton, Vec<Option<UnitTextDiff>>) {
+    let baseline_tokens = lex_with(baseline, ext);
+    let current_tokens = lex_with(current, ext);
     let skeleton = diff_lexed(
         baseline.as_bytes(),
         &baseline_tokens,
@@ -1622,6 +1639,7 @@ fn settle(mut runs: Vec<TextDiffRun>, span: &Range<u32>) -> Vec<TextDiffRun> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lex;
 
     fn addrs(source: &str) -> Vec<String> {
         let tokens = lex(source);

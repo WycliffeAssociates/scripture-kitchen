@@ -61,6 +61,7 @@ const sameBytes = (a, b) => a.length === b.length && a.every((byte, at) => byte 
 // The list, not a subset: onion-wasm's shims arrive because galley's cdylib
 // links the object they sit in, and a dropped door is otherwise silent.
 const EXPORTS = [
+  "CustomMarkers",
   "Edits",
   "Fingerprint",
   "FormatOpts",
@@ -70,8 +71,8 @@ const EXPORTS = [
   "attrResolve",
   "attrs",
   "book",
+  "customMarkersFromMarkersExt",
   "diff",
-  "extensionsFromMarkersExt",
   "format",
   "formatEdits",
   "formatEditsIn",
@@ -81,7 +82,7 @@ const EXPORTS = [
   "mergeSplices",
   "parse",
   "resolve",
-  "setExtensions",
+  "setCustomMarkers",
   "toByte",
   "toUtf16",
   "xxh3",
@@ -102,7 +103,7 @@ eq(doors.toUtf16("\\v 1 a\u{1F600}b", 10), 8, "toUtf16 counts the surrogate pair
 // conformance.
 {
   const read = JSON.parse(
-    doors.extensionsFromMarkersExt(
+    doors.customMarkersFromMarkersExt(
       "\\marker zmyf\n\\category footnote\n\\description A note.\n" +
         "\\marker bad\n\\category char\n",
     ),
@@ -122,12 +123,12 @@ eq(doors.toUtf16("\\v 1 a\u{1F600}b", 10), 8, "toUtf16 counts the surrogate pair
   const reading = () => doors.mask(book, "verseText").text.trim();
   check(reading().includes("why"), "reading a file installs nothing");
 
-  eq(doors.setExtensions(JSON.stringify(read.markers)), "[]", "a clean list reports nothing");
+  eq(doors.setCustomMarkers(JSON.stringify(read.markers)), "[]", "a clean list reports nothing");
   eq(reading(), "Jesus wept.", "…and the same bytes now read as a footnote");
 
   // A bad ENTRY is a report, not a failure; malformed JSON throws.
   const reports = JSON.parse(
-    doors.setExtensions('[{"name":"znope","category":"bogus"},{"name":"nope","category":"char"}]'),
+    doors.setCustomMarkers('[{"name":"znope","category":"bogus"},{"name":"nope","category":"char"}]'),
   );
   eq(reports.length, 2, "both entries refused");
   eq(reports[0].reason, "unknown category word", "the category is judged at the door");
@@ -135,7 +136,7 @@ eq(doors.toUtf16("\\v 1 a\u{1F600}b", 10), 8, "toUtf16 counts the surrogate pair
   check(reports[0].line === undefined, "a list report carries no line, rather than a zero");
   let threw = false;
   try {
-    doors.setExtensions("{");
+    doors.setCustomMarkers("{");
   } catch {
     threw = true;
   }
@@ -143,20 +144,20 @@ eq(doors.toUtf16("\\v 1 a\u{1F600}b", 10), 8, "toUtf16 counts the surrogate pair
 
   // A legacy name needs the named option, and never lands on a spec marker.
   const legacy = '[{"name":"s5","category":"standalone"},{"name":"s1","category":"standalone"}]';
-  eq(JSON.parse(doors.setExtensions(legacy))[0].reason, "name does not start with z", "strict by default");
-  const relaxed = JSON.parse(doors.setExtensions(legacy, { relaxZPrefix: true }));
+  eq(JSON.parse(doors.setCustomMarkers(legacy))[0].reason, "name does not start with z", "strict by default");
+  const relaxed = JSON.parse(doors.setCustomMarkers(legacy, { relaxZPrefix: true }));
   eq(relaxed.length, 1, "only the spec name is refused");
   eq(relaxed[0].name, "s1", "…and it is s1");
   threw = false;
   try {
-    doors.setExtensions("[]", { relaxZPrefix: "yes" });
+    doors.setCustomMarkers("[]", { relaxZPrefix: "yes" });
   } catch {
     threw = true;
   }
   check(threw, "a non-boolean relaxZPrefix throws");
 
   // Clear, so nothing below this block sees a registry it did not install.
-  eq(doors.setExtensions("[]"), "[]", "an empty list clears");
+  eq(doors.setCustomMarkers("[]"), "[]", "an empty list clears");
   check(reading().includes("why"), "cleared");
 }
 

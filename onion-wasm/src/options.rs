@@ -17,9 +17,15 @@
 //! Errors are `String`s, not `JsError`s: `JsError` cannot be built off a wasm
 //! target, and the doors' native tests live there.
 
+use std::sync::Arc;
+
 use js_sys::{Object, Reflect};
+use usfm_onion::extensions::{ExtensionOptions, Extensions};
 use usfm_onion::wire;
+use wasm_bindgen::convert::TryFromJsValue;
 use wasm_bindgen::{JsCast, JsValue};
+
+use crate::CustomMarkers;
 
 /// The options object, checked: `None` when absent, an error when it is not an
 /// object or names a key outside `known`.
@@ -74,6 +80,80 @@ pub fn parse_options(value: Option<&JsValue>, door: &str) -> Result<wire::ParseO
 pub fn utf16_only(value: Option<&JsValue>, door: &str) -> Result<bool, String> {
     let bag = bag(value, door, &["utf16"])?;
     flag(bag.as_ref(), door, "utf16")
+}
+
+/// `{ diagnostics?, toc?, utf16?, customMarkers? }` — `parse`, and galley's
+/// `parseText`.
+pub fn parse_text_options(
+    value: Option<&JsValue>,
+    door: &str,
+) -> Result<(wire::ParseOptions, Option<Arc<Extensions>>), String> {
+    let bag = bag(
+        value,
+        door,
+        &["diagnostics", "toc", "utf16", "customMarkers"],
+    )?;
+    Ok((
+        wire::ParseOptions {
+            diagnostics: flag(bag.as_ref(), door, "diagnostics")?,
+            toc: flag(bag.as_ref(), door, "toc")?,
+            utf16: flag(bag.as_ref(), door, "utf16")?,
+        },
+        custom_markers(bag.as_ref(), door)?,
+    ))
+}
+
+/// `{ utf16?, customMarkers? }` — `resolve`, and galley's `resolveOf`.
+pub fn resolve_text_options(
+    value: Option<&JsValue>,
+    door: &str,
+) -> Result<(bool, Option<Arc<Extensions>>), String> {
+    let bag = bag(value, door, &["utf16", "customMarkers"])?;
+    Ok((
+        flag(bag.as_ref(), door, "utf16")?,
+        custom_markers(bag.as_ref(), door)?,
+    ))
+}
+
+/// `{ customMarkers? }` — the doors whose only option is the list they lex by.
+pub fn lex_options(value: Option<&JsValue>, door: &str) -> Result<Option<Arc<Extensions>>, String> {
+    let bag = bag(value, door, &["customMarkers"])?;
+    custom_markers(bag.as_ref(), door)
+}
+
+/// `{ relaxZPrefix? }` — `setCustomMarkers` and `new CustomMarkers`.
+pub fn custom_marker_options(
+    value: Option<&JsValue>,
+    door: &str,
+) -> Result<ExtensionOptions, String> {
+    let bag = bag(value, door, &["relaxZPrefix"])?;
+    Ok(ExtensionOptions {
+        relax_z_prefix: flag(bag.as_ref(), door, "relaxZPrefix")?,
+    })
+}
+
+/// The `customMarkers` key off a checked bag: the list its handle holds, or
+/// `None` when absent.
+///
+/// Read through the handle's `__handoff` getter, which answers a second
+/// handle on the same list: converting the caller's own would free it.
+pub fn custom_markers(
+    bag: Option<&JsValue>,
+    door: &str,
+) -> Result<Option<Arc<Extensions>>, String> {
+    let Some(value) = get(bag, "customMarkers") else {
+        return Ok(None);
+    };
+    let refused = || format!("{door}: customMarkers must be a live CustomMarkers");
+    let handed = Reflect::get(&value, &JsValue::from_str("__handoff")).map_err(|_| refused())?;
+    CustomMarkers::try_from_js_value(handed)
+        .map(|markers| Some(Arc::clone(markers.list())))
+        .map_err(|_| refused())
+}
+
+/// The list a door lexes by: the one it was given, or the installed one.
+pub fn or_installed(markers: Option<Arc<Extensions>>) -> Arc<Extensions> {
+    markers.unwrap_or_else(usfm_onion::extensions::current)
 }
 
 /// `a`, `a or b`, `a, b or c` — the keys a refusal lists.

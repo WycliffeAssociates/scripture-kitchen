@@ -57,6 +57,7 @@ pub struct Extensions {
     declared: Vec<CustomMarker>,
     /// Some registered name lacks the `z`, so a spec miss asks the registry.
     legacy: bool,
+    fingerprint: u64,
 }
 
 /// How a list is judged.
@@ -112,7 +113,16 @@ impl Extensions {
             }
             out.declared.push(marker.clone());
         }
+        out.fingerprint = fingerprint(&out.declared);
         (out, reports)
+    }
+
+    /// Equal for two lists that declare the same names under the same
+    /// categories, in any order; 0 for a list that declares nothing. A cache
+    /// keyed on content keys on this too, since the same bytes lex differently
+    /// under two lists.
+    pub fn fingerprint(&self) -> u64 {
+        self.fingerprint
     }
 
     /// The list as declared, in order, including the two categories that
@@ -181,6 +191,25 @@ impl Extensions {
             UNRESOLVED
         }
     }
+}
+
+fn fingerprint(declared: &[CustomMarker]) -> u64 {
+    if declared.is_empty() {
+        return 0;
+    }
+    let mut pairs: Vec<(&str, &str)> = declared
+        .iter()
+        .map(|marker| (marker.name.as_str(), marker.category.as_str()))
+        .collect();
+    pairs.sort_unstable();
+    let mut bytes = Vec::new();
+    for (name, category) in pairs {
+        bytes.extend_from_slice(name.as_bytes());
+        bytes.push(0);
+        bytes.extend_from_slice(category.as_bytes());
+        bytes.push(0);
+    }
+    xxhash_rust::xxh3::xxh3_64(&bytes)
 }
 
 /// Why a legacy name cannot be registered: the spec table already resolves
@@ -493,6 +522,26 @@ mod tests {
             generated::template_for(ExtensionCategory::Char),
             "the first definition stands, as a char"
         );
+    }
+
+    #[test]
+    fn equal_lists_share_a_fingerprint_and_different_ones_do_not() {
+        let char_then_note = registry(&[
+            ("zfoo", ExtensionCategory::Char),
+            ("zbar", ExtensionCategory::Footnote),
+        ]);
+        let note_then_char = registry(&[
+            ("zbar", ExtensionCategory::Footnote),
+            ("zfoo", ExtensionCategory::Char),
+        ]);
+        let para = registry(&[
+            ("zfoo", ExtensionCategory::VersePara),
+            ("zbar", ExtensionCategory::Footnote),
+        ]);
+        assert_eq!(char_then_note.fingerprint(), note_then_char.fingerprint());
+        assert_ne!(char_then_note.fingerprint(), para.fingerprint());
+        assert_eq!(Extensions::default().fingerprint(), 0);
+        assert_ne!(char_then_note.fingerprint(), 0);
     }
 
     /// A legacy name registers only when asked for, and only where the spec

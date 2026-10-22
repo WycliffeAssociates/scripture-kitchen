@@ -584,6 +584,7 @@ fn options_are_total() {
                         marker_ws_at_line_start: bits & 64 != 0,
                         dedupe_verse_number: bits & 128 != 0,
                         bridge_empty_verses: bits & 256 != 0,
+                        custom_markers: None,
                     };
                     for fixture in FIXTURES {
                         // `formatted` proves the transaction valid (a debug

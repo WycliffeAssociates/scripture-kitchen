@@ -32,9 +32,10 @@
 //! types and borrows the source; plating exists only to cross a boundary.
 
 use crate::cst::Cst;
+use crate::extensions::Extensions;
 use crate::lint::{LintReport, NO_FIX, NO_TOKEN};
 use crate::toc::Toc;
-use crate::{Token, lex};
+use crate::{Token, lex_with};
 
 pub mod emit;
 pub mod generated;
@@ -117,7 +118,12 @@ impl<'a> Parsed<'a> {
 /// The tree is unconditional: it is the product, and every optional read either
 /// needs it or is cheap enough not to gate.
 pub fn parse(source: &str, opts: ParseOptions) -> Parsed<'_> {
-    let tokens = lex(source);
+    parse_with(source, opts, &crate::extensions::current())
+}
+
+/// [`parse`] lexing by `ext` rather than the installed list.
+pub fn parse_with<'s>(source: &'s str, opts: ParseOptions, ext: &Extensions) -> Parsed<'s> {
+    let tokens = lex_with(source, ext);
     let cst = crate::cst::build(&tokens);
     let lint = opts
         .diagnostics

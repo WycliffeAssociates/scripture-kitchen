@@ -12,7 +12,8 @@ use core::ops::Range;
 
 pub use mise::address::{Address, Point};
 
-use crate::scanner::lex;
+use crate::extensions::Extensions;
+use crate::scanner::lex_with;
 use crate::tables::generated::{self, MarkerIdx};
 use crate::tables::schema::{Category, MarkerKind};
 use crate::toc::{ChapterRow, Toc, VerseAnchor, VerseMember};
@@ -54,9 +55,15 @@ pub struct Candidate {
 impl Toc {
     /// `source` is the text this `Toc` was built from.
     pub fn resolve(&self, source: &str, address: &Address) -> Resolution {
+        self.resolve_with(source, address, &crate::extensions::current())
+    }
+
+    /// [`resolve`](Self::resolve) lexing by `ext` rather than the installed
+    /// list.
+    pub fn resolve_with(&self, source: &str, address: &Address, ext: &Extensions) -> Resolution {
         match address {
             Address::Verses { from, to } => self
-                .verses_span(source, from, to)
+                .verses_span(source, from, to, ext)
                 .unwrap_or_else(|refusal| refusal),
             _ => self.resolve_rows(address).expect("not a verse address"),
         }
@@ -92,9 +99,9 @@ impl Toc {
         Ok(found(span, address.clone(), false))
     }
 
-    fn verses_span(&self, source: &str, from: &Point, to: &Point) -> Answer {
-        let (first, first_coarser) = self.one_verse(source, from)?;
-        let (last, last_coarser) = self.one_verse(source, to)?;
+    fn verses_span(&self, source: &str, from: &Point, to: &Point, ext: &Extensions) -> Answer {
+        let (first, first_coarser) = self.one_verse(source, from, ext)?;
+        let (last, last_coarser) = self.one_verse(source, to, ext)?;
         let span = first.start.min(last.start)..first.end.max(last.end);
         let covered = self.addresses_covering(source, &span);
         let covers = match (covered.first(), covered.last()) {
@@ -125,7 +132,7 @@ impl Toc {
             },
         };
         Ok(Resolution::Found {
-            opening: self.opening(source, span.start),
+            opening: self.opening(source, span.start, ext),
             span,
             covers,
             coarser: first_coarser || last_coarser,
@@ -156,7 +163,12 @@ impl Toc {
 
     /// Where one point is: the one unit covering it, or, for a whole verse the
     /// text divides into segments, its first segment to its last.
-    fn one_verse(&self, source: &str, point: &Point) -> Result<(Range<u32>, bool), Resolution> {
+    fn one_verse(
+        &self,
+        source: &str,
+        point: &Point,
+        ext: &Extensions,
+    ) -> Result<(Range<u32>, bool), Resolution> {
         let chapter = self.one_chapter(point.chapter)?;
         let mut whole = Vec::new();
         let mut parts = Vec::new();
@@ -180,7 +192,7 @@ impl Toc {
                 spans
                     .into_iter()
                     .map(|span| Candidate {
-                        opening: self.opening(source, span.start),
+                        opening: self.opening(source, span.start, ext),
                         span,
                     })
                     .collect(),
@@ -349,7 +361,7 @@ impl Toc {
     /// Where the run of openers before the `\v` at `at` starts, walking back
     /// no further than the previous `\v` or the chapter's `\c`. Only that
     /// window is lexed.
-    fn opening(&self, source: &str, at: u32) -> u32 {
+    fn opening(&self, source: &str, at: u32, ext: &Extensions) -> u32 {
         let chapter = &self.chapters[self.chapter_row(at)];
         let before = self.verses.partition_point(|v| v.at < at);
         let low = before
@@ -360,7 +372,7 @@ impl Toc {
         let window = &source[low as usize..at as usize];
         let mut opening = at;
         let mut pending_text = false;
-        for token in lex(window).iter().rev() {
+        for token in lex_with(window, ext).iter().rev() {
             let bytes = &window.as_bytes()[token.start as usize..token.end() as usize];
             let role = match token.kind() {
                 TokenKind::Marker { nested: false } => opener(token.marker_idx),

@@ -19,7 +19,10 @@
 //! COMPILE error where a missing corpus should be a skip.
 
 use js_sys::{Object, Reflect};
-use onion_wasm::{FormatOpts, attr_resolve, attrs, format_edits, format_edits_in, parse, to_utf16};
+use onion_wasm::{
+    CustomMarkers, FormatOpts, attr_resolve, attrs, format, format_edits, format_edits_in, mask,
+    parse, to_utf16,
+};
 use usfm_onion::wire;
 use wasm_bindgen::JsValue;
 use wasm_bindgen_test::*;
@@ -249,4 +252,65 @@ fn an_unknown_option_is_refused_by_name() {
     let wrong_type = onion_wasm::options::parse_options(Some(&JsValue::from_f64(1.0)), "parse")
         .expect_err("not an object");
     assert!(wrong_type.contains("must be an object"), "{wrong_type}");
+}
+
+/// A handle in an options bag is lent, not taken: the same bag serves call
+/// after call, and the list is the handle's, not the installed one.
+#[wasm_bindgen_test]
+fn a_handle_in_an_options_bag_stays_the_callers() {
+    let text = "\\id GEN\n\\c 1\n\\p \\v 1 Jesus wept\\zmyf + \\ft why\\zmyf*.\n";
+    let mine =
+        CustomMarkers::new(r#"[{"name":"zmyf","category":"footnote"}]"#, None).expect("a list");
+    let handle = JsValue::from(mine);
+    let bag = Object::new();
+    Reflect::set(&bag, &JsValue::from_str("customMarkers"), &handle).expect("a plain object");
+    let bag: JsValue = bag.into();
+    let reading = |opts: Option<JsValue>| {
+        let out = mask(text, "verseText", opts).expect("known options");
+        Reflect::get(&out, &JsValue::from_str("text"))
+            .expect("a text key")
+            .as_string()
+            .expect("a string")
+    };
+    assert!(
+        reading(None).contains("why"),
+        "the installed list knows no zmyf"
+    );
+    assert_eq!(reading(Some(bag.clone())).trim(), "Jesus wept.");
+    assert_eq!(
+        reading(Some(bag.clone())).trim(),
+        "Jesus wept.",
+        "the handle survived"
+    );
+    assert_ne!(
+        parse(text, Some(bag.clone())).expect("known options"),
+        parse(text, None).expect("no options"),
+    );
+
+    let lent =
+        CustomMarkers::new(r#"[{"name":"zmyf","category":"footnote"}]"#, None).expect("a list");
+    let mut opts = FormatOpts::new();
+    opts.set_custom_markers(&lent);
+    drop(lent);
+    assert_eq!(
+        format(text, &opts),
+        format(text, &opts),
+        "the opts keep their own list"
+    );
+
+    let refused = mask(
+        text,
+        "verseText",
+        Some({
+            let wrong = Object::new();
+            Reflect::set(
+                &wrong,
+                &JsValue::from_str("customMarkers"),
+                &JsValue::from_str("zmyf"),
+            )
+            .expect("a plain object");
+            wrong.into()
+        }),
+    );
+    assert!(refused.is_err(), "a string is not a handle");
 }

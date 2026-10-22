@@ -715,14 +715,15 @@ if (corpus && existsSync(corpus)) {
 
 {
   const EXPORTS = [
+    "CustomMarkers",
     "Edits",
     "FormatOpts",
     "Splices",
     "attrResolve",
     "attrs",
     "book",
+    "customMarkersFromMarkersExt",
     "diff",
-    "extensionsFromMarkersExt",
     "format",
     "formatEdits",
     "formatEditsIn",
@@ -732,7 +733,7 @@ if (corpus && existsSync(corpus)) {
     "mergeSplices",
     "parse",
     "resolve",
-    "setExtensions",
+    "setCustomMarkers",
     "toByte",
     "toUtf16",
     "xxh3",
@@ -741,6 +742,66 @@ if (corpus && existsSync(corpus)) {
   // A CommonJS build's `module.exports` arrives as `default`.
   const exported = Object.keys(doors.default ?? doors).filter((name) => name !== "default").sort();
   eq(exported.join(" "), EXPORTS.join(" "), "the module exports exactly the door list");
+}
+
+// --- custom markers: a handle per project, the installed list otherwise ------
+//
+// The same bytes, read three ways: by the handle that declares `\zmyf` a
+// footnote, by an installed list that declares it a paragraph, and by that
+// installed list again once the handle is left out.
+{
+  const { CustomMarkers, setCustomMarkers, customMarkersFromMarkersExt, locate, book } = doors;
+  const text = "\\id GEN\n\\c 1\n\\p \\v 1 Jesus wept\\zmyf + \\ft why\\zmyf*.\n";
+  const read = JSON.parse(customMarkersFromMarkersExt("\\marker zmyf\n\\category footnote\n"));
+  const mine = new CustomMarkers(JSON.stringify(read.markers));
+  eq(mine.malformed, "[]", "a clean list reports nothing");
+  const opts = { customMarkers: mine };
+  const verseText = (o) => rawMask(text, "verseText", o).text.trim();
+
+  check(verseText().includes("why"), "nothing installed: the note's prose is verse text");
+  eq(verseText(opts), "Jesus wept.", "the handle's list drops the note");
+  eq(setCustomMarkers('[{"name":"zmyf","category":"versepara"}]'), "[]", "a different list installed");
+  try {
+    eq(verseText(opts), "Jesus wept.", "the handle ignores the installed list");
+    check(verseText().includes("why"), "no handle reads by the installed list");
+    const dish = (o) => Buffer.from(rawParse(text, o)).toString("hex");
+    check(dish(opts) !== dish(), "parse lexes by the handle");
+    check(dish({ ...opts, toc: true }) !== dish({ toc: true }), "…alongside the other keys");
+    eq(locate(text, 20, opts), "GEN 1:1", "locate takes the handle");
+    eq(book(text, opts), "GEN", "book takes the handle");
+    const verse = { kind: "verses", from: { chapter: 1, verse: 1 }, to: { chapter: 1, verse: 1 } };
+    check(JSON.parse(resolveIn(text, verse, opts)).found, "resolve takes the handle");
+    const changed = text.replace("wept", "cried");
+    check(JSON.parse(rawDiff(text, changed, { text: "none", customMarkers: mine })).units.length > 0,
+      "diff takes the handle");
+    eq(doors.merge(text, changed, "{}", "current", opts), changed, "merge takes the handle");
+    const formatOpts = new doors.FormatOpts();
+    formatOpts.setCustomMarkers(mine);
+    eq(typeof doors.format(text, formatOpts), "string", "FormatOpts takes the handle");
+  } finally {
+    setCustomMarkers("[]");
+  }
+
+  // Lent, never taken: the handle served every call above and still does.
+  eq(verseText(opts), "Jesus wept.", "the handle is still the caller's");
+  let refused = "";
+  try {
+    rawMask(text, "verseText", { customMarkers: "zmyf" });
+  } catch (error) {
+    refused = String(error.message ?? error);
+  }
+  check(refused.includes("customMarkers must be a live CustomMarkers"), `a string is refused: ${refused}`);
+  const legacy = new CustomMarkers('[{"name":"s5","category":"standalone"}]', { relaxZPrefix: true });
+  eq(legacy.malformed, "[]", "CustomMarkerOptions reach the constructor");
+  mine.free();
+  legacy.free();
+  refused = "";
+  try {
+    rawMask(text, "verseText", opts);
+  } catch (error) {
+    refused = String(error.message ?? error);
+  }
+  check(refused.length > 0, "a freed handle is refused, not read as the installed list");
 }
 
 // --- resolve: an address to its place in one text ----------------------------
