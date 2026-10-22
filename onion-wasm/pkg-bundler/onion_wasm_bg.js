@@ -436,7 +436,8 @@ export function book(text, opts) {
  * a name that is not `z`-initial, an unknown category word, a duplicate. A
  * bad entry costs only itself. Installs nothing.
  *
- * Throws when `list` is not an array of `{ name, category }` strings, or
+ * Throws when `list` is not an array of `{ name, category }` strings (with
+ * an optional string `description` and string-array `attributes`), or
  * `opts` is not `CustomMarkerOptions`.
  * @param {readonly CustomMarker[]} list
  * @param {CustomMarkerOptions} [opts]

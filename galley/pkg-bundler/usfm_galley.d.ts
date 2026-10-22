@@ -12,6 +12,10 @@ export type CustomMarkerCategory =
 export interface CustomMarker {
     name: string;
     category: CustomMarkerCategory;
+    /** The `markers.ext` description; shown, never lexed by. */
+    description?: string;
+    /** The attribute names `markers.ext` lists; shown, never lexed by. */
+    attributes?: readonly string[];
 }
 
 /** An entry a list could not keep. `line` only where a file gave one. */
@@ -784,7 +788,8 @@ export function book(text: string, opts?: LexOptions): string;
  * a name that is not `z`-initial, an unknown category word, a duplicate. A
  * bad entry costs only itself. Installs nothing.
  *
- * Throws when `list` is not an array of `{ name, category }` strings, or
+ * Throws when `list` is not an array of `{ name, category }` strings (with
+ * an optional string `description` and string-array `attributes`), or
  * `opts` is not `CustomMarkerOptions`.
  */
 export function customMarkers(list: readonly CustomMarker[], opts?: CustomMarkerOptions): CustomMarkers;
