@@ -120,18 +120,17 @@ no-op: `Retain` is part of what the Pantry serves a book from, the same way
 ## Each book's own custom markers: `{ customMarkers }`
 
 A main text and its reference texts may come from projects whose `markers.ext`
-lists differ. Each project's list is parsed once into a `CustomMarkers`
-handle, and each book is registered with its own:
+lists differ. Each project's list is judged once into a `CustomMarkers`
+object, and each book is registered with its own:
 
 ```js
-const mine = new CustomMarkers(JSON.stringify(myMarkers));
-const theirs = new CustomMarkers(JSON.stringify(refMarkers));
+const mine = customMarkersFromMarkersExt(myMarkersExt);
+const theirs = customMarkers([{ name: "zfoo", category: "char" }]);
 
 galley.update("books/MRK.usfm", text, { customMarkers: mine });
 galley.updateReference("ref/MRK.usfm", refText, { keepText: true, customMarkers: theirs });
 galley.resolveOf(refText, verse, { customMarkers: theirs });   // and parseText, maskOf,
 galley.verseTextOf(refText, { customMarkers: theirs });        // structureTextOf
-mine.free();                                                   // MRK keeps its list
 ```
 
 A registered book lexes by the list it was registered with until it is
@@ -145,8 +144,9 @@ re-derives that book alone.
 
 A book registered without `customMarkers` lexes by the list
 `setCustomMarkers` installed, and is re-derived when that list changes; a book
-with its own list never is. The handle is lent, never taken: one handle serves
-any number of calls, and `free()` drops only the handle.
+with its own list never is. `CustomMarkers` is plain data with nothing to
+free: the same object serves any number of calls, every door checks its shape,
+and equal lists resolve once and share one registry.
 
 ## Dirty and rework
 
@@ -178,7 +178,7 @@ names and signatures — the same shims its package ships, not wrappers:
 ```js
 import { parse, mask, format, formatEdits, formatEditsIn, FormatOpts, Edits,
          diff, merge, mergeSplices, Splices, toByte, toUtf16, locate, attrs,
-         attrResolve, book, setCustomMarkers, CustomMarkers,
+         attrResolve, book, setCustomMarkers, customMarkers,
          customMarkersFromMarkersExt, xxh3, xxh3Text } from "usfm-galley";
 ```
 
@@ -190,8 +190,8 @@ where something wants them. `tests/sous_conformance.mjs` therefore asserts the
 EXACT export list, not a subset, and prints it:
 
 ```text
-exports (26): CustomMarkers Edits Fingerprint FormatOpts Galley SousSettings Splices
-              attrResolve attrs book customMarkersFromMarkersExt diff format
+exports (26): Edits Fingerprint FormatOpts Galley SousSettings Splices attrResolve
+              attrs book customMarkers customMarkersFromMarkersExt diff format
               formatEdits formatEditsIn locate mask merge mergeSplices parse resolve
               setCustomMarkers toByte toUtf16 xxh3 xxh3Text
 ```
@@ -222,16 +222,19 @@ bytes given, so a CRLF file does not match its LF-normalized `sourceHash`;
 hash the form you key on. It detects change and is not cryptographic, so it is
 no defence against a file altered on purpose.
 
-## User `\z` markers: `setCustomMarkers` and `customMarkersFromMarkersExt`
+## User `\z` markers: `customMarkers`, `customMarkersFromMarkersExt`, `setCustomMarkers`
 
 ```js
-const { markers, malformed } = JSON.parse(customMarkersFromMarkersExt(fileText));
-for (const { line, name, reason } of malformed) show(line, name, reason);
-setCustomMarkers(JSON.stringify(markers));       // → "[]" when all installed
-setCustomMarkers("[]");                          // clears
+const mine = customMarkersFromMarkersExt(fileText);
+// → { markers: [{ name: "zmyf", category: "footnote" }],
+//     relaxZPrefix: false,
+//     malformed: [{ name: "bad", reason: "name does not start with z", line: 4 }] }
+for (const { line, name, reason } of mine.malformed) show(line, name, reason);
+setCustomMarkers(mine);                          // installs mine.markers
+setCustomMarkers(customMarkers([]));             // clears
 
 // Legacy markup a host cannot change: en_ulb's chunk marker as a bare point.
-setCustomMarkers('[{"name":"s5","category":"standalone"}]', { relaxZPrefix: true });
+setCustomMarkers(customMarkers([{ name: "s5", category: "standalone" }], { relaxZPrefix: true }));
 //   \p \v 1 a \s5 \v 3 b   → one paragraph; no unknown-marker, no missing-paragraph
 ```
 
@@ -242,11 +245,11 @@ lint contexts, the mask treatment, the export shape — because the engine
 resolves it to the row that category behaves as. Unregistered, a `\z` marker
 is what it has always been: row 0, and `unknown-marker`.
 
-Two doors, not one. Reading a file INSTALLS NOTHING, so a host can show what it
-found first, and a host whose markers come from a `custom.sty` or from its own
-UI feeds `setCustomMarkers` the list directly. The list's shape is
-`{ name, category, attributes?, description? }`; `category` is one of the
-spec's nineteen words.
+Judging and installing are separate doors. Reading a file INSTALLS NOTHING, so
+a host can show what it found first, and a host whose markers come from a
+`custom.sty` or from its own UI hands `customMarkers` the list directly. An
+entry is `{ name, category }`; `category` is one of the spec's nineteen words,
+the `CustomMarkerCategory` union.
 
 **`standalone` is the spec's "bare milestone with no attributes or
 delimiter"**: it opens nothing, closes nothing, carries no text and is never
@@ -259,10 +262,13 @@ does (`\s` stops at level 4); `s1` or `p` comes back as a report, because a
 legacy name can add a marker and never redefine one. A `markers.ext` file is
 still `z`-only.
 
-Reports are VALUES, never failures: one bad entry costs one entry. A file
-report carries the `line` it came from; a list report has no `line` key at all,
-rather than a zero standing in for one. Only malformed JSON, or an options
-value that is not `{ relaxZPrefix?: boolean }`, throws.
+Reports are VALUES, never failures: one bad entry costs one entry and lands in
+`malformed`. A file report carries the `line` it came from; a list report has
+no `line` key at all, rather than a zero standing in for one. Only a list that
+is not an array of `{ name, category }` strings, or an options value that is
+not `{ relaxZPrefix?: boolean }`, throws. A door handed a `CustomMarkers`
+object throws instead on any entry it would not keep, since `markers` holds
+only kept entries.
 
 **Installing re-derives every book registered without its own list**, on the
 next door a resident `Galley` is asked through — the same bytes are a

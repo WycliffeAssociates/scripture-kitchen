@@ -61,7 +61,6 @@ const sameBytes = (a, b) => a.length === b.length && a.every((byte, at) => byte 
 // The list, not a subset: onion-wasm's shims arrive because galley's cdylib
 // links the object they sit in, and a dropped door is otherwise silent.
 const EXPORTS = [
-  "CustomMarkers",
   "Edits",
   "Fingerprint",
   "FormatOpts",
@@ -71,6 +70,7 @@ const EXPORTS = [
   "attrResolve",
   "attrs",
   "book",
+  "customMarkers",
   "customMarkersFromMarkersExt",
   "diff",
   "format",
@@ -102,15 +102,14 @@ eq(doors.toUtf16("\\v 1 a\u{1F600}b", 10), 8, "toUtf16 counts the surrogate pair
 // exercised HERE, through galley's own module, not only in onion's
 // conformance.
 {
-  const read = JSON.parse(
-    doors.customMarkersFromMarkersExt(
-      "\\marker zmyf\n\\category footnote\n\\description A note.\n" +
-        "\\marker bad\n\\category char\n",
-    ),
+  const read = doors.customMarkersFromMarkersExt(
+    "\\marker zmyf\n\\category footnote\n\\description A note.\n" +
+      "\\marker bad\n\\category char\n",
   );
   eq(read.markers.length, 1, "one marker kept");
   eq(read.markers[0].name, "zmyf", "…named as the file spells it");
   eq(read.markers[0].category, "footnote", "…with the spec's own category word");
+  eq(read.relaxZPrefix, false, "a file is strict");
   eq(read.malformed.length, 1, "and one entry refused");
   eq(read.malformed[0].line, 4, "a file report carries its line");
   eq(read.malformed[0].reason, "name does not start with z", "…and why");
@@ -123,41 +122,44 @@ eq(doors.toUtf16("\\v 1 a\u{1F600}b", 10), 8, "toUtf16 counts the surrogate pair
   const reading = () => doors.mask(book, "verseText").text.trim();
   check(reading().includes("why"), "reading a file installs nothing");
 
-  eq(doors.setCustomMarkers(JSON.stringify(read.markers)), "[]", "a clean list reports nothing");
+  eq(doors.setCustomMarkers(read), undefined, "installing answers nothing");
   eq(reading(), "Jesus wept.", "…and the same bytes now read as a footnote");
 
-  // A bad ENTRY is a report, not a failure; malformed JSON throws.
-  const reports = JSON.parse(
-    doors.setCustomMarkers('[{"name":"znope","category":"bogus"},{"name":"nope","category":"char"}]'),
+  // A bad ENTRY is a report on the object, not a failure; a wrong shape throws.
+  const { malformed } = doors.customMarkers([
+    { name: "znope", category: "bogus" },
+    { name: "nope", category: "char" },
+  ]);
+  eq(malformed.length, 2, "both entries refused");
+  eq(malformed[0].reason, "unknown category word", "the category is judged at the door");
+  eq(malformed[1].reason, "name does not start with z", "the name is judged by the registry");
+  check(malformed[0].line === undefined, "a list report carries no line, rather than a zero");
+  const throws = (call) => {
+    try {
+      call();
+    } catch (error) {
+      return String(error.message ?? error);
+    }
+    return "";
+  };
+  check(throws(() => doors.customMarkers("[]")).length > 0, "a list that is not an array throws");
+  check(
+    throws(() => doors.setCustomMarkers({ markers: [{ name: "nope", category: "char" }], relaxZPrefix: false }))
+      .includes("setCustomMarkers"),
+    "an entry the registry refuses is never installed",
   );
-  eq(reports.length, 2, "both entries refused");
-  eq(reports[0].reason, "unknown category word", "the category is judged at the door");
-  eq(reports[1].reason, "name does not start with z", "the name is judged by the registry");
-  check(reports[0].line === undefined, "a list report carries no line, rather than a zero");
-  let threw = false;
-  try {
-    doors.setCustomMarkers("{");
-  } catch {
-    threw = true;
-  }
-  check(threw, "malformed JSON throws");
 
   // A legacy name needs the named option, and never lands on a spec marker.
-  const legacy = '[{"name":"s5","category":"standalone"},{"name":"s1","category":"standalone"}]';
-  eq(JSON.parse(doors.setCustomMarkers(legacy))[0].reason, "name does not start with z", "strict by default");
-  const relaxed = JSON.parse(doors.setCustomMarkers(legacy, { relaxZPrefix: true }));
-  eq(relaxed.length, 1, "only the spec name is refused");
-  eq(relaxed[0].name, "s1", "…and it is s1");
-  threw = false;
-  try {
-    doors.setCustomMarkers("[]", { relaxZPrefix: "yes" });
-  } catch {
-    threw = true;
-  }
-  check(threw, "a non-boolean relaxZPrefix throws");
+  const legacy = [{ name: "s5", category: "standalone" }, { name: "s1", category: "standalone" }];
+  eq(doors.customMarkers(legacy).malformed[0].reason, "name does not start with z", "strict by default");
+  const relaxed = doors.customMarkers(legacy, { relaxZPrefix: true });
+  eq(relaxed.malformed.length, 1, "only the spec name is refused");
+  eq(relaxed.malformed[0].name, "s1", "…and it is s1");
+  eq(relaxed.relaxZPrefix, true, "the option rides on the object");
+  check(throws(() => doors.customMarkers([], { relaxZPrefix: "yes" })).length > 0, "a non-boolean relaxZPrefix throws");
 
   // Clear, so nothing below this block sees a registry it did not install.
-  eq(doors.setCustomMarkers("[]"), "[]", "an empty list clears");
+  doors.setCustomMarkers(doors.customMarkers([]));
   check(reading().includes("why"), "cleared");
 }
 
@@ -165,16 +167,16 @@ eq(doors.toUtf16("\\v 1 a\u{1F600}b", 10), 8, "toUtf16 counts the surrogate pair
 //
 // One Galley holds a main text and a reference text whose projects declare
 // `\zfoo` differently. Neither registration reaches the other book, the
-// installed list reaches only a book registered without a list, and freeing
-// a handle leaves the book it registered its list.
+// installed list reaches only a book registered without a list, and an equal
+// list built apart is the same list.
 {
-  const { CustomMarkers, setCustomMarkers } = doors;
+  const { customMarkers, setCustomMarkers } = doors;
   const body = (code) =>
     `\\id ${code}\n\\c 1\n\\p\n\\v 1 Jesus wept\\zfoo + \\ft why\\zfoo*.\n` +
     "\\c 2\n\\p\n\\v 1 Again.\n\\c 3\n\\p\n\\v 1 Third.\n";
-  const footnote = new CustomMarkers('[{"name":"zfoo","category":"footnote"}]');
-  const charSpan = new CustomMarkers('[{"name":"zfoo","category":"char"}]');
-  eq(footnote.malformed, "[]", "a clean list reports nothing");
+  const footnote = customMarkers([{ name: "zfoo", category: "footnote" }]);
+  const charSpan = customMarkers([{ name: "zfoo", category: "char" }]);
+  eq(footnote.malformed.length, 0, "a clean list reports nothing");
   const g = new Galley();
   g.update("books/MRK.usfm", body("MRK"), { customMarkers: footnote });
   g.updateReference("ref/MRK.usfm", body("MRK"), { keepText: true, customMarkers: charSpan });
@@ -196,39 +198,42 @@ eq(doors.toUtf16("\\v 1 a\u{1F600}b", 10), 8, "toUtf16 counts the surrogate pair
   g.update("books/MRK.usfm", body("MRK"), { customMarkers: charSpan });
   check(g.verseText("books/MRK.usfm").includes("why"), "re-registering under another list re-derives the book");
   g.update("books/MRK.usfm", body("MRK"), { customMarkers: footnote });
+  check(sameBytes(g.parse("books/MRK.usfm"), mainDish), "back under its own list");
+
+  misses = g.misses();
+  const byHand = { markers: [{ category: "footnote", name: "zfoo" }], relaxZPrefix: false, malformed: [] };
+  g.update("books/MRK.usfm", body("MRK"), { customMarkers: byHand });
+  check(sameBytes(g.parse("books/MRK.usfm"), mainDish), "an equal list, built by hand, reads the same");
+  eq(g.misses(), misses, "…and shares its warm chunks");
 
   g.update("books/JHN.usfm", body("JHN"));
   check(g.verseText("books/JHN.usfm").includes("why"), "no customMarkers: the installed list, empty");
-  eq(setCustomMarkers('[{"name":"zfoo","category":"footnote"}]'), "[]", "a list installed");
+  setCustomMarkers(footnote);
   try {
     check(!g.verseText("books/JHN.usfm").includes("why"), "the book without a list follows setCustomMarkers");
     check(g.verseText("ref/MRK.usfm").includes("why"), "a book with its own list does not");
     check(sameBytes(g.parse("books/MRK.usfm"), mainDish), "…nor does the main text");
   } finally {
-    setCustomMarkers("[]");
+    setCustomMarkers(customMarkers([]));
   }
   check(g.verseText("books/JHN.usfm").includes("why"), "cleared, and followed again");
-
-  footnote.free();
-  charSpan.free();
-  check(!g.verseText("books/MRK.usfm").includes("why"), "freeing the handle leaves the book its list");
-  check(sameBytes(g.parse("books/MRK.usfm"), mainDish), "…and its parse");
+  check(sameBytes(g.parse("books/MRK.usfm"), mainDish), "the main text kept its list throughout");
   check(g.publish().length > 0, "the corpus still publishes");
 
   // The text doors take the same option, over a reference text nobody registered.
-  const theirs = new CustomMarkers('[{"name":"zfoo","category":"footnote"}]');
+  const theirs = customMarkers([{ name: "zfoo", category: "footnote" }]);
   const loose = body("LUK");
   const opts = { customMarkers: theirs };
   check(g.verseTextOf(loose).includes("why"), "verseTextOf without a list: the installed one");
-  check(!g.verseTextOf(loose, opts).includes("why"), "verseTextOf by the handle's list");
-  check(!g.structureTextOf(loose, opts).includes("why"), "structureTextOf by the handle's list");
-  check(!sameBytes(g.parseText(loose, opts), g.parseText(loose)), "parseText by the handle's list");
+  check(!g.verseTextOf(loose, opts).includes("why"), "verseTextOf by the list");
+  check(!g.structureTextOf(loose, opts).includes("why"), "structureTextOf by the list");
+  check(!sameBytes(g.parseText(loose, opts), g.parseText(loose)), "parseText by the list");
   check(
     !sameBytes(g.maskOf(loose, { recipe: "text", customMarkers: theirs }), g.maskOf(loose, { recipe: "text" })),
-    "maskOf by the handle's list",
+    "maskOf by the list",
   );
   const verse = { kind: "verses", from: { chapter: 1, verse: 1 }, to: { chapter: 1, verse: 1 } };
-  check(JSON.parse(g.resolveOf(loose, verse, { utf16: true, ...opts })).found, "resolveOf takes the handle");
+  check(JSON.parse(g.resolveOf(loose, verse, { utf16: true, ...opts })).found, "resolveOf takes the list");
   let refused = "";
   try {
     g.parse("books/MRK.usfm", opts);
@@ -236,7 +241,6 @@ eq(doors.toUtf16("\\v 1 a\u{1F600}b", 10), 8, "toUtf16 counts the surrogate pair
     refused = String(error.message ?? error);
   }
   check(refused.includes('unknown option "customMarkers"'), `a registered book's door refuses a list: ${refused}`);
-  theirs.free();
   g.free();
 }
 

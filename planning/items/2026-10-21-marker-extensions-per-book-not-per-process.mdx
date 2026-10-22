@@ -21,11 +21,12 @@ Will, 2026-10-21: Sefer puts reference texts next to main texts. Kept separate f
 
 A main text and its reference texts, from projects with different `markers.ext`, on one page and one `Galley`, each parsing its `\z` markers by its own project's list, and no registration flushing another book's caches.
 
-```js
-import { Galley, CustomMarkers } from "@…/galley";
+```ts
+import { Galley, customMarkers, customMarkersFromMarkersExt, type CustomMarkers } from "@…/galley";
 
-const mine = new CustomMarkers(myMarkers);       // parsed once
-const theirs = new CustomMarkers(refMarkers);
+const mine: CustomMarkers = customMarkersFromMarkersExt(myMarkersExt);
+const theirs = customMarkers([{ name: "zfoo", category: "char" }]);
+// → { markers: [{ name: "zfoo", category: "char" }], relaxZPrefix: false, malformed: [] }
 
 galley.update("books/MRK.usfm", text, { customMarkers: mine });
 galley.updateReference("ref/MRK.usfm", refText, { customMarkers: theirs });
@@ -39,7 +40,7 @@ The engine already takes the list explicitly: `lex_with(source, &Extensions)` (`
 
 ## What changes
 
-- `CustomMarkers`: a wasm-bindgen class in onion-wasm, re-exported by galley, built once per project with `new CustomMarkers(list)` (the same list `setCustomMarkers` takes, and the same `CustomMarkerOptions`). It holds the parsed list in an `Arc`; a book registered with it keeps a clone and lexes through `lex_with`, so a caller's `free()` drops only the handle, never a book's list. A handle the caller forgets is freed by the `FinalizationRegistry` wasm-bindgen already generates.
+- `CustomMarkers`: a plain object with a branded TypeScript type, `{ markers, relaxZPrefix, malformed }`, made by onion-wasm's `customMarkers(list, opts?)` or `customMarkersFromMarkersExt(text)` and re-exported by galley. `markers` holds the entries kept and `malformed` the ones refused. A door reads `markers` and `relaxZPrefix`, checks the shape, refuses an entry the registry would not keep, and interns the list: equal lists share one `Arc<Extensions>`, which a registered book keeps and lexes through `lex_with`. There is nothing to free.
 - The chunk store keys on content and the book's custom markers, so the same bytes under two lists never share a parse.
 - Re-registering a book with another list re-derives that book alone. The caller holds no generation; the global generation stays only for books on the global list.
 - Every door that parses loose text takes the same optional `customMarkers`: onion-wasm's free doors (`parse`, `mask`, `resolve`, …) and galley's `…Of` doors (`maskOf`, `resolveOf`, `structureTextOf`, `verseTextOf`). Without it they read the global list, as today.
@@ -50,11 +51,13 @@ The JS names that said "extensions" say "custom markers", so one word runs throu
 
 | Now | Becomes |
 |---|---|
-| `setExtensions(list, opts?)` | `setCustomMarkers(list, opts?)` |
-| `extensionsFromMarkersExt(text)` | `customMarkersFromMarkersExt(text)` |
+| `setExtensions(list, opts?)` | `setCustomMarkers(customMarkers(list, opts?))` |
+| `extensionsFromMarkersExt(text)` | `customMarkersFromMarkersExt(text)`, the object rather than JSON |
 | `ExtensionOptions` | `CustomMarkerOptions` |
 
-<Followup id="sefer-rename">Tell Sefer in the release notes: three renames, no change in behaviour.</Followup>
+<Tradeoff id="plain-object" chose="a plain object with a branded type, made by a factory" cost="each door re-reads the list from the object on every call; a table of the last eight lists, keyed by the sorted entries and relaxZPrefix, resolves each list once">A wasm-bindgen class read out of an options bag is consumed: the generated unwrap destroys the caller's object, which needed a hidden getter handing Rust a clone. Will, 2026-10-22: no class.</Tradeoff>
+
+<Followup id="sefer-rename">Tell Sefer in the release notes: three renames; lists are `CustomMarkers` objects from `customMarkers` or `customMarkersFromMarkersExt`, and `setCustomMarkers` takes one and returns nothing, since the reports are on the object.</Followup>
 
 <Question id="free-doors" answer="Yes, 2026-10-22, and galley's `…Of` doors too: `resolveOf` on a reference text is the case this plan exists for, and each door ends at a `lex()` that `lex_with` replaces. Omitted means the global list.">Do onion-wasm's free doors (`parse`, `mask`, `resolve`, …) also take an `extensions` option, or stay on the global list until someone asks?</Question>
 
