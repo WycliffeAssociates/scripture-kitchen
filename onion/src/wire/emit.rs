@@ -16,6 +16,7 @@ use ticket::emit as shared;
 
 use super::schema::{self, SectionKind};
 use crate::attributes::{AttrResolution, MalformedAttr};
+use crate::tables::schema::AttrStatus;
 
 const RS_TEMPLATE: &str = include_str!("generated.rs.tmpl");
 const TS_TEMPLATE: &str = include_str!("../../../onion-wasm/reader.ts.tmpl");
@@ -185,6 +186,17 @@ pub fn enums_ts() -> String {
 
     block(
         &mut out,
+        "What the spec says of one defined attribute — `MARKER_ATTRIBUTES`.",
+        "AttrStatus",
+        &[
+            ("Required", AttrStatus::Required as u32),
+            ("Optional", AttrStatus::Optional as u32),
+            ("Deprecated", AttrStatus::Deprecated as u32),
+        ],
+    );
+
+    block(
+        &mut out,
         "What the marker table says about an attribute name — `attrResolve`.",
         "AttrResolution",
         &[
@@ -289,6 +301,39 @@ pub fn marker_table_ts() -> String {
         ));
     }
     out.push_str("];\n\n");
+
+    out.push_str(&doc_ts(&[
+        "The attributes USFM 3.2 defines, by marker row, for the rows that define",
+        "any: each name with its `AttrStatus`, in spec order, and the one a bare",
+        "value binds to. A `\\z` marker's token carries the row it behaves as, so",
+        "`MARKER_ATTRIBUTES[markerIdx]` covers it too.",
+        "",
+        "  MARKER_ATTRIBUTES[idx]  // { defined: [{ name: \"lemma\", status: 1 }, …], default: \"lemma\" }",
+    ]));
+    out.push_str(
+        "export const MARKER_ATTRIBUTES: Readonly<Record<number, {\n  \
+         readonly defined: readonly { readonly name: string; readonly status: number }[];\n  \
+         readonly default: string | null;\n\
+         }>> = {\n",
+    );
+    for idx in 0..rows::ROWS.len() {
+        let i = idx as generated::MarkerIdx;
+        let defined = generated::defined_attributes(i);
+        if defined.is_empty() {
+            continue;
+        }
+        let names: Vec<String> = defined
+            .iter()
+            .map(|(name, status)| format!("{{ name: {name:?}, status: {} }}", *status as u32))
+            .collect();
+        let default = generated::default_attribute(i)
+            .map_or_else(|| "null".to_string(), |name| format!("{name:?}"));
+        out.push_str(&format!(
+            "  {idx}: {{ defined: [{}], default: {default} }},\n",
+            names.join(", ")
+        ));
+    }
+    out.push_str("};\n\n");
 
     out.push_str(&doc_ts(&[
         "The first extension TEMPLATE row: every index below it is a marker USFM",

@@ -996,6 +996,27 @@ export function attrList(flat: Uint32Array | readonly number[]): AttrList {
   return code === NONE ? { attrs } : { attrs, malformed: { code, at: flat[flat.length - 1] } };
 }
 
+/**
+ * An attribute name against a marker row: an `AttrResolution` code, the same
+ * the wasm `attrResolve` returns, with no wasm call. An empty name is the bare
+ * value, which binds to the row's default.
+ *
+ *   attrResolution("lemma", wIdx)      // AttrResolution.Defined
+ *   attrResolution("x-morph", wIdx)    // AttrResolution.UserNamespace
+ *   attrResolution("", wIdx)           // Defined: \w's default is lemma
+ */
+export function attrResolution(name: string, markerIdx: number): number {
+  const row = MARKER_ATTRIBUTES[markerIdx];
+  const defined = row?.defined ?? [];
+  if (name === "") return row?.default != null ? AttrResolution.Defined : AttrResolution.Unknown;
+  if (defined.some((entry) => entry.name === name)) return AttrResolution.Defined;
+  if (defined.some((entry) => entry.name.endsWith("*") && name.startsWith(entry.name.slice(0, -1)))) {
+    return AttrResolution.Defined;
+  }
+  if (name.startsWith("x-") || name.startsWith("z-")) return AttrResolution.UserNamespace;
+  return AttrResolution.Unknown;
+}
+
 /** What a parse should compute. Everything defaults off except the tree. */
 export interface ParseOptions {
   /** Run the lint walk — the one expensive optional. */

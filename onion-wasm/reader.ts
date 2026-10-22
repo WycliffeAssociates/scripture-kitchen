@@ -217,6 +217,13 @@ export const MalformedAttr = {
   BareJunk: 3,
 } as const;
 
+/** What the spec says of one defined attribute — `MARKER_ATTRIBUTES`. */
+export const AttrStatus = {
+  Required: 0,
+  Optional: 1,
+  Deprecated: 2,
+} as const;
+
 /** What the marker table says about an attribute name — `attrResolve`. */
 export const AttrResolution = {
   Defined: 0,
@@ -935,6 +942,37 @@ export const MARKERS: readonly {
   { name: "zmsbare", kind: 6, category: 23, closing: 0, shape: 1, numbering: 0, ws: 1 },
   { name: "zcell", kind: 12, category: 15, closing: 0, shape: 1, numbering: 15, ws: 6 },
 ];
+
+/**
+ * The attributes USFM 3.2 defines, by marker row, for the rows that define
+ * any: each name with its `AttrStatus`, in spec order, and the one a bare
+ * value binds to. A `\z` marker's token carries the row it behaves as, so
+ * `MARKER_ATTRIBUTES[markerIdx]` covers it too.
+ *
+ *   MARKER_ATTRIBUTES[idx]  // { defined: [{ name: "lemma", status: 1 }, …], default: "lemma" }
+ */
+export const MARKER_ATTRIBUTES: Readonly<Record<number, {
+  readonly defined: readonly { readonly name: string; readonly status: number }[];
+  readonly default: string | null;
+}>> = {
+  24: { defined: [{ name: "src", status: 0 }, { name: "size", status: 0 }, { name: "ref", status: 0 }, { name: "alt", status: 1 }, { name: "loc", status: 1 }, { name: "copy", status: 1 }], default: null },
+  59: { defined: [{ name: "href", status: 1 }, { name: "title", status: 1 }, { name: "id", status: 1 }, { name: "link-href", status: 2 }, { name: "link-title", status: 2 }, { name: "link-id", status: 2 }], default: "href" },
+  66: { defined: [{ name: "sid", status: 1 }, { name: "eid", status: 1 }], default: null },
+  83: { defined: [{ name: "id", status: 1 }], default: null },
+  103: { defined: [{ name: "who", status: 1 }, { name: "sid", status: 1 }, { name: "eid", status: 1 }], default: "who" },
+  106: { defined: [{ name: "gloss", status: 1 }], default: "gloss" },
+  107: { defined: [{ name: "loc", status: 1 }], default: "loc" },
+  119: { defined: [{ name: "a-*", status: 1 }], default: null },
+  120: { defined: [{ name: "sid", status: 1 }, { name: "eid", status: 1 }], default: null },
+  127: { defined: [{ name: "lang", status: 1 }], default: "lang" },
+  131: { defined: [{ name: "sid", status: 1 }, { name: "eid", status: 1 }], default: null },
+  135: { defined: [{ name: "ref", status: 0 }, { name: "h", status: 1 }], default: "ref" },
+  137: { defined: [{ name: "lemma", status: 1 }, { name: "strong", status: 1 }, { name: "srcloc", status: 1 }], default: "lemma" },
+  142: { defined: [{ name: "lang", status: 1 }], default: "lang" },
+  151: { defined: [{ name: "link-href", status: 2 }], default: null },
+  166: { defined: [{ name: "link-href", status: 2 }], default: null },
+  167: { defined: [{ name: "who", status: 1 }, { name: "sid", status: 1 }, { name: "eid", status: 1 }], default: "who" },
+};
 
 /**
  * The first extension TEMPLATE row: every index below it is a marker USFM
@@ -1950,6 +1988,27 @@ export function attrList(flat: Uint32Array | readonly number[]): AttrList {
   }
   const code = flat[flat.length - 2];
   return code === NONE ? { attrs } : { attrs, malformed: { code, at: flat[flat.length - 1] } };
+}
+
+/**
+ * An attribute name against a marker row: an `AttrResolution` code, the same
+ * the wasm `attrResolve` returns, with no wasm call. An empty name is the bare
+ * value, which binds to the row's default.
+ *
+ *   attrResolution("lemma", wIdx)      // AttrResolution.Defined
+ *   attrResolution("x-morph", wIdx)    // AttrResolution.UserNamespace
+ *   attrResolution("", wIdx)           // Defined: \w's default is lemma
+ */
+export function attrResolution(name: string, markerIdx: number): number {
+  const row = MARKER_ATTRIBUTES[markerIdx];
+  const defined = row?.defined ?? [];
+  if (name === "") return row?.default != null ? AttrResolution.Defined : AttrResolution.Unknown;
+  if (defined.some((entry) => entry.name === name)) return AttrResolution.Defined;
+  if (defined.some((entry) => entry.name.endsWith("*") && name.startsWith(entry.name.slice(0, -1)))) {
+    return AttrResolution.Defined;
+  }
+  if (name.startsWith("x-") || name.startsWith("z-")) return AttrResolution.UserNamespace;
+  return AttrResolution.Unknown;
 }
 
 /** What a parse should compute. Everything defaults off except the tree. */

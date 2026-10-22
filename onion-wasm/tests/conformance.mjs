@@ -42,6 +42,8 @@ const {
   StructuralWhitespaceRequirement,
   MalformedAttr,
   AttrResolution,
+  MARKER_ATTRIBUTES,
+  attrResolution,
   attrList,
   NONE,
 } = await import(resolve(here, "../reader.ts"));
@@ -503,6 +505,18 @@ const levelIsSpelled = (doc, tokens, where) => {
   eq(attrResolve("lemma", w), AttrResolution.Defined, "the table knows `lemma`");
   eq(attrResolve("x-strong", w), AttrResolution.UserNamespace, "…and the user namespace");
   eq(attrResolve("nonesuch", w), AttrResolution.Unknown, "…and what it does not know");
+
+  const names = new Set(["", "x-strong", "z-mine", "a-1", "a-", "a", "bogus", "LEMMA", "x", "link-hrefs"]);
+  for (const row of Object.values(MARKER_ATTRIBUTES)) for (const { name } of row.defined) names.add(name);
+  let pairs = 0;
+  for (let idx = 0; idx < MARKERS.length; idx++) {
+    for (const name of names) {
+      eq(attrResolution(name, idx), attrResolve(name, idx), `attrResolution(${JSON.stringify(name)}, ${MARKERS[idx].name || idx}) matches the engine`);
+      pairs++;
+    }
+  }
+  check(pairs > 5000, "every row against every name");
+  eq(MARKER_ATTRIBUTES[w].default, "lemma", "\\w's bare value is its lemma");
 }
 
 // --- forEach agrees with the iterator -------------------------------------
