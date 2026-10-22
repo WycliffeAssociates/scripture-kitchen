@@ -46,9 +46,9 @@ write instead:
 
 | alternative | ids | when |
 | --- | --- | --- |
-| the same marks in another order | `convention.exactNeighbor.swapped`, `convention.runShape` (`swap`) | `;'` beside `';`; across a straight quote only when it faces a known way (`'.` closing beside `.'` closing) |
-| a lookalike | `convention.rarity` (`lookalike`) | `’` beside `'`, from Unicode's `confusables.txt` |
-| the same word in another form | `convention.casing` | `On` beside `on` |
+| the same marks in another order | `convention.exactNeighbor.swapped`, `convention.runShape.swapped` | `;'` beside `';`; across a straight quote only when it faces a known way (`'.` closing beside `.'` closing) |
+| a lookalike | `convention.rarity.lookalike` | `’` beside `'`, from Unicode's `confusables.txt` |
+| the same word in another form | `convention.casing`, `convention.casing.afterMark` | `On` beside `on` |
 
 A SentenceStart row counts what follows the mark, never the word, so its
 headline names the mark's habit and claims nothing about the word: “his” is
@@ -64,15 +64,73 @@ reversed only among runs facing the same way. Under `opening` or `closing`
 the reordering reaches the headline, and the headline names the facing:
 
 ```text
-params    { pair: "'.", reversedPair: ".'", reversed: 974, facing: "closing",
-            glyphKind: "quote", neighborKind: "sentenceEnd", neighborName: "full stop", … }
-en        Here the full stop comes after the closing quote (['.]); this project puts it
-          before the closing quote ([.']) 974 times.
+id        convention.exactNeighbor.swapped
+params    { glyph: "'", neighbor: ".", reversedPair: ".'", reversed: 974, facing: "closing", … }
+en        Here [.] comes after [']; with a closing quote, this project writes [.'] 974 times.
 ```
 
-Under `inside` or `unknown` it stays a plain fact in the details ("This
-project also writes `."`, once"). A group reorders in the headline only when
-the site's group and the usual one share a known facing.
+Under `inside` or `unknown` it stays a plain fact in the details of
+`convention.exactNeighbor.alsoReversed` ("This project also writes `."`,
+once"). A group reorders in the headline, `convention.runShape.swapped`, only
+when the site's group and the usual one share a known facing.
+
+## For translators
+
+Sefer renders this catalog in every language it ships, so every message is
+built to be translated whole.
+
+1. **Whole sentences only.** A tier is plain text with simple arguments
+   (`{word}`, `{count, number}`, `<g>{glyph}</g>`), or exactly one `select`
+   or `plural` with nothing beside it, whose every branch is again a whole
+   message. Translate each branch as its own sentences, and add your
+   language's plural categories (`one`, `few`, `many`) beside `=1` and
+   `other`. `=1` means exactly one ("only here"), not the `one` category.
+2. **Choices in code, sentences in the catalog.** Where branches would
+   multiply, `describe` picks a more specific id, so the id already names the
+   situation (table below) and each entry stays a few sentences.
+3. **No kind's name in a grammatical slot.** A mark is named as itself,
+   `<g>{glyph}</g>`, which does not inflect. A kind of mark or of neighbour
+   (`a quotation mark`, `a letter`) appears only inside a branch written for
+   it, so you inflect it within its own sentence.
+4. **Enforced.** `galley/tests/sous_messages.rs` refuses a choice with text
+   beside it, renders every branch from parameters that reach it, requires
+   each to end a sentence, and caps a tier at sixteen branches.
+
+```text
+catalog   {count, plural, =1 {<g>{glyph}</g> right before <g>{neighbor}</g> appears only here in this project.}
+                        other {<g>{glyph}</g> right before <g>{neighbor}</g> appears only # times in this project.}}
+en        ["] right before [.] appears only 2 times in this project.
+```
+
+`#` is the number only directly inside its own plural; inside a nested
+`select` `intl-messageformat` prints it as `#`, so a nested branch writes
+`{count, number}`.
+
+The ids `describe` splits by situation; every other id is one situation
+("Parameters" lists them all):
+
+| id | situation |
+| --- | --- |
+| `hygiene.control` `.delete` `.replacement` `.carriageReturn` `.backslash` `.conflict` `.combiningMark` `.format` `.noBreakSpace` `.noncharacter` | one id per class; the headline chooses by `where`, the details by `fix` and `run` |
+| `hygiene.unidentified` | the site text does not show which character it is, so the headline names the class alone |
+| `convention.exactNeighbor` | a rare pair the project never writes the other way round |
+| `convention.exactNeighbor.alsoReversed` | a rare pair the project also writes the other way round, but not as a habit |
+| `convention.exactNeighbor.swapped` | the other way round is the project's habit |
+| `convention.runShape` | a rare group of marks, with no usual group to name |
+| `convention.runShape.reordered` | the project also writes the same marks in another order |
+| `convention.runShape.common` | the details name the most common group holding the mark |
+| `convention.runShape.swapped` | the same marks in another order are the project's habit |
+| `convention.placement.follows` `.precedes` | a mark beside a class of character it rarely touches |
+| `convention.placement.follows.digit` `.precedes.digit` | the same for the pooled digit lane, "A digit" |
+| `convention.rarity` | a rare mark; the details may name the most common mark of its kind |
+| `convention.rarity.lookalike` | a rare mark that looks like the one the project writes |
+| `convention.casing` | a word in a rare case form |
+| `convention.casing.afterMark` | the same, with what the project does after the mark before it |
+
+Two limits remain. A count before a noun outside a plural (`({usualCount,
+number} times)`) cannot inflect the noun; a language that must can write a
+label instead, `(×{usualCount, number})`. Unicode names (`{charName}`,
+`{glyphName}`) are English ("Unicode names and code points").
 
 ## Glyph tags
 
@@ -107,15 +165,16 @@ plain     g: (chunks) => chunks.join("")
 
 Readers ask "what's a mark?", so every `Glyph` parameter has a `…Kind`
 beside it (`glyphKind`, `neighborKind`, `usualKind`, `letterKind`,
-`beforeKind`) naming what it is. A `Glyphs` pair or group takes its marks'
-kinds from those.
+`beforeKind`) naming what it is, for a consumer to show beside the mark. A
+`Glyphs` pair or group takes its marks' kinds from those. The English catalog
+names the mark itself instead ("For translators", rule 3); a kind reaches a
+sentence only as the pool of `convention.pooledNeighbor`, one whole sentence
+per pool:
 
 ```text
-params    { pair: "'.", glyphKind: "quote", neighborKind: "sentenceEnd", count: 3, … }
-catalog   {glyphKind, select, quote {A quotation mark} …} right before
-          {neighborKind, select, … sentenceEnd {a mark that ends a sentence} …}
-          (<g>{pair}</g>) appears only # times in this project.
-en        A quotation mark right before a mark that ends a sentence (['.]) appears only 3 times in this project.
+params    { glyph: ",", pool: "quote", … }
+catalog   {pool, select, quote {Here <g>{glyph}</g> is followed directly by a quotation mark, which this project rarely does.} …}
+en        Here [,] is followed directly by a quotation mark, which this project rarely does.
 ```
 
 | kind | what it is, from UCD 17.0.0 | e.g. |
@@ -137,7 +196,7 @@ The first five are the engine's own neighbour pools, first match wins, so
 (`kindOf(scalar)`, `rangesOf(kind)`, `CLOSERS`) by
 `cargo run -p sous-core --bin gen-unicode`, and a test fails when it is stale.
 Kinds are `select` keys, so a translator words every one; a catalog `select`
-over a kind names all ten (`sous_messages.rs` checks), `other` included.
+over a kind names every one (`sous_messages.rs` checks), `other` included.
 
 ## Unicode names and code points
 
@@ -158,8 +217,8 @@ en        [–] en dash (U+2013) and [-] hyphen-minus (U+002D) look alike.
   `<control>` there, so it takes its first `NameAliases.txt` alias (`null`,
   `delete`, `next line`). A letter, a digit, a combining mark or a
   noncharacter has no name here, so its `…Name` is empty; `named` says both
-  of a rarity's marks have one, or that a hygiene message's character has
-  one.
+  of a rarity's marks have one, and a hygiene class whose message names its
+  character is `hygiene.unidentified` when the site does not show one.
 - [`sous-unicode-names.ts`](sous-unicode-names.ts) is generated with the
   kinds and staleness-tested the same way: `nameOf(scalar)`,
   `codePointOf(scalar)` (`U+` and at least four uppercase hex digits).
@@ -176,27 +235,23 @@ headline then details, `<g>` as `[…]`:
 
 ```text
 NUM 21:14  …the Wars of Yahweh, \q "... Zahab…                 (facing unknown)
-           A quotation mark right before a mark that ends a sentence ([".]) appears only 2 times in
-           this project.
+           ["] right before [.] appears only 2 times in this project.
            ["] is followed directly by another mark 129 times in this project, most often [']
            (77). This project also writes [."], once. [".] appears in NUM and JER.
 GEN 48:20  …like Ephraim and like Manasseh'." \m In this way…    (facing closing)
-           Here the full stop comes after the closing quote (['.]); this project puts it before
-           the closing quote ([.']) 974 times.
+           Here [.] comes after [']; with a closing quote, this project writes [.'] 974 times.
            ['] is followed directly by another mark 496 times in this project, most often ["]
            (416). ['.] appears 3 times, in 3 of 66 books.
 2KI 13:17  …Then Elisha said, "Shoot!", and he shot…            (facing closing)
-           Here the comma comes after the closing quote ([",]); this project puts it before the
-           closing quote ([,"]) 226 times.
+           Here [,] comes after ["]; with a closing quote, this project writes [,"] 226 times.
            ["] is followed directly by another mark 129 times in this project, most often [']
            (77). [",] appears nowhere else.
 PRO 30:15  …four that never say, "Enough": \q1 \v 16 Sheol…
-           A quotation mark right before a comma or similar mark ([":]) appears only here in this
-           project.
+           ["] right before [:] appears only here in this project.
            ["] is followed directly by another mark 129 times in this project, most often [']
            (77).
 DEU 7:17   …how can I dispossess them?'— \v 18 do not be afraid…
-           A quotation mark right before a dash (['—]) appears only 6 times in this project.
+           ['] right before [—] appears only 6 times in this project.
            ['] is followed directly by another mark 496 times in this project, most often ["]
            (416). This project also writes [—'], once. ['—] appears in 5 of 66 books.
 ISA 30:10  …They say to the seers, "Do not see;" \q2 and to the prophets…
@@ -205,7 +260,7 @@ ISA 30:10  …They say to the seers, "Do not see;" \q2 and to the prophets…
            [;] stands alone 4,878 of 4,904 times. Unusual groups like this appear 5 times, all
            in ISA.
 EXO 38:26  …those twenty years old and older—603,550 men in all.
-           A dash ([—]) right before a digit appears only 2 times in this project.
+           [—] right before a digit appears only 2 times in this project.
            Usually [—] is followed right away by a letter (1,341 of 1,795 times). This happens
            in EXO and JDG.
 JOS 21:5   The rest of Kohath’s descendants…
@@ -240,8 +295,7 @@ with no usual class; from `corpora/nya.txt`:
 
 ```text
 ISA 29:16  …Sibanani bumbe ine"pa vintu…
-           A quotation mark (["]) inside a word, with letters on both sides, appears only 13
-           times in this project.
+           ["] inside a word, with letters on both sides, appears only 13 times in this project.
            Of the 6,805 times this project uses ["], 13 have a letter on both sides. This happens
            in 6 of 62 books.
 ```
@@ -255,6 +309,7 @@ anchor names:
 
 ```text
 row       MisplacedFormat · BesideSpace · AtEnd · run 1     siteText "ت‌" (the letter, then U+200C)
+id        hygiene.format
 params    { class: "format", where: "space", charName: "zero width non-joiner", charCode: "U+200C", fix: "remove", … }
 en        An invisible formatting character is here beside a space: zero width non-joiner (U+200C).
           One character of this kind is here. It shows nothing, or something unexpected, on the
@@ -494,9 +549,10 @@ sets `quoted`, a closing bracket rides and sets `bracketed`, an opening
 bracket rides and marks nothing, and the first other mark is the glyph. A
 letter or digit first means no mark, and the sentence is left out. `text` is
 verse text with markers removed, as the engine read it: a raw `\q2` between
-`;` and `He` would read as the digit `2`. `hasBefore` is false when no mark
-was given or the corpus never handed a cased letter off from that mark in
-that context. The section carries raw counts only: whether a context forces a
+`;` and `He` would read as the digit `2`. The id is `convention.casing`,
+without the sentence, when no mark was given or the corpus never handed a
+cased letter off from that mark in that context, and
+`convention.casing.afterMark` otherwise. The section carries raw counts only: whether a context forces a
 capital, frees one, or is mixed is the judge's call
 (`terminal_upper_share_bp`, `terminal_lower_share_bp`), and no message
 restates it. SentenceStart needs none of this: its row is already the count
@@ -558,23 +614,32 @@ Questions below: **1** seen, **2** how often, **3** normal instead,
 
 | id | means | params (question) |
 | --- | --- | --- |
-| `convention.placement.follows` | the glyph touches a class on its left that it rarely touches | `glyph` `digit` `neighbor` (1); `count` `total` (2); `usual` `usualCount` (3); spread (4) |
+| `convention.placement.follows` | the glyph touches a class on its left that it rarely touches | `glyph` `neighbor` (1); `count` `total` (2); `usual` `usualCount` (3); spread (4) |
+| `convention.placement.follows.digit` | the same for the pooled digit lane | as above; `glyph` is the site's own digit |
 | `convention.placement.precedes` | the same on its right | as above |
+| `convention.placement.precedes.digit` | the same for the pooled digit lane | as above |
 | `convention.placement.inside` | the glyph has a letter on both sides, inside a word, which the project rarely writes | `glyph` `digit` (1); `count` `total` (2); spread (4); no usual: the rest of `total` is it |
 | `convention.bookRate.follows` | one book puts the glyph after a class far more often than the others | `glyph` `digit` `neighbor` (1); `count` `total` `rate` `book` (2); `baseline` `otherBooks` (3, 4) |
 | `convention.bookRate.precedes` | the same on its right | as above |
-| `convention.exactNeighbor` | the glyph is directly followed by a mark it rarely precedes | `glyph` `neighbor` `pair` `facing` (1); `count` `total` (2); `usual` `usualCount`, `reversed` `reversedPair` (3); spread (4). `facing`: which way a straight quote in the pair faces, `none` without one; `reversed` then counts only runs facing the same way |
+| `convention.exactNeighbor` | the glyph is directly followed by a mark it rarely precedes, and never the other way round | `glyph` `neighbor` `pair` `facing` (1); `count` `total` (2); `usual` `usualCount`, `reversed` `reversedPair` (3); spread (4). `facing`: which way a straight quote in the pair faces, `none` without one; `reversed` then counts only runs facing the same way |
+| `convention.exactNeighbor.alsoReversed` | the same, and the project also writes the pair the other way round, but not as a swap | as above; the details name `reversedPair` `reversed` |
 | `convention.exactNeighbor.swapped` | the same pair, which the project writes the other way round at least as often and at least 5 times; with a straight quote (`"`, `'`) only when it faces `opening` or `closing`, and the headline names the facing | as above; `reversedPair` `reversed` are the headline's alternative |
 | `convention.pooledNeighbor` | the glyph is directly followed by a kind of mark it rarely precedes (off by default) | `glyph` `pool` (1); `count` `total` (2); spread (4) |
-| `convention.runShape` | the glyph sits in a group of marks the project rarely writes | `cluster` `glyph` `clusterCount` (1); `count` `total` (2); `hasUsualCluster` `usualCluster` `usualClusterCount` `reordered` `swap` `usualSize` `usualAtLeast` `usualSameMark` `usualShapeCount` `facing` (3); spread (4). `reordered`: the usual cluster holds the same marks; `swap`: and no straight quote, or the two groups share a known facing, so the headline names it; `facing` is the usual cluster's |
-| `convention.rarity` | a character the project almost never uses | `glyph` (1); `count` (2); `hasUsual` `usual` `usualCount` `lookalike` (3); spread (4). `lookalike` is true when Unicode's `confusables.txt` draws the two alike (`’`/`'`, `“`/`"`, `–`/`-`; not `—`/`–`), and the headline names it; else the details name the pool's most common mark |
-| `convention.casing` | a word in a case form the project rarely gives it mid-sentence | `word` `form` (1); `count` `total` (2); `usualForm` `usualWord` `usualCount`, and `hasBefore` `before` `beforeContext` `beforeLower` `beforeCased` from `context.before` (3); spread (4) |
+| `convention.runShape` | the glyph sits in a group of marks the project rarely writes, and no recurring group holds it | `cluster` `glyph` `clusterCount` (1); `count` `total` (2); `usualSize` `usualShapeCount` (3); spread (4) |
+| `convention.runShape.reordered` | the same, and a recurring group holds the same marks in another order | as above, and `usualCluster` `usualClusterCount` (3) |
+| `convention.runShape.common` | the same, and the details name the most common recurring group holding the glyph | as above |
+| `convention.runShape.swapped` | the group reordered, with no straight quote or with both groups sharing a known facing, so the headline names it | as above, and `facing`, the usual cluster's |
+| `convention.rarity` | a character the project almost never uses | `glyph` (1); `count` (2); `hasUsual` `usual` `usualCount` (3); spread (4). The details name the pool's most common mark when `hasUsual` |
+| `convention.rarity.lookalike` | the same, when Unicode's `confusables.txt` draws it and the usual mark alike (`’`/`'`, `“`/`"`, `–`/`-`; not `—`/`–`), so the headline names the usual one | as above, and `named` |
+| `convention.casing` | a word in a case form the project rarely gives it mid-sentence | `word` `form` (1); `count` `total` (2); `usualForm` `usualWord` `usualCount` (3); spread (4) |
+| `convention.casing.afterMark` | the same, when `context.before` names a mark the terminal section has counts for | as above, and `before` `beforeContext` `beforeLower` `beforeCased` (3) |
 | `convention.wordLength` | a word far longer than the project's usual word (off by default) | `word` (1); `count` (2) |
 | `convention.doubled.bare` | a word written twice with only a space between | `word` `text` (1); `count` `total` (2); spread (4) |
 | `convention.doubled.separated` | a word written twice with punctuation between | as above |
 | `convention.letterRun` | one letter repeated more times than the project ever repeats it | `letter` `length` `atLeast` `run` `word` (1); `count` `total` (2) |
 | `convention.sentenceStart` | a lowercase word after a mark the project almost always capitalizes after | `glyph` `word` (1); `count` `total` (2); `usualWord` `upper` (3); spread (4) |
-| `hygiene` | a character that does not belong in text | `class` `where` `charName` `charCode` `named` `coded` (1); `run` `atLeast` (2); `fix`, what removing it does ("Hygiene fixes") |
+| `hygiene.<class>` | a character that does not belong in text, one id per `class` | `class` `where` `charName` `charCode` (1); `run` `atLeast` (2); `fix`, what removing it does ("Hygiene fixes") |
+| `hygiene.unidentified` | the same, when the site text does not show the character a class names | as above, `charName` and `charCode` empty |
 | `presence.missing` | source verses this book lacks | `keys` `atLeast` (1, 2) |
 | `presence.extra` | verses the source lacks | as above |
 | `presence.empty` | verses empty here but not in the source | as above |
@@ -593,12 +658,15 @@ space | other`; `pool` the same without `letter` and `space`;
 combiningMark | format | noBreakSpace | noncharacter`; `where`
 `space | edge | letters | punctuation | alone | other`; `fix`
 `remove | keepOne | none`. `digit` is true on the
-pooled digit row, whose `glyph` is the site's own digit.
+pooled digit row of `convention.placement.inside` and book rate, whose `glyph`
+is the site's own digit.
 
 `galley/tests/sous_conformance.mjs` describes every finding of the golden
 publications and checks each id has both tiers and well-formed queries;
+`sous-chef/messages.test.mjs` reaches every id from `describe`;
 `sous_messages.rs` checks the id list, that every entry is exactly a headline
 and details, every argument of either tier against `describe`, that tags
 balance within every branch, that `<g>` is the only tag and holds every
-`Glyph` parameter and nothing else, the forbidden words in both tiers, and the
-rule internals no headline may name.
+`Glyph` parameter and nothing else, that every tier is whole sentences and
+every branch renders one ("For translators"), the forbidden words in both
+tiers, and the rule internals no headline may name.

@@ -26,3 +26,14 @@ Measured on `galley/sous-messages.en.json` that day: 23 ids; 12 nest six levels 
 
 English stays as close to today's wording as the rules allow.
 
+
+## Built
+
+Commit 1768f38. 23 ids became 41; 37 of 46 tiers broke rule 1, and the 2,896 sentence variants they assembled from fragments are now 434 whole-sentence branches. `describe` splits by class for hygiene (`hygiene.unidentified` when the site does not show the character), and by situation for `exactNeighbor.alsoReversed`, `runShape.reordered` / `.common` / `.swapped`, `placement.follows.digit` / `.precedes.digit`, `rarity.lookalike` and `casing.afterMark`. Glyphs replace a kind's noun phrase; the kind stays only as `pooledNeighbor`'s pool and as a neighbour class, one whole sentence per value. The guide's "For translators" section maps ids to situations.
+
+Known limits:
+
+- Four details tiers hold 16 branches, a class or context sentence times the book spread: `placement.follows`, `.precedes` and their `.digit` ids, and `casing.afterMark`. Splitting them would copy an 8-branch headline per id.
+- A count before a noun outside a plural (`({usualCount, number} times)`) cannot inflect the noun.
+- `runShape` details no longer say how large the usual group is or that it repeats one mark ("sits in a group of marks").
+- `pooledNeighbor`'s headline says "which this project rarely does"; the count moved to its details.
