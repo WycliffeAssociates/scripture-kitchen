@@ -1173,7 +1173,10 @@ pub fn book_of(text: &str, markers: &Extensions) -> String {
 #[wasm_bindgen(typescript_custom_section)]
 const CUSTOM_MARKERS_SECTION: &str = CUSTOM_MARKERS_TS;
 
-#[cfg_attr(not(test), expect(dead_code, reason = "the section's macro hides the read"))]
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "the section's macro hides the read")
+)]
 const CUSTOM_MARKERS_TS: &str = r#"
 /** A `\category` word, as the USFM spec spells it. */
 export type CustomMarkerCategory =
@@ -1267,7 +1270,7 @@ pub fn judged(
 /// `opts` is not `CustomMarkerOptions`.
 #[wasm_bindgen(js_name = customMarkers, unchecked_return_type = "CustomMarkers")]
 pub fn custom_markers(
-    #[wasm_bindgen(unchecked_param_type = "CustomMarker[]")] list: JsValue,
+    #[wasm_bindgen(unchecked_param_type = "readonly CustomMarker[]")] list: JsValue,
     #[wasm_bindgen(unchecked_optional_param_type = "CustomMarkerOptions")] opts: Option<JsValue>,
 ) -> Result<JsValue, JsError> {
     let door = "customMarkers";
