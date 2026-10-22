@@ -2,156 +2,185 @@
 //! `sous-settings.ts` generated from them.
 //!
 //! ```text
-//! SousSettings { doubled_bare: bool, support_floor: u32, z_long: f32, … }
-//!   + SETTING_DOCS ("doubled_bare", Switch, Rules, "Doubled with a space", "Flags a word …")
+//! settings! { doubled_bare: bool = doubled.bare => Switch, Rules, "Doubled with a space", "Flags …"; … }
+//!   → SousSettings { doubled_bare: bool, … }      flat, the wasm class
+//!   → from / apply                                 config.doubled.bare <-> settings.doubled_bare
 //!   → sous-settings.ts
-//!       export type SettingKey = "placement" | … | "source_copy_min_run";
-//!       export interface SousSettingsValues { readonly doubled_bare: boolean; … }
-//!       export const SOUS_SETTINGS = { doubled_bare: { kind: "switch", default: true, … }, … };
-//!       export function toSettings(galley, values): void; fromSettings(galley)
+//!       export type SousCheck = "ExactNeighbor" | … | "LengthProportionality";
+//!       export const SOUS_SETTINGS = { doubled: {…}, doubled_bare: { check: "Doubled", kind: "switch", … }, … };
+//!       export function checkOf(code: SousCode): SousCheck | null;
 //! ```
+//!
+//! A setting's check is where its path lives in [`JudgingConfig`]: the first
+//! segment naming a check (`doubled.bare`, `channels.doubled`) decides, and
+//! `shared` and `words` are general. The table lists check by check, each
+//! check's own switch first, then its sub-switches, then its thresholds,
+//! general last; the generator refuses any other order.
 //!
 //! `cargo run -p usfm_galley --bin codegen` writes it;
 //! `tests/codegen_output_matches_input.rs` fails when it is stale.
 
 use core::fmt::Write as _;
 
-use sous_core::judge::{Channels, JudgingConfig};
+use sous_core::judge::{Channel, JudgingConfig};
+use sous_core::{Check, finding_codes};
 
-/// The judging settings that cross the wall: every plain scalar of
-/// [`JudgingConfig`], flat, so bindgen writes the getters and setters and JS
-/// assigns `settings.casing = false`.
-///
-/// Not on the wall: `bands` and `word_bands` (a `Staircase` is a validated
-/// ladder, not a plain field), `letters` and `doubles` (tri-state policies),
-/// and the roster bounds. They have no plain-field shape and no consumer has
-/// asked for them; everything not a knob keeps the current config's value
-/// through [`apply`](SousSettings::apply), so widening this later breaks nothing.
-#[cfg_attr(feature = "wasm", wasm_bindgen::prelude::wasm_bindgen)]
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct SousSettings {
-    // Channels.
-    pub placement: bool,
-    pub run_shape: bool,
-    pub exact_neighbor: bool,
-    pub pooled_neighbor: bool,
-    pub rarity: bool,
-    pub casing: bool,
-    pub word_length: bool,
-    pub doubled: bool,
-    pub letter_runs: bool,
-    pub sentence_start: bool,
-    pub book_rate: bool,
-    // Thresholds.
-    pub support_floor: u32,
-    pub word_support_floor: u32,
-    pub terminal_upper_share_bp: u16,
-    pub terminal_lower_share_bp: u16,
-    pub sentence_start_upper_bp: u16,
-    pub word_length_sigma: u8,
-    pub doubles_productive_bp: u16,
-    // Which doublings the doubled channel judges.
-    pub doubled_bare: bool,
-    pub doubled_separated: bool,
-    // When one book's rate breaks from the rest.
-    pub book_rate_ratio: u16,
-    pub book_rate_min_bp: u16,
-    pub book_rate_min_uses: u32,
-    // The source-compared lane.
-    pub z_long: f32,
-    pub z_short: f32,
-    pub min_verses: u32,
-    pub lengths_enabled: bool,
-    pub presence: bool,
-    pub source_copy: bool,
-    pub source_copy_min_run: u32,
+/// One row per setting: its key, its type, its path in [`JudgingConfig`],
+/// then its page entry. Defines [`SousSettings`], its conversions, and
+/// [`SETTINGS`], so a path that names no field does not compile.
+macro_rules! settings {
+    ($(
+        $key:ident: $ty:ty = $($seg:ident).+ => $kind:ident, $group:ident,
+            $label:literal,
+            $description:literal $(, min $min:literal)?;
+    )*) => {
+        /// The judging settings that cross the wall, flat, so bindgen writes
+        /// the getters and setters and JS assigns `settings.casing = false`.
+        ///
+        /// Not on the wall: the two ladders' bands (a `Staircase` is a
+        /// validated ladder, not a plain field), the tri-state policies, and
+        /// the rarity roster. No consumer has asked for them; everything not a
+        /// knob keeps the current config's value through
+        /// [`apply`](SousSettings::apply), so widening this later breaks
+        /// nothing.
+        #[cfg_attr(feature = "wasm", wasm_bindgen::prelude::wasm_bindgen)]
+        #[derive(Debug, Clone, Copy, PartialEq)]
+        pub struct SousSettings {
+            $(pub $key: $ty,)*
+        }
+
+        impl SousSettings {
+            /// Every knob as this config holds it.
+            pub fn from(config: &JudgingConfig) -> Self {
+                Self { $($key: config.$($seg).+,)* }
+            }
+
+            /// Writes them back, leaving every field that is not a knob alone.
+            pub fn apply(self, config: &mut JudgingConfig) {
+                $(config.$($seg).+ = self.$key;)*
+            }
+
+            fn values(self) -> Vec<Value> {
+                vec![$(Value::from(self.$key)),*]
+            }
+        }
+
+        /// Every field of [`SousSettings`], in declaration order.
+        pub const SETTINGS: &[Setting] = &[$(
+            Setting {
+                key: stringify!($key),
+                path: &[$(stringify!($seg)),+],
+                kind: Kind::$kind,
+                group: Group::$group,
+                label: $label,
+                description: $description,
+                min: settings!(@min $($min)?),
+            },
+        )*];
+    };
+    (@min) => { None };
+    (@min $min:literal) => { Some($min) };
 }
 
-impl SousSettings {
-    /// Every knob as this config holds it.
-    pub fn from(config: &JudgingConfig) -> Self {
-        let Channels {
-            placement,
-            run_shape,
-            exact_neighbor,
-            pooled_neighbor,
-            rarity,
-            casing,
-            word_length,
-            doubled,
-            letter_runs,
-            sentence_start,
-            book_rate,
-        } = config.channels;
-        Self {
-            placement,
-            run_shape,
-            exact_neighbor,
-            pooled_neighbor,
-            rarity,
-            casing,
-            word_length,
-            doubled,
-            letter_runs,
-            sentence_start,
-            book_rate,
-            support_floor: config.shared.floor,
-            word_support_floor: config.words.floor,
-            terminal_upper_share_bp: config.casing.terminal_upper_share_bp,
-            terminal_lower_share_bp: config.casing.terminal_lower_share_bp,
-            sentence_start_upper_bp: config.sentence_start.upper_bp,
-            word_length_sigma: config.word_length.sigma,
-            doubles_productive_bp: config.doubled.productive_bp,
-            doubled_bare: config.doubled.bare,
-            doubled_separated: config.doubled.separated,
-            book_rate_ratio: config.book_rate.ratio,
-            book_rate_min_bp: config.book_rate.min_bp,
-            book_rate_min_uses: config.book_rate.min_uses,
-            z_long: config.lengths.proportionality.z_long,
-            z_short: config.lengths.proportionality.z_short,
-            min_verses: config.lengths.proportionality.min_verses,
-            lengths_enabled: config.lengths.proportionality.enabled,
-            presence: config.lengths.presence,
-            source_copy: config.lengths.source_copy.enabled,
-            source_copy_min_run: config.lengths.source_copy.min_run,
-        }
-    }
-
-    /// Writes them back, leaving every field that is not a knob alone.
-    pub fn apply(self, config: &mut JudgingConfig) {
-        config.channels = Channels {
-            placement: self.placement,
-            run_shape: self.run_shape,
-            exact_neighbor: self.exact_neighbor,
-            pooled_neighbor: self.pooled_neighbor,
-            rarity: self.rarity,
-            casing: self.casing,
-            word_length: self.word_length,
-            doubled: self.doubled,
-            letter_runs: self.letter_runs,
-            sentence_start: self.sentence_start,
-            book_rate: self.book_rate,
-        };
-        config.shared.floor = self.support_floor;
-        config.words.floor = self.word_support_floor;
-        config.casing.terminal_upper_share_bp = self.terminal_upper_share_bp;
-        config.casing.terminal_lower_share_bp = self.terminal_lower_share_bp;
-        config.sentence_start.upper_bp = self.sentence_start_upper_bp;
-        config.word_length.sigma = self.word_length_sigma;
-        config.doubled.productive_bp = self.doubles_productive_bp;
-        config.doubled.bare = self.doubled_bare;
-        config.doubled.separated = self.doubled_separated;
-        config.book_rate.ratio = self.book_rate_ratio;
-        config.book_rate.min_bp = self.book_rate_min_bp;
-        config.book_rate.min_uses = self.book_rate_min_uses;
-        config.lengths.proportionality.z_long = self.z_long;
-        config.lengths.proportionality.z_short = self.z_short;
-        config.lengths.proportionality.min_verses = self.min_verses;
-        config.lengths.proportionality.enabled = self.lengths_enabled;
-        config.lengths.presence = self.presence;
-        config.lengths.source_copy.enabled = self.source_copy;
-        config.lengths.source_copy.min_run = self.source_copy_min_run;
-    }
+settings! {
+    placement: bool = channels.placement => Switch, Rules,
+        "What a mark touches",
+        "Flags a punctuation mark or digit right next to something it is rarely next to in this project, like a comma touching the next word, by counting every use of that mark across the whole project.";
+    run_shape: bool = channels.run_shape => Switch, Rules,
+        "Groups of marks",
+        "Flags a group of marks written together, like “;'”, when this project rarely groups that mark that way and does not write that exact group often.";
+    exact_neighbor: bool = channels.exact_neighbor => Switch, Rules,
+        "Pairs of marks",
+        "Flags two marks side by side, like “?,”, when this project almost never puts the second one right after the first.";
+    pooled_neighbor: bool = channels.pooled_neighbor => Switch, Rules,
+        "A mark and the kind of mark after it",
+        "Flags a mark followed directly by a kind of mark, such as a quotation mark or a dash, that rarely follows it in this project; off by default because the pairs check already covers it.";
+    rarity: bool = channels.rarity => Switch, Rules,
+        "Rare characters",
+        "Lists characters this project uses only a handful of times in all its books, like a curly apostrophe in a project that otherwise uses straight ones.";
+    casing: bool = channels.casing => Switch, Rules,
+        "Capital letters",
+        "Flags a word capitalized, or not, in a way this project rarely writes that word in the middle of a sentence, like “On” where the project writes “on”.";
+    terminal_upper_share_bp: u16 = casing.terminal_upper_share_bp => ShareBp, Thresholds,
+        "Capital after a mark",
+        "How often this project must follow a mark with a capital before a capital there counts as the mark's doing and not the word's.";
+    terminal_lower_share_bp: u16 = casing.terminal_lower_share_bp => ShareBp, Thresholds,
+        "Lowercase after a mark",
+        "How rarely a mark may be followed by a capital for a capital after it to be checked; marks between this and the capital setting are left alone.";
+    sentence_start: bool = channels.sentence_start => Switch, Rules,
+        "Lowercase after a sentence end",
+        "Flags a lowercase word right after a mark, like “?” or “!”, that this project almost always follows with a capital.";
+    sentence_start_upper_bp: u16 = sentence_start.upper_bp => ShareBp, Thresholds,
+        "Capital expected after a mark",
+        "How often this project must follow a mark with a capital before a lowercase word after that mark is flagged.";
+    word_length: bool = channels.word_length => Switch, Rules,
+        "Very long words",
+        "Flags words far longer than the words this project usually uses, which can mean two words ran together; off by default because long names are common.";
+    word_length_sigma: u8 = word_length.sigma => Count, Thresholds,
+        "How long a very long word is",
+        "How far past this project's usual word length a word must be, counted in steps of how much word lengths usually vary, before the long-word check flags it.",
+        min 1.0;
+    doubled: bool = channels.doubled => Switch, Rules,
+        "Doubled words",
+        "Turns every check for a word written twice in a row on or off.";
+    doubled_bare: bool = doubled.bare => Switch, Rules,
+        "Doubled with a space",
+        "Flags a word written twice in a row with only a space between, like “the the”, unless this project does that with the word often.";
+    doubled_separated: bool = doubled.separated => Switch, Rules,
+        "Doubled with punctuation",
+        "Flags a word written twice with punctuation between, like “Moses, Moses”, unless this project does that with the word often; off by default because calling someone by name twice is common.";
+    doubles_productive_bp: u16 = doubled.productive_bp => ShareBp, Thresholds,
+        "Repeating language",
+        "When more than this share of the different words in the project are written twice in a row more than once, the project is taken to repeat words on purpose and the doubled-word checks stay silent.";
+    letter_runs: bool = channels.letter_runs => Switch, Rules,
+        "Repeated letters",
+        "Flags a letter written more times in a row than this project ever writes it, like “joyfullly”.";
+    book_rate: bool = channels.book_rate => Switch, Rules,
+        "One book differs",
+        "Flags one book that puts a mark next to something far more often than the project's other books do, like a dash after a space in one book only.";
+    book_rate_ratio: u16 = book_rate.ratio => Count, Thresholds,
+        "One book: how many times more",
+        "How many times more often than the other books typically do one book must put a mark next to something before the one-book check flags it.",
+        min 1.0;
+    book_rate_min_bp: u16 = book_rate.min_bp => ShareBp, Thresholds,
+        "One book: least share",
+        "The least share of a mark's uses in one book that must be next to the same thing before the one-book check flags that book.";
+    book_rate_min_uses: u32 = book_rate.min_uses => Count, Thresholds,
+        "One book: least uses",
+        "How many times a book must use a mark before the one-book check may flag that book for it.",
+        min 1.0;
+    lengths_enabled: bool = lengths.proportionality.enabled => Switch, Reference,
+        "Verse lengths",
+        "Compares each verse's length with the same verse in the source text and flags verses much longer or shorter than this project usually is.";
+    z_long: f32 = lengths.proportionality.z_long => Decimal, Reference,
+        "Long verse distance",
+        "How far past this project's usual length compared with the source a verse must be, on the long side, before it is flagged as much longer.",
+        min 0.0;
+    z_short: f32 = lengths.proportionality.z_short => Decimal, Reference,
+        "Short verse distance",
+        "How far short of this project's usual length compared with the source a verse must be before it is flagged as much shorter.",
+        min 0.0;
+    min_verses: u32 = lengths.proportionality.min_verses => Count, Reference,
+        "Verses to compare a book",
+        "How many verses a book must share with the source before its verse lengths are compared within that book as well as across the project.";
+    presence: bool = lengths.presence => Switch, Reference,
+        "Missing and extra verses",
+        "Flags verses the source text has and this book lacks, verses this book has and the source lacks, and verses left empty.";
+    source_copy: bool = lengths.source_copy.enabled => Switch, Reference,
+        "Copied source words",
+        "Flags words in a row spelled exactly as in the same verse of the source text, which can mean source text was pasted in; off by default.";
+    source_copy_min_run: u32 = lengths.source_copy.min_run => Count, Reference,
+        "Copied words in a row",
+        "How many words in a row must match the source verse before the copied-words check flags them.",
+        min 2.0;
+    support_floor: u32 = shared.floor => Count, Thresholds,
+        "Habit count",
+        "How many times something must occur before the checks treat it as a habit of this project rather than a one-off.",
+        min 1.0;
+    word_support_floor: u32 = words.floor => Count, Thresholds,
+        "Word habit count",
+        "How many times a word, or a run of one letter, must occur before the capital-letter, long-word and repeated-letter checks compare it with the rest of this project.",
+        min 1.0;
 }
 
 impl Default for SousSettings {
@@ -170,7 +199,7 @@ pub enum Kind {
     Decimal,
 }
 
-/// Where a settings page lists it.
+/// What kind of setting it is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Group {
     /// Which checks run.
@@ -184,282 +213,140 @@ pub enum Group {
 /// One setting's page entry. The description is one plain sentence for a
 /// translator who is neither a linguist nor a programmer, and names no unit:
 /// the kind carries it, and a page may show a share as a percent.
-pub struct SettingDoc {
+pub struct Setting {
     pub key: &'static str,
+    /// Its field in [`JudgingConfig`], one segment per struct.
+    pub path: &'static [&'static str],
     pub kind: Kind,
     pub group: Group,
     pub label: &'static str,
     pub description: &'static str,
-    /// Bounds a page offers; an integer's type bounds it where these do not.
+    /// The least a page offers; an integer's type bounds it where this does
+    /// not.
     pub min: Option<f64>,
-    pub max: Option<f64>,
 }
 
-const fn doc(
-    key: &'static str,
-    kind: Kind,
-    group: Group,
-    label: &'static str,
-    description: &'static str,
-) -> SettingDoc {
-    SettingDoc {
-        key,
-        kind,
-        group,
-        label,
-        description,
-        min: None,
-        max: None,
+/// The config segment each check owns. `shared` and `words` are the ladders
+/// several checks read; `channels` and `lengths` only hold checks.
+const SEGMENTS: [(&str, Option<Check>); 16] = [
+    ("shared", None),
+    ("words", None),
+    (
+        "exact_neighbor",
+        Some(Check::Convention(Channel::ExactNeighbor)),
+    ),
+    (
+        "pooled_neighbor",
+        Some(Check::Convention(Channel::PooledNeighbor)),
+    ),
+    ("run_shape", Some(Check::Convention(Channel::RunShape))),
+    ("placement", Some(Check::Convention(Channel::Placement))),
+    ("rarity", Some(Check::Convention(Channel::Rarity))),
+    ("casing", Some(Check::Convention(Channel::Casing))),
+    ("word_length", Some(Check::Convention(Channel::WordLength))),
+    ("doubled", Some(Check::Convention(Channel::Doubled))),
+    ("letter_runs", Some(Check::Convention(Channel::LetterRun))),
+    (
+        "sentence_start",
+        Some(Check::Convention(Channel::SentenceStart)),
+    ),
+    ("book_rate", Some(Check::Convention(Channel::BookRate))),
+    ("presence", Some(Check::Presence)),
+    ("source_copy", Some(Check::SourceCopy)),
+    ("proportionality", Some(Check::LengthProportionality)),
+];
+
+/// Where a setting stands within its check: the check's own switch, a switch
+/// inside it, or a threshold.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Rank {
+    Switch,
+    SubSwitch,
+    Threshold,
+}
+
+impl Setting {
+    /// The check this setting tunes, `None` when several share it.
+    ///
+    /// # Panics
+    ///
+    /// When no segment of its path is in [`SEGMENTS`].
+    pub fn check(&self) -> Option<Check> {
+        self.path
+            .iter()
+            .find_map(|segment| SEGMENTS.iter().find(|(name, _)| name == segment))
+            .unwrap_or_else(|| {
+                panic!(
+                    "`{}` lives at `{}`, which names no check and is not shared",
+                    self.key,
+                    self.path.join(".")
+                )
+            })
+            .1
+    }
+
+    fn rank(&self) -> Rank {
+        let last = self.path[self.path.len() - 1];
+        let owns = SEGMENTS
+            .iter()
+            .any(|(name, check)| check.is_some() && *name == last);
+        match self.kind {
+            Kind::Switch if owns || last == "enabled" => Rank::Switch,
+            Kind::Switch => Rank::SubSwitch,
+            _ => Rank::Threshold,
+        }
     }
 }
 
-const fn at_least(mut doc: SettingDoc, min: f64) -> SettingDoc {
-    doc.min = Some(min);
-    doc
+/// `SousCheck`'s spelling of a setting's check.
+fn check_name(check: Option<Check>) -> &'static str {
+    check.map_or("general", Check::name)
 }
 
-/// Every field of [`SousSettings`], described. The generator refuses a field
-/// without an entry and an entry without a field.
-pub const SETTING_DOCS: &[SettingDoc] = {
-    use Group::{Reference, Rules, Thresholds};
-    use Kind::{Count, Decimal, ShareBp, Switch};
-    &[
-        doc(
-            "placement",
-            Switch,
-            Rules,
-            "What a mark touches",
-            "Flags a punctuation mark or digit right next to something it is rarely next to in this project, like a comma touching the next word, by counting every use of that mark across the whole project.",
-        ),
-        doc(
-            "run_shape",
-            Switch,
-            Rules,
-            "Groups of marks",
-            "Flags a group of marks written together, like “;'”, when this project rarely groups that mark that way and does not write that exact group often.",
-        ),
-        doc(
-            "exact_neighbor",
-            Switch,
-            Rules,
-            "Pairs of marks",
-            "Flags two marks side by side, like “?,”, when this project almost never puts the second one right after the first.",
-        ),
-        doc(
-            "pooled_neighbor",
-            Switch,
-            Rules,
-            "A mark and the kind of mark after it",
-            "Flags a mark followed directly by a kind of mark, such as a quotation mark or a dash, that rarely follows it in this project; off by default because the pairs check already covers it.",
-        ),
-        doc(
-            "rarity",
-            Switch,
-            Rules,
-            "Rare characters",
-            "Lists characters this project uses only a handful of times in all its books, like a curly apostrophe in a project that otherwise uses straight ones.",
-        ),
-        doc(
-            "casing",
-            Switch,
-            Rules,
-            "Capital letters",
-            "Flags a word capitalized, or not, in a way this project rarely writes that word in the middle of a sentence, like “On” where the project writes “on”.",
-        ),
-        doc(
-            "word_length",
-            Switch,
-            Rules,
-            "Very long words",
-            "Flags words far longer than the words this project usually uses, which can mean two words ran together; off by default because long names are common.",
-        ),
-        doc(
-            "doubled",
-            Switch,
-            Rules,
-            "Doubled words",
-            "Turns every check for a word written twice in a row on or off.",
-        ),
-        doc(
-            "letter_runs",
-            Switch,
-            Rules,
-            "Repeated letters",
-            "Flags a letter written more times in a row than this project ever writes it, like “joyfullly”.",
-        ),
-        doc(
-            "sentence_start",
-            Switch,
-            Rules,
-            "Lowercase after a sentence end",
-            "Flags a lowercase word right after a mark, like “?” or “!”, that this project almost always follows with a capital.",
-        ),
-        doc(
-            "book_rate",
-            Switch,
-            Rules,
-            "One book differs",
-            "Flags one book that puts a mark next to something far more often than the project's other books do, like a dash after a space in one book only.",
-        ),
-        at_least(
-            doc(
-                "support_floor",
-                Count,
-                Thresholds,
-                "Habit count",
-                "How many times something must occur before the checks treat it as a habit of this project rather than a one-off.",
+/// Panics unless [`SETTINGS`] lists check by check in the promised order and
+/// every check has exactly one switch.
+fn assert_order() {
+    let mut seen: Vec<Option<Check>> = Vec::new();
+    let mut last: Option<(Option<Check>, Rank)> = None;
+    for setting in SETTINGS {
+        let (check, rank) = (setting.check(), setting.rank());
+        match last {
+            Some((previous, before)) if previous == check => assert!(
+                check.is_none() || (before <= rank && rank != Rank::Switch),
+                "`{}` is out of order within {}: switch, sub-switches, then thresholds",
+                setting.key,
+                check_name(check)
             ),
-            1.0,
-        ),
-        at_least(
-            doc(
-                "word_support_floor",
-                Count,
-                Thresholds,
-                "Word habit count",
-                "How many times a word must appear in the middle of a sentence before the capital-letter check compares its spellings.",
-            ),
-            1.0,
-        ),
-        doc(
-            "terminal_upper_share_bp",
-            ShareBp,
-            Thresholds,
-            "Capital after a mark",
-            "How often this project must follow a mark with a capital before a capital there counts as the mark's doing and not the word's.",
-        ),
-        doc(
-            "terminal_lower_share_bp",
-            ShareBp,
-            Thresholds,
-            "Lowercase after a mark",
-            "How rarely a mark may be followed by a capital for a capital after it to be checked; marks between this and the capital setting are left alone.",
-        ),
-        doc(
-            "sentence_start_upper_bp",
-            ShareBp,
-            Thresholds,
-            "Capital expected after a mark",
-            "How often this project must follow a mark with a capital before a lowercase word after that mark is flagged.",
-        ),
-        at_least(
-            doc(
-                "word_length_sigma",
-                Count,
-                Thresholds,
-                "How long a very long word is",
-                "How far past this project's usual word length a word must be, counted in steps of how much word lengths usually vary, before the long-word check flags it.",
-            ),
-            1.0,
-        ),
-        doc(
-            "doubles_productive_bp",
-            ShareBp,
-            Thresholds,
-            "Repeating language",
-            "When more than this share of the different words in the project are written twice in a row more than once, the project is taken to repeat words on purpose and the doubled-word checks stay silent.",
-        ),
-        doc(
-            "doubled_bare",
-            Switch,
-            Rules,
-            "Doubled with a space",
-            "Flags a word written twice in a row with only a space between, like “the the”, unless this project does that with the word often.",
-        ),
-        doc(
-            "doubled_separated",
-            Switch,
-            Rules,
-            "Doubled with punctuation",
-            "Flags a word written twice with punctuation between, like “Moses, Moses”, unless this project does that with the word often; off by default because calling someone by name twice is common.",
-        ),
-        at_least(
-            doc(
-                "book_rate_ratio",
-                Count,
-                Thresholds,
-                "One book: how many times more",
-                "How many times more often than the other books typically do one book must put a mark next to something before the one-book check flags it.",
-            ),
-            1.0,
-        ),
-        doc(
-            "book_rate_min_bp",
-            ShareBp,
-            Thresholds,
-            "One book: least share",
-            "The least share of a mark's uses in one book that must be next to the same thing before the one-book check flags that book.",
-        ),
-        at_least(
-            doc(
-                "book_rate_min_uses",
-                Count,
-                Thresholds,
-                "One book: least uses",
-                "How many times a book must use a mark before the one-book check may flag that book for it.",
-            ),
-            1.0,
-        ),
-        at_least(
-            doc(
-                "z_long",
-                Decimal,
-                Reference,
-                "Long verse distance",
-                "How far past this project's usual length compared with the source a verse must be, on the long side, before it is flagged as much longer.",
-            ),
-            0.0,
-        ),
-        at_least(
-            doc(
-                "z_short",
-                Decimal,
-                Reference,
-                "Short verse distance",
-                "How far short of this project's usual length compared with the source a verse must be before it is flagged as much shorter.",
-            ),
-            0.0,
-        ),
-        doc(
-            "min_verses",
-            Count,
-            Reference,
-            "Verses to compare a book",
-            "How many verses a book must share with the source before its verse lengths are compared within that book as well as across the project.",
-        ),
-        doc(
-            "lengths_enabled",
-            Switch,
-            Reference,
-            "Verse lengths",
-            "Compares each verse's length with the same verse in the source text and flags verses much longer or shorter than this project usually is.",
-        ),
-        doc(
-            "presence",
-            Switch,
-            Reference,
-            "Missing and extra verses",
-            "Flags verses the source text has and this book lacks, verses this book has and the source lacks, and verses left empty.",
-        ),
-        doc(
-            "source_copy",
-            Switch,
-            Reference,
-            "Copied source words",
-            "Flags words in a row spelled exactly as in the same verse of the source text, which can mean source text was pasted in; off by default.",
-        ),
-        at_least(
-            doc(
-                "source_copy_min_run",
-                Count,
-                Reference,
-                "Copied words in a row",
-                "How many words in a row must match the source verse before the copied-words check flags them.",
-            ),
-            2.0,
-        ),
-    ]
-};
+            _ => {
+                assert!(
+                    !seen.contains(&check),
+                    "`{}`'s check {} is split across the table",
+                    setting.key,
+                    check_name(check)
+                );
+                assert!(
+                    !seen.contains(&None),
+                    "`{}` follows the general settings, which come last",
+                    setting.key
+                );
+                assert!(
+                    check.is_none() || rank == Rank::Switch,
+                    "{} does not open with its own switch",
+                    check_name(check)
+                );
+                seen.push(check);
+            }
+        }
+        last = Some((check, rank));
+    }
+    for check in Check::ALL {
+        assert!(
+            seen.contains(&Some(check)),
+            "{} has no switch",
+            check.name()
+        );
+    }
+}
 
 /// A default as the wasm class types it.
 #[derive(Debug, Clone, Copy)]
@@ -510,75 +397,17 @@ impl Value {
     }
 }
 
-/// Every field in declaration order with its default. Destructured, so a new
-/// field does not compile until it is listed here.
-fn fields() -> Vec<(&'static str, Value)> {
-    let SousSettings {
-        placement,
-        run_shape,
-        exact_neighbor,
-        pooled_neighbor,
-        rarity,
-        casing,
-        word_length,
-        doubled,
-        letter_runs,
-        sentence_start,
-        book_rate,
-        support_floor,
-        word_support_floor,
-        terminal_upper_share_bp,
-        terminal_lower_share_bp,
-        sentence_start_upper_bp,
-        word_length_sigma,
-        doubles_productive_bp,
-        doubled_bare,
-        doubled_separated,
-        book_rate_ratio,
-        book_rate_min_bp,
-        book_rate_min_uses,
-        z_long,
-        z_short,
-        min_verses,
-        lengths_enabled,
-        presence,
-        source_copy,
-        source_copy_min_run,
-    } = SousSettings::default();
-    use Value::{Bool, F32, U8, U16, U32};
-    vec![
-        ("placement", Bool(placement)),
-        ("run_shape", Bool(run_shape)),
-        ("exact_neighbor", Bool(exact_neighbor)),
-        ("pooled_neighbor", Bool(pooled_neighbor)),
-        ("rarity", Bool(rarity)),
-        ("casing", Bool(casing)),
-        ("word_length", Bool(word_length)),
-        ("doubled", Bool(doubled)),
-        ("letter_runs", Bool(letter_runs)),
-        ("sentence_start", Bool(sentence_start)),
-        ("book_rate", Bool(book_rate)),
-        ("support_floor", U32(support_floor)),
-        ("word_support_floor", U32(word_support_floor)),
-        ("terminal_upper_share_bp", U16(terminal_upper_share_bp)),
-        ("terminal_lower_share_bp", U16(terminal_lower_share_bp)),
-        ("sentence_start_upper_bp", U16(sentence_start_upper_bp)),
-        ("word_length_sigma", U8(word_length_sigma)),
-        ("doubles_productive_bp", U16(doubles_productive_bp)),
-        ("doubled_bare", Bool(doubled_bare)),
-        ("doubled_separated", Bool(doubled_separated)),
-        ("book_rate_ratio", U16(book_rate_ratio)),
-        ("book_rate_min_bp", U16(book_rate_min_bp)),
-        ("book_rate_min_uses", U32(book_rate_min_uses)),
-        ("z_long", F32(z_long)),
-        ("z_short", F32(z_short)),
-        ("min_verses", U32(min_verses)),
-        ("lengths_enabled", Bool(lengths_enabled)),
-        ("presence", Bool(presence)),
-        ("source_copy", Bool(source_copy)),
-        ("source_copy_min_run", U32(source_copy_min_run)),
-    ]
+macro_rules! value_from {
+    ($($ty:ty => $variant:ident),*) => {
+        $(impl From<$ty> for Value {
+            fn from(value: $ty) -> Self {
+                Value::$variant(value)
+            }
+        })*
+    };
 }
+
+value_from!(bool => Bool, u8 => U8, u16 => U16, u32 => U32, f32 => F32);
 
 /// A TypeScript string literal.
 fn quote(text: &str) -> String {
@@ -594,29 +423,21 @@ fn quote(text: &str) -> String {
     out
 }
 
-/// `sous-settings.ts`, from [`SousSettings`] and [`SETTING_DOCS`].
+/// `sous-settings.ts`, from [`SETTINGS`].
 ///
 /// # Panics
 ///
-/// On a field with no entry, an entry with no field, a kind the field's type
-/// cannot hold, or a description that is not one sentence or names a unit.
+/// On a kind the field's type cannot hold, a description that is not one
+/// sentence or names a unit, a setting whose check cannot be told from its
+/// path, or a table out of check order.
 #[must_use]
 pub fn settings_ts() -> String {
-    let fields = fields();
-    for entry in SETTING_DOCS {
-        assert!(
-            fields.iter().any(|(key, _)| *key == entry.key),
-            "SETTING_DOCS describes `{}`, which SousSettings does not have",
-            entry.key
-        );
-    }
-    let rows: Vec<(&str, Value, &SettingDoc)> = fields
+    assert_order();
+    let rows: Vec<(&str, Value, &Setting)> = SETTINGS
         .iter()
-        .map(|&(key, value)| {
-            let entry = SETTING_DOCS
-                .iter()
-                .find(|entry| entry.key == key)
-                .unwrap_or_else(|| panic!("`{key}` has no entry in SETTING_DOCS"));
+        .zip(SousSettings::default().values())
+        .map(|(entry, value)| {
+            let key = entry.key;
             assert!(
                 value.fits(entry.kind),
                 "`{key}` cannot be a {:?}",
@@ -650,6 +471,12 @@ pub fn settings_ts() -> String {
         let _ = writeln!(ts, "  readonly {key}: {};", value.ts_type());
     }
     ts.push_str("}\n\n");
+    let checks: Vec<String> = Check::ALL.iter().map(|check| quote(check.name())).collect();
+    let _ = writeln!(
+        ts,
+        "/** What a settings page groups by: one per convention channel, one per\n * source-compared lane. */\nexport type SousCheck =\n  | {};\n",
+        checks.join("\n  | ")
+    );
     ts.push_str(SPEC);
     let _ = writeln!(
         ts,
@@ -670,8 +497,8 @@ pub fn settings_ts() -> String {
             Group::Reference => "reference",
         };
         let max = match entry.kind {
-            Kind::ShareBp => entry.max.or(Some(10_000.0)),
-            _ => entry.max.or(value.type_max()),
+            Kind::ShareBp => Some(10_000.0),
+            _ => value.type_max(),
         };
         let min = entry.min.or(value.type_max().map(|_| 0.0));
         let mut bounds = String::new();
@@ -683,14 +510,27 @@ pub fn settings_ts() -> String {
         }
         let _ = writeln!(
             ts,
-            "  {key}: {{\n    key: {},\n    kind: \"{kind}\",\n    default: {},{bounds}\n    group: \"{group}\",\n    label: {},\n    description:\n      {},\n  }},",
+            "  {key}: {{\n    key: {},\n    check: {},\n    kind: \"{kind}\",\n    default: {},{bounds}\n    group: \"{group}\",\n    label: {},\n    description:\n      {},\n  }},",
             quote(key),
+            quote(check_name(entry.check())),
             value.literal(),
             quote(entry.label),
             quote(entry.description),
         );
     }
     ts.push_str("};\n\n");
+    ts.push_str("const CHECKS: { readonly [C in SousCode]: SousCheck | null } = {\n");
+    for code in finding_codes() {
+        let check = code
+            .check
+            .map_or("null".to_string(), |check| quote(check.name()));
+        let _ = writeln!(ts, "  {}: {check},", quote(&code.code));
+    }
+    ts.push_str("};\n\n");
+    ts.push_str(
+        "/** The check a finding code belongs to; `null` for hygiene, which no setting tunes. */\n",
+    );
+    ts.push_str("export function checkOf(code: SousCode): SousCheck | null {\n  return CHECKS[code];\n}\n\n");
     ts.push_str(EXACT);
     ts.push_str("/** A copy of the settings the next publication judges with. */\n");
     ts.push_str("export function fromSettings(galley: SettingsHost): SousSettingsValues {\n");
@@ -721,7 +561,13 @@ const HEADER: &str = r#"/**
  * const values = fromSettings(galley);      // { placement: true, …, support_floor: 5, … }
  * toSettings(galley, { ...values, doubled_separated: true });
  * SOUS_SETTINGS.support_floor.description   // "How many times something must occur…"
+ * SOUS_SETTINGS.doubled_bare.check          // "Doubled"
+ * checkOf("convention.Doubled")             // "Doubled": a finding links to its settings
  * ```
+ *
+ * `SOUS_SETTINGS` iterates check by check: each check's own switch, then its
+ * sub-switches, then its thresholds; the settings several checks share
+ * (`check: "general"`) come last. `group` says only what kind of setting it is.
  *
  * A setting kitchen adds, removes, or retypes changes `SousSettingsValues`, so
  * a host that restates it fails to compile rather than missing it.
@@ -729,6 +575,7 @@ const HEADER: &str = r#"/**
 
 import type { SousSettings as BundlerSettings } from "./pkg-bundler/usfm_galley.js";
 import type { SousSettings as WebSettings } from "./pkg-web/usfm_galley.js";
+import type { SousCode } from "./sous-reader.ts";
 
 "#;
 
@@ -737,6 +584,8 @@ export type SettingGroup = "rules" | "thresholds" | "reference";
 
 export interface SettingSpec<K extends SettingKey> {
   readonly key: K;
+  /** The check it tunes, or "general" when several share it. */
+  readonly check: SousCheck | "general";
   /** A share-bp is out of 10,000. */
   readonly kind: SettingKind;
   readonly default: SousSettingsValues[K];
@@ -769,3 +618,87 @@ export interface SettingsHost {
 }
 
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn check_of(key: &str) -> &'static str {
+        let setting = SETTINGS.iter().find(|setting| setting.key == key).unwrap();
+        check_name(setting.check())
+    }
+
+    #[test]
+    fn a_setting_tunes_the_check_its_path_lives_in() {
+        assert_eq!(check_of("doubled"), "Doubled");
+        assert_eq!(check_of("doubled_bare"), "Doubled");
+        assert_eq!(check_of("doubles_productive_bp"), "Doubled");
+        assert_eq!(check_of("terminal_upper_share_bp"), "Casing");
+        assert_eq!(check_of("letter_runs"), "LetterRun");
+        assert_eq!(check_of("lengths_enabled"), "LengthProportionality");
+        assert_eq!(check_of("presence"), "Presence");
+        assert_eq!(check_of("source_copy_min_run"), "SourceCopy");
+        assert_eq!(check_of("support_floor"), "general");
+        assert_eq!(check_of("word_support_floor"), "general");
+    }
+
+    #[test]
+    #[should_panic(expected = "names no check and is not shared")]
+    fn a_path_naming_no_check_is_refused() {
+        let stray = Setting {
+            key: "stray",
+            path: &["lengths", "stray"],
+            kind: Kind::Count,
+            group: Group::Reference,
+            label: "",
+            description: "",
+            min: None,
+        };
+        stray.check();
+    }
+
+    #[test]
+    fn every_finding_code_but_hygiene_has_a_check_with_settings() {
+        for code in finding_codes() {
+            assert_eq!(
+                code.check.is_none(),
+                code.code.starts_with("hygiene."),
+                "{}",
+                code.code
+            );
+            if let Some(check) = code.check {
+                assert!(
+                    SETTINGS
+                        .iter()
+                        .any(|setting| setting.check() == Some(check)),
+                    "{} has no settings",
+                    code.code
+                );
+            }
+        }
+        for check in Check::ALL {
+            assert!(
+                finding_codes().iter().any(|code| code.check == Some(check)),
+                "no finding code is {}'s",
+                check.name()
+            );
+        }
+    }
+
+    #[test]
+    fn every_setting_round_trips_through_its_path() {
+        let mut moved = SousSettings::default();
+        moved.placement = !moved.placement;
+        moved.doubled_separated = !moved.doubled_separated;
+        moved.terminal_lower_share_bp += 1;
+        moved.source_copy_min_run += 1;
+        moved.z_short += 1.0;
+        moved.word_support_floor += 1;
+        let mut config = JudgingConfig::default();
+        moved.apply(&mut config);
+        assert_eq!(SousSettings::from(&config), moved);
+        assert!(config.doubled.separated);
+        assert_eq!(config.words.floor, 21);
+        assert_eq!(config.lengths.source_copy.min_run, 4);
+    }
+}

@@ -594,11 +594,28 @@ a copy of the current values; `setConfig` writes them into BOTH judging slots of
 every field that is not a knob at the value it had.
 
 A host should not restate the fields. `sous-settings.ts`, generated from the
-struct and its `SETTING_DOCS` in `galley/src/sous/settings.rs`, is the typed
-list: `SettingKey`, `SousSettingsValues`, `SOUS_SETTINGS` (kind, default,
-bounds, group, label, one plain sentence each), and `fromSettings` /
-`toSettings`, which copy through the handle and free it. The struct is native
-so the generator reads it; `wasm` only adds the bindings.
+`settings!` table in `galley/src/sous/settings.rs`, is the typed list:
+`SettingKey`, `SousSettingsValues`, `SOUS_SETTINGS` (check, kind, default,
+bounds, group, label, one plain sentence each), `SousCheck`, `checkOf`, and
+`fromSettings` / `toSettings`, which copy through the handle and free it. The
+table also writes the struct and its conversions, one row per setting with its
+path in `JudgingConfig`; `wasm` only adds the bindings.
+
+A page builds one section per check:
+
+```js
+SOUS_SETTINGS.doubled.check                // "Doubled", the check's own switch
+SOUS_SETTINGS.doubles_productive_bp.check  // "Doubled", a threshold under it
+SOUS_SETTINGS.support_floor.check          // "general": several checks read it
+checkOf("convention.Doubled")              // "Doubled": a finding links to its settings
+checkOf("presence.Missing")                // "Presence", one check for the three kinds
+checkOf("hygiene.C0Control")               // null: no setting tunes hygiene
+```
+
+`SOUS_SETTINGS` iterates check by check: the check's own switch, then its
+sub-switches, then its thresholds; general last. The check is where the
+setting lives in `JudgingConfig`, so it cannot disagree with what the judge
+reads; `group` only says what kind of setting it is.
 
 ```js
 const values = fromSettings(galley);
@@ -640,9 +657,9 @@ galley.updateReference("ref/RUT.usfm", rutText);   // the same bytes is enough
 the lane set is part of what the Pantry serves a book from, as `keepText` is.
 Turn the knob on BEFORE loading the sources and none of this arises.
 
-Not on the wall: `bands` and `word_bands` (a `Staircase` is a validated ladder,
-not a plain field), `letters` and `doubles` (tri-state policies), and the two
-roster bounds that only make sense beside `letters`. None has a plain-field
+Not on the wall: `shared.bands` and `words.bands` (a `Staircase` is a validated
+ladder, not a plain field), `rarity.letters` and `doubled.policy` (tri-state
+policies), and the rarity roster's floor and bounds. None has a plain-field
 shape bindgen can carry, and no consumer has asked for one; because `apply`
 touches only the settings, adding them later changes nothing that already works.
 

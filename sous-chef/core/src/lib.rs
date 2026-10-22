@@ -26,10 +26,10 @@ pub use codec::{
     QuantizedDeviation, RECORD_LEN, Reasons, RuleCode, SourceCopyDigest,
 };
 pub use corpus::{
-    CoordinateSpace, CorpusBook, CorpusSnapshot, CorpusWireError, DIRECTORY_ENTRY_BYTES,
-    DIRECTORY_ID_OFFSET, FLAG_UTF16, FORMAT_VERSION, HEADER_BYTES, ID_PREFIX_BYTES, MAGIC,
-    PATTERN_ROW_LEN, PublicationBook, SECTION_ALIGNMENT, SnapshotId, encode_to_corpus_buffer,
-    generated_reader_ts,
+    Check, CoordinateSpace, CorpusBook, CorpusSnapshot, CorpusWireError, DIRECTORY_ENTRY_BYTES,
+    DIRECTORY_ID_OFFSET, FLAG_UTF16, FORMAT_VERSION, FindingCode, HEADER_BYTES, ID_PREFIX_BYTES,
+    MAGIC, PATTERN_ROW_LEN, PublicationBook, SECTION_ALIGNMENT, SnapshotId,
+    encode_to_corpus_buffer, finding_codes, generated_reader_ts,
 };
 pub use input::{
     BookIndex, BookKey, Chapter, Corpus, InputError, ProjectedBook, TextRange, Verse, VerseKey,

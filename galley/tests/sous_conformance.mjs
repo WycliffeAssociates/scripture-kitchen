@@ -332,7 +332,11 @@ check(cold.terminals().every((entry) => cold.terminal(entry.glyph, entry) === en
 // --- the typed settings are the wasm class's, field for field --------------
 
 {
-  const { SOUS_SETTINGS, SETTING_KEYS, fromSettings, toSettings } = await import(resolve(here, "../sous-settings.ts"));
+  const { SOUS_SETTINGS, SETTING_KEYS, checkOf, fromSettings, toSettings } = await import(resolve(here, "../sous-settings.ts"));
+  const { SOUS_CODES } = await import(resolve(here, "../sous-reader.ts"));
+  for (const code of SOUS_CODES) check(checkOf(code) === null || SETTING_KEYS.some((key) => SOUS_SETTINGS[key].check === checkOf(code)), `${code}'s check has settings`);
+  eq(checkOf("hygiene.C0Control"), null, "hygiene has no check");
+  eq(SOUS_SETTINGS.doubled_bare.check, "Doubled", "a setting names its check");
   const accessors = Object.getOwnPropertyNames(doors.SousSettings.prototype).filter(
     (name) => typeof Object.getOwnPropertyDescriptor(doors.SousSettings.prototype, name).get === "function",
   );

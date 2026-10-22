@@ -6,7 +6,13 @@
  * const values = fromSettings(galley);      // { placement: true, …, support_floor: 5, … }
  * toSettings(galley, { ...values, doubled_separated: true });
  * SOUS_SETTINGS.support_floor.description   // "How many times something must occur…"
+ * SOUS_SETTINGS.doubled_bare.check          // "Doubled"
+ * checkOf("convention.Doubled")             // "Doubled": a finding links to its settings
  * ```
+ *
+ * `SOUS_SETTINGS` iterates check by check: each check's own switch, then its
+ * sub-switches, then its thresholds; the settings several checks share
+ * (`check: "general"`) come last. `group` says only what kind of setting it is.
  *
  * A setting kitchen adds, removes, or retypes changes `SousSettingsValues`, so
  * a host that restates it fails to compile rather than missing it.
@@ -14,6 +20,7 @@
 
 import type { SousSettings as BundlerSettings } from "./pkg-bundler/usfm_galley.js";
 import type { SousSettings as WebSettings } from "./pkg-web/usfm_galley.js";
+import type { SousCode } from "./sous-reader.ts";
 
 export type SettingKey =
   | "placement"
@@ -22,30 +29,30 @@ export type SettingKey =
   | "pooled_neighbor"
   | "rarity"
   | "casing"
-  | "word_length"
-  | "doubled"
-  | "letter_runs"
-  | "sentence_start"
-  | "book_rate"
-  | "support_floor"
-  | "word_support_floor"
   | "terminal_upper_share_bp"
   | "terminal_lower_share_bp"
+  | "sentence_start"
   | "sentence_start_upper_bp"
+  | "word_length"
   | "word_length_sigma"
-  | "doubles_productive_bp"
+  | "doubled"
   | "doubled_bare"
   | "doubled_separated"
+  | "doubles_productive_bp"
+  | "letter_runs"
+  | "book_rate"
   | "book_rate_ratio"
   | "book_rate_min_bp"
   | "book_rate_min_uses"
+  | "lengths_enabled"
   | "z_long"
   | "z_short"
   | "min_verses"
-  | "lengths_enabled"
   | "presence"
   | "source_copy"
-  | "source_copy_min_run";
+  | "source_copy_min_run"
+  | "support_floor"
+  | "word_support_floor";
 
 /** Every setting, as the wasm `SousSettings` class types it. */
 export interface SousSettingsValues {
@@ -55,37 +62,57 @@ export interface SousSettingsValues {
   readonly pooled_neighbor: boolean;
   readonly rarity: boolean;
   readonly casing: boolean;
-  readonly word_length: boolean;
-  readonly doubled: boolean;
-  readonly letter_runs: boolean;
-  readonly sentence_start: boolean;
-  readonly book_rate: boolean;
-  readonly support_floor: number;
-  readonly word_support_floor: number;
   readonly terminal_upper_share_bp: number;
   readonly terminal_lower_share_bp: number;
+  readonly sentence_start: boolean;
   readonly sentence_start_upper_bp: number;
+  readonly word_length: boolean;
   readonly word_length_sigma: number;
-  readonly doubles_productive_bp: number;
+  readonly doubled: boolean;
   readonly doubled_bare: boolean;
   readonly doubled_separated: boolean;
+  readonly doubles_productive_bp: number;
+  readonly letter_runs: boolean;
+  readonly book_rate: boolean;
   readonly book_rate_ratio: number;
   readonly book_rate_min_bp: number;
   readonly book_rate_min_uses: number;
+  readonly lengths_enabled: boolean;
   readonly z_long: number;
   readonly z_short: number;
   readonly min_verses: number;
-  readonly lengths_enabled: boolean;
   readonly presence: boolean;
   readonly source_copy: boolean;
   readonly source_copy_min_run: number;
+  readonly support_floor: number;
+  readonly word_support_floor: number;
 }
+
+/** What a settings page groups by: one per convention channel, one per
+ * source-compared lane. */
+export type SousCheck =
+  | "ExactNeighbor"
+  | "PooledNeighbor"
+  | "RunShape"
+  | "Placement"
+  | "Rarity"
+  | "Casing"
+  | "WordLength"
+  | "Doubled"
+  | "LetterRun"
+  | "SentenceStart"
+  | "BookRate"
+  | "Presence"
+  | "SourceCopy"
+  | "LengthProportionality";
 
 export type SettingKind = "switch" | "count" | "share-bp" | "decimal";
 export type SettingGroup = "rules" | "thresholds" | "reference";
 
 export interface SettingSpec<K extends SettingKey> {
   readonly key: K;
+  /** The check it tunes, or "general" when several share it. */
+  readonly check: SousCheck | "general";
   /** A share-bp is out of 10,000. */
   readonly kind: SettingKind;
   readonly default: SousSettingsValues[K];
@@ -104,35 +131,36 @@ export const SETTING_KEYS: readonly SettingKey[] = [
   "pooled_neighbor",
   "rarity",
   "casing",
-  "word_length",
-  "doubled",
-  "letter_runs",
-  "sentence_start",
-  "book_rate",
-  "support_floor",
-  "word_support_floor",
   "terminal_upper_share_bp",
   "terminal_lower_share_bp",
+  "sentence_start",
   "sentence_start_upper_bp",
+  "word_length",
   "word_length_sigma",
-  "doubles_productive_bp",
+  "doubled",
   "doubled_bare",
   "doubled_separated",
+  "doubles_productive_bp",
+  "letter_runs",
+  "book_rate",
   "book_rate_ratio",
   "book_rate_min_bp",
   "book_rate_min_uses",
+  "lengths_enabled",
   "z_long",
   "z_short",
   "min_verses",
-  "lengths_enabled",
   "presence",
   "source_copy",
   "source_copy_min_run",
+  "support_floor",
+  "word_support_floor",
 ];
 
 export const SOUS_SETTINGS: { readonly [K in SettingKey]: SettingSpec<K> } = {
   placement: {
     key: "placement",
+    check: "Placement",
     kind: "switch",
     default: true,
     group: "rules",
@@ -142,6 +170,7 @@ export const SOUS_SETTINGS: { readonly [K in SettingKey]: SettingSpec<K> } = {
   },
   run_shape: {
     key: "run_shape",
+    check: "RunShape",
     kind: "switch",
     default: true,
     group: "rules",
@@ -151,6 +180,7 @@ export const SOUS_SETTINGS: { readonly [K in SettingKey]: SettingSpec<K> } = {
   },
   exact_neighbor: {
     key: "exact_neighbor",
+    check: "ExactNeighbor",
     kind: "switch",
     default: true,
     group: "rules",
@@ -160,6 +190,7 @@ export const SOUS_SETTINGS: { readonly [K in SettingKey]: SettingSpec<K> } = {
   },
   pooled_neighbor: {
     key: "pooled_neighbor",
+    check: "PooledNeighbor",
     kind: "switch",
     default: false,
     group: "rules",
@@ -169,6 +200,7 @@ export const SOUS_SETTINGS: { readonly [K in SettingKey]: SettingSpec<K> } = {
   },
   rarity: {
     key: "rarity",
+    check: "Rarity",
     kind: "switch",
     default: true,
     group: "rules",
@@ -178,6 +210,7 @@ export const SOUS_SETTINGS: { readonly [K in SettingKey]: SettingSpec<K> } = {
   },
   casing: {
     key: "casing",
+    check: "Casing",
     kind: "switch",
     default: true,
     group: "rules",
@@ -185,75 +218,9 @@ export const SOUS_SETTINGS: { readonly [K in SettingKey]: SettingSpec<K> } = {
     description:
       "Flags a word capitalized, or not, in a way this project rarely writes that word in the middle of a sentence, like “On” where the project writes “on”.",
   },
-  word_length: {
-    key: "word_length",
-    kind: "switch",
-    default: false,
-    group: "rules",
-    label: "Very long words",
-    description:
-      "Flags words far longer than the words this project usually uses, which can mean two words ran together; off by default because long names are common.",
-  },
-  doubled: {
-    key: "doubled",
-    kind: "switch",
-    default: true,
-    group: "rules",
-    label: "Doubled words",
-    description:
-      "Turns every check for a word written twice in a row on or off.",
-  },
-  letter_runs: {
-    key: "letter_runs",
-    kind: "switch",
-    default: true,
-    group: "rules",
-    label: "Repeated letters",
-    description:
-      "Flags a letter written more times in a row than this project ever writes it, like “joyfullly”.",
-  },
-  sentence_start: {
-    key: "sentence_start",
-    kind: "switch",
-    default: true,
-    group: "rules",
-    label: "Lowercase after a sentence end",
-    description:
-      "Flags a lowercase word right after a mark, like “?” or “!”, that this project almost always follows with a capital.",
-  },
-  book_rate: {
-    key: "book_rate",
-    kind: "switch",
-    default: true,
-    group: "rules",
-    label: "One book differs",
-    description:
-      "Flags one book that puts a mark next to something far more often than the project's other books do, like a dash after a space in one book only.",
-  },
-  support_floor: {
-    key: "support_floor",
-    kind: "count",
-    default: 5,
-    min: 1,
-    max: 4294967295,
-    group: "thresholds",
-    label: "Habit count",
-    description:
-      "How many times something must occur before the checks treat it as a habit of this project rather than a one-off.",
-  },
-  word_support_floor: {
-    key: "word_support_floor",
-    kind: "count",
-    default: 20,
-    min: 1,
-    max: 4294967295,
-    group: "thresholds",
-    label: "Word habit count",
-    description:
-      "How many times a word must appear in the middle of a sentence before the capital-letter check compares its spellings.",
-  },
   terminal_upper_share_bp: {
     key: "terminal_upper_share_bp",
+    check: "Casing",
     kind: "share-bp",
     default: 8000,
     min: 0,
@@ -265,6 +232,7 @@ export const SOUS_SETTINGS: { readonly [K in SettingKey]: SettingSpec<K> } = {
   },
   terminal_lower_share_bp: {
     key: "terminal_lower_share_bp",
+    check: "Casing",
     kind: "share-bp",
     default: 2000,
     min: 0,
@@ -274,8 +242,19 @@ export const SOUS_SETTINGS: { readonly [K in SettingKey]: SettingSpec<K> } = {
     description:
       "How rarely a mark may be followed by a capital for a capital after it to be checked; marks between this and the capital setting are left alone.",
   },
+  sentence_start: {
+    key: "sentence_start",
+    check: "SentenceStart",
+    kind: "switch",
+    default: true,
+    group: "rules",
+    label: "Lowercase after a sentence end",
+    description:
+      "Flags a lowercase word right after a mark, like “?” or “!”, that this project almost always follows with a capital.",
+  },
   sentence_start_upper_bp: {
     key: "sentence_start_upper_bp",
+    check: "SentenceStart",
     kind: "share-bp",
     default: 9800,
     min: 0,
@@ -285,8 +264,19 @@ export const SOUS_SETTINGS: { readonly [K in SettingKey]: SettingSpec<K> } = {
     description:
       "How often this project must follow a mark with a capital before a lowercase word after that mark is flagged.",
   },
+  word_length: {
+    key: "word_length",
+    check: "WordLength",
+    kind: "switch",
+    default: false,
+    group: "rules",
+    label: "Very long words",
+    description:
+      "Flags words far longer than the words this project usually uses, which can mean two words ran together; off by default because long names are common.",
+  },
   word_length_sigma: {
     key: "word_length_sigma",
+    check: "WordLength",
     kind: "count",
     default: 4,
     min: 1,
@@ -296,19 +286,19 @@ export const SOUS_SETTINGS: { readonly [K in SettingKey]: SettingSpec<K> } = {
     description:
       "How far past this project's usual word length a word must be, counted in steps of how much word lengths usually vary, before the long-word check flags it.",
   },
-  doubles_productive_bp: {
-    key: "doubles_productive_bp",
-    kind: "share-bp",
-    default: 300,
-    min: 0,
-    max: 10000,
-    group: "thresholds",
-    label: "Repeating language",
+  doubled: {
+    key: "doubled",
+    check: "Doubled",
+    kind: "switch",
+    default: true,
+    group: "rules",
+    label: "Doubled words",
     description:
-      "When more than this share of the different words in the project are written twice in a row more than once, the project is taken to repeat words on purpose and the doubled-word checks stay silent.",
+      "Turns every check for a word written twice in a row on or off.",
   },
   doubled_bare: {
     key: "doubled_bare",
+    check: "Doubled",
     kind: "switch",
     default: true,
     group: "rules",
@@ -318,6 +308,7 @@ export const SOUS_SETTINGS: { readonly [K in SettingKey]: SettingSpec<K> } = {
   },
   doubled_separated: {
     key: "doubled_separated",
+    check: "Doubled",
     kind: "switch",
     default: false,
     group: "rules",
@@ -325,8 +316,41 @@ export const SOUS_SETTINGS: { readonly [K in SettingKey]: SettingSpec<K> } = {
     description:
       "Flags a word written twice with punctuation between, like “Moses, Moses”, unless this project does that with the word often; off by default because calling someone by name twice is common.",
   },
+  doubles_productive_bp: {
+    key: "doubles_productive_bp",
+    check: "Doubled",
+    kind: "share-bp",
+    default: 300,
+    min: 0,
+    max: 10000,
+    group: "thresholds",
+    label: "Repeating language",
+    description:
+      "When more than this share of the different words in the project are written twice in a row more than once, the project is taken to repeat words on purpose and the doubled-word checks stay silent.",
+  },
+  letter_runs: {
+    key: "letter_runs",
+    check: "LetterRun",
+    kind: "switch",
+    default: true,
+    group: "rules",
+    label: "Repeated letters",
+    description:
+      "Flags a letter written more times in a row than this project ever writes it, like “joyfullly”.",
+  },
+  book_rate: {
+    key: "book_rate",
+    check: "BookRate",
+    kind: "switch",
+    default: true,
+    group: "rules",
+    label: "One book differs",
+    description:
+      "Flags one book that puts a mark next to something far more often than the project's other books do, like a dash after a space in one book only.",
+  },
   book_rate_ratio: {
     key: "book_rate_ratio",
+    check: "BookRate",
     kind: "count",
     default: 10,
     min: 1,
@@ -338,6 +362,7 @@ export const SOUS_SETTINGS: { readonly [K in SettingKey]: SettingSpec<K> } = {
   },
   book_rate_min_bp: {
     key: "book_rate_min_bp",
+    check: "BookRate",
     kind: "share-bp",
     default: 4000,
     min: 0,
@@ -349,6 +374,7 @@ export const SOUS_SETTINGS: { readonly [K in SettingKey]: SettingSpec<K> } = {
   },
   book_rate_min_uses: {
     key: "book_rate_min_uses",
+    check: "BookRate",
     kind: "count",
     default: 100,
     min: 1,
@@ -358,8 +384,19 @@ export const SOUS_SETTINGS: { readonly [K in SettingKey]: SettingSpec<K> } = {
     description:
       "How many times a book must use a mark before the one-book check may flag that book for it.",
   },
+  lengths_enabled: {
+    key: "lengths_enabled",
+    check: "LengthProportionality",
+    kind: "switch",
+    default: true,
+    group: "reference",
+    label: "Verse lengths",
+    description:
+      "Compares each verse's length with the same verse in the source text and flags verses much longer or shorter than this project usually is.",
+  },
   z_long: {
     key: "z_long",
+    check: "LengthProportionality",
     kind: "decimal",
     default: 3.5,
     min: 0,
@@ -370,6 +407,7 @@ export const SOUS_SETTINGS: { readonly [K in SettingKey]: SettingSpec<K> } = {
   },
   z_short: {
     key: "z_short",
+    check: "LengthProportionality",
     kind: "decimal",
     default: 3.5,
     min: 0,
@@ -380,6 +418,7 @@ export const SOUS_SETTINGS: { readonly [K in SettingKey]: SettingSpec<K> } = {
   },
   min_verses: {
     key: "min_verses",
+    check: "LengthProportionality",
     kind: "count",
     default: 50,
     min: 0,
@@ -389,17 +428,9 @@ export const SOUS_SETTINGS: { readonly [K in SettingKey]: SettingSpec<K> } = {
     description:
       "How many verses a book must share with the source before its verse lengths are compared within that book as well as across the project.",
   },
-  lengths_enabled: {
-    key: "lengths_enabled",
-    kind: "switch",
-    default: true,
-    group: "reference",
-    label: "Verse lengths",
-    description:
-      "Compares each verse's length with the same verse in the source text and flags verses much longer or shorter than this project usually is.",
-  },
   presence: {
     key: "presence",
+    check: "Presence",
     kind: "switch",
     default: true,
     group: "reference",
@@ -409,6 +440,7 @@ export const SOUS_SETTINGS: { readonly [K in SettingKey]: SettingSpec<K> } = {
   },
   source_copy: {
     key: "source_copy",
+    check: "SourceCopy",
     kind: "switch",
     default: false,
     group: "reference",
@@ -418,6 +450,7 @@ export const SOUS_SETTINGS: { readonly [K in SettingKey]: SettingSpec<K> } = {
   },
   source_copy_min_run: {
     key: "source_copy_min_run",
+    check: "SourceCopy",
     kind: "count",
     default: 3,
     min: 2,
@@ -427,7 +460,66 @@ export const SOUS_SETTINGS: { readonly [K in SettingKey]: SettingSpec<K> } = {
     description:
       "How many words in a row must match the source verse before the copied-words check flags them.",
   },
+  support_floor: {
+    key: "support_floor",
+    check: "general",
+    kind: "count",
+    default: 5,
+    min: 1,
+    max: 4294967295,
+    group: "thresholds",
+    label: "Habit count",
+    description:
+      "How many times something must occur before the checks treat it as a habit of this project rather than a one-off.",
+  },
+  word_support_floor: {
+    key: "word_support_floor",
+    check: "general",
+    kind: "count",
+    default: 20,
+    min: 1,
+    max: 4294967295,
+    group: "thresholds",
+    label: "Word habit count",
+    description:
+      "How many times a word, or a run of one letter, must occur before the capital-letter, long-word and repeated-letter checks compare it with the rest of this project.",
+  },
 };
+
+const CHECKS: { readonly [C in SousCode]: SousCheck | null } = {
+  "hygiene.C0Control": null,
+  "hygiene.Delete": null,
+  "hygiene.C1Control": null,
+  "hygiene.ReplacementChar": null,
+  "hygiene.StrayCarriageReturn": null,
+  "hygiene.StrandedBackslash": null,
+  "hygiene.ConflictMarker": null,
+  "hygiene.FreeCombiningMark": null,
+  "hygiene.MisplacedFormat": null,
+  "hygiene.NoBreakSpace": null,
+  "hygiene.Noncharacter": null,
+  "presence.Missing": "Presence",
+  "presence.Extra": "Presence",
+  "presence.Empty": "Presence",
+  "convention.ExactNeighbor": "ExactNeighbor",
+  "convention.PooledNeighbor": "PooledNeighbor",
+  "convention.RunShape": "RunShape",
+  "convention.Placement": "Placement",
+  "convention.Rarity": "Rarity",
+  "convention.Casing": "Casing",
+  "convention.WordLength": "WordLength",
+  "convention.Doubled": "Doubled",
+  "convention.LetterRun": "LetterRun",
+  "convention.SentenceStart": "SentenceStart",
+  "convention.BookRate": "BookRate",
+  "sourceCopy": "SourceCopy",
+  "lengthProportionality": "LengthProportionality",
+};
+
+/** The check a finding code belongs to; `null` for hygiene, which no setting tunes. */
+export function checkOf(code: SousCode): SousCheck | null {
+  return CHECKS[code];
+}
 
 type DataKey<T> = { [K in keyof T]: T[K] extends (...args: never[]) => unknown ? never : K }[keyof T];
 type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
@@ -458,30 +550,30 @@ export function fromSettings(galley: SettingsHost): SousSettingsValues {
       pooled_neighbor: handle.pooled_neighbor,
       rarity: handle.rarity,
       casing: handle.casing,
-      word_length: handle.word_length,
-      doubled: handle.doubled,
-      letter_runs: handle.letter_runs,
-      sentence_start: handle.sentence_start,
-      book_rate: handle.book_rate,
-      support_floor: handle.support_floor,
-      word_support_floor: handle.word_support_floor,
       terminal_upper_share_bp: handle.terminal_upper_share_bp,
       terminal_lower_share_bp: handle.terminal_lower_share_bp,
+      sentence_start: handle.sentence_start,
       sentence_start_upper_bp: handle.sentence_start_upper_bp,
+      word_length: handle.word_length,
       word_length_sigma: handle.word_length_sigma,
-      doubles_productive_bp: handle.doubles_productive_bp,
+      doubled: handle.doubled,
       doubled_bare: handle.doubled_bare,
       doubled_separated: handle.doubled_separated,
+      doubles_productive_bp: handle.doubles_productive_bp,
+      letter_runs: handle.letter_runs,
+      book_rate: handle.book_rate,
       book_rate_ratio: handle.book_rate_ratio,
       book_rate_min_bp: handle.book_rate_min_bp,
       book_rate_min_uses: handle.book_rate_min_uses,
+      lengths_enabled: handle.lengths_enabled,
       z_long: handle.z_long,
       z_short: handle.z_short,
       min_verses: handle.min_verses,
-      lengths_enabled: handle.lengths_enabled,
       presence: handle.presence,
       source_copy: handle.source_copy,
       source_copy_min_run: handle.source_copy_min_run,
+      support_floor: handle.support_floor,
+      word_support_floor: handle.word_support_floor,
     };
   } finally {
     handle.free();
@@ -498,30 +590,30 @@ export function toSettings(galley: SettingsHost, values: SousSettingsValues): vo
     handle.pooled_neighbor = values.pooled_neighbor;
     handle.rarity = values.rarity;
     handle.casing = values.casing;
-    handle.word_length = values.word_length;
-    handle.doubled = values.doubled;
-    handle.letter_runs = values.letter_runs;
-    handle.sentence_start = values.sentence_start;
-    handle.book_rate = values.book_rate;
-    handle.support_floor = values.support_floor;
-    handle.word_support_floor = values.word_support_floor;
     handle.terminal_upper_share_bp = values.terminal_upper_share_bp;
     handle.terminal_lower_share_bp = values.terminal_lower_share_bp;
+    handle.sentence_start = values.sentence_start;
     handle.sentence_start_upper_bp = values.sentence_start_upper_bp;
+    handle.word_length = values.word_length;
     handle.word_length_sigma = values.word_length_sigma;
-    handle.doubles_productive_bp = values.doubles_productive_bp;
+    handle.doubled = values.doubled;
     handle.doubled_bare = values.doubled_bare;
     handle.doubled_separated = values.doubled_separated;
+    handle.doubles_productive_bp = values.doubles_productive_bp;
+    handle.letter_runs = values.letter_runs;
+    handle.book_rate = values.book_rate;
     handle.book_rate_ratio = values.book_rate_ratio;
     handle.book_rate_min_bp = values.book_rate_min_bp;
     handle.book_rate_min_uses = values.book_rate_min_uses;
+    handle.lengths_enabled = values.lengths_enabled;
     handle.z_long = values.z_long;
     handle.z_short = values.z_short;
     handle.min_verses = values.min_verses;
-    handle.lengths_enabled = values.lengths_enabled;
     handle.presence = values.presence;
     handle.source_copy = values.source_copy;
     handle.source_copy_min_run = values.source_copy_min_run;
+    handle.support_floor = values.support_floor;
+    handle.word_support_floor = values.word_support_floor;
   } catch (error) {
     handle.free();
     throw error;

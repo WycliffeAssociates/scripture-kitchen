@@ -5,6 +5,7 @@
 //!   from the layout consts, so the two readers cannot drift.
 //! ```
 
+use super::codes::finding_codes;
 use super::*;
 use crate::codec::{
     Anchor, HygieneClass, HygieneSite, Placement, PresenceKind, RECORD_BOOK_INDEX_OFFSET,
@@ -16,33 +17,11 @@ use crate::substrate::{OuterClass, RUN_BUCKETS};
 use crate::unicode::Pool;
 use crate::words::{Form, LETTER_RUN_MAX, LETTER_RUN_MIN};
 
-/// Every finding code with its rule, in wire order: hygiene classes, presence
-/// kinds, convention channels, then the two lanes with no table.
+/// Every finding code with its rule, as `line` renders it.
 fn sous_codes(line: impl Fn(&str, &str) -> String) -> Vec<String> {
-    let hygiene = HygieneClass::ALL
+    finding_codes()
         .iter()
-        .map(|class| (format!("hygiene.{}", class.name()), class.rule()));
-    let presence = PresenceKind::ALL
-        .iter()
-        .map(|kind| (format!("presence.{}", kind.name()), kind.rule()));
-    let convention = Channel::ALL
-        .iter()
-        .map(|channel| (format!("convention.{}", channel.name()), channel.rule()));
-    let lanes = [
-        (
-            "sourceCopy".to_string(),
-            "Words in a row spelled exactly as in the same verse of the source text, as if pasted in.",
-        ),
-        (
-            "lengthProportionality".to_string(),
-            "A verse far longer or shorter, against its source verse, than this project usually is.",
-        ),
-    ];
-    hygiene
-        .chain(presence)
-        .chain(convention)
-        .chain(lanes)
-        .map(|(code, rule)| line(&code, rule))
+        .map(|code| line(&code.code, code.rule))
         .collect()
 }
 

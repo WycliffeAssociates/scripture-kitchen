@@ -17,6 +17,7 @@ use crate::judge::{Cluster, Pattern, TerminalCount};
 use crate::{BookIndex, BookKey};
 
 mod cluster_row;
+mod codes;
 mod error;
 mod layout;
 mod pattern_row;
@@ -25,6 +26,7 @@ mod terminal_row;
 #[cfg(test)]
 mod tests;
 
+pub use codes::{Check, FindingCode, finding_codes};
 pub use error::CorpusWireError;
 pub use layout::*;
 pub use reader_ts::generated_reader_ts;
