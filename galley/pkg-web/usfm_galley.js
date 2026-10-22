@@ -1258,15 +1258,15 @@ export class Galley {
 if (Symbol.dispose) Galley.prototype[Symbol.dispose] = Galley.prototype.free;
 
 /**
- * The judging settings that cross the wall: every plain scalar of
- * [`JudgingConfig`], flat, so bindgen writes the getters and setters and JS
- * assigns `settings.casing = false`.
+ * The judging settings that cross the wall, flat, so bindgen writes
+ * the getters and setters and JS assigns `settings.casing = false`.
  *
- * Not on the wall: `bands` and `word_bands` (a `Staircase` is a validated
- * ladder, not a plain field), `letters` and `doubles` (tri-state policies),
- * and the roster bounds. They have no plain-field shape and no consumer has
- * asked for them; everything not a knob keeps the current config's value
- * through [`apply`](SousSettings::apply), so widening this later breaks nothing.
+ * Not on the wall: the two ladders' bands (a `Staircase` is a
+ * validated ladder, not a plain field), the tri-state policies, and
+ * the rarity roster. No consumer has asked for them; everything not a
+ * knob keeps the current config's value through
+ * [`apply`](SousSettings::apply), so widening this later breaks
+ * nothing.
  */
 export class SousSettings {
     static __wrap(ptr) {
