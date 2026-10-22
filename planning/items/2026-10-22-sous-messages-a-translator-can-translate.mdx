@@ -2,7 +2,7 @@
 id: 51280e13-aef6-4067-b395-da56b8ca15dd
 title: "Sous messages a translator can translate"
 kind: plan
-status: in-progress
+status: done
 created: 2026-10-22
 updated: 2026-10-22
 sha: 3005bc7
@@ -29,7 +29,7 @@ English stays as close to today's wording as the rules allow.
 
 ## Built
 
-Commit 1768f38. 23 ids became 41; 37 of 46 tiers broke rule 1, and the 2,896 sentence variants they assembled from fragments are now 434 whole-sentence branches. `describe` splits by class for hygiene (`hygiene.unidentified` when the site does not show the character), and by situation for `exactNeighbor.alsoReversed`, `runShape.reordered` / `.common` / `.swapped`, `placement.follows.digit` / `.precedes.digit`, `rarity.lookalike` and `casing.afterMark`. Glyphs replace a kind's noun phrase; the kind stays only as `pooledNeighbor`'s pool and as a neighbour class, one whole sentence per value. The guide's "For translators" section maps ids to situations.
+Commits 1768f38 and 9e77006, shipped in 0.1.15. 23 ids became 41; 37 of 46 tiers broke rule 1, and the 2,896 sentence variants they assembled from fragments are now 434 whole-sentence branches. `describe` splits by class for hygiene (`hygiene.unidentified` when the site does not show the character), and by situation for `exactNeighbor.alsoReversed`, `runShape.reordered` / `.common` / `.swapped`, `placement.follows.digit` / `.precedes.digit`, `rarity.lookalike` and `casing.afterMark`. Glyphs replace a kind's noun phrase; the kind stays only as `pooledNeighbor`'s pool and as a neighbour class, one whole sentence per value. The guide's "For translators" section maps ids to situations.
 
 Known limits:
 
