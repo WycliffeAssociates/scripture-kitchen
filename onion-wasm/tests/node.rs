@@ -20,7 +20,7 @@
 
 use js_sys::{Object, Reflect};
 use onion_wasm::{
-    CustomMarkers, FormatOpts, attr_resolve, attrs, format, format_edits, format_edits_in, mask,
+    FormatOpts, attr_resolve, attrs, custom_markers, format, format_edits, format_edits_in, mask,
     parse, to_utf16,
 };
 use usfm_onion::wire;
@@ -254,63 +254,85 @@ fn an_unknown_option_is_refused_by_name() {
     assert!(wrong_type.contains("must be an object"), "{wrong_type}");
 }
 
-/// A handle in an options bag is lent, not taken: the same bag serves call
-/// after call, and the list is the handle's, not the installed one.
+/// A list is plain data: the same object serves call after call, a
+/// hand-built one of the same shape reads the same, and a wrong shape is
+/// refused by name.
 #[wasm_bindgen_test]
-fn a_handle_in_an_options_bag_stays_the_callers() {
+fn custom_markers_are_plain_data() {
     let text = "\\id GEN\n\\c 1\n\\p \\v 1 Jesus wept\\zmyf + \\ft why\\zmyf*.\n";
-    let mine =
-        CustomMarkers::new(r#"[{"name":"zmyf","category":"footnote"}]"#, None).expect("a list");
-    let handle = JsValue::from(mine);
-    let bag = Object::new();
-    Reflect::set(&bag, &JsValue::from_str("customMarkers"), &handle).expect("a plain object");
-    let bag: JsValue = bag.into();
-    let reading = |opts: Option<JsValue>| {
-        let out = mask(text, "verseText", opts).expect("known options");
-        Reflect::get(&out, &JsValue::from_str("text"))
-            .expect("a text key")
-            .as_string()
-            .expect("a string")
-    };
-    assert!(
-        reading(None).contains("why"),
-        "the installed list knows no zmyf"
-    );
-    assert_eq!(reading(Some(bag.clone())).trim(), "Jesus wept.");
+    let json = |source: &str| js_sys::JSON::parse(source).expect("JSON");
+    let mine = custom_markers(
+        json(r#"[{"name":"zmyf","category":"footnote"},{"name":"nope","category":"char"}]"#),
+        None,
+    )
+    .expect("a list");
     assert_eq!(
-        reading(Some(bag.clone())).trim(),
-        "Jesus wept.",
-        "the handle survived"
+        js_sys::JSON::stringify(&mine).expect("plain data"),
+        r#"{"markers":[{"name":"zmyf","category":"footnote"}],"relaxZPrefix":false,"malformed":[{"name":"nope","reason":"name does not start with z"}]}"#
+    );
+    let bag = |markers: &JsValue| {
+        let bag = Object::new();
+        Reflect::set(&bag, &JsValue::from_str("customMarkers"), markers).expect("a plain object");
+        Some(JsValue::from(bag))
+    };
+    let reading = |opts: Option<JsValue>| {
+        mask(text, "verseText", opts).map(|out| {
+            Reflect::get(&out, &JsValue::from_str("text"))
+                .expect("a text key")
+                .as_string()
+                .expect("a string")
+        })
+    };
+    assert!(reading(None).expect("no options").contains("why"));
+    for _ in 0..4 {
+        assert_eq!(
+            reading(bag(&mine)).expect("the same object").trim(),
+            "Jesus wept."
+        );
+    }
+    let by_hand =
+        json(r#"{"markers":[{"name":"zmyf","category":"footnote"}],"relaxZPrefix":false}"#);
+    assert_eq!(
+        reading(bag(&by_hand)).expect("no brand at runtime").trim(),
+        "Jesus wept."
     );
     assert_ne!(
-        parse(text, Some(bag.clone())).expect("known options"),
+        parse(text, bag(&mine)).expect("known options"),
         parse(text, None).expect("no options"),
     );
 
-    let lent =
-        CustomMarkers::new(r#"[{"name":"zmyf","category":"footnote"}]"#, None).expect("a list");
     let mut opts = FormatOpts::new();
-    opts.set_custom_markers(&lent);
-    drop(lent);
-    assert_eq!(
-        format(text, &opts),
-        format(text, &opts),
-        "the opts keep their own list"
-    );
+    opts.set_custom_markers(mine.clone()).expect("a list");
+    assert_eq!(format(text, &opts), format(text, &opts));
 
-    let refused = mask(
-        text,
-        "verseText",
-        Some({
-            let wrong = Object::new();
-            Reflect::set(
-                &wrong,
-                &JsValue::from_str("customMarkers"),
-                &JsValue::from_str("zmyf"),
-            )
-            .expect("a plain object");
-            wrong.into()
-        }),
-    );
-    assert!(refused.is_err(), "a string is not a handle");
+    for (wrong, why) in [
+        (
+            JsValue::from_str("zmyf"),
+            "customMarkers must be a CustomMarkers object",
+        ),
+        (
+            json(r#"{"markers":[{"name":"zmyf","category":"bogus"}],"relaxZPrefix":false}"#),
+            "is not a category word",
+        ),
+        (
+            json(r#"{"markers":[{"name":"nope","category":"char"}],"relaxZPrefix":false}"#),
+            "name does not start with z",
+        ),
+        (
+            json(r#"{"markers":[],"relaxZPrefix":"no"}"#),
+            "relaxZPrefix must be a boolean",
+        ),
+        (
+            json(r#"{"markers":[],"relaxZPrefix":false,"extra":1}"#),
+            "unknown key \"extra\"",
+        ),
+    ] {
+        let refused = onion_wasm::options::custom_markers(bag(&wrong).as_ref(), "mask")
+            .expect_err("a wrong shape");
+        assert!(
+            refused.starts_with("mask: ") && refused.contains(why),
+            "{refused}"
+        );
+        assert!(reading(bag(&wrong)).is_err());
+    }
 }

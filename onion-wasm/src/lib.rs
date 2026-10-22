@@ -56,7 +56,7 @@
 use std::sync::Arc;
 
 use js_sys::{Object, Reflect, Uint32Array};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use usfm_onion::attributes::{self, AttrEvent};
 use usfm_onion::diff::{
     self, Addr, CoveredSide, Decisions, DiffSkeleton, MergeSide, RunKind, RunWhat, SlotRole,
@@ -186,7 +186,7 @@ export type Resolution =
   | { missing: "intro" | "chapter" | "verse"; within?: { from: number; to: number } }
   | { ambiguous: { from: number; to: number; opening: number }[] };
 
-/** `setCustomMarkers`'s options, and `new CustomMarkers`'s. */
+/** `customMarkers`'s options. */
 export interface CustomMarkerOptions {
   /** Admit a legacy name without the `z` that the spec does not define. */
   relaxZPrefix?: boolean;
@@ -326,10 +326,19 @@ impl FormatOpts {
     }
 
     /// The list the text lexes `\z` markers by, instead of the one
-    /// `setCustomMarkers` installed. The handle stays the caller's to free.
+    /// `setCustomMarkers` installed. Throws where a door refuses its
+    /// `customMarkers` option.
     #[wasm_bindgen(js_name = setCustomMarkers)]
-    pub fn set_custom_markers(&mut self, markers: &CustomMarkers) {
-        self.custom_markers = Some(Arc::clone(&markers.list));
+    pub fn set_custom_markers(
+        &mut self,
+        #[wasm_bindgen(unchecked_param_type = "CustomMarkers")] markers: JsValue,
+    ) -> Result<(), JsError> {
+        let door = "FormatOpts.setCustomMarkers";
+        let (list, opts) =
+            options::read_custom_markers(&markers, door).map_err(|e| JsError::new(&e))?;
+        self.custom_markers =
+            Some(options::interned(door, list, &opts).map_err(|e| JsError::new(&e))?);
+        Ok(())
     }
 }
 
@@ -1161,241 +1170,233 @@ pub fn book_of(text: &str, markers: &Extensions) -> String {
 // user `\z` markers
 // ---------------------------------------------------------------------------
 
-/// One user marker, as it crosses. `category` is the spec's own `\category`
-/// word; everything else is the file's, verbatim.
-#[derive(Serialize, Deserialize)]
-struct WireExtension {
-    name: String,
-    category: String,
-    #[serde(default)]
-    description: String,
-    #[serde(default)]
-    attributes: Vec<String>,
+#[wasm_bindgen(typescript_custom_section)]
+const CUSTOM_MARKERS_SECTION: &str = CUSTOM_MARKERS_TS;
+
+#[cfg_attr(not(test), expect(dead_code, reason = "the section's macro hides the read"))]
+const CUSTOM_MARKERS_TS: &str = r#"
+/** A `\category` word, as the USFM spec spells it. */
+export type CustomMarkerCategory =
+  | "header" | "title" | "introduction" | "sectionpara" | "versepara" | "list" | "otherpara"
+  | "crossreference" | "footnote"
+  | "char" | "introchar" | "listchar" | "footnotechar" | "crossreferencechar"
+  | "milestone" | "attribute" | "cell" | "standalone" | "internal";
+
+/** One user `\z` marker. */
+export interface CustomMarker {
+  name: string;
+  category: CustomMarkerCategory;
 }
 
-/// One thing that could not be kept. `line` is present only where there IS a
-/// line — reading a file — and absent for a list a host assembled itself,
-/// rather than a zero standing in for "no line".
-#[derive(Serialize)]
-struct WireMalformed {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    line: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    name: Option<String>,
-    reason: &'static str,
+/** An entry a list could not keep. `line` only where a file gave one. */
+export interface MalformedCustomMarker {
+  name?: string;
+  reason: string;
+  line?: number;
 }
 
-#[derive(Serialize)]
-struct WireMarkersExt {
-    markers: Vec<WireExtension>,
-    malformed: Vec<WireMalformed>,
+declare const customMarkersBrand: unique symbol;
+
+/** A judged list, from `customMarkers` or `customMarkersFromMarkersExt`. */
+export type CustomMarkers = {
+  /** The entries kept; every door lexes by exactly these. */
+  readonly markers: readonly CustomMarker[];
+  readonly relaxZPrefix: boolean;
+  /** The entries refused, and why. */
+  readonly malformed: readonly MalformedCustomMarker[];
+} & { readonly [customMarkersBrand]: "CustomMarkers" };
+"#;
+
+/// One entry a list could not keep. `line` is the file's, and absent for a
+/// list a host assembled itself.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Report {
+    pub line: Option<u32>,
+    pub name: Option<String>,
+    pub reason: &'static str,
 }
 
-/// A `markers.ext` file, read into the list [`set_custom_markers`] and
-/// [`CustomMarkers::new`] take.
+/// A host's list, judged: what the registry keeps, and a report for each
+/// entry it refuses, the unknown category words first.
+pub fn judged(
+    entries: Vec<(String, String)>,
+    opts: &ExtensionOptions,
+) -> (Extensions, Vec<Report>) {
+    let mut reports = Vec::new();
+    let mut markers = Vec::new();
+    for (name, word) in entries {
+        match ExtensionCategory::parse(&word) {
+            Some(category) => markers.push(CustomMarker {
+                name,
+                category,
+                description: String::new(),
+                attributes: Vec::new(),
+            }),
+            None => reports.push(Report {
+                line: None,
+                name: Some(name),
+                reason: "unknown category word",
+            }),
+        }
+    }
+    let (extensions, refused) = Extensions::new_with(&markers, opts);
+    reports.extend(refused.into_iter().map(|report| Report {
+        line: None,
+        name: report.name,
+        reason: report.reason,
+    }));
+    (extensions, reports)
+}
+
+/// A list of user markers, judged once and held as plain data.
 ///
 /// ```js
-/// const { markers, malformed } = JSON.parse(customMarkersFromMarkersExt(text));
-/// for (const { name, reason, line } of malformed) show(line, name, reason);
-/// setCustomMarkers(JSON.stringify(markers));
+/// const mine = customMarkers([{ name: "zmyf", category: "footnote" }]);
+/// mine.malformed;                                            // → []
+/// galley.update("books/MRK.usfm", text, { customMarkers: mine });
+/// parse(refText, { customMarkers: mine });
+///
+/// customMarkers([{ name: "s5", category: "standalone" }], { relaxZPrefix: true });
 /// ```
 ///
-/// READS ONLY — nothing is installed here, because a host may want to show
-/// what it found before acting on it, and because the file is one of several
-/// ways a list arrives (a `custom.sty`, a UI that lets a user add a marker).
-/// A bad entry costs only itself and lands in `malformed`; the file never
-/// fails as a whole.
-#[wasm_bindgen(js_name = customMarkersFromMarkersExt)]
-pub fn custom_markers_from_markers_ext(text: &str) -> String {
+/// `markers` holds the entries kept and `malformed` the ones refused: no name,
+/// a name that is not `z`-initial, an unknown category word, a duplicate. A
+/// bad entry costs only itself. Installs nothing.
+///
+/// Throws when `list` is not an array of `{ name, category }` strings, or
+/// `opts` is not `CustomMarkerOptions`.
+#[wasm_bindgen(js_name = customMarkers, unchecked_return_type = "CustomMarkers")]
+pub fn custom_markers(
+    #[wasm_bindgen(unchecked_param_type = "CustomMarker[]")] list: JsValue,
+    #[wasm_bindgen(unchecked_optional_param_type = "CustomMarkerOptions")] opts: Option<JsValue>,
+) -> Result<JsValue, JsError> {
+    let door = "customMarkers";
+    let opts = options::custom_marker_options(opts.as_ref(), door).map_err(|e| JsError::new(&e))?;
+    let entries = options::entries(&list, door, false).map_err(|e| JsError::new(&e))?;
+    let (extensions, reports) = judged(entries, &opts);
+    Ok(custom_markers_object(&extensions, &opts, &reports))
+}
+
+/// A `markers.ext` file, read into the same object [`custom_markers`] makes,
+/// with `relaxZPrefix` false.
+///
+/// ```js
+/// const mine = customMarkersFromMarkersExt(text);
+/// for (const { name, reason, line } of mine.malformed) show(line, name, reason);
+/// galley.update("books/MRK.usfm", text, { customMarkers: mine });
+/// ```
+///
+/// A bad entry costs only itself and lands in `malformed` with its line; the
+/// file never fails as a whole. Installs nothing.
+#[wasm_bindgen(js_name = customMarkersFromMarkersExt, unchecked_return_type = "CustomMarkers")]
+pub fn custom_markers_from_markers_ext(text: &str) -> JsValue {
+    let (extensions, reports) = markers_ext(text);
+    custom_markers_object(&extensions, &ExtensionOptions::default(), &reports)
+}
+
+/// [`custom_markers_from_markers_ext`] for a caller with no `JsValue`.
+pub fn markers_ext(text: &str) -> (Extensions, Vec<Report>) {
     let read = mise::extensions::parse_markers_ext(text);
-    let wire = WireMarkersExt {
-        markers: read
-            .markers
-            .into_iter()
-            .map(|marker| WireExtension {
-                name: marker.name,
-                category: marker.category.as_str().to_owned(),
-                description: marker.description,
-                attributes: marker.attributes,
-            })
-            .collect(),
-        malformed: read
-            .malformed
-            .into_iter()
-            .map(|report| WireMalformed {
-                line: Some(report.line),
-                name: report.name,
-                reason: report.reason,
-            })
-            .collect(),
-    };
-    serde_json::to_string(&wire).expect("the wire structs are always serializable")
+    let mut reports: Vec<Report> = read
+        .malformed
+        .into_iter()
+        .map(|report| Report {
+            line: Some(report.line),
+            name: report.name,
+            reason: report.reason,
+        })
+        .collect();
+    let (extensions, refused) = Extensions::new(&read.markers);
+    reports.extend(refused.into_iter().map(|report| Report {
+        line: None,
+        name: report.name,
+        reason: report.reason,
+    }));
+    (extensions, reports)
 }
 
-/// Installs a list of user markers process-wide, and returns what it could not
-/// keep.
+fn custom_markers_object(
+    extensions: &Extensions,
+    opts: &ExtensionOptions,
+    reports: &[Report],
+) -> JsValue {
+    let markers: js_sys::Array = extensions
+        .declared()
+        .iter()
+        .map(|marker| {
+            let entry = Object::new();
+            put(&entry, "name", &JsValue::from_str(&marker.name));
+            put(
+                &entry,
+                "category",
+                &JsValue::from_str(marker.category.as_str()),
+            );
+            JsValue::from(entry)
+        })
+        .collect();
+    let malformed: js_sys::Array = reports
+        .iter()
+        .map(|report| {
+            let entry = Object::new();
+            if let Some(name) = &report.name {
+                put(&entry, "name", &JsValue::from_str(name));
+            }
+            put(&entry, "reason", &JsValue::from_str(report.reason));
+            if let Some(line) = report.line {
+                put(&entry, "line", &JsValue::from(line));
+            }
+            JsValue::from(entry)
+        })
+        .collect();
+    let out = Object::new();
+    put(&out, "markers", &markers);
+    put(
+        &out,
+        "relaxZPrefix",
+        &JsValue::from_bool(opts.relax_z_prefix),
+    );
+    put(&out, "malformed", &malformed);
+    out.into()
+}
+
+fn put(object: &Object, key: &str, value: &JsValue) {
+    Reflect::set(object, &JsValue::from_str(key), value)
+        .expect("a fresh Object always accepts a property");
+}
+
+/// Installs a list process-wide: the one every door lexes by when it is given
+/// no `customMarkers`.
 ///
 /// ```js
-/// setCustomMarkers('[{"name":"zaln","category":"milestone"}]');  // → "[]"
-/// setCustomMarkers("[]");                                        // clears
-///
-/// // Legacy markup a host cannot change: en_ulb's chunk marker, as a bare
-/// // point that leaves its paragraph open.
-/// setCustomMarkers('[{"name":"s5","category":"standalone"}]', { relaxZPrefix: true });
+/// setCustomMarkers(customMarkersFromMarkersExt(text));
+/// setCustomMarkers(customMarkers([]));                       // clears
 /// ```
-///
-/// Takes the LIST, never a file: a host with a `custom.sty`, or a UI that lets
-/// a user add a marker, feeds this directly.
 ///
 /// Every registered marker then behaves as its `\category` — a `footnote`
 /// takes a caller and a note scope, a `milestone` pairs `-s`/`-e` and takes
 /// attributes — because the engine resolves it to the spec row that category
 /// behaves as. An unregistered `\z` marker stays what it has always been.
 ///
-/// This is the list every door lexes by when it is given no
-/// [`CustomMarkers`]. A resident `Galley` re-derives the books registered
-/// without one; a book registered with one keeps its own list.
+/// A resident `Galley` re-derives the books registered without a list; a book
+/// registered with one keeps its own.
 ///
-/// `relaxZPrefix` admits a name without the `z` that the spec does not
-/// define; a name the spec does define (`s1`, `p`) is still a report.
-///
-/// Throws on malformed JSON and on an `opts` that is not an object or whose
-/// `relaxZPrefix` is not a boolean. A bad ENTRY — no name, a name that is not
-/// `z`-initial, an unknown category word, a duplicate — is a report, not a
-/// failure, so one bad line never costs a host the rest of its list.
+/// Throws where a door refuses its `customMarkers` option.
 #[wasm_bindgen(js_name = setCustomMarkers)]
 pub fn set_custom_markers(
-    list: &str,
-    #[wasm_bindgen(unchecked_optional_param_type = "CustomMarkerOptions")] opts: Option<JsValue>,
-) -> Result<String, JsError> {
-    let options = options::custom_marker_options(opts.as_ref(), "setCustomMarkers")
-        .map_err(|e| JsError::new(&e))?;
-    installed(list, options.relax_z_prefix).map_err(|error| JsError::new(&error))
+    #[wasm_bindgen(unchecked_param_type = "CustomMarkers")] markers: JsValue,
+) -> Result<(), JsError> {
+    let (list, opts) =
+        options::read_custom_markers(&markers, "setCustomMarkers").map_err(|e| JsError::new(&e))?;
+    installed(list, &opts).map_err(|e| JsError::new(&e))
 }
 
 /// `set_custom_markers`'s body, split from the door for the same reason
 /// [`diffed`] is: `JsError` cannot be constructed off a wasm target, so a
 /// native test would have nothing to call.
-fn installed(list: &str, relax_z_prefix: bool) -> Result<String, String> {
-    let (markers, mut reports) = read_list(list, "setCustomMarkers")?;
-    reports.extend(
-        usfm_onion::set_extensions_with(&markers, &ExtensionOptions { relax_z_prefix })
-            .into_iter()
-            .map(list_report),
-    );
-    Ok(reports_json(&reports))
-}
-
-/// One project's user `\z` markers, parsed once and handed to the doors that
-/// lex: a registered book keeps the list, a loose-text door lexes by it.
-///
-/// ```js
-/// const mine = new CustomMarkers(JSON.stringify(markers));
-/// JSON.parse(mine.malformed);                               // → [] when all kept
-/// galley.update("books/MRK.usfm", text, { customMarkers: mine });
-/// parse(refText, { customMarkers: mine });
-/// mine.free();                                              // the book keeps its list
-/// ```
-///
-/// Takes what [`set_custom_markers`] takes and judges it the same way, but
-/// installs nothing: the process-wide list stays what it was. A book or a
-/// `FormatOpts` given a handle holds its own reference to the list, so
-/// `free()` drops only the handle.
-#[wasm_bindgen]
-#[derive(Clone)]
-pub struct CustomMarkers {
-    list: Arc<Extensions>,
-    malformed: String,
-}
-
-#[wasm_bindgen]
-impl CustomMarkers {
-    /// Throws where [`set_custom_markers`] throws; a bad entry is a report in
-    /// [`malformed`](Self::malformed).
-    #[wasm_bindgen(constructor)]
-    pub fn new(
-        list: &str,
-        #[wasm_bindgen(unchecked_optional_param_type = "CustomMarkerOptions")] opts: Option<
-            JsValue,
-        >,
-    ) -> Result<CustomMarkers, JsError> {
-        let options = options::custom_marker_options(opts.as_ref(), "CustomMarkers")
-            .map_err(|e| JsError::new(&e))?;
-        CustomMarkers::from_list(list, options.relax_z_prefix).map_err(|error| JsError::new(&error))
-    }
-
-    /// What the list could not keep, as JSON: the array `setCustomMarkers`
-    /// returns for the same list.
-    #[wasm_bindgen(getter)]
-    pub fn malformed(&self) -> String {
-        self.malformed.clone()
-    }
-
-    /// A second handle on the same list. An options bag cannot lend Rust a
-    /// borrow of the handle in it, and taking the handle itself would free the
-    /// caller's; [`options::custom_markers`] reads this instead.
-    #[wasm_bindgen(getter, js_name = __handoff, skip_typescript)]
-    pub fn handoff(&self) -> CustomMarkers {
-        self.clone()
-    }
-}
-
-impl CustomMarkers {
-    /// [`new`](Self::new) for a caller with no `JsValue`.
-    pub fn from_list(list: &str, relax_z_prefix: bool) -> Result<Self, String> {
-        let (markers, mut reports) = read_list(list, "CustomMarkers")?;
-        let (extensions, malformed) =
-            Extensions::new_with(&markers, &ExtensionOptions { relax_z_prefix });
-        reports.extend(malformed.into_iter().map(list_report));
-        Ok(Self {
-            list: Arc::new(extensions),
-            malformed: reports_json(&reports),
-        })
-    }
-
-    /// The parsed list, shared with whatever else holds it.
-    pub fn list(&self) -> &Arc<Extensions> {
-        &self.list
-    }
-}
-
-/// A JSON list into engine markers, with the entries whose category word is
-/// unknown already reported: the category is the one field this layer judges,
-/// and every other reason is the registry's.
-fn read_list(list: &str, door: &str) -> Result<(Vec<CustomMarker>, Vec<WireMalformed>), String> {
-    let parsed: Vec<WireExtension> =
-        serde_json::from_str(list).map_err(|error| format!("{door}: {error}"))?;
-    let mut reports = Vec::new();
-    let mut markers = Vec::new();
-    for entry in parsed {
-        let Some(category) = ExtensionCategory::parse(&entry.category) else {
-            reports.push(WireMalformed {
-                line: None,
-                name: Some(entry.name),
-                reason: "unknown category word",
-            });
-            continue;
-        };
-        markers.push(CustomMarker {
-            name: entry.name,
-            category,
-            description: entry.description,
-            attributes: entry.attributes,
-        });
-    }
-    Ok((markers, reports))
-}
-
-fn list_report(report: usfm_onion::extensions::Malformed) -> WireMalformed {
-    WireMalformed {
-        line: None,
-        name: report.name,
-        reason: report.reason,
-    }
-}
-
-fn reports_json(reports: &[WireMalformed]) -> String {
-    serde_json::to_string(reports).expect("the wire structs are always serializable")
+fn installed(list: Vec<(String, String)>, opts: &ExtensionOptions) -> Result<(), String> {
+    let extensions = options::interned("setCustomMarkers", list, opts)?;
+    usfm_onion::set_extensions_with(extensions.declared(), opts);
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1813,37 +1814,119 @@ mod tests {
         assert!(len("nodes") > 0);
         assert!(len("childIds") > 0);
     }
-    /// The `markers.ext` door reads and installs NOTHING, and its reports
-    /// carry the line the file gave them.
-    #[test]
-    fn markers_ext_reads_without_installing() {
-        let read: serde_json::Value = serde_json::from_str(&custom_markers_from_markers_ext(
-            "\\marker zmyf\n\\category footnote\n\\attribute x-a\n\\marker bad\n\\category char\n",
-        ))
-        .unwrap();
-        assert_eq!(read["markers"].as_array().unwrap().len(), 1);
-        assert_eq!(read["markers"][0]["name"], "zmyf");
-        assert_eq!(read["markers"][0]["category"], "footnote");
-        assert_eq!(read["markers"][0]["attributes"][0], "x-a");
-        assert_eq!(read["malformed"][0]["line"], 4);
-        assert_eq!(read["malformed"][0]["reason"], "name does not start with z");
-        // Nothing installed: the marker is still row 0.
-        assert_eq!(usfm_onion::lex("\\zmyf x")[0].marker_idx, 0);
+    fn pairs(list: &[(&str, &str)]) -> Vec<(String, String)> {
+        list.iter()
+            .map(|(name, category)| ((*name).to_owned(), (*category).to_owned()))
+            .collect()
     }
 
-    /// A handle lexes by its own list and installs nothing; its reports are
-    /// the ones `setCustomMarkers` gives for the same list.
+    /// The `markers.ext` door reads and installs NOTHING, keeps only what the
+    /// registry keeps, and its file reports carry the line the file gave them.
     #[test]
-    fn a_handle_lexes_by_its_list_and_installs_nothing() {
-        let list = r#"[{"name":"zmyf","category":"footnote"},{"name":"nope","category":"char"}]"#;
-        let mine = CustomMarkers::from_list(list, false).unwrap();
-        let reports: serde_json::Value = serde_json::from_str(&mine.malformed()).unwrap();
-        assert_eq!(reports[0]["reason"], "name does not start with z");
+    fn markers_ext_reads_without_installing() {
+        let (read, reports) = markers_ext(
+            "\\marker zmyf\n\\category footnote\n\\marker bad\n\\category char\n\\marker zmyf\n\\category char\n",
+        );
+        assert_eq!(read.declared().len(), 1);
+        assert_eq!(read.declared()[0].name, "zmyf");
+        assert_eq!(read.declared()[0].category, ExtensionCategory::Footnote);
+        assert_eq!(reports[0].line, Some(3));
+        assert_eq!(reports[0].reason, "name does not start with z");
+        assert_eq!(reports.len(), 2, "{reports:?}");
+        assert_eq!(
+            reports[1].reason,
+            "duplicate name; the first definition stands"
+        );
         assert_eq!(
             usfm_onion::lex("\\zmyf x")[0].marker_idx,
             0,
             "nothing installed"
         );
+    }
+
+    /// The `.d.ts` category union is the spec's word list, whole.
+    #[test]
+    fn the_category_union_is_every_word() {
+        let union = CUSTOM_MARKERS_TS
+            .split("export type CustomMarkerCategory =")
+            .nth(1)
+            .and_then(|rest| rest.split(';').next())
+            .unwrap();
+        let words: Vec<&str> = union.split('"').skip(1).step_by(2).collect();
+        let spec: Vec<&str> = ExtensionCategory::ALL.iter().map(|c| c.as_str()).collect();
+        assert_eq!(words, spec);
+    }
+
+    /// A bad entry is a report and costs only itself.
+    #[test]
+    fn a_list_is_judged_entry_by_entry() {
+        let (kept, reports) = judged(
+            pairs(&[("znope", "bogus"), ("nope", "char"), ("zok", "versepara")]),
+            &ExtensionOptions::default(),
+        );
+        assert_eq!(kept.declared().len(), 1);
+        assert_eq!(kept.declared()[0].name, "zok");
+        assert_eq!(
+            reports,
+            [
+                Report {
+                    line: None,
+                    name: Some("znope".into()),
+                    reason: "unknown category word"
+                },
+                Report {
+                    line: None,
+                    name: Some("nope".into()),
+                    reason: "name does not start with z"
+                },
+            ]
+        );
+        let legacy = pairs(&[("s5", "standalone"), ("s1", "standalone")]);
+        let (kept, reports) = judged(
+            legacy,
+            &ExtensionOptions {
+                relax_z_prefix: true,
+            },
+        );
+        assert_eq!(kept.declared()[0].name, "s5");
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0].name.as_deref(), Some("s1"));
+    }
+
+    /// A list handed to a door lexes by itself, installs nothing, and is
+    /// resolved once however often it arrives.
+    #[test]
+    fn a_door_list_lexes_by_itself_and_is_interned() {
+        let mine = options::interned(
+            "test",
+            pairs(&[("zmyf", "footnote"), ("zmyc", "char")]),
+            &ExtensionOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            usfm_onion::lex("\\zmyf x")[0].marker_idx,
+            0,
+            "nothing installed"
+        );
+        let reordered = options::interned(
+            "test",
+            pairs(&[("zmyc", "char"), ("zmyf", "footnote")]),
+            &ExtensionOptions::default(),
+        )
+        .unwrap();
+        assert!(
+            Arc::ptr_eq(&mine, &reordered),
+            "an equal list is the same registry"
+        );
+        let relaxed = options::interned(
+            "test",
+            pairs(&[("zmyf", "footnote"), ("zmyc", "char")]),
+            &ExtensionOptions {
+                relax_z_prefix: true,
+            },
+        )
+        .unwrap();
+        assert_eq!(relaxed.fingerprint(), mine.fingerprint());
 
         let text = "\\id GEN\n\\c 1\n\\p \\v 1 Jesus wept\\zmyf + \\ft why\\zmyf*.\n";
         let verse_text = |markers: &Extensions| {
@@ -1858,23 +1941,27 @@ mod tests {
             .text(text.as_bytes())
         };
         assert!(verse_text(&NONE).contains("why"));
-        assert!(
-            !verse_text(mine.list()).contains("why"),
-            "the note drops out"
-        );
+        assert!(!verse_text(&mine).contains("why"), "the note drops out");
         assert_ne!(
-            plated(text, opts(false, false, false), mine.list()),
+            plated(text, opts(false, false, false), &mine),
             plated(text, opts(false, false, false), &NONE)
         );
         let chapter = usfm_onion::resolve::Address::Chapters { from: 1, to: 1 };
         assert_eq!(
-            resolved(text, &chapter, false, mine.list()),
+            resolved(text, &chapter, false, &mine),
             resolved(text, &chapter, false, &NONE),
             "a chapter's place does not move"
         );
-        assert!(
-            CustomMarkers::from_list("{", false).is_err(),
-            "malformed JSON throws"
+
+        let refused = options::interned(
+            "mask",
+            pairs(&[("zmyf", "footnote"), ("nope", "char")]),
+            &ExtensionOptions::default(),
+        )
+        .unwrap_err();
+        assert_eq!(
+            refused,
+            "mask: customMarkers: \"nope\": name does not start with z"
         );
     }
 
@@ -1918,70 +2005,50 @@ mod tests {
         assert_eq!(xxh3(b""), 0x2d06_8005_38d3_94c2);
     }
 
-    /// Installing changes what the same bytes mean; a bad entry is a report,
-    /// not a failure; malformed JSON is the one thing that throws.
+    /// Installing changes what the same bytes mean; a list the registry would
+    /// not keep whole installs nothing.
     #[test]
-    fn set_custom_markers_installs_and_reports() {
+    fn set_custom_markers_installs_a_whole_list() {
         struct Restore;
         impl Drop for Restore {
             fn drop(&mut self) {
-                let _ = installed("[]", false);
+                let _ = installed(Vec::new(), &ExtensionOptions::default());
             }
         }
         let _restore = Restore;
+        let strict = ExtensionOptions::default();
 
-        assert_eq!(
-            installed(r#"[{"name":"zaln","category":"milestone"}]"#, false).unwrap(),
-            "[]"
-        );
+        installed(pairs(&[("zaln", "milestone")]), &strict).unwrap();
         let idx = usfm_onion::lex("\\zaln-s |x=\"1\"\\*")[0].marker_idx;
         assert!(
             usfm_onion::tables::generated::is_extension(idx),
             "`\\zaln-s` resolves to the milestone template"
         );
 
-        // One bad category and one bad name — two reports, no line on either,
-        // and the good entry in the same list still installs.
-        let reports: serde_json::Value = serde_json::from_str(
-            &installed(
-                r#"[{"name":"znope","category":"bogus"},{"name":"nope","category":"char"},
-                    {"name":"zok","category":"versepara"}]"#,
-                false,
-            )
-            .unwrap(),
-        )
-        .unwrap();
-        let reports = reports.as_array().unwrap();
-        assert_eq!(reports.len(), 2, "{reports:?}");
-        assert_eq!(reports[0]["reason"], "unknown category word");
-        assert_eq!(reports[1]["reason"], "name does not start with z");
-        assert!(
-            reports[0].get("line").is_none(),
-            "a list report has no line"
+        assert!(installed(pairs(&[("zok", "versepara"), ("nope", "char")]), &strict).is_err());
+        assert_eq!(
+            usfm_onion::lex("\\zok x")[0].marker_idx,
+            0,
+            "nothing installed"
         );
         assert!(usfm_onion::tables::generated::is_extension(
-            usfm_onion::lex("\\zok x")[0].marker_idx
+            usfm_onion::lex("\\zaln-s |x=\"1\"\\*")[0].marker_idx
         ));
 
-        assert!(installed("{", false).is_err(), "malformed JSON throws");
-        assert_eq!(installed("[]", false).unwrap(), "[]");
-        assert_eq!(usfm_onion::lex("\\zok x")[0].marker_idx, 0, "cleared");
-
-        // A legacy name installs only under the option, and never over a spec
-        // marker.
-        let legacy =
-            r#"[{"name":"s5","category":"standalone"},{"name":"s1","category":"standalone"}]"#;
-        let strict: serde_json::Value =
-            serde_json::from_str(&installed(legacy, false).unwrap()).unwrap();
-        assert_eq!(strict[0]["reason"], "name does not start with z");
-        let relaxed: serde_json::Value =
-            serde_json::from_str(&installed(legacy, true).unwrap()).unwrap();
-        let relaxed = relaxed.as_array().unwrap();
-        assert_eq!(relaxed.len(), 1, "{relaxed:?}");
-        assert_eq!(relaxed[0]["name"], "s1");
+        let legacy = pairs(&[("s5", "standalone")]);
+        assert!(installed(legacy.clone(), &strict).is_err());
+        installed(
+            legacy,
+            &ExtensionOptions {
+                relax_z_prefix: true,
+            },
+        )
+        .unwrap();
         assert!(usfm_onion::tables::generated::is_extension(
             usfm_onion::lex("\\s5\n")[0].marker_idx
         ));
-        assert_eq!(installed("[]", false).unwrap(), "[]");
+
+        installed(Vec::new(), &strict).unwrap();
+        assert_eq!(usfm_onion::lex("\\s5\n")[0].marker_idx, 0, "cleared");
     }
 }

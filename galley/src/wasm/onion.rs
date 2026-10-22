@@ -1,11 +1,11 @@
 //! Every `onion-wasm` door, on this module.
 //!
 //! ```text
-//! import { parse, toUtf16, setCustomMarkers, CustomMarkers, Galley } from "usfm-galley";
+//! import { parse, toUtf16, setCustomMarkers, customMarkers, Galley } from "usfm-galley";
 //!
 //! toUtf16(text, 41)                  // the stateless onion door
-//! setCustomMarkers(list)             // …including the process-wide list
-//! new CustomMarkers(list)            // …and the per-project handle
+//! customMarkers(list)                // …including a project's custom markers
+//! setCustomMarkers(markers)          // …and the process-wide list
 //! new Galley().update(id, text)      // the resident sous handle
 //! ```
 //!
@@ -31,7 +31,7 @@ static DOOR: fn(&str, u32) -> u32 = onion_wasm::to_utf16;
 /// The same doors for a Rust caller — a test across the wall, or a native
 /// consumer that wants the JS-shaped call without naming the second crate.
 pub use onion_wasm::{
-    CustomMarkers, Edits, FormatOpts, Splices, attr_resolve, attrs, book,
+    Edits, FormatOpts, Splices, attr_resolve, attrs, book, custom_markers,
     custom_markers_from_markers_ext, diff, format, format_edits, format_edits_in, locate, mask,
     merge, merge_splices, parse, resolve, set_custom_markers, to_byte, to_utf16, xxh3, xxh3_text,
 };

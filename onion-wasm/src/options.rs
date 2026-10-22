@@ -17,15 +17,12 @@
 //! Errors are `String`s, not `JsError`s: `JsError` cannot be built off a wasm
 //! target, and the doors' native tests live there.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
-use js_sys::{Object, Reflect};
-use usfm_onion::extensions::{ExtensionOptions, Extensions};
+use js_sys::{Array, Object, Reflect};
+use usfm_onion::extensions::{ExtensionCategory, ExtensionOptions, Extensions};
 use usfm_onion::wire;
-use wasm_bindgen::convert::TryFromJsValue;
 use wasm_bindgen::{JsCast, JsValue};
-
-use crate::CustomMarkers;
 
 /// The options object, checked: `None` when absent, an error when it is not an
 /// object or names a key outside `known`.
@@ -121,7 +118,7 @@ pub fn lex_options(value: Option<&JsValue>, door: &str) -> Result<Option<Arc<Ext
     custom_markers(bag.as_ref(), door)
 }
 
-/// `{ relaxZPrefix? }` — `setCustomMarkers` and `new CustomMarkers`.
+/// `{ relaxZPrefix? }` — `customMarkers`.
 pub fn custom_marker_options(
     value: Option<&JsValue>,
     door: &str,
@@ -132,11 +129,19 @@ pub fn custom_marker_options(
     })
 }
 
-/// The `customMarkers` key off a checked bag: the list its handle holds, or
-/// `None` when absent.
+/// The `customMarkers` key off a checked bag: the list it declares, or `None`
+/// when absent.
 ///
-/// Read through the handle's `__handoff` getter, which answers a second
-/// handle on the same list: converting the caller's own would free it.
+/// ```text
+/// { customMarkers: customMarkers([{ name: "zmyf", category: "footnote" }]) }  →  that list
+/// { customMarkers: { markers: [], relaxZPrefix: false } }                     →  the empty list
+/// { customMarkers: "zmyf" }                  →  throws: mask: customMarkers must be a CustomMarkers object
+/// { customMarkers: { markers: [{ name: "nope", category: "char" }], relaxZPrefix: false } }
+///                                            →  throws: mask: customMarkers: "nope": name does not start with z
+/// ```
+///
+/// The object is plain data and its brand is the compiler's, so every field is
+/// checked here, and a list the registry would not keep whole is refused.
 pub fn custom_markers(
     bag: Option<&JsValue>,
     door: &str,
@@ -144,11 +149,112 @@ pub fn custom_markers(
     let Some(value) = get(bag, "customMarkers") else {
         return Ok(None);
     };
-    let refused = || format!("{door}: customMarkers must be a live CustomMarkers");
-    let handed = Reflect::get(&value, &JsValue::from_str("__handoff")).map_err(|_| refused())?;
-    CustomMarkers::try_from_js_value(handed)
-        .map(|markers| Some(Arc::clone(markers.list())))
-        .map_err(|_| refused())
+    let (list, opts) = read_custom_markers(&value, door)?;
+    interned(door, list, &opts).map(Some)
+}
+
+/// A `CustomMarkers` object's `markers` and `relaxZPrefix`, shape-checked.
+pub fn read_custom_markers(
+    value: &JsValue,
+    door: &str,
+) -> Result<(Vec<(String, String)>, ExtensionOptions), String> {
+    let refused = || format!("{door}: customMarkers must be a CustomMarkers object");
+    if !value.is_object() || Array::is_array(value) {
+        return Err(refused());
+    }
+    let known = ["markers", "relaxZPrefix", "malformed"];
+    for key in Object::keys(value.unchecked_ref::<Object>()).iter() {
+        let key = key.as_string().unwrap_or_default();
+        if !known.contains(&key.as_str()) {
+            return Err(format!(
+                "{door}: customMarkers has unknown key {key:?}; expected {}",
+                expected(&known)
+            ));
+        }
+    }
+    let markers = get(Some(value), "markers").ok_or_else(refused)?;
+    let relax_z_prefix = get(Some(value), "relaxZPrefix")
+        .and_then(|relax| relax.as_bool())
+        .ok_or_else(|| format!("{door}: customMarkers.relaxZPrefix must be a boolean"))?;
+    let list = entries(&markers, &format!("{door}: customMarkers.markers"), true)?;
+    Ok((list, ExtensionOptions { relax_z_prefix }))
+}
+
+/// An array of `{ name, category }` strings. `strict` also refuses a key
+/// beyond those two and a category word outside the spec's.
+pub fn entries(value: &JsValue, at: &str, strict: bool) -> Result<Vec<(String, String)>, String> {
+    if !Array::is_array(value) {
+        return Err(format!("{at} must be an array"));
+    }
+    let mut out = Vec::new();
+    for (i, entry) in value.unchecked_ref::<Array>().iter().enumerate() {
+        if !entry.is_object() {
+            return Err(format!("{at}[{i}] must be an object"));
+        }
+        if strict {
+            for key in Object::keys(entry.unchecked_ref::<Object>()).iter() {
+                let key = key.as_string().unwrap_or_default();
+                if key != "name" && key != "category" {
+                    return Err(format!(
+                        "{at}[{i}] has unknown key {key:?}; expected name or category"
+                    ));
+                }
+            }
+        }
+        let field = |key: &str| {
+            Reflect::get(&entry, &JsValue::from_str(key))
+                .ok()
+                .and_then(|found| found.as_string())
+                .ok_or_else(|| format!("{at}[{i}].{key} must be a string"))
+        };
+        let (name, category) = (field("name")?, field("category")?);
+        if strict && ExtensionCategory::parse(&category).is_none() {
+            return Err(format!(
+                "{at}[{i}].category {category:?} is not a category word"
+            ));
+        }
+        out.push((name, category));
+    }
+    Ok(out)
+}
+
+/// The lists the doors were last handed, newest first.
+static INTERNED: Mutex<Vec<(Key, Arc<Extensions>)>> = Mutex::new(Vec::new());
+const INTERNED_LISTS: usize = 8;
+
+/// A list as the registry would read it: order and duplicates aside, which a
+/// clean list has none of.
+type Key = (bool, Vec<(String, String)>);
+
+/// The registry for a list that must be kept whole: one `Arc` for every equal
+/// list, so a host that passes the same object call after call resolves it
+/// once.
+pub fn interned(
+    door: &str,
+    list: Vec<(String, String)>,
+    opts: &ExtensionOptions,
+) -> Result<Arc<Extensions>, String> {
+    let mut key: Key = (opts.relax_z_prefix, list);
+    key.1.sort_unstable();
+    let mut table = INTERNED.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Some(at) = table.iter().position(|(seen, _)| *seen == key) {
+        let hit = table.remove(at);
+        let found = Arc::clone(&hit.1);
+        table.insert(0, hit);
+        return Ok(found);
+    }
+    let (extensions, reports) = crate::judged(key.1.clone(), opts);
+    if let Some(report) = reports.first() {
+        return Err(format!(
+            "{door}: customMarkers: {:?}: {}",
+            report.name.as_deref().unwrap_or(""),
+            report.reason
+        ));
+    }
+    let extensions = Arc::new(extensions);
+    table.insert(0, (key, Arc::clone(&extensions)));
+    table.truncate(INTERNED_LISTS);
+    Ok(extensions)
 }
 
 /// The list a door lexes by: the one it was given, or the installed one.

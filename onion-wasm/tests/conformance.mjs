@@ -715,13 +715,13 @@ if (corpus && existsSync(corpus)) {
 
 {
   const EXPORTS = [
-    "CustomMarkers",
     "Edits",
     "FormatOpts",
     "Splices",
     "attrResolve",
     "attrs",
     "book",
+    "customMarkers",
     "customMarkersFromMarkersExt",
     "diff",
     "format",
@@ -744,64 +744,67 @@ if (corpus && existsSync(corpus)) {
   eq(exported.join(" "), EXPORTS.join(" "), "the module exports exactly the door list");
 }
 
-// --- custom markers: a handle per project, the installed list otherwise ------
+// --- custom markers: a list per project, the installed list otherwise -------
 //
-// The same bytes, read three ways: by the handle that declares `\zmyf` a
+// The same bytes, read three ways: by the list that declares `\zmyf` a
 // footnote, by an installed list that declares it a paragraph, and by that
-// installed list again once the handle is left out.
+// installed list again once the list is left out.
 {
-  const { CustomMarkers, setCustomMarkers, customMarkersFromMarkersExt, locate, book } = doors;
+  const { customMarkers, setCustomMarkers, customMarkersFromMarkersExt, locate, book } = doors;
   const text = "\\id GEN\n\\c 1\n\\p \\v 1 Jesus wept\\zmyf + \\ft why\\zmyf*.\n";
-  const read = JSON.parse(customMarkersFromMarkersExt("\\marker zmyf\n\\category footnote\n"));
-  const mine = new CustomMarkers(JSON.stringify(read.markers));
-  eq(mine.malformed, "[]", "a clean list reports nothing");
+  const read = customMarkersFromMarkersExt("\\marker zmyf\n\\category footnote\n\\marker bad\n\\category char\n");
+  eq(JSON.stringify(read.markers), '[{"name":"zmyf","category":"footnote"}]', "the file's kept entries");
+  eq(read.relaxZPrefix, false, "a file is strict");
+  eq(JSON.stringify(read.malformed), '[{"name":"bad","reason":"name does not start with z","line":3}]', "…and its refused ones, by line");
+  const mine = customMarkers(read.markers);
+  eq(Object.getPrototypeOf(mine), Object.prototype, "a plain object");
+  eq(mine.malformed.length, 0, "a clean list reports nothing");
   const opts = { customMarkers: mine };
   const verseText = (o) => rawMask(text, "verseText", o).text.trim();
 
   check(verseText().includes("why"), "nothing installed: the note's prose is verse text");
-  eq(verseText(opts), "Jesus wept.", "the handle's list drops the note");
-  eq(setCustomMarkers('[{"name":"zmyf","category":"versepara"}]'), "[]", "a different list installed");
+  eq(verseText(opts), "Jesus wept.", "the list drops the note");
+  eq(setCustomMarkers(customMarkers([{ name: "zmyf", category: "versepara" }])), undefined, "a different list installed");
   try {
-    eq(verseText(opts), "Jesus wept.", "the handle ignores the installed list");
-    check(verseText().includes("why"), "no handle reads by the installed list");
+    eq(verseText(opts), "Jesus wept.", "the list ignores the installed one");
+    check(verseText().includes("why"), "no list reads by the installed one");
     const dish = (o) => Buffer.from(rawParse(text, o)).toString("hex");
-    check(dish(opts) !== dish(), "parse lexes by the handle");
+    check(dish(opts) !== dish(), "parse lexes by the list");
     check(dish({ ...opts, toc: true }) !== dish({ toc: true }), "…alongside the other keys");
-    eq(locate(text, 20, opts), "GEN 1:1", "locate takes the handle");
-    eq(book(text, opts), "GEN", "book takes the handle");
+    eq(locate(text, 20, opts), "GEN 1:1", "locate takes the list");
+    eq(book(text, opts), "GEN", "book takes the list");
     const verse = { kind: "verses", from: { chapter: 1, verse: 1 }, to: { chapter: 1, verse: 1 } };
-    check(JSON.parse(resolveIn(text, verse, opts)).found, "resolve takes the handle");
+    check(JSON.parse(resolveIn(text, verse, opts)).found, "resolve takes the list");
     const changed = text.replace("wept", "cried");
     check(JSON.parse(rawDiff(text, changed, { text: "none", customMarkers: mine })).units.length > 0,
-      "diff takes the handle");
-    eq(doors.merge(text, changed, "{}", "current", opts), changed, "merge takes the handle");
+      "diff takes the list");
+    eq(doors.merge(text, changed, "{}", "current", opts), changed, "merge takes the list");
     const formatOpts = new doors.FormatOpts();
     formatOpts.setCustomMarkers(mine);
-    eq(typeof doors.format(text, formatOpts), "string", "FormatOpts takes the handle");
+    eq(typeof doors.format(text, formatOpts), "string", "FormatOpts takes the list");
   } finally {
-    setCustomMarkers("[]");
+    setCustomMarkers(customMarkers([]));
   }
 
-  // Lent, never taken: the handle served every call above and still does.
-  eq(verseText(opts), "Jesus wept.", "the handle is still the caller's");
-  let refused = "";
-  try {
-    rawMask(text, "verseText", { customMarkers: "zmyf" });
-  } catch (error) {
-    refused = String(error.message ?? error);
-  }
-  check(refused.includes("customMarkers must be a live CustomMarkers"), `a string is refused: ${refused}`);
-  const legacy = new CustomMarkers('[{"name":"s5","category":"standalone"}]', { relaxZPrefix: true });
-  eq(legacy.malformed, "[]", "CustomMarkerOptions reach the constructor");
-  mine.free();
-  legacy.free();
-  refused = "";
-  try {
-    rawMask(text, "verseText", opts);
-  } catch (error) {
-    refused = String(error.message ?? error);
-  }
-  check(refused.length > 0, "a freed handle is refused, not read as the installed list");
+  for (let i = 0; i < 100; i++) eq(verseText(opts), "Jesus wept.", "the same object, call after call");
+  const byHand = { markers: [{ name: "zmyf", category: "footnote" }], relaxZPrefix: false, malformed: [] };
+  eq(verseText({ customMarkers: byHand }), "Jesus wept.", "a hand-built object reads the same");
+  const refusal = (customMarkers) => {
+    try {
+      rawMask(text, "verseText", { customMarkers });
+    } catch (error) {
+      return String(error.message ?? error);
+    }
+    return "";
+  };
+  check(refusal("zmyf").includes("mask: customMarkers must be a CustomMarkers object"), `a string is refused: ${refusal("zmyf")}`);
+  const bogus = { markers: [{ name: "zmyf", category: "bogus" }], relaxZPrefix: false };
+  check(refusal(bogus).includes('customMarkers.markers[0].category "bogus"'), `a bad category is refused: ${refusal(bogus)}`);
+  const unkept = { markers: [{ name: "nope", category: "char" }], relaxZPrefix: false };
+  check(refusal(unkept).includes('"nope": name does not start with z'), `an entry the registry refuses: ${refusal(unkept)}`);
+  const legacy = customMarkers([{ name: "s5", category: "standalone" }], { relaxZPrefix: true });
+  eq(legacy.malformed.length, 0, "CustomMarkerOptions reach the factory");
+  eq(customMarkers([{ name: "s5", category: "standalone" }]).malformed[0].reason, "name does not start with z", "strict by default");
 }
 
 // --- resolve: an address to its place in one text ----------------------------
