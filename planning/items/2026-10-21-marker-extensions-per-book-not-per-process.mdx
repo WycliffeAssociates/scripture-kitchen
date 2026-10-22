@@ -30,7 +30,7 @@ const theirs = new CustomMarkers(refMarkers);
 galley.update("books/MRK.usfm", text, { customMarkers: mine });
 galley.updateReference("ref/MRK.usfm", refText, { customMarkers: theirs });
 galley.resolveOf(refText, address, { customMarkers: theirs });
-// no customMarkers option: the global setExtensions list, so today's callers do not change
+// no customMarkers option: the global setCustomMarkers list
 ```
 
 ## Why it is small
@@ -39,12 +39,22 @@ The engine already takes the list explicitly: `lex_with(source, &Extensions)` (`
 
 ## What changes
 
-- `CustomMarkers`: a wasm-bindgen class in onion-wasm, re-exported by galley, built once per project with `new CustomMarkers(list)` (the same list `setExtensions` takes). It holds the parsed list in an `Arc`; a book registered with it keeps a clone and lexes through `lex_with`, so a caller's `free()` drops only the handle, never a book's list. A handle the caller forgets is freed by the `FinalizationRegistry` wasm-bindgen already generates.
+- `CustomMarkers`: a wasm-bindgen class in onion-wasm, re-exported by galley, built once per project with `new CustomMarkers(list)` (the same list `setCustomMarkers` takes, and the same `CustomMarkerOptions`). It holds the parsed list in an `Arc`; a book registered with it keeps a clone and lexes through `lex_with`, so a caller's `free()` drops only the handle, never a book's list. A handle the caller forgets is freed by the `FinalizationRegistry` wasm-bindgen already generates.
 - The chunk store keys on content and the book's custom markers, so the same bytes under two lists never share a parse.
 - Re-registering a book with another list re-derives that book alone. The caller holds no generation; the global generation stays only for books on the global list.
 - Every door that parses loose text takes the same optional `customMarkers`: onion-wasm's free doors (`parse`, `mask`, `resolve`, …) and galley's `…Of` doors (`maskOf`, `resolveOf`, `structureTextOf`, `verseTextOf`). Without it they read the global list, as today.
 
-<Tradeoff id="name" chose="CustomMarkers, a class of its own" cost="a second name beside setExtensions">`galley.extensions()` read as a Galley feature and did not say USFM markers; Will, 2026-10-22. The engine's word for a `markers.ext` entry is `CustomMarker`, and the free doors need the value without a Galley.</Tradeoff>
+<Tradeoff id="name" chose="CustomMarkers, a class of its own" cost="a breaking rename for Sefer, the only consumer">`galley.extensions()` read as a Galley feature and did not say USFM markers; Will, 2026-10-22. The engine's word for a `markers.ext` entry is `CustomMarker`, and the free doors need the value without a Galley.</Tradeoff>
+
+The JS names that said "extensions" say "custom markers", so one word runs through the surface (Will, 2026-10-22: Sefer is the only consumer and the rename is small). The Rust names inside onion stay.
+
+| Now | Becomes |
+|---|---|
+| `setExtensions(list, opts?)` | `setCustomMarkers(list, opts?)` |
+| `extensionsFromMarkersExt(text)` | `customMarkersFromMarkersExt(text)` |
+| `ExtensionOptions` | `CustomMarkerOptions` |
+
+<Followup id="sefer-rename">Tell Sefer in the release notes: three renames, no change in behaviour.</Followup>
 
 <Question id="free-doors" answer="Yes, 2026-10-22, and galley's `…Of` doors too: `resolveOf` on a reference text is the case this plan exists for, and each door ends at a `lex()` that `lex_with` replaces. Omitted means the global list.">Do onion-wasm's free doors (`parse`, `mask`, `resolve`, …) also take an `extensions` option, or stay on the global list until someone asks?</Question>
 
