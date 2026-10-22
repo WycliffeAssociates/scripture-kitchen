@@ -1,7 +1,6 @@
 /* tslint:disable */
 /* eslint-disable */
 export const memory: WebAssembly.Memory;
-export const __wbg_custommarkers_free: (a: number, b: number) => void;
 export const __wbg_edits_free: (a: number, b: number) => void;
 export const __wbg_formatopts_free: (a: number, b: number) => void;
 export const __wbg_get_formatopts_block_marker_own_line: (a: number) => number;
@@ -32,10 +31,8 @@ export const __wbg_splices_free: (a: number, b: number) => void;
 export const attrResolve: (a: number, b: number, c: number) => number;
 export const attrs: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
 export const book: (a: number, b: number, c: number) => [number, number, number, number];
-export const customMarkersFromMarkersExt: (a: number, b: number) => [number, number];
-export const custommarkers___handoff: (a: number) => number;
-export const custommarkers_malformed: (a: number) => [number, number];
-export const custommarkers_new: (a: number, b: number, c: number) => [number, number, number];
+export const customMarkers: (a: any, b: number) => [number, number, number];
+export const customMarkersFromMarkersExt: (a: number, b: number) => any;
 export const diff: (a: number, b: number, c: number, d: number, e: any) => [number, number, number, number];
 export const edits_lens: (a: number) => [number, number];
 export const edits_spans: (a: number) => [number, number];
@@ -44,7 +41,7 @@ export const format: (a: number, b: number, c: number) => [number, number];
 export const formatEdits: (a: number, b: number, c: number) => number;
 export const formatEditsIn: (a: number, b: number, c: number, d: number, e: number) => number;
 export const formatopts_new: () => number;
-export const formatopts_setCustomMarkers: (a: number, b: number) => void;
+export const formatopts_setCustomMarkers: (a: number, b: any) => [number, number];
 export const formatopts_setRemoveMarkers: (a: number, b: number, c: number) => void;
 export const formatopts_setRepairs: (a: number, b: number, c: number) => void;
 export const locate: (a: number, b: number, c: number, d: number) => [number, number, number, number];
@@ -53,7 +50,7 @@ export const merge: (a: number, b: number, c: number, d: number, e: number, f: n
 export const mergeSplices: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number, number];
 export const parse: (a: number, b: number, c: number) => [number, number, number, number];
 export const resolve: (a: number, b: number, c: any, d: number) => [number, number, number, number];
-export const setCustomMarkers: (a: number, b: number, c: number) => [number, number, number, number];
+export const setCustomMarkers: (a: any) => [number, number];
 export const splices_inserts: (a: number) => [number, number];
 export const splices_spans: (a: number) => [number, number];
 export const toByte: (a: number, b: number, c: number) => number;

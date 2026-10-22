@@ -1,6 +1,39 @@
 /* tslint:disable */
 /* eslint-disable */
 
+/** A `\category` word, as the USFM spec spells it. */
+export type CustomMarkerCategory =
+| "header" | "title" | "introduction" | "sectionpara" | "versepara" | "list" | "otherpara"
+| "crossreference" | "footnote"
+| "char" | "introchar" | "listchar" | "footnotechar" | "crossreferencechar"
+| "milestone" | "attribute" | "cell" | "standalone" | "internal";
+
+/** One user `\z` marker. */
+export interface CustomMarker {
+    name: string;
+    category: CustomMarkerCategory;
+}
+
+/** An entry a list could not keep. `line` only where a file gave one. */
+export interface MalformedCustomMarker {
+    name?: string;
+    reason: string;
+    line?: number;
+}
+
+declare const customMarkersBrand: unique symbol;
+
+/** A judged list, from `customMarkers` or `customMarkersFromMarkersExt`. */
+export type CustomMarkers = {
+    /** The entries kept; every door lexes by exactly these. */
+    readonly markers: readonly CustomMarker[];
+    readonly relaxZPrefix: boolean;
+    /** The entries refused, and why. */
+    readonly malformed: readonly MalformedCustomMarker[];
+} & { readonly [customMarkersBrand]: "CustomMarkers" };
+
+
+
 /** `parse`'s options, and `Galley.parse`/`parseText`'s. Every key defaults to false. */
 export interface ParseOptions {
     /** Run the lint walk. The one expensive optional. */
@@ -63,45 +96,13 @@ export type Resolution =
 | { missing: "intro" | "chapter" | "verse"; within?: { from: number; to: number } }
 | { ambiguous: { from: number; to: number; opening: number }[] };
 
-/** `setCustomMarkers`'s options, and `new CustomMarkers`'s. */
+/** `customMarkers`'s options. */
 export interface CustomMarkerOptions {
     /** Admit a legacy name without the `z` that the spec does not define. */
     relaxZPrefix?: boolean;
 }
 
 
-
-/**
- * One project's user `\z` markers, parsed once and handed to the doors that
- * lex: a registered book keeps the list, a loose-text door lexes by it.
- *
- * ```js
- * const mine = new CustomMarkers(JSON.stringify(markers));
- * JSON.parse(mine.malformed);                               // → [] when all kept
- * galley.update("books/MRK.usfm", text, { customMarkers: mine });
- * parse(refText, { customMarkers: mine });
- * mine.free();                                              // the book keeps its list
- * ```
- *
- * Takes what [`set_custom_markers`] takes and judges it the same way, but
- * installs nothing: the process-wide list stays what it was. A book or a
- * `FormatOpts` given a handle holds its own reference to the list, so
- * `free()` drops only the handle.
- */
-export class CustomMarkers {
-    free(): void;
-    [Symbol.dispose](): void;
-    /**
-     * Throws where [`set_custom_markers`] throws; a bad entry is a report in
-     * [`malformed`](Self::malformed).
-     */
-    constructor(list: string, opts?: CustomMarkerOptions);
-    /**
-     * What the list could not keep, as JSON: the array `setCustomMarkers`
-     * returns for the same list.
-     */
-    readonly malformed: string;
-}
 
 /**
  * One transaction of proposed splices: `[from, to]` pairs, one concatenated
@@ -146,7 +147,8 @@ export class FormatOpts {
     constructor();
     /**
      * The list the text lexes `\z` markers by, instead of the one
-     * `setCustomMarkers` installed. The handle stays the caller's to free.
+     * `setCustomMarkers` installed. Throws where a door refuses its
+     * `customMarkers` option.
      */
     setCustomMarkers(markers: CustomMarkers): void;
     /**
@@ -234,22 +236,40 @@ export function attrs(text: string, from: number, to: number, opts?: AttrsOption
 export function book(text: string, opts?: LexOptions): string;
 
 /**
- * A `markers.ext` file, read into the list [`set_custom_markers`] and
- * [`CustomMarkers::new`] take.
+ * A list of user markers, judged once and held as plain data.
  *
  * ```js
- * const { markers, malformed } = JSON.parse(customMarkersFromMarkersExt(text));
- * for (const { name, reason, line } of malformed) show(line, name, reason);
- * setCustomMarkers(JSON.stringify(markers));
+ * const mine = customMarkers([{ name: "zmyf", category: "footnote" }]);
+ * mine.malformed;                                            // → []
+ * galley.update("books/MRK.usfm", text, { customMarkers: mine });
+ * parse(refText, { customMarkers: mine });
+ *
+ * customMarkers([{ name: "s5", category: "standalone" }], { relaxZPrefix: true });
  * ```
  *
- * READS ONLY — nothing is installed here, because a host may want to show
- * what it found before acting on it, and because the file is one of several
- * ways a list arrives (a `custom.sty`, a UI that lets a user add a marker).
- * A bad entry costs only itself and lands in `malformed`; the file never
- * fails as a whole.
+ * `markers` holds the entries kept and `malformed` the ones refused: no name,
+ * a name that is not `z`-initial, an unknown category word, a duplicate. A
+ * bad entry costs only itself. Installs nothing.
+ *
+ * Throws when `list` is not an array of `{ name, category }` strings, or
+ * `opts` is not `CustomMarkerOptions`.
  */
-export function customMarkersFromMarkersExt(text: string): string;
+export function customMarkers(list: readonly CustomMarker[], opts?: CustomMarkerOptions): CustomMarkers;
+
+/**
+ * A `markers.ext` file, read into the same object [`custom_markers`] makes,
+ * with `relaxZPrefix` false.
+ *
+ * ```js
+ * const mine = customMarkersFromMarkersExt(text);
+ * for (const { name, reason, line } of mine.malformed) show(line, name, reason);
+ * galley.update("books/MRK.usfm", text, { customMarkers: mine });
+ * ```
+ *
+ * A bad entry costs only itself and lands in `malformed` with its line; the
+ * file never fails as a whole. Installs nothing.
+ */
+export function customMarkersFromMarkersExt(text: string): CustomMarkers;
 
 /**
  * The diff skeleton as JSON: the changed units of two documents, in the
@@ -385,39 +405,25 @@ export function parse(text: string, opts?: ParseTextOptions): Uint8Array;
 export function resolve(text: string, address: Address, opts?: ResolveTextOptions): string;
 
 /**
- * Installs a list of user markers process-wide, and returns what it could not
- * keep.
+ * Installs a list process-wide: the one every door lexes by when it is given
+ * no `customMarkers`.
  *
  * ```js
- * setCustomMarkers('[{"name":"zaln","category":"milestone"}]');  // → "[]"
- * setCustomMarkers("[]");                                        // clears
- *
- * // Legacy markup a host cannot change: en_ulb's chunk marker, as a bare
- * // point that leaves its paragraph open.
- * setCustomMarkers('[{"name":"s5","category":"standalone"}]', { relaxZPrefix: true });
+ * setCustomMarkers(customMarkersFromMarkersExt(text));
+ * setCustomMarkers(customMarkers([]));                       // clears
  * ```
- *
- * Takes the LIST, never a file: a host with a `custom.sty`, or a UI that lets
- * a user add a marker, feeds this directly.
  *
  * Every registered marker then behaves as its `\category` — a `footnote`
  * takes a caller and a note scope, a `milestone` pairs `-s`/`-e` and takes
  * attributes — because the engine resolves it to the spec row that category
  * behaves as. An unregistered `\z` marker stays what it has always been.
  *
- * This is the list every door lexes by when it is given no
- * [`CustomMarkers`]. A resident `Galley` re-derives the books registered
- * without one; a book registered with one keeps its own list.
+ * A resident `Galley` re-derives the books registered without a list; a book
+ * registered with one keeps its own.
  *
- * `relaxZPrefix` admits a name without the `z` that the spec does not
- * define; a name the spec does define (`s1`, `p`) is still a report.
- *
- * Throws on malformed JSON and on an `opts` that is not an object or whose
- * `relaxZPrefix` is not a boolean. A bad ENTRY — no name, a name that is not
- * `z`-initial, an unknown category word, a duplicate — is a report, not a
- * failure, so one bad line never costs a host the rest of its list.
+ * Throws where a door refuses its `customMarkers` option.
  */
-export function setCustomMarkers(list: string, opts?: CustomMarkerOptions): string;
+export function setCustomMarkers(markers: CustomMarkers): void;
 
 /**
  * A CodeMirror offset as a source byte offset. Rebuilds the 1.6% stride index
@@ -454,7 +460,6 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
-    readonly __wbg_custommarkers_free: (a: number, b: number) => void;
     readonly __wbg_edits_free: (a: number, b: number) => void;
     readonly __wbg_formatopts_free: (a: number, b: number) => void;
     readonly __wbg_get_formatopts_block_marker_own_line: (a: number) => number;
@@ -485,10 +490,8 @@ export interface InitOutput {
     readonly attrResolve: (a: number, b: number, c: number) => number;
     readonly attrs: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
     readonly book: (a: number, b: number, c: number) => [number, number, number, number];
-    readonly customMarkersFromMarkersExt: (a: number, b: number) => [number, number];
-    readonly custommarkers___handoff: (a: number) => number;
-    readonly custommarkers_malformed: (a: number) => [number, number];
-    readonly custommarkers_new: (a: number, b: number, c: number) => [number, number, number];
+    readonly customMarkers: (a: any, b: number) => [number, number, number];
+    readonly customMarkersFromMarkersExt: (a: number, b: number) => any;
     readonly diff: (a: number, b: number, c: number, d: number, e: any) => [number, number, number, number];
     readonly edits_lens: (a: number) => [number, number];
     readonly edits_spans: (a: number) => [number, number];
@@ -497,7 +500,7 @@ export interface InitOutput {
     readonly formatEdits: (a: number, b: number, c: number) => number;
     readonly formatEditsIn: (a: number, b: number, c: number, d: number, e: number) => number;
     readonly formatopts_new: () => number;
-    readonly formatopts_setCustomMarkers: (a: number, b: number) => void;
+    readonly formatopts_setCustomMarkers: (a: number, b: any) => [number, number];
     readonly formatopts_setRemoveMarkers: (a: number, b: number, c: number) => void;
     readonly formatopts_setRepairs: (a: number, b: number, c: number) => void;
     readonly locate: (a: number, b: number, c: number, d: number) => [number, number, number, number];
@@ -506,7 +509,7 @@ export interface InitOutput {
     readonly mergeSplices: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number, number];
     readonly parse: (a: number, b: number, c: number) => [number, number, number, number];
     readonly resolve: (a: number, b: number, c: any, d: number) => [number, number, number, number];
-    readonly setCustomMarkers: (a: number, b: number, c: number) => [number, number, number, number];
+    readonly setCustomMarkers: (a: any) => [number, number];
     readonly splices_inserts: (a: number) => [number, number];
     readonly splices_spans: (a: number) => [number, number];
     readonly toByte: (a: number, b: number, c: number) => number;

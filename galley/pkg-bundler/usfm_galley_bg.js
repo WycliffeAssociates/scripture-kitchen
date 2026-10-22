@@ -1,91 +1,4 @@
 /**
- * One project's user `\z` markers, parsed once and handed to the doors that
- * lex: a registered book keeps the list, a loose-text door lexes by it.
- *
- * ```js
- * const mine = new CustomMarkers(JSON.stringify(markers));
- * JSON.parse(mine.malformed);                               // → [] when all kept
- * galley.update("books/MRK.usfm", text, { customMarkers: mine });
- * parse(refText, { customMarkers: mine });
- * mine.free();                                              // the book keeps its list
- * ```
- *
- * Takes what [`set_custom_markers`] takes and judges it the same way, but
- * installs nothing: the process-wide list stays what it was. A book or a
- * `FormatOpts` given a handle holds its own reference to the list, so
- * `free()` drops only the handle.
- */
-export class CustomMarkers {
-    static __wrap(ptr) {
-        const obj = Object.create(CustomMarkers.prototype);
-        obj.__wbg_ptr = ptr;
-        CustomMarkersFinalization.register(obj, obj.__wbg_ptr, obj);
-        return obj;
-    }
-    static __unwrap(jsValue) {
-        if (!(jsValue instanceof CustomMarkers)) {
-            return 0;
-        }
-        return jsValue.__destroy_into_raw();
-    }
-    __destroy_into_raw() {
-        const ptr = this.__wbg_ptr;
-        this.__wbg_ptr = 0;
-        CustomMarkersFinalization.unregister(this);
-        return ptr;
-    }
-    free() {
-        const ptr = this.__destroy_into_raw();
-        wasm.__wbg_custommarkers_free(ptr, 0);
-    }
-    /**
-     * A second handle on the same list. An options bag cannot lend Rust a
-     * borrow of the handle in it, and taking the handle itself would free the
-     * caller's; [`options::custom_markers`] reads this instead.
-     * @returns {CustomMarkers}
-     */
-    get __handoff() {
-        const ret = wasm.custommarkers___handoff(this.__wbg_ptr);
-        return CustomMarkers.__wrap(ret);
-    }
-    /**
-     * What the list could not keep, as JSON: the array `setCustomMarkers`
-     * returns for the same list.
-     * @returns {string}
-     */
-    get malformed() {
-        let deferred1_0;
-        let deferred1_1;
-        try {
-            const ret = wasm.custommarkers_malformed(this.__wbg_ptr);
-            deferred1_0 = ret[0];
-            deferred1_1 = ret[1];
-            return getStringFromWasm0(ret[0], ret[1]);
-        } finally {
-            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
-        }
-    }
-    /**
-     * Throws where [`set_custom_markers`] throws; a bad entry is a report in
-     * [`malformed`](Self::malformed).
-     * @param {string} list
-     * @param {CustomMarkerOptions} [opts]
-     */
-    constructor(list, opts) {
-        const ptr0 = passStringToWasm0(list, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.custommarkers_new(ptr0, len0, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        this.__wbg_ptr = ret[0];
-        CustomMarkersFinalization.register(this, this.__wbg_ptr, this);
-        return this;
-    }
-}
-if (Symbol.dispose) CustomMarkers.prototype[Symbol.dispose] = CustomMarkers.prototype.free;
-
-/**
  * One transaction of proposed splices: `[from, to]` pairs, one concatenated
  * ASCII insert blob, one length per edit.
  *
@@ -246,12 +159,15 @@ export class FormatOpts {
     }
     /**
      * The list the text lexes `\z` markers by, instead of the one
-     * `setCustomMarkers` installed. The handle stays the caller's to free.
+     * `setCustomMarkers` installed. Throws where a door refuses its
+     * `customMarkers` option.
      * @param {CustomMarkers} markers
      */
     setCustomMarkers(markers) {
-        _assertClass(markers, CustomMarkers);
-        wasm.formatopts_setCustomMarkers(this.__wbg_ptr, markers.__wbg_ptr);
+        const ret = wasm.formatopts_setCustomMarkers(this.__wbg_ptr, markers);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
     }
     /**
      * Marker names, no backslash, comma-separated — `"s5"` for the
@@ -1886,36 +1802,55 @@ export function book(text, opts) {
 }
 
 /**
- * A `markers.ext` file, read into the list [`set_custom_markers`] and
- * [`CustomMarkers::new`] take.
+ * A list of user markers, judged once and held as plain data.
  *
  * ```js
- * const { markers, malformed } = JSON.parse(customMarkersFromMarkersExt(text));
- * for (const { name, reason, line } of malformed) show(line, name, reason);
- * setCustomMarkers(JSON.stringify(markers));
+ * const mine = customMarkers([{ name: "zmyf", category: "footnote" }]);
+ * mine.malformed;                                            // → []
+ * galley.update("books/MRK.usfm", text, { customMarkers: mine });
+ * parse(refText, { customMarkers: mine });
+ *
+ * customMarkers([{ name: "s5", category: "standalone" }], { relaxZPrefix: true });
  * ```
  *
- * READS ONLY — nothing is installed here, because a host may want to show
- * what it found before acting on it, and because the file is one of several
- * ways a list arrives (a `custom.sty`, a UI that lets a user add a marker).
- * A bad entry costs only itself and lands in `malformed`; the file never
- * fails as a whole.
+ * `markers` holds the entries kept and `malformed` the ones refused: no name,
+ * a name that is not `z`-initial, an unknown category word, a duplicate. A
+ * bad entry costs only itself. Installs nothing.
+ *
+ * Throws when `list` is not an array of `{ name, category }` strings, or
+ * `opts` is not `CustomMarkerOptions`.
+ * @param {readonly CustomMarker[]} list
+ * @param {CustomMarkerOptions} [opts]
+ * @returns {CustomMarkers}
+ */
+export function customMarkers(list, opts) {
+    const ret = wasm.customMarkers(list, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * A `markers.ext` file, read into the same object [`custom_markers`] makes,
+ * with `relaxZPrefix` false.
+ *
+ * ```js
+ * const mine = customMarkersFromMarkersExt(text);
+ * for (const { name, reason, line } of mine.malformed) show(line, name, reason);
+ * galley.update("books/MRK.usfm", text, { customMarkers: mine });
+ * ```
+ *
+ * A bad entry costs only itself and lands in `malformed` with its line; the
+ * file never fails as a whole. Installs nothing.
  * @param {string} text
- * @returns {string}
+ * @returns {CustomMarkers}
  */
 export function customMarkersFromMarkersExt(text) {
-    let deferred2_0;
-    let deferred2_1;
-    try {
-        const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.customMarkersFromMarkersExt(ptr0, len0);
-        deferred2_0 = ret[0];
-        deferred2_1 = ret[1];
-        return getStringFromWasm0(ret[0], ret[1]);
-    } finally {
-        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
-    }
+    const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.customMarkersFromMarkersExt(ptr0, len0);
+    return ret;
 }
 
 /**
@@ -2240,59 +2175,29 @@ export function resolve(text, address, opts) {
 }
 
 /**
- * Installs a list of user markers process-wide, and returns what it could not
- * keep.
+ * Installs a list process-wide: the one every door lexes by when it is given
+ * no `customMarkers`.
  *
  * ```js
- * setCustomMarkers('[{"name":"zaln","category":"milestone"}]');  // → "[]"
- * setCustomMarkers("[]");                                        // clears
- *
- * // Legacy markup a host cannot change: en_ulb's chunk marker, as a bare
- * // point that leaves its paragraph open.
- * setCustomMarkers('[{"name":"s5","category":"standalone"}]', { relaxZPrefix: true });
+ * setCustomMarkers(customMarkersFromMarkersExt(text));
+ * setCustomMarkers(customMarkers([]));                       // clears
  * ```
- *
- * Takes the LIST, never a file: a host with a `custom.sty`, or a UI that lets
- * a user add a marker, feeds this directly.
  *
  * Every registered marker then behaves as its `\category` — a `footnote`
  * takes a caller and a note scope, a `milestone` pairs `-s`/`-e` and takes
  * attributes — because the engine resolves it to the spec row that category
  * behaves as. An unregistered `\z` marker stays what it has always been.
  *
- * This is the list every door lexes by when it is given no
- * [`CustomMarkers`]. A resident `Galley` re-derives the books registered
- * without one; a book registered with one keeps its own list.
+ * A resident `Galley` re-derives the books registered without a list; a book
+ * registered with one keeps its own.
  *
- * `relaxZPrefix` admits a name without the `z` that the spec does not
- * define; a name the spec does define (`s1`, `p`) is still a report.
- *
- * Throws on malformed JSON and on an `opts` that is not an object or whose
- * `relaxZPrefix` is not a boolean. A bad ENTRY — no name, a name that is not
- * `z`-initial, an unknown category word, a duplicate — is a report, not a
- * failure, so one bad line never costs a host the rest of its list.
- * @param {string} list
- * @param {CustomMarkerOptions} [opts]
- * @returns {string}
+ * Throws where a door refuses its `customMarkers` option.
+ * @param {CustomMarkers} markers
  */
-export function setCustomMarkers(list, opts) {
-    let deferred3_0;
-    let deferred3_1;
-    try {
-        const ptr0 = passStringToWasm0(list, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.setCustomMarkers(ptr0, len0, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
-        var ptr2 = ret[0];
-        var len2 = ret[1];
-        if (ret[3]) {
-            ptr2 = 0; len2 = 0;
-            throw takeFromExternrefTable0(ret[2]);
-        }
-        deferred3_0 = ptr2;
-        deferred3_1 = len2;
-        return getStringFromWasm0(ptr2, len2);
-    } finally {
-        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+export function setCustomMarkers(markers) {
+    const ret = wasm.setCustomMarkers(markers);
+    if (ret[1]) {
+        throw takeFromExternrefTable0(ret[0]);
     }
 }
 
@@ -2402,10 +2307,6 @@ export function __wbg___wbindgen_string_get_d154f1e671052120(arg0, arg1) {
 export function __wbg___wbindgen_throw_bb96b2010945f0bc(arg0, arg1) {
     throw new Error(getStringFromWasm0(arg0, arg1));
 }
-export function __wbg_custommarkers_unwrap(arg0) {
-    const ret = CustomMarkers.__unwrap(arg0);
-    return ret;
-}
 export function __wbg_from_74f3d90e0ff11240(arg0) {
     const ret = Array.from(arg0);
     return ret;
@@ -2418,12 +2319,20 @@ export function __wbg_get_unchecked_e20b893aeafc3fca(arg0, arg1) {
     const ret = arg0[arg1 >>> 0];
     return ret;
 }
+export function __wbg_isArray_6339f732981044bf(arg0) {
+    const ret = Array.isArray(arg0);
+    return ret;
+}
 export function __wbg_keys_ec7f8c0c2370d91d(arg0) {
     const ret = Object.keys(arg0);
     return ret;
 }
 export function __wbg_length_ecfa2c63d3d0d82c(arg0) {
     const ret = arg0.length;
+    return ret;
+}
+export function __wbg_new_116be93542d39019() {
+    const ret = new Array();
     return ret;
 }
 export function __wbg_new_ebe3e0f6837f0879() {
@@ -2434,11 +2343,20 @@ export function __wbg_new_from_slice_8aed4f0384605526(arg0, arg1) {
     const ret = new Uint32Array(getArrayU32FromWasm0(arg0, arg1));
     return ret;
 }
+export function __wbg_push_adb0107829f02d75(arg0, arg1) {
+    const ret = arg0.push(arg1);
+    return ret;
+}
 export function __wbg_set_8155bb79a948541b() { return handleError(function (arg0, arg1, arg2) {
     const ret = Reflect.set(arg0, arg1, arg2);
     return ret;
 }, arguments); }
-export function __wbindgen_cast_0000000000000001(arg0, arg1) {
+export function __wbindgen_cast_0000000000000001(arg0) {
+    // Cast intrinsic for `F64 -> Externref`.
+    const ret = arg0;
+    return ret;
+}
+export function __wbindgen_cast_0000000000000002(arg0, arg1) {
     // Cast intrinsic for `Ref(String) -> Externref`.
     const ret = getStringFromWasm0(arg0, arg1);
     return ret;
@@ -2452,9 +2370,6 @@ export function __wbindgen_init_externref_table() {
     table.set(offset + 2, true);
     table.set(offset + 3, false);
 }
-const CustomMarkersFinalization = (typeof FinalizationRegistry === 'undefined')
-    ? { register: () => {}, unregister: () => {} }
-    : new FinalizationRegistry(ptr => wasm.__wbg_custommarkers_free(ptr, 1));
 const EditsFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_edits_free(ptr, 1));

@@ -150,31 +150,44 @@ galley's `Galley.resolve` and `resolveOf` answer through them.
 
 ## User `\z` markers
 
-| export | what it gives back |
-|---|---|
-| `customMarkersFromMarkersExt(text)` | `{ markers, malformed }` as JSON — a `markers.ext` file, read. Installs nothing |
-| `setCustomMarkers(json, { relaxZPrefix? })` | installs the LIST (not the file) process-wide; returns the entries it could not keep, as JSON. `relaxZPrefix` admits a legacy name the spec does not define (`s5`) |
-| `new CustomMarkers(json, { relaxZPrefix? })` | the same list parsed into a handle, installed nowhere; `.malformed` is what `setCustomMarkers` would have returned |
+```ts
+customMarkers([{ name: "zmyf", category: "footnote" }, { name: "nope", category: "char" }])
+// → { markers: [{ name: "zmyf", category: "footnote" }],
+//     relaxZPrefix: false,
+//     malformed: [{ name: "nope", reason: "name does not start with z" }] }
+
+customMarkers([{ name: "s5", category: "standalone" }], { relaxZPrefix: true })
+// → { markers: [{ name: "s5", category: "standalone" }], relaxZPrefix: true, malformed: [] }
+
+customMarkersFromMarkersExt(fileText)   // the same object from a markers.ext; `line` on each report
+setCustomMarkers(mine)                  // installs it process-wide
+setCustomMarkers(customMarkers([]))     // clears
+```
+
+A `CustomMarkers` is a plain object: no class, no `free()`. Its TypeScript
+type is branded, so a typed caller gets one from the two factories; at runtime
+every door reads `markers` and `relaxZPrefix` and refuses a wrong shape, an
+unknown category word, or an entry the registry would not keep, naming the
+door. Equal lists resolve once and share one registry.
 
 A registered `\z` marker behaves as its `\category`: the engine resolves it to
 the spec row that category behaves as, so a `footnote` extension takes a caller
 and a note scope, a `milestone` pairs `-s`/`-e` and takes attributes, a
 `standalone` is a bare point that leaves its paragraph open. An
-unregistered one is row 0, exactly as before. Reports are values — one bad
-entry costs one entry — and only malformed JSON throws.
+unregistered one is row 0, exactly as before. A bad entry in a factory's list
+costs one entry and lands in `malformed`.
 
 Every door that reads text lexes by the installed list unless it is handed a
-`CustomMarkers`, which is how two projects with different `markers.ext` share
+`customMarkers`, which is how two projects with different `markers.ext` share
 one page:
 
 ```js
-const theirs = new CustomMarkers(JSON.stringify(refMarkers));
+const theirs = customMarkersFromMarkersExt(refMarkersExt);
 parse(refText, { customMarkers: theirs });
 resolve(refText, address, { customMarkers: theirs });
 mask(refText, "verseText", { customMarkers: theirs });
 locate(refText, at, { customMarkers: theirs });       // and book, diff, merge, mergeSplices
 opts.setCustomMarkers(theirs);                         // FormatOpts: format, formatEdits, formatEditsIn
-theirs.free();                                         // a FormatOpts keeps its own reference
 ```
 
 **Installing invalidates every product derived under the old rows**, so it

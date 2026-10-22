@@ -5,5 +5,5 @@ import { __wbg_set_wasm } from "./usfm_galley_bg.js";
 __wbg_set_wasm(wasm);
 wasm.__wbindgen_start();
 export {
-    CustomMarkers, Edits, Fingerprint, FormatOpts, Galley, SousSettings, Splices, attrResolve, attrs, book, customMarkersFromMarkersExt, diff, format, formatEdits, formatEditsIn, locate, mask, merge, mergeSplices, parse, resolve, setCustomMarkers, toByte, toUtf16, xxh3, xxh3Text
+    Edits, Fingerprint, FormatOpts, Galley, SousSettings, Splices, attrResolve, attrs, book, customMarkers, customMarkersFromMarkersExt, diff, format, formatEdits, formatEditsIn, locate, mask, merge, mergeSplices, parse, resolve, setCustomMarkers, toByte, toUtf16, xxh3, xxh3Text
 } from "./usfm_galley_bg.js";
