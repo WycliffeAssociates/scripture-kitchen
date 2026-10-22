@@ -1,18 +1,28 @@
 ---
 id: f9e18399-7a79-4b39-928a-25eb0e633afc
-title: "Sous settings grouped by the check they tune (idea, NOT DECIDED)"
-kind: idea
-status: discussing
+title: "Sous settings grouped by the check they tune"
+kind: plan
+status: in-progress
 created: 2026-10-01
-updated: 2026-10-01
+updated: 2026-10-22
 sha: 32bf2df
 tags: [sous, sefer]
 related: []
 source: planning/ideas/candidates/sous-settings-grouping.md
 ---
 
-Asked by Sefer 2026-10-01. Will is choosing between the two shapes below;
-nothing is built.
+Asked by Sefer 2026-10-01.
+
+## Decided, 2026-10-22: Shape B, with one field
+
+Will chose Shape B (nest the config by check). Since nesting puts every setting in exactly one place, the generated field is single-valued, not the `affects` list below:
+
+```ts
+readonly check: SousCheck | "general";   // where the setting lives in the config
+export function checkOf(code: SousCode): SousCheck | null;
+```
+
+Both ship from the existing `galley/sous-settings` export, beside `SOUS_SETTINGS`, `fromSettings` and `toSettings`. No setting key changes, so Sefer's saved settings carry over; no wire change. The rest of this item is the history of the choice.
 
 ## The ask
 
