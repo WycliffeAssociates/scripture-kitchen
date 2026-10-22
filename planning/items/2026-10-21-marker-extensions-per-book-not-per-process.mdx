@@ -4,7 +4,7 @@ title: "marker extensions per book, not per process"
 kind: plan
 status: planned
 created: 2026-10-21
-updated: 2026-10-21
+updated: 2026-10-22
 sha: 0bc36b0
 priority: 1
 tags: [galley, onion]
@@ -39,8 +39,8 @@ The engine already takes the list explicitly: `lex_with(source, &Extensions)` (`
 - An `Extensions` value a host makes once per project and passes at registration; a book keeps the one it was registered with and lexes through `lex_with`.
 - The chunk store keys on content and the book's extensions, so the same bytes under two lists never share a parse.
 - Re-registering a book with another list re-derives that book alone. The caller holds no generation; the global generation stays only for books on the global list.
-- onion-wasm's free doors keep the global list.
+- Every door that parses loose text takes the same optional `extensions`: onion-wasm's free doors (`parse`, `mask`, `resolve`, …) and galley's `…Of` doors (`maskOf`, `resolveOf`, `structureTextOf`, `verseTextOf`). Without it they read the global list, as today.
 
-<Question id="free-doors">Do onion-wasm's free doors (`parse`, `mask`, `resolve`, …) also take an `extensions` option, or stay on the global list until someone asks?</Question>
+<Question id="free-doors" answer="Yes, 2026-10-22, and galley's `…Of` doors too: `resolveOf` on a reference text is the case this plan exists for, and each door ends at a `lex()` that `lex_with` replaces. Omitted means the global list.">Do onion-wasm's free doors (`parse`, `mask`, `resolve`, …) also take an `extensions` option, or stay on the global list until someone asks?</Question>
 
 <Followup id="conformance">Conformance: two books on one Galley with different `\z` lists parse differently, and registering one does not flush the other.</Followup>
