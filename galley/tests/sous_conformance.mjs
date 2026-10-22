@@ -161,6 +161,85 @@ eq(doors.toUtf16("\\v 1 a\u{1F600}b", 10), 8, "toUtf16 counts the surrogate pair
   check(reading().includes("why"), "cleared");
 }
 
+// --- custom markers per book: each text lexes by its own project's list ----
+//
+// One Galley holds a main text and a reference text whose projects declare
+// `\zfoo` differently. Neither registration reaches the other book, the
+// installed list reaches only a book registered without a list, and freeing
+// a handle leaves the book it registered its list.
+{
+  const { CustomMarkers, setCustomMarkers } = doors;
+  const body = (code) =>
+    `\\id ${code}\n\\c 1\n\\p\n\\v 1 Jesus wept\\zfoo + \\ft why\\zfoo*.\n` +
+    "\\c 2\n\\p\n\\v 1 Again.\n\\c 3\n\\p\n\\v 1 Third.\n";
+  const footnote = new CustomMarkers('[{"name":"zfoo","category":"footnote"}]');
+  const charSpan = new CustomMarkers('[{"name":"zfoo","category":"char"}]');
+  eq(footnote.malformed, "[]", "a clean list reports nothing");
+  const g = new Galley();
+  g.update("books/MRK.usfm", body("MRK"), { customMarkers: footnote });
+  g.updateReference("ref/MRK.usfm", body("MRK"), { keepText: true, customMarkers: charSpan });
+  check(!g.verseText("books/MRK.usfm").includes("why"), "the main text reads \\zfoo as a footnote");
+  check(g.verseText("ref/MRK.usfm").includes("why"), "the reference reads the same bytes as a char span");
+
+  const mainDish = g.parse("books/MRK.usfm");
+  check(!sameBytes(mainDish, g.parse("ref/MRK.usfm")), "the same bytes parse differently");
+  let misses = g.misses();
+  g.updateReference("ref/MRK.usfm", body("MRK").replace("Again", "Once more"), {
+    keepText: true,
+    customMarkers: charSpan,
+  });
+  check(g.misses() > misses, "the edited reference re-derived");
+  misses = g.misses();
+  check(sameBytes(g.parse("books/MRK.usfm"), mainDish), "the main text is unchanged");
+  eq(g.misses(), misses, "…and served warm: registering the reference re-derived nothing of it");
+
+  g.update("books/MRK.usfm", body("MRK"), { customMarkers: charSpan });
+  check(g.verseText("books/MRK.usfm").includes("why"), "re-registering under another list re-derives the book");
+  g.update("books/MRK.usfm", body("MRK"), { customMarkers: footnote });
+
+  g.update("books/JHN.usfm", body("JHN"));
+  check(g.verseText("books/JHN.usfm").includes("why"), "no customMarkers: the installed list, empty");
+  eq(setCustomMarkers('[{"name":"zfoo","category":"footnote"}]'), "[]", "a list installed");
+  try {
+    check(!g.verseText("books/JHN.usfm").includes("why"), "the book without a list follows setCustomMarkers");
+    check(g.verseText("ref/MRK.usfm").includes("why"), "a book with its own list does not");
+    check(sameBytes(g.parse("books/MRK.usfm"), mainDish), "…nor does the main text");
+  } finally {
+    setCustomMarkers("[]");
+  }
+  check(g.verseText("books/JHN.usfm").includes("why"), "cleared, and followed again");
+
+  footnote.free();
+  charSpan.free();
+  check(!g.verseText("books/MRK.usfm").includes("why"), "freeing the handle leaves the book its list");
+  check(sameBytes(g.parse("books/MRK.usfm"), mainDish), "…and its parse");
+  check(g.publish().length > 0, "the corpus still publishes");
+
+  // The text doors take the same option, over a reference text nobody registered.
+  const theirs = new CustomMarkers('[{"name":"zfoo","category":"footnote"}]');
+  const loose = body("LUK");
+  const opts = { customMarkers: theirs };
+  check(g.verseTextOf(loose).includes("why"), "verseTextOf without a list: the installed one");
+  check(!g.verseTextOf(loose, opts).includes("why"), "verseTextOf by the handle's list");
+  check(!g.structureTextOf(loose, opts).includes("why"), "structureTextOf by the handle's list");
+  check(!sameBytes(g.parseText(loose, opts), g.parseText(loose)), "parseText by the handle's list");
+  check(
+    !sameBytes(g.maskOf(loose, { recipe: "text", customMarkers: theirs }), g.maskOf(loose, { recipe: "text" })),
+    "maskOf by the handle's list",
+  );
+  const verse = { kind: "verses", from: { chapter: 1, verse: 1 }, to: { chapter: 1, verse: 1 } };
+  check(JSON.parse(g.resolveOf(loose, verse, { utf16: true, ...opts })).found, "resolveOf takes the handle");
+  let refused = "";
+  try {
+    g.parse("books/MRK.usfm", opts);
+  } catch (error) {
+    refused = String(error.message ?? error);
+  }
+  check(refused.includes('unknown option "customMarkers"'), `a registered book's door refuses a list: ${refused}`);
+  theirs.free();
+  g.free();
+}
+
 // --- the engine's hash, for a host's own bytes -----------------------------
 
 {

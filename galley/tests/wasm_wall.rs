@@ -39,9 +39,9 @@ const KNOBS: &[u8] = include_bytes!("goldens/sous/knobs.bin");
 /// The corpus registered, and nothing published yet.
 fn loaded() -> Galley {
     let mut galley = Galley::with_budget(16 << 20);
-    assert_eq!(galley.update("books/GEN.usfm", GEN).unwrap(), "GEN");
-    galley.update("books/RUT.usfm", RUT).unwrap();
-    galley.update("books/JON.usfm", JON).unwrap();
+    assert_eq!(galley.update("books/GEN.usfm", GEN, None).unwrap(), "GEN");
+    galley.update("books/RUT.usfm", RUT, None).unwrap();
+    galley.update("books/JON.usfm", JON, None).unwrap();
     galley
         .update_reference_with("ref/RUT.usfm", RUT_REF, false)
         .unwrap();
@@ -93,7 +93,7 @@ fn the_three_publications_cross_unchanged() {
     let mut galley = loaded();
     assert_eq!(galley.publish().unwrap(), COLD, "the cold publication");
 
-    galley.update("books/GEN.usfm", GEN_EDITED).unwrap();
+    galley.update("books/GEN.usfm", GEN_EDITED, None).unwrap();
     assert_eq!(galley.publish().unwrap(), EDIT, "one word changed");
 
     let mut settings = galley.config();
@@ -198,7 +198,10 @@ fn the_onion_products_share_the_corpus_cache() {
     );
     assert!(!dish.is_empty(), "a parse buffer came back");
     assert!(
-        galley.verse_text_of(GEN).contains("beside the"),
+        galley
+            .verse_text_of(GEN, None)
+            .unwrap()
+            .contains("beside the"),
         "the verse-text projection reads"
     );
     assert!(galley.entry_count() > 0.0, "chapters were cached");
@@ -231,7 +234,7 @@ fn the_retained_copy_answers_with_the_same_bytes() {
     );
     assert_eq!(
         galley.verse_text("books/GEN.usfm").unwrap(),
-        galley.verse_text_of(GEN),
+        galley.verse_text_of(GEN, None).unwrap(),
     );
     assert_eq!(
         galley.lint("books/GEN.usfm").unwrap(),
@@ -399,7 +402,9 @@ fn the_retained_copy_is_its_own_baseline() {
 #[wasm_bindgen_test]
 fn an_overlay_crosses_the_wall() {
     let mut galley = Galley::with_budget(16 << 20);
-    galley.update("books/GEN.usfm", OVERLAY_TARGET).unwrap();
+    galley
+        .update("books/GEN.usfm", OVERLAY_TARGET, None)
+        .unwrap();
     galley
         .update_reference_with("ref/GEN.usfm", OVERLAY_SOURCE, true)
         .unwrap();

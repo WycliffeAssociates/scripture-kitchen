@@ -18,6 +18,7 @@
 
 use core::fmt;
 use core::ops::Range;
+use std::sync::Arc;
 
 use mise::books::{BookKey, canonical_rank};
 use mise::utf16::{Utf16Table, utf16_table};
@@ -26,6 +27,7 @@ use xxhash_rust::xxh3::xxh3_128;
 
 use sous_core::{InputError, SourceVerse, SourceWords, source_lengths};
 
+use crate::onion::extensions::Extensions;
 use crate::onion::{self, Filter, Mask, Toc, lint::LintReport};
 use crate::sous::OnionBook;
 
@@ -82,6 +84,19 @@ pub struct RawChecksum([u8; 16]);
 impl RawChecksum {
     pub fn of(bytes: &[u8]) -> Self {
         Self(xxh3_128(bytes).to_be_bytes())
+    }
+
+    /// Keyed also on the custom-marker list the bytes lex by, since the same
+    /// bytes are another book under another list. A list that declares
+    /// nothing leaves the checksum as it is.
+    fn under(self, markers: u64) -> Self {
+        if markers == 0 {
+            return self;
+        }
+        let mut keyed = [0u8; 24];
+        keyed[..16].copy_from_slice(&self.0);
+        keyed[16..].copy_from_slice(&markers.to_le_bytes());
+        Self::of(&keyed)
     }
 
     pub fn as_bytes(self) -> [u8; 16] {
@@ -145,6 +160,43 @@ pub enum SourceLanes {
     Lengths,
     /// The grapheme counts plus each verse's sorted deduplicated word hashes.
     LengthsAndWords,
+}
+
+/// The custom `\z` markers a book lexes by.
+///
+/// ```text
+/// Markers::Global      the list setCustomMarkers installed, re-derived when it moves
+/// Markers::Own(list)   the book's own; the installed list never reaches it
+/// ```
+#[derive(Debug, Clone, Default)]
+pub enum Markers {
+    #[default]
+    Global,
+    Own(Arc<Extensions>),
+}
+
+impl Markers {
+    /// The list to lex by right now.
+    pub fn list(&self) -> Arc<Extensions> {
+        match self {
+            Self::Global => onion::extensions::current(),
+            Self::Own(list) => Arc::clone(list),
+        }
+    }
+
+    fn same(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Global, Self::Global) => true,
+            (Self::Own(mine), Self::Own(theirs)) => mine.fingerprint() == theirs.fingerprint(),
+            _ => false,
+        }
+    }
+}
+
+impl From<Option<Arc<Extensions>>> for Markers {
+    fn from(list: Option<Arc<Extensions>>) -> Self {
+        list.map_or(Self::Global, Self::Own)
+    }
 }
 
 /// Whether a target keeps its text beside its products.
@@ -242,7 +294,10 @@ impl Fingerprint {
 struct Book {
     key: BookKey,
     role: Role,
+    /// The raw bytes' checksum, [`under`](RawChecksum::under) the list they
+    /// lex by.
     checksum: RawChecksum,
+    markers: Markers,
     fingerprint: Fingerprint,
     toc: Toc,
     /// What publication needs to place a finding, and what a search reads.
@@ -311,8 +366,11 @@ pub struct Pantry {
     /// The same order over the declared sources.
     references: Vec<(BookId, BookKey)>,
     derivations: u64,
-    /// The marker-registry generation every product here was derived under.
+    /// The marker-registry generation last checked.
     registry: u64,
+    /// The installed list's fingerprint, which every [`Markers::Global`] book
+    /// was derived under.
+    global: u64,
 }
 
 impl Pantry {
@@ -326,17 +384,19 @@ impl Pantry {
             references: Vec::new(),
             derivations: 0,
             registry: onion::extensions::generation(),
+            global: onion::extensions::current().fingerprint(),
         }
     }
 
-    /// Flushes what a changed marker registry made stale.
+    /// Re-derives the [`Markers::Global`] books when the installed list has
+    /// changed.
     ///
-    /// Both caches key on CONTENT — the chunk store on a chunk's bytes, a Book
-    /// on its raw checksum — which is right only while the same bytes parse
-    /// the same way. `set_extensions` makes them a different document, so
-    /// every derived product is stale at once. Runs at the head of every door
-    /// that reads or derives one; a comparison against a `u64`, so the
-    /// overwhelmingly common no-change case costs a load.
+    /// A book keys on its checksum under its list, and a chunk on its bytes
+    /// under theirs, so a product derived under the old list is never served
+    /// for the new one; what this does is rebuild the books that follow the
+    /// installed list. A book with its own list is not touched. Runs at the
+    /// head of every door that reads or derives a product; a comparison
+    /// against a `u64`, so the common no-change case costs a load.
     ///
     /// A book keeps its TEXT, which is the host's and was never derived: it is
     /// re-derived from it here, once. A book retaining no text cannot be
@@ -348,13 +408,16 @@ impl Pantry {
         if now == self.registry {
             return;
         }
-        // Before re-deriving: the nested `update_with` calls below must see a
-        // Pantry already at the new generation, or each would recurse.
         self.registry = now;
-        self.chunks.clear();
+        let global = onion::extensions::current().fingerprint();
+        if global == self.global {
+            return;
+        }
+        self.global = global;
         let stale: Vec<(BookId, Role, Retain, SourceLanes, String)> = self
             .books
             .iter()
+            .filter(|(_, book)| matches!(book.markers, Markers::Global))
             .filter_map(|(id, book)| {
                 book.text.as_ref().map(|text| {
                     (
@@ -374,7 +437,7 @@ impl Pantry {
             // A book that derived once derives again; a book whose bytes have
             // become invalid under the new rows is dropped, which is the same
             // answer `update` would give the host for them now.
-            let _ = self.update_with(id, role, retain, lanes, &text);
+            let _ = self.update_with_markers(id, role, retain, lanes, Markers::Global, &text);
         }
         self.reorder();
     }
@@ -392,11 +455,8 @@ impl Pantry {
         self.update_with(id, role, role.retention(), SourceLanes::Lengths, text)
     }
 
-    /// Derive and retain this book's products, keeping or dropping its text.
-    ///
-    /// Idempotent: text whose raw checksum, role and retain mode all match the
-    /// retained ones derives nothing and copies nothing. Whole-book replacement
-    /// is the only mutation, so coordinates cannot shift inside a book.
+    /// Derive and retain this book's products, keeping or dropping its text,
+    /// lexed by the installed list.
     pub fn update_with(
         &mut self,
         id: impl Into<BookId>,
@@ -405,17 +465,37 @@ impl Pantry {
         lanes: SourceLanes,
         text: &str,
     ) -> Result<Entry<'_>, PantryError> {
+        self.update_with_markers(id, role, retain, lanes, Markers::Global, text)
+    }
+
+    /// The same, lexed by `markers`.
+    ///
+    /// Idempotent: text whose raw checksum, role, retain mode and markers all
+    /// match the retained ones derives nothing and copies nothing. Whole-book
+    /// replacement is the only mutation, so coordinates cannot shift inside a
+    /// book. Registering one book never touches another's products.
+    pub fn update_with_markers(
+        &mut self,
+        id: impl Into<BookId>,
+        role: Role,
+        retain: Retain,
+        lanes: SourceLanes,
+        markers: Markers,
+        text: &str,
+    ) -> Result<Entry<'_>, PantryError> {
         self.check_registry();
         let id = id.into();
         if role == Role::Target && retain == Retain::ProductsOnly {
             return Err(PantryError::TargetNeedsText { id });
         }
-        let checksum = RawChecksum::of(text.as_bytes());
+        let list = markers.list();
+        let checksum = RawChecksum::of(text.as_bytes()).under(list.fingerprint());
         let served = self.books.get(&id).is_some_and(|book| {
             book.checksum == checksum
                 && book.role == role
                 && book.retain() == retain
                 && book.lanes() == lanes
+                && book.markers.same(&markers)
         });
         if served {
             return Ok(Entry { pantry: self, id });
@@ -427,6 +507,7 @@ impl Pantry {
                 toc: true,
                 ..Default::default()
             },
+            &list,
         );
         let toc = parsed.toc.expect("toc requested");
         if toc.book_token.is_none() {
@@ -476,6 +557,7 @@ impl Pantry {
             key,
             role,
             checksum,
+            markers,
             bytes: book_bytes(
                 &toc,
                 projection.as_ref(),
@@ -607,16 +689,21 @@ impl Pantry {
     /// The whole-book lint report over loose text the host holds, equal to a
     /// fresh `lint(lex(text), build(…))` with every unchanged chunk served
     /// from the cache.
-    pub fn lint(&mut self, text: &str) -> LintReport {
+    pub fn lint(&mut self, text: &str, markers: &Markers) -> LintReport {
         self.check_registry();
-        self.chunks.lint(text)
+        self.chunks.lint(text, &markers.list())
     }
 
     /// The book, plated — byte-identical to a cold `onion::wire::parse`, with
     /// the lex, the tree, and the lint walk reused per unchanged chunk.
-    pub fn parse(&mut self, text: &str, opts: onion::wire::ParseOptions) -> Vec<u8> {
+    pub fn parse(
+        &mut self,
+        text: &str,
+        opts: onion::wire::ParseOptions,
+        markers: &Markers,
+    ) -> Vec<u8> {
         self.check_registry();
-        self.chunks.parse(text, opts)
+        self.chunks.parse(text, opts, &markers.list())
     }
 
     /// The same ingredients as engine types, for a caller that is not
@@ -625,16 +712,17 @@ impl Pantry {
         &mut self,
         text: &'a str,
         opts: onion::wire::ParseOptions,
+        markers: &Markers,
     ) -> onion::wire::Parsed<'a> {
         self.check_registry();
-        self.chunks.parsed(text, opts)
+        self.chunks.parsed(text, opts, &markers.list())
     }
 
     /// One recipe's mask over the same assembled ingredients — what a
     /// downstream consumer of verse text reads.
-    pub fn masked(&mut self, text: &str, filter: &onion::mask::Filter) -> Mask {
+    pub fn masked(&mut self, text: &str, filter: &onion::mask::Filter, markers: &Markers) -> Mask {
         self.check_registry();
-        self.chunks.masked(text, filter)
+        self.chunks.masked(text, filter, &markers.list())
     }
 
     /// Bytes of text retained across every registered book — zero for a book
@@ -711,8 +799,8 @@ impl Pantry {
     /// The chunk cache's lint over one book's retained text. Split-borrowed,
     /// which is why this is not `Entry::text` plus a call.
     fn lint_book(&mut self, id: &BookId) -> Result<LintReport, PantryError> {
-        let text = retained(&self.books, id)?;
-        Ok(self.chunks.lint(text))
+        let (text, markers) = retained_with_markers(&self.books, id)?;
+        Ok(self.chunks.lint(text, &markers))
     }
 
     /// One book's tokens, tree and lint report off its retained text — the
@@ -725,13 +813,14 @@ impl Pantry {
         &mut self,
         id: &BookId,
     ) -> Result<(Vec<onion::Token>, onion::cst::Cst, LintReport), PantryError> {
-        let text = retained(&self.books, id)?;
+        let (text, markers) = retained_with_markers(&self.books, id)?;
         let parsed = self.chunks.parsed(
             text,
             onion::wire::ParseOptions {
                 diagnostics: true,
                 ..Default::default()
             },
+            &markers,
         );
         Ok((
             parsed.tokens,
@@ -747,8 +836,8 @@ impl Pantry {
         id: &BookId,
         opts: onion::wire::ParseOptions,
     ) -> Result<Vec<u8>, PantryError> {
-        let text = retained(&self.books, id)?;
-        Ok(self.chunks.parse(text, opts))
+        let (text, markers) = retained_with_markers(&self.books, id)?;
+        Ok(self.chunks.parse(text, opts, &markers))
     }
 
     fn reorder(&mut self) {
@@ -803,9 +892,15 @@ impl Entry<'_> {
         self.book().role
     }
 
-    /// The xxh3-128 of the raw bytes of the last update.
+    /// The xxh3-128 of the raw bytes of the last update, keyed also on the
+    /// custom-marker list they lex by when it declares any.
     pub fn checksum(&self) -> RawChecksum {
         self.book().checksum
+    }
+
+    /// The custom markers this book lexes by.
+    pub fn markers(&self) -> &Markers {
+        &self.book().markers
     }
 
     /// Chunk starts plus per-chunk checksums — the baseline for the next
@@ -896,6 +991,16 @@ fn retained<'b>(books: &'b FxHashMap<BookId, Book>, id: &BookId) -> Result<&'b s
         .get(id)
         .and_then(|book| book.text.as_deref())
         .ok_or_else(|| PantryError::NoText { id: id.clone() })
+}
+
+/// One book's text and the list it lexes by, borrowed off the map alone for
+/// the same reason as [`retained`].
+fn retained_with_markers<'b>(
+    books: &'b FxHashMap<BookId, Book>,
+    id: &BookId,
+) -> Result<(&'b str, Arc<Extensions>), PantryError> {
+    let text = retained(books, id)?;
+    Ok((text, books[id].markers.list()))
 }
 
 /// Resident size of one book's detached products and retained text.

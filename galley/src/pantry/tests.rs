@@ -3,6 +3,10 @@
 
 use super::*;
 
+/// Held by every test here that installs a list, since the installed list is
+/// one per process and the test threads share it.
+static INSTALLED: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Six chapters of a plausible book, one `\c` per chunk.
 fn book(code: &str, chapters: &[&str]) -> String {
     let mut text = format!("\\id {code}\n\\h {code}\n");
@@ -215,7 +219,9 @@ fn a_target_retains_its_text_by_default() {
     assert_eq!(entry.role(), Role::Target);
     assert_eq!(
         entry.lint().unwrap().observations,
-        Pantry::new(1 << 20).lint(&text).observations
+        Pantry::new(1 << 20)
+            .lint(&text, &Markers::Global)
+            .observations
     );
 }
 
@@ -256,7 +262,7 @@ fn a_retained_lint_equals_the_loose_text_door() {
         .unwrap()
         .lint()
         .unwrap();
-    let direct = Pantry::new(1 << 20).lint(&text);
+    let direct = Pantry::new(1 << 20).lint(&text, &Markers::Global);
     assert_eq!(through_entry.observations, direct.observations);
 
     let opts = onion::wire::ParseOptions {
@@ -264,7 +270,10 @@ fn a_retained_lint_equals_the_loose_text_door() {
         ..Default::default()
     };
     let plated = pantry.book(&mrk()).unwrap().parse(opts).unwrap();
-    assert_eq!(plated, Pantry::new(1 << 20).parse(&text, opts));
+    assert_eq!(
+        plated,
+        Pantry::new(1 << 20).parse(&text, opts, &Markers::Global)
+    );
 }
 
 #[test]
@@ -527,16 +536,16 @@ fn a_book_with_no_id_line_is_refused() {
     assert!(pantry.books(Role::Target).is_empty());
 }
 
-/// Installing a marker registry invalidates every product derived under the
-/// old one: the same bytes are a different document, and both caches key on
-/// content alone.
-///
-/// Serialized against the other registry-touching tests through
-/// `onion::extensions`'s process-wide value; the guard restores it.
+/// Installing a list re-derives every book that follows the installed list:
+/// the same bytes are a different document, and the caches key on content
+/// under the list.
 #[test]
-fn a_new_marker_registry_flushes_every_derived_product() {
+fn a_new_installed_list_re_derives_the_books_that_follow_it() {
     use onion::extensions::{CustomMarker, ExtensionCategory, set_extensions};
 
+    let _serial = INSTALLED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     /// Clears the registry however this test ends, so no other test in the
     /// process sees a marker it did not install.
     struct Restore;
@@ -566,7 +575,7 @@ fn a_new_marker_registry_flushes_every_derived_product() {
         "a served update derives nothing"
     );
     let unregistered = pantry
-        .masked(text, &Filter::verse_text())
+        .masked(text, &Filter::verse_text(), &Markers::Global)
         .text(text.as_bytes());
     assert!(
         unregistered.contains("why"),
@@ -590,7 +599,7 @@ fn a_new_marker_registry_flushes_every_derived_product() {
         "identical text must MISS after the registry moved"
     );
     let registered = pantry
-        .masked(text, &Filter::verse_text())
+        .masked(text, &Filter::verse_text(), &Markers::Global)
         .text(text.as_bytes());
     assert_ne!(
         registered, unregistered,
@@ -605,4 +614,162 @@ fn a_new_marker_registry_flushes_every_derived_product() {
         .parse(onion::wire::ParseOptions::default())
         .expect("a target parses");
     assert!(!dish.is_empty());
+}
+
+/// A list of `zfoo` as one category, as a book's own.
+fn own(category: onion::extensions::ExtensionCategory) -> Markers {
+    let (list, reports) = onion::extensions::Extensions::new(&[onion::extensions::CustomMarker {
+        name: "zfoo".to_owned(),
+        category,
+        description: String::new(),
+        attributes: Vec::new(),
+    }]);
+    assert!(reports.is_empty(), "{reports:?}");
+    Markers::Own(Arc::new(list))
+}
+
+/// Two books on one Pantry, each lexing `\zfoo` by its own list: they read
+/// differently, registering one never re-derives the other, and the
+/// installed list reaches neither.
+#[test]
+fn each_book_lexes_by_its_own_markers() {
+    use onion::extensions::{CustomMarker, ExtensionCategory, set_extensions};
+
+    let _serial = INSTALLED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    struct Restore;
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            set_extensions(&[]);
+        }
+    }
+    let _restore = Restore;
+    set_extensions(&[]);
+
+    let body = |code: &str| {
+        book(
+            code,
+            &[
+                "Jesus wept\\zfoo + \\ft why\\zfoo*.",
+                "He entered Capernaum again.",
+                "A man with a withered hand.",
+            ],
+        )
+    };
+    let (mrk, luk) = (body("MRK"), body("LUK"));
+    let verse_text = |pantry: &mut Pantry, id: &str| {
+        let entry = pantry.book(&BookId::from(id)).expect("registered");
+        let text = entry.text().expect("a target keeps its text").to_owned();
+        entry.mask().expect("a projection").text(text.as_bytes())
+    };
+    let register = |pantry: &mut Pantry, id: &str, text: &str, markers: Markers| {
+        pantry
+            .update_with_markers(
+                id,
+                Role::Target,
+                Retain::Text,
+                SourceLanes::Lengths,
+                markers,
+                text,
+            )
+            .expect("registers")
+            .checksum()
+    };
+
+    let mut pantry = Pantry::new(1 << 20);
+    register(
+        &mut pantry,
+        "books/MRK.usfm",
+        &mrk,
+        own(ExtensionCategory::Footnote),
+    );
+    let derived = pantry.derivations();
+    let luk_checksum = register(
+        &mut pantry,
+        "books/LUK.usfm",
+        &luk,
+        own(ExtensionCategory::Char),
+    );
+    assert_eq!(
+        pantry.derivations(),
+        derived + 1,
+        "one registration, one derivation"
+    );
+    assert!(
+        !verse_text(&mut pantry, "books/MRK.usfm").contains("why"),
+        "MRK: a footnote"
+    );
+    assert!(
+        verse_text(&mut pantry, "books/LUK.usfm").contains("why"),
+        "LUK: a char span"
+    );
+
+    // The same bytes under two lists share no product.
+    let footnote = pantry
+        .checksum(&BookId::from("books/MRK.usfm"))
+        .expect("registered");
+    let char_span = register(
+        &mut pantry,
+        "books/MRK2.usfm",
+        &mrk,
+        own(ExtensionCategory::Char),
+    );
+    assert_ne!(footnote, char_span, "a checksum keys on the list too");
+
+    // Re-registering MRK under LUK's list re-derives MRK and nothing else.
+    let derived = pantry.derivations();
+    let misses = pantry.chunk_stats().misses;
+    register(
+        &mut pantry,
+        "books/MRK.usfm",
+        &mrk,
+        own(ExtensionCategory::Char),
+    );
+    assert_eq!(pantry.derivations(), derived + 1);
+    assert!(
+        verse_text(&mut pantry, "books/MRK.usfm").contains("why"),
+        "MRK: now a char span"
+    );
+    pantry
+        .book(&BookId::from("books/LUK.usfm"))
+        .expect("registered")
+        .parse(Default::default())
+        .expect("parses");
+    assert_eq!(
+        pantry.chunk_stats().misses,
+        misses,
+        "MRK under an equal list reuses MRK2's chunks, and LUK's stayed warm"
+    );
+    assert_eq!(
+        pantry.checksum(&BookId::from("books/LUK.usfm")),
+        Some(luk_checksum)
+    );
+
+    // A book on the installed list follows it; a book with its own does not.
+    register(&mut pantry, "books/JHN.usfm", &body("JHN"), Markers::Global);
+    assert!(
+        verse_text(&mut pantry, "books/JHN.usfm").contains("why"),
+        "JHN: row 0"
+    );
+    let derived = pantry.derivations();
+    set_extensions(&[CustomMarker {
+        name: "zfoo".to_owned(),
+        category: ExtensionCategory::Footnote,
+        description: String::new(),
+        attributes: Vec::new(),
+    }]);
+    assert!(
+        !verse_text(&mut pantry, "books/JHN.usfm").contains("why"),
+        "JHN: now a footnote"
+    );
+    assert_eq!(pantry.derivations(), derived + 1, "only JHN re-derived");
+    assert!(
+        verse_text(&mut pantry, "books/LUK.usfm").contains("why"),
+        "LUK kept its own list"
+    );
+    assert_eq!(
+        pantry.checksum(&BookId::from("books/LUK.usfm")),
+        Some(luk_checksum)
+    );
 }

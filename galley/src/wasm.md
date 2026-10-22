@@ -45,9 +45,11 @@ JSON.parse(galley.resolve("books/LUK.usfm", verse, { utf16: true }));
 ## Options are objects, and they are checked
 
 Every door that takes options takes ONE object, last, and every such object is
-a declared TypeScript interface in the `.d.ts` — `ParseOptions`, `TocOptions`,
-`CensusOptions`, `FindOptions`, `MaskOptions`, `OverlayOptions`,
-`ReferenceOptions`, `ResolveOptions`, `GalleyOptions`. No door takes a
+a declared TypeScript interface in the `.d.ts` — `ParseOptions`,
+`ParseTextOptions`, `TocOptions`, `CensusOptions`, `FindOptions`,
+`MaskOptions`, `MaskTextOptions`, `OverlayOptions`, `UpdateOptions`,
+`ReferenceOptions`, `ResolveOptions`, `ResolveTextOptions`, `LexOptions`,
+`GalleyOptions`. No door takes a
 positional boolean or a trailing optional flag. A typed caller's misspelling
 is a compile error; an untyped caller's is a throw at the wall naming the key,
 because an unknown key is refused rather than read as `false`:
@@ -114,6 +116,37 @@ galley.verseText("ref/RUT.usfm");                       // and its projection
 Re-sending a reference with a different `keepText` is a real update, not a
 no-op: `Retain` is part of what the Pantry serves a book from, the same way
 `SourceLanes` is.
+
+## Each book's own custom markers: `{ customMarkers }`
+
+A main text and its reference texts may come from projects whose `markers.ext`
+lists differ. Each project's list is parsed once into a `CustomMarkers`
+handle, and each book is registered with its own:
+
+```js
+const mine = new CustomMarkers(JSON.stringify(myMarkers));
+const theirs = new CustomMarkers(JSON.stringify(refMarkers));
+
+galley.update("books/MRK.usfm", text, { customMarkers: mine });
+galley.updateReference("ref/MRK.usfm", refText, { keepText: true, customMarkers: theirs });
+galley.resolveOf(refText, verse, { customMarkers: theirs });   // and parseText, maskOf,
+galley.verseTextOf(refText, { customMarkers: theirs });        // structureTextOf
+mine.free();                                                   // MRK keeps its list
+```
+
+A registered book lexes by the list it was registered with until it is
+registered again, and every id door on it (`parse`, `lint`, `mask`, `resolve`,
+`find`, the overlay doors) answers by that list, so those doors take no
+`customMarkers`, and the ones with an options object refuse it by name. Registering a book never re-derives
+another's products: the chunk cache keys on the list's fingerprint as well as
+the bytes, so the same text under two lists never shares a parse, and under
+two equal lists it does. Registering a book again under a different list
+re-derives that book alone.
+
+A book registered without `customMarkers` lexes by the list
+`setCustomMarkers` installed, and is re-derived when that list changes; a book
+with its own list never is. The handle is lent, never taken: one handle serves
+any number of calls, and `free()` drops only the handle.
 
 ## Dirty and rework
 
@@ -231,11 +264,12 @@ report carries the `line` it came from; a list report has no `line` key at all,
 rather than a zero standing in for one. Only malformed JSON, or an options
 value that is not `{ relaxZPrefix?: boolean }`, throws.
 
-**Installing invalidates every derived product**, a resident `Galley`'s
-included — the same bytes are a different document once the rows change, and
-both caches key on content. Call it at composition, before the first parse,
-not between edits. The Pantry re-derives each registered book from its retained
-text on the next door it is asked through.
+**Installing re-derives every book registered without its own list**, on the
+next door a resident `Galley` is asked through — the same bytes are a
+different document once the rows change. Call it at composition, before the
+first parse, not between edits. A book registered with `{ customMarkers }`
+keeps its own list and is not touched; see "Each book's own custom markers"
+above.
 
 ## The claim
 

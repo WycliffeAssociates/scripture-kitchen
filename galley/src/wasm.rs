@@ -27,7 +27,7 @@ use sous_core::Brigade;
 use crate::find::Find;
 use crate::mask::Recipe;
 use crate::overlay::Side;
-use crate::pantry::{BookId, Entry, Retain, Role};
+use crate::pantry::{BookId, Entry, Markers, Retain, Role};
 use crate::sous::Expediter;
 pub use crate::sous::SousSettings;
 
@@ -59,8 +59,11 @@ export interface GalleyOptions {
   budgetBytes?: number;
 }
 
+/** `update(id, text, opts)`: the `\z` list the book lexes by, for as long as it is registered. */
+export interface UpdateOptions extends LexOptions {}
+
 /** `updateReference(id, text, opts)`. */
-export interface ReferenceOptions {
+export interface ReferenceOptions extends LexOptions {
   /** Keep the text and projection a target keeps, so `find` and `mask` can read it. */
   keepText?: boolean;
 }
@@ -75,11 +78,14 @@ export interface FindOptions {
   scope?: Scope;
 }
 
-/** `mask` and `maskOf`. */
+/** `mask(id, opts)`. */
 export interface MaskOptions {
   recipe?: "verseText" | "structure" | "text";
   utf16?: boolean;
 }
+
+/** `maskOf(text, opts)`. */
+export interface MaskTextOptions extends MaskOptions, LexOptions {}
 
 /** `toc(id, opts)`. */
 export interface TocOptions {
@@ -174,11 +180,19 @@ impl Galley {
     /// orders the publication. Idempotent: the same text costs a checksum.
     ///
     /// `text` must be LF-normalized, the contract every door here documents.
-    pub fn update(&mut self, id: &str, text: &str) -> Result<String, JsError> {
-        self.sous
-            .update(id, Role::Target, text)
-            .map(|key| key.to_string())
-            .map_err(|error| JsError::new(&error.to_string()))
+    ///
+    /// `{ customMarkers }` is the `\z` list the book lexes by for as long as
+    /// it is registered; omitted, it follows `setCustomMarkers`. Registering
+    /// a book under another list re-derives that book alone.
+    pub fn update(
+        &mut self,
+        id: &str,
+        text: &str,
+        #[wasm_bindgen(unchecked_optional_param_type = "UpdateOptions")] opts: Option<JsValue>,
+    ) -> Result<String, JsError> {
+        let markers = onion_wasm::options::lex_options(opts.as_ref(), "update")
+            .map_err(|e| JsError::new(&e))?;
+        self.register(id, Role::Target, Retain::Text, Markers::from(markers), text)
     }
 
     /// The same, as a declared source: one projected grapheme length per
@@ -191,7 +205,7 @@ impl Galley {
     /// projection a target keeps too, which is what [`find`](Self::find) and
     /// `findAll`'s `"references"` scope read. It costs what a target costs
     /// minus the resident analysis; a source nobody searches should stay off
-    /// it.
+    /// it. `{ customMarkers }` is [`update`](Self::update)'s.
     #[wasm_bindgen(js_name = updateReference)]
     pub fn update_reference(
         &mut self,
@@ -199,11 +213,20 @@ impl Galley {
         text: &str,
         #[wasm_bindgen(unchecked_optional_param_type = "ReferenceOptions")] opts: Option<JsValue>,
     ) -> Result<String, JsError> {
-        let bag = onion_wasm::options::bag(opts.as_ref(), "updateReference", &["keepText"])
+        let door = "updateReference";
+        let bag = onion_wasm::options::bag(opts.as_ref(), door, &["keepText", "customMarkers"])
             .map_err(|e| JsError::new(&e))?;
-        let keep_text = onion_wasm::options::flag(bag.as_ref(), "updateReference", "keepText")
+        let keep_text = onion_wasm::options::flag(bag.as_ref(), door, "keepText")
             .map_err(|e| JsError::new(&e))?;
-        self.update_reference_with(id, text, keep_text)
+        let markers = onion_wasm::options::custom_markers(bag.as_ref(), door)
+            .map_err(|e| JsError::new(&e))?;
+        self.register(
+            id,
+            Role::Reference,
+            retention(keep_text),
+            Markers::from(markers),
+            text,
+        )
     }
 
     /// Drop a book, its text, and its cached rows. `false` when the id was
@@ -379,7 +402,9 @@ impl Galley {
         let address = onion_wasm::resolution::address(&address).map_err(|e| JsError::new(&e))?;
         let entry = self.book(id)?;
         let answer = match entry.text() {
-            Ok(text) => entry.toc().resolve(text, &address),
+            Ok(text) => entry
+                .toc()
+                .resolve_with(text, &address, &entry.markers().list()),
             Err(_) => entry.toc().resolve_rows(&address).ok_or_else(|| {
                 JsError::new(&format!(
                     "reference {id} retains no text to resolve a verse in; register it with keepText"
@@ -403,23 +428,26 @@ impl Galley {
         &mut self,
         text: &str,
         #[wasm_bindgen(unchecked_param_type = "Address")] address: JsValue,
-        #[wasm_bindgen(unchecked_optional_param_type = "ResolveOptions")] opts: Option<JsValue>,
+        #[wasm_bindgen(unchecked_optional_param_type = "ResolveTextOptions")] opts: Option<JsValue>,
     ) -> Result<String, JsError> {
-        let utf16 = onion_wasm::options::utf16_only(opts.as_ref(), "resolveOf")
-            .map_err(|e| JsError::new(&e))?;
+        let (utf16, markers) =
+            onion_wasm::options::resolve_text_options(opts.as_ref(), "resolveOf")
+                .map_err(|e| JsError::new(&e))?;
         let address = onion_wasm::resolution::address(&address).map_err(|e| JsError::new(&e))?;
+        let markers = Markers::from(markers);
         let parsed = self.sous.parsed(
             text,
             crate::onion::wire::ParseOptions {
                 toc: true,
                 ..Default::default()
             },
+            &markers,
         );
-        let answer = parsed
-            .toc
-            .as_ref()
-            .expect("asked for a toc")
-            .resolve(text, &address);
+        let answer = parsed.toc.as_ref().expect("asked for a toc").resolve_with(
+            text,
+            &address,
+            &markers.list(),
+        );
         let table = utf16.then(|| mise::utf16::utf16_table(text.as_bytes()));
         Ok(onion_wasm::resolution::json(&answer, table.as_ref()))
     }
@@ -684,7 +712,7 @@ impl Galley {
         id: &str,
         #[wasm_bindgen(unchecked_optional_param_type = "MaskOptions")] opts: Option<JsValue>,
     ) -> Result<Vec<u8>, JsError> {
-        let opts = mask::options(opts.as_ref(), "mask")?;
+        let opts = mask::options(opts.as_ref(), "mask", false)?;
         let wanted = self.projected(id)?;
         match opts.recipe {
             Recipe::VerseText => {
@@ -700,17 +728,17 @@ impl Galley {
                 Ok(crate::mask::encode(cut, opts.recipe, table, source_len))
             }
             Recipe::Structure | Recipe::Text => {
-                let (text, source_len) = {
+                let (text, source_len, markers) = {
                     let book = self.book(id)?;
                     let text = book.text().map_err(refusal)?.to_owned();
                     let len = match opts.utf16 {
                         true => book.published_len().map_err(refusal)?,
                         false => text.len() as u32,
                     };
-                    (text, len)
+                    (text, len, book.markers().clone())
                 };
                 let table = self.table(&wanted, opts.utf16)?;
-                let cut = self.sous.masked(&text, &opts.recipe.filter());
+                let cut = self.sous.masked(&text, &opts.recipe.filter(), &markers);
                 Ok(crate::mask::encode(
                     &cut,
                     opts.recipe,
@@ -733,11 +761,11 @@ impl Galley {
     pub fn parse_text(
         &mut self,
         text: &str,
-        #[wasm_bindgen(unchecked_optional_param_type = "ParseOptions")] opts: Option<JsValue>,
+        #[wasm_bindgen(unchecked_optional_param_type = "ParseTextOptions")] opts: Option<JsValue>,
     ) -> Result<Vec<u8>, JsError> {
-        let opts = onion_wasm::options::parse_options(opts.as_ref(), "parseText")
+        let (opts, markers) = onion_wasm::options::parse_text_options(opts.as_ref(), "parseText")
             .map_err(|e| JsError::new(&e))?;
-        Ok(self.parse_text_with(text, opts))
+        Ok(self.sous.parse(text, opts, &Markers::from(markers)))
     }
 
     /// The verse text of loose text. See [`parse_text`](Self::parse_text).
@@ -745,11 +773,17 @@ impl Galley {
     /// The string alone: a consumer that needs to get back to the source asks
     /// [`mask_of`](Self::mask_of) for the same cut's map.
     #[wasm_bindgen(js_name = verseTextOf)]
-    pub fn verse_text_of(&mut self, text: &str) -> String {
-        let mask = self
-            .sous
-            .masked(text, &crate::onion::mask::Filter::verse_text());
-        mask.text(text.as_bytes())
+    pub fn verse_text_of(
+        &mut self,
+        text: &str,
+        #[wasm_bindgen(unchecked_optional_param_type = "LexOptions")] opts: Option<JsValue>,
+    ) -> Result<String, JsError> {
+        self.text_of(
+            text,
+            &crate::onion::mask::Filter::verse_text(),
+            opts,
+            "verseTextOf",
+        )
     }
 
     /// [`mask`](Self::mask) over text the host holds and has not registered,
@@ -759,10 +793,10 @@ impl Galley {
     pub fn mask_of(
         &mut self,
         text: &str,
-        #[wasm_bindgen(unchecked_optional_param_type = "MaskOptions")] opts: Option<JsValue>,
+        #[wasm_bindgen(unchecked_optional_param_type = "MaskTextOptions")] opts: Option<JsValue>,
     ) -> Result<Vec<u8>, JsError> {
-        let opts = mask::options(opts.as_ref(), "maskOf")?;
-        let cut = self.sous.masked(text, &opts.recipe.filter());
+        let opts = mask::options(opts.as_ref(), "maskOf", true)?;
+        let cut = self.sous.masked(text, &opts.recipe.filter(), &opts.markers);
         let table = opts
             .utf16
             .then(|| mise::utf16::utf16_table(text.as_bytes()));
@@ -781,11 +815,17 @@ impl Galley {
     /// The structure recipe's text, the verse-text mask's sibling. No book
     /// retains a structure projection, so this door takes text only.
     #[wasm_bindgen(js_name = structureTextOf)]
-    pub fn structure_text_of(&mut self, text: &str) -> String {
-        let mask = self
-            .sous
-            .masked(text, &crate::onion::mask::Filter::structure());
-        mask.text(text.as_bytes())
+    pub fn structure_text_of(
+        &mut self,
+        text: &str,
+        #[wasm_bindgen(unchecked_optional_param_type = "LexOptions")] opts: Option<JsValue>,
+    ) -> Result<String, JsError> {
+        self.text_of(
+            text,
+            &crate::onion::mask::Filter::structure(),
+            opts,
+            "structureTextOf",
+        )
     }
 
     // ── Dirty and rework ────────────────────────────────────────────────
@@ -884,14 +924,41 @@ impl Galley {
         text: &str,
         keep_text: bool,
     ) -> Result<String, JsError> {
-        let retain = match keep_text {
-            true => Retain::Text,
-            false => Retain::ProductsOnly,
-        };
+        self.register(
+            id,
+            Role::Reference,
+            retention(keep_text),
+            Markers::Global,
+            text,
+        )
+    }
+
+    fn register(
+        &mut self,
+        id: &str,
+        role: Role,
+        retain: Retain,
+        markers: Markers,
+        text: &str,
+    ) -> Result<String, JsError> {
         self.sous
-            .update_with(id, Role::Reference, retain, text)
+            .update_with_markers(id, role, retain, markers, text)
             .map(|key| key.to_string())
             .map_err(|error| JsError::new(&error.to_string()))
+    }
+
+    /// One recipe's text over loose text, for the `…TextOf` doors.
+    fn text_of(
+        &mut self,
+        text: &str,
+        filter: &crate::onion::mask::Filter,
+        opts: Option<JsValue>,
+        door: &str,
+    ) -> Result<String, JsError> {
+        let markers =
+            onion_wasm::options::lex_options(opts.as_ref(), door).map_err(|e| JsError::new(&e))?;
+        let mask = self.sous.masked(text, filter, &Markers::from(markers));
+        Ok(mask.text(text.as_bytes()))
     }
 
     /// [`parse`](Self::parse) over engine options, for a Rust caller.
@@ -909,7 +976,7 @@ impl Galley {
         text: &str,
         opts: crate::onion::wire::ParseOptions,
     ) -> Vec<u8> {
-        self.sous.parse(text, opts)
+        self.sous.parse(text, opts, &Markers::Global)
     }
 
     /// One registered book that retains a verse-text projection, or the
@@ -987,6 +1054,14 @@ impl Galley {
         opts: crate::onion::wire::ParseOptions,
     ) -> Result<Vec<u8>, JsError> {
         self.book(id)?.parse(opts).map_err(refusal)
+    }
+}
+
+/// What `keepText` asks a reference to retain.
+fn retention(keep_text: bool) -> Retain {
+    match keep_text {
+        true => Retain::Text,
+        false => Retain::ProductsOnly,
     }
 }
 

@@ -38,8 +38,8 @@ pub use overlay::{
     Scope, Skeleton, SkeletonRow, SkeletonVerse,
 };
 pub use pantry::{
-    BookId, Budget, ChunkStats, Entry, Fingerprint, Pantry, PantryError, RawChecksum, Retain, Role,
-    SourceLanes, Tally, Tier, fingerprint,
+    BookId, Budget, ChunkStats, Entry, Fingerprint, Markers, Pantry, PantryError, RawChecksum,
+    Retain, Role, SourceLanes, Tally, Tier, fingerprint,
 };
 pub use sous::{Expediter, ObservationKey};
 

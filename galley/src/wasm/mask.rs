@@ -15,21 +15,34 @@ use wasm_bindgen::prelude::*;
 
 use super::overlay::get;
 use crate::mask::Recipe;
+use crate::pantry::Markers;
 
 /// `mask` and `maskOf`'s options, defaulted and type-checked.
 #[derive(Default)]
 pub(super) struct MaskOptions {
     pub recipe: Recipe,
     pub utf16: bool,
+    pub markers: Markers,
 }
 
-/// `{ recipe?, utf16? }` off a JS object; an unknown key is an error naming it.
-pub(super) fn options(value: Option<&JsValue>, door: &str) -> Result<MaskOptions, JsError> {
-    let bag = onion_wasm::options::bag(value, door, &["recipe", "utf16"])
-        .map_err(|e| JsError::new(&e))?;
+/// `{ recipe?, utf16? }` off a JS object, and `customMarkers?` too when the
+/// door takes `text`; an unknown key is an error naming it.
+pub(super) fn options(
+    value: Option<&JsValue>,
+    door: &str,
+    text: bool,
+) -> Result<MaskOptions, JsError> {
+    let known: &[&str] = match text {
+        true => &["recipe", "utf16", "customMarkers"],
+        false => &["recipe", "utf16"],
+    };
+    let bag = onion_wasm::options::bag(value, door, known).map_err(|e| JsError::new(&e))?;
     let Some(value) = bag.as_ref() else {
         return Ok(MaskOptions::default());
     };
+    let markers = onion_wasm::options::custom_markers(Some(value), door)
+        .map_err(|e| JsError::new(&e))?
+        .into();
     let recipe = match get(value, "recipe") {
         None => Recipe::default(),
         Some(name) => {
@@ -55,5 +68,9 @@ pub(super) fn options(value: Option<&JsValue>, door: &str) -> Result<MaskOptions
             .as_bool()
             .ok_or_else(|| JsError::new("utf16 must be a boolean"))?,
     };
-    Ok(MaskOptions { recipe, utf16 })
+    Ok(MaskOptions {
+        recipe,
+        utf16,
+        markers,
+    })
 }

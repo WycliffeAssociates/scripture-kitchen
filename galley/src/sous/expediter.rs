@@ -36,7 +36,7 @@ use crate::overlay;
 
 use super::{OnionBook, PublishError, rebase_span, restate};
 use crate::pantry::derived::Store;
-use crate::pantry::{BookId, Entry, Pantry, RawChecksum, Retain, Role, SourceLanes};
+use crate::pantry::{BookId, Entry, Markers, Pantry, RawChecksum, Retain, Role, SourceLanes};
 
 /// The Sous coordinator over one [`ChapterPass`].
 ///
@@ -245,6 +245,18 @@ impl<P: ChapterPass + Sync> Expediter<P> {
         retain: Retain,
         text: &str,
     ) -> Result<BookKey, PublishError> {
+        self.update_with_markers(id, role, retain, Markers::Global, text)
+    }
+
+    /// The same, lexed by `markers`.
+    pub fn update_with_markers(
+        &mut self,
+        id: impl Into<BookId>,
+        role: Role,
+        retain: Retain,
+        markers: Markers,
+        text: &str,
+    ) -> Result<BookKey, PublishError> {
         let id = id.into();
         // A book that stops being a Target stops being cached as one: its ring
         // and its hot slot go here, and the publication that no longer lists it
@@ -255,7 +267,7 @@ impl<P: ChapterPass + Sync> Expediter<P> {
         }
         Ok(self
             .pantry
-            .update_with(id, role, retain, self.source_lanes(), text)
+            .update_with_markers(id, role, retain, self.source_lanes(), markers, text)
             .map_err(PublishError::Pantry)?
             .key())
     }
@@ -319,13 +331,18 @@ impl<P: ChapterPass + Sync> Expediter<P> {
     /// the four free-text doors the coordinator forwards: a derivation over
     /// text that is not a registered book takes `&mut` and touches no book,
     /// so the registry stays read-only from outside.
-    pub fn lint(&mut self, text: &str) -> lint::LintReport {
-        self.pantry.lint(text)
+    pub fn lint(&mut self, text: &str, markers: &Markers) -> lint::LintReport {
+        self.pantry.lint(text, markers)
     }
 
     /// The book, plated, off the same chunk cache. See [`lint`](Self::lint).
-    pub fn parse(&mut self, text: &str, opts: onion::wire::ParseOptions) -> Vec<u8> {
-        self.pantry.parse(text, opts)
+    pub fn parse(
+        &mut self,
+        text: &str,
+        opts: onion::wire::ParseOptions,
+        markers: &Markers,
+    ) -> Vec<u8> {
+        self.pantry.parse(text, opts, markers)
     }
 
     /// The same ingredients as engine types. See [`lint`](Self::lint).
@@ -333,13 +350,19 @@ impl<P: ChapterPass + Sync> Expediter<P> {
         &mut self,
         text: &'a str,
         opts: onion::wire::ParseOptions,
+        markers: &Markers,
     ) -> onion::wire::Parsed<'a> {
-        self.pantry.parsed(text, opts)
+        self.pantry.parsed(text, opts, markers)
     }
 
     /// One recipe's mask over loose text. See [`lint`](Self::lint).
-    pub fn masked(&mut self, text: &str, filter: &onion::mask::Filter) -> onion::mask::Mask {
-        self.pantry.masked(text, filter)
+    pub fn masked(
+        &mut self,
+        text: &str,
+        filter: &onion::mask::Filter,
+        markers: &Markers,
+    ) -> onion::mask::Mask {
+        self.pantry.masked(text, filter, markers)
     }
 
     /// A literal find over the REGISTERED books' retained projections, as the

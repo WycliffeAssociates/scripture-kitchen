@@ -31,7 +31,7 @@
 use std::sync::LazyLock;
 
 use divan::counter::BytesCount;
-use usfm_galley::{Pantry, onion};
+use usfm_galley::{Markers, Pantry, onion};
 
 /// See the note in `onion/benches/pipeline.rs`: measured overhead is under the
 /// noise floor, so this is safe to leave on when the counts are wanted.
@@ -127,9 +127,9 @@ fn warmed(book: &Book, name: &str) -> Pantry {
     // evicts during a run: MEASURED worst case is en_ult PSA at 3.27 MB warm and
     // 4.62 MB after 50 keystrokes, so 16 MB is 3.5x headroom.
     let mut cache = Pantry::new(24 << 20);
-    cache.lint(&book.text);
+    cache.lint(&book.text, &Markers::Global);
     let before = cache.chunk_stats().misses;
-    cache.lint(&book.keystrokes[0]);
+    cache.lint(&book.keystrokes[0], &Markers::Global);
     let dirty = cache.chunk_stats().misses - before;
     if cache.chunk_stats().len == 0 {
         // Below galley's chunk gate: nothing is cached, so every call recomputes
@@ -159,7 +159,7 @@ fn lint_folded(bencher: divan::Bencher, name: &str) {
         .bench_local(|| {
             let typed = &book.keystrokes[next];
             next += 1;
-            divan::black_box(cache.lint(divan::black_box(typed)))
+            divan::black_box(cache.lint(divan::black_box(typed), &Markers::Global))
         });
 }
 
@@ -185,7 +185,7 @@ fn parse_folded(bencher: divan::Bencher, name: &str) {
         .bench_local(|| {
             let typed = &book.keystrokes[next];
             next += 1;
-            divan::black_box(cache.parse(divan::black_box(typed), EDITOR))
+            divan::black_box(cache.parse(divan::black_box(typed), EDITOR, &Markers::Global))
         });
 }
 
@@ -208,7 +208,7 @@ fn verse_text_folded(bencher: divan::Bencher, name: &str) {
         .bench_local(|| {
             let typed = &book.keystrokes[next];
             next += 1;
-            divan::black_box(cache.masked(divan::black_box(typed), &filter))
+            divan::black_box(cache.masked(divan::black_box(typed), &filter, &Markers::Global))
         });
 }
 

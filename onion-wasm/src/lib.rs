@@ -134,7 +134,7 @@ export interface ParseOptions {
   utf16?: boolean;
 }
 
-/** The list a door that takes text lexes `\\z` markers by. */
+/** The list a door that takes text lexes `\z` markers by. */
 export interface LexOptions {
   /** Default: the list `setCustomMarkers` installed. */
   customMarkers?: CustomMarkers;

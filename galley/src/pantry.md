@@ -23,10 +23,13 @@ pantry.book(&id)                            -> Option<Entry<'_>>
 pantry.changed_since_update(&id, &edited)   -> [1_284..2_006]   // one chapter
 pantry.books(Role::Target)                  -> [(id, GEN), (id, MRK)]
 
-pantry.lint(&loose)                         // the four free-text doors: loose
-pantry.parse(&loose, opts)                  // text the host holds, served off
-pantry.parsed(&loose, opts)                 // the same content-addressed
-pantry.masked(&loose, &filter)              // chunks a registered book warmed
+pantry.lint(&loose, &markers)               // the four free-text doors: loose
+pantry.parse(&loose, opts, &markers)        // text the host holds, served off
+pantry.parsed(&loose, opts, &markers)       // the same content-addressed
+pantry.masked(&loose, &filter, &markers)    // chunks a registered book warmed
+
+pantry.update_with_markers(id, role, retain, lanes, Markers::Own(list), &text)
+                                            // a book that lexes `\z` by its own list
 
 pantry.chunk_stats()   -> ChunkStats { misses, hits, evictions, len, resident_bytes }
 pantry.budget()        -> Budget { ceiling: 16_777_216 }
@@ -69,8 +72,8 @@ correctness bug, not a performance one.
 
 | store | key | value | moves when | tier |
 | --- | --- | --- | --- | --- |
-| chunk cache | (chunk content hash, chunk 0's carry-outs) | one chunk's CST, tokens, local lint report | that chunk's bytes, the declared `\usfm` version, or the is-scripture bit | rebuildable |
-| `books` | `BookId` | `Toc`, `Mask`, `Utf16Table`, `Fingerprint`, lanes, text | `update` with a different `RawChecksum`, role, retention, or `SourceLanes` | pinned |
+| chunk cache | (chunk content hash, custom-marker fingerprint, chunk 0's carry-outs) | one chunk's CST, tokens, local lint report | that chunk's bytes, the list it lexes by, the declared `\usfm` version, or the is-scripture bit | rebuildable |
+| `books` | `BookId` | `Toc`, `Mask`, `Utf16Table`, `Fingerprint`, lanes, text, `Markers` | `update` with a different `RawChecksum`, role, retention, `SourceLanes` or `Markers`; for a `Markers::Global` book, a new installed list | pinned |
 | `observations` | `ObservationKey` | one chapter's `P::Observation` | the chapter's projected text, its rebased verse rows, or `P::SCHEMA` | rebuildable |
 | `chapter_tables` | `RawChecksum` | the book's `(ObservationKey, start)` rows | any edit at all, markup included | rebuildable |
 | `aggregates` | `RawChecksum` | the book's `P::Aggregate`, book-index free | the same | rebuildable |
@@ -130,7 +133,10 @@ method silently picks a reference point.
 ## The two hashes
 
 `RawChecksum` is the xxh3-128 of a book's raw bytes — the whole-book form of the
-per-chunk hash `galley::chunks` prints as hex. A Sous `ObservationKey` is a
+per-chunk hash `galley::chunks` prints as hex. A book that lexes by a list
+declaring any custom marker keys its checksum on that list's fingerprint too,
+so every store keyed by `RawChecksum` tells the same bytes under two lists
+apart; with no custom markers it is the raw hash unchanged. A Sous `ObservationKey` is a
 different newtype over the same algorithm, keyed on a chapter's *projected*
 inputs plus a pass schema stamp. Keeping them distinct is what lets a
 markup-only edit move the raw checksum, invalidating the projection and the
@@ -296,6 +302,13 @@ dozens-to-hundreds of entries eviction is a linear scan — and it evicts by
 last-touched tick until the retained heap is back under the ceiling. A ceiling
 is what makes a session-long cache safe: wasm linear memory grows and never
 shrinks, so a high-water mark is permanent.
+
+A chunk keys on the fingerprint of the custom-marker list it was lexed by, so
+two books whose projects declare `\zfoo` differently never share a parse, and
+two that declare it alike do. Installing a new list with `setCustomMarkers`
+clears nothing: the `Markers::Global` books re-derive under the new
+fingerprint, the old entries are simply never asked for again, and the LRU
+retires them; a book with its own list keeps every entry it had.
 
 INPUT CONTRACT: checksums are only stable against LF-normalized text, the same
 contract `onion::wire::parse` documents. CRLF works and is a different content

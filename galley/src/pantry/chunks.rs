@@ -16,9 +16,11 @@
 //! called one: a cache that happens to use a fold is still a cache.
 //!
 //! Entries are chunk-relative and NEVER mutate; absolute offsets go out the
-//! door. The cache key is (content hash, chunk 0's carry-outs): the declared
-//! `\usfm` version and the is-scripture bit gate local rules, so a chunk's
-//! product is a function of its bytes AND that context. A dirty `\c` boundary
+//! door. The cache key is (content hash, the custom-marker list's
+//! fingerprint, chunk 0's carry-outs): the same bytes lex differently under
+//! two lists, and the declared `\usfm` version and the is-scripture bit gate
+//! local rules, so a chunk's product is a function of its bytes AND that
+//! context. A dirty `\c` boundary
 //! (a sidebar straddling the seam) is remembered as [`Cached::OpenBoundary`],
 //! so repeat calls widen to the fused unit without re-lexing to rediscover it.
 //!
@@ -35,6 +37,7 @@ use rustc_hash::FxHashMap;
 use super::budget::Budget;
 use crate::onion;
 use onion::cst::{self, Cst};
+use onion::extensions::Extensions;
 use onion::lint::{self, Carried, ChunkContext, LintReport, UsfmVersion};
 use xxhash_rust::xxh3::xxh3_128;
 
@@ -101,9 +104,10 @@ enum ContextKey {
     },
 }
 
-#[derive(PartialEq, Eq, Hash)]
+#[derive(PartialEq, Eq, Hash, Clone, Copy)]
 struct Key {
     hash: u128,
+    markers: u64,
     context: ContextKey,
 }
 
@@ -144,16 +148,6 @@ impl ChunkStore {
         }
     }
 
-    /// Drops every cached chunk, keeping the counters.
-    ///
-    /// The key is CONTENT, which is right only while the same bytes parse the
-    /// same way. A marker registry that has moved makes them a different
-    /// document, so every product here is stale — see `Pantry::check_registry`.
-    pub(super) fn clear(&mut self) {
-        self.map.clear();
-        self.bytes = 0;
-    }
-
     /// The declared ceiling this store's evictions hold it under.
     pub(super) fn budget(&self) -> Budget {
         self.budget
@@ -190,8 +184,8 @@ impl ChunkStore {
     /// `lint(lex(text), build(…))` pipeline (the fold oracle's law), with
     /// every clean chunk served from the cache: one dirty chunk's walk plus
     /// the reduce.
-    pub(super) fn lint(&mut self, text: &str) -> LintReport {
-        let units = self.resolve(text);
+    pub(super) fn lint(&mut self, text: &str, markers: &Extensions) -> LintReport {
+        let units = self.resolve(text, markers);
         let (byte_bases, token_bases) = bases(&units);
         reduce(&units, &byte_bases, &token_bases)
     }
@@ -203,8 +197,13 @@ impl ChunkStore {
     /// per-chunk trees into one, the token streams concatenate under their byte
     /// bases, and the folded report is the one `onion` would have computed. The
     /// dish those produce is byte-identical to a cold `onion::wire::parse`.
-    pub(super) fn parse(&mut self, text: &str, opts: onion::wire::ParseOptions) -> Vec<u8> {
-        onion::wire::plate(&self.parsed(text, opts))
+    pub(super) fn parse(
+        &mut self,
+        text: &str,
+        opts: onion::wire::ParseOptions,
+        markers: &Extensions,
+    ) -> Vec<u8> {
+        onion::wire::plate(&self.parsed(text, opts, markers))
     }
 
     /// The same ingredients as engine types, for a caller that is not crossing
@@ -217,8 +216,9 @@ impl ChunkStore {
         &mut self,
         text: &'a str,
         opts: onion::wire::ParseOptions,
+        markers: &Extensions,
     ) -> onion::wire::Parsed<'a> {
-        let units = self.resolve(text);
+        let units = self.resolve(text, markers);
         let lint = opts.diagnostics.then(|| {
             let (byte_bases, token_bases) = bases(&units);
             reduce(&units, &byte_bases, &token_bases)
@@ -231,8 +231,13 @@ impl ChunkStore {
     /// One recipe's mask over the same assembled ingredients — what a
     /// downstream consumer of verse text reads. Not folded per chunk: the walk
     /// is cheap once the tree it walks is free.
-    pub(super) fn masked(&mut self, text: &str, filter: &onion::mask::Filter) -> onion::mask::Mask {
-        let units = self.resolve(text);
+    pub(super) fn masked(
+        &mut self,
+        text: &str,
+        filter: &onion::mask::Filter,
+        markers: &Extensions,
+    ) -> onion::mask::Mask {
+        let units = self.resolve(text, markers);
         let (tokens, tree) = assemble(&units);
         onion::mask(text.as_bytes(), &tokens, &tree, filter)
     }
@@ -240,7 +245,7 @@ impl ChunkStore {
     /// Resolve units front to back, serving from the cache or computing. Chunk
     /// 0's product carries the context every later key needs, so the order is
     /// load-bearing.
-    fn resolve(&mut self, text: &str) -> Vec<(u32, Rc<Products>)> {
+    fn resolve(&mut self, text: &str, markers: &Extensions) -> Vec<(u32, Rc<Products>)> {
         let bytes = text.as_bytes();
         let starts = onion::chunk::pre_scan(bytes).starts;
 
@@ -259,6 +264,7 @@ impl ChunkStore {
                 let end = starts.get(next).map_or(bytes.len(), |&s| s as usize);
                 let key = Key {
                     hash: xxh3_128(&bytes[start..end]),
+                    markers: markers.fingerprint(),
                     context: context_key,
                 };
                 if let Some(entry) = self.map.get_mut(&key).filter(|_| cacheable) {
@@ -279,7 +285,7 @@ impl ChunkStore {
                     }
                 }
                 let slice = &text[start..end];
-                let tokens = onion::lex(slice);
+                let tokens = onion::lex_with(slice, markers);
                 let chunk = cst::build_chunk(&tokens, end == bytes.len());
                 if chunk.open_at_end && next < starts.len() {
                     if cacheable {
@@ -347,10 +353,7 @@ impl ChunkStore {
                 .map
                 .iter()
                 .min_by_key(|(_, entry)| entry.last_tick)
-                .map(|(key, _)| Key {
-                    hash: key.hash,
-                    context: key.context,
-                })
+                .map(|(key, _)| *key)
             else {
                 break;
             };
@@ -456,7 +459,7 @@ mod tests {
     fn resident_bytes_equals_the_computed_footprint() {
         let mut warmer = ChunkStore::new(usize::MAX);
         let text = book();
-        let units = warmer.resolve(&text);
+        let units = warmer.resolve(&text, &Extensions::default());
         // Distinct chapters, so one map entry per unit — no double count.
         assert_eq!(units.len(), warmer.map.len(), "no two units share a key");
         let expected: usize =
@@ -476,7 +479,7 @@ mod tests {
         let text = book();
         // First, learn each unit's exact weight with no budget pressure.
         let mut probe = ChunkStore::new(usize::MAX);
-        let units = probe.resolve(&text);
+        let units = probe.resolve(&text, &Extensions::default());
         let weights: Vec<usize> = units.iter().map(|(_, unit)| unit.bytes).collect();
         assert!(
             weights.iter().all(|&w| w > 0),
@@ -488,7 +491,7 @@ mod tests {
         // never exceeds it, and at least one unit was evicted to stay there.
         let fits_all_but_last: usize = weights[..weights.len() - 1].iter().sum();
         let mut warmer = ChunkStore::new(fits_all_but_last);
-        warmer.resolve(&text);
+        warmer.resolve(&text, &Extensions::default());
         assert!(
             warmer.bytes <= fits_all_but_last,
             "over budget: {} > {}",
@@ -506,7 +509,7 @@ mod tests {
         // once at least two units have been seen.
         let heaviest = *weights.iter().max().unwrap();
         let mut tight = ChunkStore::new(heaviest - 1);
-        tight.resolve(&text);
+        tight.resolve(&text, &Extensions::default());
         assert!(
             tight.map.len() <= 1,
             "the tightest budget keeps at most one unit"

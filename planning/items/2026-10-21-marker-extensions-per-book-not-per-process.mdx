@@ -58,4 +58,4 @@ The JS names that said "extensions" say "custom markers", so one word runs throu
 
 <Question id="free-doors" answer="Yes, 2026-10-22, and galley's `…Of` doors too: `resolveOf` on a reference text is the case this plan exists for, and each door ends at a `lex()` that `lex_with` replaces. Omitted means the global list.">Do onion-wasm's free doors (`parse`, `mask`, `resolve`, …) also take an `extensions` option, or stay on the global list until someone asks?</Question>
 
-<Followup id="conformance">Conformance: two books on one Galley with different `\z` lists parse differently, and registering one does not flush the other.</Followup>
+<Followup id="conformance" done>Conformance: two books on one Galley with different `\z` lists parse differently, and registering one does not flush the other. Result: the custom-markers block in `galley/tests/sous_conformance.mjs`, and `each_book_lexes_by_its_own_markers` in `galley/src/pantry/tests.rs`.</Followup>

@@ -8,7 +8,7 @@
 //! 160 books). Absent bytes are a loud failure, never a silent skip.
 
 use onion::wire::ParseOptions;
-use usfm_galley::{Pantry, onion};
+use usfm_galley::{Markers, Pantry, onion};
 
 fn fresh(text: &str) -> onion::lint::LintReport {
     let tokens = onion::lex(text);
@@ -46,11 +46,11 @@ const BOOK: &str = "\\id GEN\n\\usfm 3.0\n\\h Genesis\n\\mt1 Genesis\n\
 #[test]
 fn cold_and_warm_calls_equal_fresh_lint() {
     let mut cache = Pantry::new(16 << 20);
-    assert_matches(&cache.lint(BOOK), BOOK, "cold");
+    assert_matches(&cache.lint(BOOK, &Markers::Global), BOOK, "cold");
     let cold_misses = cache.chunk_stats().misses;
     assert_eq!(cold_misses, 4, "chunk 0 + three chapters");
 
-    assert_matches(&cache.lint(BOOK), BOOK, "warm");
+    assert_matches(&cache.lint(BOOK, &Markers::Global), BOOK, "warm");
     assert_eq!(
         cache.chunk_stats().misses,
         cold_misses,
@@ -61,11 +61,11 @@ fn cold_and_warm_calls_equal_fresh_lint() {
 #[test]
 fn one_edited_chapter_is_one_miss_and_undo_is_free() {
     let mut cache = Pantry::new(16 << 20);
-    cache.lint(BOOK);
+    cache.lint(BOOK, &Markers::Global);
     let baseline = cache.chunk_stats().misses;
 
     let edited = BOOK.replace("poetry", "poetry edited");
-    assert_matches(&cache.lint(&edited), &edited, "edited");
+    assert_matches(&cache.lint(&edited, &Markers::Global), &edited, "edited");
     assert_eq!(
         cache.chunk_stats().misses,
         baseline + 1,
@@ -73,7 +73,7 @@ fn one_edited_chapter_is_one_miss_and_undo_is_free() {
     );
 
     // Undo: the original chunk's hash is still resident — zero misses.
-    assert_matches(&cache.lint(BOOK), BOOK, "undone");
+    assert_matches(&cache.lint(BOOK, &Markers::Global), BOOK, "undone");
     assert_eq!(
         cache.chunk_stats().misses,
         baseline + 1,
@@ -84,17 +84,25 @@ fn one_edited_chapter_is_one_miss_and_undo_is_free() {
 #[test]
 fn chapter_add_delete_and_split_rechunk_cleanly() {
     let mut cache = Pantry::new(16 << 20);
-    cache.lint(BOOK);
+    cache.lint(BOOK, &Markers::Global);
 
     // A pasted `\c` splits one chunk into two: the split chunk misses (as
     // two new units), the rest hit.
     let split = BOOK.replace("\\v 2 and then", "\\v 2 and then\n\\c 9\n\\p \\v 1 pasted");
-    assert_matches(&cache.lint(&split), &split, "chapter pasted");
+    assert_matches(
+        &cache.lint(&split, &Markers::Global),
+        &split,
+        "chapter pasted",
+    );
 
     // Deleting a whole chapter: remaining chunks all hit.
     let baseline = cache.chunk_stats().misses;
     let deleted = BOOK.replace("\\c 2\n\\q1 \\v 1 poetry \\add here\\add*\n", "");
-    assert_matches(&cache.lint(&deleted), &deleted, "chapter deleted");
+    assert_matches(
+        &cache.lint(&deleted, &Markers::Global),
+        &deleted,
+        "chapter deleted",
+    );
     assert_eq!(
         cache.chunk_stats().misses,
         baseline,
@@ -106,11 +114,11 @@ fn chapter_add_delete_and_split_rechunk_cleanly() {
 fn a_straddling_sidebar_fuses_and_still_matches() {
     let text = "\\id GEN\n\\c 1\n\\p \\v 1 a\n\\esb \\p in\n\\c 2\n\\p more\n\\esbe\n\\p \\v 1 b\n";
     let mut cache = Pantry::new(16 << 20);
-    assert_matches(&cache.lint(text), text, "fused cold");
+    assert_matches(&cache.lint(text, &Markers::Global), text, "fused cold");
     let cold = cache.chunk_stats().misses;
     // The fused unit is cached under the fused span's hash — and the open
     // boundary is remembered, so the warm call re-lexes nothing.
-    assert_matches(&cache.lint(text), text, "fused warm");
+    assert_matches(&cache.lint(text, &Markers::Global), text, "fused warm");
     assert_eq!(
         cache.chunk_stats().misses,
         cold,
@@ -125,9 +133,17 @@ fn a_version_edit_in_chunk_0_invalidates_gated_chunks() {
     let with = "\\id GEN\n\\usfm 3.0\n\\c 1\n\\p \\v 1 \\pro x\\pro* a\n";
     let without = "\\id GEN\n\\c 1\n\\p \\v 1 \\pro x\\pro* a\n";
     let mut cache = Pantry::new(16 << 20);
-    assert_matches(&cache.lint(with), with, "with version");
-    assert_matches(&cache.lint(without), without, "without version");
-    assert_matches(&cache.lint(with), with, "with version again");
+    assert_matches(&cache.lint(with, &Markers::Global), with, "with version");
+    assert_matches(
+        &cache.lint(without, &Markers::Global),
+        without,
+        "without version",
+    );
+    assert_matches(
+        &cache.lint(with, &Markers::Global),
+        with,
+        "with version again",
+    );
 }
 
 #[test]
@@ -135,9 +151,9 @@ fn the_byte_budget_evicts_and_correctness_survives() {
     // A budget far below one book's products: every call recomputes, the
     // answer never changes, and residency stays bounded.
     let mut cache = Pantry::new(512);
-    assert_matches(&cache.lint(BOOK), BOOK, "starved cold");
+    assert_matches(&cache.lint(BOOK, &Markers::Global), BOOK, "starved cold");
     let first = cache.chunk_stats().misses;
-    assert_matches(&cache.lint(BOOK), BOOK, "starved warm");
+    assert_matches(&cache.lint(BOOK, &Markers::Global), BOOK, "starved warm");
     assert!(
         cache.chunk_stats().misses > first,
         "a starved cache recomputes"
@@ -152,7 +168,7 @@ fn the_byte_budget_evicts_and_correctness_survives() {
 fn empty_and_single_chunk_books() {
     let mut cache = Pantry::new(16 << 20);
     for text in ["", "\\id FRT\n\\p front matter only\n", "plain prose"] {
-        assert_matches(&cache.lint(text), text, text);
+        assert_matches(&cache.lint(text, &Markers::Global), text, text);
     }
 }
 
@@ -185,7 +201,7 @@ fn fold_cache_equals_fresh_over_the_corpus() {
         let text = std::fs::read_to_string(path).expect("readable book");
         let label = path.display().to_string();
         let mut cache = Pantry::new(32 << 20);
-        assert_matches(&cache.lint(&text), &text, &label);
+        assert_matches(&cache.lint(&text, &Markers::Global), &text, &label);
         // One byte inserted mid-book: warm run, then verify the edit. The
         // midpoint rounds up to a char boundary (Hebrew text mid-byte).
         let mid = (text.len() / 2..text.len())
@@ -197,7 +213,11 @@ fn fold_cache_equals_fresh_over_the_corpus() {
             .map(|offset| mid + offset)
             .unwrap_or(0);
         edited.insert(at, 'x');
-        assert_matches(&cache.lint(&edited), &edited, &format!("{label} (edited)"));
+        assert_matches(
+            &cache.lint(&edited, &Markers::Global),
+            &edited,
+            &format!("{label} (edited)"),
+        );
     }
     println!("fold cache oracle held over {} books", paths.len());
 }
@@ -213,7 +233,7 @@ fn fold_cache_equals_fresh_over_the_corpus() {
 /// the bytes agree then every field in every section agrees, including the ones
 /// nobody thought to assert.
 fn assert_dish_matches(cache: &mut Pantry, text: &str, opts: ParseOptions, why: &str) {
-    let folded = cache.parse(text, opts);
+    let folded = cache.parse(text, opts, &Markers::Global);
     let fresh = onion::wire::plate(&onion::wire::parse(text, opts));
     assert_eq!(folded.len(), fresh.len(), "dish length — {why}");
     if folded != fresh {
@@ -270,7 +290,7 @@ fn the_masked_fold_agrees_with_a_fresh_mask() {
         onion::mask::Filter::verse_text(),
         onion::mask::Filter::structure(),
     ] {
-        let folded = cache.masked(BOOK, &filter);
+        let folded = cache.masked(BOOK, &filter, &Markers::Global);
         let tokens = onion::lex(BOOK);
         let tree = onion::cst::build(&tokens);
         let fresh = onion::mask(BOOK.as_bytes(), &tokens, &tree, &filter);
@@ -306,7 +326,7 @@ fn the_analyze_fold_holds_over_the_corpus() {
         assert_dish_matches(&mut cache, &text, all, &name);
 
         let filter = onion::mask::Filter::verse_text();
-        let folded = cache.masked(&text, &filter);
+        let folded = cache.masked(&text, &filter, &Markers::Global);
         let tokens = onion::lex(&text);
         let tree = onion::cst::build(&tokens);
         let fresh = onion::mask(text.as_bytes(), &tokens, &tree, &filter);
@@ -349,8 +369,16 @@ fn a_one_chapter_book_is_computed_and_never_cached() {
     );
 
     let mut cache = Pantry::new(16 << 20);
-    assert_matches(&cache.lint(EPISTLE), EPISTLE, "gated cold");
-    assert_matches(&cache.lint(EPISTLE), EPISTLE, "gated warm");
+    assert_matches(
+        &cache.lint(EPISTLE, &Markers::Global),
+        EPISTLE,
+        "gated cold",
+    );
+    assert_matches(
+        &cache.lint(EPISTLE, &Markers::Global),
+        EPISTLE,
+        "gated warm",
+    );
     let all = ParseOptions {
         diagnostics: true,
         toc: true,
@@ -364,7 +392,11 @@ fn a_one_chapter_book_is_computed_and_never_cached() {
     // Typing into it must not accumulate anything either.
     for n in 1..=20 {
         let typed = EPISTLE.replace("Mercy", &format!("{}Mercy", "x".repeat(n)));
-        assert_matches(&cache.lint(&typed), &typed, "gated keystroke");
+        assert_matches(
+            &cache.lint(&typed, &Markers::Global),
+            &typed,
+            "gated keystroke",
+        );
     }
     assert_eq!(
         cache.chunk_stats().len,
@@ -374,7 +406,7 @@ fn a_one_chapter_book_is_computed_and_never_cached() {
 
     // And a book ABOVE the gate still caches, so the gate is not global.
     let three_chapters = format!("{EPISTLE}\\c 2\n\\p \\v 1 more\n\\c 3\n\\p \\v 1 yet more\n");
-    cache.lint(&three_chapters);
+    cache.lint(&three_chapters, &Markers::Global);
     assert!(
         cache.chunk_stats().len > 0,
         "a multi-chapter book still caches"
