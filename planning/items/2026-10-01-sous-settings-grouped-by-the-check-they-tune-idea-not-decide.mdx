@@ -5,13 +5,21 @@ kind: plan
 status: in-progress
 created: 2026-10-01
 updated: 2026-10-22
-sha: 32bf2df
+sha: bbf0d75
 tags: [sous, sefer]
 related: []
 source: planning/ideas/candidates/sous-settings-grouping.md
 ---
 
 Asked by Sefer 2026-10-01.
+
+## Built, 2026-10-22
+
+- `JudgingConfig` is `{ shared, rarity, words, casing, sentence_start, word_length, doubled, book_rate, lengths: { proportionality, presence, source_copy }, channels }`. `shared` and `words` are the glyph and word ladders (floor and bands) that several checks read; each judge takes only the ladder it reads and its own struct.
+- The `settings!` table in `galley/src/sous/settings.rs` is the one source: each row is the key, its path (`doubled_bare: bool = doubled.bare`) and its page entry, and it writes `SousSettings`, `from`/`apply` and `sous-settings.ts`. The check is the first path segment that names one; a path naming none fails codegen, and so does a table out of check order.
+- `SOUS_SETTINGS` entries carry `check`, `SousCheck` and `checkOf` ship beside them, and `checkOf` is a record keyed by every `SousCode`, so a new code that is not mapped fails to type-check.
+- Against the table above: `word_support_floor` is general, not Casing's. Casing, WordLength and LetterRun all read it, and its description now says so. The two `terminal_*` shares stay Casing's: Doubled reads the terminal table they build, as data.
+- Goldens unchanged: the nested fields hash in the old flat order, so the config stamp did not move. Resident bytes grew 8 B per publication from struct padding.
 
 ## Decided, 2026-10-22: Shape B, with one field
 
