@@ -113,7 +113,7 @@ fn main() {
     println!(
         "books under min_verses {}: {} of {}; they carry {} rows, {} of them with an \
          unavailable book lane",
-        LengthConfig::default().min_verses,
+        LengthConfig::default().proportionality.min_verses,
         judged.small_books,
         judged.books,
         judged.small_rows,
@@ -454,7 +454,7 @@ fn judge(target: &Corpus, source: &Corpus, config: &LengthConfig) -> Judged {
         .units
         .iter()
         .enumerate()
-        .filter(|(_, count)| **count > 0 && **count < config.min_verses)
+        .filter(|(_, count)| **count > 0 && **count < config.proportionality.min_verses)
         .map(|(index, _)| index)
         .collect();
 

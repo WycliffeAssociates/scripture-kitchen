@@ -43,9 +43,48 @@ const MAD_TO_SIGMA: f64 = 0.6745;
 /// [`MAD_TO_SIGMA`] however extreme the ratio.
 const SIDE_DATA_FLOOR: usize = 3;
 
-/// What judging may vary without re-walking a chapter or re-pairing a book.
-#[derive(Debug, Clone, Copy)]
+/// What judging may vary without re-walking a chapter or re-pairing a book:
+/// the source-compared lane's three checks, each with its own settings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LengthConfig {
+    pub proportionality: ProportionalityConfig,
+    /// Verses one side holds and the other does not, and paired target verses
+    /// with no content. On: the facts already exist in the pairing, they cost
+    /// no text walk, and versification difference alone keeps the volume to a
+    /// handful of coalesced rows per book.
+    pub presence: bool,
+    pub source_copy: SourceCopyConfig,
+}
+
+impl LengthConfig {
+    /// Whether any of the three checks judges.
+    pub const fn judges(&self) -> bool {
+        self.proportionality.enabled || self.presence || self.source_copy.enabled
+    }
+}
+
+impl Default for LengthConfig {
+    fn default() -> Self {
+        Self {
+            proportionality: ProportionalityConfig {
+                z_long: 3.5,
+                z_short: 3.5,
+                min_verses: 50,
+                enabled: true,
+            },
+            presence: true,
+            source_copy: SourceCopyConfig {
+                enabled: false,
+                min_run: 3,
+            },
+        }
+    }
+}
+
+/// A verse's length against its source verse's, judged per book and across
+/// the paired project.
+#[derive(Debug, Clone, Copy)]
+pub struct ProportionalityConfig {
     /// Standardized deviations above the book's median a verse must exceed.
     pub z_long: f32,
     /// Standardized deviations below it.
@@ -53,34 +92,6 @@ pub struct LengthConfig {
     /// Paired units a scope needs before it judges at all.
     pub min_verses: u32,
     pub enabled: bool,
-    /// Verses one side holds and the other does not, and paired target verses
-    /// with no content. On: the facts already exist in the pairing, they cost
-    /// no text walk, and versification difference alone keeps the volume to a
-    /// handful of coalesced rows per book.
-    pub presence: bool,
-    /// Consecutive target words the paired source verse also holds. OFF: the
-    /// run is the rule's only filter, and against a source in the same
-    /// language family the tier fires about two rows per verse at any floor
-    /// measured. A host that knows its source is unrelated turns it on.
-    pub source_copy: bool,
-    /// Consecutive words a run needs before it is a row. Below
-    /// [`source_copy::MIN_RUN`] it reads as that floor: one shared word is
-    /// not a run.
-    pub source_copy_min_run: u32,
-}
-
-impl Default for LengthConfig {
-    fn default() -> Self {
-        Self {
-            z_long: 3.5,
-            z_short: 3.5,
-            min_verses: 50,
-            enabled: true,
-            presence: true,
-            source_copy: false,
-            source_copy_min_run: 3,
-        }
-    }
 }
 
 /// Bitwise on the two thresholds, which is what makes [`LengthConfig`] — and
@@ -89,32 +100,39 @@ impl Default for LengthConfig {
 /// The question a config comparison asks is "would a re-judge produce the
 /// identical verdict", not "are these numerically close", and bitwise
 /// equality is reflexive whatever the payload.
-impl PartialEq for LengthConfig {
+impl PartialEq for ProportionalityConfig {
     fn eq(&self, other: &Self) -> bool {
         self.z_long.to_bits() == other.z_long.to_bits()
             && self.z_short.to_bits() == other.z_short.to_bits()
             && self.min_verses == other.min_verses
             && self.enabled == other.enabled
-            && self.presence == other.presence
-            && self.source_copy == other.source_copy
-            && self.source_copy_min_run == other.source_copy_min_run
     }
 }
 
-impl Eq for LengthConfig {}
+impl Eq for ProportionalityConfig {}
 
 /// Bitwise on the two thresholds as well, so two configs that compare equal
 /// stamp alike.
-impl core::hash::Hash for LengthConfig {
+impl core::hash::Hash for ProportionalityConfig {
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
         state.write_u32(self.z_long.to_bits());
         state.write_u32(self.z_short.to_bits());
         state.write_u32(self.min_verses);
         state.write_u8(u8::from(self.enabled));
-        state.write_u8(u8::from(self.presence));
-        state.write_u8(u8::from(self.source_copy));
-        state.write_u32(self.source_copy_min_run);
     }
+}
+
+/// Consecutive target words the paired source verse also holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SourceCopyConfig {
+    /// OFF: the run is the rule's only filter, and against a source in the
+    /// same language family the tier fires about two rows per verse at any
+    /// floor measured. A host that knows its source is unrelated turns it on.
+    pub enabled: bool,
+    /// Consecutive words a run needs before it is a row. Below
+    /// [`source_copy::MIN_RUN`] it reads as that floor: one shared word is
+    /// not a run.
+    pub min_run: u32,
 }
 
 /// One source verse: its key and its projected grapheme length, and nothing
@@ -373,11 +391,12 @@ pub fn judge_paired(
     config: &LengthConfig,
     out: &mut Findings,
 ) -> Vec<u32> {
-    if !config.enabled && !config.presence && !config.source_copy {
+    if !config.judges() {
         return vec![0; books.len()];
     }
-    let min_run = config.source_copy_min_run.max(source_copy::MIN_RUN);
-    let project = project.0.gated(config.min_verses);
+    let lengths = &config.proportionality;
+    let min_run = config.source_copy.min_run.max(source_copy::MIN_RUN);
+    let project = project.0.gated(lengths.min_verses);
     let mut counts: Vec<u32> = Vec::with_capacity(books.len());
     for (index, paired) in books.iter().enumerate() {
         let Some(paired) = paired else {
@@ -403,7 +422,7 @@ pub fn judge_paired(
                 .expect("a presence span lies inside its own book");
             }
         }
-        if config.source_copy {
+        if config.source_copy.enabled {
             for row in &*paired.copies {
                 if row.run() < min_run {
                     continue;
@@ -422,14 +441,14 @@ pub fn judge_paired(
                 .expect("a source-copy span lies inside its own book");
             }
         }
-        if !config.enabled || paired.ratios.is_empty() {
+        if !lengths.enabled || paired.ratios.is_empty() {
             continue;
         }
-        let book = paired.spread.gated(config.min_verses);
+        let book = paired.spread.gated(lengths.min_verses);
         for (ratio, span) in paired.ratios.iter().zip(paired.spans.iter()) {
             let book_z = side_z(*ratio, book);
             let project_z = side_z(*ratio, project);
-            if !fires(book_z, config) && !fires(project_z, config) {
+            if !fires(book_z, lengths) && !fires(project_z, lengths) {
                 continue;
             }
             if !opened {
@@ -468,7 +487,7 @@ pub fn judge_lengths(
     out: &mut Findings,
 ) -> Paired {
     let mut facts = Vec::new();
-    if !config.enabled && !config.presence && !config.source_copy {
+    if !config.judges() {
         return Paired {
             units: vec![0; target.len()],
             facts,
@@ -491,12 +510,13 @@ pub fn judge_lengths(
             let rows = sources.get(&book.book)?;
             // The SOURCE is what kept no lane, so it is named once however
             // many targets pair against it.
-            if config.source_copy && rows.words.is_none() && !wordless.contains(&book.book) {
+            if config.source_copy.enabled && rows.words.is_none() && !wordless.contains(&book.book)
+            {
                 wordless.push(book.book);
             }
             let copy = rows
                 .words
-                .filter(|_| config.source_copy)
+                .filter(|_| config.source_copy.enabled)
                 .map(|words| (book.text, words));
             Some(PairedBook::pair_with(
                 book.book,
@@ -516,10 +536,10 @@ pub fn judge_lengths(
             None => Vec::new(),
         })
         .collect();
-    let min_run = config.source_copy_min_run.max(source_copy::MIN_RUN);
+    let min_run = config.source_copy.min_run.max(source_copy::MIN_RUN);
     let copies = views
         .iter()
-        .map(|book| match book.filter(|_| config.source_copy) {
+        .map(|book| match book.filter(|_| config.source_copy.enabled) {
             Some(book) => book
                 .copies()
                 .iter()
@@ -656,7 +676,7 @@ fn side_z(ratio: f64, scope: Option<Sides>) -> Option<f64> {
 
 /// A long-side z is held to `z_long` and a short-side z to `z_short`; neither
 /// ever borrows the other's knob.
-fn fires(z: Option<f64>, config: &LengthConfig) -> bool {
+fn fires(z: Option<f64>, config: &ProportionalityConfig) -> bool {
     z.is_some_and(|z| {
         let bar = if z >= 0.0 {
             config.z_long
@@ -771,9 +791,9 @@ mod tests {
 
     #[test]
     fn each_side_answers_to_its_own_knob() {
-        let long = LengthConfig {
+        let long = ProportionalityConfig {
             z_short: 100.0,
-            ..LengthConfig::default()
+            ..LengthConfig::default().proportionality
         };
         assert!(fires(Some(4.0), &long));
         assert!(!fires(Some(-4.0), &long));

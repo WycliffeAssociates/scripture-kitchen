@@ -282,7 +282,7 @@ impl<P: ChapterPass + Sync> Expediter<P> {
         match self
             .pass
             .length_config(&self.config)
-            .is_some_and(|lengths| lengths.source_copy)
+            .is_some_and(|lengths| lengths.source_copy.enabled)
         {
             true => SourceLanes::LengthsAndWords,
             false => SourceLanes::Lengths,

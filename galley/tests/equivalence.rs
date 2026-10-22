@@ -662,17 +662,17 @@ fn brigade_configs(rng: &mut Rng) -> <Brigade as ChapterPass>::Config {
             };
         }
         2 => {
-            config.terminal_upper_share_bp = 9_000;
-            config.terminal_lower_share_bp = 500;
-            config.sentence_start_upper_bp = 9_000;
-            config.book_rate_ratio = 2;
-            config.book_rate_min_bp = 100;
-            config.book_rate_min_uses = 5;
+            config.casing.terminal_upper_share_bp = 9_000;
+            config.casing.terminal_lower_share_bp = 500;
+            config.sentence_start.upper_bp = 9_000;
+            config.book_rate.ratio = 2;
+            config.book_rate.min_bp = 100;
+            config.book_rate.min_uses = 5;
         }
         3 => {
-            config.terminal_upper_share_bp = 8_000;
-            config.terminal_lower_share_bp = 8_000;
-            config.doubles_productive_bp = 0;
+            config.casing.terminal_upper_share_bp = 8_000;
+            config.casing.terminal_lower_share_bp = 8_000;
+            config.doubled.productive_bp = 0;
         }
         4 => {
             config.channels.casing = false;
@@ -680,18 +680,18 @@ fn brigade_configs(rng: &mut Rng) -> <Brigade as ChapterPass>::Config {
             config.channels.letter_runs = false;
         }
         5 => {
-            config.lengths.enabled = false;
+            config.lengths.proportionality.enabled = false;
             config.lengths.presence = false;
-            config.lengths.source_copy = true;
+            config.lengths.source_copy.enabled = true;
         }
         6 => {
             config.lengths.presence = false;
-            config.lengths.source_copy = true;
+            config.lengths.source_copy.enabled = true;
         }
         _ => {
-            config.lengths.enabled = false;
-            config.lengths.source_copy = true;
-            config.terminal_upper_share_bp = 9_000;
+            config.lengths.proportionality.enabled = false;
+            config.lengths.source_copy.enabled = true;
+            config.casing.terminal_upper_share_bp = 9_000;
         }
     }
     ((), config, config)
@@ -762,7 +762,7 @@ fn churn_with<P: ChapterPass + Sync + Copy>(
     // text the way a host told to by `last_wordless_references` would.
     let mut copying = pass
         .length_config(sous.config())
-        .is_some_and(|lengths| lengths.source_copy);
+        .is_some_and(|lengths| lengths.source_copy.enabled);
     let mut digests: FxHashMap<String, Vec<String>> = books
         .iter()
         .map(|(id, text)| (id.clone(), chapter_digests(text)))
@@ -800,7 +800,7 @@ fn churn_with<P: ChapterPass + Sync + Copy>(
             let config = draw(&mut rng);
             let wants = pass
                 .length_config(&config)
-                .is_some_and(|lengths| lengths.source_copy);
+                .is_some_and(|lengths| lengths.source_copy.enabled);
             sous.set_config(config);
             if wants && !copying {
                 for (id, text) in &references {
@@ -1064,7 +1064,7 @@ fn replacing_the_reference_moves_the_source_copy_rows() {
     let mut sous = Expediter::new(Brigade::default(), BUDGET);
     // The lane ships off; this gate is about what it publishes when it is on.
     let mut config = sous_core::JudgingConfig::default();
-    config.lengths.source_copy = true;
+    config.lengths.source_copy.enabled = true;
     sous.set_config(((), config, config));
     for (id, text) in &books {
         sous.update(id.as_str(), Role::Target, text).unwrap();
@@ -1260,10 +1260,8 @@ fn moving_the_terminal_table_re_sites_a_book_whose_own_text_stood_still() {
     // one keyed by the firing set alone.
     let mut sous = Expediter::new(Brigade::default(), BUDGET).with_hot_books(0);
     let forcing = JudgingConfig::default();
-    let free = JudgingConfig {
-        terminal_upper_share_bp: 9_000,
-        ..JudgingConfig::default()
-    };
+    let mut free = JudgingConfig::default();
+    free.casing.terminal_upper_share_bp = 9_000;
     sous.set_config(((), forcing, forcing));
     for (id, text) in &books {
         sous.update(id.as_str(), Role::Target, text).unwrap();

@@ -237,30 +237,30 @@ fn permissive() -> JudgingConfig {
         share_bp: 5_000,
         ..step
     });
-    JudgingConfig {
-        word_support_floor: 1,
-        word_bands: Staircase::new(steps).expect("the default bounds ascend"),
-        channels: Channels {
+    {
+        let mut config = JudgingConfig::default();
+        config.words.floor = 1;
+        config.words.bands = Staircase::new(steps).expect("the default bounds ascend");
+        config.channels = Channels {
             doubled: false,
             letter_runs: false,
             ..Channels::default()
-        },
-        ..JudgingConfig::default()
+        };
+        config
     }
 }
 
 /// The doubled channel alone, recusal off, on bands any sweep reaches.
 fn doubling() -> JudgingConfig {
-    JudgingConfig {
-        doubles: DoublesPolicy::Always,
-        channels: Channels {
-            casing: false,
-            doubled: true,
-            letter_runs: false,
-            ..Channels::default()
-        },
-        ..permissive()
-    }
+    let mut config = permissive();
+    config.doubled.policy = DoublesPolicy::Always;
+    config.channels = Channels {
+        casing: false,
+        doubled: true,
+        letter_runs: false,
+        ..Channels::default()
+    };
+    config
 }
 
 /// The letter-run channel alone. A word this channel names may also be a
@@ -269,31 +269,29 @@ fn doubling() -> JudgingConfig {
 /// merged into. Its floor is above any lane the sweep fills, so every run of
 /// three fires.
 fn sticky() -> JudgingConfig {
-    JudgingConfig {
-        word_support_floor: 1_000,
-        channels: Channels {
-            casing: false,
-            doubled: false,
-            letter_runs: true,
-            ..Channels::default()
-        },
-        ..permissive()
-    }
+    let mut config = permissive();
+    config.words.floor = 1_000;
+    config.channels = Channels {
+        casing: false,
+        doubled: false,
+        letter_runs: true,
+        ..Channels::default()
+    };
+    config
 }
 
 /// The length channel alone, on a sigma any sweep reaches.
 fn lengthy() -> JudgingConfig {
-    JudgingConfig {
-        word_length_sigma: 2,
-        channels: Channels {
-            casing: false,
-            word_length: true,
-            doubled: false,
-            letter_runs: false,
-            ..Channels::default()
-        },
-        ..permissive()
-    }
+    let mut config = permissive();
+    config.word_length.sigma = 2;
+    config.channels = Channels {
+        casing: false,
+        word_length: true,
+        doubled: false,
+        letter_runs: false,
+        ..Channels::default()
+    };
+    config
 }
 
 #[test]

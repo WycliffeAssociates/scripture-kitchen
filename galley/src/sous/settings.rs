@@ -17,7 +17,6 @@
 use core::fmt::Write as _;
 
 use sous_core::judge::{Channels, JudgingConfig};
-use sous_core::proportionality::LengthConfig;
 
 /// The judging settings that cross the wall: every plain scalar of
 /// [`JudgingConfig`], flat, so bindgen writes the getters and setters and JS
@@ -96,25 +95,25 @@ impl SousSettings {
             letter_runs,
             sentence_start,
             book_rate,
-            support_floor: config.support_floor,
-            word_support_floor: config.word_support_floor,
-            terminal_upper_share_bp: config.terminal_upper_share_bp,
-            terminal_lower_share_bp: config.terminal_lower_share_bp,
-            sentence_start_upper_bp: config.sentence_start_upper_bp,
-            word_length_sigma: config.word_length_sigma,
-            doubles_productive_bp: config.doubles_productive_bp,
-            doubled_bare: config.doubled_bare,
-            doubled_separated: config.doubled_separated,
-            book_rate_ratio: config.book_rate_ratio,
-            book_rate_min_bp: config.book_rate_min_bp,
-            book_rate_min_uses: config.book_rate_min_uses,
-            z_long: config.lengths.z_long,
-            z_short: config.lengths.z_short,
-            min_verses: config.lengths.min_verses,
-            lengths_enabled: config.lengths.enabled,
+            support_floor: config.shared.floor,
+            word_support_floor: config.words.floor,
+            terminal_upper_share_bp: config.casing.terminal_upper_share_bp,
+            terminal_lower_share_bp: config.casing.terminal_lower_share_bp,
+            sentence_start_upper_bp: config.sentence_start.upper_bp,
+            word_length_sigma: config.word_length.sigma,
+            doubles_productive_bp: config.doubled.productive_bp,
+            doubled_bare: config.doubled.bare,
+            doubled_separated: config.doubled.separated,
+            book_rate_ratio: config.book_rate.ratio,
+            book_rate_min_bp: config.book_rate.min_bp,
+            book_rate_min_uses: config.book_rate.min_uses,
+            z_long: config.lengths.proportionality.z_long,
+            z_short: config.lengths.proportionality.z_short,
+            min_verses: config.lengths.proportionality.min_verses,
+            lengths_enabled: config.lengths.proportionality.enabled,
             presence: config.lengths.presence,
-            source_copy: config.lengths.source_copy,
-            source_copy_min_run: config.lengths.source_copy_min_run,
+            source_copy: config.lengths.source_copy.enabled,
+            source_copy_min_run: config.lengths.source_copy.min_run,
         }
     }
 
@@ -133,27 +132,25 @@ impl SousSettings {
             sentence_start: self.sentence_start,
             book_rate: self.book_rate,
         };
-        config.support_floor = self.support_floor;
-        config.word_support_floor = self.word_support_floor;
-        config.terminal_upper_share_bp = self.terminal_upper_share_bp;
-        config.terminal_lower_share_bp = self.terminal_lower_share_bp;
-        config.sentence_start_upper_bp = self.sentence_start_upper_bp;
-        config.word_length_sigma = self.word_length_sigma;
-        config.doubles_productive_bp = self.doubles_productive_bp;
-        config.doubled_bare = self.doubled_bare;
-        config.doubled_separated = self.doubled_separated;
-        config.book_rate_ratio = self.book_rate_ratio;
-        config.book_rate_min_bp = self.book_rate_min_bp;
-        config.book_rate_min_uses = self.book_rate_min_uses;
-        config.lengths = LengthConfig {
-            z_long: self.z_long,
-            z_short: self.z_short,
-            min_verses: self.min_verses,
-            enabled: self.lengths_enabled,
-            presence: self.presence,
-            source_copy: self.source_copy,
-            source_copy_min_run: self.source_copy_min_run,
-        };
+        config.shared.floor = self.support_floor;
+        config.words.floor = self.word_support_floor;
+        config.casing.terminal_upper_share_bp = self.terminal_upper_share_bp;
+        config.casing.terminal_lower_share_bp = self.terminal_lower_share_bp;
+        config.sentence_start.upper_bp = self.sentence_start_upper_bp;
+        config.word_length.sigma = self.word_length_sigma;
+        config.doubled.productive_bp = self.doubles_productive_bp;
+        config.doubled.bare = self.doubled_bare;
+        config.doubled.separated = self.doubled_separated;
+        config.book_rate.ratio = self.book_rate_ratio;
+        config.book_rate.min_bp = self.book_rate_min_bp;
+        config.book_rate.min_uses = self.book_rate_min_uses;
+        config.lengths.proportionality.z_long = self.z_long;
+        config.lengths.proportionality.z_short = self.z_short;
+        config.lengths.proportionality.min_verses = self.min_verses;
+        config.lengths.proportionality.enabled = self.lengths_enabled;
+        config.lengths.presence = self.presence;
+        config.lengths.source_copy.enabled = self.source_copy;
+        config.lengths.source_copy.min_run = self.source_copy_min_run;
     }
 }
 

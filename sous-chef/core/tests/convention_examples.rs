@@ -481,16 +481,12 @@ fn letters_join_the_roster_for_an_alphabet_and_leave_it_above_the_bound() {
     let wide = format!("{alphabet}{logographic}");
     assert_eq!(letter_roster(&patterns(wide.clone())), Vec::<char>::new());
 
-    let always = JudgingConfig {
-        letters: LetterRoster::Always,
-        ..JudgingConfig::default()
-    };
+    let mut always = JudgingConfig::default();
+    always.rarity.letters = LetterRoster::Always;
     assert!(letter_roster(&patterns_with(wide, &always)).len() > 500);
 
-    let never = JudgingConfig {
-        letters: LetterRoster::Never,
-        ..JudgingConfig::default()
-    };
+    let mut never = JudgingConfig::default();
+    never.rarity.letters = LetterRoster::Never;
     assert_eq!(
         letter_roster(&patterns_with(alphabet, &never)),
         Vec::<char>::new()
@@ -518,10 +514,8 @@ fn zwj_never_reaches_the_inventory_or_the_roster() {
 fn the_config_moves_the_roster_and_the_channels() {
     let text = format!("{}b,`c", "a, ".repeat(5_000));
     let default = patterns(text.clone());
-    let raised = JudgingConfig {
-        rarity_floor: 5_001,
-        ..JudgingConfig::default()
-    };
+    let mut raised = JudgingConfig::default();
+    raised.rarity.floor = 5_001;
     assert!(
         patterns_with(text.clone(), &raised).len() > default.len(),
         "a floor above every count rosters every glyph"
@@ -627,11 +621,9 @@ fn the_bar_is_configurable() {
         &[&("Alpha. Beta. ".repeat(250) + "Go. one. two.")],
     )];
     // 500 of 502 handoffs are capitals: 9,960 basis points.
-    assert_eq!(JudgingConfig::default().sentence_start_upper_bp, 9_800);
-    let strict = JudgingConfig {
-        sentence_start_upper_bp: 9_990,
-        ..JudgingConfig::default()
-    };
+    assert_eq!(JudgingConfig::default().sentence_start.upper_bp, 9_800);
+    let mut strict = JudgingConfig::default();
+    strict.sentence_start.upper_bp = 9_990;
     assert!(expects_capital(findings_of(&books, &strict).patterns()).is_empty());
 
     assert!(JudgingConfig::default().channels.sentence_start);

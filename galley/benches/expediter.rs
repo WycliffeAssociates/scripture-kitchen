@@ -297,10 +297,8 @@ fn set_config_then_publish(bencher: divan::Bencher) {
     let mut floor = 2u32;
     bencher.bench_local(|| {
         floor = if floor == 2 { 8 } else { 2 };
-        let config = JudgingConfig {
-            rarity_floor: floor,
-            ..JudgingConfig::default()
-        };
+        let mut config = JudgingConfig::default();
+        config.rarity.floor = floor;
         sous.set_config(((), config, config));
         divan::black_box(sous.publish().unwrap())
     });

@@ -97,13 +97,12 @@ fn chapter_span(number: u16, from: u32, to: u32) -> Chapter {
 
 /// The source-copy lane alone.
 fn copy_only(min_run: u32) -> LengthConfig {
-    LengthConfig {
-        enabled: false,
-        presence: false,
-        source_copy: true,
-        source_copy_min_run: min_run,
-        ..LengthConfig::default()
-    }
+    let mut lengths = LengthConfig::default();
+    lengths.proportionality.enabled = false;
+    lengths.presence = false;
+    lengths.source_copy.enabled = true;
+    lengths.source_copy.min_run = min_run;
+    lengths
 }
 
 /// One judged row: the shared text itself, the run, and the unit's eligible

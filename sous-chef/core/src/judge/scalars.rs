@@ -20,10 +20,11 @@ pub(crate) fn judge_corpus(corpus: &[&BookAggregate], config: &JudgingConfig, ou
     let scalars = merged_scalars(corpus);
     let total_scalars: u64 = corpus.iter().map(|book| book.scalar_count()).sum();
     if config.channels.rarity {
-        roster(&scalars, total_scalars, config, out);
+        roster(&scalars, total_scalars, &config.rarity, out);
     }
 
-    let (explained, runs, shapes) = learned(corpus, config);
+    let shared = &config.shared;
+    let (explained, runs, shapes) = learned(corpus, shared, config.channels.exact_neighbor);
     let runs = if config.channels.run_shape {
         RunIndex::new(runs)
     } else {
@@ -42,28 +43,28 @@ pub(crate) fn judge_corpus(corpus: &[&BookAggregate], config: &JudgingConfig, ou
         if config.channels.exact_neighbor
             && let Some(evidence) = evidence
         {
-            neighbors(*glyph, evidence, &shapes, config, out);
+            neighbors(*glyph, evidence, &shapes, shared, out);
         }
         if config.channels.pooled_neighbor
             && let Some(evidence) = evidence
         {
-            pooled_neighbors(*glyph, evidence, config, out);
+            pooled_neighbors(*glyph, evidence, shared, out);
         }
         if config.channels.run_shape
             && let Some(evidence) = evidence
         {
-            run_shapes(*glyph, evidence, &runs, &explained, config, &mut cited, out);
+            run_shapes(*glyph, evidence, &runs, &explained, shared, &mut cited, out);
         }
         if config.channels.placement {
-            placement(*glyph, marginals, &other, config, &mut cited, out);
+            placement(*glyph, marginals, &other, shared, &mut cited, out);
         }
         if config.channels.sentence_start
             && let Some(handoffs) = handoffs.get(glyph)
         {
-            sentence_start(*glyph, handoffs, config, out);
+            sentence_start(*glyph, handoffs, shared, &config.sentence_start, out);
         }
         if config.channels.book_rate {
-            book_rates(*glyph, &marginals.books, config, out);
+            book_rates(*glyph, &marginals.books, shared, &config.book_rate, out);
         }
     }
     cited.seal();
@@ -95,7 +96,7 @@ pub struct Explained {
 impl Explained {
     /// Everything the corpus's counts explain, before any row is judged.
     pub fn learn(corpus: &[&BookAggregate], config: &JudgingConfig) -> Self {
-        learned(corpus, config).0
+        learned(corpus, &config.shared, config.channels.exact_neighbor).0
     }
 
     /// Whether the in-run pairs `glyph` leads are ExactNeighbor's to judge.
@@ -152,10 +153,11 @@ impl Explained {
 /// needs it; the leaders then come from the evidence's own position counts.
 fn learned<'a>(
     corpus: &[&'a BookAggregate],
-    config: &JudgingConfig,
+    shared: &Ladder,
+    exact_neighbor: bool,
 ) -> (Explained, MergedRuns<'a>, FxHashMap<ScalarKey, RunEvidence>) {
     let runs = merged_runs(corpus);
-    let floor = u64::from(config.support_floor);
+    let floor = u64::from(shared.floor);
     let keys: Vec<Option<Box<[ScalarKey]>>> = runs
         .runs
         .iter()
@@ -180,10 +182,10 @@ fn learned<'a>(
             .collect(),
     };
     let shapes = run_evidence(corpus, &explained);
-    if config.channels.exact_neighbor {
+    if exact_neighbor {
         explained.leaders = shapes
             .iter()
-            .filter(|(_, evidence)| entitled(evidence.positions, config).is_some())
+            .filter(|(_, evidence)| shared.entitled(evidence.positions).is_some())
             .map(|(glyph, _)| *glyph)
             .collect();
     }
@@ -277,16 +279,17 @@ pub(super) struct OtherSide<'a> {
 pub(super) fn sentence_start(
     glyph: ScalarKey,
     handoffs: &FollowEvidence,
-    config: &JudgingConfig,
+    shared: &Ladder,
+    config: &SentenceStartConfig,
     out: &mut Findings,
 ) {
     let upper = u64::from(handoffs.counts.get(Case::Upper));
     let lower = u64::from(handoffs.counts.get(Case::Lower));
     let cased = upper + lower;
-    let Some((band, _)) = entitled(cased, config) else {
+    let Some((band, _)) = shared.entitled(cased) else {
         return;
     };
-    if lower == 0 || share_bp(upper, cased) < config.sentence_start_upper_bp {
+    if lower == 0 || share_bp(upper, cased) < config.upper_bp {
         return;
     }
     out.push_pattern(Pattern {
@@ -307,12 +310,12 @@ pub(super) fn sentence_start(
 pub(super) fn roster(
     scalars: &[(ScalarKey, Tally)],
     total_scalars: u64,
-    config: &JudgingConfig,
+    config: &RarityConfig,
     out: &mut Findings,
 ) {
     let letters = letters_are_rostered(scalars, config);
     for &(glyph, tally) in scalars {
-        if glyph.is_digits() || tally.count >= u64::from(config.rarity_floor) {
+        if glyph.is_digits() || tally.count >= u64::from(config.floor) {
             continue;
         }
         if is_letter(glyph) && !letters {
@@ -350,7 +353,7 @@ pub(super) fn roster(
 
 /// A logographic corpus has thousands of letters used once, and a ten-verse
 /// draft has `q`, `x`, `z` used once by sample size; both abstain.
-pub(super) fn letters_are_rostered(scalars: &[(ScalarKey, Tally)], config: &JudgingConfig) -> bool {
+pub(super) fn letters_are_rostered(scalars: &[(ScalarKey, Tally)], config: &RarityConfig) -> bool {
     match config.letters {
         LetterRoster::Always => true,
         LetterRoster::Never => false,
@@ -395,11 +398,11 @@ pub(super) fn placement(
     glyph: ScalarKey,
     marginals: &PlacementEvidence,
     other: &OtherSide<'_>,
-    config: &JudgingConfig,
+    shared: &Ladder,
     cited: &mut Explained,
     out: &mut Findings,
 ) {
-    let Some((band, ceiling)) = entitled(marginals.denominator, config) else {
+    let Some((band, ceiling)) = shared.entitled(marginals.denominator) else {
         return;
     };
     for side in Side::ALL {
@@ -422,7 +425,7 @@ pub(super) fn placement(
             let tally = match class {
                 OuterClass::Nonletter => marginals.unexplained[side as usize],
                 OuterClass::Digit
-                    if ordinary(tally.count, other.numbers[side as usize], config) =>
+                    if ordinary(tally.count, other.numbers[side as usize], shared) =>
                 {
                     continue;
                 }
@@ -493,10 +496,11 @@ pub(super) fn placement(
 pub(super) fn book_rates(
     glyph: ScalarKey,
     books: &[BookCounts],
-    config: &JudgingConfig,
+    shared: &Ladder,
+    config: &BookRateConfig,
     out: &mut Findings,
 ) {
-    let floor = u64::from(config.support_floor);
+    let floor = u64::from(shared.floor);
     let judged: Vec<&BookCounts> = books
         .iter()
         .filter(|book| book.occurrences >= floor)
@@ -522,9 +526,9 @@ pub(super) fn book_rates(
             sorted.clear();
             for (at, book) in judged.iter().enumerate() {
                 let rate = rates[at];
-                if book.occurrences < u64::from(config.book_rate_min_uses)
+                if book.occurrences < u64::from(config.min_uses)
                     || count(book) < floor
-                    || rate < config.book_rate_min_bp
+                    || rate < config.min_bp
                 {
                     continue;
                 }
@@ -533,8 +537,7 @@ pub(super) fn book_rates(
                     sorted.sort_unstable();
                 }
                 let baseline = median_without(&sorted, rate);
-                if u32::from(rate) < u32::from(config.book_rate_ratio) * u32::from(baseline.max(1))
-                {
+                if u32::from(rate) < u32::from(config.ratio) * u32::from(baseline.max(1)) {
                     continue;
                 }
                 out.push_pattern(Pattern {
@@ -618,8 +621,9 @@ fn cite_leaders(glyph: ScalarKey, side: Side, other: &OtherSide<'_>, cited: &mut
 
 /// Whether `numerator / denominator` is at or over the band ceiling, on a
 /// denominator entitled to say so.
-pub(super) fn ordinary(numerator: u64, denominator: u64, config: &JudgingConfig) -> bool {
-    entitled(denominator, config)
+pub(super) fn ordinary(numerator: u64, denominator: u64, shared: &Ladder) -> bool {
+    shared
+        .entitled(denominator)
         .is_some_and(|(_, ceiling)| share_bp(numerator, denominator) >= ceiling)
 }
 
@@ -633,11 +637,11 @@ pub(super) fn run_shapes(
     evidence: &RunEvidence,
     runs: &RunIndex<'_>,
     explained: &Explained,
-    config: &JudgingConfig,
+    shared: &Ladder,
     cited: &mut Explained,
     out: &mut Findings,
 ) {
-    let Some((band, ceiling)) = entitled(evidence.runs, config) else {
+    let Some((band, ceiling)) = shared.entitled(evidence.runs) else {
         return;
     };
     let ((usual_pure, usual_bucket), usual_count) = most(
@@ -784,10 +788,10 @@ pub(super) fn neighbors(
     glyph: ScalarKey,
     evidence: &RunEvidence,
     shapes: &FxHashMap<ScalarKey, RunEvidence>,
-    config: &JudgingConfig,
+    shared: &Ladder,
     out: &mut Findings,
 ) {
-    let Some((band, ceiling)) = entitled(evidence.positions, config) else {
+    let Some((band, ceiling)) = shared.entitled(evidence.positions) else {
         return;
     };
     let (usual, usual_count) = most(
@@ -865,10 +869,10 @@ pub(super) fn most<K: Copy + Ord>(counts: impl Iterator<Item = (K, u64)>) -> Opt
 pub(super) fn pooled_neighbors(
     glyph: ScalarKey,
     evidence: &RunEvidence,
-    config: &JudgingConfig,
+    shared: &Ladder,
     out: &mut Findings,
 ) {
-    let Some((band, ceiling)) = entitled(evidence.positions, config) else {
+    let Some((band, ceiling)) = shared.entitled(evidence.positions) else {
         return;
     };
     for &(pool, tally) in &evidence.pools {
@@ -888,15 +892,6 @@ pub(super) fn pooled_neighbors(
             usual: Usual::None,
         });
     }
-}
-
-/// A channel's band, or `None` when its denominator is under the support
-/// floor and it abstains.
-pub(super) fn entitled(denominator: u64, config: &JudgingConfig) -> Option<(u8, u16)> {
-    if denominator < u64::from(config.support_floor) {
-        return None;
-    }
-    config.bands.band_for(saturate(denominator))
 }
 
 // ── Dispersion ──────────────────────────────────────────────────────────

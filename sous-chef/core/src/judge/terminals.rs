@@ -47,11 +47,15 @@ pub struct TerminalTable {
 
 impl TerminalTable {
     /// The forcing contexts of a corpus-merged follow lane.
-    pub fn learn(follows: &[(FollowKey, FollowCounts)], config: &JudgingConfig) -> Self {
+    pub fn learn(
+        follows: &[(FollowKey, FollowCounts)],
+        shared: &Ladder,
+        config: &CasingConfig,
+    ) -> Self {
         let mut forcing: Vec<FollowKey> = Vec::new();
         let mut mixed: Vec<FollowKey> = Vec::new();
         for (key, counts) in follows {
-            let Some(share) = upper_share(*counts, config) else {
+            let Some(share) = upper_share(*counts, shared) else {
                 continue;
             };
             if share >= config.terminal_upper_share_bp {
@@ -134,11 +138,11 @@ impl TerminalCount {
 
 /// Entitlement and the share, in one place: the denominator is the cased
 /// handoffs, so a context followed only by uncased letters decides nothing,
-/// and one under `support_floor` of them is `None` and stays free.
-fn upper_share(counts: FollowCounts, config: &JudgingConfig) -> Option<u16> {
+/// and one under `shared.floor` of them is `None` and stays free.
+fn upper_share(counts: FollowCounts, shared: &Ladder) -> Option<u16> {
     let upper = u64::from(counts.get(Case::Upper));
     let cased = upper + u64::from(counts.get(Case::Lower));
-    (cased >= u64::from(config.support_floor)).then(|| share_bp(upper, cased))
+    (cased >= u64::from(shared.floor)).then(|| share_bp(upper, cased))
 }
 
 /// Every book's follow lane merged into one, by key ascending.

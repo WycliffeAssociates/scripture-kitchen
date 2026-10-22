@@ -107,11 +107,10 @@ fn verse(chapter: u16, first: u16, last: u16, graphemes: u32) -> SourceVerse {
 /// The presence lane alone: the ratio lane judges nothing here, so every row
 /// a case sees is the one the rule under test pushed.
 fn presence_only() -> LengthConfig {
-    LengthConfig {
-        enabled: false,
-        presence: true,
-        ..LengthConfig::default()
-    }
+    let mut lengths = LengthConfig::default();
+    lengths.proportionality.enabled = false;
+    lengths.presence = true;
+    lengths
 }
 
 /// Every presence row as `(book index, from, to, kind, keys)`.

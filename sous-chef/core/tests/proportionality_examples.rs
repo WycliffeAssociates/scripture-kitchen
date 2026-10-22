@@ -471,25 +471,19 @@ fn the_thresholds_move_the_verdict_and_disabling_silences_it() {
 
     assert_eq!(judge(&books, &source).len(), 2);
 
-    let long_only = LengthConfig {
-        z_short: 1_000.0,
-        ..LengthConfig::default()
-    };
+    let mut long_only = LengthConfig::default();
+    long_only.proportionality.z_short = 1_000.0;
     let judged = judge_with(&books, &source, long_only).0;
     assert_eq!(judged.len(), 1, "the short side is out of reach");
     assert!(judged[0].3.unwrap() > 0);
 
-    let loose = LengthConfig {
-        z_long: 1_000.0,
-        z_short: 1_000.0,
-        ..LengthConfig::default()
-    };
+    let mut loose = LengthConfig::default();
+    loose.proportionality.z_long = 1_000.0;
+    loose.proportionality.z_short = 1_000.0;
     assert!(judge_with(&books, &source, loose).0.is_empty());
 
-    let off = LengthConfig {
-        enabled: false,
-        ..LengthConfig::default()
-    };
+    let mut off = LengthConfig::default();
+    off.proportionality.enabled = false;
     assert!(judge_with(&books, &source, off).0.is_empty());
 }
 

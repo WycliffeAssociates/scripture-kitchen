@@ -29,7 +29,8 @@ fn table_of(rows: &[(FollowKey, u32, u32)]) -> TerminalTable {
         .map(|&(key, upper, lower)| (key, FollowCounts::new([upper, lower, 0])))
         .collect();
     follows.sort_unstable_by_key(|entry| entry.0);
-    TerminalTable::learn(&follows, &JudgingConfig::default())
+    let config = JudgingConfig::default();
+    TerminalTable::learn(&follows, &config.shared, &config.casing)
 }
 
 const fn bare(glyph: char) -> FollowKey {
@@ -195,11 +196,10 @@ fn analyzed(books: &[Book], config: &JudgingConfig) -> Findings {
 /// mechanism rather than the shipped volume: the word ladder is a tenth of
 /// the glyph one, and a forty-word sample cannot reach three basis points.
 fn loose() -> JudgingConfig {
-    JudgingConfig {
-        word_support_floor: 5,
-        word_bands: Staircase::default(),
-        ..JudgingConfig::default()
-    }
+    let mut config = JudgingConfig::default();
+    config.words.floor = 5;
+    config.words.bands = Staircase::default();
+    config
 }
 
 fn judged(books: &[Book], config: &JudgingConfig) -> Vec<Pattern> {

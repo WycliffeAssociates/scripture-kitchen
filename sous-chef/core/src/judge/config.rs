@@ -1,7 +1,7 @@
 //! The knobs judging reads, and nothing else reads.
 //!
 //! ```text
-//! JudgingConfig::default().bands       -> five rungs, 2,500 bp down to 30 bp
+//! JudgingConfig::default().shared.bands -> five rungs, 2,500 bp down to 30 bp
 //! config.channels.casing = false       -> the casing lane publishes nothing
 //! ```
 //!
@@ -171,7 +171,7 @@ pub struct Channels {
     pub sentence_start: bool,
     /// One book whose rate of a placement key breaks from the other books'
     /// median. On: it is silent until four books each hold the glyph at
-    /// least `support_floor` times.
+    /// least `shared.floor` times.
     pub book_rate: bool,
 }
 
@@ -193,15 +193,31 @@ impl Default for Channels {
     }
 }
 
-/// Everything judging may vary. Plain fields: this is exported through
-/// wasm-bindgen later and mirrored nowhere by hand.
+/// A denominator floor and the fraction staircase above it: what entitles a
+/// row to speak, and the share under which it does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct JudgingConfig {
-    /// A channel whose denominator is below this abstains.
-    pub support_floor: u32,
+pub struct Ladder {
+    /// A denominator below this abstains.
+    pub floor: u32,
     pub bands: Staircase,
+}
+
+impl Ladder {
+    /// The rung a denominator falls in, as `(step index, share in bp)`, or
+    /// `None` when it is under the floor and abstains.
+    pub fn entitled(self, denominator: u64) -> Option<(u8, u16)> {
+        if denominator < u64::from(self.floor) {
+            return None;
+        }
+        self.bands.band_for(saturate(denominator))
+    }
+}
+
+/// [`Channel::Rarity`]'s roster.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct RarityConfig {
     /// A scalar seen fewer times than this across the corpus is rostered.
-    pub rarity_floor: u32,
+    pub floor: u32,
     /// Letters leave the roster when the corpus uses more distinct letters
     /// than this, unless `letters` overrides.
     pub letter_roster_bound: u32,
@@ -210,14 +226,13 @@ pub struct JudgingConfig {
     /// not by convention. Nonletters have no such floor.
     pub letter_roster_min_letters: u32,
     pub letters: LetterRoster,
-    /// A word judged on fewer free positions than this abstains. Doubled
-    /// reads `support_floor` instead, as a habit count.
-    pub word_support_floor: u32,
-    /// The minority share that flags a word's case form:
-    /// [`Staircase::WORD_STEPS`], the glyph ladder at a tenth. Word casing
-    /// fires at twenty times glyph volume under shared bands, so the shares
-    /// are its own (`rules/word-conventions.md`).
-    pub word_bands: Staircase,
+}
+
+/// [`Channel::Casing`]'s terminal table: which glyphs force the capital after
+/// them. The table is data to every channel that reads it; these two shares
+/// are what build it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct CasingConfig {
     /// The share of a glyph's handoffs that must be uppercase before the
     /// corpus is held to capitalize after it, in basis points.
     pub terminal_upper_share_bp: u16,
@@ -225,6 +240,11 @@ pub struct JudgingConfig {
     /// the word, in basis points. Between this and `terminal_upper_share_bp`
     /// a context is mixed and Casing judges nothing after it.
     pub terminal_lower_share_bp: u16,
+}
+
+/// [`Channel::SentenceStart`]'s bar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SentenceStartConfig {
     /// The share of a glyph's cased handoffs that must be uppercase before
     /// every lowercase one is reviewable, in basis points.
     ///
@@ -234,31 +254,67 @@ pub struct JudgingConfig {
     /// evidence about the word; 98% decides whether a lowercase letter after
     /// it is an exception worth reading. A glyph can force at 80% and say
     /// nothing here.
-    pub sentence_start_upper_bp: u16,
+    pub upper_bp: u16,
+}
+
+/// [`Channel::WordLength`]'s ceiling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct WordLengthConfig {
     /// Whole standard deviations above the corpus's mean word length that a
-    /// word must reach before [`Channel::WordLength`] names it.
-    pub word_length_sigma: u8,
+    /// word must reach before it is named.
+    pub sigma: u8,
+}
+
+/// [`Channel::Doubled`]'s recusal and its two lanes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct DoubledConfig {
     /// The share of a corpus's distinct words that may appear doubled before
-    /// doubling is held to be productive in this language and
-    /// [`Channel::Doubled`] abstains for the whole corpus, in basis points.
-    pub doubles_productive_bp: u16,
-    pub doubles: DoublesPolicy,
+    /// doubling is held to be productive in this language and the channel
+    /// abstains for the whole corpus, in basis points.
+    pub productive_bp: u16,
+    pub policy: DoublesPolicy,
     /// Judges `the the`: a doubling with only whitespace between.
-    pub doubled_bare: bool,
+    pub bare: bool,
     /// Judges `Moses, Moses`: a doubling with punctuation between. Off by
     /// default: vocatives and genealogy chains are most of its volume.
-    pub doubled_separated: bool,
+    pub separated: bool,
+}
+
+/// [`Channel::BookRate`]'s three dials.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct BookRateConfig {
     /// How many times the other judged books' median rate a book's rate must
-    /// reach before [`Channel::BookRate`] names it.
-    pub book_rate_ratio: u16,
-    /// The least rate, in basis points, a book must reach before
-    /// [`Channel::BookRate`] names it.
-    pub book_rate_min_bp: u16,
-    /// The least number of times a book must hold the glyph before
-    /// [`Channel::BookRate`] may name it. The median still reads every book
-    /// holding it `support_floor` times.
-    pub book_rate_min_uses: u32,
-    /// The source-compared lane's own knobs. Judged by
+    /// reach before it is named.
+    pub ratio: u16,
+    /// The least rate, in basis points, a book must reach before it is named.
+    pub min_bp: u16,
+    /// The least number of times a book must hold the glyph before it may be
+    /// named. The median still reads every book holding it `shared.floor`
+    /// times.
+    pub min_uses: u32,
+}
+
+/// Everything judging may vary: what several checks share, then one struct
+/// per check that has settings of its own. A check reads its own struct and
+/// the shared ladders it needs, never another check's. Plain fields: this is
+/// exported through wasm-bindgen later and mirrored nowhere by hand.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct JudgingConfig {
+    /// The glyph channels' ladder. Its floor is also the habit count Doubled,
+    /// BookRate and the terminal table read.
+    pub shared: Ladder,
+    pub rarity: RarityConfig,
+    /// The word channels' ladder: [`Staircase::WORD_STEPS`], the glyph ladder
+    /// at a tenth. Word casing fires at twenty times glyph volume under shared
+    /// bands, so the shares are its own (`rules/word-conventions.md`). A word
+    /// judged on fewer free positions than its floor abstains.
+    pub words: Ladder,
+    pub casing: CasingConfig,
+    pub sentence_start: SentenceStartConfig,
+    pub word_length: WordLengthConfig,
+    pub doubled: DoubledConfig,
+    pub book_rate: BookRateConfig,
+    /// The source-compared lane's own checks. Judged by
     /// [`crate::proportionality::judge_lengths`], which is a corpus-level step
     /// beside the chapter passes rather than one of them; a resident host
     /// reaches it through [`crate::ChapterPass::length_config`].
@@ -269,25 +325,37 @@ pub struct JudgingConfig {
 impl Default for JudgingConfig {
     fn default() -> Self {
         Self {
-            support_floor: 5,
-            bands: Staircase::default(),
-            rarity_floor: 5,
-            letter_roster_bound: 500,
-            letter_roster_min_letters: 5_000,
-            letters: LetterRoster::default(),
-            word_support_floor: 20,
-            word_bands: Staircase::new(Staircase::WORD_STEPS).expect("the word bounds ascend"),
-            terminal_upper_share_bp: 8_000,
-            terminal_lower_share_bp: 2_000,
-            sentence_start_upper_bp: 9_800,
-            word_length_sigma: 4,
-            doubles_productive_bp: 300,
-            doubles: DoublesPolicy::default(),
-            doubled_bare: true,
-            doubled_separated: false,
-            book_rate_ratio: 10,
-            book_rate_min_bp: 4_000,
-            book_rate_min_uses: 100,
+            shared: Ladder {
+                floor: 5,
+                bands: Staircase::default(),
+            },
+            rarity: RarityConfig {
+                floor: 5,
+                letter_roster_bound: 500,
+                letter_roster_min_letters: 5_000,
+                letters: LetterRoster::default(),
+            },
+            words: Ladder {
+                floor: 20,
+                bands: Staircase::new(Staircase::WORD_STEPS).expect("the word bounds ascend"),
+            },
+            casing: CasingConfig {
+                terminal_upper_share_bp: 8_000,
+                terminal_lower_share_bp: 2_000,
+            },
+            sentence_start: SentenceStartConfig { upper_bp: 9_800 },
+            word_length: WordLengthConfig { sigma: 4 },
+            doubled: DoubledConfig {
+                productive_bp: 300,
+                policy: DoublesPolicy::default(),
+                bare: true,
+                separated: false,
+            },
+            book_rate: BookRateConfig {
+                ratio: 10,
+                min_bp: 4_000,
+                min_uses: 100,
+            },
             lengths: LengthConfig::default(),
             channels: Channels::default(),
         }

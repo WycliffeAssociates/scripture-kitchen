@@ -46,8 +46,8 @@ pub use pass::{
 };
 pub use presence::PresenceRow;
 pub use proportionality::{
-    LengthConfig, Paired, PairedBook, ProjectSpread, SourceLengths, SourceVerse, TargetLengths,
-    judge_lengths, judge_paired, source_lengths,
+    LengthConfig, Paired, PairedBook, ProjectSpread, ProportionalityConfig, SourceCopyConfig,
+    SourceLengths, SourceVerse, TargetLengths, judge_lengths, judge_paired, source_lengths,
 };
 pub use sites::Site;
 pub use source_copy::{SourceCopyRow, SourceWords};

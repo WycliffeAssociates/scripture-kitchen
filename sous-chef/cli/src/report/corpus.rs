@@ -127,11 +127,11 @@ pub(super) fn corpus_json(
     let cfg = JudgingConfig::default();
     let judging = format!(
         "judge: support floor {} \u{b7} rarity floor {} \u{b7} bands {} \u{b7} word floor {} \u{b7} word bands {}",
-        cfg.support_floor,
-        cfg.rarity_floor,
-        shares(&cfg.bands),
-        cfg.word_support_floor,
-        shares(&cfg.word_bands),
+        cfg.shared.floor,
+        cfg.rarity.floor,
+        shares(&cfg.shared.bands),
+        cfg.words.floor,
+        shares(&cfg.words.bands),
     );
 
     let verses: Vec<Vec<Verse>> = corpus

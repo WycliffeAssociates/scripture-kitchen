@@ -113,7 +113,7 @@ fn main() {
     // text resent (`Expediter::last_wordless_references`).
     if source_copy {
         let mut config = *sous.config();
-        config.1.lengths.source_copy = true;
+        config.1.lengths.source_copy.enabled = true;
         sous.set_config(config);
     }
 

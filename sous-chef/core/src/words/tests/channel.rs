@@ -150,10 +150,8 @@ fn a_capital_after_a_comma_and_a_quote_stays_free_where_speech_opens_lowercase()
 
 #[test]
 fn a_word_under_the_support_floor_abstains() {
-    let quiet = JudgingConfig {
-        word_support_floor: 100,
-        ..loose()
-    };
+    let mut quiet = loose();
+    quiet.words.floor = 100;
     let text = "and David went ".repeat(40) + "and david went";
     assert!(judged(&[book(b"MRK", text.clone())], &quiet).is_empty());
     assert_eq!(judged(&[book(b"MRK", text)], &loose()).len(), 1);
@@ -164,14 +162,12 @@ fn an_uncased_corpus_emits_nothing_and_the_channel_switches_off() {
     let hebrew = "\u{5d0}\u{5d1}\u{5d2} \u{5d3}\u{5d4}\u{5d5} ".repeat(40);
     assert!(judged(&[book(b"MRK", hebrew)], &loose()).is_empty());
 
-    let off = JudgingConfig {
-        channels: Channels {
-            casing: false,
-            ..Channels::default()
-        },
-        letters: LetterRoster::Never,
-        ..loose()
+    let mut off = loose();
+    off.channels = Channels {
+        casing: false,
+        ..Channels::default()
     };
+    off.rarity.letters = LetterRoster::Never;
     let text = "and David went ".repeat(40) + "and david went";
     assert!(judged(&[book(b"MRK", text)], &off).is_empty());
 }
@@ -236,15 +232,15 @@ fn locate_sites_every_free_occurrence_the_numerator_counted() {
 /// every occurrence: length is a property of the word, not of a position.
 #[test]
 fn a_word_far_longer_than_the_corpus_fires_on_its_length() {
-    let long = JudgingConfig {
+    let mut long = JudgingConfig {
         channels: Channels {
             casing: false,
             word_length: true,
             ..Channels::default()
         },
-        word_support_floor: 3,
         ..JudgingConfig::default()
     };
+    long.words.floor = 3;
     let text = "and the cat sat ".repeat(60)
         + "abcdefghijklmnopqrst abcdefghijklmnopqrst abcdefghijklmnopqrst";
     let books = [book(b"MRK", text)];
@@ -277,11 +273,12 @@ fn a_word_far_longer_than_the_corpus_fires_on_its_length() {
 #[test]
 fn the_shipped_word_ladder_is_a_tenth_of_the_glyph_ladder() {
     let shipped = JudgingConfig::default();
-    assert_eq!(shipped.word_support_floor, 20);
-    assert_eq!(shipped.word_bands.steps, Staircase::WORD_STEPS);
+    assert_eq!(shipped.words.floor, 20);
+    assert_eq!(shipped.words.bands.steps, Staircase::WORD_STEPS);
     assert!(shipped.channels.casing);
     for (word, glyph) in shipped
-        .word_bands
+        .words
+        .bands
         .steps
         .iter()
         .zip(Staircase::DEFAULT_STEPS)

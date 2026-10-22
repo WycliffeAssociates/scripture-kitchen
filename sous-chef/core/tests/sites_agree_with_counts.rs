@@ -335,16 +335,15 @@ fn generated(seed: u64, books: usize, chapters: usize, chapter_len: usize) -> Ve
 /// one: at one every run recurs and every leader is entitled, so `RunShape`
 /// and in-run `Placement` could never fire.
 fn permissive() -> JudgingConfig {
-    JudgingConfig {
-        support_floor: 2,
-        rarity_floor: 5,
-        letters: sous_core::LetterRoster::Always,
-        channels: sous_core::Channels {
-            pooled_neighbor: true,
-            ..sous_core::Channels::default()
-        },
-        ..JudgingConfig::default()
-    }
+    let mut config = JudgingConfig::default();
+    config.shared.floor = 2;
+    config.rarity.floor = 5;
+    config.rarity.letters = sous_core::LetterRoster::Always;
+    config.channels = sous_core::Channels {
+        pooled_neighbor: true,
+        ..sous_core::Channels::default()
+    };
+    config
 }
 
 #[test]

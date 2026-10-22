@@ -109,9 +109,9 @@ Whitespace rides too.
 The table is `TerminalTable`, learned in [`judge.md`](judge.md) from the
 substrate's `follows` lane: for each glyph, `upper / (upper + lower)` of the
 letters it hands off to across the corpus. A glyph **forces** when that share
-reaches `JudgingConfig::terminal_upper_share_bp` (8,000 = 80%) on at least
-`support_floor` cased handoffs, and is **mixed** — no evidence either way —
-while it stays over `terminal_lower_share_bp` (2,000). `Start` always forces;
+reaches `casing.terminal_upper_share_bp` (8,000 = 80%) on at least
+`shared.floor` cased handoffs, and is **mixed** — no evidence either way —
+while it stays over `casing.terminal_lower_share_bp` (2,000). `Start` always forces;
 `None` is always free; everything else is the corpus's answer.
 
 This is why there is no punctuation allow-list and no rule per script. Over

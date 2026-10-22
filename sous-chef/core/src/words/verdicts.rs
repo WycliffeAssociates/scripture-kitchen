@@ -190,7 +190,7 @@ impl WordVerdicts {
         moved: &MovedWords,
         out: &mut Findings,
     ) {
-        let doubles = config.channels.doubled && judges_doubles(totals, table, config);
+        let doubles = config.channels.doubled && judges_doubles(totals, table, &config.doubled);
         let kept = self.seen.take().filter(|seen| {
             !config.channels.word_length
                 && seen.doubles == doubles

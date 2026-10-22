@@ -55,18 +55,29 @@ pub(crate) fn judge_words_for(
     moved: Option<&MovedWords>,
     out: &mut Vec<Pattern>,
 ) {
+    let words = &config.words;
     if config.channels.casing {
-        casing(corpus, totals, table, config, moved, out);
+        casing(corpus, totals, table, words, moved, out);
     }
     if config.channels.word_length {
         debug_assert!(moved.is_none(), "the length shape is the whole corpus's");
-        word_length(corpus, totals, config, out);
+        word_length(corpus, totals, words, &config.word_length, out);
     }
-    if config.channels.doubled && judges_doubles(totals, table, config) {
-        doubled(corpus, totals, table, config, moved, out);
+    if config.channels.doubled && judges_doubles(totals, table, &config.doubled) {
+        let floor = config.shared.floor;
+        doubled(
+            corpus,
+            totals,
+            table,
+            floor,
+            words,
+            &config.doubled,
+            moved,
+            out,
+        );
     }
     if config.channels.letter_runs {
-        letter_runs(corpus, totals, config, moved, out);
+        letter_runs(corpus, totals, words, moved, out);
     }
 }
 
@@ -84,19 +95,19 @@ pub(crate) fn word_slot(pattern: &Pattern) -> (u8, u64) {
 }
 
 /// One row per run length longer than the longest a letter repeats on
-/// `word_support_floor` runs, against every run of that letter of two or more.
+/// `words.floor` runs, against every run of that letter of two or more.
 /// Length 2 never fires.
 pub(super) fn letter_runs(
     corpus: &[&WordAggregate],
     totals: &WordTotals,
-    config: &JudgingConfig,
+    words: &Ladder,
     moved: Option<&MovedWords>,
     out: &mut Vec<Pattern>,
 ) {
     match moved {
         None => {
             for row in totals.letter_runs() {
-                letter_run(corpus, row, config, out);
+                letter_run(corpus, row, words, out);
             }
         }
         Some(moved) => {
@@ -104,7 +115,7 @@ pub(super) fn letter_runs(
             let mut at = 0usize;
             for letter in moved.letters() {
                 if seek(rows, &mut at, letter, |row| row.letter) {
-                    letter_run(corpus, &rows[at], config, out);
+                    letter_run(corpus, &rows[at], words, out);
                     at += 1;
                 }
             }
@@ -116,17 +127,17 @@ pub(super) fn letter_runs(
 pub(super) fn letter_run(
     corpus: &[&WordAggregate],
     row: &RunTally,
-    config: &JudgingConfig,
+    words: &Ladder,
     out: &mut Vec<Pattern>,
 ) {
     let runs = row.runs();
-    let Some((band, _)) = config.word_bands.band_for(saturate(runs)) else {
+    let Some((band, _)) = words.bands.band_for(saturate(runs)) else {
         return;
     };
     let supported = row
         .lengths
         .iter()
-        .rposition(|&count| u64::from(count) >= u64::from(config.word_support_floor))
+        .rposition(|&count| u64::from(count) >= u64::from(words.floor))
         .map_or(0, |lane| lane + 1);
     let first = supported.max(letter_run_lane(LETTER_RUN_MIN) + 1);
     for lane in first..row.lengths.len() {
@@ -162,12 +173,12 @@ pub(super) fn letter_run(
 pub(crate) fn judges_doubles(
     totals: &WordTotals,
     table: &TerminalTable,
-    config: &JudgingConfig,
+    config: &DoubledConfig,
 ) -> bool {
-    match config.doubles {
+    match config.policy {
         DoublesPolicy::Always => true,
         DoublesPolicy::Never => false,
-        DoublesPolicy::Auto => totals.doubling_share_bp(table) <= config.doubles_productive_bp,
+        DoublesPolicy::Auto => totals.doubling_share_bp(table) <= config.productive_bp,
     }
 }
 
@@ -181,11 +192,14 @@ pub(crate) fn judges_doubles(
 ///
 /// The two lanes are hash-sorted, so this is one tandem walk and not a probe
 /// per doubled word.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn doubled(
     corpus: &[&WordAggregate],
     totals: &WordTotals,
     table: &TerminalTable,
-    config: &JudgingConfig,
+    habit: u32,
+    words: &Ladder,
+    config: &DoubledConfig,
     moved: Option<&MovedWords>,
     out: &mut Vec<Pattern>,
 ) {
@@ -197,7 +211,7 @@ pub(super) fn doubled(
         None => {
             for row in doubles {
                 let held = held_of(rows, &mut cased, row.hash);
-                doubled_word(corpus, row, held, table, config, out);
+                doubled_word(corpus, row, held, table, habit, words, config, out);
             }
         }
         Some(moved) => {
@@ -209,7 +223,7 @@ pub(super) fn doubled(
                 let row = &doubles[at];
                 at += 1;
                 let held = held_of(rows, &mut cased, row.hash);
-                doubled_word(corpus, row, held, table, config, out);
+                doubled_word(corpus, row, held, table, habit, words, config, out);
             }
         }
     }
@@ -236,17 +250,20 @@ pub(super) fn held_of(rows: &[WordTally], at: &mut usize, hash: u64) -> u64 {
 }
 
 /// One word's two doubling lanes. Every doubling fires unless that key
-/// doubles at least `support_floor` times: `vous vous` x148 is the language,
+/// doubles at least `habit` times: `vous vous` x148 is the language,
 /// one `surface surface` is a slip whatever the word's frequency.
 ///
 /// The denominator is the word's own occurrences, and the band is the word
 /// ladder's rung for it: context for a reader, not a gate.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn doubled_word(
     corpus: &[&WordAggregate],
     row: &DoubleTally,
     held: u64,
     table: &TerminalTable,
-    config: &JudgingConfig,
+    habit: u32,
+    words: &Ladder,
+    config: &DoubledConfig,
     out: &mut Vec<Pattern>,
 ) {
     let free_separated = row.separated_free(table);
@@ -254,15 +271,15 @@ pub(super) fn doubled_word(
         return;
     }
     let total = held + u64::from(row.uncased);
-    let Some((band, _)) = config.word_bands.band_for(saturate(total)) else {
+    let Some((band, _)) = words.bands.band_for(saturate(total)) else {
         return;
     };
     let lanes = [
-        (false, config.doubled_bare, u64::from(row.bare)),
-        (true, config.doubled_separated, free_separated),
+        (false, config.bare, u64::from(row.bare)),
+        (true, config.separated, free_separated),
     ];
     for (separated, judged, count) in lanes {
-        if !judged || count == 0 || count >= u64::from(config.support_floor) {
+        if !judged || count == 0 || count >= u64::from(habit) {
             continue;
         }
         let key = PatternKey::Doubled {
@@ -289,14 +306,14 @@ pub(super) fn casing(
     corpus: &[&WordAggregate],
     totals: &WordTotals,
     table: &TerminalTable,
-    config: &JudgingConfig,
+    words: &Ladder,
     moved: Option<&MovedWords>,
     out: &mut Vec<Pattern>,
 ) {
     match moved {
         None => {
             for word in totals.by_word() {
-                casing_word(corpus, word, table, config, out);
+                casing_word(corpus, word, table, words, out);
             }
         }
         Some(moved) => {
@@ -310,7 +327,7 @@ pub(super) fn casing(
                 while rows.get(end).is_some_and(|row| row.hash == *hash) {
                     end += 1;
                 }
-                casing_word(corpus, &rows[at..end], table, config, out);
+                casing_word(corpus, &rows[at..end], table, words, out);
                 at = end;
             }
         }
@@ -323,7 +340,7 @@ pub(super) fn casing_word(
     corpus: &[&WordAggregate],
     word: &[WordTally],
     table: &TerminalTable,
-    config: &JudgingConfig,
+    words: &Ladder,
     out: &mut Vec<Pattern>,
 ) {
     let mut free = [0u64; 4];
@@ -336,7 +353,7 @@ pub(super) fn casing_word(
         }
     }
     let total: u64 = free.iter().sum();
-    let Some((band, ceiling)) = entitled_words(total, config) else {
+    let Some((band, ceiling)) = words.entitled(total) else {
         return;
     };
     let (usual, usual_count) = most(
@@ -374,27 +391,28 @@ pub(super) fn casing_word(
 }
 
 /// The corpus's own word length distribution, occurrence-weighted, and the
-/// words standing `word_length_sigma` deviations above it.
+/// words standing `sigma` deviations above it.
 ///
 /// Only the long end: a short word is a word, and the tail this names is
 /// names, loanwords, and compounds — which is why the channel ships off.
 pub(super) fn word_length(
     corpus: &[&WordAggregate],
     totals: &WordTotals,
-    config: &JudgingConfig,
+    words: &Ladder,
+    config: &WordLengthConfig,
     out: &mut Vec<Pattern>,
 ) {
     let Some(shape) = LengthShape::of(corpus) else {
         return;
     };
-    let ceiling = shape.at(config.word_length_sigma);
+    let ceiling = shape.at(config.sigma);
     let occurrences = saturate(shape.occurrences);
-    let Some((band, _)) = config.word_bands.band_for(occurrences) else {
+    let Some((band, _)) = words.bands.band_for(occurrences) else {
         return;
     };
     for word in totals.by_word() {
         let count: u64 = word.iter().flat_map(|row| row.counts).map(u64::from).sum();
-        if count < u64::from(config.word_support_floor) {
+        if count < u64::from(words.floor) {
             continue;
         }
         let Some(len) = shape.len_of(word[0].hash) else {
@@ -535,13 +553,4 @@ pub(crate) fn free_of(
             .map_or(0, |lanes| u64::from(lanes[letter_run_lane(length)])),
         _ => 0,
     }
-}
-
-/// A word's band, or `None` when its free positions are under the word
-/// support floor and it abstains.
-pub(super) fn entitled_words(free: u64, config: &JudgingConfig) -> Option<(u8, u16)> {
-    if free < u64::from(config.word_support_floor) {
-        return None;
-    }
-    config.word_bands.band_for(saturate(free))
 }

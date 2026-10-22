@@ -47,11 +47,11 @@ pub const KNOBS: &[u8] = include_bytes!("goldens/sous/knobs.bin");
 pub fn moved_knobs() -> JudgingConfig {
     let mut config = JudgingConfig::default();
     config.channels.casing = false;
-    config.sentence_start_upper_bp = 9_990;
-    config.lengths.z_short = 2.0;
+    config.sentence_start.upper_bp = 9_990;
+    config.lengths.proportionality.z_short = 2.0;
     // The one lane that ships off: the settings publication is where a code-3
     // row lives, because the default publication has none by design.
-    config.lengths.source_copy = true;
+    config.lengths.source_copy.enabled = true;
     config
 }
 
@@ -284,7 +284,7 @@ fn resident_bytes_is_pinned_across_the_three_publications() {
 
     assert_eq!(
         [cold, edit, settings],
-        [102_180, 110_081, 117_173],
+        [102_188, 110_089, 117_181],
         "resident bytes moved: cold, edit, settings"
     );
 }

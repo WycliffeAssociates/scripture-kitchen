@@ -6,11 +6,10 @@ use super::*;
 /// answered by the corpus statistic instead.
 /// Judged whatever the recusal says, with both keys on.
 fn always(config: &JudgingConfig) -> JudgingConfig {
-    JudgingConfig {
-        doubles: DoublesPolicy::Always,
-        doubled_separated: true,
-        ..*config
-    }
+    let mut config = *config;
+    config.doubled.policy = DoublesPolicy::Always;
+    config.doubled.separated = true;
+    config
 }
 
 fn doubled_rows(books: &[Book], config: &JudgingConfig) -> Vec<Pattern> {
@@ -129,10 +128,8 @@ fn na_comma_na_is_a_separate_claim() {
     let mut text = "and na now ".repeat(2_000);
     text.push_str("and na, na now");
     let books = [book(b"MRK", text)];
-    let config = JudgingConfig {
-        doubled_separated: true,
-        ..JudgingConfig::default()
-    };
+    let mut config = JudgingConfig::default();
+    config.doubled.separated = true;
     let findings = analyzed(&books, &config);
     let rows: Vec<Pattern> = findings
         .patterns()
@@ -165,11 +162,9 @@ fn the_bare_and_separated_switches_are_independent() {
     text.push_str("and na na now and na, na now");
     let books = [book(b"MRK", text)];
     let keys = |bare: bool, separated: bool| -> Vec<bool> {
-        let config = JudgingConfig {
-            doubled_bare: bare,
-            doubled_separated: separated,
-            ..always(&JudgingConfig::default())
-        };
+        let mut config = always(&JudgingConfig::default());
+        config.doubled.bare = bare;
+        config.doubled.separated = separated;
         doubled_rows(&books, &config)
             .iter()
             .map(|row| match row.key {
@@ -182,8 +177,8 @@ fn the_bare_and_separated_switches_are_independent() {
     assert_eq!(keys(true, false), [false]);
     assert_eq!(keys(false, true), [true]);
     assert!(keys(false, false).is_empty());
-    assert!(JudgingConfig::default().doubled_bare);
-    assert!(!JudgingConfig::default().doubled_separated);
+    assert!(JudgingConfig::default().doubled.bare);
+    assert!(!JudgingConfig::default().doubled.separated);
 }
 
 /// A separated pair whose separator's context forces a capital in this
@@ -305,10 +300,8 @@ fn a_reduplicating_corpus_recuses_itself() {
     assert_eq!(forced.len(), 3);
     assert!(forced.iter().all(|row| row.numerator == 2));
 
-    let never = JudgingConfig {
-        doubles: DoublesPolicy::Never,
-        ..loose()
-    };
+    let mut never = loose();
+    never.doubled.policy = DoublesPolicy::Never;
     assert!(doubled_rows(&books, &never).is_empty());
 }
 
@@ -342,8 +335,8 @@ fn an_uncased_script_still_counts_doubles() {
 #[test]
 fn the_doubled_channel_ships_on() {
     assert!(JudgingConfig::default().channels.doubled);
-    assert_eq!(JudgingConfig::default().doubles, DoublesPolicy::Auto);
-    assert_eq!(JudgingConfig::default().doubles_productive_bp, 300);
+    assert_eq!(JudgingConfig::default().doubled.policy, DoublesPolicy::Auto);
+    assert_eq!(JudgingConfig::default().doubled.productive_bp, 300);
 
     let mut text = "and the word ".repeat(2_000);
     text.push_str("and the the word");

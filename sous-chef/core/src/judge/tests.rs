@@ -50,11 +50,9 @@ fn books_touched_is_the_oracle_for_the_merge_time_count() {
         .map(|obs| fold_book(&[ChapterObs { start: 0, obs }], &mut Edge::default()))
         .collect();
     let views: Vec<&BookAggregate> = aggregates.iter().collect();
-    let config = JudgingConfig {
-        support_floor: 2,
-        letters: LetterRoster::Always,
-        ..JudgingConfig::default()
-    };
+    let mut config = JudgingConfig::default();
+    config.shared.floor = 2;
+    config.rarity.letters = LetterRoster::Always;
     let mut findings = Findings::new(texts.iter().map(|text| text.len() as u32).collect());
     judge_corpus(&views, &config, &mut findings);
     assert!(
@@ -324,10 +322,8 @@ fn every_row_names_what_is_usual_instead() {
         "f'. ".repeat(3),
         "g'\" ".repeat(400),
     )];
-    let config = JudgingConfig {
-        letters: LetterRoster::Never,
-        ..JudgingConfig::default()
-    };
+    let mut config = JudgingConfig::default();
+    config.rarity.letters = LetterRoster::Never;
     let findings = judged(&texts, &config);
     let usual = |glyph: char, key: PatternKey| {
         findings
@@ -581,10 +577,8 @@ fn a_fired_letter_side_leaves_no_joint_row() {
 #[test]
 fn a_rarity_usual_is_never_a_letter_or_a_space() {
     let texts = [format!("{} Q \u{a7}", "ab cd. ".repeat(2_000))];
-    let config = JudgingConfig {
-        letters: LetterRoster::Always,
-        ..JudgingConfig::default()
-    };
+    let mut config = JudgingConfig::default();
+    config.rarity.letters = LetterRoster::Always;
     let findings = judged(&texts, &config);
     let usual = |glyph: char| {
         findings
@@ -676,10 +670,8 @@ fn a_rate_under_the_minimum_is_silent() {
     let mut texts: Vec<String> = (0..4).map(|_| comma_book(1_000, 1)).collect();
     texts.push(comma_book(100, 5));
     assert!(book_rows(&judged(&texts, &JudgingConfig::default())).is_empty());
-    let config = JudgingConfig {
-        book_rate_min_bp: 400,
-        ..JudgingConfig::default()
-    };
+    let mut config = JudgingConfig::default();
+    config.book_rate.min_bp = 400;
     assert_eq!(book_rows(&judged(&texts, &config)).len(), 1);
 }
 

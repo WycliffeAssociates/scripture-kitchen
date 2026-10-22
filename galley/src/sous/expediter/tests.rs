@@ -481,10 +481,8 @@ fn a_pattern_change_re_sites_every_chapter() {
     sous.publish_after(&mark().replace("A withered", "A shrivelled"));
     assert_eq!(sous.last_sited_chapters(), 1, "warm before the knob");
 
-    let config = JudgingConfig {
-        rarity_floor: 1,
-        ..JudgingConfig::default()
-    };
+    let mut config = JudgingConfig::default();
+    config.rarity.floor = 1;
     sous.set_config(((), config, config));
     sous.publish().unwrap();
     assert_eq!(sous.last_mapped(), 0, "a knob maps nothing");
@@ -612,10 +610,8 @@ fn a_config_flip_re_judges_everything() {
     let mut sous = registered(&books);
     sous.publish().unwrap();
 
-    let config = JudgingConfig {
-        word_support_floor: 1,
-        ..JudgingConfig::default()
-    };
+    let mut config = JudgingConfig::default();
+    config.words.floor = 1;
     sous.set_config(((), config, config));
     let published = sous.publish().unwrap();
     let (_, whole) = cold(&books);
@@ -644,16 +640,14 @@ fn a_recusal_flip_re_judges_everything() {
     ];
     // A vocabulary of eight words, one of which doubles, is 1,250 bp; ten
     // more words put it under the bar and the channel stops recusing.
-    let config = JudgingConfig {
-        doubles_productive_bp: 1_000,
-        word_support_floor: 1,
-        word_bands: Staircase::new(Staircase::WORD_STEPS.map(|step| BandStep {
-            share_bp: 9_000,
-            ..step
-        }))
-        .expect("the word bounds still ascend"),
-        ..JudgingConfig::default()
-    };
+    let mut config = JudgingConfig::default();
+    config.doubled.productive_bp = 1_000;
+    config.words.floor = 1;
+    config.words.bands = Staircase::new(Staircase::WORD_STEPS.map(|step| BandStep {
+        share_bp: 9_000,
+        ..step
+    }))
+    .expect("the word bounds still ascend");
     let mut sous = registered(&books);
     sous.set_config(((), config, config));
     let before = doubled_rows(&sous.publish().unwrap());
@@ -909,10 +903,8 @@ fn set_config_relocates_from_cached_aggregates_without_mapping() {
     sous.update("b/mrk.usfm", Role::Target, &mark()).unwrap();
     let before = sous.publish().unwrap();
 
-    let config = JudgingConfig {
-        rarity_floor: 1,
-        ..JudgingConfig::default()
-    };
+    let mut config = JudgingConfig::default();
+    config.rarity.floor = 1;
     sous.set_config(((), config, config));
     let after = sous.publish().unwrap();
     assert_eq!(sous.last_mapped(), 0, "no chapter was mapped");
@@ -1142,10 +1134,8 @@ fn changing_the_config_re_judges_from_cached_aggregates() {
         .unwrap()
         .pattern_count();
 
-    let config = JudgingConfig {
-        rarity_floor: 10_000,
-        ..JudgingConfig::default()
-    };
+    let mut config = JudgingConfig::default();
+    config.rarity.floor = 10_000;
     sous.set_config(((), config, config));
     let buffer = sous.publish().unwrap();
     assert_eq!(sous.last_mapped(), 0);
@@ -1294,9 +1284,10 @@ fn a_length_knob_re_judges_without_mapping_or_folding() {
     assert_eq!(length_rows(&before).len(), 2);
 
     let config = JudgingConfig {
-        lengths: sous_core::LengthConfig {
-            z_long: 1_000.0,
-            ..sous_core::LengthConfig::default()
+        lengths: {
+            let mut lengths = sous_core::LengthConfig::default();
+            lengths.proportionality.z_long = 1_000.0;
+            lengths
         },
         ..JudgingConfig::default()
     };
@@ -1311,9 +1302,10 @@ fn a_length_knob_re_judges_without_mapping_or_folding() {
     );
 
     let off = JudgingConfig {
-        lengths: sous_core::LengthConfig {
-            enabled: false,
-            ..sous_core::LengthConfig::default()
+        lengths: {
+            let mut lengths = sous_core::LengthConfig::default();
+            lengths.proportionality.enabled = false;
+            lengths
         },
         ..JudgingConfig::default()
     };
@@ -1416,13 +1408,13 @@ fn the_source_copy_switch_re_pairs_and_the_floor_does_not() {
     sous.publish().unwrap();
 
     let mut config = source_copy_config();
-    config.lengths.source_copy_min_run = 4;
+    config.lengths.source_copy.min_run = 4;
     sous.set_config(((), config, config));
     let raised = sous.publish().unwrap();
     assert_eq!(sous.last_paired(), 0, "a floor is not in the key");
     assert!(!copy_rows(&raised).is_empty());
 
-    config.lengths.source_copy = false;
+    config.lengths.source_copy.enabled = false;
     sous.set_config(((), config, config));
     let off = sous.publish().unwrap();
     assert_eq!(sous.last_paired(), 1, "the switch is");
@@ -1432,7 +1424,7 @@ fn the_source_copy_switch_re_pairs_and_the_floor_does_not() {
 /// The lane ships off, so every case that judges it turns it on.
 fn source_copy_config() -> JudgingConfig {
     let mut config = JudgingConfig::default();
-    config.lengths.source_copy = true;
+    config.lengths.source_copy.enabled = true;
     config
 }
 
@@ -1538,9 +1530,10 @@ fn set_config_re_judges_lengths_without_re_pairing() {
     assert_eq!(sous.last_paired(), 0);
 
     let config = JudgingConfig {
-        lengths: sous_core::LengthConfig {
-            z_long: 1_000.0,
-            ..sous_core::LengthConfig::default()
+        lengths: {
+            let mut lengths = sous_core::LengthConfig::default();
+            lengths.proportionality.z_long = 1_000.0;
+            lengths
         },
         ..JudgingConfig::default()
     };

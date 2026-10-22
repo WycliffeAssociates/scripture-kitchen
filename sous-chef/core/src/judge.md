@@ -323,8 +323,8 @@ na       x2,000, one `na, na`                 → FIRES, a SEPARATE key
 na       4 `na na` and 5 `na, na`             → bare FIRES, separated SILENT
 ```
 
-The habit is an absolute count, `JudgingConfig::support_floor`, per key: the
-word ladder and `word_support_floor` do not apply here, because a word used
+The habit is an absolute count, `JudgingConfig::shared.floor`, per key: the
+word ladder's floor (`words.floor`) does not apply here, because a word used
 under a hundred times could never fire on one doubling under them, and that is
 most of the vocabulary. The row still carries the doubled count over every
 occurrence the corpus counted of that word, forced or free, cased or not — the
@@ -345,16 +345,16 @@ whitespace. A separator whose handoff context the corpus's `TerminalTable` force
 a sentence boundary and folds out of the separated numerator.
 
 ```text
-JudgingConfig::doubled_bare = false        → no bare row
-JudgingConfig::doubled_separated = false   → no separated row (the default)
+config.doubled.bare = false        → no bare row
+config.doubled.separated = false   → no separated row (the default)
 DoublesPolicy::Never or channels.doubled = false → no row
 ```
 
 **The recusal is corpus-level.** `WordTotals::doubling_share_bp` is the share
 of the corpus's distinct words that appear doubled twice or more, in basis
-points; above `JudgingConfig::doubles_productive_bp` (300 = 3%) the channel
+points; above `doubled.productive_bp` (300 = 3%) the channel
 abstains for the whole corpus, because doubling is productive in that language.
-`JudgingConfig::doubles` (`DoublesPolicy::{Auto, Always, Never}`) is the host's
+`doubled.policy` (`DoublesPolicy::{Auto, Always, Never}`) is the host's
 override, the same shape `LetterRoster` has. A share and never a count: Jonah
 and a whole Bible must answer the same way. The recusal reads both keys
 whatever the two switches say.

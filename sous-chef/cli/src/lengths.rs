@@ -24,11 +24,11 @@ pub(crate) fn brigade_findings(
     Paired,
 ) {
     let mut config = <Brigade as ChapterPass>::Config::default();
-    config.1.lengths.source_copy = source_copy;
-    config.2.lengths.source_copy = source_copy;
+    config.1.lengths.source_copy.enabled = source_copy;
+    config.2.lengths.source_copy.enabled = source_copy;
     if let Some(min_run) = min_run {
-        config.1.lengths.source_copy_min_run = min_run;
-        config.2.lengths.source_copy_min_run = min_run;
+        config.1.lengths.source_copy.min_run = min_run;
+        config.2.lengths.source_copy.min_run = min_run;
     }
     let (findings, paired) = analyze_paired(corpus, &Brigade::default(), &config, source);
     let (rows, patterns, clusters, terminals) = findings.into_parts();

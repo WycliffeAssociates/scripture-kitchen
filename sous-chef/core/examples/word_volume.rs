@@ -73,18 +73,16 @@ fn ladder(divisor: u16) -> Staircase {
 
 /// The shipped defaults with the separated key switched off.
 fn bare_only() -> JudgingConfig {
-    JudgingConfig {
-        doubled_separated: false,
-        ..JudgingConfig::default()
-    }
+    let mut config = JudgingConfig::default();
+    config.doubled.separated = false;
+    config
 }
 
 fn config(floor: u32, divisor: u16) -> JudgingConfig {
-    JudgingConfig {
-        word_support_floor: floor,
-        word_bands: ladder(divisor),
-        ..JudgingConfig::default()
-    }
+    let mut config = JudgingConfig::default();
+    config.words.floor = floor;
+    config.words.bands = ladder(divisor);
+    config
 }
 
 fn corpora_dir() -> PathBuf {
@@ -128,12 +126,13 @@ fn main() {
         let corpus = Corpus::of(&raw, &path);
         let share = corpus.doubling_share_bp();
         let auto = corpus.doubled_rows(&JudgingConfig::default());
-        let always = corpus.doubled_rows(&JudgingConfig {
-            doubles: DoublesPolicy::Always,
-            ..JudgingConfig::default()
+        let always = corpus.doubled_rows(&{
+            let mut config = JudgingConfig::default();
+            config.doubled.policy = DoublesPolicy::Always;
+            config
         });
         let bare = corpus.doubled_rows(&bare_only());
-        let recused = share > JudgingConfig::default().doubles_productive_bp;
+        let recused = share > JudgingConfig::default().doubled.productive_bp;
         println!(
             "{name:<12}{auto:>10}{always:>10}{bare:>8}{share:>12}{:>10}",
             recused
@@ -171,13 +170,14 @@ fn main() {
         print!("{name:<12}");
         let mut shipped = Vec::new();
         for (slot, bar) in SENTENCE_BARS.iter().enumerate() {
-            let rows = corpus.sentence_start_rows(&JudgingConfig {
-                sentence_start_upper_bp: *bar,
-                ..JudgingConfig::default()
+            let rows = corpus.sentence_start_rows(&{
+                let mut config = JudgingConfig::default();
+                config.sentence_start.upper_bp = *bar;
+                config
             });
             totals[slot] += rows.len();
             print!("{:>8}", rows.len());
-            if *bar == JudgingConfig::default().sentence_start_upper_bp {
+            if *bar == JudgingConfig::default().sentence_start.upper_bp {
                 shipped = rows;
             }
         }
@@ -469,10 +469,8 @@ fn sweep(dir: &Path) {
     let mut doubled_auto: Vec<usize> = Vec::new();
     let mut doubled_always: Vec<usize> = Vec::new();
     let mut doubled_bare: Vec<usize> = Vec::new();
-    let forced = JudgingConfig {
-        doubles: DoublesPolicy::Always,
-        ..JudgingConfig::default()
-    };
+    let mut forced = JudgingConfig::default();
+    forced.doubled.policy = DoublesPolicy::Always;
 
     for path in &files {
         let Ok(raw) = std::fs::read_to_string(path) else {

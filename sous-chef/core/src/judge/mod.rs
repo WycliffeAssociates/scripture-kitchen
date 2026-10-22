@@ -45,7 +45,9 @@ mod tests;
 mod words;
 
 pub use config::{
-    BandStep, Channels, DoublesPolicy, JudgingConfig, LetterRoster, Staircase, config_stamp,
+    BandStep, BookRateConfig, CasingConfig, Channels, DoubledConfig, DoublesPolicy, JudgingConfig,
+    Ladder, LetterRoster, RarityConfig, SentenceStartConfig, Staircase, WordLengthConfig,
+    config_stamp,
 };
 pub use pattern::{
     BOOK_RATE_MIN_BOOKS, Channel, Cluster, Pattern, PatternIndex, PatternKey, Side, Usual,

@@ -751,10 +751,8 @@ mod tests {
             }],
             &mut crate::substrate::Edge::default(),
         );
-        let config = crate::JudgingConfig {
-            support_floor,
-            ..crate::JudgingConfig::default()
-        };
+        let mut config = crate::JudgingConfig::default();
+        config.shared.floor = support_floor;
         Explained::learn(&[&counts], &config)
     }
 

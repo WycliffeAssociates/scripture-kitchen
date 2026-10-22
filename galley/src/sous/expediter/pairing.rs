@@ -15,8 +15,8 @@ use std::collections::hash_map::Entry;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use sous_core::{
-    AlignmentFact, BookKey, ChapterPass, Findings, PairedBook, ProjectSpread, ProjectedBook,
-    SourceVerse, SourceWords, judge_paired,
+    AlignmentFact, BookKey, ChapterPass, Findings, LengthConfig, PairedBook, ProjectSpread,
+    ProjectedBook, SourceVerse, SourceWords, judge_paired,
 };
 
 use super::keys::PairKey;
@@ -59,14 +59,12 @@ pub(super) fn pair_and_judge<P: ChapterPass>(
     // (`expediter.md`).
     // All three channels, the same set `judge_paired` gates on: a
     // host running source-copy alone still pairs.
-    let lengths = pass
-        .length_config(config)
-        .filter(|lengths| lengths.enabled || lengths.presence || lengths.source_copy);
+    let lengths = pass.length_config(config).filter(LengthConfig::judges);
     // First wins: a caller may present two files under one key, and
     // the choice has to be its order rather than a hash's.
     type Source<'a> = (RawChecksum, &'a [SourceVerse], Option<&'a SourceWords>);
     let mut sources: FxHashMap<BookKey, Source<'_>> = FxHashMap::default();
-    let copying = lengths.is_some_and(|lengths| lengths.source_copy);
+    let copying = lengths.is_some_and(|lengths| lengths.source_copy.enabled);
     if lengths.is_some() {
         for (id, key) in references {
             let Some(verses) = pantry.reference_lengths(id) else {
