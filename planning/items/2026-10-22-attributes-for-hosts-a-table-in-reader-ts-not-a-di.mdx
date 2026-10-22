@@ -1,0 +1,23 @@
+---
+id: 373a9cde-65a2-45dc-8955-ce985b33c688
+title: "Attributes for hosts: a table in reader.ts, not a dish section"
+kind: plan
+status: done
+created: 2026-10-22
+updated: 2026-10-22
+sha: ca72eb6
+tags: [onion, sefer]
+---
+
+Sefer's RFC, 2026-10-22: carry every `AttrList`'s name/value spans in the dish, so the editor package drops its TypeScript attribute parser and its hard-coded `w, rb, jmp, fig, ref, xt` list.
+
+Will, 2026-10-22: "It should just be lazy by caller right with our function no?"
+
+<Tradeoff id="lazy" chose="attrs(text, from, to) stays the one way to break a list apart, called on demand" cost="a wasm call per lookup, which a popover makes once per press">An aligned book carries 4 to 8 attributes on nearly every word, so a dish section costs every parse for a value only a popover reads. Sefer binds `attrs` once on its `Analysis`, so no surface wires it.</Tradeoff>
+
+## Shipped
+
+- `MARKER_ATTRIBUTES` in `reader.ts`: each row's defined attributes with their `AttrStatus`, and the default a bare value binds to. A `\z` marker's token carries the row it behaves as, so it is covered.
+- `attrResolution(name, markerIdx)`: what the wasm `attrResolve` answers, in TypeScript; `onion-wasm/tests/conformance.mjs` holds the two equal over every row and every defined name.
+- No wire change, no format bump.
+
