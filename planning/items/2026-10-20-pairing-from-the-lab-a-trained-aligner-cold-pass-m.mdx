@@ -285,7 +285,7 @@ UAX #29 words, so the lab's gold converts by uniting links.
 
 <Question id="one-splitter" answer="Yes (Will, 2026-10-20): move the sous rule into mise as words/1 and narrow its joiner set; tracked in words: one splitter in mise. Landed.">Adopt the sous-chef word rule as the one splitter (`words/1`, in `mise`) for the pack, the check, sous-chef and the editor, in place of UAX #29 and the pairing crate's `tokens.rs`?</Question>
 
-Still owed: the `lab-rescore` follow-up below (re-score the lab's head and gold with `words/1`; AER and
+Still owed: the `lab-rescore` follow-up (re-score the lab's head and gold with `words/1`; AER and
 findings v2 should not move). It is the gate on port stage 2.
 
 <Question id="units">Spaceless scripts (CJK, Tibetan, Myanmar, Thai/Lao, Khmer; ~9 of 561 NTs): `words/1` does no dictionary segmentation, so the aligner still works on subwords but the check's word counts are meaningless there. State an abstention like sous's ("no word lane may claim anything in them") for the check, or measure stems or BPE against Clear's Chinese and Burmese gold first? Recommendation: abstain, and measure later.</Question>
@@ -592,7 +592,7 @@ Each stage ends with the workspace gate green and a measured comparison against 
 1. **`words/1` in mise.** Landed.
 2. **`alignpack` onto `words/1`.** Port the crate; replace its UAX #29 `words.rs` with
    `mise::words`; declare the pack and overlay against `ticket` with a generated TS reader and a
-   staleness test; run the `lab-rescore` follow-up below, where AER should not move.
+   staleness test; run the `lab-rescore` follow-up, where AER should not move.
 3. **`pairing` and `pairing-data`.** Port both, delete `tokens.rs` and the similar-verse code,
    bring them to the newer rules (ignore reasons, example-led module docs), and add the lab's HMM
    and its incremental update as the fast loop, wired into `Tables` (the lab never did) and held
