@@ -248,8 +248,10 @@ is what it has always been: row 0, and `unknown-marker`.
 Judging and installing are separate doors. Reading a file INSTALLS NOTHING, so
 a host can show what it found first, and a host whose markers come from a
 `custom.sty` or from its own UI hands `customMarkers` the list directly. An
-entry is `{ name, category }`; `category` is one of the spec's nineteen words,
-the `CustomMarkerCategory` union.
+entry is `{ name, category, description?, attributes? }`; `category` is one of
+the spec's nineteen words, the `CustomMarkerCategory` union. `description` and
+`attributes` come through from `markers.ext` for a host to show; lexing never
+reads them.
 
 **`standalone` is the spec's "bare milestone with no attributes or
 delimiter"**: it opens nothing, closes nothing, carries no text and is never

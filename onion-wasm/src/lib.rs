@@ -1189,6 +1189,10 @@ export type CustomMarkerCategory =
 export interface CustomMarker {
   name: string;
   category: CustomMarkerCategory;
+  /** The `markers.ext` description; shown, never lexed by. */
+  description?: string;
+  /** The attribute names `markers.ext` lists; shown, never lexed by. */
+  attributes?: readonly string[];
 }
 
 /** An entry a list could not keep. `line` only where a file gave one. */
@@ -1221,23 +1225,20 @@ pub struct Report {
 
 /// A host's list, judged: what the registry keeps, and a report for each
 /// entry it refuses, the unknown category words first.
-pub fn judged(
-    entries: Vec<(String, String)>,
-    opts: &ExtensionOptions,
-) -> (Extensions, Vec<Report>) {
+pub fn judged(entries: Vec<options::Entry>, opts: &ExtensionOptions) -> (Extensions, Vec<Report>) {
     let mut reports = Vec::new();
     let mut markers = Vec::new();
-    for (name, word) in entries {
-        match ExtensionCategory::parse(&word) {
+    for entry in entries {
+        match ExtensionCategory::parse(&entry.category) {
             Some(category) => markers.push(CustomMarker {
-                name,
+                name: entry.name,
                 category,
-                description: String::new(),
-                attributes: Vec::new(),
+                description: entry.description,
+                attributes: entry.attributes,
             }),
             None => reports.push(Report {
                 line: None,
-                name: Some(name),
+                name: Some(entry.name),
                 reason: "unknown category word",
             }),
         }
@@ -1266,7 +1267,8 @@ pub fn judged(
 /// a name that is not `z`-initial, an unknown category word, a duplicate. A
 /// bad entry costs only itself. Installs nothing.
 ///
-/// Throws when `list` is not an array of `{ name, category }` strings, or
+/// Throws when `list` is not an array of `{ name, category }` strings (with
+/// an optional string `description` and string-array `attributes`), or
 /// `opts` is not `CustomMarkerOptions`.
 #[wasm_bindgen(js_name = customMarkers, unchecked_return_type = "CustomMarkers")]
 pub fn custom_markers(
@@ -1334,6 +1336,21 @@ fn custom_markers_object(
                 "category",
                 &JsValue::from_str(marker.category.as_str()),
             );
+            if !marker.description.is_empty() {
+                put(
+                    &entry,
+                    "description",
+                    &JsValue::from_str(&marker.description),
+                );
+            }
+            if !marker.attributes.is_empty() {
+                let attributes: js_sys::Array = marker
+                    .attributes
+                    .iter()
+                    .map(|name| JsValue::from_str(name))
+                    .collect();
+                put(&entry, "attributes", &attributes);
+            }
             JsValue::from(entry)
         })
         .collect();
@@ -1817,6 +1834,10 @@ mod tests {
         assert!(len("nodes") > 0);
         assert!(len("childIds") > 0);
     }
+    fn entries(list: &[(&str, &str)]) -> Vec<options::Entry> {
+        pairs(list).into_iter().map(options::Entry::from).collect()
+    }
+
     fn pairs(list: &[(&str, &str)]) -> Vec<(String, String)> {
         list.iter()
             .map(|(name, category)| ((*name).to_owned(), (*category).to_owned()))
@@ -1864,7 +1885,7 @@ mod tests {
     #[test]
     fn a_list_is_judged_entry_by_entry() {
         let (kept, reports) = judged(
-            pairs(&[("znope", "bogus"), ("nope", "char"), ("zok", "versepara")]),
+            entries(&[("znope", "bogus"), ("nope", "char"), ("zok", "versepara")]),
             &ExtensionOptions::default(),
         );
         assert_eq!(kept.declared().len(), 1);
@@ -1884,7 +1905,7 @@ mod tests {
                 },
             ]
         );
-        let legacy = pairs(&[("s5", "standalone"), ("s1", "standalone")]);
+        let legacy = entries(&[("s5", "standalone"), ("s1", "standalone")]);
         let (kept, reports) = judged(
             legacy,
             &ExtensionOptions {

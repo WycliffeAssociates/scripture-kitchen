@@ -176,16 +176,40 @@ pub fn read_custom_markers(
     let relax_z_prefix = get(Some(value), "relaxZPrefix")
         .and_then(|relax| relax.as_bool())
         .ok_or_else(|| format!("{door}: customMarkers.relaxZPrefix must be a boolean"))?;
-    let list = entries(&markers, &format!("{door}: customMarkers.markers"), true)?;
+    let list = entries(&markers, &format!("{door}: customMarkers.markers"), true)?
+        .into_iter()
+        .map(|entry| (entry.name, entry.category))
+        .collect();
     Ok((list, ExtensionOptions { relax_z_prefix }))
 }
 
-/// An array of `{ name, category }` strings. `strict` also refuses a key
-/// beyond those two and a category word outside the spec's.
-pub fn entries(value: &JsValue, at: &str, strict: bool) -> Result<Vec<(String, String)>, String> {
+/// One entry of a host's list. `description` and `attributes` ride along for
+/// the host to show; lexing reads only the name and category.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Entry {
+    pub name: String,
+    pub category: String,
+    pub description: String,
+    pub attributes: Vec<String>,
+}
+
+impl From<(String, String)> for Entry {
+    fn from((name, category): (String, String)) -> Self {
+        Self {
+            name,
+            category,
+            ..Self::default()
+        }
+    }
+}
+
+/// An array of `{ name, category, description?, attributes? }`. `strict` also
+/// refuses any other key and a category word outside the spec's.
+pub fn entries(value: &JsValue, at: &str, strict: bool) -> Result<Vec<Entry>, String> {
     if !Array::is_array(value) {
         return Err(format!("{at} must be an array"));
     }
+    let known = ["name", "category", "description", "attributes"];
     let mut out = Vec::new();
     for (i, entry) in value.unchecked_ref::<Array>().iter().enumerate() {
         if !entry.is_object() {
@@ -194,16 +218,21 @@ pub fn entries(value: &JsValue, at: &str, strict: bool) -> Result<Vec<(String, S
         if strict {
             for key in Object::keys(entry.unchecked_ref::<Object>()).iter() {
                 let key = key.as_string().unwrap_or_default();
-                if key != "name" && key != "category" {
+                if !known.contains(&key.as_str()) {
                     return Err(format!(
-                        "{at}[{i}] has unknown key {key:?}; expected name or category"
+                        "{at}[{i}] has unknown key {key:?}; expected {}",
+                        expected(&known)
                     ));
                 }
             }
         }
-        let field = |key: &str| {
+        let read = |key: &str| {
             Reflect::get(&entry, &JsValue::from_str(key))
                 .ok()
+                .filter(|v| !v.is_undefined())
+        };
+        let field = |key: &str| {
+            read(key)
                 .and_then(|found| found.as_string())
                 .ok_or_else(|| format!("{at}[{i}].{key} must be a string"))
         };
@@ -213,7 +242,26 @@ pub fn entries(value: &JsValue, at: &str, strict: bool) -> Result<Vec<(String, S
                 "{at}[{i}].category {category:?} is not a category word"
             ));
         }
-        out.push((name, category));
+        let description = match read("description") {
+            None => String::new(),
+            Some(_) => field("description")?,
+        };
+        let attributes = match read("attributes") {
+            None => Vec::new(),
+            Some(list) if Array::is_array(&list) => list
+                .unchecked_ref::<Array>()
+                .iter()
+                .map(|attribute| attribute.as_string())
+                .collect::<Option<Vec<_>>>()
+                .ok_or_else(|| format!("{at}[{i}].attributes must be an array of strings"))?,
+            Some(_) => return Err(format!("{at}[{i}].attributes must be an array of strings")),
+        };
+        out.push(Entry {
+            name,
+            category,
+            description,
+            attributes,
+        });
     }
     Ok(out)
 }
@@ -243,7 +291,8 @@ pub fn interned(
         table.insert(0, hit);
         return Ok(found);
     }
-    let (extensions, reports) = crate::judged(key.1.clone(), opts);
+    let (extensions, reports) =
+        crate::judged(key.1.iter().cloned().map(Entry::from).collect(), opts);
     if let Some(report) = reports.first() {
         return Err(format!(
             "{door}: customMarkers: {:?}: {}",

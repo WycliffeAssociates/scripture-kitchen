@@ -789,6 +789,14 @@ if (corpus && existsSync(corpus)) {
   for (let i = 0; i < 100; i++) eq(verseText(opts), "Jesus wept.", "the same object, call after call");
   const byHand = { markers: [{ name: "zmyf", category: "footnote" }], relaxZPrefix: false, malformed: [] };
   eq(verseText({ customMarkers: byHand }), "Jesus wept.", "a hand-built object reads the same");
+  const described = customMarkersFromMarkersExt(
+    "\\marker zmyf\n\\category footnote\n\\description My note.\n\\attribute x-a\n\\attribute x-b\n");
+  eq(JSON.stringify(described.markers),
+    '[{"name":"zmyf","category":"footnote","description":"My note.","attributes":["x-a","x-b"]}]',
+    "a file's description and attributes ride along");
+  eq(JSON.stringify(customMarkers(described.markers).markers), JSON.stringify(described.markers),
+    "…through the factory");
+  eq(verseText({ customMarkers: described }), "Jesus wept.", "…and a door accepts them");
   const refusal = (customMarkers) => {
     try {
       rawMask(text, "verseText", { customMarkers });
