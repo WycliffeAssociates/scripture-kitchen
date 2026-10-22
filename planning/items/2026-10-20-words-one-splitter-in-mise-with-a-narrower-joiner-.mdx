@@ -2,9 +2,9 @@
 id: 2a150927-67cd-47fc-8138-ed6e5e2a1a8b
 title: "words: one splitter in mise, with a narrower joiner set"
 kind: plan
-status: in-progress
+status: done
 created: 2026-10-20
-updated: 2026-10-21
+updated: 2026-10-22
 sha: b2b76e7
 priority: 1
 tags: [words, mise, sous-chef, pairing]
@@ -68,8 +68,6 @@ Will, 2026-10-21:
   uniting links; the aligner itself works on subwords and does not care which splitter is used.
 
 <Followup id="fleet-rerun" done>A comparison metric, not a gate (Will, 2026-10-21). After narrowing: rerun `cargo run -p sous-core --release --example word_breaks` on the 1,504-corpus fleet (laptop-local) and record in `sous-chef/evidence.md` whether the Tamil outliers drop and which nonletters the fleet still joins on. Done 2026-10-21 (evidence.md row of that date): Tamil 2.95% → 0.004%, p90 40.9% → 0.03% (the outliers were superscript tone digits, not commas); Latin rises 1.63% → 1.92% where UAX 29 joins across U+00AD, U+A789, `:` and `.`, the fleet's `words/2` candidates.</Followup>
-
-<Followup id="lab-rescore">Re-score the pairing lab's head and gold with `words/1` (AER and findings v2 should not move).</Followup>
 
 ## Proposal: the joiner set for `words/1`
 
@@ -136,14 +134,11 @@ Onion's only UAX #29 use is `diff` (`onion/src/diff.rs`, `split_word_bounds` and
 
 Fleet agreement on spaced scripts is already 98%+ (`sous-chef/evidence.md`, 2026-09-04), so the question is the spaceless scripts, not the spaced ones.
 
-<Followup id="onion-diff">Parked: move onion's diff to `words/1` only if a fleet diff comparison shows no loss on the spaceless scripts. Value uncertain (Will, 2026-10-21).</Followup>
-
 ## Toward `words/2`
 
 The fleet rerun after the glue change (`sous-chef/evidence.md`, 2026-10-21) names what still stands between two letters. None is decided; each is a measured candidate.
 
+What is still open moved on 2026-10-22, when this item closed: the candidates and the parked onion diff to `words/2: the measured candidates`, the lab rescore to the pairing plan.
+
 <Followup id="subscript-tone" done>Subscript tone digits ₂ U+2082 (44.6k) and ₁ U+2081 (15.5k) in Latin texts (`A₂la₂`) do the job the superscripts do: glue them as `words/2`? Done 2026-10-21: ₁..₅ are glue (all cntNT's five tones; ₀ ₆..₉ unused); Latin disagreement 1.844% → 1.894%, `word_map` cost noise (evidence.md row of that date).</Followup>
 
-<Followup id="footnote-superscript">The known cost of superscript glue: a footnote marker typed as a superscript digit rides into its word (`niet¹` in WA-nl-ulb). Measure how often across the fleet before `words/2`.</Followup>
-
-<Followup id="visarga-colon">Devanagari texts type the visarga as a colon (`दु:खी`, 1.8k): a hygiene finding rather than a joiner?</Followup>

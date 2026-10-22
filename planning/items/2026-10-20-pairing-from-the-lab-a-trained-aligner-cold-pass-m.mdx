@@ -4,7 +4,7 @@ title: "pairing: a trained aligner cold pass, a deterministic fast loop, alignme
 kind: plan
 status: discussing
 created: 2026-10-20
-updated: 2026-10-21
+updated: 2026-10-22
 sha: 549b351
 priority: 1
 tags: [pairing, words, galley, evidence]
@@ -537,6 +537,8 @@ Out of scope: similar verses (`similar.rs`, `similar_verses_{grc,hbo}.bin`; dele
 migrate), the parallel-passage check, [original languages in the UI](/items/2026-10-14-original-languages-in-the-ui), ULT in the product.
 
 <Tradeoff id="lab-stays" chose="the lab stays outside the kitchen as its evidence harness" cost="its findings are cited by number from an uncommitted repo on one machine">The lab holds GPL tools (eflomal) used only for evaluation, ~70 GB of data and tools, and Python. None of it belongs in the workspace. Committing the lab, even privately, would make the numbers this plan cites reproducible.</Tradeoff>
+
+<Followup id="lab-rescore">From the words item, 2026-10-22: Re-score the pairing lab's head and gold with `words/1` (AER and findings v2 should not move).</Followup>
 
 <Followup id="commit-lab">Commit the lab (code, scripts, RESULTS.md; not data or tools) so findings have a sha to cite.</Followup>
 
