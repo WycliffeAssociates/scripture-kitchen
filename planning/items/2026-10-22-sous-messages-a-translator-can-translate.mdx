@@ -1,0 +1,28 @@
+---
+id: 51280e13-aef6-4067-b395-da56b8ca15dd
+title: "Sous messages a translator can translate"
+kind: plan
+status: in-progress
+created: 2026-10-22
+updated: 2026-10-22
+sha: 3005bc7
+tags: [sous, sefer, messages]
+---
+
+Sefer's agent, 2026-10-22:
+
+> The real translator problem with Sous isn't the syntax. Its messages nest selects inside selects inside plurals and build sentences from fragments. That's hard to translate in any format. The fix is asking kitchen to flatten those messages, whatever the syntax.
+
+Will, 2026-10-22: "We're going to localize for sure, so might as well do what's translator friendly on our end … Messaging is half the battle for how sous works."
+
+Measured on `galley/sous-messages.en.json` that day: 23 ids; 12 nest six levels deep, `hygiene` ten. Fragments: `convention.runShape`'s `swap`/`facing` clause glued onto its sentence; `convention.exactNeighbor.swapped` drops a kind's noun phrase into subject and object slots, which German case and French gender cannot share.
+
+## The rules
+
+1. **Whole sentences only.** A message is either plain text with simple arguments, or one select/plural whose every branch is itself a message by this rule. No text beside a select or plural, so no fragment ever reaches a translator.
+2. **Choices in code, sentences in the catalog.** Where branches would multiply (an optional clause times a facing times a plural), `describe` picks a more specific id instead, each a few whole sentences.
+3. **No noun phrase in a grammatical slot.** A kind's name never fills a subject or object; name the glyphs themselves (`<g>{glyph}</g>`), which do not inflect, or give the kind its own sentence.
+4. **Enforced.** `galley/tests/sous_messages.rs` already parses every message; it refuses one that breaks rule 1, so a fragment cannot come back.
+
+English stays as close to today's wording as the rules allow.
+
