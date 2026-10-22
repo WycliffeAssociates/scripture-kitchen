@@ -66,7 +66,7 @@ the reordering reaches the headline, and the headline names the facing:
 ```text
 id        convention.exactNeighbor.swapped
 params    { glyph: "'", neighbor: ".", reversedPair: ".'", reversed: 974, facing: "closing", … }
-en        Here [.] comes after [']; with a closing quote, this project writes [.'] 974 times.
+en        Here [.] comes after the closing quote [']; this project writes [.'] 974 times.
 ```
 
 Under `inside` or `unknown` it stays a plain fact in the details of
@@ -239,11 +239,11 @@ NUM 21:14  …the Wars of Yahweh, \q "... Zahab…                 (facing unkno
            ["] is followed directly by another mark 129 times in this project, most often [']
            (77). This project also writes [."], once. [".] appears in NUM and JER.
 GEN 48:20  …like Ephraim and like Manasseh'." \m In this way…    (facing closing)
-           Here [.] comes after [']; with a closing quote, this project writes [.'] 974 times.
+           Here [.] comes after the closing quote [']; this project writes [.'] 974 times.
            ['] is followed directly by another mark 496 times in this project, most often ["]
            (416). ['.] appears 3 times, in 3 of 66 books.
 2KI 13:17  …Then Elisha said, "Shoot!", and he shot…            (facing closing)
-           Here [,] comes after ["]; with a closing quote, this project writes [,"] 226 times.
+           Here [,] comes after the closing quote ["]; this project writes [,"] 226 times.
            ["] is followed directly by another mark 129 times in this project, most often [']
            (77). [",] appears nowhere else.
 PRO 30:15  …four that never say, "Enough": \q1 \v 16 Sheol…

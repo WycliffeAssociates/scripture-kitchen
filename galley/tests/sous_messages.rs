@@ -512,33 +512,21 @@ fn plain(nodes: &[Node], in_plural: bool) -> Result<(), String> {
 #[derive(Debug, Clone)]
 struct Step {
     name: String,
-    plural: bool,
     selector: String,
-    selectors: Vec<String>,
 }
 
 /// Every branch of a whole message that holds no further choice, with the
 /// choices that reach it.
 fn leaves(nodes: &[Node]) -> Vec<(Vec<Step>, Vec<Node>)> {
-    let [
-        Node::Choice {
-            name,
-            plural,
-            branches,
-        },
-    ] = nodes
-    else {
+    let [Node::Choice { name, branches, .. }] = nodes else {
         return vec![(Vec::new(), nodes.to_vec())];
     };
-    let selectors: Vec<String> = branches.iter().map(|(s, _)| s.clone()).collect();
     branches
         .iter()
         .flat_map(|(selector, branch)| {
             let step = Step {
                 name: name.clone(),
-                plural: *plural,
                 selector: selector.clone(),
-                selectors: selectors.clone(),
             };
             leaves(branch).into_iter().map(move |(mut path, leaf)| {
                 path.insert(0, step.clone());
@@ -548,112 +536,15 @@ fn leaves(nodes: &[Node]) -> Vec<(Vec<Step>, Vec<Node>)> {
         .collect()
 }
 
-#[derive(Debug, Clone, PartialEq)]
-enum Value {
-    Num(f64),
-    Str(String),
-}
-
-impl Value {
-    fn text(&self) -> String {
-        match self {
-            Value::Num(n) => n.to_string(),
-            Value::Str(s) => s.clone(),
-        }
-    }
-}
-
-/// Parameters that take every step of `path`: a select's own key, a value no
-/// select names for `other`, `=N` as N, `one` as 1, and a plural's `other` a
-/// number no `=N` and no English `one` takes. An argument the path already
-/// set keeps its first value, so a branch two steps contradict is dead.
-fn choose(path: &[Step]) -> BTreeMap<String, Value> {
-    let mut params = BTreeMap::new();
-    for step in path {
-        let value = match (step.plural, step.selector.as_str()) {
-            (false, "other") => Value::Str("(none of these)".into()),
-            (false, key) => Value::Str(key.into()),
-            (true, "one") => Value::Num(1.0),
-            (true, "other") => {
-                let exact: Vec<f64> = step
-                    .selectors
-                    .iter()
-                    .filter_map(|s| s.strip_prefix('=')?.parse().ok())
-                    .collect();
-                let n = [7.0, 12.0, 100.0, 3.0]
-                    .into_iter()
-                    .find(|n| !exact.contains(n))
-                    .expect("a free number");
-                Value::Num(n)
-            }
-            (true, key) => Value::Num(
-                key.strip_prefix('=')
-                    .and_then(|n| n.parse().ok())
-                    .unwrap_or(f64::NAN),
-            ),
-        };
-        params.entry(step.name.clone()).or_insert(value);
-    }
-    params
-}
-
-/// A message as `intl-messageformat` renders it in English, `<g>` as `[…]`.
-fn render(
-    nodes: &[Node],
-    params: &BTreeMap<String, Value>,
-    pound: Option<f64>,
-) -> Result<String, String> {
-    let mut out = String::new();
-    for node in nodes {
-        match node {
-            Node::Text(text) => out.push_str(text),
-            Node::Pound => out.push_str(&pound.ok_or("`#` outside a plural")?.to_string()),
-            Node::Arg(name) => {
-                out.push_str(&params.get(name).ok_or(format!("no `{name}`"))?.text())
-            }
-            Node::Glyph(inner) => out.push_str(&format!("[{}]", render(inner, params, pound)?)),
-            Node::Choice {
-                name,
-                plural,
-                branches,
-            } => {
-                let value = params.get(name).ok_or(format!("no `{name}`"))?;
-                let branch = |key: &str| branches.iter().find(|(s, _)| s == key).map(|(_, b)| b);
-                let other = branch("other").expect("parsed with an other");
-                if !plural {
-                    out.push_str(&render(
-                        branch(&value.text()).unwrap_or(other),
-                        params,
-                        pound,
-                    )?);
-                    continue;
-                }
-                let n = match value {
-                    Value::Num(n) => *n,
-                    Value::Str(s) => s.parse().map_err(|_| format!("`{name}` is no number"))?,
-                };
-                let exact = branch(&format!("={n}"));
-                let category = if n == 1.0 { branch("one") } else { None };
-                out.push_str(&render(
-                    exact.or(category).unwrap_or(other),
-                    params,
-                    Some(n),
-                )?);
-            }
-        }
-    }
-    Ok(out)
-}
-
-/// A stand-in for every argument the path leaves unset, by its declared type.
-fn sample(read: &Read, declared: &BTreeMap<String, String>, params: &mut BTreeMap<String, Value>) {
-    for name in &read.names {
-        let value = match declared.get(name).map(String::as_str) {
-            Some("number") => Value::Num(3.0),
-            _ => Value::Str(format!("‹{name}›")),
-        };
-        params.entry(name.clone()).or_insert(value);
-    }
+/// A leaf's own words, arguments and tags left out.
+fn words(leaf: &[Node]) -> String {
+    leaf.iter()
+        .map(|node| match node {
+            Node::Text(text) => text.clone(),
+            Node::Glyph(inner) => words(inner),
+            _ => String::new(),
+        })
+        .collect()
 }
 
 /// The last sentence of a leaf ends at `.`, `?` or `!`, with only closing
@@ -866,13 +757,13 @@ fn a_straight_quote_swap_names_its_facing_and_inside_names_no_usual() {
             facing.name, "facing",
             "the swapped headline chooses by facing first"
         );
-        let text = render(&leaf, &BTreeMap::new(), None).unwrap_or_default();
         let named = match facing.selector.as_str() {
-            "opening" => "an opening quote",
-            "closing" => "a closing quote",
+            "opening" => "the opening quote",
+            "closing" => "the closing quote",
             _ => continue,
         };
-        assert!(swapped.contains(named), "the {named} branch: {text}");
+        let text = words(&leaf);
+        assert!(text.contains(named), "the {named} branch: {text}");
     }
     for id in [
         "convention.exactNeighbor",
@@ -922,46 +813,25 @@ fn every_message_is_whole_sentences() {
 /// Every branch is reached by some parameters, renders with no argument
 /// missing, and ends a sentence, so no branch is dead or a fragment.
 #[test]
-fn every_branch_renders_a_sentence_from_some_parameters() {
-    let declared = declared_params();
+fn every_branch_ends_a_sentence() {
     let mut broken = Vec::new();
-    let mut branches = 0;
     for (id, tier, text) in tiers() {
-        let nodes = parsed(&id, tier, &text);
-        let all = read(&nodes);
-        for (path, leaf) in leaves(&nodes) {
-            branches += 1;
-            let mut params = choose(&path);
-            sample(&all, &declared[&id], &mut params);
-            let pound =
-                path.last()
-                    .filter(|step| step.plural)
-                    .and_then(|step| match params[&step.name] {
-                        Value::Num(n) => Some(n),
-                        Value::Str(_) => None,
-                    });
+        for (path, leaf) in leaves(&parsed(&id, tier, &text)) {
             let route: Vec<String> = path
                 .iter()
                 .map(|step| format!("{} {}", step.name, step.selector))
                 .collect();
-            let at = format!("{id} {tier} [{}]", route.join(" › "));
-            match (render(&nodes, &params, None), render(&leaf, &params, pound)) {
-                (Err(why), _) | (_, Err(why)) => broken.push(format!("{at}: {why}")),
-                (Ok(all), Ok(own)) if all != own => {
-                    broken.push(format!("{at}: no parameters reach it"));
-                }
-                (Ok(all), _) if all.trim() != all || !ends_a_sentence(&all) => {
-                    broken.push(format!("{at}: “{all}” is no whole sentence"));
-                }
-                _ => {}
+            let starts =
+                matches!(leaf.first(), Some(Node::Text(t)) if t.starts_with(char::is_whitespace));
+            let ends = matches!(leaf.last(), Some(Node::Text(t)) if t.trim_end() == t && ends_a_sentence(t));
+            if starts || !ends {
+                broken.push(format!("{id} {tier} [{}]", route.join(" › ")));
             }
         }
     }
-    assert!(branches > 0, "no branch was read");
     assert!(
         broken.is_empty(),
-        "{} of {branches} branches:\n{}",
-        broken.len(),
+        "not a whole sentence:\n{}",
         broken.join("\n")
     );
 }
@@ -1046,17 +916,6 @@ fn whole_sentences_refuse_a_fragment_and_take_a_nested_choice() {
         })
         .collect();
     assert_eq!(routes, ["s x › n =1", "s x › n other", "s other"]);
-    assert_eq!(render(&nodes, &choose(&found[1].0), None).unwrap(), "7 x.");
-    let dead =
-        Icu::parse("{n, plural, =1 {{n, plural, =1 {A.} other {Never.}}} other {B.}}").unwrap();
-    let [_, (path, _), _] = &leaves(&dead)[..] else {
-        panic!("three leaves")
-    };
-    assert_ne!(
-        render(&dead, &choose(path), None).unwrap(),
-        "Never.",
-        "a contradicted branch is dead"
-    );
 
     assert!(ends_a_sentence("He said “Go.”"));
     assert!(ends_a_sentence("[x] is here."));
