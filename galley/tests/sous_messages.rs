@@ -2,22 +2,27 @@
 //! entry is a headline and details, every argument either tier reads is a
 //! parameter `describe` declares for that id in `ParamsById`, a `Glyph` or
 //! `Glyphs` parameter is shown inside `<g>` and nowhere else, every `Glyph`
-//! has a `…Kind`, `…Name` and `…Code` beside it, and a `select` over a kind
-//! names every kind.
+//! has a `…Kind`, `…Name` and `…Code` beside it, a `select` over a kind
+//! names every kind, and every message is whole sentences: plain text, or one
+//! choice with nothing beside it whose every branch is again whole.
 //!
 //! ```text
 //! ts    "convention.sentenceStart": { glyph: Glyph; word: string; usualWord: string; upper: number } & Spread;
 //! json  "convention.sentenceStart": { "headline": "“{word}” is lowercase after <g>{glyph}</g> here; …",
-//!                                     "details": "After <g>{glyph}</g>, … {upper, number} of {total, number} …" }
+//!                                     "details": "{count, plural, =1 {After <g>{glyph}</g>, … times.} other {…}}" }
 //!       arguments of each tier ⊆ declared                   → ok
 //!       inside <g> {glyph} = the Glyph params read          → ok
 //!       glyph: Glyph beside glyphKind glyphName glyphCode   → ok
-//!       {glyphKind, select, quote {…} … other {…}}          → every MarkKind
+//!       {pool, select, quote {…} … other {…}}               → every PoolName
+//!       {count, plural, =1 {…} other {…}} and nothing beside → whole
+//!       count =1 → "After [?], this project capitalizes the next word 2162 of 2165 times."
+//!                                                           → ends a sentence
 //! ```
 //!
 //! Both files are read as text: the TypeScript by its one-id-per-line blocks,
 //! the catalog as a flat object of strings, each string by an ICU
-//! MessageFormat parser just deep enough to find argument names.
+//! MessageFormat parser into a tree, which renders each branch as
+//! `intl-messageformat` does in English.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -90,15 +95,17 @@ fn declared_params() -> BTreeMap<String, BTreeMap<String, String>> {
                 .expect("`id: type`")
                 .1
                 .trim_end_matches(';');
-            let close = ty.rfind('}').expect("an object type");
-            let mut names = fields(&ty[..=close]);
-            for extra in ty[close + 1..]
+            let names = ty
                 .split('&')
                 .map(str::trim)
-                .filter(|s| !s.is_empty())
-            {
-                names.extend(alias(extra));
-            }
+                .flat_map(|part| {
+                    if part.starts_with('{') {
+                        fields(part)
+                    } else {
+                        alias(part)
+                    }
+                })
+                .collect();
             (id, names)
         })
         .collect()
@@ -235,6 +242,23 @@ fn enums() -> BTreeMap<String, BTreeSet<String>> {
     out
 }
 
+/// One piece of a parsed ICU message.
+#[derive(Debug, Clone, PartialEq)]
+enum Node {
+    Text(String),
+    /// `{name}`, or `{name, number}` with any style.
+    Arg(String),
+    /// `#`, the number of the plural it stands in.
+    Pound,
+    /// `<g>…</g>`.
+    Glyph(Vec<Node>),
+    Choice {
+        name: String,
+        plural: bool,
+        branches: Vec<(String, Vec<Node>)>,
+    },
+}
+
 /// The argument names an ICU message reads, split by whether a `<g>` tag
 /// holds them, and the selectors of every `select`.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -245,71 +269,119 @@ struct Read {
     selects: Vec<(String, BTreeSet<String>)>,
 }
 
-/// Every argument name an ICU message reads, refusing unbalanced braces or
-/// tags, a tag other than `<g>`, and a `select` or `plural` with no `other`.
+fn read(nodes: &[Node]) -> Read {
+    fn walk(nodes: &[Node], in_glyph: bool, out: &mut Read) {
+        for node in nodes {
+            let name = match node {
+                Node::Text(_) | Node::Pound => continue,
+                Node::Glyph(inner) => {
+                    walk(inner, true, out);
+                    continue;
+                }
+                Node::Arg(name) => name,
+                Node::Choice {
+                    name,
+                    plural,
+                    branches,
+                } => {
+                    if !plural {
+                        let selectors = branches.iter().map(|(s, _)| s.clone()).collect();
+                        out.selects.push((name.clone(), selectors));
+                    }
+                    for (_, branch) in branches {
+                        walk(branch, in_glyph, out);
+                    }
+                    name
+                }
+            };
+            out.names.insert(name.clone());
+            if in_glyph {
+                out.in_glyph.insert(name.clone());
+            } else {
+                out.outside.insert(name.clone());
+            }
+        }
+    }
+    let mut out = Read::default();
+    walk(nodes, false, &mut out);
+    out
+}
+
+/// An ICU message as a tree, refusing unbalanced braces or tags, a tag other
+/// than `<g>`, and a `select` or `plural` with no `other` or a selector twice.
 struct Icu<'a> {
     text: &'a [u8],
     at: usize,
-    tags: usize,
-    read: Read,
 }
 
 impl Icu<'_> {
-    fn parse(text: &str) -> Result<Read, String> {
+    fn parse(text: &str) -> Result<Vec<Node>, String> {
         let mut icu = Icu {
             text: text.as_bytes(),
             at: 0,
-            tags: 0,
-            read: Read::default(),
         };
-        icu.message()?;
+        let nodes = icu.message(false)?;
         if icu.at != icu.text.len() {
             return Err(format!("a stray `}}` at byte {}", icu.at));
         }
-        Ok(icu.read)
+        Ok(nodes)
     }
 
-    /// Text, tags and arguments up to an unmatched `}` or the end. A tag
-    /// opened here closes here, as `intl-messageformat` requires.
-    fn message(&mut self) -> Result<(), String> {
-        let open = self.tags;
+    /// Text, tags and arguments up to an unmatched `}`, the `</g>` that
+    /// closes `in_tag`, or the end. A tag opened in a branch closes in it, as
+    /// `intl-messageformat` requires.
+    fn message(&mut self, in_tag: bool) -> Result<Vec<Node>, String> {
+        let mut nodes = Vec::new();
+        let mut text = Vec::new();
+        let flush = |text: &mut Vec<u8>, nodes: &mut Vec<Node>| {
+            if !text.is_empty() {
+                let run = String::from_utf8(std::mem::take(text)).expect("split at ASCII");
+                nodes.push(Node::Text(run));
+            }
+        };
         while let Some(&byte) = self.text.get(self.at) {
+            let rest = &self.text[self.at..];
             match byte {
-                b'{' => {
-                    self.at += 1;
-                    self.argument()?;
-                }
                 b'}' => break,
-                b'<' => self.tag(open)?,
+                b'{' => {
+                    flush(&mut text, &mut nodes);
+                    self.at += 1;
+                    nodes.push(self.argument()?);
+                }
+                b'#' => {
+                    flush(&mut text, &mut nodes);
+                    self.at += 1;
+                    nodes.push(Node::Pound);
+                }
+                b'<' if rest.starts_with(b"</g>") => {
+                    if !in_tag {
+                        return Err(format!("a `</g>` with no `<g>` at byte {}", self.at));
+                    }
+                    flush(&mut text, &mut nodes);
+                    self.at += 4;
+                    return Ok(nodes);
+                }
+                b'<' if rest.starts_with(b"<g>") => {
+                    flush(&mut text, &mut nodes);
+                    self.at += 3;
+                    nodes.push(Node::Glyph(self.message(true)?));
+                }
+                b'<' => return Err(format!("a tag other than `<g>` at byte {}", self.at)),
                 // `'{` quotes a brace and `'<` a tag; the catalog needs neither.
-                b'\'' if matches!(self.text.get(self.at + 1), Some(b'{' | b'}' | b'<')) => {
+                b'\'' if matches!(rest.get(1), Some(b'{' | b'}' | b'<')) => {
                     return Err("a quoted brace or tag".into());
                 }
-                _ => self.at += 1,
+                _ => {
+                    text.push(byte);
+                    self.at += 1;
+                }
             }
         }
-        if self.tags != open {
+        if in_tag {
             return Err(format!("a `<g>` never closed before byte {}", self.at));
         }
-        Ok(())
-    }
-
-    /// `<g>` or `</g>`; `open` is the depth the enclosing message began at.
-    fn tag(&mut self, open: usize) -> Result<(), String> {
-        let rest = &self.text[self.at..];
-        if rest.starts_with(b"<g>") {
-            self.tags += 1;
-            self.at += 3;
-        } else if rest.starts_with(b"</g>") {
-            if self.tags == open {
-                return Err(format!("a `</g>` with no `<g>` at byte {}", self.at));
-            }
-            self.tags -= 1;
-            self.at += 4;
-        } else {
-            return Err(format!("a tag other than `<g>` at byte {}", self.at));
-        }
-        Ok(())
+        flush(&mut text, &mut nodes);
+        Ok(nodes)
     }
 
     fn word(&mut self) -> String {
@@ -342,27 +414,21 @@ impl Icu<'_> {
 
     /// After a `{`: `name`, `name, type`, `name, type, style`, or a
     /// `select`/`plural` with its branches, through the closing `}`.
-    fn argument(&mut self) -> Result<(), String> {
+    fn argument(&mut self) -> Result<Node, String> {
         let name = self.word();
         if name.is_empty() {
             return Err(format!("an argument with no name at byte {}", self.at));
         }
-        self.read.names.insert(name.clone());
-        if self.tags > 0 {
-            self.read.in_glyph.insert(name.clone());
-        } else {
-            self.read.outside.insert(name.clone());
-        }
         if self.text.get(self.at) == Some(&b'}') {
             self.at += 1;
-            return Ok(());
+            return Ok(Node::Arg(name));
         }
         self.eat(b',')?;
         let kind = self.word();
         match kind.as_str() {
             "select" | "plural" | "selectordinal" => {
                 self.eat(b',')?;
-                let mut selectors = BTreeSet::new();
+                let mut branches: Vec<(String, Vec<Node>)> = Vec::new();
                 loop {
                     let selector = self.word();
                     if selector.is_empty() {
@@ -371,29 +437,230 @@ impl Icu<'_> {
                     if selector.starts_with("offset:") {
                         continue;
                     }
-                    selectors.insert(selector);
+                    if branches.iter().any(|(s, _)| *s == selector) {
+                        return Err(format!("`{name}` names `{selector}` twice"));
+                    }
                     self.eat(b'{')?;
-                    self.message()?;
+                    let branch = self.message(false)?;
                     self.eat(b'}')?;
+                    branches.push((selector, branch));
                 }
-                if !selectors.contains("other") {
+                if !branches.iter().any(|(s, _)| s == "other") {
                     return Err(format!("`{name}` has no `other` branch"));
                 }
-                if kind == "select" {
-                    self.read.selects.push((name, selectors));
-                }
-                self.eat(b'}')
+                self.eat(b'}')?;
+                Ok(Node::Choice {
+                    name,
+                    plural: kind != "select",
+                    branches,
+                })
             }
             "number" | "date" | "time" => {
                 // A style is free text up to the closing brace.
                 while self.text.get(self.at).is_some_and(|b| *b != b'}') {
                     self.at += 1;
                 }
-                self.eat(b'}')
+                self.eat(b'}')?;
+                Ok(Node::Arg(name))
             }
             other => Err(format!("`{name}` has an unknown type `{other}`")),
         }
     }
+}
+
+fn parsed(id: &str, tier: &str, text: &str) -> Vec<Node> {
+    Icu::parse(text).unwrap_or_else(|why| panic!("{id} {tier}: {why}"))
+}
+
+/// Whole sentences only: plain text with simple arguments, or exactly one
+/// `select` or `plural` with nothing beside it whose every branch is again a
+/// whole message. `#` stands only in a plural's own branch; anywhere else
+/// `intl-messageformat` prints it as `#`.
+fn whole(nodes: &[Node], in_plural: bool) -> Result<(), String> {
+    if let [
+        Node::Choice {
+            name,
+            plural,
+            branches,
+        },
+    ] = nodes
+    {
+        for (selector, branch) in branches {
+            whole(branch, *plural).map_err(|why| format!("{name} {selector} → {why}"))?;
+        }
+        return Ok(());
+    }
+    plain(nodes, in_plural)
+}
+
+fn plain(nodes: &[Node], in_plural: bool) -> Result<(), String> {
+    for node in nodes {
+        match node {
+            Node::Choice { name, .. } => {
+                return Err(format!("`{name}` stands beside text, a fragment"));
+            }
+            Node::Pound if !in_plural => return Err("`#` outside a plural's own branch".into()),
+            Node::Glyph(inner) => plain(inner, in_plural)?,
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// One choice on the way to a leaf: the argument, whether it is a plural,
+/// the branch taken, and every branch it offers.
+#[derive(Debug, Clone)]
+struct Step {
+    name: String,
+    plural: bool,
+    selector: String,
+    selectors: Vec<String>,
+}
+
+/// Every branch of a whole message that holds no further choice, with the
+/// choices that reach it.
+fn leaves(nodes: &[Node]) -> Vec<(Vec<Step>, Vec<Node>)> {
+    let [
+        Node::Choice {
+            name,
+            plural,
+            branches,
+        },
+    ] = nodes
+    else {
+        return vec![(Vec::new(), nodes.to_vec())];
+    };
+    let selectors: Vec<String> = branches.iter().map(|(s, _)| s.clone()).collect();
+    branches
+        .iter()
+        .flat_map(|(selector, branch)| {
+            let step = Step {
+                name: name.clone(),
+                plural: *plural,
+                selector: selector.clone(),
+                selectors: selectors.clone(),
+            };
+            leaves(branch).into_iter().map(move |(mut path, leaf)| {
+                path.insert(0, step.clone());
+                (path, leaf)
+            })
+        })
+        .collect()
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum Value {
+    Num(f64),
+    Str(String),
+}
+
+impl Value {
+    fn text(&self) -> String {
+        match self {
+            Value::Num(n) => n.to_string(),
+            Value::Str(s) => s.clone(),
+        }
+    }
+}
+
+/// Parameters that take every step of `path`: a select's own key, a value no
+/// select names for `other`, `=N` as N, `one` as 1, and a plural's `other` a
+/// number no `=N` and no English `one` takes. An argument the path already
+/// set keeps its first value, so a branch two steps contradict is dead.
+fn choose(path: &[Step]) -> BTreeMap<String, Value> {
+    let mut params = BTreeMap::new();
+    for step in path {
+        let value = match (step.plural, step.selector.as_str()) {
+            (false, "other") => Value::Str("(none of these)".into()),
+            (false, key) => Value::Str(key.into()),
+            (true, "one") => Value::Num(1.0),
+            (true, "other") => {
+                let exact: Vec<f64> = step
+                    .selectors
+                    .iter()
+                    .filter_map(|s| s.strip_prefix('=')?.parse().ok())
+                    .collect();
+                let n = [7.0, 12.0, 100.0, 3.0]
+                    .into_iter()
+                    .find(|n| !exact.contains(n))
+                    .expect("a free number");
+                Value::Num(n)
+            }
+            (true, key) => Value::Num(
+                key.strip_prefix('=')
+                    .and_then(|n| n.parse().ok())
+                    .unwrap_or(f64::NAN),
+            ),
+        };
+        params.entry(step.name.clone()).or_insert(value);
+    }
+    params
+}
+
+/// A message as `intl-messageformat` renders it in English, `<g>` as `[…]`.
+fn render(
+    nodes: &[Node],
+    params: &BTreeMap<String, Value>,
+    pound: Option<f64>,
+) -> Result<String, String> {
+    let mut out = String::new();
+    for node in nodes {
+        match node {
+            Node::Text(text) => out.push_str(text),
+            Node::Pound => out.push_str(&pound.ok_or("`#` outside a plural")?.to_string()),
+            Node::Arg(name) => {
+                out.push_str(&params.get(name).ok_or(format!("no `{name}`"))?.text())
+            }
+            Node::Glyph(inner) => out.push_str(&format!("[{}]", render(inner, params, pound)?)),
+            Node::Choice {
+                name,
+                plural,
+                branches,
+            } => {
+                let value = params.get(name).ok_or(format!("no `{name}`"))?;
+                let branch = |key: &str| branches.iter().find(|(s, _)| s == key).map(|(_, b)| b);
+                let other = branch("other").expect("parsed with an other");
+                if !plural {
+                    out.push_str(&render(
+                        branch(&value.text()).unwrap_or(other),
+                        params,
+                        pound,
+                    )?);
+                    continue;
+                }
+                let n = match value {
+                    Value::Num(n) => *n,
+                    Value::Str(s) => s.parse().map_err(|_| format!("`{name}` is no number"))?,
+                };
+                let exact = branch(&format!("={n}"));
+                let category = if n == 1.0 { branch("one") } else { None };
+                out.push_str(&render(
+                    exact.or(category).unwrap_or(other),
+                    params,
+                    Some(n),
+                )?);
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// A stand-in for every argument the path leaves unset, by its declared type.
+fn sample(read: &Read, declared: &BTreeMap<String, String>, params: &mut BTreeMap<String, Value>) {
+    for name in &read.names {
+        let value = match declared.get(name).map(String::as_str) {
+            Some("number") => Value::Num(3.0),
+            _ => Value::Str(format!("‹{name}›")),
+        };
+        params.entry(name.clone()).or_insert(value);
+    }
+}
+
+/// The last sentence of a leaf ends at `.`, `?` or `!`, with only closing
+/// quotes or a closing `<g>` after it.
+fn ends_a_sentence(text: &str) -> bool {
+    text.trim_end_matches(['”', '’', '"', '»', ']'])
+        .ends_with(['.', '?', '!'])
 }
 
 #[test]
@@ -419,7 +686,7 @@ fn every_message_id_has_a_catalog_entry_and_nothing_else_does() {
 fn every_catalog_argument_is_a_declared_parameter() {
     let declared = declared_params();
     for (id, tier, text) in tiers() {
-        let used = Icu::parse(&text).unwrap_or_else(|why| panic!("{id} {tier}: {why}"));
+        let used = read(&parsed(&id, tier, &text));
         let params = declared
             .get(&id)
             .unwrap_or_else(|| panic!("{id} declares no parameters"));
@@ -442,7 +709,7 @@ fn every_catalog_argument_is_a_declared_parameter() {
 fn every_glyph_is_shown_inside_a_glyph_tag_and_nothing_else_is() {
     let declared = declared_params();
     for (id, tier, text) in tiers() {
-        let used = Icu::parse(&text).unwrap_or_else(|why| panic!("{id} {tier}: {why}"));
+        let used = read(&parsed(&id, tier, &text));
         let glyph = |name: &String| {
             declared[&id]
                 .get(name)
@@ -498,7 +765,7 @@ fn every_select_over_an_enum_names_only_its_values_and_every_kind() {
         "a multi-line enum was read"
     );
     for (id, tier, text) in tiers() {
-        let used = Icu::parse(&text).unwrap_or_else(|why| panic!("{id} {tier}: {why}"));
+        let used = read(&parsed(&id, tier, &text));
         for (name, selectors) in &used.selects {
             let Some(ty) = declared[&id].get(name) else {
                 continue;
@@ -578,7 +845,7 @@ fn no_headline_explains_the_rule() {
 #[test]
 fn a_sentence_start_headline_claims_nothing_about_the_word() {
     let [headline, _] = &catalog()["convention.sentenceStart"];
-    let used = Icu::parse(headline).expect("the headline parses");
+    let used = read(&parsed("convention.sentenceStart", "headline", headline));
     assert!(
         !used.names.contains("usualWord"),
         "the headline reads usualWord: {headline}"
@@ -593,16 +860,24 @@ fn a_straight_quote_swap_names_its_facing_and_inside_names_no_usual() {
     let catalog = catalog();
     let declared = declared_params();
     let [swapped, _] = &catalog["convention.exactNeighbor.swapped"];
-    let used = Icu::parse(swapped).expect("the swapped headline parses");
-    assert!(
-        used.names.contains("facing"),
-        "the swapped headline never reads facing"
-    );
-    assert!(swapped.contains("{facing, select, opening {opening} other {closing}} quote"));
+    for (path, leaf) in leaves(&parsed("swapped", "headline", swapped)) {
+        let facing = &path[0];
+        assert_eq!(
+            facing.name, "facing",
+            "the swapped headline chooses by facing first"
+        );
+        let text = render(&leaf, &BTreeMap::new(), None).unwrap_or_default();
+        let named = match facing.selector.as_str() {
+            "opening" => "an opening quote",
+            "closing" => "a closing quote",
+            _ => continue,
+        };
+        assert!(swapped.contains(named), "the {named} branch: {text}");
+    }
     for id in [
         "convention.exactNeighbor",
         "convention.exactNeighbor.swapped",
-        "convention.runShape",
+        "convention.runShape.swapped",
     ] {
         assert_eq!(
             declared[id].get("facing").map(String::as_str),
@@ -625,19 +900,104 @@ fn a_straight_quote_swap_names_its_facing_and_inside_names_no_usual() {
     }
 }
 
+/// Rule 1: a translator gets whole sentences, never a fragment glued beside a
+/// choice.
+#[test]
+fn every_message_is_whole_sentences() {
+    let broken: Vec<String> = tiers()
+        .into_iter()
+        .filter_map(|(id, tier, text)| {
+            let why = whole(&parsed(&id, tier, &text), false).err()?;
+            Some(format!("{id} {tier}: {why}"))
+        })
+        .collect();
+    assert!(
+        broken.is_empty(),
+        "{} tiers are not whole sentences:\n{}",
+        broken.len(),
+        broken.join("\n")
+    );
+}
+
+/// Every branch is reached by some parameters, renders with no argument
+/// missing, and ends a sentence, so no branch is dead or a fragment.
+#[test]
+fn every_branch_renders_a_sentence_from_some_parameters() {
+    let declared = declared_params();
+    let mut broken = Vec::new();
+    let mut branches = 0;
+    for (id, tier, text) in tiers() {
+        let nodes = parsed(&id, tier, &text);
+        let all = read(&nodes);
+        for (path, leaf) in leaves(&nodes) {
+            branches += 1;
+            let mut params = choose(&path);
+            sample(&all, &declared[&id], &mut params);
+            let pound =
+                path.last()
+                    .filter(|step| step.plural)
+                    .and_then(|step| match params[&step.name] {
+                        Value::Num(n) => Some(n),
+                        Value::Str(_) => None,
+                    });
+            let route: Vec<String> = path
+                .iter()
+                .map(|step| format!("{} {}", step.name, step.selector))
+                .collect();
+            let at = format!("{id} {tier} [{}]", route.join(" › "));
+            match (render(&nodes, &params, None), render(&leaf, &params, pound)) {
+                (Err(why), _) | (_, Err(why)) => broken.push(format!("{at}: {why}")),
+                (Ok(all), Ok(own)) if all != own => {
+                    broken.push(format!("{at}: no parameters reach it"));
+                }
+                (Ok(all), _) if all.trim() != all || !ends_a_sentence(&all) => {
+                    broken.push(format!("{at}: “{all}” is no whole sentence"));
+                }
+                _ => {}
+            }
+        }
+    }
+    assert!(branches > 0, "no branch was read");
+    assert!(
+        broken.is_empty(),
+        "{} of {branches} branches:\n{}",
+        broken.len(),
+        broken.join("\n")
+    );
+}
+
+/// Rule 2: where branches would multiply, `describe` picks a more specific
+/// id, each a few whole sentences.
+#[test]
+fn no_message_has_more_than_sixteen_branches() {
+    for (id, tier, text) in tiers() {
+        let n = leaves(&parsed(&id, tier, &text)).len();
+        assert!(
+            n <= 16,
+            "{id} {tier} has {n} branches; split it into ids describe chooses among"
+        );
+    }
+}
+
 /// The parser itself: a nested branch, a styled number, tags, and the
 /// refusals.
 #[test]
 fn the_icu_reader_finds_names_and_refuses_bad_shapes() {
-    let read = Icu::parse(
-        "<g>{a}</g> {n, plural, one {only <g>{b}</g>} other {# of {c, number, ::percent .#}}}",
-    )
-    .unwrap();
+    let read = read(
+        &Icu::parse(
+            "<g>{a}</g> {n, plural, one {only <g>{b}</g>} other {# of {c, number, ::percent .#}}}",
+        )
+        .unwrap(),
+    );
     let set = |names: &[&str]| names.iter().copied().map(String::from).collect();
     assert_eq!(read.names, set(&["a", "b", "c", "n"]));
     assert_eq!(read.in_glyph, set(&["a", "b"]));
     assert_eq!(read.outside, set(&["c", "n"]));
     assert!(Icu::parse("{s, select, x {y}}").is_err(), "no other");
+    assert!(
+        Icu::parse("{s, select, x {y} x {z} other {w}}").is_err(),
+        "twice"
+    );
     assert!(Icu::parse("{a").is_err(), "unclosed");
     assert!(Icu::parse("a}").is_err(), "stray");
     assert!(Icu::parse("<g>{a}").is_err(), "unclosed tag");
@@ -647,4 +1007,59 @@ fn the_icu_reader_finds_names_and_refuses_bad_shapes() {
         "a tag across a branch"
     );
     assert!(Icu::parse("<b>{a}</b>").is_err(), "a tag other than g");
+}
+
+/// Whole sentences: a choice with text beside it is a fragment, a choice
+/// nested as a whole branch is not, and `#` belongs to its own plural.
+#[test]
+fn whole_sentences_refuse_a_fragment_and_take_a_nested_choice() {
+    let check = |text: &str| whole(&Icu::parse(text).unwrap(), false);
+    assert!(check("Plain <g>{a}</g> and {n, number}.").is_ok());
+    assert!(check("{n, plural, =1 {One.} other {# of them.}}").is_ok());
+    assert!(check("{s, select, x {{n, plural, other {# here.}}} other {None.}}").is_ok());
+    assert!(
+        check("{n, plural, other {# here}} today.").is_err(),
+        "text beside"
+    );
+    assert!(check(" {s, select, other {A.}}").is_err(), "a space beside");
+    assert!(
+        check("{n, plural, other {{s, select, other {# here.}}}}").is_err(),
+        "# in a select"
+    );
+    assert!(check("# here.").is_err(), "# outside a plural");
+    assert!(
+        check("<g>{s, select, other {x}}</g>.").is_err(),
+        "a choice in a tag"
+    );
+
+    let nodes =
+        Icu::parse("{s, select, x {{n, plural, =1 {One.} other {# x.}}} other {None.}}").unwrap();
+    let found = leaves(&nodes);
+    let routes: Vec<String> = found
+        .iter()
+        .map(|(path, _)| {
+            let steps: Vec<String> = path
+                .iter()
+                .map(|s| format!("{} {}", s.name, s.selector))
+                .collect();
+            steps.join(" › ")
+        })
+        .collect();
+    assert_eq!(routes, ["s x › n =1", "s x › n other", "s other"]);
+    assert_eq!(render(&nodes, &choose(&found[1].0), None).unwrap(), "7 x.");
+    let dead =
+        Icu::parse("{n, plural, =1 {{n, plural, =1 {A.} other {Never.}}} other {B.}}").unwrap();
+    let [_, (path, _), _] = &leaves(&dead)[..] else {
+        panic!("three leaves")
+    };
+    assert_ne!(
+        render(&dead, &choose(path), None).unwrap(),
+        "Never.",
+        "a contradicted branch is dead"
+    );
+
+    assert!(ends_a_sentence("He said “Go.”"));
+    assert!(ends_a_sentence("[x] is here."));
+    assert!(!ends_a_sentence("[x] is here"));
+    assert!(!ends_a_sentence("all in [ISA]"));
 }

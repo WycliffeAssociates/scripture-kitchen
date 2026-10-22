@@ -303,7 +303,7 @@ test("a straight quote's pair reversed is a swap only under a known facing", () 
   assert.deepEqual(closing.queries.map((query) => [query.purpose, query.needle]), [["this", "'."], ["alternative", ".'"], ["others", "'\""]]);
   for (const facing of ["Unknown", "Inside"]) {
     const { id, params } = describe(one, pair(facing, 974), { siteText: "'.", bookCount: 66 });
-    assert.equal(id, "convention.exactNeighbor", facing);
+    assert.equal(id, "convention.exactNeighbor.alsoReversed", facing);
     assert.equal(params.facing, facing.toLowerCase());
   }
   // No straight quote: the facing is `none` and the old rule stands.
@@ -320,13 +320,12 @@ test("a group reordered across a straight quote is a swap when both groups face 
     numerator: 5, denominator: 4904, books: 1, shareBp: 10, clusters: [site, usual],
   });
   const closing = describe(one, shape(cluster(';"', 2, false, "Closing"), cluster('";', 6, true, "Closing")), { siteText: ';"', bookCount: 66 });
-  assert.equal(closing.params.swap, true);
+  assert.equal(closing.id, "convention.runShape.swapped");
   assert.equal(closing.params.facing, "closing");
   const unknown = describe(one, shape(cluster(';"', 2, false, "Unknown"), cluster('";', 6, true, "Unknown")), { siteText: ';"', bookCount: 66 });
-  assert.equal(unknown.params.swap, false);
-  assert.equal(unknown.params.reordered, true);
+  assert.equal(unknown.id, "convention.runShape.reordered");
   const crossed = describe(one, shape(cluster(';"', 2, false, "Opening"), cluster('";', 6, true, "Closing")), { siteText: ';"', bookCount: 66 });
-  assert.equal(crossed.params.swap, false);
+  assert.equal(crossed.id, "convention.runShape.reordered");
 });
 
 test("a mark inside a word describes, searches letters on both sides, and keeps its identity", () => {
@@ -363,13 +362,12 @@ test("a hygiene message names the run's first scalar and where it sits", () => {
     undefined,
     { siteText: "ت‌" },
   );
+  assert.equal(zwnj.id, "hygiene.format");
   assert.deepEqual(zwnj.params, {
     class: "format",
     run: 1,
     atLeast: false,
     where: "space",
-    named: true,
-    coded: true,
     charName: "zero width non-joiner",
     charCode: "U+200C",
     fix: "remove",
@@ -391,5 +389,82 @@ test("a hygiene message names the run's first scalar and where it sits", () => {
     undefined,
     {},
   );
-  assert.deepEqual([lost.params.coded, lost.params.fix], [false, "none"]);
+  assert.deepEqual([lost.id, lost.params.charCode, lost.params.fix], ["hygiene.replacement", "", "none"]);
+});
+
+test("describe reaches every catalog id, each from the situation it names", () => {
+  const catalog = JSON.parse(readFileSync(new URL("../galley/sous-messages.en.json", import.meta.url), "utf8"));
+  const reached = new Set();
+  const expect = (id, finding, pattern, context) => {
+    assert.equal(describe(finding, pattern, { bookCount: 66, ...context }).id, id);
+    reached.add(id);
+  };
+  const row = (hygieneClass, siteText, action = null) => [
+    { kind: "Hygiene", from: 0, to: 0, bookIdx: 0, hygiene: { class: hygieneClass, placement: "BesideSpace", anchor: "Exact", run: 1, oneUnit: true, loneIsSilent: false, saturated: false, action } },
+    undefined,
+    { siteText },
+  ];
+  expect("hygiene.control", ...row("C0Control", "\u0000", "remove"));
+  expect("hygiene.control", ...row("C1Control", "\u0085"));
+  expect("hygiene.delete", ...row("Delete", "\u007f", "remove"));
+  expect("hygiene.replacement", ...row("ReplacementChar", "�"));
+  expect("hygiene.carriageReturn", ...row("StrayCarriageReturn", "\r"));
+  expect("hygiene.backslash", ...row("StrandedBackslash", "\\"));
+  expect("hygiene.conflict", ...row("ConflictMarker", "<<<<<<< HEAD"));
+  expect("hygiene.combiningMark", ...row("FreeCombiningMark", "́"));
+  expect("hygiene.format", ...row("MisplacedFormat", "‌", "remove"));
+  expect("hygiene.noBreakSpace", ...row("NoBreakSpace", " ", "remove"));
+  expect("hygiene.noncharacter", ...row("Noncharacter", "﷐", "remove"));
+  expect("hygiene.unidentified", ...row("MisplacedFormat", "", "remove"));
+  expect("hygiene.unidentified", ...row("Noncharacter", "", "remove"));
+
+  for (const [kind, id] of [["Missing", "presence.missing"], ["Extra", "presence.extra"], ["Empty", "presence.empty"]]) {
+    expect(id, { kind: "Presence", from: 0, to: 0, bookIdx: 0, presence: { kind, keys: 2, saturated: false } });
+  }
+  expect("sourceCopy", { kind: "SourceCopy", from: 0, to: 0, bookIdx: 0, sourceCopy: { run: 9, eligible: 20, saturated: false } });
+  const length = (bookScope) => ({ kind: "LengthProportionality", from: 0, to: 0, bookIdx: 0, digest: { bookScope, projectScope: null } });
+  expect("length.long", length(4.2));
+  expect("length.short", length(-4.2));
+
+  const conv = (glyph, key, usual, extra = {}) => ({ glyph, channel: key.kind, key, usual, numerator: 3, denominator: 900, books: 2, shareBp: 30, ...extra });
+  expect("convention.exactNeighbor", one, pair("Unknown", 0), { siteText: "'." });
+  expect("convention.exactNeighbor.alsoReversed", one, pair("Unknown", 974), { siteText: "'." });
+  expect("convention.exactNeighbor.swapped", one, pair("Closing", 974), { siteText: "'." });
+  expect("convention.pooledNeighbor", one, conv(0x2c, { kind: "PooledNeighbor", pool: "Quote" }, { kind: "None" }), { siteText: ',"' });
+
+  const cluster = (text, count, recurring, facing = null) => ({ text, count, recurring, truncated: false, directionless: facing !== null, facing });
+  const shape = (...clusters) => conv(0x3b, { kind: "RunShape", pure: false, bucket: 2 }, { kind: "RunShape", pure: true, bucket: 1, count: 4878 }, { clusters });
+  expect("convention.runShape", one, shape(cluster(";:", 2, false)), { siteText: ";:" });
+  expect("convention.runShape.reordered", one, shape(cluster(';"', 2, false, "Unknown"), cluster('";', 6, true, "Unknown")), { siteText: ';"' });
+  expect("convention.runShape.common", one, shape(cluster(";:", 2, false), cluster(";)", 40, true)), { siteText: ";:" });
+  expect("convention.runShape.swapped", one, shape(cluster(";:", 2, false), cluster(":;", 40, true)), { siteText: ";:" });
+
+  const placed = (glyph, side) => conv(glyph, { kind: "Placement", side, class: "Digit" }, { kind: "Placement", class: "Letter", count: 800 });
+  expect("convention.placement.follows", one, placed(0x2014, "prev"), { siteText: "—" });
+  expect("convention.placement.follows.digit", one, placed(0xffffffff, "prev"), { siteText: "3" });
+  expect("convention.placement.precedes", one, placed(0x2014, "next"), { siteText: "—" });
+  expect("convention.placement.precedes.digit", one, placed(0xffffffff, "next"), { siteText: "3" });
+  expect("convention.placement.inside", one, conv(0x22, { kind: "Placement", side: "both", class: "Letter" }, { kind: "None" }), { siteText: '"' });
+
+  const rare = (lookalike) => conv(0x2019, { kind: "Rarity" }, { kind: "Rarity", glyph: 0x27, count: 6292, lookalike });
+  expect("convention.rarity", one, rare(false), { siteText: "’" });
+  expect("convention.rarity.lookalike", one, rare(true), { siteText: "’" });
+
+  const casing = conv(0, { kind: "Casing", hash: 1n, form: "Title" }, { kind: "Casing", form: "Lower", count: 6889 });
+  expect("convention.casing", one, casing, { siteText: "He" });
+  expect("convention.casing.afterMark", one, casing, {
+    siteText: "He",
+    before: markBefore("them; He", 6),
+    snapshot: { terminal: () => ({ cased: 4891, upper: 524 }) },
+  });
+  expect("convention.wordLength", one, conv(0, { kind: "WordLength", hash: 1n, sigma: 9 }, { kind: "None" }), { siteText: "Mahershalalhashbaz" });
+  expect("convention.doubled.bare", one, conv(0, { kind: "Doubled", hash: 1n, separated: false }, { kind: "None" }), { siteText: "a a" });
+  expect("convention.doubled.separated", one, conv(0, { kind: "Doubled", hash: 1n, separated: true }, { kind: "None" }), { siteText: "Moses, Moses" });
+  expect("convention.letterRun", one, conv(0x6c, { kind: "LetterRun", length: 3 }, { kind: "None" }), { siteText: "joyfullly" });
+  expect("convention.sentenceStart", one, conv(0x3f, { kind: "SentenceStart" }, { kind: "None" }), { siteText: "his" });
+  for (const [side, id] of [["prev", "convention.bookRate.follows"], ["next", "convention.bookRate.precedes"]]) {
+    expect(id, one, conv(0x2014, { kind: "BookRate", side, class: "Digit", book: 1 }, { kind: "BookRate", baselineBp: 0, otherBooks: 30 }));
+  }
+
+  assert.deepEqual([...reached].sort(), Object.keys(catalog).sort());
 });
