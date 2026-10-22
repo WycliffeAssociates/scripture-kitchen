@@ -10,8 +10,11 @@ export interface GalleyOptions {
     budgetBytes?: number;
 }
 
+/** `update(id, text, opts)`: the `\z` list the book lexes by, for as long as it is registered. */
+export interface UpdateOptions extends LexOptions {}
+
 /** `updateReference(id, text, opts)`. */
-export interface ReferenceOptions {
+export interface ReferenceOptions extends LexOptions {
     /** Keep the text and projection a target keeps, so `find` and `mask` can read it. */
     keepText?: boolean;
 }
@@ -26,11 +29,14 @@ export interface FindOptions {
     scope?: Scope;
 }
 
-/** `mask` and `maskOf`. */
+/** `mask(id, opts)`. */
 export interface MaskOptions {
     recipe?: "verseText" | "structure" | "text";
     utf16?: boolean;
 }
+
+/** `maskOf(text, opts)`. */
+export interface MaskTextOptions extends MaskOptions, LexOptions {}
 
 /** `toc(id, opts)`. */
 export interface TocOptions {
@@ -75,8 +81,17 @@ export interface ParseOptions {
     utf16?: boolean;
 }
 
+/** The list a door that takes text lexes `\z` markers by. */
+export interface LexOptions {
+    /** Default: the list `setCustomMarkers` installed. */
+    customMarkers?: CustomMarkers;
+}
+
+/** `parse(text, opts)`, and galley's `parseText`. */
+export interface ParseTextOptions extends ParseOptions, LexOptions {}
+
 /** `diff`'s options. */
-export interface DiffOptions {
+export interface DiffOptions extends LexOptions {
     /** The runs a changed unit is highlighted by: UAX-29 words, graphemes, or none. */
     text: "none" | "words" | "chars";
     /** Send unchanged units too, in their places; default false. */
@@ -89,11 +104,14 @@ export interface AttrsOptions {
     utf16?: boolean;
 }
 
-/** `resolve(text, address, opts)`, and galley's `resolve`/`resolveOf`. */
+/** galley's `resolve(id, address, opts)`. */
 export interface ResolveOptions {
     /** Offsets as UTF-16 code units; default bytes. */
     utf16?: boolean;
 }
+
+/** `resolve(text, address, opts)`, and galley's `resolveOf`. */
+export interface ResolveTextOptions extends ResolveOptions, LexOptions {}
 
 /** A place in scripture, Sefer's `Address`. A `book` key is read past: the book is the caller's to match. */
 export type Address =
@@ -115,13 +133,45 @@ export type Resolution =
 | { missing: "intro" | "chapter" | "verse"; within?: { from: number; to: number } }
 | { ambiguous: { from: number; to: number; opening: number }[] };
 
-/** `setExtensions`'s options. */
-export interface ExtensionOptions {
+/** `setCustomMarkers`'s options, and `new CustomMarkers`'s. */
+export interface CustomMarkerOptions {
     /** Admit a legacy name without the `z` that the spec does not define. */
     relaxZPrefix?: boolean;
 }
 
 
+
+/**
+ * One project's user `\z` markers, parsed once and handed to the doors that
+ * lex: a registered book keeps the list, a loose-text door lexes by it.
+ *
+ * ```js
+ * const mine = new CustomMarkers(JSON.stringify(markers));
+ * JSON.parse(mine.malformed);                               // → [] when all kept
+ * galley.update("books/MRK.usfm", text, { customMarkers: mine });
+ * parse(refText, { customMarkers: mine });
+ * mine.free();                                              // the book keeps its list
+ * ```
+ *
+ * Takes what [`set_custom_markers`] takes and judges it the same way, but
+ * installs nothing: the process-wide list stays what it was. A book or a
+ * `FormatOpts` given a handle holds its own reference to the list, so
+ * `free()` drops only the handle.
+ */
+export class CustomMarkers {
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * Throws where [`set_custom_markers`] throws; a bad entry is a report in
+     * [`malformed`](Self::malformed).
+     */
+    constructor(list: string, opts?: CustomMarkerOptions);
+    /**
+     * What the list could not keep, as JSON: the array `setCustomMarkers`
+     * returns for the same list.
+     */
+    readonly malformed: string;
+}
 
 /**
  * One transaction of proposed splices: `[from, to]` pairs, one concatenated
@@ -193,6 +243,11 @@ export class FormatOpts {
     free(): void;
     [Symbol.dispose](): void;
     constructor();
+    /**
+     * The list the text lexes `\z` markers by, instead of the one
+     * `setCustomMarkers` installed. The handle stays the caller's to free.
+     */
+    setCustomMarkers(markers: CustomMarkers): void;
     /**
      * Marker names, no backslash, comma-separated — `"s5"` for the
      * unfoldingWord chunk marker. Every occurrence is deleted outright.
@@ -373,7 +428,7 @@ export class Galley {
      * with the same options. Over a registered book's exact text the two
      * doors answer the same buffer.
      */
-    maskOf(text: string, opts?: MaskOptions): Uint8Array;
+    maskOf(text: string, opts?: MaskTextOptions): Uint8Array;
     /**
      * Chunk units computed rather than reused, cumulative.
      */
@@ -448,7 +503,7 @@ export class Galley {
      * registered book still hits; what it costs over the id door is the
      * string crossing the wall.
      */
-    parseText(text: string, opts?: ParseOptions): Uint8Array;
+    parseText(text: string, opts?: ParseTextOptions): Uint8Array;
     /**
      * One complete corpus publication over every target, in canonical book
      * order, in raw-book UTF-16 — the buffer `FindingsSnapshot.open` reads.
@@ -484,7 +539,7 @@ export class Galley {
      * the two doors answer the same JSON, and every address kind answers,
      * since the text is here.
      */
-    resolveOf(text: string, address: Address, opts?: ResolveOptions): string;
+    resolveOf(text: string, address: Address, opts?: ResolveTextOptions): string;
     /**
      * Replaces them. No chapter is remapped and no book refolded — judging
      * reads the config, mapping does not — so a knob flip costs a re-judge.
@@ -527,7 +582,7 @@ export class Galley {
      * The structure recipe's text, the verse-text mask's sibling. No book
      * retains a structure projection, so this door takes text only.
      */
-    structureTextOf(text: string): string;
+    structureTextOf(text: string, opts?: LexOptions): string;
     /**
      * A SOURCE block's address, answered in the target: where it is, or
      * where the overlay would put it.
@@ -577,8 +632,12 @@ export class Galley {
      * orders the publication. Idempotent: the same text costs a checksum.
      *
      * `text` must be LF-normalized, the contract every door here documents.
+     *
+     * `{ customMarkers }` is the `\z` list the book lexes by for as long as
+     * it is registered; omitted, it follows `setCustomMarkers`. Registering
+     * a book under another list re-derives that book alone.
      */
-    update(id: string, text: string): string;
+    update(id: string, text: string, opts?: UpdateOptions): string;
     /**
      * The same, as a declared source: one projected grapheme length per
      * verse and no text at all, so a reference costs a fraction of a target.
@@ -590,7 +649,7 @@ export class Galley {
      * projection a target keeps too, which is what [`find`](Self::find) and
      * `findAll`'s `"references"` scope read. It costs what a target costs
      * minus the resident analysis; a source nobody searches should stay off
-     * it.
+     * it. `{ customMarkers }` is [`update`](Self::update)'s.
      */
     updateReference(id: string, text: string, opts?: ReferenceOptions): string;
     /**
@@ -607,7 +666,7 @@ export class Galley {
      * The string alone: a consumer that needs to get back to the source asks
      * [`mask_of`](Self::mask_of) for the same cut's map.
      */
-    verseTextOf(text: string): string;
+    verseTextOf(text: string, opts?: LexOptions): string;
 }
 
 /**
@@ -705,7 +764,25 @@ export function attrs(text: string, from: number, to: number, opts?: AttrsOption
  * none (real in the wild: BSB Ecclesiastes); the `missing-id` diagnostic is
  * where that becomes a finding, not here.
  */
-export function book(text: string): string;
+export function book(text: string, opts?: LexOptions): string;
+
+/**
+ * A `markers.ext` file, read into the list [`set_custom_markers`] and
+ * [`CustomMarkers::new`] take.
+ *
+ * ```js
+ * const { markers, malformed } = JSON.parse(customMarkersFromMarkersExt(text));
+ * for (const { name, reason, line } of malformed) show(line, name, reason);
+ * setCustomMarkers(JSON.stringify(markers));
+ * ```
+ *
+ * READS ONLY — nothing is installed here, because a host may want to show
+ * what it found before acting on it, and because the file is one of several
+ * ways a list arrives (a `custom.sty`, a UI that lets a user add a marker).
+ * A bad entry costs only itself and lands in `malformed`; the file never
+ * fails as a whole.
+ */
+export function customMarkersFromMarkersExt(text: string): string;
 
 /**
  * The diff skeleton as JSON: the changed units of two documents, in the
@@ -730,23 +807,6 @@ export function book(text: string): string;
  * spans and the runs are the same in both.
  */
 export function diff(baseline: string, current: string, opts: DiffOptions): string;
-
-/**
- * A `markers.ext` file, read into the list [`set_extensions`] takes.
- *
- * ```js
- * const { markers, malformed } = JSON.parse(extensionsFromMarkersExt(text));
- * for (const { name, reason, line } of malformed) show(line, name, reason);
- * setExtensions(JSON.stringify(markers));
- * ```
- *
- * READS ONLY — nothing is installed here, because a host may want to show
- * what it found before acting on it, and because the file is one of several
- * ways a list arrives (a `custom.sty`, a UI that lets a user add a marker).
- * A bad entry costs only itself and lands in `malformed`; the file never
- * fails as a whole.
- */
-export function extensionsFromMarkersExt(text: string): string;
 
 /**
  * The formatted document. `format_edits` applied, in one call.
@@ -786,7 +846,7 @@ export function formatEditsIn(text: string, from: number, to: number, opts: Form
  * chapters, an unknown book), and a JS re-implementation of it in every
  * consumer is the drift the no-strings-cross rule exists to prevent.
  */
-export function locate(text: string, utf16: number): string;
+export function locate(text: string, utf16: number, opts?: LexOptions): string;
 
 /**
  * One mask recipe's text, and the map back to the source it was cut from.
@@ -803,26 +863,27 @@ export function locate(text: string, utf16: number): string;
  * Offsets stay in UTF-8 bytes. The mask is onion-to-sous and never reaches an
  * editor, which is the only consumer that counts in UTF-16.
  */
-export function mask(text: string, recipe: string): object;
+export function mask(text: string, recipe: string, opts?: LexOptions): object;
 
 /**
  * The merged document. An unknown unit id REJECTS loudly — the caller must
  * re-diff, and there is no fuzzy stale-id fallback.
  */
-export function merge(baseline: string, current: string, decisions_json: string, _default: string): string;
+export function merge(baseline: string, current: string, decisions_json: string, _default: string, opts?: LexOptions): string;
 
-export function mergeSplices(baseline: string, current: string, decisions_json: string, _default: string): Splices;
+export function mergeSplices(baseline: string, current: string, decisions_json: string, _default: string, opts?: LexOptions): Splices;
 
 /**
  * THE read call. One document in, one buffer out.
  *
  * ```ts
- * interface ParseOptions {
- *   diagnostics?: boolean;   // run the lint walk; default false
- *   toc?: boolean;           // build the chapter and verse index; default false
- *   utf16?: boolean;         // every offset as a UTF-16 code unit; default bytes
+ * interface ParseTextOptions {
+ *   diagnostics?: boolean;          // run the lint walk; default false
+ *   toc?: boolean;                  // build the chapter and verse index; default false
+ *   utf16?: boolean;                // every offset as a UTF-16 code unit; default bytes
+ *   customMarkers?: CustomMarkers;  // the `\z` list to lex by; default the installed one
  * }
- * parse(text: string, opts?: ParseOptions): Uint8Array;
+ * parse(text: string, opts?: ParseTextOptions): Uint8Array;
  * ```
  *
  * The buffer is a plated parse — tokens, the tree, and whatever `opts` asked
@@ -836,7 +897,7 @@ export function mergeSplices(baseline: string, current: string, decisions_json: 
  *
  * `text` must be LF-normalized (see the module doc); a debug build asserts it.
  */
-export function parse(text: string, opts?: ParseOptions): Uint8Array;
+export function parse(text: string, opts?: ParseTextOptions): Uint8Array;
 
 /**
  * Where an address is in one text, as JSON: found, missing or ambiguous,
@@ -854,19 +915,19 @@ export function parse(text: string, opts?: ParseOptions): Uint8Array;
  * `Galley.resolveOf` answers the same over text, and `Galley.resolve` over a
  * registered book.
  */
-export function resolve(text: string, address: Address, opts?: ResolveOptions): string;
+export function resolve(text: string, address: Address, opts?: ResolveTextOptions): string;
 
 /**
  * Installs a list of user markers process-wide, and returns what it could not
  * keep.
  *
  * ```js
- * setExtensions('[{"name":"zaln","category":"milestone"}]');  // → "[]"
- * setExtensions("[]");                                        // clears
+ * setCustomMarkers('[{"name":"zaln","category":"milestone"}]');  // → "[]"
+ * setCustomMarkers("[]");                                        // clears
  *
  * // Legacy markup a host cannot change: en_ulb's chunk marker, as a bare
  * // point that leaves its paragraph open.
- * setExtensions('[{"name":"s5","category":"standalone"}]', { relaxZPrefix: true });
+ * setCustomMarkers('[{"name":"s5","category":"standalone"}]', { relaxZPrefix: true });
  * ```
  *
  * Takes the LIST, never a file: a host with a `custom.sty`, or a UI that lets
@@ -877,10 +938,9 @@ export function resolve(text: string, address: Address, opts?: ResolveOptions): 
  * attributes — because the engine resolves it to the spec row that category
  * behaves as. An unregistered `\z` marker stays what it has always been.
  *
- * **This invalidates every derived product**, here and in a resident
- * `Galley`: the same bytes are a different document once the rows change, and
- * both caches key on content. Call it at composition, before the first
- * parse, rather than between edits.
+ * This is the list every door lexes by when it is given no
+ * [`CustomMarkers`]. A resident `Galley` re-derives the books registered
+ * without one; a book registered with one keeps its own list.
  *
  * `relaxZPrefix` admits a name without the `z` that the spec does not
  * define; a name the spec does define (`s1`, `p`) is still a report.
@@ -890,7 +950,7 @@ export function resolve(text: string, address: Address, opts?: ResolveOptions): 
  * `z`-initial, an unknown category word, a duplicate — is a report, not a
  * failure, so one bad line never costs a host the rest of its list.
  */
-export function setExtensions(list: string, opts?: ExtensionOptions): string;
+export function setCustomMarkers(list: string, opts?: CustomMarkerOptions): string;
 
 /**
  * A CodeMirror offset as a source byte offset. Rebuilds the 1.6% stride index
