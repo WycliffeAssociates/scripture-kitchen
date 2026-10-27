@@ -3,13 +3,15 @@
  * runs them too.
  *
  *   pnpm atlas check     concept frontmatter, related slugs, cited files,
- *                        unresolved [[links]], and map.json's references
+ *                        unresolved [[links]], map.json's references, and
+ *                        boxes on screen together that overlap
  */
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join, relative } from "node:path";
 import { parse } from "yaml";
 import { lookup, WIKI } from "../src/lib/atlas/glossary.ts";
 import { conceptsDir, mapPath } from "../src/lib/atlas/paths.ts";
+import { overlaps, place } from "../src/lib/atlas/place.ts";
 import { conceptSchema, mapSchema } from "../src/lib/atlas/schema.ts";
 import { repoRoot as root } from "../src/lib/root.ts";
 
@@ -80,6 +82,7 @@ export const checkAtlas = (itemsDir: string): number => {
       }
       for (const g of map.groups) if (g.parent !== undefined && !groups.has(g.parent)) fail(`${where}: group "${g.id}" has parent "${g.parent}", which does not exist`);
       for (const e of map.edges) for (const end of [e.from, e.to]) if (!ids.has(end)) fail(`${where}: edge ${e.from} → ${e.to} names "${end}", which does not exist`);
+      for (const clash of overlaps(map, place(map))) fail(`${where}: ${clash}`);
     }
   }
   return bad;

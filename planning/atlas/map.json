@@ -16,7 +16,11 @@
    "id": "ticket",
    "label": "ticket",
    "level": 1,
-   "parent": null
+   "parent": null,
+   "x": 150,
+   "y": 2030,
+   "w": 220,
+   "h": 110
   },
   {
    "id": "onion",
@@ -28,7 +32,11 @@
    "id": "onion-wasm",
    "label": "onion-wasm",
    "level": 1,
-   "parent": null
+   "parent": null,
+   "x": 60,
+   "y": 1880,
+   "w": 220,
+   "h": 90
   },
   {
    "id": "galley",
@@ -46,7 +54,11 @@
    "id": "sous-cli",
    "label": "sous-cli",
    "level": 1,
-   "parent": null
+   "parent": null,
+   "x": 1560,
+   "y": 1200,
+   "w": 220,
+   "h": 90
   }
  ],
  "nodes": [
@@ -57,7 +69,11 @@
    "group": "products",
    "kind": "product",
    "slug": "onion-engine",
-   "weight": 2
+   "weight": 2,
+   "x": -60,
+   "y": 760,
+   "w": 900,
+   "h": 230
   },
   {
    "id": "galley-package",
@@ -66,7 +82,11 @@
    "group": "products",
    "kind": "product",
    "slug": "galley-package",
-   "weight": 2
+   "weight": 2,
+   "x": 1000,
+   "y": 760,
+   "w": 900,
+   "h": 230
   },
   {
    "id": "sous-chef",
@@ -75,7 +95,11 @@
    "group": "products",
    "kind": "product",
    "slug": "sous-chef",
-   "weight": 2
+   "weight": 2,
+   "x": 2060,
+   "y": 760,
+   "w": 900,
+   "h": 230
   },
   {
    "id": "sefer",
@@ -84,7 +108,11 @@
    "group": "products",
    "kind": "product",
    "slug": "sefer",
-   "weight": 2
+   "weight": 2,
+   "x": 1000,
+   "y": 300,
+   "w": 900,
+   "h": 230
   },
   {
    "id": "mise",
@@ -93,7 +121,11 @@
    "group": "mise",
    "kind": "crate",
    "slug": "mise",
-   "weight": 2
+   "weight": 2,
+   "x": 1150,
+   "y": 2290,
+   "w": 300,
+   "h": 100
   },
   {
    "id": "ticket",
@@ -102,7 +134,11 @@
    "group": "ticket",
    "kind": "crate",
    "slug": "ticket",
-   "weight": 2
+   "weight": 2,
+   "x": 650,
+   "y": 2290,
+   "w": 300,
+   "h": 100
   },
   {
    "id": "onion",
@@ -111,7 +147,11 @@
    "group": "onion",
    "kind": "crate",
    "slug": "onion",
-   "weight": 2
+   "weight": 2,
+   "x": 420,
+   "y": 1960,
+   "w": 300,
+   "h": 100
   },
   {
    "id": "onion-wasm",
@@ -120,7 +160,11 @@
    "group": "onion-wasm",
    "kind": "crate",
    "slug": "onion-wasm",
-   "weight": 2
+   "weight": 2,
+   "x": 420,
+   "y": 1650,
+   "w": 300,
+   "h": 100
   },
   {
    "id": "galley",
@@ -129,7 +173,11 @@
    "group": "galley",
    "kind": "crate",
    "slug": "galley",
-   "weight": 2
+   "weight": 2,
+   "x": 1050,
+   "y": 1380,
+   "w": 300,
+   "h": 100
   },
   {
    "id": "sous-core",
@@ -138,7 +186,11 @@
    "group": "sous-core",
    "kind": "crate",
    "slug": "sous-core",
-   "weight": 2
+   "weight": 2,
+   "x": 1500,
+   "y": 1960,
+   "w": 300,
+   "h": 100
   },
   {
    "id": "sous-cli",
@@ -147,7 +199,11 @@
    "group": "sous-cli",
    "kind": "crate",
    "slug": "sous-cli",
-   "weight": 2
+   "weight": 2,
+   "x": 1700,
+   "y": 1380,
+   "w": 300,
+   "h": 100
   },
   {
    "id": "source",
@@ -156,7 +212,9 @@
    "group": "onion",
    "kind": "primitive",
    "slug": "source",
-   "weight": 1
+   "weight": 1,
+   "x": 80,
+   "y": 1500
   },
   {
    "id": "scanner",
@@ -165,7 +223,9 @@
    "group": "onion",
    "kind": "primitive",
    "slug": "scanner",
-   "weight": 2
+   "weight": 2,
+   "x": 220,
+   "y": 1500
   },
   {
    "id": "token",
@@ -174,7 +234,9 @@
    "group": "onion",
    "kind": "primitive",
    "slug": "token",
-   "weight": 2
+   "weight": 2,
+   "x": 350,
+   "y": 1500
   },
   {
    "id": "marker-table",
@@ -183,7 +245,9 @@
    "group": "onion",
    "kind": "primitive",
    "slug": "marker-table",
-   "weight": 1
+   "weight": 1,
+   "x": 410,
+   "y": 1380
   },
   {
    "id": "extensions",
@@ -192,7 +256,9 @@
    "group": "onion",
    "kind": "primitive",
    "slug": "extensions",
-   "weight": 1
+   "weight": 1,
+   "x": 220,
+   "y": 1380
   },
   {
    "id": "cst",
@@ -201,7 +267,11 @@
    "group": "onion",
    "kind": "primitive",
    "slug": "cst",
-   "weight": 3
+   "weight": 3,
+   "x": 690,
+   "y": 1560,
+   "w": 170,
+   "h": 84
   },
   {
    "id": "walker",
@@ -210,7 +280,9 @@
    "group": "onion",
    "kind": "concept",
    "slug": "walker",
-   "weight": 1
+   "weight": 1,
+   "x": 510,
+   "y": 1560
   },
   {
    "id": "designator",
@@ -219,7 +291,9 @@
    "group": "onion",
    "kind": "primitive",
    "slug": "designator",
-   "weight": 1
+   "weight": 1,
+   "x": 1000,
+   "y": 1260
   },
   {
    "id": "attributes",
@@ -228,7 +302,9 @@
    "group": "onion",
    "kind": "primitive",
    "slug": "attributes",
-   "weight": 1
+   "weight": 1,
+   "x": 380,
+   "y": 1730
   },
   {
    "id": "toc",
@@ -237,7 +313,9 @@
    "group": "onion",
    "kind": "primitive",
    "slug": "toc",
-   "weight": 2
+   "weight": 2,
+   "x": 1000,
+   "y": 1360
   },
   {
    "id": "mask",
@@ -246,7 +324,9 @@
    "group": "onion",
    "kind": "primitive",
    "slug": "mask",
-   "weight": 2
+   "weight": 2,
+   "x": 870,
+   "y": 1460
   },
   {
    "id": "resolve",
@@ -255,7 +335,9 @@
    "group": "onion",
    "kind": "primitive",
    "slug": "resolve",
-   "weight": 1
+   "weight": 1,
+   "x": 1190,
+   "y": 1260
   },
   {
    "id": "utf16",
@@ -264,7 +346,9 @@
    "group": "mise",
    "kind": "primitive",
    "slug": "utf16",
-   "weight": 1
+   "weight": 1,
+   "x": 740,
+   "y": 2350
   },
   {
    "id": "chunk",
@@ -273,7 +357,9 @@
    "group": "onion",
    "kind": "concept",
    "slug": "chunk",
-   "weight": 1
+   "weight": 1,
+   "x": 690,
+   "y": 1780
   },
   {
    "id": "words",
@@ -282,7 +368,9 @@
    "group": "mise",
    "kind": "primitive",
    "slug": "words",
-   "weight": 1
+   "weight": 1,
+   "x": 910,
+   "y": 2350
   },
   {
    "id": "lint",
@@ -291,7 +379,9 @@
    "group": "onion",
    "kind": "concept",
    "slug": "lint",
-   "weight": 2
+   "weight": 2,
+   "x": 1190,
+   "y": 1640
   },
   {
    "id": "format",
@@ -300,7 +390,9 @@
    "group": "onion",
    "kind": "concept",
    "slug": "format",
-   "weight": 1
+   "weight": 1,
+   "x": 1350,
+   "y": 1640
   },
   {
    "id": "edit",
@@ -309,7 +401,9 @@
    "group": "onion",
    "kind": "concept",
    "slug": "edit",
-   "weight": 1
+   "weight": 1,
+   "x": 1480,
+   "y": 1530
   },
   {
    "id": "vref",
@@ -318,7 +412,9 @@
    "group": "onion",
    "kind": "concept",
    "slug": "vref",
-   "weight": 1
+   "weight": 1,
+   "x": 1190,
+   "y": 1380
   },
   {
    "id": "diff",
@@ -327,7 +423,9 @@
    "group": "onion",
    "kind": "concept",
    "slug": "diff",
-   "weight": 1
+   "weight": 1,
+   "x": 1190,
+   "y": 1490
   },
   {
    "id": "exports",
@@ -336,7 +434,9 @@
    "group": "onion",
    "kind": "concept",
    "slug": "exports",
-   "weight": 1
+   "weight": 1,
+   "x": 1350,
+   "y": 1760
   },
   {
    "id": "chunk-cache",
@@ -345,7 +445,9 @@
    "group": "galley",
    "kind": "workflow",
    "slug": "chunk-cache",
-   "weight": 1
+   "weight": 1,
+   "x": 690,
+   "y": 2000
   },
   {
    "id": "pantry",
@@ -354,7 +456,9 @@
    "group": "galley",
    "kind": "workflow",
    "slug": "pantry",
-   "weight": 2
+   "weight": 2,
+   "x": 870,
+   "y": 2070
   },
   {
    "id": "expediter",
@@ -363,7 +467,9 @@
    "group": "galley",
    "kind": "workflow",
    "slug": "expediter",
-   "weight": 2
+   "weight": 2,
+   "x": 1080,
+   "y": 2140
   },
   {
    "id": "find",
@@ -372,7 +478,9 @@
    "group": "galley",
    "kind": "workflow",
    "slug": "find",
-   "weight": 1
+   "weight": 1,
+   "x": 870,
+   "y": 2200
   },
   {
    "id": "overlay",
@@ -381,7 +489,9 @@
    "group": "galley",
    "kind": "workflow",
    "slug": "overlay",
-   "weight": 1
+   "weight": 1,
+   "x": 1350,
+   "y": 1990
   },
   {
    "id": "onion-book",
@@ -390,7 +500,9 @@
    "group": "galley",
    "kind": "workflow",
    "slug": "onion-book",
-   "weight": 1
+   "weight": 1,
+   "x": 1270,
+   "y": 2100
   },
   {
    "id": "chapter-pass",
@@ -399,7 +511,9 @@
    "group": "sous-core",
    "kind": "workflow",
    "slug": "chapter-pass",
-   "weight": 1
+   "weight": 1,
+   "x": 1180,
+   "y": 2350
   },
   {
    "id": "wire",
@@ -408,7 +522,9 @@
    "group": "ticket",
    "kind": "wire",
    "slug": "wire",
-   "weight": 1
+   "weight": 1,
+   "x": 350,
+   "y": 2120
   },
   {
    "id": "plate",
@@ -417,7 +533,9 @@
    "group": "onion",
    "kind": "wire",
    "slug": "plate",
-   "weight": 1
+   "weight": 1,
+   "x": 600,
+   "y": 1650
   },
   {
    "id": "dish",
@@ -426,7 +544,9 @@
    "group": "onion",
    "kind": "wire",
    "slug": "dish",
-   "weight": 1
+   "weight": 1,
+   "x": 520,
+   "y": 1650
   },
   {
    "id": "census",
@@ -435,7 +555,9 @@
    "group": "galley",
    "kind": "wire",
    "slug": "census",
-   "weight": 1
+   "weight": 1,
+   "x": 760,
+   "y": 2130
   },
   {
    "id": "find-buffer",
@@ -444,7 +566,9 @@
    "group": "galley",
    "kind": "wire",
    "slug": "find-buffer",
-   "weight": 1
+   "weight": 1,
+   "x": 970,
+   "y": 2240
   },
   {
    "id": "mask-map",
@@ -453,7 +577,9 @@
    "group": "galley",
    "kind": "wire",
    "slug": "mask-map",
-   "weight": 1
+   "weight": 1,
+   "x": 1000,
+   "y": 2010
   },
   {
    "id": "findings-snapshot",
@@ -462,7 +588,9 @@
    "group": "sous-core",
    "kind": "wire",
    "slug": "findings-snapshot",
-   "weight": 1
+   "weight": 1,
+   "x": 1340,
+   "y": 2350
   },
   {
    "id": "corpus",
@@ -471,7 +599,9 @@
    "group": "galley",
    "kind": "wire",
    "slug": "corpus",
-   "weight": 1
+   "weight": 1,
+   "x": 520,
+   "y": 2000
   }
  ],
  "edges": [
@@ -501,7 +631,8 @@
    "to": "onion-engine",
    "label": "structure via galley's OnionBook",
    "level": 0,
-   "kind": "depends"
+   "kind": "depends",
+   "bend": 420
   },
   {
    "from": "onion",
@@ -949,7 +1080,8 @@
    "to": "onion-wasm",
    "label": "reader.ts deserialize()",
    "level": 3,
-   "kind": "data"
+   "kind": "data",
+   "bend": -150
   },
   {
    "from": "dish",
@@ -1033,7 +1165,8 @@
    "to": "dish",
    "label": "offsets under utf16: true",
    "level": 3,
-   "kind": "data"
+   "kind": "data",
+   "bend": 40
   }
  ]
 }

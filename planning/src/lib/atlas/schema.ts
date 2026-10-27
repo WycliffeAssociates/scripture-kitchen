@@ -23,6 +23,8 @@ export type Concept = z.infer<typeof conceptSchema>;
 
 /** Absent and null mean the same: map.json is written by hand and by scripts. */
 const opt = z.string().nullish().transform((v) => v ?? undefined);
+const num = z.number().nullish().transform((v) => v ?? undefined);
+const size = z.number().positive().nullish().transform((v) => v ?? undefined);
 
 export const mapSchema = z.object({
   nodes: z.array(z.object({
@@ -33,6 +35,12 @@ export const mapSchema = z.object({
     kind: z.string().default("concept"),
     slug: opt,
     weight: z.number().default(1),
+    /** World position of the node's CENTRE; without it the node is placed by ELK. */
+    x: num,
+    y: num,
+    /** Size override; by default the label and level size the box. */
+    w: size,
+    h: size,
   })),
   groups: z.array(z.object({
     id: z.string(),
@@ -40,6 +48,11 @@ export const mapSchema = z.object({
     level: z.number().int().min(0).max(3),
     parent: opt,
     slug: opt,
+    /** The frame's TOP-LEFT corner and size; without them it wraps its members. */
+    x: num,
+    y: num,
+    w: size,
+    h: size,
   })).default([]),
   edges: z.array(z.object({
     from: z.string(),
@@ -47,6 +60,8 @@ export const mapSchema = z.object({
     label: opt,
     level: z.number().int().min(0).max(3),
     kind: z.string().default("data"),
+    /** Pushes the curve's middle this many world units sideways (left of travel when positive). */
+    bend: num,
   })).default([]),
 });
 export type AtlasMap = z.infer<typeof mapSchema>;

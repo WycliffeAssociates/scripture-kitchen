@@ -1,31 +1,15 @@
 /**
- * Lays out the atlas map once, at build, in ONE coordinate space: crates sit
- * inside products, primitives inside crates, wires beside the primitives they
- * plate. Zooming in is then literally zooming in: the client only decides
- * which levels to show at the current scale.
- *
- * Each level is sized for the scale it is read at. A level-L thing is drawn
- * `SCALE[L]` world units per screen pixel, so a product tile is six times the
- * size of a primitive and reads at a sixth of the zoom.
- *
- *   level 0  products, consumers   read at k ≈ 1/6
- *   level 1  crates                read at k ≈ 1/2.5
- *   level 2  primitives            read at k ≈ 1
- *   level 3  wires                 read at k ≈ 2
+ * Lays out the atlas map once, at build, in ONE coordinate space: the client
+ * only decides which levels to show at the current scale. Positions are
+ * authored in map.json (src/lib/atlas/place.ts); ELK places only a node that
+ * has none. Every wire is a smooth curve between box sides, its ends spread
+ * along the side so wires into one box fan out instead of stacking.
  */
 import ELK from "elkjs/lib/elk.bundled.js";
-import { pathOf } from "../graph.ts";
+import { FRAME_FROM, frameHead, inner, place, SCALE, sizeOf, twinsOf, type Rect } from "./place.ts";
 import type { AtlasMap } from "./schema.ts";
 
-/** World units per screen pixel for each level's own drawing. */
-export const SCALE = [6, 2.5, 1, 0.5] as const;
-/** The zoom at which a level's things are big enough to show. */
-export const THRESHOLD = SCALE.map((s) => 0.7 / s);
-export const LEVEL_NAMES = ["products", "crates", "primitives", "wires"] as const;
-
-const CHAR = 7.6;
-const PAD_X = 28;
-const NODE_H = 36;
+export { LEVEL_NAMES, SCALE, THRESHOLD } from "./place.ts";
 
 export interface Info {
   readonly id: string;
@@ -35,6 +19,7 @@ export interface Info {
   readonly crate: string | null;
   readonly slug: string | null;
   readonly summary: string;
+  readonly problem: string;
   readonly why: string;
 }
 
@@ -44,12 +29,16 @@ export interface Box extends Info {
   readonly w: number;
   readonly h: number;
   readonly group: boolean;
-  /** Most weighty node of its level: drawn as the hub. */
+  /** The one weightiest node of its level: drawn as the hub. */
   readonly hub: boolean;
   /** Group header height, in world units. */
   readonly head: number;
   /** A group opens from a tile into a frame at the level its first child shows. */
   readonly opens: number;
+  /** Shown only from this level (a crate's frame). */
+  readonly from: number | null;
+  /** Hidden from this level on (a crate's card). */
+  readonly until: number | null;
 }
 
 export interface Wire {
@@ -59,9 +48,13 @@ export interface Wire {
   readonly level: number;
   /** The level at which both ends and the edge itself are on screen. */
   readonly shows: number;
+  /** Hidden from this level on, with the card it leaves or reaches. */
+  readonly until: number | null;
   readonly kind: string;
   readonly d: string;
-  readonly mid: { x: number; y: number; len: number } | null;
+  readonly mid: { x: number; y: number; len: number };
+  /** Drawn as a stub towards a far-off product, named at its tip. */
+  readonly stub: { name: string; x: number; y: number } | null;
 }
 
 export interface Canvas {
@@ -73,243 +66,225 @@ export interface Canvas {
   readonly hub: string | null;
 }
 
-export interface ConceptInfo { readonly crate: string; readonly summary: string; readonly why: string; readonly kind: string }
+export interface ConceptInfo { readonly crate: string; readonly summary: string; readonly problem: string; readonly why: string; readonly kind: string }
 
 interface ElkShape {
   id: string;
   x?: number; y?: number; width?: number; height?: number;
   children?: ElkShape[];
-  edges?: ElkEdge[];
+  edges?: { id: string; sources: string[]; targets: string[] }[];
   layoutOptions?: Record<string, string>;
 }
 interface Point { x: number; y: number }
-interface ElkEdge { id: string; sources: string[]; targets: string[]; sections?: { startPoint: Point; endPoint: Point; bendPoints?: Point[] }[] }
 
 const elk = new ELK();
 
+/** Positions for nodes map.json does not place: one layered pass over everything. */
+const elkFallback = async (map: AtlasMap): Promise<Map<string, Rect>> => {
+  const gk = (id: string): string => `group:${id}`;
+  const groupIds = new Set(map.groups.map((g) => g.id));
+  const kids = new Map<string | undefined, ElkShape[]>();
+  const add = (parent: string | undefined, shape: ElkShape): void => void kids.set(parent, [...(kids.get(parent) ?? []), shape]);
+  for (const n of map.nodes) add(n.group !== undefined && groupIds.has(n.group) ? gk(n.group) : undefined, { id: n.id, width: sizeOf(n).w, height: sizeOf(n).h });
+  const shape = (g: AtlasMap["groups"][number]): ElkShape => {
+    const s = inner(g.level);
+    return {
+      id: gk(g.id),
+      layoutOptions: { "elk.padding": `[top=${frameHead(g.level)},left=${18 * s},bottom=${18 * s},right=${18 * s}]`, "elk.spacing.nodeNode": String(30 * s) },
+      children: [...(kids.get(gk(g.id)) ?? []), ...map.groups.filter((c) => c.parent === g.id && c.id !== g.id).map(shape)],
+    };
+  };
+  const top = [...(kids.get(undefined) ?? []), ...map.groups.filter((g) => g.parent === undefined || !groupIds.has(g.parent)).map(shape)];
+  const ids = new Set(map.nodes.map((n) => n.id));
+  const out = (await elk.layout({
+    id: "__root",
+    layoutOptions: {
+      "elk.algorithm": "layered", "elk.direction": "RIGHT", "elk.hierarchyHandling": "INCLUDE_CHILDREN",
+      "elk.json.shapeCoords": "ROOT", "elk.spacing.nodeNode": String(40 * SCALE[1]),
+    },
+    children: top,
+    edges: map.edges.filter((e) => ids.has(e.from) && ids.has(e.to) && e.from !== e.to).map((e, i) => ({ id: `e${i}`, sources: [e.from], targets: [e.to] })),
+  } as never)) as unknown as ElkShape;
+  const rects = new Map<string, Rect>();
+  const walk = (s: ElkShape): void => {
+    for (const c of s.children ?? []) {
+      rects.set(c.id, { x: c.x ?? 0, y: c.y ?? 0, w: c.width ?? 0, h: c.height ?? 0 });
+      walk(c);
+    }
+  };
+  walk(out);
+  return rects;
+};
+
+type Side = "l" | "r" | "t" | "b";
+
 export const layoutCanvas = async (raw: AtlasMap, concepts: ReadonlyMap<string, ConceptInfo>): Promise<Canvas> => {
-  // A crate is both a group and the node inside it, under one id. Groups are
-  // keyed `group:<id>` so the two never collide; an edge names the node when
-  // there is one, else the group.
+  let placed = place(raw);
+  if (placed.missing.length > 0) placed = place(raw, await elkFallback(raw));
+
+  const twins = twinsOf(raw);
+  const gk = (id: string): string => `group:${id}`;
   const nodeIds = new Set(raw.nodes.map((n) => n.id));
   const groupIds = new Set(raw.groups.map((g) => g.id));
-  const gk = (id: string): string => `group:${id}`;
-  const end = (id: string): string | undefined => (nodeIds.has(id) ? id : groupIds.has(id) ? gk(id) : undefined);
-  const map = {
-    groups: raw.groups.map((g) => ({ ...g, id: gk(g.id), name: g.id, parent: g.parent === undefined ? undefined : gk(g.parent) })),
-    nodes: raw.nodes.map((n) => ({ ...n, group: n.group === undefined ? undefined : gk(n.group) })),
-    edges: raw.edges.flatMap((e) => {
-      const from = end(e.from), to = end(e.to);
-      return from === undefined || to === undefined ? [] : [{ ...e, from, to }];
-    }),
-  };
-  const groups = new Map(map.groups.map((g) => [g.id, g]));
-  const parentOf = new Map<string, string | undefined>();
-  for (const g of map.groups) parentOf.set(g.id, g.parent !== undefined && groups.has(g.parent) && g.parent !== g.id ? g.parent : undefined);
-  for (const n of map.nodes) parentOf.set(n.id, n.group !== undefined && groups.has(n.group) ? n.group : undefined);
+  const groups = new Map(raw.groups.map((g) => [gk(g.id), { ...g, id: gk(g.id), name: g.id, parent: g.parent === undefined || !groupIds.has(g.parent) || g.parent === g.id ? undefined : gk(g.parent) }]));
+  const nodes = new Map(raw.nodes.map((n) => [n.id, { ...n, group: n.group === undefined || !groupIds.has(n.group) ? undefined : gk(n.group) }]));
+  const parentOf = (id: string): string | undefined => groups.get(id)?.parent ?? nodes.get(id)?.group;
   const ancestors = (id: string): string[] => {
     const out: string[] = [];
-    for (let at = parentOf.get(id); at !== undefined && !out.includes(at); at = parentOf.get(at)) out.push(at);
+    for (let at = parentOf(id); at !== undefined && !out.includes(at); at = parentOf(at)) out.push(at);
     return out;
   };
-  const levelOf = new Map<string, number>([
-    ...map.groups.map((g) => [g.id, g.level] as const),
-    ...map.nodes.map((n) => [n.id, n.level] as const),
-  ]);
+
+  // Everything moves so the map's top-left corner is the origin.
+  const rawRect = (id: string): Rect | undefined => (groups.has(id) ? placed.groups.get(groups.get(id)!.name) : placed.nodes.get(id));
+  const all = [...groups.keys(), ...nodes.keys()].map(rawRect).filter((r): r is Rect => r !== undefined);
+  const ox = Math.min(0, ...all.map((r) => r.x)), oy = Math.min(0, ...all.map((r) => r.y));
+  const rectOf = (id: string): Rect => {
+    const r = rawRect(id) ?? { x: 0, y: 0, w: 0, h: 0 };
+    return { x: r.x - ox, y: r.y - oy, w: r.w, h: r.h };
+  };
 
   // A crate's hue: the concept's own crate, else the nearest crate-level group.
   const crateOf = (id: string, slug: string | undefined): string | null => {
     const concept = slug === undefined ? undefined : concepts.get(slug);
     if (concept) return concept.crate;
-    const chain = [id, ...ancestors(id)];
-    const crate = chain.find((at) => groups.get(at)?.level === 1 || concepts.get(groups.get(at)?.slug ?? at)?.kind === "crate");
+    const crate = [id, ...ancestors(id)].find((at) => groups.get(at)?.level === 1 || concepts.get(groups.get(at)?.slug ?? at)?.kind === "crate");
     return crate === undefined ? null : (groups.get(crate)?.name ?? crate);
   };
   const info = (id: string, label: string, level: number, kind: string, slug: string | undefined): Info => {
     const concept = slug === undefined ? undefined : concepts.get(slug);
-    return {
-      id, label, level, kind,
-      crate: crateOf(id, slug),
-      slug: concept ? slug! : null,
-      summary: concept?.summary ?? "",
-      why: concept?.why ?? "",
-    };
+    return { id, label, level, kind, crate: crateOf(id, slug), slug: concept ? slug! : null, summary: concept?.summary ?? "", problem: concept?.problem ?? "", why: concept?.why ?? "" };
   };
 
-  const children = new Map<string | undefined, string[]>();
-  for (const id of [...map.groups.map((g) => g.id), ...map.nodes.map((n) => n.id)]) {
-    const parent = parentOf.get(id);
-    children.set(parent, [...(children.get(parent) ?? []), id]);
+  // The hub is the one node strictly heavier than the rest of its level.
+  const hubs = new Set<string>();
+  for (let level = 0; level <= 3; level += 1) {
+    const ranked = raw.nodes.filter((n) => n.level === level).sort((a, b) => b.weight - a.weight);
+    if (ranked[0] !== undefined && ranked[0].weight > 1 && (ranked[1] === undefined || ranked[1].weight < ranked[0].weight)) hubs.add(ranked[0].id);
   }
-
-  // Within a level-L container, things are spaced for the level below it.
-  const inner = (level: number): number => SCALE[Math.min(3, level + 1)];
-  const nodes = new Map(map.nodes.map((n) => [n.id, n]));
-  const weightiest = new Map<number, string>();
-  for (const n of map.nodes) {
-    const best = weightiest.get(n.level);
-    if (best === undefined || nodes.get(best)!.weight < n.weight) weightiest.set(n.level, n.id);
-  }
-
-  const shape = (id: string): ElkShape => {
-    const group = groups.get(id);
-    if (group === undefined) {
-      const n = nodes.get(id)!;
-      const s = SCALE[n.level] * (1 + Math.max(0, n.weight - 1) * 0.18);
-      return { id, width: Math.ceil((n.label.length * CHAR + PAD_X) * s), height: Math.ceil(NODE_H * s) };
-    }
-    const s = inner(group.level);
-    const kids = children.get(id) ?? [];
-    const tile = SCALE[group.level];
-    return {
-      id,
-      children: kids.map(shape),
-      layoutOptions: {
-        "elk.direction": "RIGHT",
-        "elk.padding": `[top=${32 * s},left=${18 * s},bottom=${18 * s},right=${18 * s}]`,
-        "elk.nodeSize.constraints": "MINIMUM_SIZE",
-        "elk.nodeSize.minimum": `(${Math.ceil((group.label.length * CHAR + PAD_X) * tile)}, ${Math.ceil(NODE_H * 2 * tile)})`,
-        "elk.spacing.nodeNode": String(30 * s),
-        "elk.layered.spacing.nodeNodeBetweenLayers": String(90 * s),
-        "elk.layered.spacing.edgeNodeBetweenLayers": String(20 * s),
-        "elk.spacing.edgeNode": String(16 * s),
-      },
-    };
-  };
-
-  // An edge from a group to something inside it cannot be routed; it is left out.
-  const edges = map.edges.filter((e) => levelOf.has(e.from) && levelOf.has(e.to) && e.from !== e.to
-    && !ancestors(e.from).includes(e.to) && !ancestors(e.to).includes(e.from));
-
-  // Two passes. Each top-level group is laid out alone, left to right, with
-  // the edges inside it routed. Then the groups are placed as boxes, top to
-  // bottom by who depends on whom, and an edge between groups is drawn as a
-  // curve from node to node. One pass over everything makes a ribbon.
-  const top = children.get(undefined) ?? [];
-  const topOf = (id: string): string => [id, ...ancestors(id)].at(-1)!;
-  const options = {
-    "elk.algorithm": "layered",
-    "elk.direction": "RIGHT",
-    "elk.hierarchyHandling": "INCLUDE_CHILDREN",
-    "elk.edgeRouting": "ORTHOGONAL",
-    "elk.layered.nodePlacement.strategy": "NETWORK_SIMPLEX",
-    "elk.json.edgeCoords": "ROOT",
-    "elk.json.shapeCoords": "ROOT",
-  };
-  const placed = new Map<string, ElkShape>();
-  const routed = new Map<number, ElkEdge>();
-  const parts = await Promise.all(top.map(async (id) => {
-    const inside = edges.flatMap((e, i) => (topOf(e.from) === id && topOf(e.to) === id ? [{ id: `e${i}`, sources: [e.from], targets: [e.to] }] : []));
-    const out = (await elk.layout({ id: "__part", layoutOptions: { ...options, "elk.padding": "[top=0,left=0,bottom=0,right=0]" }, children: [shape(id)], edges: inside } as never)) as unknown as ElkShape;
-    return { id, out };
-  }));
-  const sizes = new Map(parts.map(({ id, out }) => {
-    const s = out.children![0]!;
-    return [id, { w: s.width ?? 0, h: s.height ?? 0 }];
-  }));
-  const between = new Map<string, ElkEdge>();
-  for (const e of edges) {
-    const from = topOf(e.from), to = topOf(e.to);
-    if (from !== to) between.set(`${from}>${to}`, { id: `${from}>${to}`, sources: [from], targets: [to] });
-  }
-  const gap = 40 * SCALE[1];
-  const root = (await elk.layout({
-    id: "__root",
-    layoutOptions: {
-      "elk.algorithm": "layered",
-      "elk.direction": "DOWN",
-      "elk.separateConnectedComponents": "false",
-      "elk.layered.nodePlacement.strategy": "NETWORK_SIMPLEX",
-      "elk.spacing.nodeNode": String(gap),
-      "elk.layered.spacing.nodeNodeBetweenLayers": String(gap * 1.5),
-      "elk.padding": `[top=${gap / 2},left=${gap / 2},bottom=${gap / 2},right=${gap / 2}]`,
-    },
-    // Products and consumers sit on top: the first thing a reader sees.
-    children: top.map((id) => ({
-      id, width: sizes.get(id)!.w, height: sizes.get(id)!.h,
-      ...(levelOf.get(id) === 0 ? { layoutOptions: { "elk.layered.layering.layerConstraint": "FIRST" } } : {}),
-    })),
-    edges: [...between.values()],
-  } as never)) as unknown as ElkShape;
-  const origin = new Map((root.children ?? []).map((c) => [c.id, { x: c.x ?? 0, y: c.y ?? 0 }]));
-  const shift = (p: Point, o: Point): Point => ({ x: p.x + o.x, y: p.y + o.y });
-  for (const { id, out } of parts) {
-    const o = origin.get(id)!;
-    const walk = (sh: ElkShape): void => {
-      for (const c of sh.children ?? []) {
-        placed.set(c.id, { ...c, x: (c.x ?? 0) + o.x, y: (c.y ?? 0) + o.y });
-        walk(c);
-      }
-      for (const e of sh.edges ?? []) {
-        routed.set(Number(e.id.slice(1)), {
-          ...e,
-          sections: (e.sections ?? []).map((sec) => ({
-            startPoint: shift(sec.startPoint, o), endPoint: shift(sec.endPoint, o), bendPoints: (sec.bendPoints ?? []).map((p) => shift(p, o)),
-          })),
-        });
-      }
-    };
-    walk(out);
-  }
-  const out = root;
-
   const depth = (id: string): number => ancestors(id).length;
-  const opens = (id: string): number =>
-    Math.min(4, ...(children.get(id) ?? []).map((kid) => (groups.has(kid) ? groups.get(kid)!.level : levelOf.get(kid)!)));
+  const opens = (g: string): number => {
+    if (twins.has(groups.get(g)!.name)) return FRAME_FROM;
+    const levels = [...groups.values()].filter((c) => c.parent === g).map((c) => c.level)
+      .concat([...nodes.values()].filter((n) => n.group === g).map((n) => n.level));
+    return Math.min(4, ...levels);
+  };
   const boxes: Box[] = [
-    ...map.groups.map((g) => ({ ...info(g.id, g.label, g.level, "group", g.slug ?? (concepts.has(g.name) && !nodeIds.has(g.name) ? g.name : undefined)), group: true, hub: false, head: 32 * inner(g.level), opens: opens(g.id) })),
-    ...map.nodes.map((n) => ({ ...info(n.id, n.label, n.level, n.kind, n.slug), group: false, hub: weightiest.get(n.level) === n.id && n.weight > 1, head: 0, opens: 4 })),
-  ].map((b) => {
-    const s = placed.get(b.id);
-    return { ...b, x: s?.x ?? 0, y: s?.y ?? 0, w: s?.width ?? 0, h: s?.height ?? 0 };
-  // Outer groups first, so inner ones paint over them.
-  }).sort((a, b) => Number(b.group) - Number(a.group) || depth(a.id) - depth(b.id));
+    ...[...groups.values()].map((g) => ({
+      ...info(g.id, g.label, g.level, "group", g.slug ?? (concepts.has(g.name) && !nodeIds.has(g.name) ? g.name : undefined)),
+      group: true, hub: false, head: frameHead(g.level), opens: opens(g.id),
+      from: twins.has(g.name) ? FRAME_FROM : null, until: null,
+    })),
+    ...[...nodes.values()].map((n) => ({
+      ...info(n.id, n.label, n.level, n.kind, n.slug),
+      group: false, hub: hubs.has(n.id), head: 0, opens: 4,
+      from: null, until: twins.has(n.id) ? FRAME_FROM : null,
+    })),
+  ].filter((b) => rawRect(b.id) !== undefined)
+    .map((b) => ({ ...b, ...rectOf(b.id) }))
+    // Outer groups first, so inner ones paint over them.
+    .sort((a, b) => Number(b.group) - Number(a.group) || depth(a.id) - depth(b.id));
 
-  const centre = (id: string): Point & { w: number; h: number } => {
-    const p = placed.get(id)!;
-    return { x: (p.x ?? 0) + (p.width ?? 0) / 2, y: (p.y ?? 0) + (p.height ?? 0) / 2, w: p.width ?? 0, h: p.height ?? 0 };
-  };
-  /** Where the ray from a box's centre towards `to` leaves the box. */
-  const rim = (c: ReturnType<typeof centre>, to: Point): Point => {
-    const dx = to.x - c.x, dy = to.y - c.y;
-    const t = Math.min(Math.abs(c.w / 2 / (dx || 1e-9)), Math.abs(c.h / 2 / (dy || 1e-9)));
-    return { x: c.x + dx * t, y: c.y + dy * t };
-  };
+  // An edge names a node when there is one, else the group; once a crate's
+  // card has given way to its frame, an edge drawn at that level meets the frame.
+  const edges = raw.edges.flatMap((e) => {
+    const lv = (id: string): number => nodes.get(id)?.level ?? groups.get(gk(id))?.level ?? 0;
+    const shows = Math.max(e.level, lv(e.from), lv(e.to));
+    const end = (id: string): string | undefined => {
+      if (nodeIds.has(id)) return twins.has(id) && shows >= FRAME_FROM ? gk(id) : id;
+      return groupIds.has(id) ? gk(id) : undefined;
+    };
+    const from = end(e.from), to = end(e.to);
+    if (from === undefined || to === undefined || from === to || rawRect(from) === undefined || rawRect(to) === undefined) return [];
+    // An edge from a group to something inside it has nowhere to go; it is left out.
+    if (ancestors(from).includes(to) || ancestors(to).includes(from)) return [];
+    return [{ ...e, from, to, shows }];
+  });
+
+  // A wire from a primitive to a product (a consumer such as Sefer) would cross
+  // the whole map; it is drawn as a short stub towards the product, named at its tip.
+  const levelOfEnd = (id: string): number => groups.get(id)?.level ?? nodes.get(id)?.level ?? 0;
+  const stubOf = (e: (typeof edges)[number]): "from" | "to" | null =>
+    e.shows < 2 ? null : levelOfEnd(e.to) === 0 ? "from" : levelOfEnd(e.from) === 0 ? "to" : null;
+
+  // Each end leaves the side facing the other box, along the axis with the wider gap.
+  const centre = (r: Rect): Point => ({ x: r.x + r.w / 2, y: r.y + r.h / 2 });
+  const flip: Record<Side, Side> = { l: "r", r: "l", t: "b", b: "t" };
+  const sides = edges.map((e) => {
+    const a = rectOf(e.from), b = rectOf(e.to), ca = centre(a), cb = centre(b);
+    if (stubOf(e) !== null) {
+      const towards: Side = cb.y >= ca.y ? "b" : "t";
+      return { from: towards, to: flip[towards] };
+    }
+    const gapX = Math.abs(cb.x - ca.x) - (a.w + b.w) / 2, gapY = Math.abs(cb.y - ca.y) - (a.h + b.h) / 2;
+    const from: Side = gapX >= gapY ? (cb.x >= ca.x ? "r" : "l") : (cb.y >= ca.y ? "b" : "t");
+    return { from, to: flip[from] };
+  });
+  // Ports: the ends on one side are spread along it, ordered by where the other end is.
+  const ports = new Map<string, { edge: number; end: "from" | "to"; along: number }[]>();
+  edges.forEach((e, i) => {
+    const stub = stubOf(e);
+    for (const end of ["from", "to"] as const) {
+      if (stub !== null && stub !== end) continue;
+      const id = e[end], other = centre(rectOf(e[end === "from" ? "to" : "from"]));
+      const side = sides[i]![end];
+      const key = `${id}|${side}`;
+      ports.set(key, [...(ports.get(key) ?? []), { edge: i, end, along: side === "l" || side === "r" ? other.y : other.x }]);
+    }
+  });
+  const at = new Map<string, Point>();
+  for (const [key, list] of ports) {
+    const [id, side] = key.split("|") as [string, Side];
+    const r = rectOf(id);
+    list.sort((p, q) => p.along - q.along);
+    const n = list.length;
+    list.forEach((p, k) => {
+      const f = n === 1 ? 0.5 : 0.5 + 0.7 * ((k + 0.5) / n - 0.5);
+      const pt = side === "l" ? { x: r.x, y: r.y + r.h * f }
+        : side === "r" ? { x: r.x + r.w, y: r.y + r.h * f }
+        : side === "t" ? { x: r.x + r.w * f, y: r.y }
+        : { x: r.x + r.w * f, y: r.y + r.h };
+      at.set(`${p.edge}|${p.end}`, pt);
+    });
+  }
+  const dir: Record<Side, Point> = { l: { x: -1, y: 0 }, r: { x: 1, y: 0 }, t: { x: 0, y: -1 }, b: { x: 0, y: 1 } };
+  const round = (v: number): number => Math.round(v * 10) / 10;
+  const pt = (p: Point): string => `${round(p.x)},${round(p.y)}`;
 
   const wires: Wire[] = edges.map((e, i) => {
-    const section = routed.get(i)?.sections?.[0];
-    let points: Point[];
-    let d: string;
-    let mid: Wire["mid"] = null;
-    if (section) {
-      points = [section.startPoint, ...(section.bendPoints ?? []), section.endPoint];
-      d = pathOf(points, 8 * SCALE[Math.min(3, e.level)]);
-      for (let j = 1; j < points.length; j += 1) {
-        const a = points[j - 1]!, b = points[j]!;
-        const len = Math.hypot(b.x - a.x, b.y - a.y);
-        if (mid === null || len > mid.len) mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, len };
-      }
-    } else {
-      // Between groups: a curve, leaving and arriving vertically.
-      const from = centre(e.from), to = centre(e.to);
-      const a = rim(from, to), b = rim(to, from);
-      const bend = Math.max(40, Math.abs(b.y - a.y) * 0.45);
-      const down = b.y >= a.y ? 1 : -1;
-      d = `M${a.x},${a.y} C${a.x},${a.y + bend * down} ${b.x},${b.y - bend * down} ${b.x},${b.y}`;
-      mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, len: Math.hypot(b.x - a.x, b.y - a.y) * 0.6 };
-    }
-    return {
-      from: e.from, to: e.to, label: e.label ?? null, level: e.level, kind: e.kind,
-      shows: Math.max(e.level, levelOf.get(e.from)!, levelOf.get(e.to)!),
-      d, mid,
+    const card = (id: string): boolean => nodeIds.has(id) && twins.has(id);
+    const base = {
+      from: e.from, to: e.to, label: e.label ?? null, level: e.level, kind: e.kind, shows: e.shows,
+      until: card(e.from) || card(e.to) ? FRAME_FROM : null,
     };
+    const stub = stubOf(e);
+    if (stub !== null) {
+      const near = at.get(`${i}|${stub}`)!, d = dir[sides[i]![stub]];
+      const len = 56 * SCALE[Math.min(3, e.shows)];
+      const far = { x: near.x + d.x * len, y: near.y + d.y * len };
+      const [a, b] = stub === "from" ? [near, far] : [far, near];
+      const name = nodes.get(stub === "from" ? e.to : e.from)?.label ?? "";
+      return { ...base, d: `M${pt(a)} L${pt(b)}`, mid: { x: round(near.x + d.x * len * 0.5), y: round(near.y + d.y * len * 0.5), len }, stub: { name, x: round(far.x), y: round(far.y + d.y * 6 * SCALE[Math.min(3, e.shows)]) } };
+    }
+    const a = at.get(`${i}|from`)!, b = at.get(`${i}|to`)!;
+    const da = dir[sides[i]!.from], db = dir[sides[i]!.to];
+    const span = Math.abs(da.x !== 0 ? b.x - a.x : b.y - a.y);
+    const pull = Math.max(span * 0.5, 24 * SCALE[Math.min(3, e.shows)]);
+    // A bend moves both control points sideways, so the middle moves by `bend`.
+    const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+    const side = { x: ((b.y - a.y) / len) * (e.bend ?? 0) * (4 / 3), y: (-(b.x - a.x) / len) * (e.bend ?? 0) * (4 / 3) };
+    const c1 = { x: a.x + da.x * pull + side.x, y: a.y + da.y * pull + side.y };
+    const c2 = { x: b.x + db.x * pull + side.x, y: b.y + db.y * pull + side.y };
+    const mid = { x: (a.x + 3 * c1.x + 3 * c2.x + b.x) / 8, y: (a.y + 3 * c1.y + 3 * c2.y + b.y) / 8 };
+    return { ...base, d: `M${pt(a)} C${pt(c1)} ${pt(c2)} ${pt(b)}`, mid: { x: round(mid.x), y: round(mid.y), len }, stub: null };
   });
 
   return {
-    width: Math.ceil(out.width ?? 0),
-    height: Math.ceil(out.height ?? 0),
+    width: Math.ceil(Math.max(0, ...boxes.map((b) => b.x + b.w))),
+    height: Math.ceil(Math.max(0, ...boxes.map((b) => b.y + b.h))),
     boxes,
     wires,
-    hub: weightiest.get(2) ?? null,
+    hub: [...hubs].find((id) => nodes.get(id)!.level === 2) ?? null,
   };
 };
+

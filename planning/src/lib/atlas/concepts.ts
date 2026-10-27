@@ -12,6 +12,7 @@ export { plain };
 export interface Loaded {
   readonly entry: CollectionEntry<"concepts">;
   readonly slug: string;
+  readonly problem: string;
   readonly why: string;
   readonly readsFrom: readonly string[];
   readonly readBy: readonly string[];
@@ -24,14 +25,20 @@ const paragraphs = (body: string): string[] =>
     .map((block) => block.trim())
     .filter((block) => block !== "" && !/^(import |export |<|\||>|- |\* |\d+\. )/u.test(block));
 
-/** The first paragraph under a "Why" heading, else the first paragraph after the opening one. */
+const under = (body: string, heading: RegExp): string | null => {
+  const at = body.search(heading);
+  if (at < 0) return null;
+  const rest = body.slice(at).replace(/^.*\n/u, "");
+  const first = paragraphs(rest.split(/^#{2,3}\s/mu)[0] ?? "")[0];
+  return first ? plain(first) : null;
+};
+
+const problemOf = (body: string): string => under(body, /^#{2,3}\s+the problem\b/imu) ?? "";
+
+/** The Solution section, else the older "Why", else the first paragraph after the opening one. */
 const whyOf = (body: string): string => {
-  const at = body.search(/^#{2,3}\s+why\b/imu);
-  if (at >= 0) {
-    const rest = body.slice(at).replace(/^.*\n/u, "");
-    const first = paragraphs(rest).find((p) => !p.startsWith("#"));
-    if (first) return plain(first);
-  }
+  const found = under(body, /^#{2,3}\s+the solution\b/imu) ?? under(body, /^#{2,3}\s+why\b/imu);
+  if (found) return found;
   const prose = paragraphs(body).filter((p) => !p.startsWith("#"));
   return plain(prose[1] ?? prose[0] ?? "");
 };
@@ -46,6 +53,7 @@ const load = async (): Promise<Loaded[]> => {
     .map((entry) => ({
       entry,
       slug: entry.data.slug,
+      problem: problemOf(entry.body ?? ""),
       why: whyOf(entry.body ?? ""),
       readsFrom: entry.data.related.filter((s) => slugs.has(s)),
       readBy: entries.filter((other) => other.data.related.includes(entry.data.slug)).map((other) => other.data.slug),

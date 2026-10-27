@@ -4,6 +4,7 @@
  * buttons, the keyboard, and the side panel a click opens.
  *
  *   +/=  zoom in     -  zoom out     0  whole map     arrows  pan     Esc  close panel
+ *   L    every wire's label (otherwise only the hovered or selected box's)
  *   /atlas#cst  opens on the CST, at its level, with its panel open.
  */
 import { select } from "d3-selection";
@@ -11,7 +12,7 @@ import { zoom, zoomIdentity, type D3ZoomEvent, type ZoomTransform } from "d3-zoo
 
 interface Info {
   label: string; level: number; kind: string; crate: string | null; slug: string | null;
-  summary: string; why: string; group: boolean; x: number; y: number; w: number; h: number;
+  summary: string; problem: string; why: string; group: boolean; x: number; y: number; w: number; h: number;
 }
 interface Data { threshold: number[]; hub: string | null; width: number; height: number; info: Record<string, Info> }
 
@@ -34,7 +35,14 @@ export const mountAtlas = (): void => {
     level: el.dataset.level === undefined ? null : Number(el.dataset.level),
     px: FONT[[...el.classList].find((c) => c in FONT) ?? "node-label"] ?? 13,
     chars: el.textContent?.length ?? 0,
+    /** The label's width on screen, measured once at --k: 1 (its font is a fixed screen size). */
+    len: 0,
   }));
+  host.style.setProperty("--k", "1");
+  for (const label of labels) {
+    try { label.len = label.el.getComputedTextLength(); } catch { label.len = 0; }
+    if (!(label.len > 0)) label.len = label.chars * label.px * 0.6;
+  }
   const buttons = [...host.querySelectorAll<HTMLButtonElement>(".atlas-levels [data-level]")];
 
   // The SVG's viewBox maps the whole map onto the box at k = 1; d3's k is on top of that.
@@ -61,9 +69,13 @@ export const mountAtlas = (): void => {
       for (const b of buttons) b.setAttribute("aria-pressed", String(Number(b.dataset.level) === level));
     }
     for (const label of labels) {
-      const need = label.chars * label.px * 0.6 + (label.level === null ? 10 : 18);
-      const fits = label.w * k >= need && label.h * k >= label.px + 2
-        && (label.level === null || label.level >= level - 1);
+      // A wire label shows on demand (hover, selection, the toggle), not when it fits.
+      if (label.level !== null) {
+        label.el.toggleAttribute("data-hide", label.level < level - 1);
+        continue;
+      }
+      const need = label.len + 6;
+      const fits = label.w * k >= need && label.h * k >= label.px + 2;
       label.el.toggleAttribute("data-hide", !fits);
     }
   };
@@ -141,8 +153,18 @@ export const mountAtlas = (): void => {
     const t = svgEl.__zoom as ZoomTransform | undefined;
     const box = svgEl.getBoundingClientRect();
     const k = data.threshold[level]! * 1.3;
-    if (level === 1) return go(data.width / 2, data.height / 2, Math.max(k, Math.min(box.width / data.width, box.height / data.height) * 0.9), animate);
-    if (level === 2 && data.hub !== null) return focus(data.hub, 1.3, animate);
+    if (level === 1 || level === 2) {
+      // Level 1: the crate cards filling the view. Level 2: the primitives, as many as fit at a readable zoom.
+      const cards = Object.values(data.info).filter((n) => !n.group && n.level === level);
+      if (cards.length > 0) {
+        const x0 = Math.min(...cards.map((n) => n.x)), y0 = Math.min(...cards.map((n) => n.y));
+        const x1 = Math.max(...cards.map((n) => n.x + n.w)), y1 = Math.max(...cards.map((n) => n.y + n.h));
+        const fitK = Math.min((box.width - 48) / (x1 - x0), (box.height - 120) / (y1 - y0));
+        const ceiling = level === 1 ? data.threshold[2]! * 0.95 : data.threshold[3]! * 0.95;
+        return go((x0 + x1) / 2, (y0 + y1) / 2 - 20 / fitK, Math.min(ceiling, Math.max(data.threshold[level]! * 1.05, fitK)), animate);
+      }
+      return go(data.width / 2, data.height / 2, Math.max(k, Math.min(box.width / data.width, box.height / data.height) * 0.9), animate);
+    }
     // Level 3 zooms in where the reader already is.
     const now = t ?? zoomIdentity;
     go((cx - now.x) / now.k, (cy - now.y) / now.k, k, animate);
@@ -158,10 +180,46 @@ export const mountAtlas = (): void => {
   host.querySelector("[data-zoom=out]")!.addEventListener("click", () => scaleBy(1 / 1.5));
   host.querySelector("[data-zoom=fit]")!.addEventListener("click", () => fit());
 
+  // Focus and context: the hovered box, else the selected one, lights itself,
+  // its wires and the boxes at their other ends; the rest dims.
+  const wires = [...host.querySelectorAll<SVGElement>(".wire, .wire-label")];
+  const boxesById = new Map([...host.querySelectorAll<SVGElement>(".box")].map((el) => [el.dataset.id!, el]));
+  let hovered: string | null = null;
+  let opened: string | null = null;
+  const light = (): void => {
+    const id = hovered ?? opened;
+    for (const el of host.querySelectorAll("[data-lit], [data-near]")) {
+      el.removeAttribute("data-lit");
+      el.removeAttribute("data-near");
+    }
+    if (id === null) return void delete host.dataset.focus;
+    host.dataset.focus = id;
+    boxesById.get(id)?.setAttribute("data-lit", "");
+    for (const wire of wires) {
+      const { from, to } = wire.dataset;
+      if (from !== id && to !== id) continue;
+      wire.setAttribute("data-near", "");
+      boxesById.get(from === id ? to! : from!)?.setAttribute("data-lit", "");
+    }
+  };
+  svgEl.addEventListener("pointerover", (event) => {
+    if ((event as PointerEvent).pointerType === "touch") return;
+    const box = (event.target as Element).closest<SVGElement>(".box.node");
+    const id = box?.dataset.id ?? null;
+    if (id !== hovered) { hovered = id; light(); }
+  });
+  svgEl.addEventListener("pointerleave", () => { hovered = null; light(); });
+
+  const toggle = host.querySelector<HTMLButtonElement>("[data-labels-toggle]")!;
+  const allLabels = (on: boolean): void => {
+    host.toggleAttribute("data-labels", on);
+    toggle.setAttribute("aria-pressed", String(on));
+  };
+  toggle.addEventListener("click", () => allLabels(!host.hasAttribute("data-labels")));
+
   // The side panel.
   const panel = host.querySelector<HTMLElement>(".atlas-panel")!;
   const part = (name: string): HTMLElement => panel.querySelector<HTMLElement>(`.atlas-panel-${name}`)!;
-  let opened: string | null = null;
   let returnTo: HTMLElement | SVGElement | null = null;
   const open = (id: string, from: SVGElement | null): void => {
     const node = data.info[id];
@@ -173,8 +231,11 @@ export const mountAtlas = (): void => {
     part("eyebrow").textContent = [node.group ? "group" : node.kind, node.crate, `level ${node.level} · ${LEVELS[node.level]}`].filter(Boolean).join(" · ");
     part("title").textContent = node.label;
     part("what").textContent = node.summary || (node.slug === null ? "No concept page yet." : "");
-    part("why").textContent = node.why;
-    part("why").hidden = node.why === "";
+    for (const name of ["problem", "why"] as const) {
+      const text = node[name] ?? "";
+      part(name).textContent = text;
+      panel.querySelector<HTMLElement>(`[data-block="${name}"]`)!.hidden = text === "";
+    }
     const link = part("link") as HTMLAnchorElement;
     link.hidden = node.slug === null;
     if (node.slug !== null) link.href = `/atlas/${node.slug}`;
@@ -182,18 +243,14 @@ export const mountAtlas = (): void => {
     panel.hidden = false;
     for (const el of host.querySelectorAll("[data-selected]")) el.removeAttribute("data-selected");
     host.querySelector(`.box[data-id="${CSS.escape(id)}"]`)?.setAttribute("data-selected", "");
-    for (const wire of host.querySelectorAll<SVGGElement>(".wire")) {
-      wire.toggleAttribute("data-near", wire.dataset.from === id || wire.dataset.to === id);
-    }
+    light();
     part("close").focus({ preventScroll: true });
   };
   const close = (): void => {
     panel.hidden = true;
     opened = null;
-    for (const el of host.querySelectorAll("[data-selected], [data-near]")) {
-      el.removeAttribute("data-selected");
-      el.removeAttribute("data-near");
-    }
+    for (const el of host.querySelectorAll("[data-selected]")) el.removeAttribute("data-selected");
+    light();
     (returnTo as HTMLElement | null)?.focus?.({ preventScroll: true });
   };
   part("close").addEventListener("click", close);
@@ -236,6 +293,7 @@ export const mountAtlas = (): void => {
       case "ArrowRight": svg.call(behaviour.translateBy as never, -PAN / ((svgEl.__zoom as ZoomTransform).k * base()), 0); break;
       case "ArrowUp": svg.call(behaviour.translateBy as never, 0, PAN / ((svgEl.__zoom as ZoomTransform).k * base())); break;
       case "ArrowDown": svg.call(behaviour.translateBy as never, 0, -PAN / ((svgEl.__zoom as ZoomTransform).k * base())); break;
+      case "l": case "L": allLabels(!host.hasAttribute("data-labels")); break;
       case "Escape": if (!panel.hidden) close(); else return; break;
       case "Enter": {
         const box = target.closest<SVGElement>(".box");

@@ -271,6 +271,9 @@
   .atlas[data-z="0"] :is(.lv-1, .lv-2, .lv-3),
   .atlas[data-z="1"] :is(.lv-2, .lv-3),
   .atlas[data-z="2"] .lv-3,
+  .atlas:is([data-z="0"], [data-z="1"]) .from-2,
+  .atlas:is([data-z="2"], [data-z="3"]) .until-2,
+  .atlas:not([data-labels]) .wire-label:not([data-near]),
   .atlas .label[data-hide] { opacity: 0; visibility: hidden; pointer-events: none; }
 
   .atlas .label { fill: var(--on-surface-primary); text-anchor: middle; dominant-baseline: central; pointer-events: none; }
@@ -284,12 +287,17 @@
     font-size: calc(11px / var(--k)); font-family: var(--font-mono); fill: var(--on-surface-secondary);
     filter: url(#atlas-label-bg);
   }
+  .atlas .stub-label {
+    font-size: calc(10px / var(--k)); font-weight: 600; fill: var(--on-surface-secondary); text-anchor: middle;
+    dominant-baseline: auto; pointer-events: none;
+  }
   .atlas .atlas-label-flood { flood-color: var(--surface-canvas); }
 
   .atlas .box { cursor: pointer; outline: none; }
   .atlas .box rect { vector-effect: non-scaling-stroke; stroke-width: 1.25; }
   .atlas .node rect { fill: var(--crate-wash, var(--surface-primary)); stroke: var(--crate-edge, var(--on-surface-tertiary)); }
   .atlas .node.hub rect { stroke: var(--crate-ink); stroke-width: 2.5; }
+  .atlas .node.lv-1 .node-label { font-size: calc(15px / var(--k)); font-weight: 650; }
   .atlas .node.hub .node-label { font-weight: 700; font-size: calc(15px / var(--k)); }
   .atlas .node.kind-wire rect { stroke-dasharray: 5 3; }
   .atlas .node.kind-product rect, .atlas .node.kind-consumer rect { stroke: var(--crate-ink, var(--on-surface-secondary)); stroke-width: 2; }
@@ -308,11 +316,14 @@
   .atlas .box[data-selected] > rect { stroke: var(--brand-base); stroke-width: 3; }
 
   .atlas .wire path { fill: none; stroke: var(--on-surface-tertiary); stroke-width: 1.4; vector-effect: non-scaling-stroke; }
-  .atlas .wire[data-kind="dep"] path { stroke-dasharray: 6 4; }
-  .atlas .wire[data-kind="wire"] path { stroke: var(--brand-base); }
+  .atlas .wire[data-kind="generates"] path { stroke-dasharray: 6 4; }
   .atlas[data-z="2"] :is(.wl-0, .wl-1), .atlas[data-z="3"] :is(.wl-0, .wl-1) { opacity: 0.35; }
   .atlas .wire[data-near] path { stroke: var(--brand-base); stroke-width: 2.5; opacity: 1; }
-  .atlas #atlas-arrow path { fill: var(--on-surface-tertiary); }
+  .atlas [id^="atlas-arrow"] path { fill: var(--on-surface-tertiary); fill: context-stroke; }
+  /* Focus and context: hovering or selecting a box dims everything not wired to it. */
+  .atlas[data-focus] :is(.node:not([data-lit]), .wire:not([data-near])) { opacity: 0.16; }
+  .atlas[data-focus] .group:not([data-lit]) { opacity: 0.6; }
+  .atlas .wire-label[data-near] { fill: var(--on-surface-primary); }
 
   .atlas-levels {
     position: absolute; inset-block-start: 12px; inset-inline-start: 12px; display: flex; flex-wrap: wrap; gap: 4px;
@@ -345,8 +356,13 @@
   .atlas-panel-eyebrow { font-size: var(--text-smallest); font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--crate-ink, var(--on-surface-secondary)); padding-inline-end: 2rem; }
   .atlas-panel-title { margin: 2px 0 0; font-size: var(--text-h4); font-weight: 650; }
   .atlas-panel-what { margin: 6px 0 0; }
-  .atlas-panel-why { margin: 8px 0 0; font-size: var(--text-small); color: var(--on-surface-secondary); }
-  .atlas-panel-why::before { content: "Why: "; font-weight: 600; color: var(--on-surface-primary); }
+  .atlas-panel-block { margin: 10px 0 0; }
+  .atlas-panel-block[hidden] { display: none; }
+  .atlas-panel-block h3 {
+    margin: 0; font-size: var(--text-smallest); font-weight: 650; letter-spacing: 0.05em; text-transform: uppercase;
+    color: var(--on-surface-tertiary);
+  }
+  .atlas-panel-block p { margin: 2px 0 0; font-size: var(--text-small); color: var(--on-surface-secondary); }
   .atlas-panel-actions { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-top: 12px; font-size: var(--text-small); }
   .atlas-panel-zoom { color: var(--brand-base); }
   .atlas-fixture.atlas-intro { background: var(--surface-primary); color: var(--brand-base); border: var(--border-thin) solid var(--surface-border); font-size: var(--text-small); text-decoration: none; }

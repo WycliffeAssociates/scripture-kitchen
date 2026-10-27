@@ -14,7 +14,7 @@ import { fixtures } from "../../lib/atlas/paths.ts";
 
 const concepts = await loadConcepts();
 const info = new Map<string, ConceptInfo>(concepts.map((c) => [c.slug, {
-  crate: c.entry.data.crate, kind: c.entry.data.kind, summary: plain(c.entry.data.summary), why: c.why,
+  crate: c.entry.data.crate, kind: c.entry.data.kind, summary: plain(c.entry.data.summary), problem: c.problem, why: c.why,
 }]));
 const canvas = await layoutCanvas(readMap(), info);
 ---

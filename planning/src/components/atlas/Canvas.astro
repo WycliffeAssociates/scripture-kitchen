@@ -6,17 +6,19 @@
  * when their box is too small to hold them.
  */
 import type { Canvas } from "../../lib/atlas/canvas.ts";
-import { LEVEL_NAMES, THRESHOLD } from "../../lib/atlas/canvas.ts";
+import { LEVEL_NAMES, SCALE, THRESHOLD } from "../../lib/atlas/canvas.ts";
 
 interface Props { canvas: Canvas }
 const { canvas } = Astro.props;
 const pad = 40;
 const info = Object.fromEntries(canvas.boxes.map((b) => [b.id, {
-  label: b.label, level: b.level, kind: b.kind, crate: b.crate, slug: b.slug, summary: b.summary, why: b.why, group: b.group,
+  label: b.label, level: b.level, kind: b.kind, crate: b.crate, slug: b.slug, summary: b.summary, problem: b.problem, why: b.why, group: b.group,
   x: b.x, y: b.y, w: b.w, h: b.h,
 }]));
 const data = { threshold: THRESHOLD, hub: canvas.hub, width: canvas.width, height: canvas.height, info };
 const href = (slug: string | null): string | undefined => (slug === null ? undefined : `/atlas/${slug}`);
+/** `from-2` shows a crate's frame from level 2; `until-2` hides its card and the card's wires there. */
+const span = (from: number | null, until: number | null): string[] => [from === null ? "" : `from-${from}`, until === null ? "" : `until-${until}`];
 ---
 <div class="atlas" data-atlas data-z="0" tabindex="0" aria-label="The scripture-kitchen map. Drag to pan; scroll, pinch or plus and minus to zoom; click a box for what it is.">
   <svg class="atlas-svg" role="group" viewBox={`${-pad} ${-pad} ${canvas.width + pad * 2} ${canvas.height + pad * 2}`} preserveAspectRatio="xMidYMid meet">
@@ -26,31 +28,35 @@ const href = (slug: string | null): string | undefined => (slug === null ? undef
         <feFlood class="atlas-label-flood" />
         <feComposite in="SourceGraphic" />
       </filter>
-      <marker id="atlas-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
-        <path d="M0,0 L10,5 L0,10 z" />
-      </marker>
+      <!-- One arrowhead per level, sized for the zoom that level is read at. -->
+      {SCALE.map((s, level) => (
+        <marker id={`atlas-arrow-${level}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth={8 * s} markerHeight={8 * s} markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" />
+        </marker>
+      ))}
     </defs>
     <g data-viewport>
       {canvas.boxes.filter((b) => b.group).map((b) => (
-        <a class={`box group lv-${b.level} gc-${b.opens}`} href={href(b.slug)} data-id={b.id} data-crate={b.crate ?? undefined} tabindex="0">
+        <a class:list={["box group", `lv-${b.level}`, `gc-${b.opens}`, ...span(b.from, b.until)]} href={href(b.slug)} data-id={b.id} data-crate={b.crate ?? undefined} tabindex="0">
           <rect x={b.x} y={b.y} width={b.w} height={b.h} rx={6 * Math.min(6, b.h / 40)} />
           <text class="label tile-label" x={b.x + b.w / 2} y={b.y + b.h / 2} data-w={b.w} data-h={b.h}>{b.label}</text>
           <text class="label head-label" x={b.x + b.head * 0.5} y={b.y + b.head * 0.5} data-w={b.w} data-h={b.head}>{b.label}</text>
         </a>
       ))}
       {canvas.wires.map((e) => (
-        <g class={`wire lv-${e.shows} wl-${e.level}`} data-kind={e.kind} data-from={e.from} data-to={e.to}>
-          <path d={e.d} marker-end="url(#atlas-arrow)" />
+        <g class:list={["wire", `lv-${e.shows}`, `wl-${e.level}`, ...span(null, e.until)]} data-kind={e.kind} data-from={e.from} data-to={e.to}>
+          <path d={e.d} marker-end={`url(#atlas-arrow-${e.shows})`} />
+          {e.stub && <text class="stub-label" x={e.stub.x} y={e.stub.y}>{e.stub.name}</text>}
         </g>
       ))}
       {canvas.boxes.filter((b) => !b.group).map((b) => (
-        <a class:list={["box node", `lv-${b.level}`, `kind-${b.kind}`, b.hub && "hub"]} href={href(b.slug)} data-id={b.id} data-crate={b.crate ?? undefined} tabindex="0">
+        <a class:list={["box node", `lv-${b.level}`, `kind-${b.kind}`, b.hub && "hub", ...span(b.from, b.until)]} href={href(b.slug)} data-id={b.id} data-crate={b.crate ?? undefined} tabindex="0">
           <rect x={b.x} y={b.y} width={b.w} height={b.h} rx={b.h * 0.22} />
           <text class="label node-label" x={b.x + b.w / 2} y={b.y + b.h / 2} data-w={b.w} data-h={b.h}>{b.label}</text>
         </a>
       ))}
-      {canvas.wires.filter((e) => e.label !== null && e.mid !== null).map((e) => (
-        <text class={`label wire-label lv-${e.shows} wl-${e.level}`} x={e.mid!.x} y={e.mid!.y} data-w={e.mid!.len} data-level={e.level}>{e.label}</text>
+      {canvas.wires.filter((e) => e.label !== null).map((e) => (
+        <text class:list={["label wire-label", `lv-${e.shows}`, `wl-${e.level}`, ...span(null, e.until)]} x={e.mid.x} y={e.mid.y} data-w={e.mid.len} data-level={e.level} data-from={e.from} data-to={e.to}>{e.label}</text>
       ))}
     </g>
   </svg>
@@ -66,6 +72,7 @@ const href = (slug: string | null): string | undefined => (slug === null ? undef
       <button type="button" data-zoom="out" title="Zoom out (−)" aria-label="Zoom out">−</button>
       <button type="button" data-zoom="fit" title="Whole map (0)" aria-label="Whole map">⤢</button>
     </span>
+    <button type="button" class="atlas-labels-toggle" data-labels-toggle aria-pressed="false" title="Show every wire's label (L)">labels</button>
   </div>
 
   <aside class="atlas-panel" hidden aria-live="polite" data-ref="atlas-panel">
@@ -73,7 +80,8 @@ const href = (slug: string | null): string | undefined => (slug === null ? undef
     <div class="atlas-panel-eyebrow"></div>
     <h2 class="atlas-panel-title"></h2>
     <p class="atlas-panel-what"></p>
-    <p class="atlas-panel-why"></p>
+    <section class="atlas-panel-block" data-block="problem"><h3>The problem</h3><p class="atlas-panel-problem"></p></section>
+    <section class="atlas-panel-block" data-block="why"><h3>The solution</h3><p class="atlas-panel-why"></p></section>
     <div class="atlas-panel-actions">
       <a class="atlas-panel-link">Read the page →</a>
       <button type="button" class="atlas-panel-zoom">Zoom in</button>
