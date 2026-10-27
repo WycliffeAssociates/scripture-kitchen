@@ -715,9 +715,18 @@ mod tests {
         assert_eq!(units("1,234,567"), [("1,234,567", false)]);
         assert_eq!(units("3.5"), [("3.5", false)]);
         assert_eq!(units("1\u{2019}000"), [("1\u{2019}000", false)]);
-        assert_eq!(units("\u{663}\u{66B}\u{665}"), [("\u{663}\u{66B}\u{665}", false)]);
-        assert_eq!(units("12,,3"), [("12", false), (",", false), (",", false), ("3", false)]);
-        assert_eq!(units("12, 3"), [("12", false), (",", false), (" ", false), ("3", false)]);
+        assert_eq!(
+            units("\u{663}\u{66B}\u{665}"),
+            [("\u{663}\u{66B}\u{665}", false)]
+        );
+        assert_eq!(
+            units("12,,3"),
+            [("12", false), (",", false), (",", false), ("3", false)]
+        );
+        assert_eq!(
+            units("12, 3"),
+            [("12", false), (",", false), (" ", false), ("3", false)]
+        );
         assert_eq!(units("1:1"), [("1", false), (":", false), ("1", false)]);
         assert_eq!(units("v3.a"), [("v3", true), (".", false), ("a", true)]);
         assert_eq!(units("12,"), [("12", false), (",", false)]);
