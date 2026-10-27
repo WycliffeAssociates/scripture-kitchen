@@ -1,11 +1,23 @@
 ---
 title: scripture-kitchen atlas
-summary: "What scripture-kitchen is, who uses it, and a map of how its pieces fit together."
+summary: "What scripture-kitchen is, the invariants that drive it, and a map of how its pieces fit together."
 ---
 
 # scripture-kitchen
 
-Bible translators keep their work in USFM: plain-text files, one book per file, with backslash markers like `\v 16` for verses and `\f` for footnotes. scripture-kitchen is the engine that reads those files without losing a byte. Its main user is Sefer, a translation editor that runs in the browser and calls the engine through WebAssembly, often on every keystroke. The engine checks the markup, finds chapters and verses, and hands the editor compact buffers of numbers. A second product, Sous Chef, learns what a translation normally does and flags what breaks its own pattern. It shows plain counts ("this spelling occurs 1 of 1,053 times") and leaves the call to a person. Everything is Rust; the editor gets one JavaScript package.
+The Rust workspace behind Sefer's USFM editing and proofreading. **Onion** parses USFM losslessly and answers structural questions (tree, verse index, lint, format, diff, exports) fast enough to run per keystroke in WebAssembly. **Sous Chef** flags reviewable inconsistencies from a project's own counts, in any language, and **galley** holds the state between calls and ships the one JS package Sefer vendors.
+
+## Invariants
+
+Seven rules drive most of the design; [[invariants]] gives each its reason and what it forces.
+
+1. **Lossless.** Bytes in are bytes out: a CST, not an AST; surplus whitespace is a `Pad` token; closers are recorded, never inserted.
+2. **Offsets over object graphs.** A token is 12 bytes of numbers; every per-call answer is a binary wire of ranges, enum kinds and string tables.
+3. **Flag, never repair.** Lint reports and offers edits; nothing is guessed or silently normalised.
+4. **Stateless engines.** Onion and sous-core keep nothing; galley's pantry holds all state, keyed by content.
+5. **The chapter is the unit of rework.** Parse, lint and Sous counts are per chapter, folded per book.
+6. **Author once, generate the rest.** Marker table, wire readers and writers, diagnostics and Unicode tables are generated and staleness-tested.
+7. **Sous judges from counts, behind a neutral seam.** No rule lists and no dependency on onion.
 
 ## The pieces
 
@@ -26,7 +38,7 @@ One Rust workspace, two products, one JS package.
 
 ## Where to start
 
-Read the [[cst]]. It is the base nearly everything reads: [[mask]], [[lint]], the [[exports]] and the [[dish]]. Then [[toc]] (where things are, no tree needed), then [[chunk]] and the [[chunk-cache]] (how a keystroke avoids re-reading a book).
+Read [[invariants]], then the [[cst]]. It is the base nearly everything reads: [[mask]], [[lint]], the [[exports]] and the [[dish]]. Then [[toc]] (where things are, no tree needed), then [[chunk]] and the [[chunk-cache]] (how a keystroke avoids re-reading a book).
 
 ```mermaid
 flowchart LR

@@ -7,23 +7,22 @@ crate: galley
 files: [galley/src/overlay.md, galley/src/overlay.rs, galley/tests/overlay.rs]
 related: [cst, mask, lint, edit, onion-book, pantry]
 level: 2
-summary: "Copy a source Bible's paragraph and poetry breaks onto a translation that has only verse markers, as edits the translator can accept."
+summary: "Copies a source text's paragraph and poetry breaks onto a verse-only draft, as edits addressed by verse."
 ---
 
 ## The problem
 
-Many translations are drafted as bare verses: verse markers and text, with no paragraph or poetry breaks. A translator wants them laid out like a source Bible, so Genesis 2:23 reads as four lines of poetry. Doing it by hand is slow, and guessing where to break a sentence in another language is impossible to do reliably.
+Drafts often arrive as bare `\v` plus text. Teams want them laid out like a source Bible (Gen 2:23 as four poetry lines); doing it by hand is slow, and guessing a mid-verse break position across languages is not reliable.
 
 ## The solution
 
-We read the source's layout as a list of breaks, each addressed by verse: "a paragraph starts before verse 24", "the second poetry line inside verse 23". Verse numbers mean the same thing in every language, so breaks before a verse land exactly. Breaks inside a verse cannot be placed by word, so we insert them empty after the verse's text, and the translator pastes the words in. We do not guess by text length or proportion. The result is one set of [[edit]]s, offered as a suggestion, never as a problem in the book.
+Read the source's layout as breaks addressed by verse ("`\p` before v24", "second `\q` line inside v23"). Verse identity holds across languages, so breaks between verses land exactly; breaks inside a verse are inserted empty after its text for the translator to fill. No proportional guessing ([[invariants]] 3). The output is one set of [[edit]]s offered as a suggestion, never a diagnostic.
 
 ## Trade-offs
 
-- Breaks inside a verse arrive empty; the translator still has to move text into them.
-- Footnotes are not copied across.
-- The source text must be kept loaded in the [[pantry]] (`keepText`).
-- It is not part of publishing; it only runs when asked.
+- Breaks inside a verse arrive empty.
+- Footnotes are not copied.
+- The source must keep its text in the [[pantry]] (`keepText`).
 
 ## Show me
 

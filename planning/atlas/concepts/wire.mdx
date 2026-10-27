@@ -7,26 +7,22 @@ crate: workspace
 files: [ticket/src/schema.rs, ticket/src/emit.rs, onion/src/wire/schema.rs, galley/src/toc/schema.rs, galley/src/find/wire/schema.rs, galley/src/mask/schema.rs, agents/architecture.md]
 related: [ticket, dish, census, find-buffer, mask-map, findings-snapshot, corpus, plate]
 level: 3
-summary: "How results cross from the Rust engine to the JavaScript editor: one buffer of numbers, read in place by generated code, instead of copied strings and objects."
+summary: "How answers cross to JS. One buffer of integers (from/to ranges, enum kinds, string tables) with both ends generated from one declaration."
 ---
 
 ## The problem
 
-The editor, Sefer, runs in a browser and calls the Rust engine through WebAssembly, often on every keystroke. USFM stores one book per file, so each call is about a whole book: up to a few thousand verses and tens of thousands of tokens. Every string or object handed across that boundary must be converted into a JavaScript value, and that conversion is what gets expensive. How do we hand JavaScript a whole parsed book cheaply, and keep both sides agreeing on its shape?
+Sefer calls the engine through WebAssembly on every keystroke, and each call covers a whole book. Strings and objects are the cost at that boundary: a string per token allocates in Rust and again in JS, and JSON adds an encode and a parse per call.
 
 ## The solution
 
-Send numbers, not text. A wire is one flat buffer, mostly fixed-size rows of integers. Text is not copied: a row says "bytes 120 to 135 of the file you already have". The few strings that must travel, like book ids, go once into a small table that rows point at. Kinds of things (marker category, lint code) are enum numbers whose names both sides share. Positions are number ranges: "this finding covers bytes 4,100 to 4,180", or "chapter 3, verses 16 to 18".
-
-The alternative is JSON or a JavaScript object per node. That means allocating thousands of objects per keystroke; an early measurement found encoding, not copying, was the cost.
-
-To keep both sides in step, each format is declared once in Rust. Code generation writes the Rust writer and the TypeScript reader from that declaration. A test fails if either is stale, and the reader refuses a buffer from the wrong version.
+Offsets over object graphs ([[invariants]] 2). A wire is one flat buffer, mostly fixed-stride rows: positions as from/to integer ranges into text the caller already holds, kinds as enum numbers both sides share, and a string table only where text must travel (book ids, find previews, fix text). Measured in Node, encoding was the cost and the copy was free (13c3d3b). Each format is declared once against [[ticket]]'s vocabulary; the Rust writer and the TS reader are generated and staleness-tested, and a reader refuses a buffer of the wrong version ([[invariants]] 6).
 
 ## Trade-offs
 
-- A wire is a versioned format. Changing a shape bumps the version, and every consumer must take the new reader.
-- The JS side reads through a cursor, not ordinary objects. That is less convenient to debug than JSON.
-- Two formats are still partly hand-written: the [[corpus]] envelope and sous-core's reader.
+- Versioned: a shape change bumps the version, and every consumer takes the new reader.
+- Cursor reads, not objects: harder to eyeball than JSON.
+- Two formats are still partly read by hand: the [[corpus]] envelope and sous-core's snapshot.
 
 ## Show me
 

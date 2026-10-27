@@ -7,21 +7,21 @@ crate: onion
 files: [onion/src/vref.rs, onion/tests/vref_corpus.rs]
 related: [toc, mask, designator]
 level: 2
-summary: "Write a book as one line per verse, so line N names the same verse in every translation."
+summary: "One line per verse from the verse-text mask and TOC; a bridge writes range placeholders so line N stays verse N."
 ---
 
 ## The problem
 
-Many Bible tools, such as alignment and machine translation, want scripture as one verse per line. Line 1 is Genesis 1:1 in every translation, so two files line up just by line number. A USFM file does not look like that: verses wrap, carry footnotes, and sometimes combine, as in "verses 2-3".
+Alignment and MT tools want ebible's vref shape, where line N is the same verse in every translation. Bridges (`\v 2-3`) and wrapped, footnoted verses break that if rendered naively.
 
 ## The solution
 
-We take the book's verse-text [[mask]] (markup and footnotes already removed) and its verse index (the [[toc]]), and print one line per verse. A combined verse puts its text on its first verse's line and writes `<range>` on each verse it covers. Dropping those lines would shift every later verse onto the wrong line. This follows ebible's vref format. The renderer does no filtering of its own; what counts as verse text is decided by the mask passed in.
+Render the verse-text [[mask]] by [[toc]] rows. A bridge writes its text on its first verse's line and `<range>` on each verse it covers, so later lines do not shift. It does no filtering of its own; what counts as verse text is the mask's recipe. Lossy by name ([[invariants]] 1).
 
 ## Trade-offs
 
-- Newlines and tabs inside a verse become spaces, because a line cannot hold a newline or a column a tab.
-- Verses the book never had get no blank line. That needs a versification table, which onion does not own (planning item 2026-10-14).
+- Newlines and tabs inside a verse become spaces.
+- Verses the book never had get no blank line; that needs a versification table onion does not own (planning item 2026-10-14).
 
 ## Show me
 

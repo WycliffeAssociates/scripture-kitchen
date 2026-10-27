@@ -7,23 +7,22 @@ crate: onion
 files: [onion/src/diff.rs, onion/src/edit.rs, onion/tests/diff_laws.rs, planning/items/2026-09-28-0-1-8-diff-sends-what-changed-no-moves.mdx, planning/items/2026-09-28-binary-diff-wire-a-reader-beside-the-json-not-scheduled.mdx]
 related: [toc, edit, mask, cst, plate]
 level: 2
-summary: "Compare two versions of a book verse by verse, then let someone keep either side of each change."
+summary: "Verse-aligned compare of two versions of a book, and a per-verse merge returned as text or edits."
 ---
 
 ## The problem
 
-A translator has two copies of the same book: the one on their machine and the one a colleague edited. They need to see what changed, verse by verse, and pick which wording to keep. A line-based diff is the wrong unit: one reflowed paragraph shows as dozens of changed lines, and it cannot say "verse 3 changed".
+Reviewing a colleague's copy of a book needs answers per verse ("verse 3 changed"). A line diff cannot give that: one reflowed paragraph is dozens of changed lines.
 
 ## The solution
 
-We cut each copy into blocks at chapter and verse markers, line the blocks up, and report each verse as unchanged, modified, added or deleted. The cut points already exist in the [[toc]], so we reuse them instead of re-reading the file. A merge is then just "for each verse, take this side", written back out as text or as a list of [[edit]]s the editor can replay. Inside a modified verse, the caller can ask for word-level or character-level detail. A verse that moved is shown as a deletion plus an addition: we do not detect moves.
+Cut both sides at the [[toc]]'s chapter and verse anchors (no re-scan), align by verse identity, and report each unit as modified, added or deleted; word or character detail is opt-in inside a modified unit. Merge is "take this side" per unit, written out as text or as [[edit]]s. Moves are not detected: a moved verse is a delete plus an add (0.1.8).
 
 ## Trade-offs
 
-- No move detection. A verse out of order appears twice, once deleted and once added (0.1.8).
-- The result crosses to JavaScript as JSON, not packed numbers. It is the one rich export, accepted because it runs rarely, when the editor opens a comparison view, not per keystroke.
-- With word-level detail on, JSON for 66 books grows from 221 KB to 6.2 MB. A binary format is parked until someone needs it.
-- Word boundaries never cross a footnote edge, so a footnote is compared as its own text.
+- JSON, not a binary wire: an accepted exception to [[invariants]] 2 for a cold, modal-open path.
+- Word detail grows 66-book JSON from 221 KB to 6.2 MB (17 ms of `JSON.parse`); a binary run wire is parked.
+- Word boundaries never cross a footnote edge.
 
 ## Show me
 

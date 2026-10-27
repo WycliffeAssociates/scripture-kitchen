@@ -7,21 +7,21 @@ crate: onion
 files: [onion/src/toc.rs, onion/tests/toc_oracle.rs]
 related: [token, designator, resolve, vref, diff, census, pantry, onion-book]
 level: 2
-summary: "A cheap table of where each chapter and verse starts in a file, so code can answer 'what verse is this?' without building the full tree."
+summary: "A flat chapter and verse index built from tokens alone. Where is this byte, where does chapter 3 start, no tree needed."
 ---
 
 ## The problem
 
-Many questions are just "where": which verse is the cursor in, where does chapter 3 start, how many verses are in this book? Building the full document tree to answer them is wasted work on every keystroke. And every byte needs an answer, including the title page before chapter 1.
+Cursor to verse, go to chapter, verse counts: "where" questions asked per keystroke that should not pay for a tree. Every byte needs an answer, front matter included.
 
 ## The solution
 
-We build a flat table straight from the scanned pieces: the book code, one row per chapter, and one entry per verse marker with its label. Chapter rows cover the whole file end to end, with the front matter as chapter 0, so "where is this byte?" always has an answer. Verse labels like `12b` or `1,3,5` are kept as positions into the file, because a pair of numbers cannot hold their spelling. This avoids the tree entirely, so an editor can keep a table of contents without paying for structure.
+One pass over the [[token]]s (5.8 ns per token on en_ulb, 13c3d3b) yields fixed 16-byte rows ([[invariants]] 2). Chapters tile the file and front matter is chapter 0, so `locate` is total. Verse labels stay as source offsets, since a number pair cannot hold `12b`; [[designator]] interprets them on demand.
 
 ## Trade-offs
 
-- A verse runs to the next verse or chapter marker, so a heading just before verse 4 counts as part of verse 3. [[resolve]] offers an "opening" point for callers who want the heading.
-- A bridge like `\v 2-3` is one entry naming two verses. Counting verses is left to the caller.
+- A verse runs to the next verse or chapter marker, so a heading before verse 4 belongs to verse 3; [[resolve]] offers an "opening" for callers who want it.
+- A bridge like `\v 2-3` is one entry naming two verses; counting is the caller's.
 - A malformed verse number keeps its row with numbers 0, rather than being guessed or dropped.
 
 ## Show me

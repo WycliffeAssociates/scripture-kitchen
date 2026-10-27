@@ -7,21 +7,21 @@ crate: sous-cli
 files: [sous-chef/cli/Cargo.toml, sous-chef/cli/src/main.rs]
 related: [sous-chef, sous-core, galley, onion]
 level: 1
-summary: "A command-line tool that runs the proofreader over USFM files on disk and prints or saves what it finds."
+summary: "Command-line adapter. Reads USFM from disk, parses with onion, publishes through galley's stateless seam, prints a debug view."
 ---
 
 ## The problem
 
-Developers and testers need to run the proofreader on a folder of USFM books without opening an editor. Someone has to find the files, parse them, feed them to the proofreader and print the results. None of that belongs in the counting engine itself.
+Developers and testers need to run Sous over a folder of books without an editor, and file I/O does not belong in the counting engine.
 
 ## The solution
 
-sous-cli is that glue, and nothing more. It reads files from disk, uses the USFM engine to parse them, and passes them to [[sous-core]] through [[galley]]'s publication code. It can be a separate crate because it only calls the others; no other crate depends on it. Its output is a debug view while the findings format settles.
+sous-cli is that glue and nothing more. It reads files, parses with onion, and hands them to [[sous-core]] through [[galley]]'s publication seam. No crate depends on it.
 
 ## Trade-offs
 
-- Its printed output is for debugging, not a stable interface.
-- The file-loading and adaptation code lives here alone. The charter says to pull it into a shared crate only when a second consumer needs it.
+- The printed output is for debugging, not a stable interface.
+- The file-loading adapter lives here alone; the charter says to extract a shared crate only when a second consumer needs one.
 
 ## Show me
 

@@ -7,22 +7,22 @@ crate: onion
 files: [onion/src/chunk.rs, onion/src/lint/carried.rs, onion/src/lint.rs, onion/src/cst.rs, onion/tests/fold_oracle.rs]
 related: [chunk-cache, cst, lint, scanner, pantry]
 level: 2
-summary: "Cutting a book into chapters that can be parsed separately, plus the few facts carried between them so the result matches parsing the whole book."
+summary: "Cut a book at each chapter marker, process each piece alone, and fold an explicit carry so the result equals a whole-book parse."
 ---
 
 ## The problem
 
-A typical edit changes one chapter, but a parser normally reads a whole file. To re-parse only the changed chapter, each chapter must be parseable on its own. Mostly it is. A few facts are not local, though: the USFM version is declared once at the top of the book, and "chapters are numbered in order" can only be checked across chapters.
+To reparse one chapter per keystroke, a chapter has to be processable without its neighbours. A few facts are not local: the `\usfm` version and book kind come from the front matter, and chapter order and once-per-book markers span chapters.
 
 ## The solution
 
-Cut the book before each line that starts with `\c` (the chapter marker). Parse and check each piece alone. Each piece also writes down a small summary of what it saw that matters beyond itself, its **carry**: first and last chapter number, markers allowed once per book, ranges left open. A final pass folds the summaries in order to make the book-level judgments. The alternative, re-parsing the whole book per keystroke, is the cost this removes. A whole-book check is just the one-piece case of the same fold, so every rule is written once.
+Cut before each line starting `\c`, and scan, build and lint each piece alone ([[invariants]] 5). Each piece emits a small `Carried` summary (first and last chapter, once-per-book markers, open ranges), and a final fold makes the book-level calls. The whole-book path is the one-chunk case of the same fold, so every rule is written once and `fold_oracle` holds the two equal.
 
 ## Trade-offs
 
-- The first piece's version line and "is this a scripture book" flag feed every later piece, so editing them re-derives all pieces.
-- A construct left open across a chapter break (a sidebar, say) cannot be cut there; the two pieces are fused and parsed together.
-- Every cross-chapter rule must be written as a summary plus a fold, which is more work than a whole-book scan.
+- Editing chunk 0's version line or book kind re-derives every chunk.
+- A construct open across a `\c` (a sidebar) fuses the two pieces.
+- Cross-chapter rules must be written as carry plus fold.
 
 ## Show me
 

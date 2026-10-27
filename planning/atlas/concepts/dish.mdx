@@ -7,22 +7,22 @@ crate: onion
 files: [onion/src/wire/schema.rs, onion/src/wire/generated.rs, onion-wasm/reader.ts, onion/tests/wire_roundtrip.rs]
 related: [plate, wire, ticket, token, cst, lint, toc, corpus]
 level: 3
-summary: "Everything one parse of a book produces, packed into a single buffer of numbers that JavaScript reads in place."
+summary: "The ONWR buffer one parse produces. Ten sections of fixed-stride rows, read in place by a generated reader."
 ---
 
 ## The problem
 
-The editor needs the full result of parsing a book: every piece of markup, how the pieces nest, the problems found, suggested fixes, and where each chapter and verse sits. It asks again as the translator types, and a book is one file, so each ask covers a whole book. Building thousands of JavaScript objects and strings for that on every ask would be slow.
+Sefer needs a whole book's tokens, tree, diagnostics, fixes and chapter/verse index on every keystroke. Materialising those as JS objects and strings per call would cost more than the parse.
 
 ## The solution
 
-One parse becomes one buffer: a short header, a table of contents for the buffer, and ten sections of fixed-size number rows. Positions are numbers pointing into the text the editor already has, so almost no strings cross. The obvious alternative is converting the parse to JSON or JavaScript objects; that copies every string and allocates per item. The buffer also ships the parse tree itself, so any consumer can build its own views (blocks, lines, footnote contents) without the engine guessing which ones it wants.
+One buffer: a header, a section directory, and ten sections of fixed-stride integer rows (`tokens`, `nodes`, `childIds`, `diagnostics`, `fixes`, `edits`, `fixText`, `chapters`, `verses`, `members`) ([[invariants]] 2). Rows are from/to offsets into text Sefer already holds, plus enum-numbered kinds; the only text is `fixText`, the bytes a fix would insert. It ships the raw tree rather than views, so consumers build their own. Writer and `reader.ts` are generated from `onion/src/wire/schema.rs` ([[invariants]] 6).
 
 ## Trade-offs
 
-- Readers must match the format version (now 5). A layout change means a new version and regenerated readers.
-- Every section is always listed, even when empty, so a few bytes go to sections a caller did not ask for.
-- Values are raw numbers; reading them needs the generated reader, not a debugger glance.
+- `FORMAT_VERSION` is 5; a reader that does not know the version refuses the dish.
+- Every section is listed, even when empty.
+- Raw numbers: inspect through the reader, not a debugger.
 
 ## Show me
 

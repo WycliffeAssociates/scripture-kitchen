@@ -7,22 +7,22 @@ crate: workspace
 files: [sous-chef/charter.md, sous-chef/evidence.md, sous-chef/rules]
 related: [sous-core, sous-cli, galley, expediter, findings-snapshot, onion-engine]
 level: 0
-summary: "Points a translator at spots that look unusual for their own translation, using counts only, and leaves the decision to them."
+summary: "Reviewable inconsistencies from the project's own counts, in any language. Narrow claims with a numerator, a denominator and a floor."
 ---
 
 ## The problem
 
-A translation team proofreading a New Testament wants to catch slips: a comma before a digit where the rest of the book never does that, or a verse far shorter than its neighbours. Many of these languages have no spell-checker, dictionary or grammar model. So the question is: how do you flag likely mistakes in a language no tool has ever seen?
+Teams proofread languages with no dictionary, model or style guide, and conventions vary: French spaces inside guillemets, Amharic writes `::` for its full stop, many scripts have no case. A rule list (ripgrep for spaced closers or doubled punctuation) fires on every such project's correct text.
 
 ## The solution
 
-Sous Chef learns what this translation usually does by counting, then points at the places that differ. It never says "this is wrong". It says "this happens 12 times out of 9,812", and a person decides. The obvious alternative, a trained language model or dictionary, does not exist for most of these languages, so nothing like that ships. It is a separate product from the USFM engine so it can run on any text source, not only USFM files.
+Learn each convention from the project and flag departures ([[invariants]] 7). Glyph neighbours, placement, run shapes and rarity, and word casing, doubling and length, are counted; a verdict is a fraction of the project's own population ("1 of 1,053") that must clear a support floor (default 5) and a share band scaled to the denominator. A `` ,` `` pair against 5,000 plain commas fires on run shape (1 in 5,001, band 100 bp); French guillemet spacing, Amharic `::` and uncased scripts abstain with no allow-list. Band defaults come from a sweep of 1,504 fleet corpora. Hygiene (control characters, U+FFFD, conflict markers) is the deterministic exception, and length proportionality compares against a source.
 
 ## Trade-offs
 
-- It can only report what is rare, not what is wrong. A rare but correct form still shows up and needs a human to dismiss it.
-- It needs enough text to count. On a tiny corpus it abstains rather than guess.
-- Signals stay separate. You get several plain reasons, never one blended confidence score.
+- It reports rare, not wrong; a rare but correct form needs a person to dismiss it.
+- Thin evidence abstains, and abstaining is not a claim that the text is fine.
+- Reasons stay separate. There is no blended confidence score.
 
 ## Show me
 

@@ -7,22 +7,22 @@ crate: galley
 files: [galley/src/pantry/chunks.rs, galley/src/pantry.md, galley/src/pantry/budget.rs, galley/tests/chunks.rs]
 related: [chunk, pantry, plate, cst, lint, extensions]
 level: 2
-summary: "A memory of already-parsed chapters, looked up by their exact text, so typing in one chapter does not re-parse the rest of the book."
+summary: "Galley's content-keyed store of per-chapter parse products; a keystroke reparses only the chapter whose bytes changed."
 ---
 
 ## The problem
 
-The editor asks for a fresh parse of the whole book on every keystroke. Most of the book has not changed: typing in Mark 4 leaves the other 15 chapters exactly as they were. Re-parsing them each time is wasted work. But a cache in the browser is risky: WebAssembly memory can grow and never shrinks, and a cache that serves a stale answer is worse than none.
+Sefer resends the whole book per keystroke, and typing in Mark 4 leaves 15 chapters byte-identical. Reparsing them is waste, but wasm memory never shrinks and a stale hit is worse than a miss.
 
 ## The solution
 
-Keep each chapter's parse results keyed by a hash of the chapter's text, not by its position. Same text, same answer, wherever the chapter now sits. A changed chapter simply misses, so nothing ever needs to be "invalidated". The key also includes the custom-marker list and the two book-level facts a chapter depends on (see [[chunk]]). The obvious alternative, tracking which chapters an edit touched, is easy to get wrong; a content key cannot serve a wrong answer. A byte ceiling with least-recently-used eviction keeps memory bounded.
+Each [[chunk]]'s tokens, CST and local lint are keyed by a hash of its bytes plus the custom-marker set and the two book-level facts it depends on ([[invariants]] 4, 5). A changed chapter just misses, so there is no invalidation to get wrong, and assembly from cached chunks is byte-identical to a cold parse. A byte ceiling with LRU eviction bounds it.
 
 ## Trade-offs
 
-- Every lookup hashes the chapter's bytes, even on a hit.
-- Books of two chapters or fewer skip the cache: a cached parse measured 1.02–1.14x the cost of a fresh one there, so caching only cost memory.
-- It is the only store the memory ceiling evicts today, so under pressure this is what gets slower.
+- Every lookup hashes the chapter, hit or not: the per-keystroke floor is one pre-scan (~1 ms per 5 MB) and one checksum per chapter.
+- Books of two chunks or fewer skip it; a cached parse measured 1.02–1.14x a fresh one there.
+- It is the one store the budget evicts.
 
 ## Show me
 

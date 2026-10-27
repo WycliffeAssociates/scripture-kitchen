@@ -7,23 +7,22 @@ crate: onion
 files: [onion/src/extensions.rs, mise/src/extensions.rs, onion-wasm/README.md, galley/src/wasm.md]
 related: [marker-table, scanner, chunk-cache, pantry, mise]
 level: 2
-summary: "Lets a project define its own markers (names starting with z) by saying which built-in kind each one behaves like."
+summary: "A project's custom z markers, each mapped to one of 17 template rows so it behaves as its category everywhere."
 ---
 
 ## The problem
 
-USFM lets a project invent its own markers, as long as the name starts with `z`. An alignment project might add `\zaln-s ... \zaln-e` around each word. The project lists them in a file called `markers.ext`, saying for each one "this behaves like a footnote" or "like a milestone". The engine has to treat `\zaln-s` correctly without knowing it in advance.
+Projects declare `\z` markers in `markers.ext` (`\zaln-s`…`\zaln-e` around every aligned word), and a translation and its references can come from different projects with different lists.
 
 ## The solution
 
-A custom marker is mapped to a "template": a built-in row that already behaves like that category. From then on it acts exactly like the template, for nesting, closing, checking, masking and export. We do not give custom markers their own rules, because the spec's category field already says how they behave. Only the spelled name is new. Each book carries its own list, because a translation and the reference texts beside it can come from different projects.
+Each custom marker maps to a template row that already has its category's behaviour, and from then on the scanner, walker, lint, mask and exports treat it as that row. There are no per-marker rules: the category already says how it nests and closes. Lists are per book (`lex_with`), so two projects coexist in one process.
 
 ## Trade-offs
 
-- A custom marker can only behave like one of the 17 templates; it cannot invent a new behaviour.
-- Old unprefixed names like `\s5` are allowed only when no real marker has that spelling. `s1` or `p` are refused.
-- Changing the process-wide list invalidates everything already parsed, so set it once at startup, not between edits.
-- Unregistered `\z` markers are inert: they open, close and contribute nothing.
+- Only the 17 templates' behaviours are available.
+- Unprefixed legacy names like `\s5` are allowed only where no real marker has that spelling.
+- Changing the installed list invalidates every product built under it. Unregistered `\z` markers are inert.
 
 ## Show me
 

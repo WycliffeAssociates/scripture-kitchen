@@ -7,25 +7,22 @@ crate: onion
 files: [onion/src/tables/schema.rs, onion/src/tables/rows.rs, onion/src/tables/generated.rs, onion/src/tables/emit.rs, onion/src/bin/codegen.rs]
 related: [scanner, walker, extensions, lint, mask, exports, wire]
 level: 2
-summary: "One table that says, for every USFM marker, whether it is real, what category it is, how it closes and whether it is deprecated."
+summary: "The USFM 3.2 marker rows, authored once in Rust and generated into the lookup, the name matcher and the TS table."
 ---
 
 ## The problem
 
-A USFM file is plain text with backslash markers: `\v 4` starts verse 4, `\q1` starts a line of poetry, `\f ... \f*` wraps a footnote. The spec defines 152 marker families (`\q1` to `\q4` count as one). Each has rules: its category, whether it needs a closing marker, what may follow it, whether it is deprecated. Every part of the engine needs those answers, and they change when the spec changes. Where should that knowledge live so that nobody keeps two copies in sync by hand?
+The scanner, walker, lint, mask and exports all ask the same per-marker questions (category, closing, legal contexts, deprecation), and the answers change when the spec does.
 
 ## The solution
 
-One table, one row per marker, written as named fields in Rust. A code generator turns those rows into everything else: a packed lookup table, a fast name matcher, and the same table in TypeScript for the JavaScript side. Generated files are checked in, so a build never runs the generator and every change shows up as a reviewable diff. A test regenerates them and fails if they are stale. The obvious alternative, scattering `if marker == "v"` checks through the code, would put the spec in dozens of places.
-
-Because every marker gets a small number (its row index), a parsed token stores one byte instead of the marker's name. Shipping the table on its own also gives other consumers a primitive: look up a marker to ask if it is real, what category it is, or how it behaves.
+One row per marker family, as named Rust fields. Codegen writes the packed lookup, the name matcher and the TypeScript table, all checked in and staleness-tested ([[invariants]] 6). A row index fits in a byte, so a [[token]] stores its marker as one `u8`, not a name ([[invariants]] 2).
 
 ## Trade-offs
 
-- A marker's number is one byte, so the table can hold at most 256 rows. 170 are used.
-- The table follows USFM 3.2 only. There is no column for "what 3.1 said"; a 3.2 deprecation is a flag on the row.
-- Any marker the table does not know, including unregistered custom `\z` markers, becomes row 0: the bytes are kept, but it opens nothing, closes nothing and has no rules. Hosts register custom markers through [[extensions]].
-- Editing a row means running the generator; the staleness test will fail until you do.
+- 256 rows at most; 170 are used.
+- USFM 3.2 only. A 3.2 deprecation is a flag; there is no 3.1 column.
+- Unknown markers, unregistered `\z` included, are row 0: bytes kept, no behaviour.
 
 ## Show me
 

@@ -7,22 +7,22 @@ crate: galley
 files: [galley/src/find.md, galley/src/find.rs, galley/tests/find.rs, galley/benches/find.rs]
 related: [mask, words, pantry, find-buffer, mask-map]
 level: 2
-summary: "Search the readable text of a book, skipping markup and footnotes, and point each hit back at the exact bytes in the file."
+summary: "Literal and whole-word search over a mask, each hit mapped back to source pieces that never swallow a footnote."
 ---
 
 ## The problem
 
-A translator searches for "wept. Then" in their book. In the file, a footnote sits between those words, so a plain text search fails. And when it does match, the editor must know exactly which bytes of the real file to highlight or replace, not positions in some cleaned-up copy.
+A Sefer find for "wept. Then" must match across an intervening `\f…\f*`, and replace must touch only those words' bytes in the USFM, not the note between them.
 
 ## The solution
 
-We search the [[mask]]: a copy of the book with markup and footnotes removed, which keeps a map from every position back to the original file. A hit in the clean copy is converted back through that map. If the hit spans a removed footnote, it comes back as several pieces, so a replacement never swallows the footnote. Find lives in [[galley]], not the engine, because the engine already provides everything it needs; Find is just a fast byte search on top (ruled 2026-08-24). Replacing a hit is an ordinary [[edit]].
+Search the verse-text [[mask]] and map hits back through its ranges ([[invariants]] 1). A hit spanning a removed note comes back as several source pieces, so a replace cannot delete the note. Whole-word uses [[words]], so find and Sous agree on boundaries. Find lives in galley because onion already exposes everything it needs (ruled 2026-08-24), and replace is an ordinary [[edit]].
 
 ## Trade-offs
 
-- Literal text only. No regular expressions until a consumer asks.
-- Case-insensitive search builds a folded copy of the text first. Measured, that costs about the same as folding on the fly, and keeps the search fast.
-- A hit across a footnote is several ranges, not one, so callers must handle a list.
+- Literal only; no regex until a consumer asks.
+- Case-insensitive search folds a copy first, measured about equal to folding on the fly.
+- A hit is a list of ranges.
 
 ## Show me
 

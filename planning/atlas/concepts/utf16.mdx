@@ -7,22 +7,22 @@ crate: mise
 files: [mise/src/utf16.rs, galley/src/pantry.md, onion/tests/utf16_oracle.rs]
 related: [source, mask, pantry, dish, mise]
 level: 2
-summary: "Converts positions between how the engine counts text (bytes) and how JavaScript counts it (UTF-16 units)."
+summary: "Byte to UTF-16 offset conversion. An index beside live text, and a 14% table that outlives dropped text."
 ---
 
 ## The problem
 
-The engine measures positions in bytes of UTF-8. A JavaScript editor measures them in UTF-16 units. In plain English they agree, but in Greek "λόγος" each letter is two bytes and one JavaScript unit, so byte 16 is character 11. Every position sent to the editor must be converted, and books in Hindi or Greek differ from byte counts almost everywhere.
+Onion counts UTF-8 bytes and Sefer counts UTF-16 units. They diverge on every non-ASCII character, which in Hindi or Greek is nearly every one, and every offset crossing to JS has to convert.
 
 ## The solution
 
-Two small lookup structures. The index sits beside the text and records a checkpoint every 256 bytes, then counts the rest quickly. The table is for when the text is about to be thrown away: one bit per byte marks where a JavaScript character starts, plus a running total every 256 bytes. It lets the engine drop a book's text from memory and still convert positions later. Both are built once and reused; an earlier version rebuilt its cursor on every lookup. They live in the shared base crate because both engines need them and neither may depend on the other.
+Two structures, built once and reused. `Utf16Index` checkpoints every 256 bytes over live text. `Utf16Table` keeps one bit per byte plus a running count per 256 bytes, so galley can drop a reference's text and still convert ([[invariants]] 4). Both live in [[mise]], since both engines need them ([[invariants]] 7).
 
 ## Trade-offs
 
-- The table costs 14% of the text's size (36 bytes per 256), on every script.
-- The table only answers positions on a character boundary. Every position the cache converts with it already is one.
-- The index borrows the text, so it cannot outlive it; that is what the table is for.
+- The table costs 14% of the text (36 bytes per 256), on every script.
+- The table answers only at character boundaries; every offset the cache converts is one.
+- The index borrows its text and cannot outlive it; that is what the table is for.
 
 ## Show me
 

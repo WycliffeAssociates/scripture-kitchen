@@ -7,23 +7,22 @@ crate: onion
 files: [onion/src/lint.rs, onion/src/lint/rows.rs, onion/src/lint/walk.rs, onion/src/lint/carried.rs, onion-wasm/diagnostics.json]
 related: [cst, walker, chunk, format, edit, attributes, designator, dish]
 level: 2
-summary: "Check a book for markup mistakes, like an unclosed footnote or verses out of order, and offer fixes without changing anything."
+summary: "One ordered walk over the CST emitting codes and offsets. Fixes are offered edits, and nothing is repaired."
 ---
 
 ## The problem
 
-USFM files are typed by hand, so they contain mistakes: a footnote never closed, verse 3 before verse 2, a verse number skipped. The editor needs to underline each one as the translator types and, where it is safe, offer a one-click fix. It must never quietly change the text, because the editor's cursor positions depend on the file staying exactly as typed.
+Sefer underlines markup errors as the translator types and offers one-click fixes where safe. A fix the engine applied itself would shift every offset the editor holds and hide the mistake.
 
 ## The solution
 
-We walk the parsed book (the [[cst]]) once, in order, and report each problem as a code plus positions. Problems the parser already noticed, like a footnote that never closed, are read from the parser's verdict, not worked out a second time. Each finding is just four numbers, so a whole report crosses to JavaScript as one flat array; the message text lives in a separate file, `diagnostics.json`. A fix is only an offer: a list of [[edit]]s the editor may apply. Fixes that would need a guess or a move are not offered.
+Flag, never repair ([[invariants]] 3): no token is moved, inserted or dropped. One pass over the [[cst]] reads the walker's verdicts (a `Recovery` close is an unclosed note) instead of re-deriving them. A diagnostic is four numbers, and its message lives in the generated `diagnostics.json` ([[invariants]] 2, 6). A fix exists only when the row declares one and is an offer of [[edit]]s; `check_fixes` proves them over all 226 corpus books.
 
 ## Trade-offs
 
-- No automatic repair. Lint flags; the translator or editor decides.
-- Some fixes are never offered, such as guessing which book code was meant or moving an attribute list.
-- Findings carry no text, so every consumer needs `diagnostics.json` to show a message.
-- Some severities depend on the USFM version the file declares, so the same text can lint differently depending on its `\usfm` line.
+- Fixes that would need a guess or a move are not offered (which book code was meant, moving an attribute list).
+- Every consumer needs `diagnostics.json` to show a message.
+- Some severities depend on the declared `\usfm` version.
 
 ## Show me
 

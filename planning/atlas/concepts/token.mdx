@@ -7,22 +7,22 @@ crate: onion
 files: [onion/src/token.rs, onion/src/wire/schema.rs]
 related: [scanner, source, cst, toc, marker-table, dish]
 level: 2
-summary: "One small labelled piece of the file (a marker, a verse number, a run of text), stored as a few numbers for position and type."
+summary: "The one working representation. Twelve bytes of numbers per lexeme and no text; Pad holds reducible whitespace."
 ---
 
 ## The problem
 
-Once a file is cut into pieces, every later step reads those pieces: the tree builder, the verse table, the checks, and the editor in JavaScript. A long book has tens of thousands of them. If each piece were a rich object with copied text, memory and the cost of passing them to the editor would blow up.
+Every pass after the scanner reads tokens, and a long book has tens of thousands of them per keystroke. Tokens that owned strings would allocate per lexeme and turn the wire into a serialisation job.
 
 ## The solution
 
-Each piece is a small fixed-size record (12 bytes in memory): where it starts, how long it is, what kind it is, which marker it is, and the marker's level (the `2` in `\q2`). It holds no text; the text is read from the file by position. Details inside a piece, like a verse number's value or a word's attributes, stay unread until someone asks ([[designator]], [[attributes]]). Every field we add has to be mirrored in the JavaScript reader too, so fields are added sparingly. Extra spaces between a marker and its content get their own kind, "Pad", so the editor can show them and the formatter can offer to delete them.
+A token is `start u32 · len u16 · kind_bits u8 · marker_idx u8 · level u8`, 12 bytes with padding, size asserted ([[invariants]] 2). Its text is always a slice of the [[source]], and interiors (designators, attributes) are read on demand. `Pad` is the kind for horizontal whitespace past a marker's one delimiter byte, so reducible spacing survives load ([[invariants]] 1) and lint and format can act on it.
 
 ## Trade-offs
 
-- Length is two bytes, so a piece is at most 65,535 bytes; longer text is split into several pieces. Why two bytes rather than four is not documented.
-- Marker identity is one byte, so the [[marker-table]] can hold at most 256 rows.
-- Readers that need a value inside a piece pay to interpret it each time.
+- `len` is `u16`, so text over 65,535 bytes splits into several tokens. In memory the row pads to 12 bytes either way; why two bytes was chosen is not recorded.
+- Marker identity is one byte, so the [[marker-table]] holds at most 256 rows.
+- Every reader of a value inside a token pays to interpret it.
 
 ## Show me
 

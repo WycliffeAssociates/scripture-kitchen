@@ -7,22 +7,22 @@ crate: onion
 files: [onion/src/resolve.rs, onion/src/resolve.md, testData/resolve/cases.json, mise/src/address.rs, onion-wasm/src/resolution.rs]
 related: [toc, designator, mise, galley-package, sefer]
 level: 2
-summary: "Turns a reference like Luke 1:2 into the exact stretch of one file, or says plainly that it is missing or ambiguous."
+summary: "An address like LUK 1:2 to one byte range in one text, or an explicit missing or ambiguous; never the nearest match."
 ---
 
 ## The problem
 
-An editor asks "show me Luke 1:2". In the file, verse 2 might be merged with verse 1 (`\v 1-2`), skipped (`\v 1,3`), or the whole chapter might appear twice by mistake. There may also be a heading just before the verse that the reader would want to see. The editor needs a byte range it can trust, or an honest "not here".
+Sefer's "go to Luke 1:2" meets bridged verses (`\v 1-2`), gaps (`\v 1,3`) and duplicated chapters, and usually wants the heading before the verse too.
 
 ## The solution
 
-We answer from the file's own table of verse positions ([[toc]]) with one of three results: found, missing, or ambiguous. Found carries the range to read, an earlier "opening" point that includes headings before the verse, and which verses it really covers. We never return the "nearest" match. Sefer's older code merged overlapping matches into one span, which silently hid broken text; that was not ported. The reference type itself lives in a shared crate, so any product can name a place in scripture without depending on the USFM engine.
+Answer from the [[toc]] with found, missing or ambiguous. Found carries the range, an earlier "opening" that takes in preceding headings, and the verses actually covered. Never the nearest match ([[invariants]] 3): Sefer's older merge of overlapping matches hid broken text and was not ported. `Address` lives in [[mise]], so any crate can name a place without onion.
 
 ## Trade-offs
 
-- Answers are small JSON, not a compact binary format. That is fine for one answer per call on a slow path, but not for bulk lookups.
+- The answer is small JSON: fine for one answer per call, not for bulk lookups.
 - Offsets are bytes unless the caller asks for UTF-16.
-- A broken file gives "ambiguous" with every candidate, and the caller has to pick.
+- A broken file gives ambiguous with every candidate, and the caller picks.
 
 ## Show me
 

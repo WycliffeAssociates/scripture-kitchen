@@ -7,26 +7,24 @@ crate: onion
 files: [onion/src/cst.rs, onion/tests/cst_oracle.rs, onion/tests/fold_oracle.rs]
 related: [token, walker, scanner, mask, lint, exports, dish, chunk]
 level: 2
-summary: "The parsed book as a tree that keeps every byte of the file, so anything built on it can point back to the exact text."
+summary: "The lossless tree. Every byte is reachable, closes are recorded rather than inserted, and surplus whitespace is kept as Pad."
 ---
 
 ## The problem
 
-Almost every feature needs to know what contains what. Is this word inside a footnote? Which paragraph does verse 4 sit in? Where did that unclosed `\f` footnote end? A flat list of markers cannot answer that without each feature re-tracking open and closed markers itself. And an editor needs to change a word and write the file back without disturbing anything else.
+Lint, mask, the exports and the dish all need containment: is this word inside a note, which paragraph holds verse 4. And load-then-save through the engine must reproduce the file exactly, or every save rewrites spacing and two collaborators conflict in git over bytes neither touched.
 
 ## The solution
 
-Parse each book once into a tree, and keep every byte of the file in it: spaces, newlines, even broken markup. Walk the tree in order and you get the file back exactly. The usual alternative is an abstract tree that keeps only the meaning and drops formatting; that is fine for a compiler, but an editor that saves a file must not reformat a translator's work.
+A concrete tree over the token stream, not an AST ([[invariants]] 1). An AST applies the spec's whitespace reduction and normalises closers, so loading through it is lossy. Two things keep this one lossless. Whitespace past a marker's one delimiter byte is a `Pad` token: kept, flagged by lint, dropped only by text views. And a frame the file never closed is closed **implicitly**: the node records `Implicit`, `Recovery` or `Eof` in its `reason` byte, and no `\ft*` or `\f*` token is invented.
 
-Chapters and verses are not containers in this tree. `\c 1` and `\v 4` are markers that sit beside the text, because in USFM a verse can start mid-paragraph and a paragraph can span verses. Finding "chapter 3, verse 16" is a separate index, the [[toc]].
-
-Nearly everything else reads this one tree: [[mask]], [[lint]], the USJ/USX/HTML [[exports]], and the [[dish]] the editor receives.
+Chapters and verses are Points (siblings), not containers, because verse and paragraph boundaries cross; the [[toc]] addresses them.
 
 ## Trade-offs
 
-- Onion ships one tree, not convenient views of it. A consumer wanting blocks, lines or note interiors builds them from the tree.
-- Broken input still gets a tree. An unclosed footnote is closed by a recovery rule, and lint reports it; the tree never refuses a file.
-- A whole tree costs about 6 ns per token, roughly 40% of the time to tokenize. The heaviest real book takes about 0.6 ms.
+- One tree, no views: blocks, lines and note interiors are each consumer's to build.
+- Broken input still gets a tree. An unclosed `\f` closes by `Recovery`, and lint reports it.
+- About 6 ns per token, roughly 40% of lex time; the heaviest real book builds in about 0.6 ms.
 
 ## Show me
 

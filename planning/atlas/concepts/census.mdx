@@ -7,22 +7,22 @@ crate: galley
 files: [galley/src/toc.md, galley/src/toc/schema.rs, galley/src/toc/mod.rs, galley/toc-reader.ts]
 related: [toc, pantry, wire, ticket, galley-package, sefer]
 level: 3
-summary: "How many chapters and verses every book in a project has, sent to the editor in one cheap buffer without parsing any book."
+summary: "Chapter and verse counts for every registered book in one buffer, read from resident TOCs without reparsing anything."
 ---
 
 ## The problem
 
-When a translator opens a project, the editor's sidebar lists every book with its chapters and verse counts: "GEN, 50 chapters, 1533 verses". A Bible project is 66 files. Fully parsing each one just to count chapters is slow, and most of that cost is packaging the parse for JavaScript, not reading it.
+Sefer's project sidebar lists every book's chapters and verses on open. Parsing and plating 66 books to get that pays mostly for plating, not for reading.
 
 ## The solution
 
-When a book is loaded, the engine already notes where its chapters and verses are, and keeps that note in memory. The census reads those notes for every book and packs them into one buffer of numbers. No book is parsed again and no text is read. The obvious alternative, a "just the outline" flag on the normal parse, would still pay for packaging the parse, so the census is its own call (`tocAll`). Any host gets a cheap project outline from it, not just Sefer's sidebar.
+Galley already keeps each book's [[toc]] in the [[pantry]] ([[invariants]] 4). `tocAll` packs those rows for every book into one [[ticket]]-generated buffer and reads no text. A "TOC only" flag on `parse` was rejected because it still pays the plating path.
 
 ## Trade-offs
 
-- It carries labels and verse lists, not pointers into the parsed text. Those pointers belong to data the engine does not keep in memory.
-- A malformed number like `\c 12b` comes through as chapter 0 with its label "12b". The consumer must check the label.
-- A reference book whose text was dropped still appears in the census, but cannot answer UTF-16 offset questions. It says so, naming the `keepText` option.
+- Labels and verse lists only, no token pointers: those belong to products galley does not keep.
+- `\c 12b` arrives as chapter 0 with label `12b`; check the label.
+- A reference that dropped its text still lists, but cannot answer UTF-16 questions, and says so (`keepText`).
 
 ## Show me
 

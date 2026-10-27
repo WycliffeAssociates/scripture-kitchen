@@ -7,22 +7,22 @@ crate: onion
 files: [GLOSSARY.md, onion/src/token.rs]
 related: [token, scanner, mask, utf16, edit]
 level: 2
-summary: "The USFM file exactly as the translator wrote it; everything else in the engine points into it rather than copying it."
+summary: "The USFM bytes as given. Authoritative, never normalised; everything else is offsets into them."
 ---
 
 ## The problem
 
-A translator's USFM file is the truth. Some files have odd spacing, broken markers or a missing book code. If the engine tidied any of that on the way in, the editor would show different text than the file holds, and every position it reported would be off.
+Files arrive with odd spacing, broken markers and missing book codes. Tidying any of that on load makes the engine's offsets disagree with the editor's buffer and turns every save into a diff.
 
 ## The solution
 
-We keep the file's bytes exactly as they are and never fix them on load. Everything else (the pieces, the tree, the verse table, search hits) is stored as positions into those bytes, not as copies of text. That makes "save what you loaded" trivially exact. The obvious alternative, normalising on load, would make every offset disagree with the editor. Only the formatter is allowed to propose new bytes, and only whitespace and fixes.
+Bytes are kept as they are, and every product is positions into them ([[invariants]] 1), so saving what was loaded is identity. Only [[format]] and lint fixes propose new bytes, as [[edit]]s.
 
 ## Trade-offs
 
-- Line endings must be LF. CRLF still parses, but shifts UTF-16 offsets by one per line against an editor and changes every content hash.
-- Broken input is kept as data, so every later step has to cope with it rather than assume clean text.
-- Output formats that cannot hold everything (HTML, USJ, USX, vref) are labelled lossy.
+- Line endings must be LF. CRLF parses, but shifts UTF-16 offsets one per line against an editor and changes every content hash.
+- Broken input is kept as data, so every later step must cope with it.
+- Outputs that cannot hold everything (HTML, USJ, USX, vref) are named lossy.
 
 ## Show me
 

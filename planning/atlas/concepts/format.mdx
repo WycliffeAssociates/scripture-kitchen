@@ -7,22 +7,22 @@ crate: onion
 files: [onion/src/format.rs, onion/tests/format_corpus.rs]
 related: [lint, edit, source, onion-wasm]
 level: 2
-summary: "The optional tidy-up button: puts each paragraph and heading marker on its own line, returned as a list of small edits the editor applies at once."
+summary: "Opt-in layout normalisation, returned as one transaction of edits built from the rules lint already has."
 ---
 
 ## The problem
 
-USFM files from different tools and people are laid out differently: verses on their own lines or run together, markers mid-line, odd spacing. A translator may want a tidy, consistent layout, for a whole book or just one chapter. But the words themselves must never change, and double spaces inside a verse are content, not layout.
+Teams want a consistent layout (paragraph and heading markers on their own lines), sometimes for one chapter, with no change to text and without making the load path lossy.
 
 ## The solution
 
-Format is opt-in and returns a list of small edits (insert a line break here, remove a space there) instead of a rewritten file. The edits come from the same rules the checker ([[lint]]) already uses: fixes marked as formatting, plus layout-only rules. The edits apply together as one change. The code does not record why edits were chosen over regenerating the text; what it buys is that only the touched bytes change, and a "format this chapter" button is just the whole-book list filtered to that chapter.
+Format is the one opt-in writer of new bytes ([[invariants]] 1, 3). It returns [[edit]]s from lint's formatting fixes plus layout-only rules, applied as one transaction, and it deletes Pad. A chapter-scoped format is the whole-book list filtered engine-side to the window, dropping any edit that straddles it.
 
 ## Trade-offs
 
-- Formatting one chapter still pays for checking the whole book.
-- An edit that crosses the chapter's edge is dropped whole, so a scoped format may leave a seam untidied.
-- It is the one part of the engine allowed to add bytes. It only adds whitespace and fixed engine text, never prose.
+- A scoped format still lints the whole book.
+- A straddling edit is dropped whole, so a seam may stay untidy.
+- It adds only whitespace and fixed engine text, never prose.
 
 ## Show me
 

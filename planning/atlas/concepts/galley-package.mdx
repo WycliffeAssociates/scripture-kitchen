@@ -7,22 +7,22 @@ crate: galley
 files: [galley/README.md, galley/src/wasm.md, galley/package.json, package.json, package-root.mjs, galley/tests/sous_conformance.mjs]
 related: [galley, onion-wasm, sefer, pantry, expediter, census, find-buffer, mask-map, findings-snapshot, dish]
 level: 0
-summary: "The one JavaScript package an app installs to get both the USFM engine and the proofreader, compiled to WebAssembly."
+summary: "The one wasm module and JS package Sefer vendors. The stateful Galley handle plus every stateless engine door."
 ---
 
 ## The problem
 
-A web app like the [[sefer]] editor wants to parse scripture, search it and proofread it, all inside the browser. Rust code runs there only as WebAssembly (a compiled binary module the browser loads). Shipping two modules, one per engine, would load two copies of the shared code and let their versions drift apart.
+Sefer wants parse, find and Sous in the browser. Two wasm modules would load the shared code twice and let versions drift.
 
 ## The solution
 
-One WebAssembly module carries everything: the `Galley` object that keeps books in memory across calls, and every stateless engine function besides. An app installs it from a git tag and loads one file. Most functions come in two forms. One takes a book id the app already loaded, so only the id crosses into WebAssembly. The other takes raw text. The small TypeScript readers for each binary answer ship beside the module, so they always match its version.
+One module carries the `Galley` handle and every stateless onion door. Most doors take either a registered book id (only the id crosses) or raw text. The generated readers ship beside it at the same version ([[invariants]] 6). It installs from a git tag.
 
 ## Trade-offs
 
-- Everything rides in one binary. The engine functions alone add 202 KB to the `.wasm`, even for an app that only wants the proofreader.
-- It is not on npm. npm cannot install a subdirectory of a repo, so a generated root `package.json` points into `galley/`, and CI checks it.
-- A function only ships if something in the module references it, so a test pins the exact export list.
+- The onion doors add 202 KB to the `.wasm`, even for a Sous-only host.
+- Not on npm: a generated root `package.json` points into `galley/`, and CI checks it.
+- Only referenced functions ship, so a test pins the export list.
 
 ## Show me
 

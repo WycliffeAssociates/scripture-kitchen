@@ -7,22 +7,22 @@ crate: galley
 files: [galley/src/sous/onion_book.rs, sous-chef/core/src/input.rs, galley/src/sous/mod.rs]
 related: [mask, toc, chapter-pass, expediter, sous-core, findings-snapshot]
 level: 2
-summary: "The adapter that hands sous-chef a book's plain verse text and verse positions, without sous-chef ever depending on the USFM parser."
+summary: "Galley's adapter that builds Sous's neutral ProjectedBook from onion's mask and TOC, and maps findings back to source pieces."
 ---
 
 ## The problem
 
-sous-chef looks for inconsistencies by counting words and verses. It needs each book as plain verse text, with chapter and verse positions, and a way to point a finding back at the real file. But sous-chef is meant to work without the USFM parser, so it cannot reach into the parser's types. Something has to translate between them.
+Sous needs verse text with chapter and verse rows and a way back to source offsets, without importing onion's types.
 
 ## The solution
 
-sous-chef defines a small, neutral shape it accepts: a book key, its text, its chapters and its verses (`ProjectedBook`). This adapter builds that shape from the parser's verse-text [[mask]] and its index of chapters and verses (the [[toc]]). It lives in [[galley]], the one crate allowed to depend on both sides. A finding maps back to the file as a list of pieces, not one span, because a finding can cross a removed footnote.
+sous-core defines `ProjectedBook` (key, text, chapters, verses); `OnionBook` implements it in [[galley]] over the verse-text [[mask]] and the [[toc]] ([[invariants]] 7). No second index: the mask owns the projection, the TOC owns identity. A finding maps back as a list of source pieces, since it can cross a removed note.
 
 ## Trade-offs
 
-- Verses must ascend. A verse out of order is left out of the analysis (it abstains); [[lint]] reports it instead.
-- The adapter keeps the longest ascending run, so one stray verse number drops only that verse, not its neighbours.
-- sous-chef sees only plain text and numbers. It cannot reason about markup.
+- Verses must ascend. An out-of-order verse abstains, and [[lint]] reports it.
+- It keeps the longest ascending run, so one stray verse number drops only that verse.
+- Sous sees text and numbers only, never markup.
 
 ## Show me
 

@@ -7,23 +7,22 @@ crate: onion
 files: [onion/src/usj.rs, onion/src/usx.rs, onion/src/html.rs, onion/src/export.rs, onion/tests/usj_corpus.rs]
 related: [cst, attributes, marker-table, mask]
 level: 2
-summary: "Turn a USFM book into the JSON, XML or HTML formats other Bible tools read, accepting that some formatting detail is lost."
+summary: "USJ, USX and HTML written from the CST. The one place loss is allowed, and it is named as loss."
 ---
 
 ## The problem
 
-USFM is a plain-text markup only some tools read. Other Bible software wants USJ (a JSON form of the same content), USX (an XML form), or plain HTML to show on a page. Those formats cannot hold everything the original file holds, such as the exact spacing or the order attributes were written in. Something has to convert, and it has to be clear where detail gets dropped.
+Other tools consume USJ, USX or HTML, and none of them can hold everything a USFM file does: spacing, attribute order, quote style.
 
 ## The solution
 
-We convert from the parsed tree of the book (the [[cst]]), one writer per format. All the loss happens here, at the very end, and nowhere earlier: the engine keeps the file byte-exact until someone asks for an export. Damaged markup is reported by [[lint]], not patched up in the export, so an export never invents an "unmatched" element. The three writers share only small helpers (marker spelling, canonical forms), because JSON commas and XML closing tags need different bookkeeping.
+Loss happens only here, at the end, from the [[cst]]; nothing upstream normalises ([[invariants]] 1). Damage is [[lint]]'s to report, and an export never repairs it or invents an "unmatched" element ([[invariants]] 3). The three writers share only small helpers, since JSON commas and XML closers need different bookkeeping.
 
 ## Trade-offs
 
-- Exports are lossy by design. Runs of whitespace become one space; attribute order and quote style are lost; some content moves into attributes (`\ca` becomes `altnumber`).
-- You cannot round-trip back to the original file from an export. Keep the USFM for that.
-- HTML has no official reference to test against, so it is held only by a "same text in, same text out" rule.
-- All three ship in the WebAssembly package (~370 KB, ~152 KB gzipped); a Rust user can switch each off.
+- Lossy: whitespace runs collapse, attribute order and quoting are lost, `\ca` becomes `altnumber`.
+- No round trip back to USFM; keep the USFM.
+- HTML has no reference oracle. All three ship in the wasm package; a Rust user can switch each off.
 
 ## Show me
 

@@ -7,21 +7,21 @@ crate: mise
 files: [mise/README.md, mise/src/lib.rs, mise/Cargo.toml]
 related: [onion, sous-core, galley, onion-wasm, utf16, words, extensions, resolve]
 level: 1
-summary: "A tiny shared crate with no dependencies, holding the facts both engines need: the list of Bible books, text-position types and the word-splitting rule."
+summary: "The zero-dependency leaf both engines share. Book keys and order, UTF-16 types, the Unicode class table, words/1."
 ---
 
 ## The problem
 
-The USFM engine and the proofreader both need the same basic facts. What are the 66+ book codes and their order? How do you convert a byte position to a JavaScript string position? Where does one word end? But the proofreader must never depend on the USFM engine. So where do the shared facts live?
+Onion and Sous need the same book codes and order, offset types and word rule, and Sous may not depend on onion.
 
 ## The solution
 
-They live in mise, a small crate that depends on nothing. Both engines depend on it, and neither depends on the other. The alternative, copying the facts into each engine, would let them drift apart. Mise has a strict scope rule so it does not grow into a junk drawer: only things more than one crate needs, and only fixed tables, plain data structures and versioned text rules.
+Put them in a leaf with no dependencies that both import ([[invariants]] 7); copies would drift. The scope rule: only what more than one crate needs, and only spec tables, borrow-free structures and versioned text rules. Generators stay out.
 
 ## Trade-offs
 
-- No dependencies at all, so anything needing a hash map or file I/O stays out. The Unicode table lives here, but its generator stays in [[sous-core]].
-- Holding the bytes is not owning the meaning. Onion still decides canonical order as a rule; Sous decides what a book key means to a corpus.
+- No dependencies at all, so nothing needing a hash map or I/O. The Unicode table lives here; its generator stays in [[sous-core]].
+- Holding the bytes is not owning the meaning: onion still owns canonical order as a rule.
 
 ## Show me
 

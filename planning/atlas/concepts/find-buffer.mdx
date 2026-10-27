@@ -7,22 +7,22 @@ crate: galley
 files: [galley/src/find/wire/schema.rs, galley/src/find/wire/mod.rs, galley/find-reader.ts, galley/src/wasm.md]
 related: [find, wire, ticket, mask-map, galley-package, sefer]
 level: 3
-summary: "Search results for a whole project in one buffer: for each hit, where to highlight it, where an edit lands in the file, and a preview line."
+summary: "Find results in one buffer. Per hit, the projected range to highlight, the source pieces to replace, and a preview from a string table."
 ---
 
 ## The problem
 
-A translator searches the project for "God". The editor needs a results list with a line of context, a highlight for each hit, and, for a replace, the exact spot in the file to change. The search runs over the readable text with markup and footnotes removed. So a word's position in what was searched is not its position in the file. A hit that spans a removed footnote is even split into pieces in the file.
+Find runs over a mask, so a hit's offset in the searched text is not its offset in the file, and a hit across a removed footnote is several source ranges. Sefer needs both, plus a preview line, for every hit in a project.
 
 ## The solution
 
-All hits come back in one buffer of numbers. Each hit carries both positions: where it sits in the searched text, for highlighting, and the file ranges it covers, one per piece, for editing. Book names and preview lines go in a small string table, so each string crosses once. The browser and the desktop app share one encoder, so their results cannot drift apart. The obvious alternative, an array of JavaScript hit objects, would copy a string per hit and lose the file-side positions.
+One [[ticket]]-generated buffer ([[invariants]] 2, 6). Each hit carries its projected range and a `Repeat` of source pieces; book ids and preview lines sit once in a string table. Browser and native share the encoder.
 
 ## Trade-offs
 
-- The preview is display text only. The cleaned text is thrown away after the search, so it rides in the buffer rather than being rebuilt.
-- A hit's piece list varies in length. It is the one shape fixed-size rows cannot hold, so the wire vocabulary gained a `Repeat` for it.
-- Offsets are UTF-16, the way JavaScript counts, so native callers convert if they want bytes.
+- The preview is display text only: the projected text is discarded after the search.
+- The variable piece count is why ticket gained `Repeat`.
+- Offsets are UTF-16; native callers convert.
 
 ## Show me
 

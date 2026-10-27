@@ -7,22 +7,22 @@ crate: sous-core
 files: [sous-chef/core/src/pass.md, sous-chef/core/src/pass/chapter.rs, sous-chef/core/src/lib.rs, sous-chef/charter.md]
 related: [onion-book, expediter, words, findings-snapshot, sous-core]
 level: 2
-summary: "How Sous Chef rules are split into steps, so editing one chapter only re-counts that chapter."
+summary: "Every Sous rule as map (one chapter), fold (one book, in order) and judge (the project), so an edit recounts one chapter."
 ---
 
 ## The problem
 
-Sous Chef reads a whole translation and flags things that look inconsistent, such as a name spelled one way 40 times and another way twice. Whether something is odd depends on every other book, yet a translator edits one chapter at a time. If each keystroke in Mark re-read all 66 books, checks would be far too slow to run while typing. So how do we split a check so most of its work can be kept?
+A Sous verdict depends on every book, an edit touches one chapter, and Sefer publishes after edits. Rereading 66 books per publish is the cost to avoid.
 
 ## The solution
 
-Every rule is written as four steps. **Map** counts one chapter on its own. **Fold** adds up a book's chapter counts, in order. **Judge** looks at all books' totals and decides what is odd. **Locate** finds where in the text each decision points. Only map reads chapter text, and it needs nothing from other chapters, so an unchanged chapter's counts can be reused. The obvious alternative, one function per rule that reads the whole project, is simpler but must redo everything on every edit. Settings (thresholds, what to ignore) only reach the judge step, so changing a setting never re-reads text.
+The chapter is the unit of rework ([[invariants]] 5). **Map** observes one chapter as a pure function of its own text, so its result caches by content. **Fold** stitches a book's chapters in order and owns any seam state. **Judge** reads every book's aggregate and decides; **locate** rescans current text for sites. Config reaches only judge, so moving a threshold never rereads text.
 
 ## Trade-offs
 
-- A rule cannot look across a chapter break while counting; anything that spans chapters must be done as arithmetic in the fold.
-- Nothing may carry from one book to the next. A rule that needs "what the previous book did" cannot be written.
-- Keeping chapter counts costs memory. The word rule's counts are about 5 KB a chapter, so it opts out of being kept.
+- Map cannot look across a chapter break; seam behaviour is fold arithmetic.
+- Nothing carries across a book boundary.
+- Retained observations cost memory; the word rule (~5 KB a chapter) opts out.
 
 ## Show me
 

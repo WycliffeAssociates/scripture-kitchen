@@ -7,22 +7,22 @@ crate: galley
 files: [galley/src/pantry.md, galley/src/pantry/mod.rs, galley/src/pantry/budget.rs, galley/src/pantry/derived.rs, galley/docs/analysis-host.md]
 related: [chunk-cache, expediter, toc, mask, utf16, census, find, overlay, galley]
 level: 2
-summary: "Galley's single cache: it keeps each book's text and everything computed from it, under a memory budget."
+summary: "Galley's one cache. Each registered book's retained text and derived products, content-keyed, under one byte budget."
 ---
 
 ## The problem
 
-The editor sends Galley whole books, then asks many questions about them: lint, search, findings. Copying a big project into WebAssembly memory again for each question is slow: 3.5–5 ms for 5 MB, a quarter of a video frame. Keeping everything forever is not an option either, because browser memory is limited. And caches spread across many features tend to disagree about what is current.
+Sefer registers whole books, then asks many questions about them. Copying a project into wasm memory again per question costs 3.5–5 ms per 5 MB, and caches spread across features disagree about what is current.
 
 ## The solution
 
-One cache owns everything Galley keeps. The editor sends a book once, whole, under an id it chooses (a file path, in practice). Galley keeps that copy plus everything derived from it, and every later question runs against the kept copy. There is no "change bytes 10–20" call, only "here is the whole book again", so positions inside a book can never drift out of step. A book has one of two roles: a **target** is the translation being checked; a **reference** is a source text it is compared against, and keeps much less. Memory is counted in three tiers, so the total is always known.
+One store owns everything galley keeps ([[invariants]] 4). Books arrive whole through `update(id, text)` under the caller's id; there is no splice API, so offsets inside a book cannot drift. Products key on content checksums. A **target** retains its text, because placing findings rescans it; a **reference** keeps only its TOC and per-verse observations. `Budget` attributes every resident byte to pinned, hot or rebuildable.
 
 ## Trade-offs
 
 - A one-letter edit resends the whole book; the [[chunk-cache]] makes re-deriving it cheap.
-- A target must keep its text, because placing a finding re-reads it. Only a reference may drop its text.
-- Kept products are large: on en_ulb a target's are 7.29 MB, 162% of the 4.51 MB raw text.
+- A target cannot drop its text; only a reference can.
+- Products are large: on en_ulb a target's are 7.29 MB, 162% of the 4.51 MB raw text.
 
 ## Show me
 

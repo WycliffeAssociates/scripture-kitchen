@@ -7,21 +7,21 @@ crate: onion
 files: [onion/src/cst.rs, onion/src/tables/schema.rs, GLOSSARY.md]
 related: [cst, marker-table, lint, token]
 level: 2
-summary: "The loop that turns the flat list of pieces into a nested tree, deciding when each paragraph, footnote or styled word ends."
+summary: "The stack loop that builds the CST. Displacement by context rank, close reasons recorded, closers never invented."
 ---
 
 ## The problem
 
-USFM rarely says where things end. A paragraph `\p` ends when the next paragraph starts. A footnote `\f` should end with `\f*`, but authors forget. So when a new `\p` arrives inside an open footnote, something has to decide: does the footnote run on, or did the author forget to close it? Every later check and the editor's outline depend on that answer.
+USFM rarely writes where things end: `\p` ends at the next paragraph, `\ft` at its note's end, and authors forget `\f*`. Whether a new `\p` inside an open `\f` continues the note or ends it decides everything downstream.
 
 ## The solution
 
-The walker keeps a stack of what is currently open. Each new marker either opens something, closes its own match, or forces open things to close because it outranks them. A paragraph outranks a footnote, so a new `\p` closes the open footnote. Every forced close is recorded with a reason, so [[lint]] can tell the author "we closed your footnote here". Ranking alone cannot say what may nest inside what, so a separate rule answers "may this marker appear here?".
+A stack of open frames. Each marker opens a frame, closes its own match, or displaces frames it outranks; a `\p` displaces an open `\f`. Every close records its reason in one byte: `Explicit`, `Implicit` (the grammar ended it), `Recovery` (it needed a closer it never got) or `Eof`. So the tree is complete without inserting closer tokens ([[invariants]] 1), and lint reads `Recovery` as an unclosed note ([[invariants]] 3). A separate context mask answers "may this marker appear here?".
 
 ## Trade-offs
 
-- A `\p` can never be swallowed by an unclosed `\f`, even when the author meant the note to run on. The tree may disagree with the author.
-- A sidebar only ends at its own closing marker, so a chapter marker inside it stays inside and is flagged rather than escaping.
+- A `\p` is never swallowed by an unclosed `\f`, even when the author meant the note to run on.
+- A sidebar ends only at its own closer, so a chapter marker inside it stays inside and is flagged.
 
 ## Show me
 

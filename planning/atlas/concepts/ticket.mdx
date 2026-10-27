@@ -7,21 +7,21 @@ crate: ticket
 files: [ticket/README.md, ticket/src/lib.rs, ticket/src/schema.rs, ticket/src/emit.rs, ticket/src/stale.rs]
 related: [wire, dish, census, find-buffer, mask-map, onion, galley, mise]
 level: 1
-summary: "A build-time tool crate that writes both halves of every binary format, the Rust writer and the TypeScript reader, from one declaration."
+summary: "Build-time vocabulary and emitters. One declaration per wire generates the Rust writer and the TS reader."
 ---
 
 ## The problem
 
-Several answers cross from Rust to JavaScript as packed binary buffers rather than JSON (see [[wire]]). Each buffer needs a Rust writer and a TypeScript reader that agree on every byte. Written by hand, the two sides drift: a field moves on one side and the other reads garbage, silently.
+Each binary wire needs a Rust writer and a TS reader that agree on every byte, and hand-kept pairs drift silently: onion-wasm.ts once mirrored 109 constants by hand (b781bb9).
 
 ## The solution
 
-Each format declares its fields once, and ticket generates both the Rust writer and the TypeScript reader from that declaration. It is a separate crate so all the formats share one vocabulary and one emitter. It is not in [[mise]], because mise excludes generators. It only runs at build time; nothing in a shipped binary calls it.
+A format declares its fields once in ticket's vocabulary (`Width`, `Space`, `Field`, `Record`, `Repeat`), and ticket emits both ends plus the staleness reporter ([[invariants]] 6). It is generator-only; nothing at runtime calls it. It is not in [[mise]], which excludes generators.
 
 ## Trade-offs
 
-- Each format still hand-writes its own envelope (header, magic number, version). One grammar for all of them would save about fifty lines and cost a lot of generality.
-- Two formats predate it and are still read partly by hand: the [[findings-snapshot]] and the [[corpus]] envelope.
+- Each format still writes its own envelope (header, magic, version); one grammar for all of them would save about fifty lines.
+- Two formats predate it and are still partly read by hand: the [[findings-snapshot]] and the [[corpus]] envelope.
 
 ## Show me
 

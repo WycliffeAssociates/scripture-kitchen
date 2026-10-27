@@ -7,22 +7,22 @@ crate: galley
 files: [galley/src/sous/expediter.md, galley/src/sous/expediter.rs, galley/tests/equivalence.rs]
 related: [pantry, chapter-pass, onion-book, findings-snapshot, sous-core, galley-package]
 level: 2
-summary: "The coordinator that runs Sous Chef's checks over a whole project and redoes only the work an edit actually changed."
+summary: "Galley's resident publisher. On publish it recounts changed chapters, refolds changed books, rejudges, and returns one complete snapshot."
 ---
 
 ## The problem
 
-A translator's project is many books, and Sous Chef's findings depend on all of them together. The editor sends a changed book and asks "what are the findings now?", often after every keystroke. Redoing every check over every book each time is too slow. Something has to decide, per request, what can be reused and what must be redone, and still give exactly the answer a fresh run would.
+Sous findings are corpus-relative, so a keystroke in Mark can move a verdict in Genesis, and Sefer asks for findings after edits. Rerunning every pass over every book per publish is too slow, and any reuse must still equal a cold run.
 
 ## The solution
 
-The expediter is that coordinator. Sending a book only stores it; the work happens when findings are asked for ("publish"). Then it re-counts only chapters whose text changed, re-adds only books whose counts moved, and re-decides only the judgments those counts touch. The two most recently edited books keep all their chapter counts, because the next keystroke will probably land there. The alternative, working the moment a book arrives, wastes effort when ten books arrive before one request. Every publish returns one complete answer for the whole project, never a partial update.
+An update only stores; the work happens at publish ([[invariants]] 4, 5). Then it maps only chapters whose bytes changed, refolds only books whose aggregates moved, and rejudges, all from content-keyed stores. The two most recently edited books keep their chapter observations hot. Every publish is a whole snapshot, never a patch, and `tests/equivalence.rs` holds it to a cold run.
 
 ## Trade-offs
 
-- The first publish after opening a project pays for everything.
-- Changing a setting re-places findings in every book: 3.2 ms for 66 books, against 206 µs for an unchanged republish.
-- Keeping the two hot books' counts costs memory: 281 KB of rows on en_ulb.
+- The first publish pays for everything.
+- A config change re-places findings in every book: 3.2 ms for 66 books, against 206 µs for an unchanged republish.
+- Hot books' observations cost 281 KB of rows on en_ulb.
 
 ## Show me
 

@@ -7,23 +7,22 @@ crate: sous-core
 files: [sous-chef/charter.md, sous-chef/core/src/codec/README.md, sous-chef/core/src/corpus/mod.rs, galley/sous-reader.ts, galley/src/sous/mod.rs]
 related: [expediter, chapter-pass, onion-book, utf16, wire, galley-package, sefer]
 level: 3
-summary: "Every consistency finding for a whole project, sent to the editor as one buffer of fixed-size records that replaces the previous set."
+summary: "Every Sous finding for the project as 16-byte records plus a shared pattern table; each publish replaces the last."
 ---
 
 ## The problem
 
-Sous Chef flags things a reviewer should look at, like "this spelling occurs 1 of 1,053 times". Those verdicts compare each place against the whole project. So editing one chapter of Mark can change a finding in Genesis, because the totals moved. The editor needs the full, current list after each change, with each finding pinned to an exact spot in the file it shows.
+Sous verdicts are corpus-relative: an edit in Mark can change a finding in Genesis. Sefer needs the complete current set after each publish, each finding at an exact place.
 
 ## The solution
 
-Each publication is a complete snapshot of every finding, not a list of changes. A finding is a 16-byte record: a start and end position, a book number, a kind code, flags and two small numbers whose meaning depends on the kind. Evidence shared by many findings, like a spelling pattern, sits once in a pattern table that records point to. Patches against the last snapshot were ruled out because a distant edit can shift totals anywhere. An array of JavaScript objects was ruled out in the charter from day one, in favour of fixed-size records.
+A full snapshot, not a patch, because a distant edit can move totals anywhere. A finding is 16 bytes: start and end offsets, book index, kind code, flags and two kind-dependent numbers ([[invariants]] 2). Shared evidence (a pattern's counts) sits once in a pattern table that records point at. An array of JS objects was ruled out in the charter.
 
 ## Trade-offs
 
-- Every edit republishes the whole project's findings, even if one changed.
-- The kind codes are dense with no gaps. Removing or renumbering one is a new wire version.
-- A finding over removed markup (a footnote, say) publishes the outer range in the file, not exact pieces.
-- The reader refuses anything it does not know (version, code, flag, bad range) rather than guessing.
+- Every publish resends the whole set.
+- Kind codes are dense; removing or renumbering one is a new wire version.
+- A finding over removed markup publishes the outer source range, not pieces.
 
 ## Show me
 

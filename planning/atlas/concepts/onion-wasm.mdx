@@ -7,22 +7,22 @@ crate: onion-wasm
 files: [onion-wasm/README.md, onion-wasm/src/lib.rs, onion-wasm/reader.ts, onion-wasm/diagnostics.json, onion-wasm/build.sh]
 related: [onion, galley, galley-package, dish, plate, utf16, resolve, extensions]
 level: 1
-summary: "A thin layer that exposes the USFM engine to JavaScript; it adds no logic of its own, only conversions at the boundary."
+summary: "The thin wasm-bindgen layer over onion. Conversions at the boundary, no logic."
 ---
 
 ## The problem
 
-JavaScript apps want the USFM engine, but the engine is Rust. Something has to compile it to WebAssembly and translate at the boundary. Byte positions must become JavaScript string positions, and option objects must be checked. If that layer also grew its own logic, JS and Rust users would get different answers.
+JS callers need onion with UTF-16 offsets and validated options. Any logic in the binding would make JS and Rust answers differ.
 
 ## The solution
 
-onion-wasm is a deliberately thin wrapper. Each exported function calls one engine function and converts its inputs and outputs, nothing more. "You could delete this crate and recreate it in an afternoon; that is the point." It is separate from [[onion]] so native Rust users never compile browser code. It still exists beside [[galley]] for apps that want the engine without the proofreader.
+Each export calls one onion function and converts its inputs and outputs ([[invariants]] 4). "You could delete this crate and recreate it in an afternoon; that is the point." It is separate from [[onion]] so native users never compile browser code, and it still exists beside [[galley]] for hosts that want the engine without Sous.
 
 ## Trade-offs
 
-- The built packages are committed to git, about 370 KB (152 KB gzipped), because consumers install from a git tag, not npm.
-- The binary must be byte-identical on every machine, which needs a special build script.
-- Input must use LF line endings. CRLF input would put every position one too far per line.
+- The built packages are committed, about 370 KB (152 KB gzipped), because consumers install from a git tag.
+- The binary must be byte-identical across machines, which needs a dedicated build script.
+- Input must be LF; CRLF puts every offset one further off per line.
 
 ## Show me
 

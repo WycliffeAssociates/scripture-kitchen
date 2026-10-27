@@ -7,22 +7,22 @@ crate: galley
 files: [galley/Cargo.toml, galley/src/lib.rs, galley/README.md, galley/docs/analysis-host.md, agents/architecture.md]
 related: [galley-package, onion, sous-core, onion-wasm, ticket, mise, pantry, expediter, onion-book]
 level: 1
-summary: "The crate that connects the USFM engine to the proofreader and keeps books in memory between calls, so each keystroke is cheap."
+summary: "The one crate that depends on both engines and the one that holds state. Pantry, expediter, the Onion to Sous seam, and the JS package."
 ---
 
 ## The problem
 
-An editor calls the engine on every keystroke, across a whole project of books. Re-reading every book each time is too slow, so something has to remember earlier work. The proofreader also needs the engine's view of the text, but the two products are kept independent. Someone has to hold the memory and do the translating between them.
+Per-keystroke calls over a whole project need memory between calls, and Sous needs onion's view of the text. But both engines stay stateless, and Sous must not depend on onion.
 
 ## The solution
 
-Galley is that someone. It is the only crate allowed to depend on both the USFM engine ([[onion]]) and the proofreader ([[sous-core]]). Neither engine depends on galley or on each other. All state lives here, in one cache (the [[pantry]]), so the engines stay simple text-in, answers-out functions. Galley also builds the one JavaScript package apps install.
+Galley is the only adapter allowed to see both ([[invariants]] 4, 7). All state lives in one cache, the [[pantry]]; the [[onion-book]] seam builds Sous's neutral input; the [[expediter]] publishes. Neither engine depends on galley.
 
 ## Trade-offs
 
-- Every cross-product feature must go through galley, so it is the busiest crate.
-- One cache layer means one place to reason about memory, but it also has to account for every byte it keeps.
-- Building it for JavaScript pulls the whole engine in through [[onion-wasm]].
+- Every cross-product feature goes through it, so it is the busiest crate.
+- One cache layer is one place to reason about memory, and it must account for every byte it keeps.
+- Building it for JS pulls the whole engine in through [[onion-wasm]].
 
 ## Show me
 

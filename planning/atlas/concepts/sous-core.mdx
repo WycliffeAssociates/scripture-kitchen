@@ -7,22 +7,22 @@ crate: sous-core
 files: [sous-chef/core/Cargo.toml, sous-chef/core/src/lib.rs, sous-chef/charter.md]
 related: [sous-chef, mise, galley, chapter-pass, onion-book, findings-snapshot, words]
 level: 1
-summary: "The proofreader's counting engine: it measures a translation's habits and flags what departs from them, without knowing anything about USFM."
+summary: "Sous's counting engine over a format-neutral ProjectedBook. It never depends on onion and keeps no caches."
 ---
 
 ## The problem
 
-The proofreader has to count a translation's habits, like which character usually follows a comma or how long verses run, and judge outliers. That counting should work on any source of verse text, not only USFM files. If it depended on the USFM engine, it would be tied to one file format forever.
+Sous's counts and verdicts must work for any producer of addressed verse text (onion's mask today, a vref file too), and must be reusable across keystrokes without owning a cache.
 
 ## The solution
 
-sous-core takes a plain, format-neutral view of a book: its text, plus where each chapter and verse starts. It never imports the USFM engine; [[galley]] builds that view from USFM and hands it over. It also keeps no caches between calls; galley decides what to reuse, and sous-core says what is safe to reuse. Its only shared dependency is [[mise]], the tiny leaf crate both engines use.
+It accepts a borrowed `ProjectedBook`, text plus chapter and verse rows, and never imports onion ([[invariants]] 7); [[galley]] builds the view. Rules are [[chapter-pass]]es whose map is config-free and pure per chapter, so galley caches by content while sous-core only declares what is safe to reuse ([[invariants]] 4, 5). Judging is explicit fractions against support bands, not a score. Its only shared dependency is [[mise]].
 
 ## Trade-offs
 
-- It cannot ask the USFM engine anything directly. Any structural fact it needs must be in the neutral view.
-- It owns content evidence only. Editor positions, saving, file reading and translated messages belong elsewhere.
-- It generates its own TypeScript reader instead of using [[ticket]]; `architecture.md` lists that as debt.
+- It cannot ask onion anything; any structural fact it needs must be in the neutral view.
+- It owns content evidence only. Editor positions, persistence, I/O and localisation are elsewhere.
+- Its snapshot reader is typed by hand with only the numbers generated, not built on [[ticket]]: listed as debt.
 
 ## Show me
 

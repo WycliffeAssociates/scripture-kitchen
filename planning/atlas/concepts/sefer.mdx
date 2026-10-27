@@ -7,21 +7,21 @@ crate: workspace
 files: [galley/src/wasm.md, onion/src/resolve.md, planning/roadmap.mdx]
 related: [galley-package, resolve, census, findings-snapshot, find-buffer, mask-map]
 level: 0
-summary: "The scripture editor translators type in; it lives in its own repo and calls this workspace's WebAssembly package for every answer about the text."
+summary: "The browser USFM editor, in its own repo, that vendors the galley package and calls it per keystroke."
 ---
 
 ## The problem
 
-Translators edit USFM books in Sefer, a browser-based editor. As they type, it must show the outline, jump to a verse, highlight errors, search and surface proofreading findings. It needs those answers on every keystroke, from code that understands scripture structure. Writing that logic in the editor itself would duplicate the engine.
+Sefer shows the outline, goes to a verse, underlines errors, searches and surfaces Sous findings while the translator types, and should carry no scripture parser of its own.
 
 ## The solution
 
-Sefer does no scripture parsing of its own. It loads the [[galley-package]] and asks it questions, like "where is Luke 1:2?" Positions come back in UTF-16 code units, the unit JavaScript strings and the editor use, so no conversion happens on Sefer's side. Much of this workspace's shape comes from Sefer's numbered requests, which appear in commits and planning items.
+It parses nothing itself. Every answer comes from the [[galley-package]], with offsets in UTF-16 so Sefer converts nothing. Its per-keystroke loop is what [[invariants]] 2, 4 and 5 are sized for, and many of the workspace's doors trace to its numbered requests.
 
 ## Trade-offs
 
-- Every new feature Sefer needs must land in the galley package, the only build it loads, not just in the engine.
-- Sefer's own code is in another repo. This atlas does not document its internals.
+- A feature Sefer needs must land on the galley package, the only build it vendors, not just on the engine.
+- Sefer's internals live in another repo; the atlas does not document them.
 
 ## Show me
 

@@ -7,22 +7,22 @@ crate: galley
 files: [galley/src/corpus.rs, onion-wasm/reader.ts.tmpl]
 related: [dish, wire, pantry]
 level: 3
-summary: "A whole project's parses sent across in one buffer, each book's result kept exactly as it was and labelled with the caller's name for it."
+summary: "Every book's dish framed in one buffer under the caller's own labels, for a cold project load."
 ---
 
 ## The problem
 
-Opening a project for the first time means parsing every book: 66 files for a Bible. Each parse already produces one buffer for JavaScript. Handing JavaScript 66 separate buffers means 66 crossings and 66 things to track. The caller also has its own names for the books (file paths, database ids) that the engine knows nothing about.
+A cold open parses every book. Sixty-six dishes are 66 crossings and 66 handles, and the caller keys books by its own ids (paths, database ids) that the engine has no business interpreting.
 
 ## The solution
 
-The corpus envelope puts all the per-book buffers in one buffer. Each book's result is copied in unchanged, labelled with whatever name the caller gave it. Because the contents are not re-encoded, one reader decodes a single book and a whole project the same way. The engine never reads the labels, so they cannot disagree with what the caller meant. Books can be parsed in parallel before framing; the caller chooses how.
+`ONCP` frames the per-book dishes byte for byte under opaque caller labels, so one reader decodes a book or a project the same way ([[invariants]] 2). The engine never reads the labels. Books can be parsed in parallel before framing.
 
 ## Trade-offs
 
-- A cold load does not fill the engine's per-book cache, so the first edit after it pays for parsing again. The file marks this as a TODO.
-- Entries carry no checksum. Adding one is a format change: an entry is 16 bytes, and a 128-bit hash would add 16 more.
-- Its JavaScript reader is written by hand, one of two wire formats that are not generated ([[wire]]).
+- A cold load does not warm the [[chunk-cache]], so the first edit reparses (marked TODO).
+- No per-entry checksum; adding one is a format change (16 to 32 bytes an entry).
+- Read by hand, not generated: standing debt against [[invariants]] 6.
 
 ## Show me
 

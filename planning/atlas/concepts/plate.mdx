@@ -7,26 +7,22 @@ crate: onion
 files: [onion/src/wire.rs, onion-wasm/README.md, onion-wasm/src/lib.rs]
 related: [dish, wire, cst, lint, toc, diff, onion-wasm]
 level: 3
-summary: "Packing everything one parse produced into a single buffer, so the editor gets tokens, tree, problems and chapter index from one call."
+summary: "One parse, one crossing. Tokens, CST, lint and TOC written into one buffer that JS reads lazily."
 ---
 
 ## The problem
 
-The editor calls the engine on every keystroke, and each call is about a whole book, because USFM keeps one book per file. It wants several answers at once: the tokens, the tree, the lint problems, where each chapter and verse starts. Asking for each separately pays the cost of crossing from WebAssembly to JavaScript several times. And converting results into JavaScript strings and objects is where the time goes; copying raw bytes is nearly free.
+A keystroke wants tokens, tree, diagnostics and the chapter/verse index together, and crossing a typical book costs about 80 µs, so separate calls multiply it. The old `analyze` built thirteen curated views, and three fifths of its time went to building and converting them.
 
 ## The solution
 
-Parse once, then "plate" the result: write all of it into one flat buffer of numbers and hand that buffer over in one call. JavaScript reads rows straight out of the buffer with a generated reader, and only the rows it asks for. Text is not copied; rows hold byte positions into the file the editor already has. The engine keeps nothing between calls, so there is nothing to free.
-
-The old design built thirteen prepared views of the book and converted each one for JavaScript. Three fifths of that call was building and converting views. Sending the raw tree instead took 0.64x the bytes and 0.62x the time.
-
-Rust callers can stop before plating and use the parsed result directly.
+Parse once and write the raw products into one flat buffer ([[invariants]] 2). Rows hold byte positions, not text, and JS decodes a row only when asked. Shipping the tree instead of views was 0.64x the bytes and 0.62x the time (b781bb9). `parse` returns bytes and retains nothing, so the engine stays stateless and there is nothing to free.
 
 ## Trade-offs
 
-- The buffer is a versioned format (now version 5). Changing its shape means every consumer updates its reader.
-- JavaScript gets a cursor over numbers, not friendly objects. Any convenience view is the consumer's to build.
-- Two cold paths still return JSON: [[diff]]'s skeleton and [[resolve]]'s answer.
+- A versioned format (v5); a shape change means regenerated readers.
+- Consumers build their own views from the tree.
+- [[diff]]'s skeleton and [[resolve]]'s answer still return JSON, on cold paths.
 
 ## Show me
 

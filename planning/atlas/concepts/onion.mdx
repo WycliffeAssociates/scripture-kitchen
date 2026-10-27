@@ -7,22 +7,22 @@ crate: onion
 files: [onion/Cargo.toml, onion/src/lib.rs, onion/src/bin/playground.rs, onion/src/bin/codegen.rs]
 related: [onion-engine, mise, ticket, onion-wasm, galley, cst, scanner]
 level: 1
-summary: "The Rust crate that does all the USFM work: reading the file, building its structure, checking it, formatting, diffing and exporting."
+summary: "The engine crate. Scanner, CST, TOC, mask, lint, format, diff, exports and the dish writer, with no state and no I/O."
 ---
 
 ## The problem
 
-Every question about a USFM file needs one implementation. Where is verse 4? Which codes are invalid? What changed between two drafts? What is the HTML version? If the editor, the CLI and the proofreader each answered differently, users would see contradictions.
+Every structural question about a USFM book needs one implementation behind every host.
 
 ## The solution
 
-All of that logic lives in this one crate, written once. It keeps no state and does no file I/O: you hand it text, it hands back answers. Anything that must remember between calls lives in [[galley]]. Keeping the crate free of JavaScript and WebAssembly code means native Rust users pay nothing for the browser build, which lives in [[onion-wasm]].
+All of it lives here, written once ([[invariants]] 4): text in, answers out, no file I/O. Caching is [[galley]]'s, and the wasm build is [[onion-wasm]]'s, so native users pay nothing for it.
 
 ## Trade-offs
 
-- Stateless means repeated calls redo work unless the caller caches. That is deliberate; [[galley]] caches.
-- JSON writers are hand-rolled, so serde is only a test dependency. That keeps the crate small but means more code to maintain.
-- The exports (USJ, USX, HTML) are optional features, so a size-sensitive build can drop them.
+- Repeated calls redo work unless the caller caches; deliberate.
+- JSON writers are hand-rolled, so serde is only a test dependency.
+- USJ, USX and HTML are optional features.
 
 ## Show me
 

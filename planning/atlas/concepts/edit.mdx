@@ -7,22 +7,22 @@ crate: onion
 files: [onion/src/edit.rs]
 related: [lint, format, diff, overlay, source]
 level: 2
-summary: "One shape for every proposed change to a file: replace these bytes with this text."
+summary: "The one change shape every writer returns, replace this byte range with this text."
 ---
 
 ## The problem
 
-Several features want to change a translator's file. A lint check proposes a fix, the formatter tidies spacing, a diff replays changes, and overlay copies paragraph breaks from a source text. The editor has to show and apply all of them. If each feature described its changes differently, the editor would need a separate applier for each.
+Lint fixes, format, diff merges and overlay all propose changes to a file the editor owns. A change shape per feature means an applier per feature.
 
 ## The solution
 
-Every feature speaks one shape: an **edit** says "replace the bytes from here to there with this text". The editor applies them all the same way. The obvious alternative is returning a whole new copy of the file. The docs do not record why that was rejected. What the edit shape gives: only the touched bytes change, each change can be shown on its own before it is applied, and a reference applier serves tests and other language bindings.
+Every writer returns splice edits, a byte range plus replacement text, and never a new document ([[invariants]] 1, 3). Untouched bytes stay untouched, each change can be previewed alone, and one reference applier serves tests and other bindings. Why returning a whole new document was rejected is not recorded.
 
 ## Trade-offs
 
-- Positions are byte offsets; the editor counts in UTF-16, so it converts at the boundary ([[utf16]]).
-- A set of edits is only valid against the exact text it was computed from.
-- Two inserts at the same spot are merged into one edit, so an applier working last-to-first still keeps them in order.
+- Offsets are bytes; the editor converts to UTF-16 at the boundary ([[utf16]]).
+- A set of edits is valid only against the exact text it was computed from.
+- Two inserts at one point merge, so last-to-first application keeps their order.
 
 ## Show me
 

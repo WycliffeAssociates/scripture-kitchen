@@ -6,21 +6,22 @@ import WireStrip from "../../../components/atlas/WireStrip.astro";
 import "../../../styles/wires.css";
 import { loadWires, regionBytes } from "../../../lib/atlas/layouts.ts";
 import { fixtures } from "../../../lib/atlas/paths.ts";
+import { url } from "../../../lib/url.ts";
 
 const wires = await loadWires();
 ---
 <Base title="Wires" section="atlas">
   <AtlasSidebar slot="sidebar" />
   <h1 class="text-h3 font-semibold">Wires</h1>
-  <p class="text-small">The editor, Sefer, calls the engine through WebAssembly, often on every keystroke. USFM keeps one book per file, so each call is about a whole book. Copying strings and objects across that boundary is the expensive part. So a wire is mostly numbers: fixed-size rows of integers, small string tables so no string repeats, generated enums both sides share, and number ranges saying which stretch of the book something is about.</p>
+  <p class="text-small">Sefer calls the engine through WebAssembly on every keystroke, a whole book per call. Strings are the cost at that boundary: a string per token allocates in Rust and again in JS, and JSON adds an encode and a parse. So every per-call answer is offsets over object graphs (<a href={url("/atlas/invariants")}>invariant 2</a>): fixed-stride integer rows, from/to ranges into text the caller already holds, enum-numbered kinds, and a string table only where text must travel.</p>
   <ul class="wwhy">
-    <li><b>One call, one buffer.</b> Rust writes it, JavaScript reads it in place.</li>
-    <li><b>No object per node.</b> A row is read only when asked for, through a cursor.</li>
-    <li><b>Text is not copied.</b> Rows point at byte positions in the file the editor already has.</li>
-    <li><b>Writer and reader are generated</b> from one declaration per format.</li>
-    <li><b>A version mismatch fails loudly</b> when the buffer is opened.</li>
+    <li><b>One call, one buffer.</b> Rust writes it; JS reads it in place.</li>
+    <li><b>Lazy rows.</b> A row is decoded only when asked for, through a cursor.</li>
+    <li><b>No text copied.</b> Rows are byte or UTF-16 ranges into the caller's own text.</li>
+    <li><b>Both ends generated</b> from one declaration per format, staleness-tested (<a href={url("/atlas/invariants")}>invariant 6</a>).</li>
+    <li><b>Version mismatch fails at open,</b> never as a misread field.</li>
   </ul>
-  <p class="text-small text-on-surface-secondary">More in <a href="/atlas/wire">the wire</a>.{fixtures.layouts && " These layouts are the fixture; docs/layouts/ is not written yet."}</p>
+  <p class="text-small text-on-surface-secondary">More in <a href={url("/atlas/wire")}>the wire</a>.{fixtures.layouts && " These layouts are the fixture; docs/layouts/ is not written yet."}</p>
 
   <div class="wcards">
     {wires.map((wire) => {
@@ -28,7 +29,7 @@ const wires = await loadWires();
       const first = layout.records[0];
       const head = layout.envelope.find((r) => r.fields.length > 0);
       return (
-        <a class="wcard" href={`/atlas/wires/${layout.format}`} data-crate={wire.crate}>
+        <a class="wcard" href={url(`/atlas/wires/${layout.format}`)} data-crate={wire.crate}>
           <div class="flex flex-wrap items-baseline gap-2">
             <span class="font-mono font-semibold text-on-surface-primary">{layout.format}</span>
             {layout.magic && <span class="wpill font-mono">{layout.magic}</span>}

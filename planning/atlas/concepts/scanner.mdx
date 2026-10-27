@@ -7,22 +7,22 @@ crate: onion
 files: [onion/src/scanner.rs, onion/src/lib.rs]
 related: [source, token, marker-table, extensions, designator, attributes, chunk]
 level: 2
-summary: "The first pass over a file: it cuts the text into small labelled pieces (markers, verse numbers, words) without changing a byte."
+summary: "One pass from bytes to 12-byte token rows. memchr over the prose, fused arms for the nine commonest markers, no byte lost."
 ---
 
 ## The problem
 
-A USFM file is plain text with backslash markers mixed in: `\v 1 In the beginning`. Before anything can check or display it, something has to cut it into pieces: this is a marker, this is a verse number, this is text. That step runs on every keystroke for a whole book, so it must be very fast. It must also never lose or change a character, because the editor shows the file exactly as written.
+Every keystroke relexes at least the edited chapter and a cold open lexes every book, so lexing is the floor under every other cost. The output must tile the source ([[invariants]] 1).
 
 ## The solution
 
-One pass walks the bytes and records each piece as a position and length, plus a label. Glued back together, the pieces give back the original file exactly. The scanner only decides where a piece starts and stops and what kind it is. It never reads inside a verse number or an attribute list; small separate functions do that later, only when asked ([[designator]], [[attributes]]). Keeping those jobs apart keeps the hot loop small, and lets other code parse a verse label without running the scanner.
+Most of a book's bytes are prose between markers, so the text arm does not step byte by byte: it jumps with vectorised `memchr3` to the next `\`, `\r` or `\n`. The same lexer with a plain byte loop there ran 441 MiB/s against 1.3 GiB/s on prose (1.15 aligned), about 3x (d45be4f, `experiments/scalar.rs`). At a marker, `common_marker_checks` matches the byte after `\` and handles the nine commonest markers by measured frequency (`v q p s f b ft fr xt`, about 85% of occurrences in en_ulb and BSB) in one shape test each, skipping the general path's passes and name lookup: prose went from 968 to about 1,730 MiB/s, while aligned en_ult, dominated by `\w` and `\zaln`, stayed near 1,150 (90fef5d). Designators and attribute lists stay unread slices ([[designator]], [[attributes]]).
 
 ## Trade-offs
 
-- A piece longer than 65,535 bytes is split into several pieces, because a piece's length is stored in two bytes.
-- A verse number must start with an ASCII digit; `\v Then He…` is read as text after the marker, not as a malformed number.
-- Interpreting the pieces is pushed onto later code, which has to ask for it.
+- Aligned text gains little from the fast arms: `\w` and `\zaln-s` have none (a parked idea, 2026-08-13).
+- Two code paths. `tests/fast_path_identity.rs` pins every fast arm token-identical to `lex_general_path_only` over the corpus.
+- `len` is `u16`, so a text run over 65,535 bytes splits into several tokens.
 
 ## Show me
 

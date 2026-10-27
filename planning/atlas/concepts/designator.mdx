@@ -7,22 +7,22 @@ crate: onion
 files: [onion/src/designator.rs, GLOSSARY.md]
 related: [scanner, toc, resolve, lint, vref]
 level: 2
-summary: "Reads the number after a chapter or verse marker, like 12, 12a, 3-5 or 1,3,5, into what it sorts by and which verses it really covers."
+summary: "Parses the slice after a chapter or verse marker (12, 12a, 3-5, 1,3,5) into a sortable hull and exact members, on demand."
 ---
 
 ## The problem
 
-A verse number is not always a number. Translators write `\v 12a` for half a verse, `\v 3-5` for verses merged into one, and sometimes `\v 1,3,5`. Code needs two answers from that text: where does it sort, and which verses does it actually contain? And typos like `\v 01` or `\v 1-` must be noticed, not guessed at.
+Verse labels are not integers: `12a`, `3-5`, `1,3,5`. The TOC, resolve and lint need where a label sorts and which verses it really covers, and `\v 01` or `\v 1-` must be flagged, not normalised.
 
 ## The solution
 
-One small function reads the text after `\c` or `\v` and gives both answers. The "hull" is the first and last verse, for sorting and display. The "members" are the exact list: `1,3,5` covers 1, 3 and 5, not 2 or 4. The code that cuts the file into pieces never looks inside the number; this function does, only when asked. That keeps the cutting step fast and lets anyone parse a verse label from any string.
+A pure function over any byte slice returns the **hull** (first..last, for sorting) and the **members** (the exact list). The [[scanner]] only decides where a designator's span ends and never reads inside it, so the hot loop stays small and anyone can parse a label without lexing ([[invariants]] 2). Malformed input is reported, not guessed ([[invariants]] 3).
 
 ## Trade-offs
 
-- Numbers cap at about 4 billion and clamp there, so garbage stays sorted as garbage instead of wrapping around.
-- Any non-ASCII character counts as a valid segment letter. We ship no Unicode category table, so we accept a little too much rather than flag a correct Arabic segment.
-- Chapters are digits only: `\c 12b` is malformed.
+- Numbers clamp at about 4 billion, so garbage sorts as garbage instead of wrapping.
+- Any non-ASCII character counts as a segment letter: no Unicode category table ships, so it accepts slightly too much rather than flag a correct Arabic segment.
+- Chapters are digits only; `\c 12b` is malformed.
 
 ## Show me
 
