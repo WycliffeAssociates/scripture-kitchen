@@ -4,8 +4,9 @@
  *
  *   pnpm atlas check     concept frontmatter, related slugs, cited files,
  *                        unresolved [[links]], [[code:…]] citations that no
- *                        longer resolve, map.json's references, and
- *                        boxes on screen together that overlap
+ *                        longer resolve, map.json's references,
+ *                        boxes on screen together that overlap, and the
+ *                        /features rows (atlas/features.ts)
  */
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join, relative } from "node:path";
@@ -13,6 +14,7 @@ import { parse } from "yaml";
 import { lookup, wikiLinks } from "../src/lib/atlas/glossary.ts";
 import { conceptsDir, mapPath } from "../src/lib/atlas/paths.ts";
 import { parseCite, resolveCite } from "../src/lib/code-cite.ts";
+import { checkFeatures } from "../src/lib/features.ts";
 import { overlaps, place } from "../src/lib/atlas/place.ts";
 import { conceptSchema, mapSchema } from "../src/lib/atlas/schema.ts";
 import { repoRoot as root } from "../src/lib/root.ts";
@@ -61,6 +63,12 @@ export const checkAtlas = (itemsDir: string): number => {
       } else if (!names.has(target.toLowerCase())) fail(`${relative(root, file)}:${line}: [[${target}]] names no concept`);
     }
   }
+  const items = new Set(
+    existsSync(itemsDir)
+      ? readdirSync(itemsDir, { recursive: true, encoding: "utf8" }).filter((n) => n.endsWith(".mdx")).map((n) => n.slice(0, -4))
+      : [],
+  );
+  for (const problem of checkFeatures(slugs, items)) fail(problem);
   if (existsSync(mapPath)) {
     const where = relative(root, mapPath);
     const result = mapSchema.safeParse(JSON.parse(readFileSync(mapPath, "utf8")));

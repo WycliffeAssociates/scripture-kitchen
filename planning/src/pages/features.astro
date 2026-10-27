@@ -1,96 +1,147 @@
 ---
 /**
- * What Sefer reaches through galley, one card per feature, read from the
- * verify-kitchen skill's feature files at build time.
+ * What the workspace does, as a spec sheet: one line per capability, its
+ * concept page and its door. Rows are src/lib/features.ts's; the counts come
+ * from the files that define them.
  */
 import Base from "../layouts/Base.astro";
-import { githubBlob } from "../lib/atlas/github.ts";
-import { FEATURES_DIR, loadFeatures } from "../lib/features.ts";
+import { citeLink, githubBlob } from "../lib/atlas/github.ts";
+import { DIAGNOSTICS, FEATURES_DIR, SOUS_CATALOG, proofs, sheet, sousFamilies, type FeatureGroup, type FeatureItem } from "../lib/features.ts";
+import { url } from "../lib/url.ts";
 
-const { intro, features } = await loadFeatures();
+const s = sheet();
+const lintTotal = s.lint.categories.reduce((n, c) => n + c.codes.length, 0);
+const lintFixes = s.lint.categories.reduce((n, c) => n + c.codes.filter((x) => x.fix).length, 0);
+const sousMessages = sousFamilies().reduce((n, f) => n + f.messages.length, 0);
+const proofRows = proofs();
+
+const nameHref = (i: FeatureItem): string | undefined =>
+  i.href !== undefined ? url(i.href) : i.concept !== undefined ? url(`/atlas/${i.concept}`) : undefined;
+const door = (i: FeatureItem) => {
+  if (i.door === undefined) return null;
+  const link = i.cite === undefined ? null : citeLink(i.cite);
+  return link?.ok ? { text: i.door, href: link.href, title: link.title } : { text: i.door };
+};
+const src = (i: FeatureItem) => {
+  if (i.door !== undefined || i.cite === undefined) return null;
+  const link = citeLink(i.cite);
+  return link.ok ? { href: link.href, title: link.title } : null;
+};
+const order: (FeatureGroup | "lint")[] = [...s.before, "lint", ...s.after, s.sous, s.wires, s.hosts];
 ---
 <Base title="Features" section="features">
   <h1 class="text-h3 font-semibold">Features</h1>
   <p class="mt-1 text-small text-on-surface-secondary">
-    {intro} From <a class="font-mono" href={githubBlob(`${FEATURES_DIR}/README.md`)}>{FEATURES_DIR}/</a>; proved with the <code>verify-kitchen</code> skill.
+    One line per capability: name → concept page, call → code. Untagged rows are reachable from <code>usfm-galley</code>.
   </p>
 
-  <div class="fcards">
-    {features.map((f) => (
-      <article class="fcard">
-        <header class="fcard-head">
-          <h2 class="text-h4 font-semibold">{f.title}</h2>
-          <a class="font-mono text-smallest" href={githubBlob(f.file)}>{f.file.split("/").pop()}</a>
-          <span class:list={["fhelper", f.helper === "none yet" && "fhelper-none"]}>
-            helper: <code>{f.helper || "—"}</code>
-          </span>
-        </header>
-        {!f.exists && <p class="fwarn">{f.file} is listed in the README but does not exist.</p>}
-        {f.exists && f.missing.length > 0 && (
-          <p class="fwarn">Missing required section{f.missing.length > 1 ? "s" : ""}: {f.missing.map((m) => `“${m}”`).join(", ")}</p>
-        )}
-
-        {f.html.user && (
-          <section class="fsec fsec-user">
-            <h3>What the user gets</h3>
-            <div class="prose" set:html={f.html.user} />
-          </section>
-        )}
-        {f.html.doors && (
-          <section class="fsec">
-            <h3>Galley doors</h3>
-            <div class="prose fdoors" set:html={f.html.doors} />
-          </section>
-        )}
-        {f.html.proof && (
-          <section class="fsec">
-            <h3>What proves it <span class="font-normal text-on-surface-tertiary">· {f.headings.proof}</span></h3>
-            <div class="prose fproof" set:html={f.html.proof} />
-          </section>
-        )}
-        {f.html.gotchas && (
-          <details class="fsec fgotchas">
-            <summary>Gotchas</summary>
-            <div class="prose" set:html={f.html.gotchas} />
-          </details>
-        )}
-      </article>
+  <div class="sheet">
+    {order.map((g) => g === "lint" ? (
+      <section class="sgroup" id="lint">
+        <h2>Lint <span class="scount">{lintTotal} codes · {lintFixes} with a fix</span></h2>
+        <ul>
+          {s.lint.categories.map((c) => (
+            <li>
+              <details>
+                <summary>
+                  <span class="sname scat">{c.name}</span>
+                  <span class="snote">{c.codes.length} codes · {c.codes.filter((x) => x.fix).length} with a fix</span>
+                </summary>
+                <ul class="scodes">
+                  {c.codes.map((x) => <li><code>{x.name}</code>{x.fix && <span class="sfix" title="offers a fix">fix</span>}</li>)}
+                </ul>
+              </details>
+            </li>
+          ))}
+          <li>
+            <a class="sname" href={url("/atlas/lint")}>Diagnostics</a>
+            <span class="snote">the dish's diagnostics section; names and fixes in <a href={githubBlob(DIAGNOSTICS)}>{DIAGNOSTICS}</a></span>
+            {(() => { const d = door(s.lint.door); return d?.href && <a class="sdoor" href={d.href} target="_blank" rel="noopener" title={d.title}><code>{d.text}</code></a>; })()}
+          </li>
+        </ul>
+      </section>
+    ) : (
+      <section class="sgroup" id={g.id}>
+        <h2>
+          {g.title}
+          {g.id === "sous" && <span class="scount">{sousMessages} messages · from <a href={githubBlob(SOUS_CATALOG)}>{SOUS_CATALOG.split("/").pop()}</a></span>}
+          {g.id === "wires" && <span class="scount">{g.items.length} formats · <a href={url("/atlas/wires")}>all</a></span>}
+        </h2>
+        <ul>
+          {g.items.map((i) => (
+            <li>
+              {nameHref(i) ? <a class="sname" href={nameHref(i)}>{i.name}</a> : <span class="sname">{i.name}</span>}
+              {i.tag && <span class:list={["stag", i.tag === "not built" && "stag-no"]}>{i.tag}</span>}
+              <span class="snote">{i.note}</span>
+              {i.item && <a class="splan" href={url(`/items/${i.item}`)}>plan</a>}
+              {(() => { const d = door(i); return d && (d.href ? <a class="sdoor" href={d.href} target="_blank" rel="noopener" title={d.title}><code>{d.text}</code></a> : <code class="sdoor">{d.text}</code>); })()}
+              {(() => { const c = src(i); return c && <a class="ssrc" href={c.href} target="_blank" rel="noopener" title={c.title}>code</a>; })()}
+            </li>
+          ))}
+        </ul>
+      </section>
     ))}
   </div>
+
+  <section class="sproof">
+    <h2>How each is proven end to end</h2>
+    <p class="text-small text-on-surface-secondary">Driven through galley the way Sefer calls it, by the <code>verify-kitchen</code> skill (<a class="font-mono" href={githubBlob(`${FEATURES_DIR}/README.md`)}>{FEATURES_DIR}/</a>).</p>
+    <table>
+      <thead><tr><th>Feature</th><th>Recipe</th><th>Helper</th></tr></thead>
+      <tbody>
+        {proofRows.map((p) => (
+          <tr>
+            <td>{p.name}</td>
+            <td><a class="font-mono" href={githubBlob(p.file)}>{p.file.split("/").pop()}</a>{!p.exists && " (missing)"}</td>
+            <td><code>{p.helper}</code></td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </section>
 </Base>
 
 <style is:global>
-  .fcards { display: grid; gap: 1.25rem; margin-block-start: 1.5rem; grid-template-columns: repeat(auto-fill, minmax(min(100%, 30rem), 1fr)); align-items: start; }
-  .fcard {
-    min-inline-size: 0;
-    border: var(--border-thin) solid var(--surface-border);
-    border-block-start: 4px solid var(--brand-base);
-    background: var(--surface-primary);
-    border-radius: var(--radius-md);
-    padding: 0.9rem 1rem;
+  .sheet {
+    margin-block-start: 1.25rem;
+    columns: 26rem auto;
+    column-gap: 2rem;
   }
-  .fcard-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.25rem 0.75rem; }
-  .fcard-head h2 { flex: 1 1 100%; }
-  .fhelper { font-size: var(--text-smallest); color: var(--on-surface-secondary); }
-  .fhelper code { font-family: var(--font-mono); background: var(--surface-tertiary); border-radius: var(--radius-xs); padding: 0 0.3em; }
-  .fhelper-none code { color: var(--on-surface-tertiary); }
-  .fwarn {
-    margin-block-start: 0.6rem; font-size: var(--text-small);
-    border: var(--border-thin) solid var(--on-surface-warning);
-    background: var(--surface-warning); color: var(--on-surface-warning);
-    border-radius: var(--radius-sm); padding: 0.3rem 0.6rem;
+  .sgroup { break-inside: avoid; margin-block-end: 1.4rem; }
+  .sgroup h2 {
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 0.6rem;
+    font-size: var(--text-small); font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--on-surface-secondary);
+    border-block-end: var(--border-thin) solid var(--surface-border);
+    padding-block-end: 0.2rem; margin-block-end: 0.35rem;
   }
-  .fsec { margin-block-start: 0.9rem; min-inline-size: 0; }
-  .fsec > h3, .fgotchas > summary {
-    font-size: var(--text-smallest); font-weight: 650; text-transform: uppercase; letter-spacing: 0.04em;
-    color: var(--on-surface-secondary); margin-block-end: 0.3rem;
+  .scount { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--on-surface-tertiary); }
+  .sgroup > ul > li { padding-block: 0.18rem; font-size: var(--text-small); line-height: 1.45; }
+  .sname { font-weight: 600; margin-inline-end: 0.4rem; }
+  .scat { text-transform: uppercase; font-size: var(--text-smallest); letter-spacing: 0.04em; }
+  .snote { color: var(--on-surface-secondary); }
+  .sdoor, .ssrc, .splan { margin-inline-start: 0.4rem; }
+  .ssrc, .splan { white-space: nowrap; }
+  .sdoor code, code.sdoor, .scodes code, .sproof code {
+    font-family: var(--font-mono); font-size: 0.88em;
+    background: var(--surface-tertiary); border-radius: var(--radius-xs); padding: 0 0.3em;
   }
-  .fgotchas > summary { cursor: pointer; }
-  .fsec-user .prose { font-size: 1.05em; }
-  .fcard .prose { font-size: var(--text-small); }
-  .fcard .prose pre { max-inline-size: 100%; overflow-x: auto; }
-  .fdoors code.fdoor {
-    color: var(--brand-base); font-weight: 600;
-    background: var(--brand-light);
+  .sdoor { text-decoration: none; }
+  .sdoor:hover code { text-decoration: underline; }
+  .sdoor code, code.sdoor { overflow-wrap: anywhere; }
+  .ssrc, .splan { font-size: var(--text-smallest); }
+  .stag {
+    font-size: var(--text-smallest); border: var(--border-thin) solid var(--surface-border);
+    border-radius: var(--radius-xs); padding: 0 0.3em; margin-inline-end: 0.4rem; color: var(--on-surface-tertiary);
   }
+  .stag-no { border-style: dashed; }
+  .sgroup details > summary { cursor: pointer; }
+  .scodes { display: flex; flex-wrap: wrap; gap: 0.2rem 0.5rem; margin: 0.3rem 0 0.3rem 1rem; }
+  .sfix { font-size: var(--text-smallest); color: var(--brand-base); margin-inline-start: 0.15rem; }
+  .sproof { margin-block-start: 1rem; border-block-start: var(--border-thin) solid var(--surface-border); padding-block-start: 0.8rem; }
+  .sproof h2 { font-size: var(--text-small); font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--on-surface-secondary); }
+  .sproof { overflow-x: auto; }
+  .sproof table { border-collapse: collapse; font-size: var(--text-small); margin-block-start: 0.4rem; }
+  .sproof th, .sproof td { text-align: start; padding: 0.15rem 1rem 0.15rem 0; }
+  .sproof th { font-weight: 600; color: var(--on-surface-secondary); }
 </style>

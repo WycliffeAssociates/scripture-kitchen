@@ -5,6 +5,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { parseCite, resolveCite } from "../code-cite.ts";
 import { repoRoot } from "../root.ts";
 
 const REPO = "https://github.com/WycliffeAssociates/scripture-kitchen";
@@ -29,3 +30,19 @@ export const githubBlob = (path: string, line?: number): string =>
 
 /** Whether a cited path exists in this checkout; a missing one is shown as such. */
 export const inRepo = (path: string): boolean => existsSync(join(repoRoot, path));
+
+export type CiteLink =
+  | { readonly ok: true; readonly shown: string; readonly href: string; readonly title: string }
+  | { readonly ok: false; readonly shown: string; readonly error: string };
+
+/** A `[[code:…]]` target as its GitHub link: `onion/src/cst.rs#CloseReason` → `…/cst.rs#L21-L32`, titled `onion/src/cst.rs:L21–L32`. */
+export const citeLink = (target: string, shown?: string): CiteLink => {
+  const cite = parseCite(target, shown);
+  const found = resolveCite(repoRoot, cite.path, cite.symbol);
+  if (!found.ok) return { ok: false, shown: cite.shown, error: found.error };
+  const range = found.lines;
+  const anchor = range === null ? "" : range.start === range.end ? `#L${range.start}` : `#L${range.start}-L${range.end}`;
+  const plainMd = range !== null && /\.mdx?$/u.test(cite.path) ? "?plain=1" : "";
+  const title = range === null ? cite.path : range.start === range.end ? `${cite.path}:L${range.start}` : `${cite.path}:L${range.start}–L${range.end}`;
+  return { ok: true, shown: cite.shown, href: `${githubBlob(cite.path)}${plainMd}${anchor}`, title };
+};

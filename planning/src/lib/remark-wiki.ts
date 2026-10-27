@@ -18,9 +18,7 @@
  */
 import { visit, SKIP } from "unist-util-visit";
 import { lookup, plain, WIKI } from "./atlas/glossary.ts";
-import { githubBlob } from "./atlas/github.ts";
-import { parseCite, resolveCite } from "./code-cite.ts";
-import { repoRoot } from "./root.ts";
+import { citeLink } from "./atlas/github.ts";
 
 interface Node {
   type: string;
@@ -33,18 +31,13 @@ interface Node {
 const text = (value: string): Node => ({ type: "text", value });
 
 const code = (target: string, shown: string | undefined): Node => {
-  const cite = parseCite(target, shown);
-  const found = resolveCite(repoRoot, cite.path, cite.symbol);
-  if (!found.ok) return { type: "inlineCode", value: cite.shown, data: { hProperties: { className: ["cite-broken"], title: found.error } } };
-  const range = found.lines;
-  const anchor = range === null ? "" : range.start === range.end ? `#L${range.start}` : `#L${range.start}-L${range.end}`;
-  const plainMd = range !== null && /\.mdx?$/u.test(cite.path) ? "?plain=1" : "";
-  const where = range === null ? cite.path : range.start === range.end ? `${cite.path}:L${range.start}` : `${cite.path}:L${range.start}–L${range.end}`;
+  const link = citeLink(target, shown);
+  if (!link.ok) return { type: "inlineCode", value: link.shown, data: { hProperties: { className: ["cite-broken"], title: link.error } } };
   return {
     type: "link",
-    url: `${githubBlob(cite.path)}${plainMd}${anchor}`,
-    data: { hProperties: { className: ["cite"], target: "_blank", rel: "noopener", title: where } },
-    children: [{ type: "inlineCode", value: cite.shown }],
+    url: link.href,
+    data: { hProperties: { className: ["cite"], target: "_blank", rel: "noopener", title: link.title } },
+    children: [{ type: "inlineCode", value: link.shown }],
   };
 };
 
