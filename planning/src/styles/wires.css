@@ -117,6 +117,8 @@
 .wsample-panes { display: grid; gap: 0.9rem; grid-template-columns: minmax(0, 1fr); }
 @media (min-width: 64rem) {
   .wsample-panes { grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); align-items: start; }
+  /* The source stays beside the bytes while the grid scrolls past. */
+  .wusfm { position: sticky; inset-block-start: 7rem; max-block-size: calc(100vh - 8rem); overflow-y: auto; }
 }
 .wusfm {
   margin: 0; min-inline-size: 0;
@@ -137,20 +139,69 @@
   padding: 0.5rem; overflow-x: auto;
 }
 .whex { font-family: var(--font-mono); font-size: var(--text-smallest); line-height: 1; user-select: none; }
-.whex-row { display: grid; grid-template-columns: 4.5ch repeat(16, minmax(0, 1fr)); gap: 1px; margin-block-end: 1px; }
+.whex[hidden] { display: none; }
+.whex-row {
+  display: grid; gap: 1px; margin-block-end: 1px;
+  grid-template-columns: 4.5ch repeat(16, minmax(0, 1fr));
+}
+.whex[data-hex="rows"] { min-inline-size: calc(10.5ch + var(--w) * 2.25ch); }
+.whex[data-hex="rows"] .whex-row { grid-template-columns: 4.5ch 6ch repeat(var(--w), minmax(2.2ch, 1fr)); }
 .whex-off { color: var(--on-surface-tertiary); align-self: center; }
+.whex-tag { color: var(--on-surface-tertiary); align-self: center; white-space: nowrap; }
+.whex-label {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 0.6em;
+  margin-block: 0.7em 0.3em; padding-block-start: 0.45em;
+  border-block-start: var(--border-thin) solid var(--surface-border);
+  font-family: var(--font-sans, inherit); color: var(--on-surface-secondary);
+}
+.whex-label:first-child { margin-block-start: 0; padding-block-start: 0; border-block-start: 0; }
+.whex-label .whex-off { inline-size: 4.5ch; font-family: var(--font-mono); }
+.whex-label b { font-family: var(--font-mono); color: var(--on-surface-primary); font-weight: 600; }
+.whex-label span:last-child { color: var(--on-surface-tertiary); }
+.whex-empty { margin-block: 0.4em 0.2em; padding-block-start: 0.3em; border-block-start-style: dashed; font-style: italic; }
+.whex-fields span {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-inline: 2px; padding-block: 0.2em;
+  color: var(--on-surface-secondary); font-size: 0.92em;
+  border-block-end: 2px solid var(--c, var(--surface-border));
+}
 .whex i {
+  position: relative;
   font-style: normal; text-align: center; padding-block: 0.3em; border-radius: 2px; cursor: pointer;
   background: color-mix(in oklch, var(--c, transparent) 30%, var(--surface-primary));
   color: var(--on-surface-primary);
 }
+.whex .wpad { visibility: hidden; }
 .whex i.wfree { background: var(--surface-secondary); color: var(--on-surface-tertiary); cursor: default; }
-.whex i.wstart { box-shadow: inset 2px 0 0 var(--on-surface-primary); }
-.whex i[data-on] { background: var(--c, var(--brand-base)); color: var(--surface-primary); outline: 1px solid var(--on-surface-primary); }
+/* Where a record row starts inside a line: a bar, and its index. */
+.whex i.wrow { box-shadow: inset 2px 0 0 var(--on-surface-secondary); }
+.whex[data-hex="bytes"] i[data-row]::before {
+  content: attr(data-row); position: absolute; inset-block-start: -0.55em; inset-inline-start: 1px;
+  font-size: 7px; line-height: 1; padding-inline: 1px; border-radius: 2px;
+  color: var(--on-surface-secondary); background: var(--surface-primary);
+}
+.whex[data-hex="bytes"] .whex-row:has(i[data-row]) { margin-block-start: 0.45em; }
+.whex i[data-near] { background: color-mix(in oklch, var(--c, var(--brand-base)) 55%, var(--surface-primary)); }
+.whex i[data-on] { background: var(--c, var(--brand-base)); color: var(--surface-primary); outline: 1px solid var(--on-surface-primary); z-index: 1; }
+.whex i:focus-visible { outline: 2px solid var(--brand-base); outline-offset: 1px; z-index: 2; }
 @container (max-width: 24rem) {
   .whex { font-size: 9px; }
-  .whex-row { grid-template-columns: 3.5ch repeat(16, minmax(0, 1fr)); }
+  .whex[data-hex="bytes"] .whex-row { grid-template-columns: 4.3ch repeat(16, minmax(0, 1fr)); }
+  .whex-label .whex-off { inline-size: 4.3ch; }
 }
+
+.whex-bar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem;
+  margin-block-end: 0.6rem; font-size: var(--text-smallest);
+  position: sticky; inset-inline-start: 0;
+}
+.whex-bar button {
+  border: var(--border-thin) solid var(--surface-border); border-radius: var(--radius-full);
+  padding: 0.05rem 0.55rem; background: var(--surface-primary); color: var(--on-surface-secondary); cursor: pointer;
+}
+.whex-bar button[aria-pressed="true"] { background: var(--surface-tertiary); color: var(--on-surface-primary); border-color: var(--on-surface-tertiary); }
+.whex-bar button:focus-visible { outline: 2px solid var(--brand-base); outline-offset: 1px; }
+.wusfm span[data-b0] { border-radius: 2px; cursor: pointer; }
+.wusfm span[data-b0]:focus-visible { outline: 2px solid var(--brand-base); outline-offset: 1px; }
 
 .wregions { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-block-start: 0.75rem; padding: 0; list-style: none; font-size: var(--text-smallest); }
 .wregions li {

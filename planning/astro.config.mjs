@@ -7,6 +7,7 @@ import rehypeLoc from "./src/lib/rehype-loc.ts";
 import remarkFenceProps from "./src/lib/remark-fence-props.ts";
 import remarkMermaid from "./src/lib/remark-mermaid.ts";
 import remarkWiki from "./src/lib/remark-wiki.ts";
+import { usfmLang } from "./src/lib/usfm-lang.ts";
 
 // The GitHub Pages build sets SITE_BASE=/scripture-kitchen (.github/workflows/pages.yml).
 // Unset, the site lives at / and keeps the annotator: `pnpm dev` and a plain `pnpm build`.
@@ -22,7 +23,7 @@ export default defineConfig({
   markdown: {
     // The remark/rehype processor, so these plugins run; MDX inherits it.
     processor: unified({ remarkPlugins: [remarkFenceProps, remarkMermaid, remarkWiki], rehypePlugins: [rehypeLoc, [rehypeBase, { base }]] }),
-    shikiConfig: { themes: { light: "github-light", dark: "github-dark" } },
+    shikiConfig: { themes: { light: "github-light", dark: "github-dark" }, langs: [usfmLang] },
   },
   vite: {
     plugins: [tailwindcss()],

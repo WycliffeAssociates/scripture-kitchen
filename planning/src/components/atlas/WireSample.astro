@@ -6,6 +6,7 @@
  */
 import "../../styles/wires.css";
 import type { Sample } from "../../lib/atlas/layouts.ts";
+import { byteView, cellsOf, rowView } from "../../lib/atlas/hex-lines.ts";
 import { url } from "../../lib/url.ts";
 
 interface Props {
@@ -15,12 +16,15 @@ interface Props {
 }
 const { sample, usfmPath, binPath } = Astro.props;
 const hex = (n: number, w: number): string => n.toString(16).padStart(w, "0");
-const rows = Array.from({ length: Math.ceil(sample.bytes.length / 16) }, (_, r) => r * 16);
 const hueAt = (i: number): string => {
   const s = sample.spans[sample.owner[i] ?? -1];
   return s && s.hue ? `--c: var(--crate-${s.hue})` : "";
 };
-const starts = new Map(sample.regions.filter((r) => r.kind !== "fixed").map((r) => [r.at, r.name]));
+const cells = cellsOf(sample);
+const views = [
+  { name: "bytes", view: byteView(sample), gutter: 1 },
+  { name: "rows", view: rowView(sample), gutter: 2 },
+] as const;
 const blobs = sample.regions.filter((r) => r.kind === "blob" && !r.holds);
 const data = JSON.stringify({ spans: sample.spans, owner: sample.owner }).replace(/</gu, "\\u003c");
 const size = (r: Sample["regions"][number]): string => {
@@ -46,18 +50,51 @@ const size = (r: Sample["regions"][number]): string => {
   <div class="wsample-panes">
     <pre class="wusfm" data-usfm>{sample.segments.map(([from, to, text]) => <span data-b0={from} data-b1={to}>{text}</span>)}</pre>
     <div class="whex-box">
-      <div class="whex" data-hex>
-        {rows.map((r) => (
-          <div class="whex-row">
-            <span class="whex-off">{hex(r, 4)}</span>
-            {sample.bytes.slice(r, r + 16).map((b, k) => {
-              const i = r + k;
-              const own = sample.owner[i] ?? -1;
-              return <i data-i={i} class:list={[own < 0 && "wfree", starts.has(i) && "wstart"]} style={hueAt(i)} title={starts.get(i)}>{hex(b, 2)}</i>;
-            })}
-          </div>
-        ))}
+      <div class="whex-bar" role="group" aria-label="Hex layout">
+        <span class="text-on-surface-tertiary">Lay out</span>
+        <button type="button" data-view-btn="bytes" aria-pressed="true">16 per line</button>
+        <button type="button" data-view-btn="rows" aria-pressed="false">one row per line</button>
       </div>
+      {views.map(({ name, view, gutter }) => (
+        <div class="whex" data-hex={name} hidden={name !== "bytes"} style={`--w: ${view.width}; --g: ${gutter}`}>
+          {view.lines.map((line) => {
+            if (line.kind === "label") return (
+              <div class="whex-label"><span class="whex-off">{hex(line.at, 4)}</span><b>{line.name}</b> <span>{line.note}</span></div>
+            );
+            if (line.kind === "empty") return (
+              <div class="whex-label whex-empty"><span class="whex-off">{hex(line.at, 4)}</span><span>{line.names.join(", ")}: empty in this sample</span></div>
+            );
+            if (line.kind === "fields") return (
+              <div class="whex-row whex-fields" aria-hidden="true">
+                {line.fields.map((f) => (
+                  <span style={`grid-column: ${gutter + 1 + f.col} / span ${f.width}; ${f.hue ? `--c: var(--crate-${f.hue})` : ""}`} title={f.name}>{f.name}</span>
+                ))}
+              </div>
+            );
+            return (
+              <div class="whex-row">
+                <span class="whex-off">{hex(line.off, 4)}</span>
+                {gutter > 1 && <span class="whex-tag">{line.tag}</span>}
+                {line.cells.map((i) => {
+                  if (i === null) return <b class="wpad" aria-hidden="true" />;
+                  const own = sample.owner[i] ?? -1;
+                  const cell = cells[i];
+                  return (
+                    <i
+                      data-i={i}
+                      data-r={cell?.row || undefined}
+                      data-row={cell?.rowStart ? cell.rowStart.split(" ").at(-1) : undefined}
+                      class:list={[own < 0 && "wfree", cell?.rowStart && "wrow"]}
+                      style={hueAt(i)}
+                      title={cell?.rowStart}
+                    >{hex(sample.bytes[i] ?? 0, 2)}</i>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
+      ))}
     </div>
   </div>
 

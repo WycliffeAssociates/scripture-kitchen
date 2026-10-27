@@ -7,6 +7,7 @@
  */
 
 import { createHighlighter, type Highlighter, type ShikiTransformer } from "shiki";
+import { usfmLang } from "./usfm-lang.ts";
 
 const THEMES = { light: "github-light", dark: "github-dark" } as const;
 
@@ -15,7 +16,7 @@ const BY_EXTENSION: Readonly<Record<string, string>> = {
   json: "json", jsonc: "jsonc", css: "css", html: "html", md: "md", mdx: "mdx",
   rs: "rust", py: "python", sh: "shell", bash: "shell", zsh: "shell", sql: "sql",
   toml: "toml", yaml: "yaml", yml: "yaml", astro: "astro", svelte: "svelte", vue: "vue",
-  go: "go", swift: "swift", kt: "kotlin", java: "java", rb: "ruby", usfm: "text",
+  go: "go", swift: "swift", kt: "kotlin", java: "java", rb: "ruby", usfm: "usfm", sfm: "usfm",
 };
 
 export const langOf = (path: string): string =>
@@ -23,7 +24,7 @@ export const langOf = (path: string): string =>
 
 let shared: Promise<Highlighter> | null = null;
 const highlighter = (): Promise<Highlighter> =>
-  (shared ??= createHighlighter({ themes: Object.values(THEMES), langs: [] }));
+  (shared ??= createHighlighter({ themes: Object.values(THEMES), langs: [usfmLang] }));
 
 /**
  * Per-line attributes, by 1-based index into the code passed in. The special
