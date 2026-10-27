@@ -54,9 +54,16 @@ export const WIKI = /\[\[([^\]|\n]+?)(?:\|([^\]\n]+?))?\]\]/gu;
 /** Markdown to one line of text: links and wiki-links keep their words. */
 export const plain = (markdown: string): string =>
   markdown
-    .replace(WIKI, (_, target: string, shown?: string) => (shown ?? target).trim())
-    .replace(/!?\[([^\]]*)\]\([^)]*\)/gu, "$1")
-    .replace(/[*_]{1,2}([^*_]+)[*_]{1,2}/gu, "$1")
+    .split(/(`[^`\n]+`)/u)
+    .map((part) =>
+      part.startsWith("`")
+        ? part.slice(1, -1)
+        : part
+            .replace(WIKI, (_, target: string, shown?: string) => (shown ?? target).trim())
+            .replace(/!?\[([^\]]*)\]\([^)]*\)/gu, "$1")
+            .replace(/[*_]{1,2}([^*_]+)[*_]{1,2}/gu, "$1"),
+    )
+    .join("")
     .replace(/\s+/gu, " ")
     .trim();
 
