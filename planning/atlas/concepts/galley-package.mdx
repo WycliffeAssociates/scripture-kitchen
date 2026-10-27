@@ -16,7 +16,7 @@ Sefer wants parse, find and Sous in the browser. Two wasm modules would load the
 
 ## The solution
 
-One module carries the `Galley` handle and every stateless onion door. Most doors take either a registered book id (only the id crosses) or raw text. The generated readers ship beside it at the same version ([[invariants]] 6). It installs from a git tag.
+One module carries the [[code:galley/src/wasm.rs#Galley]] handle and every stateless onion door. Most doors take either a registered book id (only the id crosses) or raw text. The generated readers ship beside it at the same version ([[invariants]] 6). It installs from a git tag.
 
 ## Trade-offs
 
@@ -61,5 +61,5 @@ Built from [[galley]] with [[onion-wasm]] linked in. Answers in the [[dish]], [[
 
 ## Where
 
-- `galley/src/wasm.rs` · `Galley`, `Fingerprint`; `galley/src/wasm/onion.rs` · the linker root
-- `galley/build.sh`, `galley/package.json`, `package-root.mjs`
+- [[code:galley/src/wasm.rs]] · [[code:galley/src/wasm.rs#Galley]], [[code:galley/src/wasm.rs#Fingerprint]]; [[code:galley/src/wasm/onion.rs]] · the linker root
+- [[code:galley/build.sh]], [[code:galley/package.json]], `package-root.mjs`

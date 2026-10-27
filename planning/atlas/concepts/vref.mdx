@@ -36,8 +36,8 @@ MRK 1:4	Bread.
 
 ## How it works
 
-- **One iterator, many formats.** `verses` is the core; `keys`, `lines` and `joined` are one-liners over it. ebible ships keys and lines as two parallel files keyed by line number.
-- **Swap the mask, change the reading.** `Filter::verse_text()` for plain text; the same with notes set to `Unwrap` folds footnote prose in.
+- **One iterator, many formats.** [[code:onion/src/vref.rs#verses]] is the core; `keys`, `lines` and `joined` are one-liners over it. ebible ships keys and lines as two parallel files keyed by line number.
+- **Swap the mask, change the reading.** [[code:onion/src/mask.rs#Filter::verse_text|Filter::verse_text()]] for plain text; the same with notes set to `Unwrap` folds footnote prose in.
 - **Trim lives here, not in the mask.** A vref line's edges are presentation; a mask offset must keep naming a real document byte.
 - Bridges come from the [[designator]]'s hull.
 
@@ -47,4 +47,4 @@ Reads the [[toc]] and a [[mask]]; bridges come from the [[designator]]'s hull. U
 
 ## Where
 
-- `onion/src/vref.rs` · `verses`, `keys`, `lines`, `joined`, `RANGE`
+- [[code:onion/src/vref.rs]] · [[code:onion/src/vref.rs#verses]], [[code:onion/src/vref.rs#keys]], [[code:onion/src/vref.rs#lines]], [[code:onion/src/vref.rs#joined]], [[code:onion/src/vref.rs#RANGE]]

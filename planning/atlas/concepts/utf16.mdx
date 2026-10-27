@@ -16,7 +16,7 @@ Onion counts UTF-8 bytes and Sefer counts UTF-16 units. They diverge on every no
 
 ## The solution
 
-Two structures, built once and reused. `Utf16Index` checkpoints every 256 bytes over live text. `Utf16Table` keeps one bit per byte plus a running count per 256 bytes, so galley can drop a reference's text and still convert ([[invariants]] 4). Both live in [[mise]], since both engines need them ([[invariants]] 7).
+Two structures, built once and reused. [[code:mise/src/utf16.rs#Utf16Index]] checkpoints every 256 bytes over live text. [[code:mise/src/utf16.rs#Utf16Table]] keeps one bit per byte plus a running count per 256 bytes, so galley can drop a reference's text and still convert ([[invariants]] 4). Both live in [[mise]], since both engines need them ([[invariants]] 7).
 
 ## Trade-offs
 
@@ -53,5 +53,5 @@ Converts offsets for the [[dish]] (`utf16: true`), the [[census]], [[find-buffer
 
 ## Where
 
-- `mise/src/utf16.rs` · `Utf16Index`, `utf16_index`, `Utf16Table`, `utf16_table`, `utf16_len`
-- `onion/tests/utf16_oracle.rs`
+- [[code:mise/src/utf16.rs]] · [[code:mise/src/utf16.rs#Utf16Index]], [[code:mise/src/utf16.rs#utf16_index]], [[code:mise/src/utf16.rs#Utf16Table]], [[code:mise/src/utf16.rs#utf16_table]], [[code:mise/src/utf16.rs#utf16_len]]
+- [[code:onion/tests/utf16_oracle.rs]]

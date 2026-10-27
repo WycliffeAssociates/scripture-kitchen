@@ -16,7 +16,7 @@ Sous's counts and verdicts must work for any producer of addressed verse text (o
 
 ## The solution
 
-It accepts a borrowed `ProjectedBook`, text plus chapter and verse rows, and never imports onion ([[invariants]] 7); [[galley]] builds the view. Rules are [[chapter-pass]]es whose map is config-free and pure per chapter, so galley caches by content while sous-core only declares what is safe to reuse ([[invariants]] 4, 5). Judging is explicit fractions against support bands, not a score. Its only shared dependency is [[mise]].
+It accepts a borrowed [[code:sous-chef/core/src/input.rs#ProjectedBook]], text plus chapter and verse rows, and never imports onion ([[invariants]] 7); [[galley]] builds the view. Rules are [[chapter-pass]]es whose map is config-free and pure per chapter, so galley caches by content while sous-core only declares what is safe to reuse ([[invariants]] 4, 5). Judging is explicit fractions against support bands, not a score. Its only shared dependency is [[mise]].
 
 ## Trade-offs
 
@@ -42,7 +42,7 @@ Dependencies: `memchr`, `rustc-hash`, `xxhash-rust`, and [[mise]]. Nothing else.
 
 - **Never depends on onion.** "Do not add the dependency" (`architecture.md`). A vref corpus can produce the same view.
 - **Owns content evidence only.** Unicode classification, config-free observations, corpus reductions, judging, finding serialization (`charter.md`, "Sous owns content evidence").
-- **No resident caches.** sous-core declares what is safe to reuse (`SCHEMA`, `RETAIN_CHAPTERS`).
+- **No resident caches.** sous-core declares what is safe to reuse (`SCHEMA`, [[code:sous-chef/core/src/pass/chapter.rs#ChapterPass::RETAIN_CHAPTERS|RETAIN_CHAPTERS]]).
 - **Its own reader emitter.** Its numbers are generated and its reader typed.
 
 ## Composes with
@@ -51,5 +51,5 @@ Depends on [[mise]]. Depended on by [[galley]] and [[sous-cli]]. Defines the [[c
 
 ## Where
 
-- `sous-chef/core/src/lib.rs` · `ProjectedBook`, `Brigade`
-- `sous-chef/core/src/bin/gen-unicode.rs`, `sous-chef/core/src/bin/codegen.rs`
+- [[code:sous-chef/core/src/lib.rs]] · `ProjectedBook`, [[code:sous-chef/core/src/lib.rs#Brigade]]
+- [[code:sous-chef/core/src/bin/gen-unicode.rs]], [[code:sous-chef/core/src/bin/codegen.rs]]

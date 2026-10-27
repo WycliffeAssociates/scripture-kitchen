@@ -39,7 +39,7 @@ Each designator as written, its hull, and its members. Watch `1,3,5` (holes at 2
 
 ## How it works
 
-- **Interpreter, not Scanner.** The [[scanner]] emits one `Designator` token and never looks inside. The spec pattern `/[1-9][0-9]*[\p{L}\p{Mn}]*(‏?[\-,][0-9]+[\p{L}\p{Mn}]*)*/` lives here (GLOSSARY, "Designator").
+- **Interpreter, not Scanner.** The [[scanner]] emits one [[code:onion/src/designator.rs#Designator]] token and never looks inside. The spec pattern `/[1-9][0-9]*[\p{L}\p{Mn}]*(‏?[\-,][0-9]+[\p{L}\p{Mn}]*)*/` lives here (GLOSSARY, "Designator").
 - **Two readings.** The hull is what a sequence sorts by and a bridge renders as. The members are the truth. Shipped with labels on the [[toc]] in 0.1.7 (commit 30b4ff2).
 - **Saturate, never wrap.** Numbers clamp at `u32::MAX`, so junk is not a false "out of order".
 - **Lenient Unicode.** A segment character is an ASCII letter or any non-ASCII scalar. Crying wolf on an Arabic segment is worse than missing a nicety.
@@ -51,4 +51,4 @@ Reads one [[token]] span. Read by the [[toc]] (hull and members per row), [[reso
 
 ## Where
 
-- `onion/src/designator.rs` · `verse`, `chapter`, `members`, `label`, `Designator`, `Member`
+- [[code:onion/src/designator.rs]] · [[code:onion/src/designator.rs#verse]], [[code:onion/src/designator.rs#chapter]], [[code:onion/src/designator.rs#members]], [[code:onion/src/designator.rs#label]], [[code:onion/src/designator.rs#Designator]], [[code:onion/src/designator.rs#Member]]

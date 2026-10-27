@@ -42,7 +42,7 @@ overlay(target, source) → 6 edits, ascending, non-overlapping
 ## How it works
 
 - **Address = (verse sid, leading | inside, ordinal)**, plus the marker as a check.
-- **Empty blocks fold by onion's own [[lint]]** (`Code::EmptyParagraph`), not a second copy of the rule.
+- **Empty blocks fold by onion's own [[lint]]** ([[code:onion/src/lint/rows.rs#Code::EmptyParagraph]]), not a second copy of the rule.
 - **Invariant:** apply the edits, re-extract, and the target's skeleton equals the source's with empty blocks folded. `tests/overlay.rs` states the comparison itself so it cannot drift into agreement with the library.
 - Verses are paired through `sous_core::align` over both sides' [[onion-book]]s.
 
@@ -52,5 +52,5 @@ Reads the [[cst]], [[lint]] report and [[mask]] from the [[pantry]]. Pairs verse
 
 ## Where
 
-- `galley/src/overlay.rs` · `skeleton`, `overlay`, `overlay_text`, `target_node_for`, `source_node_for`, `BlockAddress`
-- `galley/src/wasm.rs` · the `overlay`, `overlayText`, `targetNodeFor`, `sourceNodeFor` doors; `galley/src/wasm/overlay.rs` · their options
+- [[code:galley/src/overlay.rs]] · [[code:galley/src/overlay.rs#skeleton]], [[code:galley/src/overlay.rs#overlay]], [[code:galley/src/overlay.rs#overlay_text]], [[code:galley/src/overlay.rs#target_node_for]], [[code:galley/src/overlay.rs#source_node_for]], [[code:galley/src/overlay.rs#BlockAddress]]
+- [[code:galley/src/wasm.rs]] · the [[code:galley/src/wasm.rs#overlay]], `overlayText`, `targetNodeFor`, `sourceNodeFor` doors; [[code:galley/src/wasm/overlay.rs]] · their options

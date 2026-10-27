@@ -16,7 +16,7 @@ USFM rarely writes where things end: `\p` ends at the next paragraph, `\ft` at i
 
 ## The solution
 
-A stack of open frames. Each marker opens a frame, closes its own match, or displaces frames it outranks; a `\p` displaces an open `\f`. Every close records its reason in one byte: `Explicit`, `Implicit` (the grammar ended it), `Recovery` (it needed a closer it never got) or `Eof`. So the tree is complete without inserting closer tokens ([[invariants]] 1), and lint reads `Recovery` as an unclosed note ([[invariants]] 3). A separate context mask answers "may this marker appear here?".
+A stack of open frames. Each marker opens a frame, closes its own match, or displaces frames it outranks; a `\p` displaces an open `\f`. Every close records its reason in one byte: [[code:onion/src/cst.rs#CloseReason|Explicit]], `Implicit` (the grammar ended it), `Recovery` (it needed a closer it never got) or `Eof`. So the tree is complete without inserting closer tokens ([[invariants]] 1), and lint reads `Recovery` as an unclosed note ([[invariants]] 3). A separate context mask answers "may this marker appear here?".
 
 ## Trade-offs
 
@@ -70,6 +70,6 @@ Reads [[token]] rows and the [[marker-table]]'s columns (`opens_scope`, `closes_
 
 ## Where
 
-- `onion/src/cst.rs` · `Builder`, `Frame`, `FrameRole` (sidebar barrier, milestone point, U25003 container)
-- `onion/src/tables/schema.rs` · `SpecContext`, `MarkerRow::precedence`
+- [[code:onion/src/cst.rs]] · [[code:onion/src/cst.rs#Builder]], [[code:onion/src/cst.rs#Frame]], [[code:onion/src/cst.rs#FrameRole]] (sidebar barrier, milestone point, U25003 container)
+- [[code:onion/src/tables/schema.rs]] · [[code:onion/src/tables/schema.rs#SpecContext]], `MarkerRow::precedence`
 - `GLOSSARY.md` · "Scope", "Frame", "Precedence", "Displacement"

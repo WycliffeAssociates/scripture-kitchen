@@ -47,7 +47,7 @@ u32   version   1
 ## How it works
 
 - **Two coordinate spaces.** Projected offsets are mask space ([[mask]]); source pieces are document bytes converted to UTF-16 ([[find]]).
-- **One encoder, two doors.** The browser's `find`/`findAll` and the desktop's native `Expediter::find` both call `find::wire::encode`.
+- **One encoder, two doors.** The browser's `find`/`findAll` and the desktop's native [[code:galley/src/sous/expediter.rs#Expediter::find]] both call [[code:galley/src/find/wire/mod.rs#encode|find::wire::encode]].
 - **The id table names every book searched**, matched or not, so a hit cannot be misattributed if the corpus changed between calls.
 - **`Repeat` for pieces** in [[ticket]].
 
@@ -57,5 +57,5 @@ Written by [[find]]; declared against [[ticket]] ([[wire]]). Read through `find-
 
 ## Where
 
-- `galley/src/find/wire/mod.rs` · `encode`; `galley/src/find/wire/schema.rs` · the declaration
-- `galley/find-reader.ts` · `Hits.open`
+- [[code:galley/src/find/wire/mod.rs]] · [[code:galley/src/find/wire/mod.rs#encode]]; [[code:galley/src/find/wire/schema.rs]] · the declaration
+- [[code:galley/find-reader.ts]] · [[code:galley/find-reader.ts#Hits.open]]

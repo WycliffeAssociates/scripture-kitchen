@@ -20,7 +20,7 @@ One buffer: a header, a section directory, and ten sections of fixed-stride inte
 
 ## Trade-offs
 
-- `FORMAT_VERSION` is 5; a reader that does not know the version refuses the dish.
+- [[code:onion/src/wire/schema.rs#FORMAT_VERSION]] is 5; a reader that does not know the version refuses the dish.
 - Every section is listed, even when empty.
 - Raw numbers: inspect through the reader, not a debugger.
 
@@ -58,6 +58,6 @@ Written by [[plate]] from the [[token]]s, [[cst]], [[lint]] report and [[toc]]; 
 
 ## Where
 
-- `onion/src/wire/schema.rs` · `SECTIONS`, `TOKEN`, `NODE`, `HEADER`, `FORMAT_VERSION`, `MAGIC`
-- `onion/src/wire/generated.rs` · the generated writer
-- `onion-wasm/reader.ts` · `deserialize`, the generated reader
+- [[code:onion/src/wire/schema.rs]] · [[code:onion/src/wire/schema.rs#SECTIONS]], [[code:onion/src/wire/schema.rs#TOKEN]], [[code:onion/src/wire/schema.rs#NODE]], [[code:onion/src/wire/schema.rs#HEADER]], [[code:onion/src/wire/schema.rs#FORMAT_VERSION]], [[code:onion/src/wire/schema.rs#MAGIC]]
+- [[code:onion/src/wire/generated.rs]] · the generated writer
+- [[code:onion-wasm/reader.ts]] · [[code:onion-wasm/reader.ts#deserialize]], the generated reader

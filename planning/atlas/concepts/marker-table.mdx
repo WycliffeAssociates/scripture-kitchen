@@ -47,7 +47,7 @@ generated.rs   PACKED: [u128; 170]   NAMES: [&str; 170]   FIRST_EXTENSION_ROW = 
 ## How it works
 
 - **One authored source, several generated projections.** Humans write named fields in `rows.rs`; codegen packs them into `u128` rows, a u64 name matcher (longest name is 6 bytes) and the `common_marker_checks` fast arms. The table stores facts, codegen turns facts into instructions, the lexer reads columns (`tables.rs` doc).
-- **Referee is USFM 3.2 only.** 3.1's `usx.rng` is fallback evidence and never outvotes a 3.2 page. `deprecated` and `AttrStatus::Deprecated` record 3.2's own deprecations (`schema.rs`).
+- **Referee is USFM 3.2 only.** 3.1's `usx.rng` is fallback evidence and never outvotes a 3.2 page. `deprecated` and [[code:onion/src/tables/schema.rs#AttrStatus::Deprecated]] record 3.2's own deprecations (`schema.rs`).
 - **Derived facts are `const fn`s, not columns.** `precedence()` and context contribution are baked by codegen, so they cannot drift from the rows.
 - **Unknown and unregistered `\z` markers resolve to row 0.** A registered one resolves to a template row ([[extensions]]).
 - **The JS copy.** `onion-wasm/reader.ts` carries the generated `MARKERS` array (name, kind, category, closing, shape, numbering, whitespace rule) and `MARKER_ATTRIBUTES` (planning item 2026-10-22, "Attributes for hosts"), so `MARKERS[markerIdx]` is one array read.
@@ -58,7 +58,7 @@ The [[scanner]] stamps `marker_idx` from it. The [[walker]] reads scope columns.
 
 ## Where
 
-- `onion/src/tables/schema.rs` · `MarkerRow`, `MarkerKind`, `Category`, `SpecContext`, `Payload`
-- `onion/src/tables/rows.rs` · the authored rows
-- `onion/src/tables/generated.rs` · `PACKED`, `NAMES`, `is_extension`, `template_for` (checked in)
-- `onion/src/bin/codegen.rs` · regenerates; `onion/tests/codegen_output_matches_input.rs` fails if stale
+- [[code:onion/src/tables/schema.rs]] · [[code:onion/src/tables/schema.rs#MarkerRow]], [[code:onion/src/tables/schema.rs#MarkerKind]], [[code:onion/src/tables/schema.rs#Category]], [[code:onion/src/tables/schema.rs#SpecContext]], [[code:onion/src/tables/schema.rs#Payload]]
+- [[code:onion/src/tables/rows.rs]] · the authored rows
+- [[code:onion/src/tables/generated.rs]] · [[code:onion/src/tables/generated.rs#PACKED]], [[code:onion/src/tables/generated.rs#NAMES]], [[code:onion/src/tables/generated.rs#is_extension]], [[code:onion/src/tables/generated.rs#template_for]] (checked in)
+- [[code:onion/src/bin/codegen.rs]] · regenerates; [[code:onion/tests/codegen_output_matches_input.rs]] fails if stale

@@ -16,7 +16,7 @@ A keystroke wants tokens, tree, diagnostics and the chapter/verse index together
 
 ## The solution
 
-Parse once and write the raw products into one flat buffer ([[invariants]] 2). Rows hold byte positions, not text, and JS decodes a row only when asked. Shipping the tree instead of views was 0.64x the bytes and 0.62x the time (b781bb9). `parse` returns bytes and retains nothing, so the engine stays stateless and there is nothing to free.
+Parse once and write the raw products into one flat buffer ([[invariants]] 2). Rows hold byte positions, not text, and JS decodes a row only when asked. Shipping the tree instead of views was 0.64x the bytes and 0.62x the time (b781bb9). [[code:onion/src/wire.rs#parse]] returns bytes and retains nothing, so the engine stays stateless and there is nothing to free.
 
 ## Trade-offs
 
@@ -53,5 +53,5 @@ Reads `Parsed`: the [[token]]s, the [[cst]], an optional [[lint]] report and [[t
 
 ## Where
 
-- `onion/src/wire.rs` · `parse`, `parse_with`, `plate`, `Parsed`, `Parsed::from_parts`, `ParseOptions`
-- `onion/tests/wire_roundtrip.rs`
+- [[code:onion/src/wire.rs]] · [[code:onion/src/wire.rs#parse]], [[code:onion/src/wire.rs#parse_with]], [[code:onion/src/wire.rs#plate]], [[code:onion/src/wire.rs#Parsed]], [[code:onion/src/wire.rs#Parsed::from_parts]], [[code:onion/src/wire.rs#ParseOptions]]
+- [[code:onion/tests/wire_roundtrip.rs]]

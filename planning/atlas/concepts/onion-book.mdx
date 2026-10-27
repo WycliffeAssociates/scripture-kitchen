@@ -16,7 +16,7 @@ Sous needs verse text with chapter and verse rows and a way back to source offse
 
 ## The solution
 
-sous-core defines `ProjectedBook` (key, text, chapters, verses); `OnionBook` implements it in [[galley]] over the verse-text [[mask]] and the [[toc]] ([[invariants]] 7). No second index: the mask owns the projection, the TOC owns identity. A finding maps back as a list of source pieces, since it can cross a removed note.
+sous-core defines [[code:sous-chef/core/src/input.rs#ProjectedBook]] (key, text, chapters, verses); [[code:galley/src/sous/onion_book.rs#OnionBook]] implements it in [[galley]] over the verse-text [[mask]] and the [[toc]] ([[invariants]] 7). No second index: the mask owns the projection, the TOC owns identity. A finding maps back as a list of source pieces, since it can cross a removed note.
 
 ## Trade-offs
 
@@ -54,5 +54,5 @@ Built from a [[mask]] and [[toc]]; consumed by [[chapter-pass]]es in [[sous-core
 
 ## Where
 
-- `galley/src/sous/onion_book.rs` · `OnionBook::parse`, `from_parts`, `locate`
-- `sous-chef/core/src/input.rs` · `ProjectedBook`, `Chapter`, `Verse`
+- [[code:galley/src/sous/onion_book.rs]] · [[code:galley/src/sous/onion_book.rs#OnionBook::parse]], [[code:galley/src/sous/onion_book.rs#OnionBook::from_parts|from_parts]], [[code:galley/src/sous/onion_book.rs#OnionBook::locate|locate]]
+- [[code:sous-chef/core/src/input.rs]] · [[code:sous-chef/core/src/input.rs#ProjectedBook]], [[code:sous-chef/core/src/input.rs#Chapter]], [[code:sous-chef/core/src/input.rs#Verse]]

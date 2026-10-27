@@ -38,7 +38,7 @@ overlay(target, source) → 6 edits, ascending, non-overlapping
 
 ## How it works
 
-`edit.rs`: three speakers in onion (lint fixes, the formatter, the diff port) and one in galley ([[overlay]]). An editor applies all of them as byte splices through its UTF-16 shim. `check_edits` validates a set before it is applied; `apply` and `apply_splices` are the reference appliers.
+`edit.rs`: three speakers in onion (lint fixes, the formatter, the diff port) and one in galley ([[overlay]]). An editor applies all of them as byte splices through its UTF-16 shim. [[code:onion/src/edit.rs#check_edits]] validates a set before it is applied; `apply` and [[code:onion/src/edit.rs#apply_splices]] are the reference appliers.
 
 ## Composes with
 
@@ -46,4 +46,4 @@ Produced by [[lint]], [[format]], [[diff]] (`to_edits`, `SpliceEdit`) and [[over
 
 ## Where
 
-- `onion/src/edit.rs` · `Edit`, `SpliceEdit`, `apply`, `apply_splices`, `check_edits`
+- [[code:onion/src/edit.rs]] · [[code:onion/src/edit.rs#Edit]], [[code:onion/src/edit.rs#SpliceEdit]], [[code:onion/src/edit.rs#apply]], [[code:onion/src/edit.rs#apply_splices]], [[code:onion/src/edit.rs#check_edits]]

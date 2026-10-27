@@ -16,7 +16,7 @@ Each binary wire needs a Rust writer and a TS reader that agree on every byte, a
 
 ## The solution
 
-A format declares its fields once in ticket's vocabulary (`Width`, `Space`, `Field`, `Record`, `Repeat`), and ticket emits both ends plus the staleness reporter ([[invariants]] 6). It is generator-only; nothing at runtime calls it. It is not in [[mise]], which excludes generators.
+A format declares its fields once in ticket's vocabulary ([[code:ticket/src/schema.rs#Width]], [[code:ticket/src/schema.rs#Space]], [[code:ticket/src/schema.rs#Field]], [[code:ticket/src/schema.rs#Record]], `Repeat`), and ticket emits both ends plus the staleness reporter ([[invariants]] 6). It is generator-only; nothing at runtime calls it. It is not in [[mise]], which excludes generators.
 
 ## Trade-offs
 
@@ -47,4 +47,4 @@ Depended on by [[onion]] and [[galley]]. Every [[wire]] except the [[findings-sn
 
 ## Where
 
-- `ticket/src/schema.rs`, `ticket/src/emit.rs`, `ticket/src/stale.rs`
+- [[code:ticket/src/schema.rs]], [[code:ticket/src/emit.rs]], [[code:ticket/src/stale.rs]]

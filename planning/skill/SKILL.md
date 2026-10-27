@@ -182,6 +182,16 @@ It is the docs site for the whole workspace. Routes:
 Any MDX file may link a concept with `[[slug]]` or `[[slug|shown text]]` (a term or alias
 works too); `pnpm plans check` (or `pnpm atlas check`) lists one that names nothing.
 
+Cite code with `[[code:path#symbol]]`: a Rust item (`Builder::feed` for a method, `impl Cst`,
+`CloseReason::Implicit` for a variant or field), a TS export or `Class.method`, a markdown
+heading slug, or `#L120-L180`; `[[code:path]]` links the file and `|text` sets the shown text.
+On a concept page a click opens the lines in the code sidebar; `pnpm atlas check` fails on one
+that no longer resolves, and `pnpm test` runs the resolver's tests.
+
+```md
+Each node stores a [[code:onion/src/cst.rs#CloseReason]]; see [[code:onion/src/cst.rs#Builder::feed|feed]].
+```
+
 ### Published
 
 <https://wycliffeassociates.github.io/scripture-kitchen/>: every push to master that touches

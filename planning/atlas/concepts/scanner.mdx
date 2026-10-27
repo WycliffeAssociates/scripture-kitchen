@@ -21,7 +21,7 @@ Most of a book's bytes are prose between markers, so the text arm does not step 
 ## Trade-offs
 
 - Aligned text gains little from the fast arms: `\w` and `\zaln-s` have none (a parked idea, 2026-08-13).
-- Two code paths. `tests/fast_path_identity.rs` pins every fast arm token-identical to `lex_general_path_only` over the corpus.
+- Two code paths. `tests/fast_path_identity.rs` pins every fast arm token-identical to [[code:onion/src/scanner.rs#lex_general_path_only]] over the corpus.
 - `len` is `u16`, so a text run over 65,535 bytes splits into several tokens.
 
 ## Show me
@@ -43,7 +43,7 @@ The designator gate: a leading ASCII digit or it is text.
 
 ## How it works
 
-- **Boundary finding and classification stay apart.** The `*_end` functions decide where a token stops; `classify_marker` names it via the [[marker-table]]. GLOSSARY calls this the Scanner/Interpreter split.
+- **Boundary finding and classification stay apart.** The `*_end` functions decide where a token stops; [[code:onion/src/scanner.rs#classify_marker]] names it via the [[marker-table]]. GLOSSARY calls this the Scanner/Interpreter split.
 - **Losslessness is the partition.** Concatenating every span reproduces the source byte for byte.
 - **A newline is always its own token.** Block seams, lint's line rules, `\n\c` chunking and an editor's line model all key on it.
 - **Speed.** Scan loop ~1,164 MiB/s on en_ult with the per-arm helpers inlined; `&mut self` flag access out of line measured 6% slower (`scanner.rs`). A prebuilt `memmem::Finder` costs 6 ns against 31 ns per one-shot call, inside a ~5 ns/token budget.
@@ -55,5 +55,5 @@ Reads the [[source]], the [[marker-table]]'s generated name matcher, and the ins
 
 ## Where
 
-- `onion/src/scanner.rs` · `lex`, `lex_with`, `Scanner`, `classify_marker`
-- `onion/tests/fast_path_identity.rs` · fast arms equal the general path (`lex_general_path_only`)
+- [[code:onion/src/scanner.rs]] · [[code:onion/src/scanner.rs#lex]], [[code:onion/src/scanner.rs#lex_with]], [[code:onion/src/scanner.rs#Scanner]], [[code:onion/src/scanner.rs#classify_marker]]
+- [[code:onion/tests/fast_path_identity.rs]] · fast arms equal the general path (`lex_general_path_only`)

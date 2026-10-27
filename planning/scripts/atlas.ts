@@ -3,31 +3,21 @@
  * runs them too.
  *
  *   pnpm atlas check     concept frontmatter, related slugs, cited files,
- *                        unresolved [[links]], map.json's references, and
+ *                        unresolved [[links]], [[code:…]] citations that no
+ *                        longer resolve, map.json's references, and
  *                        boxes on screen together that overlap
  */
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join, relative } from "node:path";
 import { parse } from "yaml";
-import { lookup, WIKI } from "../src/lib/atlas/glossary.ts";
+import { lookup, wikiLinks } from "../src/lib/atlas/glossary.ts";
 import { conceptsDir, mapPath } from "../src/lib/atlas/paths.ts";
+import { parseCite, resolveCite } from "../src/lib/code-cite.ts";
 import { overlaps, place } from "../src/lib/atlas/place.ts";
 import { conceptSchema, mapSchema } from "../src/lib/atlas/schema.ts";
 import { repoRoot as root } from "../src/lib/root.ts";
 
 const FRONT = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/u;
-
-/** `[[…]]` targets outside fenced and inline code, with their line numbers. */
-const wikiLinks = (text: string): { target: string; line: number }[] => {
-  const out: { target: string; line: number }[] = [];
-  let fenced = false;
-  text.split("\n").forEach((line, i) => {
-    if (/^\s*(```|~~~)/u.test(line)) fenced = !fenced;
-    if (fenced) return;
-    for (const match of line.replace(/`[^`]*`/gu, "").matchAll(WIKI)) out.push({ target: match[1]!.trim(), line: i + 1 });
-  });
-  return out;
-};
 
 const mdx = (dir: string): string[] =>
   existsSync(dir) ? readdirSync(dir).filter((n) => n.endsWith(".mdx")).map((n) => join(dir, n)) : [];
@@ -64,7 +54,11 @@ export const checkAtlas = (itemsDir: string): number => {
   const pages = [...mdx(conceptsDir), ...mdx(join(conceptsDir, "..")), ...mdx(itemsDir)];
   for (const file of pages) {
     for (const { target, line } of wikiLinks(readFileSync(file, "utf8"))) {
-      if (!names.has(target.toLowerCase())) fail(`${relative(root, file)}:${line}: [[${target}]] names no concept`);
+      if (target.startsWith("code:")) {
+        const cite = parseCite(target.slice(5));
+        const found = resolveCite(root, cite.path, cite.symbol);
+        if (!found.ok) fail(`${relative(root, file)}:${line}: [[${target}]] ${found.error}`);
+      } else if (!names.has(target.toLowerCase())) fail(`${relative(root, file)}:${line}: [[${target}]] names no concept`);
     }
   }
   if (existsSync(mapPath)) {

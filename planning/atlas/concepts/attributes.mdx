@@ -16,12 +16,12 @@ Aligned texts put four to eight attributes on nearly every `\w`, and almost noth
 
 ## The solution
 
-The scanner keeps `|…` as one `AttrList` token, and nothing splits it until a caller asks: borrowed spans, no allocation, so an attribute-heavy book lexes like a plain one ([[invariants]] 2). A failed pair is `Malformed` ([[invariants]] 3). usfmtc instead re-reads the whole interior as the default attribute, which repairs the text and hides the slip from [[lint]].
+The scanner keeps `|…` as one `AttrList` token, and nothing splits it until a caller asks: borrowed spans, no allocation, so an attribute-heavy book lexes like a plain one ([[invariants]] 2). A failed pair is [[code:onion/src/attributes.rs#AttrEvent::Malformed|Malformed]] ([[invariants]] 3). usfmtc instead re-reads the whole interior as the default attribute, which repairs the text and hides the slip from [[lint]].
 
 ## Trade-offs
 
 - Every reader re-splits; nothing is cached.
-- Not in the per-keystroke dish. Sefer asked and was told no; it calls `attrs` on demand.
+- Not in the per-keystroke dish. Sefer asked and was told no; it calls [[code:onion/src/attributes.rs#attrs]] on demand.
 - Values are verbatim: `x="a\|b"` stays `a\|b`.
 
 ## Show me
@@ -50,4 +50,4 @@ Reads one [[token]] span plus the owning row from the [[marker-table]] (`resolve
 
 ## Where
 
-- `onion/src/attributes.rs` · `attrs`, `AttrIter`, `AttrEvent`, `resolve`, `AttrResolution`
+- [[code:onion/src/attributes.rs]] · [[code:onion/src/attributes.rs#attrs]], [[code:onion/src/attributes.rs#AttrIter]], [[code:onion/src/attributes.rs#AttrEvent]], [[code:onion/src/attributes.rs#resolve]], [[code:onion/src/attributes.rs#AttrResolution]]

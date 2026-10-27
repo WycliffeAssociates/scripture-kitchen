@@ -7,9 +7,19 @@
  *
  * The target matches a slug, a term or an alias, ignoring case. One that
  * matches nothing renders as its shown text, and `pnpm plans check` lists it.
+ *
+ * `[[code:path#symbol]]` cites code (src/lib/code-cite.ts): a code-styled link
+ * to the lines on GitHub at the build's commit, which a concept page opens in
+ * its code sidebar instead. One that does not resolve renders as plain code.
+ *
+ *   [[code:onion/src/cst.rs#CloseReason]]
+ *     → <a class="cite" data-cite="c1x…" href="https://github.com/…/cst.rs#L21-L32"><code>CloseReason</code></a>
  */
 import { visit, SKIP } from "unist-util-visit";
 import { lookup, plain, WIKI } from "./atlas/glossary.ts";
+import { githubBlob } from "./atlas/github.ts";
+import { parseCite, resolveCite } from "./code-cite.ts";
+import { repoRoot } from "./root.ts";
 
 interface Node {
   type: string;
@@ -20,6 +30,19 @@ interface Node {
 }
 
 const text = (value: string): Node => ({ type: "text", value });
+
+const code = (target: string, shown: string | undefined): Node => {
+  const cite = parseCite(target, shown);
+  const found = resolveCite(repoRoot, cite.path, cite.symbol);
+  if (!found.ok) return { type: "inlineCode", value: cite.shown, data: { hProperties: { className: ["cite-broken"], title: found.error } } };
+  const lines = found.lines === null ? "" : `#L${found.lines.start}-L${found.lines.end}`;
+  return {
+    type: "link",
+    url: `${githubBlob(cite.path)}${lines}`,
+    data: { hProperties: { className: ["cite"], dataCite: found.lines === null ? undefined : cite.key } },
+    children: [{ type: "inlineCode", value: cite.shown }],
+  };
+};
 
 export default function remarkWiki() {
   return (tree: Node) => {
@@ -34,6 +57,11 @@ export default function remarkWiki() {
         const at = match.index;
         if (at > last) out.push(text(value.slice(last, at)));
         const target = match[1]!.trim();
+        if (target.startsWith("code:")) {
+          out.push(code(target.slice(5), match[2]));
+          last = at + match[0].length;
+          continue;
+        }
         const shown = (match[2] ?? match[1]!).trim();
         const entry = names.get(target.toLowerCase());
         out.push(entry === undefined ? text(shown) : {

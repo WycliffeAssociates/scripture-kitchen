@@ -45,7 +45,7 @@ pub type Brigade = (hygiene::HygieneBytes, substrate::Substrate, words::Words);
 
 ## How it works
 
-`ChapterPass` is the trait; `Brigade` is the three passes run together. Charter invariants 2–4:
+[[code:sous-chef/core/src/pass/chapter.rs#ChapterPass]] is the trait; [[code:sous-chef/core/src/lib.rs#Brigade]] is the three passes run together. Charter invariants 2–4:
 
 - **Book is the discourse unit.** There is no `Carry` on the trait.
 - **Chapter is the rebuild unit.** `map` reads only its chapter's projected text, verse rows and key, so chapters run in any order, on any thread, or not at all on a cache hit.
@@ -61,6 +61,6 @@ Fed [[onion-book]] chapters; reads [[words]] for word boundaries. Driven by the 
 
 ## Where
 
-- `sous-chef/core/src/pass/chapter.rs` · `ChapterPass` (`map`, `fold`, `release`, `remap`, `judge`, `SCHEMA`, `RETAIN_CHAPTERS`)
-- `sous-chef/core/src/lib.rs` · `Brigade`
-- `sous-chef/core/src/substrate.md`, `words.md`, `hygiene.md` · the three passes
+- [[code:sous-chef/core/src/pass/chapter.rs]] · [[code:sous-chef/core/src/pass/chapter.rs#ChapterPass]] ([[code:sous-chef/core/src/pass/chapter.rs#ChapterPass::map|map]], [[code:sous-chef/core/src/pass/chapter.rs#ChapterPass::fold|fold]], [[code:sous-chef/core/src/pass/chapter.rs#ChapterPass::release|release]], [[code:sous-chef/core/src/pass/chapter.rs#ChapterPass::remap|remap]], [[code:sous-chef/core/src/pass/chapter.rs#ChapterPass::judge|judge]], [[code:sous-chef/core/src/pass/chapter.rs#ChapterPass::SCHEMA|SCHEMA]], [[code:sous-chef/core/src/pass/chapter.rs#ChapterPass::RETAIN_CHAPTERS|RETAIN_CHAPTERS]])
+- [[code:sous-chef/core/src/lib.rs]] · [[code:sous-chef/core/src/lib.rs#Brigade]]
+- [[code:sous-chef/core/src/substrate.md]], `words.md`, `hygiene.md` · the three passes

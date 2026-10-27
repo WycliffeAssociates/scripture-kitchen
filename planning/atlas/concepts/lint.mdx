@@ -59,7 +59,7 @@ Three laws from `lint.rs`:
 
 - **Read verdicts, never re-derive them.** `unclosed-note` is the [[walker]]'s `Recovery` on the `\f` node, matched, not recomputed.
 - **Flag, never repair.** No token is moved, inserted or dropped. A `Fix` exists iff the row declares a `fix_label`, and `check_fixes` proves them over all 226 corpus books.
-- **No strings.** An `Observation` is four `u32`s: anchor and second are token indices, `aux` means what the row's `aux` column says.
+- **No strings.** An [[code:onion/src/lint.rs#Observation]] is four `u32`s: anchor and second are token indices, `aux` means what the row's `aux` column says.
 
 One in-order walk feeds four state machines (structure, ancestry, ordering, flat). `diagnostics.json` lists 59 codes in six categories (structure, ordering, attributes, payload, form, version). 11 have severity `form`: the Form channel, which only [[format]] evaluates. The `lint.rs` doc's "48 codes" is the count without them. `declared_version` rides on every report and two rules are gated on it. ~9.4 ns/token on en_ulb, ~15.5 on en_ult; the gap is the k/v attribute rules over 31 MB of `\w` interiors.
 
@@ -69,7 +69,7 @@ Reads the [[cst]], [[token]]s, the [[designator]] and [[attributes]] interpreter
 
 ## Where
 
-- `onion/src/lint.rs` · `lint`, `lint_chunk`, `LintReport`, `Observation`, `Fix`, `check_fixes`
-- `onion/src/lint/rows.rs` · `Code`, `Category`, `LintRow`
-- `onion/src/lint/walk.rs` · the one walk; `structure.rs`, `ancestry.rs`, `ordering.rs`, `flat.rs` are the four machines
-- `onion/tests/lint_corpus.rs` · corpus pins
+- [[code:onion/src/lint.rs]] · [[code:onion/src/lint.rs#lint]], [[code:onion/src/lint.rs#lint_chunk]], [[code:onion/src/lint.rs#LintReport]], [[code:onion/src/lint.rs#Observation]], `Fix`, `check_fixes`
+- [[code:onion/src/lint/rows.rs]] · [[code:onion/src/lint/rows.rs#Code]], [[code:onion/src/lint/rows.rs#Category]], [[code:onion/src/lint/rows.rs#LintRow]]
+- [[code:onion/src/lint/walk.rs]] · the one walk; `structure.rs`, `ancestry.rs`, `ordering.rs`, `flat.rs` are the four machines
+- [[code:onion/tests/lint_corpus.rs]] · corpus pins

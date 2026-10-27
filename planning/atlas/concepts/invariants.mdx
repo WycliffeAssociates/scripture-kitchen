@@ -16,7 +16,7 @@ Each rule: the invariant, why we hold it and what the alternative would cost, an
 
 **Why.** Most parsers build an AST, and an AST applies the spec's whitespace reduction and normalises closers. Load-then-save through it rewrites spacing the translator never touched, so every save is a diff and collaborators conflict in git over bytes neither changed. We could normalise; it would make loading lossy.
 
-**Forces.** Tokens tile the source: concatenating their spans is the file ([[scanner]], [[source]]). Horizontal whitespace past a marker's one delimiter byte is its own token kind, `Pad`, not dropped (875 sites flagged across the corpus when it landed, 8128053) ([[token]]). Closers the file never wrote are never inserted: each node records how its frame ended, `Explicit`, `Implicit`, `Recovery` or `Eof`, in one byte ([[cst]], [[walker]]). Loss happens only in projections named as lossy: [[mask]], [[exports]], [[vref]].
+**Forces.** Tokens tile the source: concatenating their spans is the file ([[scanner]], [[source]]). Horizontal whitespace past a marker's one delimiter byte is its own token kind, [[code:onion/src/token.rs#TokenKind::Pad|Pad]], not dropped (875 sites flagged across the corpus when it landed, 8128053) ([[token]]). Closers the file never wrote are never inserted: each node records how its frame ended, [[code:onion/src/cst.rs#CloseReason|Explicit]], `Implicit`, `Recovery` or `Eof`, in one byte ([[cst]], [[walker]]). Loss happens only in projections named as lossy: [[mask]], [[exports]], [[vref]].
 
 ## 2. Offsets over object graphs
 
@@ -28,7 +28,7 @@ Each rule: the invariant, why we hold it and what the alternative would cost, an
 
 **Why.** A repair is a guess. A silent one moves the editor's offsets and hides the mistake from the person who has to fix it.
 
-**Forces.** Input that cannot be represented is refused with a reason, never defaulted (GLOSSARY, "Refuse, never invent"). [[lint]] moves, inserts and drops no token; a fix is an offered list of [[edit]]s and exists only where the row declares one. A malformed designator keeps its [[toc]] row with numbers 0; a broken attribute pair is `Malformed` ([[attributes]]); [[resolve]] says ambiguous rather than picking the nearest. [[format]] is the one opt-in path that writes new bytes.
+**Forces.** Input that cannot be represented is refused with a reason, never defaulted (GLOSSARY, "Refuse, never invent"). [[lint]] moves, inserts and drops no token; a fix is an offered list of [[edit]]s and exists only where the row declares one. A malformed designator keeps its [[toc]] row with numbers 0; a broken attribute pair is [[code:onion/src/attributes.rs#AttrEvent::Malformed|Malformed]] ([[attributes]]); [[resolve]] says ambiguous rather than picking the nearest. [[format]] is the one opt-in path that writes new bytes.
 
 ## 4. Engines are stateless; galley holds all state
 
@@ -40,7 +40,7 @@ Each rule: the invariant, why we hold it and what the alternative would cost, an
 
 **Why.** An edit lands in one chapter. Reparsing or recounting the whole book, or the whole Bible, per keystroke is the cost to avoid, and content keys mean nothing needs invalidating: a changed chapter simply misses.
 
-**Forces.** Onion cuts at `\c` and carries the few cross-chapter facts in an explicit `Carried` ([[chunk]]); the [[chunk-cache]] keys a chapter's products by its bytes, and the assembled dish is byte-identical to a cold parse. Every Sous rule is map, fold, judge, with map a pure function of one chapter ([[chapter-pass]]).
+**Forces.** Onion cuts at `\c` and carries the few cross-chapter facts in an explicit [[code:onion/src/lint/carried.rs#Carried]] ([[chunk]]); the [[chunk-cache]] keys a chapter's products by its bytes, and the assembled dish is byte-identical to a cold parse. Every Sous rule is map, fold, judge, with map a pure function of one chapter ([[chapter-pass]]).
 
 ## 6. Author once, generate the rest, test for staleness
 
@@ -52,4 +52,4 @@ Each rule: the invariant, why we hold it and what the alternative would cost, an
 
 **Why.** Most target languages have no dictionary, model or style guide, and conventions differ: French spaces inside guillemets, Amharic writes `::` for its full stop. A fixed rule list is wrong per language; the project's own counts are not. And a proofreader tied to the USFM parser could not read vref or any other producer.
 
-**Forces.** [[sous-core]] never depends on onion; it reads a `ProjectedBook` that galley builds ([[onion-book]]). Facts both need live in the zero-dependency [[mise]]. A verdict is a fraction with numerator, denominator and support floor, never a blended score ([[sous-chef]]).
+**Forces.** [[sous-core]] never depends on onion; it reads a [[code:sous-chef/core/src/input.rs#ProjectedBook]] that galley builds ([[onion-book]]). Facts both need live in the zero-dependency [[mise]]. A verdict is a fraction with numerator, denominator and support floor, never a blended score ([[sous-chef]]).

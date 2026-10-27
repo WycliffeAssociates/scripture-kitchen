@@ -42,12 +42,12 @@ pantry.chunk_stats() -> ChunkStats { misses, hits, evictions, len, resident_byte
 
 - **Content, not position.** Reordering chapters, undoing an edit or reopening a book all hit.
 - **The key names everything the value depends on.** The bytes lex differently under two [[extensions]] lists, and chunk 0's `\usfm` version and is-scripture bit gate local lint rules. Omitting either would be a correctness bug, not a performance one (`pantry.md`, "This is the law").
-- **Byte-identical output.** The assembled dish equals a cold [[plate]] (`galley/tests/chunks.rs`, `the_folded_dish_is_byte_identical_to_a_cold_one`), and lint equals a fresh walk cold, warm, edited, fused, evicted and undone.
+- **Byte-identical output.** The assembled dish equals a cold [[plate]] (`galley/tests/chunks.rs`, [[code:galley/tests/chunks.rs#the_folded_dish_is_byte_identical_to_a_cold_one]]), and lint equals a fresh walk cold, warm, edited, fused, evicted and undone.
 - **Small books bypass** (`UNCACHED_CHUNKS = 2`). On en_ulb's five two-chunk books, fifty keystrokes in Jude would otherwise leave 52 entries and 74 KB.
 - **A ceiling makes it safe.** A wasm high-water mark is permanent. A hand-rolled LRU evicts by last-touched tick; at dozens to hundreds of entries a linear scan is enough.
 - **Dirty seams are remembered** as `OpenBoundary`, so repeat calls widen to the fused unit without re-lexing.
 
-Name: this was the **Warmer** until commit a7c21d2 (2026-09-07) folded it into the [[pantry]] as `ChunkStore`. Test locals and `galley/examples/working_set.rs` still say `warmer`.
+Name: this was the **Warmer** until commit a7c21d2 (2026-09-07) folded it into the [[pantry]] as [[code:galley/src/pantry/chunks.rs#ChunkStore]]. Test locals and `galley/examples/working_set.rs` still say `warmer`.
 
 ## Composes with
 
@@ -55,5 +55,5 @@ Uses [[chunk]]'s per-chunk primitives over [[cst]] and [[lint]]. Lives in the [[
 
 ## Where
 
-- `galley/src/pantry/chunks.rs` · `ChunkStore`, `Key`, `ContextKey`, `Products`, `Cached::OpenBoundary`, `UNCACHED_CHUNKS`, `ChunkStats`
-- `galley/src/pantry/budget.rs` · `Budget`, `Tally`
+- [[code:galley/src/pantry/chunks.rs]] · [[code:galley/src/pantry/chunks.rs#ChunkStore]], [[code:galley/src/pantry/chunks.rs#Key]], [[code:galley/src/pantry/chunks.rs#ContextKey]], [[code:galley/src/pantry/chunks.rs#Products]], [[code:galley/src/pantry/chunks.rs#Cached::OpenBoundary]], [[code:galley/src/pantry/chunks.rs#UNCACHED_CHUNKS]], [[code:galley/src/pantry/chunks.rs#ChunkStats]]
+- [[code:galley/src/pantry/budget.rs]] · [[code:galley/src/pantry/budget.rs#Budget]], [[code:galley/src/pantry/budget.rs#Tally]]

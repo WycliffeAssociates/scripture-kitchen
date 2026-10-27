@@ -43,7 +43,7 @@ before                                   after
 
 - **Two passes, no duplicated rules.** Format runs [[lint]], keeps the fixes of rows flagged `formatter` plus any named `repairs`, then a second walk evaluates the Form-channel rows (`Severity::Form`, which lint never reaches). The two sets merge and collide by row order: first writer wins, the loser is not emitted.
 - **The [[mask]]'s no-normalization law does not bind it.** It invents whitespace and engine `FixStr`s, never prose.
-- **Scope engine-side, never in JS.** `format_edits_in` filters the whole-book transaction to a window. An edit straddling the edge is dropped whole; a multi-edit claim (`bridge-empty-verses`) is kept only if all of it is inside (`onion-wasm/README.md`).
+- **Scope engine-side, never in JS.** [[code:onion/src/format.rs#format_edits_in]] filters the whole-book transaction to a window. An edit straddling the edge is dropped whole; a multi-edit claim (`bridge-empty-verses`) is kept only if all of it is inside (`onion-wasm/README.md`).
 
 ## Composes with
 
@@ -51,5 +51,5 @@ Reads [[lint]] and the Form channel over the same rows. Emits [[edit]]s. Crosses
 
 ## Where
 
-- `onion/src/format.rs` · `format`, `format_edits`, `format_edits_in`, `FormatOptions`, `VerseBreaks`, `CharBreaks`
-- `onion/tests/format_corpus.rs`
+- [[code:onion/src/format.rs]] · [[code:onion/src/format.rs#format]], [[code:onion/src/format.rs#format_edits]], [[code:onion/src/format.rs#format_edits_in]], [[code:onion/src/format.rs#FormatOptions]], [[code:onion/src/format.rs#VerseBreaks]], [[code:onion/src/format.rs#CharBreaks]]
+- [[code:onion/tests/format_corpus.rs]]

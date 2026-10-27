@@ -6,9 +6,13 @@
 import { render } from "astro:content";
 import Base from "../../layouts/Base.astro";
 import AtlasSidebar from "../../components/atlas/AtlasSidebar.astro";
+import CodeCite from "../../components/atlas/CodeCite.astro";
 import { components } from "../../components/index.ts";
 import { loadConcepts, plain, type Loaded } from "../../lib/atlas/concepts.ts";
 import { githubBlob, inRepo } from "../../lib/atlas/github.ts";
+import { wikiLinks } from "../../lib/atlas/glossary.ts";
+import { parseCite, resolveCite } from "../../lib/code-cite.ts";
+import { repoRoot } from "../../lib/root.ts";
 import { url } from "../../lib/url.ts";
 
 export const getStaticPaths = async () => {
@@ -26,6 +30,16 @@ const lists = [
 ].map((list) => ({ ...list, pages: list.slugs.map(find).filter((c) => c !== undefined) }))
   .filter((list) => list.pages.length > 0);
 const LEVEL = ["products", "crates", "primitives", "wires"];
+const seen = new Set<string>();
+const cites = wikiLinks(concept.entry.body ?? "")
+  .filter((link) => link.target.startsWith("code:"))
+  .flatMap((link) => {
+    const cite = parseCite(link.target.slice(5), link.shown);
+    const found = resolveCite(repoRoot, cite.path, cite.symbol);
+    if (!found.ok || found.lines === null || seen.has(cite.key)) return [];
+    seen.add(cite.key);
+    return [{ ...cite, ...found.lines }];
+  });
 ---
 <Base title={data.term} section="atlas">
   <AtlasSidebar slot="sidebar" />
@@ -50,8 +64,22 @@ const LEVEL = ["products", "crates", "primitives", "wires"];
         </ul>
       )}
     </header>
-    <div class="prose">
-      <Content components={components} />
+    <div class:list={["concept-body", cites.length > 0 && "has-cites"]} data-cites-root={cites.length > 0 ? "" : undefined}>
+      <div class="prose min-w-0">
+        <Content components={components} />
+      </div>
+      {cites.length > 0 && (
+        <aside class="cite-panel" aria-label="Cited code">
+          <div class="cite-bar">
+            <span class="cite-title">Code</span>
+            <span class="cite-count" aria-live="polite">1 / {cites.length}</span>
+            <button type="button" data-cite-step="-1" title="Previous citation ([)">‹</button>
+            <button type="button" data-cite-step="1" title="Next citation (])">›</button>
+            <button type="button" data-cite-close title="Close (Esc)">×</button>
+          </div>
+          {cites.map((cite, i) => <CodeCite path={cite.path} start={cite.start} end={cite.end} id={cite.key} label={cite.shown} hidden={i > 0} />)}
+        </aside>
+      )}
     </div>
     {lists.length > 0 && (
       <footer data-ref="backlinks" class="mt-12 grid gap-6 border-t border-surface-border pt-5 md:grid-cols-2">
@@ -71,4 +99,8 @@ const LEVEL = ["products", "crates", "primitives", "wires"];
       </footer>
     )}
   </article>
+  <script>
+    import { mountCites } from "../../client/cite.ts";
+    mountCites();
+  </script>
 </Base>

@@ -92,9 +92,9 @@ node \f  reason Recovery         lint: unclosed-note
 
 - **Lossless, not abstract.** Every token id sits in exactly one child list, so an in-order walk of the tree gives back the [[scanner]]'s stream and the bytes concatenate to the [[source]]. `cst_oracle.rs` proves the partition over the 160-book test tier. An AST would have to choose what to drop; the [[exports]] make that choice later and say they are lossy.
 - **Points are siblings.** `\c` and `\v` take no content (GLOSSARY, Q16, ruled 2026-08-12), so paragraphs are their siblings. Chapters and verses are an index over the tree, the [[toc]], not a nesting of it.
-- **The walker records verdicts, lint reads them.** Each node stores a `CloseReason` (Explicit, Implicit, Recovery, Eof) and the stamped context. [[lint]] matches on those and never re-derives how a frame ended. Positional context (BookHeaders and the rest) is lint's, not the tree's.
+- **The walker records verdicts, lint reads them.** Each node stores a [[code:onion/src/cst.rs#CloseReason]] (Explicit, Implicit, Recovery, Eof) and the stamped context. [[lint]] matches on those and never re-derives how a frame ended. Positional context (BookHeaders and the rest) is lint's, not the tree's.
 - **Flat arrays, no pointers.** `nodes` plus one shared `child_ids` arena; a node id is tagged with bit 31 so tokens and nodes mix in document order. It crosses the wall as three sections of the [[dish]] without conversion (commit b781bb9: "ship the tree, not projections of it" — tree plus diagnostics was 0.64x the bytes and 0.62x the time of the curated planes it replaced).
-- **Streaming build.** `Builder::feed` takes one token at a time and holds no slice (commit 2d1108a). That is what lets `build_chunk` build one chapter and simulate the next `\c`'s displacement, which is how the [[chunk-cache]] reuses trees.
+- **Streaming build.** [[code:onion/src/cst.rs#Builder::feed]] takes one token at a time and holds no slice (commit 2d1108a). That is what lets [[code:onion/src/cst.rs#build_chunk]] build one chapter and simulate the next `\c`'s displacement, which is how the [[chunk-cache]] reuses trees.
 - **Cost.** ~6 ns/token, about 40% of a lex; the heaviest aligned book takes ~0.6 ms (`cst.rs` doc). Over the corpus, `--cst-stats` shows Recovery only on three real unclosed `\f`.
 
 ## Composes with
@@ -110,7 +110,7 @@ flowchart LR
 
 ## Where
 
-- `onion/src/cst.rs` · `build`, `build_chunk`, `ChunkCst::open_at_end`, `concat`, `Builder::feed`/`finish`, `Cst::in_order`, `Cst::extent`, `Cst::owners`, `Node`, `CloseReason`
-- `onion/tests/fold_oracle.rs` · `concat(build_chunk each) == build(lex(whole))` on clean boundaries
-- `onion/tests/cst_oracle.rs` · the partition oracle over `testData/exampleCorpora`
-- `onion/src/bin/playground.rs` · `--cst-stats`
+- [[code:onion/src/cst.rs]] · [[code:onion/src/cst.rs#build]], [[code:onion/src/cst.rs#build_chunk]], [[code:onion/src/cst.rs#ChunkCst::open_at_end]], [[code:onion/src/cst.rs#concat]], [[code:onion/src/cst.rs#Builder::feed]]/[[code:onion/src/cst.rs#Builder::finish|finish]], [[code:onion/src/cst.rs#Cst::in_order]], [[code:onion/src/cst.rs#Cst::extent]], [[code:onion/src/cst.rs#Cst::owners]], [[code:onion/src/cst.rs#Node]], [[code:onion/src/cst.rs#CloseReason]]
+- [[code:onion/tests/fold_oracle.rs]] · `concat(build_chunk each) == build(lex(whole))` on clean boundaries
+- [[code:onion/tests/cst_oracle.rs]] · the partition oracle over `testData/exampleCorpora`
+- [[code:onion/src/bin/playground.rs]] · `--cst-stats`

@@ -7,6 +7,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
+import { parseCite } from "../code-cite.ts";
 import { conceptsDir } from "./paths.ts";
 import { conceptSchema, type Concept } from "./schema.ts";
 
@@ -51,6 +52,21 @@ export const lookup = (): Map<string, Entry> => {
 /** `[[target]]` and `[[target|shown]]`, outside code. */
 export const WIKI = /\[\[([^\]|\n]+?)(?:\|([^\]\n]+?))?\]\]/gu;
 
+/** `[[…]]` in a page outside fenced and inline code, in order, with line numbers. */
+export const wikiLinks = (text: string): { target: string; shown: string | undefined; line: number }[] => {
+  const out: { target: string; shown: string | undefined; line: number }[] = [];
+  let fenced = false;
+  text.split("\n").forEach((line, i) => {
+    if (/^\s*(```|~~~)/u.test(line)) fenced = !fenced;
+    if (fenced) return;
+    for (const match of line.replace(/`[^`]*`/gu, "").matchAll(WIKI)) out.push({ target: match[1]!.trim(), shown: match[2]?.trim(), line: i + 1 });
+  });
+  return out;
+};
+
+const shownOf = (target: string, shown?: string): string =>
+  (shown ?? (target.startsWith("code:") ? parseCite(target.slice(5)).shown : target)).trim();
+
 /** Markdown to one line of text: links and wiki-links keep their words. */
 export const plain = (markdown: string): string =>
   markdown
@@ -59,7 +75,7 @@ export const plain = (markdown: string): string =>
       part.startsWith("`")
         ? part.slice(1, -1)
         : part
-            .replace(WIKI, (_, target: string, shown?: string) => (shown ?? target).trim())
+            .replace(WIKI, (_, target: string, shown?: string) => shownOf(target, shown))
             .replace(/!?\[([^\]]*)\]\([^)]*\)/gu, "$1")
             .replace(/[*_]{1,2}([^*_]+)[*_]{1,2}/gu, "$1"),
     )

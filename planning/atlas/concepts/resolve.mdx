@@ -16,7 +16,7 @@ Sefer's "go to Luke 1:2" meets bridged verses (`\v 1-2`), gaps (`\v 1,3`) and du
 
 ## The solution
 
-Answer from the [[toc]] with found, missing or ambiguous. Found carries the range, an earlier "opening" that takes in preceding headings, and the verses actually covered. Never the nearest match ([[invariants]] 3): Sefer's older merge of overlapping matches hid broken text and was not ported. `Address` lives in [[mise]], so any crate can name a place without onion.
+Answer from the [[toc]] with found, missing or ambiguous. Found carries the range, an earlier "opening" that takes in preceding headings, and the verses actually covered. Never the nearest match ([[invariants]] 3): Sefer's older merge of overlapping matches hid broken text and was not ported. [[code:mise/src/address.rs#Address]] lives in [[mise]], so any crate can name a place without onion.
 
 ## Trade-offs
 
@@ -57,7 +57,7 @@ Reads the [[toc]] and the source (segment letters, the opening walk), using the 
 
 ## Where
 
-- `onion/src/resolve.rs` · `Toc::resolve`, `Toc::resolve_with`, `Toc::resolve_rows`, `Resolution`
-- `mise/src/address.rs` · `Address`, `Point`
-- `onion-wasm/src/resolution.rs` · the address parser and JSON writer
-- `onion/tests/resolve_cases.rs`
+- [[code:onion/src/resolve.rs]] · [[code:onion/src/resolve.rs#Toc::resolve]], [[code:onion/src/resolve.rs#Toc::resolve_with]], [[code:onion/src/resolve.rs#Toc::resolve_rows]], [[code:onion/src/resolve.rs#Resolution]]
+- [[code:mise/src/address.rs]] · [[code:mise/src/address.rs#Address]], [[code:mise/src/address.rs#Point]]
+- [[code:onion-wasm/src/resolution.rs]] · the address parser and JSON writer
+- [[code:onion/tests/resolve_cases.rs]]

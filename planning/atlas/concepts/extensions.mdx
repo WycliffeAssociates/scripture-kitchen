@@ -16,7 +16,7 @@ Projects declare `\z` markers in `markers.ext` (`\zaln-s`…`\zaln-e` around eve
 
 ## The solution
 
-Each custom marker maps to a template row that already has its category's behaviour, and from then on the scanner, walker, lint, mask and exports treat it as that row. There are no per-marker rules: the category already says how it nests and closes. Lists are per book (`lex_with`), so two projects coexist in one process.
+Each custom marker maps to a template row that already has its category's behaviour, and from then on the scanner, walker, lint, mask and exports treat it as that row. There are no per-marker rules: the category already says how it nests and closes. Lists are per book ([[code:onion/src/scanner.rs#lex_with]]), so two projects coexist in one process.
 
 ## Trade-offs
 
@@ -49,7 +49,7 @@ customMarkers([{ name: "zmyf", category: "footnote" }, { name: "nope", category:
 
 ## How it works
 
-- **A name maps to a template row and stops.** Every behaviour (caller, note scope, closing, lint contexts, mask, export shape) is the [[marker-table]] row's. The one thing a template cannot carry is the spelled name, which is what `generated::is_extension` is for. Shipped as 0.1.4, seventeen template rows (commit 0eda490).
+- **A name maps to a template row and stops.** Every behaviour (caller, note scope, closing, lint contexts, mask, export shape) is the [[marker-table]] row's. The one thing a template cannot carry is the spelled name, which is what [[code:onion/src/tables/generated.rs#is_extension|generated::is_extension]] is for. Shipped as 0.1.4, seventeen template rows (commit 0eda490).
 - **Legacy names add, never redefine.** `relax_z_prefix` admits en_ulb's `\s5` because no spec spelling resolves it.
 - **Per book, not per process** (planning item 2026-10-21, shipped 0.1.13). Each [[pantry]] book lexes by the list it was registered with.
 - **Lists key the caches.** The [[chunk-cache]] key holds the list's fingerprint, so equal lists share parses and different lists never do.
@@ -60,6 +60,6 @@ Read by the [[scanner]] (`lex_with`) to resolve `z` lexemes against the [[marker
 
 ## Where
 
-- `onion/src/extensions.rs` · `Extensions::new_with`, `Extensions::fingerprint`, `set_extensions`, `marker_idx`
-- `mise/src/extensions.rs` · `ExtensionCategory`, `CustomMarker`, `parse_markers_ext`
-- `onion/tests/extensions_behave.rs`
+- [[code:onion/src/extensions.rs]] · [[code:onion/src/extensions.rs#Extensions::new_with]], [[code:onion/src/extensions.rs#Extensions::fingerprint]], [[code:onion/src/extensions.rs#set_extensions]], [[code:onion/src/extensions.rs#marker_idx]]
+- [[code:mise/src/extensions.rs]] · [[code:mise/src/extensions.rs#ExtensionCategory]], [[code:mise/src/extensions.rs#CustomMarker]], [[code:mise/src/extensions.rs#parse_markers_ext]]
+- [[code:onion/tests/extensions_behave.rs]]

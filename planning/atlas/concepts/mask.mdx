@@ -49,10 +49,10 @@ structure:   \id MRK  \mt1  \c 1  \p  \v 1  \v 2-3  \s1  \q1 \v 4
 ## How it works
 
 - **Walks the [[cst]], not the tokens.** "Text is not verse text" is a scope fact: the `why` in a footnote dies because the footnote dies, one skipped subtree instead of a stateful guess (`mask.rs` doc).
-- **Public offsets are always source bytes.** Mask space never escapes its maker. A consumer finds something in the projection, calls `to_source`, and files it in document coordinates.
+- **Public offsets are always source bytes.** Mask space never escapes its maker. A consumer finds something in the projection, calls [[code:onion/src/mask.rs#Mask::to_source|to_source]], and files it in document coordinates.
 - **Maximal ranges.** Adjacent survivors merge, so a seam between ranges is always a real gap. One `u32` per range, not per byte. ~5.5 ns/token per recipe; the oracle checked 340.9M source bytes over 226 books x 3 filters (commit 9b1e23e).
 - **Headings are not verse text** (planning item 2026-09-30). A Titles-and-Sections paragraph's text drops until a `\v` inside it opens a verse; en_ulb puts verses inside `\s5` 208 times in 2CH alone, so removing the subtree would lose them.
-- **Character markers drop in `structure`.** Words do not port across languages, which is what makes [[overlay]] possible.
+- **Character markers drop in [[code:onion/src/mask.rs#Filter::structure|structure]].** Words do not port across languages, which is what makes [[overlay]] possible.
 
 ## Composes with
 
@@ -60,5 +60,5 @@ Reads the [[cst]], the [[token]] stream and a `Filter` resolved against the [[ma
 
 ## Where
 
-- `onion/src/mask.rs` · `mask`, `Mask`, `Mask::to_source`/`from_source`/`text`, `Filter::verse_text`/`structure`/`text`, `Action`, `TextRule`
-- `onion/tests/mask_oracle.rs`
+- [[code:onion/src/mask.rs]] · [[code:onion/src/mask.rs#mask]], [[code:onion/src/mask.rs#Mask]], [[code:onion/src/mask.rs#Mask::to_source]]/[[code:onion/src/mask.rs#Mask::from_source|from_source]]/[[code:onion/src/mask.rs#Mask::text|text]], [[code:onion/src/mask.rs#Filter::verse_text]]/[[code:onion/src/mask.rs#Filter::structure|structure]]/[[code:onion/src/mask.rs#Filter::text|text]], [[code:onion/src/mask.rs#Action]], [[code:onion/src/mask.rs#TextRule]]
+- [[code:onion/tests/mask_oracle.rs]]

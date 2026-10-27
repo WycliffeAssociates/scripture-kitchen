@@ -42,7 +42,7 @@ galley::wasm        the Galley handle (feature "wasm")
 
 - **The only place the engines meet.** "Anything that might be considered stateful lives here and NEVER in the engines" (`galley/src/lib.rs`). `galley::sous` owns the Onion→Sous seam entire.
 - **One caching layer.** Everything kept between calls is in the [[pantry]] or a store it defines (`architecture.md`).
-- **The JS superset.** galley's cdylib links onion-wasm's shims, so one module exports `Galley` and every onion door. A test pins the exact export list because a cdylib silently drops what nothing references.
+- **The JS superset.** galley's cdylib links onion-wasm's shims, so one module exports [[code:galley/src/wasm.rs#Galley]] and every onion door. A test pins the exact export list because a cdylib silently drops what nothing references.
 - **Depends on** [[onion]], [[sous-core]], [[mise]], [[ticket]]; [[onion-wasm]], `wasm-bindgen` and serde only under `wasm`; `rayon` only under `parallel`.
 
 ## Composes with
@@ -51,4 +51,4 @@ Implements the [[pantry]], [[chunk-cache]], [[expediter]], [[onion-book]], [[fin
 
 ## Where
 
-- `galley/src/lib.rs`, `galley/src/wasm.rs`, `galley/docs/analysis-host.md`
+- [[code:galley/src/lib.rs]], [[code:galley/src/wasm.rs]], [[code:galley/docs/analysis-host.md]]

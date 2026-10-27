@@ -46,7 +46,7 @@ A modified unit's intra-verse runs (`diff.rs` doc), tiling the span:
 
 ## How it works
 
-- **Three layers, one walk.** Identity: a block is the bytes between two [[toc]] anchors, a `Range<u32>` plus a `Copy` address. Alignment: Myers over 12-byte addresses, then coalescing pairs a rebridged or relabeled verse into one decision. Projection: `merge` emits bytes, `to_edits` emits replay splices. PSA against itself: 2.2 ms (commit 09b76e2).
+- **Three layers, one walk.** Identity: a block is the bytes between two [[toc]] anchors, a `Range<u32>` plus a `Copy` address. Alignment: Myers over 12-byte addresses, then coalescing pairs a rebridged or relabeled verse into one decision. Projection: `merge` emits bytes, [[code:onion/src/diff.rs#to_edits]] emits replay splices. PSA against itself: 2.2 ms (commit 09b76e2).
 - **Changed units only** unless `unchanged: true` (0.1.8).
 - **Runs are asked for by name.** `"none"`, `"words"` (UAX-29) or `"chars"`; an unknown name rejects. The [[cst]] and the `text` [[mask]] are built only when runs are asked for.
 - **JSON at the wall.** serde keeps the old editors' camelCase contract (planning item 2026-09-28, binary run wire not scheduled).
@@ -57,5 +57,5 @@ Reads the [[toc]] per side, and the [[cst]] and the `text` [[mask]] cut only whe
 
 ## Where
 
-- `onion/src/diff.rs` · `diff`, `diff_with_text`, `merge`, `revert`, `to_edits`, `DiffSkeleton`, `DecisionUnit`, `Slot`
-- `onion/tests/diff_laws.rs`, `diff_fixtures.rs`, `diff_run_laws.rs`
+- [[code:onion/src/diff.rs]] · [[code:onion/src/diff.rs#diff]], [[code:onion/src/diff.rs#diff_with_text]], [[code:onion/src/diff.rs#merge]], [[code:onion/src/diff.rs#revert]], [[code:onion/src/diff.rs#to_edits]], [[code:onion/src/diff.rs#DiffSkeleton]], [[code:onion/src/diff.rs#DecisionUnit]], [[code:onion/src/diff.rs#Slot]]
+- [[code:onion/tests/diff_laws.rs]], `diff_fixtures.rs`, `diff_run_laws.rs`

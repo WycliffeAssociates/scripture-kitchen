@@ -38,7 +38,7 @@ Find::literal("why")          → nothing
 
 ## How it works
 
-- **`memmem` over `mask.text()`**, then `to_source` per hit. `Hit.projected` is in mask space (for highlighting or a second search); `Hit.source` is `Contiguous(a..b)` or `Split([…])`, one range per source piece. The bytes between pieces are exactly what the projection dropped.
+- **`memmem` over `mask.text()`**, then [[code:onion/src/mask.rs#Mask::to_source|to_source]] per hit. `Hit.projected` is in mask space (for highlighting or a second search); `Hit.source` is `Contiguous(a..b)` or `Split([…])`, one range per source piece. The bytes between pieces are exactly what the projection dropped.
 - **Whole word is `words/1`.** It calls [[words]] in [[mise]], not sous-core; `tests/find.rs` asserts every whole-word hit of `the` equals sous's word walk over the test tier.
 - **Case fold: copy plus offset map.** On en_ulb (2026-09-06): folded copy 8.26 ms for `the` against a 7.82 ms lower bound for fold-per-scalar.
 - **Measured.** Whole Bible, case-sensitive: `Melchizedek` 2.25 ms, `the` 5.14 ms (76,324 hits, ~38 ns each); `और` 13.46 ms over hin2017, where `E0 A4` leads almost every scalar and memmem's prefilter cannot help.
@@ -49,5 +49,5 @@ Reads a book's retained [[mask]] and text from the [[pantry]] (targets, and refe
 
 ## Where
 
-- `galley/src/find.rs` · `Find::literal`, `in_projection`, `in_book`, `in_pantry`, `Hit`, `SourceSpan::{Contiguous, Split}`
-- `galley/benches/find.rs`
+- [[code:galley/src/find.rs]] · [[code:galley/src/find.rs#Find::literal]], [[code:galley/src/find.rs#Find::in_projection|in_projection]], [[code:galley/src/find.rs#Find::in_book|in_book]], [[code:galley/src/find.rs#Find::in_pantry|in_pantry]], [[code:galley/src/find.rs#Hit]], `SourceSpan::{Contiguous, Split}`
+- [[code:galley/benches/find.rs]]

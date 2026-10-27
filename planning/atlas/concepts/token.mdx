@@ -16,7 +16,7 @@ Every pass after the scanner reads tokens, and a long book has tens of thousands
 
 ## The solution
 
-A token is `start u32 · len u16 · kind_bits u8 · marker_idx u8 · level u8`, 12 bytes with padding, size asserted ([[invariants]] 2). Its text is always a slice of the [[source]], and interiors (designators, attributes) are read on demand. `Pad` is the kind for horizontal whitespace past a marker's one delimiter byte, so reducible spacing survives load ([[invariants]] 1) and lint and format can act on it.
+A token is `start u32 · len u16 · kind_bits u8 · marker_idx u8 · level u8`, 12 bytes with padding, size asserted ([[invariants]] 2). Its text is always a slice of the [[source]], and interiors (designators, attributes) are read on demand. [[code:onion/src/token.rs#TokenKind::Pad|Pad]] is the kind for horizontal whitespace past a marker's one delimiter byte, so reducible spacing survives load ([[invariants]] 1) and lint and format can act on it.
 
 ## Trade-offs
 
@@ -51,7 +51,7 @@ Whitespace inside text is never Pad: `\nd*   spoke.` lexes as `Text("   spoke.")
 ## How it works
 
 - **Eager fields, lazy payloads.** `start: u32`, `len: u16`, `kind_bits: u8`, `marker_idx: u8`, `level: u8`. GLOSSARY: "each added field is twin tax", because the JS read lane must mirror it.
-- **Packed kind.** The Rust enum is 2 bytes; the row stores one byte, low 4 bits shape and bit 4 a spelling flag (`\+` nesting, or `-e` on a milestone). `to_bits`/`from_bits` is the one mapping.
+- **Packed kind.** The Rust enum is 2 bytes; the row stores one byte, low 4 bits shape and bit 4 a spelling flag (`\+` nesting, or `-e` on a milestone). [[code:onion/src/token.rs#TokenKind::to_bits|to_bits]]/`from_bits` is the one mapping.
 - **Pad** (RFC-Lexer-change-8-27, commit 8128053): each fold site keeps at most one horizontal code unit; the rest is Pad. Spans tile again, text views drop Pad whole, and `delimiter-surplus` (875 across the corpus at the time) offers a delete.
 - **Level, not spelling.** `\q1` and `\q2` share one row; `level` carries the number.
 - **Over-long runs split** at `u16::MAX` in the scanner's push.
@@ -62,5 +62,5 @@ Written by the [[scanner]] from the [[source]]. Read by the [[walker]] to build 
 
 ## Where
 
-- `onion/src/token.rs` · `Token`, `TokenKind`, `TokenKind::to_bits`/`from_bits`
-- `onion/src/wire/schema.rs` · `TOKEN` record, `TOKEN_DELIMITER_FOLDED`, `TOKEN_BLANK`
+- [[code:onion/src/token.rs]] · [[code:onion/src/token.rs#Token]], [[code:onion/src/token.rs#TokenKind]], [[code:onion/src/token.rs#TokenKind::to_bits]]/[[code:onion/src/token.rs#TokenKind::from_bits|from_bits]]
+- [[code:onion/src/wire/schema.rs]] · [[code:onion/src/wire/schema.rs#TOKEN]] record, [[code:onion/src/wire/schema.rs#TOKEN_DELIMITER_FOLDED]], [[code:onion/src/wire/schema.rs#TOKEN_BLANK]]

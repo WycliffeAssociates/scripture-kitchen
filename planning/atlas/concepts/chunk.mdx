@@ -16,7 +16,7 @@ To reparse one chapter per keystroke, a chapter has to be processable without it
 
 ## The solution
 
-Cut before each line starting `\c`, and scan, build and lint each piece alone ([[invariants]] 5). Each piece emits a small `Carried` summary (first and last chapter, once-per-book markers, open ranges), and a final fold makes the book-level calls. The whole-book path is the one-chunk case of the same fold, so every rule is written once and `fold_oracle` holds the two equal.
+Cut before each line starting `\c`, and scan, build and lint each piece alone ([[invariants]] 5). Each piece emits a small [[code:onion/src/lint/carried.rs#Carried]] summary (first and last chapter, once-per-book markers, open ranges), and a final fold makes the book-level calls. The whole-book path is the one-chunk case of the same fold, so every rule is written once and `fold_oracle` holds the two equal.
 
 ## Trade-offs
 
@@ -53,7 +53,7 @@ Carried::book_is_scripture()    does \id name a book      gates the paragraph ru
 - **Chapter is the rebuild unit** (commit 5ee9d08, "the fold is bought as a plan").
 - **Map observes, reduce judges.** Every cross-chunk fact (first and last chapter, once-per-book markers, the sid a later `-e` owes) is recorded in `Carried`. `reduce` is a left fold that needs no source, tokens or tree. Whole-book `lint` is the single-unit fold, so each judgment exists once.
 - **Carry-outs belong in the key.** A chunk's product is a function of its bytes and chunk 0's context; the [[chunk-cache]] keys on both, so a `\usfm` change re-derives every later chunk.
-- **Dirty boundaries fuse.** `build_chunk` simulates the next `\c`'s displacement. A frame it cannot close sets `open_at_end`, and the chunk fuses with its successor.
+- **Dirty boundaries fuse.** [[code:onion/src/cst.rs#build_chunk]] simulates the next `\c`'s displacement. A frame it cannot close sets `open_at_end`, and the chunk fuses with its successor.
 - **Law:** on clean boundaries `concat(build_chunk each) == build(lex(whole))`, byte for byte (`fold_oracle.rs`).
 
 ## Composes with
@@ -69,7 +69,7 @@ flowchart LR
 
 ## Where
 
-- `onion/src/chunk.rs` · `pre_scan`, `PreScan`
-- `onion/src/lint/carried.rs` · `Carried`, `reduce`
-- `onion/src/lint.rs` · `lint_chunk`, `ChunkContext`, `merge_reports`
-- `onion/src/cst.rs` · `build_chunk`, `concat`
+- [[code:onion/src/chunk.rs]] · [[code:onion/src/chunk.rs#pre_scan]], [[code:onion/src/chunk.rs#PreScan]]
+- [[code:onion/src/lint/carried.rs]] · [[code:onion/src/lint/carried.rs#Carried]], [[code:onion/src/lint/carried.rs#reduce]]
+- [[code:onion/src/lint.rs]] · [[code:onion/src/lint.rs#lint_chunk]], [[code:onion/src/lint.rs#ChunkContext]], [[code:onion/src/lint.rs#merge_reports]]
+- [[code:onion/src/cst.rs]] · [[code:onion/src/cst.rs#build_chunk]], [[code:onion/src/cst.rs#concat]]
