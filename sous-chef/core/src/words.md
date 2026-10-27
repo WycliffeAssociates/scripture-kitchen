@@ -28,7 +28,8 @@ letter. They are described in that order below.
    said      Lower    None
    Go        Title    Glyph('.' quoted)   the quote rides and marks the context
    said      Lower    Glyph(',' quoted)
-   don't-3rd Lower    None         two joiners, and a digit riding a letter
+   don't     Lower    None         the apostrophe has a letter on both sides
+   3rd       Lower    None         a digit rides a letter, so `-` joins nothing
    \u{5d0}\u{5d1}\u{5d2}       Uncased  \u{2014}            dropped: no cased letter, no convention
    a, b      Lower    None, Glyph('-')   `--` is two atoms, so it joins nothing
    (nothing)                      a digit run holding no letter is not a word

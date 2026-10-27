@@ -1,12 +1,10 @@
-//! galley — the workflows crate (piece 5 of the five-crate layout).
+//! galley — the workflows crate.
 //!
 //! ```text
-//!              mise — spec tables, borrow-free structures, zero deps
-//!                ▲                                  ▲
-//! usfm_onion ◄── onion-wasm          scripture_sous_chef ◄── sous-wasm
-//!     ▲              ▲                        ▲                   ▲
-//!     │              │ (wasm feature)         │                   │
-//!     └────────── galley ◄────────────────────┴───────────────────┘
+//!     mise ◄── onion ◄── onion-wasm            mise ◄── sous-core
+//!        ▲        ▲          ▲ (wasm feature)               ▲
+//!        ╰────────┴──────────┴─── galley ◄──────────────────╯
+//!     ticket ◄── onion, galley
 //! ```
 //!
 //! The OPINIONATED layer over the engines: checksumming, ingest recipes,

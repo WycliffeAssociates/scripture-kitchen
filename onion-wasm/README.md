@@ -1,17 +1,13 @@
 # onion-wasm
 
-The JS doorway over the USFM engine (`onion`) — **piece 2 of the five-crate
-layout**: bindgen, the `.d.ts`, and the JS-environment utilities (UTF-16 walls,
-the decoder wrapper) for THIS engine and nothing else.
+The JS doorway over the USFM engine (`onion`): bindgen, the `.d.ts`, and the
+JS-environment utilities (UTF-16 walls, the decoder wrapper) for THIS engine
+and nothing else.
 
-The five pieces: **onion** (the engine), **onion-wasm** (this), **sous**
-(proofreading), **sous-wasm**, and **galley**.
-
-`galley` is the RESERVED name for that last one — the opinionated WORKFLOWS
-crate over onion + sous: dirty-marking, checksums, ingest recipes, find,
-onion↔sous coordination, and the composed-analysis-host binary the editor
-vision describes (§4.4, §9.4). This crate will be one of galley's dependencies.
-It was briefly named `galley` itself; that was a naming error, corrected here.
+`galley` is the WORKFLOWS crate over onion and sous-core (dirty-marking,
+checksums, find, onion↔sous coordination) and the only build Sefer vendors; it
+links this crate's exports in under its `wasm` feature. The crate layout is
+`agents/architecture.md`.
 
 **Nothing is implemented here.** Every export is a `#[wasm_bindgen]` tag over a
 library function, plus — where the wall demands it — an offset conversion or a

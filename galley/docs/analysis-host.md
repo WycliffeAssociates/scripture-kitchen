@@ -8,7 +8,7 @@ handle included (see `galley/src/pantry.md`); and `galley::sous::Expediter`
 from it — chapter observations keyed by content, mapped at `publish` or, for a
 book the Pantry keeps no text for, at `update`, rebased through the retained
 mask and UTF-16 table, and swept per publication down to a book's retained
-generations. Parallel map and the `Reference` role are not built.
+generations.
 
 This note records the lifecycle decisions that belong to Galley rather than
 either engine. Sous remains independent of Onion. Galley supplies their shared

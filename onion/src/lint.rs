@@ -1,7 +1,7 @@
 //! Findings over an already-built document: `lex → cst::build → lint`.
 //!
-//! 48 codes in six families ([`Category`]): STRUCTURE, ORDERING, ATTRIBUTES,
-//! PAYLOAD, FORM and VERSION.
+//! 59 codes in six families ([`Category`]): STRUCTURE, ORDERING, ATTRIBUTES,
+//! PAYLOAD, FORM and VERSION. 11 of them are the formatter's Form channel.
 //!
 //! Three laws shape everything here:
 //!

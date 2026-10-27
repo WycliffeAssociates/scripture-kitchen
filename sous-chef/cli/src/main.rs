@@ -8,7 +8,7 @@
 //!   unpaired MRK target-only 2 source-only 0 ambiguous 0 partial-overlap 1
 //!   pattern[0] U+002C ',' placement next=Digit 12/9812 0.12% band 4 · 3/66 books 11 sites usual=Letter 9,700
 //!     site MRK 118..119
-//!   published 2 findings for 1 books (SOUS v2, UTF-16) to out.sous
+//!   published 2 findings for 1 books (SOUS v3, UTF-16) to out.sous
 //!   wrote 1 patterns and 11 sites to sites.html
 //! ```
 //!

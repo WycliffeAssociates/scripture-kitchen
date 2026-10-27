@@ -51,7 +51,8 @@
   hot, or rebuildable with no residual. `galley/src/pantry.md` is the one
   caching doc; `galley/src/sous/expediter.md` is publication order and
   counters.
-- `sous-cli` depends on both only to call them.
+- `sous-cli` depends on `sous-core`, `galley` (the stateless `galley::sous`
+  publication seam) and `onion` (default features off), only to call them.
 - `sous-chef/donor/` (gitignored) is the v1 spike's source, kept to read and
   port from by hand. Not a crate; nothing builds it. `donor/deps.toml.txt`
   records what it compiled against.
