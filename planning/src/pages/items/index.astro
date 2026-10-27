@@ -1,0 +1,47 @@
+---
+/**
+ * Every item, by stage: the plans at a glance. Closed stages fold shut.
+ */
+import Sidebar from "../../components/Sidebar.astro";
+import Base from "../../layouts/Base.astro";
+import { day, loadItems } from "../../lib/items.ts";
+import { CLOSED, STATUSES } from "../../lib/schema.ts";
+
+const items = await loadItems();
+const rank = (p: number | undefined): number => p ?? Number.POSITIVE_INFINITY;
+const groups = STATUSES.map((status) => ({
+  status,
+  closed: CLOSED.includes(status),
+  items: items
+    .filter((item) => item.entry.data.status === status)
+    .toSorted((a, b) => rank(a.entry.data.priority) - rank(b.entry.data.priority)),
+})).filter((group) => group.items.length > 0);
+---
+<Base title="Plans" section="plans">
+  <Sidebar slot="sidebar" />
+  <h1 class="text-h4 font-semibold">Plans</h1>
+  <p class="mt-1 text-small text-on-surface-secondary">
+    {items.length} items in <code>planning/items/</code>. Open questions and follow-ups are in the <a href="/inbox">Inbox</a>; the order of work is the <a href="/roadmap">Roadmap</a>.
+  </p>
+  {groups.map((group) => (
+    <details data-ref={`plans:${group.status}`} open={!group.closed} class="mt-6">
+      <summary class="mb-2 cursor-pointer text-small font-semibold uppercase tracking-wide text-on-surface-secondary">
+        {group.status} · {group.items.length}
+      </summary>
+      <ul class="m-0 list-none space-y-1 p-0">
+        {group.items.map((item) => {
+          const { data } = item.entry;
+          const open = item.lifted.filter((l) => l.open).length;
+          return (
+            <li data-ref={`item:${item.slug}`} data-loc={item.path} class="flex flex-wrap items-baseline gap-x-3 rounded-md border border-surface-border bg-surface-primary px-3 py-2">
+              {data.priority !== undefined && <span class="font-mono text-smallest text-on-surface-secondary">P{data.priority}</span>}
+              <a href={`/items/${item.slug}`} class="min-w-0 flex-1">{data.title}</a>
+              {open > 0 && <span class="text-smallest text-on-surface-warning">{open} open</span>}
+              <span class="text-smallest text-on-surface-tertiary">{data.kind} · {day(data.updated)}</span>
+            </li>
+          );
+        })}
+      </ul>
+    </details>
+  ))}
+</Base>

@@ -6,7 +6,7 @@
  *   pnpm plans json                       everything, for jq
  *   pnpm plans new "Title" [--kind idea] [--status idea] [--tag t] [--priority 1]
  *   pnpm plans roadmap                    the roadmap's phases and steps, with each item's status
- *   pnpm plans check                      validate items, and the roadmap's references
+ *   pnpm plans check                      validate items, the roadmap's references, and the atlas (scripts/atlas.ts)
  *
  *   pnpm -s plans json | jq '.[] | select(.status == "discussing") | .title'
  *   pnpm -s plans json | jq '[.[] | .lifted[] | select(.kind == "Question" and .open)] | length'
@@ -21,6 +21,7 @@ import { existsSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { parseFile } from "../src/lib/lift.ts";
+import { checkAtlas } from "./atlas.ts";
 import { repoRoot as root } from "../src/lib/root.ts";
 import { readRoadmap, refersTo, roadmapPath } from "../src/lib/roadmap.ts";
 import { CLOSED, itemSchema, KINDS, STATUSES } from "../src/lib/schema.ts";
@@ -183,7 +184,8 @@ switch (command) {
         }
       }
     }
-    console.log(bad === 0 ? "All items valid." : `${bad} problem(s).`);
+    bad += checkAtlas(itemsDir);
+    console.log(bad === 0 ? "All items and the atlas valid." : `${bad} problem(s).`);
     process.exitCode = bad === 0 ? 0 : 1;
     break;
   }

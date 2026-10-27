@@ -54,7 +54,7 @@ Prose. Quote the user's words with `>`; do not reword them.
 | `<Calls id title>` + fence | A call stack: 2 spaces per level, `@ path:line`, `-- note`. |
 | `<Machine id machine={{…}} />` | A state machine in XState's shape, drawn and steppable. Per state also `note`, `screen` (HTML), `tone`. |
 | `<Modules id scan="src/core" />` | The import graph, scanned at build. `by="folder" depth={2}`, `mark={{ "src/a.ts": "changed" }}`, `alias={{ "@/": "src/" }}`; a fence of `a -> b : label` lines adds proposed modules (`+`/`~`/`-` before a name). |
-| `<Mermaid id caption>` + fence | Any other diagram, in Mermaid syntax: flowchart, sequence, state, class, ER, gantt, timeline, pie, and more. Rendered to SVG at build by [Ondine](https://ondine.sh), so it costs the page nothing; one that does not parse shows its source and the error. |
+| `<Mermaid id caption>` + fence | Any other diagram, in Mermaid syntax: flowchart, sequence, state, class, ER, gantt, timeline, pie, and more. Rendered to SVG at build by [Pele](https://pele.run), so it costs the page nothing; a bare ```` ```mermaid ```` fence works too, `click node "/atlas/cst"` makes a node a link, and one that does not parse shows its source and the error. |
 | `<Mock id height={120}>…html…</Mock>` | A small piece of UI in a sandboxed frame; design tokens work in it. |
 
 Rules that matter:
@@ -164,4 +164,20 @@ user must make as a `<Question>` next to the part it changes.
 
 `pnpm dev` in `planning/` (local), `pnpm build` (static, in `planning/dist/`, to share
 read-only). Environment: `PLANS_ITEMS` (default `./items`), `PLANS_REPO_ROOT` (default: the
-git checkout).
+git checkout), `ATLAS_DIR` (default `./atlas`), `LAYOUTS_DIR` (default `<repo>/docs/layouts`).
+
+It is the docs site for the whole workspace. Routes:
+
+| Route | What |
+|---|---|
+| `/` → `/atlas` | The map: products, crates, primitives, wires, zoomable (`/atlas#cst` opens on one). |
+| `/atlas/overview` | `atlas/index.mdx`. |
+| `/atlas/<slug>` | A concept page, `atlas/concepts/<slug>.mdx`. |
+| `/atlas/wires`, `/atlas/wires/<format>` | Each wire's layout and decoded sample, from `docs/layouts/`. |
+| `/features` | The verify-kitchen feature files, as cards. |
+| `/items`, `/items/<slug>` | Plans: every item, and one item. |
+| `/roadmap` | The roadmap. |
+| `/inbox` | Every open question and follow-up (it was `/`). |
+
+Any MDX file may link a concept with `[[slug]]` or `[[slug|shown text]]` (a term or alias
+works too); `pnpm plans check` (or `pnpm atlas check`) lists one that names nothing.

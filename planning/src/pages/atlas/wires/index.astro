@@ -1,0 +1,48 @@
+---
+/** Every wire format at a glance: why buffers, then one card per format. */
+import Base from "../../../layouts/Base.astro";
+import AtlasSidebar from "../../../components/atlas/AtlasSidebar.astro";
+import WireStrip from "../../../components/atlas/WireStrip.astro";
+import "../../../styles/wires.css";
+import { loadWires, regionBytes } from "../../../lib/atlas/layouts.ts";
+import { fixtures } from "../../../lib/atlas/paths.ts";
+
+const wires = await loadWires();
+---
+<Base title="Wires" section="atlas">
+  <AtlasSidebar slot="sidebar" />
+  <h1 class="text-h3 font-semibold">Wires</h1>
+  <ul class="wwhy">
+    <li><b>One parse → one ArrayBuffer.</b> Rust writes it, JS reads it in place.</li>
+    <li><b>No per-node JS objects.</b> A row is read when asked for, by a cursor.</li>
+    <li><b>Strings written once,</b> as offsets into the text you already have.</li>
+    <li><b>A generated reader per format,</b> from the same declaration as the writer.</li>
+    <li><b>A version mismatch fails loud</b> when the buffer is opened.</li>
+  </ul>
+  <p class="text-small text-on-surface-secondary">More in <a href="/atlas/wire">the wire</a>.{fixtures.layouts && " These layouts are the fixture; docs/layouts/ is not written yet."}</p>
+
+  <div class="wcards">
+    {wires.map((wire) => {
+      const { layout } = wire;
+      const first = layout.records[0];
+      const head = layout.envelope.find((r) => r.fields.length > 0);
+      return (
+        <a class="wcard" href={`/atlas/wires/${layout.format}`} data-crate={wire.crate}>
+          <div class="flex flex-wrap items-baseline gap-2">
+            <span class="font-mono font-semibold text-on-surface-primary">{layout.format}</span>
+            {layout.magic && <span class="wpill font-mono">{layout.magic}</span>}
+            {layout.version !== undefined && layout.version !== null && <span class="wpill">v{layout.version}</span>}
+          </div>
+          {head && <WireStrip compact name={head.region} fields={head.fields} bytes={regionBytes(head) ?? 0} />}
+          {first && <WireStrip compact name={first.name} fields={first.fields} bytes={first.stride} />}
+          <span class="text-smallest text-on-surface-secondary">
+            {layout.envelope.length} region{layout.envelope.length === 1 ? "" : "s"} · {layout.records.length} record{layout.records.length === 1 ? "" : "s"}{wire.sample ? " · sample" : ""}
+          </span>
+          {layout.generated
+            ? <span class="text-smallest text-on-surface-success">generated reader</span>
+            : <span class="wbadge-hand">hand-packed</span>}
+        </a>
+      );
+    })}
+  </div>
+</Base>

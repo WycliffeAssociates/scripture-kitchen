@@ -1,16 +1,29 @@
 ---
 import "../styles/site.css";
-import Sidebar from "../components/Sidebar.astro";
+
+export type Section = "atlas" | "features" | "plans" | "roadmap" | "inbox";
 
 interface Props {
   title: string;
+  /** Which top-nav entry is lit. */
+  section: Section;
   /**
    * Extra header line for a copied batch. Not the item: a batch can span
    * several pages, and each comment already carries its own file and line.
    */
   context?: Record<string, string>;
+  /** The page fills the viewport under the nav (the atlas canvas): no padding, no page scroll. */
+  full?: boolean;
 }
-const { title, context = {} } = Astro.props;
+const { title, section, context = {}, full = false } = Astro.props;
+const nav: { id: Section; label: string; href: string }[] = [
+  { id: "atlas", label: "Atlas", href: "/atlas" },
+  { id: "features", label: "Features", href: "/features" },
+  { id: "plans", label: "Plans", href: "/items" },
+  { id: "roadmap", label: "Roadmap", href: "/roadmap" },
+  { id: "inbox", label: "Inbox", href: "/inbox" },
+];
+const sidebar = Astro.slots.has("sidebar");
 ---
 
 <!doctype html>
@@ -18,7 +31,7 @@ const { title, context = {} } = Astro.props;
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>{title} · Plans</title>
+    <title>{title} · scripture-kitchen</title>
     <script is:inline>
       try {
         const saved = localStorage.getItem("plans.theme");
@@ -26,11 +39,33 @@ const { title, context = {} } = Astro.props;
       } catch {}
     </script>
   </head>
-  <body class="md:grid md:grid-cols-[var(--sidebar-width,18rem)_minmax(0,1fr)]">
-    <Sidebar />
-    <main class="min-w-0 px-4 py-8 md:px-10">
-      <div class="mx-auto max-w-[110rem]"><slot /></div>
-    </main>
+  <body class:list={[full && "h-dvh overflow-hidden flex flex-col"]}>
+    <header class="topnav sticky top-0 z-30 flex h-12 shrink-0 items-center gap-1 border-b border-surface-border bg-surface-primary px-2 md:px-4">
+      <a href="/atlas" class="me-2 hidden font-semibold text-on-surface-primary no-underline sm:inline">scripture-kitchen</a>
+      <nav aria-label="Site" class="flex min-w-0 flex-1 gap-0.5 overflow-x-auto">
+        {nav.map((entry) => (
+          <a
+            href={entry.href}
+            aria-current={entry.id === section ? "page" : undefined}
+            class="shrink-0 rounded-sm px-2.5 py-1 text-small text-on-surface-secondary no-underline hover:bg-sidebar-surface-hover aria-[current=page]:bg-sidebar-surface-active aria-[current=page]:font-medium aria-[current=page]:text-on-surface-primary"
+          >{entry.label}</a>
+        ))}
+      </nav>
+      <button id="theme" type="button" class="shrink-0 px-2 text-on-surface-secondary" title="Toggle theme">◐</button>
+    </header>
+    <div class:list={[
+      sidebar && "md:grid md:grid-cols-[var(--sidebar-width,18rem)_minmax(0,1fr)]",
+      full && "min-h-0 flex-1",
+    ]}>
+      <slot name="sidebar" />
+      {full
+        ? <main class="relative h-full min-w-0"><slot /></main>
+        : (
+          <main class="min-w-0 px-4 py-8 md:px-10">
+            <div class="mx-auto max-w-[110rem]"><slot /></div>
+          </main>
+        )}
+    </div>
     <script is:inline type="application/json" id="plans-context" set:html={JSON.stringify(context).replace(/</gu, "\\u003c")} />
     <script>
       import { mountAnnotator } from "../annotate/index.ts";

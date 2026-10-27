@@ -4,6 +4,7 @@
  * for drilling in; this is the sequence: phases, numbered steps, and the
  * checkpoints where a person has to look before work goes on.
  */
+import Sidebar from "../components/Sidebar.astro";
 import Base from "../layouts/Base.astro";
 import { components } from "../components/index.ts";
 import { findItem, loadItems } from "../lib/items.ts";
@@ -22,7 +23,8 @@ const missing = items.filter(
   (item) => !item.closed && item.entry.data.kind !== "note" && item.entry.data.status !== "idea" && !onRoadmap.has(item.entry.data.id),
 );
 ---
-<Base title="Roadmap">
+<Base title="Roadmap" section="roadmap">
+  <Sidebar slot="sidebar" />
   <article data-ref="roadmap" class="roadmap">
     {Roadmap
       ? <div class="prose roadmap-body"><Roadmap components={components} /></div>

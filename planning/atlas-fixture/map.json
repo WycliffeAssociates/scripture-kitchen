@@ -1,0 +1,25 @@
+{
+  "nodes": [
+    { "id": "sefer", "label": "Sefer", "level": 0, "kind": "product", "weight": 2 },
+    { "id": "source", "label": "Source", "level": 2, "group": "onion", "kind": "primitive", "slug": "source", "weight": 1 },
+    { "id": "token", "label": "Token", "level": 2, "group": "onion", "kind": "primitive", "slug": "token", "weight": 2 },
+    { "id": "cst", "label": "CST", "level": 2, "group": "onion", "kind": "primitive", "slug": "cst", "weight": 3 },
+    { "id": "lint", "label": "lint", "level": 2, "group": "onion", "kind": "primitive", "weight": 1 },
+    { "id": "dish", "label": "dish", "level": 3, "group": "onion-wasm", "kind": "wire", "slug": "dish", "weight": 1 }
+  ],
+  "groups": [
+    { "id": "kitchen", "label": "onion engine", "level": 0 },
+    { "id": "onion", "label": "onion", "level": 1, "parent": "kitchen", "slug": "onion" },
+    { "id": "onion-wasm", "label": "onion-wasm", "level": 1, "parent": "kitchen" },
+    { "id": "galley", "label": "galley", "level": 1, "parent": "kitchen", "slug": "galley" }
+  ],
+  "edges": [
+    { "from": "kitchen", "to": "sefer", "label": "galley package", "level": 0, "kind": "data" },
+    { "from": "onion-wasm", "to": "onion", "label": "depends", "level": 1, "kind": "dep" },
+    { "from": "galley", "to": "onion", "label": "depends", "level": 1, "kind": "dep" },
+    { "from": "source", "to": "token", "label": "&str", "level": 2, "kind": "data" },
+    { "from": "token", "to": "cst", "label": "Vec<Token>", "level": 2, "kind": "data" },
+    { "from": "cst", "to": "lint", "label": "&Cst", "level": 2, "kind": "data" },
+    { "from": "cst", "to": "dish", "label": "plate", "level": 3, "kind": "wire" }
+  ]
+}

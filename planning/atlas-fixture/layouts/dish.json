@@ -1,0 +1,485 @@
+{
+  "format": "dish",
+  "magic": "ONWR",
+  "version": 5,
+  "declared_in": "onion/src/wire/schema.rs",
+  "reader": "onion-wasm/reader.ts",
+  "generated": true,
+  "envelope": [
+    {
+      "region": "header",
+      "bytes": 32,
+      "fields": [
+        {
+          "name": "magic",
+          "offset": 0,
+          "width": 4,
+          "space": "plain",
+          "doc": "`ONWR`, little-endian."
+        },
+        {
+          "name": "version",
+          "offset": 4,
+          "width": 4,
+          "space": "plain",
+          "doc": "The FORMAT_VERSION this dish was written at."
+        },
+        {
+          "name": "section_count",
+          "offset": 8,
+          "width": 4,
+          "space": "plain",
+          "doc": "Entries in the directory that follows."
+        },
+        {
+          "name": "flags",
+          "offset": 12,
+          "width": 4,
+          "space": "plain",
+          "doc": "Bit 0: every offset is UTF-16."
+        },
+        {
+          "name": "usfm_version",
+          "offset": 16,
+          "width": 4,
+          "space": "plain",
+          "doc": "The declared \\usfm ladder index, or NONE."
+        },
+        {
+          "name": "source_length",
+          "offset": 20,
+          "width": 4,
+          "space": "plain",
+          "doc": "The source's length, in the offset space."
+        },
+        {
+          "name": "source_hash",
+          "offset": 24,
+          "width": 8,
+          "space": "plain",
+          "doc": "xxh3-64 of the source bytes."
+        }
+      ]
+    },
+    {
+      "region": "directory",
+      "bytes": 8,
+      "doc": "One entry per section, in SECTION order.",
+      "fields": [
+        {
+          "name": "at",
+          "offset": 0,
+          "width": 4,
+          "space": "plain",
+          "doc": "Byte offset of the section in the dish."
+        },
+        {
+          "name": "len",
+          "offset": 4,
+          "width": 4,
+          "space": "plain",
+          "doc": "Its length in bytes."
+        }
+      ]
+    }
+  ],
+  "records": [
+    {
+      "name": "Token",
+      "doc": "",
+      "stride": 12,
+      "fields": [
+        {
+          "name": "start",
+          "offset": 0,
+          "width": 4,
+          "space": "offset",
+          "doc": "Where the token begins."
+        },
+        {
+          "name": "end",
+          "offset": 4,
+          "width": 4,
+          "space": "offset",
+          "doc": "Where it ends. Spans TILE the document, so ends ascend too."
+        },
+        {
+          "name": "kind",
+          "offset": 8,
+          "width": 1,
+          "space": "plain",
+          "doc": "Packed TokenKind; bit 4 is the per-shape spelling bit."
+        },
+        {
+          "name": "marker",
+          "offset": 9,
+          "width": 1,
+          "space": "plain",
+          "doc": "Row in the marker table; 0 is UNRESOLVED."
+        },
+        {
+          "name": "level",
+          "offset": 10,
+          "width": 1,
+          "space": "plain",
+          "doc": "The trailing number as spelled: 2 for `\\q2`, 1 for `\\tc1`, 0 for a bare `\\q`. The row's `numbering` says whether it is a nesting level or a column index."
+        },
+        {
+          "name": "flags",
+          "offset": 11,
+          "width": 1,
+          "space": "plain",
+          "doc": "`TOKEN_DELIMITER_FOLDED` | `TOKEN_BLANK`. Also rounds the row to 12 bytes, so every row's `start` and `end` land aligned for a typed-array view over a 4-aligned section."
+        }
+      ],
+      "tail": null
+    },
+    {
+      "name": "Node",
+      "doc": "",
+      "stride": 14,
+      "fields": [
+        {
+          "name": "token",
+          "offset": 0,
+          "width": 4,
+          "space": "plain",
+          "doc": "The opening marker's token index; u32::MAX on the root."
+        },
+        {
+          "name": "child_from",
+          "offset": 4,
+          "width": 4,
+          "space": "plain",
+          "doc": "Start of this node's range in the child arena."
+        },
+        {
+          "name": "child_to",
+          "offset": 8,
+          "width": 4,
+          "space": "plain",
+          "doc": "End of that range. Ranges are neither contiguous nor monotonic."
+        },
+        {
+          "name": "reason",
+          "offset": 12,
+          "width": 1,
+          "space": "plain",
+          "doc": "CloseReason: Explicit, Implicit, Recovery, Eof."
+        },
+        {
+          "name": "ctx",
+          "offset": 13,
+          "width": 1,
+          "space": "plain",
+          "doc": "The stamped SpecContext."
+        }
+      ],
+      "tail": null
+    },
+    {
+      "name": "Diagnostic",
+      "doc": "",
+      "stride": 32,
+      "fields": [
+        {
+          "name": "code",
+          "offset": 0,
+          "width": 4,
+          "space": "plain",
+          "doc": "Index into the lint catalog."
+        },
+        {
+          "name": "from",
+          "offset": 4,
+          "width": 4,
+          "space": "offset",
+          "doc": "The anchor's start."
+        },
+        {
+          "name": "to",
+          "offset": 8,
+          "width": 4,
+          "space": "offset",
+          "doc": "The anchor's end."
+        },
+        {
+          "name": "second_from",
+          "offset": 12,
+          "width": 4,
+          "space": "plain",
+          "doc": "The other party's start, or NONE."
+        },
+        {
+          "name": "second_to",
+          "offset": 16,
+          "width": 4,
+          "space": "plain",
+          "doc": "The other party's end, or NONE."
+        },
+        {
+          "name": "aux",
+          "offset": 20,
+          "width": 4,
+          "space": "plain",
+          "doc": "The code's aux integer; its meaning is the catalog row's."
+        },
+        {
+          "name": "fix",
+          "offset": 24,
+          "width": 4,
+          "space": "plain",
+          "doc": "Index into the fix section, or NONE."
+        }
+      ],
+      "tail": null
+    },
+    {
+      "name": "Fix",
+      "doc": "",
+      "stride": 8,
+      "fields": [
+        {
+          "name": "edit_from",
+          "offset": 0,
+          "width": 4,
+          "space": "plain",
+          "doc": "Start of this fix's range in the edit section."
+        },
+        {
+          "name": "edit_to",
+          "offset": 4,
+          "width": 4,
+          "space": "plain",
+          "doc": "End of that range."
+        }
+      ],
+      "tail": null
+    },
+    {
+      "name": "Edit",
+      "doc": "",
+      "stride": 16,
+      "fields": [
+        {
+          "name": "from",
+          "offset": 0,
+          "width": 4,
+          "space": "offset",
+          "doc": "Where the replacement starts."
+        },
+        {
+          "name": "to",
+          "offset": 4,
+          "width": 4,
+          "space": "offset",
+          "doc": "Where it ends; equal to `from` for a pure insertion."
+        },
+        {
+          "name": "text_from",
+          "offset": 8,
+          "width": 4,
+          "space": "plain",
+          "doc": "Start of the inserted bytes in the fix-text section."
+        },
+        {
+          "name": "text_len",
+          "offset": 12,
+          "width": 4,
+          "space": "plain",
+          "doc": "Their length. Zero is a pure deletion."
+        }
+      ],
+      "tail": null
+    },
+    {
+      "name": "Chapter",
+      "doc": "",
+      "stride": 26,
+      "fields": [
+        {
+          "name": "start",
+          "offset": 0,
+          "width": 4,
+          "space": "offset",
+          "doc": "Where the chapter begins."
+        },
+        {
+          "name": "end",
+          "offset": 4,
+          "width": 4,
+          "space": "offset",
+          "doc": "Where it ends."
+        },
+        {
+          "name": "token",
+          "offset": 8,
+          "width": 4,
+          "space": "plain",
+          "doc": "The `\\c` marker's token index; NONE on the front-matter row."
+        },
+        {
+          "name": "designator",
+          "offset": 12,
+          "width": 4,
+          "space": "plain",
+          "doc": "The number's own token index, or NONE. `\\c` opens no node, so this is the only route from a chapter to its designator."
+        },
+        {
+          "name": "label_start",
+          "offset": 16,
+          "width": 4,
+          "space": "offset",
+          "doc": "The designator as written (`12b`), minus its folded delimiter. Empty at the marker's end when there is none; 0..0 on row 0."
+        },
+        {
+          "name": "label_end",
+          "offset": 20,
+          "width": 4,
+          "space": "offset",
+          "doc": "Where the label ends."
+        },
+        {
+          "name": "number",
+          "offset": 24,
+          "width": 2,
+          "space": "plain",
+          "doc": "The number read, or 0 for absent or malformed."
+        }
+      ],
+      "tail": null
+    },
+    {
+      "name": "Verse",
+      "doc": "",
+      "stride": 32,
+      "fields": [
+        {
+          "name": "at",
+          "offset": 0,
+          "width": 4,
+          "space": "offset",
+          "doc": "Where the anchor sits."
+        },
+        {
+          "name": "token",
+          "offset": 4,
+          "width": 4,
+          "space": "plain",
+          "doc": "The `\\v` marker's token index."
+        },
+        {
+          "name": "designator",
+          "offset": 8,
+          "width": 4,
+          "space": "plain",
+          "doc": "The number's own token index, or NONE. `\\v` opens no node, so this is the only route from a verse to its designator."
+        },
+        {
+          "name": "label_start",
+          "offset": 12,
+          "width": 4,
+          "space": "offset",
+          "doc": "The designator as written (`6a`, `1,3,5`), minus its folded delimiter. Empty at the marker's end when there is none."
+        },
+        {
+          "name": "label_end",
+          "offset": 16,
+          "width": 4,
+          "space": "offset",
+          "doc": "Where the label ends."
+        },
+        {
+          "name": "members_from",
+          "offset": 20,
+          "width": 4,
+          "space": "plain",
+          "doc": "This verse's first row in the member arena."
+        },
+        {
+          "name": "members_len",
+          "offset": 24,
+          "width": 2,
+          "space": "plain",
+          "doc": "How many members it covers; 0 when the designator is absent or malformed."
+        },
+        {
+          "name": "chapter",
+          "offset": 26,
+          "width": 2,
+          "space": "plain",
+          "doc": "The enclosing chapter's number."
+        },
+        {
+          "name": "first",
+          "offset": 28,
+          "width": 2,
+          "space": "plain",
+          "doc": "First verse named; 0 when the designator is absent or malformed."
+        },
+        {
+          "name": "last",
+          "offset": 30,
+          "width": 2,
+          "space": "plain",
+          "doc": "Last verse named \u2014 a bridge `\\v 5-7` names 5 through 7."
+        }
+      ],
+      "tail": null
+    },
+    {
+      "name": "Member",
+      "doc": "",
+      "stride": 20,
+      "fields": [
+        {
+          "name": "from",
+          "offset": 0,
+          "width": 2,
+          "space": "plain",
+          "doc": "The member's first number."
+        },
+        {
+          "name": "from_segment_start",
+          "offset": 2,
+          "width": 4,
+          "space": "plain",
+          "doc": "The segment written after it (`a` in `12a`); empty when none."
+        },
+        {
+          "name": "from_segment_end",
+          "offset": 6,
+          "width": 4,
+          "space": "plain",
+          "doc": "Where that segment ends."
+        },
+        {
+          "name": "to",
+          "offset": 10,
+          "width": 2,
+          "space": "plain",
+          "doc": "Its last number; equal to `from` for a single place. Kept as written."
+        },
+        {
+          "name": "to_segment_start",
+          "offset": 12,
+          "width": 4,
+          "space": "plain",
+          "doc": "The segment after the last number; empty when none."
+        },
+        {
+          "name": "to_segment_end",
+          "offset": 16,
+          "width": 4,
+          "space": "plain",
+          "doc": "Where that segment ends."
+        }
+      ],
+      "tail": null
+    }
+  ],
+  "sample": {
+    "usfm": "samples/dish.usfm",
+    "bin": "samples/dish.bin"
+  }
+}

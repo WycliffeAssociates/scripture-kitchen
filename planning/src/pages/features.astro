@@ -1,0 +1,96 @@
+---
+/**
+ * What Sefer reaches through galley, one card per feature, read from the
+ * verify-kitchen skill's feature files at build time.
+ */
+import Base from "../layouts/Base.astro";
+import { githubBlob } from "../lib/atlas/github.ts";
+import { FEATURES_DIR, loadFeatures } from "../lib/features.ts";
+
+const { intro, features } = await loadFeatures();
+---
+<Base title="Features" section="features">
+  <h1 class="text-h3 font-semibold">Features</h1>
+  <p class="mt-1 text-small text-on-surface-secondary">
+    {intro} From <a class="font-mono" href={githubBlob(`${FEATURES_DIR}/README.md`)}>{FEATURES_DIR}/</a>; proved with the <code>verify-kitchen</code> skill.
+  </p>
+
+  <div class="fcards">
+    {features.map((f) => (
+      <article class="fcard">
+        <header class="fcard-head">
+          <h2 class="text-h4 font-semibold">{f.title}</h2>
+          <a class="font-mono text-smallest" href={githubBlob(f.file)}>{f.file.split("/").pop()}</a>
+          <span class:list={["fhelper", f.helper === "none yet" && "fhelper-none"]}>
+            helper: <code>{f.helper || "—"}</code>
+          </span>
+        </header>
+        {!f.exists && <p class="fwarn">{f.file} is listed in the README but does not exist.</p>}
+        {f.exists && f.missing.length > 0 && (
+          <p class="fwarn">Missing required section{f.missing.length > 1 ? "s" : ""}: {f.missing.map((m) => `“${m}”`).join(", ")}</p>
+        )}
+
+        {f.html.user && (
+          <section class="fsec fsec-user">
+            <h3>What the user gets</h3>
+            <div class="prose" set:html={f.html.user} />
+          </section>
+        )}
+        {f.html.doors && (
+          <section class="fsec">
+            <h3>Galley doors</h3>
+            <div class="prose fdoors" set:html={f.html.doors} />
+          </section>
+        )}
+        {f.html.proof && (
+          <section class="fsec">
+            <h3>What proves it <span class="font-normal text-on-surface-tertiary">· {f.headings.proof}</span></h3>
+            <div class="prose fproof" set:html={f.html.proof} />
+          </section>
+        )}
+        {f.html.gotchas && (
+          <details class="fsec fgotchas">
+            <summary>Gotchas</summary>
+            <div class="prose" set:html={f.html.gotchas} />
+          </details>
+        )}
+      </article>
+    ))}
+  </div>
+</Base>
+
+<style is:global>
+  .fcards { display: grid; gap: 1.25rem; margin-block-start: 1.5rem; grid-template-columns: repeat(auto-fill, minmax(min(100%, 30rem), 1fr)); align-items: start; }
+  .fcard {
+    min-inline-size: 0;
+    border: var(--border-thin) solid var(--surface-border);
+    border-block-start: 4px solid var(--brand-base);
+    background: var(--surface-primary);
+    border-radius: var(--radius-md);
+    padding: 0.9rem 1rem;
+  }
+  .fcard-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.25rem 0.75rem; }
+  .fcard-head h2 { flex: 1 1 100%; }
+  .fhelper { font-size: var(--text-smallest); color: var(--on-surface-secondary); }
+  .fhelper code { font-family: var(--font-mono); background: var(--surface-tertiary); border-radius: var(--radius-xs); padding: 0 0.3em; }
+  .fhelper-none code { color: var(--on-surface-tertiary); }
+  .fwarn {
+    margin-block-start: 0.6rem; font-size: var(--text-small);
+    border: var(--border-thin) solid var(--on-surface-warning);
+    background: var(--surface-warning); color: var(--on-surface-warning);
+    border-radius: var(--radius-sm); padding: 0.3rem 0.6rem;
+  }
+  .fsec { margin-block-start: 0.9rem; min-inline-size: 0; }
+  .fsec > h3, .fgotchas > summary {
+    font-size: var(--text-smallest); font-weight: 650; text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--on-surface-secondary); margin-block-end: 0.3rem;
+  }
+  .fgotchas > summary { cursor: pointer; }
+  .fsec-user .prose { font-size: 1.05em; }
+  .fcard .prose { font-size: var(--text-small); }
+  .fcard .prose pre { max-inline-size: 100%; overflow-x: auto; }
+  .fdoors code.fdoor {
+    color: var(--brand-base); font-weight: 600;
+    background: var(--brand-light);
+  }
+</style>

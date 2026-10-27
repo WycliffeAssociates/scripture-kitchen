@@ -1,0 +1,95 @@
+---
+/**
+ * One wire format: its envelope and records as byte strips, and, when the
+ * layout carries one, a real sample decoded byte by byte.
+ */
+import Base from "../../../layouts/Base.astro";
+import AtlasSidebar from "../../../components/atlas/AtlasSidebar.astro";
+import WireSample from "../../../components/atlas/WireSample.astro";
+import WireStrip from "../../../components/atlas/WireStrip.astro";
+import WireHeader from "../../../components/atlas/WireHeader.astro";
+import "../../../styles/wires.css";
+import { loadWires, regionBytes, type Wire } from "../../../lib/atlas/layouts.ts";
+import { fixtures } from "../../../lib/atlas/paths.ts";
+
+export const getStaticPaths = async () =>
+  (await loadWires()).map((wire) => ({ params: { format: wire.layout.format }, props: { wire } }));
+
+interface Props { wire: Wire }
+const { wire } = Astro.props;
+const { layout, sample } = wire;
+const located = new Set(["rows", "words", "blob"]);
+const sections = layout.envelope.filter((r) => located.has(r.kind ?? ""));
+const strips = layout.envelope.filter((r) => !located.has(r.kind ?? "") && regionBytes(r) !== null && r.fields.length > 0);
+const anchor = (name: string): string => `record-${name}`;
+const countNote = (count: unknown): string | undefined =>
+  typeof count === "string" ? `× ${count}` : typeof count === "number" ? `× ${count}` : undefined;
+const samplePath = (p: string): string => (fixtures.layouts ? `planning/atlas-fixture/layouts/${p}` : `docs/layouts/${p}`);
+---
+<Base title={`${layout.format} wire`} section="atlas">
+  <AtlasSidebar slot="sidebar" />
+  <p class="text-small"><a href="/atlas/wires">← Wires</a></p>
+  <WireHeader wire={wire} />
+
+  <p class="wlegend text-smallest text-on-surface-secondary">
+    <span class="wlegend-cell" /> one byte
+    <span class="wlegend-cell wgap" /> padding
+    <span class="wlegend-off">⇄16</span> offset — converts to UTF-16 when the parse asks for it
+  </p>
+
+  {layout.envelope.length > 0 && (
+    <section class="mt-8">
+      <h2 class="text-h4 font-semibold">Envelope</h2>
+      <div class="wstrips">
+        {strips.map((r) => (
+          <WireStrip
+            name={r.region}
+            fields={r.fields}
+            bytes={regionBytes(r) ?? 0}
+            doc={r.doc}
+            note={r.kind === "table" ? countNote(r.count) : r.at !== undefined ? `at ${r.at}` : undefined}
+          />
+        ))}
+      </div>
+      {sections.length > 0 && (
+        <ol class="wsections">
+          {sections.map((r) => (
+            <li>
+              <span class="font-mono font-semibold">{r.region}</span>
+              {r.of
+                ? <a class="font-mono" href={`#${anchor(r.of)}`}>{r.of}[]</a>
+                : <span class="font-mono text-on-surface-tertiary">{r.kind === "words" ? `u${(r.width ?? 4) * 8}[]` : "UTF-8"}</span>}
+              <span class="text-on-surface-tertiary font-mono text-smallest">@ {String(r.at)}</span>
+              {r.doc && <span class="text-on-surface-secondary">{r.doc}</span>}
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
+  )}
+
+  {layout.records.length > 0 && (
+    <section class="mt-8">
+      <h2 class="text-h4 font-semibold">Records</h2>
+      <div class="wstrips">
+        {layout.records.map((r) => (
+          <WireStrip
+            id={anchor(r.name)}
+            name={r.name}
+            fields={r.fields}
+            bytes={r.stride}
+            doc={r.doc}
+            note={sample?.decodedBy[r.name] === "reader" ? `stride ${r.stride} · read with ${r.name}Row` : `stride ${r.stride}`}
+          />
+        ))}
+      </div>
+    </section>
+  )}
+
+  {wire.error && <p class="mt-6 text-small text-on-surface-error">Sample failed to decode: {wire.error}</p>}
+  {sample && layout.sample && (
+    <div class="mt-10">
+      <WireSample sample={sample} usfmPath={samplePath(layout.sample.usfm)} binPath={samplePath(layout.sample.bin)} />
+    </div>
+  )}
+</Base>

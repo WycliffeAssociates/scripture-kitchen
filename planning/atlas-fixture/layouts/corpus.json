@@ -1,0 +1,18 @@
+{
+  "format": "corpus", "magic": "ONCP", "version": 1,
+  "declared_in": "galley/src/corpus.rs", "reader": null, "generated": false,
+  "envelope": [
+    { "region": "header", "bytes": 16, "fields": [
+      { "name": "magic", "offset": 0, "width": 4, "space": "plain", "doc": "`ONCP`, little-endian." },
+      { "name": "version", "offset": 4, "width": 4, "space": "plain", "doc": "CORPUS_FORMAT_VERSION." },
+      { "name": "count", "offset": 8, "width": 4, "space": "plain", "doc": "Books in the directory." },
+      { "name": "reserved", "offset": 12, "width": 4, "space": "plain", "doc": "Zero." } ] },
+    { "region": "directory", "bytes": 16, "fields": [
+      { "name": "key_at", "offset": 0, "width": 4, "space": "plain", "doc": "Where the key's bytes start." },
+      { "name": "key_len", "offset": 4, "width": 4, "space": "plain", "doc": "Key length." },
+      { "name": "dish_at", "offset": 8, "width": 4, "space": "plain", "doc": "Where the book's dish starts." },
+      { "name": "dish_len", "offset": 12, "width": 4, "space": "plain", "doc": "The dish's length." } ] }
+  ],
+  "records": [],
+  "sample": null
+}

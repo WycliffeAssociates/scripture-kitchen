@@ -61,18 +61,6 @@ const marker = `arrow-${Math.random().toString(36).slice(2, 8)}`;
 </div>
 
 <script>
-  import { select } from "d3-selection";
-  import { zoom, zoomIdentity } from "d3-zoom";
-
-  for (const host of document.querySelectorAll<HTMLElement>("[data-graph]:not([data-zoom])")) {
-    host.dataset.zoom = "";
-    const svg = select(host.querySelector("svg")!);
-    const viewport = svg.select<SVGGElement>("[data-viewport]");
-    const behaviour = zoom<SVGSVGElement, unknown>()
-      .scaleExtent([0.4, 4])
-      // Plain wheel scrolls the page; a modifier zooms. Drags always pan.
-      .filter((event: Event) => event.type !== "wheel" || (event as WheelEvent).ctrlKey || (event as WheelEvent).metaKey)
-      .on("zoom", (event) => viewport.attr("transform", String(event.transform)));
-    svg.call(behaviour).on("dblclick.zoom", () => svg.call(behaviour.transform, zoomIdentity));
-  }
+  import { mountPanZoom } from "../client/panzoom.ts";
+  mountPanZoom();
 </script>

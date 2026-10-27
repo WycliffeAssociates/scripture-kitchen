@@ -38,6 +38,7 @@
 @import "tailwindcss" source(none);
 @source "../**/*.{astro,ts,tsx,mdx}";
 @source "../../items/**/*.mdx";
+@source "../../atlas/**/*.mdx";
 
 /* The only `dark:` that can exist here is one that agrees with the swap. */
 @custom-variant dark {

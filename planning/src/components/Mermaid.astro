@@ -1,8 +1,8 @@
 ---
 /**
- * A diagram in Mermaid syntax, rendered to SVG at build time by Ondine
- * (https://ondine.sh): no diagram library ships to the page. Colours come from
- * the site's tokens (`.ondine` in site.css), so dark mode is the token swap.
+ * A diagram in Mermaid syntax, rendered to SVG at build time by Pele
+ * (https://pele.run): no diagram library ships to the page. Colours come from
+ * the site's tokens (`--pele-*` in site.css), so dark mode is the token swap.
  * State machines: `stateDiagram-v2`, or `<Machine>` for one you can step.
  *   <Mermaid id="lifecycle">
  *   ```mermaid
@@ -10,10 +10,12 @@
  *     idea --> discussing
  *   ```
  *   </Mermaid>
- * A diagram that does not parse shows its source and the parser's message
- * instead of failing the build.
+ * A bare ```mermaid fence in any MDX file becomes one of these
+ * (src/lib/remark-mermaid.ts). `click node "/atlas/cst"` makes a node a link.
+ * A diagram wider than its box pans and zooms. One that does not parse shows
+ * its source and the parser's message instead of failing the build.
  */
-import { render } from "ondine/compiler";
+import { render } from "pele";
 
 interface Props { id?: string; code: string; caption?: string; "data-loc"?: string; "data-body"?: string }
 const { id, code, caption, "data-loc": loc } = Astro.props;
@@ -21,13 +23,16 @@ const { id, code, caption, "data-loc": loc } = Astro.props;
 let svg: string | undefined;
 let error: string | undefined;
 try {
-  svg = render(code.trim()).svg;
+  // The drawing goes in a viewport group, so pan and zoom move it and not the frame.
+  svg = render(code.trim()).svg
+    .replace(/^(<svg\b[^>]*>)/u, "$1<g data-viewport>")
+    .replace(/<\/svg>\s*$/u, "</g></svg>");
 } catch (cause) {
   error = cause instanceof Error ? cause.message : String(cause);
 }
 ---
-<figure data-ref={`diagram:${id ?? "?"}`} data-loc={loc} class="plans-diagram my-4 overflow-x-auto rounded-md border border-surface-border bg-surface-primary p-4">
-  {svg !== undefined && <Fragment set:html={svg} />}
+<figure data-ref={`diagram:${id ?? "?"}`} data-loc={loc} class="plans-diagram my-4 rounded-md border border-surface-border bg-surface-primary p-4">
+  {svg !== undefined && <div class="graph overflow-hidden" data-graph="fit"><Fragment set:html={svg} /></div>}
   {error !== undefined && (
     <div>
       <p class="m-0 text-small text-on-surface-error">This diagram does not parse: {error}</p>
@@ -36,3 +41,8 @@ try {
   )}
   {caption && <figcaption class="mt-2 text-small text-on-surface-secondary">{caption}</figcaption>}
 </figure>
+
+<script>
+  import { mountPanZoom } from "../client/panzoom.ts";
+  mountPanZoom();
+</script>

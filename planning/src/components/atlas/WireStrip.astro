@@ -1,0 +1,86 @@
+---
+/**
+ * One region or record as a row of byte cells: a block per field, one cell
+ * per byte, the field's name above and its offset below. Padding is hatched.
+ * Hover or focus a field to read its doc in the caption.
+ */
+import "../../styles/wires.css";
+import type { LayoutField } from "../../lib/atlas/schema.ts";
+import { stripParts } from "../../lib/atlas/layouts.ts";
+
+interface Props {
+  name: string;
+  fields: LayoutField[];
+  bytes: number;
+  doc?: string;
+  /** "× sectionCount", "stride 12": a note beside the name. */
+  note?: string;
+  id?: string;
+  /** A thumbnail: cells only, no labels, no caption. */
+  compact?: boolean;
+}
+const { name, fields, bytes, doc = "", note, id, compact = false } = Astro.props;
+const parts = stripParts(fields, bytes);
+---
+{compact ? (
+  <div class="wstrip-thumb" aria-hidden="true">
+    {parts.map((p) => (
+      <span class:list={["wcells", p.gap && "wgap"]} style={`--c: ${p.hue ? `var(--crate-${p.hue})` : "transparent"}; --n: ${p.width}`} />
+    ))}
+  </div>
+) : (
+  <section class="wstrip" id={id} data-doc={doc}>
+    <header class="wstrip-head">
+      <h3 class="font-mono font-semibold">{name}</h3>
+      <span class="text-smallest text-on-surface-tertiary">{bytes} B{note ? ` · ${note}` : ""}</span>
+    </header>
+    <div class="wstrip-row">
+      {parts.map((p) => (
+        <div
+          class:list={["wfield", p.gap && "wgap", p.space === "offset" && "woffset"]}
+          tabindex="0"
+          title={p.doc || undefined}
+          data-name={p.name}
+          data-doc={p.doc}
+          data-space={p.space}
+          style={`--c: ${p.hue ? `var(--crate-${p.hue})` : "transparent"}`}
+        >
+          <span class="wname">{p.gap ? "" : p.name}</span>
+          <span class="wcells">{Array.from({ length: p.width }, () => <i />)}</span>
+          <span class="woff">{p.offset}{p.space === "offset" && <b class="wtick">⇄16</b>}</span>
+        </div>
+      ))}
+    </div>
+    <p class="wcaption text-small text-on-surface-secondary">{doc}</p>
+  </section>
+)}
+
+<script>
+  for (const strip of document.querySelectorAll<HTMLElement>(".wstrip")) {
+    const caption = strip.querySelector<HTMLElement>(".wcaption");
+    if (!caption) continue;
+    const rest = strip.dataset["doc"] ?? "";
+    const show = (field: HTMLElement | null): void => {
+      if (!field) {
+        caption.textContent = rest;
+        caption.removeAttribute("data-active");
+        return;
+      }
+      const name = field.dataset["name"] ?? "";
+      const tag = field.dataset["space"] === "offset" ? " · offset" : "";
+      caption.textContent = `${name}${tag} — ${field.dataset["doc"] ?? ""}`;
+      caption.setAttribute("data-active", "");
+    };
+    for (const field of strip.querySelectorAll<HTMLElement>(".wfield")) {
+      field.removeAttribute("title");
+      field.addEventListener("pointerenter", () => show(field));
+      field.addEventListener("focus", () => show(field));
+    }
+    strip.addEventListener("pointerleave", () => {
+      if (!strip.contains(document.activeElement)) show(null);
+    });
+    strip.addEventListener("focusout", (e) => {
+      if (!strip.contains(e.relatedTarget as Node | null)) show(null);
+    });
+  }
+</script>

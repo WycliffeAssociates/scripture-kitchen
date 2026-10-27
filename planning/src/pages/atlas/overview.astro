@@ -1,0 +1,23 @@
+---
+/**
+ * The atlas's prose front page, `atlas/index.mdx`: what the workspace is and
+ * where to start reading. The canvas is the picture; this is the paragraph.
+ */
+import Base from "../../layouts/Base.astro";
+import AtlasSidebar from "../../components/atlas/AtlasSidebar.astro";
+import { components } from "../../components/index.ts";
+
+type Mdx = { default: (props: { components: unknown }) => unknown; frontmatter?: { title?: string; summary?: string } };
+const found = import.meta.glob<Mdx>("/atlas/index.mdx", { eager: true });
+const page = Object.values(found)[0];
+const Overview = page?.default;
+---
+<Base title={page?.frontmatter?.title ?? "Overview"} section="atlas">
+  <AtlasSidebar slot="sidebar" />
+  <article data-ref="atlas-overview">
+    {Overview
+      ? <div class="prose"><Overview components={components} /></div>
+      : <p>No <code>planning/atlas/index.mdx</code> yet.</p>}
+    <p class="mt-10"><a href="/atlas">Open the map →</a></p>
+  </article>
+</Base>

@@ -1,0 +1,73 @@
+---
+/**
+ * One concept: what it is, why, the files it lives in, and the pages around
+ * it. The header carries the owning crate's hue, the same one the canvas uses.
+ */
+import { render } from "astro:content";
+import Base from "../../layouts/Base.astro";
+import AtlasSidebar from "../../components/atlas/AtlasSidebar.astro";
+import { components } from "../../components/index.ts";
+import { loadConcepts, plain, type Loaded } from "../../lib/atlas/concepts.ts";
+import { githubBlob, inRepo } from "../../lib/atlas/github.ts";
+
+export const getStaticPaths = async () => {
+  const all = await loadConcepts();
+  return all.map((concept) => ({ params: { slug: concept.slug }, props: { concept, all } }));
+};
+
+const { concept, all } = Astro.props;
+const { data } = concept.entry;
+const { Content } = await render(concept.entry);
+const find = (slug: string): Loaded | undefined => all.find((c) => c.slug === slug);
+const lists = [
+  { id: "reads-from", label: "Reads from", slugs: concept.readsFrom },
+  { id: "read-by", label: "Read by", slugs: concept.readBy },
+].map((list) => ({ ...list, pages: list.slugs.map(find).filter((c) => c !== undefined) }))
+  .filter((list) => list.pages.length > 0);
+const LEVEL = ["products", "crates", "primitives", "wires"];
+---
+<Base title={data.term} section="atlas">
+  <AtlasSidebar slot="sidebar" />
+  <article data-ref={`concept:${data.slug}`} class="concept">
+    <header data-crate={data.crate} class="concept-head mb-8 rounded-md px-5 py-4">
+      <div class="text-smallest font-semibold uppercase tracking-wide text-on-surface-secondary">
+        {data.kind} · <span class="concept-crate">{data.crate}</span> ·{" "}
+        <a href={`/atlas#${data.slug}`} class="text-on-surface-secondary">on the map, level {data.level} ({LEVEL[data.level]})</a>
+      </div>
+      <h1 class="mt-1 text-h3 font-semibold leading-tight">{data.term}</h1>
+      <p class="mt-2 mb-0 max-w-[75ch] text-body">{plain(data.summary)}</p>
+      {data.aliases.length > 0 && <p class="mt-1 mb-0 text-small text-on-surface-secondary">Also: {data.aliases.join(", ")}</p>}
+      {data.files.length > 0 && (
+        <ul class="mt-3 mb-0 flex list-none flex-wrap gap-x-4 gap-y-1 p-0 text-small" aria-label="Files">
+          {data.files.map((path) => (
+            <li class="min-w-0 max-w-full truncate">
+              {inRepo(path)
+                ? <a href={githubBlob(path)} class="font-mono">{path}</a>
+                : <span class="font-mono text-on-surface-error" title="Not in this checkout">{path}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </header>
+    <div class="prose">
+      <Content components={components} />
+    </div>
+    {lists.length > 0 && (
+      <footer data-ref="backlinks" class="mt-12 grid gap-6 border-t border-surface-border pt-5 md:grid-cols-2">
+        {lists.map((list) => (
+          <section data-ref={`backlinks:${list.id}`}>
+            <h2 class="m-0 mb-2 text-small font-semibold uppercase tracking-wide text-on-surface-secondary">{list.label} · {list.pages.length}</h2>
+            <ul class="m-0 list-none space-y-2 p-0">
+              {list.pages.map((other) => (
+                <li data-crate={other.entry.data.crate} class="backlink rounded-md border border-surface-border bg-surface-primary px-3 py-2">
+                  <a href={`/atlas/${other.slug}`} class="font-medium">{other.entry.data.term}</a>
+                  <div class="text-small text-on-surface-secondary">{plain(other.entry.data.summary)}</div>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))}
+      </footer>
+    )}
+  </article>
+</Base>

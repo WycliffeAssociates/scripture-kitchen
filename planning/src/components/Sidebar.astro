@@ -9,6 +9,7 @@ import { CLOSED, STATUSES } from "../lib/schema.ts";
 
 const items = await loadItems();
 const current = Astro.url.pathname.replace(/\/$/u, "");
+
 const groups = STATUSES.map((status) => ({
   status,
   closed: CLOSED.includes(status),
@@ -23,14 +24,12 @@ const groups = STATUSES.map((status) => ({
   aria-label="Resize the sidebar"
   tabindex="0"
   style="left: calc(var(--sidebar-width, 18rem) - 3px)"
-  class="fixed inset-y-0 z-20 hidden w-1.5 cursor-col-resize hover:bg-brand-light focus-visible:bg-brand-light md:block"
+  class="fixed top-12 bottom-0 z-20 hidden w-1.5 cursor-col-resize hover:bg-brand-light focus-visible:bg-brand-light md:block"
 ></div>
-<aside id="sidebar" data-ref="sidebar" class="border-surface-border bg-surface-primary md:sticky md:top-0 md:h-screen md:overflow-y-auto md:border-e">
-  <div class="flex items-center gap-3 px-4 pt-4 pb-3">
-    <a href="/" class="font-semibold text-on-surface-primary no-underline">Plans</a>
-    <a href="/" class:list={["text-small no-underline", current === "" ? "text-on-surface-primary font-medium" : "text-on-surface-secondary"]}>Inbox</a>
-    <a href="/roadmap" class:list={["text-small no-underline", current === "/roadmap" ? "text-on-surface-primary font-medium" : "text-on-surface-secondary"]}>Roadmap</a>
-    <button id="theme" type="button" class="ms-auto text-on-surface-secondary" title="Toggle theme">◐</button>
+<aside id="sidebar" data-ref="sidebar" class="border-surface-border bg-surface-primary md:sticky md:top-12 md:h-[calc(100dvh-3rem)] md:overflow-y-auto md:border-e">
+  <div class="flex items-baseline gap-3 px-4 pt-4 pb-3">
+    <a href="/items" class="font-semibold text-on-surface-primary no-underline">Plans</a>
+    <span class="text-smallest text-on-surface-tertiary">{items.length} items</span>
   </div>
 
   <div class="space-y-2 border-b border-surface-border px-4 pb-3" data-ref="sidebar-controls">

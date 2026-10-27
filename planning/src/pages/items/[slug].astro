@@ -1,5 +1,6 @@
 ---
 import { render } from "astro:content";
+import Sidebar from "../../components/Sidebar.astro";
 import Base from "../../layouts/Base.astro";
 import { components } from "../../components/index.ts";
 import { day, findItem, loadItems } from "../../lib/items.ts";
@@ -23,7 +24,8 @@ const placed = (readRoadmap() ?? []).flatMap((phase) =>
     .map((s) => `step ${s.n} in ${phase.title}`),
 );
 ---
-<Base title={data.title}>
+<Base title={data.title} section="plans">
+  <Sidebar slot="sidebar" />
   <article data-ref={`item:${item.slug}`}>
     <header class="mb-8 border-b border-surface-border pb-5">
       <div class="text-smallest font-semibold uppercase tracking-wide text-on-surface-secondary">{data.kind} · {data.status}{data.priority !== undefined && ` · P${data.priority}`}</div>

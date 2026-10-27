@@ -1,0 +1,89 @@
+---
+/**
+ * The atlas map: one SVG laid out at build (src/lib/atlas/canvas.ts), panned
+ * and zoomed in the browser (src/client/atlas.ts). The zoom picks a level and
+ * CSS shows that level's things; labels stay a fixed size on screen and hide
+ * when their box is too small to hold them.
+ */
+import type { Canvas } from "../../lib/atlas/canvas.ts";
+import { LEVEL_NAMES, THRESHOLD } from "../../lib/atlas/canvas.ts";
+
+interface Props { canvas: Canvas }
+const { canvas } = Astro.props;
+const pad = 40;
+const info = Object.fromEntries(canvas.boxes.map((b) => [b.id, {
+  label: b.label, level: b.level, kind: b.kind, crate: b.crate, slug: b.slug, summary: b.summary, why: b.why, group: b.group,
+  x: b.x, y: b.y, w: b.w, h: b.h,
+}]));
+const data = { threshold: THRESHOLD, hub: canvas.hub, width: canvas.width, height: canvas.height, info };
+const href = (slug: string | null): string | undefined => (slug === null ? undefined : `/atlas/${slug}`);
+---
+<div class="atlas" data-atlas data-z="0" tabindex="0" aria-label="The scripture-kitchen map. Drag to pan; scroll, pinch or plus and minus to zoom; click a box for what it is.">
+  <svg class="atlas-svg" role="group" viewBox={`${-pad} ${-pad} ${canvas.width + pad * 2} ${canvas.height + pad * 2}`} preserveAspectRatio="xMidYMid meet">
+    <defs>
+      <!-- A wire label sits on a patch of canvas, so the line does not show through its spaces. -->
+      <filter id="atlas-label-bg" x="-0.04" y="-0.15" width="1.08" height="1.3">
+        <feFlood class="atlas-label-flood" />
+        <feComposite in="SourceGraphic" />
+      </filter>
+      <marker id="atlas-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" />
+      </marker>
+    </defs>
+    <g data-viewport>
+      {canvas.boxes.filter((b) => b.group).map((b) => (
+        <a class={`box group lv-${b.level} gc-${b.opens}`} href={href(b.slug)} data-id={b.id} data-crate={b.crate ?? undefined} tabindex="0">
+          <rect x={b.x} y={b.y} width={b.w} height={b.h} rx={6 * Math.min(6, b.h / 40)} />
+          <text class="label tile-label" x={b.x + b.w / 2} y={b.y + b.h / 2} data-w={b.w} data-h={b.h}>{b.label}</text>
+          <text class="label head-label" x={b.x + b.head * 0.5} y={b.y + b.head * 0.5} data-w={b.w} data-h={b.head}>{b.label}</text>
+        </a>
+      ))}
+      {canvas.wires.map((e) => (
+        <g class={`wire lv-${e.shows} wl-${e.level}`} data-kind={e.kind} data-from={e.from} data-to={e.to}>
+          <path d={e.d} marker-end="url(#atlas-arrow)" />
+        </g>
+      ))}
+      {canvas.boxes.filter((b) => !b.group).map((b) => (
+        <a class:list={["box node", `lv-${b.level}`, `kind-${b.kind}`, b.hub && "hub"]} href={href(b.slug)} data-id={b.id} data-crate={b.crate ?? undefined} tabindex="0">
+          <rect x={b.x} y={b.y} width={b.w} height={b.h} rx={b.h * 0.22} />
+          <text class="label node-label" x={b.x + b.w / 2} y={b.y + b.h / 2} data-w={b.w} data-h={b.h}>{b.label}</text>
+        </a>
+      ))}
+      {canvas.wires.filter((e) => e.label !== null && e.mid !== null).map((e) => (
+        <text class={`label wire-label lv-${e.shows} wl-${e.level}`} x={e.mid!.x} y={e.mid!.y} data-w={e.mid!.len} data-level={e.level}>{e.label}</text>
+      ))}
+    </g>
+  </svg>
+
+  <div class="atlas-levels" role="toolbar" aria-label="Zoom level">
+    {LEVEL_NAMES.map((name, level) => (
+      <button type="button" data-level={level} aria-pressed="false" title={`Level ${level}: ${name}`}>
+        <span class="atlas-level-n">{level}</span><span class="atlas-level-name">{name}</span>
+      </button>
+    ))}
+    <span class="atlas-zoom">
+      <button type="button" data-zoom="in" title="Zoom in (+)" aria-label="Zoom in">+</button>
+      <button type="button" data-zoom="out" title="Zoom out (−)" aria-label="Zoom out">−</button>
+      <button type="button" data-zoom="fit" title="Whole map (0)" aria-label="Whole map">⤢</button>
+    </span>
+  </div>
+
+  <aside class="atlas-panel" hidden aria-live="polite" data-ref="atlas-panel">
+    <button type="button" class="atlas-panel-close" aria-label="Close">×</button>
+    <div class="atlas-panel-eyebrow"></div>
+    <h2 class="atlas-panel-title"></h2>
+    <p class="atlas-panel-what"></p>
+    <p class="atlas-panel-why"></p>
+    <div class="atlas-panel-actions">
+      <a class="atlas-panel-link">Read the page →</a>
+      <button type="button" class="atlas-panel-zoom">Zoom in</button>
+    </div>
+  </aside>
+
+  <script is:inline type="application/json" id="atlas-data" set:html={JSON.stringify(data).replace(/</gu, "\\u003c")} />
+</div>
+
+<script>
+  import { mountAtlas } from "../../client/atlas.ts";
+  mountAtlas();
+</script>

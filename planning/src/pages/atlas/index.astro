@@ -1,0 +1,27 @@
+---
+/**
+ * The front door: the whole workspace as one zoomable map. Zoomed out it is
+ * products and who uses them; in, crates and their dependency rules; further,
+ * the primitives around the CST; furthest, the wires and what crosses them.
+ */
+import Base from "../../layouts/Base.astro";
+import AtlasSidebar from "../../components/atlas/AtlasSidebar.astro";
+import Canvas from "../../components/atlas/Canvas.astro";
+import { layoutCanvas, type ConceptInfo } from "../../lib/atlas/canvas.ts";
+import { loadConcepts, plain } from "../../lib/atlas/concepts.ts";
+import { readMap } from "../../lib/atlas/map.ts";
+import { fixtures } from "../../lib/atlas/paths.ts";
+
+const concepts = await loadConcepts();
+const info = new Map<string, ConceptInfo>(concepts.map((c) => [c.slug, {
+  crate: c.entry.data.crate, kind: c.entry.data.kind, summary: plain(c.entry.data.summary), why: c.why,
+}]));
+const canvas = await layoutCanvas(readMap(), info);
+---
+<Base title="Atlas" section="atlas" full>
+  <div slot="sidebar" class="hidden h-full md:block"><AtlasSidebar /></div>
+  <h1 class="sr-only">Atlas: how scripture-kitchen fits together</h1>
+  {fixtures.map && <p class="atlas-fixture">Showing the fixture map: <code>planning/atlas/map.json</code> is not written yet.</p>}
+  <Canvas canvas={canvas} />
+  {!fixtures.map && <a href="/atlas/overview" class="atlas-fixture atlas-intro">New here? Read the overview →</a>}
+</Base>

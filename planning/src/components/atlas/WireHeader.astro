@@ -1,0 +1,28 @@
+---
+/** A wire format's name plate, in its crate's hue. */
+import "../../styles/wires.css";
+import type { Wire } from "../../lib/atlas/layouts.ts";
+import { githubBlob, inRepo } from "../../lib/atlas/github.ts";
+import { fixtures } from "../../lib/atlas/paths.ts";
+
+interface Props { wire: Wire }
+const { wire } = Astro.props;
+const { layout } = wire;
+const link = (path: string | null | undefined) => (path ? { path, href: githubBlob(path), missing: !inRepo(path) } : null);
+const declared = link(layout.declared_in);
+const reader = link(layout.reader);
+---
+<header class="wplate" data-crate={wire.crate}>
+  <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+    <h1 class="text-h3 font-semibold font-mono">{layout.format}</h1>
+    {layout.magic && <span class="wpill font-mono">{layout.magic}</span>}
+    {layout.version !== undefined && layout.version !== null && <span class="wpill">v{layout.version}</span>}
+    {!layout.generated && <span class="wbadge-hand">hand-packed — not checked by a generated reader</span>}
+    {fixtures.layouts && <span class="wpill">fixture</span>}
+  </div>
+  {layout.doc && <p class="mt-1 text-on-surface-secondary">{layout.doc}</p>}
+  <dl class="wplate-links text-small">
+    {declared && (<><dt>declared in</dt><dd><a class="font-mono" href={declared.href}>{declared.path}</a>{declared.missing && " (not in this checkout)"}</dd></>)}
+    {reader && (<><dt>reader</dt><dd><a class="font-mono" href={reader.href}>{reader.path}</a>{!wire.readerLoaded && " (not importable here: values decoded from the layout's offsets)"}</dd></>)}
+  </dl>
+</header>

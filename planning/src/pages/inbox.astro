@@ -3,6 +3,7 @@
  * The inbox: every open question and follow-up across items that are still
  * live. This is the page to open first.
  */
+import Sidebar from "../components/Sidebar.astro";
 import Base from "../layouts/Base.astro";
 import { existsSync } from "node:fs";
 import { relative } from "node:path";
@@ -39,7 +40,8 @@ const groups = [
   { id: "followups", label: "Follow-ups", rows: followups },
 ];
 ---
-<Base title="Inbox">
+<Base title="Inbox" section="inbox">
+  <Sidebar slot="sidebar" />
   <h1 class="text-h4 font-semibold">Inbox</h1>
   <p class="mt-1 text-small text-on-surface-secondary">
     Point at a row (press <kbd>c</kbd>) or highlight its text and write an answer; Enter adds it to the batch. Copy them all with <kbd>⇧⌘C</kbd>. Each comment carries the file and line.

@@ -1,0 +1,25 @@
+---
+term: CST
+slug: cst
+aliases: [tree, concrete syntax tree]
+kind: primitive
+crate: onion
+files: [onion/src/wire.rs]
+related: [token, source, dish]
+level: 2
+summary: "The lossless tree every onion feature reads: nodes over the [[token]] stream."
+---
+
+Fixture page. The CST is built from [[token|tokens]] scanned out of the [[source]].
+
+## Why
+
+One tree, read by every feature, means one parse per edit.
+
+```mermaid
+flowchart LR
+  S[Source] --> T[Token] --> C((CST))
+  click T "/atlas/token"
+```
+
+A link to nowhere: [[no-such-page]].

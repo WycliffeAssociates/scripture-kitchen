@@ -1,0 +1,93 @@
+---
+/**
+ * A real parse, byte by byte: the USFM on the left, the buffer it became on
+ * the right. Every byte is coloured by the field that owns it; hover or tap
+ * one to see the whole field, its decoded value, and the source it points at.
+ */
+import "../../styles/wires.css";
+import type { Sample } from "../../lib/atlas/layouts.ts";
+
+interface Props {
+  sample: Sample;
+  usfmPath: string;
+  binPath: string;
+}
+const { sample, usfmPath, binPath } = Astro.props;
+const hex = (n: number, w: number): string => n.toString(16).padStart(w, "0");
+const rows = Array.from({ length: Math.ceil(sample.bytes.length / 16) }, (_, r) => r * 16);
+const hueAt = (i: number): string => {
+  const s = sample.spans[sample.owner[i] ?? -1];
+  return s && s.hue ? `--c: var(--crate-${s.hue})` : "";
+};
+const starts = new Map(sample.regions.filter((r) => r.kind !== "fixed").map((r) => [r.at, r.name]));
+const blobs = sample.regions.filter((r) => r.kind === "blob" && !r.holds);
+const data = JSON.stringify({ spans: sample.spans, owner: sample.owner }).replace(/</gu, "\\u003c");
+const size = (r: Sample["regions"][number]): string => {
+  if (r.kind === "fixed" || r.kind === "blob") return `${r.end - r.at} B`;
+  const own = r.entries.filter((e) => e.record === r.record || r.record === undefined);
+  return `${own.length} × ${own[0]?.stride ?? 0} B${own.length < r.entries.length ? ` + ${r.entries.length - own.length} tail rows` : ""}`;
+};
+---
+<section class="wsample" data-wsample>
+  <header class="wsample-head">
+    <h2 class="text-h4 font-semibold">One real parse</h2>
+    <p class="text-small text-on-surface-secondary">
+      <code>{usfmPath}</code> → <code>{binPath}</code>, {sample.bytes.length} bytes. Offsets are
+      {sample.utf16 ? " UTF-16 code units" : " UTF-8 bytes"} into the text.
+      {sample.partial && <strong class="text-on-surface-warning"> Bytes past the header are not mapped for this format.</strong>}
+    </p>
+  </header>
+
+  <div class="wreadout" aria-live="polite" data-readout>
+    <span class="text-on-surface-tertiary">Hover or tap a byte.</span>
+  </div>
+
+  <div class="wsample-panes">
+    <pre class="wusfm" data-usfm>{sample.segments.map(([from, to, text]) => <span data-b0={from} data-b1={to}>{text}</span>)}</pre>
+    <div class="whex-box">
+      <div class="whex" data-hex>
+        {rows.map((r) => (
+          <div class="whex-row">
+            <span class="whex-off">{hex(r, 4)}</span>
+            {sample.bytes.slice(r, r + 16).map((b, k) => {
+              const i = r + k;
+              const own = sample.owner[i] ?? -1;
+              return <i data-i={i} class:list={[own < 0 && "wfree", starts.has(i) && "wstart"]} style={hueAt(i)} title={starts.get(i)}>{hex(b, 2)}</i>;
+            })}
+          </div>
+        ))}
+      </div>
+    </div>
+  </div>
+
+  <ul class="wregions">
+    {sample.regions.map((r) => (
+      <li data-from={r.at} data-to={r.end} tabindex="0">
+        <span class="font-mono">{r.name}</span>
+        <span class="text-on-surface-tertiary">@{r.at} · {size(r)}{r.holds && <> · <a href={`/atlas/wires/${r.holds}`}>{r.holds}</a></>}</span>
+      </li>
+    ))}
+  </ul>
+
+  {blobs.map((r) => (
+    <div class="wblob">
+      <h3 class="font-mono text-small font-semibold">{r.name} <span class="font-normal text-on-surface-tertiary">UTF-8 text, {r.end - r.at} bytes</span></h3>
+      {r.end === r.at
+        ? <p class="text-small text-on-surface-tertiary">Empty in this sample.</p>
+        : (
+          <div class="wblob-cells">
+            {sample.spans.filter((s) => s.region === r.name && s.space === "text").map((s) => (
+              <span data-i={s.start} style={`--n: ${s.end - s.start}`}>{JSON.parse(s.value)}</span>
+            ))}
+          </div>
+        )}
+    </div>
+  ))}
+
+  <script type="application/json" data-wsample-json set:html={data} />
+</section>
+
+<script>
+  import { mountWireSample } from "../../client/wire-sample.ts";
+  for (const root of document.querySelectorAll<HTMLElement>("[data-wsample]")) mountWireSample(root);
+</script>
