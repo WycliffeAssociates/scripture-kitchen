@@ -23,7 +23,7 @@
 //!    inserted between two ranges.
 //! 5. `projectedLen` is that concatenation's length, or 0 when empty.
 
-use ticket::schema::{Field, Record};
+use ticket::schema::{Field, Layout, Record, Region, Sample, Shape, Slot};
 
 pub use ticket::schema::{Space, Width};
 
@@ -90,3 +90,87 @@ pub const RANGE: Record = Record {
 
 /// The one row record this format has.
 pub const RECORDS: &[&Record] = &[&RANGE];
+
+pub const HEADER: &[Slot] = &[
+    Slot {
+        name: "magic",
+        at: HEADER_MAGIC_OFFSET,
+        bytes: HEADER_VERSION_OFFSET - HEADER_MAGIC_OFFSET,
+        doc: "`MASK`, little-endian.",
+    },
+    Slot {
+        name: "version",
+        at: HEADER_VERSION_OFFSET,
+        bytes: HEADER_FLAGS_OFFSET - HEADER_VERSION_OFFSET,
+        doc: "FORMAT_VERSION. A reader that does not know it stops.",
+    },
+    Slot {
+        name: "flags",
+        at: HEADER_FLAGS_OFFSET,
+        bytes: HEADER_RECIPE_OFFSET - HEADER_FLAGS_OFFSET,
+        doc: "Bit 0: every offset is UTF-16 rather than a byte.",
+    },
+    Slot {
+        name: "recipe",
+        at: HEADER_RECIPE_OFFSET,
+        bytes: HEADER_RANGE_COUNT_OFFSET - HEADER_RECIPE_OFFSET,
+        doc: "Which cut the ranges came from: 0 verse text, 1 structure, 2 text.",
+    },
+    Slot {
+        name: "rangeCount",
+        at: HEADER_RANGE_COUNT_OFFSET,
+        bytes: HEADER_SOURCE_LEN_OFFSET - HEADER_RANGE_COUNT_OFFSET,
+        doc: "Range rows after the header.",
+    },
+    Slot {
+        name: "sourceLen",
+        at: HEADER_SOURCE_LEN_OFFSET,
+        bytes: HEADER_PROJECTED_LEN_OFFSET - HEADER_SOURCE_LEN_OFFSET,
+        doc: "The length of the text the ranges were cut FROM, in the flags' unit.",
+    },
+    Slot {
+        name: "projectedLen",
+        at: HEADER_PROJECTED_LEN_OFFSET,
+        bytes: HEADER_BYTES - HEADER_PROJECTED_LEN_OFFSET,
+        doc: "The length of the projection those ranges concatenate to.",
+    },
+];
+
+/// The whole mask map, region by region, for `docs/layouts/mask.json`.
+pub fn layout() -> Layout {
+    Layout {
+        format: "mask",
+        magic: MAGIC,
+        version: FORMAT_VERSION,
+        declared_in: "galley/src/mask/schema.rs",
+        reader: "galley/mask-reader.ts",
+        generated: true,
+        doc: "One book's projection as the source spans it keeps.",
+        envelope: vec![
+            Region {
+                name: "header",
+                at: "0".into(),
+                shape: Shape::Fixed {
+                    bytes: HEADER_BYTES,
+                    slots: HEADER,
+                },
+                doc: "The header, then the rows. Nothing else.",
+            },
+            Region {
+                name: "ranges",
+                at: format!("{HEADER_BYTES}"),
+                shape: Shape::Rows {
+                    of: &RANGE,
+                    count: "header.rangeCount".into(),
+                },
+                doc: RANGE.doc,
+            },
+        ],
+        records: RECORDS,
+        sample: Some(Sample {
+            usfm: "samples/sample.usfm",
+            bin: "samples/mask.bin",
+            options: &[("recipe", "\"verseText\""), ("utf16", "false")],
+        }),
+    }
+}

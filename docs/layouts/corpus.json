@@ -1,0 +1,28 @@
+{
+  "format": "corpus",
+  "magic": "ONCP",
+  "magic_hex": "0x50434e4f",
+  "version": 1,
+  "declared_in": "galley/src/corpus.rs",
+  "reader": "onion-wasm/reader.ts",
+  "generated": false,
+  "doc": "A whole project in one buffer: each book's key and its dish, framed, not re-encoded.",
+  "envelope": [
+    {"region": "header", "at": "0", "kind": "fixed", "bytes": 16, "doc": "Four words.", "fields": [
+      {"name": "magic", "offset": 0, "width": 4, "doc": "`ONCP`, little-endian."},
+      {"name": "version", "offset": 4, "width": 4, "doc": "FORMAT_VERSION, independent of the version each dish carries."},
+      {"name": "bookCount", "offset": 8, "width": 4, "doc": "Directory entries."},
+      {"name": "reserved", "offset": 12, "width": 4, "doc": "Zero."}
+    ]},
+    {"region": "directory", "at": "16", "kind": "table", "entry_bytes": 16, "count": "header.bookCount", "doc": "One book's key and dish, by position and length.", "fields": [
+      {"name": "keyAt", "offset": 0, "width": 4, "doc": "Where the caller's key starts; 4-aligned."},
+      {"name": "keyLen", "offset": 4, "width": 4, "doc": "Its bytes of UTF-8, carried verbatim and never parsed."},
+      {"name": "dishAt", "offset": 8, "width": 4, "doc": "Where the book's dish starts; 4-aligned so its sections can be viewed in place."},
+      {"name": "dishLen", "offset": 12, "width": 4, "doc": "Its bytes: exactly what `onion::wire::plate` wrote for the book."}
+    ]},
+    {"region": "key", "at": "directory[book].keyAt", "kind": "blob", "bytes": "directory[book].keyLen", "doc": "Whatever the caller identifies the book by, padded to 4."},
+    {"region": "dish", "at": "directory[book].dishAt", "kind": "blob", "bytes": "directory[book].dishLen", "holds": "dish", "doc": "The book's dish, unchanged, padded to 4."}
+  ],
+  "records": [],
+  "sample": {"usfm": "samples/sample.usfm", "bin": "samples/corpus.bin", "options": {"keys": ["sample.usfm"], "diagnostics": true, "toc": true, "utf16": false}}
+}

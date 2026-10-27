@@ -12,7 +12,7 @@
 //! make impossible. The ENVELOPE below — header and directory — is this
 //! format's alone, because the dish frames sections and a census frames books.
 
-use ticket::schema::{Field, Record};
+use ticket::schema::{Field, Layout, Record, Region, Sample, Shape, Slot};
 
 use Space::{Offset, Plain};
 use Width::{U16, U32};
@@ -260,3 +260,178 @@ pub const MEMBER: Record = Record {
 
 /// Every row record, in the order a book's blocks are written.
 pub const RECORDS: &[&Record] = &[&CHAPTER, &VERSE, &MEMBER];
+
+pub const HEADER: &[Slot] = &[
+    Slot {
+        name: "magic",
+        at: HEADER_MAGIC_OFFSET,
+        bytes: HEADER_VERSION_OFFSET - HEADER_MAGIC_OFFSET,
+        doc: "`TOCS`, little-endian.",
+    },
+    Slot {
+        name: "version",
+        at: HEADER_VERSION_OFFSET,
+        bytes: HEADER_FLAGS_OFFSET - HEADER_VERSION_OFFSET,
+        doc: "FORMAT_VERSION. A reader that does not know it stops.",
+    },
+    Slot {
+        name: "flags",
+        at: HEADER_FLAGS_OFFSET,
+        bytes: HEADER_BOOK_COUNT_OFFSET - HEADER_FLAGS_OFFSET,
+        doc: "Bit 0: every offset is UTF-16 rather than a byte.",
+    },
+    Slot {
+        name: "bookCount",
+        at: HEADER_BOOK_COUNT_OFFSET,
+        bytes: HEADER_CHAPTER_STRIDE_OFFSET - HEADER_BOOK_COUNT_OFFSET,
+        doc: "Directory entries: one per registered book asked for.",
+    },
+    Slot {
+        name: "chapterStride",
+        at: HEADER_CHAPTER_STRIDE_OFFSET,
+        bytes: HEADER_VERSE_STRIDE_OFFSET - HEADER_CHAPTER_STRIDE_OFFSET,
+        doc: "Bytes per Chapter row, as written.",
+    },
+    Slot {
+        name: "verseStride",
+        at: HEADER_VERSE_STRIDE_OFFSET,
+        bytes: HEADER_MEMBER_STRIDE_OFFSET - HEADER_VERSE_STRIDE_OFFSET,
+        doc: "Bytes per Verse row, as written.",
+    },
+    Slot {
+        name: "memberStride",
+        at: HEADER_MEMBER_STRIDE_OFFSET,
+        bytes: HEADER_DIRECTORY_AT_OFFSET - HEADER_MEMBER_STRIDE_OFFSET,
+        doc: "Bytes per Member row, as written.",
+    },
+    Slot {
+        name: "directoryAt",
+        at: HEADER_DIRECTORY_AT_OFFSET,
+        bytes: HEADER_BYTES - HEADER_DIRECTORY_AT_OFFSET,
+        doc: "Where the directory starts, so the header may grow.",
+    },
+];
+
+pub const DIRECTORY_ENTRY: &[Slot] = &[
+    Slot {
+        name: "code",
+        at: DIRECTORY_CODE_OFFSET,
+        bytes: DIRECTORY_CODE_TERMINATOR_OFFSET - DIRECTORY_CODE_OFFSET,
+        doc: "The `\\id` line's book code, ASCII.",
+    },
+    Slot {
+        name: "terminator",
+        at: DIRECTORY_CODE_TERMINATOR_OFFSET,
+        bytes: DIRECTORY_CHAPTERS_AT_OFFSET - DIRECTORY_CODE_TERMINATOR_OFFSET,
+        doc: "NUL, the shape the Sous directory reads a code in too.",
+    },
+    Slot {
+        name: "chaptersAt",
+        at: DIRECTORY_CHAPTERS_AT_OFFSET,
+        bytes: DIRECTORY_CHAPTER_ROWS_OFFSET - DIRECTORY_CHAPTERS_AT_OFFSET,
+        doc: "Where this book's Chapter rows start.",
+    },
+    Slot {
+        name: "chapterRows",
+        at: DIRECTORY_CHAPTER_ROWS_OFFSET,
+        bytes: DIRECTORY_VERSES_AT_OFFSET - DIRECTORY_CHAPTER_ROWS_OFFSET,
+        doc: "How many; row 0 is the front matter.",
+    },
+    Slot {
+        name: "versesAt",
+        at: DIRECTORY_VERSES_AT_OFFSET,
+        bytes: DIRECTORY_VERSE_ROWS_OFFSET - DIRECTORY_VERSES_AT_OFFSET,
+        doc: "Where this book's Verse rows start.",
+    },
+    Slot {
+        name: "verseRows",
+        at: DIRECTORY_VERSE_ROWS_OFFSET,
+        bytes: DIRECTORY_ID_AT_OFFSET - DIRECTORY_VERSE_ROWS_OFFSET,
+        doc: "How many.",
+    },
+    Slot {
+        name: "idAt",
+        at: DIRECTORY_ID_AT_OFFSET,
+        bytes: DIRECTORY_ID_LEN_OFFSET - DIRECTORY_ID_AT_OFFSET,
+        doc: "Where the caller's id for this book starts, in the trailing ids.",
+    },
+    Slot {
+        name: "idLen",
+        at: DIRECTORY_ID_LEN_OFFSET,
+        bytes: DIRECTORY_MEMBERS_AT_OFFSET - DIRECTORY_ID_LEN_OFFSET,
+        doc: "Its bytes of UTF-8.",
+    },
+    Slot {
+        name: "membersAt",
+        at: DIRECTORY_MEMBERS_AT_OFFSET,
+        bytes: DIRECTORY_MEMBER_ROWS_OFFSET - DIRECTORY_MEMBERS_AT_OFFSET,
+        doc: "Where this book's Member rows start.",
+    },
+    Slot {
+        name: "memberRows",
+        at: DIRECTORY_MEMBER_ROWS_OFFSET,
+        bytes: DIRECTORY_ENTRY_BYTES - DIRECTORY_MEMBER_ROWS_OFFSET,
+        doc: "How many.",
+    },
+];
+
+/// The whole census, region by region, for `docs/layouts/census.json`.
+pub fn layout() -> Layout {
+    let rows = |of: &'static Record, at: &str, count: &str| Region {
+        name: of.plural,
+        at: format!("directory[book].{at}"),
+        shape: Shape::Rows {
+            of,
+            count: format!("directory[book].{count}"),
+        },
+        doc: of.doc,
+    };
+    Layout {
+        format: "census",
+        magic: MAGIC,
+        version: FORMAT_VERSION,
+        declared_in: "galley/src/toc/schema.rs",
+        reader: "galley/toc-reader.ts",
+        generated: true,
+        doc: "Every named book's chapters, verses and what each verse covers, without a parse.",
+        envelope: vec![
+            Region {
+                name: "header",
+                at: "0".into(),
+                shape: Shape::Fixed {
+                    bytes: HEADER_BYTES,
+                    slots: HEADER,
+                },
+                doc: "The header, then the directory, then each book's rows, then the ids.",
+            },
+            Region {
+                name: "directory",
+                at: "header.directoryAt".into(),
+                shape: Shape::Table {
+                    entry_bytes: DIRECTORY_ENTRY_BYTES,
+                    count: "header.bookCount".into(),
+                    slots: DIRECTORY_ENTRY,
+                },
+                doc: "One book's entry: where its three row blocks are, and how many rows each has.",
+            },
+            rows(&CHAPTER, "chaptersAt", "chapterRows"),
+            rows(&VERSE, "versesAt", "verseRows"),
+            rows(&MEMBER, "membersAt", "memberRows"),
+            Region {
+                name: "ids",
+                at: "directory[0].idAt".into(),
+                shape: Shape::Blob {
+                    bytes: "sum of directory[book].idLen".into(),
+                    holds: None,
+                },
+                doc: "Every book's id as the caller registered it, UTF-8, unpadded.",
+            },
+        ],
+        records: RECORDS,
+        sample: Some(Sample {
+            usfm: "samples/sample.usfm",
+            bin: "samples/census.bin",
+            options: &[("ids", "[\"sample.usfm\"]"), ("utf16", "false")],
+        }),
+    }
+}

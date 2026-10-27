@@ -58,6 +58,8 @@
 //! parses however it likes — `rayon`, a thread pool, a work queue — and galley
 //! adds no dependency to frame the result.
 
+use ticket::schema::{Layout, Region, Sample, Shape, Slot};
+
 use crate::onion;
 
 /// `"ONCP"`, little-endian — a corpus, not a single parse.
@@ -69,6 +71,128 @@ pub const FORMAT_VERSION: u32 = 1;
 
 const HEADER_BYTES: usize = 16;
 const ENTRY_BYTES: usize = 16;
+
+pub const HEADER: &[Slot] = &[
+    Slot {
+        name: "magic",
+        at: 0,
+        bytes: 4,
+        doc: "`ONCP`, little-endian.",
+    },
+    Slot {
+        name: "version",
+        at: 4,
+        bytes: 4,
+        doc: "FORMAT_VERSION, independent of the version each dish carries.",
+    },
+    Slot {
+        name: "bookCount",
+        at: 8,
+        bytes: 4,
+        doc: "Directory entries.",
+    },
+    Slot {
+        name: "reserved",
+        at: 12,
+        bytes: 4,
+        doc: "Zero.",
+    },
+];
+
+pub const ENTRY: &[Slot] = &[
+    Slot {
+        name: "keyAt",
+        at: 0,
+        bytes: 4,
+        doc: "Where the caller's key starts; 4-aligned.",
+    },
+    Slot {
+        name: "keyLen",
+        at: 4,
+        bytes: 4,
+        doc: "Its bytes of UTF-8, carried verbatim and never parsed.",
+    },
+    Slot {
+        name: "dishAt",
+        at: 8,
+        bytes: 4,
+        doc: "Where the book's dish starts; 4-aligned so its sections can be viewed in place.",
+    },
+    Slot {
+        name: "dishLen",
+        at: 12,
+        bytes: 4,
+        doc: "Its bytes: exactly what `onion::wire::plate` wrote for the book.",
+    },
+];
+
+/// The corpus envelope, region by region, for `docs/layouts/corpus.json`.
+pub fn layout() -> Layout {
+    Layout {
+        format: "corpus",
+        magic: MAGIC,
+        version: FORMAT_VERSION,
+        declared_in: "galley/src/corpus.rs",
+        reader: "onion-wasm/reader.ts",
+        generated: false,
+        doc: "A whole project in one buffer: each book's key and its dish, framed, not re-encoded.",
+        envelope: vec![
+            Region {
+                name: "header",
+                at: "0".into(),
+                shape: Shape::Fixed {
+                    bytes: HEADER_BYTES,
+                    slots: HEADER,
+                },
+                doc: "Four words.",
+            },
+            Region {
+                name: "directory",
+                at: format!("{HEADER_BYTES}"),
+                shape: Shape::Table {
+                    entry_bytes: ENTRY_BYTES,
+                    count: "header.bookCount".into(),
+                    slots: ENTRY,
+                },
+                doc: "One book's key and dish, by position and length.",
+            },
+            Region {
+                name: "key",
+                at: "directory[book].keyAt".into(),
+                shape: Shape::Blob {
+                    bytes: "directory[book].keyLen".into(),
+                    holds: None,
+                },
+                doc: "Whatever the caller identifies the book by, padded to 4.",
+            },
+            Region {
+                name: "dish",
+                at: "directory[book].dishAt".into(),
+                shape: Shape::Blob {
+                    bytes: "directory[book].dishLen".into(),
+                    holds: Some("dish"),
+                },
+                doc: "The book's dish, unchanged, padded to 4.",
+            },
+        ],
+        records: &[],
+        sample: Some(Sample {
+            usfm: "samples/sample.usfm",
+            bin: "samples/corpus.bin",
+            options: SAMPLE_OPTIONS,
+        }),
+    }
+}
+
+/// What the checked-in sample framed: the one sample book under its file name,
+/// plated as the dish sample is.
+pub const SAMPLE_KEY: &str = "sample.usfm";
+pub const SAMPLE_OPTIONS: &[(&str, &str)] = &[
+    ("keys", "[\"sample.usfm\"]"),
+    ("diagnostics", "true"),
+    ("toc", "true"),
+    ("utf16", "false"),
+];
 
 /// One book's key and its plated parse.
 pub struct Book<'a> {

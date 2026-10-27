@@ -16,6 +16,9 @@ const CHECKED_IN: &str = include_str!("../src/tables/generated.rs");
 const CHECKED_IN_DIAGNOSTICS: &str = include_str!("../../onion-wasm/diagnostics.json");
 const CHECKED_IN_WIRE: &str = include_str!("../src/wire/generated.rs");
 const CHECKED_IN_READER: &str = include_str!("../../onion-wasm/reader.ts");
+const CHECKED_IN_LAYOUT: &str = include_str!("../../docs/layouts/dish.json");
+const CHECKED_IN_SAMPLE: &[u8] = include_bytes!("../../docs/layouts/samples/dish.bin");
+const SAMPLE_USFM: &str = include_str!("../../docs/layouts/samples/sample.usfm");
 
 #[test]
 fn generated_rs_is_not_stale() {
@@ -215,4 +218,47 @@ fn wire_strides_are_the_sum_of_their_fields() {
             record.name
         );
     }
+}
+
+/// The dish's layout for the docs. Stale here means the docs draw a header,
+/// a section or a field the writer no longer puts there.
+#[test]
+fn dish_layout_is_not_stale() {
+    let fresh = wire_emit::layout_json();
+    assert!(
+        fresh == CHECKED_IN_LAYOUT,
+        "{}",
+        ticket::stale::first_difference("docs/layouts/dish.json", FIX, &fresh, CHECKED_IN_LAYOUT)
+    );
+}
+
+/// The real dish the docs decode beside that layout.
+#[test]
+fn dish_sample_is_not_stale() {
+    let fresh = wire_emit::sample_bin(SAMPLE_USFM);
+    assert!(
+        fresh == CHECKED_IN_SAMPLE,
+        "{}",
+        ticket::stale::first_byte_difference(
+            "docs/layouts/samples/dish.bin",
+            FIX,
+            &fresh,
+            CHECKED_IN_SAMPLE
+        )
+    );
+}
+
+/// The header slots the layout declares are where `plate` writes: the
+/// sample's own magic, version and section count read back through them.
+#[test]
+fn dish_header_slots_read_the_sample() {
+    use usfm_onion::wire::schema;
+    let slot = |name: &str| {
+        let slot = schema::HEADER.iter().find(|s| s.name == name).unwrap();
+        u32::from_le_bytes(CHECKED_IN_SAMPLE[slot.at..slot.at + 4].try_into().unwrap())
+    };
+    assert_eq!(slot("magic"), schema::MAGIC);
+    assert_eq!(slot("version"), schema::FORMAT_VERSION);
+    assert_eq!(slot("sectionCount") as usize, schema::SECTIONS.len());
+    assert_eq!(slot("sourceLength") as usize, SAMPLE_USFM.len());
 }

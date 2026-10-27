@@ -1,5 +1,5 @@
-//! Generator: galley's three wire schemas → both ends of each, and the typed
-//! settings module. Run with
+//! Generator: galley's three wire schemas → both ends of each, the typed
+//! settings module, and every layout galley writes or publishes for the docs. Run with
 //! `cargo run -p usfm_galley --bin codegen`; the output is CHECKED IN
 //! (reviewable diffs; consumers never run this).
 //!
@@ -25,6 +25,7 @@ const FIND_READER: &str = "find-reader.ts";
 const MASK_WRITER: &str = "src/mask/generated.rs";
 const MASK_READER: &str = "mask-reader.ts";
 const SETTINGS: &str = "sous-settings.ts";
+const LAYOUTS: &str = "../docs/layouts";
 
 fn main() -> std::io::Result<()> {
     for (path, fresh) in [
@@ -47,6 +48,23 @@ fn main() -> std::io::Result<()> {
             } else {
                 "written"
             }
+        );
+    }
+    let layouts = Path::new(CRATE).join(LAYOUTS);
+    let usfm = std::fs::read_to_string(layouts.join("samples/sample.usfm"))?;
+    for (path, fresh) in usfm_galley::layouts::files(&usfm) {
+        let path = layouts.join(path);
+        let previous = std::fs::read(&path).unwrap_or_default();
+        std::fs::write(&path, &fresh)?;
+        println!(
+            "{}: {} ({} bytes)",
+            path.display(),
+            if previous == fresh {
+                "unchanged"
+            } else {
+                "written"
+            },
+            fresh.len()
         );
     }
     Ok(())

@@ -204,3 +204,56 @@ fn the_directory_entry_tiles_its_stride() {
         "the code's NUL sits after its three bytes"
     );
 }
+
+/// Every layout galley writes or publishes, and the sample each was drawn
+/// from. Stale here means the docs draw a buffer the engine no longer writes.
+#[test]
+fn docs_layouts_are_not_stale() {
+    let layouts = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs/layouts");
+    let usfm = include_str!("../../docs/layouts/samples/sample.usfm");
+    for (path, fresh) in usfm_galley::layouts::files(usfm) {
+        let checked_in = std::fs::read(layouts.join(path))
+            .unwrap_or_else(|e| panic!("docs/layouts/{path}: {e} — run `{FIX}`"));
+        let what = format!("docs/layouts/{path}");
+        if path.ends_with(".json") {
+            let (fresh, checked_in) = (
+                String::from_utf8(fresh).expect("JSON is UTF-8"),
+                String::from_utf8(checked_in).expect("JSON is UTF-8"),
+            );
+            assert!(
+                fresh == checked_in,
+                "{}",
+                ticket::stale::first_difference(&what, FIX, &fresh, &checked_in)
+            );
+        } else {
+            assert!(
+                fresh == checked_in,
+                "{}",
+                ticket::stale::first_byte_difference(&what, FIX, &fresh, &checked_in)
+            );
+        }
+    }
+}
+
+/// Each sample opens with the magic and version its layout declares, so the
+/// layout and the bytes beside it describe the same format.
+#[test]
+fn each_sample_leads_with_its_layouts_magic_and_version() {
+    let usfm = include_str!("../../docs/layouts/samples/sample.usfm");
+    let files = usfm_galley::layouts::files(usfm);
+    for pair in files.chunks(2) {
+        let [(json, layout), (bin, bytes)] = pair else {
+            panic!("files() pairs each layout with its sample");
+        };
+        let layout = String::from_utf8_lossy(layout);
+        let word = |at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
+        assert!(
+            layout.contains(&format!("\"magic_hex\": \"0x{:08x}\"", word(0))),
+            "{bin} does not open with {json}'s magic"
+        );
+        assert!(
+            layout.contains(&format!("\"version\": {},", word(4))),
+            "{bin} does not carry {json}'s version"
+        );
+    }
+}

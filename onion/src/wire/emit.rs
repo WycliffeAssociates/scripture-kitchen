@@ -21,6 +21,21 @@ use crate::tables::schema::AttrStatus;
 const RS_TEMPLATE: &str = include_str!("generated.rs.tmpl");
 const TS_TEMPLATE: &str = include_str!("../../../onion-wasm/reader.ts.tmpl");
 
+/// `docs/layouts/dish.json`: the envelope and every record, for the docs.
+pub fn layout_json() -> String {
+    shared::layout_json(&schema::layout())
+}
+
+/// The checked-in sample dish: `text` plated with [`schema::SAMPLE_OPTIONS`].
+pub fn sample_bin(text: &str) -> Vec<u8> {
+    let opts = super::ParseOptions {
+        diagnostics: true,
+        toc: true,
+        utf16: false,
+    };
+    super::plate(&super::parse(text, opts))
+}
+
 /// One writer per record: fields in order, little-endian, offsets recorded.
 pub fn wire_generated_rs() -> String {
     RS_TEMPLATE.replace(

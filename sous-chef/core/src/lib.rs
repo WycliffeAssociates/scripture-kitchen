@@ -23,8 +23,11 @@ pub use alignment::{AlignedSide, AlignedUnit, Alignment, AlignmentFact, align};
 pub use codec::{
     Anchor, CodecError, ConventionDigest, FindingFlags, FindingKind, HygieneClass, HygieneDigest,
     HygieneSite, PackedFinding, Placement, PresenceDigest, PresenceKind, ProportionalityDigest,
-    QuantizedDeviation, RECORD_LEN, Reasons, RuleCode, SourceCopyDigest,
+    QuantizedDeviation, RECORD_BOOK_INDEX_OFFSET, RECORD_BOOK_SCOPE_OFFSET, RECORD_CODE_OFFSET,
+    RECORD_FLAGS_OFFSET, RECORD_FROM_OFFSET, RECORD_LEN, RECORD_PROJECT_SCOPE_OFFSET,
+    RECORD_TO_OFFSET, Reasons, RuleCode, SourceCopyDigest,
 };
+pub use corpus::layout;
 pub use corpus::{
     Check, CoordinateSpace, CorpusBook, CorpusSnapshot, CorpusWireError, DIRECTORY_ENTRY_BYTES,
     DIRECTORY_ID_OFFSET, FLAG_UTF16, FORMAT_VERSION, FindingCode, HEADER_BYTES, ID_PREFIX_BYTES,

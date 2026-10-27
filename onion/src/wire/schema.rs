@@ -20,6 +20,7 @@
 /// "how does a `u16` reach the buffer"; re-exported here so every path that
 /// named `wire::schema::Record` still resolves.
 pub use ticket::schema::{Field, Record, Space, Width};
+use ticket::schema::{Layout, Region, Sample, Shape, Slot};
 
 use Space::{Offset, Plain};
 use Width::{U8, U16, U32};
@@ -592,3 +593,135 @@ pub const TOKEN_BLANK: u8 = 1 << 1;
 
 /// "No such offset / no such index", the one absent-value rule.
 pub const NONE: u32 = u32::MAX;
+
+/// The header's eight words, as [`super::plate`] writes them.
+pub const HEADER: &[Slot] = &[
+    Slot {
+        name: "magic",
+        at: 0,
+        bytes: 4,
+        doc: "`ONWR`, little-endian.",
+    },
+    Slot {
+        name: "version",
+        at: 4,
+        bytes: 4,
+        doc: "FORMAT_VERSION. A reader that does not know it refuses the dish.",
+    },
+    Slot {
+        name: "sectionCount",
+        at: 8,
+        bytes: 4,
+        doc: "Directory entries: one per SECTIONS row, always all of them.",
+    },
+    Slot {
+        name: "flags",
+        at: 12,
+        bytes: 4,
+        doc: "Bit 0: every offset is a UTF-16 code unit rather than a byte.",
+    },
+    Slot {
+        name: "usfmVersion",
+        at: 16,
+        bytes: 4,
+        doc: "The `\\usfm` line's version as a ladder index (0 = 3.0), or NONE.",
+    },
+    Slot {
+        name: "sourceLength",
+        at: 20,
+        bytes: 4,
+        doc: "The source's length, in the dish's own offset space.",
+    },
+    Slot {
+        name: "sourceHash",
+        at: 24,
+        bytes: 8,
+        doc: "xxh3-64 of the source BYTES, whichever space the dish was plated in.",
+    },
+];
+
+/// One directory entry per section, in [`SECTIONS`] order.
+pub const DIRECTORY_ENTRY: &[Slot] = &[
+    Slot {
+        name: "offset",
+        at: 0,
+        bytes: 4,
+        doc: "Where the section starts; every section is 4-aligned.",
+    },
+    Slot {
+        name: "length",
+        at: 4,
+        bytes: 4,
+        doc: "Its bytes, before the padding to the next 4-byte boundary.",
+    },
+];
+
+/// The whole dish, region by region, for `docs/layouts/dish.json`.
+pub fn layout() -> Layout {
+    let mut envelope = vec![
+        Region {
+            name: "header",
+            at: "0".into(),
+            shape: Shape::Fixed {
+                bytes: super::HEADER_BYTES,
+                slots: HEADER,
+            },
+            doc: "Eight words, all spoken for.",
+        },
+        Region {
+            name: "directory",
+            at: format!("{}", super::HEADER_BYTES),
+            shape: Shape::Table {
+                entry_bytes: super::DIRECTORY_ENTRY_BYTES,
+                count: "header.sectionCount".into(),
+                slots: DIRECTORY_ENTRY,
+            },
+            doc: "Byte offset and length of each section, in SECTIONS order.",
+        },
+    ];
+    for (n, section) in SECTIONS.iter().enumerate() {
+        let at = format!("directory[{n}].offset");
+        let length = format!("directory[{n}].length");
+        let shape = match section.kind {
+            SectionKind::Rows(record) => Shape::Rows {
+                of: record,
+                count: format!("{length} / {}", record.stride()),
+            },
+            SectionKind::Indices => Shape::Words {
+                width: U32,
+                count: format!("{length} / 4"),
+            },
+            SectionKind::Bytes => Shape::Blob {
+                bytes: length,
+                holds: None,
+            },
+        };
+        envelope.push(Region {
+            name: section.name,
+            at,
+            shape,
+            doc: section.doc,
+        });
+    }
+    Layout {
+        format: "dish",
+        magic: MAGIC,
+        version: FORMAT_VERSION,
+        declared_in: "onion/src/wire/schema.rs",
+        reader: "onion-wasm/reader.ts",
+        generated: true,
+        doc: "One parse, one buffer: the tree, its tokens, and what was asked for.",
+        envelope,
+        records: RECORDS,
+        sample: Some(Sample {
+            usfm: "samples/sample.usfm",
+            bin: "samples/dish.bin",
+            options: SAMPLE_OPTIONS,
+        }),
+    }
+}
+
+/// What the checked-in sample was plated with: every optional section on, in
+/// bytes.
+pub const SAMPLE_OPTIONS: &[(&str, &str)] =
+    &[("diagnostics", "true"), ("toc", "true"), ("utf16", "false")];

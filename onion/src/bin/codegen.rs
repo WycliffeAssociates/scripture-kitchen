@@ -32,6 +32,9 @@ const OUT: &str = "src/tables/generated.rs";
 const DIAGNOSTICS: &str = "../onion-wasm/diagnostics.json";
 const WIRE: &str = "src/wire/generated.rs";
 const READER: &str = "../onion-wasm/reader.ts";
+const LAYOUT: &str = "../docs/layouts/dish.json";
+const SAMPLE_USFM: &str = "../docs/layouts/samples/sample.usfm";
+const SAMPLE_BIN: &str = "../docs/layouts/samples/dish.bin";
 
 fn main() -> std::io::Result<()> {
     let text = emit::generated_rs();
@@ -118,6 +121,26 @@ fn main() -> std::io::Result<()> {
     println!("  marker rows       {:>4}", rows::ROWS.len());
     println!("  lint codes        {:>4}", lint::LINT_ROWS.len());
     println!("  bytes written   {:>6}", text.len());
+    println!(
+        "  {}",
+        if stale {
+            "CHANGED \u{2014} review the diff before committing"
+        } else {
+            "unchanged \u{2014} checked-in file was already fresh"
+        }
+    );
+
+    let text = wire_emit::layout_json();
+    let path = &Path::new(CRATE).join(LAYOUT);
+    let stale = std::fs::read_to_string(path).unwrap_or_default() != text;
+    std::fs::write(path, &text)?;
+    let usfm = std::fs::read_to_string(Path::new(CRATE).join(SAMPLE_USFM))?;
+    let sample = wire_emit::sample_bin(&usfm);
+    let path = &Path::new(CRATE).join(SAMPLE_BIN);
+    let stale = stale || std::fs::read(path).unwrap_or_default() != sample;
+    std::fs::write(path, &sample)?;
+    println!("codegen \u{2192} {LAYOUT}, {SAMPLE_BIN}");
+    println!("  sample bytes    {:>6}", sample.len());
     println!(
         "  {}",
         if stale {

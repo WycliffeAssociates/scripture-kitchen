@@ -1,0 +1,41 @@
+{
+  "format": "find",
+  "magic": "FIND",
+  "magic_hex": "0x444e4946",
+  "version": 1,
+  "declared_in": "galley/src/find/wire/schema.rs",
+  "reader": "galley/find-reader.ts",
+  "generated": true,
+  "doc": "The hits of one search: where a reader sees each, and where an editor would change it.",
+  "envelope": [
+    {"region": "header", "at": "0", "kind": "fixed", "bytes": 16, "doc": "The header, ahead of the first hit.", "fields": [
+      {"name": "magic", "offset": 0, "width": 4, "doc": "`FIND` in ASCII."},
+      {"name": "version", "offset": 4, "width": 4, "doc": "VERSION. A reader that does not know it stops."},
+      {"name": "hitCount", "offset": 8, "width": 4, "doc": "Hit rows, and preview lengths."},
+      {"name": "bookCount", "offset": 12, "width": 4, "doc": "Books SEARCHED, whether or not they matched: the id table's length."}
+    ]},
+    {"region": "hits", "at": "16", "kind": "rows", "of": "Hit", "count": "header.hitCount", "doc": "One hit: where a reader sees it, and where an editor would change it."},
+    {"region": "idLens", "at": "after the last hit", "kind": "rows", "of": "IdLen", "count": "header.bookCount", "doc": "One searched book's id length in bytes, in id-table order."},
+    {"region": "previewLens", "at": "after idLens", "kind": "rows", "of": "PreviewLen", "count": "header.hitCount", "doc": "One hit's preview length in bytes, index-aligned with the hits."},
+    {"region": "strings", "at": "after previewLens", "kind": "blob", "bytes": "sum of idByteLen, then sum of previewByteLen", "doc": "Every id's UTF-8 in order, then every preview's; after the lengths so every u32 stays aligned."}
+  ],
+  "records": [
+    {"name": "Hit", "stride": 16, "doc": "One hit: where a reader sees it, and where an editor would change it.", "tail": {"count": "pieceCount", "of": "Piece"}, "fields": [
+      {"name": "bookIndex", "offset": 0, "width": 4, "space": "plain", "doc": "Into the buffer's own id table, which names every book SEARCHED."},
+      {"name": "projectedFrom", "offset": 4, "width": 4, "space": "offset", "doc": "First unit of the hit in the PROJECTION — what a highlighter wants."},
+      {"name": "projectedTo", "offset": 8, "width": 4, "space": "offset", "doc": "One past its last unit."},
+      {"name": "pieceCount", "offset": 12, "width": 4, "space": "plain", "doc": "Source pieces below; more than one where the hit crosses masked markup."}
+    ]},
+    {"name": "Piece", "stride": 8, "doc": "One contiguous source piece of a hit, in the raw book's UTF-16.", "fields": [
+      {"name": "sourceFrom", "offset": 0, "width": 4, "space": "offset", "doc": "First unit of the piece in the SOURCE — where an edit lands."},
+      {"name": "sourceTo", "offset": 4, "width": 4, "space": "offset", "doc": "One past its last unit."}
+    ]},
+    {"name": "IdLen", "stride": 4, "doc": "One searched book's id length in bytes, in id-table order.", "fields": [
+      {"name": "idByteLen", "offset": 0, "width": 4, "space": "plain", "doc": "Bytes of UTF-8 in the blob at the end of the buffer."}
+    ]},
+    {"name": "PreviewLen", "stride": 4, "doc": "One hit's preview length in bytes, index-aligned with the hits.", "fields": [
+      {"name": "previewByteLen", "offset": 0, "width": 4, "space": "plain", "doc": "Bytes of UTF-8 in the blob at the end of the buffer."}
+    ]}
+  ],
+  "sample": {"usfm": "samples/sample.usfm", "bin": "samples/find.bin", "options": {"needle": "the light", "caseSensitive": false, "wholeWord": false, "limit": 0}}
+}

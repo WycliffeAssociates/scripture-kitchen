@@ -133,3 +133,74 @@ impl Record {
         panic!("no such wire field: {}::{}", self.name, name)
     }
 }
+
+/// One format's whole buffer, for the layout a docs page draws: its envelope
+/// region by region, then the records those regions hold.
+///
+/// ```text
+/// Layout { format: "mask", magic: MAGIC, envelope: [header, ranges], records: [Range] }
+///   -> ticket::emit::layout_json -> docs/layouts/mask.json
+/// ```
+///
+/// The format declares it beside its own schema; nothing here names one.
+pub struct Layout {
+    pub format: &'static str,
+    pub magic: u32,
+    pub version: u32,
+    pub declared_in: &'static str,
+    pub reader: &'static str,
+    /// Whether both ends come from a declaration, or one is packed by hand.
+    pub generated: bool,
+    pub doc: &'static str,
+    pub envelope: Vec<Region>,
+    pub records: &'static [&'static Record],
+    pub sample: Option<Sample>,
+}
+
+/// One stretch of the buffer, in wire order.
+pub struct Region {
+    pub name: &'static str,
+    /// Where it starts, as a reader finds it: `0`, `header.directoryAt`.
+    pub at: String,
+    pub shape: Shape,
+    pub doc: &'static str,
+}
+
+pub enum Shape {
+    /// A fixed run of bytes whose slots tile it — a header.
+    Fixed {
+        bytes: usize,
+        slots: &'static [Slot],
+    },
+    /// `count` entries of `entry_bytes`, each tiled by the same slots.
+    Table {
+        entry_bytes: usize,
+        count: String,
+        slots: &'static [Slot],
+    },
+    /// `count` rows of a declared record.
+    Rows { of: &'static Record, count: String },
+    /// `count` bare words of one width.
+    Words { width: Width, count: String },
+    /// Opaque bytes; `holds` names the format inside, when there is one.
+    Blob {
+        bytes: String,
+        holds: Option<&'static str>,
+    },
+}
+
+/// One named stretch of a fixed region or a table entry.
+pub struct Slot {
+    pub name: &'static str,
+    pub at: usize,
+    pub bytes: usize,
+    pub doc: &'static str,
+}
+
+/// A real buffer the engine wrote, beside the text it wrote it from.
+pub struct Sample {
+    pub usfm: &'static str,
+    pub bin: &'static str,
+    /// `(name, value)`, the value a JSON literal: `("utf16", "false")`.
+    pub options: &'static [(&'static str, &'static str)],
+}

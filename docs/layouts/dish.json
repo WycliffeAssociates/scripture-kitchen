@@ -1,0 +1,102 @@
+{
+  "format": "dish",
+  "magic": "ONWR",
+  "magic_hex": "0x52574e4f",
+  "version": 5,
+  "declared_in": "onion/src/wire/schema.rs",
+  "reader": "onion-wasm/reader.ts",
+  "generated": true,
+  "doc": "One parse, one buffer: the tree, its tokens, and what was asked for.",
+  "envelope": [
+    {"region": "header", "at": "0", "kind": "fixed", "bytes": 32, "doc": "Eight words, all spoken for.", "fields": [
+      {"name": "magic", "offset": 0, "width": 4, "doc": "`ONWR`, little-endian."},
+      {"name": "version", "offset": 4, "width": 4, "doc": "FORMAT_VERSION. A reader that does not know it refuses the dish."},
+      {"name": "sectionCount", "offset": 8, "width": 4, "doc": "Directory entries: one per SECTIONS row, always all of them."},
+      {"name": "flags", "offset": 12, "width": 4, "doc": "Bit 0: every offset is a UTF-16 code unit rather than a byte."},
+      {"name": "usfmVersion", "offset": 16, "width": 4, "doc": "The `\\usfm` line's version as a ladder index (0 = 3.0), or NONE."},
+      {"name": "sourceLength", "offset": 20, "width": 4, "doc": "The source's length, in the dish's own offset space."},
+      {"name": "sourceHash", "offset": 24, "width": 8, "doc": "xxh3-64 of the source BYTES, whichever space the dish was plated in."}
+    ]},
+    {"region": "directory", "at": "32", "kind": "table", "entry_bytes": 8, "count": "header.sectionCount", "doc": "Byte offset and length of each section, in SECTIONS order.", "fields": [
+      {"name": "offset", "offset": 0, "width": 4, "doc": "Where the section starts; every section is 4-aligned."},
+      {"name": "length", "offset": 4, "width": 4, "doc": "Its bytes, before the padding to the next 4-byte boundary."}
+    ]},
+    {"region": "tokens", "at": "directory[0].offset", "kind": "rows", "of": "Token", "count": "directory[0].length / 12", "doc": "The scanner's output, in document order."},
+    {"region": "nodes", "at": "directory[1].offset", "kind": "rows", "of": "Node", "count": "directory[1].length / 14", "doc": "The tree's nodes. Node id is the row index."},
+    {"region": "childIds", "at": "directory[2].offset", "kind": "words", "width": 4, "count": "directory[2].length / 4", "doc": "The shared child arena: token ids, and node ids tagged with bit 31."},
+    {"region": "diagnostics", "at": "directory[3].offset", "kind": "rows", "of": "Diagnostic", "count": "directory[3].length / 32", "doc": "Findings, sorted by anchor then code. Empty unless asked for."},
+    {"region": "fixes", "at": "directory[4].offset", "kind": "rows", "of": "Fix", "count": "directory[4].length / 8", "doc": "Offered repairs, reached through a diagnostic's `fix`."},
+    {"region": "edits", "at": "directory[5].offset", "kind": "rows", "of": "Edit", "count": "directory[5].length / 16", "doc": "The shared edit arena every fix's range indexes."},
+    {"region": "fixText", "at": "directory[6].offset", "kind": "blob", "bytes": "directory[6].length", "doc": "Inserted bytes, concatenated. Edits carry absolute positions into it."},
+    {"region": "chapters", "at": "directory[7].offset", "kind": "rows", "of": "Chapter", "count": "directory[7].length / 26", "doc": "The chapter table. Empty unless asked for."},
+    {"region": "verses", "at": "directory[8].offset", "kind": "rows", "of": "Verse", "count": "directory[8].length / 32", "doc": "The verse anchors. Empty unless asked for."},
+    {"region": "members", "at": "directory[9].offset", "kind": "rows", "of": "Member", "count": "directory[9].length / 20", "doc": "What every verse designator covers, run after run; a verse's `membersFrom`/`membersLen` name its run. Empty unless asked for."}
+  ],
+  "records": [
+    {"name": "Token", "stride": 12, "doc": "One lexical token: the leaves of the tree.", "fields": [
+      {"name": "start", "offset": 0, "width": 4, "space": "offset", "doc": "Where the token begins."},
+      {"name": "end", "offset": 4, "width": 4, "space": "offset", "doc": "Where it ends. Spans TILE the document, so ends ascend too."},
+      {"name": "kind", "offset": 8, "width": 1, "space": "plain", "doc": "Packed TokenKind; bit 4 is the per-shape spelling bit."},
+      {"name": "marker", "offset": 9, "width": 1, "space": "plain", "doc": "Row in the marker table; 0 is UNRESOLVED."},
+      {"name": "level", "offset": 10, "width": 1, "space": "plain", "doc": "The trailing number as spelled: 2 for `\\q2`, 1 for `\\tc1`, 0 for a bare `\\q`. The row's `numbering` says whether it is a nesting level or a column index."},
+      {"name": "flags", "offset": 11, "width": 1, "space": "plain", "doc": "`TOKEN_DELIMITER_FOLDED` | `TOKEN_BLANK`. Also rounds the row to 12 bytes, so every row's `start` and `end` land aligned for a typed-array view over a 4-aligned section."}
+    ]},
+    {"name": "Node", "stride": 14, "doc": "One structural node. `token` and the child range are indices, not offsets.", "fields": [
+      {"name": "token", "offset": 0, "width": 4, "space": "plain", "doc": "The opening marker's token index; u32::MAX on the root."},
+      {"name": "childFrom", "offset": 4, "width": 4, "space": "plain", "doc": "Start of this node's range in the child arena."},
+      {"name": "childTo", "offset": 8, "width": 4, "space": "plain", "doc": "End of that range. Ranges are neither contiguous nor monotonic."},
+      {"name": "reason", "offset": 12, "width": 1, "space": "plain", "doc": "CloseReason: Explicit, Implicit, Recovery, Eof."},
+      {"name": "ctx", "offset": 13, "width": 1, "space": "plain", "doc": "The stamped SpecContext."}
+    ]},
+    {"name": "Diagnostic", "stride": 32, "doc": "One finding, with its anchor resolved from a token index to a span.", "fields": [
+      {"name": "code", "offset": 0, "width": 4, "space": "plain", "doc": "Index into the lint catalog."},
+      {"name": "from", "offset": 4, "width": 4, "space": "offset", "doc": "The anchor's start."},
+      {"name": "to", "offset": 8, "width": 4, "space": "offset", "doc": "The anchor's end."},
+      {"name": "secondFrom", "offset": 12, "width": 4, "space": "offset", "doc": "The other party's start, or NONE."},
+      {"name": "secondTo", "offset": 16, "width": 4, "space": "offset", "doc": "The other party's end, or NONE."},
+      {"name": "aux", "offset": 20, "width": 4, "space": "plain", "doc": "The code's aux integer; its meaning is the catalog row's."},
+      {"name": "fix", "offset": 24, "width": 4, "space": "plain", "doc": "Index into the fix section, or NONE."},
+      {"name": "reserved", "offset": 28, "width": 4, "space": "plain", "doc": "Rounds the row to 32 bytes. Room for a u64 code or a checksum."}
+    ]},
+    {"name": "Fix", "stride": 8, "doc": "One offered repair: the edits it owns.", "fields": [
+      {"name": "editFrom", "offset": 0, "width": 4, "space": "plain", "doc": "Start of this fix's range in the edit section."},
+      {"name": "editTo", "offset": 4, "width": 4, "space": "plain", "doc": "End of that range."}
+    ]},
+    {"name": "Edit", "stride": 16, "doc": "One edit of a repair: replace [from, to) with the named text.", "fields": [
+      {"name": "from", "offset": 0, "width": 4, "space": "offset", "doc": "Where the replacement starts."},
+      {"name": "to", "offset": 4, "width": 4, "space": "offset", "doc": "Where it ends; equal to `from` for a pure insertion."},
+      {"name": "textFrom", "offset": 8, "width": 4, "space": "plain", "doc": "Start of the inserted bytes in the fix-text section."},
+      {"name": "textLen", "offset": 12, "width": 4, "space": "plain", "doc": "Their length. Zero is a pure deletion."}
+    ]},
+    {"name": "Chapter", "stride": 26, "doc": "One chapter's extent and number. The rows tile the document.", "fields": [
+      {"name": "start", "offset": 0, "width": 4, "space": "offset", "doc": "Where the chapter begins."},
+      {"name": "end", "offset": 4, "width": 4, "space": "offset", "doc": "Where it ends."},
+      {"name": "token", "offset": 8, "width": 4, "space": "plain", "doc": "The `\\c` marker's token index; NONE on the front-matter row."},
+      {"name": "designator", "offset": 12, "width": 4, "space": "plain", "doc": "The number's own token index, or NONE. `\\c` opens no node, so this is the only route from a chapter to its designator."},
+      {"name": "labelStart", "offset": 16, "width": 4, "space": "offset", "doc": "The designator as written (`12b`), minus its folded delimiter. Empty at the marker's end when there is none; 0..0 on row 0."},
+      {"name": "labelEnd", "offset": 20, "width": 4, "space": "offset", "doc": "Where the label ends."},
+      {"name": "number", "offset": 24, "width": 2, "space": "plain", "doc": "The number read, or 0 for absent or malformed."}
+    ]},
+    {"name": "Verse", "stride": 32, "doc": "One verse anchor and the range of verse numbers it names.", "fields": [
+      {"name": "at", "offset": 0, "width": 4, "space": "offset", "doc": "Where the anchor sits."},
+      {"name": "token", "offset": 4, "width": 4, "space": "plain", "doc": "The `\\v` marker's token index."},
+      {"name": "designator", "offset": 8, "width": 4, "space": "plain", "doc": "The number's own token index, or NONE. `\\v` opens no node, so this is the only route from a verse to its designator."},
+      {"name": "labelStart", "offset": 12, "width": 4, "space": "offset", "doc": "The designator as written (`6a`, `1,3,5`), minus its folded delimiter. Empty at the marker's end when there is none."},
+      {"name": "labelEnd", "offset": 16, "width": 4, "space": "offset", "doc": "Where the label ends."},
+      {"name": "membersFrom", "offset": 20, "width": 4, "space": "plain", "doc": "This verse's first row in the member arena."},
+      {"name": "membersLen", "offset": 24, "width": 2, "space": "plain", "doc": "How many members it covers; 0 when the designator is absent or malformed."},
+      {"name": "chapter", "offset": 26, "width": 2, "space": "plain", "doc": "The enclosing chapter's number."},
+      {"name": "first", "offset": 28, "width": 2, "space": "plain", "doc": "First verse named; 0 when the designator is absent or malformed."},
+      {"name": "last", "offset": 30, "width": 2, "space": "plain", "doc": "Last verse named — a bridge `\\v 5-7` names 5 through 7."}
+    ]},
+    {"name": "Member", "stride": 20, "doc": "One member of a verse designator: a place, or a range joined by `-`. `first..last` on the verse is only the hull; these are what it covers.", "fields": [
+      {"name": "from", "offset": 0, "width": 2, "space": "plain", "doc": "The member's first number."},
+      {"name": "fromSegmentStart", "offset": 2, "width": 4, "space": "offset", "doc": "The segment written after it (`a` in `12a`); empty when none."},
+      {"name": "fromSegmentEnd", "offset": 6, "width": 4, "space": "offset", "doc": "Where that segment ends."},
+      {"name": "to", "offset": 10, "width": 2, "space": "plain", "doc": "Its last number; equal to `from` for a single place. Kept as written."},
+      {"name": "toSegmentStart", "offset": 12, "width": 4, "space": "offset", "doc": "The segment after the last number; empty when none."},
+      {"name": "toSegmentEnd", "offset": 16, "width": 4, "space": "offset", "doc": "Where that segment ends."}
+    ]}
+  ],
+  "sample": {"usfm": "samples/sample.usfm", "bin": "samples/dish.bin", "options": {"diagnostics": true, "toc": true, "utf16": false}}
+}

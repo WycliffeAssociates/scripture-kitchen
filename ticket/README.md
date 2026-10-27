@@ -25,6 +25,12 @@ Two things, and only two:
    the TypeScript accessor class's text, the template fill, and the staleness
    reporter every codegen bin and gate shares.
 
+The vocabulary also has the words a format describes its whole buffer in for
+the docs — `Layout`, `Region`, `Shape`, `Slot`, `Sample` — and `layout_json`
+renders one to `docs/layouts/<format>.json`. That is a description, not a
+grammar: no writer or reader is generated from it, and each format still
+declares its own envelope from its own constants.
+
 **Not here:** any format's declaration, template, magic, version, envelope,
 codegen bin, or generated file. Those live with the format, because an
 envelope is what a format IS — the dish frames sections, a census frames

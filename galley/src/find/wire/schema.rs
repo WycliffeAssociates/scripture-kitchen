@@ -11,7 +11,7 @@
 //! and when it converts is the encoder's business, and this encoder has done
 //! it already.
 
-use ticket::schema::{Field, Record, Repeat};
+use ticket::schema::{Field, Layout, Record, Region, Repeat, Sample, Shape, Slot};
 
 pub use ticket::schema::{Space, Width};
 
@@ -147,3 +147,106 @@ pub const PREVIEW_LEN: Record = Record {
 
 /// Every record, in the order the buffer writes them.
 pub const RECORDS: &[&Record] = &[&HIT, &PIECE, &ID_LEN, &PREVIEW_LEN];
+
+pub const HEADER: &[Slot] = &[
+    Slot {
+        name: "magic",
+        at: HEADER_MAGIC_OFFSET,
+        bytes: HEADER_VERSION_OFFSET - HEADER_MAGIC_OFFSET,
+        doc: "`FIND` in ASCII.",
+    },
+    Slot {
+        name: "version",
+        at: HEADER_VERSION_OFFSET,
+        bytes: HEADER_HIT_COUNT_OFFSET - HEADER_VERSION_OFFSET,
+        doc: "VERSION. A reader that does not know it stops.",
+    },
+    Slot {
+        name: "hitCount",
+        at: HEADER_HIT_COUNT_OFFSET,
+        bytes: HEADER_BOOK_COUNT_OFFSET - HEADER_HIT_COUNT_OFFSET,
+        doc: "Hit rows, and preview lengths.",
+    },
+    Slot {
+        name: "bookCount",
+        at: HEADER_BOOK_COUNT_OFFSET,
+        bytes: HEADER_BYTES - HEADER_BOOK_COUNT_OFFSET,
+        doc: "Books SEARCHED, whether or not they matched: the id table's length.",
+    },
+];
+
+/// The whole find buffer, region by region, for `docs/layouts/find.json`.
+pub fn layout() -> Layout {
+    Layout {
+        format: "find",
+        magic: MAGIC,
+        version: VERSION,
+        declared_in: "galley/src/find/wire/schema.rs",
+        reader: "galley/find-reader.ts",
+        generated: true,
+        doc: "The hits of one search: where a reader sees each, and where an editor would change it.",
+        envelope: vec![
+            Region {
+                name: "header",
+                at: "0".into(),
+                shape: Shape::Fixed {
+                    bytes: HEADER_BYTES,
+                    slots: HEADER,
+                },
+                doc: "The header, ahead of the first hit.",
+            },
+            Region {
+                name: "hits",
+                at: format!("{HEADER_BYTES}"),
+                shape: Shape::Rows {
+                    of: &HIT,
+                    count: "header.hitCount".into(),
+                },
+                doc: HIT.doc,
+            },
+            Region {
+                name: "idLens",
+                at: "after the last hit".into(),
+                shape: Shape::Rows {
+                    of: &ID_LEN,
+                    count: "header.bookCount".into(),
+                },
+                doc: ID_LEN.doc,
+            },
+            Region {
+                name: "previewLens",
+                at: "after idLens".into(),
+                shape: Shape::Rows {
+                    of: &PREVIEW_LEN,
+                    count: "header.hitCount".into(),
+                },
+                doc: PREVIEW_LEN.doc,
+            },
+            Region {
+                name: "strings",
+                at: "after previewLens".into(),
+                shape: Shape::Blob {
+                    bytes: "sum of idByteLen, then sum of previewByteLen".into(),
+                    holds: None,
+                },
+                doc: "Every id's UTF-8 in order, then every preview's; after the lengths so every u32 stays aligned.",
+            },
+        ],
+        records: RECORDS,
+        sample: Some(Sample {
+            usfm: "samples/sample.usfm",
+            bin: "samples/find.bin",
+            options: SAMPLE_OPTIONS,
+        }),
+    }
+}
+
+/// The search the checked-in sample ran: one hit crossing a `\\w` marker, so
+/// it lands on two source pieces, and one that does not.
+pub const SAMPLE_NEEDLE: &str = "the light";
+pub const SAMPLE_OPTIONS: &[(&str, &str)] = &[
+    ("needle", "\"the light\""),
+    ("caseSensitive", "false"),
+    ("wholeWord", "false"),
+    ("limit", "0"),
+];

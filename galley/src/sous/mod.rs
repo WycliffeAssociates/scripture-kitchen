@@ -22,6 +22,7 @@
 //! contract: `sous-chef/core/src/codec/README.md`.
 
 mod expediter;
+pub mod layout;
 mod onion_book;
 pub mod settings;
 

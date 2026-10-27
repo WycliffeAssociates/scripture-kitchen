@@ -5,7 +5,7 @@
 //! so two formats cannot disagree about how a `u16` reaches the buffer, nor
 //! about where a reader looks for it.
 
-use crate::schema::{Field, Record, Space, Width};
+use crate::schema::{Field, Layout, Record, Shape, Slot, Space, Width};
 
 /// Every record's writer, in declaration order — the `@@WRITERS@@` a format's
 /// Rust template is filled with.
@@ -263,5 +263,195 @@ pub fn row_class_ts(record: &Record) -> String {
         ));
     }
     out.push_str("}\n\n");
+    out
+}
+
+/// One format's [`Layout`] as the JSON a docs page draws byte strips from.
+///
+/// Every region and record carries its declaration's `doc`, so what a reader
+/// sees on hover is the sentence the code was written against. A fixed region
+/// or table whose slots do not tile it exactly panics: a layout with a gap in
+/// it would draw bytes nothing declared.
+pub fn layout_json(layout: &Layout) -> String {
+    let magic = String::from_utf8_lossy(&layout.magic.to_le_bytes()).into_owned();
+    let mut out = String::from("{\n");
+    out.push_str(&format!("  \"format\": {},\n", json_str(layout.format)));
+    out.push_str(&format!("  \"magic\": {},\n", json_str(&magic)));
+    out.push_str(&format!("  \"magic_hex\": \"0x{:08x}\",\n", layout.magic));
+    out.push_str(&format!("  \"version\": {},\n", layout.version));
+    out.push_str(&format!(
+        "  \"declared_in\": {},\n",
+        json_str(layout.declared_in)
+    ));
+    out.push_str(&format!("  \"reader\": {},\n", json_str(layout.reader)));
+    out.push_str(&format!("  \"generated\": {},\n", layout.generated));
+    out.push_str(&format!("  \"doc\": {},\n", json_str(layout.doc)));
+    out.push_str("  \"envelope\": [");
+    for (n, region) in layout.envelope.iter().enumerate() {
+        out.push_str(if n == 0 { "\n" } else { ",\n" });
+        let mut head = format!(
+            "\"region\": {}, \"at\": {}",
+            json_str(region.name),
+            json_str(&region.at)
+        );
+        let slots = match &region.shape {
+            Shape::Fixed { bytes, slots } => {
+                tiles(region.name, *bytes, slots);
+                head.push_str(&format!(", \"kind\": \"fixed\", \"bytes\": {bytes}"));
+                Some(slots)
+            }
+            Shape::Table {
+                entry_bytes,
+                count,
+                slots,
+            } => {
+                tiles(region.name, *entry_bytes, slots);
+                head.push_str(&format!(
+                    ", \"kind\": \"table\", \"entry_bytes\": {entry_bytes}, \"count\": {}",
+                    json_str(count)
+                ));
+                Some(slots)
+            }
+            Shape::Rows { of, count } => {
+                head.push_str(&format!(
+                    ", \"kind\": \"rows\", \"of\": {}, \"count\": {}",
+                    json_str(of.name),
+                    json_str(count)
+                ));
+                None
+            }
+            Shape::Words { width, count } => {
+                head.push_str(&format!(
+                    ", \"kind\": \"words\", \"width\": {}, \"count\": {}",
+                    width.bytes(),
+                    json_str(count)
+                ));
+                None
+            }
+            Shape::Blob { bytes, holds } => {
+                head.push_str(&format!(
+                    ", \"kind\": \"blob\", \"bytes\": {}",
+                    json_str(bytes)
+                ));
+                if let Some(format) = holds {
+                    head.push_str(&format!(", \"holds\": {}", json_str(format)));
+                }
+                None
+            }
+        };
+        out.push_str(&format!("    {{{head}, \"doc\": {}", json_str(region.doc)));
+        if let Some(slots) = slots {
+            out.push_str(", \"fields\": [");
+            for (n, slot) in slots.iter().enumerate() {
+                out.push_str(if n == 0 { "\n" } else { ",\n" });
+                out.push_str(&format!(
+                    "      {{\"name\": {}, \"offset\": {}, \"width\": {}, \"doc\": {}}}",
+                    json_str(slot.name),
+                    slot.at,
+                    slot.bytes,
+                    json_str(slot.doc)
+                ));
+            }
+            out.push_str("\n    ]");
+        }
+        out.push('}');
+    }
+    out.push_str(if layout.envelope.is_empty() {
+        "],\n"
+    } else {
+        "\n  ],\n"
+    });
+    out.push_str("  \"records\": [");
+    for (n, record) in layout.records.iter().enumerate() {
+        out.push_str(if n == 0 { "\n" } else { ",\n" });
+        out.push_str(&format!(
+            "    {{\"name\": {}, \"stride\": {}, \"doc\": {}",
+            json_str(record.name),
+            record.stride(),
+            json_str(record.doc)
+        ));
+        if let Some(run) = &record.tail {
+            out.push_str(&format!(
+                ", \"tail\": {{\"count\": {}, \"of\": {}}}",
+                json_str(run.count),
+                json_str(run.of.name)
+            ));
+        }
+        out.push_str(", \"fields\": [");
+        let mut at = 0;
+        for (n, field) in record.fields.iter().enumerate() {
+            out.push_str(if n == 0 { "\n" } else { ",\n" });
+            out.push_str(&format!(
+                "      {{\"name\": {}, \"offset\": {at}, \"width\": {}, \"space\": \"{}\", \"doc\": {}}}",
+                json_str(field.name),
+                field.width.bytes(),
+                match field.space {
+                    Space::Offset => "offset",
+                    Space::Plain => "plain",
+                },
+                json_str(field.doc)
+            ));
+            at += field.width.bytes();
+        }
+        out.push_str("\n    ]}");
+    }
+    out.push_str(if layout.records.is_empty() {
+        "],\n"
+    } else {
+        "\n  ],\n"
+    });
+    match &layout.sample {
+        None => out.push_str("  \"sample\": null\n"),
+        Some(sample) => {
+            let options: Vec<String> = sample
+                .options
+                .iter()
+                .map(|(name, value)| format!("{}: {value}", json_str(name)))
+                .collect();
+            out.push_str(&format!(
+                "  \"sample\": {{\"usfm\": {}, \"bin\": {}, \"options\": {{{}}}}}\n",
+                json_str(sample.usfm),
+                json_str(sample.bin),
+                options.join(", ")
+            ));
+        }
+    }
+    out.push_str("}\n");
+    out
+}
+
+fn tiles(region: &str, bytes: usize, slots: &[Slot]) {
+    let mut at = 0;
+    for slot in slots {
+        assert_eq!(
+            slot.at, at,
+            "{region}.{} leaves a gap or overlaps",
+            slot.name
+        );
+        at += slot.bytes;
+    }
+    assert_eq!(
+        at, bytes,
+        "{region}'s slots cover {at} of its {bytes} bytes"
+    );
+}
+
+/// A JSON string literal: quotes, backslashes and control characters escaped,
+/// everything else as written.
+pub fn json_str(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 2);
+    out.push('"');
+    for c in text.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\t' => out.push_str("\\t"),
+            '\r' => out.push_str("\\r"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
     out
 }

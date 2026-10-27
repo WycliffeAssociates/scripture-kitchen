@@ -36,3 +36,30 @@ pub fn first_difference(what: &str, fix: &str, fresh: &str, checked_in: &str) ->
         }
     )
 }
+
+/// The same for a checked-in binary: the first byte offset that differs.
+///
+/// ```text
+/// samples/dish.bin is STALE — run `cargo run --bin codegen`.
+/// First difference at byte 0x38: checked in 0x0c, fresh 0x0d (1168 vs 1172 bytes).
+/// ```
+pub fn first_byte_difference(what: &str, fix: &str, fresh: &[u8], checked_in: &[u8]) -> String {
+    let at = fresh
+        .iter()
+        .zip(checked_in)
+        .position(|(a, b)| a != b)
+        .unwrap_or(fresh.len().min(checked_in.len()));
+    let byte = |bytes: &[u8]| {
+        bytes
+            .get(at)
+            .map_or("<eof>".into(), |b| format!("0x{b:02x}"))
+    };
+    format!(
+        "{what} is STALE — run `{fix}`.\nFirst difference at byte 0x{at:x}: checked in {}, \
+         fresh {} ({} vs {} bytes).",
+        byte(checked_in),
+        byte(fresh),
+        checked_in.len(),
+        fresh.len(),
+    )
+}

@@ -19,7 +19,7 @@ use crate::{BookIndex, BookKey};
 mod cluster_row;
 mod codes;
 mod error;
-mod layout;
+pub mod layout;
 mod pattern_row;
 mod reader_ts;
 mod terminal_row;

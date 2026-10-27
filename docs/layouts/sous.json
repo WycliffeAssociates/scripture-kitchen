@@ -1,0 +1,76 @@
+{
+  "format": "sous",
+  "magic": "SOUS",
+  "magic_hex": "0x53554f53",
+  "version": 3,
+  "declared_in": "sous-chef/core/src/corpus/layout.rs",
+  "reader": "galley/sous-reader.ts",
+  "generated": false,
+  "doc": "One complete corpus publication: every finding, the patterns that argue for them, and what the corpus does instead.",
+  "envelope": [
+    {"region": "header", "at": "0", "kind": "fixed", "bytes": 64, "doc": "Counts and absolute offsets for every section behind it.", "fields": [
+      {"name": "magic", "offset": 0, "width": 4, "doc": "`SOUS`, little-endian."},
+      {"name": "version", "offset": 4, "width": 4, "doc": "FORMAT_VERSION. A reader that does not know it stops."},
+      {"name": "flags", "offset": 8, "width": 4, "doc": "Bit 0: every span is raw-book UTF-16 rather than bytes."},
+      {"name": "bookCount", "offset": 12, "width": 4, "doc": "Directory rows, in caller order."},
+      {"name": "recordLen", "offset": 16, "width": 4, "doc": "The record stride, 16."},
+      {"name": "totalFindings", "offset": 20, "width": 4, "doc": "Records across every book's section."},
+      {"name": "patternCount", "offset": 24, "width": 4, "doc": "Rows in the pattern table."},
+      {"name": "patternOffset", "offset": 28, "width": 4, "doc": "Where the pattern table starts, absolute."},
+      {"name": "snapshotId", "offset": 32, "width": 16, "doc": "Opaque identity of the snapshot; a finding handle is this plus a row."},
+      {"name": "clusterCount", "offset": 48, "width": 4, "doc": "Entries in the cluster section."},
+      {"name": "clusterOffset", "offset": 52, "width": 4, "doc": "Where it starts: the running cursor after the pattern table."},
+      {"name": "terminalCount", "offset": 56, "width": 4, "doc": "Entries in the terminal section."},
+      {"name": "terminalOffset", "offset": 60, "width": 4, "doc": "Where it starts: the running cursor after the cluster section."}
+    ]},
+    {"region": "directory", "at": "64", "kind": "table", "entry_bytes": 20, "count": "header.bookCount", "doc": "One row per book, in caller order.", "fields": [
+      {"name": "key", "offset": 0, "width": 3, "doc": "The book code, ASCII."},
+      {"name": "terminator", "offset": 3, "width": 1, "doc": "NUL."},
+      {"name": "publishedLength", "offset": 4, "width": 4, "doc": "The book's length in the header's coordinate space; no span passes it."},
+      {"name": "sectionOffset", "offset": 8, "width": 4, "doc": "Where this book's records start, absolute."},
+      {"name": "findingCount", "offset": 12, "width": 4, "doc": "How many."},
+      {"name": "idOffset", "offset": 16, "width": 4, "doc": "Where the caller's id for this book starts in the id strings."}
+    ]},
+    {"region": "ids", "at": "after the directory", "kind": "blob", "bytes": "per book: a u16 length, then that many UTF-8 bytes; padded to 4", "doc": "The caller's id for each book, in directory order."},
+    {"region": "patterns", "at": "header.patternOffset", "kind": "table", "entry_bytes": 36, "count": "header.patternCount", "doc": "The judge's output, one row per firing pattern; a Convention record names one by index.", "fields": [
+      {"name": "glyph", "offset": 0, "width": 4, "doc": "The scalar; u32::MAX is the pooled digit key."},
+      {"name": "neighbor", "offset": 4, "width": 4, "doc": "The neighbouring scalar on ExactNeighbor; 0 on every other channel."},
+      {"name": "channel", "offset": 8, "width": 1, "doc": "The Channel discriminant, finest grain first."},
+      {"name": "key", "offset": 9, "width": 1, "doc": "A byte each channel gives its own meaning."},
+      {"name": "band", "offset": 10, "width": 1, "doc": "Staircase step; 0xFF is none."},
+      {"name": "flags", "offset": 11, "width": 1, "doc": "Bit 0 LOOKALIKE, on a Rarity row only."},
+      {"name": "numerator", "offset": 12, "width": 4, "doc": "How often the pattern occurred."},
+      {"name": "denominator", "offset": 16, "width": 4, "doc": "Out of how many chances."},
+      {"name": "shareBp", "offset": 20, "width": 2, "doc": "That share in basis points, at most 10,000."},
+      {"name": "books", "offset": 22, "width": 1, "doc": "Books holding part of the numerator; books-possible is the header's bookCount."},
+      {"name": "facing", "offset": 23, "width": 1, "doc": "ExactNeighbor only: the pair's Facing byte, 0 when it holds no directionless quote."},
+      {"name": "usual", "offset": 24, "width": 4, "doc": "What is usual instead; each channel owns the meaning."},
+      {"name": "usualCount", "offset": 28, "width": 4, "doc": "How often the usual occurred."},
+      {"name": "otherCount", "offset": 32, "width": 4, "doc": "The third lane, per channel."}
+    ]},
+    {"region": "clusters", "at": "header.clusterOffset", "kind": "table", "entry_bytes": 8, "count": "header.clusterCount", "doc": "The exact runs each RunShape row lists, each entry followed by atomCount u32 scalars.", "fields": [
+      {"name": "pattern", "offset": 0, "width": 2, "doc": "The RunShape row this run is of."},
+      {"name": "atomCount", "offset": 2, "width": 1, "doc": "Atoms stored after the entry, 1..=16, a u32 scalar each."},
+      {"name": "flags", "offset": 3, "width": 1, "doc": "Bit 0 RECURRING, bit 1 TRUNCATED, the high nibble the run's Facing."},
+      {"name": "count", "offset": 4, "width": 4, "doc": "Corpus occurrences of exactly this run."}
+    ]},
+    {"region": "terminals", "at": "header.terminalOffset", "kind": "table", "entry_bytes": 16, "count": "header.terminalCount", "doc": "What the corpus hands off to after each mark, one entry per mark and context.", "fields": [
+      {"name": "glyph", "offset": 0, "width": 4, "doc": "The mark, a scalar."},
+      {"name": "context", "offset": 4, "width": 1, "doc": "Bit 0 QUOTED, bit 1 BRACKETED: what stood between mark and word."},
+      {"name": "pad", "offset": 5, "width": 3, "doc": "Zero."},
+      {"name": "upper", "offset": 8, "width": 4, "doc": "Handoffs to an uppercase letter."},
+      {"name": "cased", "offset": 12, "width": 4, "doc": "Handoffs to a cased letter; never 0, at least upper."}
+    ]},
+    {"region": "records", "at": "directory[book].sectionOffset", "kind": "table", "entry_bytes": 16, "count": "directory[book].findingCount", "doc": "Fixed-width findings, one section per book, no padding.", "fields": [
+      {"name": "from", "offset": 0, "width": 4, "doc": "Start, in the coordinate space the header declares."},
+      {"name": "to", "offset": 4, "width": 4, "doc": "End, exclusive."},
+      {"name": "bookIndex", "offset": 8, "width": 2, "doc": "Into the directory; always this section's own book."},
+      {"name": "code", "offset": 10, "width": 1, "doc": "The rule code: the union tag the two lanes are read by."},
+      {"name": "flags", "offset": 11, "width": 1, "doc": "Only SATURATED: a lane was clamped."},
+      {"name": "laneA", "offset": 12, "width": 2, "doc": "An i16 whose meaning the rule code owns."},
+      {"name": "laneB", "offset": 14, "width": 2, "doc": "A second i16 the rule code owns."}
+    ]}
+  ],
+  "records": [],
+  "sample": {"usfm": "samples/sample.usfm", "bin": "samples/sous.bin", "options": {"ids": ["sample.usfm"], "role": "target"}}
+}
