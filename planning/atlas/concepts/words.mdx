@@ -21,7 +21,7 @@ One rule in [[mise]] ([[invariants]] 7): a close variant of Unicode's word bound
 ## Trade-offs
 
 - The wasm carries its own Unicode class table, pinned to 17.0.0, where a host could have used the browser's `Intl.Segmenter` for nothing.
-- Its words are not quite UAX #29's: `father-in-law` is one word here and three there. [[diff]] splits by it too, so a hyphenated word changes as one run, and `12,345` diffs as `12` `,` `345`, where UAX #29 keeps one number.
+- Its words are not quite UAX #29's: `father-in-law` is one word here and three there. [[diff]] splits by it too, so a hyphenated word changes as one run; a number such as `12,345` or `3.5` stays one unit, as in UAX #29.
 - An emoji ZWJ sequence or a flag is no word, and diff splits it into scalars; scripture carries neither.
 - Frozen per version; improving it means `words/2` and a re-hash in every consumer.
 

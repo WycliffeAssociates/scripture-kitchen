@@ -284,32 +284,81 @@ pub fn for_each_word(text: &str, mut visit: impl FnMut(u32, u32)) {
     }
 }
 
-/// Calls `visit` with every unit of `text`, in order: each core run of the
-/// rule (a word, or digits and glue holding no letter) as [`for_each_word`]
-/// cuts it, each line break, each run of other whitespace, and every other
-/// scalar alone. The units tile `text`.
+/// Calls `visit` with every unit of `text`, in order: each word as
+/// [`for_each_word`] cuts it, each number, each line break, each run of other
+/// whitespace, and every other scalar alone. A number is a letterless core run,
+/// extended through one separator (`,` `.` `'` `’` `٫` `٬`) that has a digit
+/// run on both sides. The units tile `text`.
 ///
 /// ```text
-/// for_each_unit("He said, don't-3rd 12,345\r\n")
-///   0..2    He     word
+/// for_each_unit("He said, don't-3rd 12,345.\r\n")
+///   0..2    He      word
 ///   2..3    ␠
-///   3..7    said   word
+///   3..7    said    word
 ///   7..8    ,
 ///   8..9    ␠
-///   9..14   don't  word
-///   14..15  -      the joiner a digit refused
-///   15..18  3rd    word
+///   9..14   don't   word
+///   14..15  -       the joiner a digit refused
+///   15..18  3rd     word
 ///   18..19  ␠
-///   19..21  12     no letter, no word
-///   21..22  ,
-///   22..25  345
-///   25..27  ␍␊     one line break
+///   19..25  12,345  one number
+///   25..26  .       no digit after it
+///   26..28  ␍␊      one line break
 /// ```
 pub fn for_each_unit(text: &str, mut visit: impl FnMut(u32, u32, bool)) {
+    let mut number: Option<(u32, u32)> = None;
+    let mut separator: Option<(u32, u32)> = None;
+    tile(text, &mut |from, to, kind| match kind {
+        Kind::Number if separator.is_some() => {
+            number = number.map(|(start, _)| (start, to));
+            separator = None;
+        }
+        Kind::Other
+            if number.is_some()
+                && separator.is_none()
+                && is_digit_separator(&text[from as usize..to as usize]) =>
+        {
+            separator = Some((from, to));
+        }
+        _ => {
+            release(&mut number, &mut separator, &mut visit);
+            match kind {
+                Kind::Number => number = Some((from, to)),
+                _ => visit(from, to, kind == Kind::Word),
+            }
+        }
+    });
+    release(&mut number, &mut separator, &mut visit);
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    Word,
+    Number,
+    Other,
+}
+
+fn release(
+    number: &mut Option<(u32, u32)>,
+    separator: &mut Option<(u32, u32)>,
+    visit: &mut impl FnMut(u32, u32, bool),
+) {
+    for (from, to) in [number.take(), separator.take()].into_iter().flatten() {
+        visit(from, to, false);
+    }
+}
+
+fn is_digit_separator(unit: &str) -> bool {
+    matches!(unit, "," | "." | "'" | "\u{2019}" | "\u{66B}" | "\u{66C}")
+}
+
+/// The core runs and the gaps between them, before numbers join.
+fn tile(text: &str, visit: &mut dyn FnMut(u32, u32, Kind)) {
     let mut at = 0u32;
-    let mut emit = |run: Run, visit: &mut dyn FnMut(u32, u32, bool)| {
+    let mut emit = |run: Run, visit: &mut dyn FnMut(u32, u32, Kind)| {
         gap(text, at, run.from, visit);
-        visit(run.from, run.to, run.word);
+        let kind = if run.word { Kind::Word } else { Kind::Number };
+        visit(run.from, run.to, kind);
         at = run.to;
     };
     let mut split = Splitter::default();
@@ -317,18 +366,18 @@ pub fn for_each_unit(text: &str, mut visit: impl FnMut(u32, u32, bool)) {
         if let Step::Close(run) | Step::Restart(run) =
             split.step(offset as u32, scalar, class_of(scalar))
         {
-            emit(run, &mut visit);
+            emit(run, visit);
         }
     }
     if let Some(run) = split.finish(text.len() as u32) {
-        emit(run, &mut visit);
+        emit(run, visit);
     }
-    gap(text, at, text.len() as u32, &mut visit);
+    gap(text, at, text.len() as u32, visit);
 }
 
 /// The scalars between two core runs: each line break alone (`\r\n` is one),
 /// each run of other whitespace whole, every other scalar alone.
-fn gap(text: &str, from: u32, to: u32, visit: &mut dyn FnMut(u32, u32, bool)) {
+fn gap(text: &str, from: u32, to: u32, visit: &mut dyn FnMut(u32, u32, Kind)) {
     let mut space: Option<u32> = None;
     let mut scalars = text[from as usize..to as usize].char_indices().peekable();
     while let Some((offset, scalar)) = scalars.next() {
@@ -338,16 +387,16 @@ fn gap(text: &str, from: u32, to: u32, visit: &mut dyn FnMut(u32, u32, bool)) {
             continue;
         }
         if let Some(start) = space.take() {
-            visit(start, at, false);
+            visit(start, at, Kind::Other);
         }
         let mut end = at + scalar.len_utf8() as u32;
         if scalar == '\r' && scalars.next_if(|&(_, next)| next == '\n').is_some() {
             end += 1;
         }
-        visit(at, end, false);
+        visit(at, end, Kind::Other);
     }
     if let Some(start) = space {
-        visit(start, to, false);
+        visit(start, to, Kind::Other);
     }
 }
 
@@ -643,7 +692,7 @@ mod tests {
     #[test]
     fn the_unit_example_is_exact() {
         assert_eq!(
-            units("He said, don't-3rd 12,345\r\n"),
+            units("He said, don't-3rd 12,345.\r\n"),
             [
                 ("He", true),
                 (" ", false),
@@ -654,12 +703,27 @@ mod tests {
                 ("-", false),
                 ("3rd", true),
                 (" ", false),
-                ("12", false),
-                (",", false),
-                ("345", false),
+                ("12,345", false),
+                (".", false),
                 ("\r\n", false),
             ]
         );
+    }
+
+    #[test]
+    fn a_number_joins_through_one_separator_between_digits() {
+        assert_eq!(units("1,234,567"), [("1,234,567", false)]);
+        assert_eq!(units("3.5"), [("3.5", false)]);
+        assert_eq!(units("1\u{2019}000"), [("1\u{2019}000", false)]);
+        assert_eq!(units("\u{663}\u{66B}\u{665}"), [("\u{663}\u{66B}\u{665}", false)]);
+        assert_eq!(units("12,,3"), [("12", false), (",", false), (",", false), ("3", false)]);
+        assert_eq!(units("12, 3"), [("12", false), (",", false), (" ", false), ("3", false)]);
+        assert_eq!(units("1:1"), [("1", false), (":", false), ("1", false)]);
+        assert_eq!(units("v3.a"), [("v3", true), (".", false), ("a", true)]);
+        assert_eq!(units("12,"), [("12", false), (",", false)]);
+        for text in ["1,234,567", "3.5", "12,,3", "12, 3", "12,"] {
+            tiles(text);
+        }
     }
 
     #[test]

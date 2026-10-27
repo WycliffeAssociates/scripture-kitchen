@@ -17,7 +17,7 @@ mise = { path = "../mise" }
 rustc-hash.workspace = true
 # The diff port's two algorithm layers: Myers over block keys, and the word /
 # grapheme diff inside a unit. Pure Rust, no_std-friendly, wasm-clean.
-similar = { version = "2.7", features = ["unicode"] }
+similar = "2.7"
 # Grapheme clusters for the `chars` text diff, per note-bounded segment so a
 # footnote's text never fuses with the text it follows. Words are `words/1`.
 unicode-segmentation = "1"
