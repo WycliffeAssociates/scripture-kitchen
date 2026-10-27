@@ -16,11 +16,11 @@ Lint fixes, format, diff merges and overlay all propose changes to a file the ed
 
 ## The solution
 
-Every writer returns splice edits, a byte range plus replacement text, and never a new document ([[invariants]] 1, 3). Untouched bytes stay untouched, each change can be previewed alone, and one reference applier serves tests and other bindings. Why returning a whole new document was rejected is not recorded.
+Every writer returns splice edits, a byte range plus replacement text, and never a new document ([[invariants]] 1, 3). Untouched bytes stay untouched, each change can be previewed alone, and one reference applier serves tests and other bindings.
 
 ## Trade-offs
 
-- Offsets are bytes; the editor converts to UTF-16 at the boundary ([[utf16]]).
+- Offsets are bytes; a JS editor converts to UTF-16 at the boundary ([[utf16]]).
 - A set of edits is valid only against the exact text it was computed from.
 - Two inserts at one point merge, so last-to-first application keeps their order.
 
@@ -28,12 +28,12 @@ Every writer returns splice edits, a byte range plus replacement text, and never
 
 The shape, and what overlay returns for one passage (from `galley/src/overlay.md`):
 
-```text
-Edit { from, to, insert }        replace source[from..to] with insert
+```rust
+pub struct Edit { pub from: u32, pub to: u32, pub insert: FixStr } // replace source[from..to] with insert
 
-overlay(target, source) → 6 edits, ascending, non-overlapping
-  insert "\p\n"   at the target's \v 21
-  insert "\n\q1" "\n\q2" "\n\q1" "\n\q2"   after verse 23's text   ← one edit, shared position
+let edits = overlay(target, source); // 6 edits, ascending, non-overlapping
+// insert "\p\n" at the target's \v 21
+// insert "\n\q1" "\n\q2" "\n\q1" "\n\q2" after verse 23's text: one edit each, shared position
 ```
 
 ## How it works

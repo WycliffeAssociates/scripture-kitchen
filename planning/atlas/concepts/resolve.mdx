@@ -5,18 +5,18 @@ aliases: [Locate, Address, opening, Resolution]
 kind: primitive
 crate: onion
 files: [onion/src/resolve.rs, onion/src/resolve.md, testData/resolve/cases.json, mise/src/address.rs, onion-wasm/src/resolution.rs]
-related: [toc, designator, mise, galley-package, sefer]
+related: [toc, designator, mise, galley-package]
 level: 2
 summary: "An address like LUK 1:2 to one byte range in one text, or an explicit missing or ambiguous; never the nearest match."
 ---
 
 ## The problem
 
-Sefer's "go to Luke 1:2" meets bridged verses (`\v 1-2`), gaps (`\v 1,3`) and duplicated chapters, and usually wants the heading before the verse too.
+An editor's "go to Luke 1:2" meets bridged verses (`\v 1-2`), gaps (`\v 1,3`) and duplicated chapters, and usually wants the heading before the verse too.
 
 ## The solution
 
-Answer from the [[toc]] with found, missing or ambiguous. Found carries the range, an earlier "opening" that takes in preceding headings, and the verses actually covered. Never the nearest match ([[invariants]] 3): Sefer's older merge of overlapping matches hid broken text and was not ported. [[code:mise/src/address.rs#Address]] lives in [[mise]], so any crate can name a place without onion.
+Answer from the [[toc]] with found, missing or ambiguous. Found carries the range, an earlier "opening" that takes in preceding headings, and the verses actually covered. Never the nearest match ([[invariants]] 3): merging overlapping matches would hide broken text. [[code:mise/src/address.rs#Address]] lives in [[mise]], so any crate can name a place without onion.
 
 ## Trade-offs
 
@@ -28,13 +28,13 @@ Answer from the [[toc]] with found, missing or ambiguous. Found carries the rang
 
 Each line is a tiny source text, the reference asked for, and the answer. Note the bridge, the hole, the duplicate chapter, and the heading picked up by `opening`.
 
-```text
-\v 1-2 a b\n\v 3 c          LUK 1:2   → found \v 1-2 .. \v 3, covers LUK 1:1-2
-\v 1,3 a\n\v 4 b            LUK 1:2   → missing verse within chapter 1
-\c 3\n\p a\n\c 3\n\p b\n    LUK 3     → ambiguous [0..10, 10..20]
-\v 3 a                      LUK 1:3a  → found \v 3, covers LUK 1:3, coarser
-\v 1 a\n\s1 A heading\n\p\n\v 2   LUK 1:2 opening at \s1
-```
+| source | asked | answer |
+| --- | --- | --- |
+| `\v 1-2 a b\n\v 3 c` | `LUK 1:2` | found `\v 1-2 .. \v 3`, covers LUK 1:1-2 |
+| `\v 1,3 a\n\v 4 b` | `LUK 1:2` | missing verse within chapter 1 |
+| `\c 3\n\p a\n\c 3\n\p b\n` | `LUK 3` | ambiguous `[0..10, 10..20]` |
+| `\v 3 a` | `LUK 1:3a` | found `\v 3`, covers LUK 1:3, coarser |
+| `\v 1 a\n\s1 A heading\n\p\n\v 2` | `LUK 1:2` | opening at `\s1` |
 
 At the JS wall:
 
@@ -46,14 +46,14 @@ JSON.parse(resolve(text, { kind: "verses", from: { chapter: 1, verse: 2 }, to: {
 ## How it works
 
 - **Every answer from the one text's [[toc]].** Ambiguity is malformed text, said so with every candidate in source order (`resolve.md`, "Where this departs").
-- **`opening` is new.** `opening..to` is what a multibuffer clips: it walks back over line openers and headings before the first `\v`. `from..to` is what a check reads.
+- **`opening` takes in headings.** `opening..to` is what a multibuffer clips: it walks back over line openers and headings before the first `\v`. `from..to` is what a check reads.
 - **Members, not hulls.** A verse is found by the [[designator]]'s members, so `\v 1,3` does not claim verse 2.
-- **Cases as data.** `testData/resolve/cases.json` holds cases any language can run (31 at first, commit 4b17b21); `gen_cases.py` reproduces it byte for byte (commit a28a2eb).
+- **Cases as data.** `testData/resolve/cases.json` holds cases any language can run; `gen_cases.py` reproduces it byte for byte.
 - **The Address type lives in [[mise]]**, so a place in scripture no text owns is not an onion type.
 
 ## Composes with
 
-Reads the [[toc]] and the source (segment letters, the opening walk), using the [[designator]]'s members. Served by `onion-wasm`'s `resolve` and galley's `Galley.resolve`/`resolveOf` ([[galley-package]]); [[sefer]] is the asker.
+Reads the [[toc]] and the source (segment letters, the opening walk), using the [[designator]]'s members. Served by `onion-wasm`'s `resolve` and galley's `Galley.resolve`/`resolveOf` ([[galley-package]]), for an editor's go-to and multibuffer.
 
 ## Where
 

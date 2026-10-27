@@ -12,7 +12,7 @@ summary: "Byte to UTF-16 offset conversion. An index beside live text, and a 14%
 
 ## The problem
 
-Onion counts UTF-8 bytes and Sefer counts UTF-16 units. They diverge on every non-ASCII character, which in Hindi or Greek is nearly every one, and every offset crossing to JS has to convert.
+Onion counts UTF-8 bytes and JS strings count UTF-16 units. They diverge on every non-ASCII character, which in Hindi or Greek is nearly every one, and every offset crossing to JS has to convert.
 
 ## The solution
 
@@ -21,30 +21,34 @@ Two structures, built once and reused. [[code:mise/src/utf16.rs#Utf16Index]] che
 ## Trade-offs
 
 - The table costs 14% of the text (36 bytes per 256), on every script.
-- The table answers only at character boundaries; every offset the cache converts is one.
+- The table answers only at character boundaries; an offset inside a character has no UTF-16 position.
 - The index borrows its text and cannot outlive it; that is what the table is for.
 
 ## Show me
 
 A Greek verse: the bytes, then the byte and UTF-16 positions under each character. From `mise/src/utf16.rs`:
 
-```text
+```rust
 let ix = utf16_index("\\v 1 λόγος ἦν".as_bytes());
-ix.to_utf16(16) == 11        ix.to_byte(11) == 16        ix.len_utf16() == 13
+assert_eq!(ix.to_utf16(16), 11);  // ἦ starts at byte 16, unit 11
+assert_eq!(ix.to_byte(11), 16);
+assert_eq!(ix.len_utf16(), 13);
 
-let t = utf16_table("\\v 1 λόγος ἦν".as_bytes());   // then drop the string
-t.to_utf16(16) == 11
-
-bytes   \  v  ␠  1  ␠  CE BB CF 8C CE B3 CE BF CF 82 ␠  E1 BC A6 CE BD
-byte#   0  1  2  3  4  5     7     9     11    13    15 16       19
-utf16#  0  1  2  3  4  5     6     7     8     9     10 11       12
+let t = utf16_table("\\v 1 λόγος ἦν".as_bytes()); // then drop the string
+assert_eq!(t.to_utf16(16), 11);                    // still answers
 ```
+
+| | `\` | `v` | ␠ | `1` | ␠ | λ | ό | γ | ο | ς | ␠ | ἦ | ν |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| bytes | 5C | 76 | 20 | 31 | 20 | CE BB | CF 8C | CE B3 | CE BF | CF 82 | 20 | E1 BC A6 | CE BD |
+| byte# | 0 | 1 | 2 | 3 | 4 | 5 | 7 | 9 | 11 | 13 | 15 | 16 | 19 |
+| utf16# | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 |
 
 ## How it works
 
-- **Index: stride 256 + SWAR.** Per-drift-change anchors cost 236% of the source on Devanagari (705 KB for a 292 KB book). Fixed-stride anchors cost 1.6% on every script and build 6–13x faster (commit 68ffdf5, from Will's Hindi IRV question).
+- **Index: stride 256 + SWAR.** Per-drift-change anchors cost 236% of the source on Devanagari (705 KB for a 292 KB book). Fixed-stride anchors cost 1.6% on every script and build 6–13x faster.
 - **Table: one bit per byte** plus a `u32` total per 256 bytes: 36 bytes per 256, 14.06%, identical on all eight tier corpora (`pantry.md`). Lets the [[pantry]] drop text it does not keep and still rebase offsets.
-- **One sweep, not one per read.** Building once cut `analyze::full` on en_ulb from 28.10 ms to 18.51 ms (commit 46ed346).
+- **One sweep, not one per read.** Building once cut `analyze::full` on en_ulb from 28.10 ms to 18.51 ms.
 - **In [[mise]]** so onion and sous-chef share the offset types.
 
 ## Composes with

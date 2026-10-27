@@ -16,7 +16,7 @@ Teams proofread languages with no dictionary, model or style guide, and conventi
 
 ## The solution
 
-Learn each convention from the project and flag departures ([[invariants]] 7). Glyph neighbours, placement, run shapes and rarity, and word casing, doubling and length, are counted; a verdict is a fraction of the project's own population ("1 of 1,053") that must clear a support floor (default 5) and a share band scaled to the denominator. A `` ,` `` pair against 5,000 plain commas fires on run shape (1 in 5,001, band 100 bp); French guillemet spacing, Amharic `::` and uncased scripts abstain with no allow-list. Band defaults come from a sweep of 1,504 fleet corpora. Hygiene (control characters, U+FFFD, conflict markers) is the deterministic exception, and length proportionality compares against a source.
+Learn each convention from the project and flag departures ([[invariants]] 7). Glyph neighbours, placement, run shapes and rarity, and word casing, doubling and length, are counted; a verdict is a fraction of the project's own population ("1 of 1,053") that must clear a support floor (default 5) and a share band scaled to the denominator. A `` ,` `` pair against 5,000 plain commas fires on run shape (1 in 5,001, band 100 bp); French guillemet spacing, Amharic `::` and uncased scripts abstain with no allow-list. Band defaults are measured on real projects (`evidence.md`). Hygiene (control characters, U+FFFD, conflict markers) is the deterministic exception, and length proportionality compares against a source.
 
 ## Trade-offs
 
@@ -28,10 +28,10 @@ Learn each convention from the project and flag departures ([[invariants]] 7). G
 
 Two findings as the CLI prints them: a rare comma placement, and a verse far shorter than usual.
 
-```text
-pattern[0] U+002C ',' placement next=Digit 12/9812 0.12% band 4 · 3/66 books 11 sites usual=Letter 9,700
-length target[0] MRK 1:9 ratio 0.14 z_book -8.72 z_project -6.05
-```
+| printed | reads as |
+| --- | --- |
+| `pattern[0] U+002C ',' placement next=Digit 12/9812 0.12% band 4 · 3/66 books 11 sites usual=Letter 9,700` | a comma before a digit: 12 of 9,812 commas, 11 sites in 3 of 66 books; the usual neighbour is a letter (9,700) |
+| `length target[0] MRK 1:9 ratio 0.14 z_book -8.72 z_project -6.05` | MRK 1:9 is 0.14 of its expected length, far out against its book and the project |
 
 (From `sous-chef/cli/src/main.rs`.)
 

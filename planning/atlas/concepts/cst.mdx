@@ -16,15 +16,16 @@ Lint, mask, the exports and the dish all need containment: is this word inside a
 
 ## The solution
 
-A concrete tree over the token stream, not an AST ([[invariants]] 1). An AST applies the spec's whitespace reduction and normalises closers, so loading through it is lossy. Two things keep this one lossless. Whitespace past a marker's one delimiter byte is a `Pad` token: kept, flagged by lint, dropped only by text views. And a frame the file never closed is closed **implicitly**: the node records `Implicit`, `Recovery` or `Eof` in its `reason` byte, and no `\ft*` or `\f*` token is invented.
+A concrete tree over the token stream, not an AST ([[invariants]] 1). An AST applies the spec's [whitespace reduction](https://docs.usfm.bible/usfm/3.1/whitespace.html#ws-reducing) and normalises closers, so loading through it is lossy. USJ and USX are lossy for the same reason: their key:value shape cannot hold every USFM byte, and it forces an object graph. So the library keeps USFM itself as the document and answers in string offsets into it. Two things keep this one lossless. Whitespace past a marker's one delimiter byte is a `Pad` token: kept, flagged by lint, dropped only by text views. And a frame the file never closed is closed **implicitly**: the node records `Implicit`, `Recovery` or `Eof` in its `reason` byte, and no `\ft*` or `\f*` token is invented.
 
 Chapters and verses are Points (siblings), not containers, because verse and paragraph boundaries cross; the [[toc]] addresses them.
 
 ## Trade-offs
 
-- One tree, no views: blocks, lines and note interiors are each consumer's to build.
+- Traversing the tree as an editor is opaque without knowing USFM: which markers nest, which are Points, why a `\p` closed. There are no ready-made views; blocks, lines and note interiors are each consumer's to build.
+- Whitespace the spec would collapse is kept, so a file can carry extra spaces where none are needed; lint flags them as Pad rather than removing them.
 - Broken input still gets a tree. An unclosed `\f` closes by `Recovery`, and lint reports it.
-- About 6 ns per token, roughly 40% of lex time; the heaviest real book builds in about 0.6 ms.
+- Building it costs about 40% on top of a lex; the heaviest real book builds in about 0.6 ms.
 
 ## Show me
 
@@ -32,7 +33,7 @@ The file below has a footnote, a character style, a heading and a poetry line. L
 
 Input, 125 bytes (a scratch book run through `lex` then `cst::build`):
 
-```text
+```usfm
 \id MRK
 \mt1 Mark
 \c 1
@@ -45,57 +46,54 @@ Input, 125 bytes (a scratch book run through `lex` then `cst::build`):
 
 Output: 37 tokens, 9 nodes, 45 child ids.
 
-```text
-node 0 <root>  children 37..45  Eof
-node 1 \id     children  0..3   Implicit   ctx Scripture
-node 2 \mt1    children  3..6   Implicit   ctx Section
-node 3 \p      children 15..29  Implicit   ctx Para
-node 4 \f      children  8..12  Explicit   ctx Footnote
-node 5 \ft     children  6..8   Implicit   ctx Footnote
-node 6 \nd     children 12..15  Explicit   ctx Para
-node 7 \s1     children 29..32  Implicit   ctx Section
-node 8 \q1     children 32..37  Eof        ctx Para
+| node | marker | children | reason | context |
+| --- | --- | --- | --- | --- |
+| 0 | root | 37..45 | Eof | |
+| 1 | `\id` | 0..3 | Implicit | Scripture |
+| 2 | `\mt1` | 3..6 | Implicit | Section |
+| 3 | `\p` | 15..29 | Implicit | Para |
+| 4 | `\f` | 8..12 | Explicit | Footnote |
+| 5 | `\ft` | 6..8 | Implicit | Footnote |
+| 6 | `\nd` | 12..15 | Explicit | Para |
+| 7 | `\s1` | 29..32 | Implicit | Section |
+| 8 | `\q1` | 32..37 | Eof | Para |
 
-root's children: [node 1, node 2, tok 6 \c, tok 7 "1", tok 8 ⏎, node 3, node 7, node 8]
-\p's children:   [tok 9 \p, tok 10 ⏎, tok 11 \v, tok 12 "1 ", tok 13 "Jesus wept.", node 4, tok 19 " Then", …]
+```rust
+// root's children: [node 1, node 2, tok 6 \c, tok 7 "1", tok 8 ⏎, node 3, node 7, node 8]
+// \p's children:   [tok 9 \p, tok 10 ⏎, tok 11 \v, tok 12 "1 ", tok 13 "Jesus wept.", node 4, tok 19 " Then", …]
 ```
 
 Read it as a tree:
 
-```text
-<root>
-├─ \id MRK
-├─ \mt1 Mark
-├─ \c 1                       ← a Point: a sibling of \p, not its parent
-├─ \p
-│  ├─ \v 1  Jesus wept.        ← \v is a Point inside \p
-│  ├─ \f + ─ \ft why ─ \f*     ← Explicit: closed by its own \f*
-│  ├─ Then  \v 2-3  he
-│  ├─ \nd Lord \nd*
-│  └─    spoke.
-├─ \s1 A heading               ← \p closed Implicit: \s1 outranks it
-└─ \q1 \v 4 Bread.             ← closed at Eof
+```mermaid
+flowchart TD
+  root["root"] --> id["\id MRK"] & mt["\mt1 Mark"] & c["\c 1 · Point, a sibling of \p"] & p["\p · Implicit: \s1 outranks it"] & s1["\s1 A heading"] & q1["\q1 · Eof"]
+  p --> v1["\v 1 Jesus wept. · Point inside \p"] & f["\f + · Explicit: own \f*"] & t["Then \v 2-3 he"] & nd["\nd Lord \nd*"] & sp["spoke."]
+  f --> ft["\ft why"]
+  q1 --> v4["\v 4 Bread."]
 ```
 
 Unclosed input closes by recovery, never by swallowing:
 
-```text
+```usfm
 \p
-\v 1 Jesus wept.\f + \ft why     ← no \f*
-\p                               ← this \p displaces the \f
+\v 1 Jesus wept.\f + \ft why
+\p
 \v 3 Then
+```
 
-node \f  reason Recovery         lint: unclosed-note
+```rust
+// no \f* before the second \p, so that \p displaces the \f:
+// node \f  reason: CloseReason::Recovery      lint: unclosed-note
 ```
 
 ## How it works
 
-- **Lossless, not abstract.** Every token id sits in exactly one child list, so an in-order walk of the tree gives back the [[scanner]]'s stream and the bytes concatenate to the [[source]]. `cst_oracle.rs` proves the partition over the 160-book test tier. An AST would have to choose what to drop; the [[exports]] make that choice later and say they are lossy.
-- **Points are siblings.** `\c` and `\v` take no content (GLOSSARY, Q16, ruled 2026-08-12), so paragraphs are their siblings. Chapters and verses are an index over the tree, the [[toc]], not a nesting of it.
+- **Lossless, not abstract.** Every token id sits in exactly one child list, so an in-order walk of the tree gives back the [[scanner]]'s stream and the bytes concatenate to the [[source]]. `cst_oracle.rs` proves the partition over the test corpus. An AST would have to choose what to drop; the [[exports]] make that choice later and say they are lossy.
+- **Points are siblings.** `\c` and `\v` take no content, so paragraphs are their siblings. Chapters and verses are an index over the tree, the [[toc]], not a nesting of it.
 - **The walker records verdicts, lint reads them.** Each node stores a [[code:onion/src/cst.rs#CloseReason]] (Explicit, Implicit, Recovery, Eof) and the stamped context. [[lint]] matches on those and never re-derives how a frame ended. Positional context (BookHeaders and the rest) is lint's, not the tree's.
-- **Flat arrays, no pointers.** `nodes` plus one shared `child_ids` arena; a node id is tagged with bit 31 so tokens and nodes mix in document order. It crosses the wall as three sections of the [[dish]] without conversion (commit b781bb9: "ship the tree, not projections of it" — tree plus diagnostics was 0.64x the bytes and 0.62x the time of the curated planes it replaced).
-- **Streaming build.** [[code:onion/src/cst.rs#Builder::feed]] takes one token at a time and holds no slice (commit 2d1108a). That is what lets [[code:onion/src/cst.rs#build_chunk]] build one chapter and simulate the next `\c`'s displacement, which is how the [[chunk-cache]] reuses trees.
-- **Cost.** ~6 ns/token, about 40% of a lex; the heaviest aligned book takes ~0.6 ms (`cst.rs` doc). Over the corpus, `--cst-stats` shows Recovery only on three real unclosed `\f`.
+- **Flat arrays, no pointers.** `nodes` plus one shared `child_ids` arena; a node id is tagged with bit 31 so tokens and nodes mix in document order. It crosses the wall as three sections of the [[dish]] without conversion, and shipping the tree rather than prebuilt views is what keeps the [[plate]] small.
+- **Streaming build.** [[code:onion/src/cst.rs#Builder::feed]] takes one token at a time and holds no slice. That is what lets [[code:onion/src/cst.rs#build_chunk]] build one chapter and simulate the next `\c`'s displacement, which is how the [[chunk-cache]] reuses trees.
 
 ## Composes with
 

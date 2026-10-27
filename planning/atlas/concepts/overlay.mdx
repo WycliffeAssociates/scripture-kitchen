@@ -28,16 +28,11 @@ Read the source's layout as breaks addressed by verse ("`\p` before v24", "secon
 
 From `galley/src/overlay.md` (GEN 2:21–24). The source's six breaks become six inserts in the target:
 
-```text
-skeleton(source)
-  GEN 2:21 leading 1 p       GEN 2:23 inside 1 q1     GEN 2:23 inside 2 q2
-  GEN 2:23 inside 3 q1       GEN 2:23 inside 4 q2     GEN 2:24 leading 1 p
-
-overlay(target, source) → 6 edits, ascending, non-overlapping
-  insert "\p\n"   at the target's \v 21
-  insert "\n\q1" "\n\q2" "\n\q1" "\n\q2"   after verse 23's text
-  insert "\p\n"   at the target's \v 24
-```
+| `skeleton(source)` | `overlay(target, source)`: 6 edits, ascending, non-overlapping |
+| --- | --- |
+| GEN 2:21 leading 1 `p` | insert `\p\n` at the target's `\v 21` |
+| GEN 2:23 inside 1–4 `q1 q2 q1 q2` | insert `\n\q1`, `\n\q2`, `\n\q1`, `\n\q2` after verse 23's text |
+| GEN 2:24 leading 1 `p` | insert `\p\n` at the target's `\v 24` |
 
 ## How it works
 

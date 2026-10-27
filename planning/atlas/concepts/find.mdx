@@ -12,35 +12,37 @@ summary: "Literal and whole-word search over a mask, each hit mapped back to sou
 
 ## The problem
 
-A Sefer find for "wept. Then" must match across an intervening `\f…\f*`, and replace must touch only those words' bytes in the USFM, not the note between them.
+A find for "wept. Then" in an editor must match across an intervening `\f…\f*`, and replace must touch only those words' bytes in the USFM, not the note between them.
 
 ## The solution
 
-Search the verse-text [[mask]] and map hits back through its ranges ([[invariants]] 1). A hit spanning a removed note comes back as several source pieces, so a replace cannot delete the note. Whole-word uses [[words]], so find and Sous agree on boundaries. Find lives in galley because onion already exposes everything it needs (ruled 2026-08-24), and replace is an ordinary [[edit]].
+Search the verse-text [[mask]] and map hits back through its ranges ([[invariants]] 1). A hit spanning a removed note comes back as several source pieces, so a replace cannot delete the note. Whole-word uses [[words]], so find and Sous agree on boundaries. Find lives in galley because onion already exposes everything it needs, and replace is an ordinary [[edit]].
 
 ## Trade-offs
 
 - Literal only; no regex until a consumer asks.
-- Case-insensitive search folds a copy first, measured about equal to folding on the fly.
-- A hit is a list of ranges.
+- Case-insensitive search folds a copy of the book first: memory for the copy and its offset map.
+- A hit is a list of ranges, so a replace is several edits, not one splice.
 
 ## Show me
 
 From `galley/src/find.md`. The dots are bytes the mask dropped; "why" is in a footnote, so it is not found:
 
-```text
-source   \v 1 Jesus wept.\f + \ft why\f* Then…
-mask     ·····Jesus wept.················ Then…
+```usfm
+\v 1 Jesus wept.\f + \ft why\f* Then…
+```
 
-Find::literal("wept. Then")   → Hit { projected: 6..16, source: Split([11..16, 31..36]) }
-Find::literal("why")          → nothing
+```rust
+// mask:  ·····Jesus wept.················ Then…
+Find::literal("wept. Then") // Hit { projected: 6..16, source: Split([11..16, 31..36]) }
+Find::literal("why")        // nothing: it is in a footnote
 ```
 
 ## How it works
 
 - **`memmem` over `mask.text()`**, then [[code:onion/src/mask.rs#Mask::to_source|to_source]] per hit. `Hit.projected` is in mask space (for highlighting or a second search); `Hit.source` is `Contiguous(a..b)` or `Split([…])`, one range per source piece. The bytes between pieces are exactly what the projection dropped.
 - **Whole word is `words/1`.** It calls [[words]] in [[mise]], not sous-core; `tests/find.rs` asserts every whole-word hit of `the` equals sous's word walk over the test tier.
-- **Case fold: copy plus offset map.** On en_ulb (2026-09-06): folded copy 8.26 ms for `the` against a 7.82 ms lower bound for fold-per-scalar.
+- **Case fold: copy plus offset map.** On en_ulb the folded copy finds `the` in 8.26 ms against a 7.82 ms lower bound for folding per scalar, so the simpler copy stays.
 - **Measured.** Whole Bible, case-sensitive: `Melchizedek` 2.25 ms, `the` 5.14 ms (76,324 hits, ~38 ns each); `और` 13.46 ms over hin2017, where `E0 A4` leads almost every scalar and memmem's prefilter cannot help.
 
 ## Composes with

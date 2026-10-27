@@ -16,27 +16,41 @@ Projects declare `\z` markers in `markers.ext` (`\zaln-s`…`\zaln-e` around eve
 
 ## The solution
 
-Each custom marker maps to a template row that already has its category's behaviour, and from then on the scanner, walker, lint, mask and exports treat it as that row. There are no per-marker rules: the category already says how it nests and closes. Lists are per book ([[code:onion/src/scanner.rs#lex_with]]), so two projects coexist in one process.
+USFM's own [User Extensions](https://docs.usfm.bible/usfm/3.1/extensions.html) rule: a project names `z` markers in `markers.ext` and gives each a spec `\category`. Each category maps to a template row that already has its behaviour, and from then on the scanner, walker, lint, mask and exports treat the marker as that row. There are no per-marker rules: the category already says how it nests and closes. Lists are per book ([[code:onion/src/scanner.rs#lex_with]]), so two projects coexist in one process.
 
 ## Trade-offs
 
-- Only the 17 templates' behaviours are available.
+- Changing the installed list invalidates every product built under it.
+- A `\z` marker the list does not name is inert: no nesting, no lint, no export shape.
 - Unprefixed legacy names like `\s5` are allowed only where no real marker has that spelling.
-- Changing the installed list invalidates every product built under it. Unregistered `\z` markers are inert.
 
 ## Show me
 
-Registering `zaln` as a milestone makes it pair and take attributes like `\qt-s`; relaxing the prefix lets `\s5` be a bare point.
+A spec-conformant `markers.ext` entry, then a verse that uses it:
 
-```text
-set_extensions(&[CustomMarker { name: "zaln", category: Milestone, .. }])
+```usfm
+\marker zmyc
+\category char
+\description A character marker extension.
+\attribute x-myattr1
+```
 
-lex("\\zaln-s |x-strong=\"H0430\"\\*word\\zaln-e\\*")
-    -> Milestone{end:false} marker_idx = zms   ← pairs, takes attributes like \qt-s
+```usfm
+\p \v 1 In the beginning \zmyc God|x-myattr1="H0430"\zmyc* created.
+```
 
-set_extensions_with(&[CustomMarker { name: "s5", category: Standalone, .. }],
-                    &ExtensionOptions { relax_z_prefix: true })
-lex("\\p \\v 1 a \\s5 \\v 3 b")   -> \s5 is a bare point; the \p stays open past it
+Registered as `char`, `\zmyc` nests, closes and takes attributes like `\w`. Registering `zaln` as a milestone makes it pair like `\qt-s`; relaxing the prefix lets `\s5` be a bare point:
+
+```rust
+let zaln = CustomMarker { name: "zaln".into(), category: Milestone, description: String::new(), attributes: vec![] };
+set_extensions(&[zaln]);
+lex("\\zaln-s |x-strong=\"H0430\"\\*word\\zaln-e\\*");
+// Milestone { end: false }, marker_idx = zms: pairs and takes attributes like \qt-s
+
+let s5 = CustomMarker { name: "s5".into(), category: Standalone, description: String::new(), attributes: vec![] };
+set_extensions_with(&[s5], &ExtensionOptions { relax_z_prefix: true });
+lex("\\p \\v 1 a \\s5 \\v 3 b");
+// \s5 is a bare point; the \p stays open past it
 ```
 
 At the JS wall (`onion-wasm/README.md`), bad entries come back with a reason:
@@ -49,9 +63,9 @@ customMarkers([{ name: "zmyf", category: "footnote" }, { name: "nope", category:
 
 ## How it works
 
-- **A name maps to a template row and stops.** Every behaviour (caller, note scope, closing, lint contexts, mask, export shape) is the [[marker-table]] row's. The one thing a template cannot carry is the spelled name, which is what [[code:onion/src/tables/generated.rs#is_extension|generated::is_extension]] is for. Shipped as 0.1.4, seventeen template rows (commit 0eda490).
+- **A name maps to a template row and stops.** Every behaviour (caller, note scope, closing, lint contexts, mask, export shape) is the [[marker-table]] row's. The one thing a template cannot carry is the spelled name, which is what [[code:onion/src/tables/generated.rs#is_extension|generated::is_extension]] is for.
 - **Legacy names add, never redefine.** `relax_z_prefix` admits en_ulb's `\s5` because no spec spelling resolves it.
-- **Per book, not per process** (planning item 2026-10-21, shipped 0.1.13). Each [[pantry]] book lexes by the list it was registered with.
+- **Per book, not per process**. Each [[pantry]] book lexes by the list it was registered with.
 - **Lists key the caches.** The [[chunk-cache]] key holds the list's fingerprint, so equal lists share parses and different lists never do.
 
 ## Composes with

@@ -22,15 +22,16 @@ Bytes are kept as they are, and every product is positions into them ([[invarian
 
 - Line endings must be LF. CRLF parses, but shifts UTF-16 offsets one per line against an editor and changes every content hash.
 - Broken input is kept as data, so every later step must cope with it.
-- Outputs that cannot hold everything (HTML, USJ, USX, vref) are named lossy.
+- HTML, USJ, USX and vref cannot hold everything; a round trip through them loses bytes.
 
 ## Show me
 
 A token is just a start and a length into the file; reading it is a slice.
 
-```text
-source    \v 1 Jesus wept.
-span      Token { start: 26, len: 3 }   → source[26..29] == "\v "
+```rust
+// source: …\v 1 Jesus wept.  (the scratch book in the CST page)
+let t = tokens[11];                           // Token { start: 26, len: 3, .. }
+assert_eq!(&source[26..29], "\\v ");         // reading a token is a slice
 ```
 
 Spans tile the source. The scratch book in [[cst]] is 125 bytes and its 37 tokens cover 0..125 with no gap.

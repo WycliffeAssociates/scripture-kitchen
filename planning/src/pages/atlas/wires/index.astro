@@ -13,7 +13,7 @@ const wires = await loadWires();
 <Base title="Wires" section="atlas">
   <AtlasSidebar slot="sidebar" />
   <h1 class="text-h3 font-semibold">Wires</h1>
-  <p class="text-small">Sefer calls the engine through WebAssembly on every keystroke, a whole book per call. Strings are the cost at that boundary: a string per token allocates in Rust and again in JS, and JSON adds an encode and a parse. So every per-call answer is offsets over object graphs (<a href={url("/atlas/invariants")}>invariant 2</a>): fixed-stride integer rows, from/to ranges into text the caller already holds, enum-numbered kinds, and a string table only where text must travel.</p>
+  <p class="text-small">An editor calls the engine through WebAssembly on every keystroke, a whole book per call. Strings are the cost at that boundary: a string per token allocates in Rust and again in JS, and JSON adds an encode and a parse. So every per-call answer is offsets over object graphs (<a href={url("/atlas/invariants")}>invariant 2</a>): fixed-stride integer rows, from/to ranges into text the caller already holds, enum-numbered kinds, and a string table only where text must travel.</p>
   <ul class="wwhy">
     <li><b>One call, one buffer.</b> Rust writes it; JS reads it in place.</li>
     <li><b>Lazy rows.</b> A row is decoded only when asked for, through a cursor.</li>

@@ -38,10 +38,16 @@ for (let n = 0; n < map.rangeCount; n++) {
 map.toSource(hit.projectedFrom);
 ```
 
-```text
-0  magic "MASK"   4 version 1   8 flags (bit 0 UTF-16)   12 recipe (0 verseText, 1 structure, 2 text)
-16 rangeCount     20 sourceLen  24 projectedLen          28 rangeCount × (sourceFrom u32, sourceTo u32)
-```
+| offset | field |
+| --- | --- |
+| 0 | magic `"MASK"` |
+| 4 | version 1 |
+| 8 | flags (bit 0 UTF-16) |
+| 12 | recipe (0 verseText, 1 structure, 2 text) |
+| 16 | rangeCount |
+| 20 | sourceLen |
+| 24 | projectedLen |
+| 28 | rangeCount × (sourceFrom u32, sourceTo u32) |
 
 ## How it works
 

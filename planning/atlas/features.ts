@@ -154,7 +154,7 @@ export const HOSTS: FeatureGroup = {
   id: "hosts",
   title: "Hosts",
   items: [
-    { name: "usfm-galley", note: "every door plus the resident handle; what Sefer vendors", concept: "galley-package", door: "import { Galley } from \"usfm-galley\"", cite: "galley/src/wasm/onion.rs" },
+    { name: "usfm-galley", note: "every door plus the resident handle; the build hosts vendor", concept: "galley-package", door: "import { Galley } from \"usfm-galley\"", cite: "galley/src/wasm/onion.rs" },
     { name: "Builds", note: "bundler (.) and web (./web); readers as .ts subpaths", concept: "galley-package", cite: "galley/build.sh" },
     { name: "onion-wasm", note: "the stateless doors alone, same builds", concept: "onion-wasm", cite: "onion-wasm/src/lib.rs" },
     { name: "sous", note: "Sous over a book or folder from a shell", concept: "sous-cli", door: "sous --findings --publish out.sous book.usfm", cite: "sous-chef/cli/src/args.rs#Args", tag: "CLI" },

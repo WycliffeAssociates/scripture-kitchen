@@ -12,36 +12,37 @@ summary: "The ONWR buffer one parse produces. Ten sections of fixed-stride rows,
 
 ## The problem
 
-Sefer needs a whole book's tokens, tree, diagnostics, fixes and chapter/verse index on every keystroke. Materialising those as JS objects and strings per call would cost more than the parse.
+An editor that reparses per keystroke needs a whole book's tokens, tree, diagnostics, fixes and chapter/verse index on every keystroke. Materialising those as JS objects and strings per call would cost more than the parse.
 
 ## The solution
 
-One buffer: a header, a section directory, and ten sections of fixed-stride integer rows (`tokens`, `nodes`, `childIds`, `diagnostics`, `fixes`, `edits`, `fixText`, `chapters`, `verses`, `members`) ([[invariants]] 2). Rows are from/to offsets into text Sefer already holds, plus enum-numbered kinds; the only text is `fixText`, the bytes a fix would insert. It ships the raw tree rather than views, so consumers build their own. Writer and `reader.ts` are generated from `onion/src/wire/schema.rs` ([[invariants]] 6).
+One buffer: a header, a section directory, and ten sections of fixed-stride integer rows (`tokens`, `nodes`, `childIds`, `diagnostics`, `fixes`, `edits`, `fixText`, `chapters`, `verses`, `members`) ([[invariants]] 2). Rows are from/to offsets into text the host already holds, plus enum-numbered kinds; the only text is `fixText`, the bytes a fix would insert. It ships the raw tree rather than views, so consumers build their own. Writer and `reader.ts` are generated from `onion/src/wire/schema.rs` ([[invariants]] 6).
 
 ## Trade-offs
 
-- [[code:onion/src/wire/schema.rs#FORMAT_VERSION]] is 5; a reader that does not know the version refuses the dish.
-- Every section is listed, even when empty.
+- Reader and writer upgrade together: a reader that does not know [[code:onion/src/wire/schema.rs#FORMAT_VERSION]] (5) refuses the dish.
+- Consumers build their own views (blocks, lines, note interiors) from the raw tree.
 - Raw numbers: inspect through the reader, not a debugger.
 
 ## Show me
 
 The first 32 bytes of the scratch book's dish (`plate` with `toc` and `diagnostics`). Look at how much is said by plain numbers:
 
-```text
-4f 4e 57 52   "ONWR"        magic
-05 00 00 00   5             format version
-0a 00 00 00   10            section count
-00 00 00 00   0             flags (bit 0 = offsets are UTF-16)
-ff ff ff ff   NONE          declared \usfm version
-7d 00 00 00   125           source length
-10 2a 39 c5 03 f0 40 7b     xxh3-64 of the source bytes
+```rust
+// first 32 bytes, little-endian
+4f 4e 57 52              // "ONWR"  magic
+05 00 00 00              // 5       format version
+0a 00 00 00              // 10      section count
+00 00 00 00              // 0       flags (bit 0 = offsets are UTF-16)
+ff ff ff ff              // NONE    declared \usfm version
+7d 00 00 00              // 125     source length
+10 2a 39 c5 03 f0 40 7b  // xxh3-64 of the source bytes
 ```
 
 The ten sections, in wire order:
 
-```text
-tokens  nodes  childIds  diagnostics  fixes  edits  fixText  chapters  verses  members
+```ts
+["tokens", "nodes", "childIds", "diagnostics", "fixes", "edits", "fixText", "chapters", "verses", "members"]
 ```
 
 ## How it works
@@ -54,7 +55,7 @@ tokens  nodes  childIds  diagnostics  fixes  edits  fixText  chapters  verses  m
 
 ## Composes with
 
-Written by [[plate]] from the [[token]]s, [[cst]], [[lint]] report and [[toc]]; generated from its declaration by [[ticket]]'s emitters ([[wire]]). Read by `onion-wasm/reader.ts` in [[onion-wasm]] and [[galley-package]], and so by [[sefer]]. Framed many-at-once by the [[corpus]] envelope.
+Written by [[plate]] from the [[token]]s, [[cst]], [[lint]] report and [[toc]]; generated from its declaration by [[ticket]]'s emitters ([[wire]]). Read by `onion-wasm/reader.ts` in [[onion-wasm]] and [[galley-package]]. Framed many-at-once by the [[corpus]] envelope.
 
 ## Where
 

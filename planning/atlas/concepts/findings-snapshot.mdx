@@ -12,11 +12,11 @@ summary: "Every Sous finding for the project as 16-byte records plus a shared pa
 
 ## The problem
 
-Sous verdicts are corpus-relative: an edit in Mark can change a finding in Genesis. Sefer needs the complete current set after each publish, each finding at an exact place.
+Sous verdicts are corpus-relative: an edit in Mark can change a finding in Genesis. A host needs the complete current set after each publish, each finding at an exact place.
 
 ## The solution
 
-A full snapshot, not a patch, because a distant edit can move totals anywhere. A finding is 16 bytes: start and end offsets, book index, kind code, flags and two kind-dependent numbers ([[invariants]] 2). Shared evidence (a pattern's counts) sits once in a pattern table that records point at. An array of JS objects was ruled out in the charter.
+A full snapshot, not a patch, because a distant edit can move totals anywhere. A finding is 16 bytes: start and end offsets, book index, kind code, flags and two kind-dependent numbers ([[invariants]] 2). Shared evidence (a pattern's counts) sits once in a pattern table that records point at. An array of JS objects would cost an allocation per finding.
 
 ## Trade-offs
 
@@ -28,18 +28,21 @@ A full snapshot, not a patch, because a distant edit can move totals anywhere. A
 
 One finding in "Jesus wept.", found in the cleaned text and published as a range in the raw file. Then the record layout. From `galley/src/sous/mod.rs` and `charter.md`:
 
-```text
-publish_onion_findings([OnionInputBook::new("books/mrk.usfm", "\\id MRK\n\\c 1\n\\p\n\\v 1 Jesus \\f + \\ft note\\f* wept.\n")],
-                       &[finding /* projected-book UTF-8: 0..13 over "Jesus  wept.\n" */], …)
-  → SOUS corpus buffer, CoordinateSpace::Utf16
-      directory  MRK  books/mrk.usfm  published_len 50  count 1
-      record     from 21  to 50                        // raw-book UTF-16
+```rust
+let buf = publish_onion_findings(
+    &[OnionInputBook::new("books/mrk.usfm", "\\id MRK\n\\c 1\n\\p\n\\v 1 Jesus \\f + \\ft note\\f* wept.\n")],
+    &[finding /* projected-book UTF-8: 0..13 over "Jesus  wept.\n" */],
+    /* … */
+); // SOUS corpus buffer, CoordinateSpace::Utf16
+// directory  MRK  books/mrk.usfm  published_len 50  count 1
+// record     from 21  to 50   raw-book UTF-16
 ```
 
-```text
-0..4 from u32 · 4..8 to u32 · 8..10 book_idx u16 · 10 code u8 · 11 flags u8 · 12..14 lane i16 · 14..16 lane i16
-codes: 0 LengthProportionality · 1 Hygiene · 2 Convention · 3 SourceCopy · 4 Presence
-```
+| bytes | 0..4 | 4..8 | 8..10 | 10 | 11 | 12..14 | 14..16 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| field | from u32 | to u32 | book_idx u16 | code u8 | flags u8 | lane i16 | lane i16 |
+
+Codes: 0 LengthProportionality · 1 Hygiene · 2 Convention · 3 SourceCopy · 4 Presence.
 
 ## How it works
 
@@ -49,7 +52,7 @@ codes: 0 LengthProportionality · 1 Hygiene · 2 Convention · 3 SourceCopy · 4
 
 ## Composes with
 
-Written by the [[expediter]] (resident) or `publish_onion_findings` (cold) from [[chapter-pass]] results placed through [[onion-book]]. Read through `sous-reader.ts`. [[sefer]] opens it via the [[galley-package]].
+Written by the [[expediter]] (resident) or `publish_onion_findings` (cold) from [[chapter-pass]] results placed through [[onion-book]]. Read through `sous-reader.ts`, shipped in the [[galley-package]].
 
 ## Where
 

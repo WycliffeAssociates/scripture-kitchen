@@ -7,49 +7,48 @@ crate: onion
 files: [onion/src/toc.rs, onion/tests/toc_oracle.rs]
 related: [token, designator, resolve, vref, diff, census, pantry, onion-book]
 level: 2
-summary: "A flat chapter and verse index built from tokens alone. Where is this byte, where does chapter 3 start, no tree needed."
+summary: "The table of contents: an index into the document by book, chapter and verse (BCV), built from tokens alone. Where is this byte, where does chapter 3 start, no tree needed."
 ---
 
 ## The problem
 
-Cursor to verse, go to chapter, verse counts: "where" questions asked per keystroke that should not pay for a tree. Every byte needs an answer, front matter included.
+Cursor to verse, go to chapter, verse counts: "where" questions asked per keystroke that should not pay for a tree. They need a table of contents, an index into the USFM document in book-chapter-verse (BCV) addressing, with an answer for every byte, front matter included.
 
 ## The solution
 
-One pass over the [[token]]s (5.8 ns per token on en_ulb, 13c3d3b) yields fixed 16-byte rows ([[invariants]] 2). Chapters tile the file and front matter is chapter 0, so `locate` is total. Verse labels stay as source offsets, since a number pair cannot hold `12b`; [[designator]] interprets them on demand.
+One pass over the [[token]]s yields fixed-stride rows, 24 bytes per chapter and 28 per verse anchor ([[invariants]] 2). Chapters tile the file and front matter is chapter 0, so `locate` is total. Verse labels stay as source offsets, since a number pair cannot hold `12b`; [[designator]] interprets them on demand.
 
 ## Trade-offs
 
 - A verse runs to the next verse or chapter marker, so a heading before verse 4 belongs to verse 3; [[resolve]] offers an "opening" for callers who want it.
 - A bridge like `\v 2-3` is one entry naming two verses; counting is the caller's.
-- A malformed verse number keeps its row with numbers 0, rather than being guessed or dropped.
+- A malformed verse number still gets a row, with numbers 0; every caller has to handle the 0.
 
 ## Show me
 
-The table for a 125-byte scratch book: front matter as chapter 0, then chapter 1 with three verse anchors, one of them a bridge.
+The table for the 125-byte scratch book in [[cst]]: front matter as chapter 0, then chapter 1 with three verse anchors, one of them a bridge.
 
-```text
-book "MRK"
-ChapterRow { start: 0,  end: 18,  token: MAX, number: 0 }              ← front matter is row 0
-ChapterRow { start: 18, end: 125, token: 6, label 21..22, number: 1 }
-VerseAnchor { at: 26,  chapter: 1, first: 1, last: 1, label 29..30 }
-VerseAnchor { at: 63,  chapter: 1, first: 2, last: 3, label 66..69 }   ← "2-3"
-VerseAnchor { at: 113, chapter: 1, first: 4, last: 4, label 116..117 }
-locate(10) = MRK chapter 0      locate(40) = MRK 1:1
+```rust
+let toc = onion::toc::toc(src.as_bytes(), &tokens); // the MRK scratch book
+// toc.chapters[0] == ChapterRow { start: 0,  end: 18,  token: MAX, number: 0 }   front matter is row 0
+// toc.chapters[1] == ChapterRow { start: 18, end: 125, token: 6, label_start: 21, label_end: 22, number: 1 }
+// toc.verses[0]   == VerseAnchor { at: 26,  chapter: 1, first: 1, last: 1, .. }  label 29..30
+// toc.verses[1]   == VerseAnchor { at: 63,  chapter: 1, first: 2, last: 3, .. }  label 66..69, "2-3"
+// toc.verses[2]   == VerseAnchor { at: 113, chapter: 1, first: 4, last: 4, .. }  label 116..117
+toc.locate(10); // MRK chapter 0
+toc.locate(40); // MRK 1:1
 ```
 
-`playground --toc-trace`:
+`playground --toc-trace` on the same book, 2 chapter rows and 3 verse anchors over 125 bytes:
 
-```text
-MRK — 2 chapter rows, 3 verse anchors, 125 bytes
-  ch            bytes  verses  first anchors
-   0        0..18           0
-   1       18..125          3  MRK 1:1@26  MRK 1:2-3@63  MRK 1:4@113
-```
+| ch | bytes | verses | anchors |
+| --- | --- | --- | --- |
+| 0 | 0..18 | 0 | |
+| 1 | 18..125 | 3 | MRK 1:1@26, MRK 1:2-3@63, MRK 1:4@113 |
 
 ## How it works
 
-- **Tokens, no tree.** `\c`, `\v` and their designators are flat facts, read from [[token]] rows without a [[cst]]. 5.8 ns/token on en_ulb (commit 13c3d3b, when it replaced `ParseHeader`).
+- **Tokens, no tree.** `\c`, `\v` and their designators are flat facts, read from [[token]] rows without a [[cst]].
 - **Rows tile `0..len`.** That makes `locate` total: front matter is chapter 0, never a fabricated verse.
 - **Labels and members are spans**, read through the [[designator]] interpreter.
 - **Degrade, never repair.** A malformed designator keeps its row with numbers 0, so the previous verse's extent cannot swallow it.

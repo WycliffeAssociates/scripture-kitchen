@@ -22,20 +22,22 @@ A cold open parses every book. Sixty-six dishes are 66 crossings and 66 handles,
 
 - A cold load does not warm the [[chunk-cache]], so the first edit reparses (marked TODO).
 - No per-entry checksum; adding one is a format change (16 to 32 bytes an entry).
-- Read by hand, not generated: standing debt against [[invariants]] 6.
+- Its reader is hand-written, not generated, so a change to the envelope has no staleness test to catch a mismatched reader ([[invariants]] 6).
 
 ## Show me
 
 Two books framed together; look at the header, then one directory entry per book. From `galley/src/corpus.rs`:
 
-```text
-galley::corpus::plate(&[("GEN", gen_dish), ("EXO", exo_dish)])
-
-bytes[0..4]    "ONCP"            magic
-bytes[4..8]    1                 format version
-bytes[8..12]   2                 book count
-bytes[12..16]  0                 reserved
-bytes[16..]    [keyAt, keyLen, dishAt, dishLen] x 2, then the bodies
+```rust
+let buf = galley::corpus::plate(&[
+    Book { key: "GEN", dish: gen_dish },
+    Book { key: "EXO", dish: exo_dish },
+]);
+// buf[0..4]   == b"ONCP"   magic
+// buf[4..8]   == 1         format version
+// buf[8..12]  == 2         book count
+// buf[12..16] == 0         reserved
+// buf[16..]   [keyAt, keyLen, dishAt, dishLen] x 2, then the bodies
 ```
 
 ## How it works

@@ -21,7 +21,7 @@ Each export calls one onion function and converts its inputs and outputs ([[inva
 ## Trade-offs
 
 - The built packages are committed, about 370 KB (152 KB gzipped), because consumers install from a git tag.
-- The binary must be byte-identical across machines, which needs a dedicated build script.
+- Each call copies its text into wasm memory; many questions about one book are cheaper through [[galley]]'s registered ids.
 - Input must be LF; CRLF puts every offset one further off per line.
 
 ## Show me
@@ -43,7 +43,7 @@ galley.parseText(text, { tco: true });   // throws: parseText: unknown option "t
 - **Nothing is implemented here.** Every export tags a library function, plus an offset conversion or a small wire struct where the wall demands it (`README.md`).
 - **Byte-identical binaries.** `build.sh` remaps `$CARGO_HOME` and the sysroot and strips the `producers` section, so the same source builds to one sha on macOS/arm64 and Linux arm64/x86_64. That lets CI gate the binary, not just its interface. Release builds run on x86_64 Linux via `wasm-build.sh`.
 - **Committed packages.** `pkg-web`/`pkg-bundler` are checked in, one build per target.
-- **Options are checked.** Every option bag is a declared interface; an unknown key throws by name rather than reading as `false` (0.1.7).
+- **Options are checked.** Every option bag is a declared interface; an unknown key throws by name rather than reading as `false`.
 - **UTF-16 at the wall, LF in.** Offsets out are CodeMirror code units ([[utf16]]).
 
 ## Composes with

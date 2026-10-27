@@ -16,40 +16,41 @@ Reviewing a colleague's copy of a book needs answers per verse ("verse 3 changed
 
 ## The solution
 
-Cut both sides at the [[toc]]'s chapter and verse anchors (no re-scan), align by verse identity, and report each unit as modified, added or deleted; word or character detail is opt-in inside a modified unit. Merge is "take this side" per unit, written out as text or as [[edit]]s. Moves are not detected: a moved verse is a delete plus an add (0.1.8).
+Cut both sides at the [[toc]]'s chapter and verse anchors (no re-scan), align by verse identity, and report each unit as modified, added or deleted; word or character detail is opt-in inside a modified unit. Merge is "take this side" per unit, written out as text or as [[edit]]s. Moves are not detected: a moved verse is a delete plus an add.
 
 ## Trade-offs
 
-- JSON, not a binary wire: an accepted exception to [[invariants]] 2 for a cold, modal-open path.
-- Word detail grows 66-book JSON from 221 KB to 6.2 MB (17 ms of `JSON.parse`); a binary run wire is parked.
+- JSON, not a binary wire ([[invariants]] 2 does not hold here): word detail grows 66-book JSON from 221 KB to 6.2 MB, 17 ms of `JSON.parse`.
+- A moved verse reads as a delete plus an add.
 - Word boundaries never cross a footnote edge.
 
 ## Show me
 
 Here two copies differ in verses 1 and 2-3 (b drops the footnote and changes "spoke." to "spoke loudly."). `playground --diff-trace a.usfm b.usfm`:
 
-```text
-=== diff 125 bytes vs 101 bytes
-=== 5 slots, 5 units: 3 unchanged, 2 modified, 0 added, 0 deleted
-=== 1 replay splices
-
-Modified Shared MRK 1:1    -> MRK 1:1
-Modified Shared MRK 1:2-3  -> MRK 1:2-3
+```rust
+// playground --diff-trace a.usfm b.usfm: 125 bytes vs 101 bytes
+// 5 slots, 5 units: 3 unchanged, 2 modified, 0 added, 0 deleted; 1 replay splice
+Modified { side: Shared, a: "MRK 1:1",   b: "MRK 1:1" }
+Modified { side: Shared, a: "MRK 1:2-3", b: "MRK 1:2-3" }
 ```
 
 A modified unit's intra-verse runs (`diff.rs` doc), tiling the span:
 
-```text
+```usfm
 \v 1 Jesus \add wept\add*.
-[\v 1 ]Markup [Jesus]Text [ ]Whitespace [\add ]Markup [wept]Text [\add*]Markup [.]Text
+```
+
+```rust
+// [\v 1 ]Markup [Jesus]Text [ ]Whitespace [\add ]Markup [wept]Text [\add*]Markup [.]Text
 ```
 
 ## How it works
 
-- **Three layers, one walk.** Identity: a block is the bytes between two [[toc]] anchors, a `Range<u32>` plus a `Copy` address. Alignment: Myers over 12-byte addresses, then coalescing pairs a rebridged or relabeled verse into one decision. Projection: `merge` emits bytes, [[code:onion/src/diff.rs#to_edits]] emits replay splices. PSA against itself: 2.2 ms (commit 09b76e2).
-- **Changed units only** unless `unchanged: true` (0.1.8).
+- **Three layers, one walk.** Identity: a block is the bytes between two [[toc]] anchors, a `Range<u32>` plus a `Copy` address. Alignment: Myers over 12-byte addresses, then coalescing pairs a rebridged or relabeled verse into one decision. Projection: `merge` emits bytes, [[code:onion/src/diff.rs#to_edits]] emits replay splices.
+- **Changed units only** unless `unchanged: true`.
 - **Runs are asked for by name.** `"none"`, `"words"` (UAX-29) or `"chars"`; an unknown name rejects. The [[cst]] and the `text` [[mask]] are built only when runs are asked for.
-- **JSON at the wall.** serde keeps the old editors' camelCase contract (planning item 2026-09-28, binary run wire not scheduled).
+- **JSON at the wall.** serde keeps the old editors' camelCase contract; there is no binary run wire.
 
 ## Composes with
 

@@ -20,21 +20,21 @@ Put them in a leaf with no dependencies that both import ([[invariants]] 7); cop
 
 ## Trade-offs
 
-- No dependencies at all, so nothing needing a hash map or I/O. The Unicode table lives here; its generator stays in [[sous-core]].
-- Holding the bytes is not owning the meaning: onion still owns canonical order as a rule.
+- No dependencies, so nothing here can use a hash map or I/O; the Unicode table lives here but its generator stays in [[sous-core]].
+- A shared rule is versioned (`words/1`): changing it changes find and Sous together, so it takes a new version, not a patch.
 
 ## Show me
 
 What is in it:
 
-```text
-mise/src/books.rs        BOOK_CODES in spec order, BookKey, canonical_rank
-mise/src/utf16.rs        Utf16Index (borrows), Utf16Table (detached)
-mise/src/words.rs        words/1: Splitter, for_each_word, fold
-mise/src/unicode/        Class bits from the pinned UCD; table written by sous-core's gen-unicode
-mise/src/extensions.rs   ExtensionCategory, CustomMarker, parse_markers_ext
-mise/src/address.rs      Address, Point: a place in scripture no text owns
-```
+| file | holds |
+| --- | --- |
+| `mise/src/books.rs` | `BOOK_CODES` in spec order, `BookKey`, `canonical_rank` |
+| `mise/src/utf16.rs` | `Utf16Index` (borrows), `Utf16Table` (detached) |
+| `mise/src/words.rs` | words/1: `Splitter`, `for_each_word`, `fold` |
+| `mise/src/unicode/` | `Class` bits from the pinned UCD; table written by sous-core's `gen-unicode` |
+| `mise/src/extensions.rs` | `ExtensionCategory`, `CustomMarker`, `parse_markers_ext` |
+| `mise/src/address.rs` | `Address`, `Point`: a place in scripture no text owns |
 
 ## How it works
 

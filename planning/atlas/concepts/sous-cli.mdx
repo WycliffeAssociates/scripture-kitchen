@@ -21,14 +21,14 @@ sous-cli is that glue and nothing more. It reads files, parses with onion, and h
 ## Trade-offs
 
 - The printed output is for debugging, not a stable interface.
-- The file-loading adapter lives here alone; the charter says to extract a shared crate only when a second consumer needs one.
+- File loading lives here alone; another host writes its own until a second consumer justifies a shared crate.
 
 ## Show me
 
 One run, printing two findings and saving a snapshot. From `sous-chef/cli/src/main.rs`:
 
-```text
-sous --findings --source source.usfm --publish out.sous --report sites.html book.usfm
+```console
+$ sous --findings --source source.usfm --publish out.sous --report sites.html book.usfm
   finding target[0] MRK 1:1-1:1 C0Control 11..14 run 3 raw [46..49]
   length target[0] MRK 1:9 ratio 0.14 z_book -8.72 z_project -6.05
   pattern[0] U+002C ',' placement next=Digit 12/9812 0.12% band 4 · 3/66 books 11 sites usual=Letter 9,700

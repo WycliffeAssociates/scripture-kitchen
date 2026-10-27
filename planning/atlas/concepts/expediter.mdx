@@ -12,7 +12,7 @@ summary: "Galley's resident publisher. On publish it recounts changed chapters, 
 
 ## The problem
 
-Sous findings are corpus-relative, so a keystroke in Mark can move a verdict in Genesis, and Sefer asks for findings after edits. Rerunning every pass over every book per publish is too slow, and any reuse must still equal a cold run.
+Sous findings are corpus-relative, so a keystroke in Mark can move a verdict in Genesis, and a host asks for findings after edits. Rerunning every pass over every book per publish is too slow, and any reuse must still equal a cold run.
 
 ## The solution
 
@@ -28,24 +28,24 @@ An update only stores; the work happens at publish ([[invariants]] 4, 5). Then i
 
 From `galley/src/sous/expediter.md`: the second publish reads nothing.
 
-```text
-sous.update("books/mrk.usfm", Role::Target, &text)?
-sous.publish()?          -> SOUS corpus buffer, raw-book UTF-16
-sous.last_mapped()       -> 6      // six chapters mapped
-sous.publish()?          -> the same bytes
-sous.last_mapped()       -> 0      // nothing re-read, nothing re-mapped
+```rust
+sous.update("books/mrk.usfm", Role::Target, &text)?;
+let buf = sous.publish()?;   // SOUS corpus buffer, raw-book UTF-16
+sous.last_mapped();          // 6: six chapters mapped
+sous.publish()?;             // the same bytes
+sous.last_mapped();          // 0: nothing re-read, nothing re-mapped
 ```
 
-```text
-1 index   chapter table hit? skip : OnionBook::from_parts → ObservationKey per chapter → map / remap
-2 fold    books with no aggregate
-3 tally   untally the old aggregate, tally the new, name the moved word keys
-4 judge   every Target aggregate, re-deciding only the named keys
-5 pair    each Target against its Reference
-6 locate  replay cached site rows, or rescan text
-7 sweep   drop what no ring names
-8 rebase  through each book's retained mask and UTF-16 table, then encode
-```
+| step | does |
+| --- | --- |
+| 1 index | chapter table hit? skip : `OnionBook::from_parts` → `ObservationKey` per chapter → map / remap |
+| 2 fold | books with no aggregate |
+| 3 tally | untally the old aggregate, tally the new, name the moved word keys |
+| 4 judge | every Target aggregate, re-deciding only the named keys |
+| 5 pair | each Target against its Reference |
+| 6 locate | replay cached site rows, or rescan text |
+| 7 sweep | drop what no ring names |
+| 8 rebase | through each book's retained mask and UTF-16 table, then encode |
 
 ## How it works
 

@@ -20,23 +20,23 @@ Galley is the only adapter allowed to see both ([[invariants]] 4, 7). All state 
 
 ## Trade-offs
 
-- Every cross-product feature goes through it, so it is the busiest crate.
-- One cache layer is one place to reason about memory, and it must account for every byte it keeps.
+- It is stateful: answers are only as current as the host's last `update`, and each update sends a whole book, not a splice.
+- Retained products cost memory, about 1.6x a target's text ([[pantry]]), and wasm memory grows and never shrinks.
 - Building it for JS pulls the whole engine in through [[onion-wasm]].
 
 ## Show me
 
 The modules, one job each:
 
-```text
-galley::pantry      the one caching layer (chunks, books, derived stores, budget)
-galley::sous        OnionBook, Expediter, publish_onion_findings, settings
-galley::find        literal search over a projection
-galley::overlay     match formatting
-galley::toc / mask  the census and mask-map wires
-galley::corpus      the ONCP envelope
-galley::wasm        the Galley handle (feature "wasm")
-```
+| module | job |
+| --- | --- |
+| `galley::pantry` | the one caching layer (chunks, books, derived stores, budget) |
+| `galley::sous` | `OnionBook`, `Expediter`, `publish_onion_findings`, settings |
+| `galley::find` | literal search over a projection |
+| `galley::overlay` | match formatting |
+| `galley::toc` / `mask` | the census and mask-map wires |
+| `galley::corpus` | the ONCP envelope |
+| `galley::wasm` | the Galley handle (feature `wasm`) |
 
 ## How it works
 

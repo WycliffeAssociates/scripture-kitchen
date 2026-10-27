@@ -12,15 +12,15 @@ summary: "One parse, one crossing. Tokens, CST, lint and TOC written into one bu
 
 ## The problem
 
-A keystroke wants tokens, tree, diagnostics and the chapter/verse index together, and crossing a typical book costs about 80 µs, so separate calls multiply it. The old `analyze` built thirteen curated views, and three fifths of its time went to building and converting them.
+A keystroke wants tokens, tree, diagnostics and the chapter/verse index together, and crossing a typical book costs about 80 µs, so separate calls multiply it. Prebuilt views cost more than they save: building and converting them was three fifths of the call.
 
 ## The solution
 
-Parse once and write the raw products into one flat buffer ([[invariants]] 2). Rows hold byte positions, not text, and JS decodes a row only when asked. Shipping the tree instead of views was 0.64x the bytes and 0.62x the time (b781bb9). [[code:onion/src/wire.rs#parse]] returns bytes and retains nothing, so the engine stays stateless and there is nothing to free.
+Parse once and write the raw products into one flat buffer ([[invariants]] 2). Rows hold byte positions, not text, and JS decodes a row only when asked. Shipping the tree instead of thirteen prebuilt views was 0.64x the bytes and 0.62x the time. [[code:onion/src/wire.rs#parse]] returns bytes and retains nothing, so the engine stays stateless and there is nothing to free.
 
 ## Trade-offs
 
-- A versioned format (v5); a shape change means regenerated readers.
+- The reader must match the buffer's version (v5): a shape change means upgrading reader and engine together.
 - Consumers build their own views from the tree.
 - [[diff]]'s skeleton and [[resolve]]'s answer still return JSON, on cold paths.
 
@@ -28,9 +28,9 @@ Parse once and write the raw products into one flat buffer ([[invariants]] 2). R
 
 Native callers stop at `parse`; anything crossing to JavaScript calls `plate`.
 
-```text
-onion::wire::parse(text, opts)   -> Parsed    native callers stop here
-onion::wire::plate(&parsed)      -> Vec<u8>   the dish, for anything crossing
+```rust
+let parsed: Parsed = onion::wire::parse(text, opts); // native callers stop here
+let dish: Vec<u8> = onion::wire::plate(&parsed);     // the dish, for anything crossing
 ```
 
 ```ts
@@ -41,10 +41,10 @@ The scratch book in [[cst]] plates to 1,072 bytes with `toc` and `diagnostics` o
 
 ## How it works
 
-- **Ship the tree, not projections.** Tokens + CST + diagnostics was 0.64x the bytes and 0.62x the time of the thirteen curated planes `analyze` used to build; three fifths of `analyze` was building and converting planes (commit b781bb9).
+- **Ship the tree, not projections.** Tokens, CST and diagnostics, not curated planes; each consumer builds the view it needs.
 - **One call, several products.** Crossing a typical book cost ~80 µs, which is what forces several products into one call. Statelessness stayed: `parse` returns bytes and retains nothing, so there is nothing to free.
 - **Nothing rich crosses.** Flat `Uint32Array` copies plus a few strings. JS never holds a token object; the generated reader is lazy and decodes a row only when asked.
-- **Copy is free, encode is the cost** (commit 13c3d3b, measured in Node: analyze 1.4–1.5x native).
+- **Copy is free, encode is the cost.** Measured in Node, `analyze` ran at 1.4–1.5x native; the copy cost nothing, encoding did.
 - **Exceptions.** JSON on cold paths: [[diff]]'s skeleton (old camelCase contract) and [[resolve]]'s answer.
 
 ## Composes with

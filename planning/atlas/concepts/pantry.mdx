@@ -12,7 +12,7 @@ summary: "Galley's one cache. Each registered book's retained text and derived p
 
 ## The problem
 
-Sefer registers whole books, then asks many questions about them. Copying a project into wasm memory again per question costs 3.5–5 ms per 5 MB, and caches spread across features disagree about what is current.
+A host registers whole books, then asks many questions about them. Copying a project into wasm memory again per question costs 3.5–5 ms per 5 MB, and caches spread across features disagree about what is current.
 
 ## The solution
 
@@ -30,17 +30,15 @@ The one entry point and the questions it answers, from `galley/src/pantry.md`:
 
 ```rust
 pantry.update("books/mrk.usfm", Role::Target, &text)?   // -> Entry for MRK
-    .lint()      .mask()      .text()
+    .lint(); // also .mask(), .text()
 
-pantry.changed_since_update(&id, &edited)   -> [1_284..2_006]   // one chapter
-pantry.books(Role::Target)                  -> [(id, GEN), (id, MRK)]
-pantry.tally()         -> Tally { pinned, hot, rebuildable }
-pantry.resident_bytes() == pantry.tally().total()
-```
+pantry.changed_since_update(&id, &edited); // [1_284..2_006]: one chapter
+pantry.books(Role::Target);                // [(id, GEN), (id, MRK)]
+pantry.tally();                            // Tally { pinned, hot, rebuildable }
+assert_eq!(pantry.resident_bytes(), pantry.tally().total()); // every byte attributed
 
-```text
-dirty(book)   = baseline.checksum() != current.checksum()   // POSITIONAL
-rework(book)  = baseline.changed_chunks(&current)           // SET MEMBERSHIP
+let dirty = baseline.checksum() != current.checksum(); // positional: any byte moved
+let rework = baseline.changed_chunks(&current);        // set membership: chapters to re-derive
 ```
 
 ## How it works

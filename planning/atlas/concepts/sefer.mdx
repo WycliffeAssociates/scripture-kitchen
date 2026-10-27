@@ -12,34 +12,26 @@ summary: "The browser USFM editor, in its own repo, that vendors the galley pack
 
 ## The problem
 
-Sefer shows the outline, goes to a verse, underlines errors, searches and surfaces Sous findings while the translator types, and should carry no scripture parser of its own.
+A browser USFM editor shows the outline, goes to a verse, underlines errors, searches and surfaces Sous findings while the translator types, and should carry no scripture parser of its own.
 
 ## The solution
 
-It parses nothing itself. Every answer comes from the [[galley-package]], with offsets in UTF-16 so Sefer converts nothing. Its per-keystroke loop is what [[invariants]] 2, 4 and 5 are sized for, and many of the workspace's doors trace to its numbered requests.
+Sefer parses nothing itself. Every answer comes from the [[galley-package]], with offsets in UTF-16 ([[utf16]]) so it converts nothing. It is one host of the package, not the reason for its shape.
 
 ## Trade-offs
 
-- A feature Sefer needs must land on the galley package, the only build it vendors, not just on the engine.
-- Sefer's internals live in another repo; the atlas does not document them.
+- A feature it needs must land on the galley package, the only build it vendors, not just on the engine.
+- Its internals live in another repo; the atlas does not document them.
 
 ## Show me
 
-Sefer asking where a verse is:
+Asking where a verse is:
 
-```js
+```ts
 const verse = { kind: "verses", from: { chapter: 1, verse: 2 }, to: { chapter: 1, verse: 2 } };
 JSON.parse(galley.resolve("books/LUK.usfm", verse, { utf16: true }));
-//   { found: { from, to, opening, covers, coarser } }
+// { found: { from, to, opening, covers, coarser } }
 ```
-
-`address` is Sefer's `Address` (`book`, `intro`, `chapters`, `verses`) (`galley/src/wasm.md`).
-
-## How it works
-
-Sefer's numbered asks appear in commits and planning items: resolve (asks 12, 14), [[code:galley/src/sous/onion_book.rs#OnionBook::locate]] cost (11), `LetterRun` (13), stable diagnostic identity (15). Its `locate.ts` was the reference [[resolve]] ported, with the departures listed in `resolve.md`.
-
-It vendors the [[galley-package]], the superset module that carries every onion door beside the `Galley` handle (`galley/README.md`), so a new door must land on galley. Offsets at the wall are UTF-16 code units ([[utf16]]).
 
 ## Composes with
 
@@ -47,5 +39,4 @@ Reads the [[galley-package]]'s wires: [[dish]], [[census]], [[find-buffer]], [[m
 
 ## Where
 
-- [[code:galley/src/wasm.md]] · the door list Sefer calls
-- [[code:planning/roadmap.mdx]] · what Sefer is waiting on
+- [[code:galley/src/wasm.md]] · the door list a host calls

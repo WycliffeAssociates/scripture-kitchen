@@ -22,17 +22,24 @@ Format is the one opt-in writer of new bytes ([[invariants]] 1, 3). It returns [
 
 - A scoped format still lints the whole book.
 - A straddling edit is dropped whole, so a seam may stay untidy.
-- It adds only whitespace and fixed engine text, never prose.
+- Layout is a fixed set of switches (`verse_breaks`, `char_marker_breaks`, per-rule flags); a house style outside them needs its own edits.
 
 ## Show me
 
-`playground --format-trace`, default options, on the scratch book in [[cst]]: 3 edits over 125 bytes. Watch the verses join their paragraph's line:
+`playground --format-trace`, default options, on the scratch book in [[cst]]: 3 edits over 125 bytes. Watch the verses join their paragraph's line and the surplus spaces before `spoke.` go. Before:
 
-```text
-before                                   after
-\p                                       \p \v 1 Jesus wept.\f + \ft why\f* Then \v 2-3 he \nd Lord\nd* spoke.
-\v 1 Jesus wept.\f + \ft why\f* Then     \s1 A heading
-\v 2-3 he \nd Lord\nd*   spoke.          \q1 \v 4 Bread.
+```usfm
+\p
+\v 1 Jesus wept.\f + \ft why\f* Then
+\v 2-3 he \nd Lord\nd*   spoke.
+\s1 A heading
+\q1 \v 4 Bread.
+```
+
+After:
+
+```usfm
+\p \v 1 Jesus wept.\f + \ft why\f* Then \v 2-3 he \nd Lord\nd* spoke.
 \s1 A heading
 \q1 \v 4 Bread.
 ```

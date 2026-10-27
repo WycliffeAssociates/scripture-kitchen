@@ -20,27 +20,26 @@ A pure function over any byte slice returns the **hull** (first..last, for sorti
 
 ## Trade-offs
 
-- Numbers clamp at about 4 billion, so garbage sorts as garbage instead of wrapping.
 - Any non-ASCII character counts as a segment letter: no Unicode category table ships, so it accepts slightly too much rather than flag a correct Arabic segment.
-- Chapters are digits only; `\c 12b` is malformed.
+- Chapters are digits only: `\c 12b` is malformed, so a host that wants it must read the label itself.
 
 ## Show me
 
 Each designator as written, its hull, and its members. Watch `1,3,5` (holes at 2 and 4) and `3-1` (kept as written).
 
-```text
-"12"     → Wellformed { first: 12, last: 12 }   members [12]
-"12a"    → Wellformed { first: 12, last: 12 }   members [12, segment "a"]
-"1,3,5"  → Wellformed { first: 1,  last: 5 }    members [1] [3] [5]       2 and 4 are holes
-"3-1"    → Wellformed { first: 3,  last: 3 }    members [3–1]             kept as written
-"01"     → Malformed                            members []
-"1-"     → Malformed                            members []
+```rust
+verse(b"12")    // Wellformed { first: 12, last: 12 }   members [12]
+verse(b"12a")   // Wellformed { first: 12, last: 12 }   members [12, segment "a"]
+verse(b"1,3,5") // Wellformed { first: 1,  last: 5 }    members [1] [3] [5]   2 and 4 are holes
+verse(b"3-1")   // Wellformed { first: 3,  last: 3 }    members [3–1]         kept as written
+verse(b"01")    // Malformed                            members []
+verse(b"1-")    // Malformed                            members []
 ```
 
 ## How it works
 
 - **Interpreter, not Scanner.** The [[scanner]] emits one [[code:onion/src/designator.rs#Designator]] token and never looks inside. The spec pattern `/[1-9][0-9]*[\p{L}\p{Mn}]*(‏?[\-,][0-9]+[\p{L}\p{Mn}]*)*/` lives here (GLOSSARY, "Designator").
-- **Two readings.** The hull is what a sequence sorts by and a bridge renders as. The members are the truth. Shipped with labels on the [[toc]] in 0.1.7 (commit 30b4ff2).
+- **Two readings.** The hull is what a sequence sorts by and a bridge renders as. The members are the truth. The [[toc]] carries both.
 - **Saturate, never wrap.** Numbers clamp at `u32::MAX`, so junk is not a false "out of order".
 - **Lenient Unicode.** A segment character is an ASCII letter or any non-ASCII scalar. Crying wolf on an Arabic segment is worse than missing a nicety.
 - **Chapter is digits only**, from the chapter milestone's `sid` pattern. That is the module's one assumption.

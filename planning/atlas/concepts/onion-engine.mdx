@@ -12,7 +12,7 @@ summary: "The USFM engine as a product. Lossless parse, structure, lint, format,
 
 ## The problem
 
-Sefer, the CLI and Sous's adapter all need the same answers about a USFM book (where chapter 2 starts, what is malformed, the text without notes), per keystroke in Sefer's case. Separate parsers would disagree.
+An editor, the CLI and Sous's adapter all need the same answers about a USFM book (where chapter 2 starts, what is malformed, the text without notes), the editor per keystroke. Separate parsers would disagree.
 
 ## The solution
 
@@ -41,7 +41,7 @@ const { tree, tokens, diagnostics, toc } = deserialize(parse(text, { diagnostics
 
 - **Source is the truth.** Every product is an index over or a derivation from the exact bytes ([[source]]); round trip is identity by construction.
 - **One engine, many drivers.** The engine never forks per host (GLOSSARY, "Engine").
-- **Stateless.** A stateful handle was ruled out until a profiler shows the per-call index build matters (`onion-wasm/README.md`, "Deliberately absent").
+- **Stateless.** No stateful handle until a profiler shows the per-call index build matters (`onion-wasm/README.md`, "Deliberately absent").
 - **Owns scripture structure for Sous** too: parsing, marker validity, canonical order, masks, verse anchors (`charter.md`). Sous does not grow a second USFM parser.
 
 ## Composes with

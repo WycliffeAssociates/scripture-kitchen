@@ -20,29 +20,31 @@ The scanner keeps `|…` as one `AttrList` token, and nothing splits it until a 
 
 ## Trade-offs
 
-- Every reader re-splits; nothing is cached.
-- Not in the per-keystroke dish. Sefer asked and was told no; it calls [[code:onion/src/attributes.rs#attrs]] on demand.
+- Every reader re-splits; nothing is cached, so a caller reading the same list twice pays twice.
+- Not in the per-keystroke dish: a host that wants spans calls [[code:onion/src/attributes.rs#attrs]] per list, on demand.
 - Values are verbatim: `x="a\|b"` stays `a\|b`.
 
 ## Show me
 
 Each line is one attribute list as written, and what the interpreter reads out of it. Note the bare value and the two malformed cases.
 
-```text
-|x-strong="G2532" x-lemma="καί"  →  x-strong=G2532, x-lemma=καί
-|in                              →  lemma=in              bare → the row's default attribute
-|lemma=grace                     →  lemma=grace
-|lemma="grace                    →  Malformed(UnterminatedQuote)
-|lemma="a", strong="G1"          →  lemma=a, Malformed(BareJunk @ ,)
-|x="a\|b"                        →  x=a\|b                no escapes, passed verbatim
+```rust
+// `list` is the AttrList token of `\w και|x-strong="G2532" x-lemma="καί"\w*`
+let pairs: Vec<AttrEvent> = attrs(src.as_bytes(), &list).collect();
+// x-strong=G2532, x-lemma=καί
+
+// |in                     → lemma=in            bare: the row's default attribute
+// |lemma=grace            → lemma=grace
+// |lemma="grace           → Malformed(UnterminatedQuote)
+// |lemma="a", strong="G1" → lemma=a, Malformed(BareJunk @ ,)
+// |x="a\|b"               → x=a\|b              no escapes, passed verbatim
 ```
 
 ## How it works
 
 - **A span, not a container.** The [[token]] keeps the list byte-identical, deformed ones included. Splitting it is an interpreter's job (GLOSSARY: a pure function from a slice to a payload), on demand, with no allocation.
 - **Malformed, never repaired.** On any pair failure usfmtc re-reads the whole interior as the default value. Here a failed pair is `Malformed`, the finding lint wants.
-- **Lazy for hosts too.** Sefer asked for every list's spans as a [[dish]] section (2026-10-22). Declined: a section costs every parse for a value only a popover reads. `attrs(text, from, to)` stays the way in, and `reader.ts` carries a `MARKER_ATTRIBUTES` table instead.
-- **Cost.** The corpus sweep in `tests/attr_corpus.rs` reads 1.25M lists and 4.35M attributes over 226 books.
+- **Lazy for hosts too.** Attribute spans are not a [[dish]] section: a section costs every parse for a value only a popover reads. `attrs(text, from, to)` stays the way in, and `reader.ts` carries a `MARKER_ATTRIBUTES` table instead.
 
 ## Composes with
 

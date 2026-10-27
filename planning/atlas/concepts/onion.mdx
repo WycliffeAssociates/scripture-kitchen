@@ -21,19 +21,20 @@ All of it lives here, written once ([[invariants]] 4): text in, answers out, no 
 ## Trade-offs
 
 - Repeated calls redo work unless the caller caches; deliberate.
-- JSON writers are hand-rolled, so serde is only a test dependency.
-- USJ, USX and HTML are optional features.
+- Answers are indices into the caller's text and token arrays, not owned strings or objects; the caller keeps both and slices.
+- The whole book must be in memory; `lex` takes a `&str`, not a reader.
 
 ## Show me
 
 The pipeline, text to answers:
 
-```text
-lex(text) → Vec<Token> → cst::build → Cst
-                       → toc        → Toc
-          mask(source, tokens, cst, Filter) → Mask
-          lint / format_edits / diff / usj / usx / html / Toc::resolve
-          wire::parse → Parsed → wire::plate → Vec<u8>
+```rust
+let tokens: Vec<Token> = onion::lex(text);
+let tree: Cst = onion::cst::build(&tokens);
+let toc: Toc = onion::toc(text.as_bytes(), &tokens);   // no tree needed
+let kept: Mask = onion::mask(text.as_bytes(), &tokens, &tree, &filter);
+// lint, format_edits, diff, usj / usx / html and Toc::resolve read the same arrays
+let dish: Vec<u8> = onion::wire::plate(&onion::wire::parse(text, opts)); // for JS
 ```
 
 `cargo run --release --bin playground -- --toc-trace <file>` and friends regenerate the `debug/` dumps; `--bin codegen` regenerates the marker tables, the wire, `reader.ts` and `diagnostics.json`.
@@ -42,7 +43,7 @@ lex(text) → Vec<Token> → cst::build → Cst
 
 - **One implementation per behaviour.** "Drivers may vary, the engine never forks" (GLOSSARY, "Engine"). Every derivation lives here, computed on demand.
 - **Stateless and lossless.** No caching, no I/O (`galley/src/lib.rs`).
-- **Small dependency set:** `memchr`, `rustc-hash`, `similar` and `unicode-segmentation` for diff, `xxhash-rust` for the dish hash, plus [[mise]] and [[ticket]].
+- **Small dependency set** (JSON writers are hand-rolled; serde is a test dependency only): `memchr`, `rustc-hash`, `similar` and `unicode-segmentation` for diff, `xxhash-rust` for the dish hash, plus [[mise]] and [[ticket]].
 - **Exports are features** (`usj`, `usx`, `html`, default on).
 
 ## Composes with

@@ -22,7 +22,7 @@ It accepts a borrowed [[code:sous-chef/core/src/input.rs#ProjectedBook]], text p
 
 - It cannot ask onion anything; any structural fact it needs must be in the neutral view.
 - It owns content evidence only. Editor positions, persistence, I/O and localisation are elsewhere.
-- Its snapshot reader is typed by hand with only the numbers generated, not built on [[ticket]]: listed as debt.
+- A check sees one chapter at a time in `map`; anything that spans chapters has to be carried through `fold` ([[chapter-pass]]).
 
 ## Show me
 
@@ -32,8 +32,9 @@ The neutral view going in, findings coming out:
 pub type Brigade = (hygiene::HygieneBytes, substrate::Substrate, words::Words);
 ```
 
-```text
-ProjectedBook (text, chapters, verses) ─ ChapterPass::map/fold ─→ Aggregate ─ judge ─→ Findings
+```mermaid
+flowchart LR
+  pb["ProjectedBook: text, chapters, verses"] -- "ChapterPass map / fold" --> agg[Aggregate] -- judge --> f[Findings]
 ```
 
 Dependencies: `memchr`, `rustc-hash`, `xxhash-rust`, and [[mise]]. Nothing else.
@@ -43,7 +44,7 @@ Dependencies: `memchr`, `rustc-hash`, `xxhash-rust`, and [[mise]]. Nothing else.
 - **Never depends on onion.** "Do not add the dependency" (`architecture.md`). A vref corpus can produce the same view.
 - **Owns content evidence only.** Unicode classification, config-free observations, corpus reductions, judging, finding serialization (`charter.md`, "Sous owns content evidence").
 - **No resident caches.** sous-core declares what is safe to reuse (`SCHEMA`, [[code:sous-chef/core/src/pass/chapter.rs#ChapterPass::RETAIN_CHAPTERS|RETAIN_CHAPTERS]]).
-- **Its own reader emitter.** Its numbers are generated and its reader typed.
+- **Its own reader emitter.** Its numbers are generated and its reader typed by hand, not built on [[ticket]]: listed as debt.
 
 ## Composes with
 

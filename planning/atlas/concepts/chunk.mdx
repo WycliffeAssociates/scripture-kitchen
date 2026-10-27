@@ -28,29 +28,35 @@ Cut before each line starting `\c`, and scan, build and lint each piece alone ([
 
 The pre-scan finds the cut points, from `onion/src/chunk.rs`:
 
-```text
-"\\id GEN\n\\c 1\n\\p a\n\\c 2\n\\p b\n"
-   → starts [0, 8, 18]   lf 5   crlf 0
+```rust
+let scan = pre_scan(b"\\id GEN\n\\c 1\n\\p a\n\\c 2\n\\p b\n");
+// scan.starts == [0, 8, 18]   a cut before each line starting \c
+// lf 5, crlf 0
 ```
 
 Each chunk becomes products, then they fold:
 
-```text
-chunk i bytes ─ lex ─ build_chunk ─ lint_chunk(ctx) ─→ (tokens, Cst, local LintReport, Carried)
-                                                              │
-all chunks, in order ─ cst::concat ─ carried::reduce ─ merge_reports ─→ the whole-book Parsed
+```rust
+// per chunk i, alone
+let tokens = lex(chunk_bytes);
+let cst = build_chunk(&tokens);
+let (report, carried) = lint_chunk(&tokens, &cst, ctx); // local LintReport + Carried
+
+// all chunks, in order → the whole-book Parsed
+let cst = cst::concat(csts);
+let book_facts = carried::reduce(carrieds);   // left fold: no source, tokens or tree
+let lint = merge_reports(reports, book_facts);
 ```
 
 Chunk 0's carry-outs, the two facts a later chunk cannot see in its own bytes:
 
-```text
-Carried::declared_version()     the \usfm line            gates deprecated-marker
-Carried::book_is_scripture()    does \id name a book      gates the paragraph rule
+```rust
+carried.declared_version()   // the \usfm line: gates deprecated-marker
+carried.book_is_scripture()  // does \id name a book: gates the paragraph rule
 ```
 
 ## How it works
 
-- **Chapter is the rebuild unit** (commit 5ee9d08, "the fold is bought as a plan").
 - **Map observes, reduce judges.** Every cross-chunk fact (first and last chapter, once-per-book markers, the sid a later `-e` owes) is recorded in `Carried`. `reduce` is a left fold that needs no source, tokens or tree. Whole-book `lint` is the single-unit fold, so each judgment exists once.
 - **Carry-outs belong in the key.** A chunk's product is a function of its bytes and chunk 0's context; the [[chunk-cache]] keys on both, so a `\usfm` change re-derives every later chunk.
 - **Dirty boundaries fuse.** [[code:onion/src/cst.rs#build_chunk]] simulates the next `\c`'s displacement. A frame it cannot close sets `open_at_end`, and the chunk fuses with its successor.

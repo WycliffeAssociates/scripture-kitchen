@@ -12,7 +12,7 @@ summary: "Galley's content-keyed store of per-chapter parse products; a keystrok
 
 ## The problem
 
-Sefer resends the whole book per keystroke, and typing in Mark 4 leaves 15 chapters byte-identical. Reparsing them is waste, but wasm memory never shrinks and a stale hit is worse than a miss.
+An editor that reparses per keystroke resends the whole book each time, and typing in Mark 4 leaves 15 chapters byte-identical. Reparsing them is waste, but wasm memory never shrinks and a stale hit is worse than a miss.
 
 ## The solution
 
@@ -28,14 +28,14 @@ Each [[chunk]]'s tokens, CST and local lint are keyed by a hash of its bytes plu
 
 What one entry holds, and the counters a host can read, from `galley/src/pantry/chunks.rs` and `pantry.md`:
 
-```text
-chunks.parse(text, opts)  ->  the same bytes onion::wire::parse would plate,
-                              with every unchanged chunk served from memory
+```rust
+// the same bytes onion::wire::parse would plate, every unchanged chunk served from memory
+let dish = chunks.parse(text, opts);
 
-key   = (xxh3-128 of the chunk's bytes, custom-marker list fingerprint, chunk 0's carry-outs)
-value = Products { cst, tokens (chunk-relative), local LintReport, Carried, bytes }
+// key   = (xxh3-128 of the chunk's bytes, custom-marker list fingerprint, chunk 0's carry-outs)
+// value = Products { cst, tokens /* chunk-relative */, local LintReport, Carried, bytes }
 
-pantry.chunk_stats() -> ChunkStats { misses, hits, evictions, len, resident_bytes }
+let ChunkStats { misses, hits, evictions, len, resident_bytes } = pantry.chunk_stats();
 ```
 
 ## How it works
@@ -47,7 +47,7 @@ pantry.chunk_stats() -> ChunkStats { misses, hits, evictions, len, resident_byte
 - **A ceiling makes it safe.** A wasm high-water mark is permanent. A hand-rolled LRU evicts by last-touched tick; at dozens to hundreds of entries a linear scan is enough.
 - **Dirty seams are remembered** as `OpenBoundary`, so repeat calls widen to the fused unit without re-lexing.
 
-Name: this was the **Warmer** until commit a7c21d2 (2026-09-07) folded it into the [[pantry]] as [[code:galley/src/pantry/chunks.rs#ChunkStore]]. Test locals and `galley/examples/working_set.rs` still say `warmer`.
+In code it is [[code:galley/src/pantry/chunks.rs#ChunkStore]], part of the [[pantry]]. Test locals and `galley/examples/working_set.rs` still call it `warmer`.
 
 ## Composes with
 

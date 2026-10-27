@@ -22,36 +22,39 @@ A mask is a named recipe over the [[cst]] that emits the kept text plus the sour
 
 - Nothing is inserted: `\add one\add*two` projects as `onetwo`, since a synthesised space has no source offset.
 - An offset inside a cut range (mid-footnote) maps to nothing.
-- Headings are not verse text.
+- Headings are not verse text, so a check run over verse text never sees a typo in a heading.
 
 ## Show me
 
 The dots are the bytes the mask cut. Two kept stretches; position 13 in the kept text lands on byte 33 of the source.
 
-```text
-source   \v 1 Jesus wept.\f + \ft why\f* Then…
-         ·····Jesus wept.················ Then…      · = dropped
+```usfm
+\v 1 Jesus wept.\f + \ft why\f* Then…
+```
 
-m.ranges          == [5..16, 31..39]
-m.starts          == [0, 11]
-m.text(source)    == "Jesus wept. Then…"
-m.to_source(13)   == 33     past the note, still exact
-m.from_source(20) == None   inside the dropped \f
+```rust
+let m = mask(source, &tokens, &cst, &Filter::verse_text());
+// kept:  ·····Jesus wept.················ Then…      (· = cut)
+m.ranges;          // [5..16, 31..39]
+m.starts;          // [0, 11]
+m.text(source);    // "Jesus wept. Then…"
+m.to_source(13);   // 33: past the note, still exact
+m.from_source(20); // None: inside the dropped \f
 ```
 
 `playground --mask-trace` on the scratch book in [[cst]]: `verse_text` keeps 45 of 125 bytes in 10 ranges, `structure` keeps 51 in 6.
 
-```text
-verse_text:  "\n\n\nJesus wept. Then\nhe Lord   spoke.\n\nBread.\n"
-structure:   \id MRK  \mt1  \c 1  \p  \v 1  \v 2-3  \s1  \q1 \v 4
+```rust
+// verse_text: "\n\n\nJesus wept. Then\nhe Lord   spoke.\n\nBread.\n"
+// structure:  \id MRK  \mt1  \c 1  \p  \v 1  \v 2-3  \s1  \q1 \v 4
 ```
 
 ## How it works
 
 - **Walks the [[cst]], not the tokens.** "Text is not verse text" is a scope fact: the `why` in a footnote dies because the footnote dies, one skipped subtree instead of a stateful guess (`mask.rs` doc).
 - **Public offsets are always source bytes.** Mask space never escapes its maker. A consumer finds something in the projection, calls [[code:onion/src/mask.rs#Mask::to_source|to_source]], and files it in document coordinates.
-- **Maximal ranges.** Adjacent survivors merge, so a seam between ranges is always a real gap. One `u32` per range, not per byte. ~5.5 ns/token per recipe; the oracle checked 340.9M source bytes over 226 books x 3 filters (commit 9b1e23e).
-- **Headings are not verse text** (planning item 2026-09-30). A Titles-and-Sections paragraph's text drops until a `\v` inside it opens a verse; en_ulb puts verses inside `\s5` 208 times in 2CH alone, so removing the subtree would lose them.
+- **Maximal ranges.** Adjacent survivors merge, so a seam between ranges is always a real gap. One `u32` per range, not per byte.
+- **Headings are not verse text.** A Titles-and-Sections paragraph's text drops until a `\v` inside it opens a verse; real projects put verses inside `\s5` headings, so removing the subtree would lose them.
 - **Character markers drop in [[code:onion/src/mask.rs#Filter::structure|structure]].** Words do not port across languages, which is what makes [[overlay]] possible.
 
 ## Composes with

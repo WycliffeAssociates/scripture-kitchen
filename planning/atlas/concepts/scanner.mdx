@@ -16,33 +16,34 @@ Every keystroke relexes at least the edited chapter and a cold open lexes every 
 
 ## The solution
 
-Most of a book's bytes are prose between markers, so the text arm does not step byte by byte: it jumps with vectorised `memchr3` to the next `\`, `\r` or `\n`. The same lexer with a plain byte loop there ran 441 MiB/s against 1.3 GiB/s on prose (1.15 aligned), about 3x (d45be4f, `experiments/scalar.rs`). At a marker, `common_marker_checks` matches the byte after `\` and handles the nine commonest markers by measured frequency (`v q p s f b ft fr xt`, about 85% of occurrences in en_ulb and BSB) in one shape test each, skipping the general path's passes and name lookup: prose went from 968 to about 1,730 MiB/s, while aligned en_ult, dominated by `\w` and `\zaln`, stayed near 1,150 (90fef5d). Designators and attribute lists stay unread slices ([[designator]], [[attributes]]).
+Most of a book's bytes are prose between markers, so the text arm does not step byte by byte: it jumps with vectorised `memchr3` to the next `\`, `\r` or `\n`. The same lexer with a plain byte loop there ran 441 MiB/s against 1.3 GiB/s on prose (1.15 aligned), about 3x (`experiments/scalar.rs`). At a marker, `common_marker_checks` matches the byte after `\` and handles the nine commonest markers by measured frequency (`v q p s f b ft fr xt`, about 85% of occurrences in en_ulb and BSB) in one shape test each, skipping the general path's passes and name lookup: prose went from 968 to about 1,730 MiB/s, while aligned en_ult, dominated by `\w` and `\zaln`, stayed near 1,150. Designators and attribute lists stay unread slices ([[designator]], [[attributes]]).
 
 ## Trade-offs
 
-- Aligned text gains little from the fast arms: `\w` and `\zaln-s` have none (a parked idea, 2026-08-13).
-- Two code paths. `tests/fast_path_identity.rs` pins every fast arm token-identical to [[code:onion/src/scanner.rs#lex_general_path_only]] over the corpus.
+- Aligned text gains little from the fast arms: `\w` and `\zaln-s` have none.
+- Designators and attribute lists come back unread; a caller that wants their values interprets them ([[designator]], [[attributes]]).
 - `len` is `u16`, so a text run over 65,535 bytes splits into several tokens.
 
 ## Show me
 
 One line of source and the pieces it becomes. Note the `//` line-break hint and the attribute list as their own pieces.
 
-```text
-\v 1 gr//ace \w x|lemma="g"\w*
-→ Marker("\v ") Designator("1 ") Text("gr") OptBreak("//") Text("ace ")
-  Marker("\w ") Text("x") AttrList("|lemma=\"g\"") ClosingMarker("\w*")
+```rust
+let tokens = onion::lex(r#"\v 1 gr//ace \w x|lemma="g"\w*"#);
+// Marker("\v ") Designator("1 ") Text("gr") OptBreak("//") Text("ace ")
+// Marker("\w ") Text("x") AttrList("|lemma=\"g\"") ClosingMarker("\w*")
 ```
 
 The designator gate: a leading ASCII digit or it is text.
 
-```text
-\v 012 text  Marker("\v ") Designator("012 ") Text("text")
-\v Then He…  Marker("\v ") Text("Then He…")
+```rust
+onion::lex(r"\v 012 text"); // Marker("\v ") Designator("012 ") Text("text")
+onion::lex(r"\v Then He…"); // Marker("\v ") Text("Then He…"): no digit, so text
 ```
 
 ## How it works
 
+- **Two code paths, pinned equal.** `tests/fast_path_identity.rs` holds every fast arm token-identical to [[code:onion/src/scanner.rs#lex_general_path_only]] over the corpus.
 - **Boundary finding and classification stay apart.** The `*_end` functions decide where a token stops; [[code:onion/src/scanner.rs#classify_marker]] names it via the [[marker-table]]. GLOSSARY calls this the Scanner/Interpreter split.
 - **Losslessness is the partition.** Concatenating every span reproduces the source byte for byte.
 - **A newline is always its own token.** Block seams, lint's line rules, `\n\c` chunking and an editor's line model all key on it.

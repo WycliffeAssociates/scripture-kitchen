@@ -12,7 +12,7 @@ summary: "Build-time vocabulary and emitters. One declaration per wire generates
 
 ## The problem
 
-Each binary wire needs a Rust writer and a TS reader that agree on every byte, and hand-kept pairs drift silently: onion-wasm.ts once mirrored 109 constants by hand (b781bb9).
+Each binary wire needs a Rust writer and a TS reader that agree on every byte, and hand-kept pairs drift silently: a moved field reads garbage.
 
 ## The solution
 
@@ -21,23 +21,25 @@ A format declares its fields once in ticket's vocabulary ([[code:ticket/src/sche
 ## Trade-offs
 
 - Each format still writes its own envelope (header, magic, version); one grammar for all of them would save about fifty lines.
-- Two formats predate it and are still partly read by hand: the [[findings-snapshot]] and the [[corpus]] envelope.
+- Two formats are still partly read by hand: the [[findings-snapshot]] and the [[corpus]] envelope.
 
 ## Show me
 
 Three formats, one emitter:
 
-```text
-onion/src/wire/schema.rs    the dish's declaration    ─┐
-galley/src/toc/schema.rs    the census's declaration   ├─► ticket::emit ─► both ends
-galley/src/find/…/schema.rs find's declaration        ─┘
+```mermaid
+flowchart LR
+  dish["onion/src/wire/schema.rs (dish)"] --> emit["ticket::emit"]
+  census["galley/src/toc/schema.rs (census)"] --> emit
+  find["galley/src/find/…/schema.rs (find)"] --> emit
+  emit --> both[Rust writer + TS reader]
 ```
 
 Vocabulary: `Width`, `Space` (`Offset` converts under UTF-16), `Field`, `Record`, and `Repeat` for a run of sub-rows a row carries the length of (a find hit's source pieces).
 
 ## How it works
 
-- **No two formats can disagree** about how a field reaches the buffer or where a reader looks for it (`architecture.md`). Extracted in 0.1.1 from onion's dish codegen, which it reproduces byte for byte (commit 07278dc).
+- **No two formats can disagree** about how a field reaches the buffer or where a reader looks for it (`architecture.md`).
 - **Formats keep their envelopes.** Declaration, magic, version, envelope, codegen bin and generated files stay with each format (`ticket/README.md`).
 - **Generator-only.** No I/O: every function returns a `String`.
 

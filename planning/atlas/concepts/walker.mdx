@@ -27,22 +27,28 @@ A stack of open frames. Each marker opens a frame, closes its own match, or disp
 
 A paragraph arriving inside an open footnote pops three frames, each with its own reason; the stack is on the right.
 
-```text
+```usfm
 \p
-\v 1 Jesus wept.\f + \ft why     stack: [root, \p, \f, \ft]
-\p                               \p outranks \f: pop \ft (Implicit), pop \f (Recovery), pop \p (Implicit), push \p
+\v 1 Jesus wept.\f + \ft why
+\p
 \v 3 Then
-\v 2 he \nd Lord.                end of input: \nd and \p close at Eof
+\v 2 he \nd Lord.
 ```
+
+| at | the walker |
+| --- | --- |
+| `\ft why` | stack: `[root, \p, \f, \ft]` |
+| second `\p` | outranks `\f`: pop `\ft` (Implicit), pop `\f` (Recovery), pop `\p` (Implicit), push `\p` |
+| end of input | `\nd` and `\p` close at Eof |
 
 Lint over the same 76 bytes (`playground --lint-stats`):
 
-```text
-unclosed-note        @32   the \f the walker closed by Recovery
-unclosed-at-eof      @66   the \nd
-verse-out-of-order   @61
-verse-gap            @51
-```
+| code | at | |
+| --- | --- | --- |
+| `unclosed-note` | 32 | the `\f` the walker closed by Recovery |
+| `unclosed-at-eof` | 66 | the `\nd` |
+| `verse-out-of-order` | 61 | |
+| `verse-gap` | 51 | |
 
 ## How it works
 
@@ -50,10 +56,10 @@ GLOSSARY.md separates the words so the code can keep them apart:
 
 - A **Scope** is a kind that opens, takes content and closes. A **Frame** is one live occurrence on the stack, stamped with its **Context** at push time.
 - **Context** answers "may this marker appear here?". **Precedence** answers "how many frames to pop?". Precedence cannot do Context's job: it is a total order and cannot say `\add` may nest in `\add`.
-- **Displacement** closes a frame because an incoming marker outranks it. It is always a lint event, never silent (Will, 2026-08-12: "let them know we closed the footnote").
+- **Displacement** closes a frame because an incoming marker outranks it. It is always a lint event, never silent: the author is told the footnote was closed.
 - A sidebar is a pop barrier: only `\esbe` ends it.
 
-The name: "Walker", ruled 2026-08-12. "Driver" is a synonym to avoid; the glossary already uses driver for the engine host.
+The name is "Walker". "Driver" is a synonym to avoid; the glossary already uses driver for the engine host.
 
 ```mermaid
 stateDiagram-v2

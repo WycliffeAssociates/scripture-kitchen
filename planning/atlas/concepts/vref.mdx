@@ -21,18 +21,18 @@ Render the verse-text [[mask]] by [[toc]] rows. A bridge writes its text on its 
 ## Trade-offs
 
 - Newlines and tabs inside a verse become spaces.
-- Verses the book never had get no blank line; that needs a versification table onion does not own (planning item 2026-10-14).
+- Verses the book never had get no blank line; that needs a versification table onion does not own.
 
 ## Show me
 
 `playground --vref` on the scratch book in [[cst]]. Verses 2-3 are combined, so verse 3 is `<range>`:
 
-```text
-MRK 1:1	Jesus wept. Then
-MRK 1:2	he Lord   spoke.
-MRK 1:3	<range>
-MRK 1:4	Bread.
-```
+| key | line |
+| --- | --- |
+| `MRK 1:1` | `Jesus wept. Then` |
+| `MRK 1:2` | `he Lord   spoke.` |
+| `MRK 1:3` | `<range>` |
+| `MRK 1:4` | `Bread.` |
 
 ## How it works
 

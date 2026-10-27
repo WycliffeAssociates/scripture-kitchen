@@ -20,7 +20,7 @@ A token is `start u32 · len u16 · kind_bits u8 · marker_idx u8 · level u8`, 
 
 ## Trade-offs
 
-- `len` is `u16`, so text over 65,535 bytes splits into several tokens. In memory the row pads to 12 bytes either way; why two bytes was chosen is not recorded.
+- `len` is `u16`, so text over 65,535 bytes splits into several tokens.
 - Marker identity is one byte, so the [[marker-table]] holds at most 256 rows.
 - Every reader of a value inside a token pays to interpret it.
 
@@ -28,22 +28,22 @@ A token is `start u32 · len u16 · kind_bits u8 · marker_idx u8 · level u8`, 
 
 Eight pieces from one verse with a footnote. Each is a kind, its text (by position), and the marker row it points at.
 
-```text
- 11 Marker        "\v "          start=26 len=3  marker_idx=133
- 12 Designator    "1 "           start=29 len=2
- 13 Text          "Jesus wept."  start=31 len=11
- 14 Marker        "\f "          start=42 len=3  marker_idx=21
- 15 NoteCaller    "+ "           start=45 len=2
- 16 Marker        "\ft "         start=47 len=4  marker_idx=32
- 17 Text          "why"          start=51 len=3
- 18 ClosingMarker "\f*"          start=54 len=3  marker_idx=21
-```
+| # | kind | text | start | len | marker_idx |
+| --- | --- | --- | --- | --- | --- |
+| 11 | Marker | `\v ` | 26 | 3 | 133 |
+| 12 | Designator | `1 ` | 29 | 2 | |
+| 13 | Text | `Jesus wept.` | 31 | 11 | |
+| 14 | Marker | `\f ` | 42 | 3 | 21 |
+| 15 | NoteCaller | `+ ` | 45 | 2 | |
+| 16 | Marker | `\ft ` | 47 | 4 | 32 |
+| 17 | Text | `why` | 51 | 3 | |
+| 18 | ClosingMarker | `\f*` | 54 | 3 | 21 |
 
 Surplus delimiter whitespace becomes `Pad` (`scanner.rs` doc):
 
-```text
-\v 1 text    Marker("\v ") Designator("1 ") Text("text")
-\v   1 text  Marker("\v ") Pad("  ") Designator("1 ") Text("text")
+```rust
+onion::lex(r"\v 1 text");   // Marker("\v ") Designator("1 ") Text("text")
+onion::lex(r"\v   1 text"); // Marker("\v ") Pad("  ") Designator("1 ") Text("text")
 ```
 
 Whitespace inside text is never Pad: `\nd*   spoke.` lexes as `Text("   spoke.")`.
@@ -52,7 +52,7 @@ Whitespace inside text is never Pad: `\nd*   spoke.` lexes as `Text("   spoke.")
 
 - **Eager fields, lazy payloads.** `start: u32`, `len: u16`, `kind_bits: u8`, `marker_idx: u8`, `level: u8`. GLOSSARY: "each added field is twin tax", because the JS read lane must mirror it.
 - **Packed kind.** The Rust enum is 2 bytes; the row stores one byte, low 4 bits shape and bit 4 a spelling flag (`\+` nesting, or `-e` on a milestone). [[code:onion/src/token.rs#TokenKind::to_bits|to_bits]]/`from_bits` is the one mapping.
-- **Pad** (RFC-Lexer-change-8-27, commit 8128053): each fold site keeps at most one horizontal code unit; the rest is Pad. Spans tile again, text views drop Pad whole, and `delimiter-surplus` (875 across the corpus at the time) offers a delete.
+- **Pad**: each fold site keeps at most one horizontal code unit; the rest is Pad. Spans tile again, text views drop Pad whole, and `delimiter-surplus` offers a delete.
 - **Level, not spelling.** `\q1` and `\q2` share one row; `level` carries the number.
 - **Over-long runs split** at `u16::MAX` in the scanner's push.
 

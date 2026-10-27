@@ -12,7 +12,7 @@ summary: "Find results in one buffer. Per hit, the projected range to highlight,
 
 ## The problem
 
-Find runs over a mask, so a hit's offset in the searched text is not its offset in the file, and a hit across a removed footnote is several source ranges. Sefer needs both, plus a preview line, for every hit in a project.
+Find runs over a mask, so a hit's offset in the searched text is not its offset in the file, and a hit across a removed footnote is several source ranges. An editor needs both, plus a preview line, for every hit in a project.
 
 ## The solution
 
@@ -21,14 +21,14 @@ One [[ticket]]-generated buffer ([[invariants]] 2, 6). Each hit carries its proj
 ## Trade-offs
 
 - The preview is display text only: the projected text is discarded after the search.
-- The variable piece count is why ticket gained `Repeat`.
+- Reading pieces is a nested loop per hit, not a fixed-stride row.
 - Offsets are UTF-16; native callers convert.
 
 ## Show me
 
-How Sefer walks the hits; note the two kinds of position per hit. From `galley/src/wasm.md`:
+How a host walks the hits; note the two kinds of position per hit. From `galley/src/wasm.md`:
 
-```js
+```ts
 const hits = Hits.open(galley.findAll("God", { wholeWord: true, limit: 200 }));
 for (let n = 0; n < hits.hitCount; n++) {
   const hit = hits.hit(n);
@@ -39,9 +39,10 @@ for (let n = 0; n < hits.hitCount; n++) {
 }
 ```
 
-```text
-u32   magic     0x444E4946 — "FIND"
-u32   version   1
+```ts
+// header
+magic: u32;    // 0x444E4946, "FIND"
+version: u32;  // 1
 ```
 
 ## How it works
@@ -53,7 +54,7 @@ u32   version   1
 
 ## Composes with
 
-Written by [[find]]; declared against [[ticket]] ([[wire]]). Read through `find-reader.ts` by [[sefer]] via the [[galley-package]]. Its `pieces` agree with the [[mask-map]]'s.
+Written by [[find]]; declared against [[ticket]] ([[wire]]). Read through `find-reader.ts` in the [[galley-package]]. Its `pieces` agree with the [[mask-map]]'s.
 
 ## Where
 

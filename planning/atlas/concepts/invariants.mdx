@@ -14,21 +14,21 @@ Each rule: the invariant, why we hold it and what the alternative would cost, an
 
 ## 1. Lossless: bytes in are bytes out
 
-**Why.** Most parsers build an AST, and an AST applies the spec's whitespace reduction and normalises closers. Load-then-save through it rewrites spacing the translator never touched, so every save is a diff and collaborators conflict in git over bytes neither changed. We could normalise; it would make loading lossy.
+**Why.** Few existing USFM parsers fit. Some did not run where one was needed (a Tauri app, so Rust); most built an AST that applies the spec's [whitespace reduction](https://docs.usfm.bible/usfm/3.1/whitespace.html#ws-reducing) and normalises closers. Load-then-save through an AST rewrites spacing the translator never touched, so every save is a diff and collaborators conflict in git over bytes neither changed. This is the primary invariant: much of the API's shape, a CST rather than an AST and answers as offsets into the original text, follows from it.
 
-**Forces.** Tokens tile the source: concatenating their spans is the file ([[scanner]], [[source]]). Horizontal whitespace past a marker's one delimiter byte is its own token kind, [[code:onion/src/token.rs#TokenKind::Pad|Pad]], not dropped (875 sites flagged across the corpus when it landed, 8128053) ([[token]]). Closers the file never wrote are never inserted: each node records how its frame ended, [[code:onion/src/cst.rs#CloseReason|Explicit]], `Implicit`, `Recovery` or `Eof`, in one byte ([[cst]], [[walker]]). Loss happens only in projections named as lossy: [[mask]], [[exports]], [[vref]].
+**Forces.** Tokens tile the source: concatenating their spans is the file ([[scanner]], [[source]]). Horizontal whitespace past a marker's one delimiter byte is its own token kind, [[code:onion/src/token.rs#TokenKind::Pad|Pad]], not dropped ([[token]]). Closers the file never wrote are never inserted: each node records how its frame ended, [[code:onion/src/cst.rs#CloseReason|Explicit]], `Implicit`, `Recovery` or `Eof`, in one byte ([[cst]], [[walker]]). Loss happens only in projections named as lossy: [[mask]], [[exports]], [[vref]].
 
 ## 2. Offsets over object graphs
 
-**Why.** Sefer reparses on every keystroke, and the answer crosses into JS. A string per token is a heap allocation in Rust and another in JS; JSON adds an encode and a parse on top. Integers are small, live in flat arrays and copy for free. Measured in Node, encoding was the cost and the copy was free (13c3d3b).
+**Why.** An editor that reparses on every keystroke needs each answer to cross into JS. A string per token is a heap allocation in Rust and another in JS; JSON adds an encode and a parse on top. Integers are small, live in flat arrays and copy for free. Measured in Node, encoding was the cost and the copy was free.
 
-**Forces.** A [[token]] is 12 bytes of numbers (`start u32 · len u16 · kind u8 · marker u8 · level u8`, size asserted) and holds no text. Interiors are read lazily ([[designator]], [[attributes]]). Every per-call answer is a binary wire: from/to ranges, enum-numbered kinds, string tables only where text must travel ([[wire]], [[plate]], [[dish]]). Shipping tokens, CST and diagnostics instead of thirteen prebuilt views was 0.64x the bytes and 0.62x the time (b781bb9). JSON is kept for two cold paths, [[diff]] and [[resolve]].
+**Forces.** A [[token]] is 12 bytes of numbers (`start u32 · len u16 · kind u8 · marker u8 · level u8`, size asserted) and holds no text. Interiors are read lazily ([[designator]], [[attributes]]). Every per-call answer is a binary wire: from/to ranges, enum-numbered kinds, string tables only where text must travel ([[wire]], [[plate]], [[dish]]). Shipping tokens, CST and diagnostics instead of thirteen prebuilt views was 0.64x the bytes and 0.62x the time. JSON is kept for two cold paths, [[diff]] and [[resolve]].
 
 ## 3. Flag, never repair
 
-**Why.** A repair is a guess. A silent one moves the editor's offsets and hides the mistake from the person who has to fix it.
+**Why.** This is a corollary of 1. A repair on load is lossy loading by another name: it changes bytes the author never touched, moves the editor's offsets and hides the mistake from the person who has to fix it. Flagging does not mean leaving fixable issues bare: a fixable issue is flagged with its fix offered, and the user or host decides whether to apply it.
 
-**Forces.** Input that cannot be represented is refused with a reason, never defaulted (GLOSSARY, "Refuse, never invent"). [[lint]] moves, inserts and drops no token; a fix is an offered list of [[edit]]s and exists only where the row declares one. A malformed designator keeps its [[toc]] row with numbers 0; a broken attribute pair is [[code:onion/src/attributes.rs#AttrEvent::Malformed|Malformed]] ([[attributes]]); [[resolve]] says ambiguous rather than picking the nearest. [[format]] is the one opt-in path that writes new bytes.
+**Forces.** Input that cannot be represented is refused with a reason, never defaulted. [[lint]] moves, inserts and drops no token; a fix is an offered list of [[edit]]s wherever the lint row declares one. A malformed designator keeps its [[toc]] row with numbers 0; a broken attribute pair is [[code:onion/src/attributes.rs#AttrEvent::Malformed|Malformed]] ([[attributes]]); [[resolve]] says ambiguous rather than picking the nearest. [[format]] is the one opt-in path that writes new bytes.
 
 ## 4. Engines are stateless; galley holds all state
 
@@ -44,7 +44,7 @@ Each rule: the invariant, why we hold it and what the alternative would cost, an
 
 ## 6. Author once, generate the rest, test for staleness
 
-**Why.** Two hand-kept copies of a fact drift silently: a moved wire field reads garbage, a spec change misses one `if`. Before generation, onion-wasm.ts mirrored 109 constants by hand (b781bb9).
+**Why.** Two hand-kept copies of a fact drift silently: a moved wire field reads garbage, a spec change misses one `if`. Generating both ends leaves no hand-mirrored constants to drift.
 
 **Forces.** The [[marker-table]] generates the Rust lookup, the name matcher and the TS table. [[ticket]] generates each wire's Rust writer and TS reader from one declaration. `diagnostics.json` is generated from lint's catalog, and mise's Unicode tables from a pinned UCD. Generated files are checked in, and a test fails when one is stale. The [[corpus]] envelope and the Sous snapshot reader are the standing exceptions.
 

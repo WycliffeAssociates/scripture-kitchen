@@ -16,36 +16,36 @@ summary: "words/1. The one versioned word-boundary rule, in mise, shared by find
 
 ## The solution
 
-One rule in [[mise]] ([[invariants]] 7): letters, clinging marks and digits, joined across one apostrophe or hyphen only with a letter on both sides. It is versioned (`words/1`) because consumers store word hashes, so a change is a new version, not an edit.
+One rule in [[mise]] ([[invariants]] 7), a close variant of Unicode's word boundaries ([UAX #29](https://www.unicode.org/reports/tr29/)): letters, clinging marks and digits, joined across one apostrophe or hyphen only with a letter on both sides. Across the corpus fleet it agrees with UAX #29 on 98% or more of words in every spaced script; it differs mainly at hyphens and the maqaf, which it joins, and at digit runs with no letter, which are no word. It is a table lookup per scalar in a state machine, without UAX #29's segmentation rules, so it is fast enough to run over every word of a Bible on each recount: Sous proofreads by it now, and alignment will align by it. It is versioned (`words/1`) because consumers store word hashes, so a change is a new version, not an edit.
 
 ## Trade-offs
 
-- Frozen per version; improving it means `words/2` and a re-hash.
-- Classes come from one pinned Unicode version (17.0.0).
-- A digit run with no letter, like `12,345`, is not a word.
+- The wasm carries its own Unicode class table, pinned to 17.0.0, where a host could have used the browser's `Intl.Segmenter` for nothing.
+- Its words are not quite UAX #29's: `father-in-law` is one word here and three there. [[diff]]'s word detail still splits by UAX #29, so its words can differ from find's.
+- Frozen per version; improving it means `words/2` and a re-hash in every consumer.
 
 ## Show me
 
 One sentence split by the rule. Watch `don't` stay joined, `3rd` split off, and `a--b` become two words.
 
-```text
-for_each_word("He said, don't-3rd אבג a--b 12,345")
-  0..2    He
-  3..7    said
-  9..14   don't         a joiner with a letter on both sides
-  15..18  3rd           a digit confirms no joiner, so `-` closes `don't`
-  19..25  אבג
-  26..27  a             `--` is two scalars: the second confirms nothing
-  29..30  b
-                        `12,345` holds no letter, so it is no word
+```rust
+mise::words::for_each_word("He said, don't-3rd אבג a--b 12,345", |from, to| { /* … */ });
+// 0..2    "He"
+// 3..7    "said"
+// 9..14   "don't"   a joiner with a letter on both sides
+// 15..18  "3rd"     a digit confirms no joiner, so `-` closes "don't"
+// 19..25  "אבג"
+// 26..27  "a"       `--` is two scalars: the second confirms nothing
+// 29..30  "b"
+//                   "12,345" holds no letter, so it is no word
 
-ng'ombe  l'homme  father-in-law  col·lecció  בֶּן־הֲדַד   → one word each
+// One word each: ng'ombe  l'homme  father-in-law  col·lecció  בֶּן־הֲדַד
 ```
 
 ## How it works
 
 - **Versioned because consumers hash words.** Changing the joiner set, glue, digit rule, fold or Unicode version is `words/2`.
-- **In [[mise]]** because sous's walk, galley's whole-word [[find]] and alignment must agree bit for bit, and find must not depend on sous-core (planning item 2026-10-20, shipped 0.1.12).
+- **In [[mise]]** because sous's walk, galley's whole-word [[find]] and alignment must agree bit for bit, and find must not depend on sous-core.
 - **A state machine.** [[code:mise/src/words.rs#Splitter]] takes one scalar at a time, so a walk keeping its own state asks every boundary question without a second pass.
 - **Classes from the pinned UCD 17.0.0**, so a doubly-pointed Hebrew word or a multi-virama Devanagari one joins where Sous joins.
 

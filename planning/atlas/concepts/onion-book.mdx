@@ -22,31 +22,31 @@ sous-core defines [[code:sous-chef/core/src/input.rs#ProjectedBook]] (key, text,
 
 - Verses must ascend. An out-of-order verse abstains, and [[lint]] reports it.
 - It keeps the longest ascending run, so one stray verse number drops only that verse.
-- Sous sees text and numbers only, never markup.
+- Sous cannot judge anything only markup carries (poetry lines, footnote text): it sees verse text and numbers.
 
 ## Show me
 
 From `galley/src/sous/onion_book.rs`. The footnote is gone from the text, and `locate` returns two raw pieces around it:
 
-```text
-OnionBook::parse("\\id MRK\n\\c 1\n\\p\n\\v 1 Jesus \\f + \\ft note\\f* wept.\n")
-  .text()      "Jesus  wept.\n"          // verse text, markup gone
-  .chapters()  [Chapter 1 at 0..13]
-  .locate(0..13)                          // -> MRK 1:1, raw runs [21..27, 43..50]
+```rust
+let book = OnionBook::parse("\\id MRK\n\\c 1\n\\p\n\\v 1 Jesus \\f + \\ft note\\f* wept.\n")?;
+book.text();       // "Jesus  wept.\n": verse text, markup gone
+book.chapters();   // [Chapter 1 at 0..13]
+book.locate(0..13); // MRK 1:1, raw runs [21..27, 43..50]: two pieces around the note
 ```
 
 Out-of-order verses abstain:
 
-```text
-\v 22 \v 23 \v 24 \v 23 \v 25   →  the second 23 abstains
-\v 22 \v 23 \v 42 \v 25 \v 26   →  42 abstains, not 25 and 26
-```
+| verses in order | abstains |
+| --- | --- |
+| `\v 22 \v 23 \v 24 \v 23 \v 25` | the second 23 |
+| `\v 22 \v 23 \v 42 \v 25 \v 26` | 42, not 25 and 26 |
 
 ## How it works
 
 - **sous-core never depends on onion.** It takes a borrowed `ProjectedBook`. Onion stays the USFM authority; Sous sees projected ranges and numeric units (`charter.md`, "Ownership boundaries").
 - **Ascending verses** come from a patience sort keeping the longest ascending run.
-- **`from_parts` rebuilds from retained products** without lexing again; `locate` walks only the ranges it returns (Sefer ask 11, planning item 2026-10-20).
+- **`from_parts` rebuilds from retained products** without lexing again; `locate` walks only the ranges it returns.
 
 ## Composes with
 

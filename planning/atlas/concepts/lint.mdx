@@ -12,23 +12,23 @@ summary: "One ordered walk over the CST emitting codes and offsets. Fixes are of
 
 ## The problem
 
-Sefer underlines markup errors as the translator types and offers one-click fixes where safe. A fix the engine applied itself would shift every offset the editor holds and hide the mistake.
+An editor underlines markup errors as the translator types and offers one-click fixes where safe. A fix the engine applied itself would shift every offset the editor holds and hide the mistake.
 
 ## The solution
 
-Flag, never repair ([[invariants]] 3): no token is moved, inserted or dropped. One pass over the [[cst]] reads the walker's verdicts (a `Recovery` close is an unclosed note) instead of re-deriving them. A diagnostic is four numbers, and its message lives in the generated `diagnostics.json` ([[invariants]] 2, 6). A fix exists only when the row declares one and is an offer of [[edit]]s; `check_fixes` proves them over all 226 corpus books.
+Flag, never repair ([[invariants]] 3): no token is moved, inserted or dropped. One pass over the [[cst]] reads the walker's verdicts (a `Recovery` close is an unclosed note) instead of re-deriving them. A diagnostic is four numbers, and its message lives in the generated `diagnostics.json` ([[invariants]] 2, 6). A fix exists only when the row declares one and is an offer of [[edit]]s.
 
 ## Trade-offs
 
 - Fixes that would need a guess or a move are not offered (which book code was meant, moving an attribute list).
 - Every consumer needs `diagnostics.json` to show a message.
-- Some severities depend on the declared `\usfm` version.
+- The same file can report differently under another `\usfm` declaration: two rules are gated on it.
 
 ## Show me
 
 `playground --lint-stats` over 76 bytes. Four problems: the footnote never closes, the paragraph is still open at the end, verse 3 comes before 2, and verse 2 is missing before 3:
 
-```text
+```usfm
 \id MRK
 \c 1
 \p
@@ -36,21 +36,26 @@ Flag, never repair ([[invariants]] 3): no token is moved, inserted or dropped. O
 \p
 \v 3 Then
 \v 2 he \nd Lord.
-
-findings=4 with-fix=3
-  unclosed-note       @32   (1 with a fix)
-  unclosed-at-eof     @66   (1 with a fix)
-  verse-out-of-order  @61   (1 with a fix)
-  verse-gap           @51   (0 with a fix)
 ```
 
-The same report as engine values:
+4 findings, 3 with a fix:
 
-```text
-Observation { code: UnclosedNote,    anchor: 11, second: MAX, aux: 0 }
-Observation { code: VerseGap,        anchor: 19, second: 9,   aux: 2 }
-Observation { code: VerseOutOfOrder, anchor: 23, second: 19,  aux: 4 }
-Observation { code: UnclosedAtEof,   anchor: 25, second: MAX, aux: 0 }
+| code | byte | fix |
+| --- | --- | --- |
+| `unclosed-note` | 32 | yes |
+| `unclosed-at-eof` | 66 | yes |
+| `verse-out-of-order` | 61 | yes |
+| `verse-gap` | 51 | no |
+
+The same report as engine values; `anchor` and `second` are token indices:
+
+```rust
+[
+    Observation { code: UnclosedNote,    anchor: 11, second: MAX, aux: 0 }, // MAX: no second token
+    Observation { code: VerseGap,        anchor: 19, second: 9,   aux: 2 },
+    Observation { code: VerseOutOfOrder, anchor: 23, second: 19,  aux: 4 },
+    Observation { code: UnclosedAtEof,   anchor: 25, second: MAX, aux: 0 },
+]
 ```
 
 ## How it works
@@ -61,7 +66,7 @@ Three laws from `lint.rs`:
 - **Flag, never repair.** No token is moved, inserted or dropped. A `Fix` exists iff the row declares a `fix_label`, and `check_fixes` proves them over all 226 corpus books.
 - **No strings.** An [[code:onion/src/lint.rs#Observation]] is four `u32`s: anchor and second are token indices, `aux` means what the row's `aux` column says.
 
-One in-order walk feeds four state machines (structure, ancestry, ordering, flat). `diagnostics.json` lists 59 codes in six categories (structure, ordering, attributes, payload, form, version). 11 have severity `form`: the Form channel, which only [[format]] evaluates. The `lint.rs` doc's "48 codes" is the count without them. `declared_version` rides on every report and two rules are gated on it. ~9.4 ns/token on en_ulb, ~15.5 on en_ult; the gap is the k/v attribute rules over 31 MB of `\w` interiors.
+One in-order walk feeds four state machines (structure, ancestry, ordering, flat). `diagnostics.json` lists 59 codes in six categories (structure, ordering, attributes, payload, form, version). 11 have severity `form`: the Form channel, which only [[format]] evaluates. `declared_version` rides on every report and two rules are gated on it.
 
 ## Composes with
 

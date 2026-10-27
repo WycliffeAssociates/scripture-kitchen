@@ -12,7 +12,7 @@ summary: "Every Sous rule as map (one chapter), fold (one book, in order) and ju
 
 ## The problem
 
-A Sous verdict depends on every book, an edit touches one chapter, and Sefer publishes after edits. Rereading 66 books per publish is the cost to avoid.
+A Sous verdict depends on every book, an edit touches one chapter, and a host republishes findings after edits. Rereading 66 books per publish is the cost to avoid.
 
 ## The solution
 
@@ -28,15 +28,13 @@ The chapter is the unit of rework ([[invariants]] 5). **Map** observes one chapt
 
 Two books, from `sous-chef/core/src/pass.md`: chapters map alone, a book folds, the whole project judges.
 
-```text
-book MRK, projected text, chapters in order
-  ┌ chapter 1  start 0   ─ map ─→ Observation  ┐
-  ├ chapter 2  start 16  ─ map ─→ Observation  ├─ ChapterObs rows, book order
-  └ chapter 3  start 41  ─ map ─→ Observation  ┘
-                                        │ fold(rows)
-                                    Aggregate, book coordinates
-book GEN ─ map, fold ─→ Aggregate      ← no state crosses a book
-   judge([&MRK, &GEN], &config, &mut out) ─→ Findings ─→ finish()
+```rust
+// book MRK, projected text, chapters starting at 0, 16 and 41
+let obs: Vec<_> = mrk.chapters().map(|c| pass.map(c)).collect(); // each alone: caches by content
+let mrk_agg = pass.fold(&rows(&obs));      // ChapterObs rows, book order → Aggregate in book coordinates
+let gen_agg = pass.fold(&rows(&gen_obs));  // no state crosses a book
+pass.judge(&[&mrk_agg, &gen_agg], &config, &mut out); // only judge sees config
+out.finish();                              // Findings
 ```
 
 ```rust

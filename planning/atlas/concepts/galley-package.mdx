@@ -7,12 +7,12 @@ crate: galley
 files: [galley/README.md, galley/src/wasm.md, galley/package.json, package.json, package-root.mjs, galley/tests/sous_conformance.mjs]
 related: [galley, onion-wasm, sefer, pantry, expediter, census, find-buffer, mask-map, findings-snapshot, dish]
 level: 0
-summary: "The one wasm module and JS package Sefer vendors. The stateful Galley handle plus every stateless engine door."
+summary: "The one wasm module and JS package a host vendors. The stateful Galley handle plus every stateless engine door."
 ---
 
 ## The problem
 
-Sefer wants parse, find and Sous in the browser. Two wasm modules would load the shared code twice and let versions drift.
+A host wants parse, find and Sous in the browser. Two wasm modules would load the shared code twice and let versions drift.
 
 ## The solution
 
@@ -21,8 +21,7 @@ One module carries the [[code:galley/src/wasm.rs#Galley]] handle and every state
 ## Trade-offs
 
 - The onion doors add 202 KB to the `.wasm`, even for a Sous-only host.
-- Not on npm: a generated root `package.json` points into `galley/`, and CI checks it.
-- Only referenced functions ship, so a test pins the export list.
+- Not on npm: hosts install from a git tag, so there are no semver ranges and every upgrade is a tag bump.
 
 ## Show me
 
@@ -41,10 +40,12 @@ const snap = FindingsSnapshot.open(galley.publish());
 galley.find("books/MRK.usfm", "wept. Then", { caseSensitive: true });
 ```
 
-```text
-exports (26): Edits Fingerprint FormatOpts Galley SousSettings Splices attrResolve attrs book
-              customMarkers customMarkersFromMarkersExt diff format formatEdits formatEditsIn
-              locate mask merge mergeSplices parse resolve setCustomMarkers toByte toUtf16 xxh3 xxh3Text
+```ts
+import { // all 26 exports
+  Edits, Fingerprint, FormatOpts, Galley, SousSettings, Splices, attrResolve, attrs, book,
+  customMarkers, customMarkersFromMarkersExt, diff, format, formatEdits, formatEditsIn,
+  locate, mask, merge, mergeSplices, parse, resolve, setCustomMarkers, toByte, toUtf16, xxh3, xxh3Text,
+} from "usfm-galley";
 ```
 
 ## How it works
@@ -57,7 +58,7 @@ exports (26): Edits Fingerprint FormatOpts Galley SousSettings Splices attrResol
 
 ## Composes with
 
-Built from [[galley]] with [[onion-wasm]] linked in. Answers in the [[dish]], [[census]], [[find-buffer]], [[mask-map]] and [[findings-snapshot]] wires; runs the [[expediter]] over the [[pantry]]. Consumed by [[sefer]].
+Built from [[galley]] with [[onion-wasm]] linked in. Answers in the [[dish]], [[census]], [[find-buffer]], [[mask-map]] and [[findings-snapshot]] wires; runs the [[expediter]] over the [[pantry]]. Consumed by hosts such as [[sefer]].
 
 ## Where
 

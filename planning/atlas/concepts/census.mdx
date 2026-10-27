@@ -12,7 +12,7 @@ summary: "Chapter and verse counts for every registered book in one buffer, read
 
 ## The problem
 
-Sefer's project sidebar lists every book's chapters and verses on open. Parsing and plating 66 books to get that pays mostly for plating, not for reading.
+An editor's project sidebar lists every book's chapters and verses on open. Parsing and plating 66 books to get that pays mostly for plating, not for reading.
 
 ## The solution
 
@@ -26,23 +26,31 @@ Galley already keeps each book's [[toc]] in the [[pantry]] ([[invariants]] 4). `
 
 ## Show me
 
-How Sefer builds its sidebar, then how odd chapters and verses come through, then the buffer's layout. From `galley/src/toc.md`:
+How a host builds its sidebar, then how odd chapters and verses come through, then the buffer's layout. From `galley/src/toc.md`:
 
-```js
+```ts
 for (const id of project) galley.update(id, await read(id));   // once, at open
 const census = Census.open(galley.tocAll());                   // once, for the sidebar
 for (const book of census) sidebar.add(book.code, book.chapters, book.verseCount);   // GEN 50 1533
 ```
 
-```text
-\c 12b         chapter  number 0 (malformed as a NUMBER), label "12b"
-\v 1,3,5 …     verse    first 1, last 5, label "1,3,5", members [1] [3] [5]
-
-header      magic "TOCS", version, flags, bookCount, the three strides, directoryAt
-directory   per book: code, chaptersAt, chapterRows, versesAt, verseRows, idAt, idLen, membersAt, memberRows
-rows        per book: chapter rows, verse anchors, then members, each block 4-aligned
-ids         every id's UTF-8, in directory order
+```usfm
+\c 12b
+\v 1,3,5 …
 ```
+
+```ts
+chapter.number                         // 0: malformed as a NUMBER
+text.slice(chapter.labelStart, chapter.labelEnd)  // "12b"
+verse.first, verse.last                // 1, 5; label "1,3,5", members [1] [3] [5]
+```
+
+| section | holds |
+| --- | --- |
+| header | magic `TOCS`, version, flags, bookCount, the three strides, directoryAt |
+| directory | per book: code, chaptersAt, chapterRows, versesAt, verseRows, idAt, idLen, membersAt, memberRows |
+| rows | per book: chapter rows, verse anchors, then members, each block 4-aligned |
+| ids | every id's UTF-8, in directory order |
 
 ## How it works
 
@@ -52,7 +60,7 @@ ids         every id's UTF-8, in directory order
 
 ## Composes with
 
-Reads the [[toc]] the [[pantry]] pins per book. Declared against [[ticket]] ([[wire]]). Served by `toc`/`tocAll` on the [[galley-package]] handle; read by [[sefer]] through `toc-reader.ts`.
+Reads the [[toc]] the [[pantry]] pins per book. Declared against [[ticket]] ([[wire]]). Served by `toc`/`tocAll` on the [[galley-package]] handle; read through `toc-reader.ts`.
 
 ## Where
 

@@ -20,7 +20,7 @@ One row per marker family, as named Rust fields. Codegen writes the packed looku
 
 ## Trade-offs
 
-- 256 rows at most; 170 are used.
+- Behaviour is per row and fixed at build: a project can map a `\z` name onto a template row ([[extensions]]) but cannot redefine a spec marker.
 - USFM 3.2 only. A 3.2 deprecation is a flag; there is no 3.1 column.
 - Unknown markers, unregistered `\z` included, are row 0: bytes kept, no behaviour.
 
@@ -28,20 +28,24 @@ One row per marker family, as named Rust fields. Codegen writes the packed looku
 
 Each token below carries the row number of its marker; the table tells you what that number means.
 
-```text
+```usfm
 \q1 \v 4 Bread.
+```
 
-token \q1   marker_idx 95   level 1     row "q": numbered UpTo, ParaPoetry
-token \v    marker_idx 133  level 0     row "v": Verse point, payload Designator
-token \s1   marker_idx 110  level 1
-\zfoo       marker_idx 0    (row 0, the inert empty row, unless registered)
+```rust
+tokens[q1].marker_idx == 95  // level 1; row "q": numbered UpTo, ParaPoetry
+tokens[v].marker_idx == 133  // level 0; row "v": Verse point, payload Designator
+tokens[s1].marker_idx == 110 // level 1
+tokens[zfoo].marker_idx == 0 // row 0, the inert empty row, unless registered
 ```
 
 Rows key on (canonical name, spelling shape): strip `-s`/`-e`, then digits. `q1..q4` are one row `q`; `qt3-s` is row `qt`.
 
-```text
-generated.rs   PACKED: [u128; 170]   NAMES: [&str; 170]   FIRST_EXTENSION_ROW = 153
-               row 0 empty · rows 1..=152 spec markers · rows 153..169 the 17 template rows
+```rust
+// generated.rs: row 0 empty, rows 1..=152 spec markers, rows 153..169 the 17 template rows
+static PACKED: [u128; 170] = [/* … */];
+static NAMES: [&str; 170] = [/* … */];
+pub const FIRST_EXTENSION_ROW: MarkerIdx = 153;
 ```
 
 ## How it works
@@ -50,11 +54,11 @@ generated.rs   PACKED: [u128; 170]   NAMES: [&str; 170]   FIRST_EXTENSION_ROW = 
 - **Referee is USFM 3.2 only.** 3.1's `usx.rng` is fallback evidence and never outvotes a 3.2 page. `deprecated` and [[code:onion/src/tables/schema.rs#AttrStatus::Deprecated]] record 3.2's own deprecations (`schema.rs`).
 - **Derived facts are `const fn`s, not columns.** `precedence()` and context contribution are baked by codegen, so they cannot drift from the rows.
 - **Unknown and unregistered `\z` markers resolve to row 0.** A registered one resolves to a template row ([[extensions]]).
-- **The JS copy.** `onion-wasm/reader.ts` carries the generated `MARKERS` array (name, kind, category, closing, shape, numbering, whitespace rule) and `MARKER_ATTRIBUTES` (planning item 2026-10-22, "Attributes for hosts"), so `MARKERS[markerIdx]` is one array read.
+- **The JS copy.** `onion-wasm/reader.ts` carries the generated `MARKERS` array (name, kind, category, closing, shape, numbering, whitespace rule) and `MARKER_ATTRIBUTES`, so `MARKERS[markerIdx]` is one array read.
 
 ## Composes with
 
-The [[scanner]] stamps `marker_idx` from it. The [[walker]] reads scope columns. [[lint]], [[mask]] recipes and the [[exports]] read category and kind. The JS side gets the same table through generated code in `onion-wasm/reader.ts` ([[wire]]), including `MARKER_ATTRIBUTES` (planning item 2026-10-22, "Attributes for hosts").
+The [[scanner]] stamps `marker_idx` from it. The [[walker]] reads scope columns. [[lint]], [[mask]] recipes and the [[exports]] read category and kind. The JS side gets the same table through generated code in `onion-wasm/reader.ts` ([[wire]]), including `MARKER_ATTRIBUTES`.
 
 ## Where
 
