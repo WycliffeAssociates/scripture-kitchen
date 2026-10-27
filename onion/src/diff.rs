@@ -1080,7 +1080,8 @@ pub fn to_edits(
 pub enum TextDiffMode {
     #[default]
     None,
-    /// UAX-29 word boundaries.
+    /// `words/1` words, and between them each line break, whitespace run and
+    /// other scalar ([`mise::words::for_each_unit`]).
     Words,
     /// Grapheme clusters.
     Chars,
@@ -1584,7 +1585,7 @@ fn push_run(
     }
 }
 
-/// One side's reading as the differ's units: words or graphemes, segmented
+/// One side's reading as the differ's units: `words/1` units or graphemes, segmented
 /// per stretch of pieces that share a note. A note's text is its own reading,
 /// so `servant` + `1:1` never fuse into `servant1:1`, while the verse's text
 /// on either side of a note is one reading and segments as if the note were
@@ -1601,7 +1602,9 @@ fn segmented<'s>(
     let cut = |units: &mut Vec<&'s str>, from: usize, to: usize| {
         let segment = &slice[from..to];
         match mode {
-            TextDiffMode::Words => units.extend(segment.split_word_bounds()),
+            TextDiffMode::Words => mise::words::for_each_unit(segment, |from, to, _| {
+                units.push(&segment[from as usize..to as usize])
+            }),
             TextDiffMode::Chars => units.extend(segment.graphemes(true)),
             TextDiffMode::None => unreachable!("the caller returns early for None"),
         }

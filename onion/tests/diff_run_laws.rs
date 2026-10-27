@@ -205,7 +205,13 @@ fn units<'s>(
         .flat_map(|cut| {
             let segment = &slice[cut[0]..cut[1]];
             match mode {
-                TextDiffMode::Words => segment.split_word_bounds().collect::<Vec<_>>(),
+                TextDiffMode::Words => {
+                    let mut units = Vec::new();
+                    mise::words::for_each_unit(segment, |from, to, _| {
+                        units.push(&segment[from as usize..to as usize])
+                    });
+                    units
+                }
                 TextDiffMode::Chars => segment.graphemes(true).collect(),
                 TextDiffMode::None => unreachable!("the caller never asks"),
             }

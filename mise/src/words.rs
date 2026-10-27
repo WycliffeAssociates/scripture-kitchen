@@ -284,6 +284,81 @@ pub fn for_each_word(text: &str, mut visit: impl FnMut(u32, u32)) {
     }
 }
 
+/// Calls `visit` with every unit of `text`, in order: each core run of the
+/// rule (a word, or digits and glue holding no letter) as [`for_each_word`]
+/// cuts it, each line break, each run of other whitespace, and every other
+/// scalar alone. The units tile `text`.
+///
+/// ```text
+/// for_each_unit("He said, don't-3rd 12,345\r\n")
+///   0..2    He     word
+///   2..3    ␠
+///   3..7    said   word
+///   7..8    ,
+///   8..9    ␠
+///   9..14   don't  word
+///   14..15  -      the joiner a digit refused
+///   15..18  3rd    word
+///   18..19  ␠
+///   19..21  12     no letter, no word
+///   21..22  ,
+///   22..25  345
+///   25..27  ␍␊     one line break
+/// ```
+pub fn for_each_unit(text: &str, mut visit: impl FnMut(u32, u32, bool)) {
+    let mut at = 0u32;
+    let mut emit = |run: Run, visit: &mut dyn FnMut(u32, u32, bool)| {
+        gap(text, at, run.from, visit);
+        visit(run.from, run.to, run.word);
+        at = run.to;
+    };
+    let mut split = Splitter::default();
+    for (offset, scalar) in text.char_indices() {
+        if let Step::Close(run) | Step::Restart(run) =
+            split.step(offset as u32, scalar, class_of(scalar))
+        {
+            emit(run, &mut visit);
+        }
+    }
+    if let Some(run) = split.finish(text.len() as u32) {
+        emit(run, &mut visit);
+    }
+    gap(text, at, text.len() as u32, &mut visit);
+}
+
+/// The scalars between two core runs: each line break alone (`\r\n` is one),
+/// each run of other whitespace whole, every other scalar alone.
+fn gap(text: &str, from: u32, to: u32, visit: &mut dyn FnMut(u32, u32, bool)) {
+    let mut space: Option<u32> = None;
+    let mut scalars = text[from as usize..to as usize].char_indices().peekable();
+    while let Some((offset, scalar)) = scalars.next() {
+        let at = from + offset as u32;
+        if !is_line_break(scalar) && unicode::class_of(scalar).is_whitespace() {
+            space.get_or_insert(at);
+            continue;
+        }
+        if let Some(start) = space.take() {
+            visit(start, at, false);
+        }
+        let mut end = at + scalar.len_utf8() as u32;
+        if scalar == '\r' && scalars.next_if(|&(_, next)| next == '\n').is_some() {
+            end += 1;
+        }
+        visit(at, end, false);
+    }
+    if let Some(start) = space {
+        visit(start, to, false);
+    }
+}
+
+#[inline]
+const fn is_line_break(scalar: char) -> bool {
+    matches!(
+        scalar,
+        '\n' | '\r' | '\u{B}' | '\u{C}' | '\u{85}' | '\u{2028}' | '\u{2029}'
+    )
+}
+
 /// The span holding the scalar at `at`, by the rule [`for_each_word`] splits
 /// by, letter or no.
 ///
@@ -538,6 +613,117 @@ mod tests {
             ["a", "b"],
             "the word joiner is neither"
         );
+    }
+
+    fn units(text: &str) -> Vec<(&str, bool)> {
+        let mut out = Vec::new();
+        for_each_unit(text, |from, to, word| {
+            out.push((&text[from as usize..to as usize], word))
+        });
+        out
+    }
+
+    fn tiles(text: &str) {
+        let mut at = 0;
+        let mut unit_words = Vec::new();
+        for_each_unit(text, |from, to, word| {
+            assert_eq!(from, at, "gapless at {from} in {text:?}");
+            assert!(to > from, "empty unit at {from} in {text:?}");
+            at = to;
+            if word {
+                unit_words.push((from, to));
+            }
+        });
+        assert_eq!(at as usize, text.len(), "closes on the end of {text:?}");
+        let mut words = Vec::new();
+        for_each_word(text, |from, to| words.push((from, to)));
+        assert_eq!(unit_words, words, "the words are for_each_word's");
+    }
+
+    #[test]
+    fn the_unit_example_is_exact() {
+        assert_eq!(
+            units("He said, don't-3rd 12,345\r\n"),
+            [
+                ("He", true),
+                (" ", false),
+                ("said", true),
+                (",", false),
+                (" ", false),
+                ("don't", true),
+                ("-", false),
+                ("3rd", true),
+                (" ", false),
+                ("12", false),
+                (",", false),
+                ("345", false),
+                ("\r\n", false),
+            ]
+        );
+    }
+
+    #[test]
+    fn units_keep_words_whole_and_split_the_rest() {
+        assert_eq!(units("father-in-law"), [("father-in-law", true)]);
+        assert_eq!(
+            units("\u{5d1}\u{5bc}\u{5b6}\u{5df}\u{5be}\u{5d4}\u{5b2}\u{5d3}\u{5b7}\u{5d3}"),
+            [(
+                "\u{5d1}\u{5bc}\u{5b6}\u{5df}\u{5be}\u{5d4}\u{5b2}\u{5d3}\u{5b7}\u{5d3}",
+                true
+            )],
+            "maqaf joins"
+        );
+        assert_eq!(
+            units("e\u{301}\u{302}  \u{301}x"),
+            [("e\u{301}\u{302}", true), ("  ", false), ("\u{301}x", true)],
+            "marks ride; a stray mark opens the word it precedes"
+        );
+        assert_eq!(
+            units("a--b ...!"),
+            [
+                ("a", true),
+                ("-", false),
+                ("-", false),
+                ("b", true),
+                (" ", false),
+                (".", false),
+                (".", false),
+                (".", false),
+                ("!", false),
+            ]
+        );
+        assert_eq!(
+            units("a \t\r\n\r\n\n  b"),
+            [
+                ("a", true),
+                (" \t", false),
+                ("\r\n", false),
+                ("\r\n", false),
+                ("\n", false),
+                ("  ", false),
+                ("b", true),
+            ],
+            "each line break alone, spaces whole"
+        );
+        assert_eq!(units(""), Vec::<(&str, bool)>::new());
+        assert_eq!(units("a-"), [("a", true), ("-", false)]);
+    }
+
+    #[test]
+    fn units_tile_the_text() {
+        for text in [
+            "",
+            " ",
+            "-",
+            "a-",
+            "father-in-law",
+            "He said, don't-3rd \u{5d0}\u{5d1}\u{5d2} a--b 12,345 col\u{b7}lecci\u{f3}",
+            "\u{301}\u{302} e\u{301} \u{b3} \u{ad}",
+            "line\r\nline\r\n",
+            "\u{1230}\u{1361}\u{1208} \u{e5a}\u{e01}\u{e32}",
+        ] {
+            tiles(text);
+        }
     }
 
     #[test]

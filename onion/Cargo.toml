@@ -15,11 +15,11 @@ memchr.workspace = true
 # shared with sous-core without either engine seeing the other.
 mise = { path = "../mise" }
 rustc-hash.workspace = true
-# The diff port's two algorithm layers: Myers over block keys, and the UAX-29
-# word / grapheme diff inside a unit. Pure Rust, no_std-friendly, wasm-clean.
+# The diff port's two algorithm layers: Myers over block keys, and the word /
+# grapheme diff inside a unit. Pure Rust, no_std-friendly, wasm-clean.
 similar = { version = "2.7", features = ["unicode"] }
-# The same UAX-29 segmentation `similar` uses, applied per note-bounded segment
-# so a footnote's text never fuses with the word it follows.
+# Grapheme clusters for the `chars` text diff, per note-bounded segment so a
+# footnote's text never fuses with the text it follows. Words are `words/1`.
 unicode-segmentation = "1"
 # xxh3-64 of the source, in every dish's header, so a consumer can tell one
 # document's parse from another's without holding both texts.

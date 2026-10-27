@@ -43,7 +43,7 @@ let dish: Vec<u8> = onion::wire::plate(&onion::wire::parse(text, opts)); // for 
 
 - **One implementation per behaviour.** "Drivers may vary, the engine never forks" (GLOSSARY, "Engine"). Every derivation lives here, computed on demand.
 - **Stateless and lossless.** No caching, no I/O (`galley/src/lib.rs`).
-- **Small dependency set** (JSON writers are hand-rolled; serde is a test dependency only): `memchr`, `rustc-hash`, `similar` and `unicode-segmentation` for diff, `xxhash-rust` for the dish hash, plus [[mise]] and [[ticket]].
+- **Small dependency set** (JSON writers are hand-rolled; serde is a test dependency only): `memchr`, `rustc-hash`, `similar` and `unicode-segmentation` for diff's graphemes, `xxhash-rust` for the dish hash, plus [[mise]] and [[ticket]].
 - **Exports are features** (`usj`, `usx`, `html`, default on).
 
 ## Composes with

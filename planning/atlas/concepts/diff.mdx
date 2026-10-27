@@ -5,7 +5,7 @@ aliases: [merge, DecisionUnit, DiffSkeleton, text diff]
 kind: concept
 crate: onion
 files: [onion/src/diff.rs, onion/src/edit.rs, onion/tests/diff_laws.rs, planning/items/2026-09-28-0-1-8-diff-sends-what-changed-no-moves.mdx, planning/items/2026-09-28-binary-diff-wire-a-reader-beside-the-json-not-scheduled.mdx]
-related: [toc, edit, mask, cst, plate]
+related: [toc, edit, mask, cst, plate, words]
 level: 2
 summary: "Verse-aligned compare of two versions of a book, and a per-verse merge returned as text or edits."
 ---
@@ -49,7 +49,7 @@ A modified unit's intra-verse runs (`diff.rs` doc), tiling the span:
 
 - **Three layers, one walk.** Identity: a block is the bytes between two [[toc]] anchors, a `Range<u32>` plus a `Copy` address. Alignment: Myers over 12-byte addresses, then coalescing pairs a rebridged or relabeled verse into one decision. Projection: `merge` emits bytes, [[code:onion/src/diff.rs#to_edits]] emits replay splices.
 - **Changed units only** unless `unchanged: true`.
-- **Runs are asked for by name.** `"none"`, `"words"` (UAX-29) or `"chars"`; an unknown name rejects. The [[cst]] and the `text` [[mask]] are built only when runs are asked for.
+- **Runs are asked for by name.** `"none"`, `"words"` ([[words]]: each word, line break, whitespace run and other scalar is one unit) or `"chars"`; an unknown name rejects. The [[cst]] and the `text` [[mask]] are built only when runs are asked for.
 - **JSON at the wall.** serde keeps the old editors' camelCase contract; there is no binary run wire.
 
 ## Composes with

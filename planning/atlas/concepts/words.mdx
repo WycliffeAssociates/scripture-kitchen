@@ -1,27 +1,28 @@
 ---
 term: words/1
 slug: words
-aliases: [words/1, Splitter, word boundary, for_each_word]
+aliases: [words/1, Splitter, word boundary, for_each_word, for_each_unit]
 kind: primitive
 crate: mise
-files: [mise/src/words.rs, galley/tests/find.rs, planning/items/2026-10-20-words-one-splitter-in-mise-with-a-narrower-joiner-.mdx]
-related: [mise, find, chapter-pass, sous-core]
+files: [mise/src/words.rs, galley/tests/find.rs, onion/src/diff.rs, planning/items/2026-10-20-words-one-splitter-in-mise-with-a-narrower-joiner-.mdx]
+related: [mise, find, diff, chapter-pass, sous-core]
 level: 2
-summary: "words/1. The one versioned word-boundary rule, in mise, shared by find, Sous and alignment."
+summary: "words/1. The one versioned word-boundary rule, in mise, shared by find, diff, Sous and alignment."
 ---
 
 ## The problem
 
-`don't`, `father-in-law`, `ng'ombe`, a maqaf join, Devanagari marks: whole-word find, Sous's word rules and alignment must split these the same way, or a word Sous flags cannot be found.
+`don't`, `father-in-law`, `ng'ombe`, a maqaf join, Devanagari marks: whole-word find, diff's word detail, Sous's word rules and alignment must split these the same way, or a word Sous flags cannot be found.
 
 ## The solution
 
-One rule in [[mise]] ([[invariants]] 7), a close variant of Unicode's word boundaries ([UAX #29](https://www.unicode.org/reports/tr29/)): letters, clinging marks and digits, joined across one apostrophe or hyphen only with a letter on both sides. Across the corpus fleet it agrees with UAX #29 on 98% or more of words in every spaced script; it differs mainly at hyphens and the maqaf, which it joins, and at digit runs with no letter, which are no word. It is a table lookup per scalar in a state machine, without UAX #29's segmentation rules, so it is fast enough to run over every word of a Bible on each recount: Sous proofreads by it now, and alignment will align by it. It is versioned (`words/1`) because consumers store word hashes, so a change is a new version, not an edit.
+One rule in [[mise]] ([[invariants]] 7): a close variant of Unicode's word boundaries ([UAX #29](https://www.unicode.org/reports/tr29/)), pinned to one UCD version and scoped to what scripture text needs. Its class table covers every script, mark and digit in that UCD, astral planes included; it has none of UAX #29's emoji machinery (ZWJ sequences, Extended_Pictographic, regional-indicator flags), which buys scripture nothing. A word is letters, clinging marks and digits, joined across one apostrophe or hyphen only with a letter on both sides. Across the corpus fleet it agrees with UAX #29 on 98% or more of words in every spaced script; it differs mainly at hyphens and the maqaf, which it joins, and at digit runs with no letter, which are no word. It is a table lookup per scalar in a state machine, without UAX #29's segmentation rules, so it is fast enough to run over every word of a Bible on each recount: Sous proofreads by it, [[diff]] segments its word detail by it, and alignment will align by it. It is versioned (`words/1`) because consumers store word hashes, so a change is a new version, not an edit.
 
 ## Trade-offs
 
 - The wasm carries its own Unicode class table, pinned to 17.0.0, where a host could have used the browser's `Intl.Segmenter` for nothing.
-- Its words are not quite UAX #29's: `father-in-law` is one word here and three there. [[diff]]'s word detail still splits by UAX #29, so its words can differ from find's.
+- Its words are not quite UAX #29's: `father-in-law` is one word here and three there. [[diff]] splits by it too, so a hyphenated word changes as one run, and `12,345` diffs as `12` `,` `345`, where UAX #29 keeps one number.
+- An emoji ZWJ sequence or a flag is no word, and diff splits it into scalars; scripture carries neither.
 - Frozen per version; improving it means `words/2` and a re-hash in every consumer.
 
 ## Show me
@@ -53,8 +54,8 @@ Doc conflict: `sous-chef/core/src/words.md` still shows `don't-3rd` as one word 
 
 ## Composes with
 
-Read by [[find]] (whole word), the [[chapter-pass]] `Words` walk in [[sous-core]], and alignment. Shares `mise::unicode::class_of` with the substrate.
+Read by [[find]] (whole word), [[diff]] (word detail, through [[code:mise/src/words.rs#for_each_unit]]), the [[chapter-pass]] `Words` walk in [[sous-core]], and alignment. Shares `mise::unicode::class_of` with the substrate.
 
 ## Where
 
-- [[code:mise/src/words.rs]] · [[code:mise/src/words.rs#Splitter]], [[code:mise/src/words.rs#for_each_word]], [[code:mise/src/words.rs#word_around]], [[code:mise/src/words.rs#is_joiner]], [[code:mise/src/words.rs#is_word_glue]], [[code:mise/src/words.rs#class_of]], [[code:mise/src/words.rs#fold]]
+- [[code:mise/src/words.rs]] · [[code:mise/src/words.rs#Splitter]], [[code:mise/src/words.rs#for_each_word]], [[code:mise/src/words.rs#for_each_unit]], [[code:mise/src/words.rs#word_around]], [[code:mise/src/words.rs#is_joiner]], [[code:mise/src/words.rs#is_word_glue]], [[code:mise/src/words.rs#class_of]], [[code:mise/src/words.rs#fold]]
