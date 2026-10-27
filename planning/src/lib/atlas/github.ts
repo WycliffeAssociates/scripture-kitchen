@@ -9,9 +9,15 @@ import { repoRoot } from "../root.ts";
 
 const REPO = "https://github.com/WycliffeAssociates/scripture-kitchen";
 
+const git = (...args: string[]): string =>
+  execFileSync("git", ["-C", repoRoot, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+
+/** CI builds a pushed commit; a local build of an unpushed one links master, since GitHub has no page for it. */
 export const sha = ((): string => {
+  if (process.env["GITHUB_SHA"]) return process.env["GITHUB_SHA"];
   try {
-    return execFileSync("git", ["-C", repoRoot, "rev-parse", "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    const head = git("rev-parse", "HEAD");
+    return git("branch", "-r", "--contains", head) === "" ? "master" : head;
   } catch {
     return "master";
   }
