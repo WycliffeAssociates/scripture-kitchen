@@ -1,0 +1,46 @@
+---
+term: Mask map
+slug: mask-map
+aliases: [MASK, MaskMap, mask-reader]
+kind: wire
+crate: galley
+files: [galley/src/mask.md, galley/src/mask/schema.rs, galley/src/mask/mod.rs, galley/mask-reader.ts]
+related: [mask, wire, ticket, find-buffer, galley-package, sefer]
+level: 3
+summary: "A projection's source ranges as one MASK buffer, so a host can map projected offsets back without asking again."
+---
+
+## Show me
+
+From `galley/src/mask.md`:
+
+```js
+const map = MaskMap.open(galley.mask("books/MRK.usfm", { utf16: true }));
+let reading = "";
+for (let n = 0; n < map.rangeCount; n++) {
+  const r = map.range(n);
+  reading += source.slice(r.sourceFrom, r.sourceTo);   // === galley.verseText(id)
+}
+map.toSource(hit.projectedFrom);
+```
+
+```text
+0  magic "MASK"   4 version 1   8 flags (bit 0 UTF-16)   12 recipe (0 verseText, 1 structure, 2 text)
+16 rangeCount     20 sourceLen  24 projectedLen          28 rangeCount × (sourceFrom u32, sourceTo u32)
+```
+
+## Why
+
+- **`starts` is not on the wire.** It is the prefix sum of range lengths; the reader builds it in one pass at open. Four bytes a range saved for a value derived in microseconds.
+- **`sourceLen` refuses the wrong revision** before a consumer joins slices out of the wrong string; `projectedLen` checks the join.
+- **Cost is honest.** en_ulb verseText: ~80 k ranges, ~645 KB of wire for ~4.1 MB of text. On word-aligned en_ult the map (12.9 MB) is larger than the projection (4.2 MB), because each word and each space is its own range. For aligned references, hold the string.
+- **No run-length form.** `gap u16, keep u16` would halve the aligned figure but is not [[ticket]]'s fixed-width vocabulary.
+
+## Composes with
+
+Encodes a [[mask]] from the [[pantry]] (`mask(id)`) or loose text (`maskOf(text)`). Declared against [[ticket]] ([[wire]]). `pieces` equals the [[find-buffer]]'s, asserted in `galley/tests/mask.rs`.
+
+## Where
+
+- `galley/src/mask/mod.rs` · `encode`, `pieces`; `galley/src/mask/schema.rs`
+- `galley/mask-reader.ts` · `MaskMap.open`

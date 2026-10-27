@@ -1,0 +1,51 @@
+---
+term: Galley package
+slug: galley-package
+aliases: [usfm-galley, Galley handle, "@wycliffeassociates/scripture-kitchen"]
+kind: product
+crate: galley
+files: [galley/README.md, galley/src/wasm.md, galley/package.json, package.json, package-root.mjs, galley/tests/sous_conformance.mjs]
+related: [galley, onion-wasm, sefer, pantry, expediter, census, find-buffer, mask-map, findings-snapshot, dish]
+level: 0
+summary: "The JS package a host installs: the resident Galley handle plus every onion door, in one wasm module."
+---
+
+## Show me
+
+From `galley/src/wasm.md`:
+
+```js
+import { Galley } from "usfm-galley";
+import { FindingsSnapshot } from "usfm-galley/sous-reader";
+import { Census } from "usfm-galley/toc-reader";
+
+const galley = new Galley();
+galley.update("books/MRK.usfm", text);                  // whole book → "MRK"
+galley.updateReference("ref/en_ult/GEN.usfm", ult);     // lengths only, no text
+const census = Census.open(galley.tocAll());
+const snap = FindingsSnapshot.open(galley.publish());
+galley.find("books/MRK.usfm", "wept. Then", { caseSensitive: true });
+```
+
+```text
+exports (26): Edits Fingerprint FormatOpts Galley SousSettings Splices attrResolve attrs book
+              customMarkers customMarkersFromMarkersExt diff format formatEdits formatEditsIn
+              locate mask merge mergeSplices parse resolve setCustomMarkers toByte toUtf16 xxh3 xxh3Text
+```
+
+## Why
+
+- **The superset, one module.** A host vendoring one wasm gets both engines. The onion doors cost 202 KB of `.wasm` (744,333 → 946,665 bytes).
+- **Two doors per product: by id or by text.** Id doors run off the [[pantry]]'s retained copy, so nothing crosses but the id. Text doors serve loose text off the same content-addressed chunks.
+- **Readers are subpaths.** `./toc-reader`, `./find-reader`, `./mask-reader`, `./sous-reader` ship beside the binary so they version with it.
+- **Installed from a git tag.** npm cannot install a subdirectory, so the repo-root `package.json` is derived by `node package-root.mjs` and CI diffs it.
+- **Byte-identical to native.** Three tests pin one set of publication goldens across Rust, wasm and Node.
+
+## Composes with
+
+Built from [[galley]] with [[onion-wasm]] linked in. Answers in the [[dish]], [[census]], [[find-buffer]], [[mask-map]] and [[findings-snapshot]] wires; runs the [[expediter]] over the [[pantry]]. Consumed by [[sefer]].
+
+## Where
+
+- `galley/src/wasm.rs` · `Galley`, `Fingerprint`; `galley/src/wasm/onion.rs` · the linker root
+- `galley/build.sh`, `galley/package.json`, `package-root.mjs`

@@ -1,0 +1,48 @@
+---
+term: Wire
+slug: wire
+aliases: [generated reader, reader.ts, staleness test, wire format, Record]
+kind: wire
+crate: workspace
+files: [ticket/src/schema.rs, ticket/src/emit.rs, onion/src/wire/schema.rs, galley/src/toc/schema.rs, galley/src/find/wire/schema.rs, galley/src/mask/schema.rs, agents/architecture.md]
+related: [ticket, dish, census, find-buffer, mask-map, findings-snapshot, corpus, plate]
+level: 3
+summary: "A declared binary format whose Rust writer and TypeScript reader are both generated from one schema, checked in, and pinned by a staleness test."
+---
+
+## Show me
+
+```text
+<format>/schema.rs  RECORDS  ─ ticket::emit::writers_rs     ─→ generated.rs   (Rust writer)
+                             ─ ticket::emit::row_classes_ts ─→ *-reader.ts    (TS reader)
+```
+
+Every wire and its two ends:
+
+| wire | magic | declared in | reader |
+| --- | --- | --- | --- |
+| [[dish]] | `ONWR` | `onion/src/wire/schema.rs` | `onion-wasm/reader.ts` |
+| [[census]] | `TOCS` | `galley/src/toc/schema.rs` | `galley/toc-reader.ts` |
+| [[find-buffer]] | `FIND` | `galley/src/find/wire/schema.rs` | `galley/find-reader.ts` |
+| [[mask-map]] | `MASK` | `galley/src/mask/schema.rs` | `galley/mask-reader.ts` |
+| [[findings-snapshot]] | `SOUS` | sous-core's own emitter | `galley/sous-reader.ts` |
+| [[corpus]] | `ONCP` | `galley/src/corpus.rs` | by hand, inside `reader.ts.tmpl` |
+
+## Why
+
+- **No mirrors.** Before 0.1.0, `onion-wasm.ts` held 109 hand-mirrored constants (commit b781bb9). Generating both ends from one declaration took that to zero.
+- **A consumer never learns a layout.** Each reader checks magic, version and strides at `open` and throws naming the mismatch, so a reader a version behind fails loudly instead of misreading a field (`architecture.md`).
+- **Little-endian by construction.** A field declares its name, width, whether it is a source offset (`Space::Offset`, converted under `utf16`), and the expression that reaches it. Nothing casts a Rust struct.
+- **Checked in at both ends.** `codegen_output_matches_input` fails the build when either end is stale.
+
+Debt, named in `architecture.md`: the [[corpus]] envelope and sous-core's reader are still partly typed by hand.
+
+## Composes with
+
+The vocabulary and emitters are [[ticket]]'s. Each format's envelope stays with the format. [[plate]] is why the wires are binary at all.
+
+## Where
+
+- `ticket/src/schema.rs` · `Width`, `Space`, `Field`, `Record`, `Repeat`
+- `ticket/src/emit.rs` · the Rust writer and TS accessor emitters
+- `ticket/src/stale.rs` · the shared staleness reporter

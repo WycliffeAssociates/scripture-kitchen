@@ -1,0 +1,45 @@
+---
+term: Scanner
+slug: scanner
+aliases: [lex, lex_with]
+kind: primitive
+crate: onion
+files: [onion/src/scanner.rs, onion/src/lib.rs]
+related: [source, token, marker-table, extensions, designator, attributes, chunk]
+level: 2
+summary: "The only code that owns position: one fused memchr pass from bytes to token rows."
+---
+
+## Show me
+
+From the module doc of `onion/src/scanner.rs`:
+
+```text
+\v 1 gr//ace \w x|lemma="g"\w*
+→ Marker("\v ") Designator("1 ") Text("gr") OptBreak("//") Text("ace ")
+  Marker("\w ") Text("x") AttrList("|lemma=\"g\"") ClosingMarker("\w*")
+```
+
+The designator gate: a leading ASCII digit or it is text.
+
+```text
+\v 012 text  Marker("\v ") Designator("012 ") Text("text")
+\v Then He…  Marker("\v ") Text("Then He…")
+```
+
+## Why
+
+- **Boundary finding and classification stay apart.** The `*_end` functions decide where a token stops; `classify_marker` names it. Neither reads a payload's interior; that is the interpreters' job, on demand ([[designator]], [[attributes]]). GLOSSARY calls this the Scanner/Interpreter split.
+- **Losslessness is the partition.** Concatenating every span reproduces the source byte for byte.
+- **A newline is always its own token.** Block seams, lint's line rules, `\n\c` chunking and an editor's line model all key on it.
+- **Speed.** Scan loop ~1,164 MiB/s on en_ult with the per-arm helpers inlined; `&mut self` flag access out of line measured 6% slower (`scanner.rs`). A prebuilt `memmem::Finder` costs 6 ns against 31 ns per one-shot call, inside a ~5 ns/token budget.
+- **Name:** "Scanner", never "lexer" (GLOSSARY). The functions are still called `lex`.
+
+## Composes with
+
+Reads the [[source]], the [[marker-table]]'s generated name matcher, and the installed or per-book [[extensions]]. Writes [[token]] rows. The [[chunk]] pre-scan runs ahead of it so the [[chunk-cache]] can lex one chapter at a time.
+
+## Where
+
+- `onion/src/scanner.rs` · `lex`, `lex_with`, `Scanner`, `classify_marker`
+- `onion/tests/fast_path_identity.rs` · fast arms equal the general path (`lex_general_path_only`)

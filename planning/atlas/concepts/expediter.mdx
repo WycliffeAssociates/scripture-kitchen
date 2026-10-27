@@ -1,0 +1,51 @@
+---
+term: Expediter
+slug: expediter
+aliases: [publish, hot set, publication]
+kind: workflow
+crate: galley
+files: [galley/src/sous/expediter.md, galley/src/sous/expediter.rs, galley/tests/equivalence.rs]
+related: [pantry, chapter-pass, onion-book, findings-snapshot, sous-core, galley-package]
+level: 2
+summary: "The Sous coordinator: one ChapterPass, one Pantry, one complete corpus publication per call."
+---
+
+## Show me
+
+From `galley/src/sous/expediter.md`:
+
+```text
+sous.update("books/mrk.usfm", Role::Target, &text)?
+sous.publish()?          -> SOUS corpus buffer, raw-book UTF-16
+sous.last_mapped()       -> 6      // six chapters mapped
+sous.publish()?          -> the same bytes
+sous.last_mapped()       -> 0      // nothing re-read, nothing re-mapped
+```
+
+```text
+1 index   chapter table hit? skip : OnionBook::from_parts → ObservationKey per chapter → map / remap
+2 fold    books with no aggregate
+3 tally   untally the old aggregate, tally the new, name the moved word keys
+4 judge   every Target aggregate, re-deciding only the named keys
+5 pair    each Target against its Reference
+6 locate  replay cached site rows, or rescan text
+7 sweep   drop what no ring names
+8 rebase  through each book's retained mask and UTF-16 table, then encode
+```
+
+## Why
+
+- **Index at publish, not update.** Ten updates and one publish pay one pass over ten books. Projected text is never retained; reprojecting costs ~38 µs a book.
+- **Judging is corpus-level.** What one book's counts mean depends on the others, so step 4 runs over every aggregate. Steps 3–4 move one book at a time: re-merging all rows was 4.7 ms of a 4.9 ms warm republication.
+- **Two hot books keep their rows.** An editor types in one book for minutes; with the hot set the second keystroke maps 1 chapter of MRK instead of 16, for 281 KB of rows on en_ulb.
+- **A config change is a re-judge, never a re-map.** Config is in no cache key except `verdicts`. Moving a knob re-locates every book: 3.2 ms for 66 books, against 206 µs for an unchanged republication.
+- **Same bytes native and in JS.** `sous_goldens.rs`, `wasm_wall.rs` and `sous_conformance.mjs` pin one set of goldens (`wasm.md`, "The claim").
+
+## Composes with
+
+Mutates through the [[pantry]] (its own `pantry()` is read-only). Builds [[onion-book]]s, runs the [[chapter-pass]] `Brigade` from [[sous-core]], writes the [[findings-snapshot]]. Exposed as `Galley.publish()` in the [[galley-package]].
+
+## Where
+
+- `galley/src/sous/expediter.rs` · `Expediter::update`/`publish`/`set_config`/`find`, `last_mapped` and the other counters
+- `galley/tests/equivalence.rs` · whole-Bible churn oracles (ignored tier)

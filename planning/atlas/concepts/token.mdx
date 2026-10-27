@@ -1,0 +1,53 @@
+---
+term: Token
+slug: token
+aliases: [TokenKind, Pad, token row]
+kind: primitive
+crate: onion
+files: [onion/src/token.rs, onion/src/wire/schema.rs]
+related: [scanner, source, cst, toc, marker-table, dish]
+level: 2
+summary: "The one working representation: an 8-byte row of start, length, packed kind, marker row and level."
+---
+
+## Show me
+
+`lex` over `\v 1 Jesus wept.\f + \ft why\f* Then` (from the scratch book in [[cst]]):
+
+```text
+ 11 Marker        "\v "          start=26 len=3  marker_idx=133
+ 12 Designator    "1 "           start=29 len=2
+ 13 Text          "Jesus wept."  start=31 len=11
+ 14 Marker        "\f "          start=42 len=3  marker_idx=21
+ 15 NoteCaller    "+ "           start=45 len=2
+ 16 Marker        "\ft "         start=47 len=4  marker_idx=32
+ 17 Text          "why"          start=51 len=3
+ 18 ClosingMarker "\f*"          start=54 len=3  marker_idx=21
+```
+
+Surplus delimiter whitespace becomes `Pad` (`scanner.rs` doc):
+
+```text
+\v 1 text    Marker("\v ") Designator("1 ") Text("text")
+\v   1 text  Marker("\v ") Pad("  ") Designator("1 ") Text("text")
+```
+
+Whitespace inside text is never Pad: `\nd*   spoke.` lexes as `Text("   spoke.")`.
+
+## Why
+
+- **Eager fields, lazy payloads.** A token carries `start: u32`, `len: u16`, `kind_bits: u8`, `marker_idx: u8`, `level: u8`. Attribute k/v and designator numbers stay as spans until an interpreter reads them ([[attributes]], [[designator]]). GLOSSARY: "each added field is twin tax", because the JS read lane must mirror it.
+- **Packed kind.** The Rust enum is 2 bytes; the row stores one byte, low 4 bits shape and bit 4 a spelling flag (`\+` nesting, or `-e` on a milestone). `to_bits`/`from_bits` is the one mapping.
+- **Pad** (RFC-Lexer-change-8-27, commit 8128053): each fold site keeps at most one horizontal code unit; the rest is Pad. Spans tile again, text views drop Pad whole, and `delimiter-surplus` (875 across the corpus at the time) offers a delete.
+- **Level, not spelling.** `level` is the trailing number as spelled (`2` for `\q2`); `\q1` and `\q2` share one row.
+
+Trade-off: `len: u16` caps a token at 65,535 bytes. Undocumented why u16 was chosen over u32 beyond the 8-byte row.
+
+## Composes with
+
+Written by the [[scanner]] from the [[source]]. Read by the [[walker]] to build the [[cst]], by the [[toc]] without a tree, and by [[lint]]. Crosses in the [[dish]] as a 12-byte row (`start`, `end`, `kind`, `marker`, `level`, `flags`): `end` replaces `len` so every offset converts to UTF-16 in one sweep.
+
+## Where
+
+- `onion/src/token.rs` · `Token`, `TokenKind`, `TokenKind::to_bits`/`from_bits`
+- `onion/src/wire/schema.rs` · `TOKEN` record, `TOKEN_DELIMITER_FOLDED`, `TOKEN_BLANK`

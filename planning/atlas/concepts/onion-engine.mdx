@@ -1,0 +1,37 @@
+---
+term: Onion engine
+slug: onion-engine
+aliases: [Onion, USFM engine, Engine]
+kind: product
+crate: workspace
+files: [README.md, onion/src/lib.rs, onion-wasm/README.md, GLOSSARY.md]
+related: [onion, onion-wasm, galley-package, cst, sous-chef]
+level: 0
+summary: "The USFM engine: lossless scan, CST, lint, format, diff, resolve and the USJ/USX/HTML exports, in Rust with a JS doorway."
+---
+
+## Show me
+
+```toml
+usfm_onion = { git = "https://github.com/WycliffeAssociates/scripture-kitchen", tag = "v0.1.0" }
+```
+
+```ts
+import { parse } from "onion-wasm";
+const { tree, tokens, diagnostics, toc } = deserialize(parse(text, { diagnostics: true, toc: true }));
+```
+
+## Why
+
+- **Source is the truth.** Every product is an index over or a derivation from the exact bytes ([[source]]); round trip is identity by construction.
+- **One engine, many drivers.** Native Rust callers use [[onion]]; JS uses [[onion-wasm]] or the [[galley-package]]. The engine never forks per host (GLOSSARY, "Engine").
+- **Stateless.** Text in, numbers and strings out. A stateful handle was ruled out until a profiler shows the per-call index build matters (`onion-wasm/README.md`, "Deliberately absent").
+- **Owns scripture structure for Sous** too: parsing, marker validity, canonical order, masks, verse anchors (`charter.md`).
+
+## Composes with
+
+Built from the [[onion]] crate; the [[cst]] is its base. [[sous-chef]] reads it only through [[galley]]'s [[onion-book]].
+
+## Where
+
+- `README.md`, `onion/src/lib.rs`, `GLOSSARY.md`

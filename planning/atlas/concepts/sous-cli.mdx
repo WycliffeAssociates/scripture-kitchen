@@ -1,0 +1,38 @@
+---
+term: sous-cli
+slug: sous-cli
+aliases: [sous CLI, sous]
+kind: crate
+crate: sous-cli
+files: [sous-chef/cli/Cargo.toml, sous-chef/cli/src/main.rs]
+related: [sous-chef, sous-core, galley, onion]
+level: 1
+summary: "The first walking consumer of Sous: filesystem discovery and Onion adaptation around sous-core, with a debug view of findings."
+---
+
+## Show me
+
+From `sous-chef/cli/src/main.rs`:
+
+```text
+sous --findings --source source.usfm --publish out.sous --report sites.html book.usfm
+  finding target[0] MRK 1:1-1:1 C0Control 11..14 run 3 raw [46..49]
+  length target[0] MRK 1:9 ratio 0.14 z_book -8.72 z_project -6.05
+  pattern[0] U+002C ',' placement next=Digit 12/9812 0.12% band 4 · 3/66 books 11 sites usual=Letter 9,700
+  published 2 findings for 1 books (SOUS v2, UTF-16) to out.sous
+```
+
+## Why
+
+- **An adapter, not an engine.** The CLI owns file discovery and Onion adaptation; core owns validation, alignment and the scans; galley owns UTF-16 publication (`main.rs` doc). The charter calls it the first host adapter and says to extract a shared adapter crate only when a second consumer needs it.
+- **Output is a debug view** while the finding contract freezes.
+
+Doc gap: `architecture.md` says sous-cli "depends on both only to call them"; its `Cargo.toml` depends on three: [[sous-core]], [[galley]] and [[onion]] (default features off).
+
+## Composes with
+
+Calls [[sous-core]], [[galley]] (publication, `Expediter`) and [[onion]]. Part of [[sous-chef]].
+
+## Where
+
+- `sous-chef/cli/src/main.rs`, `args.rs`, `load.rs`, `publishing.rs`, `report/`

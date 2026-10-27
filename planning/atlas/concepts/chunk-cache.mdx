@@ -1,0 +1,45 @@
+---
+term: Chunk cache
+slug: chunk-cache
+aliases: [Warmer, ChunkStore, chunk store]
+kind: workflow
+crate: galley
+files: [galley/src/pantry/chunks.rs, galley/src/pantry.md, galley/src/pantry/budget.rs, galley/tests/chunks.rs]
+related: [chunk, pantry, plate, cst, lint, extensions]
+level: 2
+summary: "Per-chapter CST, tokens and local lint kept by content hash, so an unchanged chapter is never re-lexed; the one store the byte ceiling bites."
+---
+
+## Show me
+
+From `galley/src/pantry/chunks.rs` and `pantry.md`:
+
+```text
+chunks.parse(text, opts)  ->  the same bytes onion::wire::parse would plate,
+                              with every unchanged chunk served from memory
+
+key   = (xxh3-128 of the chunk's bytes, custom-marker list fingerprint, chunk 0's carry-outs)
+value = Products { cst, tokens (chunk-relative), local LintReport, Carried, bytes }
+
+pantry.chunk_stats() -> ChunkStats { misses, hits, evictions, len, resident_bytes }
+```
+
+## Why
+
+- **Content, not position.** Reordering chapters, undoing an edit or reopening a book all hit; a changed chapter misses. A stale entry cannot be served, only missed, so nothing is ever invalidated.
+- **The key names everything the value depends on.** The bytes lex differently under two [[extensions]] lists, and chunk 0's `\usfm` version and is-scripture bit gate local lint rules ([[chunk]]). Omitting either would be a correctness bug, not a performance one (`pantry.md`, "This is the law").
+- **Byte-identical output.** The assembled dish equals a cold [[plate]] (`galley/tests/chunks.rs`, `the_folded_dish_is_byte_identical_to_a_cold_one`), and lint equals a fresh walk cold, warm, edited, fused, evicted and undone.
+- **Small books bypass.** At two chunks or fewer an entry can only serve front matter. On en_ulb's five two-chunk books a cached parse was 1.02–1.14x fresh, while fifty keystrokes in Jude would leave 52 entries and 74 KB.
+- **A ceiling is what makes it safe.** wasm memory grows and never shrinks, so a high-water mark is permanent. A hand-rolled LRU evicts by last-touched tick; at dozens to hundreds of entries a linear scan is enough.
+- **Dirty seams are remembered** as `OpenBoundary`, so repeat calls widen to the fused unit without re-lexing.
+
+Name: this was the **Warmer** until commit a7c21d2 (2026-09-07) folded it into the [[pantry]] as `ChunkStore`. Test locals and `galley/examples/working_set.rs` still say `warmer`.
+
+## Composes with
+
+Uses [[chunk]]'s per-chunk primitives over [[cst]] and [[lint]]. Lives in the [[pantry]], whose `Budget` it enforces. Feeds `Parsed::from_parts` for [[plate]].
+
+## Where
+
+- `galley/src/pantry/chunks.rs` · `ChunkStore`, `Key`, `ContextKey`, `Products`, `Cached::OpenBoundary`, `UNCACHED_CHUNKS`, `ChunkStats`
+- `galley/src/pantry/budget.rs` · `Budget`, `Tally`

@@ -1,0 +1,40 @@
+---
+term: galley
+slug: galley
+aliases: [usfm_galley, workflows crate]
+kind: crate
+crate: galley
+files: [galley/Cargo.toml, galley/src/lib.rs, galley/README.md, galley/docs/analysis-host.md, agents/architecture.md]
+related: [galley-package, onion, sous-core, onion-wasm, ticket, mise, pantry, expediter, onion-book]
+level: 1
+summary: "The workflows crate (usfm_galley): the one adapter over both engines, with all state, caching and the Onion→Sous seam."
+---
+
+## Show me
+
+```text
+galley::pantry      the one caching layer (chunks, books, derived stores, budget)
+galley::sous        OnionBook, Expediter, publish_onion_findings, settings
+galley::find        literal search over a projection
+galley::overlay     match formatting
+galley::toc / mask  the census and mask-map wires
+galley::corpus      the ONCP envelope
+galley::wasm        the Galley handle (feature "wasm")
+```
+
+## Why
+
+- **The only place the engines meet.** "Anything that might be considered stateful lives here and NEVER in the engines" (`galley/src/lib.rs`). `galley::sous` owns the seam entire.
+- **One caching layer.** Everything kept between calls is in the [[pantry]] or a store it defines (`architecture.md`).
+- **The JS superset.** galley's cdylib links onion-wasm's shims, so one module exports `Galley` and every onion door. A test pins the exact export list because a cdylib silently drops what nothing references.
+- **Depends on** [[onion]], [[sous-core]], [[mise]], [[ticket]]; [[onion-wasm]] and `wasm-bindgen` only under `wasm`; `rayon` only under `parallel`.
+
+Doc drift: `galley/src/lib.rs`'s diagram and `onion-wasm/README.md` still name a `sous-wasm` crate and a "five-crate layout"; the workspace has seven members and no `sous-wasm`.
+
+## Composes with
+
+Implements the [[pantry]], [[chunk-cache]], [[expediter]], [[onion-book]], [[find]], [[overlay]] and the [[census]], [[mask-map]], [[find-buffer]] and [[corpus]] wires. Ships as the [[galley-package]].
+
+## Where
+
+- `galley/src/lib.rs`, `galley/src/wasm.rs`, `galley/docs/analysis-host.md`

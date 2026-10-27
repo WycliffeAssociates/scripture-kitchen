@@ -1,0 +1,40 @@
+---
+term: Source
+slug: source
+aliases: [Span, Document]
+kind: primitive
+crate: onion
+files: [GLOSSARY.md, onion/src/token.rs]
+related: [token, scanner, mask, utf16, edit]
+level: 2
+summary: "The exact bytes of one USFM document; every other artifact is an index over them or a derivation."
+---
+
+## Show me
+
+```text
+source    \v 1 Jesus wept.
+span      Token { start: 26, len: 3 }   → source[26..29] == "\v "
+```
+
+Spans tile the source. The scratch book in [[cst]] is 125 bytes and its 37 tokens cover 0..125 with no gap.
+
+## Why
+
+GLOSSARY.md, "The material": Source is never normalized and never repaired on ingest. Text is source-backed: reading a token's text is a slice, never a copy of a stored string. An invalid or missing `\id` is kept as data.
+
+Two invariants follow:
+
+- **Lossless invariant.** The token stream is an index over Source, so round trip is identity by construction. HTML, USJ, USX and vref are named as lossy.
+- **Refuse, never invent.** Input that cannot be represented is refused with a reason. Only [[format]] may invent bytes, and only whitespace and fix text.
+
+Trade-off: LF is the input contract. CRLF lexes fine but shifts UTF-16 offsets by one per line against an editor, and changes every content hash (`onion-wasm/README.md`, "The contract").
+
+## Composes with
+
+The [[scanner]] cuts it into [[token]] spans. [[mask]] ranges, [[toc]] rows, [[edit]] splices and [[utf16]] offsets all point into it.
+
+## Where
+
+- `GLOSSARY.md` · "Source", "Span", "Lossless invariant", "Refuse, never invent"
+- `onion/src/token.rs` · `Token::start`, `Token::end`

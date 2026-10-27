@@ -1,0 +1,42 @@
+---
+term: Find
+slug: find
+aliases: [findAll, whole word, literal search]
+kind: workflow
+crate: galley
+files: [galley/src/find.md, galley/src/find.rs, galley/tests/find.rs, galley/benches/find.rs]
+related: [mask, words, pantry, find-buffer, mask-map]
+level: 2
+summary: "Literal search over a book's projection, every hit placed back in the source as one or more pieces."
+---
+
+## Show me
+
+From `galley/src/find.md`:
+
+```text
+source   \v 1 Jesus wept.\f + \ft why\f* Then…
+mask     ·····Jesus wept.················ Then…
+
+Find::literal("wept. Then")   → Hit { projected: 6..16, source: Split([11..16, 31..36]) }
+Find::literal("why")          → nothing
+```
+
+## Why
+
+- **Galley's, not the engine's.** Onion already gives the [[mask]] and its offset map, so Find is `memmem` over `mask.text()`, `to_source` per hit, and replacement as ordinary edits (ruled 2026-08-24).
+- **`Split`, not one span.** A hit across a dropped footnote covers markup in source space; one `a..d` would swallow the note. The bytes between pieces are exactly what the projection dropped.
+- **Whole word is `words/1`.** It calls [[words]] in [[mise]], not sous-core, and `tests/find.rs` asserts every whole-word hit of `the` equals sous's word walk over the test tier.
+- **Case fold: copy plus offset map.** Measured on en_ulb (2026-09-06): folded copy 8.26 ms for `the` against a 7.82 ms lower bound for fold-per-scalar. Within noise, and it keeps `memmem`, so no needle goes quadratic.
+- **Measured.** Whole Bible, case-sensitive: `Melchizedek` 2.25 ms, `the` 5.14 ms (76,324 hits, ~38 ns each); `और` 13.46 ms over hin2017, where `E0 A4` leads almost every scalar and memmem's prefilter cannot help.
+
+Trade-off: literal only. `regex` waits for a consumer to ask.
+
+## Composes with
+
+Reads a book's retained [[mask]] and text from the [[pantry]] (targets, and references kept with `keepText`). Uses [[words]] for boundaries. Encodes to the [[find-buffer]]; its pieces equal the [[mask-map]]'s.
+
+## Where
+
+- `galley/src/find.rs` · `Find::literal`, `in_projection`, `in_book`, `in_pantry`, `Hit`, `SourceSpan::{Contiguous, Split}`
+- `galley/benches/find.rs`

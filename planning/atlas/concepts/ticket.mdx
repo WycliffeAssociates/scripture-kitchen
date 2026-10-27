@@ -1,0 +1,36 @@
+---
+term: ticket
+slug: ticket
+aliases: [order slip, wire vocabulary]
+kind: crate
+crate: ticket
+files: [ticket/README.md, ticket/src/lib.rs, ticket/src/schema.rs, ticket/src/emit.rs, ticket/src/stale.rs]
+related: [wire, dish, census, find-buffer, mask-map, onion, galley, mise]
+level: 1
+summary: "The second zero-dependency leaf: the wire vocabulary and the emitters that write one record's Rust writer and TypeScript reader."
+---
+
+## Show me
+
+```text
+onion/src/wire/schema.rs    the dish's declaration    ─┐
+galley/src/toc/schema.rs    the census's declaration   ├─► ticket::emit ─► both ends
+galley/src/find/…/schema.rs find's declaration        ─┘
+```
+
+Vocabulary: `Width`, `Space` (`Offset` converts under UTF-16), `Field`, `Record`, and `Repeat` for a run of sub-rows a row carries the length of (a find hit's source pieces).
+
+## Why
+
+- **No two formats can disagree** about how a field reaches the buffer or where a reader looks for it (`architecture.md`). Extracted in 0.1.1 from onion's dish codegen, which it reproduces byte for byte (commit 07278dc).
+- **Formats keep their envelopes.** Declaration, magic, version, envelope, codegen bin and generated files stay with each format: the dish frames sections, a census frames books, find counts hits. A grammar for all three would be written to save fifty lines (`ticket/README.md`).
+- **Not in [[mise]], on purpose.** mise excludes generators; keeping ticket beside it keeps that rule sharp.
+- **Generator-only.** Nothing on a runtime path calls it; it is dead in a release build. No I/O: every function returns a `String`.
+
+## Composes with
+
+Depended on by [[onion]] and [[galley]]. Every [[wire]] except the [[findings-snapshot]] (sous-core's own emitter) and the [[corpus]] envelope is declared against it: [[dish]], [[census]], [[find-buffer]], [[mask-map]].
+
+## Where
+
+- `ticket/src/schema.rs`, `ticket/src/emit.rs`, `ticket/src/stale.rs`

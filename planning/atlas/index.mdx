@@ -1,0 +1,34 @@
+---
+title: scripture-kitchen atlas
+summary: "What each piece of the workspace is, why it is shaped that way, and how the pieces compose."
+---
+
+# scripture-kitchen
+
+One Rust workspace, two products, one JS package.
+
+- **[[onion-engine|Onion]]** reads USFM losslessly: [[scanner]] to [[token]]s, tokens to the [[cst]], and everything else derived from those.
+- **[[sous-chef|Sous Chef]]** finds reviewable inconsistencies from counts alone, and never depends on onion.
+- **[[galley]]** is the one crate allowed to see both. It caches ([[pantry]]), publishes ([[expediter]]) and ships the [[galley-package]] that [[sefer]] runs.
+
+## Four zoom levels
+
+| level | what | start with |
+| --- | --- | --- |
+| 0 | products and consumers | [[onion-engine]], [[sous-chef]], [[galley-package]], [[sefer]] |
+| 1 | crates, and who may depend on whom | [[mise]], [[ticket]], [[onion]], [[galley]], [[sous-core]] |
+| 2 | primitives and workflows | [[cst]], [[toc]], [[mask]], [[chunk]], [[pantry]] |
+| 3 | wires: bytes that cross to JS | [[wire]], [[plate]], [[dish]] |
+
+## Where to start
+
+Read the [[cst]]. It is the base nearly everything reads: [[mask]], [[lint]], the [[exports]] and the [[dish]]. Then [[toc]] (where things are, no tree needed), then [[chunk]] and the [[chunk-cache]] (how a keystroke avoids re-reading a book).
+
+```mermaid
+flowchart LR
+  source --> scanner --> token --> cst
+  token --> toc
+  cst --> mask & lint & exports
+  cst & lint & toc --> plate --> dish --> sefer
+  mask & toc --> onion-book --> sous-core --> findings-snapshot --> sefer
+```

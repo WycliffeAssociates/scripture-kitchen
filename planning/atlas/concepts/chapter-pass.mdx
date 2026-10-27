@@ -1,0 +1,52 @@
+---
+term: ChapterPass
+slug: chapter-pass
+aliases: [map fold judge, Brigade, Observation, Aggregate, pass]
+kind: workflow
+crate: sous-core
+files: [sous-chef/core/src/pass.md, sous-chef/core/src/pass/chapter.rs, sous-chef/core/src/lib.rs, sous-chef/charter.md]
+related: [onion-book, expediter, words, findings-snapshot, sous-core]
+level: 2
+summary: "The seam every Sous rule hangs on: map a chapter alone, fold a book in order, judge the corpus, then locate."
+---
+
+## Show me
+
+From `sous-chef/core/src/pass.md`:
+
+```text
+book MRK, projected text, chapters in order
+  ┌ chapter 1  start 0   ─ map ─→ Observation  ┐
+  ├ chapter 2  start 16  ─ map ─→ Observation  ├─ ChapterObs rows, book order
+  └ chapter 3  start 41  ─ map ─→ Observation  ┘
+                                        │ fold(rows)
+                                    Aggregate, book coordinates
+book GEN ─ map, fold ─→ Aggregate      ← no state crosses a book
+   judge([&MRK, &GEN], &config, &mut out) ─→ Findings ─→ finish()
+```
+
+```rust
+pub type Brigade = (hygiene::HygieneBytes, substrate::Substrate, words::Words);
+```
+
+## Why
+
+Charter invariants 2–4:
+
+- **Book is the discourse unit.** No state crosses a book; there is no `Carry` on the trait.
+- **Chapter is the rebuild unit.** `map` reads only its chapter's projected text, verse rows and key, so chapters run in any order, on any thread, or not at all when a cache holds the answer.
+- **Raw observations are config-free.** Only `judge` sees a `Config`, which is what lets a host re-judge without remapping.
+- **Judgment is corpus-level.** Whether a comma attached to a letter is a slip depends on every other book.
+- **`locate` only places.** It reads text to site what the counts decided, never to decide.
+
+`RETAIN_CHAPTERS` is each rule's answer to "may a host keep my observation?" `Words` says no: ~5 KB a chapter against the substrate's 0.3, 4–5 MB per Bible to save ~200 µs (`expediter.md`).
+
+## Composes with
+
+Fed [[onion-book]] chapters; reads [[words]] for word boundaries. Driven by the [[expediter]], whose caches key on `ObservationKey` and `SCHEMA`. Its findings become the [[findings-snapshot]].
+
+## Where
+
+- `sous-chef/core/src/pass/chapter.rs` · `ChapterPass` (`map`, `fold`, `release`, `remap`, `judge`, `SCHEMA`, `RETAIN_CHAPTERS`)
+- `sous-chef/core/src/lib.rs` · `Brigade`
+- `sous-chef/core/src/substrate.md`, `words.md`, `hygiene.md` · the three passes

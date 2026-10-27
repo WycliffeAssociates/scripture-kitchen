@@ -1,0 +1,46 @@
+---
+term: words/1
+slug: words
+aliases: [words/1, Splitter, word boundary, for_each_word]
+kind: primitive
+crate: mise
+files: [mise/src/words.rs, galley/tests/find.rs, planning/items/2026-10-20-words-one-splitter-in-mise-with-a-narrower-joiner-.mdx]
+related: [mise, find, chapter-pass, sous-core]
+level: 2
+summary: "The one versioned word rule every crate splits by: letters, glue and digits, through one joiner with a letter on both sides."
+---
+
+## Show me
+
+From `mise/src/words.rs`:
+
+```text
+for_each_word("He said, don't-3rd אבג a--b 12,345")
+  0..2    He
+  3..7    said
+  9..14   don't         a joiner with a letter on both sides
+  15..18  3rd           a digit confirms no joiner, so `-` closes `don't`
+  19..25  אבג
+  26..27  a             `--` is two scalars: the second confirms nothing
+  29..30  b
+                        `12,345` holds no letter, so it is no word
+
+ng'ombe  l'homme  father-in-law  col·lecció  בֶּן־הֲדַד   → one word each
+```
+
+## Why
+
+- **Versioned because consumers hash words.** Changing the joiner set, glue, digit rule, fold or Unicode version is `words/2`; a consumer hashing words would see different hashes.
+- **In [[mise]]** because sous's walk, galley's whole-word [[find]] and alignment must agree bit for bit, and find must not depend on sous-core (planning item 2026-10-20, shipped 0.1.12).
+- **A state machine.** `Splitter` takes one scalar at a time, so a walk keeping its own state asks every boundary question without a second pass.
+- **Classes from the pinned UCD 17.0.0**, so a doubly-pointed Hebrew word or a multi-virama Devanagari one joins where Sous joins.
+
+Doc conflict: `sous-chef/core/src/words.md` still shows `don't-3rd` as one word ("two joiners"). The code (`mise::words`, words/1, narrowed joiners) splits it in two. Trust the code.
+
+## Composes with
+
+Read by [[find]] (whole word), the [[chapter-pass]] `Words` walk in [[sous-core]], and alignment. Shares `mise::unicode::class_of` with the substrate.
+
+## Where
+
+- `mise/src/words.rs` · `Splitter`, `for_each_word`, `word_around`, `is_joiner`, `is_word_glue`, `class_of`, `fold`

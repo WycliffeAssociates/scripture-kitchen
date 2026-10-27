@@ -1,0 +1,38 @@
+---
+term: Sefer
+slug: sefer
+aliases: [the editor host]
+kind: product
+crate: workspace
+files: [galley/src/wasm.md, onion/src/resolve.md, planning/roadmap.mdx]
+related: [galley-package, resolve, census, findings-snapshot, find-buffer, mask-map]
+level: 0
+summary: "The scripture editor host, in a separate repo, that vendors galley's wasm package and asks for the doors."
+---
+
+## Show me
+
+```js
+const verse = { kind: "verses", from: { chapter: 1, verse: 2 }, to: { chapter: 1, verse: 2 } };
+JSON.parse(galley.resolve("books/LUK.usfm", verse, { utf16: true }));
+//   { found: { from, to, opening, covers, coarser } }
+```
+
+`address` is Sefer's `Address` (`book`, `intro`, `chapters`, `verses`) (`galley/src/wasm.md`).
+
+## Why
+
+Sefer is the consumer most kitchen work is shaped by. Its numbered asks appear in commits and planning items: resolve (asks 12, 14), `OnionBook::locate` cost (11), `LetterRun` (13), stable diagnostic identity (15). Its `locate.ts` was the reference [[resolve]] ported, with the departures listed in `resolve.md`.
+
+It vendors the [[galley-package]], the superset module that carries every onion door beside the `Galley` handle (`galley/README.md`), so a new door must land on galley. Offsets at the wall are UTF-16 code units, the editor's unit.
+
+Sefer's own repo is outside this workspace; its internals are not documented here.
+
+## Composes with
+
+Reads the [[galley-package]]'s wires: [[dish]], [[census]], [[find-buffer]], [[mask-map]], [[findings-snapshot]]; and [[resolve]]'s JSON.
+
+## Where
+
+- `galley/src/wasm.md` · the door list Sefer calls
+- `planning/roadmap.mdx` · what Sefer is waiting on

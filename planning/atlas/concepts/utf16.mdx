@@ -1,0 +1,47 @@
+---
+term: UTF-16 index
+slug: utf16
+aliases: [Utf16Index, Utf16Table, UTF-16 table, utf16]
+kind: primitive
+crate: mise
+files: [mise/src/utf16.rs, galley/src/pantry.md, onion/tests/utf16_oracle.rs]
+related: [source, mask, pantry, dish, mise]
+level: 2
+summary: "Byte to UTF-16 offsets: an index that borrows the string, and a table that outlives it."
+---
+
+## Show me
+
+From `mise/src/utf16.rs`:
+
+```text
+let ix = utf16_index("\\v 1 λόγος ἦν".as_bytes());
+ix.to_utf16(16) == 11        ix.to_byte(11) == 16        ix.len_utf16() == 13
+
+let t = utf16_table("\\v 1 λόγος ἦν".as_bytes());   // then drop the string
+t.to_utf16(16) == 11
+
+bytes   \  v  ␠  1  ␠  CE BB CF 8C CE B3 CE BF CF 82 ␠  E1 BC A6 CE BD
+byte#   0  1  2  3  4  5     7     9     11    13    15 16       19
+utf16#  0  1  2  3  4  5     6     7     8     9     10 11       12
+```
+
+## Why
+
+The engine counts bytes. A JS editor counts UTF-16 code units. Every offset that crosses to JS converts once.
+
+- **Index: stride 256 + SWAR.** Per-drift-change anchors cost 236% of the source on Devanagari (705 KB for a 292 KB book). Fixed-stride anchors cost 1.6% on every script and build 6–13x faster (commit 68ffdf5, from Will's Hindi IRV question).
+- **Table: one bit per byte.** With the source gone, a set bit marks where a UTF-16 unit starts, plus a `u32` total per 256 bytes: 36 bytes per 256, 14.06%, identical on all eight tier corpora (`pantry.md`). Lets the [[pantry]] drop text it does not keep and still rebase offsets.
+- **One sweep, not one per read.** `to_utf16` once built a fresh cursor per read; ten reads walked the document ten times. Building once cut `analyze::full` on en_ulb from 28.10 ms to 18.51 ms (commit 46ed346).
+- **In [[mise]]** because both engines need the offset types, and neither may depend on the other.
+
+Trade-off: the table answers character-boundary offsets only. Every offset the Pantry rebases is already a boundary.
+
+## Composes with
+
+Converts offsets for the [[dish]] (`utf16: true`), the [[census]], [[find-buffer]], [[mask-map]] and [[findings-snapshot]]. Retained per book by the [[pantry]]. Re-exported by onion as `onion::utf16`.
+
+## Where
+
+- `mise/src/utf16.rs` · `Utf16Index`, `utf16_index`, `Utf16Table`, `utf16_table`, `utf16_len`
+- `onion/tests/utf16_oracle.rs`

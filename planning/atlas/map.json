@@ -1,0 +1,1039 @@
+{
+ "groups": [
+  {
+   "id": "products",
+   "label": "products and consumers",
+   "level": 0,
+   "parent": null
+  },
+  {
+   "id": "mise",
+   "label": "mise",
+   "level": 1,
+   "parent": null
+  },
+  {
+   "id": "ticket",
+   "label": "ticket",
+   "level": 1,
+   "parent": null
+  },
+  {
+   "id": "onion",
+   "label": "onion",
+   "level": 1,
+   "parent": null
+  },
+  {
+   "id": "onion-wasm",
+   "label": "onion-wasm",
+   "level": 1,
+   "parent": null
+  },
+  {
+   "id": "galley",
+   "label": "galley",
+   "level": 1,
+   "parent": null
+  },
+  {
+   "id": "sous-core",
+   "label": "sous-core",
+   "level": 1,
+   "parent": null
+  },
+  {
+   "id": "sous-cli",
+   "label": "sous-cli",
+   "level": 1,
+   "parent": null
+  }
+ ],
+ "nodes": [
+  {
+   "id": "onion-engine",
+   "label": "Onion engine",
+   "level": 0,
+   "group": "products",
+   "kind": "product",
+   "slug": "onion-engine",
+   "weight": 2
+  },
+  {
+   "id": "galley-package",
+   "label": "Galley package",
+   "level": 0,
+   "group": "products",
+   "kind": "product",
+   "slug": "galley-package",
+   "weight": 2
+  },
+  {
+   "id": "sous-chef",
+   "label": "Sous Chef",
+   "level": 0,
+   "group": "products",
+   "kind": "product",
+   "slug": "sous-chef",
+   "weight": 2
+  },
+  {
+   "id": "sefer",
+   "label": "Sefer",
+   "level": 0,
+   "group": "products",
+   "kind": "product",
+   "slug": "sefer",
+   "weight": 2
+  },
+  {
+   "id": "mise",
+   "label": "mise",
+   "level": 1,
+   "group": "mise",
+   "kind": "crate",
+   "slug": "mise",
+   "weight": 2
+  },
+  {
+   "id": "ticket",
+   "label": "ticket",
+   "level": 1,
+   "group": "ticket",
+   "kind": "crate",
+   "slug": "ticket",
+   "weight": 2
+  },
+  {
+   "id": "onion",
+   "label": "onion",
+   "level": 1,
+   "group": "onion",
+   "kind": "crate",
+   "slug": "onion",
+   "weight": 2
+  },
+  {
+   "id": "onion-wasm",
+   "label": "onion-wasm",
+   "level": 1,
+   "group": "onion-wasm",
+   "kind": "crate",
+   "slug": "onion-wasm",
+   "weight": 2
+  },
+  {
+   "id": "galley",
+   "label": "galley",
+   "level": 1,
+   "group": "galley",
+   "kind": "crate",
+   "slug": "galley",
+   "weight": 2
+  },
+  {
+   "id": "sous-core",
+   "label": "sous-core",
+   "level": 1,
+   "group": "sous-core",
+   "kind": "crate",
+   "slug": "sous-core",
+   "weight": 2
+  },
+  {
+   "id": "sous-cli",
+   "label": "sous-cli",
+   "level": 1,
+   "group": "sous-cli",
+   "kind": "crate",
+   "slug": "sous-cli",
+   "weight": 2
+  },
+  {
+   "id": "source",
+   "label": "Source",
+   "level": 2,
+   "group": "onion",
+   "kind": "primitive",
+   "slug": "source",
+   "weight": 1
+  },
+  {
+   "id": "scanner",
+   "label": "Scanner",
+   "level": 2,
+   "group": "onion",
+   "kind": "primitive",
+   "slug": "scanner",
+   "weight": 2
+  },
+  {
+   "id": "token",
+   "label": "Token",
+   "level": 2,
+   "group": "onion",
+   "kind": "primitive",
+   "slug": "token",
+   "weight": 2
+  },
+  {
+   "id": "marker-table",
+   "label": "Marker table",
+   "level": 2,
+   "group": "onion",
+   "kind": "primitive",
+   "slug": "marker-table",
+   "weight": 1
+  },
+  {
+   "id": "extensions",
+   "label": "Extensions",
+   "level": 2,
+   "group": "onion",
+   "kind": "primitive",
+   "slug": "extensions",
+   "weight": 1
+  },
+  {
+   "id": "cst",
+   "label": "CST",
+   "level": 2,
+   "group": "onion",
+   "kind": "primitive",
+   "slug": "cst",
+   "weight": 3
+  },
+  {
+   "id": "walker",
+   "label": "Walker",
+   "level": 2,
+   "group": "onion",
+   "kind": "concept",
+   "slug": "walker",
+   "weight": 1
+  },
+  {
+   "id": "designator",
+   "label": "Designator",
+   "level": 2,
+   "group": "onion",
+   "kind": "primitive",
+   "slug": "designator",
+   "weight": 1
+  },
+  {
+   "id": "attributes",
+   "label": "Attributes",
+   "level": 2,
+   "group": "onion",
+   "kind": "primitive",
+   "slug": "attributes",
+   "weight": 1
+  },
+  {
+   "id": "toc",
+   "label": "Toc",
+   "level": 2,
+   "group": "onion",
+   "kind": "primitive",
+   "slug": "toc",
+   "weight": 2
+  },
+  {
+   "id": "mask",
+   "label": "Mask",
+   "level": 2,
+   "group": "onion",
+   "kind": "primitive",
+   "slug": "mask",
+   "weight": 2
+  },
+  {
+   "id": "resolve",
+   "label": "Resolve",
+   "level": 2,
+   "group": "onion",
+   "kind": "primitive",
+   "slug": "resolve",
+   "weight": 1
+  },
+  {
+   "id": "utf16",
+   "label": "UTF-16 index",
+   "level": 2,
+   "group": "mise",
+   "kind": "primitive",
+   "slug": "utf16",
+   "weight": 1
+  },
+  {
+   "id": "chunk",
+   "label": "Chunk and carry",
+   "level": 2,
+   "group": "onion",
+   "kind": "concept",
+   "slug": "chunk",
+   "weight": 1
+  },
+  {
+   "id": "words",
+   "label": "words/1",
+   "level": 2,
+   "group": "mise",
+   "kind": "primitive",
+   "slug": "words",
+   "weight": 1
+  },
+  {
+   "id": "lint",
+   "label": "Lint",
+   "level": 2,
+   "group": "onion",
+   "kind": "concept",
+   "slug": "lint",
+   "weight": 2
+  },
+  {
+   "id": "format",
+   "label": "Format",
+   "level": 2,
+   "group": "onion",
+   "kind": "concept",
+   "slug": "format",
+   "weight": 1
+  },
+  {
+   "id": "edit",
+   "label": "Edit",
+   "level": 2,
+   "group": "onion",
+   "kind": "concept",
+   "slug": "edit",
+   "weight": 1
+  },
+  {
+   "id": "vref",
+   "label": "vref",
+   "level": 2,
+   "group": "onion",
+   "kind": "concept",
+   "slug": "vref",
+   "weight": 1
+  },
+  {
+   "id": "diff",
+   "label": "Diff",
+   "level": 2,
+   "group": "onion",
+   "kind": "concept",
+   "slug": "diff",
+   "weight": 1
+  },
+  {
+   "id": "exports",
+   "label": "Exports",
+   "level": 2,
+   "group": "onion",
+   "kind": "concept",
+   "slug": "exports",
+   "weight": 1
+  },
+  {
+   "id": "chunk-cache",
+   "label": "Chunk cache",
+   "level": 2,
+   "group": "galley",
+   "kind": "workflow",
+   "slug": "chunk-cache",
+   "weight": 1
+  },
+  {
+   "id": "pantry",
+   "label": "Pantry",
+   "level": 2,
+   "group": "galley",
+   "kind": "workflow",
+   "slug": "pantry",
+   "weight": 2
+  },
+  {
+   "id": "expediter",
+   "label": "Expediter",
+   "level": 2,
+   "group": "galley",
+   "kind": "workflow",
+   "slug": "expediter",
+   "weight": 2
+  },
+  {
+   "id": "find",
+   "label": "Find",
+   "level": 2,
+   "group": "galley",
+   "kind": "workflow",
+   "slug": "find",
+   "weight": 1
+  },
+  {
+   "id": "overlay",
+   "label": "Overlay",
+   "level": 2,
+   "group": "galley",
+   "kind": "workflow",
+   "slug": "overlay",
+   "weight": 1
+  },
+  {
+   "id": "onion-book",
+   "label": "OnionBook",
+   "level": 2,
+   "group": "galley",
+   "kind": "workflow",
+   "slug": "onion-book",
+   "weight": 1
+  },
+  {
+   "id": "chapter-pass",
+   "label": "ChapterPass",
+   "level": 2,
+   "group": "sous-core",
+   "kind": "workflow",
+   "slug": "chapter-pass",
+   "weight": 1
+  },
+  {
+   "id": "wire",
+   "label": "Wire",
+   "level": 3,
+   "group": "ticket",
+   "kind": "wire",
+   "slug": "wire",
+   "weight": 1
+  },
+  {
+   "id": "plate",
+   "label": "Plate",
+   "level": 3,
+   "group": "onion",
+   "kind": "wire",
+   "slug": "plate",
+   "weight": 1
+  },
+  {
+   "id": "dish",
+   "label": "Dish",
+   "level": 3,
+   "group": "onion",
+   "kind": "wire",
+   "slug": "dish",
+   "weight": 1
+  },
+  {
+   "id": "census",
+   "label": "Census",
+   "level": 3,
+   "group": "galley",
+   "kind": "wire",
+   "slug": "census",
+   "weight": 1
+  },
+  {
+   "id": "find-buffer",
+   "label": "Find buffer",
+   "level": 3,
+   "group": "galley",
+   "kind": "wire",
+   "slug": "find-buffer",
+   "weight": 1
+  },
+  {
+   "id": "mask-map",
+   "label": "Mask map",
+   "level": 3,
+   "group": "galley",
+   "kind": "wire",
+   "slug": "mask-map",
+   "weight": 1
+  },
+  {
+   "id": "findings-snapshot",
+   "label": "Findings snapshot",
+   "level": 3,
+   "group": "sous-core",
+   "kind": "wire",
+   "slug": "findings-snapshot",
+   "weight": 1
+  },
+  {
+   "id": "corpus",
+   "label": "Corpus envelope",
+   "level": 3,
+   "group": "galley",
+   "kind": "wire",
+   "slug": "corpus",
+   "weight": 1
+  }
+ ],
+ "edges": [
+  {
+   "from": "sefer",
+   "to": "galley-package",
+   "label": "Galley handle, ArrayBuffers",
+   "level": 0,
+   "kind": "calls"
+  },
+  {
+   "from": "galley-package",
+   "to": "onion-engine",
+   "label": "every onion door, linked",
+   "level": 0,
+   "kind": "depends"
+  },
+  {
+   "from": "galley-package",
+   "to": "sous-chef",
+   "label": "Expediter publication",
+   "level": 0,
+   "kind": "depends"
+  },
+  {
+   "from": "sous-chef",
+   "to": "onion-engine",
+   "label": "structure via galley's OnionBook",
+   "level": 0,
+   "kind": "depends"
+  },
+  {
+   "from": "onion",
+   "to": "mise",
+   "label": "BookKey, utf16, extensions",
+   "level": 1,
+   "kind": "depends"
+  },
+  {
+   "from": "onion",
+   "to": "ticket",
+   "label": "wire vocabulary (generator-only)",
+   "level": 1,
+   "kind": "depends"
+  },
+  {
+   "from": "onion-wasm",
+   "to": "onion",
+   "label": "library calls",
+   "level": 1,
+   "kind": "depends"
+  },
+  {
+   "from": "onion-wasm",
+   "to": "mise",
+   "label": "utf16, Address",
+   "level": 1,
+   "kind": "depends"
+  },
+  {
+   "from": "galley",
+   "to": "onion",
+   "label": "usfm_onion",
+   "level": 1,
+   "kind": "depends"
+  },
+  {
+   "from": "galley",
+   "to": "sous-core",
+   "label": "ProjectedBook, ChapterPass",
+   "level": 1,
+   "kind": "depends"
+  },
+  {
+   "from": "galley",
+   "to": "mise",
+   "label": "utf16, words/1, BookKey",
+   "level": 1,
+   "kind": "depends"
+  },
+  {
+   "from": "galley",
+   "to": "ticket",
+   "label": "wire vocabulary (generator-only)",
+   "level": 1,
+   "kind": "depends"
+  },
+  {
+   "from": "galley",
+   "to": "onion-wasm",
+   "label": "optional, feature wasm",
+   "level": 1,
+   "kind": "depends"
+  },
+  {
+   "from": "sous-core",
+   "to": "mise",
+   "label": "Class, BookKey, words/1",
+   "level": 1,
+   "kind": "depends"
+  },
+  {
+   "from": "sous-cli",
+   "to": "sous-core",
+   "label": "sous_core",
+   "level": 1,
+   "kind": "depends"
+  },
+  {
+   "from": "sous-cli",
+   "to": "galley",
+   "label": "publication",
+   "level": 1,
+   "kind": "depends"
+  },
+  {
+   "from": "sous-cli",
+   "to": "onion",
+   "label": "default-features = false",
+   "level": 1,
+   "kind": "depends"
+  },
+  {
+   "from": "source",
+   "to": "scanner",
+   "label": "&str",
+   "level": 2,
+   "kind": "data"
+  },
+  {
+   "from": "marker-table",
+   "to": "scanner",
+   "label": "name → MarkerIdx",
+   "level": 2,
+   "kind": "data"
+  },
+  {
+   "from": "extensions",
+   "to": "scanner",
+   "label": "&Extensions",
+   "level": 2,
+   "kind": "data"
+  },
+  {
+   "from": "scanner",
+   "to": "token",
+   "label": "Vec<Token>",
+   "level": 2,
+   "kind": "data"
+  },
+  {
+   "from": "token",
+   "to": "walker",
+   "label": "&[Token]",
+   "level": 2,
+   "kind": "data"
+  },
+  {
+   "from": "marker-table",
+   "to": "walker",
+   "label": "scope columns, precedence()",
+   "level": 2,
+   "kind": "data"
+  },
+  {
+   "from": "walker",
+   "to": "cst",
+   "label": "Cst { nodes, child_ids }",
+   "level": 2,
+   "kind": "data"
+  },
+  {
+   "from": "token",
+   "to": "toc",
+   "label": "&[Token]",
+   "level": 2,
+   "kind": "data"
+  },
+  {
+   "from": "designator",
+   "to": "toc",
+   "label": "Designator, members",
+   "level": 2,
+   "kind": "data"
+  },
+  {
+   "from": "cst",
+   "to": "mask",
+   "label": "&Cst + Filter",
+   "level": 2,
+   "kind": "data"
+  },
+  {
+   "from": "toc",
+   "to": "resolve",
+   "label": "&Toc + source",
+   "level": 2,
+   "kind": "data"
+  },
+  {
+   "from": "designator",
+   "to": "resolve",
+   "label": "members",
+   "level": 2,
+   "kind": "data"
+  },
+  {
+   "from": "cst",
+   "to": "lint",
+   "label": "&Cst (CloseReason, ctx)",
+   "level": 2,
+   "kind": "data"
+  },
+  {
+   "from": "attributes",
+   "to": "lint",
+   "label": "AttrEvent",
+   "level": 2,
+   "kind": "data"
+  },
+  {
+   "from": "lint",
+   "to": "format",
+   "label": "formatter-row Fix edits",
+   "level": 2,
+   "kind": "data"
+  },
+  {
+   "from": "lint",
+   "to": "edit",
+   "label": "Fix → [Edit]",
+   "level": 2,
+   "kind": "data"
+  },
+  {
+   "from": "format",
+   "to": "edit",
+   "label": "Vec<Edit>",
+   "level": 2,
+   "kind": "data"
+  },
+  {
+   "from": "diff",
+   "to": "edit",
+   "label": "SpliceEdit",
+   "level": 2,
+   "kind": "data"
+  },
+  {
+   "from": "overlay",
+   "to": "edit",
+   "label": "Edits",
+   "level": 2,
+   "kind": "data"
+  },
+  {
+   "from": "toc",
+   "to": "vref",
+   "label": "&Toc",
+   "level": 2,
+   "kind": "data"
+  },
+  {
+   "from": "mask",
+   "to": "vref",
+   "label": "&Mask",
+   "level": 2,
+   "kind": "data"
+  },
+  {
+   "from": "toc",
+   "to": "diff",
+   "label": "anchors → blocks",
+   "level": 2,
+   "kind": "data"
+  },
+  {
+   "from": "mask",
+   "to": "diff",
+   "label": "text cut (runs)",
+   "level": 2,
+   "kind": "data"
+  },
+  {
+   "from": "cst",
+   "to": "exports",
+   "label": "&Cst",
+   "level": 2,
+   "kind": "data"
+  },
+  {
+   "from": "attributes",
+   "to": "exports",
+   "label": "AttrIter",
+   "level": 2,
+   "kind": "data"
+  },
+  {
+   "from": "chunk",
+   "to": "chunk-cache",
+   "label": "chunk starts + Carried carry-outs",
+   "level": 2,
+   "kind": "data"
+  },
+  {
+   "from": "chunk-cache",
+   "to": "pantry",
+   "label": "Products { cst, tokens, local lint }",
+   "level": 2,
+   "kind": "data"
+  },
+  {
+   "from": "cst",
+   "to": "chunk",
+   "label": "build_chunk / concat",
+   "level": 2,
+   "kind": "calls"
+  },
+  {
+   "from": "lint",
+   "to": "chunk",
+   "label": "lint_chunk / reduce",
+   "level": 2,
+   "kind": "calls"
+  },
+  {
+   "from": "toc",
+   "to": "pantry",
+   "label": "Toc (pinned)",
+   "level": 2,
+   "kind": "data"
+  },
+  {
+   "from": "mask",
+   "to": "pantry",
+   "label": "Mask (pinned)",
+   "level": 2,
+   "kind": "data"
+  },
+  {
+   "from": "utf16",
+   "to": "pantry",
+   "label": "Utf16Table (pinned)",
+   "level": 2,
+   "kind": "data"
+  },
+  {
+   "from": "pantry",
+   "to": "find",
+   "label": "Entry: mask + text",
+   "level": 2,
+   "kind": "data"
+  },
+  {
+   "from": "words",
+   "to": "find",
+   "label": "words/1 boundaries",
+   "level": 2,
+   "kind": "data"
+  },
+  {
+   "from": "pantry",
+   "to": "overlay",
+   "label": "parsed + mask + Toc",
+   "level": 2,
+   "kind": "data"
+  },
+  {
+   "from": "onion-book",
+   "to": "overlay",
+   "label": "sous_core::align pairing",
+   "level": 2,
+   "kind": "data"
+  },
+  {
+   "from": "mask",
+   "to": "onion-book",
+   "label": "Mask",
+   "level": 2,
+   "kind": "data"
+  },
+  {
+   "from": "toc",
+   "to": "onion-book",
+   "label": "Toc",
+   "level": 2,
+   "kind": "data"
+  },
+  {
+   "from": "onion-book",
+   "to": "chapter-pass",
+   "label": "ChapterInput",
+   "level": 2,
+   "kind": "data"
+  },
+  {
+   "from": "words",
+   "to": "chapter-pass",
+   "label": "words/1",
+   "level": 2,
+   "kind": "data"
+  },
+  {
+   "from": "pantry",
+   "to": "expediter",
+   "label": "Entry (text, mask, toc, utf16)",
+   "level": 2,
+   "kind": "data"
+  },
+  {
+   "from": "chapter-pass",
+   "to": "expediter",
+   "label": "Aggregate → Findings",
+   "level": 2,
+   "kind": "data"
+  },
+  {
+   "from": "expediter",
+   "to": "onion-book",
+   "label": "OnionBook::from_parts",
+   "level": 2,
+   "kind": "calls"
+  },
+  {
+   "from": "ticket",
+   "to": "wire",
+   "label": "schema + emitters",
+   "level": 3,
+   "kind": "generates"
+  },
+  {
+   "from": "wire",
+   "to": "dish",
+   "label": "generated.rs + reader.ts",
+   "level": 3,
+   "kind": "generates"
+  },
+  {
+   "from": "wire",
+   "to": "census",
+   "label": "toc-reader.ts",
+   "level": 3,
+   "kind": "generates"
+  },
+  {
+   "from": "wire",
+   "to": "find-buffer",
+   "label": "find-reader.ts",
+   "level": 3,
+   "kind": "generates"
+  },
+  {
+   "from": "wire",
+   "to": "mask-map",
+   "label": "mask-reader.ts",
+   "level": 3,
+   "kind": "generates"
+  },
+  {
+   "from": "cst",
+   "to": "plate",
+   "label": "Parsed { tokens, cst, lint, toc }",
+   "level": 3,
+   "kind": "data"
+  },
+  {
+   "from": "plate",
+   "to": "dish",
+   "label": "wire::plate → Vec<u8>",
+   "level": 3,
+   "kind": "generates"
+  },
+  {
+   "from": "dish",
+   "to": "onion-wasm",
+   "label": "reader.ts deserialize()",
+   "level": 3,
+   "kind": "data"
+  },
+  {
+   "from": "dish",
+   "to": "sefer",
+   "label": "deserialize() via galley",
+   "level": 3,
+   "kind": "data"
+  },
+  {
+   "from": "dish",
+   "to": "corpus",
+   "label": "dish bytes, framed",
+   "level": 3,
+   "kind": "data"
+  },
+  {
+   "from": "corpus",
+   "to": "sefer",
+   "label": "decoded by hand in reader.ts",
+   "level": 3,
+   "kind": "data"
+  },
+  {
+   "from": "pantry",
+   "to": "census",
+   "label": "toc::encode",
+   "level": 3,
+   "kind": "generates"
+  },
+  {
+   "from": "census",
+   "to": "sefer",
+   "label": "Census.open",
+   "level": 3,
+   "kind": "data"
+  },
+  {
+   "from": "find",
+   "to": "find-buffer",
+   "label": "find::wire::encode",
+   "level": 3,
+   "kind": "generates"
+  },
+  {
+   "from": "find-buffer",
+   "to": "sefer",
+   "label": "Hits.open",
+   "level": 3,
+   "kind": "data"
+  },
+  {
+   "from": "mask",
+   "to": "mask-map",
+   "label": "mask::encode",
+   "level": 3,
+   "kind": "generates"
+  },
+  {
+   "from": "mask-map",
+   "to": "sefer",
+   "label": "MaskMap.open",
+   "level": 3,
+   "kind": "data"
+  },
+  {
+   "from": "expediter",
+   "to": "findings-snapshot",
+   "label": "publish() → SOUS",
+   "level": 3,
+   "kind": "generates"
+  },
+  {
+   "from": "findings-snapshot",
+   "to": "sefer",
+   "label": "FindingsSnapshot.open",
+   "level": 3,
+   "kind": "data"
+  },
+  {
+   "from": "utf16",
+   "to": "dish",
+   "label": "offsets under utf16: true",
+   "level": 3,
+   "kind": "data"
+  }
+ ]
+}

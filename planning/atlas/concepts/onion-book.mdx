@@ -1,0 +1,46 @@
+---
+term: OnionBook
+slug: onion-book
+aliases: [ProjectedBook, seam, Onion→Sous seam]
+kind: workflow
+crate: galley
+files: [galley/src/sous/onion_book.rs, sous-chef/core/src/input.rs, galley/src/sous/mod.rs]
+related: [mask, toc, chapter-pass, expediter, sous-core, findings-snapshot]
+level: 2
+summary: "Onion's Mask and Toc presented to sous-core as a neutral ProjectedBook: projected text, chapters, verses, and a way back to raw bytes."
+---
+
+## Show me
+
+From `galley/src/sous/onion_book.rs`:
+
+```text
+OnionBook::parse("\\id MRK\n\\c 1\n\\p\n\\v 1 Jesus \\f + \\ft note\\f* wept.\n")
+  .text()      "Jesus  wept.\n"          // verse text, markup gone
+  .chapters()  [Chapter 1 at 0..13]
+  .locate(0..13)                          // -> MRK 1:1, raw runs [21..27, 43..50]
+```
+
+Out-of-order verses abstain:
+
+```text
+\v 22 \v 23 \v 24 \v 23 \v 25   →  the second 23 abstains
+\v 22 \v 23 \v 42 \v 25 \v 26   →  42 abstains, not 25 and 26
+```
+
+## Why
+
+- **sous-core never depends on onion.** It takes a neutral borrowed view (`ProjectedBook`: key, text, chapters, verses). Onion stays the USFM authority; Sous sees projected ranges and numeric units (`charter.md`, "Ownership boundaries").
+- **The seam lives in galley**, the one crate allowed to depend on both.
+- **Raw runs, not one span.** A finding can cross removed markup, so one contiguous USFM span would be lossy at exactly the boundary this adapter preserves.
+- **Ascending verses only.** Sous needs them; a patience sort keeps the longest ascending run and onion's [[lint]] reports the rest.
+- **`from_parts` rebuilds from retained products** without lexing again; `locate` walks only the ranges it returns (Sefer ask 11, planning item 2026-10-20).
+
+## Composes with
+
+Built from a [[mask]] and [[toc]]; consumed by [[chapter-pass]]es in [[sous-core]]; built per book by the [[expediter]] and the cold `publish_onion_findings`, whose results become the [[findings-snapshot]].
+
+## Where
+
+- `galley/src/sous/onion_book.rs` · `OnionBook::parse`, `from_parts`, `locate`
+- `sous-chef/core/src/input.rs` · `ProjectedBook`, `Chapter`, `Verse`

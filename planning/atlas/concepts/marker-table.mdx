@@ -1,0 +1,49 @@
+---
+term: Marker table
+slug: marker-table
+aliases: [MarkerRow, marker, marker row, template row]
+kind: primitive
+crate: onion
+files: [onion/src/tables/schema.rs, onion/src/tables/rows.rs, onion/src/tables/generated.rs, onion/src/tables/emit.rs, onion/src/bin/codegen.rs]
+related: [scanner, walker, extensions, lint, mask, exports, wire]
+level: 2
+summary: "The single registry from marker to semantics: kind, category, payload, contexts, closing rule. Authored in Rust, generated for JS."
+---
+
+## Show me
+
+```text
+\q1 \v 4 Bread.
+
+token \q1   marker_idx 95   level 1     row "q": numbered UpTo, ParaPoetry
+token \v    marker_idx 133  level 0     row "v": Verse point, payload Designator
+token \s1   marker_idx 110  level 1
+\zfoo       marker_idx 0    (row 0, the inert empty row, unless registered)
+```
+
+Rows key on (canonical name, spelling shape): strip `-s`/`-e`, then digits. `q1..q4` are one row `q`; `qt3-s` is row `qt`.
+
+```text
+generated.rs   PACKED: [u128; 170]   NAMES: [&str; 170]   FIRST_EXTENSION_ROW = 153
+               row 0 empty · rows 1..=152 spec markers · rows 153..169 the 17 template rows
+```
+
+## Why
+
+- **One authored source, several generated projections.** Humans write named fields in `rows.rs`; codegen packs them into `u128` rows, a u64 name matcher (longest name is 6 bytes) and the `common_marker_checks` fast arms. Nothing is kept in sync by hand (`tables.rs` doc).
+- **Referee is USFM 3.2 only.** No version column. 3.1's `usx.rng` is fallback evidence and never outvotes a 3.2 page (`schema.rs`).
+- **Derived facts are `const fn`s, not columns.** `precedence()` and context contribution are baked by codegen, so they cannot drift from the rows.
+- **Unknown and unregistered `\z` markers resolve to row 0**, which opens, closes and contributes nothing. A registered one resolves to a template row ([[extensions]]).
+
+Trade-off: `marker_idx` is a `u8`, so the table plus templates must stay under 256 rows. 170 are used.
+
+## Composes with
+
+The [[scanner]] stamps `marker_idx` from it. The [[walker]] reads scope columns. [[lint]], [[mask]] recipes and the [[exports]] read category and kind. The JS side gets the same table through generated code in `onion-wasm/reader.ts` ([[wire]]), including `MARKER_ATTRIBUTES` (planning item 2026-10-22, "Attributes for hosts").
+
+## Where
+
+- `onion/src/tables/schema.rs` · `MarkerRow`, `MarkerKind`, `Category`, `SpecContext`, `Payload`
+- `onion/src/tables/rows.rs` · the authored rows
+- `onion/src/tables/generated.rs` · `PACKED`, `NAMES`, `is_extension`, `template_for` (checked in)
+- `onion/src/bin/codegen.rs` · regenerates; `onion/tests/codegen_output_matches_input.rs` fails if stale

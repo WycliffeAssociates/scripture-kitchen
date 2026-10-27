@@ -1,0 +1,53 @@
+---
+term: Extensions
+slug: extensions
+aliases: [custom markers, \z markers, CustomMarkers, markers.ext]
+kind: primitive
+crate: onion
+files: [onion/src/extensions.rs, mise/src/extensions.rs, onion-wasm/README.md, galley/src/wasm.md]
+related: [marker-table, scanner, chunk-cache, pantry, mise]
+level: 2
+summary: "User \\z markers registered by name and spec category, resolved to the template row that category behaves as."
+---
+
+## Show me
+
+From `onion/src/extensions.rs`:
+
+```text
+set_extensions(&[CustomMarker { name: "zaln", category: Milestone, .. }])
+
+lex("\\zaln-s |x-strong=\"H0430\"\\*word\\zaln-e\\*")
+    -> Milestone{end:false} marker_idx = zms   ← pairs, takes attributes like \qt-s
+
+set_extensions_with(&[CustomMarker { name: "s5", category: Standalone, .. }],
+                    &ExtensionOptions { relax_z_prefix: true })
+lex("\\p \\v 1 a \\s5 \\v 3 b")   -> \s5 is a bare point; the \p stays open past it
+```
+
+At the JS wall (`onion-wasm/README.md`):
+
+```ts
+customMarkers([{ name: "zmyf", category: "footnote" }, { name: "nope", category: "char" }])
+// → { markers: [{ name: "zmyf", category: "footnote" }], relaxZPrefix: false,
+//     malformed: [{ name: "nope", reason: "name does not start with z" }] }
+```
+
+## Why
+
+- **A name maps to a template row and stops.** The spec's `\category` field already says which marker a user marker behaves as. Every behaviour (caller, note scope, closing, lint contexts, mask, export shape) is the row's. The one thing a template cannot carry is the spelled name, which is what `generated::is_extension` is for. Shipped as 0.1.4, seventeen template rows (commit 0eda490).
+- **Legacy names add, never redefine.** `relax_z_prefix` admits en_ulb's `\s5` because no spec spelling resolves it; `s1` or `p` is refused.
+- **Per book, not per process** (planning item 2026-10-21, shipped 0.1.13). A main text and its references can come from projects with different `markers.ext`. Each [[pantry]] book lexes by the list it was registered with.
+- **Lists key the caches.** The [[chunk-cache]] key holds the list's fingerprint, so equal lists share parses and different lists never do.
+
+Trade-off: installing a process-wide list invalidates every product derived under the old rows, so it belongs at composition, not between edits.
+
+## Composes with
+
+Read by the [[scanner]] (`lex_with`) to resolve `z` lexemes against the [[marker-table]]. `mise::extensions::parse_markers_ext` ([[mise]]) translates a file into the list. Galley's [[pantry]] stores a `Markers` per book.
+
+## Where
+
+- `onion/src/extensions.rs` · `Extensions::new_with`, `Extensions::fingerprint`, `set_extensions`, `marker_idx`
+- `mise/src/extensions.rs` · `ExtensionCategory`, `CustomMarker`, `parse_markers_ext`
+- `onion/tests/extensions_behave.rs`

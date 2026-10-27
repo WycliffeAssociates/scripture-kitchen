@@ -1,0 +1,44 @@
+---
+term: Corpus envelope
+slug: corpus
+aliases: [ONCP, cold load]
+kind: wire
+crate: galley
+files: [galley/src/corpus.rs, onion-wasm/reader.ts.tmpl]
+related: [dish, wire, pantry]
+level: 3
+summary: "A whole project in one ONCP buffer: unchanged dishes framed under caller keys, for the cold door."
+---
+
+## Show me
+
+From `galley/src/corpus.rs`:
+
+```text
+galley::corpus::plate(&[("GEN", gen_dish), ("EXO", exo_dish)])
+
+bytes[0..4]    "ONCP"            magic
+bytes[4..8]    1                 format version
+bytes[8..12]   2                 book count
+bytes[12..16]  0                 reserved
+bytes[16..]    [keyAt, keyLen, dishAt, dishLen] x 2, then the bodies
+```
+
+## Why
+
+- **Frames, never re-encodes.** Each body is exactly what [[plate]] writes for one book, so a project and a single parse decode through one reader.
+- **The key is the caller's.** Onion never parses it; a key that meant something to onion could disagree with the caller.
+- **Parallelism is the caller's.** Parsing is embarrassingly parallel per book: 28.80 ms on 10 threads against 158.38 ms serial for the English Bible.
+
+Open, stated in the file as a TODO: a cold load does not seed the [[pantry]]'s chunk cache or carry per-book checksums, so the work is paid twice. Adding a checksum is a format change (an entry is 16 bytes, an xxh3-128 is 16 more).
+
+Debt: the reader is hand-typed inside `reader.ts.tmpl`, one of two formats not generated ([[wire]]).
+
+## Composes with
+
+Frames [[dish]] buffers. Not yet wired to the [[pantry]].
+
+## Where
+
+- `galley/src/corpus.rs` · `plate`, `FORMAT_VERSION`
+- `onion-wasm/reader.ts.tmpl` · the hand-written decode

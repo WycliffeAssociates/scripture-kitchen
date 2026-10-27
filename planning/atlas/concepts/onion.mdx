@@ -1,0 +1,39 @@
+---
+term: onion
+slug: onion
+aliases: [usfm_onion, the engine crate]
+kind: crate
+crate: onion
+files: [onion/Cargo.toml, onion/src/lib.rs, onion/src/bin/playground.rs, onion/src/bin/codegen.rs]
+related: [onion-engine, mise, ticket, onion-wasm, galley, cst, scanner]
+level: 1
+summary: "The USFM engine crate (usfm_onion): scan, CST, Toc, mask, lint, format, diff, resolve and the exports. No JS, no wasm, no serde in src/."
+---
+
+## Show me
+
+```text
+lex(text) → Vec<Token> → cst::build → Cst
+                       → toc        → Toc
+          mask(source, tokens, cst, Filter) → Mask
+          lint / format_edits / diff / usj / usx / html / Toc::resolve
+          wire::parse → Parsed → wire::plate → Vec<u8>
+```
+
+`cargo run --release --bin playground -- --toc-trace <file>` and friends regenerate the `debug/` dumps; `--bin codegen` regenerates the marker tables, the wire, `reader.ts` and `diagnostics.json`.
+
+## Why
+
+- **One implementation per behaviour.** "Drivers may vary, the engine never forks" (GLOSSARY, "Engine"). Every derivation lives here, computed on demand.
+- **Stateless and lossless.** No caching, no I/O; anything stateful lives in [[galley]] (`galley/src/lib.rs`).
+- **Small dependency set:** `memchr`, `rustc-hash`, `similar` and `unicode-segmentation` for diff, `xxhash-rust` for the dish hash, plus [[mise]] and [[ticket]]. The JSON writers are hand-rolled; serde is a test-only dependency.
+- **Exports are features** (`usj`, `usx`, `html`, default on) so a size-sensitive build drops them.
+
+## Composes with
+
+Depends on [[mise]] and [[ticket]]. Depended on by [[onion-wasm]], [[galley]] and [[sous-cli]]. Never by [[sous-core]]. Primitives inside: [[scanner]], [[token]], [[marker-table]], [[cst]], [[toc]], [[mask]], [[designator]], [[attributes]], [[resolve]], [[chunk]]; passes: [[lint]], [[format]], [[diff]], [[vref]], [[exports]]; boundary: [[plate]], [[dish]].
+
+## Where
+
+- `onion/src/lib.rs` · the module list and re-exports
+- `onion/src/bin/playground.rs`, `onion/src/bin/codegen.rs`

@@ -1,0 +1,49 @@
+---
+term: Dish
+slug: dish
+aliases: [ONWR, parse buffer]
+kind: wire
+crate: onion
+files: [onion/src/wire/schema.rs, onion/src/wire/generated.rs, onion-wasm/reader.ts, onion/tests/wire_roundtrip.rs]
+related: [plate, wire, ticket, token, cst, lint, toc, corpus]
+level: 3
+summary: "One parse as one buffer: an ONWR header, a directory, and ten little-endian sections."
+---
+
+## Show me
+
+The first 32 bytes of the scratch book's dish (`plate` with `toc` and `diagnostics`):
+
+```text
+4f 4e 57 52   "ONWR"        magic
+05 00 00 00   5             format version
+0a 00 00 00   10            section count
+00 00 00 00   0             flags (bit 0 = offsets are UTF-16)
+ff ff ff ff   NONE          declared \usfm version
+7d 00 00 00   125           source length
+10 2a 39 c5 03 f0 40 7b     xxh3-64 of the source bytes
+```
+
+The ten sections, in wire order:
+
+```text
+tokens  nodes  childIds  diagnostics  fixes  edits  fixText  chapters  verses  members
+```
+
+## Why
+
+- **The tree is the product.** `tokens`, `nodes` and `childIds` are the [[cst]] as it lives in Rust. Blocks, lines and note interiors are projections a consumer makes for itself.
+- **Optional sections are empty, not absent.** The directory always lists all ten, so a reader indexes by slot.
+- **`end`, not `len`, on a token.** Every offset field is a plain source offset, so one sorted sweep converts the whole dish to [[utf16]].
+- **The source hash** answers "is this the parse of that text" without holding both (`xxh3Text(text) === dish.sourceHash`).
+- **The declared `\usfm` version always crosses,** because it gates severities before a single finding can be shown.
+
+## Composes with
+
+Written by [[plate]] from the [[token]]s, [[cst]], [[lint]] report and [[toc]]; generated from its declaration by [[ticket]]'s emitters ([[wire]]). Read by `onion-wasm/reader.ts` in [[onion-wasm]] and [[galley-package]], and so by [[sefer]]. Framed many-at-once by the [[corpus]] envelope.
+
+## Where
+
+- `onion/src/wire/schema.rs` · `SECTIONS`, `TOKEN`, `NODE`, `HEADER`, `FORMAT_VERSION`, `MAGIC`
+- `onion/src/wire/generated.rs` · the generated writer
+- `onion-wasm/reader.ts` · `deserialize`, the generated reader

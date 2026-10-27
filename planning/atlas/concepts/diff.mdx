@@ -1,0 +1,47 @@
+---
+term: Diff
+slug: diff
+aliases: [merge, DecisionUnit, DiffSkeleton, text diff]
+kind: concept
+crate: onion
+files: [onion/src/diff.rs, onion/src/edit.rs, onion/tests/diff_laws.rs, planning/items/2026-09-28-0-1-8-diff-sends-what-changed-no-moves.mdx, planning/items/2026-09-28-binary-diff-wire-a-reader-beside-the-json-not-scheduled.mdx]
+related: [toc, edit, mask, cst, plate]
+level: 2
+summary: "Two documents cut into blocks at Toc anchors, aligned by Myers, merged back as a projection over byte ranges."
+---
+
+## Show me
+
+`playground --diff-trace a.usfm b.usfm` (b drops the footnote and changes "spoke." to "spoke loudly."):
+
+```text
+=== diff 125 bytes vs 101 bytes
+=== 5 slots, 5 units: 3 unchanged, 2 modified, 0 added, 0 deleted
+=== 1 replay splices
+
+Modified Shared MRK 1:1    -> MRK 1:1
+Modified Shared MRK 1:2-3  -> MRK 1:2-3
+```
+
+A modified unit's intra-verse runs (`diff.rs` doc), tiling the span:
+
+```text
+\v 1 Jesus \add wept\add*.
+[\v 1 ]Markup [Jesus]Text [ ]Whitespace [\add ]Markup [wept]Text [\add*]Markup [.]Text
+```
+
+## Why
+
+- **Blocks come from the [[toc]].** A block is the bytes between two anchors; nothing is re-derived per token. Myers over 12-byte `Copy` addresses, then coalescing pairs a rebridged verse into one decision. PSA against itself: 2.2 ms (commit 09b76e2).
+- **No moves** (0.1.8). A verse out of order is a deletion where it was and an addition where it is. `diff` sends only changed units unless `unchanged: true`.
+- **Runs are asked for by name.** `"none"`, `"words"` (UAX-29) or `"chars"`; an unknown name rejects. A footnote is its own reading: words never span its edge.
+- **JSON at the wall**, the one structured export. It is a cold, modal-open path, and serde buys back the old editors' camelCase contract. A binary run wire is parked: changed-only JSON for 66 books is 221 KB with no runs and 6.2 MB with words (planning item 2026-09-28).
+
+## Composes with
+
+Reads the [[toc]] per side, and the [[cst]] and the `text` [[mask]] cut only when runs are asked for. Emits [[edit]]s (`to_edits`, `SpliceEdit`) for replay. Contrast with [[plate]]: diff is the exception to "nothing rich crosses".
+
+## Where
+
+- `onion/src/diff.rs` · `diff`, `diff_with_text`, `merge`, `revert`, `to_edits`, `DiffSkeleton`, `DecisionUnit`, `Slot`
+- `onion/tests/diff_laws.rs`, `diff_fixtures.rs`, `diff_run_laws.rs`

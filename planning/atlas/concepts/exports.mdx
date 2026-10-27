@@ -1,0 +1,46 @@
+---
+term: Exports
+slug: exports
+aliases: [USJ, USX, HTML, usj, usx, html]
+kind: concept
+crate: onion
+files: [onion/src/usj.rs, onion/src/usx.rs, onion/src/html.rs, onion/src/export.rs, onion/tests/usj_corpus.rs]
+related: [cst, attributes, marker-table, mask]
+level: 2
+summary: "Three lossy folds of the CST: USJ (JSON), USX (XML) and HTML (a view with every fact in data-*)."
+---
+
+## Show me
+
+The scratch book in [[cst]], run through each fold (trimmed):
+
+```text
+USJ   {"type":"para","marker":"p","content":[{"type":"verse","marker":"v","number":"1","sid":"MRK 1:1"},
+        "Jesus wept.",{"type":"note","marker":"f","caller":"+","content":[{"type":"char","marker":"ft","content":["why"]}]},
+        " Then ",{"type":"verse","marker":"v","number":"2-3","sid":"MRK 1:2-3"},"he ",
+        {"type":"char","marker":"nd","content":["Lord"]}," spoke."]}
+
+USX   <para style="p"><verse number="1" style="v" sid="MRK 1:1" />Jesus wept.<note caller="+" style="f">
+        <char style="ft">why</char></note> Then <verse eid="MRK 1:1" />…
+
+HTML  <div class="usfm-p" data-marker="p" data-usfm-type="para" data-usfm-category="para-body">
+        <sup class="verse-num usfm-lifted usfm-v" … data-sid="MRK 1:1">1</sup>Jesus wept.…
+```
+
+Note `   spoke.` became ` spoke.`: every whitespace run is one space in the export.
+
+## Why
+
+- **This is the lossy view.** The token stream stays byte-identical; attribute order, quote style, content lifted to attributes (`\ca` → `altnumber`, caller → `caller`) and whitespace are thrown away here and nowhere upstream. Damage is lint's answer, so no `unmatched` element is ever emitted.
+- **Oracled where an oracle exists.** USJ matches 187 of 187 validated committee fixtures in `testData`, with 20 excluded, each with a reason (commit b82a2bf). HTML has no reference; it is pinned by a text-identity invariant.
+- **Separate writers, shared reads.** A JSON array's commas and an XML self-closing rewind are different state, so `export.rs` shares only canonicalization, marker spelling and note-peer sets.
+- **Compile-time optional.** Features `usj`, `usx`, `html`, on by default; the wasm package ships all three (~370 KB, ~152 KB gzipped).
+
+## Composes with
+
+Fold the [[cst]], read [[attributes]] for the k/v splat and the [[marker-table]] for categories.
+
+## Where
+
+- `onion/src/usj.rs` · `usj`; `onion/src/usx.rs` · `usx`; `onion/src/html.rs` · `html`; `onion/src/export.rs` · `canonical`, `marker_name`
+- `onion/tests/usj_corpus.rs`, `usx_corpus.rs`, `html_corpus.rs`

@@ -1,0 +1,44 @@
+---
+term: Plate
+slug: plate
+aliases: [plating, Parsed, ArrayBuffer, one call one buffer]
+kind: wire
+crate: onion
+files: [onion/src/wire.rs, onion-wasm/README.md, onion-wasm/src/lib.rs]
+related: [dish, wire, cst, lint, toc, diff, onion-wasm]
+level: 3
+summary: "Turning one Parsed into one little-endian buffer: why the JS wall moves ArrayBuffers, not JSON or objects."
+---
+
+## Show me
+
+```text
+onion::wire::parse(text, opts)   -> Parsed    native callers stop here
+onion::wire::plate(&parsed)      -> Vec<u8>   the dish, for anything crossing
+```
+
+```ts
+const { tree, tokens, diagnostics, toc } = deserialize(parse(text, { diagnostics: true }));
+```
+
+The scratch book in [[cst]] plates to 1,072 bytes with `toc` and `diagnostics` on.
+
+## Why
+
+- **Ship the tree, not projections.** Tokens + CST + diagnostics was 0.64x the bytes and 0.62x the time of the thirteen curated planes `analyze` used to build; three fifths of `analyze` was building and converting planes (commit b781bb9).
+- **One call, several products.** Crossing a typical book cost ~80 µs, which is what forces several products into one call. Statelessness stayed: `parse` returns bytes and retains nothing, so there is nothing to free.
+- **Nothing rich crosses.** Flat `Uint32Array` copies plus a few strings. JS never holds a token object; the generated reader is lazy and decodes a row only when asked.
+- **Copy is free, encode is the cost** (commit 13c3d3b, measured in Node: analyze 1.4–1.5x native).
+
+The exceptions are JSON on cold paths: [[diff]]'s skeleton (old camelCase contract) and [[resolve]]'s answer.
+
+Trade-off: the wire is a format with a version. A shape change bumps `FORMAT_VERSION` (now 5) and every consumer must update its reader.
+
+## Composes with
+
+Reads `Parsed`: the [[token]]s, the [[cst]], an optional [[lint]] report and [[toc]]. Writes the [[dish]]. The galley [[chunk-cache]] builds a `Parsed` with `Parsed::from_parts` from cached chunks and plates it byte-identically.
+
+## Where
+
+- `onion/src/wire.rs` · `parse`, `parse_with`, `plate`, `Parsed`, `Parsed::from_parts`, `ParseOptions`
+- `onion/tests/wire_roundtrip.rs`

@@ -1,0 +1,39 @@
+---
+term: Attributes
+slug: attributes
+aliases: [AttrList, attrs, attribute interpreter]
+kind: primitive
+crate: onion
+files: [onion/src/attributes.rs, onion/tests/attr_corpus.rs, planning/items/2026-10-22-attributes-for-hosts-a-table-in-reader-ts-not-a-di.mdx]
+related: [token, marker-table, lint, exports]
+level: 2
+summary: "The interpreter for an AttrList span: name/value events on demand, Malformed recorded, never repaired."
+---
+
+## Show me
+
+From `onion/src/attributes.rs`, one `AttrList` token per line:
+
+```text
+|x-strong="G2532" x-lemma="καί"  →  x-strong=G2532, x-lemma=καί
+|in                              →  lemma=in              bare → the row's default attribute
+|lemma=grace                     →  lemma=grace
+|lemma="grace                    →  Malformed(UnterminatedQuote)
+|lemma="a", strong="G1"          →  lemma=a, Malformed(BareJunk @ ,)
+|x="a\|b"                        →  x=a\|b                no escapes, passed verbatim
+```
+
+## Why
+
+- **A span, not a container.** The [[token]] keeps the list byte-identical, deformed ones included. Splitting it is an interpreter's job, on demand, with no allocation.
+- **Flag where usfmtc loses data.** On any pair failure usfmtc re-reads the whole interior as the default value; that is a repair. Here a failed pair is `Malformed`, the finding lint wants.
+- **Lazy for hosts too.** Sefer asked for every list's spans as a [[dish]] section (2026-10-22). Declined: an aligned book carries 4 to 8 attributes on nearly every word, so a section costs every parse for a value only a popover reads. `attrs(text, from, to)` stays the way in, and `reader.ts` carries a `MARKER_ATTRIBUTES` table instead.
+- **Cost.** The corpus sweep in `tests/attr_corpus.rs` reads 1.25M lists and 4.35M attributes over 226 books.
+
+## Composes with
+
+Reads one [[token]] span plus the owning row from the [[marker-table]] (`resolve` matches a name against the row). Read by [[lint]]'s attribute rules and the [[exports]]' attribute splat.
+
+## Where
+
+- `onion/src/attributes.rs` · `attrs`, `AttrIter`, `AttrEvent`, `resolve`, `AttrResolution`

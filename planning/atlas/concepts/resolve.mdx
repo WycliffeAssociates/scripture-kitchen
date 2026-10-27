@@ -1,0 +1,50 @@
+---
+term: Resolve
+slug: resolve
+aliases: [Locate, Address, opening, Resolution]
+kind: primitive
+crate: onion
+files: [onion/src/resolve.rs, onion/src/resolve.md, testData/resolve/cases.json, mise/src/address.rs, onion-wasm/src/resolution.rs]
+related: [toc, designator, mise, galley-package, sefer]
+level: 2
+summary: "An address to its place in one text: found, missing or ambiguous, never a silent nearest."
+---
+
+## Show me
+
+From `onion/src/resolve.md`:
+
+```text
+\v 1-2 a b\n\v 3 c          LUK 1:2   → found \v 1-2 .. \v 3, covers LUK 1:1-2
+\v 1,3 a\n\v 4 b            LUK 1:2   → missing verse within chapter 1
+\c 3\n\p a\n\c 3\n\p b\n    LUK 3     → ambiguous [0..10, 10..20]
+\v 3 a                      LUK 1:3a  → found \v 3, covers LUK 1:3, coarser
+\v 1 a\n\s1 A heading\n\p\n\v 2   LUK 1:2 opening at \s1
+```
+
+At the JS wall:
+
+```js
+JSON.parse(resolve(text, { kind: "verses", from: { chapter: 1, verse: 2 }, to: { chapter: 1, verse: 2 } }));
+//   { found: { from, to, opening, covers, coarser } } | { missing, within? } | { ambiguous: [...] }
+```
+
+## Why
+
+- **Every answer from the one text's [[toc]].** Ambiguity is malformed text, said so with every candidate in source order. Sefer's `locate.ts` joined overlapping segments into one span; that is a silent nearest and was not ported (`resolve.md`, "Where this departs").
+- **`opening` is new.** `opening..to` is what a multibuffer clips: it walks back over line openers and headings before the first `\v`. `from..to` is what a check reads.
+- **Cases as data.** `testData/resolve/cases.json` holds the cases as data any language can run (31 at first, commit 4b17b21); `gen_cases.py` reproduces it byte for byte (commit a28a2eb).
+- **The Address type lives in [[mise]]**, so a place in scripture no text owns is not an onion type.
+
+Trade-off: answers are JSON, not a binary wire. One small answer per call, on a cold path. Offsets are bytes unless `utf16` is asked.
+
+## Composes with
+
+Reads the [[toc]] and the source (segment letters, the opening walk), using the [[designator]]'s members. Served by `onion-wasm`'s `resolve` and galley's `Galley.resolve`/`resolveOf` ([[galley-package]]); [[sefer]] is the asker.
+
+## Where
+
+- `onion/src/resolve.rs` · `Toc::resolve`, `Toc::resolve_with`, `Toc::resolve_rows`, `Resolution`
+- `mise/src/address.rs` · `Address`, `Point`
+- `onion-wasm/src/resolution.rs` · the address parser and JSON writer
+- `onion/tests/resolve_cases.rs`

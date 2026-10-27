@@ -1,0 +1,39 @@
+---
+term: sous-core
+slug: sous-core
+aliases: [sous_core]
+kind: crate
+crate: sous-core
+files: [sous-chef/core/Cargo.toml, sous-chef/core/src/lib.rs, sous-chef/charter.md]
+related: [sous-chef, mise, galley, chapter-pass, onion-book, findings-snapshot, words]
+level: 1
+summary: "Sous's count substrate: language-agnostic evidence and judgment over a neutral projected view. Never depends on onion."
+---
+
+## Show me
+
+```rust
+pub type Brigade = (hygiene::HygieneBytes, substrate::Substrate, words::Words);
+```
+
+```text
+ProjectedBook (text, chapters, verses) ─ ChapterPass::map/fold ─→ Aggregate ─ judge ─→ Findings
+```
+
+Dependencies: `memchr`, `rustc-hash`, `xxhash-rust`, and [[mise]]. Nothing else.
+
+## Why
+
+- **Never depends on onion.** It accepts a small neutral borrowed view, not a parse. "Do not add the dependency" (`architecture.md`). A vref corpus can produce the same view.
+- **Owns content evidence only.** Unicode classification, config-free observations, corpus reductions, judging, finding serialization. Not editor positions, persistence, I/O or localization (`charter.md`, "Sous owns content evidence").
+- **No resident caches.** Galley owns reuse; sous-core declares what is safe to reuse (`SCHEMA`, `RETAIN_CHAPTERS`).
+- **Its own reader emitter.** sous-core generates `sous-reader.ts` itself rather than through [[ticket]]; its numbers are generated and its reader typed (`architecture.md` names this as debt).
+
+## Composes with
+
+Depends on [[mise]]. Depended on by [[galley]] and [[sous-cli]]. Defines the [[chapter-pass]] contract and the [[findings-snapshot]]; reads [[onion-book]]s through `ProjectedBook`; splits words by [[words]].
+
+## Where
+
+- `sous-chef/core/src/lib.rs` · `ProjectedBook`, `Brigade`
+- `sous-chef/core/src/bin/gen-unicode.rs`, `sous-chef/core/src/bin/codegen.rs`

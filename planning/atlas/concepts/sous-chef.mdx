@@ -1,0 +1,40 @@
+---
+term: Sous Chef
+slug: sous-chef
+aliases: [Sous, Sous Chef 2, proofreading]
+kind: product
+crate: workspace
+files: [sous-chef/charter.md, sous-chef/evidence.md, sous-chef/rules]
+related: [sous-core, sous-cli, galley, expediter, findings-snapshot, onion-engine]
+level: 0
+summary: "Finds reviewable inconsistencies in scripture from counts alone; reports evidence in plain numbers and leaves the decision to a person."
+---
+
+## Show me
+
+```text
+pattern[0] U+002C ',' placement next=Digit 12/9812 0.12% band 4 · 3/66 books 11 sites usual=Letter 9,700
+length target[0] MRK 1:9 ratio 0.14 z_book -8.72 z_project -6.05
+```
+
+(From `sous-chef/cli/src/main.rs`.)
+
+## Why
+
+The product promise (`charter.md`):
+
+- **Narrow, truthful claims.** "This form occurs 1 of 1,053 times" is valid; "this is wrong" usually is not.
+- **Every verdict shows its numerator, denominator, population and abstention condition.** Unrelated signals are not blended into a confidence number.
+- **Patterns first, sites second.** One review row may expand to every matching span.
+- **Useful on a new language from the first corpus.** No language model, dictionary or trained artifact ships.
+
+Measurements behind each rule are in `sous-chef/evidence.md`; checks are defined in `sous-chef/rules/`.
+
+## Composes with
+
+The [[sous-core]] crate does the counting; [[sous-cli]] and the [[galley-package]] host it. Structure comes from the [[onion-engine]] through [[galley]]; findings leave as the [[findings-snapshot]] built by the [[expediter]].
+
+## Where
+
+- `sous-chef/charter.md` · purpose, ownership, wire contract
+- `sous-chef/evidence.md` · the measurement ledger

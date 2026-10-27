@@ -1,0 +1,48 @@
+---
+term: Findings snapshot
+slug: findings-snapshot
+aliases: [SOUS, FindingsSnapshot, sous-reader, corpus findings buffer, PackedFinding]
+kind: wire
+crate: sous-core
+files: [sous-chef/charter.md, sous-chef/core/src/codec/README.md, sous-chef/core/src/corpus/mod.rs, galley/sous-reader.ts, galley/src/sous/mod.rs]
+related: [expediter, chapter-pass, onion-book, utf16, wire, galley-package, sefer]
+level: 3
+summary: "One complete corpus publication: a SOUS header, a book directory, 16-byte finding records and the pattern table."
+---
+
+## Show me
+
+From `galley/src/sous/mod.rs`:
+
+```text
+publish_onion_findings([OnionInputBook::new("books/mrk.usfm", "\\id MRK\n\\c 1\n\\p\n\\v 1 Jesus \\f + \\ft note\\f* wept.\n")],
+                       &[finding /* projected-book UTF-8: 0..13 over "Jesus  wept.\n" */], …)
+  → SOUS corpus buffer, CoordinateSpace::Utf16
+      directory  MRK  books/mrk.usfm  published_len 50  count 1
+      record     from 21  to 50                        // raw-book UTF-16
+```
+
+The 16-byte record (`charter.md`):
+
+```text
+0..4 from u32 · 4..8 to u32 · 8..10 book_idx u16 · 10 code u8 · 11 flags u8 · 12..14 lane i16 · 14..16 lane i16
+codes: 0 LengthProportionality · 1 Hygiene · 2 Convention · 3 SourceCopy · 4 Presence
+```
+
+## Why
+
+- **A complete snapshot, not patches.** One chapter edit can move a corpus denominator and change findings in an untouched book, so publication replaces the whole snapshot.
+- **Fixed-width from day one.** Not a serialized Rust struct and not an array of JS objects. Each code owns its two `i16` lanes; a `Convention` row names a row of the pattern table instead of repeating its evidence.
+- **Dense code table, no tombstones.** Removing or renumbering a code is a new wire version.
+- **Coordinates are composed in galley.** Sous emits projected-book UTF-8; galley maps it through the [[mask]] and [[utf16]] table to raw-book UTF-16. A range across removed markup publishes its bounding raw range.
+- **Fail closed** on unknown versions, codes, flags or malformed spans.
+
+## Composes with
+
+Written by the [[expediter]] (resident) or `publish_onion_findings` (cold) from [[chapter-pass]] results placed through [[onion-book]]. Read through `sous-reader.ts`, which sous-core's own emitter generates, not [[ticket]] ([[wire]]). [[sefer]] opens it via the [[galley-package]].
+
+## Where
+
+- `sous-chef/core/src/codec/` · per-code lane codecs; `sous-chef/core/src/corpus/` · the envelope, `reader_ts.rs`
+- `galley/src/sous/mod.rs` · `publish_onion_findings`
+- `galley/sous-reader.ts` · `FindingsSnapshot.open`

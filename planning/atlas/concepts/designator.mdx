@@ -1,0 +1,40 @@
+---
+term: Designator
+slug: designator
+aliases: [hull, members, segment, label, verse designator]
+kind: primitive
+crate: onion
+files: [onion/src/designator.rs, GLOSSARY.md]
+related: [scanner, toc, resolve, lint, vref]
+level: 2
+summary: "The interpreter for the payload after \\c and \\v: a hull to sort by, members to say what it covers."
+---
+
+## Show me
+
+Run through `designator::verse` and `designator::members`:
+
+```text
+"12"     → Wellformed { first: 12, last: 12 }   members [12]
+"12a"    → Wellformed { first: 12, last: 12 }   members [12, segment "a"]
+"1,3,5"  → Wellformed { first: 1,  last: 5 }    members [1] [3] [5]       2 and 4 are holes
+"3-1"    → Wellformed { first: 3,  last: 3 }    members [3–1]             kept as written
+"01"     → Malformed                            members []
+"1-"     → Malformed                            members []
+```
+
+## Why
+
+- **Interpreter, not Scanner.** The [[scanner]] emits one `Designator` token and never looks inside. The spec pattern `/[1-9][0-9]*[\p{L}\p{Mn}]*(‏?[\-,][0-9]+[\p{L}\p{Mn}]*)*/` lives here (GLOSSARY, "Designator").
+- **Two readings.** The hull is what a sequence sorts by and a bridge renders as. The members are the truth: `\v 1,3,5` covers 1, 3 and 5. Shipped with labels on the [[toc]] in 0.1.7 (commit 30b4ff2).
+- **Saturate, never wrap.** Numbers clamp at `u32::MAX` so junk stays ordered junk, not a false "out of order".
+- **Lenient Unicode.** A segment character is an ASCII letter or any non-ASCII scalar. Onion ships no general-category table, and crying wolf on an Arabic segment is worse than missing a nicety.
+- **Chapter is digits only.** `\c 12b` is malformed, from the chapter milestone's `sid` pattern. That is the module's one assumption.
+
+## Composes with
+
+Reads one [[token]] span. Read by the [[toc]] (hull and members per row), [[resolve]], [[lint]]'s ordering rules and [[vref]].
+
+## Where
+
+- `onion/src/designator.rs` · `verse`, `chapter`, `members`, `label`, `Designator`, `Member`

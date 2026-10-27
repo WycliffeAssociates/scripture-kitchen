@@ -1,0 +1,52 @@
+---
+term: Mask
+slug: mask
+aliases: [Filter, recipe, projection, verseText, verse text]
+kind: primitive
+crate: onion
+files: [onion/src/mask.rs, onion/tests/mask_oracle.rs, planning/items/2026-09-30-headings-are-not-verse-text.mdx]
+related: [cst, toc, vref, find, mask-map, onion-book, pantry, utf16]
+level: 2
+summary: "Which source bytes survive a Filter, as maximal ranges that double as the offset map back to the document."
+---
+
+## Show me
+
+From `onion/src/mask.rs`:
+
+```text
+source   \v 1 Jesus wept.\f + \ft why\f* Then…
+         ·····Jesus wept.················ Then…      · = dropped
+
+m.ranges          == [5..16, 31..39]
+m.starts          == [0, 11]
+m.text(source)    == "Jesus wept. Then…"
+m.to_source(13)   == 33     past the note, still exact
+m.from_source(20) == None   inside the dropped \f
+```
+
+`playground --mask-trace` on the scratch book in [[cst]]: `verse_text` keeps 45 of 125 bytes in 10 ranges, `structure` keeps 51 in 6.
+
+```text
+verse_text:  "\n\n\nJesus wept. Then\nhe Lord   spoke.\n\nBread.\n"
+structure:   \id MRK  \mt1  \c 1  \p  \v 1  \v 2-3  \s1  \q1 \v 4
+```
+
+## Why
+
+- **Walks the [[cst]], not the tokens.** "Text is not verse text" is a scope fact: the `why` in a footnote dies because the footnote dies, one skipped subtree instead of a stateful guess (`mask.rs` doc).
+- **Public offsets are always source bytes.** Mask space never escapes its maker. A consumer finds something in the projection, calls `to_source`, and files it in document coordinates.
+- **Maximal ranges.** Adjacent survivors merge, so a seam between ranges is always a real gap. One `u32` per range, not per byte. ~5.5 ns/token per recipe; the oracle checked 340.9M source bytes over 226 books x 3 filters (commit 9b1e23e).
+- **Nothing inserted, nothing trimmed.** `\add one\add*two` projects to `onetwo`. The engine will not invent text it cannot point at.
+- **Headings are not verse text** (planning item 2026-09-30). A Titles-and-Sections paragraph's text drops until a `\v` inside it opens a verse; en_ulb puts verses inside `\s5` 208 times in 2CH alone, so removing the subtree would lose them.
+
+Trade-off: character markers drop in `structure`. They wrap words, and words do not port across languages, which is what makes [[overlay]] possible.
+
+## Composes with
+
+Reads the [[cst]], the [[token]] stream and a `Filter` resolved against the [[marker-table]]. Read by [[vref]], [[find]], [[onion-book]] (the Sous projection), the [[pantry]] (retained per target), [[diff]] runs (the `text` cut) and the [[mask-map]] wire. Offsets convert through [[utf16]] at the wall.
+
+## Where
+
+- `onion/src/mask.rs` · `mask`, `Mask`, `Mask::to_source`/`from_source`/`text`, `Filter::verse_text`/`structure`/`text`, `Action`, `TextRule`
+- `onion/tests/mask_oracle.rs`

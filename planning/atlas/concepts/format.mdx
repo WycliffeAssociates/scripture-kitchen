@@ -1,0 +1,43 @@
+---
+term: Format
+slug: format
+aliases: [Formatter, formatEdits, formatEditsIn, FormatOptions]
+kind: concept
+crate: onion
+files: [onion/src/format.rs, onion/tests/format_corpus.rs]
+related: [lint, edit, source, onion-wasm]
+level: 2
+summary: "The opt-in prettifier: lint's formatter fixes plus the Form-channel rows, merged into one transaction of byte edits."
+---
+
+## Show me
+
+`playground --format-trace`, default options, on the scratch book in [[cst]]: 3 edits over 125 bytes.
+
+```text
+before                                   after
+\p                                       \p \v 1 Jesus wept.\f + \ft why\f* Then \v 2-3 he \nd Lord\nd* spoke.
+\v 1 Jesus wept.\f + \ft why\f* Then     \s1 A heading
+\v 2-3 he \nd Lord\nd*   spoke.          \q1 \v 4 Bread.
+\s1 A heading
+\q1 \v 4 Bread.
+```
+
+`verse_breaks: Remove` joins verses onto their paragraph's line; `VerseBreaks::Keep` would keep them.
+
+## Why
+
+- **Edits, not a rewriter.** Format runs [[lint]], keeps the fixes of rows flagged `formatter` plus any named `repairs`, then a second walk evaluates the Form-channel rows. The two sets merge and collide by row order: first writer wins, the loser is not emitted.
+- **The one pass allowed to invent bytes.** It invents whitespace and engine fix strings, never prose. The [[mask]]'s no-normalization law does not bind it.
+- **Scope engine-side, never in JS.** `format_edits_in` runs the same whole-book analysis and filters to a window. An edit straddling the edge is dropped whole; a multi-edit claim (`bridge-empty-verses`) is kept only if all of it is inside (`onion-wasm/README.md`).
+
+Trade-off: scoping to a chapter still pays for the whole book's lint.
+
+## Composes with
+
+Reads [[lint]] and the Form channel over the same rows. Emits [[edit]]s. Crosses as `onion-wasm`'s `Edits` handle with UTF-16 spans ([[onion-wasm]]).
+
+## Where
+
+- `onion/src/format.rs` · `format`, `format_edits`, `format_edits_in`, `FormatOptions`, `VerseBreaks`, `CharBreaks`
+- `onion/tests/format_corpus.rs`
