@@ -7,12 +7,27 @@ crate: galley
 files: [galley/src/overlay.md, galley/src/overlay.rs, galley/tests/overlay.rs]
 related: [cst, mask, lint, edit, onion-book, pantry]
 level: 2
-summary: "A target's paragraph and poetry structure made equal to a source's, as one edit transaction."
+summary: "Copy a source Bible's paragraph and poetry breaks onto a translation that has only verse markers, as edits the translator can accept."
 ---
+
+## The problem
+
+Many translations are drafted as bare verses: verse markers and text, with no paragraph or poetry breaks. A translator wants them laid out like a source Bible, so Genesis 2:23 reads as four lines of poetry. Doing it by hand is slow, and guessing where to break a sentence in another language is impossible to do reliably.
+
+## The solution
+
+We read the source's layout as a list of breaks, each addressed by verse: "a paragraph starts before verse 24", "the second poetry line inside verse 23". Verse numbers mean the same thing in every language, so breaks before a verse land exactly. Breaks inside a verse cannot be placed by word, so we insert them empty after the verse's text, and the translator pastes the words in. We do not guess by text length or proportion. The result is one set of [[edit]]s, offered as a suggestion, never as a problem in the book.
+
+## Trade-offs
+
+- Breaks inside a verse arrive empty; the translator still has to move text into them.
+- Footnotes are not copied across.
+- The source text must be kept loaded in the [[pantry]] (`keepText`).
+- It is not part of publishing; it only runs when asked.
 
 ## Show me
 
-From `galley/src/overlay.md` (GEN 2:21–24):
+From `galley/src/overlay.md` (GEN 2:21–24). The source's six breaks become six inserts in the target:
 
 ```text
 skeleton(source)
@@ -25,18 +40,16 @@ overlay(target, source) → 6 edits, ascending, non-overlapping
   insert "\p\n"   at the target's \v 24
 ```
 
-## Why
+## How it works
 
-- **Address = (verse sid, leading | inside, ordinal)**, plus the marker as a check. "Immediately before `\v 24`" means the same in every language, so leading blocks land exactly. Where a verse's text splits is unknowable across languages, so inside blocks are inserted empty after the verse and the translator pastes into them.
-- **Nothing by proportion or length ratio.**
-- **Notes never cross.** They are not blocks.
-- **Empty blocks fold by onion's own lint** (`Code::EmptyParagraph`), not a second copy of the rule.
+- **Address = (verse sid, leading | inside, ordinal)**, plus the marker as a check.
+- **Empty blocks fold by onion's own [[lint]]** (`Code::EmptyParagraph`), not a second copy of the rule.
 - **Invariant:** apply the edits, re-extract, and the target's skeleton equals the source's with empty blocks folded. `tests/overlay.rs` states the comparison itself so it cannot drift into agreement with the library.
-- **A suggestion, never a finding.** Not on the publication path.
+- Verses are paired through `sous_core::align` over both sides' [[onion-book]]s.
 
 ## Composes with
 
-Reads the [[cst]], [[lint]] report and [[mask]] from the [[pantry]] (the source needs `keepText`). Pairs verses through `sous_core::align` over both sides' [[onion-book]]s. Emits [[edit]]s as onion-wasm's `Edits` class.
+Reads the [[cst]], [[lint]] report and [[mask]] from the [[pantry]]. Pairs verses through `sous_core::align` over both sides' [[onion-book]]s. Emits [[edit]]s as onion-wasm's `Edits` class.
 
 ## Where
 

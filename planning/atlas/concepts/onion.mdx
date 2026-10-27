@@ -7,10 +7,26 @@ crate: onion
 files: [onion/Cargo.toml, onion/src/lib.rs, onion/src/bin/playground.rs, onion/src/bin/codegen.rs]
 related: [onion-engine, mise, ticket, onion-wasm, galley, cst, scanner]
 level: 1
-summary: "The USFM engine crate (usfm_onion): scan, CST, Toc, mask, lint, format, diff, resolve and the exports. No JS, no wasm, no serde in src/."
+summary: "The Rust crate that does all the USFM work: reading the file, building its structure, checking it, formatting, diffing and exporting."
 ---
 
+## The problem
+
+Every question about a USFM file needs one implementation. Where is verse 4? Which codes are invalid? What changed between two drafts? What is the HTML version? If the editor, the CLI and the proofreader each answered differently, users would see contradictions.
+
+## The solution
+
+All of that logic lives in this one crate, written once. It keeps no state and does no file I/O: you hand it text, it hands back answers. Anything that must remember between calls lives in [[galley]]. Keeping the crate free of JavaScript and WebAssembly code means native Rust users pay nothing for the browser build, which lives in [[onion-wasm]].
+
+## Trade-offs
+
+- Stateless means repeated calls redo work unless the caller caches. That is deliberate; [[galley]] caches.
+- JSON writers are hand-rolled, so serde is only a test dependency. That keeps the crate small but means more code to maintain.
+- The exports (USJ, USX, HTML) are optional features, so a size-sensitive build can drop them.
+
 ## Show me
+
+The pipeline, text to answers:
 
 ```text
 lex(text) → Vec<Token> → cst::build → Cst
@@ -22,12 +38,12 @@ lex(text) → Vec<Token> → cst::build → Cst
 
 `cargo run --release --bin playground -- --toc-trace <file>` and friends regenerate the `debug/` dumps; `--bin codegen` regenerates the marker tables, the wire, `reader.ts` and `diagnostics.json`.
 
-## Why
+## How it works
 
 - **One implementation per behaviour.** "Drivers may vary, the engine never forks" (GLOSSARY, "Engine"). Every derivation lives here, computed on demand.
-- **Stateless and lossless.** No caching, no I/O; anything stateful lives in [[galley]] (`galley/src/lib.rs`).
-- **Small dependency set:** `memchr`, `rustc-hash`, `similar` and `unicode-segmentation` for diff, `xxhash-rust` for the dish hash, plus [[mise]] and [[ticket]]. The JSON writers are hand-rolled; serde is a test-only dependency.
-- **Exports are features** (`usj`, `usx`, `html`, default on) so a size-sensitive build drops them.
+- **Stateless and lossless.** No caching, no I/O (`galley/src/lib.rs`).
+- **Small dependency set:** `memchr`, `rustc-hash`, `similar` and `unicode-segmentation` for diff, `xxhash-rust` for the dish hash, plus [[mise]] and [[ticket]].
+- **Exports are features** (`usj`, `usx`, `html`, default on).
 
 ## Composes with
 

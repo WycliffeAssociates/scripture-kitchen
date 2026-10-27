@@ -7,12 +7,29 @@ crate: onion
 files: [onion/src/mask.rs, onion/tests/mask_oracle.rs, planning/items/2026-09-30-headings-are-not-verse-text.mdx]
 related: [cst, toc, vref, find, mask-map, onion-book, pantry, utf16]
 level: 2
-summary: "Which source bytes survive a Filter, as maximal ranges that double as the offset map back to the document."
+summary: "A copy of the book's text with markup and footnotes cut out, where every position still points back to the exact spot in the original file."
 ---
+
+## The problem
+
+Many jobs want only the words a reader would read. A proofreading pass, a search box or a word count should not see `\v`, `\f + \ft why\f*` or a heading. But when they find something, say a doubled word, they must report it at its place in the real file so the editor can jump there. Strip the markup naively and every position after the first footnote is wrong.
+
+## The solution
+
+A mask produces two things: the kept text, and a list of the stretches of the original file it came from. Because the list records where each kept stretch starts in the original, any position in the kept text maps back exactly, however much was cut before it. The obvious alternative, a regex that deletes markup, loses that map. It also has to guess where a footnote ends; the mask asks the parsed tree instead.
+
+What to keep is a named recipe: verse text only, all text (for diffing), or just the chapter and verse skeleton. Search, Sous Chef's counting, diffing and the editor (through the [[mask-map]] wire) all read masks. All of them report positions in the original file.
+
+## Trade-offs
+
+- Nothing is inserted or trimmed. `\add one\add*two` becomes `onetwo`, because the engine will not invent a space it cannot point at.
+- A position inside a cut stretch, such as the middle of a footnote, maps to nothing.
+- Headings are not verse text, so a search over verse text will not find words in a section heading.
+- The structure recipe drops character markers such as `\nd`, since they wrap words that differ between languages.
 
 ## Show me
 
-From `onion/src/mask.rs`:
+The dots are the bytes the mask cut. Two kept stretches; position 13 in the kept text lands on byte 33 of the source.
 
 ```text
 source   \v 1 Jesus wept.\f + \ft why\f* Then…
@@ -32,15 +49,13 @@ verse_text:  "\n\n\nJesus wept. Then\nhe Lord   spoke.\n\nBread.\n"
 structure:   \id MRK  \mt1  \c 1  \p  \v 1  \v 2-3  \s1  \q1 \v 4
 ```
 
-## Why
+## How it works
 
 - **Walks the [[cst]], not the tokens.** "Text is not verse text" is a scope fact: the `why` in a footnote dies because the footnote dies, one skipped subtree instead of a stateful guess (`mask.rs` doc).
 - **Public offsets are always source bytes.** Mask space never escapes its maker. A consumer finds something in the projection, calls `to_source`, and files it in document coordinates.
 - **Maximal ranges.** Adjacent survivors merge, so a seam between ranges is always a real gap. One `u32` per range, not per byte. ~5.5 ns/token per recipe; the oracle checked 340.9M source bytes over 226 books x 3 filters (commit 9b1e23e).
-- **Nothing inserted, nothing trimmed.** `\add one\add*two` projects to `onetwo`. The engine will not invent text it cannot point at.
 - **Headings are not verse text** (planning item 2026-09-30). A Titles-and-Sections paragraph's text drops until a `\v` inside it opens a verse; en_ulb puts verses inside `\s5` 208 times in 2CH alone, so removing the subtree would lose them.
-
-Trade-off: character markers drop in `structure`. They wrap words, and words do not port across languages, which is what makes [[overlay]] possible.
+- **Character markers drop in `structure`.** Words do not port across languages, which is what makes [[overlay]] possible.
 
 ## Composes with
 

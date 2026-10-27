@@ -7,10 +7,26 @@ crate: onion
 files: [onion/src/edit.rs]
 related: [lint, format, diff, overlay, source]
 level: 2
-summary: "The one byte-splice vocabulary: lint fixes, the formatter, diff replay and overlay all propose changes as Edits."
+summary: "One shape for every proposed change to a file: replace these bytes with this text."
 ---
 
+## The problem
+
+Several features want to change a translator's file. A lint check proposes a fix, the formatter tidies spacing, a diff replays changes, and overlay copies paragraph breaks from a source text. The editor has to show and apply all of them. If each feature described its changes differently, the editor would need a separate applier for each.
+
+## The solution
+
+Every feature speaks one shape: an **edit** says "replace the bytes from here to there with this text". The editor applies them all the same way. The obvious alternative is returning a whole new copy of the file. The docs do not record why that was rejected. What the edit shape gives: only the touched bytes change, each change can be shown on its own before it is applied, and a reference applier serves tests and other language bindings.
+
+## Trade-offs
+
+- Positions are byte offsets; the editor counts in UTF-16, so it converts at the boundary ([[utf16]]).
+- A set of edits is only valid against the exact text it was computed from.
+- Two inserts at the same spot are merged into one edit, so an applier working last-to-first still keeps them in order.
+
 ## Show me
+
+The shape, and what overlay returns for one passage (from `galley/src/overlay.md`):
 
 ```text
 Edit { from, to, insert }        replace source[from..to] with insert
@@ -20,13 +36,9 @@ overlay(target, source) → 6 edits, ascending, non-overlapping
   insert "\n\q1" "\n\q2" "\n\q1" "\n\q2"   after verse 23's text   ← one edit, shared position
 ```
 
-(The overlay example is from `galley/src/overlay.md`.)
+## How it works
 
-## Why
-
-`edit.rs`: one shape of "here is a change", three speakers in onion (lint fixes, the formatter, the diff port) and one in galley ([[overlay]]). An editor applies all of them the same way, as byte splices through its UTF-16 shim. `check_edits` validates a set before it is applied; `apply` and `apply_splices` are the reference appliers.
-
-Inserts at one position cross as one edit so an applier that splices last-first still lands them in order.
+`edit.rs`: three speakers in onion (lint fixes, the formatter, the diff port) and one in galley ([[overlay]]). An editor applies all of them as byte splices through its UTF-16 shim. `check_edits` validates a set before it is applied; `apply` and `apply_splices` are the reference appliers.
 
 ## Composes with
 

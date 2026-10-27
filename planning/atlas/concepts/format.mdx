@@ -7,12 +7,26 @@ crate: onion
 files: [onion/src/format.rs, onion/tests/format_corpus.rs]
 related: [lint, edit, source, onion-wasm]
 level: 2
-summary: "The opt-in prettifier: lint's formatter fixes plus the Form-channel rows, merged into one transaction of byte edits."
+summary: "The optional tidy-up button: puts each paragraph and heading marker on its own line, returned as a list of small edits the editor applies at once."
 ---
+
+## The problem
+
+USFM files from different tools and people are laid out differently: verses on their own lines or run together, markers mid-line, odd spacing. A translator may want a tidy, consistent layout, for a whole book or just one chapter. But the words themselves must never change, and double spaces inside a verse are content, not layout.
+
+## The solution
+
+Format is opt-in and returns a list of small edits (insert a line break here, remove a space there) instead of a rewritten file. The edits come from the same rules the checker ([[lint]]) already uses: fixes marked as formatting, plus layout-only rules. The edits apply together as one change. The code does not record why edits were chosen over regenerating the text; what it buys is that only the touched bytes change, and a "format this chapter" button is just the whole-book list filtered to that chapter.
+
+## Trade-offs
+
+- Formatting one chapter still pays for checking the whole book.
+- An edit that crosses the chapter's edge is dropped whole, so a scoped format may leave a seam untidied.
+- It is the one part of the engine allowed to add bytes. It only adds whitespace and fixed engine text, never prose.
 
 ## Show me
 
-`playground --format-trace`, default options, on the scratch book in [[cst]]: 3 edits over 125 bytes.
+`playground --format-trace`, default options, on the scratch book in [[cst]]: 3 edits over 125 bytes. Watch the verses join their paragraph's line:
 
 ```text
 before                                   after
@@ -25,13 +39,11 @@ before                                   after
 
 `verse_breaks: Remove` joins verses onto their paragraph's line; `VerseBreaks::Keep` would keep them.
 
-## Why
+## How it works
 
-- **Edits, not a rewriter.** Format runs [[lint]], keeps the fixes of rows flagged `formatter` plus any named `repairs`, then a second walk evaluates the Form-channel rows. The two sets merge and collide by row order: first writer wins, the loser is not emitted.
-- **The one pass allowed to invent bytes.** It invents whitespace and engine fix strings, never prose. The [[mask]]'s no-normalization law does not bind it.
-- **Scope engine-side, never in JS.** `format_edits_in` runs the same whole-book analysis and filters to a window. An edit straddling the edge is dropped whole; a multi-edit claim (`bridge-empty-verses`) is kept only if all of it is inside (`onion-wasm/README.md`).
-
-Trade-off: scoping to a chapter still pays for the whole book's lint.
+- **Two passes, no duplicated rules.** Format runs [[lint]], keeps the fixes of rows flagged `formatter` plus any named `repairs`, then a second walk evaluates the Form-channel rows (`Severity::Form`, which lint never reaches). The two sets merge and collide by row order: first writer wins, the loser is not emitted.
+- **The [[mask]]'s no-normalization law does not bind it.** It invents whitespace and engine `FixStr`s, never prose.
+- **Scope engine-side, never in JS.** `format_edits_in` filters the whole-book transaction to a window. An edit straddling the edge is dropped whole; a multi-edit claim (`bridge-empty-verses`) is kept only if all of it is inside (`onion-wasm/README.md`).
 
 ## Composes with
 

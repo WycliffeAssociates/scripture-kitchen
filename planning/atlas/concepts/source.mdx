@@ -7,10 +7,26 @@ crate: onion
 files: [GLOSSARY.md, onion/src/token.rs]
 related: [token, scanner, mask, utf16, edit]
 level: 2
-summary: "The exact bytes of one USFM document; every other artifact is an index over them or a derivation."
+summary: "The USFM file exactly as the translator wrote it; everything else in the engine points into it rather than copying it."
 ---
 
+## The problem
+
+A translator's USFM file is the truth. Some files have odd spacing, broken markers or a missing book code. If the engine tidied any of that on the way in, the editor would show different text than the file holds, and every position it reported would be off.
+
+## The solution
+
+We keep the file's bytes exactly as they are and never fix them on load. Everything else (the pieces, the tree, the verse table, search hits) is stored as positions into those bytes, not as copies of text. That makes "save what you loaded" trivially exact. The obvious alternative, normalising on load, would make every offset disagree with the editor. Only the formatter is allowed to propose new bytes, and only whitespace and fixes.
+
+## Trade-offs
+
+- Line endings must be LF. CRLF still parses, but shifts UTF-16 offsets by one per line against an editor and changes every content hash.
+- Broken input is kept as data, so every later step has to cope with it rather than assume clean text.
+- Output formats that cannot hold everything (HTML, USJ, USX, vref) are labelled lossy.
+
 ## Show me
+
+A token is just a start and a length into the file; reading it is a slice.
 
 ```text
 source    \v 1 Jesus wept.
@@ -19,16 +35,13 @@ span      Token { start: 26, len: 3 }   → source[26..29] == "\v "
 
 Spans tile the source. The scratch book in [[cst]] is 125 bytes and its 37 tokens cover 0..125 with no gap.
 
-## Why
+## How it works
 
 GLOSSARY.md, "The material": Source is never normalized and never repaired on ingest. Text is source-backed: reading a token's text is a slice, never a copy of a stored string. An invalid or missing `\id` is kept as data.
 
-Two invariants follow:
-
-- **Lossless invariant.** The token stream is an index over Source, so round trip is identity by construction. HTML, USJ, USX and vref are named as lossy.
+- **Lossless invariant.** The token stream is an index over Source, so round trip is identity by construction.
 - **Refuse, never invent.** Input that cannot be represented is refused with a reason. Only [[format]] may invent bytes, and only whitespace and fix text.
-
-Trade-off: LF is the input contract. CRLF lexes fine but shifts UTF-16 offsets by one per line against an editor, and changes every content hash (`onion-wasm/README.md`, "The contract").
+- **LF contract** (`onion-wasm/README.md`, "The contract").
 
 ## Composes with
 

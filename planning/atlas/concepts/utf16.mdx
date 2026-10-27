@@ -7,12 +7,26 @@ crate: mise
 files: [mise/src/utf16.rs, galley/src/pantry.md, onion/tests/utf16_oracle.rs]
 related: [source, mask, pantry, dish, mise]
 level: 2
-summary: "Byte to UTF-16 offsets: an index that borrows the string, and a table that outlives it."
+summary: "Converts positions between how the engine counts text (bytes) and how JavaScript counts it (UTF-16 units)."
 ---
+
+## The problem
+
+The engine measures positions in bytes of UTF-8. A JavaScript editor measures them in UTF-16 units. In plain English they agree, but in Greek "λόγος" each letter is two bytes and one JavaScript unit, so byte 16 is character 11. Every position sent to the editor must be converted, and books in Hindi or Greek differ from byte counts almost everywhere.
+
+## The solution
+
+Two small lookup structures. The index sits beside the text and records a checkpoint every 256 bytes, then counts the rest quickly. The table is for when the text is about to be thrown away: one bit per byte marks where a JavaScript character starts, plus a running total every 256 bytes. It lets the engine drop a book's text from memory and still convert positions later. Both are built once and reused; an earlier version rebuilt its cursor on every lookup. They live in the shared base crate because both engines need them and neither may depend on the other.
+
+## Trade-offs
+
+- The table costs 14% of the text's size (36 bytes per 256), on every script.
+- The table only answers positions on a character boundary. Every position the cache converts with it already is one.
+- The index borrows the text, so it cannot outlive it; that is what the table is for.
 
 ## Show me
 
-From `mise/src/utf16.rs`:
+A Greek verse: the bytes, then the byte and UTF-16 positions under each character. From `mise/src/utf16.rs`:
 
 ```text
 let ix = utf16_index("\\v 1 λόγος ἦν".as_bytes());
@@ -26,16 +40,12 @@ byte#   0  1  2  3  4  5     7     9     11    13    15 16       19
 utf16#  0  1  2  3  4  5     6     7     8     9     10 11       12
 ```
 
-## Why
-
-The engine counts bytes. A JS editor counts UTF-16 code units. Every offset that crosses to JS converts once.
+## How it works
 
 - **Index: stride 256 + SWAR.** Per-drift-change anchors cost 236% of the source on Devanagari (705 KB for a 292 KB book). Fixed-stride anchors cost 1.6% on every script and build 6–13x faster (commit 68ffdf5, from Will's Hindi IRV question).
-- **Table: one bit per byte.** With the source gone, a set bit marks where a UTF-16 unit starts, plus a `u32` total per 256 bytes: 36 bytes per 256, 14.06%, identical on all eight tier corpora (`pantry.md`). Lets the [[pantry]] drop text it does not keep and still rebase offsets.
-- **One sweep, not one per read.** `to_utf16` once built a fresh cursor per read; ten reads walked the document ten times. Building once cut `analyze::full` on en_ulb from 28.10 ms to 18.51 ms (commit 46ed346).
-- **In [[mise]]** because both engines need the offset types, and neither may depend on the other.
-
-Trade-off: the table answers character-boundary offsets only. Every offset the Pantry rebases is already a boundary.
+- **Table: one bit per byte** plus a `u32` total per 256 bytes: 36 bytes per 256, 14.06%, identical on all eight tier corpora (`pantry.md`). Lets the [[pantry]] drop text it does not keep and still rebase offsets.
+- **One sweep, not one per read.** Building once cut `analyze::full` on en_ulb from 28.10 ms to 18.51 ms (commit 46ed346).
+- **In [[mise]]** so onion and sous-chef share the offset types.
 
 ## Composes with
 

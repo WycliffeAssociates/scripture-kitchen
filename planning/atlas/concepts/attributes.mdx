@@ -7,12 +7,26 @@ crate: onion
 files: [onion/src/attributes.rs, onion/tests/attr_corpus.rs, planning/items/2026-10-22-attributes-for-hosts-a-table-in-reader-ts-not-a-di.mdx]
 related: [token, marker-table, lint, exports]
 level: 2
-summary: "The interpreter for an AttrList span: name/value events on demand, Malformed recorded, never repaired."
+summary: "Reads the name=value pairs attached to a word (like its Greek lemma) only when someone asks, and reports broken ones instead of guessing."
 ---
+
+## The problem
+
+Some USFM words carry extra data after a bar, such as `\w grace|lemma="charis" strong="G5485"\w*`. Aligned translations put four to eight of these on nearly every word. Most code never needs them, but a word popover or a checker does. And people type them wrong: a missing quote, a stray comma.
+
+## The solution
+
+We keep the whole `|...` stretch as one untouched piece of the file, and split it into name/value pairs only when someone asks. Nothing is allocated up front, so a book full of attributes costs the same to open as one with none. When a pair is broken we report it as broken. The obvious alternative, usfmtc's (another USFM parser), is to re-read the whole thing as one default value; that quietly repairs the text and hides the mistake from [[lint]].
+
+## Trade-offs
+
+- Every reader that wants attributes pays to split them again; nothing is cached.
+- Hosts do not get attributes in the main per-keystroke payload. Sefer asked for that and was told no; it calls `attrs` on demand instead.
+- Values are passed verbatim. No escape sequences are decoded, so `x="a\|b"` stays `a\|b`.
 
 ## Show me
 
-From `onion/src/attributes.rs`, one `AttrList` token per line:
+Each line is one attribute list as written, and what the interpreter reads out of it. Note the bare value and the two malformed cases.
 
 ```text
 |x-strong="G2532" x-lemma="καί"  →  x-strong=G2532, x-lemma=καί
@@ -23,11 +37,11 @@ From `onion/src/attributes.rs`, one `AttrList` token per line:
 |x="a\|b"                        →  x=a\|b                no escapes, passed verbatim
 ```
 
-## Why
+## How it works
 
-- **A span, not a container.** The [[token]] keeps the list byte-identical, deformed ones included. Splitting it is an interpreter's job, on demand, with no allocation.
-- **Flag where usfmtc loses data.** On any pair failure usfmtc re-reads the whole interior as the default value; that is a repair. Here a failed pair is `Malformed`, the finding lint wants.
-- **Lazy for hosts too.** Sefer asked for every list's spans as a [[dish]] section (2026-10-22). Declined: an aligned book carries 4 to 8 attributes on nearly every word, so a section costs every parse for a value only a popover reads. `attrs(text, from, to)` stays the way in, and `reader.ts` carries a `MARKER_ATTRIBUTES` table instead.
+- **A span, not a container.** The [[token]] keeps the list byte-identical, deformed ones included. Splitting it is an interpreter's job (GLOSSARY: a pure function from a slice to a payload), on demand, with no allocation.
+- **Malformed, never repaired.** On any pair failure usfmtc re-reads the whole interior as the default value. Here a failed pair is `Malformed`, the finding lint wants.
+- **Lazy for hosts too.** Sefer asked for every list's spans as a [[dish]] section (2026-10-22). Declined: a section costs every parse for a value only a popover reads. `attrs(text, from, to)` stays the way in, and `reader.ts` carries a `MARKER_ATTRIBUTES` table instead.
 - **Cost.** The corpus sweep in `tests/attr_corpus.rs` reads 1.25M lists and 4.35M attributes over 226 books.
 
 ## Composes with

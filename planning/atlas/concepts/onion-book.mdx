@@ -7,12 +7,26 @@ crate: galley
 files: [galley/src/sous/onion_book.rs, sous-chef/core/src/input.rs, galley/src/sous/mod.rs]
 related: [mask, toc, chapter-pass, expediter, sous-core, findings-snapshot]
 level: 2
-summary: "Onion's Mask and Toc presented to sous-core as a neutral ProjectedBook: projected text, chapters, verses, and a way back to raw bytes."
+summary: "The adapter that hands sous-chef a book's plain verse text and verse positions, without sous-chef ever depending on the USFM parser."
 ---
+
+## The problem
+
+sous-chef looks for inconsistencies by counting words and verses. It needs each book as plain verse text, with chapter and verse positions, and a way to point a finding back at the real file. But sous-chef is meant to work without the USFM parser, so it cannot reach into the parser's types. Something has to translate between them.
+
+## The solution
+
+sous-chef defines a small, neutral shape it accepts: a book key, its text, its chapters and its verses (`ProjectedBook`). This adapter builds that shape from the parser's verse-text [[mask]] and its index of chapters and verses (the [[toc]]). It lives in [[galley]], the one crate allowed to depend on both sides. A finding maps back to the file as a list of pieces, not one span, because a finding can cross a removed footnote.
+
+## Trade-offs
+
+- Verses must ascend. A verse out of order is left out of the analysis (it abstains); [[lint]] reports it instead.
+- The adapter keeps the longest ascending run, so one stray verse number drops only that verse, not its neighbours.
+- sous-chef sees only plain text and numbers. It cannot reason about markup.
 
 ## Show me
 
-From `galley/src/sous/onion_book.rs`:
+From `galley/src/sous/onion_book.rs`. The footnote is gone from the text, and `locate` returns two raw pieces around it:
 
 ```text
 OnionBook::parse("\\id MRK\n\\c 1\n\\p\n\\v 1 Jesus \\f + \\ft note\\f* wept.\n")
@@ -28,12 +42,10 @@ Out-of-order verses abstain:
 \v 22 \v 23 \v 42 \v 25 \v 26   →  42 abstains, not 25 and 26
 ```
 
-## Why
+## How it works
 
-- **sous-core never depends on onion.** It takes a neutral borrowed view (`ProjectedBook`: key, text, chapters, verses). Onion stays the USFM authority; Sous sees projected ranges and numeric units (`charter.md`, "Ownership boundaries").
-- **The seam lives in galley**, the one crate allowed to depend on both.
-- **Raw runs, not one span.** A finding can cross removed markup, so one contiguous USFM span would be lossy at exactly the boundary this adapter preserves.
-- **Ascending verses only.** Sous needs them; a patience sort keeps the longest ascending run and onion's [[lint]] reports the rest.
+- **sous-core never depends on onion.** It takes a borrowed `ProjectedBook`. Onion stays the USFM authority; Sous sees projected ranges and numeric units (`charter.md`, "Ownership boundaries").
+- **Ascending verses** come from a patience sort keeping the longest ascending run.
 - **`from_parts` rebuilds from retained products** without lexing again; `locate` walks only the ranges it returns (Sefer ask 11, planning item 2026-10-20).
 
 ## Composes with

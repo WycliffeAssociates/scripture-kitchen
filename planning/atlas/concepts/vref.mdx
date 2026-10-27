@@ -7,12 +7,25 @@ crate: onion
 files: [onion/src/vref.rs, onion/tests/vref_corpus.rs]
 related: [toc, mask, designator]
 level: 2
-summary: "A line per verse, rendered from a Toc and a Mask; bridges keep every later verse on its own line."
+summary: "Write a book as one line per verse, so line N names the same verse in every translation."
 ---
+
+## The problem
+
+Many Bible tools, such as alignment and machine translation, want scripture as one verse per line. Line 1 is Genesis 1:1 in every translation, so two files line up just by line number. A USFM file does not look like that: verses wrap, carry footnotes, and sometimes combine, as in "verses 2-3".
+
+## The solution
+
+We take the book's verse-text [[mask]] (markup and footnotes already removed) and its verse index (the [[toc]]), and print one line per verse. A combined verse puts its text on its first verse's line and writes `<range>` on each verse it covers. Dropping those lines would shift every later verse onto the wrong line. This follows ebible's vref format. The renderer does no filtering of its own; what counts as verse text is decided by the mask passed in.
+
+## Trade-offs
+
+- Newlines and tabs inside a verse become spaces, because a line cannot hold a newline or a column a tab.
+- Verses the book never had get no blank line. That needs a versification table, which onion does not own (planning item 2026-10-14).
 
 ## Show me
 
-`playground --vref` on the scratch book in [[cst]]:
+`playground --vref` on the scratch book in [[cst]]. Verses 2-3 are combined, so verse 3 is `<range>`:
 
 ```text
 MRK 1:1	Jesus wept. Then
@@ -21,11 +34,12 @@ MRK 1:3	<range>
 MRK 1:4	Bread.
 ```
 
-## Why
+## How it works
 
-- **Line N names the same verse in every translation.** That is ebible's shape and the whole point. A bridge puts its text on its first verse and gives each covered verse a `<range>` line; omitting them would slide every later verse onto the wrong line.
-- **No second filter.** Which bytes are verse text was decided by the [[mask]] handed in. The renderer only does what the format demands: a newline or tab becomes one space, byte for byte.
-- **Renders what the file holds.** Blank lines for verses a book never had need a versification table onion does not own (see planning item 2026-10-14, versification layer).
+- **One iterator, many formats.** `verses` is the core; `keys`, `lines` and `joined` are one-liners over it. ebible ships keys and lines as two parallel files keyed by line number.
+- **Swap the mask, change the reading.** `Filter::verse_text()` for plain text; the same with notes set to `Unwrap` folds footnote prose in.
+- **Trim lives here, not in the mask.** A vref line's edges are presentation; a mask offset must keep naming a real document byte.
+- Bridges come from the [[designator]]'s hull.
 
 ## Composes with
 

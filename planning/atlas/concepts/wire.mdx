@@ -7,10 +7,30 @@ crate: workspace
 files: [ticket/src/schema.rs, ticket/src/emit.rs, onion/src/wire/schema.rs, galley/src/toc/schema.rs, galley/src/find/wire/schema.rs, galley/src/mask/schema.rs, agents/architecture.md]
 related: [ticket, dish, census, find-buffer, mask-map, findings-snapshot, corpus, plate]
 level: 3
-summary: "A declared binary format whose Rust writer and TypeScript reader are both generated from one schema, checked in, and pinned by a staleness test."
+summary: "How results cross from the Rust engine to the JavaScript editor: one buffer of numbers, read in place by generated code, instead of copied strings and objects."
 ---
 
+## The problem
+
+The editor, Sefer, runs in a browser and calls the Rust engine through WebAssembly, often on every keystroke. USFM stores one book per file, so each call is about a whole book: up to a few thousand verses and tens of thousands of tokens. Every string or object handed across that boundary must be converted into a JavaScript value, and that conversion is what gets expensive. How do we hand JavaScript a whole parsed book cheaply, and keep both sides agreeing on its shape?
+
+## The solution
+
+Send numbers, not text. A wire is one flat buffer, mostly fixed-size rows of integers. Text is not copied: a row says "bytes 120 to 135 of the file you already have". The few strings that must travel, like book ids, go once into a small table that rows point at. Kinds of things (marker category, lint code) are enum numbers whose names both sides share. Positions are number ranges: "this finding covers bytes 4,100 to 4,180", or "chapter 3, verses 16 to 18".
+
+The alternative is JSON or a JavaScript object per node. That means allocating thousands of objects per keystroke; an early measurement found encoding, not copying, was the cost.
+
+To keep both sides in step, each format is declared once in Rust. Code generation writes the Rust writer and the TypeScript reader from that declaration. A test fails if either is stale, and the reader refuses a buffer from the wrong version.
+
+## Trade-offs
+
+- A wire is a versioned format. Changing a shape bumps the version, and every consumer must take the new reader.
+- The JS side reads through a cursor, not ordinary objects. That is less convenient to debug than JSON.
+- Two formats are still partly hand-written: the [[corpus]] envelope and sous-core's reader.
+
 ## Show me
+
+One declaration, two generated ends. The table lists every wire the engine sends to JavaScript.
 
 ```text
 <format>/schema.rs  RECORDS  ─ ticket::emit::writers_rs     ─→ generated.rs   (Rust writer)
@@ -28,14 +48,14 @@ Every wire and its two ends:
 | [[findings-snapshot]] | `SOUS` | sous-core's own emitter | `galley/sous-reader.ts` |
 | [[corpus]] | `ONCP` | `galley/src/corpus.rs` | by hand, inside `reader.ts.tmpl` |
 
-## Why
+## How it works
 
 - **No mirrors.** Before 0.1.0, `onion-wasm.ts` held 109 hand-mirrored constants (commit b781bb9). Generating both ends from one declaration took that to zero.
 - **A consumer never learns a layout.** Each reader checks magic, version and strides at `open` and throws naming the mismatch, so a reader a version behind fails loudly instead of misreading a field (`architecture.md`).
 - **Little-endian by construction.** A field declares its name, width, whether it is a source offset (`Space::Offset`, converted under `utf16`), and the expression that reaches it. Nothing casts a Rust struct.
+- **Encode is the cost, copy is free.** Measured in Node before the formats were fixed: analyze ran at 1.4–1.5x native (commit 13c3d3b). Crossing a typical book cost ~80 µs, which is why one call returns several products ([[plate]]).
 - **Checked in at both ends.** `codegen_output_matches_input` fails the build when either end is stale.
-
-Debt, named in `architecture.md`: the [[corpus]] envelope and sous-core's reader are still partly typed by hand.
+- **Debt**, named in `architecture.md`: the [[corpus]] envelope and sous-core's reader are still partly typed by hand.
 
 ## Composes with
 

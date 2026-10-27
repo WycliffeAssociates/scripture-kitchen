@@ -7,10 +7,25 @@ crate: ticket
 files: [ticket/README.md, ticket/src/lib.rs, ticket/src/schema.rs, ticket/src/emit.rs, ticket/src/stale.rs]
 related: [wire, dish, census, find-buffer, mask-map, onion, galley, mise]
 level: 1
-summary: "The second zero-dependency leaf: the wire vocabulary and the emitters that write one record's Rust writer and TypeScript reader."
+summary: "A build-time tool crate that writes both halves of every binary format, the Rust writer and the TypeScript reader, from one declaration."
 ---
 
+## The problem
+
+Several answers cross from Rust to JavaScript as packed binary buffers rather than JSON (see [[wire]]). Each buffer needs a Rust writer and a TypeScript reader that agree on every byte. Written by hand, the two sides drift: a field moves on one side and the other reads garbage, silently.
+
+## The solution
+
+Each format declares its fields once, and ticket generates both the Rust writer and the TypeScript reader from that declaration. It is a separate crate so all the formats share one vocabulary and one emitter. It is not in [[mise]], because mise excludes generators. It only runs at build time; nothing in a shipped binary calls it.
+
+## Trade-offs
+
+- Each format still hand-writes its own envelope (header, magic number, version). One grammar for all of them would save about fifty lines and cost a lot of generality.
+- Two formats predate it and are still read partly by hand: the [[findings-snapshot]] and the [[corpus]] envelope.
+
 ## Show me
+
+Three formats, one emitter:
 
 ```text
 onion/src/wire/schema.rs    the dish's declaration    ─┐
@@ -20,12 +35,11 @@ galley/src/find/…/schema.rs find's declaration        ─┘
 
 Vocabulary: `Width`, `Space` (`Offset` converts under UTF-16), `Field`, `Record`, and `Repeat` for a run of sub-rows a row carries the length of (a find hit's source pieces).
 
-## Why
+## How it works
 
 - **No two formats can disagree** about how a field reaches the buffer or where a reader looks for it (`architecture.md`). Extracted in 0.1.1 from onion's dish codegen, which it reproduces byte for byte (commit 07278dc).
-- **Formats keep their envelopes.** Declaration, magic, version, envelope, codegen bin and generated files stay with each format: the dish frames sections, a census frames books, find counts hits. A grammar for all three would be written to save fifty lines (`ticket/README.md`).
-- **Not in [[mise]], on purpose.** mise excludes generators; keeping ticket beside it keeps that rule sharp.
-- **Generator-only.** Nothing on a runtime path calls it; it is dead in a release build. No I/O: every function returns a `String`.
+- **Formats keep their envelopes.** Declaration, magic, version, envelope, codegen bin and generated files stay with each format (`ticket/README.md`).
+- **Generator-only.** No I/O: every function returns a `String`.
 
 ## Composes with
 

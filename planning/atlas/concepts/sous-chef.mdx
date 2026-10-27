@@ -7,10 +7,26 @@ crate: workspace
 files: [sous-chef/charter.md, sous-chef/evidence.md, sous-chef/rules]
 related: [sous-core, sous-cli, galley, expediter, findings-snapshot, onion-engine]
 level: 0
-summary: "Finds reviewable inconsistencies in scripture from counts alone; reports evidence in plain numbers and leaves the decision to a person."
+summary: "Points a translator at spots that look unusual for their own translation, using counts only, and leaves the decision to them."
 ---
 
+## The problem
+
+A translation team proofreading a New Testament wants to catch slips: a comma before a digit where the rest of the book never does that, or a verse far shorter than its neighbours. Many of these languages have no spell-checker, dictionary or grammar model. So the question is: how do you flag likely mistakes in a language no tool has ever seen?
+
+## The solution
+
+Sous Chef learns what this translation usually does by counting, then points at the places that differ. It never says "this is wrong". It says "this happens 12 times out of 9,812", and a person decides. The obvious alternative, a trained language model or dictionary, does not exist for most of these languages, so nothing like that ships. It is a separate product from the USFM engine so it can run on any text source, not only USFM files.
+
+## Trade-offs
+
+- It can only report what is rare, not what is wrong. A rare but correct form still shows up and needs a human to dismiss it.
+- It needs enough text to count. On a tiny corpus it abstains rather than guess.
+- Signals stay separate. You get several plain reasons, never one blended confidence score.
+
 ## Show me
+
+Two findings as the CLI prints them: a rare comma placement, and a verse far shorter than usual.
 
 ```text
 pattern[0] U+002C ',' placement next=Digit 12/9812 0.12% band 4 · 3/66 books 11 sites usual=Letter 9,700
@@ -19,7 +35,7 @@ length target[0] MRK 1:9 ratio 0.14 z_book -8.72 z_project -6.05
 
 (From `sous-chef/cli/src/main.rs`.)
 
-## Why
+## How it works
 
 The product promise (`charter.md`):
 
@@ -27,6 +43,7 @@ The product promise (`charter.md`):
 - **Every verdict shows its numerator, denominator, population and abstention condition.** Unrelated signals are not blended into a confidence number.
 - **Patterns first, sites second.** One review row may expand to every matching span.
 - **Useful on a new language from the first corpus.** No language model, dictionary or trained artifact ships.
+- **Structure comes from Onion.** Sous does not parse USFM; it reads a neutral projection [[galley]] builds.
 
 Measurements behind each rule are in `sous-chef/evidence.md`; checks are defined in `sous-chef/rules/`.
 

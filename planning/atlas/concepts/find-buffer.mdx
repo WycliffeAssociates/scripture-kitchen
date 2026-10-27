@@ -7,12 +7,26 @@ crate: galley
 files: [galley/src/find/wire/schema.rs, galley/src/find/wire/mod.rs, galley/find-reader.ts, galley/src/wasm.md]
 related: [find, wire, ticket, mask-map, galley-package, sefer]
 level: 3
-summary: "Search hits as one FIND buffer in UTF-16: both coordinate spaces per hit, ids and previews in a string table."
+summary: "Search results for a whole project in one buffer: for each hit, where to highlight it, where an edit lands in the file, and a preview line."
 ---
+
+## The problem
+
+A translator searches the project for "God". The editor needs a results list with a line of context, a highlight for each hit, and, for a replace, the exact spot in the file to change. The search runs over the readable text with markup and footnotes removed. So a word's position in what was searched is not its position in the file. A hit that spans a removed footnote is even split into pieces in the file.
+
+## The solution
+
+All hits come back in one buffer of numbers. Each hit carries both positions: where it sits in the searched text, for highlighting, and the file ranges it covers, one per piece, for editing. Book names and preview lines go in a small string table, so each string crosses once. The browser and the desktop app share one encoder, so their results cannot drift apart. The obvious alternative, an array of JavaScript hit objects, would copy a string per hit and lose the file-side positions.
+
+## Trade-offs
+
+- The preview is display text only. The cleaned text is thrown away after the search, so it rides in the buffer rather than being rebuilt.
+- A hit's piece list varies in length. It is the one shape fixed-size rows cannot hold, so the wire vocabulary gained a `Repeat` for it.
+- Offsets are UTF-16, the way JavaScript counts, so native callers convert if they want bytes.
 
 ## Show me
 
-From `galley/src/wasm.md`:
+How Sefer walks the hits; note the two kinds of position per hit. From `galley/src/wasm.md`:
 
 ```js
 const hits = Hits.open(galley.findAll("God", { wholeWord: true, limit: 200 }));
@@ -30,13 +44,12 @@ u32   magic     0x444E4946 — "FIND"
 u32   version   1
 ```
 
-## Why
+## How it works
 
-- **Two coordinate spaces.** Projected offsets are what a highlighter wants; source pieces are where an edit lands. A hit across a dropped footnote comes back as one source range per piece ([[find]]).
-- **One encoder, two doors.** The browser's `find`/`findAll` and the desktop's native `Expediter::find` both call `find::wire::encode`, so they cannot drift.
+- **Two coordinate spaces.** Projected offsets are mask space ([[mask]]); source pieces are document bytes converted to UTF-16 ([[find]]).
+- **One encoder, two doors.** The browser's `find`/`findAll` and the desktop's native `Expediter::find` both call `find::wire::encode`.
 - **The id table names every book searched**, matched or not, so a hit cannot be misattributed if the corpus changed between calls.
-- **The preview rides in the buffer** because the projection is dropped after the search; recomputing it would mean masking the book again. Display text only.
-- **Repeat for pieces.** A hit's source pieces are the one shape a fixed stride cannot hold; `ticket`'s `Repeat` exists for it.
+- **`Repeat` for pieces** in [[ticket]].
 
 ## Composes with
 

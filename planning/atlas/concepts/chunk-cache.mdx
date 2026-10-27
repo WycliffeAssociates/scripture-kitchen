@@ -7,12 +7,26 @@ crate: galley
 files: [galley/src/pantry/chunks.rs, galley/src/pantry.md, galley/src/pantry/budget.rs, galley/tests/chunks.rs]
 related: [chunk, pantry, plate, cst, lint, extensions]
 level: 2
-summary: "Per-chapter CST, tokens and local lint kept by content hash, so an unchanged chapter is never re-lexed; the one store the byte ceiling bites."
+summary: "A memory of already-parsed chapters, looked up by their exact text, so typing in one chapter does not re-parse the rest of the book."
 ---
+
+## The problem
+
+The editor asks for a fresh parse of the whole book on every keystroke. Most of the book has not changed: typing in Mark 4 leaves the other 15 chapters exactly as they were. Re-parsing them each time is wasted work. But a cache in the browser is risky: WebAssembly memory can grow and never shrinks, and a cache that serves a stale answer is worse than none.
+
+## The solution
+
+Keep each chapter's parse results keyed by a hash of the chapter's text, not by its position. Same text, same answer, wherever the chapter now sits. A changed chapter simply misses, so nothing ever needs to be "invalidated". The key also includes the custom-marker list and the two book-level facts a chapter depends on (see [[chunk]]). The obvious alternative, tracking which chapters an edit touched, is easy to get wrong; a content key cannot serve a wrong answer. A byte ceiling with least-recently-used eviction keeps memory bounded.
+
+## Trade-offs
+
+- Every lookup hashes the chapter's bytes, even on a hit.
+- Books of two chapters or fewer skip the cache: a cached parse measured 1.02–1.14x the cost of a fresh one there, so caching only cost memory.
+- It is the only store the memory ceiling evicts today, so under pressure this is what gets slower.
 
 ## Show me
 
-From `galley/src/pantry/chunks.rs` and `pantry.md`:
+What one entry holds, and the counters a host can read, from `galley/src/pantry/chunks.rs` and `pantry.md`:
 
 ```text
 chunks.parse(text, opts)  ->  the same bytes onion::wire::parse would plate,
@@ -24,13 +38,13 @@ value = Products { cst, tokens (chunk-relative), local LintReport, Carried, byte
 pantry.chunk_stats() -> ChunkStats { misses, hits, evictions, len, resident_bytes }
 ```
 
-## Why
+## How it works
 
-- **Content, not position.** Reordering chapters, undoing an edit or reopening a book all hit; a changed chapter misses. A stale entry cannot be served, only missed, so nothing is ever invalidated.
-- **The key names everything the value depends on.** The bytes lex differently under two [[extensions]] lists, and chunk 0's `\usfm` version and is-scripture bit gate local lint rules ([[chunk]]). Omitting either would be a correctness bug, not a performance one (`pantry.md`, "This is the law").
+- **Content, not position.** Reordering chapters, undoing an edit or reopening a book all hit.
+- **The key names everything the value depends on.** The bytes lex differently under two [[extensions]] lists, and chunk 0's `\usfm` version and is-scripture bit gate local lint rules. Omitting either would be a correctness bug, not a performance one (`pantry.md`, "This is the law").
 - **Byte-identical output.** The assembled dish equals a cold [[plate]] (`galley/tests/chunks.rs`, `the_folded_dish_is_byte_identical_to_a_cold_one`), and lint equals a fresh walk cold, warm, edited, fused, evicted and undone.
-- **Small books bypass.** At two chunks or fewer an entry can only serve front matter. On en_ulb's five two-chunk books a cached parse was 1.02–1.14x fresh, while fifty keystrokes in Jude would leave 52 entries and 74 KB.
-- **A ceiling is what makes it safe.** wasm memory grows and never shrinks, so a high-water mark is permanent. A hand-rolled LRU evicts by last-touched tick; at dozens to hundreds of entries a linear scan is enough.
+- **Small books bypass** (`UNCACHED_CHUNKS = 2`). On en_ulb's five two-chunk books, fifty keystrokes in Jude would otherwise leave 52 entries and 74 KB.
+- **A ceiling makes it safe.** A wasm high-water mark is permanent. A hand-rolled LRU evicts by last-touched tick; at dozens to hundreds of entries a linear scan is enough.
 - **Dirty seams are remembered** as `OpenBoundary`, so repeat calls widen to the fused unit without re-lexing.
 
 Name: this was the **Warmer** until commit a7c21d2 (2026-09-07) folded it into the [[pantry]] as `ChunkStore`. Test locals and `galley/examples/working_set.rs` still say `warmer`.

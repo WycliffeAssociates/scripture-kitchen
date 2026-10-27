@@ -7,12 +7,26 @@ crate: onion
 files: [onion/src/designator.rs, GLOSSARY.md]
 related: [scanner, toc, resolve, lint, vref]
 level: 2
-summary: "The interpreter for the payload after \\c and \\v: a hull to sort by, members to say what it covers."
+summary: "Reads the number after a chapter or verse marker, like 12, 12a, 3-5 or 1,3,5, into what it sorts by and which verses it really covers."
 ---
+
+## The problem
+
+A verse number is not always a number. Translators write `\v 12a` for half a verse, `\v 3-5` for verses merged into one, and sometimes `\v 1,3,5`. Code needs two answers from that text: where does it sort, and which verses does it actually contain? And typos like `\v 01` or `\v 1-` must be noticed, not guessed at.
+
+## The solution
+
+One small function reads the text after `\c` or `\v` and gives both answers. The "hull" is the first and last verse, for sorting and display. The "members" are the exact list: `1,3,5` covers 1, 3 and 5, not 2 or 4. The code that cuts the file into pieces never looks inside the number; this function does, only when asked. That keeps the cutting step fast and lets anyone parse a verse label from any string.
+
+## Trade-offs
+
+- Numbers cap at about 4 billion and clamp there, so garbage stays sorted as garbage instead of wrapping around.
+- Any non-ASCII character counts as a valid segment letter. We ship no Unicode category table, so we accept a little too much rather than flag a correct Arabic segment.
+- Chapters are digits only: `\c 12b` is malformed.
 
 ## Show me
 
-Run through `designator::verse` and `designator::members`:
+Each designator as written, its hull, and its members. Watch `1,3,5` (holes at 2 and 4) and `3-1` (kept as written).
 
 ```text
 "12"     → Wellformed { first: 12, last: 12 }   members [12]
@@ -23,13 +37,13 @@ Run through `designator::verse` and `designator::members`:
 "1-"     → Malformed                            members []
 ```
 
-## Why
+## How it works
 
 - **Interpreter, not Scanner.** The [[scanner]] emits one `Designator` token and never looks inside. The spec pattern `/[1-9][0-9]*[\p{L}\p{Mn}]*(‏?[\-,][0-9]+[\p{L}\p{Mn}]*)*/` lives here (GLOSSARY, "Designator").
-- **Two readings.** The hull is what a sequence sorts by and a bridge renders as. The members are the truth: `\v 1,3,5` covers 1, 3 and 5. Shipped with labels on the [[toc]] in 0.1.7 (commit 30b4ff2).
-- **Saturate, never wrap.** Numbers clamp at `u32::MAX` so junk stays ordered junk, not a false "out of order".
-- **Lenient Unicode.** A segment character is an ASCII letter or any non-ASCII scalar. Onion ships no general-category table, and crying wolf on an Arabic segment is worse than missing a nicety.
-- **Chapter is digits only.** `\c 12b` is malformed, from the chapter milestone's `sid` pattern. That is the module's one assumption.
+- **Two readings.** The hull is what a sequence sorts by and a bridge renders as. The members are the truth. Shipped with labels on the [[toc]] in 0.1.7 (commit 30b4ff2).
+- **Saturate, never wrap.** Numbers clamp at `u32::MAX`, so junk is not a false "out of order".
+- **Lenient Unicode.** A segment character is an ASCII letter or any non-ASCII scalar. Crying wolf on an Arabic segment is worse than missing a nicety.
+- **Chapter is digits only**, from the chapter milestone's `sid` pattern. That is the module's one assumption.
 
 ## Composes with
 

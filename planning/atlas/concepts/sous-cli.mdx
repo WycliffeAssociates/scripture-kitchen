@@ -7,27 +7,38 @@ crate: sous-cli
 files: [sous-chef/cli/Cargo.toml, sous-chef/cli/src/main.rs]
 related: [sous-chef, sous-core, galley, onion]
 level: 1
-summary: "The first walking consumer of Sous: filesystem discovery and Onion adaptation around sous-core, with a debug view of findings."
+summary: "A command-line tool that runs the proofreader over USFM files on disk and prints or saves what it finds."
 ---
+
+## The problem
+
+Developers and testers need to run the proofreader on a folder of USFM books without opening an editor. Someone has to find the files, parse them, feed them to the proofreader and print the results. None of that belongs in the counting engine itself.
+
+## The solution
+
+sous-cli is that glue, and nothing more. It reads files from disk, uses the USFM engine to parse them, and passes them to [[sous-core]] through [[galley]]'s publication code. It can be a separate crate because it only calls the others; no other crate depends on it. Its output is a debug view while the findings format settles.
+
+## Trade-offs
+
+- Its printed output is for debugging, not a stable interface.
+- The file-loading and adaptation code lives here alone. The charter says to pull it into a shared crate only when a second consumer needs it.
 
 ## Show me
 
-From `sous-chef/cli/src/main.rs`:
+One run, printing two findings and saving a snapshot. From `sous-chef/cli/src/main.rs`:
 
 ```text
 sous --findings --source source.usfm --publish out.sous --report sites.html book.usfm
   finding target[0] MRK 1:1-1:1 C0Control 11..14 run 3 raw [46..49]
   length target[0] MRK 1:9 ratio 0.14 z_book -8.72 z_project -6.05
   pattern[0] U+002C ',' placement next=Digit 12/9812 0.12% band 4 · 3/66 books 11 sites usual=Letter 9,700
-  published 2 findings for 1 books (SOUS v2, UTF-16) to out.sous
+  published 2 findings for 1 books (SOUS v3, UTF-16) to out.sous
 ```
 
-## Why
+## How it works
 
-- **An adapter, not an engine.** The CLI owns file discovery and Onion adaptation; core owns validation, alignment and the scans; galley owns UTF-16 publication (`main.rs` doc). The charter calls it the first host adapter and says to extract a shared adapter crate only when a second consumer needs it.
-- **Output is a debug view** while the finding contract freezes.
-
-Doc gap: `architecture.md` says sous-cli "depends on both only to call them"; its `Cargo.toml` depends on three: [[sous-core]], [[galley]] and [[onion]] (default features off).
+- **An adapter, not an engine.** The CLI owns file discovery and Onion adaptation; core owns validation, alignment and the scans; galley owns UTF-16 publication (`main.rs` doc). The charter calls it the first host adapter.
+- **Depends on three crates**, only to call them: [[sous-core]], [[galley]] (the stateless `galley::sous` publication seam) and [[onion]] (default features off) (`architecture.md`).
 
 ## Composes with
 

@@ -7,10 +7,25 @@ crate: workspace
 files: [galley/src/wasm.md, onion/src/resolve.md, planning/roadmap.mdx]
 related: [galley-package, resolve, census, findings-snapshot, find-buffer, mask-map]
 level: 0
-summary: "The scripture editor host, in a separate repo, that vendors galley's wasm package and asks for the doors."
+summary: "The scripture editor translators type in; it lives in its own repo and calls this workspace's WebAssembly package for every answer about the text."
 ---
 
+## The problem
+
+Translators edit USFM books in Sefer, a browser-based editor. As they type, it must show the outline, jump to a verse, highlight errors, search and surface proofreading findings. It needs those answers on every keystroke, from code that understands scripture structure. Writing that logic in the editor itself would duplicate the engine.
+
+## The solution
+
+Sefer does no scripture parsing of its own. It loads the [[galley-package]] and asks it questions, like "where is Luke 1:2?" Positions come back in UTF-16 code units, the unit JavaScript strings and the editor use, so no conversion happens on Sefer's side. Much of this workspace's shape comes from Sefer's numbered requests, which appear in commits and planning items.
+
+## Trade-offs
+
+- Every new feature Sefer needs must land in the galley package, the only build it loads, not just in the engine.
+- Sefer's own code is in another repo. This atlas does not document its internals.
+
 ## Show me
+
+Sefer asking where a verse is:
 
 ```js
 const verse = { kind: "verses", from: { chapter: 1, verse: 2 }, to: { chapter: 1, verse: 2 } };
@@ -20,13 +35,11 @@ JSON.parse(galley.resolve("books/LUK.usfm", verse, { utf16: true }));
 
 `address` is Sefer's `Address` (`book`, `intro`, `chapters`, `verses`) (`galley/src/wasm.md`).
 
-## Why
+## How it works
 
-Sefer is the consumer most kitchen work is shaped by. Its numbered asks appear in commits and planning items: resolve (asks 12, 14), `OnionBook::locate` cost (11), `LetterRun` (13), stable diagnostic identity (15). Its `locate.ts` was the reference [[resolve]] ported, with the departures listed in `resolve.md`.
+Sefer's numbered asks appear in commits and planning items: resolve (asks 12, 14), `OnionBook::locate` cost (11), `LetterRun` (13), stable diagnostic identity (15). Its `locate.ts` was the reference [[resolve]] ported, with the departures listed in `resolve.md`.
 
-It vendors the [[galley-package]], the superset module that carries every onion door beside the `Galley` handle (`galley/README.md`), so a new door must land on galley. Offsets at the wall are UTF-16 code units, the editor's unit.
-
-Sefer's own repo is outside this workspace; its internals are not documented here.
+It vendors the [[galley-package]], the superset module that carries every onion door beside the `Galley` handle (`galley/README.md`), so a new door must land on galley. Offsets at the wall are UTF-16 code units ([[utf16]]).
 
 ## Composes with
 

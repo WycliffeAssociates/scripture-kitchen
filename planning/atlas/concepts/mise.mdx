@@ -7,10 +7,25 @@ crate: mise
 files: [mise/README.md, mise/src/lib.rs, mise/Cargo.toml]
 related: [onion, sous-core, galley, onion-wasm, utf16, words, extensions, resolve]
 level: 1
-summary: "The zero-dependency leaf both engines share: spec tables, borrow-free structures and versioned text rules."
+summary: "A tiny shared crate with no dependencies, holding the facts both engines need: the list of Bible books, text-position types and the word-splitting rule."
 ---
 
+## The problem
+
+The USFM engine and the proofreader both need the same basic facts. What are the 66+ book codes and their order? How do you convert a byte position to a JavaScript string position? Where does one word end? But the proofreader must never depend on the USFM engine. So where do the shared facts live?
+
+## The solution
+
+They live in mise, a small crate that depends on nothing. Both engines depend on it, and neither depends on the other. The alternative, copying the facts into each engine, would let them drift apart. Mise has a strict scope rule so it does not grow into a junk drawer: only things more than one crate needs, and only fixed tables, plain data structures and versioned text rules.
+
+## Trade-offs
+
+- No dependencies at all, so anything needing a hash map or file I/O stays out. The Unicode table lives here, but its generator stays in [[sous-core]].
+- Holding the bytes is not owning the meaning. Onion still decides canonical order as a rule; Sous decides what a book key means to a corpus.
+
 ## Show me
+
+What is in it:
 
 ```text
 mise/src/books.rs        BOOK_CODES in spec order, BookKey, canonical_rank
@@ -21,11 +36,10 @@ mise/src/extensions.rs   ExtensionCategory, CustomMarker, parse_markers_ext
 mise/src/address.rs      Address, Point: a place in scripture no text owns
 ```
 
-## Why
+## How it works
 
-- **The boundary needs a leaf.** onion and sous-core must share `BookKey` and the UTF-16 offset types without either depending on the other (`charter.md`). mise depends on nothing.
-- **Scope rule** (`mise/README.md`): only things more than one crate needs, and only of three kinds: standard-derived tables, borrow-free structures, versioned text rules. No I/O, no policy, no checksums, no engine logic, no dependencies.
-- **Owning bytes is not owning semantics.** Onion still owns canonical order as a rule; Sous still owns what a book key means to a corpus.
+- **The boundary needs a leaf.** onion and sous-core must share `BookKey` and the UTF-16 offset types without either depending on the other (`charter.md`).
+- **Scope rule** (`mise/README.md`): standard-derived tables, borrow-free structures, versioned text rules. No I/O, no policy, no checksums, no engine logic, no dependencies.
 - **A generated table may live here while its generator does not.** `bin/gen-unicode` needs a hash map and the UCD extracts, so it stays in sous-core and writes across.
 
 ## Composes with

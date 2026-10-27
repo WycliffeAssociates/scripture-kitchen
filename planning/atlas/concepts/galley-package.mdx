@@ -7,12 +7,26 @@ crate: galley
 files: [galley/README.md, galley/src/wasm.md, galley/package.json, package.json, package-root.mjs, galley/tests/sous_conformance.mjs]
 related: [galley, onion-wasm, sefer, pantry, expediter, census, find-buffer, mask-map, findings-snapshot, dish]
 level: 0
-summary: "The JS package a host installs: the resident Galley handle plus every onion door, in one wasm module."
+summary: "The one JavaScript package an app installs to get both the USFM engine and the proofreader, compiled to WebAssembly."
 ---
+
+## The problem
+
+A web app like the [[sefer]] editor wants to parse scripture, search it and proofread it, all inside the browser. Rust code runs there only as WebAssembly (a compiled binary module the browser loads). Shipping two modules, one per engine, would load two copies of the shared code and let their versions drift apart.
+
+## The solution
+
+One WebAssembly module carries everything: the `Galley` object that keeps books in memory across calls, and every stateless engine function besides. An app installs it from a git tag and loads one file. Most functions come in two forms. One takes a book id the app already loaded, so only the id crosses into WebAssembly. The other takes raw text. The small TypeScript readers for each binary answer ship beside the module, so they always match its version.
+
+## Trade-offs
+
+- Everything rides in one binary. The engine functions alone add 202 KB to the `.wasm`, even for an app that only wants the proofreader.
+- It is not on npm. npm cannot install a subdirectory of a repo, so a generated root `package.json` points into `galley/`, and CI checks it.
+- A function only ships if something in the module references it, so a test pins the exact export list.
 
 ## Show me
 
-From `galley/src/wasm.md`:
+A typical session: load a book, read its outline, publish proofreading findings, search. From `galley/src/wasm.md`:
 
 ```js
 import { Galley } from "usfm-galley";
@@ -33,12 +47,12 @@ exports (26): Edits Fingerprint FormatOpts Galley SousSettings Splices attrResol
               locate mask merge mergeSplices parse resolve setCustomMarkers toByte toUtf16 xxh3 xxh3Text
 ```
 
-## Why
+## How it works
 
 - **The superset, one module.** A host vendoring one wasm gets both engines. The onion doors cost 202 KB of `.wasm` (744,333 → 946,665 bytes).
-- **Two doors per product: by id or by text.** Id doors run off the [[pantry]]'s retained copy, so nothing crosses but the id. Text doors serve loose text off the same content-addressed chunks.
+- **Two doors per product: by id or by text.** Id doors run off the [[pantry]]'s retained copy. Text doors serve loose text off the same content-addressed chunks.
 - **Readers are subpaths.** `./toc-reader`, `./find-reader`, `./mask-reader`, `./sous-reader` ship beside the binary so they version with it.
-- **Installed from a git tag.** npm cannot install a subdirectory, so the repo-root `package.json` is derived by `node package-root.mjs` and CI diffs it.
+- **Installed from a git tag.** The repo-root `package.json` is derived by `node package-root.mjs` and CI diffs it.
 - **Byte-identical to native.** Three tests pin one set of publication goldens across Rust, wasm and Node.
 
 ## Composes with

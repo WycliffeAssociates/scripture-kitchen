@@ -7,10 +7,26 @@ crate: workspace
 files: [README.md, onion/src/lib.rs, onion-wasm/README.md, GLOSSARY.md]
 related: [onion, onion-wasm, galley-package, cst, sous-chef]
 level: 0
-summary: "The USFM engine: lossless scan, CST, lint, format, diff, resolve and the USJ/USX/HTML exports, in Rust with a JS doorway."
+summary: "Reads a scripture file exactly as written and answers questions about it: where the verses are, what is malformed, how to reformat or export it."
 ---
 
+## The problem
+
+Bible translators keep their work in USFM: plain-text files, one book per file, with backslash codes like `\v 3` for verse 3 and `\f` for a footnote. Every tool that touches those files needs the same answers. Where does chapter 2 start? Is this code valid? What is the text without the footnotes? An editor, a proofreader and an export script should not each guess differently.
+
+## The solution
+
+One Rust engine answers all of those questions, and every host calls it instead of writing its own parser. It never changes or normalizes the file: everything it reports points back at the exact bytes the translator typed. It keeps no memory between calls; text goes in, numbers and strings come out. Native Rust programs use the [[onion]] crate directly, and JavaScript gets the same engine compiled to WebAssembly through [[onion-wasm]] or the [[galley-package]].
+
+## Trade-offs
+
+- Being stateless means each call re-reads the text it is given. Keeping work between calls is [[galley]]'s job, not the engine's.
+- Because it never rewrites the source, every fix comes back as an edit for the host to apply, not as a new file.
+- It knows USFM 3.2 only; other scripture formats arrive as exports (USJ, USX, HTML), not as inputs.
+
 ## Show me
+
+How a Rust project and a JS project each pull it in:
 
 ```toml
 usfm_onion = { git = "https://github.com/WycliffeAssociates/scripture-kitchen", tag = "v0.1.0" }
@@ -21,12 +37,12 @@ import { parse } from "onion-wasm";
 const { tree, tokens, diagnostics, toc } = deserialize(parse(text, { diagnostics: true, toc: true }));
 ```
 
-## Why
+## How it works
 
 - **Source is the truth.** Every product is an index over or a derivation from the exact bytes ([[source]]); round trip is identity by construction.
-- **One engine, many drivers.** Native Rust callers use [[onion]]; JS uses [[onion-wasm]] or the [[galley-package]]. The engine never forks per host (GLOSSARY, "Engine").
-- **Stateless.** Text in, numbers and strings out. A stateful handle was ruled out until a profiler shows the per-call index build matters (`onion-wasm/README.md`, "Deliberately absent").
-- **Owns scripture structure for Sous** too: parsing, marker validity, canonical order, masks, verse anchors (`charter.md`).
+- **One engine, many drivers.** The engine never forks per host (GLOSSARY, "Engine").
+- **Stateless.** A stateful handle was ruled out until a profiler shows the per-call index build matters (`onion-wasm/README.md`, "Deliberately absent").
+- **Owns scripture structure for Sous** too: parsing, marker validity, canonical order, masks, verse anchors (`charter.md`). Sous does not grow a second USFM parser.
 
 ## Composes with
 

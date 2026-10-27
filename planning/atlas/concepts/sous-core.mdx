@@ -7,10 +7,26 @@ crate: sous-core
 files: [sous-chef/core/Cargo.toml, sous-chef/core/src/lib.rs, sous-chef/charter.md]
 related: [sous-chef, mise, galley, chapter-pass, onion-book, findings-snapshot, words]
 level: 1
-summary: "Sous's count substrate: language-agnostic evidence and judgment over a neutral projected view. Never depends on onion."
+summary: "The proofreader's counting engine: it measures a translation's habits and flags what departs from them, without knowing anything about USFM."
 ---
 
+## The problem
+
+The proofreader has to count a translation's habits, like which character usually follows a comma or how long verses run, and judge outliers. That counting should work on any source of verse text, not only USFM files. If it depended on the USFM engine, it would be tied to one file format forever.
+
+## The solution
+
+sous-core takes a plain, format-neutral view of a book: its text, plus where each chapter and verse starts. It never imports the USFM engine; [[galley]] builds that view from USFM and hands it over. It also keeps no caches between calls; galley decides what to reuse, and sous-core says what is safe to reuse. Its only shared dependency is [[mise]], the tiny leaf crate both engines use.
+
+## Trade-offs
+
+- It cannot ask the USFM engine anything directly. Any structural fact it needs must be in the neutral view.
+- It owns content evidence only. Editor positions, saving, file reading and translated messages belong elsewhere.
+- It generates its own TypeScript reader instead of using [[ticket]]; `architecture.md` lists that as debt.
+
 ## Show me
+
+The neutral view going in, findings coming out:
 
 ```rust
 pub type Brigade = (hygiene::HygieneBytes, substrate::Substrate, words::Words);
@@ -22,12 +38,12 @@ ProjectedBook (text, chapters, verses) ─ ChapterPass::map/fold ─→ Aggregat
 
 Dependencies: `memchr`, `rustc-hash`, `xxhash-rust`, and [[mise]]. Nothing else.
 
-## Why
+## How it works
 
-- **Never depends on onion.** It accepts a small neutral borrowed view, not a parse. "Do not add the dependency" (`architecture.md`). A vref corpus can produce the same view.
-- **Owns content evidence only.** Unicode classification, config-free observations, corpus reductions, judging, finding serialization. Not editor positions, persistence, I/O or localization (`charter.md`, "Sous owns content evidence").
-- **No resident caches.** Galley owns reuse; sous-core declares what is safe to reuse (`SCHEMA`, `RETAIN_CHAPTERS`).
-- **Its own reader emitter.** sous-core generates `sous-reader.ts` itself rather than through [[ticket]]; its numbers are generated and its reader typed (`architecture.md` names this as debt).
+- **Never depends on onion.** "Do not add the dependency" (`architecture.md`). A vref corpus can produce the same view.
+- **Owns content evidence only.** Unicode classification, config-free observations, corpus reductions, judging, finding serialization (`charter.md`, "Sous owns content evidence").
+- **No resident caches.** sous-core declares what is safe to reuse (`SCHEMA`, `RETAIN_CHAPTERS`).
+- **Its own reader emitter.** Its numbers are generated and its reader typed.
 
 ## Composes with
 

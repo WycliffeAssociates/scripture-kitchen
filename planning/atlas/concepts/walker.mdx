@@ -7,10 +7,25 @@ crate: onion
 files: [onion/src/cst.rs, onion/src/tables/schema.rs, GLOSSARY.md]
 related: [cst, marker-table, lint, token]
 level: 2
-summary: "The structural loop that builds the CST: a frame stack, push and pop, displacement by precedence."
+summary: "The loop that turns the flat list of pieces into a nested tree, deciding when each paragraph, footnote or styled word ends."
 ---
 
+## The problem
+
+USFM rarely says where things end. A paragraph `\p` ends when the next paragraph starts. A footnote `\f` should end with `\f*`, but authors forget. So when a new `\p` arrives inside an open footnote, something has to decide: does the footnote run on, or did the author forget to close it? Every later check and the editor's outline depend on that answer.
+
+## The solution
+
+The walker keeps a stack of what is currently open. Each new marker either opens something, closes its own match, or forces open things to close because it outranks them. A paragraph outranks a footnote, so a new `\p` closes the open footnote. Every forced close is recorded with a reason, so [[lint]] can tell the author "we closed your footnote here". Ranking alone cannot say what may nest inside what, so a separate rule answers "may this marker appear here?".
+
+## Trade-offs
+
+- A `\p` can never be swallowed by an unclosed `\f`, even when the author meant the note to run on. The tree may disagree with the author.
+- A sidebar only ends at its own closing marker, so a chapter marker inside it stays inside and is flagged rather than escaping.
+
 ## Show me
+
+A paragraph arriving inside an open footnote pops three frames, each with its own reason; the stack is on the right.
 
 ```text
 \p
@@ -29,22 +44,16 @@ verse-out-of-order   @61
 verse-gap            @51
 ```
 
-## Why
+## How it works
 
 GLOSSARY.md separates the words so the code can keep them apart:
 
 - A **Scope** is a kind that opens, takes content and closes. A **Frame** is one live occurrence on the stack, stamped with its **Context** at push time.
 - **Context** answers "may this marker appear here?". **Precedence** answers "how many frames to pop?". Precedence cannot do Context's job: it is a total order and cannot say `\add` may nest in `\add`.
 - **Displacement** closes a frame because an incoming marker outranks it. It is always a lint event, never silent (Will, 2026-08-12: "let them know we closed the footnote").
-- A sidebar is a pop barrier: only `\esbe` ends it, so a `\c` inside `\esb` stays inside and lint flags it.
+- A sidebar is a pop barrier: only `\esbe` ends it.
 
 The name: "Walker", ruled 2026-08-12. "Driver" is a synonym to avoid; the glossary already uses driver for the engine host.
-
-Trade-off: a `\p` can never be swallowed by an unclosed `\f`, at the cost of the tree disagreeing with an author who meant the note to run on.
-
-## Composes with
-
-Reads [[token]] rows and the [[marker-table]]'s columns (`opens_scope`, `closes_scope`, `allowed_contexts`, `precedence()`). Writes the [[cst]]'s `CloseReason` and `ctx` per node. [[lint]] reads those verdicts.
 
 ```mermaid
 stateDiagram-v2
@@ -54,6 +63,10 @@ stateDiagram-v2
   Open --> Recovery: needed a closer, was displaced
   Open --> Eof: input ended
 ```
+
+## Composes with
+
+Reads [[token]] rows and the [[marker-table]]'s columns (`opens_scope`, `closes_scope`, `allowed_contexts`, `precedence()`). Writes the [[cst]]'s `CloseReason` and `ctx` per node. [[lint]] reads those verdicts.
 
 ## Where
 

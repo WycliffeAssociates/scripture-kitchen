@@ -7,10 +7,30 @@ crate: onion
 files: [onion/src/wire.rs, onion-wasm/README.md, onion-wasm/src/lib.rs]
 related: [dish, wire, cst, lint, toc, diff, onion-wasm]
 level: 3
-summary: "Turning one Parsed into one little-endian buffer: why the JS wall moves ArrayBuffers, not JSON or objects."
+summary: "Packing everything one parse produced into a single buffer, so the editor gets tokens, tree, problems and chapter index from one call."
 ---
 
+## The problem
+
+The editor calls the engine on every keystroke, and each call is about a whole book, because USFM keeps one book per file. It wants several answers at once: the tokens, the tree, the lint problems, where each chapter and verse starts. Asking for each separately pays the cost of crossing from WebAssembly to JavaScript several times. And converting results into JavaScript strings and objects is where the time goes; copying raw bytes is nearly free.
+
+## The solution
+
+Parse once, then "plate" the result: write all of it into one flat buffer of numbers and hand that buffer over in one call. JavaScript reads rows straight out of the buffer with a generated reader, and only the rows it asks for. Text is not copied; rows hold byte positions into the file the editor already has. The engine keeps nothing between calls, so there is nothing to free.
+
+The old design built thirteen prepared views of the book and converted each one for JavaScript. Three fifths of that call was building and converting views. Sending the raw tree instead took 0.64x the bytes and 0.62x the time.
+
+Rust callers can stop before plating and use the parsed result directly.
+
+## Trade-offs
+
+- The buffer is a versioned format (now version 5). Changing its shape means every consumer updates its reader.
+- JavaScript gets a cursor over numbers, not friendly objects. Any convenience view is the consumer's to build.
+- Two cold paths still return JSON: [[diff]]'s skeleton and [[resolve]]'s answer.
+
 ## Show me
+
+Native callers stop at `parse`; anything crossing to JavaScript calls `plate`.
 
 ```text
 onion::wire::parse(text, opts)   -> Parsed    native callers stop here
@@ -23,16 +43,13 @@ const { tree, tokens, diagnostics, toc } = deserialize(parse(text, { diagnostics
 
 The scratch book in [[cst]] plates to 1,072 bytes with `toc` and `diagnostics` on.
 
-## Why
+## How it works
 
 - **Ship the tree, not projections.** Tokens + CST + diagnostics was 0.64x the bytes and 0.62x the time of the thirteen curated planes `analyze` used to build; three fifths of `analyze` was building and converting planes (commit b781bb9).
 - **One call, several products.** Crossing a typical book cost ~80 µs, which is what forces several products into one call. Statelessness stayed: `parse` returns bytes and retains nothing, so there is nothing to free.
 - **Nothing rich crosses.** Flat `Uint32Array` copies plus a few strings. JS never holds a token object; the generated reader is lazy and decodes a row only when asked.
 - **Copy is free, encode is the cost** (commit 13c3d3b, measured in Node: analyze 1.4–1.5x native).
-
-The exceptions are JSON on cold paths: [[diff]]'s skeleton (old camelCase contract) and [[resolve]]'s answer.
-
-Trade-off: the wire is a format with a version. A shape change bumps `FORMAT_VERSION` (now 5) and every consumer must update its reader.
+- **Exceptions.** JSON on cold paths: [[diff]]'s skeleton (old camelCase contract) and [[resolve]]'s answer.
 
 ## Composes with
 

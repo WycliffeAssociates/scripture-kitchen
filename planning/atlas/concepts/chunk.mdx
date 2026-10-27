@@ -7,19 +7,33 @@ crate: onion
 files: [onion/src/chunk.rs, onion/src/lint/carried.rs, onion/src/lint.rs, onion/src/cst.rs, onion/tests/fold_oracle.rs]
 related: [chunk-cache, cst, lint, scanner, pantry]
 level: 2
-summary: "A book cut at each line-initial \\c; per-chunk products plus a Carried summary fold back to the whole-book answer."
+summary: "Cutting a book into chapters that can be parsed separately, plus the few facts carried between them so the result matches parsing the whole book."
 ---
+
+## The problem
+
+A typical edit changes one chapter, but a parser normally reads a whole file. To re-parse only the changed chapter, each chapter must be parseable on its own. Mostly it is. A few facts are not local, though: the USFM version is declared once at the top of the book, and "chapters are numbered in order" can only be checked across chapters.
+
+## The solution
+
+Cut the book before each line that starts with `\c` (the chapter marker). Parse and check each piece alone. Each piece also writes down a small summary of what it saw that matters beyond itself, its **carry**: first and last chapter number, markers allowed once per book, ranges left open. A final pass folds the summaries in order to make the book-level judgments. The alternative, re-parsing the whole book per keystroke, is the cost this removes. A whole-book check is just the one-piece case of the same fold, so every rule is written once.
+
+## Trade-offs
+
+- The first piece's version line and "is this a scripture book" flag feed every later piece, so editing them re-derives all pieces.
+- A construct left open across a chapter break (a sidebar, say) cannot be cut there; the two pieces are fused and parsed together.
+- Every cross-chapter rule must be written as a summary plus a fold, which is more work than a whole-book scan.
 
 ## Show me
 
-The pre-scan, from `onion/src/chunk.rs`:
+The pre-scan finds the cut points, from `onion/src/chunk.rs`:
 
 ```text
 "\\id GEN\n\\c 1\n\\p a\n\\c 2\n\\p b\n"
    → starts [0, 8, 18]   lf 5   crlf 0
 ```
 
-The fold, per chunk:
+Each chunk becomes products, then they fold:
 
 ```text
 chunk i bytes ─ lex ─ build_chunk ─ lint_chunk(ctx) ─→ (tokens, Cst, local LintReport, Carried)
@@ -34,12 +48,12 @@ Carried::declared_version()     the \usfm line            gates deprecated-marke
 Carried::book_is_scripture()    does \id name a book      gates the paragraph rule
 ```
 
-## Why
+## How it works
 
-- **Chapter is the rebuild unit.** An edit lands in one chapter; re-lexing the book per keystroke is the cost to remove (commit 5ee9d08, "the fold is bought as a plan").
+- **Chapter is the rebuild unit** (commit 5ee9d08, "the fold is bought as a plan").
 - **Map observes, reduce judges.** Every cross-chunk fact (first and last chapter, once-per-book markers, the sid a later `-e` owes) is recorded in `Carried`. `reduce` is a left fold that needs no source, tokens or tree. Whole-book `lint` is the single-unit fold, so each judgment exists once.
-- **Carry-outs belong in the key.** A chunk's product is a function of its bytes and chunk 0's context. The [[chunk-cache]] keys on both, so a `\usfm` change re-derives every later chunk.
-- **Dirty boundaries fuse.** `build_chunk` simulates the next `\c`'s displacement. A frame it cannot close (a sidebar across the seam) sets `open_at_end`, and the chunk fuses with its successor.
+- **Carry-outs belong in the key.** A chunk's product is a function of its bytes and chunk 0's context; the [[chunk-cache]] keys on both, so a `\usfm` change re-derives every later chunk.
+- **Dirty boundaries fuse.** `build_chunk` simulates the next `\c`'s displacement. A frame it cannot close sets `open_at_end`, and the chunk fuses with its successor.
 - **Law:** on clean boundaries `concat(build_chunk each) == build(lex(whole))`, byte for byte (`fold_oracle.rs`).
 
 ## Composes with

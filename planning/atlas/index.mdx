@@ -1,9 +1,13 @@
 ---
 title: scripture-kitchen atlas
-summary: "What each piece of the workspace is, why it is shaped that way, and how the pieces compose."
+summary: "What scripture-kitchen is, who uses it, and a map of how its pieces fit together."
 ---
 
 # scripture-kitchen
+
+Bible translators keep their work in USFM: plain-text files, one book per file, with backslash markers like `\v 16` for verses and `\f` for footnotes. scripture-kitchen is the engine that reads those files without losing a byte. Its main user is Sefer, a translation editor that runs in the browser and calls the engine through WebAssembly, often on every keystroke. The engine checks the markup, finds chapters and verses, and hands the editor compact buffers of numbers. A second product, Sous Chef, learns what a translation normally does and flags what breaks its own pattern. It shows plain counts ("this spelling occurs 1 of 1,053 times") and leaves the call to a person. Everything is Rust; the editor gets one JavaScript package.
+
+## The pieces
 
 One Rust workspace, two products, one JS package.
 

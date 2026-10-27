@@ -7,12 +7,26 @@ crate: galley
 files: [galley/src/corpus.rs, onion-wasm/reader.ts.tmpl]
 related: [dish, wire, pantry]
 level: 3
-summary: "A whole project in one ONCP buffer: unchanged dishes framed under caller keys, for the cold door."
+summary: "A whole project's parses sent across in one buffer, each book's result kept exactly as it was and labelled with the caller's name for it."
 ---
+
+## The problem
+
+Opening a project for the first time means parsing every book: 66 files for a Bible. Each parse already produces one buffer for JavaScript. Handing JavaScript 66 separate buffers means 66 crossings and 66 things to track. The caller also has its own names for the books (file paths, database ids) that the engine knows nothing about.
+
+## The solution
+
+The corpus envelope puts all the per-book buffers in one buffer. Each book's result is copied in unchanged, labelled with whatever name the caller gave it. Because the contents are not re-encoded, one reader decodes a single book and a whole project the same way. The engine never reads the labels, so they cannot disagree with what the caller meant. Books can be parsed in parallel before framing; the caller chooses how.
+
+## Trade-offs
+
+- A cold load does not fill the engine's per-book cache, so the first edit after it pays for parsing again. The file marks this as a TODO.
+- Entries carry no checksum. Adding one is a format change: an entry is 16 bytes, and a 128-bit hash would add 16 more.
+- Its JavaScript reader is written by hand, one of two wire formats that are not generated ([[wire]]).
 
 ## Show me
 
-From `galley/src/corpus.rs`:
+Two books framed together; look at the header, then one directory entry per book. From `galley/src/corpus.rs`:
 
 ```text
 galley::corpus::plate(&[("GEN", gen_dish), ("EXO", exo_dish)])
@@ -24,15 +38,11 @@ bytes[12..16]  0                 reserved
 bytes[16..]    [keyAt, keyLen, dishAt, dishLen] x 2, then the bodies
 ```
 
-## Why
+## How it works
 
-- **Frames, never re-encodes.** Each body is exactly what [[plate]] writes for one book, so a project and a single parse decode through one reader.
-- **The key is the caller's.** Onion never parses it; a key that meant something to onion could disagree with the caller.
+- **Frames, never re-encodes.** Each body is exactly what [[plate]] writes for one book.
 - **Parallelism is the caller's.** Parsing is embarrassingly parallel per book: 28.80 ms on 10 threads against 158.38 ms serial for the English Bible.
-
-Open, stated in the file as a TODO: a cold load does not seed the [[pantry]]'s chunk cache or carry per-book checksums, so the work is paid twice. Adding a checksum is a format change (an entry is 16 bytes, an xxh3-128 is 16 more).
-
-Debt: the reader is hand-typed inside `reader.ts.tmpl`, one of two formats not generated ([[wire]]).
+- Not yet wired to the [[pantry]]: no chunk-cache seeding, no per-book checksum.
 
 ## Composes with
 

@@ -7,12 +7,26 @@ crate: galley
 files: [galley/src/toc.md, galley/src/toc/schema.rs, galley/src/toc/mod.rs, galley/toc-reader.ts]
 related: [toc, pantry, wire, ticket, galley-package, sefer]
 level: 3
-summary: "Every registered book's chapter and verse rows in one TOCS buffer, read off the pinned Toc with no parse."
+summary: "How many chapters and verses every book in a project has, sent to the editor in one cheap buffer without parsing any book."
 ---
+
+## The problem
+
+When a translator opens a project, the editor's sidebar lists every book with its chapters and verse counts: "GEN, 50 chapters, 1533 verses". A Bible project is 66 files. Fully parsing each one just to count chapters is slow, and most of that cost is packaging the parse for JavaScript, not reading it.
+
+## The solution
+
+When a book is loaded, the engine already notes where its chapters and verses are, and keeps that note in memory. The census reads those notes for every book and packs them into one buffer of numbers. No book is parsed again and no text is read. The obvious alternative, a "just the outline" flag on the normal parse, would still pay for packaging the parse, so the census is its own call (`tocAll`). Any host gets a cheap project outline from it, not just Sefer's sidebar.
+
+## Trade-offs
+
+- It carries labels and verse lists, not pointers into the parsed text. Those pointers belong to data the engine does not keep in memory.
+- A malformed number like `\c 12b` comes through as chapter 0 with its label "12b". The consumer must check the label.
+- A reference book whose text was dropped still appears in the census, but cannot answer UTF-16 offset questions. It says so, naming the `keepText` option.
 
 ## Show me
 
-From `galley/src/toc.md`:
+How Sefer builds its sidebar, then how odd chapters and verses come through, then the buffer's layout. From `galley/src/toc.md`:
 
 ```js
 for (const id of project) galley.update(id, await read(id));   // once, at open
@@ -30,11 +44,10 @@ rows        per book: chapter rows, verse anchors, then members, each block 4-al
 ids         every id's UTF-8, in directory order
 ```
 
-## Why
+## How it works
 
-- **A warm parse is mostly its plate.** Per book on MRK (83 KB), a `parse` with every chunk a cache hit is 311 µs; the same work without the wire plate is 45 µs; the census row set is already resident. So a census is its own door, not a flag on `parse`.
-- **No token indices.** The dish's rows carry token and designator indices; tokens are the rebuildable tier and not resident, so the census carries label spans and member runs instead.
-- **Lists references too.** A reference with no text still kept its [[toc]]. It just cannot answer `utf16`, and says so naming `keepText`.
+- **A warm parse is mostly its plate.** Per book on MRK (83 KB), a `parse` with every chunk a cache hit is 311 µs; the same work without the wire plate is 45 µs; the census row set is already resident in the [[pantry]]'s pinned [[toc]]. `encode` takes `&Pantry`, not `&mut`, because nothing here can run the cache.
+- **No token indices.** The [[dish]]'s rows carry token and designator indices; tokens are the rebuildable tier and not resident, so the census carries label spans and member runs instead.
 - **Lazy reader.** A sidebar over 66 books touches 66 directory entries and no verse row.
 
 ## Composes with

@@ -7,10 +7,29 @@ crate: onion
 files: [onion/src/tables/schema.rs, onion/src/tables/rows.rs, onion/src/tables/generated.rs, onion/src/tables/emit.rs, onion/src/bin/codegen.rs]
 related: [scanner, walker, extensions, lint, mask, exports, wire]
 level: 2
-summary: "The single registry from marker to semantics: kind, category, payload, contexts, closing rule. Authored in Rust, generated for JS."
+summary: "One table that says, for every USFM marker, whether it is real, what category it is, how it closes and whether it is deprecated."
 ---
 
+## The problem
+
+A USFM file is plain text with backslash markers: `\v 4` starts verse 4, `\q1` starts a line of poetry, `\f ... \f*` wraps a footnote. The spec defines 152 marker families (`\q1` to `\q4` count as one). Each has rules: its category, whether it needs a closing marker, what may follow it, whether it is deprecated. Every part of the engine needs those answers, and they change when the spec changes. Where should that knowledge live so that nobody keeps two copies in sync by hand?
+
+## The solution
+
+One table, one row per marker, written as named fields in Rust. A code generator turns those rows into everything else: a packed lookup table, a fast name matcher, and the same table in TypeScript for the JavaScript side. Generated files are checked in, so a build never runs the generator and every change shows up as a reviewable diff. A test regenerates them and fails if they are stale. The obvious alternative, scattering `if marker == "v"` checks through the code, would put the spec in dozens of places.
+
+Because every marker gets a small number (its row index), a parsed token stores one byte instead of the marker's name. Shipping the table on its own also gives other consumers a primitive: look up a marker to ask if it is real, what category it is, or how it behaves.
+
+## Trade-offs
+
+- A marker's number is one byte, so the table can hold at most 256 rows. 170 are used.
+- The table follows USFM 3.2 only. There is no column for "what 3.1 said"; a 3.2 deprecation is a flag on the row.
+- Any marker the table does not know, including unregistered custom `\z` markers, becomes row 0: the bytes are kept, but it opens nothing, closes nothing and has no rules. Hosts register custom markers through [[extensions]].
+- Editing a row means running the generator; the staleness test will fail until you do.
+
 ## Show me
+
+Each token below carries the row number of its marker; the table tells you what that number means.
 
 ```text
 \q1 \v 4 Bread.
@@ -28,14 +47,13 @@ generated.rs   PACKED: [u128; 170]   NAMES: [&str; 170]   FIRST_EXTENSION_ROW = 
                row 0 empty · rows 1..=152 spec markers · rows 153..169 the 17 template rows
 ```
 
-## Why
+## How it works
 
-- **One authored source, several generated projections.** Humans write named fields in `rows.rs`; codegen packs them into `u128` rows, a u64 name matcher (longest name is 6 bytes) and the `common_marker_checks` fast arms. Nothing is kept in sync by hand (`tables.rs` doc).
-- **Referee is USFM 3.2 only.** No version column. 3.1's `usx.rng` is fallback evidence and never outvotes a 3.2 page (`schema.rs`).
+- **One authored source, several generated projections.** Humans write named fields in `rows.rs`; codegen packs them into `u128` rows, a u64 name matcher (longest name is 6 bytes) and the `common_marker_checks` fast arms. The table stores facts, codegen turns facts into instructions, the lexer reads columns (`tables.rs` doc).
+- **Referee is USFM 3.2 only.** 3.1's `usx.rng` is fallback evidence and never outvotes a 3.2 page. `deprecated` and `AttrStatus::Deprecated` record 3.2's own deprecations (`schema.rs`).
 - **Derived facts are `const fn`s, not columns.** `precedence()` and context contribution are baked by codegen, so they cannot drift from the rows.
-- **Unknown and unregistered `\z` markers resolve to row 0**, which opens, closes and contributes nothing. A registered one resolves to a template row ([[extensions]]).
-
-Trade-off: `marker_idx` is a `u8`, so the table plus templates must stay under 256 rows. 170 are used.
+- **Unknown and unregistered `\z` markers resolve to row 0.** A registered one resolves to a template row ([[extensions]]).
+- **The JS copy.** `onion-wasm/reader.ts` carries the generated `MARKERS` array (name, kind, category, closing, shape, numbering, whitespace rule) and `MARKER_ATTRIBUTES` (planning item 2026-10-22, "Attributes for hosts"), so `MARKERS[markerIdx]` is one array read.
 
 ## Composes with
 

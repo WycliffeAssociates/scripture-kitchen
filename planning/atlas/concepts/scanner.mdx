@@ -7,12 +7,26 @@ crate: onion
 files: [onion/src/scanner.rs, onion/src/lib.rs]
 related: [source, token, marker-table, extensions, designator, attributes, chunk]
 level: 2
-summary: "The only code that owns position: one fused memchr pass from bytes to token rows."
+summary: "The first pass over a file: it cuts the text into small labelled pieces (markers, verse numbers, words) without changing a byte."
 ---
+
+## The problem
+
+A USFM file is plain text with backslash markers mixed in: `\v 1 In the beginning`. Before anything can check or display it, something has to cut it into pieces: this is a marker, this is a verse number, this is text. That step runs on every keystroke for a whole book, so it must be very fast. It must also never lose or change a character, because the editor shows the file exactly as written.
+
+## The solution
+
+One pass walks the bytes and records each piece as a position and length, plus a label. Glued back together, the pieces give back the original file exactly. The scanner only decides where a piece starts and stops and what kind it is. It never reads inside a verse number or an attribute list; small separate functions do that later, only when asked ([[designator]], [[attributes]]). Keeping those jobs apart keeps the hot loop small, and lets other code parse a verse label without running the scanner.
+
+## Trade-offs
+
+- A piece longer than 65,535 bytes is split into several pieces, because a piece's length is stored in two bytes.
+- A verse number must start with an ASCII digit; `\v Then He…` is read as text after the marker, not as a malformed number.
+- Interpreting the pieces is pushed onto later code, which has to ask for it.
 
 ## Show me
 
-From the module doc of `onion/src/scanner.rs`:
+One line of source and the pieces it becomes. Note the `//` line-break hint and the attribute list as their own pieces.
 
 ```text
 \v 1 gr//ace \w x|lemma="g"\w*
@@ -27,9 +41,9 @@ The designator gate: a leading ASCII digit or it is text.
 \v Then He…  Marker("\v ") Text("Then He…")
 ```
 
-## Why
+## How it works
 
-- **Boundary finding and classification stay apart.** The `*_end` functions decide where a token stops; `classify_marker` names it. Neither reads a payload's interior; that is the interpreters' job, on demand ([[designator]], [[attributes]]). GLOSSARY calls this the Scanner/Interpreter split.
+- **Boundary finding and classification stay apart.** The `*_end` functions decide where a token stops; `classify_marker` names it via the [[marker-table]]. GLOSSARY calls this the Scanner/Interpreter split.
 - **Losslessness is the partition.** Concatenating every span reproduces the source byte for byte.
 - **A newline is always its own token.** Block seams, lint's line rules, `\n\c` chunking and an editor's line model all key on it.
 - **Speed.** Scan loop ~1,164 MiB/s on en_ult with the per-arm helpers inlined; `&mut self` flag access out of line measured 6% slower (`scanner.rs`). A prebuilt `memmem::Finder` costs 6 ns against 31 ns per one-shot call, inside a ~5 ns/token budget.

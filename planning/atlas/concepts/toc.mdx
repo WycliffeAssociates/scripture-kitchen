@@ -7,12 +7,26 @@ crate: onion
 files: [onion/src/toc.rs, onion/tests/toc_oracle.rs]
 related: [token, designator, resolve, vref, diff, census, pantry, onion-book]
 level: 2
-summary: "Where things are: the book code, chapter rows that tile the file, verse anchors with labels and members."
+summary: "A cheap table of where each chapter and verse starts in a file, so code can answer 'what verse is this?' without building the full tree."
 ---
+
+## The problem
+
+Many questions are just "where": which verse is the cursor in, where does chapter 3 start, how many verses are in this book? Building the full document tree to answer them is wasted work on every keystroke. And every byte needs an answer, including the title page before chapter 1.
+
+## The solution
+
+We build a flat table straight from the scanned pieces: the book code, one row per chapter, and one entry per verse marker with its label. Chapter rows cover the whole file end to end, with the front matter as chapter 0, so "where is this byte?" always has an answer. Verse labels like `12b` or `1,3,5` are kept as positions into the file, because a pair of numbers cannot hold their spelling. This avoids the tree entirely, so an editor can keep a table of contents without paying for structure.
+
+## Trade-offs
+
+- A verse runs to the next verse or chapter marker, so a heading just before verse 4 counts as part of verse 3. [[resolve]] offers an "opening" point for callers who want the heading.
+- A bridge like `\v 2-3` is one entry naming two verses. Counting verses is left to the caller.
+- A malformed verse number keeps its row with numbers 0, rather than being guessed or dropped.
 
 ## Show me
 
-`toc(source, &tokens)` over the scratch book in [[cst]]:
+The table for a 125-byte scratch book: front matter as chapter 0, then chapter 1 with three verse anchors, one of them a bridge.
 
 ```text
 book "MRK"
@@ -33,15 +47,12 @@ MRK — 2 chapter rows, 3 verse anchors, 125 bytes
    1       18..125          3  MRK 1:1@26  MRK 1:2-3@63  MRK 1:4@113
 ```
 
-## Why
+## How it works
 
-- **Tokens, no tree.** `\c`, `\v` and their designators are flat facts, so an editor can hold a Toc without building a [[cst]]. 5.8 ns/token on en_ulb (commit 13c3d3b, when it replaced `ParseHeader`).
-- **Rows tile `0..len`.** That makes `locate` total: every byte is in some chapter, and front matter is chapter 0, never a fabricated verse.
-- **Labels and members are spans.** The spelling `12b` or `1,3,5` cannot be carried by numbers; positions are kept instead of copied text.
+- **Tokens, no tree.** `\c`, `\v` and their designators are flat facts, read from [[token]] rows without a [[cst]]. 5.8 ns/token on en_ulb (commit 13c3d3b, when it replaced `ParseHeader`).
+- **Rows tile `0..len`.** That makes `locate` total: front matter is chapter 0, never a fabricated verse.
+- **Labels and members are spans**, read through the [[designator]] interpreter.
 - **Degrade, never repair.** A malformed designator keeps its row with numbers 0, so the previous verse's extent cannot swallow it.
-- **Structural extents.** A verse runs to the next `\v` or `\c`, so a heading before verse 4 sits in verse 3. [[resolve]]'s `opening` is the answer for a caller who wants the heading.
-
-Trade-off: verse counts are the host's arithmetic. A bridge is one anchor naming several verses; the row carries both and picks neither.
 
 ## Composes with
 

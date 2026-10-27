@@ -7,12 +7,26 @@ crate: galley
 files: [galley/src/pantry.md, galley/src/pantry/mod.rs, galley/src/pantry/budget.rs, galley/src/pantry/derived.rs, galley/docs/analysis-host.md]
 related: [chunk-cache, expediter, toc, mask, utf16, census, find, overlay, galley]
 level: 2
-summary: "Galley's one caching layer: books by opaque id, their retained text and detached products, every derived store, three tiers of bytes."
+summary: "Galley's single cache: it keeps each book's text and everything computed from it, under a memory budget."
 ---
+
+## The problem
+
+The editor sends Galley whole books, then asks many questions about them: lint, search, findings. Copying a big project into WebAssembly memory again for each question is slow: 3.5–5 ms for 5 MB, a quarter of a video frame. Keeping everything forever is not an option either, because browser memory is limited. And caches spread across many features tend to disagree about what is current.
+
+## The solution
+
+One cache owns everything Galley keeps. The editor sends a book once, whole, under an id it chooses (a file path, in practice). Galley keeps that copy plus everything derived from it, and every later question runs against the kept copy. There is no "change bytes 10–20" call, only "here is the whole book again", so positions inside a book can never drift out of step. A book has one of two roles: a **target** is the translation being checked; a **reference** is a source text it is compared against, and keeps much less. Memory is counted in three tiers, so the total is always known.
+
+## Trade-offs
+
+- A one-letter edit resends the whole book; the [[chunk-cache]] makes re-deriving it cheap.
+- A target must keep its text, because placing a finding re-reads it. Only a reference may drop its text.
+- Kept products are large: on en_ulb a target's are 7.29 MB, 162% of the 4.51 MB raw text.
 
 ## Show me
 
-From `galley/src/pantry.md`:
+The one entry point and the questions it answers, from `galley/src/pantry.md`:
 
 ```rust
 pantry.update("books/mrk.usfm", Role::Target, &text)?   // -> Entry for MRK
@@ -29,16 +43,13 @@ dirty(book)   = baseline.checksum() != current.checksum()   // POSITIONAL
 rework(book)  = baseline.changed_chunks(&current)           // SET MEMBERSHIP
 ```
 
-## Why
+## How it works
 
-- **`update` is the only door that takes a book's text.** Replacement is whole-book under a caller-chosen id; there is no splice API, so coordinates cannot shift inside a book. Marshaling a 5 MB corpus into wasm costs 3.5–5 ms, a quarter of a frame, while retaining 5 MB is cheap (`analysis-host.md`).
-- **Roles are asymmetric, and measured.** On en_ulb a Target's products are 7.29 MB (162% of 4.51 MB raw, text included); a Reference's are 1.17 MB for lengths alone, 3.94 MB with the word lane.
-- **A Target cannot drop its text.** Placing a finding rescans the text, so `Retain::ProductsOnly` on a Target is refused (`PantryError::TargetNeedsText`).
+- **`update` is the only door that takes a book's text**, and replacement is whole-book (`analysis-host.md`, charter).
+- **Roles are measured.** A Reference's products are 1.17 MB for lengths alone, 3.94 MB with the word lane. `Retain::ProductsOnly` on a Target is refused (`PantryError::TargetNeedsText`).
 - **Three tiers, no residual.** Pinned (text, `Toc`, `Mask`, `Utf16Table`, `Fingerprint`), hot (the [[expediter]]'s hot-set rows) and rebuildable (chunks and derived stores). Only the [[chunk-cache]] is evicted today; a counting allocator holds the total to a tenth of live bytes over a whole Bible.
 - **Dirty is not rework.** A moved chapter makes the file dirty but needs no re-derivation. One `Fingerprint`, ~1 KB of chunk starts and xxh3-128s, answers both.
 - **Canonical order** by `BookKey` from [[mise]], ties by id, so `BookIndex` never depends on update order.
-
-Doc conflict: `analysis-host.md` says "the `Reference` role [is] not built"; `pantry.md` and the code (`Role::Reference`) have it live.
 
 ## Composes with
 

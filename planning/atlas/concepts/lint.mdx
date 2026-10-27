@@ -7,12 +7,27 @@ crate: onion
 files: [onion/src/lint.rs, onion/src/lint/rows.rs, onion/src/lint/walk.rs, onion/src/lint/carried.rs, onion-wasm/diagnostics.json]
 related: [cst, walker, chunk, format, edit, attributes, designator, dish]
 level: 2
-summary: "Findings over a built document: one in-order walk of the CST, four state machines, four u32s per finding."
+summary: "Check a book for markup mistakes, like an unclosed footnote or verses out of order, and offer fixes without changing anything."
 ---
+
+## The problem
+
+USFM files are typed by hand, so they contain mistakes: a footnote never closed, verse 3 before verse 2, a verse number skipped. The editor needs to underline each one as the translator types and, where it is safe, offer a one-click fix. It must never quietly change the text, because the editor's cursor positions depend on the file staying exactly as typed.
+
+## The solution
+
+We walk the parsed book (the [[cst]]) once, in order, and report each problem as a code plus positions. Problems the parser already noticed, like a footnote that never closed, are read from the parser's verdict, not worked out a second time. Each finding is just four numbers, so a whole report crosses to JavaScript as one flat array; the message text lives in a separate file, `diagnostics.json`. A fix is only an offer: a list of [[edit]]s the editor may apply. Fixes that would need a guess or a move are not offered.
+
+## Trade-offs
+
+- No automatic repair. Lint flags; the translator or editor decides.
+- Some fixes are never offered, such as guessing which book code was meant or moving an attribute list.
+- Findings carry no text, so every consumer needs `diagnostics.json` to show a message.
+- Some severities depend on the USFM version the file declares, so the same text can lint differently depending on its `\usfm` line.
 
 ## Show me
 
-`playground --lint-stats` over 76 bytes:
+`playground --lint-stats` over 76 bytes. Four problems: the footnote never closes, the paragraph is still open at the end, verse 3 comes before 2, and verse 2 is missing before 3:
 
 ```text
 \id MRK
@@ -39,17 +54,15 @@ Observation { code: VerseOutOfOrder, anchor: 23, second: 19,  aux: 4 }
 Observation { code: UnclosedAtEof,   anchor: 25, second: MAX, aux: 0 }
 ```
 
-## Why
+## How it works
 
 Three laws from `lint.rs`:
 
 - **Read verdicts, never re-derive them.** `unclosed-note` is the [[walker]]'s `Recovery` on the `\f` node, matched, not recomputed.
-- **Flag, never repair.** No token is moved, inserted or dropped. A `Fix` is an offered run of [[edit]]s. Moves and guesses are not offered (relocating an attribute list, guessing a book code).
-- **No strings.** An `Observation` is four `u32`s: anchor and second are token indices, `aux` means what the row's `aux` column says. A report crosses as one flat array; text comes from `diagnostics.json`.
+- **Flag, never repair.** No token is moved, inserted or dropped. A `Fix` exists iff the row declares a `fix_label`, and `check_fixes` proves them over all 226 corpus books.
+- **No strings.** An `Observation` is four `u32`s: anchor and second are token indices, `aux` means what the row's `aux` column says.
 
-`diagnostics.json` lists 59 codes in six categories (structure, ordering, attributes, payload, form, version). 11 have severity `form`: the Form channel, which only [[format]] evaluates. The `lint.rs` doc's "48 codes" is the count without them. ~9.4 ns/token on en_ulb, ~15.5 on en_ult; the gap is the k/v attribute rules over 31 MB of `\w` interiors.
-
-Severity can depend on the declared `\usfm` version, so `declared_version` rides on every report and two rules are gated on it.
+One in-order walk feeds four state machines (structure, ancestry, ordering, flat). `diagnostics.json` lists 59 codes in six categories (structure, ordering, attributes, payload, form, version). 11 have severity `form`: the Form channel, which only [[format]] evaluates. The `lint.rs` doc's "48 codes" is the count without them. `declared_version` rides on every report and two rules are gated on it. ~9.4 ns/token on en_ulb, ~15.5 on en_ult; the gap is the k/v attribute rules over 31 MB of `\w` interiors.
 
 ## Composes with
 

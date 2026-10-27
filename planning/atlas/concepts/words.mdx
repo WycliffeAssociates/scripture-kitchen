@@ -7,12 +7,26 @@ crate: mise
 files: [mise/src/words.rs, galley/tests/find.rs, planning/items/2026-10-20-words-one-splitter-in-mise-with-a-narrower-joiner-.mdx]
 related: [mise, find, chapter-pass, sous-core]
 level: 2
-summary: "The one versioned word rule every crate splits by: letters, glue and digits, through one joiner with a letter on both sides."
+summary: "The one shared rule for what counts as a word, in any script, so search, checking and alignment all split text the same way."
 ---
+
+## The problem
+
+"What is a word?" sounds easy until you meet `don't`, `father-in-law`, `ng'ombe`, Hebrew joined with a maqaf, or Devanagari with combining marks. Several tools here split text into words: whole-word search, the inconsistency checker, alignment. If they disagree, a word the checker flags may not be findable by search.
+
+## The solution
+
+One word rule lives in the shared base crate, and every tool uses it. A word is letters, plus marks that cling to letters, plus digits, joined across one apostrophe or hyphen only when there is a letter on both sides. The rule has a version name, `words/1`. Some consumers store hashes of words, so any change to the rule is a new version, not a silent edit. It sits in the shared crate because search must not depend on the checker's crate.
+
+## Trade-offs
+
+- The rule is frozen per version; improving it means shipping `words/2` and letting consumers re-hash.
+- Character classes come from one pinned Unicode version (17.0.0); new characters wait for a version bump.
+- A run of digits with no letter, like `12,345`, is not a word.
 
 ## Show me
 
-From `mise/src/words.rs`:
+One sentence split by the rule. Watch `don't` stay joined, `3rd` split off, and `a--b` become two words.
 
 ```text
 for_each_word("He said, don't-3rd אבג a--b 12,345")
@@ -28,9 +42,9 @@ for_each_word("He said, don't-3rd אבג a--b 12,345")
 ng'ombe  l'homme  father-in-law  col·lecció  בֶּן־הֲדַד   → one word each
 ```
 
-## Why
+## How it works
 
-- **Versioned because consumers hash words.** Changing the joiner set, glue, digit rule, fold or Unicode version is `words/2`; a consumer hashing words would see different hashes.
+- **Versioned because consumers hash words.** Changing the joiner set, glue, digit rule, fold or Unicode version is `words/2`.
 - **In [[mise]]** because sous's walk, galley's whole-word [[find]] and alignment must agree bit for bit, and find must not depend on sous-core (planning item 2026-10-20, shipped 0.1.12).
 - **A state machine.** `Splitter` takes one scalar at a time, so a walk keeping its own state asks every boundary question without a second pass.
 - **Classes from the pinned UCD 17.0.0**, so a doubly-pointed Hebrew word or a multi-virama Devanagari one joins where Sous joins.

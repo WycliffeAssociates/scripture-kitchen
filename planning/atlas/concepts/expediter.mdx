@@ -7,12 +7,26 @@ crate: galley
 files: [galley/src/sous/expediter.md, galley/src/sous/expediter.rs, galley/tests/equivalence.rs]
 related: [pantry, chapter-pass, onion-book, findings-snapshot, sous-core, galley-package]
 level: 2
-summary: "The Sous coordinator: one ChapterPass, one Pantry, one complete corpus publication per call."
+summary: "The coordinator that runs Sous Chef's checks over a whole project and redoes only the work an edit actually changed."
 ---
+
+## The problem
+
+A translator's project is many books, and Sous Chef's findings depend on all of them together. The editor sends a changed book and asks "what are the findings now?", often after every keystroke. Redoing every check over every book each time is too slow. Something has to decide, per request, what can be reused and what must be redone, and still give exactly the answer a fresh run would.
+
+## The solution
+
+The expediter is that coordinator. Sending a book only stores it; the work happens when findings are asked for ("publish"). Then it re-counts only chapters whose text changed, re-adds only books whose counts moved, and re-decides only the judgments those counts touch. The two most recently edited books keep all their chapter counts, because the next keystroke will probably land there. The alternative, working the moment a book arrives, wastes effort when ten books arrive before one request. Every publish returns one complete answer for the whole project, never a partial update.
+
+## Trade-offs
+
+- The first publish after opening a project pays for everything.
+- Changing a setting re-places findings in every book: 3.2 ms for 66 books, against 206 µs for an unchanged republish.
+- Keeping the two hot books' counts costs memory: 281 KB of rows on en_ulb.
 
 ## Show me
 
-From `galley/src/sous/expediter.md`:
+From `galley/src/sous/expediter.md`: the second publish reads nothing.
 
 ```text
 sous.update("books/mrk.usfm", Role::Target, &text)?
@@ -33,12 +47,12 @@ sous.last_mapped()       -> 0      // nothing re-read, nothing re-mapped
 8 rebase  through each book's retained mask and UTF-16 table, then encode
 ```
 
-## Why
+## How it works
 
 - **Index at publish, not update.** Ten updates and one publish pay one pass over ten books. Projected text is never retained; reprojecting costs ~38 µs a book.
-- **Judging is corpus-level.** What one book's counts mean depends on the others, so step 4 runs over every aggregate. Steps 3–4 move one book at a time: re-merging all rows was 4.7 ms of a 4.9 ms warm republication.
-- **Two hot books keep their rows.** An editor types in one book for minutes; with the hot set the second keystroke maps 1 chapter of MRK instead of 16, for 281 KB of rows on en_ulb.
-- **A config change is a re-judge, never a re-map.** Config is in no cache key except `verdicts`. Moving a knob re-locates every book: 3.2 ms for 66 books, against 206 µs for an unchanged republication.
+- **Judging is corpus-level.** Step 4 runs over every aggregate. Steps 3–4 move one book at a time: re-merging all rows was 4.7 ms of a 4.9 ms warm republication.
+- **The hot set.** With two hot books the second keystroke maps 1 chapter of MRK instead of 16.
+- **A config change is a re-judge, never a re-map.** Config is in no cache key except `verdicts`.
 - **Same bytes native and in JS.** `sous_goldens.rs`, `wasm_wall.rs` and `sous_conformance.mjs` pin one set of goldens (`wasm.md`, "The claim").
 
 ## Composes with

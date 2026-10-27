@@ -7,10 +7,26 @@ crate: onion-wasm
 files: [onion-wasm/README.md, onion-wasm/src/lib.rs, onion-wasm/reader.ts, onion-wasm/diagnostics.json, onion-wasm/build.sh]
 related: [onion, galley, galley-package, dish, plate, utf16, resolve, extensions]
 level: 1
-summary: "The #[wasm_bindgen] doorway over onion alone: tagged exports, UTF-16 walls, the generated reader. Nothing implemented here."
+summary: "A thin layer that exposes the USFM engine to JavaScript; it adds no logic of its own, only conversions at the boundary."
 ---
 
+## The problem
+
+JavaScript apps want the USFM engine, but the engine is Rust. Something has to compile it to WebAssembly and translate at the boundary. Byte positions must become JavaScript string positions, and option objects must be checked. If that layer also grew its own logic, JS and Rust users would get different answers.
+
+## The solution
+
+onion-wasm is a deliberately thin wrapper. Each exported function calls one engine function and converts its inputs and outputs, nothing more. "You could delete this crate and recreate it in an afternoon; that is the point." It is separate from [[onion]] so native Rust users never compile browser code. It still exists beside [[galley]] for apps that want the engine without the proofreader.
+
+## Trade-offs
+
+- The built packages are committed to git, about 370 KB (152 KB gzipped), because consumers install from a git tag, not npm.
+- The binary must be byte-identical on every machine, which needs a special build script.
+- Input must use LF line endings. CRLF input would put every position one too far per line.
+
 ## Show me
+
+Parsing from JS, and a misspelled option failing loudly:
 
 ```ts
 import { parse } from "onion-wasm";
@@ -22,13 +38,13 @@ const { tree, tokens, diagnostics, toc } = deserialize(parse(text, { diagnostics
 galley.parseText(text, { tco: true });   // throws: parseText: unknown option "tco"; expected diagnostics, toc or utf16
 ```
 
-## Why
+## How it works
 
-- **Nothing is implemented here.** Every export tags a library function, plus an offset conversion or a small wire struct where the wall demands it. "You could delete this crate and recreate it in an afternoon; that is the point" (`README.md`).
-- **Byte-identical binaries.** `build.sh` remaps `$CARGO_HOME` and the sysroot and strips the `producers` section, so the same source builds to one sha on macOS/arm64 and Linux arm64/x86_64. That lets CI gate the binary, not just its interface. Release builds now run on x86_64 Linux via `wasm-build.sh`.
-- **Committed packages.** Not on npm; consumers install from a git tag, so `pkg-web`/`pkg-bundler` are checked in. ~370 KB, ~152 KB gzipped, one build per target.
+- **Nothing is implemented here.** Every export tags a library function, plus an offset conversion or a small wire struct where the wall demands it (`README.md`).
+- **Byte-identical binaries.** `build.sh` remaps `$CARGO_HOME` and the sysroot and strips the `producers` section, so the same source builds to one sha on macOS/arm64 and Linux arm64/x86_64. That lets CI gate the binary, not just its interface. Release builds run on x86_64 Linux via `wasm-build.sh`.
+- **Committed packages.** `pkg-web`/`pkg-bundler` are checked in, one build per target.
 - **Options are checked.** Every option bag is a declared interface; an unknown key throws by name rather than reading as `false` (0.1.7).
-- **UTF-16 at the wall, LF in.** Offsets out are CodeMirror code units; CRLF input would put them one ahead per line.
+- **UTF-16 at the wall, LF in.** Offsets out are CodeMirror code units ([[utf16]]).
 
 ## Composes with
 

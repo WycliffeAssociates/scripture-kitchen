@@ -7,12 +7,27 @@ crate: onion
 files: [onion/src/usj.rs, onion/src/usx.rs, onion/src/html.rs, onion/src/export.rs, onion/tests/usj_corpus.rs]
 related: [cst, attributes, marker-table, mask]
 level: 2
-summary: "Three lossy folds of the CST: USJ (JSON), USX (XML) and HTML (a view with every fact in data-*)."
+summary: "Turn a USFM book into the JSON, XML or HTML formats other Bible tools read, accepting that some formatting detail is lost."
 ---
+
+## The problem
+
+USFM is a plain-text markup only some tools read. Other Bible software wants USJ (a JSON form of the same content), USX (an XML form), or plain HTML to show on a page. Those formats cannot hold everything the original file holds, such as the exact spacing or the order attributes were written in. Something has to convert, and it has to be clear where detail gets dropped.
+
+## The solution
+
+We convert from the parsed tree of the book (the [[cst]]), one writer per format. All the loss happens here, at the very end, and nowhere earlier: the engine keeps the file byte-exact until someone asks for an export. Damaged markup is reported by [[lint]], not patched up in the export, so an export never invents an "unmatched" element. The three writers share only small helpers (marker spelling, canonical forms), because JSON commas and XML closing tags need different bookkeeping.
+
+## Trade-offs
+
+- Exports are lossy by design. Runs of whitespace become one space; attribute order and quote style are lost; some content moves into attributes (`\ca` becomes `altnumber`).
+- You cannot round-trip back to the original file from an export. Keep the USFM for that.
+- HTML has no official reference to test against, so it is held only by a "same text in, same text out" rule.
+- All three ship in the WebAssembly package (~370 KB, ~152 KB gzipped); a Rust user can switch each off.
 
 ## Show me
 
-The scratch book in [[cst]], run through each fold (trimmed):
+The scratch book in [[cst]], through each format (trimmed). Note `   spoke.` became ` spoke.`:
 
 ```text
 USJ   {"type":"para","marker":"p","content":[{"type":"verse","marker":"v","number":"1","sid":"MRK 1:1"},
@@ -27,18 +42,16 @@ HTML  <div class="usfm-p" data-marker="p" data-usfm-type="para" data-usfm-catego
         <sup class="verse-num usfm-lifted usfm-v" … data-sid="MRK 1:1">1</sup>Jesus wept.…
 ```
 
-Note `   spoke.` became ` spoke.`: every whitespace run is one space in the export.
+## How it works
 
-## Why
-
-- **This is the lossy view.** The token stream stays byte-identical; attribute order, quote style, content lifted to attributes (`\ca` → `altnumber`, caller → `caller`) and whitespace are thrown away here and nowhere upstream. Damage is lint's answer, so no `unmatched` element is ever emitted.
-- **Oracled where an oracle exists.** USJ matches 187 of 187 validated committee fixtures in `testData`, with 20 excluded, each with a reason (commit b82a2bf). HTML has no reference; it is pinned by a text-identity invariant.
-- **Separate writers, shared reads.** A JSON array's commas and an XML self-closing rewind are different state, so `export.rs` shares only canonicalization, marker spelling and note-peer sets.
-- **Compile-time optional.** Features `usj`, `usx`, `html`, on by default; the wasm package ships all three (~370 KB, ~152 KB gzipped).
+- **The lossy view.** The [[token]] stream stays byte-identical; whitespace, attribute order, quote style and lifted content are dropped only in these folds.
+- **Oracled where an oracle exists.** USJ matches 187 of 187 validated committee fixtures in `testData`, with 20 excluded, each with a reason (commit b82a2bf). HTML puts every fact in `data-*` attributes and is pinned by a text-identity invariant.
+- **Separate writers, shared reads.** `export.rs` shares only canonicalization, marker spelling and note-peer sets.
+- **Compile-time optional.** Cargo features `usj`, `usx`, `html`, on by default.
 
 ## Composes with
 
-Fold the [[cst]], read [[attributes]] for the k/v splat and the [[marker-table]] for categories.
+Fold the [[cst]], read [[attributes]] for the key/value splat and the [[marker-table]] for categories.
 
 ## Where
 

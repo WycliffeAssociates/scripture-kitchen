@@ -7,12 +7,26 @@ crate: galley
 files: [galley/src/find.md, galley/src/find.rs, galley/tests/find.rs, galley/benches/find.rs]
 related: [mask, words, pantry, find-buffer, mask-map]
 level: 2
-summary: "Literal search over a book's projection, every hit placed back in the source as one or more pieces."
+summary: "Search the readable text of a book, skipping markup and footnotes, and point each hit back at the exact bytes in the file."
 ---
+
+## The problem
+
+A translator searches for "wept. Then" in their book. In the file, a footnote sits between those words, so a plain text search fails. And when it does match, the editor must know exactly which bytes of the real file to highlight or replace, not positions in some cleaned-up copy.
+
+## The solution
+
+We search the [[mask]]: a copy of the book with markup and footnotes removed, which keeps a map from every position back to the original file. A hit in the clean copy is converted back through that map. If the hit spans a removed footnote, it comes back as several pieces, so a replacement never swallows the footnote. Find lives in [[galley]], not the engine, because the engine already provides everything it needs; Find is just a fast byte search on top (ruled 2026-08-24). Replacing a hit is an ordinary [[edit]].
+
+## Trade-offs
+
+- Literal text only. No regular expressions until a consumer asks.
+- Case-insensitive search builds a folded copy of the text first. Measured, that costs about the same as folding on the fly, and keeps the search fast.
+- A hit across a footnote is several ranges, not one, so callers must handle a list.
 
 ## Show me
 
-From `galley/src/find.md`:
+From `galley/src/find.md`. The dots are bytes the mask dropped; "why" is in a footnote, so it is not found:
 
 ```text
 source   \v 1 Jesus wept.\f + \ft why\f* Then…
@@ -22,15 +36,12 @@ Find::literal("wept. Then")   → Hit { projected: 6..16, source: Split([11..16,
 Find::literal("why")          → nothing
 ```
 
-## Why
+## How it works
 
-- **Galley's, not the engine's.** Onion already gives the [[mask]] and its offset map, so Find is `memmem` over `mask.text()`, `to_source` per hit, and replacement as ordinary edits (ruled 2026-08-24).
-- **`Split`, not one span.** A hit across a dropped footnote covers markup in source space; one `a..d` would swallow the note. The bytes between pieces are exactly what the projection dropped.
-- **Whole word is `words/1`.** It calls [[words]] in [[mise]], not sous-core, and `tests/find.rs` asserts every whole-word hit of `the` equals sous's word walk over the test tier.
-- **Case fold: copy plus offset map.** Measured on en_ulb (2026-09-06): folded copy 8.26 ms for `the` against a 7.82 ms lower bound for fold-per-scalar. Within noise, and it keeps `memmem`, so no needle goes quadratic.
+- **`memmem` over `mask.text()`**, then `to_source` per hit. `Hit.projected` is in mask space (for highlighting or a second search); `Hit.source` is `Contiguous(a..b)` or `Split([…])`, one range per source piece. The bytes between pieces are exactly what the projection dropped.
+- **Whole word is `words/1`.** It calls [[words]] in [[mise]], not sous-core; `tests/find.rs` asserts every whole-word hit of `the` equals sous's word walk over the test tier.
+- **Case fold: copy plus offset map.** On en_ulb (2026-09-06): folded copy 8.26 ms for `the` against a 7.82 ms lower bound for fold-per-scalar.
 - **Measured.** Whole Bible, case-sensitive: `Melchizedek` 2.25 ms, `the` 5.14 ms (76,324 hits, ~38 ns each); `और` 13.46 ms over hin2017, where `E0 A4` leads almost every scalar and memmem's prefilter cannot help.
-
-Trade-off: literal only. `regex` waits for a consumer to ask.
 
 ## Composes with
 

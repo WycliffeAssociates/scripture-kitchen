@@ -7,12 +7,26 @@ crate: galley
 files: [galley/src/mask.md, galley/src/mask/schema.rs, galley/src/mask/mod.rs, galley/mask-reader.ts]
 related: [mask, wire, ticket, find-buffer, galley-package, sefer]
 level: 3
-summary: "A projection's source ranges as one MASK buffer, so a host can map projected offsets back without asking again."
+summary: "The list of file ranges that make up a cleaned-up text, sent to the editor once so it can turn any position in that text back into a file position itself."
 ---
+
+## The problem
+
+A host often works on the readable text of a book: the verses with markup and footnotes removed, say for a proofreading view. When it finds something at position 120 in that text, it needs the matching position in the actual file. Asking the engine for every such lookup means a round trip across the WebAssembly boundary each time.
+
+## The solution
+
+The engine sends the [[mask]]'s list of kept file ranges once, as plain pairs of numbers. The host's reader joins them to rebuild the readable text and maps positions back to the file on its own, with no further calls. The obvious alternative is a lookup call per position. The map also carries the file length, so a host cannot apply it to the wrong version of the file.
+
+## Trade-offs
+
+- It can be bigger than the text it describes. On a word-aligned translation each word and each space is its own range: 12.9 MB of map for 4.2 MB of text. For those, keep the string instead.
+- No compressed form. Run-length pairs would halve the aligned case but do not fit the fixed-size row vocabulary.
+- The prefix sums that make lookups fast are rebuilt by the reader at open, not sent.
 
 ## Show me
 
-From `galley/src/mask.md`:
+Rebuilding the verse text from the ranges, then mapping a search hit back. Then the byte layout. From `galley/src/mask.md`:
 
 ```js
 const map = MaskMap.open(galley.mask("books/MRK.usfm", { utf16: true }));
@@ -29,12 +43,12 @@ map.toSource(hit.projectedFrom);
 16 rangeCount     20 sourceLen  24 projectedLen          28 rangeCount × (sourceFrom u32, sourceTo u32)
 ```
 
-## Why
+## How it works
 
 - **`starts` is not on the wire.** It is the prefix sum of range lengths; the reader builds it in one pass at open. Four bytes a range saved for a value derived in microseconds.
 - **`sourceLen` refuses the wrong revision** before a consumer joins slices out of the wrong string; `projectedLen` checks the join.
-- **Cost is honest.** en_ulb verseText: ~80 k ranges, ~645 KB of wire for ~4.1 MB of text. On word-aligned en_ult the map (12.9 MB) is larger than the projection (4.2 MB), because each word and each space is its own range. For aligned references, hold the string.
-- **No run-length form.** `gap u16, keep u16` would halve the aligned figure but is not [[ticket]]'s fixed-width vocabulary.
+- **Cost.** en_ulb verseText: ~80 k ranges, ~645 KB of wire for ~4.1 MB of text. en_ult (word-aligned): 12.9 MB map against a 4.2 MB projection.
+- **No run-length form** (`gap u16, keep u16`): not [[ticket]]'s fixed-width vocabulary.
 
 ## Composes with
 

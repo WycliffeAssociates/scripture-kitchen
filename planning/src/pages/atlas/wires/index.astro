@@ -12,12 +12,13 @@ const wires = await loadWires();
 <Base title="Wires" section="atlas">
   <AtlasSidebar slot="sidebar" />
   <h1 class="text-h3 font-semibold">Wires</h1>
+  <p class="text-small">The editor, Sefer, calls the engine through WebAssembly, often on every keystroke. USFM keeps one book per file, so each call is about a whole book. Copying strings and objects across that boundary is the expensive part. So a wire is mostly numbers: fixed-size rows of integers, small string tables so no string repeats, generated enums both sides share, and number ranges saying which stretch of the book something is about.</p>
   <ul class="wwhy">
-    <li><b>One parse → one ArrayBuffer.</b> Rust writes it, JS reads it in place.</li>
-    <li><b>No per-node JS objects.</b> A row is read when asked for, by a cursor.</li>
-    <li><b>Strings written once,</b> as offsets into the text you already have.</li>
-    <li><b>A generated reader per format,</b> from the same declaration as the writer.</li>
-    <li><b>A version mismatch fails loud</b> when the buffer is opened.</li>
+    <li><b>One call, one buffer.</b> Rust writes it, JavaScript reads it in place.</li>
+    <li><b>No object per node.</b> A row is read only when asked for, through a cursor.</li>
+    <li><b>Text is not copied.</b> Rows point at byte positions in the file the editor already has.</li>
+    <li><b>Writer and reader are generated</b> from one declaration per format.</li>
+    <li><b>A version mismatch fails loudly</b> when the buffer is opened.</li>
   </ul>
   <p class="text-small text-on-surface-secondary">More in <a href="/atlas/wire">the wire</a>.{fixtures.layouts && " These layouts are the fixture; docs/layouts/ is not written yet."}</p>
 

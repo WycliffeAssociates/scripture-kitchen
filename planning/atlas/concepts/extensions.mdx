@@ -7,12 +7,27 @@ crate: onion
 files: [onion/src/extensions.rs, mise/src/extensions.rs, onion-wasm/README.md, galley/src/wasm.md]
 related: [marker-table, scanner, chunk-cache, pantry, mise]
 level: 2
-summary: "User \\z markers registered by name and spec category, resolved to the template row that category behaves as."
+summary: "Lets a project define its own markers (names starting with z) by saying which built-in kind each one behaves like."
 ---
+
+## The problem
+
+USFM lets a project invent its own markers, as long as the name starts with `z`. An alignment project might add `\zaln-s ... \zaln-e` around each word. The project lists them in a file called `markers.ext`, saying for each one "this behaves like a footnote" or "like a milestone". The engine has to treat `\zaln-s` correctly without knowing it in advance.
+
+## The solution
+
+A custom marker is mapped to a "template": a built-in row that already behaves like that category. From then on it acts exactly like the template, for nesting, closing, checking, masking and export. We do not give custom markers their own rules, because the spec's category field already says how they behave. Only the spelled name is new. Each book carries its own list, because a translation and the reference texts beside it can come from different projects.
+
+## Trade-offs
+
+- A custom marker can only behave like one of the 17 templates; it cannot invent a new behaviour.
+- Old unprefixed names like `\s5` are allowed only when no real marker has that spelling. `s1` or `p` are refused.
+- Changing the process-wide list invalidates everything already parsed, so set it once at startup, not between edits.
+- Unregistered `\z` markers are inert: they open, close and contribute nothing.
 
 ## Show me
 
-From `onion/src/extensions.rs`:
+Registering `zaln` as a milestone makes it pair and take attributes like `\qt-s`; relaxing the prefix lets `\s5` be a bare point.
 
 ```text
 set_extensions(&[CustomMarker { name: "zaln", category: Milestone, .. }])
@@ -25,7 +40,7 @@ set_extensions_with(&[CustomMarker { name: "s5", category: Standalone, .. }],
 lex("\\p \\v 1 a \\s5 \\v 3 b")   -> \s5 is a bare point; the \p stays open past it
 ```
 
-At the JS wall (`onion-wasm/README.md`):
+At the JS wall (`onion-wasm/README.md`), bad entries come back with a reason:
 
 ```ts
 customMarkers([{ name: "zmyf", category: "footnote" }, { name: "nope", category: "char" }])
@@ -33,14 +48,12 @@ customMarkers([{ name: "zmyf", category: "footnote" }, { name: "nope", category:
 //     malformed: [{ name: "nope", reason: "name does not start with z" }] }
 ```
 
-## Why
+## How it works
 
-- **A name maps to a template row and stops.** The spec's `\category` field already says which marker a user marker behaves as. Every behaviour (caller, note scope, closing, lint contexts, mask, export shape) is the row's. The one thing a template cannot carry is the spelled name, which is what `generated::is_extension` is for. Shipped as 0.1.4, seventeen template rows (commit 0eda490).
-- **Legacy names add, never redefine.** `relax_z_prefix` admits en_ulb's `\s5` because no spec spelling resolves it; `s1` or `p` is refused.
-- **Per book, not per process** (planning item 2026-10-21, shipped 0.1.13). A main text and its references can come from projects with different `markers.ext`. Each [[pantry]] book lexes by the list it was registered with.
+- **A name maps to a template row and stops.** Every behaviour (caller, note scope, closing, lint contexts, mask, export shape) is the [[marker-table]] row's. The one thing a template cannot carry is the spelled name, which is what `generated::is_extension` is for. Shipped as 0.1.4, seventeen template rows (commit 0eda490).
+- **Legacy names add, never redefine.** `relax_z_prefix` admits en_ulb's `\s5` because no spec spelling resolves it.
+- **Per book, not per process** (planning item 2026-10-21, shipped 0.1.13). Each [[pantry]] book lexes by the list it was registered with.
 - **Lists key the caches.** The [[chunk-cache]] key holds the list's fingerprint, so equal lists share parses and different lists never do.
-
-Trade-off: installing a process-wide list invalidates every product derived under the old rows, so it belongs at composition, not between edits.
 
 ## Composes with
 
