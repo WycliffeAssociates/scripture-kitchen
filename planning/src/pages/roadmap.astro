@@ -9,6 +9,7 @@ import Base from "../layouts/Base.astro";
 import { components } from "../components/index.ts";
 import { findItem, loadItems } from "../lib/items.ts";
 import { readRoadmap } from "../lib/roadmap.ts";
+import { url } from "../lib/url.ts";
 
 const found = import.meta.glob<{ default: (props: { components: unknown }) => unknown }>("/roadmap.mdx", { eager: true });
 const Roadmap = Object.values(found)[0]?.default;
@@ -40,7 +41,7 @@ const missing = items.filter(
         <ul class="m-0 list-none space-y-1 p-0 text-small">
           {missing.map((item) => (
             <li data-ref={`unplaced:${item.slug}`} data-loc={item.path}>
-              <a href={`/items/${item.slug}`}>{item.entry.data.title}</a>
+              <a href={url(`/items/${item.slug}`)}>{item.entry.data.title}</a>
               <span class="ms-2 text-on-surface-secondary">{item.entry.data.status}{item.entry.data.priority !== undefined && ` · P${item.entry.data.priority}`}</span>
             </li>
           ))}

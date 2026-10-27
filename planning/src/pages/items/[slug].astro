@@ -5,6 +5,7 @@ import Base from "../../layouts/Base.astro";
 import { components } from "../../components/index.ts";
 import { day, findItem, loadItems } from "../../lib/items.ts";
 import { readRoadmap } from "../../lib/roadmap.ts";
+import { url } from "../../lib/url.ts";
 
 export const getStaticPaths = async () => {
   const items = await loadItems();
@@ -38,7 +39,7 @@ const placed = (readRoadmap() ?? []).flatMap((phase) =>
         {data.tags.length > 0 && <div>{data.tags.map((tag) => `#${tag}`).join(" ")}</div>}
       </dl>
       {placed.length > 0 && (
-        <p class="mt-3 text-small"><a href="/roadmap">On the roadmap</a>: {placed.join(", ")}</p>
+        <p class="mt-3 text-small"><a href={url("/roadmap")}>On the roadmap</a>: {placed.join(", ")}</p>
       )}
       {open.length > 0 && (
         <p class="mt-3 text-small text-on-surface-warning">
@@ -52,7 +53,7 @@ const placed = (readRoadmap() ?? []).flatMap((phase) =>
     {related.length > 0 && (
       <footer data-ref="related" class="mt-12 border-t border-surface-border pt-4 text-small">
         <span class="text-on-surface-secondary">Related: </span>
-        {related.map((other, i) => <>{i > 0 && " · "}<a href={`/items/${other.slug}`}>{other.entry.data.title}</a></>)}
+        {related.map((other, i) => <>{i > 0 && " · "}<a href={url(`/items/${other.slug}`)}>{other.entry.data.title}</a></>)}
       </footer>
     )}
   </article>

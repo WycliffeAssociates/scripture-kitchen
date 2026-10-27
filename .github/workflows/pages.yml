@@ -1,0 +1,76 @@
+name: pages
+
+# The planning site (planning/) at https://wycliffeassociates.github.io/scripture-kitchen/.
+# It reads only checked-in files: the items and atlas under planning/, the wire
+# layouts in docs/layouts, the generated readers it decodes samples with, and
+# the verify-kitchen feature files. No Rust toolchain; nothing shells out to cargo.
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "planning/**"
+      - "docs/layouts/**"
+      - "onion-wasm/reader.ts"
+      - "galley/*-reader.ts"
+      - "galley/sous-*.ts"
+      - ".claude/skills/verify-kitchen/features/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SITE_BASE: /scripture-kitchen
+    defaults:
+      run:
+        working-directory: planning
+    steps:
+      # One commit is enough: the build links cited files at `git rev-parse HEAD`.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # pnpm-lock.yaml is lockfileVersion 9.0, and pnpm-workspace.yaml's
+      # minimumReleaseAgeExclude needs pnpm 10.16 or later.
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      # Node 24 runs scripts/*.ts by type stripping, as ci.yml's wasm job does.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: planning/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm atlas check
+      - run: pnpm build
+      - run: pnpm links check
+
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: planning/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

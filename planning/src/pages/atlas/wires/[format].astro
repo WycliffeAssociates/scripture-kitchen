@@ -11,6 +11,7 @@ import WireHeader from "../../../components/atlas/WireHeader.astro";
 import "../../../styles/wires.css";
 import { loadWires, regionBytes, type Wire } from "../../../lib/atlas/layouts.ts";
 import { fixtures } from "../../../lib/atlas/paths.ts";
+import { url } from "../../../lib/url.ts";
 
 export const getStaticPaths = async () =>
   (await loadWires()).map((wire) => ({ params: { format: wire.layout.format }, props: { wire } }));
@@ -28,7 +29,7 @@ const samplePath = (p: string): string => (fixtures.layouts ? `planning/atlas-fi
 ---
 <Base title={`${layout.format} wire`} section="atlas">
   <AtlasSidebar slot="sidebar" />
-  <p class="text-small"><a href="/atlas/wires">← Wires</a></p>
+  <p class="text-small"><a href={url("/atlas/wires")}>← Wires</a></p>
   <WireHeader wire={wire} />
 
   <p class="wlegend text-smallest text-on-surface-secondary">

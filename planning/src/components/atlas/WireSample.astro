@@ -6,6 +6,7 @@
  */
 import "../../styles/wires.css";
 import type { Sample } from "../../lib/atlas/layouts.ts";
+import { url } from "../../lib/url.ts";
 
 interface Props {
   sample: Sample;
@@ -64,7 +65,7 @@ const size = (r: Sample["regions"][number]): string => {
     {sample.regions.map((r) => (
       <li data-from={r.at} data-to={r.end} tabindex="0">
         <span class="font-mono">{r.name}</span>
-        <span class="text-on-surface-tertiary">@{r.at} · {size(r)}{r.holds && <> · <a href={`/atlas/wires/${r.holds}`}>{r.holds}</a></>}</span>
+        <span class="text-on-surface-tertiary">@{r.at} · {size(r)}{r.holds && <> · <a href={url(`/atlas/wires/${r.holds}`)}>{r.holds}</a></>}</span>
       </li>
     ))}
   </ul>

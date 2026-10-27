@@ -6,9 +6,10 @@
  */
 import { loadItems, day } from "../lib/items.ts";
 import { CLOSED, STATUSES } from "../lib/schema.ts";
+import { sitePath, url } from "../lib/url.ts";
 
 const items = await loadItems();
-const current = Astro.url.pathname.replace(/\/$/u, "");
+const current = sitePath(Astro.url.pathname);
 
 const groups = STATUSES.map((status) => ({
   status,
@@ -28,7 +29,7 @@ const groups = STATUSES.map((status) => ({
 ></div>
 <aside id="sidebar" data-ref="sidebar" class="border-surface-border bg-surface-primary md:sticky md:top-12 md:h-[calc(100dvh-3rem)] md:overflow-y-auto md:border-e">
   <div class="flex items-baseline gap-3 px-4 pt-4 pb-3">
-    <a href="/items" class="font-semibold text-on-surface-primary no-underline">Plans</a>
+    <a href={url("/items")} class="font-semibold text-on-surface-primary no-underline">Plans</a>
     <span class="text-smallest text-on-surface-tertiary">{items.length} items</span>
   </div>
 
@@ -104,7 +105,7 @@ const groups = STATUSES.map((status) => ({
                 data-created={day(data.created)}
               >
                 <a
-                  href={`/items/${item.slug}`}
+                  href={url(`/items/${item.slug}`)}
                   aria-current={active ? "page" : undefined}
                   class="flex items-baseline gap-2 rounded-sm px-2 py-1 text-small text-on-surface-primary no-underline hover:bg-sidebar-surface-hover aria-[current=page]:bg-sidebar-surface-active"
                 >

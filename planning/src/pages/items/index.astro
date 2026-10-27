@@ -6,6 +6,7 @@ import Sidebar from "../../components/Sidebar.astro";
 import Base from "../../layouts/Base.astro";
 import { day, loadItems } from "../../lib/items.ts";
 import { CLOSED, STATUSES } from "../../lib/schema.ts";
+import { url } from "../../lib/url.ts";
 
 const items = await loadItems();
 const rank = (p: number | undefined): number => p ?? Number.POSITIVE_INFINITY;
@@ -21,7 +22,7 @@ const groups = STATUSES.map((status) => ({
   <Sidebar slot="sidebar" />
   <h1 class="text-h4 font-semibold">Plans</h1>
   <p class="mt-1 text-small text-on-surface-secondary">
-    {items.length} items in <code>planning/items/</code>. Open questions and follow-ups are in the <a href="/inbox">Inbox</a>; the order of work is the <a href="/roadmap">Roadmap</a>.
+    {items.length} items in <code>planning/items/</code>. Open questions and follow-ups are in the <a href={url("/inbox")}>Inbox</a>; the order of work is the <a href={url("/roadmap")}>Roadmap</a>.
   </p>
   {groups.map((group) => (
     <details data-ref={`plans:${group.status}`} open={!group.closed} class="mt-6">
@@ -35,7 +36,7 @@ const groups = STATUSES.map((status) => ({
           return (
             <li data-ref={`item:${item.slug}`} data-loc={item.path} class="flex flex-wrap items-baseline gap-x-3 rounded-md border border-surface-border bg-surface-primary px-3 py-2">
               {data.priority !== undefined && <span class="font-mono text-smallest text-on-surface-secondary">P{data.priority}</span>}
-              <a href={`/items/${item.slug}`} class="min-w-0 flex-1">{data.title}</a>
+              <a href={url(`/items/${item.slug}`)} class="min-w-0 flex-1">{data.title}</a>
               {open > 0 && <span class="text-smallest text-on-surface-warning">{open} open</span>}
               <span class="text-smallest text-on-surface-tertiary">{data.kind} · {day(data.updated)}</span>
             </li>

@@ -181,3 +181,28 @@ It is the docs site for the whole workspace. Routes:
 
 Any MDX file may link a concept with `[[slug]]` or `[[slug|shown text]]` (a term or alias
 works too); `pnpm plans check` (or `pnpm atlas check`) lists one that names nothing.
+
+### Published
+
+<https://wycliffeassociates.github.io/scripture-kitchen/>: every push to master that touches
+the site's inputs deploys it (`.github/workflows/pages.yml`; Actions → pages → Run workflow
+redeploys by hand). That build sets `SITE_BASE=/scripture-kitchen`, which puts every link
+under the base and leaves the annotator out; unset (`pnpm dev`, a plain `pnpm build`) the site
+is at `/` with the annotator. In site code, link with `url("/atlas/x")` from `src/lib/url.ts`,
+never a bare `"/…"`; links written in MDX get the base added at build, and a relative link to a
+repo file (`sous-chef/rules/x.md`) goes to GitHub at the build's commit.
+
+Preview what Pages will serve:
+
+```sh
+SITE_BASE=/scripture-kitchen pnpm build
+SITE_BASE=/scripture-kitchen pnpm links check   # every internal href/src resolves under the base
+SITE_BASE=/scripture-kitchen pnpm preview       # http://localhost:4321/scripture-kitchen/
+```
+
+One-time switches, for a maintainer, before the first deploy:
+
+```sh
+gh api -X POST repos/WycliffeAssociates/scripture-kitchen/pages -f build_type=workflow
+gh repo edit --homepage https://wycliffeassociates.github.io/scripture-kitchen/
+```

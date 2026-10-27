@@ -7,6 +7,7 @@
  *   <Step item="2026-10-14-planning-site" with="tests">Ship the sidebar first.</Step>
  */
 import { findItem, loadItems } from "../lib/items.ts";
+import { url } from "../lib/url.ts";
 
 interface Props { item?: string; with?: string; "data-loc"?: string }
 const { item: ref, with: extras, "data-loc": loc } = Astro.props;
@@ -26,7 +27,7 @@ const tags = (extras ?? "").split(",").map((s) => s.trim()).filter(Boolean);
   <div class="flex items-baseline gap-2">
     <span class="roadmap-n" aria-hidden="true"></span>
     {item
-      ? <a href={`/items/${item.slug}`} class="font-medium leading-snug text-on-surface-primary no-underline hover:underline">{data!.title}</a>
+      ? <a href={url(`/items/${item.slug}`)} class="font-medium leading-snug text-on-surface-primary no-underline hover:underline">{data!.title}</a>
       : ref
         ? <span class="font-mono text-small text-on-surface-error">No item “{ref}”</span>
         : <span class="font-medium leading-snug [&>p]:m-0" set:html={note} />}

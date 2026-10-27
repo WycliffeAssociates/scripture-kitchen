@@ -2,22 +2,30 @@ import mdx from "@astrojs/mdx";
 import { unified } from "@astrojs/markdown-remark";
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "astro/config";
+import rehypeBase from "./src/lib/rehype-base.ts";
 import rehypeLoc from "./src/lib/rehype-loc.ts";
 import remarkFenceProps from "./src/lib/remark-fence-props.ts";
 import remarkMermaid from "./src/lib/remark-mermaid.ts";
 import remarkWiki from "./src/lib/remark-wiki.ts";
 
+// The GitHub Pages build sets SITE_BASE=/scripture-kitchen (.github/workflows/pages.yml).
+// Unset, the site lives at / and keeps the annotator: `pnpm dev` and a plain `pnpm build`.
+const base = (process.env.SITE_BASE ?? "").replace(/^\/*/u, "/").replace(/\/+$/u, "");
+const pages = base !== "";
+
 export default defineConfig({
+  ...(pages ? { site: process.env.SITE_ORIGIN ?? "https://wycliffeassociates.github.io", base } : {}),
   devToolbar: { enabled: false },
   // The atlas is the front door; the inbox moved to /inbox.
-  redirects: { "/": "/atlas" },
+  redirects: { "/": `${base}/atlas` },
   integrations: [mdx()],
   markdown: {
     // The remark/rehype processor, so these plugins run; MDX inherits it.
-    processor: unified({ remarkPlugins: [remarkFenceProps, remarkMermaid, remarkWiki], rehypePlugins: [rehypeLoc] }),
+    processor: unified({ remarkPlugins: [remarkFenceProps, remarkMermaid, remarkWiki], rehypePlugins: [rehypeLoc, [rehypeBase, { base }]] }),
     shikiConfig: { themes: { light: "github-light", dark: "github-dark" } },
   },
   vite: {
     plugins: [tailwindcss()],
+    define: { __ANNOTATE__: JSON.stringify(!pages) },
   },
 });

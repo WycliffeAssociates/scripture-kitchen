@@ -11,6 +11,7 @@ import { loadItems } from "../lib/items.ts";
 import { parseFile } from "../lib/lift.ts";
 import { roadmapPath } from "../lib/roadmap.ts";
 import { repoRoot } from "../lib/root.ts";
+import { url } from "../lib/url.ts";
 
 const items = (await loadItems()).filter((item) => !item.closed);
 // Most pressing item first (priority, then most recently touched); within an item, file order.
@@ -22,12 +23,12 @@ const rows = items
 const roadmap = roadmapPath();
 const roadmapRows = existsSync(roadmap)
   ? parseFile(roadmap).lifted.filter((l) => l.open).map((lifted) => ({
-      item: { slug: "", path: relative(repoRoot, roadmap), href: "/roadmap", title: "Roadmap", priority: undefined as number | undefined },
+      item: { slug: "", path: relative(repoRoot, roadmap), href: url("/roadmap"), title: "Roadmap", priority: undefined as number | undefined },
       lifted,
     }))
   : [];
 const view = (row: (typeof rows)[number]) => ({
-  item: { slug: row.item.slug, path: row.item.path, href: `/items/${row.item.slug}`, title: row.item.entry.data.title, priority: row.item.entry.data.priority },
+  item: { slug: row.item.slug, path: row.item.path, href: url(`/items/${row.item.slug}`), title: row.item.entry.data.title, priority: row.item.entry.data.priority },
   lifted: row.lifted,
 });
 const all = [...roadmapRows, ...rows.map(view)];

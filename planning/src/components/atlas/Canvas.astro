@@ -7,6 +7,7 @@
  */
 import type { Canvas } from "../../lib/atlas/canvas.ts";
 import { LEVEL_NAMES, SCALE, THRESHOLD } from "../../lib/atlas/canvas.ts";
+import { url } from "../../lib/url.ts";
 
 interface Props { canvas: Canvas }
 const { canvas } = Astro.props;
@@ -16,7 +17,7 @@ const info = Object.fromEntries(canvas.boxes.map((b) => [b.id, {
   x: b.x, y: b.y, w: b.w, h: b.h,
 }]));
 const data = { threshold: THRESHOLD, hub: canvas.hub, width: canvas.width, height: canvas.height, info };
-const href = (slug: string | null): string | undefined => (slug === null ? undefined : `/atlas/${slug}`);
+const href = (slug: string | null): string | undefined => (slug === null ? undefined : url(`/atlas/${slug}`));
 /** `from-2` shows a crate's frame from level 2; `until-2` hides its card and the card's wires there. */
 const span = (from: number | null, until: number | null): string[] => [from === null ? "" : `from-${from}`, until === null ? "" : `until-${until}`];
 ---

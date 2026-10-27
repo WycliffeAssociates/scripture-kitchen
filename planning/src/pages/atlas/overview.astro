@@ -6,6 +6,7 @@
 import Base from "../../layouts/Base.astro";
 import AtlasSidebar from "../../components/atlas/AtlasSidebar.astro";
 import { components } from "../../components/index.ts";
+import { url } from "../../lib/url.ts";
 
 type Mdx = { default: (props: { components: unknown }) => unknown; frontmatter?: { title?: string; summary?: string } };
 const found = import.meta.glob<Mdx>("/atlas/index.mdx", { eager: true });
@@ -18,6 +19,6 @@ const Overview = page?.default;
     {Overview
       ? <div class="prose"><Overview components={components} /></div>
       : <p>No <code>planning/atlas/index.mdx</code> yet.</p>}
-    <p class="mt-10"><a href="/atlas">Open the map →</a></p>
+    <p class="mt-10"><a href={url("/atlas")}>Open the map →</a></p>
   </article>
 </Base>

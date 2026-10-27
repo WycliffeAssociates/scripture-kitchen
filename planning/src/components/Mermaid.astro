@@ -16,6 +16,7 @@
  * its source and the parser's message instead of failing the build.
  */
 import { render } from "pele";
+import { url } from "../lib/url.ts";
 
 interface Props { id?: string; code: string; caption?: string; "data-loc"?: string; "data-body"?: string }
 const { id, code, caption, "data-loc": loc } = Astro.props;
@@ -26,7 +27,9 @@ try {
   // The drawing goes in a viewport group, so pan and zoom move it and not the frame.
   svg = render(code.trim()).svg
     .replace(/^(<svg\b[^>]*>)/u, "$1<g data-viewport>")
-    .replace(/<\/svg>\s*$/u, "</g></svg>");
+    .replace(/<\/svg>\s*$/u, "</g></svg>")
+    // `click node "/atlas/cst"` links are site paths; put the deploy base in front.
+    .replace(/(\bhref=")(\/[^/"][^"]*)"/gu, (_, attr: string, path: string) => `${attr}${url(path)}"`);
 } catch (cause) {
   error = cause instanceof Error ? cause.message : String(cause);
 }

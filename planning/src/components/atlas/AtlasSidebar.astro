@@ -4,8 +4,9 @@
  * by kind, each with its crate's colour. Folds shut on a phone.
  */
 import { byKind, loadConcepts } from "../../lib/atlas/concepts.ts";
+import { sitePath, url } from "../../lib/url.ts";
 
-const current = Astro.url.pathname.replace(/\/$/u, "");
+const current = sitePath(Astro.url.pathname);
 const groups = byKind(await loadConcepts());
 const link = "flex items-center gap-2 rounded-sm px-2 py-1 text-small text-on-surface-primary no-underline hover:bg-sidebar-surface-hover aria-[current=page]:bg-sidebar-surface-active";
 ---
@@ -15,16 +16,16 @@ const link = "flex items-center gap-2 rounded-sm px-2 py-1 text-small text-on-su
       Concepts <span class="ms-auto text-on-surface-tertiary group-open:rotate-180">▾</span>
     </summary>
     <nav class="px-2 pt-2 pb-4">
-      <a href="/atlas" aria-current={current === "/atlas" ? "page" : undefined} class={link}>Map</a>
-      <a href="/atlas/overview" aria-current={current === "/atlas/overview" ? "page" : undefined} class={link}>Overview</a>
-      <a href="/atlas/wires" aria-current={current.startsWith("/atlas/wires") ? "page" : undefined} class={link}>Wires</a>
+      <a href={url("/atlas")} aria-current={current === "/atlas" ? "page" : undefined} class={link}>Map</a>
+      <a href={url("/atlas/overview")} aria-current={current === "/atlas/overview" ? "page" : undefined} class={link}>Overview</a>
+      <a href={url("/atlas/wires")} aria-current={current.startsWith("/atlas/wires") ? "page" : undefined} class={link}>Wires</a>
       {groups.map((group) => (
         <section class="mt-3">
           <h2 class="m-0 px-2 py-1 text-smallest font-semibold uppercase tracking-wide text-on-surface-secondary">{group.label}</h2>
           <ul class="m-0 list-none p-0">
             {group.items.map((c) => (
               <li>
-                <a href={`/atlas/${c.slug}`} aria-current={current === `/atlas/${c.slug}` ? "page" : undefined} class={link} data-crate={c.entry.data.crate} title={c.entry.data.summary}>
+                <a href={url(`/atlas/${c.slug}`)} aria-current={current === `/atlas/${c.slug}` ? "page" : undefined} class={link} data-crate={c.entry.data.crate} title={c.entry.data.summary}>
                   <span class="crate-dot" aria-hidden="true"></span>
                   <span class="min-w-0 flex-1 truncate">{c.entry.data.term}</span>
                 </a>

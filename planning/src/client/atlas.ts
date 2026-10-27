@@ -9,6 +9,7 @@
  */
 import { select } from "d3-selection";
 import { zoom, zoomIdentity, type D3ZoomEvent, type ZoomTransform } from "d3-zoom";
+import { url } from "../lib/url.ts";
 
 interface Info {
   label: string; level: number; kind: string; crate: string | null; slug: string | null;
@@ -238,7 +239,7 @@ export const mountAtlas = (): void => {
     }
     const link = part("link") as HTMLAnchorElement;
     link.hidden = node.slug === null;
-    if (node.slug !== null) link.href = `/atlas/${node.slug}`;
+    if (node.slug !== null) link.href = url(`/atlas/${node.slug}`);
     part("zoom").hidden = !node.group && node.level >= current;
     panel.hidden = false;
     for (const el of host.querySelectorAll("[data-selected]")) el.removeAttribute("data-selected");
