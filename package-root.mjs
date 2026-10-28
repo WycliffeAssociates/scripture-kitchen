@@ -56,11 +56,10 @@ export const root = {
   version: galley.version,
   description: galley.description,
   type: galley.type,
-  // Never published to a registry: consumers install from a git tag or from the
-  // tarball on the Release. `private` blocks `npm publish` and nothing else —
-  // a git install and `npm pack` both work through it.
-  private: true,
   license: "UNLICENSED",
+  // Published only to the org Nexus (ci.yml's publish job); pinning the registry
+  // here keeps a stray `npm publish` off the public one.
+  publishConfig: { registry: "https://nexus-registry.walink.org/repository/wa-npm/" },
   // `files` takes bare paths, not "./"-prefixed ones.
   files: PACKAGES.flatMap(({ dir, pkg }) => pkg.files.map((f) => `${dir}/${f}`)),
   sideEffects: PACKAGES.flatMap(({ dir, pkg }) => push(dir)(pkg.sideEffects)),
