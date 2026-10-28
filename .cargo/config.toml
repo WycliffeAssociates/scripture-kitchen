@@ -1,0 +1,4 @@
+# The org Nexus. ci.yml's publish-crates job publishes here; a consumer copies
+# this table into their own .cargo/config.toml.
+[registries.wa-cargo]
+index = "sparse+https://nexus-registry.walink.org/repository/wa-cargo/"

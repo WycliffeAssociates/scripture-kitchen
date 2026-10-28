@@ -322,3 +322,44 @@ jobs:
             exit 0
           fi
           npm publish
+
+  # The crates to the org Nexus (wa-cargo in .cargo/config.toml), leaves first
+  # so each finds its siblings already indexed. Nexus's free edition has no
+  # cargo tokens: the token is HTTP Basic over ci-publisher's login.
+  # Re-running a tag is safe: a crate whose version is indexed is skipped.
+  publish-crates:
+    needs: [release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+        with:
+          cache-key: publish
+
+      - name: Source secrets
+        uses: 1password/load-secrets-action@v3
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          NEXUS_USER: "op://DevOps/Nexus Registry CI/emailAddress"
+          NEXUS_PASSWORD: "op://DevOps/Nexus Registry CI/password"
+
+      - name: publish
+        run: |
+          token="Basic $(printf '%s:%s' "$NEXUS_USER" "$NEXUS_PASSWORD" | base64 -w0)"
+          echo "::add-mask::${token}"
+          export CARGO_REGISTRIES_WA_CARGO_TOKEN="$token"
+          index=https://nexus-registry.walink.org/repository/wa-cargo
+          want="${GITHUB_REF_NAME#v}"
+          for crate in mise ticket usfm_onion onion-wasm sous-core usfm_galley; do
+            path="${crate:0:2}/${crate:2:2}/${crate}"
+            if curl -sf -H "Authorization: $token" "$index/$path" | grep -q "\"vers\":\"$want\""; then
+              echo "$crate $want is already on wa-cargo"
+              continue
+            fi
+            cargo publish -p "$crate" --registry wa-cargo
+          done
