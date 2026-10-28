@@ -3,6 +3,8 @@ name = "usfm_galley"
 version = "0.1.17"
 edition = "2024"
 description = "The workflows crate over the USFM engine and the Sous analysis — the resident handle, and every onion door on one module."
+# The npm package (pkg-*, the readers) ships from the repo root; the crate is Rust only.
+exclude = ["pkg-*", "*.ts", "*.mjs", "*.json"]
 
 [lints]
 workspace = true
@@ -15,15 +17,15 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 # The wire vocabulary and the per-record emitters this crate's schema module
 # declares against. Generator-only: nothing on a runtime path calls it.
-ticket = { path = "../ticket" }
+ticket = { path = "../ticket", version = "0.1.17" }
 # Literal search: `memmem` over a book's projection (galley/src/find.md).
 memchr.workspace = true
 # The leaf both engines share: `BookKey`, canonical order, `Utf16Table`.
-mise = { path = "../mise" }
-usfm_onion = { path = "../onion" }
+mise = { path = "../mise", version = "0.1.17" }
+usfm_onion = { path = "../onion", version = "0.1.17" }
 # The other engine galley coordinates. Never the reverse: sous-core keeps no
 # onion dependency and sees only neutral projected coordinates.
-sous-core = { path = "../sous-chef/core" }
+sous-core = { path = "../sous-chef/core", version = "0.1.17" }
 # xxh3-128 for the content-addressed chunk checksums (vision §13.4:
 # xxh3-128-v1).
 xxhash-rust.workspace = true
@@ -37,7 +39,7 @@ rayon = { workspace = true, optional = true }
 # so the linker pulls the object its shims sit in — one engine copy, both
 # doors, one module.
 wasm-bindgen = { version = "0.2", optional = true }
-onion-wasm = { path = "../onion-wasm", optional = true }
+onion-wasm = { path = "../onion-wasm", version = "0.1.17", optional = true }
 js-sys = { version = "0.3", optional = true }
 # JSON for the overlay's three read-only doors, which answer structured rows
 # no buffer format would earn. Behind `wasm` only: the native crate computes
@@ -48,7 +50,7 @@ serde_json = { version = "1", optional = true }
 [dev-dependencies]
 # The shared staleness reporter, for the gates below. A regular dependency too;
 # an integration test sees only dev-dependencies.
-ticket = { path = "../ticket" }
+ticket = { path = "../ticket", version = "0.1.17" }
 divan = "0.1.21"
 # Example-only heap profiler (galley/examples/heap_profile.rs): attributes
 # live bytes at global max to allocation sites, not just totals.

@@ -19,7 +19,7 @@ use crate::attributes::{AttrResolution, MalformedAttr};
 use crate::tables::schema::AttrStatus;
 
 const RS_TEMPLATE: &str = include_str!("generated.rs.tmpl");
-const TS_TEMPLATE: &str = include_str!("../../../onion-wasm/reader.ts.tmpl");
+const TS_TEMPLATE: &str = include_str!("../../reader.ts.tmpl");
 
 /// `docs/layouts/dish.json`: the envelope and every record, for the docs.
 pub fn layout_json() -> String {

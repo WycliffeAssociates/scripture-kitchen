@@ -308,7 +308,7 @@ pub fn generated_reader_ts() -> String {
         ),
     ];
 
-    let mut text = include_str!("../../../reader.ts.tmpl").to_string();
+    let mut text = include_str!("../../reader.ts.tmpl").to_string();
     for (placeholder, value) in substitutions {
         text = text.replace(placeholder, &value);
     }

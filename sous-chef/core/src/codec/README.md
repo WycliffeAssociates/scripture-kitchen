@@ -431,7 +431,7 @@ ONE generator, TWO outputs: `sous-chef/reader.ts` is the reader's home, and
 sous-chef copy; `galley/tests/sous_conformance.mjs` imports the galley one.
 
 `corpus::generated_reader_ts()` substitutes `@@NAME@@` placeholders in
-`sous-chef/reader.ts.tmpl` with the Rust constants — every offset, the magic,
+`sous-chef/core/reader.ts.tmpl` with the Rust constants — every offset, the magic,
 the format version, the UTF-16 flag, and the `HygieneClass`, `PresenceKind`,
 `Channel`, `OuterClass`, `Pool`, and `Reasons` name lists. The
 freshness test `corpus::tests::checked_in_reader_is_fresh` compares the

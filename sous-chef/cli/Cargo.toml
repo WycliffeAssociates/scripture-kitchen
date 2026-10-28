@@ -2,6 +2,7 @@
 name = "sous-cli"
 version.workspace = true
 edition.workspace = true
+publish = false
 
 [lints]
 workspace = true
@@ -13,8 +14,8 @@ path = "src/main.rs"
 [dependencies]
 rayon.workspace = true
 rustc-hash.workspace = true
-sous-core = { path = "../core" }
+sous-core = { path = "../core", version = "0.1.17" }
 # Publication only: the stateless galley::sous seam. No Warmer, no cache.
-usfm_galley = { path = "../../galley" }
-usfm_onion = { path = "../../onion", default-features = false }
+usfm_galley = { path = "../../galley", version = "0.1.17" }
+usfm_onion = { path = "../../onion", version = "0.1.17", default-features = false }
 usage.workspace = true

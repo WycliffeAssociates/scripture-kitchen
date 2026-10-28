@@ -35,7 +35,7 @@
   failure at `open` rather than a field silently misread. Two formats are still
   read by hand and are the standing debt: galley's corpus envelope (`ONCP`,
   written in `galley/src/corpus.rs`, decoded inside
-  `onion-wasm/reader.ts.tmpl`) and sous-core's, whose reader is typed in
+  `onion/reader.ts.tmpl`) and sous-core's, whose reader is typed in
   TypeScript with only its numbers generated.
 - `sous-core` never depends on onion. It takes a neutral borrowed view of the
   analysis. Do not add the dependency; see the charter's ownership boundaries.

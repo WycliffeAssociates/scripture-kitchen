@@ -269,6 +269,9 @@ jobs:
             got=$(node --input-type=commonjs -p "require('./$f').version" < /dev/null)
             [ "$got" = "$want" ] || { echo "$f is $got, tag says $want"; fail=1; }
           done
+          # A published crate names its siblings by these versions, not by path.
+          stale=$(git grep -nE 'path = "[^"]+", version = "' -- '*Cargo.toml' | grep -v "version = \"$want\"" || true)
+          [ -z "$stale" ] || { echo "path dependencies not at $want:"; echo "$stale"; fail=1; }
           exit $fail
 
       - name: release
