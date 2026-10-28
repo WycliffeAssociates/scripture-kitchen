@@ -238,12 +238,10 @@ jobs:
           cache-key: release
       - run: cargo test --workspace --release -- --include-ignored
 
-  # The tag IS the distribution — both consumers install from it directly:
-  #   Cargo   usfm_onion = { git = "…/usfm_onion", tag = "v0.1.0" }
-  #   npm     npm i github:<org>/usfm_onion#v0.1.0
-  # So a tag becomes a Release only once the committed packages were proven
-  # fresh and the exhaustive oracles were green. The Release itself carries no
-  # artifact: there is nothing to download that the tag does not already hold.
+  # Cargo consumers install from the tag; npm consumers from the org Nexus
+  # (the publish job below) or the tag. So a tag becomes a Release only once the
+  # committed packages were proven fresh and the exhaustive oracles were green.
+  # The Release itself carries no artifact: the tag already holds everything.
   release:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [lint, test, wasm, artifacts, oracles]
@@ -280,6 +278,44 @@ jobs:
         # leave the tag without its annotation, so fetch it whole first.
         run: |
           git fetch --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
+          if gh release view "${GITHUB_REF_NAME}" > /dev/null 2>&1; then
+            echo "${GITHUB_REF_NAME} is already released"
+            exit 0
+          fi
           gh release create "${GITHUB_REF_NAME}" \
             --title "${GITHUB_REF_NAME}" \
             --notes-from-tag
+
+  # The root package to the org Nexus (publishConfig.registry), as the
+  # ci-publisher user. The committed pkg-* dirs are what ships, so nothing is
+  # built here; `release` has already checked the tag against every manifest.
+  # Re-running a tag is safe: a version already on the registry is skipped.
+  publish:
+    needs: [release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Source secrets
+        uses: 1password/load-secrets-action@v3
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          NEXUS_NPM_TOKEN: "op://DevOps/Nexus Registry CI/Saved on nexus-registry.walink.org/npmToken"
+
+      - name: publish
+        run: |
+          registry=$(node -p "require('./package.json').publishConfig.registry")
+          name=$(node -p "require('./package.json').name")
+          echo "//${registry#https://}:_authToken=${NEXUS_NPM_TOKEN}" > "$HOME/.npmrc"
+          if npm view "${name}@${GITHUB_REF_NAME#v}" version --registry "$registry" > /dev/null 2>&1; then
+            echo "${name}@${GITHUB_REF_NAME#v} is already on ${registry}"
+            exit 0
+          fi
+          npm publish
