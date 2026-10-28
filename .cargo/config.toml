@@ -1,7 +1,10 @@
-# The org Nexus. ci.yml's publish-crates job publishes here; a consumer copies
-# this table into their own .cargo/config.toml. Nexus marks the index
-# auth-required, so cargo wants a token even to read: CARGO_REGISTRIES_WA_CARGO_TOKEN,
-# "Basic " + base64 of user:password.
+# The org Nexus, for publishing (ci.yml's publish-crates job). Nexus marks a
+# hosted cargo index auth-required, so cargo wants a token even to read here:
+# CARGO_REGISTRIES_WA_CARGO_TOKEN, "Basic " + base64 of user:password.
+#
+# Consumers read through the group instead, which needs no token:
+#   [registries.wa-cargo]
+#   index = "sparse+https://nexus-registry.walink.org/repository/wa-cargo-public/"
 [registries.wa-cargo]
 index = "sparse+https://nexus-registry.walink.org/repository/wa-cargo/"
 credential-provider = "cargo:token"
