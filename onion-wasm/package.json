@@ -1,6 +1,6 @@
 {
   "name": "onion-wasm",
-  "version": "0.1.17",
+  "version": "0.1.18",
   "type": "module",
   "description": "The JS doorway over the USFM engine — piece 2 of the five-crate layout.",
   "private": true,
