@@ -355,11 +355,16 @@ jobs:
           export CARGO_REGISTRIES_WA_CARGO_TOKEN="$token"
           index=https://nexus-registry.walink.org/repository/wa-cargo
           want="${GITHUB_REF_NAME#v}"
+          # Published, a sibling path dependency must name its registry or cargo
+          # looks for it on crates.io (which has an unrelated `mise`). Committed,
+          # that key breaks git-tag consumers, who have no wa-cargo configured,
+          # so it is added only here, for the upload.
+          git ls-files '*Cargo.toml' | xargs sed -i -E 's/(\{ path = "[^"]+", version = "[^"]+")/\1, registry = "wa-cargo"/'
           for crate in mise ticket usfm_onion onion-wasm sous-core usfm_galley; do
             path="${crate:0:2}/${crate:2:2}/${crate}"
             if curl -sf -H "Authorization: $token" "$index/$path" | grep -q "\"vers\":\"$want\""; then
               echo "$crate $want is already on wa-cargo"
               continue
             fi
-            cargo publish -p "$crate" --registry wa-cargo
+            cargo publish -p "$crate" --registry wa-cargo --allow-dirty
           done
