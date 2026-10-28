@@ -1,6 +1,6 @@
 [package]
 name = "onion-wasm"
-version = "0.1.18"
+version = "0.1.19"
 edition = "2024"
 description = "The JS doorway over the USFM engine — piece 2 of the five-crate layout (bindgen, .d.ts, UTF-16 walls)."
 # The npm package (pkg-*, the readers) ships from the repo root; the crate is Rust only.
@@ -16,10 +16,10 @@ name = "onion_wasm"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-usfm_onion = { path = "../onion", version = "0.1.18" }
+usfm_onion = { path = "../onion", version = "0.1.19" }
 # The `markers.ext` reader and the spec's `\category` vocabulary. Read here so
 # the engine never learns a file format; the registry it feeds is onion's.
-mise = { path = "../mise", version = "0.1.18" }
+mise = { path = "../mise", version = "0.1.19" }
 # `xxh3`/`xxh3Text`: the hash the dish header stamps, for a host's own bytes.
 xxhash-rust.workspace = true
 wasm-bindgen = "0.2"

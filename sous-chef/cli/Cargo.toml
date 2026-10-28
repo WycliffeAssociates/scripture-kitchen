@@ -14,8 +14,8 @@ path = "src/main.rs"
 [dependencies]
 rayon.workspace = true
 rustc-hash.workspace = true
-sous-core = { path = "../core", version = "0.1.18" }
+sous-core = { path = "../core", version = "0.1.19" }
 # Publication only: the stateless galley::sous seam. No Warmer, no cache.
-usfm_galley = { path = "../../galley", version = "0.1.18" }
-usfm_onion = { path = "../../onion", version = "0.1.18", default-features = false }
+usfm_galley = { path = "../../galley", version = "0.1.19" }
+usfm_onion = { path = "../../onion", version = "0.1.19", default-features = false }
 usage.workspace = true
