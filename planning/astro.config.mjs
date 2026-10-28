@@ -14,12 +14,22 @@ import { usfmLang } from "./src/lib/usfm-lang.ts";
 const base = (process.env.SITE_BASE ?? "").replace(/^\/*/u, "/").replace(/\/+$/u, "");
 const pages = base !== "";
 
+// The inbox is a working view for the repo's own planning, not part of the published docs.
+const devOnly = {
+  name: "dev-only-routes",
+  hooks: {
+    "astro:config:setup": ({ command, injectRoute }) => {
+      if (command === "dev") injectRoute({ pattern: "/inbox", entrypoint: "./src/dev/inbox.astro" });
+    },
+  },
+};
+
 export default defineConfig({
   ...(pages ? { site: process.env.SITE_ORIGIN ?? "https://wycliffeassociates.github.io", base } : {}),
   devToolbar: { enabled: false },
-  // The atlas is the front door; the inbox moved to /inbox.
+  // The atlas is the front door.
   redirects: { "/": `${base}/atlas` },
-  integrations: [mdx()],
+  integrations: [mdx(), devOnly],
   markdown: {
     // The remark/rehype processor, so these plugins run; MDX inherits it.
     processor: unified({ remarkPlugins: [remarkFenceProps, remarkMermaid, remarkWiki], rehypePlugins: [rehypeLoc, [rehypeBase, { base }]] }),

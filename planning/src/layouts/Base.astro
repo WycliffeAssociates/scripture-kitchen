@@ -22,7 +22,7 @@ const nav: { id: Section; label: string; href: string }[] = [
   { id: "features", label: "Features", href: url("/features") },
   { id: "plans", label: "Plans", href: url("/items") },
   { id: "roadmap", label: "Roadmap", href: url("/roadmap") },
-  { id: "inbox", label: "Inbox", href: url("/inbox") },
+  ...(import.meta.env.DEV ? [{ id: "inbox" as const, label: "Inbox", href: url("/inbox") }] : []),
 ];
 const sidebar = Astro.slots.has("sidebar");
 ---

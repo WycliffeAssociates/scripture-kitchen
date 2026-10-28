@@ -177,7 +177,7 @@ It is the docs site for the whole workspace. Routes:
 | `/features` | The verify-kitchen feature files, as cards. |
 | `/items`, `/items/<slug>` | Plans: every item, and one item. |
 | `/roadmap` | The roadmap. |
-| `/inbox` | Every open question and follow-up (it was `/`). |
+| `/inbox` | Every open question and follow-up. `pnpm dev` only; the built site leaves it out. |
 
 Any MDX file may link a concept with `[[slug]]` or `[[slug|shown text]]` (a term or alias
 works too); `pnpm plans check` (or `pnpm atlas check`) lists one that names nothing.

@@ -22,7 +22,7 @@ const groups = STATUSES.map((status) => ({
   <Sidebar slot="sidebar" />
   <h1 class="text-h4 font-semibold">Plans</h1>
   <p class="mt-1 text-small text-on-surface-secondary">
-    {items.length} items in <code>planning/items/</code>. Open questions and follow-ups are in the <a href={url("/inbox")}>Inbox</a>; the order of work is the <a href={url("/roadmap")}>Roadmap</a>.
+    {items.length} items in <code>planning/items/</code>. {import.meta.env.DEV && <>Open questions and follow-ups are in the <a href={url("/inbox")}>Inbox</a>; </>}The order of work is the <a href={url("/roadmap")}>Roadmap</a>.
   </p>
   {groups.map((group) => (
     <details data-ref={`plans:${group.status}`} open={!group.closed} class="mt-6">
