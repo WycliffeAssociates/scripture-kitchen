@@ -16,12 +16,12 @@ A host wants parse, find and Sous in the browser. Two wasm modules would load th
 
 ## The solution
 
-One module carries the [[code:galley/src/wasm.rs#Galley]] handle and every stateless onion door. Most doors take either a registered book id (only the id crosses) or raw text. The generated readers ship beside it at the same version ([[invariants]] 6). It installs from a git tag.
+One module carries the [[code:galley/src/wasm.rs#Galley]] handle and every stateless onion door. Most doors take either a registered book id (only the id crosses) or raw text. The generated readers ship beside it at the same version ([[invariants]] 6). It installs from the org Nexus npm registry or from a git tag.
 
 ## Trade-offs
 
 - The onion doors add 202 KB to the `.wasm`, even for a Sous-only host.
-- Not on npm: hosts install from a git tag, so there are no semver ranges and every upgrade is a tag bump.
+- Not on public npm: a host adds one `.npmrc` scope line for the org Nexus, or pins a git tag.
 
 ## Show me
 
@@ -53,7 +53,7 @@ import { // all 26 exports
 - **The superset, one module.** A host vendoring one wasm gets both engines. The onion doors cost 202 KB of `.wasm` (744,333 → 946,665 bytes).
 - **Two doors per product: by id or by text.** Id doors run off the [[pantry]]'s retained copy. Text doors serve loose text off the same content-addressed chunks.
 - **Readers are subpaths.** `./toc-reader`, `./find-reader`, `./mask-reader`, `./sous-reader` ship beside the binary so they version with it.
-- **Installed from a git tag.** The repo-root `package.json` is derived by `node package-root.mjs` and CI diffs it.
+- **Published to the org Nexus on each tag, or installed from the tag.** The repo-root `package.json` is derived by `node package-root.mjs` and CI diffs it.
 - **Byte-identical to native.** Three tests pin one set of publication goldens across Rust, wasm and Node.
 
 ## Composes with

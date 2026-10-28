@@ -20,7 +20,7 @@ Each export calls one onion function and converts its inputs and outputs ([[inva
 
 ## Trade-offs
 
-- The built packages are committed, about 370 KB (152 KB gzipped), because consumers install from a git tag.
+- The built packages are committed, about 370 KB (152 KB gzipped), because consumers can install from a git tag as well as from the registry.
 - Each call copies its text into wasm memory; many questions about one book are cheaper through [[galley]]'s registered ids.
 - Input must be LF; CRLF puts every offset one further off per line.
 

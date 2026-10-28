@@ -15,15 +15,44 @@ checked-in tables, the wire, `reader.ts` and `diagnostics.json`.
 
 ## Install
 
-Nothing is published to crates.io or npm. Both consumers install from a tag.
+Every `v*` tag publishes to the org Nexus: the npm package to `wa-npm`, the
+six library crates to `wa-cargo`. Reads need no login. Not on crates.io or
+public npm. Install from the registry, or from the git tag; both carry the same
+code.
 
-```toml
-# Cargo.toml — one repo, both crates
-usfm_onion  = { git = "https://github.com/WycliffeAssociates/scripture-kitchen", tag = "v0.1.0" }
-usfm_galley = { git = "https://github.com/WycliffeAssociates/scripture-kitchen", tag = "v0.1.0" }
+**npm, from Nexus**
+
+```ini
+# .npmrc
+@wycliffeassociates:registry=https://nexus-registry.walink.org/repository/wa-npm/
 ```
 
 ```sh
-npm  i   github:WycliffeAssociates/scripture-kitchen#v0.1.0
-pnpm add github:WycliffeAssociates/scripture-kitchen#v0.1.0
+pnpm add @wycliffeassociates/scripture-kitchen
+```
+
+**Cargo, from Nexus** (read through the `wa-cargo-public` group: the hosted
+repo marks its index auth-required, the group does not)
+
+```toml
+# .cargo/config.toml
+[registries.wa-cargo]
+index = "sparse+https://nexus-registry.walink.org/repository/wa-cargo-public/"
+```
+
+```toml
+# Cargo.toml
+usfm_onion  = { version = "0.1", registry = "wa-cargo" }
+usfm_galley = { version = "0.1", registry = "wa-cargo" }
+```
+
+**Or from the git tag**, no registry configured
+
+```toml
+usfm_onion  = { git = "https://github.com/WycliffeAssociates/scripture-kitchen", tag = "v0.1.19" }
+usfm_galley = { git = "https://github.com/WycliffeAssociates/scripture-kitchen", tag = "v0.1.19" }
+```
+
+```sh
+pnpm add github:WycliffeAssociates/scripture-kitchen#v0.1.19
 ```

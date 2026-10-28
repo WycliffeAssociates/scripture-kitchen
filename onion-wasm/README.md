@@ -76,14 +76,15 @@ more than that.
 
 ## Distribution
 
-Not on npm. Consumers install from a GitHub tag, which is why the two `pkg-*`
-directories are committed rather than gitignored. `package.json` maps the
+Published to the org Nexus (`wa-npm`) on each `v*` tag, and installable from
+the GitHub tag too, which is why the two `pkg-*` directories are committed
+rather than gitignored. `package.json` maps the
 subpaths: `.` → `pkg-bundler`, `./web` → `pkg-web`, `./web/wasm` → the binary,
 `./schema` → `onion-wasm.ts`, `./diagnostics.json` → the side-table.
 
 That map is not what a consumer resolves against, though: npm cannot install a
 subdirectory of a git repo, so the REPO-ROOT `package.json` is the installable
-identity (`@wycliffeassociates/scripture-kitchen`). It is derived from this
+and published identity (`@wycliffeassociates/scripture-kitchen`). It is derived from this
 file and `galley/package.json` together, by `node package-root.mjs >
 package.json`: these subpaths land under `./onion`, and `.` / `./web` are
 `usfm-galley`, the superset module. Edit the map here and regenerate, never

@@ -47,13 +47,14 @@ CI gate the binary and not merely its interface. It exports
 
 ## Distribution
 
-Not on npm. Consumers install from a GitHub tag, which is why the two `pkg-*`
-directories are committed. This `package.json` maps the subpaths: `.` →
+Published to the org Nexus (`wa-npm`) on each `v*` tag, and installable from
+the GitHub tag too, which is why the two `pkg-*` directories are committed.
+This `package.json` maps the subpaths: `.` →
 `pkg-bundler`, `./web` → `pkg-web`, `./web/wasm` → the binary, `./sous-reader`
 → the findings reader.
 
 npm cannot install a subdirectory of a git repo, so the REPO-ROOT
-`package.json` is the installable identity
+`package.json` is the installable and published identity
 (`@wycliffeassociates/scripture-kitchen`). It is DERIVED from this file and
 `onion-wasm/package.json` together — `node package-root.mjs > package.json` —
 with this package at `.` / `./web` and onion-wasm's under `./onion`. Edit a map
