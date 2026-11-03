@@ -19,6 +19,7 @@ const CHECKED_IN_READER: &str = include_str!("../../onion-wasm/reader.ts");
 const CHECKED_IN_LAYOUT: &str = include_str!("../../docs/layouts/dish.json");
 const CHECKED_IN_SAMPLE: &[u8] = include_bytes!("../../docs/layouts/samples/dish.bin");
 const SAMPLE_USFM: &str = include_str!("../../docs/layouts/samples/sample.usfm");
+const CHECKED_IN_MARKERS: &str = include_str!("../../docs/markers.json");
 
 #[test]
 fn generated_rs_is_not_stale() {
@@ -120,13 +121,14 @@ fn every_row_resolves_to_itself() {
 #[test]
 fn unknown_markers_land_on_the_empty_row() {
     let cases: &[&[u8]] = &[
-        b"",           // nothing at all
-        b"zaln",       // unconfigured `\z` extension — bails before any match
-        b"zaln-s",     //   …including the milestone spelling
-        b"notamarker", // unknown name
-        b"s5",         // real name, illegal level (`s` is UpTo(4))
-        b"p9",         // real name, `p` takes no digits
-        b"ADD",        // right name, wrong case
+        b"",            // nothing at all
+        b"zaln",        // unconfigured `\z` extension — bails before any match
+        b"zaln-s",      //   …including the milestone spelling
+        b"notamarker",  // unknown name
+        b"s5",          // real name, illegal level (`s` is UpTo(4))
+        b"p9",          // real name, `p` takes no digits
+        b"ADD",         // right name, wrong case
+        b"q9999999992", // level past u32::MAX — saturates, never wraps into range
     ];
     for case in cases {
         assert_eq!(
@@ -261,4 +263,33 @@ fn dish_header_slots_read_the_sample() {
     assert_eq!(slot("version"), schema::FORMAT_VERSION);
     assert_eq!(slot("sectionCount") as usize, schema::SECTIONS.len());
     assert_eq!(slot("sourceLength") as usize, SAMPLE_USFM.len());
+}
+
+/// The marker table as JSON, for ports that generate their own table from it.
+/// Stale here means another language's engine is built from rows this one no
+/// longer has.
+#[test]
+fn markers_json_is_not_stale() {
+    let fresh = emit::markers_json();
+    assert!(
+        fresh == CHECKED_IN_MARKERS,
+        "{}",
+        ticket::stale::first_difference("docs/markers.json", FIX, &fresh, CHECKED_IN_MARKERS)
+    );
+}
+
+/// The JSON is INDEX-ADDRESSED like the table: entry `n` is row `n`, and its
+/// name and context mask are the generated table's.
+#[test]
+fn markers_json_rows_are_index_addressed() {
+    let json: serde_json::Value = serde_json::from_str(CHECKED_IN_MARKERS).expect("valid JSON");
+    let rows = json["rows"].as_array().expect("rows");
+    assert_eq!(rows.len(), generated::ROW_COUNT);
+    for (idx, row) in rows.iter().enumerate() {
+        let i = idx as generated::MarkerIdx;
+        assert_eq!(row["index"], idx);
+        assert_eq!(row["marker"], generated::name(i));
+        assert_eq!(row["derived"]["contextMask"], generated::context_mask(i));
+    }
+    assert_eq!(json["firstExtensionRow"], generated::FIRST_EXTENSION_ROW);
 }

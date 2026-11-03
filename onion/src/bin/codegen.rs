@@ -9,9 +9,11 @@
 //! `tests/codegen_output_matches_input.rs` can regenerate to a buffer and fail
 //! the build when the checked-in file is stale.
 //!
-//! TWO artifacts now: the marker table (`src/tables/generated.rs`) and the
-//! diagnostics side-table the JS bundle loads (`onion-wasm/diagnostics.json` —
-//! `lint::catalog`). Both are checked in and both have a staleness test.
+//! Artifacts: the marker table (`src/tables/generated.rs`), the diagnostics
+//! side-table the JS bundle loads (`onion-wasm/diagnostics.json` —
+//! `lint::catalog`), the wire writer and reader, the dish layout and sample,
+//! and the marker table as JSON for other languages (`docs/markers.json`).
+//! All are checked in and each has a staleness test.
 //!
 //! Deliberately NOT emitted: `common_marker_checks`, the hot-marker fast path —
 //! built one pattern at a time and MEASURED, never speculated (the `priority`
@@ -35,6 +37,9 @@ const READER: &str = "../onion-wasm/reader.ts";
 const LAYOUT: &str = "../docs/layouts/dish.json";
 const SAMPLE_USFM: &str = "../docs/layouts/samples/sample.usfm";
 const SAMPLE_BIN: &str = "../docs/layouts/samples/dish.bin";
+// Beside `layouts/`, not in it: that folder is one file per wire buffer, and
+// the planning atlas reads every JSON there as one.
+const MARKERS: &str = "../docs/markers.json";
 
 fn main() -> std::io::Result<()> {
     let text = emit::generated_rs();
@@ -141,6 +146,22 @@ fn main() -> std::io::Result<()> {
     std::fs::write(path, &sample)?;
     println!("codegen \u{2192} {LAYOUT}, {SAMPLE_BIN}");
     println!("  sample bytes    {:>6}", sample.len());
+    println!(
+        "  {}",
+        if stale {
+            "CHANGED \u{2014} review the diff before committing"
+        } else {
+            "unchanged \u{2014} checked-in file was already fresh"
+        }
+    );
+
+    let text = emit::markers_json();
+    let path = &Path::new(CRATE).join(MARKERS);
+    let stale = std::fs::read_to_string(path).unwrap_or_default() != text;
+    std::fs::write(path, &text)?;
+    println!("codegen \u{2192} {MARKERS}");
+    println!("  marker rows       {:>4}", rows::ROWS.len());
+    println!("  bytes written   {:>6}", text.len());
     println!(
         "  {}",
         if stale {

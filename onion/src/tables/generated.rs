@@ -1043,7 +1043,7 @@ fn digits_ok(idx: MarkerIdx, rest: &[u8]) -> bool {
             digits if digits.iter().all(u8::is_ascii_digit) => {
                 let level = digits
                     .iter()
-                    .fold(0u32, |acc, b| acc.saturating_mul(10) + u32::from(b - b'0'));
+                    .fold(0u32, |acc, b| acc.saturating_mul(10).saturating_add(u32::from(b - b'0')));
                 (1..=u32::from(cap)).contains(&level)
             }
             _ => false,

@@ -36,6 +36,9 @@ use super::schema::{
     Payload, ScopeKind, SpecContext, SpellingShape, StructuralWhitespaceRequirement as Ws,
 };
 
+mod markers;
+pub use markers::markers_json;
+
 // ---------------------------------------------------------------------------
 // Variant code tables. POSITION IS THE CODE — see the module doc.
 // ---------------------------------------------------------------------------
