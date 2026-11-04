@@ -270,7 +270,8 @@ export class FormatOpts {
         return ret !== 0;
     }
     /**
-     * 0 = keep the line break in front of a `\v`, 1 = fold it into a space.
+     * 0 = keep the line break in front of a `\v` (the default: one verse
+     * per line), 1 = fold it into a space.
      * @returns {number}
      */
     get verse_breaks() {
@@ -347,7 +348,8 @@ export class FormatOpts {
         wasm.__wbg_set_formatopts_trim_text_edges(this.__wbg_ptr, arg0);
     }
     /**
-     * 0 = keep the line break in front of a `\v`, 1 = fold it into a space.
+     * 0 = keep the line break in front of a `\v` (the default: one verse
+     * per line), 1 = fold it into a space.
      * @param {number} arg0
      */
     set verse_breaks(arg0) {
@@ -660,11 +662,12 @@ export class Galley {
      * }
      * ```
      *
-     * A source block the target lacks is INSERTED — before the verse's `\v`
-     * when it is leading, EMPTY after the verse's text when it is inside,
-     * because where a verse's text splits is unknowable across languages and
-     * the translator pastes each line into place. A target block the source
-     * lacks is REMOVED and its text joins the block before it. Footnotes and
+     * A LEADING source block the target lacks is INSERTED before the verse's
+     * `\v`. An INSIDE one is not: where a verse's text splits is unknowable
+     * across languages, so the translator places it, and `targetNodeFor`
+     * says where. Inside blocks the target already has are respelled to the
+     * source's by ordinal. A target block the source lacks is REMOVED and its
+     * text joins the block before it. `\id mat` pairs with `\id MAT`. Footnotes and
      * cross-references never cross; their locations are the target's own.
      *
      * The transaction is ascending and non-overlapping, so a host applies it
@@ -695,7 +698,7 @@ export class Galley {
      * interface BlockAddress { sid: string; where: "leading" | "inside"; ordinal: number;
      *                           marker: string }   // the spelling that position held
      * interface OverlayReport {
-     *   inserted:  { address: BlockAddress; marker: string; at: number; empty: boolean }[];  // empty = Inside block awaiting text
+     *   inserted:  { address: BlockAddress; marker: string; at: number }[];                 // leading blocks added, and blocks respelled
      *   removed:   { address: BlockAddress; marker: string; from: number; to: number }[];    // target blocks the source lacks
      *   collapsed: { sid: string; marker: string; count: number }[];                         // source empty-block runs folded to one
      *   unpaired:  { sid: string; side: "target" | "source"; reason: "absent" | "bridge" | "ambiguous" }[];
@@ -939,8 +942,11 @@ export class Galley {
      *
      * `opts` is an [`OverlayOptions`](Self::overlay) — only `markers` and
      * `utf16` are read here. A block is
-     * LEADING when it sits immediately before its verse's `\v`, INSIDE when
-     * the verse's own text is above it; ordinals count from one per address.
+     * LEADING when it sits in the run immediately before its verse's `\v`
+     * with no verse text between, INSIDE when the verse's own text is above
+     * it; ordinals count from one per address. A `\c`, or a block marker
+     * outside the set, cuts a leading run. Sids read in capitals whatever the
+     * `\id` line's case.
      * Both lists are in document order. A block ends where its paragraph
      * closes — a heading or `\c` the marker set leaves out still ends it — so
      * the next row's `from` is not its end.

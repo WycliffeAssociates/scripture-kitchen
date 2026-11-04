@@ -184,7 +184,8 @@ export class FormatOpts {
     normalize_newlines: boolean;
     trim_text_edges: boolean;
     /**
-     * 0 = keep the line break in front of a `\v`, 1 = fold it into a space.
+     * 0 = keep the line break in front of a `\v` (the default: one verse
+     * per line), 1 = fold it into a space.
      */
     verse_breaks: number;
 }

@@ -211,7 +211,8 @@ export class FormatOpts {
         return ret !== 0;
     }
     /**
-     * 0 = keep the line break in front of a `\v`, 1 = fold it into a space.
+     * 0 = keep the line break in front of a `\v` (the default: one verse
+     * per line), 1 = fold it into a space.
      * @returns {number}
      */
     get verse_breaks() {
@@ -288,7 +289,8 @@ export class FormatOpts {
         wasm.__wbg_set_formatopts_trim_text_edges(this.__wbg_ptr, arg0);
     }
     /**
-     * 0 = keep the line break in front of a `\v`, 1 = fold it into a space.
+     * 0 = keep the line break in front of a `\v` (the default: one verse
+     * per line), 1 = fold it into a space.
      * @param {number} arg0
      */
     set verse_breaks(arg0) {
