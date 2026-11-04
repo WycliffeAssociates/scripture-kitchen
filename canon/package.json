@@ -1,0 +1,19 @@
+{
+  "name": "canon",
+  "version": "0.1.20",
+  "type": "module",
+  "description": "Book identity: the USFM book table and its lookups, as plain TypeScript (no wasm).",
+  "private": true,
+  "files": [
+    "ts/canon.ts",
+    "ts/tables.ts",
+    "README.md"
+  ],
+  "sideEffects": [],
+  "exports": {
+    ".": "./ts/canon.ts"
+  },
+  "scripts": {
+    "test": "node --experimental-strip-types --test ts/canon.test.mjs"
+  }
+}

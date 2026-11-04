@@ -21,6 +21,11 @@
 #      ▲        ▲                                        ▲
 #      ╰────────┴──────────── galley ◄──────────────────╯
 #
+# `canon` sits on `mise` alone: the book table and (to come) versification,
+# generated from canon/data/ into Rust consts and a TypeScript module.
+#
+#   mise ◄── canon
+#
 # `ticket` is the second leaf: the wire vocabulary and the per-record emitters
 # that onion's dish, galley's census and galley's find buffer all declare
 # against, so no two formats can disagree about how a field reaches the buffer.
@@ -29,6 +34,7 @@
 #   ticket ◄── onion, galley
 members = [
     "mise",
+    "canon",
     "ticket",
     "onion",
     "onion-wasm",

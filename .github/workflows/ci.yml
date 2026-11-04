@@ -110,6 +110,12 @@ jobs:
         working-directory: sous-chef
         run: npm test
 
+      # canon ships plain TypeScript beside the Rust; both run
+      # canon/fixtures/books.json, and this is the TypeScript half.
+      - name: canon TypeScript fixtures
+        working-directory: canon
+        run: npm test
+
       # The root package.json is DERIVED from galley's and onion-wasm's — an
       # inner export map edited without regenerating it ships a root map that
       # points nowhere, and a stale `sideEffects` is worse than that: silent,
@@ -423,7 +429,7 @@ jobs:
           # that key breaks git-tag consumers, who have no wa-cargo configured,
           # so it is added only here, for the upload.
           git ls-files '*Cargo.toml' | xargs sed -i -E 's/(\{ path = "[^"]+", version = "[^"]+")/\1, registry = "wa-cargo"/'
-          for crate in mise ticket usfm_onion onion-wasm sous-core usfm_galley; do
+          for crate in mise canon ticket usfm_onion onion-wasm sous-core usfm_galley; do
             path="${crate:0:2}/${crate:2:2}/${crate}"
             if curl -sf -H "Authorization: $token" "$index/$path" | grep -q "\"vers\":\"$want\""; then
               echo "$crate $want is already on wa-cargo"

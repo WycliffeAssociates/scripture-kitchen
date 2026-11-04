@@ -4,6 +4,7 @@
        ▲        ▲                                        ▲
        ╰────────┴──────────── galley ◄──────────────────╯
     ticket ◄── onion, galley
+    mise ◄── canon
 
 - `onion` / `onion-wasm` / `galley` are the engine. `sous-core` / `sous-cli`
   (under `sous-chef/`) are the other product. `GLOSSARY.md` is onion's only;
@@ -15,6 +16,14 @@
   galley's whole-word find and alignment all split by. A generated table may live there while its
   generator does not — `bin/gen-unicode` stays in `sous-core` with the pinned
   UCD extracts and writes across. Scope rule and exclusions: `mise/README.md`.
+- `canon/` is book identity and numbering: the USFM book table (codes, both
+  of Matthew's numbers, English names, `parse_book`, `usfm_file_name`), with
+  versification schemes, mapping, coverage and sniffing to follow. It depends
+  on `mise` only and has no runtime parsing: `gen-canon` writes its Rust
+  tables AND `canon/ts/tables.ts` from `canon/data/`, and the package ships the
+  TypeScript lookups at `./canon` with no wasm. Rust and TS both run
+  `canon/fixtures/books.json`. Plan:
+  `planning/items/2026-11-04-canon-and-versification-the-book-table-schemes-map.mdx`.
 - `ticket/` is the second zero-dependency leaf: the WIRE vocabulary (`Width`,
   `Space`, `Field`, `Record`, `Repeat`) and the emitters that write one
   record's Rust writer and one record's TypeScript accessor class. Every wire

@@ -1,5 +1,5 @@
 /**
- * The repo-root `package.json`, derived from the two inner ones.
+ * The repo-root `package.json`, derived from the three inner ones.
  *
  *     node package-root.mjs > package.json
  *
@@ -12,7 +12,8 @@
  *
  * `usfm-galley` is the default export: it is the SUPERSET module, every onion
  * door plus the resident sous handle. `onion-wasm` keeps its own subtree under
- * `./onion` for a consumer that wants the engine alone.
+ * `./onion` for a consumer that wants the engine alone, and `canon` sits at
+ * `./canon`: plain TypeScript with no wasm, so a book table costs no `init()`.
  */
 import { readFileSync } from "node:fs";
 
@@ -26,6 +27,7 @@ const under = (prefix) => (key) =>
 const PACKAGES = [
   { dir: "galley", pkg: inner("galley"), subpath: (key) => key },
   { dir: "onion-wasm", pkg: inner("onion-wasm"), subpath: under("./onion") },
+  { dir: "canon", pkg: inner("canon"), subpath: under("./canon") },
 ];
 
 const push = (dir) => {

@@ -8,6 +8,7 @@ exports, plus a JS doorway over the same code.
 | `usfm_onion` | `onion/` | the engine — no JS, no wasm, no serde in `src/` |
 | `onion-wasm` | `onion-wasm/` | the `#[wasm_bindgen]` doorway and the UTF-16 walls |
 | `usfm_galley` | `galley/` | the workflows layer: chunk memoization, checksums |
+| `canon` | `canon/` | book identity: the USFM book table, its lookups, and (to come) versification; also plain TypeScript at `./canon` |
 
 `onion/src/bin/playground.rs` drives the engine over a corpus for profiling and
 for the `debug/` eyeball dumps; `onion/src/bin/codegen.rs` regenerates the
@@ -24,7 +25,7 @@ Nobody builds wasm or pushes a tag by hand.
 ## Install
 
 Every `v*` tag publishes to the org Nexus: the npm package to `wa-npm`, the
-six library crates to `wa-cargo`. Reads need no login. Not on crates.io or
+seven library crates to `wa-cargo`. Reads need no login. Not on crates.io or
 public npm. Install from the registry, or from the git tag; both carry the same
 code.
 

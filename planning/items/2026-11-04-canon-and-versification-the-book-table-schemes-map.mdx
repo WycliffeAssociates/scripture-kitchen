@@ -2,7 +2,7 @@
 id: 1da22c7f-fb35-4432-b867-3b66a218bcea
 title: "Canon and versification: the book table, schemes, mapping and sniffing"
 kind: plan
-status: discussing
+status: in-progress
 created: 2026-11-04
 updated: 2026-11-04
 sha: ea9dc6e
@@ -316,9 +316,10 @@ consumer's repo, pinned to the kitchen tag that has the step.
 | The book-name half of citation parsing | Sefer `packages/text/src/location/citation.ts` | Calls `parse_book`. The rest of the citation grammar stays in Sefer until the reference step | 1 |
 | `lastVerseOf` over the text's own TOC | Sefer `src/app/kinds/context.ts` | Keeps working for "the last verse this text has". `scheme.last_verse` answers "the last verse it should have" | 2 |
 | Its own 66-code table and `usfm_file_name` | hub `crates/stitch/src/lib.rs` | canon's `books` and `usfm_file_name`, through the kitchen git tag | 1 |
-| Ad hoc uppercasing of `\id` codes | galley `overlay.rs` `book_code` | `parse_book` | 1 |
 | Pairing on numbers as written | sous `alignment::align` callers | `to_org` before `align` and `from_org` on findings | 7 |
 | The versification-layer idea | `planning/items/2026-10-14-a-versification-layer-…` | This plan (that item closes when step 7 ships) | 7 |
+
+galley's `overlay.rs` keeps its own `book_code` (it uppercases three bytes it already has, so depending on canon would buy nothing).
 
 What stays: `mise`'s `BOOK_CODES`, `BookKey` and `canonical_rank` (lint's "is this a book
 code" stays byte-exact), and a project's own `bookNames` in Sefer, which canon's names sit
@@ -326,7 +327,7 @@ behind.
 
 ## Order, each step usable on its own
 
-1. **Book table.** `books.tsv` from usfm-tools' `usfm_verses.py` and our `BOOK_CODES`, plus
+1. **Book table** (done on the `canon` branch, 2026-11-04). `books.tsv` from usfm-tools' `usfm_verses.py` and our `BOOK_CODES`, plus
    `book`, `parse_book` (codes, slugs, English names), `books`, `usfm_file_name`, and
    fixtures for Matthew 40/41 and Song of Songs vs Song of Solomon. Sefer's and the hub's
    book tables move to it.

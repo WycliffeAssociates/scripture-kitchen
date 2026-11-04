@@ -1,0 +1,122 @@
+# The book table: one row per USFM book identifier, in the spec's row order.
+# Source: the USFM 3.1 Book Identifiers table (ubsicap/usfm docs/identification/books.rst).
+# English names for the 66 follow Sefer's canon.ts. parse_book matches names and aliases,
+# so every one must be unique across the table. After editing, regenerate the tables:
+#   cargo run -p canon --bin gen-canon
+code	usfm_number	division	canonical_index	english	aliases
+GEN	01	ot	1	Genesis	1 Moses
+EXO	02	ot	2	Exodus	2 Moses
+LEV	03	ot	3	Leviticus	3 Moses
+NUM	04	ot	4	Numbers	4 Moses
+DEU	05	ot	5	Deuteronomy	5 Moses
+JOS	06	ot	6	Joshua	
+JDG	07	ot	7	Judges	
+RUT	08	ot	8	Ruth	
+1SA	09	ot	9	1 Samuel	1 Kingdoms
+2SA	10	ot	10	2 Samuel	2 Kingdoms
+1KI	11	ot	11	1 Kings	3 Kingdoms
+2KI	12	ot	12	2 Kings	4 Kingdoms
+1CH	13	ot	13	1 Chronicles	1 Paralipomenon
+2CH	14	ot	14	2 Chronicles	2 Paralipomenon
+EZR	15	ot	15	Ezra	
+NEH	16	ot	16	Nehemiah	
+EST	17	ot	17	Esther	
+JOB	18	ot	18	Job	
+PSA	19	ot	19	Psalms	Psalm
+PRO	20	ot	20	Proverbs	
+ECC	21	ot	21	Ecclesiastes	Qoheleth|Qohelet
+SNG	22	ot	22	Song of Songs	Song of Solomon|Canticles|Canticle of Canticles
+ISA	23	ot	23	Isaiah	
+JER	24	ot	24	Jeremiah	
+LAM	25	ot	25	Lamentations	
+EZK	26	ot	26	Ezekiel	
+DAN	27	ot	27	Daniel	
+HOS	28	ot	28	Hosea	
+JOL	29	ot	29	Joel	
+AMO	30	ot	30	Amos	
+OBA	31	ot	31	Obadiah	
+JON	32	ot	32	Jonah	
+MIC	33	ot	33	Micah	
+NAM	34	ot	34	Nahum	
+HAB	35	ot	35	Habakkuk	
+ZEP	36	ot	36	Zephaniah	
+HAG	37	ot	37	Haggai	
+ZEC	38	ot	38	Zechariah	
+MAL	39	ot	39	Malachi	
+MAT	41	nt	40	Matthew	
+MRK	42	nt	41	Mark	
+LUK	43	nt	42	Luke	
+JHN	44	nt	43	John	
+ACT	45	nt	44	Acts	Acts of the Apostles
+ROM	46	nt	45	Romans	
+1CO	47	nt	46	1 Corinthians	
+2CO	48	nt	47	2 Corinthians	
+GAL	49	nt	48	Galatians	
+EPH	50	nt	49	Ephesians	
+PHP	51	nt	50	Philippians	
+COL	52	nt	51	Colossians	
+1TH	53	nt	52	1 Thessalonians	
+2TH	54	nt	53	2 Thessalonians	
+1TI	55	nt	54	1 Timothy	
+2TI	56	nt	55	2 Timothy	
+TIT	57	nt	56	Titus	
+PHM	58	nt	57	Philemon	
+HEB	59	nt	58	Hebrews	
+JAS	60	nt	59	James	
+1PE	61	nt	60	1 Peter	
+2PE	62	nt	61	2 Peter	
+1JN	63	nt	62	1 John	
+2JN	64	nt	63	2 John	
+3JN	65	nt	64	3 John	
+JUD	66	nt	65	Jude	
+REV	67	nt	66	Revelation	Apocalypse|Revelation of John
+TOB	68	deuterocanon		Tobit	
+JDT	69	deuterocanon		Judith	
+ESG	70	deuterocanon		Esther (Greek)	Greek Esther
+WIS	71	deuterocanon		Wisdom of Solomon	Wisdom
+SIR	72	deuterocanon		Sirach	Ecclesiasticus|Ben Sira
+BAR	73	deuterocanon		Baruch	
+LJE	74	deuterocanon		Letter of Jeremiah	Epistle of Jeremiah
+S3Y	75	deuterocanon		Song of the Three Young Men	Prayer of Azariah
+SUS	76	deuterocanon		Susanna	
+BEL	77	deuterocanon		Bel and the Dragon	
+1MA	78	deuterocanon		1 Maccabees	
+2MA	79	deuterocanon		2 Maccabees	
+3MA	80	deuterocanon		3 Maccabees	
+4MA	81	deuterocanon		4 Maccabees	
+1ES	82	deuterocanon		1 Esdras	
+2ES	83	deuterocanon		2 Esdras	
+MAN	84	deuterocanon		Prayer of Manasseh	
+PS2	85	deuterocanon		Psalm 151	
+ODA	86	deuterocanon		Odes	Odae
+PSS	87	deuterocanon		Psalms of Solomon	
+EZA	A4	additional		Ezra Apocalypse	4 Ezra
+5EZ	A5	additional		5 Ezra	
+6EZ	A6	additional		6 Ezra	
+DAG	B2	additional		Daniel (Greek)	Greek Daniel
+PS3	B3	additional		Psalms 152-155	
+2BA	B4	additional		2 Baruch (Apocalypse)	
+LBA	B5	additional		Letter of Baruch	
+JUB	B6	additional		Jubilees	
+ENO	B7	additional		Enoch	
+1MQ	B8	additional		1 Meqabyan/Mekabis	
+2MQ	B9	additional		2 Meqabyan/Mekabis	
+3MQ	C0	additional		3 Meqabyan/Mekabis	
+REP	C1	additional		Reproof	
+4BA	C2	additional		4 Baruch	
+LAO	C3	additional		Letter to the Laodiceans	
+FRT	A0	peripheral		Front Matter	
+BAK	A1	peripheral		Back Matter	
+OTH	A2	peripheral		Other Matter	
+INT	A7	peripheral		Introduction Matter	
+CNC	A8	peripheral		Concordance	
+GLO	A9	peripheral		Glossary	Wordlist
+TDX	B0	peripheral		Topical Index	
+NDX	B1	peripheral		Names Index	
+XXA	94	extra		Extra Material A	
+XXB	95	extra		Extra Material B	
+XXC	96	extra		Extra Material C	
+XXD	97	extra		Extra Material D	
+XXE	98	extra		Extra Material E	
+XXF	99	extra		Extra Material F	
+XXG	100	extra		Extra Material G	

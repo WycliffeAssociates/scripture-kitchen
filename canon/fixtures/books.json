@@ -1,0 +1,65 @@
+{
+  "about": "Cases both canon implementations must pass: tests/fixtures.rs (Rust) and ts/canon.test.mjs (TypeScript). A behaviour change starts here.",
+  "parse_book": [
+    { "text": "GEN", "book": "GEN" },
+    { "text": "gen", "book": "GEN", "why": "a code in any case: Writer directories and lowercase \\id lines" },
+    { "text": "1jn", "book": "1JN" },
+    { "text": "Genesis", "book": "GEN" },
+    { "text": "genesis", "book": "GEN" },
+    { "text": "  Genesis  ", "book": "GEN" },
+    { "text": "1 Samuel", "book": "1SA" },
+    { "text": "1Samuel", "book": "1SA", "why": "a leading digit folds apart from its word" },
+    { "text": "1   SAMUEL", "book": "1SA" },
+    { "text": "Song of Songs", "book": "SNG" },
+    { "text": "Song of Solomon", "book": "SNG", "why": "the name the other half of the org's tables use" },
+    { "text": "song  of\tsolomon", "book": "SNG" },
+    { "text": "Psalm", "book": "PSA" },
+    { "text": "Psalms", "book": "PSA" },
+    { "text": "Jon", "book": "JON", "why": "a code wins over a name: Jonah, never John" },
+    { "text": "John", "book": "JHN" },
+    { "text": "1 John", "book": "1JN" },
+    { "text": "Job", "book": "JOB", "why": "a code and a name of the same book" },
+    { "text": "Acts of the Apostles", "book": "ACT" },
+    { "text": "3 Kingdoms", "book": "1KI", "why": "Orthodox numbering: 1-2 Samuel are 1-2 Kingdoms" },
+    { "text": "Esther (Greek)", "book": "ESG" },
+    { "text": "Front Matter", "book": "FRT" },
+    { "text": "phil", "book": null, "why": "no prefix matching: that is a navigation box's policy" },
+    { "text": "Gen.", "book": null, "why": "abbreviations arrive with the localized names" },
+    { "text": "ZZZ", "book": null },
+    { "text": "", "book": null },
+    { "text": "   ", "book": null }
+  ],
+  "fold": [
+    { "text": "1Samuel", "folded": "1 samuel" },
+    { "text": " 1   SAMUEL ", "folded": "1 samuel" },
+    { "text": "150", "folded": "150" },
+    { "text": "Song  of\tSongs", "folded": "song of songs" },
+    { "text": "", "folded": "" }
+  ],
+  "book": [
+    { "code": "GEN", "usfm_number": "01", "division": "ot", "canonical_index": 1, "english": "Genesis" },
+    { "code": "MAL", "usfm_number": "39", "division": "ot", "canonical_index": 39, "english": "Malachi" },
+    { "code": "MAT", "usfm_number": "41", "division": "nt", "canonical_index": 40, "english": "Matthew" },
+    { "code": "3JN", "usfm_number": "65", "division": "nt", "canonical_index": 64, "english": "3 John" },
+    { "code": "REV", "usfm_number": "67", "division": "nt", "canonical_index": 66, "english": "Revelation" },
+    { "code": "SNG", "usfm_number": "22", "division": "ot", "canonical_index": 22, "english": "Song of Songs" },
+    { "code": "TOB", "usfm_number": "68", "division": "deuterocanon", "canonical_index": null, "english": "Tobit" },
+    { "code": "EZA", "usfm_number": "A4", "division": "additional", "canonical_index": null, "english": "Ezra Apocalypse" },
+    { "code": "FRT", "usfm_number": "A0", "division": "peripheral", "canonical_index": null, "english": "Front Matter" },
+    { "code": "XXG", "usfm_number": "100", "division": "extra", "canonical_index": null, "english": "Extra Material G" },
+    { "code": "mat", "missing": true, "why": "book() is byte-exact; parse_book folds" },
+    { "code": "ZZZ", "missing": true }
+  ],
+  "usfm_file_name": [
+    { "code": "MAT", "name": "41-MAT.usfm" },
+    { "code": "GEN", "name": "01-GEN.usfm" },
+    { "code": "FRT", "name": "A0-FRT.usfm" },
+    { "code": "XXG", "name": "100-XXG.usfm" },
+    { "code": "ZZZ", "name": null }
+  ],
+  "books": [
+    { "canon": "protestant66", "count": 66, "first": "GEN", "last": "REV" },
+    { "canon": "with_deuterocanon", "count": 86, "first": "GEN", "last": "PSS" },
+    { "canon": "all", "count": 116, "first": "GEN", "last": "XXG" }
+  ]
+}

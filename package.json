@@ -27,7 +27,10 @@
     "onion-wasm/reader.ts",
     "onion-wasm/onion-wasm.ts",
     "onion-wasm/diagnostics.json",
-    "onion-wasm/README.md"
+    "onion-wasm/README.md",
+    "canon/ts/canon.ts",
+    "canon/ts/tables.ts",
+    "canon/README.md"
   ],
   "sideEffects": [
     "./galley/pkg-bundler/usfm_galley.js",
@@ -68,6 +71,7 @@
     "./onion/web/wasm": "./onion-wasm/pkg-web/onion_wasm_bg.wasm",
     "./schema": "./onion-wasm/reader.ts",
     "./diagnostics.json": "./onion-wasm/diagnostics.json",
-    "./reader": "./onion-wasm/reader.ts"
+    "./reader": "./onion-wasm/reader.ts",
+    "./canon": "./canon/ts/canon.ts"
   }
 }
