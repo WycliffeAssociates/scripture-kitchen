@@ -19,7 +19,7 @@ cd galley && wasm-pack build --target nodejs --release --out-dir pkg-node -- --f
 
 About 35 s. Ready when it prints `Your wasm pkg is ready`. `pkg-node` is
 gitignored scratch. Never rebuild `pkg-web`/`pkg-bundler` for a proof: those
-are committed, byte-gated on x86_64 Linux, and built only by `galley/build.sh`.
+are committed by CI, which rebuilds them on every push to master.
 Nothing stays running; there is no server.
 
 ## Doctor

@@ -7,9 +7,11 @@ on:
   pull_request:
   workflow_dispatch:
 
+# A master run may be committing packages back, tagging and publishing; a newer
+# push queues behind it instead of cancelling it halfway through a release.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -152,11 +154,20 @@ jobs:
           '
 
   # Both packages' pkg-web and pkg-bundler are COMMITTED — consumers install
-  # from a git tag, so a stale package there ships stale code with no other
-  # signal. Rebuild and compare.
+  # from a git tag as well as the registry. CI is what builds them: nobody has
+  # to reproduce these bytes locally (a native build on a dev box drifted even
+  # with every tool pinned). So:
+  # - master: a rebuild that differs is committed back by CI, and `sha` names
+  #   the commit that holds fresh packages — the one `tag` releases.
+  # - a pull request: a stale package is a warning; merging rebuilds it.
+  # - a tag pushed by hand: the tag's own bytes ship, so stale fails.
   artifacts:
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    permissions:
+      contents: write
+    outputs:
+      sha: ${{ steps.fresh.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup
@@ -164,9 +175,9 @@ jobs:
           cache-key: wasm
       - uses: ./.github/actions/wasm-tools
 
-      # The same script Will runs. It exports the --remap-path-prefix flags that
-      # make the .wasm host-independent, so it is not optional here: building
-      # with the raw wasm-pack lines would produce different bytes.
+      # The same scripts a developer runs. They export the --remap-path-prefix
+      # flags that make the .wasm host-independent, so they are not optional:
+      # the raw wasm-pack lines produce different bytes.
       - name: rebuild both packages
         run: |
           ./onion-wasm/build.sh
@@ -178,38 +189,39 @@ jobs:
             onion-wasm/pkg-web onion-wasm/pkg-bundler \
             galley/pkg-web galley/pkg-bundler
 
-      # The glue and the .d.ts are what a consumer's bundler and type-checker
-      # bind to, and wasm-bindgen writes them deterministically from the wasm's
-      # custom sections. A diff here is a stale package, full stop.
-      - name: interface is fresh
+      - name: packages are fresh
+        id: fresh
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
         run: |
-          git diff --exit-code -- \
-            onion-wasm/pkg-web onion-wasm/pkg-bundler \
-            galley/pkg-web galley/pkg-bundler \
-            ':!onion-wasm/pkg-web/onion_wasm_bg.wasm' \
-            ':!onion-wasm/pkg-bundler/onion_wasm_bg.wasm' \
-            ':!galley/pkg-web/usfm_galley_bg.wasm' \
-            ':!galley/pkg-bundler/usfm_galley_bg.wasm'
-
-      # A hard gate, and it has to be: an engine fix that ships with no API
-      # change is exactly the stale package the interface check above cannot
-      # see. It is only safe to fail on because the build is byte-reproducible
-      # across hosts — once build.sh remapped the paths, pinned wasm-opt, and
-      # built on x86_64 Linux (LLVM lays out a few tied items by build-host
-      # architecture; an arm64 build differs by a few hundred bytes, so
-      # build.sh hands an off-platform host to a container: ../wasm-build.sh).
-      # If this ever starts failing on an untouched tree, suspect a version
-      # drift in rustc, wasm-bindgen (via Cargo.lock) or wasm-opt first.
-      - name: binary is fresh
-        run: |
-          git diff --exit-code -- \
-            onion-wasm/pkg-web/onion_wasm_bg.wasm \
-            onion-wasm/pkg-bundler/onion_wasm_bg.wasm \
-            || { echo "::error::committed .wasm is stale — run ./onion-wasm/build.sh"; exit 1; }
-          git diff --exit-code -- \
-            galley/pkg-web/usfm_galley_bg.wasm \
-            galley/pkg-bundler/usfm_galley_bg.wasm \
-            || { echo "::error::committed .wasm is stale — run ./galley/build.sh"; exit 1; }
+          set -- onion-wasm/pkg-web onion-wasm/pkg-bundler galley/pkg-web galley/pkg-bundler
+          if git diff --quiet -- "$@"; then
+            echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          case "$EVENT:$REF" in
+            push:refs/heads/master)
+              git config user.name "github-actions[bot]"
+              git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+              git add -- "$@"
+              git commit -q -m "pkg: wasm rebuilt by CI for ${GITHUB_SHA::7}"
+              # A push made with GITHUB_TOKEN starts no workflow, so this commit
+              # does not loop. If master moved meanwhile, the newer run rebuilds.
+              if git push origin HEAD:refs/heads/master; then
+                echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+              else
+                echo "::warning::master moved during the rebuild; the newer run commits its packages"
+              fi
+              ;;
+            push:refs/tags/*)
+              echo "::error::a hand-pushed tag ships its committed packages, and they are stale — push the version to master and let CI tag it"
+              exit 1
+              ;;
+            *)
+              echo "::warning::committed packages are stale; CI rebuilds them when this lands on master"
+              ;;
+          esac
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -238,18 +250,61 @@ jobs:
           cache-key: release
       - run: cargo test --workspace --release -- --include-ignored
 
+  # A release is a version bump pushed to master. When the manifests name a
+  # version with no tag yet and every gate is green, CI tags the commit that
+  # holds the fresh packages, with the version commit's message as the notes,
+  # and the jobs below release it in this same run. (A tag pushed with
+  # GITHUB_TOKEN starts no workflow of its own.)
+  tag:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master' && needs.artifacts.outputs.sha != ''
+    needs: [lint, test, wasm, artifacts, oracles]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.artifacts.outputs.sha }}
+          fetch-depth: 0
+
+      - name: tag a new version
+        id: tag
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          tag="v$version"
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" > /dev/null; then
+            echo "$tag already exists"
+            exit 0
+          fi
+          # The notes are the message of the commit that set this version.
+          bump=$(git log -1 --format=%H -G '^version = ' -- Cargo.toml)
+          git log -1 --format=%B "$bump" | grep -vE '^(Co-Authored-By|Claude-Session):' > /tmp/notes
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$tag" -F /tmp/notes
+          git push origin "refs/tags/$tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
   # Cargo consumers install from the tag; npm consumers from the org Nexus
   # (the publish job below) or the tag. So a tag becomes a Release only once the
   # committed packages were proven fresh and the exhaustive oracles were green.
   # The Release itself carries no artifact: the tag already holds everything.
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [lint, test, wasm, artifacts, oracles]
+    if: ${{ !cancelled() && !failure() && (startsWith(github.ref, 'refs/tags/v') || needs.tag.outputs.tag != '') }}
+    needs: [lint, test, wasm, artifacts, oracles, tag]
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      TAG: ${{ needs.tag.outputs.tag || github.ref_name }}
+    outputs:
+      tag: ${{ needs.tag.outputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.tag.outputs.tag || github.ref }}
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -259,7 +314,7 @@ jobs:
       # something that calls itself the wrong thing.
       - name: manifests agree with the tag
         run: |
-          want="${GITHUB_REF_NAME#v}"
+          want="${TAG#v}"
           fail=0
           for f in onion/Cargo.toml onion-wasm/Cargo.toml galley/Cargo.toml; do
             got=$(sed -n 's/^version = "\(.*\)"/\1/p' "$f" | head -1)
@@ -280,13 +335,13 @@ jobs:
         # The notes are the annotated tag's message. A shallow checkout can
         # leave the tag without its annotation, so fetch it whole first.
         run: |
-          git fetch --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
-          if gh release view "${GITHUB_REF_NAME}" > /dev/null 2>&1; then
-            echo "${GITHUB_REF_NAME} is already released"
+          git fetch --force origin "refs/tags/${TAG}:refs/tags/${TAG}"
+          if gh release view "${TAG}" > /dev/null 2>&1; then
+            echo "${TAG} is already released"
             exit 0
           fi
-          gh release create "${GITHUB_REF_NAME}" \
-            --title "${GITHUB_REF_NAME}" \
+          gh release create "${TAG}" \
+            --title "${TAG}" \
             --notes-from-tag
 
   # The root package to the org Nexus (publishConfig.registry), as the
@@ -298,8 +353,12 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    env:
+      TAG: ${{ needs.release.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release.outputs.tag }}
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -317,8 +376,8 @@ jobs:
           registry=$(node -p "require('./package.json').publishConfig.registry")
           name=$(node -p "require('./package.json').name")
           echo "//${registry#https://}:_authToken=${NEXUS_NPM_TOKEN}" > "$HOME/.npmrc"
-          if npm view "${name}@${GITHUB_REF_NAME#v}" version --registry "$registry" > /dev/null 2>&1; then
-            echo "${name}@${GITHUB_REF_NAME#v} is already on ${registry}"
+          if npm view "${name}@${TAG#v}" version --registry "$registry" > /dev/null 2>&1; then
+            echo "${name}@${TAG#v} is already on ${registry}"
             exit 0
           fi
           npm publish
@@ -333,8 +392,12 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
+    env:
+      TAG: ${{ needs.release.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release.outputs.tag }}
       - uses: ./.github/actions/setup
         with:
           cache-key: publish
@@ -354,7 +417,7 @@ jobs:
           echo "::add-mask::${token}"
           export CARGO_REGISTRIES_WA_CARGO_TOKEN="$token"
           index=https://nexus-registry.walink.org/repository/wa-cargo
-          want="${GITHUB_REF_NAME#v}"
+          want="${TAG#v}"
           # Published, a sibling path dependency must name its registry or cargo
           # looks for it on crates.io (which has an unrelated `mise`). Committed,
           # that key breaks git-tag consumers, who have no wa-cargo configured,

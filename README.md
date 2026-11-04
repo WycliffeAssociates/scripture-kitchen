@@ -13,6 +13,14 @@ exports, plus a JS doorway over the same code.
 for the `debug/` eyeball dumps; `onion/src/bin/codegen.rs` regenerates the
 checked-in tables, the wire, `reader.ts` and `diagnostics.json`.
 
+## Releasing
+
+Bump the version in every manifest (as the `0.1.x:` commits do) and push to
+`master` with the release notes as the commit message. CI does the rest: it
+rebuilds the wasm packages and commits them back if they changed, then, with
+every gate green, tags `vX.Y.Z` on that commit and releases and publishes it.
+Nobody builds wasm or pushes a tag by hand.
+
 ## Install
 
 Every `v*` tag publishes to the org Nexus: the npm package to `wa-npm`, the

@@ -1,7 +1,10 @@
 #!/usr/bin/env sh
-# Builds one crate's committed wasm packages on x86_64 Linux, whatever this
-# machine is: the same rustc, wasm-pack and wasm-opt CI pins, inside a
-# container. LLVM lays out a few tied functions and data items in an order
+# Builds one crate's wasm packages on x86_64 Linux, whatever this machine is:
+# the same rustc, wasm-pack and wasm-opt CI pins, inside a container. The
+# committed packages are CI's (it rebuilds and commits them on master); this is
+# for testing a package locally with CI's exact bytes. It is the only local
+# route known to match them: a native Linux build drifted with every tool
+# pinned. LLVM lays out a few tied functions and data items in an order
 # that depends on the BUILD HOST's architecture — an arm64 build differs from
 # an x86_64 build by a few hundred bytes with identical content — so the
 # committed .wasm, which CI gates byte for byte on x86_64, is built there too.

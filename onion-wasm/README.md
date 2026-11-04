@@ -35,16 +35,19 @@ never be fetched from anywhere else.
 ## Build
 
 ```sh
-./build.sh                                 # BOTH committed packages — use this
+./build.sh                                 # both packages, for local testing
 
 wasm-pack test --node                      # the one boundary test
 cargo build --target wasm32-unknown-unknown -p onion-wasm   # compile check
 cargo test -p onion-wasm                   # native tests (rlib, no wasm needed)
 ```
 
-`build.sh` is the only supported way to produce `pkg-web`/`pkg-bundler`, because
-the committed `.wasm` has to be BYTE-IDENTICAL on any machine — that is what
-lets CI gate the binary and not merely its interface. Two things leaked the
+CI produces the committed `pkg-web`/`pkg-bundler`: every push to master runs
+`build.sh` and commits the packages back when they changed, so nobody builds
+them for a commit or a release. Locally, `build.sh` (or `../wasm-build.sh`,
+the pinned container, the one route known to match CI's bytes) is for testing
+a package. The build is meant to be BYTE-IDENTICAL on any machine, and a
+hand-pushed tag is still gated on it. Two things leaked the
 build host into it, and both are now handled:
 
 - **Absolute paths.** Panic locations embed the tree that compiled them — a

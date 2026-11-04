@@ -41,7 +41,7 @@ galley.parseText(text, { tco: true });   // throws: parseText: unknown option "t
 ## How it works
 
 - **Nothing is implemented here.** Every export tags a library function, plus an offset conversion or a small wire struct where the wall demands it (`README.md`).
-- **Byte-identical binaries.** `build.sh` remaps `$CARGO_HOME` and the sysroot and strips the `producers` section, so the same source builds to one sha on macOS/arm64 and Linux arm64/x86_64. That lets CI gate the binary, not just its interface. Release builds run on x86_64 Linux via `wasm-build.sh`.
+- **Byte-identical binaries.** `build.sh` remaps `$CARGO_HOME` and the sysroot and strips the `producers` section, so the same source builds to one sha on macOS/arm64 and Linux arm64/x86_64. CI builds the committed packages: each push to master rebuilds them and commits them back when they changed, and a version bump is tagged on that commit.
 - **Committed packages.** `pkg-web`/`pkg-bundler` are checked in, one build per target.
 - **Options are checked.** Every option bag is a declared interface; an unknown key throws by name rather than reading as `false`.
 - **UTF-16 at the wall, LF in.** Offsets out are CodeMirror code units ([[utf16]]).

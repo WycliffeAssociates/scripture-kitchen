@@ -1,6 +1,8 @@
 #!/usr/bin/env sh
-# The ONE way to build the committed `usfm-galley` packages. Run this, never
-# the raw wasm-pack lines: the RUSTFLAGS below are part of the output.
+# The ONE way to build the `usfm-galley` packages. CI runs it and commits the
+# result to master, so a developer runs it only to test a package locally —
+# never to produce the committed bytes. Never the raw wasm-pack lines: the
+# RUSTFLAGS below are part of the output.
 #
 #     ./galley/build.sh
 #
