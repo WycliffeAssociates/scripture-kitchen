@@ -29,15 +29,15 @@ reader the package ships lives here. Both are checked in and
 ## Build
 
 ```sh
-./build.sh                                          # BOTH committed packages
+./build.sh                                          # both packages, for local testing
 
 cd galley && wasm-pack test --node --features wasm --test wasm_wall
 cargo check -p usfm_galley --features wasm --target wasm32-unknown-unknown
 ```
 
-`build.sh` is the only supported way to produce `pkg-web`/`pkg-bundler`: the
-committed `.wasm` has to be BYTE-IDENTICAL on any machine, which is what lets
-CI gate the binary and not merely its interface. It exports
+CI produces the committed `pkg-web`/`pkg-bundler` (it rebuilds them on every
+push to master and commits them back when they changed); `build.sh` is how
+that build is made, and locally it is for testing a package. It exports
 `--remap-path-prefix` for `$CARGO_HOME` and the rustup sysroot, and
 `Cargo.toml`'s wasm-opt args strip the `producers` section. Same treatment as
 `onion-wasm/build.sh`, same reasons, stated there in full.
