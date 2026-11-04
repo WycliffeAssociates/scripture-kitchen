@@ -539,8 +539,8 @@ natural. `overlayText` is for a caller that only needs the string.
 
 `Edits` carries at most one edit per position: a pure insert landing where the
 previous edit ends is folded into it. So whatever order an applier splices in,
-first-to-last or last-to-first, `\q2 \q3 \q4` inserted after one verse lands
-as `\q2 \q3 \q4`.
+first-to-last or last-to-first, `\b \q1` inserted before one verse lands as
+`\b \q1`.
 
 **The one difference is the unit.** `formatEdits` and `formatEditsIn` always
 answer in UTF-16; `overlay` answers in BYTES unless `utf16` asks otherwise,

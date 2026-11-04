@@ -5,11 +5,11 @@
 //!
 //! One law runs on every fixture: apply the overlay's edits to the target,
 //! re-extract its skeleton, and it equals the source's skeleton with the
-//! source's empty blocks folded away. `equal_skeletons` states it here rather
-//! than calling the comparison the library uses, so the two cannot drift into
-//! agreement.
+//! source's empty blocks folded away — less the inside blocks the target never
+//! had, which the overlay leaves for the translator. `expected_rows` states it
+//! here rather than calling the comparison the library uses, so the two cannot
+//! drift into agreement.
 
-use usfm_galley::onion::Edit;
 use usfm_galley::overlay::{
     self, BlockAddress, Equivalent, OverlayOptions, Placement, Reason, Scope, Side, Skeleton,
 };
@@ -103,32 +103,52 @@ fn numbered(skeleton: &Skeleton, keep_empty: bool) -> Vec<String> {
     out
 }
 
-/// The law, on every fixture: apply the overlay, give every block it inserted
-/// EMPTY the word a translator would type, re-extract, and the target's
-/// skeleton is the source's.
-///
-/// The paste is not a softening. A block marker with nothing under it but the
-/// next `\v` is, in USFM, the block that verse sits in — there is no byte in
-/// the file that says otherwise — so a scaffold reads back as its own address
-/// only once it holds text, which is exactly what the scaffold is for.
-/// Everything else the law claims — which addresses, in what order, spelled
-/// how — is asserted here unchanged.
+/// What the overlaid target's skeleton must be: the source's, except that a
+/// verse keeps only as many inside blocks as the target already had there. The
+/// overlay respells and removes inside blocks; it never opens one.
+fn expected_rows(target_before: &Skeleton, source: &Skeleton) -> Vec<String> {
+    let had = |sid: &str| {
+        target_before
+            .blocks
+            .iter()
+            .filter(|block| block.sid == sid && block.placement == Placement::Inside)
+            .count() as u32
+    };
+    source_rows(source)
+        .into_iter()
+        .filter(|row| {
+            // `"GEN 2:23 inside 1 q1"`: the sid itself holds a space.
+            let mut parts = row.rsplitn(4, ' ');
+            let (_, ordinal, side, sid) = (
+                parts.next(),
+                parts.next().and_then(|n| n.parse::<u32>().ok()),
+                parts.next(),
+                parts.next().unwrap_or_default(),
+            );
+            side != Some("inside") || ordinal.is_some_and(|n| n <= had(sid))
+        })
+        .collect()
+}
+
+/// The law, on every fixture: apply the overlay, re-extract, and the target's
+/// skeleton is [`expected_rows`]. Nothing is pasted first: with no empty
+/// inside blocks opened, every inserted marker already reads back as its own
+/// address.
 fn overlaid(target: &str, source: &str, opts: &OverlayOptions) -> String {
     let mut pantry = loaded(target, source);
-    let computed = overlay::overlay(&mut pantry, &id(TARGET), &id(SOURCE), opts)
-        .expect("the overlay computes");
     let applied = overlay::overlay_text(&mut pantry, &id(TARGET), &id(SOURCE), opts)
         .expect("the overlay applies");
-    let pasted = with_pasted_text(target, &computed.edits);
+    let target_before =
+        overlay::skeleton_with(&mut pantry, &id(TARGET), opts).expect("the target has one");
+    let source_skeleton =
+        overlay::skeleton_with(&mut pantry, &id(SOURCE), opts).expect("the source has one");
 
     let mut after = Pantry::new(1 << 20);
     after
-        .update(TARGET, Role::Target, &pasted)
+        .update(TARGET, Role::Target, &applied)
         .expect("the overlaid target is still a book");
     let target_after =
         overlay::skeleton_with(&mut after, &id(TARGET), opts).expect("it still has a skeleton");
-    let source_skeleton =
-        overlay::skeleton_with(&mut pantry, &id(SOURCE), opts).expect("the source has one");
 
     // Only the verses the overlay was allowed to touch can be expected to
     // match; a scoped run leaves the rest of the book alone on purpose.
@@ -147,50 +167,10 @@ fn overlaid(target: &str, source: &str, opts: &OverlayOptions) -> String {
     };
     assert_eq!(
         scoped(target_rows(&target_after)),
-        scoped(source_rows(&source_skeleton)),
-        "the overlaid target's skeleton is the source's"
+        scoped(expected_rows(&target_before, &source_skeleton)),
+        "the overlaid target's skeleton is the source's, less the inside blocks it never had"
     );
     applied
-}
-
-/// The transaction applied, with a word typed into every inside block it
-/// opened. An inside insert is the one that opens a line it does not finish;
-/// a leading insert ends in the newline its `\v` follows.
-fn with_pasted_text(target: &str, edits: &[Edit]) -> String {
-    let mut out = String::new();
-    let mut cursor = 0usize;
-    for edit in edits {
-        out.push_str(&target[cursor..edit.from as usize]);
-        out.push_str(edit.insert.as_str());
-        let insert = edit.insert.as_str();
-        if insert.contains('\\') && !insert.ends_with('\n') {
-            out.push_str(" x");
-        }
-        cursor = edit.to as usize;
-    }
-    out.push_str(&target[cursor..]);
-    out
-}
-
-/// The same skeleton comparison with NOTHING pasted — the form that holds
-/// wherever the source's own blocks disambiguate the scaffold.
-fn strictly_equal(target: &str, source: &str, opts: &OverlayOptions) {
-    let mut pantry = loaded(target, source);
-    let applied = overlay::overlay_text(&mut pantry, &id(TARGET), &id(SOURCE), opts)
-        .expect("the overlay applies");
-    let mut after = Pantry::new(1 << 20);
-    after
-        .update(TARGET, Role::Target, &applied)
-        .expect("still a book");
-    let target_after =
-        overlay::skeleton_with(&mut after, &id(TARGET), opts).expect("still a skeleton");
-    let source_skeleton =
-        overlay::skeleton_with(&mut pantry, &id(SOURCE), opts).expect("the source has one");
-    assert_eq!(
-        target_rows(&target_after),
-        source_rows(&source_skeleton),
-        "the empty scaffold already reads back as the source's skeleton"
-    );
 }
 
 // ------------------------------------------------------- the worked example
@@ -299,26 +279,27 @@ fn a_registered_legacy_marker_does_not_end_a_block() {
     assert_eq!(first_block(), "\\p\n\\v 1 a\n\\s5\n\\v 2 b\n");
 }
 
-/// SHAPES: a verse-only target gets the paragraph before v21, four EMPTY
-/// poetry lines after v23's text, and the paragraph before v24.
+/// SHAPES: a verse-only target gets the paragraph before v21 and the one
+/// before v24. The four poetry lines inside v23 split its text, which is the
+/// translator's call, so no empty line is opened for them.
 #[test]
 fn a_verse_only_target_takes_the_sources_shape() {
     let applied = overlaid(GEN_TARGET, GEN_SOURCE, &OverlayOptions::default());
     assert!(applied.contains("\\p\n\\v 21 Kwa hiyo"), "{applied}");
     assert!(
-        applied.contains("mwanamume.”\n\\q1\n\\q2\n\\q1\n\\q2\n\\p\n\\v 24 Kwa sababu"),
+        applied.contains("mwanamume.”\n\\p\n\\v 24 Kwa sababu"),
         "{applied}"
     );
-    // Here the source's own `\p` closes the poetry run, so the scaffold needs
-    // no text to read back as the source's skeleton.
-    strictly_equal(GEN_TARGET, GEN_SOURCE, &OverlayOptions::default());
+    assert!(
+        !applied.contains("\\q"),
+        "no inside block is opened: {applied}"
+    );
     // The source's footnotes are the source's; the target's text is its own.
     assert!(!applied.contains("\\f "), "{applied}");
     assert!(!applied.contains("Cited in Matthew"), "{applied}");
 }
 
-/// SHAPES: the report names every block it placed, and says which arrived
-/// empty.
+/// SHAPES: the report names every block it placed — leading blocks only.
 #[test]
 fn the_report_names_what_it_placed() {
     let mut pantry = loaded(GEN_TARGET, GEN_SOURCE);
@@ -329,17 +310,15 @@ fn the_report_names_what_it_placed() {
         &OverlayOptions::default(),
     )
     .expect("the overlay computes");
-    assert_eq!(overlay.report.inserted.len(), 6);
-    assert_eq!(overlay.report.removed, []);
-    assert_eq!(overlay.report.unpaired, []);
-    let empty: Vec<&str> = overlay
+    let inserted: Vec<String> = overlay
         .report
         .inserted
         .iter()
-        .filter(|row| row.empty)
-        .map(|row| row.marker.as_str())
+        .map(|row| row.address.to_string())
         .collect();
-    assert_eq!(empty, ["q1", "q2", "q1", "q2"], "inside blocks await text");
+    assert_eq!(inserted, ["GEN 2:21 leading 1", "GEN 2:24 leading 1"]);
+    assert_eq!(overlay.report.removed, []);
+    assert_eq!(overlay.report.unpaired, []);
     assert!(
         overlay
             .edits
@@ -470,8 +449,8 @@ fn bridges_pair_and_unpaired_verses_report() {
             .iter()
             .map(|row| (row.address.sid.as_str(), row.marker.as_str()))
             .collect::<Vec<_>>(),
-        [("GEN 1:1-2", "q1")],
-        "the bridge takes its poetry line"
+        [("GEN 1:1-2", "p")],
+        "the bridge takes its paragraph"
     );
     let unpaired: Vec<(&str, Side, Reason)> = overlay
         .report
@@ -499,7 +478,74 @@ fn scope_bounds_the_transaction() {
     let applied = overlaid(GEN_TARGET, GEN_SOURCE, &opts);
     assert!(applied.contains("\\p\n\\v 24 Kwa sababu"), "{applied}");
     assert!(!applied.contains("\\p\n\\v 21"), "{applied}");
-    assert!(!applied.contains("\\q1"), "{applied}");
+}
+
+/// SHAPES: every block between one verse's text and the next `\\v` leads
+/// that verse, so a stanza break crosses with the line it opens.
+#[test]
+fn a_stanza_break_leads_with_its_line() {
+    let source = "\\id PSA\n\\c 1\n\\q1\n\\v 1 Blessed is the man\n\\q2 who walks not.\n\
+                  \\b\n\\q1\n\\v 2 But his delight\n";
+    let target = "\\id PSA\n\\c 1\n\\v 1 Heri mtu yule asiyekwenda.\n\\v 2 Bali sheria.\n";
+    let applied = overlaid(target, source, &OverlayOptions::default());
+    assert_eq!(
+        applied,
+        "\\id PSA\n\\c 1\n\\q1\n\\v 1 Heri mtu yule asiyekwenda.\n\\b\n\\q1\n\\v 2 Bali sheria.\n"
+    );
+}
+
+/// SHAPES: a run is cut at a `\\c`, so nothing the source closes a chapter
+/// with is carried past the next chapter's number.
+#[test]
+fn a_chapter_cuts_the_leading_run() {
+    let source = "\\id PSA\n\\c 1\n\\q1\n\\v 1 One.\n\\b\n\\c 2\n\\q1\n\\v 1 Two.\n";
+    let target = "\\id PSA\n\\c 1\n\\v 1 Moja.\n\\c 2\n\\v 1 Mbili.\n";
+    let applied = overlaid(target, source, &OverlayOptions::default());
+    assert_eq!(
+        applied,
+        "\\id PSA\n\\c 1\n\\q1\n\\v 1 Moja.\n\\c 2\n\\q1\n\\v 1 Mbili.\n"
+    );
+}
+
+/// SHAPES: inside blocks the target already has are respelled to the
+/// source's, ordinal by ordinal, and the ones it lacks are not opened.
+#[test]
+fn inside_blocks_are_respelled_never_opened() {
+    let target = GEN_TARGET.replace(
+        "na nyama ya nyama yangu;",
+        "\n\\q2 na nyama ya nyama yangu;",
+    );
+    let applied = overlaid(&target, GEN_SOURCE, &OverlayOptions::default());
+    assert!(
+        applied.contains("mifupa yangu \n\\q1 na nyama"),
+        "{applied}"
+    );
+    assert_eq!(applied.matches("\\q").count(), 1, "{applied}");
+}
+
+/// SHAPES: `\\id gen` and `\\id GEN` are one book. The Toc keeps the code
+/// verbatim; the overlay compares it folded, so a lowercase export still
+/// pairs, and its sids read in capitals like every other book's.
+#[test]
+fn a_lowercase_book_code_still_pairs() {
+    let lower = GEN_TARGET.replacen("\\id GEN", "\\id gen", 1);
+    assert_ne!(lower, GEN_TARGET);
+    let mut pantry = loaded(&lower, GEN_SOURCE);
+    let computed = overlay::overlay(
+        &mut pantry,
+        &id(TARGET),
+        &id(SOURCE),
+        &OverlayOptions::default(),
+    )
+    .expect("the overlay computes");
+    assert_eq!(computed.report.unpaired, []);
+    assert_eq!(computed.report.inserted.len(), 2);
+    let applied = overlaid(&lower, GEN_SOURCE, &OverlayOptions::default());
+    assert!(
+        applied.starts_with("\\id gen\n"),
+        "the file keeps its spelling: {applied}"
+    );
+    assert!(applied.contains("\\p\n\\v 24 Kwa sababu"), "{applied}");
 }
 
 // ------------------------------------------------------------- the node doors

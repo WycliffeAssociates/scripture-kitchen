@@ -427,17 +427,15 @@ fn an_overlay_crosses_the_wall() {
     assert!(report.contains(r#""removed":[]"#), "{report}");
     assert!(report.contains(r#""unpaired":[]"#), "{report}");
     assert!(
-        report.contains(r#""empty":true"#),
-        "inside blocks await text"
+        !report.contains(r#""where":"inside""#),
+        "no inside block is opened: {report}"
     );
 
     let applied = galley
         .overlay_text("books/GEN.usfm", "ref/GEN.usfm", None)
         .expect("the overlay applies");
-    assert!(
-        applied.contains("\\q1\n\\q2\n\\q1\n\\q2\n\\p\n\\v 24"),
-        "{applied}"
-    );
+    assert!(applied.contains("mwanamume.”\n\\p\n\\v 24"), "{applied}");
+    assert!(!applied.contains("\\q"), "{applied}");
     assert!(!applied.contains("\\f "), "the source's notes stay home");
 
     // Both coordinate spaces, from one transaction: the UTF-16 spans are the

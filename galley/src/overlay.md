@@ -21,19 +21,16 @@ skeleton(source)
   GEN 2:21 leading 1 p       GEN 2:23 inside 1 q1     GEN 2:23 inside 2 q2
   GEN 2:23 inside 3 q1       GEN 2:23 inside 4 q2     GEN 2:24 leading 1 p
 
-overlay(target, source) → 6 edits, ascending, non-overlapping
+overlay(target, source) → 2 edits, ascending, non-overlapping
   insert "\p\n"   at the target's \v 21
-  insert "\n\q1" "\n\q2" "\n\q1" "\n\q2"   after verse 23's text
   insert "\p\n"   at the target's \v 24
+  (the four poetry lines split verse 23's text: the translator places them)
 
 overlayText(target, source)
+  \p
   \v 21 Kwa hiyo Bwana Mungu …
   …
   \v 23 Ndipo huyo mtu akasema: “Huyu … mwanamume.”
-  \q1
-  \q2
-  \q1
-  \q2
   \p
   \v 24 Kwa sababu hii …
 ```
@@ -44,15 +41,21 @@ overlayText(target, source)
 when the address was taken. The triple is what names equivalent nodes on both
 sides; the marker is a check, never a key.
 
-- **Leading** — the block sits immediately before its verse's `\v`, with no
-  verse text between them. It lands exactly, because "immediately before
-  `\v 24`" means the same thing in every language. A verse has AT MOST ONE
-  leading block: the markers ahead of it in the same run closed before the
-  `\v` and belong to the verse behind them.
+- **Leading** — the block is in the run immediately before its verse's `\v`,
+  with no verse text between them: `\b \q1 \v 5` gives verse 5 two leading
+  blocks. It lands exactly, because "immediately before `\v 5`" means the same
+  thing in every language. A `\c`, or a paragraph-kind marker outside the set
+  (a `\s1` by default), cuts the run: what waits before it stays inside the
+  verse behind, so nothing is carried past a chapter number or a heading.
 - **Inside** — the verse's own text is above it. Where a verse's text SPLITS
-  is unknowable across languages, so an inside block is inserted EMPTY after
-  the target's verse text, in source order, and the translator pastes each
-  line into place.
+  is unknowable across languages, so the overlay NEVER opens an inside block.
+  The translator places each one (a key binding, not cut and paste), and
+  `targetNodeFor` answers where the next one would go. Inside blocks the
+  target already has are respelled to the source's, ordinal by ordinal, and
+  any past the source's count are removed.
+- **The book code is compared in capitals.** `\id mat` and `\id MAT` are one
+  book: the Toc keeps the code verbatim, the overlay folds it, so a lowercase
+  tS/BTT export still pairs and its sids read `MAT 1:1` like any other.
 
 Ordinals count from one per address, in document order.
 
@@ -106,12 +109,12 @@ answers as such.
   in the SOURCE to one block. `\b` is empty by design, abstains from the lint,
   and crosses. The fold is source-side only: a TARGET keeps every block it
   has, because the overlay has to account for each one.
-- **The target's skeleton becomes the source's, exactly.** A target block at
-  an address the source lacks is REMOVED — only its marker token, so its text
+- **The target's skeleton becomes the source's, less inside blocks it never
+  had.** A target block at an address the source lacks is REMOVED — only its marker token, so its text
   joins the block before it. A target block the source spells differently is
   respelled in place, keeping whatever delimiter it ended in.
 - **Nothing is placed by proportion or length ratio.** Leading before `\v`,
-  inside after the verse text. That is all.
+  and that is all the overlay places.
 - **Pairing is S1's**, through `sous_core::align` over both sides'
   `OnionBook` projections. A verse pairs when one range meets one range, which
   is bridge ↔ the same bridge. A bridge met by a constituent run, a duplicate
@@ -121,22 +124,13 @@ answers as such.
 ## The invariant
 
 > Apply the overlay's edits to the target, re-extract its skeleton, and it
-> equals the source's skeleton with the source's empty blocks folded away.
+> equals the source's skeleton with the source's empty blocks folded away and
+> each verse's inside blocks cut to the number the target already had.
 
 `galley/tests/overlay.rs` asserts it on every fixture, stating the comparison
 itself rather than calling the library's, so the two cannot drift into
-agreement.
-
-**One shape needs its text first.** A block marker with nothing under it but
-the next `\v` IS, in USFM, the block that verse sits in — no byte in the file
-says otherwise. So an inside block inserted at the end of a verse, with no
-further block before the next `\v`, reads back as that verse's leading block
-until the translator types into it. The test pastes a word into every block
-the overlay opened empty, which is exactly what the scaffold is for; every
-other claim — which addresses, in what order, spelled how — is asserted
-unchanged. Where the source's own blocks close the run, as in the example
-above, the empty scaffold already reads back correctly and the test says so
-without pasting.
+agreement. It holds strictly, with nothing pasted first: the overlay opens no
+empty block, so every marker it writes reads back as its own address.
 
 ## What it costs, and what it is not
 
@@ -149,8 +143,8 @@ because a lengths-only reference has no skeleton to copy.
 The transaction crosses as `onion-wasm`'s `Edits`, built through
 `Edits::from_parts` — the same class `formatEdits` answers with, so a host
 applies an overlay exactly as it applies a fix. Its spans are bytes unless the
-caller asked for `utf16`. Inserts that share a position — four empty poetry
-lines after one verse's text — cross as ONE edit, so an applier that splices
+caller asked for `utf16`. Inserts that share a position — `\b` and `\q1`
+before one verse — cross as ONE edit, so an applier that splices
 last-first still lands them in source order.
 
 An overlay is a SUGGESTION applied on request, never a finding. It is not on

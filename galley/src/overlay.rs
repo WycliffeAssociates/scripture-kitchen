@@ -18,17 +18,17 @@
 //!                   \q2(GEN 2:23 inside 4)  \p(GEN 2:24 leading 1)
 //!
 //! overlay(target, source)   insert "\\p\n"  at the target's `\v 21`
-//!                           insert "\n\\q1" ×2 and "\n\\q2" ×2 after v23's text
 //!                           insert "\\p\n"  at the target's `\v 24`
 //! ```
 //!
 //! An address — (verse sid, leading or inside, ordinal) — names equivalent
-//! nodes on both sides. Leading blocks sit immediately before their verse's
-//! `\v`, so they land exactly; where a verse's text SPLITS is unknowable
-//! across languages, so inside blocks arrive EMPTY after the verse's text and
-//! the translator pastes each line into place. `overlay.md` beside this file
-//! is the contract: the marker set, what an empty block does, and why a
-//! target block the source lacks is removed rather than kept.
+//! nodes on both sides. Leading blocks sit between a verse's text and the
+//! next `\v`, so they land exactly. Where a verse's text SPLITS is unknowable
+//! across languages, so the overlay never opens an inside block: the
+//! translator places those, and the node doors say where each one goes.
+//! `overlay.md` beside this file is the contract: the marker set, what an
+//! empty block does, and why a target block the source lacks is removed
+//! rather than kept.
 
 use core::ops::Range;
 
@@ -48,7 +48,9 @@ use crate::sous::OnionBook;
 #[cfg_attr(feature = "wasm", derive(serde::Serialize))]
 #[cfg_attr(feature = "wasm", serde(rename_all = "lowercase"))]
 pub enum Placement {
-    /// Immediately before the verse's `\v`, with no verse text in between.
+    /// In the run of blocks immediately before the verse's `\v`, with no
+    /// verse text in between — after the verse behind it, and after any `\c`
+    /// or block marker outside the set.
     Leading,
     /// After verse text, inside the verse's own extent.
     Inside,
@@ -118,7 +120,7 @@ pub struct SkeletonRow {
     pub end: u32,
     /// What onion lints as an empty paragraph — a block marker with nothing
     /// under it but line endings. `\b` is empty by design and is never one.
-    /// An empty row shares the ordinal of the row it folds into.
+    /// A source-side diff drops empty rows and renumbers what is left.
     pub empty: bool,
     /// The one delimiter byte the marker token folded — a space when text
     /// follows on the line, a newline when it does not, `0` at end of file.
@@ -236,16 +238,14 @@ pub enum Reason {
     Ambiguous,
 }
 
-/// One block the overlay adds to the target.
+/// One block the overlay adds to the target: a leading block, or a target
+/// block respelled in place.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "wasm", derive(serde::Serialize))]
 pub struct Inserted {
     pub address: BlockAddress,
     pub marker: String,
     pub at: u32,
-    /// An inside block arrives with no text under it, awaiting the
-    /// translator's.
-    pub empty: bool,
 }
 
 /// One target block the source has no equivalent for.
@@ -461,7 +461,7 @@ fn extract(pantry: &mut Pantry, id: &BookId, set: &MarkerSet) -> Result<Skeleton
     let source = text.as_bytes();
     let mask = entry.mask()?;
     let toc = entry.toc();
-    let toc_book = toc.book;
+    let toc_book = book_code(toc.book);
 
     // Verse rows first: a keyed anchor's extent is its `\v` through the next
     // anchor, capped at its chapter's end — the same extent `OnionBook` cuts.
@@ -487,7 +487,7 @@ fn extract(pantry: &mut Pantry, id: &BookId, set: &MarkerSet) -> Result<Skeleton
             text_extent(mask, source, anchor.at..end, marker_end, &mut text_at);
         verses.push(SkeletonVerse {
             sid: Sid {
-                book: toc.book,
+                book: toc_book,
                 chapter: anchor.chapter,
                 first: anchor.first,
                 last: anchor.last,
@@ -508,9 +508,11 @@ fn extract(pantry: &mut Pantry, id: &BookId, set: &MarkerSet) -> Result<Skeleton
 
     // Then the walk. A block marker waits in `pending` until the document
     // places it. Verse text makes every waiting block INSIDE the current
-    // verse; a `\v` makes the LAST waiting block leading for it — the others
-    // closed before the `\v` and belong to the verse behind them, which is
-    // why a verse has at most one leading block.
+    // verse; a `\v` makes the whole waiting run LEADING for it, since every
+    // block in it sits between one verse's text and the next `\v`. A `\c`,
+    // or a paragraph marker the set leaves out, ends the run inside the
+    // current verse instead: a block before a chapter or a heading does not
+    // lead the verse on its far side.
     let mut blocks: Vec<SkeletonRow> = Vec::new();
     let mut collapsed: Vec<Collapsed> = Vec::new();
     let mut pending: Vec<Pending> = Vec::new();
@@ -526,13 +528,14 @@ fn extract(pantry: &mut Pantry, id: &BookId, set: &MarkerSet) -> Result<Skeleton
         let kind = generated::kind(token.marker_idx);
         let block = kind == MarkerKind::Paragraph && set.contains(token.marker_idx);
         let verse = kind == MarkerKind::Verse;
-        if !block && !verse {
+        let boundary = kind == MarkerKind::Chapter || (kind == MarkerKind::Paragraph && !block);
+        if !block && !verse && !boundary {
             continue;
         }
         // Verse text before this marker places everything waiting. The mask
         // keeps line endings, so a run of whitespace is not text.
         let saw_text = text_between(mask, source, &mut range_at, &mut scanned, token.start);
-        if saw_text {
+        if saw_text || boundary {
             note_run(&mut collapsed, &pending, sid_of_row(&verses, current));
             place(
                 &mut pending,
@@ -542,33 +545,31 @@ fn extract(pantry: &mut Pantry, id: &BookId, set: &MarkerSet) -> Result<Skeleton
                 &mut inside,
             );
         }
+        if boundary {
+            continue;
+        }
         if verse {
             let Some(row) = by_token.get(&(index as u32)).copied() else {
                 continue;
             };
             // An EMPTY block cannot be the one this `\v` sits inside: a block
-            // with the verse under it has the verse's text under it too. So an
-            // empty tail belongs to the verse behind, which is also what makes
-            // an inserted, text-less inside block read back as one.
+            // with the verse under it has the verse's text under it too. So a
+            // run ending in one belongs to the verse behind.
             let leads = pending.last().is_some_and(|row| !row.empty);
-            note_run(
-                &mut collapsed,
-                &pending,
-                match leads {
-                    true => Some(&verses[row].sid),
-                    false => sid_of_row(&verses, current),
-                },
-            );
-            let leader = leads.then(|| pending.pop()).flatten();
-            place(
-                &mut pending,
-                &mut blocks,
-                sid_of_row(&verses, current),
-                Placement::Inside,
-                &mut inside,
-            );
-            if let Some(leader) = leader {
-                blocks.push(leader.into_row(&verses[row].sid, Placement::Leading, 1));
+            let sid = match leads {
+                true => Some(verses[row].sid.as_str()),
+                false => sid_of_row(&verses, current),
+            };
+            note_run(&mut collapsed, &pending, sid);
+            match leads {
+                true => place(&mut pending, &mut blocks, sid, Placement::Leading, &mut 1),
+                false => place(
+                    &mut pending,
+                    &mut blocks,
+                    sid,
+                    Placement::Inside,
+                    &mut inside,
+                ),
             }
             current = Some(row);
             inside = 1;
@@ -872,11 +873,19 @@ fn projected(pantry: &mut Pantry, id: &BookId) -> Result<OnionBook, OverlayError
         .ok_or_else(|| OverlayError::UnknownBook { id: id.clone() })?;
     let text = entry.text()?.to_string();
     let mask = entry.mask()?.clone();
-    let toc = entry.toc().clone();
+    let mut toc = entry.toc().clone();
+    toc.book = book_code(toc.book);
     OnionBook::from_parts(&text, mask, toc).map_err(|error| OverlayError::Input {
         id: id.clone(),
         error,
     })
+}
+
+/// The `\id` code as the overlay compares it. The Toc keeps `\id mat`
+/// verbatim, and lowercase codes are common in tS/BTT exports; pairing must
+/// not hinge on them, or every verse reads as absent and nothing crosses.
+fn book_code(book: [u8; 3]) -> [u8; 3] {
+    book.map(|byte| byte.to_ascii_uppercase())
 }
 
 fn sid_of(book: [u8; 3], key: VerseKey) -> String {
@@ -937,12 +946,11 @@ pub fn overlay(
         for placement in [Placement::Leading, Placement::Inside] {
             let mine = target.rows(&target_groups, &verse.sid, placement, true);
             let theirs = source.rows(&source_groups, &verse.sid, placement, false);
-            let at = match placement {
-                Placement::Leading => verse.from,
-                Placement::Inside => verse
-                    .text_to
-                    .max(mine.last().map_or(verse.text_to, |row| row.to)),
-            };
+            let at = verse.from;
+            // A verse-only Bible often runs `\v` on after the previous verse's
+            // text, so the first leading marker opens the line it needs rather
+            // than landing mid-line.
+            let mut mid_line = at > 0 && target_text.get(at as usize - 1) != Some(&b'\n');
             for slot in 0..mine.len().max(theirs.len()) {
                 match (mine.get(slot), theirs.get(slot)) {
                     (Some(row), Some(want)) if row.marker == want.marker => {}
@@ -959,32 +967,25 @@ pub fn overlay(
                             },
                             marker: want.marker.clone(),
                             at: row.from,
-                            empty: false,
                         });
                     }
                     (Some(row), None) => {
                         push(&mut edits, row.from, row.to, "");
                         report.removed.push(removed(row));
                     }
+                    // Where the target's text splits is the translator's call,
+                    // so an inside block the target lacks is left for them.
+                    (None, Some(_)) if placement == Placement::Inside => {}
                     (None, Some(want)) => {
-                        let text = match placement {
-                            // A verse-only Bible often runs `\v` on after the
-                            // previous verse's text, so a leading marker opens
-                            // the line it needs rather than landing mid-line.
-                            Placement::Leading => {
-                                match at > 0 && target_text.get(at as usize - 1) != Some(&b'\n') {
-                                    true => format!("\n\\{}\n", want.marker),
-                                    false => format!("\\{}\n", want.marker),
-                                }
-                            }
-                            Placement::Inside => format!("\n\\{}", want.marker),
+                        let open = match core::mem::take(&mut mid_line) {
+                            true => "\n",
+                            false => "",
                         };
-                        push(&mut edits, at, at, &text);
+                        push(&mut edits, at, at, &format!("{open}\\{}\n", want.marker));
                         report.inserted.push(Inserted {
                             address: want.address(),
                             marker: want.marker.clone(),
                             at,
-                            empty: placement == Placement::Inside,
                         });
                     }
                     (None, None) => unreachable!("the loop is bounded by the longer side"),
@@ -993,9 +994,8 @@ pub fn overlay(
         }
     }
 
-    // Leading blocks precede their `\v` and inside blocks follow their text,
-    // so document order is already ascending; the sort is stable, which is
-    // what keeps several inserts at one offset in source order.
+    // The sort is stable, which is what keeps several leading inserts at one
+    // `\v` in source order.
     edits.sort_by_key(|edit| edit.from);
     debug_assert!(
         edits
