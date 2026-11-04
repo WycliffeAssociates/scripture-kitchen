@@ -351,8 +351,8 @@ fn format_listing(source: &str, chapter: Option<u16>, variant: &str) -> String {
 
     let opts = match variant {
         "default" => FormatOptions::default(),
-        "keep-verse-breaks" => FormatOptions {
-            verse_breaks: VerseBreaks::Keep,
+        "join-verses" => FormatOptions {
+            verse_breaks: VerseBreaks::Remove,
             ..FormatOptions::default()
         },
         "remove-s5" => FormatOptions {

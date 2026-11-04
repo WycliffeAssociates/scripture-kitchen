@@ -26,7 +26,7 @@ Format is the one opt-in writer of new bytes ([[invariants]] 1, 3). It returns [
 
 ## Show me
 
-`playground --format-trace`, default options, on the scratch book in [[cst]]: 3 edits over 125 bytes. Watch the verses join their paragraph's line and the surplus spaces before `spoke.` go. Before:
+`playground --format-trace`, default options, on the scratch book in [[cst]]: 2 edits. Watch `\v 4` take its own line and the surplus spaces before `spoke.` go. Before:
 
 ```usfm
 \p
@@ -39,12 +39,15 @@ Format is the one opt-in writer of new bytes ([[invariants]] 1, 3). It returns [
 After:
 
 ```usfm
-\p \v 1 Jesus wept.\f + \ft why\f* Then \v 2-3 he \nd Lord\nd* spoke.
+\p
+\v 1 Jesus wept.\f + \ft why\f* Then
+\v 2-3 he \nd Lord\nd* spoke.
 \s1 A heading
-\q1 \v 4 Bread.
+\q1
+\v 4 Bread.
 ```
 
-`verse_breaks: Remove` joins verses onto their paragraph's line; `VerseBreaks::Keep` would keep them.
+The default is one verse per line, as most USFM is written. `verse_breaks: Remove` joins verses onto their paragraph's line instead (`--format-variant join-verses`). Empty paragraphs (`\m` then `\p`) are left as written: which one was meant is ambiguous, so `empty-paragraph`'s fix runs only when named in `repairs`.
 
 ## How it works
 

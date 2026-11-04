@@ -1,6 +1,7 @@
 //! What `format` does to 160 real books — the invariants, at corpus scale.
 //!
-//! Seven claims, all of them checked per book on the default bundle:
+//! Seven claims, all of them checked per book on the default bundle and on
+//! the joined-verse one:
 //! determinism, one valid transaction, a partition that still holds,
 //! convergence in ONE pass, conservation of every meaning-bearing diagnostic,
 //! sanctity of verse text, and — with `remove_markers: ["s5"]` — that a
@@ -14,6 +15,7 @@ use std::path::{Path, PathBuf};
 use rayon::prelude::*;
 use usfm_onion::cst::build;
 use usfm_onion::edit::apply;
+use usfm_onion::format::VerseBreaks;
 use usfm_onion::lint::{Code, LINT_ROWS, check_edits, lint};
 use usfm_onion::toc::toc;
 use usfm_onion::{Filter, FormatOptions, format, format_edits, format_edits_in, lex, mask};
@@ -84,95 +86,110 @@ fn the_default_bundle_holds_every_invariant_over_the_corpus() {
         "corpus size changed — re-read the numbers"
     );
 
-    let edited: Vec<u64> = paths
+    // The default bundle, and the one opt-in axis that rewrites the most bytes
+    // — paragraphs as one flowing line — so its edits get the same scrutiny.
+    let joined = FormatOptions {
+        verse_breaks: VerseBreaks::Remove,
+        ..FormatOptions::default()
+    };
+    let default: Vec<u64> = paths
         .par_iter()
-        .map(|path| {
-            let source = std::fs::read(path).unwrap();
-            let opts = FormatOptions::default();
-            let edits = format_edits(&source, &opts);
-
-            // 4. ONE TRANSACTION: sorted, disjoint, in bounds, char-aligned.
-            check_edits(&source, &edits)
-                .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
-
-            // 6. DETERMINISM: same bytes, same options, same answer.
-            assert_eq!(
-                format_edits(&source, &opts),
-                edits,
-                "{}: a second run disagreed",
-                path.display()
-            );
-
-            let out = format(&source, &opts);
-            let text = core::str::from_utf8(&out)
-                .unwrap_or_else(|_| panic!("{}: format broke UTF-8", path.display()));
-
-            // THE PARTITION, on text nobody has lexed before: the formatted
-            // bytes re-lex into spans that tile them exactly.
-            let mut cursor = 0usize;
-            for token in &lex(text) {
-                assert_eq!(
-                    token.start as usize,
-                    cursor,
-                    "{}: the formatted text does not partition",
-                    path.display()
-                );
-                cursor += token.len as usize;
-            }
-            assert_eq!(
-                cursor,
-                out.len(),
-                "{}: the formatted text does not partition",
-                path.display()
-            );
-
-            // 1. IDEMPOTENCE, in its strong form: re-walking the OUTPUT finds
-            // nothing left for any Form row, formatter-bit row or opted repair.
-            let left = format_edits(&out, &opts);
-            assert!(
-                left.is_empty(),
-                "{}: {} edits still wanted after one pass ({:?})",
-                path.display(),
-                left.len(),
-                &left[..left.len().min(3)]
-            );
-
-            // 2. VERSE TEXT IS CONTENT. Nothing but whitespace forms moved.
-            assert_eq!(
-                verse_words(&out),
-                verse_words(&source),
-                "{}: verse text changed",
-                path.display()
-            );
-
-            // 5. MEANING-BEARING DIAGNOSTICS ARE CONSERVED: for every code the
-            // formatter does NOT own, the count is the same before and after.
-            let (before, after) = (counts(&source), counts(&out));
-            for row in LINT_ROWS.iter().filter(|row| !row.formats()) {
-                assert_eq!(
-                    before[row.code as usize],
-                    after[row.code as usize],
-                    "{}: formatting changed the {} count",
-                    path.display(),
-                    row.name
-                );
-            }
-            edits.len() as u64
-        })
+        .map(|path| holds_every_invariant(path, &FormatOptions::default()))
+        .collect();
+    let flowing: Vec<u64> = paths
+        .par_iter()
+        .map(|path| holds_every_invariant(path, &joined))
         .collect();
 
     // The invariants are only evidence if the formatter actually did something,
-    // so the transaction size is pinned like every other corpus number: 88,648
-    // edits over 12.8 MB — en_ulb 48,934, examples.bsb 31,087, bdf_reg 7,940,
-    // en_ult-fixtures 687. The corpora are already tidy, so what this mostly is: verse
-    // breaks joined into their paragraphs (the default axis), the blank line
-    // above every `\s5`, and the `\p` a paragraph-less run owes.
-    let total: u64 = edited.iter().sum();
-    assert_eq!(total, 88_648);
+    // so the transaction sizes are pinned like every other corpus number. The
+    // default — one verse per line — finds these corpora mostly tidy already:
+    // 22,958 edits, en_ulb 22,550 (the blank line above every `\s5`, and the
+    // `\p` a paragraph-less run owes), en_ult-fixtures 402, bdf_reg 3,
+    // examples.bsb 3. Joining verse breaks into their paragraphs touches every
+    // book: 87,944 — the 88,648 this pinned when joining was the default, less
+    // the 704 `empty-paragraph` deletions format no longer makes unasked.
+    let total: u64 = default.iter().sum();
+    assert_eq!(total, 22_958);
+    let total: u64 = flowing.iter().sum();
+    assert_eq!(total, 87_944);
     assert!(
-        edited.iter().all(|count| *count > 0),
+        flowing.iter().all(|count| *count > 0),
         "a book formatted to nothing"
     );
+}
+
+/// Every per-book claim, under one set of options; the edit count back.
+fn holds_every_invariant(path: &Path, opts: &FormatOptions) -> u64 {
+    let source = std::fs::read(path).unwrap();
+    let edits = format_edits(&source, opts);
+
+    // 4. ONE TRANSACTION: sorted, disjoint, in bounds, char-aligned.
+    check_edits(&source, &edits).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+
+    // 6. DETERMINISM: same bytes, same options, same answer.
+    assert_eq!(
+        format_edits(&source, opts),
+        edits,
+        "{}: a second run disagreed",
+        path.display()
+    );
+
+    let out = format(&source, opts);
+    let text = core::str::from_utf8(&out)
+        .unwrap_or_else(|_| panic!("{}: format broke UTF-8", path.display()));
+
+    // THE PARTITION, on text nobody has lexed before: the formatted
+    // bytes re-lex into spans that tile them exactly.
+    let mut cursor = 0usize;
+    for token in &lex(text) {
+        assert_eq!(
+            token.start as usize,
+            cursor,
+            "{}: the formatted text does not partition",
+            path.display()
+        );
+        cursor += token.len as usize;
+    }
+    assert_eq!(
+        cursor,
+        out.len(),
+        "{}: the formatted text does not partition",
+        path.display()
+    );
+
+    // 1. IDEMPOTENCE, in its strong form: re-walking the OUTPUT finds
+    // nothing left for any Form row, formatter-bit row or opted repair.
+    let left = format_edits(&out, opts);
+    assert!(
+        left.is_empty(),
+        "{}: {} edits still wanted after one pass ({:?})",
+        path.display(),
+        left.len(),
+        &left[..left.len().min(3)]
+    );
+
+    // 2. VERSE TEXT IS CONTENT. Nothing but whitespace forms moved.
+    assert_eq!(
+        verse_words(&out),
+        verse_words(&source),
+        "{}: verse text changed",
+        path.display()
+    );
+
+    // 5. MEANING-BEARING DIAGNOSTICS ARE CONSERVED: for every code the
+    // formatter does NOT own, the count is the same before and after.
+    let (before, after) = (counts(&source), counts(&out));
+    for row in LINT_ROWS.iter().filter(|row| !row.formats()) {
+        assert_eq!(
+            before[row.code as usize],
+            after[row.code as usize],
+            "{}: formatting changed the {} count",
+            path.display(),
+            row.name
+        );
+    }
+    edits.len() as u64
 }
 
 /// The `\s5` case the parameterized row exists for: 13,636 unfoldingWord chunk

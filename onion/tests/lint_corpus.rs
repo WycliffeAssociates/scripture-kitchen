@@ -409,8 +409,9 @@ fn every_corpus_fix_passes_the_oracle() {
     assert_eq!(total(Code::OrphanCloser), 1);
     // One `\p` per paragraph-less run, all 5434 of them.
     assert_eq!(total(Code::MissingParagraph), 5_403);
-    // The FORMATTER half of `empty-paragraph`: every one of the 787 empty
-    // paragraphs is deleted, under ONE fix per RUN filed on the run's first
+    // The fix half of `empty-paragraph` (format applies it only when named in
+    // `repairs`): every one of the 787 empty paragraphs is deleted, under ONE
+    // fix per RUN filed on the run's first
     // member — so the fix count is the number of RUNS. The 25 findings that are
     // not a first member are the fixless remainder the same transaction
     // repairs, and every run in 160 books that has one is exactly two long:

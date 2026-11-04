@@ -255,7 +255,8 @@ pub fn mask(
 /// each switch, and adding one later does not renumber a call site.
 #[wasm_bindgen]
 pub struct FormatOpts {
-    /// 0 = keep the line break in front of a `\v`, 1 = fold it into a space.
+    /// 0 = keep the line break in front of a `\v` (the default: one verse
+    /// per line), 1 = fold it into a space.
     pub verse_breaks: u32,
     /// 0 = keep a break on a character-marker boundary, 1 = join it into a
     /// space (the aligned-corpus shape).
@@ -1527,7 +1528,7 @@ mod tests {
     /// spans go out through — multibyte text or not.
     #[test]
     fn format_edits_in_takes_its_range_in_utf16() {
-        let messy = "\\c 1\n\\p\n\\v 1 λόγος  ἦν\n\\c 2\n\\p\n\\v 1 a\n\\v 2 b\n";
+        let messy = "\\c 1\n\\p \\v 1 λόγος  ἦν\n\\c 2\n\\p\n\\v 1 a \\v 2 b\n";
         let opts = FormatOpts::new();
         let index = Utf16Index::new(messy.as_bytes());
         let whole = format_edits(messy, &opts);

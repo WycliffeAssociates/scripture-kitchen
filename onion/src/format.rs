@@ -5,15 +5,13 @@
 //!
 //! format(source, &FormatOptions::default())
 //!            \c 1
-//!            \p \v 1 In  the beginning. \v 2 The earth…
-//!            ↑ every block marker owns  ↑ interior spacing is CONTENT
-//!              its own line               and is never touched
+//!            \p                        ← every block marker owns its line,
+//!            \v 1 In  the beginning.  ← and so does every verse
+//!            \v 2 The earth…            (interior spacing is CONTENT, untouched)
 //!
-//! format(source, &FormatOptions { verse_breaks: VerseBreaks::Keep, ..d })
+//! format(source, &FormatOptions { verse_breaks: VerseBreaks::Remove, ..d })
 //!            \c 1
-//!            \p
-//!            \v 1 In  the beginning.
-//!            \v 2 The earth…
+//!            \p \v 1 In  the beginning. \v 2 The earth…
 //! ```
 //!
 //! Two internal passes and no duplicated rule logic: [`lint`] runs as it always
@@ -51,12 +49,13 @@ use crate::{Token, TokenKind, lex, lex_with};
 /// What happens to the line break in front of a `\v`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum VerseBreaks {
-    /// `\v` joins the block-marker list: one verse per line. What a CodeMirror
-    /// session rendering line breaks wants.
+    /// `\v` joins the block-marker list: one verse per line — how most USFM
+    /// is written, and the easiest markup to read as markup. An editor that
+    /// wants verses to flow decides that in its rendering, not in the bytes.
+    #[default]
     Keep,
     /// The break in front of a `\v` inside a paragraph becomes a space, so a
-    /// paragraph is one flowing line. The brief's default.
-    #[default]
+    /// paragraph is one flowing line.
     Remove,
 }
 

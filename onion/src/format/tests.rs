@@ -9,9 +9,10 @@
 use super::*;
 use crate::lint::{LINT_ROWS, Severity};
 
-fn keep_verses() -> FormatOptions<'static> {
+/// Paragraphs as one flowing line — the opt-in the default no longer is.
+fn join_verses() -> FormatOptions<'static> {
     FormatOptions {
-        verse_breaks: VerseBreaks::Keep,
+        verse_breaks: VerseBreaks::Remove,
         ..FormatOptions::default()
     }
 }
@@ -47,23 +48,23 @@ fn rows(usfm: &str, opts: &FormatOptions) -> Vec<Code> {
 fn every_form_row_fires_on_its_own_snippet() {
     let s5 = FormatOptions {
         remove_markers: &["s5"],
-        ..FormatOptions::default()
+        ..join_verses()
     };
     let bridge = FormatOptions {
         bridge_empty_verses: true,
-        ..FormatOptions::default()
+        ..join_verses()
     };
     let dedupe = FormatOptions {
         dedupe_verse_number: true,
-        ..FormatOptions::default()
+        ..join_verses()
     };
     let join = FormatOptions {
         char_marker_breaks: CharBreaks::Join,
-        ..FormatOptions::default()
+        ..join_verses()
     };
     let crlf = FormatOptions {
         newline: Newline::CrLf,
-        ..FormatOptions::default()
+        ..join_verses()
     };
 
     // (row, options, before, after) — one MINIMAL snippet per Form row, whose
@@ -89,7 +90,7 @@ fn every_form_row_fires_on_its_own_snippet() {
         ),
         (
             Code::BlockMarkerOwnLine,
-            &FormatOptions::default(),
+            &join_verses(),
             "\\c 1 \\c 2",
             "\\c 1\n\\c 2",
         ),
@@ -101,7 +102,7 @@ fn every_form_row_fires_on_its_own_snippet() {
         ),
         (
             Code::CollapseBlankLines,
-            &FormatOptions::default(),
+            &join_verses(),
             "\\c 1\n\n\n\\c 2",
             "\\c 1\n\\c 2",
         ),
@@ -113,25 +114,25 @@ fn every_form_row_fires_on_its_own_snippet() {
         ),
         (
             Code::TrimTextEdges,
-            &FormatOptions::default(),
+            &join_verses(),
             "\\p \\add x\\add*   more",
             "\\p \\add x\\add* more",
         ),
         (
             Code::DelimiterSingle,
-            &FormatOptions::default(),
+            &join_verses(),
             "\\p   Text",
             "\\p Text",
         ),
         (
             Code::DesignatorWsSingle,
-            &FormatOptions::default(),
+            &join_verses(),
             "\\p \\v 12   Text",
             "\\p \\v 12 Text",
         ),
         (
             Code::MarkerWsAtLineStart,
-            &FormatOptions::default(),
+            &join_verses(),
             "\\p a\n   \\p b",
             "\\p a\n\\p b",
         ),
@@ -173,16 +174,16 @@ fn the_form_channel_is_declared_consistently() {
             assert_eq!(row.severity_at(version), Some(Severity::Form));
         }
     }
-    // The three DUAL CITIZENS keep their real severity and carry the bit.
-    for code in [
-        Code::MissingParagraph,
-        Code::MarkerNotWsPreceded,
-        Code::EmptyParagraph,
-    ] {
+    // The DUAL CITIZENS keep their real severity and carry the bit.
+    for code in [Code::MissingParagraph, Code::MarkerNotWsPreceded] {
         let row = code.row();
         assert!(row.formatter && !row.is_form(), "{}", row.name);
         assert!(row.fix_label.is_some(), "{}", row.name);
     }
+    // `empty-paragraph` has a fix but is not in the default bundle: which of
+    // `\m \p` was meant is the author's call.
+    let empty = Code::EmptyParagraph.row();
+    assert!(!empty.formatter && empty.fix_label.is_some());
 }
 
 // ---------------------------------------------------------------------------
@@ -193,25 +194,25 @@ fn the_form_channel_is_declared_consistently() {
 #[test]
 fn interior_verse_text_is_untouched_and_edges_are_not() {
     assert_eq!(
-        formatted("\\c 1\n\\p \\v 1 In  the beginning\n", &keep_verses()),
+        formatted(
+            "\\c 1\n\\p \\v 1 In  the beginning\n",
+            &FormatOptions::default()
+        ),
         "\\c 1\n\\p\n\\v 1 In  the beginning\n"
     );
     // NBSP is content, never structural whitespace.
     assert_eq!(
         formatted(
             "\\c 1\n\\p \\v 1 In\u{00A0}\u{00A0}the beginning\n",
-            &keep_verses()
+            &FormatOptions::default()
         ),
         "\\c 1\n\\p\n\\v 1 In\u{00A0}\u{00A0}the beginning\n"
     );
     // The EDGES are another matter — and `\p   Text` has no leading run at all,
     // the scanner having folded it into the marker's own span.
+    assert_eq!(formatted("\\p   Text\n", &join_verses()), "\\p Text\n");
     assert_eq!(
-        formatted("\\p   Text\n", &FormatOptions::default()),
-        "\\p Text\n"
-    );
-    assert_eq!(
-        formatted("\\p \\add x\\add*   more   \n", &FormatOptions::default()),
+        formatted("\\p \\add x\\add*   more   \n", &join_verses()),
         "\\p \\add x\\add* more\n"
     );
 }
@@ -223,11 +224,11 @@ fn interior_verse_text_is_untouched_and_edges_are_not() {
 fn poetry_falls_out_of_the_block_rule() {
     let stanza = "\\c 1\n\\q1 a \\q2 b \\q1 c\n\\p \\v 1 x\n";
     assert_eq!(
-        formatted(stanza, &FormatOptions::default()),
+        formatted(stanza, &join_verses()),
         "\\c 1\n\\q1 a\n\\q2 b\n\\q1 c\n\\p \\v 1 x\n"
     );
     assert_eq!(
-        formatted(stanza, &keep_verses()),
+        formatted(stanza, &FormatOptions::default()),
         "\\c 1\n\\q1 a\n\\q2 b\n\\q1 c\n\\p\n\\v 1 x\n"
     );
 }
@@ -237,50 +238,64 @@ fn poetry_falls_out_of_the_block_rule() {
 #[test]
 fn a_closing_char_marker_glues_to_the_text_after_it() {
     let glued = "\\c 1\n\\p \\v 1 \\nd Lord\\nd*'s Battles\n";
-    assert_eq!(formatted(glued, &FormatOptions::default()), glued);
+    assert_eq!(formatted(glued, &join_verses()), glued);
     assert_eq!(
-        formatted(glued, &keep_verses()),
+        formatted(glued, &FormatOptions::default()),
         "\\c 1\n\\p\n\\v 1 \\nd Lord\\nd*'s Battles\n"
     );
     // Aligned USFM is built out of hugging, and none of it moves.
     let aligned = "\\c 1\n\\p \\v 1 \\w In\\w*\\w the\\w*\\add x\\add*\n";
-    assert_eq!(formatted(aligned, &FormatOptions::default()), aligned);
+    assert_eq!(formatted(aligned, &join_verses()), aligned);
 }
 
 // ---------------------------------------------------------------------------
 // The axes
 // ---------------------------------------------------------------------------
 
+/// The default is one verse per line, as most USFM is written: a paragraph
+/// run onto one line is split, `\p` takes its own line, and the `\p` that
+/// `missing-paragraph` opens after a heading does too.
+#[test]
+fn by_default_every_verse_starts_its_own_line() {
+    assert_eq!(
+        formatted(
+            "\\c 1\n\\p \\v 1 Paul, a servant. \\v 2 with the hope.\n\\s5 \\v 3 At the right time.\n",
+            &FormatOptions::default()
+        ),
+        "\\c 1\n\\p\n\\v 1 Paul, a servant.\n\\v 2 with the hope.\n\\s5\n\\p\n\\v 3 At the right time.\n"
+    );
+}
+
 #[test]
 fn the_two_verse_break_settings_differ_only_in_verse_breaks() {
     let usfm = "\\c 1\n\\p\n\\v 1 a\n\\v 2 b\n\\q1 poetry\n";
     assert_eq!(
-        formatted(usfm, &keep_verses()),
+        formatted(usfm, &FormatOptions::default()),
         "\\c 1\n\\p\n\\v 1 a\n\\v 2 b\n\\q1 poetry\n"
     );
     assert_eq!(
-        formatted(usfm, &FormatOptions::default()),
+        formatted(usfm, &join_verses()),
         "\\c 1\n\\p \\v 1 a \\v 2 b\n\\q1 poetry\n"
     );
     // Same bytes modulo the break form: strip the whitespace and the two
     // outputs are identical.
     let squeeze = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
     assert_eq!(
-        squeeze(&formatted(usfm, &keep_verses())),
-        squeeze(&formatted(usfm, &FormatOptions::default()))
+        squeeze(&formatted(usfm, &FormatOptions::default())),
+        squeeze(&formatted(usfm, &join_verses()))
     );
 }
 
 #[test]
 fn every_ending_in_the_output_is_the_configured_one() {
     let mixed = "\\id GEN\r\n\\c 1\n\\p a\r\n\\p b\n";
-    let lf = formatted(mixed, &FormatOptions::default());
+    let lf = formatted(mixed, &join_verses());
     assert_eq!(lf, "\\id GEN\n\\c 1\n\\p a\n\\p b\n");
     assert!(!lf.contains('\r'));
 
     let crlf = FormatOptions {
         newline: Newline::CrLf,
-        ..FormatOptions::default()
+        ..join_verses()
     };
     let out = formatted(mixed, &crlf);
     assert_eq!(out, "\\id GEN\r\n\\c 1\r\n\\p a\r\n\\p b\r\n");
@@ -299,12 +314,12 @@ fn every_ending_in_the_output_is_the_configured_one() {
 fn joining_char_marker_lines_reads_as_flowing_text() {
     let join = FormatOptions {
         char_marker_breaks: CharBreaks::Join,
-        ..FormatOptions::default()
+        ..join_verses()
     };
     // The en_ult shape: one word per line, each wrapped in its own `\w`.
     let aligned = "\\c 1\n\\p \\v 1 \\w In\\w*\n\\w the\\w*\n\\w beginning\\w*\n";
     assert_eq!(
-        formatted(aligned, &FormatOptions::default()),
+        formatted(aligned, &join_verses()),
         "\\c 1\n\\p \\v 1 \\w In\\w*\n\\w the\\w*\n\\w beginning\\w*\n"
     );
     let joined = formatted(aligned, &join);
@@ -336,15 +351,15 @@ fn remove_markers_takes_the_marker_and_the_line_it_stood_on() {
     let ulb = "\\id GEN\n\\c 1\n\\p\n\\v 1 a\n\n\\s5\n\\p\n\\v 2 b\n";
     // Empty list: not one finding, and the `\s5` survives untouched.
     assert!(
-        rows(ulb, &FormatOptions::default())
+        rows(ulb, &join_verses())
             .iter()
             .all(|code| *code != Code::RemoveMarker)
     );
-    assert!(formatted(ulb, &FormatOptions::default()).contains("\\s5"));
+    assert!(formatted(ulb, &join_verses()).contains("\\s5"));
 
     let s5 = FormatOptions {
         remove_markers: &["s5"],
-        ..FormatOptions::default()
+        ..join_verses()
     };
     // THE en_ulb STRESS BLOCK: a removed chunk marker, an empty paragraph and a
     // blank line, all in one transaction, converging in one pass.
@@ -359,7 +374,7 @@ fn remove_markers_takes_the_marker_and_the_line_it_stood_on() {
             "\\id GEN\n\\c 1\n\\p a\n\\q1 poetry\n\\p b\n",
             &FormatOptions {
                 remove_markers: &["q1"],
-                ..FormatOptions::default()
+                ..join_verses()
             }
         ),
         "\\id GEN\n\\c 1\n\\p a\n\\p b\n"
@@ -371,12 +386,12 @@ fn the_repeated_verse_number_goes_only_on_a_number_boundary() {
     let usfm = "\\id GEN\n\\c 1\n\\p\n\\v 2 2 men went\n\\v 3 2000 men\n";
     // Default OFF: both lines are left exactly as written.
     assert_eq!(
-        formatted(usfm, &keep_verses()),
+        formatted(usfm, &FormatOptions::default()),
         "\\id GEN\n\\c 1\n\\p\n\\v 2 2 men went\n\\v 3 2000 men\n"
     );
     let dedupe = FormatOptions {
         dedupe_verse_number: true,
-        ..keep_verses()
+        ..FormatOptions::default()
     };
     assert_eq!(
         formatted(usfm, &dedupe),
@@ -388,11 +403,11 @@ fn the_repeated_verse_number_goes_only_on_a_number_boundary() {
 fn a_run_of_empty_verses_bridges_into_the_one_that_has_text() {
     let usfm = "\\id GEN\n\\c 1\n\\p \\v 1\\v 2\\v 3 asdf\n";
     // Default OFF — lint still flags the shape, format leaves it.
-    assert_eq!(formatted(usfm, &FormatOptions::default()), usfm);
+    assert_eq!(formatted(usfm, &join_verses()), usfm);
 
     let bridge = FormatOptions {
         bridge_empty_verses: true,
-        ..FormatOptions::default()
+        ..join_verses()
     };
     assert_eq!(
         formatted(usfm, &bridge),
@@ -408,46 +423,51 @@ fn a_run_of_empty_verses_bridges_into_the_one_that_has_text() {
 // The dual citizens
 // ---------------------------------------------------------------------------
 
+/// `\m \p` is ambiguous — in en_ulb the author usually meant the `\m` — so
+/// format leaves an empty paragraph exactly as written. Lint still reports it,
+/// and naming the code in `repairs` brings its fix back.
 #[test]
-fn an_empty_paragraph_is_deleted_whatever_its_spelling() {
+fn an_empty_paragraph_stays_unless_repairs_name_it() {
+    for usfm in [
+        "\\id GEN\n\\c 1\n\\m\n\\p\n\\v 1 yada yada\n",
+        "\\id GEN\n\\c 1\n\\p\n\\p text\n",
+    ] {
+        assert_eq!(formatted(usfm, &FormatOptions::default()), usfm);
+    }
+
+    let repair = FormatOptions {
+        repairs: &[Code::EmptyParagraph],
+        ..join_verses()
+    };
     assert_eq!(
-        formatted(
-            "\\id GEN\n\\c 1\n\\p\n\\p text\n",
-            &FormatOptions::default()
-        ),
+        formatted("\\id GEN\n\\c 1\n\\p\n\\p text\n", &repair),
         "\\id GEN\n\\c 1\n\\p text\n"
     );
-    // A MIXED pair goes too: neither marker holds a character, so there is no
-    // "which was meant" to settle — the `\p` renders the text before and after.
+    // Opted in, a MIXED pair goes too: the fix keeps the marker that holds
+    // the text.
     assert_eq!(
-        formatted(
-            "\\id GEN\n\\c 1\n\\m\n\\p text\n",
-            &FormatOptions::default()
-        ),
+        formatted("\\id GEN\n\\c 1\n\\m\n\\p text\n", &repair),
         "\\id GEN\n\\c 1\n\\p text\n"
     );
 
     // A RUN collapses in ONE pass — the fix is chain-aware, so N repeats need
     // N-of-nothing passes, not N — and the run is spelling-agnostic.
     let chain = "\\id GEN\n\\c 1\n\\p a\n\\p\n\\m\n\\q1\n\\p b\n";
-    let once = formatted(chain, &FormatOptions::default());
+    let once = formatted(chain, &repair);
     assert_eq!(once, "\\id GEN\n\\c 1\n\\p a\n\\p b\n");
-    assert_eq!(formatted(&once, &FormatOptions::default()), once);
+    assert_eq!(formatted(&once, &repair), once);
 
     // Will's shape: a run of five, displaced by a heading rather than by a
     // paragraph. Nothing about the heading or the verse after it moves.
     let editor = "\\id GEN\n\\c 1\n\\p\n\\p\n\\p\n\\p\n\\p\n\\s1 Hidden pieces are not places\n\\p \\v 1 Put the caret\n";
     assert_eq!(
-        formatted(editor, &FormatOptions::default()),
+        formatted(editor, &repair),
         "\\id GEN\n\\c 1\n\\s1 Hidden pieces are not places\n\\p \\v 1 Put the caret\n"
     );
 
     // A run that reaches end of input goes with the rest.
     assert_eq!(
-        formatted(
-            "\\id GEN\n\\c 1\n\\p a\n\\p\n\\p\n\\p\n",
-            &FormatOptions::default()
-        ),
+        formatted("\\id GEN\n\\c 1\n\\p a\n\\p\n\\p\n\\p\n", &repair),
         "\\id GEN\n\\c 1\n\\p a\n"
     );
 }
@@ -460,7 +480,7 @@ fn an_empty_verse_run_collapses_into_the_verse_that_names_itself() {
     assert_eq!(
         formatted(
             "\\id GEN\n\\c 1\n\\p \\v \\v \\v 1 Put the caret in the slot\n",
-            &FormatOptions::default()
+            &join_verses()
         ),
         "\\id GEN\n\\c 1\n\\p \\v 1 Put the caret in the slot\n"
     );
@@ -468,12 +488,12 @@ fn an_empty_verse_run_collapses_into_the_verse_that_names_itself() {
     // A designator-less `\v` that HOLDS something names a verse nobody but the
     // author can name: format leaves it exactly as written.
     let named = "\\id GEN\n\\c 1\n\\p \\v Then He declared\n";
-    assert_eq!(formatted(named, &FormatOptions::default()), named);
+    assert_eq!(formatted(named, &join_verses()), named);
 
     // A run that is its paragraph's whole content is refused: deleting it would
     // hand back an `empty-paragraph`.
     let alone = "\\id GEN\n\\c 1\n\\p \\v \\v\n\\p b\n";
-    assert_eq!(formatted(alone, &FormatOptions::default()), alone);
+    assert_eq!(formatted(alone, &join_verses()), alone);
 }
 
 /// The two repairs meeting on ONE byte: `\s1` holds no verse, so
@@ -486,7 +506,7 @@ fn a_heading_verse_that_is_also_an_empty_run_takes_both_repairs() {
     assert_eq!(
         formatted(
             "\\id GEN\n\\c 1\n\\s1 Hidden pieces are not places\n\n\\v \\v 1 Put the caret\n",
-            &FormatOptions::default()
+            &join_verses()
         ),
         "\\id GEN\n\\c 1\n\\s1 Hidden pieces are not places\n\\p \\v 1 Put the caret\n"
     );
@@ -496,7 +516,7 @@ fn a_heading_verse_that_is_also_an_empty_run_takes_both_repairs() {
     assert_eq!(
         formatted(
             "\\id GEN\n\\c 1\n\\qa ALEPH\n\\v \\v 1 Put the caret\n",
-            &FormatOptions::default()
+            &join_verses()
         ),
         "\\id GEN\n\\c 1\n\\qa ALEPH\n\\p \\v 1 Put the caret\n"
     );
@@ -506,16 +526,16 @@ fn a_heading_verse_that_is_also_an_empty_run_takes_both_repairs() {
 fn the_missing_paragraph_fix_rides_the_verse_break_axis() {
     // Keep: the `\p` gets its own line and so does the verse.
     assert_eq!(
-        formatted("\\id GEN\n\\c 1\\v 1 In the beginning\n", &keep_verses()),
+        formatted(
+            "\\id GEN\n\\c 1\\v 1 In the beginning\n",
+            &FormatOptions::default()
+        ),
         "\\id GEN\n\\c 1\n\\p\n\\v 1 In the beginning\n"
     );
     // Remove: the same `\p`, with the verse flowing after it — the fix's own
     // trailing break IS a verse break, so the axis decides it.
     assert_eq!(
-        formatted(
-            "\\id GEN\n\\c 1\\v 1 In the beginning\n",
-            &FormatOptions::default()
-        ),
+        formatted("\\id GEN\n\\c 1\\v 1 In the beginning\n", &join_verses()),
         "\\id GEN\n\\c 1\n\\p \\v 1 In the beginning\n"
     );
 }
@@ -525,12 +545,12 @@ fn a_repair_joins_the_transaction_only_when_it_is_asked_for() {
     let truncated = "\\id GEN\n\\c 1\n\\p \\v 1 a\\f + \\ft note\\c 2\n\\p b\n";
     // Without the allowlist the note stays open — format is not a linter.
     assert_eq!(
-        formatted(truncated, &keep_verses()),
+        formatted(truncated, &FormatOptions::default()),
         "\\id GEN\n\\c 1\n\\p\n\\v 1 a\\f + \\ft note\n\\c 2\n\\p b\n"
     );
     let repairs = FormatOptions {
         repairs: &[Code::UnclosedNote],
-        ..keep_verses()
+        ..FormatOptions::default()
     };
     assert_eq!(
         formatted(truncated, &repairs),
@@ -604,8 +624,8 @@ fn options_are_total() {
 #[test]
 fn every_inserted_byte_is_whitespace_or_an_engine_string() {
     let bundles = [
+        join_verses(),
         FormatOptions::default(),
-        keep_verses(),
         FormatOptions {
             newline: Newline::CrLf,
             char_marker_breaks: CharBreaks::Join,
@@ -613,7 +633,7 @@ fn every_inserted_byte_is_whitespace_or_an_engine_string() {
             repairs: &[Code::UnclosedNote, Code::UnclosedAtEof],
             bridge_empty_verses: true,
             dedupe_verse_number: true,
-            ..FormatOptions::default()
+            ..join_verses()
         },
     ];
     for opts in &bundles {
@@ -645,8 +665,8 @@ fn every_inserted_byte_is_whitespace_or_an_engine_string() {
 #[test]
 fn malformed_bytes_format_to_themselves() {
     let broken = b"\\id GEN\n\\p \xff\xfe not utf8\n";
-    assert_eq!(format_edits(broken, &FormatOptions::default()), vec![]);
-    assert_eq!(format(broken, &FormatOptions::default()), broken.to_vec());
+    assert_eq!(format_edits(broken, &join_verses()), vec![]);
+    assert_eq!(format(broken, &join_verses()), broken.to_vec());
 }
 
 /// A CrLf rewrite that outgrows one `FixStr` stacks adjacent edits instead of
@@ -655,7 +675,7 @@ fn malformed_bytes_format_to_themselves() {
 fn an_overflowing_retarget_stacks_adjacent_edits() {
     let opts = FormatOptions {
         newline: Newline::CrLf,
-        ..FormatOptions::default()
+        ..join_verses()
     };
     // 8 breaks = 8 bytes in, 16 out — one past the 15-byte cap.
     let fix = Edit {
@@ -692,7 +712,7 @@ fn spans(edits: &[Edit]) -> Vec<(u32, u32, &str)> {
 #[test]
 fn an_edit_straddling_the_boundary_is_dropped_not_cut() {
     let source = "\\c 1\n\\p \\v 1 a\n\n\n\\v 2 b\n".as_bytes();
-    let opts = FormatOptions::default();
+    let opts = join_verses();
     assert_eq!(
         spans(&format_edits(source, &opts)),
         [(14, 16, ""), (16, 17, " ")]
@@ -716,7 +736,7 @@ fn an_atomic_group_half_inside_is_wholly_absent() {
     let source = "\\c 1\n\\p \\v 1\\v 2\\v 3 asdf\n\\p \\v 4  x\n".as_bytes();
     let opts = FormatOptions {
         bridge_empty_verses: true,
-        ..FormatOptions::default()
+        ..join_verses()
     };
     assert_eq!(
         spans(&format_edits(source, &opts)),
@@ -734,7 +754,7 @@ fn an_atomic_group_half_inside_is_wholly_absent() {
 #[test]
 fn a_pure_insertion_on_the_boundary_is_inside() {
     let source = "\\c 1\n\\p \\v 1 a\\q1 b\n".as_bytes();
-    let opts = FormatOptions::default();
+    let opts = join_verses();
     let insertion = [(14u32, 14u32, "\n")];
     assert_eq!(spans(&format_edits(source, &opts)), insertion);
     assert_eq!(spans(&format_edits_in(source, 0..14, &opts)), insertion);
@@ -755,7 +775,7 @@ fn a_pure_insertion_on_the_boundary_is_inside() {
 #[test]
 fn a_scoped_format_settles_inside_its_own_scope() {
     let source = "\\c 1\n\\p \\v 1 a\n\n\n\\c 2\n\\p \\v 1 b  c \\q1 d\n".as_bytes();
-    let opts = FormatOptions::default();
+    let opts = join_verses();
     let text = core::str::from_utf8(source).unwrap();
     let toc = crate::toc::toc(source, &lex(text));
     let chapter = toc.chapters.last().unwrap();
@@ -785,7 +805,7 @@ fn byte_delta(edits: &[Edit]) -> i64 {
 #[test]
 fn a_boundary_cut_through_a_straddler_converges_instead() {
     let source = "\\c 1\n\\p \\v 1 a\n\n\n\\v 2 b \\q1 c\n".as_bytes();
-    let opts = FormatOptions::default();
+    let opts = join_verses();
     // 15 sits INSIDE the 14..16 blank-line collapse.
     let mut doc = source.to_vec();
     let mut range = 15..source.len() as u32;
@@ -811,7 +831,7 @@ fn the_full_range_is_the_whole_book() {
         bridge_empty_verses: true,
         dedupe_verse_number: true,
         remove_markers: &["s5"],
-        ..FormatOptions::default()
+        ..join_verses()
     };
     for fixture in FIXTURES {
         let source = fixture.as_bytes();

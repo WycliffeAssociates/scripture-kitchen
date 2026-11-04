@@ -733,6 +733,10 @@ pub const LINT_ROWS: [LintRow; 59] = [
     // character, so `\m\p` poses no "which was meant" question — what displaces
     // the run is what a reader sees either way, and dropping the node is inert
     // in USX apart from the empty `<para/>` element itself.
+    //
+    // NOT a formatter row: which of `\m \p` the author meant is ambiguous (in
+    // en_ulb the intent is usually the `\m`), so format leaves the run alone
+    // unless a caller names the code in `repairs`.
     LintRow {
         code: Code::EmptyParagraph,
         name: "empty-paragraph",
@@ -741,7 +745,7 @@ pub const LINT_ROWS: [LintRow; 59] = [
         escalation: &[],
         aux: AuxKind::None,
         template: "{anchor} has no content",
-        formatter: true,
+        formatter: false,
         fix_label: Some("delete the empty paragraph"),
     },
     // ---- Attributes (shape only) ------------------------------------------
