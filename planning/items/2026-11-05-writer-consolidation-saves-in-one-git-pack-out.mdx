@@ -204,7 +204,7 @@ bttwriter.isomorphicGitSource({ git, fs, dir }): ObjectSource;
 // Returns a handle: the decoded saves stay in wasm memory, so the text doesn't
 // cross into JS and back again on its way to replay.
 // Book, language, resource and translators come from the repo's own manifest.json
-// at HEAD (see "Writer's manifest.json is bttwriter's"), so the caller says only
+// at HEAD (read with container's writer module), so the caller says only
 // where the repo came from.
 const rom: WriterHistory = await bttwriter.readHistory(source, {
   source: "owner/repo",   // what Writer-Source names
@@ -249,7 +249,7 @@ const source = bttwriter.isomorphicGitSource({ git, fs, dir: repo.root });
 staged.history = await bttwriter.readHistory(source, { source: upstream });
 
 // local.ts, a Writer folder on disk (not a repo): was recognizeWriter's own schema
-const project = bttwriter.parseManifest(await fs.readFile(`${root}/manifest.json`));
+const project = container.read("manifest.json", await fs.readFile(`${root}/manifest.json`)); // the container plan
 
 // assemble.ts: behind the existing spinner; no worker (see "Speed")
 const replayed = bttwriter.replay(histories, { now: Date.now() / 1000 });
@@ -327,17 +327,19 @@ fs::write(objects.join(format!("pack/{}.idx", replayed.name)), &replayed.idx)?;
 
 <Question id="container" answer="Not in replay. replay returns `books` (code, file name, title), which is everything a manifest needs. When the container step (step 3) lands, a `consolidate()` built on replay + container + PackWriter can return a pack whose closing commit holds a fresh manifest.yaml or metadata.json. Recorded as a followup.">Should this optionally return a new RC or Burrito? (Will: "I think so, but we haven't built those container formats in this repo/workspace yet.")</Question>
 
-<Question id="container-first" answer="Not all of it first. Writer's manifest.json moves into bttwriter (it's Writer's input format, not a container we write), so nothing in bttwriter's native steps waits on container. Then the order interleaves: bttwriter's native steps (the hub's payoff), then container's RC and Burrito, then bttwriter's wasm step with consolidate() in it, so Sefer switches once, manifest included. See 'Order'.">Should the container crate come first, so it's ready for consolidate()? (Will, 2026-11-05.)</Question>
+<Question id="container-first" answer="Not all of it first. The container crate starts small at bttwriter's step 3, holding only Writer's manifest.json, so bttwriter can read it. RC and Burrito come after bttwriter's native steps, and bttwriter's wasm step (with consolidate()) comes after those, so Sefer switches once, manifest included. See 'Order'. (Order confirmed by Will, 2026-11-05.)">Should the container crate come first, so it's ready for consolidate()? (Will, 2026-11-05.)</Question>
 
 Two things came out of looking at this:
 
-- **Writer's `manifest.json` is bttwriter's, not container's.** The container step was going
-  to merge three manifest formats: RC, Burrito and Writer's. But Writer's `manifest.json` is
-  an *input* only Writer projects have, and it says which book, language and resource a
-  repo is. That's exactly the `meta` callers pass to `readHistory` today. Read inside
-  bttwriter (from the walk, at HEAD), it makes the caller thinner. It's small: the hub's
-  `crates/manifest/src/ts_manifest.rs` is 264 lines, and Sefer's `recognizeWriter` and its
-  schema are about 80. Container is left with RC and Burrito, the two formats we *write*.
+- **bttwriter reads Writer's `manifest.json` itself, through container.** It says which book,
+  language and resource a repo is, which is exactly the `meta` callers were passing to
+  `readHistory`. Read during the walk (at HEAD), it makes the caller thinner. The parser
+  lives in container's `writer` module, not in bttwriter. The hub's ingest classifies every
+  WACS repo through one "read whichever manifest this is" function, and most of those repos
+  are Writer projects. So all three formats belong in one crate, and bttwriter depends on
+  it. The module is small (the hub's `ts_manifest.rs` is 264 lines, Sefer's
+  `recognizeWriter` and its schema about 80). The container crate starts with only this
+  module, at bttwriter's step 3. (This corrects an earlier draft that put it in bttwriter.)
 - **`consolidate()` is the only thing that needs container, and only Sefer's switch
   needs `consolidate()`.** The hub can move to `replay` with its own manifest commit
   for now. Sefer's switch is the last bttwriter step anyway, so putting container just
@@ -413,8 +415,9 @@ The options, against what Will raised (migration is rare, galley is about USFM):
 
 The third is the one. The npm package already ships two wasm modules (`galley/pkg-*`,
 `onion-wasm/pkg-*`) under one version. `bttwriter/pkg-web` and `bttwriter/pkg-bundler` become
-the third, with a `./bttwriter` export. `bttwriter` depends on `canon` and `mise` only, not on
-onion or galley, so it's small. I'd expect well under 150 KB of wasm, and step 5 measures it.
+the third, with a `./bttwriter` export. `bttwriter` depends on `canon`, `mise` and
+`container`, not on onion or galley, so it's small. I'd expect well under 150 KB of wasm, plus
+whatever container's `consolidate()` path pulls in (JSON and YAML writing); step 6 measures it.
 
 <Question id="duplication" answer="Yes, each wasm module links its own copy of what it uses from mise and canon, but only what it uses. For bttwriter that's the book table and usfm_file_name, a few KB, fetched only on the migration screen. Accepted.">Doesn't a second module duplicate mise and canon, and mean installing galley to get it? (Will, 2026-11-05.)</Question>
 
@@ -426,7 +429,7 @@ onion or galley, so it's small. I'd expect well under 150 KB of wasm, and step 5
   own copy of the Rust it calls. But the linker and `wasm-opt` drop everything that isn't
   called. bttwriter calls canon's book table and `usfm_file_name`, not the per-locale name
   tables or versification. That's a few KB, and only on a screen most users never open.
-  Step 5 measures it, so the number gets checked rather than assumed.
+  Container's code is duplicated the same way once `consolidate()` uses it. Step 6 measures it, so the number gets checked rather than assumed.
 - **The alternative** is bttwriter taking file names from the caller (from canon's generated
   TS data) and depending on no canon at all. That saves those few KB, but every caller has
   to do the lookup, which works against keeping the apps thin. Not worth it.
@@ -456,12 +459,11 @@ What that means in practice:
 
 <Files id="footprint">
 ```text
-+ bttwriter/                          -- new crate; depends on canon and mise. Features: git2, parallel, wasm
++ bttwriter/                          -- new crate; depends on canon, mise and container (its writer module). Features: git2, parallel, wasm
 + bttwriter/src/lib.rs                -- WriterHistory, BookMeta, Signature, replay, Replayed
 + bttwriter/src/walk.rs               -- HistoryWalk (sans-IO), ObjectSource, read_history; tree diff; first parent
 + bttwriter/src/git2.rs               -- Git2Source, behind `git2`
 + bttwriter/src/stitch.rs             -- from hub crates/stitch: decode, is_text_path, tree_from_files, the template
-+ bttwriter/src/manifest.rs           -- Writer's manifest.json: from hub ts_manifest.rs and Sefer recognizeWriter
 + bttwriter/src/clock.rs              -- estimate_bad_clocks, day_of
 + bttwriter/src/summary.rs            -- verses_of, summary_of: the subject line; progress
 + bttwriter/src/interleave.rs         -- format-free: per-book versions merged by time
@@ -487,7 +489,6 @@ Then, each in its own repo and pinned to the kitchen tag that ships this:
 ~ sefer/src/core/migrate/candidate.ts       -- bttwriter.readHistory instead of readWriterHistory
 ~ sefer/src/core/migrate/assemble.ts        -- bttwriter.replay
 - hub/crates/stitch/                        -- usfm_file_name comes from canon; the rest from bttwriter
-- hub/crates/manifest/src/ts_manifest.rs    -- Writer's manifest.json, now bttwriter's (RC and Burrito go to container)
 - hub/crates/history/                       -- all of it: read_history (git2 feature), replay, progress
 ~ hub/crates/server/src/{publish,progress}.rs -- call bttwriter; write the returned pack + idx
 ```
@@ -530,24 +531,24 @@ without `REPO_ROOT`), which `agents/testing.md` forbids here.
 1. **Stitch** (`stitch.rs`: the template and decode) with the hub's goldens, using canon's
    `usfm_file_name`. The hub can switch `hub-stitch` to it immediately.
 2. **Pack writer** (`pack.rs`) with the git-accepts-it tests. Nothing uses it yet.
-3. **The walk** (`walk.rs`, `Git2Source`), Writer's `manifest.json` (`manifest.rs`), and the
-   bundle fixtures.
+3. **The walk** (`walk.rs`, `Git2Source`) and the bundle fixtures. The container crate is
+   created here with only its `writer` module (Writer's `manifest.json`), so the walk can read it.
 4. **Replay, clocks, summaries, progress**, plus the head-id goldens against Sefer's TS, and
-   the timing and profiling pass. Then the hub deletes `history`, `stitch` and
-   `ts_manifest.rs` (native, no wasm needed), and keeps its own manifest commit on top for now.
-5. **Container: RC and Burrito** (its own plan item, step 3 of the shared-libraries order).
-   It's narrower than first sketched, because Writer's manifest now lives in bttwriter.
+   the timing and profiling pass. Then the hub deletes `history` and `stitch` (native, no
+   wasm needed), and keeps its own manifest commit on top for now.
+5. **Container: RC and Burrito, reading and writing** (its own plan item, step 3 of the
+   shared-libraries order).
 6. **The wasm module, TS shim and `consolidate()`** (`isomorphicGitSource`, `readHistory`,
-   `parseManifest`, `replay`, `consolidate`), the CI wiring, and the size measurement. Then
+   `replay`, `consolidate`), the CI wiring, and the size measurement. Then
    Sefer switches `local`/`candidate`/`assemble`/`addBooks` once, manifest included, and
    deletes `writerHistory.ts`, `pack.ts` and its Writer manifest schema. The hub moves its
    closing commit to `consolidate()` at the same time.
 
 ```mermaid
 flowchart LR
-  c1["canon: book table"] --> b1["1 stitch"] --> b2["2 pack"] --> b3["3 walk + manifest.json"] --> b4["4 replay"]
+  c1["canon: book table"] --> b1["1 stitch"] --> b2["2 pack"] --> b3["3 walk + container::writer"] --> b4["4 replay"]
   b4 --> hub(["hub switches (native)"])
   b4 --> k5["5 container: RC + Burrito"] --> b6["6 wasm + consolidate()"] --> sefer(["Sefer switches once"])
 ```
 
-<Question id="order">Is this order right? Steps 1–4 pay off in the hub before any wasm work. Container slots in before the wasm step, so Sefer switches once, straight to consolidate(), and the riskiest part (wasm speed and size) still comes last, with a working native version to compare against. Step 1 waits for canon's book table. If canon slips, stitch can carry the 66-code table for a release and drop it later.</Question>
+<Question id="order" answer="Yes (Will, 2026-11-05). Container's RC and Burrito work doesn't depend on bttwriter, so it can be built any time before step 6, in parallel if there are hands.">Is this order right? Steps 1–4 pay off in the hub before any wasm work. Container slots in before the wasm step, so Sefer switches once, straight to consolidate(), and the riskiest part (wasm speed and size) still comes last, with a working native version to compare against. Step 1 waits for canon's book table. If canon slips, stitch can carry the 66-code table for a release and drop it later.</Question>
