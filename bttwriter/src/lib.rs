@@ -13,7 +13,7 @@
 //!
 //! BTT Writer keeps one project per book: chunk files (`NN/NN.txt`) holding
 //! inline USFM fragments, a title per chapter, and the book's title in
-//! `front/title.txt`. [`stitch`] turns one book's files into one USFM book with
+//! `front/title.txt`. [`stitch()`] turns one book's files into one USFM book with
 //! the same bytes Sefer's `writerBook.ts` writes; `fixtures/stitched/` pins
 //! them on five real projects.
 //!

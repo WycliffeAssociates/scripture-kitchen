@@ -206,3 +206,32 @@ fn trees_order_entries_by_bytes() {
     assert!(body.starts_with(b"100644 01-GEN.usfm\0"));
     assert_eq!(body.len(), 2 * ("100644 01-GEN.usfm\0".len() + 20));
 }
+
+#[test]
+fn offsets_past_2_gib_go_in_the_64_bit_table() {
+    // No test can write a 2 GiB pack, so the entries are placed by hand.
+    let mut pack = PackWriter::new();
+    let ids = [[0x10u8; 20], [0x20; 20], [0x30; 20]].map(ObjectId);
+    for (id, offset) in ids.iter().zip([12u64, 0x8000_0000, 0x1_2345_6789]) {
+        pack.entries.push(Entry {
+            id: *id,
+            offset,
+            crc: 0,
+        });
+    }
+    let idx = pack.finish().idx;
+    let n = 3;
+    let slots = 8 + 256 * 4 + n * 20 + n * 4;
+    let slot =
+        |i: usize| u32::from_be_bytes(idx[slots + i * 4..slots + i * 4 + 4].try_into().unwrap());
+    assert_eq!(slot(0), 12);
+    assert_eq!(slot(1), 0x8000_0000);
+    assert_eq!(slot(2), 0x8000_0001);
+    let table = slots + n * 4;
+    let large =
+        |i: usize| u64::from_be_bytes(idx[table + i * 8..table + i * 8 + 8].try_into().unwrap());
+    assert_eq!(large(0), 0x8000_0000);
+    assert_eq!(large(1), 0x1_2345_6789);
+    // Then the pack's checksum and the index's own: 40 bytes.
+    assert_eq!(idx.len(), table + 2 * 8 + 40);
+}

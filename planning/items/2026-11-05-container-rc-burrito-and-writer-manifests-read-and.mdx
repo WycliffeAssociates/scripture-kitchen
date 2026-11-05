@@ -419,7 +419,7 @@ parser's share, since it's most of what's new.
 
 Tupperware is a trademark, so we went with `bento`: a box with a compartment per format.
 
-<Question id="yaml-crate" answer="`yaml-edit` 0.3.6, measured 2026-11-05: it passes checks 1 and 2, and check 3 costs about 155 KB gzipped. See the results below.">Which YAML crate? The fidelity answer makes `yaml-edit` (0.3.6, lossless parser and editor) the first candidate, for both reading and editing, so there's one parser. What to check before committing to it: (1) it reads every catalog and WACS-scan manifest, including the hub's leniency cases (multi-document files, a leading `---`, a BOM); (2) adding a project entry to `en_ulb`'s manifest gives a diff of only that entry; (3) its wasm size. If it fails (1) or (2), the fallback is a maintained serde fork (`serde_yaml_ng`, `serde_norway`) and re-emitting. `serde_yaml`, which the hub uses, has been unmaintained since 2024.</Question>
+<Question id="yaml-crate" answer="`yaml-edit` 0.3.6, measured 2026-11-05: it passes checks 1 and 2, and it is the smallest of the YAML crates in wasm (about 52 KB gzipped over an empty module, with default features off). See the results below.">Which YAML crate? The fidelity answer makes `yaml-edit` (0.3.6, lossless parser and editor) the first candidate, for both reading and editing, so there's one parser. What to check before committing to it: (1) it reads every catalog and WACS-scan manifest, including the hub's leniency cases (multi-document files, a leading `---`, a BOM); (2) adding a project entry to `en_ulb`'s manifest gives a diff of only that entry; (3) its wasm size. If it fails (1) or (2), the fallback is a maintained serde fork (`serde_yaml_ng`, `serde_norway`) and re-emitting. `serde_yaml`, which the hub uses, has been unmaintained since 2024.</Question>
 
 Measured on 2026-11-05 in a scratch crate (not committed):
 
@@ -427,11 +427,21 @@ Measured on 2026-11-05 in a scratch crate (not committed):
 |---|---|
 | 1. Reads the catalog manifests and the leniency cases | **Pass.** `en_ulb`, `en_ult` and `bdf_reg` round-trip byte-identical (quotes, flow lists and all). So do a BOM, a leading `---`, three documents in one file, CRLF line ends and a trailing `...`. Not yet run over the 291 RC repos in the hub's WACS scan, which aren't on this machine. That's the bin step 2 adds. |
 | 2. Adding a project changes only that entry | **Pass.** Adding MAT to `en_ulb` (and to `en_ult`) inserts seven lines between MAL and MRK and changes no other line. The new entry comes out in yaml-edit's own style (`- title: Matiu`, block list, no quotes), not `en_ulb`'s quoted, flow style. Matching a neighbour's style would be a follow-up, if it matters. |
-| 3. wasm size | 490 KB raw, **155 KB gzipped**, for parse + round trip + insert (release, `opt-level = "s"`, LTO, before `wasm-opt`, default features on). It pulls in `rowan`, `hashbrown`, `text-size`, `countme` and `base64`. The last comes from the default `binary` feature, which we don't need. |
+| 3. wasm size | First run: 155 KB gzipped, but with default features on, unwinding panics and a weak profile. Like for like (below), it is **the smallest YAML crate we could use**. |
 
-So the cost of format-preserving edits is roughly 150 KB gzipped in bento's module, about
-30% of galley's 516 KB. That's acceptable by Will's "for whole apps … it's nothing", and
-step 4 measures it again inside the real module with `wasm-opt`.
+Like for like (each crate parsing and re-emitting one file; release, `opt-level = "s"`, LTO,
+one codegen unit, `panic = "abort"`; no `wasm-opt` on the machine, so all slightly high):
+
+| Crate | gzipped | Over an empty module |
+|---|---|---|
+| (empty module, `format!` only) | 12 KB | 0 |
+| **`yaml-edit`**, no default features | **64 KB** | **+52 KB** |
+| `yaml-rust2` | 77 KB | +65 KB |
+| `saphyr` | 77 KB | +65 KB |
+| `serde_yaml_ng` / `serde_norway` | 100 KB | +88 KB |
+
+Any YAML support costs roughly 50–90 KB gzipped, and the format-preserving one is the cheapest.
+Step 4 measures it again inside the real module, with `wasm-opt`.
 
 ## Where it lives
 
