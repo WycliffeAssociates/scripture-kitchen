@@ -20,6 +20,7 @@
   "include": [
     "bento/bento.ts",
     "bttwriter/bttwriter.ts",
+    "docx/docx.ts",
     "canon/ts/*.ts",
     "galley/*.ts",
     "onion-wasm/*.ts",

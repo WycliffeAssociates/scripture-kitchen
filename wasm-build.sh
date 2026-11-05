@@ -13,11 +13,12 @@
 #     ./wasm-build.sh onion-wasm
 #     ./wasm-build.sh bento
 #     ./wasm-build.sh bttwriter
+#     ./wasm-build.sh docx
 #
 # Two named volumes keep the toolchain install and the registry between runs;
 # the first run compiles wasm-pack and takes minutes, later runs take one.
 set -eu
-crate=${1:?crate directory: galley, onion-wasm, bento or bttwriter}
+crate=${1:?crate directory: galley, onion-wasm, bento, bttwriter or docx}
 root=$(cd "$(dirname "$0")" && pwd)
 docker run --rm --platform linux/amd64 \
   -v "$root":/src \

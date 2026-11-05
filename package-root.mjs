@@ -14,10 +14,10 @@
  * door plus the resident sous handle. `onion-wasm` keeps its own subtree under
  * `./onion` for a consumer that wants the engine alone, and `canon` sits at
  * `./canon`: plain TypeScript with no wasm, so a book table costs no `init()`.
- * `bento` (manifests) and `bttwriter` (Writer migration) are TypeScript over
- * a wasm module each, at `./bento` and `./bttwriter`; a bundler fetches a
- * module only where it's imported, so Sefer pays for bttwriter only on the
- * migration screen.
+ * `bento` (manifests), `bttwriter` (Writer migration) and `docx` (USFM in Word)
+ * are TypeScript over a wasm module each, at `./bento`, `./bttwriter` and
+ * `./docx`; a bundler fetches a module only where it's imported, so Sefer
+ * pays for bttwriter only on the migration screen.
  */
 import { readFileSync } from "node:fs";
 
@@ -34,6 +34,7 @@ const PACKAGES = [
   { dir: "canon", pkg: inner("canon"), subpath: under("./canon") },
   { dir: "bento", pkg: inner("bento"), subpath: under("./bento") },
   { dir: "bttwriter", pkg: inner("bttwriter"), subpath: under("./bttwriter") },
+  { dir: "docx", pkg: inner("docx"), subpath: under("./docx") },
 ];
 
 const push = (dir) => {

@@ -37,7 +37,9 @@
     "bento/bento.ts",
     "bento/pkg-web",
     "bttwriter/bttwriter.ts",
-    "bttwriter/pkg-web"
+    "bttwriter/pkg-web",
+    "docx/docx.ts",
+    "docx/pkg-web"
   ],
   "sideEffects": [
     "./galley/pkg-bundler/usfm_galley.js",
@@ -47,7 +49,8 @@
     "./onion-wasm/pkg-bundler/snippets/*",
     "./onion-wasm/pkg-web/onion_wasm.js",
     "./bento/pkg-web/bento.js",
-    "./bttwriter/pkg-web/bttwriter.js"
+    "./bttwriter/pkg-web/bttwriter.js",
+    "./docx/pkg-web/docx.js"
   ],
   "exports": {
     ".": {
@@ -85,6 +88,8 @@
     "./bento": "./bento/bento.ts",
     "./bento/web/wasm": "./bento/pkg-web/bento_bg.wasm",
     "./bttwriter": "./bttwriter/bttwriter.ts",
-    "./bttwriter/web/wasm": "./bttwriter/pkg-web/bttwriter_bg.wasm"
+    "./bttwriter/web/wasm": "./bttwriter/pkg-web/bttwriter_bg.wasm",
+    "./docx": "./docx/docx.ts",
+    "./docx/web/wasm": "./docx/pkg-web/docx_bg.wasm"
   }
 }

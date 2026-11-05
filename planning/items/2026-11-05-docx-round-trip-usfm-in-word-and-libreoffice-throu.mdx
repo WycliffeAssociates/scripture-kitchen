@@ -2,7 +2,7 @@
 id: 95bc09c4-2e59-4220-9bfc-e4e90c52e1fe
 title: "docx round trip: USFM in Word and LibreOffice through named styles"
 kind: plan
-status: planned
+status: in-progress
 created: 2026-11-05
 updated: 2026-11-05
 sha: 143889c
@@ -133,12 +133,52 @@ the same code as an Open and Save in the app. It needs the Writer module
 There's no equivalent for Word on Linux, so Word gets a manual check on a
 few books.
 
-<Tradeoff id="lo-ignored" chose="the LibreOffice test is #[ignore]d, with its reason written per agents/testing.md" cost="CI doesn't prove the editor round trip on every push">
+<Tradeoff id="lo-ignored" chose="the LibreOffice sweep is an example run by hand (docx/examples/libreoffice.rs), not an #[ignore]d test" cost="CI doesn't prove the editor round trip on every push">
 Writer is a few hundred MB to install in CI. Will: "Kinda hate that pattern
-but also makes sense too".
+but also makes sense too". An `#[ignore]`d test would not have worked: CI
+runs `--include-ignored`, and it has no LibreOffice. `agents/testing.md`
+puts a sweep run deliberately in an example.
 </Tradeoff>
 
 <Followup id="lo-writer" done>Install `libreoffice-writer` on the dev box. Done 2026-11-05; the probe above ran on it.</Followup>
+
+## Built, step 10 (2026-11-05, branch `docx`)
+
+The strict half: export, import, comments, the wasm module and `docx.ts`.
+
+- **Export folds onion's USX, not the CST or USJ.** USJ drops a space that
+  sits alone between two spans (`\nd Lord\nd* \add God\add*`), which a
+  reader of the document would see. The CST's useful helpers are
+  `pub(crate)` in onion. USX is onion's own fold, tested against the
+  committee's data. Measured on BSB Psalms (276 KB of USFM, release build):
+  export 42 ms, of which the USX hop is about 10 and deflate 15; import
+  40 ms. In wasm under Node, 48 and 44. Will agreed USX is fine; the
+  writer can move into onion behind a feature later without touching the
+  import or the tests.
+- **Round trip, as USJ:** 159 of the 160 test-tier books export with
+  nothing unsupported, and all 159 come back the same book
+  (`docx/tests/round_trip.rs`). The 160th is en_ult's aligned Mark.
+- **Through LibreOffice 24.2:** all 159, saved by `soffice --headless`, come
+  back the same book, with an exact report and the source hash kept
+  (`docx/examples/libreoffice.rs`, about 50 s).
+- Shapes the corpus needed, each a style rather than a guess:
+  - `USFM (no marker)`: verses after a heading with no paragraph marker
+    (`\s5` then `\v 8 …`), all through the ULB.
+  - `USFM raw`: text copied back verbatim. Used for `\ts\*`, `//`, a `\v`
+    with no number, and an empty span (`\ft \fqa x`), since Word cannot
+    hold an empty run.
+  - Two touching spans of one style get a space between them, or Word's
+    runs would read back as one span.
+  - A footnote right after a styled word stays outside it, unless the span
+    carries on after the note.
+  - A note's own peers (`\fr`, `\ft`, `\fqa`, …) get a closer only when
+    plain text follows (`\fqa a\fqa* or`).
+- Comments come back in `@sefer/document-import`'s `CommentThread` shape,
+  per book, tested with a comment and a resolved reply.
+- The wasm module is 413 KB (158 KB gzipped), wired into `package.json`,
+  the typecheck, `wasm-build.sh` and CI like bttwriter.
+
+<Followup id="template">Generate `docx/template.dotx` (the styles in an empty document, for authoring in Word from scratch).</Followup>
 
 ## Still open
 

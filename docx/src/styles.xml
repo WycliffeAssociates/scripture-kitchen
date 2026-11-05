@@ -1,0 +1,215 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+<w:docDefaults><w:rPrDefault><w:rPr/></w:rPrDefault><w:pPrDefault><w:pPr/></w:pPrDefault></w:docDefaults>
+<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/><w:pPr><w:spacing w:after="120"/></w:pPr></w:style>
+<w:style w:type="character" w:default="1" w:styleId="DefaultParagraphFont"><w:name w:val="Default Paragraph Font"/><w:uiPriority w:val="1"/><w:semiHidden/></w:style>
+<w:style w:type="paragraph" w:styleId="Title"><w:name w:val="Title"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:jc w:val="center"/><w:spacing w:after="240"/></w:pPr><w:rPr><w:b/><w:sz w:val="40"/></w:rPr></w:style>
+<w:style w:type="paragraph" w:styleId="Heading2"><w:name w:val="heading 2"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:keepNext/><w:spacing w:before="240"/><w:outlineLvl w:val="1"/></w:pPr><w:rPr><w:b/><w:sz w:val="26"/></w:rPr></w:style>
+<w:style w:type="paragraph" w:styleId="FootnoteText"><w:name w:val="footnote text"/><w:basedOn w:val="Normal"/><w:pPr><w:spacing w:after="0"/></w:pPr><w:rPr><w:sz w:val="20"/></w:rPr></w:style>
+<w:style w:type="character" w:styleId="FootnoteReference"><w:name w:val="footnote reference"/><w:rPr><w:vertAlign w:val="superscript"/></w:rPr></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMadd"><w:name w:val="USFM add"/><w:qFormat/><w:rPr><w:i/></w:rPr></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMaddpn"><w:name w:val="USFM addpn"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMb"><w:name w:val="USFM b"/><w:basedOn w:val="Normal"/><w:next w:val="USFMb"/><w:qFormat/></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMbd"><w:name w:val="USFM bd"/><w:rPr><w:b/></w:rPr></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMbdit"><w:name w:val="USFM bdit"/></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMbk"><w:name w:val="USFM bk"/><w:rPr><w:i/></w:rPr></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMc"><w:name w:val="USFM c"/><w:basedOn w:val="Normal"/><w:next w:val="USFMc"/><w:qFormat/><w:pPr><w:keepNext/><w:spacing w:before="240"/></w:pPr><w:rPr><w:b/><w:sz w:val="32"/></w:rPr></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMca"><w:name w:val="USFM ca"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMcd"><w:name w:val="USFM cd"/><w:basedOn w:val="Normal"/><w:next w:val="USFMcd"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMcl"><w:name w:val="USFM cl"/><w:basedOn w:val="Normal"/><w:next w:val="USFMcl"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMcls"><w:name w:val="USFM cls"/><w:basedOn w:val="Normal"/><w:next w:val="USFMcls"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMcp"><w:name w:val="USFM cp"/><w:basedOn w:val="Normal"/><w:next w:val="USFMcp"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMd"><w:name w:val="USFM d"/><w:basedOn w:val="Normal"/><w:next w:val="USFMd"/><w:qFormat/><w:rPr><w:i/></w:rPr></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMdc"><w:name w:val="USFM dc"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMef"><w:name w:val="USFM ef"/><w:basedOn w:val="FootnoteText"/><w:next w:val="USFMef"/></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMem"><w:name w:val="USFM em"/><w:rPr><w:i/></w:rPr></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMex"><w:name w:val="USFM ex"/><w:basedOn w:val="FootnoteText"/><w:next w:val="USFMex"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMf"><w:name w:val="USFM f"/><w:basedOn w:val="FootnoteText"/><w:next w:val="USFMf"/></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMfdc"><w:name w:val="USFM fdc"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMfe"><w:name w:val="USFM fe"/><w:basedOn w:val="FootnoteText"/><w:next w:val="USFMfe"/></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMfk"><w:name w:val="USFM fk"/></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMfl"><w:name w:val="USFM fl"/></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMfm"><w:name w:val="USFM fm"/></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMfp"><w:name w:val="USFM fp"/></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMfq"><w:name w:val="USFM fq"/><w:qFormat/><w:rPr><w:i/></w:rPr></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMfqa"><w:name w:val="USFM fqa"/><w:rPr><w:i/></w:rPr></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMfr"><w:name w:val="USFM fr"/><w:qFormat/><w:rPr><w:b/></w:rPr></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMft"><w:name w:val="USFM ft"/><w:qFormat/></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMfv"><w:name w:val="USFM fv"/></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMfw"><w:name w:val="USFM fw"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMh"><w:name w:val="USFM h"/><w:basedOn w:val="Normal"/><w:next w:val="USFMh"/><w:rPr><w:color w:val="808080"/><w:sz w:val="18"/></w:rPr></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMh1"><w:name w:val="USFM h1"/><w:basedOn w:val="Normal"/><w:next w:val="USFMh1"/><w:rPr><w:color w:val="808080"/><w:sz w:val="18"/></w:rPr></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMh2"><w:name w:val="USFM h2"/><w:basedOn w:val="Normal"/><w:next w:val="USFMh2"/><w:rPr><w:color w:val="808080"/><w:sz w:val="18"/></w:rPr></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMh3"><w:name w:val="USFM h3"/><w:basedOn w:val="Normal"/><w:next w:val="USFMh3"/><w:rPr><w:color w:val="808080"/><w:sz w:val="18"/></w:rPr></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMib"><w:name w:val="USFM ib"/><w:basedOn w:val="Normal"/><w:next w:val="USFMib"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMid"><w:name w:val="USFM id"/><w:basedOn w:val="Normal"/><w:next w:val="USFMid"/><w:rPr><w:color w:val="808080"/><w:sz w:val="18"/></w:rPr></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMide"><w:name w:val="USFM ide"/><w:basedOn w:val="Normal"/><w:next w:val="USFMide"/><w:rPr><w:color w:val="808080"/><w:sz w:val="18"/></w:rPr></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMie"><w:name w:val="USFM ie"/><w:basedOn w:val="Normal"/><w:next w:val="USFMie"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMiex"><w:name w:val="USFM iex"/><w:basedOn w:val="Normal"/><w:next w:val="USFMiex"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMili"><w:name w:val="USFM ili"/><w:basedOn w:val="Normal"/><w:next w:val="USFMili"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMili1"><w:name w:val="USFM ili1"/><w:basedOn w:val="Normal"/><w:next w:val="USFMili1"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMili2"><w:name w:val="USFM ili2"/><w:basedOn w:val="Normal"/><w:next w:val="USFMili2"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMim"><w:name w:val="USFM im"/><w:basedOn w:val="Normal"/><w:next w:val="USFMim"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMimi"><w:name w:val="USFM imi"/><w:basedOn w:val="Normal"/><w:next w:val="USFMimi"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMimq"><w:name w:val="USFM imq"/><w:basedOn w:val="Normal"/><w:next w:val="USFMimq"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMimt"><w:name w:val="USFM imt"/><w:basedOn w:val="Normal"/><w:next w:val="USFMimt"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMimt1"><w:name w:val="USFM imt1"/><w:basedOn w:val="Normal"/><w:next w:val="USFMimt1"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMimt2"><w:name w:val="USFM imt2"/><w:basedOn w:val="Normal"/><w:next w:val="USFMimt2"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMimt3"><w:name w:val="USFM imt3"/><w:basedOn w:val="Normal"/><w:next w:val="USFMimt3"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMimt4"><w:name w:val="USFM imt4"/><w:basedOn w:val="Normal"/><w:next w:val="USFMimt4"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMimte"><w:name w:val="USFM imte"/><w:basedOn w:val="Normal"/><w:next w:val="USFMimte"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMimte1"><w:name w:val="USFM imte1"/><w:basedOn w:val="Normal"/><w:next w:val="USFMimte1"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMimte2"><w:name w:val="USFM imte2"/><w:basedOn w:val="Normal"/><w:next w:val="USFMimte2"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMio"><w:name w:val="USFM io"/><w:basedOn w:val="Normal"/><w:next w:val="USFMio"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMio1"><w:name w:val="USFM io1"/><w:basedOn w:val="Normal"/><w:next w:val="USFMio1"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMio2"><w:name w:val="USFM io2"/><w:basedOn w:val="Normal"/><w:next w:val="USFMio2"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMio3"><w:name w:val="USFM io3"/><w:basedOn w:val="Normal"/><w:next w:val="USFMio3"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMio4"><w:name w:val="USFM io4"/><w:basedOn w:val="Normal"/><w:next w:val="USFMio4"/></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMior"><w:name w:val="USFM ior"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMiot"><w:name w:val="USFM iot"/><w:basedOn w:val="Normal"/><w:next w:val="USFMiot"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMip"><w:name w:val="USFM ip"/><w:basedOn w:val="Normal"/><w:next w:val="USFMip"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMipc"><w:name w:val="USFM ipc"/><w:basedOn w:val="Normal"/><w:next w:val="USFMipc"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMipi"><w:name w:val="USFM ipi"/><w:basedOn w:val="Normal"/><w:next w:val="USFMipi"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMipq"><w:name w:val="USFM ipq"/><w:basedOn w:val="Normal"/><w:next w:val="USFMipq"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMipr"><w:name w:val="USFM ipr"/><w:basedOn w:val="Normal"/><w:next w:val="USFMipr"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMiq"><w:name w:val="USFM iq"/><w:basedOn w:val="Normal"/><w:next w:val="USFMiq"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMiq1"><w:name w:val="USFM iq1"/><w:basedOn w:val="Normal"/><w:next w:val="USFMiq1"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMiq2"><w:name w:val="USFM iq2"/><w:basedOn w:val="Normal"/><w:next w:val="USFMiq2"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMiq3"><w:name w:val="USFM iq3"/><w:basedOn w:val="Normal"/><w:next w:val="USFMiq3"/></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMiqt"><w:name w:val="USFM iqt"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMis"><w:name w:val="USFM is"/><w:basedOn w:val="Normal"/><w:next w:val="USFMis"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMis1"><w:name w:val="USFM is1"/><w:basedOn w:val="Normal"/><w:next w:val="USFMis1"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMis2"><w:name w:val="USFM is2"/><w:basedOn w:val="Normal"/><w:next w:val="USFMis2"/></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMit"><w:name w:val="USFM it"/><w:rPr><w:i/></w:rPr></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMjmp"><w:name w:val="USFM jmp"/></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMk"><w:name w:val="USFM k"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMlf"><w:name w:val="USFM lf"/><w:basedOn w:val="Normal"/><w:next w:val="USFMlf"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMlh"><w:name w:val="USFM lh"/><w:basedOn w:val="Normal"/><w:next w:val="USFMlh"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMli"><w:name w:val="USFM li"/><w:basedOn w:val="Normal"/><w:next w:val="USFMli"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMli1"><w:name w:val="USFM li1"/><w:basedOn w:val="Normal"/><w:next w:val="USFMli1"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMli2"><w:name w:val="USFM li2"/><w:basedOn w:val="Normal"/><w:next w:val="USFMli2"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMli3"><w:name w:val="USFM li3"/><w:basedOn w:val="Normal"/><w:next w:val="USFMli3"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMli4"><w:name w:val="USFM li4"/><w:basedOn w:val="Normal"/><w:next w:val="USFMli4"/></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMlik"><w:name w:val="USFM lik"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMlim"><w:name w:val="USFM lim"/><w:basedOn w:val="Normal"/><w:next w:val="USFMlim"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMlim1"><w:name w:val="USFM lim1"/><w:basedOn w:val="Normal"/><w:next w:val="USFMlim1"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMlim2"><w:name w:val="USFM lim2"/><w:basedOn w:val="Normal"/><w:next w:val="USFMlim2"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMlim3"><w:name w:val="USFM lim3"/><w:basedOn w:val="Normal"/><w:next w:val="USFMlim3"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMlim4"><w:name w:val="USFM lim4"/><w:basedOn w:val="Normal"/><w:next w:val="USFMlim4"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMlit"><w:name w:val="USFM lit"/><w:basedOn w:val="Normal"/><w:next w:val="USFMlit"/></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMlitl"><w:name w:val="USFM litl"/></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMliv"><w:name w:val="USFM liv"/></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMliv1"><w:name w:val="USFM liv1"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMm"><w:name w:val="USFM m"/><w:basedOn w:val="Normal"/><w:next w:val="USFMm"/><w:qFormat/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMmi"><w:name w:val="USFM mi"/><w:basedOn w:val="Normal"/><w:next w:val="USFMmi"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMmi1"><w:name w:val="USFM mi1"/><w:basedOn w:val="Normal"/><w:next w:val="USFMmi1"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMmi2"><w:name w:val="USFM mi2"/><w:basedOn w:val="Normal"/><w:next w:val="USFMmi2"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMmi3"><w:name w:val="USFM mi3"/><w:basedOn w:val="Normal"/><w:next w:val="USFMmi3"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMmr"><w:name w:val="USFM mr"/><w:basedOn w:val="Normal"/><w:next w:val="USFMmr"/><w:rPr><w:i/></w:rPr></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMms"><w:name w:val="USFM ms"/><w:basedOn w:val="Normal"/><w:next w:val="USFMms"/><w:pPr><w:keepNext/></w:pPr><w:rPr><w:b/></w:rPr></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMms1"><w:name w:val="USFM ms1"/><w:basedOn w:val="Normal"/><w:next w:val="USFMms1"/><w:pPr><w:keepNext/></w:pPr><w:rPr><w:b/></w:rPr></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMms2"><w:name w:val="USFM ms2"/><w:basedOn w:val="Normal"/><w:next w:val="USFMms2"/><w:pPr><w:keepNext/></w:pPr><w:rPr><w:b/></w:rPr></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMms3"><w:name w:val="USFM ms3"/><w:basedOn w:val="Normal"/><w:next w:val="USFMms3"/><w:pPr><w:keepNext/></w:pPr><w:rPr><w:b/></w:rPr></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMmt"><w:name w:val="USFM mt"/><w:basedOn w:val="Title"/><w:next w:val="USFMmt"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMmt1"><w:name w:val="USFM mt1"/><w:basedOn w:val="Title"/><w:next w:val="USFMmt1"/><w:qFormat/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMmt2"><w:name w:val="USFM mt2"/><w:basedOn w:val="Normal"/><w:next w:val="USFMmt2"/><w:pPr><w:jc w:val="center"/></w:pPr><w:rPr><w:b/></w:rPr></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMmt3"><w:name w:val="USFM mt3"/><w:basedOn w:val="Normal"/><w:next w:val="USFMmt3"/><w:pPr><w:jc w:val="center"/></w:pPr><w:rPr><w:b/></w:rPr></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMmt4"><w:name w:val="USFM mt4"/><w:basedOn w:val="Normal"/><w:next w:val="USFMmt4"/><w:pPr><w:jc w:val="center"/></w:pPr><w:rPr><w:b/></w:rPr></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMmte"><w:name w:val="USFM mte"/><w:basedOn w:val="Normal"/><w:next w:val="USFMmte"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMmte1"><w:name w:val="USFM mte1"/><w:basedOn w:val="Normal"/><w:next w:val="USFMmte1"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMmte2"><w:name w:val="USFM mte2"/><w:basedOn w:val="Normal"/><w:next w:val="USFMmte2"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMnb"><w:name w:val="USFM nb"/><w:basedOn w:val="Normal"/><w:next w:val="USFMnb"/></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMnd"><w:name w:val="USFM nd"/><w:qFormat/><w:rPr><w:smallCaps/></w:rPr></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMno"><w:name w:val="USFM no"/></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMord"><w:name w:val="USFM ord"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMp"><w:name w:val="USFM p"/><w:basedOn w:val="Normal"/><w:next w:val="USFMp"/><w:qFormat/><w:pPr><w:ind w:firstLine="360"/></w:pPr></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMpb"><w:name w:val="USFM pb"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMpc"><w:name w:val="USFM pc"/><w:basedOn w:val="Normal"/><w:next w:val="USFMpc"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMph"><w:name w:val="USFM ph"/><w:basedOn w:val="Normal"/><w:next w:val="USFMph"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMph1"><w:name w:val="USFM ph1"/><w:basedOn w:val="Normal"/><w:next w:val="USFMph1"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMph2"><w:name w:val="USFM ph2"/><w:basedOn w:val="Normal"/><w:next w:val="USFMph2"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMph3"><w:name w:val="USFM ph3"/><w:basedOn w:val="Normal"/><w:next w:val="USFMph3"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMpi"><w:name w:val="USFM pi"/><w:basedOn w:val="Normal"/><w:next w:val="USFMpi"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMpi1"><w:name w:val="USFM pi1"/><w:basedOn w:val="Normal"/><w:next w:val="USFMpi1"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMpi2"><w:name w:val="USFM pi2"/><w:basedOn w:val="Normal"/><w:next w:val="USFMpi2"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMpi3"><w:name w:val="USFM pi3"/><w:basedOn w:val="Normal"/><w:next w:val="USFMpi3"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMpm"><w:name w:val="USFM pm"/><w:basedOn w:val="Normal"/><w:next w:val="USFMpm"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMpmc"><w:name w:val="USFM pmc"/><w:basedOn w:val="Normal"/><w:next w:val="USFMpmc"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMpmo"><w:name w:val="USFM pmo"/><w:basedOn w:val="Normal"/><w:next w:val="USFMpmo"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMpmr"><w:name w:val="USFM pmr"/><w:basedOn w:val="Normal"/><w:next w:val="USFMpmr"/></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMpn"><w:name w:val="USFM pn"/></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMpng"><w:name w:val="USFM png"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMpo"><w:name w:val="USFM po"/><w:basedOn w:val="Normal"/><w:next w:val="USFMpo"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMpr"><w:name w:val="USFM pr"/><w:basedOn w:val="Normal"/><w:next w:val="USFMpr"/></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMpro"><w:name w:val="USFM pro"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMq"><w:name w:val="USFM q"/><w:basedOn w:val="Normal"/><w:next w:val="USFMq"/><w:pPr><w:spacing w:after="0"/><w:ind w:left="720" w:hanging="360"/></w:pPr></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMq1"><w:name w:val="USFM q1"/><w:basedOn w:val="Normal"/><w:next w:val="USFMq1"/><w:qFormat/><w:pPr><w:spacing w:after="0"/><w:ind w:left="720" w:hanging="360"/></w:pPr></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMq2"><w:name w:val="USFM q2"/><w:basedOn w:val="Normal"/><w:next w:val="USFMq2"/><w:qFormat/><w:pPr><w:spacing w:after="0"/><w:ind w:left="1080" w:hanging="360"/></w:pPr></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMq3"><w:name w:val="USFM q3"/><w:basedOn w:val="Normal"/><w:next w:val="USFMq3"/><w:pPr><w:spacing w:after="0"/><w:ind w:left="1440" w:hanging="360"/></w:pPr></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMq4"><w:name w:val="USFM q4"/><w:basedOn w:val="Normal"/><w:next w:val="USFMq4"/><w:pPr><w:spacing w:after="0"/><w:ind w:left="1800" w:hanging="360"/></w:pPr></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMqa"><w:name w:val="USFM qa"/><w:basedOn w:val="Normal"/><w:next w:val="USFMqa"/></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMqac"><w:name w:val="USFM qac"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMqc"><w:name w:val="USFM qc"/><w:basedOn w:val="Normal"/><w:next w:val="USFMqc"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMqd"><w:name w:val="USFM qd"/><w:basedOn w:val="Normal"/><w:next w:val="USFMqd"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMqm"><w:name w:val="USFM qm"/><w:basedOn w:val="Normal"/><w:next w:val="USFMqm"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMqm1"><w:name w:val="USFM qm1"/><w:basedOn w:val="Normal"/><w:next w:val="USFMqm1"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMqm2"><w:name w:val="USFM qm2"/><w:basedOn w:val="Normal"/><w:next w:val="USFMqm2"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMqm3"><w:name w:val="USFM qm3"/><w:basedOn w:val="Normal"/><w:next w:val="USFMqm3"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMqr"><w:name w:val="USFM qr"/><w:basedOn w:val="Normal"/><w:next w:val="USFMqr"/></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMqs"><w:name w:val="USFM qs"/></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMqt"><w:name w:val="USFM qt"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMr"><w:name w:val="USFM r"/><w:basedOn w:val="Normal"/><w:next w:val="USFMr"/><w:rPr><w:i/></w:rPr></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMrb"><w:name w:val="USFM rb"/></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMref"><w:name w:val="USFM ref"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMrem"><w:name w:val="USFM rem"/><w:basedOn w:val="Normal"/><w:next w:val="USFMrem"/><w:rPr><w:color w:val="808080"/><w:sz w:val="18"/></w:rPr></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMrq"><w:name w:val="USFM rq"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMs"><w:name w:val="USFM s"/><w:basedOn w:val="Heading2"/><w:next w:val="USFMs"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMs1"><w:name w:val="USFM s1"/><w:basedOn w:val="Heading2"/><w:next w:val="USFMs1"/><w:qFormat/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMs2"><w:name w:val="USFM s2"/><w:basedOn w:val="Normal"/><w:next w:val="USFMs2"/><w:pPr><w:keepNext/></w:pPr><w:rPr><w:b/></w:rPr></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMs3"><w:name w:val="USFM s3"/><w:basedOn w:val="Normal"/><w:next w:val="USFMs3"/><w:pPr><w:keepNext/></w:pPr><w:rPr><w:b/></w:rPr></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMs4"><w:name w:val="USFM s4"/><w:basedOn w:val="Normal"/><w:next w:val="USFMs4"/><w:pPr><w:keepNext/></w:pPr><w:rPr><w:b/></w:rPr></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMsc"><w:name w:val="USFM sc"/><w:rPr><w:smallCaps/></w:rPr></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMsd"><w:name w:val="USFM sd"/><w:basedOn w:val="Normal"/><w:next w:val="USFMsd"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMsd1"><w:name w:val="USFM sd1"/><w:basedOn w:val="Normal"/><w:next w:val="USFMsd1"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMsd2"><w:name w:val="USFM sd2"/><w:basedOn w:val="Normal"/><w:next w:val="USFMsd2"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMsd3"><w:name w:val="USFM sd3"/><w:basedOn w:val="Normal"/><w:next w:val="USFMsd3"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMsd4"><w:name w:val="USFM sd4"/><w:basedOn w:val="Normal"/><w:next w:val="USFMsd4"/></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMsig"><w:name w:val="USFM sig"/></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMsls"><w:name w:val="USFM sls"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMsp"><w:name w:val="USFM sp"/><w:basedOn w:val="Normal"/><w:next w:val="USFMsp"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMsr"><w:name w:val="USFM sr"/><w:basedOn w:val="Normal"/><w:next w:val="USFMsr"/><w:rPr><w:i/></w:rPr></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMsts"><w:name w:val="USFM sts"/><w:basedOn w:val="Normal"/><w:next w:val="USFMsts"/><w:rPr><w:color w:val="808080"/><w:sz w:val="18"/></w:rPr></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMsup"><w:name w:val="USFM sup"/><w:rPr><w:vertAlign w:val="superscript"/></w:rPr></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMta"><w:name w:val="USFM ta"/></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMtl"><w:name w:val="USFM tl"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMtoc"><w:name w:val="USFM toc"/><w:basedOn w:val="Normal"/><w:next w:val="USFMtoc"/><w:rPr><w:color w:val="808080"/><w:sz w:val="18"/></w:rPr></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMtoc1"><w:name w:val="USFM toc1"/><w:basedOn w:val="Normal"/><w:next w:val="USFMtoc1"/><w:rPr><w:color w:val="808080"/><w:sz w:val="18"/></w:rPr></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMtoc2"><w:name w:val="USFM toc2"/><w:basedOn w:val="Normal"/><w:next w:val="USFMtoc2"/><w:rPr><w:color w:val="808080"/><w:sz w:val="18"/></w:rPr></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMtoc3"><w:name w:val="USFM toc3"/><w:basedOn w:val="Normal"/><w:next w:val="USFMtoc3"/><w:rPr><w:color w:val="808080"/><w:sz w:val="18"/></w:rPr></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMtoca"><w:name w:val="USFM toca"/><w:basedOn w:val="Normal"/><w:next w:val="USFMtoca"/><w:rPr><w:color w:val="808080"/><w:sz w:val="18"/></w:rPr></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMtoca1"><w:name w:val="USFM toca1"/><w:basedOn w:val="Normal"/><w:next w:val="USFMtoca1"/><w:rPr><w:color w:val="808080"/><w:sz w:val="18"/></w:rPr></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMtoca2"><w:name w:val="USFM toca2"/><w:basedOn w:val="Normal"/><w:next w:val="USFMtoca2"/><w:rPr><w:color w:val="808080"/><w:sz w:val="18"/></w:rPr></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMtoca3"><w:name w:val="USFM toca3"/><w:basedOn w:val="Normal"/><w:next w:val="USFMtoca3"/><w:rPr><w:color w:val="808080"/><w:sz w:val="18"/></w:rPr></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMv"><w:name w:val="USFM v"/><w:qFormat/><w:rPr><w:vertAlign w:val="superscript"/></w:rPr></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMva"><w:name w:val="USFM va"/></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMvp"><w:name w:val="USFM vp"/></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMw"><w:name w:val="USFM w"/></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMwa"><w:name w:val="USFM wa"/></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMwg"><w:name w:val="USFM wg"/></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMwh"><w:name w:val="USFM wh"/></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMwj"><w:name w:val="USFM wj"/><w:qFormat/><w:rPr><w:color w:val="C00000"/></w:rPr></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMwl"><w:name w:val="USFM wl"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMx"><w:name w:val="USFM x"/><w:basedOn w:val="FootnoteText"/><w:next w:val="USFMx"/></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMxdc"><w:name w:val="USFM xdc"/></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMxk"><w:name w:val="USFM xk"/></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMxnt"><w:name w:val="USFM xnt"/></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMxo"><w:name w:val="USFM xo"/><w:rPr><w:b/></w:rPr></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMxop"><w:name w:val="USFM xop"/></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMxot"><w:name w:val="USFM xot"/></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMxq"><w:name w:val="USFM xq"/></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMxt"><w:name w:val="USFM xt"/></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMxta"><w:name w:val="USFM xta"/></w:style>
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="USFMnomarker"><w:name w:val="USFM (no marker)"/><w:basedOn w:val="Normal"/><w:next w:val="USFMnomarker"/></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMraw"><w:name w:val="USFM raw"/><w:rPr><w:color w:val="808080"/></w:rPr></w:style>
+<w:style w:type="character" w:customStyle="1" w:styleId="USFMcaller"><w:name w:val="USFM caller"/><w:rPr><w:vertAlign w:val="superscript"/></w:rPr></w:style>
+</w:styles>
