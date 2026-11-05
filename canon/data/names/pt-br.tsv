@@ -1,0 +1,70 @@
+# pt-br: Brazilian Portuguese (Português Brasileiro). Book names harvested from \toc1-3 (Writer
+# projects: front/title.txt) of: WA-Catalog/pt-br_ulb.
+# Reviewed (first pass, 2026-11-05): as harvested.
+code	long	short	abbrev
+GEN	Gênesis	Gênesis	
+EXO	Êxodo	Êxodo	
+LEV	Levíticos	Levíticos	
+NUM	Números	Números	
+DEU	Deuteronômio	Deuteronômio	
+JOS	Josué	Josué	
+JDG	Juízes	Juízes	
+RUT	Rute	Rute	
+1SA	1 Samuel	1 Samuel	
+2SA	2 Samuel	2 Samuel	
+1KI	1 Reis	1 Reis	
+2KI	2 Reis	2 Reis	
+1CH	1 Crônicas	1 Crônicas	
+2CH	2 Crônicas	2 Crônicas	
+EZR	Esdras	Esdras	
+NEH	Neemias	Neemias	
+EST	Ester	Ester	
+JOB	Jó	Jó	
+PSA	Salmos	Salmos	
+PRO	Provérbios	Provérbios	
+ECC	Eclesiastes	Eclesiastes	
+SNG	Cantares de Salomão	Cantares de Salomão	
+ISA	Isaías	Isaías	
+JER	Jeremias	Jeremias	
+LAM	Lamentações	Lamentações	
+EZK	Ezequiel	Ezequiel	
+DAN	Daniel	Daniel	
+HOS	Oseias	Oseias	
+JOL	Joel	Joel	
+AMO	Amós	Amós	
+OBA	Obadias	Obadias	
+JON	Jonas	Jonas	
+MIC	Miqueias	Miqueias	
+NAM	Naum	Naum	
+HAB	Habacuque	Habacuque	
+ZEP	Sofonias	Sofonias	
+HAG	Ageu	Ageu	
+ZEC	Zacarias	Zacarias	
+MAL	Malaquias	Malaquias	
+MAT	Mateus	Mateus	
+MRK	Marcos	Marcos	
+LUK	Lucas	Lucas	
+JHN	João	João	
+ACT	Atos	Atos	
+ROM	Romanos	Romanos	
+1CO	1 Corintios	1 Corintios	
+2CO	2 Coríntios	2 Coríntios	
+GAL	Gálatas	Gálatas	
+EPH	Efésios	Efésios	
+PHP	Filipenses	Filipenses	
+COL	Colossenses	Colossenses	
+1TH	1 Tessalonicenses	1 Tessalonicenses	
+2TH	2 Tessalonicenses	2 Tessalonicenses	
+1TI	1 Timóteo	1 Timóteo	
+2TI	2 Timóteo	2 Timóteo	
+TIT	Tito	Tito	
+PHM	Filemom	Filemom	
+HEB	Hebreus	Hebreus	
+JAS	Tiago	Tiago	
+1PE	1 Pedro	1 Pedro	
+2PE	2 Pedro	2 Pedro	
+1JN	1 João	1 João	
+2JN	2 João	2 João	
+3JN	3 João	3 João	
+JUD	Judas	Judas	
+REV	Apocalipse	Apocalipse	

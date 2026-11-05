@@ -441,6 +441,215 @@ fn unit(
     }
 }
 
+/// How one book's verses correspond across two numberings: the target's and
+/// its source's. A caller that knows both sides' versification schemes
+/// supplies it (galley, from canon); sous-core knows no scheme.
+///
+/// Both directions answer in the other side's numbering and push nothing for
+/// a verse with no counterpart. Verse 0 is the title slot before verse 1 (a
+/// Psalm's superscription in a scheme that doesn't number it); no row is ever
+/// keyed there, so an answer of verse 0 means "a title, not a verse".
+pub trait Crosswalk {
+    /// The source verses a target verse is, as `(chapter, verse)`.
+    fn to_source(&self, chapter: u16, verse: u16, out: &mut Vec<(u16, u16)>);
+    /// The target verses a source verse is.
+    fn to_target(&self, chapter: u16, verse: u16, out: &mut Vec<(u16, u16)>);
+}
+
+/// [`pair_keys`] for two sides numbered differently: units are the connected
+/// groups of rows, where a target row joins every source row covering a
+/// verse it corresponds to (and the reverse).
+///
+/// ```text
+/// target PSA 3:1 (eng)     ↔ source PSA 3:2 (org)               one-to-one, renumbered
+/// target PSA 13:5, 13:6    ↔ source PSA 13:6                    a merge: one unit, two target ranges
+/// target PSA 89:6 (rsc)    ↔ source PSA 90:5, 90:6              a split: one unit, two source ranges
+/// target \v 1-2            ↔ source 2, 3 (each moved by one)    a bridge across a move
+/// ```
+///
+/// The same callback contract as [`pair_keys`], so everything downstream
+/// (lengths, presence, source copy) reads a unit the same way. A unit's key
+/// is its target rows' hull. Facts differ in one way, on purpose: a source
+/// row nothing in the target answers is `SourceOnly` keyed in the TARGET's
+/// numbering, which is where presence places "missing" and what a translator
+/// reads. One whose counterpart is a title (verse 0) or nothing at all is
+/// dropped: the target lacks no verse there.
+///
+/// A key repeated on one side cannot be placed across numberings, so every
+/// copy is blocked and reported `AmbiguousDuplicate`. Verses the crosswalk
+/// sends to another book are ignored: pairing is per book.
+pub(crate) fn pair_keys_across(
+    book: BookKey,
+    target: &[VerseKey],
+    source: &[VerseKey],
+    walk: &dyn Crosswalk,
+    unit: &mut impl FnMut(VerseKey, &[usize], &[usize]),
+    facts: &mut Vec<AlignmentFact>,
+) {
+    let blocked = |rows: &[VerseKey], facts: &mut Vec<AlignmentFact>| -> Vec<bool> {
+        let mut count: FxHashMap<VerseKey, u32> = FxHashMap::default();
+        for key in rows {
+            *count.entry(*key).or_default() += 1;
+        }
+        rows.iter()
+            .map(|key| {
+                let repeated = count[key] > 1;
+                if repeated {
+                    push_fact(facts, AlignmentFact::AmbiguousDuplicate { book, key: *key });
+                }
+                repeated
+            })
+            .collect()
+    };
+    let target_blocked = blocked(target, facts);
+    let source_blocked = blocked(source, facts);
+
+    // (chapter, verse) → the unblocked rows covering it, per side.
+    let cover = |rows: &[VerseKey], blocked: &[bool]| {
+        let mut at: FxHashMap<(u16, u16), Vec<usize>> = FxHashMap::default();
+        for (index, key) in rows.iter().enumerate() {
+            if blocked[index] {
+                continue;
+            }
+            for verse in key.first()..=key.last() {
+                at.entry((key.chapter(), verse)).or_default().push(index);
+            }
+        }
+        at
+    };
+    let target_at = cover(target, &target_blocked);
+    let source_at = cover(source, &source_blocked);
+
+    // Union-find over target rows (0..t) then source rows (t..).
+    let t = target.len();
+    let mut parent: Vec<usize> = (0..t + source.len()).collect();
+    fn root(parent: &mut [usize], mut node: usize) -> usize {
+        while parent[node] != node {
+            parent[node] = parent[parent[node]];
+            node = parent[node];
+        }
+        node
+    }
+    let join = |parent: &mut Vec<usize>, a: usize, b: usize| {
+        let (ra, rb) = (root(parent, a), root(parent, b));
+        if ra != rb {
+            parent[ra.max(rb)] = ra.min(rb);
+        }
+    };
+    let mut there = Vec::new();
+    for (index, key) in target.iter().enumerate() {
+        if target_blocked[index] {
+            continue;
+        }
+        for verse in key.first()..=key.last() {
+            there.clear();
+            walk.to_source(key.chapter(), verse, &mut there);
+            for place in &there {
+                for s in source_at.get(place).into_iter().flatten() {
+                    join(&mut parent, index, t + s);
+                }
+            }
+        }
+    }
+    for (index, key) in source.iter().enumerate() {
+        if source_blocked[index] {
+            continue;
+        }
+        for verse in key.first()..=key.last() {
+            there.clear();
+            walk.to_target(key.chapter(), verse, &mut there);
+            for place in &there {
+                for r in target_at.get(place).into_iter().flatten() {
+                    join(&mut parent, *r, t + index);
+                }
+            }
+        }
+    }
+
+    // Components, in the order of their first row (target rows come first,
+    // so units follow the target book).
+    let mut groups: FxHashMap<usize, (Vec<usize>, Vec<usize>)> = FxHashMap::default();
+    let mut order: Vec<usize> = Vec::new();
+    for node in 0..parent.len() {
+        let blocked = if node < t {
+            target_blocked[node]
+        } else {
+            source_blocked[node - t]
+        };
+        if blocked {
+            continue;
+        }
+        let r = root(&mut parent, node);
+        let group = groups.entry(r).or_insert_with(|| {
+            order.push(r);
+            (Vec::new(), Vec::new())
+        });
+        if node < t {
+            group.0.push(node);
+        } else {
+            group.1.push(node - t);
+        }
+    }
+
+    let mut missing: Vec<VerseKey> = Vec::new();
+    for r in order {
+        let (left, right) = &groups[&r];
+        match (left.is_empty(), right.is_empty()) {
+            (false, false) => unit(hull(target, left), left, right),
+            (false, true) => {
+                for index in left {
+                    push_fact(
+                        facts,
+                        AlignmentFact::TargetOnly {
+                            book,
+                            key: target[*index],
+                        },
+                    );
+                }
+            }
+            (true, false) => {
+                for index in right {
+                    let key = source[*index];
+                    let mut answered: Vec<(u16, u16)> = Vec::new();
+                    for verse in key.first()..=key.last() {
+                        walk.to_target(key.chapter(), verse, &mut answered);
+                    }
+                    answered.retain(|(_, verse)| *verse > 0);
+                    answered.sort_unstable();
+                    answered.dedup();
+                    // One fact per chapter the counterpart spans.
+                    for chunk in answered.chunk_by(|a, b| a.0 == b.0) {
+                        let (chapter, first, last) =
+                            (chunk[0].0, chunk[0].1, chunk[chunk.len() - 1].1);
+                        if let Ok(key) = VerseKey::new(chapter, first, last) {
+                            missing.push(key);
+                        }
+                    }
+                }
+            }
+            (true, true) => {}
+        }
+    }
+    missing.sort_unstable_by_key(|key| (key.chapter(), key.first(), key.last()));
+    for key in missing {
+        push_fact(facts, AlignmentFact::SourceOnly { book, key });
+    }
+}
+
+/// The span a unit's target rows cover, as one key: their hull within the
+/// first row's chapter (a unit crossing a chapter keys by its first row).
+fn hull(target: &[VerseKey], rows: &[usize]) -> VerseKey {
+    let first = target[rows[0]];
+    let (lo, hi) = rows
+        .iter()
+        .map(|at| target[*at])
+        .filter(|key| key.chapter() == first.chapter())
+        .fold((first.first(), first.last()), |(lo, hi), key| {
+            (lo.min(key.first()), hi.max(key.last()))
+        });
+    VerseKey::new(first.chapter(), lo, hi).unwrap_or(first)
+}
+
 fn push_fact(facts: &mut Vec<AlignmentFact>, fact: AlignmentFact) {
     if !facts.contains(&fact) {
         facts.push(fact);
@@ -689,5 +898,183 @@ mod tests {
         let result = align(&corpus(&target), &corpus(&source));
         assert!(result.units().is_empty());
         assert_eq!(result.facts().len(), 2);
+    }
+}
+
+#[cfg(test)]
+mod across_tests {
+    use super::*;
+
+    const PSA: BookKey = BookKey::new(*b"PSA");
+
+    /// A crosswalk given as explicit (target → source) pairs; a verse not
+    /// listed keeps its number on the other side.
+    struct Table(Vec<((u16, u16), (u16, u16))>);
+
+    impl Crosswalk for Table {
+        fn to_source(&self, chapter: u16, verse: u16, out: &mut Vec<(u16, u16)>) {
+            let listed: Vec<_> = self
+                .0
+                .iter()
+                .filter(|(t, _)| *t == (chapter, verse))
+                .map(|(_, s)| *s)
+                .collect();
+            if listed.is_empty() && !self.0.iter().any(|(_, s)| *s == (chapter, verse)) {
+                out.push((chapter, verse));
+            }
+            out.extend(listed);
+        }
+        fn to_target(&self, chapter: u16, verse: u16, out: &mut Vec<(u16, u16)>) {
+            let listed: Vec<_> = self
+                .0
+                .iter()
+                .filter(|(_, s)| *s == (chapter, verse))
+                .map(|(t, _)| *t)
+                .collect();
+            if listed.is_empty() && !self.0.iter().any(|(t, _)| *t == (chapter, verse)) {
+                out.push((chapter, verse));
+            }
+            out.extend(listed);
+        }
+    }
+
+    fn key(chapter: u16, first: u16, last: u16) -> VerseKey {
+        VerseKey::new(chapter, first, last).unwrap()
+    }
+
+    /// One unit's target keys and source keys.
+    type Unit = (Vec<VerseKey>, Vec<VerseKey>);
+
+    /// Every unit, and the facts.
+    fn paired(
+        target: &[VerseKey],
+        source: &[VerseKey],
+        walk: &dyn Crosswalk,
+    ) -> (Vec<Unit>, Vec<AlignmentFact>) {
+        let mut units = Vec::new();
+        let mut facts = Vec::new();
+        pair_keys_across(
+            PSA,
+            target,
+            source,
+            walk,
+            &mut |_, left, right| {
+                units.push((
+                    left.iter().map(|at| target[*at]).collect(),
+                    right.iter().map(|at| source[*at]).collect(),
+                ));
+            },
+            &mut facts,
+        );
+        (units, facts)
+    }
+
+    #[test]
+    fn with_nothing_moved_it_pairs_exactly_as_pair_keys() {
+        let target = [key(1, 1, 1), key(1, 2, 3), key(1, 4, 4), key(1, 6, 6)];
+        let source = [
+            key(1, 1, 1),
+            key(1, 2, 2),
+            key(1, 3, 3),
+            key(1, 4, 4),
+            key(1, 5, 5),
+        ];
+        let (units, facts) = paired(&target, &source, &Table(vec![]));
+        let mut plain_units = Vec::new();
+        let mut plain_facts = Vec::new();
+        pair_keys(
+            PSA,
+            &target,
+            &source,
+            &mut |_, left, right| {
+                plain_units.push((
+                    left.iter().map(|at| target[*at]).collect::<Vec<_>>(),
+                    right.iter().map(|at| source[*at]).collect::<Vec<_>>(),
+                ));
+            },
+            &mut plain_facts,
+        );
+        // The same units; pair_keys emits exact keys before bridges, this
+        // walks the target in order, and nothing downstream reads the order.
+        let (mut units, mut plain_units) = (units, plain_units);
+        units.sort();
+        plain_units.sort();
+        assert_eq!(units, plain_units);
+        assert_eq!(facts, plain_facts);
+    }
+
+    /// eng numbers Psalm 3's title as nothing and its verses 1-8; org
+    /// numbers the title 1 and the verses 2-9. Every verse pairs with its
+    /// counterpart, and org's title verse is no "missing" verse: the target
+    /// has it as a `\d` title, not a verse.
+    #[test]
+    fn a_shift_by_one_pairs_every_verse_and_the_title_is_not_missing() {
+        let mut walk = vec![((3, 0), (3, 1))];
+        walk.extend((1..=8).map(|v| ((3, v), (3, v + 1))));
+        let target: Vec<VerseKey> = (1..=8).map(|v| key(3, v, v)).collect();
+        let source: Vec<VerseKey> = (1..=9).map(|v| key(3, v, v)).collect();
+        let (units, facts) = paired(&target, &source, &Table(walk));
+        assert_eq!(units.len(), 8);
+        assert_eq!(units[0], (vec![key(3, 1, 1)], vec![key(3, 2, 2)]));
+        assert!(facts.is_empty(), "{facts:?}");
+    }
+
+    #[test]
+    fn a_merge_and_a_split_are_each_one_unit() {
+        // Target 13:5 and 13:6 are both source 13:6; target 14:1 is source 14:1-2.
+        let walk = Table(vec![
+            ((13, 5), (13, 6)),
+            ((13, 6), (13, 6)),
+            ((14, 1), (14, 1)),
+            ((14, 1), (14, 2)),
+            ((14, 2), (14, 3)),
+        ]);
+        let target = [key(13, 5, 5), key(13, 6, 6), key(14, 1, 1), key(14, 2, 2)];
+        let source = [key(13, 6, 6), key(14, 1, 1), key(14, 2, 2), key(14, 3, 3)];
+        let (units, facts) = paired(&target, &source, &walk);
+        assert_eq!(
+            units,
+            [
+                (vec![key(13, 5, 5), key(13, 6, 6)], vec![key(13, 6, 6)]),
+                (vec![key(14, 1, 1)], vec![key(14, 1, 1), key(14, 2, 2)]),
+                (vec![key(14, 2, 2)], vec![key(14, 3, 3)]),
+            ]
+        );
+        assert!(facts.is_empty(), "{facts:?}");
+    }
+
+    #[test]
+    fn a_source_verse_the_target_lacks_is_missing_in_the_targets_numbering() {
+        // Target numbers one behind the source; it lacks the source's 3:5,
+        // which is its own 3:4.
+        let walk = Table((1..=8).map(|v| ((3, v), (3, v + 1))).collect());
+        let target = [key(3, 1, 1), key(3, 2, 2), key(3, 3, 3), key(3, 5, 5)];
+        let source = [
+            key(3, 2, 2),
+            key(3, 3, 3),
+            key(3, 4, 4),
+            key(3, 5, 5),
+            key(3, 6, 6),
+        ];
+        let (_, facts) = paired(&target, &source, &walk);
+        assert_eq!(
+            facts,
+            [AlignmentFact::SourceOnly {
+                book: PSA,
+                key: key(3, 4, 4)
+            }]
+        );
+    }
+
+    #[test]
+    fn a_repeated_key_is_blocked_rather_than_guessed() {
+        let target = [key(1, 1, 1), key(1, 1, 1), key(1, 2, 2)];
+        let source = [key(1, 1, 1), key(1, 2, 2)];
+        let (units, facts) = paired(&target, &source, &Table(vec![]));
+        assert_eq!(units, [(vec![key(1, 2, 2)], vec![key(1, 2, 2)])]);
+        assert!(facts.contains(&AlignmentFact::AmbiguousDuplicate {
+            book: PSA,
+            key: key(1, 1, 1)
+        }));
     }
 }

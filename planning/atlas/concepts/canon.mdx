@@ -1,0 +1,61 @@
+---
+term: canon
+slug: canon
+aliases: [book table, book names, gateway names]
+kind: crate
+crate: canon
+files: [canon/README.md, canon/src/lib.rs, canon/src/books.rs, canon/src/names.rs, canon/src/scheme.rs, canon/gen/src/main.rs, canon/ts/canon.ts]
+related: [versification, mise, galley, lint, toc]
+level: 1
+summary: "What a book is before any text of it exists: codes, both numbers, names in English and the gateway languages, and each versification scheme's counts and mapping."
+---
+
+## The problem
+
+About 35 hand-kept book tables across the org's repos disagree, even on Matthew's number. Every book picker, citation box, file name and stitcher spells its own. And a text's verses only mean something against a numbering tradition, which nothing in the workspace knew.
+
+## The solution
+
+One crate of data with no runtime parsing. `canon-gen` writes Rust consts and their TypeScript twins from `canon/data/`, so Sefer gets plain TS with no wasm `init()`, and both languages pass the same `canon/fixtures/*.json`. canon depends on [[mise]] alone; galley is its only Rust consumer. The numbering half is [[versification]].
+
+## Trade-offs
+
+- Data, not code, is the review surface: `books.tsv`, the scheme JSON, the sniffing rules and each gateway language's `names/<locale>.tsv` are what a person checks. The generated tables are checked only for freshness.
+- No Unicode library, so the generator writes what `fold` makes of each character (NFKD, accents dropped, marks ordered) into a table. A Unicode bump on either side could move a rare character.
+- Book names are each translation's own `\toc` lines: 32 gateway languages, reviewed once. fa, pmy and zh have no Primary text and fall back to English.
+
+## Show me
+
+```rust
+canon::book(MAT)                         // usfm_number "41", canonical_index 40
+canon::parse_book("1samuel")             // Some(1SA)
+canon::parse_book_in("Éxodo", &["es"])   // Some(EXO): es is es-419, accents fold
+canon::name(MAT, &["fr"], Form::Long)    // "Matthieu", locale "fr"
+canon::usfm_file_name(MAT)               // "41-MAT.usfm"
+```
+
+```ts
+import fr from "@wycliffeassociates/scripture-kitchen/canon/names/fr";
+name("MAT", "long", [fr]);   // { text: "Matthieu", locale: "fr", form: "long" }
+parseBook("matthieu", [fr]); // "MAT"
+```
+
+| data | generated into |
+| --- | --- |
+| `data/books.tsv` | `src/tables.rs`, `ts/tables.ts` |
+| `data/schemes/*.json` | `src/scheme_tables.rs`, `ts/scheme-tables.ts` |
+| `data/sniff/rules.json` | `src/sniff_tables.rs` (Rust only) |
+| `data/names/<locale>.tsv` | `src/name_tables.rs`, `ts/names/<locale>.ts` |
+| Unicode NFKD | `src/fold_tables.rs` |
+
+## How it works
+
+- **Two numbers, never one.** `canonical_index` is the place among the 66 (Matthew 40); `usfm_number` is the file number (Matthew 41).
+- **A code wins.** `parse_book` tries a code in any case before any name, so "Jon" is Jonah, even in Tok Pisin, whose John is "Jon". Sefer decides it the same way.
+- **Names fall back, and say so.** Each locale asked for, then en_ulb's names, then the book table's English. `Named` reports which locale and form answered.
+- **One TS module per locale**, so a bundle carries only the languages it imports (`NAME_LOCALES` lists them for a dynamic import).
+- **Refreshing names** is `gen/fetch-gateways.sh` (BIEL API, clones), `harvest-names` (onion's lexer over `\toc1-3`), a review, then `cargo run -p canon-gen`.
+
+## Composes with
+
+[[versification]] is the other half of the crate. [[galley]] reaches canon for declared schemes, sniffing and pairing across schemes; the plan was `planning/items/2026-11-04-canon-and-versification-the-book-table-schemes-map.mdx`.

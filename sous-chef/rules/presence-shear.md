@@ -26,6 +26,10 @@ the computation and where the span lands:
   most of what fires on real corpora is exactly that.
 - No expected-verse table and no versification repair. Sous holds no opinion
   about which verses a book ought to have; both sides' keys are the caller's.
+  When the caller declares that target and source number differently, it
+  passes a crosswalk, and a missing verse is reported in the target's own
+  numbering (`presence.md`, "Across two numberings"). That is the caller's
+  mapping applied, not one Sous infers.
 - No ratio. An absent or empty unit produces no length row, and nothing here
   fabricates a zero-length one.
 - Nothing about content. An `Empty` row says the target unit counted no

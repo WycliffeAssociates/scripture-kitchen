@@ -1,8 +1,11 @@
-//! `fixtures/books.json` and `fixtures/schemes.json`, the cases the TypeScript
+//! `fixtures/books.json`, `fixtures/schemes.json` and `fixtures/names.json`, the cases the TypeScript
 //! side runs too (`ts/canon.test.mjs`). Every row is checked; a failure names
 //! the row.
 
-use canon::{BookKey, Canon, book, books, fold, parse_book, scheme, schemes, usfm_file_name};
+use canon::{
+    BookKey, Canon, Form, book, books, fold, locales, name, parse_book, parse_book_in, scheme,
+    schemes, usfm_file_name,
+};
 use serde_json::Value;
 
 fn fixtures() -> Value {
@@ -181,5 +184,101 @@ fn excluded_cases() {
             "{}.excluded({code} {chapter}:{verse})",
             row["scheme"]
         );
+    }
+}
+
+fn names_fixtures() -> Value {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/fixtures/names.json");
+    serde_json::from_str(&std::fs::read_to_string(path).expect("fixtures exist"))
+        .expect("fixtures parse")
+}
+
+fn locales_of(row: &Value) -> Vec<&str> {
+    row["locales"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tag| tag.as_str().unwrap())
+        .collect()
+}
+
+fn form_name(form: Form) -> &'static str {
+    match form {
+        Form::Long => "long",
+        Form::Short => "short",
+        Form::Abbrev => "abbrev",
+    }
+}
+
+#[test]
+fn name_cases() {
+    for row in rows(&names_fixtures(), "name") {
+        let code = row["code"].as_str().unwrap();
+        let locales = locales_of(row);
+        let form = [Form::Long, Form::Short, Form::Abbrev]
+            .into_iter()
+            .find(|f| form_name(*f) == row["form"].as_str().unwrap())
+            .expect("a form");
+        let found = name(key(code), &locales, form);
+        let what = format!("name({code}, {locales:?}, {form:?})");
+        let Some(want) = row["text"].as_str() else {
+            assert!(found.is_none(), "{what} should be None, is {found:?}");
+            continue;
+        };
+        let found = found.unwrap_or_else(|| panic!("{what} is None"));
+        assert_eq!(found.text, want, "{what} text");
+        assert_eq!(
+            found.locale,
+            row["locale"].as_str().unwrap(),
+            "{what} locale"
+        );
+        assert_eq!(
+            form_name(found.form),
+            row["answered"].as_str().unwrap(),
+            "{what} form"
+        );
+    }
+}
+
+#[test]
+fn parse_book_in_cases() {
+    for row in rows(&names_fixtures(), "parse_book") {
+        let text = row["text"].as_str().unwrap();
+        let locales = locales_of(row);
+        assert_eq!(
+            parse_book_in(text, &locales),
+            row["book"].as_str().map(key),
+            "parse_book_in({text:?}, {locales:?})"
+        );
+    }
+}
+
+/// The generator folded every name with this same `fold`, so each locale's
+/// every name parses back to its own book, except one that is a book code,
+/// which the code wins.
+#[test]
+fn every_locales_names_parse_back_to_their_book() {
+    for tag in locales() {
+        for book in books(Canon::All) {
+            for form in [Form::Long, Form::Short, Form::Abbrev] {
+                let Some(named) = name(book.code, &[tag], form) else {
+                    continue;
+                };
+                if named.locale != tag {
+                    continue;
+                }
+                let parsed = parse_book_in(named.text, &[tag]);
+                let a_code = named.text.trim().len() == 3
+                    && parse_book(named.text).is_some_and(|code| {
+                        code.to_string().eq_ignore_ascii_case(named.text.trim())
+                    });
+                assert!(
+                    parsed == Some(book.code) || a_code,
+                    "{tag} {}: {:?} parses as {parsed:?}",
+                    book.code,
+                    named.text
+                );
+            }
+        }
     }
 }

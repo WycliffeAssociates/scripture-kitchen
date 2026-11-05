@@ -1,4 +1,6 @@
 /target
+# A re-harvest of book names, written beside a reviewed file for diffing.
+/canon/data/names/*.harvested
 /.ai-notify
 planning/spec_contexts_diff.py
 planning/mine_fastpath_windows.py

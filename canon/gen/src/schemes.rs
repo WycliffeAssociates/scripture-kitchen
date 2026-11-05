@@ -65,6 +65,13 @@ const ERRATA: [(&str, &str, &str, &str); 4] = [
     ("rso", "PSA 89:2-6", "PSA 89:2-6", "PSA 90:2-6"),
 ];
 
+/// Rows dropped by name, each with why. `vul.json` counts Jonah as `org`
+/// does (1 has 16 verses, 2 has 11), as the Vulgate does, but carries
+/// `eng.json`'s two Jonah rows, which assume `eng`'s 17 and 10: read as
+/// written, every verse of vul's Jonah 2 would be one off. `gen-canon` fails
+/// if one is no longer there to drop.
+const DROPPED: [(&str, &str); 2] = [("vul", "JON 1:17"), ("vul", "JON 2:1-10")];
+
 /// Paratext's codes for alternate Greek texts (Theodotion's Bel, Daniel and
 /// Susanna; Judges B; Joshua A; Sinaiticus Tobit). `org`, `eng` and `lxx`
 /// count them, but they are not USFM book identifiers, no `\id` can name
@@ -181,10 +188,15 @@ fn read_one(name: &'static str, text: &str, book_order: &[String]) -> Result<Sch
     {
         let mapped = mapped.as_object().ok_or("mappedVerses is not an object")?;
         let mut used = 0;
+        let mut dropped = 0;
         for (key, value) in mapped {
             let value = value
                 .as_str()
                 .ok_or_else(|| format!("mappedVerses.{key} is {value}"))?;
+            if DROPPED.contains(&(name, key.as_str())) {
+                dropped += 1;
+                continue;
+            }
             let (key, value) = match ERRATA
                 .iter()
                 .find(|(scheme, wrong, _, _)| *scheme == name && wrong == key)
@@ -198,6 +210,12 @@ fn read_one(name: &'static str, text: &str, book_order: &[String]) -> Result<Sch
             let row = mapped_row(key, value, book_order)
                 .map_err(|e| format!("mappedVerses {key:?}: {value:?}: {e}"))?;
             rows.push(row);
+        }
+        let to_drop = DROPPED.iter().filter(|(scheme, _)| *scheme == name).count();
+        if dropped != to_drop {
+            return Err(format!(
+                "{to_drop} rows to drop but {dropped} found; one has been fixed upstream?"
+            ));
         }
         let listed = ERRATA.iter().filter(|(scheme, ..)| *scheme == name).count();
         if used != listed {

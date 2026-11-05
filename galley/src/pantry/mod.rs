@@ -840,6 +840,27 @@ impl Pantry {
         Ok(self.chunks.parse(text, opts, &markers))
     }
 
+    /// [`parse_book`](Self::parse_book) with findings made outside the walk
+    /// (the versification lints) folded into its diagnostics before plating.
+    /// With no extra findings, or no diagnostics asked for, it is exactly
+    /// `parse_book`.
+    fn parse_book_with(
+        &mut self,
+        id: &BookId,
+        opts: onion::wire::ParseOptions,
+        extra: Vec<onion::lint::Observation>,
+    ) -> Result<Vec<u8>, PantryError> {
+        if extra.is_empty() || !opts.diagnostics {
+            return self.parse_book(id, opts);
+        }
+        let (text, markers) = retained_with_markers(&self.books, id)?;
+        let mut parsed = self.chunks.parsed(text, opts, &markers);
+        if let Some(lint) = parsed.lint.as_mut() {
+            lint.absorb(extra);
+        }
+        Ok(onion::wire::plate(&parsed))
+    }
+
     fn reorder(&mut self) {
         self.targets = self.ordered(Role::Target);
         self.references = self.ordered(Role::Reference);
@@ -966,6 +987,25 @@ impl Entry<'_> {
     /// [`Pantry::parse`] over the retained text.
     pub fn parse(&mut self, opts: onion::wire::ParseOptions) -> Result<Vec<u8>, PantryError> {
         self.pantry.parse_book(&self.id, opts)
+    }
+
+    /// [`parse`](Self::parse) with `extra` findings in its diagnostics.
+    pub fn parse_with(
+        &mut self,
+        opts: onion::wire::ParseOptions,
+        extra: Vec<onion::lint::Observation>,
+    ) -> Result<Vec<u8>, PantryError> {
+        self.pantry.parse_book_with(&self.id, opts, extra)
+    }
+
+    /// [`lint`](Self::lint) with `extra` findings folded in.
+    pub fn lint_with(
+        &mut self,
+        extra: Vec<onion::lint::Observation>,
+    ) -> Result<LintReport, PantryError> {
+        let mut report = self.lint()?;
+        report.absorb(extra);
+        Ok(report)
     }
 
     /// An entry is only ever built for a registered id, and it holds the

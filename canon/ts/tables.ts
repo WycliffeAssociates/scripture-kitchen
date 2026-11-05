@@ -279,3 +279,6 @@ export const NAMES: ReadonlyMap<string, string> = new Map([
   ["zechariah", "ZEC"],
   ["zephaniah", "ZEP"],
 ]);
+
+/** The locales with a names module: `import fr from "…/canon/names/fr"`. */
+export const NAME_LOCALES: readonly string[] = ["am", "arb", "as", "bn", "ceb", "en", "es-419", "fr", "gu", "ha", "hi", "ilo", "km", "kn", "lo", "ml", "mr", "my", "ne", "or", "pa", "plt", "pt-br", "ru", "sw", "ta", "te", "th", "tl", "tpi", "ur-deva", "vi"];

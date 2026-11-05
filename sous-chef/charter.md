@@ -258,6 +258,10 @@ The semantic contract is:
 - source and target are assumed to use compatible versification. Detecting or
   repairing versification differences belongs upstream; Sous may surface a
   typed refusal or a separate shear observation, but may not silently realign.
+  When the host declares that the two number differently, it passes a
+  `Crosswalk` and Sous pairs through it (`pair_keys_across`,
+  `core/src/presence.md`): the host's declared mapping, not a guess, and Sous
+  still holds no scheme of its own.
 
 Proportionality caches target and source per-unit lengths independently, then
 pairs and folds them in book and project order. Adding or removing a source

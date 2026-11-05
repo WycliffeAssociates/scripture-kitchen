@@ -5,6 +5,7 @@
        ╰────────┴──────────── galley ◄──────────────────╯
     ticket ◄── onion, galley
     mise ◄── canon ◄── canon-gen (never published)
+             canon ◄── galley (galley::versification: onion's facts, canon's sniff)
 
 - `onion` / `onion-wasm` / `galley` are the engine. `sous-core` / `sous-cli`
   (under `sous-chef/`) are the other product. `GLOSSARY.md` is onion's only;
@@ -17,13 +18,20 @@
   generator does not — `bin/gen-unicode` stays in `sous-core` with the pinned
   UCD extracts and writes across. Scope rule and exclusions: `mise/README.md`.
 - `canon/` is book identity and numbering: the USFM book table (codes, both
-  of Matthew's numbers, English names, `parse_book`, `usfm_file_name`) and
-  versification schemes' chapter and verse counts, with mapping, coverage and
-  sniffing to follow. It depends on `mise` only and has no runtime parsing:
-  `canon-gen` (`canon/gen/`, its own crate because it reads JSON with
-  serde_json) writes the Rust tables AND their `canon/ts/` twins from
-  `canon/data/`, and the package ships the TypeScript lookups at `./canon`
-  with no wasm. Rust and TS both run `canon/fixtures/*.json`. Plan:
+  of Matthew's numbers, English names, `parse_book`, `usfm_file_name`), book
+  names in 32 gateway languages (`name`, `parse_book_in`), versification
+  schemes' chapter and verse counts, mapping through `org` (`map`, `pairs`,
+  `counterparts`) and sniffing. It depends on `mise` only and has no runtime
+  parsing: `canon-gen` (`canon/gen/`, its own crate because it reads JSON with
+  serde_json and onion's lexer for the name harvest) writes the Rust tables
+  AND their `canon/ts/` twins from `canon/data/`, and the package ships the
+  TypeScript lookups at `./canon` (names at `./canon/names/<locale>`) with no
+  wasm. Mapping and sniffing are Rust only, reached from JS through galley.
+  Rust and TS both run `canon/fixtures/*.json`. A text against its scheme is
+  onion's `lint_against_counts`, given the counts: onion never depends on
+  canon. Pairing across two schemes is sous-core's `pair_keys_across`, given a
+  `Crosswalk` galley builds from canon: sous-core never depends on canon
+  either. Plan (done):
   `planning/items/2026-11-04-canon-and-versification-the-book-table-schemes-map.mdx`.
 - `ticket/` is the second zero-dependency leaf: the WIRE vocabulary (`Width`,
   `Space`, `Field`, `Record`, `Repeat`) and the emitters that write one

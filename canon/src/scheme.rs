@@ -24,13 +24,27 @@ use mise::books::BookKey;
 use crate::map::Row;
 use crate::scheme_tables::SCHEMES;
 
-/// One numbering tradition's chapter and verse counts.
+/// One numbering tradition's chapter and verse counts, and its rows toward
+/// `org`.
 ///
-/// The fields are private so that a scheme a project declares (a reviewed
-/// `.vrs` import, plan step 7) can later be held the same way without
-/// changing a caller.
+/// Built in (`scheme("ulb")`, generated from `data/schemes/`) or defined by a
+/// project ([`SchemeBuilder`](crate::SchemeBuilder), from a reviewed `.vrs`
+/// import). Both answer every question the same way; the fields are private
+/// so a caller never knows which it holds.
 #[derive(Debug)]
 pub struct Scheme {
+    inner: Inner,
+}
+
+#[derive(Debug)]
+enum Inner {
+    Builtin(Builtin),
+    Defined(Box<Defined>),
+}
+
+/// The generated tables, borrowed for the life of the program.
+#[derive(Debug)]
+struct Builtin {
     name: &'static str,
     /// In book-table order. Chapter `n` is at index `n - 1`.
     books: &'static [(BookKey, &'static [u16])],
@@ -44,6 +58,16 @@ pub struct Scheme {
     by_target: &'static [u16],
 }
 
+/// The same facts, owned: a scheme built at run time.
+#[derive(Debug)]
+pub(crate) struct Defined {
+    pub(crate) name: String,
+    pub(crate) books: Vec<(BookKey, Vec<u16>)>,
+    pub(crate) excluded: Vec<([u8; 3], u16, u16)>,
+    pub(crate) rows: Vec<Row>,
+    pub(crate) by_target: Vec<u16>,
+}
+
 impl Scheme {
     pub(crate) const fn builtin(
         name: &'static str,
@@ -53,39 +77,80 @@ impl Scheme {
         by_target: &'static [u16],
     ) -> Scheme {
         Scheme {
-            name,
-            books,
-            excluded,
-            rows,
-            by_target,
+            inner: Inner::Builtin(Builtin {
+                name,
+                books,
+                excluded,
+                rows,
+                by_target,
+            }),
+        }
+    }
+
+    pub(crate) fn defined(defined: Defined) -> Scheme {
+        Scheme {
+            inner: Inner::Defined(Box::new(defined)),
         }
     }
 
     pub(crate) fn rows(&self) -> &[Row] {
-        self.rows
+        match &self.inner {
+            Inner::Builtin(b) => b.rows,
+            Inner::Defined(d) => &d.rows,
+        }
     }
 
     pub(crate) fn by_target(&self) -> &[u16] {
-        self.by_target
+        match &self.inner {
+            Inner::Builtin(b) => b.by_target,
+            Inner::Defined(d) => &d.by_target,
+        }
     }
 
-    /// `"org"`, `"eng"`, `"ulb"`, …
+    fn excluded_table(&self) -> &[([u8; 3], u16, u16)] {
+        match &self.inner {
+            Inner::Builtin(b) => b.excluded,
+            Inner::Defined(d) => &d.excluded,
+        }
+    }
+
+    /// `"org"`, `"eng"`, `"ulb"`, or a defined scheme's own name.
     pub fn name(&self) -> &str {
-        self.name
+        match &self.inner {
+            Inner::Builtin(b) => b.name,
+            Inner::Defined(d) => &d.name,
+        }
+    }
+
+    /// Whether this is one of canon's own schemes rather than one a project
+    /// defined.
+    pub fn is_builtin(&self) -> bool {
+        matches!(self.inner, Inner::Builtin(_))
     }
 
     /// The books this scheme numbers, in book-table order.
-    pub fn books(&self) -> impl Iterator<Item = BookKey> + '_ {
-        self.books.iter().map(|(book, _)| *book)
+    pub fn books(&self) -> Box<dyn Iterator<Item = BookKey> + '_> {
+        match &self.inner {
+            Inner::Builtin(b) => Box::new(b.books.iter().map(|(book, _)| *book)),
+            Inner::Defined(d) => Box::new(d.books.iter().map(|(book, _)| *book)),
+        }
     }
 
     /// The last verse of every chapter, chapter 1 first. `None` when the
     /// scheme does not number the book at all.
     pub fn verse_counts(&self, book: BookKey) -> Option<&[u16]> {
-        self.books
-            .iter()
-            .find(|(key, _)| *key == book)
-            .map(|(_, counts)| *counts)
+        match &self.inner {
+            Inner::Builtin(b) => b
+                .books
+                .iter()
+                .find(|(key, _)| *key == book)
+                .map(|(_, counts)| *counts),
+            Inner::Defined(d) => d
+                .books
+                .iter()
+                .find(|(key, _)| *key == book)
+                .map(|(_, counts)| counts.as_slice()),
+        }
     }
 
     /// How many chapters the book has. `None` when the scheme does not
@@ -105,9 +170,9 @@ impl Scheme {
     /// Whether the scheme omits this verse on purpose, so that a text
     /// lacking it is not missing anything. No built-in scheme excludes a
     /// verse today: they all number `MAT 17:21` and its kind, and leave the
-    /// text to footnote it. The question is here for declared schemes.
+    /// text to footnote it. The question is here for defined schemes.
     pub fn excluded(&self, book: BookKey, chapter: u16, verse: u16) -> bool {
-        self.excluded
+        self.excluded_table()
             .binary_search(&(book.as_bytes(), chapter, verse))
             .is_ok()
     }
@@ -115,7 +180,7 @@ impl Scheme {
 
 /// A built-in scheme by name, exactly (`"org"`, not `"ORG"`).
 pub fn scheme(name: &str) -> Option<&'static Scheme> {
-    SCHEMES.iter().find(|scheme| scheme.name == name)
+    SCHEMES.iter().find(|scheme| scheme.name() == name)
 }
 
 /// Every built-in scheme, `org` (the pivot every mapping goes through) first.
@@ -182,7 +247,7 @@ mod tests {
     #[test]
     fn exclusions_are_sorted_for_binary_search() {
         for scheme in schemes() {
-            assert!(scheme.excluded.is_sorted(), "{}", scheme.name());
+            assert!(scheme.excluded_table().is_sorted(), "{}", scheme.name());
         }
     }
 }

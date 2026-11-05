@@ -65,6 +65,22 @@ impl fmt::Display for Verse {
     }
 }
 
+/// `"GEN 31:55"`, `"PSA 3:0"`, `"ESG 4:17c"`, the form [`Display`](fmt::Display)
+/// writes. The book must be a USFM code in canon's table; a range is refused.
+impl core::str::FromStr for Verse {
+    type Err = String;
+
+    fn from_str(text: &str) -> Result<Verse, String> {
+        match crate::define::range(text) {
+            Some((book, chapter, verse, last, part)) if last == verse => Ok(Verse {
+                part,
+                ..Verse::new(book, chapter, verse)
+            }),
+            _ => Err(format!("{text:?} is not one verse as \"BBB c:v\"")),
+        }
+    }
+}
+
 /// Where a verse is under another scheme.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Mapped {
@@ -228,6 +244,23 @@ pub fn map(from: &Scheme, to: &Scheme, v: Verse) -> Mapped {
     }
 }
 
+/// The verses of `to` that `from`'s verse `v` corresponds to, whole, in
+/// canonical order: [`map`]'s answer without its verdict (no `Same`, `Merged`
+/// or `Absent`, only the verses). What a pairing asks for every verse, so it
+/// skips the reverse check `map` makes to tell a merge from a move. Unlike
+/// `map`, it doesn't check that `from` numbers `v`.
+pub fn counterparts(from: &Scheme, to: &Scheme, v: Verse) -> Vec<Verse> {
+    if from.name() == to.name() {
+        return vec![v.whole()];
+    }
+    let mut there = through_org(from, to, v.whole());
+    for t in &mut there {
+        *t = t.whole();
+    }
+    there.dedup();
+    there
+}
+
 /// `from`'s `v` in `org`, then the verses of `to` that sit there, deduplicated
 /// and in canonical order.
 fn through_org(from: &Scheme, to: &Scheme, v: Verse) -> Vec<Verse> {
@@ -308,8 +341,20 @@ impl Scheme {
     }
 
     fn sources_of(&self, o: Verse, out: &mut Vec<Verse>) {
+        let before = out.len();
         for row in self.rows_to(o) {
             row.sources(o, out);
+        }
+        // A few vendored rows start past their own scheme's counts (vul's
+        // JON 1:17, where vul counts 16; rso's 2ES 7:106-140): a verse the
+        // scheme doesn't have is no counterpart.
+        let mut at = before;
+        while at < out.len() {
+            if self.has_verse(out[at].whole()) {
+                at += 1;
+            } else {
+                out.remove(at);
+            }
         }
         let whole = o.whole();
         if self.has_verse(whole) && self.rows_from(whole).next().is_none() {
@@ -508,6 +553,13 @@ mod tests {
                             to.name()
                         );
                         for h in &unit.here {
+                            assert!(
+                                from.has_verse(h.whole()),
+                                "{}→{} {book}: {h} is no verse of {}",
+                                from.name(),
+                                to.name(),
+                                from.name()
+                            );
                             *here_count.entry(h.to_string()).or_insert(0) += 1;
                             if from.name() != to.name() {
                                 for t in through_org(from, to, *h) {
@@ -521,6 +573,13 @@ mod tests {
                             }
                         }
                         for t in &unit.there {
+                            assert!(
+                                to.has_verse(t.whole()),
+                                "{}→{} {book}: {t} is no verse of {}",
+                                from.name(),
+                                to.name(),
+                                to.name()
+                            );
                             *there_count.entry(t.to_string()).or_insert(0) += 1;
                         }
                     }

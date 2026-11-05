@@ -141,6 +141,22 @@ export const AFTER: readonly FeatureGroup[] = [
       { name: "Regex", note: "literal only until a consumer asks", concept: "find", tag: "not built" },
     ],
   },
+  {
+    id: "books",
+    title: "Books and versification",
+    items: [
+      { name: "Book table", note: "codes, both numbers, English names; plain TS, no wasm", concept: "canon", door: "book(code)", cite: "canon/src/books.rs#book", tag: "TS + Rust" },
+      { name: "Parse a book", note: "a code in any case, then names; exact, accents folded", concept: "canon", door: "parseBook(text, tables)", cite: "canon/src/names.rs#parse_book_in", tag: "TS + Rust" },
+      { name: "Gateway names", note: "32 languages' own \\toc names, one TS module each", concept: "canon", door: "name(code, form, tables)", cite: "canon/src/names.rs#name", tag: "TS + Rust" },
+      { name: "Scheme counts", note: "org, eng, lxx, vul, rsc, rso, ulb: chapters and last verses", concept: "versification", door: "lastVerse(scheme, book, chapter)", cite: "canon/src/scheme.rs#Scheme::last_verse", tag: "TS + Rust" },
+      { name: "Declare a scheme", note: "per book, or followSource; a project may define its own", concept: "versification", door: "update(id, text, { versification })", cite: "galley/src/wasm.rs#Galley::define_scheme" },
+      { name: "Map a verse", note: "Same, Moved, Merged, Split or Absent, through org", concept: "versification", door: "galley.mapVerse(from, to, ref)", cite: "galley/src/wasm.rs#Galley::map_verse" },
+      { name: "Pair a book", note: "connected units across two schemes, titles as verse 0", concept: "versification", door: "galley.pairs(from, to, book)", cite: "galley/src/wasm.rs#Galley::pairs" },
+      { name: "Sniff", note: "TVTMS rules vote for a scheme; suggested, never applied", concept: "versification", door: "galley.sniff(opts)", cite: "galley/src/wasm.rs#Galley::sniff" },
+      { name: "Pairing across schemes", note: "Sous pairs target and source through the crosswalk", concept: "versification", cite: "sous-chef/core/src/alignment.rs#pair_keys_across" },
+      { name: "Overlay across schemes", note: "overlay still pairs numbers as written", concept: "overlay", tag: "not built" },
+    ],
+  },
 ];
 
 /** The Sous group's rows that the message catalog does not list. */

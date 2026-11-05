@@ -1,5 +1,12 @@
 # Versification: STEP's TVTMS as a kitchen table plus a small engine (idea, NOT SCHEDULED)
 
+> **Superseded (2026-11-05).** Built as the `canon` crate: the Copenhagen
+> Alliance schemes (themselves from Paratext's VRS files), the TVTMS sniffing
+> rules, mapping through `org`, and galley's declarations and pairing across
+> schemes. See
+> `planning/items/2026-11-04-canon-and-versification-the-book-table-schemes-map.mdx`.
+> What follows is the original note, kept as written.
+
 Dropped here 2026-09-25 from a Sefer discussion: every cross-resource pane
 needs to map one Address between numbering schemes (Macula Hebrew against an
 English-numbered translation, TN chunks, TW occurrences), and Location has no

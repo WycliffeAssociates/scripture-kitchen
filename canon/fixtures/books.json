@@ -24,7 +24,8 @@
     { "text": "Esther (Greek)", "book": "ESG" },
     { "text": "Front Matter", "book": "FRT" },
     { "text": "phil", "book": null, "why": "no prefix matching: that is a navigation box's policy" },
-    { "text": "Gen.", "book": null, "why": "abbreviations arrive with the localized names" },
+    { "text": "Gen.", "book": null, "why": "not a name: en_ulb abbreviates Gen, which is the code anyway" },
+    { "text": "Éxodo", "book": null, "why": "Spanish is parse_book_in's, when es-419 is asked for (Génesis folds to English genesis)" },
     { "text": "ZZZ", "book": null },
     { "text": "", "book": null },
     { "text": "   ", "book": null }
@@ -34,7 +35,18 @@
     { "text": " 1   SAMUEL ", "folded": "1 samuel" },
     { "text": "150", "folded": "150" },
     { "text": "Song  of\tSongs", "folded": "song of songs" },
-    { "text": "", "folded": "" }
+    { "text": "", "folded": "" },
+    { "text": "Éxodo", "folded": "exodo", "why": "NFKD, then the combining accents dropped: Sefer's fold" },
+    { "text": "Sáng Thế", "folded": "sang the", "why": "two stacked marks on one letter" },
+    { "text": "ﬁlemón", "folded": "filemon", "why": "NFKD splits the ligature" },
+    { "text": "1Éxodo", "folded": "1 exodo" },
+    { "text": "ΙΗΣΟΥΣ", "folded": "ιησους", "why": "lowercased as a word: the last sigma is final" },
+    { "text": "창세기", "folded": "\u110e\u1161\u11bc\u1109\u1166\u1100\u1175", "why": "Hangul syllables decompose to jamo, as NFKD does" },
+    { "text": "Книга  Бытие", "folded": "книга бытие" },
+    { "text": "\u00a0Ruth\u00a0", "folded": "ruth", "why": "a no-break space is a space after NFKD, and trims" },
+    { "text": "\ufeffGenesis", "folded": "genesis", "why": "a BOM is whitespace to JavaScript's trim" },
+    { "text": "Gen\u0085esis", "folded": "gen\u0085esis", "why": "U+0085 is not whitespace to JavaScript" },
+    { "text": "\u062a\u0651\u064e", "folded": "\u062a\u064e\u0651", "why": "marks sorted by combining class: fatha (30) before shadda (33)" }
   ],
   "book": [
     { "code": "GEN", "usfm_number": "01", "division": "ot", "canonical_index": 1, "english": "Genesis" },

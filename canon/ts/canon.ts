@@ -9,15 +9,24 @@
  *     books("protestant66").length   // 66
  *     usfmFileName("MAT")            // "41-MAT.usfm"
  *
+ * Book names in a gateway language are one module per locale, so a bundle
+ * carries only the languages it imports (`NAME_LOCALES` lists them):
+ *
+ *     import fr from "@wycliffeassociates/scripture-kitchen/canon/names/fr";
+ *
+ *     name("MAT", "long", [fr])      // { text: "Matthieu", locale: "fr", form: "long" }
+ *     parseBook("matthieu", [fr])    // "MAT"
+ *
  * The data is `tables.ts`, generated from `canon/data/books.tsv` by the same
  * run that writes the Rust tables. These lookups are hand-written to match
  * `canon/src/books.rs`, and both pass `canon/fixtures/books.json`
  * (`canon.test.mjs` here, `tests/fixtures.rs` there). Change behaviour in the
  * fixtures first.
  */
-import { BOOKS, NAMES, type Book, type Division } from "./tables.ts";
+import english from "./names/en.ts";
+import { BOOKS, NAMES, NAME_LOCALES, type Book, type Division } from "./tables.ts";
 
-export { BOOKS, type Book, type Division };
+export { BOOKS, NAME_LOCALES, type Book, type Division };
 export {
   SCHEME_NAMES,
   chapters,
@@ -46,18 +55,84 @@ export const book = (code: string): Book | undefined => BY_CODE.get(code);
 export const books = (canon: Canon): readonly Book[] =>
   BOOKS.filter((row) => HOLDS[canon](row.division));
 
+/** Which of a book's names: `\toc1`, `\toc2` or `\toc3`. */
+export type NameForm = "long" | "short" | "abbrev";
+
+/** One gateway language's reviewed names: `[long, short, abbrev]`, "" for none. */
+export interface NameTable {
+  readonly locale: string;
+  readonly books: Readonly<Record<string, readonly [string, string, string]>>;
+}
+
+/** A name, with the locale and form that answered. */
+export interface Named {
+  readonly text: string;
+  readonly locale: string;
+  readonly form: NameForm;
+}
+
+const FORMS: readonly NameForm[] = ["long", "short", "abbrev"];
+
+/** Each table's names folded, to the code: built once per table. */
+const INDEXES = new WeakMap<NameTable, ReadonlyMap<string, string>>();
+const indexOf = (table: NameTable): ReadonlyMap<string, string> => {
+  let index = INDEXES.get(table);
+  if (index === undefined) {
+    const built = new Map<string, string>();
+    for (const [code, names] of Object.entries(table.books)) {
+      for (const n of names) {
+        if (n !== "") built.set(fold(n), code);
+      }
+    }
+    index = built;
+    INDEXES.set(table, index);
+  }
+  return index;
+};
+
 /**
  * The code a word names, or `undefined`: a book code in any case first, then
- * an English name or alias after `fold`. Exact only; prefix matching is a
- * navigation box's policy. A code wins, so "Jon" is Jonah.
+ * each given locale's names (any form) in order, then an English name or
+ * alias, all after `fold`. Exact only; prefix matching is a navigation box's
+ * policy. A code wins, so "Jon" is Jonah, even in Tok Pisin.
  */
-export const parseBook = (text: string): string | undefined => {
+export const parseBook = (text: string, tables: readonly NameTable[] = []): string | undefined => {
   const trimmed = text.trim();
   if (trimmed.length === 3) {
     const upper = trimmed.replace(/[a-z]/g, (c) => c.toUpperCase());
     if (BY_CODE.has(upper)) return upper;
   }
-  return NAMES.get(fold(trimmed));
+  const folded = fold(trimmed);
+  for (const table of tables) {
+    const code = indexOf(table).get(folded);
+    if (code !== undefined) return code;
+  }
+  return NAMES.get(folded);
+};
+
+/**
+ * What a book is called: each table in order, then English (en_ulb's own
+ * names, then the book table's, which also covers the books en_ulb lacks).
+ * Within a table, "short" falls back to "long"; "abbrev" stands in for
+ * nothing. Rust's `canon::name` is this with locale tags for tables.
+ */
+export const name = (
+  code: string,
+  form: NameForm,
+  tables: readonly NameTable[] = [],
+): Named | undefined => {
+  const row = BY_CODE.get(code);
+  if (row === undefined) return undefined;
+  for (const table of [...tables, english]) {
+    const names = table.books[code];
+    if (names === undefined) continue;
+    const at = FORMS.indexOf(form);
+    if (names[at] !== "") return { text: names[at], locale: table.locale, form };
+    if (form === "short" && names[0] !== "") {
+      return { text: names[0], locale: table.locale, form: "long" };
+    }
+  }
+  return form === "abbrev" ? undefined : { text: row.english, locale: "en", form };
 };
 
 /** `41-MAT.usfm`, or `undefined` for a code outside the table. */
@@ -70,12 +145,21 @@ export const usfmFileName = (code: string): string | undefined => {
 export const slug = (code: string): string => code.replace(/[A-Z]/g, (c) => c.toLowerCase());
 
 /**
- * A name as `parseBook` compares it: trimmed, lowercased, whitespace runs
- * collapsed to one space, and a leading digit separated from the word after
- * it. Must equal Rust's `canon::fold` on every fixture.
+ * A name as `parseBook` compares it: NFKD with the combining accents
+ * (U+0300..U+036F) dropped, trimmed, lowercased, whitespace runs collapsed to
+ * one space, and a leading digit separated from the word after it, so
+ * "Éxodo" is "exodo". Sefer's `names.ts` folds the same way. Must equal
+ * Rust's `canon::fold` on every fixture.
  */
 export const fold = (text: string): string => {
-  const out = text.trim().split(/\s+/u).filter((word) => word !== "").join(" ").toLowerCase();
+  const out = text
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/gu, "")
+    .trim()
+    .split(/\s+/u)
+    .filter((word) => word !== "")
+    .join(" ")
+    .toLowerCase();
   const first = out.charAt(0);
   const next = out.charAt(1);
   return /^[0-9]$/.test(first) && next !== "" && next !== " " && !/^[0-9]$/.test(next)

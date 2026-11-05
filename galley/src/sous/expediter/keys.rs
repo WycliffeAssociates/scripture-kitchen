@@ -223,5 +223,7 @@ pub(super) fn key_bytes(key: PatternKey) -> [u8; 10] {
 /// checksum of the source book of its [`BookKey`], and whether the source-copy
 /// words were walked. Both sides, because either moving is a different sample;
 /// the walk, because a pairing made without it holds no runs and a knob that
-/// only filters cached runs is not in here.
-pub(super) type PairKey = (RawChecksum, RawChecksum, bool);
+/// only filters cached runs is not in here. Last, the crosswalk the two
+/// sides paired through (`Registry::crosswalk`'s identity; 0 for none), so a
+/// changed declaration re-pairs without either text moving.
+pub(super) type PairKey = (RawChecksum, RawChecksum, bool, u64);

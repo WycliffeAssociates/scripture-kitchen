@@ -59,6 +59,12 @@
    "y": 1200,
    "w": 220,
    "h": 90
+  },
+  {
+   "id": "canon",
+   "label": "canon",
+   "level": 1,
+   "parent": null
   }
  ],
  "nodes": [
@@ -602,6 +608,30 @@
    "weight": 1,
    "x": 520,
    "y": 2000
+  },
+  {
+   "id": "canon",
+   "label": "canon",
+   "level": 1,
+   "group": "canon",
+   "kind": "crate",
+   "slug": "canon",
+   "weight": 2,
+   "x": 1650,
+   "y": 2290,
+   "w": 300,
+   "h": 100
+  },
+  {
+   "id": "versification",
+   "label": "Versification",
+   "level": 2,
+   "group": "canon",
+   "kind": "concept",
+   "slug": "versification",
+   "weight": 1,
+   "x": 1700,
+   "y": 2440
   }
  ],
  "edges": [
@@ -1167,6 +1197,34 @@
    "level": 3,
    "kind": "data",
    "bend": 40
+  },
+  {
+   "from": "canon",
+   "to": "mise",
+   "label": "BookKey",
+   "level": 1,
+   "kind": "depends"
+  },
+  {
+   "from": "galley",
+   "to": "canon",
+   "label": "schemes, sniff, crosswalk",
+   "level": 1,
+   "kind": "depends"
+  },
+  {
+   "from": "versification",
+   "to": "expediter",
+   "label": "crosswalk for pairing",
+   "level": 2,
+   "kind": "data"
+  },
+  {
+   "from": "versification",
+   "to": "lint",
+   "label": "verse counts → lint_against_counts",
+   "level": 2,
+   "kind": "data"
   }
  ]
 }

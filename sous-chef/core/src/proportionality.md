@@ -148,7 +148,8 @@ recomputation would produce.
 
 Presence and versification shear. An absent key and an empty unit produce no
 ratio here; they are [`presence.md`](presence.md)'s wire code 4, judged from
-the same `pair_keys` call and cached in the same `PairedBook`, and no
+the same pairing call (`pair_keys`, or `pair_keys_across` when the host
+passes a crosswalk) and cached in the same `PairedBook`, and no
 proportionality row ever fabricates a zero-length ratio to stand in for one.
 Ambiguous duplicates and partial overlaps come back in `Paired::facts` as
 structure a host may report and are rows in neither rule. Versification shear

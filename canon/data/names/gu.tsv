@@ -1,0 +1,38 @@
+# gu: Gujarati (ગુજરાતી). Book names harvested from \toc1-3 (Writer
+# projects: front/title.txt) of: Josh_1203/gu_amo_text_reg, Josh_1203/gu_deu_text_reg, Josh_1203/gu_jos_text_reg, jebaseelan/gu_1co_text_reg, jebaseelan/gu_1ti_text_reg, jebaseelan/gu_2co_text_reg, jebaseelan/gu_2ti_text_reg, jebaseelan/gu_col_text_reg, jebaseelan/gu_eph_text_reg, jebaseelan/gu_gal_text_reg, jebaseelan/gu_heb_text_reg, jebaseelan/gu_jdg_text_reg, jebaseelan/gu_jud_text_reg, jebaseelan/gu_mrk_text_reg, jebaseelan/gu_phm_text_reg, jebaseelan/gu_php_text_reg, jebaseelan/gu_rom_text_reg, jebaseelan/gu_rut_text_reg, kings/gu_1jn_text_reg, kings/gu_1pe_text_reg, kings/gu_1th_text_reg, kings/gu_2jn_text_reg, kings/gu_2pe_text_reg, kings/gu_2th_text_reg, kings/gu_3jn_text_reg, kings/gu_act_text_reg, kings/gu_jas_text_reg, kings/gu_jhn_text_reg, kings/gu_lev_text_reg, kings/gu_luk_text_reg, kings/gu_mat_text_reg, kings/gu_num_text_reg, kings/gu_rev_text_reg, kings/gu_tit_text_reg.
+# Reviewed (first pass, 2026-11-05): as harvested.
+code	long	short	abbrev
+LEV	લેવીય		
+NUM	ગણના		
+DEU	પુનર્નિયમ		
+JOS	યહોશુઆ		
+JDG	ન્યાયાધીશો		
+RUT	રૂથ		
+AMO	આમોસ		
+MAT	માથ્થી		
+MRK	માર્ક		
+LUK	લૂક		
+JHN	યોહાન		
+ACT	પ્રેરિતોનાં ક્રત્યો		
+ROM	રોમનોને પત્ર		
+1CO	કરિંથીઓને પહેલો પત્ર		
+2CO	કરિંથીઓને બીજો પત્ર		
+GAL	ગલાતીઓને પત્ર		
+EPH	એફેસીઓને પત્ર		
+PHP	ફિલિપીઓને પત્ર		
+COL	કલોસીઓને પત્ર		
+1TH	૧ થેસ્સલોનિકીઓને		
+2TH	2 થેસ્સલોનિકીઓને		
+1TI	1 તિમોથીને		
+2TI	2 તિમોથીને		
+TIT	તિતસનો પત્ર		
+PHM	ફિલેમોનને પત્ર		
+HEB	હિબ્રૂઓને પત્ર		
+JAS	યાકૂબનો પત્ર		
+1PE	પિતરનો પહેલો પત્ર		
+2PE	પિતરનો બીજો પત્ર		
+1JN	યોહાનનો પહેલો પત્ર		
+2JN	યોહાનનો બીજો પત્ર		
+3JN	યોહાનનો ત્રીજો પત્ર		
+JUD	યહૂદાનો પત્ર		
+REV	પ્રકટીકરણ		

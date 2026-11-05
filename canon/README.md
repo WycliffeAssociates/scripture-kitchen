@@ -1,13 +1,16 @@
 # canon
 
 What a book is, before any text of it exists: its code, its two numbers, its
-English names, and how each numbering tradition counts its chapters and verses.
+names in English and the gateway languages, and how each numbering tradition
+counts its chapters and verses.
 
 ```rust
 canon::book(MAT)                  // Book { usfm_number: "41", canonical_index: Some(40), .. }
 canon::parse_book("1samuel")      // Some(1SA): a code in any case, an English name or alias
 canon::books(Canon::Protestant66) // GEN .. REV, in canonical order
 canon::usfm_file_name(MAT)        // "41-MAT.usfm"
+canon::name(MAT, &["fr"], Form::Long)   // Some(Named { text: "Matthieu", locale: "fr", .. })
+canon::parse_book_in("Éxodo", &["es"])  // Some(EXO): es is es-419; accents fold
 
 canon::scheme("eng")?.chapters(MAL)       // Some(4); org has 3
 canon::scheme("org")?.last_verse(PSA, 3)  // Some(9); org numbers the title
@@ -20,6 +23,11 @@ import { book, books, parseBook, usfmFileName } from "@wycliffeassociates/script
 import { chapters, lastVerse, verseCounts } from "@wycliffeassociates/scripture-kitchen/canon";
 
 lastVerse("ulb", "ACT", 19); // 40
+
+// One module per locale, so a bundle carries only what it imports.
+import fr from "@wycliffeassociates/scripture-kitchen/canon/names/fr";
+name("MAT", "long", [fr]);   // { text: "Matthieu", locale: "fr", form: "long" }
+parseBook("matthieu", [fr]); // "MAT"
 ```
 
 ## Two numbers, never one
@@ -42,6 +50,14 @@ number" is. Here both are named, and neither is "the" number.
 | `src/map.rs` | `map`, `pairs`, `to_org`, `from_org`, `moves` (Rust only) | by hand |
 | `fixtures/books.json`, `fixtures/schemes.json` | the cases both lookups must pass | by hand |
 | `fixtures/map.json` | mapping cases (`tests/map.rs`) | from a prototype, then reviewed |
+| `data/sniff/rules.json` | the TVTMS sniffing rules (see its README) | vendored |
+| `src/sniff.rs`, `src/sniff_tables.rs` | `Inventory`, `sniff`; the generated rules | by hand; `canon-gen` |
+| `data/names/<locale>.tsv` | a gateway language's book names, reviewed | `harvest-names`, then a person |
+| `data/names/GATEWAYS.tsv` | the gateway languages and the repos harvested | `gen/fetch-gateways.sh` |
+| `src/names.rs`, `src/name_tables.rs` | `name`, `parse_book_in`; the generated names | by hand; `canon-gen` |
+| `ts/names/<locale>.ts` | one module per locale | `canon-gen` |
+| `src/fold_tables.rs` | what `fold` makes of each character (NFKD less accents) | `canon-gen` |
+| `fixtures/names.json` | names and localized parsing, both languages | by hand |
 
 The generator is `gen/`, a separate unpublished crate (`canon-gen`): it reads
 the scheme JSON with serde_json, and canon's only dependency is `mise`. Its
@@ -54,9 +70,9 @@ change starts as a fixture change.
 The book table is data, and its lookups are a few lines. Shipping them as wasm
 would make every book picker wait on `init()` and hold a handle. So the data
 is generated as TypeScript from the same rows as the Rust, the lookups are
-written once per language, and the shared fixtures keep them in agreement. The
-logic that versification brings next (mapping, coverage, sniffing) is a
-different case: it has one implementation, reached through galley's wasm.
+written once per language, and the shared fixtures keep them in agreement.
+Mapping and sniffing are a different case: they have one implementation,
+reached from JS through galley's wasm.
 
 No serde and no runtime parsing. canon depends on `mise` and nothing else, so
 onion can use it without gaining a dependency.
@@ -65,9 +81,39 @@ onion can use it without gaining a dependency.
 
 `parse_book` matches exactly, never by prefix: "phil" choosing Philippians is a
 navigation box's policy, not the table's. A code wins over a name, so "Jon" is
-Jonah. Every name and alias must fold to something no other book uses, and
-`gen-canon` refuses a table where two do. Abbreviations and names in other
-languages arrive with the localized names (plan step 6).
+Jonah, even in Tok Pisin, whose John is "Jon" (Sefer decides it the same way).
+Every name and alias must fold to something no other book uses, and
+`gen-canon` refuses a table where two do; in a locale's file, the same holds
+within that locale.
+
+`fold` is Sefer's: NFKD, the combining accents dropped, lowercased, spaces
+collapsed. canon has no Unicode library, so `canon-gen` writes each changed
+character's answer into `src/fold_tables.rs` (Hangul is arithmetic).
+
+## Names in the gateway languages
+
+`name(code, locales, form)` tries each locale, then English: en_ulb's own
+`\toc` names, then the book table's English. Within a locale `Short` falls
+back to `Long`, and `Named` says which locale and form answered, so a UI can
+mark a name it didn't find in the language it asked for. A project's own book
+names come before any of this; canon is what stands behind them. Rust takes
+locale tags (`"es"` finds `es-419`); TypeScript takes the imported tables.
+
+The names are each translation's own. To refresh them:
+
+```sh
+canon/gen/fetch-gateways.sh                     # GATEWAYS.tsv from the BIEL API; clone the sources
+cargo run -p canon-gen --bin harvest-names      # \toc1-3 into data/names/<locale>.tsv
+cargo run -p canon-gen                          # the tables (twice if the fold table changed)
+```
+
+A language's source is one org text (the first of ulb, reg, avd, udb, blv,
+nav), or its per-book Writer repos where it has no org text. A cell where
+sources disagree holds every value, ` | `-separated, and `gen-canon` refuses
+it until someone picks. A reviewed file is never overwritten: a re-harvest
+goes beside it as `<locale>.tsv.harvested`. Each file's header lists what its
+review changed. fa, pmy and zh have no Primary text yet, so they fall back to
+English.
 
 ## Sources
 
@@ -79,13 +125,14 @@ for the 66 follow Sefer's `packages/text/src/location/canon.ts`.
 The versification schemes other than `ulb` are the Copenhagen Alliance files
 (CC BY-SA 4.0); `NOTICE` carries their attribution, and
 `data/schemes/README.md` says where each came from and how `ulb` was measured.
-The sniffing rules still to come (TVTMS-derived, CC BY) will join them there.
+The sniffing rules (TVTMS-derived) and the gateway-language book names (from
+the org's CC BY-SA texts) are attributed there too.
 
 ## Schemes
 
 A scheme answers "which verses should this book have": `chapters`,
 `last_verse`, `verse_counts` and `excluded`. What a text actually has is its
-own TOC, in onion; comparing the two is coverage (plan step 4).
+own TOC, in onion; comparing the two is coverage, below.
 
 - `org` is the pivot every mapping goes through: BHS for the OT, UBS/NA for the NT.
 - `eng`, `lxx`, `vul`, `rsc`, `rso`: English, Septuagint, Vulgate, and the
@@ -136,6 +183,38 @@ Hebrew lacks, lands on `org`'s 7:68 beside `eng`'s 7:69, and comes back
   in exactly one unit; a test checks that for every pair of schemes and every
   book.
 - **No guessing.** A verse with no counterpart is `Absent`, never "nearest".
+
+## Sniffing
+
+`sniff(&inventory)` says which built-in scheme a text follows, when it never
+said. An `Inventory` is plain facts: which verses, parts and bridges a text
+has per chapter, and each verse's length in characters. canon doesn't parse
+USFM, so galley builds one from onion (`galley::versification::sniff`) and
+anything else can too.
+
+```text
+en_ulb   ulb  Decided   250 votes: ulb 250-0, eng 249-1, org 146-104
+BSB      eng  Decided   246 votes: eng 244-2. Dissent: 3Jn.14:15, Rev.12:17-13.1a
+bdf_reg  eng  Leaning   7 votes (a New Testament alone)
+```
+
+The rules are TVTMS's, via nida (`data/sniff/README.md`). Each votes once.
+A scheme agrees when it fits a column the text passes, and disagrees when it
+fits only others. The ranking is fewest disagreements, then most agreements.
+`Decided` needs 20 votes and the winner wrong on at most one in ten.
+`Undetermined` (no votes, or a tie) means use the project's default. A rule
+abstains where a missing or misplaced verse would fool it, so a draft with
+gaps still sniffs as what it means to follow. A text that follows no
+tradition at a passage reports that passage as dissent or unmatched. It
+never becomes a new scheme.
+
+## Coverage
+
+A text against its scheme is onion's job, given the counts:
+`onion::lint::lint_against_counts(toc, |chapter| scheme.last_verse(book, chapter))`
+gives `chapter-ends-early` (the last verse is missing, which no gap lint can
+see) and `verse-beyond-scheme`. `galley::versification::lint_against(book,
+scheme)` does the wiring. onion never depends on canon.
 
 `map` is Rust only for now. It reaches TypeScript through galley's wasm
 (plan step 7), so it has one implementation. `fixtures/map.json`'s answers

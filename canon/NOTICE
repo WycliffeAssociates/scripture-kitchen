@@ -15,9 +15,33 @@ Versification schemes
   The files are unchanged. The generated tables keep their chapter and verse
   counts, exclusions and verse mappings; drop six Paratext-only book codes
   (BLT, DNT, JDB, JSA, SST, TBS) and org.json's own mappings; and correct
-  four mapping rows that are evident typos (listed in gen-canon's ERRATA and
-  data/schemes/README.md). Those tables are a CC BY-SA 4.0 adaptation.
+  four mapping rows that are evident typos and drop vul's two Jonah rows,
+  which contradict its own counts (listed in gen-canon's ERRATA and DROPPED
+  and data/schemes/README.md). Those tables are a CC BY-SA 4.0 adaptation.
 
+Sniffing rules
+  data/sniff/rules.json, and the table generated from it (src/sniff_tables.rs).
+
+  nida-institute/versification's versification-sniffing/rules/merged_rules.json
+  (commit 519af776ab65d89a51e37f750779250f940459ef), CC BY-SA 4.0 as above,
+  derived from TVTMS: STEPBible's Translators' Versification Traditions with
+  Methodology for Standardisation, Tyndale House, Cambridge
+  (https://github.com/STEPBible/STEPBible-Data), CC BY 4.0. The file is
+  unchanged; the generated table keeps the tests and column labels, adds which
+  columns each built-in scheme fits, and drops the ranges.
+
+Book names
+  data/names/<locale>.tsv, and the tables generated from them
+  (src/name_tables.rs, ts/names/*.ts).
+
+  Each gateway language's book names as its own translation writes them in
+  \toc1-3 (or a Writer project's front/title.txt), harvested from the repos
+  data/names/GATEWAYS.tsv lists on https://content.bibletranslationtools.org
+  (WA-Catalog, WycliffeAssociates and the Writer repos named there). Those
+  texts are CC BY-SA 4.0. The names are kept as written, except where each
+  file's header says a reviewer changed one.
+
+Ours
   data/schemes/ulb.json is ours: chapter and verse counts measured from
   WycliffeAssociates/en_ulb, with eng.json's verse mappings for the 66 books
   copied in. Because it carries those mappings it is also CC BY-SA 4.0.

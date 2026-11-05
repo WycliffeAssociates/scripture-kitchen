@@ -2,13 +2,13 @@
 id: 1da22c7f-fb35-4432-b867-3b66a218bcea
 title: "Canon and versification: the book table, schemes, mapping and sniffing"
 kind: plan
-status: in-progress
+status: done
 created: 2026-11-04
-updated: 2026-11-04
+updated: 2026-11-05
 sha: ea9dc6e
 priority: 0
 tags: [canon, versification]
-related: [dbe7dbed-9eed-4a79-8d80-28085fcb30f3]
+related: [dbe7dbed-9eed-4a79-8d80-28085fcb30f3, 5851d89e-0a5b-426d-ad10-33c46b26bc7d]
 source: conversation 2026-11-04, after the "Shared Scripture Domain Libraries" doc
 ---
 
@@ -194,8 +194,10 @@ A text declares its numbering once, at registration, as one of two things:
   against whatever the registered source declares, such as `rso`. This is the natural
   default for a WA translation that has a source registered.
 
-With no declaration, the host uses the sniff result when it's `Decided`, and otherwise the
-project default.
+With no declaration, numbers are taken as written, which is today's behaviour. A `Decided`
+sniff is offered to the host as a suggestion ("this looks like `eng`; use it?"), never
+applied silently: remapping someone's pairing on a guess is the bad surprise (Will,
+2026-11-05).
 
 ### Handles
 
@@ -374,16 +376,99 @@ behind.
    - The Kotlin hub's `cases.json` isn't in the wacs-dashboard-2 clone. Instead,
      `fixtures/map.json` was written from a separate Python prototype and reviewed, and a
      test sends every verse of every scheme through `org` and back.
-4. **Inventory, coverage and the two lints.** This is where the screenshot's books get
+4. **Inventory, coverage and the two lints** (done on the `canon` branch, 2026-11-05; the
+   inventory shipped with step 5). The lints live in onion, which still doesn't depend on
+   canon: `onion::lint::lint_against_counts(toc, |chapter| last_verse)` emits
+   `chapter-ends-early` and `verse-beyond-scheme` as ordinary `Observation`s (codes appended
+   to the catalogue, so existing indices hold). `galley::versification::lint_against(book,
+   scheme)` fills the counts from canon. `lint()` never emits them; not calling
+   `lint_against_counts` is the off switch. Templates name `aux` ("its versification goes to
+   verse 22") and leave the scheme's name to the host. Pinned: en_ulb against `ulb` is
+   clean, and bdf_reg against `eng` is missing five chapters' last verses (JHN 20:31,
+   ACT 6:15, GAL 4:31, REV 16:21 and 20:15) that no gap lint could see. Not done: a
+   `verse-gap` message that names the scheme (it would change messages Sefer shows), and
+   whole-chapter findings.
+   Originally: **Inventory, coverage and the two lints.** This is where the screenshot's books get
    better messages.
-5. **Sniff.** Port the test grammar (`Last`, `Exist`, `NotExist`, `<`/`>` with factors) and
+5. **Sniff** (done on the `canon` branch, 2026-11-05, ahead of step 4's lints; the inventory
+   came with it). `canon::Inventory` and `canon::sniff`, plus `galley::versification`, which
+   builds the inventory from onion's TOC and `verse_text` mask. Pinned over the example
+   corpora: en_ulb sniffs as `ulb` (Decided, 250 votes, 0 against), the BSB as `eng` with
+   3 John 14–15 and Revelation 12:17 as dissent, and bdf_reg (an NT) only leans `eng`. How
+   it differs from the design above:
+   - TVTMS columns are traditions ("English", "Greek2 (eg NETS)", …), not our schemes. The
+     generator fits each scheme to columns by running the structural tests against the
+     scheme's counts, so nothing maps labels by hand.
+   - Part tests (`Gen.5:31.2`) test the part (USFM `31b`). nida tests the whole verse there.
+   - galley, not onion, joins the two, so onion still doesn't depend on canon. Step 4's
+     lints decide whether it ever will.
+   Originally: Port the test grammar (`Last`, `Exist`, `NotExist`, `<`/`>` with factors) and
    the voting and abstention above. Run it over every corpus in `testData`, and pin a
    golden of which scheme each book sniffs as.
-6. **Names.** The `\toc` harvester over the gateway-language list, plus reviewed
+6. **Names** (done on the `canon` branch, 2026-11-05; first-pass review by Claude, Will
+   to confirm). `gen/fetch-gateways.sh` refreshes `GATEWAYS.tsv` from the BIEL API and
+   clones the sources. `harvest-names` reads `\toc1-3` through onion's lexer (Writer repos:
+   `front/title.txt`) into `data/names/<locale>.tsv`: 32 languages, and fa, pmy and zh
+   fall back to English. What the data showed:
+   - One source per language. The first harvest took every Primary text (ulb and udb,
+     arb's avd and nav) and disagreed in hundreds of cells. One org text per language
+     (the first of ulb, reg, avd, udb, blv, nav) disagrees in none.
+   - Fixed in review, and listed in each file's header: Assamese Exodus had Leviticus's
+     `\toc2`; Burmese `\toc2` is English throughout (dropped, so short falls back to long);
+     Odia's Pentateuch has `\toc1` and `\toc2` swapped; a few all-capitals names (fr, tl,
+     vi, ru). Zero-width spaces (lo) and leading dashes (or) are stripped by the harvester.
+   - Kept as written: Tamil numbers 1-2 Samuel, Kings and Chronicles as I and II; Russian
+     calls 1 Kings "3 Царств"; Tok Pisin calls John "Jon", which `parse_book_in` reads as
+     Jonah's code, as Sefer does.
+   - `fold` became Sefer's (NFKD, accents dropped). canon stays on `mise` alone: the
+     generator writes each changed character into `src/fold_tables.rs`, and Hangul is
+     arithmetic.
+   - `name(code, locales, form)` and `parse_book_in(text, locales)` in Rust (tags, `"es"`
+     finds `es-419`); `name(code, form, tables)` and `parseBook(text, tables)` in
+     TypeScript, with one module per locale (`canon/names/fr`) so a bundle carries only
+     what it imports. No cargo feature: galley never calls them, so its wasm is
+     byte-identical. Both pass `fixtures/names.json`.
+
+   Originally: The `\toc` harvester over the gateway-language list, plus reviewed
    `names/<locale>.tsv`, plus `name(code, locale, form)` and localized `parse_book`.
 7. **Galley.** A declared `versification` per registered book (`Scheme` or
    `FollowSource`), `defineScheme`, and sous pairing on `org` keys. This closes the
-   versification-layer idea's question about which consumer goes first.
+   versification-layer idea's question about which consumer goes first. Split in two,
+   because the second changes what the Expediter's caches are keyed by:
+   - **7a, declaring and asking** (done on the `canon` branch, 2026-11-05). Everything
+     except pairing. Both JS conformance suites pass against local nodejs builds. galley's
+     wasm grew 1.34 MB → 1.64 MB raw, 515 → 606 KB gzipped, more than the 60–100 KB
+     guessed. Measured by emptying each table (gzipped, before wasm-opt): the sniffing
+     rules are about 19 KB of it and the mapping rows about 9 KB; the other ~60 KB is
+     code. Packing the rules tighter would win back perhaps 10–15 KB, so it waits until
+     the code side has been profiled.
+     - canon: a `Scheme` a project defines (owned, built through a validated builder).
+       galley parses the Copenhagen JSON, since it has serde and canon doesn't.
+     - galley: a scheme registry on the handle (built-ins plus `defineScheme(name, json)`),
+       and a declaration per registered book.
+     - The two lints join that book's diagnostics when its scheme is known and no source
+       is paired with it (presence owns "missing" then, as above).
+     - wasm: `{ versification: "ulb" | "followSource" }` on `update`/`updateReference`,
+       `defineScheme`, `sniff(scope)`, `mapVerse(from, to, ref)` and `pairs(from, to, book)`,
+       as flat results like the other doors. Conformance tests in `sous_conformance.mjs`.
+   - **7b, pairing across schemes** (done on the `canon` branch, 2026-11-05, as option B: Will
+     chose the more correct one). sous-core gained a `Crosswalk` trait and
+     `pair_keys_across`. Units are connected groups of rows, so merges and splits are single
+     units under the existing unit contract. A source-only verse is reported in the
+     target's numbering, and one that is a title or has no counterpart is dropped. galley
+     builds the crosswalk from canon (`counterparts`), and the pairing cache key gains its
+     identity. With no crosswalk the path is `pair_keys`, unchanged, and every golden held
+     (only the memory pin moved, by the key's 8 bytes). Pinned end to end: an
+     eng-numbered Psalm 3 against an org-numbered source reports a missing verse as
+     written, and nothing once both declare. Not yet: the overlay doors' text alignment
+     (`align`) still pairs as written.
+     Originally: **7b, pairing on `org` keys.** Before `pair_keys`, each side's keys go to `org` through
+     its scheme's `moves()`, and findings come back through the target's scheme. Same
+     schemes, or no declaration on either side, is exactly today's path. The pairing cache
+     key (`PairKey`, both checksums today) gains both sides' scheme identities, so changing a
+     declaration re-pairs without either text changing. Sous's `VerseKey` refuses verse 0, so
+     a `\d` title never pairs, and `org`'s title verse is `SourceOnly` there. Merges and
+     splits pair as one unit, as `canon::pairs` builds them.
 
 <Question id="order" answer="Not a concern (Will, 2026-11-04). Keep the order as written.">Is this order right? Names (6) could come right after the book table (1) if Sefer wants localized book names sooner than it wants mapping.</Question>
 

@@ -1,6 +1,6 @@
 //! Findings over an already-built document: `lex → cst::build → lint`.
 //!
-//! 59 codes in six families ([`Category`]): STRUCTURE, ORDERING, ATTRIBUTES,
+//! 61 codes in six families ([`Category`]): STRUCTURE, ORDERING, ATTRIBUTES,
 //! PAYLOAD, FORM and VERSION. 11 of them are the formatter's Form channel.
 //!
 //! Three laws shape everything here:
@@ -53,6 +53,7 @@ pub(crate) mod flat;
 pub(crate) mod ordering;
 pub(crate) mod rows;
 pub(crate) mod structure;
+pub mod versification;
 pub(crate) mod walk;
 
 #[cfg(test)]
@@ -65,6 +66,7 @@ pub use fix::{Fix, check_fixes};
 pub use rows::{
     AuxKind, Category, Code, LINT_ROWS, LintRow, Severity, UsfmVersion, VERSION_ROWS, VersionRow,
 };
+pub use versification::lint_against_counts;
 
 pub(crate) use ancestry::Ancestry;
 pub(crate) use flat::Flat;
@@ -161,6 +163,24 @@ impl LintReport {
     /// One fix's edits, in apply order (see [`Fix`]).
     pub fn edits(&self, fix: &Fix) -> &[Edit] {
         &self.edit_list[fix.edits.start as usize..fix.edits.end as usize]
+    }
+
+    /// Folds in findings made outside the walk ([`lint_against_counts`]'s),
+    /// keeping the report's order (anchor, then code) and offering no repair
+    /// for them. A caller adds them before plating, so they cross the wire in
+    /// the same diagnostics section as every other finding.
+    pub fn absorb(&mut self, extra: Vec<Observation>) {
+        if extra.is_empty() {
+            return;
+        }
+        let mut all: Vec<(Observation, u32)> = self
+            .observations
+            .drain(..)
+            .zip(self.fix_of.drain(..))
+            .chain(extra.into_iter().map(|o| (o, NO_FIX)))
+            .collect();
+        all.sort_by_key(|(o, _)| (o.anchor, o.code as u32));
+        (self.observations, self.fix_of) = all.into_iter().unzip();
     }
 }
 
