@@ -1,6 +1,6 @@
 ---
 id: 35e4d72d-1818-42da-a087-93f0881f6741
-title: "Container: RC, Burrito and BTT Writer manifests, read, checked and written in one place"
+title: "bento: RC, Burrito and BTT Writer manifests, read, checked and written in one place"
 kind: plan
 status: discussing
 created: 2026-11-05
@@ -123,16 +123,16 @@ finished chunks, an RC's `checking`, a Burrito's `copyright`) branches once on `
 and gets that format's own typed document, not a pile of optional fields on the common type.
 
 ```ts
-container.find(rootNames: string[]): { name: string; format: Format } | undefined;
+bento.find(rootNames: string[]): { name: string; format: Format } | undefined;
 type Format = "burrito" | "rc" | "bttwriter";
 
 // Never throws. A file it can't make sense of comes back as findings with no manifest.
-container.read(name: string, bytes: Uint8Array): Read;
+bento.read(name: string, bytes: Uint8Array): Read;
 
 interface Read {
   manifest?: Manifest;                 // undefined only when nothing could be read
   detail?: Detail;
-  findings: Finding[];                 // what reading had to forgive, or couldn't
+  findings: ManifestFinding[];                 // what reading had to forgive, or couldn't
 }
 
 type Detail =
@@ -170,21 +170,21 @@ interface BookEntry {
 interface Related { relation: "source"; language: string; resource: string; version?: string }
 ```
 
-<Question id="manifest-name">Is `Manifest` the right name for the common shape? The hub calls it `NormalizedManifest` and Sefer `ProjectMetadata`. `Manifest` reads naturally (`read(...).manifest.books`), and the typed documents keep their formats' own names (`RcManifest`, `BurritoMetadata`, `BttWriterManifest`), so it doesn't collide. The cost: an RC's file is also called a manifest, so in RC-only code the word means two things.</Question>
+<Question id="manifest-name" answer="`Manifest` (Will, 2026-11-05: 'Manifest seems fine, either that or commonMetadata'). Kept `Manifest`: it reads naturally (`read(…).manifest.books`), and the typed documents keep their formats' own names, so it doesn't collide.">Is `Manifest` the right name for the common shape?</Question>
 
 How the two apps read with it:
 
 ```ts
 // Sefer, discovery.ts: replaces the Burrito-then-RC sequence and both schemas
-const found = container.find(await fs.readdir(root));
-const read = found && container.read(found.name, await fs.readFile(`${root}/${found.name}`));
+const found = bento.find(await fs.readdir(root));
+const read = found && bento.read(found.name, await fs.readFile(`${root}/${found.name}`));
 project.metadata = read?.manifest;
 ```
 
 ```rust
 // hub, ingest: replaces hub_manifest::{find_manifest, parse_as, normalize}
-let (name, _) = container::find(&root_names)?;
-let read = container::read(name, &bytes);
+let (name, _) = bento::find(&root_names)?;
+let read = bento::read(name, &bytes);
 report.books = read.manifest.iter().flat_map(|m| &m.books).map(|b| b.book).collect();
 report.findings.extend(read.findings);
 ```
@@ -194,13 +194,14 @@ report.findings.extend(read.findings);
 > For example of "leniency", I think d43 health check is likely good here … NOt 100% to
 > copy, but yes, that's the idea.
 
-Leniency and health are one thing: **findings**. Reading produces the findings it can see
+Leniency and health are one thing: **findings**, typed `ManifestFinding` so the name
+can't be confused with onion's diagnostics or sous's findings. Reading produces the findings it can see
 from the manifest alone ("`sort` was the string `"40"`, read as 40"). `check` adds the ones
 that need the repo's files. Each finding names its check, so a UI can list checks as
 passed or failed, as Door43's page does:
 
 ```ts
-interface Finding {
+interface ManifestFinding {
   check: CheckId;                      // stable id: "ingredient-checksum", "book-title-translated", …
   severity: "error" | "warning" | "info";
   at?: string;                         // JSON pointer into the manifest: "/ingredients/41-MAT.usfm/size"
@@ -209,10 +210,10 @@ interface Finding {
 }
 
 // Checks that need more than the manifest. Pure: the caller hands over what it has.
-container.check(read: Read, repo: {
+bento.check(read: Read, repo: {
   files?: Map<string, Uint8Array>;     // for exist / non-empty / checksum checks
   name?: string;                       // for "repo name matches the language"
-}): Finding[];
+}): ManifestFinding[];
 ```
 
 Door43's list, and where each one belongs:
@@ -248,16 +249,29 @@ interface NewBibleProject {
   publisher: string; creator: string; rights: string; checkingLevel: string;
   copyright: string;                   // Burrito requires it
   generator: { name: string; version: string }; // Burrito meta.generator: "Sefer" "1.4.0"
-  createdAt: string;                   // ISO date-time, the caller's clock
+  createdAt: string;                   // ISO date-time, the caller's clock (meta.dateCreated)
+  repository: string;                  // "owner/repo" on WACS: identification.primary (see Burrito)
 }
 
 // The files to write, by name: metadata.json and manifest.yaml unless asked for fewer.
-container.createBible(project: NewBibleProject, formats?: Format[]): Map<string, Uint8Array>;
+bento.createBible(project: NewBibleProject, formats?: Format[]): Map<string, Uint8Array>;
 ```
 
 `createBible` rather than one generic `create`: it's the only kind we make today, and a
-Bible project has a fixed answer for flavor, `sort`, file names and categories. A
-`createHelps` (tn, tq) can sit beside it when an app makes one.
+Bible project has a fixed answer for flavor, `sort`, file names and categories.
+
+<Question id="other-kinds" answer="Read and check every kind now; create only Bibles until an app creates something else. Each new kind gets its own typed create beside createBible, sharing the same core.">Do we support other resource types to create or set, now or later? (Will, 2026-11-05.)</Question>
+
+- **Reading and checking:** every kind, now. `read` already classifies tn, tq, tw, ta and OBS
+  through `Manifest.kind`, and the hub's scan needs all of them.
+- **Editing:** `edit` works on any manifest that lists files (RC `projects`, Burrito
+  `ingredients`), so checksums and added entries work for a helps resource too.
+- **Creating:** only Bibles, because that's all any app creates today. Sefer's tn pack is
+  its own format, not a bento. When an app first creates a helps resource, it gets its own
+  `createHelps(…)` with arguments typed for it: an RC `type: help`, or a Burrito
+  `parascriptural` flavor. The first one is the moment to check the fork's schema for that
+  flavor. Writing a generic `create(kind, …)` now would mean guessing at those arguments
+  with no caller to check them against.
 
 ### Editing: one call, one commit
 
@@ -267,13 +281,13 @@ All edits go through one call that returns every changed file. The caller commit
 and the manifests together.
 
 ```ts
-container.edit(existing: Map<string, Uint8Array>, change: {
+bento.edit(existing: Map<string, Uint8Array>, change: {
   addBooks?: NewBibleProject["books"];      // refuses one already listed
   checksums?: Map<string, Uint8Array>;      // the ingredient files as they'll be committed
-}): { files: Map<string, Uint8Array>; findings: Finding[] }; // only files that changed
+}): { files: Map<string, Uint8Array>; findings: ManifestFinding[] }; // only files that changed
 
 // The primitive, for a caller that only needs the numbers.
-container.fingerprint(bytes: Uint8Array): { md5: string; size: number };
+bento.fingerprint(bytes: Uint8Array): { md5: string; size: number };
 ```
 
 Sefer's save becomes "write the USFM, `edit(..., { checksums })`, commit both". Its
@@ -284,7 +298,11 @@ typed structs. A field we don't model survives, and so does key order (`serde_js
 `preserve_order`, written as `JSON.stringify(v, null, 2)` + newline, as Sefer writes it now,
 so the first edit of a Sefer project is a minimal diff).
 
-<Question id="yaml-fidelity">When we edit an existing `manifest.yaml`, how much of its formatting do we keep? Re-emitting it (what both apps do today) keeps every value and key but loses the catalog's quoting (`identifier: 'gen'` becomes `identifier: gen`), its flow lists (`[ 'bible-ot' ]` becomes a block list) and any comments. So the first edit shows a diff on lines we didn't mean to change. Keeping them takes a format-preserving YAML editor; `yaml-edit` (lossless, rowan-based) is the candidate to evaluate. Given rule 1 (only change what was asked), I now lean toward trying the format-preserving editor and falling back to re-emitting only if it can't handle the catalog's files. Worth it to you?</Question>
+<Question id="yaml-fidelity" answer="Preserve the formatting: if a file is going to be rewritten on every update, avoiding format churn is worth a dependency (Will, 2026-11-05). Evaluate `yaml-edit` (lossless, rowan-based) against the catalog's files first; fall back to re-emitting only if it can't handle them.">When we edit an existing `manifest.yaml`, how much of its formatting do we keep?</Question>
+
+So an edit to a `manifest.yaml` changes only the lines it means to: adding MAT adds MAT's
+project entry, and the catalog's quoting, flow lists and comments elsewhere stay as they
+were. The JSON side already gets this by keeping key order and Sefer's indentation.
 
 <Question id="both-formats" answer="Keep writing both for now, for legacy reasons; the Burrito is read first when both are there (Will, 2026-11-05).">Should Sefer keep writing both `metadata.json` and `manifest.yaml`?</Question>
 
@@ -306,12 +324,42 @@ so the first edit of a Sefer project is a minimal diff).
 | `/` must have required property `copyright` | `burritoText` writes none | `copyright` is a required argument |
 | `/meta/dateCreated` must match format `date-time` | Sefer passes `new Date().toISOString().slice(0, 10)`, a date only | `createdAt` is a full ISO date-time |
 | `/meta/generator` must have required property `softwareVersion` | Sefer writes only `softwareName` | `generator.version` is required |
-| `/identification` must have required property `primary` | WA's fork requires it, and Sefer writes none | written from the id authority, with a generated id and the creation timestamp |
+| `/identification` must have required property `primary` | WA's fork requires it, and Sefer writes none | written from the project's WACS repo (`repository` argument), as below |
 
 So "what we create is right from the start" also fixes every project Sefer creates from then
 on. Existing ones stay as they are (rule 1), and `check` reports them under `manifest-valid`.
 
-<Question id="burrito-primary">What goes in `identification.primary` for a new project: `{ "wycliffeassociates": { "<id>": { "revision": "1", "timestamp": "<createdAt>" } } }` with a fresh UUID as `<id>`? The hub's catalog ids are `language/resource` (`tpi/reg`). That isn't unique per project, but it's what `relationships` already use (`wycliffeassociates::en/ulb`). Which identity do we want a Burrito to claim?</Question>
+<Question id="burrito-primary" answer="The project's WACS repo, under the `wacs` authority: `{ wacs: { 'Tech_Advance/cdi_reg': { revision: 'latest', timestamp: '2026-11-04' } } }` (Will, 2026-11-05). WA's fork enforces exactly this shape.">What goes in `identification.primary` for a new project?</Question>
+
+Will's example turns out to be exactly what WA's fork enforces
+(`schema/identification.schema.json`, `authorityRepositories`):
+
+- **One authority, one repo.** `primary` holds exactly one authority label (lowercase,
+  `^[a-z][a-z0-9-]*[a-z0-9]$`), and under it exactly one key, which must be an `owner/repo` path.
+- **`revision` must be the string `"latest"`.** It's a `const` in the schema.
+- **`timestamp` is a date, not a date-time:** `YYYY`, `YYYY-MM` or `YYYY-MM-DD`. Unlike
+  `meta.dateCreated`, which must be a full date-time.
+- **The fork's own example declares the authority:** `idAuthorities.wacs` =
+  `https://content.bibletranslationtools.org`, "Wycliffe Associates Content Services". Its
+  example omits `timestamp`, so it predates the commit that made `timestamp` required. Our
+  schema test would catch exactly that.
+
+So `createBible` takes a required `repository: "owner/repo"` and writes:
+
+```json
+"idAuthorities": {
+  "wacs": { "id": "https://content.bibletranslationtools.org", "name": { "en": "Wycliffe Associates Content Services" } }
+},
+"identification": {
+  "name": { "tpi": "…" },
+  "abbreviation": { "tpi": "reg" },
+  "primary": { "wacs": { "Tech_Advance/cdi_reg": { "revision": "latest", "timestamp": "2026-11-04" } } }
+}
+```
+
+<Question id="repo-at-create">Does Sefer know the repo when it creates a project? A migrated BTT Writer project has an upstream, but the consolidated project's own WACS repo may not exist until the first push. Options: Sefer passes the repo it *will* push to (`<user>/<lang>_<resource>`, as the hub names them), or `createBible` writes it once it's known, as an `edit(…, { primary })` before the first push. The first keeps every file valid from its first commit, which I'd prefer if Sefer can know the name up front.</Question>
+
+<Question id="authority-label">Sefer's current authority is `wycliffeassociates` (`https://www.wycliffeassociates.org`), and its relationships say `wycliffeassociates::en/ulb`. The fork's convention is `wacs` (`content.bibletranslationtools.org`). Should new projects use `wacs` everywhere, including in `relationships` (`wacs::WA-Catalog/en_ulb`, an `owner/repo` path, matching `primary`)? Reading would accept both, since existing projects say `wycliffeassociates::en/ulb`. Sefer's relationship parser expects `language/resource` after the `::`, so this changes what it reads.</Question>
 
 ### Kinds: one vocabulary for "what is this"
 
@@ -325,15 +373,24 @@ asks "can I open it?" (USFM, tn as RC help markdown). The first moves into conta
 > In ts I think of this as standard schema. We'll still be upholding validate and assert as
 > boundaries for consumer here right?
 
-Yes. The boundary is the same in both languages:
+Yes. And it's **wasm underneath, with a thin hand-written TS layer on top**, not a second
+implementation in TS. Reading, leniency, checks and editing all run in the wasm, so the
+rules exist once. The TS layer is what makes it feel native: the types (`Manifest`,
+`ManifestFinding`, the format documents), `readOrThrow`, and the Standard Schema objects,
+whose `validate` is synchronous because wasm calls are synchronous once the module is
+initialized. The TS types are written by hand beside the shim. A conformance test (as
+`sous_conformance.mjs` does for galley) reads every fixture through the built module and
+checks the values against those types, so they can't drift from what the wasm returns.
+
+The boundary is the same in both languages:
 
 - **Validate:** `read` never throws. It returns what it could read plus findings, and a
   caller decides what's fatal. In Rust that's the same `Read` value; a hard parse failure
   is an error finding, not a panic.
-- **Assert:** `container.readOrThrow(name, bytes)` throws when any finding is an `error`,
+- **Assert:** `bento.readOrThrow(name, bytes)` throws when any finding is an `error`,
   with every error in the message. Use it where a bad manifest should stop the operation.
 - **Standard Schema:** each format is also exported as a
-  [Standard Schema](https://standardschema.dev) v1 object (`container.schemas.burrito`,
+  [Standard Schema](https://standardschema.dev) v1 object (`bento.schemas.burrito`,
   `.rc`, `.bttwriter`). `validate(value)` takes an already-parsed value and returns the typed
   document, or `issues` built from the error findings (`path` from `at`). So Sefer can drop
   it into Effect Schema (`Schema.standardSchemaV1`) or any other Standard Schema consumer
@@ -358,27 +415,29 @@ Size isn't the deciding factor:
 So: **its own module**, loaded at startup beside galley. It's still worth measuring the YAML
 parser's share, since it's most of what's new.
 
-<Question id="wasm-home">The module's name, and whether formats get their own subpaths. Will floated `@wycliffeassociates/scripture-kitchen/tupperware/scripture-burrito` and `/resource-container`. Two thoughts: (1) Tupperware is a trademark, so a kitchen word that isn't a brand fits better. `bento` (a box with compartments, one per format) keeps the joke and the burrito, or keep the plain `container`. (2) Per-format *subpaths* are good for TS ergonomics, but they should be namespaces over one wasm module, not one module per format, which would duplicate the shared core (reading, findings, canon) three times. So: `import { burrito, rc, bttwriter } from "@wycliffeassociates/scripture-kitchen/bento"`, or subpath files re-exporting from one module. Which name?</Question>
+<Question id="wasm-home" answer="`bento` (Will, 2026-11-05): the crate, and `@wycliffeassociates/scripture-kitchen/bento`, with per-format namespaces (`burrito`, `rc`, `bttwriter`) over one wasm module rather than one module per format.">The module's name, and whether formats get their own subpaths.</Question>
 
-<Question id="yaml-crate">`serde_yaml` (what the hub uses) has been unmaintained since 2024. Options: a maintained fork (`serde_yaml_ng`, `serde_norway`), `saphyr` (the `yaml-rust2` line), or `yaml-edit` if the fidelity question goes that way, since it parses and edits losslessly. I'd pick by the fidelity answer first, then by wasm size and by how each handles the hub's leniency cases (multi-document files, a leading `---`).</Question>
+Tupperware is a trademark, so we went with `bento`: a box with a compartment per format.
+
+<Question id="yaml-crate">Which YAML crate? The fidelity answer makes `yaml-edit` (0.3.6, lossless parser and editor) the first candidate, for both reading and editing, so there's one parser. What to check before committing to it: (1) it reads every catalog and WACS-scan manifest, including the hub's leniency cases (multi-document files, a leading `---`, a BOM); (2) adding a project entry to `en_ulb`'s manifest gives a diff of only that entry; (3) its wasm size. If it fails (1) or (2), the fallback is a maintained serde fork (`serde_yaml_ng`, `serde_norway`) and re-emitting. `serde_yaml`, which the hub uses, has been unmaintained since 2024.</Question>
 
 ## Where it lives
 
 <Files id="footprint">
 ```text
-+ container/                       -- new crate (name: see wasm-home); depends on canon and mise; serde, serde_json, a YAML crate
-+ container/src/lib.rs             -- find, read, check, Read, Manifest, Detail, Kind, Finding
-+ container/src/bttwriter.rs       -- BTT Writer manifest.json (first, at bttwriter's step 3): from hub ts_manifest.rs + Sefer writerBook.ts
-+ container/src/rc.rs              -- RC 0.2: typed read, create, edit
-+ container/src/burrito.rs         -- Burrito 1.0 (WA fork): typed read, create, edit
-+ container/src/check.rs           -- the checks in the Door43 table that are ours
-+ container/src/kind.rs            -- subject / domain vocabulary: from hub canonical_subject + Domain
-+ container/src/related.rs         -- sources from all three formats: from Sefer relationships.ts
-+ container/src/lenient.rs         -- number-or-string, one-or-many, BOM, multi-document YAML → findings
-+ container/src/md5.rs             -- Burrito's checksum (or the md-5 crate)
-+ container/schema/burrito/        -- WA fork's schema/ at b8872ee, for tests only
-+ container/fixtures/              -- real manifests: the catalog's, Sefer-written, hub-written, BTT Writer's, odd ones from the WACS scan
-~ Cargo.toml                       -- member; serde_json, the YAML crate; jsonschema as a dev dependency
++ bento/                         -- new crate; depends on canon and mise; serde, serde_json, a YAML crate
++ bento/src/lib.rs               -- find, read, check, Read, Manifest, Detail, Kind, ManifestFinding
++ bento/src/bttwriter.rs         -- BTT Writer manifest.json (first, at bttwriter's step 3): from hub ts_manifest.rs + Sefer writerBook.ts
++ bento/src/rc.rs                -- RC 0.2: typed read, create, edit
++ bento/src/burrito.rs           -- Burrito 1.0 (WA fork): typed read, create, edit
++ bento/src/check.rs             -- the checks in the Door43 table that are ours
++ bento/src/kind.rs              -- subject / domain vocabulary: from hub canonical_subject + Domain
++ bento/src/related.rs           -- sources from all three formats: from Sefer relationships.ts
++ bento/src/lenient.rs           -- number-or-string, one-or-many, BOM, multi-document YAML → findings
++ bento/src/md5.rs               -- Burrito's checksum (or the md-5 crate)
++ bento/schema/burrito/          -- WA fork's schema/ at b8872ee, for tests only
++ bento/fixtures/                -- real manifests: the catalog's, Sefer-written, hub-written, BTT Writer's, odd ones from the WACS scan
+~ Cargo.toml                     -- member; serde_json, the YAML crate; jsonschema as a dev dependency
 ```
 </Files>
 
