@@ -1,0 +1,47 @@
+{
+	"package_version": 6,
+	"format": "usfm",
+	"generator": {
+		"name": "ts-desktop",
+		"build": "27"
+	},
+	"target_language": {
+		"id": "kps-x-kaigar",
+		"name": "Kaigar",
+		"direction": "ltr"
+	},
+	"project": {
+		"id": "3jn",
+		"name": "3 John"
+	},
+	"type": {
+		"id": "text",
+		"name": "Text"
+	},
+	"resource": {
+		"id": "reg",
+		"name": "Regular"
+	},
+	"source_translations": [
+		{
+			"language_id": "id",
+			"resource_id": "ayt",
+			"checking_level": "3",
+			"date_modified": "2021-10-26T13:24:35.3586529+00:00",
+			"version": "1.3"
+		}
+	],
+	"parent_draft": {},
+	"translators": [
+		"bahasatech.indotimur"
+	],
+	"finished_chunks": [
+		"front-title",
+		"01-title",
+		"01-01",
+		"01-05",
+		"01-09",
+		"01-11",
+		"01-13"
+	]
+}

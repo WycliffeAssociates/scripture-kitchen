@@ -56,6 +56,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "bento"
+version = "0.1.20"
+dependencies = [
+ "canon",
+ "mise",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "bitflags"
 version = "2.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
