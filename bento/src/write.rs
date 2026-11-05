@@ -587,26 +587,80 @@ fn yaml_scalar(node: &Node) -> String {
     }
 }
 
-/// Plain when `key: <s>` reads back as the string `s`; else double-quoted,
-/// with JSON's escapes (which YAML's double quotes share).
+/// Plain when no YAML reader would take it for anything but this text, else
+/// double-quoted with JSON's escapes (which YAML's double quotes share).
+///
+/// Quoted: YAML 1.2's null, booleans and numbers (`null`, `true`, `12`,
+/// `1.10`, `0x1F`, `.inf`), YAML 1.1's booleans too (`yes`, `off`: older
+/// readers still take them so), a leading indicator (`-`, `[`, `&`, …), a `: `
+/// or ` #`, quotes, braces, brackets, commas, control characters, and space
+/// at either end. Decided by rule, not by parsing, so a module that writes a
+/// manifest needn't carry a YAML parser; `tests` checks the rule against one.
 pub(crate) fn yaml_string(s: &str) -> String {
-    let plain_ok = !s.is_empty()
-        && !s.contains([
-            '\n', '\r', '\t', '"', '\'', '#', '{', '}', '[', ']', ',', '&', '*', '!', '|', '>',
-            '%', '@', '`',
-        ])
-        && !s.starts_with(['-', '?', ':', ' '])
-        && !s.ends_with([' ', ':'])
-        && !s.contains(": ")
-        && crate::tree::from_yaml(&format!("k: {s}\n"))
-            .is_ok_and(|r| r.node.get("k") == Some(&Node::String(s.to_owned())));
-    if plain_ok {
+    if is_plain_safe(s) {
         s.to_owned()
     } else {
         let mut out = String::new();
         crate::tree::json_string(s, &mut out);
         out
     }
+}
+
+fn is_plain_safe(s: &str) -> bool {
+    let Some(first) = s.chars().next() else {
+        return false;
+    };
+    if s.starts_with(char::is_whitespace) || s.ends_with(char::is_whitespace) || s.ends_with(':') {
+        return false;
+    }
+    if "-?:,[]{}#&*!|>'\"%@`~".contains(first) {
+        return false;
+    }
+    if s.chars()
+        .any(|c| c.is_control() || "\"'{}[],#`".contains(c))
+        || s.contains(": ")
+    {
+        return false;
+    }
+    !looks_typed(s)
+}
+
+/// What a YAML reader (1.2's core schema, or 1.1's) would read as other than text.
+fn looks_typed(s: &str) -> bool {
+    const WORDS: &[&str] = &[
+        "null", "Null", "NULL", "~", "true", "True", "TRUE", "false", "False", "FALSE", "y", "Y",
+        "yes", "Yes", "YES", "n", "N", "no", "No", "NO", "on", "On", "ON", "off", "Off", "OFF",
+        ".inf", ".Inf", ".INF", "+.inf", "-.inf", ".nan", ".NaN", ".NAN",
+    ];
+    if WORDS.contains(&s) {
+        return true;
+    }
+    let digits =
+        |t: &str, radix: u32| !t.is_empty() && t.chars().all(|c| c.is_digit(radix) || c == '_');
+    let unsigned = s.strip_prefix(['+', '-']).unwrap_or(s);
+    if let Some(hex) = unsigned.strip_prefix("0x") {
+        return digits(hex, 16);
+    }
+    if let Some(oct) = unsigned.strip_prefix("0o") {
+        return digits(oct, 8);
+    }
+    // Decimal, with an optional fraction and exponent: `12`, `1.10`, `.5`, `1e3`, `1_000`.
+    let (mantissa, exponent) = match unsigned.find(['e', 'E']) {
+        Some(i) => (&unsigned[..i], Some(&unsigned[i + 1..])),
+        None => (unsigned, None),
+    };
+    let mantissa_ok = match mantissa.split_once('.') {
+        Some((whole, frac)) => {
+            (whole.is_empty() || digits(whole, 10))
+                && (frac.is_empty() || digits(frac, 10))
+                && !(whole.is_empty() && frac.is_empty())
+        }
+        None => digits(mantissa, 10),
+    };
+    let exponent_ok = exponent.is_none_or(|e| digits(e.strip_prefix(['+', '-']).unwrap_or(e), 10));
+    // YAML 1.1 sexagesimal (`1:30`) has a colon; dates (`2026-11-05`) read as
+    // text in 1.2 and are left plain, as Sefer's and the catalog's writers do.
+    mantissa_ok && exponent_ok
 }
 
 #[cfg(test)]

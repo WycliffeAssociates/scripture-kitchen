@@ -43,6 +43,8 @@ pub mod replay;
 pub mod stitch;
 pub mod summary;
 pub mod walk;
+#[cfg(feature = "wasm")]
+pub mod wasm;
 
 #[cfg(feature = "git2")]
 mod git2_source;

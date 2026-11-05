@@ -582,6 +582,36 @@ without `REPO_ROOT`), which `agents/testing.md` forbids here.
    Sefer switches `local`/`candidate`/`assemble`/`addBooks` once, manifest included, and
    deletes `writerHistory.ts`, `pack.ts` and its Writer manifest schema. The hub moves its
    closing commit to `consolidate()` at the same time.
+   *Built 2026-11-05*, on the kitchen side (`consolidate.rs`, `wasm.rs`, `bttwriter.ts`,
+   `tests/conformance.mjs`, CI). What it settled is under "Step 6, as built" below; Sefer's
+   switch and the hub's are theirs.
+
+### Step 6, as built
+
+- **`consolidate(histories, opts, project, formats, closing)`** replays, then makes one
+  closing commit holding the book files and bento's `metadata.json` and `manifest.yaml`
+  (`create_bible` over each book's last rendering, titled by its `\h`). `project` is bento's
+  `NewBibleProject` without books; `closing` is the commit's author, committer and message.
+  Tested against git: the closing commit's parent is Sefer's four-book head, `fsck --strict`
+  accepts the pack, and bento's checks find the manifests match the files beside them.
+- **The TS surface** is as sketched (`readHistory`, `isomorphicGitSource`, `replay`), with:
+  - `replay` and `consolidate` *use the histories up*: their text moves into the replay
+    rather than being copied; a used history says so if touched. Read again to replay again.
+  - `consolidate`'s manifest arguments are bento's project shape, not the sketch's
+    `{ container: { kind, … } }`: a manifest needs publisher, rights and the rest, and
+    both formats come back by default.
+  - `replay` of nothing is `undefined`; two histories of one book throw.
+  - `isomorphicGitSource` takes isomorphic-git's `resolveRef` and `readObject` as
+    arguments, so the package doesn't depend on isomorphic-git. The conformance test hands
+    it a stand-in backed by the `git` command and reads all five fixtures through it.
+- **Web target only** (`pkg-web`): `bttwriter.ts` imports it, Sefer starts it with `init()`
+  or `initSync()` as it does galley, and a bundler takes it as is.
+- **Measured** (2026-11-05): the module is **163 KB gzipped** (387 KB raw). It was 209 KB
+  until YAML quoting stopped parsing to decide (bento's `yaml_string` now decides by rule,
+  checked against the parser in tests), which took yaml-edit out of this module. Replay of
+  the four fixture books (1,484 commits) is **about 610 ms in wasm under Node**, against
+  500 ms native and 3.3–3.8 s for Sefer's TS; reading the four histories through the TS
+  driver is 60–100 ms.
 
 ```mermaid
 flowchart LR

@@ -28,7 +28,7 @@ fn opt(entries: &mut Vec<(String, Node)>, key: &str, value: Option<&str>) {
     }
 }
 
-pub(crate) fn format_name(f: Format) -> &'static str {
+pub fn format_name(f: Format) -> &'static str {
     match f {
         Format::Burrito => "burrito",
         Format::Rc => "rc",
@@ -47,7 +47,7 @@ fn direction(d: Direction) -> Node {
     })
 }
 
-pub(crate) fn related(r: &Related) -> Node {
+pub fn related(r: &Related) -> Node {
     let mut e = vec![
         ("relation".to_owned(), text("source")),
         ("language".to_owned(), text(&r.language)),
@@ -57,7 +57,7 @@ pub(crate) fn related(r: &Related) -> Node {
     Node::Map(e)
 }
 
-pub(crate) fn manifest(m: &Manifest) -> Node {
+pub fn manifest(m: &Manifest) -> Node {
     let mut e: Vec<(String, Node)> = vec![("format".into(), text(format_name(m.format)))];
     opt(&mut e, "id", m.id.as_deref());
     e.push(("name".into(), localized(&m.name)));
@@ -119,7 +119,7 @@ pub(crate) fn manifest(m: &Manifest) -> Node {
     Node::Map(e)
 }
 
-pub(crate) fn finding(f: &ManifestFinding) -> Node {
+pub fn finding(f: &ManifestFinding) -> Node {
     let mut e = vec![
         ("check".to_owned(), text(f.check.id())),
         (
@@ -139,12 +139,12 @@ pub(crate) fn finding(f: &ManifestFinding) -> Node {
     Node::Map(e)
 }
 
-pub(crate) fn findings(fs: &[ManifestFinding]) -> Node {
+pub fn findings(fs: &[ManifestFinding]) -> Node {
     Node::List(fs.iter().map(finding).collect())
 }
 
 /// A [`Read`] as `bento.ts`'s `Read`, with the file's own value as the detail's document.
-pub(crate) fn read(read: &Read, format: Option<Format>, document: Option<Node>) -> Node {
+pub fn read(read: &Read, format: Option<Format>, document: Option<Node>) -> Node {
     let mut e = Vec::new();
     if let Some(m) = &read.manifest {
         e.push(("manifest".to_owned(), manifest(m)));
@@ -160,11 +160,11 @@ pub(crate) fn read(read: &Read, format: Option<Format>, document: Option<Node>) 
 }
 
 /// Why a JSON argument from the TS layer was refused.
-pub(crate) fn want<'n>(node: &'n Node, key: &str) -> Result<&'n Node, String> {
+pub fn want<'n>(node: &'n Node, key: &str) -> Result<&'n Node, String> {
     node.get(key).ok_or_else(|| format!("{key} is required"))
 }
 
-pub(crate) fn want_text(node: &Node, key: &str) -> Result<String, String> {
+pub fn want_text(node: &Node, key: &str) -> Result<String, String> {
     match want(node, key)? {
         Node::String(s) => Ok(s.clone()),
         other => Err(format!("{key} must be text, not {}", other.kind())),
@@ -179,7 +179,7 @@ fn want_list<'n>(node: &'n Node, key: &str) -> Result<&'n [Node], String> {
     }
 }
 
-pub(crate) fn canon_of(node: &Node) -> Result<canon::Canon, String> {
+pub fn canon_of(node: &Node) -> Result<canon::Canon, String> {
     match node.get("canon") {
         None | Some(Node::Null) => Ok(canon::Canon::Protestant66),
         Some(Node::String(s)) if s == "protestant66" => Ok(canon::Canon::Protestant66),
@@ -191,7 +191,7 @@ pub(crate) fn canon_of(node: &Node) -> Result<canon::Canon, String> {
 }
 
 /// `[{book: "MAT", title: "Matyu"}, …]` with each one's bytes, in order.
-pub(crate) fn books(node: &Node, key: &str, bytes: Vec<Vec<u8>>) -> Result<Vec<NewBook>, String> {
+pub fn books(node: &Node, key: &str, bytes: Vec<Vec<u8>>) -> Result<Vec<NewBook>, String> {
     let list = want_list(node, key)?;
     if list.len() != bytes.len() {
         return Err(format!(
@@ -215,8 +215,16 @@ pub(crate) fn books(node: &Node, key: &str, bytes: Vec<Vec<u8>>) -> Result<Vec<N
         .collect()
 }
 
+/// `createBible`'s argument as JSON text, with its books' bytes in order:
+/// for another wasm module that takes a project in `bento.ts`'s shape.
+pub fn project_from_json(text: &str, book_bytes: Vec<Vec<u8>>) -> Result<NewBibleProject, String> {
+    let node = crate::tree::from_json(text.as_bytes())?;
+    let books = books(&node, "books", book_bytes)?;
+    project(&node, books)
+}
+
 /// `createBible`'s argument: every `NewBibleProject` field, camelCase.
-pub(crate) fn project(node: &Node, books: Vec<NewBook>) -> Result<NewBibleProject, String> {
+pub fn project(node: &Node, books: Vec<NewBook>) -> Result<NewBibleProject, String> {
     let language = want(node, "language")?;
     let generator = want(node, "generator")?;
     let sources = want_list(node, "sources")?
@@ -270,7 +278,7 @@ pub(crate) fn project(node: &Node, books: Vec<NewBook>) -> Result<NewBibleProjec
 }
 
 /// The formats `createBible` writes: `["burrito", "rc"]` by default.
-pub(crate) fn formats(names: &[String]) -> Result<Vec<Format>, String> {
+pub fn formats(names: &[String]) -> Result<Vec<Format>, String> {
     if names.is_empty() {
         return Ok(vec![Format::Burrito, Format::Rc]);
     }

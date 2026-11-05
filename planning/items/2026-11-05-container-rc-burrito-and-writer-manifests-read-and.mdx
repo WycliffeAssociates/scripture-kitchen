@@ -498,6 +498,8 @@ Step 4 measures it again inside the real module, with `wasm-opt`.
 4. **The TS surface**: the module, `readOrThrow`, the Standard Schema exports, and the size
    measurement. Sefer switches `discovery`, `projectAdmin`, `import` and its save path, and
    `assemble` together with bttwriter's step 6.
+   *Built 2026-11-05* (`wasm.rs`, `js.rs`, `bento.ts`, `tests/conformance.mjs`, CI). What it
+   settled is under "Step 4, as built" below.
 
 ### Step 2, as built
 
@@ -568,6 +570,31 @@ Step 4 measures it again inside the real module, with `wasm-opt`.
   project entry; a 66-book RC reads in 1–3 ms). Most of it is yaml-edit's parse and its
   conversion to values (anchors, merge keys), which is about 1.4× the parse. Fine at
   manifest sizes; walking the syntax tree directly would roughly halve it if it ever matters.
+
+### Step 4, as built
+
+- **`bento.ts`** over `bento/pkg-web` (web target; `init` or `initSync`): `find`, `read`
+  (never throws), `readOrThrow` (a `ManifestError` carrying the error findings), `check`
+  (repo name and files), `createBible`, `edit`, `fingerprint`, and `schemas.{burrito, rc,
+  bttwriter}` as Standard Schema v1. The types are written by hand beside it, and
+  `tests/conformance.mjs` runs it as shipped over the built module (24 checks, including
+  create + edit(add MRK) == create with MRK, byte for byte).
+- **`detail.document` in TS is the file's own value as written** (a YAML file as its JSON
+  equivalent), typed by loose per-format interfaces. The Rust `Detail` is the lenient
+  typed read. Shipping the file's value needs no second set of converters and keeps fields
+  bento doesn't model.
+- **A Standard Schema issue** is an error finding or a `manifest-valid` one, with its
+  `path` from the finding's `at`. Leniencies and health findings aren't issues. An RC
+  value is validated by reading its JSON as YAML (JSON is YAML).
+- **Size: 195 KB gzipped** (478 KB raw), down from 307 KB at first. Most of the first
+  build was yaml-edit's editing machinery (135 KB pre-optimisation for a `projects:` key
+  that's rarely missing) and its value conversion. YAML is now read by walking yaml-edit's
+  syntax tree directly (maps keep file order, a duplicate key no longer fails the read),
+  and an RC project is added as a text splice at the byte offset the tree gives, in the
+  file's own indentation, which a flow-style `projects` list refuses. The results are the
+  same, and the edges are tested.
+- **A `json` feature** carries `js.rs` without the wasm doors, so bttwriter's module can take
+  a project in the same JSON shape without linking bento's exports.
 
 <Followup id="wacs-scan-bin">The WACS-scan bin (read every repo under a folder, print a findings summary) wasn't built in step 2: the 1,441 repos aren't on this machine. Build it when they are, and copy any new odd case into `fixtures/`.</Followup>
 

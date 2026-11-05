@@ -30,8 +30,8 @@ pub mod bttwriter;
 pub mod burrito;
 mod check;
 mod edit;
-#[cfg(any(feature = "wasm", test))]
-mod js;
+#[cfg(any(feature = "json", test))]
+pub mod js;
 mod kind;
 mod lenient;
 mod md5;

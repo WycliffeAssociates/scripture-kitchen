@@ -33,7 +33,11 @@
     "canon/ts/versification.ts",
     "canon/ts/scheme-tables.ts",
     "canon/NOTICE",
-    "canon/README.md"
+    "canon/README.md",
+    "bento/bento.ts",
+    "bento/pkg-web",
+    "bttwriter/bttwriter.ts",
+    "bttwriter/pkg-web"
   ],
   "sideEffects": [
     "./galley/pkg-bundler/usfm_galley.js",
@@ -41,7 +45,9 @@
     "./galley/pkg-web/usfm_galley.js",
     "./onion-wasm/pkg-bundler/onion_wasm.js",
     "./onion-wasm/pkg-bundler/snippets/*",
-    "./onion-wasm/pkg-web/onion_wasm.js"
+    "./onion-wasm/pkg-web/onion_wasm.js",
+    "./bento/pkg-web/bento.js",
+    "./bttwriter/pkg-web/bttwriter.js"
   ],
   "exports": {
     ".": {
@@ -75,6 +81,10 @@
     "./schema": "./onion-wasm/reader.ts",
     "./diagnostics.json": "./onion-wasm/diagnostics.json",
     "./reader": "./onion-wasm/reader.ts",
-    "./canon": "./canon/ts/canon.ts"
+    "./canon": "./canon/ts/canon.ts",
+    "./bento": "./bento/bento.ts",
+    "./bento/web/wasm": "./bento/pkg-web/bento_bg.wasm",
+    "./bttwriter": "./bttwriter/bttwriter.ts",
+    "./bttwriter/web/wasm": "./bttwriter/pkg-web/bttwriter_bg.wasm"
   }
 }

@@ -417,6 +417,14 @@ impl WriterHistory {
             .collect()
     }
 
+    /// The book's title at its last save (its `\h`), else canon's English name.
+    pub fn title(&self) -> String {
+        let usfm = self.usfm();
+        h_title(&usfm)
+            .unwrap_or(fallback_title(self.project.book))
+            .to_owned()
+    }
+
     /// The book at its last save, as replay renders it.
     pub fn usfm(&self) -> String {
         let mut files = Files::default();

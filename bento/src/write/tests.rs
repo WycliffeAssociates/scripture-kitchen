@@ -34,6 +34,99 @@ fn strings_are_plain_only_when_they_read_back_the_same() {
     }
 }
 
+// Why: the rule decides without a parser, so it's checked against one: any
+// string it lets through plain must read back as itself.
+#[test]
+fn every_plain_string_reads_back_as_itself() {
+    let cases = [
+        "Baibel",
+        "Tok Pisin",
+        "1 Timoti",
+        "II Cesolonaika",
+        "Ɓille",
+        "Ọlọ́run",
+        "كتاب",
+        "a: b",
+        "a:b",
+        "a #b",
+        "a#b",
+        "C#",
+        "2026-11-05",
+        "2026-11-05T14:30:00Z",
+        "12",
+        "-12",
+        "+12",
+        "1.10",
+        "1e3",
+        "1_000",
+        "0x1F",
+        "0o17",
+        ".5",
+        "5.",
+        ".inf",
+        "-.inf",
+        ".nan",
+        "yes",
+        "No",
+        "off",
+        "ON",
+        "y",
+        "n",
+        "~",
+        "null",
+        "True",
+        "x: y z",
+        "x-y",
+        "-x",
+        "?x",
+        ":x",
+        "x:",
+        "&a",
+        "*a",
+        "!a",
+        "|a",
+        ">a",
+        "%a",
+        "@a",
+        "`a",
+        "'a",
+        "\"a",
+        "{a}",
+        "[a]",
+        "a,b",
+        "a, b",
+        " a",
+        "a ",
+        "\ta",
+        "a\nb",
+        "",
+        "1:30",
+        "v12",
+        "12a",
+        "ufw",
+        "bible-nt",
+        "text/usfm",
+        "CC BY-SA 4.0",
+        "./41-MAT.usfm",
+        "Wycliffe Associates",
+        "rc0.2",
+        "21-05",
+        "21-05.1",
+        "en/ulb",
+    ];
+    for s in cases {
+        let written = yaml_string(s);
+        let back = crate::tree::from_yaml(&format!("k: {written}\n"))
+            .unwrap()
+            .node;
+        assert_eq!(
+            back.get("k"),
+            Some(&Node::String(s.to_owned())),
+            "{s:?} written as {written}"
+        );
+    }
+}
+
 #[test]
 fn contributors_are_each_listed_once() {
     let names = ["Mary_Kila", " mary  kila ", "", "Tomas", "TOMAS", "Ana"].map(String::from);

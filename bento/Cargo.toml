@@ -25,7 +25,10 @@ wasm-bindgen = { version = "0.2", optional = true }
 js-sys = { version = "0.3", optional = true }
 
 [features]
-wasm = ["dep:wasm-bindgen", "dep:js-sys"]
+# The JSON `bento.ts` reads and writes, without the wasm doors: for another
+# module (bttwriter's) that takes a project in the same shape.
+json = []
+wasm = ["json", "dep:wasm-bindgen", "dep:js-sys"]
 
 [dev-dependencies]
 jsonschema = { version = "0.60.2", default-features = false }
