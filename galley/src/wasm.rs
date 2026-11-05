@@ -248,6 +248,8 @@ impl Galley {
         let markers = onion_wasm::options::custom_markers(bag.as_ref(), door)
             .map_err(|e| JsError::new(&e))?;
         let declared = versification::declaration(bag.as_ref(), door)?;
+        // Refuse an unknown scheme before the text is registered: all or nothing.
+        self.check_declaration(declared.as_ref())?;
         let key = self.register(id, Role::Target, Retain::Text, Markers::from(markers), text)?;
         self.declare(id, declared)?;
         Ok(key)
@@ -283,6 +285,7 @@ impl Galley {
             .map_err(|e| JsError::new(&e))?;
         let markers = onion_wasm::options::custom_markers(bag.as_ref(), door)
             .map_err(|e| JsError::new(&e))?;
+        self.check_declaration(declared.as_ref())?;
         let key = self.register(
             id,
             Role::Reference,
@@ -1157,6 +1160,19 @@ impl Galley {
                 .declare(id, Some(declared))
                 .map_err(|error| JsError::new(&error.to_string())),
             None => Ok(()),
+        }
+    }
+
+    /// An unknown scheme name refused before anything is registered.
+    fn check_declaration(
+        &self,
+        declared: Option<&crate::versification::Declared>,
+    ) -> Result<(), JsError> {
+        match declared {
+            Some(crate::versification::Declared::Scheme(name)) => {
+                self.named_scheme(name).map(|_| ())
+            }
+            _ => Ok(()),
         }
     }
 

@@ -227,3 +227,48 @@ fn a_psalm_numbered_two_ways_pairs_cleanly_once_both_sides_declare() {
         "org against org: numbers as written"
     );
 }
+
+fn snapshot_of(sous: &mut Expediter<Brigade>) -> sous_core::SnapshotId {
+    let bytes = sous.publish().unwrap();
+    sous_core::CorpusSnapshot::open(&bytes)
+        .unwrap()
+        .snapshot_id()
+}
+
+/// A `FindingHandle` is a snapshot plus a row, and a declaration re-pairs,
+/// moving rows: two publications differing only by a declaration may not
+/// share an identity.
+#[test]
+fn a_declaration_is_part_of_what_a_publication_is_of() {
+    let mut sous = Expediter::new(Brigade::default(), BUDGET);
+    sous.update("books/PSA.usfm", Role::Target, &psalm_three(false))
+        .unwrap();
+    sous.update_with(
+        "ref/PSA.usfm",
+        Role::Reference,
+        Retain::ProductsOnly,
+        &psalm_three(true),
+    )
+    .unwrap();
+    let undeclared = snapshot_of(&mut sous);
+    assert_eq!(
+        snapshot_of(&mut sous),
+        undeclared,
+        "stable when nothing moves"
+    );
+
+    sous.declare("books/PSA.usfm", Some(Declared::Scheme("eng".into())))
+        .unwrap();
+    sous.declare("ref/PSA.usfm", Some(Declared::Scheme("org".into())))
+        .unwrap();
+    let declared = snapshot_of(&mut sous);
+    assert_ne!(declared, undeclared);
+
+    sous.declare("books/PSA.usfm", None).unwrap();
+    sous.declare("ref/PSA.usfm", None).unwrap();
+    assert_eq!(
+        snapshot_of(&mut sous),
+        undeclared,
+        "back to the same inputs"
+    );
+}

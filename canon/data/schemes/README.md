@@ -32,6 +32,17 @@ rows as it reads them, and fails if one is no longer there to correct.
 | `vul` | `DAG 14:1-42` → `BEL 1:42` | `BEL 1:1-42` | likewise, Bel |
 | `rso` | `PSA 89:2-6` → `PSA 90:1-6` | `PSA 90:2-6` | five verses onto six; the row before already sends 89:0-1 to 90:0-1 |
 
+Two rows are dropped instead (`gen-canon`'s `DROPPED`). `vul.json` counts
+Jonah as the Vulgate and `org` do (chapter 1 has 16 verses, chapter 2 has
+11), but carries `eng.json`'s Jonah rows (`JON 1:17` → `JON 2:1` and
+`JON 2:1-10` → `JON 2:2-11`), which assume `eng`'s 17 and 10. Read as written,
+vul's JON 1:17 does not exist and every verse of its Jonah 2 maps one off.
+Without them vul's Jonah is `org`'s, verse for verse.
+
+Separately, a few rows start past their own scheme's counts (`rso`'s
+`2ES 7:106-140`, `eng`'s `ESG 8:37-41`, `lxx`'s `EZR 13:1-38`). They are kept,
+and `map` never answers with a verse its scheme doesn't have.
+
 Every other unequal pair is a real merge or split (one side a single verse),
 such as `rsc`'s `PSA 89:0-1` → `PSA 90:0`.
 

@@ -66,6 +66,8 @@ struct Facts {
     bridged: bool,
     /// Written as a whole verse, not only as parts.
     whole: bool,
+    /// Written in parts (`\v 3a`).
+    parted: bool,
 }
 
 impl Inventory {
@@ -97,7 +99,7 @@ impl Inventory {
         if last > first {
             for verse in first..=last {
                 let facts = row.verses.entry(verse).or_default();
-                row.duplicate |= facts.whole || facts.bridged;
+                row.duplicate |= facts.whole || facts.bridged || facts.parted;
                 facts.bridged = true;
             }
             return;
@@ -106,10 +108,13 @@ impl Inventory {
         match part {
             Some(part) => {
                 row.duplicate |= !row.parts.insert((first, part)) || facts.whole;
+                facts.parted = true;
                 facts.chars += chars;
             }
             None => {
-                row.duplicate |= facts.whole || facts.bridged;
+                // A whole verse after its parts is the verse twice, as the
+                // parts after a whole one are.
+                row.duplicate |= facts.whole || facts.bridged || facts.parted;
                 facts.whole = true;
                 facts.chars += chars;
             }
@@ -471,10 +476,23 @@ mod tests {
         ] {
             inventory.add(GEN, 4, first, last, part, 10);
         }
+        // A whole verse 3 after its parts, in both orders.
+        for (verse, part) in [
+            (1, None),
+            (2, None),
+            (3, Some('a')),
+            (3, Some('b')),
+            (3, None),
+        ] {
+            inventory.add(GEN, 5, verse, verse, part, 10);
+        }
+        for (verse, part) in [(1, None), (2, None), (3, None), (3, Some('a'))] {
+            inventory.add(GEN, 6, verse, verse, part, 10);
+        }
         let defective: Vec<u16> = inventory.defective().map(|(_, c)| c).collect();
         assert_eq!(
             defective,
-            [1, 2, 3],
+            [1, 2, 3, 5, 6],
             "chapter 4's bridge and parts are fine"
         );
     }

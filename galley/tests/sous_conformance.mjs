@@ -1279,6 +1279,10 @@ if (corpusDir && existsSync(corpusDir)) {
     threw = String(error);
   }
   check(threw.includes("defineScheme"), `an unknown scheme throws, naming the way out: ${threw}`);
+  check(
+    named(v, "books/RUT.usfm").has("verse-beyond-scheme"),
+    "a refused update registers nothing: the old four chapters are still there",
+  );
 
   v.defineScheme("short-ruth", { maxVerses: { RUT: ["21", "24", "18", "22"] } });
   v.update("books/RUT.usfm", verses("RUT", [21, 24, 18, 22]), { versification: "short-ruth" });

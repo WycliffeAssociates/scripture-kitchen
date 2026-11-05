@@ -341,8 +341,20 @@ impl Scheme {
     }
 
     fn sources_of(&self, o: Verse, out: &mut Vec<Verse>) {
+        let before = out.len();
         for row in self.rows_to(o) {
             row.sources(o, out);
+        }
+        // A few vendored rows start past their own scheme's counts (vul's
+        // JON 1:17, where vul counts 16; rso's 2ES 7:106-140): a verse the
+        // scheme doesn't have is no counterpart.
+        let mut at = before;
+        while at < out.len() {
+            if self.has_verse(out[at].whole()) {
+                at += 1;
+            } else {
+                out.remove(at);
+            }
         }
         let whole = o.whole();
         if self.has_verse(whole) && self.rows_from(whole).next().is_none() {
@@ -541,6 +553,13 @@ mod tests {
                             to.name()
                         );
                         for h in &unit.here {
+                            assert!(
+                                from.has_verse(h.whole()),
+                                "{}→{} {book}: {h} is no verse of {}",
+                                from.name(),
+                                to.name(),
+                                from.name()
+                            );
                             *here_count.entry(h.to_string()).or_insert(0) += 1;
                             if from.name() != to.name() {
                                 for t in through_org(from, to, *h) {
@@ -554,6 +573,13 @@ mod tests {
                             }
                         }
                         for t in &unit.there {
+                            assert!(
+                                to.has_verse(t.whole()),
+                                "{}→{} {book}: {t} is no verse of {}",
+                                from.name(),
+                                to.name(),
+                                to.name()
+                            );
                             *there_count.entry(t.to_string()).or_insert(0) += 1;
                         }
                     }

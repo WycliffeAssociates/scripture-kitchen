@@ -67,6 +67,12 @@ pub struct Registry {
 }
 
 impl Registry {
+    /// How many times a scheme has been defined: part of what a publication
+    /// is OF, beside each book's declaration.
+    pub(crate) fn generation(&self) -> u64 {
+        self.generation
+    }
+
     /// Adds a project's scheme, replacing one defined under the same name.
     /// A built-in name can't be taken (canon's builder refuses it).
     pub fn define(&mut self, scheme: Scheme) {

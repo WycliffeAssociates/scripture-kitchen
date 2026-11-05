@@ -15,8 +15,9 @@ Versification schemes
   The files are unchanged. The generated tables keep their chapter and verse
   counts, exclusions and verse mappings; drop six Paratext-only book codes
   (BLT, DNT, JDB, JSA, SST, TBS) and org.json's own mappings; and correct
-  four mapping rows that are evident typos (listed in gen-canon's ERRATA and
-  data/schemes/README.md). Those tables are a CC BY-SA 4.0 adaptation.
+  four mapping rows that are evident typos and drop vul's two Jonah rows,
+  which contradict its own counts (listed in gen-canon's ERRATA and DROPPED
+  and data/schemes/README.md). Those tables are a CC BY-SA 4.0 adaptation.
 
 Sniffing rules
   data/sniff/rules.json, and the table generated from it (src/sniff_tables.rs).

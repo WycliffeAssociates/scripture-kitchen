@@ -1101,7 +1101,14 @@ impl<P: ChapterPass + Sync> Expediter<P> {
                 PublicationBook::new(*key, id.as_str(), published_len, findings)
             })
             .collect();
-        let snapshot = snapshot_id(&self.pass, &self.config, &self.pantry, &books, &references);
+        let snapshot = snapshot_id(
+            &self.pass,
+            &self.config,
+            &self.pantry,
+            &self.versification,
+            &books,
+            &references,
+        );
         encode_to_corpus_buffer(
             snapshot,
             CoordinateSpace::Utf16,
@@ -1120,11 +1127,14 @@ impl<P: ChapterPass + Sync> Expediter<P> {
 ///
 /// The config is in it because a `FindingHandle` is a snapshot plus a row:
 /// two publications differing only by a knob name different rows, so they may
-/// not share an identity.
+/// not share an identity. Each book's versification declaration, and the
+/// registry's definitions, are in it for the same reason: a declaration
+/// re-pairs a target against its source, so it moves presence rows.
 fn snapshot_id<P: ChapterPass>(
     pass: &P,
     config: &P::Config,
     pantry: &Pantry,
+    registry: &Registry,
     books: &[(BookId, BookKey)],
     references: &[(BookId, BookKey)],
 ) -> SnapshotId {
@@ -1143,7 +1153,22 @@ fn snapshot_id<P: ChapterPass>(
                     .expect("the pantry listed this id")
                     .as_bytes(),
             );
+            // Nothing for an undeclared book, so a project that declares
+            // nothing keeps the identity it always had.
+            match registry.declared(id) {
+                None => {}
+                Some(Declared::FollowSource) => hasher.update(b"\xffversification:follow"),
+                Some(Declared::Scheme(name)) => {
+                    hasher.update(b"\xffversification:");
+                    hasher.update(&(name.len() as u32).to_le_bytes());
+                    hasher.update(name.as_bytes());
+                }
+            }
         }
+    }
+    if registry.generation() != 0 {
+        hasher.update(b"\xffdefined:");
+        hasher.update(&registry.generation().to_le_bytes());
     }
     hasher.update(&P::SCHEMA.get().to_le_bytes());
     hasher.update(&pass.config_stamp(config).to_le_bytes());
