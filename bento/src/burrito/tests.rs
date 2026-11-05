@@ -4,10 +4,21 @@ use super::*;
 // `timestamp` as a date; Sefer wrote each as the other. Both rules must be exact.
 #[test]
 fn date_times_and_dates_are_the_schemas() {
-    for good in ["2026-11-05T14:30:00Z", "2026-11-05T14:30:00.123+02:00", "2026-09-06T00:00:00.000Z", "2026-11-05t14:30:00z"] {
+    for good in [
+        "2026-11-05T14:30:00Z",
+        "2026-11-05T14:30:00.123+02:00",
+        "2026-09-06T00:00:00.000Z",
+        "2026-11-05t14:30:00z",
+    ] {
         assert!(is_date_time(good), "{good}");
     }
-    for bad in ["2026-11-05", "2026-11-05T14:30Z", "2026-11-05T14:30:00", "2026-11-05T14:30:00.Z", "2026-11-05 14:30:00Z"] {
+    for bad in [
+        "2026-11-05",
+        "2026-11-05T14:30Z",
+        "2026-11-05T14:30:00",
+        "2026-11-05T14:30:00.Z",
+        "2026-11-05 14:30:00Z",
+    ] {
         assert!(!is_date_time(bad), "{bad}");
     }
     for good in ["2026", "2026-11", "2026-11-04"] {

@@ -6,7 +6,9 @@
 //!                                              manifest: Manifest { language: llx, kind: Bible, books: [PSA, PHM, …], … },
 //!                                              detail:   Detail::Rc(RcManifest { dublin_core, checking, projects }),
 //!                                              findings: [ManifestFinding { check: SortCanon, … }, …] }
-//! check(&read, &Repo { name: Some("Tech_Advance/llx_reg"), .. })  → findings that need the repo
+//! check(&read, &Repo { name: Some("Tech_Advance/llx_reg"), files: Some(&files) })  → findings that need the repo
+//! create_bible(&NewBibleProject { books: [MAT, ROM], … }, &[Burrito, Rc])  → metadata.json, manifest.yaml
+//! edit(&manifests, &Change { add_books: [MRK], checksums: [(path, bytes)], .. })  → only the files that changed
 //!
 //! manifest.json   BTT Writer, one book        bttwriter::read(bytes) → BttWriterManifest
 //! manifest.yaml   Resource Container 0.2      rc
@@ -27,18 +29,25 @@
 pub mod bttwriter;
 pub mod burrito;
 mod check;
+mod edit;
 mod kind;
 mod lenient;
+mod md5;
 pub mod rc;
 mod related;
 pub mod tree;
+mod write;
 
 use std::collections::BTreeMap;
 
 use mise::books::BookKey;
 
 pub use check::{Repo, check};
+pub use edit::{Change, EditError, Edited, edit};
 pub use kind::Domain;
+pub use write::{
+    CreateError, Fingerprint, NewBibleProject, NewBook, NewLanguage, create_bible, fingerprint,
+};
 
 /// Which container a manifest is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -259,6 +268,12 @@ pub enum Check {
     SortCanon,
     /// The repo's name starts with the manifest's language (`tpi_reg` for `tpi`).
     RepoNameLanguage,
+    /// Each file the manifest lists is in the repo.
+    IngredientExists,
+    /// Each file the manifest lists has something in it.
+    IngredientEmpty,
+    /// Each Burrito ingredient's size and md5 are its file's.
+    IngredientChecksum,
 }
 
 impl Check {
@@ -272,6 +287,9 @@ impl Check {
         Check::BookTitleTranslated,
         Check::SortCanon,
         Check::RepoNameLanguage,
+        Check::IngredientExists,
+        Check::IngredientEmpty,
+        Check::IngredientChecksum,
     ];
 
     /// The stable id: `title-set`.
@@ -286,6 +304,9 @@ impl Check {
             Check::BookTitleTranslated => "book-title-translated",
             Check::SortCanon => "sort-canon",
             Check::RepoNameLanguage => "repo-name-language",
+            Check::IngredientExists => "ingredient-exists",
+            Check::IngredientEmpty => "ingredient-empty",
+            Check::IngredientChecksum => "ingredient-checksum",
         }
     }
 }

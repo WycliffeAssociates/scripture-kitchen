@@ -407,10 +407,7 @@ fn primary_rules(primary: &[(String, Vec<(String, PrimaryId)>)], r: &mut Reader)
         }
         for (repo, id) in repos {
             let at = pointer(&at, repo);
-            let mut halves = repo.split('/');
-            let path = matches!((halves.next(), halves.next(), halves.next()), (Some(o), Some(n), None)
-                if !o.is_empty() && !n.is_empty() && !repo.chars().any(char::is_whitespace));
-            if !path {
+            if !is_repository_path(repo) {
                 bad(
                     r,
                     &at,
@@ -437,6 +434,13 @@ fn primary_rules(primary: &[(String, Vec<(String, PrimaryId)>)], r: &mut Reader)
             }
         }
     }
+}
+
+/// `owner/repo`: `^[^\s/]+/[^\s/]+$`.
+pub(crate) fn is_repository_path(repo: &str) -> bool {
+    let mut halves = repo.split('/');
+    matches!((halves.next(), halves.next(), halves.next()), (Some(o), Some(n), None)
+        if !o.is_empty() && !n.is_empty() && !repo.chars().any(char::is_whitespace))
 }
 
 /// `^[a-z][a-z0-9-]*[a-z0-9]$`
@@ -548,7 +552,7 @@ fn scope(node: Option<&Node>, at: &str, r: &mut Reader) -> Vec<(String, Vec<Stri
 
 /// RFC 3339's date-time, as JSON Schema's `date-time` format means it:
 /// `2026-11-05T14:30:00Z`, `2026-11-05T14:30:00.123+02:00`.
-fn is_date_time(text: &str) -> bool {
+pub(crate) fn is_date_time(text: &str) -> bool {
     let b = text.as_bytes();
     let digits = |range: std::ops::Range<usize>| {
         b.get(range)

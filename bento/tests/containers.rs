@@ -383,7 +383,15 @@ fn the_repos_name_should_start_with_its_language() {
         "manifest.yaml",
         &fixture("fixtures/rc/hub_tn_luk_text_reg.yaml"),
     );
-    let named = |name| check(&tn, &Repo { name: Some(name) });
+    let named = |name| {
+        check(
+            &tn,
+            &Repo {
+                name: Some(name),
+                files: None,
+            },
+        )
+    };
     assert_eq!(named("alfred/tn_luk_text_reg"), []);
     assert_eq!(named("TN_reg"), [], "any case");
     let wrong = named("Tech_Advance/tpi_reg");

@@ -276,4 +276,3 @@ impl RcManifest {
         }
     }
 }
-

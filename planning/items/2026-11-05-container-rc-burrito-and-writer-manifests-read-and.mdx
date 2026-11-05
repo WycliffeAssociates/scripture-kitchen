@@ -492,6 +492,9 @@ Step 4 measures it again inside the real module, with `wasm-opt`.
    settled is under "Step 2, as built" below.
 3. **Write**: `createBible`, `edit`, `fingerprint`, the file checks, and the schema tests.
    bttwriter's `consolidate()` can now be built, and the hub's `manifest_with_book` goes.
+   *Built 2026-11-05* (`write.rs`, `edit.rs`, `md5.rs`; `tests/write.rs` validates against
+   `schema/burrito/`, the fork vendored at `b8872ee`). What it settled is under "Step 3, as
+   built" below.
 4. **The TS surface**: the module, `readOrThrow`, the Standard Schema exports, and the size
    measurement. Sefer switches `discovery`, `projectAdmin`, `import` and its save path, and
    `assemble` together with bttwriter's step 6.
@@ -525,6 +528,38 @@ Step 4 measures it again inside the real module, with `wasm-opt`.
   switches). A source with no language isn't a `Related` (the hub kept opaque Burrito
   targets; Sefer dropped them). Older Burritos' `type`/`target` relationships read as
   `relationType`/`id`.
+
+### Step 3, as built
+
+- **`create_bible` passes the fork's schema**, checked by `jsonschema` (a dev dependency)
+  over the vendored files, with no network. The test also proves it can fail: a Burrito
+  written as Sefer writes it today fails in the four places named above.
+- **Creating then adding is creating.** `create(MAT, ROM)` then `edit(add MRK)` gives the
+  same `metadata.json` bytes as `create(MAT, MRK, ROM)`, and the same RC manifest.
+- **Adding a book to a catalog RC adds only its lines.** Adding GEN to `bdf_reg` inserts its
+  seven lines before MAT and changes nothing else. The new entry follows the file's own
+  list style: the catalog writes a list flush with its key (`categories:` then
+  `- bible-nt`), so the new entry does too.
+- **A tie is said, not fixed.** Adding ACT (canon's 44) to a Sefer-written RC whose ROM is
+  44 adds it and reports the tie; the neighbours keep their numbers.
+- **Checksums** update only an ingredient's md5 and size lines, and return no file when
+  nothing changed; a path with no ingredient is a finding.
+- **What the Burrito says, decided here** (not settled earlier; say if any should change):
+  - `identification.name` and `abbreviation` are keyed by the project's language tag, and
+    `meta.defaultLocale` is that tag. Sefer keys them `en`, though the text is in the
+    project's language.
+  - A language's `name` is written under `en` and under its own tag, because the fork
+    requires an `en` name (the schema test caught it). Sefer does the same.
+  - `copyright` is one short statement with no `lang`.
+  - `idAuthorities` and `primary` use `wacs`; relationships are `wacs::WA-Catalog/en_ulb`.
+- **The RC**: `sort` is the book's place in the chosen canon's list (MAT 40; with the
+  deuterocanon, TOB 67), `categories` is `bible-nt` or else `bible-ot` (the deuterocanon
+  included), `issued` and `modified` are the date of `created_at`. `edit` doesn't touch
+  `modified`: it changes only what it was asked to.
+- **New ingredients sit at the root** under canon's file name (`42-MRK.usfm`), as
+  `create_bible` puts them.
+- **The file checks** (`ingredient-exists`, `-empty`, `-checksum`) are warnings, through
+  `Repo { name, files }`.
 
 <Followup id="wacs-scan-bin">The WACS-scan bin (read every repo under a folder, print a findings summary) wasn't built in step 2: the 1,441 repos aren't on this machine. Build it when they are, and copy any new odd case into `fixtures/`.</Followup>
 

@@ -195,6 +195,110 @@ fn from_yaml_value(value: &yaml_edit::YamlValue) -> Node {
     }
 }
 
+impl Node {
+    /// `{"key": value, …}` from pairs.
+    pub fn map<K: Into<String>>(entries: impl IntoIterator<Item = (K, Node)>) -> Node {
+        Node::Map(entries.into_iter().map(|(k, v)| (k.into(), v)).collect())
+    }
+
+    pub fn text(text: impl Into<String>) -> Node {
+        Node::String(text.into())
+    }
+
+    /// The value for `key` to change, if it's there (the later, if twice).
+    pub fn get_mut(&mut self, key: &str) -> Option<&mut Node> {
+        let Node::Map(entries) = self else {
+            return None;
+        };
+        entries
+            .iter_mut()
+            .rev()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v)
+    }
+
+    /// The value for `key` to change, adding it last when it's not there.
+    pub fn entry(&mut self, key: &str) -> Option<&mut Node> {
+        let Node::Map(entries) = self else {
+            return None;
+        };
+        match entries.iter().rposition(|(k, _)| k == key) {
+            Some(i) => Some(&mut entries[i].1),
+            None => {
+                entries.push((key.to_owned(), Node::Null));
+                entries.last_mut().map(|(_, v)| v)
+            }
+        }
+    }
+
+    /// As `JSON.stringify(value, null, 2)` writes it, plus a final newline:
+    /// how Sefer writes `metadata.json` today.
+    pub fn to_json(&self) -> String {
+        let mut out = String::new();
+        write_json(self, 0, &mut out);
+        out.push('\n');
+        out
+    }
+}
+
+fn write_json(node: &Node, depth: usize, out: &mut String) {
+    let pad = |n: usize| "  ".repeat(n);
+    match node {
+        Node::Null => out.push_str("null"),
+        Node::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+        Node::Number(n) => out.push_str(n),
+        Node::String(s) => json_string(s, out),
+        Node::List(items) if items.is_empty() => out.push_str("[]"),
+        Node::List(items) => {
+            out.push_str("[\n");
+            for (i, item) in items.iter().enumerate() {
+                out.push_str(&pad(depth + 1));
+                write_json(item, depth + 1, out);
+                out.push_str(if i + 1 < items.len() { ",\n" } else { "\n" });
+            }
+            out.push_str(&pad(depth));
+            out.push(']');
+        }
+        Node::Map(_) => {
+            let entries = node.entries();
+            if entries.is_empty() {
+                out.push_str("{}");
+                return;
+            }
+            out.push_str("{\n");
+            for (i, (key, value)) in entries.iter().enumerate() {
+                out.push_str(&pad(depth + 1));
+                json_string(key, out);
+                out.push_str(": ");
+                write_json(value, depth + 1, out);
+                out.push_str(if i + 1 < entries.len() { ",\n" } else { "\n" });
+            }
+            out.push_str(&pad(depth));
+            out.push('}');
+        }
+    }
+}
+
+/// A JSON string as `JSON.stringify` escapes it: quotes, backslashes and
+/// control characters; everything else as itself.
+pub(crate) fn json_string(text: &str, out: &mut String) {
+    out.push('"');
+    for c in text.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\u{8}' => out.push_str("\\b"),
+            '\u{c}' => out.push_str("\\f"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+}
+
 /// `at` + `/key`, escaped as a JSON pointer (`~` → `~0`, `/` → `~1`).
 pub fn pointer(at: &str, key: &str) -> String {
     format!("{at}/{}", key.replace('~', "~0").replace('/', "~1"))

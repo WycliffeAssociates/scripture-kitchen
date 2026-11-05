@@ -3,7 +3,8 @@
 //! ```text
 //! read(…).findings     the manifest alone   title-set, language-set, book-title-translated, sort-canon
 //!                                           (and what reading forgave: lenient-value, manifest-valid)
-//! check(&read, &repo)  the repo too         repo-name-language
+//! check(&read, &repo)  the repo too         repo-name-language; with its files, ingredient-exists,
+//!                                           ingredient-empty, ingredient-checksum
 //! ```
 //!
 //! Each finding names its [`Check`], so a page can list every check as passed
@@ -18,6 +19,9 @@ use crate::{Check, Detail, Format, Manifest, ManifestFinding, Read, Severity};
 pub struct Repo<'a> {
     /// `owner/repo`, or just the repo's name: `Tech_Advance/tpi_reg`.
     pub name: Option<&'a str>,
+    /// The repo's files by path from its root (`41-MAT.usfm`); a leading
+    /// `./` on either side is ignored.
+    pub files: Option<&'a [(String, Vec<u8>)]>,
 }
 
 /// The checks that need more than the manifest. Pure: the caller hands over
@@ -43,7 +47,93 @@ pub fn check(read: &Read, repo: &Repo<'_>) -> Vec<ManifestFinding> {
             });
         }
     }
+    if let Some(files) = repo.files {
+        files_check(read, files, &mut out);
+    }
     out
+}
+
+fn files_check(read: &Read, files: &[(String, Vec<u8>)], out: &mut Vec<ManifestFinding>) {
+    let find = |path: &str| {
+        let path = path.trim_start_matches("./");
+        files
+            .iter()
+            .find(|(p, _)| p.trim_start_matches("./") == path)
+            .map(|(_, b)| b.as_slice())
+    };
+    // Each listed file: its path, where the manifest lists it, and what the
+    // manifest says it should be (a Burrito's size and md5).
+    let listed: Vec<(String, String, Option<i64>, Option<String>)> = match &read.detail {
+        Some(Detail::Rc(rc)) => rc
+            .projects
+            .iter()
+            .enumerate()
+            .filter_map(|(i, p)| Some((p.path.clone()?, format!("/projects/{i}/path"), None, None)))
+            .collect(),
+        Some(Detail::Burrito(b)) => b
+            .ingredients
+            .iter()
+            .map(|(path, i)| {
+                (
+                    path.clone(),
+                    pointer("/ingredients", path),
+                    i.size,
+                    i.md5.clone(),
+                )
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
+    for (path, at, size, md5) in listed {
+        let book = read
+            .manifest
+            .as_ref()
+            .and_then(|m| {
+                m.books
+                    .iter()
+                    .find(|b| b.path.as_deref() == Some(path.as_str()))
+            })
+            .map(|b| b.book);
+        let mut push = |check, severity, message: String| {
+            out.push(ManifestFinding {
+                check,
+                severity,
+                at: Some(at.clone()),
+                book,
+                message,
+            });
+        };
+        let Some(bytes) = find(&path) else {
+            push(
+                Check::IngredientExists,
+                Severity::Warning,
+                format!("{path} is listed but not in the repo."),
+            );
+            continue;
+        };
+        if bytes.is_empty() {
+            push(
+                Check::IngredientEmpty,
+                Severity::Warning,
+                format!("{path} is empty."),
+            );
+        }
+        let print = crate::fingerprint(bytes);
+        let size_wrong = size.is_some_and(|s| s != print.size as i64);
+        let md5_wrong = md5
+            .as_deref()
+            .is_some_and(|m| !m.eq_ignore_ascii_case(&print.md5));
+        if size_wrong || md5_wrong {
+            push(
+                Check::IngredientChecksum,
+                Severity::Warning,
+                format!(
+                    "{path}'s size or md5 isn't the file's ({} bytes, md5 {}); the manifest is out of date.",
+                    print.size, print.md5
+                ),
+            );
+        }
+    }
 }
 
 /// The checks a manifest answers alone, added to what reading found.
