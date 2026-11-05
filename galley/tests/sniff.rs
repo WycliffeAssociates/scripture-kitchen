@@ -17,7 +17,7 @@ fn against(name: &str, scheme: &str) -> Vec<String> {
     for source in corpus(name) {
         let tokens = lex(&source);
         let toc = toc(source.as_bytes(), &tokens);
-        for o in lint_against(&source, scheme) {
+        for o in lint_against(&toc, scheme) {
             let at: Sid = toc.locate(tokens[o.anchor as usize].start);
             let row = &usfm_onion::lint::LINT_ROWS[o.code as usize];
             out.push(format!("{}@{at} ({})", row.name, o.aux));

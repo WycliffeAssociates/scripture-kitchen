@@ -4,7 +4,7 @@
 //! ```text
 //! inventory([GEN.usfm, EXO.usfm, …])  ->  canon::Inventory   which verses, parts and lengths
 //! sniff([GEN.usfm, EXO.usfm, …])      ->  canon::Sniff       which scheme the text follows
-//! lint_against(GEN.usfm, ulb)         ->  [Observation]      chapter-ends-early, verse-beyond-scheme
+//! lint_against(&gen_toc, ulb)         ->  [Observation]      chapter-ends-early, verse-beyond-scheme
 //! ```
 //!
 //! canon never parses USFM, and onion never learns what a versification
@@ -35,11 +35,17 @@ pub fn sniff<'a>(books: impl IntoIterator<Item = &'a str>) -> Sniff {
 /// One book judged against a scheme's counts: onion's `chapter-ends-early`
 /// and `verse-beyond-scheme`, anchored on its tokens like any lint finding.
 /// A book the scheme doesn't number gets none.
-pub fn lint_against(source: &str, scheme: &Scheme) -> Vec<Observation> {
-    let tokens = lex(source);
-    let toc = toc(source.as_bytes(), &tokens);
-    let book = book_key(&toc);
-    lint_against_counts(&toc, |chapter| scheme.last_verse(book, chapter))
+///
+/// Takes the book's table of contents, which a registered book already has
+/// (`Pantry::toc`): this lexes nothing. The book's counts are found once, and
+/// each verse is then an index into them.
+pub fn lint_against(toc: &Toc, scheme: &Scheme) -> Vec<Observation> {
+    let Some(counts) = scheme.verse_counts(book_key(toc)) else {
+        return Vec::new();
+    };
+    lint_against_counts(toc, |chapter| {
+        counts.get(usize::from(chapter).checked_sub(1)?).copied()
+    })
 }
 
 /// The `\id` code, uppercased: canon's keys are the spec's spelling.
