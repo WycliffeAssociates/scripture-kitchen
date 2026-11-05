@@ -26,6 +26,7 @@
 //! `planning/items/2026-11-04-canon-and-versification-the-book-table-schemes-map.mdx`.
 
 pub mod books;
+pub mod define;
 pub mod map;
 pub mod scheme;
 mod scheme_tables;
@@ -34,6 +35,7 @@ mod sniff_tables;
 mod tables;
 
 pub use books::{Book, Canon, Division, book, books, fold, parse_book, usfm_file_name};
+pub use define::{DefineError, SchemeBuilder};
 pub use map::{Mapped, Paired, Verse, map, pairs};
 pub use mise::books::BookKey;
 pub use scheme::{Scheme, scheme, schemes};
