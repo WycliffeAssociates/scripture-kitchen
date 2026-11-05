@@ -25,6 +25,12 @@
 
 pub mod pack;
 pub mod stitch;
+pub mod walk;
+
+#[cfg(feature = "git2")]
+mod git2_source;
+#[cfg(feature = "git2")]
+pub use git2_source::Git2Source;
 
 pub use stitch::{
     WriterChapter, WriterTree, book_to_usfm, decode_text, is_text_path, stitch, tree_from_files,
