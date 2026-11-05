@@ -425,7 +425,18 @@ behind.
      - wasm: `{ versification: "ulb" | "followSource" }` on `update`/`updateReference`,
        `defineScheme`, `sniff(scope)`, `mapVerse(from, to, ref)` and `pairs(from, to, book)`,
        as flat results like the other doors. Conformance tests in `sous_conformance.mjs`.
-   - **7b, pairing on `org` keys.** Before `pair_keys`, each side's keys go to `org` through
+   - **7b, pairing across schemes** (done on the `canon` branch, 2026-11-05, as option B: Will
+     chose the more correct one). sous-core gained a `Crosswalk` trait and
+     `pair_keys_across`. Units are connected groups of rows, so merges and splits are single
+     units under the existing unit contract. A source-only verse is reported in the
+     target's numbering, and one that is a title or has no counterpart is dropped. galley
+     builds the crosswalk from canon (`counterparts`), and the pairing cache key gains its
+     identity. With no crosswalk the path is `pair_keys`, unchanged, and every golden held
+     (only the memory pin moved, by the key's 8 bytes). Pinned end to end: an
+     eng-numbered Psalm 3 against an org-numbered source reports a missing verse as
+     written, and nothing once both declare. Not yet: the overlay doors' text alignment
+     (`align`) still pairs as written.
+     Originally: **7b, pairing on `org` keys.** Before `pair_keys`, each side's keys go to `org` through
      its scheme's `moves()`, and findings come back through the target's scheme. Same
      schemes, or no declaration on either side, is exactly today's path. The pairing cache
      key (`PairKey`, both checksums today) gains both sides' scheme identities, so changing a

@@ -36,7 +36,7 @@ mod tables;
 
 pub use books::{Book, Canon, Division, book, books, fold, parse_book, usfm_file_name};
 pub use define::{DefineError, SchemeBuilder};
-pub use map::{Mapped, Paired, Verse, map, pairs};
+pub use map::{Mapped, Paired, Verse, counterparts, map, pairs};
 pub use mise::books::BookKey;
 pub use scheme::{Scheme, scheme, schemes};
 pub use sniff::{Confidence, Dissent, Inventory, Sniff, Standing, sniff};

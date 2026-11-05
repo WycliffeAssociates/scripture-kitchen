@@ -36,6 +36,35 @@ visited: presence is per PAIRED book. That is what keeps a 27-book New
 Testament judged against a whole Bible at eighteen rows rather than eighteen
 thousand.
 
+## Across two numberings
+
+When the target and its source follow different versification schemes (a
+`ulb` translation of an `org`-numbered Hebrew text, say), the host passes a
+`Crosswalk` (`PairedBook::pair_across`) and the pairing is
+`pair_keys_across` instead of `pair_keys`:
+
+| the two sides | the unit |
+| --- | --- |
+| target PSA 3:1 (eng), source PSA 3:2 (org) | one unit: renumbered, paired |
+| target PSA 13:5 and 13:6, source PSA 13:6 | one unit, two target ranges (a merge) |
+| target PSA 89:6 (rsc), source PSA 90:5 and 90:6 | one unit, two source ranges (a split) |
+| source PSA 3:1 (org's title verse), target a `\d` title | no unit and no fact: a title is not a verse row |
+
+Units are the connected groups of rows across the crosswalk, which is the
+same unit contract bridges already use, so lengths, presence and source copy
+read them unchanged. Two differences from `pair_keys`, both deliberate:
+
+- A `SourceOnly` key is in the **target's** numbering: presence places
+  "missing" among the target's own rows, and it is what the translator reads.
+  A source verse whose counterpart is a title, or nothing (the target's
+  scheme has no such verse), is no missing verse and is dropped.
+- A key repeated on one side can't be placed across numberings, so every copy
+  is blocked as `AmbiguousDuplicate` rather than zipped in order.
+
+With no crosswalk (no declaration, or both sides on one scheme) it is
+`pair_keys`, unchanged. sous-core knows no scheme: galley builds the crosswalk
+from canon and keys its pairing cache on it.
+
 ## Coalescing
 
 Keys of one kind, in one chapter, whose numbers run consecutively become ONE

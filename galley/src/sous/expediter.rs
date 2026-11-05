@@ -810,6 +810,7 @@ impl<P: ChapterPass + Sync> Expediter<P> {
         let (projected, patterns, clusters, terminals) = {
             let Self {
                 pantry,
+                versification,
                 pass,
                 config,
                 observations,
@@ -947,6 +948,7 @@ impl<P: ChapterPass + Sync> Expediter<P> {
                     pass,
                     config,
                     pantry,
+                    versification,
                     &books,
                     &references,
                     &checksums,

@@ -21,7 +21,7 @@
 
 use rustc_hash::FxHashMap;
 
-use crate::alignment::pair_keys;
+use crate::alignment::{Crosswalk, pair_keys, pair_keys_across};
 use crate::codec::{
     FindingKind, PresenceDigest, ProportionalityDigest, QuantizedDeviation, SourceCopyDigest,
 };
@@ -273,6 +273,22 @@ impl PairedBook {
         copy: Option<(&str, &SourceWords)>,
         facts: &mut Vec<AlignmentFact>,
     ) -> Self {
+        Self::pair_across(book, target, source, copy, None, facts)
+    }
+
+    /// [`pair_with`](Self::pair_with) for a target and source numbered
+    /// differently: with a [`Crosswalk`], units are the connected groups of
+    /// rows across the two numberings (`pair_keys_across`), so a merge or a
+    /// split is one unit and a renumbered verse pairs with its counterpart.
+    /// `None` is exactly `pair_with`: the keys pair as written.
+    pub fn pair_across(
+        book: BookKey,
+        target: &[VerseLength],
+        source: &[SourceVerse],
+        copy: Option<(&str, &SourceWords)>,
+        crosswalk: Option<&dyn Crosswalk>,
+        facts: &mut Vec<AlignmentFact>,
+    ) -> Self {
         let target_keys: Vec<VerseKey> = target.iter().map(|row| row.key()).collect();
         let source_keys: Vec<VerseKey> = source.iter().map(|row| row.key()).collect();
         let mut ratios: Vec<f64> = Vec::with_capacity(target.len());
@@ -284,39 +300,39 @@ impl PairedBook {
         let mut merged: Vec<u32> = Vec::new();
         // This book's own facts, whatever the caller accumulated before it.
         let facts_start = facts.len();
-        pair_keys(
-            book,
-            &target_keys,
-            &source_keys,
-            &mut |key, left, right| {
-                if let Some((text, words)) = copy {
-                    let set = match right {
-                        [only] => words.verse(*only),
-                        many => {
-                            merged.clear();
-                            for at in many {
-                                merged.extend_from_slice(words.verse(*at));
-                            }
-                            merged.sort_unstable();
-                            merged.dedup();
-                            &merged
+        let mut unit = |key: VerseKey, left: &[usize], right: &[usize]| {
+            if let Some((text, words)) = copy {
+                let set = match right {
+                    [only] => words.verse(*only),
+                    many => {
+                        merged.clear();
+                        for at in many {
+                            merged.extend_from_slice(words.verse(*at));
                         }
-                    };
-                    source_copy::unit_rows(text, target, left, set, &mut copies);
-                }
-                let long: u32 = left.iter().map(|at| target[*at].graphemes()).sum();
-                let short: u32 = right.iter().map(|at| source[*at].graphemes()).sum();
-                if long == 0 || short == 0 {
-                    if long == 0 && short > 0 {
-                        empties.push((key, bounding(target, left)));
+                        merged.sort_unstable();
+                        merged.dedup();
+                        &merged
                     }
-                    return;
+                };
+                source_copy::unit_rows(text, target, left, set, &mut copies);
+            }
+            let long: u32 = left.iter().map(|at| target[*at].graphemes()).sum();
+            let short: u32 = right.iter().map(|at| source[*at].graphemes()).sum();
+            if long == 0 || short == 0 {
+                if long == 0 && short > 0 {
+                    empties.push((key, bounding(target, left)));
                 }
-                ratios.push(f64::from(long) / f64::from(short));
-                spans.push(bounding(target, left));
-            },
-            facts,
-        );
+                return;
+            }
+            ratios.push(f64::from(long) / f64::from(short));
+            spans.push(bounding(target, left));
+        };
+        match crosswalk {
+            None => pair_keys(book, &target_keys, &source_keys, &mut unit, facts),
+            Some(walk) => {
+                pair_keys_across(book, &target_keys, &source_keys, walk, &mut unit, facts);
+            }
+        }
         // Pairing walks keys in target order, so units already follow the book.
         let spread = Spread::of(&ratios);
         copies.sort_by_key(|row| (row.span().from(), row.span().to()));

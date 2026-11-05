@@ -19,7 +19,7 @@ pub mod typos;
 pub mod unicode;
 pub mod words;
 
-pub use alignment::{AlignedSide, AlignedUnit, Alignment, AlignmentFact, align};
+pub use alignment::{AlignedSide, AlignedUnit, Alignment, AlignmentFact, Crosswalk, align};
 pub use codec::{
     Anchor, CodecError, ConventionDigest, FindingFlags, FindingKind, HygieneClass, HygieneDigest,
     HygieneSite, PackedFinding, Placement, PresenceDigest, PresenceKind, ProportionalityDigest,

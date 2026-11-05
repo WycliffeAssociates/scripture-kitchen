@@ -7,16 +7,22 @@
 //! the source withdrawn                      -> the whole cache dropped
 //! ```
 //!
-//! The key is both raw checksums and whether the source-copy words were
-//! walked, so nothing here has to be invalidated: a side that moved simply
-//! misses.
+//! The key is both raw checksums, whether the source-copy words were
+//! walked, and the crosswalk the two sides' declared schemes make (none when
+//! they number alike), so nothing here has to be invalidated: a side or a
+//! declaration that moved simply misses.
+//!
+//! With a crosswalk, sous pairs across the two numberings
+//! (`PairedBook::pair_across`): a renumbered verse pairs with its
+//! counterpart, a merge or a split is one unit, and a source verse the target
+//! lacks is missing in the target's own numbering.
 
 use std::collections::hash_map::Entry;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use sous_core::{
-    AlignmentFact, BookKey, ChapterPass, Findings, LengthConfig, PairedBook, ProjectSpread,
-    ProjectedBook, SourceVerse, SourceWords, judge_paired,
+    AlignmentFact, BookKey, ChapterPass, Crosswalk, Findings, LengthConfig, PairedBook,
+    ProjectSpread, ProjectedBook, SourceVerse, SourceWords, judge_paired,
 };
 
 use super::keys::PairKey;
@@ -24,6 +30,7 @@ use super::siting::projection;
 use super::{OnionBook, PublishError};
 use crate::pantry::derived::Store;
 use crate::pantry::{BookId, Pantry, RawChecksum};
+use crate::versification::Registry;
 
 /// Pairs every target against the reference of its [`BookKey`] and judges the
 /// ratios, filling `views` with any projection the source-copy walk had to
@@ -33,6 +40,7 @@ pub(super) fn pair_and_judge<P: ChapterPass>(
     pass: &P,
     config: &P::Config,
     pantry: &Pantry,
+    registry: &Registry,
     books: &[(BookId, BookKey)],
     references: &[(BookId, BookKey)],
     checksums: &[RawChecksum],
@@ -62,7 +70,12 @@ pub(super) fn pair_and_judge<P: ChapterPass>(
     let lengths = pass.length_config(config).filter(LengthConfig::judges);
     // First wins: a caller may present two files under one key, and
     // the choice has to be its order rather than a hash's.
-    type Source<'a> = (RawChecksum, &'a [SourceVerse], Option<&'a SourceWords>);
+    type Source<'a> = (
+        &'a BookId,
+        RawChecksum,
+        &'a [SourceVerse],
+        Option<&'a SourceWords>,
+    );
     let mut sources: FxHashMap<BookKey, Source<'_>> = FxHashMap::default();
     let copying = lengths.is_some_and(|lengths| lengths.source_copy.enabled);
     if lengths.is_some() {
@@ -72,7 +85,7 @@ pub(super) fn pair_and_judge<P: ChapterPass>(
             };
             let checksum = pantry.checksum(id).expect("the pantry listed this id");
             let words = copying.then(|| pantry.reference_words(id)).flatten();
-            sources.entry(*key).or_insert((checksum, verses, words));
+            sources.entry(*key).or_insert((id, checksum, verses, words));
         }
     }
     match lengths.filter(|_| !sources.is_empty()) {
@@ -81,7 +94,7 @@ pub(super) fn pair_and_judge<P: ChapterPass>(
             let mut keys: Vec<PairKey> = Vec::with_capacity(books.len());
             let mut slots: Vec<Option<PairKey>> = Vec::with_capacity(books.len());
             for (index, ((id, key), aggregate)) in books.iter().zip(corpus).enumerate() {
-                let Some((source, verses, words)) = sources.get(key) else {
+                let Some((source_id, source, verses, words)) = sources.get(key) else {
                     slots.push(None);
                     continue;
                 };
@@ -89,7 +102,9 @@ pub(super) fn pair_and_judge<P: ChapterPass>(
                     wordless.insert(*key);
                 }
                 let walked = copying && words.is_some();
-                let entry = (checksums[index], *source, walked);
+                let crosswalk = registry.crosswalk(id, source_id, *key);
+                let across = crosswalk.as_ref().map_or(0, |(_, identity)| *identity);
+                let entry = (checksums[index], *source, walked, across);
                 if let Entry::Vacant(slot) = paired.entry(entry) {
                     facts.clear();
                     // The one text read on this path, and only for
@@ -103,11 +118,12 @@ pub(super) fn pair_and_judge<P: ChapterPass>(
                         .then(|| views[index].as_ref().zip(*words))
                         .flatten()
                         .map(|(view, words)| (view.text(), words));
-                    slot.insert(PairedBook::pair_with(
+                    slot.insert(PairedBook::pair_across(
                         *key,
                         pass.verse_lengths(aggregate),
                         verses,
                         copy,
+                        crosswalk.as_ref().map(|(walk, _)| walk as &dyn Crosswalk),
                         &mut facts,
                     ));
                     pairings += 1;

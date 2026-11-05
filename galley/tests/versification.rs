@@ -144,3 +144,86 @@ fn the_plated_diagnostics_carry_the_findings_and_are_unchanged_without_them() {
     let declared = sous.book_parse(&id, opts).unwrap().unwrap();
     assert_ne!(declared, plain, "two more findings crossed the wire");
 }
+
+/// Psalm 3 numbered two ways: the target as eng (title as `\d`, verses
+/// 1-8), its source as org (title as verse 1, verses 2-9).
+fn psalm_three(org_numbering: bool) -> String {
+    let lines = [
+        "A psalm of David, when he fled from Absalom his son.",
+        "Yahweh, how many are my enemies!",
+        "Many are saying of me, there is no help for him in God.",
+        "But you, Yahweh, are a shield around me, my glory.",
+        "I lift up my voice to Yahweh, and he answers me from his holy hill.",
+        "I lay down and slept; I awoke, for Yahweh sustains me.",
+        "I will not be afraid of the ten thousands of people.",
+        "Arise, Yahweh! Save me, my God! For you strike all my enemies.",
+        "Salvation comes from Yahweh. May your blessing be on your people.",
+    ];
+    let mut text = String::from("\\id PSA\n\\c 3\n");
+    if org_numbering {
+        for (at, line) in lines.iter().enumerate() {
+            text.push_str(&format!("\\q1\n\\v {} {line}\n", at + 1));
+        }
+    } else {
+        text.push_str(&format!("\\d {}\n", lines[0]));
+        for (at, line) in lines[1..].iter().enumerate() {
+            text.push_str(&format!("\\q1\n\\v {} {line}\n", at + 1));
+        }
+    }
+    text
+}
+
+fn presence_rows(sous: &mut Expediter<Brigade>) -> usize {
+    let bytes = sous.publish().unwrap();
+    let snapshot = sous_core::CorpusSnapshot::open(&bytes).unwrap();
+    let mut presence = 0;
+    for index in 0..snapshot.len() {
+        let book = snapshot
+            .book(sous_core::BookIndex::new(index).unwrap())
+            .unwrap();
+        for row in 0..book.len() {
+            if let sous_core::FindingKind::Presence(_) = book.at(row).unwrap().kind() {
+                presence += 1;
+            }
+        }
+    }
+    presence
+}
+
+/// The pairing itself, across schemes: undeclared, every verse pairs one
+/// number off and org's 3:9 looks missing; declared eng against org, every
+/// verse pairs with its counterpart and org's title verse is no missing verse.
+#[test]
+fn a_psalm_numbered_two_ways_pairs_cleanly_once_both_sides_declare() {
+    let mut sous = Expediter::new(Brigade::default(), BUDGET);
+    sous.update("books/PSA.usfm", Role::Target, &psalm_three(false))
+        .unwrap();
+    sous.update_with(
+        "ref/PSA.usfm",
+        Role::Reference,
+        Retain::ProductsOnly,
+        &psalm_three(true),
+    )
+    .unwrap();
+    let undeclared = presence_rows(&mut sous);
+    assert!(undeclared > 0, "as written, the source's 3:9 has no target");
+
+    sous.declare("books/PSA.usfm", Some(Declared::Scheme("eng".into())))
+        .unwrap();
+    sous.declare("ref/PSA.usfm", Some(Declared::Scheme("org".into())))
+        .unwrap();
+    assert_eq!(
+        presence_rows(&mut sous),
+        0,
+        "across the schemes, nothing is missing"
+    );
+
+    // A declaration that moves re-pairs, though neither text changed.
+    sous.declare("books/PSA.usfm", Some(Declared::Scheme("org".into())))
+        .unwrap();
+    assert_eq!(
+        presence_rows(&mut sous),
+        undeclared,
+        "org against org: numbers as written"
+    );
+}

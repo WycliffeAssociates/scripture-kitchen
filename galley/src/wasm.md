@@ -178,9 +178,14 @@ JSON.parse(galley.pairs("ulb", "org", "PSA"));  // [{ here: ["PSA 3:0"], there: 
 ```
 
 `sniff` is a suggestion for a book that declares nothing, and nothing applies
-it: remapping a translator's numbering on a guess is the bad surprise. Pairing
-on `org` keys (plan step 7b) is not here yet: sous still pairs numbers as
-written.
+it: remapping a translator's numbering on a guess is the bad surprise.
+
+When a target and its source both have a scheme and the two differ, sous
+pairs them across the numberings (`presence.md`, "Across two numberings"): a
+renumbered verse pairs with its counterpart, a merge or split is one unit, and
+a missing verse is reported in the target's own numbering. Changing a
+declaration re-pairs at the next `publish`. The overlay doors still pair
+numbers as written.
 
 ## Dirty and rework
 

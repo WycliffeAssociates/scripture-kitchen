@@ -244,6 +244,23 @@ pub fn map(from: &Scheme, to: &Scheme, v: Verse) -> Mapped {
     }
 }
 
+/// The verses of `to` that `from`'s verse `v` corresponds to, whole, in
+/// canonical order: [`map`]'s answer without its verdict (no `Same`, `Merged`
+/// or `Absent`, only the verses). What a pairing asks for every verse, so it
+/// skips the reverse check `map` makes to tell a merge from a move. Unlike
+/// `map`, it doesn't check that `from` numbers `v`.
+pub fn counterparts(from: &Scheme, to: &Scheme, v: Verse) -> Vec<Verse> {
+    if from.name() == to.name() {
+        return vec![v.whole()];
+    }
+    let mut there = through_org(from, to, v.whole());
+    for t in &mut there {
+        *t = t.whole();
+    }
+    there.dedup();
+    there
+}
+
 /// `from`'s `v` in `org`, then the verses of `to` that sit there, deduplicated
 /// and in canonical order.
 fn through_org(from: &Scheme, to: &Scheme, v: Verse) -> Vec<Verse> {

@@ -61,6 +61,9 @@ impl std::error::Error for UnknownScheme {}
 pub struct Registry {
     defined: Vec<Scheme>,
     declared: FxHashMap<BookId, Declared>,
+    /// Bumped by every `define`: a defined name can mean new counts, so a
+    /// pairing cached under it must miss.
+    generation: u64,
 }
 
 impl Registry {
@@ -69,6 +72,42 @@ impl Registry {
     pub fn define(&mut self, scheme: Scheme) {
         self.defined.retain(|seen| seen.name() != scheme.name());
         self.defined.push(scheme);
+        self.generation += 1;
+    }
+
+    /// The crosswalk a target pairs with its source through, when both
+    /// follow a known scheme and the two differ; `None` pairs numbers as
+    /// written, as before any declaration. The identity is what the pairing
+    /// cache keys on: both names, and for a defined scheme the generation.
+    pub fn crosswalk<'a>(
+        &'a self,
+        target: &BookId,
+        source: &BookId,
+        book: BookKey,
+    ) -> Option<(SchemeWalk<'a>, u64)> {
+        let source_scheme = self.named(source)?;
+        let target_scheme = match self.declared(target)? {
+            Declared::Scheme(_) => self.named(target)?,
+            Declared::FollowSource => source_scheme,
+        };
+        if target_scheme.name() == source_scheme.name() {
+            return None;
+        }
+        let mut hash = rustc_hash::FxHasher::default();
+        core::hash::Hash::hash(&(target_scheme.name(), source_scheme.name()), &mut hash);
+        if !(target_scheme.is_builtin() && source_scheme.is_builtin()) {
+            core::hash::Hash::hash(&self.generation, &mut hash);
+        }
+        // Never 0: that is "no crosswalk" in the key.
+        let identity = core::hash::Hasher::finish(&hash) | 1;
+        Some((
+            SchemeWalk {
+                target: target_scheme,
+                source: source_scheme,
+                book,
+            },
+            identity,
+        ))
     }
 
     /// A scheme by name: built-in first, then defined.
@@ -106,6 +145,46 @@ impl Registry {
             Declared::Scheme(name) => self.scheme(name),
             Declared::FollowSource => None,
         }
+    }
+}
+
+/// One book's verses across a target's scheme and its source's, for sous's
+/// pairing: canon's [`counterparts`](canon::counterparts) in each direction,
+/// kept to this book (a scheme that folds books together, like `lxx`'s EZR
+/// holding `org`'s NEH, pairs per book all the same).
+#[derive(Debug, Clone, Copy)]
+pub struct SchemeWalk<'a> {
+    pub target: &'a Scheme,
+    pub source: &'a Scheme,
+    pub book: BookKey,
+}
+
+impl SchemeWalk<'_> {
+    fn across(
+        &self,
+        from: &Scheme,
+        to: &Scheme,
+        chapter: u16,
+        verse: u16,
+        out: &mut Vec<(u16, u16)>,
+    ) {
+        let v = canon::Verse::new(self.book, chapter, verse);
+        out.extend(
+            canon::counterparts(from, to, v)
+                .into_iter()
+                .filter(|t| t.book == self.book)
+                .map(|t| (t.chapter, t.verse)),
+        );
+    }
+}
+
+impl sous_core::Crosswalk for SchemeWalk<'_> {
+    fn to_source(&self, chapter: u16, verse: u16, out: &mut Vec<(u16, u16)>) {
+        self.across(self.target, self.source, chapter, verse, out);
+    }
+
+    fn to_target(&self, chapter: u16, verse: u16, out: &mut Vec<(u16, u16)>) {
+        self.across(self.source, self.target, chapter, verse, out);
     }
 }
 
