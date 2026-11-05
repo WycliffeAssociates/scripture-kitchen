@@ -1,6 +1,6 @@
 //! Findings over an already-built document: `lex → cst::build → lint`.
 //!
-//! 59 codes in six families ([`Category`]): STRUCTURE, ORDERING, ATTRIBUTES,
+//! 61 codes in six families ([`Category`]): STRUCTURE, ORDERING, ATTRIBUTES,
 //! PAYLOAD, FORM and VERSION. 11 of them are the formatter's Form channel.
 //!
 //! Three laws shape everything here:
@@ -53,6 +53,7 @@ pub(crate) mod flat;
 pub(crate) mod ordering;
 pub(crate) mod rows;
 pub(crate) mod structure;
+pub mod versification;
 pub(crate) mod walk;
 
 #[cfg(test)]
@@ -65,6 +66,7 @@ pub use fix::{Fix, check_fixes};
 pub use rows::{
     AuxKind, Category, Code, LINT_ROWS, LintRow, Severity, UsfmVersion, VERSION_ROWS, VersionRow,
 };
+pub use versification::lint_against_counts;
 
 pub(crate) use ancestry::Ancestry;
 pub(crate) use flat::Flat;

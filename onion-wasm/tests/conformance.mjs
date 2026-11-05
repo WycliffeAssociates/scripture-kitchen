@@ -395,7 +395,7 @@ const levelIsSpelled = (doc, tokens, where) => {
   const slice = (from, to) => bad.slice(from, to);
   check(d.message(slice).length > 0, "the message renders from the document");
   check(d.severity(null) !== undefined, "the severity ladder resolves");
-  eq(CODES.length, 59, "the whole catalog shipped");
+  eq(CODES.length, 61, "the whole catalog shipped");
 
   const gap = "\\id GEN\n\\c 1\n\\p \\v 1 a \\v 3 b\n";
   const skipped = parse(gap, true, false, false).diagnostics;

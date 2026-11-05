@@ -136,6 +136,11 @@ pub enum Code {
     DelimiterSurplus,
     // --- once-per-book cardinality (appended; earlier indices stay stable) --
     DuplicateUsfm,
+    // --- against a versification's counts (appended; earlier indices stay
+    // stable). `lint` never emits these: only `lint_against_counts`, which a
+    // caller runs with a scheme's counts, does. ---------------------------
+    ChapterEndsEarly,
+    VerseBeyondScheme,
     // --- the FORM CHANNEL --------------------------------------------------
     // Never a diagnostic (`Severity::Form`), never evaluated by `lint`. THIS
     // ORDER IS PRECEDENCE: where two of these want the same bytes, the earlier
@@ -247,7 +252,7 @@ impl LintRow {
 /// The authored rules table — one row per [`Code`], in the enum's order. All
 /// six families have a pass; the FORM family's tail is the format channel, which
 /// `lint` never reaches (see [`Severity::Form`]).
-pub const LINT_ROWS: [LintRow; 59] = [
+pub const LINT_ROWS: [LintRow; 61] = [
     // Something that cannot live inside a note (a `\c`, a bare `\v`, an unknown
     // marker) arrived while the frame was open. Both live corpus instances
     // (en_ulb ISA, MRK) are genuinely truncated footnotes.
@@ -1043,6 +1048,33 @@ pub const LINT_ROWS: [LintRow; 59] = [
         template: "this book already has a \\usfm line",
         formatter: false,
         fix_label: Some("delete the duplicate line"),
+    },
+    // The chapter's last verse is below the count its versification gives:
+    // the gap lint can't see a missing LAST verse, because nothing follows it.
+    // Anchored on the chapter's last `\v`; `aux` is the scheme's last verse.
+    LintRow {
+        code: Code::ChapterEndsEarly,
+        name: "chapter-ends-early",
+        category: Category::Ordering,
+        severity: Some(Severity::Warning),
+        escalation: &[],
+        aux: AuxKind::ExpectedNumber,
+        template: "this chapter ends at {anchor}; its versification goes to verse {aux}",
+        formatter: false,
+        fix_label: None,
+    },
+    // A verse numbered past its chapter's last in the versification (a bridge
+    // counts by its top). One finding per `\v`; `aux` is the scheme's last verse.
+    LintRow {
+        code: Code::VerseBeyondScheme,
+        name: "verse-beyond-scheme",
+        category: Category::Ordering,
+        severity: Some(Severity::Warning),
+        escalation: &[],
+        aux: AuxKind::ExpectedNumber,
+        template: "{anchor} is past this chapter's end in its versification, verse {aux}",
+        formatter: false,
+        fix_label: None,
     },
     LintRow {
         code: Code::RemoveMarker,

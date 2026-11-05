@@ -374,7 +374,19 @@ behind.
    - The Kotlin hub's `cases.json` isn't in the wacs-dashboard-2 clone. Instead,
      `fixtures/map.json` was written from a separate Python prototype and reviewed, and a
      test sends every verse of every scheme through `org` and back.
-4. **Inventory, coverage and the two lints.** This is where the screenshot's books get
+4. **Inventory, coverage and the two lints** (done on the `canon` branch, 2026-11-05; the
+   inventory shipped with step 5). The lints live in onion, which still doesn't depend on
+   canon: `onion::lint::lint_against_counts(toc, |chapter| last_verse)` emits
+   `chapter-ends-early` and `verse-beyond-scheme` as ordinary `Observation`s (codes appended
+   to the catalogue, so existing indices hold). `galley::versification::lint_against(book,
+   scheme)` fills the counts from canon. `lint()` never emits them; not calling
+   `lint_against_counts` is the off switch. Templates name `aux` ("its versification goes to
+   verse 22") and leave the scheme's name to the host. Pinned: en_ulb against `ulb` is
+   clean, and bdf_reg against `eng` is missing five chapters' last verses (JHN 20:31,
+   ACT 6:15, GAL 4:31, REV 16:21 and 20:15) that no gap lint could see. Not done: a
+   `verse-gap` message that names the scheme (it would change messages Sefer shows), and
+   whole-chapter findings.
+   Originally: **Inventory, coverage and the two lints.** This is where the screenshot's books get
    better messages.
 5. **Sniff** (done on the `canon` branch, 2026-11-05, ahead of step 4's lints; the inventory
    came with it). `canon::Inventory` and `canon::sniff`, plus `galley::versification`, which

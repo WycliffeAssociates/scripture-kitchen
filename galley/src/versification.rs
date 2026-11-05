@@ -4,6 +4,7 @@
 //! ```text
 //! inventory([GEN.usfm, EXO.usfm, …])  ->  canon::Inventory   which verses, parts and lengths
 //! sniff([GEN.usfm, EXO.usfm, …])      ->  canon::Sniff       which scheme the text follows
+//! lint_against(GEN.usfm, ulb)         ->  [Observation]      chapter-ends-early, verse-beyond-scheme
 //! ```
 //!
 //! canon never parses USFM, and onion never learns what a versification
@@ -12,7 +13,8 @@
 //! headings), in characters, which is what the sniffing rules' length tests
 //! compare.
 
-use canon::{BookKey, Inventory, Sniff};
+use canon::{BookKey, Inventory, Scheme, Sniff};
+use usfm_onion::lint::{Observation, lint_against_counts};
 use usfm_onion::{Filter, Toc, cst, lex, mask, toc};
 
 /// Every verse of every book, in one inventory. Give it the whole text:
@@ -30,13 +32,28 @@ pub fn sniff<'a>(books: impl IntoIterator<Item = &'a str>) -> Sniff {
     canon::sniff(&inventory(books))
 }
 
+/// One book judged against a scheme's counts: onion's `chapter-ends-early`
+/// and `verse-beyond-scheme`, anchored on its tokens like any lint finding.
+/// A book the scheme doesn't number gets none.
+pub fn lint_against(source: &str, scheme: &Scheme) -> Vec<Observation> {
+    let tokens = lex(source);
+    let toc = toc(source.as_bytes(), &tokens);
+    let book = book_key(&toc);
+    lint_against_counts(&toc, |chapter| scheme.last_verse(book, chapter))
+}
+
+/// The `\id` code, uppercased: canon's keys are the spec's spelling.
+fn book_key(toc: &Toc) -> BookKey {
+    BookKey::new(toc.book.map(|b| b.to_ascii_uppercase()))
+}
+
 fn add_book(inventory: &mut Inventory, source: &str) {
     let bytes = source.as_bytes();
     let tokens = lex(source);
     let tree = cst::build(&tokens);
     let toc: Toc = toc(bytes, &tokens);
     let reader = mask(bytes, &tokens, &tree, &Filter::verse_text());
-    let book = BookKey::new(toc.book.map(|b| b.to_ascii_uppercase()));
+    let book = book_key(&toc);
 
     for (at, verse) in toc.verses.iter().enumerate() {
         let chapter_end = toc

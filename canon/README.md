@@ -163,6 +163,14 @@ gaps still sniffs as what it means to follow. A text that follows no
 tradition at a passage reports that passage as dissent or unmatched. It
 never becomes a new scheme.
 
+## Coverage
+
+A text against its scheme is onion's job, given the counts:
+`onion::lint::lint_against_counts(toc, |chapter| scheme.last_verse(book, chapter))`
+gives `chapter-ends-early` (the last verse is missing, which no gap lint can
+see) and `verse-beyond-scheme`. `galley::versification::lint_against(book,
+scheme)` does the wiring. onion never depends on canon.
+
 `map` is Rust only for now. It reaches TypeScript through galley's wasm
 (plan step 7), so it has one implementation. `fixtures/map.json`'s answers
 came from a separate prototype of the same rules, and a test sends every
