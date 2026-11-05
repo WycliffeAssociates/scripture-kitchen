@@ -194,8 +194,10 @@ A text declares its numbering once, at registration, as one of two things:
   against whatever the registered source declares, such as `rso`. This is the natural
   default for a WA translation that has a source registered.
 
-With no declaration, the host uses the sniff result when it's `Decided`, and otherwise the
-project default.
+With no declaration, numbers are taken as written, which is today's behaviour. A `Decided`
+sniff is offered to the host as a suggestion ("this looks like `eng`; use it?"), never
+applied silently: remapping someone's pairing on a guess is the bad surprise (Will,
+2026-11-05).
 
 ### Handles
 
@@ -407,7 +409,25 @@ behind.
    `names/<locale>.tsv`, plus `name(code, locale, form)` and localized `parse_book`.
 7. **Galley.** A declared `versification` per registered book (`Scheme` or
    `FollowSource`), `defineScheme`, and sous pairing on `org` keys. This closes the
-   versification-layer idea's question about which consumer goes first.
+   versification-layer idea's question about which consumer goes first. Split in two,
+   because the second changes what the Expediter's caches are keyed by:
+   - **7a, declaring and asking.** Everything except pairing.
+     - canon: a `Scheme` a project defines (owned, built through a validated builder).
+       galley parses the Copenhagen JSON, since it has serde and canon doesn't.
+     - galley: a scheme registry on the handle (built-ins plus `defineScheme(name, json)`),
+       and a declaration per registered book.
+     - The two lints join that book's diagnostics when its scheme is known and no source
+       is paired with it (presence owns "missing" then, as above).
+     - wasm: `{ versification: "ulb" | "followSource" }` on `update`/`updateReference`,
+       `defineScheme`, `sniff(scope)`, `mapVerse(from, to, ref)` and `pairs(from, to, book)`,
+       as flat results like the other doors. Conformance tests in `sous_conformance.mjs`.
+   - **7b, pairing on `org` keys.** Before `pair_keys`, each side's keys go to `org` through
+     its scheme's `moves()`, and findings come back through the target's scheme. Same
+     schemes, or no declaration on either side, is exactly today's path. The pairing cache
+     key (`PairKey`, both checksums today) gains both sides' scheme identities, so changing a
+     declaration re-pairs without either text changing. Sous's `VerseKey` refuses verse 0, so
+     a `\d` title never pairs, and `org`'s title verse is `SourceOnly` there. Merges and
+     splits pair as one unit, as `canon::pairs` builds them.
 
 <Question id="order" answer="Not a concern (Will, 2026-11-04). Keep the order as written.">Is this order right? Names (6) could come right after the book table (1) if Sefer wants localized book names sooner than it wants mapping.</Question>
 
