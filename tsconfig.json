@@ -1,0 +1,29 @@
+{
+  // Every TypeScript file the package ships, checked as Sefer compiles them
+  // (Sefer type-checks these .ts files as its own source: skipLibCheck skips
+  // only .d.ts). Run: npm ci --prefix tools/typecheck && npm run --prefix tools/typecheck check
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "strict": true,
+    "skipLibCheck": true,
+    // Node runs these files by stripping their types (the conformance tests,
+    // `node --test`), so nothing that needs a TypeScript emit: no enums,
+    // namespaces or parameter properties.
+    "erasableSyntaxOnly": true,
+    "types": []
+  },
+  "include": [
+    "bento/bento.ts",
+    "bttwriter/bttwriter.ts",
+    "canon/ts/*.ts",
+    "galley/*.ts",
+    "onion-wasm/*.ts",
+    "sous-chef/reader.ts"
+  ],
+  "exclude": ["**/*.tmpl", "**/node_modules", "**/pkg-*"]
+}

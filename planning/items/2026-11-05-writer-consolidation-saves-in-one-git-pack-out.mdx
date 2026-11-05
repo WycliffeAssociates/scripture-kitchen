@@ -604,6 +604,13 @@ without `REPO_ROOT`), which `agents/testing.md` forbids here.
   - `isomorphicGitSource` takes isomorphic-git's `resolveRef` and `readObject` as
     arguments, so the package doesn't depend on isomorphic-git. The conformance test hands
     it a stand-in backed by the `git` command and reads all five fixtures through it.
+- **The shipped TypeScript is type-checked in CI** (`tools/typecheck`, the root
+  `tsconfig.json`): every `.ts` the package exports, with Sefer's compiler (7.0.2) and
+  settings, since Sefer checks them as its own source. All 17 files pass. The step was
+  added after `bttwriter.ts` and `bento.ts` failed Sefer-style strict checks in five places.
+
+<Followup id="ts-stricter">`noUncheckedIndexedAccess` and `exactOptionalPropertyTypes` find 69 errors, almost all in the codegen-written readers (`onion-wasm/reader.ts`, `galley/sous-reader.ts`, `sous-chef/reader.ts`). Sefer doesn't set them, so CI checks at Sefer's level; turning them on means fixing the generators' templates, not the generated files.</Followup>
+
 - **Web target only** (`pkg-web`): `bttwriter.ts` imports it, Sefer starts it with `init()`
   or `initSync()` as it does galley, and a bundler takes it as is.
 - **Measured** (2026-11-05): the module is **163 KB gzipped** (387 KB raw). It was 209 KB
