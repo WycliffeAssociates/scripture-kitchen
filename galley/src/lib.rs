@@ -30,6 +30,7 @@ pub mod overlay;
 pub mod pantry;
 pub mod sous;
 pub mod toc;
+pub mod versification;
 pub use find::{Find, Hit, Hits, SourceSpan};
 pub use mise::utf16::{Utf16Table, utf16_table};
 pub use overlay::{

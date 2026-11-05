@@ -42,6 +42,8 @@ number" is. Here both are named, and neither is "the" number.
 | `src/map.rs` | `map`, `pairs`, `to_org`, `from_org`, `moves` (Rust only) | by hand |
 | `fixtures/books.json`, `fixtures/schemes.json` | the cases both lookups must pass | by hand |
 | `fixtures/map.json` | mapping cases (`tests/map.rs`) | from a prototype, then reviewed |
+| `data/sniff/rules.json` | the TVTMS sniffing rules (see its README) | vendored |
+| `src/sniff.rs`, `src/sniff_tables.rs` | `Inventory`, `sniff`; the generated rules | by hand; `canon-gen` |
 
 The generator is `gen/`, a separate unpublished crate (`canon-gen`): it reads
 the scheme JSON with serde_json, and canon's only dependency is `mise`. Its
@@ -136,6 +138,30 @@ Hebrew lacks, lands on `org`'s 7:68 beside `eng`'s 7:69, and comes back
   in exactly one unit; a test checks that for every pair of schemes and every
   book.
 - **No guessing.** A verse with no counterpart is `Absent`, never "nearest".
+
+## Sniffing
+
+`sniff(&inventory)` says which built-in scheme a text follows, when it never
+said. An `Inventory` is plain facts: which verses, parts and bridges a text
+has per chapter, and each verse's length in characters. canon doesn't parse
+USFM, so galley builds one from onion (`galley::versification::sniff`) and
+anything else can too.
+
+```text
+en_ulb   ulb  Decided   250 votes: ulb 250-0, eng 249-1, org 146-104
+BSB      eng  Decided   246 votes: eng 244-2. Dissent: 3Jn.14:15, Rev.12:17-13.1a
+bdf_reg  eng  Leaning   7 votes (a New Testament alone)
+```
+
+The rules are TVTMS's, via nida (`data/sniff/README.md`). Each votes once.
+A scheme agrees when it fits a column the text passes, and disagrees when it
+fits only others. The ranking is fewest disagreements, then most agreements.
+`Decided` needs 20 votes and the winner wrong on at most one in ten.
+`Undetermined` (no votes, or a tie) means use the project's default. A rule
+abstains where a missing or misplaced verse would fool it, so a draft with
+gaps still sniffs as what it means to follow. A text that follows no
+tradition at a passage reports that passage as dissent or unmatched. It
+never becomes a new scheme.
 
 `map` is Rust only for now. It reaches TypeScript through galley's wasm
 (plan step 7), so it has one implementation. `fixtures/map.json`'s answers

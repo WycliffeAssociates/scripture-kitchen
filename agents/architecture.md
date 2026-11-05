@@ -5,6 +5,7 @@
        ╰────────┴──────────── galley ◄──────────────────╯
     ticket ◄── onion, galley
     mise ◄── canon ◄── canon-gen (never published)
+             canon ◄── galley (galley::versification: onion's facts, canon's sniff)
 
 - `onion` / `onion-wasm` / `galley` are the engine. `sous-core` / `sous-cli`
   (under `sous-chef/`) are the other product. `GLOSSARY.md` is onion's only;

@@ -706,6 +706,7 @@ dependencies = [
 name = "usfm_galley"
 version = "0.1.20"
 dependencies = [
+ "canon",
  "dhat",
  "divan",
  "js-sys",

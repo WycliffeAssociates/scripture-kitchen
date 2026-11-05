@@ -2,12 +2,13 @@
 //!
 //! ```sh
 //! cargo run -p canon-gen          # rewrite the committed tables
-//! gen-canon <dir>                 # write all four into <dir> (the freshness test)
+//! gen-canon <dir>                 # write every table into <dir> (the freshness test)
 //! ```
 //!
 //! ```text
 //! data/books.tsv        →  src/tables.rs, ts/tables.ts                the book table, names
 //! data/schemes/*.json   →  src/scheme_tables.rs, ts/scheme-tables.ts  each scheme's counts
+//! data/sniff/rules.json →  src/sniff_tables.rs                        the sniffing rules (Rust only)
 //! ```
 //!
 //! Each pair comes from one read of its source, so the Rust and the
@@ -19,6 +20,7 @@
 //! This is its own crate, not a binary inside canon, because it reads JSON
 //! with serde_json and canon's only dependency is `mise`.
 
+mod rules;
 mod schemes;
 
 use std::fmt::Write as _;
@@ -38,11 +40,16 @@ struct Row {
 
 fn main() -> ExitCode {
     let canon_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
-    let [rust_out, ts_out, schemes_rust_out, schemes_ts_out] =
-        match std::env::args_os().nth(1).map(PathBuf::from) {
-            Some(dir) => OUTPUTS.map(|path| dir.join(path.rsplit('/').next().unwrap_or(path))),
-            None => OUTPUTS.map(|path| canon_dir.join(path)),
-        };
+    let [
+        rust_out,
+        ts_out,
+        schemes_rust_out,
+        schemes_ts_out,
+        sniff_rust_out,
+    ] = match std::env::args_os().nth(1).map(PathBuf::from) {
+        Some(dir) => OUTPUTS.map(|path| dir.join(path.rsplit('/').next().unwrap_or(path))),
+        None => OUTPUTS.map(|path| canon_dir.join(path)),
+    };
 
     let source = canon_dir.join("data/books.tsv");
     let text = match std::fs::read_to_string(&source) {
@@ -76,6 +83,14 @@ fn main() -> ExitCode {
         }
     };
     let schemes_header = HEADER.replace("canon/data/books.tsv", "canon/data/schemes/*.json");
+    let rules = match rules::read(&canon_dir.join("data/sniff/rules.json"), &schemes, &codes) {
+        Ok(rules) => rules,
+        Err(e) => {
+            eprintln!("gen-canon: data/sniff/rules.json: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let rules_header = HEADER.replace("canon/data/books.tsv", "canon/data/sniff/rules.json");
 
     for (path, body) in [
         (&rust_out, rust(&rows, &names)),
@@ -85,6 +100,7 @@ fn main() -> ExitCode {
             &schemes_ts_out,
             schemes::typescript(&schemes, &schemes_header, json),
         ),
+        (&sniff_rust_out, rules::rust(&rules, &rules_header)),
     ] {
         if let Err(e) = std::fs::write(path, body) {
             eprintln!("gen-canon: writing {}: {e}", path.display());
@@ -188,11 +204,12 @@ fn name_index(rows: &[Row]) -> Result<Vec<(String, u8)>, String> {
 
 /// Where each table goes, relative to `canon/`. With a directory argument,
 /// each goes into it under its file name instead.
-const OUTPUTS: [&str; 4] = [
+const OUTPUTS: [&str; 5] = [
     "src/tables.rs",
     "ts/tables.ts",
     "src/scheme_tables.rs",
     "ts/scheme-tables.ts",
+    "src/sniff_tables.rs",
 ];
 
 const HEADER: &str =

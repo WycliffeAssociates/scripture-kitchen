@@ -376,7 +376,19 @@ behind.
      test sends every verse of every scheme through `org` and back.
 4. **Inventory, coverage and the two lints.** This is where the screenshot's books get
    better messages.
-5. **Sniff.** Port the test grammar (`Last`, `Exist`, `NotExist`, `<`/`>` with factors) and
+5. **Sniff** (done on the `canon` branch, 2026-11-05, ahead of step 4's lints; the inventory
+   came with it). `canon::Inventory` and `canon::sniff`, plus `galley::versification`, which
+   builds the inventory from onion's TOC and `verse_text` mask. Pinned over the example
+   corpora: en_ulb sniffs as `ulb` (Decided, 250 votes, 0 against), the BSB as `eng` with
+   3 John 14–15 and Revelation 12:17 as dissent, and bdf_reg (an NT) only leans `eng`. How
+   it differs from the design above:
+   - TVTMS columns are traditions ("English", "Greek2 (eg NETS)", …), not our schemes. The
+     generator fits each scheme to columns by running the structural tests against the
+     scheme's counts, so nothing maps labels by hand.
+   - Part tests (`Gen.5:31.2`) test the part (USFM `31b`). nida tests the whole verse there.
+   - galley, not onion, joins the two, so onion still doesn't depend on canon. Step 4's
+     lints decide whether it ever will.
+   Originally: Port the test grammar (`Last`, `Exist`, `NotExist`, `<`/`>` with factors) and
    the voting and abstention above. Run it over every corpus in `testData`, and pin a
    golden of which scheme each book sniffs as.
 6. **Names.** The `\toc` harvester over the gateway-language list, plus reviewed

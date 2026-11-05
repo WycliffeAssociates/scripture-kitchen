@@ -1,14 +1,15 @@
 //! canon's generated tables are committed: a fresh `gen-canon` run must
-//! reproduce all four byte for byte. When this fails, run `cargo run -p canon-gen`.
+//! reproduce every one byte for byte. When this fails, run `cargo run -p canon-gen`.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const TABLES: [&str; 4] = [
+const TABLES: [&str; 5] = [
     "src/tables.rs",
     "ts/tables.ts",
     "src/scheme_tables.rs",
     "ts/scheme-tables.ts",
+    "src/sniff_tables.rs",
 ];
 
 #[test]
