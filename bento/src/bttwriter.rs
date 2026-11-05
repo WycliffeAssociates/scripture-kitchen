@@ -19,60 +19,47 @@
 //! book project must answer (which book, which language, which resource),
 //! as Sefer's migration asks it.
 
-use serde::{Deserialize, Deserializer};
-use serde_json::Value;
-
-use crate::{Direction, ReadError, Related, without_bom};
+use crate::lenient::Reader;
+use crate::tree::{Node, pointer};
+use crate::{
+    BookEntry, Declared, Direction, Format, Kind, Manifest, ReadError, Related, Severity, kind,
+    one, related, without_bom,
+};
 use mise::books::BookKey;
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BttWriterManifest {
-    #[serde(default, deserialize_with = "flex_string")]
     pub format: Option<String>,
-    #[serde(default)]
     pub target_language: Option<TargetLanguage>,
-    #[serde(default)]
     pub project: Option<Project>,
-    #[serde(default, rename = "type")]
+    /// `type`: `{"id": "text"}`, or a bare string.
     pub kind: Option<NameBlock>,
-    #[serde(default)]
     pub resource: Option<NameBlock>,
-    #[serde(default, deserialize_with = "flex_sources")]
     pub source_translations: Vec<SourceTranslation>,
-    #[serde(default, deserialize_with = "flex_strings")]
     pub translators: Vec<String>,
     /// Chunks marked done: `front-title`, `01-title`, `01-05`. `None` when the
     /// file has no list (translationCore never writes one).
-    #[serde(default, deserialize_with = "flex_chunks")]
     pub finished_chunks: Option<Vec<String>>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TargetLanguage {
-    #[serde(default, deserialize_with = "flex_string")]
     pub id: Option<String>,
-    #[serde(default, deserialize_with = "flex_string")]
     pub name: Option<String>,
-    #[serde(default, deserialize_with = "flex_string")]
     pub direction: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Project {
-    #[serde(default, deserialize_with = "flex_string")]
     pub id: Option<String>,
-    #[serde(default, deserialize_with = "flex_string")]
     pub name: Option<String>,
 }
 
 /// `type` and `resource`: normally `{"id", "name"}`, sometimes a bare string.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(untagged)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NameBlock {
     Object {
-        #[serde(default, deserialize_with = "flex_string")]
         id: Option<String>,
-        #[serde(default, deserialize_with = "flex_string")]
         name: Option<String>,
     },
     Bare(String),
@@ -85,19 +72,21 @@ impl NameBlock {
             NameBlock::Bare(id) => Some(id),
         }
     }
+
+    pub fn name(&self) -> Option<&str> {
+        match self {
+            NameBlock::Object { name, .. } => name.as_deref(),
+            NameBlock::Bare(_) => None,
+        }
+    }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SourceTranslation {
-    #[serde(default, deserialize_with = "flex_string")]
     pub language_id: Option<String>,
-    #[serde(default, deserialize_with = "flex_string")]
     pub resource_id: Option<String>,
-    #[serde(default, deserialize_with = "flex_string")]
     pub version: Option<String>,
-    #[serde(default, deserialize_with = "flex_string")]
     pub checking_level: Option<String>,
-    #[serde(default, deserialize_with = "flex_string")]
     pub date_modified: Option<String>,
 }
 
@@ -120,12 +109,191 @@ pub struct Language {
     pub direction: Direction,
 }
 
-/// A `manifest.json`'s bytes, as written. A leading byte order mark is skipped.
+/// A `manifest.json`'s bytes, as written. A leading byte order mark is
+/// skipped. An error only when it isn't a JSON object; what reading forgave
+/// is in [`crate::read`]'s findings.
 pub fn read(bytes: &[u8]) -> Result<BttWriterManifest, ReadError> {
-    serde_json::from_slice(without_bom(bytes)).map_err(|e| ReadError::Json(e.to_string()))
+    let node = crate::tree::from_json(without_bom(bytes)).map_err(ReadError::Json)?;
+    if !matches!(node, Node::Map(_)) {
+        return Err(ReadError::Json(format!(
+            "the manifest is {}, not an object",
+            node.kind()
+        )));
+    }
+    Ok(from_node(&node, &mut Reader::new(Vec::new())))
+}
+
+pub(crate) fn from_node(root: &Node, r: &mut Reader) -> BttWriterManifest {
+    let target_language = r
+        .map(root.get("target_language"), "/target_language")
+        .map(|t| TargetLanguage {
+            id: r.field(t, "id", "/target_language"),
+            name: r.field(t, "name", "/target_language"),
+            direction: r.field(t, "direction", "/target_language"),
+        });
+    let project = r.map(root.get("project"), "/project").map(|p| Project {
+        id: r.field(p, "id", "/project"),
+        name: r.field(p, "name", "/project"),
+    });
+    let finished_chunks = match root.get("finished_chunks") {
+        None | Some(Node::Null) => None,
+        Some(list @ Node::List(_)) => Some(r.strings(Some(list), "/finished_chunks")),
+        Some(other) => {
+            r.note(
+                crate::Check::ManifestValid,
+                Severity::Warning,
+                "/finished_chunks",
+                format!(
+                    "Expected a list at /finished_chunks, found {}; it was left unread.",
+                    other.kind()
+                ),
+            );
+            None
+        }
+    };
+    BttWriterManifest {
+        format: r.field(root, "format", ""),
+        target_language,
+        project,
+        kind: name_block(root.get("type"), "/type", r),
+        resource: name_block(root.get("resource"), "/resource", r),
+        source_translations: sources(root.get("source_translations"), r),
+        translators: r.strings(root.get("translators"), "/translators"),
+        finished_chunks,
+    }
+}
+
+fn name_block(node: Option<&Node>, at: &str, r: &mut Reader) -> Option<NameBlock> {
+    match node? {
+        Node::String(s) => Some(NameBlock::Bare(s.clone())),
+        other => r.map(Some(other), at).map(|b| NameBlock::Object {
+            id: r.field(b, "id", at),
+            name: r.field(b, "name", at),
+        }),
+    }
+}
+
+/// A list of sources, or an object whose values are the sources (`{}` is
+/// seen in real files). An entry that isn't an object is left out.
+fn sources(node: Option<&Node>, r: &mut Reader) -> Vec<SourceTranslation> {
+    let at = "/source_translations";
+    let items: Vec<(String, &Node)> = match node {
+        None | Some(Node::Null) => Vec::new(),
+        Some(Node::List(items)) => items
+            .iter()
+            .enumerate()
+            .map(|(i, n)| (format!("{at}/{i}"), n))
+            .collect(),
+        Some(map @ Node::Map(_)) => {
+            r.note(
+                crate::Check::LenientValue,
+                Severity::Info,
+                at,
+                format!("{at} is an object, read as the list of its values."),
+            );
+            map.entries()
+                .into_iter()
+                .map(|(k, n)| (pointer(at, k), n))
+                .collect()
+        }
+        Some(other) => {
+            r.list(Some(other), at);
+            Vec::new()
+        }
+    };
+    items
+        .into_iter()
+        .filter_map(|(at, n)| {
+            let s = r.map(Some(n), &at)?;
+            Some(SourceTranslation {
+                language_id: r.field(s, "language_id", &at),
+                resource_id: r.field(s, "resource_id", &at),
+                version: r.field(s, "version", &at),
+                checking_level: r.field(s, "checking_level", &at),
+                date_modified: r.field(s, "date_modified", &at),
+            })
+        })
+        .collect()
 }
 
 impl BttWriterManifest {
+    /// What every format says. A Writer project is one book; `books` is
+    /// empty when the manifest names none of canon's table.
+    pub(crate) fn manifest(&self) -> Manifest {
+        let tag = self
+            .target_language
+            .as_ref()
+            .and_then(|t| t.id.clone())
+            .unwrap_or_default();
+        let project_id = self.project.as_ref().and_then(|p| p.id.as_deref());
+        let resource_id = self.resource.as_ref().and_then(NameBlock::id);
+        let subject = kind::subject(None, resource_id, project_id);
+        Manifest {
+            format: Format::BttWriter,
+            id: None,
+            name: one(&tag, self.resource.as_ref().and_then(NameBlock::name)),
+            abbreviation: one(&tag, resource_id),
+            language: crate::Language {
+                name: one(
+                    &tag,
+                    self.target_language
+                        .as_ref()
+                        .and_then(|t| t.name.as_deref()),
+                ),
+                direction: match self
+                    .target_language
+                    .as_ref()
+                    .and_then(|t| t.direction.as_deref())
+                {
+                    Some("rtl") => Direction::Rtl,
+                    _ => Direction::Ltr,
+                },
+                tag: tag.clone(),
+            },
+            kind: Kind {
+                domain: subject.as_deref().and_then(crate::Domain::of_subject),
+                subject,
+                flavor: None,
+                declared: Declared {
+                    subject: None,
+                    r#type: self
+                        .kind
+                        .as_ref()
+                        .and_then(NameBlock::id)
+                        .map(str::to_owned),
+                    format: self.format.clone(),
+                    identifier: resource_id.map(str::to_owned),
+                },
+            },
+            books: project_id
+                .and_then(crate::book_of)
+                .map(|book| BookEntry {
+                    book,
+                    path: None,
+                    title: one(&tag, self.project.as_ref().and_then(|p| p.name.as_deref())),
+                    sort: None,
+                })
+                .into_iter()
+                .collect(),
+            sources: self
+                .source_translations
+                .iter()
+                .filter_map(|s| {
+                    related::related(
+                        s.language_id.as_deref()?,
+                        s.resource_id.as_deref()?,
+                        s.version.as_deref(),
+                    )
+                })
+                .collect(),
+            version: None,
+            issued: None,
+            modified: None,
+            rights: None,
+            publisher: None,
+        }
+    }
+
     /// The book project, or `None` when the manifest doesn't name a book of the
     /// table, a language, and a resource.
     ///
@@ -167,22 +335,11 @@ impl BttWriterManifest {
             .source_translations
             .iter()
             .filter_map(|source| {
-                let language = source.language_id.as_deref()?.trim().to_lowercase();
-                let resource = source.resource_id.as_deref()?.trim().to_lowercase();
-                if language.is_empty() || resource.is_empty() {
-                    return None;
-                }
-                let version = source
-                    .version
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|v| !v.is_empty())
-                    .map(str::to_string);
-                Some(Related {
-                    language,
-                    resource,
-                    version,
-                })
+                related::related(
+                    source.language_id.as_deref()?,
+                    source.resource_id.as_deref()?,
+                    source.version.as_deref(),
+                )
             })
             .collect();
 
@@ -198,55 +355,6 @@ impl BttWriterManifest {
             translators: self.translators.clone(),
         })
     }
-}
-
-/// A string, or a number or boolean written where a string belongs (a
-/// version `20211118`). Anything else reads as absent.
-fn flex_string<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
-    Ok(match Value::deserialize(d)? {
-        Value::String(s) => Some(s),
-        Value::Number(n) => Some(n.to_string()),
-        Value::Bool(b) => Some(b.to_string()),
-        _ => None,
-    })
-}
-
-/// A list of strings; other entries are dropped, and anything but a list
-/// reads as empty.
-fn flex_strings<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
-    Ok(match Value::deserialize(d)? {
-        Value::Array(items) => items
-            .into_iter()
-            .filter_map(|item| match item {
-                Value::String(s) => Some(s),
-                _ => None,
-            })
-            .collect(),
-        _ => Vec::new(),
-    })
-}
-
-fn flex_chunks<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Vec<String>>, D::Error> {
-    let value = Value::deserialize(d)?;
-    Ok(match value {
-        Value::Array(_) => Some(flex_strings(value).unwrap_or_default()),
-        _ => None,
-    })
-}
-
-/// A list of sources, or a map whose values are the sources (`{}` is seen in
-/// real files). An entry that isn't an object is dropped.
-fn flex_sources<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<SourceTranslation>, D::Error> {
-    let items = match Value::deserialize(d)? {
-        Value::Array(items) => items,
-        Value::Object(map) => map.into_iter().map(|(_, v)| v).collect(),
-        _ => Vec::new(),
-    };
-    Ok(items
-        .into_iter()
-        .filter(Value::is_object)
-        .filter_map(|item| serde_json::from_value(item).ok())
-        .collect())
 }
 
 #[cfg(test)]

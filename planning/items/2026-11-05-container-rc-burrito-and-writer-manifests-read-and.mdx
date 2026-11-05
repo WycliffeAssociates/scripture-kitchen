@@ -487,11 +487,46 @@ Step 4 measures it again inside the real module, with `wasm-opt`.
 2. **Read and check**: RC and Burrito, `find`, `Manifest`, `kind`, `related`, findings and
    the manifest-only checks. The hub's `ingest` and `synthetic` switch, and `crates/manifest`
    goes.
+   *Built 2026-11-05* (`tree.rs`, `lenient.rs`, `rc.rs`, `burrito.rs`, `kind.rs`,
+   `related.rs`, `check.rs`; `tests/containers.rs` pins seven real manifests). What it
+   settled is under "Step 2, as built" below.
 3. **Write**: `createBible`, `edit`, `fingerprint`, the file checks, and the schema tests.
    bttwriter's `consolidate()` can now be built, and the hub's `manifest_with_book` goes.
 4. **The TS surface**: the module, `readOrThrow`, the Standard Schema exports, and the size
    measurement. Sefer switches `discovery`, `projectAdmin`, `import` and its save path, and
    `assemble` together with bttwriter's step 6.
+
+### Step 2, as built
+
+- **One reader for every format.** JSON and YAML both read into an order-keeping tree
+  (`tree::Node`), and every value goes through `lenient::Reader`, which records what it
+  forgave as a `lenient-value` finding pointing at the value. The typed documents are read
+  by hand from that tree, not derived with serde. The Writer module moved onto it too, so
+  a number in `translators` now reads as its text (with a finding) instead of being
+  dropped silently.
+- **Key order without `preserve_order`.** A Burrito's ingredients are its books, in file
+  order, but turning on `serde_json`'s `preserve_order` would change key order for every
+  crate in the build (onion's USJ included). The tree keeps order itself.
+- **Severities.** `error` only when nothing could be read (`manifest-unreadable`,
+  `manifest-missing`). A field the format requires is a `manifest-valid` *warning*, so a
+  project Sefer already wrote (which fails the fork's schema) still opens through
+  `readOrThrow`. `title-set` and `language-set` are warnings; `sort-canon` and
+  `book-title-translated` are info.
+- **Manifest-only checks run in `read`**; `check(&read, &Repo { name })` adds
+  `repo-name-language`. The file checks (`ingredient-exists`, `-empty`, `-checksum`) come
+  with step 3, when `Repo` gains `files`.
+- **The fork's `primary` rules are checked by hand** (one authority, one `owner/repo`,
+  `revision: "latest"`, `timestamp` a date), as are `dateCreated` as a date-time,
+  `generator.softwareVersion` and `copyright`. A fixture written exactly as Sefer's
+  `burritoText` writes fails in the four places this plan named. Full validation against
+  the vendored schema is step 3's test.
+- **As written, not normalized.** A Burrito's content format stays `text/x-usfm` (the hub
+  normalized it to `text/usfm`; its `synthetic` compares against that, so it adapts when it
+  switches). A source with no language isn't a `Related` (the hub kept opaque Burrito
+  targets; Sefer dropped them). Older Burritos' `type`/`target` relationships read as
+  `relationType`/`id`.
+
+<Followup id="wacs-scan-bin">The WACS-scan bin (read every repo under a folder, print a findings summary) wasn't built in step 2: the 1,441 repos aren't on this machine. Build it when they are, and copy any new odd case into `fixtures/`.</Followup>
 
 ```mermaid
 flowchart LR

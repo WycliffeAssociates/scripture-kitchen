@@ -2,7 +2,7 @@
 name = "bento"
 version.workspace = true
 edition.workspace = true
-description = "Scripture containers: BTT Writer, Resource Container and Scripture Burrito manifests, read leniently (RC and Burrito, checking and writing to come)."
+description = "Scripture containers: BTT Writer, Resource Container and Scripture Burrito manifests, read leniently and checked (writing to come)."
 
 [lints]
 workspace = true
@@ -10,5 +10,8 @@ workspace = true
 [dependencies]
 canon = { path = "../canon", version = "0.1.20" }
 mise = { path = "../mise", version = "0.1.20" }
-serde = { version = "1", features = ["derive"] }
+serde = "1"
 serde_json = "1"
+# Lossless YAML: reads every catalog manifest, and (step 3) edits one changing
+# only the lines it means to. The smallest YAML crate in wasm, like for like.
+yaml-edit = { version = "0.3.6", default-features = false }

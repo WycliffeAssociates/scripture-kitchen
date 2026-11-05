@@ -34,14 +34,15 @@ fn a_plain_manifest_is_a_project() {
 #[test]
 fn real_files_bend_the_shapes() {
     // A BOM, a number for a version, sources as a map, a bare-string resource,
-    // translators with a stray number, a non-list finished_chunks.
+    // translators with a stray number (read as its text, as every format
+    // reads a number where text belongs), a non-list finished_chunks.
     let m = read(b"\xEF\xBB\xBF{\"target_language\": {\"id\": \"ar\", \"direction\": \"rtl\"},
         \"project\": {\"id\": \"MAT\"}, \"resource\": \"ULB\",
         \"source_translations\": {\"0\": {\"language_id\": \"EN\", \"resource_id\": \"ulb\", \"version\": 20211118}, \"1\": 7},
         \"translators\": [\"a\", 3, \"b\"], \"finished_chunks\": {}}")
     .unwrap();
     assert_eq!(m.finished_chunks, None);
-    assert_eq!(m.translators, ["a", "b"]);
+    assert_eq!(m.translators, ["a", "3", "b"]);
     let p = m.project(None).unwrap();
     assert_eq!(p.book, key(b"MAT"));
     assert_eq!(p.language.direction, Direction::Rtl);
