@@ -1,6 +1,6 @@
 ---
 id: 4c7328e1-1ed5-4272-9d4f-c43c392d8f74
-title: "Writer consolidation: saves in, one git pack out"
+title: "BTT Writer consolidation: Writer repos in, one git pack out"
 kind: plan
 status: discussing
 created: 2026-11-05
@@ -20,7 +20,16 @@ Will, 2026-11-05:
 This is step 2 of the Shared Scripture Domain Libraries order. Step 1 is canon
 ([[code:planning/items/2026-11-04-canon-and-versification-the-book-table-schemes-map.mdx|the canon plan]]),
 and this step leans on it for the book table and `usfm_file_name`. The work is built
-Rust-first here and reaches TypeScript through galley's wasm, the same way as canon.
+Rust-first here and reaches TypeScript as a wasm module of its own, inside the same npm package.
+
+Will's goal for the split, from the review:
+
+> keep the actual apps thin as possible and the libraries and useful. and thick as needed /
+> modular. as needed.
+
+So the library owns everything from "here are a Writer repo's git objects" to "here is the
+consolidated pack". The apps own only storage, which is reading objects, writing the pack,
+moving a ref and pushing.
 
 ## What changes for a user
 
@@ -43,9 +52,9 @@ this step there is one implementation, and three things change:
    meet the hub's consolidated repo as a fast-forward instead of an unrelated history.
 2. **Sefer gets the hub's fixes.** Saves dated 1970 or 2000 by a reset battery (Tesaka, Ɓille) land
    between the good saves around them, and a `Writer-Clock:` trailer keeps what the device said.
-3. **The hub drops libgit2 from this path.** It writes the pack and index that come back,
-   the way Sefer does, instead of going through libgit2's in-memory object store. It still
-   uses libgit2 to read Writer repos and to push.
+3. **Both apps get thinner.** The hub replays without libgit2's in-memory store; it hands the
+   kitchen its libgit2 object database and writes back the pack it gets. Sefer does the same
+   with isomorphic-git's. Neither app walks a Writer repo itself any more.
 
 Nothing changes for a translator except (2). The log reads the same: one commit per save
 that changed the book's text, subject `ROM 5:1–11; titles`, trailers `Writer-Message`
@@ -81,186 +90,336 @@ hub's current tree:
 | Template | `writerBookToUsfm` | `writer_book_to_usfm` | yes, by port and by the 5-repo golden |
 | Order across books | author time, never earlier than the book's previous save, then book, then save | the same | yes |
 | Bad device clocks | kept as the device said | `estimate_bad_clocks`, plus a `Writer-Clock:` trailer | **no** |
-| Pack | own writer: SHA-1, deflate and `ofs-delta` against the same file's previous version, idx v2. One NT: 2.7 MB in about 2 s | libgit2 mempack, dumped to one pack. Tawara: 3,959 commits in 2.1 s | different bytes, same objects |
+| Pack | own writer: SHA-1, deflate and deltas (below). One NT: 2.7 MB in about 2 s | libgit2 mempack, dumped to one pack. Tawara: 3,959 commits in 2.1 s | different bytes, same objects |
 | Progress per save | none | `progress()` (verses present after each save) | hub only |
 
-Nothing in Sefer's `src/core/migrate` beyond these three files is pure. `candidate.ts`,
-`writerWork.ts`, `local.ts`, `upstreams.ts` and the rest of `assemble.ts` are app flow
-(probing upstreams, staging, the project manifest, the merge commit) and stay in Sefer.
-**Correction to the earlier estimate:** what this retires in Sefer is about 670 lines
-(`writerHistory.ts` 157, `pack.ts` 308 and the template half of `writerBook.ts` 202), plus
-`pack.test.ts`, not the ~2,400 I quoted for all of `migrate/` and `git/`.
+**What this retires in Sefer:** about 670 lines (`writerHistory.ts` 157, `pack.ts` 308 and the
+template half of `writerBook.ts` 202), plus `pack.test.ts` and the Writer use of `git.walk`.
+That's less than the ~2,400 I first quoted for all of `migrate/` and `git/`.
+`candidate.ts`, `writerWork.ts`, `local.ts`, `upstreams.ts` and the rest of `assemble.ts`
+are app flow (probing upstreams, staging, the project manifest, the merge commit) and stay
+in Sefer.
+
+## How specific: BTT Writer, by name
+
+<Question id="generic" answer="BTT Writer by name (Will, 2026-11-05: 'if we're not going to say that this is sort of generically taking any book[] and making a new repo, I'd go even more specific … bttwriter').">Is this "consolidate any per-book repos into one" or "consolidate BTT Writer projects"?</Question>
+
+BTT Writer is the only per-book-repo, save-per-commit source we have, and most of the work
+is Writer's shape: chunk paths, the template, decoding, Writer's timestamp messages, device
+clocks and chunk-to-verse summaries. A generic "any book repos" API would have to invent a
+second source to be generic against. So the public API is named `bttwriter` and says Writer
+throughout.
+
+What stays format-free *inside* the crate is the part that is: interleaving per-book file
+versions by time (`interleave.rs`) and writing git objects (`pack.rs`). Neither imports
+anything Writer-specific, so if a second per-book source ever shows up, those two modules
+are what it would reuse, and they can move to their own crate then.
 
 ## The API
 
-The core is one pure function: Writer saves go in, git objects come out as a pack. It reads
-no files, runs no git, and takes the clock as an argument, so the same input gives the same
-bytes in the browser, in the hub and in a test.
+A port and two adapters in front, the replay in the middle, a pack out the back. It does no
+I/O itself, and the clock is an argument, so the same input gives the same bytes in the
+browser, in the hub and in a test.
 
-### From TypeScript (Sefer), through galley's wasm
+```mermaid
+flowchart LR
+  subgraph App["app (thin)"]
+    a1["isomorphic-git / libgit2"]
+    a2["write pack + idx, move a ref, push"]
+  end
+  subgraph K["bttwriter (kitchen)"]
+    w["HistoryWalk: first parent, changed Writer files"]
+    d["decode, fix clocks"]
+    r["per book: chunks → USFM, drop unchanged"]
+    i["interleave by time"]
+    p["pack: blob/tree/commit, SHA-1, deflate, delta"]
+  end
+  a1 -- "objects by id (the port)" --> w --> d --> r --> i --> p -- "head, pack, idx, books" --> a2
+```
+
+### The port: "give me these git objects"
+
+<Question id="ports" answer="Yes: a port, with an isomorphic-git adapter and a libgit2 adapter shipped by the kitchen. The port is a sans-IO 'wants / give' loop rather than a callback, so async isomorphic-git works across the wasm line. (Will, 2026-11-05, asked; this is the answer.)">Interface plus ports, with adapters for libgit2 and isomorphic-git?</Question>
+
+Yes, and it makes the "who walks the repo" question cheap. The only thing the kitchen needs
+from storage is *git objects by id*. Both libraries already do the hard part (finding an
+object in a pack, inflating it, resolving its deltas), so the kitchen doesn't need a pack
+reader of its own. Each adapter is about ten lines.
+
+The catch is that isomorphic-git's `readObject` is async, and a wasm call can't stop
+partway to wait for a JS promise. So the port isn't a callback. The walk is a small state
+machine that **says what it wants** and is **given** it, and a short driver loop on each side
+does the awaiting:
+
+<Machine id="walk" machine={{
+  id: "HistoryWalk",
+  initial: "commits",
+  states: {
+    commits: { note: "wants: the next commit on HEAD's first-parent line (and its parent's, for the diff)", on: { give: "commits", "line ends": "trees" } },
+    trees: { note: "wants: every tree the line's commits point at, batched; diffs each against its first parent", on: { give: "trees", "all diffed": "blobs" } },
+    blobs: { note: "wants: the blobs of changed Writer text paths only, one batch", on: { give: "done" } },
+    done: { note: "finish(meta) → WriterHistory", type: "final", tone: "good" }
+  }
+}} />
+
+The walk asks in batches. Commits come one round each, because each one names the next. Then all trees in a few rounds by depth, then every changed blob in one round. Sefer already
+batches blob reads (`git.blobs(repo, wanted)`), so a Writer NT is a few thousand cheap commit
+reads plus a handful of large batches.
+
+### From TypeScript (Sefer)
 
 ```ts
-// What a caller hands over: one book's Writer history, read however the caller reads git.
-interface WriterBook {
-  book: string;            // "ROM" (any case; canon's parse_book accepts the Writer slug "rom")
-  title: string;           // the template's fallback title when front/title.txt is empty
-  source: string;          // "owner/repo": what Writer-Source names
-  saves: WriterSave[];     // oldest first, along HEAD's first-parent line
-}
+// Imported lazily, on the migration screen only: nobody else pays for its wasm.
+const bttwriter = await import("@wycliffeassociates/scripture-kitchen/bttwriter");
+await bttwriter.init();
 
-interface WriterSave {
-  id: string;              // the Writer commit id, for the Writer-Source trailer
-  author: Who;
-  committer: Who;
-  message: string;         // Writer's own message (a timestamp in practice)
-  // Every file the save changed, as raw bytes: null means deleted.
-  // Paths that aren't Writer text are ignored here, so the caller needn't filter.
-  // Bytes, not strings: decoding is part of what must agree, so the kitchen does it.
-  changes: Map<string, Uint8Array | null>;
+// --- The port -------------------------------------------------------------
+interface ObjectSource {
+  head(): Promise<string | undefined>;                    // HEAD's commit id
+  shallow(): Promise<string[]>;                           // .git/shallow: treat these as roots
+  read(ids: string[]): Promise<Map<string, GitObject>>;   // batched
 }
+interface GitObject { type: "commit" | "tree" | "blob"; bytes: Uint8Array }
 
-interface Who { name: string; email: string; at: number /* unix s */; offset: number /* minutes */ }
+// --- Adapters, shipped in the package -------------------------------------
+// Structural: takes isomorphic-git's functions, doesn't import isomorphic-git.
+bttwriter.isomorphicGitSource({ git, fs, dir }): ObjectSource;
+
+// --- Reading one Writer repo ----------------------------------------------
+// Drives the walk: while (want = walk.wants()) walk.give(await source.read(want)).
+// Returns a handle: the decoded saves stay in wasm memory, so the text doesn't
+// cross into JS and back again on its way to replay.
+const rom: WriterHistory = await bttwriter.readHistory(source, {
+  book: "ROM",            // canon's parse_book also takes Writer's "rom"
+  title: "Romans",        // the template's fallback when front/title.txt is empty
+  source: "owner/repo",   // what Writer-Source names
+});
+rom.saves;     // number, for the staging screen
+rom.first;     // Signature of the first save (after clock fixes)
+rom.last;
+rom.progress(); // Array<[at: number, verses: number]>: raw verse-marker counts after each save
+rom.usfm();     // the book at HEAD, as the template renders it (staging preview)
+
+// --- Replay ---------------------------------------------------------------
+interface Signature { name: string; email: string; at: number /* unix s */; offset: number /* minutes */ }
 
 interface ReplayOptions {
-  now: number;             // unix seconds; a clock later than now + 1 day counts as wrong
-  deltas?: boolean;        // ofs-delta each book file against its previous version (default true)
+  now: number;            // unix seconds; a device clock later than now + 1 day counts as wrong
+  deltas?: boolean;       // default true; see "Deltas" below
 }
 
 interface Replayed {
-  head: string;            // the last commit; the caller points a branch at it, or merges it
-  pack: Uint8Array;        // .git/objects/pack/<name>.pack
-  idx: Uint8Array;         // .git/objects/pack/<name>.idx (v2)
-  name: string;            // "pack-<sha of the pack>"
+  head: string;           // the last replayed commit. Nothing is committed on top of it.
+  pack: Uint8Array;       // → .git/objects/pack/<name>.pack
+  idx: Uint8Array;        // → .git/objects/pack/<name>.idx (v2)
+  name: string;           // "pack-<sha of the pack>"
+  books: Array<{ book: string; file: string; title: string }>; // what a manifest needs (see RC/Burrito)
   commits: number;
-  unchanged: number;       // saves that changed no rendered text: no commit for them
-  estimated: number;       // saves whose date was estimated (Writer-Clock trailer written)
+  unchanged: number;      // saves that changed no rendered text: no commit for them
+  estimated: number;      // saves whose date was estimated (Writer-Clock trailer written)
   stats: { objects: number; deltas: number; packBytes: number };
 }
 
-// The one call. undefined when no save changed any book's text.
-galley.writer.replay(books: WriterBook[], options: ReplayOptions): Replayed | undefined;
-
-// Small pure helpers the callers also need. Today each app has its own copy.
-galley.writer.progress(book: WriterBook): Array<[at: number, verses: number]>; // hub progress line
-galley.writer.stitch(files: Map<string, Uint8Array>, book: string, title: string): string; // one book at HEAD
-galley.writer.isTextPath(path: string): boolean;
+bttwriter.replay(histories: WriterHistory[], options: ReplayOptions): Replayed | undefined;
 ```
 
-How Sefer uses it, replacing `replayWriterHistories` and `packWriter` and leaving the
-rest of `assemble` as it is:
+How Sefer uses it. `readWriterHistory`, `replayWriterHistories` and `packWriter` go, and the
+rest of `assemble` stays as it is:
 
 ```ts
-// src/core/migrate/assemble.ts, inside assemble()
-const books = staged.flatMap((s) => (s.history ? [s.history] : [])); // readWriterHistory keeps the walk, minus decode
-const replayed = galley.writer.replay(books, { now: Date.now() / 1000 });
+// candidate.ts, staging: was readWriterHistory(repo, …) over git.walk
+const source = bttwriter.isomorphicGitSource({ git, fs, dir: repo.root });
+staged.history = await bttwriter.readHistory(source, { book, title, source: upstream });
+
+// assemble.ts: behind the existing spinner; no worker (see "Speed")
+const replayed = bttwriter.replay(histories, { now: Date.now() / 1000 });
 if (replayed) {
-  await fs.writeFile(`${git}/objects/pack/${replayed.name}.pack`, replayed.pack);
-  await fs.writeFile(`${git}/objects/pack/${replayed.name}.idx`, replayed.idx);
-  await fs.writeFile(`${git}/refs/heads/${DEFAULT_BRANCH}`, `${replayed.head}\n`);
+  await fs.writeFile(`${gitDir}/objects/pack/${replayed.name}.pack`, replayed.pack);
+  await fs.writeFile(`${gitDir}/objects/pack/${replayed.name}.idx`, replayed.idx);
+  await fs.writeFile(`${gitDir}/refs/heads/${DEFAULT_BRANCH}`, `${replayed.head}\n`);
 }
 // addBooks(): the same call, then the existing merge commit with alsoParents: [replayed.head].
 ```
 
-### From Rust (the hub), natively
+### From Rust (the hub)
 
 ```rust
-// The crate (name: see the question below). No libgit2, no serde, no I/O.
-pub struct WriterBook { pub book: BookKey, pub title: String, pub source: String, pub saves: Vec<Save> }
-pub struct Save { pub id: String, pub author: Sig, pub committer: Sig, pub message: String,
-                  pub changes: Vec<(String, Option<Vec<u8>>)> }
+// bttwriter: no I/O, no serde. The libgit2 adapter is behind the `git2` feature, native only.
+pub trait ObjectSource {                                   // the sync convenience over the walk
+    fn read(&mut self, id: &ObjectId) -> Result<(Kind, Vec<u8>)>;
+}
+#[cfg(feature = "git2")]
+pub struct Git2Source<'r> { /* wraps &git2::Odb */ }
 
-pub fn replay(books: &[WriterBook], opts: &ReplayOptions) -> Option<Replayed>;
-pub fn progress(book: &WriterBook) -> Vec<(i64, i64)>;
-pub fn stitch<'a>(files: impl IntoIterator<Item = (&'a str, &'a [u8])>, book: BookKey, title: &str) -> String;
+pub struct HistoryWalk { /* the sans-IO machine above */ }
+impl HistoryWalk {
+    pub fn new(head: ObjectId, shallow: &[ObjectId]) -> Self;
+    pub fn wants(&self) -> &[ObjectId];                    // empty: done
+    pub fn give(&mut self, objects: impl IntoIterator<Item = (ObjectId, Kind, Vec<u8>)>) -> Result<()>;
+    pub fn finish(self, meta: BookMeta) -> Result<WriterHistory>;
+}
+pub fn read_history(src: &mut impl ObjectSource, head: ObjectId, meta: BookMeta) -> Result<WriterHistory>;
 
-// Underneath, and public because the hub's closing manifest commit can use it too:
-pub mod pack {
+impl WriterHistory {
+    pub fn progress(&self) -> Vec<(i64, i64)>;
+    pub fn usfm(&self) -> String;
+}
+pub fn replay(histories: &[WriterHistory], opts: &ReplayOptions) -> Option<Replayed>;
+
+pub mod pack {                                             // public: for a commit on top
     pub struct PackWriter { /* … */ }
     impl PackWriter {
         pub fn new() -> Self;
-        /// Returns the object id. `lane` names a chain to delta against ("46-ROM.usfm").
         pub fn add(&mut self, kind: Kind, body: &[u8], lane: Option<&str>) -> ObjectId;
-        pub fn finish(self) -> FinishedPack; // pack, idx, name, stats
+        pub fn finish(self) -> FinishedPack;               // pack, idx, name, stats
     }
     pub fn tree_body(entries: &BTreeMap<String, ObjectId>) -> Vec<u8>;
     pub fn commit_body(c: &CommitFields) -> Vec<u8>;
 }
 ```
 
-The hub keeps reading Writer repos with libgit2 (`read_writer_history` stays in the hub,
-but stops decoding), and `build_consolidated` becomes:
+The hub's `crates/history` and `crates/stitch` go away, and `build_consolidated` becomes:
 
 ```rust
-let replayed = writer::replay(&books, &ReplayOptions { now, deltas: true }).ok_or("no save changed any book")?;
-std::fs::write(objects.join(format!("pack/{}.pack", replayed.name)), &replayed.pack)?;
-std::fs::write(objects.join(format!("pack/{}.idx", replayed.name)), &replayed.idx)?;
+let histories = books.par_iter().map(|b| {
+    let repo = git2::Repository::open_bare(scanner.repo_path(&b.owner, &b.name))?;
+    let head = repo.head()?.peel_to_commit()?.id();
+    bttwriter::read_history(&mut Git2Source::new(&repo.odb()?), head.into(), meta(b))
+}).collect::<Result<Vec<_>, _>>()?;
+let replayed = bttwriter::replay(&histories, &ReplayOptions { now, deltas: true }).ok_or("no save changed any book")?;
+fs::write(objects.join(format!("pack/{}.pack", replayed.name)), &replayed.pack)?;
+fs::write(objects.join(format!("pack/{}.idx", replayed.name)), &replayed.idx)?;
 // then the manifest.yaml commit on top of replayed.head, with git2, as today
 ```
 
-### Why the line is drawn there
+### Contract notes
 
-```mermaid
-sequenceDiagram
-  participant App as Sefer / hub
-  participant K as kitchen: writer::replay
-  App->>App: read each Writer repo (isomorphic-git / libgit2): first-parent walk, changed paths, blob bytes
-  App->>K: WriterBook[] (bytes) + now
-  K->>K: decode, keep text paths, fix bad clocks
-  K->>K: per book: apply save → tree → template → USFM, drop unchanged
-  K->>K: merge books by key, build blob/tree/commit, SHA-1, deflate, delta
-  K-->>App: head, pack, idx, counts
-  App->>App: write pack + idx, point a ref or merge, push
+- **No commit on top.** `head` is the last replayed save. A manifest, an assembly commit or a
+  merge is the caller's, on top of `head` (the hub) or as a second parent (Sefer's
+  `addBooks`). The crate's docs and the `Replayed.head` doc comment say so.
+- **Always a new root.** There's no `parent` option: every caller today replays as a root
+  and commits or merges on top.
+- **Clock fixes are unconditional.** One behaviour in every app is the point of the step.
+- **`progress` is raw counts.** Verse markers present after each save, with a bridge `1-3`
+  counted as three. Scaling against a versification is the caller's.
+
+### RC and Burrito: later, by composition
+
+<Question id="container" answer="Not in replay. replay returns `books` (code, file name, title), which is everything a manifest needs. When the container step (step 3) lands, a `consolidate()` built on replay + container + PackWriter can return a pack whose closing commit holds a fresh manifest.yaml or metadata.json. Recorded as a followup.">Should this optionally return a new RC or Burrito? (Will: "I think so, but we haven't built those container formats in this repo/workspace yet.")</Question>
+
+Building it into `replay` now would mean either writing a throwaway manifest writer or
+waiting on step 3. Keeping `replay` manifest-free and returning `books` means step 3 can add
+it without changing this API:
+
+```ts
+// After step 3 (container), roughly:
+bttwriter.consolidate(histories, {
+  now,
+  container: { kind: "rc", language: "tpi", resource: "reg" }, // or { kind: "burrito", … }
+}): Replayed & { manifest: { path: string; bytes: Uint8Array } }; // closing commit is in the pack
 ```
 
-- **Walking a Writer repo stays with the caller.** Both apps already have a git library
-  open on those repos, and the walk is the part that touches storage. Moving it in would
-  mean a pack *reader* (inflate, delta resolution, idx lookup) inside the kitchen. See the
-  question below.
-- **Decoding moves in.** It's part of what has to agree byte for byte, and it's the step
-  most likely to drift (JS `trim` vs Rust `trim`, the BOM, U+0085).
-- **Writing a ref, merging and pushing stay with the caller.** Those are each app's
-  repository state: Sefer's lock and `Repositories` service, the hub's publish flow.
-- **A pack, not a fast-import stream.** A stream needs a `git` binary, which the browser
-  doesn't have. The stream can stay as a debug dump if it's ever wanted; it's not planned.
+<Followup id="consolidate-manifest">When the container crate lands, add `consolidate()`: replay, then a closing commit (with `PackWriter`) holding the RC `manifest.yaml` or Burrito `metadata.json` for `books`. The hub's `manifest_with_book` and Sefer's `withProjects`/`withBooks` are what it replaces.</Followup>
 
-<Tradeoff id="sync" chose="A synchronous wasm call" cost="About 2 s of work on whatever thread calls it; Sefer's TS writer awaited crypto.subtle and CompressionStream, so it yielded between objects.">
-Rust's SHA-1 and deflate run inside the call, so it doesn't yield. On the main thread that
-blocks the UI for the length of a New Testament's replay.
-</Tradeoff>
+## Git internals the pack needs
 
-<Question id="worker">Does Sefer call galley from a worker already, or would `writer.replay` be the first thing that needs one? If galley lives on the main thread, the migration screen needs a worker or a chunked call (`replay` taking a budget and resuming). I'd rather not design resumption until we know it's needed.</Question>
+**What a pack is.** Git stores three kinds of object here: a *blob* (a file's bytes), a
+*tree* (a folder: names → object ids) and a *commit* (a tree, parents, author, committer,
+message). An object's id is the SHA-1 of `"<type> <length>\0"` plus its bytes, so any two
+programs that build the same commit get the same id. A pack is all of those objects in one
+file, each one zlib-compressed, plus an index (`.idx`) that says where each id is.
 
-## The pack writer
+**Why SHA-1 and deflate (`sha1_smol`, `miniz_oxide`).** These are the two primitives git
+itself uses: SHA-1 names every object, and zlib (deflate) compresses every object, in a pack
+or loose. So any pack writer needs both, and that's all it needs. `miniz_oxide` is the
+pure-Rust deflate behind `flate2`'s default backend, so it builds for wasm with nothing
+extra. It's in our `Cargo.lock` today only by accident: galley's heap profiler (`dhat`, a
+dev dependency) uses `backtrace`, which uses `miniz_oxide` to read compressed debug info.
+That has nothing to do with this; it just means the crate is already vetted here.
 
-It's a port of Sefer's `pack.ts`, which already works and is tested against `git`:
+**Deltas.** Without them, each of a New Testament's ~3,000 saves stores its whole book file
+again: 35 MB. With them, a version is stored as "the previous version of this file, plus
+these edits". The edits are a list of "copy bytes 0–8,000 from the base" and "insert these
+40 new bytes" instructions. A typical save changes one chunk, so a version shrinks to a few
+dozen bytes, and the NT becomes 2.7 MB. `ofs-delta` is the form whose base is named by its
+byte offset earlier in the same pack. A delta changes how an object is *stored*, never its
+id. The writer keeps a "lane" per book file (and one for the root tree), deltas each version
+against the previous one in its lane, caps chains at 50, and keeps a delta only when it's
+smaller.
 
-- **Objects:** `blob`, `tree` (one level, every entry `100644`; a consolidated repo is
-  flat book files), `commit`. Object ids are SHA-1 of `"<type> <len>\0" + body`, so they
-  match what any git computes. This is what has to be identical across implementations.
-- **Deltas:** `ofs-delta` only, against the previous object in the same lane (a book's
-  file, the root tree), depth at most 50, kept only when smaller. This is what turns 35 MB
-  of whole versions into 2.7 MB.
-- **Pack bytes may differ** from today's TS (another deflate gives other bytes), and that's
-  fine: what gets pinned is the ids and that `git` accepts the pack.
-- **Dependencies:** `sha1_smol` (no dependencies) and `miniz_oxide` (pure Rust; in `Cargo.lock`
-  today only as a dev dependency, through `dhat`, so this is its first runtime use). Both build for wasm32 with no feature games.
+**A pack, not a fast-import stream.**
 
-<Question id="speed">The gate I'd set: on Tawara (3,959 commits) and one NT, `replay` in galley's wasm under Node is no slower than today's TS writer, and the pack is within 10% of its size. Browser-native SHA-1 and deflate are fast, so this isn't a given. Is "no slower than today" the right bar, or is a bit slower fine for one-off migrations?</Question>
+<Question id="fast-import" answer="Not planned. Same ids, yes; but neither isomorphic-git nor libgit2 can read a stream, so only the git binary could use it. Cheap to add later as a debug dump.">Would a stream be byte identical? Could Rust produce one that libgit2 could use? Can isomorphic-git take one?</Question>
+
+- **Same objects, yes.** A fast-import stream is a text script ("commit refs/heads/main",
+  "author …", "M 100644 inline 46-ROM.usfm" plus data). `git fast-import` would build exactly
+  the same commits from it, with the same ids. The pack it writes would differ in bytes,
+  which never matters.
+- **No library can read it.** fast-import is a feature of the `git` program. libgit2 has no
+  fast-import, and neither does isomorphic-git. The hub could shell out to `git fast-import`,
+  but Sefer can't, and the pack already works in both.
+- **Producing one is trivial** (about 60 lines from the same replay steps), so it's a fine
+  debug output if we ever want to inspect a replay with stock git. Not in this plan.
+
+## Packaging: its own crate and its own wasm module
+
+<Question id="wasm-home" answer="Its own crate, `bttwriter`, built to its own wasm module and shipped as a subpath of the existing npm package (`@wycliffeassociates/scripture-kitchen/bttwriter`). galley stays about USFM, Sefer imports this lazily on the migration screen, and there's no new release pipeline. (Will, 2026-11-05: 'galley should be mostly about usfm'.)">Door on galley's wasm, or its own crate and package?</Question>
+
+The options, against what Will raised (migration is rare, galley is about USFM):
+
+| | Door on galley | Own npm package | **Own wasm module, same npm package** |
+|---|---|---|---|
+| galley stays about USFM | no | yes | yes |
+| Cost to a Sefer user who never migrates | SHA-1 + deflate in the module every page loads | none | none (dynamic `import()`) |
+| Release work | none | second package, its own version and pin | one more crate in CI's wasm list (beside `onion-wasm` and `galley`) |
+| Version skew with canon | none | possible | none: same tag |
+
+The third is the one. The npm package already ships two wasm modules (`galley/pkg-*`,
+`onion-wasm/pkg-*`) under one version. `bttwriter/pkg-web` and `bttwriter/pkg-bundler` become
+the third, with a `./bttwriter` export. `bttwriter` depends on `canon` and `mise` only, not on
+onion or galley, so it's small. I'd expect well under 150 KB of wasm, and step 5 measures it.
+
+<Question id="crate-name" answer="`bttwriter` (Will, 2026-11-05).">What's the crate called?</Question>
+
+## Speed
+
+<Question id="worker" answer="No worker. Migration is a one-time action behind a spinner, and 3–5 seconds is fine; the user has to wait for it to finish before they can work anyway (Will, 2026-11-05).">Does Sefer need a worker for this?</Question>
+
+<Question id="speed" answer="No slower than today's TS writer is the goal, but it's a cold action: time it a few times, profile it once or twice for needless allocation, and parallelize per book natively (Will, 2026-11-05).">What's the bar?</Question>
+
+What that means in practice:
+
+- **Timing:** Tawara (3,959 commits) and one NT, three runs each, native and wasm under Node,
+  recorded in the ledger beside today's TS numbers (about 2 s for an NT).
+- **Profiling once:** `samply` natively, plus `dhat` (already a galley dev dependency) for
+  allocations. The hub's port has known waste to check: it clones the whole held-chunk map
+  per save to build the summary, and it re-renders the whole book per save. Plan to keep
+  the previous rendering and render only from the changed chapter on.
+- **Parallel per book, natively:** reading histories and rendering each book's versions
+  are independent per book. Behind a `parallel` cargo feature (rayon, as galley's
+  `parallel` is), on for the hub and off for wasm, which has no threads here. Interleaving
+  and object writing stay one sequential line: each commit names the one before.
 
 ## Where it lives
 
 <Files id="footprint">
 ```text
-+ writer/                            -- new crate (name: see question); depends on canon and mise
-+ writer/src/lib.rs                  -- WriterBook, Save, Sig, replay, progress
-+ writer/src/stitch.rs               -- from hub crates/stitch: decode_text, is_text_path, tree_from_files, the template
-+ writer/src/clock.rs                -- estimate_bad_clocks, day_of
-+ writer/src/summary.rs              -- verses_of, summary_of: the subject line
-+ writer/src/pack.rs                 -- from Sefer src/core/git/pack.ts: PackWriter, tree_body, commit_body
-+ writer/fixtures/                   -- histories extracted once from the five golden repos (see Tests)
-~ galley/src/wasm.rs                 -- the writer.replay / progress / stitch / isTextPath doors
-~ galley/Cargo.toml                  -- depends on writer
-~ Cargo.toml                         -- workspace member; sha1_smol, miniz_oxide
++ bttwriter/                          -- new crate; depends on canon and mise. Features: git2, parallel, wasm
++ bttwriter/src/lib.rs                -- WriterHistory, BookMeta, Signature, replay, Replayed
++ bttwriter/src/walk.rs               -- HistoryWalk (sans-IO), ObjectSource, read_history; tree diff; first parent
++ bttwriter/src/git2.rs               -- Git2Source, behind `git2`
++ bttwriter/src/stitch.rs             -- from hub crates/stitch: decode, is_text_path, tree_from_files, the template
++ bttwriter/src/clock.rs              -- estimate_bad_clocks, day_of
++ bttwriter/src/summary.rs            -- verses_of, summary_of: the subject line; progress
++ bttwriter/src/interleave.rs         -- format-free: per-book versions merged by time
++ bttwriter/src/pack.rs               -- format-free: from Sefer src/core/git/pack.ts
++ bttwriter/src/wasm.rs               -- behind `wasm`: readHistory handle, replay
++ bttwriter/bttwriter.ts              -- the TS shim: the walk driver loop, isomorphicGitSource
++ bttwriter/build.sh                  -- as galley/build.sh
++ bttwriter/fixtures/*.bundle         -- the five golden repos, ~1.4 MB together (see Tests)
+~ Cargo.toml                          -- member; sha1_smol, miniz_oxide
+~ package.json                        -- files + exports for ./bttwriter
+~ .github/workflows/ci.yml            -- bttwriter in the wasm build, byte check and test lists
 ```
 </Files>
 
@@ -268,61 +427,61 @@ Then, each in its own repo and pinned to the kitchen tag that ships this:
 
 <Files id="retired">
 ```text
-- sefer/src/core/migrate/writerHistory.ts   -- replay and summaries; readWriterHistory shrinks to the walk
+- sefer/src/core/migrate/writerHistory.ts   -- all of it
 - sefer/src/core/git/pack.ts                -- the pack writer
 - sefer/src/platform/web/pack.test.ts       -- moves in as the git-accepts-it test
 ~ sefer/src/core/migrate/writerBook.ts      -- keeps recognizeWriter / readWriterTree (they read the FS); the template goes
-~ sefer/src/core/migrate/assemble.ts        -- calls galley.writer.replay
-- hub/crates/stitch/                        -- usfm_file_name comes from canon; the rest from the kitchen
-~ hub/crates/history/                       -- keeps read_writer_history (libgit2); replay and progress go
-~ hub/crates/server/src/publish.rs          -- writes the returned pack + idx
+~ sefer/src/core/migrate/candidate.ts       -- bttwriter.readHistory instead of readWriterHistory
+~ sefer/src/core/migrate/assemble.ts        -- bttwriter.replay
+- hub/crates/stitch/                        -- usfm_file_name comes from canon; the rest from bttwriter
+- hub/crates/history/                       -- all of it: read_history (git2 feature), replay, progress
+~ hub/crates/server/src/{publish,progress}.rs -- call bttwriter; write the returned pack + idx
 ```
 </Files>
 
-<Question id="crate-name">What's the crate called? It holds the Writer format (stitch, template, history) and a small git pack writer. Options: `writer` (plain, says what it reads), `stock` (in the kitchen naming: many saves boiled down into one), or two crates, `writer` plus a generic `packfile`. I'd go with one crate named `writer` and a `pack` module, and split the pack out only when a second user appears.</Question>
-
-<Question id="wasm-home">Door on galley's existing wasm module, or a separate small wasm package? galley is the one module Sefer already loads and inits, which argues for a door there. The cost is SHA-1 and deflate inside it for every Sefer user, though only migration uses them. I'd put it on galley and measure the size change. If it's more than a few tens of KB gzipped, put it behind a cargo feature first, and make it a separate package only if that isn't enough.</Question>
-
-## The open questions about behaviour
-
-<Question id="clocks-in-sefer">Bad-clock estimation comes to Sefer as part of this. Projects Sefer already migrated keep their commits; only new migrations change. From then on, a save with a 1970 or 2000 date gets an estimated date and a `Writer-Clock:` trailer in Sefer too. Is that wanted, or should `estimate` be an option that Sefer turns off? I'd make it unconditional: one behaviour is the point of the step.</Question>
-
-<Question id="who-walks">Should the kitchen also read Writer repos (the walk), not only write the result? That would take raw object bytes through a callback (`(id) => Uint8Array`), so it's still I/O-free, but it means a pack reader (inflate, delta resolution, idx v2 lookup) in the kitchen. It would remove the last per-app difference (the first-parent walk is written twice today, and the Bemba bug was in that part). I'd leave it out of this step: both walks agree now, and a reader roughly doubles the work. Revisit if they drift.</Question>
-
-<Question id="base">The hub's `replay` takes a `parent` to build on, but every caller passes `None`. Sefer's `addBooks` replays the new books as their own root and merges that with `alsoParents`. Do we drop `parent` and always replay as a new root? I'd drop it. A caller that wants a linear history can still commit on top of `head`.</Question>
-
-<Question id="closing-commit">The hub ends with one more commit (`manifest.yaml`) via libgit2, and Sefer ends with an assembly commit via isomorphic-git. Should `replay` optionally take a closing commit (files and a message) so it lands in the same pack? It's convenient, but each app's closing commit is its own policy. I'd leave it out and make `pack::PackWriter` public for anyone who wants it.</Question>
-
-<Question id="progress-unit">`progress` counts verse markers (a bridge `1-3` is three) per chunk after each save, and the hub scales that line against the source. Once canon's schemes land, should `progress` take a scheme and report against `last_verse`, or keep raw counts and leave the scaling to the hub? I'd keep raw counts here, because canon shouldn't be a reason to touch this.</Question>
-
 ## Tests
 
-- **Ids, not bytes.** For each golden history, `replay` gives the same `head` as Sefer's TS
+- **Ids, not bytes.** For each golden repo, `replay` gives the same `head` as Sefer's TS
   `replayWriterHistories` at `326f02c8`, for books with no bad clocks, where the two agree
-  today. That one 40-hex string pins the template, the decode, the order, the summaries,
-  the trailers and the object encoding at once.
-- **git accepts it.** Write `pack` + `idx`, run `git index-pack --verify` and `git fsck`,
-  and check that the `idx` we wrote is byte-equal to the one `git index-pack` writes for
-  the same pack (idx v2 is determined by the pack). `git` is on CI already.
-- **The hub's existing unit tests come along:** bad clocks between good saves, summaries,
-  and a merged side branch losing no chunks. The last one becomes a test of the input
-  contract, since the walk stays with the caller.
-- **Goldens without the silent-skip trap.** The hub's stitch golden passes and prints a
-  note when `REPO_ROOT` is unset. `agents/testing.md` forbids that pattern here. Instead,
-  extract the five repos' histories once (`kpass/tmf_3jn_text_reg`, `kps-x-kaigar_3jn`,
-  `bem-x-ngumbo_2ch`, `msh_job_text_udb`, `saw_isa_text_reg`) into `writer/fixtures/` as
-  plain files, and assert their paths. The extractor is a bin, not a test.
+  today. That one 40-hex string pins the walk, the template, the decode, the order, the
+  summaries, the trailers and the object encoding at once.
+- **git accepts it.** Write `pack` + `idx`, run `git index-pack --verify` and `git fsck`, and
+  check that our `idx` is byte-equal to the one `git index-pack` writes for the same pack
+  (idx v2 is fully determined by the pack). `git` is on CI already.
+- **Both adapters.** The Rust tests read the fixtures through `Git2Source`. The wasm wall
+  reads one through `isomorphicGitSource` under Node, so the async driver loop is tested too.
+- **The hub's unit tests come along:** bad clocks between good saves, summaries, and the
+  merged side branch that must not lose chunks. The last now tests `HistoryWalk` directly,
+  since the walk is ours.
 
-<Question id="fixture-size">The five histories as plain files: are they small enough to commit? 3JN and 2CH should be tiny; ISA and JOB could be a few MB. If they're too big, the big two go to the calibration bucket (R2) and become a deliberately-run bin. Then the in-repo tier is the three small ones plus a synthetic history covering bad clocks and deletes.</Question>
+<Question id="fixture-size" answer="Small enough: commit all five as git bundles, about 1.4 MB together (measured 2026-11-05). Tests clone each bundle into a temp dir with git and read it through Git2Source; a missing bundle or git fails the test, it doesn't skip.">Are the five histories small enough to commit?</Question>
+
+Measured on 2026-11-05 by cloning each from WACS:
+
+| Repo | First-parent commits | Bundle | Every save's changed files, raw |
+|---|---|---|---|
+| `kpass/tmf_3jn_text_reg` | 5 | 4 KB | 8 KB |
+| `bahasatech.indotimur/kps-x-kaigar_3jn_text_reg` | 19 | 11 KB | 11 KB |
+| `chunga_major/bem-x-ngumbo_2ch_text_reg` | 352 | 445 KB | 533 KB |
+| `andriatiana_wa/msh_job_text_udb` | 1,188 | 435 KB | 1.46 MB |
+| `bahasatech.indotimur/saw_isa_text_reg` | 148 | 502 KB | 1.48 MB |
+
+The bundles are the right form. They're git's own packed format, a third of the size of
+the plain-file extraction, and reading them exercises the real walk and the real adapter
+instead of a pre-walked JSON. That also fixes the hub golden's silent skip (it passes
+without `REPO_ROOT`), which `agents/testing.md` forbids here.
 
 ## Order, each step usable on its own
 
-1. **Stitch** (`stitch.rs`, the template, decode) with the hub's goldens, using canon's
+1. **Stitch** (`stitch.rs`: the template and decode) with the hub's goldens, using canon's
    `usfm_file_name`. The hub can switch `hub-stitch` to it immediately.
 2. **Pack writer** (`pack.rs`) with the git-accepts-it tests. Nothing uses it yet.
-3. **Replay, clocks, summaries, progress**, plus the head-id goldens against Sefer's TS.
-   Then the hub switches `history::replay` and `progress` (native, no wasm needed).
-4. **The galley doors** and the speed and size measurements. Then Sefer switches
-   `assemble`/`addBooks` and deletes `writerHistory.ts`' replay and `pack.ts`.
+3. **The walk** (`walk.rs`, `Git2Source`) and the bundle fixtures.
+4. **Replay, clocks, summaries, progress**, plus the head-id goldens against Sefer's TS, and
+   the timing and profiling pass. Then the hub deletes `history` and `stitch` (native, no
+   wasm needed).
+5. **The wasm module and TS shim** (`isomorphicGitSource`, `readHistory`, `replay`), the CI
+   wiring, and the size measurement. Then Sefer switches `candidate`/`assemble`/`addBooks`
+   and deletes `writerHistory.ts` and `pack.ts`.
 
-<Question id="order">Is this order right? Steps 1–3 pay off in the hub before any wasm work, so the riskiest part (wasm speed and size) comes last, with a working native version to compare against. Step 1 waits for canon's book table. If canon slips, stitch can carry the 66-code table for a release and drop it later.</Question>
+<Question id="order">Is this order right? Steps 1–4 pay off in the hub before any wasm work, so the riskiest part (wasm speed and size) comes last, with a working native version to compare against. Step 1 waits for canon's book table. If canon slips, stitch can carry the 66-code table for a release and drop it later.</Question>
