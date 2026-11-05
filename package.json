@@ -32,6 +32,7 @@
     "canon/ts/tables.ts",
     "canon/ts/versification.ts",
     "canon/ts/scheme-tables.ts",
+    "canon/ts/names/*.ts",
     "canon/NOTICE",
     "canon/README.md"
   ],
@@ -75,6 +76,7 @@
     "./schema": "./onion-wasm/reader.ts",
     "./diagnostics.json": "./onion-wasm/diagnostics.json",
     "./reader": "./onion-wasm/reader.ts",
-    "./canon": "./canon/ts/canon.ts"
+    "./canon": "./canon/ts/canon.ts",
+    "./canon/names/*": "./canon/ts/names/*.ts"
   }
 }

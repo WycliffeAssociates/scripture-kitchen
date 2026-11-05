@@ -9,7 +9,12 @@
 //! data/books.tsv        →  src/tables.rs, ts/tables.ts                the book table, names
 //! data/schemes/*.json   →  src/scheme_tables.rs, ts/scheme-tables.ts  each scheme's counts
 //! data/sniff/rules.json →  src/sniff_tables.rs                        the sniffing rules (Rust only)
+//! data/names/*.tsv      →  src/name_tables.rs, ts/names/<locale>.ts   each gateway language's names
+//! (Unicode's NFKD)      →  src/fold_tables.rs                         what `fold` makes of a character
 //! ```
+//!
+//! The names are folded with `canon::fold`, which reads `fold_tables.rs`: after
+//! a change to the fold table, run the generator twice.
 //!
 //! Each pair comes from one read of its source, so the Rust and the
 //! TypeScript tables cannot disagree. Names are folded HERE, with the library's
@@ -20,6 +25,8 @@
 //! This is its own crate, not a binary inside canon, because it reads JSON
 //! with serde_json and canon's only dependency is `mise`.
 
+mod fold;
+mod names;
 mod rules;
 mod schemes;
 
@@ -46,6 +53,9 @@ fn main() -> ExitCode {
         schemes_rust_out,
         schemes_ts_out,
         sniff_rust_out,
+        fold_rust_out,
+        names_rust_out,
+        names_ts_dir,
     ] = match std::env::args_os().nth(1).map(PathBuf::from) {
         Some(dir) => OUTPUTS.map(|path| dir.join(path.rsplit('/').next().unwrap_or(path))),
         None => OUTPUTS.map(|path| canon_dir.join(path)),
@@ -91,17 +101,46 @@ fn main() -> ExitCode {
         }
     };
     let rules_header = HEADER.replace("canon/data/books.tsv", "canon/data/sniff/rules.json");
+    let locales = match names::read(&canon_dir.join("data/names"), &codes) {
+        Ok(locales) => locales,
+        Err(e) => {
+            eprintln!("gen-canon: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let names_header = HEADER.replace("canon/data/books.tsv", "canon/data/names/*.tsv");
+    let fold_header = HEADER.replace(
+        "from canon/data/books.tsv",
+        "from Unicode's NFKD (the unicode-normalization crate)",
+    );
+    let tags: Vec<&str> = locales.iter().map(|l| l.tag.as_str()).collect();
+    if let Err(e) = std::fs::create_dir_all(&names_ts_dir) {
+        eprintln!("gen-canon: {}: {e}", names_ts_dir.display());
+        return ExitCode::FAILURE;
+    }
+    let mut writes: Vec<(PathBuf, String)> = locales
+        .iter()
+        .map(|locale| {
+            (
+                names_ts_dir.join(format!("{}.ts", locale.tag)),
+                names::typescript(locale, &codes, &names_header, json),
+            )
+        })
+        .collect();
 
-    for (path, body) in [
-        (&rust_out, rust(&rows, &names)),
-        (&ts_out, typescript(&rows, &names)),
-        (&schemes_rust_out, schemes::rust(&schemes, &schemes_header)),
+    writes.extend([
+        (rust_out, rust(&rows, &names)),
+        (ts_out, typescript(&rows, &names, &tags)),
+        (schemes_rust_out, schemes::rust(&schemes, &schemes_header)),
         (
-            &schemes_ts_out,
+            schemes_ts_out,
             schemes::typescript(&schemes, &schemes_header, json),
         ),
-        (&sniff_rust_out, rules::rust(&rules, &rules_header)),
-    ] {
+        (sniff_rust_out, rules::rust(&rules, &rules_header)),
+        (fold_rust_out, fold::rust(&fold::table(), &fold_header)),
+        (names_rust_out, names::rust(&locales, &names_header)),
+    ]);
+    for (path, body) in &writes {
         if let Err(e) = std::fs::write(path, body) {
             eprintln!("gen-canon: writing {}: {e}", path.display());
             return ExitCode::FAILURE;
@@ -204,12 +243,16 @@ fn name_index(rows: &[Row]) -> Result<Vec<(String, u8)>, String> {
 
 /// Where each table goes, relative to `canon/`. With a directory argument,
 /// each goes into it under its file name instead.
-const OUTPUTS: [&str; 5] = [
+/// The last is a directory: one TypeScript module per locale.
+const OUTPUTS: [&str; 8] = [
     "src/tables.rs",
     "ts/tables.ts",
     "src/scheme_tables.rs",
     "ts/scheme-tables.ts",
     "src/sniff_tables.rs",
+    "src/fold_tables.rs",
+    "src/name_tables.rs",
+    "ts/names",
 ];
 
 const HEADER: &str =
@@ -254,7 +297,7 @@ fn rust(rows: &[Row], names: &[(String, u8)]) -> String {
     out
 }
 
-fn typescript(rows: &[Row], names: &[(String, u8)]) -> String {
+fn typescript(rows: &[Row], names: &[(String, u8)], locales: &[&str]) -> String {
     let mut out = String::new();
     let _ = writeln!(out, "// {HEADER}\n");
     out.push_str(
@@ -291,7 +334,16 @@ fn typescript(rows: &[Row], names: &[(String, u8)]) -> String {
             json(&rows[usize::from(*at)].code)
         );
     }
-    out.push_str("]);\n");
+    out.push_str("]);\n\n");
+    out.push_str(
+        "/** The locales with a names module: `import fr from \"…/canon/names/fr\"`. */\n",
+    );
+    let tags: Vec<String> = locales.iter().map(|t| json(t)).collect();
+    let _ = writeln!(
+        out,
+        "export const NAME_LOCALES: readonly string[] = [{}];",
+        tags.join(", ")
+    );
     out
 }
 

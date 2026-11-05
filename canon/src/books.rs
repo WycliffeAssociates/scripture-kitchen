@@ -8,6 +8,7 @@
 
 use mise::books::BookKey;
 
+use crate::fold_tables::FOLD;
 use crate::tables::{BOOKS, NAMES};
 
 /// One USFM book identifier and what the org needs to know about it.
@@ -119,18 +120,23 @@ pub fn books(canon: Canon) -> impl Iterator<Item = &'static Book> {
 /// 1. a book code in any case: `MAT`, `mat`, `1jn`;
 /// 2. an English name or alias, after [`fold`]: `"1samuel"`, `"Song of Solomon"`.
 ///
-/// A code wins over a name, so `"Jon"` is Jonah, never John.
+/// A code wins over a name, so `"Jon"` is Jonah, never John. Names in other
+/// languages are [`parse_book_in`](crate::parse_book_in)'s.
 pub fn parse_book(text: &str) -> Option<BookKey> {
-    let trimmed = text.trim();
-    if let Ok(bytes) = <[u8; 3]>::try_from(trimmed.as_bytes()) {
-        let upper = BookKey::new(bytes.map(|b| b.to_ascii_uppercase()));
-        if book(upper).is_some() {
-            return Some(upper);
-        }
-    }
-    let folded = fold(trimmed);
+    parse_code(text).or_else(|| parse_english(&fold(text)))
+}
+
+/// A book code in any case, after trimming.
+pub(crate) fn parse_code(text: &str) -> Option<BookKey> {
+    let bytes = <[u8; 3]>::try_from(text.trim().as_bytes()).ok()?;
+    let upper = BookKey::new(bytes.map(|b| b.to_ascii_uppercase()));
+    book(upper).map(|_| upper)
+}
+
+/// An English name or alias, already folded.
+pub(crate) fn parse_english(folded: &str) -> Option<BookKey> {
     NAMES
-        .binary_search_by(|(name, _)| (*name).cmp(folded.as_str()))
+        .binary_search_by(|(name, _)| (*name).cmp(folded))
         .ok()
         .map(|at| BOOKS[usize::from(NAMES[at].1)].code)
 }
@@ -141,27 +147,34 @@ pub fn usfm_file_name(code: BookKey) -> Option<String> {
     book(code).map(|book| format!("{}-{}.usfm", book.usfm_number, book.code))
 }
 
-/// A name as `parse_book` compares it: trimmed, lowercased, whitespace runs
+/// A name as `parse_book` compares it: Unicode NFKD with the combining
+/// accents (U+0300..U+036F) dropped, trimmed, lowercased, whitespace runs
 /// collapsed to one space, and a leading digit separated from the word after
-/// it, so `"1Samuel"`, `"1 samuel"` and `" 1   SAMUEL "` fold alike.
+/// it. So `"Éxodo"` is `"exodo"`, and `"1Samuel"`, `"1 samuel"` and
+/// `" 1   SAMUEL "` fold alike.
 ///
-/// `ts/canon.ts` folds the same way, and `fixtures/books.json` holds the cases
-/// both must agree on. Accents are NOT folded yet: that arrives with the
-/// localized names, which need it.
+/// Sefer's `names.ts` and `ts/canon.ts` fold the same way, and
+/// `fixtures/books.json` holds the cases they must agree on.
 pub fn fold(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
+    let mut decomposed = String::with_capacity(text.len());
+    for c in text.chars() {
+        decompose(c, &mut decomposed);
+    }
+    let mut collapsed = String::with_capacity(decomposed.len());
     let mut space = false;
-    for c in text.trim().chars() {
+    for c in decomposed.trim().chars() {
         if c.is_whitespace() {
             space = true;
             continue;
         }
-        if space && !out.is_empty() {
-            out.push(' ');
+        if space && !collapsed.is_empty() {
+            collapsed.push(' ');
         }
         space = false;
-        out.extend(c.to_lowercase());
+        collapsed.push(c);
     }
+    // The whole string, not char by char: a final sigma lowercases to ς.
+    let mut out = collapsed.to_lowercase();
     let mut chars = out.chars();
     match (chars.next(), chars.next()) {
         (Some(digit), Some(next))
@@ -171,6 +184,32 @@ pub fn fold(text: &str) -> String {
             out
         }
         _ => out,
+    }
+}
+
+/// One character's NFKD less the combining accents, onto `out`.
+fn decompose(c: char, out: &mut String) {
+    const S_BASE: u32 = 0xAC00;
+    const T_COUNT: u32 = 28;
+    const N_COUNT: u32 = 21 * T_COUNT;
+    let syllable = u32::from(c).wrapping_sub(S_BASE);
+    if syllable < 19 * N_COUNT {
+        // Hangul: Unicode's arithmetic, so the table needn't hold 11,172 rows.
+        let jamo = [
+            0x1100 + syllable / N_COUNT,
+            0x1161 + (syllable % N_COUNT) / T_COUNT,
+            0x11A7 + syllable % T_COUNT,
+        ];
+        for (at, cp) in jamo.into_iter().enumerate() {
+            if at < 2 || cp != 0x11A7 {
+                out.extend(char::from_u32(cp));
+            }
+        }
+        return;
+    }
+    match FOLD.binary_search_by(|(from, _)| from.cmp(&c)) {
+        Ok(at) => out.push_str(FOLD[at].1),
+        Err(_) => out.push(c),
     }
 }
 

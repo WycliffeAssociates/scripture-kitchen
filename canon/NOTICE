@@ -29,6 +29,17 @@ Sniffing rules
   unchanged; the generated table keeps the tests and column labels, adds which
   columns each built-in scheme fits, and drops the ranges.
 
+Book names
+  data/names/<locale>.tsv, and the tables generated from them
+  (src/name_tables.rs, ts/names/*.ts).
+
+  Each gateway language's book names as its own translation writes them in
+  \toc1-3 (or a Writer project's front/title.txt), harvested from the repos
+  data/names/GATEWAYS.tsv lists on https://content.bibletranslationtools.org
+  (WA-Catalog, WycliffeAssociates and the Writer repos named there). Those
+  texts are CC BY-SA 4.0. The names are kept as written, except where each
+  file's header says a reviewer changed one.
+
 Ours
   data/schemes/ulb.json is ours: chapter and verse counts measured from
   WycliffeAssociates/en_ulb, with eng.json's verse mappings for the 66 books

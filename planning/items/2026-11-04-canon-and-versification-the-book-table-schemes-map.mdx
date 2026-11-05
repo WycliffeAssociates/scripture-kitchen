@@ -405,7 +405,31 @@ behind.
    Originally: Port the test grammar (`Last`, `Exist`, `NotExist`, `<`/`>` with factors) and
    the voting and abstention above. Run it over every corpus in `testData`, and pin a
    golden of which scheme each book sniffs as.
-6. **Names.** The `\toc` harvester over the gateway-language list, plus reviewed
+6. **Names** (done on the `canon` branch, 2026-11-05; first-pass review by Claude, Will
+   to confirm). `gen/fetch-gateways.sh` refreshes `GATEWAYS.tsv` from the BIEL API and
+   clones the sources. `harvest-names` reads `\toc1-3` through onion's lexer (Writer repos:
+   `front/title.txt`) into `data/names/<locale>.tsv`: 32 languages, and fa, pmy and zh
+   fall back to English. What the data showed:
+   - One source per language. The first harvest took every Primary text (ulb and udb,
+     arb's avd and nav) and disagreed in hundreds of cells. One org text per language
+     (the first of ulb, reg, avd, udb, blv, nav) disagrees in none.
+   - Fixed in review, and listed in each file's header: Assamese Exodus had Leviticus's
+     `\toc2`; Burmese `\toc2` is English throughout (dropped, so short falls back to long);
+     Odia's Pentateuch has `\toc1` and `\toc2` swapped; a few all-capitals names (fr, tl,
+     vi, ru). Zero-width spaces (lo) and leading dashes (or) are stripped by the harvester.
+   - Kept as written: Tamil numbers 1-2 Samuel, Kings and Chronicles as I and II; Russian
+     calls 1 Kings "3 Царств"; Tok Pisin calls John "Jon", which `parse_book_in` reads as
+     Jonah's code, as Sefer does.
+   - `fold` became Sefer's (NFKD, accents dropped). canon stays on `mise` alone: the
+     generator writes each changed character into `src/fold_tables.rs`, and Hangul is
+     arithmetic.
+   - `name(code, locales, form)` and `parse_book_in(text, locales)` in Rust (tags, `"es"`
+     finds `es-419`); `name(code, form, tables)` and `parseBook(text, tables)` in
+     TypeScript, with one module per locale (`canon/names/fr`) so a bundle carries only
+     what it imports. No cargo feature: galley never calls them, so its wasm is
+     byte-identical. Both pass `fixtures/names.json`.
+
+   Originally: The `\toc` harvester over the gateway-language list, plus reviewed
    `names/<locale>.tsv`, plus `name(code, locale, form)` and localized `parse_book`.
 7. **Galley.** A declared `versification` per registered book (`Scheme` or
    `FollowSource`), `defineScheme`, and sous pairing on `org` keys. This closes the

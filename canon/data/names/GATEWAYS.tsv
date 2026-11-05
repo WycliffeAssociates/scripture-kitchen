@@ -1,0 +1,38 @@
+# The gateway languages whose book names canon harvests. Written by
+# canon/gen/fetch-gateways.sh from the BIEL language API; do not edit.
+# locale	english_name	national_name	sources (owner/repo, comma-separated)
+am	Amharic	አማርኛ	WA-Catalog/am_ulb
+arb	Arabic, Standard	العربية الفصحى, عربي فصيح	WA-Catalog/arb_avd
+as	Assamese	অসমীয়া	WA-Catalog/as_ulb
+bn	Bengali, Bangla	বাংলা	WA-Catalog/bn_ulb
+ceb	Cebuano	Cebuano	WA-Catalog/ceb_ulb
+en	English	English	WycliffeAssociates/en_ulb
+es-419	Latin American Spanish	Español Latin America	WA-Catalog/es-419_ulb
+fa	Persian (Farsi)	فارسی	
+fr	French	Français	WA-Catalog/fr_ulb
+gu	Gujarati	ગુજરાતી	Josh_1203/gu_amo_text_reg,Josh_1203/gu_deu_text_reg,Josh_1203/gu_jos_text_reg,jebaseelan/gu_1co_text_reg,jebaseelan/gu_1ti_text_reg,jebaseelan/gu_2co_text_reg,jebaseelan/gu_2ti_text_reg,jebaseelan/gu_col_text_reg,jebaseelan/gu_eph_text_reg,jebaseelan/gu_gal_text_reg,jebaseelan/gu_heb_text_reg,jebaseelan/gu_jdg_text_reg,jebaseelan/gu_jud_text_reg,jebaseelan/gu_mrk_text_reg,jebaseelan/gu_phm_text_reg,jebaseelan/gu_php_text_reg,jebaseelan/gu_rom_text_reg,jebaseelan/gu_rut_text_reg,kings/gu_1jn_text_reg,kings/gu_1pe_text_reg,kings/gu_1th_text_reg,kings/gu_2jn_text_reg,kings/gu_2pe_text_reg,kings/gu_2th_text_reg,kings/gu_3jn_text_reg,kings/gu_act_text_reg,kings/gu_jas_text_reg,kings/gu_jhn_text_reg,kings/gu_lev_text_reg,kings/gu_luk_text_reg,kings/gu_mat_text_reg,kings/gu_num_text_reg,kings/gu_rev_text_reg,kings/gu_tit_text_reg
+ha	Hausa	هَوُسَ	WA-Catalog/ha_ulb
+hi	Hindi	हिन्दी	WA-Catalog/hi_ulb
+ilo	Ilocano	Iloko	WA-Catalog/ilo_ulb
+km	Khmer	ខ្មែរ, ខេមរភាសា, ភាសាខ្មែរ	WA-Catalog/km_ulb
+kn	Kannada	ಕನ್ನಡ	WA-Catalog/kn_ulb
+lo	Laotian	ພາສາລາວ	WA-Catalog/lo_ulb
+ml	Malayalam	മലയാളം	WA-Catalog/ml_ulb
+mr	Marathi (Marāṭhī)	मराठी	WA-Catalog/mr_ulb
+my	Burmese	ျမန္မာစာ	WA-Catalog/my_juds
+ne	Nepali	नेपाली	WA-Catalog/ne_ulb
+or	Odia	ଓଡ଼ିଆ	WA-Catalog/or_ulb
+pa	Punjabi, Eastern	ਪੰਜਾਬੀ, پنجابی‎	WA-Catalog/pa_ulb
+plt	Malagasy, Plateau	Malagasy ôfisialy	WA-Catalog/plt_ulb
+pmy	Papuan Malay	Papuan Malay	
+pt-br	Brazilian Portuguese	Português Brasileiro	WA-Catalog/pt-br_ulb
+ru	Russian	Русский	Raphael/ru_psa_text_ulb,WorkInEurasia/ru_1ch_text_ulb,WorkInEurasia/ru_1ki_text_ulb,WorkInEurasia/ru_1sa_text_ulb,WorkInEurasia/ru_2ch_text_ulb,WorkInEurasia/ru_2ki_text_ulb,WorkInEurasia/ru_2sa_text_ulb,WorkInEurasia/ru_amo_text_ulb,WorkInEurasia/ru_dan_text_ulb,WorkInEurasia/ru_deu_text_ulb,WorkInEurasia/ru_ecc_text_ulb,WorkInEurasia/ru_est_text_ulb,WorkInEurasia/ru_exo_text_ulb,WorkInEurasia/ru_ezk_text_ulb,WorkInEurasia/ru_ezr_text_ulb,WorkInEurasia/ru_gen_text_ulb,WorkInEurasia/ru_hab_text_ulb,WorkInEurasia/ru_hag_text_ulb,WorkInEurasia/ru_hos_text_ulb,WorkInEurasia/ru_isa_text_ulb,WorkInEurasia/ru_jdg_text_ulb,WorkInEurasia/ru_jer_text_ulb,WorkInEurasia/ru_job_text_ulb,WorkInEurasia/ru_jol_text_ulb,WorkInEurasia/ru_jon_text_ulb,WorkInEurasia/ru_jos_text_ulb,WorkInEurasia/ru_lam_text_ulb,WorkInEurasia/ru_lev_text_ulb,WorkInEurasia/ru_mal_text_ulb,WorkInEurasia/ru_mic_text_ulb,WorkInEurasia/ru_nam_text_ulb,WorkInEurasia/ru_neh_text_ulb,WorkInEurasia/ru_num_text_ulb,WorkInEurasia/ru_oba_text_ulb,WorkInEurasia/ru_pro_text_ulb,WorkInEurasia/ru_rut_text_ulb,WorkInEurasia/ru_sng_text_ulb,WorkInEurasia/ru_zec_text_ulb,WorkInEurasia/ru_zep_text_ulb
+sw	Swahili	Kiswahili	WA-Catalog/sw_ulb
+ta	Tamil	தமிழ்	WA-Catalog/ta_ulb
+te	Telugu	తెలుగు	WA-Catalog/te_ulb
+th	Thai	ไทย	WA-Catalog/th_ulb
+tl	Tagalog	Wikang Tagalog	WA-Catalog/tl_ulb
+tpi	Tok Pisin	Tok Pisin	WA-Catalog/tpi_ulb
+ur-deva	Urdu Devanagari Script	उर्दू	WA-Catalog/ur-deva_ulb
+vi	Vietnamese	Tiếng Việt	WA-Catalog/vi_ulb
+zh	Chinese	中文 - Zhōngwén	

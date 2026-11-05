@@ -1,0 +1,33 @@
+{
+  "about": "Book names in the gateway languages, for tests/fixtures.rs (Rust) and ts/canon.test.mjs (TypeScript). Rust names locales by tag; TypeScript passes the imported tables, so a row marked rust_only tests Rust's tag matching, which TypeScript leaves to whoever imports.",
+  "name": [
+    { "code": "MAT", "locales": ["fr"], "form": "long", "text": "Matthieu", "locale": "fr", "answered": "long" },
+    { "code": "MAT", "locales": ["vi", "fr"], "form": "short", "text": "Ma-Thi-Ơ", "locale": "vi", "answered": "short", "why": "the first locale that has the book answers" },
+    { "code": "GEN", "locales": ["fr", "es-419"], "form": "long", "text": "Génesis", "locale": "es-419", "answered": "long", "why": "fr_ulb holds only the New Testament" },
+    { "code": "GEN", "locales": ["fr"], "form": "long", "text": "The Book of Genesis", "locale": "en", "answered": "long", "why": "English is the last resort: en_ulb's own names first" },
+    { "code": "GEN", "locales": [], "form": "short", "text": "Genesis", "locale": "en", "answered": "short" },
+    { "code": "GEN", "locales": [], "form": "abbrev", "text": "Gen", "locale": "en", "answered": "abbrev" },
+    { "code": "GEN", "locales": ["ru"], "form": "short", "text": "Книга Бытие", "locale": "ru", "answered": "long", "why": "a locale with no short name answers with its long one, and says so" },
+    { "code": "GEN", "locales": ["ru"], "form": "abbrev", "text": "Gen", "locale": "en", "answered": "abbrev", "why": "an abbreviation never stands in for a long name" },
+    { "code": "JHN", "locales": ["tpi"], "form": "long", "text": "Jon", "locale": "tpi", "answered": "long", "why": "shown as written, though parse_book reads \"Jon\" as Jonah" },
+    { "code": "TOB", "locales": ["fr"], "form": "long", "text": "Tobit", "locale": "en", "answered": "long", "why": "past en_ulb, the book table's English" },
+    { "code": "TOB", "locales": [], "form": "abbrev", "text": null },
+    { "code": "GEN", "locales": ["es"], "form": "long", "text": "Génesis", "locale": "es-419", "answered": "long", "rust_only": true, "why": "a tag without its region finds the language's table" },
+    { "code": "GEN", "locales": ["ES-419"], "form": "long", "text": "Génesis", "locale": "es-419", "answered": "long", "rust_only": true },
+    { "code": "GEN", "locales": ["xx"], "form": "long", "text": "The Book of Genesis", "locale": "en", "answered": "long", "rust_only": true, "why": "a tag canon has no names for is skipped" }
+  ],
+  "parse_book": [
+    { "text": "Matthieu", "locales": ["fr"], "book": "MAT" },
+    { "text": "matthieu", "locales": ["fr"], "book": "MAT" },
+    { "text": "Matthieu", "locales": [], "book": null, "why": "French only when French is asked for" },
+    { "text": "genesis", "locales": ["es-419"], "book": "GEN", "why": "folded: Génesis without its accent; also English" },
+    { "text": "EXODO", "locales": ["es-419"], "book": "EXO" },
+    { "text": "Книга Бытие", "locales": ["ru"], "book": "GEN" },
+    { "text": "книга   бытие", "locales": ["ru"], "book": "GEN" },
+    { "text": "उत्पत्ति", "locales": ["hi"], "book": "GEN" },
+    { "text": "Stat", "locales": ["tpi"], "book": "GEN" },
+    { "text": "Jon", "locales": ["tpi"], "book": "JON", "why": "a code wins over a name, in every language: Tok Pisin's John is Jonah here, as in Sefer" },
+    { "text": "1 Samuel", "locales": ["ru"], "book": "1SA", "why": "English after the locales" },
+    { "text": "Sang The", "locales": ["vi"], "book": "GEN", "why": "Vietnamese tone marks fold away" }
+  ]
+}

@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import {
+  NAME_LOCALES,
   SCHEME_NAMES,
   book,
   books,
@@ -13,6 +14,7 @@ import {
   fold,
   isSchemeName,
   lastVerse,
+  name,
   parseBook,
   slug,
   usfmFileName,
@@ -102,4 +104,35 @@ test("excluded", () => {
       `${row.scheme}.excluded(${row.book} ${row.chapter}:${row.verse})`,
     );
   }
+});
+
+const nameFixtures = load("names.json");
+const tableOf = async (tag) => (await import(`./names/${tag}.ts`)).default;
+const tablesOf = (tags) => Promise.all(tags.map(tableOf));
+
+test("name", async () => {
+  for (const row of nameFixtures.name) {
+    if (row.rust_only) continue;
+    const what = `name(${row.code}, ${row.form}, [${row.locales}])`;
+    const found = name(row.code, row.form, await tablesOf(row.locales));
+    if (row.text === null) {
+      assert.equal(found, undefined, what);
+      continue;
+    }
+    assert.deepEqual(found, { text: row.text, locale: row.locale, form: row.answered }, what);
+  }
+});
+
+test("parseBook with locales", async () => {
+  for (const row of nameFixtures.parse_book) {
+    assert.equal(
+      parseBook(row.text, await tablesOf(row.locales)),
+      row.book ?? undefined,
+      `parseBook(${JSON.stringify(row.text)}, [${row.locales}])`,
+    );
+  }
+});
+
+test("NAME_LOCALES lists a module for each", async () => {
+  for (const tag of NAME_LOCALES) assert.equal((await tableOf(tag)).locale, tag);
 });

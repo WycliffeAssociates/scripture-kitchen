@@ -1,0 +1,33 @@
+# fr: French (Français). Book names harvested from \toc1-3 (Writer
+# projects: front/title.txt) of: WA-Catalog/fr_ulb.
+# Reviewed (first pass, 2026-11-05), changed from the harvest:
+#   JAS long: JACQUES -> Jacques (was all capitals)
+#   JAS short: JACQUES -> Jacques (was all capitals)
+code	long	short	abbrev
+MAT	Matthieu	Matthieu	
+MRK	Marc	Marc	
+LUK	Luc	Luc	
+JHN	Jean	Jean	
+ACT	Actes	Actes	
+ROM	Romains	Romains	
+1CO	1 Corinthiens	1 Corinthiens	
+2CO	2 Corinthiens	2 Corinthiens	
+GAL	Galates	Galates	
+EPH	Ephésiens	Ephésiens	
+PHP	Philippiens	Philippiens	
+COL	Colossiens	Colossiens	
+1TH	1 Thessaloniciens	1 Thessaloniciens	
+2TH	2 Thessaloniciens	2 Thessaloniciens	
+1TI	1 Timothée	1 Timothée	
+2TI	2 Timothée	2 Timothée	
+TIT	Tite	Tite	
+PHM	Philémon	Philémon	
+HEB	Hébreux	Hébreux	
+JAS	Jacques	Jacques	
+1PE	1 Pierre	1 Pierre	
+2PE	2 Pierre	2 Pierre	
+1JN	1Jean	1Jean	
+2JN	2 Jean	2 Jean	
+3JN	3 Jean	3 Jean	
+JUD	Jude	Jude	
+REV	Apocalypse	Apocalypse	

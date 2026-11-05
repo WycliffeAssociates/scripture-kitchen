@@ -4,17 +4,23 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const TABLES: [&str; 5] = [
+const TABLES: [&str; 7] = [
     "src/tables.rs",
     "ts/tables.ts",
     "src/scheme_tables.rs",
     "ts/scheme-tables.ts",
     "src/sniff_tables.rs",
+    "src/fold_tables.rs",
+    "src/name_tables.rs",
 ];
+
+/// One module per locale: the same set of files, each reproduced.
+const NAME_MODULES: &str = "ts/names";
 
 #[test]
 fn a_second_generator_run_reproduces_the_committed_tables() {
     let scratch = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("canon-gen");
+    let _ = std::fs::remove_dir_all(&scratch); // a locale since removed must not linger
     std::fs::create_dir_all(&scratch).expect("a scratch directory");
     let status = Command::new(env!("CARGO_BIN_EXE_gen-canon"))
         .arg(&scratch)
@@ -26,6 +32,25 @@ fn a_second_generator_run_reproduces_the_committed_tables() {
     for table in TABLES {
         let name = table.rsplit('/').next().unwrap();
         assert_reproduces(&scratch.join(name), &canon.join(table));
+    }
+    let listing = |dir: &Path| {
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .expect("a names directory")
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    };
+    let fresh = scratch.join("names");
+    let committed = canon.join(NAME_MODULES);
+    assert_eq!(
+        listing(&fresh),
+        listing(&committed),
+        "{NAME_MODULES} holds other locales than data/names; run `cargo run -p canon-gen`"
+    );
+    for module in listing(&committed) {
+        assert_reproduces(&fresh.join(&module), &committed.join(&module));
     }
 }
 

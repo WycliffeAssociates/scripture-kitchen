@@ -11,7 +11,15 @@ workspace = true
 [dependencies]
 canon = { path = ".." }
 serde_json = "1.0"
+# The harvester reads `\toc` lines through onion's lexer.
+usfm_onion = { path = "../../onion" }
+# The fold table: each character's NFKD, written into src/fold_tables.rs.
+unicode-normalization = "0.1"
 
 [[bin]]
 name = "gen-canon"
 path = "src/main.rs"
+
+[[bin]]
+name = "harvest-names"
+path = "src/harvest.rs"

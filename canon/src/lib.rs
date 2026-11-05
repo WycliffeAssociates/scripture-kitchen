@@ -5,6 +5,8 @@
 //! canon::parse_book("1samuel")     -> Some(1SA)    code, slug, English name or alias; folded
 //! canon::books(Canon::Protestant66) -> GEN .. REV  in canonical order
 //! canon::usfm_file_name(MAT)       -> "41-MAT.usfm"
+//! canon::name(MAT, &["fr"], Long)  -> Named { text: "Matthieu", locale: "fr", form: Long }
+//! canon::parse_book_in("Éxodo", &["es"]) -> Some(EXO)   a gateway language's names; accents fold
 //!
 //! canon::scheme("eng")?.chapters(MAL)       -> Some(4)   org says 3
 //! canon::scheme("ulb")?.last_verse(ACT, 19) -> Some(40)  eng says 41
@@ -27,7 +29,10 @@
 
 pub mod books;
 pub mod define;
+mod fold_tables;
 pub mod map;
+mod name_tables;
+pub mod names;
 pub mod scheme;
 mod scheme_tables;
 pub mod sniff;
@@ -38,5 +43,6 @@ pub use books::{Book, Canon, Division, book, books, fold, parse_book, usfm_file_
 pub use define::{DefineError, SchemeBuilder};
 pub use map::{Mapped, Paired, Verse, counterparts, map, pairs};
 pub use mise::books::BookKey;
+pub use names::{Form, Named, locales, name, parse_book_in};
 pub use scheme::{Scheme, scheme, schemes};
 pub use sniff::{Confidence, Dissent, Inventory, Sniff, Standing, sniff};

@@ -2,7 +2,7 @@
 name = "canon"
 version.workspace = true
 edition.workspace = true
-description = "Book identity and numbering: the USFM book table, names, and (to come) versification schemes."
+description = "Book identity and numbering: the USFM book table, book names in the gateway languages, and versification schemes."
 
 [lints]
 workspace = true
