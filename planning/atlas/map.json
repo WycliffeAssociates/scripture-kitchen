@@ -65,6 +65,18 @@
    "label": "canon",
    "level": 1,
    "parent": null
+  },
+  {
+   "id": "bento",
+   "label": "bento",
+   "level": 1,
+   "parent": null
+  },
+  {
+   "id": "bttwriter",
+   "label": "bttwriter",
+   "level": 1,
+   "parent": null
   }
  ],
  "nodes": [
@@ -632,6 +644,32 @@
    "weight": 1,
    "x": 1700,
    "y": 2440
+  },
+  {
+   "id": "bento",
+   "label": "bento",
+   "level": 1,
+   "group": "bento",
+   "kind": "crate",
+   "slug": "bento",
+   "weight": 2,
+   "x": 2150,
+   "y": 2290,
+   "w": 300,
+   "h": 100
+  },
+  {
+   "id": "bttwriter",
+   "label": "bttwriter",
+   "level": 1,
+   "group": "bttwriter",
+   "kind": "crate",
+   "slug": "bttwriter",
+   "weight": 2,
+   "x": 2150,
+   "y": 1960,
+   "w": 300,
+   "h": 100
   }
  ],
  "edges": [
@@ -1225,6 +1263,48 @@
    "label": "verse counts → lint_against_counts",
    "level": 2,
    "kind": "data"
+  },
+  {
+   "from": "bento",
+   "to": "canon",
+   "label": "book table, names, sort",
+   "level": 1,
+   "kind": "depends"
+  },
+  {
+   "from": "bento",
+   "to": "mise",
+   "label": "BookKey",
+   "level": 1,
+   "kind": "depends"
+  },
+  {
+   "from": "bttwriter",
+   "to": "bento",
+   "label": "manifest.json, createBible",
+   "level": 1,
+   "kind": "depends"
+  },
+  {
+   "from": "bttwriter",
+   "to": "canon",
+   "label": "names, file names",
+   "level": 1,
+   "kind": "depends"
+  },
+  {
+   "from": "sefer",
+   "to": "bento",
+   "label": "read, check, createBible, edit",
+   "level": 1,
+   "kind": "calls"
+  },
+  {
+   "from": "sefer",
+   "to": "bttwriter",
+   "label": "readHistory, consolidate (migration only)",
+   "level": 1,
+   "kind": "calls"
   }
  ]
 }

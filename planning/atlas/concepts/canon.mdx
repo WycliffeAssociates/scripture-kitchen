@@ -16,7 +16,7 @@ About 35 hand-kept book tables across the org's repos disagree, even on Matthew'
 
 ## The solution
 
-One crate of data with no runtime parsing. `canon-gen` writes Rust consts and their TypeScript twins from `canon/data/`, so Sefer gets plain TS with no wasm `init()`, and both languages pass the same `canon/fixtures/*.json`. canon depends on [[mise]] alone; galley is its only Rust consumer. The numbering half is [[versification]].
+One crate of data with no runtime parsing. `canon-gen` writes Rust consts and their TypeScript twins from `canon/data/`, so Sefer gets plain TS with no wasm `init()`, and both languages pass the same `canon/fixtures/*.json`. canon depends on [[mise]] alone. Its Rust consumers are galley, [[bento]] (book entries, names and `sort`) and [[bttwriter]] (titles and file names). The numbering half is [[versification]].
 
 ## Trade-offs
 
@@ -58,4 +58,4 @@ parseBook("matthieu", [fr]); // "MAT"
 
 ## Composes with
 
-[[versification]] is the other half of the crate. [[galley]] reaches canon for declared schemes, sniffing and pairing across schemes; the plan was `planning/items/2026-11-04-canon-and-versification-the-book-table-schemes-map.mdx`.
+[[versification]] is the other half of the crate. [[galley]] reaches canon for declared schemes, sniffing and pairing across schemes. [[bento]] and [[bttwriter]] use the book table: manifests' book entries and `sort`, a book's English title, and `41-MAT.usfm` file names; the plan was `planning/items/2026-11-04-canon-and-versification-the-book-table-schemes-map.mdx`.

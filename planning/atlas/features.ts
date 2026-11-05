@@ -157,6 +157,21 @@ export const AFTER: readonly FeatureGroup[] = [
       { name: "Overlay across schemes", note: "overlay still pairs numbers as written", concept: "overlay", tag: "not built" },
     ],
   },
+  {
+    id: "containers",
+    title: "Manifests and BTT Writer",
+    items: [
+      { name: "Find a manifest", note: "metadata.json first, then manifest.yaml, then Writer's manifest.json", concept: "bento", door: "bento.find(names)", cite: "bento/src/lib.rs#find", tag: "bento" },
+      { name: "Read a manifest", note: "RC, Burrito or Writer into one shape; never throws, forgiveness said as findings", concept: "bento", door: "bento.read(name, bytes)", cite: "bento/src/lib.rs#read", tag: "bento" },
+      { name: "Check a repo", note: "against WA's Burrito fork, the repo's name and its files' checksums", concept: "bento", door: "bento.check(name, bytes, repo, files)", cite: "bento/src/check.rs#check", tag: "bento" },
+      { name: "Create a Bible's manifests", note: "metadata.json and manifest.yaml, valid from the first commit", concept: "bento", door: "bento.createBible(project, formats)", cite: "bento/src/write.rs#create_bible", tag: "bento" },
+      { name: "Add books, refresh checksums", note: "only the new lines change, in the file's own style", concept: "bento", door: "bento.edit(files, change)", cite: "bento/src/edit.rs#edit", tag: "bento" },
+      { name: "Stitch a Writer book", note: "chunks to USFM, byte for byte as Sefer's template", concept: "bttwriter", cite: "bttwriter/src/stitch.rs#stitch", tag: "Rust" },
+      { name: "Read a Writer history", note: "sans-IO walk, driven by isomorphic-git or libgit2", concept: "bttwriter", door: "bttwriter.readHistory(source, opts)", cite: "bttwriter/bttwriter.ts#readHistory", tag: "bttwriter" },
+      { name: "Fix bad device clocks", note: "1970, 2000 or future dates estimated between good saves, with a trailer", concept: "bttwriter", cite: "bttwriter/src/clock.rs#clocks", tag: "Rust" },
+      { name: "Consolidate", note: "every book's saves as one line in one git pack, manifests in a closing commit", concept: "bttwriter", door: "bttwriter.consolidate(histories, opts, project, closing)", cite: "bttwriter/src/consolidate.rs#consolidate", tag: "bttwriter" },
+    ],
+  },
 ];
 
 /** The Sous group's rows that the message catalog does not list. */

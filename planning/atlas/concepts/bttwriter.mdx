@@ -1,0 +1,68 @@
+---
+term: bttwriter
+slug: bttwriter
+aliases: [BTT Writer, Writer, consolidation, migration, replay, pack writer]
+kind: crate
+crate: bttwriter
+files: [bttwriter/src/lib.rs, bttwriter/src/stitch.rs, bttwriter/src/walk.rs, bttwriter/src/replay.rs, bttwriter/src/clock.rs, bttwriter/src/consolidate.rs, bttwriter/src/pack.rs, bttwriter/bttwriter.ts]
+related: [bento, canon, mise, sefer]
+level: 1
+summary: "BTT Writer projects, one repo per book, replayed save by save into one git pack, with the project's manifests in a closing commit."
+---
+
+## The problem
+
+BTT Writer keeps one git repo per book. Each repo holds chunk files of inline USFM, and every save is a commit. Migrating a project means stitching each save into a USFM book and interleaving the books' saves by time, so the history survives as one line of commits. Sefer did this in TypeScript and the hub did it in Rust, and the two disagreed. Neither fixed the dates on devices whose clock had reset to 1970 or 2000.
+
+## The solution
+
+One crate, with no I/O, does the whole job:
+- `stitch` renders a book the way Sefer's template does, byte for byte, which five real projects pin;
+- `walk` reads a repo's saves from git objects it asks for;
+- `replay` writes one line of commits;
+- `pack` writes the objects as a git pack and its index, in memory.
+
+`consolidate` adds a closing commit holding [[bento]]'s manifests. For any history without a bad clock, the commit ids are the ones Sefer's own replay gives.
+
+## Trade-offs
+
+- The walk is sans-IO: it says which objects it wants and is handed them back, a round at a time. That is what lets async isomorphic-git drive it across the wasm line, at the cost of a driver loop in `bttwriter.ts`.
+- Dates are estimated only when they can't be right: before 2015, or more than a day past now. Each estimated commit carries a `Writer-Clock:` trailer, and only those commits' ids differ from Sefer's.
+- Rendering is single-threaded. Callers who want threads read histories in parallel themselves; the module docs show how with rayon.
+- Its own wasm module (163 KB gzipped), loaded only on the migration screen, so nobody else pays for it.
+
+## Show me
+
+```ts
+const bttwriter = await import("@wycliffeassociates/scripture-kitchen/bttwriter");
+await bttwriter.init();
+
+const source = bttwriter.isomorphicGitSource({ git, fs, dir });
+const rom = await bttwriter.readHistory(source, { source: "owner/repo" });
+rom.project; rom.title; rom.saves; rom.progress(now); rom.usfm();
+
+const done = bttwriter.consolidate([rom, tit], { now }, project, closing);
+// write done.pack and done.idx under objects/pack/<done.name>, point a branch at done.head
+```
+
+## How it works
+
+- **Walk.** The walk follows the first-parent line from HEAD, treating shallow commits as roots. It diffs each save's tree against the one before and records the changed files in Sefer's order.
+- **Replay.** Saves from every book are merged by time. A save that changes no rendered text gets no commit. Each commit message summarises the verses the save changed.
+- **Pack.** The pack holds every object, optionally as deltas against the book's previous version, with a v2 index. `git fsck --strict` checks the output in tests.
+- **Cost.** Four books replay in about 500 ms natively and 610 ms in wasm under Node; Sefer's TypeScript took 3.3–3.8 s. About 30% of the time is SHA-1 and 40% is deflate.
+- **Native callers** can read repos through the `git2` feature's `Git2Source` adapter.
+
+## Composes with
+
+Depends on [[bento]] (Writer's `manifest.json`, and `createBible` for the closing commit), [[canon]] (English names and file names) and [[mise]]. [[sefer]] imports it lazily for migration. The hub can call the same Rust.
+
+## Where
+
+- [[code:bttwriter/src/lib.rs]] · the pipeline
+- [[code:bttwriter/src/walk.rs]] · the sans-IO walk
+- [[code:bttwriter/src/replay.rs]] · replay
+- [[code:bttwriter/src/clock.rs]] · date estimates
+- [[code:bttwriter/src/consolidate.rs]] · the closing commit
+- [[code:bttwriter/bttwriter.ts]] · the TypeScript layer and the isomorphic-git adapter
+- [[code:planning/items/2026-11-05-writer-consolidation-saves-in-one-git-pack-out.mdx|plan]]
