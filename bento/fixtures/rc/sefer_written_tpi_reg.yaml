@@ -1,0 +1,43 @@
+dublin_core:
+  conformsto: rc0.2
+  contributor:
+    - Mary Kila
+  creator: Bible translation community
+  format: text/usfm
+  identifier: reg
+  issued: 2026-11-04
+  language:
+    direction: ltr
+    identifier: tpi
+    title: Tok Pisin
+  modified: 2026-11-04
+  publisher: Wycliffe Associates
+  relation:
+    - tpi/reg
+  rights: CC BY-SA 4.0
+  source:
+    - identifier: ulb
+      language: en
+      version: "12"
+  subject: Bible
+  title: Baibel
+  type: bundle
+  version: "1"
+checking:
+  checking_entity: []
+  checking_level: "1"
+projects:
+  - title: Matyu
+    identifier: mat
+    path: ./41-MAT.usfm
+    sort: 39
+    categories:
+      - bible-nt
+    versification: ufw
+  - title: Rom
+    identifier: rom
+    path: ./46-ROM.usfm
+    sort: 44
+    categories:
+      - bible-nt
+    versification: ufw

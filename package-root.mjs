@@ -1,5 +1,5 @@
 /**
- * The repo-root `package.json`, derived from the three inner ones.
+ * The repo-root `package.json`, derived from the inner ones.
  *
  *     node package-root.mjs > package.json
  *
@@ -14,6 +14,10 @@
  * door plus the resident sous handle. `onion-wasm` keeps its own subtree under
  * `./onion` for a consumer that wants the engine alone, and `canon` sits at
  * `./canon`: plain TypeScript with no wasm, so a book table costs no `init()`.
+ * `bento` (manifests), `bttwriter` (Writer migration) and `docx` (USFM in Word)
+ * are TypeScript over a wasm module each, at `./bento`, `./bttwriter` and
+ * `./docx`; a bundler fetches a module only where it's imported, so Sefer
+ * pays for bttwriter only on the migration screen.
  */
 import { readFileSync } from "node:fs";
 
@@ -28,6 +32,10 @@ const PACKAGES = [
   { dir: "galley", pkg: inner("galley"), subpath: (key) => key },
   { dir: "onion-wasm", pkg: inner("onion-wasm"), subpath: under("./onion") },
   { dir: "canon", pkg: inner("canon"), subpath: under("./canon") },
+  { dir: "bento", pkg: inner("bento"), subpath: under("./bento") },
+  { dir: "bttwriter", pkg: inner("bttwriter"), subpath: under("./bttwriter") },
+  // Every docx key sits under ./docx, the template file included.
+  { dir: "docx", pkg: inner("docx"), subpath: (key) => (key === "." ? "./docx" : `./docx${key.slice(1)}`) },
 ];
 
 const push = (dir) => {

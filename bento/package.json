@@ -1,0 +1,21 @@
+{
+  "name": "bento",
+  "version": "0.1.20",
+  "type": "module",
+  "description": "A repo's manifest (Scripture Burrito, Resource Container, BTT Writer): read, checked, created and edited. TypeScript over one wasm module.",
+  "private": true,
+  "files": [
+    "bento.ts",
+    "pkg-web"
+  ],
+  "sideEffects": [
+    "./pkg-web/bento.js"
+  ],
+  "exports": {
+    ".": "./bento.ts",
+    "./web/wasm": "./pkg-web/bento_bg.wasm"
+  },
+  "scripts": {
+    "test": "node tests/conformance.mjs"
+  }
+}

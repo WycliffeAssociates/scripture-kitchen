@@ -65,6 +65,12 @@
    "label": "canon",
    "level": 1,
    "parent": null
+  },
+  {
+   "id": "docx",
+   "label": "docx",
+   "level": 1,
+   "parent": null
   }
  ],
  "nodes": [
@@ -632,6 +638,19 @@
    "weight": 1,
    "x": 1700,
    "y": 2440
+  },
+  {
+   "id": "docx",
+   "label": "docx",
+   "level": 1,
+   "group": "docx",
+   "kind": "crate",
+   "slug": "docx",
+   "weight": 2,
+   "x": 1700,
+   "y": 1650,
+   "w": 300,
+   "h": 100
   }
  ],
  "edges": [
@@ -1225,6 +1244,27 @@
    "label": "verse counts → lint_against_counts",
    "level": 2,
    "kind": "data"
+  },
+  {
+   "from": "docx",
+   "to": "onion",
+   "label": "folds the USX export",
+   "level": 1,
+   "kind": "depends"
+  },
+  {
+   "from": "sefer",
+   "to": "docx",
+   "label": "readDocument, exportBook",
+   "level": 0,
+   "kind": "calls"
+  },
+  {
+   "from": "docx",
+   "to": "canon",
+   "label": "versification for verse numbers",
+   "level": 1,
+   "kind": "depends"
   }
  ]
 }

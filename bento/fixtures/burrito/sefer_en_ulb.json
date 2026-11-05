@@ -1,0 +1,128 @@
+{
+  "format": "scripture burrito",
+  "meta": {
+    "version": "1.0.0",
+    "category": "source",
+    "generator": {
+      "softwareName": "Sefer",
+      "softwareVersion": "0.0.0"
+    },
+    "defaultLocale": "en",
+    "dateCreated": "2026-09-06T00:00:00.000Z",
+    "normalization": "NFC"
+  },
+  "idAuthorities": {
+    "wycliffeassociates": {
+      "id": "https://content.bibletranslationtools.org",
+      "name": {
+        "en": "Wycliffe Associates Content Services"
+      }
+    }
+  },
+  "identification": {
+    "name": {
+      "en": "Unlocked Literal Bible"
+    },
+    "abbreviation": {
+      "en": "ULB"
+    },
+    "primary": {
+      "wycliffeassociates": {
+        "en_ulb": {
+          "revision": "1",
+          "timestamp": "2026-09-06T00:00:00.000Z"
+        }
+      }
+    }
+  },
+  "confidential": false,
+  "type": {
+    "flavorType": {
+      "name": "scripture",
+      "flavor": {
+        "name": "textTranslation",
+        "projectType": "standard",
+        "translationType": "newTranslation",
+        "audience": "common",
+        "usfmVersion": "3.0"
+      },
+      "currentScope": {
+        "PSA": [],
+        "PHM": [],
+        "3JN": [],
+        "JUD": []
+      }
+    }
+  },
+  "languages": [
+    {
+      "tag": "en",
+      "name": {
+        "en": "English"
+      },
+      "scriptDirection": "ltr"
+    }
+  ],
+  "localizedNames": {
+    "PSA": {
+      "short": { "en": "Psalms" },
+      "abbr": { "en": "PSA" },
+      "long": { "en": "The Psalms" }
+    },
+    "PHM": {
+      "short": { "en": "Philemon" },
+      "abbr": { "en": "PHM" },
+      "long": { "en": "Paul's Letter to Philemon" }
+    },
+    "3JN": {
+      "short": { "en": "3 John" },
+      "abbr": { "en": "3JN" },
+      "long": { "en": "The Third Letter of John" }
+    },
+    "JUD": {
+      "short": { "en": "Jude" },
+      "abbr": { "en": "JUD" },
+      "long": { "en": "The Letter of Jude" }
+    }
+  },
+  "ingredients": {
+    "release/19-PSA.usfm": {
+      "checksum": { "md5": "d1261bad10b7a86037d10fa823b4140d" },
+      "mimeType": "text/usfm",
+      "size": 3042,
+      "scope": { "PSA": [] }
+    },
+    "release/58-PHM.usfm": {
+      "checksum": { "md5": "725192c740aca0dcd9e21ed685f15d2e" },
+      "mimeType": "text/usfm",
+      "size": 2683,
+      "scope": { "PHM": [] }
+    },
+    "release/65-3JN.usfm": {
+      "checksum": { "md5": "023866f1d4a65eb0d50f0f385e41c21f" },
+      "mimeType": "text/usfm",
+      "size": 1866,
+      "scope": { "3JN": [] }
+    },
+    "release/66-JUD.usfm": {
+      "checksum": { "md5": "7200304bcb52f8dec33f56127bedced2" },
+      "mimeType": "text/usfm",
+      "size": 3946,
+      "scope": { "JUD": [] }
+    },
+    "LICENSE.md": {
+      "checksum": { "md5": "9f7a0b1c2d3e4f5061728394a5b6c7d8" },
+      "mimeType": "text/markdown",
+      "size": 1080
+    }
+  },
+  "copyright": {
+    "shortStatements": [
+      {
+        "statement": "Licensed under CC BY-SA 4.0.",
+        "mimetype": "text/plain",
+        "lang": "en"
+      }
+    ]
+  }
+}

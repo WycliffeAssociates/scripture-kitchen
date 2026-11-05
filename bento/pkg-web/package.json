@@ -1,0 +1,16 @@
+{
+  "name": "bento",
+  "type": "module",
+  "description": "Scripture containers: BTT Writer, Resource Container and Scripture Burrito manifests, read leniently, checked, created and edited.",
+  "version": "0.1.20",
+  "files": [
+    "bento_bg.wasm",
+    "bento.js",
+    "bento.d.ts"
+  ],
+  "main": "bento.js",
+  "types": "bento.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

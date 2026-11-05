@@ -1,0 +1,240 @@
+dublin_core:
+  conformsto: rc0.2
+  contributor:
+    - 1005Barb
+    - Caroltreloar
+    - Debbiekitch
+    - Djgoodner
+    - Dlmorgan50
+    - Ezar.Chandra
+    - Fijian Translator
+    - Jastumbo
+    - Lakeba
+    - Lauan
+    - Masher50
+    - Raphael
+    - Theck82
+  creator: Bible translation community
+  description: An unrestricted literal Bible
+  format: text/usfm
+  identifier: reg
+  issued: "2025-10-06"
+  language:
+    direction: ltr
+    identifier: llx
+    title: Lauan
+  modified: "2025-10-06"
+  publisher: Wycliffe Associates
+  relation:
+    - llx/reg
+  rights: CC BY-SA 4.0
+  source:
+    - identifier: ulb
+      language: en
+      version: 21-05
+    - identifier: ulb
+      language: en
+      version: "9"
+    - identifier: ulb
+      language: en
+      version: "12"
+    - identifier: ulb
+      language: en
+      version: 24-02
+  subject: Bible
+  title: Bible
+  type: bundle
+  version: 21-05.1
+checking:
+  checking_entity: []
+  checking_level: "1"
+projects:
+  - title: Maciu
+    identifier: mat
+    sort: 40
+    path: ./41-MAT.usfm
+    categories:
+      - bible-nt
+    versification: ufw
+  - title: Marika
+    identifier: mrk
+    sort: 41
+    path: ./42-MRK.usfm
+    categories:
+      - bible-nt
+    versification: ufw
+  - title: Luke
+    identifier: luk
+    sort: 42
+    path: ./43-LUK.usfm
+    categories:
+      - bible-nt
+    versification: ufw
+  - title: Joni
+    identifier: jhn
+    sort: 43
+    path: ./44-JHN.usfm
+    categories:
+      - bible-nt
+    versification: ufw
+  - title: Cakacaka
+    identifier: act
+    sort: 44
+    path: ./45-ACT.usfm
+    categories:
+      - bible-nt
+    versification: ufw
+  - title: Roma
+    identifier: rom
+    sort: 45
+    path: ./46-ROM.usfm
+    categories:
+      - bible-nt
+    versification: ufw
+  - title: 1 Koronica
+    identifier: 1co
+    sort: 46
+    path: ./47-1CO.usfm
+    categories:
+      - bible-nt
+    versification: ufw
+  - title: 2 Korinica
+    identifier: 2co
+    sort: 47
+    path: ./48-2CO.usfm
+    categories:
+      - bible-nt
+    versification: ufw
+  - title: Kalatia
+    identifier: gal
+    sort: 48
+    path: ./49-GAL.usfm
+    categories:
+      - bible-nt
+    versification: ufw
+  - title: Efeso
+    identifier: eph
+    sort: 49
+    path: ./50-EPH.usfm
+    categories:
+      - bible-nt
+    versification: ufw
+  - title: Filipai
+    identifier: php
+    sort: 50
+    path: ./51-PHP.usfm
+    categories:
+      - bible-nt
+    versification: ufw
+  - title: Kolosa
+    identifier: col
+    sort: 51
+    path: ./52-COL.usfm
+    categories:
+      - bible-nt
+    versification: ufw
+  - title: 1 Cesalonaika
+    identifier: 1th
+    sort: 52
+    path: ./53-1TH.usfm
+    categories:
+      - bible-nt
+    versification: ufw
+  - title: II Cesolonaika
+    identifier: 2th
+    sort: 53
+    path: ./54-2TH.usfm
+    categories:
+      - bible-nt
+    versification: ufw
+  - title: 1 Timoci
+    identifier: 1ti
+    sort: 54
+    path: ./55-1TI.usfm
+    categories:
+      - bible-nt
+    versification: ufw
+  - title: 2 Timoci
+    identifier: 2ti
+    sort: 55
+    path: ./56-2TI.usfm
+    categories:
+      - bible-nt
+    versification: ufw
+  - title: Taito
+    identifier: tit
+    sort: 56
+    path: ./57-TIT.usfm
+    categories:
+      - bible-nt
+    versification: ufw
+  - title: Filimoni
+    identifier: phm
+    sort: 57
+    path: ./58-PHM.usfm
+    categories:
+      - bible-nt
+    versification: ufw
+  - title: Iperiu
+    identifier: heb
+    sort: 58
+    path: ./59-HEB.usfm
+    categories:
+      - bible-nt
+    versification: ufw
+  - title: Jemesa
+    identifier: jas
+    sort: 59
+    path: ./60-JAS.usfm
+    categories:
+      - bible-nt
+    versification: ufw
+  - title: 1 Pita
+    identifier: 1pe
+    sort: 60
+    path: ./61-1PE.usfm
+    categories:
+      - bible-nt
+    versification: ufw
+  - title: 2 Pita
+    identifier: 2pe
+    sort: 61
+    path: ./62-2PE.usfm
+    categories:
+      - bible-nt
+    versification: ufw
+  - title: 1 Joni
+    identifier: 1jn
+    sort: 62
+    path: ./63-1JN.usfm
+    categories:
+      - bible-nt
+    versification: ufw
+  - title: 2 Joni
+    identifier: 2jn
+    sort: 63
+    path: ./64-2JN.usfm
+    categories:
+      - bible-nt
+    versification: ufw
+  - title: 3 Joni
+    identifier: 3jn
+    sort: 64
+    path: ./65-3JN.usfm
+    categories:
+      - bible-nt
+    versification: ufw
+  - title: Juta
+    identifier: jud
+    sort: 65
+    path: ./66-JUD.usfm
+    categories:
+      - bible-nt
+    versification: ufw
+  - title: Vakatakila
+    identifier: rev
+    sort: 66
+    path: ./67-REV.usfm
+    categories:
+      - bible-nt
+    versification: ufw

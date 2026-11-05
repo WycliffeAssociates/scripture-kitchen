@@ -1,0 +1,45 @@
+{
+	"package_version": 6,
+	"format": "usfm",
+	"generator": {
+		"name": "ts-desktop",
+		"build": "4"
+	},
+	"target_language": {
+		"id": "tmf",
+		"name": "Toba-Maskoy",
+		"direction": "ltr"
+	},
+	"project": {
+		"id": "3jn",
+		"name": "3 John"
+	},
+	"type": {
+		"id": "text",
+		"name": "Text"
+	},
+	"resource": {
+		"id": "reg",
+		"name": "Regular"
+	},
+	"source_translations": [
+		{
+			"language_id": "en",
+			"resource_id": "ulb",
+			"checking_level": "3",
+			"date_modified": "2017-11-29T00:00:00+00:00",
+			"version": "12"
+		}
+	],
+	"parent_draft": {},
+	"translators": [
+		"kpass"
+	],
+	"finished_chunks": [
+		"01-01",
+		"01-05",
+		"01-09",
+		"01-11",
+		"01-13"
+	]
+}

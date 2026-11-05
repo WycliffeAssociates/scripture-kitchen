@@ -1,0 +1,59 @@
+//! BTT Writer projects, read as books.
+//!
+//! ```text
+//! files of one Writer book project          stitch(files, ROM, "Romans")
+//!   front/title.txt   "Roma\n"                →  \id ROM
+//!   05/title.txt      "Pasal 5"                  \ide UTF-8
+//!   05/01.txt         "\c 5 \v 1 …"              \h Roma …  \mt1 Roma
+//!   05/03.txt         "\v 3 …"                   \c 5
+//!   manifest.json     (not the book)             \cl Pasal 5
+//!                                                \v 1 …
+//!                                                \v 3 …
+//! ```
+//!
+//! BTT Writer keeps one project per book: chunk files (`NN/NN.txt`) holding
+//! inline USFM fragments, a title per chapter, and the book's title in
+//! `front/title.txt`. [`stitch()`] turns one book's files into one USFM book with
+//! the same bytes Sefer's `writerBook.ts` writes; `fixtures/stitched/` pins
+//! them on five real projects.
+//!
+//! A project's history, from its git objects to one pack:
+//!
+//! ```text
+//! walk::HistoryWalk / read_history(objects, head, …)   → WriterHistory { project, saves }
+//! replay(&[WriterHistory], &ReplayOptions { now, … })  → Replayed { head, pack, idx, name, books, … }
+//! consolidate(&histories, &opts, &project, formats, &closing)  → the same, plus a closing commit
+//!                                                         holding bento's manifests
+//! ```
+//!
+//! [`walk`] reads a Writer repo's saves from objects it asks for (sans-IO, so
+//! an async git can drive it). [`replay()`] turns several books' saves into one
+//! line of commits, each holding the book as the template renders it, with
+//! [`clock`] estimating dates a reset battery got wrong and [`summary`] saying
+//! what each save changed. [`pack`] writes the objects into one pack and its
+//! index in memory, with no git library and no filesystem.
+//!
+//! No I/O: callers hand over each file's path and bytes, read however they
+//! read them (a folder, a git tree), and write what comes back.
+
+pub mod clock;
+mod consolidate;
+pub mod pack;
+pub mod replay;
+pub mod stitch;
+pub mod summary;
+pub mod walk;
+#[cfg(feature = "wasm")]
+pub mod wasm;
+
+#[cfg(feature = "git2")]
+mod git2_source;
+#[cfg(feature = "git2")]
+pub use git2_source::Git2Source;
+
+pub use consolidate::{Closing, ConsolidateError, Consolidated, consolidate};
+pub use replay::{BookFile, ReplayError, ReplayOptions, Replayed, replay};
+pub use stitch::{
+    WriterChapter, WriterTree, book_to_usfm, decode_text, is_text_path, stitch, tree_from_files,
+};
+pub use walk::{Save, WriterHistory, read_history};

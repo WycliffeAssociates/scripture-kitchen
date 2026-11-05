@@ -29,6 +29,10 @@ jobs:
 
       - name: clippy
         run: cargo clippy --all-targets -- -D warnings
+      # bttwriter's libgit2 adapter is off by default, so the pass above never
+      # compiles it.
+      - name: clippy (bttwriter's git2 feature)
+        run: cargo clippy -p bttwriter --all-targets --features git2 -- -D warnings
 
       # onion/Cargo.toml advertises usj/usx/html as compile-time optional, and
       # every other job builds them all ON. Without this, no build in CI ever
@@ -49,6 +53,14 @@ jobs:
       - name: galley wasm feature compiles
         run: cargo check -p usfm_galley --features wasm --target wasm32-unknown-unknown
 
+      # bento's, bttwriter's and docx's JS doors, likewise wasm32-only; clippy
+      # over them too, since no native pass compiles `src/wasm.rs`.
+      - name: bento, bttwriter and docx wasm features
+        run: |
+          cargo clippy -p bento --features wasm --target wasm32-unknown-unknown -- -D warnings
+          cargo clippy -p bttwriter --features wasm --target wasm32-unknown-unknown -- -D warnings
+          cargo clippy -p docx --features wasm --target wasm32-unknown-unknown -- -D warnings
+
   # The inner-loop suite, in DEBUG on purpose: two dozen `debug_assert!`s across
   # the engine only fire here. It also includes codegen_output_matches_input, so
   # a row edited without `cargo run --bin codegen` fails in this job — no
@@ -61,6 +73,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup
       - run: cargo test --workspace
+      # The libgit2 adapter and the test that it agrees with the git command.
+      - run: cargo test -p bttwriter --features git2
 
   # The JS side of the wall. Node 24 because conformance.mjs imports reader.ts
   # directly and leans on type stripping — there is no build step by design.
@@ -103,6 +117,34 @@ jobs:
       # corpus it also prints the keystroke lifecycle.
       - name: galley sous conformance
         run: node galley/tests/sous_conformance.mjs galley/pkg-node testData/exampleCorpora/en_ulb
+
+      # Every .ts the package ships, type-checked as Sefer compiles it (Sefer
+      # checks them as its own source). The compiler is pinned in
+      # tools/typecheck to Sefer's; the settings are ../../tsconfig.json.
+      - name: typecheck the shipped TypeScript
+        run: |
+          npm ci --prefix tools/typecheck
+          npm run --prefix tools/typecheck check
+
+      # bento.ts, bttwriter.ts and docx.ts as shipped, over freshly built
+      # modules: the same claims as the Rust tests, through the wall.
+      # bttwriter's reads the five fixture repos through isomorphicGitSource and
+      # checks Sefer's head ids and a consolidated pack with `git fsck`. (These builds skip the
+      # path remapping; the artifacts job checks the committed bytes.)
+      - name: bento conformance
+        run: |
+          (cd bento && wasm-pack build --target web --release --weak-refs --out-dir pkg-web -- --features wasm)
+          node bento/tests/conformance.mjs
+
+      - name: bttwriter conformance
+        run: |
+          (cd bttwriter && wasm-pack build --target web --release --weak-refs --out-dir pkg-web -- --features wasm)
+          node bttwriter/tests/conformance.mjs
+
+      - name: docx conformance
+        run: |
+          (cd docx && wasm-pack build --target web --release --weak-refs --out-dir pkg-web -- --features wasm)
+          node docx/tests/conformance.mjs
 
       # The reader TypeScript ships unbuilt, so its own tests are the only
       # thing that type-checks and runs it apart from the conformance scripts.
@@ -159,7 +201,7 @@ jobs:
             );
           '
 
-  # Both packages' pkg-web and pkg-bundler are COMMITTED — consumers install
+  # Every package's pkg-web (and galley's and onion-wasm's pkg-bundler) is COMMITTED — consumers install
   # from a git tag as well as the registry. CI is what builds them: nobody has
   # to reproduce these bytes locally (a native build on a dev box drifted even
   # with every tool pinned). So:
@@ -184,16 +226,20 @@ jobs:
       # The same scripts a developer runs. They export the --remap-path-prefix
       # flags that make the .wasm host-independent, so they are not optional:
       # the raw wasm-pack lines produce different bytes.
-      - name: rebuild both packages
+      - name: rebuild every package
         run: |
           ./onion-wasm/build.sh
           ./galley/build.sh
+          ./bento/build.sh
+          ./bttwriter/build.sh
+          ./docx/build.sh
 
       - name: what moved
         run: |
           git diff --stat -- \
             onion-wasm/pkg-web onion-wasm/pkg-bundler \
-            galley/pkg-web galley/pkg-bundler
+            galley/pkg-web galley/pkg-bundler \
+            bento/pkg-web bttwriter/pkg-web docx/pkg-web
 
       - name: packages are fresh
         id: fresh
@@ -201,7 +247,8 @@ jobs:
           EVENT: ${{ github.event_name }}
           REF: ${{ github.ref }}
         run: |
-          set -- onion-wasm/pkg-web onion-wasm/pkg-bundler galley/pkg-web galley/pkg-bundler
+          set -- onion-wasm/pkg-web onion-wasm/pkg-bundler galley/pkg-web galley/pkg-bundler \
+            bento/pkg-web bttwriter/pkg-web docx/pkg-web
           if git diff --quiet -- "$@"; then
             echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
             exit 0
@@ -238,6 +285,9 @@ jobs:
             onion-wasm/pkg-bundler
             galley/pkg-web
             galley/pkg-bundler
+            bento/pkg-web
+            bttwriter/pkg-web
+            docx/pkg-web
 
   # The sixteen `#[ignore]`d oracles, each naming a claim nothing else makes:
   # galley's whole-Bible publication laws, mise's UTF-16 boundary sweep of the
@@ -326,7 +376,7 @@ jobs:
             got=$(sed -n 's/^version = "\(.*\)"/\1/p' "$f" | head -1)
             [ "$got" = "$want" ] || { echo "$f is $got, tag says $want"; fail=1; }
           done
-          for f in package.json onion-wasm/package.json galley/package.json; do
+          for f in package.json onion-wasm/package.json galley/package.json bento/package.json bttwriter/package.json docx/package.json; do
             got=$(node --input-type=commonjs -p "require('./$f').version" < /dev/null)
             [ "$got" = "$want" ] || { echo "$f is $got, tag says $want"; fail=1; }
           done

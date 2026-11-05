@@ -1,0 +1,462 @@
+//! Editing existing manifests: one call, every changed file, nothing else touched.
+//!
+//! ```text
+//! edit(&[("metadata.json", …), ("manifest.yaml", …)], &Change { add_books: [MRK], checksums: [("41-MAT.usfm", bytes)], .. })
+//!   → Edited { files: [("metadata.json", …), ("manifest.yaml", …)], findings: [] }
+//!
+//!   metadata.json   MRK's ingredient, scope and name, placed by canon; MAT's md5 and size, if they changed
+//!   manifest.yaml   MRK's project entry between MAT and LUK; every other line as it was
+//! ```
+//!
+//! The caller commits the books and the manifests together: one commit, not
+//! two. A file comes back only when it changed. An edit changes only what it
+//! was asked to: adding MRK touches MRK's entries, and an old manifest's
+//! `sort` values stay as they were (`check` reports them). A YAML file keeps
+//! its quoting, flow lists and comments elsewhere (yaml-edit edits the file's
+//! syntax tree); a JSON file keeps its key order and is written as Sefer
+//! writes it, `JSON.stringify(value, null, 2)`.
+
+use std::str::FromStr;
+
+use canon::Canon;
+use mise::books::BookKey;
+
+use crate::tree::{Node, pointer};
+use crate::write::{
+    NewBook, Placed, fingerprint, ingredient, place, rc_project, trimmed_books, yaml_list,
+};
+use crate::{Check, Format, ManifestFinding, Severity, book_of, format_of, without_bom};
+
+/// What to change.
+#[derive(Debug, Clone)]
+pub struct Change {
+    /// Books to list; refused if one is listed already.
+    pub add_books: Vec<NewBook>,
+    /// Which canon places them (`sort`, order). The project's own.
+    pub canon: Canon,
+    /// Ingredient files as they'll be committed, by path (`41-MAT.usfm`):
+    /// their Burrito md5 and size are brought up to date.
+    pub checksums: Vec<(String, Vec<u8>)>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Edited {
+    /// Only the files that changed, by name.
+    pub files: Vec<(String, Vec<u8>)>,
+    pub findings: Vec<ManifestFinding>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EditError {
+    /// The book is listed already.
+    Listed(BookKey),
+    /// A book that isn't in the chosen canon, or given twice.
+    Book(crate::CreateError),
+    /// A manifest that can't be read or edited: its name and why.
+    Unreadable(String, String),
+}
+
+impl std::fmt::Display for EditError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EditError::Listed(book) => write!(f, "{book} is listed already"),
+            EditError::Book(e) => write!(f, "{e}"),
+            EditError::Unreadable(name, why) => write!(f, "{name} can't be edited: {why}"),
+        }
+    }
+}
+
+impl std::error::Error for EditError {}
+
+/// Apply `change` to each manifest in `existing` (by file name: Burrito and
+/// RC; a BTT Writer manifest is never edited and comes back unchanged).
+pub fn edit(existing: &[(String, Vec<u8>)], change: &Change) -> Result<Edited, EditError> {
+    let books = trimmed_books(&change.add_books);
+    let placed = place(&books, change.canon).map_err(EditError::Book)?;
+    let mut out = Edited {
+        files: Vec::new(),
+        findings: Vec::new(),
+    };
+    for (name, bytes) in existing {
+        let edited = match format_of(name) {
+            Some(Format::Burrito) => edit_burrito(name, bytes, &placed, change, &mut out.findings)?,
+            Some(Format::Rc) => edit_rc(name, bytes, &placed, change, &mut out.findings)?,
+            _ => None,
+        };
+        if let Some(bytes) = edited {
+            out.files.push((name.clone(), bytes));
+        }
+    }
+    Ok(out)
+}
+
+/// Where a book goes among keys or items that are books: before the first
+/// that comes after it in the canon, else last.
+fn position(
+    order: &[BookKey],
+    book: BookKey,
+    existing: impl Iterator<Item = Option<BookKey>>,
+) -> Option<usize> {
+    let place = |b: BookKey| order.iter().position(|&k| k == b);
+    let mine = place(book)?;
+    existing
+        .enumerate()
+        .find(|(_, b)| b.and_then(place).is_some_and(|theirs| theirs > mine))
+        .map(|(i, _)| i)
+}
+
+fn insert_at(node: &mut Node, at: Option<usize>, key: String, value: Node) {
+    if let Node::Map(entries) = node {
+        let i = at.unwrap_or(entries.len());
+        entries.insert(i, (key, value));
+    }
+}
+
+fn edit_burrito(
+    name: &str,
+    bytes: &[u8],
+    placed: &[Placed<'_>],
+    change: &Change,
+    findings: &mut Vec<ManifestFinding>,
+) -> Result<Option<Vec<u8>>, EditError> {
+    let unreadable = |why: String| EditError::Unreadable(name.to_owned(), why);
+    let mut root = crate::tree::from_json(without_bom(bytes)).map_err(unreadable)?;
+    if !matches!(root, Node::Map(_)) {
+        return Err(unreadable("not an object".into()));
+    }
+    let before = root.clone();
+    let listed = crate::read_as(Format::Burrito, bytes)
+        .manifest
+        .map(|m| m.books.iter().map(|b| b.book).collect::<Vec<_>>())
+        .unwrap_or_default();
+    let tag = root
+        .get("languages")
+        .and_then(|l| match l {
+            Node::List(items) => items.first(),
+            _ => None,
+        })
+        .and_then(|l| l.get("tag"))
+        .and_then(|t| match t {
+            Node::String(s) => Some(s.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| "und".into());
+    let order: Vec<BookKey> = canon::books(change.canon).map(|b| b.code).collect();
+
+    for p in placed {
+        let book = p.book.book;
+        if listed.contains(&book) {
+            return Err(EditError::Listed(book));
+        }
+        let code = book.to_string();
+        // Ingredients: keyed by path; a key's book is its scope's.
+        if let Some(ingredients) = root.entry("ingredients") {
+            if !matches!(ingredients, Node::Map(_)) {
+                *ingredients = Node::Map(Vec::new());
+            }
+            let books: Vec<Option<BookKey>> = ingredients
+                .entries()
+                .iter()
+                .map(|(_, i)| {
+                    i.get("scope")
+                        .and_then(|s| s.entries().first().and_then(|(k, _)| book_of(k)))
+                })
+                .collect();
+            let at = position(&order, book, books.into_iter());
+            insert_at(ingredients, at, p.file.clone(), ingredient(p.book));
+        }
+        if let Some(scope) = root
+            .get_mut("type")
+            .and_then(|t| t.get_mut("flavorType"))
+            .and_then(|f| f.entry("currentScope"))
+        {
+            if !matches!(scope, Node::Map(_)) {
+                *scope = Node::Map(Vec::new());
+            }
+            let at = position(
+                &order,
+                book,
+                scope
+                    .entries()
+                    .iter()
+                    .map(|(k, _)| book_of(k))
+                    .collect::<Vec<_>>()
+                    .into_iter(),
+            );
+            insert_at(scope, at, code.clone(), Node::List(Vec::new()));
+        }
+        if let Some(names) = root.entry("localizedNames") {
+            if !matches!(names, Node::Map(_)) {
+                *names = Node::Map(Vec::new());
+            }
+            let at = position(
+                &order,
+                book,
+                names
+                    .entries()
+                    .iter()
+                    .map(|(k, _)| book_of(k))
+                    .collect::<Vec<_>>()
+                    .into_iter(),
+            );
+            let name = Node::map([("short", crate::write::named(&tag, &p.book.title))]);
+            insert_at(names, at, code, name);
+        }
+    }
+
+    for (path, bytes) in &change.checksums {
+        let print = fingerprint(bytes);
+        let Some(Node::Map(ingredients)) = root.get_mut("ingredients") else {
+            break;
+        };
+        let wanted = path.trim_start_matches("./");
+        let Some((_, ingredient)) = ingredients
+            .iter_mut()
+            .rev()
+            .find(|(k, _)| k.trim_start_matches("./") == wanted)
+        else {
+            findings.push(ManifestFinding {
+                check: Check::ManifestValid,
+                severity: Severity::Warning,
+                at: Some(pointer("/ingredients", path)),
+                book: None,
+                message: format!("{path} has no ingredient to update."),
+            });
+            continue;
+        };
+        let fresh = (Node::text(&print.md5), Node::Number(print.size.to_string()));
+        if ingredient.get("checksum").and_then(|c| c.get("md5")) != Some(&fresh.0)
+            && let Some(checksum) = ingredient.entry("checksum")
+        {
+            if !matches!(checksum, Node::Map(_)) {
+                *checksum = Node::Map(Vec::new());
+            }
+            if let Some(md5) = checksum.entry("md5") {
+                *md5 = fresh.0;
+            }
+        }
+        // A size written `9` and one written `9.0` are the same size.
+        let size_now = ingredient.get("size").and_then(|s| match s {
+            Node::Number(n) => n.parse::<f64>().ok(),
+            _ => None,
+        });
+        if size_now != Some(print.size as f64)
+            && let Some(size) = ingredient.entry("size")
+        {
+            *size = fresh.1;
+        }
+    }
+
+    Ok((root != before).then(|| root.to_json().into_bytes()))
+}
+
+fn edit_rc(
+    name: &str,
+    bytes: &[u8],
+    placed: &[Placed<'_>],
+    change: &Change,
+    findings: &mut Vec<ManifestFinding>,
+) -> Result<Option<Vec<u8>>, EditError> {
+    if placed.is_empty() {
+        return Ok(None); // an RC lists no checksums
+    }
+    let unreadable = |why: String| EditError::Unreadable(name.to_owned(), why);
+    let had_bom = bytes.starts_with(b"\xEF\xBB\xBF");
+    let mut text = std::str::from_utf8(without_bom(bytes))
+        .map_err(|e| unreadable(e.to_string()))?
+        .to_owned();
+    let read = crate::read_as(Format::Rc, bytes);
+    let Some(crate::Detail::Rc(doc)) = &read.detail else {
+        return Err(unreadable("not a Resource Container".into()));
+    };
+    let order: Vec<BookKey> = canon::books(change.canon).map(|b| b.code).collect();
+    let indent_lists = indents_lists(&text);
+
+    for p in placed {
+        let book = p.book.book;
+        let projects = projects(&text).map_err(unreadable)?;
+        if projects.iter().any(|(b, _)| *b == Some(book)) {
+            return Err(EditError::Listed(book));
+        }
+        // A manifest whose sorts count from 0 (Sefer's) can tie with the new one.
+        if let Some(tie) = doc.projects.iter().find(|q| q.sort == Some(p.sort as i64)) {
+            findings.push(ManifestFinding {
+                check: Check::SortCanon,
+                severity: Severity::Warning,
+                at: None,
+                book: Some(book),
+                message: format!(
+                    "{book}'s sort, {}, ties with {}'s; order by sort, then by canon, is still right.",
+                    p.sort,
+                    tie.identifier.as_deref().unwrap_or("another project")
+                ),
+            });
+        }
+        let at = position(&order, book, projects.iter().map(|(b, _)| *b));
+        splice_project(&mut text, &projects, at, &rc_project(p), indent_lists)
+            .map_err(unreadable)?;
+    }
+
+    let mut out = if had_bom {
+        "\u{FEFF}".to_owned()
+    } else {
+        String::new()
+    };
+    out.push_str(&text);
+    Ok(Some(out.into_bytes()))
+}
+
+/// The `projects` list's items: each one's book, and the byte offset its
+/// line starts at. An error for a `projects` that isn't a block list.
+fn projects(text: &str) -> Result<Vec<(Option<BookKey>, usize)>, String> {
+    let file = yaml_edit::YamlFile::from_str(text).map_err(|e| e.to_string())?;
+    let mapping = file
+        .documents()
+        .find_map(|d| d.as_mapping())
+        .ok_or("the manifest isn't a mapping")?;
+    let Some(list) = mapping.get("projects") else {
+        return Ok(Vec::new());
+    };
+    let yaml_edit::YamlNode::Sequence(list) = list else {
+        return Err("projects isn't a list".into());
+    };
+    if list.is_flow_style() {
+        return Err("projects is a flow list ([…]); bento adds to block lists".into());
+    }
+    Ok(list
+        .values()
+        .map(|item| {
+            let book = match &item {
+                yaml_edit::YamlNode::Mapping(m) => match m.get("identifier") {
+                    Some(yaml_edit::YamlNode::Scalar(s)) => book_of(&s.as_string()),
+                    _ => None,
+                },
+                _ => None,
+            };
+            // The item's line is its dash's, which may stand alone above
+            // the item's first key (`-` then `    identifier: gen`).
+            let start = item.byte_range().start as usize;
+            let before = text[..start].trim_end_matches([' ', '\t', '\r', '\n']);
+            let dash = if before.ends_with('-') {
+                before.len() - 1
+            } else {
+                start
+            };
+            (book, text[..dash].rfind('\n').map_or(0, |n| n + 1))
+        })
+        .collect())
+}
+
+/// Insert `entry` as item `at` of the `projects` list (last when `None`), in
+/// the list's own indentation, as text: every other byte stays as it was.
+fn splice_project(
+    text: &mut String,
+    projects: &[(Option<BookKey>, usize)],
+    at: Option<usize>,
+    entry: &Node,
+    indent_lists: bool,
+) -> Result<(), String> {
+    let mut rendered = String::new();
+    yaml_list(std::slice::from_ref(entry), 0, indent_lists, &mut rendered);
+    let Some(&(_, first)) = projects.first() else {
+        // No list yet: a new `projects:` key at the end of the file.
+        if text
+            .lines()
+            .any(|l| l.trim_end() == "projects:" || l.starts_with("projects:"))
+        {
+            return Err("projects is there but empty or not a list".into());
+        }
+        // At the end of the first document: before a `...` or `---` that
+        // closes it, else the file's end.
+        let mut end = text.len();
+        let mut seen = false;
+        let mut cursor = 0;
+        for line in text.split_inclusive('\n') {
+            let bare = line.trim_end();
+            let marker = bare == "..." || bare == "---" || bare.starts_with("--- ");
+            if marker && (seen || bare == "...") {
+                end = cursor;
+                break;
+            }
+            seen |= !marker && !bare.trim_start().is_empty() && !bare.trim_start().starts_with('#');
+            cursor += line.len();
+        }
+        let mut block = String::new();
+        if end == text.len() && !text.is_empty() && !text.ends_with('\n') {
+            block.push('\n');
+        }
+        block.push_str("projects:\n");
+        let pad = if indent_lists { "  " } else { "" };
+        for line in rendered.lines() {
+            block.push_str(pad);
+            block.push_str(line);
+            block.push('\n');
+        }
+        text.insert_str(end, &block);
+        return Ok(());
+    };
+    let pad: String = text[first..].chars().take_while(|c| *c == ' ').collect();
+    let indented: String = rendered.lines().map(|l| format!("{pad}{l}\n")).collect();
+    let offset = match at {
+        Some(i) => projects[i].1,
+        // After the last item: the end of its last line, which is where the
+        // next line indented no deeper than the list starts (or the file
+        // ends). Blank and comment lines don't end the item, since a comment
+        // may sit at any indent inside it; a run of them just before the end
+        // stays after the new item.
+        None => {
+            let last = projects[projects.len() - 1].1;
+            let mut offset = text.len();
+            let mut cursor = text[last..].find('\n').map_or(text.len(), |n| last + n + 1);
+            let mut quiet: Option<usize> = None;
+            while cursor < text.len() {
+                let line = &text[cursor..];
+                let line_end = line.find('\n').map_or(text.len(), |n| cursor + n + 1);
+                let content = &text[cursor..line_end];
+                let depth = content.chars().take_while(|c| *c == ' ').count();
+                let trimmed = content.trim();
+                if trimmed.is_empty() || trimmed.starts_with('#') {
+                    quiet.get_or_insert(cursor);
+                } else if depth <= pad.len() {
+                    offset = quiet.unwrap_or(cursor);
+                    break;
+                } else {
+                    quiet = None;
+                }
+                cursor = line_end;
+            }
+            if offset == text.len() {
+                offset = quiet.unwrap_or(offset);
+            }
+            if offset == text.len() && !text.ends_with('\n') {
+                text.push('\n');
+                offset = text.len();
+            }
+            offset
+        }
+    };
+    text.insert_str(offset, &indented);
+    Ok(())
+}
+
+/// Whether the file indents a list under its key (`projects:` then
+/// `  - title: …`), or writes it at the key's own indent (`- title: …`), as
+/// the catalog does. Judged by the first list under a key; indented when
+/// there's none to judge by.
+fn indents_lists(text: &str) -> bool {
+    let lines: Vec<&str> = text
+        .lines()
+        .filter(|l| !l.trim().is_empty() && !l.trim_start().starts_with('#'))
+        .collect();
+    for pair in lines.windows(2) {
+        let (key, item) = (pair[0], pair[1]);
+        let item_line = item.trim_start();
+        if key.trim_end().ends_with(':')
+            && (item_line.starts_with("- ") || item_line.trim_end() == "-")
+        {
+            let indent = |l: &str| l.len() - l.trim_start().len();
+            return indent(item) > indent(key);
+        }
+    }
+    true
+}

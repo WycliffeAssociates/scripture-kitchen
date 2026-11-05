@@ -1,0 +1,11 @@
+{
+  "name": "kitchen-typecheck",
+  "private": true,
+  "description": "Type-checks every TypeScript file the package ships, with the compiler and settings Sefer compiles them with (../../tsconfig.json).",
+  "scripts": {
+    "check": "tsc -p ../../tsconfig.json"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2"
+  }
+}

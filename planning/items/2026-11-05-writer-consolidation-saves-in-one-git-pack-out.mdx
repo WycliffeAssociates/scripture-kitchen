@@ -2,7 +2,7 @@
 id: 4c7328e1-1ed5-4272-9d4f-c43c392d8f74
 title: "BTT Writer consolidation: Writer repos in, one git pack out"
 kind: plan
-status: planned
+status: done
 created: 2026-11-05
 updated: 2026-11-05
 sha: fcda333
@@ -281,10 +281,12 @@ impl HistoryWalk {
 pub fn read_history(src: &mut impl ObjectSource, head: ObjectId, meta: BookMeta) -> Result<WriterHistory>;
 
 impl WriterHistory {
-    pub fn progress(&self) -> Vec<(i64, i64)>;
+    pub fn progress(&self, now: i64) -> Vec<(i64, u64)>;  // times after clock fixes
+    pub fn clocks(&self, now: i64) -> Vec<Clock>;         // { author_at, committer_at, device_at }
     pub fn usfm(&self) -> String;
 }
-pub fn replay(histories: &[WriterHistory], opts: &ReplayOptions) -> Option<Replayed>;
+pub fn replay(histories: &[WriterHistory], opts: &ReplayOptions) -> Result<Replayed, ReplayError>;
+// ReplayError::NothingChanged (Sefer's `undefined`), ReplayError::SameBook(BookKey)
 
 pub mod pack {                                             // public: for a commit on top
     pub struct PackWriter { /* … */ }
@@ -306,7 +308,7 @@ let histories = books.par_iter().map(|b| {
     let head = repo.head()?.peel_to_commit()?.id();
     bttwriter::read_history(&mut Git2Source::new(&repo.odb()?), head.into(), meta(b))
 }).collect::<Result<Vec<_>, _>>()?;
-let replayed = bttwriter::replay(&histories, &ReplayOptions { now, deltas: true }).ok_or("no save changed any book")?;
+let replayed = bttwriter::replay(&histories, &ReplayOptions { now, deltas: true })?;
 fs::write(objects.join(format!("pack/{}.pack", replayed.name)), &replayed.pack)?;
 fs::write(objects.join(format!("pack/{}.idx", replayed.name)), &replayed.idx)?;
 // then the manifest.yaml commit on top of replayed.head, with git2, as today
@@ -322,6 +324,13 @@ fs::write(objects.join(format!("pack/{}.idx", replayed.name)), &replayed.idx)?;
 - **Clock fixes are unconditional.** One behaviour in every app is the point of the step.
 - **`progress` is raw counts.** Verse markers present after each save, with a bridge `1-3`
   counted as three. Scaling against a versification is the caller's.
+- **Where Sefer and the hub differed, replay is Sefer's** (settled at step 4, so the ids
+  match): a book's first save is always a commit (the hub could drop one that rendered
+  empty); an empty author name or email is written as the save had it (the hub wrote
+  `unknown`, because libgit2 refuses it); a book's files are held in a JS `Map`'s order,
+  so the walk lists a save's changes as Sefer's walk does. From the hub: the clock fix.
+- **One history per book.** Two histories of one book are `ReplayError::SameBook`;
+  Sefer would have rendered them into one file.
 
 ### RC and Burrito: later, by composition
 
@@ -358,7 +367,7 @@ bttwriter.consolidate(histories, {
 }): Replayed & { manifest: { path: string; bytes: Uint8Array } }; // closing commit is in the pack
 ```
 
-<Followup id="consolidate-manifest">In step 6, after container (step 5), add `consolidate()`: replay, then a closing commit (with `PackWriter`) holding the RC `manifest.yaml` or Burrito `metadata.json` for `books`. The hub's `manifest_with_book` and Sefer's `withProjects`/`withBooks` are what it replaces.</Followup>
+<Followup id="consolidate-manifest" done>In step 6, after container (step 5), add `consolidate()`: replay, then a closing commit (with `PackWriter`) holding the RC `manifest.yaml` or Burrito `metadata.json` for `books`. The hub's `manifest_with_book` and Sefer's `withProjects`/`withBooks` are what it replaces.</Followup>
 
 ## Git internals the pack needs
 
@@ -455,6 +464,34 @@ What that means in practice:
   `parallel` is), on for the hub and off for wasm, which has no threads here. Interleaving
   and object writing stay one sequential line: each commit names the one before.
 
+Measured at step 4 (2026-11-05, release build, this machine). Tawara and an NT aren't
+fixtures, so these are the four distinct books of the fixtures (3JN, 2CH, JOB, ISA; 1,525
+saves, 1,484 commits), against Sefer's `replayWriterHistories` at `326f02c8` on the same
+histories under Node:
+
+| | kitchen, native | Sefer TS |
+|---|---|---|
+| Replay, four books together (3 runs) | 0.50, 0.50, 0.51 s | 3.81, 3.31, 3.45 s |
+| Job alone (1,130 commits) | 0.40 s | 2.12 s |
+| 2 Chronicles alone (332 commits) | 0.05 s | 0.52 s |
+| Walk, Job (1,166 saves, through `git cat-file`) | 0.15 s | (not timed) |
+
+Where the native half-second goes: rendering every version about 0.13 s, SHA-1 of every
+object 0.15 s (`sha1_smol`, scalar), deflate and deltas the rest. perf isn't allowed on
+this machine (`perf_event_paranoid`), so this is by hand, timing each part alone. The known
+waste in the hub's port (cloning the held map per save) isn't in this one: a deleted
+chunk's old text is the only thing kept for the summary.
+
+Profiled with callgrind after bento step 3 (2026-11-05; valgrind works where perf is
+blocked). The profile is flat: SHA-1 about 30% and deflate about 40% of replay, rendering
+every version about 5%, the walk about 2%, malloc under 1%. callgrind showed `memset` at a
+quarter of instructions, from a new deflate compressor per object; reusing one compressor
+measured *slower* (575 ms against 500 ms), because its `reset` zeroes the same tables by
+hand where a fresh one gets zeroed pages from `calloc`, and callgrind counts every byte of
+a `rep stosb` as an instruction. Left as it is.
+
+<Tradeoff id="parallel" chose="No `parallel` feature yet" cost="The hub renders its books on one thread: about a quarter of replay's time could overlap">Rendering is the only part that parallelizes (packing is one line), and it's a quarter of a replay that's already 7× faster than Sefer's. Reading histories in parallel is the caller's: `read_history` per book is independent, and the hub can `par_iter` it with a `Git2Source` per thread without bttwriter depending on rayon. Worth adding if a whole-Bible consolidation measures slow. (Step 4, 2026-11-05.)</Tradeoff>
+
 ## Where it lives
 
 <Files id="footprint">
@@ -534,7 +571,9 @@ without `REPO_ROOT`), which `agents/testing.md` forbids here.
 3. **The walk** (`walk.rs`, `Git2Source`) and the bundle fixtures. The bento crate is
    created here with only its `bttwriter` module (Writer's `manifest.json`), so the walk can read it.
 4. **Replay, clocks, summaries, progress**, plus the head-id goldens against Sefer's TS, and
-   the timing and profiling pass. Then the hub deletes `history` and `stitch` (native, no
+   the timing and profiling pass. *Built 2026-11-05:* `replay.rs`, `clock.rs`, `summary.rs`;
+   Sefer's head ids hold for all five fixtures alone and for four books interleaved
+   (`tests/replay.rs`, made by `fixtures/sefer-heads.test.ts`). Then the hub deletes `history` and `stitch` (native, no
    wasm needed), and keeps its own manifest commit on top for now.
 5. **bento: RC and Burrito, reading and writing** (its own plan item, step 3 of the
    shared-libraries order).
@@ -543,6 +582,43 @@ without `REPO_ROOT`), which `agents/testing.md` forbids here.
    Sefer switches `local`/`candidate`/`assemble`/`addBooks` once, manifest included, and
    deletes `writerHistory.ts`, `pack.ts` and its Writer manifest schema. The hub moves its
    closing commit to `consolidate()` at the same time.
+   *Built 2026-11-05*, on the kitchen side (`consolidate.rs`, `wasm.rs`, `bttwriter.ts`,
+   `tests/conformance.mjs`, CI). What it settled is under "Step 6, as built" below; Sefer's
+   switch and the hub's are theirs.
+
+### Step 6, as built
+
+- **`consolidate(histories, opts, project, formats, closing)`** replays, then makes one
+  closing commit holding the book files and bento's `metadata.json` and `manifest.yaml`
+  (`create_bible` over each book's last rendering, titled by its `\h`). `project` is bento's
+  `NewBibleProject` without books; `closing` is the commit's author, committer and message.
+  Tested against git: the closing commit's parent is Sefer's four-book head, `fsck --strict`
+  accepts the pack, and bento's checks find the manifests match the files beside them.
+- **The TS surface** is as sketched (`readHistory`, `isomorphicGitSource`, `replay`), with:
+  - `replay` and `consolidate` *use the histories up*: their text moves into the replay
+    rather than being copied; a used history says so if touched. Read again to replay again.
+  - `consolidate`'s manifest arguments are bento's project shape, not the sketch's
+    `{ container: { kind, … } }`: a manifest needs publisher, rights and the rest, and
+    both formats come back by default.
+  - `replay` of nothing is `undefined`; two histories of one book throw.
+  - `isomorphicGitSource` takes isomorphic-git's `resolveRef` and `readObject` as
+    arguments, so the package doesn't depend on isomorphic-git. The conformance test hands
+    it a stand-in backed by the `git` command and reads all five fixtures through it.
+- **The shipped TypeScript is type-checked in CI** (`tools/typecheck`, the root
+  `tsconfig.json`): every `.ts` the package exports, with Sefer's compiler (7.0.2) and
+  settings, since Sefer checks them as its own source. All 17 files pass. The step was
+  added after `bttwriter.ts` and `bento.ts` failed Sefer-style strict checks in five places.
+
+<Followup id="ts-stricter">`noUncheckedIndexedAccess` and `exactOptionalPropertyTypes` find 69 errors, almost all in the codegen-written readers (`onion-wasm/reader.ts`, `galley/sous-reader.ts`, `sous-chef/reader.ts`). Sefer doesn't set them, so CI checks at Sefer's level; turning them on means fixing the generators' templates, not the generated files.</Followup>
+
+- **Web target only** (`pkg-web`): `bttwriter.ts` imports it, Sefer starts it with `init()`
+  or `initSync()` as it does galley, and a bundler takes it as is.
+- **Measured** (2026-11-05): the module is **163 KB gzipped** (387 KB raw). It was 209 KB
+  until YAML quoting stopped parsing to decide (bento's `yaml_string` now decides by rule,
+  checked against the parser in tests), which took yaml-edit out of this module. Replay of
+  the four fixture books (1,484 commits) is **about 610 ms in wasm under Node**, against
+  500 ms native and 3.3–3.8 s for Sefer's TS; reading the four histories through the TS
+  driver is 60–100 ms.
 
 ```mermaid
 flowchart LR

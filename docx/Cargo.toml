@@ -1,0 +1,41 @@
+[package]
+name = "docx"
+version.workspace = true
+edition.workspace = true
+description = "USFM in Word and LibreOffice: a book exported as a .docx whose named styles are its markers, and imported back exactly."
+
+[lints]
+workspace = true
+
+[lib]
+# cdylib is what `wasm-pack build --features wasm` links; rlib keeps the
+# native crate for tests and other Rust callers.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# The parse and the USX the export folds. Only the USX export is needed.
+usfm_onion = { path = "../onion", version = "0.1.20", default-features = false, features = ["usx"] }
+# Book codes and versification: a number past a chapter's last verse is never a verse.
+canon = { path = "../canon", version = "0.1.20" }
+# Reading onion's USX on export, and the document's parts on import.
+quick-xml = "0.42"
+# The zip container: raw deflate both ways. CRC-32 is written here.
+miniz_oxide.workspace = true
+# The source hashes in docProps/custom.xml: git's blob id and onion's dish hash.
+sha1_smol.workspace = true
+xxhash-rust.workspace = true
+# The JS doors (`src/wasm.rs`), for `docx.ts`. Only ever linked for wasm32.
+wasm-bindgen = { version = "0.2", optional = true }
+js-sys = { version = "0.3", optional = true }
+serde_json = { version = "1", optional = true }
+
+[features]
+wasm = ["dep:wasm-bindgen", "dep:js-sys", "dep:serde_json"]
+
+[dev-dependencies]
+# The round trip compares as onion's USJ.
+usfm_onion = { path = "../onion", version = "0.1.20", default-features = false, features = ["usx", "usj"] }
+serde_json = "1"
+# The staleness reporter onion's generated files use.
+ticket = { path = "../ticket", version = "0.1.20" }
+rayon.workspace = true

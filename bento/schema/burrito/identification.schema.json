@@ -1,0 +1,71 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema",
+    "$id": "https://burrito.bible/schema/identification.schema.json",
+    "$$target": "identification.schema.json",
+    "title": "Identification",
+    "type": "object",
+    "description": "Identification section.",
+    "definitions": {
+        "revisionString": {
+            "type": "string",
+            "const": "latest"
+        },
+        "repositoryPath": {
+            "type": "string",
+            "pattern": "^[^\\s/]+/[^\\s/]+$"
+        },
+        "repositoryRevision": {
+            "type": "object",
+            "properties": {
+                "revision": {
+                    "$ref": "#/definitions/revisionString"
+                },
+                "timestamp": {
+                    "$ref": "common.schema.json#/definitions/timestamp"
+                }
+            },
+            "required": ["revision",  "timestamp"],
+            "additionalProperties": false
+        },
+        "authorityRepositories": {
+            "type": "object",
+            "minProperties": 1,
+            "maxProperties": 1,
+            "propertyNames": {
+                "$ref": "common.schema.json#/definitions/idAuthorityLabel"
+            },
+            "additionalProperties": {
+                "type": "object",
+                "minProperties": 1,
+                "maxProperties": 1,
+                "propertyNames": {
+                    "$ref": "#/definitions/repositoryPath"
+                },
+                "additionalProperties": {
+                    "$ref": "#/definitions/repositoryRevision"
+                }
+            }
+        }
+    },
+    "properties": {
+        "name": {
+            "$ref": "common.schema.json#/definitions/localizedText"
+        },
+        "description": {
+            "$ref": "common.schema.json#/definitions/localizedText"
+        },
+        "abbreviation": {
+            "$ref": "common.schema.json#/definitions/localizedText"
+        },
+        "primary": {
+            "$ref": "#/definitions/authorityRepositories",
+            "description": "Contains the primary authority and identification information."
+        },
+        "upstream": {
+            "$ref": "#/definitions/authorityRepositories",
+            "description": "Contains the upstream authority and identification information."
+        }
+    },
+    "required": ["name", "abbreviation", "primary"],
+    "additionalProperties": false
+}

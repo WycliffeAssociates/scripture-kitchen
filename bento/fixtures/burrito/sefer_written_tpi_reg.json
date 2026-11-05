@@ -1,0 +1,97 @@
+{
+  "format": "scripture burrito",
+  "meta": {
+    "version": "1.0.0",
+    "category": "source",
+    "defaultLocale": "en",
+    "dateCreated": "2026-11-04",
+    "generator": {
+      "softwareName": "Sefer"
+    }
+  },
+  "idAuthorities": {
+    "wycliffeassociates": {
+      "id": "https://www.wycliffeassociates.org",
+      "name": {
+        "en": "Wycliffe Associates"
+      }
+    }
+  },
+  "identification": {
+    "name": {
+      "en": "Baibel"
+    },
+    "abbreviation": {
+      "en": "reg"
+    }
+  },
+  "confidential": false,
+  "type": {
+    "flavorType": {
+      "name": "scripture",
+      "flavor": {
+        "name": "textTranslation",
+        "projectType": "standard",
+        "translationType": "newTranslation",
+        "audience": "common",
+        "usfmVersion": "3.0"
+      },
+      "currentScope": {
+        "MAT": [],
+        "ROM": []
+      }
+    }
+  },
+  "languages": [
+    {
+      "tag": "tpi",
+      "name": {
+        "en": "Tok Pisin",
+        "tpi": "Tok Pisin"
+      },
+      "scriptDirection": "ltr"
+    }
+  ],
+  "ingredients": {
+    "41-MAT.usfm": {
+      "checksum": {
+        "md5": "77e7a58d723b368ef5f1edb2c6f0b2fe"
+      },
+      "mimeType": "text/x-usfm",
+      "size": 38,
+      "scope": {
+        "MAT": []
+      }
+    },
+    "46-ROM.usfm": {
+      "checksum": {
+        "md5": "3ada88e137ec52900104bdb6b2ae4581"
+      },
+      "mimeType": "text/x-usfm",
+      "size": 26,
+      "scope": {
+        "ROM": []
+      }
+    }
+  },
+  "localizedNames": {
+    "MAT": {
+      "short": {
+        "tpi": "Matyu"
+      }
+    },
+    "ROM": {
+      "short": {
+        "tpi": "Rom"
+      }
+    }
+  },
+  "relationships": [
+    {
+      "relationType": "source",
+      "flavor": "textTranslation",
+      "id": "wycliffeassociates::en/ulb",
+      "revision": "12"
+    }
+  ]
+}

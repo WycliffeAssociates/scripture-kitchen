@@ -1,0 +1,34 @@
+[package]
+name = "bttwriter"
+version.workspace = true
+edition.workspace = true
+description = "BTT Writer projects: one book's chunk files to USFM, and a project's save history replayed into one git pack."
+
+[lints]
+workspace = true
+
+[lib]
+# cdylib is what `wasm-pack build --features wasm` links; rlib keeps the
+# native crate for the hub.
+crate-type = ["cdylib", "rlib"]
+
+# canon for the book table and file names; mise for `BookKey`. No I/O and no
+# git library: callers hand over bytes.
+[dependencies]
+bento = { path = "../bento", version = "0.1.20" }
+canon = { path = "../canon", version = "0.1.20" }
+mise = { path = "../mise", version = "0.1.20" }
+rustc-hash.workspace = true
+sha1_smol.workspace = true
+miniz_oxide.workspace = true
+# The libgit2 adapter (`Git2Source`), for callers that already read repos with
+# git2. Off by default: libgit2 is a C build, and nothing else here needs it.
+git2 = { version = "0.20", default-features = false, optional = true }
+# The JS doors (`src/wasm.rs`), for `bttwriter.ts`. Only ever linked for
+# wasm32. bento's `json` is its project shape, without its own doors.
+wasm-bindgen = { version = "0.2", optional = true }
+js-sys = { version = "0.3", optional = true }
+
+[features]
+git2 = ["dep:git2"]
+wasm = ["dep:wasm-bindgen", "dep:js-sys", "bento/json"]

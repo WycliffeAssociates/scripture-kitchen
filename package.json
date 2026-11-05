@@ -34,7 +34,14 @@
     "canon/ts/scheme-tables.ts",
     "canon/ts/names/*.ts",
     "canon/NOTICE",
-    "canon/README.md"
+    "canon/README.md",
+    "bento/bento.ts",
+    "bento/pkg-web",
+    "bttwriter/bttwriter.ts",
+    "bttwriter/pkg-web",
+    "docx/docx.ts",
+    "docx/pkg-web",
+    "docx/template.dotx"
   ],
   "sideEffects": [
     "./galley/pkg-bundler/usfm_galley.js",
@@ -42,7 +49,10 @@
     "./galley/pkg-web/usfm_galley.js",
     "./onion-wasm/pkg-bundler/onion_wasm.js",
     "./onion-wasm/pkg-bundler/snippets/*",
-    "./onion-wasm/pkg-web/onion_wasm.js"
+    "./onion-wasm/pkg-web/onion_wasm.js",
+    "./bento/pkg-web/bento.js",
+    "./bttwriter/pkg-web/bttwriter.js",
+    "./docx/pkg-web/docx.js"
   ],
   "exports": {
     ".": {
@@ -77,6 +87,13 @@
     "./diagnostics.json": "./onion-wasm/diagnostics.json",
     "./reader": "./onion-wasm/reader.ts",
     "./canon": "./canon/ts/canon.ts",
-    "./canon/names/*": "./canon/ts/names/*.ts"
+    "./names/*": "./canon/ts/names/*.ts",
+    "./bento": "./bento/bento.ts",
+    "./bento/web/wasm": "./bento/pkg-web/bento_bg.wasm",
+    "./bttwriter": "./bttwriter/bttwriter.ts",
+    "./bttwriter/web/wasm": "./bttwriter/pkg-web/bttwriter_bg.wasm",
+    "./docx": "./docx/docx.ts",
+    "./docx/web/wasm": "./docx/pkg-web/docx_bg.wasm",
+    "./docx/template.dotx": "./docx/template.dotx"
   }
 }

@@ -10,6 +10,15 @@
   `cargo test --release -- --include-ignored` (~11s) is what CI runs anyway;
   `.github/workflows/ci.yml` runs debug for the `debug_assert!`s and release
   for the ignored tier.
+- The shipped TypeScript (`*.ts` the package exports): `npm ci --prefix
+  tools/typecheck && npm run --prefix tools/typecheck check`. Sefer
+  type-checks these files as its own source, so the compiler is pinned to
+  Sefer's and `tsconfig.json` uses Sefer's settings, plus
+  `erasableSyntaxOnly` because Node runs them by stripping types. A new
+  shipped `.ts` goes in `tsconfig.json`'s `include`. bento's, bttwriter's and docx's
+  `tests/conformance.mjs` run their `.ts` over the built module. docx's
+  LibreOffice sweep is an example run by hand (`cargo run --release -p docx
+  --example libreoffice`): CI has no LibreOffice.
 - Dev and test profiles are `opt-level = 1`. Debug asserts stay on; the
   corpus sweeps would be minutes at level 0.
 

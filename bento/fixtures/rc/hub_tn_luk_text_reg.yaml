@@ -1,0 +1,37 @@
+dublin_core:
+  conformsto: rc0.2
+  contributor:
+  - Oteng Mpho Mokgosi
+  - NAMETSO AGNES MOGAPI
+  creator: Bible translation community
+  format: text/usfm
+  identifier: reg
+  issued: 2023-09-01
+  language:
+    direction: ltr
+    identifier: tn
+    title: Setswana
+  modified: 2023-09-01
+  publisher: Wycliffe Associates
+  relation:
+  - tn/reg
+  rights: CC-BY-SA-4.0
+  source:
+  - identifier: ulb
+    language: en
+    version: '9'
+  subject: Bible
+  title: Bible
+  type: bundle
+  version: '1'
+checking:
+  checking_entity: []
+  checking_level: '1'
+projects:
+- title: Luke
+  identifier: luk
+  path: ./43-LUK.usfm
+  sort: 41
+  categories:
+  - bible-nt
+  versification: ufw
