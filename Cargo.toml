@@ -38,6 +38,7 @@ members = [
     "mise",
     "canon",
     "canon/gen",
+    "bttwriter",
     "ticket",
     "onion",
     "onion-wasm",

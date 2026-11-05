@@ -1,0 +1,15 @@
+[package]
+name = "bttwriter"
+version.workspace = true
+edition.workspace = true
+description = "BTT Writer projects: one book's chunk files to USFM, and (to come) a project's save history replayed into one git pack."
+
+[lints]
+workspace = true
+
+# canon for the book table and file names; mise for `BookKey`. No I/O and no
+# git library: callers hand over bytes.
+[dependencies]
+canon = { path = "../canon", version = "0.1.20" }
+mise = { path = "../mise", version = "0.1.20" }
+rustc-hash.workspace = true
