@@ -1,0 +1,50 @@
+{
+  "schemes": ["org", "eng", "lxx", "vul", "rsc", "rso", "ulb"],
+  "not_schemes": ["ORG", "kjv", "", "ethiopian_custom"],
+  "chapters": [
+    { "scheme": "eng", "book": "MAL", "chapters": 4, "why": "eng's Malachi 4 is org's 3:19-24" },
+    { "scheme": "org", "book": "MAL", "chapters": 3 },
+    { "scheme": "ulb", "book": "MAL", "chapters": 4 },
+    { "scheme": "eng", "book": "JOL", "chapters": 3, "why": "and the reverse: org's Joel 3 is eng's 2:28-32" },
+    { "scheme": "org", "book": "JOL", "chapters": 4 },
+    { "scheme": "org", "book": "PSA", "chapters": 150 },
+    { "scheme": "lxx", "book": "PSA", "chapters": 151, "why": "LXX has Psalm 151" },
+    { "scheme": "rso", "book": "PSA", "chapters": 151 },
+    { "scheme": "org", "book": "TOB", "chapters": 14 },
+    { "scheme": "ulb", "book": "TOB", "chapters": null, "why": "ulb is the 66" },
+    { "scheme": "rsc", "book": "TOB", "chapters": null, "why": "the Protestant Russian Synodal has no deuterocanon" },
+    { "scheme": "lxx", "book": "NEH", "chapters": null, "why": "the Septuagint's Nehemiah is the back half of 2 Esdras" },
+    { "scheme": "lxx", "book": "EZR", "chapters": 23 },
+    { "scheme": "org", "book": "EZR", "chapters": 10 },
+    { "scheme": "eng", "book": "BLT", "chapters": null, "why": "Paratext-only codes are dropped" },
+    { "scheme": "eng", "book": "mal", "chapters": null, "why": "book codes are exact" }
+  ],
+  "last_verse": [
+    { "scheme": "org", "book": "PSA", "chapter": 3, "last_verse": 9, "why": "org numbers the superscription as verse 1" },
+    { "scheme": "eng", "book": "PSA", "chapter": 3, "last_verse": 8 },
+    { "scheme": "ulb", "book": "PSA", "chapter": 3, "last_verse": 8, "why": "en_ulb writes titles as \\d" },
+    { "scheme": "org", "book": "PSA", "chapter": 119, "last_verse": 176 },
+    { "scheme": "lxx", "book": "PSA", "chapter": 151, "last_verse": 7 },
+    { "scheme": "org", "book": "GEN", "chapter": 31, "last_verse": 54 },
+    { "scheme": "eng", "book": "GEN", "chapter": 31, "last_verse": 55 },
+    { "scheme": "org", "book": "GEN", "chapter": 32, "last_verse": 33 },
+    { "scheme": "eng", "book": "GEN", "chapter": 32, "last_verse": 32 },
+    { "scheme": "eng", "book": "ACT", "chapter": 19, "last_verse": 41 },
+    { "scheme": "ulb", "book": "ACT", "chapter": 19, "last_verse": 40, "why": "en_ulb folds 41 into 40 and footnotes it" },
+    { "scheme": "eng", "book": "2CO", "chapter": 13, "last_verse": 14 },
+    { "scheme": "ulb", "book": "2CO", "chapter": 13, "last_verse": 13, "why": "en_ulb numbers like org here" },
+    { "scheme": "ulb", "book": "3JN", "chapter": 1, "last_verse": 15 },
+    { "scheme": "ulb", "book": "REV", "chapter": 12, "last_verse": 18 },
+    { "scheme": "rsc", "book": "REV", "chapter": 12, "last_verse": 17 },
+    { "scheme": "ulb", "book": "MAT", "chapter": 17, "last_verse": 27 },
+    { "scheme": "vul", "book": "MAT", "chapter": 17, "last_verse": 26 },
+    { "scheme": "org", "book": "MAL", "chapter": 4, "last_verse": null, "why": "past the last chapter" },
+    { "scheme": "org", "book": "GEN", "chapter": 0, "last_verse": null },
+    { "scheme": "ulb", "book": "TOB", "chapter": 1, "last_verse": null }
+  ],
+  "excluded": [
+    { "scheme": "ulb", "book": "MAT", "chapter": 17, "verse": 21, "excluded": false, "why": "numbered in every built-in scheme" },
+    { "scheme": "eng", "book": "MRK", "chapter": 16, "verse": 9, "excluded": false },
+    { "scheme": "org", "book": "GEN", "chapter": 1, "verse": 1, "excluded": false }
+  ]
+}

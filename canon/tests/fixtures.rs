@@ -1,7 +1,8 @@
-//! `fixtures/books.json`, the cases the TypeScript side runs too
-//! (`ts/canon.test.mjs`). Every row is checked; a failure names the row.
+//! `fixtures/books.json` and `fixtures/schemes.json`, the cases the TypeScript
+//! side runs too (`ts/canon.test.mjs`). Every row is checked; a failure names
+//! the row.
 
-use canon::{BookKey, Canon, book, books, fold, parse_book, usfm_file_name};
+use canon::{BookKey, Canon, book, books, fold, parse_book, scheme, schemes, usfm_file_name};
 use serde_json::Value;
 
 fn fixtures() -> Value {
@@ -111,6 +112,74 @@ fn books_cases() {
             list.last().map(String::as_str),
             row["last"].as_str(),
             "{canon:?} last"
+        );
+    }
+}
+
+fn schemes_fixtures() -> Value {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/fixtures/schemes.json");
+    serde_json::from_str(&std::fs::read_to_string(path).expect("fixtures exist"))
+        .expect("fixtures parse")
+}
+
+fn named(row: &Value) -> &'static canon::Scheme {
+    let name = row["scheme"].as_str().unwrap();
+    scheme(name).unwrap_or_else(|| panic!("no scheme {name}"))
+}
+
+#[test]
+fn scheme_names() {
+    let all = schemes_fixtures();
+    let want: Vec<&str> = rows(&all, "schemes")
+        .iter()
+        .map(|n| n.as_str().unwrap())
+        .collect();
+    let have: Vec<&str> = schemes().iter().map(canon::Scheme::name).collect();
+    assert_eq!(have, want, "schemes(), in order");
+    for name in rows(&all, "not_schemes") {
+        let name = name.as_str().unwrap();
+        assert!(scheme(name).is_none(), "scheme({name:?}) should be None");
+    }
+}
+
+#[test]
+fn chapters_cases() {
+    for row in rows(&schemes_fixtures(), "chapters") {
+        let code = row["book"].as_str().unwrap();
+        assert_eq!(
+            named(row).chapters(key(code)).map(u64::from),
+            row["chapters"].as_u64(),
+            "{}.chapters({code})",
+            row["scheme"]
+        );
+    }
+}
+
+#[test]
+fn last_verse_cases() {
+    for row in rows(&schemes_fixtures(), "last_verse") {
+        let code = row["book"].as_str().unwrap();
+        let chapter = u16::try_from(row["chapter"].as_u64().unwrap()).unwrap();
+        assert_eq!(
+            named(row).last_verse(key(code), chapter).map(u64::from),
+            row["last_verse"].as_u64(),
+            "{}.last_verse({code}, {chapter})",
+            row["scheme"]
+        );
+    }
+}
+
+#[test]
+fn excluded_cases() {
+    for row in rows(&schemes_fixtures(), "excluded") {
+        let code = row["book"].as_str().unwrap();
+        let chapter = u16::try_from(row["chapter"].as_u64().unwrap()).unwrap();
+        let verse = u16::try_from(row["verse"].as_u64().unwrap()).unwrap();
+        assert_eq!(
+            named(row).excluded(key(code), chapter, verse),
+            row["excluded"].as_bool().unwrap(),
+            "{}.excluded({code} {chapter}:{verse})",
+            row["scheme"]
         );
     }
 }

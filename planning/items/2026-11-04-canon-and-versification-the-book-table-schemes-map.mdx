@@ -93,14 +93,16 @@ The data is the Copenhagen Alliance mapping format, in the same shape as the nid
 `standard-mappings/*.json`: `maxVerses`, `mappedVerses`, `excludedVerses` and
 `partialVerses`. Built-in schemes are `org` (the pivot: BHS/WLC and UBS/NA), `eng`, `lxx`,
 `vul`, `rsc`, `rso`, and **`ulb`** as a scheme of its own. `ulb` is measured from our en_ulb
-and reviewed by hand, so the "3 John 1 has 14 or 15 verses" disagreement becomes a named
-choice instead of a bug.
+and reviewed by hand. Measured (step 2), it is `eng` except in two chapters, where en_ulb
+numbers like `org` and footnotes the other numbering: Acts 19 ends at 40 and 2 Corinthians
+13 at 13. The "3 John 1 has 14 or 15 verses" worry was unfounded: en_ulb, `eng` and `org`
+all have 15.
 
 | API | Returns | Who needs it, and why |
 |---|---|---|
-| `scheme(name)` / `Scheme::from_json(bytes)` | A `Scheme` (a plain struct; see "Handles" below) | Every call below. `from_json` takes a project's own declared mapping (one imported from Paratext's `.vrs`, for example). |
+| `scheme(name)` / `Scheme::from_json(bytes)` | A `Scheme` (a plain struct; see "Handles" below) | Every call below. `from_json` takes a project's own declared mapping (one imported from Paratext's `.vrs`, for example). It moves to step 7: canon reads no JSON, so galley (which has serde) parses a declared scheme and builds the `Scheme`. `Scheme`'s fields are private so that change stays internal. |
 | `scheme.chapters(book)`, `scheme.last_verse(book, ch)` | Counts | "35 of 40 chapters drafted", "verses present over time, scaled to the source" (the hub's progress line), Writer chunk closing, and scaffolding a new book. |
-| `scheme.excluded(point)` | `bool` | `MAT 17:21` and similar verses that a scheme omits on purpose. Without it, progress and lint call that verse missing. |
+| `scheme.excluded(book, chapter, verse)` | `bool` | Verses a scheme omits on purpose. Without it, progress and lint call that verse missing. No built-in scheme excludes anything (all number `MAT 17:21` and let the text footnote it), so this matters only for declared schemes. |
 | `map(span, from, to)` | `Mapped` (below). It never guesses "nearest". | Three users: (1) **pairing and sous**, which put a target and its source on `org` keys before aligning; (2) **helps**, where a tn written against `eng` and a WLC scholar note both show beside the verse the reader is on; (3) **Macula and original texts**, which are already keyed in `org`. |
 | `to_org(span, scheme)` / `from_org(span, scheme)` | Two halves of `map` | The fast path for pairing, which maps each side once at registration. |
 | `scheme.moves()` | Only the spans that differ from `org`, with where each goes | Building a key remap table for a whole book in one pass. Most books return nothing. |
@@ -287,8 +289,10 @@ work for every other rule.
 + canon/data/sniff/rules.json     -- nida merged_rules.json (TVTMS-derived, CC BY)
 + canon/fixtures/*.json           -- shared cases, run by cargo test and by the TS tests
 + canon/src/{books,names,scheme,map,coverage,sniff}.rs
-+ canon/src/tables.rs             -- generated from data/; freshness-tested
-+ canon/canon.ts                  -- generated TS data module, plus the hand-written lookups
++ canon/src/tables.rs, scheme_tables.rs  -- generated from data/; freshness-tested
++ canon/ts/{tables,scheme-tables}.ts    -- the same, generated for TypeScript
++ canon/ts/{canon,versification}.ts     -- the hand-written TS lookups
++ canon/gen/                      -- canon-gen, the generator: its own unpublished crate, for serde_json
 + canon/NOTICE                    -- attribution for the nida/TVTMS data
 ~ onion/src/                      -- VerseInventory from the Toc; lint entry point with a scheme
 ~ galley/src/wasm.rs              -- register(..., {versification}); defineScheme; map/coverage/sniff doors
@@ -331,9 +335,18 @@ behind.
    `book`, `parse_book` (codes, slugs, English names), `books`, `usfm_file_name`, and
    fixtures for Matthew 40/41 and Song of Songs vs Song of Solomon. Sefer's and the hub's
    book tables move to it.
-2. **Schemes and counts.** Import nida's seven schemes, plus `chapters`, `last_verse` and
-   `excluded`. Measure `ulb` from en_ulb and review it, including the two known
-   disagreements (3 John 1, Revelation 12).
+2. **Schemes and counts** (done on the `canon` branch, 2026-11-05). nida's six schemes plus
+   `ulb`, with `scheme`, `schemes`, `chapters`, `last_verse`, `verse_counts` and `excluded`
+   in Rust and TS, and `fixtures/schemes.json`. What the data showed:
+   - `ulb` differs from `eng` only at ACT 19 and 2CO 13 (`data/schemes/README.md`). 3 John 1
+     and Revelation 12 match.
+   - `lxx` has no NEH, DAN or EST, and `vul` no EST. Nehemiah is the back half of the
+     Septuagint's EZR, and Daniel and Esther are only the Greek DAG and ESG. So
+     `chapters(NEH)` under `lxx` is `None`, and mapping (step 3) is what reaches it.
+   - `org`, `eng` and `lxx` count six Paratext-only texts (BLT, DNT, JDB, JSA, SST, TBS),
+     which aren't USFM codes. The generator drops them by name.
+   - The generator moved to its own crate, `canon-gen`, so it can read JSON while canon
+     keeps `mise` as its only dependency.
 3. **Map.** `to_org`/`from_org`/`map`/`moves`, with fixtures from the Kotlin hub's
    `fixtures/versification/cases.json` and a Psalm-superscription set.
 4. **Inventory, coverage and the two lints.** This is where the screenshot's books get

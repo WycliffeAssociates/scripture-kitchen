@@ -4,11 +4,24 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
-import { book, books, fold, parseBook, slug, usfmFileName } from "./canon.ts";
+import {
+  SCHEME_NAMES,
+  book,
+  books,
+  chapters,
+  excluded,
+  fold,
+  isSchemeName,
+  lastVerse,
+  parseBook,
+  slug,
+  usfmFileName,
+} from "./canon.ts";
 
-const fixtures = JSON.parse(
-  readFileSync(new URL("../fixtures/books.json", import.meta.url), "utf8"),
-);
+const load = (name) =>
+  JSON.parse(readFileSync(new URL(`../fixtures/${name}`, import.meta.url), "utf8"));
+const fixtures = load("books.json");
+const schemeFixtures = load("schemes.json");
 
 const CANONS = { protestant66: "protestant66", with_deuterocanon: "withDeuterocanon", all: "all" };
 
@@ -57,4 +70,36 @@ test("books", () => {
 test("slug", () => {
   assert.equal(slug("MAT"), "mat");
   assert.equal(slug("1JN"), "1jn");
+});
+
+test("scheme names", () => {
+  assert.deepEqual([...SCHEME_NAMES], schemeFixtures.schemes);
+  for (const name of schemeFixtures.schemes) assert.ok(isSchemeName(name), name);
+  for (const name of schemeFixtures.not_schemes) assert.ok(!isSchemeName(name), `${name} is not a scheme`);
+});
+
+test("chapters", () => {
+  for (const row of schemeFixtures.chapters) {
+    assert.equal(chapters(row.scheme, row.book), row.chapters ?? undefined, `${row.scheme}.chapters(${row.book})`);
+  }
+});
+
+test("last_verse", () => {
+  for (const row of schemeFixtures.last_verse) {
+    assert.equal(
+      lastVerse(row.scheme, row.book, row.chapter),
+      row.last_verse ?? undefined,
+      `${row.scheme}.lastVerse(${row.book}, ${row.chapter})`,
+    );
+  }
+});
+
+test("excluded", () => {
+  for (const row of schemeFixtures.excluded) {
+    assert.equal(
+      excluded(row.scheme, row.book, row.chapter, row.verse),
+      row.excluded,
+      `${row.scheme}.excluded(${row.book} ${row.chapter}:${row.verse})`,
+    );
+  }
 });

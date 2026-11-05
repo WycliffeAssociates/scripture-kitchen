@@ -1,5 +1,6 @@
 /**
- * canon for TypeScript: the book table and its lookups, with no wasm.
+ * canon for TypeScript: the book table, versification schemes' counts, and
+ * their lookups, with no wasm. The schemes are in `versification.ts`.
  *
  *     import { book, books, parseBook, usfmFileName } from "@wycliffeassociates/scripture-kitchen/canon";
  *
@@ -17,6 +18,15 @@
 import { BOOKS, NAMES, type Book, type Division } from "./tables.ts";
 
 export { BOOKS, type Book, type Division };
+export {
+  SCHEME_NAMES,
+  chapters,
+  excluded,
+  isSchemeName,
+  lastVerse,
+  verseCounts,
+  type SchemeName,
+} from "./versification.ts";
 
 /** Which books a list holds; every list is in the spec's row order. */
 export type Canon = "protestant66" | "withDeuterocanon" | "all";

@@ -21,10 +21,12 @@
 #      ▲        ▲                                        ▲
 #      ╰────────┴──────────── galley ◄──────────────────╯
 #
-# `canon` sits on `mise` alone: the book table and (to come) versification,
-# generated from canon/data/ into Rust consts and a TypeScript module.
+# `canon` sits on `mise` alone: the book table and versification, generated
+# from canon/data/ into Rust consts and a TypeScript module by `canon-gen`
+# (canon/gen/, never published). The generator is its own crate because it
+# reads the scheme JSON with serde_json, and canon's dependencies stay `mise`.
 #
-#   mise ◄── canon
+#   mise ◄── canon ◄── canon-gen
 #
 # `ticket` is the second leaf: the wire vocabulary and the per-record emitters
 # that onion's dish, galley's census and galley's find buffer all declare
@@ -35,6 +37,7 @@
 members = [
     "mise",
     "canon",
+    "canon/gen",
     "ticket",
     "onion",
     "onion-wasm",

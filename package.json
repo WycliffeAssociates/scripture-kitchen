@@ -30,6 +30,9 @@
     "onion-wasm/README.md",
     "canon/ts/canon.ts",
     "canon/ts/tables.ts",
+    "canon/ts/versification.ts",
+    "canon/ts/scheme-tables.ts",
+    "canon/NOTICE",
     "canon/README.md"
   ],
   "sideEffects": [

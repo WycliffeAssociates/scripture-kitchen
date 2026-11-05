@@ -1,0 +1,21 @@
+canon includes third-party data.
+
+Versification schemes
+  data/schemes/{org,eng,lxx,vul,rsc,rso}.json, and the tables generated from
+  them (src/scheme_tables.rs, ts/scheme-tables.ts).
+
+  From the Copenhagen Alliance versification mappings,
+  https://github.com/nida-institute/versification
+  (versification-mappings/standard-mappings/, commit 519af776ab65d89a51e37f750779250f940459ef).
+  Created by Neil Rees, Reinier de Blois, Mike Lothers, Tim Steenwyk,
+  Peter Kirk and Matjaž Crnivec, from Paratext's VRS files.
+
+  Licensed under Creative Commons Attribution-ShareAlike 4.0 International
+  (CC BY-SA 4.0), https://creativecommons.org/licenses/by-sa/4.0/.
+  The files are unchanged. The generated tables keep only their chapter and
+  verse counts and exclusions, and drop six Paratext-only book codes (BLT,
+  DNT, JDB, JSA, SST, TBS); those tables are a CC BY-SA 4.0 adaptation.
+
+  data/schemes/ulb.json is ours: chapter and verse counts measured from
+  WycliffeAssociates/en_ulb, with eng.json's verse mappings for the 66 books
+  copied in. Because it carries those mappings it is also CC BY-SA 4.0.
