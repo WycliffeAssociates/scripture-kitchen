@@ -15,9 +15,13 @@ use crate::import::Out;
 use crate::reading::{Inline, NoteKind, Paragraph};
 use crate::styles::{CALLER, LOOSE, NEST, NOTE_PEERS, PREFIX, RAW};
 
-/// The marker a style name carries, when it is one of ours.
+/// The marker a style name carries, when it is one of ours: `USFM ` and a
+/// marker's spelling, nested ones joined by `+`, or one of our own
+/// non-markers. "USFM my heading" is someone else's style, not `\my`.
 pub fn marker(style: Option<&str>) -> Option<&str> {
-    style?.strip_prefix(PREFIX).filter(|m| !m.is_empty())
+    let m = style?.strip_prefix(PREFIX)?;
+    let spelling = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+    (m == LOOSE || m.split(NEST).all(spelling)).then_some(m)
 }
 
 pub fn is_ours(p: &Paragraph) -> bool {
@@ -309,6 +313,16 @@ impl<'s> Spans<'s> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_marker_spellings_are_ours() {
+        assert_eq!(marker(Some("USFM q1")), Some("q1"));
+        assert_eq!(marker(Some("USFM wj+nd")), Some("wj+nd"));
+        assert_eq!(marker(Some("USFM (no marker)")), Some(LOOSE));
+        assert_eq!(marker(Some("USFM my heading")), None);
+        assert_eq!(marker(Some("USFM ")), None);
+        assert_eq!(marker(Some("Heading 1")), None);
+    }
 
     fn write(steps: &[(&[&'static str], &str)], in_note: bool) -> String {
         let mut spans = Spans::new(in_note);

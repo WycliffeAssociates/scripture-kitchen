@@ -383,6 +383,28 @@ could call this later.
 
 <Followup id="sefer" done>Tell Sefer how this relates to `packages/document-import` once the curated set is agreed.</Followup>
 
+## Review (2026-11-05)
+
+A light review (Opus) before merge. Fixed:
+
+- Import inflated every part of the package, images and fonts included, so
+  one image in a codec we lack failed the whole import, and a crafted file
+  could inflate many 512 MB entries. It now reads the central directory and
+  inflates only the parts it reads.
+- A style named "USFM my heading" was read as the marker `\my`. A `USFM …`
+  name is ours only when what follows is a marker's spelling.
+- Part names now match case-insensitively, and `../` in a relationship
+  target resolves.
+
+Left as it is:
+
+- Text typed with a backslash inside one of our paragraphs (`see \v 9 here`)
+  becomes markup, and verse tracking for comments does not see it. USFM has
+  no escape for a backslash; someone typing markers by hand probably means
+  them.
+- A comment in a .docx written by LibreOffice has no `w14:paraId`, so its
+  replies and resolved state are not linked. Word's own files are.
+
 <Followup id="sefer-switch">In Sefer: `ImportDocumentDialog` reads through `docx.readDocument(bytes).render(settings)` instead of `@sefer/document-import`, offers an export to Word (`exportBook`, `exportBooks`, `template`), and `packages/document-import` is deleted. The types match by design, so the dialog's code should change little.</Followup>
 
 <Followup id="template-by-hand">Will, in LibreOffice: open `docx/template.dotx`, type a few verses picking `USFM …` styles from the list, save, and import. The one path not proved by machine.</Followup>

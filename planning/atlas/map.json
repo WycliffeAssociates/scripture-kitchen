@@ -59,6 +59,12 @@
    "y": 1200,
    "w": 220,
    "h": 90
+  },
+  {
+   "id": "docx",
+   "label": "docx",
+   "level": 1,
+   "parent": null
   }
  ],
  "nodes": [
@@ -602,6 +608,19 @@
    "weight": 1,
    "x": 520,
    "y": 2000
+  },
+  {
+   "id": "docx",
+   "label": "docx",
+   "level": 1,
+   "group": "docx",
+   "kind": "crate",
+   "slug": "docx",
+   "weight": 2,
+   "x": 1700,
+   "y": 1650,
+   "w": 300,
+   "h": 100
   }
  ],
  "edges": [
@@ -1167,6 +1186,20 @@
    "level": 3,
    "kind": "data",
    "bend": 40
+  },
+  {
+   "from": "docx",
+   "to": "onion",
+   "label": "folds the USX export",
+   "level": 1,
+   "kind": "depends"
+  },
+  {
+   "from": "sefer",
+   "to": "docx",
+   "label": "readDocument, exportBook",
+   "level": 0,
+   "kind": "calls"
   }
  ]
 }

@@ -3,8 +3,12 @@
 //!
 //! ```text
 //! write(&[("word/document.xml", bytes), …])  ->  one .zip, entries in that order
-//! read(zip)                                  ->  [Entry { name, data }, …]
+//! Archive::open(zip)?.get("word/styles.xml")  ->  that one part, inflated now
+//! read(zip)                                  ->  [Entry { name, data }, …], every part
 //! ```
+//!
+//! Import opens the archive and inflates only the parts it reads, so an
+//! embedded video costs nothing and an image in a codec we lack fails nothing.
 //!
 //! Every timestamp is 1980-01-01, so the same parts always make the same bytes.
 //! No zip64: an office document never needs it, and reading one is an error.
@@ -20,6 +24,7 @@ const DOS_DATE: u16 = 0x0021;
 /// The largest part an import inflates. A Bible's document.xml is tens of MB.
 const MAX_INFLATED: usize = 512 << 20;
 
+#[cfg(test)]
 pub struct Entry {
     pub name: String,
     pub data: Vec<u8>,
@@ -103,57 +108,107 @@ pub fn write(entries: &[(&str, &[u8])]) -> Vec<u8> {
     out
 }
 
-pub fn read(zip: &[u8]) -> Result<Vec<Entry>, ZipError> {
-    let end = find_end(zip).ok_or(ZipError::NotAZip)?;
-    let count = u16_at(zip, end + 10)? as usize;
-    let central_at = u32_at(zip, end + 16)?;
-    if central_at == u32::MAX || count == 0xFFFF {
-        return Err(ZipError::Zip64);
-    }
-    let mut at = central_at as usize;
-    let mut entries = Vec::with_capacity(count);
-    for _ in 0..count {
-        if u32_at(zip, at)? != CENTRAL {
-            return Err(ZipError::Truncated);
-        }
-        let flags = u16_at(zip, at + 8)?;
-        let method = u16_at(zip, at + 10)?;
-        let crc = u32_at(zip, at + 16)?;
-        let packed_len = u32_at(zip, at + 20)?;
-        let len = u32_at(zip, at + 24)?;
-        let name_len = u16_at(zip, at + 28)? as usize;
-        let extra_len = u16_at(zip, at + 30)? as usize;
-        let comment_len = u16_at(zip, at + 32)? as usize;
-        let local = u32_at(zip, at + 42)? as usize;
-        let name = slice(zip, at + 46, name_len)?;
-        let name = String::from_utf8_lossy(name).into_owned();
-        at += 46 + name_len + extra_len + comment_len;
-        if packed_len == u32::MAX || len == u32::MAX || local == u32::MAX as usize {
+/// One central-directory record: where a part is and how it is packed.
+struct Meta {
+    name: String,
+    method: u16,
+    crc: u32,
+    packed_len: usize,
+    local: usize,
+}
+
+/// A zip whose central directory is read and whose parts are not, yet.
+pub struct Archive<'a> {
+    zip: &'a [u8],
+    entries: Vec<Meta>,
+}
+
+impl<'a> Archive<'a> {
+    pub fn open(zip: &'a [u8]) -> Result<Self, ZipError> {
+        let end = find_end(zip).ok_or(ZipError::NotAZip)?;
+        let count = u16_at(zip, end + 10)? as usize;
+        let central_at = u32_at(zip, end + 16)?;
+        if central_at == u32::MAX || count == 0xFFFF {
             return Err(ZipError::Zip64);
         }
-        if flags & 1 != 0 {
-            return Err(ZipError::Encrypted);
+        let mut at = central_at as usize;
+        let mut entries = Vec::with_capacity(count);
+        for _ in 0..count {
+            if u32_at(zip, at)? != CENTRAL {
+                return Err(ZipError::Truncated);
+            }
+            let flags = u16_at(zip, at + 8)?;
+            let method = u16_at(zip, at + 10)?;
+            let crc = u32_at(zip, at + 16)?;
+            let packed_len = u32_at(zip, at + 20)?;
+            let len = u32_at(zip, at + 24)?;
+            let name_len = u16_at(zip, at + 28)? as usize;
+            let extra_len = u16_at(zip, at + 30)? as usize;
+            let comment_len = u16_at(zip, at + 32)? as usize;
+            let local = u32_at(zip, at + 42)?;
+            let name = String::from_utf8_lossy(slice(zip, at + 46, name_len)?).into_owned();
+            at += 46 + name_len + extra_len + comment_len;
+            if packed_len == u32::MAX || len == u32::MAX || local == u32::MAX {
+                return Err(ZipError::Zip64);
+            }
+            if flags & 1 != 0 {
+                return Err(ZipError::Encrypted);
+            }
+            if name.ends_with('/') {
+                continue;
+            }
+            entries.push(Meta { name, method, crc, packed_len: packed_len as usize, local: local as usize });
         }
-        if name.ends_with('/') {
-            continue;
-        }
-        if u32_at(zip, local)? != LOCAL {
+        Ok(Self { zip, entries })
+    }
+
+    #[cfg(test)]
+    pub fn names(&self) -> impl Iterator<Item = &str> {
+        self.entries.iter().map(|e| e.name.as_str())
+    }
+
+    /// OPC part names are case-insensitive.
+    fn find(&self, name: &str) -> Option<&Meta> {
+        let name = name.trim_start_matches('/');
+        self.entries.iter().find(|e| e.name.eq_ignore_ascii_case(name))
+    }
+
+    pub fn has(&self, name: &str) -> bool {
+        self.find(name).is_some()
+    }
+
+    /// One part, inflated and checked; `None` when the archive has no such part.
+    pub fn get(&self, name: &str) -> Result<Option<Vec<u8>>, ZipError> {
+        let Some(e) = self.find(name) else { return Ok(None) };
+        let zip = self.zip;
+        if u32_at(zip, e.local)? != LOCAL {
             return Err(ZipError::Truncated);
         }
-        let skip = u16_at(zip, local + 26)? as usize + u16_at(zip, local + 28)? as usize;
-        let packed = slice(zip, local + 30 + skip, packed_len as usize)?;
-        let data = match method {
+        let skip = u16_at(zip, e.local + 26)? as usize + u16_at(zip, e.local + 28)? as usize;
+        let packed = slice(zip, e.local + 30 + skip, e.packed_len)?;
+        let data = match e.method {
             0 => packed.to_vec(),
-            8 => decompress_to_vec_with_limit(packed, MAX_INFLATED)
-                .map_err(|_| ZipError::Inflate(name.clone()))?,
+            8 => decompress_to_vec_with_limit(packed, MAX_INFLATED).map_err(|_| ZipError::Inflate(e.name.clone()))?,
             m => return Err(ZipError::Method(m)),
         };
-        if crc32(&data) != crc {
-            return Err(ZipError::Crc(name));
+        if crc32(&data) != e.crc {
+            return Err(ZipError::Crc(e.name.clone()));
         }
-        entries.push(Entry { name, data });
+        Ok(Some(data))
     }
-    Ok(entries)
+}
+
+/// Every part, inflated: for tests that rewrite a whole package.
+#[cfg(test)]
+pub fn read(zip: &[u8]) -> Result<Vec<Entry>, ZipError> {
+    let archive = Archive::open(zip)?;
+    let mut out = Vec::new();
+    for name in archive.names() {
+        if let Some(data) = archive.get(name)? {
+            out.push(Entry { name: name.to_owned(), data });
+        }
+    }
+    Ok(out)
 }
 
 fn find_end(zip: &[u8]) -> Option<usize> {

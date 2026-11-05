@@ -26,10 +26,9 @@ const OFFICE_DOCUMENT: &str = "/officeDocument";
 
 /// Reads a .docx, or an .odt (told apart by the `mimetype` entry ODF puts first).
 pub fn read(bytes: &[u8]) -> Result<Reading, ImportError> {
-    let entries = zip::read(bytes).map_err(ImportError::Zip)?;
-    let package = Package { entries };
-    let odt = package.get("mimetype").is_some_and(|m| m.starts_with(crate::odt::MIMETYPE.as_bytes()));
-    if odt || (package.get("content.xml").is_some() && package.get("word/document.xml").is_none()) {
+    let package = Package { archive: zip::Archive::open(bytes).map_err(ImportError::Zip)? };
+    let odt = package.get("mimetype")?.is_some_and(|m| m.starts_with(crate::odt::MIMETYPE.as_bytes()));
+    if odt || (package.archive.has("content.xml") && !package.archive.has("word/document.xml")) {
         let content = package.xml("content.xml")?.ok_or_else(|| ImportError::Missing("content.xml".to_owned()))?;
         let styles = package.xml("styles.xml")?;
         let mut reading = crate::odt::read(&content, styles.as_ref())
@@ -78,18 +77,18 @@ pub fn read(bytes: &[u8]) -> Result<Reading, ImportError> {
     })
 }
 
-struct Package {
-    entries: Vec<zip::Entry>,
+/// The package, its parts inflated only when read.
+struct Package<'a> {
+    archive: zip::Archive<'a>,
 }
 
-impl Package {
-    fn get(&self, name: &str) -> Option<&[u8]> {
-        let name = name.trim_start_matches('/');
-        self.entries.iter().find(|e| e.name == name).map(|e| e.data.as_slice())
+impl Package<'_> {
+    fn get(&self, name: &str) -> Result<Option<Vec<u8>>, ImportError> {
+        self.archive.get(name).map_err(ImportError::Zip)
     }
 
     fn xml(&self, name: &str) -> Result<Option<Element>, ImportError> {
-        self.get(name).map(|data| dom::parse(name, data).map_err(ImportError::Xml)).transpose()
+        self.get(name)?.map(|data| dom::parse(name, &data).map_err(ImportError::Xml)).transpose()
     }
 
     /// A relationships part, as (type, target resolved against `dir`).
@@ -105,10 +104,25 @@ impl Package {
                     None if dir.is_empty() => target.to_owned(),
                     None => format!("{dir}/{target}"),
                 };
-                Some((e.attr("Type")?.to_owned(), path))
+                Some((e.attr("Type")?.to_owned(), normalise(&path)))
             })
             .collect())
     }
+}
+
+/// A part path with its `.` and `..` steps resolved: `word/../media/a.png` is `media/a.png`.
+fn normalise(path: &str) -> String {
+    let mut out: Vec<&str> = Vec::new();
+    for step in path.split('/') {
+        match step {
+            "" | "." => {}
+            ".." => {
+                out.pop();
+            }
+            s => out.push(s),
+        }
+    }
+    out.join("/")
 }
 
 pub(crate) struct Book {
