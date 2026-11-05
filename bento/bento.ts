@@ -356,7 +356,10 @@ const schema = <Output>(file: string): StandardSchemaV1<Output> => ({
       const r = read(file, encoder.encode(JSON.stringify(value) ?? "null"));
       const issues = r.findings
         .filter((f) => f.severity === "error" || f.check === "manifest-valid")
-        .map((f): Issue => ({ message: f.message, path: pathOf(f.at) }));
+        .map((f): Issue => {
+          const path = pathOf(f.at);
+          return path === undefined ? { message: f.message } : { message: f.message, path };
+        });
       return issues.length > 0 ? { issues } : { value: value as Output };
     },
   },

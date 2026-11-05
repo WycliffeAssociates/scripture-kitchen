@@ -154,7 +154,11 @@ export class WriterHistory {
   progress(now: number): Array<[at: number, verses: number]> {
     const flat = this.held().progress(now);
     const out: Array<[number, number]> = [];
-    for (let i = 0; i + 1 < flat.length; i += 2) out.push([flat[i], flat[i + 1]]);
+    for (let i = 0; i + 1 < flat.length; i += 2) {
+      const at = flat[i];
+      const verses = flat[i + 1];
+      if (at !== undefined && verses !== undefined) out.push([at, verses]);
+    }
     return out;
   }
 
@@ -237,7 +241,7 @@ const handles = (histories: readonly WriterHistory[]): raw.WriterHistory[] =>
  * Uses the histories up. Throws on two histories of one book.
  */
 export const replay = (histories: readonly WriterHistory[], options: ReplayOptions): Replayed | undefined =>
-  raw.replay(handles(histories), options.now, options.deltas ?? true) ?? undefined;
+  (raw.replay(handles(histories), options.now, options.deltas ?? true) as Replayed | undefined) ?? undefined;
 
 /** Who makes the closing commit, and what it says (end it with `\n`). */
 export interface Closing {
@@ -266,4 +270,4 @@ export const consolidate = (
     JSON.stringify({ ...project, books: [] }),
     JSON.stringify(closing),
     [...formats],
-  );
+  ) as Replayed & { manifests: Map<string, Uint8Array> };
