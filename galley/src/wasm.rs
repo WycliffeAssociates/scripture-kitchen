@@ -35,6 +35,7 @@ mod find;
 mod mask;
 pub mod onion;
 pub mod overlay;
+mod versification;
 
 /// The two flags the find doors take, as the query Find prepares once.
 ///
@@ -60,12 +61,62 @@ export interface GalleyOptions {
 }
 
 /** `update(id, text, opts)`: the `\z` list the book lexes by, for as long as it is registered. */
-export interface UpdateOptions extends LexOptions {}
+export interface UpdateOptions extends LexOptions {
+  /**
+   * The numbering the book follows: a scheme's name (`"ulb"`, `"eng"`, `"org"`, …, or one
+   * `defineScheme` added), or `"followSource"` for whatever its same-code reference declares.
+   * Omitted, an earlier declaration for this id stands.
+   */
+  versification?: string;
+}
 
 /** `updateReference(id, text, opts)`. */
 export interface ReferenceOptions extends LexOptions {
   /** Keep the text and projection a target keeps, so `find` and `mask` can read it. */
   keepText?: boolean;
+  /** As `UpdateOptions.versification`. */
+  versification?: string;
+}
+
+/** A Copenhagen Alliance versification mapping, as `JSON.parse` returns it. */
+export interface VersificationMapping {
+  /** Per book code, each chapter's last verse (numbers, or the decimal strings published files use). */
+  maxVerses: Record<string, (number | string)[]>;
+  /** `"GEN 31:55": "GEN 32:1"`: this scheme's verses toward org's. */
+  mappedVerses?: Record<string, string>;
+  /** `"MAT 17:21"`: verses this scheme omits on purpose. */
+  excludedVerses?: string[];
+  /** Accepted and not read. */
+  partialVerses?: unknown;
+}
+
+/** `JSON.parse(galley.sniff())`. */
+export interface SniffResult {
+  /** The winner; `null` when undetermined (use the project's default). */
+  best: string | null;
+  confidence: "decided" | "leaning" | "undetermined";
+  /** Rules that told the schemes apart. */
+  voted: number;
+  /** Every built-in scheme, best first. */
+  ranked: { scheme: string; agree: number; disagree: number }[];
+  /** Rules the winner disagrees with: passages the text numbers like another tradition. */
+  dissent: { rule: string; textFollows: string[] }[];
+  /** Rules where the text followed no tradition at all. */
+  unmatched: string[];
+}
+
+/** `JSON.parse(galley.mapVerse(from, to, "GEN 31:55"))`. Verses are `"BBB c:v"`, a part as `"ESG 4:17c"`. */
+export type MappedVerse =
+  | { same: true }
+  | { moved: string }
+  | { merged: string }
+  | { split: string[] }
+  | { absent: true };
+
+/** One unit of `JSON.parse(galley.pairs(from, to, "PSA"))`: verses that map only to each other. */
+export interface PairedVerses {
+  here: string[];
+  there: string[];
 }
 
 /** `find` and `findAll`. */
@@ -190,9 +241,16 @@ impl Galley {
         text: &str,
         #[wasm_bindgen(unchecked_optional_param_type = "UpdateOptions")] opts: Option<JsValue>,
     ) -> Result<String, JsError> {
-        let markers = onion_wasm::options::lex_options(opts.as_ref(), "update")
+        let door = "update";
+        let bag =
+            onion_wasm::options::bag(opts.as_ref(), door, &["customMarkers", "versification"])
+                .map_err(|e| JsError::new(&e))?;
+        let markers = onion_wasm::options::custom_markers(bag.as_ref(), door)
             .map_err(|e| JsError::new(&e))?;
-        self.register(id, Role::Target, Retain::Text, Markers::from(markers), text)
+        let declared = versification::declaration(bag.as_ref(), door)?;
+        let key = self.register(id, Role::Target, Retain::Text, Markers::from(markers), text)?;
+        self.declare(id, declared)?;
+        Ok(key)
     }
 
     /// The same, as a declared source: one projected grapheme length per
@@ -214,19 +272,102 @@ impl Galley {
         #[wasm_bindgen(unchecked_optional_param_type = "ReferenceOptions")] opts: Option<JsValue>,
     ) -> Result<String, JsError> {
         let door = "updateReference";
-        let bag = onion_wasm::options::bag(opts.as_ref(), door, &["keepText", "customMarkers"])
-            .map_err(|e| JsError::new(&e))?;
+        let bag = onion_wasm::options::bag(
+            opts.as_ref(),
+            door,
+            &["keepText", "customMarkers", "versification"],
+        )
+        .map_err(|e| JsError::new(&e))?;
+        let declared = versification::declaration(bag.as_ref(), door)?;
         let keep_text = onion_wasm::options::flag(bag.as_ref(), door, "keepText")
             .map_err(|e| JsError::new(&e))?;
         let markers = onion_wasm::options::custom_markers(bag.as_ref(), door)
             .map_err(|e| JsError::new(&e))?;
-        self.register(
+        let key = self.register(
             id,
             Role::Reference,
             retention(keep_text),
             Markers::from(markers),
             text,
-        )
+        )?;
+        self.declare(id, declared)?;
+        Ok(key)
+    }
+
+    // ── Versification ───────────────────────────────────────────────────
+
+    /// Adds a project's own versification scheme, by name, from a Copenhagen
+    /// mapping object (`JSON.parse` of a `.json` mapping, such as one
+    /// converted from a Paratext `.vrs`). Replaces one defined under the same
+    /// name; a built-in name (`"ulb"`) is refused. Every entry is checked, and
+    /// the first bad one throws, naming it.
+    #[wasm_bindgen(js_name = defineScheme)]
+    pub fn define_scheme(
+        &mut self,
+        name: &str,
+        #[wasm_bindgen(unchecked_param_type = "VersificationMapping")] mapping: JsValue,
+    ) -> Result<(), JsError> {
+        let scheme = versification::scheme(name, &mapping)?;
+        self.sous.define_scheme(scheme);
+        Ok(())
+    }
+
+    /// The scheme a registered book follows (its own declaration, or its
+    /// source's for `"followSource"`), or `undefined`.
+    #[wasm_bindgen(js_name = schemeOf)]
+    pub fn scheme_of(&self, id: &str) -> Option<String> {
+        self.sous
+            .scheme_of(&BookId::from(id))
+            .map(|scheme| scheme.name().to_owned())
+    }
+
+    /// Which built-in scheme the books in `scope` follow, from what they
+    /// have, as JSON ([`SniffResult`]). A suggestion for a book that declares
+    /// nothing: nothing here applies it.
+    ///
+    /// `{ scope }` is `findAll`'s, default `"targets"`; every book in it must
+    /// retain its text (a reference needs `keepText`). Sniff the whole text
+    /// at once: one book alone has few rules to vote with.
+    pub fn sniff(
+        &mut self,
+        #[wasm_bindgen(unchecked_optional_param_type = "{ scope?: Scope }")] opts: Option<JsValue>,
+    ) -> Result<String, JsError> {
+        let door = "sniff";
+        let bag = onion_wasm::options::bag(opts.as_ref(), door, &["scope"])
+            .map_err(|e| JsError::new(&e))?;
+        let scope = onion_wasm::options::get(bag.as_ref(), "scope").and_then(|v| v.as_string());
+        let roles = scope_roles(scope, door)?;
+        let mut texts = Vec::new();
+        for role in roles {
+            for (id, _) in self.sous.pantry().books(*role).to_vec() {
+                let text = self.book(id.as_str())?.text().map_err(refusal)?.to_owned();
+                texts.push(text);
+            }
+        }
+        let sniff = crate::versification::sniff(texts.iter().map(String::as_str));
+        versification::sniff_json(&sniff)
+    }
+
+    /// Where `verse` (`"GEN 31:55"`), numbered by scheme `from`, is under
+    /// scheme `to`, as JSON ([`MappedVerse`]). Either name may be a built-in
+    /// or a defined scheme.
+    #[wasm_bindgen(js_name = mapVerse)]
+    pub fn map_verse(&self, from: &str, to: &str, verse: &str) -> Result<String, JsError> {
+        let (from, to) = (self.named_scheme(from)?, self.named_scheme(to)?);
+        let verse: canon::Verse = verse
+            .parse()
+            .map_err(|e: String| JsError::new(&format!("mapVerse: {e}")))?;
+        versification::mapped_json(&canon::map(from, to, verse))
+    }
+
+    /// A whole book walked in step across two schemes, as JSON
+    /// ([`PairedVerses`]`[]`): each unit is the verses on each side that map
+    /// only to each other. `book` is a USFM code (`"PSA"`).
+    pub fn pairs(&self, from: &str, to: &str, book: &str) -> Result<String, JsError> {
+        let (from, to) = (self.named_scheme(from)?, self.named_scheme(to)?);
+        let book = versification::book_key(book)
+            .ok_or_else(|| JsError::new(&format!("pairs: {book:?} is not a book code")))?;
+        versification::pairs_json(&canon::pairs(from, to, book))
     }
 
     /// Drop a book, its text, and its cached rows. `false` when the id was
@@ -1004,6 +1145,29 @@ impl Galley {
     }
 
     /// One registered book, or the refusal an unknown id earns.
+    /// Records a registration's `versification`, when it named one.
+    fn declare(
+        &mut self,
+        id: &str,
+        declared: Option<crate::versification::Declared>,
+    ) -> Result<(), JsError> {
+        match declared {
+            Some(declared) => self
+                .sous
+                .declare(id, Some(declared))
+                .map_err(|error| JsError::new(&error.to_string())),
+            None => Ok(()),
+        }
+    }
+
+    /// A built-in or defined scheme by name, or an error listing the
+    /// built-in ones.
+    fn named_scheme(&self, name: &str) -> Result<&canon::Scheme, JsError> {
+        self.sous.versification().scheme(name).ok_or_else(|| {
+            JsError::new(&crate::versification::UnknownScheme(name.to_owned()).to_string())
+        })
+    }
+
     fn book(&mut self, id: &str) -> Result<Entry<'_>, JsError> {
         self.sous
             .book(&BookId::from(id))

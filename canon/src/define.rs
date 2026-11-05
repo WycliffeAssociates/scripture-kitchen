@@ -194,7 +194,7 @@ impl SchemeBuilder {
 
 /// `"PSA 3:0-8"` → `(PSA, 3, 0, 8, None)`; `"ESG 4:17c"` → `(ESG, 4, 17, 17, Some('c'))`.
 /// The book must be in canon's table. A backwards range is refused.
-fn range(text: &str) -> Option<(BookKey, u16, u16, u16, Option<char>)> {
+pub(crate) fn range(text: &str) -> Option<(BookKey, u16, u16, u16, Option<char>)> {
     let (book, rest) = text.trim().split_once(' ')?;
     let book = BookKey::new(book.as_bytes().try_into().ok()?);
     crate::book(book)?;

@@ -1239,5 +1239,80 @@ if (corpusDir && existsSync(corpusDir)) {
   console.log(`corpus: ${corpusDir} is absent — timing skipped`);
 }
 
+// --- versification: declare, define, sniff, map, pairs --------------------
+//
+// A declaration rides on update/updateReference; the two findings it buys
+// cross in the ordinary diagnostics section; the rest answer as JSON.
+
+{
+  const { deserialize } = await import(resolve(here, "../../onion-wasm/reader.ts"));
+  const verses = (book, counts) => {
+    let text = `\\id ${book}\n`;
+    counts.forEach((last, at) => {
+      text += `\\c ${at + 1}\n\\p\n`;
+      for (let v = 1; v <= last; v++) text += `\\v ${v} word\n`;
+    });
+    return text;
+  };
+  const named = (handle, id) =>
+    new Set(
+      [...deserialize(handle.lint(id)).diagnostics]
+        .map((d) => d.code().name)
+        .filter((name) => name === "chapter-ends-early" || name === "verse-beyond-scheme"),
+    );
+
+  const v = new Galley();
+  // Ruth: chapter 1 one short of ulb's 22, chapter 2 one past its 23.
+  v.update("books/RUT.usfm", verses("RUT", [21, 24, 18, 22]));
+  eq(v.schemeOf("books/RUT.usfm"), undefined, "nothing declared");
+  eq(named(v, "books/RUT.usfm").size, 0, "no scheme, no versification findings");
+
+  v.update("books/RUT.usfm", verses("RUT", [21, 24, 18, 22]), { versification: "ulb" });
+  eq(v.schemeOf("books/RUT.usfm"), "ulb", "update declares");
+  const both = named(v, "books/RUT.usfm");
+  check(both.has("chapter-ends-early") && both.has("verse-beyond-scheme"), "both findings cross in diagnostics");
+
+  let threw = "";
+  try {
+    v.update("books/RUT.usfm", verses("RUT", [21]), { versification: "nope" });
+  } catch (error) {
+    threw = String(error);
+  }
+  check(threw.includes("defineScheme"), `an unknown scheme throws, naming the way out: ${threw}`);
+
+  v.defineScheme("short-ruth", { maxVerses: { RUT: ["21", "24", "18", "22"] } });
+  v.update("books/RUT.usfm", verses("RUT", [21, 24, 18, 22]), { versification: "short-ruth" });
+  eq(named(v, "books/RUT.usfm").size, 0, "a defined scheme with exactly its counts");
+  threw = "";
+  try {
+    v.defineScheme("ulb", { maxVerses: { RUT: [1] } });
+  } catch (error) {
+    threw = String(error);
+  }
+  check(threw.includes("built-in"), `a built-in name can't be redefined: ${threw}`);
+
+  // followSource: the same-code reference's declaration.
+  v.update("books/RUT.usfm", verses("RUT", [22, 23, 18, 22]), { versification: "followSource" });
+  eq(v.schemeOf("books/RUT.usfm"), undefined, "no source yet");
+  v.updateReference("ref/RUT.usfm", verses("RUT", [22, 23, 18, 22]), { versification: "rso" });
+  eq(v.schemeOf("books/RUT.usfm"), "rso", "the source's scheme");
+
+  eq(JSON.parse(v.mapVerse("eng", "org", "GEN 31:55")).moved, "GEN 32:1", "mapVerse moves");
+  eq(JSON.parse(v.mapVerse("eng", "vul", "MAT 1:1")).same, true, "mapVerse same");
+  eq(JSON.parse(v.mapVerse("org", "eng", "PSA 13:6")).split.join(" "), "PSA 13:5 PSA 13:6", "mapVerse splits");
+  eq(JSON.parse(v.mapVerse("eng", "org", "ACT 19:41")).absent, true, "mapVerse absent");
+
+  const units = JSON.parse(v.pairs("ulb", "org", "PSA"));
+  check(
+    units.some((u) => u.here.join() === "PSA 3:0" && u.there.join() === "PSA 3:1"),
+    "pairs puts ulb's title slot beside org's verse 1",
+  );
+
+  const sniffed = JSON.parse(v.sniff());
+  check(["decided", "leaning", "undetermined"].includes(sniffed.confidence), "sniff answers a confidence");
+  eq(sniffed.ranked.length, 7, "every built-in scheme ranked");
+  v.free();
+}
+
 console.log(failures === 0 ? "sous conformance: OK" : `sous conformance: ${failures} FAILURES`);
 process.exit(failures === 0 ? 0 : 1);

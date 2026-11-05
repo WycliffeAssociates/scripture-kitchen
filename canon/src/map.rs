@@ -65,6 +65,22 @@ impl fmt::Display for Verse {
     }
 }
 
+/// `"GEN 31:55"`, `"PSA 3:0"`, `"ESG 4:17c"`, the form [`Display`](fmt::Display)
+/// writes. The book must be a USFM code in canon's table; a range is refused.
+impl core::str::FromStr for Verse {
+    type Err = String;
+
+    fn from_str(text: &str) -> Result<Verse, String> {
+        match crate::define::range(text) {
+            Some((book, chapter, verse, last, part)) if last == verse => Ok(Verse {
+                part,
+                ..Verse::new(book, chapter, verse)
+            }),
+            _ => Err(format!("{text:?} is not one verse as \"BBB c:v\"")),
+        }
+    }
+}
+
 /// Where a verse is under another scheme.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Mapped {

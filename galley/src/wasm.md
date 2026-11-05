@@ -148,6 +148,40 @@ with its own list never is. `CustomMarkers` is plain data with nothing to
 free: the same object serves any number of calls, every door checks its shape,
 and equal lists resolve once and share one registry.
 
+## Versification: `{ versification }`, `defineScheme`, `sniff`, `mapVerse`, `pairs`
+
+A book declares the numbering it follows when it is registered. The declaration
+outlives a re-registration of the same id; omit the key to leave it as it is.
+
+```js
+galley.update("books/RUT.usfm", text, { versification: "ulb" });      // a built-in scheme
+galley.update("books/PSA.usfm", text, { versification: "followSource" });
+galley.updateReference("ref/PSA.usfm", src, { versification: "rso" }); // …which this answers
+galley.schemeOf("books/PSA.usfm");                                     // "rso"
+
+galley.defineScheme("my-vrs", JSON.parse(mappingJson));  // Copenhagen format; then name it
+```
+
+A declared target with no source paired gets `chapter-ends-early` and
+`verse-beyond-scheme` in its ordinary diagnostics (`lint`, `parse`): a chapter
+missing its last verse, which no gap lint can see, and a verse past the
+scheme's count. With a source paired, presence owns "missing" and "extra". An
+undeclared book's bytes are exactly as before.
+
+The rest answer as JSON (`SniffResult`, `MappedVerse`, `PairedVerses` in the
+`.d.ts`):
+
+```js
+JSON.parse(galley.sniff());                     // { best: "ulb", confidence: "decided", voted: 250, ranked, dissent, unmatched }
+JSON.parse(galley.mapVerse("eng", "org", "GEN 31:55"));  // { moved: "GEN 32:1" }
+JSON.parse(galley.pairs("ulb", "org", "PSA"));  // [{ here: ["PSA 3:0"], there: ["PSA 3:1"] }, …]
+```
+
+`sniff` is a suggestion for a book that declares nothing, and nothing applies
+it: remapping a translator's numbering on a guess is the bad surprise. Pairing
+on `org` keys (plan step 7b) is not here yet: sous still pairs numbers as
+written.
+
 ## Dirty and rework
 
 Two questions, two answers, and a `Fingerprint` is ~1 KB of chunk starts and

@@ -411,7 +411,11 @@ behind.
    `FollowSource`), `defineScheme`, and sous pairing on `org` keys. This closes the
    versification-layer idea's question about which consumer goes first. Split in two,
    because the second changes what the Expediter's caches are keyed by:
-   - **7a, declaring and asking.** Everything except pairing.
+   - **7a, declaring and asking** (done on the `canon` branch, 2026-11-05). Everything
+     except pairing. Both JS conformance suites pass against local nodejs builds. galley's
+     wasm grew 1.34 MB → 1.64 MB raw, 515 → 606 KB gzipped, more than the 60–100 KB
+     guessed: mostly the sniffing rules as Rust structs, plus the mapping rows. Packing
+     the rules tighter, or loading sniffing as its own module, can win most of it back.
      - canon: a `Scheme` a project defines (owned, built through a validated builder).
        galley parses the Copenhagen JSON, since it has serde and canon doesn't.
      - galley: a scheme registry on the handle (built-ins plus `defineScheme(name, json)`),
