@@ -496,3 +496,53 @@ fn the_file_checks_compare_the_manifest_with_the_repo() {
         "./46-ROM.usfm is listed but not in the repo."
     );
 }
+
+// Why: the RC edit splices text, so its edges are where it can go wrong: a
+// book after every other, a manifest with no `projects` yet, a list it
+// mustn't touch because it can't place a line in it.
+#[test]
+fn adding_after_the_last_book_and_to_no_list_at_all() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/rc/hub_tn_luk_text_reg.yaml");
+    let before = std::fs::read_to_string(&path).unwrap();
+    let edited = edit(
+        &[("manifest.yaml".into(), before.clone().into_bytes())],
+        &add(vec![book(b"REV", "Tshenolo")]),
+    )
+    .unwrap();
+    let after = String::from_utf8(edited.files[0].1.clone()).unwrap();
+    let new =
+        inserted(&before, &after).unwrap_or_else(|| panic!("more than one run changed:\n{after}"));
+    assert_eq!(new.len(), 7, "{new:#?}");
+    assert!(after.ends_with("  versification: ufw\n"), "{after}");
+    let books: Vec<String> = read("manifest.yaml", after.as_bytes())
+        .manifest
+        .unwrap()
+        .books
+        .iter()
+        .map(|b| b.book.to_string())
+        .collect();
+    assert_eq!(books, ["LUK", "REV"]);
+
+    let bare =
+        "dublin_core:\n  identifier: reg\n  title: Baibel\n  language:\n    identifier: tpi\n";
+    let edited = edit(
+        &[("manifest.yaml".into(), bare.as_bytes().to_vec())],
+        &add(vec![book(b"MAT", "Matyu")]),
+    )
+    .unwrap();
+    let after = String::from_utf8(edited.files[0].1.clone()).unwrap();
+    assert!(after.starts_with(bare), "{after}");
+    let r = read("manifest.yaml", after.as_bytes());
+    assert_eq!(r.manifest.unwrap().books[0].sort, Some(40), "{after}");
+
+    let flow =
+        "dublin_core:\n  identifier: reg\nprojects: [{identifier: mat, path: ./41-MAT.usfm}]\n";
+    let refused = edit(
+        &[("manifest.yaml".into(), flow.as_bytes().to_vec())],
+        &add(vec![book(b"MRK", "Mak")]),
+    );
+    assert!(
+        matches!(refused, Err(EditError::Unreadable(_, ref why)) if why.contains("flow list")),
+        "{refused:?}"
+    );
+}

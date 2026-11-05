@@ -11,11 +11,13 @@
 #
 #     ./wasm-build.sh galley        # what galley/build.sh runs for you off-platform
 #     ./wasm-build.sh onion-wasm
+#     ./wasm-build.sh bento
+#     ./wasm-build.sh bttwriter
 #
 # Two named volumes keep the toolchain install and the registry between runs;
 # the first run compiles wasm-pack and takes minutes, later runs take one.
 set -eu
-crate=${1:?crate directory: galley or onion-wasm}
+crate=${1:?crate directory: galley, onion-wasm, bento or bttwriter}
 root=$(cd "$(dirname "$0")" && pwd)
 docker run --rm --platform linux/amd64 \
   -v "$root":/src \
@@ -23,6 +25,7 @@ docker run --rm --platform linux/amd64 \
   -v scripture-kitchen-cargo-bin:/usr/local/cargo/bin \
   -v scripture-kitchen-target:/tmp/target \
   -e CARGO_TARGET_DIR=/tmp/target \
+  -e HOST_IDS="$(id -u):$(id -g)" \
   -w "/src/$crate" \
   rust:1.97.1 sh -c '
     set -eu
@@ -32,4 +35,6 @@ docker run --rm --platform linux/amd64 \
     export PATH=/opt/binaryen-version_131/bin:$PATH
     [ "$(wasm-pack --version 2>/dev/null)" = "wasm-pack 0.14.0" ] || cargo install wasm-pack --version 0.14.0 --locked -q
     WASM_BUILD_NATIVE=1 ./build.sh
+    # The container runs as root; hand the packages back to whoever ran this.
+    chown -R "$HOST_IDS" pkg-*
   '

@@ -262,30 +262,20 @@ fn edit_rc(
     }
     let unreadable = |why: String| EditError::Unreadable(name.to_owned(), why);
     let had_bom = bytes.starts_with(b"\xEF\xBB\xBF");
-    let text = std::str::from_utf8(without_bom(bytes)).map_err(|e| unreadable(e.to_string()))?;
+    let mut text = std::str::from_utf8(without_bom(bytes))
+        .map_err(|e| unreadable(e.to_string()))?
+        .to_owned();
     let read = crate::read_as(Format::Rc, bytes);
     let Some(crate::Detail::Rc(doc)) = &read.detail else {
         return Err(unreadable("not a Resource Container".into()));
     };
-    let file = yaml_edit::YamlFile::from_str(text).map_err(|e| unreadable(e.to_string()))?;
-    let document = file
-        .documents()
-        .find(|d| d.as_mapping().is_some())
-        .ok_or_else(|| unreadable("no mapping".into()))?;
-    let mapping = document
-        .as_mapping()
-        .ok_or_else(|| unreadable("no mapping".into()))?;
     let order: Vec<BookKey> = canon::books(change.canon).map(|b| b.code).collect();
-    let indent_lists = indents_lists(text);
-    let mut books: Vec<Option<BookKey>> = doc
-        .projects
-        .iter()
-        .map(|p| p.identifier.as_deref().and_then(book_of))
-        .collect();
+    let indent_lists = indents_lists(&text);
 
     for p in placed {
         let book = p.book.book;
-        if books.contains(&Some(book)) {
+        let projects = projects(&text).map_err(unreadable)?;
+        if projects.iter().any(|(b, _)| *b == Some(book)) {
             return Err(EditError::Listed(book));
         }
         // A manifest whose sorts count from 0 (Sefer's) can tie with the new one.
@@ -302,30 +292,9 @@ fn edit_rc(
                 ),
             });
         }
-        let at = position(&order, book, books.iter().copied()).unwrap_or(books.len());
-        let mut entry = String::new();
-        yaml_list(&[rc_project(p)], 0, indent_lists, &mut entry);
-        let entry = entry.strip_prefix("- ").unwrap_or(&entry);
-        let entry = entry
-            .lines()
-            .map(|l| l.strip_prefix("  ").unwrap_or(l))
-            .collect::<Vec<_>>()
-            .join("\n");
-        let new = yaml_edit::Document::from_str(&entry).map_err(|e| unreadable(e.to_string()))?;
-        let new = new
-            .as_mapping()
-            .ok_or_else(|| unreadable("a project entry".into()))?;
-        match mapping.get_sequence("projects") {
-            Some(projects) => projects.insert(at, new),
-            None => {
-                mapping.set("projects", yaml_edit::YamlValue::Sequence(Vec::new()));
-                mapping
-                    .get_sequence("projects")
-                    .ok_or_else(|| unreadable("projects".into()))?
-                    .push(new);
-            }
-        }
-        books.insert(at, Some(book));
+        let at = position(&order, book, projects.iter().map(|(b, _)| *b));
+        splice_project(&mut text, &projects, at, &rc_project(p), indent_lists)
+            .map_err(unreadable)?;
     }
 
     let mut out = if had_bom {
@@ -333,8 +302,104 @@ fn edit_rc(
     } else {
         String::new()
     };
-    out.push_str(&file.to_string());
+    out.push_str(&text);
     Ok(Some(out.into_bytes()))
+}
+
+/// The `projects` list's items: each one's book, and the byte offset its
+/// line starts at. An error for a `projects` that isn't a block list.
+fn projects(text: &str) -> Result<Vec<(Option<BookKey>, usize)>, String> {
+    let file = yaml_edit::YamlFile::from_str(text).map_err(|e| e.to_string())?;
+    let mapping = file
+        .documents()
+        .find_map(|d| d.as_mapping())
+        .ok_or("the manifest isn't a mapping")?;
+    let Some(list) = mapping.get("projects") else {
+        return Ok(Vec::new());
+    };
+    let yaml_edit::YamlNode::Sequence(list) = list else {
+        return Err("projects isn't a list".into());
+    };
+    if list.is_flow_style() {
+        return Err("projects is a flow list ([…]); bento adds to block lists".into());
+    }
+    Ok(list
+        .values()
+        .map(|item| {
+            let book = match &item {
+                yaml_edit::YamlNode::Mapping(m) => match m.get("identifier") {
+                    Some(yaml_edit::YamlNode::Scalar(s)) => book_of(&s.as_string()),
+                    _ => None,
+                },
+                _ => None,
+            };
+            let start = item.byte_range().start as usize;
+            (book, text[..start].rfind('\n').map_or(0, |n| n + 1))
+        })
+        .collect())
+}
+
+/// Insert `entry` as item `at` of the `projects` list (last when `None`), in
+/// the list's own indentation, as text: every other byte stays as it was.
+fn splice_project(
+    text: &mut String,
+    projects: &[(Option<BookKey>, usize)],
+    at: Option<usize>,
+    entry: &Node,
+    indent_lists: bool,
+) -> Result<(), String> {
+    let mut rendered = String::new();
+    yaml_list(std::slice::from_ref(entry), 0, indent_lists, &mut rendered);
+    let Some(&(_, first)) = projects.first() else {
+        // No list yet: a new `projects:` key at the end of the file.
+        if text
+            .lines()
+            .any(|l| l.trim_end() == "projects:" || l.starts_with("projects:"))
+        {
+            return Err("projects is there but empty or not a list".into());
+        }
+        if !text.is_empty() && !text.ends_with('\n') {
+            text.push('\n');
+        }
+        text.push_str("projects:\n");
+        let pad = if indent_lists { "  " } else { "" };
+        for line in rendered.lines() {
+            text.push_str(pad);
+            text.push_str(line);
+            text.push('\n');
+        }
+        return Ok(());
+    };
+    let pad: String = text[first..].chars().take_while(|c| *c == ' ').collect();
+    let indented: String = rendered.lines().map(|l| format!("{pad}{l}\n")).collect();
+    let offset = match at {
+        Some(i) => projects[i].1,
+        // After the last item: the end of its last line, which is the start of
+        // the next line indented no deeper than the list (or the file's end).
+        None => {
+            let last = projects[projects.len() - 1].1;
+            let mut offset = text.len();
+            let mut cursor = text[last..].find('\n').map_or(text.len(), |n| last + n + 1);
+            while cursor < text.len() {
+                let line = &text[cursor..];
+                let line_end = line.find('\n').map_or(text.len(), |n| cursor + n + 1);
+                let content = &text[cursor..line_end];
+                let depth = content.chars().take_while(|c| *c == ' ').count();
+                if !content.trim().is_empty() && depth <= pad.len() {
+                    offset = cursor;
+                    break;
+                }
+                cursor = line_end;
+            }
+            if offset == text.len() && !text.ends_with('\n') {
+                text.push('\n');
+                offset = text.len();
+            }
+            offset
+        }
+    };
+    text.insert_str(offset, &indented);
+    Ok(())
 }
 
 /// Whether the file indents a list under its key (`projects:` then

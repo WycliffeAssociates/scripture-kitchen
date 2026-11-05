@@ -138,10 +138,11 @@ pub struct YamlRead {
 
 /// YAML text → its first non-empty document as a [`Node`].
 ///
-/// Mappings come back in key order (YAML's own reading sorts them, which
-/// doesn't matter for a manifest's fields; lists keep their order). A
-/// scalar's type is YAML 1.2's: `01` is a number, `2025-10-06` and `yes`
-/// are text.
+/// Read from yaml-edit's lossless syntax tree directly, so a mapping keeps
+/// the file's key order. A scalar's type is YAML 1.2's: `01` is a number,
+/// `2025-10-06` and `yes` are text. An alias reads as null (manifests don't
+/// use anchors); a key written twice keeps both, and [`Node::get`] answers
+/// with the later.
 pub fn from_yaml(text: &str) -> Result<YamlRead, String> {
     use std::str::FromStr;
     let file = yaml_edit::YamlFile::from_str(text).map_err(|e| e.to_string())?;
@@ -152,8 +153,15 @@ pub fn from_yaml(text: &str) -> Result<YamlRead, String> {
         if first.is_some() {
             continue;
         }
-        let value = yaml_edit::YamlValue::from_document(&doc).map_err(|e| e.to_string())?;
-        let node = from_yaml_value(&value);
+        let node = if let Some(m) = doc.as_mapping() {
+            from_yaml_node(&yaml_edit::YamlNode::Mapping(m))
+        } else if let Some(s) = doc.as_sequence() {
+            from_yaml_node(&yaml_edit::YamlNode::Sequence(s))
+        } else if let Some(s) = doc.as_scalar() {
+            from_yaml_node(&yaml_edit::YamlNode::Scalar(s))
+        } else {
+            Node::Null
+        };
         if node != Node::Null {
             first = Some(node);
         }
@@ -164,34 +172,45 @@ pub fn from_yaml(text: &str) -> Result<YamlRead, String> {
     })
 }
 
-fn from_yaml_value(value: &yaml_edit::YamlValue) -> Node {
-    use yaml_edit::{ScalarType, YamlValue};
-    match value {
-        YamlValue::Scalar(scalar) => {
-            let text = scalar.value();
-            match scalar.scalar_type() {
+fn from_yaml_node(node: &yaml_edit::YamlNode) -> Node {
+    use yaml_edit::{ScalarType, ScalarValue, YamlNode};
+    match node {
+        YamlNode::Scalar(scalar) => {
+            let value = ScalarValue::from_scalar(scalar);
+            let text = value.value();
+            match value.scalar_type() {
                 ScalarType::Null => Node::Null,
-                ScalarType::Boolean => scalar
+                ScalarType::Boolean => value
                     .to_bool()
                     .map_or_else(|| Node::String(text.to_owned()), Node::Bool),
                 ScalarType::Integer | ScalarType::Float => Node::Number(text.to_owned()),
                 _ => Node::String(text.to_owned()),
             }
         }
-        YamlValue::Sequence(items) => Node::List(items.iter().map(from_yaml_value).collect()),
-        YamlValue::Mapping(map) => Node::Map(
-            map.iter()
-                .map(|(k, v)| (k.clone(), from_yaml_value(v)))
+        YamlNode::Mapping(m) => Node::Map(
+            m.iter()
+                .map(|(k, v)| {
+                    let key = match &k {
+                        YamlNode::Scalar(s) => s.as_string(),
+                        other => other.to_string(),
+                    };
+                    (key, from_yaml_node(&v))
+                })
                 .collect(),
         ),
-        YamlValue::OrderedMapping(pairs) | YamlValue::Pairs(pairs) => Node::Map(
-            pairs
-                .iter()
-                .map(|(k, v)| (k.clone(), from_yaml_value(v)))
-                .collect(),
-        ),
-        YamlValue::Set(items) => Node::List(items.iter().cloned().map(Node::String).collect()),
-        YamlValue::Tagged(_, inner) => from_yaml_value(inner),
+        YamlNode::Sequence(s) => Node::List(s.values().map(|v| from_yaml_node(&v)).collect()),
+        YamlNode::Alias(_) => Node::Null,
+        YamlNode::TaggedNode(t) => {
+            if let Some(m) = t.as_mapping() {
+                from_yaml_node(&YamlNode::Mapping(m))
+            } else if let Some(s) = t.as_sequence() {
+                from_yaml_node(&YamlNode::Sequence(s))
+            } else if let Some(s) = t.value() {
+                from_yaml_node(&YamlNode::Scalar(s))
+            } else {
+                Node::Null
+            }
+        }
     }
 }
 

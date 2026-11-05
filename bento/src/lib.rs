@@ -30,12 +30,16 @@ pub mod bttwriter;
 pub mod burrito;
 mod check;
 mod edit;
+#[cfg(any(feature = "wasm", test))]
+mod js;
 mod kind;
 mod lenient;
 mod md5;
 pub mod rc;
 mod related;
 pub mod tree;
+#[cfg(feature = "wasm")]
+pub mod wasm;
 mod write;
 
 use std::collections::BTreeMap;
@@ -323,12 +327,17 @@ pub fn read(name: &str, bytes: &[u8]) -> Read {
 
 /// Read a manifest's bytes as `format`. A leading byte order mark is skipped.
 pub fn read_as(format: Format, bytes: &[u8]) -> Read {
+    read_with_document(format, bytes).0
+}
+
+/// [`read_as`], and the file's own value, parsed (for `detail.document` in TS).
+pub(crate) fn read_with_document(format: Format, bytes: &[u8]) -> (Read, Option<tree::Node>) {
     let bytes = without_bom(bytes);
     let mut findings = Vec::new();
     let node = match format {
         Format::Rc => {
             let Ok(text) = std::str::from_utf8(bytes) else {
-                return unreadable("The manifest isn't UTF-8 text.".into());
+                return (unreadable("The manifest isn't UTF-8 text.".into()), None);
             };
             match tree::from_yaml(text) {
                 Ok(read) => {
@@ -342,16 +351,19 @@ pub fn read_as(format: Format, bytes: &[u8]) -> Read {
                     }
                     read.node
                 }
-                Err(why) => return unreadable(format!("The manifest isn't YAML: {why}")),
+                Err(why) => return (unreadable(format!("The manifest isn't YAML: {why}")), None),
             }
         }
         Format::Burrito | Format::BttWriter => match tree::from_json(bytes) {
             Ok(node) => node,
-            Err(why) => return unreadable(format!("The manifest isn't JSON: {why}")),
+            Err(why) => return (unreadable(format!("The manifest isn't JSON: {why}")), None),
         },
     };
     if !matches!(node, tree::Node::Map(_)) {
-        return unreadable(format!("The manifest is {}, not an object.", node.kind()));
+        return (
+            unreadable(format!("The manifest is {}, not an object.", node.kind())),
+            None,
+        );
     }
     let mut reader = lenient::Reader::new(findings);
     let (manifest, detail) = match format {
@@ -370,11 +382,14 @@ pub fn read_as(format: Format, bytes: &[u8]) -> Read {
     };
     let mut findings = reader.into_findings();
     check::manifest_only(&manifest, &detail, &mut findings);
-    Read {
-        manifest: Some(manifest),
-        detail: Some(detail),
-        findings,
-    }
+    (
+        Read {
+            manifest: Some(manifest),
+            detail: Some(detail),
+            findings,
+        },
+        Some(node),
+    )
 }
 
 fn unreadable(message: String) -> Read {

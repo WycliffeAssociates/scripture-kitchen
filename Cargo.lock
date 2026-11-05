@@ -89,10 +89,12 @@ name = "bento"
 version = "0.1.20"
 dependencies = [
  "canon",
+ "js-sys",
  "jsonschema",
  "mise",
  "serde",
  "serde_json",
+ "wasm-bindgen",
  "yaml-edit",
 ]
 
