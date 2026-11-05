@@ -24,6 +24,33 @@
 //!
 //! Nothing is committed on top: [`Replayed::head`] is the last save. A
 //! manifest, an assembly commit or a merge is the caller's.
+//!
+//! # Threads are the caller's
+//!
+//! Replay is one sequential line (each commit names the one before), and it
+//! runs once per migration, so this crate starts no threads. What does
+//! parallelize is reading: each book's history is independent. A native
+//! caller with many books can read them on its own threads, one source per
+//! thread, and hand the results to `replay`:
+//!
+//! ```ignore
+//! use rayon::prelude::*;
+//!
+//! let histories = repos
+//!     .par_iter()
+//!     .map(|(path, source)| {
+//!         let repo = git2::Repository::open_bare(path)?;
+//!         let head = repo.head()?.peel_to_commit()?.id().into();
+//!         let mut objects = bttwriter::Git2Source::new(repo.odb()?);
+//!         Ok(bttwriter::read_history(&mut objects, head, &[], source)?)
+//!     })
+//!     .collect::<Result<Vec<_>, Box<dyn std::error::Error + Send + Sync>>>()?;
+//! let replayed = bttwriter::replay(&histories, &ReplayOptions { now, deltas: true })?;
+//! ```
+//!
+//! Measured on four books (1,484 commits), rendering is about a quarter of
+//! replay's time and packing the rest, so threads inside replay would save
+//! little.
 
 use std::collections::BTreeMap;
 
