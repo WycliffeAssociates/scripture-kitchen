@@ -341,23 +341,25 @@ impl HistoryWalk {
         let empty = Vec::new();
         let before = pair.before.map_or(&empty, |id| &self.trees[&id]);
         let after = pair.after.map_or(&empty, |id| &self.trees[&id]);
-        let find = |entries: &'_ [TreeEntry], name: &str| -> Option<(EntryKind, ObjectId)> {
-            entries
-                .iter()
-                .find(|e| e.name == name)
-                .map(|e| (e.kind, e.id))
-        };
-        let same = |name: &str| {
-            let was = before.iter().find(|e| e.name == name);
-            let now = after.iter().find(|e| e.name == name);
-            match (was, now) {
-                (Some(a), Some(b)) => a.id == b.id && a.mode == b.mode,
-                _ => false,
+        // By name, so a folder of many entries diffs in linear time.
+        fn index_of(entries: &[TreeEntry]) -> FxHashMap<&str, &TreeEntry> {
+            let mut by = FxHashMap::default();
+            for e in entries {
+                by.entry(e.name.as_str()).or_insert(e);
             }
+            by
+        }
+        let (was_by, now_by) = (index_of(before), index_of(after));
+        let find =
+            |by: &FxHashMap<&str, &TreeEntry>, name: &str| by.get(name).map(|e| (e.kind, e.id));
+        let same = |name: &str| match (was_by.get(name), now_by.get(name)) {
+            (Some(a), Some(b)) => a.id == b.id && a.mode == b.mode,
+            _ => false,
         };
         let mut names: Vec<&str> = before.iter().map(|e| e.name.as_str()).collect();
+        let mut seen: FxHashSet<&str> = names.iter().copied().collect();
         for entry in after {
-            if !names.contains(&entry.name.as_str()) {
+            if seen.insert(&entry.name) {
                 names.push(&entry.name);
             }
         }
@@ -367,8 +369,8 @@ impl HistoryWalk {
             if same(name) {
                 continue;
             }
-            let was = find(before, name);
-            let now = find(after, name);
+            let was = find(&was_by, name);
+            let now = find(&now_by, name);
             let path = format!("{}{name}", pair.prefix);
             let tree_of = |side: Option<(EntryKind, ObjectId)>| {
                 side.filter(|(kind, _)| *kind == EntryKind::Tree)
@@ -401,7 +403,7 @@ impl HistoryWalk {
             }
         }
         if pair.prefix.is_empty() && pair.save + 1 == self.line.len() {
-            self.manifest = find(after, "manifest.json")
+            self.manifest = find(&now_by, "manifest.json")
                 .filter(|(kind, _)| *kind == EntryKind::File)
                 .map(|(_, id)| id);
         }
