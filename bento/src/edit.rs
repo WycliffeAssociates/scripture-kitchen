@@ -199,10 +199,7 @@ fn edit_burrito(
                     .collect::<Vec<_>>()
                     .into_iter(),
             );
-            let name = Node::map([(
-                "short",
-                Node::map([(tag.as_str(), Node::text(&p.book.title))]),
-            )]);
+            let name = Node::map([("short", crate::write::named(&tag, &p.book.title))]);
             insert_at(names, at, code, name);
         }
     }

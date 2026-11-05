@@ -106,6 +106,17 @@ fn a_created_burrito_passes_the_forks_schema_and_reads_back_clean() {
     assert_eq!(r.findings, [], "{:#?}", r.findings);
     let m = r.manifest.unwrap();
     assert_eq!(m.id.as_deref(), Some("Tech_Advance/tpi_reg"));
+    // `en` is the default locale, and every name carries it beside the project's own tag.
+    let both =
+        |t: &str| bento::LocalizedText::from([("en".into(), t.into()), ("tpi".into(), t.into())]);
+    assert_eq!(m.name, both("Baibel"));
+    assert_eq!(m.abbreviation, both("reg"));
+    assert_eq!(m.language.name, both("Tok Pisin"));
+    assert_eq!(m.books[0].title, both("Matyu"));
+    let Some(bento::Detail::Burrito(doc)) = read("metadata.json", metadata).detail else {
+        panic!()
+    };
+    assert_eq!(doc.meta.default_locale.as_deref(), Some("en"));
     let books: Vec<String> = m.books.iter().map(|b| b.book.to_string()).collect();
     assert_eq!(
         books,

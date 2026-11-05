@@ -5,6 +5,7 @@
 //!   → [("metadata.json", …), ("manifest.yaml", …)]
 //!
 //!   order, sort, file names, categories   from canon: MAT is 41-MAT.usfm, sort 40
+//!   names                                 under "en" and the project's tag; defaultLocale "en"
 //!   identification.primary                {"wacs": {"Tech_Advance/tpi_reg": {"revision": "latest", "timestamp": "2026-11-05"}}}
 //!   relationships                         wacs::WA-Catalog/en_ulb
 //!   checksums                             md5 and size of each book's bytes
@@ -221,6 +222,18 @@ fn text(s: &str) -> Node {
     Node::text(s)
 }
 
+/// A name under `en` and under the project's own tag (once, when the tag is
+/// `en`). WA's fork requires an `en` name for a language, and `defaultLocale`
+/// is `en`, which upstream says every name field must carry (Will,
+/// 2026-11-05: `en` stays the default locale, the project's own tag beside it).
+pub(crate) fn named(tag: &str, s: &str) -> Node {
+    Node::map(
+        [("en", text(s))]
+            .into_iter()
+            .chain((tag != "en").then(|| (tag, text(s)))),
+    )
+}
+
 fn localized(tag: &str, s: &str) -> Node {
     Node::map([(tag, text(s))])
 }
@@ -262,7 +275,7 @@ fn burrito(p: &NewBibleProject, placed: &[Placed<'_>], date: &str) -> Node {
                         ("softwareVersion", text(&p.generator.1)),
                     ]),
                 ),
-                ("defaultLocale", text(tag)),
+                ("defaultLocale", text("en")),
                 ("dateCreated", text(&p.created_at)),
             ]),
         ),
@@ -282,8 +295,8 @@ fn burrito(p: &NewBibleProject, placed: &[Placed<'_>], date: &str) -> Node {
         (
             "identification",
             Node::map([
-                ("name", localized(tag, &p.title)),
-                ("abbreviation", localized(tag, &p.abbreviation)),
+                ("name", named(tag, &p.title)),
+                ("abbreviation", named(tag, &p.abbreviation)),
                 (
                     "primary",
                     Node::map([(
@@ -338,15 +351,7 @@ fn burrito(p: &NewBibleProject, placed: &[Placed<'_>], date: &str) -> Node {
             "languages",
             Node::List(vec![Node::map([
                 ("tag", text(tag)),
-                // The fork requires an `en` name; Sefer writes the same name under both.
-                (
-                    "name",
-                    Node::map(
-                        [("en", text(&p.language.name))]
-                            .into_iter()
-                            .chain((tag != "en").then(|| (tag, text(&p.language.name)))),
-                    ),
-                ),
+                ("name", named(tag, &p.language.name)),
                 ("scriptDirection", text(direction(p.language.direction))),
             ])]),
         ),
@@ -359,7 +364,7 @@ fn burrito(p: &NewBibleProject, placed: &[Placed<'_>], date: &str) -> Node {
             Node::map(placed.iter().map(|b| {
                 (
                     b.book.book.to_string(),
-                    Node::map([("short", localized(tag, &b.book.title))]),
+                    Node::map([("short", named(tag, &b.book.title))]),
                 )
             })),
         ),

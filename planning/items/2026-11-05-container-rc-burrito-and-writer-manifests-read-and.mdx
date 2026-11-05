@@ -545,11 +545,12 @@ Step 4 measures it again inside the real module, with `wasm-opt`.
 - **Checksums** update only an ingredient's md5 and size lines, and return no file when
   nothing changed; a path with no ingredient is a finding.
 - **What the Burrito says, decided here** (not settled earlier; say if any should change):
-  - `identification.name` and `abbreviation` are keyed by the project's language tag, and
-    `meta.defaultLocale` is that tag. Sefer keys them `en`, though the text is in the
-    project's language.
-  - A language's `name` is written under `en` and under its own tag, because the fork
-    requires an `en` name (the schema test caught it). Sefer does the same.
+  - `meta.defaultLocale` is `en`, and every name (`identification.name`, `abbreviation`,
+    the language's name, each book's `localizedNames` short name) is written under `en` and
+    under the project's own tag. The fork requires an `en` name for a language (the schema
+    test caught it), and upstream defines `defaultLocale` as the locale every name field
+    carries. Will chose this over keying names by the project's tag alone (2026-11-05):
+    every reader finds `en`, at the cost of the title being filed as English too.
   - `copyright` is one short statement with no `lang`.
   - `idAuthorities` and `primary` use `wacs`; relationships are `wacs::WA-Catalog/en_ulb`.
 - **The RC**: `sort` is the book's place in the chosen canon's list (MAT 40; with the
