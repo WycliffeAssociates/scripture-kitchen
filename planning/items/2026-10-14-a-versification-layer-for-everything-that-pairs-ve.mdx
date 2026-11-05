@@ -2,12 +2,12 @@
 id: dbe7dbed-9eed-4a79-8d80-28085fcb30f3
 title: "A versification layer for everything that pairs verses"
 kind: idea
-status: idea
+status: done
 created: 2026-10-14
-updated: 2026-10-21
+updated: 2026-11-05
 sha: 32bf2df
 tags: [versification, galley, sous, pairing]
-related: [7a6073fc-21b5-4f86-aa7b-c5c320b71692]
+related: [7a6073fc-21b5-4f86-aa7b-c5c320b71692, 1da22c7f-fb35-4432-b867-3b66a218bcea, 5851d89e-0a5b-426d-ad10-33c46b26bc7d]
 source: comment on the pairing plan, 2026-10-14
 ---
 
@@ -15,6 +15,12 @@ Will, on the pairing plan's versification question:
 
 > Probably should have this layer of versification in the call stack for this. Probably should
 > in sous/gallye too for anything that gets paired tbh.
+
+**Built (2026-11-05)** by the canon and versification plan (1da22c7f), one difference
+from the sketch below: rather than mapping each side to `org` keys at ingest, units are
+the connected groups of rows across a crosswalk between the two declared schemes
+(`pair_keys_across`), so a merge or split is one unit and a missing verse is reported in the
+target's own numbering. What follows is the idea as written.
 
 Today a target and its source pair by their own book, chapter and verse numbers.
 `sous_core::alignment::align` matches keys as written, and unpaired rows become alignment
@@ -42,8 +48,8 @@ galley: a target book and a source book are both registered
 - Mapping happens once per side, at ingest. Every pairing consumer (sous and pairing alike)
   reads org keys, and only the display maps back.
 
-<Question id="data-license">The Copenhagen Alliance versification data is CC BY-SA 4.0 (built on STEPBible TVTMS, CC BY). Does share-alike fit `mise`, which every package ships? If not, the tables are a separate asset like pairing's data packs, and the mapping code stays in the workspace.</Question>
+<Question id="data-license" answer="Built (2026-11-05): the data lives in its own crate, canon, not mise. canon carries the CC BY-SA files and its NOTICE, and mise stays free of them.">The Copenhagen Alliance versification data is CC BY-SA 4.0 (built on STEPBible TVTMS, CC BY). Does share-alike fit `mise`, which every package ships? If not, the tables are a separate asset like pairing's data packs, and the mapping code stays in the workspace.</Question>
 
-<Question id="home">`mise` (beside `BookKey` and book order, if the tables count as standard-derived data) or galley (since only pairing consumers need it)? The `mise` scope rule allows standard-derived tables, but not their generator.</Question>
+<Question id="home" answer="Neither: a new crate, canon, beside mise. galley builds the crosswalk from it, and sous-core takes a Crosswalk trait and knows no scheme.">`mise` (beside `BookKey` and book order, if the tables count as standard-derived data) or galley (since only pairing consumers need it)? The `mise` scope rule allows standard-derived tables, but not their generator.</Question>
 
-<Question id="who-first">Is this a prerequisite for pairing v1, or does pairing ship first with "both sides already share a versification" as a stated precondition, the way sous runs today?</Question>
+<Question id="who-first" answer="Sous pairs across schemes as of 2026-11-05 (pair_keys_across), opt-in by declaration; undeclared books pair as written. The word-alignment pairing engine is not wired yet: the follow-up item 5851d89e lists it.">Is this a prerequisite for pairing v1, or does pairing ship first with "both sides already share a versification" as a stated precondition, the way sous runs today?</Question>

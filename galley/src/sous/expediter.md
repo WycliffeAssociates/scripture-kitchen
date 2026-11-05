@@ -237,6 +237,14 @@ canonically ordered and the choice has to be an order rather than a hash. A
 Target with no Reference gets no ratios and no rows; that is the contract, not
 an error, so a host may declare a source for part of a corpus.
 
+When the Target and its Reference both declare a versification scheme and the
+two differ, step 5 pairs them across the numberings: `Registry::crosswalk`
+builds a `Crosswalk` from canon and `PairedBook::pair_across` pairs through it
+(`sous-chef/core/src/presence.md`, "Across two numberings"). The pairing cache
+key carries the crosswalk's identity, so changing a declaration re-pairs at the
+next publish though neither text moved. With no declaration, or one scheme on
+both sides, it is `pair_with`, unchanged.
+
 Three properties follow, and each is a test:
 
 - **a source change touches no target observation.** Registering, replacing, or

@@ -24,7 +24,8 @@
 //!
 //! canon::sniff(&inventory)                  -> ulb, Decided, on 250 votes (en_ulb)
 //!
-//! Coverage (a text against its scheme) lands here next; the plan is
+//! Coverage (a text against its scheme) is onion's `lint_against_counts`,
+//! given a scheme's counts; galley wires them. The plan was
 //! `planning/items/2026-11-04-canon-and-versification-the-book-table-schemes-map.mdx`.
 
 pub mod books;

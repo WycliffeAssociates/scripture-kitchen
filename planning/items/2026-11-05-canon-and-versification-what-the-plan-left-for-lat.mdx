@@ -14,6 +14,16 @@ source: closing the canon and versification plan, 2026-11-05
 The canon and versification plan is done (steps 1-7). These were left for later on
 purpose, each recorded in that plan where it came up. None blocks anything today.
 
+<Followup id="pairing-engine">
+
+**The word-alignment pairing engine pairs through the crosswalk too.** Sous does today.
+The pairing engine (7a6073fc) isn't on master yet; when it lands, its target-source verse
+pairing should take the same `Crosswalk` galley builds, so an `eng` translation aligns with
+an `org` Hebrew text without the Psalms falling one off (the versification-layer idea,
+dbe7dbed).
+
+</Followup>
+
 <Followup id="names-review">
 
 **Confirm the gateway-language book names.** `canon/data/names/*.tsv` had a first-pass
@@ -54,6 +64,18 @@ either.
 **galley's wasm size.** Step 7a grew it 515 → 606 KB gzipped. Measured: the sniffing
 rules are about 19 KB of that, the mapping rows about 9 KB, and the rest is code. Profile
 the code before packing the rules (which would win back perhaps 10–15 KB).
+
+</Followup>
+
+<Followup id="review-nits">
+
+**Two nits from the second review (2026-11-05), left as they are.**
+- `sniff`'s `Decided` test counts the rules the winner sat out (`fits == 0`) in its
+  denominator. Its dissent rate is therefore measured against slightly more votes than it
+  actually cast. This doesn't matter at today's margins (250 to 0 on en_ulb).
+- `SchemeBuilder` doesn't refuse overlapping rows; they quietly become a `Split`. The
+  built-in `lxx` has one pair (`DAG 5:1-30` and `DAG 5:1-31`). `map` no longer answers with
+  the phantom 5:31, but a builder check would stop a project from defining such rows.
 
 </Followup>
 

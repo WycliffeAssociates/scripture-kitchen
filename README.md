@@ -8,7 +8,7 @@ exports, plus a JS doorway over the same code.
 | `usfm_onion` | `onion/` | the engine — no JS, no wasm, no serde in `src/` |
 | `onion-wasm` | `onion-wasm/` | the `#[wasm_bindgen]` doorway and the UTF-16 walls |
 | `usfm_galley` | `galley/` | the workflows layer: chunk memoization, checksums |
-| `canon` | `canon/` | book identity: the USFM book table, its lookups, and (to come) versification; also plain TypeScript at `./canon` |
+| `canon` | `canon/` | book identity and numbering: the USFM book table, book names in 32 gateway languages, versification schemes, mapping and sniffing; the table, names and counts also as plain TypeScript at `./canon` |
 
 `onion/src/bin/playground.rs` drives the engine over a corpus for profiling and
 for the `debug/` eyeball dumps; `onion/src/bin/codegen.rs` regenerates the

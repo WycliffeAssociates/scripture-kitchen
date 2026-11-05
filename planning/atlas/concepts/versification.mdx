@@ -1,0 +1,55 @@
+---
+term: Versification
+slug: versification
+aliases: [scheme, org, sniff, crosswalk, verse mapping]
+kind: concept
+crate: canon
+files: [canon/src/scheme.rs, canon/src/map.rs, canon/src/sniff.rs, onion/src/lint/versification.rs, galley/src/versification.rs, sous-chef/core/src/presence.md]
+related: [canon, galley, expediter, lint, toc, sous-core, overlay]
+level: 2
+summary: "Which verses a book should have under a numbering tradition, where a verse is under another, and pairing a target and its source across two of them."
+---
+
+## The problem
+
+A Psalm title is verse 1 in Hebrew numbering and a `\d` line in English, so every verse after it is one off. A translation and its source that number differently pair each verse with its neighbour, and Sous reports verses missing that are not.
+
+## The solution
+
+A **scheme** says how many verses each chapter has and how its verses map to `org`, the pivot (BHS for the OT, UBS/NA for the NT). The built-ins are the Copenhagen Alliance's `org`, `eng`, `lxx`, `vul`, `rsc`, `rso`, plus `ulb`, measured from en_ulb. A project can define its own. Each registered book declares a scheme, or follows its source's. Nothing is remapped on a guess: **sniffing** suggests a scheme and never applies it.
+
+## Trade-offs
+
+- A declaration is opt-in. Undeclared books pair numbers as written, exactly as before.
+- Sous knows no scheme. galley hands it a crosswalk, and keys its pairing cache on it, so a changed declaration re-pairs without either text changing.
+- The [[overlay]] still pairs numbers as written: its addresses are one shared verse id, and source and target nearly always share a scheme.
+- The sniffing rules add about 19 KB gzipped to galley's wasm, and the mapping rows about 9 KB.
+
+## Show me
+
+```rust
+canon::map(eng, org, GEN 31:55)   // Moved(GEN 32:1)
+canon::map(eng, org, PSA 3:0)     // Moved(PSA 3:1): eng's title slot is org's verse 1
+canon::map(org, eng, PSA 13:6)    // Split([PSA 13:5, PSA 13:6])
+canon::pairs(ulb, org, PSA)       // [PSA 3:0] ↔ [PSA 3:1], [PSA 3:1] ↔ [PSA 3:2], …
+canon::sniff(&inventory)          // ulb, Decided, on 250 votes (en_ulb)
+```
+
+```ts
+galley.update("books/PSA.usfm", text, { versification: "eng" });
+galley.updateReference("ref/PSA.usfm", hebrew, { versification: "org" });
+galley.publish(); // eng 3:1 pairs with org 3:2; org's title verse is no missing verse
+JSON.parse(galley.sniff()); // { best: "ulb", confidence: "decided", … }: a suggestion, never applied
+```
+
+## How it works
+
+- **Verse 0 is the title slot.** `\d` before a chapter's first verse is onion's `Toc.titles`, so eng's title and org's verse 1 map to each other.
+- **Mapping goes through `org`.** `map` answers `Same`, `Moved`, `Merged`, `Split` or `Absent`. `pairs` walks a whole book as connected units.
+- **Two lints, once a scheme is known.** `ChapterEndsEarly` and `VerseBeyondScheme` come from onion's `lint_against_counts`, given the scheme's counts. With a source paired, presence owns "missing" instead.
+- **Sniffing votes.** Each TVTMS rule tests a few telling verses. A rule abstains on a defective chapter. A scheme is `Decided` on 20 or more votes with at most 10% dissent.
+- **Pairing across schemes.** When target and source declare different schemes, `pair_keys_across` makes units the connected groups of rows across the crosswalk. A merge or split is one unit, and a missing verse is reported in the target's own numbering ([[code:sous-chef/core/src/presence.md]]).
+
+## Composes with
+
+Data and lookups live in [[canon]]. galley's `versification` module and the [[expediter]] hold declarations and build the crosswalk. Pairing is [[sous-core]]'s `pair_keys_across`. The lints are onion's [[lint]] over the [[toc]]. What is left is the follow-up `planning/items/2026-11-05-canon-and-versification-what-the-plan-left-for-lat.mdx`.

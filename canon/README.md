@@ -70,9 +70,9 @@ change starts as a fixture change.
 The book table is data, and its lookups are a few lines. Shipping them as wasm
 would make every book picker wait on `init()` and hold a handle. So the data
 is generated as TypeScript from the same rows as the Rust, the lookups are
-written once per language, and the shared fixtures keep them in agreement. The
-logic that versification brings next (mapping, coverage, sniffing) is a
-different case: it has one implementation, reached through galley's wasm.
+written once per language, and the shared fixtures keep them in agreement.
+Mapping and sniffing are a different case: they have one implementation,
+reached from JS through galley's wasm.
 
 No serde and no runtime parsing. canon depends on `mise` and nothing else, so
 onion can use it without gaining a dependency.
@@ -132,7 +132,7 @@ the org's CC BY-SA texts) are attributed there too.
 
 A scheme answers "which verses should this book have": `chapters`,
 `last_verse`, `verse_counts` and `excluded`. What a text actually has is its
-own TOC, in onion; comparing the two is coverage (plan step 4).
+own TOC, in onion; comparing the two is coverage, below.
 
 - `org` is the pivot every mapping goes through: BHS for the OT, UBS/NA for the NT.
 - `eng`, `lxx`, `vul`, `rsc`, `rso`: English, Septuagint, Vulgate, and the
