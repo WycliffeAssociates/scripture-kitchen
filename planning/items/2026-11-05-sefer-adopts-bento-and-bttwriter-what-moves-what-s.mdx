@@ -1,0 +1,150 @@
+---
+id: efe4a744-f767-4d0d-b45c-3523ed413692
+title: "Sefer adopts bento and bttwriter: what moves, what Sefer stops maintaining"
+kind: plan
+status: planned
+created: 2026-11-05
+updated: 2026-11-05
+sha: 1fa2b63
+priority: 1
+tags: [sefer, container]
+related: [4c7328e1-1ed5-4272-9d4f-c43c392d8f74, 35e4d72d-1818-42da-a087-93f0881f6741]
+source: conversation 2026-11-05, written for when Sefer switches (the roadmap's "Sefer switches once" gate)
+---
+
+Will, 2026-11-05:
+
+> leave a summary for when we want Sefer to adopt this work and what is no longer on its plate for maintaining
+
+The kitchen side of
+[[code:planning/items/2026-11-05-writer-consolidation-saves-in-one-git-pack-out.mdx|bttwriter]]
+(steps 1–6) and
+[[code:planning/items/2026-11-05-container-rc-burrito-and-writer-manifests-read-and.mdx|bento]]
+(steps 1–4) is built and tested on the `bttwriter` branch (commits `889bdee` … `1fa2b63`). This
+item is the checklist for Sefer's side, written against Sefer `dcca4a2d`. Read the line
+numbers there as pointers, not promises.
+
+## Before Sefer can switch
+
+1. Merge the `bttwriter` branch to master (Will's ok). CI then runs the new jobs for the
+   first time: both conformance tests, the TypeScript check, and the package freshness gate
+   (CI rebuilds `bento/pkg-web` and `bttwriter/pkg-web` and commits them if they moved).
+2. Release a version of `@wycliffeassociates/scripture-kitchen` that carries them (the
+   usual version bump to master; CI tags and publishes).
+3. Bump Sefer's dependency (`package.json` pins `0.1.20` today).
+
+The new imports:
+
+```ts
+// bento: at startup, beside galley (its wasm is 196 KB gzipped)
+import * as bento from "@wycliffeassociates/scripture-kitchen/bento";
+bento.initSync({ module: bytes });   // or await bento.init(url), as galley is started
+
+// bttwriter: lazily, on the migration screen only (163 KB gzipped)
+const bttwriter = await import("@wycliffeassociates/scripture-kitchen/bttwriter");
+await bttwriter.init();
+```
+
+Both are TypeScript over a web-target wasm module, as galley is. Their `.ts` passes
+Sefer's compiler and settings in the kitchen's CI. The wasm files are at
+`…/bento/web/wasm` and `…/bttwriter/web/wasm` for `?url` or `import.meta.resolve`, like
+`…/web/wasm`.
+
+## What moves, file by file
+
+<Files id="sefer-switch">
+```text
+- src/core/migrate/writerHistory.ts    -- all of it (157): readWriterHistory → bttwriter.readHistory(isomorphicGitSource({ git, fs, dir }), { source }); replayWriterHistories → bttwriter.replay / consolidate
+- src/core/git/pack.ts                 -- all of it (308): the pack writer is bttwriter's (PackWriter, inside replay/consolidate)
+- src/platform/web/pack.test.ts        -- all of it (164): the git-accepts-it test lives in the kitchen (bttwriter/tests/pack.rs, replay.rs)
+~ src/core/migrate/writerBook.ts       -- keeps recognizeWriter and readWriterTree (they read the filesystem); drops isWriterTextPath, treeFromFiles, writerBookToUsfm, usfmFileName and its Writer manifest schema (bento reads manifest.json; bttwriter stitches)
+~ src/core/migrate/candidate.ts        -- staging: bttwriter.readHistory; the staged history's project, title, progress and usfm come from the WriterHistory handle
+~ src/core/migrate/assemble.ts         -- assemble: bttwriter.consolidate (pack + idx + head, manifests included); addBooks: bento.edit(existing, { addBooks }) and a merge with the replayed head; withBooks / withProjects (≈405–460) go
+- src/core/resources/burrito.ts        -- all of it (103): bento.read / schemas.burrito
+- src/core/resources/resourceContainer.ts -- all of it (53): bento.read / schemas.rc
+~ src/core/resources/projectMetadata.ts -- (131) fromBurrito / readResourceContainer → bento.read(name, bytes).manifest; keep ProjectMetadata only as an adapter if callers need its shape (see "Shape changes")
+- src/core/resources/writeMetadata.ts  -- all of it (162): burritoText / resourceContainerText / dedupeContributors → bento.createBible
+- src/core/resources/checksum.ts       -- all of it (131): refreshIngredientChecksums → bento.edit(existing, { checksums }); fingerprint → bento.fingerprint
+~ src/core/resources/relationships.ts  -- (170) the from* parsers (≈100 lines) go: bento's Manifest.sources; keep highestVersions, resolveRelatedTexts, catalogueUrl, normaliseRepoUrl (resolution is app policy)
+~ src/core/project/discovery.ts, src/core/admin/projectAdmin.ts, src/core/resources/import.ts, src/core/project/project.ts, src/app/language.ts, src/app/ui/workspace/project.ts
+                                       -- read manifests through bento.find + bento.read (or readOrThrow where a bad manifest should stop)
+~ src/core/resources/kinds/tn/pack.ts  -- reads an RC manifest: bento.read("manifest.yaml", …)
+```
+</Files>
+
+About 1,100 lines leave Sefer outright (`writerHistory.ts`, `pack.ts`, `pack.test.ts`,
+`burrito.ts`, `resourceContainer.ts`, `writeMetadata.ts`, `checksum.ts`), plus most of
+`projectMetadata.ts`, half of `relationships.ts`, the template half of `writerBook.ts`, and
+`withBooks`/`withProjects`.
+
+## What Sefer stops maintaining
+
+- **The Writer template's byte fidelity.** USFM from chunks (`writerBookToUsfm`, JS-trim
+  semantics, title handling) is bttwriter's, pinned to five real projects.
+- **The walk and the pack writer.** First-parent history, shallow roots, tree diffs, SHA-1,
+  deflate, deltas, the idx v2 and its 64-bit offset table. Git itself checks all of it in
+  the kitchen's tests.
+- **Replay.** Interleaving books by time, dropping unchanged saves, commit summaries,
+  trailers, and the hub's bad-clock fix, which Sefer never had. The commit ids are Sefer's
+  own for histories with no bad clock.
+- **Every manifest schema.** Burrito, RC and Writer reading, leniency, health findings, and
+  validity against WA's Burrito fork, with a vendored copy of that schema tested in CI.
+- **Writing and editing manifests.** Order, `sort`, paths and categories from canon;
+  checksums; adding books with minimal diffs. A YAML edit changes only the new entry's
+  lines, in the file's own style.
+- **Keeping two apps in step.** The hub and Sefer call the same code, so a project
+  migrated in Sefer and one consolidated by the hub get the same commits.
+
+What stays Sefer's: reading the filesystem and git (`recognizeWriter`, `readWriterTree`,
+isomorphic-git itself), writing the pack files and refs it's handed, the migration UI and
+form, the assembly commit's words (`closing` in `consolidate`), the resource library and
+kinds (`library.ts`, `kinds/`, `recognize`), and policy on related texts (which version,
+which catalog).
+
+## Behaviour Sefer users will see change
+
+These are deliberate, and each is recorded in the two plans:
+
+- **New projects' `metadata.json` passes WA's fork.** It now has `copyright`, a full ISO
+  `dateCreated`, `generator.softwareVersion`, and `identification.primary` under `wacs`
+  with `revision: "latest"` and a date `timestamp`. `defaultLocale` stays `en`, and every
+  name is written under `en` *and* the project's tag. Relationships are
+  `wacs::WA-Catalog/en_ulb`. Existing projects aren't rewritten: reading reports them under
+  `manifest-valid` as warnings, so they still open through `readOrThrow`.
+- **RC `sort` is canon's place from 1** (MAT 40, as the catalog writes it), where Sefer
+  wrote 0-based. Old manifests keep their numbers. An `addBooks` that lands on an old
+  neighbour's number reports the tie and doesn't renumber.
+- **Saves with an impossible device date** (1970, 2000, the future) get an estimated date
+  between their neighbours and a `Writer-Clock:` trailer. Those commits' ids differ from
+  what Sefer's old replay gave. Every other commit is identical.
+- **Migration's closing commit holds the manifests** (`consolidate`), rather than Sefer
+  writing them in a separate step.
+
+## Shape changes to expect
+
+| Sefer today (`ProjectMetadata`) | bento (`Manifest`) |
+|---|---|
+| `container: "burrito" \| "resourceContainer"` | `format: "burrito" \| "rc" \| "bttwriter"` |
+| `id`: an RC's `identifier` | `id`: a Burrito's primary repo; *undefined for RC*. Use `abbreviation` for an RC's code |
+| `subject`: as written (`textTranslation`, `Bible`) | `kind.subject` is canonical (`Bible`, `Translation Notes`); as written is `kind.flavor` / `kind.declared.subject` |
+| `bookNames: { MAT: LocalizedText }` | `books: [{ book, path, title, sort }]`, in file order |
+| `related` | `sources` (same fields: `relation`, `language`, `resource`, `version`) |
+| `declared: { type, format }` | `kind.declared: { subject, type, format, identifier }` |
+| Effect `Schema` decode failures | `findings` with `check`, `severity`, `at` (a JSON pointer), `message`; or `schemas.*` (Standard Schema v1, usable via `Schema.standardSchemaV1`) |
+
+`createBible` needs what Sefer used to default: `publisher`, `creator`, `rights`,
+`checkingLevel`, `copyright`, `generator { name, version }`, a full ISO `createdAt`, and
+`repository` (the `owner/repo` it will push to). `replay` and `consolidate` *use up* the
+histories passed to them. Read again to replay again.
+
+## Check on the switch
+
+- **Real isomorphic-git driving `readHistory`.** The kitchen's test uses a stand-in with
+  isomorphic-git's two functions, backed by the `git` command. Run Sefer's migration on the
+  five fixture projects and compare heads with `bttwriter/tests/replay.rs`.
+- **A whole Bible's migration time** in the browser (the four-book replay is about 610 ms
+  in wasm under Node; Tawara and an NT haven't been timed).
+- **A project with bad clocks** (Tesaka, Ɓille) through the whole flow: no fixture has one.
+- **Bundle split:** bttwriter's module should load only on the migration screen.
+
+<Followup id="sefer-switch">When Sefer switches: work through "What moves", delete what's listed, run the checks above, and close this item.</Followup>
