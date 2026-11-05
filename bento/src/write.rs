@@ -158,6 +158,7 @@ pub fn create_bible(
     if project.books.is_empty() {
         return Err(CreateError::NoBooks);
     }
+    let project = &trimmed(project);
     let placed = place(&project.books, project.canon)?;
     if !crate::burrito::is_repository_path(&project.repository) {
         return Err(CreateError::Repository(project.repository.clone()));
@@ -183,6 +184,32 @@ pub fn create_bible(
         ));
     }
     Ok(out)
+}
+
+/// The project with its names trimmed: the fork's localized text can't
+/// start or end with space (`trimmedText`), and nor should a name anywhere.
+fn trimmed(p: &NewBibleProject) -> NewBibleProject {
+    NewBibleProject {
+        title: p.title.trim().to_owned(),
+        abbreviation: p.abbreviation.trim().to_owned(),
+        language: NewLanguage {
+            tag: p.language.tag.trim().to_owned(),
+            name: p.language.name.trim().to_owned(),
+            direction: p.language.direction,
+        },
+        books: trimmed_books(&p.books),
+        ..p.clone()
+    }
+}
+
+pub(crate) fn trimmed_books(books: &[NewBook]) -> Vec<NewBook> {
+    books
+        .iter()
+        .map(|b| NewBook {
+            title: b.title.trim().to_owned(),
+            ..b.clone()
+        })
+        .collect()
 }
 
 /// The id a WACS catalog source has as a Burrito relationship.

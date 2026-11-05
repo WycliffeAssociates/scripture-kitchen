@@ -132,6 +132,23 @@ fn a_created_burrito_passes_the_forks_schema_and_reads_back_clean() {
     assert_eq!(doc.dublin_core.issued.as_deref(), Some("2026-11-05"));
 }
 
+// Why: the fork's localized text can't start or end with space; a name
+// typed into a form often does.
+#[test]
+fn names_are_trimmed_so_the_schema_holds() {
+    let mut p = project();
+    p.title = " Baibel ".into();
+    p.language.name = "Tok Pisin\n".into();
+    p.books[0].title = " Rom".into();
+    let files = create_bible(&p, &[Format::Burrito, Format::Rc]).unwrap();
+    assert_eq!(errors(&files[0].1), Vec::<String>::new());
+    assert_eq!(files, files_of(&project()));
+    let added = edit(&files_of(&project()), &add(vec![book(b"MRK", " Mak ")])).unwrap();
+    let mut three = project();
+    three.books.push(book(b"MRK", "Mak"));
+    assert_eq!(added.files[0].1, files_of(&three)[0].1);
+}
+
 #[test]
 fn deuterocanon_books_need_a_canon_that_holds_them() {
     let mut p = project();

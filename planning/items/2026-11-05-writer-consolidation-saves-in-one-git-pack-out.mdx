@@ -482,6 +482,14 @@ this machine (`perf_event_paranoid`), so this is by hand, timing each part alone
 waste in the hub's port (cloning the held map per save) isn't in this one: a deleted
 chunk's old text is the only thing kept for the summary.
 
+Profiled with callgrind after bento step 3 (2026-11-05; valgrind works where perf is
+blocked). The profile is flat: SHA-1 about 30% and deflate about 40% of replay, rendering
+every version about 5%, the walk about 2%, malloc under 1%. callgrind showed `memset` at a
+quarter of instructions, from a new deflate compressor per object; reusing one compressor
+measured *slower* (575 ms against 500 ms), because its `reset` zeroes the same tables by
+hand where a fresh one gets zeroed pages from `calloc`, and callgrind counts every byte of
+a `rep stosb` as an instruction. Left as it is.
+
 <Tradeoff id="parallel" chose="No `parallel` feature yet" cost="The hub renders its books on one thread: about a quarter of replay's time could overlap">Rendering is the only part that parallelizes (packing is one line), and it's a quarter of a replay that's already 7× faster than Sefer's. Reading histories in parallel is the caller's: `read_history` per book is independent, and the hub can `par_iter` it with a `Git2Source` per thread without bttwriter depending on rayon. Worth adding if a whole-Bible consolidation measures slow. (Step 4, 2026-11-05.)</Tradeoff>
 
 ## Where it lives

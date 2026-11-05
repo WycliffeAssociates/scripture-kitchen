@@ -22,7 +22,9 @@ use canon::Canon;
 use mise::books::BookKey;
 
 use crate::tree::{Node, pointer};
-use crate::write::{NewBook, Placed, fingerprint, ingredient, place, rc_project, yaml_list};
+use crate::write::{
+    NewBook, Placed, fingerprint, ingredient, place, rc_project, trimmed_books, yaml_list,
+};
 use crate::{Check, Format, ManifestFinding, Severity, book_of, format_of, without_bom};
 
 /// What to change.
@@ -69,7 +71,8 @@ impl std::error::Error for EditError {}
 /// Apply `change` to each manifest in `existing` (by file name: Burrito and
 /// RC; a BTT Writer manifest is never edited and comes back unchanged).
 pub fn edit(existing: &[(String, Vec<u8>)], change: &Change) -> Result<Edited, EditError> {
-    let placed = place(&change.add_books, change.canon).map_err(EditError::Book)?;
+    let books = trimmed_books(&change.add_books);
+    let placed = place(&books, change.canon).map_err(EditError::Book)?;
     let mut out = Edited {
         files: Vec::new(),
         findings: Vec::new(),
