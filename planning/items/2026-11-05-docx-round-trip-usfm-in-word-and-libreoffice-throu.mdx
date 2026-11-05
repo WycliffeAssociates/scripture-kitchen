@@ -218,7 +218,7 @@ exporter importer path".
 - The wasm module is now 673 KB (263 KB gzipped), up from 413 KB. Probably
   much of that is canon's versification tables; not measured.
 
-<Question id="wasm-size">Is 263 KB gzipped acceptable, or should versification sit behind a feature so a host that never sets it doesn't carry canon's tables? I haven't measured what canon accounts for.</Question>
+<Question id="wasm-size" answer="Fine as it is (Will, 2026-11-05): the module loads once and a CDN caches it.">Is 263 KB gzipped acceptable, or should versification sit behind a feature so a host that never sets it doesn't carry canon's tables? I haven't measured what canon accounts for.</Question>
 
 ## Still open
 
@@ -226,7 +226,7 @@ exporter importer path".
 
 <Question id="rtl" answer="Yes, as recommended (Will, 2026-11-05).">Right-to-left scripts and fonts. The styles need `w:bidi` and `w:rtl` for Arabic or Hebrew script, and a sensible font for the language. bento's manifest already carries `language.direction`. Recommendation: export takes direction and an optional font as options, the host passes them from the manifest, and the import ignores both.</Question>
 
-<Followup id="word-check">Check in real Word what was only measured in LibreOffice: custom style names kept, style ids possibly rewritten, `usfm.*` custom properties kept.</Followup>
+<Followup id="word-check" due="2026-12-01">Check in real Word what was only measured in LibreOffice: custom style names kept, style ids possibly rewritten, `usfm.*` custom properties kept. Will has no Word license; needs someone who does. The quickest check: export a book, open and save it in Word, then `cargo run -p docx --example roundtrip_file -- check <book.usfm> <saved.docx>`.</Followup>
 
 ## Where it lives
 
@@ -382,3 +382,7 @@ direct formatting for the rest, so nothing it writes can be read back.
 could call this later.
 
 <Followup id="sefer" done>Tell Sefer how this relates to `packages/document-import` once the curated set is agreed.</Followup>
+
+<Followup id="sefer-switch">In Sefer: `ImportDocumentDialog` reads through `docx.readDocument(bytes).render(settings)` instead of `@sefer/document-import`, offers an export to Word (`exportBook`, `exportBooks`, `template`), and `packages/document-import` is deleted. The types match by design, so the dialog's code should change little.</Followup>
+
+<Followup id="template-by-hand">Will, in LibreOffice: open `docx/template.dotx`, type a few verses picking `USFM …` styles from the list, save, and import. The one path not proved by machine.</Followup>

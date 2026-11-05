@@ -15,8 +15,10 @@
   type-checks these files as its own source, so the compiler is pinned to
   Sefer's and `tsconfig.json` uses Sefer's settings, plus
   `erasableSyntaxOnly` because Node runs them by stripping types. A new
-  shipped `.ts` goes in `tsconfig.json`'s `include`. bento's and bttwriter's
-  `tests/conformance.mjs` run their `.ts` over the built module.
+  shipped `.ts` goes in `tsconfig.json`'s `include`. bento's, bttwriter's and docx's
+  `tests/conformance.mjs` run their `.ts` over the built module. docx's
+  LibreOffice sweep is an example run by hand (`cargo run --release -p docx
+  --example libreoffice`): CI has no LibreOffice.
 - Dev and test profiles are `opt-level = 1`. Debug asserts stay on; the
   corpus sweeps would be minutes at level 0.
 
