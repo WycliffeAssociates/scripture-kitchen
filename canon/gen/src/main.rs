@@ -137,7 +137,10 @@ fn main() -> ExitCode {
             schemes::typescript(&schemes, &schemes_header, json),
         ),
         (sniff_rust_out, rules::rust(&rules, &rules_header)),
-        (fold_rust_out, fold::rust(&fold::table(), &fold_header)),
+        (
+            fold_rust_out,
+            fold::rust(&fold::table(), &fold::classes(), &fold_header),
+        ),
         (names_rust_out, names::rust(&locales, &names_header)),
     ]);
     for (path, body) in &writes {

@@ -8,7 +8,7 @@
 
 use mise::books::BookKey;
 
-use crate::fold_tables::FOLD;
+use crate::fold_tables::{COMBINING, FOLD};
 use crate::tables::{BOOKS, NAMES};
 
 /// One USFM book identifier and what the org needs to know about it.
@@ -160,10 +160,11 @@ pub fn fold(text: &str) -> String {
     for c in text.chars() {
         decompose(c, &mut decomposed);
     }
+    let decomposed = reorder(&decomposed);
     let mut collapsed = String::with_capacity(decomposed.len());
     let mut space = false;
-    for c in decomposed.trim().chars() {
-        if c.is_whitespace() {
+    for c in decomposed.trim_matches(js_space).chars() {
+        if js_space(c) {
             space = true;
             continue;
         }
@@ -185,6 +186,44 @@ pub fn fold(text: &str) -> String {
         }
         _ => out,
     }
+}
+
+/// Whitespace as JavaScript's `trim` and `\s` mean it, so both folds agree:
+/// U+FEFF is one, U+0085 is not. (The other Unicode spaces are U+0020 by now.)
+fn js_space(c: char) -> bool {
+    matches!(
+        c,
+        '\t' | '\n' | '\u{b}' | '\u{c}' | '\r' | ' ' | '\u{a0}' | '\u{1680}' | '\u{2000}'
+            ..='\u{200a}'
+                | '\u{2028}'
+                | '\u{2029}'
+                | '\u{202f}'
+                | '\u{205f}'
+                | '\u{3000}'
+                | '\u{feff}'
+    )
+}
+
+/// NFKD's canonical ordering: each run of combining marks sorted, stably, by
+/// combining class. Arabic writes shadda (33) before fatha (30); NFKD, and so
+/// Sefer, puts fatha first.
+fn reorder(text: &str) -> String {
+    let class = |c: char| {
+        COMBINING
+            .binary_search_by(|(mark, _)| mark.cmp(&c))
+            .map_or(0, |at| COMBINING[at].1)
+    };
+    let mut chars: Vec<(char, u8)> = text.chars().map(|c| (c, class(c))).collect();
+    let mut start = 0;
+    while start < chars.len() {
+        let end = chars[start..]
+            .iter()
+            .position(|(_, class)| *class == 0)
+            .map_or(chars.len(), |len| start + len);
+        chars[start..end].sort_by_key(|(_, class)| *class);
+        start = end + 1;
+    }
+    chars.into_iter().map(|(c, _)| c).collect()
 }
 
 /// One character's NFKD less the combining accents, onto `out`.

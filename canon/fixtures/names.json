@@ -28,6 +28,8 @@
     { "text": "Stat", "locales": ["tpi"], "book": "GEN" },
     { "text": "Jon", "locales": ["tpi"], "book": "JON", "why": "a code wins over a name, in every language: Tok Pisin's John is Jonah here, as in Sefer" },
     { "text": "1 Samuel", "locales": ["ru"], "book": "1SA", "why": "English after the locales" },
-    { "text": "Sang The", "locales": ["vi"], "book": "GEN", "why": "Vietnamese tone marks fold away" }
+    { "text": "Sang The", "locales": ["vi"], "book": "GEN", "why": "Vietnamese tone marks fold away" },
+    { "text": "\u0627\u064e\u0644\u062a\u064e\u0651\u0643\u0652\u0648\u0650\u064a\u0646\u064f", "locales": ["arb"], "book": "GEN", "why": "Genesis as NFC writes it, fatha before shadda: NFKD's ordering of marks, not the order typed" },
+    { "text": "\u0627\u064e\u0644\u062a\u0651\u064e\u0643\u0652\u0648\u0650\u064a\u0646\u064f", "locales": ["arb"], "book": "GEN", "why": "and shadda before fatha, as the source writes it" }
   ]
 }
