@@ -17,9 +17,13 @@
 //! the same bytes Sefer's `writerBook.ts` writes; `fixtures/stitched/` pins
 //! them on five real projects.
 //!
+//! [`pack`] writes git objects into one pack and its index in memory: what a
+//! replayed history becomes, with no git library and no filesystem.
+//!
 //! No I/O: callers hand over each file's path and bytes, read however they
-//! read them (a folder, a git tree).
+//! read them (a folder, a git tree), and write what comes back.
 
+pub mod pack;
 pub mod stitch;
 
 pub use stitch::{
