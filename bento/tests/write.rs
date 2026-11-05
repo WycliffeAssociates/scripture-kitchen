@@ -546,3 +546,81 @@ fn adding_after_the_last_book_and_to_no_list_at_all() {
         "{refused:?}"
     );
 }
+
+fn added(before: &str, code: &[u8; 3], title: &str) -> String {
+    let edited = edit(
+        &[("manifest.yaml".into(), before.as_bytes().to_vec())],
+        &add(vec![book(code, title)]),
+    )
+    .unwrap();
+    String::from_utf8(edited.files[0].1.clone()).unwrap()
+}
+
+fn paths(yaml: &str) -> Vec<(String, String)> {
+    read("manifest.yaml", yaml.as_bytes())
+        .manifest
+        .unwrap()
+        .books
+        .iter()
+        .map(|b| (b.book.to_string(), b.path.clone().unwrap_or_default()))
+        .collect()
+}
+
+// Why: the splice anchors on lines, and three shapes of valid YAML once put
+// the new lines inside another item or another document. Each answer is
+// pinned as text, since bento's own reader forgives what a strict one won't.
+#[test]
+fn the_splice_finds_an_items_dash_its_end_and_the_documents_end() {
+    // A dash alone on its line, its mapping below.
+    let dash = "projects:\n  -\n    identifier: gen\n    title: Genesis\n    path: ./01-GEN.usfm\n";
+    let after = added(dash, b"MRK", "Mak");
+    assert!(after.starts_with(dash), "{after}");
+    assert!(
+        after[dash.len()..].starts_with("  - title: Mak\n"),
+        "{after}"
+    );
+    assert_eq!(
+        paths(&after),
+        [
+            ("GEN".into(), "./01-GEN.usfm".into()),
+            ("MRK".into(), "./42-MRK.usfm".into())
+        ]
+    );
+    // Before it: GEN goes ahead of EXO, so the insert lands on EXO's dash line.
+    let exo = "projects:\n  -\n    identifier: exo\n    path: ./02-EXO.usfm\n";
+    let after = added(exo, b"GEN", "Stat");
+    assert!(after.starts_with("projects:\n  - title: Stat\n"), "{after}");
+    assert!(after.ends_with(&exo["projects:\n".len()..]), "{after}");
+    assert_eq!(paths(&after).len(), 2, "{after}");
+
+    // A comment at column 0 inside the last item doesn't end it.
+    let comment =
+        "projects:\n  - identifier: gen\n# note\n    title: Genesis\n    path: ./01-GEN.usfm\n";
+    let after = added(comment, b"MRK", "Mak");
+    assert!(after.starts_with(comment), "{after}");
+    assert_eq!(paths(&after)[1], ("MRK".into(), "./42-MRK.usfm".into()));
+
+    // Comments and blanks after the list stay after the new item.
+    let trailing =
+        "projects:\n  - identifier: gen\n    path: ./01-GEN.usfm\n\n# the rest\nextra: 1\n";
+    let after = added(trailing, b"MRK", "Mak");
+    assert!(after.ends_with("\n\n# the rest\nextra: 1\n"), "{after}");
+    assert!(
+        after.contains("path: ./01-GEN.usfm\n  - title: Mak\n"),
+        "{after}"
+    );
+
+    // No list, and the document closes with `...`: the list goes inside it.
+    let closed = "dublin_core:\n  identifier: reg\n...\n";
+    let after = added(closed, b"MAT", "Matyu");
+    assert!(
+        after.starts_with("dublin_core:\n  identifier: reg\nprojects:\n"),
+        "{after}"
+    );
+    assert!(after.ends_with("...\n"), "{after}");
+    assert_eq!(paths(&after), [("MAT".into(), "./41-MAT.usfm".into())]);
+    let opened = "---\ndublin_core:\n  identifier: reg\n---\nother: 1\n";
+    let after = added(opened, b"MAT", "Matyu");
+    assert!(after.ends_with("---\nother: 1\n"), "{after}");
+    assert_eq!(paths(&after).len(), 1, "{after}");
+}

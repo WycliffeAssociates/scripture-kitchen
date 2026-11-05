@@ -64,3 +64,25 @@ fn pointers_escape_slashes_and_tildes() {
     );
     assert_eq!(pointer("", "a~b"), "/a~0b");
 }
+
+#[test]
+fn yaml_numbers_json_cant_hold_are_written_as_it_can() {
+    let read = from_yaml(
+        "a: 01\nb: +5\nc: 0x1F\nd: 0o17\ne: 1.\nf: .inf\ng: -.Inf\nh: .NaN\ni: 1.10\nk: 1e5\n",
+    )
+    .unwrap();
+    let json = read.node.to_json();
+    let parsed: serde_json::Value = serde_json::from_str(&json).expect(&json);
+    assert_eq!(
+        parsed,
+        serde_json::json!({
+            "a": 1, "b": 5, "c": 31, "d": 15, "e": 1,
+            "f": ".inf", "g": "-.Inf", "h": ".NaN",
+            "i": 1.10, "k": 1e5,
+        })
+    );
+    assert!(
+        json.contains("\"i\": 1.10"),
+        "valid JSON stays as written: {json}"
+    );
+}

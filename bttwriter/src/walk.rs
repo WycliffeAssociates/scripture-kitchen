@@ -513,7 +513,7 @@ fn parse_signature(text: &str) -> Option<Signature> {
     let zone = rest.next().unwrap_or("+0000");
     let sign = if zone.starts_with('-') { -1 } else { 1 };
     let digits = zone.trim_start_matches(['+', '-']);
-    let offset_minutes = if digits.len() == 4 {
+    let offset_minutes = if digits.len() == 4 && digits.is_ascii() {
         let hours: i32 = digits[..2].parse().ok()?;
         let minutes: i32 = digits[2..].parse().ok()?;
         sign * (hours * 60 + minutes)

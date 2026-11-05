@@ -29,6 +29,10 @@ jobs:
 
       - name: clippy
         run: cargo clippy --all-targets -- -D warnings
+      # bttwriter's libgit2 adapter is off by default, so the pass above never
+      # compiles it.
+      - name: clippy (bttwriter's git2 feature)
+        run: cargo clippy -p bttwriter --all-targets --features git2 -- -D warnings
 
       # onion/Cargo.toml advertises usj/usx/html as compile-time optional, and
       # every other job builds them all ON. Without this, no build in CI ever
@@ -68,6 +72,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup
       - run: cargo test --workspace
+      # The libgit2 adapter and the test that it agrees with the git command.
+      - run: cargo test -p bttwriter --features git2
 
   # The JS side of the wall. Node 24 because conformance.mjs imports reader.ts
   # directly and leans on type stripping — there is no build step by design.

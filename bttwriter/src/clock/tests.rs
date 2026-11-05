@@ -91,6 +91,25 @@ fn an_estimated_committer_lags_at_most_a_minute_and_never_leads() {
 }
 
 #[test]
+fn extreme_device_times_saturate_rather_than_overflow() {
+    let mut low = save(0);
+    low.author.at = i64::MIN;
+    low.committer.at = i64::MAX;
+    let mut neg = save(-5);
+    neg.committer.at = i64::MAX;
+    let saves = [save(GOOD), low, neg, save(GOOD + 1_000)];
+    let c = clocks(&saves, i64::MAX);
+    assert!(author_times(&c).is_sorted());
+    assert!(c[1].author_at > GOOD && c[2].author_at < GOOD + 1_000);
+    assert_eq!(c[1].committer_at - c[1].author_at, 60);
+    // Good saves at i64's ends, with bad ones after and before.
+    let c = clocks(&[save(i64::MAX - 5), save(0)], i64::MAX);
+    assert_eq!(c[1].author_at, i64::MAX - 4);
+    let c = clocks(&[save(0), save(GOOD)], i64::MAX);
+    assert_eq!(c[0].author_at, GOOD - 1);
+}
+
+#[test]
 fn days() {
     assert_eq!(day_of(0), "1970-01-01");
     assert_eq!(day_of(946_684_800), "2000-01-01");

@@ -62,27 +62,34 @@ pub fn clocks(saves: &[Save], latest: i64) -> Vec<Clock> {
         let after = saves.get(end).map(|s| s.author.at);
         let run: Vec<i64> = saves[i..end].iter().map(|s| s.author.at).collect();
         let n = run.len() as i64;
+        // Times are the repo's, so anything i64 holds: saturate, never wrap.
         let times: Vec<i64> = match (before, after) {
             (None, None) => return out,
-            (Some(b), None) => (1..=n).map(|k| b + k).collect(),
-            (None, Some(a)) => (0..n).map(|k| a - n + k).collect(),
+            (Some(b), None) => (1..=n).map(|k| b.saturating_add(k)).collect(),
+            (None, Some(a)) => (0..n).map(|k| a.saturating_sub(n - k)).collect(),
             (Some(b), Some(a)) => {
-                let shift = a - 1 - run[run.len() - 1];
-                let kept: Vec<i64> = run.iter().map(|t| t + shift).collect();
-                if kept.is_sorted() && kept[0] > b {
-                    kept
-                } else {
+                let kept: Option<Vec<i64>> = a
+                    .saturating_sub(1)
+                    .checked_sub(run[run.len() - 1])
+                    .and_then(|shift| run.iter().map(|t| t.checked_add(shift)).collect());
+                match kept {
+                    Some(kept) if kept.is_sorted() && kept[0] > b => kept,
                     // Evenly between the two good saves, never before the first.
-                    let gap = (a - b).max(0);
-                    (1..=n).map(|k| b + gap * k / (n + 1)).collect()
+                    _ => {
+                        let gap = (i128::from(a) - i128::from(b)).max(0);
+                        let n = i128::from(n);
+                        (1..=n)
+                            .map(|k| (i128::from(b) + gap * k / (n + 1)) as i64)
+                            .collect()
+                    }
                 }
             }
         };
         for ((clock, save), at) in out[i..end].iter_mut().zip(&saves[i..end]).zip(times) {
-            let lag = save.committer.at - save.author.at;
+            let lag = save.committer.at.saturating_sub(save.author.at);
             *clock = Clock {
                 author_at: at,
-                committer_at: at + lag.clamp(0, 60),
+                committer_at: at.saturating_add(lag.clamp(0, 60)),
                 device_at: Some(save.author.at),
             };
         }

@@ -404,6 +404,13 @@ fn signatures_parse_as_git_writes_them() {
     assert_eq!(sig.name, "");
     assert_eq!(parse_signature("no email 5 +0000"), None);
     assert_eq!(parse_signature("a <b> notanumber +0000"), None);
+    // A zone four bytes long but not four characters: no zone, not a panic.
+    assert_eq!(
+        parse_signature("A <a@b> 1700000000 +0\u{e9}0")
+            .unwrap()
+            .offset_minutes,
+        0
+    );
     // Round trip with the writer's Display.
     let written = Signature {
         name: "x".into(),

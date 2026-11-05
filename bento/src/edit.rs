@@ -333,8 +333,16 @@ fn projects(text: &str) -> Result<Vec<(Option<BookKey>, usize)>, String> {
                 },
                 _ => None,
             };
+            // The item's line is its dash's, which may stand alone above
+            // the item's first key (`-` then `    identifier: gen`).
             let start = item.byte_range().start as usize;
-            (book, text[..start].rfind('\n').map_or(0, |n| n + 1))
+            let before = text[..start].trim_end_matches([' ', '\t', '\r', '\n']);
+            let dash = if before.ends_with('-') {
+                before.len() - 1
+            } else {
+                start
+            };
+            (book, text[..dash].rfind('\n').map_or(0, |n| n + 1))
         })
         .collect())
 }
@@ -358,38 +366,67 @@ fn splice_project(
         {
             return Err("projects is there but empty or not a list".into());
         }
-        if !text.is_empty() && !text.ends_with('\n') {
-            text.push('\n');
+        // At the end of the first document: before a `...` or `---` that
+        // closes it, else the file's end.
+        let mut end = text.len();
+        let mut seen = false;
+        let mut cursor = 0;
+        for line in text.split_inclusive('\n') {
+            let bare = line.trim_end();
+            let marker = bare == "..." || bare == "---" || bare.starts_with("--- ");
+            if marker && (seen || bare == "...") {
+                end = cursor;
+                break;
+            }
+            seen |= !marker && !bare.trim_start().is_empty() && !bare.trim_start().starts_with('#');
+            cursor += line.len();
         }
-        text.push_str("projects:\n");
+        let mut block = String::new();
+        if end == text.len() && !text.is_empty() && !text.ends_with('\n') {
+            block.push('\n');
+        }
+        block.push_str("projects:\n");
         let pad = if indent_lists { "  " } else { "" };
         for line in rendered.lines() {
-            text.push_str(pad);
-            text.push_str(line);
-            text.push('\n');
+            block.push_str(pad);
+            block.push_str(line);
+            block.push('\n');
         }
+        text.insert_str(end, &block);
         return Ok(());
     };
     let pad: String = text[first..].chars().take_while(|c| *c == ' ').collect();
     let indented: String = rendered.lines().map(|l| format!("{pad}{l}\n")).collect();
     let offset = match at {
         Some(i) => projects[i].1,
-        // After the last item: the end of its last line, which is the start of
-        // the next line indented no deeper than the list (or the file's end).
+        // After the last item: the end of its last line, which is where the
+        // next line indented no deeper than the list starts (or the file
+        // ends). Blank and comment lines don't end the item, since a comment
+        // may sit at any indent inside it; a run of them just before the end
+        // stays after the new item.
         None => {
             let last = projects[projects.len() - 1].1;
             let mut offset = text.len();
             let mut cursor = text[last..].find('\n').map_or(text.len(), |n| last + n + 1);
+            let mut quiet: Option<usize> = None;
             while cursor < text.len() {
                 let line = &text[cursor..];
                 let line_end = line.find('\n').map_or(text.len(), |n| cursor + n + 1);
                 let content = &text[cursor..line_end];
                 let depth = content.chars().take_while(|c| *c == ' ').count();
-                if !content.trim().is_empty() && depth <= pad.len() {
-                    offset = cursor;
+                let trimmed = content.trim();
+                if trimmed.is_empty() || trimmed.starts_with('#') {
+                    quiet.get_or_insert(cursor);
+                } else if depth <= pad.len() {
+                    offset = quiet.unwrap_or(cursor);
                     break;
+                } else {
+                    quiet = None;
                 }
                 cursor = line_end;
+            }
+            if offset == text.len() {
+                offset = quiet.unwrap_or(offset);
             }
             if offset == text.len() && !text.ends_with('\n') {
                 text.push('\n');
@@ -413,7 +450,10 @@ fn indents_lists(text: &str) -> bool {
         .collect();
     for pair in lines.windows(2) {
         let (key, item) = (pair[0], pair[1]);
-        if key.trim_end().ends_with(':') && item.trim_start().starts_with("- ") {
+        let item_line = item.trim_start();
+        if key.trim_end().ends_with(':')
+            && (item_line.starts_with("- ") || item_line.trim_end() == "-")
+        {
             let indent = |l: &str| l.len() - l.trim_start().len();
             return indent(item) > indent(key);
         }

@@ -39,7 +39,12 @@ pub fn git(dir: &Path, args: &[&str]) -> String {
 pub fn clone(repo: &str) -> PathBuf {
     let bundle = fixtures().join("repos").join(format!("{repo}.bundle"));
     assert!(bundle.is_file(), "missing {}", bundle.display());
-    let dir = std::env::temp_dir().join(format!("bttwriter-walk-{}-{repo}", std::process::id()));
+    // Unique per call: `cargo test` runs a binary's tests as threads of one
+    // process, and two of them may clone the same repo at once.
+    static CLONES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = CLONES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir =
+        std::env::temp_dir().join(format!("bttwriter-walk-{}-{n}-{repo}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let status = Command::new("git")
         .args(["clone", "--bare", "--quiet"])

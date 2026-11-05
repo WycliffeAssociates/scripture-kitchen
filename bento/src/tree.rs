@@ -3,6 +3,7 @@
 //! ```text
 //! {"b": 1, "a": [true, null]}   →  Map [("b", Number "1"), ("a", List [Bool true, Null])]
 //! sort: 01                      →  Map [("sort", Number "01")]      the number as written
+//!                                   (to_json writes it as JSON can: `1`)
 //! ```
 //!
 //! JSON and YAML both read into [`Node`], so one set of lenient readers serves
@@ -265,7 +266,7 @@ fn write_json(node: &Node, depth: usize, out: &mut String) {
     match node {
         Node::Null => out.push_str("null"),
         Node::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
-        Node::Number(n) => out.push_str(n),
+        Node::Number(n) => json_number(n, out),
         Node::String(s) => json_string(s, out),
         Node::List(items) if items.is_empty() => out.push_str("[]"),
         Node::List(items) => {
@@ -300,6 +301,78 @@ fn write_json(node: &Node, depth: usize, out: &mut String) {
 
 /// A JSON string as `JSON.stringify` escapes it: quotes, backslashes and
 /// control characters; everything else as itself.
+/// A number as JSON can hold it. One read from JSON already is; YAML writes
+/// numbers JSON can't (`01`, `+5`, `0x1F`, `1.`, `.inf`), which are written
+/// as their value, or as text when they have no finite one.
+fn json_number(text: &str, out: &mut String) {
+    if is_json_number(text) {
+        out.push_str(text);
+        return;
+    }
+    let unsigned = text.strip_prefix('+').unwrap_or(text);
+    let (negative, digits) = match unsigned.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, unsigned),
+    };
+    let radix = |prefix: &str, radix: u32| {
+        digits
+            .strip_prefix(prefix)
+            .and_then(|d| i128::from_str_radix(&d.replace('_', ""), radix).ok())
+    };
+    let integer = radix("0x", 16)
+        .or_else(|| radix("0o", 8))
+        .or_else(|| radix("", 10));
+    if let Some(i) = integer {
+        out.push_str(&if negative { -i } else { i }.to_string());
+        return;
+    }
+    match unsigned.replace('_', "").parse::<f64>() {
+        Ok(f) if f.is_finite() && f.fract() == 0.0 && f.abs() < 9_007_199_254_740_992.0 => {
+            out.push_str(&(f as i64).to_string());
+        }
+        Ok(f) if f.is_finite() => match serde_json::Number::from_f64(f) {
+            Some(n) => out.push_str(&n.to_string()),
+            None => json_string(text, out),
+        },
+        _ => json_string(text, out),
+    }
+}
+
+/// `-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?`
+fn is_json_number(text: &str) -> bool {
+    let b = text.as_bytes();
+    let mut i = usize::from(b.first() == Some(&b'-'));
+    let digits = |i: &mut usize| {
+        let start = *i;
+        while b.get(*i).is_some_and(u8::is_ascii_digit) {
+            *i += 1;
+        }
+        *i - start
+    };
+    let whole = i;
+    match digits(&mut i) {
+        0 => return false,
+        n if n > 1 && b[whole] == b'0' => return false,
+        _ => {}
+    }
+    if b.get(i) == Some(&b'.') {
+        i += 1;
+        if digits(&mut i) == 0 {
+            return false;
+        }
+    }
+    if matches!(b.get(i), Some(b'e' | b'E')) {
+        i += 1;
+        if matches!(b.get(i), Some(b'+' | b'-')) {
+            i += 1;
+        }
+        if digits(&mut i) == 0 {
+            return false;
+        }
+    }
+    i == b.len()
+}
+
 pub(crate) fn json_string(text: &str, out: &mut String) {
     out.push('"');
     for c in text.chars() {
