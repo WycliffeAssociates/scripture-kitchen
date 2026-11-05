@@ -134,12 +134,52 @@ pub struct VerseMember {
     pub to: u16,
 }
 
+/// A chapter's title: a `\d` paragraph ahead of the chapter's first `\v`,
+/// which is scripture (a Psalm's superscription) sitting in verse 0's slot.
+///
+/// ```text
+/// \c 3
+/// \d A psalm of David…    titles = [ chapter 3, at..end ]   locate(at) = "PSA 3"
+/// \q1
+/// \v 1 Yahweh, how…       verses = [ chapter 3, 1..1 ]
+/// ```
+///
+/// Versification schemes that don't number titles (`eng`, `ulb`) call this
+/// slot verse 0, and the ones that do (`org`) call it verse 1; canon's `map`
+/// pairs the two. A `\d` after the chapter's first `\v` is part of that verse
+/// and gets no row, and so does a title written as `\d \v 1 …`, which
+/// numbers itself.
+///
+/// Byte layout — `#[repr(C)]`, 12 bytes, stride 12:
+///
+/// ```text
+/// 0  u32  at       first byte of the `\d` marker
+/// 4  u32  end      the next paragraph, chapter or verse marker, or the
+///                  chapter's end
+/// 8  u16  chapter  the enclosing chapter row's `number`
+/// 10      —        2 bytes of trailing padding
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(C)]
+pub struct TitleRow {
+    pub at: u32,
+    pub end: u32,
+    pub chapter: u16,
+}
+
+impl TitleRow {
+    pub fn span(&self) -> core::ops::Range<u32> {
+        self.at..self.end
+    }
+}
+
 // The layout is internal hygiene, not a versioned wire format — but it is the
 // shape a wasm consumer would read, so the widths are pinned here rather than
 // rediscovered there.
 const _: () = assert!(size_of::<ChapterRow>() == 24);
 const _: () = assert!(size_of::<VerseAnchor>() == 28);
 const _: () = assert!(size_of::<VerseMember>() == 20);
+const _: () = assert!(size_of::<TitleRow>() == 12);
 
 impl ChapterRow {
     pub fn span(&self) -> core::ops::Range<u32> {
@@ -229,6 +269,8 @@ pub struct Toc {
     /// Every verse's members, run after run in `verses` order; a row's
     /// `members_from`/`members_len` name its run.
     pub members: Vec<VerseMember>,
+    /// Every chapter title ([`TitleRow`]), in source order.
+    pub titles: Vec<TitleRow>,
 }
 
 /// Indexes an already-lexed book: the book code, the chapter table, the verse
@@ -254,9 +296,16 @@ pub fn toc(source: &[u8], tokens: &[Token]) -> Toc {
         }],
         verses: Vec::new(),
         members: Vec::new(),
+        titles: Vec::new(),
     };
+    // An open title row, ended by the next marker that starts a paragraph, a
+    // chapter or a verse. `Some(index)` into `out.titles`.
+    let mut open_title: Option<usize> = None;
 
     for (row, token) in tokens.iter().enumerate() {
+        if let TokenKind::Marker { nested: false } = token.kind() {
+            title_bookkeeping(&mut out, &mut open_title, source, token);
+        }
         match token.kind() {
             // No marker lookup needed: `BookCode` belongs to exactly one row,
             // so the first one in the stream IS the first `\id`'s code.
@@ -325,7 +374,56 @@ pub fn toc(source: &[u8], tokens: &[Token]) -> Toc {
     out
 }
 
+/// Ends an open title at the next paragraph, chapter or verse marker, and
+/// opens one at a `\d` that comes before its chapter's first `\v`. Runs
+/// before the marker itself is indexed, so a `\c` closes the previous
+/// chapter's title at its own first byte.
+fn title_bookkeeping(out: &mut Toc, open_title: &mut Option<usize>, source: &[u8], token: &Token) {
+    let kind = generated::kind(token.marker_idx);
+    if !matches!(
+        kind,
+        MarkerKind::Paragraph
+            | MarkerKind::Chapter
+            | MarkerKind::Verse
+            | MarkerKind::Periph
+            | MarkerKind::Sidebar
+            | MarkerKind::TableRow
+    ) {
+        return;
+    }
+    if let Some(at) = open_title.take() {
+        out.titles[at].end = token.start;
+        // `\d \v 1 …` numbers its own title: an empty `\d` is no title.
+        let text = &source[out.titles[at].at as usize + 2..token.start as usize];
+        if text.iter().all(u8::is_ascii_whitespace) {
+            out.titles.truncate(at);
+        }
+    }
+    if !matches!(kind, MarkerKind::Paragraph) || generated::name(token.marker_idx) != "d" {
+        return;
+    }
+    // Front matter (row 0) has no verse 0 to fill.
+    let [_, .., chapter] = out.chapters.as_slice() else {
+        return;
+    };
+    let before_first_verse = out.verses.last().is_none_or(|v| v.at < chapter.start);
+    if before_first_verse {
+        *open_title = Some(out.titles.len());
+        out.titles.push(TitleRow {
+            at: token.start,
+            end: chapter.end,
+            chapter: chapter.number,
+        });
+    }
+}
+
 impl Toc {
+    /// A chapter's titles (usually none or one), in source order. Matches
+    /// chapter rows by `number`, so a reopened chapter's titles all answer.
+    pub fn titles_of(&self, chapter: u16) -> impl Iterator<Item = &TitleRow> + '_ {
+        self.titles.iter().filter(move |row| row.chapter == chapter)
+    }
+
     /// The reference at a source byte. TOTAL: a byte past the end of the
     /// source reports the last chapter rather than nothing, because every
     /// caller of this is labelling a position it already has.
@@ -476,6 +574,48 @@ mod tests {
 
     fn sid(source: &str, at: u32) -> String {
         built(source).locate(at).to_string()
+    }
+
+    /// Each title row as `(chapter, its text)`.
+    fn titles(source: &str) -> Vec<(u16, &str)> {
+        built(source)
+            .titles
+            .iter()
+            .map(|row| (row.chapter, &source[row.at as usize..row.end as usize]))
+            .collect()
+    }
+
+    #[test]
+    fn a_psalm_title_before_verse_one_is_a_title_row() {
+        let source = "\\id PSA\n\\c 3\n\\d A psalm of David.\n\\q1\n\\v 1 Yahweh\n\\c 4\n\\q1\n\\v 1 Answer me\n";
+        assert_eq!(titles(source), [(3, "\\d A psalm of David.\n")]);
+        let toc = built(source);
+        assert_eq!(toc.titles_of(3).count(), 1);
+        assert_eq!(toc.titles_of(4).count(), 0);
+        // The title's bytes locate to the chapter, verse 0: never to verse 1.
+        assert_eq!(sid(source, toc.titles[0].at + 3), "PSA 3");
+    }
+
+    #[test]
+    fn a_title_runs_to_the_chapter_end_when_nothing_follows() {
+        let source = "\\id PSA\n\\c 3\n\\d Selah";
+        assert_eq!(titles(source), [(3, "\\d Selah")]);
+    }
+
+    #[test]
+    fn a_title_closes_at_the_next_chapter() {
+        let source = "\\id PSA\n\\c 3\n\\d A\n\\c 4\n\\d B\n\\v 1 x\n";
+        assert_eq!(titles(source), [(3, "\\d A\n"), (4, "\\d B\n")]);
+    }
+
+    #[test]
+    fn a_d_after_verse_one_or_numbering_itself_is_no_title() {
+        // Habakkuk 3:19's closing note belongs to verse 19.
+        assert!(titles("\\id HAB\n\\c 3\n\\v 1 x\n\\d To the choirmaster\n").is_empty());
+        // A title that numbers itself (org style) is verse 1.
+        assert!(titles("\\id PSA\n\\c 3\n\\d \\v 1 A psalm of David.\n").is_empty());
+        // Front matter has no verse 0.
+        assert!(titles("\\id PSA\n\\d stray\n\\c 1\n\\v 1 x\n").is_empty());
     }
 
     #[test]

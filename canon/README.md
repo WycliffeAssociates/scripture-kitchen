@@ -39,7 +39,7 @@ number" is. Here both are named, and neither is "the" number.
 | `ts/tables.ts`, `ts/scheme-tables.ts` | the same tables for TypeScript | the same run |
 | `src/books.rs`, `src/scheme.rs` | the Rust lookups | by hand |
 | `ts/canon.ts`, `ts/versification.ts` | the TypeScript lookups | by hand |
-| `src/map.rs` | `map`, `to_org`, `from_org`, `moves` (Rust only) | by hand |
+| `src/map.rs` | `map`, `pairs`, `to_org`, `from_org`, `moves` (Rust only) | by hand |
 | `fixtures/books.json`, `fixtures/schemes.json` | the cases both lookups must pass | by hand |
 | `fixtures/map.json` | mapping cases (`tests/map.rs`) | from a prototype, then reviewed |
 
@@ -128,6 +128,13 @@ Hebrew lacks, lands on `org`'s 7:68 beside `eng`'s 7:69, and comes back
   The verse you ask about is always whole.
 - **`moves()`** lists only the verses that differ from `org`, for pairing to
   rewrite just those keys.
+- **`pairs(from, to, book)`** walks a whole book in step across two schemes,
+  like zipping two lists. Each unit is the smallest set of verses on each side
+  that map only to each other: `[PSA 3:0] ↔ [PSA 3:1]` (a title),
+  `[PSA 13:5, PSA 13:6] ↔ [PSA 13:6]` (a merge), `[ACT 19:41] ↔ []`. Word
+  alignment and parallel views iterate these. Every verse on both sides lands
+  in exactly one unit; a test checks that for every pair of schemes and every
+  book.
 - **No guessing.** A verse with no counterpart is `Absent`, never "nearest".
 
 `map` is Rust only for now. It reaches TypeScript through galley's wasm

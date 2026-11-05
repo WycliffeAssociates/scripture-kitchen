@@ -21,6 +21,7 @@
 //! What comes back is exact or says it isn't. It never guesses "nearest".
 
 use core::fmt;
+use std::collections::BTreeSet;
 
 use mise::books::{BookKey, canonical_rank};
 
@@ -236,7 +237,7 @@ fn through_org(from: &Scheme, to: &Scheme, v: Verse) -> Vec<Verse> {
     for o in in_org {
         to.sources_of(o, &mut there);
     }
-    there.sort_by_key(|t| (canonical_rank(t.book), t.chapter, t.verse, t.part));
+    sort_canonical(&mut there);
     there.dedup();
     there
 }
@@ -317,6 +318,130 @@ impl Scheme {
     }
 }
 
+/// One unit of a book paired across two schemes: the verses on each side that
+/// are the same text. Most units are one verse each; a merge or split puts
+/// several on one side; a verse with no counterpart has the other side empty.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Paired {
+    /// In `from`'s numbering, canonical order.
+    pub here: Vec<Verse>,
+    /// In `to`'s numbering, canonical order.
+    pub there: Vec<Verse>,
+}
+
+/// A whole book walked in step across two schemes, like zipping two lists:
+/// each unit is the smallest set of verses on each side that map only to each
+/// other.
+///
+/// ```text
+/// pairs(ulb, org, PSA)  ->  [PSA 3:0] ↔ [PSA 3:1]       the title
+///                           [PSA 3:1] ↔ [PSA 3:2]
+///                           [PSA 13:5, PSA 13:6] ↔ [PSA 13:6]
+/// pairs(eng, org, ACT)  ->  [ACT 19:41] ↔ []
+/// ```
+///
+/// Units come in `from`'s order. A verse only `to` numbers comes after the
+/// unit holding the `to` verse before it. Verses are whole: where a scheme
+/// file names a part (`ESG 4:17c`), the unit holds the whole verse.
+///
+/// Verse 0 (the title slot) takes part only where a scheme's rows mention it:
+/// `eng`'s PSA 3:0 does, and GEN 1:0 never appears. Units can reach into
+/// another book where a scheme folds books together (`lxx`'s EZR holds
+/// `org`'s NEH). A book `from` doesn't number pairs nothing; ask from the
+/// scheme that has it.
+pub fn pairs(from: &Scheme, to: &Scheme, book: BookKey) -> Vec<Paired> {
+    let here_verses = book_verses(from, book);
+    if from.name() == to.name() {
+        return here_verses
+            .into_iter()
+            .map(|v| Paired {
+                here: vec![v],
+                there: vec![v],
+            })
+            .collect();
+    }
+    let key = |v: &Verse| (v.book.as_bytes(), v.chapter, v.verse);
+    let mut seen_here = BTreeSet::new();
+    let mut seen_there = BTreeSet::new();
+    let mut units = Vec::new();
+    for v in here_verses {
+        if seen_here.contains(&key(&v)) {
+            continue;
+        }
+        let mut here = vec![v];
+        let mut there: Vec<Verse> = Vec::new();
+        let (mut h_done, mut t_done) = (0, 0);
+        while h_done < here.len() || t_done < there.len() {
+            while h_done < here.len() {
+                for t in through_org(from, to, here[h_done]) {
+                    let t = t.whole();
+                    if !there.contains(&t) {
+                        there.push(t);
+                    }
+                }
+                h_done += 1;
+            }
+            while t_done < there.len() {
+                for h in through_org(to, from, there[t_done]) {
+                    let h = h.whole();
+                    if !here.contains(&h) {
+                        here.push(h);
+                    }
+                }
+                t_done += 1;
+            }
+        }
+        sort_canonical(&mut here);
+        sort_canonical(&mut there);
+        seen_here.extend(here.iter().map(key));
+        seen_there.extend(there.iter().map(key));
+        units.push(Paired { here, there });
+    }
+    for t in book_verses(to, book) {
+        if seen_there.contains(&key(&t)) {
+            continue;
+        }
+        let after = units
+            .iter()
+            .rposition(|unit| {
+                unit.there
+                    .iter()
+                    .any(|x| x.book == book && key(x) < key(&t))
+            })
+            .map_or(0, |at| at + 1);
+        units.insert(
+            after,
+            Paired {
+                here: Vec::new(),
+                there: vec![t],
+            },
+        );
+    }
+    units
+}
+
+/// The verses of a book a scheme numbers, in order: 1 to the last of each
+/// chapter, with verse 0 first wherever the scheme's rows mention it.
+fn book_verses(scheme: &Scheme, book: BookKey) -> Vec<Verse> {
+    let Some(counts) = scheme.verse_counts(book) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for (at, &last) in counts.iter().enumerate() {
+        let chapter = u16::try_from(at + 1).unwrap_or(u16::MAX);
+        let title = Verse::new(book, chapter, 0);
+        if scheme.rows_from(title).next().is_some() {
+            out.push(title);
+        }
+        out.extend((1..=last).map(|verse| Verse::new(book, chapter, verse)));
+    }
+    out
+}
+
+fn sort_canonical(verses: &mut [Verse]) {
+    verses.sort_by_key(|v| (canonical_rank(v.book), v.chapter, v.verse, v.part));
+}
+
 /// `org`, the pivot. It is always the first built-in scheme.
 fn org() -> &'static Scheme {
     &schemes()[0]
@@ -362,6 +487,86 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// For every pair of schemes and every book: each verse of the book on
+    /// either side sits in exactly one unit, no unit is empty, and a unit is
+    /// closed (everything its verses map to is in it).
+    #[test]
+    fn pairs_partition_both_sides_into_closed_units() {
+        for from in schemes() {
+            for to in schemes() {
+                for book in from.books() {
+                    let units = pairs(from, to, book);
+                    let mut here_count = std::collections::BTreeMap::new();
+                    let mut there_count = std::collections::BTreeMap::new();
+                    for unit in &units {
+                        assert!(
+                            !(unit.here.is_empty() && unit.there.is_empty()),
+                            "{}→{} {book}: an empty unit",
+                            from.name(),
+                            to.name()
+                        );
+                        for h in &unit.here {
+                            *here_count.entry(h.to_string()).or_insert(0) += 1;
+                            if from.name() != to.name() {
+                                for t in through_org(from, to, *h) {
+                                    assert!(
+                                        unit.there.contains(&t.whole()),
+                                        "{}→{} {h} reaches {t} outside its unit",
+                                        from.name(),
+                                        to.name()
+                                    );
+                                }
+                            }
+                        }
+                        for t in &unit.there {
+                            *there_count.entry(t.to_string()).or_insert(0) += 1;
+                        }
+                    }
+                    for (side, scheme, counts) in
+                        [("here", from, &here_count), ("there", to, &there_count)]
+                    {
+                        for v in book_verses(scheme, book) {
+                            assert_eq!(
+                                counts.get(&v.to_string()),
+                                Some(&1),
+                                "{}→{} {book}: {side} {v}",
+                                from.name(),
+                                to.name()
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn pairs_walk_a_psalm_title_and_a_merge() {
+        let psa = BookKey::new(*b"PSA");
+        let units = pairs(scheme("ulb").unwrap(), scheme("org").unwrap(), psa);
+        let v = |c, n| Verse::new(psa, c, n);
+        let unit = |here: Vec<Verse>, there: Vec<Verse>| Paired { here, there };
+        assert!(units.contains(&unit(vec![v(3, 0)], vec![v(3, 1)])));
+        assert!(units.contains(&unit(vec![v(3, 1)], vec![v(3, 2)])));
+        assert!(units.contains(&unit(vec![v(13, 5), v(13, 6)], vec![v(13, 6)])));
+        let title = units.iter().position(|u| u.here == [v(3, 0)]).unwrap();
+        assert_eq!(units[title + 1].here, [v(3, 1)], "units come in order");
+        assert!(
+            !units.iter().any(|u| u.here.contains(&v(1, 0))),
+            "Psalm 1 has no title row, so no verse 0"
+        );
+    }
+
+    #[test]
+    fn pairs_leave_a_side_empty_where_one_scheme_lacks_the_verse() {
+        let act = BookKey::new(*b"ACT");
+        let units = pairs(scheme("eng").unwrap(), scheme("org").unwrap(), act);
+        assert!(units.contains(&Paired {
+            here: vec![Verse::new(act, 19, 41)],
+            there: vec![],
+        }));
     }
 
     #[test]

@@ -363,6 +363,14 @@ behind.
    - Verse 0 is the title slot and exists in every chapter.
    - Four rows in `vul` and `rso` are evident typos. The generator corrects them by name
      and fails on any other unequal range pair (`data/schemes/README.md`).
+   - Added `pairs(from, to, book)`, Will's ask: a book walked in step across two schemes,
+     yielding units (`here` ↔ `there`) that map only to each other. This is what pairing,
+     word alignment (en_ulb ↔ WLC is `ulb` ↔ `org`) and parallel views iterate, rather than
+     asking verse by verse. A side can be empty.
+   - onion's `Toc` gained `titles`: a `\d` before a chapter's first `\v` is a `TitleRow`,
+     the text of verse 0's slot. 116 of en_ulb's 150 Psalms have one. A `\d \v 1 …` title
+     numbers itself and gets no row. So a pairing view can put en_ulb's title beside WLC's
+     verse 1.
    - The Kotlin hub's `cases.json` isn't in the wacs-dashboard-2 clone. Instead,
      `fixtures/map.json` was written from a separate Python prototype and reviewed, and a
      test sends every verse of every scheme through `org` and back.
