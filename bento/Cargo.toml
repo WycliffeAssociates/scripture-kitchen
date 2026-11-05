@@ -2,7 +2,7 @@
 name = "bento"
 version.workspace = true
 edition.workspace = true
-description = "Scripture containers: BTT Writer, Resource Container and Scripture Burrito manifests, read leniently and checked (writing to come)."
+description = "Scripture containers: BTT Writer, Resource Container and Scripture Burrito manifests, read leniently, checked, created and edited."
 
 [lints]
 workspace = true
