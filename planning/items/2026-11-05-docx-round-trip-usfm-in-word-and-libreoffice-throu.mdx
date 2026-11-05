@@ -140,6 +140,14 @@ but also makes sense too".
 
 <Followup id="lo-writer" done>Install `libreoffice-writer` on the dev box. Done 2026-11-05; the probe above ran on it.</Followup>
 
+## Still open
+
+<Question id="crate-name">The crate reads .odt as well as .docx once the best-effort rules come over. Is `docx` still the name? Alternatives: `office`, `documents`. Recommendation: `docx`, because export only writes .docx (LibreOffice opens it fine) and that's the format people ask for by name.</Question>
+
+<Question id="rtl">Right-to-left scripts and fonts. The styles need `w:bidi` and `w:rtl` for Arabic or Hebrew script, and a sensible font for the language. bento's manifest already carries `language.direction`. Recommendation: export takes direction and an optional font as options, the host passes them from the manifest, and the import ignores both.</Question>
+
+<Followup id="word-check">Check in real Word what was only measured in LibreOffice: custom style names kept, style ids possibly rewritten, `usfm.*` custom properties kept.</Followup>
+
 ## Where it lives
 
 <Tradeoff id="own-crate" chose="its own crate, depending on onion" cost="one more crate in the workspace">
@@ -269,7 +277,7 @@ document per book keeps the hash meaning one file, keeps Word fast, and lets
 each book go to its own reviewer. A Word file holding several books still
 imports, because someone may paste books together, but we don't produce one.
 
-<Question id="many-export">Export of many books: a map of one .docx per book, zipped by the host? Recommendation: yes. The crate already writes zips, so returning a zip instead is cheap if a host wants that.</Question>
+<Question id="many-export" answer="Yes (Will, 2026-11-05).">Export of many books: a map of one .docx per book, zipped by the host? Recommendation: yes. The crate already writes zips, so returning a zip instead is cheap if a host wants that.</Question>
 
 USJ and USX import are still deferred (see the USJ import sketch). When USX
 import comes, quick-xml is already here: the XML reader this crate brings is
