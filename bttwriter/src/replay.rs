@@ -134,6 +134,47 @@ impl std::error::Error for ReplayError {}
 /// one before it in its book. Ties go to the earlier history, then the
 /// earlier save.
 pub fn replay(histories: &[WriterHistory], opts: &ReplayOptions) -> Result<Replayed, ReplayError> {
+    let mut writer = PackWriter::new();
+    let line = line(histories, opts, &mut writer)?;
+    Ok(line.finish(writer, None))
+}
+
+/// The replayed line, before its pack is finished: what [`crate::consolidate()`]
+/// commits a manifest on top of.
+pub(crate) struct Line {
+    pub head: ObjectId,
+    /// The last commit's tree: every book file.
+    pub tree: BTreeMap<String, ObjectId>,
+    /// Each book written, with its rendering at its last save.
+    pub books: Vec<(BookFile, String)>,
+    pub commits: usize,
+    pub unchanged: usize,
+    pub estimated: usize,
+}
+
+impl Line {
+    /// Finish the pack. `head` is the line's own, or a commit added on top.
+    pub fn finish(self, writer: PackWriter, head: Option<ObjectId>) -> Replayed {
+        let finished = writer.finish();
+        Replayed {
+            head: head.unwrap_or(self.head),
+            pack: finished.pack,
+            idx: finished.idx,
+            name: finished.name,
+            books: self.books.into_iter().map(|(file, _)| file).collect(),
+            commits: self.commits,
+            unchanged: self.unchanged,
+            estimated: self.estimated,
+            stats: finished.stats,
+        }
+    }
+}
+
+pub(crate) fn line(
+    histories: &[WriterHistory],
+    opts: &ReplayOptions,
+    writer: &mut PackWriter,
+) -> Result<Line, ReplayError> {
     let latest = opts.now.saturating_add(CLOCK_SLACK);
     let mut books: Vec<Book<'_>> = Vec::with_capacity(histories.len());
     for history in histories {
@@ -157,7 +198,6 @@ pub fn replay(histories: &[WriterHistory], opts: &ReplayOptions) -> Result<Repla
     fn lane(deltas: bool, name: &str) -> Option<&str> {
         deltas.then_some(name)
     }
-    let mut writer = PackWriter::new();
     let mut tree: BTreeMap<String, ObjectId> = BTreeMap::new();
     let mut head: Option<ObjectId> = None;
     let (mut commits, mut unchanged, mut estimated) = (0, 0, 0);
@@ -201,24 +241,23 @@ pub fn replay(histories: &[WriterHistory], opts: &ReplayOptions) -> Result<Repla
         .filter_map(|book| {
             let rendered = book.rendered?;
             let title = h_title(&rendered).unwrap_or(book.fallback_title).to_owned();
-            Some(BookFile {
-                book: book.key,
-                file: book.file,
-                title,
-            })
+            Some((
+                BookFile {
+                    book: book.key,
+                    file: book.file,
+                    title,
+                },
+                rendered,
+            ))
         })
         .collect();
-    let finished = writer.finish();
-    Ok(Replayed {
+    Ok(Line {
         head,
-        pack: finished.pack,
-        idx: finished.idx,
-        name: finished.name,
+        tree,
         books,
         commits,
         unchanged,
         estimated,
-        stats: finished.stats,
     })
 }
 

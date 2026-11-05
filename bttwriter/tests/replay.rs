@@ -6,6 +6,8 @@
 //! the four-book pack + idx                      git fsck --strict accepts it; git index-pack writes our idx;
 //!                                               each book file at head == that history's usfm()
 //! two made-up books, one with a reset clock     git log reads the order, messages and dates we meant
+//! consolidate(four books)                       a closing commit on Sefer's head: the books + manifests,
+//!                                               and bento's checks find the manifests match the files
 //! ```
 //!
 //! Sefer's ids hold where Sefer and the kitchen agree: a history with no
@@ -113,6 +115,124 @@ fn run(command: &mut Command) -> Vec<u8> {
         String::from_utf8_lossy(&out.stderr)
     );
     out.stdout
+}
+
+fn four_books() -> Vec<WriterHistory> {
+    let mut histories: Vec<WriterHistory> = SEFER_HEADS
+        .iter()
+        .map(|(repo, ..)| {
+            let dir = clone(repo);
+            let history = history_of(&dir, repo);
+            let _ = std::fs::remove_dir_all(&dir);
+            history
+        })
+        .collect();
+    histories.remove(1);
+    histories
+}
+
+#[test]
+fn consolidating_closes_seferss_line_with_the_manifests() {
+    use bttwriter::{Closing, consolidate};
+    let histories = four_books();
+    let who = Signature {
+        name: "Mary Kila".into(),
+        email: "mary@example.org".into(),
+        at: NOW,
+        offset_minutes: 600,
+    };
+    let project = bento::NewBibleProject {
+        title: "Baibel".into(),
+        abbreviation: "reg".into(),
+        language: bento::NewLanguage {
+            tag: "tpi".into(),
+            name: "Tok Pisin".into(),
+            direction: Direction::Ltr,
+        },
+        books: Vec::new(),
+        canon: canon::Canon::Protestant66,
+        sources: Vec::new(),
+        contributors: vec!["Mary Kila".into()],
+        publisher: "Wycliffe Associates".into(),
+        creator: "Bible translation community".into(),
+        rights: "CC BY-SA 4.0".into(),
+        checking_level: "1".into(),
+        copyright: "Licensed under CC BY-SA 4.0.".into(),
+        generator: ("bttwriter test".into(), "0".into()),
+        created_at: "2026-11-05T00:00:00Z".into(),
+        repository: "Tech_Advance/tpi_reg".into(),
+    };
+    let closing = Closing {
+        author: who.clone(),
+        committer: who,
+        message: "Four books from Writer\n".into(),
+    };
+    let done = consolidate(
+        &histories,
+        &opts(),
+        &project,
+        &[bento::Format::Burrito, bento::Format::Rc],
+        &closing,
+    )
+    .unwrap();
+    let names: Vec<&str> = done.manifests.iter().map(|(n, _)| n.as_str()).collect();
+    assert_eq!(names, ["metadata.json", "manifest.yaml"]);
+
+    let dir = unpacked(&done.replayed, "consolidated");
+    git(&dir, &["fsck", "--full", "--strict", "--no-dangling"]);
+    let parent = git(&dir, &["rev-parse", "main~1"]);
+    assert_eq!(
+        parent.trim(),
+        SEFER_FOUR_BOOKS.0,
+        "the closing commit sits on Sefer's line"
+    );
+    assert_eq!(
+        git(&dir, &["log", "-1", "--format=%B", "main"]),
+        "Four books from Writer\n\n"
+    );
+    let files = git(&dir, &["ls-tree", "--name-only", "main"]);
+    assert_eq!(
+        files,
+        "14-2CH.usfm\n18-JOB.usfm\n23-ISA.usfm\n65-3JN.usfm\nmanifest.yaml\nmetadata.json\n"
+    );
+
+    // The manifests describe the files beside them: bento's own checks agree.
+    let at_head: Vec<(String, Vec<u8>)> = files
+        .lines()
+        .map(|f| {
+            (
+                f.to_owned(),
+                git(&dir, &["cat-file", "blob", &format!("main:{f}")]).into_bytes(),
+            )
+        })
+        .collect();
+    for (name, _) in &done.manifests {
+        let read = bento::read(name, &at_head.iter().find(|(f, _)| f == name).unwrap().1);
+        assert_eq!(
+            read.findings
+                .iter()
+                .filter(|f| f.check != bento::Check::BookTitleTranslated)
+                .count(),
+            0,
+            "{name}: {:#?}",
+            read.findings
+        );
+        let books: Vec<String> = read
+            .manifest
+            .as_ref()
+            .unwrap()
+            .books
+            .iter()
+            .map(|b| b.book.to_string())
+            .collect();
+        assert_eq!(books, ["2CH", "JOB", "ISA", "3JN"], "{name}");
+        let repo = bento::Repo {
+            name: Some("Tech_Advance/tpi_reg"),
+            files: Some(&at_head),
+        };
+        assert_eq!(bento::check(&read, &repo), [], "{name}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]

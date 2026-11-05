@@ -22,6 +22,8 @@
 //! ```text
 //! walk::HistoryWalk / read_history(objects, head, …)   → WriterHistory { project, saves }
 //! replay(&[WriterHistory], &ReplayOptions { now, … })  → Replayed { head, pack, idx, name, books, … }
+//! consolidate(&histories, &opts, &project, formats, &closing)  → the same, plus a closing commit
+//!                                                         holding bento's manifests
 //! ```
 //!
 //! [`walk`] reads a Writer repo's saves from objects it asks for (sans-IO, so
@@ -35,6 +37,7 @@
 //! read them (a folder, a git tree), and write what comes back.
 
 pub mod clock;
+mod consolidate;
 pub mod pack;
 pub mod replay;
 pub mod stitch;
@@ -46,6 +49,7 @@ mod git2_source;
 #[cfg(feature = "git2")]
 pub use git2_source::Git2Source;
 
+pub use consolidate::{Closing, ConsolidateError, Consolidated, consolidate};
 pub use replay::{BookFile, ReplayError, ReplayOptions, Replayed, replay};
 pub use stitch::{
     WriterChapter, WriterTree, book_to_usfm, decode_text, is_text_path, stitch, tree_from_files,
