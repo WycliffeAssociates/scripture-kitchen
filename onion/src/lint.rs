@@ -164,6 +164,24 @@ impl LintReport {
     pub fn edits(&self, fix: &Fix) -> &[Edit] {
         &self.edit_list[fix.edits.start as usize..fix.edits.end as usize]
     }
+
+    /// Folds in findings made outside the walk ([`lint_against_counts`]'s),
+    /// keeping the report's order (anchor, then code) and offering no repair
+    /// for them. A caller adds them before plating, so they cross the wire in
+    /// the same diagnostics section as every other finding.
+    pub fn absorb(&mut self, extra: Vec<Observation>) {
+        if extra.is_empty() {
+            return;
+        }
+        let mut all: Vec<(Observation, u32)> = self
+            .observations
+            .drain(..)
+            .zip(self.fix_of.drain(..))
+            .chain(extra.into_iter().map(|o| (o, NO_FIX)))
+            .collect();
+        all.sort_by_key(|(o, _)| (o.anchor, o.code as u32));
+        (self.observations, self.fix_of) = all.into_iter().unzip();
+    }
 }
 
 /// Lints one already-lexed, already-built document.

@@ -1057,7 +1057,12 @@ impl Galley {
         id: &str,
         opts: crate::onion::wire::ParseOptions,
     ) -> Result<Vec<u8>, JsError> {
-        self.book(id)?.parse(opts).map_err(refusal)
+        // Through the coordinator, so a book with a declared scheme carries
+        // its versification findings in the same diagnostics section.
+        self.sous
+            .book_parse(&BookId::from(id), opts)
+            .ok_or_else(|| JsError::new(&format!("no book is registered as {id}")))?
+            .map_err(refusal)
     }
 }
 

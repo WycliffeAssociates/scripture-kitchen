@@ -13,9 +13,101 @@
 //! headings), in characters, which is what the sniffing rules' length tests
 //! compare.
 
+use core::fmt;
+
 use canon::{BookKey, Inventory, Scheme, Sniff};
+use rustc_hash::FxHashMap;
 use usfm_onion::lint::{Observation, lint_against_counts};
 use usfm_onion::{Filter, Toc, cst, lex, mask, toc};
+
+use crate::pantry::BookId;
+
+/// What a registered book says about its numbering.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Declared {
+    /// "I follow this scheme": a built-in name (`"ulb"`) or one defined on
+    /// the handle.
+    Scheme(String),
+    /// "I number like my source": whatever the reference registered under
+    /// the same book code declares. A target with no such reference, or one
+    /// whose reference declares nothing, has no scheme.
+    FollowSource,
+}
+
+/// A declaration naming a scheme nobody defined.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnknownScheme(pub String);
+
+impl fmt::Display for UnknownScheme {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "no versification scheme is named {:?}; the built-in ones are {}, and others need defineScheme first",
+            self.0,
+            canon::schemes()
+                .iter()
+                .map(Scheme::name)
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    }
+}
+
+impl std::error::Error for UnknownScheme {}
+
+/// The handle's schemes and each book's declaration. Built-ins are always
+/// there; a project adds its own with [`define`](Self::define).
+#[derive(Debug, Default)]
+pub struct Registry {
+    defined: Vec<Scheme>,
+    declared: FxHashMap<BookId, Declared>,
+}
+
+impl Registry {
+    /// Adds a project's scheme, replacing one defined under the same name.
+    /// A built-in name can't be taken (canon's builder refuses it).
+    pub fn define(&mut self, scheme: Scheme) {
+        self.defined.retain(|seen| seen.name() != scheme.name());
+        self.defined.push(scheme);
+    }
+
+    /// A scheme by name: built-in first, then defined.
+    pub fn scheme(&self, name: &str) -> Option<&Scheme> {
+        canon::scheme(name).or_else(|| self.defined.iter().find(|s| s.name() == name))
+    }
+
+    /// Records (or with `None`, clears) a book's declaration. A named scheme
+    /// must exist now, so a typo fails here rather than silently checking
+    /// nothing.
+    pub fn declare(&mut self, id: BookId, declared: Option<Declared>) -> Result<(), UnknownScheme> {
+        match declared {
+            Some(Declared::Scheme(name)) if self.scheme(&name).is_none() => {
+                Err(UnknownScheme(name))
+            }
+            Some(declared) => {
+                self.declared.insert(id, declared);
+                Ok(())
+            }
+            None => {
+                self.declared.remove(&id);
+                Ok(())
+            }
+        }
+    }
+
+    pub fn declared(&self, id: &BookId) -> Option<&Declared> {
+        self.declared.get(id)
+    }
+
+    /// The scheme a book's own declaration names, without following a
+    /// source. `None` for no declaration and for `FollowSource`.
+    pub fn named(&self, id: &BookId) -> Option<&Scheme> {
+        match self.declared.get(id)? {
+            Declared::Scheme(name) => self.scheme(name),
+            Declared::FollowSource => None,
+        }
+    }
+}
 
 /// Every verse of every book, in one inventory. Give it the whole text:
 /// sniffing a single book has few rules to vote with.

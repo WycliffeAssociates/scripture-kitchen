@@ -36,7 +36,10 @@ use crate::overlay;
 
 use super::{OnionBook, PublishError, rebase_span, restate};
 use crate::pantry::derived::Store;
-use crate::pantry::{BookId, Entry, Markers, Pantry, RawChecksum, Retain, Role, SourceLanes};
+use crate::pantry::{
+    BookId, Entry, Markers, Pantry, PantryError, RawChecksum, Retain, Role, SourceLanes,
+};
+use crate::versification::{Declared, Registry, UnknownScheme};
 
 /// The Sous coordinator over one [`ChapterPass`].
 ///
@@ -44,6 +47,9 @@ use crate::pantry::{BookId, Entry, Markers, Pantry, RawChecksum, Retain, Role, S
 /// keyed by content, and one chapter table per retained book text.
 pub struct Expediter<P: ChapterPass> {
     pantry: Pantry,
+    /// The schemes the handle knows and what each book declares; see
+    /// [`declare`](Self::declare).
+    versification: Registry,
     pass: P,
     /// What judging may vary without touching a chapter or a book.
     config: P::Config,
@@ -176,6 +182,7 @@ impl<P: ChapterPass + Sync> Expediter<P> {
     pub fn new(pass: P, budget_bytes: usize) -> Self {
         Self {
             pantry: Pantry::new(budget_bytes),
+            versification: Registry::default(),
             pass,
             config: P::Config::default(),
             observations: Store::default(),
@@ -295,7 +302,89 @@ impl<P: ChapterPass + Sync> Expediter<P> {
     /// `false` when the id was not registered.
     pub fn remove(&mut self, id: &BookId) -> bool {
         self.forget_target(id);
+        let _ = self.versification.declare(id.clone(), None);
         self.pantry.remove(id)
+    }
+
+    // ── Versification ──────────────────────────────────────────────────
+
+    /// Adds a project's own scheme (a reviewed `.vrs` import), replacing one
+    /// of the same name. Built-in schemes are always there.
+    pub fn define_scheme(&mut self, scheme: canon::Scheme) {
+        self.versification.define(scheme);
+    }
+
+    /// What a book says about its numbering, or `None` to clear it. The id
+    /// need not be registered yet: a host declares at registration, and the
+    /// declaration outlives a re-registration of the same id.
+    pub fn declare(
+        &mut self,
+        id: impl Into<BookId>,
+        declared: Option<Declared>,
+    ) -> Result<(), UnknownScheme> {
+        self.versification.declare(id.into(), declared)
+    }
+
+    /// The schemes and declarations, read-only.
+    pub fn versification(&self) -> &Registry {
+        &self.versification
+    }
+
+    /// The scheme a registered book follows: the one it names, or for
+    /// `FollowSource` the one its source names. `None` when it declares
+    /// nothing, or follows a source that isn't there or declares nothing.
+    pub fn scheme_of(&self, id: &BookId) -> Option<&canon::Scheme> {
+        match self.versification.declared(id)? {
+            Declared::Scheme(_) => self.versification.named(id),
+            Declared::FollowSource => self.versification.named(self.source_of(id)?),
+        }
+    }
+
+    /// The reference a target pairs with: the one registered under the same
+    /// book code, as publication pairs them.
+    pub fn source_of(&self, id: &BookId) -> Option<&BookId> {
+        let (_, key) = self
+            .pantry
+            .books(Role::Target)
+            .iter()
+            .find(|(target, _)| target == id)?;
+        self.pantry
+            .books(Role::Reference)
+            .iter()
+            .find(|(_, reference)| reference == key)
+            .map(|(reference, _)| reference)
+    }
+
+    /// A target's `chapter-ends-early` and `verse-beyond-scheme`, against
+    /// the scheme it follows. None when it follows none, and none when a
+    /// source pairs with it: presence then owns "missing" and "extra", and
+    /// one gap isn't reported twice.
+    pub fn versification_findings(&self, id: &BookId) -> Vec<lint::Observation> {
+        if self.pantry.role(id) != Some(Role::Target) || self.source_of(id).is_some() {
+            return Vec::new();
+        }
+        let (Some(scheme), Some((toc, _))) = (self.scheme_of(id), self.pantry.census(id)) else {
+            return Vec::new();
+        };
+        crate::versification::lint_against(toc, scheme)
+    }
+
+    /// A registered book's whole lint report, the versification findings
+    /// included. `None` for an unknown id.
+    pub fn book_lint(&mut self, id: &BookId) -> Option<Result<lint::LintReport, PantryError>> {
+        let extra = self.versification_findings(id);
+        Some(self.pantry.book(id)?.lint_with(extra))
+    }
+
+    /// A registered book plated, its diagnostics including the versification
+    /// findings. `None` for an unknown id.
+    pub fn book_parse(
+        &mut self,
+        id: &BookId,
+        opts: onion::wire::ParseOptions,
+    ) -> Option<Result<Vec<u8>, PantryError>> {
+        let extra = self.versification_findings(id);
+        Some(self.pantry.book(id)?.parse_with(opts, extra))
     }
 
     /// Drops this id's ring and its claim on a hot slot.
