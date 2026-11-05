@@ -142,9 +142,9 @@ but also makes sense too".
 
 ## Still open
 
-<Question id="crate-name">The crate reads .odt as well as .docx once the best-effort rules come over. Is `docx` still the name? Alternatives: `office`, `documents`. Recommendation: `docx`, because export only writes .docx (LibreOffice opens it fine) and that's the format people ask for by name.</Question>
+<Question id="crate-name" answer="`docx` (Will, 2026-11-05).">The crate reads .odt as well as .docx once the best-effort rules come over. Is `docx` still the name? Alternatives: `office`, `documents`. Recommendation: `docx`, because export only writes .docx (LibreOffice opens it fine) and that's the format people ask for by name.</Question>
 
-<Question id="rtl">Right-to-left scripts and fonts. The styles need `w:bidi` and `w:rtl` for Arabic or Hebrew script, and a sensible font for the language. bento's manifest already carries `language.direction`. Recommendation: export takes direction and an optional font as options, the host passes them from the manifest, and the import ignores both.</Question>
+<Question id="rtl" answer="Yes, as recommended (Will, 2026-11-05).">Right-to-left scripts and fonts. The styles need `w:bidi` and `w:rtl` for Arabic or Hebrew script, and a sensible font for the language. bento's manifest already carries `language.direction`. Recommendation: export takes direction and an optional font as options, the host passes them from the manifest, and the import ignores both.</Question>
 
 <Followup id="word-check">Check in real Word what was only measured in LibreOffice: custom style names kept, style ids possibly rewritten, `usfm.*` custom properties kept.</Followup>
 
@@ -238,9 +238,9 @@ Its settings are rerun on every change without reading the file again
 one owned handle: `read(bytes) -> Reading`, then `reading.render(settings)`.
 The handle owns its data, so it still needs no lifetime wrappers.
 
-<Question id="order">Order: strict export and import first (it defines the style table and is small), then the best-effort port behind the same entry point? Recommendation: yes. Until the port lands, unknown paragraphs fall back to `\p`, as first written.</Question>
+<Question id="order" answer="Yes (Will, 2026-11-05).">Order: strict export and import first (it defines the style table and is small), then the best-effort port behind the same entry point? Recommendation: yes. Until the port lands, unknown paragraphs fall back to `\p`, as first written.</Question>
 
-<Question id="who">Who owns the port? document-import is fresh Sefer code, so its author should agree before it moves.</Question>
+<Question id="who" answer="Will wrote document-import (with Claude) and agrees: the port is ours.">Who owns the port? document-import is fresh Sefer code, so its author should agree before it moves.</Question>
 
 Two things to match with it:
 
@@ -301,4 +301,4 @@ direct formatting for the rest, so nothing it writes can be read back.
 `WycliffeAssociates/DOC` is a Python service that combines resources and
 could call this later.
 
-<Followup id="sefer">Tell Sefer how this relates to `packages/document-import` once the curated set is agreed.</Followup>
+<Followup id="sefer" done>Tell Sefer how this relates to `packages/document-import` once the curated set is agreed.</Followup>
