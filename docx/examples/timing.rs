@@ -16,7 +16,7 @@ fn main() {
         let d = Instant::now();
         let out = docx::export(&src, &docx::ExportOptions::default());
         let e = Instant::now();
-        let back = docx::import(&out.docx).unwrap();
+        let back = docx::import(&out.docx, &docx::Settings::default()).unwrap();
         let f = Instant::now();
         std::hint::black_box(back.books.len());
         docx_len = out.docx.len();

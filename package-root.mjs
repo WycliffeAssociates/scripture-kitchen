@@ -34,7 +34,8 @@ const PACKAGES = [
   { dir: "canon", pkg: inner("canon"), subpath: under("./canon") },
   { dir: "bento", pkg: inner("bento"), subpath: under("./bento") },
   { dir: "bttwriter", pkg: inner("bttwriter"), subpath: under("./bttwriter") },
-  { dir: "docx", pkg: inner("docx"), subpath: under("./docx") },
+  // Every docx key sits under ./docx, the template file included.
+  { dir: "docx", pkg: inner("docx"), subpath: (key) => (key === "." ? "./docx" : `./docx${key.slice(1)}`) },
 ];
 
 const push = (dir) => {

@@ -1,22 +1,26 @@
 /**
  * docx: USFM in Word and LibreOffice. A book exports as a .docx whose named
  * styles are its markers ("USFM p", "USFM q1", "USFM v", real footnotes), and
- * any .docx imports back. TypeScript over one wasm module; every rule lives in
- * the Rust (`docx/src`), once.
+ * any .docx or .odt imports back. TypeScript over one wasm module; every rule
+ * lives in the Rust (`docx/src`), once.
  *
  *     const docx = await import("@wycliffeassociates/scripture-kitchen/docx");
  *     await docx.init();                                     // or initSync({ module: bytes })
  *
  *     const out = docx.exportBook(usfm);                     // { name: "PSA.docx", docx, book, unsupported }
  *     const all = docx.exportBooks([gen, exo], { rtl: true }); // one .docx per book, by file name
- *     const back = docx.importDocx(bytes);                   // { books, report, properties }
- *     back.books[0].usfm;  back.books[0].comments;           // threads as @sefer/document-import's
- *     back.report.unknownParagraphStyles;                    // what was not in our styles
+ *     const dotx = docx.template();                          // every style and a starter book
  *
- * A paragraph or run in a `USFM …` style is read as that marker, with no
- * guessing. A paragraph in any other style becomes `\p`, a run in any other
- * style is unwrapped, and each is counted in the report. Tracked changes are
- * taken as accepted and counted.
+ *     const reading = docx.readDocument(bytes);              // once per file
+ *     const back = reading.render({ book: "TIT" });          // rerun on every settings change
+ *     back.books[0].usfm;  back.books[0].comments;           // threads as @sefer/document-import's
+ *     back.report.exact;  back.report.guesses;               // nothing guessed? and every guess, with its reason
+ *
+ * A paragraph in one of our `USFM …` styles is read as that marker, with no
+ * guessing. Any other paragraph is read by `@sefer/document-import`'s rules,
+ * the same settings and the same report: verse numbers by how the document
+ * writes them, poetry by indent, headings by look. One file may mix the two.
+ * Tracked changes are taken as accepted and counted.
  *
  * A large book takes tens of milliseconds each way; call it from a Worker
  * where that would stall a frame.
@@ -118,11 +122,96 @@ export interface ImportedBook {
   comments: CommentThread[];
 }
 
+export type Keep = "keep" | "unwrap";
+export type VerseMode = "superscript" | "marked" | "lineStart" | "perLine" | "any";
+
+/** How a paragraph in no style of ours is read. `@sefer/document-import`'s settings, but for `versification`. */
+export interface Settings {
+  /** Book code for the `\id` line when the document has none of its own. */
+  book?: string;
+  /** How verse numbers are written; "auto" (the default) detects it. */
+  verses?: VerseMode | "auto";
+  /** Words that label a chapter, as in "Chapter 3". A label without a number is the next chapter. */
+  chapterWords?: string[];
+  /** A canon versification scheme ("eng", "org", "ulb"): a number past the chapter's last verse is never a verse. Needs a book code. */
+  versification?: string;
+  /** Indented, italic, Quote-styled or short-lined paragraphs: \q1–\q3, or \p. */
+  poetry?: Keep;
+  /** Heading paragraphs: \s1, \rem, or left out. */
+  headings?: "keep" | "rem" | "drop";
+  /** Text before the first verse: \rem, \mt, or left out. */
+  front?: "rem" | "mt" | "drop";
+  notes?: "keep" | "drop";
+  italic?: Keep;
+  bold?: Keep;
+  /** Numbered and bulleted paragraphs: \li1, or \p. */
+  lists?: Keep;
+  /** Paragraph styles named after a USFM marker ("q2", "s1 - Heading"): that marker, or ignored. */
+  styleMarkers?: Keep;
+  comments?: "keep" | "drop";
+  /** Renames guessed paragraph markers last, e.g. { q2: "q1", li1: "p" }. */
+  markers?: Record<string, string>;
+}
+
+export interface ChapterSummary {
+  chapter: number;
+  verses: number;
+  last: number;
+  missing: number[];
+}
+
+export interface Found {
+  poetry: number;
+  headings: number;
+  front: number;
+  notes: number;
+  italic: number;
+  bold: number;
+  lists: number;
+  tables: number;
+  styleMarkers: number;
+  comments: number;
+  trackedChanges: number;
+  lineBreaks: number;
+  blankParagraphs: number;
+}
+
+export interface Skip {
+  ref: string | null;
+  number: string;
+  reason: "sequence" | "versification" | "thousands";
+}
+
+export interface Guess {
+  ref: string | null;
+  marker: string;
+  reason: string;
+  excerpt: string;
+}
+
+/** `@sefer/document-import`'s report, with what the exact path adds. */
 export interface ImportReport {
-  /** Paragraph styles that are not ours, by name, with how many paragraphs used each. Each became `\p`. */
-  unknownParagraphStyles: Record<string, number>;
-  /** Character styles that are not ours. Their text was kept, unwrapped. */
+  /** "usfm" when the document already held USFM markers, copied through as text. */
+  source: "document" | "usfm";
+  verses: VerseMode;
+  detected: VerseMode;
+  /** How many numbers of each kind the guessed paragraphs hold (our own verse numbers count as superscript). */
+  candidates: Record<"superscript" | "alone" | "marked" | "lineStart" | "inline", number>;
+  chapters: ChapterSummary[];
+  /** What the document holds, whatever the settings do with it: the switches a host offers. */
+  found: Found;
+  /** Numbers written like verse numbers that were left as text, and why. */
+  skipped: Skip[];
+  /** Every guess, with the reason. */
+  guesses: Guess[];
+  /** Nothing was guessed: every paragraph and run was in one of our styles. */
+  exact: boolean;
+  /** Paragraphs in no style of ours, by style name: read by the best-effort rules. */
+  guessedParagraphs: Record<string, number>;
+  /** Character styles that are not ours, inside our paragraphs. Their text was kept, unwrapped. */
   unknownCharacterStyles: Record<string, number>;
+  /** Notes whose paragraph style is not ours; each became \f or \fe. */
+  unknownNoteStyles: Record<string, number>;
   /** Insertions, deletions and moves still tracked; all taken as accepted. */
   trackedChanges: number;
   /** Note references whose note was not in the file. */
@@ -137,16 +226,32 @@ export interface Imported {
   properties: [string, string][];
 }
 
-/** Throws when the bytes are not a .docx (not a zip, or no document part). */
-export function importDocx(bytes: Uint8Array): Imported {
-  return JSON.parse(raw.importDocx(bytes)) as Imported;
+export interface DocumentReading {
+  render(settings?: Settings): Imported;
+  /** Frees the reading's memory in the module; it cannot render after. */
+  free(): void;
 }
 
-/** Nothing was guessed: every paragraph and run was in one of our styles. */
-export function isExact(report: ImportReport): boolean {
-  return (
-    Object.keys(report.unknownParagraphStyles).length === 0 &&
-    Object.keys(report.unknownCharacterStyles).length === 0 &&
-    report.missingNotes === 0
-  );
+/** Reads a .docx or .odt once. Throws when the bytes are neither. */
+export function readDocument(bytes: Uint8Array): DocumentReading {
+  const reading = raw.readDocument(bytes);
+  return {
+    render: (settings: Settings = {}) => JSON.parse(reading.render(JSON.stringify(settings))) as Imported,
+    free: () => reading.free(),
+  };
+}
+
+/** Reads and renders once, with these settings. */
+export function importDocument(bytes: Uint8Array, settings: Settings = {}): Imported {
+  const reading = raw.readDocument(bytes);
+  try {
+    return JSON.parse(reading.render(JSON.stringify(settings))) as Imported;
+  } finally {
+    reading.free();
+  }
+}
+
+/** The template (.dotx): every style and a starter book, for writing USFM in Word from scratch. */
+export function template(): Uint8Array {
+  return raw.template();
 }

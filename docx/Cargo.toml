@@ -15,6 +15,8 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 # The parse and the USX the export folds. Only the USX export is needed.
 usfm_onion = { path = "../onion", version = "0.1.20", default-features = false, features = ["usx"] }
+# Book codes and versification: a number past a chapter's last verse is never a verse.
+canon = { path = "../canon", version = "0.1.20" }
 # Reading onion's USX on export, and the document's parts on import.
 quick-xml = "0.42"
 # The zip container: raw deflate both ways. CRC-32 is written here.

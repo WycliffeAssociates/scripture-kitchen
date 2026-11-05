@@ -114,8 +114,18 @@ pub struct Anchors {
 }
 
 impl Anchors {
-    fn current(&self) -> Option<String> {
+    /// `chapter:verse` where the next text lands.
+    pub fn current(&self) -> Option<String> {
         self.verse.as_ref().map(|v| format!("{}:{v}", self.chapter))
+    }
+
+    /// A verse starts: its plain text starts empty.
+    pub fn at(&mut self, chapter: &str, verse: &str) {
+        self.chapter = chapter.trim().to_owned();
+        self.verse = Some(verse.trim().to_owned());
+        if let Some(r) = self.current() {
+            self.verses.insert(r, String::new());
+        }
     }
 
     fn here(&self) -> Option<VersePoint> {
@@ -127,13 +137,6 @@ impl Anchors {
     pub fn chapter(&mut self, number: &str) {
         self.chapter = number.trim().to_owned();
         self.verse = None;
-    }
-
-    pub fn verse(&mut self, number: &str) {
-        self.verse = Some(number.trim().to_owned());
-        if let Some(r) = self.current() {
-            self.verses.entry(r).or_default();
-        }
     }
 
     /// Words of the verse being printed (not a note's).

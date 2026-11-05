@@ -32,24 +32,45 @@ const STYLES: &str = include_str!("styles.xml");
 const CARRIED: &[&str] = &["style", "number", "sid", "eid", "vid", "code", "caller"];
 
 pub fn export(usfm: &str, options: &ExportOptions) -> Exported {
-    let tokens = usfm_onion::lex(usfm);
-    let cst = usfm_onion::cst::build(&tokens);
-    let usx = usfm_onion::usx::usx(usfm.as_bytes(), &tokens, &cst);
-    let root = dom::parse("usx", usx.as_bytes()).expect("onion's USX is XML");
-
-    let mut w = Writer::new();
-    w.blocks(&root.children);
-    w.close_loose();
-
+    let w = fold(usfm);
     let book = w.book.clone();
     let source = crate::Source::of(usfm.as_bytes());
     let parts = Parts {
         document: w.document(),
         footnotes: w.footnotes(),
         styles: w.styles(options),
-        custom: crate::props::write(book.as_deref(), &source),
+        custom: Some(crate::props::write(book.as_deref(), &source)),
+        main: DOCUMENT,
     };
     Exported { book, docx: parts.zip(), unsupported: w.unsupported }
+}
+
+/// What a new document from the template holds: one of each paragraph a book
+/// starts with, to type over.
+const STARTER: &str = "\\id XXX Book name\n\\h Book name\n\\toc1 The Book of …\n\\toc2 Book name\n\\toc3 Abbr\n\\mt1 Book name\n\\c 1\n\\s1 A heading\n\\p\n\\v 1 The first verse.\n\\v 2 The second.\n\\q1\n\\v 3 A line of poetry,\n\\q2 and the next one indented.\n";
+
+/// The template (.dotx): every style, a starter book, no source.
+pub fn template() -> Vec<u8> {
+    let w = fold(STARTER);
+    Parts {
+        document: w.document(),
+        footnotes: w.footnotes(),
+        styles: w.styles(&ExportOptions::default()),
+        custom: None,
+        main: TEMPLATE,
+    }
+    .zip()
+}
+
+fn fold(usfm: &str) -> Writer {
+    let tokens = usfm_onion::lex(usfm);
+    let cst = usfm_onion::cst::build(&tokens);
+    let usx = usfm_onion::usx::usx(usfm.as_bytes(), &tokens, &cst);
+    let root = dom::parse("usx", usx.as_bytes()).expect("onion's USX is XML");
+    let mut w = Writer::new();
+    w.blocks(&root.children);
+    w.close_loose();
+    w
 }
 
 fn style_of(e: &Element) -> &str {
@@ -408,43 +429,61 @@ struct Parts {
     document: String,
     footnotes: String,
     styles: String,
-    custom: String,
+    custom: Option<String>,
+    /// The main part's content type: a document or a template.
+    main: &'static str,
 }
 
 impl Parts {
     fn zip(&self) -> Vec<u8> {
-        crate::zip::write(&[
-            ("[Content_Types].xml", CONTENT_TYPES.as_bytes()),
-            ("_rels/.rels", RELS.as_bytes()),
+        let custom_type = if self.custom.is_some() {
+            r#"<Override PartName="/docProps/custom.xml" ContentType="application/vnd.openxmlformats-officedocument.custom-properties+xml"/>"#
+        } else {
+            ""
+        };
+        let content_types = format!("{}{custom_type}</Types>\n", CONTENT_TYPES.replace("MAIN", self.main));
+        let custom_rel = if self.custom.is_some() {
+            r#"<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties" Target="docProps/custom.xml"/>"#
+        } else {
+            ""
+        };
+        let rels = format!("{RELS}{custom_rel}</Relationships>\n");
+        let mut parts: Vec<(&str, &[u8])> = vec![
+            ("[Content_Types].xml", content_types.as_bytes()),
+            ("_rels/.rels", rels.as_bytes()),
             ("word/_rels/document.xml.rels", DOCUMENT_RELS.as_bytes()),
             ("word/document.xml", self.document.as_bytes()),
             ("word/styles.xml", self.styles.as_bytes()),
             ("word/footnotes.xml", self.footnotes.as_bytes()),
             ("word/settings.xml", SETTINGS.as_bytes()),
-            ("docProps/custom.xml", self.custom.as_bytes()),
-        ])
+        ];
+        if let Some(custom) = &self.custom {
+            parts.push(("docProps/custom.xml", custom.as_bytes()));
+        }
+        crate::zip::write(&parts)
     }
 }
 
+const DOCUMENT: &str = "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml";
+const TEMPLATE: &str = "application/vnd.openxmlformats-officedocument.wordprocessingml.template.main+xml";
+
+/// Closed by [`Parts::zip`], after the custom properties' override if any.
 const CONTENT_TYPES: &str = concat!(
     "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n",
     r#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">"#,
     r#"<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>"#,
     r#"<Default Extension="xml" ContentType="application/xml"/>"#,
-    r#"<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>"#,
+    r#"<Override PartName="/word/document.xml" ContentType="MAIN"/>"#,
     r#"<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>"#,
     r#"<Override PartName="/word/footnotes.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml"/>"#,
     r#"<Override PartName="/word/settings.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/>"#,
-    r#"<Override PartName="/docProps/custom.xml" ContentType="application/vnd.openxmlformats-officedocument.custom-properties+xml"/>"#,
-    "</Types>\n",
 );
 
+/// Closed by [`Parts::zip`], after the custom properties' relationship if any.
 const RELS: &str = concat!(
     "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n",
     r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">"#,
     r#"<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>"#,
-    r#"<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties" Target="docProps/custom.xml"/>"#,
-    "</Relationships>\n",
 );
 
 const DOCUMENT_RELS: &str = concat!(

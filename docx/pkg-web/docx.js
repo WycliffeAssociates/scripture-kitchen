@@ -1,6 +1,53 @@
 /* @ts-self-types="./docx.d.ts" */
 
 /**
+ * A document read once, rendered as often as its settings change.
+ */
+export class DocumentReading {
+    static __wrap(ptr) {
+        const obj = Object.create(DocumentReading.prototype);
+        obj.__wbg_ptr = ptr;
+        DocumentReadingFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        DocumentReadingFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_documentreading_free(ptr, 0);
+    }
+    /**
+     * @param {string} settings
+     * @returns {string}
+     */
+    render(settings) {
+        let deferred3_0;
+        let deferred3_1;
+        try {
+            const ptr0 = passStringToWasm0(settings, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.documentreading_render(this.__wbg_ptr, ptr0, len0);
+            var ptr2 = ret[0];
+            var len2 = ret[1];
+            if (ret[3]) {
+                ptr2 = 0; len2 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred3_0 = ptr2;
+            deferred3_1 = len2;
+            return getStringFromWasm0(ptr2, len2);
+        } finally {
+            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        }
+    }
+}
+if (Symbol.dispose) DocumentReading.prototype[Symbol.dispose] = DocumentReading.prototype.free;
+
+/**
  * @param {string} usfm
  * @param {boolean} rtl
  * @param {string | null} [font]
@@ -20,27 +67,26 @@ export function exportBook(usfm, rtl, font) {
 
 /**
  * @param {Uint8Array} bytes
- * @returns {string}
+ * @returns {DocumentReading}
  */
-export function importDocx(bytes) {
-    let deferred3_0;
-    let deferred3_1;
-    try {
-        const ptr0 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.importDocx(ptr0, len0);
-        var ptr2 = ret[0];
-        var len2 = ret[1];
-        if (ret[3]) {
-            ptr2 = 0; len2 = 0;
-            throw takeFromExternrefTable0(ret[2]);
-        }
-        deferred3_0 = ptr2;
-        deferred3_1 = len2;
-        return getStringFromWasm0(ptr2, len2);
-    } finally {
-        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+export function readDocument(bytes) {
+    const ptr0 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.readDocument(ptr0, len0);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
     }
+    return DocumentReading.__wrap(ret[0]);
+}
+
+/**
+ * @returns {Uint8Array}
+ */
+export function template() {
+    const ret = wasm.template();
+    var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v1;
 }
 function __wbg_get_imports() {
     const import0 = {
@@ -84,6 +130,10 @@ function __wbg_get_imports() {
         "./docx_bg.js": import0,
     };
 }
+
+const DocumentReadingFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_documentreading_free(ptr, 1));
 
 function addToExternrefTable0(obj) {
     const idx = wasm.__externref_table_alloc();

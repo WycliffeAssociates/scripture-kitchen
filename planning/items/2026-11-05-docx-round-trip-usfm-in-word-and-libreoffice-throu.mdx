@@ -178,7 +178,47 @@ The strict half: export, import, comments, the wasm module and `docx.ts`.
 - The wasm module is 413 KB (158 KB gzipped), wired into `package.json`,
   the typecheck, `wasm-build.sh` and CI like bttwriter.
 
-<Followup id="template">Generate `docx/template.dotx` (the styles in an empty document, for authoring in Word from scratch).</Followup>
+<Followup id="template" done>Generate `docx/template.dotx` (the styles in an empty document, for authoring in Word from scratch). Done 2026-11-05: written by the codegen bin with a freshness test, a starter book (`\id XXX`, `\h`, `\toc1-3`, `\mt1`, `\c 1`, `\s1`, `\p`, `\q1`, `\q2`) to type over, shipped at `./docx/template.dotx` and as `docx.template()`. LibreOffice opens it and saves it as .docx and .odt, and both import exactly. Authoring new text through LibreOffice's scripting API (UNO) hung in this sandbox, so that part was not proved by machine.</Followup>
+
+## Built, step 11 (2026-11-05, branch `docx`)
+
+The best-effort rules, ported from `@sefer/document-import`, behind the
+same entry point. Will: "we can't expect everyone to have come through our
+exporter importer path".
+
+- **Per paragraph, one pass.** A paragraph in a `USFM …` style goes to the
+  exact path (`strict.rs`); any other goes to the ported rules (`guess.rs`).
+  Both write into one state (books, lines, chapter, verse, comment anchors),
+  so a heading pasted between two of our paragraphs follows the verse
+  before it.
+- **One reading model for both** (`reading.rs`): a run keeps its character
+  style's name for the exact path and its formatting for the rules. `.odt`
+  is read too (`odt.rs`), including our styles after a Writer save, and the
+  source hash from Writer's `meta.xml`.
+- **Parity, measured.** document-import's own fixtures (Word, Word with a
+  raised baseline, Writer) give byte-identical USFM, report and comment
+  anchors (`docx/tests/document_import.rs`, the golden being
+  document-import's output). All 159 test-tier books, exported and then
+  stripped of our styles into wild drafts (superscript verse numbers,
+  indented poetry, bold headings), give the same USFM, detected mode,
+  skipped numbers and guesses from both implementations.
+- **What changed from the TypeScript, on purpose:**
+  - Versification is a canon scheme name (`"eng"`) and the book code, not a
+    callback.
+  - In a mixed document, our own `USFM v` runs count as superscript verse
+    numbers when detecting how the document writes them. Without this, a
+    verse pasted into one of our documents was left as text, because the
+    guessed paragraphs alone held too few numbers to detect.
+  - Italic or bold set by hand inside one of our paragraphs becomes
+    `\it`/`\bd`, reported as a guess.
+  - A non-breaking hyphen stays U+2011 rather than becoming `-`.
+- `read(bytes)` once, `render(&reading, &settings)` per settings change;
+  in JS, `readDocument(bytes).render(settings)`, with document-import's
+  `Settings` and `Report` shapes plus `exact` and our own counts.
+- The wasm module is now 673 KB (263 KB gzipped), up from 413 KB. Probably
+  much of that is canon's versification tables; not measured.
+
+<Question id="wasm-size">Is 263 KB gzipped acceptable, or should versification sit behind a feature so a host that never sets it doesn't carry canon's tables? I haven't measured what canon accounts for.</Question>
 
 ## Still open
 

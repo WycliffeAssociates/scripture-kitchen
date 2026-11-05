@@ -39,7 +39,7 @@ fn main() {
     let mut differ = 0;
     for (name, file, source, has_id) in &books {
         let saved = std::fs::read(dir.join("saved").join(file)).unwrap_or_else(|e| panic!("{name}: {e}"));
-        let back = docx::import(&saved).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let back = docx::import(&saved, &docx::Settings::default()).unwrap_or_else(|e| panic!("{name}: {e}"));
         // A book with no `\id` has no key to file its source hash under.
         let source_kept = back.books.first().and_then(|b| b.source.as_ref()).is_some() || !has_id;
         let verdict = match common::compare(source, &back.books[0].usfm) {

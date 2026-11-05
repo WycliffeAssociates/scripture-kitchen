@@ -6,14 +6,16 @@
   "private": true,
   "files": [
     "docx.ts",
-    "pkg-web"
+    "pkg-web",
+    "template.dotx"
   ],
   "sideEffects": [
     "./pkg-web/docx.js"
   ],
   "exports": {
     ".": "./docx.ts",
-    "./web/wasm": "./pkg-web/docx_bg.wasm"
+    "./web/wasm": "./pkg-web/docx_bg.wasm",
+    "./template.dotx": "./template.dotx"
   },
   "scripts": {
     "test": "node tests/conformance.mjs"

@@ -1,8 +1,11 @@
 /* tslint:disable */
 /* eslint-disable */
 export const memory: WebAssembly.Memory;
+export const __wbg_documentreading_free: (a: number, b: number) => void;
+export const documentreading_render: (a: number, b: number, c: number) => [number, number, number, number];
 export const exportBook: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
-export const importDocx: (a: number, b: number) => [number, number, number, number];
+export const readDocument: (a: number, b: number) => [number, number, number];
+export const template: () => [number, number];
 export const __wbindgen_exn_store: (a: number) => void;
 export const __externref_table_alloc: () => number;
 export const __wbindgen_externrefs: WebAssembly.Table;

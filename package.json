@@ -39,7 +39,8 @@
     "bttwriter/bttwriter.ts",
     "bttwriter/pkg-web",
     "docx/docx.ts",
-    "docx/pkg-web"
+    "docx/pkg-web",
+    "docx/template.dotx"
   ],
   "sideEffects": [
     "./galley/pkg-bundler/usfm_galley.js",
@@ -90,6 +91,7 @@
     "./bttwriter": "./bttwriter/bttwriter.ts",
     "./bttwriter/web/wasm": "./bttwriter/pkg-web/bttwriter_bg.wasm",
     "./docx": "./docx/docx.ts",
-    "./docx/web/wasm": "./docx/pkg-web/docx_bg.wasm"
+    "./docx/web/wasm": "./docx/pkg-web/docx_bg.wasm",
+    "./docx/template.dotx": "./docx/template.dotx"
   }
 }

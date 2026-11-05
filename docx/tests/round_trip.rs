@@ -39,7 +39,7 @@ fn every_carried_book_round_trips() {
             if let Some(first) = out.unsupported.first() {
                 return (name, Outcome::NotCarried(first.what.clone()));
             }
-            let back = docx::import(&out.docx).unwrap_or_else(|e| panic!("{name}: {e}"));
+            let back = docx::import(&out.docx, &docx::Settings::default()).unwrap_or_else(|e| panic!("{name}: {e}"));
             assert!(back.report.is_exact(), "{name}: {:?}", back.report);
             assert_eq!(back.books.len(), 1, "{name}");
             match common::compare(&source, &back.books[0].usfm) {
