@@ -1,0 +1,68 @@
+---
+id: 5851d89e-0a5b-426d-ad10-33c46b26bc7d
+title: "Canon and versification: what the plan left for later"
+kind: followup
+status: planned
+created: 2026-11-05
+updated: 2026-11-05
+sha: 7dde91c
+tags: [canon, versification]
+related: [1da22c7f-fb35-4432-b867-3b66a218bcea]
+source: closing the canon and versification plan, 2026-11-05
+---
+
+The canon and versification plan is done (steps 1-7). These were left for later on
+purpose, each recorded in that plan where it came up. None blocks anything today.
+
+<Followup id="names-review">
+
+**Confirm the gateway-language book names.** `canon/data/names/*.tsv` had a first-pass
+review only (Claude, 2026-11-05). Each file's header lists what that review changed. Kept
+as the translations write them, and worth a second look: Tamil's I and II Samuel, Kings and
+Chronicles; Russian's "3 Царств" for 1 Kings; Tok Pisin's "Jon" for John, which parsing
+reads as Jonah's code, as Sefer does. fa, pmy and zh have no Primary text yet, so they
+fall back to English until someone picks a source.
+
+</Followup>
+
+<Followup id="verse-gap-scheme">
+
+**`verse-gap` names the scheme.** "13 is missing (ulb has 1–22)", or "(following your
+source)". Left alone because it changes messages Sefer already shows.
+
+</Followup>
+
+<Followup id="whole-chapter">
+
+**Whole-chapter findings.** A chapter the scheme has and the text lacks, or one the text
+has beyond the scheme. The two lints today are per verse.
+
+</Followup>
+
+<Followup id="overlay-across-schemes">
+
+**The overlay across schemes.** The overlay doors (structure copied from a source) still
+pair verse numbers as written. Their address model is one shared sid per verse, so pairing
+across schemes means translating addresses in every overlay call. That's not worth it
+while source and target nearly always share a scheme. Decided 2026-11-05: no guard
+either.
+
+</Followup>
+
+<Followup id="wasm-size">
+
+**galley's wasm size.** Step 7a grew it 515 → 606 KB gzipped. Measured: the sniffing
+rules are about 19 KB of that, the mapping rows about 9 KB, and the rest is code. Profile
+the code before packing the rules (which would win back perhaps 10–15 KB).
+
+</Followup>
+
+<Followup id="unicode-drift">
+
+**Unicode versions.** canon's Rust `fold` follows the `unicode-normalization` crate the
+generator pins, and the TypeScript follows Node's ICU. They agree today: every
+language's names, as stored, NFC, NFD and uppercased, fold the same on both sides (15,876
+inputs). A Unicode bump on either side could move a rare character. Re-run the generator
+when the crate updates.
+
+</Followup>
