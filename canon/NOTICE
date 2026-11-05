@@ -12,9 +12,11 @@ Versification schemes
 
   Licensed under Creative Commons Attribution-ShareAlike 4.0 International
   (CC BY-SA 4.0), https://creativecommons.org/licenses/by-sa/4.0/.
-  The files are unchanged. The generated tables keep only their chapter and
-  verse counts and exclusions, and drop six Paratext-only book codes (BLT,
-  DNT, JDB, JSA, SST, TBS); those tables are a CC BY-SA 4.0 adaptation.
+  The files are unchanged. The generated tables keep their chapter and verse
+  counts, exclusions and verse mappings; drop six Paratext-only book codes
+  (BLT, DNT, JDB, JSA, SST, TBS) and org.json's own mappings; and correct
+  four mapping rows that are evident typos (listed in gen-canon's ERRATA and
+  data/schemes/README.md). Those tables are a CC BY-SA 4.0 adaptation.
 
   data/schemes/ulb.json is ours: chapter and verse counts measured from
   WycliffeAssociates/en_ulb, with eng.json's verse mappings for the 66 books

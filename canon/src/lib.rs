@@ -8,6 +8,9 @@
 //!
 //! canon::scheme("eng")?.chapters(MAL)       -> Some(4)   org says 3
 //! canon::scheme("ulb")?.last_verse(ACT, 19) -> Some(40)  eng says 41
+//!
+//! canon::map(eng, org, GEN 31:55)           -> Moved(GEN 32:1)
+//! canon::map(org, eng, PSA 13:6)            -> Split([PSA 13:5, PSA 13:6])
 //! ```
 //!
 //! The data is `data/books.tsv`, one row per USFM book identifier, and
@@ -17,14 +20,16 @@
 //! test fails when any is stale. Nothing is parsed at run time and nothing
 //! here allocates except `usfm_file_name`'s string.
 //!
-//! Mapping, coverage and sniffing land here next; the plan is
+//! Coverage and sniffing land here next; the plan is
 //! `planning/items/2026-11-04-canon-and-versification-the-book-table-schemes-map.mdx`.
 
 pub mod books;
+pub mod map;
 pub mod scheme;
 mod scheme_tables;
 mod tables;
 
 pub use books::{Book, Canon, Division, book, books, fold, parse_book, usfm_file_name};
+pub use map::{Mapped, Verse, map};
 pub use mise::books::BookKey;
 pub use scheme::{Scheme, scheme, schemes};

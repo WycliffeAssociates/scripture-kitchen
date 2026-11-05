@@ -39,7 +39,9 @@ number" is. Here both are named, and neither is "the" number.
 | `ts/tables.ts`, `ts/scheme-tables.ts` | the same tables for TypeScript | the same run |
 | `src/books.rs`, `src/scheme.rs` | the Rust lookups | by hand |
 | `ts/canon.ts`, `ts/versification.ts` | the TypeScript lookups | by hand |
+| `src/map.rs` | `map`, `to_org`, `from_org`, `moves` (Rust only) | by hand |
 | `fixtures/books.json`, `fixtures/schemes.json` | the cases both lookups must pass | by hand |
+| `fixtures/map.json` | mapping cases (`tests/map.rs`) | from a prototype, then reviewed |
 
 The generator is `gen/`, a separate unpublished crate (`canon-gen`): it reads
 the scheme JSON with serde_json, and canon's only dependency is `mise`. Its
@@ -97,5 +99,38 @@ own TOC, in onion; comparing the two is coverage (plan step 4).
 - No built-in scheme excludes a verse. `MAT 17:21` and its kind are numbered
   everywhere and left to the text to footnote.
 
-Scheme names are exact (`"org"`, not `"ORG"`). Mapping between schemes uses
-the same files' `mappedVerses` and comes next (plan step 3).
+Scheme names are exact (`"org"`, not `"ORG"`).
+
+## Mapping
+
+`map(from, to, verse)` says where a verse numbered by one scheme is under
+another, and `to_org`/`from_org` are the same with `org` on one side:
+
+```rust
+map(eng, org, GEN 31:55)  // Moved(GEN 32:1)
+map(eng, org, PSA 3:0)    // Moved(PSA 3:1): eng's title slot is org's verse 1
+map(org, lxx, NEH 1:1)    // Moved(EZR 11:1): the Septuagint's 2 Esdras
+map(eng, org, PSA 13:5)   // Merged(PSA 13:6): eng 13:5 and 13:6 are both org 13:6
+map(org, eng, PSA 13:6)   // Split([PSA 13:5, PSA 13:6])
+map(eng, org, ACT 19:41)  // Absent
+map(eng, vul, MAT 1:1)    // Same
+```
+
+Every mapping goes through `org`: a scheme's `mappedVerses` rows say where
+its verses sit there, and a verse no row mentions keeps its number (the
+format's rule, as Paratext applies it). So `eng`'s NEH 7:68, which the
+Hebrew lacks, lands on `org`'s 7:68 beside `eng`'s 7:69, and comes back
+`Merged`. The data says so; canon doesn't second-guess it.
+
+- **Verse 0** is the slot before verse 1, where a Psalm's title sits in a
+  scheme that doesn't number titles. It exists in every chapter.
+- **Parts** come back on a target where the file names one (`ESG 4:17c`).
+  The verse you ask about is always whole.
+- **`moves()`** lists only the verses that differ from `org`, for pairing to
+  rewrite just those keys.
+- **No guessing.** A verse with no counterpart is `Absent`, never "nearest".
+
+`map` is Rust only for now. It reaches TypeScript through galley's wasm
+(plan step 7), so it has one implementation. `fixtures/map.json`'s answers
+came from a separate prototype of the same rules, and a test sends every
+verse of every scheme through `org` and checks it comes back.

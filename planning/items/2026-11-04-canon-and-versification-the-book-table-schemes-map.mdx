@@ -121,6 +121,9 @@ reads those into `mise::Point`s (chapter, verse, segment) and ranges of them, an
 a `Span` (a single point or a range, both ends in one book) in the `from` scheme. What comes
 back is a span in the `to` scheme, or an honest statement that there isn't exactly one:
 
+As built (step 3), `Part` became `Merged(Verse)` and `map` takes one whole verse. See
+step 3 in "Order" below. The original sketch:
+
 <Diff id="mapped" path="canon/src/map.rs">
 ```rust
 pub struct Span {
@@ -347,8 +350,22 @@ behind.
      which aren't USFM codes. The generator drops them by name.
    - The generator moved to its own crate, `canon-gen`, so it can read JSON while canon
      keeps `mise` as its only dependency.
-3. **Map.** `to_org`/`from_org`/`map`/`moves`, with fixtures from the Kotlin hub's
-   `fixtures/versification/cases.json` and a Psalm-superscription set.
+3. **Map** (done on the `canon` branch, 2026-11-05). `map`, `to_org`, `from_org`, `moves`
+   and `has_verse`, Rust only (TypeScript gets them through galley in step 7). What changed
+   from the design above:
+   - `Mapped` is `Same`, `Moved(Verse)`, `Merged(Verse)`, `Split(Vec<Verse>)` and `Absent`.
+     `Part { of, part }` became `Merged`, which covers every many-to-one row (most have no
+     part letter), and a part letter rides on the target `Verse` where the file names one.
+   - It maps one whole verse, not a `Span`. A range is its verses mapped one by one.
+   - A verse no row mentions keeps its number (the format's rule, as Paratext applies it),
+     so `eng` NEH 7:68, which the Hebrew lacks, comes back `Merged` with 7:69 rather than
+     `Absent`. The data says so, and canon follows it.
+   - Verse 0 is the title slot and exists in every chapter.
+   - Four rows in `vul` and `rso` are evident typos. The generator corrects them by name
+     and fails on any other unequal range pair (`data/schemes/README.md`).
+   - The Kotlin hub's `cases.json` isn't in the wacs-dashboard-2 clone. Instead,
+     `fixtures/map.json` was written from a separate Python prototype and reviewed, and a
+     test sends every verse of every scheme through `org` and back.
 4. **Inventory, coverage and the two lints.** This is where the screenshot's books get
    better messages.
 5. **Sniff.** Port the test grammar (`Last`, `Exist`, `NotExist`, `<`/`>` with factors) and

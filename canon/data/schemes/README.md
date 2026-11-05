@@ -2,8 +2,11 @@
 
 One file per scheme, in the Copenhagen Alliance mapping format
 (`maxVerses`, `mappedVerses`, `partialVerses`, `excludedVerses`). `gen-canon`
-reads `maxVerses` and `excludedVerses` today; mapping (plan step 3) will read
-the rest. Licence and attribution: `../../NOTICE`.
+reads all but `partialVerses`, which only lists the parts `lxx` cuts some
+verses into: a mapping row that names a part carries its letter itself.
+`org.json`'s own eight `mappedVerses` rows (S3Y into DAG) are not read,
+because `org` is the pivot and every `org` verse is itself. Licence and
+attribution: `../../NOTICE`.
 
 ## The six vendored files
 
@@ -15,6 +18,22 @@ diff and any fixture that changes.
 
 `ethiopian_custom.json` from the same directory is not vendored: nothing here
 asks for it yet.
+
+### Errata
+
+Four `mappedVerses` rows pair ranges of different lengths in a way only a
+typo explains. The files stay unchanged; `gen-canon`'s `ERRATA` corrects the
+rows as it reads them, and fails if one is no longer there to correct.
+
+| scheme | row as written | read as | why |
+|---|---|---|---|
+| `vul` | `DAG 3:52-23` → `S3Y 1:30-31` | `DAG 3:52-53` | backwards; `org.json` pairs S3Y 1:30-31 with DAG 3:52-53 |
+| `vul` | `DAG 13:1-63` → `SUS 1:63` | `SUS 1:1-63` | a whole chapter onto its last verse; it is Susanna, verse for verse |
+| `vul` | `DAG 14:1-42` → `BEL 1:42` | `BEL 1:1-42` | likewise, Bel |
+| `rso` | `PSA 89:2-6` → `PSA 90:1-6` | `PSA 90:2-6` | five verses onto six; the row before already sends 89:0-1 to 90:0-1 |
+
+Every other unequal pair is a real merge or split (one side a single verse),
+such as `rsc`'s `PSA 89:0-1` → `PSA 90:0`.
 
 `org`, `eng` and `lxx` also count six Paratext-only texts (BLT, DNT, JDB,
 JSA, SST, TBS: alternate Greek forms of Bel, Daniel, Judges, Joshua, Susanna

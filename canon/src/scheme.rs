@@ -16,12 +16,12 @@
 //! The built-in schemes are generated from `data/schemes/*.json`: the
 //! Copenhagen Alliance files (`org`, `eng`, `lxx`, `vul`, `rsc`, `rso`, CC
 //! BY-SA 4.0; see `NOTICE`) and `ulb`, which is measured from en_ulb (see
-//! `data/schemes/README.md`). This module reads only their counts and
-//! exclusions. The `mappedVerses` the same files carry are what `map` will
-//! read (plan step 3).
+//! `data/schemes/README.md`). This module holds their counts and
+//! exclusions, and the `mappedVerses` rows that `crate::map` reads.
 
 use mise::books::BookKey;
 
+use crate::map::Row;
 use crate::scheme_tables::SCHEMES;
 
 /// One numbering tradition's chapter and verse counts.
@@ -37,6 +37,11 @@ pub struct Scheme {
     /// `(book's bytes, chapter, verse)`, sorted: verses the scheme omits on
     /// purpose. Bytes rather than `BookKey`, which has no order.
     excluded: &'static [([u8; 3], u16, u16)],
+    /// The file's `mappedVerses`, toward `org`, sorted by where they start
+    /// here. Empty for `org` itself.
+    rows: &'static [Row],
+    /// Indexes into `rows`, sorted by where each lands in `org`.
+    by_target: &'static [u16],
 }
 
 impl Scheme {
@@ -44,12 +49,24 @@ impl Scheme {
         name: &'static str,
         books: &'static [(BookKey, &'static [u16])],
         excluded: &'static [([u8; 3], u16, u16)],
+        rows: &'static [Row],
+        by_target: &'static [u16],
     ) -> Scheme {
         Scheme {
             name,
             books,
             excluded,
+            rows,
+            by_target,
         }
+    }
+
+    pub(crate) fn rows(&self) -> &[Row] {
+        self.rows
+    }
+
+    pub(crate) fn by_target(&self) -> &[u16] {
+        self.by_target
     }
 
     /// `"org"`, `"eng"`, `"ulb"`, …
