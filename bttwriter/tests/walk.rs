@@ -9,123 +9,16 @@
 //!
 //! Needs the `git` command; a missing one, or a missing fixture, fails.
 
+mod common;
+
 use std::collections::BTreeMap;
-use std::io::{BufRead, BufReader, Read, Write};
-use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::path::Path;
 
-use bttwriter::pack::{Kind, ObjectId};
-use bttwriter::walk::{ObjectSource, WriterHistory, read_history};
+use bttwriter::pack::ObjectId;
+#[cfg(feature = "git2")]
+use bttwriter::walk::read_history;
 
-const REPOS: &[&str] = &[
-    "kpass_tmf_3jn_text_reg",
-    "bahasatech.indotimur_kps-x-kaigar_3jn_text_reg",
-    "chunga_major_bem-x-ngumbo_2ch_text_reg",
-    "andriatiana_wa_msh_job_text_udb",
-    "bahasatech.indotimur_saw_isa_text_reg",
-];
-
-fn fixtures() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures")
-}
-
-fn git(dir: &Path, args: &[&str]) -> String {
-    let out = Command::new("git")
-        .arg("--git-dir")
-        .arg(dir)
-        .args(args)
-        .output()
-        .expect("git runs");
-    assert!(
-        out.status.success(),
-        "git {args:?}: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    String::from_utf8(out.stdout).unwrap()
-}
-
-fn clone(repo: &str) -> PathBuf {
-    let bundle = fixtures().join("repos").join(format!("{repo}.bundle"));
-    assert!(bundle.is_file(), "missing {}", bundle.display());
-    let dir = std::env::temp_dir().join(format!("bttwriter-walk-{}-{repo}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    let status = Command::new("git")
-        .args(["clone", "--bare", "--quiet"])
-        .arg(&bundle)
-        .arg(&dir)
-        .status()
-        .expect("git runs");
-    assert!(status.success(), "clone {repo}");
-    dir
-}
-
-/// `git cat-file --batch`, kept open: one request per object.
-struct CliSource {
-    child: Child,
-    stdin: ChildStdin,
-    stdout: BufReader<ChildStdout>,
-}
-
-impl CliSource {
-    fn new(dir: &Path) -> CliSource {
-        let mut child = Command::new("git")
-            .arg("--git-dir")
-            .arg(dir)
-            .args(["cat-file", "--batch"])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .expect("git runs");
-        let stdin = child.stdin.take().unwrap();
-        let stdout = BufReader::new(child.stdout.take().unwrap());
-        CliSource {
-            child,
-            stdin,
-            stdout,
-        }
-    }
-}
-
-impl Drop for CliSource {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
-}
-
-impl ObjectSource for CliSource {
-    type Error = String;
-
-    fn read(&mut self, id: &ObjectId) -> Result<(Kind, Vec<u8>), String> {
-        writeln!(self.stdin, "{id}").map_err(|e| e.to_string())?;
-        self.stdin.flush().map_err(|e| e.to_string())?;
-        let mut header = String::new();
-        self.stdout
-            .read_line(&mut header)
-            .map_err(|e| e.to_string())?;
-        let parts: Vec<&str> = header.split_whitespace().collect();
-        let [_, kind, size] = parts[..] else {
-            return Err(format!("{id}: {header}"));
-        };
-        let kind = match kind {
-            "commit" => Kind::Commit,
-            "tree" => Kind::Tree,
-            "blob" => Kind::Blob,
-            other => return Err(format!("{id} is a {other}")),
-        };
-        let size: usize = size.parse().map_err(|_| header.clone())?;
-        let mut body = vec![0; size + 1];
-        self.stdout
-            .read_exact(&mut body)
-            .map_err(|e| e.to_string())?;
-        body.pop();
-        Ok((kind, body))
-    }
-}
-
-fn head(dir: &Path) -> ObjectId {
-    ObjectId::from_hex(git(dir, &["rev-parse", "HEAD"]).trim()).unwrap()
-}
+use common::{REPOS, clone, fixtures, git, history_of};
 
 /// What git says each first-parent commit changed, text paths only, oldest
 /// first: one `git log`, each commit against its first parent (merges too).
@@ -158,17 +51,11 @@ fn gits_saves(dir: &Path) -> Vec<(ObjectId, Vec<String>)> {
         .collect()
 }
 
-fn walk(dir: &Path, repo: &str) -> WriterHistory {
-    let source = repo.replacen('_', "/", 1);
-    read_history(&mut CliSource::new(dir), head(dir), &[], &source)
-        .unwrap_or_else(|e| panic!("{repo}: {e}"))
-}
-
 #[test]
 fn five_histories_rebuild_head_and_agree_with_git() {
     for repo in REPOS {
         let dir = clone(repo);
-        let history = walk(&dir, repo);
+        let history = history_of(&dir, repo);
 
         // Every save, applied in order, is the book at HEAD.
         let mut files: BTreeMap<String, String> = BTreeMap::new();
@@ -208,7 +95,8 @@ fn five_histories_rebuild_head_and_agree_with_git() {
         {
             let git2_repo = git2::Repository::open_bare(&dir).unwrap();
             let mut source = bttwriter::Git2Source::new(git2_repo.odb().unwrap());
-            let via_git2 = read_history(&mut source, head(&dir), &[], &history.source).unwrap();
+            let via_git2 =
+                read_history(&mut source, common::head(&dir), &[], &history.source).unwrap();
             assert_eq!(
                 via_git2, history,
                 "{repo}: libgit2 and the git command disagree"

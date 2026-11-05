@@ -17,14 +17,28 @@
 //! the same bytes Sefer's `writerBook.ts` writes; `fixtures/stitched/` pins
 //! them on five real projects.
 //!
-//! [`pack`] writes git objects into one pack and its index in memory: what a
-//! replayed history becomes, with no git library and no filesystem.
+//! A project's history, from its git objects to one pack:
+//!
+//! ```text
+//! walk::HistoryWalk / read_history(objects, head, …)   → WriterHistory { project, saves }
+//! replay(&[WriterHistory], &ReplayOptions { now, … })  → Replayed { head, pack, idx, name, books, … }
+//! ```
+//!
+//! [`walk`] reads a Writer repo's saves from objects it asks for (sans-IO, so
+//! an async git can drive it). [`replay()`] turns several books' saves into one
+//! line of commits, each holding the book as the template renders it, with
+//! [`clock`] estimating dates a reset battery got wrong and [`summary`] saying
+//! what each save changed. [`pack`] writes the objects into one pack and its
+//! index in memory, with no git library and no filesystem.
 //!
 //! No I/O: callers hand over each file's path and bytes, read however they
 //! read them (a folder, a git tree), and write what comes back.
 
+pub mod clock;
 pub mod pack;
+pub mod replay;
 pub mod stitch;
+pub mod summary;
 pub mod walk;
 
 #[cfg(feature = "git2")]
@@ -32,6 +46,8 @@ mod git2_source;
 #[cfg(feature = "git2")]
 pub use git2_source::Git2Source;
 
+pub use replay::{BookFile, ReplayError, ReplayOptions, Replayed, replay};
 pub use stitch::{
     WriterChapter, WriterTree, book_to_usfm, decode_text, is_text_path, stitch, tree_from_files,
 };
+pub use walk::{Save, WriterHistory, read_history};

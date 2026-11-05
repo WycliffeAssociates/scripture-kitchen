@@ -31,7 +31,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use bento::bttwriter::WriterProject;
 
 use crate::pack::{Kind, ObjectId, Signature};
-use crate::stitch::{decode_text, is_text_path};
+use crate::stitch::{decode_text, is_text_path, js_trim};
 
 /// One save that changed the book's text.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,7 +41,8 @@ pub struct Save {
     pub committer: Signature,
     /// The message's first line, trimmed: a timestamp, in practice.
     pub message: String,
-    /// The text files it changed, with their new text; `None`: deleted, or not text.
+    /// The text files it changed, with their new text (`None`: deleted, or not
+    /// text), in the order Sefer's walk lists them.
     pub changes: Vec<(String, Option<String>)>,
 }
 
@@ -105,9 +106,22 @@ struct TreeEntry {
     id: ObjectId,
 }
 
+/// A changed path, with its place in the order Sefer's walk lists a save's
+/// changes: depth first, each folder's names as the union of the old tree's
+/// (in tree order) and then the new tree's, and a folder's contents before a
+/// file of the same name. Replay holds files in that insertion order, as
+/// Sefer's `Map` does, and the template's "the later title file wins" reads it.
+struct Change {
+    order: Vec<u32>,
+    path: String,
+    blob: Option<ObjectId>,
+}
+
 /// Two trees to compare, at `prefix`, for the save at `save`.
 struct Pair {
     save: usize,
+    /// Where this pair's changes fall in the save's list: see [`Change`].
+    order: Vec<u32>,
     before: Option<ObjectId>,
     after: Option<ObjectId>,
     prefix: String,
@@ -136,7 +150,7 @@ pub struct HistoryWalk {
     blobs: FxHashMap<ObjectId, Vec<u8>>,
     pending: Vec<Pair>,
     /// Per save on the line: the paths it changed and their new blob.
-    changes: Vec<Vec<(String, Option<ObjectId>)>>,
+    changes: Vec<Vec<Change>>,
     manifest: Option<ObjectId>,
     wants: Vec<ObjectId>,
 }
@@ -219,13 +233,14 @@ impl HistoryWalk {
         let project_name = manifest.project.and_then(|p| p.name);
 
         let mut saves = Vec::new();
-        for (commit, changed) in self.line.into_iter().zip(self.changes) {
+        for (commit, mut changed) in self.line.into_iter().zip(self.changes) {
             if changed.is_empty() {
                 continue;
             }
+            changed.sort_by(|a, b| a.order.cmp(&b.order));
             let changes = changed
                 .into_iter()
-                .map(|(path, blob)| {
+                .map(|Change { path, blob, .. }| {
                     let text = blob
                         .and_then(|id| self.blobs.get(&id))
                         .and_then(|bytes| decode_text(bytes));
@@ -252,11 +267,12 @@ impl HistoryWalk {
     /// with its first parent's (the one before it on the line).
     fn start_trees(&mut self) {
         self.line.reverse();
-        self.changes = vec![Vec::new(); self.line.len()];
+        self.changes = self.line.iter().map(|_| Vec::new()).collect();
         let mut before = None;
         for (save, commit) in self.line.iter().enumerate() {
             self.pending.push(Pair {
                 save,
+                order: Vec::new(),
                 before,
                 after: Some(commit.tree),
                 prefix: String::new(),
@@ -301,7 +317,7 @@ impl HistoryWalk {
                 self.changes
                     .iter()
                     .flatten()
-                    .filter_map(|(_, blob)| *blob)
+                    .filter_map(|change| change.blob)
                     .chain(self.manifest)
                     .filter(|id| !self.blobs.contains_key(id) && seen.insert(*id))
                     .collect()
@@ -347,7 +363,7 @@ impl HistoryWalk {
         }
         let mut deeper = Vec::new();
         let mut changed = Vec::new();
-        for name in names {
+        for (index, name) in (0u32..).zip(names) {
             if same(name) {
                 continue;
             }
@@ -365,15 +381,23 @@ impl HistoryWalk {
             if tree_of(was).is_some() || tree_of(now).is_some() {
                 deeper.push(Pair {
                     save: pair.save,
+                    order: [pair.order.as_slice(), &[index, 0]].concat(),
                     before: tree_of(was),
                     after: tree_of(now),
                     prefix: format!("{path}/"),
                 });
             }
-            if let Some(blob) = file_of(now) {
-                changed.push((path, Some(blob)));
-            } else if file_of(was).is_some() {
-                changed.push((path, None));
+            let blob = match (file_of(was), file_of(now)) {
+                (_, Some(blob)) => Some(blob),
+                (Some(_), None) => None,
+                (None, None) => continue,
+            };
+            if is_text_path(&path) {
+                changed.push(Change {
+                    order: [pair.order.as_slice(), &[index, 1]].concat(),
+                    path,
+                    blob,
+                });
             }
         }
         if pair.prefix.is_empty() && pair.save + 1 == self.line.len() {
@@ -381,7 +405,7 @@ impl HistoryWalk {
                 .filter(|(kind, _)| *kind == EntryKind::File)
                 .map(|(_, id)| id);
         }
-        self.changes[pair.save].extend(changed.into_iter().filter(|(path, _)| is_text_path(path)));
+        self.changes[pair.save].extend(changed);
         self.pending.extend(deeper);
     }
 }
@@ -468,7 +492,12 @@ fn parse_commit(id: ObjectId, bytes: &[u8]) -> Result<Commit, WalkError> {
         first_parent,
         author: author.ok_or_else(|| malformed(id, "a commit with no author"))?,
         committer: committer.ok_or_else(|| malformed(id, "a commit with no committer"))?,
-        message: message.trim().lines().next().unwrap_or("").to_owned(),
+        // As Sefer reads it: `message.trim().split("\n")[0]`.
+        message: js_trim(&message)
+            .split('\n')
+            .next()
+            .unwrap_or("")
+            .to_owned(),
     })
 }
 

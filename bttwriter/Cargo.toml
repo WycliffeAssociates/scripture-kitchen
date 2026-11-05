@@ -2,7 +2,7 @@
 name = "bttwriter"
 version.workspace = true
 edition.workspace = true
-description = "BTT Writer projects: one book's chunk files to USFM, and (to come) a project's save history replayed into one git pack."
+description = "BTT Writer projects: one book's chunk files to USFM, and a project's save history replayed into one git pack."
 
 [lints]
 workspace = true

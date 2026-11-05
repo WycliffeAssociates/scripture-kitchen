@@ -65,7 +65,7 @@ pub fn stitch<'a>(
 /// ECMAScript's whitespace, as `String.prototype.trim` and a regex `\s` mean
 /// it. Rust's `char::is_whitespace` differs on two code points: it counts
 /// U+0085, which JavaScript does not, and not U+FEFF, which JavaScript does.
-fn is_js_space(c: char) -> bool {
+pub(crate) fn is_js_space(c: char) -> bool {
     matches!(
         c,
         '\u{0009}'
@@ -87,7 +87,7 @@ fn is_js_space(c: char) -> bool {
     )
 }
 
-fn js_trim(text: &str) -> &str {
+pub(crate) fn js_trim(text: &str) -> &str {
     text.trim_matches(is_js_space)
 }
 
