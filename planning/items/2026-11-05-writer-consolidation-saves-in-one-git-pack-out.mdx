@@ -2,7 +2,7 @@
 id: 4c7328e1-1ed5-4272-9d4f-c43c392d8f74
 title: "BTT Writer consolidation: Writer repos in, one git pack out"
 kind: plan
-status: in-progress
+status: done
 created: 2026-11-05
 updated: 2026-11-05
 sha: fcda333
@@ -367,7 +367,7 @@ bttwriter.consolidate(histories, {
 }): Replayed & { manifest: { path: string; bytes: Uint8Array } }; // closing commit is in the pack
 ```
 
-<Followup id="consolidate-manifest">In step 6, after container (step 5), add `consolidate()`: replay, then a closing commit (with `PackWriter`) holding the RC `manifest.yaml` or Burrito `metadata.json` for `books`. The hub's `manifest_with_book` and Sefer's `withProjects`/`withBooks` are what it replaces.</Followup>
+<Followup id="consolidate-manifest" done>In step 6, after container (step 5), add `consolidate()`: replay, then a closing commit (with `PackWriter`) holding the RC `manifest.yaml` or Burrito `metadata.json` for `books`. The hub's `manifest_with_book` and Sefer's `withProjects`/`withBooks` are what it replaces.</Followup>
 
 ## Git internals the pack needs
 
