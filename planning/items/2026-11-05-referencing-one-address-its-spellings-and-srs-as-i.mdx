@@ -75,7 +75,7 @@ One `Address`, many spellings. Each spelling is a codec, never a second model:
 |---|---|---|---|
 | **Machine** (stored, sent, logged) | `GEN 0`, `PSA 3:0`, `LUK 11:2b`, `MAT 1:20-2:3` | us | undecided: `mise` documents `GEN intro`, Sefer uses `GEN 0` |
 | **Human citation** (typed, shown) | `Mateo 5:3-7; 6:1`, `1 Jn 3:16` | people, in a go-to box or a note | Sefer `citation.ts` + `names.ts` (~390 lines, `citation.test.ts` ~60 rows) |
-| **uW TSV Reference cell** | `1:3`, `1:3-5`, `front:intro`, `1:intro` | tn/tq TSV files (book from the file) | each helps reader; the helps spike's parser accepts a backwards range Sefer rejects |
+| **uW TSV Reference cell** | `1:3`, `1:3-5`, `front:intro`, `1:intro` | tn/tq TSV files (book from the file) | only the helps spike, which measured how messy en_tn's format is. Not this repo's job yet (below) |
 | **onion `Sid`** | `GEN 1:3-5` | onion's TOC | onion `toc.rs` |
 | **SRS** | `MAT 2:1!3`, `en+niv.MRK 1:14!s`, `MRK 0!ip!w!1` | the USFM committee's standard; `\ref loc`; usfmtc | the Kotlin hub's `SrsParser` (private repo) |
 
@@ -99,6 +99,14 @@ code disagrees with itself:
 
 <Question id="machine-spelling" answer="Yes (Will, 2026-11-06). The basic reference is a small text grammar over Address: no USFM parser and no NFD. Those belong to SRS words, characters and markers only, which is why srs is its own crate.">Do we adopt SRS's basic reference (book, chapter, verse, subverse, ranges, lists; no words, characters, markers or translation prefix) as *the* machine spelling of an `Address`? It answers the doc's first open question with a published standard instead of a house rule, it costs only renaming `GEN intro` to `GEN 0` in `mise`'s docs, and anything that reads SRS reads ours. I'd say yes.</Question>
 
+**A segment is one letter.** SRS: "Only a simple ascii lowercase letter may be used for a
+subverse identifier." So `Point.segment` becomes `Option<u8>` instead of `Option<String>`,
+and `Address` needs no heap and can be `Copy`. Decided 2026-11-06, while `mise` has few
+users: onion's `resolve` (which builds the segment from the source), `onion-wasm`'s
+resolution and the resolve cases. A source segment that isn't one lowercase letter (`12ab`,
+`12A`) is then never matched by an `Address`, the same as any other malformed designator:
+degrade, never repair.
+
 **Its status.** The tcdocs [roadmap](https://github.com/usfm-bible/tcdocs/blob/main/docs/USFMTC%20Roadmap.md)
 still lists the Google doc
 [U23003 USFM References](https://docs.google.com/document/d/1U0CrIJkU4h4pPOhhifN1y-HJU5f5r6nGD6d2rLuMeeM/edit?tab=t.0)
@@ -107,9 +115,22 @@ Google doc is the proposal; the Markdown is the standard. USFM itself now leans 
 gives `@vid` "extended reference syntax", 3.1.2 adds a `vid` milestone, and `\ref loc`
 uses it.
 
-The other spellings become codecs into and out of `Address`: the uW TSV cell (with its book
-from the file name, and `front`/`intro` mapped to chapter 0 and `Intro`), `Sid`, and
-human citations.
+The other spellings become codecs into and out of `Address`: `Sid` and human citations.
+
+**TSV helps cells are out of scope.**
+
+> I don't think we're ready for anything TSV like in this repo (Will, 2026-11-06)
+
+`front:intro` is a convention of the helps format, not of USFM, and the org doesn't read
+those files today. When it does, a helps package owns the cells: it maps `front:intro` and
+`1:intro` itself and hands the rest to `reference.parse_in`.
+
+**`Sid` stays onion's.** It is the TOC's cheap answer to "which row is this byte in": `Copy`,
+10 bytes, the book as written (even `gen` or a broken `\id 1`), one chapter, no segment.
+`locate` runs for every sous finding, so it doesn't allocate an `Address`. `reference` adds one
+conversion, `Sid` → `(book, Address)`, and nothing outside onion and galley holds a `Sid`.
+With the TOC tile change, `Sid` prints the front matter as `GEN 0`, not `GEN`, since in the
+machine spelling `GEN` is the whole book.
 
 ## Source spans inside, SRS at the edge
 
@@ -211,7 +232,7 @@ What changes for callers:
 flowchart LR
   mise["mise: Address, Point"] --> reference
   canon["canon: books, names, schemes"] --> reference
-  reference["reference: machine spelling, citations, TSV + Sid codecs"] --> srs
+  reference["reference: machine spelling, citations, Sid"] --> srs
   srs["srs: the full SRS grammar"] --> galley
   reference --> galley["galley: resolve, srs locate (needs the text)"]
 ```
@@ -234,9 +255,10 @@ reference.cite(text: string, opts: { locales: string[]; book?: BookCode /* conte
 // "Mateo 5:3-7; 6:1" → MAT 5:3-7, MAT 6:1 (book carried to the second), assumed: ["es name"]
 reference.show(refs: Reference[], opts: { locale: string; style: "long" | "short" | "abbr" }): string;
 
-// Codecs
-reference.tsv.parse(cell: "1:3-5" | "front:intro", book: BookCode): Reference;
-reference.tsv.format(ref: Reference): string;
+// A contextual reference, read relative to a book (SRS's ContextRef): "1:3-5" in MAT.
+reference.parseIn(book: BookCode, text: string): Reference[] | ReferenceError;
+
+// onion's TOC answer, as an Address.
 reference.sid(sid: Sid): Reference;
 ```
 
@@ -289,8 +311,6 @@ words, characters or markers, and `reference` stays small without them.
 |---|---|---|
 | `address.ts` (types) | Sefer `packages/text/src/location` | `mise::Address`, through galley |
 | `citation.ts`, `names.ts` (~390 lines) | Sefer `packages/text/src/location` | `reference.cite` / `show`, with canon's names |
-| The cut-down citation parser | the helps spike | `reference.tsv` |
-| Ad hoc `front:intro` handling | each helps reader | `reference.tsv` |
 | `SrsParser` | the Kotlin hub (private) | `srs`, through its fixtures until a JVM app needs bindings |
 | `GEN intro` in `mise`'s docs | `mise/src/address.rs` | `GEN 0` (doc only, done 2026-11-06) |
 
@@ -316,8 +336,8 @@ words, characters or markers, and `reference` stays small without them.
 
 1. **The spelling decision** (done 2026-11-06): SRS basic as the machine spelling; `mise`'s
    docs now say `GEN 0`.
-2. **`reference` with `parse`/`format`** (machine spelling) and the TSV and `Sid` codecs.
-   Nothing here waits on canon.
+2. **`reference` with `parse`/`format`/`parseIn`** (machine spelling) and the `Sid`
+   conversion, with `Point.segment` as one letter. Nothing here waits on canon.
 3. **`cite`/`show`** with English names and Sefer's fixtures, then localized names when
    canon's step 6 lands.
 4. **galley doors**, so Sefer switches `citation.ts` and `names.ts`. This goes with canon's
