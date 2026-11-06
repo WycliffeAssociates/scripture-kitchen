@@ -16,6 +16,11 @@ B=../testData/exampleCorpora
 ./target/release/recipe-diff   ../testData/stressCorpora/en_ult/42-MRK.usfm $B/en_ulb/42-MRK.usfm side ULT ULB    # or redline
 ```
 
+The studio (`plate-serve`) runs them too: pick one from **Recipe** in the
+bar. Server compile only. Diglot pairs the selected book with the ULB; diff
+compares the ULT and the ULB of the selected book; notes need
+`data/tn_<CODE>.tsv`.
+
 `data/tn_MRK.tsv` is unfoldingWord's English translation notes for Mark (CC
 BY-SA 4.0), fetched with
 `curl -L -o data/tn_MRK.tsv https://git.door43.org/unfoldingWord/en_tn/raw/branch/master/tn_MRK.tsv`.

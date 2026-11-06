@@ -19,10 +19,39 @@ use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use typst_kit::fonts::FontStore;
 
+// The recipes, compiled straight from their folders (they stay out of the
+// library: examples, not product).
+#[path = "../../recipes/diff/recipe.rs"]
+mod diff;
+#[path = "../../recipes/diglot/recipe.rs"]
+mod diglot;
+#[path = "../../recipes/links/recipe.rs"]
+mod links;
+#[path = "../../recipes/notes/recipe.rs"]
+mod notes;
+
 struct App {
     fonts: Arc<FontStore>,
     /// File name → USFM text.
     books: BTreeMap<String, String>,
+    /// Book code → text, for the recipes' second texts.
+    ulb: BTreeMap<String, String>,
+    ult: BTreeMap<String, String>,
+}
+
+/// Every .usfm under `dir`, keyed by its `\id` code.
+fn by_code(dir: &std::path::Path) -> BTreeMap<String, String> {
+    let mut map = BTreeMap::new();
+    let Ok(entries) = std::fs::read_dir(dir) else { return map };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("usfm"))
+            && let Ok(text) = std::fs::read_to_string(&path)
+        {
+            map.insert(plate::markup(&text).code, text);
+        }
+    }
+    map
 }
 
 #[derive(Serialize)]
@@ -36,6 +65,8 @@ struct BookInfo {
 struct RenderRequest {
     books: Vec<String>,
     settings: serde_json::Value,
+    #[serde(default)]
+    recipe: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -66,7 +97,10 @@ async fn main() {
         }
     }
     let fonts = plate::world::fonts(&[PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/fonts"))]);
-    let app = Arc::new(App { fonts, books });
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../testData");
+    let ulb = by_code(&root.join("exampleCorpora/en_ulb"));
+    let ult = by_code(&root.join("stressCorpora/en_ult"));
+    let app = Arc::new(App { fonts, books, ulb, ult });
     let router = Router::new()
         .route("/", get(index))
         .route("/api/books", get(list_books))
@@ -115,6 +149,8 @@ struct RenderQuery {
     books: String,
     /// The settings JSON.
     settings: String,
+    #[serde(default)]
+    recipe: Option<String>,
 }
 
 /// The GET spelling of `/api/render`, for networks whose web filter stops a
@@ -125,7 +161,7 @@ async fn render_get(State(app): State<Arc<App>>, Query(q): Query<RenderQuery>) -
         Err(e) => return (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
     };
     let books = q.books.split(',').filter(|b| !b.is_empty()).map(str::to_string).collect();
-    render(State(app), Json(RenderRequest { books, settings })).await
+    render(State(app), Json(RenderRequest { books, settings, recipe: q.recipe })).await
 }
 
 async fn render(State(app): State<Arc<App>>, Json(req): Json<RenderRequest>) -> Response {
@@ -139,8 +175,34 @@ async fn render(State(app): State<Arc<App>>, Json(req): Json<RenderRequest>) -> 
     }
     let settings = req.settings.to_string();
     let fonts = app.fonts.clone();
+    let recipe = req.recipe.unwrap_or_default();
+    let code = plate::markup(&usfm[0]).code;
+    let app2 = app.clone();
     let result = tokio::task::spawn_blocking(move || {
-        let r = plate::world::render(&fonts, &usfm, &settings);
+        let need = |map: &BTreeMap<String, String>, what: &str| {
+            map.get(&code).cloned().ok_or_else(|| format!("no {what} text for {code} in testData"))
+        };
+        let r = match recipe.as_str() {
+            "links" => links::run(&fonts, &usfm, &settings),
+            "notes" => {
+                let tsv_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("data/tn_{code}.tsv"));
+                match std::fs::read_to_string(&tsv_path) {
+                    Ok(tsv) => {
+                        let text = app2.ult.get(&code).cloned().unwrap_or_else(|| usfm[0].clone());
+                        notes::run(&fonts, &text, &tsv, &settings)
+                    }
+                    Err(_) => Err(format!("no notes for {code}: fetch {} (only Mark is here)", tsv_path.display())),
+                }
+            }
+            "diglot" => need(&app2.ulb, "ULB").and_then(|right| {
+                diglot::run(&fonts, &usfm[0], &right, ("Berean Standard Bible", "Unlocked Literal Bible"), &settings)
+            }),
+            "diff-side" | "diff-redline" => need(&app2.ult, "ULT").and_then(|old| {
+                let new = need(&app2.ulb, "ULB")?;
+                diff::run(&fonts, &old, &new, recipe.trim_start_matches("diff-"), ("ULT", "ULB"), &settings)
+            }),
+            _ => plate::world::render(&fonts, &usfm, &settings),
+        };
         // Keep the incremental cache for recent compiles only.
         comemo::evict(10);
         r

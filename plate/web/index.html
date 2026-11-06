@@ -111,6 +111,14 @@
   <div id="bar">
     <button class="primary" id="go">Render</button>
     <label class="check" style="margin:0">Auto <input type="checkbox" id="auto" checked></label>
+    <label style="margin:0;grid-template-columns:auto auto">Recipe <select id="recipe">
+      <option value="">Plain</option>
+      <option value="links">Links + contents</option>
+      <option value="notes">Study notes (Mark only)</option>
+      <option value="diglot">Diglot BSB | ULB</option>
+      <option value="diff-side">Diff ULT → ULB, side by side</option>
+      <option value="diff-redline">Diff ULT → ULB, redline</option>
+    </select></label>
     <label style="margin:0;grid-template-columns:auto auto">Compile in <select id="where"><option value="server">server (native)</option><option value="browser">browser (wasm)</option></select></label>
     <span id="status">Pick books and change a setting.</span>
   </div>
@@ -189,6 +197,18 @@ function schedule() {
 form.addEventListener("input", schedule);
 booksEl.addEventListener("change", schedule);
 document.getElementById("go").onclick = render;
+document.getElementById("recipe").addEventListener("change", () => {
+  // The recipes that read one book need it: pick Mark if nothing fits.
+  const r = document.getElementById("recipe").value;
+  if (r && r !== "links") {
+    const codes = JSON.parse(booksEl.dataset.codes);
+    const sel = [...booksEl.selectedOptions];
+    if (sel.length !== 1 || (r === "notes" && codes[[...booksEl.options].indexOf(sel[0])] !== "MRK")) {
+      [...booksEl.options].forEach((o, i) => o.selected = codes[i] === "MRK");
+    }
+  }
+  schedule(); if (!document.getElementById("auto").checked) render();
+});
 
 // Browser mode: onion and Typst in one wasm module, loaded on first use.
 let studio, usfmCache = new Map();
@@ -219,6 +239,12 @@ async function browserRender(books, s) {
 async function render() {
   const s = settings();
   const books = [...booksEl.selectedOptions].map(o => o.value);
+  const recipe = document.getElementById("recipe").value;
+  if (document.getElementById("where").value === "browser" && recipe) {
+    errorEl.style.display = "block";
+    errorEl.textContent = "Recipes run on the server only; switch “Compile in” to server.";
+    return;
+  }
   if (document.getElementById("where").value === "browser") {
     if (!books.length) return;
     statusEl.textContent = "Rendering in the browser…";
@@ -241,7 +267,7 @@ async function render() {
   statusEl.textContent = `Rendering ${books.length} book${books.length > 1 ? "s" : ""}…`;
   const t0 = performance.now();
   // GET, not POST: some web filters (Sophos) stop a POST to an uncategorized host.
-  const q = new URLSearchParams({ books: books.join(","), settings: JSON.stringify(s) });
+  const q = new URLSearchParams({ books: books.join(","), settings: JSON.stringify(s), recipe });
   const res = await fetch("/api/render?" + q, { cache: "no-store" });
   if (id !== inflight) return;
   const type = res.headers.get("content-type") || "";

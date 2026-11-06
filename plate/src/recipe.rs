@@ -64,3 +64,13 @@ pub fn report(name: &str, result: Result<(Vec<u8>, Timings), String>) {
         }
     }
 }
+
+/// `user` settings with `forced` laid over them: a recipe that needs one
+/// column says so, whatever the form sent.
+pub fn merge(user: &str, forced: &str) -> String {
+    let mut base: serde_json::Value = serde_json::from_str(user).unwrap_or_else(|_| serde_json::json!({}));
+    if let (Some(b), Ok(serde_json::Value::Object(f))) = (base.as_object_mut(), serde_json::from_str(forced)) {
+        b.extend(f);
+    }
+    base.to_string()
+}
