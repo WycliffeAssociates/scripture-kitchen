@@ -82,7 +82,9 @@ use crate::token::{Token, TokenKind};
 pub enum BlockKind {
     /// The bytes before the first `\c` — `BOOK 0:0`.
     FrontMatter,
-    /// A `\c` and whatever precedes its first verse's tile — `BOOK 1:0`.
+    /// A `\c` and whatever precedes its first verse's tile — `BOOK 1:0`. That
+    /// label is diff's own: the block is the chapter's whole head, a `\d`
+    /// title (verse 0 to resolve and `Toc::address_at`) included.
     ChapterOpen,
     /// A verse's tile: the `\p` and headings before its `\v`, the `\v`, and its
     /// text — `BOOK 1:1`, `BOOK 1:1-3`.

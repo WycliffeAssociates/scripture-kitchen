@@ -526,7 +526,7 @@ fn item_address(start: Ref, end: Option<Ref>) -> Result<Address, CiteError> {
         });
     }
     let (from, to) = (point(&start), point(&end));
-    if to < from {
+    if from.runs_back_to(&to) {
         return Err(CiteError::of(Problem::Backwards));
     }
     Ok(Address::Verses { from, to })

@@ -491,11 +491,14 @@ impl Reader<'_, '_> {
             .iter()
             .take_while(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'+' | b'_'))
             .count();
+        // A book code has a capital: `4:100` is a chapter and verse, not a
+        // prefix `4` before a code `100`.
         id > 0
             && matches!(bytes.get(id), Some(b'.' | b':'))
             && bytes.get(id + 1..id + 4).is_some_and(|code| {
                 code.iter()
                     .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
+                    && code.iter().any(u8::is_ascii_uppercase)
             })
     }
 
@@ -530,6 +533,11 @@ impl Reader<'_, '_> {
             at: end.at,
         };
         match (start.chapter, start_point, end_point) {
+            // The introduction has no verses and starts no range: `JUD 0-3`.
+            (Some(_), Pointed::Chapter(0), _) => Err(Error {
+                kind: ErrorKind::IntroHasNoVerses,
+                at: start.at,
+            }),
             (None, _, _) => Err(Error {
                 kind: ErrorKind::MixedRange,
                 at: end.at,
@@ -547,7 +555,7 @@ impl Reader<'_, '_> {
                 }
             }
             (_, Pointed::Verse(from), Pointed::Verse(to)) => {
-                if to < from {
+                if from.runs_back_to(&to) {
                     Err(backwards)
                 } else {
                     Ok(Address::Verses { from, to })

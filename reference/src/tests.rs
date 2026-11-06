@@ -60,6 +60,11 @@ fn context_is_the_parent_of_the_reference_before() {
         // A bare part is a part of the verse before it.
         ("LUK 11:2a-b", "LUK 11:2a-2b"),
         ("LUK 11:2a-3", "LUK 11:2a-3"),
+        // A part to its whole verse runs to the verse's end.
+        ("MAT 5:5a-5", "MAT 5:5a-5"),
+        // A three-digit verse after `;` is a chapter and verse, not a prefix.
+        ("PSA 119:1; 119:176", "PSA 119:1; PSA 119:176"),
+        ("ROM 3:21; 4:100", "ROM 3:21; ROM 4:100"),
     ] {
         assert_eq!(spelled(text), written, "{text}");
     }
@@ -95,6 +100,7 @@ fn a_book_from_context() {
     assert_eq!(read("5:3-12"), "MAT 5:3-12");
     assert_eq!(read("5"), "MAT 5");
     assert_eq!(read("5:3, 7"), "MAT 5:3; MAT 5:7");
+    assert_eq!(read("5:123"), "MAT 5:123");
     assert_eq!(
         read("MRK 1:1"),
         "MRK 1:1",
@@ -157,6 +163,8 @@ fn anything_else_is_refused_with_where() {
         ("ROM 9-10:4", ErrorKind::MixedRange, 6),
         ("GEN 0:3", ErrorKind::IntroHasNoVerses, 0),
         ("GEN 0-2", ErrorKind::IntroHasNoVerses, 0),
+        ("JUD 0-3", ErrorKind::IntroHasNoVerses, 0),
+        ("MAT 5:5b-5a", ErrorKind::Backwards, 9),
         ("en+ulb.ROM 1:1", ErrorKind::NotBasic, 0),
         ("ROM 3:21!3", ErrorKind::NotBasic, 8),
         ("MRK 1:14!s", ErrorKind::NotBasic, 8),
