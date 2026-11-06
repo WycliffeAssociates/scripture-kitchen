@@ -1294,6 +1294,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "srs"
+version = "0.1.20"
+dependencies = [
+ "canon",
+ "mise",
+ "reference",
+ "serde_json",
+]
+
+[[package]]
 name = "stable_deref_trait"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

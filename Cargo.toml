@@ -39,6 +39,7 @@ members = [
     "canon",
     "canon/gen",
     "reference",
+    "srs",
     "bento",
     "bttwriter",
     "docx",
