@@ -40,6 +40,9 @@ pub struct Hooks<'h> {
     pub chapter_start: Option<&'h dyn Fn(&str, &str) -> Option<String>>,
     /// Right after a verse number: (book, chapter, verse).
     pub at_verse: Option<&'h dyn Fn(&str, &str, &str) -> Option<String>>,
+    /// Before every paragraph, at the top level of the flow: (book, the
+    /// paragraph's index in the book, counting from 0).
+    pub before_paragraph: Option<&'h dyn Fn(&str, usize) -> Option<String>>,
     /// After a paragraph that held verses: (book, [(chapter, verse)…]).
     pub after_paragraph: Option<&'h dyn Fn(&str, &[(String, String)]) -> Option<String>>,
 }
@@ -73,6 +76,7 @@ pub fn markup_with(usfm: &str, hooks: &Hooks) -> Book {
         space: false,
         hooks,
         para_verses: Vec::new(),
+        para_index: 0,
     };
     e.scan_identification(0);
     let mut out = format!(
@@ -99,6 +103,8 @@ struct Emitter<'a> {
     hooks: &'a Hooks<'a>,
     /// The verses the current paragraph has opened, for `after_paragraph`.
     para_verses: Vec<(String, String)>,
+    /// Paragraphs emitted so far, for `before_paragraph`.
+    para_index: usize,
     src: &'a str,
     tokens: &'a [Token],
     cst: &'a Cst,
@@ -284,6 +290,13 @@ impl<'a> Emitter<'a> {
         } else {
             None
         };
+        if let Some(hook) = self.hooks.before_paragraph
+            && let Some(extra) = hook(&self.code, self.para_index)
+        {
+            self.out.push_str(&extra);
+            self.out.push('\n');
+        }
+        self.para_index += 1;
         self.out
             .push_str(&format!("#u.para(\"{}\", {}", str_lit(style), level));
         if let Some(c) = chapter {

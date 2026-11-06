@@ -57,10 +57,23 @@ the emitter places there. Every verse call carries its book
   page-wide bottom floats placed by the first note on each page (the page's
   notes found by introspection) — layout did not converge in Typst's five
   passes, the float took a column instead of the page, and notes overlapped.
-  What would work is a driver outside Typst: compile, read where each verse
-  landed, assign notes to pages, compile again, until stable (PTXprint's
-  approach with XeTeX). Past about one
+  Then tried that driver: `pagenotes` (below). Past about one
   note per verse the text thins to a few lines a page.
+- `pagenotes` (experiment, does not work yet): a Rust driver around Typst —
+  lay out, read where each verse and each band landed (the document's
+  introspector gives page and y), give each page one full-width band of its
+  verses' notes in two columns, lay out again. The bands draw right (a
+  page-wide float placed between paragraphs; a float placed inside a
+  paragraph is confined to its column, and `columns()` does not balance
+  inside a float, so the driver splits the notes in two). The ASSIGNMENT does
+  not converge: re-placing every page each pass oscillates (on Mark, notes on
+  their verse's page swing 8 → 208 → 43 → 11 over 12 passes, about 1.3 s
+  each), and making notes only move forward snowballs instead. What would
+  settle it is building page by page — fix page 1, then page 2 — either as
+  one Typst pass per page (slow: tens of passes per book) or by measuring
+  note and verse heights once and simulating pages in Rust, which is the
+  page builder proper and well past this recipe's 300 lines. `study`'s
+  per-column footnotes keep every note on its verse's page, in one pass.
 - `diglot`: verse text only (notes and headings drop out); verses matched by
   number, not mapped between versifications through canon.
 - `diff`: verse text only; a moved verse shows as a delete and an insert.

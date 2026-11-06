@@ -13,6 +13,7 @@ use typst::text::{Font, FontBook};
 use typst::utils::LazyHash;
 use typst::{Library, LibraryExt, World};
 pub use typst_kit::fonts::FontStore;
+pub use typst_layout::PagedDocument as Document;
 use web_time::Instant;
 use typst_layout::PagedDocument;
 
@@ -160,6 +161,7 @@ pub fn compile(
 /// A whole document for [`compile_doc`]: `main` is `/main.typ`, `sources` are
 /// further files by absolute path, and the base template is always
 /// `/usfm.typ`. A recipe adds its overlay as another source and imports that.
+#[derive(Clone)]
 pub struct Doc {
     pub main: String,
     pub sources: Vec<(String, String)>,
@@ -185,6 +187,38 @@ pub fn compile_doc(
     doc: &Doc,
     template: &str,
 ) -> Result<(Vec<u8>, Timings), String> {
+    let t1 = Instant::now();
+    let document = compile_document(fonts, doc, template)?;
+    let layout_ms = ms(t1);
+    export(&document, doc, layout_ms)
+}
+
+/// The PDF of a laid-out document, with the timings so far.
+pub fn export(document: &PagedDocument, doc: &Doc, layout_ms: f64) -> Result<(Vec<u8>, Timings), String> {
+    let t2 = Instant::now();
+    let pdf = typst_pdf::pdf(document, &typst_pdf::PdfOptions::default()).map_err(|errors| {
+        errors.iter().map(|e| e.message.to_string()).collect::<Vec<_>>().join("\n")
+    })?;
+    Ok((
+        pdf,
+        Timings {
+            markup_ms: doc.markup_ms,
+            layout_ms,
+            pdf_ms: ms(t2),
+            pages: document.pages().len(),
+            markup_bytes: doc.sources.iter().map(|(_, t)| t.len()).sum(),
+            warnings: 0,
+        },
+    ))
+}
+
+/// Lays `doc` out without exporting, for a caller that reads where things
+/// landed (a recipe driving several passes).
+pub fn compile_document(
+    fonts: &Arc<FontStore>,
+    doc: &Doc,
+    template: &str,
+) -> Result<PagedDocument, String> {
     let mut sources = HashMap::new();
     for (path, text) in &doc.sources {
         let fid = id(path);
@@ -205,44 +239,19 @@ pub fn compile_doc(
         files,
     };
 
-    let t1 = Instant::now();
     let warned = typst::compile::<PagedDocument>(&world);
-    let layout_ms = ms(t1);
-    let warnings = warned.warnings.len();
     #[cfg(feature = "native")]
-    for w in warned.warnings.iter().take(5) {
+    for w in warned.warnings.iter().take(3) {
         eprintln!("warning: {}", describe(&world, w));
     }
-    let document = warned.output.map_err(|errors| {
+    warned.output.map_err(|errors| {
         errors
             .iter()
             .take(8)
             .map(|e| describe(&world, e))
             .collect::<Vec<_>>()
             .join("\n")
-    })?;
-
-    let t2 = Instant::now();
-    let pdf = typst_pdf::pdf(&document, &typst_pdf::PdfOptions::default()).map_err(|errors| {
-        errors
-            .iter()
-            .map(|e| e.message.to_string())
-            .collect::<Vec<_>>()
-            .join("\n")
-    })?;
-    let pdf_ms = ms(t2);
-
-    Ok((
-        pdf,
-        Timings {
-            markup_ms: doc.markup_ms,
-            layout_ms,
-            pdf_ms,
-            pages: document.pages().len(),
-            markup_bytes: doc.sources.iter().map(|(_, t)| t.len()).sum(),
-            warnings,
-        },
-    ))
+    })
 }
 
 fn describe(world: &PlateWorld, diag: &SourceDiagnostic) -> String {

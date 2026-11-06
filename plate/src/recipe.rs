@@ -13,6 +13,24 @@ use std::sync::Arc;
 use crate::Book;
 use crate::world::{Doc, FontStore, Timings, book_sources, compile_doc, template_path};
 
+/// The [`Doc`] a recipe compiles: its overlay at `/recipe.typ`, the books
+/// importing it, `before`/`after` around them.
+pub fn doc(name: &str, books: &[Book], before: &str, after: &str, settings: &str, markup_ms: f64) -> Doc {
+    let (includes, mut sources) = book_sources(books, "/recipe.typ");
+    sources.push(("/recipe.typ".into(), overlay(name)));
+    Doc {
+        main: format!("#import \"/recipe.typ\" as u\n#show: u.setup\n{before}\n{includes}{after}\n"),
+        sources,
+        settings: settings.to_string(),
+        markup_ms,
+    }
+}
+
+/// The base template's text, read from disk.
+pub fn template() -> String {
+    std::fs::read_to_string(template_path()).unwrap()
+}
+
 pub fn overlay(name: &str) -> String {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("recipes")
