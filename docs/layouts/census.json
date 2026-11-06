@@ -2,7 +2,7 @@
   "format": "census",
   "magic": "TOCS",
   "magic_hex": "0x53434f54",
-  "version": 2,
+  "version": 3,
   "declared_in": "galley/src/toc/schema.rs",
   "reader": "galley/toc-reader.ts",
   "generated": true,
@@ -45,15 +45,16 @@
       {"name": "anchors", "offset": 18, "width": 2, "space": "plain", "doc": "How many `\\v` markers sit inside this chapter's span, saturating."},
       {"name": "lastVerse", "offset": 20, "width": 2, "space": "plain", "doc": "The highest verse number those anchors name; 0 when none does. A bridge `\\v 5-7` is one anchor reaching 7 — so this is the count that keys by NUMBER where `anchors` counts MARKERS."}
     ]},
-    {"name": "Verse", "stride": 24, "doc": "One verse anchor and the range of verse numbers it names.", "fields": [
+    {"name": "Verse", "stride": 28, "doc": "One verse anchor and the range of verse numbers it names.", "fields": [
       {"name": "at", "offset": 0, "width": 4, "space": "offset", "doc": "First byte of the `\\v` marker."},
-      {"name": "chapter", "offset": 4, "width": 2, "space": "plain", "doc": "The number of the chapter row whose span CONTAINS this anchor — position, never the designator."},
-      {"name": "first", "offset": 6, "width": 2, "space": "plain", "doc": "Lowest verse named; 0 when the designator is absent or malformed."},
-      {"name": "last", "offset": 8, "width": 2, "space": "plain", "doc": "Highest named — equal to `first` unless this is a bridge or a list. `first..last` is the HULL; the members are what it covers."},
-      {"name": "labelStart", "offset": 10, "width": 4, "space": "offset", "doc": "The designator as written (`6a`, `1,3,5`). Empty at the marker's end when there is none."},
-      {"name": "labelEnd", "offset": 14, "width": 4, "space": "offset", "doc": "Where the label ends."},
-      {"name": "membersFrom", "offset": 18, "width": 4, "space": "plain", "doc": "This verse's first row in the book's member block."},
-      {"name": "membersLen", "offset": 22, "width": 2, "space": "plain", "doc": "How many members it covers; 0 when the designator is absent or malformed."}
+      {"name": "start", "offset": 4, "width": 4, "space": "offset", "doc": "Where the verse's tile begins: its `\\p` and any heading before `at`, or `at` itself mid-paragraph. A verse runs from here to the next verse's `start` or its chapter's end."},
+      {"name": "chapter", "offset": 8, "width": 2, "space": "plain", "doc": "The number of the chapter row whose span CONTAINS this anchor — position, never the designator."},
+      {"name": "first", "offset": 10, "width": 2, "space": "plain", "doc": "Lowest verse named; 0 when the designator is absent or malformed."},
+      {"name": "last", "offset": 12, "width": 2, "space": "plain", "doc": "Highest named — equal to `first` unless this is a bridge or a list. `first..last` is the HULL; the members are what it covers."},
+      {"name": "labelStart", "offset": 14, "width": 4, "space": "offset", "doc": "The designator as written (`6a`, `1,3,5`). Empty at the marker's end when there is none."},
+      {"name": "labelEnd", "offset": 18, "width": 4, "space": "offset", "doc": "Where the label ends."},
+      {"name": "membersFrom", "offset": 22, "width": 4, "space": "plain", "doc": "This verse's first row in the book's member block."},
+      {"name": "membersLen", "offset": 26, "width": 2, "space": "plain", "doc": "How many members it covers; 0 when the designator is absent or malformed."}
     ]},
     {"name": "Member", "stride": 20, "doc": "One member of a verse designator: a place, or a range joined by `-`.", "fields": [
       {"name": "from", "offset": 0, "width": 2, "space": "plain", "doc": "The member's first number."},

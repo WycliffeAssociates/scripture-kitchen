@@ -385,6 +385,22 @@ const levelIsSpelled = (doc, tokens, where) => {
   eq(at.chapter, 2, "at() lands in chapter 2");
 }
 
+// --- a verse's tile takes its paragraph marker and the heading above it -----
+{
+  const text = "\\id MRK\n\\c 1\n\\p\n\\v 13 helped him.\n\\s1 Jesus Calls\n\\p\n\\v 14 After John\n";
+  const { toc } = parse(text, false, true, false);
+  const verses = toc.verses();
+  const heading = text.indexOf("\\s1");
+  eq(verses[1].start, heading, "verse 14's tile starts at its heading");
+  eq(verses[1].at, text.indexOf("\\v 14"), "at is still the \\v");
+  eq(verses[0].start, text.indexOf("\\p"), "verse 13's starts at its \\p");
+  eq(toc.at(heading).verse, 14, "at() answers a heading with the verse it introduces");
+  eq(toc.at(heading - 1).verse, 13, "and the byte before it with the verse before");
+  let starts = [];
+  toc.forEachVerse((chapter, first, last, at, token, designator, start) => { starts.push(start); });
+  eq(JSON.stringify(starts), JSON.stringify(verses.map((v) => v.start)), "forEachVerse passes start");
+}
+
 // --- diagnostics resolve through the catalog ------------------------------
 {
   const bad = "\\id GEN\n\\c 1\n\\p \\v 1 unclosed \\add here\n";

@@ -49,6 +49,8 @@ pub struct Chapter {
 /// One verse anchor as it crosses.
 pub struct Verse {
     pub at: u32,
+    /// Where the verse's tile begins (`VerseAnchor::start`).
+    pub start: u32,
     pub chapter: u16,
     pub first: u16,
     pub last: u16,
@@ -79,6 +81,7 @@ pub fn rows_of(toc: &Toc) -> (Vec<Chapter>, Vec<Verse>) {
             last_verse = last_verse.max(anchor.last);
             verses.push(Verse {
                 at: anchor.at,
+                start: anchor.start,
                 chapter: row.number,
                 first: anchor.first,
                 last: anchor.last,

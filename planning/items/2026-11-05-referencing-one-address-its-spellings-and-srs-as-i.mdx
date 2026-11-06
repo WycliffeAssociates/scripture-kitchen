@@ -238,9 +238,11 @@ Diff's blocks are now tiles; a `\p` edit is the verse it opens, a heading's remo
 verse it introduced, and undoing a swapped pair takes back the verse that gained the `\p`
 too.</Followup>
 
-<Followup id="wire-start">Put `start` on the dish and galley TOC wires when Sefer wants
+<Followup id="wire-start" done>Put `start` on the dish and galley TOC wires when Sefer wants
 tiles row by row. Both are schema-generated with TS readers, so it's a format version
-bump. Until then galley's `resolve` already returns the tile as `opening..to`.</Followup>
+bump. Done 2026-11-06 (Will: "ok"): the dish is format 6 and galley's census format 3,
+both with `start` after `at`; the dish reader's `verses()` and `forEachVerse` carry it,
+and its `toc.at(pos)` searches tiles, so JS and onion's `locate` agree on a heading.</Followup>
 
 **For `srs.locate` later:** SRS treats headings as "both inside and outside the range".
 `MRK 1:14!s` reaches the heading, but word 1 of `MRK 1:14` is still the first word after
@@ -364,12 +366,15 @@ words, characters or markers, and `reference` stays small without them.
    books written with their chapter (`JUD 1:3`, where the hub writes `JUD 3`). The hub's
    range operations (split per chapter, overlap, verse lists) aren't ported: no caller
    here needs them yet. The JS surface comes with step 4.
-3. **`cite`/`show`** with English names and Sefer's fixtures, then localized names when
-   canon's step 6 lands.
+3. **`cite`/`show`** (done 2026-11-06, in Rust): `reference::cite`, `Catalogue` over canon's
+   names in any locale plus the project's own, and `show`. Sefer's `citation.test.ts` is
+   `reference/fixtures/cite.json` (67 cases). Two departures, both to match the machine
+   spelling: `Luke 3:0` is a title, not "zero", and `Jude 3` is verse 3. Every guess is an
+   `Assumption` (a book by prefix, a comma read as a colon).
 4. **galley doors**, so Sefer switches `citation.ts` and `names.ts`. This goes with canon's
    step 7, which wires canon into galley anyway.
 5. **TOC tiles** (done 2026-11-06): headings and the opening paragraph go with the next
-   verse, verse 0 is the title, `Sid` prints `GEN 0`, diff units are tiles. The wires are a followup.
+   verse, verse 0 is the title, `Sid` prints `GEN 0`, diff units are tiles, and both wires carry `start`.
 6. **`srs` grammar**, from usfmtc's cases and the standard's examples.
 7. **`galley.srs.locate` / `at`**, after 5, NFD and the heading skip included.
 

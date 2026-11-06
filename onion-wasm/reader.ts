@@ -41,7 +41,7 @@
 export const MAGIC = 0x52574e4f;
 
 /** Bumped whenever the schema changes shape. */
-export const FORMAT_VERSION = 5;
+export const FORMAT_VERSION = 6;
 
 /** Set when every offset in the dish is a UTF-16 code unit. */
 export const FLAG_UTF16 = 1 << 0;
@@ -604,7 +604,7 @@ export class ChapterRow {
 /**
  * One verse anchor and the range of verse numbers it names.
  *
- * 32 bytes per row. A CURSOR: `seek` moves it, the getters read
+ * 36 bytes per row. A CURSOR: `seek` moves it, the getters read
 * the row it is on, and nothing is allocated per row.
  */
 export class VerseRow {
@@ -620,62 +620,67 @@ export class VerseRow {
     return (this.#view.byteLength / this.stride) | 0;
   }
 
-  readonly stride = 32;
+  readonly stride = 36;
 
   /** Move to row `n`; returns `this` so reads chain. */
   seek(n: number): this {
-    this.#row = n * 32;
+    this.#row = n * 36;
     return this;
   }
 
-  /** Where the anchor sits. */
+  /** Where the anchor sits: the `\v` marker's first byte. */
   get at(): number {
     return this.#view.getUint32(this.#row + 0, true);
   }
 
+  /** Where the verse's tile begins: its `\p` and any heading before `at`, or `at` itself mid-paragraph. A verse runs from here to the next verse's `start` or its chapter's end. */
+  get start(): number {
+    return this.#view.getUint32(this.#row + 4, true);
+  }
+
   /** The `\v` marker's token index. */
   get token(): number {
-    return this.#view.getUint32(this.#row + 4, true);
+    return this.#view.getUint32(this.#row + 8, true);
   }
 
   /** The number's own token index, or NONE. `\v` opens no node, so this is the only route from a verse to its designator. */
   get designator(): number {
-    return this.#view.getUint32(this.#row + 8, true);
+    return this.#view.getUint32(this.#row + 12, true);
   }
 
   /** The designator as written (`6a`, `1,3,5`), minus its folded delimiter. Empty at the marker's end when there is none. */
   get labelStart(): number {
-    return this.#view.getUint32(this.#row + 12, true);
+    return this.#view.getUint32(this.#row + 16, true);
   }
 
   /** Where the label ends. */
   get labelEnd(): number {
-    return this.#view.getUint32(this.#row + 16, true);
+    return this.#view.getUint32(this.#row + 20, true);
   }
 
   /** This verse's first row in the member arena. */
   get membersFrom(): number {
-    return this.#view.getUint32(this.#row + 20, true);
+    return this.#view.getUint32(this.#row + 24, true);
   }
 
   /** How many members it covers; 0 when the designator is absent or malformed. */
   get membersLen(): number {
-    return this.#view.getUint16(this.#row + 24, true);
+    return this.#view.getUint16(this.#row + 28, true);
   }
 
   /** The enclosing chapter's number. */
   get chapter(): number {
-    return this.#view.getUint16(this.#row + 26, true);
+    return this.#view.getUint16(this.#row + 30, true);
   }
 
   /** First verse named; 0 when the designator is absent or malformed. */
   get first(): number {
-    return this.#view.getUint16(this.#row + 28, true);
+    return this.#view.getUint16(this.#row + 32, true);
   }
 
   /** Last verse named — a bridge `\v 5-7` names 5 through 7. */
   get last(): number {
-    return this.#view.getUint16(this.#row + 30, true);
+    return this.#view.getUint16(this.#row + 34, true);
   }
 
 }
@@ -1842,13 +1847,16 @@ export class Toc {
   /**
    * Every verse anchor. `first..last` is the HULL — a bridge `\\v 5-7` and a
    * list `\\v 5,7` both span 5 to 7 — and `members` is what it COVERS, so a
-   * list's holes are visible. `label` is the designator as written.
+   * list's holes are visible. `label` is the designator as written. `at` is
+   * the `\\v` marker; `start` is where the verse's tile begins (its `\\p` and
+   * any heading before it), and the tile runs to the next verse's `start`.
    */
   verses(): {
     chapter: number;
     first: number;
     last: number;
     at: number;
+    start: number;
     token: number;
     designator: number;
     label: Span;
@@ -1862,6 +1870,7 @@ export class Toc {
         first: r.first,
         last: r.last,
         at: r.at,
+        start: r.start,
         token: r.token,
         designator: r.designator,
         label: { from: r.labelStart, to: r.labelEnd },
@@ -1910,18 +1919,20 @@ export class Toc {
       at: number,
       token: number,
       designator: number,
+      start: number,
     ) => void | boolean,
   ): void {
     for (let i = 0, n = this.verseRows.length; i < n; i++) {
       const r = this.verseRows.seek(i);
-      if (fn(r.chapter, r.first, r.last, r.at, r.token, r.designator) === false) return;
+      if (fn(r.chapter, r.first, r.last, r.at, r.token, r.designator, r.start) === false) return;
     }
   }
 
   /**
-   * The chapter:verse address containing `pos` — the reverse index. Chapters
-   * tile, so the chapter is a binary search; the verse is the last anchor at
-   * or before `pos` within it.
+   * The chapter:verse address containing `pos` — the reverse index, and
+   * onion's `Toc::locate`. Chapters tile, so the chapter is a binary search;
+   * the verse is the last TILE starting at or before `pos` within it, so a
+   * heading answers for the verse it introduces.
    */
   at(pos: number): { chapter: number; verse: number } | null {
     const chapters = this.chapterRows;
@@ -1938,8 +1949,8 @@ export class Toc {
     }
     const chapter = chapters.seek(found).number;
 
-    // Anchors are sorted by `at`, so the verse is the last one at or before
-    // `pos` — a binary search, not a scan.
+    // Tiles are sorted by `start`, so the verse is the last one starting at or
+    // before `pos` — a binary search, not a scan.
     const verses = this.verseRows;
     lo = 0;
     hi = verses.length - 1;
@@ -1947,7 +1958,7 @@ export class Toc {
     while (lo <= hi) {
       const mid = (lo + hi) >> 1;
       const r = verses.seek(mid);
-      if (r.at <= pos) {
+      if (r.start <= pos) {
         if (r.chapter === chapter) verse = r.first;
         lo = mid + 1;
       } else hi = mid - 1;

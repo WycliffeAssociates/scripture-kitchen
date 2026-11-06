@@ -59,7 +59,9 @@
   Referencing Standard's basic reference (`MAT 1:20-2:3; MRK 1:1`), read
   strictly into `mise::Address` with byte-offset errors, and written back.
   Contextual references (`24` after `ROM 3:21`), one-chapter books, and `end`
-  given a canon scheme. Translation prefixes and word, character and marker
+  given a canon scheme. `cite` is the lenient reader for people (Sefer's
+  `citation.ts` ported: canon's localized names, prefixes in a go-to box) and
+  `show` the label. Translation prefixes and word, character and marker
   references are refused by name: they belong to a future `srs` crate. No text
   and no onion; onion's `Sid::address` converts the TOC's answer. Plan:
   `planning/items/2026-11-05-referencing-one-address-its-spellings-and-srs-as-i.mdx`.

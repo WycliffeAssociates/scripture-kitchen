@@ -50,14 +50,17 @@ pub fn write_chapters(rows: &[Chapter], out: &mut Vec<u8>, offsets: &mut Offsets
 
 /// One verse anchor and the range of verse numbers it names.
 ///
-/// 24 bytes per row. `offsets` collects the position of every
+/// 28 bytes per row. `offsets` collects the position of every
 /// source offset written, for the UTF-16 pass.
 pub fn write_verses(rows: &[Verse], out: &mut Vec<u8>, offsets: &mut Offsets) {
-    out.reserve(rows.len() * 24);
+    out.reserve(rows.len() * 28);
     for v in rows {
         offsets.push(out.len());
         // First byte of the `\v` marker.
         out.extend_from_slice(&((v.at) as u32).to_le_bytes());
+        offsets.push(out.len());
+        // Where the verse's tile begins: its `\p` and any heading before `at`, or `at` itself mid-paragraph. A verse runs from here to the next verse's `start` or its chapter's end.
+        out.extend_from_slice(&((v.start) as u32).to_le_bytes());
         // The number of the chapter row whose span CONTAINS this anchor — position, never the designator.
         out.extend_from_slice(&((v.chapter) as u16).to_le_bytes());
         // Lowest verse named; 0 when the designator is absent or malformed.

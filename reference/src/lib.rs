@@ -41,6 +41,11 @@
 
 use core::fmt;
 
+pub mod cite;
+pub use cite::{
+    Assumption, Catalogue, CiteError, Cited, Grammar, Problem, citation_words, cite, show,
+};
+
 use canon::scheme::Scheme;
 pub use mise::address::{Address, Point, Segment};
 pub use mise::books::BookKey;

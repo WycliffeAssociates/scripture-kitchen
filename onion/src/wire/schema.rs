@@ -360,7 +360,16 @@ pub const VERSE: Record = Record {
             width: U32,
             space: Offset,
             rust: "v.at",
-            doc: "Where the anchor sits.",
+            doc: "Where the anchor sits: the `\\v` marker's first byte.",
+        },
+        Field {
+            name: "start",
+            width: U32,
+            space: Offset,
+            rust: "v.start",
+            doc: "Where the verse's tile begins: its `\\p` and any heading before \
+                  `at`, or `at` itself mid-paragraph. A verse runs from here to \
+                  the next verse's `start` or its chapter's end.",
         },
         Field {
             name: "token",
@@ -573,7 +582,7 @@ pub const SECTIONS: &[Section] = &[
 
 /// Bumped whenever [`SECTIONS`] or any [`Record`] changes shape. A reader
 /// refuses a dish it does not recognise rather than misreading one.
-pub const FORMAT_VERSION: u32 = 5;
+pub const FORMAT_VERSION: u32 = 6;
 
 /// `"ONWR"`, little-endian — the dish's first four bytes.
 pub const MAGIC: u32 = u32::from_le_bytes(*b"ONWR");
