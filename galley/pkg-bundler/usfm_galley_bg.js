@@ -1,4 +1,82 @@
 /**
+ * A citation reader: what a person types in a go-to box or a note, read
+ * against the book names it was made with. Make one per project (and
+ * language), then `read` on every keystroke.
+ */
+export class Citations {
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        CitationsFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_citations_free(ptr, 0);
+    }
+    /**
+     * Every book the words before the numbers could mean, in canon order:
+     * a filter under a go-to box. `"john 3"` lists JHN, 1JN, 2JN and 3JN.
+     * @param {string} text
+     * @returns {string[]}
+     */
+    booksMatching(text) {
+        const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.citations_booksMatching(this.__wbg_ptr, ptr0, len0);
+        var v2 = getArrayJsValueFromWasm0(ret[0], ret[1]);
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v2;
+    }
+    /**
+     * `names`: per book code, what the project calls it in any language it
+     * names books in, and registered abbreviations (`{ MAT: ["Mateo", "Mt"] }`).
+     * `intro`: words for the introduction (`["introducción"]`). `books`: codes
+     * outside canon's table that should still be named (a `\z` book).
+     * @param {CitationNames} [opts]
+     */
+    constructor(opts) {
+        const ret = wasm.citations_new(isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        this.__wbg_ptr = ret[0];
+        CitationsFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    /**
+     * `{ ok: true, text, addresses, assumed }` or `{ ok: false, text,
+     * problem, word? }`, as Sefer's `Citation`. `grammar` is `"navigation"`
+     * (the default: prefixes, `3,1` as `3:1`) or `"prose"`; `held` is the
+     * project's books, which win a prefix tie.
+     * @param {string} text
+     * @param {CiteOptions} [opts]
+     * @returns {string}
+     */
+    read(text, opts) {
+        let deferred3_0;
+        let deferred3_1;
+        try {
+            const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.citations_read(this.__wbg_ptr, ptr0, len0, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
+            var ptr2 = ret[0];
+            var len2 = ret[1];
+            if (ret[3]) {
+                ptr2 = 0; len2 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred3_0 = ptr2;
+            deferred3_1 = len2;
+            return getStringFromWasm0(ptr2, len2);
+        } finally {
+            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        }
+    }
+}
+if (Symbol.dispose) Citations.prototype[Symbol.dispose] = Citations.prototype.free;
+
+/**
  * One transaction of proposed splices: `[from, to]` pairs, one concatenated
  * ASCII insert blob, one length per edit.
  *
@@ -375,6 +453,64 @@ export class Galley {
     free() {
         const ptr = this.__destroy_into_raw();
         wasm.__wbg_galley_free(ptr, 0);
+    }
+    /**
+     * The place at an offset in one registered book's text, as a
+     * `BookAddress` in JSON: the introduction, a chapter's head, its title
+     * (verse 0), or the verse whose tile holds the offset, parts included.
+     * The inverse of `resolve`; the offset is in bytes unless `utf16`.
+     * @param {string} id
+     * @param {number} offset
+     * @param {ResolveOptions} [opts]
+     * @returns {string}
+     */
+    addressAt(id, offset, opts) {
+        let deferred3_0;
+        let deferred3_1;
+        try {
+            const ptr0 = passStringToWasm0(id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.galley_addressAt(this.__wbg_ptr, ptr0, len0, offset, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
+            var ptr2 = ret[0];
+            var len2 = ret[1];
+            if (ret[3]) {
+                ptr2 = 0; len2 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred3_0 = ptr2;
+            deferred3_1 = len2;
+            return getStringFromWasm0(ptr2, len2);
+        } finally {
+            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        }
+    }
+    /**
+     * [`addressAt`](Self::address_at) over text the host holds and has not
+     * registered, with `resolveOf`'s options.
+     * @param {string} text
+     * @param {number} offset
+     * @param {ResolveTextOptions} [opts]
+     * @returns {string}
+     */
+    addressAtOf(text, offset, opts) {
+        let deferred3_0;
+        let deferred3_1;
+        try {
+            const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.galley_addressAtOf(this.__wbg_ptr, ptr0, len0, offset, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
+            var ptr2 = ret[0];
+            var len2 = ret[1];
+            if (ret[3]) {
+                ptr2 = 0; len2 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred3_0 = ptr2;
+            deferred3_1 = len2;
+            return getStringFromWasm0(ptr2, len2);
+        } finally {
+            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        }
     }
     /**
      * Ranges of `text` whose chunk this book's last update never saw — the
@@ -2101,6 +2237,30 @@ export function formatEditsIn(text, from, to, opts) {
 }
 
 /**
+ * The machine spelling of a list: `"MAT 1:20-2:3; MRK 1:1"`.
+ * @param {BookAddress[]} refs
+ * @returns {string}
+ */
+export function formatReference(refs) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ret = wasm.formatReference(refs);
+        var ptr1 = ret[0];
+        var len1 = ret[1];
+        if (ret[3]) {
+            ptr1 = 0; len1 = 0;
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        deferred2_0 = ptr1;
+        deferred2_1 = len1;
+        return getStringFromWasm0(ptr1, len1);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+
+/**
  * The reference at a CodeMirror offset — `"MRK 6:3"`, `"MRK 6:1-3"` for a
  * bridge, `"MRK 6"` ahead of a chapter's first verse, `"MRK"` in front matter,
  * `"###"` when the book declares no `\id`.
@@ -2270,6 +2430,36 @@ export function parse(text, opts) {
 }
 
 /**
+ * The machine spelling (the Scripture Referencing Standard's basic
+ * reference), read strictly: `{ ok: true, addresses }`, or `{ ok: false,
+ * error, at }` with a stable error name and a UTF-16 offset. `book` reads a
+ * list whose first reference leaves its book out (`"5:3-12"`).
+ * @param {string} text
+ * @param {{ book?: string }} [opts]
+ * @returns {string}
+ */
+export function parseReference(text, opts) {
+    let deferred3_0;
+    let deferred3_1;
+    try {
+        const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.parseReference(ptr0, len0, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
+        var ptr2 = ret[0];
+        var len2 = ret[1];
+        if (ret[3]) {
+            ptr2 = 0; len2 = 0;
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        deferred3_0 = ptr2;
+        deferred3_1 = len2;
+        return getStringFromWasm0(ptr2, len2);
+    } finally {
+        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+    }
+}
+
+/**
  * Where an address is in one text, as JSON: found, missing or ambiguous,
  * never a silent nearest. The rules are `onion/src/resolve.md`, the cases
  * `testData/resolve/cases.json`, whose `expect` is this door's answer.
@@ -2334,6 +2524,37 @@ export function setCustomMarkers(markers) {
     const ret = wasm.setCustomMarkers(markers);
     if (ret[1]) {
         throw takeFromExternrefTable0(ret[0]);
+    }
+}
+
+/**
+ * What a person reads: `"Mateo 5:3-7"`. The book's name and the word for an
+ * introduction are the caller's, in the project's language.
+ * @param {BookAddress} address
+ * @param {string} book_name
+ * @param {string} intro
+ * @returns {string}
+ */
+export function showReference(address, book_name, intro) {
+    let deferred4_0;
+    let deferred4_1;
+    try {
+        const ptr0 = passStringToWasm0(book_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(intro, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.showReference(address, ptr0, len0, ptr1, len1);
+        var ptr3 = ret[0];
+        var len3 = ret[1];
+        if (ret[3]) {
+            ptr3 = 0; len3 = 0;
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        deferred4_0 = ptr3;
+        deferred4_1 = len3;
+        return getStringFromWasm0(ptr3, len3);
+    } finally {
+        wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
     }
 }
 
@@ -2514,6 +2735,9 @@ export function __wbindgen_init_externref_table() {
     table.set(offset + 2, true);
     table.set(offset + 3, false);
 }
+const CitationsFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_citations_free(ptr, 1));
 const EditsFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_edits_free(ptr, 1));
@@ -2608,6 +2832,17 @@ function debugString(val) {
     }
     // TODO we could test for more things here, like `Set`s and `Map`s.
     return className;
+}
+
+function getArrayJsValueFromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    const mem = getDataViewMemory0();
+    const result = [];
+    for (let i = ptr; i < ptr + 4 * len; i += 4) {
+        result.push(wasm.__wbindgen_externrefs.get(mem.getUint32(i, true)));
+    }
+    wasm.__externref_drop_slice(ptr, len);
+    return result;
 }
 
 function getArrayU32FromWasm0(ptr, len) {

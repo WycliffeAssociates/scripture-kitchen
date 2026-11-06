@@ -156,6 +156,53 @@ export interface BlockAddress {
     marker: string;
 }
 
+/** An `Address` in its book: Sefer's `Address` shape. */
+export type BookAddress = Address & { book: string };
+
+/** `JSON.parse(parseReference(text))`. `at` counts UTF-16 units. */
+export type ReferenceParse =
+| { ok: true; addresses: BookAddress[] }
+| {
+    ok: false;
+    error:
+    | "empty" | "expected-book" | "unknown-book" | "no-reference-before"
+    | "expected-verse" | "range-end" | "unexpected" | "different-book"
+    | "backwards" | "mixed-range" | "intro-has-no-verses" | "end-needs-scheme"
+    | "chapter-out-of-range" | "verse-out-of-range" | "not-basic";
+    at: number;
+};
+
+/** `new Citations(names)`: the names a project reads books by, past English and codes. */
+export interface CitationNames {
+    /** Per book code, what the project calls it in each language it names books in, and abbreviations. */
+    names?: Record<string, string[]>;
+    /** Words for the introduction: `["introducción"]`. `intro` and `introduction` always are. */
+    intro?: string[];
+    /** Codes outside canon's table to name anyway: a `\\z` book. */
+    books?: string[];
+}
+
+/** `Citations.read(text, opts)`. */
+export interface CiteOptions {
+    /** `"navigation"` (default): prefixes, `3,1` as `3:1`. `"prose"`: whole names, a comma is a list. */
+    grammar?: "navigation" | "prose";
+    /** The project's books, which win a prefix tie (`phil` is PHM when only PHM is held). */
+    held?: string[];
+}
+
+/** What a reading took for granted. */
+export type CiteAssumption = { kind: "prefix"; word: string; book: string } | { kind: "comma" };
+
+/** `JSON.parse(citations.read(text))`, Sefer's `Citation`. */
+export type Citation =
+| { ok: true; text: string; addresses: BookAddress[]; assumed: CiteAssumption[] }
+| {
+    ok: false;
+    text: string;
+    problem: "empty" | "unknown-book" | "no-book" | "malformed" | "zero" | "backwards";
+    word?: string;
+};
+
 
 
 /** `parse`'s options, and `Galley.parse`/`parseText`'s. Every key defaults to false. */
@@ -227,6 +274,35 @@ export interface CustomMarkerOptions {
 }
 
 
+
+/**
+ * A citation reader: what a person types in a go-to box or a note, read
+ * against the book names it was made with. Make one per project (and
+ * language), then `read` on every keystroke.
+ */
+export class Citations {
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * Every book the words before the numbers could mean, in canon order:
+     * a filter under a go-to box. `"john 3"` lists JHN, 1JN, 2JN and 3JN.
+     */
+    booksMatching(text: string): string[];
+    /**
+     * `names`: per book code, what the project calls it in any language it
+     * names books in, and registered abbreviations (`{ MAT: ["Mateo", "Mt"] }`).
+     * `intro`: words for the introduction (`["introducción"]`). `books`: codes
+     * outside canon's table that should still be named (a `\z` book).
+     */
+    constructor(opts?: CitationNames);
+    /**
+     * `{ ok: true, text, addresses, assumed }` or `{ ok: false, text,
+     * problem, word? }`, as Sefer's `Citation`. `grammar` is `"navigation"`
+     * (the default: prefixes, `3,1` as `3:1`) or `"prose"`; `held` is the
+     * project's books, which win a prefix tie.
+     */
+    read(text: string, opts?: CiteOptions): string;
+}
 
 /**
  * One transaction of proposed splices: `[from, to]` pairs, one concatenated
@@ -349,6 +425,18 @@ export class FormatOpts {
 export class Galley {
     free(): void;
     [Symbol.dispose](): void;
+    /**
+     * The place at an offset in one registered book's text, as a
+     * `BookAddress` in JSON: the introduction, a chapter's head, its title
+     * (verse 0), or the verse whose tile holds the offset, parts included.
+     * The inverse of `resolve`; the offset is in bytes unless `utf16`.
+     */
+    addressAt(id: string, offset: number, opts?: ResolveOptions): string;
+    /**
+     * [`addressAt`](Self::address_at) over text the host holds and has not
+     * registered, with `resolveOf`'s options.
+     */
+    addressAtOf(text: string, offset: number, opts?: ResolveTextOptions): string;
     /**
      * Ranges of `text` whose chunk this book's last update never saw — the
      * chunks a host would have to re-derive, in `text`'s own byte offsets,
@@ -949,6 +1037,11 @@ export function formatEdits(text: string, opts: FormatOpts): Edits;
 export function formatEditsIn(text: string, from: number, to: number, opts: FormatOpts): Edits;
 
 /**
+ * The machine spelling of a list: `"MAT 1:20-2:3; MRK 1:1"`.
+ */
+export function formatReference(refs: BookAddress[]): string;
+
+/**
  * The reference at a CodeMirror offset — `"MRK 6:3"`, `"MRK 6:1-3"` for a
  * bridge, `"MRK 6"` ahead of a chapter's first verse, `"MRK"` in front matter,
  * `"###"` when the book declares no `\id`.
@@ -1015,6 +1108,14 @@ export function mergeSplices(baseline: string, current: string, decisions_json: 
 export function parse(text: string, opts?: ParseTextOptions): Uint8Array;
 
 /**
+ * The machine spelling (the Scripture Referencing Standard's basic
+ * reference), read strictly: `{ ok: true, addresses }`, or `{ ok: false,
+ * error, at }` with a stable error name and a UTF-16 offset. `book` reads a
+ * list whose first reference leaves its book out (`"5:3-12"`).
+ */
+export function parseReference(text: string, opts?: { book?: string }): string;
+
+/**
  * Where an address is in one text, as JSON: found, missing or ambiguous,
  * never a silent nearest. The rules are `onion/src/resolve.md`, the cases
  * `testData/resolve/cases.json`, whose `expect` is this door's answer.
@@ -1054,6 +1155,12 @@ export function resolve(text: string, address: Address, opts?: ResolveTextOption
 export function setCustomMarkers(markers: CustomMarkers): void;
 
 /**
+ * What a person reads: `"Mateo 5:3-7"`. The book's name and the word for an
+ * introduction are the caller's, in the project's language.
+ */
+export function showReference(address: BookAddress, book_name: string, intro: string): string;
+
+/**
  * A CodeMirror offset as a source byte offset. Rebuilds the 1.6% stride index
  * per call (~0.1ms) — honest and stateless at a handful of calls per user
  * interaction, which is what a cursor-to-sid lookup is.
@@ -1088,6 +1195,7 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
+    readonly __wbg_citations_free: (a: number, b: number) => void;
     readonly __wbg_fingerprint_free: (a: number, b: number) => void;
     readonly __wbg_galley_free: (a: number, b: number) => void;
     readonly __wbg_get_soussettings_book_rate: (a: number) => number;
@@ -1151,9 +1259,15 @@ export interface InitOutput {
     readonly __wbg_set_soussettings_z_long: (a: number, b: number) => void;
     readonly __wbg_set_soussettings_z_short: (a: number, b: number) => void;
     readonly __wbg_soussettings_free: (a: number, b: number) => void;
+    readonly citations_booksMatching: (a: number, b: number, c: number) => [number, number];
+    readonly citations_new: (a: number) => [number, number, number];
+    readonly citations_read: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly fingerprint_changedChunks: (a: number, b: number) => [number, number];
     readonly fingerprint_chunkCount: (a: number) => number;
     readonly fingerprint_differsFrom: (a: number, b: number) => number;
+    readonly formatReference: (a: any) => [number, number, number, number];
+    readonly galley_addressAt: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
+    readonly galley_addressAtOf: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
     readonly galley_changedSinceUpdate: (a: number, b: number, c: number, d: number, e: number) => [number, number];
     readonly galley_config: (a: number) => number;
     readonly galley_defineScheme: (a: number, b: number, c: number, d: any) => [number, number];
@@ -1196,6 +1310,8 @@ export interface InitOutput {
     readonly galley_updateReference: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly galley_verseText: (a: number, b: number, c: number) => [number, number, number, number];
     readonly galley_verseTextOf: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+    readonly parseReference: (a: number, b: number, c: number) => [number, number, number, number];
+    readonly showReference: (a: any, b: number, c: number, d: number, e: number) => [number, number, number, number];
     readonly __wbg_edits_free: (a: number, b: number) => void;
     readonly __wbg_formatopts_free: (a: number, b: number) => void;
     readonly __wbg_get_formatopts_block_marker_own_line: (a: number) => number;
@@ -1259,6 +1375,7 @@ export interface InitOutput {
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __externref_table_dealloc: (a: number) => void;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;
+    readonly __externref_drop_slice: (a: number, b: number) => void;
     readonly __wbindgen_start: () => void;
 }
 
