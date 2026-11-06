@@ -26,6 +26,10 @@
 - CI runs plain `cargo test`, whose tests share one process as threads, while
   nextest gives each its own. A test writing a temp path must make it unique
   per call, not per process id, or it passes under nextest and races in CI.
+  The same goes for process-wide state: a test that installs the global
+  marker list (`set_extensions`) changes lexing for every other test thread,
+  so galley's re-run themselves in a child process (`in_own_process` in
+  `galley/src/pantry/tests.rs`) unless nextest already gave them one.
 - Dev and test profiles are `opt-level = 1`. Debug asserts stay on; the
   corpus sweeps would be minutes at level 0.
 
