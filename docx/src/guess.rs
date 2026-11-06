@@ -30,10 +30,10 @@ use crate::{Guess, Keep, Settings, Skip, SkipReason};
 /// Paragraph markers a style name may carry straight through (Paratext
 /// exports, house templates): "q2", "s1 - Heading".
 const STYLE_MARKERS: &[&str] = &[
-    "p", "m", "pi", "pi1", "pi2", "mi", "nb", "pc", "pm", "pmo", "pmc", "pmr", "cls", "q", "q1", "q2", "q3",
-    "q4", "qc", "qr", "qm", "qm1", "qm2", "qa", "qd", "b", "s", "s1", "s2", "s3", "s4", "ms", "ms1", "ms2",
-    "mr", "sr", "r", "d", "sp", "cl", "mt", "mt1", "mt2", "mt3", "mt4", "imt", "is", "ip", "io1", "li", "li1",
-    "li2", "li3", "lh", "lf",
+    "p", "m", "pi", "pi1", "pi2", "mi", "nb", "pc", "pm", "pmo", "pmc", "pmr", "cls", "q", "q1",
+    "q2", "q3", "q4", "qc", "qr", "qm", "qm1", "qm2", "qa", "qd", "b", "s", "s1", "s2", "s3", "s4",
+    "ms", "ms1", "ms2", "mr", "sr", "r", "d", "sp", "cl", "mt", "mt1", "mt2", "mt3", "mt4", "imt",
+    "is", "ip", "io1", "li", "li1", "li2", "li3", "lh", "lf",
 ];
 
 /// `^\\?([a-z]+\d?)(?:$|\s|\s?-|_)` over the lowercased, trimmed style name.
@@ -64,8 +64,15 @@ pub fn style_marker(style: Option<&str>) -> Option<String> {
 /// Text formatting carried into a piece.
 #[derive(Debug, Clone)]
 pub enum Piece {
-    Text { text: String, italic: bool, bold: bool },
-    Verse { chapter: u32, sid: String },
+    Text {
+        text: String,
+        italic: bool,
+        bold: bool,
+    },
+    Verse {
+        chapter: u32,
+        sid: String,
+    },
     Chapter(u32),
     Line,
     Note(String),
@@ -97,7 +104,14 @@ pub struct Block {
 pub fn tidy(p: &Paragraph) -> Paragraph {
     let mut out: Vec<Inline> = Vec::new();
     for i in &p.inlines {
-        if let (Inline::Text { text, format, .. }, Some(Inline::Text { text: last, format: lf, .. })) = (i, out.last_mut())
+        if let (
+            Inline::Text { text, format, .. },
+            Some(Inline::Text {
+                text: last,
+                format: lf,
+                ..
+            }),
+        ) = (i, out.last_mut())
             && (format == lf || text.trim().is_empty())
         {
             last.push_str(text);
@@ -105,7 +119,10 @@ pub fn tidy(p: &Paragraph) -> Paragraph {
         }
         out.push(i.clone());
     }
-    Paragraph { inlines: out, ..p.clone() }
+    Paragraph {
+        inlines: out,
+        ..p.clone()
+    }
 }
 
 /// What the whole document says, worked out before any paragraph is read.
@@ -128,12 +145,24 @@ impl<'s> Guesser<'s> {
         counts.superscript += our_verses;
         let detected = verses::detect(&counts);
         let mode = settings.verses.unwrap_or(detected);
-        let labelled = paragraphs.iter().any(|p| chapter_label(&settings.chapter_words, &p.plain()).is_some());
-        Self { settings, mode, detected, counts, levels: indent_levels(paragraphs), labelled }
+        let labelled = paragraphs
+            .iter()
+            .any(|p| chapter_label(&settings.chapter_words, &p.plain()).is_some());
+        Self {
+            settings,
+            mode,
+            detected,
+            counts,
+            levels: indent_levels(paragraphs),
+            labelled,
+        }
     }
 
     fn level(&self, indent: f64) -> u32 {
-        self.levels.iter().find(|(i, _)| *i == indent).map_or(0, |(_, l)| *l)
+        self.levels
+            .iter()
+            .find(|(i, _)| *i == indent)
+            .map_or(0, |(_, l)| *l)
     }
 
     /// One paragraph into blocks: a chapter it opens, then itself.
@@ -147,17 +176,28 @@ impl<'s> Guesser<'s> {
         let excerpt = excerpt(&text);
         let mut guess = |out: &mut Out<'_>, marker: &str, reason: String| {
             let r = out.verse_ref();
-            out.report.guesses.push(Guess { r#ref: r, marker: marker.to_owned(), reason, excerpt: excerpt.clone() });
+            out.report.guesses.push(Guess {
+                r#ref: r,
+                marker: marker.to_owned(),
+                reason,
+                excerpt: excerpt.clone(),
+            });
         };
 
         // "Chapter 3", "Chapter", or a paragraph that is only the next
         // chapter's number. A paragraph carrying a footnote is never a label:
         // the label is dropped, the note must not be.
         let noted = p.has_note();
-        let label = if noted { None } else { chapter_label(&s.chapter_words, &text) };
+        let label = if noted {
+            None
+        } else {
+            chapter_label(&s.chapter_words, &text)
+        };
         let bare = if noted { None } else { bare_number(&text) };
         let bare_next = bare.is_some_and(|n| {
-            self.mode != VerseMode::PerLine && n == out.chapter + 1 && (out.verse > 0 || out.chapter == 0)
+            self.mode != VerseMode::PerLine
+                && n == out.chapter + 1
+                && (out.verse > 0 || out.chapter == 0)
         });
         if label.is_some() || bare_next {
             let n = match label {
@@ -166,41 +206,69 @@ impl<'s> Guesser<'s> {
                 None => bare.unwrap_or(out.chapter + 1),
             };
             match label {
-                None => guess(out, "c", "a paragraph holding only the next chapter's number".to_owned()),
+                None => guess(
+                    out,
+                    "c",
+                    "a paragraph holding only the next chapter's number".to_owned(),
+                ),
                 Some(None) => guess(
                     out,
                     "c",
-                    format!("\"{}\" without a number, counted on from the last chapter", text.trim()),
+                    format!(
+                        "\"{}\" without a number, counted on from the last chapter",
+                        text.trim()
+                    ),
                 ),
                 Some(Some(_)) => {}
             }
             if n != out.chapter {
                 out.chapter = n;
                 out.verse = 0;
-                blocks.push(Block { kind: BlockKind::Chapter, marker: "c".to_owned(), poetry: 0, chapter: Some(n), pieces: Vec::new() });
+                blocks.push(Block {
+                    kind: BlockKind::Chapter,
+                    marker: "c".to_owned(),
+                    poetry: 0,
+                    chapter: Some(n),
+                    pieces: Vec::new(),
+                });
             }
             return blocks;
         }
 
         let mut pieces: Vec<Piece> = Vec::new();
         let mut opens: Option<u32> = None;
-        let start_verse = |out: &mut Out<'_>, pieces: &mut Vec<Piece>, opens: &mut Option<u32>, from: u32, to: u32, restart: bool, why: &str, guess: &mut dyn FnMut(&mut Out<'_>, &str, String)| {
-            if restart || out.chapter == 0 {
-                out.chapter = if restart { out.chapter + 1 } else { 1 };
-                if pieces.iter().any(|x| !matches!(x, Piece::CommentStart(_))) {
-                    pieces.push(Piece::Chapter(out.chapter));
+        let start_verse =
+            |out: &mut Out<'_>,
+             pieces: &mut Vec<Piece>,
+             opens: &mut Option<u32>,
+             from: u32,
+             to: u32,
+             restart: bool,
+             why: &str,
+             guess: &mut dyn FnMut(&mut Out<'_>, &str, String)| {
+                if restart || out.chapter == 0 {
+                    out.chapter = if restart { out.chapter + 1 } else { 1 };
+                    if pieces.iter().any(|x| !matches!(x, Piece::CommentStart(_))) {
+                        pieces.push(Piece::Chapter(out.chapter));
+                    } else {
+                        *opens = Some(out.chapter);
+                    }
+                    if restart {
+                        guess(out, "c", why.to_owned());
+                    }
+                }
+                out.verse = to;
+                out.record(from, to);
+                let sid = if from == to {
+                    from.to_string()
                 } else {
-                    *opens = Some(out.chapter);
-                }
-                if restart {
-                    guess(out, "c", why.to_owned());
-                }
-            }
-            out.verse = to;
-            out.record(from, to);
-            let sid = if from == to { from.to_string() } else { format!("{from}-{to}") };
-            pieces.push(Piece::Verse { chapter: out.chapter, sid });
-        };
+                    format!("{from}-{to}")
+                };
+                pieces.push(Piece::Verse {
+                    chapter: out.chapter,
+                    sid,
+                });
+            };
         const RESTART: &str = "verse 1 again after a later verse, with no chapter label";
 
         if self.mode == VerseMode::PerLine {
@@ -209,7 +277,16 @@ impl<'s> Guesser<'s> {
                 let max = out.max_verse(out.chapter.max(1));
                 let full = !self.labelled && out.chapter > 0 && max.is_some_and(|m| out.verse >= m);
                 let n = if full { 1 } else { out.verse + 1 };
-                start_verse(out, &mut pieces, &mut opens, n, n, full, "the versification's verse count was reached", &mut guess);
+                start_verse(
+                    out,
+                    &mut pieces,
+                    &mut opens,
+                    n,
+                    n,
+                    full,
+                    "the versification's verse count was reached",
+                    &mut guess,
+                );
             }
         }
 
@@ -238,7 +315,11 @@ impl<'s> Guesser<'s> {
             let mut cursor = 0;
             let push = |pieces: &mut Vec<Piece>, cursor: usize, to: usize| {
                 if to > cursor {
-                    pieces.push(Piece::Text { text: itext[cursor..to].to_owned(), italic: format.italic, bold: format.bold });
+                    pieces.push(Piece::Text {
+                        text: itext[cursor..to].to_owned(),
+                        italic: format.italic,
+                        bold: format.bold,
+                    });
                 }
             };
             for c in verses::candidates(itext, format.superscript, at_line_start) {
@@ -248,21 +329,49 @@ impl<'s> Guesser<'s> {
                 let written = itext[c.start..c.end].trim().to_owned();
                 let r = out.verse_ref();
                 if c.thousands {
-                    out.report.skipped.push(Skip { r#ref: r, number: written, reason: SkipReason::Thousands });
+                    out.report.skipped.push(Skip {
+                        r#ref: r,
+                        number: written,
+                        reason: SkipReason::Thousands,
+                    });
                     continue;
                 }
                 let max = out.max_verse(out.chapter.max(1));
-                let step = verses::next_verse(out.verse, c.from, c.to, verses::gap_for(c.kind), c.kind != Kind::Inline, max);
+                let step = verses::next_verse(
+                    out.verse,
+                    c.from,
+                    c.to,
+                    verses::gap_for(c.kind),
+                    c.kind != Kind::Inline,
+                    max,
+                );
                 let Some(step) = step else {
                     let over = max.is_some_and(|m| c.to > m) && c.from > out.verse;
                     if c.kind != Kind::Inline {
-                        let reason = if over { SkipReason::Versification } else { SkipReason::Sequence };
-                        out.report.skipped.push(Skip { r#ref: r, number: written, reason });
+                        let reason = if over {
+                            SkipReason::Versification
+                        } else {
+                            SkipReason::Sequence
+                        };
+                        out.report.skipped.push(Skip {
+                            r#ref: r,
+                            number: written,
+                            reason,
+                        });
                     }
                     continue;
                 };
                 push(&mut pieces, cursor, c.start);
-                start_verse(out, &mut pieces, &mut opens, c.from, c.to, step == Step::Restart, RESTART, &mut guess);
+                start_verse(
+                    out,
+                    &mut pieces,
+                    &mut opens,
+                    c.from,
+                    c.to,
+                    step == Step::Restart,
+                    RESTART,
+                    &mut guess,
+                );
                 cursor = c.end;
             }
             push(&mut pieces, cursor, itext.len());
@@ -275,7 +384,13 @@ impl<'s> Guesser<'s> {
         if has_verse {
             out.started = true;
         }
-        let mut block = Block { kind: BlockKind::Para, marker: "p".to_owned(), poetry: 0, chapter: opens, pieces };
+        let mut block = Block {
+            kind: BlockKind::Para,
+            marker: "p".to_owned(),
+            poetry: 0,
+            chapter: opens,
+            pieces,
+        };
         if !out.started {
             block.kind = BlockKind::Front;
             block.marker = "rem".to_owned();
@@ -285,7 +400,11 @@ impl<'s> Guesser<'s> {
         } else if !has_verse && looks_like_heading(p, &text) {
             block.kind = BlockKind::Heading;
             block.marker = "s1".to_owned();
-            let why = if p.align == Some(Align::Center) { "short, centred, no verse number" } else { "short, bold, no verse number" };
+            let why = if p.align == Some(Align::Center) {
+                "short, centred, no verse number"
+            } else {
+                "short, bold, no verse number"
+            };
             guess(out, "s1", why.to_owned());
         } else {
             self.paragraph_marker(p, &mut block, &mut |out, m, r| guess(out, m, r), out);
@@ -293,7 +412,11 @@ impl<'s> Guesser<'s> {
         if block.kind == BlockKind::Para && block.poetry == 0 {
             for piece in &mut block.pieces {
                 if matches!(piece, Piece::Line) {
-                    *piece = Piece::Text { text: " ".to_owned(), italic: false, bold: false };
+                    *piece = Piece::Text {
+                        text: " ".to_owned(),
+                        italic: false,
+                        bold: false,
+                    };
                 }
             }
         }
@@ -312,18 +435,33 @@ impl<'s> Guesser<'s> {
         if s.style_markers == Keep::Keep
             && let Some(m) = style_marker(p.style.as_deref())
         {
-            let marker = if matches!(m.as_str(), "q" | "li" | "mt" | "s") { format!("{m}1") } else { m };
+            let marker = if matches!(m.as_str(), "q" | "li" | "mt" | "s") {
+                format!("{m}1")
+            } else {
+                m
+            };
             block.marker = marker.clone();
             if let Some(q) = marker.strip_prefix('q').and_then(|d| d.parse::<u32>().ok())
                 && marker.len() == 2
             {
                 block.poetry = q;
             }
-            let heading = marker.len() == 2 && marker.starts_with('s') && marker.as_bytes()[1].is_ascii_digit();
-            if heading && !block.pieces.iter().any(|x| matches!(x, Piece::Verse { .. })) {
+            let heading = marker.len() == 2
+                && marker.starts_with('s')
+                && marker.as_bytes()[1].is_ascii_digit();
+            if heading
+                && !block
+                    .pieces
+                    .iter()
+                    .any(|x| matches!(x, Piece::Verse { .. }))
+            {
                 block.kind = BlockKind::Heading;
             }
-            guess(out, &marker, format!("paragraph style \"{}\"", p.style.as_deref().unwrap_or("")));
+            guess(
+                out,
+                &marker,
+                format!("paragraph style \"{}\"", p.style.as_deref().unwrap_or("")),
+            );
             return;
         }
         if p.list && s.lists == Keep::Keep {
@@ -337,7 +475,10 @@ impl<'s> Guesser<'s> {
         let reason = if level > 0 {
             Some(format!("indented {}pt", p.indent.round()))
         } else if p.role == Some(Role::Quote) {
-            Some(format!("paragraph style \"{}\"", p.style.as_deref().unwrap_or("")))
+            Some(format!(
+                "paragraph style \"{}\"",
+                p.style.as_deref().unwrap_or("")
+            ))
         } else if italic {
             Some("the whole paragraph is italic".to_owned())
         } else if lines.len() >= 2 && lines.iter().all(|&n| n <= 60) {
@@ -366,7 +507,12 @@ impl<'s> Guesser<'s> {
     /// Writes the blocks of one paragraph.
     pub fn emit(&self, blocks: &[Block], out: &mut Out<'_>) {
         let s = self.settings;
-        let rename = |m: &str| s.markers.iter().find(|(from, _)| from == m).map_or_else(|| m.to_owned(), |(_, to)| to.clone());
+        let rename = |m: &str| {
+            s.markers
+                .iter()
+                .find(|(from, _)| from == m)
+                .map_or_else(|| m.to_owned(), |(_, to)| to.clone())
+        };
         for block in blocks {
             if block.kind == BlockKind::Chapter {
                 out.chapter_line(block.chapter.unwrap_or(0));
@@ -386,7 +532,11 @@ impl<'s> Guesser<'s> {
                     }
                 }
                 let text = collapse(&text).replace(" \\f +", "\\f +").trim().to_owned();
-                let choice = if block.kind == BlockKind::Front { s.front.name() } else { s.headings.name() };
+                let choice = if block.kind == BlockKind::Front {
+                    s.front.name()
+                } else {
+                    s.headings.name()
+                };
                 if choice == "drop" || text.is_empty() {
                     continue;
                 }
@@ -394,7 +544,11 @@ impl<'s> Guesser<'s> {
                     "rem".to_owned()
                 } else if block.kind == BlockKind::Front {
                     out.mt_count += 1;
-                    if out.mt_count == 1 { "mt1".to_owned() } else { "mt2".to_owned() }
+                    if out.mt_count == 1 {
+                        "mt1".to_owned()
+                    } else {
+                        "mt2".to_owned()
+                    }
                 } else {
                     block.marker.clone()
                 };
@@ -479,7 +633,11 @@ impl<'s> Guesser<'s> {
         let fr = match out.anchors_ref() {
             Some(r) => {
                 let r = match r.rsplit_once('-') {
-                    Some((head, tail)) if tail.bytes().all(|b| b.is_ascii_digit()) && !tail.is_empty() => head.to_owned(),
+                    Some((head, tail))
+                        if tail.bytes().all(|b| b.is_ascii_digit()) && !tail.is_empty() =>
+                    {
+                        head.to_owned()
+                    }
                     _ => r,
                 };
                 format!("\\fr {r} ")
@@ -497,7 +655,9 @@ pub fn chapter_label(words: &[String], text: &str) -> Option<Option<u32>> {
     let lower = t.to_lowercase();
     for w in words.iter().filter(|w| !w.is_empty()) {
         let w = w.to_lowercase();
-        let Some(rest) = lower.strip_prefix(&w) else { continue };
+        let Some(rest) = lower.strip_prefix(&w) else {
+            continue;
+        };
         let rest = rest.strip_prefix('.').unwrap_or(rest).trim_start();
         let n = rest.bytes().take_while(u8::is_ascii_digit).count();
         if n > 3 {
@@ -516,7 +676,8 @@ pub fn chapter_label(words: &[String], text: &str) -> Option<Option<u32>> {
 /// `^\s*(\d{1,3})\s*$`
 fn bare_number(text: &str) -> Option<u32> {
     let t = text.trim();
-    (!t.is_empty() && t.len() <= 3 && t.bytes().all(|b| b.is_ascii_digit())).then(|| t.parse().unwrap_or(0))
+    (!t.is_empty() && t.len() <= 3 && t.bytes().all(|b| b.is_ascii_digit()))
+        .then(|| t.parse().unwrap_or(0))
 }
 
 /// Left indents deeper than the body text's, ranked: the first step in is
@@ -541,14 +702,23 @@ fn indent_levels(paragraphs: &[&Paragraph]) -> Vec<(f64, u32)> {
             body = i;
         }
     }
-    let mut deeper: Vec<f64> = counts.iter().map(|(i, _)| *i).filter(|&i| i > body + 4.0).collect();
+    let mut deeper: Vec<f64> = counts
+        .iter()
+        .map(|(i, _)| *i)
+        .filter(|&i| i > body + 4.0)
+        .collect();
     deeper.sort_by(f64::total_cmp);
-    deeper.into_iter().enumerate().map(|(n, i)| (i, (n as u32 + 1).min(3))).collect()
+    deeper
+        .into_iter()
+        .enumerate()
+        .map(|(n, i)| (i, (n as u32 + 1).min(3)))
+        .collect()
 }
 
 fn looks_like_heading(p: &Paragraph, text: &str) -> bool {
     let t = text.trim();
-    if t.encode_utf16().count() > 80 || t.ends_with(['.', ',', ';', ':', '!', '?', '"', '”', '’']) {
+    if t.encode_utf16().count() > 80 || t.ends_with(['.', ',', ';', ':', '!', '?', '"', '”', '’'])
+    {
         return false;
     }
     let texts: Vec<bool> = p
@@ -581,12 +751,16 @@ pub fn looks_like_usfm(paragraphs: &[&Paragraph]) -> bool {
 
 /// `^\s*\\(id|c|v|p|m|q\d?|s\d?|h|mt\d?|toc\d)(\s|$)`
 fn starts_with_marker(text: &str) -> bool {
-    let Some(rest) = text.trim_start().strip_prefix('\\') else { return false };
+    let Some(rest) = text.trim_start().strip_prefix('\\') else {
+        return false;
+    };
     let name_len = rest.bytes().take_while(u8::is_ascii_alphanumeric).count();
     let name = &rest[..name_len];
     let after_ok = rest[name_len..].is_empty() || rest[name_len..].starts_with(char::is_whitespace);
     let digit = |prefix: &str, required: bool| {
-        name.strip_prefix(prefix).is_some_and(|d| (d.is_empty() && !required) || (d.len() == 1 && d.as_bytes()[0].is_ascii_digit()))
+        name.strip_prefix(prefix).is_some_and(|d| {
+            (d.is_empty() && !required) || (d.len() == 1 && d.as_bytes()[0].is_ascii_digit())
+        })
     };
     let known = matches!(name, "id" | "c" | "v" | "p" | "m" | "h")
         || digit("q", false)
@@ -610,11 +784,17 @@ fn line_lengths(pieces: &[Piece]) -> Vec<usize> {
     for piece in pieces {
         match piece {
             Piece::Line => lengths.push(0),
-            Piece::Text { text, .. } => *lengths.last_mut().expect("one") += text.trim().encode_utf16().count(),
+            Piece::Text { text, .. } => {
+                *lengths.last_mut().expect("one") += text.trim().encode_utf16().count()
+            }
             _ => {}
         }
     }
-    if lengths.len() > 1 { lengths.into_iter().filter(|&n| n > 0).collect() } else { Vec::new() }
+    if lengths.len() > 1 {
+        lengths.into_iter().filter(|&n| n > 0).collect()
+    } else {
+        Vec::new()
+    }
 }
 
 fn all_italic(pieces: &[Piece]) -> bool {
@@ -654,7 +834,12 @@ fn count_candidates(paragraphs: &[&Paragraph]) -> Counts {
 
 /// Every run of whitespace as one space.
 pub fn collapse(text: &str) -> String {
-    text.split_whitespace().collect::<Vec<_>>().join(" ") + if text.ends_with(char::is_whitespace) && !text.trim().is_empty() { " " } else { "" }
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+        + if text.ends_with(char::is_whitespace) && !text.trim().is_empty() {
+            " "
+        } else {
+            ""
+        }
 }
 
 fn excerpt(text: &str) -> String {
@@ -669,16 +854,26 @@ fn excerpt(text: &str) -> String {
 
 /// How many paragraphs carry a style named after a marker.
 pub fn count_style_markers(paragraphs: &[&Paragraph]) -> usize {
-    paragraphs.iter().filter(|p| style_marker(p.style.as_deref()).is_some()).count()
+    paragraphs
+        .iter()
+        .filter(|p| style_marker(p.style.as_deref()).is_some())
+        .count()
 }
 
 /// The verses seen in each chapter, as document-import summarises them.
-pub fn summarise(seen: &BTreeMap<u32, std::collections::BTreeSet<u32>>) -> Vec<crate::ChapterSummary> {
+pub fn summarise(
+    seen: &BTreeMap<u32, std::collections::BTreeSet<u32>>,
+) -> Vec<crate::ChapterSummary> {
     seen.iter()
         .map(|(&chapter, verses)| {
             let last = verses.iter().next_back().copied().unwrap_or(0);
             let missing = (1..=last).filter(|n| !verses.contains(n)).collect();
-            crate::ChapterSummary { chapter, verses: verses.len(), last, missing }
+            crate::ChapterSummary {
+                chapter,
+                verses: verses.len(),
+                last,
+                missing,
+            }
         })
         .collect()
 }

@@ -9,8 +9,8 @@
 //! Names stay qualified as written (`w:p`). Word, LibreOffice and Google Docs
 //! all write WordprocessingML with the `w` prefix.
 
-use quick_xml::{Reader, XmlVersion};
 use quick_xml::events::{BytesStart, Event};
+use quick_xml::{Reader, XmlVersion};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Node {
@@ -27,7 +27,10 @@ pub struct Element {
 
 impl Element {
     pub fn attr(&self, name: &str) -> Option<&str> {
-        self.attrs.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str())
+        self.attrs
+            .iter()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| v.as_str())
     }
 
     pub fn elements(&self) -> impl Iterator<Item = &Element> {
@@ -66,7 +69,10 @@ pub struct XmlError {
 
 /// Parses one part; the root element is returned.
 pub fn parse(part: &str, xml: &[u8]) -> Result<Element, XmlError> {
-    let fail = |message: String| XmlError { part: part.to_owned(), message };
+    let fail = |message: String| XmlError {
+        part: part.to_owned(),
+        message,
+    };
     let mut reader = Reader::from_reader(xml);
     reader.config_mut().trim_text(false);
     let mut stack: Vec<Element> = vec![Element::default()];
@@ -112,7 +118,9 @@ pub fn parse(part: &str, xml: &[u8]) -> Result<Element, XmlError> {
         }
     }
     let mut root = stack.pop().filter(|_| stack.is_empty());
-    let root = root.take().ok_or_else(|| fail("unclosed element".to_owned()))?;
+    let root = root
+        .take()
+        .ok_or_else(|| fail("unclosed element".to_owned()))?;
     root.elements()
         .next()
         .cloned()
@@ -131,7 +139,11 @@ fn open(start: &BytesStart<'_>) -> Result<Element, String> {
             .into_owned();
         attrs.push((key, value));
     }
-    Ok(Element { name, attrs, children: Vec::new() })
+    Ok(Element {
+        name,
+        attrs,
+        children: Vec::new(),
+    })
 }
 
 fn push(stack: &mut [Element], node: Node) {
@@ -156,8 +168,11 @@ mod tests {
 
     #[test]
     fn text_and_entities_join() {
-        let root = parse("t", br#"<?xml version="1.0"?><w:t a="x &amp; y">a &amp; b&#x41;</w:t>"#)
-            .unwrap();
+        let root = parse(
+            "t",
+            br#"<?xml version="1.0"?><w:t a="x &amp; y">a &amp; b&#x41;</w:t>"#,
+        )
+        .unwrap();
         assert_eq!(root.name, "w:t");
         assert_eq!(root.attr("a"), Some("x & y"));
         assert_eq!(root.children, vec![Node::Text("a & bA".to_owned())]);

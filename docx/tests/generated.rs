@@ -26,5 +26,8 @@ const TEMPLATE: &[u8] = include_bytes!("../template.dotx");
 
 #[test]
 fn template_dotx_is_not_stale() {
-    assert!(docx::template() == TEMPLATE, "docx/template.dotx is stale: run `cargo run -p docx --bin codegen` (twice after a style change)");
+    assert!(
+        docx::template() == TEMPLATE,
+        "docx/template.dotx is stale: run `cargo run -p docx --bin codegen` (twice after a style change)"
+    );
 }

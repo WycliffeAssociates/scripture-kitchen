@@ -13,20 +13,31 @@ pub fn corpus() -> Vec<PathBuf> {
     for dir in std::fs::read_dir(&root).unwrap_or_else(|e| panic!("{}: {e}", root.display())) {
         for f in std::fs::read_dir(dir.unwrap().path()).unwrap() {
             let path = f.unwrap().path();
-            let ext = path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase());
+            let ext = path
+                .extension()
+                .map(|e| e.to_string_lossy().to_ascii_lowercase());
             if matches!(ext.as_deref(), Some("usfm" | "sfm")) {
                 files.push(path);
             }
         }
     }
     files.sort();
-    assert!(files.len() > 150, "the test tier is 160 books, found {}", files.len());
+    assert!(
+        files.len() > 150,
+        "the test tier is 160 books, found {}",
+        files.len()
+    );
     files
 }
 
 /// `corpora-dir/file.usfm`: unique where the file name alone is not.
 pub fn name(path: &Path) -> String {
-    let dir = path.parent().unwrap().file_name().unwrap().to_string_lossy();
+    let dir = path
+        .parent()
+        .unwrap()
+        .file_name()
+        .unwrap()
+        .to_string_lossy();
     format!("{dir}/{}", path.file_name().unwrap().to_string_lossy())
 }
 
@@ -46,7 +57,9 @@ pub fn first_difference(a: &Value, b: &Value, path: &str) -> Option<String> {
                 None => Some(format!("{path}.{k}: missing after the round trip")),
             })
             .or_else(|| {
-                y.keys().find(|k| !x.contains_key(*k)).map(|k| format!("{path}.{k}: added by the round trip"))
+                y.keys()
+                    .find(|k| !x.contains_key(*k))
+                    .map(|k| format!("{path}.{k}: added by the round trip"))
             }),
         (Value::Array(x), Value::Array(y)) => x
             .iter()
@@ -56,7 +69,12 @@ pub fn first_difference(a: &Value, b: &Value, path: &str) -> Option<String> {
             .or_else(|| {
                 (x.len() != y.len()).then(|| {
                     let i = x.len().min(y.len());
-                    format!("{path}: {} items became {}; first extra {}", x.len(), y.len(), x.get(i).or(y.get(i)).unwrap())
+                    format!(
+                        "{path}: {} items became {}; first extra {}",
+                        x.len(),
+                        y.len(),
+                        x.get(i).or(y.get(i)).unwrap()
+                    )
                 })
             }),
         _ => (a != b).then(|| format!("{path}: {a} became {b}")),

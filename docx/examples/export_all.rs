@@ -17,7 +17,11 @@ fn main() {
         let source = std::fs::read_to_string(&path).unwrap();
         let out = docx::export(&source, &docx::ExportOptions::default());
         if out.unsupported.is_empty() {
-            std::fs::write(dir.join(format!("{}.docx", common::name(&path).replace('/', "__"))), &out.docx).unwrap();
+            std::fs::write(
+                dir.join(format!("{}.docx", common::name(&path).replace('/', "__"))),
+                &out.docx,
+            )
+            .unwrap();
             n += 1;
         }
     }

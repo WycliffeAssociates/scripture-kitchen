@@ -16,7 +16,8 @@ fn main() {
     for entry in std::fs::read_dir(input).unwrap() {
         let path = entry.unwrap().path();
         let name = path.file_name().unwrap().to_string_lossy().into_owned();
-        let back = docx::import(&std::fs::read(&path).unwrap(), &docx::Settings::default()).unwrap();
+        let back =
+            docx::import(&std::fs::read(&path).unwrap(), &docx::Settings::default()).unwrap();
         let r = &back.report;
         let usfm: String = back.books.iter().map(|b| b.usfm.as_str()).collect();
         let skipped: Vec<_> = r
@@ -31,7 +32,11 @@ fn main() {
                 json!({"ref": s.r#ref, "number": s.number, "reason": reason})
             })
             .collect();
-        let guesses: Vec<_> = r.guesses.iter().map(|g| json!([g.r#ref, g.marker, g.reason, g.excerpt])).collect();
+        let guesses: Vec<_> = r
+            .guesses
+            .iter()
+            .map(|g| json!([g.r#ref, g.marker, g.reason, g.excerpt]))
+            .collect();
         let summary = format!(
             "detected={} skipped={} guesses={} chapters={}\n{}\n{}\n",
             r.detected.name(),

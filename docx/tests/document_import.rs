@@ -15,12 +15,17 @@
 use docx::{Settings, VerseMode, VersePoint};
 
 fn fixture(name: &str) -> Vec<u8> {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures").join(name);
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("fixtures")
+        .join(name);
     std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
 }
 
 fn titus() -> Settings {
-    Settings { book: Some("TIT".to_owned()), ..Settings::default() }
+    Settings {
+        book: Some("TIT".to_owned()),
+        ..Settings::default()
+    }
 }
 
 #[test]
@@ -31,16 +36,27 @@ fn word_word_raised_and_writer_all_write_document_imports_usfm() {
         assert_eq!(out.books.len(), 1, "{name}");
         assert_eq!(out.books[0].usfm, golden, "{name}");
         assert_eq!(out.report.detected, VerseMode::Superscript, "{name}");
-        let chapters: Vec<(u32, usize, usize)> =
-            out.report.chapters.iter().map(|c| (c.chapter, c.verses, c.missing.len())).collect();
+        let chapters: Vec<(u32, usize, usize)> = out
+            .report
+            .chapters
+            .iter()
+            .map(|c| (c.chapter, c.verses, c.missing.len()))
+            .collect();
         assert_eq!(chapters, [(1, 16, 0), (2, 15, 0), (3, 15, 0)], "{name}");
     }
 }
 
 #[test]
 fn the_documents_own_paragraphs_are_kept_and_the_title_line_too() {
-    let usfm = docx::import(&fixture("master-titus.docx"), &titus()).unwrap().books.remove(0).usfm;
-    assert!(usfm.starts_with("\\id TIT\n\\rem MASTER:\n\\c 1\n"), "{usfm}");
+    let usfm = docx::import(&fixture("master-titus.docx"), &titus())
+        .unwrap()
+        .books
+        .remove(0)
+        .usfm;
+    assert!(
+        usfm.starts_with("\\id TIT\n\\rem MASTER:\n\\c 1\n"),
+        "{usfm}"
+    );
     let chapter_one = &usfm[..usfm.find("\\c 2").unwrap()];
     let starts: Vec<&str> = chapter_one
         .split("\\p\n\\v ")
@@ -58,8 +74,22 @@ fn a_comment_lands_on_the_same_words_from_word_and_from_writer() {
         assert_eq!(threads.len(), 1, "{name}");
         let t = &threads[0];
         assert_eq!(t.r#ref.as_deref(), Some("1:1"), "{name}");
-        assert_eq!(t.start, Some(VersePoint { r#ref: "1:1".to_owned(), offset: 23 }), "{name}");
-        assert_eq!(t.end, Some(VersePoint { r#ref: "1:1".to_owned(), offset: 40 }), "{name}");
+        assert_eq!(
+            t.start,
+            Some(VersePoint {
+                r#ref: "1:1".to_owned(),
+                offset: 23
+            }),
+            "{name}"
+        );
+        assert_eq!(
+            t.end,
+            Some(VersePoint {
+                r#ref: "1:1".to_owned(),
+                offset: 40
+            }),
+            "{name}"
+        );
         assert_eq!(t.anchor_text, "and an apostle of", "{name}");
     }
 }

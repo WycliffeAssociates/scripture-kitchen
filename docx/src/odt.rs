@@ -13,7 +13,9 @@ use std::collections::BTreeMap;
 
 use crate::comments::Comment;
 use crate::dom::{Element, Node};
-use crate::reading::{Align, Formatting, Inline, Note, NoteKind, Paragraph, Reading, push_text, role_of};
+use crate::reading::{
+    Align, Formatting, Inline, Note, NoteKind, Paragraph, Reading, push_text, role_of,
+};
 
 pub const MIMETYPE: &str = "application/vnd.oasis.opendocument.text";
 
@@ -49,7 +51,9 @@ impl Styles {
         let mut chain = Vec::new();
         let mut at = name.map(str::to_owned);
         while let Some(n) = at.take() {
-            let Some(own) = self.by_name.get(&n) else { break };
+            let Some(own) = self.by_name.get(&n) else {
+                break;
+            };
             if chain.len() > 20 {
                 break;
             }
@@ -60,7 +64,11 @@ impl Styles {
         for own in chain.iter().rev() {
             merged = StyleProps {
                 automatic: own.automatic,
-                name: if own.automatic { merged.name.clone() } else { own.name.clone() },
+                name: if own.automatic {
+                    merged.name.clone()
+                } else {
+                    own.name.clone()
+                },
                 parent: None,
                 indent: own.indent.or(merged.indent),
                 align: own.align.or(merged.align),
@@ -77,7 +85,9 @@ impl Styles {
 fn collect(e: &Element, automatic: bool, out: &mut BTreeMap<String, StyleProps>) {
     for c in e.elements() {
         if c.name == "style:style" {
-            let Some(name) = c.attr("style:name") else { continue };
+            let Some(name) = c.attr("style:name") else {
+                continue;
+            };
             let para = c.child("style:paragraph-properties");
             let text = c.child("style:text-properties");
             let mut p = StyleProps {
@@ -93,8 +103,12 @@ fn collect(e: &Element, automatic: bool, out: &mut BTreeMap<String, StyleProps>)
                 "justify" => Align::Justify,
                 _ => Align::Start,
             });
-            p.outline = c.attr("style:default-outline-level").and_then(|o| o.parse().ok());
-            p.italic = text.and_then(|t| t.attr("fo:font-style")).map(|s| s == "italic" || s == "oblique");
+            p.outline = c
+                .attr("style:default-outline-level")
+                .and_then(|o| o.parse().ok());
+            p.italic = text
+                .and_then(|t| t.attr("fo:font-style"))
+                .map(|s| s == "italic" || s == "oblique");
             p.bold = text
                 .and_then(|t| t.attr("fo:font-weight"))
                 .map(|w| w == "bold" || w.parse::<f64>().is_ok_and(|n| n >= 600.0));
@@ -158,7 +172,15 @@ pub fn read(content: &Element, styles: Option<&Element>) -> Option<Reading> {
         comments: Vec::new(),
     };
     let mut paragraphs = Vec::new();
-    blocks(text, &mut ctx, Where { list: false, table: false }, &mut paragraphs);
+    blocks(
+        text,
+        &mut ctx,
+        Where {
+            list: false,
+            table: false,
+        },
+        &mut paragraphs,
+    );
     ctx.paragraphs = paragraphs;
     Some(Reading {
         format: crate::reading::Format::Odt,
@@ -210,7 +232,10 @@ fn blocks(e: &Element, ctx: &mut Ctx, at: Where, out: &mut Vec<Paragraph>) {
             }
             "text:list" => blocks(c, ctx, Where { list: true, ..at }, out),
             "table:table" => blocks(c, ctx, Where { table: true, ..at }, out),
-            "text:tracked-changes" | "text:sequence-decls" | "text:variable-decls" | "office:forms" => {}
+            "text:tracked-changes"
+            | "text:sequence-decls"
+            | "text:variable-decls"
+            | "office:forms" => {}
             _ => blocks(c, ctx, at, out),
         }
     }
@@ -218,8 +243,12 @@ fn blocks(e: &Element, ctx: &mut Ctx, at: Where, out: &mut Vec<Paragraph>) {
 
 fn paragraph(p: &Element, ctx: &mut Ctx, at: Where) -> Paragraph {
     let style = ctx.styles.resolve(p.attr("text:style-name"));
-    let outline = (p.name == "text:h")
-        .then(|| p.attr("text:outline-level").and_then(|o| o.parse().ok()).or(style.outline).unwrap_or(1));
+    let outline = (p.name == "text:h").then(|| {
+        p.attr("text:outline-level")
+            .and_then(|o| o.parse().ok())
+            .or(style.outline)
+            .unwrap_or(1)
+    });
     let (role, level) = role_of(style.name.as_deref(), outline);
     let format = Formatting {
         superscript: style.superscript.unwrap_or(false),
@@ -248,7 +277,9 @@ fn inline(
     style: Option<&str>,
     out: &mut Vec<Inline>,
 ) {
-    let text = |out: &mut Vec<Inline>, value: &str| push_text(out, value, style.map(str::to_owned), format, direct);
+    let text = |out: &mut Vec<Inline>, value: &str| {
+        push_text(out, value, style.map(str::to_owned), format, direct)
+    };
     for node in &e.children {
         let c = match node {
             // ODF collapses whitespace; explicit spaces are <text:s/>.
@@ -300,8 +331,14 @@ fn inline(
                     out.push(Inline::CommentEnd(n.to_owned()));
                 }
             }
-            "text:change-start" | "text:change-end" | "text:change" | "text:bookmark" | "text:bookmark-start"
-            | "text:bookmark-end" | "text:soft-page-break" | "text:reference-mark" => {}
+            "text:change-start"
+            | "text:change-end"
+            | "text:change"
+            | "text:bookmark"
+            | "text:bookmark-start"
+            | "text:bookmark-end"
+            | "text:soft-page-break"
+            | "text:reference-mark" => {}
             _ => inline(c, ctx, format, direct, style, out),
         }
     }
@@ -325,12 +362,32 @@ fn collapse_ws(t: &str) -> String {
 }
 
 fn note(e: &Element, ctx: &mut Ctx) -> String {
-    let kind = if e.attr("text:note-class") == Some("endnote") { NoteKind::Endnote } else { NoteKind::Footnote };
-    let prefix = if kind == NoteKind::Footnote { "fn" } else { "en" };
-    let id = format!("{prefix}:{}", e.attr("text:id").map_or_else(|| ctx.notes.len().to_string(), str::to_owned));
+    let kind = if e.attr("text:note-class") == Some("endnote") {
+        NoteKind::Endnote
+    } else {
+        NoteKind::Footnote
+    };
+    let prefix = if kind == NoteKind::Footnote {
+        "fn"
+    } else {
+        "en"
+    };
+    let id = format!(
+        "{prefix}:{}",
+        e.attr("text:id")
+            .map_or_else(|| ctx.notes.len().to_string(), str::to_owned)
+    );
     let mut paragraphs = Vec::new();
     if let Some(body) = e.child("text:note-body") {
-        blocks(body, ctx, Where { list: false, table: false }, &mut paragraphs);
+        blocks(
+            body,
+            ctx,
+            Where {
+                list: false,
+                table: false,
+            },
+            &mut paragraphs,
+        );
     }
     ctx.notes.insert(id.clone(), Note { kind, paragraphs });
     id
@@ -339,7 +396,11 @@ fn note(e: &Element, ctx: &mut Ctx) -> String {
 fn annotation(e: &Element, ctx: &mut Ctx, out: &mut Vec<Inline>) {
     let name = e.attr("office:name");
     let id = name.map_or_else(|| format!("odt-{}", ctx.comments.len()), str::to_owned);
-    let text: Vec<String> = e.elements().filter(|c| c.name == "text:p").map(Element::text).collect();
+    let text: Vec<String> = e
+        .elements()
+        .filter(|c| c.name == "text:p")
+        .map(Element::text)
+        .collect();
     ctx.comments.push(Comment {
         id: id.clone(),
         author: find(e, "dc:creator").map(Element::text).unwrap_or_default(),

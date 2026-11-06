@@ -53,17 +53,28 @@ pub struct CommentThread {
 /// Every comment in comments.xml, in document order, with replies and
 /// resolved state from commentsExtended.xml.
 pub fn read(comments: Option<&Element>, extended: Option<&Element>) -> Vec<Comment> {
-    let Some(root) = comments else { return Vec::new() };
+    let Some(root) = comments else {
+        return Vec::new();
+    };
     let mut out = Vec::new();
     let mut by_para: BTreeMap<String, usize> = BTreeMap::new();
     for c in root.elements().filter(|e| e.name == "w:comment") {
         let Some(id) = c.attr("w:id") else { continue };
         let paragraphs: Vec<&Element> = c.elements().filter(|e| e.name == "w:p").collect();
-        let text = paragraphs.iter().map(|p| texts(p)).collect::<Vec<_>>().join("\n").trim().to_owned();
+        let text = paragraphs
+            .iter()
+            .map(|p| texts(p))
+            .collect::<Vec<_>>()
+            .join("\n")
+            .trim()
+            .to_owned();
         if let Some(para) = paragraphs.last().and_then(|p| p.attr("w14:paraId")) {
             by_para.insert(para.to_owned(), out.len());
         }
-        let date = c.attr("w:date").filter(|d| !d.starts_with("1900")).map(str::to_owned);
+        let date = c
+            .attr("w:date")
+            .filter(|d| !d.starts_with("1900"))
+            .map(str::to_owned);
         out.push(Comment {
             id: id.to_owned(),
             author: c.attr("w:author").unwrap_or("").to_owned(),
@@ -73,9 +84,18 @@ pub fn read(comments: Option<&Element>, extended: Option<&Element>) -> Vec<Comme
             resolved: false,
         });
     }
-    for ex in extended.iter().flat_map(|e| e.elements()).filter(|e| e.name == "w15:commentEx") {
-        let Some(&i) = ex.attr("w15:paraId").and_then(|p| by_para.get(p)) else { continue };
-        let parent = ex.attr("w15:paraIdParent").and_then(|p| by_para.get(p)).map(|&j| out[j].id.clone());
+    for ex in extended
+        .iter()
+        .flat_map(|e| e.elements())
+        .filter(|e| e.name == "w15:commentEx")
+    {
+        let Some(&i) = ex.attr("w15:paraId").and_then(|p| by_para.get(p)) else {
+            continue;
+        };
+        let parent = ex
+            .attr("w15:paraIdParent")
+            .and_then(|p| by_para.get(p))
+            .map(|&j| out[j].id.clone());
         out[i].parent_id = parent;
         out[i].resolved = ex.attr("w15:done") == Some("1");
     }
@@ -160,7 +180,13 @@ impl Anchors {
 
     pub fn start(&mut self, id: &str) {
         let start = self.here();
-        self.anchors.insert(id.to_owned(), Anchor { start, ..Anchor::default() });
+        self.anchors.insert(
+            id.to_owned(),
+            Anchor {
+                start,
+                ..Anchor::default()
+            },
+        );
         self.open.push(id.to_owned());
     }
 
@@ -182,12 +208,20 @@ impl Anchors {
 
     /// The threads whose root comment is anchored in this book. Ranges are
     /// pulled in off the collapsed space at either end.
-    pub fn threads(mut self, comments: &[Comment], take: impl Fn(&str) -> bool) -> Vec<CommentThread> {
+    pub fn threads(
+        mut self,
+        comments: &[Comment],
+        take: impl Fn(&str) -> bool,
+    ) -> Vec<CommentThread> {
         for text in self.verses.values_mut() {
             let trimmed = text.trim_end().len();
             text.truncate(trimmed);
         }
-        let units = |r: &str| -> Vec<u16> { self.verses.get(r).map_or(Vec::new(), |t| t.encode_utf16().collect()) };
+        let units = |r: &str| -> Vec<u16> {
+            self.verses
+                .get(r)
+                .map_or(Vec::new(), |t| t.encode_utf16().collect())
+        };
         for a in self.anchors.values_mut() {
             if let Some(s) = &mut a.start {
                 let v = units(&s.r#ref);
@@ -206,7 +240,11 @@ impl Anchors {
         let root_of = |id: &str| -> String {
             let mut id = id.to_owned();
             for _ in 0..50 {
-                match comments.iter().find(|c| c.id == id).and_then(|c| c.parent_id.clone()) {
+                match comments
+                    .iter()
+                    .find(|c| c.id == id)
+                    .and_then(|c| c.parent_id.clone())
+                {
                     Some(p) if p != id => id = p,
                     _ => break,
                 }
@@ -222,7 +260,12 @@ impl Anchors {
             let i = match threads.iter().position(|(r, _)| *r == root) {
                 Some(i) => i,
                 None => {
-                    let a = self.anchors.get(&root).or_else(|| self.anchors.get(&c.id)).cloned().unwrap_or_default();
+                    let a = self
+                        .anchors
+                        .get(&root)
+                        .or_else(|| self.anchors.get(&c.id))
+                        .cloned()
+                        .unwrap_or_default();
                     threads.push((
                         root.clone(),
                         CommentThread {

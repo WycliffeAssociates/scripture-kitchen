@@ -129,7 +129,11 @@ fn digits(s: &str, at: usize) -> usize {
 }
 
 fn space_at(s: &str, at: usize) -> Option<usize> {
-    s[at..].chars().next().filter(|c| c.is_whitespace()).map(char::len_utf8)
+    s[at..]
+        .chars()
+        .next()
+        .filter(|c| c.is_whitespace())
+        .map(char::len_utf8)
 }
 
 /// NUMBER at `at`: with the bridge before without, the period before none.
@@ -157,14 +161,25 @@ fn numbers(s: &str, at: usize) -> Vec<Number> {
         let m = digits(s, k);
         if (1..=3).contains(&m) {
             let to = s[k..k + m].parse().unwrap_or(0);
-            bases.push(Number { end: k + m, from, to });
+            bases.push(Number {
+                end: k + m,
+                from,
+                to,
+            });
         }
     }
-    bases.push(Number { end: at + n, from, to: from });
+    bases.push(Number {
+        end: at + n,
+        from,
+        to: from,
+    });
     let mut out = Vec::new();
     for b in bases {
         if s[b.end..].starts_with('.') {
-            out.push(Number { end: b.end + 1, ..b });
+            out.push(Number {
+                end: b.end + 1,
+                ..b
+            });
         }
         out.push(b);
     }
@@ -219,21 +234,43 @@ pub fn candidates(text: &str, superscript: bool, at_line_start: bool) -> Vec<Can
 
     // WHOLE_RUN: the match is the whole run, its spaces included.
     let lead = skip_ws(text, 0);
-    if let Some(n) = numbers(text, lead).into_iter().find(|n| skip_ws(text, n.end) == text.len()) {
-        add(if superscript { Kind::Superscript } else { Kind::Alone }, 0, Number { end: text.len(), ..n });
+    if let Some(n) = numbers(text, lead)
+        .into_iter()
+        .find(|n| skip_ws(text, n.end) == text.len())
+    {
+        add(
+            if superscript {
+                Kind::Superscript
+            } else {
+                Kind::Alone
+            },
+            0,
+            Number {
+                end: text.len(),
+                ..n
+            },
+        );
         return out;
     }
     if superscript {
         return out;
     }
     // LINE_START: the match starts at the run's start, leading spaces included.
-    if at_line_start && let Some(n) = numbers(text, lead).into_iter().find(|n| ws_or_end(text, n.end)) {
+    if at_line_start
+        && let Some(n) = numbers(text, lead)
+            .into_iter()
+            .find(|n| ws_or_end(text, n.end))
+    {
         add(Kind::LineStart, 0, n);
     }
     // MARKED, global
     let mut at = 0;
     while at < text.len() {
-        let behind_ok = at == 0 || text[..at].chars().next_back().is_some_and(char::is_whitespace);
+        let behind_ok = at == 0
+            || text[..at]
+                .chars()
+                .next_back()
+                .is_some_and(char::is_whitespace);
         let found = behind_ok.then(|| marked_at(text, at)).flatten();
         match found {
             Some(n) => {
@@ -246,12 +283,17 @@ pub fn candidates(text: &str, superscript: bool, at_line_start: bool) -> Vec<Can
     // INLINE, global
     let mut at = 0;
     while at < text.len() {
-        let behind_ok = at == 0 || text[..at].chars().next_back().is_some_and(|c| c.is_whitespace() || c == '(');
+        let behind_ok = at == 0
+            || text[..at]
+                .chars()
+                .next_back()
+                .is_some_and(|c| c.is_whitespace() || c == '(');
         let found = behind_ok
             .then(|| {
                 numbers(text, at).into_iter().find(|n| {
                     n.end == text.len()
-                        || text[n.end..].starts_with(|c: char| c.is_whitespace() || ",;:!?)".contains(c))
+                        || text[n.end..]
+                            .starts_with(|c: char| c.is_whitespace() || ",;:!?)".contains(c))
                 })
             })
             .flatten();
@@ -281,9 +323,11 @@ fn marked_at(text: &str, at: usize) -> Option<Number> {
         }
         prefixes.push(at + 1);
     }
-    prefixes
-        .into_iter()
-        .find_map(|p| numbers(text, skip_ws(text, p)).into_iter().find(|n| ws_or_end(text, n.end)))
+    prefixes.into_iter().find_map(|p| {
+        numbers(text, skip_ws(text, p))
+            .into_iter()
+            .find(|n| ws_or_end(text, n.end))
+    })
 }
 
 /// Picks the document's convention from how its numbers are written.
@@ -309,12 +353,23 @@ pub enum Step {
 /// Whether a number may be the next verse: ahead of the last one by at most
 /// `gap`, or 1 again (a new chapter) when `restart` is allowed. `max` is the
 /// chapter's verse count from a versification, when there is one.
-pub fn next_verse(previous: u32, from: u32, to: u32, gap: u32, restart: bool, max: Option<u32>) -> Option<Step> {
+pub fn next_verse(
+    previous: u32,
+    from: u32,
+    to: u32,
+    gap: u32,
+    restart: bool,
+    max: Option<u32>,
+) -> Option<Step> {
     if to < from {
         return None;
     }
     if from > previous && from <= previous + gap {
-        return if max.is_some_and(|m| to > m) { None } else { Some(Step::Next) };
+        return if max.is_some_and(|m| to > m) {
+            None
+        } else {
+            Some(Step::Next)
+        };
     }
     if restart && from == 1 && previous >= 1 {
         return Some(Step::Restart);
@@ -324,7 +379,11 @@ pub fn next_verse(previous: u32, from: u32, to: u32, gap: u32, restart: bool, ma
 
 /// How far ahead a number may jump: strong signals tolerate a skipped verse or two more.
 pub fn gap_for(kind: Kind) -> u32 {
-    if matches!(kind, Kind::Superscript | Kind::Marked | Kind::Alone) { 10 } else { 3 }
+    if matches!(kind, Kind::Superscript | Kind::Marked | Kind::Alone) {
+        10
+    } else {
+        3
+    }
 }
 
 #[cfg(test)]
@@ -334,14 +393,28 @@ mod tests {
     fn found(text: &str, sup: bool, line: bool) -> Vec<(Kind, String, u32, u32, bool)> {
         candidates(text, sup, line)
             .into_iter()
-            .map(|c| (c.kind, text[c.start..c.end].to_owned(), c.from, c.to, c.thousands))
+            .map(|c| {
+                (
+                    c.kind,
+                    text[c.start..c.end].to_owned(),
+                    c.from,
+                    c.to,
+                    c.thousands,
+                )
+            })
             .collect()
     }
 
     #[test]
     fn a_run_that_is_only_a_number() {
-        assert_eq!(found(" 12 ", true, false), vec![(Kind::Superscript, " 12 ".to_owned(), 12, 12, false)]);
-        assert_eq!(found("3-4", false, false), vec![(Kind::Alone, "3-4".to_owned(), 3, 4, false)]);
+        assert_eq!(
+            found(" 12 ", true, false),
+            vec![(Kind::Superscript, " 12 ".to_owned(), 12, 12, false)]
+        );
+        assert_eq!(
+            found("3-4", false, false),
+            vec![(Kind::Alone, "3-4".to_owned(), 3, 4, false)]
+        );
         assert_eq!(found("1000", true, false), vec![]);
     }
 
@@ -349,7 +422,15 @@ mod tests {
     fn marked_line_start_and_inline() {
         let got = found("v1 One. verse 2 Two. v 3 Three in 4 parts.", false, true);
         let kinds: Vec<(Kind, u32)> = got.iter().map(|g| (g.0, g.2)).collect();
-        assert_eq!(kinds, vec![(Kind::Marked, 1), (Kind::Marked, 2), (Kind::Marked, 3), (Kind::Inline, 4)]);
+        assert_eq!(
+            kinds,
+            vec![
+                (Kind::Marked, 1),
+                (Kind::Marked, 2),
+                (Kind::Marked, 3),
+                (Kind::Inline, 4)
+            ]
+        );
         let got = found("1 One, 3 days.", false, true);
         assert_eq!(got[0].0, Kind::LineStart);
         assert_eq!(got[1], (Kind::Inline, "3".to_owned(), 3, 3, false));

@@ -33,8 +33,8 @@ mod odt;
 mod props;
 mod reading;
 mod strict;
-mod verses;
 pub mod styles;
+mod verses;
 #[cfg(feature = "wasm")]
 mod wasm;
 mod xml;

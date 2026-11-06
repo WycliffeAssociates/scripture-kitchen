@@ -42,7 +42,11 @@ pub fn export(usfm: &str, options: &ExportOptions) -> Exported {
         custom: Some(crate::props::write(book.as_deref(), &source)),
         main: DOCUMENT,
     };
-    Exported { book, docx: parts.zip(), unsupported: w.unsupported }
+    Exported {
+        book,
+        docx: parts.zip(),
+        unsupported: w.unsupported,
+    }
 }
 
 /// What a new document from the template holds: one of each paragraph a book
@@ -112,11 +116,19 @@ impl Writer {
     }
 
     fn out(&mut self) -> &mut String {
-        if self.in_note { &mut self.notes } else { &mut self.body }
+        if self.in_note {
+            &mut self.notes
+        } else {
+            &mut self.body
+        }
     }
 
     fn report(&mut self, what: String) {
-        let at = if self.at.is_empty() { self.book.clone().unwrap_or_default() } else { self.at.clone() };
+        let at = if self.at.is_empty() {
+            self.book.clone().unwrap_or_default()
+        } else {
+            self.at.clone()
+        };
         self.unsupported.push(Unsupported { at, what });
     }
 
@@ -144,7 +156,11 @@ impl Writer {
                 self.close_loose();
                 let code = e.attr("code").unwrap_or("").to_owned();
                 let rest = e.text();
-                let text = if rest.trim().is_empty() { code.clone() } else { format!("{code} {}", rest.trim()) };
+                let text = if rest.trim().is_empty() {
+                    code.clone()
+                } else {
+                    format!("{code} {}", rest.trim())
+                };
                 self.book = Some(code.clone());
                 self.at = code;
                 self.paragraph_of_text("id", &text);
@@ -173,8 +189,12 @@ impl Writer {
             t @ ("table" | "row" | "cell" | "sidebar" | "periph") => {
                 self.close_loose();
                 match t {
-                    "sidebar" => self.report("a sidebar (\\esb); its paragraphs are kept".to_owned()),
-                    "periph" => self.report("a peripheral (\\periph); its paragraphs are kept".to_owned()),
+                    "sidebar" => {
+                        self.report("a sidebar (\\esb); its paragraphs are kept".to_owned())
+                    }
+                    "periph" => {
+                        self.report("a peripheral (\\periph); its paragraphs are kept".to_owned())
+                    }
                     "table" => self.report("a table; its cells are kept as paragraphs".to_owned()),
                     _ => {}
                 }
@@ -241,8 +261,13 @@ impl Writer {
 
     fn attributes(&mut self, e: &Element) {
         let marker = style_of(e).to_owned();
-        let keys: Vec<String> =
-            e.attrs.iter().map(|(k, _)| k).filter(|k| !CARRIED.contains(&k.as_str())).cloned().collect();
+        let keys: Vec<String> = e
+            .attrs
+            .iter()
+            .map(|(k, _)| k)
+            .filter(|k| !CARRIED.contains(&k.as_str()))
+            .cloned()
+            .collect();
         for k in keys {
             self.report(format!("attribute {k} on \\{marker}"));
         }
@@ -295,7 +320,10 @@ impl Writer {
                     self.run(&raw, Some(styles::RAW));
                 }
                 "char" if e.children.is_empty() => {
-                    self.report(format!("an empty \\{} inside another span, left out", style_of(e)));
+                    self.report(format!(
+                        "an empty \\{} inside another span, left out",
+                        style_of(e)
+                    ));
                 }
                 "char" => {
                     self.attributes(e);
@@ -376,7 +404,9 @@ impl Writer {
 
     fn document(&self) -> String {
         let mut s = String::from(xml::DECLARATION);
-        s.push_str(&format!(r#"<w:document xmlns:w="{W}" xmlns:r="{R}"><w:body>"#));
+        s.push_str(&format!(
+            r#"<w:document xmlns:w="{W}" xmlns:r="{R}"><w:body>"#
+        ));
         s.push('\n');
         s.push_str(&self.body);
         s.push_str(r#"<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/></w:sectPr>"#);
@@ -420,7 +450,11 @@ impl Writer {
                 1,
             );
         }
-        let extra: String = self.extra.iter().map(|(m, k)| styles::style_xml(m, *k)).collect();
+        let extra: String = self
+            .extra
+            .iter()
+            .map(|(m, k)| styles::style_xml(m, *k))
+            .collect();
         s.replacen(styles::END, &format!("{extra}{}", styles::END), 1)
     }
 }
@@ -441,7 +475,10 @@ impl Parts {
         } else {
             ""
         };
-        let content_types = format!("{}{custom_type}</Types>\n", CONTENT_TYPES.replace("MAIN", self.main));
+        let content_types = format!(
+            "{}{custom_type}</Types>\n",
+            CONTENT_TYPES.replace("MAIN", self.main)
+        );
         let custom_rel = if self.custom.is_some() {
             r#"<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties" Target="docProps/custom.xml"/>"#
         } else {
@@ -464,8 +501,10 @@ impl Parts {
     }
 }
 
-const DOCUMENT: &str = "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml";
-const TEMPLATE: &str = "application/vnd.openxmlformats-officedocument.wordprocessingml.template.main+xml";
+const DOCUMENT: &str =
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml";
+const TEMPLATE: &str =
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.template.main+xml";
 
 /// Closed by [`Parts::zip`], after the custom properties' override if any.
 const CONTENT_TYPES: &str = concat!(

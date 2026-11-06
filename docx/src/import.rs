@@ -20,16 +20,24 @@ use crate::comments::Anchors;
 use crate::dom::{self, Element};
 use crate::guess::{self, Guesser};
 use crate::reading::{Inline, NoteKind, Paragraph, Reading, WordReader, WordStyles, word_notes};
-use crate::{Found, ImportError, ImportReport, Imported, ImportedBook, KeepDrop, Settings, strict, zip};
+use crate::{
+    Found, ImportError, ImportReport, Imported, ImportedBook, KeepDrop, Settings, strict, zip,
+};
 
 const OFFICE_DOCUMENT: &str = "/officeDocument";
 
 /// Reads a .docx, or an .odt (told apart by the `mimetype` entry ODF puts first).
 pub fn read(bytes: &[u8]) -> Result<Reading, ImportError> {
-    let package = Package { archive: zip::Archive::open(bytes).map_err(ImportError::Zip)? };
-    let odt = package.get("mimetype")?.is_some_and(|m| m.starts_with(crate::odt::MIMETYPE.as_bytes()));
+    let package = Package {
+        archive: zip::Archive::open(bytes).map_err(ImportError::Zip)?,
+    };
+    let odt = package
+        .get("mimetype")?
+        .is_some_and(|m| m.starts_with(crate::odt::MIMETYPE.as_bytes()));
     if odt || (package.archive.has("content.xml") && !package.archive.has("word/document.xml")) {
-        let content = package.xml("content.xml")?.ok_or_else(|| ImportError::Missing("content.xml".to_owned()))?;
+        let content = package
+            .xml("content.xml")?
+            .ok_or_else(|| ImportError::Missing("content.xml".to_owned()))?;
         let styles = package.xml("styles.xml")?;
         let mut reading = crate::odt::read(&content, styles.as_ref())
             .ok_or_else(|| ImportError::Missing("content.xml: office:text".to_owned()))?;
@@ -54,15 +62,35 @@ pub fn read(bytes: &[u8]) -> Result<Reading, ImportError> {
     };
 
     let styles = WordStyles::read(part("/styles")?.as_ref());
-    let document = package.xml(&main)?.ok_or_else(|| ImportError::Missing(main.clone()))?;
-    let body = document.child("w:body").ok_or_else(|| ImportError::Missing(format!("{main}: w:body")))?;
-    let mut reader = WordReader { styles: &styles, tracked_changes: 0 };
+    let document = package
+        .xml(&main)?
+        .ok_or_else(|| ImportError::Missing(main.clone()))?;
+    let body = document
+        .child("w:body")
+        .ok_or_else(|| ImportError::Missing(format!("{main}: w:body")))?;
+    let mut reader = WordReader {
+        styles: &styles,
+        tracked_changes: 0,
+    };
     let mut paragraphs = Vec::new();
     reader.blocks(body, false, &mut paragraphs);
     let mut notes = BTreeMap::new();
-    word_notes(&mut reader, part("/footnotes")?.as_ref(), NoteKind::Footnote, &mut notes);
-    word_notes(&mut reader, part("/endnotes")?.as_ref(), NoteKind::Endnote, &mut notes);
-    let comments = crate::comments::read(part("/comments")?.as_ref(), part("/commentsExtended")?.as_ref());
+    word_notes(
+        &mut reader,
+        part("/footnotes")?.as_ref(),
+        NoteKind::Footnote,
+        &mut notes,
+    );
+    word_notes(
+        &mut reader,
+        part("/endnotes")?.as_ref(),
+        NoteKind::Endnote,
+        &mut notes,
+    );
+    let comments = crate::comments::read(
+        part("/comments")?.as_ref(),
+        part("/commentsExtended")?.as_ref(),
+    );
     let properties = match package.xml("docProps/custom.xml")? {
         Some(root) => crate::props::read(&root),
         None => Vec::new(),
@@ -88,12 +116,16 @@ impl Package<'_> {
     }
 
     fn xml(&self, name: &str) -> Result<Option<Element>, ImportError> {
-        self.get(name)?.map(|data| dom::parse(name, &data).map_err(ImportError::Xml)).transpose()
+        self.get(name)?
+            .map(|data| dom::parse(name, &data).map_err(ImportError::Xml))
+            .transpose()
     }
 
     /// A relationships part, as (type, target resolved against `dir`).
     fn rels(&self, name: &str, dir: &str) -> Result<Vec<(String, String)>, ImportError> {
-        let Some(root) = self.xml(name)? else { return Ok(Vec::new()) };
+        let Some(root) = self.xml(name)? else {
+            return Ok(Vec::new());
+        };
         Ok(root
             .elements()
             .filter(|e| e.attr("TargetMode") != Some("External"))
@@ -166,8 +198,17 @@ impl<'a> Out<'a> {
 
     fn book(&mut self) -> &mut Book {
         if self.books.is_empty() {
-            let lines = self.settings.book.iter().map(|b| format!("\\id {b}")).collect();
-            self.books.push(Book { code: self.settings.book.clone(), lines, anchors: Anchors::default() });
+            let lines = self
+                .settings
+                .book
+                .iter()
+                .map(|b| format!("\\id {b}"))
+                .collect();
+            self.books.push(Book {
+                code: self.settings.book.clone(),
+                lines,
+                anchors: Anchors::default(),
+            });
         }
         self.books.last_mut().expect("a book")
     }
@@ -187,7 +228,11 @@ impl<'a> Out<'a> {
 
     pub fn new_book(&mut self, code: Option<String>, id_line: String) {
         self.flush();
-        self.books.push(Book { code, lines: vec![id_line], anchors: Anchors::default() });
+        self.books.push(Book {
+            code,
+            lines: vec![id_line],
+            anchors: Anchors::default(),
+        });
         self.chapter = 0;
         self.verse = 0;
         self.started = false;
@@ -199,7 +244,11 @@ impl<'a> Out<'a> {
         let line = std::mem::take(&mut self.line);
         // Runs of spaces and tabs as one space, then trimmed as JavaScript
         // trims: every kind of whitespace, no-break spaces included.
-        let joined = line.split([' ', '\t']).filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" ");
+        let joined = line
+            .split([' ', '\t'])
+            .filter(|w| !w.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
         let tidied = joined.trim();
         if !tidied.is_empty() {
             let tidied = tidied.to_owned();
@@ -226,9 +275,15 @@ impl<'a> Out<'a> {
     /// The chapter's verse count from the versification, when there is one.
     pub fn max_verse(&self, chapter: u32) -> Option<u32> {
         let scheme = canon::scheme(self.settings.versification.as_deref()?)?;
-        let code = self.books.last().and_then(|b| b.code.clone()).or_else(|| self.settings.book.clone())?;
+        let code = self
+            .books
+            .last()
+            .and_then(|b| b.code.clone())
+            .or_else(|| self.settings.book.clone())?;
         let book = canon::parse_book(&code)?;
-        scheme.last_verse(book, u16::try_from(chapter).ok()?).map(u32::from)
+        scheme
+            .last_verse(book, u16::try_from(chapter).ok()?)
+            .map(u32::from)
     }
 
     /// A `\c` in one of our styles.
@@ -243,7 +298,10 @@ impl<'a> Out<'a> {
     /// A `\v` in one of our styles.
     pub fn strict_verse(&mut self, number: &str) {
         let from = leading_number(number);
-        let to = number.split_once(['-', '–']).and_then(|(_, b)| leading_number(b.trim())).or(from);
+        let to = number
+            .split_once(['-', '–'])
+            .and_then(|(_, b)| leading_number(b.trim()))
+            .or(from);
         if let (Some(from), Some(to)) = (from, to) {
             if self.chapter == 0 {
                 self.chapter = 1;
@@ -263,8 +321,17 @@ fn leading_number(s: &str) -> Option<u32> {
 }
 
 pub fn render(reading: &Reading, settings: &Settings) -> Imported {
-    let paragraphs: Vec<Paragraph> =
-        reading.paragraphs.iter().map(|p| if strict::is_ours(p) { p.clone() } else { guess::tidy(p) }).collect();
+    let paragraphs: Vec<Paragraph> = reading
+        .paragraphs
+        .iter()
+        .map(|p| {
+            if strict::is_ours(p) {
+                p.clone()
+            } else {
+                guess::tidy(p)
+            }
+        })
+        .collect();
     let guessed: Vec<&Paragraph> = paragraphs.iter().filter(|p| !strict::is_ours(p)).collect();
     let any_ours = paragraphs.len() != guessed.len();
     let mut found = found(reading, &paragraphs);
@@ -312,26 +379,48 @@ pub fn render(reading: &Reading, settings: &Settings) -> Imported {
     report.found = found;
 
     let books = finish(out.books, reading, settings);
-    Imported { books, report, properties: reading.properties.clone() }
+    Imported {
+        books,
+        report,
+        properties: reading.properties.clone(),
+    }
 }
 
 /// Each book's USFM, source and comment threads.
 fn finish(books: Vec<Book>, reading: &Reading, settings: &Settings) -> Vec<ImportedBook> {
-    let comments = if settings.comments == KeepDrop::Keep { reading.comments.as_slice() } else { &[] };
+    let comments = if settings.comments == KeepDrop::Keep {
+        reading.comments.as_slice()
+    } else {
+        &[]
+    };
     let anchored = |id: &str| books.iter().any(|b| b.anchors.has(id));
-    let unanchored: Vec<String> = comments.iter().map(|c| c.id.clone()).filter(|id| !anchored(id)).collect();
+    let unanchored: Vec<String> = comments
+        .iter()
+        .map(|c| c.id.clone())
+        .filter(|id| !anchored(id))
+        .collect();
     books
         .into_iter()
         .enumerate()
         .map(|(i, b)| {
-            let source = b.code.as_deref().and_then(|c| crate::props::source(&reading.properties, c));
+            let source = b
+                .code
+                .as_deref()
+                .and_then(|c| crate::props::source(&reading.properties, c));
             let mut usfm = b.lines.join("\n");
             usfm.push('\n');
             // A thread anchored nowhere goes with the first book.
             let here = b.anchors.ids();
-            let take = |root: &str| here.iter().any(|h| h == root) || (i == 0 && unanchored.iter().any(|u| u == root));
+            let take = |root: &str| {
+                here.iter().any(|h| h == root) || (i == 0 && unanchored.iter().any(|u| u == root))
+            };
             let comments = b.anchors.threads(comments, take);
-            ImportedBook { code: b.code, usfm, source, comments }
+            ImportedBook {
+                code: b.code,
+                usfm,
+                source,
+                comments,
+            }
         })
         .collect()
 }
@@ -355,7 +444,11 @@ fn passthrough(reading: &Reading, paragraphs: &[Paragraph], found: Found) -> Imp
     usfm.push('\n');
     let code = usfm
         .lines()
-        .find_map(|l| l.trim_start().strip_prefix("\\id ").and_then(|r| r.split_whitespace().next()))
+        .find_map(|l| {
+            l.trim_start()
+                .strip_prefix("\\id ")
+                .and_then(|r| r.split_whitespace().next())
+        })
         .map(str::to_owned);
     let report = ImportReport {
         passthrough: true,
@@ -365,9 +458,16 @@ fn passthrough(reading: &Reading, paragraphs: &[Paragraph], found: Found) -> Imp
         found,
         ..ImportReport::default()
     };
-    let source = code.as_deref().and_then(|c| crate::props::source(&reading.properties, c));
+    let source = code
+        .as_deref()
+        .and_then(|c| crate::props::source(&reading.properties, c));
     Imported {
-        books: vec![ImportedBook { code, usfm, source, comments: Vec::new() }],
+        books: vec![ImportedBook {
+            code,
+            usfm,
+            source,
+            comments: Vec::new(),
+        }],
         report,
         properties: reading.properties.clone(),
     }
@@ -417,8 +517,11 @@ mod tests {
     /// them.
     fn with_comment(usfm: &str, anchored: &str, inside: &str) -> Vec<u8> {
         let out = crate::export(usfm, &crate::ExportOptions::default());
-        let mut parts: Vec<(String, Vec<u8>)> =
-            zip::read(&out.docx).unwrap().into_iter().map(|e| (e.name, e.data)).collect();
+        let mut parts: Vec<(String, Vec<u8>)> = zip::read(&out.docx)
+            .unwrap()
+            .into_iter()
+            .map(|e| (e.name, e.data))
+            .collect();
         let (before, after) = anchored.split_once(inside).unwrap();
         let marked = format!(
             r#"{before}</w:t></w:r><w:commentRangeStart w:id="0"/><w:r><w:t xml:space="preserve">{inside}</w:t></w:r><w:commentRangeEnd w:id="0"/><w:r><w:t xml:space="preserve">{after}"#
@@ -443,7 +546,10 @@ mod tests {
             "word/commentsExtended.xml".to_owned(),
             br#"<w15:commentsEx xmlns:w15="w15"><w15:commentEx w15:paraId="AAA" w15:done="1"/><w15:commentEx w15:paraId="BBB" w15:paraIdParent="AAA" w15:done="0"/></w15:commentsEx>"#.to_vec(),
         ));
-        let refs: Vec<(&str, &[u8])> = parts.iter().map(|(n, d)| (n.as_str(), d.as_slice())).collect();
+        let refs: Vec<(&str, &[u8])> = parts
+            .iter()
+            .map(|(n, d)| (n.as_str(), d.as_slice()))
+            .collect();
         zip::write(&refs)
     }
 
@@ -453,34 +559,64 @@ mod tests {
         let docx = with_comment(usfm, "Paul, a servant of God", "servant");
         let back = crate::import(&docx, &Settings::default()).unwrap();
         let book = &back.books[0];
-        assert_eq!(book.usfm, "\\id TIT\n\\c 1\n\\p \\v 1 Paul, a servant of God \\v 2 in hope\n");
+        assert_eq!(
+            book.usfm,
+            "\\id TIT\n\\c 1\n\\p \\v 1 Paul, a servant of God \\v 2 in hope\n"
+        );
         assert_eq!(book.comments.len(), 1);
         let t = &book.comments[0];
         assert_eq!(t.r#ref.as_deref(), Some("1:1"));
         assert_eq!(t.anchor_text, "servant");
-        assert_eq!(t.start, Some(crate::VersePoint { r#ref: "1:1".to_owned(), offset: 8 }));
-        assert_eq!(t.end, Some(crate::VersePoint { r#ref: "1:1".to_owned(), offset: 15 }));
+        assert_eq!(
+            t.start,
+            Some(crate::VersePoint {
+                r#ref: "1:1".to_owned(),
+                offset: 8
+            })
+        );
+        assert_eq!(
+            t.end,
+            Some(crate::VersePoint {
+                r#ref: "1:1".to_owned(),
+                offset: 15
+            })
+        );
         assert_eq!(t.comments.len(), 2);
-        assert_eq!((t.comments[0].author.as_str(), t.comments[0].resolved), ("Ana", true));
+        assert_eq!(
+            (t.comments[0].author.as_str(), t.comments[0].resolved),
+            ("Ana", true)
+        );
         assert_eq!(t.comments[0].date.as_deref(), Some("2026-11-05T10:00:00Z"));
         assert_eq!(t.comments[1].parent_id.as_deref(), Some("0"));
         assert_eq!(t.comments[1].date, None);
     }
 
     fn text(value: &str, superscript: bool) -> Inline {
-        let format = crate::reading::Formatting { superscript, ..Default::default() };
-        Inline::Text { text: value.to_owned(), style: None, format, direct: format }
+        let format = crate::reading::Formatting {
+            superscript,
+            ..Default::default()
+        };
+        Inline::Text {
+            text: value.to_owned(),
+            style: None,
+            format,
+            direct: format,
+        }
     }
 
     fn para(inlines: Vec<Inline>) -> Paragraph {
-        Paragraph { inlines, ..Paragraph::default() }
+        Paragraph {
+            inlines,
+            ..Paragraph::default()
+        }
     }
 
     fn verses(usfm: &str) -> Vec<String> {
         usfm.split('\\')
             .filter_map(|m| {
                 let (name, rest) = m.split_once(' ')?;
-                matches!(name, "c" | "v").then(|| format!("{name}{}", rest.split_whitespace().next().unwrap_or("")))
+                matches!(name, "c" | "v")
+                    .then(|| format!("{name}{}", rest.split_whitespace().next().unwrap_or("")))
             })
             .collect()
     }
@@ -503,7 +639,11 @@ mod tests {
             ],
             ..Reading::default()
         };
-        let settings = Settings { book: Some("2JN".to_owned()), versification: Some("eng".to_owned()), ..Settings::default() };
+        let settings = Settings {
+            book: Some("2JN".to_owned()),
+            versification: Some("eng".to_owned()),
+            ..Settings::default()
+        };
         let out = render(&reading, &settings);
         let usfm = &out.books[0].usfm;
         assert_eq!(verses(usfm), ["c1", "v1", "v2", "v3-4", "c2", "v1"]);
@@ -511,13 +651,20 @@ mod tests {
         assert!(usfm.contains("14Too far."), "{usfm}");
         assert_eq!(
             out.report.skipped,
-            [crate::Skip { r#ref: Some("1:4".to_owned()), number: "14".to_owned(), reason: crate::SkipReason::Versification }]
+            [crate::Skip {
+                r#ref: Some("1:4".to_owned()),
+                number: "14".to_owned(),
+                reason: crate::SkipReason::Versification
+            }]
         );
     }
 
     #[test]
     fn line_start_and_marked_numbers_are_each_detected() {
-        let reading = |ps: Vec<Paragraph>| Reading { paragraphs: ps, ..Reading::default() };
+        let reading = |ps: Vec<Paragraph>| Reading {
+            paragraphs: ps,
+            ..Reading::default()
+        };
         let line_start = render(
             &reading(vec![
                 para(vec![text("Chapter 2", false)]),
@@ -529,7 +676,10 @@ mod tests {
         assert_eq!(line_start.report.detected, crate::VerseMode::LineStart);
         assert_eq!(verses(&line_start.books[0].usfm), ["c2", "v1", "v2"]);
         let marked = render(
-            &reading(vec![para(vec![text("v1 One. verse 2 Two. v 3 Three in 4 parts.", false)])]),
+            &reading(vec![para(vec![text(
+                "v1 One. verse 2 Two. v 3 Three in 4 parts.",
+                false,
+            )])]),
             &Settings::default(),
         );
         assert_eq!(marked.report.detected, crate::VerseMode::Marked);
@@ -541,8 +691,11 @@ mod tests {
     fn a_mixed_document_reads_ours_exactly_and_guesses_the_rest() {
         let usfm = "\\id TIT\n\\c 1\n\\p\n\\v 1 Paul, a servant\n\\v 2 in hope\n";
         let out = crate::export(usfm, &crate::ExportOptions::default());
-        let mut parts: Vec<(String, Vec<u8>)> =
-            zip::read(&out.docx).unwrap().into_iter().map(|e| (e.name, e.data)).collect();
+        let mut parts: Vec<(String, Vec<u8>)> = zip::read(&out.docx)
+            .unwrap()
+            .into_iter()
+            .map(|e| (e.name, e.data))
+            .collect();
         let pasted = concat!(
             r#"<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>A pasted heading</w:t></w:r></w:p>"#,
             r#"<w:p><w:r><w:rPr><w:vertAlign w:val="superscript"/></w:rPr><w:t>3</w:t></w:r>"#,
@@ -551,10 +704,15 @@ mod tests {
         for (name, data) in &mut parts {
             if name == "word/document.xml" {
                 let text = String::from_utf8(data.clone()).unwrap();
-                *data = text.replacen("<w:sectPr>", &format!("{pasted}<w:sectPr>"), 1).into_bytes();
+                *data = text
+                    .replacen("<w:sectPr>", &format!("{pasted}<w:sectPr>"), 1)
+                    .into_bytes();
             }
         }
-        let refs: Vec<(&str, &[u8])> = parts.iter().map(|(n, d)| (n.as_str(), d.as_slice())).collect();
+        let refs: Vec<(&str, &[u8])> = parts
+            .iter()
+            .map(|(n, d)| (n.as_str(), d.as_slice()))
+            .collect();
         let back = crate::import(&zip::write(&refs), &Settings::default()).unwrap();
         assert_eq!(
             back.books[0].usfm,
@@ -573,6 +731,10 @@ mod tests {
         assert!(back.report.is_exact(), "{:?}", back.report);
         assert_eq!(back.books[0].code.as_deref(), Some("XXX"));
         assert_eq!(back.books[0].source, None);
-        assert!(back.books[0].usfm.contains("\\q2 and the next one indented."));
+        assert!(
+            back.books[0]
+                .usfm
+                .contains("\\q2 and the next one indented.")
+        );
     }
 }
