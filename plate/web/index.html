@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plate Studio</title>
+<style>
+  :root {
+    --bg: #f6f4ef; --panel: #fffdf8; --ink: #23201b; --muted: #6d665b; --line: #e2ddd2;
+    --accent: #7a1f1f; --accent-ink: #fff; --bad: #b3261e; --good: #2e6b3a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #1b1a18; --panel: #24221f; --ink: #ece8e1; --muted: #a39b8e; --line: #3a3732;
+      --accent: #d27b6b; --accent-ink: #1b1a18; --bad: #ff8a80; --good: #8fd19e; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 13px/1.4 system-ui, sans-serif;
+    display: grid; grid-template-columns: 340px 1fr; height: 100vh; }
+  aside { background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto; padding: 12px 14px 40px; }
+  h1 { font: 600 17px/1.2 Georgia, serif; margin: 2px 0 10px; }
+  fieldset { border: 0; border-top: 1px solid var(--line); margin: 10px 0 0; padding: 8px 0 0; }
+  legend { font-weight: 600; color: var(--muted); text-transform: uppercase; font-size: 11px; letter-spacing: .06em; padding: 0 4px 0 0; }
+  label { display: grid; grid-template-columns: 1fr 120px; align-items: center; gap: 8px; margin: 5px 0; }
+  label.check { grid-template-columns: 1fr auto; }
+  input[type=number], select, input[type=text] { width: 100%; padding: 3px 5px; border: 1px solid var(--line);
+    border-radius: 4px; background: var(--bg); color: var(--ink); font: inherit; }
+  input[type=color] { width: 100%; height: 24px; border: 1px solid var(--line); background: none; padding: 0; }
+  #books { width: 100%; height: 150px; }
+  .picks { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }
+  button { border: 1px solid var(--line); background: var(--bg); color: var(--ink); border-radius: 4px;
+    padding: 3px 8px; font: inherit; cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  main { display: grid; grid-template-rows: auto 1fr; min-width: 0; }
+  #bar { display: flex; gap: 14px; align-items: center; padding: 8px 14px; border-bottom: 1px solid var(--line);
+    background: var(--panel); flex-wrap: wrap; }
+  #status { font-variant-numeric: tabular-nums; color: var(--muted); }
+  #status b { color: var(--ink); }
+  #error { color: var(--bad); white-space: pre-wrap; font: 12px ui-monospace, monospace; padding: 10px 14px; display: none; }
+  iframe { width: 100%; height: 100%; border: 0; background: #888; }
+  details { margin-top: 10px; }
+  pre { font: 11px ui-monospace, monospace; white-space: pre-wrap; background: var(--bg); padding: 6px; border-radius: 4px; }
+  @media (max-width: 760px) { body { grid-template-columns: 1fr; grid-template-rows: 45vh 55vh; } aside { border-right: 0; } }
+</style>
+</head>
+<body>
+<aside>
+  <h1>Plate Studio</h1>
+  <fieldset><legend>Books</legend>
+    <select id="books" multiple></select>
+    <div class="picks">
+      <button data-pick="RUT">Ruth</button><button data-pick="MRK">Mark</button>
+      <button data-pick="PSA">Psalms</button><button data-pick="NT">NT</button><button data-pick="ALL">Bible</button>
+    </div>
+  </fieldset>
+  <form id="f">
+  <fieldset><legend>Page</legend>
+    <label>Paper <select name="paper"><option>a5</option><option>pocket</option><option>trade</option><option>6x9</option><option>a4</option><option>letter</option></select></label>
+    <label>Columns <select name="columns" data-num><option>1</option><option selected>2</option></select></label>
+    <label>Gutter (mm) <input type="number" name="gutter" step="0.5"></label>
+    <label class="check">Column rule <input type="checkbox" name="column_rule"></label>
+    <label>Top margin (mm) <input type="number" name="margin_top" step="0.5"></label>
+    <label>Bottom margin (mm) <input type="number" name="margin_bottom" step="0.5"></label>
+    <label>Inside margin (mm) <input type="number" name="margin_inside" step="0.5"></label>
+    <label>Outside margin (mm) <input type="number" name="margin_outside" step="0.5"></label>
+    <label>Book starts <select name="book_break"><option>page</option><option>odd</option><option>column</option><option>none</option></select></label>
+  </fieldset>
+  <fieldset><legend>Type</legend>
+    <label>Font <select name="font" id="font"></select></label>
+    <label>Size (pt) <input type="number" name="size" step="0.25"></label>
+    <label>Line gap (em) <input type="number" name="leading" step="0.05"></label>
+    <label class="check">Justify <input type="checkbox" name="justify"></label>
+    <label class="check">Hyphenate <input type="checkbox" name="hyphenate"></label>
+    <label class="check">Avoid widows/orphans <input type="checkbox" name="widows"></label>
+    <label>Language <input type="text" name="lang"></label>
+    <label>Direction <select name="dir"><option>auto</option><option>ltr</option><option>rtl</option></select></label>
+  </fieldset>
+  <fieldset><legend>Paragraphs and poetry</legend>
+    <label>\p indent (em) <input type="number" name="indent" step="0.25"></label>
+    <label>Poetry indent / level (em) <input type="number" name="poetry_indent" step="0.25"></label>
+    <label>Poetry wrap (em) <input type="number" name="poetry_wrap" step="0.25"></label>
+  </fieldset>
+  <fieldset><legend>Chapters and verses</legend>
+    <label>Chapter number <select name="chapter"><option>inline</option><option>heading</option><option>drop</option></select></label>
+    <label>Chapter size (em) <input type="number" name="chapter_size" step="0.1"></label>
+    <label>Verse numbers <select name="verse_numbers"><option>super</option><option>bold</option><option>none</option></select></label>
+    <label>Number colour <input type="color" name="verse_color"></label>
+  </fieldset>
+  <fieldset><legend>Headings</legend>
+    <label class="check">Section headings <input type="checkbox" name="headings"></label>
+    <label class="check">Parallel passages (\r) <input type="checkbox" name="parallel_refs"></label>
+    <label>Title size (pt) <input type="number" name="title_size" step="1"></label>
+    <label>Running head <select name="running_head"><option>range</option><option>book</option><option>none</option></select></label>
+    <label class="check">Page numbers <input type="checkbox" name="page_numbers"></label>
+  </fieldset>
+  <fieldset><legend>Notes</legend>
+    <label class="check">Footnotes <input type="checkbox" name="footnotes"></label>
+    <label class="check">Cross references <input type="checkbox" name="xrefs"></label>
+    <label>Callers <select name="footnote_numbering"><option>a</option><option>1</option><option>*</option><option>i</option></select></label>
+    <label>Restart per <select name="footnote_reset"><option>page</option><option>chapter</option><option>book</option></select></label>
+    <label class="check">Show reference (1:1) <input type="checkbox" name="footnote_ref"></label>
+    <label>Note size (pt) <input type="number" name="note_size" step="0.25"></label>
+  </fieldset>
+  <fieldset><legend>Words of Jesus</legend>
+    <label class="check">Red letter <input type="checkbox" name="red_letter"></label>
+    <label>Colour <input type="color" name="red"></label>
+  </fieldset>
+  </form>
+  <details><summary>Settings JSON</summary><pre id="json"></pre></details>
+</aside>
+<main>
+  <div id="bar">
+    <button class="primary" id="go">Render</button>
+    <label class="check" style="margin:0">Auto <input type="checkbox" id="auto" checked></label>
+    <label style="margin:0;grid-template-columns:auto auto">Compile in <select id="where"><option value="server">server (native)</option><option value="browser">browser (wasm)</option></select></label>
+    <span id="status">Pick books and change a setting.</span>
+  </div>
+  <div style="position:relative;min-height:0">
+    <div id="error"></div>
+    <iframe id="pdf" title="PDF preview"></iframe>
+  </div>
+</main>
+<script>
+const defaults = {
+  paper: "a5", margin_top: 14, margin_bottom: 14, margin_inside: 16, margin_outside: 12,
+  columns: 2, gutter: 5, column_rule: true, font: "Libertinus Serif", size: 9.5, leading: 0.5,
+  justify: true, hyphenate: true, lang: "en", dir: "auto", widows: true, indent: 1,
+  poetry_indent: 1, poetry_wrap: 3, verse_numbers: "super", verse_color: "#7a1f1f",
+  chapter: "inline", chapter_size: 2.6, headings: true, parallel_refs: true, title_size: 22,
+  red_letter: false, red: "#b3261e", footnotes: true, footnote_numbering: "a",
+  footnote_reset: "page", footnote_ref: true, note_size: 7.5, xrefs: true,
+  running_head: "range", page_numbers: true, book_break: "page",
+};
+const form = document.getElementById("f");
+const booksEl = document.getElementById("books");
+const statusEl = document.getElementById("status");
+const errorEl = document.getElementById("error");
+const frame = document.getElementById("pdf");
+let saved = {};
+try { saved = JSON.parse(localStorage.getItem("plate-settings") || "{}"); } catch {}
+
+function fill(values) {
+  for (const el of form.elements) {
+    if (!el.name || !(el.name in values)) continue;
+    if (el.type === "checkbox") el.checked = !!values[el.name];
+    else el.value = values[el.name];
+  }
+}
+function settings() {
+  const out = {};
+  for (const el of form.elements) {
+    if (!el.name) continue;
+    let v = el.type === "checkbox" ? el.checked : el.value;
+    if (el.type === "number" || el.dataset.num !== undefined) v = Number(v);
+    out[el.name] = v;
+  }
+  return out;
+}
+
+async function init() {
+  const [books, fonts] = await Promise.all([
+    fetch("/api/books").then(r => r.json()), fetch("/api/fonts").then(r => r.json())]);
+  const fontEl = document.getElementById("font");
+  for (const f of fonts) fontEl.add(new Option(f, f));
+  for (const b of books) booksEl.add(new Option(`${b.code} · ${b.name}`, b.file));
+  booksEl.dataset.codes = JSON.stringify(books.map(b => b.code));
+  fill({ ...defaults, ...saved });
+  let picked = [];
+  try { picked = JSON.parse(localStorage.getItem("plate-books") || "[]"); } catch {}
+  if (!picked.length) picked = books.filter(b => b.code === "MRK").map(b => b.file);
+  for (const o of booksEl.options) o.selected = picked.includes(o.value);
+  render();
+}
+
+const NT = ["MAT","MRK","LUK","JHN","ACT","ROM","1CO","2CO","GAL","EPH","PHP","COL","1TH","2TH","1TI","2TI","TIT","PHM","HEB","JAS","1PE","2PE","1JN","2JN","3JN","JUD","REV"];
+document.querySelectorAll("[data-pick]").forEach(btn => btn.onclick = () => {
+  const codes = JSON.parse(booksEl.dataset.codes);
+  const want = btn.dataset.pick;
+  [...booksEl.options].forEach((o, i) => o.selected =
+    want === "ALL" || (want === "NT" ? NT.includes(codes[i]) : codes[i] === want));
+  render();
+});
+
+let timer, inflight = 0, url;
+function schedule() {
+  document.getElementById("json").textContent = JSON.stringify(settings(), null, 1);
+  if (!document.getElementById("auto").checked) return;
+  clearTimeout(timer); timer = setTimeout(render, 350);
+}
+form.addEventListener("input", schedule);
+booksEl.addEventListener("change", schedule);
+document.getElementById("go").onclick = render;
+
+// Browser mode: onion and Typst in one wasm module, loaded on first use.
+let studio, usfmCache = new Map();
+async function browserRender(books, s) {
+  const t0 = performance.now();
+  let loadMs = 0;
+  if (!studio) {
+    statusEl.textContent = "Loading the wasm module (16 MB gzipped)…";
+    const mod = await import("/wasm/plate_wasm.js");
+    await mod.default("/wasm/plate_wasm_bg.wasm");
+    studio = new mod.Studio();
+    loadMs = performance.now() - t0;
+  }
+  const texts = [];
+  for (const b of books) {
+    if (!usfmCache.has(b)) usfmCache.set(b, await fetch("/api/usfm?book=" + encodeURIComponent(b)).then(r => r.text()));
+    texts.push(usfmCache.get(b));
+  }
+  const template = await fetch("/api/template").then(r => r.text());
+  if (studio.fonts().indexOf(s.font) < 0) s = { ...s, font: "Libertinus Serif" };
+  const t1 = performance.now();
+  const pdf = studio.render(texts, JSON.stringify(s), template);
+  const t = JSON.parse(studio.timings());
+  t.wall_ms = performance.now() - t1; t.load_ms = loadMs;
+  return { blob: new Blob([pdf], { type: "application/pdf" }), t };
+}
+
+async function render() {
+  const s = settings();
+  const books = [...booksEl.selectedOptions].map(o => o.value);
+  if (document.getElementById("where").value === "browser") {
+    if (!books.length) return;
+    statusEl.textContent = "Rendering in the browser…";
+    await new Promise(r => setTimeout(r, 20));
+    try {
+      const { blob, t } = await browserRender(books, s);
+      errorEl.style.display = "none";
+      if (url) URL.revokeObjectURL(url);
+      url = URL.createObjectURL(blob); frame.src = url;
+      statusEl.innerHTML = `<b>browser</b> · <b>${t.pages}</b> pages · onion <b>${t.markup_ms.toFixed(1)}</b> ms · ` +
+        `typst layout <b>${t.layout_ms.toFixed(0)}</b> ms · pdf <b>${t.pdf_ms.toFixed(0)}</b> ms · total <b>${t.wall_ms.toFixed(0)}</b> ms` +
+        (t.load_ms ? ` · first load ${t.load_ms.toFixed(0)} ms` : "");
+    } catch (e) { errorEl.style.display = "block"; errorEl.textContent = String(e); statusEl.textContent = "Error"; }
+    return;
+  }
+  try { localStorage.setItem("plate-settings", JSON.stringify(s)); localStorage.setItem("plate-books", JSON.stringify(books)); } catch {}
+  document.getElementById("json").textContent = JSON.stringify(s, null, 1);
+  if (!books.length) return;
+  const id = ++inflight;
+  statusEl.textContent = `Rendering ${books.length} book${books.length > 1 ? "s" : ""}…`;
+  const t0 = performance.now();
+  const res = await fetch("/api/render", { method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ books, settings: s }) });
+  if (id !== inflight) return;
+  if (!res.ok) { errorEl.style.display = "block"; errorEl.textContent = await res.text(); statusEl.textContent = "Error"; return; }
+  errorEl.style.display = "none";
+  const t = JSON.parse(res.headers.get("x-plate-timings"));
+  const blob = await res.blob();
+  const round = performance.now() - t0;
+  if (url) URL.revokeObjectURL(url);
+  url = URL.createObjectURL(blob);
+  frame.src = url;
+  statusEl.innerHTML = `<b>${t.pages}</b> pages · onion <b>${t.markup_ms.toFixed(1)}</b> ms · ` +
+    `typst layout <b>${t.layout_ms.toFixed(0)}</b> ms · pdf <b>${t.pdf_ms.toFixed(0)}</b> ms · ` +
+    `round trip <b>${round.toFixed(0)}</b> ms · ${(blob.size / 1024 / 1024).toFixed(1)} MB`;
+}
+init();
+</script>
+</body>
+</html>

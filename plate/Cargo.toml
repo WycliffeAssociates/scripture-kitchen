@@ -1,0 +1,41 @@
+[package]
+name = "plate"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Experiment: USFM to PDF through Typst, over onion's CST."
+
+# Its own workspace: typst's dependency tree stays out of the kitchen's gate.
+[workspace]
+members = [".", "wasm"]
+
+[features]
+default = ["native"]
+# System and directory fonts, the template read from disk, the CLI and the
+# studio server. Off for the browser build (`wasm/`).
+native = ["typst-kit/scan-fonts", "dep:axum", "dep:tokio", "dep:tower-http"]
+
+[dependencies]
+usfm_onion = { path = "../onion", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+typst = "0.15.1"
+typst-pdf = "0.15.1"
+typst-layout = "0.15.1"
+typst-kit = { version = "0.15.1", default-features = false, features = ["embedded-fonts"] }
+comemo = "0.5.1"
+web-time = "1"
+axum = { version = "0.8.9", optional = true }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"], optional = true }
+tower-http = { version = "0.6", features = ["fs"], optional = true }
+
+[[bin]]
+name = "plate"
+required-features = ["native"]
+
+[[bin]]
+name = "plate-serve"
+required-features = ["native"]
+
+[profile.release]
+debug = 1

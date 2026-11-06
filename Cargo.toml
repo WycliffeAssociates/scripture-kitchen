@@ -49,6 +49,9 @@ members = [
     "sous-chef/core",
     "sous-chef/cli",
 ]
+# `plate` (print through Typst) is an experiment with its own workspace and
+# lockfile, so typst's dependency tree never reaches the gate's build.
+exclude = ["plate"]
 resolver = "2"
 
 [workspace.package]
