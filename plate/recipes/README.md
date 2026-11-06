@@ -53,7 +53,13 @@ the emitter places there. Every verse call carries its book
   on a one-column page), but the band is a single column of notes, notes fall
   behind their verses when they crowd, and layout is about 11x slower (Mark
   29 s against 2.6 s). A band set in two or three columns, or notes run in as
-  one paragraph, needs a page builder Typst does not have. Past about one
+  one paragraph, needs a page builder Typst does not have. Tried and dropped:
+  page-wide bottom floats placed by the first note on each page (the page's
+  notes found by introspection) — layout did not converge in Typst's five
+  passes, the float took a column instead of the page, and notes overlapped.
+  What would work is a driver outside Typst: compile, read where each verse
+  landed, assign notes to pages, compile again, until stable (PTXprint's
+  approach with XeTeX). Past about one
   note per verse the text thins to a few lines a page.
 - `diglot`: verse text only (notes and headings drop out); verses matched by
   number, not mapped between versifications through canon.
