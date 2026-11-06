@@ -167,14 +167,17 @@ pub fn write_chapters(rows: &[Chapter], out: &mut Vec<u8>, offsets: &mut Offsets
 
 /// One verse anchor and the range of verse numbers it names.
 ///
-/// 32 bytes per row. `offsets` collects the position of every
+/// 36 bytes per row. `offsets` collects the position of every
 /// source offset written, for the UTF-16 pass.
 pub fn write_verses(rows: &[Verse], out: &mut Vec<u8>, offsets: &mut Offsets) {
-    out.reserve(rows.len() * 32);
+    out.reserve(rows.len() * 36);
     for v in rows {
         offsets.push(out.len());
-        // Where the anchor sits.
+        // Where the anchor sits: the `\v` marker's first byte.
         out.extend_from_slice(&((v.at) as u32).to_le_bytes());
+        offsets.push(out.len());
+        // Where the verse's tile begins: its `\p` and any heading before `at`, or `at` itself mid-paragraph. A verse runs from here to the next verse's `start` or its chapter's end.
+        out.extend_from_slice(&((v.start) as u32).to_le_bytes());
         // The `\v` marker's token index.
         out.extend_from_slice(&((v.token) as u32).to_le_bytes());
         // The number's own token index, or NONE. `\v` opens no node, so this is the only route from a verse to its designator.

@@ -2,7 +2,7 @@
   "format": "dish",
   "magic": "ONWR",
   "magic_hex": "0x52574e4f",
-  "version": 5,
+  "version": 6,
   "declared_in": "onion/src/wire/schema.rs",
   "reader": "onion-wasm/reader.ts",
   "generated": true,
@@ -29,7 +29,7 @@
     {"region": "edits", "at": "directory[5].offset", "kind": "rows", "of": "Edit", "count": "directory[5].length / 16", "doc": "The shared edit arena every fix's range indexes."},
     {"region": "fixText", "at": "directory[6].offset", "kind": "blob", "bytes": "directory[6].length", "doc": "Inserted bytes, concatenated. Edits carry absolute positions into it."},
     {"region": "chapters", "at": "directory[7].offset", "kind": "rows", "of": "Chapter", "count": "directory[7].length / 26", "doc": "The chapter table. Empty unless asked for."},
-    {"region": "verses", "at": "directory[8].offset", "kind": "rows", "of": "Verse", "count": "directory[8].length / 32", "doc": "The verse anchors. Empty unless asked for."},
+    {"region": "verses", "at": "directory[8].offset", "kind": "rows", "of": "Verse", "count": "directory[8].length / 36", "doc": "The verse anchors. Empty unless asked for."},
     {"region": "members", "at": "directory[9].offset", "kind": "rows", "of": "Member", "count": "directory[9].length / 20", "doc": "What every verse designator covers, run after run; a verse's `membersFrom`/`membersLen` name its run. Empty unless asked for."}
   ],
   "records": [
@@ -77,17 +77,18 @@
       {"name": "labelEnd", "offset": 20, "width": 4, "space": "offset", "doc": "Where the label ends."},
       {"name": "number", "offset": 24, "width": 2, "space": "plain", "doc": "The number read, or 0 for absent or malformed."}
     ]},
-    {"name": "Verse", "stride": 32, "doc": "One verse anchor and the range of verse numbers it names.", "fields": [
-      {"name": "at", "offset": 0, "width": 4, "space": "offset", "doc": "Where the anchor sits."},
-      {"name": "token", "offset": 4, "width": 4, "space": "plain", "doc": "The `\\v` marker's token index."},
-      {"name": "designator", "offset": 8, "width": 4, "space": "plain", "doc": "The number's own token index, or NONE. `\\v` opens no node, so this is the only route from a verse to its designator."},
-      {"name": "labelStart", "offset": 12, "width": 4, "space": "offset", "doc": "The designator as written (`6a`, `1,3,5`), minus its folded delimiter. Empty at the marker's end when there is none."},
-      {"name": "labelEnd", "offset": 16, "width": 4, "space": "offset", "doc": "Where the label ends."},
-      {"name": "membersFrom", "offset": 20, "width": 4, "space": "plain", "doc": "This verse's first row in the member arena."},
-      {"name": "membersLen", "offset": 24, "width": 2, "space": "plain", "doc": "How many members it covers; 0 when the designator is absent or malformed."},
-      {"name": "chapter", "offset": 26, "width": 2, "space": "plain", "doc": "The enclosing chapter's number."},
-      {"name": "first", "offset": 28, "width": 2, "space": "plain", "doc": "First verse named; 0 when the designator is absent or malformed."},
-      {"name": "last", "offset": 30, "width": 2, "space": "plain", "doc": "Last verse named — a bridge `\\v 5-7` names 5 through 7."}
+    {"name": "Verse", "stride": 36, "doc": "One verse anchor and the range of verse numbers it names.", "fields": [
+      {"name": "at", "offset": 0, "width": 4, "space": "offset", "doc": "Where the anchor sits: the `\\v` marker's first byte."},
+      {"name": "start", "offset": 4, "width": 4, "space": "offset", "doc": "Where the verse's tile begins: its `\\p` and any heading before `at`, or `at` itself mid-paragraph. A verse runs from here to the next verse's `start` or its chapter's end."},
+      {"name": "token", "offset": 8, "width": 4, "space": "plain", "doc": "The `\\v` marker's token index."},
+      {"name": "designator", "offset": 12, "width": 4, "space": "plain", "doc": "The number's own token index, or NONE. `\\v` opens no node, so this is the only route from a verse to its designator."},
+      {"name": "labelStart", "offset": 16, "width": 4, "space": "offset", "doc": "The designator as written (`6a`, `1,3,5`), minus its folded delimiter. Empty at the marker's end when there is none."},
+      {"name": "labelEnd", "offset": 20, "width": 4, "space": "offset", "doc": "Where the label ends."},
+      {"name": "membersFrom", "offset": 24, "width": 4, "space": "plain", "doc": "This verse's first row in the member arena."},
+      {"name": "membersLen", "offset": 28, "width": 2, "space": "plain", "doc": "How many members it covers; 0 when the designator is absent or malformed."},
+      {"name": "chapter", "offset": 30, "width": 2, "space": "plain", "doc": "The enclosing chapter's number."},
+      {"name": "first", "offset": 32, "width": 2, "space": "plain", "doc": "First verse named; 0 when the designator is absent or malformed."},
+      {"name": "last", "offset": 34, "width": 2, "space": "plain", "doc": "Last verse named — a bridge `\\v 5-7` names 5 through 7."}
     ]},
     {"name": "Member", "stride": 20, "doc": "One member of a verse designator: a place, or a range joined by `-`. `first..last` on the verse is only the hull; these are what it covers.", "fields": [
       {"name": "from", "offset": 0, "width": 2, "space": "plain", "doc": "The member's first number."},

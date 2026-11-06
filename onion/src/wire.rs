@@ -169,6 +169,7 @@ pub struct Chapter {
 /// A verse anchor as it crosses. Same reason for `designator` as [`Chapter`].
 pub struct Verse {
     pub at: u32,
+    pub start: u32,
     pub token: u32,
     pub designator: u32,
     pub label_start: u32,
@@ -316,6 +317,7 @@ pub fn plate(parsed: &Parsed<'_>) -> Vec<u8> {
                 .iter()
                 .map(|v| Verse {
                     at: v.at,
+                    start: v.start,
                     token: v.token,
                     designator: designator_of(&parsed.tokens, v.token),
                     label_start: v.label_start,

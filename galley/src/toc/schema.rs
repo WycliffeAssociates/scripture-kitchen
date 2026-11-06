@@ -23,7 +23,7 @@ pub const MAGIC: u32 = u32::from_le_bytes(*b"TOCS");
 
 /// Bumped when this envelope's or either record's shape changes. A reader that
 /// does not know this number stops rather than misreading a field.
-pub const FORMAT_VERSION: u32 = 2;
+pub const FORMAT_VERSION: u32 = 3;
 
 /// Header `flags`: every offset in the buffer is UTF-16 rather than a byte.
 pub const FLAG_UTF16: u32 = 1 << 0;
@@ -147,6 +147,15 @@ pub const VERSE: Record = Record {
             space: Offset,
             rust: "v.at",
             doc: "First byte of the `\\v` marker.",
+        },
+        Field {
+            name: "start",
+            width: U32,
+            space: Offset,
+            rust: "v.start",
+            doc: "Where the verse's tile begins: its `\\p` and any heading before \
+                  `at`, or `at` itself mid-paragraph. A verse runs from here to \
+                  the next verse's `start` or its chapter's end.",
         },
         Field {
             name: "chapter",

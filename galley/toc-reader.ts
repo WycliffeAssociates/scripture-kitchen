@@ -25,7 +25,7 @@
 /** `TOCS`, the four bytes in order. */
 export const MAGIC = 0x53434f54;
 /** The layout this reader knows. A buffer naming another one throws. */
-export const FORMAT_VERSION = 2;
+export const FORMAT_VERSION = 3;
 /** Header flag: every offset in the buffer is UTF-16 rather than a byte. */
 export const FLAG_UTF16 = 1;
 
@@ -52,7 +52,7 @@ export const DIRECTORY_MEMBER_ROWS_OFFSET = 32;
 
 /** Bytes per row, from the same declaration the row classes below come from. */
 export const CHAPTER_STRIDE = 22;
-export const VERSE_STRIDE = 24;
+export const VERSE_STRIDE = 28;
 export const MEMBER_STRIDE = 20;
 
 /**
@@ -122,7 +122,7 @@ export class ChapterRow {
 /**
  * One verse anchor and the range of verse numbers it names.
  *
- * 24 bytes per row. A CURSOR: `seek` moves it, the getters read
+ * 28 bytes per row. A CURSOR: `seek` moves it, the getters read
 * the row it is on, and nothing is allocated per row.
  */
 export class VerseRow {
@@ -138,11 +138,11 @@ export class VerseRow {
     return (this.#view.byteLength / this.stride) | 0;
   }
 
-  readonly stride = 24;
+  readonly stride = 28;
 
   /** Move to row `n`; returns `this` so reads chain. */
   seek(n: number): this {
-    this.#row = n * 24;
+    this.#row = n * 28;
     return this;
   }
 
@@ -151,39 +151,44 @@ export class VerseRow {
     return this.#view.getUint32(this.#row + 0, true);
   }
 
+  /** Where the verse's tile begins: its `\p` and any heading before `at`, or `at` itself mid-paragraph. A verse runs from here to the next verse's `start` or its chapter's end. */
+  get start(): number {
+    return this.#view.getUint32(this.#row + 4, true);
+  }
+
   /** The number of the chapter row whose span CONTAINS this anchor — position, never the designator. */
   get chapter(): number {
-    return this.#view.getUint16(this.#row + 4, true);
+    return this.#view.getUint16(this.#row + 8, true);
   }
 
   /** Lowest verse named; 0 when the designator is absent or malformed. */
   get first(): number {
-    return this.#view.getUint16(this.#row + 6, true);
+    return this.#view.getUint16(this.#row + 10, true);
   }
 
   /** Highest named — equal to `first` unless this is a bridge or a list. `first..last` is the HULL; the members are what it covers. */
   get last(): number {
-    return this.#view.getUint16(this.#row + 8, true);
+    return this.#view.getUint16(this.#row + 12, true);
   }
 
   /** The designator as written (`6a`, `1,3,5`). Empty at the marker's end when there is none. */
   get labelStart(): number {
-    return this.#view.getUint32(this.#row + 10, true);
+    return this.#view.getUint32(this.#row + 14, true);
   }
 
   /** Where the label ends. */
   get labelEnd(): number {
-    return this.#view.getUint32(this.#row + 14, true);
+    return this.#view.getUint32(this.#row + 18, true);
   }
 
   /** This verse's first row in the book's member block. */
   get membersFrom(): number {
-    return this.#view.getUint32(this.#row + 18, true);
+    return this.#view.getUint32(this.#row + 22, true);
   }
 
   /** How many members it covers; 0 when the designator is absent or malformed. */
   get membersLen(): number {
-    return this.#view.getUint16(this.#row + 22, true);
+    return this.#view.getUint16(this.#row + 26, true);
   }
 
 }

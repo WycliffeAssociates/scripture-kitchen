@@ -846,13 +846,16 @@ export class Toc {
   /**
    * Every verse anchor. `first..last` is the HULL — a bridge `\\v 5-7` and a
    * list `\\v 5,7` both span 5 to 7 — and `members` is what it COVERS, so a
-   * list's holes are visible. `label` is the designator as written.
+   * list's holes are visible. `label` is the designator as written. `at` is
+   * the `\\v` marker; `start` is where the verse's tile begins (its `\\p` and
+   * any heading before it), and the tile runs to the next verse's `start`.
    */
   verses(): {
     chapter: number;
     first: number;
     last: number;
     at: number;
+    start: number;
     token: number;
     designator: number;
     label: Span;
@@ -866,6 +869,7 @@ export class Toc {
         first: r.first,
         last: r.last,
         at: r.at,
+        start: r.start,
         token: r.token,
         designator: r.designator,
         label: { from: r.labelStart, to: r.labelEnd },
@@ -914,18 +918,20 @@ export class Toc {
       at: number,
       token: number,
       designator: number,
+      start: number,
     ) => void | boolean,
   ): void {
     for (let i = 0, n = this.verseRows.length; i < n; i++) {
       const r = this.verseRows.seek(i);
-      if (fn(r.chapter, r.first, r.last, r.at, r.token, r.designator) === false) return;
+      if (fn(r.chapter, r.first, r.last, r.at, r.token, r.designator, r.start) === false) return;
     }
   }
 
   /**
-   * The chapter:verse address containing `pos` — the reverse index. Chapters
-   * tile, so the chapter is a binary search; the verse is the last anchor at
-   * or before `pos` within it.
+   * The chapter:verse address containing `pos` — the reverse index, and
+   * onion's `Toc::locate`. Chapters tile, so the chapter is a binary search;
+   * the verse is the last TILE starting at or before `pos` within it, so a
+   * heading answers for the verse it introduces.
    */
   at(pos: number): { chapter: number; verse: number } | null {
     const chapters = this.chapterRows;
@@ -942,8 +948,8 @@ export class Toc {
     }
     const chapter = chapters.seek(found).number;
 
-    // Anchors are sorted by `at`, so the verse is the last one at or before
-    // `pos` — a binary search, not a scan.
+    // Tiles are sorted by `start`, so the verse is the last one starting at or
+    // before `pos` — a binary search, not a scan.
     const verses = this.verseRows;
     lo = 0;
     hi = verses.length - 1;
@@ -951,7 +957,7 @@ export class Toc {
     while (lo <= hi) {
       const mid = (lo + hi) >> 1;
       const r = verses.seek(mid);
-      if (r.at <= pos) {
+      if (r.start <= pos) {
         if (r.chapter === chapter) verse = r.first;
         lo = mid + 1;
       } else hi = mid - 1;
