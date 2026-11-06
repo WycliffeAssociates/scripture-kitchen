@@ -335,10 +335,20 @@ impl Reader<'_> {
             };
             Ok(())
         };
-        if matches!(self.peek(), Some('!' | '@')) && prev_chapter.is_some() {
-            let segment = self.segment();
-            as_verse(&mut r, segment).map_err(|kind| self.error(kind))?;
-            return Ok(r);
+        // A verse part, or a `!` or `@` after the number, makes it a verse:
+        // `2!4`, `2a!4`, and after a verse `1b`.
+        if prev_chapter.is_some() {
+            let save = self.at;
+            let segment = if level(previous) >= Level::Verse {
+                self.segment()
+            } else {
+                None
+            };
+            if segment.is_some() || matches!(self.peek(), Some('!' | '@')) {
+                as_verse(&mut r, segment).map_err(|kind| self.error(kind))?;
+                return Ok(r);
+            }
+            self.at = save;
         }
         match level(previous) {
             Level::Book | Level::Chapter => {
@@ -653,7 +663,7 @@ fn one_chapter(book: BookKey) -> bool {
 /// grammar's own punctuation. `/` is allowed for the standard's own `t:`
 /// example (`NEH t:Israel/6/1`).
 fn name_char(c: char, first: bool) -> bool {
-    if c.is_whitespace() || matches!(c, '!' | '@' | ';' | ',' | '-' | '[' | ']') {
+    if c.is_whitespace() || is_ws(c) || matches!(c, '!' | '@' | ';' | ',' | '-' | '[' | ']') {
         return false;
     }
     if c.is_ascii() {

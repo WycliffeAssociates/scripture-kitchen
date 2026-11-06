@@ -144,6 +144,10 @@ fn spell_is_locates_inverse() {
         "JON 1:13!f!2-4",
         "JON 3:10!1+2-3",
         "JON 1:1",
+        "JON 1:1-2",
+        "JON 1:4!s1!2-3",
+        "JON 1:2!3-3!4",
+        "JON 1:13!f!5+2-13!f!6",
     ] {
         let range = srs::parse(reference).unwrap();
         let span = locate(&jon, &ext(), &range[0]).unwrap();
@@ -156,4 +160,21 @@ fn spell_is_locates_inverse() {
             "{reference} round trips"
         );
     }
+}
+
+#[test]
+fn spell_names_a_caret_and_note_markers_end_at_the_next() {
+    let jon = jonah();
+    let range = srs::parse("JON 2:8!3").unwrap();
+    let word = locate(&jon, &ext(), &range[0]).unwrap();
+    let caret = spell(&jon, &ext(), word.start..word.start).unwrap();
+    assert_eq!(caret.to_string(), "JON 2:8!3");
+    // `\fr` ends where `\ft` starts.
+    let note = "\\id MAT\n\\c 1\n\\p\n\\v 1 a\\f + \\fr 1:1 \\ft one two\\f*\n";
+    assert_eq!(text(note, "MAT 1:1!f!fr"), "1:1 ");
+    assert_eq!(text(note, "MAT 1:1!f!ft!2"), "two");
+    assert_eq!(
+        found(note, "MAT 1:1!s[-2147483648]"),
+        Err(LocateError::Missing("element"))
+    );
 }

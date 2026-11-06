@@ -304,8 +304,6 @@ impl Toc {
         best
     }
 
-    /// The address one verse unit names: its hull for a bridge or a list, its
-    /// segments' first start and last end for a segmented one.
     /// The place at a source byte, as the address every other crate speaks,
     /// with the book as written: the introduction, a chapter's head, its title
     /// (verse 0, the same bytes `resolve` finds for `PSA 7:0`), or the verse
@@ -342,6 +340,8 @@ impl Toc {
         (book, address)
     }
 
+    /// The address one verse unit names: its hull for a bridge or a list, its
+    /// segments' first start and last end for a segmented one.
     fn unit_address(&self, source: &[u8], chapter: &ChapterRow, verse: &VerseAnchor) -> Address {
         if chapter.number == 0 {
             return Address::Book;

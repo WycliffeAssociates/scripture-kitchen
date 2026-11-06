@@ -2,7 +2,7 @@
 
 ```text
 toc.resolve(source, GEN)          → found 0..len
-toc.resolve(source, GEN intro)    → found 0..8          the front matter, chapter row 0
+toc.resolve(source, GEN 0)        → found 0..8          the front matter (the intro), chapter row 0
 toc.resolve(source, LUK 1:2)      → found over `\v 1-2`, covers LUK 1:1-2
 toc.resolve(source, LUK 1:2)      → missing verse within 1's span, when the text has `\v 1,3`
 toc.resolve(source, LUK 30)       → missing chapter
@@ -51,8 +51,8 @@ when that row is empty. "the intro is the front matter", "an empty intro is
 missing"
 
 ```text
-\id GEN\n\mt1 Genesis\n\c 1…     GEN intro → found 0..21
-\c 1\n\p\n\v 1 a\n               GEN intro → missing intro
+\id GEN\n\mt1 Genesis\n\c 1…     GEN 0 → found 0..21
+\c 1\n\p\n\v 1 a\n               GEN 0 → missing intro
 ```
 
 **Chapters** span their rows, first to last. A number two `\c` rows carry is

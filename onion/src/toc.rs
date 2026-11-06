@@ -89,7 +89,7 @@ pub struct ChapterRow {
 
 /// Where one `\v` sits, and which verses it names.
 ///
-/// Byte layout — `#[repr(C)]`, 28 bytes, stride 28:
+/// Byte layout — `#[repr(C)]`, 32 bytes, stride 32:
 ///
 /// ```text
 /// 0  u32  at            first byte of the `\v` marker

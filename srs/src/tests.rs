@@ -83,6 +83,13 @@ fn the_standards_examples_read_and_write_back() {
         "JON 1:13!5!f!5",
         "JON 1:13!f!2-4",
         "JON 1:13!f[2]!1+2-5",
+        // From a character to a whole word, and a part before refinements.
+        "MAT 2:1!5+2-1!6",
+        "MAT 1:1!2+3-1!4",
+        "JON 1:13!f!5+2-13!f!6",
+        "MAT 2:1!3-2a!4",
+        "MAT 2:1a!3-1b!4",
+        "MAT 2-MAT 3!4",
         "1CO 6:5a-10",
         "LUK 3:35-end",
         "JON 1:1-4:11",
@@ -227,4 +234,43 @@ fn the_hubs_srs_cases() {
         checked += 1;
     }
     assert_eq!(checked, 9);
+}
+
+/// Built values, written and read back, are the same values: the writer's
+/// short forms never say something else to the parser.
+#[test]
+fn written_values_read_back_as_themselves() {
+    let r = |text: &str| parse(text).unwrap().remove(0).first;
+    let word = |base: &str, w: u32, c: Option<u32>| {
+        let mut x = r(base);
+        x.steps.push(Step::Word {
+            word: Index::At(w),
+            char: c.map(|c| CharStep {
+                at: Index::At(c),
+                gap: false,
+            }),
+        });
+        x
+    };
+    let ranges = [
+        (word("MAT 2:1", 5, Some(2)), word("MAT 2:1", 6, None)),
+        (word("MAT 2:1", 5, None), word("MAT 2:1", 6, Some(3))),
+        (word("MAT 2:1", 5, Some(2)), word("MAT 2:1", 5, Some(4))),
+        (word("MAT 2:1", 5, Some(2)), word("MAT 2:1", 7, Some(1))),
+        (word("JON 1:13!f", 5, Some(2)), word("JON 1:13!f", 6, None)),
+        (word("JON 1:13!f", 2, None), word("JON 1:13", 4, None)),
+        (word("MAT 2:1", 3, None), word("MAT 2:2a", 4, None)),
+        (word("MAT 2:1a", 3, None), word("MAT 2:1b", 4, None)),
+        (r("MAT 2"), word("MAT 3", 4, None)),
+        (word("MAT 2:1", 3, None), r("MAT 2:4")),
+    ];
+    for (first, last) in ranges {
+        let range = SrsRange {
+            first,
+            last: Some(last),
+        };
+        let written = range.to_string();
+        let read = parse(&written).unwrap_or_else(|e| panic!("{written}: {e}"));
+        assert_eq!(read, std::slice::from_ref(&range), "{written}");
+    }
 }

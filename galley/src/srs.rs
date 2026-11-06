@@ -68,9 +68,11 @@ pub fn locate(source: &str, ext: &Extensions, range: &SrsRange) -> Result<Range<
     Ok(first.start.min(last.start)..first.end.max(last.end))
 }
 
-/// The SRS spelling of a span of `source`: its verse, and the words (and
-/// characters, when it starts or ends inside a word) it runs between, in the
-/// verse's scripture or one of its notes. `None` outside any verse.
+/// The SRS spelling of a span of `source`: the verse each end is in, and the
+/// words (and characters, when an end falls inside a word) it runs between, in
+/// a verse's scripture, one of its notes, or a heading it opens. A span of
+/// whole verses is the verses; an empty span (a caret) is one place. `None`
+/// outside any verse.
 pub fn spell(source: &str, ext: &Extensions, span: Range<u32>) -> Option<SrsRange> {
     Model::new(source, ext).spell(span)
 }
@@ -234,6 +236,19 @@ impl<'s> Model<'s> {
                         }
                         element.content.start = t.end();
                         next += 1;
+                    }
+                    // A note's own markers (`\\fr`, `\\ft`, `\\xo`, …) close the one
+                    // before them: `\\fr 1:1 \\ft text` is two spans, not nested.
+                    if element.kind == Kind::Char && note_content(marker) {
+                        while let Some(&top) = open.last() {
+                            let open_one = &mut self.elements[top];
+                            if open_one.kind != Kind::Char || !note_content(open_one.marker) {
+                                break;
+                            }
+                            open_one.span.end = token.start;
+                            open_one.content.end = open_one.content.end.min(token.start);
+                            open.pop();
+                        }
                     }
                     let at = self.elements.len();
                     match element.kind {
@@ -579,7 +594,7 @@ impl<'s> Model<'s> {
             word: None,
         };
         if index < 0 {
-            let back = (-index) as usize;
+            let back = index.unsigned_abs() as usize;
             let chapter_start = self.chapter_start(within.start);
             let before: Vec<usize> = (0..self.elements.len())
                 .filter(|&at| {
@@ -594,24 +609,7 @@ impl<'s> Model<'s> {
                 .ok_or(LocateError::Missing("element"))?;
             return Ok(element_scope(at, self.elements[at].content.clone()));
         }
-        let mut candidates: Vec<usize> = Vec::new();
-        // Headings and titles just before the paragraph the range starts in.
-        if scope.element.is_none() {
-            candidates.extend(
-                self.headings_before(within.start)
-                    .into_iter()
-                    .filter(|&at| named(&self.elements[at])),
-            );
-        }
-        // Elements starting inside the range.
-        candidates.extend((0..self.elements.len()).filter(|&at| {
-            let e = &self.elements[at];
-            named(e)
-                && within.start <= e.span.start
-                && e.span.start < within.end
-                && Some(at) != scope.element
-                && (scope.element.is_some() || e.kind == Kind::Note || self.note_of(e).is_none())
-        }));
+        let candidates = self.candidates(scope, wanted);
         if let Some(&at) = candidates.get(index as usize - 1) {
             return Ok(element_scope(at, self.elements[at].content.clone()));
         }
@@ -632,6 +630,31 @@ impl<'s> Model<'s> {
             return Ok(element_scope(at, span));
         }
         Err(LocateError::Missing("element"))
+    }
+
+    /// The elements a positive `!marker[n]` counts, in order: for a verse or
+    /// chapter, the headings and titles just before the paragraph the range
+    /// starts in; then the elements starting inside the range.
+    fn candidates(&self, scope: &Scope, wanted: &str) -> Vec<usize> {
+        let named = |e: &Element| marker_matches(&e.name, wanted);
+        let within = &scope.reach;
+        let mut out: Vec<usize> = Vec::new();
+        if scope.element.is_none() {
+            out.extend(
+                self.headings_before(within.start)
+                    .into_iter()
+                    .filter(|&at| named(&self.elements[at])),
+            );
+        }
+        out.extend((0..self.elements.len()).filter(|&at| {
+            let e = &self.elements[at];
+            named(e)
+                && within.start <= e.span.start
+                && e.span.start < within.end
+                && Some(at) != scope.element
+                && (scope.element.is_some() || e.kind == Kind::Note || self.note_of(e).is_none())
+        }));
+        out
     }
 
     /// The heading and title paragraphs in a row just before the paragraph
@@ -763,7 +786,54 @@ impl<'s> Model<'s> {
     // ── spell ──────────────────────────────────────────────────────────
 
     fn spell(&self, span: Range<u32>) -> Option<SrsRange> {
-        let (book, address) = self.toc.address_at(self.source, span.start);
+        let (book, first_place, first_verse) = self.verse_at(span.start)?;
+        let reference = |place: &Place, steps: Vec<Step>| SrsRef {
+            translation: None,
+            book,
+            place: place.clone(),
+            steps,
+        };
+        let first_steps = self.word_steps(&first_verse, span.start, false)?;
+        // A caret is one place.
+        if span.end <= span.start {
+            return Some(SrsRange {
+                first: reference(&first_place, first_steps),
+                last: None,
+            });
+        }
+        // The end, in its own verse: a span may run on into the next.
+        let (_, last_place, last_verse) = self.verse_at(span.end - 1)?;
+        let last_steps = self.word_steps(&last_verse, span.end, true)?;
+        // A span holding whole verses is the verses.
+        let first_words = self.scope_words(&first_verse);
+        let last_words = self.scope_words(&last_verse);
+        let whole = first_words
+            .first()
+            .is_some_and(|&w| self.words[w].span.start >= span.start)
+            && last_words
+                .last()
+                .is_some_and(|&w| self.words[w].span.end <= span.end)
+            && span.end <= last_verse.span.end;
+        let (first, last) = if whole {
+            (
+                reference(&first_place, Vec::new()),
+                reference(&last_place, Vec::new()),
+            )
+        } else {
+            (
+                reference(&first_place, first_steps),
+                reference(&last_place, last_steps),
+            )
+        };
+        Some(SrsRange {
+            last: (last != first).then_some(last),
+            first,
+        })
+    }
+
+    /// The verse holding a byte, as its book, its place and its scope.
+    fn verse_at(&self, byte: u32) -> Option<(mise::books::BookKey, Place, Scope)> {
+        let (book, address) = self.toc.address_at(self.source, byte);
         let Address::Verses { from, .. } = address else {
             return None;
         };
@@ -772,37 +842,8 @@ impl<'s> Model<'s> {
             verse: Index::At(u32::from(from.verse)),
             segment: from.segment,
         };
-        let verse = self.place(&place).ok()?;
-        let at = |byte: u32, end: bool| self.word_steps(&verse, byte, end);
-        let first_steps = at(span.start, false)?;
-        let last_steps = at(span.end, true)?;
-        let reference = |steps: Vec<Step>| SrsRef {
-            translation: None,
-            book,
-            place: place.clone(),
-            steps,
-        };
-        // A span that is the verse's whole scripture is the verse.
-        let words = self.scope_words(&verse);
-        let whole = words
-            .first()
-            .is_some_and(|&w| self.words[w].span.start >= span.start)
-            && words
-                .last()
-                .is_some_and(|&w| self.words[w].span.end <= span.end)
-            && span.end <= verse.span.end;
-        if whole {
-            return Some(SrsRange {
-                first: reference(Vec::new()),
-                last: None,
-            });
-        }
-        let first = reference(first_steps);
-        let last = reference(last_steps);
-        Some(SrsRange {
-            last: (last != first).then_some(last),
-            first,
-        })
+        let scope = self.place(&place).ok()?;
+        Some((book, place, scope))
     }
 
     /// The steps naming a byte inside a verse: a note's word, or the verse's.
@@ -834,6 +875,26 @@ impl<'s> Model<'s> {
                 span: self.elements[note].content.clone(),
                 reach: self.elements[note].content.clone(),
                 element: Some(note),
+                scripture: false,
+                word: None,
+            };
+        } else if let Some(heading) = self.paragraph_at(probe).filter(|&p| self.is_heading(p)) {
+            // Inside a heading: the heading, counted as `!s1[n]` counts, then
+            // its word.
+            let name = self.elements[heading].name.clone();
+            let nth = self
+                .candidates(verse, &name)
+                .iter()
+                .position(|&at| at == heading)?
+                + 1;
+            steps.push(Step::Element {
+                marker: name,
+                index: (nth > 1).then_some(nth as i32),
+            });
+            scope = Scope {
+                span: self.elements[heading].content.clone(),
+                reach: self.elements[heading].content.clone(),
+                element: Some(heading),
                 scripture: false,
                 word: None,
             };
@@ -878,6 +939,14 @@ impl<'s> Model<'s> {
         });
         Some(steps)
     }
+}
+
+/// A footnote's or cross reference's own character markers.
+fn note_content(marker: MarkerIdx) -> bool {
+    matches!(
+        generated::category(marker),
+        Category::CharNotesFootnote | Category::CharNotesCrossReference
+    )
 }
 
 /// `s` names `\s1`, `\s2` …; `s1` names `\s` too (USFM's `\s` is `\s1`).

@@ -106,9 +106,11 @@ pub struct SrsRange {
 
 impl SrsRange {
     /// The basic reference this range lies within: its translation and
-    /// refinements dropped (`MAT 2:1!3-5` is in `MAT 2:1`). `None` for a named
-    /// reference, a range across books, or `end` (which only a versification
-    /// can place: give one to `reference::parse_with` instead).
+    /// refinements dropped (`MAT 2:1!3-5` is in `MAT 2:1`). `None` where no one
+    /// `Address` holds it: a named reference, a range across books or across
+    /// levels (chapter to verse, the introduction to a chapter), and `end`
+    /// (which only a versification can place: give one to
+    /// `reference::parse_with` instead).
     pub fn reference(&self) -> Option<Reference> {
         let first = &self.first;
         let last = self.last.as_ref().unwrap_or(first);
@@ -176,7 +178,10 @@ impl fmt::Display for SrsRange {
             return write!(f, "{last}");
         }
         match (&first.place, &last.place) {
-            (Place::Chapter(_), Place::Chapter(b)) if first.steps.is_empty() => {
+            // A chapter with refinements after it would read as a verse.
+            (Place::Chapter(_), Place::Chapter(b))
+                if first.steps.is_empty() && last.steps.is_empty() =>
+            {
                 write!(f, "{b}")?;
             }
             (
@@ -193,7 +198,8 @@ impl fmt::Display for SrsRange {
             ) if c1 == c2 => {
                 // Same verse, and the same steps but the last word: only the
                 // word, or only the character when it is the same word
-                // (`!3-5`, `!f!2-4`, `!5+2-6`).
+                // (`!3-5`, `!f!2-4`, `!5+2-6`). Not from a character to a
+                // whole word: after `!5+2`, a bare `6` is a character.
                 if v1 == v2
                     && s1 == s2
                     && let (
@@ -201,6 +207,7 @@ impl fmt::Display for SrsRange {
                         [head2 @ .., Step::Word { word: w2, char: c2 }],
                     ) = (first.steps.as_slice(), last.steps.as_slice())
                     && head1 == head2
+                    && (c1.is_none() || c2.is_some())
                 {
                     if w1 == w2
                         && let (Some(_), Some(c2)) = (c1, c2)
