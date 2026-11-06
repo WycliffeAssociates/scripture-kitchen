@@ -231,10 +231,12 @@ What changes for callers:
 - The TOC tests that pin verse extents are updated, and galley's resident-bytes pin grows
   by 4 bytes a verse.
 
-<Followup id="diff-tiles">Should diff's verse blocks follow the tiles? Moving them changes
+<Followup id="diff-tiles" done>Should diff's verse blocks follow the tiles? Moving them changes
 diff's own laws: a `\p` edit between verses stops being a chapter-structure change and
-becomes the next verse's, and a note's reading text moves. Diff stays on the `\v` until
-that's decided.</Followup>
+becomes the next verse's, and a note's reading text moves. Decided 2026-11-06 (Will): yes.
+Diff's blocks are now tiles; a `\p` edit is the verse it opens, a heading's removal the
+verse it introduced, and undoing a swapped pair takes back the verse that gained the `\p`
+too.</Followup>
 
 <Followup id="wire-start">Put `start` on the dish and galley TOC wires when Sefer wants
 tiles row by row. Both are schema-generated with TS readers, so it's a format version
@@ -367,7 +369,7 @@ words, characters or markers, and `reference` stays small without them.
 4. **galley doors**, so Sefer switches `citation.ts` and `names.ts`. This goes with canon's
    step 7, which wires canon into galley anyway.
 5. **TOC tiles** (done 2026-11-06): headings and the opening paragraph go with the next
-   verse, verse 0 is the title, `Sid` prints `GEN 0`. Diff and the wires are followups.
+   verse, verse 0 is the title, `Sid` prints `GEN 0`, diff units are tiles. The wires are a followup.
 6. **`srs` grammar**, from usfmtc's cases and the standard's examples.
 7. **`galley.srs.locate` / `at`**, after 5, NFD and the heading skip included.
 

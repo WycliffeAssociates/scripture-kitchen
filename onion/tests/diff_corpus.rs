@@ -262,16 +262,20 @@ fn a_deleted_a_duplicated_and_a_reordered_verse_all_round_trip() {
 
     let reordered = reorder_two_verses(&source);
     let skeleton = check_pair("MRK verses reordered", &source, &reordered);
-    // A swap is one verse deleted where it was and added where it is; taking
-    // the baseline side of both restores the baseline byte-for-byte.
-    let one_sided: Vec<_> = skeleton
+    // A swap is one verse deleted where it was and added where it is. Units are
+    // verse tiles, so the paragraph marker that opened the first verse now opens
+    // the other one, which changes too; taking the baseline side of every
+    // changed unit restores the baseline byte-for-byte.
+    let one_sided = skeleton
         .units
         .iter()
         .filter(|unit| matches!(unit.status, Status::Deleted | Status::Added))
-        .collect();
-    assert_eq!(one_sided.len(), 2, "a swap is a deletion and an addition");
-    let decisions: Decisions = one_sided
+        .count();
+    assert_eq!(one_sided, 2, "a swap is a deletion and an addition");
+    let decisions: Decisions = skeleton
+        .units
         .iter()
+        .filter(|unit| unit.status != Status::Unchanged)
         .map(|unit| (unit.id.clone(), MergeSide::Baseline))
         .collect();
     assert_eq!(
