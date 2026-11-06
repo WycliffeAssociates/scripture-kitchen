@@ -114,7 +114,9 @@
     <label style="margin:0;grid-template-columns:auto auto">Recipe <select id="recipe">
       <option value="">Plain</option>
       <option value="links">Links + contents</option>
-      <option value="notes">Study notes (Mark only)</option>
+      <option value="study">Study Bible, notes at foot (Mark)</option>
+      <option value="study-all">Study Bible, every note (Mark, stress)</option>
+      <option value="notes">Notes after paragraphs (Mark)</option>
       <option value="diglot">Diglot BSB | ULB</option>
       <option value="diff-side">Diff ULT → ULB, side by side</option>
       <option value="diff-redline">Diff ULT → ULB, redline</option>
@@ -203,7 +205,8 @@ document.getElementById("recipe").addEventListener("change", () => {
   if (r && r !== "links") {
     const codes = JSON.parse(booksEl.dataset.codes);
     const sel = [...booksEl.selectedOptions];
-    if (sel.length !== 1 || (r === "notes" && codes[[...booksEl.options].indexOf(sel[0])] !== "MRK")) {
+    const needsMark = r.startsWith("notes") || r.startsWith("study");
+    if (sel.length !== 1 || (needsMark && codes[[...booksEl.options].indexOf(sel[0])] !== "MRK")) {
       [...booksEl.options].forEach((o, i) => o.selected = codes[i] === "MRK");
     }
   }

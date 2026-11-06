@@ -29,6 +29,7 @@ BY-SA 4.0), fetched with
 |---|---|---|---|---|
 | `links` | contents page, PDF bookmarks for books and sections, every `\xt` a link to its verse when the verse is in the PDF (book names parsed by canon) | 37 | 32 | Psalms + prophets + NT: 733 pages, 885 references resolved, 5,918 link annotations, 7.8 s |
 | `notes` | a study edition: translation notes after the paragraph holding their verse, book and chapter introductions in place, Markdown notes turned into Typst | 110 | 34 | ULT Mark + 3,116 notes: 308 pages, 2.7 s |
+| `study` | a classic study Bible page: text above, the notes for that page's verses below a rule in small type; each note a caller-less footnote anchored at its verse, so Typst keeps it with its verse and carries overflow on (`sample` = first note per verse, `all` = every note) | 50 | 31 | ULT Mark: 54 pages at sample density, 2.7 s; 143 pages with all 3,116 notes, 5 s |
 | `diglot` | two texts side by side, one row per paragraph of the left text | 74 | 17 | BSB + ULB Mark: 366 rows, 48 pages, 0.5 s |
 | `diff` | verse-by-verse word diff, unchanged runs collapsed; `side` or `redline` | 93 | 37 | ULT → ULB Mark: 676 verses changed, 63 pages (side) / 38 (redline), under 1 s |
 
@@ -47,6 +48,8 @@ the emitter places there. Every verse call carries its book
   are not bookmarked.
 - `notes`: notes follow the paragraph, not the bottom of the page; a classic
   study-Bible note zone needs a page builder Typst does not have.
+- `study`: notes sit at the foot of each column, not in one full-width band;
+  past about one note per verse the text thins to a few lines a page.
 - `diglot`: verse text only (notes and headings drop out); verses matched by
   number, not mapped between versifications through canon.
 - `diff`: verse text only; a moved verse shows as a delete and an insert.

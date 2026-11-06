@@ -29,6 +29,8 @@ mod diglot;
 mod links;
 #[path = "../../recipes/notes/recipe.rs"]
 mod notes;
+#[path = "../../recipes/study/recipe.rs"]
+mod study;
 
 struct App {
     fonts: Arc<FontStore>,
@@ -184,12 +186,16 @@ async fn render(State(app): State<Arc<App>>, Json(req): Json<RenderRequest>) -> 
         };
         let r = match recipe.as_str() {
             "links" => links::run(&fonts, &usfm, &settings),
-            "notes" => {
+            "notes" | "study" | "study-all" => {
                 let tsv_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("data/tn_{code}.tsv"));
                 match std::fs::read_to_string(&tsv_path) {
                     Ok(tsv) => {
                         let text = app2.ult.get(&code).cloned().unwrap_or_else(|| usfm[0].clone());
-                        notes::run(&fonts, &text, &tsv, &settings)
+                        match recipe.as_str() {
+                            "notes" => notes::run(&fonts, &text, &tsv, &settings),
+                            "study" => study::run(&fonts, &text, &tsv, "sample", &settings),
+                            _ => study::run(&fonts, &text, &tsv, "all", &settings),
+                        }
                     }
                     Err(_) => Err(format!("no notes for {code}: fetch {} (only Mark is here)", tsv_path.display())),
                 }

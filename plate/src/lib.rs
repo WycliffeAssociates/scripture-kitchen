@@ -38,6 +38,8 @@ pub struct Hooks<'h> {
     pub book_start: Option<&'h dyn Fn(&str) -> Option<String>>,
     /// After `\c`: (book, chapter).
     pub chapter_start: Option<&'h dyn Fn(&str, &str) -> Option<String>>,
+    /// Right after a verse number: (book, chapter, verse).
+    pub at_verse: Option<&'h dyn Fn(&str, &str, &str) -> Option<String>>,
     /// After a paragraph that held verses: (book, [(chapter, verse)…]).
     pub after_paragraph: Option<&'h dyn Fn(&str, &[(String, String)]) -> Option<String>>,
 }
@@ -314,6 +316,11 @@ impl<'a> Emitter<'a> {
             str_lit(number)
         ));
         self.para_verses.push((self.chapter.clone(), number.to_string()));
+        if let Some(hook) = self.hooks.at_verse
+            && let Some(extra) = hook(&self.code, &self.chapter, number)
+        {
+            self.out.push_str(&extra);
+        }
     }
 
     fn flush_space(&mut self) {

@@ -16,7 +16,7 @@ struct Note {
 /// Markdown → Typst markup, calling the overlay's `u.md-*` functions for
 /// structure. Links keep their text; tN's relative and rc:// targets mean
 /// nothing on paper.
-fn markdown(md: &str) -> String {
+pub fn markdown(md: &str) -> String {
     let mut out = String::new();
     for event in Parser::new(md) {
         match event {
