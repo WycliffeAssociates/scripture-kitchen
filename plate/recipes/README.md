@@ -48,8 +48,13 @@ the emitter places there. Every verse call carries its book
   are not bookmarked.
 - `notes`: notes follow the paragraph, not the bottom of the page; a classic
   study-Bible note zone needs a page builder Typst does not have.
-- `study`: notes sit at the foot of each column, not in one full-width band;
-  past about one note per verse the text thins to a few lines a page.
+- `study`: notes sit at the foot of each column by default. `{"study_layout":
+  "band"}` puts them in one full-width band (the text in a `columns()` block
+  on a one-column page), but the band is a single column of notes, notes fall
+  behind their verses when they crowd, and layout is about 11x slower (Mark
+  29 s against 2.6 s). A band set in two or three columns, or notes run in as
+  one paragraph, needs a page builder Typst does not have. Past about one
+  note per verse the text thins to a few lines a page.
 - `diglot`: verse text only (notes and headings drop out); verses matched by
   number, not mapped between versifications through canon.
 - `diff`: verse text only; a moved verse shows as a delete and an insert.
