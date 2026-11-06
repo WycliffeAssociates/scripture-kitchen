@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! Address::Book                                    GEN            the book
-//! Address::Intro                                   GEN intro      before its first chapter
+//! Address::Intro                                   GEN 0          before its first chapter (SRS chapter 0)
 //! Address::Chapters { from: 2, to: 4 }             MAT 2-4        whole chapters
 //! Address::Verses { from: 1:1, to: 1:2 }           LUK 1:1-2      a single verse has equal ends
 //! Address::Verses { from: 1:20, to: 2:3 }          MAT 1:20-2:3   a range may cross a chapter
