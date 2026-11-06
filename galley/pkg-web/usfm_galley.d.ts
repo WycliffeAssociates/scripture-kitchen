@@ -48,12 +48,62 @@ export interface GalleyOptions {
 }
 
 /** `update(id, text, opts)`: the `\z` list the book lexes by, for as long as it is registered. */
-export interface UpdateOptions extends LexOptions {}
+export interface UpdateOptions extends LexOptions {
+    /**
+     * The numbering the book follows: a scheme's name (`"ulb"`, `"eng"`, `"org"`, …, or one
+     * `defineScheme` added), or `"followSource"` for whatever its same-code reference declares.
+     * Omitted, an earlier declaration for this id stands.
+     */
+    versification?: string;
+}
 
 /** `updateReference(id, text, opts)`. */
 export interface ReferenceOptions extends LexOptions {
     /** Keep the text and projection a target keeps, so `find` and `mask` can read it. */
     keepText?: boolean;
+    /** As `UpdateOptions.versification`. */
+    versification?: string;
+}
+
+/** A Copenhagen Alliance versification mapping, as `JSON.parse` returns it. */
+export interface VersificationMapping {
+    /** Per book code, each chapter's last verse (numbers, or the decimal strings published files use). */
+    maxVerses: Record<string, (number | string)[]>;
+    /** `"GEN 31:55": "GEN 32:1"`: this scheme's verses toward org's. */
+    mappedVerses?: Record<string, string>;
+    /** `"MAT 17:21"`: verses this scheme omits on purpose. */
+    excludedVerses?: string[];
+    /** Accepted and not read. */
+    partialVerses?: unknown;
+}
+
+/** `JSON.parse(galley.sniff())`. */
+export interface SniffResult {
+    /** The winner; `null` when undetermined (use the project's default). */
+    best: string | null;
+    confidence: "decided" | "leaning" | "undetermined";
+    /** Rules that told the schemes apart. */
+    voted: number;
+    /** Every built-in scheme, best first. */
+    ranked: { scheme: string; agree: number; disagree: number }[];
+    /** Rules the winner disagrees with: passages the text numbers like another tradition. */
+    dissent: { rule: string; textFollows: string[] }[];
+    /** Rules where the text followed no tradition at all. */
+    unmatched: string[];
+}
+
+/** `JSON.parse(galley.mapVerse(from, to, "GEN 31:55"))`. Verses are `"BBB c:v"`, a part as `"ESG 4:17c"`. */
+export type MappedVerse =
+| { same: true }
+| { moved: string }
+| { merged: string }
+| { split: string[] }
+| { absent: true };
+
+/** One unit of `JSON.parse(galley.pairs(from, to, "PSA"))`: verses that map only to each other. */
+export interface PairedVerses {
+    here: string[];
+    there: string[];
 }
 
 /** `find` and `findAll`. */
@@ -313,6 +363,14 @@ export class Galley {
      */
     config(): SousSettings;
     /**
+     * Adds a project's own versification scheme, by name, from a Copenhagen
+     * mapping object (`JSON.parse` of a `.json` mapping, such as one
+     * converted from a Paratext `.vrs`). Replaces one defined under the same
+     * name; a built-in name (`"ulb"`) is refused. Every entry is checked, and
+     * the first bad one throws, naming it.
+     */
+    defineScheme(name: string, mapping: VersificationMapping): void;
+    /**
      * Cached chunk units. Zero for a one-chapter book: galley does not cache
      * what it cannot reuse.
      */
@@ -404,6 +462,12 @@ export class Galley {
      */
     lint(id: string): Uint8Array;
     /**
+     * Where `verse` (`"GEN 31:55"`), numbered by scheme `from`, is under
+     * scheme `to`, as JSON ([`MappedVerse`]). Either name may be a built-in
+     * or a defined scheme.
+     */
+    mapVerse(from: string, to: string, verse: string): string;
+    /**
      * One registered book's mask map — which source spans its projection is
      * made of, in order. The projection is a pure concatenation of those
      * spans, so a host holding the source rebuilds it from the map alone.
@@ -494,6 +558,12 @@ export class Galley {
      */
     overlayText(target_id: string, source_id: string, opts?: OverlayOptions): string;
     /**
+     * A whole book walked in step across two schemes, as JSON
+     * ([`PairedVerses`]`[]`): each unit is the verses on each side that map
+     * only to each other. `book` is a USFM code (`"PSA"`).
+     */
+    pairs(from: string, to: string, book: string): string;
+    /**
      * One registered book, plated — the same buffer `onion_wasm::parse`
      * returns for that text, with the lex, the tree and the lint walk reused
      * for every chunk whose bytes did not change.
@@ -549,6 +619,11 @@ export class Galley {
      */
     resolveOf(text: string, address: Address, opts?: ResolveTextOptions): string;
     /**
+     * The scheme a registered book follows (its own declaration, or its
+     * source's for `"followSource"`), or `undefined`.
+     */
+    schemeOf(id: string): string | undefined;
+    /**
      * Replaces them. No chapter is remapped and no book refolded — judging
      * reads the config, mapping does not — so a knob flip costs a re-judge.
      */
@@ -584,6 +659,16 @@ export class Galley {
      * the next row's `from` is not its end.
      */
     skeleton(id: string, opts?: OverlayOptions): string;
+    /**
+     * Which built-in scheme the books in `scope` follow, from what they
+     * have, as JSON ([`SniffResult`]). A suggestion for a book that declares
+     * nothing: nothing here applies it.
+     *
+     * `{ scope }` is `findAll`'s, default `"targets"`; every book in it must
+     * retain its text (a reference needs `keepText`). Sniff the whole text
+     * at once: one book alone has few rules to vote with.
+     */
+    sniff(opts?: { scope?: Scope }): string;
     /**
      * A TARGET block's address, answered in the source — the mirror of
      * [`targetNodeFor`](Self::target_node_for), and the same three answers.
@@ -1071,6 +1156,7 @@ export interface InitOutput {
     readonly fingerprint_differsFrom: (a: number, b: number) => number;
     readonly galley_changedSinceUpdate: (a: number, b: number, c: number, d: number, e: number) => [number, number];
     readonly galley_config: (a: number) => number;
+    readonly galley_defineScheme: (a: number, b: number, c: number, d: any) => [number, number];
     readonly galley_entryCount: (a: number) => number;
     readonly galley_find: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly galley_findAll: (a: number, b: number, c: number, d: number) => [number, number, number, number];
@@ -1081,6 +1167,7 @@ export interface InitOutput {
     readonly galley_lastRemapped: (a: number) => number;
     readonly galley_lastWordlessReferences: (a: number) => number;
     readonly galley_lint: (a: number, b: number, c: number) => [number, number, number, number];
+    readonly galley_mapVerse: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number, number];
     readonly galley_mask: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly galley_maskOf: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly galley_misses: (a: number) => number;
@@ -1088,6 +1175,7 @@ export interface InitOutput {
     readonly galley_overlay: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
     readonly galley_overlayReport: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly galley_overlayText: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+    readonly galley_pairs: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number, number];
     readonly galley_parse: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly galley_parseText: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly galley_publish: (a: number) => [number, number, number, number];
@@ -1095,8 +1183,10 @@ export interface InitOutput {
     readonly galley_residentBytes: (a: number) => number;
     readonly galley_resolve: (a: number, b: number, c: number, d: any, e: number) => [number, number, number, number];
     readonly galley_resolveOf: (a: number, b: number, c: number, d: any, e: number) => [number, number, number, number];
+    readonly galley_schemeOf: (a: number, b: number, c: number) => [number, number];
     readonly galley_setConfig: (a: number, b: number) => void;
     readonly galley_skeleton: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+    readonly galley_sniff: (a: number, b: number) => [number, number, number, number];
     readonly galley_sourceNodeFor: (a: number, b: number, c: number, d: number, e: number, f: any, g: number) => [number, number, number, number];
     readonly galley_structureTextOf: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly galley_targetNodeFor: (a: number, b: number, c: number, d: number, e: number, f: any, g: number) => [number, number, number, number];

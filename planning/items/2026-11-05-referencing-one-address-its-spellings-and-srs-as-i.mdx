@@ -4,12 +4,12 @@ title: "Referencing: one address, its spellings, and SRS as its own crate"
 kind: plan
 status: discussing
 created: 2026-11-05
-updated: 2026-11-05
+updated: 2026-11-06
 sha: ee19ff2
 priority: 3
 tags: [reference]
 related: [1da22c7f-fb35-4432-b867-3b66a218bcea, 7485a140-9d43-4604-8a2a-f78a10f67f05]
-source: conversation 2026-11-05, step 2 ("reference") of the "Shared Scripture Domain Libraries" order
+source: conversations 2026-11-05 and 2026-11-06, step 2 ("reference") of the "Shared Scripture Domain Libraries" order
 ---
 
 Will, 2026-11-05:
@@ -44,6 +44,29 @@ More than the doc assumed:
 
 What's missing is the **grammar**: text → address and back, in each spelling we meet.
 
+## Three kinds of address, and when SRS is used
+
+Will, 2026-11-06:
+
+> Addresing could mean at least 3 things? 1. simple BCV 2. u32..u32 offsets, which I need.
+> to yes actually point to whitesapce, unlike what srs allows 3. SRS.
+
+> how do you know when to use SRS versus not use SRS?
+
+Three layers, and SRS never shapes the other two:
+
+| You're pointing at… | …and the reader has your exact USFM bytes | Use |
+|---|---|---|
+| a book, chapter or verse | either way | the **basic reference**: `MAT 1:20-2:3` (an `Address`, spelled the SRS way) |
+| something inside a verse | yes: CodeMirror, onion, galley, sous, Sefer's storage | a **`u32..u32` source span** |
+| something inside a verse | no: another tool, a USX file someone else made, `\ref loc`, `@vid`, a person reading it | **SRS** `!word+char` |
+
+The basic reference needs no parser, no NFD and no word counting. NFD, SRS's whitespace
+rules and word counting happen only at the moment a span is converted to SRS or back
+(`galley.srs.at` / `locate`). Like a date: a timestamp inside, an ISO string at the
+boundary. Nothing stores SRS, and nothing draws from it: an SRS reference is located to a
+span first, every time.
+
 ## The spellings we meet
 
 One `Address`, many spellings. Each spelling is a codec, never a second model:
@@ -52,15 +75,21 @@ One `Address`, many spellings. Each spelling is a codec, never a second model:
 |---|---|---|---|
 | **Machine** (stored, sent, logged) | `GEN 0`, `PSA 3:0`, `LUK 11:2b`, `MAT 1:20-2:3` | us | undecided: `mise` documents `GEN intro`, Sefer uses `GEN 0` |
 | **Human citation** (typed, shown) | `Mateo 5:3-7; 6:1`, `1 Jn 3:16` | people, in a go-to box or a note | Sefer `citation.ts` + `names.ts` (~390 lines, `citation.test.ts` ~60 rows) |
-| **uW TSV Reference cell** | `1:3`, `1:3-5`, `front:intro`, `1:intro` | tn/tq TSV files (book from the file) | each helps reader; the helps spike's parser accepts a backwards range Sefer rejects |
+| **uW TSV Reference cell** | `1:3`, `1:3-5`, `front:intro`, `1:intro` | tn/tq TSV files (book from the file) | only the helps spike, which measured how messy en_tn's format is. Not this repo's job yet (below) |
 | **onion `Sid`** | `GEN 1:3-5` | onion's TOC | onion `toc.rs` |
 | **SRS** | `MAT 2:1!3`, `en+niv.MRK 1:14!s`, `MRK 0!ip!w!1` | the USFM committee's standard; `\ref loc`; usfmtc | the Kotlin hub's `SrsParser` (private repo) |
+
+Two words, kept apart. A **reference** is the strict machine string: one spelling, parsed
+exactly, an error otherwise. A **citation** is what a person types or reads: localized
+(`Mateo`, `1 Jn`), parsed leniently, and it says what it assumed. "Citation" never means
+SRS.
 
 ### The machine spelling: SRS's basic reference
 
 The USFM committee's
 [Scripture Referencing Standard](https://github.com/usfm-bible/tcdocs/blob/main/docs/Scripture%20Referencing%20Standard.md)
-already spells everything `Address` holds, and agrees with Sefer and canon where our own
+(version 1.0, released: its changelog says "Initial release Feb 2026 · Released and moved
+from proposals", committed 2026-08-31) already spells everything `Address` holds, and agrees with Sefer and canon where our own
 code disagrees with itself:
 
 - **The intro is chapter 0**: `MRK 0`. Sefer's `GEN 0` agrees; `mise`'s doc comment says `GEN intro`.
@@ -68,44 +97,154 @@ code disagrees with itself:
 - **A verse part is one lowercase letter**: `LUK 11:2b`, which is `Point.segment`.
 - **Ranges and lists**: `MAT 1:20-2:3`, `PSA 68:25,28`, `GEN 1:1; 2:4`. A bridge is just a range.
 
-<Question id="machine-spelling">Do we adopt SRS's basic reference (book, chapter, verse, subverse, ranges, lists; no words, characters, markers or translation prefix) as *the* machine spelling of an `Address`? It answers the doc's first open question with a published standard instead of a house rule, it costs only renaming `GEN intro` to `GEN 0` in `mise`'s docs, and anything that reads SRS reads ours. I'd say yes.</Question>
+<Question id="machine-spelling" answer="Yes (Will, 2026-11-06). The basic reference is a small text grammar over Address: no USFM parser and no NFD. Those belong to SRS words, characters and markers only, which is why srs is its own crate.">Do we adopt SRS's basic reference (book, chapter, verse, subverse, ranges, lists; no words, characters, markers or translation prefix) as *the* machine spelling of an `Address`? It answers the doc's first open question with a published standard instead of a house rule, it costs only renaming `GEN intro` to `GEN 0` in `mise`'s docs, and anything that reads SRS reads ours. I'd say yes.</Question>
 
-The other spellings become codecs into and out of `Address`: the uW TSV cell (with its book
-from the file name, and `front`/`intro` mapped to chapter 0 and `Intro`), `Sid`, and
-human citations.
+**A segment is one letter.** SRS: "Only a simple ascii lowercase letter may be used for a
+subverse identifier." So `Point.segment` becomes `Option<u8>` instead of `Option<String>`,
+and `Address` needs no heap and can be `Copy`. Decided 2026-11-06, while `mise` has few
+users: onion's `resolve` (which builds the segment from the source), `onion-wasm`'s
+resolution and the resolve cases. A source segment that isn't one lowercase letter (`12ab`,
+`12A`) is then never matched by an `Address`, the same as any other malformed designator:
+degrade, never repair.
 
-## Why not just offsets? We do use offsets. SRS is for the edge.
+**Its status.** The tcdocs [roadmap](https://github.com/usfm-bible/tcdocs/blob/main/docs/USFMTC%20Roadmap.md)
+still lists the Google doc
+[U23003 USFM References](https://docs.google.com/document/d/1U0CrIJkU4h4pPOhhifN1y-HJU5f5r6nGD6d2rLuMeeM/edit?tab=t.0)
+as "in discussion", but the roadmap was last changed on 2026-03-09, before the release. The
+Google doc is the proposal; the Markdown is the standard. USFM itself now leans on it: 3.1
+gives `@vid` "extended reference syntax", 3.1.2 adds a `vid` milestone, and `\ref loc`
+uses it.
 
-Will's instinct is right for everything *we* store. The question is what crosses to someone
-who doesn't have our exact bytes.
+The other spellings become codecs into and out of `Address`: `Sid` and human citations.
 
-**Inside our tools, a position in a verse is an offset**: an offset into the verse's
-projected reading text (markup removed, notes out), the same coordinate galley's mask map
-and sous findings already use. On the wire it's UTF-8 bytes. At the JS edge it's UTF-16,
-converted by `mise::utf16`, as galley does now. That's the doc's second open question,
-answered by what's already built: **projected offsets, UTF-8 on the wire, each language's
-own unit at its edge.**
+**TSV helps cells are out of scope.**
 
-**Why SRS counts words instead:** it's written for a different job.
+> I don't think we're ready for anything TSV like in this repo (Will, 2026-11-06)
 
-- **It must survive serialization.** An SRS reference means the same place in a USFM, USX
-  or USJ file. A byte offset into USFM doesn't: `\~` is two bytes in USFM and one character
-  in the model. Offsets into *our projection* also survive serialization, but only if the
-  other side computes the same projection. SRS defines one projection everyone can compute:
-  whitespace-separated runs of the model's text, notes counted separately.
-- **It's meant for people.** "Third word of MAT 2:1" can be counted by eye; "byte 17" can't.
-  The standard says so: "The reason for character locations to be identified by word is
-  that it makes indexing by humans easier."
-- **Characters are counted in NFD**, so it can point at one diacritic. An offset into NFC
-  text can't.
+`front:intro` is a convention of the helps format, not of USFM, and the org doesn't read
+those files today. When it does, a helps package owns the cells: it maps `front:intro` and
+`1:intro` itself and hands the rest to `reference.parse_in`.
 
-Neither survives an edit to the verse: inserting a word moves every later word number just
-as it moves every later offset. So the rule is: **store and compute offsets; speak SRS
-only when the other side is another tool or a person.** The conversion between them is
-exact given the text: count non-space runs in the projection. It belongs to galley, which
-has the projection.
+**`Sid` stays onion's.** It is the TOC's cheap answer to "which row is this byte in": `Copy`,
+10 bytes, the book as written (even `gen` or a broken `\id 1`), one chapter, no segment.
+`locate` runs for every sous finding, so it doesn't allocate an `Address`. `reference` adds one
+conversion, `Sid` → `(book, Address)`, and nothing outside onion and galley holds a `Sid`.
+With the TOC tile change, `Sid` prints the front matter as `GEN 0`, not `GEN`, since in the
+machine spelling `GEN` is the whole book.
 
-<Question id="offsets">Is "projected offsets, UTF-8 bytes on the wire, UTF-16 at the JS edge" the answer to the doc's offset-unit question? It's what galley and sous already do, so adopting it changes no code. Alignment (`../pairing-lab`) would store its word links this way too, with SRS as an export spelling.</Question>
+## Source spans inside, SRS at the edge
+
+Will, 2026-11-06:
+
+> the counting to me is wild since it doesn't survive edits and I don't find it terribly
+> readable. It's why I persoanlly think the range should just be u32..u32, adn if you
+> convert to another format, you should just map select and reanchor in the new document
+
+> to do anything basic like we do with codemirror of just drawing on diagnostics, you still
+> have to resolve back to a u32..u32
+
+**The address of a place inside our tools is a source span**: `u32..u32` into the USFM
+source, which can point at whitespace or a marker. onion's TOC, `resolve`, lints and the
+editor's diagnostics already speak it. In Rust and on the wire it's UTF-8 bytes; at the JS
+edge it's UTF-16, converted by `mise::utf16`, as galley does now.
+
+**Projected offsets are galley's internal detail.** galley and sous count inside a verse's
+reading text (markup removed, notes out), then map back through the mask
+(`galley/src/mask.md`) before anything leaves galley. Nothing outside galley holds one.
+
+**When we convert, we re-anchor by map, not by SRS.** onion writes USX and USJ itself, so the
+converter can carry a source-span map, and a span re-anchors exactly with no counting. SRS
+is for a USX or USJ file someone else made, where no such map exists.
+
+**Why SRS counts words anyway:** it's written for that other job.
+
+- **It must mean the same place in USFM, USX and USJ** made by tools that share no map. A
+  byte offset into USFM doesn't: `\~` is two bytes in USFM and one character in the model.
+- **It's meant for people.** "Third word of MAT 2:1" can be counted by eye.
+- **Characters are counted in NFD**, so it can point at one diacritic.
+
+Neither survives an edit to the verse: a new word moves every later word number just as it
+moves every later offset.
+
+<Question id="offsets" answer="Yes, revised (Will, 2026-11-06): source spans are the address, UTF-8 bytes on the wire and UTF-16 at the JS edge. Projected offsets stay inside galley. Our own conversions re-anchor by a span map; SRS is only for files and tools we share no map with.">What crosses a boundary: source spans or projected offsets? The first draft said projected offsets on the wire. Alignment (`../pairing-lab`) would store its word links as spans too, with SRS as an export spelling.</Question>
+
+## Verse tiles: the heading and the opening paragraph go with the next verse
+
+Will, 2026-11-06:
+
+> there's times I want to say pull 13, but you should pull the paragraph in the subheading
+> above it as well. So keep the test of title the whole document and move the boundaries is
+> fine with me, Because there's times I've like been like show 13 and you didn't pull the P,
+> so the text is not indented
+
+Today a verse in onion's TOC ([[code:onion/src/toc.rs#VerseAnchor]]) runs from its `\v` to
+the next `\v` or `\c`. So the `\s1`, the `\r` *and the `\p` that opens verse 14* all sit in
+verse 13's tile, and a heading before a chapter's first verse belongs to no verse:
+
+```text
+\v 12 At once the Spirit … \v 13 where he stayed 40 days … angels came and helped him.
+\s1 Jesus Calls Four Fishermen        today: 1:13        after: 1:14
+\r (Mt 4.12-22; Lk 4.14-15; 5.1-11)   today: 1:13        after: 1:14
+\p                                    today: 1:13        after: 1:14
+\v 14 After John had been put in prison …
+```
+
+**The rule.** A verse's tile starts at the first paragraph or heading marker after the
+previous verse's last text (plus the notes and milestones attached to that text). Everything
+from there to its `\v` comes with it. A paragraph break inside a verse (`\q2` with no `\v`)
+has no `\v` to belong to, so it stays with the verse it continues. This is SRS's own
+association ("section headings are associated with the following paragraph").
+
+- **The whole document is still tiled.** Only the boundary moves.
+- **A new field, `VerseAnchor.start`**, where the tile begins; `at` stays the `\v`. The
+  first draft said to redefine `at`, but Sefer matches `verse.at === found.from`
+  (`src/app/workflows/stet.ts`), and resolve's `from` and onion's lints read it as the
+  marker. The row grows from 28 to 32 bytes.
+- **The rule was already written**, as resolve's `opening` (`onion/src/resolve.md`, a dozen
+  worked cases). The TOC now walks it once at build time, and resolve reads it instead of
+  re-lexing a window on every call.
+- **Chapters stay hard breaks.** SRS never says whether a heading's association crosses a
+  `\c` (its examples always put the heading after it), so a heading before `\c 2` stays in
+  chapter 1.
+- **A heading before verse 1 goes to verse 1**, as SRS addresses it (`MRK 1:1!s`). Not
+  chapter 0: that is the book's introduction, before `\c 1`. In a Psalm,
+  `\c 7 \s1 … \d … \v 1`, the heading's next paragraph is the `\d` title, so it goes with
+  verse 0 (`PSA 7:0`).
+- **Verse 0 is now resolvable.** `TitleRow` gets its own `start` (16 bytes), verse 1's walk
+  stops at the title, and `resolve(PSA 7:0)` finds it. Before, resolve had no verse 0, and
+  verse 1's opening reached back over the `\d` instead.
+
+<Tradeoff id="ms-before-c" chose="Chapters stay hard breaks" cost="A heading a text puts just before \c (a Psalms book division as \ms, say) stays with the previous chapter's last verse">Moving it into the next chapter would change chapter tiling too, and SRS doesn't ask for it.</Tradeoff>
+
+**`resolve` and `locate` both stay.** `resolve` is the lookup ("where is JHN 3:16": bridges,
+lists, `16a`, missing, twice); `locate` is its inverse ("which verse holds this byte"). After
+the change both answer with the wider tile, so they agree with each other better.
+
+What changes for callers:
+
+- `resolve` returns the heading and the `\p` with the verse, so "show 13" renders indented.
+  Its 31 cases (`testData/resolve/cases.json`) are updated.
+- A finding inside a heading is reported against the next verse (sous, and anything built on
+  `locate`).
+- A heading before verse 1 reports verse 1, not the bare chapter.
+- `Sid` prints the front matter as `GEN 0` (onion-wasm's `locate` string too).
+- The TOC tests that pin verse extents are updated, and galley's resident-bytes pin grows
+  by 4 bytes a verse.
+
+<Followup id="diff-tiles" done>Should diff's verse blocks follow the tiles? Moving them changes
+diff's own laws: a `\p` edit between verses stops being a chapter-structure change and
+becomes the next verse's, and a note's reading text moves. Decided 2026-11-06 (Will): yes.
+Diff's blocks are now tiles; a `\p` edit is the verse it opens, a heading's removal the
+verse it introduced, and undoing a swapped pair takes back the verse that gained the `\p`
+too.</Followup>
+
+<Followup id="wire-start">Put `start` on the dish and galley TOC wires when Sefer wants
+tiles row by row. Both are schema-generated with TS readers, so it's a format version
+bump. Until then galley's `resolve` already returns the tile as `opening..to`.</Followup>
+
+**For `srs.locate` later:** SRS treats headings as "both inside and outside the range".
+`MRK 1:14!s` reaches the heading, but word 1 of `MRK 1:14` is still the first word after
+`\v 14`. So locate skips the heading paragraphs at the head of a tile when it counts words.
 
 ## Two crates
 
@@ -113,7 +252,7 @@ has the projection.
 flowchart LR
   mise["mise: Address, Point"] --> reference
   canon["canon: books, names, schemes"] --> reference
-  reference["reference: machine spelling, citations, TSV + Sid codecs"] --> srs
+  reference["reference: machine spelling, citations, Sid"] --> srs
   srs["srs: the full SRS grammar"] --> galley
   reference --> galley["galley: resolve, srs locate (needs the text)"]
 ```
@@ -136,9 +275,10 @@ reference.cite(text: string, opts: { locales: string[]; book?: BookCode /* conte
 // "Mateo 5:3-7; 6:1" → MAT 5:3-7, MAT 6:1 (book carried to the second), assumed: ["es name"]
 reference.show(refs: Reference[], opts: { locale: string; style: "long" | "short" | "abbr" }): string;
 
-// Codecs
-reference.tsv.parse(cell: "1:3-5" | "front:intro", book: BookCode): Reference;
-reference.tsv.format(ref: Reference): string;
+// A contextual reference, read relative to a book (SRS's ContextRef): "1:3-5" in MAT.
+reference.parseIn(book: BookCode, text: string): Reference[] | ReferenceError;
+
+// onion's TOC answer, as an Address.
 reference.sid(sid: Sid): Reference;
 ```
 
@@ -165,10 +305,25 @@ galley.srs.locate(id, ref: SrsRef): { from: number; to: number } | Missing; // p
 galley.srs.at(id, from: number, to: number): SrsRef;      // the SRS spelling of a range
 ```
 
+It ports the released standard in full, grammar and `locate`, NFD included. There's no
+config flag: spans are our default because spans are what we store, and SRS exists only
+through `locate` and `at`.
+
+> if it's a USFM standard we should just go and port it (Will, 2026-11-06)
+
+**What usfmtc gives us**, read 2026-11-06:
+
+- **The grammar, complete**, in `src/usfmtc/reference.py` (about 1,100 lines): prefixes,
+  `!word+char`, `end`, markers with `[n]`, ranges, lists and localized book names. Where the
+  standard's grammar and prose disagree (#125, #126) it accepts both.
+- **Locating** in `src/usfmtc/usxcursor.py`, over USX rather than USFM. It splits words on a
+  whitespace regex and **never normalizes to NFD**, so its character counts are in whatever
+  form the file is in. Ours follows the standard there, and says so in the fixtures.
+
 Its own crate because it's its own address space, as Will says: most callers never need
 words, characters or markers, and `reference` stays small without them.
 
-<Question id="srs-when">When is `srs` built? The grammar half is cheap: usfmtc implements it (`src/usfmtc/reference.py`, MIT) with about 250 test cases (`tests/test_refs.py`) to port as fixtures. The `locate` half needs a consumer. The candidates are `\ref loc` (USFM 3.1 links, which the standard governs, and which onion could lint), alignment exporting to other tools, and helps anchored below the verse. I'd build the grammar after `reference`, and `locate` only when one of those asks.</Question>
+<Question id="srs-when" answer="Port it in full (Will, 2026-11-06): it is a released USFM standard, and @vid and \ref loc use it. The grammar comes after reference; locate follows the TOC tiling change, since it counts within those tiles.">When is `srs` built? The grammar half is cheap: usfmtc implements it (`src/usfmtc/reference.py`, MIT), with test cases (`tests/test_refs.py`) to port as fixtures. The `locate` half needs a consumer. The candidates are `\ref loc` (USFM 3.1 links, which the standard governs, and which onion could lint), alignment exporting to other tools, and helps anchored below the verse.</Question>
 
 ## What it replaces
 
@@ -176,10 +331,8 @@ words, characters or markers, and `reference` stays small without them.
 |---|---|---|
 | `address.ts` (types) | Sefer `packages/text/src/location` | `mise::Address`, through galley |
 | `citation.ts`, `names.ts` (~390 lines) | Sefer `packages/text/src/location` | `reference.cite` / `show`, with canon's names |
-| The cut-down citation parser | the helps spike | `reference.tsv` |
-| Ad hoc `front:intro` handling | each helps reader | `reference.tsv` |
 | `SrsParser` | the Kotlin hub (private) | `srs`, through its fixtures until a JVM app needs bindings |
-| `GEN intro` in `mise`'s docs | `mise/src/address.rs` | `GEN 0` (doc only) |
+| `GEN intro` in `mise`'s docs | `mise/src/address.rs` | `GEN 0` (doc only, done 2026-11-06) |
 
 `locate.ts` already went to onion's `resolve`.
 
@@ -187,8 +340,9 @@ words, characters or markers, and `reference` stays small without them.
 
 - **Sefer `citation.test.ts`** (~60 rows): `reference/fixtures/cite.json`, run by the Rust
   tests and by Sefer's TS tests until Sefer switches.
-- **usfmtc `tests/test_refs.py`** (~250 cases, MIT): the grammar cases go to
-  `srs/fixtures/`. The ones that resolve against `32JONBSB.usfm` become `locate` cases.
+- **usfmtc `tests/test_refs.py`** (96 test functions, MIT): the grammar cases go to
+  `srs/fixtures/`. The ones that locate against `32JONBSB.usfm` (through `USXCursor`) become
+  `locate` cases, except where a character count depends on NFD, which we mark.
 - **The SRS document's own examples**, including the two places the grammar and the prose
   disagree (usfm-bible/tcdocs issues
   [#125](https://github.com/usfm-bible/tcdocs/issues/125) and
@@ -196,19 +350,27 @@ words, characters or markers, and `reference` stays small without them.
   which accepts both, and note it.
 - **The Kotlin hub's `fixtures/srs/cases.json`**, if we can get it.
 
-<Question id="kotlin-cases">The Kotlin translation-hub repo is private and isn't checked out here. Can someone share `fixtures/srs/cases.json` and `fixtures/versification/cases.json`? The versification cases are also owed to canon.</Question>
+<Question id="kotlin-cases" answer="Shared 2026-11-06: the hub is copied to /home/kellyw/Downloads/translation-hub. fixtures/srs/cases.json has 90 cases in 9 groups (parse 28, parseList 8, invalid 14, parseListInvalid 2, splitPerChapter 9, overlap 11, formatSelection 7, verseList 8, verseListOps 3); 6 are marked hubDecision, choices the standard leaves open. They are mostly the basic reference plus range operations, so most become reference fixtures and the few with ! go to srs. fixtures/versification/cases.json (schemes, mapToOrg, mapFromOrg, mapBetween, detect, mismatch) goes to canon. Neither is copied into the repo yet.">The Kotlin translation-hub repo is private and isn't checked out here. Can someone share `fixtures/srs/cases.json` and `fixtures/versification/cases.json`? The versification cases are also owed to canon.</Question>
 
 ## Order
 
-1. **The spelling decision**: SRS basic as the machine spelling, `GEN intro` → `GEN 0` in
-   `mise`'s docs.
-2. **`reference` with `parse`/`format`** (machine spelling) and the TSV and `Sid` codecs.
-   Nothing here waits on canon.
+1. **The spelling decision** (done 2026-11-06): SRS basic as the machine spelling; `mise`'s
+   docs now say `GEN 0`.
+2. **`reference` with `parse`/`format`/`parseIn`** (done 2026-11-06, in Rust): the
+   `reference/` crate, `mise::Segment`, and `Sid::address` in onion rather than
+   `reference.sid` (reference depends on no text and no onion). The hub's 52 parse, list
+   and invalid cases run as fixtures; the 19 we answer differently are listed with why:
+   strictness (`rom 9:1`, spaces around `:`), srs's parts (prefixes, `!`), and one-chapter
+   books written with their chapter (`JUD 1:3`, where the hub writes `JUD 3`). The hub's
+   range operations (split per chapter, overlap, verse lists) aren't ported: no caller
+   here needs them yet. The JS surface comes with step 4.
 3. **`cite`/`show`** with English names and Sefer's fixtures, then localized names when
    canon's step 6 lands.
 4. **galley doors**, so Sefer switches `citation.ts` and `names.ts`. This goes with canon's
    step 7, which wires canon into galley anyway.
-5. **`srs` grammar**, from usfmtc's cases.
-6. **`galley.srs.locate` / `at`**, when a consumer asks.
+5. **TOC tiles** (done 2026-11-06): headings and the opening paragraph go with the next
+   verse, verse 0 is the title, `Sid` prints `GEN 0`, diff units are tiles. The wires are a followup.
+6. **`srs` grammar**, from usfmtc's cases and the standard's examples.
+7. **`galley.srs.locate` / `at`**, after 5, NFD and the heading skip included.
 
 <Question id="order">Is this order right, and where does it sit against bttwriter and bento? It touches none of their crates, so steps 1–3 can run alongside them. Step 4 waits on canon's galley wiring.</Question>

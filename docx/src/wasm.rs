@@ -16,8 +16,8 @@ use serde_json::{Value, json};
 use wasm_bindgen::prelude::*;
 
 use crate::{
-    CommentThread, ExportOptions, Front, Headings, ImportReport, Imported, Keep, KeepDrop, Reading, Settings,
-    SkipReason, Source, VerseMode, VersePoint,
+    CommentThread, ExportOptions, Front, Headings, ImportReport, Imported, Keep, KeepDrop, Reading,
+    Settings, SkipReason, Source, VerseMode, VersePoint,
 };
 
 #[wasm_bindgen(js_name = exportBook)]
@@ -60,7 +60,8 @@ impl DocumentReading {
 }
 
 fn settings_of(json: &str) -> Result<Settings, String> {
-    let v: Value = serde_json::from_str(if json.is_empty() { "{}" } else { json }).map_err(|e| e.to_string())?;
+    let v: Value = serde_json::from_str(if json.is_empty() { "{}" } else { json })
+        .map_err(|e| e.to_string())?;
     let text = |k: &str| v.get(k).and_then(Value::as_str);
     let bad = |k: &str, got: &str| format!("settings.{k}: unknown value \"{got}\"");
     let keep = |k: &str| match text(k) {
@@ -102,10 +103,17 @@ fn settings_of(json: &str) -> Result<Settings, String> {
         ..Settings::default()
     };
     if let Some(words) = v.get("chapterWords").and_then(Value::as_array) {
-        s.chapter_words = words.iter().filter_map(Value::as_str).map(str::to_owned).collect();
+        s.chapter_words = words
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::to_owned)
+            .collect();
     }
     if let Some(markers) = v.get("markers").and_then(Value::as_object) {
-        s.markers = markers.iter().filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_owned()))).collect();
+        s.markers = markers
+            .iter()
+            .filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_owned())))
+            .collect();
     }
     Ok(s)
 }
@@ -169,7 +177,10 @@ fn report_json(r: &ImportReport) -> Value {
 }
 
 fn point_json(p: &Option<VersePoint>) -> Value {
-    p.as_ref().map_or(Value::Null, |p| json!({ "ref": p.r#ref, "offset": p.offset }))
+    p.as_ref().map_or(
+        Value::Null,
+        |p| json!({ "ref": p.r#ref, "offset": p.offset }),
+    )
 }
 
 fn thread_json(t: &CommentThread) -> Value {

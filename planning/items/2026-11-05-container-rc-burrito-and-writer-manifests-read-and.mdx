@@ -596,6 +596,23 @@ Step 4 measures it again inside the real module, with `wasm-opt`.
 - **A `json` feature** carries `js.rs` without the wasm doors, so bttwriter's module can take
   a project in the same JSON shape without linking bento's exports.
 
+### Review, 2026-11-05
+
+A light review with fresh eyes (`220e737`), each fix with a test that pins the output text,
+since bento's own lenient reader forgives what a strict one won't:
+- **A YAML number JSON can't hold** (`01`, `+5`, `0x1F`, `1.`, `.inf`) is written in `read`'s
+  JSON as its value, or as text when it has no finite value. `read` used to give invalid
+  JSON for these, so `bento.read` threw.
+- **The RC splice anchors on an item's dash**, even when the dash stands alone above the
+  item's first key.
+- **A comment inside the last item no longer ends it.** Trailing blank and comment lines
+  stay after the new item.
+- **With no `projects` list**, the new list goes inside the first document, before a `...`
+  or `---` that closes it.
+- Left alone: a JSON float is reformatted when a Burrito is rewritten (`1e5` becomes
+  `100000.0`). The fork's schema has no floats, so only a user's own extension field could
+  hold one.
+
 <Followup id="wacs-scan-bin">The WACS-scan bin (read every repo under a folder, print a findings summary) wasn't built in step 2: the 1,441 repos aren't on this machine. Build it when they are, and copy any new odd case into `fixtures/`.</Followup>
 
 ```mermaid

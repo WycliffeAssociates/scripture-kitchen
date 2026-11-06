@@ -5,7 +5,7 @@ summary: "What scripture-kitchen is, the invariants that drive it, and a map of 
 
 # scripture-kitchen
 
-A Rust workspace for USFM editing and proofreading. **Onion** parses USFM losslessly and answers structural questions (tree, verse index, lint, format, diff, exports) fast enough for an editor to run per keystroke in WebAssembly. **Sous Chef** flags reviewable inconsistencies from a project's own counts, in any language, and **galley** holds the state between calls and ships the one JS package hosts vendor.
+A Rust workspace for USFM editing and proofreading. **Onion** parses USFM losslessly and answers structural questions (tree, verse index, lint, format, diff, exports) fast enough for an editor to run per keystroke in WebAssembly. **Sous Chef** flags reviewable inconsistencies from a project's own counts, in any language, and **galley** holds the state between calls and ships the one JS package hosts vendor. Beside them sit the shared domain libraries: what a book is and how it is numbered, what a repo's manifest says, and how BTT Writer projects become one history.
 
 ## Invariants
 
@@ -25,18 +25,25 @@ Naming is hard, and hardest at the module level: there is no natural single word
 
 ## The pieces
 
-One Rust workspace, two products, one JS package.
+One Rust workspace, two products, one JS package, and the libraries around them.
 
 - **[[onion-engine|Onion]]** reads USFM losslessly: [[scanner]] to [[token]]s, tokens to the [[cst]], and everything else derived from those.
 - **[[sous-chef|Sous Chef]]** finds reviewable inconsistencies from counts alone, and never depends on onion.
 - **[[galley]]** is the one crate allowed to see both. It caches ([[pantry]]), publishes ([[expediter]]) and ships the [[galley-package]] that hosts run.
+- **Shared domain libraries**, one implementation per concept for Sefer and the hub:
+  - [[canon]]: book identity, names and [[versification]];
+  - [[bento]]: RC, Burrito and Writer manifests, read, checked, created and edited;
+  - [[bttwriter]]: Writer repos replayed into one git pack;
+  - [[reference]]: a place in scripture spelled for machines, the Scripture Referencing Standard's basic reference.
+
+  canon ships as plain TypeScript; bento and bttwriter each ship as their own wasm module, under subpaths of the same npm package.
 
 ## Four zoom levels
 
 | level | what | start with |
 | --- | --- | --- |
 | 0 | products and consumers | [[onion-engine]], [[sous-chef]], [[galley-package]], [[sefer]] (one host) |
-| 1 | crates, and who may depend on whom | [[mise]], [[ticket]], [[onion]], [[galley]], [[sous-core]] |
+| 1 | crates, and who may depend on whom | [[mise]], [[ticket]], [[onion]], [[galley]], [[sous-core]], [[canon]], [[bento]], [[bttwriter]], [[reference]] |
 | 2 | primitives and workflows | [[cst]], [[toc]], [[mask]], [[chunk]], [[pantry]] |
 | 3 | wires: bytes that cross to JS | [[wire]], [[plate]], [[dish]] |
 

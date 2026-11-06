@@ -409,6 +409,23 @@ export class Galley {
         return SousSettings.__wrap(ret);
     }
     /**
+     * Adds a project's own versification scheme, by name, from a Copenhagen
+     * mapping object (`JSON.parse` of a `.json` mapping, such as one
+     * converted from a Paratext `.vrs`). Replaces one defined under the same
+     * name; a built-in name (`"ulb"`) is refused. Every entry is checked, and
+     * the first bad one throws, naming it.
+     * @param {string} name
+     * @param {VersificationMapping} mapping
+     */
+    defineScheme(name, mapping) {
+        const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.galley_defineScheme(this.__wbg_ptr, ptr0, len0, mapping);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
      * Cached chunk units. Zero for a one-chapter book: galley does not cache
      * what it cannot reuse.
      * @returns {number}
@@ -570,6 +587,39 @@ export class Galley {
         var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
         wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
         return v2;
+    }
+    /**
+     * Where `verse` (`"GEN 31:55"`), numbered by scheme `from`, is under
+     * scheme `to`, as JSON ([`MappedVerse`]). Either name may be a built-in
+     * or a defined scheme.
+     * @param {string} from
+     * @param {string} to
+     * @param {string} verse
+     * @returns {string}
+     */
+    mapVerse(from, to, verse) {
+        let deferred5_0;
+        let deferred5_1;
+        try {
+            const ptr0 = passStringToWasm0(from, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ptr1 = passStringToWasm0(to, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len1 = WASM_VECTOR_LEN;
+            const ptr2 = passStringToWasm0(verse, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len2 = WASM_VECTOR_LEN;
+            const ret = wasm.galley_mapVerse(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2);
+            var ptr4 = ret[0];
+            var len4 = ret[1];
+            if (ret[3]) {
+                ptr4 = 0; len4 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred5_0 = ptr4;
+            deferred5_1 = len4;
+            return getStringFromWasm0(ptr4, len4);
+        } finally {
+            wasm.__wbindgen_free(deferred5_0, deferred5_1, 1);
+        }
     }
     /**
      * One registered book's mask map — which source spans its projection is
@@ -765,6 +815,39 @@ export class Galley {
         }
     }
     /**
+     * A whole book walked in step across two schemes, as JSON
+     * ([`PairedVerses`]`[]`): each unit is the verses on each side that map
+     * only to each other. `book` is a USFM code (`"PSA"`).
+     * @param {string} from
+     * @param {string} to
+     * @param {string} book
+     * @returns {string}
+     */
+    pairs(from, to, book) {
+        let deferred5_0;
+        let deferred5_1;
+        try {
+            const ptr0 = passStringToWasm0(from, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ptr1 = passStringToWasm0(to, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len1 = WASM_VECTOR_LEN;
+            const ptr2 = passStringToWasm0(book, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len2 = WASM_VECTOR_LEN;
+            const ret = wasm.galley_pairs(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2);
+            var ptr4 = ret[0];
+            var len4 = ret[1];
+            if (ret[3]) {
+                ptr4 = 0; len4 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred5_0 = ptr4;
+            deferred5_1 = len4;
+            return getStringFromWasm0(ptr4, len4);
+        } finally {
+            wasm.__wbindgen_free(deferred5_0, deferred5_1, 1);
+        }
+    }
+    /**
      * One registered book, plated — the same buffer `onion_wasm::parse`
      * returns for that text, with the lex, the tree and the lint walk reused
      * for every chunk whose bytes did not change.
@@ -912,6 +995,23 @@ export class Galley {
         }
     }
     /**
+     * The scheme a registered book follows (its own declaration, or its
+     * source's for `"followSource"`), or `undefined`.
+     * @param {string} id
+     * @returns {string | undefined}
+     */
+    schemeOf(id) {
+        const ptr0 = passStringToWasm0(id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.galley_schemeOf(this.__wbg_ptr, ptr0, len0);
+        let v2;
+        if (ret[0] !== 0) {
+            v2 = getStringFromWasm0(ret[0], ret[1]);
+            wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        }
+        return v2;
+    }
+    /**
      * Replaces them. No chapter is remapped and no book refolded — judging
      * reads the config, mapping does not — so a knob flip costs a re-judge.
      * @param {SousSettings} settings
@@ -972,6 +1072,35 @@ export class Galley {
             return getStringFromWasm0(ptr2, len2);
         } finally {
             wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        }
+    }
+    /**
+     * Which built-in scheme the books in `scope` follow, from what they
+     * have, as JSON ([`SniffResult`]). A suggestion for a book that declares
+     * nothing: nothing here applies it.
+     *
+     * `{ scope }` is `findAll`'s, default `"targets"`; every book in it must
+     * retain its text (a reference needs `keepText`). Sniff the whole text
+     * at once: one book alone has few rules to vote with.
+     * @param {{ scope?: Scope }} [opts]
+     * @returns {string}
+     */
+    sniff(opts) {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const ret = wasm.galley_sniff(this.__wbg_ptr, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
+            var ptr1 = ret[0];
+            var len1 = ret[1];
+            if (ret[3]) {
+                ptr1 = 0; len1 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred2_0 = ptr1;
+            deferred2_1 = len1;
+            return getStringFromWasm0(ptr1, len1);
+        } finally {
+            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
         }
     }
     /**
@@ -2314,6 +2443,10 @@ export function __wbg___wbindgen_string_get_d154f1e671052120(arg0, arg1) {
 export function __wbg___wbindgen_throw_bb96b2010945f0bc(arg0, arg1) {
     throw new Error(getStringFromWasm0(arg0, arg1));
 }
+export function __wbg_entries_7774d489e1da5f4f(arg0) {
+    const ret = Object.entries(arg0);
+    return ret;
+}
 export function __wbg_from_74f3d90e0ff11240(arg0) {
     const ret = Array.from(arg0);
     return ret;
@@ -2322,6 +2455,10 @@ export function __wbg_get_971a0c45d172643f() { return handleError(function (arg0
     const ret = Reflect.get(arg0, arg1);
     return ret;
 }, arguments); }
+export function __wbg_get_c0c8f8d7da0c03dd(arg0, arg1) {
+    const ret = arg0[arg1 >>> 0];
+    return ret;
+}
 export function __wbg_get_unchecked_e20b893aeafc3fca(arg0, arg1) {
     const ret = arg0[arg1 >>> 0];
     return ret;

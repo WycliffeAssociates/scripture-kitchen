@@ -33,8 +33,8 @@ pub const NEST: char = '+';
 
 /// A note's own peers, which sit beside each other without closers.
 pub const NOTE_PEERS: &[&str] = &[
-    "fdc", "fk", "fl", "fp", "fq", "fqa", "fr", "ft", "fw", "xdc", "xk", "xnt", "xo", "xop",
-    "xot", "xq", "xt", "xta",
+    "fdc", "fk", "fl", "fp", "fq", "fqa", "fr", "ft", "fw", "xdc", "xk", "xnt", "xo", "xop", "xot",
+    "xq", "xt", "xta",
 ];
 
 /// The markers people authoring in Word see first.
@@ -114,20 +114,44 @@ fn look(marker: &str, kind: Kind) -> Look {
     };
     let (based_on, ppr, rpr): (&str, &str, &str) = match marker {
         "p" => ("Normal", r#"<w:ind w:firstLine="360"/>"#, ""),
-        "q" | "q1" => ("Normal", r#"<w:spacing w:after="0"/><w:ind w:left="720" w:hanging="360"/>"#, ""),
-        "q2" => ("Normal", r#"<w:spacing w:after="0"/><w:ind w:left="1080" w:hanging="360"/>"#, ""),
-        "q3" => ("Normal", r#"<w:spacing w:after="0"/><w:ind w:left="1440" w:hanging="360"/>"#, ""),
-        "q4" => ("Normal", r#"<w:spacing w:after="0"/><w:ind w:left="1800" w:hanging="360"/>"#, ""),
+        "q" | "q1" => (
+            "Normal",
+            r#"<w:spacing w:after="0"/><w:ind w:left="720" w:hanging="360"/>"#,
+            "",
+        ),
+        "q2" => (
+            "Normal",
+            r#"<w:spacing w:after="0"/><w:ind w:left="1080" w:hanging="360"/>"#,
+            "",
+        ),
+        "q3" => (
+            "Normal",
+            r#"<w:spacing w:after="0"/><w:ind w:left="1440" w:hanging="360"/>"#,
+            "",
+        ),
+        "q4" => (
+            "Normal",
+            r#"<w:spacing w:after="0"/><w:ind w:left="1800" w:hanging="360"/>"#,
+            "",
+        ),
         "s" | "s1" => ("Heading2", "", ""),
-        "s2" | "s3" | "s4" | "ms" | "ms1" | "ms2" | "ms3" => ("Normal", r#"<w:keepNext/>"#, "<w:b/>"),
+        "s2" | "s3" | "s4" | "ms" | "ms1" | "ms2" | "ms3" => {
+            ("Normal", r#"<w:keepNext/>"#, "<w:b/>")
+        }
         "mt" | "mt1" => ("Title", "", ""),
         "mt2" | "mt3" | "mt4" => ("Normal", r#"<w:jc w:val="center"/>"#, "<w:b/>"),
-        "c" => ("Normal", r#"<w:keepNext/><w:spacing w:before="240"/>"#, r#"<w:b/><w:sz w:val="32"/>"#),
+        "c" => (
+            "Normal",
+            r#"<w:keepNext/><w:spacing w:before="240"/>"#,
+            r#"<w:b/><w:sz w:val="32"/>"#,
+        ),
         "d" | "r" | "mr" | "sr" => ("Normal", "", "<w:i/>"),
         "id" | "ide" | "h" | "h1" | "h2" | "h3" | "toc" | "toc1" | "toc2" | "toc3" | "toca"
-        | "toca1" | "toca2" | "toca3" | "rem" | "usfm" | "sts" => {
-            ("Normal", "", r#"<w:color w:val="808080"/><w:sz w:val="18"/>"#)
-        }
+        | "toca1" | "toca2" | "toca3" | "rem" | "usfm" | "sts" => (
+            "Normal",
+            "",
+            r#"<w:color w:val="808080"/><w:sz w:val="18"/>"#,
+        ),
         "f" | "fe" | "ef" | "x" | "ex" => ("FootnoteText", "", ""),
         "v" => ("", "", r#"<w:vertAlign w:val="superscript"/>"#),
         "nd" => ("", "", "<w:smallCaps/>"),
@@ -139,7 +163,11 @@ fn look(marker: &str, kind: Kind) -> Look {
         "raw" => ("", "", r#"<w:color w:val="808080"/>"#),
         _ => (plain_based_on, "", ""),
     };
-    let based_on = if based_on.is_empty() { plain_based_on } else { based_on };
+    let based_on = if based_on.is_empty() {
+        plain_based_on
+    } else {
+        based_on
+    };
     Look { based_on, ppr, rpr }
 }
 
@@ -196,7 +224,9 @@ pub const END: &str = "</w:styles>";
 pub fn styles_xml() -> String {
     let mut s = String::new();
     s.push_str(crate::xml::DECLARATION);
-    s.push_str(r#"<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">"#);
+    s.push_str(
+        r#"<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">"#,
+    );
     s.push('\n');
     s.push_str("<w:docDefaults>");
     s.push_str(RPR_DEFAULT);
@@ -251,7 +281,9 @@ mod tests {
     #[test]
     fn spellings_expand() {
         let all = markers();
-        for m in ["q", "q1", "q4", "s2", "mt1", "toc3", "f", "x", "ft", "v", "c", "id"] {
+        for m in [
+            "q", "q1", "q4", "s2", "mt1", "toc3", "f", "x", "ft", "v", "c", "id",
+        ] {
             assert!(all.iter().any(|(s, _)| s == m), "{m}");
         }
         assert!(!all.iter().any(|(s, _)| s == "q5"));

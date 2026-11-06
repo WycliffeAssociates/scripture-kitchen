@@ -19,6 +19,17 @@
   `tests/conformance.mjs` run their `.ts` over the built module. docx's
   LibreOffice sweep is an example run by hand (`cargo run --release -p docx
   --example libreoffice`): CI has no LibreOffice.
+- bttwriter's libgit2 adapter is behind a feature: `cargo test -p bttwriter
+  --features git2` (CI runs it, and clippies it). The repo fixtures are git
+  bundles cloned into temp dirs and need the `git` command; a missing one
+  fails, never skips.
+- CI runs plain `cargo test`, whose tests share one process as threads, while
+  nextest gives each its own. A test writing a temp path must make it unique
+  per call, not per process id, or it passes under nextest and races in CI.
+  The same goes for process-wide state: a test that installs the global
+  marker list (`set_extensions`) changes lexing for every other test thread,
+  so galley's re-run themselves in a child process (`in_own_process` in
+  `galley/src/pantry/tests.rs`) unless nextest already gave them one.
 - Dev and test profiles are `opt-level = 1`. Debug asserts stay on; the
   corpus sweeps would be minutes at level 0.
 

@@ -2,7 +2,7 @@
 //! snippet, an address in Sefer's shape, and the answer in byte offsets.
 
 use serde_json::{Value, json};
-use usfm_onion::resolve::{Address, Missing, Point, Resolution};
+use usfm_onion::resolve::{Address, Missing, Point, Resolution, Segment};
 use usfm_onion::{lex, toc};
 
 fn point(value: &Value) -> Point {
@@ -11,7 +11,7 @@ fn point(value: &Value) -> Point {
         verse: value["verse"].as_u64().expect("verse") as u16,
         segment: value
             .get("segment")
-            .map(|s| s.as_str().expect("segment").to_string()),
+            .map(|s| Segment::parse(s.as_str().expect("segment").as_bytes()).expect("one letter")),
     }
 }
 
@@ -34,7 +34,7 @@ fn address(value: &Value) -> Address {
 fn point_json(point: &Point) -> Value {
     let mut out = json!({ "chapter": point.chapter, "verse": point.verse });
     if let Some(segment) = &point.segment {
-        out["segment"] = json!(segment);
+        out["segment"] = json!(segment.to_string());
     }
     out
 }

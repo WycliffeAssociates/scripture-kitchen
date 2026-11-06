@@ -26,9 +26,19 @@ fn main() {
         t[3] += (f - e).as_secs_f64();
     }
     let ms = |x: f64| x / n as f64 * 1000.0;
-    println!("{path}: {} KB USFM, {} KB docx", src.len() / 1024, docx_len / 1024);
+    println!(
+        "{path}: {} KB USFM, {} KB docx",
+        src.len() / 1024,
+        docx_len / 1024
+    );
     println!("  lex + cst        {:6.1} ms", ms(t[0]));
     println!("  usx fold         {:6.1} ms", ms(t[1]));
-    println!("  export, whole    {:6.1} ms  (lex, cst, usx, parse, fold, styles, zip)", ms(t[2]));
-    println!("  import, whole    {:6.1} ms  (unzip, parse, print)", ms(t[3]));
+    println!(
+        "  export, whole    {:6.1} ms  (lex, cst, usx, parse, fold, styles, zip)",
+        ms(t[2])
+    );
+    println!(
+        "  import, whole    {:6.1} ms  (unzip, parse, print)",
+        ms(t[3])
+    );
 }

@@ -3,6 +3,8 @@ name = "bttwriter"
 version.workspace = true
 edition.workspace = true
 description = "BTT Writer projects: one book's chunk files to USFM, and a project's save history replayed into one git pack."
+# The npm side (pkg-*, the .ts) ships from the repo root; the crate is Rust only.
+exclude = ["pkg-*", "*.ts", "*.mjs", "*.json", "build.sh", "fixtures"]
 
 [lints]
 workspace = true

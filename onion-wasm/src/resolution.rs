@@ -11,7 +11,7 @@
 
 use mise::utf16::Utf16Table;
 use serde_json::{Value, json};
-use usfm_onion::resolve::{Address, Missing, Point, Resolution};
+use usfm_onion::resolve::{Address, Missing, Point, Resolution, Segment};
 use wasm_bindgen::JsValue;
 
 use crate::options::get;
@@ -24,8 +24,8 @@ pub fn address(value: &JsValue) -> Result<Address, String> {
         Some("book") => Ok(Address::Book),
         Some("intro") => Ok(Address::Intro),
         Some("chapters") => Ok(Address::Chapters {
-            from: number(value, "from", "chapter")?,
-            to: number(value, "to", "chapter")?,
+            from: number(value, "from", "chapter", 1)?,
+            to: number(value, "to", "chapter", 1)?,
         }),
         Some("verses") => Ok(Address::Verses {
             from: point(value, "from")?,
@@ -46,24 +46,25 @@ fn point(value: &JsValue, end: &str) -> Result<Point, String> {
         Some(segment) => Some(
             segment
                 .as_string()
-                .filter(|segment| !segment.is_empty())
-                .ok_or_else(|| "resolve: a segment is a non-empty string".to_string())?,
+                .and_then(|segment| Segment::parse(segment.as_bytes()))
+                .ok_or_else(|| "resolve: a segment is one lowercase letter".to_string())?,
         ),
     };
     Ok(Point {
-        chapter: number(&point, "chapter", "chapter")?,
-        verse: number(&point, "verse", "verse")?,
+        chapter: number(&point, "chapter", "chapter", 1)?,
+        verse: number(&point, "verse", "verse", 0)?,
         segment,
     })
 }
 
-/// A chapter or verse number: a whole number from 1, as the `Toc`'s u16 holds.
-fn number(value: &JsValue, key: &str, what: &str) -> Result<u16, String> {
+/// A chapter or verse number: a whole number from `low`, as the `Toc`'s u16
+/// holds. A chapter is from 1; a verse is from 0, the chapter's title.
+fn number(value: &JsValue, key: &str, what: &str, low: u16) -> Result<u16, String> {
     get(Some(value), key)
         .and_then(|n| n.as_f64())
-        .filter(|n| n.fract() == 0.0 && *n >= 1.0 && *n <= f64::from(u16::MAX))
+        .filter(|n| n.fract() == 0.0 && *n >= f64::from(low) && *n <= f64::from(u16::MAX))
         .map(|n| n as u16)
-        .ok_or_else(|| format!("resolve: {key} must be a {what} number from 1"))
+        .ok_or_else(|| format!("resolve: {key} must be a {what} number from {low}"))
 }
 
 /// The answer as JSON, in UTF-16 code units when a `table` is given.
@@ -102,7 +103,7 @@ fn address_json(address: &Address) -> Value {
     let point = |point: &Point| {
         let mut out = json!({ "chapter": point.chapter, "verse": point.verse });
         if let Some(segment) = &point.segment {
-            out["segment"] = json!(segment);
+            out["segment"] = json!(segment.to_string());
         }
         out
     };

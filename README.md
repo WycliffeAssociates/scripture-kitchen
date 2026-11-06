@@ -9,6 +9,9 @@ exports, plus a JS doorway over the same code.
 | `onion-wasm` | `onion-wasm/` | the `#[wasm_bindgen]` doorway and the UTF-16 walls |
 | `usfm_galley` | `galley/` | the workflows layer: chunk memoization, checksums |
 | `canon` | `canon/` | book identity and numbering: the USFM book table, book names in 32 gateway languages, versification schemes, mapping and sniffing; the table, names and counts also as plain TypeScript at `./canon` |
+| `bento` | `bento/` | scripture containers: RC, Scripture Burrito and BTT Writer manifests, read leniently into one shape, checked against WA's Burrito fork, created and edited; its own wasm module at `./bento` |
+| `bttwriter` | `bttwriter/` | BTT Writer projects: stitched to USFM, their save histories replayed into one git pack with the manifests in a closing commit; its own wasm module at `./bttwriter`, loaded on the migration screen |
+| `reference` | `reference/` | a place in scripture spelled for machines: the Scripture Referencing Standard's basic reference (`MAT 1:20-2:3; MRK 1:1`), read strictly into `mise::Address` and written back |
 
 `onion/src/bin/playground.rs` drives the engine over a corpus for profiling and
 for the `debug/` eyeball dumps; `onion/src/bin/codegen.rs` regenerates the
@@ -25,7 +28,7 @@ Nobody builds wasm or pushes a tag by hand.
 ## Install
 
 Every `v*` tag publishes to the org Nexus: the npm package to `wa-npm`, the
-seven library crates to `wa-cargo`. Reads need no login. Not on crates.io or
+ten library crates to `wa-cargo`. Reads need no login. Not on crates.io or
 public npm. Install from the registry, or from the git tag; both carry the same
 code.
 

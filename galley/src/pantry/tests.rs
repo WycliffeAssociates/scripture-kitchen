@@ -7,6 +7,30 @@ use super::*;
 /// one per process and the test threads share it.
 static INSTALLED: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// Whether to run the calling test's body here. Installing a marker list is
+/// process-wide, and under plain `cargo test` every other test in the crate is
+/// a thread of this process, lexing while the list is installed (a publication
+/// compared byte for byte then differs, now and then). So outside nextest,
+/// which gives each test its own process already, the test re-runs itself in a
+/// child process of this binary, alone, and the parent returns.
+fn in_own_process(test: &str) -> bool {
+    const ALONE: &str = "GALLEY_TEST_ALONE";
+    if std::env::var_os(ALONE).is_some() || std::env::var_os("NEXTEST").is_some() {
+        return true;
+    }
+    let path = module_path!()
+        .split_once("::")
+        .map_or(module_path!(), |(_, path)| path);
+    let name = format!("{path}::{test}");
+    let status = std::process::Command::new(std::env::current_exe().expect("the test binary"))
+        .args([name.as_str(), "--exact", "--test-threads=1"])
+        .env(ALONE, "1")
+        .status()
+        .expect("the test binary runs");
+    assert!(status.success(), "{name} failed in its own process");
+    false
+}
+
 /// Six chapters of a plausible book, one `\c` per chunk.
 fn book(code: &str, chapters: &[&str]) -> String {
     let mut text = format!("\\id {code}\n\\h {code}\n");
@@ -542,6 +566,9 @@ fn a_book_with_no_id_line_is_refused() {
 #[test]
 fn a_new_installed_list_re_derives_the_books_that_follow_it() {
     use onion::extensions::{CustomMarker, ExtensionCategory, set_extensions};
+    if !in_own_process("a_new_installed_list_re_derives_the_books_that_follow_it") {
+        return;
+    }
 
     let _serial = INSTALLED
         .lock()
@@ -634,6 +661,9 @@ fn own(category: onion::extensions::ExtensionCategory) -> Markers {
 #[test]
 fn each_book_lexes_by_its_own_markers() {
     use onion::extensions::{CustomMarker, ExtensionCategory, set_extensions};
+    if !in_own_process("each_book_lexes_by_its_own_markers") {
+        return;
+    }
 
     let _serial = INSTALLED
         .lock()

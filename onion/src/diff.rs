@@ -16,9 +16,11 @@
 //! Three layers, and this file is all three because they are one walk:
 //!
 //! 1. **Identity** — a BLOCK is the bytes between two consecutive [`Toc`]
-//!    anchors (a `\c`, a `\v`, or the start of the file). The Toc already
-//!    computed that fact, so nothing is re-derived per token and nothing owns
-//!    text: a block is a [`Range<u32>`] plus a `Copy` [`Addr`].
+//!    cuts: a `\c`, the start of a verse's TILE (its `\v`, or the `\p` and
+//!    any heading before it), or the start of the file. So a heading's change
+//!    is the verse it introduces. The Toc already computed that fact, so
+//!    nothing is re-derived per token and nothing owns text: a block is a
+//!    [`Range<u32>`] plus a `Copy` [`Addr`].
 //! 2. **Alignment** — Myers (via `similar`) over the block addresses, then the
 //!    two-tier coalescing that pairs a rebridged or relabeled verse into ONE
 //!    decision holding two slots, when the two sit in relational order. A
@@ -80,9 +82,10 @@ use crate::token::{Token, TokenKind};
 pub enum BlockKind {
     /// The bytes before the first `\c` — `BOOK 0:0`.
     FrontMatter,
-    /// A `\c` and whatever precedes its first `\v` — `BOOK 1:0`.
+    /// A `\c` and whatever precedes its first verse's tile — `BOOK 1:0`.
     ChapterOpen,
-    /// A `\v` and its text — `BOOK 1:1`, `BOOK 1:1-3`.
+    /// A verse's tile: the `\p` and headings before its `\v`, the `\v`, and its
+    /// text — `BOOK 1:1`, `BOOK 1:1-3`.
     Verse,
 }
 
@@ -175,7 +178,7 @@ fn blocks(len: u32, toc: &Toc) -> Vec<Block> {
         let next_chapter = toc.chapters.get(ci);
         let next_verse = toc.verses.get(vi);
         let take_chapter = match (next_chapter, next_verse) {
-            (Some(c), Some(v)) => c.start < v.at,
+            (Some(c), Some(v)) => c.start < v.start,
             (Some(_), None) => true,
             _ => false,
         };
@@ -205,7 +208,9 @@ fn blocks(len: u32, toc: &Toc) -> Vec<Block> {
                 .or_insert(0);
             let vdup = *seen;
             *seen += 1;
-            offsets.push(anchor.at);
+            // A verse's block is its tile: a heading and the paragraph marker
+            // before its `\v` go with the verse they introduce.
+            offsets.push(anchor.start);
             cuts.push(Addr {
                 book: toc.book,
                 chapter,

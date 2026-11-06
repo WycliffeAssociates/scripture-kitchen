@@ -38,6 +38,7 @@ members = [
     "mise",
     "canon",
     "canon/gen",
+    "reference",
     "bento",
     "bttwriter",
     "docx",

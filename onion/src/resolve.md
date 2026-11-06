@@ -23,9 +23,20 @@ Offsets are UTF-8 bytes into `source`, half-open. The cases, as data any
 language can run, are `testData/resolve/cases.json`; every rule below is one or
 more of them, named in quotes.
 
-Extents are STRUCTURAL, as the `Toc`'s are: a verse runs from its `\v` to the
-next `\v` or the end of its chapter, so a heading before verse 4 sits inside
-verse 3's span. `opening` is the answer for a caller that wants the heading.
+Spans follow the `Toc`'s verse TILES. A verse's tile starts at its opening (the
+paragraph marker and any heading before its `\v`, below) and runs to the next
+verse's opening, or the end of its chapter. So a heading before verse 4 is
+verse 4's, never verse 3's:
+
+```text
+\v 3 c\n\s1 Head\n\p\n\v 4 d     LUK 1:3 → from \v 3, to \s1
+                                 LUK 1:4 → from \v 4, opening \s1
+```
+
+`from..to` starts at the `\v`, for a caller that reads the verse's own text;
+`opening..to` is the whole tile, for one that shows it with its heading and
+paragraph. The walk is done once, when the `Toc` is built
+(`VerseAnchor::start`), so resolve never re-lexes.
 
 ## The rules
 
@@ -54,10 +65,23 @@ missing"
 \c 3\n\p a\n\c 3\n\p b\n         GEN 3   → ambiguous [0..10, 10..20]
 ```
 
-**A verse** is the one `\v` covering it, to the next `\v` or `\c`. A range
-spans its two ends, across a chapter if it says so. "a verse runs to the next
-verse or chapter", "a verse range spans both ends", "a range may cross a
-chapter"
+**A verse** is the one `\v` covering it, to the next verse's opening or the
+`\c`. A range spans its two ends, across a chapter if it says so. "a verse
+runs to the next verse or chapter", "a verse range spans both ends", "a range
+may cross a chapter", "a heading before the next verse is the next verse's",
+"a verse opens at the heading that introduces it"
+
+**Verse 0** is the chapter's title: a `\d` before its first verse (a Psalm's
+superscription), as SRS spells it (`PSA 7:0`). Its tile takes the headings
+above it, and verse 1's tile starts after it. A chapter with no title is
+missing verse 0. "verse 0 is the chapter's title", "a heading above a title
+opens verse 0", "a range from verse 0 covers the title", "verse 0 without a
+title is missing"
+
+```text
+\c 7\n\s1 Prayer\n\d A Shiggaion\n\q1\n\v 1 O   PSA 7:0 → from \d to \q1, opening \s1
+                                          PSA 7:1 → from \v 1, opening \q1
+```
 
 **A bridge** covers each verse it joins, and `covers` says what was found. "a
 verse in a bridge covers the bridge"
@@ -135,8 +159,8 @@ equals `from` mid-paragraph, and for every answer that is not a verse.
 \p \v 1 a \v 2 b                 opening == from
 \c 1\n\p\n\v 1 a                 opening at \p, never \c
 \c 1\n\cl Psalm 1\n\p\n\v 1 a    opening at \p
-\c 3\n\d A psalm of David.\n\q1 \v 1   opening at \d
-\d \zaln-s |…\*\w A\w*\zaln-e\* psalm.\n\q1 \v 1   opening at \d; a milestone is transparent
+\c 3\n\d A psalm of David.\n\q1 \v 1   opening at \q1; the title is verse 0's
+\d \zaln-s |…\*\w A\w*\zaln-e\* psalm.\n\q1 \v 1   verse 0 is the whole \d; a milestone is transparent
 \s1 Head\n\ts\*\n\p\n\v 2        opening at \s1
 \c 1\n\ms Book One\n\cl Psalm\n\q1 \v 1   opening at \ms; \cl is passed over
 \s1 Title\n\p\n\v 1 a\n\p\n\v 2  GEN 1:1-2 opens at \s1, where its first verse does
@@ -156,20 +180,23 @@ Walking back from the `\v`, never past the previous `\v` or the chapter's `\c`:
   and attribute lists, inside a heading's text or between openers; and the
   chapter-head markers `\cl`, `\cp`, `\ca`, `\cd` with their text. The walk
   passes over them without starting there.
-- Not openers: `\mt#` and `\mte#` (a book's titles, not a verse's), and
-  everything else. The walk stops at the first one.
+- Not openers: `\mt#` and `\mte#` (a book's titles, not a verse's), a
+  chapter's title `\d` (verse 0's own tile), and everything else. The walk
+  stops at the first one.
 
 A verse range opens where its first verse does. A whole verse the text divides
 opens where its first segment does. An ambiguous candidate carries its own.
 
-To clip consecutive verses without repeating a heading, end each one at the
-next verse's `opening` rather than its `to`: `opening(1:1)..opening(1:2)`,
-then `opening(1:2)..`. The heading before verse 2 sits inside verse 1's `to`.
+Consecutive verses clip without repeating a heading: `opening..to` of one
+verse ends where the next one's opening starts.
 
 ## Where this departs from Sefer's `locate.ts`
 
 - `opening` is new; `locate.ts` has no such field. Its rule above is a choice
   this module makes, from onion's marker table.
+- A verse's `to` is the next verse's opening, not its `\v`, so a heading is
+  never in the verse before it. `locate.ts` ends at the next `\v`.
+- Verse 0 is the chapter's `\d` title. `locate.ts` has no verse 0.
 - Segments order by their bytes (Rust `str` order). `locate.ts` orders them by
   `localeCompare(…, "en")`. The two agree on lower-case `a`-`z`, which is every
   segment the cases and the corpora hold; they differ on mixed case.

@@ -548,9 +548,10 @@ fn a_note_is_its_own_reading() {
             .map(|run| run_text(current.as_bytes(), run))
             .collect()
     };
+    // The verse's unit is its tile, so it opens with the `\p` line's break.
     assert_eq!(
         reading(false),
-        "Paul a servant of Christ\n",
+        "\nPaul a servant of Christ\n",
         "the verse reads past it"
     );
     assert_eq!(

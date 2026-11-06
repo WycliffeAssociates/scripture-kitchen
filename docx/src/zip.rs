@@ -157,7 +157,13 @@ impl<'a> Archive<'a> {
             if name.ends_with('/') {
                 continue;
             }
-            entries.push(Meta { name, method, crc, packed_len: packed_len as usize, local: local as usize });
+            entries.push(Meta {
+                name,
+                method,
+                crc,
+                packed_len: packed_len as usize,
+                local: local as usize,
+            });
         }
         Ok(Self { zip, entries })
     }
@@ -170,7 +176,9 @@ impl<'a> Archive<'a> {
     /// OPC part names are case-insensitive.
     fn find(&self, name: &str) -> Option<&Meta> {
         let name = name.trim_start_matches('/');
-        self.entries.iter().find(|e| e.name.eq_ignore_ascii_case(name))
+        self.entries
+            .iter()
+            .find(|e| e.name.eq_ignore_ascii_case(name))
     }
 
     pub fn has(&self, name: &str) -> bool {
@@ -179,7 +187,9 @@ impl<'a> Archive<'a> {
 
     /// One part, inflated and checked; `None` when the archive has no such part.
     pub fn get(&self, name: &str) -> Result<Option<Vec<u8>>, ZipError> {
-        let Some(e) = self.find(name) else { return Ok(None) };
+        let Some(e) = self.find(name) else {
+            return Ok(None);
+        };
         let zip = self.zip;
         if u32_at(zip, e.local)? != LOCAL {
             return Err(ZipError::Truncated);
@@ -188,7 +198,8 @@ impl<'a> Archive<'a> {
         let packed = slice(zip, e.local + 30 + skip, e.packed_len)?;
         let data = match e.method {
             0 => packed.to_vec(),
-            8 => decompress_to_vec_with_limit(packed, MAX_INFLATED).map_err(|_| ZipError::Inflate(e.name.clone()))?,
+            8 => decompress_to_vec_with_limit(packed, MAX_INFLATED)
+                .map_err(|_| ZipError::Inflate(e.name.clone()))?,
             m => return Err(ZipError::Method(m)),
         };
         if crc32(&data) != e.crc {
@@ -205,7 +216,10 @@ pub fn read(zip: &[u8]) -> Result<Vec<Entry>, ZipError> {
     let mut out = Vec::new();
     for name in archive.names() {
         if let Some(data) = archive.get(name)? {
-            out.push(Entry { name: name.to_owned(), data });
+            out.push(Entry {
+                name: name.to_owned(),
+                data,
+            });
         }
     }
     Ok(out)
@@ -251,7 +265,11 @@ const CRC_TABLE: [u32; 256] = {
         let mut c = i as u32;
         let mut k = 0;
         while k < 8 {
-            c = if c & 1 != 0 { 0xEDB8_8320 ^ (c >> 1) } else { c >> 1 };
+            c = if c & 1 != 0 {
+                0xEDB8_8320 ^ (c >> 1)
+            } else {
+                c >> 1
+            };
             k += 1;
         }
         table[i] = c;

@@ -34,14 +34,19 @@ fn main() {
         }
         Some("check") => {
             let usfm = std::fs::read_to_string(&args[2]).unwrap();
-            let back = docx::import(&std::fs::read(&args[3]).unwrap(), &docx::Settings::default()).unwrap();
+            let back = docx::import(
+                &std::fs::read(&args[3]).unwrap(),
+                &docx::Settings::default(),
+            )
+            .unwrap();
             eprintln!("{:?}", back.report);
             match common::compare(&usfm, &back.books[0].usfm) {
                 None => println!("same book"),
                 Some(d) => println!("differs at {d}"),
             }
         }
-        _ => eprintln!("export <in.usfm> <out.docx> | import <in.docx> | check <in.usfm> <in.docx>"),
+        _ => {
+            eprintln!("export <in.usfm> <out.docx> | import <in.docx> | check <in.usfm> <in.docx>")
+        }
     }
 }
-

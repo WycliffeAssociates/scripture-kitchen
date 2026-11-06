@@ -285,23 +285,30 @@ fn case_7_whitespace_only_change_is_flagged_and_not_usfm_structure() {
 
 #[test]
 fn case_8_paragraph_marker_change_is_usfm_structure_only() {
+    // Units are the TOC's verse tiles: `\p`/`\m` opens verse 1, so the marker
+    // change is verse 1's; `\s Section` introduced verse 2, so its removal is
+    // verse 2's. The chapter's own unit (`\c 1`) is untouched.
     let (skeleton, ..) = skeleton_for(8);
-    let chapter_open = skeleton
-        .units
-        .iter()
-        .position(|unit| unit.baseline_addr.map(|a| a.to_string()).as_deref() == Some("GEN 1:0"))
-        .expect("chapter-open unit");
-    assert!(skeleton.units[chapter_open].is_usfm_structure_change);
-    assert!(!skeleton.units[chapter_open].is_whitespace_change);
+    let unit = |sid: &str| {
+        let at = skeleton
+            .units
+            .iter()
+            .position(|unit| unit.baseline_addr.map(|a| a.to_string()).as_deref() == Some(sid))
+            .unwrap_or_else(|| panic!("{sid} unit"));
+        &skeleton.units[at]
+    };
+    let chapter_open = unit("GEN 1:0");
+    assert!(!chapter_open.is_usfm_structure_change);
+    assert!(!chapter_open.is_whitespace_change);
 
-    // The v1 heading-removal unit is a real content change: neither flag.
-    let verse_1 = skeleton
-        .units
-        .iter()
-        .position(|unit| unit.baseline_addr.map(|a| a.to_string()).as_deref() == Some("GEN 1:1"))
-        .expect("verse 1 unit");
-    assert!(!skeleton.units[verse_1].is_whitespace_change);
-    assert!(!skeleton.units[verse_1].is_usfm_structure_change);
+    let verse_1 = unit("GEN 1:1");
+    assert!(verse_1.is_usfm_structure_change);
+    assert!(!verse_1.is_whitespace_change);
+
+    // The heading removal is a real content change: neither flag.
+    let verse_2 = unit("GEN 1:2");
+    assert!(!verse_2.is_whitespace_change);
+    assert!(!verse_2.is_usfm_structure_change);
 }
 
 #[test]

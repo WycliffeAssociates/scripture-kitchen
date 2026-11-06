@@ -1808,7 +1808,7 @@ mod tests {
         // Greek ahead of the verse, so a byte offset would land elsewhere.
         let text = "\\id MRK\n\\c 6\n\\p \\v 1 λόγος\n\\v 2-4 bridged\n";
         assert_eq!(book_of(text, &NONE), "MRK");
-        assert_eq!(located(text, 0, &NONE), "MRK");
+        assert_eq!(located(text, 0, &NONE), "MRK 0");
         assert_eq!(located(text, 8, &NONE), "MRK 6");
         let inside = text.find("λόγος").unwrap() + "λόγος".len();
         let utf16 = to_utf16(text, inside as u32);

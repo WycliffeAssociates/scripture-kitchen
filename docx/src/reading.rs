@@ -115,7 +115,10 @@ impl Note {
     /// The note's words, whitespace collapsed.
     pub fn text(&self) -> String {
         let all: Vec<String> = self.paragraphs.iter().map(Paragraph::plain).collect();
-        all.join(" ").split_whitespace().collect::<Vec<_>>().join(" ")
+        all.join(" ")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 }
 
@@ -134,7 +137,9 @@ pub struct Reading {
 /// Title, heading or quote, from a style's name and outline level.
 pub fn role_of(name: Option<&str>, outline: Option<u32>) -> (Option<Role>, u32) {
     let n = name.unwrap_or("").trim().to_lowercase();
-    let word = |w: &str| n.starts_with(w) && !n[w.len()..].starts_with(|c: char| c.is_alphanumeric() || c == '_');
+    let word = |w: &str| {
+        n.starts_with(w) && !n[w.len()..].starts_with(|c: char| c.is_alphanumeric() || c == '_')
+    };
     if word("title") {
         return (Some(Role::Title), 1);
     }
@@ -142,10 +147,16 @@ pub fn role_of(name: Option<&str>, outline: Option<u32>) -> (Option<Role>, u32) 
         return (Some(Role::Title), 2);
     }
     if let Some(rest) = n.strip_prefix("heading") {
-        let digit = rest.trim_start().chars().next().and_then(|c| c.to_digit(10));
+        let digit = rest
+            .trim_start()
+            .chars()
+            .next()
+            .and_then(|c| c.to_digit(10));
         return (Some(Role::Heading), digit.unwrap_or(1));
     }
-    let quote = n.split(|c: char| !c.is_alphanumeric() && c != '_').any(|w| w.starts_with("quote") || w.starts_with("quotation"));
+    let quote = n
+        .split(|c: char| !c.is_alphanumeric() && c != '_')
+        .any(|w| w.starts_with("quote") || w.starts_with("quotation"));
     if quote {
         return (Some(Role::Quote), 1);
     }
@@ -197,14 +208,29 @@ impl WordStyles {
     pub fn read(root: Option<&Element>) -> Self {
         let mut by_id = BTreeMap::new();
         let mut default_paragraph = None;
-        for style in root.iter().flat_map(|r| r.elements()).filter(|e| e.name == "w:style") {
-            let Some(id) = style.attr("w:styleId") else { continue };
+        for style in root
+            .iter()
+            .flat_map(|r| r.elements())
+            .filter(|e| e.name == "w:style")
+        {
+            let Some(id) = style.attr("w:styleId") else {
+                continue;
+            };
             if style.attr("w:type") == Some("paragraph") && style.attr("w:default") == Some("1") {
                 default_paragraph = Some(id.to_owned());
             }
             let mut props = StyleProps {
-                name: Some(style.child("w:name").and_then(|n| n.attr("w:val")).unwrap_or(id).to_owned()),
-                based_on: style.child("w:basedOn").and_then(|b| b.attr("w:val")).map(str::to_owned),
+                name: Some(
+                    style
+                        .child("w:name")
+                        .and_then(|n| n.attr("w:val"))
+                        .unwrap_or(id)
+                        .to_owned(),
+                ),
+                based_on: style
+                    .child("w:basedOn")
+                    .and_then(|b| b.attr("w:val"))
+                    .map(str::to_owned),
                 ..StyleProps::default()
             };
             if let Some(ppr) = style.child("w:pPr") {
@@ -215,14 +241,19 @@ impl WordStyles {
             }
             by_id.insert(id.to_owned(), props);
         }
-        Self { by_id, default_paragraph }
+        Self {
+            by_id,
+            default_paragraph,
+        }
     }
 
     fn resolve(&self, id: Option<&str>) -> StyleProps {
         let mut chain = Vec::new();
         let mut at = id.map(str::to_owned);
         while let Some(id) = at.take() {
-            let Some(own) = self.by_id.get(&id) else { break };
+            let Some(own) = self.by_id.get(&id) else {
+                break;
+            };
             if chain.len() > 20 {
                 break;
             }
@@ -252,12 +283,19 @@ fn paragraph_props(ppr: &Element, props: &mut StyleProps) {
             _ => Align::Start,
         });
     }
-    if let Some(level) = ppr.child("w:outlineLvl").and_then(|o| o.attr("w:val")).and_then(|v| v.parse::<u32>().ok())
+    if let Some(level) = ppr
+        .child("w:outlineLvl")
+        .and_then(|o| o.attr("w:val"))
+        .and_then(|v| v.parse::<u32>().ok())
         && level < 9
     {
         props.outline = Some(level);
     }
-    if let Some(num) = ppr.child("w:numPr").and_then(|n| n.child("w:numId")).and_then(|n| n.attr("w:val")) {
+    if let Some(num) = ppr
+        .child("w:numPr")
+        .and_then(|n| n.child("w:numId"))
+        .and_then(|n| n.attr("w:val"))
+    {
         props.list = Some(num != "0");
     }
 }
@@ -274,7 +312,10 @@ fn run_props(rpr: &Element, props: &mut StyleProps) {
     }
     // A raised baseline (half-points) is how some exports fake superscript.
     if props.superscript.is_none()
-        && let Some(p) = rpr.child("w:position").and_then(|p| p.attr("w:val")).and_then(|v| v.parse::<f64>().ok())
+        && let Some(p) = rpr
+            .child("w:position")
+            .and_then(|p| p.attr("w:val"))
+            .and_then(|v| v.parse::<f64>().ok())
     {
         props.superscript = Some(p > 0.0);
     }
@@ -335,8 +376,12 @@ impl WordReader<'_> {
 
     fn paragraph(&mut self, p: &Element, table: bool) -> Paragraph {
         let ppr = p.child("w:pPr");
-        let id = ppr.and_then(|ppr| ppr.child("w:pStyle")).and_then(|s| s.attr("w:val"));
-        let style = self.styles.resolve(id.or(self.styles.default_paragraph.as_deref()));
+        let id = ppr
+            .and_then(|ppr| ppr.child("w:pStyle"))
+            .and_then(|s| s.attr("w:val"));
+        let style = self
+            .styles
+            .resolve(id.or(self.styles.default_paragraph.as_deref()));
         let mut direct = StyleProps::default();
         if let Some(ppr) = ppr {
             paragraph_props(ppr, &mut direct);
@@ -373,7 +418,11 @@ impl WordReader<'_> {
                     }
                 }
                 "w:del" | "w:moveFrom" => self.tracked_changes += 1,
-                "w:pPr" | "w:proofErr" | "w:bookmarkStart" | "w:bookmarkEnd" | "mc:AlternateContent" => {}
+                "w:pPr"
+                | "w:proofErr"
+                | "w:bookmarkStart"
+                | "w:bookmarkEnd"
+                | "mc:AlternateContent" => {}
                 name => {
                     if name == "w:ins" || name == "w:moveTo" {
                         self.tracked_changes += 1;
@@ -384,21 +433,46 @@ impl WordReader<'_> {
         }
     }
 
-    fn run(&mut self, r: &Element, paragraph: &StyleProps, out: &mut Vec<Inline>, drop_mark: &mut bool) {
+    fn run(
+        &mut self,
+        r: &Element,
+        paragraph: &StyleProps,
+        out: &mut Vec<Inline>,
+        drop_mark: &mut bool,
+    ) {
         let rpr = r.child("w:rPr");
-        if rpr.and_then(|rpr| rpr.child("w:vanish")).is_some_and(toggle) {
+        if rpr
+            .and_then(|rpr| rpr.child("w:vanish"))
+            .is_some_and(toggle)
+        {
             return;
         }
-        let char_id = rpr.and_then(|rpr| rpr.child("w:rStyle")).and_then(|s| s.attr("w:val"));
-        let char_style = char_id.map(|id| self.styles.resolve(Some(id))).unwrap_or_default();
+        let char_id = rpr
+            .and_then(|rpr| rpr.child("w:rStyle"))
+            .and_then(|s| s.attr("w:val"));
+        let char_style = char_id
+            .map(|id| self.styles.resolve(Some(id)))
+            .unwrap_or_default();
         let mut own = StyleProps::default();
         if let Some(rpr) = rpr {
             run_props(rpr, &mut own);
         }
         let format = Formatting {
-            superscript: own.superscript.or(char_style.superscript).or(paragraph.superscript).unwrap_or(false),
-            italic: own.italic.or(char_style.italic).or(paragraph.italic).unwrap_or(false),
-            bold: own.bold.or(char_style.bold).or(paragraph.bold).unwrap_or(false),
+            superscript: own
+                .superscript
+                .or(char_style.superscript)
+                .or(paragraph.superscript)
+                .unwrap_or(false),
+            italic: own
+                .italic
+                .or(char_style.italic)
+                .or(paragraph.italic)
+                .unwrap_or(false),
+            bold: own
+                .bold
+                .or(char_style.bold)
+                .or(paragraph.bold)
+                .unwrap_or(false),
         };
         let direct = Formatting {
             superscript: own.superscript.unwrap_or(false),
@@ -424,7 +498,11 @@ impl WordReader<'_> {
                 },
                 "w:cr" => out.push(Inline::Break),
                 "w:footnoteReference" | "w:endnoteReference" => {
-                    let prefix = if e.name == "w:footnoteReference" { "fn" } else { "en" };
+                    let prefix = if e.name == "w:footnoteReference" {
+                        "fn"
+                    } else {
+                        "en"
+                    };
                     if let Some(id) = e.attr("w:id") {
                         out.push(Inline::Note(format!("{prefix}:{id}")));
                     }
@@ -438,11 +516,22 @@ impl WordReader<'_> {
 }
 
 /// Appends text, joining the run before when it has the same style and look.
-pub fn push_text(out: &mut Vec<Inline>, value: &str, style: Option<String>, format: Formatting, direct: Formatting) {
+pub fn push_text(
+    out: &mut Vec<Inline>,
+    value: &str,
+    style: Option<String>,
+    format: Formatting,
+    direct: Formatting,
+) {
     if value.is_empty() {
         return;
     }
-    if let Some(Inline::Text { text, style: s, format: f, direct: d }) = out.last_mut()
+    if let Some(Inline::Text {
+        text,
+        style: s,
+        format: f,
+        direct: d,
+    }) = out.last_mut()
         && *s == style
         && *f == format
         && *d == direct
@@ -450,15 +539,29 @@ pub fn push_text(out: &mut Vec<Inline>, value: &str, style: Option<String>, form
         text.push_str(value);
         return;
     }
-    out.push(Inline::Text { text: value.to_owned(), style, format, direct });
+    out.push(Inline::Text {
+        text: value.to_owned(),
+        style,
+        format,
+        direct,
+    });
 }
 
-pub fn word_notes(reader: &mut WordReader<'_>, root: Option<&Element>, kind: NoteKind, notes: &mut BTreeMap<String, Note>) {
+pub fn word_notes(
+    reader: &mut WordReader<'_>,
+    root: Option<&Element>,
+    kind: NoteKind,
+    notes: &mut BTreeMap<String, Note>,
+) {
     let (element, prefix) = match kind {
         NoteKind::Footnote => ("w:footnote", "fn"),
         NoteKind::Endnote => ("w:endnote", "en"),
     };
-    for n in root.iter().flat_map(|r| r.elements()).filter(|e| e.name == element) {
+    for n in root
+        .iter()
+        .flat_map(|r| r.elements())
+        .filter(|e| e.name == element)
+    {
         if n.attr("w:type").is_some_and(|t| t != "normal") {
             continue; // separators and continuation notices
         }

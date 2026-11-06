@@ -20,7 +20,11 @@ use crate::styles::{CALLER, LOOSE, NEST, NOTE_PEERS, PREFIX, RAW};
 /// non-markers. "USFM my heading" is someone else's style, not `\my`.
 pub fn marker(style: Option<&str>) -> Option<&str> {
     let m = style?.strip_prefix(PREFIX)?;
-    let spelling = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+    let spelling = |s: &str| {
+        !s.is_empty()
+            && s.bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    };
     (m == LOOSE || m.split(NEST).all(spelling)).then_some(m)
 }
 
@@ -37,7 +41,12 @@ fn benign(name: &str) -> bool {
 
 #[derive(Debug)]
 enum Item {
-    Text { style: Option<String>, text: String, italic: bool, bold: bool },
+    Text {
+        style: Option<String>,
+        text: String,
+        italic: bool,
+        bold: bool,
+    },
     Note(String),
     CommentStart(String),
     CommentEnd(String),
@@ -49,9 +58,19 @@ fn items(inlines: &[Inline]) -> Vec<Item> {
     let mut out: Vec<Item> = Vec::new();
     for i in inlines {
         let (style, text, italic, bold) = match i {
-            Inline::Text { text, style, direct, .. } => (style.clone(), text.clone(), direct.italic, direct.bold),
+            Inline::Text {
+                text,
+                style,
+                direct,
+                ..
+            } => (style.clone(), text.clone(), direct.italic, direct.bold),
             Inline::Break => match out.last() {
-                Some(Item::Text { style, italic, bold, .. }) => (style.clone(), " ".to_owned(), *italic, *bold),
+                Some(Item::Text {
+                    style,
+                    italic,
+                    bold,
+                    ..
+                }) => (style.clone(), " ".to_owned(), *italic, *bold),
                 _ => (None, " ".to_owned(), false, false),
             },
             Inline::Note(id) => {
@@ -67,7 +86,12 @@ fn items(inlines: &[Inline]) -> Vec<Item> {
                 continue;
             }
         };
-        if let Some(Item::Text { style: s, text: t, italic: i, bold: b }) = out.last_mut()
+        if let Some(Item::Text {
+            style: s,
+            text: t,
+            italic: i,
+            bold: b,
+        }) = out.last_mut()
             && *s == style
             && *i == italic
             && *b == bold
@@ -75,7 +99,12 @@ fn items(inlines: &[Inline]) -> Vec<Item> {
             t.push_str(&text);
             continue;
         }
-        out.push(Item::Text { style, text, italic, bold });
+        out.push(Item::Text {
+            style,
+            text,
+            italic,
+            bold,
+        });
     }
     out
 }
@@ -106,7 +135,11 @@ pub fn paragraph(p: &Paragraph, out: &mut Out<'_>) {
         m => {
             out.anchors().text(" ");
             let inline = inline(&items, false, out);
-            let line = if inline.is_empty() { format!("\\{m}") } else { format!("\\{m} {inline}") };
+            let line = if inline.is_empty() {
+                format!("\\{m}")
+            } else {
+                format!("\\{m} {inline}")
+            };
             out.lines().push(line);
         }
     }
@@ -127,7 +160,12 @@ fn inline(items: &[Item], in_note: bool, out: &mut Out<'_>) -> String {
     let mut spans = Spans::new(in_note);
     for (i, item) in items.iter().enumerate() {
         match item {
-            Item::Text { style, text, italic, bold } => match marker(style.as_deref()) {
+            Item::Text {
+                style,
+                text,
+                italic,
+                bold,
+            } => match marker(style.as_deref()) {
                 Some("v") => {
                     spans.close_all();
                     spans.push(&format!("\\v {} ", text.trim()));
@@ -152,7 +190,10 @@ fn inline(items: &[Item], in_note: bool, out: &mut Out<'_>) -> String {
                     if let Some(name) = style
                         && !benign(name)
                     {
-                        *out.report.unknown_character_styles.entry(name.clone()).or_default() += 1;
+                        *out.report
+                            .unknown_character_styles
+                            .entry(name.clone())
+                            .or_default() += 1;
                     }
                     spans.close_all();
                     spans.push(&emphasis(text, *italic, *bold, out));
@@ -167,8 +208,9 @@ fn inline(items: &[Item], in_note: bool, out: &mut Out<'_>) -> String {
                     Item::Text { style, .. } => Some(style),
                     _ => None,
                 });
-                let inside =
-                    goes_on.and_then(|s| marker(s.as_deref())).is_some_and(|m| m.split(NEST).eq(spans.stack.iter().copied()));
+                let inside = goes_on
+                    .and_then(|s| marker(s.as_deref()))
+                    .is_some_and(|m| m.split(NEST).eq(spans.stack.iter().copied()));
                 if !inside {
                     spans.close_all();
                 }
@@ -201,9 +243,18 @@ fn emphasis(text: &str, italic: bool, bold: bool, out: &mut Out<'_>) -> String {
         wrapped = format!("\\bd {wrapped}\\bd*");
     }
     let marker = if bold { "bd" } else { "it" };
-    let reason = if bold { "bold set by hand" } else { "italic set by hand" };
+    let reason = if bold {
+        "bold set by hand"
+    } else {
+        "italic set by hand"
+    };
     let r = out.verse_ref();
-    out.report.guesses.push(Guess { r#ref: r, marker: marker.to_owned(), reason: reason.to_owned(), excerpt: core.to_owned() });
+    out.report.guesses.push(Guess {
+        r#ref: r,
+        marker: marker.to_owned(),
+        reason: reason.to_owned(),
+        excerpt: core.to_owned(),
+    });
     format!("{lead}{wrapped}{trail}")
 }
 
@@ -220,19 +271,31 @@ fn note(id: &str, out: &mut Out<'_>) -> String {
         None => {
             let name = style.unwrap_or_else(|| "(no style)".to_owned());
             *out.report.unknown_note_styles.entry(name).or_default() += 1;
-            if endnote { "fe".to_owned() } else { "f".to_owned() }
+            if endnote {
+                "fe".to_owned()
+            } else {
+                "f".to_owned()
+            }
         }
     };
-    let all: Vec<Inline> = paragraphs.iter().flat_map(|p| p.inlines.iter().cloned()).collect();
+    let all: Vec<Inline> = paragraphs
+        .iter()
+        .flat_map(|p| p.inlines.iter().cloned())
+        .collect();
     let all = items(&all);
     let caller = all
         .iter()
         .find_map(|i| match i {
-            Item::Text { style, text, .. } if marker(style.as_deref()) == Some(CALLER) => Some(text.trim().to_owned()),
+            Item::Text { style, text, .. } if marker(style.as_deref()) == Some(CALLER) => {
+                Some(text.trim().to_owned())
+            }
             _ => None,
         })
         .unwrap_or_else(|| "+".to_owned());
-    let text: Vec<Item> = all.into_iter().filter(|i| matches!(i, Item::Text { .. })).collect();
+    let text: Vec<Item> = all
+        .into_iter()
+        .filter(|i| matches!(i, Item::Text { .. }))
+        .collect();
     let body = inline(&text, true, out);
     format!("\\{m} {caller} {}\\{m}*", body.trim_start())
 }
@@ -250,7 +313,12 @@ struct Spans<'s> {
 
 impl<'s> Spans<'s> {
     fn new(in_note: bool) -> Self {
-        Self { out: String::new(), stack: Vec::new(), in_note, pending: None }
+        Self {
+            out: String::new(),
+            stack: Vec::new(),
+            in_note,
+            pending: None,
+        }
     }
 
     /// Text in the current spans.
@@ -293,7 +361,12 @@ impl<'s> Spans<'s> {
     }
 
     fn to(&mut self, want: &[&'s str]) {
-        let common = self.stack.iter().zip(want).take_while(|(a, b)| a == b).count();
+        let common = self
+            .stack
+            .iter()
+            .zip(want)
+            .take_while(|(a, b)| a == b)
+            .count();
         self.close_to(common);
         for m in &want[common..] {
             if self.stack.is_empty() {
@@ -342,7 +415,13 @@ mod tests {
 
     #[test]
     fn note_peers_close_only_before_plain_text() {
-        assert_eq!(write(&[(&["fr"], "1.1 "), (&["ft"], "text")], true), r"\fr 1.1 \ft text");
-        assert_eq!(write(&[(&["fqa"], "a"), (&[], " or "), (&["fqa"], "b")], true), r"\fqa a\fqa* or \fqa b");
+        assert_eq!(
+            write(&[(&["fr"], "1.1 "), (&["ft"], "text")], true),
+            r"\fr 1.1 \ft text"
+        );
+        assert_eq!(
+            write(&[(&["fqa"], "a"), (&[], " or "), (&["fqa"], "b")], true),
+            r"\fqa a\fqa* or \fqa b"
+        );
     }
 }

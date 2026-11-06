@@ -39,7 +39,8 @@ fn every_carried_book_round_trips() {
             if let Some(first) = out.unsupported.first() {
                 return (name, Outcome::NotCarried(first.what.clone()));
             }
-            let back = docx::import(&out.docx, &docx::Settings::default()).unwrap_or_else(|e| panic!("{name}: {e}"));
+            let back = docx::import(&out.docx, &docx::Settings::default())
+                .unwrap_or_else(|e| panic!("{name}: {e}"));
             assert!(back.report.is_exact(), "{name}: {:?}", back.report);
             assert_eq!(back.books.len(), 1, "{name}");
             match common::compare(&source, &back.books[0].usfm) {
@@ -56,7 +57,12 @@ fn every_carried_book_round_trips() {
             _ => None,
         })
         .collect();
-    assert!(differs.is_empty(), "{} books differ:\n{}", differs.len(), differs.join("\n"));
+    assert!(
+        differs.is_empty(),
+        "{} books differ:\n{}",
+        differs.len(),
+        differs.join("\n")
+    );
     let not_carried: Vec<(&str, &str)> = outcomes
         .iter()
         .filter_map(|(n, o)| match o {
@@ -65,7 +71,13 @@ fn every_carried_book_round_trips() {
         })
         .collect();
     let names: Vec<&str> = not_carried.iter().map(|(n, _)| *n).collect();
-    assert_eq!(names, NOT_CARRIED, "the books export cannot carry whole changed: {not_carried:?}");
-    let same = outcomes.iter().filter(|(_, o)| matches!(o, Outcome::Same)).count();
+    assert_eq!(
+        names, NOT_CARRIED,
+        "the books export cannot carry whole changed: {not_carried:?}"
+    );
+    let same = outcomes
+        .iter()
+        .filter(|(_, o)| matches!(o, Outcome::Same))
+        .count();
     assert!(same >= 159, "only {same} books compared");
 }

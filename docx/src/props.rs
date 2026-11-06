@@ -20,8 +20,14 @@ pub fn write(book: Option<&str>, source: &Source) -> String {
     let mut props: Vec<(String, String)> = Vec::new();
     if let Some(code) = book {
         props.push(("usfm.books".to_owned(), code.to_owned()));
-        props.push((format!("usfm.{code}.source.git-blob-sha1"), source.git_blob_sha1.clone()));
-        props.push((format!("usfm.{code}.source.xxh3-64"), source.xxh3_64.clone()));
+        props.push((
+            format!("usfm.{code}.source.git-blob-sha1"),
+            source.git_blob_sha1.clone(),
+        ));
+        props.push((
+            format!("usfm.{code}.source.xxh3-64"),
+            source.xxh3_64.clone(),
+        ));
     }
     let mut s = String::from(xml::DECLARATION);
     s.push_str(r#"<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/custom-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">"#);
@@ -46,7 +52,12 @@ pub fn read(root: &Element) -> Vec<(String, String)> {
 
 /// The source a book was exported from, if the properties name it.
 pub fn source(props: &[(String, String)], code: &str) -> Option<Source> {
-    let get = |key: String| props.iter().find(|(k, _)| *k == key).map(|(_, v)| v.clone());
+    let get = |key: String| {
+        props
+            .iter()
+            .find(|(k, _)| *k == key)
+            .map(|(_, v)| v.clone())
+    };
     Some(Source {
         git_blob_sha1: get(format!("usfm.{code}.source.git-blob-sha1"))?,
         xxh3_64: get(format!("usfm.{code}.source.xxh3-64")).unwrap_or_default(),
