@@ -240,10 +240,19 @@ async function render() {
   const id = ++inflight;
   statusEl.textContent = `Rendering ${books.length} book${books.length > 1 ? "s" : ""}…`;
   const t0 = performance.now();
-  const res = await fetch("/api/render", { method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ books, settings: s }) });
+  // GET, not POST: some web filters (Sophos) stop a POST to an uncategorized host.
+  const q = new URLSearchParams({ books: books.join(","), settings: JSON.stringify(s) });
+  const res = await fetch("/api/render?" + q, { cache: "no-store" });
   if (id !== inflight) return;
-  if (!res.ok) { errorEl.style.display = "block"; errorEl.textContent = await res.text(); statusEl.textContent = "Error"; return; }
+  const type = res.headers.get("content-type") || "";
+  if (!res.ok || !type.startsWith("application/pdf")) {
+    errorEl.style.display = "block";
+    const body = await res.text();
+    errorEl.textContent = type.includes("html")
+      ? "Something between this browser and the server (a web filter or proxy) answered instead of plate. Try “Compile in: browser”, or open this page from the server machine."
+      : body;
+    statusEl.textContent = "Error"; return;
+  }
   errorEl.style.display = "none";
   const t = JSON.parse(res.headers.get("x-plate-timings"));
   const blob = await res.blob();

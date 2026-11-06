@@ -71,7 +71,7 @@ async fn main() {
         .route("/", get(index))
         .route("/api/books", get(list_books))
         .route("/api/fonts", get(list_fonts))
-        .route("/api/render", post(render))
+        .route("/api/render", post(render).get(render_get))
         .route("/api/markup", get(markup))
         .route("/api/template", get(template))
         .route("/api/usfm", get(usfm))
@@ -107,6 +107,25 @@ async fn list_fonts(State(app): State<Arc<App>>) -> Json<Vec<String>> {
     families.sort();
     families.dedup();
     Json(families)
+}
+
+#[derive(Deserialize)]
+struct RenderQuery {
+    /// Comma-separated file names.
+    books: String,
+    /// The settings JSON.
+    settings: String,
+}
+
+/// The GET spelling of `/api/render`, for networks whose web filter stops a
+/// POST to an uncategorized host (Sophos does).
+async fn render_get(State(app): State<Arc<App>>, Query(q): Query<RenderQuery>) -> Response {
+    let settings = match serde_json::from_str(&q.settings) {
+        Ok(v) => v,
+        Err(e) => return (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
+    };
+    let books = q.books.split(',').filter(|b| !b.is_empty()).map(str::to_string).collect();
+    render(State(app), Json(RenderRequest { books, settings })).await
 }
 
 async fn render(State(app): State<Arc<App>>, Json(req): Json<RenderRequest>) -> Response {
