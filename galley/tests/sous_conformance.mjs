@@ -61,6 +61,7 @@ const sameBytes = (a, b) => a.length === b.length && a.every((byte, at) => byte 
 // The list, not a subset: onion-wasm's shims arrive because galley's cdylib
 // links the object they sit in, and a dropped door is otherwise silent.
 const EXPORTS = [
+  "Citations",
   "Edits",
   "Fingerprint",
   "FormatOpts",
@@ -76,13 +77,17 @@ const EXPORTS = [
   "format",
   "formatEdits",
   "formatEditsIn",
+  "formatReference",
   "locate",
   "mask",
   "merge",
   "mergeSplices",
   "parse",
+  "parseReference",
+  "parseSrs",
   "resolve",
   "setCustomMarkers",
+  "showReference",
   "toByte",
   "toUtf16",
   "xxh3",

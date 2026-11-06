@@ -608,21 +608,47 @@ retained text and pinned `Toc`; `onion/src/resolve.md` is the contract and
 `testData/resolve/cases.json` the cases, whose `expect` is this door's JSON in
 bytes. `address` is Sefer's `Address` (`book`, `intro`, `chapters`, `verses`);
 a `book` key on it is read past, because the book is the caller's to match.
-Chapter and verse numbers are whole numbers from 1, and anything else throws
-naming the key, as does an unknown `kind` or an empty segment.
+Chapter numbers are whole numbers from 1 and verse numbers from 0 (a chapter's
+`\d` title), and anything else throws naming the key, as does an unknown `kind`
+or a segment that isn't one lowercase letter.
 
 JSON, like `targetNodeFor`: one small answer per call, on no bulk path, so it
 needs no buffer or generated reader. Offsets are bytes unless `utf16` asks
 otherwise. A reference registered without `keepText` still answers a book, an
 intro or chapters from its `Toc`, in bytes (it kept no UTF-16 table, so
-`utf16` throws as `toc` does). A verse needs the text, its segment letters and
-the opening walk, so a verse address to such a reference is refused by name.
+`utf16` throws as `toc` does). A verse needs the text for its segment letters,
+so a verse address to such a reference is refused by name. A verse's span runs
+from its `\v` to the next verse's tile; `opening` is the start of its own tile,
+its `\p` and any heading above it, which the `Toc` walked when it was built.
 
 `resolveOf(text, address, { utf16? })` is the same door over text the host
 holds, so it needs no registration and answers every kind, verses included.
 Over a registered book's exact text it answers what `resolve(id)` does.
 The free `resolve(text, address, { utf16? })`, onion-wasm's door, answers
 the same JSON with no `Galley` at all.
+
+## Places: `addressAt`, the reference doors, and SRS
+
+Every place crosses as Sefer's `Address` with its `book` (`BookAddress`).
+
+- `addressAt(id, offset, { utf16? })` / `addressAtOf(text, offset, opts)`: the
+  place at a cursor, `resolve`'s inverse (`onion::Toc::address_at`): the
+  introduction, a chapter's head, its title (verse 0), or the verse whose tile
+  holds the offset, parts included.
+- `parseReference(text, { book? })`, `formatReference(addresses)`,
+  `showReference(address, bookName, intro)`: the machine spelling (the
+  Scripture Referencing Standard's basic reference, the `reference` crate),
+  strict, with errors named and placed in UTF-16.
+- `new Citations({ names, intro, books })` and `.read(text, { grammar, held })`,
+  `.booksMatching(text)`: what a person types, read leniently (Sefer's
+  `citation.ts`, ported). No locale's names are linked: the host passes the
+  names it has. `reference/fixtures/cite.json` is the shared cases.
+- `parseSrs(text)`, `srsLocate(id, ref, { utf16? })` / `srsLocateOf`,
+  `srsAt(id, from, to, { utf16? })` / `srsAtOf`: the standard in full (`srs`
+  crate), located in a text and spelled from a span (`galley/src/srs.rs`).
+
+All answer JSON, one small answer per call, as `resolve` does.
+`tests/reference_conformance.mjs` runs them from Node.
 
 ## SousSettings
 
