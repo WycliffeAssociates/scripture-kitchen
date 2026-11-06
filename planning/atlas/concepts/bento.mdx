@@ -1,0 +1,65 @@
+---
+term: bento
+slug: bento
+aliases: [manifest, container, Resource Container, RC, Scripture Burrito, metadata.json, manifest.yaml]
+kind: crate
+crate: bento
+files: [bento/src/lib.rs, bento/src/check.rs, bento/src/write.rs, bento/src/edit.rs, bento/src/lenient.rs, bento/src/tree.rs, bento/bento.ts, bento/schema/burrito/README.md]
+related: [canon, mise, bttwriter, sefer]
+level: 1
+summary: "The manifest at a repo's root: RC, Scripture Burrito and BTT Writer, read leniently into one shape, checked, created and edited."
+---
+
+## The problem
+
+A repo says what it is in a manifest: an RC `manifest.yaml`, a Burrito `metadata.json` or a BTT Writer `manifest.json`. Sefer, the hub and the catalog tools each read and wrote their own subset. They disagreed on sort numbers, authorities and what counted as valid. The real files are messy too: numbers where text belongs, a byte order mark, a second YAML document.
+
+## The solution
+
+One crate reads all three formats into one `Manifest` (language, kind, books, sources), with each format's own typed document beside it as `detail`. It also creates a Bible's manifests and edits existing ones. Two rules hold throughout. **Reading never changes anything**, and **reading never fails**: whatever bento forgives comes back as a finding with a JSON pointer, never as a silent fix. Book codes, names and `sort` come from [[canon]]. Burrito validity is judged against WA's fork of the schema, a copy of which is vendored in the crate and tested in CI.
+
+## Trade-offs
+
+- The YAML side uses `yaml-edit`, a lossless parser, rather than a serde re-emitter. Adding a book splices only that entry's lines, in the file's own indentation. The cost is splice logic that has to find where a list item starts and ends.
+- Numbers are kept as written (`version: 1.10` stays `1.10`). JSON output writes a YAML-only spelling (`01`, `0x1F`) as its value, or as text when it has no finite value.
+- A new project's names are written under both `en` and the project's own tag, because the fork requires an `en` key. `defaultLocale` stays `en`.
+- Creating supports Bibles only. Every other kind is read and checked, and gets its own typed create when an app needs one.
+
+## Show me
+
+```ts
+import * as bento from "@wycliffeassociates/scripture-kitchen/bento";
+bento.initSync({ module: bytes });
+
+const found = bento.find(names);                       // { name: "manifest.yaml", format: "rc" }
+const read = bento.read(found.name, bytes);            // never throws
+read.manifest.books;                                   // [{ book: "MAT", path: "./41-MAT.usfm", title, sort: 40 }, …]
+read.findings;                                         // [{ check: "sort-canon", severity: "info", at: "/projects/3/sort", message }]
+
+const files = bento.createBible(project, ["burrito", "rc"]);       // Map: metadata.json, manifest.yaml
+const edited = bento.edit(files, { addBooks: [mrk], checksums: [] }); // only the files that changed
+```
+
+## How it works
+
+- **One tree, both syntaxes.** JSON and YAML both read into `tree::Node`, whose maps keep the file's key order, so one set of lenient readers (`lenient::Reader`) serves every format.
+- **Findings, not errors.** Each check has a stable id and a severity:
+  - errors: `manifest-missing`, `manifest-unreadable`;
+  - warnings: `manifest-valid` (against the fork's rules), `title-set`, `language-set`, `ingredient-exists`, `ingredient-checksum`;
+  - info: `lenient-value`, `book-title-translated`, `sort-canon`.
+- **`check` takes the repo as well.** Given the repo's name and files, it also reports a repo name that disagrees with the language, and ingredients that are missing, empty or stale.
+- **Edits are minimal.** A Burrito is rewritten as `JSON.stringify(v, null, 2)` would write it. An RC has the new project's lines spliced in. Old `sort` values are never renumbered; a clash is reported instead.
+- **Across the wall:** one wasm module with six doors (`find`, `read`, `check`, `createBible`, `edit`, `fingerprint`). Structured values cross as JSON. `bento.ts` adds the types, `readOrThrow` and Standard Schema v1 `schemas` for each format.
+
+## Composes with
+
+Depends on [[canon]] (the book table, names and file names) and [[mise]] (`BookKey`). [[bttwriter]] reads Writer's `manifest.json` through it, and its `consolidate` commits bento's manifests. [[sefer]] imports it at startup, beside the galley package. Sefer's switch to it is planned in [[code:planning/items/2026-11-05-sefer-adopts-bento-and-bttwriter-what-moves-what-s.mdx|its handoff item]].
+
+## Where
+
+- [[code:bento/src/lib.rs]] · the doors and the two rules
+- [[code:bento/src/check.rs]] · the checks
+- [[code:bento/src/write.rs]] · `create_bible`
+- [[code:bento/src/edit.rs]] · `edit`, and the YAML splice
+- [[code:bento/bento.ts]] · the TypeScript layer
+- [[code:planning/items/2026-11-05-container-rc-burrito-and-writer-manifests-read-and.mdx|plan]] · every decision

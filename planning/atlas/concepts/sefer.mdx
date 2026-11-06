@@ -5,7 +5,7 @@ aliases: [the editor host]
 kind: product
 crate: workspace
 files: [galley/src/wasm.md, onion/src/resolve.md, planning/roadmap.mdx]
-related: [galley-package, resolve, census, findings-snapshot, find-buffer, mask-map]
+related: [galley-package, resolve, census, findings-snapshot, find-buffer, mask-map, canon, bento, bttwriter]
 level: 0
 summary: "The browser USFM editor, in its own repo, that vendors the galley package and calls it per keystroke."
 ---
@@ -16,7 +16,7 @@ A browser USFM editor shows the outline, goes to a verse, underlines errors, sea
 
 ## The solution
 
-Sefer parses nothing itself. Every answer comes from the [[galley-package]], with offsets in UTF-16 ([[utf16]]) so it converts nothing. It is one host of the package, not the reason for its shape.
+Sefer parses nothing itself. Every answer about USFM comes from the [[galley-package]], with offsets in UTF-16 ([[utf16]]) so it converts nothing. It is one host of the package, not the reason for its shape. The same npm package carries the shared domain libraries: [[canon]] for books and numbering, [[bento]] for manifests, and [[bttwriter]], loaded only on the migration screen, for BTT Writer projects.
 
 ## Trade-offs
 
@@ -35,7 +35,7 @@ JSON.parse(galley.resolve("books/LUK.usfm", verse, { utf16: true }));
 
 ## Composes with
 
-Reads the [[galley-package]]'s wires: [[dish]], [[census]], [[find-buffer]], [[mask-map]], [[findings-snapshot]]; and [[resolve]]'s JSON.
+Reads the [[galley-package]]'s wires: [[dish]], [[census]], [[find-buffer]], [[mask-map]], [[findings-snapshot]]; and [[resolve]]'s JSON. Calls [[bento]] and [[bttwriter]] once it switches to them; `planning/items/2026-11-05-sefer-adopts-bento-and-bttwriter-what-moves-what-s.mdx` lists what moves.
 
 ## Where
 

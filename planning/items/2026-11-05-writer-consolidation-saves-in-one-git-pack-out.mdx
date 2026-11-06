@@ -613,6 +613,21 @@ without `REPO_ROOT`), which `agents/testing.md` forbids here.
 
 - **Web target only** (`pkg-web`): `bttwriter.ts` imports it, Sefer starts it with `init()`
   or `initSync()` as it does galley, and a bundler takes it as is.
+
+### Review, 2026-11-05
+
+A light review with fresh eyes (`220e737`, `c5e0149`), each fix with a test:
+- **A time zone that isn't ASCII** (`+0é0`) is read as no zone. It used to panic, which
+  in wasm kills the module.
+- **Device times at i64's ends** saturate instead of overflowing.
+- **The tree diff indexes entries by name**, so a folder of tens of thousands of entries
+  (a committed `node_modules`) no longer makes the walk quadratic.
+- **Test clones are unique per call.** Plain `cargo test`, which is what CI runs, raced
+  on them.
+- **CI clippies and tests the `git2` feature**, which nothing built before.
+- **bento and bttwriter are published to `wa-cargo`** with the other crates, for the hub.
+
+<Followup id="keep-histories-on-error">`replay` and `consolidate` use the histories up before Rust checks anything. A bad `createdAt`, a missing project field or two histories of one book then cost a fresh `readHistory` of every repo. Mostly moot, since a failed replay stops the migration anyway, but a typo in the migration form shouldn't cost a re-walk. Cheap fix: check the project, closing and book codes before taking the handles. Do it if Sefer's migration screen shows it matters.</Followup>
 - **Measured** (2026-11-05): the module is **163 KB gzipped** (387 KB raw). It was 209 KB
   until YAML quoting stopped parsing to decide (bento's `yaml_string` now decides by rule,
   checked against the parser in tests), which took yaml-edit out of this module. Replay of

@@ -20,7 +20,8 @@ The kitchen side of
 [[code:planning/items/2026-11-05-writer-consolidation-saves-in-one-git-pack-out.mdx|bttwriter]]
 (steps 1–6) and
 [[code:planning/items/2026-11-05-container-rc-burrito-and-writer-manifests-read-and.mdx|bento]]
-(steps 1–4) is built and tested on the `bttwriter` branch (commits `889bdee` … `1fa2b63`). This
+(steps 1–4) is built and tested on the `bttwriter` branch (commits `889bdee` … `c5e0149`, plus a
+merge of master's canon work). This
 item is the checklist for Sefer's side, written against Sefer `dcca4a2d`. Read the line
 numbers there as pointers, not promises.
 
@@ -30,7 +31,8 @@ numbers there as pointers, not promises.
    first time: both conformance tests, the TypeScript check, and the package freshness gate
    (CI rebuilds `bento/pkg-web` and `bttwriter/pkg-web` and commits them if they moved).
 2. Release a version of `@wycliffeassociates/scripture-kitchen` that carries them (the
-   usual version bump to master; CI tags and publishes).
+   usual version bump to master; CI tags and publishes). The same release puts the `bento`
+   and `bttwriter` crates on `wa-cargo` for the hub.
 3. Bump Sefer's dependency (`package.json` pins `0.1.20` today).
 
 The new imports:

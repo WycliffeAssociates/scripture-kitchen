@@ -6,6 +6,7 @@
     ticket ◄── onion, galley
     mise ◄── canon ◄── canon-gen (never published)
              canon ◄── galley (galley::versification: onion's facts, canon's sniff)
+    mise, canon ◄── bento ◄── bttwriter (mise, canon too)
 
 - `onion` / `onion-wasm` / `galley` are the engine. `sous-core` / `sous-cli`
   (under `sous-chef/`) are the other product. `GLOSSARY.md` is onion's only;
@@ -33,6 +34,32 @@
   `Crosswalk` galley builds from canon: sous-core never depends on canon
   either. Plan (done):
   `planning/items/2026-11-04-canon-and-versification-the-book-table-schemes-map.mdx`.
+- `bento/` is scripture containers: the manifest at a repo's root (RC
+  `manifest.yaml`, Burrito `metadata.json`, BTT Writer `manifest.json`), read
+  into one `Manifest` with each format's typed document beside it, checked
+  (findings with a JSON pointer, never a silent fix), created (`create_bible`)
+  and edited (`edit`: add books, refresh checksums, splicing YAML text so only
+  the new lines change). Reading never changes anything and never fails. Book
+  entries, names and `sort` come from canon. Burrito validity is WA's fork,
+  vendored in `bento/schema/burrito` and tested. It depends on `canon` and
+  `mise`, never on onion or galley: a manifest's books are files, not text it
+  parses. Plan (done):
+  `planning/items/2026-11-05-container-rc-burrito-and-writer-manifests-read-and.mdx`.
+- `bttwriter/` is BTT Writer migration: `stitch` (a Writer book's chunks to
+  USFM, byte for byte as Sefer's template), a sans-IO history `walk` (it asks
+  for objects and is handed them, so async isomorphic-git can drive it; the
+  `git2` feature adds a libgit2 adapter), `replay` (every book's saves as one
+  line of commits, with `clock` estimating impossible device dates), the
+  in-memory `pack` writer, and `consolidate` (replay plus a closing commit
+  holding bento's manifests). No I/O and no git library on the default
+  features. It depends on `bento`, `canon` and `mise`. Plan (done):
+  `planning/items/2026-11-05-writer-consolidation-saves-in-one-git-pack-out.mdx`.
+- bento and bttwriter each build their own wasm module (`./wasm-build.sh
+  bento`, `./wasm-build.sh bttwriter`) and ship as `./bento` and
+  `./bttwriter` subpaths of the npm package, TypeScript over a web-target
+  module like galley. Each links only what it uses of mise and canon. Values
+  cross as JSON (`bento/src/js.rs`), files as `Uint8Array`s. Sefer's switch:
+  `planning/items/2026-11-05-sefer-adopts-bento-and-bttwriter-what-moves-what-s.mdx`.
 - `ticket/` is the second zero-dependency leaf: the WIRE vocabulary (`Width`,
   `Space`, `Field`, `Record`, `Repeat`) and the emitters that write one
   record's Rust writer and one record's TypeScript accessor class. Every wire
