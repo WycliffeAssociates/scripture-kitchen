@@ -866,6 +866,7 @@ if (corpus && existsSync(corpus)) {
     ["an unknown kind", () => resolveIn("\\id GEN\n", { kind: "verse" }), "kind"],
     ["chapter 0", () => resolveIn("\\id GEN\n", { kind: "chapters", from: 0, to: 1 }), "from"],
     ["an empty segment", () => resolveIn("\\id GEN\n", { kind: "verses", from: { chapter: 1, verse: 1, segment: "" }, to: { chapter: 1, verse: 1 } }), "segment"],
+    ["a two-letter segment", () => resolveIn("\\id GEN\n", { kind: "verses", from: { chapter: 1, verse: 1, segment: "ab" }, to: { chapter: 1, verse: 1 } }), "one lowercase letter"],
   ]) {
     let refused = "";
     try {
