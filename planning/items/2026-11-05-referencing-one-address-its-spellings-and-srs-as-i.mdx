@@ -366,8 +366,11 @@ words, characters or markers, and `reference` stays small without them.
    books written with their chapter (`JUD 1:3`, where the hub writes `JUD 3`). The hub's
    range operations (split per chapter, overlap, verse lists) aren't ported: no caller
    here needs them yet. The JS surface comes with step 4.
-3. **`cite`/`show`** with English names and Sefer's fixtures, then localized names when
-   canon's step 6 lands.
+3. **`cite`/`show`** (done 2026-11-06, in Rust): `reference::cite`, `Catalogue` over canon's
+   names in any locale plus the project's own, and `show`. Sefer's `citation.test.ts` is
+   `reference/fixtures/cite.json` (67 cases). Two departures, both to match the machine
+   spelling: `Luke 3:0` is a title, not "zero", and `Jude 3` is verse 3. Every guess is an
+   `Assumption` (a book by prefix, a comma read as a colon).
 4. **galley doors**, so Sefer switches `citation.ts` and `names.ts`. This goes with canon's
    step 7, which wires canon into galley anyway.
 5. **TOC tiles** (done 2026-11-06): headings and the opening paragraph go with the next

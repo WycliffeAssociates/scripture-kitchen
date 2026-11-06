@@ -1,0 +1,498 @@
+{
+  "_note": "Sefer's citation.test.ts (packages/text/src/location, at dcca4a2d) as data, plus the cases marked `note` where this crate departs or adds. Names: canon's English names and codes, plus `names`. `assumed` lists `prefix:<BOOK>` and `comma`, checked only where given.",
+  "catalogue": {
+    "names": {
+      "LUK": [
+        "Lucas"
+      ],
+      "EXO": [
+        "Éxodo"
+      ],
+      "MAT": [
+        "Mateo",
+        "Mt",
+        "Matt"
+      ]
+    },
+    "intro": [
+      "introducción"
+    ]
+  },
+  "cases": [
+    {
+      "text": "Luke",
+      "grammar": "navigation",
+      "refs": [
+        "LUK"
+      ]
+    },
+    {
+      "text": "luke 3",
+      "grammar": "navigation",
+      "refs": [
+        "LUK 3"
+      ]
+    },
+    {
+      "text": "LUK 3:1",
+      "grammar": "navigation",
+      "refs": [
+        "LUK 3:1"
+      ]
+    },
+    {
+      "text": "luk 3.1",
+      "grammar": "navigation",
+      "refs": [
+        "LUK 3:1"
+      ]
+    },
+    {
+      "text": "Lucas 3:1",
+      "grammar": "navigation",
+      "refs": [
+        "LUK 3:1"
+      ]
+    },
+    {
+      "text": "1 John 2:3",
+      "grammar": "navigation",
+      "refs": [
+        "1JN 2:3"
+      ]
+    },
+    {
+      "text": "1john 2:3",
+      "grammar": "navigation",
+      "refs": [
+        "1JN 2:3"
+      ]
+    },
+    {
+      "text": "2 Sam 3",
+      "grammar": "navigation",
+      "refs": [
+        "2SA 3"
+      ]
+    },
+    {
+      "text": "Éxodo 20",
+      "grammar": "navigation",
+      "refs": [
+        "EXO 20"
+      ]
+    },
+    {
+      "text": "exodo 20",
+      "grammar": "navigation",
+      "refs": [
+        "EXO 20"
+      ]
+    },
+    {
+      "text": "  Luke   3 : 1  ",
+      "grammar": "navigation",
+      "refs": [
+        "LUK 3:1"
+      ]
+    },
+    {
+      "text": "Mt 5:3",
+      "grammar": "navigation",
+      "refs": [
+        "MAT 5:3"
+      ]
+    },
+    {
+      "text": "Luke 1:1-2",
+      "grammar": "navigation",
+      "refs": [
+        "LUK 1:1-2"
+      ]
+    },
+    {
+      "text": "Luke 1:1–2",
+      "grammar": "navigation",
+      "refs": [
+        "LUK 1:1-2"
+      ]
+    },
+    {
+      "text": "Luke 1:1—2",
+      "grammar": "navigation",
+      "refs": [
+        "LUK 1:1-2"
+      ]
+    },
+    {
+      "text": "Mat 2-4",
+      "grammar": "navigation",
+      "refs": [
+        "MAT 2-4"
+      ]
+    },
+    {
+      "text": "Mat 1:20-2:3",
+      "grammar": "navigation",
+      "refs": [
+        "MAT 1:20-2:3"
+      ]
+    },
+    {
+      "text": "Mat 2-3:4",
+      "grammar": "navigation",
+      "refs": [
+        "MAT 2:1-3:4"
+      ]
+    },
+    {
+      "text": "Mat 1:1,3",
+      "grammar": "prose",
+      "refs": [
+        "MAT 1:1",
+        "MAT 1:3"
+      ]
+    },
+    {
+      "text": "Mat 1:1,2",
+      "grammar": "prose",
+      "refs": [
+        "MAT 1:1",
+        "MAT 1:2"
+      ]
+    },
+    {
+      "text": "Mat 1:5-23",
+      "grammar": "prose",
+      "refs": [
+        "MAT 1:5-23"
+      ]
+    },
+    {
+      "text": "Mat 1:1,3; 2:4-6; Mrk 3:1",
+      "grammar": "prose",
+      "refs": [
+        "MAT 1:1",
+        "MAT 1:3",
+        "MAT 2:4-6",
+        "MRK 3:1"
+      ]
+    },
+    {
+      "text": "Mat 1:1; 3",
+      "grammar": "prose",
+      "refs": [
+        "MAT 1:1",
+        "MAT 3"
+      ]
+    },
+    {
+      "text": "Mat 1:20-2:3, 5",
+      "grammar": "prose",
+      "refs": [
+        "MAT 1:20-2:3",
+        "MAT 2:5"
+      ]
+    },
+    {
+      "text": "Mat 5, 7",
+      "grammar": "prose",
+      "refs": [
+        "MAT 5",
+        "MAT 7"
+      ]
+    },
+    {
+      "text": "John 3:16a",
+      "grammar": "navigation",
+      "refs": [
+        "JHN 3:16a"
+      ]
+    },
+    {
+      "text": "John 3:16a-17",
+      "grammar": "navigation",
+      "refs": [
+        "JHN 3:16a-17"
+      ]
+    },
+    {
+      "text": "John 3:16-16b",
+      "grammar": "navigation",
+      "refs": [
+        "JHN 3:16-16b"
+      ]
+    },
+    {
+      "text": "John 3:16b-16a",
+      "grammar": "navigation",
+      "problem": "backwards"
+    },
+    {
+      "text": "John 3a",
+      "grammar": "navigation",
+      "problem": "malformed",
+      "note": "a chapter carries no segment"
+    },
+    {
+      "text": "John 3:16A",
+      "grammar": "navigation",
+      "refs": [
+        "JHN 3:16a"
+      ],
+      "note": "ours: a part is one letter, in either case"
+    },
+    {
+      "text": "John 3:16ab",
+      "grammar": "navigation",
+      "problem": "malformed",
+      "note": "ours: a part is one letter"
+    },
+    {
+      "text": "Luke intro",
+      "grammar": "navigation",
+      "refs": [
+        "LUK 0"
+      ]
+    },
+    {
+      "text": "Luke introduction",
+      "grammar": "navigation",
+      "refs": [
+        "LUK 0"
+      ]
+    },
+    {
+      "text": "Lucas introducción",
+      "grammar": "navigation",
+      "refs": [
+        "LUK 0"
+      ]
+    },
+    {
+      "text": "LUK 0",
+      "grammar": "navigation",
+      "refs": [
+        "LUK 0"
+      ]
+    },
+    {
+      "text": "LUK 0:1",
+      "grammar": "navigation",
+      "problem": "zero"
+    },
+    {
+      "text": "luk 3,1",
+      "grammar": "navigation",
+      "refs": [
+        "LUK 3:1"
+      ],
+      "assumed": [
+        "comma"
+      ]
+    },
+    {
+      "text": "luk 3,1-4",
+      "grammar": "navigation",
+      "refs": [
+        "LUK 3:1-4"
+      ],
+      "assumed": [
+        "comma"
+      ]
+    },
+    {
+      "text": "Mat 1:1,3",
+      "grammar": "navigation",
+      "refs": [
+        "MAT 1:1",
+        "MAT 1:3"
+      ],
+      "assumed": []
+    },
+    {
+      "text": "phil",
+      "grammar": "navigation",
+      "refs": [
+        "PHP"
+      ],
+      "assumed": [
+        "prefix:PHP"
+      ]
+    },
+    {
+      "text": "mar 3",
+      "grammar": "navigation",
+      "refs": [
+        "MRK 3"
+      ],
+      "assumed": [
+        "prefix:MRK"
+      ]
+    },
+    {
+      "text": "phil",
+      "grammar": "navigation",
+      "held": [
+        "PHM"
+      ],
+      "refs": [
+        "PHM"
+      ],
+      "note": "a prefix prefers a book the project holds"
+    },
+    {
+      "text": "jude",
+      "grammar": "navigation",
+      "refs": [
+        "JUD"
+      ],
+      "assumed": []
+    },
+    {
+      "text": "John",
+      "grammar": "navigation",
+      "refs": [
+        "JHN"
+      ]
+    },
+    {
+      "text": "phil 2:3",
+      "grammar": "prose",
+      "problem": "unknown-book",
+      "word": "phil"
+    },
+    {
+      "text": "Matt 5:3",
+      "grammar": "prose",
+      "refs": [
+        "MAT 5:3"
+      ]
+    },
+    {
+      "text": "Mat 3,1",
+      "grammar": "prose",
+      "refs": [
+        "MAT 3",
+        "MAT 1"
+      ]
+    },
+    {
+      "text": "Romans 8:28",
+      "grammar": "navigation",
+      "held": [
+        "LUK"
+      ],
+      "refs": [
+        "ROM 8:28"
+      ],
+      "note": "resolution, not citation, answers that the project lacks it"
+    },
+    {
+      "text": "",
+      "grammar": "navigation",
+      "problem": "empty"
+    },
+    {
+      "text": "   ",
+      "grammar": "navigation",
+      "problem": "empty"
+    },
+    {
+      "text": "Hezekiah 3",
+      "grammar": "navigation",
+      "problem": "unknown-book",
+      "word": "Hezekiah"
+    },
+    {
+      "text": "3:16",
+      "grammar": "navigation",
+      "problem": "no-book"
+    },
+    {
+      "text": "Luke 0-3",
+      "grammar": "navigation",
+      "problem": "zero"
+    },
+    {
+      "text": "Luke 3:5-2",
+      "grammar": "navigation",
+      "problem": "backwards"
+    },
+    {
+      "text": "Luke 5-2",
+      "grammar": "navigation",
+      "problem": "backwards"
+    },
+    {
+      "text": "Luke 3:",
+      "grammar": "navigation",
+      "problem": "malformed"
+    },
+    {
+      "text": "Luke 3:1,",
+      "grammar": "navigation",
+      "problem": "malformed"
+    },
+    {
+      "text": "Luke 3:1 and 4",
+      "grammar": "navigation",
+      "problem": "malformed"
+    },
+    {
+      "text": "Luke 3::1",
+      "grammar": "navigation",
+      "problem": "malformed"
+    },
+    {
+      "text": "Luke 3:1;",
+      "grammar": "navigation",
+      "problem": "malformed"
+    },
+    {
+      "text": "Luke intro 3",
+      "grammar": "navigation",
+      "problem": "malformed"
+    },
+    {
+      "text": "Luke 3:0",
+      "grammar": "navigation",
+      "refs": [
+        "LUK 3:0"
+      ],
+      "note": "ours: verse 0 is a chapter's title (PSA 7:0); Sefer refused it as zero"
+    },
+    {
+      "text": "Psalm 3:0-2",
+      "grammar": "navigation",
+      "refs": [
+        "PSA 3:0-2"
+      ],
+      "note": "ours: a range may start at the title"
+    },
+    {
+      "text": "Jude 3",
+      "grammar": "navigation",
+      "refs": [
+        "JUD 1:3"
+      ],
+      "note": "ours: a one-chapter book's bare number is a verse, as the standard says; Sefer read a chapter"
+    },
+    {
+      "text": "Jude 3-5",
+      "grammar": "navigation",
+      "refs": [
+        "JUD 1:3-5"
+      ],
+      "note": "ours, as above"
+    },
+    {
+      "text": "Jude 0",
+      "grammar": "navigation",
+      "refs": [
+        "JUD 0"
+      ],
+      "note": "the introduction still"
+    }
+  ]
+}
