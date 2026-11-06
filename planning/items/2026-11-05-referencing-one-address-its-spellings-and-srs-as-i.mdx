@@ -196,8 +196,13 @@ has no `\v` to belong to, so it stays with the verse it continues. This is SRS's
 association ("section headings are associated with the following paragraph").
 
 - **The whole document is still tiled.** Only the boundary moves.
-- **No second field.** `VerseAnchor.at` becomes where the tile begins; the `\v` itself is
-  still reached through the row's `token`. The row stays 28 bytes.
+- **A new field, `VerseAnchor.start`**, where the tile begins; `at` stays the `\v`. The
+  first draft said to redefine `at`, but Sefer matches `verse.at === found.from`
+  (`src/app/workflows/stet.ts`), and resolve's `from` and onion's lints read it as the
+  marker. The row grows from 28 to 32 bytes.
+- **The rule was already written**, as resolve's `opening` (`onion/src/resolve.md`, a dozen
+  worked cases). The TOC now walks it once at build time, and resolve reads it instead of
+  re-lexing a window on every call.
 - **Chapters stay hard breaks.** SRS never says whether a heading's association crosses a
   `\c` (its examples always put the heading after it), so a heading before `\c 2` stays in
   chapter 1.
@@ -205,6 +210,9 @@ association ("section headings are associated with the following paragraph").
   chapter 0: that is the book's introduction, before `\c 1`. In a Psalm,
   `\c 7 \s1 … \d … \v 1`, the heading's next paragraph is the `\d` title, so it goes with
   verse 0 (`PSA 7:0`).
+- **Verse 0 is now resolvable.** `TitleRow` gets its own `start` (16 bytes), verse 1's walk
+  stops at the title, and `resolve(PSA 7:0)` finds it. Before, resolve had no verse 0, and
+  verse 1's opening reached back over the `\d` instead.
 
 <Tradeoff id="ms-before-c" chose="Chapters stay hard breaks" cost="A heading a text puts just before \c (a Psalms book division as \ms, say) stays with the previous chapter's last verse">Moving it into the next chapter would change chapter tiling too, and SRS doesn't ask for it.</Tradeoff>
 
@@ -219,8 +227,18 @@ What changes for callers:
 - A finding inside a heading is reported against the next verse (sous, and anything built on
   `locate`).
 - A heading before verse 1 reports verse 1, not the bare chapter.
-- The TOC tests that pin verse extents are updated, and the JS readers of the row see a
-  different `at`, not a different layout.
+- `Sid` prints the front matter as `GEN 0` (onion-wasm's `locate` string too).
+- The TOC tests that pin verse extents are updated, and galley's resident-bytes pin grows
+  by 4 bytes a verse.
+
+<Followup id="diff-tiles">Should diff's verse blocks follow the tiles? Moving them changes
+diff's own laws: a `\p` edit between verses stops being a chapter-structure change and
+becomes the next verse's, and a note's reading text moves. Diff stays on the `\v` until
+that's decided.</Followup>
+
+<Followup id="wire-start">Put `start` on the dish and galley TOC wires when Sefer wants
+tiles row by row. Both are schema-generated with TS readers, so it's a format version
+bump. Until then galley's `resolve` already returns the tile as `opening..to`.</Followup>
 
 **For `srs.locate` later:** SRS treats headings as "both inside and outside the range".
 `MRK 1:14!s` reaches the heading, but word 1 of `MRK 1:14` is still the first word after
@@ -342,8 +360,8 @@ words, characters or markers, and `reference` stays small without them.
    canon's step 6 lands.
 4. **galley doors**, so Sefer switches `citation.ts` and `names.ts`. This goes with canon's
    step 7, which wires canon into galley anyway.
-5. **TOC tiles**: headings and the opening paragraph go with the next verse, in onion's TOC,
-   with `resolve`'s cases updated. Independent of 2–4, and it can go first.
+5. **TOC tiles** (done 2026-11-06): headings and the opening paragraph go with the next
+   verse, verse 0 is the title, `Sid` prints `GEN 0`. Diff and the wires are followups.
 6. **`srs` grammar**, from usfmtc's cases and the standard's examples.
 7. **`galley.srs.locate` / `at`**, after 5, NFD and the heading skip included.
 

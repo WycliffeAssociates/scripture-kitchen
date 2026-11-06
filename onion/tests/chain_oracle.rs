@@ -58,8 +58,8 @@ impl Rng {
     }
 }
 
-/// The verse extent a direct scan says holds `at`: the last anchor at or before
-/// it, unless that anchor belongs to an earlier chapter. `Toc::verse_at`'s
+/// The verse tile a direct scan says holds `at`: the last tile starting at or
+/// before it, unless that tile belongs to an earlier chapter. `Toc::verse_at`'s
 /// binary searches must agree with this walk.
 fn scanned_verse(toc: &Toc, at: u32) -> (u16, Option<(u16, u16)>) {
     let chapter = toc
@@ -72,7 +72,7 @@ fn scanned_verse(toc: &Toc, at: u32) -> (u16, Option<(u16, u16)>) {
         .verses
         .iter()
         .rev()
-        .find(|v| v.at <= at && v.at >= chapter.start)
+        .find(|v| v.start <= at && v.start >= chapter.start)
     else {
         // Inside a chapter but ahead of its first verse: a real answer, and the
         // one `locate` degrades to `(0, 0)`.
@@ -81,11 +81,11 @@ fn scanned_verse(toc: &Toc, at: u32) -> (u16, Option<(u16, u16)>) {
     let end = toc
         .verses
         .iter()
-        .find(|v| v.at > anchor.at)
-        .map_or(chapter.end, |v| v.at)
+        .find(|v| v.start > anchor.start)
+        .map_or(chapter.end, |v| v.start)
         .min(chapter.end);
     assert!(
-        (anchor.at..end).contains(&at),
+        (anchor.start..end).contains(&at),
         "the scanned extent must contain the byte it was found for"
     );
     (chapter.number, Some((anchor.first, anchor.last)))

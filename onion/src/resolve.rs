@@ -10,14 +10,10 @@
 
 use core::ops::Range;
 
-pub use mise::address::{Address, Point};
+pub use mise::address::{Address, Point, Segment};
 
 use crate::extensions::Extensions;
-use crate::scanner::lex_with;
-use crate::tables::generated::{self, MarkerIdx};
-use crate::tables::schema::{Category, MarkerKind};
-use crate::toc::{ChapterRow, Toc, VerseAnchor, VerseMember};
-use crate::token::TokenKind;
+use crate::toc::{ChapterRow, TitleRow, Toc, VerseAnchor, VerseMember};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Resolution {
@@ -58,12 +54,13 @@ impl Toc {
         self.resolve_with(source, address, &crate::extensions::current())
     }
 
-    /// [`resolve`](Self::resolve) lexing by `ext` rather than the installed
-    /// list.
-    pub fn resolve_with(&self, source: &str, address: &Address, ext: &Extensions) -> Resolution {
+    /// [`resolve`](Self::resolve) for a text lexed by `ext`. `ext` is no
+    /// longer read: the `Toc` was built from tokens lexed with it and already
+    /// holds each verse's opening. Kept so callers need not change.
+    pub fn resolve_with(&self, source: &str, address: &Address, _ext: &Extensions) -> Resolution {
         match address {
             Address::Verses { from, to } => self
-                .verses_span(source, from, to, ext)
+                .verses_span(source, from, to)
                 .unwrap_or_else(|refusal| refusal),
             _ => self.resolve_rows(address).expect("not a verse address"),
         }
@@ -71,7 +68,7 @@ impl Toc {
 
     /// The answer the chapter rows alone give, for a holder of the `Toc`
     /// without its text: a book, an intro or chapters. `None` for verses,
-    /// which need the text's segment letters and opening walk.
+    /// which need the text's segment letters.
     pub fn resolve_rows(&self, address: &Address) -> Option<Resolution> {
         let answer = match address {
             Address::Book => {
@@ -96,12 +93,12 @@ impl Toc {
         let first = self.one_chapter(from)?.span();
         let last = self.one_chapter(to)?.span();
         let span = first.start.min(last.start)..first.end.max(last.end);
-        Ok(found(span, address.clone(), false))
+        Ok(found(span, *address, false))
     }
 
-    fn verses_span(&self, source: &str, from: &Point, to: &Point, ext: &Extensions) -> Answer {
-        let (first, first_coarser) = self.one_verse(source, from, ext)?;
-        let (last, last_coarser) = self.one_verse(source, to, ext)?;
+    fn verses_span(&self, source: &str, from: &Point, to: &Point) -> Answer {
+        let (first, first_coarser) = self.one_verse(source, from)?;
+        let (last, last_coarser) = self.one_verse(source, to)?;
         let span = first.start.min(last.start)..first.end.max(last.end);
         let covered = self.addresses_covering(source, &span);
         let covers = match (covered.first(), covered.last()) {
@@ -112,11 +109,11 @@ impl Toc {
                         continue;
                     };
                     ends = Some(match ends {
-                        None => (from.clone(), to.clone()),
+                        None => (*from, *to),
                         Some((low, high)) => (
-                            if from < &low { from.clone() } else { low },
+                            if from < &low { *from } else { low },
                             if to.cmp_ends(&high).is_gt() {
-                                to.clone()
+                                *to
                             } else {
                                 high
                             },
@@ -127,12 +124,12 @@ impl Toc {
                 Address::Verses { from, to }
             }
             _ => Address::Verses {
-                from: from.clone(),
-                to: to.clone(),
+                from: *from,
+                to: *to,
             },
         };
         Ok(Resolution::Found {
-            opening: self.opening(source, span.start, ext),
+            opening: self.opening(span.start),
             span,
             covers,
             coarser: first_coarser || last_coarser,
@@ -163,13 +160,11 @@ impl Toc {
 
     /// Where one point is: the one unit covering it, or, for a whole verse the
     /// text divides into segments, its first segment to its last.
-    fn one_verse(
-        &self,
-        source: &str,
-        point: &Point,
-        ext: &Extensions,
-    ) -> Result<(Range<u32>, bool), Resolution> {
+    fn one_verse(&self, source: &str, point: &Point) -> Result<(Range<u32>, bool), Resolution> {
         let chapter = self.one_chapter(point.chapter)?;
+        if point.verse == 0 {
+            return self.title(chapter, point);
+        }
         let mut whole = Vec::new();
         let mut parts = Vec::new();
         let mut coarser = false;
@@ -192,7 +187,7 @@ impl Toc {
                 spans
                     .into_iter()
                     .map(|span| Candidate {
-                        opening: self.opening(source, span.start, ext),
+                        opening: self.opening(span.start),
                         span,
                     })
                     .collect(),
@@ -216,6 +211,32 @@ impl Toc {
                 Err(ambiguous(spans))
             }
         }
+    }
+
+    /// Verse 0: the chapter's title (`\d` before its first verse), as SRS
+    /// spells it (`PSA 7:0`). A segment of it is the whole title, coarser.
+    fn title(&self, chapter: &ChapterRow, point: &Point) -> Result<(Range<u32>, bool), Resolution> {
+        let rows = || self.titles_in(chapter);
+        match rows().count() {
+            0 => Err(missing(Missing::Verse, Some(chapter.span()))),
+            1 => Ok((rows().next().expect("one").span(), point.segment.is_some())),
+            _ => Err(Resolution::Ambiguous(
+                rows()
+                    .map(|title| Candidate {
+                        span: title.span(),
+                        opening: title.start,
+                    })
+                    .collect(),
+            )),
+        }
+    }
+
+    /// The title rows inside one chapter row, so a reopened chapter's titles
+    /// stay with their own row.
+    fn titles_in<'t>(&'t self, chapter: &'t ChapterRow) -> impl Iterator<Item = &'t TitleRow> + 't {
+        self.titles
+            .iter()
+            .filter(move |title| chapter.span().contains(&title.at))
     }
 
     /// Whether two units' parts of one whole verse share a place: `\v 3a` and
@@ -243,8 +264,9 @@ impl Toc {
         })
     }
 
-    /// Each verse of one chapter row with its extent, to the next `\v` or the
-    /// row's end.
+    /// Each verse of one chapter row with its span: its `\v` to the next
+    /// verse's tile (`start`), or the row's end. A heading before the next
+    /// verse is that verse's, so it is not in this span.
     fn verse_units<'t>(
         &'t self,
         chapter: &'t ChapterRow,
@@ -253,7 +275,7 @@ impl Toc {
         let high = self.verses.partition_point(|v| v.at < chapter.end);
         let verses = &self.verses[low..high];
         verses.iter().enumerate().map(move |(at, verse)| {
-            let end = verses.get(at + 1).map_or(chapter.end, |next| next.at);
+            let end = verses.get(at + 1).map_or(chapter.end, |next| next.start);
             (verse, verse.at..end)
         })
     }
@@ -304,7 +326,9 @@ impl Toc {
         let place = |number: u16, start: u32, end: u32| Point {
             chapter: chapter.number,
             verse: number,
-            segment: segment(source, start, end).map(|s| String::from_utf8_lossy(s).into_owned()),
+            // A segment that isn't one lowercase letter (`12ab`) reads as the
+            // whole verse here: degrade, never repair.
+            segment: segment(source, start, end).and_then(Segment::parse),
         };
         let mut from: Option<Point> = None;
         let mut to: Option<Point> = None;
@@ -338,7 +362,11 @@ impl Toc {
                 continue;
             }
             let mut verses = self.verse_units(chapter).peekable();
-            let head_end = verses.peek().map_or(chapter.end, |(verse, _)| verse.at);
+            let first_verse = verses.peek().map_or(chapter.end, |(verse, _)| verse.start);
+            let head_end = self
+                .titles_in(chapter)
+                .next()
+                .map_or(first_verse, |title| title.start.min(first_verse));
             if touches(&(chapter.start..head_end)) {
                 out.push(match (row, chapter.number) {
                     (0, _) => Address::Intro,
@@ -349,8 +377,17 @@ impl Toc {
                     },
                 });
             }
+            for title in self.titles_in(chapter) {
+                if touches(&(title.start..title.end)) {
+                    let zero = Point::verse(chapter.number, 0);
+                    out.push(Address::Verses {
+                        from: zero,
+                        to: zero,
+                    });
+                }
+            }
             for (verse, unit) in verses {
-                if touches(&unit) {
+                if touches(&(verse.start..unit.end)) {
                     out.push(self.unit_address(source.as_bytes(), chapter, verse));
                 }
             }
@@ -358,65 +395,18 @@ impl Toc {
         out
     }
 
-    /// Where the run of openers before the `\v` at `at` starts, walking back
-    /// no further than the previous `\v` or the chapter's `\c`. Only that
-    /// window is lexed.
-    fn opening(&self, source: &str, at: u32, ext: &Extensions) -> u32 {
-        let chapter = &self.chapters[self.chapter_row(at)];
-        let before = self.verses.partition_point(|v| v.at < at);
-        let low = before
-            .checked_sub(1)
-            .map(|previous| self.verses[previous].at)
-            .filter(|previous| *previous >= chapter.start)
-            .unwrap_or(chapter.start);
-        let window = &source[low as usize..at as usize];
-        let mut opening = at;
-        let mut pending_text = false;
-        for token in lex_with(window, ext).iter().rev() {
-            let bytes = &window.as_bytes()[token.start as usize..token.end() as usize];
-            let role = match token.kind() {
-                TokenKind::Marker { nested: false } => opener(token.marker_idx),
-                _ => None,
-            };
-            match (token.kind(), role) {
-                (_, Some(Opener::Heading)) => {
-                    opening = low + token.start;
-                    pending_text = false;
-                }
-                (_, Some(Opener::Line)) if !pending_text => opening = low + token.start,
-                (_, Some(Opener::Line)) => break,
-                (_, Some(Opener::ChapterHead)) => pending_text = false,
-                (
-                    TokenKind::Newline
-                    | TokenKind::Pad
-                    | TokenKind::Milestone { .. }
-                    | TokenKind::MilestoneTerminator
-                    | TokenKind::AttrList,
-                    None,
-                ) => {}
-                (TokenKind::Text, None) if bytes.iter().all(u8::is_ascii_whitespace) => {}
-                (TokenKind::Marker { .. }, None)
-                    if generated::kind(token.marker_idx) == MarkerKind::Milestone => {}
-                (TokenKind::Marker { .. }, None)
-                    if matches!(
-                        generated::kind(token.marker_idx),
-                        MarkerKind::Character | MarkerKind::Note
-                    ) =>
-                {
-                    pending_text = true;
-                }
-                (
-                    TokenKind::Text
-                    | TokenKind::ClosingMarker { .. }
-                    | TokenKind::NoteCaller
-                    | TokenKind::OptBreak
-                    | TokenKind::Designator,
-                    None,
-                ) => pending_text = true,
-                _ => break,
-            }
+    /// Where the tile of the verse whose `\v` is at `at` starts: the run of
+    /// openers before it, which the `Toc` walked when it was built. A title's
+    /// `\d` opens at its own tile the same way. `at` for anything else.
+    fn opening(&self, at: u32) -> u32 {
+        let row = self.verses.partition_point(|v| v.at < at);
+        if let Some(verse) = self.verses.get(row).filter(|verse| verse.at == at) {
+            return verse.start;
         }
-        opening
+        self.titles
+            .iter()
+            .find(|title| title.at == at)
+            .map_or(at, |title| title.start)
     }
 }
 
@@ -457,7 +447,8 @@ fn meet(source: &[u8], member: &VerseMember, point: &Point) -> Meet {
     let to_segment = segment(source, member.to_segment_start, member.to_segment_end)
         .filter(|_| verse == member.to);
     let cut = from_segment.is_some() || to_segment.is_some();
-    let Some(asked) = point.segment.as_deref().map(str::as_bytes) else {
+    let asked_letter = point.segment.map(|segment| [segment.byte()]);
+    let Some(asked) = asked_letter.as_ref().map(|letter| &letter[..]) else {
         return if cut { Meet::Part } else { Meet::Whole };
     };
     if from_segment.is_some_and(|low| asked < low) || to_segment.is_some_and(|high| asked > high) {
@@ -495,24 +486,4 @@ fn piece<'s>(source: &'s [u8], member: &VerseMember, verse: u16) -> Piece<'s> {
 /// A member's segment letters, `None` when none is written.
 fn segment(source: &[u8], start: u32, end: u32) -> Option<&[u8]> {
     (end > start).then(|| &source[start as usize..end as usize])
-}
-
-enum Opener {
-    /// Joins the run only with nothing but whitespace after it.
-    Line,
-    /// Joins the run with its text.
-    Heading,
-    /// Its text is its own; the run passes over it without starting there.
-    ChapterHead,
-}
-
-fn opener(marker: MarkerIdx) -> Option<Opener> {
-    match (generated::category(marker), generated::name(marker)) {
-        (_, "cl" | "cp" | "ca" | "cd") => Some(Opener::ChapterHead),
-        (_, "qa") => Some(Opener::Heading),
-        (Category::ParaTitlesSections, "mt" | "mte") => None,
-        (Category::ParaTitlesSections, _) => Some(Opener::Heading),
-        (Category::ParaBody | Category::ParaPoetry | Category::ParaLists, _) => Some(Opener::Line),
-        _ => None,
-    }
 }

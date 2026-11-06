@@ -118,8 +118,24 @@ case("opening: a chapter label is not an opener", s, V(P(1, 1)),
      found(at(s, "\\v 1"), L(s), V(P(1, 1)), opening=at(s, "\\p")))
 
 s = ID + "\\c 3\n\\d A psalm of David.\n\\q1 \\v 1 a\n"
-case("opening: a psalm title is an opener", s, V(P(3, 1)),
-     found(at(s, "\\v 1"), L(s), V(P(3, 1)), opening=at(s, "\\d")))
+case("opening: a psalm title is verse 0's, not verse 1's", s, V(P(3, 1)),
+     found(at(s, "\\v 1"), L(s), V(P(3, 1)), opening=at(s, "\\q1")))
+case("verse 0 is the chapter's title", s, V(P(3, 0)),
+     found(at(s, "\\d"), at(s, "\\q1"), V(P(3, 0))))
+case("a range from verse 0 covers the title", s, V(P(3, 0), P(3, 1)),
+     found(at(s, "\\d"), L(s), V(P(3, 0), P(3, 1))))
+case("verse 0 without a title is missing", A, V(P(1, 0)),
+     missing("verse", (at(A, "\\c 1"), at(A, "\\c 2"))))
+
+s = "\\id PSA\n\\c 7\n\\cl Psalm 7\n\\s1 Prayer for Deliverance\n\\d A Shiggaion\n\\q1\n\\v 1 O Yahweh\n"
+case("a heading above a title opens verse 0", s, V(P(7, 0)),
+     found(at(s, "\\d"), at(s, "\\q1"), V(P(7, 0)), opening=at(s, "\\s1")))
+
+s = ID + "\\c 1\n\\p\n\\v 13 helped him.\n\\s1 Jesus Calls\n\\r (Mt 4.12-22)\n\\p\n\\v 14 After John\n"
+case("a heading before the next verse is the next verse's", s, V(P(1, 13)),
+     found(at(s, "\\v 13"), at(s, "\\s1"), V(P(1, 13)), opening=at(s, "\\p")))
+case("a verse opens at the heading that introduces it", s, V(P(1, 14)),
+     found(at(s, "\\v 14"), L(s), V(P(1, 14)), opening=at(s, "\\s1")))
 
 s = ID + "\\c 1\n\\s1 Title\n\\p\n\\v 1 a\n\\p\n\\v 2 b\n"
 case("opening: a range opens where its first verse does", s, V(P(1, 1), P(1, 2)),
@@ -132,8 +148,8 @@ case("non-ASCII text: a heading opening", s, V(P(1, 1)),
      found(at(s, "\\v 1"), at(s, "\\v 2"), V(P(1, 1)), opening=at(s, "\\s1")))
 
 s = "\\id PSA\n\\c 3\n\\cl Psalm\n\\d \\zaln-s |x-strong=\"H4210\"\\*\\w A|x-occurrence=\"1\"\\w*\\zaln-e\\* psalm.\n\\q1 \\v 1 a\n"
-case("opening: a milestone inside a heading is transparent", s, V(P(3, 1)),
-     found(at(s, "\\v 1"), L(s), V(P(3, 1)), opening=at(s, "\\d")))
+case("opening: a milestone inside a heading is transparent", s, V(P(3, 0)),
+     found(at(s, "\\d"), at(s, "\\q1"), V(P(3, 0))))
 
 s = ID + "\\c 1\n\\p\n\\v 1 a\n\\s1 Head\n\\ts\\*\n\\p\n\\v 2 b\n"
 case("opening: a milestone between heading and paragraph is transparent", s, V(P(1, 2)),
@@ -141,7 +157,7 @@ case("opening: a milestone between heading and paragraph is transparent", s, V(P
 
 s = "\\id PSA\n\\c 5\n\\cl Psalm\n\\d For the director.\n\n\\ts\\*\n\\q1 \\v 1 a\n"
 case("opening: a milestone after a psalm title is transparent", s, V(P(5, 1)),
-     found(at(s, "\\v 1"), L(s), V(P(5, 1)), opening=at(s, "\\d")))
+     found(at(s, "\\v 1"), L(s), V(P(5, 1)), opening=at(s, "\\q1")))
 
 s = "\\id PSA\n\\c 1\n\\ms Book One\n\\cl Psalm\n\\q1 \\v 1 a\n"
 case("opening: a chapter label between openers is transparent", s, V(P(1, 1)),

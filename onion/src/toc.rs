@@ -6,7 +6,7 @@
 //! \mt1 Genesis       chapters = [ 0: 0..24,  ← front matter is chapter 0
 //! \c 1                            1: 24..46, label "1" ]
 //! \p                 verses   = [ at 33, chapter 1, 1..1, label "1", members [1] ]
-//! \v 1 In the…       locate(40) = "GEN 1:1"   locate(10) = "GEN"
+//! \v 1 In the…       locate(40) = "GEN 1:1"   locate(10) = "GEN 0"
 //!
 //! \v 1,3,5 …         verse 1..5, label "1,3,5", members [1] [3] [5]   ← holes at 2 and 4
 //! \v 12a …           verse 12..12, label "12a", members [12a]          ← a place inside 12
@@ -27,11 +27,27 @@
 //! Chapter rows TILE `0..source.len()`, which is what makes [`Toc::locate`]
 //! total: every byte lands in some chapter, and the bytes before the first `\c`
 //! land in chapter 0 (a book-only sid, never a fabricated verse).
+//!
+//! Verse rows tile each chapter after its head. A verse's tile STARTS at the
+//! run of openers before its `\v` (its paragraph marker, and any heading above
+//! it), so a heading belongs to the verse it introduces, never to the one it
+//! follows:
+//!
+//! ```text
+//! \v 13 … helped him.       verse 13
+//! \s1 Jesus Calls Four       verse 14's tile starts here
+//! \p
+//! \v 14 After John …         verse 14's `at`
+//! ```
+//!
+//! The walk is `resolve.md`'s opening rule. It never passes the previous `\v`
+//! or the chapter's `\c` (chapters stay hard breaks), and never takes in a
+//! chapter title (`\d`), which is verse 0's own row.
 
 use crate::designator::{self, Designator};
 use crate::scanner::payload_label;
-use crate::tables::generated;
-use crate::tables::schema::MarkerKind;
+use crate::tables::generated::{self, MarkerIdx};
+use crate::tables::schema::{Category, MarkerKind};
 use crate::token::{Token, TokenKind};
 
 /// One chapter's number and the source bytes it covers.
@@ -76,20 +92,27 @@ pub struct ChapterRow {
 /// Byte layout — `#[repr(C)]`, 28 bytes, stride 28:
 ///
 /// ```text
-/// 0  u32  at            first byte of the `\v` marker — where the verse starts
-/// 4  u32  token         that marker's token index
-/// 8  u32  label_start   the designator as written, minus its folded delimiter
-/// 12 u32  label_end
-/// 16 u32  members_from  this verse's run in `Toc::members`
-/// 20 u16  chapter       the enclosing chapter row's `number`
-/// 22 u16  first         lowest verse the designator names
-/// 24 u16  last          highest — `first == last` unless this is a bridge
-/// 26 u16  members_len   how many members the run holds; 0 when malformed
+/// 0  u32  at            first byte of the `\v` marker
+/// 4  u32  start         first byte of the verse's tile: the openers before
+///                       `at` (its `\p`, a heading above it), else `at`
+/// 8  u32  token         that marker's token index
+/// 12 u32  label_start   the designator as written, minus its folded delimiter
+/// 16 u32  label_end
+/// 20 u32  members_from  this verse's run in `Toc::members`
+/// 24 u16  chapter       the enclosing chapter row's `number`
+/// 26 u16  first         lowest verse the designator names
+/// 28 u16  last          highest — `first == last` unless this is a bridge
+/// 30 u16  members_len   how many members the run holds; 0 when malformed
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(C)]
 pub struct VerseAnchor {
+    /// The `\v` marker's first byte.
     pub at: u32,
+    /// Where the verse's tile begins: the run of openers directly before `at`
+    /// (resolve.md's opening), or `at` itself mid-paragraph. The tile runs to
+    /// the next verse's `start`, or the chapter's end.
+    pub start: u32,
     pub token: u32,
     /// The designator's LABEL in the source, as [`ChapterRow::label_start`]:
     /// `6a`, `1,3,5`, or the malformed `7"`. Empty at the marker's end when
@@ -150,19 +173,25 @@ pub struct VerseMember {
 /// and gets no row, and so does a title written as `\d \v 1 …`, which
 /// numbers itself.
 ///
-/// Byte layout — `#[repr(C)]`, 12 bytes, stride 12:
+/// Its tile is verse 0's: it starts at the headings above the `\d`, as a
+/// verse's does, and verse 1's tile starts after it. So `PSA 3:0` resolves to
+/// it, and verse 1 never takes the title in.
+///
+/// Byte layout — `#[repr(C)]`, 16 bytes, stride 16:
 ///
 /// ```text
 /// 0  u32  at       first byte of the `\d` marker
-/// 4  u32  end      the next paragraph, chapter or verse marker, or the
+/// 4  u32  start    first byte of its tile: the headings before `at`, else `at`
+/// 8  u32  end      the next paragraph, chapter or verse marker, or the
 ///                  chapter's end
-/// 8  u16  chapter  the enclosing chapter row's `number`
-/// 10      —        2 bytes of trailing padding
+/// 12 u16  chapter  the enclosing chapter row's `number`
+/// 14      —        2 bytes of trailing padding
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(C)]
 pub struct TitleRow {
     pub at: u32,
+    pub start: u32,
     pub end: u32,
     pub chapter: u16,
 }
@@ -177,9 +206,9 @@ impl TitleRow {
 // shape a wasm consumer would read, so the widths are pinned here rather than
 // rediscovered there.
 const _: () = assert!(size_of::<ChapterRow>() == 24);
-const _: () = assert!(size_of::<VerseAnchor>() == 28);
+const _: () = assert!(size_of::<VerseAnchor>() == 32);
 const _: () = assert!(size_of::<VerseMember>() == 20);
-const _: () = assert!(size_of::<TitleRow>() == 12);
+const _: () = assert!(size_of::<TitleRow>() == 16);
 
 impl ChapterRow {
     pub fn span(&self) -> core::ops::Range<u32> {
@@ -213,9 +242,10 @@ impl VerseAnchor {
 /// GEN 1:1     first == last
 /// MRK 6:1-3   a bridge reports its WHOLE range; a renderer that wants
 ///             ebible's first-verse keying reads `first` itself
-/// GEN 1       inside a chapter, ahead of its first verse (or on a verse
-///             whose designator was malformed)
-/// GEN         chapter 0 — front matter names no chapter and no verse
+/// GEN 1       inside a chapter's head, ahead of its first verse's tile (or
+///             on a verse whose designator was malformed)
+/// GEN 0       chapter 0 — the front matter, SRS's spelling of the intro.
+///             `GEN` alone is the whole book, which no byte is.
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Sid {
@@ -236,10 +266,10 @@ impl core::fmt::Display for Sid {
         let code = book_str(&self.book);
         let code = if code.is_empty() { UNKNOWN_BOOK } else { &code };
         f.write_str(code)?;
+        write!(f, " {}", self.chapter)?;
         if self.chapter == 0 {
             return Ok(());
         }
-        write!(f, " {}", self.chapter)?;
         match (self.first, self.last) {
             (0, _) => Ok(()),
             (first, last) if first == last => write!(f, ":{first}"),
@@ -304,7 +334,7 @@ pub fn toc(source: &[u8], tokens: &[Token]) -> Toc {
 
     for (row, token) in tokens.iter().enumerate() {
         if let TokenKind::Marker { nested: false } = token.kind() {
-            title_bookkeeping(&mut out, &mut open_title, source, token);
+            title_bookkeeping(&mut out, &mut open_title, source, tokens, row);
         }
         match token.kind() {
             // No marker lookup needed: `BookCode` belongs to exactly one row,
@@ -355,6 +385,7 @@ pub fn toc(source: &[u8], tokens: &[Token]) -> Toc {
                         }));
                     out.verses.push(VerseAnchor {
                         at: token.start,
+                        start: tile_start(source, tokens, row, &out.titles),
                         token: row as u32,
                         label_start,
                         label_end,
@@ -378,7 +409,14 @@ pub fn toc(source: &[u8], tokens: &[Token]) -> Toc {
 /// opens one at a `\d` that comes before its chapter's first `\v`. Runs
 /// before the marker itself is indexed, so a `\c` closes the previous
 /// chapter's title at its own first byte.
-fn title_bookkeeping(out: &mut Toc, open_title: &mut Option<usize>, source: &[u8], token: &Token) {
+fn title_bookkeeping(
+    out: &mut Toc,
+    open_title: &mut Option<usize>,
+    source: &[u8],
+    tokens: &[Token],
+    row: usize,
+) {
+    let token = &tokens[row];
     let kind = generated::kind(token.marker_idx);
     if !matches!(
         kind,
@@ -409,11 +447,96 @@ fn title_bookkeeping(out: &mut Toc, open_title: &mut Option<usize>, source: &[u8
     let before_first_verse = out.verses.last().is_none_or(|v| v.at < chapter.start);
     if before_first_verse {
         *open_title = Some(out.titles.len());
+        let start = tile_start(source, tokens, row, &out.titles);
         out.titles.push(TitleRow {
             at: token.start,
+            start,
             end: chapter.end,
             chapter: chapter.number,
         });
+    }
+}
+
+/// Where the tile of the verse whose `\v` is token `row` begins: resolve.md's
+/// opening rule, walked back over the tokens already lexed.
+///
+/// - A LINE OPENER (`\p`, `\q1`, `\b`, …) joins the run only when nothing but
+///   whitespace lies between it and the run; text after one means the verse
+///   starts mid-paragraph.
+/// - A HEADING (`\s1`, `\r`, `\ms`, `\qa`, …) joins with its text, notes and
+///   character markup.
+/// - Milestones, attribute lists and the chapter-head markers (`\cl`, `\cp`,
+///   `\ca`, `\cd`) are passed over without starting there.
+/// - Anything else stops it: the previous `\v`'s text, a `\c`, a book title
+///   (`\mt#`), and a chapter title (`\d`), which is verse 0's own row.
+fn tile_start(source: &[u8], tokens: &[Token], row: usize, titles: &[TitleRow]) -> u32 {
+    let mut start = tokens[row].start;
+    let mut pending_text = false;
+    for token in tokens[..row].iter().rev() {
+        let bytes = &source[token.start as usize..token.end() as usize];
+        let role = match token.kind() {
+            TokenKind::Marker { nested: false } => opener(token.marker_idx),
+            _ => None,
+        };
+        match (token.kind(), role) {
+            (_, Some(Opener::Heading)) if titles.iter().any(|t| t.at == token.start) => break,
+            (_, Some(Opener::Heading)) => {
+                start = token.start;
+                pending_text = false;
+            }
+            (_, Some(Opener::Line)) if !pending_text => start = token.start,
+            (_, Some(Opener::Line)) => break,
+            (_, Some(Opener::ChapterHead)) => pending_text = false,
+            (
+                TokenKind::Newline
+                | TokenKind::Pad
+                | TokenKind::Milestone { .. }
+                | TokenKind::MilestoneTerminator
+                | TokenKind::AttrList,
+                None,
+            ) => {}
+            (TokenKind::Text, None) if bytes.iter().all(u8::is_ascii_whitespace) => {}
+            (TokenKind::Marker { .. }, None)
+                if generated::kind(token.marker_idx) == MarkerKind::Milestone => {}
+            (TokenKind::Marker { .. }, None)
+                if matches!(
+                    generated::kind(token.marker_idx),
+                    MarkerKind::Character | MarkerKind::Note
+                ) =>
+            {
+                pending_text = true;
+            }
+            (
+                TokenKind::Text
+                | TokenKind::ClosingMarker { .. }
+                | TokenKind::NoteCaller
+                | TokenKind::OptBreak
+                | TokenKind::Designator,
+                None,
+            ) => pending_text = true,
+            _ => break,
+        }
+    }
+    start
+}
+
+enum Opener {
+    /// Joins the run only with nothing but whitespace after it.
+    Line,
+    /// Joins the run with its text.
+    Heading,
+    /// Its text is its own; the run passes over it without starting there.
+    ChapterHead,
+}
+
+fn opener(marker: MarkerIdx) -> Option<Opener> {
+    match (generated::category(marker), generated::name(marker)) {
+        (_, "cl" | "cp" | "ca" | "cd") => Some(Opener::ChapterHead),
+        (_, "qa") => Some(Opener::Heading),
+        (Category::ParaTitlesSections, "mt" | "mte") => None,
+        (Category::ParaTitlesSections, _) => Some(Opener::Heading),
+        (Category::ParaBody | Category::ParaPoetry | Category::ParaLists, _) => Some(Opener::Line),
+        _ => None,
     }
 }
 
@@ -451,17 +574,17 @@ impl Toc {
             .map(ChapterRow::span)
     }
 
-    /// The verse whose extent covers `src_byte`, or `None` for a byte in front
-    /// matter or ahead of its chapter's first verse.
+    /// The verse whose tile covers `src_byte`, or `None` for a byte in front
+    /// matter or in its chapter's head, ahead of the first verse's tile.
     ///
-    /// A verse runs from its own `\v` to the next `\v` or `\c` — so the answer
-    /// is the last anchor at or before the byte, unless that anchor belongs to
-    /// an earlier chapter.
+    /// A verse's tile runs from its `start` to the next verse's `start` or the
+    /// `\c` — so the answer is the last tile starting at or before the byte,
+    /// unless that tile belongs to an earlier chapter.
     pub fn verse_at(&self, src_byte: u32) -> Option<&VerseAnchor> {
-        let candidate = self.verses.partition_point(|v| v.at <= src_byte);
+        let candidate = self.verses.partition_point(|v| v.start <= src_byte);
         let anchor = self.verses.get(candidate.checked_sub(1)?)?;
         let chapter = &self.chapters[self.chapter_row(src_byte)];
-        (anchor.at >= chapter.start).then_some(anchor)
+        (anchor.start >= chapter.start).then_some(anchor)
     }
 
     /// What a verse row's designator covers, in written order.
@@ -648,10 +771,10 @@ mod tests {
     }
 
     #[test]
-    fn a_chapter_zero_byte_locates_to_the_book_alone() {
+    fn a_front_matter_byte_locates_to_chapter_0() {
         let source = "\\id GEN\n\\c 1\n\\p \\v 1 a\n";
-        assert_eq!(sid(source, 0), "GEN");
-        assert_eq!(sid(source, 7), "GEN");
+        assert_eq!(sid(source, 0), "GEN 0");
+        assert_eq!(sid(source, 7), "GEN 0");
         assert_eq!(sid(source, 8), "GEN 1");
         assert_eq!(sid(source, 20), "GEN 1:1");
     }
@@ -742,28 +865,106 @@ mod tests {
         assert_eq!(built("\\id gen\n").book, *b"gen");
         assert_eq!(built("\\id GENESIS\n").book, *b"GEN");
         assert_eq!(built("\\id 1\n").book, [b'1', 0, 0]);
-        assert_eq!(built("\\id 1\n").locate(0).to_string(), "1");
+        assert_eq!(built("\\id 1\n").locate(0).to_string(), "1 0");
         // Later `\id`s are ordinary tokens.
         assert_eq!(built("\\id GEN\n\\id EXO\n").book, *b"GEN");
     }
 
     #[test]
-    fn verse_extents_run_to_the_next_verse_or_chapter() {
+    fn verse_tiles_run_to_the_next_tile_or_chapter() {
         let source = "\\id GEN\n\\c 1\n\\p \\v 1 a \\v 2 b\n\\c 2\n\\s head\n\\p \\v 1 c\n";
         let toc = built(source);
-        // Chapter 2's heading is inside chapter 2 but ahead of its first verse.
+        // Chapter 2's heading introduces its first verse, so it is in that tile;
+        // only the `\c 2` line is the chapter's head.
         let heading = source.find("\\s head").unwrap() as u32;
-        assert!(toc.verse_at(heading).is_none());
-        assert_eq!(toc.locate(heading).to_string(), "GEN 2");
-        assert_eq!(toc.locate(source.len() as u32 - 2).to_string(), "GEN 2:1");
-        // Every anchor round-trips through the byte it names.
+        assert_eq!(toc.locate(heading).to_string(), "GEN 2:1");
+        let head = source.find("\\c 2").unwrap() as u32 + 2;
+        assert!(toc.verse_at(head).is_none());
+        assert_eq!(toc.locate(head).to_string(), "GEN 2");
+        // Every anchor round-trips through both the byte it names and its tile's
+        // first byte.
         for anchor in &toc.verses {
-            let sid = toc.locate(anchor.at);
-            assert_eq!(
-                (sid.chapter, sid.first, sid.last),
-                (anchor.chapter, anchor.first, anchor.last)
-            );
+            for byte in [anchor.at, anchor.start] {
+                let sid = toc.locate(byte);
+                assert_eq!(
+                    (sid.chapter, sid.first, sid.last),
+                    (anchor.chapter, anchor.first, anchor.last)
+                );
+            }
         }
+    }
+
+    /// Each verse's tile as text, `start..` the next tile or the chapter's end.
+    fn tiles(source: &str) -> Vec<(u16, &str)> {
+        let toc = built(source);
+        toc.verses
+            .iter()
+            .enumerate()
+            .map(|(i, v)| {
+                let chapter = &toc.chapters[toc.chapter_row(v.at)];
+                let end = toc
+                    .verses
+                    .get(i + 1)
+                    .map_or(chapter.end, |next| next.start)
+                    .min(chapter.end);
+                (v.first, text(source, v.start, end))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_heading_and_paragraph_go_with_the_verse_they_introduce() {
+        let source = "\\id MRK\n\\c 1\n\\p\n\\v 13 helped him.\n\\s1 Jesus Calls\n\\r (Mt 4.12)\n\\p\n\\v 14 After John\n";
+        assert_eq!(
+            tiles(source),
+            [
+                (13, "\\p\n\\v 13 helped him.\n"),
+                (
+                    14,
+                    "\\s1 Jesus Calls\n\\r (Mt 4.12)\n\\p\n\\v 14 After John\n"
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn mid_paragraph_a_tile_starts_at_its_verse() {
+        let source = "\\id GEN\n\\c 1\n\\q1 \\v 1 one\n\\q2 two\n\\q1 \\v 2 three \\v 3 four\n";
+        assert_eq!(
+            tiles(source),
+            [
+                (1, "\\q1 \\v 1 one\n\\q2 two\n"),
+                (2, "\\q1 \\v 2 three "),
+                (3, "\\v 3 four\n"),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_chapter_is_a_hard_break() {
+        // The heading before `\c 2` stays with chapter 1's last verse; a chapter
+        // label is passed over without starting the tile.
+        let source = "\\id GEN\n\\c 1\n\\p \\v 1 a\n\\s1 Late\n\\c 2\n\\cl Two\n\\p\n\\v 1 b\n";
+        assert_eq!(
+            tiles(source),
+            [(1, "\\p \\v 1 a\n\\s1 Late\n"), (1, "\\p\n\\v 1 b\n")]
+        );
+    }
+
+    #[test]
+    fn a_title_is_verse_zeros_tile_and_verse_one_starts_after_it() {
+        let source =
+            "\\id PSA\n\\c 7\n\\cl Psalm 7\n\\s1 Prayer\n\\d A Shiggaion\n\\q1\n\\v 1 O Yahweh\n";
+        let toc = built(source);
+        let title = toc.titles[0];
+        assert_eq!(
+            text(source, title.start, title.end),
+            "\\s1 Prayer\n\\d A Shiggaion\n"
+        );
+        assert_eq!(tiles(source), [(1, "\\q1\n\\v 1 O Yahweh\n")]);
+        // A `\d` that numbers itself is no title, and joins verse 1's tile.
+        let source = "\\id PSA\n\\c 3\n\\d \\v 1 A psalm.\n";
+        assert_eq!(tiles(source), [(1, "\\d \\v 1 A psalm.\n")]);
     }
 
     #[test]
@@ -798,7 +999,7 @@ mod tests {
         let source = "\\id GEN\n\\c 1\n\\p \\v 1 a\n";
         assert_eq!(sid(source, source.len() as u32), "GEN 1:1");
         assert_eq!(sid(source, u32::MAX), "GEN 1:1");
-        assert_eq!(built("").locate(u32::MAX).to_string(), "###");
+        assert_eq!(built("").locate(u32::MAX).to_string(), "### 0");
     }
 
     #[test]
@@ -812,8 +1013,9 @@ mod tests {
     #[test]
     fn rows_are_fixed_width() {
         assert_eq!(size_of::<ChapterRow>(), 24);
-        assert_eq!(size_of::<VerseAnchor>(), 28);
+        assert_eq!(size_of::<VerseAnchor>(), 32);
         assert_eq!(size_of::<VerseMember>(), 20);
+        assert_eq!(size_of::<TitleRow>(), 16);
     }
 
     fn text(source: &str, start: u32, end: u32) -> &str {
