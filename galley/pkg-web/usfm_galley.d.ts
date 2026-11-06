@@ -190,6 +190,19 @@ export interface CiteOptions {
     held?: string[];
 }
 
+/** `JSON.parse(parseSrs(text))`: a reference in the Scripture Referencing Standard's full spelling. */
+export type SrsParse =
+| { ok: true; canonical: string; within: (BookAddress | null)[] }
+| { ok: false; error: string; at: number };
+
+/** `JSON.parse(galley.srsLocate(id, ref))`. */
+export type SrsLocation =
+| { found: { from: number; to: number } }
+| { missing: "verse" | "chapter" | "introduction" | "word" | "character" | "element" | "attribute" }
+| { ambiguous: true }
+| { unsupported: "named reference" | "book" }
+| { error: string; at: number };
+
 /** What a reading took for granted. */
 export type CiteAssumption = { kind: "prefix"; word: string; book: string } | { kind: "comma" };
 
@@ -763,6 +776,24 @@ export class Galley {
      */
     sourceNodeFor(target_id: string, source_id: string, address: BlockAddress, opts?: OverlayOptions): string;
     /**
+     * The SRS spelling of a span of one registered book's text, or
+     * `undefined` outside any verse; offsets in bytes unless `utf16`.
+     */
+    srsAt(id: string, from: number, to: number, opts?: ResolveOptions): string | undefined;
+    /**
+     * [`srsAt`](Self::srs_at) over text the host holds.
+     */
+    srsAtOf(text: string, from: number, to: number, opts?: ResolveTextOptions): string | undefined;
+    /**
+     * Where an SRS reference is in one registered book's text (`JON 2:8!2-4`,
+     * `JON 1:13!f!5`, `MAT 1:1!5+2`), as JSON; offsets in bytes unless `utf16`.
+     */
+    srsLocate(id: string, reference: string, opts?: ResolveOptions): string;
+    /**
+     * [`srsLocate`](Self::srs_locate) over text the host holds.
+     */
+    srsLocateOf(text: string, reference: string, opts?: ResolveTextOptions): string;
+    /**
      * The structure recipe's text, the verse-text mask's sibling. No book
      * retains a structure projection, so this door takes text only.
      */
@@ -1116,6 +1147,14 @@ export function parse(text: string, opts?: ParseTextOptions): Uint8Array;
 export function parseReference(text: string, opts?: { book?: string }): string;
 
 /**
+ * A reference in the standard's full spelling, read: `{ ok: true, canonical,
+ * within }`, where `within` is the basic reference each range lies in (a
+ * `BookAddress`, or `null` for a named reference, `end`, or a range across
+ * books), or `{ ok: false, error, at }` with a UTF-16 offset.
+ */
+export function parseSrs(text: string): string;
+
+/**
  * Where an address is in one text, as JSON: found, missing or ambiguous,
  * never a silent nearest. The rules are `onion/src/resolve.md`, the cases
  * `testData/resolve/cases.json`, whose `expect` is this door's answer.
@@ -1302,6 +1341,10 @@ export interface InitOutput {
     readonly galley_skeleton: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly galley_sniff: (a: number, b: number) => [number, number, number, number];
     readonly galley_sourceNodeFor: (a: number, b: number, c: number, d: number, e: number, f: any, g: number) => [number, number, number, number];
+    readonly galley_srsAt: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+    readonly galley_srsAtOf: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+    readonly galley_srsLocate: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+    readonly galley_srsLocateOf: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly galley_structureTextOf: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly galley_targetNodeFor: (a: number, b: number, c: number, d: number, e: number, f: any, g: number) => [number, number, number, number];
     readonly galley_toc: (a: number, b: number, c: number, d: number) => [number, number, number, number];
@@ -1311,6 +1354,7 @@ export interface InitOutput {
     readonly galley_verseText: (a: number, b: number, c: number) => [number, number, number, number];
     readonly galley_verseTextOf: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly parseReference: (a: number, b: number, c: number) => [number, number, number, number];
+    readonly parseSrs: (a: number, b: number) => [number, number];
     readonly showReference: (a: any, b: number, c: number, d: number, e: number) => [number, number, number, number];
     readonly __wbg_edits_free: (a: number, b: number) => void;
     readonly __wbg_formatopts_free: (a: number, b: number) => void;

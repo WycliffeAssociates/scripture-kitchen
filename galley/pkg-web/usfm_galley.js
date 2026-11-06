@@ -1273,6 +1273,110 @@ export class Galley {
         }
     }
     /**
+     * The SRS spelling of a span of one registered book's text, or
+     * `undefined` outside any verse; offsets in bytes unless `utf16`.
+     * @param {string} id
+     * @param {number} from
+     * @param {number} to
+     * @param {ResolveOptions} [opts]
+     * @returns {string | undefined}
+     */
+    srsAt(id, from, to, opts) {
+        const ptr0 = passStringToWasm0(id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.galley_srsAt(this.__wbg_ptr, ptr0, len0, from, to, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        let v2;
+        if (ret[0] !== 0) {
+            v2 = getStringFromWasm0(ret[0], ret[1]);
+            wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        }
+        return v2;
+    }
+    /**
+     * [`srsAt`](Self::srs_at) over text the host holds.
+     * @param {string} text
+     * @param {number} from
+     * @param {number} to
+     * @param {ResolveTextOptions} [opts]
+     * @returns {string | undefined}
+     */
+    srsAtOf(text, from, to, opts) {
+        const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.galley_srsAtOf(this.__wbg_ptr, ptr0, len0, from, to, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        let v2;
+        if (ret[0] !== 0) {
+            v2 = getStringFromWasm0(ret[0], ret[1]);
+            wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        }
+        return v2;
+    }
+    /**
+     * Where an SRS reference is in one registered book's text (`JON 2:8!2-4`,
+     * `JON 1:13!f!5`, `MAT 1:1!5+2`), as JSON; offsets in bytes unless `utf16`.
+     * @param {string} id
+     * @param {string} reference
+     * @param {ResolveOptions} [opts]
+     * @returns {string}
+     */
+    srsLocate(id, reference, opts) {
+        let deferred4_0;
+        let deferred4_1;
+        try {
+            const ptr0 = passStringToWasm0(id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ptr1 = passStringToWasm0(reference, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len1 = WASM_VECTOR_LEN;
+            const ret = wasm.galley_srsLocate(this.__wbg_ptr, ptr0, len0, ptr1, len1, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
+            var ptr3 = ret[0];
+            var len3 = ret[1];
+            if (ret[3]) {
+                ptr3 = 0; len3 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred4_0 = ptr3;
+            deferred4_1 = len3;
+            return getStringFromWasm0(ptr3, len3);
+        } finally {
+            wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+        }
+    }
+    /**
+     * [`srsLocate`](Self::srs_locate) over text the host holds.
+     * @param {string} text
+     * @param {string} reference
+     * @param {ResolveTextOptions} [opts]
+     * @returns {string}
+     */
+    srsLocateOf(text, reference, opts) {
+        let deferred4_0;
+        let deferred4_1;
+        try {
+            const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ptr1 = passStringToWasm0(reference, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len1 = WASM_VECTOR_LEN;
+            const ret = wasm.galley_srsLocateOf(this.__wbg_ptr, ptr0, len0, ptr1, len1, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
+            var ptr3 = ret[0];
+            var len3 = ret[1];
+            if (ret[3]) {
+                ptr3 = 0; len3 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred4_0 = ptr3;
+            deferred4_1 = len3;
+            return getStringFromWasm0(ptr3, len3);
+        } finally {
+            wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+        }
+    }
+    /**
      * The structure recipe's text, the verse-text mask's sibling. No book
      * retains a structure projection, so this door takes text only.
      * @param {string} text
@@ -2458,6 +2562,29 @@ export function parseReference(text, opts) {
         return getStringFromWasm0(ptr2, len2);
     } finally {
         wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+    }
+}
+
+/**
+ * A reference in the standard's full spelling, read: `{ ok: true, canonical,
+ * within }`, where `within` is the basic reference each range lies in (a
+ * `BookAddress`, or `null` for a named reference, `end`, or a range across
+ * books), or `{ ok: false, error, at }` with a UTF-16 offset.
+ * @param {string} text
+ * @returns {string}
+ */
+export function parseSrs(text) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.parseSrs(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
     }
 }
 
