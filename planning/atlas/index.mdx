@@ -33,7 +33,8 @@ One Rust workspace, two products, one JS package, and the libraries around them.
 - **Shared domain libraries**, one implementation per concept for Sefer and the hub:
   - [[canon]]: book identity, names and [[versification]];
   - [[bento]]: RC, Burrito and Writer manifests, read, checked, created and edited;
-  - [[bttwriter]]: Writer repos replayed into one git pack.
+  - [[bttwriter]]: Writer repos replayed into one git pack;
+  - [[reference]]: a place in scripture spelled for machines, the Scripture Referencing Standard's basic reference.
 
   canon ships as plain TypeScript; bento and bttwriter each ship as their own wasm module, under subpaths of the same npm package.
 
@@ -42,7 +43,7 @@ One Rust workspace, two products, one JS package, and the libraries around them.
 | level | what | start with |
 | --- | --- | --- |
 | 0 | products and consumers | [[onion-engine]], [[sous-chef]], [[galley-package]], [[sefer]] (one host) |
-| 1 | crates, and who may depend on whom | [[mise]], [[ticket]], [[onion]], [[galley]], [[sous-core]], [[canon]], [[bento]], [[bttwriter]] |
+| 1 | crates, and who may depend on whom | [[mise]], [[ticket]], [[onion]], [[galley]], [[sous-core]], [[canon]], [[bento]], [[bttwriter]], [[reference]] |
 | 2 | primitives and workflows | [[cst]], [[toc]], [[mask]], [[chunk]], [[pantry]] |
 | 3 | wires: bytes that cross to JS | [[wire]], [[plate]], [[dish]] |
 

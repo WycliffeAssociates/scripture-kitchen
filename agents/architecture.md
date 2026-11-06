@@ -7,6 +7,7 @@
     mise ◄── canon ◄── canon-gen (never published)
              canon ◄── galley (galley::versification: onion's facts, canon's sniff)
     mise, canon ◄── bento ◄── bttwriter (mise, canon too)
+    mise, canon ◄── reference
 
 - `onion` / `onion-wasm` / `galley` are the engine. `sous-core` / `sous-cli`
   (under `sous-chef/`) are the other product. `GLOSSARY.md` is onion's only;
@@ -54,6 +55,14 @@
   holding bento's manifests). No I/O and no git library on the default
   features. It depends on `bento`, `canon` and `mise`. Plan (done):
   `planning/items/2026-11-05-writer-consolidation-saves-in-one-git-pack-out.mdx`.
+- `reference/` is a place in scripture spelled for machines: the Scripture
+  Referencing Standard's basic reference (`MAT 1:20-2:3; MRK 1:1`), read
+  strictly into `mise::Address` with byte-offset errors, and written back.
+  Contextual references (`24` after `ROM 3:21`), one-chapter books, and `end`
+  given a canon scheme. Translation prefixes and word, character and marker
+  references are refused by name: they belong to a future `srs` crate. No text
+  and no onion; onion's `Sid::address` converts the TOC's answer. Plan:
+  `planning/items/2026-11-05-referencing-one-address-its-spellings-and-srs-as-i.mdx`.
 - bento and bttwriter each build their own wasm module (`./wasm-build.sh
   bento`, `./wasm-build.sh bttwriter`) and ship as `./bento` and
   `./bttwriter` subpaths of the npm package, TypeScript over a web-target

@@ -1,0 +1,67 @@
+---
+term: reference
+slug: reference
+aliases: [machine spelling, SRS basic reference, Scripture Referencing Standard, parse_in, contextual reference]
+kind: crate
+crate: reference
+files: [reference/src/lib.rs, reference/src/tests.rs, reference/fixtures/hub-srs-cases.json, mise/src/address.rs]
+related: [mise, canon, resolve, toc]
+level: 1
+summary: "A place in scripture, spelled for machines: the Scripture Referencing Standard's basic reference (MAT 1:20-2:3; MRK 1:1), read strictly into mise's Address and written back."
+---
+
+## The problem
+
+An `Address` gets stored, sent and logged, so it needs one written form. The kitchen's own code disagreed on that form: `mise`'s docs wrote the introduction as `GEN intro`, while Sefer wrote `GEN 0`. Sefer, the Kotlin hub and the helps spike each parsed references their own way.
+
+## The solution
+
+The USFM committee's Scripture Referencing Standard (version 1.0, released 2026) already spells everything an `Address` holds. This crate reads and writes its BASIC reference: a book code, a chapter, a verse with an optional one-letter part, ranges and lists.
+
+- `GEN 0` is the introduction.
+- `PSA 7:0` is a Psalm's title.
+- `LUK 11:2b` is a verse part.
+- `MAT 1:20-2:3; MRK 1:1` is a list.
+
+It is strict. One spelling is accepted, and anything else is an error with its byte offset, never a guess.
+
+## Trade-offs
+
+- **Strict.** A person's `rom 9:1` or `Romans 9:1` is a citation, which is a different, lenient reader (still to come). Here `rom 9:1` is "expected a book code".
+- **Only the basic reference.** Translation prefixes (`en+ulb.`) and word, character and marker references (`!3`, `!s`) are their own address space. They are refused by name, to be handled by a later `srs` crate.
+- **One-chapter books are written with their chapter** (`JUD 1:3`). The standard reads a bare `JUD 3` as verse 3, and so does this crate, but writing `JUD 1:3` reads the same in any reader.
+- **`end`, and range checks, need a versification.** Pass a canon scheme. Without one, `end` is refused and numbers aren't checked.
+
+## Show me
+
+```rust
+use reference::{parse, parse_in, format};
+let refs = parse("ROM 3:21, 24-26; JUD 3")?;   // ROM 3:21, ROM 3:24-26, JUD 1:3
+format(&refs);                                 // "ROM 3:21; ROM 3:24-26; JUD 1:3"
+parse_in(mat, "5:3-12")?;                      // MAT 5:3-12: the book from context
+parse("ROM 9:1-GEN 1:1");                      // Err(DifferentBook at 8)
+parse("MRK 1:14!s");                           // Err(NotBasic at 8): srs's
+```
+
+## How it works
+
+- **Context is the parent of the reference before**, as the standard says:
+  - after `ROM 3:21`, `24` is a verse;
+  - after `ROM 9`, `10` is a chapter;
+  - `4:1` is always a chapter and verse of the same book;
+  - a bare `b` after `11:2a` is a part of verse 2.
+- **The result is mise's `Address`**: `Book`, `Intro`, `Chapters` or `Verses` of `Point`s. A `Point`'s segment is one lowercase letter (`mise::Segment`), so an `Address` holds no heap and is `Copy`.
+- **The TOC's answer converts too.** onion's `Sid::address` gives `(BookKey, Address)`, so nothing outside onion needs `Sid`.
+- **Fixtures.** The tests run the standard's examples and the Kotlin hub's 52 parse, list and invalid cases. Each of the 19 the crate answers differently on purpose (strictness, srs parts, one-chapter books) is listed with its reason.
+
+## Composes with
+
+Depends on [[mise]] (`Address`, `Point`, `Segment`, `BookKey`) and [[canon]] (which codes are books; given a scheme, chapter and verse counts). [[resolve]] answers whether a text has the place. Galley's doors for Sefer, and the lenient `cite`, are the next steps in the plan.
+
+## Where
+
+- [[code:reference/src/lib.rs]] · `parse`, `parse_in`, `parse_with`, `format`, the rules
+- [[code:reference/src/tests.rs]] · the standard's examples and the hub's cases
+- [[code:mise/src/address.rs#Segment]] · one letter
+- [[code:onion/src/toc.rs#Sid::address]] · the TOC's answer as an `Address`
+- [[code:planning/items/2026-11-05-referencing-one-address-its-spellings-and-srs-as-i.mdx|plan]]

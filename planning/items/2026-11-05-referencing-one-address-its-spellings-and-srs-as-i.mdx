@@ -354,8 +354,14 @@ words, characters or markers, and `reference` stays small without them.
 
 1. **The spelling decision** (done 2026-11-06): SRS basic as the machine spelling; `mise`'s
    docs now say `GEN 0`.
-2. **`reference` with `parse`/`format`/`parseIn`** (machine spelling) and the `Sid`
-   conversion, with `Point.segment` as one letter. Nothing here waits on canon.
+2. **`reference` with `parse`/`format`/`parseIn`** (done 2026-11-06, in Rust): the
+   `reference/` crate, `mise::Segment`, and `Sid::address` in onion rather than
+   `reference.sid` (reference depends on no text and no onion). The hub's 52 parse, list
+   and invalid cases run as fixtures; the 19 we answer differently are listed with why:
+   strictness (`rom 9:1`, spaces around `:`), srs's parts (prefixes, `!`), and one-chapter
+   books written with their chapter (`JUD 1:3`, where the hub writes `JUD 3`). The hub's
+   range operations (split per chapter, overlap, verse lists) aren't ported: no caller
+   here needs them yet. The JS surface comes with step 4.
 3. **`cite`/`show`** with English names and Sefer's fixtures, then localized names when
    canon's step 6 lands.
 4. **galley doors**, so Sefer switches `citation.ts` and `names.ts`. This goes with canon's

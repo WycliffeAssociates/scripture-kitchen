@@ -256,6 +256,28 @@ pub struct Sid {
     pub last: u16,
 }
 
+impl Sid {
+    /// The place as an [`Address`](mise::address::Address), with the book as
+    /// written: chapter 0 is the introduction, a chapter with no verse is the
+    /// chapter, and a verse range is its verses. The way from the TOC's cheap
+    /// answer to the address every other crate speaks.
+    pub fn address(&self) -> (mise::books::BookKey, mise::address::Address) {
+        use mise::address::{Address, Point};
+        let address = match (self.chapter, self.first) {
+            (0, _) => Address::Intro,
+            (chapter, 0) => Address::Chapters {
+                from: chapter,
+                to: chapter,
+            },
+            (chapter, first) => Address::Verses {
+                from: Point::verse(chapter, first),
+                to: Point::verse(chapter, self.last),
+            },
+        };
+        (mise::books::BookKey::new(self.book), address)
+    }
+}
+
 /// Rendered when the book code is absent: a sid still has to name SOMETHING,
 /// and three question marks read as "unknown book" where three NUL bytes read
 /// as a corrupted string.
@@ -910,6 +932,27 @@ mod tests {
                 (v.first, text(source, v.start, end))
             })
             .collect()
+    }
+
+    #[test]
+    fn a_sid_is_an_address() {
+        use mise::address::{Address, Point};
+        let source = "\\id MRK\n\\c 6\n\\p \\v 1 a \\v 2-4 b\n";
+        let toc = built(source);
+        let at = |needle: &str| toc.locate(source.find(needle).unwrap() as u32).address();
+        let mrk = mise::books::BookKey::new(*b"MRK");
+        assert_eq!(at("\\id"), (mrk, Address::Intro));
+        assert_eq!(at("\\c 6"), (mrk, Address::Chapters { from: 6, to: 6 }));
+        assert_eq!(
+            at("\\v 2-4"),
+            (
+                mrk,
+                Address::Verses {
+                    from: Point::verse(6, 2),
+                    to: Point::verse(6, 4)
+                }
+            )
+        );
     }
 
     #[test]
