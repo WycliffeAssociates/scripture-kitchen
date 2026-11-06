@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const TABLES: [&str; 7] = [
+const TABLES: [&str; 8] = [
     "src/tables.rs",
     "ts/tables.ts",
     "src/scheme_tables.rs",
@@ -12,6 +12,7 @@ const TABLES: [&str; 7] = [
     "src/sniff_tables.rs",
     "src/fold_tables.rs",
     "src/name_tables.rs",
+    "src/nfd_tables.rs",
 ];
 
 /// One module per locale: the same set of files, each reproduced.
@@ -62,4 +63,18 @@ fn assert_reproduces(fresh: &Path, committed: &Path) {
         "{} is stale; run `cargo run -p canon-gen`",
         committed.display()
     );
+}
+
+/// `canon::nfd_len` against the Unicode library itself, for every scalar.
+#[test]
+fn nfd_len_counts_every_character_as_nfd_does() {
+    use unicode_normalization::UnicodeNormalization;
+    for c in (0..=0x10FFFF_u32).filter_map(char::from_u32) {
+        assert_eq!(
+            canon::nfd_len(c),
+            std::iter::once(c).nfd().count(),
+            "U+{:04X}",
+            c as u32
+        );
+    }
 }

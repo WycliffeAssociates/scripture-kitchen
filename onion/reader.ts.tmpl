@@ -931,7 +931,9 @@ export class Toc {
    * The chapter:verse address containing `pos` — the reverse index, and
    * onion's `Toc::locate`. Chapters tile, so the chapter is a binary search;
    * the verse is the last TILE starting at or before `pos` within it, so a
-   * heading answers for the verse it introduces.
+   * heading answers for the verse it introduces. `verse` is 0 for a byte in
+   * a chapter's head, its `\\d` title included: 0 here means "no verse", as in
+   * onion's `Sid`. Telling a title (`PSA 7:0`) apart is `Toc::address_at`'s.
    */
   at(pos: number): { chapter: number; verse: number } | null {
     const chapters = this.chapterRows;

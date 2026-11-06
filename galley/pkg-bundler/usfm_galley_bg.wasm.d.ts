@@ -1,6 +1,7 @@
 /* tslint:disable */
 /* eslint-disable */
 export const memory: WebAssembly.Memory;
+export const __wbg_citations_free: (a: number, b: number) => void;
 export const __wbg_fingerprint_free: (a: number, b: number) => void;
 export const __wbg_galley_free: (a: number, b: number) => void;
 export const __wbg_get_soussettings_book_rate: (a: number) => number;
@@ -64,9 +65,15 @@ export const __wbg_set_soussettings_word_support_floor: (a: number, b: number) =
 export const __wbg_set_soussettings_z_long: (a: number, b: number) => void;
 export const __wbg_set_soussettings_z_short: (a: number, b: number) => void;
 export const __wbg_soussettings_free: (a: number, b: number) => void;
+export const citations_booksMatching: (a: number, b: number, c: number) => [number, number];
+export const citations_new: (a: number) => [number, number, number];
+export const citations_read: (a: number, b: number, c: number, d: number) => [number, number, number, number];
 export const fingerprint_changedChunks: (a: number, b: number) => [number, number];
 export const fingerprint_chunkCount: (a: number) => number;
 export const fingerprint_differsFrom: (a: number, b: number) => number;
+export const formatReference: (a: any) => [number, number, number, number];
+export const galley_addressAt: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
+export const galley_addressAtOf: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
 export const galley_changedSinceUpdate: (a: number, b: number, c: number, d: number, e: number) => [number, number];
 export const galley_config: (a: number) => number;
 export const galley_defineScheme: (a: number, b: number, c: number, d: any) => [number, number];
@@ -101,6 +108,10 @@ export const galley_setConfig: (a: number, b: number) => void;
 export const galley_skeleton: (a: number, b: number, c: number, d: number) => [number, number, number, number];
 export const galley_sniff: (a: number, b: number) => [number, number, number, number];
 export const galley_sourceNodeFor: (a: number, b: number, c: number, d: number, e: number, f: any, g: number) => [number, number, number, number];
+export const galley_srsAt: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+export const galley_srsAtOf: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+export const galley_srsLocate: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+export const galley_srsLocateOf: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
 export const galley_structureTextOf: (a: number, b: number, c: number, d: number) => [number, number, number, number];
 export const galley_targetNodeFor: (a: number, b: number, c: number, d: number, e: number, f: any, g: number) => [number, number, number, number];
 export const galley_toc: (a: number, b: number, c: number, d: number) => [number, number, number, number];
@@ -109,6 +120,9 @@ export const galley_update: (a: number, b: number, c: number, d: number, e: numb
 export const galley_updateReference: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
 export const galley_verseText: (a: number, b: number, c: number) => [number, number, number, number];
 export const galley_verseTextOf: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+export const parseReference: (a: number, b: number, c: number) => [number, number, number, number];
+export const parseSrs: (a: number, b: number) => [number, number];
+export const showReference: (a: any, b: number, c: number, d: number, e: number) => [number, number, number, number];
 export const __wbg_edits_free: (a: number, b: number) => void;
 export const __wbg_formatopts_free: (a: number, b: number) => void;
 export const __wbg_get_formatopts_block_marker_own_line: (a: number) => number;
@@ -172,4 +186,5 @@ export const __externref_table_alloc: () => number;
 export const __wbindgen_externrefs: WebAssembly.Table;
 export const __externref_table_dealloc: (a: number) => void;
 export const __wbindgen_free: (a: number, b: number, c: number) => void;
+export const __externref_drop_slice: (a: number, b: number) => void;
 export const __wbindgen_start: () => void;

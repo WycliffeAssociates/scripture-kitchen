@@ -62,7 +62,7 @@ show(&refs[0], "Mateo", "introducción");                  // "Mateo 5:3-7"
 
 ## Composes with
 
-Depends on [[mise]] (`Address`, `Point`, `Segment`, `BookKey`) and [[canon]] (which codes are books; given a scheme, chapter and verse counts). [[resolve]] answers whether a text has the place. Galley's doors, so Sefer can switch, are the next step in the plan.
+Depends on [[mise]] (`Address`, `Point`, `Segment`, `BookKey`) and [[canon]] (which codes are books; given a scheme, chapter and verse counts). [[resolve]] answers whether a text has the place, and `Toc::address_at` the place at a byte. JavaScript reaches all of it through the [[galley-package]]: `parseReference`, `formatReference`, `showReference`, the `Citations` reader, and `Galley.addressAt`.
 
 ## Where
 

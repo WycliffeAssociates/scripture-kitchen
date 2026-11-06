@@ -22,12 +22,23 @@ fn in_own_process(test: &str) -> bool {
         .split_once("::")
         .map_or(module_path!(), |(_, path)| path);
     let name = format!("{path}::{test}");
-    let status = std::process::Command::new(std::env::current_exe().expect("the test binary"))
+    let child = std::process::Command::new(std::env::current_exe().expect("the test binary"))
         .args([name.as_str(), "--exact", "--test-threads=1"])
         .env(ALONE, "1")
-        .status()
+        .output()
         .expect("the test binary runs");
-    assert!(status.success(), "{name} failed in its own process");
+    let report = String::from_utf8_lossy(&child.stdout);
+    assert!(
+        child.status.success(),
+        "{name} failed in its own process:\n{report}{}",
+        String::from_utf8_lossy(&child.stderr)
+    );
+    // A renamed test whose name here was not renamed would match nothing, and
+    // an empty run exits 0: insist that exactly this test ran.
+    assert!(
+        report.contains("test result: ok. 1 passed"),
+        "{name} ran no test in its own process:\n{report}"
+    );
     false
 }
 

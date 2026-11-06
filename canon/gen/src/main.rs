@@ -56,6 +56,7 @@ fn main() -> ExitCode {
         fold_rust_out,
         names_rust_out,
         names_ts_dir,
+        nfd_rust_out,
     ] = match std::env::args_os().nth(1).map(PathBuf::from) {
         Some(dir) => OUTPUTS.map(|path| dir.join(path.rsplit('/').next().unwrap_or(path))),
         None => OUTPUTS.map(|path| canon_dir.join(path)),
@@ -142,6 +143,10 @@ fn main() -> ExitCode {
             fold::rust(&fold::table(), &fold::classes(), &fold_header),
         ),
         (names_rust_out, names::rust(&locales, &names_header)),
+        (
+            nfd_rust_out,
+            fold::nfd_rust(&fold::nfd_lengths(), &fold_header.replace("NFKD", "NFD")),
+        ),
     ]);
     for (path, body) in &writes {
         if let Err(e) = std::fs::write(path, body) {
@@ -247,7 +252,7 @@ fn name_index(rows: &[Row]) -> Result<Vec<(String, u8)>, String> {
 /// Where each table goes, relative to `canon/`. With a directory argument,
 /// each goes into it under its file name instead.
 /// The last is a directory: one TypeScript module per locale.
-const OUTPUTS: [&str; 8] = [
+const OUTPUTS: [&str; 9] = [
     "src/tables.rs",
     "ts/tables.ts",
     "src/scheme_tables.rs",
@@ -256,6 +261,7 @@ const OUTPUTS: [&str; 8] = [
     "src/fold_tables.rs",
     "src/name_tables.rs",
     "ts/names",
+    "src/nfd_tables.rs",
 ];
 
 const HEADER: &str =

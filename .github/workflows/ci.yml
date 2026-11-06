@@ -118,6 +118,9 @@ jobs:
       - name: galley sous conformance
         run: node galley/tests/sous_conformance.mjs galley/pkg-node testData/exampleCorpora/en_ulb
 
+      - name: galley reference conformance
+        run: node galley/tests/reference_conformance.mjs galley/pkg-node
+
       # Every .ts the package ships, type-checked as Sefer compiles it (Sefer
       # checks them as its own source). The compiler is pinned in
       # tools/typecheck to Sefer's; the settings are ../../tsconfig.json.
@@ -479,8 +482,14 @@ jobs:
           # that key breaks git-tag consumers, who have no wa-cargo configured,
           # so it is added only here, for the upload.
           git ls-files '*Cargo.toml' | xargs sed -i -E 's/(\{ path = "[^"]+", version = "[^"]+")/\1, registry = "wa-cargo"/'
-          for crate in mise canon reference bento bttwriter ticket usfm_onion onion-wasm sous-core usfm_galley; do
-            path="${crate:0:2}/${crate:2:2}/${crate}"
+          for crate in mise canon reference srs bento bttwriter ticket usfm_onion onion-wasm sous-core usfm_galley; do
+            # The sparse index's layout: 1/x, 2/xy, 3/x/xyz, then ab/cd/abcd…
+            case ${#crate} in
+              1) path="1/${crate}" ;;
+              2) path="2/${crate}" ;;
+              3) path="3/${crate:0:1}/${crate}" ;;
+              *) path="${crate:0:2}/${crate:2:2}/${crate}" ;;
+            esac
             if curl -sf -H "Authorization: $token" "$index/$path" | grep -q "\"vers\":\"$want\""; then
               echo "$crate $want is already on wa-cargo"
               continue

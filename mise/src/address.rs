@@ -81,6 +81,13 @@ impl Point {
         }
     }
 
+    /// Whether a range from `self` to `to` runs backwards: `to` starts AND ends
+    /// before `self` starts. `5a-5` (to the end of verse 5) and `5-5b` run
+    /// forwards; `5b-5a` and `5-4` don't.
+    pub fn runs_back_to(&self, to: &Point) -> bool {
+        to < self && to.cmp_ends(self).is_lt()
+    }
+
     /// Where two places END, in order: a whole verse runs past each of its
     /// segments, so `3` ends after `3b`, where as starts `3` sorts first.
     pub fn cmp_ends(&self, other: &Point) -> Ordering {
@@ -129,6 +136,19 @@ mod tests {
         assert_eq!(whole.cmp_ends(&seg(1, 3, "b")), Ordering::Greater);
         assert_eq!(seg(1, 3, "a").cmp_ends(&seg(1, 3, "b")), Ordering::Less);
         assert!(seg(1, 3, "b") < Point::verse(1, 4));
+    }
+
+    #[test]
+    fn a_range_runs_back_only_when_its_end_is_wholly_before_its_start() {
+        let five = Point::verse(1, 5);
+        assert!(
+            !seg(1, 5, "a").runs_back_to(&five),
+            "5a-5 runs to the end of 5"
+        );
+        assert!(!five.runs_back_to(&seg(1, 5, "b")), "5-5b");
+        assert!(seg(1, 5, "b").runs_back_to(&seg(1, 5, "a")), "5b-5a");
+        assert!(five.runs_back_to(&Point::verse(1, 4)), "5-4");
+        assert!(!five.runs_back_to(&five));
     }
 
     #[test]

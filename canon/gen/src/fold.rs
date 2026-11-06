@@ -43,6 +43,33 @@ pub fn classes() -> Vec<(char, u8)> {
         .collect()
 }
 
+/// Every character whose canonical decomposition (NFD) is longer than one
+/// character, with its length. Hangul syllables are arithmetic, as in `fold`.
+pub fn nfd_lengths() -> Vec<(char, u8)> {
+    (0..=0x10FFFF_u32)
+        .filter(|cp| !HANGUL.contains(cp))
+        .filter_map(char::from_u32)
+        .filter_map(|c| {
+            let len = std::iter::once(c).nfd().count();
+            (len > 1).then(|| (c, u8::try_from(len).expect("an NFD under 256 characters")))
+        })
+        .collect()
+}
+
+pub fn nfd_rust(lengths: &[(char, u8)], header: &str) -> String {
+    let mut out = format!("// {header}\n\n");
+    out.push_str(
+        "/// Each character whose NFD is more than one character, with how many,\n\
+         /// sorted for binary search. Hangul syllables are `nfd_len`'s arithmetic.\n",
+    );
+    out.push_str("#[rustfmt::skip]\npub(crate) static NFD_LEN: &[(char, u8)] = &[\n");
+    for (c, len) in lengths {
+        let _ = writeln!(out, "    ({c:?}, {len}),");
+    }
+    out.push_str("];\n");
+    out
+}
+
 pub fn rust(table: &[(char, String)], classes: &[(char, u8)], header: &str) -> String {
     let mut out = format!("// {header}\n\n");
     out.push_str(

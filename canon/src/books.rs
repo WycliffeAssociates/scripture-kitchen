@@ -204,6 +204,23 @@ fn js_space(c: char) -> bool {
     )
 }
 
+/// How many characters `c` is in NFD, the canonical decomposition: 1 for most,
+/// 2 for `é` (e and a combining acute), 2 or 3 for a Hangul syllable. The
+/// Scripture Referencing Standard counts a word's characters this way, so a
+/// reference can name one diacritic.
+pub fn nfd_len(c: char) -> usize {
+    const S_BASE: u32 = 0xAC00;
+    const T_COUNT: u32 = 28;
+    const N_COUNT: u32 = 21 * T_COUNT;
+    let syllable = u32::from(c).wrapping_sub(S_BASE);
+    if syllable < 19 * N_COUNT {
+        return if syllable % T_COUNT == 0 { 2 } else { 3 };
+    }
+    crate::nfd_tables::NFD_LEN
+        .binary_search_by(|(from, _)| from.cmp(&c))
+        .map_or(1, |at| usize::from(crate::nfd_tables::NFD_LEN[at].1))
+}
+
 /// NFKD's canonical ordering: each run of combining marks sorted, stably, by
 /// combining class. Arabic writes shadda (33) before fatha (30); NFKD, and so
 /// Sefer, puts fatha first.

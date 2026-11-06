@@ -1,0 +1,66 @@
+---
+term: srs
+slug: srs
+aliases: [Scripture Referencing Standard, SRS, word reference, character reference, marker reference, srsLocate, srsAt]
+kind: crate
+crate: srs
+files: [srs/src/lib.rs, srs/src/parse.rs, srs/src/tests.rs, galley/src/srs.rs, galley/src/srs/tests.rs, canon/src/nfd_tables.rs]
+related: [reference, galley-package, toc, resolve]
+level: 1
+summary: "The USFM Scripture Referencing Standard in full: words, characters (in NFD), notes, headings, elements and attributes below the verse, read and written, and located in a text by galley."
+---
+
+## The problem
+
+USFM's own `\ref loc` and `@vid`, and tools such as usfmtc, point below the verse: "the third word of MAT 2:1", "the fifth word of 1:13's footnote". They do this for a reader who doesn't have our bytes, so it can't be an offset. The Scripture Referencing Standard (version 1.0) is that spelling.
+
+## The solution
+
+Two halves:
+- **The `srs` crate is the grammar.** It reads everything the standard writes and writes it back:
+  - translation prefixes (`en+ulb.`);
+  - words (`!3`) and characters (`!5+6`, with `+` for the gap after one);
+  - elements (`!f`, `!s1`, `!q1[2]`, `!s[-1]`) and attributes (`@strong`);
+  - named references (`NEH t:Israel/6/1`).
+- **galley locates a reference in a text and spells a span as one.** Our tools keep source spans, and SRS only crosses the edge. Every SRS reference becomes a span, and back.
+
+## Trade-offs
+
+- **Locating needs the text, so it lives in galley**, on onion's tokens. The grammar crate has no text.
+- **A word is a run of non-space characters, and any marker ends one**, as the standard says. That's simple and the same in every script, but it isn't linguistic.
+- **Characters are counted in NFD** (`canon::nfd_len`, generated from Unicode and checked against it for every code point). A reference to an accent answers the source character that holds it, since bytes can't split one.
+- **Named references are read but not located:** onion holds no `aid` anchors yet.
+
+## Show me
+
+```js
+galley.srsLocate("books/JON.usfm", "JON 2:8!2-4", { utf16: true });   // {"found":{"from":…,"to":…}}  "who cling to"
+galley.srsLocate("books/JON.usfm", "JON 1:13!f!5");                   // "dug", in the footnote
+galley.srsAt("books/JON.usfm", from, to, { utf16: true });            // "JON 2:8!2-4"
+JSON.parse(parseSrs("en+ulb.ROM 9:1!3-5"));                           // { ok, canonical, within: [ROM 9:1] }
+```
+
+## How it works
+
+- **Context is the standard's rule.** A number with `:` is a chapter and verse, one with `+` a word, and one with `!` or `@` a verse. Otherwise it's at the level of the reference before, so `MAT 2:1!3-5` is words 3 to 5 and `MAT 2:1!3-2!4` runs to verse 2's fourth word.
+- **One walk over the tokens** builds the elements (paragraphs, notes, character spans, verses, milestones) and the words, each word with its note and paragraph.
+- **A verse's words are its scripture.** Notes are counted on their own (`!f!5`), and a heading paragraph's words are its own (`!s1!2`). The verse span is the [[toc]]'s tile, found by [[resolve]].
+- **An element step looks in three places, in order:**
+  1. for a paragraph marker, the headings and titles just before the paragraph the range starts in;
+  2. elements that start inside the range;
+  3. the paragraph containing the range's start (`LUK 8:10!p`).
+
+  A word reaches on to the next word, so the note after it is its note (`1:13!5!f`).
+- **Tests:** usfmtc's Jonah cases, every worked example in the standard (Appendix 3's Psalm 78, the notes, attributes and paragraphs sections), NFD characters, and `spell` as `locate`'s inverse. galley's `reference_conformance.mjs` runs them from JavaScript.
+
+## Composes with
+
+Narrows a [[reference]]: `SrsRange::reference` gives the basic reference a range lies within. Located through [[resolve]] and the [[toc]]'s tiles; served by the [[galley-package]].
+
+## Where
+
+- [[code:srs/src/lib.rs]] · the types, the writer, `SrsRange::reference`
+- [[code:srs/src/parse.rs]] · the grammar
+- [[code:galley/src/srs.rs]] · `locate`, `spell`
+- [[code:galley/src/wasm/reference.rs]] · `parseSrs`, `srsLocate`, `srsAt`
+- [[code:planning/items/2026-11-05-referencing-one-address-its-spellings-and-srs-as-i.mdx|plan]]

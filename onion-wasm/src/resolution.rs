@@ -99,7 +99,9 @@ pub fn json(answer: &Resolution, table: Option<&Utf16Table>) -> String {
     value.to_string()
 }
 
-fn address_json(address: &Address) -> Value {
+/// An address as the JSON `resolve` answers with: Sefer's `Address` shape,
+/// without its book.
+pub fn address_json(address: &Address) -> Value {
     let point = |point: &Point| {
         let mut out = json!({ "chapter": point.chapter, "verse": point.verse });
         if let Some(segment) = &point.segment {

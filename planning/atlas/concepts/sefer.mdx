@@ -5,7 +5,7 @@ aliases: [the editor host]
 kind: product
 crate: workspace
 files: [galley/src/wasm.md, onion/src/resolve.md, planning/roadmap.mdx]
-related: [galley-package, resolve, census, findings-snapshot, find-buffer, mask-map, canon, bento, bttwriter]
+related: [galley-package, resolve, census, findings-snapshot, find-buffer, mask-map, canon, bento, bttwriter, reference, srs]
 level: 0
 summary: "The browser USFM editor, in its own repo, that vendors the galley package and calls it per keystroke."
 ---
@@ -35,7 +35,7 @@ JSON.parse(galley.resolve("books/LUK.usfm", verse, { utf16: true }));
 
 ## Composes with
 
-Reads the [[galley-package]]'s wires: [[dish]], [[census]], [[find-buffer]], [[mask-map]], [[findings-snapshot]]; and [[resolve]]'s JSON. Calls [[bento]] and [[bttwriter]] once it switches to them; `planning/items/2026-11-05-sefer-adopts-bento-and-bttwriter-what-moves-what-s.mdx` lists what moves.
+Reads the [[galley-package]]'s wires: [[dish]], [[census]], [[find-buffer]], [[mask-map]], [[findings-snapshot]]; and [[resolve]]'s JSON. Calls [[bento]] and [[bttwriter]] once it switches to them; `planning/items/2026-11-05-sefer-adopts-bento-and-bttwriter-what-moves-what-s.mdx` lists what moves. Its next upgrade (from 0.1.20) also brings [[reference]]'s citations and `addressAt`, and verse tiles under `diff` and `resolve`: `planning/items/2026-11-06-sefer-on-the-kitchen-after-0-1-20-what-changes-und.mdx` is the checklist.
 
 ## Where
 

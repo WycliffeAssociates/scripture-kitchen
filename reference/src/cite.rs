@@ -68,6 +68,33 @@ impl Catalogue {
         }
     }
 
+    /// Only the book table's English names and aliases, and each code: no
+    /// locale's names, so a wasm build that never calls [`Catalogue::new`]
+    /// links none of canon's name tables. A host adds the names it has (the
+    /// project's own, its heart and UI languages') with [`Catalogue::name`].
+    pub fn english() -> Catalogue {
+        let books = canon::books(canon::Canon::All)
+            .map(|book| {
+                let mut folded: Vec<String> = Vec::new();
+                let names = std::iter::once(book.english)
+                    .chain(book.aliases.iter().copied())
+                    .map(str::to_string)
+                    .chain(std::iter::once(book.code.to_string()));
+                for name in names {
+                    let name = canon::fold(&name);
+                    if !name.is_empty() && !folded.contains(&name) {
+                        folded.push(name);
+                    }
+                }
+                (book.code, folded)
+            })
+            .collect();
+        Catalogue {
+            books,
+            intro: vec!["intro".to_string(), "introduction".to_string()],
+        }
+    }
+
     /// A name the project uses for a book, or a registered abbreviation
     /// (`Mt`, `Matt`). Matched like canon's, folded.
     pub fn name(&mut self, book: BookKey, name: &str) -> &mut Catalogue {
@@ -209,6 +236,20 @@ pub enum Problem {
     Zero,
     /// A range whose end comes before its start.
     Backwards,
+}
+
+impl Problem {
+    /// Sefer's `CitationProblem` names: `unknown-book`, `no-book`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Problem::Empty => "empty",
+            Problem::UnknownBook => "unknown-book",
+            Problem::NoBook => "no-book",
+            Problem::Malformed => "malformed",
+            Problem::Zero => "zero",
+            Problem::Backwards => "backwards",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -526,7 +567,7 @@ fn item_address(start: Ref, end: Option<Ref>) -> Result<Address, CiteError> {
         });
     }
     let (from, to) = (point(&start), point(&end));
-    if to < from {
+    if from.runs_back_to(&to) {
         return Err(CiteError::of(Problem::Backwards));
     }
     Ok(Address::Verses { from, to })

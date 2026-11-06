@@ -89,6 +89,12 @@
    "label": "reference",
    "level": 1,
    "parent": null
+  },
+  {
+   "id": "srs",
+   "label": "srs",
+   "level": 1,
+   "parent": null
   }
  ],
  "nodes": [
@@ -706,6 +712,19 @@
    "weight": 2,
    "x": 2650,
    "y": 2290,
+   "w": 300,
+   "h": 100
+  },
+  {
+   "id": "srs",
+   "label": "srs",
+   "level": 1,
+   "group": "srs",
+   "kind": "crate",
+   "slug": "srs",
+   "weight": 2,
+   "x": 2650,
+   "y": 1960,
    "w": 300,
    "h": 100
   }
@@ -1376,6 +1395,20 @@
    "from": "reference",
    "to": "canon",
    "label": "which codes are books; counts for end",
+   "level": 1,
+   "kind": "depends"
+  },
+  {
+   "from": "srs",
+   "to": "reference",
+   "label": "Address, Segment, the basic reference",
+   "level": 1,
+   "kind": "depends"
+  },
+  {
+   "from": "galley",
+   "to": "srs",
+   "label": "locate, spell",
    "level": 1,
    "kind": "depends"
   }

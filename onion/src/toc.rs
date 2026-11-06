@@ -89,7 +89,7 @@ pub struct ChapterRow {
 
 /// Where one `\v` sits, and which verses it names.
 ///
-/// Byte layout — `#[repr(C)]`, 28 bytes, stride 28:
+/// Byte layout — `#[repr(C)]`, 32 bytes, stride 32:
 ///
 /// ```text
 /// 0  u32  at            first byte of the `\v` marker
@@ -259,8 +259,11 @@ pub struct Sid {
 impl Sid {
     /// The place as an [`Address`](mise::address::Address), with the book as
     /// written: chapter 0 is the introduction, a chapter with no verse is the
-    /// chapter, and a verse range is its verses. The way from the TOC's cheap
-    /// answer to the address every other crate speaks.
+    /// chapter, and a verse range is its verses.
+    ///
+    /// A `Sid`'s verse 0 means "no verse", so a byte in a chapter's title
+    /// reports the chapter here. [`Toc::address_at`] tells the title apart
+    /// (`PSA 7:0`, as resolve reads it) and is the answer to give a caller.
     pub fn address(&self) -> (mise::books::BookKey, mise::address::Address) {
         use mise::address::{Address, Point};
         let address = match (self.chapter, self.first) {
@@ -932,6 +935,73 @@ mod tests {
                 (v.first, text(source, v.start, end))
             })
             .collect()
+    }
+
+    #[test]
+    fn a_title_byte_is_verse_0_and_the_head_is_the_chapter() {
+        use mise::address::{Address, Point};
+        let source =
+            "\\id PSA\n\\c 7\n\\cl Psalm 7\n\\s1 Prayer\n\\d A Shiggaion\n\\q1\n\\v 1 O Yahweh\n";
+        let toc = built(source);
+        let at = |needle: &str| {
+            toc.address_at(source, source.find(needle).unwrap() as u32)
+                .1
+        };
+        let zero = Point::verse(7, 0);
+        assert_eq!(at("\\id"), Address::Intro);
+        assert_eq!(at("\\cl"), Address::Chapters { from: 7, to: 7 });
+        assert_eq!(
+            at("\\s1"),
+            Address::Verses {
+                from: zero,
+                to: zero
+            }
+        );
+        assert_eq!(
+            at("Shiggaion"),
+            Address::Verses {
+                from: zero,
+                to: zero
+            }
+        );
+        let one = Point::verse(7, 1);
+        assert_eq!(at("\\q1"), Address::Verses { from: one, to: one });
+        // And resolve finds the same bytes for 7:0 that answer 7:0 here.
+        let crate::resolve::Resolution::Found { opening, span, .. } = toc.resolve(
+            source,
+            &Address::Verses {
+                from: zero,
+                to: zero,
+            },
+        ) else {
+            panic!("7:0 found");
+        };
+        for byte in opening..span.end {
+            assert_eq!(
+                toc.address_at(source, byte).1,
+                Address::Verses {
+                    from: zero,
+                    to: zero
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn a_byte_in_a_verse_part_is_the_part() {
+        use mise::address::{Address, Point, Segment};
+        let source = "\\id LUK\n\\c 1\n\\p \\v 3a a \\v 3b b\n";
+        let toc = built(source);
+        let b = Point {
+            chapter: 1,
+            verse: 3,
+            segment: Segment::new(b'b'),
+        };
+        let byte = source.find(" b\n").unwrap() as u32;
+        assert_eq!(
+            toc.address_at(source, byte).1,
+            Address::Verses { from: b, to: b }
+        );
     }
 
     #[test]

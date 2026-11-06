@@ -105,6 +105,29 @@ pub enum ErrorKind {
     NotBasic,
 }
 
+impl ErrorKind {
+    /// A stable kebab-case name, for a wire or a log: `unknown-book`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ErrorKind::Empty => "empty",
+            ErrorKind::ExpectedBook => "expected-book",
+            ErrorKind::UnknownBook => "unknown-book",
+            ErrorKind::NoReferenceBefore => "no-reference-before",
+            ErrorKind::ExpectedVerse => "expected-verse",
+            ErrorKind::RangeEnd => "range-end",
+            ErrorKind::Unexpected => "unexpected",
+            ErrorKind::DifferentBook => "different-book",
+            ErrorKind::Backwards => "backwards",
+            ErrorKind::MixedRange => "mixed-range",
+            ErrorKind::IntroHasNoVerses => "intro-has-no-verses",
+            ErrorKind::EndNeedsScheme => "end-needs-scheme",
+            ErrorKind::ChapterOutOfRange => "chapter-out-of-range",
+            ErrorKind::VerseOutOfRange => "verse-out-of-range",
+            ErrorKind::NotBasic => "not-basic",
+        }
+    }
+}
+
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let what = match self.kind {
@@ -491,11 +514,14 @@ impl Reader<'_, '_> {
             .iter()
             .take_while(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'+' | b'_'))
             .count();
+        // A book code has a capital: `4:100` is a chapter and verse, not a
+        // prefix `4` before a code `100`.
         id > 0
             && matches!(bytes.get(id), Some(b'.' | b':'))
             && bytes.get(id + 1..id + 4).is_some_and(|code| {
                 code.iter()
                     .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
+                    && code.iter().any(u8::is_ascii_uppercase)
             })
     }
 
@@ -530,6 +556,11 @@ impl Reader<'_, '_> {
             at: end.at,
         };
         match (start.chapter, start_point, end_point) {
+            // The introduction has no verses and starts no range: `JUD 0-3`.
+            (Some(_), Pointed::Chapter(0), _) => Err(Error {
+                kind: ErrorKind::IntroHasNoVerses,
+                at: start.at,
+            }),
             (None, _, _) => Err(Error {
                 kind: ErrorKind::MixedRange,
                 at: end.at,
@@ -547,7 +578,7 @@ impl Reader<'_, '_> {
                 }
             }
             (_, Pointed::Verse(from), Pointed::Verse(to)) => {
-                if to < from {
+                if from.runs_back_to(&to) {
                     Err(backwards)
                 } else {
                     Ok(Address::Verses { from, to })

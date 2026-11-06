@@ -1,0 +1,122 @@
+---
+id: 52faebc7-ee3c-498b-a8d8-68b43602459b
+title: "Sefer on the kitchen after 0.1.20: what changes under it, and what it can delete"
+kind: plan
+status: planned
+created: 2026-11-06
+updated: 2026-11-06
+sha: a658791
+priority: 1
+tags: [sefer]
+related: [efe4a744-f767-4d0d-b45c-3523ed413692, 182066d1-ea54-46ef-8e5f-6abaa69cb86d, 95bc09c4-2e59-4220-9bfc-e4e90c52e1fe, 1da22c7f-fb35-4432-b867-3b66a218bcea]
+source: conversation 2026-11-06, the handoff for Sefer's next kitchen upgrade
+---
+
+Will, 2026-11-06:
+
+> finish with a handoff for Sefer for everything it can update since we last pushed a tagged version
+
+Sefer pins `@wycliffeassociates/scripture-kitchen` **0.1.20** (Sefer `dcca4a2d`). Everything
+below is on master after it and ships in the next tag. Part 1 is what changes under Sefer when it
+upgrades, whether or not it calls anything new: check those first. Part 2 is what Sefer can then
+delete, each with the plan that holds the detail.
+
+## 1. What changes under Sefer on upgrade
+
+**Two wire formats moved.** The dish is format 6 (was 5) and the census format 3 (was 2): each
+verse row gains `start` after `at`. The readers ship in the same package (`./reader`,
+`./toc-reader`), so upgrading together is all it takes; an old reader refuses a new buffer at
+`open` rather than misreading it. Nothing in Sefer should read these rows by offset.
+
+**A verse now owns the heading and paragraph marker that introduce it** (a verse's "tile").
+`\s1 Heading` / `\p` / `\v 14` used to sit in verse 13; they are verse 14's now. Chapters are
+still hard breaks. This reaches Sefer in four places:
+
+| Where Sefer feels it | What changes | Check |
+|---|---|---|
+| `galley.diff` (`src/core/sync/facts.ts`, `src/core/diff/skeleton.ts`, `src/app/migrate.ts`) | A unit is a verse's tile. A `\p` → `\m` edit is the verse it opens (a structure-only change); a removed heading is the verse it introduced; the chapter's own unit is just its head. Undoing a swapped pair also takes back the verse that gained the `\p`. | The review screen's unit list and its snapshot tests; migration's diff count. |
+| `galley.resolve` / `resolveOf` | `to` ends at the next verse's tile, so a heading is never in the verse before it; `opening..to` is the whole tile. `PSA 3:0` finds a Psalm's `\d` title, and verse 1's opening no longer takes the title in. A segment must be one lowercase letter (`"ab"` throws). | Anything clipping `from..to` or `opening..to`. Sefer's own `locate.ts` still splits at `\v` until it goes (2b). |
+| the dish reader's `toc.at(pos)` | Searches tiles: a byte in a heading answers the verse it introduces. `verse` is still 0 for a chapter's head. | Cursor-to-verse in the editor, if it reads `toc.at`. |
+| onion-wasm's `locate` string | Front matter prints `MRK 0`, not `MRK` (the machine spelling of the introduction). | Any label built from it. |
+
+**Two new lints, only when a book declares a versification** (`update(id, text, {
+versification })`): `chapter-ends-early` and `verse-beyond-scheme`. A book with no declared scheme
+gets neither.
+
+**The package grew**: galley's module is 706 KB gzipped (was about 619 KB), mostly canon's
+Unicode fold for matching book names. New subpaths: `./canon`, `./names/<locale>`, `./bento`,
+`./bttwriter`, `./docx` (each loaded only where imported).
+
+## 2. What Sefer can delete
+
+### 2a. Citations, labels and the cursor's address (`reference`)
+
+Plan: [[code:planning/items/2026-11-05-referencing-one-address-its-spellings-and-srs-as-i.mdx|referencing]],
+step 4. In `src/app/location.ts`:
+
+| Today | Becomes |
+|---|---|
+| `nameCatalogue({ named, extraIds, intro })`, memoized per project | `new Citations({ names, books, intro })`, memoized per project. `names` is the project's own `bookNames` plus canon's names for the UI language from `./names/<locale>` (the module links none). |
+| `parseCitation(text, catalogue, { grammar: "navigation", held })` | `JSON.parse(citations.read(text, { grammar: "navigation", held: [...held] }))`: the same `Citation` shape (`ok`, `text`, `addresses` or `problem`, `word`) plus `assumed` (a book by prefix, a comma read as a colon) for the UI to show. |
+| `booksMatching(citationWords(text), catalogue)` | `citations.booksMatching(text)` |
+| `addressLabel(address, bookName, intro)` | `showReference(address, bookName, intro)` |
+| `addressCode(address)` | `formatReference([address])` |
+| `addressAt(book, tocViewOf(analysis), offset)` | `JSON.parse(galley.addressAt(id, offset, { utf16: true }))`: parts (`3a`) and titles (verse 0) included |
+
+Then `packages/text/src/location/citation.ts`, `names.ts`, `canon.ts` and their tests go;
+`address.ts` keeps only its types. The cases are shared: `reference/fixtures/cite.json` is
+`citation.test.ts` as data. Two answers differ on purpose: `Luke 3:0` is a chapter's title (Sefer
+said "zero"), and `Jude 3` is verse 3 (Sefer read chapter 3).
+
+### 2b. Sefer's own resolver (`locate.ts`)
+
+`packages/text/src/location/locate.ts` (418 lines) is the resolver galley's `resolve` was ported
+from in 0.1.11 (Sefer's item `2026-10-20-kitchen-0-1-11-in-sefer-…`). Its callers
+(`src/core/excerpts/excerpts.ts`, `src/core/search/expect.ts`, `src/app/workflows/stet.ts`,
+`packages/editor/src/surfaces/align.ts`, `packages/editor/src/bookEditor.ts`) move to
+`galley.resolve(id, address, { utf16: true })` / `resolveOf`, and the file goes. `stet.ts` matches
+`verse.at === found.from`, which still holds: `at` is still the `\v`.
+
+### 2c. Book tables and names (`canon`)
+
+Plan: [[code:planning/items/2026-11-04-canon-and-versification-the-book-table-schemes-map.mdx|canon]],
+"What it replaces". `./canon` (plain TypeScript, no wasm) is the book table, `parseBook`, `name`
+and the schemes; `./names/<locale>` one gateway language's names. They replace Sefer's hand-kept
+book lists (the plan counts about 35, already disagreeing on Matthew's number).
+
+### 2d. Versification
+
+Same plan, step 7. Per book: `galley.update(id, text, { versification: "ulb" | "eng" | … |
+"followSource" })`; a project's own scheme through `galley.defineScheme(name, mapping)`;
+`galley.sniff()` offers a scheme for a project that never declared one (offered, never applied);
+`galley.mapVerse(from, to, verse)` and `galley.pairs(from, to, book)` move a verse between
+schemes.
+
+### 2e. Manifests and BTT Writer migration (`bento`, `bttwriter`)
+
+Plan: [[code:planning/items/2026-11-05-sefer-adopts-bento-and-bttwriter-what-moves-what-s.mdx|Sefer adopts bento and bttwriter]].
+Unchanged by this work; it is the checklist for that switch.
+
+### 2f. Word import and export (`docx`)
+
+Plan: [[code:planning/items/2026-11-05-docx-round-trip-usfm-in-word-and-libreoffice-throu.mdx|docx]],
+followup `sefer-switch`: `ImportDocumentDialog` reads through `docx.readDocument(bytes)`, offers
+an export (`exportBook`, `exportBooks`, `template`), and `packages/document-import` goes. The docx
+plan is still in progress (a Word check and a by-hand template try are open).
+
+### 2g. Optional: words and characters below the verse (`srs`)
+
+Nothing in Sefer needs this yet. `galley.srsLocate(id, "JON 2:8!2-4", { utf16: true })` finds a
+Scripture Referencing Standard reference in a text, and `galley.srsAt(id, from, to)` spells a
+selection as one (`"JON 2:8!2-4"`, `"JON 1:13!f!5"`), for a "copy a link to these words" action or
+reading USFM 3.1's `\ref loc`.
+
+## Order
+
+1. **Upgrade and run part 1's checks** (formats, tiles in diff and resolve). Nothing else moves
+   until the review screen and migration read right.
+2. **2a and 2b together**: the location service, then `locate.ts`'s callers.
+3. **2c and 2d** where a screen already lists books or numbers verses.
+4. **2e and 2f** on their own plans' gates.
+
+<Question id="tiles-in-review">Does the review screen want headings and paragraph markers grouped with the verse they introduce (the kitchen's new default), or does any Sefer workflow rely on the old grouping? If one does, say which, and the kitchen can offer the old cut as an option.</Question>

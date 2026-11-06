@@ -1,0 +1,19 @@
+[package]
+name = "srs"
+version.workspace = true
+edition.workspace = true
+description = "The USFM Scripture Referencing Standard in full: translation prefixes, word, character, marker and attribute references, and named references, read and written. Grammar only; locating one in a text is galley's."
+
+[lints]
+workspace = true
+
+# `reference` for the basic reference an SRS reference narrows (Address, the
+# one-letter Segment, BookKey), `canon` for which codes are books and which
+# books have one chapter. No text: an SRS reference is located in one by galley.
+[dependencies]
+mise = { path = "../mise", version = "0.1.20" }
+canon = { path = "../canon", version = "0.1.20" }
+reference = { path = "../reference", version = "0.1.20" }
+
+[dev-dependencies]
+serde_json = "1.0"
