@@ -15,6 +15,7 @@
 //! Every code expression ends in `;` so the text after it can never be read
 //! as a method call or a trailing content argument.
 
+pub mod recipe;
 pub mod world;
 
 use usfm_onion::cst::{Cst, build};
@@ -26,6 +27,21 @@ use usfm_onion::{Token, TokenKind, lex};
 /// `pub(crate)` in onion, so a consumer restates it.
 const NODE_BIT: u32 = 1 << 31;
 
+/// Where a recipe plugs in. Every hook returns Typst markup (or nothing) that
+/// the emitter places verbatim; the core never knows what a recipe prints.
+#[derive(Default)]
+pub struct Hooks<'h> {
+    /// Resolves an `\xt` target's text ("Malachi 3:1") to an anchor name;
+    /// the span is then emitted as `#u.xt("MAL-3-1")[…]`.
+    pub xt: Option<&'h dyn Fn(&str) -> Option<String>>,
+    /// After `\id` and identification: (book).
+    pub book_start: Option<&'h dyn Fn(&str) -> Option<String>>,
+    /// After `\c`: (book, chapter).
+    pub chapter_start: Option<&'h dyn Fn(&str, &str) -> Option<String>>,
+    /// After a paragraph that held verses: (book, [(chapter, verse)…]).
+    pub after_paragraph: Option<&'h dyn Fn(&str, &[(String, String)]) -> Option<String>>,
+}
+
 /// One book's markup and what the template needs to know about it.
 pub struct Book {
     pub code: String,
@@ -35,6 +51,11 @@ pub struct Book {
 
 /// Lexes, builds and folds one USFM book into Typst markup.
 pub fn markup(usfm: &str) -> Book {
+    markup_with(usfm, &Hooks::default())
+}
+
+/// [`markup`] with a recipe's hooks.
+pub fn markup_with(usfm: &str, hooks: &Hooks) -> Book {
     let tokens = lex(usfm);
     let cst = build(&tokens);
     let mut e = Emitter {
@@ -48,6 +69,8 @@ pub fn markup(usfm: &str) -> Book {
         pending_chapter: None,
         pending_inline: String::new(),
         space: false,
+        hooks,
+        para_verses: Vec::new(),
     };
     e.scan_identification(0);
     let mut out = format!(
@@ -55,6 +78,12 @@ pub fn markup(usfm: &str) -> Book {
         str_lit(&e.code),
         str_lit(&e.name)
     );
+    if let Some(hook) = hooks.book_start
+        && let Some(extra) = hook(&e.code)
+    {
+        out.push_str(&extra);
+        out.push('\n');
+    }
     e.block_children(0);
     out.push_str(&e.out);
     Book {
@@ -65,6 +94,9 @@ pub fn markup(usfm: &str) -> Book {
 }
 
 struct Emitter<'a> {
+    hooks: &'a Hooks<'a>,
+    /// The verses the current paragraph has opened, for `after_paragraph`.
+    para_verses: Vec<(String, String)>,
     src: &'a str,
     tokens: &'a [Token],
     cst: &'a Cst,
@@ -189,6 +221,12 @@ impl<'a> Emitter<'a> {
                                 self.chapter = number.clone();
                                 self.out
                                     .push_str(&format!("#u.c(\"{}\");\n", str_lit(&number)));
+                                if let Some(hook) = self.hooks.chapter_start
+                                    && let Some(extra) = hook(&self.code, &number)
+                                {
+                                    self.out.push_str(&extra);
+                                    self.out.push('\n');
+                                }
                                 self.pending_chapter = Some(number);
                             }
                             MarkerKind::Verse => {
@@ -256,15 +294,26 @@ impl<'a> Emitter<'a> {
         self.inline_children(n);
         self.space = false;
         self.out.push_str("];\n");
+        if !self.para_verses.is_empty() {
+            let verses = std::mem::take(&mut self.para_verses);
+            if let Some(hook) = self.hooks.after_paragraph
+                && let Some(extra) = hook(&self.code, &verses)
+            {
+                self.out.push_str(&extra);
+                self.out.push('\n');
+            }
+        }
     }
 
     fn verse(&mut self, number: &str) {
         self.flush_space();
         self.out.push_str(&format!(
-            "#u.v(\"{}\", \"{}\");",
+            "#u.v(\"{}\", \"{}\", \"{}\");",
+            str_lit(&self.code),
             str_lit(&self.chapter),
             str_lit(number)
         ));
+        self.para_verses.push((self.chapter.clone(), number.to_string()));
     }
 
     fn flush_space(&mut self) {
@@ -346,8 +395,16 @@ impl<'a> Emitter<'a> {
                     style
                 };
                 self.flush_space();
-                self.out
-                    .push_str(&format!("#u.ch(\"{}\")[", str_lit(name)));
+                let target = match self.hooks.xt {
+                    Some(resolve) if name == "xt" => resolve(&self.text_of(n)),
+                    _ => None,
+                };
+                match target {
+                    Some(t) => self.out.push_str(&format!("#u.xt(\"{}\")[", str_lit(&t))),
+                    None => self
+                        .out
+                        .push_str(&format!("#u.ch(\"{}\")[", str_lit(name))),
+                }
                 self.inline_children(n);
                 self.out.push_str("];");
             }
@@ -379,9 +436,16 @@ impl<'a> Emitter<'a> {
     }
 }
 
+/// [`escape_into`] into a new string.
+pub fn escape(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 8);
+    escape_into(&mut out, text);
+    out
+}
+
 /// Escapes a run of text for Typst markup. Quotes stay bare so Typst's smart
 /// quotes apply; everything with markup meaning is backslash-escaped.
-fn escape_into(out: &mut String, text: &str) {
+pub fn escape_into(out: &mut String, text: &str) {
     for ch in text.chars() {
         if matches!(
             ch,
@@ -395,6 +459,6 @@ fn escape_into(out: &mut String, text: &str) {
 }
 
 /// Escapes a value for a Typst string literal.
-fn str_lit(s: &str) -> String {
+pub fn str_lit(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
 }

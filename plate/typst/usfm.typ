@@ -188,7 +188,7 @@
 // is indented by a hanging indent on the paragraph instead (see para()).
 #let drop-width(n) = measure(chapter-number(n)).width + 0.3em
 
-#let v(c, n) = {
+#let v(b, c, n) = {
   [#metadata((c: c, v: n))<plate-v>]
   if s.verse_numbers == "none" { return }
   if n == "1" and s.chapter != "heading" { return }
@@ -291,6 +291,9 @@
 )
 
 #let ch(m, body) = (chars.at(m, default: b => b))(body)
+
+// An `\xt` a recipe resolved to an anchor; the base template ignores it.
+#let xt(target, body) = body
 
 #let n(kind, caller, body) = {
   let xref = kind == "x" or kind == "ex"

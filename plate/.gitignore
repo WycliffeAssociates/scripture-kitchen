@@ -2,3 +2,4 @@
 /debug
 /fonts
 /wasm/pkg
+/data/*.tsv

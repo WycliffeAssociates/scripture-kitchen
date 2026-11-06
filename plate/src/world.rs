@@ -147,24 +147,55 @@ pub fn compile(
     template: &str,
     markup_ms: f64,
 ) -> Result<(Vec<u8>, Timings), String> {
-    let template = template.to_string();
-    let mut sources = HashMap::new();
-    let mut main = String::from(
-        "#import \"/usfm.typ\" as u\n#show: u.setup\n",
-    );
+    let (includes, sources) = book_sources(books, "/usfm.typ");
+    let doc = Doc {
+        main: format!("#import \"/usfm.typ\" as u\n#show: u.setup\n{includes}"),
+        sources,
+        settings: settings.to_string(),
+        markup_ms,
+    };
+    compile_doc(fonts, &doc, template)
+}
+
+/// A whole document for [`compile_doc`]: `main` is `/main.typ`, `sources` are
+/// further files by absolute path, and the base template is always
+/// `/usfm.typ`. A recipe adds its overlay as another source and imports that.
+pub struct Doc {
+    pub main: String,
+    pub sources: Vec<(String, String)>,
+    pub settings: String,
+    pub markup_ms: f64,
+}
+
+/// One `/books/N.typ` per book, each importing `module` as `u`, and the
+/// `#include` lines that pull them into a main file in order.
+pub fn book_sources(books: &[Book], module: &str) -> (String, Vec<(String, String)>) {
+    let mut includes = String::new();
+    let mut sources = Vec::new();
     for (i, book) in books.iter().enumerate() {
         let path = format!("/books/{i}.typ");
-        main.push_str(&format!("#include \"{path}\"\n"));
-        let text = format!("#import \"/usfm.typ\" as u\n{}", book.markup);
-        let fid = id(&path);
-        sources.insert(fid, Source::new(fid, text));
+        includes.push_str(&format!("#include \"{path}\"\n"));
+        sources.push((path, format!("#import \"{module}\" as u\n{}", book.markup)));
+    }
+    (includes, sources)
+}
+
+pub fn compile_doc(
+    fonts: &Arc<FontStore>,
+    doc: &Doc,
+    template: &str,
+) -> Result<(Vec<u8>, Timings), String> {
+    let mut sources = HashMap::new();
+    for (path, text) in &doc.sources {
+        let fid = id(path);
+        sources.insert(fid, Source::new(fid, text.clone()));
     }
     let main_id = id("/main.typ");
-    sources.insert(main_id, Source::new(main_id, main));
+    sources.insert(main_id, Source::new(main_id, doc.main.clone()));
     let template_id = id("/usfm.typ");
-    sources.insert(template_id, Source::new(template_id, template));
+    sources.insert(template_id, Source::new(template_id, template.to_string()));
     let mut files = HashMap::new();
-    files.insert(id("/settings.json"), Bytes::from_string(settings.to_string()));
+    files.insert(id("/settings.json"), Bytes::from_string(doc.settings.clone()));
 
     let world = PlateWorld {
         library: LazyHash::new(Library::default()),
@@ -204,11 +235,11 @@ pub fn compile(
     Ok((
         pdf,
         Timings {
-            markup_ms,
+            markup_ms: doc.markup_ms,
             layout_ms,
             pdf_ms,
             pages: document.pages().len(),
-            markup_bytes: books.iter().map(|b| b.markup.len()).sum(),
+            markup_bytes: doc.sources.iter().map(|(_, t)| t.len()).sum(),
             warnings,
         },
     ))

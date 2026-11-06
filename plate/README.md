@@ -30,6 +30,20 @@ Onion's share (lex, CST, markup) is 1 ms for Mark, 63 ms for the Bible. The
 wasm module is 40 MB, 16 MB gzipped (Typst's fonts and hyphenation data).
 PTXprint sets Charis SIL with more leading, so its page counts run higher.
 
+## One document per book, in parallel
+
+`plate --split` compiles each book as its own Typst document on rayon's pool
+(books start on a new page, so pagination does not cross books). NT 1.4 s
+against 3.1 s as one document; Bible 4.6 s against 13.2 s, 2.6 GB against
+3.4 GB. The slowest book bounds it. Not done: merging the PDFs, carrying
+page numbers across books, and a contents page or links across books, which
+need a first pass for page counts.
+
+## Recipes
+
+`recipes/`: links and contents, a study edition with translation notes, a
+diglot, a printable diff. Examples, not product; see `recipes/README.md`.
+
 ## What's missing against PTXprint
 
 Paragraph-style footnotes across the page width, cross-reference apparatus,
