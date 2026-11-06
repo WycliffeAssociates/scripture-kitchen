@@ -7,7 +7,7 @@
     mise ◄── canon ◄── canon-gen (never published)
              canon ◄── galley (galley::versification: onion's facts, canon's sniff)
     mise, canon ◄── bento ◄── bttwriter (mise, canon too)
-    mise, canon ◄── reference
+    mise, canon ◄── reference ◄── srs ◄── galley (srs locate, the reference doors)
 
 - `onion` / `onion-wasm` / `galley` are the engine. `sous-core` / `sous-cli`
   (under `sous-chef/`) are the other product. `GLOSSARY.md` is onion's only;
@@ -65,6 +65,11 @@
   references are refused by name: they belong to a future `srs` crate. No text
   and no onion; onion's `Sid::address` converts the TOC's answer. Plan:
   `planning/items/2026-11-05-referencing-one-address-its-spellings-and-srs-as-i.mdx`.
+- `srs/` is the Scripture Referencing Standard in full, grammar only: a place,
+  then a chain of refinements (word, character, element, attribute), with
+  translation prefixes and named references. Locating one needs the text, so
+  it is galley's (`galley/src/srs.rs`, on onion's tokens; NFD counts from
+  `canon::nfd_len`). Same plan.
 - bento and bttwriter each build their own wasm module (`./wasm-build.sh
   bento`, `./wasm-build.sh bttwriter`) and ship as `./bento` and
   `./bttwriter` subpaths of the npm package, TypeScript over a web-target

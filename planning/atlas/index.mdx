@@ -34,7 +34,8 @@ One Rust workspace, two products, one JS package, and the libraries around them.
   - [[canon]]: book identity, names and [[versification]];
   - [[bento]]: RC, Burrito and Writer manifests, read, checked, created and edited;
   - [[bttwriter]]: Writer repos replayed into one git pack;
-  - [[reference]]: a place in scripture spelled for machines, the Scripture Referencing Standard's basic reference.
+  - [[reference]]: a place in scripture spelled for machines, the Scripture Referencing Standard's basic reference;
+  - [[srs]]: the standard in full, words, characters, notes and elements below the verse, located in a text by galley.
 
   canon ships as plain TypeScript; bento and bttwriter each ship as their own wasm module, under subpaths of the same npm package.
 
@@ -43,7 +44,7 @@ One Rust workspace, two products, one JS package, and the libraries around them.
 | level | what | start with |
 | --- | --- | --- |
 | 0 | products and consumers | [[onion-engine]], [[sous-chef]], [[galley-package]], [[sefer]] (one host) |
-| 1 | crates, and who may depend on whom | [[mise]], [[ticket]], [[onion]], [[galley]], [[sous-core]], [[canon]], [[bento]], [[bttwriter]], [[reference]] |
+| 1 | crates, and who may depend on whom | [[mise]], [[ticket]], [[onion]], [[galley]], [[sous-core]], [[canon]], [[bento]], [[bttwriter]], [[reference]], [[srs]] |
 | 2 | primitives and workflows | [[cst]], [[toc]], [[mask]], [[chunk]], [[pantry]] |
 | 3 | wires: bytes that cross to JS | [[wire]], [[plate]], [[dish]] |
 

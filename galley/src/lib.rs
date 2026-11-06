@@ -29,6 +29,7 @@ pub mod mask;
 pub mod overlay;
 pub mod pantry;
 pub mod sous;
+pub mod srs;
 pub mod toc;
 pub mod versification;
 pub use find::{Find, Hit, Hits, SourceSpan};

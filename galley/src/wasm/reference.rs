@@ -19,6 +19,8 @@ use wasm_bindgen::prelude::*;
 
 use onion_wasm::options::{bag, get};
 
+use super::Galley;
+
 /// A reference as JSON: resolve's address shape with its `book`.
 pub(super) fn book_address(book: BookKey, address: &Address) -> Value {
     let mut out = onion_wasm::resolution::address_json(address);
@@ -264,4 +266,148 @@ fn strings(value: &JsValue, door: &str, key: &str) -> Result<Vec<String>, JsErro
         .iter()
         .map(|item| item.as_string().ok_or_else(fail))
         .collect()
+}
+
+// ── The Scripture Referencing Standard in full ─────────────────────────
+
+/// A reference in the standard's full spelling, read: `{ ok: true, canonical,
+/// within }`, where `within` is the basic reference each range lies in (a
+/// `BookAddress`, or `null` for a named reference, `end`, or a range across
+/// books), or `{ ok: false, error, at }` with a UTF-16 offset.
+#[wasm_bindgen(js_name = parseSrs)]
+pub fn parse_srs(text: &str) -> String {
+    match srs::parse(text) {
+        Ok(ranges) => json!({
+            "ok": true,
+            "canonical": srs::format(&ranges),
+            "within": ranges
+                .iter()
+                .map(|r| r.reference().map_or(Value::Null, |r| reference_json(&r)))
+                .collect::<Vec<_>>(),
+        }),
+        Err(error) => json!({
+            "ok": false,
+            "error": error.kind.as_str(),
+            "at": utf16_at(text, error.at),
+        }),
+    }
+    .to_string()
+}
+
+/// One SRS reference's place in a text, as JSON: `{ found: { from, to } }`,
+/// `{ missing: what }`, `{ ambiguous: true }`, `{ unsupported: what }`, or a
+/// parse error `{ error, at }`. Only the first range of a list is located.
+fn locate_json(text: &str, reference: &str, ext: &crate::onion::Extensions, utf16: bool) -> String {
+    let ranges = match srs::parse(reference) {
+        Ok(ranges) => ranges,
+        Err(error) => {
+            return json!({ "error": error.kind.as_str(), "at": utf16_at(reference, error.at) })
+                .to_string();
+        }
+    };
+    let at = |byte: u32| {
+        if utf16 {
+            utf16_at(text, byte as usize) as u32
+        } else {
+            byte
+        }
+    };
+    match crate::srs::locate(text, ext, &ranges[0]) {
+        Ok(span) => json!({ "found": { "from": at(span.start), "to": at(span.end) } }),
+        Err(crate::srs::LocateError::Missing(what)) => json!({ "missing": what }),
+        Err(crate::srs::LocateError::Ambiguous) => json!({ "ambiguous": true }),
+        Err(crate::srs::LocateError::Unsupported(what)) => json!({ "unsupported": what }),
+    }
+    .to_string()
+}
+
+/// A span of a text spelled in the standard: `"JON 2:8!2-4"`, or `null`
+/// outside any verse.
+fn spell_json(
+    text: &str,
+    from: u32,
+    to: u32,
+    ext: &crate::onion::Extensions,
+    utf16: bool,
+) -> Option<String> {
+    let byte = |offset: u32| {
+        if utf16 {
+            mise::utf16::Utf16Index::new(text.as_bytes()).to_byte(offset)
+        } else {
+            offset
+        }
+    };
+    crate::srs::spell(text, ext, byte(from)..byte(to)).map(|range| range.to_string())
+}
+
+#[wasm_bindgen]
+impl Galley {
+    /// Where an SRS reference is in one registered book's text (`JON 2:8!2-4`,
+    /// `JON 1:13!f!5`, `MAT 1:1!5+2`), as JSON; offsets in bytes unless `utf16`.
+    #[wasm_bindgen(js_name = srsLocate)]
+    pub fn srs_locate(
+        &mut self,
+        id: &str,
+        reference: &str,
+        #[wasm_bindgen(unchecked_optional_param_type = "ResolveOptions")] opts: Option<JsValue>,
+    ) -> Result<String, JsError> {
+        let utf16 = onion_wasm::options::utf16_only(opts.as_ref(), "srsLocate")
+            .map_err(|e| JsError::new(&e))?;
+        let entry = self.book(id)?;
+        let text = entry.text().map_err(|_| no_text(id))?;
+        Ok(locate_json(text, reference, &entry.markers().list(), utf16))
+    }
+
+    /// [`srsLocate`](Self::srs_locate) over text the host holds.
+    #[wasm_bindgen(js_name = srsLocateOf)]
+    pub fn srs_locate_of(
+        &mut self,
+        text: &str,
+        reference: &str,
+        #[wasm_bindgen(unchecked_optional_param_type = "ResolveTextOptions")] opts: Option<JsValue>,
+    ) -> Result<String, JsError> {
+        let (utf16, markers) =
+            onion_wasm::options::resolve_text_options(opts.as_ref(), "srsLocateOf")
+                .map_err(|e| JsError::new(&e))?;
+        let markers = crate::pantry::Markers::from(markers);
+        Ok(locate_json(text, reference, &markers.list(), utf16))
+    }
+
+    /// The SRS spelling of a span of one registered book's text, or
+    /// `undefined` outside any verse; offsets in bytes unless `utf16`.
+    #[wasm_bindgen(js_name = srsAt)]
+    pub fn srs_at(
+        &mut self,
+        id: &str,
+        from: u32,
+        to: u32,
+        #[wasm_bindgen(unchecked_optional_param_type = "ResolveOptions")] opts: Option<JsValue>,
+    ) -> Result<Option<String>, JsError> {
+        let utf16 = onion_wasm::options::utf16_only(opts.as_ref(), "srsAt")
+            .map_err(|e| JsError::new(&e))?;
+        let entry = self.book(id)?;
+        let text = entry.text().map_err(|_| no_text(id))?;
+        Ok(spell_json(text, from, to, &entry.markers().list(), utf16))
+    }
+
+    /// [`srsAt`](Self::srs_at) over text the host holds.
+    #[wasm_bindgen(js_name = srsAtOf)]
+    pub fn srs_at_of(
+        &mut self,
+        text: &str,
+        from: u32,
+        to: u32,
+        #[wasm_bindgen(unchecked_optional_param_type = "ResolveTextOptions")] opts: Option<JsValue>,
+    ) -> Result<Option<String>, JsError> {
+        let (utf16, markers) = onion_wasm::options::resolve_text_options(opts.as_ref(), "srsAtOf")
+            .map_err(|e| JsError::new(&e))?;
+        let markers = crate::pantry::Markers::from(markers);
+        Ok(spell_json(text, from, to, &markers.list(), utf16))
+    }
+}
+
+fn no_text(id: &str) -> JsError {
+    JsError::new(&format!(
+        "reference {id} retains no text to locate in; register it with keepText"
+    ))
 }

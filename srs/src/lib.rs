@@ -191,14 +191,16 @@ impl fmt::Display for SrsRange {
                     segment: s2,
                 },
             ) if c1 == c2 => {
-                // Same verse, a word to a word: only the word, or only the
-                // character when it is the same word.
+                // Same verse, and the same steps but the last word: only the
+                // word, or only the character when it is the same word
+                // (`!3-5`, `!f!2-4`, `!5+2-6`).
                 if v1 == v2
                     && s1 == s2
                     && let (
-                        [Step::Word { word: w1, char: c1 }],
-                        [Step::Word { word: w2, char: c2 }],
+                        [head1 @ .., Step::Word { word: w1, char: c1 }],
+                        [head2 @ .., Step::Word { word: w2, char: c2 }],
                     ) = (first.steps.as_slice(), last.steps.as_slice())
+                    && head1 == head2
                 {
                     if w1 == w2
                         && let (Some(_), Some(c2)) = (c1, c2)

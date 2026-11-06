@@ -37,7 +37,7 @@ pub mod onion;
 pub mod overlay;
 mod reference;
 mod versification;
-pub use reference::{Citations, format_reference, parse_reference, show_reference};
+pub use reference::{Citations, format_reference, parse_reference, parse_srs, show_reference};
 
 /// The two flags the find doors take, as the query Find prepares once.
 ///
@@ -204,6 +204,19 @@ export interface CiteOptions {
   /** The project's books, which win a prefix tie (`phil` is PHM when only PHM is held). */
   held?: string[];
 }
+
+/** `JSON.parse(parseSrs(text))`: a reference in the Scripture Referencing Standard's full spelling. */
+export type SrsParse =
+  | { ok: true; canonical: string; within: (BookAddress | null)[] }
+  | { ok: false; error: string; at: number };
+
+/** `JSON.parse(galley.srsLocate(id, ref))`. */
+export type SrsLocation =
+  | { found: { from: number; to: number } }
+  | { missing: "verse" | "chapter" | "introduction" | "word" | "character" | "element" | "attribute" }
+  | { ambiguous: true }
+  | { unsupported: "named reference" | "book" }
+  | { error: string; at: number };
 
 /** What a reading took for granted. */
 export type CiteAssumption = { kind: "prefix"; word: string; book: string } | { kind: "comma" };

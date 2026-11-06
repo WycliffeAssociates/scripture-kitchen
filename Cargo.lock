@@ -1488,6 +1488,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sous-core",
+ "srs",
  "ticket",
  "usfm_onion",
  "wasm-bindgen",

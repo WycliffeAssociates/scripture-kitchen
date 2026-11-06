@@ -12,6 +12,7 @@ exports, plus a JS doorway over the same code.
 | `bento` | `bento/` | scripture containers: RC, Scripture Burrito and BTT Writer manifests, read leniently into one shape, checked against WA's Burrito fork, created and edited; its own wasm module at `./bento` |
 | `bttwriter` | `bttwriter/` | BTT Writer projects: stitched to USFM, their save histories replayed into one git pack with the manifests in a closing commit; its own wasm module at `./bttwriter`, loaded on the migration screen |
 | `reference` | `reference/` | a place in scripture spelled for machines: the Scripture Referencing Standard's basic reference (`MAT 1:20-2:3; MRK 1:1`), read strictly into `mise::Address` and written back; and citations as people write them (`Mateo 5:3-7; 6:1`), read leniently with canon's names |
+| `srs` | `srs/` | the Scripture Referencing Standard in full: words, characters (NFD), notes, headings, elements and attributes below the verse, read and written; galley locates one in a text and spells a span as one |
 
 `onion/src/bin/playground.rs` drives the engine over a corpus for profiling and
 for the `debug/` eyeball dumps; `onion/src/bin/codegen.rs` regenerates the
@@ -28,7 +29,7 @@ Nobody builds wasm or pushes a tag by hand.
 ## Install
 
 Every `v*` tag publishes to the org Nexus: the npm package to `wa-npm`, the
-ten library crates to `wa-cargo`. Reads need no login. Not on crates.io or
+eleven library crates to `wa-cargo`. Reads need no login. Not on crates.io or
 public npm. Install from the registry, or from the git tag; both carry the same
 code.
 

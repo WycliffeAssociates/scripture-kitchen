@@ -137,5 +137,35 @@ const throws = (call, says, what) => {
   galley.free();
 }
 
+// --- the standard in full ----------------------------------------------------
+{
+  const { parseSrs } = doors;
+  const galley = new Galley();
+  const jonah = readFileSync(resolve(here, "../../testData/exampleCorpora/examples.bsb/32JONBSB.usfm"), "utf8");
+  const at = (ref, opts) => {
+    const got = JSON.parse(galley.srsLocateOf(jonah, ref, opts));
+    return got.found ? jonah.slice(got.found.from, got.found.to) : got;
+  };
+  // usfmtc's cases; the file is ASCII apart from its quotes, so offsets are UTF-16 too.
+  eq(at("JON 2:8!2-4", { utf16: true }), "who cling to", "JON 2:8!2-4");
+  eq(at("JON 1:4!s1!2", { utf16: true }), "Great", "a heading's word");
+  eq(at("JON 1:13!f!5", { utf16: true }), "dug", "a footnote's word");
+  eq(at("JON 1:99"), { missing: "verse" }, "a verse the text lacks");
+  eq(at("GEN 1:1"), { unsupported: "book" }, "another book");
+  eq(at("JON 1:1!"), { error: "expected-step", at: 8 }, "a parse error");
+
+  const found = JSON.parse(galley.srsLocateOf(jonah, "JON 2:8!2-4", { utf16: true })).found;
+  eq(galley.srsAtOf(jonah, found.from, found.to, { utf16: true }), "JON 2:8!2-4", "srsAt spells it back");
+  eq(galley.srsAtOf(jonah, 0, 3), undefined, "outside any verse");
+
+  eq(JSON.parse(parseSrs("en+ulb.ROM 9:1!3-5")), {
+    ok: true,
+    canonical: "en+ulb.ROM 9:1!3-5",
+    within: [{ kind: "verses", book: "ROM", from: { chapter: 9, verse: 1 }, to: { chapter: 9, verse: 1 } }],
+  }, "parseSrs");
+  eq(JSON.parse(parseSrs("NEH t:Israel/6/1")).within, [null], "a named reference lies in no basic one");
+  galley.free();
+}
+
 console.log(failures === 0 ? "reference conformance: OK" : `reference conformance: ${failures} FAILURES`);
 process.exit(failures === 0 ? 0 : 1);

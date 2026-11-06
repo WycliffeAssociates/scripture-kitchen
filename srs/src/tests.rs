@@ -81,6 +81,8 @@ fn the_standards_examples_read_and_write_back() {
         "JON 1:4!s1!2",
         "JON 1:13!f!5",
         "JON 1:13!5!f!5",
+        "JON 1:13!f!2-4",
+        "JON 1:13!f[2]!1+2-5",
         "1CO 6:5a-10",
         "LUK 3:35-end",
         "JON 1:1-4:11",

@@ -34,13 +34,14 @@ mod fold_tables;
 pub mod map;
 mod name_tables;
 pub mod names;
+mod nfd_tables;
 pub mod scheme;
 mod scheme_tables;
 pub mod sniff;
 mod sniff_tables;
 mod tables;
 
-pub use books::{Book, Canon, Division, book, books, fold, parse_book, usfm_file_name};
+pub use books::{Book, Canon, Division, book, books, fold, nfd_len, parse_book, usfm_file_name};
 pub use define::{DefineError, SchemeBuilder};
 pub use map::{Mapped, Paired, Verse, counterparts, map, pairs};
 pub use mise::books::BookKey;
