@@ -35,7 +35,9 @@ mod find;
 mod mask;
 pub mod onion;
 pub mod overlay;
+mod reference;
 mod versification;
+pub use reference::{Citations, format_reference, parse_reference, show_reference};
 
 /// The two flags the find doors take, as the query Find prepares once.
 ///
@@ -168,6 +170,53 @@ export interface BlockAddress {
   /** The spelling the position held; checked, so a stale address throws. */
   marker: string;
 }
+
+/** An `Address` in its book: Sefer's `Address` shape. */
+export type BookAddress = Address & { book: string };
+
+/** `JSON.parse(parseReference(text))`. `at` counts UTF-16 units. */
+export type ReferenceParse =
+  | { ok: true; addresses: BookAddress[] }
+  | {
+      ok: false;
+      error:
+        | "empty" | "expected-book" | "unknown-book" | "no-reference-before"
+        | "expected-verse" | "range-end" | "unexpected" | "different-book"
+        | "backwards" | "mixed-range" | "intro-has-no-verses" | "end-needs-scheme"
+        | "chapter-out-of-range" | "verse-out-of-range" | "not-basic";
+      at: number;
+    };
+
+/** `new Citations(names)`: the names a project reads books by, past English and codes. */
+export interface CitationNames {
+  /** Per book code, what the project calls it in each language it names books in, and abbreviations. */
+  names?: Record<string, string[]>;
+  /** Words for the introduction: `["introducción"]`. `intro` and `introduction` always are. */
+  intro?: string[];
+  /** Codes outside canon's table to name anyway: a `\\z` book. */
+  books?: string[];
+}
+
+/** `Citations.read(text, opts)`. */
+export interface CiteOptions {
+  /** `"navigation"` (default): prefixes, `3,1` as `3:1`. `"prose"`: whole names, a comma is a list. */
+  grammar?: "navigation" | "prose";
+  /** The project's books, which win a prefix tie (`phil` is PHM when only PHM is held). */
+  held?: string[];
+}
+
+/** What a reading took for granted. */
+export type CiteAssumption = { kind: "prefix"; word: string; book: string } | { kind: "comma" };
+
+/** `JSON.parse(citations.read(text))`, Sefer's `Citation`. */
+export type Citation =
+  | { ok: true; text: string; addresses: BookAddress[]; assumed: CiteAssumption[] }
+  | {
+      ok: false;
+      text: string;
+      problem: "empty" | "unknown-book" | "no-book" | "malformed" | "zero" | "backwards";
+      word?: string;
+    };
 "#;
 
 /// Which roles `findAll`'s scope names, in the order their books are searched.
@@ -594,6 +643,65 @@ impl Galley {
         );
         let table = utf16.then(|| mise::utf16::utf16_table(text.as_bytes()));
         Ok(onion_wasm::resolution::json(&answer, table.as_ref()))
+    }
+
+    /// The place at an offset in one registered book's text, as a
+    /// `BookAddress` in JSON: the introduction, a chapter's head, its title
+    /// (verse 0), or the verse whose tile holds the offset, parts included.
+    /// The inverse of `resolve`; the offset is in bytes unless `utf16`.
+    #[wasm_bindgen(js_name = addressAt)]
+    pub fn address_at(
+        &mut self,
+        id: &str,
+        offset: u32,
+        #[wasm_bindgen(unchecked_optional_param_type = "ResolveOptions")] opts: Option<JsValue>,
+    ) -> Result<String, JsError> {
+        let utf16 = onion_wasm::options::utf16_only(opts.as_ref(), "addressAt")
+            .map_err(|e| JsError::new(&e))?;
+        let entry = self.book(id)?;
+        let text = entry.text().map_err(|_| {
+            JsError::new(&format!(
+                "reference {id} retains no text to place an offset in; register it with keepText"
+            ))
+        })?;
+        let byte = if utf16 {
+            mise::utf16::Utf16Index::new(text.as_bytes()).to_byte(offset)
+        } else {
+            offset
+        };
+        let (book, address) = entry.toc().address_at(text, byte);
+        Ok(reference::book_address(book, &address).to_string())
+    }
+
+    /// [`addressAt`](Self::address_at) over text the host holds and has not
+    /// registered, with `resolveOf`'s options.
+    #[wasm_bindgen(js_name = addressAtOf)]
+    pub fn address_at_of(
+        &mut self,
+        text: &str,
+        offset: u32,
+        #[wasm_bindgen(unchecked_optional_param_type = "ResolveTextOptions")] opts: Option<JsValue>,
+    ) -> Result<String, JsError> {
+        let (utf16, markers) =
+            onion_wasm::options::resolve_text_options(opts.as_ref(), "addressAtOf")
+                .map_err(|e| JsError::new(&e))?;
+        let markers = Markers::from(markers);
+        let parsed = self.sous.parsed(
+            text,
+            crate::onion::wire::ParseOptions {
+                toc: true,
+                ..Default::default()
+            },
+            &markers,
+        );
+        let byte = if utf16 {
+            mise::utf16::Utf16Index::new(text.as_bytes()).to_byte(offset)
+        } else {
+            offset
+        };
+        let toc = parsed.toc.as_ref().expect("asked for a toc");
+        let (book, address) = toc.address_at(text, byte);
+        Ok(reference::book_address(book, &address).to_string())
     }
 
     // ── Match formatting: a target's skeleton made the source's ─────────

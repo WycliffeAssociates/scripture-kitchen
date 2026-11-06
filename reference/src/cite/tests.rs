@@ -5,14 +5,7 @@ fn key(code: &str) -> BookKey {
 }
 
 fn problem_name(problem: Problem) -> &'static str {
-    match problem {
-        Problem::Empty => "empty",
-        Problem::UnknownBook => "unknown-book",
-        Problem::NoBook => "no-book",
-        Problem::Malformed => "malformed",
-        Problem::Zero => "zero",
-        Problem::Backwards => "backwards",
-    }
+    problem.as_str()
 }
 
 /// `fixtures/cite.json`: Sefer's cases, and ours where we depart.
@@ -74,6 +67,23 @@ fn the_shared_cases() {
         }
     }
     assert_eq!(cases.len(), 67);
+}
+
+#[test]
+fn the_english_catalogue_reads_the_shared_cases_too() {
+    // Sefer's own catalogue is English, codes and what it adds: no locale.
+    let mut catalogue = Catalogue::english();
+    catalogue.name(key("LUK"), "Lucas").name(key("MAT"), "Mt");
+    let read = |text| {
+        cite(text, &catalogue, Grammar::Navigation, &[])
+            .map(|cited| crate::format(&cited.refs))
+            .map_err(|e| e.problem)
+    };
+    assert_eq!(read("Lucas 3:1"), Ok("LUK 3:1".to_string()));
+    assert_eq!(read("1 John 2:3"), Ok("1JN 2:3".to_string()));
+    assert_eq!(read("Song of Solomon 2"), Ok("SNG 2".to_string()));
+    assert_eq!(read("Mt 5:3"), Ok("MAT 5:3".to_string()));
+    assert_eq!(read("Mateo 5:3"), Err(Problem::UnknownBook));
 }
 
 #[test]

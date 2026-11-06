@@ -25,6 +25,8 @@ mise = { path = "../mise", version = "0.1.20" }
 # Book identity and versification: `versification` builds its inventory from
 # onion and asks canon to sniff it. canon depends on mise alone.
 canon = { path = "../canon", version = "0.1.20" }
+# Addresses spelled: the machine spelling and citations, for the reference doors.
+reference = { path = "../reference", version = "0.1.20" }
 usfm_onion = { path = "../onion", version = "0.1.20" }
 # The other engine galley coordinates. Never the reverse: sous-core keeps no
 # onion dependency and sees only neutral projected coordinates.

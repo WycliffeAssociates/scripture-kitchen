@@ -575,32 +575,6 @@ impl Toc {
     /// The reference at a source byte. TOTAL: a byte past the end of the
     /// source reports the last chapter rather than nothing, because every
     /// caller of this is labelling a position it already has.
-    /// The place at a source byte as the address every other crate speaks:
-    /// the introduction, a chapter's head, a chapter's title (verse 0, which
-    /// `resolve` finds the same bytes for), or a verse. The inverse of
-    /// `resolve`, total as [`locate`](Self::locate) is.
-    pub fn address_at(&self, src_byte: u32) -> (mise::books::BookKey, mise::address::Address) {
-        use mise::address::{Address, Point};
-        let sid = self.locate(src_byte);
-        let (book, address) = sid.address();
-        let row = &self.chapters[self.chapter_row(src_byte)];
-        if matches!(address, Address::Chapters { .. })
-            && self.titles.iter().any(|title| {
-                row.span().contains(&title.at) && (title.start..title.end).contains(&src_byte)
-            })
-        {
-            let zero = Point::verse(sid.chapter, 0);
-            return (
-                book,
-                Address::Verses {
-                    from: zero,
-                    to: zero,
-                },
-            );
-        }
-        (book, address)
-    }
-
     pub fn locate(&self, src_byte: u32) -> Sid {
         let chapter = self.chapters[self.chapter_row(src_byte)].number;
         let (first, last) = self
@@ -969,8 +943,12 @@ mod tests {
         let source =
             "\\id PSA\n\\c 7\n\\cl Psalm 7\n\\s1 Prayer\n\\d A Shiggaion\n\\q1\n\\v 1 O Yahweh\n";
         let toc = built(source);
-        let at = |needle: &str| toc.address_at(source.find(needle).unwrap() as u32).1;
+        let at = |needle: &str| {
+            toc.address_at(source, source.find(needle).unwrap() as u32)
+                .1
+        };
         let zero = Point::verse(7, 0);
+        assert_eq!(at("\\id"), Address::Intro);
         assert_eq!(at("\\cl"), Address::Chapters { from: 7, to: 7 });
         assert_eq!(
             at("\\s1"),
@@ -1000,13 +978,30 @@ mod tests {
         };
         for byte in opening..span.end {
             assert_eq!(
-                toc.address_at(byte).1,
+                toc.address_at(source, byte).1,
                 Address::Verses {
                     from: zero,
                     to: zero
                 }
             );
         }
+    }
+
+    #[test]
+    fn a_byte_in_a_verse_part_is_the_part() {
+        use mise::address::{Address, Point, Segment};
+        let source = "\\id LUK\n\\c 1\n\\p \\v 3a a \\v 3b b\n";
+        let toc = built(source);
+        let b = Point {
+            chapter: 1,
+            verse: 3,
+            segment: Segment::new(b'b'),
+        };
+        let byte = source.find(" b\n").unwrap() as u32;
+        assert_eq!(
+            toc.address_at(source, byte).1,
+            Address::Verses { from: b, to: b }
+        );
     }
 
     #[test]

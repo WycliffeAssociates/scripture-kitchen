@@ -371,8 +371,24 @@ words, characters or markers, and `reference` stays small without them.
    `reference/fixtures/cite.json` (67 cases). Two departures, both to match the machine
    spelling: `Luke 3:0` is a title, not "zero", and `Jude 3` is verse 3. Every guess is an
    `Assumption` (a book by prefix, a comma read as a colon).
-4. **galley doors**, so Sefer switches `citation.ts` and `names.ts`. This goes with canon's
-   step 7, which wires canon into galley anyway.
+4. **galley doors** (done 2026-11-06): `parseReference`, `formatReference`,
+   `showReference`, a `Citations` reader built once from the host's names, and
+   `Galley.addressAt`/`addressAtOf` over onion's new `Toc::address_at` (parts and titles
+   included). Places cross as Sefer's `Address` with its book. No locale tables are linked:
+   Sefer passes the names it has. `galley/tests/reference_conformance.mjs` runs the
+   shared cite cases from JS. The module grew about 62 KB gzipped (619 → 681 KB), mostly
+   canon's Unicode fold.
+
+   **Sefer's switch**, in `src/app/location.ts`:
+   - `nameCatalogue` + `parseCitation` → `new Citations({ names, intro, books })` (memoized
+     per project), then `.read(text, { grammar: "navigation", held })`;
+   - `booksMatching(citationWords(text), …)` → `citations.booksMatching(text)`;
+   - `addressLabel` → `showReference(address, bookName, intro)`;
+   - `addressAt` over the TOC view → `galley.addressAt(id, offset, { utf16: true })`;
+   - `addressCode` → `formatReference([address])`.
+
+   Then `packages/text/src/location/citation.ts`, `names.ts` and their tests go, and
+   `address.ts` keeps only the types.
 5. **TOC tiles** (done 2026-11-06): headings and the opening paragraph go with the next
    verse, verse 0 is the title, `Sid` prints `GEN 0`, diff units are tiles, and both wires carry `start`.
 6. **`srs` grammar**, from usfmtc's cases and the standard's examples.

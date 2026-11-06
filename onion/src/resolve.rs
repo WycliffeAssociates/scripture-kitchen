@@ -306,6 +306,42 @@ impl Toc {
 
     /// The address one verse unit names: its hull for a bridge or a list, its
     /// segments' first start and last end for a segmented one.
+    /// The place at a source byte, as the address every other crate speaks,
+    /// with the book as written: the introduction, a chapter's head, its title
+    /// (verse 0, the same bytes `resolve` finds for `PSA 7:0`), or the verse
+    /// whose tile holds the byte, parts included (`3a`). The inverse of
+    /// `resolve`, and total as [`locate`](Self::locate) is.
+    ///
+    /// `source` is the text this `Toc` was built from: a part's letter is read
+    /// from it.
+    pub fn address_at(&self, source: &str, src_byte: u32) -> (mise::books::BookKey, Address) {
+        let book = mise::books::BookKey::new(self.book);
+        let row = self.chapter_row(src_byte);
+        if row == 0 {
+            return (book, Address::Intro);
+        }
+        let chapter = &self.chapters[row];
+        if let Some(verse) = self.verse_at(src_byte) {
+            return (book, self.unit_address(source.as_bytes(), chapter, verse));
+        }
+        let in_title = self
+            .titles_in(chapter)
+            .any(|title| (title.start..title.end).contains(&src_byte));
+        let address = if in_title {
+            let zero = Point::verse(chapter.number, 0);
+            Address::Verses {
+                from: zero,
+                to: zero,
+            }
+        } else {
+            Address::Chapters {
+                from: chapter.number,
+                to: chapter.number,
+            }
+        };
+        (book, address)
+    }
+
     fn unit_address(&self, source: &[u8], chapter: &ChapterRow, verse: &VerseAnchor) -> Address {
         if chapter.number == 0 {
             return Address::Book;

@@ -105,6 +105,29 @@ pub enum ErrorKind {
     NotBasic,
 }
 
+impl ErrorKind {
+    /// A stable kebab-case name, for a wire or a log: `unknown-book`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ErrorKind::Empty => "empty",
+            ErrorKind::ExpectedBook => "expected-book",
+            ErrorKind::UnknownBook => "unknown-book",
+            ErrorKind::NoReferenceBefore => "no-reference-before",
+            ErrorKind::ExpectedVerse => "expected-verse",
+            ErrorKind::RangeEnd => "range-end",
+            ErrorKind::Unexpected => "unexpected",
+            ErrorKind::DifferentBook => "different-book",
+            ErrorKind::Backwards => "backwards",
+            ErrorKind::MixedRange => "mixed-range",
+            ErrorKind::IntroHasNoVerses => "intro-has-no-verses",
+            ErrorKind::EndNeedsScheme => "end-needs-scheme",
+            ErrorKind::ChapterOutOfRange => "chapter-out-of-range",
+            ErrorKind::VerseOutOfRange => "verse-out-of-range",
+            ErrorKind::NotBasic => "not-basic",
+        }
+    }
+}
+
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let what = match self.kind {

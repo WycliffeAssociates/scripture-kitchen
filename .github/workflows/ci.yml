@@ -118,6 +118,9 @@ jobs:
       - name: galley sous conformance
         run: node galley/tests/sous_conformance.mjs galley/pkg-node testData/exampleCorpora/en_ulb
 
+      - name: galley reference conformance
+        run: node galley/tests/reference_conformance.mjs galley/pkg-node
+
       # Every .ts the package ships, type-checked as Sefer compiles it (Sefer
       # checks them as its own source). The compiler is pinned in
       # tools/typecheck to Sefer's; the settings are ../../tsconfig.json.
