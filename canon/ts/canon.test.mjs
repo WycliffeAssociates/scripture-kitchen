@@ -14,6 +14,7 @@ import {
   fold,
   isSchemeName,
   lastVerse,
+  localeFor,
   name,
   parseBook,
   slug,
@@ -109,6 +110,12 @@ test("excluded", () => {
 const nameFixtures = load("names.json");
 const tableOf = async (tag) => (await import(`./names/${tag}.ts`)).default;
 const tablesOf = (tags) => Promise.all(tags.map(tableOf));
+
+test("localeFor", () => {
+  for (const row of nameFixtures.locale_for) {
+    assert.equal(localeFor(row.tag), row.locale ?? undefined, `localeFor(${JSON.stringify(row.tag)})`);
+  }
+});
 
 test("name", async () => {
   for (const row of nameFixtures.name) {

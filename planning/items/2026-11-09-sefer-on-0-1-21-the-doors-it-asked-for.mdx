@@ -2,7 +2,7 @@
 id: 89ade78b-55b6-4a24-bc45-3c14f8337b87
 title: "Sefer on 0.1.21: the doors it asked for"
 kind: plan
-status: in-progress
+status: done
 created: 2026-11-09
 updated: 2026-11-09
 sha: fe1480d
@@ -156,4 +156,24 @@ a list.
 with no history and no git. Over each fixture's checked-out files it equals the history's last
 save. `writerBookToUsfm`, `treeFromFiles` and `readWriterTree` go. `WriterHistory` gains `spent`
 and `free()`.
+
+## In 0.1.23: the rest
+
+Items 5, 7 and 11 are done. Item 12 is its own plan:
+[[code:planning/items/2026-11-09-docx-import-a-generated-document-property-test-sef.mdx|docx import: a generated-document property test]].
+
+- **canon ships compiled JavaScript (5).** `./canon` and `./names/*` point at `canon/js`: `.js`
+  plus `.d.ts`, compiled from `canon/ts`. A plain Node script can import it from `node_modules`
+  now. CI rebuilds `js/` and fails on a stale one. Nothing changes for a bundler, and the import
+  paths are the same. (The docs used to say `…/canon/names/fr`. The export was, and is,
+  `…/names/fr`.)
+- **`localeFor(tag)` (7).** It answers which names module a BCP 47 tag means:
+  - `es` and `es-MX` → `es-419`; `pt` → `pt-br`; `ar-EG` → `arb`;
+  - `ur` → `undefined`, because `ur-deva` is Devanagari.
+
+  Sefer's hard-coded pairing goes. Rust's `canon::name` picks its table by the same rule.
+- **`bento.writerProject(manifestBytes, folderName?)` (11).** It answers the same
+  `WriterProject` that `WriterHistory.project` reports, minus `name`, including the folder-name
+  fallback for the resource. Over all five fixture repos it equals the history's project.
+  Sefer's `recognizeWriter` re-implementation goes.
 

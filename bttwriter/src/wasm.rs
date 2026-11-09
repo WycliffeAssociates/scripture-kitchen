@@ -112,31 +112,7 @@ fn signature(s: &Signature) -> Node {
 impl History {
     /// JSON: `{book, language: {id, name?, direction}, resource, sources, translators, name?}`.
     pub fn project(&self) -> String {
-        let p = &self.0.project;
-        let mut language = vec![("id".to_owned(), Node::text(&p.language.id))];
-        if let Some(n) = &p.language.name {
-            language.push(("name".into(), Node::text(n)));
-        }
-        language.push((
-            "direction".into(),
-            Node::text(match p.language.direction {
-                bento::Direction::Ltr => "ltr",
-                bento::Direction::Rtl => "rtl",
-            }),
-        ));
-        let mut e = vec![
-            ("book".to_owned(), Node::text(p.book.to_string())),
-            ("language".into(), Node::Map(language)),
-            ("resource".into(), Node::text(&p.resource)),
-            (
-                "sources".into(),
-                Node::List(p.sources.iter().map(bento::js::related).collect()),
-            ),
-            (
-                "translators".into(),
-                Node::List(p.translators.iter().map(Node::text).collect()),
-            ),
-        ];
+        let mut e = bento::js::writer_project(&self.0.project);
         if let Some(n) = &self.0.project_name {
             e.push(("name".into(), Node::text(n)));
         }

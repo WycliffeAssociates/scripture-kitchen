@@ -13,6 +13,14 @@ export function fingerprint(bytes: Uint8Array): string;
 
 export function read(name: string, bytes: Uint8Array): string;
 
+/**
+ * A BTT Writer `manifest.json`'s book project, or `undefined` when it
+ * doesn't name a book, a language and a resource. `repo` is the repo or
+ * folder name (`tmf_3jn_text_reg`): when the manifest names no resource,
+ * Writer's naming supplies it.
+ */
+export function writerProject(bytes: Uint8Array, repo?: string | null): string | undefined;
+
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
@@ -23,6 +31,7 @@ export interface InitOutput {
     readonly find: (a: number, b: number) => [number, number];
     readonly fingerprint: (a: number, b: number) => [number, number];
     readonly read: (a: number, b: number, c: number, d: number) => [number, number];
+    readonly writerProject: (a: number, b: number, c: number, d: number) => [number, number];
     readonly wasm_bindgen_a705d1ccab00a4e4___convert__closures_____invoke___js_sys_b4878f215895654f___Function_fn_wasm_bindgen_a705d1ccab00a4e4___JsValue_____wasm_bindgen_a705d1ccab00a4e4___sys__Undefined___js_sys_b4878f215895654f___Function_fn_wasm_bindgen_a705d1ccab00a4e4___JsValue_____wasm_bindgen_a705d1ccab00a4e4___sys__Undefined_______true_: (a: number, b: number, c: any, d: any) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;

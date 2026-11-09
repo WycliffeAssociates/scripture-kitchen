@@ -344,9 +344,7 @@ fn typescript(rows: &[Row], names: &[(String, u8)], locales: &[&str]) -> String 
         );
     }
     out.push_str("]);\n\n");
-    out.push_str(
-        "/** The locales with a names module: `import fr from \"…/canon/names/fr\"`. */\n",
-    );
+    out.push_str("/** The locales with a names module: `import fr from \"…/names/fr\"`. */\n");
     let tags: Vec<String> = locales.iter().map(|t| json(t)).collect();
     let _ = writeln!(
         out,

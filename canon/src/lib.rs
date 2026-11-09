@@ -45,6 +45,6 @@ pub use books::{Book, Canon, Division, book, books, fold, nfd_len, parse_book, u
 pub use define::{DefineError, SchemeBuilder};
 pub use map::{Mapped, Paired, Verse, counterparts, map, pairs};
 pub use mise::books::BookKey;
-pub use names::{Form, Named, locales, name, parse_book_in};
+pub use names::{Form, Named, locale_for, locales, name, parse_book_in};
 pub use scheme::{Scheme, scheme, schemes};
 pub use sniff::{Confidence, Dissent, Inventory, Sniff, Standing, sniff};

@@ -47,6 +47,29 @@ fn direction(d: Direction) -> Node {
     })
 }
 
+/// A Writer book project as `bento.ts`'s `WriterProject`:
+/// `{book, language: {id, name?, direction}, resource, sources, translators}`.
+pub fn writer_project(p: &crate::bttwriter::WriterProject) -> Vec<(String, Node)> {
+    let mut language = vec![("id".to_owned(), text(&p.language.id))];
+    if let Some(n) = &p.language.name {
+        language.push(("name".into(), text(n)));
+    }
+    language.push(("direction".into(), direction(p.language.direction)));
+    vec![
+        ("book".to_owned(), text(&p.book.to_string())),
+        ("language".into(), Node::Map(language)),
+        ("resource".into(), text(&p.resource)),
+        (
+            "sources".into(),
+            Node::List(p.sources.iter().map(related).collect()),
+        ),
+        (
+            "translators".into(),
+            Node::List(p.translators.iter().map(|t| text(t)).collect()),
+        ),
+    ]
+}
+
 pub fn related(r: &Related) -> Node {
     let mut e = vec![
         ("relation".to_owned(), text("source")),

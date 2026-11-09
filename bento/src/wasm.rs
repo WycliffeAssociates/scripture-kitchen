@@ -7,6 +7,7 @@
 //! createBible(projectJson, bookBytes[], formats) → Map<name, bytes>
 //! edit(existing, changeJson, addBytes[], checksumBytes[]) → {files: Map<name, bytes>, findings: JSON}
 //! fingerprint(bytes)                            → JSON {md5, size}
+//! writerProject(bytes, repo?)                   → JSON WriterProject | undefined
 //! ```
 //!
 //! Structured values cross as JSON (`js.rs` writes `bento.ts`'s types), and
@@ -57,6 +58,17 @@ pub fn find_js(names: Vec<String>) -> Option<String> {
         ])
         .to_json()
     })
+}
+
+/// A BTT Writer `manifest.json`'s book project, or `undefined` when it
+/// doesn't name a book, a language and a resource. `repo` is the repo or
+/// folder name (`tmf_3jn_text_reg`): when the manifest names no resource,
+/// Writer's naming supplies it.
+#[wasm_bindgen(js_name = writerProject)]
+pub fn writer_project_js(bytes: &[u8], repo: Option<String>) -> Option<String> {
+    let manifest = crate::bttwriter::read(bytes).ok()?;
+    let project = manifest.project(repo.as_deref())?;
+    Some(Node::Map(js::writer_project(&project)).to_json())
 }
 
 #[wasm_bindgen(js_name = read)]

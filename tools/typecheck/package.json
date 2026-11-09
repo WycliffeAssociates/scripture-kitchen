@@ -1,9 +1,10 @@
 {
   "name": "kitchen-typecheck",
   "private": true,
-  "description": "Type-checks every TypeScript file the package ships, with the compiler and settings Sefer compiles them with (../../tsconfig.json).",
+  "description": "Type-checks every TypeScript file the package ships, with the compiler and settings Sefer compiles them with (../../tsconfig.json). Also compiles canon's TypeScript to the JavaScript the package ships (`npm run canon`).",
   "scripts": {
-    "check": "tsc -p ../../tsconfig.json"
+    "check": "tsc -p ../../tsconfig.json",
+    "canon": "tsc -p ../../canon/tsconfig.json"
   },
   "devDependencies": {
     "typescript": "7.0.2"

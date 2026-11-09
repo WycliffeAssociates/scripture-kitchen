@@ -1,0 +1,74 @@
+---
+id: 713dd278-95f6-46ad-89d0-3d7ff870e9c1
+title: "docx import: a generated-document property test, Sefer's faithful check ported"
+kind: plan
+status: planned
+created: 2026-11-09
+updated: 2026-11-09
+sha: 6d9ce33
+tags: [docx, testing]
+related: [95bc09c4-2e59-4220-9bfc-e4e90c52e1fe, 89ade78b-55b6-4a24-bc45-3c14f8337b87]
+source: Sefer's feedback on 0.1.21 (item 12); Will, 2026-11-09
+---
+
+
+Will, 2026-11-09:
+
+> I think for now just write a plan for fuzzing/prop test on word at some point, but not this very
+> second.
+
+## Why
+
+When Sefer switched Word import to the kitchen's `docx`, it deleted `packages/document-import`, and
+with it `faithful.verify.ts` (Sefer `dc086cad^`). That test generated thousands of documents and
+checked two promises on every one. The kitchen has fixture tests: the 63 fixture/setting runs that
+matched the old importer byte for byte, and `tests/document_import.rs`. It has nothing that
+generates input. So a change to the import rules can drop or reorder a translator's words in a case
+no fixture covers, and nothing would fail.
+
+## What the test was
+
+It built a `Reading` directly, not a `.docx`: paragraphs of text runs, verse numbers in the forms
+people type, breaks, footnotes and comments. It mixed in:
+- styles and roles (heading, title, quote), indents, alignment, list and table paragraphs;
+- chapter labels, which are not the translator's text;
+- numbers sharing a run with words (`and 3 sons`);
+- superscript, italic and bold.
+
+It then picked random `Settings` (verses, poetry, headings, front, italic, bold, lists,
+styleMarkers, sometimes a versification or a marker map), ran `render`, and checked two things:
+
+1. **Every letter survives, in order, none twice.** Words are built only from letters that no
+   marker or verse number consumes (no `e`, `r`, `s`, `v`, no digits, `.` or `-`). Filtering the
+   input text and the USFM, with its markers removed, down to that alphabet must give the same
+   string.
+2. **Verse numbers only rise within a chapter**, and no `\v` comes before the first `\c`.
+
+A failure printed its seed, and `SEED=<n> RUNS=1` replayed it. The default was 3000 runs;
+`RUNS=20000` ran longer.
+
+## The port
+
+The docx crate has the same model in Rust: `docx::reading::{Reading, Paragraph, Inline}`,
+`docx::Settings` and `docx::render` ([[code:docx/src/lib.rs#render]]). So the port is the
+generator and the two checks, unchanged:
+
+<Files id="files">
+```
++ docx/tests/faithful.rs   -- the generator, the two promises, a seed in every failure
+~ docx/Cargo.toml          -- dev-dependency only if a generator crate is chosen (see below)
+```
+</Files>
+
+- **The generator.** A small seeded PRNG (the same mulberry32 Sefer used), so a seed replays
+  exactly and the test adds no dependency. Same alphabet, same mix, same settings.
+- **Runs.** About 3000 per `cargo nextest run` (a fraction of a second natively). `FAITHFUL_RUNS`
+  and `FAITHFUL_SEED` env vars for a long run and a replay. A long run joins the ignored tier
+  (`agents/testing.md`).
+- **One step past Sefer.** Also write each generated `Reading` to a real `.docx` with `export` and
+  import that file, so the zip and XML reading is covered too, not only `render`. This is a
+  second test, so a failure says which half broke.
+
+<Question id="generator">Hand-rolled seeded generator (no dependency, Sefer's exact cases) or `proptest` (shrinks a failure to its smallest case, adds a dev-dependency)? I'd start hand-rolled, to match Sefer's coverage on day one, and switch only if failures turn out hard to read.</Question>
+
+<Question id="when">When? It's a test only and changes nothing for Sefer. It's worth having before anyone next changes the import rules (the docx plan's best-effort rules, `guess.rs`).</Question>

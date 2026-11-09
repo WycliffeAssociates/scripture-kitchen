@@ -100,6 +100,10 @@ try {
         .map((path) => [path, new Uint8Array(readFileSync(join(dir, path)))]),
     );
     check(bttwriter.stitch(files, book) === history.usfm(), `${repo}: stitch over the files equals the history's last save`);
+    // bento answers the same project from the manifest and the folder name alone.
+    const { name: _, ...project } = history.project;
+    const fromManifest = bento.writerProject(files.get("manifest.json"), repo);
+    check(JSON.stringify(fromManifest) === JSON.stringify(project), `${repo}: bento.writerProject is the history's project`, fromManifest);
     check(history.saves > 0 && reads() > 0, `${repo}: ${history.saves} saves, ${reads()} objects read`);
     const progress = history.progress(NOW);
     check(progress.length === history.saves && progress.every(([at]) => at > 1_420_070_400), `${repo}: progress per save`);

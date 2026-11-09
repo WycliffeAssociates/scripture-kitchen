@@ -3,8 +3,8 @@
 //! the row.
 
 use canon::{
-    BookKey, Canon, Form, book, books, fold, locales, name, parse_book, parse_book_in, scheme,
-    schemes, usfm_file_name,
+    BookKey, Canon, Form, book, books, fold, locale_for, locales, name, parse_book, parse_book_in,
+    scheme, schemes, usfm_file_name,
 };
 use serde_json::Value;
 
@@ -207,6 +207,18 @@ fn form_name(form: Form) -> &'static str {
         Form::Long => "long",
         Form::Short => "short",
         Form::Abbrev => "abbrev",
+    }
+}
+
+#[test]
+fn locale_for_cases() {
+    for row in rows(&names_fixtures(), "locale_for") {
+        let tag = row["tag"].as_str().unwrap();
+        assert_eq!(
+            locale_for(tag),
+            row["locale"].as_str(),
+            "locale_for({tag:?})"
+        );
     }
 }
 

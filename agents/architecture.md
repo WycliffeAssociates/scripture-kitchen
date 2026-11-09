@@ -27,7 +27,7 @@
   parsing: `canon-gen` (`canon/gen/`, its own crate because it reads JSON with
   serde_json and onion's lexer for the name harvest) writes the Rust tables
   AND their `canon/ts/` twins from `canon/data/`, and the package ships the
-  TypeScript lookups at `./canon` (names at `./canon/names/<locale>`) with no
+  TypeScript lookups at `./canon` (names at `./names/<locale>`) with no
   wasm. Mapping and sniffing are Rust only, reached from JS through galley.
   Rust and TS both run `canon/fixtures/*.json`. A text against its scheme is
   onion's `lint_against_counts`, given the counts: onion never depends on
