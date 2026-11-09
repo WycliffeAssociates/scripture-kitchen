@@ -15,9 +15,9 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 # The parse and the USX the export folds. Only the USX export is needed.
-usfm_onion = { path = "../onion", version = "0.1.22", default-features = false, features = ["usx"] }
+usfm_onion = { path = "../onion", version = "0.1.23", default-features = false, features = ["usx"] }
 # Book codes and versification: a number past a chapter's last verse is never a verse.
-canon = { path = "../canon", version = "0.1.22" }
+canon = { path = "../canon", version = "0.1.23" }
 # Reading onion's USX on export, and the document's parts on import.
 quick-xml = "0.42"
 # The zip container: raw deflate both ways. CRC-32 is written here.
@@ -35,8 +35,8 @@ wasm = ["dep:wasm-bindgen", "dep:js-sys", "dep:serde_json"]
 
 [dev-dependencies]
 # The round trip compares as onion's USJ.
-usfm_onion = { path = "../onion", version = "0.1.22", default-features = false, features = ["usx", "usj"] }
+usfm_onion = { path = "../onion", version = "0.1.23", default-features = false, features = ["usx", "usj"] }
 serde_json = "1"
 # The staleness reporter onion's generated files use.
-ticket = { path = "../ticket", version = "0.1.22" }
+ticket = { path = "../ticket", version = "0.1.23" }
 rayon.workspace = true

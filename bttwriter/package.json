@@ -1,6 +1,6 @@
 {
   "name": "bttwriter",
-  "version": "0.1.22",
+  "version": "0.1.23",
   "type": "module",
   "description": "BTT Writer projects' save histories, read through any git and replayed into one git pack, with the project's manifests. TypeScript over one wasm module.",
   "private": true,

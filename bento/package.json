@@ -1,6 +1,6 @@
 {
   "name": "bento",
-  "version": "0.1.22",
+  "version": "0.1.23",
   "type": "module",
   "description": "A repo's manifest (Scripture Burrito, Resource Container, BTT Writer): read, checked, created and edited. TypeScript over one wasm module.",
   "private": true,

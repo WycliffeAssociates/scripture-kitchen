@@ -12,8 +12,8 @@ workspace = true
 # scheme, how long chapters are. No text and no onion: whether a text has the
 # place is resolve's question.
 [dependencies]
-mise = { path = "../mise", version = "0.1.22" }
-canon = { path = "../canon", version = "0.1.22" }
+mise = { path = "../mise", version = "0.1.23" }
+canon = { path = "../canon", version = "0.1.23" }
 
 [dev-dependencies]
 serde_json = "1.0"
