@@ -66,7 +66,7 @@ export const root = {
   version: galley.version,
   description: galley.description,
   type: galley.type,
-  license: "UNLICENSED",
+  license: "MIT",
   // Published only to the org Nexus (ci.yml's publish job); pinning the registry
   // here keeps a stray `npm publish` off the public one.
   publishConfig: { registry: "https://nexus-registry.walink.org/repository/wa-npm/" },
