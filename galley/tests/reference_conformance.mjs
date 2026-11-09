@@ -52,7 +52,7 @@ const throws = (call, says, what) => {
   const fixture = JSON.parse(readFileSync(resolve(here, "../../reference/fixtures/cite.json"), "utf8"));
   const citations = new Citations({ names: fixture.catalogue.names, intro: fixture.catalogue.intro });
   for (const c of fixture.cases) {
-    const got = JSON.parse(citations.read(c.text, { grammar: c.grammar, ...(c.held ? { held: c.held } : {}) }));
+    const got = citations.read(c.text, { grammar: c.grammar, ...(c.held ? { held: c.held } : {}) });
     if (c.refs) {
       eq(got.ok, true, `${JSON.stringify(c.text)} reads`);
       if (got.ok) eq(formatReference(got.addresses).split("; ").filter(Boolean), c.refs, JSON.stringify(c.text));
@@ -68,7 +68,7 @@ const throws = (call, says, what) => {
 
   // The shape Sefer reads: a book on every address, the text trimmed.
   eq(
-    JSON.parse(citations.read("  Mateo 5:3-7 ", { grammar: "prose" })),
+    citations.read("  Mateo 5:3-7 ", { grammar: "prose" }),
     {
       ok: true,
       text: "Mateo 5:3-7",
@@ -79,10 +79,15 @@ const throws = (call, says, what) => {
   );
   // REV too: canon's English aliases include "Revelation of John".
   eq(citations.booksMatching("john 3:16"), ["JHN", "1JN", "2JN", "3JN", "REV"], "booksMatching");
+  // No peripheral or XXA–XXG unless the project holds it or asks.
+  eq(citations.booksMatching("ma"), ["MAL", "MAT", "MRK", "1MA", "2MA", "3MA", "4MA", "MAN"], "no peripherals");
+  eq(new Citations({ books: ["FRT"] }).booksMatching("frt"), ["FRT"], "a held peripheral");
+  eq(new Citations({ peripherals: true }).booksMatching("xxa"), ["XXA"], "peripherals asked for");
+  eq(citations.read("FRT 1").ok, true, "reading still knows them");
   // A heart language's names arrive from the host, in any script.
   const am = new Citations({ names: { MAT: ["ማቴዎስ"] }, intro: ["መግቢያ"] });
-  eq(formatReference(JSON.parse(am.read("ማቴዎስ 5:3")).addresses), "MAT 5:3", "an Amharic name");
-  eq(formatReference(JSON.parse(am.read("ማቴዎስ መግቢያ")).addresses), "MAT 0", "an Amharic intro word");
+  eq(formatReference(am.read("ማቴዎስ 5:3").addresses), "MAT 5:3", "an Amharic name");
+  eq(formatReference(am.read("ማቴዎስ መግቢያ").addresses), "MAT 0", "an Amharic intro word");
   throws(() => citations.read("Mat 1", { grammer: "prose" }), "unknown option", "a misspelled option");
   throws(() => citations.read("Mat 1", { grammar: "poetry" }), "grammar", "an unknown grammar");
   throws(() => new Citations({ names: { MATT: ["x"] } }), "book code", "a four-letter code");
@@ -90,7 +95,7 @@ const throws = (call, says, what) => {
 
 // --- the machine spelling -------------------------------------------------
 {
-  const read = (text, opts) => JSON.parse(parseReference(text, opts));
+  const read = (text, opts) => parseReference(text, opts);
   eq(
     read("MAT 1:20-2:3; MRK 1:1").addresses,
     [
@@ -113,16 +118,19 @@ const throws = (call, says, what) => {
   }
   const lk = read("LUK 11:2a-3").addresses[0];
   eq(showReference(lk, "Lucas", "introducción"), "Lucas 11:2a-3", "showReference");
+  eq(formatReference(lk), "LUK 11:2a-3", "one address, no list");
+  // Every structured answer is an object, never a JSON string.
+  eq(typeof parseReference("MAT 1:1"), "object", "an object");
   eq(showReference({ kind: "intro", book: "LUK" }, "Lucas", "introducción"), "Lucas introducción", "an intro shown");
   throws(() => formatReference([{ kind: "book" }]), "book", "an address without its book");
-  throws(() => formatReference("MAT"), "array", "not an array");
+  throws(() => formatReference("MAT"), "an address or an array", "neither an address nor a list");
 }
 
 // --- the place at a cursor --------------------------------------------------
 {
   const galley = new Galley();
   const text = "\\id PSA\n\\c 7\n\\s1 Prayer\n\\d A Shiggaion\n\\q1\n\\v 1 O Yahweh\n\\v 2a lest \\v 2b they\n";
-  const at = (needle, opts) => JSON.parse(galley.addressAtOf(text, text.indexOf(needle), opts));
+  const at = (needle, opts) => galley.addressAtOf(text, text.indexOf(needle), opts);
   eq(at("\\id"), { kind: "intro", book: "PSA" }, "the front matter");
   eq(at("\\c 7"), { kind: "chapters", from: 7, to: 7, book: "PSA" }, "a chapter's head");
   eq(at("\\s1").from, { chapter: 7, verse: 0 }, "a heading above the title is verse 0's");
@@ -133,12 +141,12 @@ const throws = (call, says, what) => {
   // UTF-16: the offset of `b` after an astral character is one less in bytes' terms.
   const astral = "\\id GEN\n\\c 1\n\\p \\v 1 𝔄 \\v 2 b\n";
   const unit = astral.indexOf("b");
-  eq(JSON.parse(galley.addressAtOf(astral, unit, { utf16: true })).from, { chapter: 1, verse: 2 }, "a UTF-16 offset");
+  eq(galley.addressAtOf(astral, unit, { utf16: true }).from, { chapter: 1, verse: 2 }, "a UTF-16 offset");
 
   // An offset outside the text is refused, not wrapped or clamped: a u32
   // once read -1 as the book's last verse.
   galley.update("PSA", text);
-  eq(JSON.parse(galley.addressAt("PSA", text.length)).from, { chapter: 7, verse: 2, segment: "b" }, "the end itself");
+  eq(galley.addressAt("PSA", text.length).from, { chapter: 7, verse: 2, segment: "b" }, "the end itself");
   throws(() => galley.addressAt("PSA", -1), "outside the text", "a negative offset");
   throws(() => galley.addressAt("PSA", text.length + 1), "outside the text", "past the end");
   throws(() => galley.addressAt("PSA", 1.5), "outside the text", "a fraction");
@@ -157,7 +165,7 @@ const throws = (call, says, what) => {
   const galley = new Galley();
   const jonah = readFileSync(resolve(here, "../../testData/exampleCorpora/examples.bsb/32JONBSB.usfm"), "utf8");
   const at = (ref, opts) => {
-    const got = JSON.parse(galley.srsLocateOf(jonah, ref, opts));
+    const got = galley.srsLocateOf(jonah, ref, opts);
     return got.found ? jonah.slice(got.found.from, got.found.to) : got;
   };
   // usfmtc's cases; the file is ASCII apart from its quotes, so offsets are UTF-16 too.
@@ -168,16 +176,16 @@ const throws = (call, says, what) => {
   eq(at("GEN 1:1"), { unsupported: "book" }, "another book");
   eq(at("JON 1:1!"), { error: "expected-step", at: 8 }, "a parse error");
 
-  const found = JSON.parse(galley.srsLocateOf(jonah, "JON 2:8!2-4", { utf16: true })).found;
+  const found = galley.srsLocateOf(jonah, "JON 2:8!2-4", { utf16: true }).found;
   eq(galley.srsAtOf(jonah, found.from, found.to, { utf16: true }), "JON 2:8!2-4", "srsAt spells it back");
   eq(galley.srsAtOf(jonah, 0, 3), undefined, "outside any verse");
 
-  eq(JSON.parse(parseSrs("en+ulb.ROM 9:1!3-5")), {
+  eq(parseSrs("en+ulb.ROM 9:1!3-5"), {
     ok: true,
     canonical: "en+ulb.ROM 9:1!3-5",
     within: [{ kind: "verses", book: "ROM", from: { chapter: 9, verse: 1 }, to: { chapter: 9, verse: 1 } }],
   }, "parseSrs");
-  eq(JSON.parse(parseSrs("NEH t:Israel/6/1")).within, [null], "a named reference lies in no basic one");
+  eq(parseSrs("NEH t:Israel/6/1").within, [null], "a named reference lies in no basic one");
   galley.free();
 }
 

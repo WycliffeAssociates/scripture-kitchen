@@ -17,7 +17,13 @@ use reference::{Address, Assumption, BookKey, Catalogue, Grammar, Reference};
 use serde_json::{Value, json};
 use wasm_bindgen::prelude::*;
 
+use onion_wasm::object as js;
 use onion_wasm::options::{bag, get};
+
+/// A JSON answer handed to JS as the object it spells.
+fn object(value: Value) -> JsValue {
+    js(&value.to_string())
+}
 
 use super::Galley;
 
@@ -70,18 +76,18 @@ fn utf16_at(text: &str, byte: usize) -> usize {
 /// reference), read strictly: `{ ok: true, addresses }`, or `{ ok: false,
 /// error, at }` with a stable error name and a UTF-16 offset. `book` reads a
 /// list whose first reference leaves its book out (`"5:3-12"`).
-#[wasm_bindgen(js_name = parseReference)]
+#[wasm_bindgen(js_name = parseReference, unchecked_return_type = "ReferenceParse")]
 pub fn parse_reference(
     text: &str,
     #[wasm_bindgen(unchecked_optional_param_type = "{ book?: string }")] opts: Option<JsValue>,
-) -> Result<String, JsError> {
+) -> Result<JsValue, JsError> {
     let door = "parseReference";
     let opts = bag(opts.as_ref(), door, &["book"]).map_err(|e| JsError::new(&e))?;
     let read = match get(opts.as_ref(), "book") {
         Some(book) => reference::parse_in(book_code(&book, door)?, text),
         None => reference::parse(text),
     };
-    Ok(match read {
+    Ok(object(match read {
         Ok(refs) => json!({
             "ok": true,
             "addresses": refs.iter().map(reference_json).collect::<Vec<_>>(),
@@ -91,25 +97,27 @@ pub fn parse_reference(
             "error": error.kind.as_str(),
             "at": utf16_at(text, error.at),
         }),
-    }
-    .to_string())
+    }))
 }
 
-/// The machine spelling of a list: `"MAT 1:20-2:3; MRK 1:1"`.
+/// The machine spelling of one address or a list: `"MAT 1:20-2:3; MRK 1:1"`.
 #[wasm_bindgen(js_name = formatReference)]
 pub fn format_reference(
-    #[wasm_bindgen(unchecked_param_type = "BookAddress[]")] refs: JsValue,
+    #[wasm_bindgen(unchecked_param_type = "BookAddress | BookAddress[]")] refs: JsValue,
 ) -> Result<String, JsError> {
     let door = "formatReference";
-    if !Array::is_array(&refs) {
+    let refs: Vec<Reference> = if Array::is_array(&refs) {
+        Array::from(&refs)
+            .iter()
+            .map(|one| reference_from(&one, door))
+            .collect::<Result<_, _>>()?
+    } else if refs.is_object() {
+        vec![reference_from(&refs, door)?]
+    } else {
         return Err(JsError::new(&format!(
-            "{door}: expected an array of addresses"
+            "{door}: expected an address or an array of them"
         )));
-    }
-    let refs: Vec<Reference> = Array::from(&refs)
-        .iter()
-        .map(|one| reference_from(&one, door))
-        .collect::<Result<_, _>>()?;
+    };
     Ok(reference::format(&refs))
 }
 
@@ -138,15 +146,26 @@ impl Citations {
     /// `names`: per book code, what the project calls it in any language it
     /// names books in, and registered abbreviations (`{ MAT: ["Mateo", "Mt"] }`).
     /// `intro`: words for the introduction (`["introducción"]`). `books`: codes
-    /// outside canon's table that should still be named (a `\z` book).
+    /// the project holds outside the 66 and the deuterocanon (a peripheral like
+    /// `FRT`, a `\z` book): named, and offered by `booksMatching`.
+    /// `peripherals: true` offers every book there, XXA–XXG included.
     #[wasm_bindgen(constructor)]
     pub fn new(
         #[wasm_bindgen(unchecked_optional_param_type = "CitationNames")] opts: Option<JsValue>,
     ) -> Result<Citations, JsError> {
         let door = "Citations";
-        let opts =
-            bag(opts.as_ref(), door, &["names", "intro", "books"]).map_err(|e| JsError::new(&e))?;
+        let opts = bag(
+            opts.as_ref(),
+            door,
+            &["names", "intro", "books", "peripherals"],
+        )
+        .map_err(|e| JsError::new(&e))?;
         let mut catalogue = Catalogue::english();
+        if onion_wasm::options::flag(opts.as_ref(), door, "peripherals")
+            .map_err(|e| JsError::new(&e))?
+        {
+            catalogue.offer_all();
+        }
         if let Some(books) = get(opts.as_ref(), "books") {
             for code in strings(&books, door, "books")? {
                 let bytes: [u8; 3] =
@@ -190,11 +209,12 @@ impl Citations {
     /// problem, word? }`, as Sefer's `Citation`. `grammar` is `"navigation"`
     /// (the default: prefixes, `3,1` as `3:1`) or `"prose"`; `held` is the
     /// project's books, which win a prefix tie.
+    #[wasm_bindgen(unchecked_return_type = "Citation")]
     pub fn read(
         &self,
         text: &str,
         #[wasm_bindgen(unchecked_optional_param_type = "CiteOptions")] opts: Option<JsValue>,
-    ) -> Result<String, JsError> {
+    ) -> Result<JsValue, JsError> {
         let door = "Citations.read";
         let opts = bag(opts.as_ref(), door, &["grammar", "held"]).map_err(|e| JsError::new(&e))?;
         let grammar = match get(opts.as_ref(), "grammar").and_then(|g| g.as_string()) {
@@ -219,7 +239,7 @@ impl Citations {
                 .collect(),
         };
         let trimmed = text.trim();
-        Ok(
+        Ok(object(
             match reference::cite(text, &self.catalogue, grammar, &held) {
                 Ok(cited) => json!({
                     "ok": true,
@@ -239,13 +259,14 @@ impl Citations {
                     }
                     out
                 }
-            }
-            .to_string(),
-        )
+            },
+        ))
     }
 
     /// Every book the words before the numbers could mean, in canon order:
-    /// a filter under a go-to box. `"john 3"` lists JHN, 1JN, 2JN and 3JN.
+    /// a filter under a go-to box. `"john 3"` lists JHN, 1JN, 2JN and 3JN (and
+    /// REV, "Revelation of John"). No peripheral or XXA–XXG unless `books`
+    /// listed it or `peripherals` asked.
     #[wasm_bindgen(js_name = booksMatching)]
     pub fn books_matching(&self, text: &str) -> Vec<String> {
         self.catalogue
@@ -274,9 +295,9 @@ fn strings(value: &JsValue, door: &str, key: &str) -> Result<Vec<String>, JsErro
 /// within }`, where `within` is the basic reference each range lies in (a
 /// `BookAddress`, or `null` for a named reference, `end`, or a range across
 /// books), or `{ ok: false, error, at }` with a UTF-16 offset.
-#[wasm_bindgen(js_name = parseSrs)]
-pub fn parse_srs(text: &str) -> String {
-    match srs::parse(text) {
+#[wasm_bindgen(js_name = parseSrs, unchecked_return_type = "SrsParse")]
+pub fn parse_srs(text: &str) -> JsValue {
+    object(match srs::parse(text) {
         Ok(ranges) => json!({
             "ok": true,
             "canonical": srs::format(&ranges),
@@ -290,19 +311,24 @@ pub fn parse_srs(text: &str) -> String {
             "error": error.kind.as_str(),
             "at": utf16_at(text, error.at),
         }),
-    }
-    .to_string()
+    })
 }
 
-/// One SRS reference's place in a text, as JSON: `{ found: { from, to } }`,
+/// One SRS reference's place in a text: `{ found: { from, to } }`,
 /// `{ missing: what }`, `{ ambiguous: true }`, `{ unsupported: what }`, or a
 /// parse error `{ error, at }`. Only the first range of a list is located.
-fn locate_json(text: &str, reference: &str, ext: &crate::onion::Extensions, utf16: bool) -> String {
+fn locate_json(
+    text: &str,
+    reference: &str,
+    ext: &crate::onion::Extensions,
+    utf16: bool,
+) -> JsValue {
     let ranges = match srs::parse(reference) {
         Ok(ranges) => ranges,
         Err(error) => {
-            return json!({ "error": error.kind.as_str(), "at": utf16_at(reference, error.at) })
-                .to_string();
+            return object(
+                json!({ "error": error.kind.as_str(), "at": utf16_at(reference, error.at) }),
+            );
         }
     };
     let at = |byte: u32| {
@@ -312,13 +338,12 @@ fn locate_json(text: &str, reference: &str, ext: &crate::onion::Extensions, utf1
             byte
         }
     };
-    match crate::srs::locate(text, ext, &ranges[0]) {
+    object(match crate::srs::locate(text, ext, &ranges[0]) {
         Ok(span) => json!({ "found": { "from": at(span.start), "to": at(span.end) } }),
         Err(crate::srs::LocateError::Missing(what)) => json!({ "missing": what }),
         Err(crate::srs::LocateError::Ambiguous) => json!({ "ambiguous": true }),
         Err(crate::srs::LocateError::Unsupported(what)) => json!({ "unsupported": what }),
-    }
-    .to_string()
+    })
 }
 
 /// An offset from JS made a byte offset into `text`, refusing what is not
@@ -368,14 +393,14 @@ fn spell_json(
 #[wasm_bindgen]
 impl Galley {
     /// Where an SRS reference is in one registered book's text (`JON 2:8!2-4`,
-    /// `JON 1:13!f!5`, `MAT 1:1!5+2`), as JSON; offsets in bytes unless `utf16`.
-    #[wasm_bindgen(js_name = srsLocate)]
+    /// `JON 1:13!f!5`, `MAT 1:1!5+2`); offsets in bytes unless `utf16`.
+    #[wasm_bindgen(js_name = srsLocate, unchecked_return_type = "SrsLocation")]
     pub fn srs_locate(
         &mut self,
         id: &str,
         reference: &str,
         #[wasm_bindgen(unchecked_optional_param_type = "ResolveOptions")] opts: Option<JsValue>,
-    ) -> Result<String, JsError> {
+    ) -> Result<JsValue, JsError> {
         let utf16 = onion_wasm::options::utf16_only(opts.as_ref(), "srsLocate")
             .map_err(|e| JsError::new(&e))?;
         let entry = self.book(id)?;
@@ -384,13 +409,13 @@ impl Galley {
     }
 
     /// [`srsLocate`](Self::srs_locate) over text the host holds.
-    #[wasm_bindgen(js_name = srsLocateOf)]
+    #[wasm_bindgen(js_name = srsLocateOf, unchecked_return_type = "SrsLocation")]
     pub fn srs_locate_of(
         &mut self,
         text: &str,
         reference: &str,
         #[wasm_bindgen(unchecked_optional_param_type = "ResolveTextOptions")] opts: Option<JsValue>,
-    ) -> Result<String, JsError> {
+    ) -> Result<JsValue, JsError> {
         let (utf16, markers) =
             onion_wasm::options::resolve_text_options(opts.as_ref(), "srsLocateOf")
                 .map_err(|e| JsError::new(&e))?;

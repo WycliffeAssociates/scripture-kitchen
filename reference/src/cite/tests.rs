@@ -120,6 +120,44 @@ fn a_filter_lists_every_book_a_word_could_mean() {
 }
 
 #[test]
+fn a_filter_offers_peripherals_only_when_listed_or_asked() {
+    let english = Catalogue::english();
+    let codes = |catalogue: &Catalogue, word: &str| {
+        catalogue
+            .books_matching(word)
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+    };
+    // Malachi, Matthew, Mark, then the deuterocanon's Maccabees and Manasseh:
+    // no FRT, BAK, OTH, INT or XXA–XXG.
+    assert_eq!(
+        codes(&english, "ma"),
+        ["MAL", "MAT", "MRK", "1MA", "2MA", "3MA", "4MA", "MAN"]
+    );
+    for hidden in ["FRT", "BAK", "OTH", "INT", "XXA"] {
+        assert!(
+            !codes(&english, "ma").contains(&hidden.to_string()),
+            "{hidden}"
+        );
+        assert!(
+            !codes(&english, &hidden.to_lowercase()).contains(&hidden.to_string()),
+            "{hidden} by its code"
+        );
+    }
+    // The deuterocanon is offered.
+    assert!(codes(&english, "tob").contains(&"TOB".to_string()));
+    // A held peripheral is offered; reading still knows them all.
+    let mut held = Catalogue::english();
+    held.book(key("FRT"));
+    assert_eq!(codes(&held, "frt"), ["FRT"]);
+    assert!(cite("FRT 1", &english, Grammar::Prose, &[]).is_ok());
+    let mut all = Catalogue::english();
+    all.offer_all();
+    assert!(codes(&all, "xxa").contains(&"XXA".to_string()));
+}
+
+#[test]
 fn show_writes_for_a_person() {
     let refs = crate::parse("MAT 5:3-7; MAT 0; MAT; LUK 11:2a-3; MAT 2-4").unwrap();
     let names = ["Mateo", "Mateo", "Mateo", "Lucas", "Mateo"];

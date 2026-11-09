@@ -30,6 +30,11 @@ pub struct Catalogue {
     /// Canon order (the spec's rows), then books added with [`Catalogue::book`].
     books: Vec<(BookKey, Vec<String>)>,
     intro: Vec<String>,
+    /// Books [`Catalogue::books_matching`] offers beyond the 66 and the
+    /// deuterocanon: the ones a host listed with [`Catalogue::book`].
+    offered: Vec<BookKey>,
+    /// Offer every book, peripherals and XXA–XXG included.
+    offer_all: bool,
 }
 
 impl Catalogue {
@@ -65,6 +70,8 @@ impl Catalogue {
         Catalogue {
             books,
             intro: vec!["intro".to_string(), "introduction".to_string()],
+            offered: Vec::new(),
+            offer_all: false,
         }
     }
 
@@ -92,6 +99,8 @@ impl Catalogue {
         Catalogue {
             books,
             intro: vec!["intro".to_string(), "introduction".to_string()],
+            offered: Vec::new(),
+            offer_all: false,
         }
     }
 
@@ -109,10 +118,30 @@ impl Catalogue {
         self
     }
 
-    /// A book outside canon's table that should still be named: a `\z` book.
+    /// A book the project holds that should be named and offered even
+    /// though it is outside the 66 and the deuterocanon: a peripheral (`FRT`)
+    /// or a `\z` book.
     pub fn book(&mut self, book: BookKey) -> &mut Catalogue {
         self.names_mut(book);
+        if !self.offered.contains(&book) {
+            self.offered.push(book);
+        }
         self
+    }
+
+    /// Offer every book in [`Catalogue::books_matching`], peripherals and
+    /// XXA–XXG included.
+    pub fn offer_all(&mut self) -> &mut Catalogue {
+        self.offer_all = true;
+        self
+    }
+
+    /// Whether [`Catalogue::books_matching`] lists `book`: the 66 and the
+    /// deuterocanon always, anything else only when listed or asked for.
+    fn offers(&self, book: BookKey) -> bool {
+        self.offer_all
+            || self.offered.contains(&book)
+            || canon::books(canon::Canon::WithDeuterocanon).any(|row| row.code == book)
     }
 
     /// A word for the introduction in the project's or the UI's language.
@@ -138,7 +167,10 @@ impl Catalogue {
 
     /// Every book a partly typed word could mean, in catalogue order: a name
     /// that starts with it, or has a later word that does ("john" is John and
-    /// 1, 2 and 3 John). A filter's answer.
+    /// 1, 2 and 3 John). A filter's answer, so it lists only books a person
+    /// would go to: no peripheral or XXA–XXG unless [`Catalogue::book`]
+    /// listed it or [`Catalogue::offer_all`] was asked. Reading a citation
+    /// still knows them all (`FRT 1` reads).
     pub fn books_matching(&self, word: &str) -> Vec<BookKey> {
         let wanted = canon::fold(word);
         if wanted.is_empty() {
@@ -147,6 +179,7 @@ impl Catalogue {
         let later = format!(" {wanted}");
         self.books
             .iter()
+            .filter(|(book, _)| self.offers(*book))
             .filter(|(_, names)| {
                 names
                     .iter()

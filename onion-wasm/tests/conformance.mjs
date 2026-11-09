@@ -692,7 +692,7 @@ if (corpus && existsSync(corpus)) {
     "\\q1 \\v 2-3",
     "\\q2 \\v 2-3",
   );
-  const skeleton = JSON.parse(rawDiff(baseline, current, { text: "words" }));
+  const skeleton = rawDiff(baseline, current, { text: "words" });
   // Changed units only, in the current document's order: each current span,
   // points included, opens at or after the one before closed, so the gaps are
   // the unchanged text.
@@ -804,11 +804,14 @@ if (corpus && existsSync(corpus)) {
     eq(locate(text, 20, opts), "GEN 1:1", "locate takes the list");
     eq(book(text, opts), "GEN", "book takes the list");
     const verse = { kind: "verses", from: { chapter: 1, verse: 1 }, to: { chapter: 1, verse: 1 } };
-    check(JSON.parse(resolveIn(text, verse, opts)).found, "resolve takes the list");
+    check(resolveIn(text, verse, opts).found, "resolve takes the list");
     const changed = text.replace("wept", "cried");
-    check(JSON.parse(rawDiff(text, changed, { text: "none", customMarkers: mine })).units.length > 0,
+    check(rawDiff(text, changed, { text: "none", customMarkers: mine }).units.length > 0,
       "diff takes the list");
-    eq(doors.merge(text, changed, "{}", "current", opts), changed, "merge takes the list");
+    eq(doors.merge(text, changed, {}, "current", opts), changed, "merge takes the list");
+    let refused = "";
+    try { doors.merge(text, changed, "{}", "current", opts); } catch (e) { refused = String(e.message ?? e); }
+    check(refused.includes("not a JSON string"), "merge's decisions are an object, not a string");
     const formatOpts = new doors.FormatOpts();
     formatOpts.setCustomMarkers(mine);
     eq(typeof doors.format(text, formatOpts), "string", "FormatOpts takes the list");
@@ -867,9 +870,9 @@ if (corpus && existsSync(corpus)) {
   };
   let wide = 0;
   for (const { name, usfm, address, expect } of all) {
-    const bytes = JSON.parse(resolveIn(usfm, { ...address, book: "GEN" }));
+    const bytes = resolveIn(usfm, { ...address, book: "GEN" });
     eq(canonical(bytes), canonical(expect), `resolve bytes: ${name}`);
-    const units = JSON.parse(resolveIn(usfm, address, { utf16: true }));
+    const units = resolveIn(usfm, address, { utf16: true });
     eq(canonical(units), canonical(rebase(expect, usfm)), `resolve utf16: ${name}`);
     if (canonical(units) !== canonical(bytes)) wide++;
   }

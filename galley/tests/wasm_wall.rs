@@ -22,6 +22,14 @@ use usfm_galley::wasm::{Galley, SousSettings};
 use wasm_bindgen::JsValue;
 use wasm_bindgen_test::*;
 
+/// An object a door answered, as JSON, for a substring check.
+fn json(value: &JsValue) -> String {
+    js_sys::JSON::stringify(value)
+        .expect("a JSON-shaped answer")
+        .as_string()
+        .expect("a string")
+}
+
 const GEN: &str = include_str!("fixtures/sous/GEN.usfm");
 const GEN_EDITED: &str = include_str!("fixtures/sous/GEN-edited.usfm");
 const RUT: &str = include_str!("fixtures/sous/RUT.usfm");
@@ -409,9 +417,12 @@ fn an_overlay_crosses_the_wall() {
         .update_reference_with("ref/GEN.usfm", OVERLAY_SOURCE, true)
         .unwrap();
 
-    let skeleton = galley
-        .skeleton("ref/GEN.usfm", None)
-        .expect("the source has a skeleton");
+    // The doors answer objects; read them back as their JSON.
+    let skeleton = json(
+        &galley
+            .skeleton("ref/GEN.usfm", None)
+            .expect("the source has a skeleton"),
+    );
     assert!(
         skeleton.contains(r#""sid":"GEN 2:23","where":"inside","ordinal":1,"marker":"q1""#),
         "{skeleton}"
@@ -421,9 +432,11 @@ fn an_overlay_crosses_the_wall() {
         "{skeleton}"
     );
 
-    let report = galley
-        .overlay_report("books/GEN.usfm", "ref/GEN.usfm", None)
-        .expect("a report");
+    let report = json(
+        &galley
+            .overlay_report("books/GEN.usfm", "ref/GEN.usfm", None)
+            .expect("a report"),
+    );
     assert!(report.contains(r#""removed":[]"#), "{report}");
     assert!(report.contains(r#""unpaired":[]"#), "{report}");
     assert!(

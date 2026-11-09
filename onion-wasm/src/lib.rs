@@ -75,6 +75,26 @@ use wasm_bindgen::prelude::*;
 pub mod options;
 pub mod resolution;
 
+/// A JSON answer handed to JS as the object it spells: one native
+/// `JSON.parse` on the JS side of the call, the same cost a host's own parse
+/// had, and no string for the host to parse. Every structured answer from
+/// here and from galley crosses this way.
+pub fn object(json: &str) -> JsValue {
+    js_sys::JSON::parse(json).expect("the doors write valid JSON")
+}
+
+/// An object argument read back as the JSON the Rust side parses, so a door
+/// takes `{ "GEN 1:1": "current" }` rather than its string.
+pub fn json_arg(value: &JsValue, door: &str, what: &str) -> Result<String, String> {
+    if value.is_string() {
+        return Err(format!("{door}: {what} is an object, not a JSON string"));
+    }
+    js_sys::JSON::stringify(value)
+        .ok()
+        .and_then(|s| s.as_string())
+        .ok_or_else(|| format!("{door}: {what} is not JSON-shaped"))
+}
+
 // ---------------------------------------------------------------------------
 // parse
 // ---------------------------------------------------------------------------
@@ -180,7 +200,47 @@ export interface AddressPoint {
   segment?: string;
 }
 
-/** What `resolve` answers, JSON-encoded. Offsets are half-open. */
+/** `diff`'s answer: every changed unit (and with `unchanged`, every unit), in the
+ * current document's order. Spans are UTF-16 offsets into each side's own text. */
+export interface DiffSkeleton {
+  baselineLen: number;
+  currentLen: number;
+  unchangedCount: number;
+  units: DiffUnit[];
+}
+
+export interface DiffUnit {
+  /** Opaque: decisions name it, nothing parses it. */
+  unitId: string;
+  kind: "shared" | "added" | "deleted" | "coalesced";
+  status: "unchanged" | "modified" | "added" | "deleted";
+  baselineSid: string | null;
+  currentSid: string | null;
+  baseline: [number, number];
+  current: [number, number];
+  relabeled: boolean;
+  baselineCount: number;
+  currentCount: number;
+  isDup: boolean;
+  coveredBy: { sid: string; side: "baseline" | "current" } | null;
+  isWhitespaceChange: boolean;
+  isUsfmStructureChange: boolean;
+  /** Present only when `text` asked for runs and the unit has any. */
+  text?: { baseline: DiffRun[]; current: DiffRun[] };
+}
+
+export interface DiffRun {
+  from: number;
+  to: number;
+  kind: "unchanged" | "added" | "removed";
+  what: "markup" | "text" | "whitespace";
+  note: boolean;
+}
+
+/** `merge`'s choices: unit id to the side it keeps. */
+export type Decisions = Record<string, "baseline" | "current">;
+
+/** What `resolve` answers. Offsets are half-open. */
 export type Resolution =
   | { found: { from: number; to: number; opening: number; covers: Address; coarser: boolean } }
   | { missing: "intro" | "chapter" | "verse"; within?: { from: number; to: number } }
@@ -721,7 +781,7 @@ fn wire(
     }
 }
 
-/// The diff skeleton as JSON: the changed units of two documents, in the
+/// The diff skeleton (`DiffSkeleton`): the changed units of two documents, in the
 /// current document's order. Spans are UTF-16 offsets into each side's own document.
 ///
 /// ```ts
@@ -729,7 +789,7 @@ fn wire(
 ///   text: "none" | "words" | "chars";   // required
 ///   unchanged?: boolean;                // send unchanged units too; default false
 /// }
-/// diff(baseline: string, current: string, opts: DiffOptions): string;
+/// diff(baseline: string, current: string, opts: DiffOptions): DiffSkeleton;
 /// ```
 ///
 /// `text` is the intra-verse runs a `modified`, `added` or `deleted` unit is
@@ -741,14 +801,16 @@ fn wire(
 /// `unchanged: true` adds every unchanged unit in its place, for a view that
 /// draws the whole book from the skeleton. Nothing else changes: the ids, the
 /// spans and the runs are the same in both.
-#[wasm_bindgen]
+#[wasm_bindgen(unchecked_return_type = "DiffSkeleton")]
 pub fn diff(
     baseline: &str,
     current: &str,
     #[wasm_bindgen(unchecked_param_type = "DiffOptions")] opts: JsValue,
-) -> Result<String, JsError> {
+) -> Result<JsValue, JsError> {
     let opts = diff_options(Some(&opts)).map_err(|error| JsError::new(&error))?;
-    diffed(baseline, current, opts).map_err(|error| JsError::new(&error))
+    diffed(baseline, current, opts)
+        .map(|json| object(&json))
+        .map_err(|error| JsError::new(&error))
 }
 
 /// [`diff`]'s options, read.
@@ -827,15 +889,17 @@ fn default_side(name: &str) -> Result<MergeSide, String> {
 pub fn merge(
     baseline: &str,
     current: &str,
-    decisions_json: &str,
+    #[wasm_bindgen(unchecked_param_type = "Decisions")] decisions: JsValue,
     default: &str,
     #[wasm_bindgen(unchecked_optional_param_type = "LexOptions")] opts: Option<JsValue>,
 ) -> Result<String, JsError> {
     let markers = options::lex_options(opts.as_ref(), "merge").map_err(|e| JsError::new(&e))?;
+    let decisions_json =
+        json_arg(&decisions, "merge", "decisions").map_err(|e| JsError::new(&e))?;
     merged(
         baseline,
         current,
-        decisions_json,
+        &decisions_json,
         default,
         &options::or_installed(markers),
     )
@@ -893,16 +957,18 @@ impl Splices {
 pub fn merge_splices(
     baseline: &str,
     current: &str,
-    decisions_json: &str,
+    #[wasm_bindgen(unchecked_param_type = "Decisions")] decisions: JsValue,
     default: &str,
     #[wasm_bindgen(unchecked_optional_param_type = "LexOptions")] opts: Option<JsValue>,
 ) -> Result<Splices, JsError> {
     let markers =
         options::lex_options(opts.as_ref(), "mergeSplices").map_err(|e| JsError::new(&e))?;
+    let decisions_json =
+        json_arg(&decisions, "mergeSplices", "decisions").map_err(|e| JsError::new(&e))?;
     splices(
         baseline,
         current,
-        decisions_json,
+        &decisions_json,
         default,
         &options::or_installed(markers),
     )
@@ -1026,29 +1092,29 @@ pub fn located(text: &str, utf16: u32, markers: &Extensions) -> String {
 ///
 /// ```js
 /// resolve(text, { kind: "verses", from: { chapter: 1, verse: 2 }, to: { chapter: 1, verse: 2 } })
-///   // → '{"found":{"from":8,"to":19,"opening":5,"covers":{…},"coarser":false}}'
+///   // → { found: { from: 8, to: 19, opening: 5, covers: {…}, coarser: false } }
 /// resolve(text, { kind: "chapters", from: 3, to: 3 }, { utf16: true })
-///   // → '{"missing":"chapter"}'
+///   // → { missing: "chapter" }
 /// ```
 ///
 /// Offsets are bytes unless `utf16` asks otherwise. galley's
 /// `Galley.resolveOf` answers the same over text, and `Galley.resolve` over a
 /// registered book.
-#[wasm_bindgen]
+#[wasm_bindgen(unchecked_return_type = "Resolution")]
 pub fn resolve(
     text: &str,
     #[wasm_bindgen(unchecked_param_type = "Address")] address: JsValue,
     #[wasm_bindgen(unchecked_optional_param_type = "ResolveTextOptions")] opts: Option<JsValue>,
-) -> Result<String, JsError> {
+) -> Result<JsValue, JsError> {
     let (utf16, markers) =
         options::resolve_text_options(opts.as_ref(), "resolve").map_err(|e| JsError::new(&e))?;
     let address = resolution::address(&address).map_err(|e| JsError::new(&e))?;
-    Ok(resolved(
+    Ok(object(&resolved(
         text,
         &address,
         utf16,
         &options::or_installed(markers),
-    ))
+    )))
 }
 
 /// [`resolve`]'s body over a parsed address, for a caller with no `JsValue`.
