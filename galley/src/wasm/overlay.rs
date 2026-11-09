@@ -167,7 +167,10 @@ pub(super) fn rebase_equivalent(answer: &mut Equivalent, table: Option<&Utf16Tab
     }
 }
 
-/// The one serialization, so every door fails the same way.
-pub(super) fn json<T: serde::Serialize>(value: &T) -> Result<String, JsError> {
-    serde_json::to_string(value).map_err(|error| JsError::new(&error.to_string()))
+/// The one serialization, so every door fails the same way, handed to JS as
+/// the object it spells.
+pub(super) fn json<T: serde::Serialize>(value: &T) -> Result<JsValue, JsError> {
+    serde_json::to_string(value)
+        .map(|json| onion_wasm::object(&json))
+        .map_err(|error| JsError::new(&error.to_string()))
 }

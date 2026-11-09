@@ -17,7 +17,7 @@ BTT Writer keeps one git repo per book. Each repo holds chunk files of inline US
 ## The solution
 
 One crate, with no I/O, does the whole job:
-- `stitch` renders a book the way Sefer's template does, byte for byte, which five real projects pin;
+- `stitch` renders a book the way Sefer's template does, byte for byte, which five real projects pin. It needs no history: `bttwriter.stitch(files, "ROM")` renders a Writer folder without `.git`, or an upstream's files to compare;
 - `walk` reads a repo's saves from git objects it asks for;
 - `replay` writes one line of commits;
 - `pack` writes the objects as a git pack and its index, in memory.
@@ -40,6 +40,9 @@ await bttwriter.init();
 const source = bttwriter.isomorphicGitSource({ git, fs, dir });
 const rom = await bttwriter.readHistory(source, { source: "owner/repo" });
 rom.project; rom.title; rom.saves; rom.progress(now); rom.usfm();
+rom.spent; rom.free();                       // used up by replay, or released unreplayed
+
+const usfm = bttwriter.stitch(files, "ROM");  // no history, no git: Map<path, bytes | text>
 
 const done = bttwriter.consolidate([rom, tit], { now }, project, closing);
 // write done.pack and done.idx under objects/pack/<done.name>, point a branch at done.head

@@ -238,7 +238,7 @@ eq(doors.toUtf16("\\v 1 a\u{1F600}b", 10), 8, "toUtf16 counts the surrogate pair
     "maskOf by the list",
   );
   const verse = { kind: "verses", from: { chapter: 1, verse: 1 }, to: { chapter: 1, verse: 1 } };
-  check(JSON.parse(g.resolveOf(loose, verse, { utf16: true, ...opts })).found, "resolveOf takes the list");
+  check(g.resolveOf(loose, verse, { utf16: true, ...opts }).found, "resolveOf takes the list");
   let refused = "";
   try {
     g.parse("books/MRK.usfm", opts);
@@ -876,9 +876,9 @@ for (const [door, call] of [
   cases.forEach(({ name, usfm, address, expect }, n) => {
     const id = `resolve/${n}.usfm`;
     resolver.update(id, usfm);
-    const bytes = JSON.parse(resolver.resolve(id, { ...address, book: "GEN" }));
+    const bytes = resolver.resolve(id, { ...address, book: "GEN" });
     eq(canonical(bytes), canonical(expect), `resolve bytes: ${name}`);
-    const units = JSON.parse(resolver.resolve(id, address, { utf16: true }));
+    const units = resolver.resolve(id, address, { utf16: true });
     eq(canonical(units), canonical(rebase(expect, usfm)), `resolve utf16: ${name}`);
     if (canonical(units) !== canonical(bytes)) wide++;
   });
@@ -888,11 +888,11 @@ for (const [door, call] of [
   // resolveOf needs no registration, so it runs every case, the empty intro
   // too, and answers what resolve(id) does over the same text.
   for (const { name, usfm, address, expect } of all) {
-    eq(canonical(JSON.parse(resolver.resolveOf(usfm, address))), canonical(expect), `resolveOf bytes: ${name}`);
-    eq(canonical(JSON.parse(resolver.resolveOf(usfm, address, { utf16: true }))), canonical(rebase(expect, usfm)), `resolveOf utf16: ${name}`);
+    eq(canonical(resolver.resolveOf(usfm, address)), canonical(expect), `resolveOf bytes: ${name}`);
+    eq(canonical(resolver.resolveOf(usfm, address, { utf16: true })), canonical(rebase(expect, usfm)), `resolveOf utf16: ${name}`);
   }
   cases.forEach(({ name, usfm, address }, n) => {
-    eq(resolver.resolveOf(usfm, address), resolver.resolve(`resolve/${n}.usfm`, address), `resolveOf equals resolve(id): ${name}`);
+    eq(JSON.stringify(resolver.resolveOf(usfm, address)), JSON.stringify(resolver.resolve(`resolve/${n}.usfm`, address)), `resolveOf equals resolve(id): ${name}`);
   });
   console.log(`resolveOf: ${all.length} cases`);
 
@@ -921,11 +921,11 @@ for (const [door, call] of [
   // Its rows still tile its source, so the places they name answer in bytes.
   const rut = fixture("ref/RUT.usfm");
   const rutBytes = Buffer.byteLength(rut, "utf8");
-  eq(canonical(JSON.parse(resolver.resolve("ref/RUT.usfm", { kind: "book" }))),
+  eq(canonical(resolver.resolve("ref/RUT.usfm", { kind: "book" })),
      canonical({ found: { from: 0, to: rutBytes, opening: 0, covers: { kind: "book" }, coarser: false } }),
      "a reference without text answers its book from its Toc");
   const chapter2 = Buffer.from(rut, "utf8").indexOf("\\c 2");
-  eq(JSON.parse(resolver.resolve("ref/RUT.usfm", { kind: "chapters", from: 2, to: 2 })).found?.from, chapter2,
+  eq(resolver.resolve("ref/RUT.usfm", { kind: "chapters", from: 2, to: 2 }).found?.from, chapter2,
      "a reference without text answers a chapter from its Toc");
   resolver.free();
 }
@@ -944,14 +944,14 @@ for (const [door, call] of [
   }
   check(refused.includes("text is required"), `diff asks for text: ${refused}`);
 
-  const changed = JSON.parse(doors.diff(baseline, current, { text: "words" }));
+  const changed = doors.diff(baseline, current, { text: "words" });
   eq(changed.slots, undefined, "no slots on the wire");
   eq(
     changed.units.map((unit) => `${unit.unitId} ${unit.status}`).join(" | "),
     "GEN 1:3@1 added | GEN 1:3 deleted",
     "a verse out of order is an addition where it is and a deletion where it was",
   );
-  const full = JSON.parse(doors.diff(baseline, current, { text: "words", unchanged: true }));
+  const full = doors.diff(baseline, current, { text: "words", unchanged: true });
   eq(full.units.length, changed.units.length + changed.unchangedCount, "full = changed + unchanged");
   eq(
     JSON.stringify(full.units.filter((unit) => unit.status !== "unchanged")),
@@ -985,9 +985,8 @@ const overlayFixture = (name) =>
 galley.update("books/OVL.usfm", overlayFixture("gen-target.usfm"));
 galley.updateReference("ref/OVL.usfm", overlayFixture("gen-source.usfm"), { keepText: true });
 
-// The one JSON parse: the reader is `JSON.parse`, because a skeleton is a
-// modal-open shape and not a keystroke one.
-const skeleton = JSON.parse(galley.skeleton("ref/OVL.usfm"));
+// A skeleton crosses as an object, like every structured answer.
+const skeleton = galley.skeleton("ref/OVL.usfm");
 eq(skeleton.verses.length, 4, "the source names four verses");
 eq(
   skeleton.blocks.map((b) => `${b.sid} ${b.where} ${b.ordinal} ${b.marker}`).join(" | "),
@@ -1007,7 +1006,7 @@ check(
   "every span is forward",
 );
 
-const report = JSON.parse(galley.overlayReport("books/OVL.usfm", "ref/OVL.usfm"));
+const report = galley.overlayReport("books/OVL.usfm", "ref/OVL.usfm");
 eq(report.removed.length, 0, "the target has nothing the source lacks");
 eq(report.unpaired.length, 0, "every verse pairs");
 eq(
@@ -1022,9 +1021,9 @@ check(!applied.includes("\\q"), "no empty poetry line is opened");
 check(!applied.includes("\\f "), "the source's footnotes stay home");
 
 const where = { sid: "GEN 2:23", where: "inside", ordinal: 1, marker: "q1" };
-const inSource = JSON.parse(galley.sourceNodeFor("books/OVL.usfm", "ref/OVL.usfm", where));
+const inSource = galley.sourceNodeFor("books/OVL.usfm", "ref/OVL.usfm", where);
 eq(inSource.found.marker, "q1", "the source block the address names");
-const inTarget = JSON.parse(galley.targetNodeFor("books/OVL.usfm", "ref/OVL.usfm", where));
+const inTarget = galley.targetNodeFor("books/OVL.usfm", "ref/OVL.usfm", where);
 check(inTarget.absent === true, "the target has no such block yet");
 eq(inTarget.where, "inside", "and the translator would place it after the verse text");
 
@@ -1306,18 +1305,18 @@ if (corpusDir && existsSync(corpusDir)) {
   v.updateReference("ref/RUT.usfm", verses("RUT", [22, 23, 18, 22]), { versification: "rso" });
   eq(v.schemeOf("books/RUT.usfm"), "rso", "the source's scheme");
 
-  eq(JSON.parse(v.mapVerse("eng", "org", "GEN 31:55")).moved, "GEN 32:1", "mapVerse moves");
-  eq(JSON.parse(v.mapVerse("eng", "vul", "MAT 1:1")).same, true, "mapVerse same");
-  eq(JSON.parse(v.mapVerse("org", "eng", "PSA 13:6")).split.join(" "), "PSA 13:5 PSA 13:6", "mapVerse splits");
-  eq(JSON.parse(v.mapVerse("eng", "org", "ACT 19:41")).absent, true, "mapVerse absent");
+  eq(v.mapVerse("eng", "org", "GEN 31:55").moved, "GEN 32:1", "mapVerse moves");
+  eq(v.mapVerse("eng", "vul", "MAT 1:1").same, true, "mapVerse same");
+  eq(v.mapVerse("org", "eng", "PSA 13:6").split.join(" "), "PSA 13:5 PSA 13:6", "mapVerse splits");
+  eq(v.mapVerse("eng", "org", "ACT 19:41").absent, true, "mapVerse absent");
 
-  const units = JSON.parse(v.pairs("ulb", "org", "PSA"));
+  const units = v.pairs("ulb", "org", "PSA");
   check(
     units.some((u) => u.here.join() === "PSA 3:0" && u.there.join() === "PSA 3:1"),
     "pairs puts ulb's title slot beside org's verse 1",
   );
 
-  const sniffed = JSON.parse(v.sniff());
+  const sniffed = v.sniff();
   check(["decided", "leaning", "undetermined"].includes(sniffed.confidence), "sniff answers a confidence");
   eq(sniffed.ranked.length, 7, "every built-in scheme ranked");
   v.free();

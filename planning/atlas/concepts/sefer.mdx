@@ -29,13 +29,13 @@ Asking where a verse is:
 
 ```ts
 const verse = { kind: "verses", from: { chapter: 1, verse: 2 }, to: { chapter: 1, verse: 2 } };
-JSON.parse(galley.resolve("books/LUK.usfm", verse, { utf16: true }));
+galley.resolve("books/LUK.usfm", verse, { utf16: true });
 // { found: { from, to, opening, covers, coarser } }
 ```
 
 ## Composes with
 
-Reads the [[galley-package]]'s wires: [[dish]], [[census]], [[find-buffer]], [[mask-map]], [[findings-snapshot]]; and [[resolve]]'s JSON. Calls [[bento]] and [[bttwriter]] once it switches to them; `planning/items/2026-11-05-sefer-adopts-bento-and-bttwriter-what-moves-what-s.mdx` lists what moves. Its next upgrade (from 0.1.20) also brings [[reference]]'s citations and `addressAt`, and verse tiles under `diff` and `resolve`: `planning/items/2026-11-06-sefer-on-the-kitchen-after-0-1-20-what-changes-und.mdx` is the checklist.
+Reads the [[galley-package]]'s wires: [[dish]], [[census]], [[find-buffer]], [[mask-map]], [[findings-snapshot]]; and [[resolve]]'s answers. Calls [[bento]] and [[bttwriter]] once it switches to them; `planning/items/2026-11-05-sefer-adopts-bento-and-bttwriter-what-moves-what-s.mdx` lists what moves. Its next upgrade (from 0.1.20) also brings [[reference]]'s citations and `addressAt`, and verse tiles under `diff` and `resolve`: `planning/items/2026-11-06-sefer-on-the-kitchen-after-0-1-20-what-changes-und.mdx` is the checklist.
 
 ## Where
 

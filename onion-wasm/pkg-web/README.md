@@ -134,12 +134,12 @@ the debounced second call. `toc` is cheap and needs no tree.
 ## Where an address is: `resolve`
 
 `resolve(text, address, { utf16?, customMarkers? })` answers where Sefer's `Address` is in one
-text, as JSON, in bytes unless `utf16` asks otherwise. The rules are
+text, in bytes unless `utf16` asks otherwise. The rules are
 `onion/src/resolve.md`; `testData/resolve/cases.json`'s `expect` is the answer.
 
 ```js
 const verse = { kind: "verses", from: { chapter: 1, verse: 2 }, to: { chapter: 1, verse: 2 } };
-JSON.parse(resolve(text, verse));
+resolve(text, verse);
 //   { found: { from, to, opening, covers, coarser } }
 //   { missing: "intro" | "chapter" | "verse", within? }
 //   { ambiguous: [{ from, to, opening }, …] }
@@ -242,9 +242,12 @@ from the `chapters` section.
   write path still hands out handles (`FormatOpts`, `Edits`, `Splices`); those
   are freed explicitly, with `--weak-refs` as the backstop.
 - **Nothing rich crosses.** Flat `Uint32Array`s (copies, never views into wasm
-  memory) plus a few strings. JS never holds a token. The one structured export
-  is the diff skeleton — a cold, modal-open path where serde JSON buys back the
-  old editors' camelCase contract verbatim.
+  memory) plus a few strings. JS never holds a token. The structured answers
+  (the diff skeleton, `resolve`) cross as plain objects, typed in the `.d.ts`
+  (`DiffSkeleton`, `Resolution`): serde writes JSON and the door hands JS what
+  it parses to, so the old editors' camelCase contract holds verbatim.
+  `merge`'s decisions go in as an object too (`{ [unitId]: "baseline" |
+  "current" }`), never its JSON string.
 - **`diff` sends what changed.** `units` holds the changed units in the
   current document's order (a baseline view sorts by `baseline[0]`), and `unchangedCount` counts the rest; `unchanged: true` adds the
   unchanged units in their places and changes nothing else. A unit is

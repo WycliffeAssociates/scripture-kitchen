@@ -37,7 +37,7 @@ Two halves:
 galley.srsLocate("books/JON.usfm", "JON 2:8!2-4", { utf16: true });   // {"found":{"from":…,"to":…}}  "who cling to"
 galley.srsLocate("books/JON.usfm", "JON 1:13!f!5");                   // "dug", in the footnote
 galley.srsAt("books/JON.usfm", from, to, { utf16: true });            // "JON 2:8!2-4"
-JSON.parse(parseSrs("en+ulb.ROM 9:1!3-5"));                           // { ok, canonical, within: [ROM 9:1] }
+parseSrs("en+ulb.ROM 9:1!3-5");                           // { ok, canonical, within: [ROM 9:1] }
 ```
 
 ## How it works

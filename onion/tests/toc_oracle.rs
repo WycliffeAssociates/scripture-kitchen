@@ -216,6 +216,28 @@ fn every_corpus_book_indexes_its_own_stream() {
                 "{where_}: the book code and its token disagree about existing"
             );
 
+            // ---- places tile the text, and agree with address_at -------
+            let places = toc.places(&source);
+            let mut next = 0;
+            for place in &places {
+                assert_eq!(place.opening, next, "{where_}: a gap or overlap before {place:?}");
+                assert!(
+                    place.opening <= place.from && place.from <= place.to,
+                    "{where_}: {place:?} is out of order"
+                );
+                if place.to > place.opening {
+                    for byte in [place.opening, place.to - 1] {
+                        assert_eq!(
+                            toc.address_at(&source, byte).1,
+                            place.address,
+                            "{where_}: byte {byte} of {place:?}"
+                        );
+                    }
+                }
+                next = place.to;
+            }
+            assert_eq!(next as usize, source.len(), "{where_}: places stop short of the end");
+
             Tally {
                 chapters: (toc.chapters.len() - 1) as u64,
                 verses: toc.verses.len() as u64,

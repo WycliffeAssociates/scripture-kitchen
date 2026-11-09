@@ -2,7 +2,7 @@
 id: 89ade78b-55b6-4a24-bc45-3c14f8337b87
 title: "Sefer on 0.1.21: the doors it asked for"
 kind: plan
-status: discussing
+status: in-progress
 created: 2026-11-09
 updated: 2026-11-09
 sha: fe1480d
@@ -37,7 +37,7 @@ the same for `addressAtOf`, `srsAt` and `srsAtOf`. One test per door.
 return JSON strings, so every host writes its own parse, cast and book stamping (Sefer's is
 `packages/text/src/engine/places.ts`).
 
-<Question id="typed-how">Return objects from the wasm (serde-wasm-bindgen, so no parse on the JS side), or keep the strings and ship a thin typed `.ts`/`.js` wrapper in the package? Objects are simpler for hosts, but they change every one of these doors' return types, which breaks Sefer once more. A wrapper adds new names and breaks nothing.</Question>
+<Question id="typed-how" answer="Objects (Will, 2026-11-09: not concerned about Sefer churn). Returning JS objects is the normal shape for a wasm-bindgen library; JSON strings were a speed habit. Measure `places` on a long book, since JSON.parse can beat building objects for big lists.">Return objects from the wasm (serde-wasm-bindgen, so no parse on the JS side), or keep the strings and ship a thin typed `.ts`/`.js` wrapper in the package? Objects are simpler for hosts, but they change every one of these doors' return types, which breaks Sefer once more. A wrapper adds new names and breaks nothing.</Question>
 
 **3. Refuse a stale id.** The id doors answer for whatever text was last registered under that id,
 so Sefer keeps its own map of which text each id holds (`src/core/galley/galley.ts`). Proposal: an
@@ -59,7 +59,7 @@ add a CI freshness check like the wasm one.
 **6. `booksMatching` offers peripherals.** `"ma"` returns FRT, BAK, OTH, INT and XXA–XXG after
 MAL, MAT and MRK.
 
-<Question id="peripherals">Leave peripherals out by default, and offer them only when the host lists them in `books` or passes `{ peripherals: true }`? Separately, `"john"` matching REV (canon's English alias "Revelation of John") stays, since Sefer intersects with held books anyway. Agree?</Question>
+<Question id="peripherals" answer="Yes (2026-11-09): peripherals only when the host lists them in `books` or asks; REV stays for &quot;john&quot;, after JHN.">Leave peripherals out by default, and offer them only when the host lists them in `books` or passes `{ peripherals: true }`? Separately, `"john"` matching REV (canon's English alias "Revelation of John") stays, since Sefer intersects with held books anyway. Agree?</Question>
 
 **7. Locale → name table.** Add `namesFor(tag)` in `./canon`, with BCP 47 fallback: exact, then
 the language plus any region (`es` → `es-419`), then none. Sefer's hard-coded pairing goes.
@@ -73,7 +73,7 @@ Sefer's project screen comparing upstream Writer work. `stitch`, `tree_from_file
 `book_to_usfm` already exist in [[code:bttwriter/src/stitch.rs]]; only a JS door is missing. Once
 it lands, Sefer deletes `writerBookToUsfm`, `treeFromFiles` and `readWriterTree`.
 
-<Question id="stitch-where">Sefer doesn't want bttwriter's module loaded on the project screen. The stitch code needs no git, so it could be exposed from bento's module, or from a small `./bttwriter/stitch` entry built without the walk and the pack writer. Which one?</Question>
+<Question id="stitch-where" answer="In bttwriter's own module (2026-11-09). bttwriter's wasm is 172 KB gzipped against bento's 204 KB, so bento is no lighter; if Sefer's project screen can't load it, ask Sefer what the actual constraint is.">Sefer doesn't want bttwriter's module loaded on the project screen. The stitch code needs no git, so it could be exposed from bento's module, or from a small `./bttwriter/stitch` entry built without the walk and the pack writer. Which one?</Question>
 
 **10. `WriterHistory`'s lifetime.** `.free()` already exists (wasm-bindgen gives every class
 one), so a staged history that is never assembled can be freed today. The handoff should have said
@@ -107,4 +107,53 @@ batch. It already returns a list, so check how Sefer's command uses it before ch
 
 ## Order
 
-<Question id="order">Proposed order: (1) item 1, the bug, now; (2) items 3, 4 and 9, which let Sefer delete the most; (3) items 2, 5, 6, 7, 10 and 11 together as one release, because item 2 may break doors; (4) item 12 on docx's own plan. Item 8 rides along with whichever release comes first. Right?</Question>
+<Question id="order" answer="Yes (Will, 2026-11-09).">Proposed order: (1) item 1, the bug, now; (2) items 3, 4 and 9, which let Sefer delete the most; (3) items 2, 5, 6, 7, 10 and 11 together as one release, because item 2 may break doors; (4) item 12 on docx's own plan. Item 8 rides along with whichever release comes first. Right?</Question>
+
+## Will on `stitch`, 2026-11-09
+
+> Oh, def agree this should be the corest primitive actually, and git is a layer above that
+> conceptually, or perhaps it's reahter an adapter. Or augmentation. You know I mean though. The
+> bytes moving around is the main idea, and so for the project screen showing an upstream for
+> compare, yeah, that's what we'd want
+
+## In 0.1.22: what changes for Sefer
+
+Done on branch `sefer-doors`: items 1, 2, 3, 4, 6, 8, 9 and 10. Still open: 5 (canon as compiled
+JS), 7 (`namesFor`), 11 (`WriterProject` to JS) and 12 (docx's generated-document check).
+
+**Breaking: structured answers are objects.** Every door that answered a JSON string now answers
+the object, typed in the `.d.ts`. Drop the `JSON.parse` around:
+- `resolve`, `resolveOf`, `addressAt` and `addressAtOf`;
+- `Citations.read`, `parseReference` and `parseSrs`;
+- `srsLocate` and `srsLocateOf`;
+- `sniff`, `mapVerse` and `pairs`;
+- `skeleton`, `overlayReport`, `targetNodeFor` and `sourceNodeFor`;
+- onion's `resolve` and `diff`.
+
+`merge` and `mergeSplices` take their decisions as an object (`{ [unitId]: side }`) and refuse a
+string by name. In Sefer, `packages/text/src/engine/places.ts` loses its parse and cast.
+
+**Breaking: offsets are checked.** `addressAt`, `addressAtOf`, `srsAt` and `srsAtOf` refuse an
+offset outside `0..=len`, a fraction or NaN with "outside the text", where `-1` used to answer the
+last verse.
+
+**New: `places(id)` / `placesOf(text)`.** These answer `Place[]`: `{ address, from, to, opening }`
+for the intro, each chapter head, each title and each verse tile, in order. `opening..to` tile the
+text, and `addressAt` anywhere inside a place answers its `address`. Sefer's `units.ts` goes, and
+so do its `addressAt(unit.from)` calls. Key suppressions on `address`. Cost: 4.5 ms for BSB
+Psalms' 2727 places.
+
+**New: `expect` on id doors.** `resolve`, `addressAt`, `places`, `srsLocate` and `srsAt` take
+`{ expect: sourceHash }` (`xxh3Text(text)`, a bigint) and throw "… is stale" on a mismatch.
+`galley.sourceHash(id)` reads what an id holds. The id map in `src/core/galley/galley.ts` becomes
+the hash Sefer already has.
+
+**Changed: `booksMatching` leaves out peripherals and XXA–XXG.** List held ones in
+`new Citations({ books })`, or pass `peripherals: true`. `formatReference` takes one address or
+a list.
+
+**New: `bttwriter.stitch(files, book, { title? })`.** It turns one Writer book's files into USFM
+with no history and no git. Over each fixture's checked-out files it equals the history's last
+save. `writerBookToUsfm`, `treeFromFiles` and `readWriterTree` go. `WriterHistory` gains `spent`
+and `free()`.
+

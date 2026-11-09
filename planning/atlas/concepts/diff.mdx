@@ -50,7 +50,7 @@ A modified unit's intra-verse runs (`diff.rs` doc), tiling the span:
 - **Three layers, one walk.** Identity: a block is the bytes between two [[toc]] anchors, a `Range<u32>` plus a `Copy` address. Alignment: Myers over 12-byte addresses, then coalescing pairs a rebridged or relabeled verse into one decision. Projection: `merge` emits bytes, [[code:onion/src/diff.rs#to_edits]] emits replay splices.
 - **Changed units only** unless `unchanged: true`.
 - **Runs are asked for by name.** `"none"`, `"words"` ([[words]]: each word, line break, whitespace run and other scalar is one unit) or `"chars"`; an unknown name rejects. The [[cst]] and the `text` [[mask]] are built only when runs are asked for.
-- **JSON at the wall.** serde keeps the old editors' camelCase contract; there is no binary run wire.
+- **JSON at the wall, an object out.** serde keeps the old editors' camelCase contract and the door hands JS the parsed `DiffSkeleton`; there is no binary run wire. `merge` takes its decisions as an object.
 
 ## Composes with
 

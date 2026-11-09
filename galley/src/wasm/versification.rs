@@ -156,7 +156,7 @@ struct DissentJson<'a> {
     text_follows: &'a [&'static str],
 }
 
-pub(super) fn sniff_json(sniff: &Sniff) -> Result<String, JsError> {
+pub(super) fn sniff_json(sniff: &Sniff) -> Result<JsValue, JsError> {
     super::overlay::json(&SniffJson {
         best: sniff.best().map(Scheme::name),
         confidence: match sniff.confidence {
@@ -196,7 +196,7 @@ enum MappedJson {
     Absent(bool),
 }
 
-pub(super) fn mapped_json(mapped: &Mapped) -> Result<String, JsError> {
+pub(super) fn mapped_json(mapped: &Mapped) -> Result<JsValue, JsError> {
     super::overlay::json(&match mapped {
         Mapped::Same => MappedJson::Same(true),
         Mapped::Moved(v) => MappedJson::Moved(v.to_string()),
@@ -212,7 +212,7 @@ struct PairedJson {
     there: Vec<String>,
 }
 
-pub(super) fn pairs_json(units: &[Paired]) -> Result<String, JsError> {
+pub(super) fn pairs_json(units: &[Paired]) -> Result<JsValue, JsError> {
     super::overlay::json(
         &units
             .iter()

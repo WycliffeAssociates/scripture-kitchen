@@ -6,6 +6,7 @@
 //!                                  .progress(now) → [at, verses, at, verses, …]  .usfm()
 //! replay(histories, now, deltas)   → Replayed | undefined          (the histories are used up)
 //! consolidate(histories, now, deltas, projectJson, closingJson, formats) → Replayed & { manifests }
+//! stitch(paths, lengths, bytes, book, title?) → usfm   (one book's files, no history: no git)
 //! ```
 //!
 //! The walk is sans-IO: the TS driver asks `wants()`, reads those objects
@@ -307,4 +308,49 @@ pub fn consolidate(
     }
     set(&out, "manifests", &manifests);
     Ok(out)
+}
+
+/// One Writer book's files, with no history, → its USFM: the template
+/// replay renders each save with, over the files as they are. `paths[i]`'s
+/// bytes are the next `lengths[i]` of `bytes`, as `give` packs them; files
+/// that aren't the book's text, or aren't UTF-8, are left out. `book` is the
+/// code `\id` gets; `title` stands in when `front/title.txt` says nothing
+/// (default: canon's English name). Needs no git.
+#[wasm_bindgen]
+pub fn stitch(
+    paths: Vec<String>,
+    lengths: &[u32],
+    bytes: &[u8],
+    book: &str,
+    title: Option<String>,
+) -> Result<String, JsError> {
+    if paths.len() != lengths.len() {
+        return Err(JsError::new("stitch: paths and lengths differ in number"));
+    }
+    let code: [u8; 3] = book
+        .as_bytes()
+        .try_into()
+        .ok()
+        .filter(|code: &[u8; 3]| {
+            code.iter()
+                .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
+        })
+        .ok_or_else(|| {
+            JsError::new(&format!(
+                "stitch: {book:?} is not a book code, like \"ROM\""
+            ))
+        })?;
+    let book = mise::books::BookKey::new(code);
+    let mut files = Vec::with_capacity(paths.len());
+    let mut at = 0usize;
+    for (path, &len) in paths.iter().zip(lengths) {
+        let end = at + len as usize;
+        let body = bytes
+            .get(at..end)
+            .ok_or_else(|| JsError::new("stitch: lengths run past the bytes"))?;
+        files.push((path.as_str(), body));
+        at = end;
+    }
+    let title = title.unwrap_or_else(|| crate::replay::fallback_title(book).to_owned());
+    Ok(crate::stitch(files, book, &title))
 }

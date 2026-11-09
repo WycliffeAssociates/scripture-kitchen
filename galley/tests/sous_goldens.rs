@@ -284,7 +284,7 @@ fn resident_bytes_is_pinned_across_the_three_publications() {
 
     assert_eq!(
         [cold, edit, settings],
-        [103_392, 111_293, 118_385],
+        [103_432, 111_333, 118_425],
         "resident bytes moved: cold, edit, settings"
     );
 }

@@ -92,7 +92,7 @@ export interface VersificationMapping {
   partialVerses?: unknown;
 }
 
-/** `JSON.parse(galley.sniff())`. */
+/** `galley.sniff()`. */
 export interface SniffResult {
   /** The winner; `null` when undetermined (use the project's default). */
   best: string | null;
@@ -107,7 +107,7 @@ export interface SniffResult {
   unmatched: string[];
 }
 
-/** `JSON.parse(galley.mapVerse(from, to, "GEN 31:55"))`. Verses are `"BBB c:v"`, a part as `"ESG 4:17c"`. */
+/** `galley.mapVerse(from, to, "GEN 31:55")`. Verses are `"BBB c:v"`, a part as `"ESG 4:17c"`. */
 export type MappedVerse =
   | { same: true }
   | { moved: string }
@@ -115,7 +115,7 @@ export type MappedVerse =
   | { split: string[] }
   | { absent: true };
 
-/** One unit of `JSON.parse(galley.pairs(from, to, "PSA"))`: verses that map only to each other. */
+/** One unit of `galley.pairs(from, to, "PSA")`: verses that map only to each other. */
 export interface PairedVerses {
   here: string[];
   there: string[];
@@ -162,6 +162,20 @@ export interface OverlayOptions {
   utf16?: boolean;
 }
 
+/** One place in a book's order: `places(id)`. `opening..to` tile the text; `from` is its own marker. */
+export interface Place {
+  address: BookAddress;
+  from: number;
+  to: number;
+  opening: number;
+}
+
+/** The options of a door that answers a place in a registered book. */
+export interface IdOptions extends ResolveOptions {
+  /** The `sourceHash` (`xxh3Text(text)`) of the text the host believes the id holds: the door refuses ("… is stale") when it holds other text. */
+  expect?: bigint;
+}
+
 /** One block's address on one side — a skeleton row names its own. */
 export interface BlockAddress {
   sid: string;
@@ -171,10 +185,40 @@ export interface BlockAddress {
   marker: string;
 }
 
+/** `skeleton(id)`: one book's block structure, the whole truth for drawing. */
+export interface Skeleton {
+  /** The `\\v` marker span, and the verse's own text span. */
+  verses: { sid: string; from: number; to: number; textFrom: number; textTo: number }[];
+  blocks: SkeletonRow[];
+}
+
+/** One block: its address, its marker token's span, and the whole block's end. */
+export interface SkeletonRow extends BlockAddress {
+  from: number;
+  to: number;
+  end: number;
+  /** onion's empty paragraph; a source folds these away. */
+  empty: boolean;
+}
+
+/** `overlayReport(targetId, sourceId)`: what the overlay did, and what it declined to do. */
+export interface OverlayReport {
+  inserted: { address: BlockAddress; marker: string; at: number }[];
+  removed: { address: BlockAddress; marker: string; from: number; to: number }[];
+  collapsed: { sid: string; marker: string; count: number }[];
+  unpaired: { sid: string; side: "target" | "source"; reason: "absent" | "bridge" | "ambiguous" }[];
+}
+
+/** `targetNodeFor` / `sourceNodeFor`: a block's counterpart on the other side. */
+export type Equivalent =
+  | { found: SkeletonRow }
+  | { absent: true; insertAt: number; where: "leading" | "inside" }
+  | { unpaired: true; reason: "absent" | "bridge" | "ambiguous" };
+
 /** An `Address` in its book: Sefer's `Address` shape. */
 export type BookAddress = Address & { book: string };
 
-/** `JSON.parse(parseReference(text))`. `at` counts UTF-16 units. */
+/** `parseReference(text)`. `at` counts UTF-16 units. */
 export type ReferenceParse =
   | { ok: true; addresses: BookAddress[] }
   | {
@@ -193,8 +237,10 @@ export interface CitationNames {
   names?: Record<string, string[]>;
   /** Words for the introduction: `["introducción"]`. `intro` and `introduction` always are. */
   intro?: string[];
-  /** Codes outside canon's table to name anyway: a `\\z` book. */
+  /** Books the project holds outside the 66 and the deuterocanon (a peripheral like `FRT`, a `\\z` book): named, and offered by `booksMatching`. */
   books?: string[];
+  /** Offer every book in `booksMatching`, peripherals and XXA–XXG included. Default false. */
+  peripherals?: boolean;
 }
 
 /** `Citations.read(text, opts)`. */
@@ -205,12 +251,12 @@ export interface CiteOptions {
   held?: string[];
 }
 
-/** `JSON.parse(parseSrs(text))`: a reference in the Scripture Referencing Standard's full spelling. */
+/** `parseSrs(text)`: a reference in the Scripture Referencing Standard's full spelling. */
 export type SrsParse =
   | { ok: true; canonical: string; within: (BookAddress | null)[] }
   | { ok: false; error: string; at: number };
 
-/** `JSON.parse(galley.srsLocate(id, ref))`. */
+/** `galley.srsLocate(id, ref)`. */
 export type SrsLocation =
   | { found: { from: number; to: number } }
   | { missing: "verse" | "chapter" | "introduction" | "word" | "character" | "element" | "attribute" }
@@ -221,7 +267,7 @@ export type SrsLocation =
 /** What a reading took for granted. */
 export type CiteAssumption = { kind: "prefix"; word: string; book: string } | { kind: "comma" };
 
-/** `JSON.parse(citations.read(text))`, Sefer's `Citation`. */
+/** `citations.read(text)`, Sefer's `Citation`. */
 export type Citation =
   | { ok: true; text: string; addresses: BookAddress[]; assumed: CiteAssumption[] }
   | {
@@ -377,6 +423,13 @@ impl Galley {
         Ok(())
     }
 
+    /// The `sourceHash` of the text an id holds: onion's `xxh3Text` of it, a
+    /// bigint. What the id doors' `expect` checks against.
+    #[wasm_bindgen(js_name = sourceHash)]
+    pub fn source_hash(&mut self, id: &str) -> Result<u64, JsError> {
+        Ok(self.book(id)?.source_hash())
+    }
+
     /// The scheme a registered book follows (its own declaration, or its
     /// source's for `"followSource"`), or `undefined`.
     #[wasm_bindgen(js_name = schemeOf)]
@@ -387,16 +440,17 @@ impl Galley {
     }
 
     /// Which built-in scheme the books in `scope` follow, from what they
-    /// have, as JSON ([`SniffResult`]). A suggestion for a book that declares
+    /// have ([`SniffResult`]). A suggestion for a book that declares
     /// nothing: nothing here applies it.
     ///
     /// `{ scope }` is `findAll`'s, default `"targets"`; every book in it must
     /// retain its text (a reference needs `keepText`). Sniff the whole text
     /// at once: one book alone has few rules to vote with.
+    #[wasm_bindgen(unchecked_return_type = "SniffResult")]
     pub fn sniff(
         &mut self,
         #[wasm_bindgen(unchecked_optional_param_type = "{ scope?: Scope }")] opts: Option<JsValue>,
-    ) -> Result<String, JsError> {
+    ) -> Result<JsValue, JsError> {
         let door = "sniff";
         let bag = onion_wasm::options::bag(opts.as_ref(), door, &["scope"])
             .map_err(|e| JsError::new(&e))?;
@@ -414,10 +468,10 @@ impl Galley {
     }
 
     /// Where `verse` (`"GEN 31:55"`), numbered by scheme `from`, is under
-    /// scheme `to`, as JSON ([`MappedVerse`]). Either name may be a built-in
+    /// scheme `to` ([`MappedVerse`]). Either name may be a built-in
     /// or a defined scheme.
-    #[wasm_bindgen(js_name = mapVerse)]
-    pub fn map_verse(&self, from: &str, to: &str, verse: &str) -> Result<String, JsError> {
+    #[wasm_bindgen(js_name = mapVerse, unchecked_return_type = "MappedVerse")]
+    pub fn map_verse(&self, from: &str, to: &str, verse: &str) -> Result<JsValue, JsError> {
         let (from, to) = (self.named_scheme(from)?, self.named_scheme(to)?);
         let verse: canon::Verse = verse
             .parse()
@@ -425,10 +479,11 @@ impl Galley {
         versification::mapped_json(&canon::map(from, to, verse))
     }
 
-    /// A whole book walked in step across two schemes, as JSON
+    /// A whole book walked in step across two schemes
     /// ([`PairedVerses`]`[]`): each unit is the verses on each side that map
     /// only to each other. `book` is a USFM code (`"PSA"`).
-    pub fn pairs(&self, from: &str, to: &str, book: &str) -> Result<String, JsError> {
+    #[wasm_bindgen(unchecked_return_type = "PairedVerses[]")]
+    pub fn pairs(&self, from: &str, to: &str, book: &str) -> Result<JsValue, JsError> {
         let (from, to) = (self.named_scheme(from)?, self.named_scheme(to)?);
         let book = versification::book_key(book)
             .ok_or_else(|| JsError::new(&format!("pairs: {book:?} is not a book code")))?;
@@ -589,7 +644,7 @@ impl Galley {
         crate::toc::encode(self.sous.pantry(), &ids, utf16).map_err(census_refusal)
     }
 
-    /// Where an address is in one registered book's text, as JSON: found,
+    /// Where an address is in one registered book's text: found,
     /// missing or ambiguous, never a silent nearest. The rules are
     /// `onion/src/resolve.md`; the answer is a [`Resolution`] in bytes unless
     /// `utf16` asks otherwise.
@@ -597,16 +652,16 @@ impl Galley {
     /// A reference registered without `keepText` answers a book, an intro or
     /// chapters from its `Toc`, in bytes; a verse needs the text (segment
     /// letters, the opening walk) and is refused by name.
+    #[wasm_bindgen(unchecked_return_type = "Resolution")]
     pub fn resolve(
         &mut self,
         id: &str,
         #[wasm_bindgen(unchecked_param_type = "Address")] address: JsValue,
-        #[wasm_bindgen(unchecked_optional_param_type = "ResolveOptions")] opts: Option<JsValue>,
-    ) -> Result<String, JsError> {
-        let utf16 = onion_wasm::options::utf16_only(opts.as_ref(), "resolve")
-            .map_err(|e| JsError::new(&e))?;
+        #[wasm_bindgen(unchecked_optional_param_type = "IdOptions")] opts: Option<JsValue>,
+    ) -> Result<JsValue, JsError> {
+        let (utf16, expect) = id_options(opts.as_ref(), "resolve")?;
         let address = onion_wasm::resolution::address(&address).map_err(|e| JsError::new(&e))?;
-        let entry = self.book(id)?;
+        let entry = self.current(id, expect, "resolve")?;
         let answer = match entry.text() {
             Ok(text) => entry
                 .toc()
@@ -622,20 +677,22 @@ impl Galley {
         } else {
             None
         };
-        Ok(onion_wasm::resolution::json(&answer, table))
+        Ok(onion_wasm::object(&onion_wasm::resolution::json(
+            &answer, table,
+        )))
     }
 
     /// [`resolve`](Self::resolve) over text the host holds and has not
     /// registered, with the same options. Over a registered book's exact text
-    /// the two doors answer the same JSON, and every address kind answers,
+    /// the two doors answer the same, and every address kind answers,
     /// since the text is here.
-    #[wasm_bindgen(js_name = resolveOf)]
+    #[wasm_bindgen(js_name = resolveOf, unchecked_return_type = "Resolution")]
     pub fn resolve_of(
         &mut self,
         text: &str,
         #[wasm_bindgen(unchecked_param_type = "Address")] address: JsValue,
         #[wasm_bindgen(unchecked_optional_param_type = "ResolveTextOptions")] opts: Option<JsValue>,
-    ) -> Result<String, JsError> {
+    ) -> Result<JsValue, JsError> {
         let (utf16, markers) =
             onion_wasm::options::resolve_text_options(opts.as_ref(), "resolveOf")
                 .map_err(|e| JsError::new(&e))?;
@@ -655,46 +712,104 @@ impl Galley {
             &markers.list(),
         );
         let table = utf16.then(|| mise::utf16::utf16_table(text.as_bytes()));
-        Ok(onion_wasm::resolution::json(&answer, table.as_ref()))
+        Ok(onion_wasm::object(&onion_wasm::resolution::json(
+            &answer,
+            table.as_ref(),
+        )))
     }
 
     /// The place at an offset in one registered book's text, as a
-    /// `BookAddress` in JSON: the introduction, a chapter's head, its title
+    /// `BookAddress`: the introduction, a chapter's head, its title
     /// (verse 0), or the verse whose tile holds the offset, parts included.
-    /// The inverse of `resolve`; the offset is in bytes unless `utf16`.
-    #[wasm_bindgen(js_name = addressAt)]
+    /// The inverse of `resolve`; the offset is in bytes unless `utf16`, and one
+    /// outside `0..=len` (or not an integer) is refused.
+    #[wasm_bindgen(js_name = addressAt, unchecked_return_type = "BookAddress")]
     pub fn address_at(
         &mut self,
         id: &str,
-        offset: u32,
-        #[wasm_bindgen(unchecked_optional_param_type = "ResolveOptions")] opts: Option<JsValue>,
-    ) -> Result<String, JsError> {
-        let utf16 = onion_wasm::options::utf16_only(opts.as_ref(), "addressAt")
-            .map_err(|e| JsError::new(&e))?;
-        let entry = self.book(id)?;
+        offset: f64,
+        #[wasm_bindgen(unchecked_optional_param_type = "IdOptions")] opts: Option<JsValue>,
+    ) -> Result<JsValue, JsError> {
+        let (utf16, expect) = id_options(opts.as_ref(), "addressAt")?;
+        let entry = self.current(id, expect, "addressAt")?;
         let text = entry.text().map_err(|_| {
             JsError::new(&format!(
                 "reference {id} retains no text to place an offset in; register it with keepText"
             ))
         })?;
-        let byte = if utf16 {
-            mise::utf16::Utf16Index::new(text.as_bytes()).to_byte(offset)
-        } else {
-            offset
-        };
+        let byte = reference::byte_offset(text, offset, utf16, "addressAt")?;
         let (book, address) = entry.toc().address_at(text, byte);
-        Ok(reference::book_address(book, &address).to_string())
+        Ok(onion_wasm::object(
+            &reference::book_address(book, &address).to_string(),
+        ))
+    }
+
+    /// Every place in one registered book, in order (`Place[]`): the
+    /// introduction, each chapter's head, each title (verse 0) and each
+    /// verse's tile, with the address `addressAt` answers anywhere inside it.
+    /// `opening..to` tile the text, so the list is what a host steps through
+    /// ("one more above"), groups hunks by, and keys a place on.
+    #[wasm_bindgen(unchecked_return_type = "Place[]")]
+    pub fn places(
+        &mut self,
+        id: &str,
+        #[wasm_bindgen(unchecked_optional_param_type = "IdOptions")] opts: Option<JsValue>,
+    ) -> Result<JsValue, JsError> {
+        let (utf16, expect) = id_options(opts.as_ref(), "places")?;
+        let entry = self.current(id, expect, "places")?;
+        let text = entry.text().map_err(|_| {
+            JsError::new(&format!(
+                "reference {id} retains no text to list places in; register it with keepText"
+            ))
+        })?;
+        let places = entry.toc().places(text);
+        let book = mise::books::BookKey::new(entry.toc().book);
+        // The book's own UTF-16 table, as `resolve` reads it: no walk per call.
+        let table = if utf16 {
+            Some(entry.utf16().map_err(census_refusal)?)
+        } else {
+            None
+        };
+        Ok(places_object(book, &places, table))
+    }
+
+    /// [`places`](Self::places) over text the host holds and has not
+    /// registered, with `resolveOf`'s options.
+    #[wasm_bindgen(js_name = placesOf, unchecked_return_type = "Place[]")]
+    pub fn places_of(
+        &mut self,
+        text: &str,
+        #[wasm_bindgen(unchecked_optional_param_type = "ResolveTextOptions")] opts: Option<JsValue>,
+    ) -> Result<JsValue, JsError> {
+        let (utf16, markers) = onion_wasm::options::resolve_text_options(opts.as_ref(), "placesOf")
+            .map_err(|e| JsError::new(&e))?;
+        let markers = Markers::from(markers);
+        let parsed = self.sous.parsed(
+            text,
+            crate::onion::wire::ParseOptions {
+                toc: true,
+                ..Default::default()
+            },
+            &markers,
+        );
+        let toc = parsed.toc.as_ref().expect("asked for a toc");
+        let table = utf16.then(|| mise::utf16::utf16_table(text.as_bytes()));
+        Ok(places_object(
+            mise::books::BookKey::new(toc.book),
+            &toc.places(text),
+            table.as_ref(),
+        ))
     }
 
     /// [`addressAt`](Self::address_at) over text the host holds and has not
     /// registered, with `resolveOf`'s options.
-    #[wasm_bindgen(js_name = addressAtOf)]
+    #[wasm_bindgen(js_name = addressAtOf, unchecked_return_type = "BookAddress")]
     pub fn address_at_of(
         &mut self,
         text: &str,
-        offset: u32,
+        offset: f64,
         #[wasm_bindgen(unchecked_optional_param_type = "ResolveTextOptions")] opts: Option<JsValue>,
-    ) -> Result<String, JsError> {
+    ) -> Result<JsValue, JsError> {
         let (utf16, markers) =
             onion_wasm::options::resolve_text_options(opts.as_ref(), "addressAtOf")
                 .map_err(|e| JsError::new(&e))?;
@@ -707,19 +822,17 @@ impl Galley {
             },
             &markers,
         );
-        let byte = if utf16 {
-            mise::utf16::Utf16Index::new(text.as_bytes()).to_byte(offset)
-        } else {
-            offset
-        };
+        let byte = reference::byte_offset(text, offset, utf16, "addressAtOf")?;
         let toc = parsed.toc.as_ref().expect("asked for a toc");
         let (book, address) = toc.address_at(text, byte);
-        Ok(reference::book_address(book, &address).to_string())
+        Ok(onion_wasm::object(
+            &reference::book_address(book, &address).to_string(),
+        ))
     }
 
     // ── Match formatting: a target's skeleton made the source's ─────────
 
-    /// One registered book's block structure, as JSON — either side, and the
+    /// One registered book's block structure — either side, and the
     /// whole truth for drawing.
     ///
     /// ```ts
@@ -747,11 +860,12 @@ impl Galley {
     /// Both lists are in document order. A block ends where its paragraph
     /// closes — a heading or `\c` the marker set leaves out still ends it — so
     /// the next row's `from` is not its end.
+    #[wasm_bindgen(unchecked_return_type = "Skeleton")]
     pub fn skeleton(
         &mut self,
         id: &str,
         #[wasm_bindgen(unchecked_optional_param_type = "OverlayOptions")] opts: Option<JsValue>,
-    ) -> Result<String, JsError> {
+    ) -> Result<JsValue, JsError> {
         let (options, utf16) = overlay::options(opts.as_ref(), "skeleton")?;
         let wanted = BookId::from(id);
         let mut skeleton = self.sous.skeleton(&wanted, &options).map_err(door)?;
@@ -815,7 +929,7 @@ impl Galley {
             .map_err(door)
     }
 
-    /// What the overlay did, and what it declined to do, as JSON.
+    /// What the overlay did, and what it declined to do.
     ///
     /// ```ts
     /// interface BlockAddress { sid: string; where: "leading" | "inside"; ordinal: number;
@@ -829,13 +943,13 @@ impl Galley {
     /// ```
     ///
     /// An overlay is a SUGGESTION applied on request, never a finding.
-    #[wasm_bindgen(js_name = overlayReport)]
+    #[wasm_bindgen(js_name = overlayReport, unchecked_return_type = "OverlayReport")]
     pub fn overlay_report(
         &mut self,
         target_id: &str,
         source_id: &str,
         #[wasm_bindgen(unchecked_optional_param_type = "OverlayOptions")] opts: Option<JsValue>,
-    ) -> Result<String, JsError> {
+    ) -> Result<JsValue, JsError> {
         let (options, utf16) = overlay::options(opts.as_ref(), "overlayReport")?;
         let target = BookId::from(target_id);
         let mut report = self
@@ -863,27 +977,27 @@ impl Galley {
     /// something else, the call THROWS ("… names q2 but the node there is q1
     /// — the address is stale") rather than answering about another node. The
     /// position is still the key; the name is only the check.
-    #[wasm_bindgen(js_name = targetNodeFor)]
+    #[wasm_bindgen(js_name = targetNodeFor, unchecked_return_type = "Equivalent")]
     pub fn target_node_for(
         &mut self,
         target_id: &str,
         source_id: &str,
         #[wasm_bindgen(unchecked_param_type = "BlockAddress")] address: JsValue,
         #[wasm_bindgen(unchecked_optional_param_type = "OverlayOptions")] opts: Option<JsValue>,
-    ) -> Result<String, JsError> {
+    ) -> Result<JsValue, JsError> {
         self.node_for(target_id, source_id, address, opts, Side::Target)
     }
 
     /// A TARGET block's address, answered in the source — the mirror of
     /// [`targetNodeFor`](Self::target_node_for), and the same three answers.
-    #[wasm_bindgen(js_name = sourceNodeFor)]
+    #[wasm_bindgen(js_name = sourceNodeFor, unchecked_return_type = "Equivalent")]
     pub fn source_node_for(
         &mut self,
         target_id: &str,
         source_id: &str,
         #[wasm_bindgen(unchecked_param_type = "BlockAddress")] address: JsValue,
         #[wasm_bindgen(unchecked_optional_param_type = "OverlayOptions")] opts: Option<JsValue>,
-    ) -> Result<String, JsError> {
+    ) -> Result<JsValue, JsError> {
         self.node_for(target_id, source_id, address, opts, Side::Source)
     }
 
@@ -1305,6 +1419,19 @@ impl Galley {
         })
     }
 
+    /// A registered book, refused when the host `expect`ed other text: the
+    /// id doors' guard against an id re-registered since the host last looked.
+    fn current(&mut self, id: &str, expect: Option<u64>, door: &str) -> Result<Entry<'_>, JsError> {
+        let entry = self.book(id)?;
+        match expect {
+            Some(want) if entry.source_hash() != want => Err(JsError::new(&format!(
+                "{door}: {id} is stale: it holds text with sourceHash {:#x}, not {want:#x}",
+                entry.source_hash()
+            ))),
+            _ => Ok(entry),
+        }
+    }
+
     fn book(&mut self, id: &str) -> Result<Entry<'_>, JsError> {
         self.sous
             .book(&BookId::from(id))
@@ -1319,7 +1446,7 @@ impl Galley {
         address: JsValue,
         opts: Option<JsValue>,
         want: Side,
-    ) -> Result<String, JsError> {
+    ) -> Result<JsValue, JsError> {
         let name = match want {
             Side::Target => "targetNodeFor",
             Side::Source => "sourceNodeFor",
@@ -1378,6 +1505,86 @@ fn retention(keep_text: bool) -> Retain {
 /// An overlay refusal, as the JS error carrying its text.
 fn door(error: crate::overlay::OverlayError) -> JsError {
     JsError::new(&error.to_string())
+}
+
+/// `Place[]`, in UTF-16 code units when a `table` is given. Written as JSON
+/// by hand and parsed once on the JS side: a serde `Value` per place cost
+/// three times the parse on a whole Psalter. The address shape is
+/// `resolution::address_json`'s with its `book`, which the conformance
+/// script holds to `addressAt`'s.
+fn places_object(
+    book: mise::books::BookKey,
+    places: &[crate::onion::resolve::Place],
+    table: Option<&mise::utf16::Utf16Table>,
+) -> JsValue {
+    use crate::onion::resolve::{Address, Point};
+    use std::fmt::Write;
+    let at = |byte: u32| table.map_or(byte, |table| table.to_utf16(byte));
+    let point = |out: &mut String, point: &Point| {
+        let _ = write!(
+            out,
+            r#"{{"chapter":{},"verse":{}"#,
+            point.chapter, point.verse
+        );
+        if let Some(segment) = &point.segment {
+            let _ = write!(out, r#","segment":"{segment}""#);
+        }
+        out.push('}');
+    };
+    // Escaped once: a malformed `\id` can put anything in the code.
+    let book = serde_json::to_string(&book.to_string()).expect("a string serializes");
+    let mut out = String::with_capacity(places.len() * 150);
+    out.push('[');
+    for (n, place) in places.iter().enumerate() {
+        if n > 0 {
+            out.push(',');
+        }
+        out.push_str(r#"{"address":{"#);
+        match &place.address {
+            Address::Book => out.push_str(r#""kind":"book""#),
+            Address::Intro => out.push_str(r#""kind":"intro""#),
+            Address::Chapters { from, to } => {
+                let _ = write!(out, r#""kind":"chapters","from":{from},"to":{to}"#);
+            }
+            Address::Verses { from, to } => {
+                out.push_str(r#""kind":"verses","from":"#);
+                point(&mut out, from);
+                out.push_str(r#","to":"#);
+                point(&mut out, to);
+            }
+        }
+        let _ = write!(
+            out,
+            r#","book":{book}}},"from":{},"to":{},"opening":{}}}"#,
+            at(place.from),
+            at(place.to),
+            at(place.opening)
+        );
+    }
+    out.push(']');
+    onion_wasm::object(&out)
+}
+
+/// `{ utf16?, expect? }`: the options every id door that answers a place
+/// takes. `expect` is the `sourceHash` (onion's `xxh3Text` of the text) the
+/// host believes the id holds; a door refuses when it holds other text.
+pub(crate) fn id_options(
+    opts: Option<&JsValue>,
+    door: &str,
+) -> Result<(bool, Option<u64>), JsError> {
+    let bag =
+        onion_wasm::options::bag(opts, door, &["utf16", "expect"]).map_err(|e| JsError::new(&e))?;
+    let utf16 =
+        onion_wasm::options::flag(bag.as_ref(), door, "utf16").map_err(|e| JsError::new(&e))?;
+    let expect = match onion_wasm::options::get(bag.as_ref(), "expect") {
+        None => None,
+        Some(hash) => Some(u64::try_from(hash).map_err(|_| {
+            JsError::new(&format!(
+                "{door}: expect is a sourceHash, the bigint xxh3Text answers"
+            ))
+        })?),
+    };
+    Ok((utf16, expect))
 }
 
 /// The census's one refusal, naming the argument that fixes it rather than

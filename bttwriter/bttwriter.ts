@@ -13,6 +13,9 @@
  *     const done = bttwriter.consolidate([rom, tit], { now }, project, closing);
  *     // write done.pack / done.idx as objects/pack/<done.name>.{pack,idx}, point a branch at done.head
  *
+ *     // A Writer folder with no history (no .git, or an upstream's files as they are):
+ *     const usfm = bttwriter.stitch(files, "ROM");         // files: Map<path, bytes | text>
+ *
  * Imported lazily, on the migration screen: nobody else pays for the module.
  */
 import wasmInit, * as raw from "./pkg-web/bttwriter.js";
@@ -166,6 +169,17 @@ export class WriterHistory {
   usfm(): string {
     return this.held().usfm();
   }
+
+  /** True once {@link replay} or {@link consolidate} has used this history up, or {@link free} released it. */
+  get spent(): boolean {
+    return this.raw === undefined;
+  }
+
+  /** Release the module memory a history that will never be replayed holds. Safe to call twice. */
+  free(): void {
+    this.raw?.free();
+    this.raw = undefined;
+  }
 }
 
 const KIND = { commit: 0, tree: 1, blob: 2 } as const;
@@ -271,3 +285,34 @@ export const consolidate = (
     JSON.stringify(closing),
     [...formats],
   ) as Replayed & { manifests: Map<string, Uint8Array> };
+
+/**
+ * One Writer book's files → its USFM, with no history and no git: the
+ * template replay renders each save with, over the files as they are. For a
+ * Writer folder without `.git`, or an upstream's files to compare against.
+ * Keys are paths inside the book project (`front/title.txt`, `05/03.txt`);
+ * anything else (`manifest.json`) is ignored, and so is a file that isn't
+ * UTF-8. `book` is the code (`"ROM"`); `title` stands in when
+ * `front/title.txt` says nothing (default: canon's English name).
+ */
+export const stitch = (
+  files: ReadonlyMap<string, Uint8Array | string> | Iterable<readonly [string, Uint8Array | string]>,
+  book: string,
+  options: { title?: string } = {},
+): string => {
+  const encoder = new TextEncoder();
+  const paths: string[] = [];
+  const bodies: Uint8Array[] = [];
+  for (const [path, body] of files instanceof Map ? files.entries() : files) {
+    paths.push(path);
+    bodies.push(typeof body === "string" ? encoder.encode(body) : body);
+  }
+  const lengths = new Uint32Array(bodies.map((b) => b.length));
+  const bytes = new Uint8Array(lengths.reduce((n, l) => n + l, 0));
+  let at = 0;
+  for (const body of bodies) {
+    bytes.set(body, at);
+    at += body.length;
+  }
+  return raw.stitch(paths, lengths, bytes, book, options.title);
+};

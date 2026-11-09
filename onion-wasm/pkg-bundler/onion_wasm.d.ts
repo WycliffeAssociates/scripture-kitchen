@@ -94,7 +94,47 @@ export interface AddressPoint {
     segment?: string;
 }
 
-/** What `resolve` answers, JSON-encoded. Offsets are half-open. */
+/** `diff`'s answer: every changed unit (and with `unchanged`, every unit), in the
+ * current document's order. Spans are UTF-16 offsets into each side's own text. */
+export interface DiffSkeleton {
+    baselineLen: number;
+    currentLen: number;
+    unchangedCount: number;
+    units: DiffUnit[];
+}
+
+export interface DiffUnit {
+    /** Opaque: decisions name it, nothing parses it. */
+    unitId: string;
+    kind: "shared" | "added" | "deleted" | "coalesced";
+    status: "unchanged" | "modified" | "added" | "deleted";
+    baselineSid: string | null;
+    currentSid: string | null;
+    baseline: [number, number];
+    current: [number, number];
+    relabeled: boolean;
+    baselineCount: number;
+    currentCount: number;
+    isDup: boolean;
+    coveredBy: { sid: string; side: "baseline" | "current" } | null;
+    isWhitespaceChange: boolean;
+    isUsfmStructureChange: boolean;
+    /** Present only when `text` asked for runs and the unit has any. */
+    text?: { baseline: DiffRun[]; current: DiffRun[] };
+}
+
+export interface DiffRun {
+    from: number;
+    to: number;
+    kind: "unchanged" | "added" | "removed";
+    what: "markup" | "text" | "whitespace";
+    note: boolean;
+}
+
+/** `merge`'s choices: unit id to the side it keeps. */
+export type Decisions = Record<string, "baseline" | "current">;
+
+/** What `resolve` answers. Offsets are half-open. */
 export type Resolution =
 | { found: { from: number; to: number; opening: number; covers: Address; coarser: boolean } }
 | { missing: "intro" | "chapter" | "verse"; within?: { from: number; to: number } }
@@ -278,7 +318,7 @@ export function customMarkers(list: readonly CustomMarker[], opts?: CustomMarker
 export function customMarkersFromMarkersExt(text: string): CustomMarkers;
 
 /**
- * The diff skeleton as JSON: the changed units of two documents, in the
+ * The diff skeleton (`DiffSkeleton`): the changed units of two documents, in the
  * current document's order. Spans are UTF-16 offsets into each side's own document.
  *
  * ```ts
@@ -286,7 +326,7 @@ export function customMarkersFromMarkersExt(text: string): CustomMarkers;
  *   text: "none" | "words" | "chars";   // required
  *   unchanged?: boolean;                // send unchanged units too; default false
  * }
- * diff(baseline: string, current: string, opts: DiffOptions): string;
+ * diff(baseline: string, current: string, opts: DiffOptions): DiffSkeleton;
  * ```
  *
  * `text` is the intra-verse runs a `modified`, `added` or `deleted` unit is
@@ -299,7 +339,7 @@ export function customMarkersFromMarkersExt(text: string): CustomMarkers;
  * draws the whole book from the skeleton. Nothing else changes: the ids, the
  * spans and the runs are the same in both.
  */
-export function diff(baseline: string, current: string, opts: DiffOptions): string;
+export function diff(baseline: string, current: string, opts: DiffOptions): DiffSkeleton;
 
 /**
  * The formatted document. `format_edits` applied, in one call.
@@ -362,9 +402,9 @@ export function mask(text: string, recipe: string, opts?: LexOptions): object;
  * The merged document. An unknown unit id REJECTS loudly — the caller must
  * re-diff, and there is no fuzzy stale-id fallback.
  */
-export function merge(baseline: string, current: string, decisions_json: string, _default: string, opts?: LexOptions): string;
+export function merge(baseline: string, current: string, decisions: Decisions, _default: string, opts?: LexOptions): string;
 
-export function mergeSplices(baseline: string, current: string, decisions_json: string, _default: string, opts?: LexOptions): Splices;
+export function mergeSplices(baseline: string, current: string, decisions: Decisions, _default: string, opts?: LexOptions): Splices;
 
 /**
  * THE read call. One document in, one buffer out.
@@ -399,16 +439,16 @@ export function parse(text: string, opts?: ParseTextOptions): Uint8Array;
  *
  * ```js
  * resolve(text, { kind: "verses", from: { chapter: 1, verse: 2 }, to: { chapter: 1, verse: 2 } })
- *   // → '{"found":{"from":8,"to":19,"opening":5,"covers":{…},"coarser":false}}'
+ *   // → { found: { from: 8, to: 19, opening: 5, covers: {…}, coarser: false } }
  * resolve(text, { kind: "chapters", from: 3, to: 3 }, { utf16: true })
- *   // → '{"missing":"chapter"}'
+ *   // → { missing: "chapter" }
  * ```
  *
  * Offsets are bytes unless `utf16` asks otherwise. galley's
  * `Galley.resolveOf` answers the same over text, and `Galley.resolve` over a
  * registered book.
  */
-export function resolve(text: string, address: Address, opts?: ResolveTextOptions): string;
+export function resolve(text: string, address: Address, opts?: ResolveTextOptions): Resolution;
 
 /**
  * Installs a list process-wide: the one every door lexes by when it is given
