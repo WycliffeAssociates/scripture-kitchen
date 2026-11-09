@@ -2,7 +2,8 @@
   "name": "bttwriter",
   "type": "module",
   "description": "BTT Writer projects: one book's chunk files to USFM, and a project's save history replayed into one git pack.",
-  "version": "0.1.20",
+  "version": "0.1.21",
+  "license": "MIT",
   "files": [
     "bttwriter_bg.wasm",
     "bttwriter.js",

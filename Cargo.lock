@@ -86,7 +86,7 @@ dependencies = [
 
 [[package]]
 name = "bento"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "canon",
  "js-sys",
@@ -127,7 +127,7 @@ checksum = "dc0b364ead1874514c8c2855ab558056ebfeb775653e7ae45ff72f28f8f3166c"
 
 [[package]]
 name = "bttwriter"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "bento",
  "canon",
@@ -154,7 +154,7 @@ checksum = "175812e0be2bccb6abe50bb8d566126198344f707e304f45c648fd8f2cc0365e"
 
 [[package]]
 name = "canon"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "mise",
  "serde_json",
@@ -162,7 +162,7 @@ dependencies = [
 
 [[package]]
 name = "canon-gen"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "canon",
  "serde_json",
@@ -317,7 +317,7 @@ dependencies = [
 
 [[package]]
 name = "docx"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "canon",
  "js-sys",
@@ -800,7 +800,7 @@ checksum = "c505b3e17ed6b70a7ed2e67fbb2c560ee327353556120d6e72f5232b6880d536"
 
 [[package]]
 name = "mise"
-version = "0.1.20"
+version = "0.1.21"
 
 [[package]]
 name = "nu-ansi-term"
@@ -907,7 +907,7 @@ checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 
 [[package]]
 name = "onion-wasm"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "js-sys",
  "mise",
@@ -1071,7 +1071,7 @@ dependencies = [
 
 [[package]]
 name = "reference"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "canon",
  "mise",
@@ -1269,7 +1269,7 @@ checksum = "b9be42f50aa861c555654aa3a37f52f4b1074bacf4e48fe0ef7fa584e80f1f0f"
 
 [[package]]
 name = "sous-cli"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "rayon",
  "rustc-hash 2.1.3",
@@ -1281,7 +1281,7 @@ dependencies = [
 
 [[package]]
 name = "sous-core"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "divan",
  "memchr",
@@ -1295,7 +1295,7 @@ dependencies = [
 
 [[package]]
 name = "srs"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "canon",
  "mise",
@@ -1387,7 +1387,7 @@ checksum = "3bf63baf9f5039dadc247375c29eb13706706cfde997d0330d05aa63a77d8820"
 
 [[package]]
 name = "ticket"
-version = "0.1.20"
+version = "0.1.21"
 
 [[package]]
 name = "tinystr"
@@ -1473,7 +1473,7 @@ dependencies = [
 
 [[package]]
 name = "usfm_galley"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "canon",
  "dhat",
@@ -1498,7 +1498,7 @@ dependencies = [
 
 [[package]]
 name = "usfm_onion"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "divan",
  "memchr",

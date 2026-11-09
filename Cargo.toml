@@ -53,8 +53,9 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.1.20"
+version = "0.1.21"
 edition = "2024"
+license = "MIT"
 
 # Pinned here rather than per-crate so one version is stated once. These are
 # exactly what Cargo.lock resolves; a bump is a deliberate edit in one place.
