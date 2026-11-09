@@ -478,7 +478,7 @@ export function customMarkersFromMarkersExt(text) {
 }
 
 /**
- * The diff skeleton as JSON: the changed units of two documents, in the
+ * The diff skeleton (`DiffSkeleton`): the changed units of two documents, in the
  * current document's order. Spans are UTF-16 offsets into each side's own document.
  *
  * ```ts
@@ -486,7 +486,7 @@ export function customMarkersFromMarkersExt(text) {
  *   text: "none" | "words" | "chars";   // required
  *   unchanged?: boolean;                // send unchanged units too; default false
  * }
- * diff(baseline: string, current: string, opts: DiffOptions): string;
+ * diff(baseline: string, current: string, opts: DiffOptions): DiffSkeleton;
  * ```
  *
  * `text` is the intra-verse runs a `modified`, `added` or `deleted` unit is
@@ -501,29 +501,18 @@ export function customMarkersFromMarkersExt(text) {
  * @param {string} baseline
  * @param {string} current
  * @param {DiffOptions} opts
- * @returns {string}
+ * @returns {DiffSkeleton}
  */
 export function diff(baseline, current, opts) {
-    let deferred4_0;
-    let deferred4_1;
-    try {
-        const ptr0 = passStringToWasm0(baseline, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passStringToWasm0(current, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ret = wasm.diff(ptr0, len0, ptr1, len1, opts);
-        var ptr3 = ret[0];
-        var len3 = ret[1];
-        if (ret[3]) {
-            ptr3 = 0; len3 = 0;
-            throw takeFromExternrefTable0(ret[2]);
-        }
-        deferred4_0 = ptr3;
-        deferred4_1 = len3;
-        return getStringFromWasm0(ptr3, len3);
-    } finally {
-        wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+    const ptr0 = passStringToWasm0(baseline, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(current, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.diff(ptr0, len0, ptr1, len1, opts);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
     }
+    return takeFromExternrefTable0(ret[0]);
 }
 
 /**
@@ -662,56 +651,52 @@ export function mask(text, recipe, opts) {
  * re-diff, and there is no fuzzy stale-id fallback.
  * @param {string} baseline
  * @param {string} current
- * @param {string} decisions_json
+ * @param {Decisions} decisions
  * @param {string} _default
  * @param {LexOptions} [opts]
  * @returns {string}
  */
-export function merge(baseline, current, decisions_json, _default, opts) {
-    let deferred6_0;
-    let deferred6_1;
+export function merge(baseline, current, decisions, _default, opts) {
+    let deferred5_0;
+    let deferred5_1;
     try {
         const ptr0 = passStringToWasm0(baseline, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
         const ptr1 = passStringToWasm0(current, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len1 = WASM_VECTOR_LEN;
-        const ptr2 = passStringToWasm0(decisions_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const ptr2 = passStringToWasm0(_default, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len2 = WASM_VECTOR_LEN;
-        const ptr3 = passStringToWasm0(_default, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len3 = WASM_VECTOR_LEN;
-        const ret = wasm.merge(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
-        var ptr5 = ret[0];
-        var len5 = ret[1];
+        const ret = wasm.merge(ptr0, len0, ptr1, len1, decisions, ptr2, len2, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
+        var ptr4 = ret[0];
+        var len4 = ret[1];
         if (ret[3]) {
-            ptr5 = 0; len5 = 0;
+            ptr4 = 0; len4 = 0;
             throw takeFromExternrefTable0(ret[2]);
         }
-        deferred6_0 = ptr5;
-        deferred6_1 = len5;
-        return getStringFromWasm0(ptr5, len5);
+        deferred5_0 = ptr4;
+        deferred5_1 = len4;
+        return getStringFromWasm0(ptr4, len4);
     } finally {
-        wasm.__wbindgen_free(deferred6_0, deferred6_1, 1);
+        wasm.__wbindgen_free(deferred5_0, deferred5_1, 1);
     }
 }
 
 /**
  * @param {string} baseline
  * @param {string} current
- * @param {string} decisions_json
+ * @param {Decisions} decisions
  * @param {string} _default
  * @param {LexOptions} [opts]
  * @returns {Splices}
  */
-export function mergeSplices(baseline, current, decisions_json, _default, opts) {
+export function mergeSplices(baseline, current, decisions, _default, opts) {
     const ptr0 = passStringToWasm0(baseline, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len0 = WASM_VECTOR_LEN;
     const ptr1 = passStringToWasm0(current, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len1 = WASM_VECTOR_LEN;
-    const ptr2 = passStringToWasm0(decisions_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const ptr2 = passStringToWasm0(_default, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len2 = WASM_VECTOR_LEN;
-    const ptr3 = passStringToWasm0(_default, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    const len3 = WASM_VECTOR_LEN;
-    const ret = wasm.mergeSplices(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
+    const ret = wasm.mergeSplices(ptr0, len0, ptr1, len1, decisions, ptr2, len2, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
     if (ret[2]) {
         throw takeFromExternrefTable0(ret[1]);
     }
@@ -764,9 +749,9 @@ export function parse(text, opts) {
  *
  * ```js
  * resolve(text, { kind: "verses", from: { chapter: 1, verse: 2 }, to: { chapter: 1, verse: 2 } })
- *   // → '{"found":{"from":8,"to":19,"opening":5,"covers":{…},"coarser":false}}'
+ *   // → { found: { from: 8, to: 19, opening: 5, covers: {…}, coarser: false } }
  * resolve(text, { kind: "chapters", from: 3, to: 3 }, { utf16: true })
- *   // → '{"missing":"chapter"}'
+ *   // → { missing: "chapter" }
  * ```
  *
  * Offsets are bytes unless `utf16` asks otherwise. galley's
@@ -775,27 +760,16 @@ export function parse(text, opts) {
  * @param {string} text
  * @param {Address} address
  * @param {ResolveTextOptions} [opts]
- * @returns {string}
+ * @returns {Resolution}
  */
 export function resolve(text, address, opts) {
-    let deferred3_0;
-    let deferred3_1;
-    try {
-        const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.resolve(ptr0, len0, address, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
-        var ptr2 = ret[0];
-        var len2 = ret[1];
-        if (ret[3]) {
-            ptr2 = 0; len2 = 0;
-            throw takeFromExternrefTable0(ret[2]);
-        }
-        deferred3_0 = ptr2;
-        deferred3_1 = len2;
-        return getStringFromWasm0(ptr2, len2);
-    } finally {
-        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+    const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.resolve(ptr0, len0, address, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
     }
+    return takeFromExternrefTable0(ret[0]);
 }
 
 /**
@@ -913,6 +887,10 @@ function __wbg_get_imports() {
             const ret = typeof(val) === 'object' && val !== null;
             return ret;
         },
+        __wbg___wbindgen_is_string_e6f02f0ea5f20a32: function(arg0) {
+            const ret = typeof(arg0) === 'string';
+            return ret;
+        },
         __wbg___wbindgen_is_undefined_6cff064c44e0d823: function(arg0) {
             const ret = arg0 === undefined;
             return ret;
@@ -966,12 +944,20 @@ function __wbg_get_imports() {
             const ret = new Uint32Array(getArrayU32FromWasm0(arg0, arg1));
             return ret;
         },
+        __wbg_parse_1cc93481b0865939: function() { return handleError(function (arg0, arg1) {
+            const ret = JSON.parse(getStringFromWasm0(arg0, arg1));
+            return ret;
+        }, arguments); },
         __wbg_push_adb0107829f02d75: function(arg0, arg1) {
             const ret = arg0.push(arg1);
             return ret;
         },
         __wbg_set_8155bb79a948541b: function() { return handleError(function (arg0, arg1, arg2) {
             const ret = Reflect.set(arg0, arg1, arg2);
+            return ret;
+        }, arguments); },
+        __wbg_stringify_f93a4ebae9231922: function() { return handleError(function (arg0) {
+            const ret = JSON.stringify(arg0);
             return ret;
         }, arguments); },
         __wbindgen_cast_0000000000000001: function(arg0) {

@@ -327,7 +327,7 @@ impl<'h> Book<'h> {
 
 /// Canon's English name for a book: the template's title when
 /// `front/title.txt` says nothing, as Sefer's `fallbackTitle`.
-fn fallback_title(book: BookKey) -> &'static str {
+pub(crate) fn fallback_title(book: BookKey) -> &'static str {
     canon::book(book).map_or("", |b| b.english)
 }
 

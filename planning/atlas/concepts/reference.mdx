@@ -59,6 +59,7 @@ show(&refs[0], "Mateo", "introducción");                  // "Mateo 5:3-7"
 - **The TOC's answer converts too.** onion's `Sid::address` gives `(BookKey, Address)`, so nothing outside onion needs `Sid`.
 - **Fixtures.** The tests run the standard's examples and the Kotlin hub's 52 parse, list and invalid cases. Each of the 19 the crate answers differently on purpose (strictness, srs parts, one-chapter books) is listed with its reason.
 - **`cite` is Sefer's `citation.ts` and `names.ts`, ported.** Its 67 cases are `fixtures/cite.json`, data Sefer's tests can run too. It departs from Sefer in two places, to match the machine spelling: `Luke 3:0` is the chapter's title, and `Jude 3` is verse 3.
+- **`books_matching` offers what a person would go to.** The 66 and the deuterocanon, plus books the host lists (`Catalogue::book`: a held `FRT`, a `\z` book), or everything after `offer_all`. Reading a citation still knows every book.
 
 ## Composes with
 

@@ -18,7 +18,9 @@ export class Citations {
     }
     /**
      * Every book the words before the numbers could mean, in canon order:
-     * a filter under a go-to box. `"john 3"` lists JHN, 1JN, 2JN and 3JN.
+     * a filter under a go-to box. `"john 3"` lists JHN, 1JN, 2JN and 3JN (and
+     * REV, "Revelation of John"). No peripheral or XXA–XXG unless `books`
+     * listed it or `peripherals` asked.
      * @param {string} text
      * @returns {string[]}
      */
@@ -34,7 +36,9 @@ export class Citations {
      * `names`: per book code, what the project calls it in any language it
      * names books in, and registered abbreviations (`{ MAT: ["Mateo", "Mt"] }`).
      * `intro`: words for the introduction (`["introducción"]`). `books`: codes
-     * outside canon's table that should still be named (a `\z` book).
+     * the project holds outside the 66 and the deuterocanon (a peripheral like
+     * `FRT`, a `\z` book): named, and offered by `booksMatching`.
+     * `peripherals: true` offers every book there, XXA–XXG included.
      * @param {CitationNames} [opts]
      */
     constructor(opts) {
@@ -53,27 +57,16 @@ export class Citations {
      * project's books, which win a prefix tie.
      * @param {string} text
      * @param {CiteOptions} [opts]
-     * @returns {string}
+     * @returns {Citation}
      */
     read(text, opts) {
-        let deferred3_0;
-        let deferred3_1;
-        try {
-            const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-            const len0 = WASM_VECTOR_LEN;
-            const ret = wasm.citations_read(this.__wbg_ptr, ptr0, len0, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
-            var ptr2 = ret[0];
-            var len2 = ret[1];
-            if (ret[3]) {
-                ptr2 = 0; len2 = 0;
-                throw takeFromExternrefTable0(ret[2]);
-            }
-            deferred3_0 = ptr2;
-            deferred3_1 = len2;
-            return getStringFromWasm0(ptr2, len2);
-        } finally {
-            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.citations_read(this.__wbg_ptr, ptr0, len0, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
         }
+        return takeFromExternrefTable0(ret[0]);
     }
 }
 if (Symbol.dispose) Citations.prototype[Symbol.dispose] = Citations.prototype.free;
@@ -458,34 +451,23 @@ export class Galley {
     }
     /**
      * The place at an offset in one registered book's text, as a
-     * `BookAddress` in JSON: the introduction, a chapter's head, its title
+     * `BookAddress`: the introduction, a chapter's head, its title
      * (verse 0), or the verse whose tile holds the offset, parts included.
      * The inverse of `resolve`; the offset is in bytes unless `utf16`, and one
      * outside `0..=len` (or not an integer) is refused.
      * @param {string} id
      * @param {number} offset
-     * @param {ResolveOptions} [opts]
-     * @returns {string}
+     * @param {IdOptions} [opts]
+     * @returns {BookAddress}
      */
     addressAt(id, offset, opts) {
-        let deferred3_0;
-        let deferred3_1;
-        try {
-            const ptr0 = passStringToWasm0(id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-            const len0 = WASM_VECTOR_LEN;
-            const ret = wasm.galley_addressAt(this.__wbg_ptr, ptr0, len0, offset, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
-            var ptr2 = ret[0];
-            var len2 = ret[1];
-            if (ret[3]) {
-                ptr2 = 0; len2 = 0;
-                throw takeFromExternrefTable0(ret[2]);
-            }
-            deferred3_0 = ptr2;
-            deferred3_1 = len2;
-            return getStringFromWasm0(ptr2, len2);
-        } finally {
-            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        const ptr0 = passStringToWasm0(id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.galley_addressAt(this.__wbg_ptr, ptr0, len0, offset, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
         }
+        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * [`addressAt`](Self::address_at) over text the host holds and has not
@@ -493,27 +475,16 @@ export class Galley {
      * @param {string} text
      * @param {number} offset
      * @param {ResolveTextOptions} [opts]
-     * @returns {string}
+     * @returns {BookAddress}
      */
     addressAtOf(text, offset, opts) {
-        let deferred3_0;
-        let deferred3_1;
-        try {
-            const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-            const len0 = WASM_VECTOR_LEN;
-            const ret = wasm.galley_addressAtOf(this.__wbg_ptr, ptr0, len0, offset, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
-            var ptr2 = ret[0];
-            var len2 = ret[1];
-            if (ret[3]) {
-                ptr2 = 0; len2 = 0;
-                throw takeFromExternrefTable0(ret[2]);
-            }
-            deferred3_0 = ptr2;
-            deferred3_1 = len2;
-            return getStringFromWasm0(ptr2, len2);
-        } finally {
-            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.galley_addressAtOf(this.__wbg_ptr, ptr0, len0, offset, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
         }
+        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * Ranges of `text` whose chunk this book's last update never saw — the
@@ -729,36 +700,25 @@ export class Galley {
     }
     /**
      * Where `verse` (`"GEN 31:55"`), numbered by scheme `from`, is under
-     * scheme `to`, as JSON ([`MappedVerse`]). Either name may be a built-in
+     * scheme `to` ([`MappedVerse`]). Either name may be a built-in
      * or a defined scheme.
      * @param {string} from
      * @param {string} to
      * @param {string} verse
-     * @returns {string}
+     * @returns {MappedVerse}
      */
     mapVerse(from, to, verse) {
-        let deferred5_0;
-        let deferred5_1;
-        try {
-            const ptr0 = passStringToWasm0(from, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-            const len0 = WASM_VECTOR_LEN;
-            const ptr1 = passStringToWasm0(to, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-            const len1 = WASM_VECTOR_LEN;
-            const ptr2 = passStringToWasm0(verse, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-            const len2 = WASM_VECTOR_LEN;
-            const ret = wasm.galley_mapVerse(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2);
-            var ptr4 = ret[0];
-            var len4 = ret[1];
-            if (ret[3]) {
-                ptr4 = 0; len4 = 0;
-                throw takeFromExternrefTable0(ret[2]);
-            }
-            deferred5_0 = ptr4;
-            deferred5_1 = len4;
-            return getStringFromWasm0(ptr4, len4);
-        } finally {
-            wasm.__wbindgen_free(deferred5_0, deferred5_1, 1);
+        const ptr0 = passStringToWasm0(from, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(to, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(verse, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ret = wasm.galley_mapVerse(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
         }
+        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * One registered book's mask map — which source spans its projection is
@@ -881,7 +841,7 @@ export class Galley {
         return Edits.__wrap(ret[0]);
     }
     /**
-     * What the overlay did, and what it declined to do, as JSON.
+     * What the overlay did, and what it declined to do.
      *
      * ```ts
      * interface BlockAddress { sid: string; where: "leading" | "inside"; ordinal: number;
@@ -898,29 +858,18 @@ export class Galley {
      * @param {string} target_id
      * @param {string} source_id
      * @param {OverlayOptions} [opts]
-     * @returns {string}
+     * @returns {OverlayReport}
      */
     overlayReport(target_id, source_id, opts) {
-        let deferred4_0;
-        let deferred4_1;
-        try {
-            const ptr0 = passStringToWasm0(target_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-            const len0 = WASM_VECTOR_LEN;
-            const ptr1 = passStringToWasm0(source_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-            const len1 = WASM_VECTOR_LEN;
-            const ret = wasm.galley_overlayReport(this.__wbg_ptr, ptr0, len0, ptr1, len1, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
-            var ptr3 = ret[0];
-            var len3 = ret[1];
-            if (ret[3]) {
-                ptr3 = 0; len3 = 0;
-                throw takeFromExternrefTable0(ret[2]);
-            }
-            deferred4_0 = ptr3;
-            deferred4_1 = len3;
-            return getStringFromWasm0(ptr3, len3);
-        } finally {
-            wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+        const ptr0 = passStringToWasm0(target_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(source_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.galley_overlayReport(this.__wbg_ptr, ptr0, len0, ptr1, len1, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
         }
+        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * The same transaction applied — the target's own bytes under the
@@ -954,37 +903,26 @@ export class Galley {
         }
     }
     /**
-     * A whole book walked in step across two schemes, as JSON
+     * A whole book walked in step across two schemes
      * ([`PairedVerses`]`[]`): each unit is the verses on each side that map
      * only to each other. `book` is a USFM code (`"PSA"`).
      * @param {string} from
      * @param {string} to
      * @param {string} book
-     * @returns {string}
+     * @returns {PairedVerses[]}
      */
     pairs(from, to, book) {
-        let deferred5_0;
-        let deferred5_1;
-        try {
-            const ptr0 = passStringToWasm0(from, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-            const len0 = WASM_VECTOR_LEN;
-            const ptr1 = passStringToWasm0(to, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-            const len1 = WASM_VECTOR_LEN;
-            const ptr2 = passStringToWasm0(book, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-            const len2 = WASM_VECTOR_LEN;
-            const ret = wasm.galley_pairs(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2);
-            var ptr4 = ret[0];
-            var len4 = ret[1];
-            if (ret[3]) {
-                ptr4 = 0; len4 = 0;
-                throw takeFromExternrefTable0(ret[2]);
-            }
-            deferred5_0 = ptr4;
-            deferred5_1 = len4;
-            return getStringFromWasm0(ptr4, len4);
-        } finally {
-            wasm.__wbindgen_free(deferred5_0, deferred5_1, 1);
+        const ptr0 = passStringToWasm0(from, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(to, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(book, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ret = wasm.galley_pairs(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
         }
+        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * One registered book, plated — the same buffer `onion_wasm::parse`
@@ -1032,6 +970,41 @@ export class Galley {
         return v2;
     }
     /**
+     * Every place in one registered book, in order (`Place[]`): the
+     * introduction, each chapter's head, each title (verse 0) and each
+     * verse's tile, with the address `addressAt` answers anywhere inside it.
+     * `opening..to` tile the text, so the list is what a host steps through
+     * ("one more above"), groups hunks by, and keys a place on.
+     * @param {string} id
+     * @param {IdOptions} [opts]
+     * @returns {Place[]}
+     */
+    places(id, opts) {
+        const ptr0 = passStringToWasm0(id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.galley_places(this.__wbg_ptr, ptr0, len0, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * [`places`](Self::places) over text the host holds and has not
+     * registered, with `resolveOf`'s options.
+     * @param {string} text
+     * @param {ResolveTextOptions} [opts]
+     * @returns {Place[]}
+     */
+    placesOf(text, opts) {
+        const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.galley_placesOf(this.__wbg_ptr, ptr0, len0, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
      * One complete corpus publication over every target, in canonical book
      * order, in raw-book UTF-16 — the buffer `FindingsSnapshot.open` reads.
      *
@@ -1070,7 +1043,7 @@ export class Galley {
         return ret;
     }
     /**
-     * Where an address is in one registered book's text, as JSON: found,
+     * Where an address is in one registered book's text: found,
      * missing or ambiguous, never a silent nearest. The rules are
      * `onion/src/resolve.md`; the answer is a [`Resolution`] in bytes unless
      * `utf16` asks otherwise.
@@ -1080,58 +1053,36 @@ export class Galley {
      * letters, the opening walk) and is refused by name.
      * @param {string} id
      * @param {Address} address
-     * @param {ResolveOptions} [opts]
-     * @returns {string}
+     * @param {IdOptions} [opts]
+     * @returns {Resolution}
      */
     resolve(id, address, opts) {
-        let deferred3_0;
-        let deferred3_1;
-        try {
-            const ptr0 = passStringToWasm0(id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-            const len0 = WASM_VECTOR_LEN;
-            const ret = wasm.galley_resolve(this.__wbg_ptr, ptr0, len0, address, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
-            var ptr2 = ret[0];
-            var len2 = ret[1];
-            if (ret[3]) {
-                ptr2 = 0; len2 = 0;
-                throw takeFromExternrefTable0(ret[2]);
-            }
-            deferred3_0 = ptr2;
-            deferred3_1 = len2;
-            return getStringFromWasm0(ptr2, len2);
-        } finally {
-            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        const ptr0 = passStringToWasm0(id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.galley_resolve(this.__wbg_ptr, ptr0, len0, address, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
         }
+        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * [`resolve`](Self::resolve) over text the host holds and has not
      * registered, with the same options. Over a registered book's exact text
-     * the two doors answer the same JSON, and every address kind answers,
+     * the two doors answer the same, and every address kind answers,
      * since the text is here.
      * @param {string} text
      * @param {Address} address
      * @param {ResolveTextOptions} [opts]
-     * @returns {string}
+     * @returns {Resolution}
      */
     resolveOf(text, address, opts) {
-        let deferred3_0;
-        let deferred3_1;
-        try {
-            const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-            const len0 = WASM_VECTOR_LEN;
-            const ret = wasm.galley_resolveOf(this.__wbg_ptr, ptr0, len0, address, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
-            var ptr2 = ret[0];
-            var len2 = ret[1];
-            if (ret[3]) {
-                ptr2 = 0; len2 = 0;
-                throw takeFromExternrefTable0(ret[2]);
-            }
-            deferred3_0 = ptr2;
-            deferred3_1 = len2;
-            return getStringFromWasm0(ptr2, len2);
-        } finally {
-            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.galley_resolveOf(this.__wbg_ptr, ptr0, len0, address, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
         }
+        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * The scheme a registered book follows (its own declaration, or its
@@ -1161,7 +1112,7 @@ export class Galley {
         wasm.galley_setConfig(this.__wbg_ptr, ptr0);
     }
     /**
-     * One registered book's block structure, as JSON — either side, and the
+     * One registered book's block structure — either side, and the
      * whole truth for drawing.
      *
      * ```ts
@@ -1191,56 +1142,49 @@ export class Galley {
      * the next row's `from` is not its end.
      * @param {string} id
      * @param {OverlayOptions} [opts]
-     * @returns {string}
+     * @returns {Skeleton}
      */
     skeleton(id, opts) {
-        let deferred3_0;
-        let deferred3_1;
-        try {
-            const ptr0 = passStringToWasm0(id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-            const len0 = WASM_VECTOR_LEN;
-            const ret = wasm.galley_skeleton(this.__wbg_ptr, ptr0, len0, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
-            var ptr2 = ret[0];
-            var len2 = ret[1];
-            if (ret[3]) {
-                ptr2 = 0; len2 = 0;
-                throw takeFromExternrefTable0(ret[2]);
-            }
-            deferred3_0 = ptr2;
-            deferred3_1 = len2;
-            return getStringFromWasm0(ptr2, len2);
-        } finally {
-            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        const ptr0 = passStringToWasm0(id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.galley_skeleton(this.__wbg_ptr, ptr0, len0, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
         }
+        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * Which built-in scheme the books in `scope` follow, from what they
-     * have, as JSON ([`SniffResult`]). A suggestion for a book that declares
+     * have ([`SniffResult`]). A suggestion for a book that declares
      * nothing: nothing here applies it.
      *
      * `{ scope }` is `findAll`'s, default `"targets"`; every book in it must
      * retain its text (a reference needs `keepText`). Sniff the whole text
      * at once: one book alone has few rules to vote with.
      * @param {{ scope?: Scope }} [opts]
-     * @returns {string}
+     * @returns {SniffResult}
      */
     sniff(opts) {
-        let deferred2_0;
-        let deferred2_1;
-        try {
-            const ret = wasm.galley_sniff(this.__wbg_ptr, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
-            var ptr1 = ret[0];
-            var len1 = ret[1];
-            if (ret[3]) {
-                ptr1 = 0; len1 = 0;
-                throw takeFromExternrefTable0(ret[2]);
-            }
-            deferred2_0 = ptr1;
-            deferred2_1 = len1;
-            return getStringFromWasm0(ptr1, len1);
-        } finally {
-            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+        const ret = wasm.galley_sniff(this.__wbg_ptr, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
         }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * The `sourceHash` of the text an id holds: onion's `xxh3Text` of it, a
+     * bigint. What the id doors' `expect` checks against.
+     * @param {string} id
+     * @returns {bigint}
+     */
+    sourceHash(id) {
+        const ptr0 = passStringToWasm0(id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.galley_sourceHash(this.__wbg_ptr, ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return BigInt.asUintN(64, ret[0]);
     }
     /**
      * A TARGET block's address, answered in the source — the mirror of
@@ -1249,29 +1193,18 @@ export class Galley {
      * @param {string} source_id
      * @param {BlockAddress} address
      * @param {OverlayOptions} [opts]
-     * @returns {string}
+     * @returns {Equivalent}
      */
     sourceNodeFor(target_id, source_id, address, opts) {
-        let deferred4_0;
-        let deferred4_1;
-        try {
-            const ptr0 = passStringToWasm0(target_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-            const len0 = WASM_VECTOR_LEN;
-            const ptr1 = passStringToWasm0(source_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-            const len1 = WASM_VECTOR_LEN;
-            const ret = wasm.galley_sourceNodeFor(this.__wbg_ptr, ptr0, len0, ptr1, len1, address, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
-            var ptr3 = ret[0];
-            var len3 = ret[1];
-            if (ret[3]) {
-                ptr3 = 0; len3 = 0;
-                throw takeFromExternrefTable0(ret[2]);
-            }
-            deferred4_0 = ptr3;
-            deferred4_1 = len3;
-            return getStringFromWasm0(ptr3, len3);
-        } finally {
-            wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+        const ptr0 = passStringToWasm0(target_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(source_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.galley_sourceNodeFor(this.__wbg_ptr, ptr0, len0, ptr1, len1, address, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
         }
+        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * The SRS spelling of a span of one registered book's text, or
@@ -1279,7 +1212,7 @@ export class Galley {
      * @param {string} id
      * @param {number} from
      * @param {number} to
-     * @param {ResolveOptions} [opts]
+     * @param {IdOptions} [opts]
      * @returns {string | undefined}
      */
     srsAt(id, from, to, opts) {
@@ -1320,62 +1253,40 @@ export class Galley {
     }
     /**
      * Where an SRS reference is in one registered book's text (`JON 2:8!2-4`,
-     * `JON 1:13!f!5`, `MAT 1:1!5+2`), as JSON; offsets in bytes unless `utf16`.
+     * `JON 1:13!f!5`, `MAT 1:1!5+2`); offsets in bytes unless `utf16`.
      * @param {string} id
      * @param {string} reference
-     * @param {ResolveOptions} [opts]
-     * @returns {string}
+     * @param {IdOptions} [opts]
+     * @returns {SrsLocation}
      */
     srsLocate(id, reference, opts) {
-        let deferred4_0;
-        let deferred4_1;
-        try {
-            const ptr0 = passStringToWasm0(id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-            const len0 = WASM_VECTOR_LEN;
-            const ptr1 = passStringToWasm0(reference, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-            const len1 = WASM_VECTOR_LEN;
-            const ret = wasm.galley_srsLocate(this.__wbg_ptr, ptr0, len0, ptr1, len1, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
-            var ptr3 = ret[0];
-            var len3 = ret[1];
-            if (ret[3]) {
-                ptr3 = 0; len3 = 0;
-                throw takeFromExternrefTable0(ret[2]);
-            }
-            deferred4_0 = ptr3;
-            deferred4_1 = len3;
-            return getStringFromWasm0(ptr3, len3);
-        } finally {
-            wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+        const ptr0 = passStringToWasm0(id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(reference, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.galley_srsLocate(this.__wbg_ptr, ptr0, len0, ptr1, len1, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
         }
+        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * [`srsLocate`](Self::srs_locate) over text the host holds.
      * @param {string} text
      * @param {string} reference
      * @param {ResolveTextOptions} [opts]
-     * @returns {string}
+     * @returns {SrsLocation}
      */
     srsLocateOf(text, reference, opts) {
-        let deferred4_0;
-        let deferred4_1;
-        try {
-            const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-            const len0 = WASM_VECTOR_LEN;
-            const ptr1 = passStringToWasm0(reference, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-            const len1 = WASM_VECTOR_LEN;
-            const ret = wasm.galley_srsLocateOf(this.__wbg_ptr, ptr0, len0, ptr1, len1, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
-            var ptr3 = ret[0];
-            var len3 = ret[1];
-            if (ret[3]) {
-                ptr3 = 0; len3 = 0;
-                throw takeFromExternrefTable0(ret[2]);
-            }
-            deferred4_0 = ptr3;
-            deferred4_1 = len3;
-            return getStringFromWasm0(ptr3, len3);
-        } finally {
-            wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+        const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(reference, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.galley_srsLocateOf(this.__wbg_ptr, ptr0, len0, ptr1, len1, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
         }
+        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * The structure recipe's text, the verse-text mask's sibling. No book
@@ -1424,29 +1335,18 @@ export class Galley {
      * @param {string} source_id
      * @param {BlockAddress} address
      * @param {OverlayOptions} [opts]
-     * @returns {string}
+     * @returns {Equivalent}
      */
     targetNodeFor(target_id, source_id, address, opts) {
-        let deferred4_0;
-        let deferred4_1;
-        try {
-            const ptr0 = passStringToWasm0(target_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-            const len0 = WASM_VECTOR_LEN;
-            const ptr1 = passStringToWasm0(source_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-            const len1 = WASM_VECTOR_LEN;
-            const ret = wasm.galley_targetNodeFor(this.__wbg_ptr, ptr0, len0, ptr1, len1, address, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
-            var ptr3 = ret[0];
-            var len3 = ret[1];
-            if (ret[3]) {
-                ptr3 = 0; len3 = 0;
-                throw takeFromExternrefTable0(ret[2]);
-            }
-            deferred4_0 = ptr3;
-            deferred4_1 = len3;
-            return getStringFromWasm0(ptr3, len3);
-        } finally {
-            wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+        const ptr0 = passStringToWasm0(target_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(source_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.galley_targetNodeFor(this.__wbg_ptr, ptr0, len0, ptr1, len1, address, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
         }
+        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * One registered book's census — its chapter rows and verse anchors, off
@@ -2233,7 +2133,7 @@ export function customMarkersFromMarkersExt(text) {
 }
 
 /**
- * The diff skeleton as JSON: the changed units of two documents, in the
+ * The diff skeleton (`DiffSkeleton`): the changed units of two documents, in the
  * current document's order. Spans are UTF-16 offsets into each side's own document.
  *
  * ```ts
@@ -2241,7 +2141,7 @@ export function customMarkersFromMarkersExt(text) {
  *   text: "none" | "words" | "chars";   // required
  *   unchanged?: boolean;                // send unchanged units too; default false
  * }
- * diff(baseline: string, current: string, opts: DiffOptions): string;
+ * diff(baseline: string, current: string, opts: DiffOptions): DiffSkeleton;
  * ```
  *
  * `text` is the intra-verse runs a `modified`, `added` or `deleted` unit is
@@ -2256,29 +2156,18 @@ export function customMarkersFromMarkersExt(text) {
  * @param {string} baseline
  * @param {string} current
  * @param {DiffOptions} opts
- * @returns {string}
+ * @returns {DiffSkeleton}
  */
 export function diff(baseline, current, opts) {
-    let deferred4_0;
-    let deferred4_1;
-    try {
-        const ptr0 = passStringToWasm0(baseline, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passStringToWasm0(current, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ret = wasm.diff(ptr0, len0, ptr1, len1, opts);
-        var ptr3 = ret[0];
-        var len3 = ret[1];
-        if (ret[3]) {
-            ptr3 = 0; len3 = 0;
-            throw takeFromExternrefTable0(ret[2]);
-        }
-        deferred4_0 = ptr3;
-        deferred4_1 = len3;
-        return getStringFromWasm0(ptr3, len3);
-    } finally {
-        wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+    const ptr0 = passStringToWasm0(baseline, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(current, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.diff(ptr0, len0, ptr1, len1, opts);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
     }
+    return takeFromExternrefTable0(ret[0]);
 }
 
 /**
@@ -2344,8 +2233,8 @@ export function formatEditsIn(text, from, to, opts) {
 }
 
 /**
- * The machine spelling of a list: `"MAT 1:20-2:3; MRK 1:1"`.
- * @param {BookAddress[]} refs
+ * The machine spelling of one address or a list: `"MAT 1:20-2:3; MRK 1:1"`.
+ * @param {BookAddress | BookAddress[]} refs
  * @returns {string}
  */
 export function formatReference(refs) {
@@ -2441,56 +2330,52 @@ export function mask(text, recipe, opts) {
  * re-diff, and there is no fuzzy stale-id fallback.
  * @param {string} baseline
  * @param {string} current
- * @param {string} decisions_json
+ * @param {Decisions} decisions
  * @param {string} _default
  * @param {LexOptions} [opts]
  * @returns {string}
  */
-export function merge(baseline, current, decisions_json, _default, opts) {
-    let deferred6_0;
-    let deferred6_1;
+export function merge(baseline, current, decisions, _default, opts) {
+    let deferred5_0;
+    let deferred5_1;
     try {
         const ptr0 = passStringToWasm0(baseline, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
         const ptr1 = passStringToWasm0(current, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len1 = WASM_VECTOR_LEN;
-        const ptr2 = passStringToWasm0(decisions_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const ptr2 = passStringToWasm0(_default, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len2 = WASM_VECTOR_LEN;
-        const ptr3 = passStringToWasm0(_default, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len3 = WASM_VECTOR_LEN;
-        const ret = wasm.merge(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
-        var ptr5 = ret[0];
-        var len5 = ret[1];
+        const ret = wasm.merge(ptr0, len0, ptr1, len1, decisions, ptr2, len2, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
+        var ptr4 = ret[0];
+        var len4 = ret[1];
         if (ret[3]) {
-            ptr5 = 0; len5 = 0;
+            ptr4 = 0; len4 = 0;
             throw takeFromExternrefTable0(ret[2]);
         }
-        deferred6_0 = ptr5;
-        deferred6_1 = len5;
-        return getStringFromWasm0(ptr5, len5);
+        deferred5_0 = ptr4;
+        deferred5_1 = len4;
+        return getStringFromWasm0(ptr4, len4);
     } finally {
-        wasm.__wbindgen_free(deferred6_0, deferred6_1, 1);
+        wasm.__wbindgen_free(deferred5_0, deferred5_1, 1);
     }
 }
 
 /**
  * @param {string} baseline
  * @param {string} current
- * @param {string} decisions_json
+ * @param {Decisions} decisions
  * @param {string} _default
  * @param {LexOptions} [opts]
  * @returns {Splices}
  */
-export function mergeSplices(baseline, current, decisions_json, _default, opts) {
+export function mergeSplices(baseline, current, decisions, _default, opts) {
     const ptr0 = passStringToWasm0(baseline, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len0 = WASM_VECTOR_LEN;
     const ptr1 = passStringToWasm0(current, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len1 = WASM_VECTOR_LEN;
-    const ptr2 = passStringToWasm0(decisions_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const ptr2 = passStringToWasm0(_default, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len2 = WASM_VECTOR_LEN;
-    const ptr3 = passStringToWasm0(_default, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    const len3 = WASM_VECTOR_LEN;
-    const ret = wasm.mergeSplices(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
+    const ret = wasm.mergeSplices(ptr0, len0, ptr1, len1, decisions, ptr2, len2, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
     if (ret[2]) {
         throw takeFromExternrefTable0(ret[1]);
     }
@@ -2543,27 +2428,16 @@ export function parse(text, opts) {
  * list whose first reference leaves its book out (`"5:3-12"`).
  * @param {string} text
  * @param {{ book?: string }} [opts]
- * @returns {string}
+ * @returns {ReferenceParse}
  */
 export function parseReference(text, opts) {
-    let deferred3_0;
-    let deferred3_1;
-    try {
-        const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.parseReference(ptr0, len0, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
-        var ptr2 = ret[0];
-        var len2 = ret[1];
-        if (ret[3]) {
-            ptr2 = 0; len2 = 0;
-            throw takeFromExternrefTable0(ret[2]);
-        }
-        deferred3_0 = ptr2;
-        deferred3_1 = len2;
-        return getStringFromWasm0(ptr2, len2);
-    } finally {
-        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+    const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.parseReference(ptr0, len0, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
     }
+    return takeFromExternrefTable0(ret[0]);
 }
 
 /**
@@ -2572,21 +2446,13 @@ export function parseReference(text, opts) {
  * `BookAddress`, or `null` for a named reference, `end`, or a range across
  * books), or `{ ok: false, error, at }` with a UTF-16 offset.
  * @param {string} text
- * @returns {string}
+ * @returns {SrsParse}
  */
 export function parseSrs(text) {
-    let deferred2_0;
-    let deferred2_1;
-    try {
-        const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.parseSrs(ptr0, len0);
-        deferred2_0 = ret[0];
-        deferred2_1 = ret[1];
-        return getStringFromWasm0(ret[0], ret[1]);
-    } finally {
-        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
-    }
+    const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.parseSrs(ptr0, len0);
+    return ret;
 }
 
 /**
@@ -2596,9 +2462,9 @@ export function parseSrs(text) {
  *
  * ```js
  * resolve(text, { kind: "verses", from: { chapter: 1, verse: 2 }, to: { chapter: 1, verse: 2 } })
- *   // → '{"found":{"from":8,"to":19,"opening":5,"covers":{…},"coarser":false}}'
+ *   // → { found: { from: 8, to: 19, opening: 5, covers: {…}, coarser: false } }
  * resolve(text, { kind: "chapters", from: 3, to: 3 }, { utf16: true })
- *   // → '{"missing":"chapter"}'
+ *   // → { missing: "chapter" }
  * ```
  *
  * Offsets are bytes unless `utf16` asks otherwise. galley's
@@ -2607,27 +2473,16 @@ export function parseSrs(text) {
  * @param {string} text
  * @param {Address} address
  * @param {ResolveTextOptions} [opts]
- * @returns {string}
+ * @returns {Resolution}
  */
 export function resolve(text, address, opts) {
-    let deferred3_0;
-    let deferred3_1;
-    try {
-        const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.resolve(ptr0, len0, address, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
-        var ptr2 = ret[0];
-        var len2 = ret[1];
-        if (ret[3]) {
-            ptr2 = 0; len2 = 0;
-            throw takeFromExternrefTable0(ret[2]);
-        }
-        deferred3_0 = ptr2;
-        deferred3_1 = len2;
-        return getStringFromWasm0(ptr2, len2);
-    } finally {
-        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+    const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.resolve(ptr0, len0, address, isLikeNone(opts) ? 0 : addToExternrefTable0(opts));
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
     }
+    return takeFromExternrefTable0(ret[0]);
 }
 
 /**
@@ -2755,6 +2610,12 @@ function __wbg_get_imports() {
             const ret = Error(getStringFromWasm0(arg0, arg1));
             return ret;
         },
+        __wbg___wbindgen_bigint_get_as_i64_c4ecf48528083721: function(arg0, arg1) {
+            const v = arg1;
+            const ret = typeof(v) === 'bigint' ? v : undefined;
+            getDataViewMemory0().setBigInt64(arg0 + 8 * 1, isLikeNone(ret) ? BigInt(0) : ret, true);
+            getDataViewMemory0().setInt32(arg0 + 4 * 0, !isLikeNone(ret), true);
+        },
         __wbg___wbindgen_boolean_get_c9c83ebd41b34df3: function(arg0) {
             const v = arg0;
             const ret = typeof(v) === 'boolean' ? v : undefined;
@@ -2776,8 +2637,16 @@ function __wbg_get_imports() {
             const ret = typeof(val) === 'object' && val !== null;
             return ret;
         },
+        __wbg___wbindgen_is_string_e6f02f0ea5f20a32: function(arg0) {
+            const ret = typeof(arg0) === 'string';
+            return ret;
+        },
         __wbg___wbindgen_is_undefined_6cff064c44e0d823: function(arg0) {
             const ret = arg0 === undefined;
+            return ret;
+        },
+        __wbg___wbindgen_jsval_eq_0a18949a61670320: function(arg0, arg1) {
+            const ret = arg0 === arg1;
             return ret;
         },
         __wbg___wbindgen_number_get_136b9679cab35cfb: function(arg0, arg1) {
@@ -2841,12 +2710,20 @@ function __wbg_get_imports() {
             const ret = new Uint32Array(getArrayU32FromWasm0(arg0, arg1));
             return ret;
         },
+        __wbg_parse_1cc93481b0865939: function() { return handleError(function (arg0, arg1) {
+            const ret = JSON.parse(getStringFromWasm0(arg0, arg1));
+            return ret;
+        }, arguments); },
         __wbg_push_adb0107829f02d75: function(arg0, arg1) {
             const ret = arg0.push(arg1);
             return ret;
         },
         __wbg_set_8155bb79a948541b: function() { return handleError(function (arg0, arg1, arg2) {
             const ret = Reflect.set(arg0, arg1, arg2);
+            return ret;
+        }, arguments); },
+        __wbg_stringify_f93a4ebae9231922: function() { return handleError(function (arg0) {
+            const ret = JSON.stringify(arg0);
             return ret;
         }, arguments); },
         __wbindgen_cast_0000000000000001: function(arg0) {
@@ -2857,6 +2734,11 @@ function __wbg_get_imports() {
         __wbindgen_cast_0000000000000002: function(arg0, arg1) {
             // Cast intrinsic for `Ref(String) -> Externref`.
             const ret = getStringFromWasm0(arg0, arg1);
+            return ret;
+        },
+        __wbindgen_cast_0000000000000003: function(arg0) {
+            // Cast intrinsic for `U64 -> Externref`.
+            const ret = BigInt.asUintN(64, arg0);
             return ret;
         },
         __wbindgen_init_externref_table: function() {

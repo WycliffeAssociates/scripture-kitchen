@@ -261,6 +261,49 @@ export function replay(histories, now, deltas) {
     }
     return takeFromExternrefTable0(ret[0]);
 }
+
+/**
+ * One Writer book's files, with no history, → its USFM: the template
+ * replay renders each save with, over the files as they are. `paths[i]`'s
+ * bytes are the next `lengths[i]` of `bytes`, as `give` packs them; files
+ * that aren't the book's text, or aren't UTF-8, are left out. `book` is the
+ * code `\id` gets; `title` stands in when `front/title.txt` says nothing
+ * (default: canon's English name). Needs no git.
+ * @param {string[]} paths
+ * @param {Uint32Array} lengths
+ * @param {Uint8Array} bytes
+ * @param {string} book
+ * @param {string | null} [title]
+ * @returns {string}
+ */
+export function stitch(paths, lengths, bytes, book, title) {
+    let deferred7_0;
+    let deferred7_1;
+    try {
+        const ptr0 = passArrayJsValueToWasm0(paths, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArray32ToWasm0(lengths, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ptr3 = passStringToWasm0(book, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len3 = WASM_VECTOR_LEN;
+        var ptr4 = isLikeNone(title) ? 0 : passStringToWasm0(title, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        var len4 = WASM_VECTOR_LEN;
+        const ret = wasm.stitch(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4);
+        var ptr6 = ret[0];
+        var len6 = ret[1];
+        if (ret[3]) {
+            ptr6 = 0; len6 = 0;
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        deferred7_0 = ptr6;
+        deferred7_1 = len6;
+        return getStringFromWasm0(ptr6, len6);
+    } finally {
+        wasm.__wbindgen_free(deferred7_0, deferred7_1, 1);
+    }
+}
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,

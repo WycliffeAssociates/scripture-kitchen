@@ -39,7 +39,7 @@ canon::sniff(&inventory)          // ulb, Decided, on 250 votes (en_ulb)
 galley.update("books/PSA.usfm", text, { versification: "eng" });
 galley.updateReference("ref/PSA.usfm", hebrew, { versification: "org" });
 galley.publish(); // eng 3:1 pairs with org 3:2; org's title verse is no missing verse
-JSON.parse(galley.sniff()); // { best: "ulb", confidence: "decided", … }: a suggestion, never applied
+galley.sniff(); // { best: "ulb", confidence: "decided", … }: a suggestion, never applied
 ```
 
 ## How it works

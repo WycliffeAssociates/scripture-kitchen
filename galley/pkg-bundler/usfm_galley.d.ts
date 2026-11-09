@@ -77,7 +77,7 @@ export interface VersificationMapping {
     partialVerses?: unknown;
 }
 
-/** `JSON.parse(galley.sniff())`. */
+/** `galley.sniff()`. */
 export interface SniffResult {
     /** The winner; `null` when undetermined (use the project's default). */
     best: string | null;
@@ -92,7 +92,7 @@ export interface SniffResult {
     unmatched: string[];
 }
 
-/** `JSON.parse(galley.mapVerse(from, to, "GEN 31:55"))`. Verses are `"BBB c:v"`, a part as `"ESG 4:17c"`. */
+/** `galley.mapVerse(from, to, "GEN 31:55")`. Verses are `"BBB c:v"`, a part as `"ESG 4:17c"`. */
 export type MappedVerse =
 | { same: true }
 | { moved: string }
@@ -100,7 +100,7 @@ export type MappedVerse =
 | { split: string[] }
 | { absent: true };
 
-/** One unit of `JSON.parse(galley.pairs(from, to, "PSA"))`: verses that map only to each other. */
+/** One unit of `galley.pairs(from, to, "PSA")`: verses that map only to each other. */
 export interface PairedVerses {
     here: string[];
     there: string[];
@@ -147,6 +147,20 @@ export interface OverlayOptions {
     utf16?: boolean;
 }
 
+/** One place in a book's order: `places(id)`. `opening..to` tile the text; `from` is its own marker. */
+export interface Place {
+    address: BookAddress;
+    from: number;
+    to: number;
+    opening: number;
+}
+
+/** The options of a door that answers a place in a registered book. */
+export interface IdOptions extends ResolveOptions {
+    /** The `sourceHash` (`xxh3Text(text)`) of the text the host believes the id holds: the door refuses ("… is stale") when it holds other text. */
+    expect?: bigint;
+}
+
 /** One block's address on one side — a skeleton row names its own. */
 export interface BlockAddress {
     sid: string;
@@ -156,10 +170,40 @@ export interface BlockAddress {
     marker: string;
 }
 
+/** `skeleton(id)`: one book's block structure, the whole truth for drawing. */
+export interface Skeleton {
+    /** The `\\v` marker span, and the verse's own text span. */
+    verses: { sid: string; from: number; to: number; textFrom: number; textTo: number }[];
+    blocks: SkeletonRow[];
+}
+
+/** One block: its address, its marker token's span, and the whole block's end. */
+export interface SkeletonRow extends BlockAddress {
+    from: number;
+    to: number;
+    end: number;
+    /** onion's empty paragraph; a source folds these away. */
+    empty: boolean;
+}
+
+/** `overlayReport(targetId, sourceId)`: what the overlay did, and what it declined to do. */
+export interface OverlayReport {
+    inserted: { address: BlockAddress; marker: string; at: number }[];
+    removed: { address: BlockAddress; marker: string; from: number; to: number }[];
+    collapsed: { sid: string; marker: string; count: number }[];
+    unpaired: { sid: string; side: "target" | "source"; reason: "absent" | "bridge" | "ambiguous" }[];
+}
+
+/** `targetNodeFor` / `sourceNodeFor`: a block's counterpart on the other side. */
+export type Equivalent =
+| { found: SkeletonRow }
+| { absent: true; insertAt: number; where: "leading" | "inside" }
+| { unpaired: true; reason: "absent" | "bridge" | "ambiguous" };
+
 /** An `Address` in its book: Sefer's `Address` shape. */
 export type BookAddress = Address & { book: string };
 
-/** `JSON.parse(parseReference(text))`. `at` counts UTF-16 units. */
+/** `parseReference(text)`. `at` counts UTF-16 units. */
 export type ReferenceParse =
 | { ok: true; addresses: BookAddress[] }
 | {
@@ -178,8 +222,10 @@ export interface CitationNames {
     names?: Record<string, string[]>;
     /** Words for the introduction: `["introducción"]`. `intro` and `introduction` always are. */
     intro?: string[];
-    /** Codes outside canon's table to name anyway: a `\\z` book. */
+    /** Books the project holds outside the 66 and the deuterocanon (a peripheral like `FRT`, a `\\z` book): named, and offered by `booksMatching`. */
     books?: string[];
+    /** Offer every book in `booksMatching`, peripherals and XXA–XXG included. Default false. */
+    peripherals?: boolean;
 }
 
 /** `Citations.read(text, opts)`. */
@@ -190,12 +236,12 @@ export interface CiteOptions {
     held?: string[];
 }
 
-/** `JSON.parse(parseSrs(text))`: a reference in the Scripture Referencing Standard's full spelling. */
+/** `parseSrs(text)`: a reference in the Scripture Referencing Standard's full spelling. */
 export type SrsParse =
 | { ok: true; canonical: string; within: (BookAddress | null)[] }
 | { ok: false; error: string; at: number };
 
-/** `JSON.parse(galley.srsLocate(id, ref))`. */
+/** `galley.srsLocate(id, ref)`. */
 export type SrsLocation =
 | { found: { from: number; to: number } }
 | { missing: "verse" | "chapter" | "introduction" | "word" | "character" | "element" | "attribute" }
@@ -206,7 +252,7 @@ export type SrsLocation =
 /** What a reading took for granted. */
 export type CiteAssumption = { kind: "prefix"; word: string; book: string } | { kind: "comma" };
 
-/** `JSON.parse(citations.read(text))`, Sefer's `Citation`. */
+/** `citations.read(text)`, Sefer's `Citation`. */
 export type Citation =
 | { ok: true; text: string; addresses: BookAddress[]; assumed: CiteAssumption[] }
 | {
@@ -274,7 +320,47 @@ export interface AddressPoint {
     segment?: string;
 }
 
-/** What `resolve` answers, JSON-encoded. Offsets are half-open. */
+/** `diff`'s answer: every changed unit (and with `unchanged`, every unit), in the
+ * current document's order. Spans are UTF-16 offsets into each side's own text. */
+export interface DiffSkeleton {
+    baselineLen: number;
+    currentLen: number;
+    unchangedCount: number;
+    units: DiffUnit[];
+}
+
+export interface DiffUnit {
+    /** Opaque: decisions name it, nothing parses it. */
+    unitId: string;
+    kind: "shared" | "added" | "deleted" | "coalesced";
+    status: "unchanged" | "modified" | "added" | "deleted";
+    baselineSid: string | null;
+    currentSid: string | null;
+    baseline: [number, number];
+    current: [number, number];
+    relabeled: boolean;
+    baselineCount: number;
+    currentCount: number;
+    isDup: boolean;
+    coveredBy: { sid: string; side: "baseline" | "current" } | null;
+    isWhitespaceChange: boolean;
+    isUsfmStructureChange: boolean;
+    /** Present only when `text` asked for runs and the unit has any. */
+    text?: { baseline: DiffRun[]; current: DiffRun[] };
+}
+
+export interface DiffRun {
+    from: number;
+    to: number;
+    kind: "unchanged" | "added" | "removed";
+    what: "markup" | "text" | "whitespace";
+    note: boolean;
+}
+
+/** `merge`'s choices: unit id to the side it keeps. */
+export type Decisions = Record<string, "baseline" | "current">;
+
+/** What `resolve` answers. Offsets are half-open. */
 export type Resolution =
 | { found: { from: number; to: number; opening: number; covers: Address; coarser: boolean } }
 | { missing: "intro" | "chapter" | "verse"; within?: { from: number; to: number } }
@@ -298,14 +384,18 @@ export class Citations {
     [Symbol.dispose](): void;
     /**
      * Every book the words before the numbers could mean, in canon order:
-     * a filter under a go-to box. `"john 3"` lists JHN, 1JN, 2JN and 3JN.
+     * a filter under a go-to box. `"john 3"` lists JHN, 1JN, 2JN and 3JN (and
+     * REV, "Revelation of John"). No peripheral or XXA–XXG unless `books`
+     * listed it or `peripherals` asked.
      */
     booksMatching(text: string): string[];
     /**
      * `names`: per book code, what the project calls it in any language it
      * names books in, and registered abbreviations (`{ MAT: ["Mateo", "Mt"] }`).
      * `intro`: words for the introduction (`["introducción"]`). `books`: codes
-     * outside canon's table that should still be named (a `\z` book).
+     * the project holds outside the 66 and the deuterocanon (a peripheral like
+     * `FRT`, a `\z` book): named, and offered by `booksMatching`.
+     * `peripherals: true` offers every book there, XXA–XXG included.
      */
     constructor(opts?: CitationNames);
     /**
@@ -314,7 +404,7 @@ export class Citations {
      * (the default: prefixes, `3,1` as `3:1`) or `"prose"`; `held` is the
      * project's books, which win a prefix tie.
      */
-    read(text: string, opts?: CiteOptions): string;
+    read(text: string, opts?: CiteOptions): Citation;
 }
 
 /**
@@ -440,17 +530,17 @@ export class Galley {
     [Symbol.dispose](): void;
     /**
      * The place at an offset in one registered book's text, as a
-     * `BookAddress` in JSON: the introduction, a chapter's head, its title
+     * `BookAddress`: the introduction, a chapter's head, its title
      * (verse 0), or the verse whose tile holds the offset, parts included.
      * The inverse of `resolve`; the offset is in bytes unless `utf16`, and one
      * outside `0..=len` (or not an integer) is refused.
      */
-    addressAt(id: string, offset: number, opts?: ResolveOptions): string;
+    addressAt(id: string, offset: number, opts?: IdOptions): BookAddress;
     /**
      * [`addressAt`](Self::address_at) over text the host holds and has not
      * registered, with `resolveOf`'s options.
      */
-    addressAtOf(text: string, offset: number, opts?: ResolveTextOptions): string;
+    addressAtOf(text: string, offset: number, opts?: ResolveTextOptions): BookAddress;
     /**
      * Ranges of `text` whose chunk this book's last update never saw — the
      * chunks a host would have to re-derive, in `text`'s own byte offsets,
@@ -565,10 +655,10 @@ export class Galley {
     lint(id: string): Uint8Array;
     /**
      * Where `verse` (`"GEN 31:55"`), numbered by scheme `from`, is under
-     * scheme `to`, as JSON ([`MappedVerse`]). Either name may be a built-in
+     * scheme `to` ([`MappedVerse`]). Either name may be a built-in
      * or a defined scheme.
      */
-    mapVerse(from: string, to: string, verse: string): string;
+    mapVerse(from: string, to: string, verse: string): MappedVerse;
     /**
      * One registered book's mask map — which source spans its projection is
      * made of, in order. The projection is a pure concatenation of those
@@ -637,7 +727,7 @@ export class Galley {
      */
     overlay(target_id: string, source_id: string, opts?: OverlayOptions): Edits;
     /**
-     * What the overlay did, and what it declined to do, as JSON.
+     * What the overlay did, and what it declined to do.
      *
      * ```ts
      * interface BlockAddress { sid: string; where: "leading" | "inside"; ordinal: number;
@@ -652,7 +742,7 @@ export class Galley {
      *
      * An overlay is a SUGGESTION applied on request, never a finding.
      */
-    overlayReport(target_id: string, source_id: string, opts?: OverlayOptions): string;
+    overlayReport(target_id: string, source_id: string, opts?: OverlayOptions): OverlayReport;
     /**
      * The same transaction applied — the target's own bytes under the
      * source's structure. [`overlay`](Self::overlay) is what an editor wants;
@@ -660,11 +750,11 @@ export class Galley {
      */
     overlayText(target_id: string, source_id: string, opts?: OverlayOptions): string;
     /**
-     * A whole book walked in step across two schemes, as JSON
+     * A whole book walked in step across two schemes
      * ([`PairedVerses`]`[]`): each unit is the verses on each side that map
      * only to each other. `book` is a USFM code (`"PSA"`).
      */
-    pairs(from: string, to: string, book: string): string;
+    pairs(from: string, to: string, book: string): PairedVerses[];
     /**
      * One registered book, plated — the same buffer `onion_wasm::parse`
      * returns for that text, with the lex, the tree and the lint walk reused
@@ -685,6 +775,19 @@ export class Galley {
      */
     parseText(text: string, opts?: ParseTextOptions): Uint8Array;
     /**
+     * Every place in one registered book, in order (`Place[]`): the
+     * introduction, each chapter's head, each title (verse 0) and each
+     * verse's tile, with the address `addressAt` answers anywhere inside it.
+     * `opening..to` tile the text, so the list is what a host steps through
+     * ("one more above"), groups hunks by, and keys a place on.
+     */
+    places(id: string, opts?: IdOptions): Place[];
+    /**
+     * [`places`](Self::places) over text the host holds and has not
+     * registered, with `resolveOf`'s options.
+     */
+    placesOf(text: string, opts?: ResolveTextOptions): Place[];
+    /**
      * One complete corpus publication over every target, in canonical book
      * order, in raw-book UTF-16 — the buffer `FindingsSnapshot.open` reads.
      *
@@ -703,7 +806,7 @@ export class Galley {
      */
     residentBytes(): number;
     /**
-     * Where an address is in one registered book's text, as JSON: found,
+     * Where an address is in one registered book's text: found,
      * missing or ambiguous, never a silent nearest. The rules are
      * `onion/src/resolve.md`; the answer is a [`Resolution`] in bytes unless
      * `utf16` asks otherwise.
@@ -712,14 +815,14 @@ export class Galley {
      * chapters from its `Toc`, in bytes; a verse needs the text (segment
      * letters, the opening walk) and is refused by name.
      */
-    resolve(id: string, address: Address, opts?: ResolveOptions): string;
+    resolve(id: string, address: Address, opts?: IdOptions): Resolution;
     /**
      * [`resolve`](Self::resolve) over text the host holds and has not
      * registered, with the same options. Over a registered book's exact text
-     * the two doors answer the same JSON, and every address kind answers,
+     * the two doors answer the same, and every address kind answers,
      * since the text is here.
      */
-    resolveOf(text: string, address: Address, opts?: ResolveTextOptions): string;
+    resolveOf(text: string, address: Address, opts?: ResolveTextOptions): Resolution;
     /**
      * The scheme a registered book follows (its own declaration, or its
      * source's for `"followSource"`), or `undefined`.
@@ -731,7 +834,7 @@ export class Galley {
      */
     setConfig(settings: SousSettings): void;
     /**
-     * One registered book's block structure, as JSON — either side, and the
+     * One registered book's block structure — either side, and the
      * whole truth for drawing.
      *
      * ```ts
@@ -760,40 +863,45 @@ export class Galley {
      * closes — a heading or `\c` the marker set leaves out still ends it — so
      * the next row's `from` is not its end.
      */
-    skeleton(id: string, opts?: OverlayOptions): string;
+    skeleton(id: string, opts?: OverlayOptions): Skeleton;
     /**
      * Which built-in scheme the books in `scope` follow, from what they
-     * have, as JSON ([`SniffResult`]). A suggestion for a book that declares
+     * have ([`SniffResult`]). A suggestion for a book that declares
      * nothing: nothing here applies it.
      *
      * `{ scope }` is `findAll`'s, default `"targets"`; every book in it must
      * retain its text (a reference needs `keepText`). Sniff the whole text
      * at once: one book alone has few rules to vote with.
      */
-    sniff(opts?: { scope?: Scope }): string;
+    sniff(opts?: { scope?: Scope }): SniffResult;
+    /**
+     * The `sourceHash` of the text an id holds: onion's `xxh3Text` of it, a
+     * bigint. What the id doors' `expect` checks against.
+     */
+    sourceHash(id: string): bigint;
     /**
      * A TARGET block's address, answered in the source — the mirror of
      * [`targetNodeFor`](Self::target_node_for), and the same three answers.
      */
-    sourceNodeFor(target_id: string, source_id: string, address: BlockAddress, opts?: OverlayOptions): string;
+    sourceNodeFor(target_id: string, source_id: string, address: BlockAddress, opts?: OverlayOptions): Equivalent;
     /**
      * The SRS spelling of a span of one registered book's text, or
      * `undefined` outside any verse; offsets in bytes unless `utf16`.
      */
-    srsAt(id: string, from: number, to: number, opts?: ResolveOptions): string | undefined;
+    srsAt(id: string, from: number, to: number, opts?: IdOptions): string | undefined;
     /**
      * [`srsAt`](Self::srs_at) over text the host holds.
      */
     srsAtOf(text: string, from: number, to: number, opts?: ResolveTextOptions): string | undefined;
     /**
      * Where an SRS reference is in one registered book's text (`JON 2:8!2-4`,
-     * `JON 1:13!f!5`, `MAT 1:1!5+2`), as JSON; offsets in bytes unless `utf16`.
+     * `JON 1:13!f!5`, `MAT 1:1!5+2`); offsets in bytes unless `utf16`.
      */
-    srsLocate(id: string, reference: string, opts?: ResolveOptions): string;
+    srsLocate(id: string, reference: string, opts?: IdOptions): SrsLocation;
     /**
      * [`srsLocate`](Self::srs_locate) over text the host holds.
      */
-    srsLocateOf(text: string, reference: string, opts?: ResolveTextOptions): string;
+    srsLocateOf(text: string, reference: string, opts?: ResolveTextOptions): SrsLocation;
     /**
      * The structure recipe's text, the verse-text mask's sibling. No book
      * retains a structure projection, so this door takes text only.
@@ -816,7 +924,7 @@ export class Galley {
      * — the address is stale") rather than answering about another node. The
      * position is still the key; the name is only the check.
      */
-    targetNodeFor(target_id: string, source_id: string, address: BlockAddress, opts?: OverlayOptions): string;
+    targetNodeFor(target_id: string, source_id: string, address: BlockAddress, opts?: OverlayOptions): Equivalent;
     /**
      * One registered book's census — its chapter rows and verse anchors, off
      * the `Toc` that `update` built and the Pantry pins.
@@ -1020,7 +1128,7 @@ export function customMarkers(list: readonly CustomMarker[], opts?: CustomMarker
 export function customMarkersFromMarkersExt(text: string): CustomMarkers;
 
 /**
- * The diff skeleton as JSON: the changed units of two documents, in the
+ * The diff skeleton (`DiffSkeleton`): the changed units of two documents, in the
  * current document's order. Spans are UTF-16 offsets into each side's own document.
  *
  * ```ts
@@ -1028,7 +1136,7 @@ export function customMarkersFromMarkersExt(text: string): CustomMarkers;
  *   text: "none" | "words" | "chars";   // required
  *   unchanged?: boolean;                // send unchanged units too; default false
  * }
- * diff(baseline: string, current: string, opts: DiffOptions): string;
+ * diff(baseline: string, current: string, opts: DiffOptions): DiffSkeleton;
  * ```
  *
  * `text` is the intra-verse runs a `modified`, `added` or `deleted` unit is
@@ -1041,7 +1149,7 @@ export function customMarkersFromMarkersExt(text: string): CustomMarkers;
  * draws the whole book from the skeleton. Nothing else changes: the ids, the
  * spans and the runs are the same in both.
  */
-export function diff(baseline: string, current: string, opts: DiffOptions): string;
+export function diff(baseline: string, current: string, opts: DiffOptions): DiffSkeleton;
 
 /**
  * The formatted document. `format_edits` applied, in one call.
@@ -1069,9 +1177,9 @@ export function formatEdits(text: string, opts: FormatOpts): Edits;
 export function formatEditsIn(text: string, from: number, to: number, opts: FormatOpts): Edits;
 
 /**
- * The machine spelling of a list: `"MAT 1:20-2:3; MRK 1:1"`.
+ * The machine spelling of one address or a list: `"MAT 1:20-2:3; MRK 1:1"`.
  */
-export function formatReference(refs: BookAddress[]): string;
+export function formatReference(refs: BookAddress | BookAddress[]): string;
 
 /**
  * The reference at a CodeMirror offset — `"MRK 6:3"`, `"MRK 6:1-3"` for a
@@ -1109,9 +1217,9 @@ export function mask(text: string, recipe: string, opts?: LexOptions): object;
  * The merged document. An unknown unit id REJECTS loudly — the caller must
  * re-diff, and there is no fuzzy stale-id fallback.
  */
-export function merge(baseline: string, current: string, decisions_json: string, _default: string, opts?: LexOptions): string;
+export function merge(baseline: string, current: string, decisions: Decisions, _default: string, opts?: LexOptions): string;
 
-export function mergeSplices(baseline: string, current: string, decisions_json: string, _default: string, opts?: LexOptions): Splices;
+export function mergeSplices(baseline: string, current: string, decisions: Decisions, _default: string, opts?: LexOptions): Splices;
 
 /**
  * THE read call. One document in, one buffer out.
@@ -1145,7 +1253,7 @@ export function parse(text: string, opts?: ParseTextOptions): Uint8Array;
  * error, at }` with a stable error name and a UTF-16 offset. `book` reads a
  * list whose first reference leaves its book out (`"5:3-12"`).
  */
-export function parseReference(text: string, opts?: { book?: string }): string;
+export function parseReference(text: string, opts?: { book?: string }): ReferenceParse;
 
 /**
  * A reference in the standard's full spelling, read: `{ ok: true, canonical,
@@ -1153,7 +1261,7 @@ export function parseReference(text: string, opts?: { book?: string }): string;
  * `BookAddress`, or `null` for a named reference, `end`, or a range across
  * books), or `{ ok: false, error, at }` with a UTF-16 offset.
  */
-export function parseSrs(text: string): string;
+export function parseSrs(text: string): SrsParse;
 
 /**
  * Where an address is in one text, as JSON: found, missing or ambiguous,
@@ -1162,16 +1270,16 @@ export function parseSrs(text: string): string;
  *
  * ```js
  * resolve(text, { kind: "verses", from: { chapter: 1, verse: 2 }, to: { chapter: 1, verse: 2 } })
- *   // → '{"found":{"from":8,"to":19,"opening":5,"covers":{…},"coarser":false}}'
+ *   // → { found: { from: 8, to: 19, opening: 5, covers: {…}, coarser: false } }
  * resolve(text, { kind: "chapters", from: 3, to: 3 }, { utf16: true })
- *   // → '{"missing":"chapter"}'
+ *   // → { missing: "chapter" }
  * ```
  *
  * Offsets are bytes unless `utf16` asks otherwise. galley's
  * `Galley.resolveOf` answers the same over text, and `Galley.resolve` over a
  * registered book.
  */
-export function resolve(text: string, address: Address, opts?: ResolveTextOptions): string;
+export function resolve(text: string, address: Address, opts?: ResolveTextOptions): Resolution;
 
 /**
  * Installs a list process-wide: the one every door lexes by when it is given

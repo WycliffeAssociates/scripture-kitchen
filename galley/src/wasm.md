@@ -32,11 +32,11 @@ galley.findAll("God", { wholeWord: true, limit: 200 });                // every 
 galley.findAll("God", { wholeWord: true, limit: 200, scope: "all" });  // and the sources
 ```
 
-Resolve answers where an address is in one book's text, as JSON:
+Resolve answers where an address is in one book's text:
 
 ```js
 const verse = { kind: "verses", from: { chapter: 1, verse: 2 }, to: { chapter: 1, verse: 2 } };
-JSON.parse(galley.resolve("books/LUK.usfm", verse, { utf16: true }));
+galley.resolve("books/LUK.usfm", verse, { utf16: true });
 //   { found: { from, to, opening, covers, coarser } }     opening..to is what a multibuffer clips
 //   { missing: "intro" | "chapter" | "verse", within? }   within: the chapter a missing verse would be in
 //   { ambiguous: [{ from, to, opening }, …] }             two `\c 3`, or two anchors for one verse
@@ -168,13 +168,13 @@ missing its last verse, which no gap lint can see, and a verse past the
 scheme's count. With a source paired, presence owns "missing" and "extra". An
 undeclared book's bytes are exactly as before.
 
-The rest answer as JSON (`SniffResult`, `MappedVerse`, `PairedVerses` in the
+The rest answer objects (`SniffResult`, `MappedVerse`, `PairedVerses` in the
 `.d.ts`):
 
 ```js
-JSON.parse(galley.sniff());                     // { best: "ulb", confidence: "decided", voted: 250, ranked, dissent, unmatched }
-JSON.parse(galley.mapVerse("eng", "org", "GEN 31:55"));  // { moved: "GEN 32:1" }
-JSON.parse(galley.pairs("ulb", "org", "PSA"));  // [{ here: ["PSA 3:0"], there: ["PSA 3:1"] }, …]
+galley.sniff();                     // { best: "ulb", confidence: "decided", voted: 250, ranked, dissent, unmatched }
+galley.mapVerse("eng", "org", "GEN 31:55");  // { moved: "GEN 32:1" }
+galley.pairs("ulb", "org", "PSA");  // [{ here: ["PSA 3:0"], there: ["PSA 3:1"] }, …]
 ```
 
 `sniff` is a suggestion for a book that declares nothing, and nothing applies
@@ -543,20 +543,20 @@ poetry. `galley/src/overlay.md` is the contract; this is the wire.
 galley.update("books/GEN.usfm", target);
 galley.updateReference("ref/GEN.usfm", source, { keepText: true });   // a skeleton needs the text
 
-const skeleton = JSON.parse(galley.skeleton("ref/GEN.usfm"));
+const skeleton = galley.skeleton("ref/GEN.usfm");
 //   { verses: [{ sid, from, to, textFrom, textTo }],
 //     blocks: [{ sid, where: "leading" | "inside", ordinal, marker, from, to, end, empty }] }
 //   from..to is a marker; a block's from..end is its paragraph (overlay.md, "A row's spans")
 
 const edits = galley.overlay("books/GEN.usfm", "ref/GEN.usfm");
 //   Edits — spans, lens, text: onion-wasm's own class, the shape a fix crosses in
-const report = JSON.parse(galley.overlayReport("books/GEN.usfm", "ref/GEN.usfm"));
+const report = galley.overlayReport("books/GEN.usfm", "ref/GEN.usfm");
 //   { inserted, removed, collapsed, unpaired }
 galley.overlayText("books/GEN.usfm", "ref/GEN.usfm");   // the same edits, applied
 
 const at = { sid: "GEN 2:23", where: "inside", ordinal: 1, marker: "q1" };
-JSON.parse(galley.sourceNodeFor("books/GEN.usfm", "ref/GEN.usfm", at));  // { found: SkeletonRow }
-JSON.parse(galley.targetNodeFor("books/GEN.usfm", "ref/GEN.usfm", at));  // { absent: true, insertAt, where }
+galley.sourceNodeFor("books/GEN.usfm", "ref/GEN.usfm", at);  // { found: SkeletonRow }
+galley.targetNodeFor("books/GEN.usfm", "ref/GEN.usfm", at);  // { absent: true, insertAt, where }
 ```
 
 An address is `{ sid, where, ordinal, marker }` and every field is required.
@@ -590,13 +590,14 @@ JS string under `utf16: true` gets lengths in code units too. Every insert an
 overlay writes is ASCII today, where the two counts agree; the conversion is
 there so that stays true of a marker that is not.
 
-**JSON for the three read-only doors.** They answer structured rows on a
+**Objects for the three read-only doors.** They answer structured rows on a
 cold, modal-open path — the same kind of path onion-wasm already carries serde
 for. `serde` and `serde_json` are galley dependencies behind the `wasm`
 feature ONLY: `galley::overlay` computes plain Rust structs, `galley::wasm::
-overlay` serializes them, and the native crate links no serializer at all.
-`sous-core` and `onion` stay serde-free. JSON now; an array buffer later only
-if a measurement asks for one.
+overlay` serializes them and hands JS the object (one `JSON.parse` inside the
+door, `onion_wasm::object`), and the native crate links no serializer at all.
+`sous-core` and `onion` stay serde-free. An array buffer later only if a
+measurement asks for one.
 
 An overlay is a suggestion applied on request, never a finding: nothing here
 is on the publication path.
@@ -605,14 +606,14 @@ is on the publication path.
 
 `resolve(id, address, { utf16? })` is `onion::Toc::resolve` over the book's
 retained text and pinned `Toc`; `onion/src/resolve.md` is the contract and
-`testData/resolve/cases.json` the cases, whose `expect` is this door's JSON in
+`testData/resolve/cases.json` the cases, whose `expect` is this door's answer in
 bytes. `address` is Sefer's `Address` (`book`, `intro`, `chapters`, `verses`);
 a `book` key on it is read past, because the book is the caller's to match.
 Chapter numbers are whole numbers from 1 and verse numbers from 0 (a chapter's
 `\d` title), and anything else throws naming the key, as does an unknown `kind`
 or a segment that isn't one lowercase letter.
 
-JSON, like `targetNodeFor`: one small answer per call, on no bulk path, so it
+An object, like `targetNodeFor`: one small answer per call, on no bulk path, so it
 needs no buffer or generated reader. Offsets are bytes unless `utf16` asks
 otherwise. A reference registered without `keepText` still answers a book, an
 intro or chapters from its `Toc`, in bytes (it kept no UTF-16 table, so
@@ -625,29 +626,46 @@ its `\p` and any heading above it, which the `Toc` walked when it was built.
 holds, so it needs no registration and answers every kind, verses included.
 Over a registered book's exact text it answers what `resolve(id)` does.
 The free `resolve(text, address, { utf16? })`, onion-wasm's door, answers
-the same JSON with no `Galley` at all.
+the same with no `Galley` at all.
 
 ## Places: `addressAt`, the reference doors, and SRS
 
 Every place crosses as Sefer's `Address` with its `book` (`BookAddress`).
 
-- `addressAt(id, offset, { utf16? })` / `addressAtOf(text, offset, opts)`: the
+- `addressAt(id, offset, { utf16?, expect? })` / `addressAtOf(text, offset, opts)`: the
   place at a cursor, `resolve`'s inverse (`onion::Toc::address_at`): the
   introduction, a chapter's head, its title (verse 0), or the verse whose tile
   holds the offset, parts included.
-- `parseReference(text, { book? })`, `formatReference(addresses)`,
+- `places(id, { utf16?, expect? })` / `placesOf(text, opts)`: every place in
+  the book in order (`Place[]`: `{ address, from, to, opening }`), the
+  introduction, each chapter's head, each title and each verse's tile.
+  `opening..to` tile the text and `from` is the place's own marker; anywhere
+  inside a place, `addressAt` answers its `address` (`onion::Toc::places`).
+  For stepping through excerpts, grouping hunks, and keying on a place.
+  BSB Psalms' 2727 places cost about 4.5 ms by id, 3 ms of it the parse.
+- `parseReference(text, { book? })`, `formatReference(address | addresses)`,
   `showReference(address, bookName, intro)`: the machine spelling (the
   Scripture Referencing Standard's basic reference, the `reference` crate),
   strict, with errors named and placed in UTF-16.
-- `new Citations({ names, intro, books })` and `.read(text, { grammar, held })`,
+- `new Citations({ names, intro, books, peripherals })` and `.read(text, { grammar, held })`,
   `.booksMatching(text)`: what a person types, read leniently (Sefer's
   `citation.ts`, ported). No locale's names are linked: the host passes the
   names it has. `reference/fixtures/cite.json` is the shared cases.
-- `parseSrs(text)`, `srsLocate(id, ref, { utf16? })` / `srsLocateOf`,
-  `srsAt(id, from, to, { utf16? })` / `srsAtOf`: the standard in full (`srs`
+  `booksMatching` offers the 66 and the deuterocanon, plus the peripherals and
+  `\z` books listed in `books`, or everything under `peripherals: true`;
+  `read` knows them all either way.
+- `parseSrs(text)`, `srsLocate(id, ref, { utf16?, expect? })` / `srsLocateOf`,
+  `srsAt(id, from, to, { utf16?, expect? })` / `srsAtOf`: the standard in full (`srs`
   crate), located in a text and spelled from a span (`galley/src/srs.rs`).
 
-All answer JSON, one small answer per call, as `resolve` does.
+All answer objects, typed in the `.d.ts`, as every structured door does.
+
+**A stale id.** An id door answers for whatever text was last registered
+under the id. `expect` is the `sourceHash` the host believes it holds
+(onion's `xxh3Text(text)`, a bigint; `galley.sourceHash(id)` reads the one
+it holds), and `resolve`, `addressAt`, `places`, `srsLocate` and `srsAt`
+refuse with "… is stale" when it holds other text. The id doors cost about
+0.03 ms against 1–3 ms through the text, so a loop wants them, guarded.
 
 An offset outside the text (`0..=len`, in UTF-16 units under `utf16`), a
 fraction or NaN is refused with "outside the text"; `srsAt` also refuses

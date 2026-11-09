@@ -94,6 +94,12 @@ try {
       `$1${history.title}`,
     );
     check(history.usfm() === stitched, `${repo}: read through isomorphicGitSource, the book at HEAD is the stitched fixture`);
+    // No history: the checked-out files alone stitch to the same book.
+    const files = new Map(
+      git(["-C", dir, "ls-files", "-z"]).toString().split("\0").filter(Boolean)
+        .map((path) => [path, new Uint8Array(readFileSync(join(dir, path)))]),
+    );
+    check(bttwriter.stitch(files, book) === history.usfm(), `${repo}: stitch over the files equals the history's last save`);
     check(history.saves > 0 && reads() > 0, `${repo}: ${history.saves} saves, ${reads()} objects read`);
     const progress = history.progress(NOW);
     check(progress.length === history.saves && progress.every(([at]) => at > 1_420_070_400), `${repo}: progress per save`);
@@ -111,10 +117,25 @@ try {
       usedUp = e;
     }
     check(usedUp !== undefined, `${repo}: a replayed history is used up, and says so`);
+    check(again.spent && !history.spent, `${repo}: spent says which`);
     histories.push(history);
   }
 
   check(histories[0].project.book === "3JN" && histories[0].project.resource === "reg", "project from manifest.json");
+
+  // stitch's own edges: text keys, a fallback title, a title given, junk ignored.
+  const tiny = [["front/title.txt", ""], ["01/01.txt", "\\v 1 a"], ["manifest.json", "{}"], ["01/02.txt", new Uint8Array([0xff])]];
+  const romans = bttwriter.stitch(tiny, "ROM");
+  check(romans.startsWith("\\id ROM\n") && romans.includes("\\h Romans\n") && romans.includes("\\v 1 a"), "stitch: canon's name stands in", romans);
+  check(bttwriter.stitch(tiny, "ROM", { title: "Warumi" }).includes("\\h Warumi\n"), "stitch: a title given");
+  let refused;
+  try { bttwriter.stitch(tiny, "rom"); } catch (e) { refused = String(e.message ?? e); }
+  check(refused?.includes("book code"), "stitch: a book is a code", refused);
+
+  // free: a staged history that will never be replayed lets go of its memory.
+  histories[1].free();
+  check(histories[1].spent, "free leaves a history spent");
+  histories[1].free();
   check(histories[2].title.length > 0, "a title", histories[2].title);
 
   histories.splice(1, 1); // one history per book

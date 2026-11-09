@@ -68,6 +68,16 @@ export function consolidate(histories: WriterHistory[], now: number, deltas: boo
  */
 export function replay(histories: WriterHistory[], now: number, deltas: boolean): object | undefined;
 
+/**
+ * One Writer book's files, with no history, → its USFM: the template
+ * replay renders each save with, over the files as they are. `paths[i]`'s
+ * bytes are the next `lengths[i]` of `bytes`, as `give` packs them; files
+ * that aren't the book's text, or aren't UTF-8, are left out. `book` is the
+ * code `\id` gets; `title` stands in when `front/title.txt` says nothing
+ * (default: canon's English name). Needs no git.
+ */
+export function stitch(paths: string[], lengths: Uint32Array, bytes: Uint8Array, book: string, title?: string | null): string;
+
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
@@ -80,6 +90,7 @@ export interface InitOutput {
     readonly historywalk_new: (a: number, b: number, c: number, d: number) => [number, number, number];
     readonly historywalk_wants: (a: number) => [number, number];
     readonly replay: (a: number, b: number, c: number, d: number) => [number, number, number];
+    readonly stitch: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number, number, number];
     readonly writerhistory_first: (a: number, b: number) => [number, number];
     readonly writerhistory_last: (a: number, b: number) => [number, number];
     readonly writerhistory_progress: (a: number, b: number) => [number, number];

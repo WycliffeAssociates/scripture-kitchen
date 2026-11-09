@@ -20,7 +20,7 @@ Answer from the [[toc]] with found, missing or ambiguous. Found carries the rang
 
 ## Trade-offs
 
-- The answer is small JSON: fine for one answer per call, not for bulk lookups.
+- The answer is a small object: fine for one answer per call, not for bulk lookups. For every place in a book at once, `places` lists them in order.
 - Offsets are bytes unless the caller asks for UTF-16.
 - A broken file gives ambiguous with every candidate, and the caller picks.
 
@@ -40,7 +40,7 @@ Each line is a tiny source text, the reference asked for, and the answer. Note t
 At the JS wall:
 
 ```js
-JSON.parse(resolve(text, { kind: "verses", from: { chapter: 1, verse: 2 }, to: { chapter: 1, verse: 2 } }));
+resolve(text, { kind: "verses", from: { chapter: 1, verse: 2 }, to: { chapter: 1, verse: 2 } });
 //   { found: { from, to, opening, covers, coarser } } | { missing, within? } | { ambiguous: [...] }
 ```
 
@@ -61,5 +61,5 @@ Reads the [[toc]] (which walked each opening when it was built) and the source (
 
 - [[code:onion/src/resolve.rs]] · [[code:onion/src/resolve.rs#Toc::resolve]], [[code:onion/src/resolve.rs#Toc::resolve_with]], [[code:onion/src/resolve.rs#Toc::resolve_rows]], [[code:onion/src/resolve.rs#Resolution]]
 - [[code:mise/src/address.rs]] · [[code:mise/src/address.rs#Address]], [[code:mise/src/address.rs#Point]]
-- [[code:onion-wasm/src/resolution.rs]] · the address parser and JSON writer
+- [[code:onion-wasm/src/resolution.rs]] · the address parser and the answer's writer
 - [[code:onion/tests/resolve_cases.rs]]

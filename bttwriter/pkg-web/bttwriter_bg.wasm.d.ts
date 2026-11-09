@@ -9,6 +9,7 @@ export const historywalk_give: (a: number, b: number, c: number, d: number, e: n
 export const historywalk_new: (a: number, b: number, c: number, d: number) => [number, number, number];
 export const historywalk_wants: (a: number) => [number, number];
 export const replay: (a: number, b: number, c: number, d: number) => [number, number, number];
+export const stitch: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number, number, number];
 export const writerhistory_first: (a: number, b: number) => [number, number];
 export const writerhistory_last: (a: number, b: number) => [number, number];
 export const writerhistory_progress: (a: number, b: number) => [number, number];

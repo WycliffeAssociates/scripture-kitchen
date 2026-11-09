@@ -40,11 +40,12 @@ const snap = FindingsSnapshot.open(galley.publish());
 galley.find("books/MRK.usfm", "wept. Then", { caseSensitive: true });
 
 // Places: the cursor's address, and references read and written (the reference crate).
-JSON.parse(galley.addressAt("books/MRK.usfm", offset, { utf16: true })); // { kind: "verses", book: "MRK", from, to }
+galley.addressAt("books/MRK.usfm", offset, { utf16: true }); // { kind: "verses", book: "MRK", from, to }
+galley.places("books/MRK.usfm", { utf16: true, expect: xxh3Text(text) }); // [{ address, from, to, opening }, …] in order
 const citations = new Citations({ names: { MAT: ["Mateo", "Mt"] }, intro: ["introducción"] });
-JSON.parse(citations.read("Mateo 5:3-7; 6:1"));         // { ok: true, text, addresses, assumed }
-JSON.parse(parseReference("MAT 1:20-2:3; MRK 1:1"));     // { ok: true, addresses }
-formatReference(addresses); showReference(address, "Mateo", "introducción");
+citations.read("Mateo 5:3-7; 6:1");         // { ok: true, text, addresses, assumed }
+parseReference("MAT 1:20-2:3; MRK 1:1");     // { ok: true, addresses }
+formatReference(address); showReference(address, "Mateo", "introducción");
 ```
 
 ```ts
@@ -60,6 +61,8 @@ import { // all 31 exports
 
 - **The superset, one module.** A host vendoring one wasm gets both engines. The onion doors cost 202 KB of `.wasm` (744,333 → 946,665 bytes).
 - **Two doors per product: by id or by text.** Id doors run off the [[pantry]]'s retained copy. Text doors serve loose text off the same content-addressed chunks.
+- **Structured answers cross as objects**, typed in the `.d.ts`: one `JSON.parse` inside the door, so a host parses nothing.
+- **An id door can refuse a stale id.** `expect: sourceHash` (`xxh3Text` of the text the host believes the id holds) makes `resolve`, `addressAt`, `places`, `srsLocate` and `srsAt` throw "… is stale" rather than answer for other text.
 - **Places cross as Sefer's `Address`**, with its `book` (`BookAddress`). `Citations` holds the book table's English names and codes plus the names the host passes in: no locale's names are linked, so a page loads only the languages it uses, from canon's TypeScript ([[reference]]).
 - **Readers are subpaths.** `./toc-reader`, `./find-reader`, `./mask-reader`, `./sous-reader` ship beside the binary so they version with it.
 - **Published to the org Nexus on each tag, or installed from the tag.** The repo-root `package.json` is derived by `node package-root.mjs` and CI diffs it.
