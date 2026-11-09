@@ -2,21 +2,26 @@
   "name": "canon",
   "version": "0.1.22",
   "type": "module",
-  "description": "Book identity and versification counts: the USFM book table, gateway-language book names, scheme verse counts and their lookups, as plain TypeScript (no wasm).",
+  "description": "Book identity and versification counts: the USFM book table, gateway-language book names, scheme verse counts and their lookups, as plain JavaScript with declarations (no wasm), compiled from ts/.",
   "private": true,
   "files": [
-    "ts/canon.ts",
-    "ts/tables.ts",
-    "ts/versification.ts",
-    "ts/scheme-tables.ts",
-    "ts/names/*.ts",
+    "js/*.js",
+    "js/*.d.ts",
+    "js/names/*.js",
+    "js/names/*.d.ts",
     "NOTICE",
     "README.md"
   ],
   "sideEffects": [],
   "exports": {
-    ".": "./ts/canon.ts",
-    "./names/*": "./ts/names/*.ts"
+    ".": {
+      "types": "./js/canon.d.ts",
+      "default": "./js/canon.js"
+    },
+    "./names/*": {
+      "types": "./js/names/*.d.ts",
+      "default": "./js/names/*.js"
+    }
   },
   "scripts": {
     "test": "node --experimental-strip-types --test ts/canon.test.mjs"

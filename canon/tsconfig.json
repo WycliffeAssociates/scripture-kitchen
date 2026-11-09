@@ -1,0 +1,24 @@
+{
+  // canon's TypeScript compiled to what the package ships: plain JavaScript
+  // plus declarations in js/, so plain Node can import it from node_modules
+  // (Node strips types only outside node_modules). The .ts in ts/ is the
+  // source; CI rebuilds js/ and refuses a stale one.
+  //
+  //     npm ci --prefix tools/typecheck && npm run --prefix tools/typecheck canon
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+    "isolatedModules": true,
+    "erasableSyntaxOnly": true,
+    "strict": true,
+    "declaration": true,
+    "rootDir": "ts",
+    "outDir": "js",
+    "newLine": "lf",
+    "types": []
+  },
+  "include": ["ts/*.ts", "ts/names/*.ts"]
+}

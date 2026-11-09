@@ -45,24 +45,52 @@ pub fn locales() -> impl Iterator<Item = &'static str> {
     LOCALES.iter().map(|locale| locale.tag)
 }
 
-/// The table a requested tag means: the same tag in any case, or else the
-/// first held tag of the same language (`"es"` and `"es-MX"` are `es-419`,
-/// `"pt"` is `pt-br`).
+/// The names locale a BCP 47 tag means, of those canon holds: the same tag
+/// in any case; else a held locale of the same language whose script, if it
+/// names one, the tag names too. A macrolanguage reads as the language canon
+/// holds for it (`ar` is `arb`, `mg` is `plt`, `fil` is `tl`).
+///
+/// ```text
+/// locale_for("es")       Some("es-419")    a region the tag lacks or differs on is fine
+/// locale_for("pt-PT")    Some("pt-br")
+/// locale_for("ar-EG")    Some("arb")
+/// locale_for("ur")       None              ur-deva is Devanagari; plain ur is Arabic script
+/// locale_for("ur-Deva")  Some("ur-deva")
+/// ```
+pub fn locale_for(tag: &str) -> Option<&'static str> {
+    find(tag).map(|locale| locale.tag)
+}
+
+/// A tag's language, macrolanguage aliases folded, and its script, lowercased.
+fn subtags(tag: &str) -> (String, Option<String>) {
+    let mut parts = tag.split(['-', '_']);
+    let language = parts.next().unwrap_or("").to_ascii_lowercase();
+    let language = match language.as_str() {
+        "ar" => "arb".to_owned(),
+        "mg" => "plt".to_owned(),
+        "fil" => "tl".to_owned(),
+        _ => language,
+    };
+    let script = parts
+        .find(|part| part.len() == 4 && part.bytes().all(|b| b.is_ascii_alphabetic()))
+        .map(str::to_ascii_lowercase);
+    (language, script)
+}
+
+/// The table a requested tag means: [`locale_for`]'s rule.
 fn find(wanted: &str) -> Option<&'static Locale> {
     let exact = LOCALES
         .iter()
         .find(|locale| locale.tag.eq_ignore_ascii_case(wanted));
     exact.or_else(|| {
-        let language = |tag: &str| {
-            tag.split(['-', '_'])
-                .next()
-                .unwrap_or("")
-                .to_ascii_lowercase()
-        };
-        let wanted = language(wanted);
-        LOCALES
-            .iter()
-            .find(|locale| !wanted.is_empty() && language(locale.tag) == wanted)
+        let (language, script) = subtags(wanted);
+        if language.is_empty() {
+            return None;
+        }
+        LOCALES.iter().find(|locale| {
+            let (held, held_script) = subtags(locale.tag);
+            held == language && (held_script.is_none() || held_script == script)
+        })
     })
 }
 

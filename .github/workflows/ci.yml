@@ -162,6 +162,15 @@ jobs:
         working-directory: canon
         run: npm test
 
+      # The package ships canon/js, compiled from canon/ts (plain Node will not
+      # strip types under node_modules). Rebuilt here; a stale js/ fails.
+      - name: canon's compiled JavaScript is not stale
+        run: |
+          npm run --prefix tools/typecheck canon
+          git add -N canon/js
+          git diff --exit-code --stat canon/js \
+            || { echo "::error::run: npm run --prefix tools/typecheck canon"; exit 1; }
+
       # The root package.json is DERIVED from galley's and onion-wasm's — an
       # inner export map edited without regenerating it ships a root map that
       # points nowhere, and a stale `sideEffects` is worse than that: silent,

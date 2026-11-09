@@ -12,7 +12,7 @@
  * Book names in a gateway language are one module per locale, so a bundle
  * carries only the languages it imports (`NAME_LOCALES` lists them):
  *
- *     import fr from "@wycliffeassociates/scripture-kitchen/canon/names/fr";
+ *     import fr from "@wycliffeassociates/scripture-kitchen/names/fr";
  *
  *     name("MAT", "long", [fr])      // { text: "Matthieu", locale: "fr", form: "long" }
  *     parseBook("matthieu", [fr])    // "MAT"
@@ -88,6 +88,37 @@ const indexOf = (table: NameTable): ReadonlyMap<string, string> => {
     INDEXES.set(table, index);
   }
   return index;
+};
+
+/** A tag's language, macrolanguage aliases folded, and its script, lowercased. */
+const subtags = (tag: string): [string, string | undefined] => {
+  const [first = "", ...rest] = tag.split(/[-_]/);
+  const language = first.toLowerCase();
+  const alias: Record<string, string> = { ar: "arb", mg: "plt", fil: "tl" };
+  const script = rest.find((part) => /^[A-Za-z]{4}$/.test(part))?.toLowerCase();
+  return [alias[language] ?? language, script];
+};
+
+/**
+ * The names module a BCP 47 tag means, of those canon holds (`NAME_LOCALES`),
+ * or `undefined`: the same tag in any case; else a held locale of the same
+ * language whose script, if it names one, the tag names too. A
+ * macrolanguage reads as the language canon holds for it. Rust's
+ * `canon::locale_for`; `fixtures/names.json` holds both to one rule.
+ *
+ *     localeFor("es")        // "es-419", then import(`…/names/es-419`)
+ *     localeFor("ar-EG")     // "arb"
+ *     localeFor("ur")        // undefined: ur-deva is Devanagari
+ */
+export const localeFor = (tag: string): string | undefined => {
+  const exact = NAME_LOCALES.find((held) => held.toLowerCase() === tag.toLowerCase());
+  if (exact !== undefined) return exact;
+  const [language, script] = subtags(tag);
+  if (language === "") return undefined;
+  return NAME_LOCALES.find((held) => {
+    const [heldLanguage, heldScript] = subtags(held);
+    return heldLanguage === language && (heldScript === undefined || heldScript === script);
+  });
 };
 
 /**

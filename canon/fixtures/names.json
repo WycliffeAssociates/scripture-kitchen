@@ -1,5 +1,5 @@
 {
-  "about": "Book names in the gateway languages, for tests/fixtures.rs (Rust) and ts/canon.test.mjs (TypeScript). Rust names locales by tag; TypeScript passes the imported tables, so a row marked rust_only tests Rust's tag matching, which TypeScript leaves to whoever imports.",
+  "about": "Book names in the gateway languages, for tests/fixtures.rs (Rust) and ts/canon.test.mjs (TypeScript). Rust names locales by tag; TypeScript passes the imported tables, so a row marked rust_only tests Rust's tag matching, which TypeScript leaves to whoever imports. locale_for is the names locale a BCP 47 tag means, the same rule on both sides (Rust's locale_for, TypeScript's localeFor).",
   "name": [
     { "code": "MAT", "locales": ["fr"], "form": "long", "text": "Matthieu", "locale": "fr", "answered": "long" },
     { "code": "MAT", "locales": ["vi", "fr"], "form": "short", "text": "Ma-Thi-Ơ", "locale": "vi", "answered": "short", "why": "the first locale that has the book answers" },
@@ -31,5 +31,24 @@
     { "text": "Sang The", "locales": ["vi"], "book": "GEN", "why": "Vietnamese tone marks fold away" },
     { "text": "\u0627\u064e\u0644\u062a\u064e\u0651\u0643\u0652\u0648\u0650\u064a\u0646\u064f", "locales": ["arb"], "book": "GEN", "why": "Genesis as NFC writes it, fatha before shadda: NFKD's ordering of marks, not the order typed" },
     { "text": "\u0627\u064e\u0644\u062a\u0651\u064e\u0643\u0652\u0648\u0650\u064a\u0646\u064f", "locales": ["arb"], "book": "GEN", "why": "and shadda before fatha, as the source writes it" }
+  ],
+  "locale_for": [
+    { "tag": "es", "locale": "es-419", "why": "a tag without its region finds the language's table" },
+    { "tag": "es-MX", "locale": "es-419", "why": "another region of the same language" },
+    { "tag": "ES-419", "locale": "es-419", "why": "case does not matter" },
+    { "tag": "pt", "locale": "pt-br" },
+    { "tag": "pt-PT", "locale": "pt-br" },
+    { "tag": "fr-CA", "locale": "fr" },
+    { "tag": "ar", "locale": "arb", "why": "a macrolanguage reads as the language canon holds for it" },
+    { "tag": "ar-EG", "locale": "arb" },
+    { "tag": "mg", "locale": "plt" },
+    { "tag": "fil", "locale": "tl" },
+    { "tag": "ur", "locale": null, "why": "ur-deva is Devanagari, and plain ur is Arabic script" },
+    { "tag": "ur-Arab", "locale": null },
+    { "tag": "ur-Deva", "locale": "ur-deva" },
+    { "tag": "ur-Deva-IN", "locale": "ur-deva" },
+    { "tag": "en-US", "locale": "en" },
+    { "tag": "xx", "locale": null, "why": "a language canon has no names for" },
+    { "tag": "", "locale": null }
   ]
 }

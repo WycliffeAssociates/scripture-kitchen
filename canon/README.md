@@ -25,10 +25,18 @@ import { chapters, lastVerse, verseCounts } from "@wycliffeassociates/scripture-
 lastVerse("ulb", "ACT", 19); // 40
 
 // One module per locale, so a bundle carries only what it imports.
-import fr from "@wycliffeassociates/scripture-kitchen/canon/names/fr";
+import fr from "@wycliffeassociates/scripture-kitchen/names/fr";
 name("MAT", "long", [fr]);   // { text: "Matthieu", locale: "fr", form: "long" }
 parseBook("matthieu", [fr]); // "MAT"
+
+// Which names module a UI's locale means: the same tag, else the same
+// language (scripts must agree), else undefined.
+localeFor("es-MX");          // "es-419", then import(`…/names/es-419`)
 ```
+
+The source is `ts/`; the package ships `js/`, compiled from it with
+declarations (`npm run --prefix tools/typecheck canon`), so plain Node can
+import it from `node_modules`. CI rebuilds `js/` and refuses a stale one.
 
 ## Two numbers, never one
 

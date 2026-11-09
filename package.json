@@ -28,11 +28,10 @@
     "onion-wasm/onion-wasm.ts",
     "onion-wasm/diagnostics.json",
     "onion-wasm/README.md",
-    "canon/ts/canon.ts",
-    "canon/ts/tables.ts",
-    "canon/ts/versification.ts",
-    "canon/ts/scheme-tables.ts",
-    "canon/ts/names/*.ts",
+    "canon/js/*.js",
+    "canon/js/*.d.ts",
+    "canon/js/names/*.js",
+    "canon/js/names/*.d.ts",
     "canon/NOTICE",
     "canon/README.md",
     "bento/bento.ts",
@@ -86,8 +85,14 @@
     "./schema": "./onion-wasm/reader.ts",
     "./diagnostics.json": "./onion-wasm/diagnostics.json",
     "./reader": "./onion-wasm/reader.ts",
-    "./canon": "./canon/ts/canon.ts",
-    "./names/*": "./canon/ts/names/*.ts",
+    "./canon": {
+      "types": "./canon/js/canon.d.ts",
+      "default": "./canon/js/canon.js"
+    },
+    "./names/*": {
+      "types": "./canon/js/names/*.d.ts",
+      "default": "./canon/js/names/*.js"
+    },
     "./bento": "./bento/bento.ts",
     "./bento/web/wasm": "./bento/pkg-web/bento_bg.wasm",
     "./bttwriter": "./bttwriter/bttwriter.ts",
