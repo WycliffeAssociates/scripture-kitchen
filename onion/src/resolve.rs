@@ -340,6 +340,62 @@ impl Toc {
         (book, address)
     }
 
+    /// Every place in the book, in order, each with the address
+    /// [`Toc::address_at`] answers inside it: the introduction, then per
+    /// chapter row its head (`\c` to the first tile), its titles (verse 0)
+    /// and its verses' tiles. `opening..to` tile the text: each place's `to`
+    /// is the next one's `opening`, so a heading is in the place it
+    /// introduces. `from` is the place's own marker (`\c`, `\d`, `\v`).
+    pub fn places(&self, source: &str) -> Vec<Place> {
+        let mut out = Vec::new();
+        let front = &self.chapters[0];
+        if front.end > front.start {
+            out.push(Place {
+                address: Address::Intro,
+                from: front.start,
+                to: front.end,
+                opening: front.start,
+            });
+        }
+        for chapter in &self.chapters[1..] {
+            let titles: Vec<&TitleRow> = self.titles_in(chapter).collect();
+            let verses: Vec<(&VerseAnchor, Range<u32>)> = self.verse_units(chapter).collect();
+            let first_verse = verses.first().map(|(verse, _)| verse.start);
+            let first = titles.first().map(|title| title.start).or(first_verse);
+            out.push(Place {
+                address: Address::Chapters {
+                    from: chapter.number,
+                    to: chapter.number,
+                },
+                from: chapter.start,
+                to: first.unwrap_or(chapter.end),
+                opening: chapter.start,
+            });
+            let zero = Point::verse(chapter.number, 0);
+            for (at, title) in titles.iter().enumerate() {
+                let next = titles.get(at + 1).map(|next| next.start).or(first_verse);
+                out.push(Place {
+                    address: Address::Verses {
+                        from: zero,
+                        to: zero,
+                    },
+                    from: title.at,
+                    to: next.unwrap_or(chapter.end),
+                    opening: title.start,
+                });
+            }
+            for (verse, span) in verses {
+                out.push(Place {
+                    address: self.unit_address(source.as_bytes(), chapter, verse),
+                    from: verse.at,
+                    to: span.end,
+                    opening: verse.start,
+                });
+            }
+        }
+        out
+    }
+
     /// The address one verse unit names: its hull for a bridge or a list, its
     /// segments' first start and last end for a segmented one.
     fn unit_address(&self, source: &[u8], chapter: &ChapterRow, verse: &VerseAnchor) -> Address {
@@ -444,6 +500,16 @@ impl Toc {
             .find(|title| title.at == at)
             .map_or(at, |title| title.start)
     }
+}
+
+/// One place in a book's order ([`Toc::places`]): what it is, its own
+/// marker (`from`), where its tile opens, and where the next place's opens.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Place {
+    pub address: Address,
+    pub from: u32,
+    pub to: u32,
+    pub opening: u32,
 }
 
 type Answer = Result<Resolution, Resolution>;

@@ -399,11 +399,10 @@ impl Galley {
         &mut self,
         id: &str,
         reference: &str,
-        #[wasm_bindgen(unchecked_optional_param_type = "ResolveOptions")] opts: Option<JsValue>,
+        #[wasm_bindgen(unchecked_optional_param_type = "IdOptions")] opts: Option<JsValue>,
     ) -> Result<JsValue, JsError> {
-        let utf16 = onion_wasm::options::utf16_only(opts.as_ref(), "srsLocate")
-            .map_err(|e| JsError::new(&e))?;
-        let entry = self.book(id)?;
+        let (utf16, expect) = super::id_options(opts.as_ref(), "srsLocate")?;
+        let entry = self.current(id, expect, "srsLocate")?;
         let text = entry.text().map_err(|_| no_text(id))?;
         Ok(locate_json(text, reference, &entry.markers().list(), utf16))
     }
@@ -431,11 +430,10 @@ impl Galley {
         id: &str,
         from: f64,
         to: f64,
-        #[wasm_bindgen(unchecked_optional_param_type = "ResolveOptions")] opts: Option<JsValue>,
+        #[wasm_bindgen(unchecked_optional_param_type = "IdOptions")] opts: Option<JsValue>,
     ) -> Result<Option<String>, JsError> {
-        let utf16 = onion_wasm::options::utf16_only(opts.as_ref(), "srsAt")
-            .map_err(|e| JsError::new(&e))?;
-        let entry = self.book(id)?;
+        let (utf16, expect) = super::id_options(opts.as_ref(), "srsAt")?;
+        let entry = self.current(id, expect, "srsAt")?;
         let text = entry.text().map_err(|_| no_text(id))?;
         spell_json(text, from, to, &entry.markers().list(), utf16, "srsAt")
     }

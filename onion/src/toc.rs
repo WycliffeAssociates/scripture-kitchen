@@ -988,6 +988,44 @@ mod tests {
     }
 
     #[test]
+    fn places_tile_the_book_in_order() {
+        use mise::address::{Address, Point};
+        let source = "\\id PSA\n\\c 7\n\\cl Psalm 7\n\\s1 Prayer\n\\d A Shiggaion\n\\q1\n\\v 1 O Yahweh\n\\s1 Rise\n\\p\n\\v 2 lest\n";
+        let toc = built(source);
+        let places = toc.places(source);
+        let verse = |n| Address::Verses {
+            from: Point::verse(7, n),
+            to: Point::verse(7, n),
+        };
+        let at = |needle: &str| source.find(needle).unwrap() as u32;
+        let got: Vec<_> = places
+            .iter()
+            .map(|place| (place.address, place.opening, place.from, place.to))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                (Address::Intro, 0, 0, at("\\c 7")),
+                (
+                    Address::Chapters { from: 7, to: 7 },
+                    at("\\c 7"),
+                    at("\\c 7"),
+                    at("\\s1 Prayer")
+                ),
+                (verse(0), at("\\s1 Prayer"), at("\\d"), at("\\q1")),
+                (verse(1), at("\\q1"), at("\\v 1"), at("\\s1 Rise")),
+                (verse(2), at("\\s1 Rise"), at("\\v 2"), source.len() as u32),
+            ]
+        );
+        // Every byte of a place answers that place's address.
+        for place in &places {
+            for byte in place.opening..place.to {
+                assert_eq!(toc.address_at(source, byte).1, place.address, "byte {byte}");
+            }
+        }
+    }
+
+    #[test]
     fn a_byte_in_a_verse_part_is_the_part() {
         use mise::address::{Address, Point, Segment};
         let source = "\\id LUK\n\\c 1\n\\p \\v 3a a \\v 3b b\n";

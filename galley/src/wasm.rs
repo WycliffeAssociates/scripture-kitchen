@@ -162,6 +162,20 @@ export interface OverlayOptions {
   utf16?: boolean;
 }
 
+/** One place in a book's order: `places(id)`. `opening..to` tile the text; `from` is its own marker. */
+export interface Place {
+  address: BookAddress;
+  from: number;
+  to: number;
+  opening: number;
+}
+
+/** The options of a door that answers a place in a registered book. */
+export interface IdOptions extends ResolveOptions {
+  /** The `sourceHash` (`xxh3Text(text)`) of the text the host believes the id holds: the door refuses ("… is stale") when it holds other text. */
+  expect?: bigint;
+}
+
 /** One block's address on one side — a skeleton row names its own. */
 export interface BlockAddress {
   sid: string;
@@ -409,6 +423,13 @@ impl Galley {
         Ok(())
     }
 
+    /// The `sourceHash` of the text an id holds: onion's `xxh3Text` of it, a
+    /// bigint. What the id doors' `expect` checks against.
+    #[wasm_bindgen(js_name = sourceHash)]
+    pub fn source_hash(&mut self, id: &str) -> Result<u64, JsError> {
+        Ok(self.book(id)?.source_hash())
+    }
+
     /// The scheme a registered book follows (its own declaration, or its
     /// source's for `"followSource"`), or `undefined`.
     #[wasm_bindgen(js_name = schemeOf)]
@@ -636,12 +657,11 @@ impl Galley {
         &mut self,
         id: &str,
         #[wasm_bindgen(unchecked_param_type = "Address")] address: JsValue,
-        #[wasm_bindgen(unchecked_optional_param_type = "ResolveOptions")] opts: Option<JsValue>,
+        #[wasm_bindgen(unchecked_optional_param_type = "IdOptions")] opts: Option<JsValue>,
     ) -> Result<JsValue, JsError> {
-        let utf16 = onion_wasm::options::utf16_only(opts.as_ref(), "resolve")
-            .map_err(|e| JsError::new(&e))?;
+        let (utf16, expect) = id_options(opts.as_ref(), "resolve")?;
         let address = onion_wasm::resolution::address(&address).map_err(|e| JsError::new(&e))?;
-        let entry = self.book(id)?;
+        let entry = self.current(id, expect, "resolve")?;
         let answer = match entry.text() {
             Ok(text) => entry
                 .toc()
@@ -708,11 +728,10 @@ impl Galley {
         &mut self,
         id: &str,
         offset: f64,
-        #[wasm_bindgen(unchecked_optional_param_type = "ResolveOptions")] opts: Option<JsValue>,
+        #[wasm_bindgen(unchecked_optional_param_type = "IdOptions")] opts: Option<JsValue>,
     ) -> Result<JsValue, JsError> {
-        let utf16 = onion_wasm::options::utf16_only(opts.as_ref(), "addressAt")
-            .map_err(|e| JsError::new(&e))?;
-        let entry = self.book(id)?;
+        let (utf16, expect) = id_options(opts.as_ref(), "addressAt")?;
+        let entry = self.current(id, expect, "addressAt")?;
         let text = entry.text().map_err(|_| {
             JsError::new(&format!(
                 "reference {id} retains no text to place an offset in; register it with keepText"
@@ -722,6 +741,63 @@ impl Galley {
         let (book, address) = entry.toc().address_at(text, byte);
         Ok(onion_wasm::object(
             &reference::book_address(book, &address).to_string(),
+        ))
+    }
+
+    /// Every place in one registered book, in order (`Place[]`): the
+    /// introduction, each chapter's head, each title (verse 0) and each
+    /// verse's tile, with the address `addressAt` answers anywhere inside it.
+    /// `opening..to` tile the text, so the list is what a host steps through
+    /// ("one more above"), groups hunks by, and keys a place on.
+    #[wasm_bindgen(unchecked_return_type = "Place[]")]
+    pub fn places(
+        &mut self,
+        id: &str,
+        #[wasm_bindgen(unchecked_optional_param_type = "IdOptions")] opts: Option<JsValue>,
+    ) -> Result<JsValue, JsError> {
+        let (utf16, expect) = id_options(opts.as_ref(), "places")?;
+        let entry = self.current(id, expect, "places")?;
+        let text = entry.text().map_err(|_| {
+            JsError::new(&format!(
+                "reference {id} retains no text to list places in; register it with keepText"
+            ))
+        })?;
+        let places = entry.toc().places(text);
+        let book = mise::books::BookKey::new(entry.toc().book);
+        // The book's own UTF-16 table, as `resolve` reads it: no walk per call.
+        let table = if utf16 {
+            Some(entry.utf16().map_err(census_refusal)?)
+        } else {
+            None
+        };
+        Ok(places_object(book, &places, table))
+    }
+
+    /// [`places`](Self::places) over text the host holds and has not
+    /// registered, with `resolveOf`'s options.
+    #[wasm_bindgen(js_name = placesOf, unchecked_return_type = "Place[]")]
+    pub fn places_of(
+        &mut self,
+        text: &str,
+        #[wasm_bindgen(unchecked_optional_param_type = "ResolveTextOptions")] opts: Option<JsValue>,
+    ) -> Result<JsValue, JsError> {
+        let (utf16, markers) = onion_wasm::options::resolve_text_options(opts.as_ref(), "placesOf")
+            .map_err(|e| JsError::new(&e))?;
+        let markers = Markers::from(markers);
+        let parsed = self.sous.parsed(
+            text,
+            crate::onion::wire::ParseOptions {
+                toc: true,
+                ..Default::default()
+            },
+            &markers,
+        );
+        let toc = parsed.toc.as_ref().expect("asked for a toc");
+        let table = utf16.then(|| mise::utf16::utf16_table(text.as_bytes()));
+        Ok(places_object(
+            mise::books::BookKey::new(toc.book),
+            &toc.places(text),
+            table.as_ref(),
         ))
     }
 
@@ -1343,6 +1419,19 @@ impl Galley {
         })
     }
 
+    /// A registered book, refused when the host `expect`ed other text: the
+    /// id doors' guard against an id re-registered since the host last looked.
+    fn current(&mut self, id: &str, expect: Option<u64>, door: &str) -> Result<Entry<'_>, JsError> {
+        let entry = self.book(id)?;
+        match expect {
+            Some(want) if entry.source_hash() != want => Err(JsError::new(&format!(
+                "{door}: {id} is stale: it holds text with sourceHash {:#x}, not {want:#x}",
+                entry.source_hash()
+            ))),
+            _ => Ok(entry),
+        }
+    }
+
     fn book(&mut self, id: &str) -> Result<Entry<'_>, JsError> {
         self.sous
             .book(&BookId::from(id))
@@ -1416,6 +1505,86 @@ fn retention(keep_text: bool) -> Retain {
 /// An overlay refusal, as the JS error carrying its text.
 fn door(error: crate::overlay::OverlayError) -> JsError {
     JsError::new(&error.to_string())
+}
+
+/// `Place[]`, in UTF-16 code units when a `table` is given. Written as JSON
+/// by hand and parsed once on the JS side: a serde `Value` per place cost
+/// three times the parse on a whole Psalter. The address shape is
+/// `resolution::address_json`'s with its `book`, which the conformance
+/// script holds to `addressAt`'s.
+fn places_object(
+    book: mise::books::BookKey,
+    places: &[crate::onion::resolve::Place],
+    table: Option<&mise::utf16::Utf16Table>,
+) -> JsValue {
+    use crate::onion::resolve::{Address, Point};
+    use std::fmt::Write;
+    let at = |byte: u32| table.map_or(byte, |table| table.to_utf16(byte));
+    let point = |out: &mut String, point: &Point| {
+        let _ = write!(
+            out,
+            r#"{{"chapter":{},"verse":{}"#,
+            point.chapter, point.verse
+        );
+        if let Some(segment) = &point.segment {
+            let _ = write!(out, r#","segment":"{segment}""#);
+        }
+        out.push('}');
+    };
+    // Escaped once: a malformed `\id` can put anything in the code.
+    let book = serde_json::to_string(&book.to_string()).expect("a string serializes");
+    let mut out = String::with_capacity(places.len() * 150);
+    out.push('[');
+    for (n, place) in places.iter().enumerate() {
+        if n > 0 {
+            out.push(',');
+        }
+        out.push_str(r#"{"address":{"#);
+        match &place.address {
+            Address::Book => out.push_str(r#""kind":"book""#),
+            Address::Intro => out.push_str(r#""kind":"intro""#),
+            Address::Chapters { from, to } => {
+                let _ = write!(out, r#""kind":"chapters","from":{from},"to":{to}"#);
+            }
+            Address::Verses { from, to } => {
+                out.push_str(r#""kind":"verses","from":"#);
+                point(&mut out, from);
+                out.push_str(r#","to":"#);
+                point(&mut out, to);
+            }
+        }
+        let _ = write!(
+            out,
+            r#","book":{book}}},"from":{},"to":{},"opening":{}}}"#,
+            at(place.from),
+            at(place.to),
+            at(place.opening)
+        );
+    }
+    out.push(']');
+    onion_wasm::object(&out)
+}
+
+/// `{ utf16?, expect? }`: the options every id door that answers a place
+/// takes. `expect` is the `sourceHash` (onion's `xxh3Text` of the text) the
+/// host believes the id holds; a door refuses when it holds other text.
+pub(crate) fn id_options(
+    opts: Option<&JsValue>,
+    door: &str,
+) -> Result<(bool, Option<u64>), JsError> {
+    let bag =
+        onion_wasm::options::bag(opts, door, &["utf16", "expect"]).map_err(|e| JsError::new(&e))?;
+    let utf16 =
+        onion_wasm::options::flag(bag.as_ref(), door, "utf16").map_err(|e| JsError::new(&e))?;
+    let expect = match onion_wasm::options::get(bag.as_ref(), "expect") {
+        None => None,
+        Some(hash) => Some(u64::try_from(hash).map_err(|_| {
+            JsError::new(&format!(
+                "{door}: expect is a sourceHash, the bigint xxh3Text answers"
+            ))
+        })?),
+    };
+    Ok((utf16, expect))
 }
 
 /// The census's one refusal, naming the argument that fixes it rather than

@@ -297,6 +297,10 @@ struct Book {
     /// The raw bytes' checksum, [`under`](RawChecksum::under) the list they
     /// lex by.
     checksum: RawChecksum,
+    /// The xxh3-64 of the text: onion's `sourceHash`, what a host already
+    /// holds for the text it registered (`xxh3Text`), so a door can refuse a
+    /// stale id.
+    source_hash: u64,
     markers: Markers,
     fingerprint: Fingerprint,
     toc: Toc,
@@ -557,6 +561,7 @@ impl Pantry {
             key,
             role,
             checksum,
+            source_hash: xxhash_rust::xxh3::xxh3_64(text.as_bytes()),
             markers,
             bytes: book_bytes(
                 &toc,
@@ -917,6 +922,11 @@ impl Entry<'_> {
     /// custom-marker list they lex by when it declares any.
     pub fn checksum(&self) -> RawChecksum {
         self.book().checksum
+    }
+
+    /// The xxh3-64 of the text as last updated: onion's `sourceHash`.
+    pub fn source_hash(&self) -> u64 {
+        self.book().source_hash
     }
 
     /// The custom markers this book lexes by.

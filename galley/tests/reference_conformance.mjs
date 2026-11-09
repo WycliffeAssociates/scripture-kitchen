@@ -159,6 +159,63 @@ const throws = (call, says, what) => {
   galley.free();
 }
 
+// --- a book's places, and the stale-id guard ------------------------------
+{
+  const { xxh3Text } = doors;
+  const galley = new Galley();
+  const psalm = "\\id PSA\n\\c 7\n\\s1 Prayer\n\\d A Shiggaion\n\\q1\n\\v 1 O 𝔄 Yahweh\n\\s1 Rise\n\\p\n\\v 2 lest\n";
+  galley.update("PSA", psalm);
+  const places = galley.places("PSA", { utf16: true });
+  eq(
+    places.map((p) => [formatReference(p.address), psalm.slice(p.opening, p.to)]),
+    [
+      ["PSA 0", "\\id PSA\n"],
+      ["PSA 7", "\\c 7\n"],
+      ["PSA 7:0", "\\s1 Prayer\n\\d A Shiggaion\n"],
+      ["PSA 7:1", "\\q1\n\\v 1 O 𝔄 Yahweh\n"],
+      ["PSA 7:2", "\\s1 Rise\n\\p\n\\v 2 lest\n"],
+    ],
+    "places tile the book",
+  );
+  eq(psalm.slice(places[3].from, places[3].from + 4), "\\v 1", "from is the place's own marker");
+  // Each place's address is what addressAt answers inside it.
+  for (const p of places) eq(galley.addressAt("PSA", p.opening, { utf16: true }), p.address, `addressAt at ${p.opening}`);
+  eq(galley.placesOf(psalm, { utf16: true }), places, "placesOf answers the same");
+
+  // The guard: a door refuses when the id holds other text than the host expects.
+  const hash = xxh3Text(psalm);
+  eq(galley.sourceHash("PSA") === hash, true, "sourceHash is xxh3Text of the text");
+  eq(galley.places("PSA", { expect: hash }).length, 5, "the expected text answers");
+  galley.update("PSA", psalm.replace("lest", "lest we"));
+  for (const [door, call] of [
+    ["places", (o) => galley.places("PSA", o)],
+    ["resolve", (o) => galley.resolve("PSA", { kind: "book" }, o)],
+    ["addressAt", (o) => galley.addressAt("PSA", 0, o)],
+    ["srsLocate", (o) => galley.srsLocate("PSA", "PSA 7:1", o)],
+    ["srsAt", (o) => galley.srsAt("PSA", 0, 1, o)],
+  ]) {
+    throws(() => call({ expect: hash }), "is stale", `${door} refuses a stale id`);
+    call({ expect: galley.sourceHash("PSA") });
+  }
+  throws(() => galley.places("PSA", { expect: "abc" }), "bigint", "expect is a bigint");
+
+  // What a full book costs, by id and through the text.
+  const psalms = readFileSync(resolve(here, "../../testData/exampleCorpora/examples.bsb/19PSABSB.usfm"), "utf8");
+  galley.update("PSALMS", psalms);
+  const time = (call, n = 20) => {
+    call();
+    const start = performance.now();
+    for (let i = 0; i < n; i += 1) call();
+    return (performance.now() - start) / n;
+  };
+  const byId = time(() => galley.places("PSALMS", { utf16: true }));
+  const byText = time(() => galley.placesOf(psalms, { utf16: true }));
+  const count = galley.places("PSALMS").length;
+  console.log(`places: ${count} in BSB Psalms, ${byId.toFixed(2)} ms by id, ${byText.toFixed(2)} ms through the text`);
+  eq(galley.placesOf(psalms, { utf16: true }), galley.places("PSALMS", { utf16: true }), "Psalms: placesOf and places agree");
+  galley.free();
+}
+
 // --- the standard in full ----------------------------------------------------
 {
   const { parseSrs } = doors;
