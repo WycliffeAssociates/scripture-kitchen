@@ -2,7 +2,7 @@
   "name": "docx",
   "type": "module",
   "description": "USFM in Word and LibreOffice: a book exported as a .docx whose named styles are its markers, and imported back exactly.",
-  "version": "0.1.21",
+  "version": "0.1.22",
   "license": "MIT",
   "files": [
     "docx_bg.wasm",

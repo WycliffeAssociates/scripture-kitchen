@@ -12,9 +12,9 @@ workspace = true
 # one-letter Segment, BookKey), `canon` for which codes are books and which
 # books have one chapter. No text: an SRS reference is located in one by galley.
 [dependencies]
-mise = { path = "../mise", version = "0.1.21" }
-canon = { path = "../canon", version = "0.1.21" }
-reference = { path = "../reference", version = "0.1.21" }
+mise = { path = "../mise", version = "0.1.22" }
+canon = { path = "../canon", version = "0.1.22" }
+reference = { path = "../reference", version = "0.1.22" }
 
 [dev-dependencies]
 serde_json = "1.0"

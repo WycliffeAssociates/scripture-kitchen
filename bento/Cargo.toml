@@ -16,8 +16,8 @@ workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-canon = { path = "../canon", version = "0.1.21" }
-mise = { path = "../mise", version = "0.1.21" }
+canon = { path = "../canon", version = "0.1.22" }
+mise = { path = "../mise", version = "0.1.22" }
 serde = "1"
 serde_json = "1"
 # Lossless YAML: reads every catalog manifest, and (step 3) edits one changing
