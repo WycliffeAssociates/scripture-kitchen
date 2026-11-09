@@ -1,0 +1,110 @@
+---
+id: 89ade78b-55b6-4a24-bc45-3c14f8337b87
+title: "Sefer on 0.1.21: the doors it asked for"
+kind: plan
+status: discussing
+created: 2026-11-09
+updated: 2026-11-09
+sha: fe1480d
+priority: 1
+tags: [sefer]
+related: [52faebc7-ee3c-498b-a8d8-68b43602459b, 182066d1-ea54-46ef-8e5f-6abaa69cb86d, 1da22c7f-fb35-4432-b867-3b66a218bcea, 4c7328e1-1ed5-4272-9d4f-c43c392d8f74, 35e4d72d-1818-42da-a087-93f0881f6741, 95bc09c4-2e59-4220-9bfc-e4e90c52e1fe]
+source: Sefer's feedback after switching to 0.1.21 (Sefer branch kitchen-0.1.21), 2026-11-09
+---
+
+Sefer adopted everything in the
+[[code:planning/items/2026-11-06-sefer-on-the-kitchen-after-0-1-20-what-changes-und.mdx|0.1.20 handoff]]:
+parts 1 and 2a–2f, except SRS, docx export, and 2d (Sefer declares no scheme; it borrows the
+reference text's last verse per chapter). It accepted tiles, `Luke 3:0` as a title and `Jude 3` as
+verse 3. Writer replay matches `bttwriter/tests/replay.rs`'s heads on all five fixtures through real
+isomorphic-git, and docx import gave byte-identical USFM to the old TS importer on 63
+fixture/setting runs.
+
+What it hit, as kitchen work. Each item names what Sefer could delete once it lands. Every claim
+below was checked against the code on 2026-11-09.
+
+## A bug first
+
+**1. `addressAt` reads a negative offset as the last verse.** The offset is a `u32`
+([[code:galley/src/wasm.rs#Galley::address_at]]), so JS's `-1` wraps to 4294967295 and then clamps
+to the end of the text. Anything past the end clamps the same way. The fix: take the offset as a JS
+number, and refuse anything that isn't an integer in `[0, len]` (UTF-16 length under `utf16`). Do
+the same for `addressAtOf`, `srsAt` and `srsAtOf`. One test per door.
+
+## Doors every host would use
+
+**2. Typed returns.** `resolve`, `addressAt`, `Citations.read`, `parseReference` and `srsLocate`
+return JSON strings, so every host writes its own parse, cast and book stamping (Sefer's is
+`packages/text/src/engine/places.ts`).
+
+<Question id="typed-how">Return objects from the wasm (serde-wasm-bindgen, so no parse on the JS side), or keep the strings and ship a thin typed `.ts`/`.js` wrapper in the package? Objects are simpler for hosts, but they change every one of these doors' return types, which breaks Sefer once more. A wrapper adds new names and breaks nothing.</Question>
+
+**3. Refuse a stale id.** The id doors answer for whatever text was last registered under that id,
+so Sefer keeps its own map of which text each id holds (`src/core/galley/galley.ts`). Proposal: an
+`expect: sourceHash` option on every id door (`resolve`, `addressAt`, `places`, `srsLocate`,
+`srsAt`, `diff`), which refuses on a mismatch with an error the host can match on. The hash
+already exists. This matters because hosts will put the id doors in loops: they cost about 0.03 ms
+against 1–3 ms through the text doors on full BSB Psalms.
+
+**4. `places(id)`: a book's places in order.** This returns
+`[{ from, to, opening, address }]` for the intro, each chapter head, each title (verse 0) and each
+verse tile. The TOC already holds all of it. Sefer's `units.ts` (excerpt stepping, diff hunk
+grouping, suppression keys) then goes, along with its `addressAt(unit.from)` calls. It goes on both
+the id door and the text door (`placesOf`), with `utf16` and item 3's `expect`.
+
+**5. canon as compiled JS.** `./canon` and `./names/*` ship as `.ts`, which plain Node refuses to
+load from inside `node_modules`. The fix: compile them to `.js` plus `.d.ts` at package build, and
+add a CI freshness check like the wasm one.
+
+**6. `booksMatching` offers peripherals.** `"ma"` returns FRT, BAK, OTH, INT and XXA–XXG after
+MAL, MAT and MRK.
+
+<Question id="peripherals">Leave peripherals out by default, and offer them only when the host lists them in `books` or passes `{ peripherals: true }`? Separately, `"john"` matching REV (canon's English alias "Revelation of John") stays, since Sefer intersects with held books anyway. Agree?</Question>
+
+**7. Locale → name table.** Add `namesFor(tag)` in `./canon`, with BCP 47 fallback: exact, then
+the language plus any region (`es` → `es-419`), then none. Sefer's hard-coded pairing goes.
+
+**8. `formatReference` takes one address or a list.** This is cosmetic and doesn't break anything.
+
+## Writer, manifests, Word
+
+**9. `stitch(files, book)` without history.** This is for a Writer folder with no `.git`, and for
+Sefer's project screen comparing upstream Writer work. `stitch`, `tree_from_files` and
+`book_to_usfm` already exist in [[code:bttwriter/src/stitch.rs]]; only a JS door is missing. Once
+it lands, Sefer deletes `writerBookToUsfm`, `treeFromFiles` and `readWriterTree`.
+
+<Question id="stitch-where">Sefer doesn't want bttwriter's module loaded on the project screen. The stitch code needs no git, so it could be exposed from bento's module, or from a small `./bttwriter/stitch` entry built without the walk and the pack writer. Which one?</Question>
+
+**10. `WriterHistory`'s lifetime.** `.free()` already exists (wasm-bindgen gives every class
+one), so a staged history that is never assembled can be freed today. The handoff should have said
+so. What's missing is `spent`: `replay` and `consolidate` take histories by value, which leaves
+the JS object dead with no way to ask whether it is. Add a `spent` getter and document both.
+
+**11. bento's `WriterProject` to JS.** It holds the folder-name fallback for the resource, so
+expose `project(repo?)` on the manifest door. Sefer's `recognizeWriter` re-implementation then
+goes.
+
+**12. docx's generated-document check.** Sefer's `faithful.verify.ts` went with
+`packages/document-import`. It generated thousands of documents and checked that every letter comes
+out in order and that verse numbers only rise. Port it as a property test in `docx` (proptest, or a
+seeded generator like the existing corpus tests).
+
+## Sefer's own, noted
+
+These are Sefer's own and need no kitchen work:
+- `createBible`'s placeholder repo policy.
+- Assembly's extra commit for upstreams and books with no history.
+- Migration no longer taking uncommitted Writer changes.
+- bento opening incomplete manifests with warnings.
+- Suppressions saved inside headings showing again under tiles.
+- The desktop `git_objects` command, untested, which makes one IPC call per commit against
+  `git_walk`'s one in total.
+
+Two of these touch the kitchen. A suppression key built from a unit's span moves under tiles, and
+`places` (item 4) gives a stable key: the address. The per-commit IPC cost is the walk's
+want/give loop. If it matters on desktop, `HistoryWalk.wants()` could hand out a whole frontier
+batch. It already returns a list, so check how Sefer's command uses it before changing anything.
+
+## Order
+
+<Question id="order">Proposed order: (1) item 1, the bug, now; (2) items 3, 4 and 9, which let Sefer delete the most; (3) items 2, 5, 6, 7, 10 and 11 together as one release, because item 2 may break doors; (4) item 12 on docx's own plan. Item 8 rides along with whichever release comes first. Right?</Question>
