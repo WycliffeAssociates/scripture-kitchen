@@ -13,6 +13,7 @@
  *     check(name, bytes, { name: "Tech_Advance/tpi_reg", files });  // findings that need the repo
  *     createBible(project);                            // Map { "metadata.json" => …, "manifest.yaml" => … }
  *     edit(existing, { addBooks, checksums });         // { files: only those that changed, findings }
+ *     writerProject(bytes, "tmf_3jn_text_reg");        // a Writer manifest's book project, or undefined
  *
  * Reading never changes anything and never throws: what it forgave or found
  * wrong is a finding, with a JSON pointer (`at`) into the file.
@@ -200,6 +201,28 @@ export interface BttWriterManifest {
   finished_chunks?: string[];
   [key: string]: unknown;
 }
+
+/** What a BTT Writer book project is, once its manifest names a book, a language and a resource. */
+export interface WriterProject {
+  /** `ROM` */
+  book: BookCode;
+  language: { id: string; name?: string; direction: "ltr" | "rtl" };
+  /** `reg`, `ulb`: lowercase */
+  resource: string;
+  sources: Related[];
+  translators: string[];
+}
+
+/**
+ * A Writer `manifest.json`'s book project, or `undefined` when it doesn't
+ * name a book of the table, a language and a resource. `repo` is the repo or
+ * folder name (`tmf_3jn_text_reg`): when the manifest names no resource,
+ * Writer's naming `{language}_{book}_text_{resource}` supplies it.
+ */
+export const writerProject = (bytes: Uint8Array, repo?: string): WriterProject | undefined => {
+  const found = raw.writerProject(bytes, repo);
+  return found === undefined ? undefined : JSON.parse(found);
+};
 
 /** The manifest among a repo's root file names, if it has one. */
 export const find = (rootNames: readonly string[]): { name: string; format: Format } | undefined => {

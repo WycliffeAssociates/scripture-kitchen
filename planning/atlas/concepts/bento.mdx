@@ -38,6 +38,8 @@ read.findings;                                         // [{ check: "sort-canon"
 
 const files = bento.createBible(project, ["burrito", "rc"]);       // Map: metadata.json, manifest.yaml
 const edited = bento.edit(files, { addBooks: [mrk], checksums: [] }); // only the files that changed
+
+bento.writerProject(manifestJson, "tmf_3jn_text_reg"); // { book: "3JN", language, resource: "reg", sources, translators }
 ```
 
 ## How it works
@@ -49,7 +51,7 @@ const edited = bento.edit(files, { addBooks: [mrk], checksums: [] }); // only th
   - info: `lenient-value`, `book-title-translated`, `sort-canon`.
 - **`check` takes the repo as well.** Given the repo's name and files, it also reports a repo name that disagrees with the language, and ingredients that are missing, empty or stale.
 - **Edits are minimal.** A Burrito is rewritten as `JSON.stringify(v, null, 2)` would write it. An RC has the new project's lines spliced in. Old `sort` values are never renumbered; a clash is reported instead.
-- **Across the wall:** one wasm module with six doors (`find`, `read`, `check`, `createBible`, `edit`, `fingerprint`). Structured values cross as JSON. `bento.ts` adds the types, `readOrThrow` and Standard Schema v1 `schemas` for each format.
+- **Across the wall:** one wasm module with seven doors (`find`, `read`, `check`, `createBible`, `edit`, `fingerprint`, `writerProject`). Structured values cross as JSON. `bento.ts` adds the types, `readOrThrow` and Standard Schema v1 `schemas` for each format.
 
 ## Composes with
 

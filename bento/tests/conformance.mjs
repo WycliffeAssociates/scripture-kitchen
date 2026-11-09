@@ -140,5 +140,31 @@ const rcValue = { dublin_core: { identifier: "reg", title: "Baibel", language: {
 check(bento.schemas.rc["~standard"].validate(rcValue).value === rcValue, "schemas.rc reads a value through YAML");
 check(bento.schemas.rc["~standard"].validate(7).issues?.length === 1, "schemas.rc: a number is an issue");
 
+// --- writerProject: a Writer manifest's book project ------------------------
+{
+  const manifest = (fields) => enc.encode(JSON.stringify({
+    target_language: { id: "tmf", direction: "ltr" },
+    project: { id: "3jn", name: "3 John" },
+    source_translations: [{ language_id: "en", resource_id: "ulb", version: 12 }],
+    translators: ["kpass"],
+    ...fields,
+  }));
+  check(
+    same(bento.writerProject(manifest({ resource: { id: "reg" } })), {
+      book: "3JN",
+      language: { id: "tmf", direction: "ltr" },
+      resource: "reg",
+      sources: [{ relation: "source", language: "en", resource: "ulb", version: "12" }],
+      translators: ["kpass"],
+    }),
+    "writerProject: book, language, resource, sources, translators",
+    bento.writerProject(manifest({ resource: { id: "reg" } })),
+  );
+  check(bento.writerProject(manifest({}), "tmf_3jn_text_udb")?.resource === "udb", "writerProject: the folder name supplies a missing resource");
+  check(bento.writerProject(manifest({})) === undefined, "writerProject: no resource and no folder is undefined");
+  check(bento.writerProject(manifest({ project: { id: "zzz" }, resource: "reg" })) === undefined, "writerProject: a book outside the table is undefined");
+  check(bento.writerProject(enc.encode("[]")) === undefined, "writerProject: not a manifest is undefined");
+}
+
 console.log(failures === 0 ? "\nall passed" : `\n${failures} failed`);
 process.exit(failures === 0 ? 0 : 1);

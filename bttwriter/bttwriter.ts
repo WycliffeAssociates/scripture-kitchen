@@ -19,7 +19,7 @@
  * Imported lazily, on the migration screen: nobody else pays for the module.
  */
 import wasmInit, * as raw from "./pkg-web/bttwriter.js";
-import type { NewBibleProject } from "../bento/bento.ts";
+import type { NewBibleProject, WriterProject as BookProject } from "../bento/bento.ts";
 
 /** Start the module: from its URL (the default), a `Response`, or its bytes. */
 export const init = (input?: Parameters<typeof wasmInit>[0]) => wasmInit(input);
@@ -104,14 +104,8 @@ export interface Signature {
   offset: number;
 }
 
-export interface WriterProject {
-  /** `ROM` */
-  book: string;
-  language: { id: string; name?: string; direction: "ltr" | "rtl" };
-  /** `reg`, `ulb` */
-  resource: string;
-  sources: Array<{ relation: "source"; language: string; resource: string; version?: string }>;
-  translators: string[];
+/** bento's `WriterProject` (what `bento.writerProject` answers), plus the manifest's name. */
+export interface WriterProject extends BookProject {
   /** The manifest's `project.name`, when it has one. */
   name?: string;
 }

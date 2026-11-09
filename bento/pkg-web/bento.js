@@ -117,6 +117,29 @@ export function read(name, bytes) {
         wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
     }
 }
+
+/**
+ * A BTT Writer `manifest.json`'s book project, or `undefined` when it
+ * doesn't name a book, a language and a resource. `repo` is the repo or
+ * folder name (`tmf_3jn_text_reg`): when the manifest names no resource,
+ * Writer's naming supplies it.
+ * @param {Uint8Array} bytes
+ * @param {string | null} [repo]
+ * @returns {string | undefined}
+ */
+export function writerProject(bytes, repo) {
+    const ptr0 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    var ptr1 = isLikeNone(repo) ? 0 : passStringToWasm0(repo, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    var len1 = WASM_VECTOR_LEN;
+    const ret = wasm.writerProject(ptr0, len0, ptr1, len1);
+    let v3;
+    if (ret[0] !== 0) {
+        v3 = getStringFromWasm0(ret[0], ret[1]);
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    }
+    return v3;
+}
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,
