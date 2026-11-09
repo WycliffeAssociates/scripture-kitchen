@@ -2,7 +2,7 @@
 id: 89ade78b-55b6-4a24-bc45-3c14f8337b87
 title: "Sefer on 0.1.21: the doors it asked for"
 kind: plan
-status: discussing
+status: planned
 created: 2026-11-09
 updated: 2026-11-09
 sha: fe1480d
@@ -37,7 +37,7 @@ the same for `addressAtOf`, `srsAt` and `srsAtOf`. One test per door.
 return JSON strings, so every host writes its own parse, cast and book stamping (Sefer's is
 `packages/text/src/engine/places.ts`).
 
-<Question id="typed-how">Return objects from the wasm (serde-wasm-bindgen, so no parse on the JS side), or keep the strings and ship a thin typed `.ts`/`.js` wrapper in the package? Objects are simpler for hosts, but they change every one of these doors' return types, which breaks Sefer once more. A wrapper adds new names and breaks nothing.</Question>
+<Question id="typed-how" answer="Objects (Will, 2026-11-09: not concerned about Sefer churn). Returning JS objects is the normal shape for a wasm-bindgen library; JSON strings were a speed habit. Measure `places` on a long book, since JSON.parse can beat building objects for big lists.">Return objects from the wasm (serde-wasm-bindgen, so no parse on the JS side), or keep the strings and ship a thin typed `.ts`/`.js` wrapper in the package? Objects are simpler for hosts, but they change every one of these doors' return types, which breaks Sefer once more. A wrapper adds new names and breaks nothing.</Question>
 
 **3. Refuse a stale id.** The id doors answer for whatever text was last registered under that id,
 so Sefer keeps its own map of which text each id holds (`src/core/galley/galley.ts`). Proposal: an
@@ -59,7 +59,7 @@ add a CI freshness check like the wasm one.
 **6. `booksMatching` offers peripherals.** `"ma"` returns FRT, BAK, OTH, INT and XXA–XXG after
 MAL, MAT and MRK.
 
-<Question id="peripherals">Leave peripherals out by default, and offer them only when the host lists them in `books` or passes `{ peripherals: true }`? Separately, `"john"` matching REV (canon's English alias "Revelation of John") stays, since Sefer intersects with held books anyway. Agree?</Question>
+<Question id="peripherals" answer="Yes (2026-11-09): peripherals only when the host lists them in `books` or asks; REV stays for &quot;john&quot;, after JHN.">Leave peripherals out by default, and offer them only when the host lists them in `books` or passes `{ peripherals: true }`? Separately, `"john"` matching REV (canon's English alias "Revelation of John") stays, since Sefer intersects with held books anyway. Agree?</Question>
 
 **7. Locale → name table.** Add `namesFor(tag)` in `./canon`, with BCP 47 fallback: exact, then
 the language plus any region (`es` → `es-419`), then none. Sefer's hard-coded pairing goes.
@@ -73,7 +73,7 @@ Sefer's project screen comparing upstream Writer work. `stitch`, `tree_from_file
 `book_to_usfm` already exist in [[code:bttwriter/src/stitch.rs]]; only a JS door is missing. Once
 it lands, Sefer deletes `writerBookToUsfm`, `treeFromFiles` and `readWriterTree`.
 
-<Question id="stitch-where">Sefer doesn't want bttwriter's module loaded on the project screen. The stitch code needs no git, so it could be exposed from bento's module, or from a small `./bttwriter/stitch` entry built without the walk and the pack writer. Which one?</Question>
+<Question id="stitch-where" answer="In bttwriter's own module (2026-11-09). bttwriter's wasm is 172 KB gzipped against bento's 204 KB, so bento is no lighter; if Sefer's project screen can't load it, ask Sefer what the actual constraint is.">Sefer doesn't want bttwriter's module loaded on the project screen. The stitch code needs no git, so it could be exposed from bento's module, or from a small `./bttwriter/stitch` entry built without the walk and the pack writer. Which one?</Question>
 
 **10. `WriterHistory`'s lifetime.** `.free()` already exists (wasm-bindgen gives every class
 one), so a staged history that is never assembled can be freed today. The handoff should have said
@@ -107,4 +107,4 @@ batch. It already returns a list, so check how Sefer's command uses it before ch
 
 ## Order
 
-<Question id="order">Proposed order: (1) item 1, the bug, now; (2) items 3, 4 and 9, which let Sefer delete the most; (3) items 2, 5, 6, 7, 10 and 11 together as one release, because item 2 may break doors; (4) item 12 on docx's own plan. Item 8 rides along with whichever release comes first. Right?</Question>
+<Question id="order" answer="Yes (Will, 2026-11-09).">Proposed order: (1) item 1, the bug, now; (2) items 3, 4 and 9, which let Sefer delete the most; (3) items 2, 5, 6, 7, 10 and 11 together as one release, because item 2 may break doors; (4) item 12 on docx's own plan. Item 8 rides along with whichever release comes first. Right?</Question>
