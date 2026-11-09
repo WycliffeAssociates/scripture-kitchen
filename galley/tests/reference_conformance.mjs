@@ -134,6 +134,20 @@ const throws = (call, says, what) => {
   const astral = "\\id GEN\n\\c 1\n\\p \\v 1 𝔄 \\v 2 b\n";
   const unit = astral.indexOf("b");
   eq(JSON.parse(galley.addressAtOf(astral, unit, { utf16: true })).from, { chapter: 1, verse: 2 }, "a UTF-16 offset");
+
+  // An offset outside the text is refused, not wrapped or clamped: a u32
+  // once read -1 as the book's last verse.
+  galley.update("PSA", text);
+  eq(JSON.parse(galley.addressAt("PSA", text.length)).from, { chapter: 7, verse: 2, segment: "b" }, "the end itself");
+  throws(() => galley.addressAt("PSA", -1), "outside the text", "a negative offset");
+  throws(() => galley.addressAt("PSA", text.length + 1), "outside the text", "past the end");
+  throws(() => galley.addressAt("PSA", 1.5), "outside the text", "a fraction");
+  throws(() => galley.addressAt("PSA", NaN), "outside the text", "NaN");
+  throws(() => galley.addressAtOf(text, -1), "outside the text", "addressAtOf too");
+  // The end in UTF-16 units is shorter than in bytes; one past it is refused.
+  throws(() => galley.addressAtOf(astral, astral.length + 1, { utf16: true }), "outside the text", "past the UTF-16 end");
+  throws(() => galley.srsAt("PSA", -1, 3), "outside the text", "srsAt");
+  throws(() => galley.srsAtOf(text, 5, 2), "after", "a backwards span");
   galley.free();
 }
 

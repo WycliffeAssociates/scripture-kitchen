@@ -442,7 +442,8 @@ export class Galley {
      * The place at an offset in one registered book's text, as a
      * `BookAddress` in JSON: the introduction, a chapter's head, its title
      * (verse 0), or the verse whose tile holds the offset, parts included.
-     * The inverse of `resolve`; the offset is in bytes unless `utf16`.
+     * The inverse of `resolve`; the offset is in bytes unless `utf16`, and one
+     * outside `0..=len` (or not an integer) is refused.
      */
     addressAt(id: string, offset: number, opts?: ResolveOptions): string;
     /**

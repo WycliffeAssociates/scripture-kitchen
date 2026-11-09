@@ -321,23 +321,48 @@ fn locate_json(text: &str, reference: &str, ext: &crate::onion::Extensions, utf1
     .to_string()
 }
 
+/// An offset from JS made a byte offset into `text`, refusing what is not
+/// in it: a fraction, a negative, NaN, or anything past the end (`len` in
+/// UTF-16 units under `utf16`, else in bytes). A `u32` parameter would wrap
+/// `-1` to the last byte and clamp the rest.
+pub(crate) fn byte_offset(
+    text: &str,
+    offset: f64,
+    utf16: bool,
+    door: &str,
+) -> Result<u32, JsError> {
+    let index = utf16.then(|| mise::utf16::Utf16Index::new(text.as_bytes()));
+    let len = index.as_ref().map_or(text.len() as u32, |i| i.len_utf16());
+    if !(offset.fract() == 0.0 && (0.0..=f64::from(len)).contains(&offset)) {
+        let unit = if utf16 { "UTF-16 units" } else { "bytes" };
+        return Err(JsError::new(&format!(
+            "{door}: offset {offset} is outside the text (0..={len} {unit})"
+        )));
+    }
+    let offset = offset as u32;
+    Ok(index.map_or(offset, |i| i.to_byte(offset)))
+}
+
 /// A span of a text spelled in the standard: `"JON 2:8!2-4"`, or `null`
 /// outside any verse.
 fn spell_json(
     text: &str,
-    from: u32,
-    to: u32,
+    from: f64,
+    to: f64,
     ext: &crate::onion::Extensions,
     utf16: bool,
-) -> Option<String> {
-    let byte = |offset: u32| {
-        if utf16 {
-            mise::utf16::Utf16Index::new(text.as_bytes()).to_byte(offset)
-        } else {
-            offset
-        }
-    };
-    crate::srs::spell(text, ext, byte(from)..byte(to)).map(|range| range.to_string())
+    door: &str,
+) -> Result<Option<String>, JsError> {
+    let (from, to) = (
+        byte_offset(text, from, utf16, door)?,
+        byte_offset(text, to, utf16, door)?,
+    );
+    if from > to {
+        return Err(JsError::new(&format!(
+            "{door}: from {from} is after to {to}"
+        )));
+    }
+    Ok(crate::srs::spell(text, ext, from..to).map(|range| range.to_string()))
 }
 
 #[wasm_bindgen]
@@ -379,15 +404,15 @@ impl Galley {
     pub fn srs_at(
         &mut self,
         id: &str,
-        from: u32,
-        to: u32,
+        from: f64,
+        to: f64,
         #[wasm_bindgen(unchecked_optional_param_type = "ResolveOptions")] opts: Option<JsValue>,
     ) -> Result<Option<String>, JsError> {
         let utf16 = onion_wasm::options::utf16_only(opts.as_ref(), "srsAt")
             .map_err(|e| JsError::new(&e))?;
         let entry = self.book(id)?;
         let text = entry.text().map_err(|_| no_text(id))?;
-        Ok(spell_json(text, from, to, &entry.markers().list(), utf16))
+        spell_json(text, from, to, &entry.markers().list(), utf16, "srsAt")
     }
 
     /// [`srsAt`](Self::srs_at) over text the host holds.
@@ -395,14 +420,14 @@ impl Galley {
     pub fn srs_at_of(
         &mut self,
         text: &str,
-        from: u32,
-        to: u32,
+        from: f64,
+        to: f64,
         #[wasm_bindgen(unchecked_optional_param_type = "ResolveTextOptions")] opts: Option<JsValue>,
     ) -> Result<Option<String>, JsError> {
         let (utf16, markers) = onion_wasm::options::resolve_text_options(opts.as_ref(), "srsAtOf")
             .map_err(|e| JsError::new(&e))?;
         let markers = crate::pantry::Markers::from(markers);
-        Ok(spell_json(text, from, to, &markers.list(), utf16))
+        spell_json(text, from, to, &markers.list(), utf16, "srsAtOf")
     }
 }
 

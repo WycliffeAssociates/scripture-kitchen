@@ -661,12 +661,13 @@ impl Galley {
     /// The place at an offset in one registered book's text, as a
     /// `BookAddress` in JSON: the introduction, a chapter's head, its title
     /// (verse 0), or the verse whose tile holds the offset, parts included.
-    /// The inverse of `resolve`; the offset is in bytes unless `utf16`.
+    /// The inverse of `resolve`; the offset is in bytes unless `utf16`, and one
+    /// outside `0..=len` (or not an integer) is refused.
     #[wasm_bindgen(js_name = addressAt)]
     pub fn address_at(
         &mut self,
         id: &str,
-        offset: u32,
+        offset: f64,
         #[wasm_bindgen(unchecked_optional_param_type = "ResolveOptions")] opts: Option<JsValue>,
     ) -> Result<String, JsError> {
         let utf16 = onion_wasm::options::utf16_only(opts.as_ref(), "addressAt")
@@ -677,11 +678,7 @@ impl Galley {
                 "reference {id} retains no text to place an offset in; register it with keepText"
             ))
         })?;
-        let byte = if utf16 {
-            mise::utf16::Utf16Index::new(text.as_bytes()).to_byte(offset)
-        } else {
-            offset
-        };
+        let byte = reference::byte_offset(text, offset, utf16, "addressAt")?;
         let (book, address) = entry.toc().address_at(text, byte);
         Ok(reference::book_address(book, &address).to_string())
     }
@@ -692,7 +689,7 @@ impl Galley {
     pub fn address_at_of(
         &mut self,
         text: &str,
-        offset: u32,
+        offset: f64,
         #[wasm_bindgen(unchecked_optional_param_type = "ResolveTextOptions")] opts: Option<JsValue>,
     ) -> Result<String, JsError> {
         let (utf16, markers) =
@@ -707,11 +704,7 @@ impl Galley {
             },
             &markers,
         );
-        let byte = if utf16 {
-            mise::utf16::Utf16Index::new(text.as_bytes()).to_byte(offset)
-        } else {
-            offset
-        };
+        let byte = reference::byte_offset(text, offset, utf16, "addressAtOf")?;
         let toc = parsed.toc.as_ref().expect("asked for a toc");
         let (book, address) = toc.address_at(text, byte);
         Ok(reference::book_address(book, &address).to_string())

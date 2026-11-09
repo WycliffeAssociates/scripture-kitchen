@@ -648,6 +648,10 @@ Every place crosses as Sefer's `Address` with its `book` (`BookAddress`).
   crate), located in a text and spelled from a span (`galley/src/srs.rs`).
 
 All answer JSON, one small answer per call, as `resolve` does.
+
+An offset outside the text (`0..=len`, in UTF-16 units under `utf16`), a
+fraction or NaN is refused with "outside the text"; `srsAt` also refuses
+`from > to`.
 `tests/reference_conformance.mjs` runs them from Node.
 
 ## SousSettings
