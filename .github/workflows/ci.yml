@@ -133,20 +133,21 @@ jobs:
       # modules: the same claims as the Rust tests, through the wall.
       # bttwriter's reads the five fixture repos through isomorphicGitSource and
       # checks Sefer's head ids and a consolidated pack with `git fsck`. (These builds skip the
-      # path remapping; the artifacts job checks the committed bytes.)
+      # path remapping; the artifacts job checks the committed bytes. wasm-pack's `*`
+      # .gitignore goes, or the pack check below would find the package dropped.)
       - name: bento conformance
         run: |
-          (cd bento && wasm-pack build --target web --release --weak-refs --out-dir pkg-web -- --features wasm)
+          (cd bento && wasm-pack build --target web --release --weak-refs --out-dir pkg-web -- --features wasm && rm pkg-web/.gitignore)
           node bento/tests/conformance.mjs
 
       - name: bttwriter conformance
         run: |
-          (cd bttwriter && wasm-pack build --target web --release --weak-refs --out-dir pkg-web -- --features wasm)
+          (cd bttwriter && wasm-pack build --target web --release --weak-refs --out-dir pkg-web -- --features wasm && rm pkg-web/.gitignore)
           node bttwriter/tests/conformance.mjs
 
       - name: docx conformance
         run: |
-          (cd docx && wasm-pack build --target web --release --weak-refs --out-dir pkg-web -- --features wasm)
+          (cd docx && wasm-pack build --target web --release --weak-refs --out-dir pkg-web -- --features wasm && rm pkg-web/.gitignore)
           node docx/tests/conformance.mjs
 
       # The reader TypeScript ships unbuilt, so its own tests are the only
@@ -192,9 +193,14 @@ jobs:
                 ? targets.add(v)
                 : Object.values(v ?? {}).forEach(walk);
             walk(read("./package.json").exports);
-            const missing = [...targets].filter(
-              (p) => !packed.has(p.replace(/^\.\//, "")),
-            );
+            // A subpath pattern (`./names/*.ts`) needs one packed match.
+            const present = (target) => {
+              const p = target.replace(/^\.\//, "");
+              if (!p.includes("*")) return packed.has(p);
+              const [head, tail] = p.split("*");
+              return [...packed].some((f) => f.startsWith(head) && f.endsWith(tail));
+            };
+            const missing = [...targets].filter((p) => !present(p));
             if (missing.length) {
               console.error("exports not in the tarball:", missing);
               process.exit(1);
