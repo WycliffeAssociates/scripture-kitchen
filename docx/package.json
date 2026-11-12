@@ -1,6 +1,6 @@
 {
   "name": "docx",
-  "version": "0.1.23",
+  "version": "0.1.24",
   "type": "module",
   "description": "USFM in Word and LibreOffice: a book as a .docx whose named styles are its markers, and any .docx read back into USFM. TypeScript over one wasm module.",
   "private": true,

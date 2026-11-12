@@ -1,6 +1,6 @@
 {
   "name": "canon",
-  "version": "0.1.23",
+  "version": "0.1.24",
   "type": "module",
   "description": "Book identity and versification counts: the USFM book table, gateway-language book names, scheme verse counts and their lookups, as plain JavaScript with declarations (no wasm), compiled from ts/.",
   "private": true,

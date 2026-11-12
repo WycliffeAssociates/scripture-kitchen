@@ -18,9 +18,9 @@ crate-type = ["cdylib", "rlib"]
 # canon for the book table and file names; mise for `BookKey`. No I/O and no
 # git library: callers hand over bytes.
 [dependencies]
-bento = { path = "../bento", version = "0.1.23" }
-canon = { path = "../canon", version = "0.1.23" }
-mise = { path = "../mise", version = "0.1.23" }
+bento = { path = "../bento", version = "0.1.24" }
+canon = { path = "../canon", version = "0.1.24" }
+mise = { path = "../mise", version = "0.1.24" }
 rustc-hash.workspace = true
 sha1_smol.workspace = true
 miniz_oxide.workspace = true

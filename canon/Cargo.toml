@@ -13,7 +13,7 @@ workspace = true
 # `data/`, so a crate that depends on canon (onion, for the coverage lints to
 # come) gains nothing else.
 [dependencies]
-mise = { path = "../mise", version = "0.1.23" }
+mise = { path = "../mise", version = "0.1.24" }
 
 [dev-dependencies]
 serde_json = "1.0"

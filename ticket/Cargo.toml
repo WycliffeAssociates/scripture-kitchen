@@ -1,6 +1,6 @@
 [package]
 name = "ticket"
-version = "0.1.23"
+version = "0.1.24"
 license.workspace = true
 edition = "2024"
 description = "The wire vocabulary and the per-record emitters every declaration in the workspace shares."

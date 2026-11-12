@@ -2,7 +2,7 @@
   "name": "bento",
   "type": "module",
   "description": "Scripture containers: BTT Writer, Resource Container and Scripture Burrito manifests, read leniently, checked, created and edited.",
-  "version": "0.1.23",
+  "version": "0.1.24",
   "license": "MIT",
   "files": [
     "bento_bg.wasm",
